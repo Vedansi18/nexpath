@@ -1,0 +1,22 @@
+{
+  "sessionId": "mock-session-002",
+  "stage": "implementation",
+  "prevStage": "implementation",
+  "flagType": "absence:test_creation",
+  "pinchLabel": "Quick check.",
+  "promptCount": 28,
+  "options": [
+    {
+      "label": "Write a test for the last thing you built",
+      "description": "Pick the single most critical behaviour you implemented in the last 5 prompts and write one test for it — the happy path only. A test written now is worth five written at the end."
+    },
+    {
+      "label": "Name the riskiest untested assumption",
+      "description": "What is the one thing in your implementation that, if wrong, would cause the most user-visible damage? State it explicitly — then decide if it needs a test before you continue."
+    },
+    {
+      "label": "List the edge cases you haven't handled yet",
+      "description": "Write a bulleted list of inputs or states your current implementation would handle incorrectly. Prioritise — which ones are worth a test before you ship?"
+    }
+  ]
+}

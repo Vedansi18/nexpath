@@ -1,0 +1,22 @@
+{
+  "sessionId": "mock-session-005",
+  "stage": "architecture",
+  "prevStage": "prd",
+  "flagType": "stage_transition",
+  "pinchLabel": "Design review.",
+  "promptCount": 22,
+  "options": [
+    {
+      "label": "Document the key architectural decisions and trade-offs",
+      "description": "For each major design decision in the current architecture, state: (a) what you chose, (b) what you rejected, (c) why. Trade-off documentation now prevents expensive reversals later."
+    },
+    {
+      "label": "Identify the constraints that shape the architecture",
+      "description": "List the non-negotiable constraints: latency requirements, throughput targets, deployment environment, team size, operational complexity ceiling. Architecture decisions should be traceable to these."
+    },
+    {
+      "label": "Define the failure modes and how the system handles them",
+      "description": "For the critical paths in your current design, enumerate the failure modes — network partition, DB unavailability, downstream API timeouts. State explicitly how each is handled or why it's acceptable to not handle it."
+    }
+  ]
+}

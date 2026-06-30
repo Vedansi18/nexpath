@@ -1,0 +1,22 @@
+{
+  "sessionId": "mock-session-006",
+  "stage": "implementation",
+  "prevStage": "implementation",
+  "flagType": "absence:problem_correction",
+  "pinchLabel": "Breathe.",
+  "promptCount": 35,
+  "options": [
+    {
+      "label": "Describe the problem in one sentence without code",
+      "description": "Sometimes stepping back and writing the problem in plain English — without any code — reveals the fix. What is the bug actually doing, in words? Often the sentence itself contains the answer."
+    },
+    {
+      "label": "Write down what you know for certain and what you're guessing",
+      "description": "Split what you know into two lists: 'confirmed facts' and 'assumptions I haven't verified'. Debug the assumptions first — they're usually where the bug is hiding."
+    },
+    {
+      "label": "Describe the last state where it worked correctly",
+      "description": "When was the last time this worked? What changed between then and now? A precise 'last known good' state is the fastest path to isolating where things went wrong."
+    }
+  ]
+}

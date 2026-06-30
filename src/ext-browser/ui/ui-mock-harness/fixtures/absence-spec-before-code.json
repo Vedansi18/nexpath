@@ -1,0 +1,22 @@
+{
+  "sessionId": "mock-session-003",
+  "stage": "implementation",
+  "prevStage": "implementation",
+  "flagType": "absence:spec_before_code",
+  "pinchLabel": "Worth a pause.",
+  "promptCount": 18,
+  "options": [
+    {
+      "label": "Write the expected behaviour before the code",
+      "description": "In 3-5 bullet points, describe what the feature does from the user's perspective — inputs, outputs, and edge cases. Write this before the implementation, not after."
+    },
+    {
+      "label": "Define what done looks like for this feature",
+      "description": "Complete this sentence: 'This feature is done when...'. Make it specific enough that you could verify it with a single test. Vague done criteria compound into scope creep."
+    },
+    {
+      "label": "Write the acceptance criteria for the current task",
+      "description": "List the conditions under which you'd accept a PR for this feature. If you were reviewing someone else's implementation, what would you check? Write those criteria now."
+    }
+  ]
+}

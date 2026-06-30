@@ -4,22 +4,26 @@ import { basename, join } from 'node:path';
 import { resolveOpenAIKey, getKeySource } from '../../config/ApiKeyResolver.js';
 import type { Store } from '../../store/db.js';
 import { openStore, closeStore, DEFAULT_DB_PATH } from '../../store/db.js';
-import { classifyPrompt } from '../../classifier/PromptClassifier.js';
-import { SessionStateManager } from '../../classifier/SessionStateManager.js';
+import { classifyPrompt } from '../../core/classifier/PromptClassifier.js';
+import { classifyWithTFIDF } from '../../classifier/TFIDFClassifier.js';
+import { SessionStateManager } from '../../core/session-state.js';
 import { detectAbsenceFlags, ABSENCE_MIN_PROMPTS } from '../../classifier/AbsenceDetector.js';
-import { classifyStreamBPresence } from '../../classifier/StreamBPresenceClassifier.js';
-import type { StreamBPresenceResult } from '../../classifier/StreamBPresenceClassifier.js';
-import { shouldFireStage2, runStage2 } from '../../classifier/Stage2Trigger.js';
-import { generatePinchLabel } from '../../decision-session/PinchGenerator.js';
+import { classifyStreamBPresence } from '../../core/classifier/StreamBPresenceClassifier.js';
+import type { StreamBPresenceResult } from '../../core/classifier/StreamBPresenceClassifier.js';
+import { shouldFireStage2, runStage2 } from '../../core/stage2.js';
+import { generatePinchLabel } from '../../core/decision/pinch.js';
 import type { Stage } from '../../classifier/types.js';
-import type { FlagType, Stage2TriggerResult } from '../../classifier/Stage2Trigger.js';
+import type { FlagType, Stage2TriggerResult } from '../../core/stage2.js';
 import { resolveLanguage } from '../../classifier/LanguageDetector.js';
 import { insertPrompt } from '../../store/prompts.js';
 import { getConfig } from '../../store/config.js';
 import { getProject, upsertProject } from '../../store/projects.js';
 import { importHistoricalPrompts } from '../../store/historical-import.js';
-import { classifyUserProfileLLM, MIN_PROFILE_PROMPTS } from '../../classifier/LLMProfileClassifier.js';
+import { classifyUserProfileLLM, MIN_PROFILE_PROMPTS } from '../../core/classifier/LLMProfileClassifier.js';
 import { isProfileStale } from '../../classifier/UserProfileClassifier.js';
+import { SqlJsStorageAdapter } from '../adapters/storage.adapter.js';
+import { OpenAILLMAdapter } from '../adapters/llm.adapter.js';
+import { loggerAdapter } from '../adapters/log.adapter.js';
 import { logger, initLogger } from '../../logger.js';
 import { extractApiError } from '../../utils/api-error.js';
 import type { LogLevel } from '../../logger.js';
@@ -104,6 +108,10 @@ export async function runAuto(
   store:   Store,
   openai?: OpenAI,
 ): Promise<AutoOutcome> {
+  // ── Adapters — wire platform-specific deps to core port interfaces ───────────
+  const storageAdapter = new SqlJsStorageAdapter(store);
+  const llmAdapter     = new OpenAILLMAdapter(openai);
+
   // ── -1. Advisory-injected prompt guard ──────────────────────────────────────
   // When the stop hook injects an advisory option as a new Claude turn (block decision),
   // Claude Code fires UserPromptSubmit with that option text — it arrives here like any
@@ -113,10 +121,10 @@ export async function runAuto(
   // The field is always cleared (match or no match) so a cancelled injection cannot
   // leave stale state that silently skips the next genuine user prompt.
   {
-    const guardMgr = SessionStateManager.load(store, input.projectRoot);
+    const guardMgr = SessionStateManager.load(storageAdapter, input.projectRoot);
     const injectedText = guardMgr.current.lastInjectedPrompt ?? null;
     if (injectedText !== null) {
-      guardMgr.clearInjectedPrompt(store);
+      guardMgr.clearInjectedPrompt(storageAdapter);
       if (injectedText === input.promptText) {
         logger.info('pipeline_outcome', { outcome: 'no_action', reason: 'advisory_injected' });
         return { outcome: 'no_action' };
@@ -135,7 +143,7 @@ export async function runAuto(
   insertPrompt(store, { projectRoot: input.projectRoot, promptText: input.promptText, agent: 'claude-code' });
 
   // ── 1. Load session state ────────────────────────────────────────────────────
-  const mgr = SessionStateManager.load(store, input.projectRoot);
+  const mgr = SessionStateManager.load(storageAdapter, input.projectRoot);
   const prevStage: Stage = mgr.current.currentStage;
   logger.debug('session_loaded', { promptCount: mgr.current.promptCount, stage: prevStage, project: input.projectRoot });
   writeTelemetry(input.projectRoot, 'prompt_received', { promptCount: mgr.current.promptCount }, store);
@@ -152,10 +160,10 @@ export async function runAuto(
     getConfig(store.db, `role:${input.projectRoot}`) ??
     getConfig(store.db, 'role') ??
     null
-  ) as import('../../classifier/types.js').UserRole | null;
+  ) as import('../../core/classifier/types.js').UserRole | null;
 
   // ── 2. Stage 1 classifier ────────────────────────────────────────────────────
-  const classification = await classifyPrompt(input.promptText);
+  const classification = await classifyPrompt(input.promptText, { tidfClassifier: classifyWithTFIDF });
   logger.debug('stage1_result', { classified: classification.stage, confidence: classification.confidence });
   writeTelemetry(input.projectRoot, 'prompt_classified', { stage: classification.stage, confidence: classification.confidence }, store);
 
@@ -163,10 +171,11 @@ export async function runAuto(
   if (isProfileStale(mgr.current.profile, mgr.current.promptCount) &&
       mgr.current.promptHistory.length >= MIN_PROFILE_PROMPTS - 1) {
     const updatedProfile = await classifyUserProfileLLM(
-      mgr.current.promptHistory as import('../../classifier/types.js').PromptRecord[],
+      mgr.current.promptHistory as import('../../core/classifier/types.js').PromptRecord[],
       mgr.current.promptCount,
       mgr.current.profile,
-      openai,
+      llmAdapter,
+      loggerAdapter,
     );
     mgr.setProfile(updatedProfile);
     logger.debug('profile_classified', { nature: updatedProfile.nature, mood: updatedProfile.mood, depth: updatedProfile.depth });
@@ -191,7 +200,7 @@ export async function runAuto(
   let streamBOverrides: StreamBPresenceResult | undefined;
   if (mgr.current.currentStage === 'implementation'
       && mgr.current.promptsInCurrentStage >= 3) {
-    streamBOverrides = await classifyStreamBPresence(input.promptText, openai)
+    streamBOverrides = await classifyStreamBPresence(input.promptText, llmAdapter, loggerAdapter)
       .catch(() => {
         logger.debug('stream_b_presence_failed', { prompt: input.promptText.slice(0, 60) });
         return undefined; // fallback: vibeKeyword detection stands
@@ -199,7 +208,7 @@ export async function runAuto(
   }
 
   // ── 3. Process prompt → updates state (stage, history, counters) ─────────────
-  mgr.processPrompt(store, input.promptText, classification, Date.now(),
+  mgr.processPrompt(storageAdapter, input.promptText, classification, Date.now(),
     freqConfig.minStageChangeConfidence, streamBOverrides);
   logger.debug('after_process', { stage: mgr.current.currentStage, stageConfidence: mgr.current.stageConfidence });
 
@@ -213,7 +222,7 @@ export async function runAuto(
 
   // ── 4. Absence detection ─────────────────────────────────────────────────────
   const newFlags = detectAbsenceFlags(
-    mgr.current as import('../../classifier/types.js').SessionState,
+    mgr.current as import('../../core/classifier/types.js').SessionState,
     mgr.current.profile,
     projectType,
     freqConfig.signalAbsenceThresholdMultiplier,
@@ -240,7 +249,7 @@ export async function runAuto(
 
   // ── 5. Should Stage 2 fire? ──────────────────────────────────────────────────
   const triggerResult: Stage2TriggerResult = shouldFireStage2(
-    mgr.current as import('../../classifier/types.js').SessionState,
+    mgr.current as import('../../core/classifier/types.js').SessionState,
     prevStage,
     newFlags,
     freqConfig.stage2S1LowConfidence,
@@ -321,22 +330,22 @@ export async function runAuto(
   // Guard: Condition 2 only fires when newFlags is non-empty and trigger kind is absence.
   if (triggerResult.kind === 'absence' && newFlags.length > 0) {
     for (const flag of newFlags) {
-      mgr.addAbsenceFlag(store, flag);
+      mgr.addAbsenceFlag(storageAdapter, flag);
     }
   }
 
   // ── 7. Stage 2 LLM cross-confirmation ───────────────────────────────────────
   const stage2Input = {
-    state:          mgr.current as import('../../classifier/types.js').SessionState,
+    state:          mgr.current as import('../../core/classifier/types.js').SessionState,
     detectedStage:  mgr.current.currentStage,
     confidence:     mgr.current.stageConfidence,
     flagType:       triggerResult.kind as 'stage_transition' | 'absence',
     qualifyingFlags: triggerResult.kind === 'absence' ? triggerResult.qualifyingFlags : undefined,
   };
 
-  let stage2Output: import('../../classifier/Stage2Trigger.js').Stage2Output;
+  let stage2Output: import('../../core/stage2.js').Stage2Output;
   try {
-    stage2Output = await runStage2(stage2Input, openai, {
+    stage2Output = await runStage2(stage2Input, llmAdapter, loggerAdapter, {
       minConfidence: freqConfig.stage2MinConfidence,
       contextWindow: freqConfig.stage2ContextWindow,
     });
@@ -356,14 +365,14 @@ export async function runAuto(
   }
 
   // ── 7.5. Feed Stage 2 signal assessments back into signal counters ───────────
-  mgr.applyStage2SignalUpdates(store, stage2Output.signals_present);
+  mgr.applyStage2SignalUpdates(storageAdapter, stage2Output.signals_present);
 
   // ── 8. Compute effective flagType from Stage 2 selection, then mark as fired ─
   const effectiveFlagType: FlagType = triggerResult.kind === 'stage_transition'
     ? 'stage_transition'
     : `absence:${stage2Output.selected_signal_key}`;
   const firedKey = buildFiredKey(effectiveFlagType, prevStage, mgr.current.currentStage);
-  mgr.markDecisionSessionFired(store, firedKey);
+  mgr.markDecisionSessionFired(storageAdapter, firedKey);
 
   // ── 8.5. Read user profile (computed in processPrompt, null if < 5 prompts) ──
   const userProfile = mgr.current.profile ?? undefined;
@@ -372,7 +381,7 @@ export async function runAuto(
   const pinchLabel = await generatePinchLabel(
     mgr.current.currentStage,
     effectiveFlagType,
-    openai,
+    llmAdapter,
     userProfile,
     effectiveLang,
   );
@@ -398,7 +407,7 @@ export async function runAuto(
     // Item B — last-5 prompt metadata, PII-safe (no text).
     recentPrompts:                 recentPromptMetadata(mgr.current.promptHistory),
   }, store);
-  mgr.markAdvisoryFired(store);
+  mgr.markAdvisoryFired(storageAdapter);
 
   logger.info('pipeline_outcome', { outcome: 'pending', pinchLabel });
   return { outcome: 'pending' };

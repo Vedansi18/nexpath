@@ -8,7 +8,8 @@ import type { SelectFn } from '../../decision-session/DecisionSession.js';
 import { createTtySelectFn } from '../../decision-session/TtySelectFn.js';
 import { getConfig } from '../../store/config.js';
 import { detectLanguage, resolveLanguage, LANG_WINDOW, LANG_DETECT_INTERVAL } from '../../classifier/LanguageDetector.js';
-import { SessionStateManager } from '../../classifier/SessionStateManager.js';
+import { SessionStateManager } from '../../core/session-state.js';
+import { SqlJsStorageAdapter } from '../adapters/storage.adapter.js';
 import { getRecentPrompts } from '../../store/prompts.js';
 import { getProject, setDetectedLanguage } from '../../store/projects.js';
 import { logger, initLogger } from '../../logger.js';
@@ -92,7 +93,8 @@ export async function runStop(
   const decisionSessionCount = getProject(store, payload.cwd)?.decisionSessionCount ?? 0;
 
   // 2. Load session state — needed for session filter and option gen
-  const mgr = SessionStateManager.load(store, payload.cwd);
+  const storageAdapter = new SqlJsStorageAdapter(store);
+  const mgr = SessionStateManager.load(storageAdapter, payload.cwd);
 
   // 3. Check for a pending advisory stored by the auto hook
   const advisory = getPendingAdvisory(store, payload.cwd, mgr.current.sessionId);
@@ -150,7 +152,7 @@ export async function runStop(
     content,
     mgr.current.profile ?? undefined,
     effectiveLang,
-    mgr.current.promptHistory as import('../../classifier/types.js').PromptRecord[],
+    mgr.current.promptHistory as import('../../core/classifier/types.js').PromptRecord[],
     {
       flagType:              advisory.flagType,
       currentStage:          mgr.current.currentStage,
@@ -187,7 +189,7 @@ export async function runStop(
   if (dsResult.outcome === 'selected') {
     // Store injected text in session — auto reads and clears this on its next invocation
     // to skip all pipeline processing for the advisory-injected prompt.
-    mgr.setInjectedPrompt(store, dsResult.selectedPrompt);
+    mgr.setInjectedPrompt(storageAdapter, dsResult.selectedPrompt);
     logger.info('stop_blocked', { cwd: payload.cwd, reason: dsResult.selectedPrompt });
     return { outcome: 'blocked', reason: dsResult.selectedPrompt };
   }

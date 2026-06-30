@@ -1,0 +1,22 @@
+{
+  "sessionId": "mock-session-004",
+  "stage": "idea",
+  "prevStage": "",
+  "flagType": "stage_transition",
+  "pinchLabel": "Hold on.",
+  "promptCount": 8,
+  "options": [
+    {
+      "label": "Tell me who this app is for and what problem it solves",
+      "description": "Before we build anything, let's be clear on two things: who is going to use this, and what frustration or problem does it fix for them? Write 2-3 sentences answering both questions."
+    },
+    {
+      "label": "Describe what your app does in one sentence",
+      "description": "If someone asked you what your app does at a party, what would you say? Keep it short — no technical words needed. Just the thing it does and who it helps."
+    },
+    {
+      "label": "Pick the one feature to build first",
+      "description": "Out of everything you want this app to do, which one feature would make someone say 'yes, I need this'? Focus there first — everything else can wait."
+    }
+  ]
+}

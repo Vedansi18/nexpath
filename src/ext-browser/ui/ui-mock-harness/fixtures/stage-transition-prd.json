@@ -1,0 +1,22 @@
+{
+  "sessionId": "mock-session-001",
+  "stage": "prd",
+  "prevStage": "idea",
+  "flagType": "stage_transition",
+  "pinchLabel": "Before coding.",
+  "promptCount": 12,
+  "options": [
+    {
+      "label": "Write a PRD for this project",
+      "description": "Define the problem, target user, core features with acceptance criteria, what is explicitly out of scope, and any technical constraints. Produce the spec artifact itself — the document, with the five named sections."
+    },
+    {
+      "label": "Define the problem and success criteria first",
+      "description": "Who is this for, what problem does it solve, and how will we know when it's done? Lock the problem statement and how to recognise done before expanding into architecture."
+    },
+    {
+      "label": "List the top 3 unknowns blocking a clear spec",
+      "description": "Name the three things you'd need to know or decide before a PRD could be written. Forces the key open questions into the open before architecture decisions get made ad-hoc."
+    }
+  ]
+}
