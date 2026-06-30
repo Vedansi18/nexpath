@@ -1,0 +1,51 @@
+{
+  "manifest_version": 3,
+  "name": "Nexpath",
+  "version": "0.1.5",
+  "description": "Behaviour guidance for vibe coders using AI coding agents.",
+  "permissions": [
+    "storage",
+    "tabs",
+    "scripting",
+    "offscreen"
+  ],
+  "host_permissions": [
+    "https://*.replit.com/*",
+    "https://bolt.new/*",
+    "https://*.stackblitz.com/*",
+    "https://lovable.dev/*"
+  ],
+  "background": {
+    "service_worker": "service-worker.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.replit.com/*",
+        "https://bolt.new/*",
+        "https://*.stackblitz.com/*",
+        "https://lovable.dev/*"
+      ],
+      "js": ["content/main-world-injector.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["inject/main-world.js"],
+      "matches": [
+        "https://*.replit.com/*",
+        "https://bolt.new/*",
+        "https://*.stackblitz.com/*",
+        "https://lovable.dev/*"
+      ]
+    }
+  ],
+  "options_page": "options/options.html",
+  "icons": {
+    "16":  "icons/icon16.png",
+    "48":  "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

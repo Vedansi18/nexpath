@@ -1,0 +1,123 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font: 14px/1.6 system-ui, -apple-system, sans-serif;
+  background: #1e1e2e;
+  color: #cdd6f4;
+  min-height: 100vh;
+  padding: 32px 16px;
+}
+
+.container {
+  max-width: 480px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+header h1 {
+  font-size: 22px;
+  font-weight: 700;
+  color: #cba6f7;
+}
+
+.subtitle {
+  font-size: 13px;
+  color: #6c7086;
+  margin-top: 4px;
+}
+
+.card {
+  background: #181825;
+  border: 1px solid #313244;
+  border-radius: 10px;
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #a6adc8;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.input-row {
+  display: flex;
+  gap: 8px;
+}
+
+input[type="password"] {
+  flex: 1;
+  background: #1e1e2e;
+  border: 1px solid #45475a;
+  border-radius: 6px;
+  color: #cdd6f4;
+  font: inherit;
+  padding: 8px 12px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+input[type="password"]:focus {
+  border-color: #cba6f7;
+}
+
+button {
+  background: #cba6f7;
+  border: none;
+  border-radius: 6px;
+  color: #1e1e2e;
+  cursor: pointer;
+  font: 600 13px/1 inherit;
+  padding: 8px 16px;
+  transition: background 0.15s;
+}
+
+button:hover { background: #b4a0d4; }
+button:active { background: #9a87ba; }
+
+.status {
+  font-size: 12px;
+  min-height: 16px;
+  transition: color 0.2s;
+}
+.status.ok  { color: #a6e3a1; }
+.status.err { color: #f38ba8; }
+
+.site-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.site-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+  color: #cdd6f4;
+}
+
+.badge {
+  font-size: 11px;
+  background: #313244;
+  border: 1px solid #45475a;
+  border-radius: 4px;
+  padding: 2px 6px;
+  color: #89b4fa;
+}
+
+footer {
+  font-size: 11px;
+  color: #45475a;
+  text-align: center;
+}
+
+footer a { color: #585b70; }
+footer a:hover { color: #6c7086; }
