@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>nexpath — UI mock harness</title>
+<style>
+  body {
+    margin: 0; font: 14px/1.5 system-ui, sans-serif;
+    background: #11111b; color: #cdd6f4;
+    display: flex; height: 100vh;
+  }
+  nav {
+    width: 260px; flex-shrink: 0; background: #181825;
+    border-right: 1px solid #313244; padding: 16px; overflow-y: auto;
+  }
+  nav h1 { font-size: 14px; margin: 0 0 4px; color: #cba6f7; }
+  nav p { font-size: 12px; color: #6c7086; margin: 0 0 16px; }
+  nav a {
+    display: block; padding: 8px 10px; margin-bottom: 6px;
+    border-radius: 6px; color: #cdd6f4; text-decoration: none; font-size: 13px;
+    border: 1px solid #313244;
+  }
+  nav a:hover { background: #313244; }
+  nav a.active { background: #313244; border-color: #cba6f7; }
+  main { flex: 1; position: relative; padding: 16px; overflow-y: auto; }
+  #nexpath-harness-root { position: relative; height: 100%; }
+  #nexpath-harness-log {
+    margin-top: 16px; max-width: 600px;
+  }
+  #nexpath-harness-log pre {
+    background: #181825; border: 1px solid #313244; border-radius: 6px;
+    padding: 8px; font-size: 11px; margin: 0 0 6px; white-space: pre-wrap;
+  }
+  #status { font-size: 12px; color: #6c7086; margin-bottom: 8px; }
+</style>
+</head>
+<body>
+  <nav>
+    <h1>nexpath UI mock harness</h1>
+    <p>Pick a fixture — reloads the page with <code>?fixture=name</code>.</p>
+    <a href="?fixture=stage-transition-prd">stage-transition-prd</a>
+    <a href="?fixture=absence-test-creation">absence-test-creation</a>
+    <a href="?fixture=absence-spec-before-code">absence-spec-before-code</a>
+    <a href="?fixture=beginner-profile">beginner-profile</a>
+    <a href="?fixture=hardcore-pro-profile">hardcore-pro-profile</a>
+    <a href="?fixture=frustrated-mood">frustrated-mood</a>
+  </nav>
+  <main>
+    <div id="status">Loading…</div>
+    <div id="nexpath-harness-root"></div>
+    <div id="nexpath-harness-log"></div>
+  </main>
+  <script type="module">
+    import './index.js';
+    const params = new URLSearchParams(location.search);
+    const current = params.get('fixture') ?? 'stage-transition-prd';
+    document.querySelectorAll('nav a').forEach((a) => {
+      if (a.getAttribute('href') === `?fixture=${current}`) a.classList.add('active');
+    });
+    document.getElementById('status').textContent = `Fixture: ${current}`;
+  </script>
+</body>
+</html>
