@@ -1,4 +1,6 @@
 import type { UserProfile, PromptRecord } from './types.js';
+import type { LLMPort } from '../ports/llm.port.js';
+import type { LogPort } from '../ports/log.port.js';
 import { classifyUserProfileLLM } from './LLMProfileClassifier.js';
 
 /** Recompute profile every N prompts — matches the LLM call frequency in auto.ts. */
@@ -20,7 +22,9 @@ export function isProfileStale(
 export async function classifyUserProfile(
   history:         PromptRecord[],
   promptCount:     number,
-  existing:        UserProfile | null = null,
+  existing:        UserProfile | null,
+  llm:             LLMPort,
+  log?:            LogPort,
 ): Promise<UserProfile> {
-  return classifyUserProfileLLM(history, promptCount, existing);
+  return classifyUserProfileLLM(history, promptCount, existing, llm, log);
 }

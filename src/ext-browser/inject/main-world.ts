@@ -24,13 +24,14 @@ type ResponseStoppedMsg = {
 /** Emit a captured prompt to the ISOLATED content script world. */
 export function emitPromptCaptured(promptText: string, agent: string): void {
   const msg: PromptCapturedMsg = { type: 'nexpath:prompt-captured', promptText, agent };
-  window.postMessage(msg, '*');
+  // Use location.origin (not '*') so the message is only delivered to this page.
+  window.postMessage(msg, window.location.origin);
 }
 
 /** Emit a response-stopped event to the ISOLATED content script world. */
 export function emitResponseStopped(agent: string): void {
   const msg: ResponseStoppedMsg = { type: 'nexpath:response-stopped', agent };
-  window.postMessage(msg, '*');
+  window.postMessage(msg, window.location.origin);
 }
 
 // ── Stub fetch patcher (B3/B4/B5 fill in per-agent logic) ────────────────────

@@ -26,7 +26,7 @@
         "https://*.stackblitz.com/*",
         "https://lovable.dev/*"
       ],
-      "js": ["content/main-world-injector.js"],
+      "js": ["content/main-world-injector.js", "content/inject.js"],
       "run_at": "document_idle"
     }
   ],

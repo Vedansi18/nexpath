@@ -18,21 +18,21 @@ describe('main-world emit helpers', () => {
     vi.resetModules();
   });
 
-  it('emitPromptCaptured posts correct message shape', async () => {
+  it('emitPromptCaptured posts to location.origin (not *)', async () => {
     const { emitPromptCaptured } = await import('./main-world.js');
     emitPromptCaptured('write some code', 'replit');
     expect(postMessageSpy).toHaveBeenCalledWith(
       { type: 'nexpath:prompt-captured', promptText: 'write some code', agent: 'replit' },
-      '*',
+      'https://replit.com',
     );
   });
 
-  it('emitResponseStopped posts correct message shape', async () => {
+  it('emitResponseStopped posts to location.origin (not *)', async () => {
     const { emitResponseStopped } = await import('./main-world.js');
     emitResponseStopped('bolt');
     expect(postMessageSpy).toHaveBeenCalledWith(
       { type: 'nexpath:response-stopped', agent: 'bolt' },
-      '*',
+      'https://replit.com',
     );
   });
 

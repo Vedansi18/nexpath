@@ -6,12 +6,17 @@ import type { AdvisoryPayload } from '../../core/ports/ui.port.js';
  * B5b replaces this with the real UI (mountNexpathPanel from ui-contract.ts).
  */
 
+/**
+ * Returns the closed ShadowRoot so callers (e.g. tests) can inspect content
+ * without going through element.shadowRoot (which is null for mode:'closed').
+ */
 export function mountStubPanel(
   root: HTMLElement,
   payload: AdvisoryPayload,
   onDismiss: () => void,
-): void {
-  const shadow = root.attachShadow({ mode: 'open' });
+): ShadowRoot {
+  // Closed mode prevents host-page JS from reading the shadow DOM (security §13.5).
+  const shadow = root.attachShadow({ mode: 'closed' });
 
   const style = document.createElement('style');
   style.textContent = `
@@ -71,6 +76,7 @@ export function mountStubPanel(
   });
 
   shadow.appendChild(card);
+  return shadow;
 }
 
 function escHtml(str: string): string {

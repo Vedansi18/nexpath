@@ -28,59 +28,66 @@ describe('mountStubPanel', () => {
     document.body.appendChild(root);
   });
 
-  it('attaches a shadow root to the provided element', () => {
+  it('returns a ShadowRoot', () => {
+    const shadow = mountStubPanel(root, makePayload(), () => {});
+    expect(shadow).toBeDefined();
+    expect(shadow.nodeType).toBe(Node.DOCUMENT_FRAGMENT_NODE);
+  });
+
+  it('uses closed shadow DOM — root.shadowRoot is null', () => {
     mountStubPanel(root, makePayload(), () => {});
-    expect(root.shadowRoot).not.toBeNull();
+    // mode:'closed' means the host page cannot access the shadow tree
+    expect(root.shadowRoot).toBeNull();
   });
 
   it('renders the pinch label', () => {
-    mountStubPanel(root, makePayload(), () => {});
-    expect(root.shadowRoot?.textContent).toContain('Hold up.');
+    const shadow = mountStubPanel(root, makePayload(), () => {});
+    expect(shadow.textContent).toContain('Hold up.');
   });
 
   it('renders the stage', () => {
-    mountStubPanel(root, makePayload(), () => {});
-    expect(root.shadowRoot?.textContent).toContain('implementation');
+    const shadow = mountStubPanel(root, makePayload(), () => {});
+    expect(shadow.textContent).toContain('implementation');
   });
 
   it('renders all three option titles', () => {
-    mountStubPanel(root, makePayload(), () => {});
-    const text = root.shadowRoot?.textContent ?? '';
+    const shadow = mountStubPanel(root, makePayload(), () => {});
+    const text = shadow.textContent ?? '';
     expect(text).toContain('Write the tests now');
     expect(text).toContain('At least write one test');
     expect(text).toContain('Add a TODO comment');
   });
 
   it('renders the agent in meta', () => {
-    mountStubPanel(root, makePayload(), () => {});
-    expect(root.shadowRoot?.textContent).toContain('replit');
+    const shadow = mountStubPanel(root, makePayload(), () => {});
+    expect(shadow.textContent).toContain('replit');
   });
 
   it('calls onDismiss when close button is clicked', () => {
     const onDismiss = vi.fn();
-    mountStubPanel(root, makePayload(), onDismiss);
-    const closeBtn = root.shadowRoot?.querySelector('.close') as HTMLButtonElement;
+    const shadow = mountStubPanel(root, makePayload(), onDismiss);
+    const closeBtn = shadow.querySelector('.close') as HTMLButtonElement;
     closeBtn?.click();
     expect(onDismiss).toHaveBeenCalledOnce();
   });
 
   it('calls onDismiss when an option button is clicked', () => {
     const onDismiss = vi.fn();
-    mountStubPanel(root, makePayload(), onDismiss);
-    const optBtns = root.shadowRoot?.querySelectorAll('.opt') as NodeListOf<HTMLButtonElement>;
+    const shadow = mountStubPanel(root, makePayload(), onDismiss);
+    const optBtns = shadow.querySelectorAll('.opt') as NodeListOf<HTMLButtonElement>;
     optBtns[0]?.click();
     expect(onDismiss).toHaveBeenCalledOnce();
   });
 
   it('renders empty options list when payload has no options', () => {
-    mountStubPanel(root, makePayload({ options: [] }), () => {});
-    const optBtns = root.shadowRoot?.querySelectorAll('.opt');
+    const shadow = mountStubPanel(root, makePayload({ options: [] }), () => {});
+    const optBtns = shadow.querySelectorAll('.opt');
     expect(optBtns?.length).toBe(0);
   });
 
   it('HTML-escapes XSS in pinch label', () => {
-    mountStubPanel(root, makePayload({ pinchLabel: '<script>alert(1)</script>' }), () => {});
-    const html = root.shadowRoot?.innerHTML ?? '';
+    const shadow = mountStubPanel(root, makePayload({ pinchLabel: '<script>alert(1)</script>' }), () => {});
+    const html = shadow.innerHTML ?? '';
     expect(html).not.toContain('<script>alert(1)</script>');
     expect(html).toContain('&lt;script&gt;');
   });

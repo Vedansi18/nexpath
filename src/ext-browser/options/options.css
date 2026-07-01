@@ -113,6 +113,31 @@ button:active { background: #9a87ba; }
   color: #89b4fa;
 }
 
+.self-check {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.check-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+}
+
+.check-label {
+  color: #a6adc8;
+}
+
+.check-val {
+  font-size: 12px;
+  color: #6c7086;
+}
+
+.check-val.ok  { color: #a6e3a1; }
+.check-val.err { color: #f38ba8; }
+
 footer {
   font-size: 11px;
   color: #45475a;

@@ -26,27 +26,35 @@ const log = new ConsoleLogAdapter('[nexpath-sw]');
 // ── Offscreen document management (Chrome only) ────────────────────────────────
 
 const OFFSCREEN_URL = 'offscreen/offscreen.html';
-let offscreenCreated = false;
+
+type ChromeWithOffscreen = typeof chrome & {
+  offscreen: {
+    createDocument(opts: { url: string; reasons: string[]; justification: string }): Promise<void>;
+    hasDocument(): Promise<boolean>;
+  };
+};
 
 async function ensureOffscreen(): Promise<void> {
-  if (offscreenCreated) return;
-  try {
-    await (chrome as typeof chrome & {
-      offscreen: {
-        createDocument(opts: { url: string; reasons: string[]; justification: string }): Promise<void>;
-        hasDocument(): Promise<boolean>;
-      };
-    }).offscreen.createDocument({
-      url: OFFSCREEN_URL,
-      reasons: ['WORKERS'],
-      justification: 'Runs Transformers.js embedding model outside the service worker',
-    });
-    offscreenCreated = true;
-  } catch {
-    // Already exists in Firefox or if called twice — ignore
-    offscreenCreated = true;
-  }
+  const offscreenApi = (chrome as ChromeWithOffscreen).offscreen;
+  if (!offscreenApi) return; // Firefox — no offscreen API
+
+  // hasDocument() prevents double-create errors when the SW restarts.
+  if (await offscreenApi.hasDocument()) return;
+
+  await offscreenApi.createDocument({
+    url: OFFSCREEN_URL,
+    reasons: ['WORKERS'],
+    justification: 'Runs Transformers.js embedding model outside the service worker',
+  });
 }
+
+// ── First-install: open options page ──────────────────────────────────────────
+
+chrome.runtime.onInstalled.addListener(({ reason }) => {
+  if (reason === 'install') {
+    chrome.runtime.openOptionsPage();
+  }
+});
 
 // ── Main message listener ──────────────────────────────────────────────────────
 
