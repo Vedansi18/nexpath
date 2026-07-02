@@ -1,5 +1,6 @@
 import { isShowAdvisoryMsg } from './ipc.js';
 import { mountStubPanel } from '../ui/stub-panel.js';
+import type { PanelEvent } from '../../core/ports/ui.port.js';
 // Imports from replit-inject.ts, NOT replit.ts — replit.ts auto-runs its capture
 // bootstrap at import time, and esbuild would inline that into this bundle too if
 // imported directly here, duplicating every MutationObserver (confirmed bug, fixed
@@ -42,11 +43,23 @@ function setupListener(): void {
     panelRoot.id = 'nexpath-panel-root';
     document.body.appendChild(panelRoot);
 
+    const payload = msg.payload;
+
     // mountStubPanel returns the closed ShadowRoot reference (root.shadowRoot is null for closed).
-    mountStubPanel(panelRoot, msg.payload, (event) => {
+    mountStubPanel(panelRoot, payload, (event) => {
+      // Report the real outcome back to main-world-injector.ts, which is holding the
+      // SW's showAdvisory() reply open waiting for this — without it, every advisory
+      // resolves as a synthetic 'dismiss' on the SW side regardless of what the user
+      // actually clicked (see main-world-injector.ts's onMessage listener).
+      let panelEvent: PanelEvent;
       if (event.type === 'select') {
+        const option = payload.options[event.optionIndex];
+        panelEvent = { type: 'select', advisoryId: payload.advisoryId, selectedOptionId: option?.id ?? '' };
         injectPromptText(event.text).catch(() => { /* fallback-to-clipboard already handles failure internally */ });
+      } else {
+        panelEvent = { type: 'dismiss', advisoryId: payload.advisoryId };
       }
+      window.dispatchEvent(new CustomEvent('nexpath:panel-event', { detail: panelEvent }));
       removePanel();
     });
   });

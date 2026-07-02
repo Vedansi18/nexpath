@@ -140,7 +140,7 @@ describe('main-world-injector.ts', () => {
     });
 
     it('re-dispatches an incoming SW message as a nexpath:sw-message CustomEvent', () => {
-      const listener = onMessageAddListenerMock.mock.calls[0]![0] as (msg: unknown) => void;
+      const listener = onMessageAddListenerMock.mock.calls[0]![0] as (msg: unknown) => unknown;
       const received = vi.fn();
       window.addEventListener('nexpath:sw-message', (ev) => received((ev as CustomEvent).detail));
 
@@ -148,6 +148,28 @@ describe('main-world-injector.ts', () => {
       listener(swMsg);
 
       expect(received).toHaveBeenCalledWith(swMsg);
+    });
+
+    it('returns undefined (no async reply expected) for non-show-advisory messages', () => {
+      const listener = onMessageAddListenerMock.mock.calls[0]![0] as (msg: unknown) => unknown;
+      expect(listener({ type: 'something-else' })).toBeUndefined();
+    });
+
+    it('returns a Promise for a show-advisory message that resolves with the PanelEvent inject.ts reports back', async () => {
+      // Confirmed real bug 2026-07-02: ContentScriptUIAdapter.showAdvisory() (SW side)
+      // awaits this listener's return value directly via browser.tabs.sendMessage — with
+      // no Promise returned here, it resolved as undefined almost instantly and every
+      // advisory was treated as a synthetic dismiss regardless of what the user clicked.
+      const listener = onMessageAddListenerMock.mock.calls[0]![0] as (msg: unknown) => unknown;
+      const swMsg = { type: 'nexpath:show-advisory', payload: { advisoryId: 'adv-1' } };
+
+      const result = listener(swMsg);
+      expect(result).toBeInstanceOf(Promise);
+
+      const panelEvent = { type: 'select', advisoryId: 'adv-1', selectedOptionId: 'adv-1-L1' };
+      window.dispatchEvent(new CustomEvent('nexpath:panel-event', { detail: panelEvent }));
+
+      await expect(result).resolves.toEqual(panelEvent);
     });
   });
 

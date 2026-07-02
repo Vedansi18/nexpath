@@ -109,6 +109,45 @@ describe('inject.ts', () => {
     expect(document.getElementById('nexpath-panel-root')).toBeNull();
   });
 
+  describe('nexpath:panel-event reporting (SW round-trip)', () => {
+    // Confirmed real bug 2026-07-02: without this, main-world-injector.ts's onMessage
+    // listener (which the SW's showAdvisory() awaits directly) never learns what the
+    // user did, so every advisory resolved as a synthetic dismiss on the SW side.
+    it('dispatches a select PanelEvent with the chosen option\'s id when an option is picked', () => {
+      const payload = makePayload({
+        options: [
+          { id: 'adv-1-L1', title: 'Do the thing', body: 'Full body text', level: 'L1' },
+        ],
+      });
+      dispatchShowAdvisory(payload);
+
+      const received = vi.fn();
+      window.addEventListener('nexpath:panel-event', (ev) => received((ev as CustomEvent).detail));
+
+      const onEvent = mountStubPanelMock.mock.calls[0]![2] as (e: { type: string; optionIndex?: number; text?: string }) => void;
+      onEvent({ type: 'select', optionIndex: 0, text: 'Do the thing' });
+
+      expect(received).toHaveBeenCalledWith({
+        type: 'select',
+        advisoryId: 'adv-1',
+        selectedOptionId: 'adv-1-L1',
+      });
+    });
+
+    it('dispatches a dismiss PanelEvent with the advisoryId when the panel is dismissed', () => {
+      const payload = makePayload({ advisoryId: 'adv-2' });
+      dispatchShowAdvisory(payload);
+
+      const received = vi.fn();
+      window.addEventListener('nexpath:panel-event', (ev) => received((ev as CustomEvent).detail));
+
+      const onEvent = mountStubPanelMock.mock.calls[0]![2] as (e: { type: string }) => void;
+      onEvent({ type: 'dismiss' });
+
+      expect(received).toHaveBeenCalledWith({ type: 'dismiss', advisoryId: 'adv-2' });
+    });
+  });
+
   describe('idempotent-injection guard', () => {
     it('does not re-register its listener on a second import into the same page', async () => {
       // Simulates a stale content-script re-injection: the window flag from the earlier

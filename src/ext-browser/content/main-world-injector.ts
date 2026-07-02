@@ -1,6 +1,7 @@
 import browser from 'webextension-polyfill';
-import { isPromptCapturedMsg, isResponseStoppedMsg } from './ipc.js';
+import { isPromptCapturedMsg, isResponseStoppedMsg, isShowAdvisoryMsg } from './ipc.js';
 import type { PromptSubmitMsg, ResponseStopMsg } from './ipc.js';
+import type { PanelEvent } from '../../core/ports/ui.port.js';
 
 /**
  * Runs in the ISOLATED content-script world.
@@ -69,6 +70,25 @@ function setupListeners(): void {
   browser.runtime.onMessage.addListener((msg) => {
     // Re-dispatch to inject.ts (which handles panel mounting).
     window.dispatchEvent(new CustomEvent('nexpath:sw-message', { detail: msg }));
+
+    if (!isShowAdvisoryMsg(msg)) return undefined;
+
+    // panel-adapter.ts's ContentScriptUIAdapter.showAdvisory() awaits this listener's
+    // return value directly (via browser.tabs.sendMessage) — without returning a
+    // Promise here, it resolves as undefined almost immediately, which showAdvisory()
+    // treats as a synthetic 'dismiss' regardless of what the user actually does. Wait
+    // for inject.ts to report the real outcome (dispatched as 'nexpath:panel-event'
+    // once the user selects or dismisses) before resolving, so session-state/cooldown
+    // bookkeeping reflects reality. Single-in-flight assumption: the engine awaits
+    // showAdvisory() before it can fire another advisory, so at most one listener is
+    // ever pending at a time — no advisoryId correlation needed.
+    return new Promise<PanelEvent>((resolve) => {
+      const handlePanelEvent = (ev: Event): void => {
+        window.removeEventListener('nexpath:panel-event', handlePanelEvent);
+        resolve((ev as CustomEvent<PanelEvent>).detail);
+      };
+      window.addEventListener('nexpath:panel-event', handlePanelEvent);
+    });
   });
 }
 
