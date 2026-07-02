@@ -67,11 +67,16 @@ function setupListeners(): void {
 
   // ── Service worker → content → inject-back ───────────────────────────────────
 
-  browser.runtime.onMessage.addListener((msg) => {
+  // Must always return a Promise (never a bare value) to match webextension-polyfill's
+  // OnMessageListenerAsync shape exactly — a mixed Promise|undefined return doesn't
+  // structurally match any of OnMessageListener's 3 alternatives and silently degrades
+  // to an untyped callback (confirmed via tsconfig.ext-browser.json, 2026-07-02 — see
+  // that file's header comment for why this class of error went uncaught all session).
+  browser.runtime.onMessage.addListener((msg: unknown): Promise<unknown> => {
     // Re-dispatch to inject.ts (which handles panel mounting).
     window.dispatchEvent(new CustomEvent('nexpath:sw-message', { detail: msg }));
 
-    if (!isShowAdvisoryMsg(msg)) return undefined;
+    if (!isShowAdvisoryMsg(msg)) return Promise.resolve(undefined);
 
     // panel-adapter.ts's ContentScriptUIAdapter.showAdvisory() awaits this listener's
     // return value directly (via browser.tabs.sendMessage) — without returning a

@@ -30,16 +30,18 @@ describe('offscreen.ts', () => {
     const handled = registeredListener!({ type: 'nexpath:embedding-classify', text: 'hi' }, {}, sendResponse);
 
     expect(sendResponse).toHaveBeenCalledWith({
-      result: { stage: 'implementation', confidence: 0.0, tier: 3 },
+      result: { stage: 'implementation', confidence: 0.0, tier: 3, allScores: {} },
     });
-    expect(handled).toBe(false);
+    // Always true — webextension-polyfill's OnMessageListenerCallback type requires the
+    // literal `true` for the 3-arg (sendResponse) form; see the source's header comment.
+    expect(handled).toBe(true);
   });
 
-  it('ignores messages of a different type', () => {
+  it('ignores messages of a different type, responding with undefined', () => {
     const sendResponse = vi.fn();
     const handled = registeredListener!({ type: 'nexpath:something-else' }, {}, sendResponse);
 
-    expect(sendResponse).not.toHaveBeenCalled();
-    expect(handled).toBe(false);
+    expect(sendResponse).toHaveBeenCalledWith(undefined);
+    expect(handled).toBe(true);
   });
 });

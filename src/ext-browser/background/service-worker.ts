@@ -62,7 +62,12 @@ browser.runtime.onInstalled.addListener(({ reason }) => {
 // ── Main message listener ──────────────────────────────────────────────────────
 
 browser.runtime.onMessage.addListener(
-  (msg: unknown, sender, sendResponse: (r?: unknown) => void) => {
+  // webextension-polyfill's OnMessageListenerCallback requires the 3-arg form to
+  // return the literal `true` unconditionally (its type contract, not `boolean`) —
+  // returning `false` here doesn't match any of OnMessageListener's 3 shapes and is
+  // a genuine type error, invisible until 2026-07-02 (see tsconfig.ext-browser.json
+  // header comment for why this was never caught before).
+  (msg: unknown, sender, sendResponse: (r?: unknown) => void): true => {
     if (isPromptSubmitMsg(msg)) {
       log.debug('prompt_submit_received', { agent: msg.agent, projectRoot: msg.projectRoot });
       const tabId = sender.tab?.id ?? msg.tabId;
@@ -80,10 +85,11 @@ browser.runtime.onMessage.addListener(
       // so response-stop receipt is directly visible/testable, not just inferred.
       log.debug('response_stop_received', { agent: msg.agent, projectRoot: msg.projectRoot });
       sendResponse({ ok: true });
-      return false;
+      return true;
     }
 
-    return false;
+    sendResponse(undefined);
+    return true;
   },
 );
 
@@ -166,14 +172,22 @@ async function handlePromptSubmit(
 
   let stage2Out: import('../../core/stage2.js').Stage2Output;
   try {
+    // Stage2Input's actual shape (confirmed against core/stage2.ts, 2026-07-02 — the
+    // object literal here previously omitted required fields `detectedStage`/`confidence`
+    // and included nonexistent fields `prevStage`/`promptHistory`, silently invisible
+    // because tsconfig.ext-browser.json was never invoked; buildStage2Prompt's
+    // `confidence.toFixed(2)` crashed on the resulting undefined at runtime, confirmed
+    // live). `flagType` is the bare category only ('stage_transition' | 'absence') —
+    // NOT the same as core/stage2.ts's separate `FlagType` template-literal type used
+    // by resolveDecisionContent/generatePinchLabel below; the specific signal is carried
+    // via `qualifyingFlags` instead.
     stage2Out = await runStage2(
       {
         state,
-        flagType: trigger.kind === 'stage_transition'
-          ? 'stage_transition'
-          : `absence:${trigger.qualifyingFlags?.[0]?.signalKey ?? 'unknown'}`,
-        prevStage: prevStage ?? state.currentStage,
-        promptHistory: [...state.promptHistory],
+        detectedStage: classification.stage,
+        confidence: classification.confidence,
+        flagType: trigger.kind === 'stage_transition' ? 'stage_transition' : 'absence',
+        qualifyingFlags: trigger.kind === 'absence' ? trigger.qualifyingFlags : undefined,
       },
       llm,
       log,

@@ -150,9 +150,14 @@ describe('main-world-injector.ts', () => {
       expect(received).toHaveBeenCalledWith(swMsg);
     });
 
-    it('returns undefined (no async reply expected) for non-show-advisory messages', () => {
+    it('returns a Promise resolving to undefined (no async reply expected) for non-show-advisory messages', async () => {
+      // Always a Promise, never a bare value — a mixed Promise|undefined return doesn't
+      // structurally match webextension-polyfill's OnMessageListenerAsync type; see the
+      // source's header comment for the full explanation.
       const listener = onMessageAddListenerMock.mock.calls[0]![0] as (msg: unknown) => unknown;
-      expect(listener({ type: 'something-else' })).toBeUndefined();
+      const result = listener({ type: 'something-else' });
+      expect(result).toBeInstanceOf(Promise);
+      await expect(result).resolves.toBeUndefined();
     });
 
     it('returns a Promise for a show-advisory message that resolves with the PanelEvent inject.ts reports back', async () => {

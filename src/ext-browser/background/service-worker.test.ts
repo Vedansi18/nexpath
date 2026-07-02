@@ -161,7 +161,11 @@ describe('service-worker.ts', () => {
   });
 
   describe('onMessage routing', () => {
-    it('acknowledges nexpath:response-stop synchronously and does not keep the channel open', async () => {
+    it('acknowledges nexpath:response-stop synchronously, calling sendResponse before returning', async () => {
+      // Always returns true — webextension-polyfill's OnMessageListenerCallback type
+      // requires the literal `true` for the 3-arg (sendResponse) form; `false` isn't a
+      // valid return for any of its 3 listener shapes, and calling sendResponse
+      // synchronously before returning true is harmless (the response is already sent).
       const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
       const sendResponse = vi.fn();
       const keepOpen = messageListener(
@@ -170,7 +174,7 @@ describe('service-worker.ts', () => {
         sendResponse,
       );
       expect(sendResponse).toHaveBeenCalledWith({ ok: true });
-      expect(keepOpen).toBe(false);
+      expect(keepOpen).toBe(true);
     });
 
     it('logs response_stop_received so receipt is directly visible in the console, not just inferred', async () => {
@@ -199,12 +203,12 @@ describe('service-worker.ts', () => {
       expect(logInstance.debug).toHaveBeenCalledWith('prompt_submit_received', { agent: 'replit', projectRoot: 'https://replit.com' });
     });
 
-    it('ignores unrecognized message shapes', async () => {
+    it('ignores unrecognized message shapes, responding with undefined', async () => {
       const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
       const sendResponse = vi.fn();
       const keepOpen = messageListener({ type: 'nexpath:something-else' }, {}, sendResponse);
-      expect(sendResponse).not.toHaveBeenCalled();
-      expect(keepOpen).toBe(false);
+      expect(sendResponse).toHaveBeenCalledWith(undefined);
+      expect(keepOpen).toBe(true);
     });
 
     it('keeps the channel open for nexpath:prompt-submit and resolves {ok:true} when no stage2 trigger fires', async () => {

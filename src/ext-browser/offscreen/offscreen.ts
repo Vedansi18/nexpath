@@ -20,16 +20,24 @@ const NEUTRAL_RESULT: ClassificationResult = {
   stage: 'implementation',
   confidence: 0.0,
   tier: 3 as const,
+  // Required field on ClassificationResult, previously missing here — invisible until
+  // tsconfig.ext-browser.json was actually run for the first time, 2026-07-02.
+  allScores: {},
 };
 
 browser.runtime.onMessage.addListener(
-  (msg: unknown, _sender, sendResponse: (r: unknown) => void) => {
+  // Must return the literal `true` unconditionally — see service-worker.ts's main
+  // listener for the full explanation of this webextension-polyfill type contract.
+  (msg: unknown, _sender, sendResponse: (r: unknown) => void): true => {
     const req = msg as Partial<EmbeddingClassifyRequest>;
-    if (req.type !== 'nexpath:embedding-classify') return false;
+    if (req.type !== 'nexpath:embedding-classify') {
+      sendResponse(undefined);
+      return true;
+    }
 
     // Stub: return neutral so the rest of the pipeline can proceed.
     // Real Transformers.js pipeline is wired in B5.
     sendResponse({ result: NEUTRAL_RESULT as ClassificationResult });
-    return false;
+    return true;
   },
 );
