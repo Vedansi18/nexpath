@@ -17,10 +17,9 @@ function makeUserMessage(text: string): HTMLElement {
   return el;
 }
 
-function makeSubmitButton(disabled: boolean): HTMLButtonElement {
+function makeStopButton(): HTMLButtonElement {
   const btn = document.createElement('button');
-  btn.setAttribute('data-cy', 'ai-prompt-submit');
-  if (disabled) btn.setAttribute('disabled', '');
+  btn.setAttribute('data-cy', 'ai-prompt-stop');
   return btn;
 }
 
@@ -28,8 +27,14 @@ describe('content/agents/replit.ts', () => {
   let postMessageSpy: ReturnType<typeof vi.spyOn>;
   let observers: MutationObserver[];
 
-  beforeEach(() => {
+  beforeEach(async () => {
     document.body.innerHTML = '';
+    // The module's own auto-run bootstrap() (import-time side effect, never
+    // disconnected) keeps a long-lived observer alive on document.body for the whole
+    // file. Clearing innerHTML above is itself a mutation it reacts to — drain that
+    // notification against the outgoing spy before installing a fresh one, so it can
+    // never land inside a later test's assertion window.
+    await flush();
     postMessageSpy = vi.spyOn(window, 'postMessage').mockImplementation(() => {});
     observers = [];
   });
@@ -139,7 +144,12 @@ describe('content/agents/replit.ts', () => {
       expect(postMessageSpy).toHaveBeenCalledTimes(1);
     });
 
-    it('still emits for the same text again once the dedup window has passed (not suppressed forever)', async () => {
+    it('collapses a duplicate re-render no matter how long the gap is (no fixed time window)', async () => {
+      // Confirmed live 2026-07-02: a second, separate re-render duplicate was also
+      // observed when the "Working" status label first appeared after submit — a
+      // different trigger than the page-load swap above, with an unpredictable gap
+      // (depends on Replit's own response latency). A fixed time window can't bound
+      // this reliably, so the real fix has none — collapse holds regardless of delay.
       vi.useFakeTimers();
       try {
         observers.push(observeUserMessages(document.body));
@@ -147,25 +157,49 @@ describe('content/agents/replit.ts', () => {
         await vi.advanceTimersByTimeAsync(0);
         expect(postMessageSpy).toHaveBeenCalledTimes(1);
 
-        await vi.advanceTimersByTimeAsync(5000);
+        await vi.advanceTimersByTimeAsync(60_000);
 
         document.body.appendChild(makeUserMessage('run the tests'));
         await vi.advanceTimersByTimeAsync(0);
 
-        expect(postMessageSpy).toHaveBeenCalledTimes(2);
+        expect(postMessageSpy).toHaveBeenCalledTimes(1);
       } finally {
         vi.useRealTimers();
       }
     });
+
+    it('still emits an identical text again once a genuinely different message has been captured in between', async () => {
+      observers.push(observeUserMessages(document.body));
+
+      document.body.appendChild(makeUserMessage('deploy the app'));
+      await flush();
+      expect(postMessageSpy).toHaveBeenCalledTimes(1);
+
+      document.body.appendChild(makeUserMessage('something else entirely'));
+      await flush();
+      expect(postMessageSpy).toHaveBeenCalledTimes(2);
+
+      // The dedup guard only tracks the single most-recently emitted text, so a later,
+      // deliberate resend of the original text is not mistaken for a re-render echo.
+      document.body.appendChild(makeUserMessage('deploy the app'));
+      await flush();
+
+      expect(postMessageSpy).toHaveBeenCalledTimes(3);
+    });
   });
 
   describe('observeSubmitButton', () => {
-    it('emits nexpath:response-stopped when the button transitions disabled -> enabled', async () => {
-      const btn = makeSubmitButton(true);
-      document.body.appendChild(btn);
+    // Confirmed live 2026-07-02 (Elements-panel inspection): Replit does NOT toggle a
+    // `disabled` attribute on the submit button to signal generation state — that
+    // attribute reflects whether the input box is empty. While generating, Replit
+    // swaps in a wholly different element, data-cy="ai-prompt-stop". Response-stop is
+    // therefore detected by that stop button's presence being removed from the DOM.
+    it('emits nexpath:response-stopped when the stop button is removed after being present', async () => {
+      const stopBtn = makeStopButton();
+      document.body.appendChild(stopBtn);
       observers.push(observeSubmitButton(document.body));
 
-      btn.removeAttribute('disabled');
+      stopBtn.remove();
       await flush();
 
       expect(postMessageSpy).toHaveBeenCalledWith(
@@ -174,27 +208,40 @@ describe('content/agents/replit.ts', () => {
       );
     });
 
-    it('does not emit when the button transitions enabled -> disabled', async () => {
-      const btn = makeSubmitButton(false);
-      document.body.appendChild(btn);
+    it('does not emit when the stop button appears (generation starting)', async () => {
       observers.push(observeSubmitButton(document.body));
 
-      btn.setAttribute('disabled', '');
+      document.body.appendChild(makeStopButton());
       await flush();
 
       expect(postMessageSpy).not.toHaveBeenCalled();
     });
 
-    it('does not emit on the first disabled -> enabled-looking state without a prior disabled observation', async () => {
-      const btn = makeSubmitButton(false);
-      document.body.appendChild(btn);
+    it('does not emit on removal without a prior stop-button observation (observer attached after generation already ended)', async () => {
       observers.push(observeSubmitButton(document.body));
 
-      // Attribute mutation on something unrelated must not spuriously fire.
-      btn.setAttribute('data-x', '1');
+      // Some unrelated DOM churn must not spuriously fire.
+      document.body.appendChild(document.createElement('span'));
       await flush();
 
       expect(postMessageSpy).not.toHaveBeenCalled();
+    });
+
+    it('handles a full generate cycle: stop button appears then disappears', async () => {
+      observers.push(observeSubmitButton(document.body));
+
+      const stopBtn = makeStopButton();
+      document.body.appendChild(stopBtn);
+      await flush();
+      expect(postMessageSpy).not.toHaveBeenCalled();
+
+      stopBtn.remove();
+      await flush();
+
+      expect(postMessageSpy).toHaveBeenCalledWith(
+        { type: 'nexpath:response-stopped', agent: 'replit' },
+        window.location.origin,
+      );
     });
   });
 

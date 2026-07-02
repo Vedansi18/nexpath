@@ -12,7 +12,15 @@ import type { PromptCapturedMsg, ResponseStoppedMsg } from '../ipc.js';
  */
 
 const USER_MESSAGE_SELECTOR = '[data-cy="user-message"]';
-const SUBMIT_BUTTON_SELECTOR = '[data-cy="ai-prompt-submit"]';
+// While the Agent is generating, Replit does NOT toggle a `disabled` attribute on the
+// submit button — it replaces it entirely with a different element carrying
+// data-cy="ai-prompt-stop" (confirmed via live Elements-panel inspection, 2026-07-02:
+// idle state showed data-cy="ai-prompt-submit" disabled="true" — which reflects an
+// EMPTY input box, not generation state — while generating showed a wholly different
+// button, different SVG icon, data-cy="ai-prompt-stop"). Response-stop is therefore
+// detected by the stop button's presence being removed from the DOM, not an attribute
+// transition on one persistent node.
+const STOP_BUTTON_SELECTOR = '[data-cy="ai-prompt-stop"]';
 const CAPTURE_TIER = 'mutation-observer';
 
 function emitPromptCaptured(promptText: string): void {
@@ -34,24 +42,24 @@ function extractPromptText(el: Element): string {
 
 const seenMessages = new WeakSet<Element>();
 
-// Replit swaps its chat DOM from a lightweight loading shell to the fully-hydrated
-// real list shortly after a project page finishes loading (confirmed live 2026-07-02:
-// submitting a prompt while the tab title still read "Loading…" produced one capture,
-// then a second identical-text capture the moment the title changed to the project
-// name — same message, promptCount 1 then 2, no new prompt sent). Replit re-creates
-// the message element as a new DOM node with the same text during that swap, so the
-// WeakSet above (keyed by element identity) can't recognize it as already-seen — a
-// short content+time window catches this specific transitional duplicate without
-// suppressing a genuinely repeated prompt sent minutes apart.
-const recentTexts = new Map<string, number>();
-const TEXT_DEDUP_WINDOW_MS = 4000;
-
-function isDuplicateText(text: string): boolean {
-  const now = Date.now();
-  const last = recentTexts.get(text);
-  recentTexts.set(text, now);
-  return last !== undefined && now - last < TEXT_DEDUP_WINDOW_MS;
-}
+// Replit re-creates the [data-cy="user-message"] element (new DOM node, same text)
+// more than once per turn — confirmed live 2026-07-02 across two separate occasions:
+// once during the page's own loading→hydrated-list swap (promptCount jumped 1→2 with
+// no new prompt sent, right as the tab title finished changing), and again — a second,
+// unrelated re-render — when the "Working" status label first appears after submit
+// (same symptom, different trigger, observed on a fresh page load this time, so it
+// isn't only a page-load artifact). A fixed time window (the first fix attempt) can't
+// reliably bound this: the gap between these re-renders depends on Replit's own
+// variable load/response latency, not a fixed duration. The WeakSet above dedups by
+// element identity and can't help here since each re-render is a genuinely different
+// element. Instead: collapse only *consecutive* identical captures, with no time bound
+// — any number of redundant re-renders of the same still-most-recent message collapse
+// to one emission, but the guard resets the instant a genuinely different message is
+// captured, so an intentional identical resend after another prompt still counts. The
+// one accepted tradeoff: sending the exact same text twice in a row with nothing in
+// between is indistinguishable from a re-render artifact and would also collapse —
+// unavoidable from DOM observation alone, and a narrower miss than a time window.
+let lastEmittedText: string | null = null;
 
 export function observeUserMessages(root: Element): MutationObserver {
   // Prime: register any messages already in the DOM at setup time as "seen" WITHOUT
@@ -77,7 +85,8 @@ export function observeUserMessages(root: Element): MutationObserver {
           if (seenMessages.has(el)) continue;
           seenMessages.add(el);
           const text = extractPromptText(el);
-          if (!text || isDuplicateText(text)) continue;
+          if (!text || text === lastEmittedText) continue;
+          lastEmittedText = text;
           emitPromptCaptured(text);
         }
       }
@@ -87,20 +96,19 @@ export function observeUserMessages(root: Element): MutationObserver {
   return observer;
 }
 
-// ── Response-stop: the submit button's disabled attribute toggling off ─────────
+// ── Response-stop: the stop button disappearing from the DOM ───────────────────
 
 export function observeSubmitButton(root: Node): MutationObserver {
-  // Read current state at observer setup so an already-disabled button (e.g. observer
-  // attached mid-turn) doesn't spuriously fire on its first observed transition.
-  let wasDisabled = document.querySelector(SUBMIT_BUTTON_SELECTOR)?.hasAttribute('disabled') ?? false;
+  // Read current state at observer setup so an already-mid-generation attach (e.g.
+  // observer starts while a response is already streaming) doesn't spuriously fire on
+  // its first observed transition.
+  let wasGenerating = document.querySelector(STOP_BUTTON_SELECTOR) !== null;
   const observer = new MutationObserver(() => {
-    const btn = document.querySelector(SUBMIT_BUTTON_SELECTOR);
-    if (!btn) return;
-    const isDisabled = btn.hasAttribute('disabled');
-    if (wasDisabled && !isDisabled) emitResponseStopped();
-    wasDisabled = isDisabled;
+    const isGenerating = document.querySelector(STOP_BUTTON_SELECTOR) !== null;
+    if (wasGenerating && !isGenerating) emitResponseStopped();
+    wasGenerating = isGenerating;
   });
-  observer.observe(root, { attributes: true, attributeFilter: ['disabled'], subtree: true });
+  observer.observe(root, { childList: true, subtree: true });
   return observer;
 }
 
