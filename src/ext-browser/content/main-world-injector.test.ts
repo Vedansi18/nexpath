@@ -2,9 +2,21 @@
 
 import { describe, it, expect, vi, beforeAll } from 'vitest';
 
-const getURLMock = vi.fn().mockReturnValue('chrome-extension://abc123/inject/main-world.js');
-const sendMessageMock = vi.fn().mockResolvedValue(undefined);
-const onMessageAddListenerMock = vi.fn();
+const { getURLMock, sendMessageMock, onMessageAddListenerMock } = vi.hoisted(() => ({
+  getURLMock: vi.fn().mockReturnValue('chrome-extension://abc123/inject/main-world.js'),
+  sendMessageMock: vi.fn().mockResolvedValue(undefined),
+  onMessageAddListenerMock: vi.fn(),
+}));
+
+vi.mock('webextension-polyfill', () => ({
+  default: {
+    runtime: {
+      getURL: getURLMock,
+      sendMessage: sendMessageMock,
+      onMessage: { addListener: onMessageAddListenerMock },
+    },
+  },
+}));
 
 let appendChildSpy: ReturnType<typeof vi.spyOn>;
 let capturedScript: HTMLScriptElement | undefined;
@@ -21,13 +33,6 @@ describe('main-world-injector.ts', () => {
   // Module registers its 'message' listener and injects the script once, at import time —
   // must be imported exactly once for this file, not per-test.
   beforeAll(async () => {
-    vi.stubGlobal('chrome', {
-      runtime: {
-        getURL: getURLMock,
-        sendMessage: sendMessageMock,
-        onMessage: { addListener: onMessageAddListenerMock },
-      },
-    });
     setLocation('https://replit.com', 'replit.com');
 
     appendChildSpy = vi.spyOn(document.head, 'appendChild').mockImplementation((node) => {
@@ -143,6 +148,29 @@ describe('main-world-injector.ts', () => {
       listener(swMsg);
 
       expect(received).toHaveBeenCalledWith(swMsg);
+    });
+  });
+
+  describe('idempotent-injection guard', () => {
+    it('does not re-inject the script or re-register listeners on a second import into the same page', async () => {
+      // Simulates a stale content-script re-injection: the window flag from the earlier
+      // beforeAll import is still set (persists on the real jsdom window), so re-importing
+      // the module (as if the extension re-injected it into an already-open tab) must be
+      // a no-op this time.
+      expect(window.__nexpathMainWorldInjectorBootstrapped).toBe(true);
+
+      appendChildSpy.mockClear();
+      onMessageAddListenerMock.mockClear();
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      vi.resetModules();
+      await import('./main-world-injector.js');
+
+      expect(appendChildSpy).not.toHaveBeenCalled();
+      expect(onMessageAddListenerMock).not.toHaveBeenCalled();
+      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('skipped, already bootstrapped'));
+
+      logSpy.mockRestore();
     });
   });
 });

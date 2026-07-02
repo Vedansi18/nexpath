@@ -1,3 +1,4 @@
+import browser from 'webextension-polyfill';
 import type { ClassificationResult } from '../../core/classifier/types.js';
 
 /**
@@ -21,7 +22,7 @@ const NEUTRAL_RESULT: ClassificationResult = {
   tier: 3 as const,
 };
 
-chrome.runtime.onMessage.addListener(
+browser.runtime.onMessage.addListener(
   (msg: unknown, _sender, sendResponse: (r: unknown) => void) => {
     const req = msg as Partial<EmbeddingClassifyRequest>;
     if (req.type !== 'nexpath:embedding-classify') return false;

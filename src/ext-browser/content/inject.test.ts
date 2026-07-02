@@ -4,9 +4,14 @@ import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
 import type { AdvisoryPayload } from '../../core/ports/ui.port.js';
 
 const mountStubPanelMock = vi.fn().mockReturnValue({} as ShadowRoot);
+const injectPromptTextMock = vi.fn().mockResolvedValue(undefined);
 
 vi.mock('../ui/stub-panel.js', () => ({
   mountStubPanel: mountStubPanelMock,
+}));
+
+vi.mock('./agents/replit-inject.js', () => ({
+  injectPromptText: injectPromptTextMock,
 }));
 
 function makePayload(overrides: Partial<AdvisoryPayload> = {}): AdvisoryPayload {
@@ -83,13 +88,47 @@ describe('inject.ts', () => {
     expect(mountStubPanelMock).toHaveBeenCalledTimes(2);
   });
 
-  it('removes the panel root when onDismiss is invoked', () => {
+  it('removes the panel root when a dismiss event is emitted', () => {
     dispatchShowAdvisory(makePayload());
     expect(document.getElementById('nexpath-panel-root')).not.toBeNull();
 
-    const onDismiss = mountStubPanelMock.mock.calls[0]![2] as () => void;
-    onDismiss();
+    const onEvent = mountStubPanelMock.mock.calls[0]![2] as (e: { type: string }) => void;
+    onEvent({ type: 'dismiss' });
 
     expect(document.getElementById('nexpath-panel-root')).toBeNull();
+  });
+
+  it('injects the selected option text and removes the panel when a select event is emitted', () => {
+    dispatchShowAdvisory(makePayload());
+    injectPromptTextMock.mockClear();
+
+    const onEvent = mountStubPanelMock.mock.calls[0]![2] as (e: { type: string; optionIndex?: number; text?: string }) => void;
+    onEvent({ type: 'select', optionIndex: 0, text: 'Write the tests now' });
+
+    expect(injectPromptTextMock).toHaveBeenCalledWith('Write the tests now');
+    expect(document.getElementById('nexpath-panel-root')).toBeNull();
+  });
+
+  describe('idempotent-injection guard', () => {
+    it('does not re-register its listener on a second import into the same page', async () => {
+      // Simulates a stale content-script re-injection: the window flag from the earlier
+      // beforeAll import is still set (persists on the real jsdom window), so re-importing
+      // the module (as if the extension re-injected it into an already-open tab) must be
+      // a no-op this time.
+      expect(window.__nexpathInjectBootstrapped).toBe(true);
+
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      vi.resetModules();
+      await import('./inject.js');
+
+      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('skipped, already bootstrapped'));
+
+      // A duplicate listener would double-mount the panel for the same event.
+      mountStubPanelMock.mockClear();
+      dispatchShowAdvisory(makePayload());
+      expect(mountStubPanelMock).toHaveBeenCalledTimes(1);
+
+      logSpy.mockRestore();
+    });
   });
 });

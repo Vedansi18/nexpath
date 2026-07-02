@@ -58,6 +58,18 @@ const openOptionsPageMock = vi.fn();
 const onInstalledAddListenerMock = vi.fn();
 const onMessageAddListenerMock = vi.fn();
 
+// browser.* (webextension-polyfill) covers everything except chrome.offscreen, which has no
+// cross-browser equivalent and stays a real chrome.* global — see importFreshServiceWorker below.
+vi.mock('webextension-polyfill', () => ({
+  default: {
+    runtime: {
+      onInstalled:     { addListener: onInstalledAddListenerMock },
+      onMessage:        { addListener: onMessageAddListenerMock },
+      openOptionsPage:  openOptionsPageMock,
+    },
+  },
+}));
+
 type MessageListener = (
   msg: unknown,
   sender: { tab?: { id: number } },
@@ -68,14 +80,7 @@ async function importFreshServiceWorker(chromeOffscreen: unknown): Promise<{
   messageListener: MessageListener;
   installedListener: (details: { reason: string }) => void;
 }> {
-  vi.stubGlobal('chrome', {
-    runtime: {
-      onInstalled: { addListener: onInstalledAddListenerMock },
-      onMessage: { addListener: onMessageAddListenerMock },
-      openOptionsPage: openOptionsPageMock,
-    },
-    offscreen: chromeOffscreen,
-  });
+  vi.stubGlobal('chrome', { offscreen: chromeOffscreen });
   vi.resetModules();
   await import('./service-worker.js');
   return {
@@ -166,6 +171,32 @@ describe('service-worker.ts', () => {
       );
       expect(sendResponse).toHaveBeenCalledWith({ ok: true });
       expect(keepOpen).toBe(false);
+    });
+
+    it('logs response_stop_received so receipt is directly visible in the console, not just inferred', async () => {
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      const logInstance = vi.mocked(ConsoleLogAdapter).mock.results.at(-1)!.value as { debug: ReturnType<typeof vi.fn> };
+
+      messageListener(
+        { type: 'nexpath:response-stop', projectRoot: 'https://replit.com', agent: 'replit', tabId: 1 },
+        {},
+        vi.fn(),
+      );
+
+      expect(logInstance.debug).toHaveBeenCalledWith('response_stop_received', { agent: 'replit', projectRoot: 'https://replit.com' });
+    });
+
+    it('logs prompt_submit_received immediately on receipt, before the pipeline resolves', async () => {
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      const logInstance = vi.mocked(ConsoleLogAdapter).mock.results.at(-1)!.value as { debug: ReturnType<typeof vi.fn> };
+
+      messageListener(
+        { type: 'nexpath:prompt-submit', promptText: 'hi', projectRoot: 'https://replit.com', agent: 'replit', tabId: 7 },
+        {},
+        vi.fn(),
+      );
+
+      expect(logInstance.debug).toHaveBeenCalledWith('prompt_submit_received', { agent: 'replit', projectRoot: 'https://replit.com' });
     });
 
     it('ignores unrecognized message shapes', async () => {

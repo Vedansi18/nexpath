@@ -2,11 +2,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { OffscreenEmbeddingAdapter } from './embedding-offscreen.js';
 import type { ClassificationResult } from '../../core/classifier/types.js';
 
-const sendMessageMock = vi.fn();
+const { sendMessageMock } = vi.hoisted(() => ({ sendMessageMock: vi.fn() }));
 
-vi.stubGlobal('chrome', {
-  runtime: { sendMessage: sendMessageMock },
-});
+vi.mock('webextension-polyfill', () => ({
+  default: { runtime: { sendMessage: sendMessageMock } },
+}));
 
 describe('OffscreenEmbeddingAdapter', () => {
   beforeEach(() => {

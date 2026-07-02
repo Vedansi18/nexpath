@@ -2,18 +2,19 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 type OnMessageListener = (msg: unknown, sender: unknown, sendResponse: (r: unknown) => void) => boolean;
 
+const { addListenerMock } = vi.hoisted(() => ({ addListenerMock: vi.fn() }));
 let registeredListener: OnMessageListener | undefined;
-const addListenerMock = vi.fn((listener: OnMessageListener) => {
-  registeredListener = listener;
-});
 
-vi.stubGlobal('chrome', {
-  runtime: { onMessage: { addListener: addListenerMock } },
-});
+vi.mock('webextension-polyfill', () => ({
+  default: { runtime: { onMessage: { addListener: addListenerMock } } },
+}));
 
 describe('offscreen.ts', () => {
   beforeEach(async () => {
     addListenerMock.mockClear();
+    addListenerMock.mockImplementation((listener: OnMessageListener) => {
+      registeredListener = listener;
+    });
     registeredListener = undefined;
     vi.resetModules();
     await import('./offscreen.js');

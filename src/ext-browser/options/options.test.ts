@@ -6,6 +6,10 @@ const mockGet = vi.fn();
 const mockSet = vi.fn();
 const fetchMock = vi.fn();
 
+vi.mock('webextension-polyfill', () => ({
+  default: { storage: { local: { get: mockGet, set: mockSet } } },
+}));
+
 function setupDom(): void {
   document.body.innerHTML = `
     <input id="api-key" />
@@ -23,7 +27,6 @@ async function flush(): Promise<void> {
 async function loadOptionsModule(): Promise<void> {
   setupDom();
   vi.resetModules();
-  vi.stubGlobal('chrome', { storage: { local: { get: mockGet, set: mockSet } } });
   vi.stubGlobal('fetch', fetchMock);
   await import('./options.js');
   await flush();

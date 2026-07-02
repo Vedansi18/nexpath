@@ -6,6 +6,11 @@ import type { AdvisoryPayload } from '../../core/ports/ui.port.js';
  * B5b replaces this with the real UI (mountNexpathPanel from ui-contract.ts).
  */
 
+/** Distinguishes an option pick (which needs its text injected back) from a plain dismiss. */
+export type StubPanelEvent =
+  | { type: 'select'; optionIndex: number; text: string }
+  | { type: 'dismiss' };
+
 /**
  * Returns the closed ShadowRoot so callers (e.g. tests) can inspect content
  * without going through element.shadowRoot (which is null for mode:'closed').
@@ -13,7 +18,7 @@ import type { AdvisoryPayload } from '../../core/ports/ui.port.js';
 export function mountStubPanel(
   root: HTMLElement,
   payload: AdvisoryPayload,
-  onDismiss: () => void,
+  onEvent: (event: StubPanelEvent) => void,
 ): ShadowRoot {
   // Closed mode prevents host-page JS from reading the shadow DOM (security §13.5).
   const shadow = root.attachShadow({ mode: 'closed' });
@@ -70,9 +75,12 @@ export function mountStubPanel(
     <div class="meta">nexpath · ${escHtml(payload.meta.agent)}</div>
   `;
 
-  card.querySelector('.close')?.addEventListener('click', onDismiss);
-  card.querySelectorAll('.opt').forEach((btn) => {
-    btn.addEventListener('click', onDismiss);
+  card.querySelector('.close')?.addEventListener('click', () => onEvent({ type: 'dismiss' }));
+  card.querySelectorAll('.opt').forEach((btn, i) => {
+    btn.addEventListener('click', () => {
+      const option = payload.options[i];
+      onEvent({ type: 'select', optionIndex: i, text: option?.title ?? '' });
+    });
   });
 
   shadow.appendChild(card);

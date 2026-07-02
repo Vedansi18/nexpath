@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ConsoleLogAdapter } from './log-console.js';
 
 describe('ConsoleLogAdapter', () => {
-  const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {});
+  const debugSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
   const infoSpy  = vi.spyOn(console, 'info').mockImplementation(() => {});
   const warnSpy  = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
@@ -12,13 +12,13 @@ describe('ConsoleLogAdapter', () => {
     warnSpy.mockClear();
   });
 
-  it('calls console.debug with prefix and key', () => {
+  it('calls console.log (not .debug — Verbose is hidden by default in DevTools) with prefix and key', () => {
     const log = new ConsoleLogAdapter('[test]');
     log.debug('my_event');
     expect(debugSpy).toHaveBeenCalledWith('[test]', 'my_event', '');
   });
 
-  it('calls console.debug with data when provided', () => {
+  it('calls console.log with data when provided', () => {
     const log = new ConsoleLogAdapter('[test]');
     log.debug('my_event', { foo: 1 });
     expect(debugSpy).toHaveBeenCalledWith('[test]', 'my_event', { foo: 1 });

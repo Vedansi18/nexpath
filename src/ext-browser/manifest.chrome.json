@@ -29,6 +29,11 @@
       ],
       "js": ["content/main-world-injector.js", "content/inject.js"],
       "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://*.replit.com/*"],
+      "js": ["content/agents/replit.js"],
+      "run_at": "document_idle"
     }
   ],
   "web_accessible_resources": [

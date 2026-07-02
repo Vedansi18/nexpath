@@ -1,3 +1,5 @@
+import browser from 'webextension-polyfill';
+
 const KEY_NAME = 'openai_api_key';
 const MODELS_URL = 'https://api.openai.com/v1/models';
 
@@ -10,7 +12,7 @@ const checkEl  = document.getElementById('self-check')   as HTMLDivElement;
 // ── Key persistence ───────────────────────────────────────────────────────────
 
 async function loadKey(): Promise<void> {
-  const result = await chrome.storage.local.get(KEY_NAME);
+  const result = await browser.storage.local.get(KEY_NAME);
   const saved = result[KEY_NAME];
   if (typeof saved === 'string' && saved.length > 0) {
     input.value = saved;
@@ -29,7 +31,7 @@ saveBtn.addEventListener('click', async () => {
   if (!key) { setKeyStatus('Please enter a key', 'err'); return; }
   if (!key.startsWith('sk-')) { setKeyStatus('Key must start with sk-', 'err'); return; }
   try {
-    await chrome.storage.local.set({ [KEY_NAME]: key });
+    await browser.storage.local.set({ [KEY_NAME]: key });
     setKeyStatus('Saved — click Test to validate', '');
     await renderSelfCheck();
   } catch (err) {
@@ -52,7 +54,7 @@ testBtn.addEventListener('click', async () => {
     });
 
     if (resp.ok) {
-      await chrome.storage.local.set({ [KEY_NAME]: key });
+      await browser.storage.local.set({ [KEY_NAME]: key });
       setKeyStatus('Key valid ✅', 'ok');
     } else if (resp.status === 401) {
       setKeyStatus('Invalid key ❌ — check and re-enter', 'err');
@@ -78,7 +80,7 @@ function escHtml(str: string): string {
 }
 
 async function renderSelfCheck(): Promise<void> {
-  const result = await chrome.storage.local.get([KEY_NAME, 'nexpath_last_capture']);
+  const result = await browser.storage.local.get([KEY_NAME, 'nexpath_last_capture']);
   const hasKey = typeof result[KEY_NAME] === 'string' && (result[KEY_NAME] as string).length > 0;
   const lastCapture = result['nexpath_last_capture'] as string | undefined;
 

@@ -63,20 +63,20 @@ describe('mountStubPanel', () => {
     expect(shadow.textContent).toContain('replit');
   });
 
-  it('calls onDismiss when close button is clicked', () => {
-    const onDismiss = vi.fn();
-    const shadow = mountStubPanel(root, makePayload(), onDismiss);
+  it('emits a dismiss event when the close button is clicked', () => {
+    const onEvent = vi.fn();
+    const shadow = mountStubPanel(root, makePayload(), onEvent);
     const closeBtn = shadow.querySelector('.close') as HTMLButtonElement;
     closeBtn?.click();
-    expect(onDismiss).toHaveBeenCalledOnce();
+    expect(onEvent).toHaveBeenCalledWith({ type: 'dismiss' });
   });
 
-  it('calls onDismiss when an option button is clicked', () => {
-    const onDismiss = vi.fn();
-    const shadow = mountStubPanel(root, makePayload(), onDismiss);
+  it('emits a select event with the option index and title when an option button is clicked', () => {
+    const onEvent = vi.fn();
+    const shadow = mountStubPanel(root, makePayload(), onEvent);
     const optBtns = shadow.querySelectorAll('.opt') as NodeListOf<HTMLButtonElement>;
-    optBtns[0]?.click();
-    expect(onDismiss).toHaveBeenCalledOnce();
+    optBtns[1]?.click();
+    expect(onEvent).toHaveBeenCalledWith({ type: 'select', optionIndex: 1, text: 'At least write one test' });
   });
 
   it('renders empty options list when payload has no options', () => {

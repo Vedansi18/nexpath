@@ -1,3 +1,4 @@
+import browser from 'webextension-polyfill';
 import { classifyPrompt } from '../../core/classifier/PromptClassifier.js';
 import { SessionStateManager } from '../../core/session-state.js';
 import { shouldFireStage2, runStage2 } from '../../core/stage2.js';
@@ -27,6 +28,8 @@ const log = new ConsoleLogAdapter('[nexpath-sw]');
 
 const OFFSCREEN_URL = 'offscreen/offscreen.html';
 
+// chrome.offscreen has no cross-browser equivalent (Chrome-only API, no Firefox support) —
+// stays as chrome.*, not webextension-polyfill, deliberately. Already feature-detected below.
 type ChromeWithOffscreen = typeof chrome & {
   offscreen: {
     createDocument(opts: { url: string; reasons: string[]; justification: string }): Promise<void>;
@@ -50,17 +53,18 @@ async function ensureOffscreen(): Promise<void> {
 
 // ── First-install: open options page ──────────────────────────────────────────
 
-chrome.runtime.onInstalled.addListener(({ reason }) => {
+browser.runtime.onInstalled.addListener(({ reason }) => {
   if (reason === 'install') {
-    chrome.runtime.openOptionsPage();
+    browser.runtime.openOptionsPage();
   }
 });
 
 // ── Main message listener ──────────────────────────────────────────────────────
 
-chrome.runtime.onMessage.addListener(
-  (msg: unknown, sender: chrome.runtime.MessageSender, sendResponse: (r?: unknown) => void) => {
+browser.runtime.onMessage.addListener(
+  (msg: unknown, sender, sendResponse: (r?: unknown) => void) => {
     if (isPromptSubmitMsg(msg)) {
+      log.debug('prompt_submit_received', { agent: msg.agent, projectRoot: msg.projectRoot });
       const tabId = sender.tab?.id ?? msg.tabId;
       handlePromptSubmit(msg.promptText, msg.projectRoot, msg.agent, tabId)
         .then(() => sendResponse({ ok: true }))
@@ -72,7 +76,9 @@ chrome.runtime.onMessage.addListener(
     }
 
     if (isResponseStopMsg(msg)) {
-      // No pipeline action in B2 skeleton — acknowledge and return
+      // No pipeline action in B2 skeleton — acknowledge and return. Logged explicitly
+      // so response-stop receipt is directly visible/testable, not just inferred.
+      log.debug('response_stop_received', { agent: msg.agent, projectRoot: msg.projectRoot });
       sendResponse({ ok: true });
       return false;
     }

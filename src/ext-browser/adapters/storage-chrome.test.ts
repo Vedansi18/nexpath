@@ -1,15 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ChromeStorageKeyAdapter } from './storage-chrome.js';
 
-const mockGet = vi.fn();
+// vi.mock is hoisted above imports — vi.hoisted is the supported escape hatch
+// for identifiers the factory needs to reference (see src/ext-vscode precedent).
+const { mockGet } = vi.hoisted(() => ({ mockGet: vi.fn() }));
 
-vi.stubGlobal('chrome', {
-  storage: {
-    local: {
-      get: mockGet,
-    },
-  },
-});
+vi.mock('webextension-polyfill', () => ({
+  default: { storage: { local: { get: mockGet } } },
+}));
 
 describe('ChromeStorageKeyAdapter', () => {
   beforeEach(() => {

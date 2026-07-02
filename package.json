@@ -30,6 +30,7 @@
     "openai": "^6.34.0",
     "sql.js": "^1",
     "tinyld": "^1",
+    "webextension-polyfill": "^0.12.0",
     "zod": "^3"
   },
   "devDependencies": {
@@ -37,6 +38,7 @@
     "@types/natural": "^5.1.5",
     "@types/node": "^20",
     "@types/sql.js": "^1",
+    "@types/webextension-polyfill": "^0.12.5",
     "esbuild": "^0.24.0",
     "jsdom": "^25.0.0",
     "tsx": "^4",
