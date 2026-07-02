@@ -34,6 +34,25 @@ function extractPromptText(el: Element): string {
 
 const seenMessages = new WeakSet<Element>();
 
+// Replit swaps its chat DOM from a lightweight loading shell to the fully-hydrated
+// real list shortly after a project page finishes loading (confirmed live 2026-07-02:
+// submitting a prompt while the tab title still read "Loading…" produced one capture,
+// then a second identical-text capture the moment the title changed to the project
+// name — same message, promptCount 1 then 2, no new prompt sent). Replit re-creates
+// the message element as a new DOM node with the same text during that swap, so the
+// WeakSet above (keyed by element identity) can't recognize it as already-seen — a
+// short content+time window catches this specific transitional duplicate without
+// suppressing a genuinely repeated prompt sent minutes apart.
+const recentTexts = new Map<string, number>();
+const TEXT_DEDUP_WINDOW_MS = 4000;
+
+function isDuplicateText(text: string): boolean {
+  const now = Date.now();
+  const last = recentTexts.get(text);
+  recentTexts.set(text, now);
+  return last !== undefined && now - last < TEXT_DEDUP_WINDOW_MS;
+}
+
 export function observeUserMessages(root: Element): MutationObserver {
   // Prime: register any messages already in the DOM at setup time as "seen" WITHOUT
   // emitting captures for them. Mirrors src/ext-vscode/chat-history-watcher.ts's
@@ -58,7 +77,8 @@ export function observeUserMessages(root: Element): MutationObserver {
           if (seenMessages.has(el)) continue;
           seenMessages.add(el);
           const text = extractPromptText(el);
-          if (text) emitPromptCaptured(text);
+          if (!text || isDuplicateText(text)) continue;
+          emitPromptCaptured(text);
         }
       }
     }

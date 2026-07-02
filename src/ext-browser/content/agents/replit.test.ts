@@ -121,6 +121,42 @@ describe('content/agents/replit.ts', () => {
 
       expect(postMessageSpy).not.toHaveBeenCalled();
     });
+
+    it('collapses a duplicate capture when the same text arrives via a brand-new DOM node shortly after (Replit loading-shell → hydrated-list swap)', async () => {
+      // Confirmed live 2026-07-02: Replit re-creates the message element (new node
+      // identity, same text) when its own page finishes loading, right after the
+      // original was already captured — the WeakSet above can't catch this since
+      // it's genuinely a different element. Simulate that: two separate elements,
+      // identical text, inserted moments apart.
+      observers.push(observeUserMessages(document.body));
+      document.body.appendChild(makeUserMessage('how add a comment to this function'));
+      await flush();
+      expect(postMessageSpy).toHaveBeenCalledTimes(1);
+
+      document.body.appendChild(makeUserMessage('how add a comment to this function'));
+      await flush();
+
+      expect(postMessageSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('still emits for the same text again once the dedup window has passed (not suppressed forever)', async () => {
+      vi.useFakeTimers();
+      try {
+        observers.push(observeUserMessages(document.body));
+        document.body.appendChild(makeUserMessage('run the tests'));
+        await vi.advanceTimersByTimeAsync(0);
+        expect(postMessageSpy).toHaveBeenCalledTimes(1);
+
+        await vi.advanceTimersByTimeAsync(5000);
+
+        document.body.appendChild(makeUserMessage('run the tests'));
+        await vi.advanceTimersByTimeAsync(0);
+
+        expect(postMessageSpy).toHaveBeenCalledTimes(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 
   describe('observeSubmitButton', () => {
