@@ -98,33 +98,56 @@ export function observeUserMessages(root: Element): MutationObserver {
 
 // ── Response-stop: the stop button disappearing from the DOM ───────────────────
 
+const POLL_INTERVAL_MS = 1500;
+
 export function observeSubmitButton(root: Node): MutationObserver {
   // Read current state at observer setup so an already-mid-generation attach (e.g.
   // observer starts while a response is already streaming) doesn't spuriously fire on
   // its first observed transition.
   let wasGenerating = document.querySelector(STOP_BUTTON_SELECTOR) !== null;
-  const observer = new MutationObserver(() => {
+
+  const checkAndEmit = (): void => {
     const isGenerating = document.querySelector(STOP_BUTTON_SELECTOR) !== null;
     if (wasGenerating && !isGenerating) {
       // Visible in the page console regardless of whether the SW message that follows
       // succeeds — closes an observability gap confirmed live 2026-07-03: response-stop
       // silently stopped firing on longer, multi-action responses with no trace of
       // whether the content script ever detected the transition at all, or detected it
-      // but the message to the SW got lost. This line answers that question directly
-      // the next time it happens, instead of requiring another guess.
+      // but the message to the SW got lost.
       console.log('[nexpath] response-stop detected (stop button no longer present)');
       emitResponseStopped();
     }
     wasGenerating = isGenerating;
-  });
-  // Watch both childList (element swapped — confirmed live 2026-07-02 as the primary
-  // mechanism for short responses) AND attributes. Longer, multi-action responses may
-  // toggle the stop button's visibility via a class/style/hidden change on a persistent
-  // element instead of swapping it entirely — childList-only observation would silently
-  // miss that transition. Broader observation is strictly safer; MutationObserver
-  // callbacks aren't subject to the background-tab timer throttling that affects
-  // setInterval/setTimeout, so this doesn't trade off reliability for cost.
+  };
+
+  const observer = new MutationObserver(checkAndEmit);
+  // childList (element swapped — confirmed live 2026-07-02 for short responses) +
+  // attributes (in case some response types toggle visibility on a persistent element
+  // instead — hardened 2026-07-03, first attempted fix). Kept as the primary,
+  // lowest-latency path; the poll below is the actual safety net.
   observer.observe(root, { childList: true, subtree: true, attributes: true });
+
+  // Polling safety net, independent of MutationObserver's mutation-type coverage.
+  // Confirmed live 2026-07-03: response-stop still failed to fire on longer,
+  // multi-action responses across two separate MutationObserver-config attempts
+  // (childList, then childList+attributes) — meaning the actual DOM mechanism Replit
+  // uses for these response types isn't understood with certainty yet, and guessing a
+  // third specific mutation-type config risks the same result. This checks ground
+  // truth directly on a fixed interval regardless of *how* the DOM changed, so it
+  // cannot have the same class of blind spot a mutation-type filter can — the
+  // trade-off is up to POLL_INTERVAL_MS of added detection latency, which only affects
+  // when we notice completion, not whether it's noticed at all. Both mechanisms share
+  // `wasGenerating`, so whichever detects the transition first wins; the other is a
+  // silent no-op. disconnect() is wrapped so callers (bootstrap, tests) that already
+  // call the standard MutationObserver.disconnect() correctly stop the poll too,
+  // without needing to know it exists.
+  const pollIntervalId = setInterval(checkAndEmit, POLL_INTERVAL_MS);
+  const originalDisconnect = observer.disconnect.bind(observer);
+  observer.disconnect = (): void => {
+    clearInterval(pollIntervalId);
+    originalDisconnect();
+  };
+
   return observer;
 }
 

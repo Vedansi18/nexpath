@@ -264,6 +264,58 @@ describe('content/agents/replit.ts', () => {
         window.location.origin,
       );
     });
+
+    it('the poll independently detects response-stop even when MutationObserver never fires (safety-net proof, 2026-07-03)', async () => {
+      // Response-stop still failed to fire on longer, multi-action responses across two
+      // separate MutationObserver-config attempts (childList, then childList+attributes)
+      // — meaning the real DOM mechanism isn't understood with certainty and a third
+      // specific mutation-type guess risks the same result. Stubs MutationObserver to a
+      // total no-op (never invokes its callback for any mutation) to prove the polling
+      // fallback alone — independent of any mutation-type assumption — still detects the
+      // transition once the poll interval elapses.
+      vi.useFakeTimers();
+      const RealMutationObserver = globalThis.MutationObserver;
+      try {
+        class NoOpObserver {
+          observe(): void { /* never calls back, on purpose */ }
+          disconnect(): void { /* no-op */ }
+        }
+        vi.stubGlobal('MutationObserver', NoOpObserver as unknown as typeof MutationObserver);
+
+        const stopBtn = makeStopButton();
+        document.body.appendChild(stopBtn);
+        const observer = observeSubmitButton(document.body);
+        observers.push(observer);
+
+        stopBtn.remove(); // the stubbed MutationObserver never reacts to this
+        await vi.advanceTimersByTimeAsync(1500); // let the poll interval elapse
+
+        expect(postMessageSpy).toHaveBeenCalledWith(
+          { type: 'nexpath:response-stopped', agent: 'replit' },
+          window.location.origin,
+        );
+      } finally {
+        vi.stubGlobal('MutationObserver', RealMutationObserver);
+        vi.useRealTimers();
+      }
+    });
+
+    it('disconnect() stops the poll too, not just the MutationObserver', async () => {
+      vi.useFakeTimers();
+      try {
+        const stopBtn = makeStopButton();
+        document.body.appendChild(stopBtn);
+        const observer = observeSubmitButton(document.body);
+
+        observer.disconnect();
+        stopBtn.remove();
+        await vi.advanceTimersByTimeAsync(3000); // well past one poll interval
+
+        expect(postMessageSpy).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 
   describe('bootstrap', () => {
