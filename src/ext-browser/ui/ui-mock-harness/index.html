@@ -22,6 +22,10 @@
   }
   nav a:hover { background: #313244; }
   nav a.active { background: #313244; border-color: #cba6f7; }
+  nav .actions { margin-top: 20px; padding-top: 16px; border-top: 1px solid #313244; display: flex; flex-direction: column; gap: 6px; }
+  nav .actions h2 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: #6c7086; margin: 0 0 6px; }
+  nav button { appearance: none; background: #1e1e2e; border: 1px solid #313244; border-radius: 6px; color: #cdd6f4; font: inherit; font-size: 12.5px; padding: 8px 10px; cursor: pointer; text-align: left; }
+  nav button:hover { border-color: #cba6f7; }
   main { flex: 1; position: relative; padding: 16px; overflow-y: auto; }
   #nexpath-harness-root { position: relative; height: 100%; }
   #nexpath-harness-log {
@@ -44,6 +48,13 @@
     <a href="?fixture=beginner-profile">beginner-profile</a>
     <a href="?fixture=hardcore-pro-profile">hardcore-pro-profile</a>
     <a href="?fixture=frustrated-mood">frustrated-mood</a>
+
+    <div class="actions">
+      <h2>Controls</h2>
+      <button id="nexpath-harness-busy-on">setBusy(true)</button>
+      <button id="nexpath-harness-busy-off">setBusy(false)</button>
+      <button id="nexpath-harness-hide">hide()</button>
+    </div>
   </nav>
   <main>
     <div id="status">Loading…</div>

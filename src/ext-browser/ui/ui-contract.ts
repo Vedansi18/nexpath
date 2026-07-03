@@ -1,79 +1,177 @@
-/**
- * B1 UI Contract — FROZEN.
- *
- * This file defines the boundary between the nexpath core pipeline and the UI layer.
- * UI developers implement against this contract; the pipeline team implements against it.
- * Neither side breaks the other as long as this contract stays stable.
- *
- * DO NOT change these interfaces without a major-version bump or explicit sign-off from both sides.
- */
+// Frozen contract — copied verbatim from docs/dev/v0.1.5-ui-developer-brief.md §5.
+// Do not edit without a major-version bump or explicit sign-off from both the
+// engine team and the UI developer. Deliberately has zero imports (see §9 of the
+// brief) so it can be dropped standalone into the UI developer's own build.
+//
+// Corrected 2026-07-03: `stage` was `'planning' | 'implementation' | 'review'` — a
+// 3-value taxonomy that never matched the real engine, which has always used the
+// 8-value Stage enum below (core/classifier/types.ts). Confirmed live: a real
+// advisory fired with `stage: 'review_testing'`, which the old type didn't even
+// allow. This file was also, independently, out of sync with the brief document
+// itself (a stale pre-brief draft — different AdvisoryPayload/PanelEvent/
+// MountNexpathPanel shapes entirely) — replaced wholesale to match the brief, not
+// just patched, since the previous version had never matched what was actually
+// documented and delivered.
 
-// ── AdvisoryPayload — what the pipeline sends to the UI ───────────────────────
+// ─── Types sent FROM engine TO panel ──────────────────────────────────
+
+export interface AdvisoryPayload {
+  /** Always 1 — runtime-checked; panel throws graceful error on mismatch */
+  schemaVersion: 1;
+
+  /** Unique ID for this advisory, format: "adv-{uuid4}" */
+  advisoryId: string;
+
+  /**
+   * Short attention-grabbing label.
+   * Examples: "Before coding.", "Scope check.", "Review ready?",
+   *           "Before you ship.", "Step back."
+   * Max 40 chars. Always ends with punctuation.
+   */
+  pinchLabel: string;
+
+  /** Which phase of the session triggered this advisory */
+  stage:
+    | 'idea'
+    | 'prd'
+    | 'architecture'
+    | 'task_breakdown'
+    | 'implementation'
+    | 'review_testing'
+    | 'release'
+    | 'feedback_loop';
+
+  /**
+   * Always exactly 3 items in this order: L1, L2, L3.
+   * L1 = detailed (~60 words), L2 = medium (~35 words), L3 = brief (~20 words).
+   * Default displayed level is L1.
+   */
+  options: AdvisoryOption[];
+
+  meta: {
+    /** Which coding agent this tab is running */
+    agent: 'replit' | 'bolt' | 'lovable';
+
+    /** User's configured advisory frequency — for display only, not logic */
+    frequency: 'off' | 'major_only' | 'once_per_session' | 'every_event' | 'optimum';
+  };
+}
 
 export interface AdvisoryOption {
-  /** Short action label (e.g. "Write the PRD now →"). */
-  label:       string;
-  /** Full description / why-this-matters text. */
-  description: string;
+  /** Display-only level tag */
+  level: 'L1' | 'L2' | 'L3';
+
+  /**
+   * Opaque identifier — pass back in PanelEvent.optionId on select/copy.
+   * Format: "{advisoryId}-{level}" but treat as opaque string.
+   */
+  id: string;
+
+  /** Short headline for this option (max 80 chars) */
+  title: string;
+
+  /**
+   * The full text of this option — this is what gets injected into the
+   * agent's chat input when the user selects it.
+   * L1: ~200–350 chars · L2: ~120–200 chars · L3: ~60–100 chars
+   */
+  body: string;
 }
+
+
+// ─── Types sent FROM panel TO engine (via onEvent callback) ───────────
 
 /**
- * Complete advisory payload delivered by the pipeline to the UI.
- * All fields are required — the UI must handle every one.
+ * User picked an option → engine will inject option.body into the agent chat.
+ * After emitting this, expect controller.setBusy(true) → inject runs →
+ * controller.setBusy(false) → controller.hide() in sequence.
  */
-export interface AdvisoryPayload {
-  /** Session identifier — opaque string. */
-  sessionId:   string;
-  /** Current dev stage key (e.g. 'implementation', 'prd'). */
-  stage:       string;
-  /** Previous stage key — empty string if no transition. */
-  prevStage:   string;
-  /** FlagType string (e.g. 'stage_transition', 'absence:test_creation'). */
-  flagType:    string;
-  /** 2-3 word LLM-generated or static pinch label (e.g. 'Hold up.'). */
-  pinchLabel:  string;
-  /** Prompt count at the time the advisory fired. */
-  promptCount: number;
-  /** Ordered advisory options (1-3 entries). */
-  options:     AdvisoryOption[];
-}
-
-// ── PanelEvent — what the UI sends back to the extension background ───────────
-
-export type PanelEventType =
-  | 'option_selected'    // user clicked an option
-  | 'copy_to_clipboard'  // user chose clipboard-only path
-  | 'dismissed';         // user dismissed the panel without selecting
-
-export interface PanelEvent {
-  type:           PanelEventType;
-  /** Index of the selected option (present only when type === 'option_selected'). */
-  optionIndex?:   number;
-  /** Full text of the selected option (present only when type === 'option_selected'). */
-  selectedText?:  string;
-}
-
-// ── Panel lifecycle — what the UI must export ─────────────────────────────────
+export type SelectEvent    = { type: 'select';    optionId: string; body: string };
 
 /**
- * Controller returned by mountNexpathPanel.
- * The extension host uses this to tear down the panel.
+ * User clicked "Skip" (acknowledge but don't act).
+ * Engine stores the skip. You should call hide() if you want — but the
+ * engine may also call controller.hide() in response.
  */
+export type SkipEvent      = { type: 'skip' };
+
+/**
+ * User clicked ✕ or pressed Escape (ignore entirely).
+ * Engine does not store anything for dismiss. Panel should close.
+ */
+export type DismissEvent   = { type: 'dismiss' };
+
+/**
+ * User clicked "Copy" on an option (without selecting it for inject-back).
+ * Engine may log this. Panel stays open.
+ */
+export type CopyEvent      = { type: 'copy';      optionId: string };
+
+/**
+ * User clicked "Show simpler →" to navigate to the next level.
+ * Panel manages its own level display internally.
+ * Engine logs this for analytics. You do not need to do anything in response.
+ */
+export type ShowSimplerEvent = { type: 'show-simpler' };
+
+export type PanelEvent =
+  | SelectEvent
+  | SkipEvent
+  | DismissEvent
+  | CopyEvent
+  | ShowSimplerEvent;
+
+
+// ─── What you return from mountNexpathPanel ───────────────────────────
+
 export interface PanelController {
-  /** Remove the panel from the DOM and clean up all event listeners. */
-  unmount(): void;
+  /**
+   * Show (or update) the panel with a new advisory payload.
+   * Called every time an advisory fires. If the panel is already open,
+   * replace its content with the new payload.
+   */
+  show(payload: AdvisoryPayload): void;
+
+  /**
+   * Set / clear the busy (loading) state.
+   * Called true immediately after 'select' while inject-back is running.
+   * Called false when inject-back completes (or fails).
+   * While busy: disable all interactions; show a loading indicator.
+   */
+  setBusy(isBusy: boolean): void;
+
+  /**
+   * Hide the panel (slide or fade out). Do not destroy — show() may be
+   * called again later.
+   */
+  hide(): void;
+
+  /**
+   * Permanently destroy the panel and clean up all event listeners,
+   * DOM nodes, and any internal timers. Called when the content script
+   * unloads (tab close / navigation away from the agent site).
+   * After this call, no further methods will be called.
+   */
+  destroy(): void;
 }
 
+
+// ─── The ONE function you export ──────────────────────────────────────
+
 /**
- * Mount the nexpath advisory panel into the given root element.
+ * Mount the nexpath advisory panel into the provided root element.
  *
- * @param root     DOM element to mount into (the extension creates this).
- * @param payload  Advisory data from the pipeline.
- * @param onEvent  Callback the extension calls when the user acts.
- * @returns        Controller — call unmount() when done.
+ * @param root    - An empty HTMLElement inside the engine's Shadow root.
+ *                  You own this element and all its children.
+ *                  Do NOT reach outside this element into the page DOM.
+ * @param options - { onEvent } — call this for every user interaction.
+ *
+ * @returns PanelController that the engine uses to drive the panel.
+ *
+ * This function is called ONCE per content-script lifetime.
+ * It should be synchronous and return immediately. Do not fetch resources.
  */
 export type MountNexpathPanel = (
-  root:    HTMLElement,
-  payload: AdvisoryPayload,
-  onEvent: (event: PanelEvent) => void,
+  root: HTMLElement,
+  options: { onEvent: (e: PanelEvent) => void }
 ) => PanelController;

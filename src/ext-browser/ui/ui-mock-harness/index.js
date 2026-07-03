@@ -17,19 +17,29 @@ async function bootstrap() {
     const entry = document.createElement("pre");
     entry.textContent = JSON.stringify(event, null, 2);
     eventLog?.prepend(entry);
-    if (event.type === "option_selected") {
-      console.log("[nexpath harness] option_selected:", event.selectedText);
+    if (event.type === "select") {
+      console.log("[nexpath harness] select:", event.optionId, event.body);
     } else {
       console.log("[nexpath harness] event:", event.type);
     }
   }
-  const controller = mountNexpathPanel(root, payload, logEvent);
-  console.log("[nexpath harness] panel mounted. fixture:", fixtureName);
+  const controller = mountNexpathPanel(root, { onEvent: logEvent });
+  controller.show(payload);
+  console.log("[nexpath harness] panel mounted + shown. fixture:", fixtureName);
   console.log("[nexpath harness] payload:", payload);
-  window["nexpathUnmount"] = () => {
-    controller.unmount();
-    console.log("[nexpath harness] panel unmounted");
-  };
+  window["nexpathController"] = controller;
+  document.getElementById("nexpath-harness-busy-on")?.addEventListener("click", () => {
+    controller.setBusy(true);
+    console.log("[nexpath harness] setBusy(true)");
+  });
+  document.getElementById("nexpath-harness-busy-off")?.addEventListener("click", () => {
+    controller.setBusy(false);
+    console.log("[nexpath harness] setBusy(false)");
+  });
+  document.getElementById("nexpath-harness-hide")?.addEventListener("click", () => {
+    controller.hide();
+    console.log("[nexpath harness] hide()");
+  });
 }
 bootstrap().catch((err) => {
   console.error("[nexpath harness] bootstrap failed:", err);

@@ -1,22 +1,30 @@
 {
-  "sessionId": "mock-session-005",
-  "stage": "architecture",
-  "prevStage": "prd",
-  "flagType": "stage_transition",
+  "schemaVersion": 1,
+  "advisoryId": "adv-mock-hardcore-pro-profile-0005",
   "pinchLabel": "Design review.",
-  "promptCount": 22,
+  "stage": "architecture",
   "options": [
     {
-      "label": "Document the key architectural decisions and trade-offs",
-      "description": "For each major design decision in the current architecture, state: (a) what you chose, (b) what you rejected, (c) why. Trade-off documentation now prevents expensive reversals later."
+      "level": "L1",
+      "id": "adv-mock-hardcore-pro-profile-0005-L1",
+      "title": "Document the key architectural decisions and trade-offs",
+      "body": "For each major design decision in the current architecture, state what you chose, what you rejected, and why. Include the constraints that shaped the decision — latency, throughput, deployment environment, operational complexity ceiling. Trade-off documentation now prevents expensive reversals once the system is load-bearing."
     },
     {
-      "label": "Identify the constraints that shape the architecture",
-      "description": "List the non-negotiable constraints: latency requirements, throughput targets, deployment environment, team size, operational complexity ceiling. Architecture decisions should be traceable to these."
+      "level": "L2",
+      "id": "adv-mock-hardcore-pro-profile-0005-L2",
+      "title": "Document the trade-offs",
+      "body": "Document the key architecture decisions: what you chose, what you rejected, why, and against which constraints. Prevents costly reversals later."
     },
     {
-      "label": "Define the failure modes and how the system handles them",
-      "description": "For the critical paths in your current design, enumerate the failure modes — network partition, DB unavailability, downstream API timeouts. State explicitly how each is handled or why it's acceptable to not handle it."
+      "level": "L3",
+      "id": "adv-mock-hardcore-pro-profile-0005-L3",
+      "title": "Chosen vs rejected, and why",
+      "body": "Write down your architecture trade-offs: chosen vs rejected, and why."
     }
-  ]
+  ],
+  "meta": {
+    "agent": "bolt",
+    "frequency": "major_only"
+  }
 }

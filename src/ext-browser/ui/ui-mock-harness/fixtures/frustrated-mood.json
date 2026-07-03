@@ -1,22 +1,30 @@
 {
-  "sessionId": "mock-session-006",
-  "stage": "implementation",
-  "prevStage": "implementation",
-  "flagType": "absence:problem_correction",
+  "schemaVersion": 1,
+  "advisoryId": "adv-mock-frustrated-mood-0006",
   "pinchLabel": "Breathe.",
-  "promptCount": 35,
+  "stage": "implementation",
   "options": [
     {
-      "label": "Describe the problem in one sentence without code",
-      "description": "Sometimes stepping back and writing the problem in plain English — without any code — reveals the fix. What is the bug actually doing, in words? Often the sentence itself contains the answer."
+      "level": "L1",
+      "id": "adv-mock-frustrated-mood-0006-L1",
+      "title": "Describe the problem in one sentence, without code",
+      "body": "Step back for a second. Describe the problem in plain English, without any code — what is it actually doing wrong? Often just writing that sentence reveals the fix. If you're stuck, note the last point where things worked and what's changed since."
     },
     {
-      "label": "Write down what you know for certain and what you're guessing",
-      "description": "Split what you know into two lists: 'confirmed facts' and 'assumptions I haven't verified'. Debug the assumptions first — they're usually where the bug is hiding."
+      "level": "L2",
+      "id": "adv-mock-frustrated-mood-0006-L2",
+      "title": "Describe the bug in plain English",
+      "body": "Describe the bug in plain English, no code. Often the sentence itself reveals the fix. What was the last point it worked?"
     },
     {
-      "label": "Describe the last state where it worked correctly",
-      "description": "When was the last time this worked? What changed between then and now? A precise 'last known good' state is the fastest path to isolating where things went wrong."
+      "level": "L3",
+      "id": "adv-mock-frustrated-mood-0006-L3",
+      "title": "What's actually going wrong?",
+      "body": "What's actually going wrong, in plain words? Often that's the fix."
     }
-  ]
+  ],
+  "meta": {
+    "agent": "lovable",
+    "frequency": "once_per_session"
+  }
 }

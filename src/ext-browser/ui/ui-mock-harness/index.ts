@@ -54,23 +54,37 @@ async function bootstrap(): Promise<void> {
     entry.textContent = JSON.stringify(event, null, 2);
     eventLog?.prepend(entry);
 
-    if (event.type === 'option_selected') {
-      console.log('[nexpath harness] option_selected:', event.selectedText);
+    if (event.type === 'select') {
+      console.log('[nexpath harness] select:', event.optionId, event.body);
     } else {
       console.log('[nexpath harness] event:', event.type);
     }
   }
 
-  // ── Mount ────────────────────────────────────────────────────────────────────
-  const controller = mountNexpathPanel(root, payload, logEvent);
-  console.log('[nexpath harness] panel mounted. fixture:', fixtureName);
+  // ── Mount + show — mountNexpathPanel takes only { onEvent }; show(payload) is a
+  // separate call, since the real engine calls mount() once per content-script
+  // lifetime and show() again on every subsequent advisory. ──────────────────────
+  const controller = mountNexpathPanel(root, { onEvent: logEvent });
+  controller.show(payload);
+  console.log('[nexpath harness] panel mounted + shown. fixture:', fixtureName);
   console.log('[nexpath harness] payload:', payload);
 
-  // Expose unmount on window for manual testing in devtools
-  (window as unknown as Record<string, unknown>)['nexpathUnmount'] = () => {
-    controller.unmount();
-    console.log('[nexpath harness] panel unmounted');
-  };
+  // Expose controls on window for manual testing in devtools, and wire the
+  // "Simulate setBusy/hide" buttons the brief (§7) promises the harness has.
+  (window as unknown as Record<string, unknown>)['nexpathController'] = controller;
+
+  document.getElementById('nexpath-harness-busy-on')?.addEventListener('click', () => {
+    controller.setBusy(true);
+    console.log('[nexpath harness] setBusy(true)');
+  });
+  document.getElementById('nexpath-harness-busy-off')?.addEventListener('click', () => {
+    controller.setBusy(false);
+    console.log('[nexpath harness] setBusy(false)');
+  });
+  document.getElementById('nexpath-harness-hide')?.addEventListener('click', () => {
+    controller.hide();
+    console.log('[nexpath harness] hide()');
+  });
 }
 
 bootstrap().catch((err: unknown) => {

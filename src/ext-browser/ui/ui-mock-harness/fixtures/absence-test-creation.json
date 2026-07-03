@@ -1,22 +1,30 @@
 {
-  "sessionId": "mock-session-002",
-  "stage": "implementation",
-  "prevStage": "implementation",
-  "flagType": "absence:test_creation",
+  "schemaVersion": 1,
+  "advisoryId": "adv-mock-absence-test-creation-0002",
   "pinchLabel": "Quick check.",
-  "promptCount": 28,
+  "stage": "review_testing",
   "options": [
     {
-      "label": "Write a test for the last thing you built",
-      "description": "Pick the single most critical behaviour you implemented in the last 5 prompts and write one test for it — the happy path only. A test written now is worth five written at the end."
+      "level": "L1",
+      "id": "adv-mock-absence-test-creation-0002-L1",
+      "title": "Write a test for the last thing you built",
+      "body": "Pick the single most critical behaviour you implemented in the last few prompts and write one test for it — the happy path only. A test written now, while the logic is fresh, is worth five written at the end of the session once context has drifted."
     },
     {
-      "label": "Name the riskiest untested assumption",
-      "description": "What is the one thing in your implementation that, if wrong, would cause the most user-visible damage? State it explicitly — then decide if it needs a test before you continue."
+      "level": "L2",
+      "id": "adv-mock-absence-test-creation-0002-L2",
+      "title": "Write one test now",
+      "body": "Write one test for the riskiest thing you just built — happy path is enough. Do it now while it's fresh."
     },
     {
-      "label": "List the edge cases you haven't handled yet",
-      "description": "Write a bulleted list of inputs or states your current implementation would handle incorrectly. Prioritise — which ones are worth a test before you ship?"
+      "level": "L3",
+      "id": "adv-mock-absence-test-creation-0002-L3",
+      "title": "One test, right now",
+      "body": "Write one test for what you just built. Just the happy path."
     }
-  ]
+  ],
+  "meta": {
+    "agent": "bolt",
+    "frequency": "optimum"
+  }
 }

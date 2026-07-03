@@ -1,22 +1,30 @@
 {
-  "sessionId": "mock-session-004",
-  "stage": "idea",
-  "prevStage": "",
-  "flagType": "stage_transition",
+  "schemaVersion": 1,
+  "advisoryId": "adv-mock-beginner-profile-0004",
   "pinchLabel": "Hold on.",
-  "promptCount": 8,
+  "stage": "idea",
   "options": [
     {
-      "label": "Tell me who this app is for and what problem it solves",
-      "description": "Before we build anything, let's be clear on two things: who is going to use this, and what frustration or problem does it fix for them? Write 2-3 sentences answering both questions."
+      "level": "L1",
+      "id": "adv-mock-beginner-profile-0004-L1",
+      "title": "Who is this for, and what problem does it solve?",
+      "body": "Before building anything, get clear on two things: who's going to use this, and what problem or frustration does it fix for them? Write two or three sentences answering both — no technical words needed, just the plain idea."
     },
     {
-      "label": "Describe what your app does in one sentence",
-      "description": "If someone asked you what your app does at a party, what would you say? Keep it short — no technical words needed. Just the thing it does and who it helps."
+      "level": "L2",
+      "id": "adv-mock-beginner-profile-0004-L2",
+      "title": "Who's it for, and what problem does it fix?",
+      "body": "Who is this for, and what problem does it solve? Write a couple of sentences — keep it simple, no tech talk needed."
     },
     {
-      "label": "Pick the one feature to build first",
-      "description": "Out of everything you want this app to do, which one feature would make someone say 'yes, I need this'? Focus there first — everything else can wait."
+      "level": "L3",
+      "id": "adv-mock-beginner-profile-0004-L3",
+      "title": "Who's it for? What problem?",
+      "body": "Who's it for? What problem does it fix? Write it in plain words."
     }
-  ]
+  ],
+  "meta": {
+    "agent": "replit",
+    "frequency": "optimum"
+  }
 }

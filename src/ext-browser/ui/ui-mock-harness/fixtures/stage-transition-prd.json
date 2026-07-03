@@ -1,22 +1,30 @@
 {
-  "sessionId": "mock-session-001",
-  "stage": "prd",
-  "prevStage": "idea",
-  "flagType": "stage_transition",
+  "schemaVersion": 1,
+  "advisoryId": "adv-mock-stage-transition-prd-0001",
   "pinchLabel": "Before coding.",
-  "promptCount": 12,
+  "stage": "prd",
   "options": [
     {
-      "label": "Write a PRD for this project",
-      "description": "Define the problem, target user, core features with acceptance criteria, what is explicitly out of scope, and any technical constraints. Produce the spec artifact itself — the document, with the five named sections."
+      "level": "L1",
+      "id": "adv-mock-stage-transition-prd-0001-L1",
+      "title": "Write a short PRD before the next line of code",
+      "body": "Before writing any code, define the problem, target user, and core features with acceptance criteria. Note what's explicitly out of scope and any technical constraints. Produce the actual spec artifact — the document itself, with these sections named. A written PRD now prevents scope drift and rework later."
     },
     {
-      "label": "Define the problem and success criteria first",
-      "description": "Who is this for, what problem does it solve, and how will we know when it's done? Lock the problem statement and how to recognise done before expanding into architecture."
+      "level": "L2",
+      "id": "adv-mock-stage-transition-prd-0001-L2",
+      "title": "Write a short PRD first",
+      "body": "Write a short PRD: problem, target user, core features, and what's out of scope. Doesn't need to be long — just written down before more code gets built."
     },
     {
-      "label": "List the top 3 unknowns blocking a clear spec",
-      "description": "Name the three things you'd need to know or decide before a PRD could be written. Forces the key open questions into the open before architecture decisions get made ad-hoc."
+      "level": "L3",
+      "id": "adv-mock-stage-transition-prd-0001-L3",
+      "title": "Write the problem down first",
+      "body": "Write down the problem, who it's for, and what's out of scope. Now, before more code."
     }
-  ]
+  ],
+  "meta": {
+    "agent": "replit",
+    "frequency": "every_event"
+  }
 }
