@@ -35,6 +35,31 @@ function resolveAgent(): string {
   return 'unknown';
 }
 
+// browser.runtime.sendMessage() is supposed to transparently wake a terminated/idle
+// MV3 service worker, but this has a real, confirmed failure mode: the SW can be
+// asleep or mid-restart at the exact moment a message arrives (more likely the longer
+// a tab sits idle relative to capture — e.g. a long-running agent turn, or a page-level
+// flow like Replit's Publish pipeline running for minutes with no new prompt sent).
+// Previously any sendMessage failure was swallowed by an empty catch — completely
+// silent, no log, no retry — which is indistinguishable from "nothing was ever
+// captured" from the console. Confirmed live 2026-07-03: prompt_submit_received simply
+// never appeared for prompts submitted during/after a multi-minute Publish flow, with
+// zero error anywhere. Retry once after a short delay (covers the transient wake-up
+// race), and always log loudly on final failure so a dropped message is never silent
+// again, even if the retry doesn't recover it.
+const SEND_RETRY_DELAY_MS = 400;
+
+function sendToServiceWorker(msg: PromptSubmitMsg | ResponseStopMsg): void {
+  browser.runtime.sendMessage(msg).catch((firstErr: unknown) => {
+    console.warn('[nexpath] sendMessage failed, retrying once:', msg.type, String(firstErr));
+    setTimeout(() => {
+      browser.runtime.sendMessage(msg).catch((retryErr: unknown) => {
+        console.error('[nexpath] sendMessage failed on retry, message DROPPED:', msg.type, String(retryErr));
+      });
+    }, SEND_RETRY_DELAY_MS);
+  });
+}
+
 function setupListeners(): void {
   // ── window.postMessage → service worker ──────────────────────────────────────
 
@@ -50,7 +75,7 @@ function setupListeners(): void {
         agent: msg.agent || resolveAgent(),
         tabId: 0, // SW fills real tab ID from sender.tab.id
       };
-      browser.runtime.sendMessage(sw).catch(() => { /* SW may not be up yet */ });
+      sendToServiceWorker(sw);
       return;
     }
 
@@ -61,7 +86,7 @@ function setupListeners(): void {
         agent: msg.agent || resolveAgent(),
         tabId: 0,
       };
-      browser.runtime.sendMessage(sw).catch(() => { /* SW may not be up yet */ });
+      sendToServiceWorker(sw);
     }
   });
 

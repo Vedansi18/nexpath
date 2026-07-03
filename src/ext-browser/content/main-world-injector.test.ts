@@ -134,6 +134,68 @@ describe('main-world-injector.ts', () => {
     });
   });
 
+  describe('sendToServiceWorker retry on failure (confirmed real bug 2026-07-03)', () => {
+    // Previously any sendMessage failure (e.g. the SW asleep/mid-restart) was swallowed
+    // by an empty catch — completely silent, no log, no retry. Confirmed live: prompt
+    // capture vanished with zero trace during a long-running page flow. Now retries once
+    // after a short delay and always logs on final failure.
+    it('retries once after the SW rejects the first send, and succeeds silently if the retry works', async () => {
+      vi.useFakeTimers();
+      try {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        sendMessageMock.mockClear();
+        sendMessageMock.mockRejectedValueOnce(new Error('SW not up yet')).mockResolvedValueOnce(undefined);
+
+        setLocation('https://replit.com', 'replit.com');
+        dispatchWindowMessage({ type: 'nexpath:prompt-captured', promptText: 'hi', agent: 'replit' });
+        await vi.advanceTimersByTimeAsync(0); // let the first rejection's .catch() run
+
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.stringContaining('retrying once'),
+          'nexpath:prompt-submit',
+          expect.any(String),
+        );
+
+        await vi.advanceTimersByTimeAsync(400); // fire the retry's setTimeout
+        expect(sendMessageMock).toHaveBeenCalledTimes(2);
+        expect(errorSpy).not.toHaveBeenCalled();
+
+        warnSpy.mockRestore();
+        errorSpy.mockRestore();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('logs the message as DROPPED if the retry also fails', async () => {
+      vi.useFakeTimers();
+      try {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        sendMessageMock.mockClear();
+        sendMessageMock.mockRejectedValue(new Error('still not up'));
+
+        setLocation('https://replit.com', 'replit.com');
+        dispatchWindowMessage({ type: 'nexpath:response-stopped', agent: 'replit' });
+        await vi.advanceTimersByTimeAsync(0);
+        await vi.advanceTimersByTimeAsync(400);
+        await vi.advanceTimersByTimeAsync(0); // let the retry's own rejection settle
+
+        expect(errorSpy).toHaveBeenCalledWith(
+          expect.stringContaining('DROPPED'),
+          'nexpath:response-stop',
+          expect.any(String),
+        );
+
+        warnSpy.mockRestore();
+        errorSpy.mockRestore();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
   describe('chrome.runtime.onMessage → nexpath:sw-message re-dispatch', () => {
     it('registers exactly one onMessage listener', () => {
       expect(onMessageAddListenerMock).toHaveBeenCalledOnce();
