@@ -105,10 +105,26 @@ export function observeSubmitButton(root: Node): MutationObserver {
   let wasGenerating = document.querySelector(STOP_BUTTON_SELECTOR) !== null;
   const observer = new MutationObserver(() => {
     const isGenerating = document.querySelector(STOP_BUTTON_SELECTOR) !== null;
-    if (wasGenerating && !isGenerating) emitResponseStopped();
+    if (wasGenerating && !isGenerating) {
+      // Visible in the page console regardless of whether the SW message that follows
+      // succeeds — closes an observability gap confirmed live 2026-07-03: response-stop
+      // silently stopped firing on longer, multi-action responses with no trace of
+      // whether the content script ever detected the transition at all, or detected it
+      // but the message to the SW got lost. This line answers that question directly
+      // the next time it happens, instead of requiring another guess.
+      console.log('[nexpath] response-stop detected (stop button no longer present)');
+      emitResponseStopped();
+    }
     wasGenerating = isGenerating;
   });
-  observer.observe(root, { childList: true, subtree: true });
+  // Watch both childList (element swapped — confirmed live 2026-07-02 as the primary
+  // mechanism for short responses) AND attributes. Longer, multi-action responses may
+  // toggle the stop button's visibility via a class/style/hidden change on a persistent
+  // element instead of swapping it entirely — childList-only observation would silently
+  // miss that transition. Broader observation is strictly safer; MutationObserver
+  // callbacks aren't subject to the background-tab timer throttling that affects
+  // setInterval/setTimeout, so this doesn't trade off reliability for cost.
+  observer.observe(root, { childList: true, subtree: true, attributes: true });
   return observer;
 }
 

@@ -243,6 +243,27 @@ describe('content/agents/replit.ts', () => {
         window.location.origin,
       );
     });
+
+    it('also detects an attribute-based toggle, not just element add/remove (hardened 2026-07-03)', async () => {
+      // Confirmed live 2026-07-02 that Replit swaps the whole element for short
+      // responses, but response-stop silently stopped firing on longer, multi-action
+      // responses in live testing 2026-07-03 — plausibly because some response types
+      // toggle the stop button's matching attribute on a persistent element instead of
+      // swapping it. The observer now watches attribute mutations too, so this must
+      // fire even when the element is never added/removed, only its matching attribute
+      // is toggled off.
+      const stopBtn = makeStopButton();
+      document.body.appendChild(stopBtn);
+      observers.push(observeSubmitButton(document.body));
+
+      stopBtn.removeAttribute('data-cy'); // no longer matches STOP_BUTTON_SELECTOR — element stays in the DOM
+      await flush();
+
+      expect(postMessageSpy).toHaveBeenCalledWith(
+        { type: 'nexpath:response-stopped', agent: 'replit' },
+        window.location.origin,
+      );
+    });
   });
 
   describe('bootstrap', () => {
