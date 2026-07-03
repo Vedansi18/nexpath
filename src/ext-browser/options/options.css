@@ -113,6 +113,52 @@ button:active { background: #9a87ba; }
   color: #89b4fa;
 }
 
+.field-hint {
+  font-size: 12px;
+  color: #6c7086;
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: 400;
+  line-height: 1.5;
+}
+
+.radio-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.radio-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid #313244;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.radio-option:hover { border-color: #45475a; }
+
+.radio-option:has(input:checked) {
+  border-color: #cba6f7;
+  background: rgba(203, 166, 247, 0.08);
+}
+
+.radio-option input[type="radio"] {
+  accent-color: #cba6f7;
+  flex-shrink: 0;
+}
+
+.radio-option .radio-label {
+  font-size: 13px;
+  color: #cdd6f4;
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: 500;
+}
+
 .self-check {
   display: flex;
   flex-direction: column;

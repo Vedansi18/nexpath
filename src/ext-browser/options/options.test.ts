@@ -16,6 +16,8 @@ function setupDom(): void {
     <button id="test-key"></button>
     <button id="save-key"></button>
     <p id="key-status"></p>
+    <div id="frequency-group"></div>
+    <div id="role-group"></div>
     <div id="self-check"></div>
   `;
 }
@@ -39,7 +41,13 @@ function els() {
     saveBtn: document.getElementById('save-key') as HTMLButtonElement,
     status: document.getElementById('key-status') as HTMLParagraphElement,
     selfCheck: document.getElementById('self-check') as HTMLDivElement,
+    freqGroup: document.getElementById('frequency-group') as HTMLDivElement,
+    roleGroup: document.getElementById('role-group') as HTMLDivElement,
   };
+}
+
+function radioFor(group: HTMLDivElement, value: string): HTMLInputElement {
+  return group.querySelector(`input[value="${value}"]`) as HTMLInputElement;
 }
 
 describe('options.ts', () => {
@@ -81,6 +89,76 @@ describe('options.ts', () => {
       await loadOptionsModule();
 
       expect(els().selfCheck.innerHTML).toContain('Saved');
+    });
+  });
+
+  describe('advisory frequency + role selectors — same value sets/labels/defaults as the CLI installer', () => {
+    it('renders the 3 High/Medium/Low frequency options and 4 role options, matching the CLI picker exactly', async () => {
+      mockGet.mockResolvedValue({});
+      await loadOptionsModule();
+
+      const { freqGroup, roleGroup } = els();
+      expect(freqGroup.querySelectorAll('input[type="radio"]').length).toBe(3);
+      expect(radioFor(freqGroup, 'optimum')).not.toBeNull();
+      expect(radioFor(freqGroup, 'every_event')).not.toBeNull();
+      expect(radioFor(freqGroup, 'major_only')).not.toBeNull();
+
+      expect(roleGroup.querySelectorAll('input[type="radio"]').length).toBe(4);
+      expect(radioFor(roleGroup, 'founder')).not.toBeNull();
+      expect(radioFor(roleGroup, 'vibe_coder')).not.toBeNull();
+      expect(radioFor(roleGroup, 'indie_hacker')).not.toBeNull();
+      expect(radioFor(roleGroup, 'pm')).not.toBeNull();
+    });
+
+    it('defaults to every_event / founder when nothing is stored — matches the CLI installer\'s DEFAULT_FREQUENCY/DEFAULT_ROLE', async () => {
+      mockGet.mockResolvedValue({});
+      await loadOptionsModule();
+
+      const { freqGroup, roleGroup } = els();
+      expect(radioFor(freqGroup, 'every_event').checked).toBe(true);
+      expect(radioFor(freqGroup, 'optimum').checked).toBe(false);
+      expect(radioFor(roleGroup, 'founder').checked).toBe(true);
+    });
+
+    it('pre-selects the stored frequency and role values', async () => {
+      mockGet.mockResolvedValue({ advisory_frequency: 'optimum', role: 'indie_hacker' });
+      await loadOptionsModule();
+
+      const { freqGroup, roleGroup } = els();
+      expect(radioFor(freqGroup, 'optimum').checked).toBe(true);
+      expect(radioFor(freqGroup, 'every_event').checked).toBe(false);
+      expect(radioFor(roleGroup, 'indie_hacker').checked).toBe(true);
+    });
+
+    it('persists the chosen frequency to storage on change', async () => {
+      mockGet.mockResolvedValue({});
+      await loadOptionsModule();
+
+      const { freqGroup } = els();
+      radioFor(freqGroup, 'major_only').click();
+      await flush();
+
+      expect(mockSet).toHaveBeenCalledWith({ advisory_frequency: 'major_only' });
+    });
+
+    it('persists the chosen role to storage on change', async () => {
+      mockGet.mockResolvedValue({});
+      await loadOptionsModule();
+
+      const { roleGroup } = els();
+      radioFor(roleGroup, 'pm').click();
+      await flush();
+
+      expect(mockSet).toHaveBeenCalledWith({ role: 'pm' });
+    });
+
+    it('reflects the current frequency and role in the self-check panel', async () => {
+      mockGet.mockResolvedValue({ advisory_frequency: 'optimum', role: 'vibe_coder' });
+      await loadOptionsModule();
+
+      const html = els().selfCheck.innerHTML;
+      expect(html).toContain('High');
+      expect(html).toContain('vibe coder');
     });
   });
 

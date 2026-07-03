@@ -48,6 +48,8 @@ const showAdvisoryMock = vi.fn();
 const mgrProcessPrompt = vi.fn();
 const mgrMarkAdvisoryFired = vi.fn();
 const mgrMarkDecisionSessionFired = vi.fn();
+const mgrHasFiredDecisionSession = vi.fn();
+const mgrSetProfile = vi.fn();
 let mgrCurrent: Partial<SessionState>;
 
 const getLatestStateMock = vi.fn();
@@ -104,11 +106,15 @@ describe('service-worker.ts', () => {
       profile: null,
       detectedLanguage: undefined,
       promptHistory: [],
+      firedDecisionSessions: [],
+      lastAdvisoryPromptIndex: -1,
+      advisoryCount: 0,
     };
     idbLoadSessionState.mockResolvedValue(null);
     idbGetProjectDetectedLanguage.mockResolvedValue(undefined);
     getLatestStateMock.mockReturnValue({ currentStage: 'implementation', detectedLanguage: undefined });
     keyStoreGetKey.mockResolvedValue(null);
+    mgrHasFiredDecisionSession.mockReturnValue(false);
 
     vi.mocked(classifyPrompt).mockResolvedValue(baseClassification());
     vi.mocked(SessionStateManager.load).mockImplementation(function () {
@@ -117,6 +123,8 @@ describe('service-worker.ts', () => {
         processPrompt: mgrProcessPrompt,
         markAdvisoryFired: mgrMarkAdvisoryFired,
         markDecisionSessionFired: mgrMarkDecisionSessionFired,
+        hasFiredDecisionSession: mgrHasFiredDecisionSession,
+        setProfile: mgrSetProfile,
       } as unknown as ReturnType<typeof SessionStateManager.load>;
     });
     vi.mocked(shouldFireStage2).mockReturnValue(null as unknown as ReturnType<typeof shouldFireStage2>);
@@ -260,7 +268,12 @@ describe('service-worker.ts', () => {
 
     it('runs the full pipeline through to showAdvisory when stage2 fires and the key is present', async () => {
       vi.mocked(shouldFireStage2).mockReturnValue({ kind: 'stage_transition' } as unknown as ReturnType<typeof shouldFireStage2>);
-      keyStoreGetKey.mockResolvedValue('sk-real-key');
+      // Promise.all calls getKey in declared order: openai_api_key, then
+      // advisory_frequency, then role — mockResolvedValueOnce answers only the
+      // first, leaving the beforeEach's null default for the other two (a blanket
+      // mockResolvedValue here would wrongly feed 'sk-real-key' into
+      // resolveFrequencyConfig too, since it now answers all 3 calls in this test).
+      keyStoreGetKey.mockResolvedValueOnce('sk-real-key');
       vi.mocked(runStage2).mockResolvedValue({ fire_decision_session: true } as unknown as Awaited<ReturnType<typeof runStage2>>);
       vi.mocked(resolveDecisionContent).mockReturnValue({
         L1: [{ option: 'Write tests', descBase: 'body' }],
@@ -290,7 +303,7 @@ describe('service-worker.ts', () => {
           { id: 'l2-0', level: 'L2', title: 'Write one test', body: 'body' },
           { id: 'l3-0', level: 'L3', title: 'TODO comment', body: 'body' },
         ],
-        meta: { agent: 'replit', frequency: 'optimum' },
+        meta: { agent: 'replit', frequency: 'every_event' },
       });
       expect(mgrMarkAdvisoryFired).toHaveBeenCalledOnce();
       expect(mgrMarkDecisionSessionFired).toHaveBeenCalledOnce();
@@ -299,7 +312,9 @@ describe('service-worker.ts', () => {
 
     it('does not attempt to show an advisory when there is no tab id', async () => {
       vi.mocked(shouldFireStage2).mockReturnValue({ kind: 'stage_transition' } as unknown as ReturnType<typeof shouldFireStage2>);
-      keyStoreGetKey.mockResolvedValue('sk-real-key');
+      // See the previous test's comment — Once, not blanket, so frequency/role
+      // calls still get the beforeEach's null default.
+      keyStoreGetKey.mockResolvedValueOnce('sk-real-key');
       vi.mocked(runStage2).mockResolvedValue({ fire_decision_session: true } as unknown as Awaited<ReturnType<typeof runStage2>>);
       vi.mocked(resolveDecisionContent).mockReturnValue({
         L1: [], L2: [], L3: [], pinchFallback: 'fallback',
@@ -316,6 +331,192 @@ describe('service-worker.ts', () => {
 
       await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
       expect(showAdvisoryMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('advisory frequency + role gating (mirrors cli/commands/auto.ts)', () => {
+    // Promise.all calls getKey in declared order: openai_api_key, advisory_frequency,
+    // role — queue exactly 3 Once values so each call gets the intended answer.
+    function mockKeyStore(apiKey: string | null, freq: string | null, role: string | null): void {
+      keyStoreGetKey.mockResolvedValueOnce(apiKey).mockResolvedValueOnce(freq).mockResolvedValueOnce(role);
+    }
+
+    it('freq "off" fast-exits before shouldFireStage2 is ever called', async () => {
+      mockKeyStore('sk-real-key', 'off', null);
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+
+      const sendResponse = vi.fn();
+      messageListener(
+        { type: 'nexpath:prompt-submit', promptText: 'hi', projectRoot: 'https://replit.com', agent: 'replit', tabId: 7 },
+        {},
+        sendResponse,
+      );
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+      expect(shouldFireStage2).not.toHaveBeenCalled();
+      expect(runStage2).not.toHaveBeenCalled();
+    });
+
+    it('blocks when promptCount is below the configured frequency level\'s minPromptsBeforeAdvisory', async () => {
+      // major_only requires 5 prompts before any advisory; mgrCurrent.promptCount is 3.
+      mockKeyStore('sk-real-key', 'major_only', null);
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+
+      const sendResponse = vi.fn();
+      messageListener(
+        { type: 'nexpath:prompt-submit', promptText: 'hi', projectRoot: 'https://replit.com', agent: 'replit', tabId: 7 },
+        {},
+        sendResponse,
+      );
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+      expect(shouldFireStage2).not.toHaveBeenCalled();
+    });
+
+    it('dedups — does not re-run stage2 for a stage_transition event already recorded as fired this session', async () => {
+      vi.mocked(shouldFireStage2).mockReturnValue({ kind: 'stage_transition' } as unknown as ReturnType<typeof shouldFireStage2>);
+      mgrHasFiredDecisionSession.mockReturnValue(true);
+      mockKeyStore('sk-real-key', 'every_event', null);
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+
+      const sendResponse = vi.fn();
+      messageListener(
+        { type: 'nexpath:prompt-submit', promptText: 'hi', projectRoot: 'https://replit.com', agent: 'replit', tabId: 7 },
+        {},
+        sendResponse,
+      );
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+      expect(runStage2).not.toHaveBeenCalled();
+    });
+
+    it('major_only blocks an absence-triggered advisory but allows a stage_transition one through', async () => {
+      vi.mocked(shouldFireStage2).mockReturnValue({
+        kind: 'absence',
+        qualifyingFlags: [{ signalKey: 'x' }],
+      } as unknown as ReturnType<typeof shouldFireStage2>);
+      mockKeyStore('sk-real-key', 'major_only', null);
+      mgrCurrent.promptCount = 5; // clears major_only's minPromptsBeforeAdvisory gate
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+
+      const sendResponse = vi.fn();
+      messageListener(
+        { type: 'nexpath:prompt-submit', promptText: 'hi', projectRoot: 'https://replit.com', agent: 'replit', tabId: 7 },
+        {},
+        sendResponse,
+      );
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+      expect(runStage2).not.toHaveBeenCalled();
+    });
+
+    it('once_per_session blocks a second advisory in the same session', async () => {
+      vi.mocked(shouldFireStage2).mockReturnValue({ kind: 'stage_transition' } as unknown as ReturnType<typeof shouldFireStage2>);
+      mockKeyStore('sk-real-key', 'once_per_session', null);
+      mgrCurrent.promptCount = 10; // clears once_per_session's minPromptsBeforeAdvisory gate
+      mgrCurrent.firedDecisionSessions = ['stage_transition:idea→implementation'];
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+
+      const sendResponse = vi.fn();
+      messageListener(
+        { type: 'nexpath:prompt-submit', promptText: 'hi', projectRoot: 'https://replit.com', agent: 'replit', tabId: 7 },
+        {},
+        sendResponse,
+      );
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+      expect(runStage2).not.toHaveBeenCalled();
+    });
+
+    it('post-advisory cooldown blocks a second advisory fired too soon after the last one', async () => {
+      vi.mocked(shouldFireStage2).mockReturnValue({ kind: 'stage_transition' } as unknown as ReturnType<typeof shouldFireStage2>);
+      mockKeyStore('sk-real-key', 'every_event', null); // postAdvisoryCooldown = 5
+      mgrCurrent.promptCount = 4;
+      mgrCurrent.lastAdvisoryPromptIndex = 2; // only 2 prompts since the last advisory — inside the 5-prompt cooldown
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+
+      const sendResponse = vi.fn();
+      messageListener(
+        { type: 'nexpath:prompt-submit', promptText: 'hi', projectRoot: 'https://replit.com', agent: 'replit', tabId: 7 },
+        {},
+        sendResponse,
+      );
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+      expect(runStage2).not.toHaveBeenCalled();
+    });
+
+    it('session advisory cap blocks further advisories once the default cap is reached', async () => {
+      vi.mocked(shouldFireStage2).mockReturnValue({ kind: 'stage_transition' } as unknown as ReturnType<typeof shouldFireStage2>);
+      mockKeyStore('sk-real-key', 'every_event', null); // sessionAdvisoryCapDefault = 5
+      mgrCurrent.promptCount = 20;
+      mgrCurrent.advisoryCount = 5;
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+
+      const sendResponse = vi.fn();
+      messageListener(
+        { type: 'nexpath:prompt-submit', promptText: 'hi', projectRoot: 'https://replit.com', agent: 'replit', tabId: 7 },
+        {},
+        sendResponse,
+      );
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+      expect(runStage2).not.toHaveBeenCalled();
+    });
+
+    it('passes frequency-derived minConfidence/contextWindow overrides into runStage2', async () => {
+      vi.mocked(shouldFireStage2).mockReturnValue({ kind: 'stage_transition' } as unknown as ReturnType<typeof shouldFireStage2>);
+      vi.mocked(runStage2).mockResolvedValue({ fire_decision_session: false } as unknown as Awaited<ReturnType<typeof runStage2>>);
+      mockKeyStore('sk-real-key', 'major_only', null); // stage2MinConfidence=0.49, stage2ContextWindow=10
+      mgrCurrent.promptCount = 5;
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+
+      const sendResponse = vi.fn();
+      messageListener(
+        { type: 'nexpath:prompt-submit', promptText: 'hi', projectRoot: 'https://replit.com', agent: 'replit', tabId: 7 },
+        {},
+        sendResponse,
+      );
+      await vi.waitFor(() => expect(runStage2).toHaveBeenCalledOnce());
+      expect(runStage2).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+        { minConfidence: 0.49, contextWindow: 10 },
+      );
+    });
+
+    it('injects the configured role into an existing profile', async () => {
+      mgrCurrent.profile = {
+        nature: 'hardcore_pro',
+        precisionScore: 8,
+        playfulnessScore: 2,
+        precisionOrdinal: 'high',
+        playfulnessOrdinal: 'low',
+        mood: 'focused',
+        depth: 'high',
+        depthScore: 8,
+        computedAt: 1,
+        role: null,
+      };
+      mockKeyStore('sk-real-key', 'every_event', 'pm');
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+
+      const sendResponse = vi.fn();
+      messageListener(
+        { type: 'nexpath:prompt-submit', promptText: 'hi', projectRoot: 'https://replit.com', agent: 'replit', tabId: 7 },
+        {},
+        sendResponse,
+      );
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+      expect(mgrSetProfile).toHaveBeenCalledWith(expect.objectContaining({ role: 'pm' }));
+    });
+
+    it('does not inject role when no profile exists yet (LLM profile classification not wired in the browser yet)', async () => {
+      mockKeyStore('sk-real-key', 'every_event', 'pm');
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+
+      const sendResponse = vi.fn();
+      messageListener(
+        { type: 'nexpath:prompt-submit', promptText: 'hi', projectRoot: 'https://replit.com', agent: 'replit', tabId: 7 },
+        {},
+        sendResponse,
+      );
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+      expect(mgrSetProfile).not.toHaveBeenCalled();
     });
   });
 

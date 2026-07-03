@@ -16,8 +16,9 @@ import {
   isPromptSubmitMsg,
   isResponseStopMsg,
 } from '../content/ipc.js';
+import { resolveFrequencyConfig, type AdvisoryFrequencyLevel } from '../../config/GlobalConfig.js';
 import type { AdvisoryPayload } from '../../core/ports/ui.port.js';
-import type { Stage } from '../../core/classifier/types.js';
+import type { Stage, UserRole } from '../../core/classifier/types.js';
 
 const idb = new IdbStorageAdapter();
 const keyStore = new ChromeStorageKeyAdapter();
@@ -103,12 +104,22 @@ async function handlePromptSubmit(
 ): Promise<void> {
   const now = clock.now();
 
-  // ── Step 1: Load persisted session state ────────────────────────────────────
-  const [loadedState, lang, apiKey] = await Promise.all([
+  // ── Step 1: Load persisted session state + config ───────────────────────────
+  const [loadedState, lang, apiKey, freqRaw, roleRaw] = await Promise.all([
     idb.loadSessionState(projectRoot),
     idb.getProjectDetectedLanguage(projectRoot),
     keyStore.getKey('openai_api_key'),
+    keyStore.getKey('advisory_frequency'),
+    keyStore.getKey('role'),
   ]);
+
+  // ── Step 1.5: Resolve frequency + role config — mirrors cli/commands/auto.ts's
+  // step 1.5 exactly (same fallback default, same resolveFrequencyConfig call) so
+  // the browser's advisory-firing gating is the same logic as the CLI's, just fed
+  // from browser.storage.local instead of the sql.js config table.
+  const freq = (freqRaw ?? 'every_event') as AdvisoryFrequencyLevel;
+  const freqConfig = resolveFrequencyConfig(freq);
+  const configuredRole = roleRaw as UserRole | null;
 
   // ── Step 2: Build sync in-memory port ───────────────────────────────────────
   const memHandle = makeMemoryStoragePort(loadedState, lang);
@@ -135,7 +146,19 @@ async function handlePromptSubmit(
     ? mgr.current.currentStage
     : undefined;
 
-  mgr.processPrompt(memHandle.port, promptText, classification, now);
+  // freqConfig.minStageChangeConfidence mirrors auto.ts's step 3 exactly — same
+  // gate the CLI uses to decide whether a cross-stage classification is confident
+  // enough to actually move currentStage.
+  mgr.processPrompt(memHandle.port, promptText, classification, now, freqConfig.minStageChangeConfidence);
+
+  // Inject the configured role into an existing profile — mirrors auto.ts's step
+  // 2.7. A no-op today: LLM profile classification isn't wired into the browser
+  // skeleton yet (mgr.current.profile stays null), so this only takes effect once
+  // that lands, but the wiring is correct now rather than needing revisiting then.
+  const currentProfileForRole = mgr.current.profile;
+  if (currentProfileForRole !== null) {
+    mgr.setProfile({ ...currentProfileForRole, role: configuredRole });
+  }
 
   // ── Step 5: PERSIST before any further awaits (SW ephemerality rule) ────────
   const stateAfterClassify = memHandle.getLatestState();
@@ -153,14 +176,78 @@ async function handlePromptSubmit(
     promptCount: mgr.current.promptCount,
   });
 
+  // ── Step 5.5: Frequency off fast-exit + minimum-prompt guard — mirrors auto.ts's
+  // step 4.5 exactly (same order, same gate values from freqConfig). ──────────────
+  if (freq === 'off') {
+    log.debug('advisory_freq_blocked', { freq });
+    return;
+  }
+  if (mgr.current.promptCount < freqConfig.minPromptsBeforeAdvisory) {
+    log.debug('advisory_min_prompts_blocked', {
+      promptCount: mgr.current.promptCount,
+      minRequired: freqConfig.minPromptsBeforeAdvisory,
+    });
+    return;
+  }
+
   // ── Step 6: Decide whether Stage 2 should run ───────────────────────────────
   const trigger = shouldFireStage2(
     mgr.current as import('../../core/classifier/types.js').SessionState,
     prevStage,
     [], // newAbsenceFlags — AbsenceDetector not wired in B2 skeleton
+    freqConfig.stage2S1LowConfidence,
   );
 
   if (!trigger) return;
+
+  // ── Step 6.3: Dedup — already fired this exact stage_transition/absence event
+  // this session? — mirrors auto.ts's step 6 (buildFiredKey + hasFiredDecisionSession).
+  // Uses prevStageBeforeUpdate (captured before processPrompt ran) as the true prior
+  // stage, matching the key format markDecisionSessionFired writes below at Step 10.
+  const preCheckFiredKey = trigger.kind === 'stage_transition'
+    ? `stage_transition:${prevStageBeforeUpdate}→${mgr.current.currentStage}`
+    : `absence:${trigger.qualifyingFlags?.[0]?.signalKey ?? 'unknown'}@${mgr.current.currentStage}`;
+  if (mgr.hasFiredDecisionSession(preCheckFiredKey)) {
+    log.debug('advisory_dedup_blocked', { firedKey: preCheckFiredKey });
+    return;
+  }
+
+  // ── Step 6.5: Advisory frequency gate — mirrors auto.ts's step 6.5 exactly. ───
+  if (freq === 'major_only' && trigger.kind !== 'stage_transition') {
+    log.debug('advisory_freq_blocked', { freq, flagType: trigger.kind });
+    return;
+  }
+  if (freq === 'once_per_session' && mgr.current.firedDecisionSessions.length > 0) {
+    log.debug('advisory_freq_blocked', { freq, flagType: trigger.kind });
+    return;
+  }
+
+  // ── Step 6.6: Post-advisory cooldown — mirrors auto.ts's step 6.6 exactly. ────
+  const lastAdvisory = mgr.current.lastAdvisoryPromptIndex ?? -1;
+  if (lastAdvisory >= 0 && mgr.current.promptCount - lastAdvisory < freqConfig.postAdvisoryCooldown) {
+    log.debug('advisory_cooldown_blocked', {
+      promptCount: mgr.current.promptCount,
+      lastAdvisoryAt: lastAdvisory,
+      cooldownRemaining: freqConfig.postAdvisoryCooldown - (mgr.current.promptCount - lastAdvisory),
+    });
+    return;
+  }
+
+  // ── Step 6.7: Session advisory cap — profile-aware ceiling — mirrors auto.ts's
+  // step 6.7 exactly. isVibeProfile stays false today (profile classification isn't
+  // wired in the browser yet), so this always uses sessionAdvisoryCapDefault for now.
+  const isVibeProfile =
+    mgr.current.profile?.nature === 'beginner' ||
+    mgr.current.profile?.nature === 'cool_geek';
+  const advisoryCap = isVibeProfile
+    ? freqConfig.sessionAdvisoryCapVibe
+    : freqConfig.sessionAdvisoryCapDefault;
+  const advisoryCount = mgr.current.advisoryCount ?? 0;
+  if (advisoryCount >= advisoryCap) {
+    log.debug('advisory_cap_blocked', { advisoryCount, advisoryCap });
+    return;
+  }
+
   if (!apiKey) {
     log.debug('stage2_skipped_no_key', {});
     return;
@@ -191,6 +278,9 @@ async function handlePromptSubmit(
       },
       llm,
       log,
+      // Frequency-derived overrides — mirrors auto.ts's step 7 exactly, instead of
+      // always using runStage2's hardcoded defaults regardless of the user's setting.
+      { minConfidence: freqConfig.stage2MinConfidence, contextWindow: freqConfig.stage2ContextWindow },
     );
   } catch (err) {
     log.warn('stage2_error', { error: String(err) });
@@ -237,7 +327,7 @@ async function handlePromptSubmit(
     ],
     meta: {
       agent,
-      frequency: 'optimum',
+      frequency: freq,
     },
   };
 
