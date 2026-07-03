@@ -33,6 +33,32 @@ function emitResponseStopped(): void {
   window.postMessage(msg, window.location.origin);
 }
 
+// Shared across every response-stop detection mechanism below (stop-button presence,
+// and the "Worked for" text marker) — several independent detectors run in parallel by
+// design (see each one's own comment for why relying on a single mechanism has
+// repeatedly proven insufficient), so a brief cooldown prevents a duplicate
+// response_stop_received signal when more than one of them notices the same
+// completion within a moment of each other. This is expected, harmless overlap, not a
+// bug to eliminate — better to risk an occasional harmless duplicate than to miss the
+// signal entirely again.
+const RESPONSE_STOP_DEDUP_WINDOW_MS = 3000;
+let lastResponseStoppedEmittedAt = 0;
+
+function emitResponseStoppedOnce(): void {
+  const now = Date.now();
+  if (now - lastResponseStoppedEmittedAt < RESPONSE_STOP_DEDUP_WINDOW_MS) return;
+  lastResponseStoppedEmittedAt = now;
+  emitResponseStopped();
+}
+
+// Test-only reset — this dedup is time-based (real Date.now(), not element identity or
+// text content like the other module-scope dedups in this file), so different tests in
+// the same run can genuinely fall within RESPONSE_STOP_DEDUP_WINDOW_MS of each other in
+// real wall-clock time and spuriously suppress one another without this.
+export function __resetResponseStopDedupForTests(): void {
+  lastResponseStoppedEmittedAt = 0;
+}
+
 function extractPromptText(el: Element): string {
   const rendered = el.querySelector('.rendered-markdown');
   return (rendered?.textContent ?? '').trim();
@@ -115,7 +141,7 @@ export function observeSubmitButton(root: Node): MutationObserver {
       // whether the content script ever detected the transition at all, or detected it
       // but the message to the SW got lost.
       console.log('[nexpath] response-stop detected (stop button no longer present)');
-      emitResponseStopped();
+      emitResponseStoppedOnce();
     }
     wasGenerating = isGenerating;
   };
@@ -148,6 +174,50 @@ export function observeSubmitButton(root: Node): MutationObserver {
     originalDisconnect();
   };
 
+  return observer;
+}
+
+// ── Response-stop, independent second signal: the "Worked for X seconds/minutes" label ──
+//
+// Three separate stop-button-based detection strategies (element-swap, attribute-
+// toggle, presence-polling) all failed to reliably fire live, 2026-07-03, specifically
+// on longer, multi-action responses. Rather than a fourth guess at the same button
+// mechanism, this uses a completely independent signal: Replit's own chat transcript
+// reliably shows a "Worked for X seconds"/"Worked for X minutes" label the moment a
+// turn completes — confirmed by direct visual evidence across EVERY live test
+// screenshot this session, both the one confirmed-working case and every case where
+// stop-button detection failed. The exact selector/data-cy for this element isn't
+// confirmed (no live DOM access to inspect it directly) — matched by text-content
+// pattern instead, which is arguably more resilient anyway, since Replit's own CSS
+// class names elsewhere carry deploy-specific content hashes that break on their next
+// release. Runs in parallel with observeSubmitButton, not as a replacement for it —
+// whichever detector notices completion first wins (emitResponseStoppedOnce dedups).
+
+const WORKED_FOR_PATTERN = /\bWorked for\s+\d/;
+
+function isWorkedForLabel(el: Element): boolean {
+  // Length cap bounds false positives from a large container that happens to contain
+  // this phrase somewhere deep inside unrelated content — a short, leaf-like label
+  // matching this exact pattern is very unlikely to occur elsewhere on the page.
+  const text = el.textContent?.trim() ?? '';
+  return text.length > 0 && text.length < 60 && WORKED_FOR_PATTERN.test(text);
+}
+
+export function observeWorkedForLabel(root: Element): MutationObserver {
+  const observer = new MutationObserver((mutations) => {
+    for (const mutation of mutations) {
+      for (const node of Array.from(mutation.addedNodes)) {
+        if (!(node instanceof Element)) continue;
+        const matches = isWorkedForLabel(node)
+          ? [node]
+          : Array.from(node.querySelectorAll('*')).filter(isWorkedForLabel);
+        if (matches.length === 0) continue;
+        console.log('[nexpath] response-stop detected ("Worked for" label appeared)');
+        emitResponseStoppedOnce();
+      }
+    }
+  });
+  observer.observe(root, { childList: true, subtree: true });
   return observer;
 }
 
@@ -188,6 +258,7 @@ export function bootstrap(): void {
   console.log(`[nexpath] capture: ${CAPTURE_TIER}`);
   observeUserMessages(document.body);
   observeSubmitButton(document.body);
+  observeWorkedForLabel(document.body);
 }
 
 if (document.readyState === 'loading') {

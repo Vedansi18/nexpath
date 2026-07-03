@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { observeUserMessages, observeSubmitButton, bootstrap } from './replit.js';
+import { observeUserMessages, observeSubmitButton, observeWorkedForLabel, bootstrap, __resetResponseStopDedupForTests } from './replit.js';
 
 function flush(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
@@ -23,6 +23,12 @@ function makeStopButton(): HTMLButtonElement {
   return btn;
 }
 
+function makeWorkedForLabel(text = 'Worked for 13 seconds'): HTMLSpanElement {
+  const span = document.createElement('span');
+  span.textContent = text;
+  return span;
+}
+
 describe('content/agents/replit.ts', () => {
   let postMessageSpy: ReturnType<typeof vi.spyOn>;
   let observers: MutationObserver[];
@@ -37,6 +43,11 @@ describe('content/agents/replit.ts', () => {
     await flush();
     postMessageSpy = vi.spyOn(window, 'postMessage').mockImplementation(() => {});
     observers = [];
+    // The response-stop dedup (shared across observeSubmitButton and
+    // observeWorkedForLabel) is time-based, not identity/text-based like the file's
+    // other module-scope dedups — different tests can genuinely run within the same
+    // real-world dedup window and spuriously suppress each other without this reset.
+    __resetResponseStopDedupForTests();
   });
 
   afterEach(() => {
@@ -318,6 +329,88 @@ describe('content/agents/replit.ts', () => {
     });
   });
 
+  describe('observeWorkedForLabel — independent second response-stop signal (2026-07-03)', () => {
+    // Three separate stop-button-based strategies all failed to reliably fire live —
+    // this uses a completely different signal (Replit's own "Worked for X
+    // seconds/minutes" completion label), confirmed by direct visual evidence across
+    // every live test screenshot this session.
+    it('emits nexpath:response-stopped when a "Worked for X seconds" label appears', async () => {
+      observers.push(observeWorkedForLabel(document.body));
+
+      document.body.appendChild(makeWorkedForLabel('Worked for 13 seconds'));
+      await flush();
+
+      expect(postMessageSpy).toHaveBeenCalledWith(
+        { type: 'nexpath:response-stopped', agent: 'replit' },
+        window.location.origin,
+      );
+    });
+
+    it('matches "Worked for X minutes" too, not just seconds', async () => {
+      observers.push(observeWorkedForLabel(document.body));
+
+      document.body.appendChild(makeWorkedForLabel('Worked for 9 minutes'));
+      await flush();
+
+      expect(postMessageSpy).toHaveBeenCalledWith(
+        { type: 'nexpath:response-stopped', agent: 'replit' },
+        window.location.origin,
+      );
+    });
+
+    it('detects the label nested inside a larger inserted subtree', async () => {
+      observers.push(observeWorkedForLabel(document.body));
+
+      const wrapper = document.createElement('div');
+      wrapper.appendChild(makeWorkedForLabel('Worked for 32 seconds'));
+      document.body.appendChild(wrapper);
+      await flush();
+
+      expect(postMessageSpy).toHaveBeenCalledWith(
+        { type: 'nexpath:response-stopped', agent: 'replit' },
+        window.location.origin,
+      );
+    });
+
+    it('ignores unrelated text that does not match the pattern', async () => {
+      observers.push(observeWorkedForLabel(document.body));
+
+      document.body.appendChild(makeWorkedForLabel('Working on it...'));
+      await flush();
+
+      expect(postMessageSpy).not.toHaveBeenCalled();
+    });
+
+    it('ignores a large container that merely happens to contain the phrase deep inside unrelated content', async () => {
+      observers.push(observeWorkedForLabel(document.body));
+
+      const container = document.createElement('div');
+      container.textContent = 'A'.repeat(100) + ' Worked for 5 seconds ' + 'B'.repeat(100);
+      document.body.appendChild(container);
+      await flush();
+
+      expect(postMessageSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('response-stop dedup across independent detectors (2026-07-03)', () => {
+    it('collapses near-simultaneous signals from both observeSubmitButton and observeWorkedForLabel into one emission', async () => {
+      const stopBtn = makeStopButton();
+      document.body.appendChild(stopBtn);
+      observers.push(observeSubmitButton(document.body));
+      observers.push(observeWorkedForLabel(document.body));
+
+      stopBtn.remove();
+      document.body.appendChild(makeWorkedForLabel('Worked for 13 seconds'));
+      await flush();
+
+      const matchingCalls = postMessageSpy.mock.calls.filter(
+        (call) => (call[0] as { type?: string }).type === 'nexpath:response-stopped',
+      );
+      expect(matchingCalls).toHaveLength(1);
+    });
+  });
+
   describe('bootstrap', () => {
     beforeEach(() => {
       // The module auto-runs bootstrap() once at import time (top-level side effect),
@@ -325,7 +418,7 @@ describe('content/agents/replit.ts', () => {
       window.__nexpathReplitBootstrapped = undefined;
     });
 
-    it('logs the capture tier (console.log, not .debug — Verbose is hidden by default in DevTools) and wires up both observers', async () => {
+    it('logs the capture tier (console.log, not .debug — Verbose is hidden by default in DevTools) and wires up all three observers', async () => {
       const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
       bootstrap();
 
@@ -335,6 +428,13 @@ describe('content/agents/replit.ts', () => {
       await flush();
       expect(postMessageSpy).toHaveBeenCalledWith(
         expect.objectContaining({ promptText: 'post-bootstrap message' }),
+        window.location.origin,
+      );
+
+      document.body.appendChild(makeWorkedForLabel('Worked for 7 seconds'));
+      await flush();
+      expect(postMessageSpy).toHaveBeenCalledWith(
+        { type: 'nexpath:response-stopped', agent: 'replit' },
         window.location.origin,
       );
 
