@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { observeUserMessages, observeSubmitButton, observeWorkedForLabel, bootstrap, __resetResponseStopDedupForTests } from './replit.js';
+import { observeUserMessages, observeSubmitButton, observeWorkedForLabel, bootstrap, __resetResponseStopDedupForTests, __resetPromptCaptureStateForTests } from './replit.js';
 
 function flush(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
@@ -48,6 +48,9 @@ describe('content/agents/replit.ts', () => {
     // other module-scope dedups — different tests can genuinely run within the same
     // real-world dedup window and spuriously suppress each other without this reset.
     __resetResponseStopDedupForTests();
+    // pendingEmptyMessages holds strong Element refs from prior tests' DOM, and
+    // lastEmittedText's consecutive-collapse couples tests that reuse a prompt string.
+    __resetPromptCaptureStateForTests();
   });
 
   afterEach(() => {
@@ -196,6 +199,159 @@ describe('content/agents/replit.ts', () => {
       await flush();
 
       expect(postMessageSpy).toHaveBeenCalledTimes(3);
+    });
+  });
+
+  describe('observeUserMessages — reconciliation sweep (shell-first render fix, 2026-07-03)', () => {
+    // Root cause of "first prompt captured, every later prompt silently lost": Replit
+    // can insert the user-message shell before filling .rendered-markdown, and the old
+    // code marked the element seen while its text was still empty — permanently
+    // consuming it. These tests cover the sweep that closes both that mode and the
+    // missed-mutation mode.
+
+    function makeEmptyShellMessage(): HTMLElement {
+      const el = document.createElement('div');
+      el.setAttribute('data-cy', 'user-message');
+      const rendered = document.createElement('div');
+      rendered.className = 'rendered-markdown';
+      el.appendChild(rendered);
+      return el;
+    }
+
+    it('captures a message whose text arrives only after the node was inserted (shell-first render)', async () => {
+      vi.useFakeTimers();
+      try {
+        observers.push(observeUserMessages(document.body));
+
+        const shell = makeEmptyShellMessage();
+        document.body.appendChild(shell);
+        await vi.advanceTimersByTimeAsync(0);
+        expect(postMessageSpy).not.toHaveBeenCalled(); // empty at insert — parked, not consumed
+
+        shell.querySelector('.rendered-markdown')!.innerHTML = '<p>add a delete button</p>';
+        await vi.advanceTimersByTimeAsync(1500); // one sweep interval
+
+        expect(postMessageSpy).toHaveBeenCalledWith(
+          { type: 'nexpath:prompt-captured', promptText: 'add a delete button', agent: 'replit' },
+          window.location.origin,
+        );
+        expect(postMessageSpy).toHaveBeenCalledTimes(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('sweep captures a user-message the MutationObserver never saw at all', async () => {
+      vi.useFakeTimers();
+      const RealMutationObserver = globalThis.MutationObserver;
+      try {
+        class NoOpObserver {
+          observe(): void { /* never calls back, on purpose */ }
+          disconnect(): void { /* no-op */ }
+        }
+        vi.stubGlobal('MutationObserver', NoOpObserver as unknown as typeof MutationObserver);
+
+        const observer = observeUserMessages(document.body);
+        observers.push(observer);
+        document.body.appendChild(makeUserMessage('missed by the observer'));
+        await vi.advanceTimersByTimeAsync(1500);
+
+        expect(postMessageSpy).toHaveBeenCalledWith(
+          expect.objectContaining({ promptText: 'missed by the observer' }),
+          window.location.origin,
+        );
+      } finally {
+        vi.stubGlobal('MutationObserver', RealMutationObserver);
+        vi.useRealTimers();
+      }
+    });
+
+    it('does not double-emit when both the observer and the sweep see the same message', async () => {
+      vi.useFakeTimers();
+      try {
+        observers.push(observeUserMessages(document.body));
+        document.body.appendChild(makeUserMessage('captured once only'));
+        await vi.advanceTimersByTimeAsync(0); // observer path emits
+        await vi.advanceTimersByTimeAsync(4500); // several sweeps pass over the same DOM
+
+        expect(postMessageSpy).toHaveBeenCalledTimes(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('a shell whose text never arrives ages out and never emits', async () => {
+      vi.useFakeTimers();
+      try {
+        observers.push(observeUserMessages(document.body));
+
+        const shell = makeEmptyShellMessage();
+        document.body.appendChild(shell);
+        await vi.advanceTimersByTimeAsync(61_000); // past PENDING_EMPTY_MAX_AGE_MS — pruned
+
+        shell.querySelector('.rendered-markdown')!.innerHTML = '<p>too late</p>';
+        await vi.advanceTimersByTimeAsync(3000);
+
+        expect(postMessageSpy).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('a parked shell removed from the DOM is dropped without emitting', async () => {
+      vi.useFakeTimers();
+      try {
+        observers.push(observeUserMessages(document.body));
+
+        const shell = makeEmptyShellMessage();
+        document.body.appendChild(shell);
+        await vi.advanceTimersByTimeAsync(0);
+        shell.remove();
+        shell.querySelector('.rendered-markdown')!.innerHTML = '<p>detached text</p>';
+        await vi.advanceTimersByTimeAsync(3000);
+
+        expect(postMessageSpy).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('disconnect() stops the sweep too, not just the MutationObserver', async () => {
+      vi.useFakeTimers();
+      try {
+        const observer = observeUserMessages(document.body);
+
+        const shell = makeEmptyShellMessage();
+        document.body.appendChild(shell);
+        await vi.advanceTimersByTimeAsync(0);
+        observer.disconnect();
+
+        shell.querySelector('.rendered-markdown')!.innerHTML = '<p>after disconnect</p>';
+        await vi.advanceTimersByTimeAsync(3000);
+
+        expect(postMessageSpy).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('sweep-captured re-render of the same still-most-recent text collapses via the consecutive dedup', async () => {
+      vi.useFakeTimers();
+      try {
+        observers.push(observeUserMessages(document.body));
+        document.body.appendChild(makeUserMessage('re-rendered prompt'));
+        await vi.advanceTimersByTimeAsync(0);
+        expect(postMessageSpy).toHaveBeenCalledTimes(1);
+
+        // Replit re-creates the node (new identity, same text) — the sweep's
+        // reconciliation pass must not re-emit it.
+        document.body.appendChild(makeUserMessage('re-rendered prompt'));
+        await vi.advanceTimersByTimeAsync(1500);
+
+        expect(postMessageSpy).toHaveBeenCalledTimes(1);
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 

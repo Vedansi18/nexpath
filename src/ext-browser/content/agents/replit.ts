@@ -87,6 +87,48 @@ const seenMessages = new WeakSet<Element>();
 // unavoidable from DOM observation alone, and a narrower miss than a time window.
 let lastEmittedText: string | null = null;
 
+// Messages whose [data-cy="user-message"] node existed but whose .rendered-markdown
+// text was still EMPTY when first examined. Root cause of "first prompt captured, every
+// later prompt silently lost" (reported live 2026-07-02 during a Publish flow, then
+// reproduced 2026-07-03 on prompt 2 of a fresh session, with the sendMessage-retry
+// logging added in between staying completely silent — proving the loss happens here,
+// before any messaging): Replit can insert the message shell first and fill the
+// markdown child a tick later, and the old code marked the element seen *before*
+// checking its text, permanently consuming it with no capture and no log. Empty-text
+// elements are parked here instead and re-checked by the reconciliation sweep below
+// until their text arrives, they leave the DOM, or they age out.
+const pendingEmptyMessages = new Map<Element, number>();
+const PENDING_EMPTY_MAX_AGE_MS = 60_000;
+const SWEEP_INTERVAL_MS = 1500;
+
+// Test-only reset — pendingEmptyMessages holds strong Element refs across tests in the
+// same file, and lastEmittedText's consecutive-collapse would otherwise couple tests
+// that happen to reuse a prompt string.
+export function __resetPromptCaptureStateForTests(): void {
+  pendingEmptyMessages.clear();
+  lastEmittedText = null;
+}
+
+function tryCapture(el: Element, via: 'observer' | 'sweep'): void {
+  const text = extractPromptText(el);
+  if (!text) {
+    if (!pendingEmptyMessages.has(el)) {
+      pendingEmptyMessages.set(el, Date.now());
+      // Visible by default (same rationale as the response-stop detection logs): this
+      // exact state was previously indistinguishable from "nothing happened at all".
+      console.log('[nexpath] user-message appeared with empty text — parked for re-check');
+    }
+    return;
+  }
+  pendingEmptyMessages.delete(el);
+  if (text === lastEmittedText) return;
+  lastEmittedText = text;
+  if (via === 'sweep') {
+    console.log('[nexpath] prompt captured via reconciliation sweep (mutation path missed it)');
+  }
+  emitPromptCaptured(text);
+}
+
 export function observeUserMessages(root: Element): MutationObserver {
   // Prime: register any messages already in the DOM at setup time as "seen" WITHOUT
   // emitting captures for them. Mirrors src/ext-vscode/chat-history-watcher.ts's
@@ -110,15 +152,42 @@ export function observeUserMessages(root: Element): MutationObserver {
         for (const el of matches) {
           if (seenMessages.has(el)) continue;
           seenMessages.add(el);
-          const text = extractPromptText(el);
-          if (!text || text === lastEmittedText) continue;
-          lastEmittedText = text;
-          emitPromptCaptured(text);
+          tryCapture(el, 'observer');
         }
       }
     }
   });
   observer.observe(root, { childList: true, subtree: true });
+
+  // Reconciliation sweep — the same hypothesis-independent safety-net philosophy that
+  // ended the response-stop saga (see observeSubmitButton's poll), applied to prompt
+  // capture: on a fixed interval, re-check ground truth directly instead of trusting
+  // any single assumption about how/when Replit mutates the DOM. Covers both known
+  // loss modes at once: (1) shell-inserted-then-text-filled messages parked above, and
+  // (2) any user-message the addedNodes walk never saw at all. Whichever path (observer
+  // or sweep) reaches a message first wins; lastEmittedText collapses the overlap.
+  const sweep = (): void => {
+    const now = Date.now();
+    for (const [el, firstSeenAt] of pendingEmptyMessages) {
+      if (!el.isConnected || now - firstSeenAt > PENDING_EMPTY_MAX_AGE_MS) {
+        pendingEmptyMessages.delete(el);
+        continue;
+      }
+      tryCapture(el, 'sweep');
+    }
+    for (const el of root.querySelectorAll(USER_MESSAGE_SELECTOR)) {
+      if (seenMessages.has(el)) continue;
+      seenMessages.add(el);
+      tryCapture(el, 'sweep');
+    }
+  };
+  const sweepIntervalId = setInterval(sweep, SWEEP_INTERVAL_MS);
+  const originalDisconnect = observer.disconnect.bind(observer);
+  observer.disconnect = (): void => {
+    clearInterval(sweepIntervalId);
+    originalDisconnect();
+  };
+
   return observer;
 }
 
