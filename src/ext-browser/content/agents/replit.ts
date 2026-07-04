@@ -61,7 +61,15 @@ export function __resetResponseStopDedupForTests(): void {
 
 function extractPromptText(el: Element): string {
   const rendered = el.querySelector('.rendered-markdown');
-  return (rendered?.textContent ?? '').trim();
+  // A present-but-empty .rendered-markdown means a fill-in-progress shell — return ''
+  // so the caller parks it for re-check rather than falling through to unrelated text
+  // (timestamps, action labels) that happens to live elsewhere inside the element.
+  if (rendered) return (rendered.textContent ?? '').trim();
+  // No .rendered-markdown child at all: live-typed messages may render through a
+  // different path than server-hydrated history (2026-07-03 — the second prompt of a
+  // session was never captured even by the reconciliation sweep running for minutes,
+  // proving the history-confirmed structure doesn't hold for every message render).
+  return (el.textContent ?? '').trim();
 }
 
 // ── Prompt-submit: new [data-cy="user-message"] nodes in the chat feed ─────────
@@ -109,6 +117,17 @@ export function __resetPromptCaptureStateForTests(): void {
   lastEmittedText = null;
 }
 
+// Single funnel for every prompt-capture channel (composer submit, mutation observer,
+// reconciliation sweep) — the consecutive-identical collapse lives here once, so any
+// two channels noticing the same prompt (e.g. composer capture at submit time followed
+// by the rendered message echo in the chat feed) can never double-emit.
+function emitIfNewText(text: string, viaLog?: string): void {
+  if (!text || text === lastEmittedText) return;
+  lastEmittedText = text;
+  if (viaLog) console.log(viaLog);
+  emitPromptCaptured(text);
+}
+
 function tryCapture(el: Element, via: 'observer' | 'sweep'): void {
   const text = extractPromptText(el);
   if (!text) {
@@ -121,12 +140,12 @@ function tryCapture(el: Element, via: 'observer' | 'sweep'): void {
     return;
   }
   pendingEmptyMessages.delete(el);
-  if (text === lastEmittedText) return;
-  lastEmittedText = text;
-  if (via === 'sweep') {
-    console.log('[nexpath] prompt captured via reconciliation sweep (mutation path missed it)');
-  }
-  emitPromptCaptured(text);
+  emitIfNewText(
+    text,
+    via === 'sweep'
+      ? '[nexpath] prompt captured via reconciliation sweep (mutation path missed it)'
+      : undefined,
+  );
 }
 
 export function observeUserMessages(root: Element): MutationObserver {
@@ -189,6 +208,92 @@ export function observeUserMessages(root: Element): MutationObserver {
   };
 
   return observer;
+}
+
+// ── Prompt-submit, independent source-side channel: read the composer at submit ──
+//
+// The mutation-observer channel above depends on TWO render-path assumptions
+// ([data-cy="user-message"] + .rendered-markdown) that were recon-confirmed for
+// server-hydrated history messages but demonstrably do NOT hold for every live-typed
+// message: on 2026-07-03, across two separate projects, the first (hydration-rendered)
+// prompt was captured while every live-typed follow-up was silently missed — with the
+// reconciliation sweep re-scanning the whole document every 1.5s for minutes, which
+// rules out timing and proves the live-message DOM simply doesn't match the selectors.
+// Rather than guess a third render-path selector with no live DOM access, this channel
+// removes the render-path dependency entirely: read the user's text directly from the
+// composer at the moment of submit (Enter keydown / send-button click), before the
+// framework clears it. Both selectors involved are live-confirmed on real Replit:
+// COMPOSER_SELECTOR is the exact selector inject-back successfully targets
+// (replit-inject.ts), and the submit button's data-cy came from the user's own
+// Elements-panel inspection (2026-07-02). Capture-phase listeners on the root beat the
+// page's own handlers, so the text is still present when read. The rendered-message
+// echo that may follow collapses via emitIfNewText's consecutive-identical guard.
+
+const COMPOSER_SELECTOR = '.cm-content[contenteditable="true"]';
+const SUBMIT_BUTTON_SELECTOR = '[data-cy="ai-prompt-submit"]';
+
+// Replit's FILE editors are CodeMirror too — COMPOSER_SELECTOR alone could match the
+// code editor and capture file contents as a "prompt" on every Enter keystroke. The
+// chat composer is disambiguated by anchoring on the agent submit/stop button (both
+// data-cys live-confirmed 2026-07-02): walk up from the button until an ancestor's
+// subtree contains a CodeMirror editor — that shared container is the prompt box, and
+// its editor is the chat composer. File editors live in different panes and never
+// share a container with these buttons below the workspace root.
+function findChatComposer(): HTMLElement | null {
+  const anchor =
+    document.querySelector(SUBMIT_BUTTON_SELECTOR) ?? document.querySelector(STOP_BUTTON_SELECTOR);
+  let node: Element | null = anchor;
+  while (node) {
+    const cm = node.querySelector<HTMLElement>(COMPOSER_SELECTOR);
+    if (cm) return cm;
+    node = node.parentElement;
+  }
+  return null;
+}
+
+function readComposerText(input: HTMLElement): string {
+  // CodeMirror 6 renders one .cm-line per line; textContent alone would drop the
+  // line breaks of a multi-line prompt.
+  const lines = Array.from(input.querySelectorAll('.cm-line'), (l) => l.textContent ?? '');
+  const text = (lines.length > 0 ? lines.join('\n') : (input.textContent ?? '')).trim();
+  // An empty CodeMirror editor renders its placeholder ("Message Agent…") as real
+  // text inside the line — never capture that as a prompt.
+  const placeholder = (input.querySelector('.cm-placeholder')?.textContent ?? '').trim();
+  if (placeholder && text === placeholder) return '';
+  return text;
+}
+
+function captureFromComposer(input: HTMLElement): void {
+  const text = readComposerText(input);
+  if (!text) return;
+  emitIfNewText(text, '[nexpath] prompt captured at submit (composer read)');
+}
+
+export function observeComposerSubmit(root: Document | Element): { disconnect(): void } {
+  const onKeyDown = (ev: Event): void => {
+    const ke = ev as KeyboardEvent;
+    // Shift+Enter is "newline", every other Enter variant (plain/Ctrl/Cmd) submits.
+    if (ke.key !== 'Enter' || ke.shiftKey) return;
+    const target = ev.target instanceof Element ? ev.target : null;
+    const cm = target?.closest<HTMLElement>(COMPOSER_SELECTOR);
+    if (!cm || cm !== findChatComposer()) return; // Enter in a file editor is just a newline
+    captureFromComposer(cm);
+  };
+  const onClick = (ev: Event): void => {
+    const target = ev.target instanceof Element ? ev.target : null;
+    if (!target?.closest(SUBMIT_BUTTON_SELECTOR)) return;
+    const cm = findChatComposer();
+    if (!cm) return;
+    captureFromComposer(cm);
+  };
+  root.addEventListener('keydown', onKeyDown, true);
+  root.addEventListener('click', onClick, true);
+  return {
+    disconnect(): void {
+      root.removeEventListener('keydown', onKeyDown, true);
+      root.removeEventListener('click', onClick, true);
+    },
+  };
 }
 
 // ── Response-stop: the stop button disappearing from the DOM ───────────────────
@@ -325,6 +430,7 @@ export function bootstrap(): void {
   // (which .debug is categorized as) unless the user explicitly enables it in the
   // level filter. This line is meant to be visible by default, per devplan §8.1.
   console.log(`[nexpath] capture: ${CAPTURE_TIER}`);
+  observeComposerSubmit(document);
   observeUserMessages(document.body);
   observeSubmitButton(document.body);
   observeWorkedForLabel(document.body);

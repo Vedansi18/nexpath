@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { observeUserMessages, observeSubmitButton, observeWorkedForLabel, bootstrap, __resetResponseStopDedupForTests, __resetPromptCaptureStateForTests } from './replit.js';
+import { observeUserMessages, observeSubmitButton, observeWorkedForLabel, observeComposerSubmit, bootstrap, __resetResponseStopDedupForTests, __resetPromptCaptureStateForTests } from './replit.js';
 
 function flush(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
@@ -31,7 +31,7 @@ function makeWorkedForLabel(text = 'Worked for 13 seconds'): HTMLSpanElement {
 
 describe('content/agents/replit.ts', () => {
   let postMessageSpy: ReturnType<typeof vi.spyOn>;
-  let observers: MutationObserver[];
+  let observers: Array<{ disconnect(): void }>;
 
   beforeEach(async () => {
     document.body.innerHTML = '';
@@ -352,6 +352,209 @@ describe('content/agents/replit.ts', () => {
       } finally {
         vi.useRealTimers();
       }
+    });
+  });
+
+  describe('observeUserMessages — render-path fallback (live-typed messages without .rendered-markdown, 2026-07-03)', () => {
+    it('captures a user-message with no .rendered-markdown child via its own text content', async () => {
+      observers.push(observeUserMessages(document.body));
+
+      const el = document.createElement('div');
+      el.setAttribute('data-cy', 'user-message');
+      el.textContent = "make it's color beige";
+      document.body.appendChild(el);
+      await flush();
+
+      expect(postMessageSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ promptText: "make it's color beige" }),
+        window.location.origin,
+      );
+    });
+
+    it('a present-but-empty .rendered-markdown still parks (does not fall through to sibling UI text)', async () => {
+      vi.useFakeTimers();
+      try {
+        observers.push(observeUserMessages(document.body));
+
+        const el = document.createElement('div');
+        el.setAttribute('data-cy', 'user-message');
+        const rendered = document.createElement('div');
+        rendered.className = 'rendered-markdown';
+        el.appendChild(rendered);
+        const timestamp = document.createElement('span');
+        timestamp.textContent = 'Just now';
+        el.appendChild(timestamp);
+        document.body.appendChild(el);
+        await vi.advanceTimersByTimeAsync(0);
+        expect(postMessageSpy).not.toHaveBeenCalled(); // parked — 'Just now' must never be the prompt
+
+        rendered.innerHTML = '<p>the real prompt text</p>';
+        await vi.advanceTimersByTimeAsync(1500);
+
+        expect(postMessageSpy).toHaveBeenCalledWith(
+          expect.objectContaining({ promptText: 'the real prompt text' }),
+          window.location.origin,
+        );
+        expect(postMessageSpy).toHaveBeenCalledTimes(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
+  describe('observeComposerSubmit — source-side capture channel (2026-07-03)', () => {
+    // Live-typed messages demonstrably don't match the history-confirmed message
+    // selectors (sweep re-scanned for minutes without a hit) — this channel reads the
+    // composer itself at submit time, independent of any message-render assumption.
+
+    // Mirrors Replit's real prompt-box structure: the chat composer (CodeMirror) and
+    // the agent submit button share a container — that adjacency is exactly how the
+    // production code disambiguates the composer from Replit's CodeMirror file editors.
+    function makeComposer(text: string): { composer: HTMLElement; button: HTMLElement } {
+      const container = document.createElement('div');
+      const composer = document.createElement('div');
+      composer.className = 'cm-content';
+      composer.setAttribute('contenteditable', 'true');
+      for (const lineText of text === '' ? [''] : text.split('\n')) {
+        const line = document.createElement('div');
+        line.className = 'cm-line';
+        line.textContent = lineText;
+        composer.appendChild(line);
+      }
+      const button = document.createElement('button');
+      button.setAttribute('data-cy', 'ai-prompt-submit');
+      container.appendChild(composer);
+      container.appendChild(button);
+      document.body.appendChild(container);
+      return { composer, button };
+    }
+
+    function pressEnter(target: Element, init: KeyboardEventInit = {}): void {
+      target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, ...init }));
+    }
+
+    it('captures the composer text on Enter inside the composer', () => {
+      observers.push(observeComposerSubmit(document));
+      const { composer } = makeComposer('build a login page');
+
+      pressEnter(composer.querySelector('.cm-line')!);
+
+      expect(postMessageSpy).toHaveBeenCalledWith(
+        { type: 'nexpath:prompt-captured', promptText: 'build a login page', agent: 'replit' },
+        window.location.origin,
+      );
+    });
+
+    it('joins multi-line composer content with newlines', () => {
+      observers.push(observeComposerSubmit(document));
+      const { composer } = makeComposer('first line\nsecond line');
+
+      pressEnter(composer);
+
+      expect(postMessageSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ promptText: 'first line\nsecond line' }),
+        window.location.origin,
+      );
+    });
+
+    it('does not capture on Shift+Enter (newline, not submit)', () => {
+      observers.push(observeComposerSubmit(document));
+      const { composer } = makeComposer('still typing');
+
+      pressEnter(composer, { shiftKey: true });
+
+      expect(postMessageSpy).not.toHaveBeenCalled();
+    });
+
+    it('does not capture Enter pressed outside the composer', () => {
+      observers.push(observeComposerSubmit(document));
+      makeComposer('composer text');
+      const outside = document.createElement('input');
+      document.body.appendChild(outside);
+
+      pressEnter(outside);
+
+      expect(postMessageSpy).not.toHaveBeenCalled();
+    });
+
+    it('does NOT capture Enter inside a CodeMirror FILE editor (no adjacent agent button)', () => {
+      // Replit's code editors are CodeMirror too — Enter there is a newline in a file,
+      // and its contents must never be emitted as a prompt.
+      observers.push(observeComposerSubmit(document));
+      makeComposer('the real chat composer');
+
+      const editorPane = document.createElement('div');
+      const fileEditor = document.createElement('div');
+      fileEditor.className = 'cm-content';
+      fileEditor.setAttribute('contenteditable', 'true');
+      const codeLine = document.createElement('div');
+      codeLine.className = 'cm-line';
+      codeLine.textContent = 'const secret = process.env.API_KEY;';
+      fileEditor.appendChild(codeLine);
+      editorPane.appendChild(fileEditor);
+      document.body.appendChild(editorPane);
+
+      pressEnter(codeLine);
+
+      expect(postMessageSpy).not.toHaveBeenCalled();
+    });
+
+    it('captures the composer text when the submit button is clicked (even via a child element)', () => {
+      observers.push(observeComposerSubmit(document));
+      const { button } = makeComposer('clicked to send');
+      const icon = document.createElement('span');
+      button.appendChild(icon);
+
+      icon.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+      expect(postMessageSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ promptText: 'clicked to send' }),
+        window.location.origin,
+      );
+    });
+
+    it('never captures the CodeMirror placeholder as a prompt', () => {
+      observers.push(observeComposerSubmit(document));
+      const { composer } = makeComposer('');
+      const line = composer.querySelector('.cm-line')!;
+      const placeholder = document.createElement('span');
+      placeholder.className = 'cm-placeholder';
+      placeholder.textContent = 'Message Agent…';
+      line.appendChild(placeholder);
+
+      pressEnter(composer);
+
+      expect(postMessageSpy).not.toHaveBeenCalled();
+    });
+
+    it('the rendered-message echo of a composer-captured prompt collapses to one emission', async () => {
+      observers.push(observeComposerSubmit(document));
+      observers.push(observeUserMessages(document.body));
+      const { composer } = makeComposer('same prompt both channels');
+
+      pressEnter(composer);
+      expect(postMessageSpy).toHaveBeenCalledTimes(1);
+
+      document.body.appendChild(makeUserMessage('same prompt both channels'));
+      await flush();
+
+      expect(postMessageSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('disconnect() removes exactly the listeners it added', () => {
+      // Asserted via listener bookkeeping on an isolated root rather than event
+      // dispatch: the module's import-time auto-bootstrap keeps its own document-level
+      // composer listener alive for the whole test file, so any DOM-routed event
+      // would be captured by that instance regardless of this controller's state.
+      const root = document.createElement('div');
+      const addSpy = vi.spyOn(root, 'addEventListener');
+      const removeSpy = vi.spyOn(root, 'removeEventListener');
+
+      const controller = observeComposerSubmit(root);
+      expect(addSpy).toHaveBeenCalledTimes(2);
+      controller.disconnect();
+
+      expect(removeSpy.mock.calls).toEqual(addSpy.mock.calls);
     });
   });
 
