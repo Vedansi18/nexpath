@@ -541,6 +541,56 @@ describe('content/agents/replit.ts', () => {
       expect(postMessageSpy).toHaveBeenCalledTimes(1);
     });
 
+    it('captures on Enter while the agent is generating (submit button swapped for the stop button)', () => {
+      // Real scenario: typing a follow-up prompt mid-generation. Replit replaces
+      // data-cy="ai-prompt-submit" with data-cy="ai-prompt-stop" while generating
+      // (confirmed live 2026-07-02), so findChatComposer's anchor must fall back to
+      // the stop button when no submit button exists in the DOM at all.
+      observers.push(observeComposerSubmit(document));
+      const container = document.createElement('div');
+      const composer = document.createElement('div');
+      composer.className = 'cm-content';
+      composer.setAttribute('contenteditable', 'true');
+      const line = document.createElement('div');
+      line.className = 'cm-line';
+      line.textContent = 'follow-up while generating';
+      composer.appendChild(line);
+      const stopBtn = document.createElement('button');
+      stopBtn.setAttribute('data-cy', 'ai-prompt-stop');
+      container.append(composer, stopBtn);
+      document.body.appendChild(container);
+
+      pressEnter(line);
+
+      expect(postMessageSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ promptText: 'follow-up while generating' }),
+        window.location.origin,
+      );
+    });
+
+    it('falls back to the composer element textContent when no .cm-line children exist', () => {
+      // readComposerText's lines.length === 0 branch — CodeMirror normally always
+      // renders .cm-line children, but the fallback must hold if that structure
+      // ever changes (same defensive posture as the rest of the capture channels).
+      observers.push(observeComposerSubmit(document));
+      const container = document.createElement('div');
+      const composer = document.createElement('div');
+      composer.className = 'cm-content';
+      composer.setAttribute('contenteditable', 'true');
+      composer.textContent = 'plain text, no line divs';
+      const button = document.createElement('button');
+      button.setAttribute('data-cy', 'ai-prompt-submit');
+      container.append(composer, button);
+      document.body.appendChild(container);
+
+      pressEnter(composer);
+
+      expect(postMessageSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ promptText: 'plain text, no line divs' }),
+        window.location.origin,
+      );
+    });
+
     it('disconnect() removes exactly the listeners it added', () => {
       // Asserted via listener bookkeeping on an isolated root rather than event
       // dispatch: the module's import-time auto-bootstrap keeps its own document-level

@@ -7,7 +7,7 @@ describe('replitAdapter', () => {
     expect(replitAdapter.id).toBe('replit');
     expect(replitAdapter.category).toBe('browser-extension');
     expect(replitAdapter.origins).toEqual(['https://*.replit.com/*']);
-    expect(replitAdapter.capture).toEqual(['mutation-observer']);
+    expect(replitAdapter.capture).toEqual(['mutation-observer', 'dom-events']);
     expect(replitAdapter.contentScriptModule).toBe('content/agents/replit.js');
   });
 
