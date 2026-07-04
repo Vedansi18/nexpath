@@ -6,9 +6,26 @@ import {
   isPanelEventMsg,
   isPromptCapturedMsg,
   isResponseStoppedMsg,
+  isFetchPromptMsg,
 } from './ipc.js';
 
 describe('IPC type guards', () => {
+  describe('isFetchPromptMsg', () => {
+    it('returns true for a valid FetchPromptMsg', () => {
+      expect(isFetchPromptMsg({
+        type: 'nexpath:fetch-prompt',
+        promptText: 'build a nav',
+        agent: 'bolt',
+      })).toBe(true);
+    });
+
+    it('returns false for other message types, null, and non-objects', () => {
+      expect(isFetchPromptMsg({ type: 'nexpath:prompt-captured' })).toBe(false);
+      expect(isFetchPromptMsg(null)).toBe(false);
+      expect(isFetchPromptMsg('nexpath:fetch-prompt')).toBe(false);
+    });
+  });
+
   describe('isPromptSubmitMsg', () => {
     it('returns true for valid PromptSubmitMsg', () => {
       expect(isPromptSubmitMsg({

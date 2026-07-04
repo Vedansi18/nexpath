@@ -1,13 +1,28 @@
 import { isShowAdvisoryMsg } from './ipc.js';
 import { mountStubPanel } from '../ui/stub-panel.js';
 import type { PanelEvent } from '../../core/ports/ui.port.js';
-// Imports from replit-inject.ts, NOT replit.ts — replit.ts auto-runs its capture
-// bootstrap at import time, and esbuild would inline that into this bundle too if
-// imported directly here, duplicating every MutationObserver (confirmed bug, fixed
-// 2026-07-02 — see replit-inject.ts's header comment for the full explanation).
-// Direct import — only Replit exists as of B3. When B4/B5 add Bolt/Lovable, this
-// becomes a per-agent dispatch (resolveAgent() -> the matching injectPromptText).
-import { injectPromptText } from './agents/replit-inject.js';
+// Imports from the *-inject.ts modules, NOT the capture entries (replit.ts /
+// bolt.ts) — those auto-run their capture bootstrap at import time, and esbuild
+// would inline that into this bundle too, duplicating every observer (confirmed
+// bug, fixed 2026-07-02 — see replit-inject.ts's header comment).
+import { injectPromptText as injectPromptTextReplit } from './agents/replit-inject.js';
+import { injectPromptText as injectPromptTextBolt } from './agents/bolt-inject.js';
+import { clipboardFallback } from './agents/inject-kit.js';
+import { resolveAgentFromHostname } from './agents/agent-hosts.js';
+
+// Per-agent inject-back dispatch (B4 — the per-agent split B3's comment planned).
+// A host with no injector yet (lovable until B5, unknown hosts) degrades to the
+// clipboard fallback rather than silently doing nothing or using the wrong
+// agent's editor mechanics.
+const INJECTORS: Record<string, (text: string) => Promise<void>> = {
+  replit: injectPromptTextReplit,
+  bolt: injectPromptTextBolt,
+};
+
+function injectPromptText(text: string): Promise<void> {
+  const injector = INJECTORS[resolveAgentFromHostname(window.location.hostname)];
+  return injector ? injector(text) : clipboardFallback(text);
+}
 
 declare global {
   interface Window {

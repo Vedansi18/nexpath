@@ -1,10 +1,15 @@
 // @vitest-environment jsdom
 
-import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 import type { AdvisoryPayload } from '../../core/ports/ui.port.js';
 
 const mountStubPanelMock = vi.fn().mockReturnValue({} as ShadowRoot);
 const injectPromptTextMock = vi.fn().mockResolvedValue(undefined);
+const injectPromptTextBoltMock = vi.fn().mockResolvedValue(undefined);
+const clipboardFallbackMock = vi.fn().mockResolvedValue(undefined);
+// jsdom's hostname is localhost (agent 'unknown') — default to 'replit' so the
+// pre-B4 tests keep exercising the replit injector; dispatch tests override it.
+const resolveAgentMock = vi.fn().mockReturnValue('replit');
 
 vi.mock('../ui/stub-panel.js', () => ({
   mountStubPanel: mountStubPanelMock,
@@ -12,6 +17,18 @@ vi.mock('../ui/stub-panel.js', () => ({
 
 vi.mock('./agents/replit-inject.js', () => ({
   injectPromptText: injectPromptTextMock,
+}));
+
+vi.mock('./agents/bolt-inject.js', () => ({
+  injectPromptText: injectPromptTextBoltMock,
+}));
+
+vi.mock('./agents/inject-kit.js', () => ({
+  clipboardFallback: clipboardFallbackMock,
+}));
+
+vi.mock('./agents/agent-hosts.js', () => ({
+  resolveAgentFromHostname: resolveAgentMock,
 }));
 
 function makePayload(overrides: Partial<AdvisoryPayload> = {}): AdvisoryPayload {
@@ -107,6 +124,39 @@ describe('inject.ts', () => {
 
     expect(injectPromptTextMock).toHaveBeenCalledWith('Write the tests now');
     expect(document.getElementById('nexpath-panel-root')).toBeNull();
+  });
+
+  describe('per-agent inject-back dispatch (B4)', () => {
+    afterEach(() => {
+      resolveAgentMock.mockReturnValue('replit');
+    });
+
+    function emitSelect(text: string): void {
+      dispatchShowAdvisory(makePayload());
+      const onEvent = mountStubPanelMock.mock.calls.at(-1)![2] as (e: { type: string; optionIndex?: number; text?: string }) => void;
+      onEvent({ type: 'select', optionIndex: 0, text });
+    }
+
+    it('routes to the bolt injector on bolt hosts', () => {
+      resolveAgentMock.mockReturnValue('bolt');
+      injectPromptTextBoltMock.mockClear();
+
+      emitSelect('add tests to the app');
+
+      expect(injectPromptTextBoltMock).toHaveBeenCalledWith('add tests to the app');
+      expect(injectPromptTextMock).not.toHaveBeenCalledWith('add tests to the app');
+    });
+
+    it('degrades to the clipboard fallback on hosts with no injector yet', () => {
+      resolveAgentMock.mockReturnValue('lovable');
+      clipboardFallbackMock.mockClear();
+
+      emitSelect('review the edge cases');
+
+      expect(clipboardFallbackMock).toHaveBeenCalledWith('review the edge cases');
+      expect(injectPromptTextMock).not.toHaveBeenCalledWith('review the edge cases');
+      expect(injectPromptTextBoltMock).not.toHaveBeenCalledWith('review the edge cases');
+    });
   });
 
   describe('nexpath:panel-event reporting (SW round-trip)', () => {

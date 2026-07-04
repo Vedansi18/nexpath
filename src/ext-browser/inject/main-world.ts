@@ -10,6 +10,8 @@
  * and the postMessage emit helper only.
  */
 
+import { resolveAgentFromHostname } from '../content/agents/agent-hosts.js';
+
 type PromptCapturedMsg = {
   type: 'nexpath:prompt-captured';
   promptText: string;
@@ -34,16 +36,97 @@ export function emitResponseStopped(agent: string): void {
   window.postMessage(msg, window.location.origin);
 }
 
-// ── Stub fetch patcher (B3/B4/B5 fill in per-agent logic) ────────────────────
+// ── Fetch-interception rules (per agent, recon-confirmed transports only) ─────
+//
+// B4 (Bolt) is the first real consumer: recon confirmed the prompt travels in a
+// page-context `POST /api/chat/v2` whose JSON body carries the full `messages`
+// history with the newest entry `{role:'user', content:'<prompt string>'}` — see
+// docs/capture-recon/bolt-recon.md §1. Replit deliberately has NO rule here (its
+// chat is binary MessagePack over WS — fetch confirmed non-viable in B3 recon).
+//
+// The extracted prompt is posted as `nexpath:fetch-prompt` — a DISTINCT message
+// type that main-world-injector.ts does NOT forward. Only the agent's capture kit
+// listens for it (capture-kit.ts observeFetchPrompts) and routes the text through
+// its single emitIfNewText funnel, so this channel can never double-emit a prompt
+// the composer/observer channels also saw.
+
+export interface FetchCaptureRule {
+  agent: string;
+  /** Substring the request URL must contain (matched only for POSTs on this agent's host). */
+  urlIncludes: string;
+  /** Extract the newest user prompt from the raw request body, or null to ignore. */
+  extractPrompt(bodyText: string): string | null;
+}
+
+/**
+ * Extract the newest `{role:'user'}` message's string content from an AI-SDK-style
+ * `{messages: [...]}` JSON body. Walks backwards so trailing non-user entries
+ * (assistant placeholders, tool results) never shadow the real prompt.
+ */
+export function extractLastUserMessage(bodyText: string): string | null {
+  try {
+    const parsed = JSON.parse(bodyText) as { messages?: Array<{ role?: unknown; content?: unknown }> };
+    if (!Array.isArray(parsed.messages)) return null;
+    for (let i = parsed.messages.length - 1; i >= 0; i--) {
+      const m = parsed.messages[i];
+      if (m && m.role === 'user' && typeof m.content === 'string') {
+        const text = m.content.trim();
+        return text.length > 0 ? text : null;
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export const FETCH_CAPTURE_RULES: FetchCaptureRule[] = [
+  { agent: 'bolt', urlIncludes: '/api/chat', extractPrompt: extractLastUserMessage },
+];
+
+export function emitFetchPrompt(promptText: string, agent: string): void {
+  window.postMessage(
+    { type: 'nexpath:fetch-prompt', promptText, agent },
+    window.location.origin,
+  );
+}
+
+async function maybeCaptureFetch(input: RequestInfo | URL, init?: RequestInit): Promise<void> {
+  const url =
+    typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+  const method = (
+    init?.method ?? (typeof input === 'object' && 'method' in input ? input.method : 'GET')
+  ).toUpperCase();
+  if (method !== 'POST') return;
+  const agent = resolveAgentFromHostname(window.location.hostname);
+  const rule = FETCH_CAPTURE_RULES.find(
+    (r) => r.agent === agent && url.includes(r.urlIncludes),
+  );
+  if (!rule) return;
+  let bodyText: string | null = typeof init?.body === 'string' ? init.body : null;
+  if (bodyText === null && input instanceof Request) {
+    // clone() lets us read the body without consuming the page's own copy.
+    try {
+      bodyText = await input.clone().text();
+    } catch {
+      return;
+    }
+  }
+  if (!bodyText) return;
+  const prompt = rule.extractPrompt(bodyText);
+  if (prompt) emitFetchPrompt(prompt, agent);
+}
 
 const _nativeFetch = window.fetch.bind(window);
 
-window.fetch = async function patchedFetch(
+window.fetch = function patchedFetch(
   input: RequestInfo | URL,
   init?: RequestInit,
 ): Promise<Response> {
-  // Per-agent interception hooks will be registered here in B3/B4/B5.
-  // For B2 (skeleton), pass through untouched.
+  // Fire-and-forget: capture must never delay, alter, or break the page's own
+  // request — the native call goes out immediately regardless of what the
+  // capture path does, and any capture error is swallowed after being isolated.
+  void maybeCaptureFetch(input, init).catch(() => {});
   return _nativeFetch(input, init);
 };
 

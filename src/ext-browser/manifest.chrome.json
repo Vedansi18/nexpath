@@ -34,6 +34,11 @@
       "matches": ["https://*.replit.com/*"],
       "js": ["content/agents/replit.js"],
       "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://bolt.new/*", "https://*.stackblitz.com/*"],
+      "js": ["content/agents/bolt.js"],
+      "run_at": "document_idle"
     }
   ],
   "web_accessible_resources": [

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { injectViaSimulatedPaste } from './inject-kit.js';
+import { injectViaSimulatedPaste, clipboardFallback } from './inject-kit.js';
 
 // Parameterization proof for the shared inject kit: works against arbitrary,
 // NON-Replit selectors. The full behavior matrix (focus, landed-verification,
@@ -67,5 +67,10 @@ describe('content/agents/inject-kit.ts — injectViaSimulatedPaste', () => {
     await injectViaSimulatedPaste('.lovable-editor', 'add dark mode');
 
     expect(clipboardWriteTextMock).toHaveBeenCalledWith('add dark mode');
+  });
+
+  it('clipboardFallback (exported for hosts with no injector) copies and toasts', async () => {
+    await clipboardFallback('option text for an agent without inject-back yet');
+    expect(clipboardWriteTextMock).toHaveBeenCalledWith('option text for an agent without inject-back yet');
   });
 });

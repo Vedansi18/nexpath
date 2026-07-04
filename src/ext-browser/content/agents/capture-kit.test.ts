@@ -204,6 +204,64 @@ describe('content/agents/capture-kit.ts', () => {
     );
   });
 
+  describe('observeFetchPrompts — transport channel', () => {
+    function dispatchFetchPrompt(promptText: string, agent: string, origin = window.location.origin): void {
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          data: { type: 'nexpath:fetch-prompt', promptText, agent },
+          origin,
+          source: window,
+        }),
+      );
+    }
+
+    it('routes a matching fetch-prompt through the funnel with this kit agent id', () => {
+      const kit = createCaptureKit(makeConfig({ agent: 'bolt' }));
+      observers.push(kit.observeFetchPrompts(window));
+
+      dispatchFetchPrompt('deploy the app', 'bolt');
+
+      expect(postMessageSpy).toHaveBeenCalledWith(
+        { type: 'nexpath:prompt-captured', promptText: 'deploy the app', agent: 'bolt' },
+        window.location.origin,
+      );
+    });
+
+    it('ignores fetch-prompts addressed to a different agent', () => {
+      const kit = createCaptureKit(makeConfig({ agent: 'bolt' }));
+      observers.push(kit.observeFetchPrompts(window));
+
+      dispatchFetchPrompt('someone else', 'lovable');
+
+      expect(postMessageSpy).not.toHaveBeenCalled();
+    });
+
+    it('ignores messages from a foreign origin', () => {
+      const kit = createCaptureKit(makeConfig({ agent: 'bolt' }));
+      observers.push(kit.observeFetchPrompts(window));
+
+      dispatchFetchPrompt('injected from elsewhere', 'bolt', 'https://evil.example');
+
+      expect(postMessageSpy).not.toHaveBeenCalled();
+    });
+
+    it('shares the consecutive-identical collapse with the other channels', async () => {
+      const kit = createCaptureKit(
+        makeConfig({ agent: 'bolt', userMessageSelector: '[data-testid="kit-fp-msg"]' }),
+      );
+      observers.push(kit.observeFetchPrompts(window), kit.observeUserMessages(document.body));
+
+      dispatchFetchPrompt('one prompt', 'bolt');
+      const el = document.createElement('div');
+      el.setAttribute('data-testid', 'kit-fp-msg');
+      el.textContent = 'one prompt';
+      document.body.appendChild(el);
+      await flush();
+
+      expect(postMessageSpy).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it('bootstrap guards on the configured window flag and only wires configured channels', async () => {
     const flag = '__nexpathKitBootstrapTest';
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});

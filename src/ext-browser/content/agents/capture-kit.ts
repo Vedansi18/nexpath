@@ -79,6 +79,16 @@ export interface CaptureKitConfig {
   composer?: ComposerCaptureConfig;
   /** Independent completion-label response-stop detector. Optional per agent. */
   completionLabel?: CompletionLabelConfig;
+  /**
+   * Listen for `nexpath:fetch-prompt` messages posted by inject/main-world.ts's
+   * fetch-interception rules (B4: Bolt's POST /api/chat/v2 — see
+   * docs/capture-recon/bolt-recon.md §1). Enable only for agents whose recon
+   * confirmed a page-context fetch transport. The fetch rule posts a DISTINCT
+   * message type precisely so the text enters through THIS kit's emitIfNewText
+   * funnel — never forwarded to the SW directly — keeping the no-double-emit
+   * guarantee across fetch/composer/observer channels.
+   */
+  listenForFetchPrompts?: boolean;
 }
 
 export interface CaptureKit {
@@ -86,6 +96,7 @@ export interface CaptureKit {
   observeComposerSubmit(root: Document | Element): { disconnect(): void };
   observeStopButton(root: Node): MutationObserver;
   observeCompletionLabel(root: Element): MutationObserver;
+  observeFetchPrompts(win: Window): { disconnect(): void };
   bootstrap(): void;
   resetResponseStopDedupForTests(): void;
   resetPromptCaptureStateForTests(): void;
@@ -331,6 +342,31 @@ export function createCaptureKit(config: CaptureKitConfig): CaptureKit {
     };
   }
 
+  // ── Prompt-submit, transport-side channel: fetch prompts from the MAIN world ────
+  //
+  // inject/main-world.ts intercepts the agent's page-context fetch (where recon
+  // confirmed the prompt travels over HTTP — Bolt: POST /api/chat/v2) and posts a
+  // `nexpath:fetch-prompt` message. This listener routes it through emitIfNewText,
+  // making transport capture the most direct channel available while keeping the
+  // single-funnel guarantee: the composer/observer channels seeing the same prompt
+  // collapse instead of double-emitting.
+
+  function observeFetchPrompts(win: Window): { disconnect(): void } {
+    const onMessage = (ev: MessageEvent): void => {
+      if (ev.source !== win || ev.origin !== win.location.origin) return;
+      const msg = ev.data as { type?: unknown; promptText?: unknown; agent?: unknown } | null;
+      if (!msg || msg.type !== 'nexpath:fetch-prompt' || msg.agent !== config.agent) return;
+      if (typeof msg.promptText !== 'string') return;
+      emitIfNewText(msg.promptText.trim(), '[nexpath] prompt captured via fetch interception');
+    };
+    win.addEventListener('message', onMessage as EventListener);
+    return {
+      disconnect(): void {
+        win.removeEventListener('message', onMessage as EventListener);
+      },
+    };
+  }
+
   // ── Response-stop: the stop button disappearing from the DOM ────────────────────
 
   function observeStopButton(root: Node): MutationObserver {
@@ -442,6 +478,7 @@ export function createCaptureKit(config: CaptureKitConfig): CaptureKit {
     // (which .debug is categorized as) unless the user explicitly enables it in the
     // level filter. This line is meant to be visible by default, per devplan §8.1.
     console.log(`[nexpath] capture: ${config.captureTier}`);
+    if (config.listenForFetchPrompts) observeFetchPrompts(window);
     if (config.composer) observeComposerSubmit(document);
     observeUserMessages(document.body);
     observeStopButton(document.body);
@@ -471,6 +508,7 @@ export function createCaptureKit(config: CaptureKitConfig): CaptureKit {
     observeComposerSubmit,
     observeStopButton,
     observeCompletionLabel,
+    observeFetchPrompts,
     bootstrap,
     resetResponseStopDedupForTests,
     resetPromptCaptureStateForTests,

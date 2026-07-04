@@ -1,4 +1,5 @@
 import browser from 'webextension-polyfill';
+import { resolveAgentFromHostname } from './agents/agent-hosts.js';
 import { isPromptCapturedMsg, isResponseStoppedMsg, isShowAdvisoryMsg } from './ipc.js';
 import type { PromptSubmitMsg, ResponseStopMsg } from './ipc.js';
 import type { PanelEvent } from '../../core/ports/ui.port.js';
@@ -28,11 +29,9 @@ function resolveProjectRoot(): string {
 }
 
 function resolveAgent(): string {
-  const host = window.location.hostname;
-  if (host.endsWith('replit.com')) return 'replit';
-  if (host === 'bolt.new' || host.endsWith('stackblitz.com')) return 'bolt';
-  if (host === 'lovable.dev') return 'lovable';
-  return 'unknown';
+  // Shared hostname→agent table (content/agents/agent-hosts.ts) — extracted in B4
+  // when inject.ts's per-agent inject-back dispatch needed the same mapping.
+  return resolveAgentFromHostname(window.location.hostname);
 }
 
 // browser.runtime.sendMessage() is supposed to transparently wake a terminated/idle

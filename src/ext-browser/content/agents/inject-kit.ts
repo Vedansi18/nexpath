@@ -37,7 +37,13 @@ function showToast(message: string): void {
   setTimeout(() => host.remove(), 4000);
 }
 
-async function fallbackToClipboard(text: string): Promise<void> {
+/**
+ * Copy the text to the clipboard and toast the user to paste it manually. Used
+ * internally as the paste-injection fallback, and exported for callers with no
+ * agent-specific injector at all (e.g. inject.ts on a host whose inject-back
+ * hasn't been built yet) — degraded-but-honest beats silently doing nothing.
+ */
+export async function clipboardFallback(text: string): Promise<void> {
   try {
     await navigator.clipboard.writeText(text);
     showToast('Copied to clipboard — paste it into the chat input.');
@@ -67,7 +73,7 @@ function dispatchSimulatedPaste(input: HTMLElement, text: string): void {
 export async function injectViaSimulatedPaste(inputSelector: string, text: string): Promise<void> {
   const input = document.querySelector<HTMLElement>(inputSelector);
   if (!input) {
-    await fallbackToClipboard(text);
+    await clipboardFallback(text);
     return;
   }
 
@@ -77,6 +83,6 @@ export async function injectViaSimulatedPaste(inputSelector: string, text: strin
   await new Promise((resolve) => setTimeout(resolve, 50));
   const landed = (input.textContent ?? '').trim().includes(text.trim().slice(0, 20));
   if (!landed) {
-    await fallbackToClipboard(text);
+    await clipboardFallback(text);
   }
 }
