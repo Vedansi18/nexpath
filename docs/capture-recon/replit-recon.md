@@ -1,5 +1,6 @@
 # Replit — Capture Recon (B3)
 
+**Release:** v0.1.5 (browser extension milestone — see `reviewduel-submodule` `docs/dev/v0.1.5-browser-extension-devplan.md` §7, phase B3)
 **Date:** 2026-07-01 / 2026-07-02
 **Method:** Manual DevTools Network + Elements inspection, relayed via screenshots (browser automation tool was disconnected for this session — see session-history `v015-b2-testing-recovery-and-ui-handoff-gap--discussion-log.md` §O–T for full detail).
 **Test project:** `replit.com/@vedansi18/Hello-World` (a real Agent-built to-do list app), real prompts submitted: "hello", "build a to do list application", "change color to violet one", "make the header bold".

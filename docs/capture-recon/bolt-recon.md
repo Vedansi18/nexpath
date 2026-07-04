@@ -1,5 +1,6 @@
 # Bolt.new — Capture Recon (B4)
 
+**Release:** v0.1.5 (browser extension milestone — see `reviewduel-submodule` `docs/dev/v0.1.5-browser-extension-devplan.md` §8, phase B4)
 **Status: RECON COMPLETE — 2026-07-04.**
 **Method:** Live automated DevTools-equivalent session driven by the assistant via claude-in-chrome in the user's own logged-in Chrome profile (first recon ever done this way — B3's was manual screenshots). Network requests read via the extension's network tracker; request/response shapes confirmed via a temporary page-context fetch tap (removed by tab reload afterwards); DOM read via sanitized in-page queries. Two real prompts submitted to project `bolt.new/~/sb1-1wsba8zs` ("what is machine learning" was pre-existing; "what is supervised learning exactly" submitted twice during recon).
 
@@ -71,11 +72,11 @@ All prompt channels must funnel through the kit's single `emitIfNewText` collaps
 
 ## 4. Inject-back
 
-TipTap/ProseMirror contenteditable → **simulated paste via `inject-kit.ts`** (ProseMirror handles paste through its own transaction pipeline, same rationale as CodeMirror on Replit). Selector: `.tiptap.ProseMirror`. **NOT yet live-verified** — needs the same live confirmation Replit's inject-back eventually got.
+TipTap/ProseMirror contenteditable → **simulated paste via `inject-kit.ts`** (ProseMirror handles paste through its own transaction pipeline, same rationale as CodeMirror on Replit). Selector: `.tiptap.ProseMirror`. **LIVE-VERIFIED 2026-07-04** — full advisory → panel → option-select → inject-back cycle confirmed on real bolt.new: selected option's title pasted into the TipTap composer exactly (text confirmed via `textContent` read), panel closed, no stray submit.
 
 ## 5. Open items
 
-- [ ] Inject-back live verification (§4) — implement first, then live test.
+- [x] Inject-back live verification (§4) — CONFIRMED 2026-07-04 (see §4). Same live cycle also confirmed: composer channel captured at Enter before the page's fetch, both `/api/chat`-matching fetch rules collapsed by the kit funnel (no double-emit), exactly one `response-stopped` after turn completion, advisory fired through the real SW pipeline (Stage 2 LLM `fire:true` on the release-transition trigger prompt).
 - [ ] `*.stackblitz.com` host variant: manifest + `resolveAgent()` already treat it as bolt; whether the same UI/DOM serves there is **NOT CONFIRMED** (bolt.new confirmed only).
 - [ ] Landing-page (`bolt.new` home) prompt box: creates the project then hard-navigates to `/~/<slug>` (content scripts re-inject). First-prompt capture on the landing page **NOT CONFIRMED** — the landing composer wasn't inspected; acceptable gap since the project page is where sessions live (note: the project-creation prompt arrives in `/api/chat/v2`'s `messages` history anyway).
 - [ ] Whether `Version N at` cards appear for EVERY turn type (confirmed for Q&A and observed for the build turn) — the label is a dedup'd secondary signal, so a miss is harmless.
