@@ -118,6 +118,11 @@ import {
   ABSENCE_WORK_RHYTHM_CHECK_FORMAL,
 } from './content-templates/class5-session-quality.js';
 import {
+  ABSENCE_CONTEXT_LOSS_FOUNDER,
+  ABSENCE_CONTEXT_LOSS_INDIE_HACKER,
+  ABSENCE_CONTEXT_LOSS_PM,
+} from './content-templates/context-loss-role-variants.js';
+import {
   ABSENCE_FEATURE_SCOPE,
   ABSENCE_FEATURE_SCOPE_CASUAL,
   ABSENCE_IDEA_CONSTRAINT_CHECK,
@@ -465,6 +470,7 @@ const ABSENCE_CONTENT_FOUNDER: Partial<Record<string, DecisionContent>> = {
   hypothesis_before_build:           ABSENCE_HYPOTHESIS_BEFORE_BUILD_CASUAL,
   technical_vs_product_time_balance: ABSENCE_TECHNICAL_VS_PRODUCT_TIME_BALANCE_CASUAL,
   north_star_alignment:              ABSENCE_NORTH_STAR_ALIGNMENT_CASUAL,
+  context_loss:                      ABSENCE_CONTEXT_LOSS_FOUNDER,
 };
 
 const ABSENCE_CONTENT_INDIE_HACKER: Partial<Record<string, DecisionContent>> = {
@@ -479,6 +485,7 @@ const ABSENCE_CONTENT_INDIE_HACKER: Partial<Record<string, DecisionContent>> = {
   monetization_path_clarity:   ABSENCE_MONETIZATION_PATH_CLARITY_CASUAL,
   build_in_public_opportunity: ABSENCE_BUILD_IN_PUBLIC_OPPORTUNITY_CASUAL,
   scope_vs_time_check:         ABSENCE_SCOPE_VS_TIME_CHECK_CASUAL,
+  context_loss:                ABSENCE_CONTEXT_LOSS_INDIE_HACKER,
 };
 
 const ABSENCE_CONTENT_PM: Partial<Record<string, DecisionContent>> = {
@@ -499,6 +506,7 @@ const ABSENCE_CONTENT_PM: Partial<Record<string, DecisionContent>> = {
   focus_drift_detection:          ABSENCE_FOCUS_DRIFT_DETECTION_FORMAL,
   session_length_checkpoint:      ABSENCE_SESSION_LENGTH_CHECKPOINT_FORMAL,
   progress_consolidation_gap:     ABSENCE_PROGRESS_CONSOLIDATION_GAP_FORMAL,
+  context_loss:                   ABSENCE_CONTEXT_LOSS_PM,
 };
 
 const ABSENCE_CONTENT_PRO_GEEK_SOUL: Partial<Record<string, DecisionContent>> = {
