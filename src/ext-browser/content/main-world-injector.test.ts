@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { describe, it, expect, vi, beforeAll } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 
 const { getURLMock, sendMessageMock, onMessageAddListenerMock, storageGetMock } = vi.hoisted(() => ({
   getURLMock: vi.fn().mockReturnValue('chrome-extension://abc123/inject/main-world.js'),
@@ -102,6 +102,9 @@ describe('main-world-injector.ts', () => {
     });
 
     it('SKIPS capture on the bolt.new landing page AND posts capture-rejected so the kit funnel clears the text', () => {
+      // Fake timers: the skip also arms the rejected-capture stash poll — keep its
+      // interval on a fake clock so it can never fire mid-file on the real one.
+      vi.useFakeTimers();
       sendMessageMock.mockClear();
       const postSpy = vi.spyOn(window, 'postMessage');
       setLocation('https://bolt.new', 'bolt.new', '/');
@@ -115,6 +118,7 @@ describe('main-world-injector.ts', () => {
         'https://bolt.new',
       );
       postSpy.mockRestore();
+      vi.useRealTimers();
     });
 
     it('falls back to hostname-based agent resolution — stackblitz.com subdomain project page', () => {
@@ -152,6 +156,78 @@ describe('main-world-injector.ts', () => {
         agent: 'replit',
         tabId: 0,
       });
+    });
+  });
+
+  describe('rejected-capture stash — delivery after navigating into a project (DOM/transport-independent)', () => {
+    // Replit's newer workspace has no data-cy user-message and a binary-WS chat
+    // transport, so nothing re-captures a home-typed prompt (confirmed live
+    // 2026-07-06 twice) — the injector itself must carry the text across the
+    // navigation.
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+      // Restore the file-default location — later describes depend on it.
+      setLocation('https://replit.com', 'replit.com', '/@vedansi18/Hello-World');
+    });
+
+    it('delivers the stashed prompt with the NEW project root once the URL resolves', () => {
+      sendMessageMock.mockClear();
+      setLocation('https://replit.com', 'replit.com', '/~'); // home — rejection + stash
+      dispatchWindowMessage({ type: 'nexpath:prompt-captured', promptText: 'make a tip calculator', agent: 'replit' });
+      expect(sendMessageMock).not.toHaveBeenCalled();
+
+      // Replit soft-navigates into the auto-created repl.
+      setLocation('https://replit.com', 'replit.com', '/@bhavnesh1/Tip-Calculator');
+      vi.advanceTimersByTime(1_100);
+
+      expect(sendMessageMock).toHaveBeenCalledWith({
+        type: 'nexpath:prompt-submit',
+        promptText: 'make a tip calculator',
+        projectRoot: 'https://replit.com/@bhavnesh1/Tip-Calculator',
+        agent: 'replit',
+        tabId: 0,
+      });
+    });
+
+    it('delivers exactly once — the poll stops after flushing', () => {
+      sendMessageMock.mockClear();
+      setLocation('https://bolt.new', 'bolt.new', '/');
+      dispatchWindowMessage({ type: 'nexpath:prompt-captured', promptText: 'weather page', agent: 'bolt' });
+
+      setLocation('https://bolt.new', 'bolt.new', '/~/sb1-abc');
+      vi.advanceTimersByTime(1_100);
+      expect(sendMessageMock).toHaveBeenCalledTimes(1);
+
+      vi.advanceTimersByTime(5_000);
+      expect(sendMessageMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('drops the stash after the TTL if no project is ever entered', () => {
+      sendMessageMock.mockClear();
+      setLocation('https://bolt.new', 'bolt.new', '/');
+      dispatchWindowMessage({ type: 'nexpath:prompt-captured', promptText: 'abandoned prompt', agent: 'bolt' });
+
+      vi.advanceTimersByTime(125_000); // stays on the landing page past the TTL
+      setLocation('https://bolt.new', 'bolt.new', '/~/sb1-late');
+      vi.advanceTimersByTime(5_000);
+
+      expect(sendMessageMock).not.toHaveBeenCalled();
+    });
+
+    it('a newer rejected prompt replaces the stash (latest wins)', () => {
+      sendMessageMock.mockClear();
+      setLocation('https://bolt.new', 'bolt.new', '/');
+      dispatchWindowMessage({ type: 'nexpath:prompt-captured', promptText: 'first idea', agent: 'bolt' });
+      dispatchWindowMessage({ type: 'nexpath:prompt-captured', promptText: 'second idea', agent: 'bolt' });
+
+      setLocation('https://bolt.new', 'bolt.new', '/~/sb1-xyz');
+      vi.advanceTimersByTime(1_100);
+
+      expect(sendMessageMock).toHaveBeenCalledTimes(1);
+      expect(sendMessageMock).toHaveBeenCalledWith(expect.objectContaining({ promptText: 'second idea' }));
     });
   });
 

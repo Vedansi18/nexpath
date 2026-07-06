@@ -55,6 +55,64 @@ function resolveAgent(): string {
 // again, even if the retry doesn't recover it.
 const SEND_RETRY_DELAY_MS = 400;
 
+// ── Rejected-capture stash ─────────────────────────────────────────────────────
+//
+// A prompt typed on a landing/home page has no project context yet, so delivery is
+// rejected — but the SAME page instance then soft-navigates into the newly created
+// project (Bolt landing → /~/<slug>, Replit home box → /@user/<repl>). The
+// capture-rejected feedback lets DOM/fetch channels re-capture it there, but that
+// depends on the agent having such a channel on the project page: Replit's newer
+// workspace renders user messages with hashed CSS classes only (no data-cy) and its
+// chat transport is binary WS — nothing re-captures, the prompt is lost (confirmed
+// live 2026-07-06, twice). The stash removes every DOM/transport assumption: hold
+// the rejected text here and deliver it directly as soon as the URL resolves to a
+// project root. Layering is safe — if a channel re-captures the same text too, the
+// SW's cross-page same-text dedup collapses the duplicate.
+const PENDING_CAPTURE_TTL_MS = 120_000;
+const PENDING_FLUSH_POLL_MS = 1_000;
+
+let pendingRejectedCapture: { promptText: string; agent: string; stashedAt: number } | null = null;
+let pendingFlushTimer: ReturnType<typeof setInterval> | null = null;
+
+function stopPendingFlush(): void {
+  if (pendingFlushTimer !== null) {
+    clearInterval(pendingFlushTimer);
+    pendingFlushTimer = null;
+  }
+}
+
+function stashRejectedCapture(promptText: string, agent: string): void {
+  pendingRejectedCapture = { promptText, agent, stashedAt: Date.now() };
+  // Always re-arm: a fresh interval per stash keeps the poll's lifetime tied to the
+  // newest stash (and never leaves a stale timer from an earlier one running).
+  stopPendingFlush();
+  pendingFlushTimer = setInterval(() => {
+    if (pendingRejectedCapture === null) {
+      stopPendingFlush();
+      return;
+    }
+    if (Date.now() - pendingRejectedCapture.stashedAt > PENDING_CAPTURE_TTL_MS) {
+      console.log('[nexpath] stashed prompt expired without entering a project — dropped');
+      pendingRejectedCapture = null;
+      stopPendingFlush();
+      return;
+    }
+    const projectRoot = resolveProjectRoot();
+    if (projectRoot === null) return;
+    const sw: PromptSubmitMsg = {
+      type: 'nexpath:prompt-submit',
+      promptText: pendingRejectedCapture.promptText,
+      projectRoot,
+      agent: pendingRejectedCapture.agent,
+      tabId: 0,
+    };
+    sendToServiceWorker(sw);
+    console.log('[nexpath] stashed prompt delivered after navigating into the project');
+    pendingRejectedCapture = null;
+    stopPendingFlush();
+  }, PENDING_FLUSH_POLL_MS);
+}
+
 function sendToServiceWorker(msg: PromptSubmitMsg | ResponseStopMsg): void {
   browser.runtime.sendMessage(msg).catch((firstErr: unknown) => {
     console.warn('[nexpath] sendMessage failed, retrying once:', msg.type, String(firstErr));
@@ -108,6 +166,9 @@ function setupListeners(): void {
           { type: 'nexpath:capture-rejected', promptText: msg.promptText },
           window.location.origin,
         );
+        // And hold the text ourselves: some agents have no re-capture channel on
+        // the project page at all (see stashRejectedCapture).
+        stashRejectedCapture(msg.promptText, msg.agent || resolveAgent());
         return;
       }
       const sw: PromptSubmitMsg = {
