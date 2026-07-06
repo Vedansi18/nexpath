@@ -81,7 +81,13 @@ export function extractLastUserMessage(bodyText: string): string | null {
 }
 
 export const FETCH_CAPTURE_RULES: FetchCaptureRule[] = [
-  { agent: 'bolt', urlIncludes: '/api/chat', extractPrompt: extractLastUserMessage },
+  // '/api/chat/v2' exactly — NOT the broader '/api/chat' substring. Bolt also POSTs
+  // its project-persist payload to /api/chats/<id> (matches the substring, carries
+  // the full messages history); on a page load with unsaved state that persist call
+  // re-captures the LAST HISTORICAL user prompt and fires a spurious advisory with
+  // zero user action (observed live 2026-07-06). Only the generation endpoint
+  // carries a prompt the user just submitted.
+  { agent: 'bolt', urlIncludes: '/api/chat/v2', extractPrompt: extractLastUserMessage },
 ];
 
 export function emitFetchPrompt(promptText: string, agent: string): void {

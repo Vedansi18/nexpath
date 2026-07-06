@@ -127,12 +127,29 @@ describe('fetch capture rules (B4 — Bolt transport, recon-confirmed)', () => {
     });
   });
 
-  it('declares a bolt rule for /api/chat', async () => {
+  it('declares a bolt rule for the /api/chat/v2 generation endpoint only', async () => {
     stubWindow('bolt.new');
     const { FETCH_CAPTURE_RULES } = await import('./main-world.js');
     const bolt = FETCH_CAPTURE_RULES.find((r) => r.agent === 'bolt');
     expect(bolt).toBeDefined();
-    expect(bolt!.urlIncludes).toBe('/api/chat');
+    expect(bolt!.urlIncludes).toBe('/api/chat/v2');
+  });
+
+  it('ignores Bolt project-persist POSTs to /api/chats/<id> even when they carry a messages history', async () => {
+    // Bolt persists the project (full messages array included) to /api/chats/<id>;
+    // on a load with unsaved state this replayed the last HISTORICAL prompt and fired
+    // a spurious advisory with zero user action (live, 2026-07-06).
+    stubWindow('bolt.new');
+    await import('./main-world.js');
+
+    void window.fetch('https://bolt.new/api/chats/68519367', {
+      method: 'POST',
+      body: JSON.stringify({ messages: [{ role: 'user', content: 'old historical prompt' }] }),
+    });
+    await flush();
+
+    expect(nativeFetch).toHaveBeenCalled();
+    expect(postMessageSpy).not.toHaveBeenCalled();
   });
 
   it('a POST to /api/chat/v2 on bolt.new posts a nexpath:fetch-prompt message', async () => {

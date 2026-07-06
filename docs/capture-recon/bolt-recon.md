@@ -62,7 +62,7 @@ A **`Version N at <time>` card** appears in the chat per completed turn (confirm
 
 | Signal | Method | Selector/endpoint | Notes |
 |---|---|---|---|
-| Prompt-submit (primary) | MAIN-world fetch interception | `POST` URL containing `/api/chat` on bolt hosts → `body.messages.at(-1).content` where `role==='user'` | The devplan's original tier-2 'fetch' plan finally applies (non-viable on Replit) |
+| Prompt-submit (primary) | MAIN-world fetch interception | `POST` URL containing `/api/chat/v2` (exactly — NOT the `/api/chat` substring) on bolt hosts → `body.messages.at(-1).content` where `role==='user'` | The devplan's original tier-2 'fetch' plan finally applies (non-viable on Replit). **Corrected 2026-07-06:** the original `/api/chat` substring also matched Bolt's project-persist `POST /api/chats/<id>` (full messages history) — on a page load with unsaved state this replayed the last HISTORICAL prompt and fired a spurious advisory with zero user action (observed live). |
 | Prompt-submit (secondary) | Composer read at submit (dom-events) | `.tiptap.ProseMirror` + `button[aria-label="Send message"]` anchor; Enter submits | Same kit channel as Replit; per-agent selectors prevent the file-editor trap (§2.1) |
 | Prompt-submit (tertiary) | MutationObserver + park/sweep | `.self-end [class*="_MarkdownContent_"]` | Defense-in-depth only |
 | Response-stop | Stop-button presence removal (observer + poll) + `Version N at` completion label | `button[aria-label="Stop generation"]`; `/\bVersion \d+ at\b/` | Deliberately NOT signaled from the fetch stream end — single source of truth for stop stays DOM-side, deduped in the kit |
