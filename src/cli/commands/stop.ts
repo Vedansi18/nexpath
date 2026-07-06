@@ -3,6 +3,8 @@ import { platform } from 'node:process';
 import type { Store } from '../../store/db.js';
 import { openStore, closeStore, DEFAULT_DB_PATH } from '../../store/db.js';
 import { getPendingAdvisory, markAdvisoryShown } from '../../store/pending-advisories.js';
+import { recordActivity } from '../../store/project-usage.js';
+import { recordAdvisoryFired, recordOptionSelected } from '../../store/feedback-signals.js';
 import { runDecisionSession } from '../../decision-session/DecisionSession.js';
 import type { SelectFn } from '../../decision-session/DecisionSession.js';
 import { createTtySelectFn } from '../../decision-session/TtySelectFn.js';
@@ -76,6 +78,10 @@ export async function runStop(
     logger.debug('stop_loop_guard', { cwd: payload.cwd });
     return { outcome: 'loop_guard' };
   }
+
+  // 1.2. Record active usage for this project — one heartbeat per turn,
+  //      independent of whether an advisory fires.
+  recordActivity(store, payload.cwd);
 
   // 1.5. Language detection — runs post-response, invisible latency
   //      Only fires when >= LANG_DETECT_INTERVAL prompts have been captured for this project.
@@ -165,6 +171,7 @@ export async function runStop(
     stage:            advisory.stage,
     generatedOptions: !!generatedOptions,
   }, store);
+  recordAdvisoryFired(store, payload.cwd);
 
   const dsResult = await runDecisionSession(
     {
@@ -185,6 +192,8 @@ export async function runStop(
   );
 
   if (dsResult.outcome === 'selected') {
+    // Record the selection (timestamp only — no option text or index).
+    recordOptionSelected(store, payload.cwd);
     // Store injected text in session — auto reads and clears this on its next invocation
     // to skip all pipeline processing for the advisory-injected prompt.
     mgr.setInjectedPrompt(store, dsResult.selectedPrompt);
