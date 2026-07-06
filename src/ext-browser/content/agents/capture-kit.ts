@@ -89,6 +89,24 @@ export interface CaptureKitConfig {
    * guarantee across fetch/composer/observer channels.
    */
   listenForFetchPrompts?: boolean;
+
+  /**
+   * Whether bootstrap() wires the rendered-message MutationObserver channel
+   * (observeUserMessages + its reconciliation sweep). Default true.
+   *
+   * Set FALSE for agents whose chat re-renders/re-creates message DOM nodes
+   * during a single turn: the observer keys "already seen" on element identity,
+   * so re-created history nodes read as brand-new and get re-captured every
+   * 1500ms sweep — and because those false captures alternate different old
+   * texts, they also defeat the funnel's consecutive-duplicate guard, breaking
+   * the legitimate composer/fetch collapse too. Confirmed live on Lovable
+   * 2026-07-06 (promptCount exploded to 13+ from one prompt). Lovable's genuine
+   * prompt is captured exactly once by the composer + fetch channels, which the
+   * funnel collapses correctly, so the observer is redundant there — not merely
+   * disabled to hide a symptom. `observeUserMessages` stays exported for direct
+   * unit testing; only the bootstrap wiring is gated.
+   */
+  observeRenderedMessages?: boolean;
 }
 
 export interface CaptureKit {
@@ -513,7 +531,7 @@ export function createCaptureKit(config: CaptureKitConfig): CaptureKit {
     if (config.listenForFetchPrompts) observeFetchPrompts(window);
     observeCaptureRejections(window);
     if (config.composer) observeComposerSubmit(document);
-    observeUserMessages(document.body);
+    if (config.observeRenderedMessages !== false) observeUserMessages(document.body);
     observeStopButton(document.body);
     if (config.completionLabel) observeCompletionLabel(document.body);
   }

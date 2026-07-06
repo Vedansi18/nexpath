@@ -258,6 +258,22 @@ describe('content/agents/lovable.ts', () => {
     });
   });
 
+  describe('rendered-message observer DISABLED (Lovable re-render flood fix, live 2026-07-06)', () => {
+    it('a re-rendered/re-inserted user message is NOT captured by the wired kit (bootstrap already ran at import)', async () => {
+      // The module auto-ran bootstrap() at import with observeRenderedMessages:false,
+      // so no rendered-message observer is live. Inserting a user-message node — as
+      // Lovable does repeatedly during a turn — must produce NO capture.
+      postMessageSpy.mockClear();
+      document.body.appendChild(makeUserMessage('This looks done - ship this now', 99));
+      await flush();
+
+      expect(postMessageSpy).not.toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'nexpath:prompt-captured' }),
+        window.location.origin,
+      );
+    });
+  });
+
   describe('bootstrap idempotency (stale re-injection guard)', () => {
     it('a second bootstrap() call in the same page is a no-op', () => {
       // The module's import-time auto-run already set the window flag.

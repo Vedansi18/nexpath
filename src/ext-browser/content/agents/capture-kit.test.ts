@@ -41,6 +41,87 @@ describe('content/agents/capture-kit.ts', () => {
     postMessageSpy.mockRestore();
   });
 
+  describe('observeRenderedMessages flag (Lovable re-render fix, live 2026-07-06)', () => {
+    // Each unique bootstrapFlag makes bootstrap()'s idempotency guard independent.
+    it('bootstrap() WIRES the rendered-message observer by default (Bolt/Replit behavior unchanged)', async () => {
+      const kit = createCaptureKit(makeConfig({
+        bootstrapFlag: '__nexpathObsDefault', userMessageSelector: '[data-testid="m"]',
+      }));
+      kit.bootstrap();
+      await flush();
+
+      // A user message inserted after bootstrap must be captured (observer live).
+      const el = document.createElement('div');
+      el.setAttribute('data-testid', 'm');
+      el.textContent = 'a fresh prompt';
+      document.body.appendChild(el);
+      await flush();
+
+      expect(postMessageSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'nexpath:prompt-captured', promptText: 'a fresh prompt' }),
+        window.location.origin,
+      );
+    });
+
+    it('bootstrap() does NOT wire the rendered-message observer when observeRenderedMessages:false', async () => {
+      const kit = createCaptureKit(makeConfig({
+        bootstrapFlag: '__nexpathObsOff', observeRenderedMessages: false,
+        userMessageSelector: '[data-testid="m2"]',
+      }));
+      kit.bootstrap();
+      await flush();
+
+      // An inserted (re-rendered) message must NOT be captured — this is the flood
+      // Lovable hit: re-created history nodes re-captured every sweep.
+      const el = document.createElement('div');
+      el.setAttribute('data-testid', 'm2');
+      el.textContent = 'a re-rendered history message';
+      document.body.appendChild(el);
+      await flush();
+
+      expect(postMessageSpy).not.toHaveBeenCalled();
+    });
+
+    it('with the observer off, composer + fetch of the SAME prompt still collapse to ONE emit', async () => {
+      const kit = createCaptureKit(makeConfig({
+        bootstrapFlag: '__nexpathObsOff2', observeRenderedMessages: false,
+        userMessageSelector: '[data-testid="m3"]',
+        composer: {
+          composerSelector: '.tiptap.ProseMirror',
+          submitButtonSelector: 'button[aria-label="Send message"]',
+          readComposerText: (el) => Array.from(el.querySelectorAll('p'), (p) => p.textContent ?? '').join('\n').trim(),
+        },
+        listenForFetchPrompts: true,
+      }));
+      observers.push(kit.observeComposerSubmit(document));
+      observers.push(kit.observeFetchPrompts(window));
+
+      const container = document.createElement('div');
+      const composer = document.createElement('div');
+      composer.className = 'tiptap ProseMirror';
+      composer.setAttribute('contenteditable', 'true');
+      const para = document.createElement('p');
+      para.textContent = 'ship it now';
+      composer.appendChild(para);
+      const btn = document.createElement('button');
+      btn.setAttribute('aria-label', 'Send message');
+      container.append(composer, btn);
+      document.body.appendChild(container);
+
+      // Composer submit, then the page's fetch of the same text.
+      para.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      window.dispatchEvent(new MessageEvent('message', {
+        data: { type: 'nexpath:fetch-prompt', promptText: 'ship it now', agent: 'test-agent' },
+        origin: window.location.origin, source: window,
+      }));
+
+      const captured = postMessageSpy.mock.calls.filter(
+        (c) => (c[0] as { type?: string })?.type === 'nexpath:prompt-captured',
+      );
+      expect(captured).toHaveLength(1);
+    });
+  });
+
   it('carries the configured agent id in prompt-captured messages', async () => {
     const kit = createCaptureKit(makeConfig({ agent: 'bolt', userMessageSelector: '[data-testid="bolt-msg"]' }));
     observers.push(kit.observeUserMessages(document.body));

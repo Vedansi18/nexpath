@@ -71,6 +71,14 @@ const kit = createCaptureKit({
   // varies ("Added…"/"Built…"), too fragile for a signal (recon §5). The
   // stop-button observer + the kit's poll safety net are the single stop source.
   listenForFetchPrompts: true,
+  // CRITICAL (confirmed live 2026-07-06): Lovable re-renders/re-creates its chat
+  // message DOM nodes throughout a generation turn, so the rendered-message
+  // observer channel re-captures already-sent history messages every sweep,
+  // exploding promptCount (13+ from one prompt). Lovable's genuine prompt is
+  // captured exactly once by the composer channel (on Enter) AND the fetch channel
+  // (POST /projects/<id>/chat), which the funnel collapses to a single emit — so
+  // the observer is redundant here, not just noisy. Disable it. See CaptureKitConfig.
+  observeRenderedMessages: false,
 });
 
 // Re-exported for tests, mirroring replit.ts/bolt.ts's stable agent-named surface.
