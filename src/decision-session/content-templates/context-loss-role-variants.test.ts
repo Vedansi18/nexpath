@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { UserProfile } from '../../classifier/types.js';
 import { resolveDecisionContent, type DecisionContent } from '../options.js';
+import { findVoiceViolations } from '../content-authoring-rules.js';
 import {
   ABSENCE_CONTEXT_LOSS_FOUNDER,
   ABSENCE_CONTEXT_LOSS_INDIE_HACKER,
@@ -34,6 +35,17 @@ describe('context_loss role variants — structure + decision anchor', () => {
         expect(joined).toContain('constraint');
         expect(joined).toContain('assumption');
       });
+    });
+  }
+});
+
+describe('context_loss role variants — voice (option = user message TO the agent)', () => {
+  for (const [role, c] of Object.entries(VARIANTS)) {
+    it(`${role}: no banned third-person patterns in any option or why-desc`, () => {
+      for (const e of [...c.L1, ...c.L2, ...c.L3]) {
+        expect(findVoiceViolations(e.option)).toEqual([]);
+        expect(findVoiceViolations(e.descBase)).toEqual([]);
+      }
     });
   }
 });
