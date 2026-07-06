@@ -1,5 +1,5 @@
 import browser from 'webextension-polyfill';
-import { resolveAgentFromHostname } from './agents/agent-hosts.js';
+import { resolveAgentFromHostname, resolveProjectRootFromLocation } from './agents/agent-hosts.js';
 import { isPromptCapturedMsg, isResponseStoppedMsg, isShowAdvisoryMsg } from './ipc.js';
 import type { PromptSubmitMsg, ResponseStopMsg } from './ipc.js';
 import type { PanelEvent } from '../../core/ports/ui.port.js';
@@ -23,9 +23,16 @@ declare global {
 
 // ── Resolve project root from current tab URL ─────────────────────────────────
 
-function resolveProjectRoot(): string {
-  // Use origin as the project-root proxy in the browser; B3–B5 will refine.
-  return window.location.origin;
+function resolveProjectRoot(): string | null {
+  // Per-project session root (CLI parity: session keyed to the project, not the
+  // whole site) — see agent-hosts.ts for the shapes and why null means "skip".
+  // Read at message time, not module load: SPA navigations change the path
+  // without re-injecting this script.
+  return resolveProjectRootFromLocation(
+    window.location.hostname,
+    window.location.pathname,
+    window.location.origin,
+  );
 }
 
 function resolveAgent(): string {
@@ -66,11 +73,35 @@ function setupListeners(): void {
     if (ev.source !== window) return;
     const msg = ev.data as unknown;
 
+    // Read-only debug channel: SW console lines die with the SW (MV3 teardown), and
+    // neither chrome:// nor chrome-extension:// pages are reachable by tooling — this
+    // is the only way to inspect the last Stage-2 verdict from the page itself.
+    // Strictly whitelisted (never the API key or any other storage content).
+    if ((msg as { type?: unknown } | null)?.type === 'nexpath:debug-request') {
+      void browser.storage.local.get('nexpath_last_stage2_result').then((res) => {
+        window.postMessage(
+          {
+            type: 'nexpath:debug-state',
+            lastStage2Result: typeof res['nexpath_last_stage2_result'] === 'string'
+              ? res['nexpath_last_stage2_result']
+              : null,
+          },
+          window.location.origin,
+        );
+      });
+      return;
+    }
+
     if (isPromptCapturedMsg(msg)) {
+      const projectRoot = resolveProjectRoot();
+      if (projectRoot === null) {
+        console.log('[nexpath] capture skipped — no project context on this page (e.g. landing page)');
+        return;
+      }
       const sw: PromptSubmitMsg = {
         type: 'nexpath:prompt-submit',
         promptText: msg.promptText,
-        projectRoot: resolveProjectRoot(),
+        projectRoot,
         agent: msg.agent || resolveAgent(),
         tabId: 0, // SW fills real tab ID from sender.tab.id
       };
@@ -79,9 +110,11 @@ function setupListeners(): void {
     }
 
     if (isResponseStoppedMsg(msg)) {
+      const projectRoot = resolveProjectRoot();
+      if (projectRoot === null) return; // same skip rule as prompt-submit, no log needed
       const sw: ResponseStopMsg = {
         type: 'nexpath:response-stop',
-        projectRoot: resolveProjectRoot(),
+        projectRoot,
         agent: msg.agent || resolveAgent(),
         tabId: 0,
       };

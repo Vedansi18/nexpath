@@ -2,10 +2,11 @@
 
 import { describe, it, expect, vi, beforeAll } from 'vitest';
 
-const { getURLMock, sendMessageMock, onMessageAddListenerMock } = vi.hoisted(() => ({
+const { getURLMock, sendMessageMock, onMessageAddListenerMock, storageGetMock } = vi.hoisted(() => ({
   getURLMock: vi.fn().mockReturnValue('chrome-extension://abc123/inject/main-world.js'),
   sendMessageMock: vi.fn().mockResolvedValue(undefined),
   onMessageAddListenerMock: vi.fn(),
+  storageGetMock: vi.fn().mockResolvedValue({}),
 }));
 
 vi.mock('webextension-polyfill', () => ({
@@ -15,14 +16,15 @@ vi.mock('webextension-polyfill', () => ({
       sendMessage: sendMessageMock,
       onMessage: { addListener: onMessageAddListenerMock },
     },
+    storage: { local: { get: storageGetMock } },
   },
 }));
 
 let appendChildSpy: ReturnType<typeof vi.spyOn>;
 let capturedScript: HTMLScriptElement | undefined;
 
-function setLocation(origin: string, hostname: string): void {
-  vi.stubGlobal('location', { origin, hostname });
+function setLocation(origin: string, hostname: string, pathname = '/'): void {
+  vi.stubGlobal('location', { origin, hostname, pathname });
 }
 
 function dispatchWindowMessage(data: unknown, source: unknown = window): void {
@@ -33,7 +35,7 @@ describe('main-world-injector.ts', () => {
   // Module registers its 'message' listener and injects the script once, at import time —
   // must be imported exactly once for this file, not per-test.
   beforeAll(async () => {
-    setLocation('https://replit.com', 'replit.com');
+    setLocation('https://replit.com', 'replit.com', '/@vedansi18/Hello-World');
 
     appendChildSpy = vi.spyOn(document.head, 'appendChild').mockImplementation((node) => {
       capturedScript = node as HTMLScriptElement;
@@ -74,63 +76,112 @@ describe('main-world-injector.ts', () => {
       expect(sendMessageMock).not.toHaveBeenCalled();
     });
 
-    it('forwards a PromptCapturedMsg as nexpath:prompt-submit with resolved projectRoot and given agent', () => {
+    it('forwards a PromptCapturedMsg as nexpath:prompt-submit with the per-PROJECT root (CLI parity)', () => {
       sendMessageMock.mockClear();
-      setLocation('https://replit.com', 'replit.com');
+      setLocation('https://replit.com', 'replit.com', '/@vedansi18/Hello-World');
       dispatchWindowMessage({ type: 'nexpath:prompt-captured', promptText: 'write code', agent: 'replit' });
 
       expect(sendMessageMock).toHaveBeenCalledWith({
         type: 'nexpath:prompt-submit',
         promptText: 'write code',
-        projectRoot: 'https://replit.com',
+        projectRoot: 'https://replit.com/@vedansi18/Hello-World',
         agent: 'replit',
         tabId: 0,
       });
     });
 
-    it('falls back to hostname-based agent resolution when agent is empty — bolt.new', () => {
+    it('falls back to hostname-based agent resolution when agent is empty — bolt.new project page', () => {
       sendMessageMock.mockClear();
-      setLocation('https://bolt.new', 'bolt.new');
+      setLocation('https://bolt.new', 'bolt.new', '/~/sb1-abc123');
+      dispatchWindowMessage({ type: 'nexpath:prompt-captured', promptText: 'hi', agent: '' });
+
+      expect(sendMessageMock).toHaveBeenCalledWith(expect.objectContaining({
+        agent: 'bolt',
+        projectRoot: 'https://bolt.new/~/sb1-abc123',
+      }));
+    });
+
+    it('SKIPS capture on the bolt.new landing page — no project context (the prompt re-arrives in the new project page own /api/chat/v2 POST)', () => {
+      sendMessageMock.mockClear();
+      setLocation('https://bolt.new', 'bolt.new', '/');
+      dispatchWindowMessage({ type: 'nexpath:prompt-captured', promptText: 'hi', agent: 'bolt' });
+
+      expect(sendMessageMock).not.toHaveBeenCalled();
+    });
+
+    it('falls back to hostname-based agent resolution — stackblitz.com subdomain project page', () => {
+      sendMessageMock.mockClear();
+      setLocation('https://abc.stackblitz.com', 'abc.stackblitz.com', '/~/xyz');
       dispatchWindowMessage({ type: 'nexpath:prompt-captured', promptText: 'hi', agent: '' });
 
       expect(sendMessageMock).toHaveBeenCalledWith(expect.objectContaining({ agent: 'bolt' }));
     });
 
-    it('falls back to hostname-based agent resolution — stackblitz.com subdomain', () => {
+    it('SKIPS capture on lovable.dev — project URL shape unknown until the B5 recon', () => {
       sendMessageMock.mockClear();
-      setLocation('https://abc.stackblitz.com', 'abc.stackblitz.com');
+      setLocation('https://lovable.dev', 'lovable.dev', '/projects/some-app');
       dispatchWindowMessage({ type: 'nexpath:prompt-captured', promptText: 'hi', agent: '' });
 
-      expect(sendMessageMock).toHaveBeenCalledWith(expect.objectContaining({ agent: 'bolt' }));
+      expect(sendMessageMock).not.toHaveBeenCalled();
     });
 
-    it('falls back to hostname-based agent resolution — lovable.dev', () => {
+    it('SKIPS capture on an unrecognized host — no project-root rule exists for it', () => {
       sendMessageMock.mockClear();
-      setLocation('https://lovable.dev', 'lovable.dev');
+      setLocation('https://example.com', 'example.com', '/whatever');
       dispatchWindowMessage({ type: 'nexpath:prompt-captured', promptText: 'hi', agent: '' });
 
-      expect(sendMessageMock).toHaveBeenCalledWith(expect.objectContaining({ agent: 'lovable' }));
+      expect(sendMessageMock).not.toHaveBeenCalled();
     });
 
-    it('resolves to "unknown" for an unrecognized host', () => {
+    it('forwards a ResponseStoppedMsg as nexpath:response-stop with the per-PROJECT root', () => {
       sendMessageMock.mockClear();
-      setLocation('https://example.com', 'example.com');
-      dispatchWindowMessage({ type: 'nexpath:prompt-captured', promptText: 'hi', agent: '' });
-
-      expect(sendMessageMock).toHaveBeenCalledWith(expect.objectContaining({ agent: 'unknown' }));
-    });
-
-    it('forwards a ResponseStoppedMsg as nexpath:response-stop', () => {
-      sendMessageMock.mockClear();
-      setLocation('https://replit.com', 'replit.com');
+      setLocation('https://replit.com', 'replit.com', '/@vedansi18/Hello-World');
       dispatchWindowMessage({ type: 'nexpath:response-stopped', agent: 'replit' });
 
       expect(sendMessageMock).toHaveBeenCalledWith({
         type: 'nexpath:response-stop',
-        projectRoot: 'https://replit.com',
+        projectRoot: 'https://replit.com/@vedansi18/Hello-World',
         agent: 'replit',
         tabId: 0,
       });
+    });
+  });
+
+  describe('nexpath:debug-request → whitelisted debug-state reply', () => {
+    it('answers a debug-request with the persisted last Stage-2 verdict via postMessage', async () => {
+      sendMessageMock.mockClear();
+      storageGetMock.mockResolvedValueOnce({
+        nexpath_last_stage2_result: '{"fire":false,"reason":"testing already demonstrated"}',
+      });
+      const postSpy = vi.spyOn(window, 'postMessage');
+
+      dispatchWindowMessage({ type: 'nexpath:debug-request' });
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(storageGetMock).toHaveBeenCalledWith('nexpath_last_stage2_result');
+      expect(postSpy).toHaveBeenCalledWith(
+        {
+          type: 'nexpath:debug-state',
+          lastStage2Result: '{"fire":false,"reason":"testing already demonstrated"}',
+        },
+        'https://replit.com',
+      );
+      expect(sendMessageMock).not.toHaveBeenCalled(); // debug traffic never reaches the SW
+      postSpy.mockRestore();
+    });
+
+    it('answers with null when no verdict has been persisted yet', async () => {
+      storageGetMock.mockResolvedValueOnce({});
+      const postSpy = vi.spyOn(window, 'postMessage');
+
+      dispatchWindowMessage({ type: 'nexpath:debug-request' });
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(postSpy).toHaveBeenCalledWith(
+        { type: 'nexpath:debug-state', lastStage2Result: null },
+        'https://replit.com',
+      );
+      postSpy.mockRestore();
     });
   });
 
@@ -147,7 +198,7 @@ describe('main-world-injector.ts', () => {
         sendMessageMock.mockClear();
         sendMessageMock.mockRejectedValueOnce(new Error('SW not up yet')).mockResolvedValueOnce(undefined);
 
-        setLocation('https://replit.com', 'replit.com');
+        setLocation('https://replit.com', 'replit.com', '/@vedansi18/Hello-World');
         dispatchWindowMessage({ type: 'nexpath:prompt-captured', promptText: 'hi', agent: 'replit' });
         await vi.advanceTimersByTimeAsync(0); // let the first rejection's .catch() run
 
@@ -176,7 +227,7 @@ describe('main-world-injector.ts', () => {
         sendMessageMock.mockClear();
         sendMessageMock.mockRejectedValue(new Error('still not up'));
 
-        setLocation('https://replit.com', 'replit.com');
+        setLocation('https://replit.com', 'replit.com', '/@vedansi18/Hello-World');
         dispatchWindowMessage({ type: 'nexpath:response-stopped', agent: 'replit' });
         await vi.advanceTimersByTimeAsync(0);
         await vi.advanceTimersByTimeAsync(400);
