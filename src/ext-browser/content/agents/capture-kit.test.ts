@@ -247,6 +247,25 @@ describe('content/agents/capture-kit.ts', () => {
       );
     });
 
+    it('ignores a capture-rejected message from a foreign origin (funnel record stays intact)', () => {
+      const kit = createCaptureKit(makeConfig({ agent: 'bolt' }));
+      observers.push(kit.observeFetchPrompts(window));
+      observers.push(kit.observeCaptureRejections(window));
+
+      dispatchFetchPromptFor('bolt', 'prompt one');
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          data: { type: 'nexpath:capture-rejected', promptText: 'prompt one' },
+          origin: 'https://evil.example.com',
+          source: window,
+        }),
+      );
+
+      postMessageSpy.mockClear();
+      dispatchFetchPromptFor('bolt', 'prompt one');
+      expect(postMessageSpy).not.toHaveBeenCalled(); // still deduped — foreign rejection had no effect
+    });
+
     it('a rejection for a DIFFERENT text leaves the funnel record intact (identical re-send still collapses)', () => {
       const kit = createCaptureKit(makeConfig({ agent: 'bolt' }));
       observers.push(kit.observeFetchPrompts(window));

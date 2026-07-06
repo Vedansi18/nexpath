@@ -145,6 +145,21 @@ describe('main-world-injector.ts', () => {
       expect(sendMessageMock).not.toHaveBeenCalled();
     });
 
+    it('SKIPS a ResponseStoppedMsg on a landing page and never stashes it (stash is prompt-only by design)', () => {
+      vi.useFakeTimers();
+      sendMessageMock.mockClear();
+      setLocation('https://bolt.new', 'bolt.new', '/');
+      dispatchWindowMessage({ type: 'nexpath:response-stopped', agent: 'bolt' });
+      expect(sendMessageMock).not.toHaveBeenCalled();
+
+      // Entering a project later must NOT produce a delivery — there is no prompt.
+      setLocation('https://bolt.new', 'bolt.new', '/~/sb1-zzz');
+      vi.advanceTimersByTime(5_000);
+      expect(sendMessageMock).not.toHaveBeenCalled();
+      vi.useRealTimers();
+      setLocation('https://replit.com', 'replit.com', '/@vedansi18/Hello-World');
+    });
+
     it('forwards a ResponseStoppedMsg as nexpath:response-stop with the per-PROJECT root', () => {
       sendMessageMock.mockClear();
       setLocation('https://replit.com', 'replit.com', '/@vedansi18/Hello-World');

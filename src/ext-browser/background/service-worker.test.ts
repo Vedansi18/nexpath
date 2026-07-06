@@ -719,6 +719,11 @@ describe('service-worker.ts', () => {
       expect(logDebugMock).toHaveBeenCalledWith('stage2_result', expect.objectContaining({ fire: true }));
       expect(logDebugMock).toHaveBeenCalledWith('advisory_showing', expect.objectContaining({ tabId: 7 }));
       expect(showAdvisoryMock).toHaveBeenCalledOnce();
+      // The verdict record must persist on the FIRE path too, not just declines/errors.
+      expect(keyStoreSetKey).toHaveBeenCalledWith(
+        'nexpath_last_stage2_result',
+        expect.stringContaining('"fire":true'),
+      );
     });
   });
 
