@@ -402,6 +402,77 @@ describe('content/agents/replit.ts', () => {
     });
   });
 
+  describe('home-page prompt loss regression — REAL replit config, exact broken flow (live 2026-07-06)', () => {
+    // The user typed a prompt in replit.com's HOME agent box: the composer channel
+    // captured it and the funnel recorded the text, then the injector rejected the
+    // delivery (no project context on the home path). Replit soft-navigated into the
+    // auto-created repl WITHOUT a page load, so the SAME kit instance saw the
+    // rendered user-message and collapsed it as a duplicate — the prompt was lost
+    // and the session never started. The capture-rejected feedback must clear the
+    // funnel so the workspace render re-captures it.
+    function makeComposer(text: string): { composer: HTMLElement; button: HTMLElement } {
+      const container = document.createElement('div');
+      const composer = document.createElement('div');
+      composer.className = 'cm-content';
+      composer.setAttribute('contenteditable', 'true');
+      const line = document.createElement('div');
+      line.className = 'cm-line';
+      line.textContent = text;
+      composer.appendChild(line);
+      const button = document.createElement('button');
+      button.setAttribute('data-cy', 'ai-prompt-submit');
+      container.appendChild(composer);
+      container.appendChild(button);
+      document.body.appendChild(container);
+      return { composer, button };
+    }
+
+    it('re-captures the prompt from the workspace render after an upstream rejection', async () => {
+      // 1. Home page: composer capture → funnel records the text.
+      observers.push(observeComposerSubmit(document));
+      const { composer } = makeComposer('what is ML');
+      composer.querySelector('.cm-line')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      expect(postMessageSpy).toHaveBeenCalledWith(
+        { type: 'nexpath:prompt-captured', promptText: 'what is ML', agent: 'replit' },
+        window.location.origin,
+      );
+
+      // 2. Injector rejects delivery (no project context on the home path). The
+      //    rejection listener is registered by the module's auto-run bootstrap().
+      window.dispatchEvent(new MessageEvent('message', {
+        data: { type: 'nexpath:capture-rejected', promptText: 'what is ML' },
+        origin: window.location.origin,
+        source: window,
+      }));
+      await flush();
+
+      // 3. Workspace (same kit instance — soft navigation): the rendered user
+      //    message MUST be captured, not collapsed as a duplicate.
+      postMessageSpy.mockClear();
+      observers.push(observeUserMessages(document.body));
+      document.body.appendChild(makeUserMessage('what is ML'));
+      await flush();
+
+      expect(postMessageSpy).toHaveBeenCalledWith(
+        { type: 'nexpath:prompt-captured', promptText: 'what is ML', agent: 'replit' },
+        window.location.origin,
+      );
+    });
+
+    it('WITHOUT a rejection the workspace render still collapses as a duplicate (funnel invariant unchanged)', async () => {
+      observers.push(observeComposerSubmit(document));
+      const { composer } = makeComposer('what is ML');
+      composer.querySelector('.cm-line')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+
+      postMessageSpy.mockClear();
+      observers.push(observeUserMessages(document.body));
+      document.body.appendChild(makeUserMessage('what is ML'));
+      await flush();
+
+      expect(postMessageSpy).not.toHaveBeenCalled();
+    });
+  });
+
   describe('observeComposerSubmit — source-side capture channel (2026-07-03)', () => {
     // Live-typed messages demonstrably don't match the history-confirmed message
     // selectors (sweep re-scanned for minutes without a hit) — this channel reads the

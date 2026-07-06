@@ -101,12 +101,20 @@ describe('main-world-injector.ts', () => {
       }));
     });
 
-    it('SKIPS capture on the bolt.new landing page — no project context (the prompt re-arrives in the new project page own /api/chat/v2 POST)', () => {
+    it('SKIPS capture on the bolt.new landing page AND posts capture-rejected so the kit funnel clears the text', () => {
       sendMessageMock.mockClear();
+      const postSpy = vi.spyOn(window, 'postMessage');
       setLocation('https://bolt.new', 'bolt.new', '/');
-      dispatchWindowMessage({ type: 'nexpath:prompt-captured', promptText: 'hi', agent: 'bolt' });
+      dispatchWindowMessage({ type: 'nexpath:prompt-captured', promptText: 'make me an invoice site', agent: 'bolt' });
 
       expect(sendMessageMock).not.toHaveBeenCalled();
+      // Without this feedback the kit's dedup funnel keeps the text recorded and
+      // collapses the project page's re-send — the prompt is lost (live 2026-07-06).
+      expect(postSpy).toHaveBeenCalledWith(
+        { type: 'nexpath:capture-rejected', promptText: 'make me an invoice site' },
+        'https://bolt.new',
+      );
+      postSpy.mockRestore();
     });
 
     it('falls back to hostname-based agent resolution — stackblitz.com subdomain project page', () => {

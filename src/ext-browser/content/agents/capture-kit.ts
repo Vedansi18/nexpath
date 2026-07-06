@@ -97,6 +97,7 @@ export interface CaptureKit {
   observeStopButton(root: Node): MutationObserver;
   observeCompletionLabel(root: Element): MutationObserver;
   observeFetchPrompts(win: Window): { disconnect(): void };
+  observeCaptureRejections(win: Window): { disconnect(): void };
   bootstrap(): void;
   resetResponseStopDedupForTests(): void;
   resetPromptCaptureStateForTests(): void;
@@ -367,6 +368,37 @@ export function createCaptureKit(config: CaptureKitConfig): CaptureKit {
     };
   }
 
+  // ── Upstream-rejection feedback: never let the funnel dedup an undelivered prompt ─
+  //
+  // The injector SKIPS forwarding when the page has no project context (e.g. a
+  // prompt typed on the bolt.new landing composer). But by the time it skips, this
+  // funnel has already recorded the text in lastEmittedText — and Bolt navigates
+  // from landing to the new project WITHOUT a full page load, so the SAME kit
+  // instance then collapses the project page's /api/chat/v2 re-send of that exact
+  // prompt as a duplicate. Net effect: the first prompt of every landing-created
+  // project was silently lost (confirmed live 2026-07-06). The injector now posts
+  // `nexpath:capture-rejected` back for every skipped prompt; clearing the funnel
+  // record here lets the next channel that sees the text re-emit it once a real
+  // project root exists.
+  function observeCaptureRejections(win: Window): { disconnect(): void } {
+    const onMessage = (ev: MessageEvent): void => {
+      if (ev.source !== win || ev.origin !== win.location.origin) return;
+      const msg = ev.data as { type?: unknown; promptText?: unknown } | null;
+      if (!msg || msg.type !== 'nexpath:capture-rejected') return;
+      if (typeof msg.promptText !== 'string') return;
+      if (lastEmittedText === msg.promptText) {
+        lastEmittedText = null;
+        console.log('[nexpath] capture rejected upstream (no project context) — cleared for re-capture on the project page');
+      }
+    };
+    win.addEventListener('message', onMessage as EventListener);
+    return {
+      disconnect(): void {
+        win.removeEventListener('message', onMessage as EventListener);
+      },
+    };
+  }
+
   // ── Response-stop: the stop button disappearing from the DOM ────────────────────
 
   function observeStopButton(root: Node): MutationObserver {
@@ -479,6 +511,7 @@ export function createCaptureKit(config: CaptureKitConfig): CaptureKit {
     // level filter. This line is meant to be visible by default, per devplan §8.1.
     console.log(`[nexpath] capture: ${config.captureTier}`);
     if (config.listenForFetchPrompts) observeFetchPrompts(window);
+    observeCaptureRejections(window);
     if (config.composer) observeComposerSubmit(document);
     observeUserMessages(document.body);
     observeStopButton(document.body);
@@ -509,6 +542,7 @@ export function createCaptureKit(config: CaptureKitConfig): CaptureKit {
     observeStopButton,
     observeCompletionLabel,
     observeFetchPrompts,
+    observeCaptureRejections,
     bootstrap,
     resetResponseStopDedupForTests,
     resetPromptCaptureStateForTests,

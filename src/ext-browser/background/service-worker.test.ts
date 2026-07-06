@@ -67,6 +67,8 @@ const createDocumentMock = vi.fn().mockResolvedValue(undefined);
 const openOptionsPageMock = vi.fn();
 const onInstalledAddListenerMock = vi.fn();
 const onMessageAddListenerMock = vi.fn();
+const tabsQueryMock = vi.fn();
+const tabsReloadMock = vi.fn().mockResolvedValue(undefined);
 
 // browser.* (webextension-polyfill) covers everything except chrome.offscreen, which has no
 // cross-browser equivalent and stays a real chrome.* global — see importFreshServiceWorker below.
@@ -77,6 +79,7 @@ vi.mock('webextension-polyfill', () => ({
       onMessage:        { addListener: onMessageAddListenerMock },
       openOptionsPage:  openOptionsPageMock,
     },
+    tabs: { query: tabsQueryMock, reload: tabsReloadMock },
   },
 }));
 
@@ -123,6 +126,7 @@ describe('service-worker.ts', () => {
     getLatestStateMock.mockReturnValue({ currentStage: 'implementation', detectedLanguage: undefined });
     keyStoreGetKey.mockResolvedValue(null);
     mgrHasFiredDecisionSession.mockReturnValue(false);
+    tabsQueryMock.mockResolvedValue([]);
 
     vi.mocked(classifyPrompt).mockResolvedValue(baseClassification());
     vi.mocked(SessionStateManager.load).mockImplementation(function () {
@@ -178,6 +182,37 @@ describe('service-worker.ts', () => {
       const { installedListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
       installedListener({ reason: 'update' });
       expect(openOptionsPageMock).not.toHaveBeenCalled();
+    });
+
+    it('reloads open agent-site tabs on update — stale content scripts from the previous generation silently DROP every capture (live 2026-07-06)', async () => {
+      tabsQueryMock.mockResolvedValue([{ id: 11 }, { id: 22 }]);
+      const { installedListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      installedListener({ reason: 'update' });
+
+      await vi.waitFor(() => expect(tabsReloadMock).toHaveBeenCalledTimes(2));
+      expect(tabsQueryMock).toHaveBeenCalledWith({
+        url: ['https://*.replit.com/*', 'https://bolt.new/*', 'https://*.stackblitz.com/*', 'https://lovable.dev/*'],
+      });
+      expect(tabsReloadMock).toHaveBeenCalledWith(11);
+      expect(tabsReloadMock).toHaveBeenCalledWith(22);
+    });
+
+    it('reloads agent tabs on fresh install too (any onInstalled = new generation)', async () => {
+      tabsQueryMock.mockResolvedValue([{ id: 7 }]);
+      const { installedListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      installedListener({ reason: 'install' });
+
+      await vi.waitFor(() => expect(tabsReloadMock).toHaveBeenCalledWith(7));
+      expect(openOptionsPageMock).toHaveBeenCalledOnce();
+    });
+
+    it('skips tabs without an id and survives a tabs.query failure', async () => {
+      tabsQueryMock.mockRejectedValue(new Error('no permission'));
+      const { installedListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      installedListener({ reason: 'update' });
+
+      await vi.waitFor(() => expect(logWarnMock).toHaveBeenCalledWith('agent_tab_reload_failed', expect.anything()));
+      expect(tabsReloadMock).not.toHaveBeenCalled();
     });
   });
 

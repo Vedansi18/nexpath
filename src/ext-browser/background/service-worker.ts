@@ -58,10 +58,39 @@ async function ensureOffscreen(): Promise<void> {
 
 // ── First-install: open options page ──────────────────────────────────────────
 
+// Must stay in sync with the manifests' host_permissions/content-script matches.
+const AGENT_TAB_URL_PATTERNS = [
+  'https://*.replit.com/*',
+  'https://bolt.new/*',
+  'https://*.stackblitz.com/*',
+  'https://lovable.dev/*',
+];
+
 browser.runtime.onInstalled.addListener(({ reason }) => {
   if (reason === 'install') {
     browser.runtime.openOptionsPage();
   }
+
+  // Every install/update starts a NEW extension generation; content scripts already
+  // running in open agent tabs belong to the dead one — their runtime.sendMessage
+  // fails with "Extension context invalidated" and every capture is silently
+  // DROPPED until the tab is manually reloaded. Testers hit this constantly
+  // (confirmed live 2026-07-04 and again 2026-07-06 despite written guidance to
+  // close tabs). Reloading the agent-site tabs — and only those — swaps in the
+  // current generation automatically; Bolt/Replit chat state is server-side, so a
+  // reload loses nothing.
+  void browser.tabs.query({ url: AGENT_TAB_URL_PATTERNS }).then((tabs) => {
+    let reloaded = 0;
+    for (const t of tabs) {
+      if (t.id !== undefined) {
+        void browser.tabs.reload(t.id);
+        reloaded++;
+      }
+    }
+    if (reloaded > 0) log.debug('agent_tabs_reloaded_on_' + reason, { count: reloaded });
+  }).catch((err: unknown) => {
+    log.warn('agent_tab_reload_failed', { error: String(err) });
+  });
 });
 
 // ── Main message listener ──────────────────────────────────────────────────────

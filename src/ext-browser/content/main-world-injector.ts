@@ -99,6 +99,15 @@ function setupListeners(): void {
       const projectRoot = resolveProjectRoot();
       if (projectRoot === null) {
         console.log('[nexpath] capture skipped — no project context on this page (e.g. landing page)');
+        // Tell the capture kit the text was NOT delivered so its dedup funnel
+        // clears the record — otherwise Bolt's soft navigation (landing → new
+        // project, same page instance) lets the funnel collapse the project
+        // page's re-send of this exact prompt and it is lost forever
+        // (confirmed live 2026-07-06).
+        window.postMessage(
+          { type: 'nexpath:capture-rejected', promptText: msg.promptText },
+          window.location.origin,
+        );
         return;
       }
       const sw: PromptSubmitMsg = {

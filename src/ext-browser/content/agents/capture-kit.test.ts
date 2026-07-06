@@ -204,6 +204,63 @@ describe('content/agents/capture-kit.ts', () => {
     );
   });
 
+  describe('observeCaptureRejections — undelivered prompts must be re-capturable', () => {
+    function dispatchRejection(promptText: string): void {
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          data: { type: 'nexpath:capture-rejected', promptText },
+          origin: window.location.origin,
+          source: window,
+        }),
+      );
+    }
+
+    function dispatchFetchPromptFor(agent: string, promptText: string): void {
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          data: { type: 'nexpath:fetch-prompt', promptText, agent },
+          origin: window.location.origin,
+          source: window,
+        }),
+      );
+    }
+
+    it('a rejected prompt is cleared from the funnel so the SAME text can be re-captured (the lost landing-prompt bug, live 2026-07-06)', () => {
+      const kit = createCaptureKit(makeConfig({ agent: 'bolt' }));
+      observers.push(kit.observeFetchPrompts(window));
+      observers.push(kit.observeCaptureRejections(window));
+
+      // Landing page: composer channel captures → funnel records the text.
+      dispatchFetchPromptFor('bolt', 'make me an invoice website');
+      expect(postMessageSpy).toHaveBeenCalledTimes(1);
+
+      // Injector had no project context → rejected the delivery.
+      dispatchRejection('make me an invoice website');
+
+      // Project page (same kit instance — Bolt soft-navigates): the /api/chat/v2
+      // re-send of the exact same text MUST emit again, not collapse as a dup.
+      postMessageSpy.mockClear();
+      dispatchFetchPromptFor('bolt', 'make me an invoice website');
+      expect(postMessageSpy).toHaveBeenCalledWith(
+        { type: 'nexpath:prompt-captured', promptText: 'make me an invoice website', agent: 'bolt' },
+        window.location.origin,
+      );
+    });
+
+    it('a rejection for a DIFFERENT text leaves the funnel record intact (identical re-send still collapses)', () => {
+      const kit = createCaptureKit(makeConfig({ agent: 'bolt' }));
+      observers.push(kit.observeFetchPrompts(window));
+      observers.push(kit.observeCaptureRejections(window));
+
+      dispatchFetchPromptFor('bolt', 'prompt one');
+      dispatchRejection('a totally different prompt');
+
+      postMessageSpy.mockClear();
+      dispatchFetchPromptFor('bolt', 'prompt one');
+      expect(postMessageSpy).not.toHaveBeenCalled();
+    });
+  });
+
   describe('observeFetchPrompts — transport channel', () => {
     function dispatchFetchPrompt(promptText: string, agent: string, origin = window.location.origin): void {
       window.dispatchEvent(
