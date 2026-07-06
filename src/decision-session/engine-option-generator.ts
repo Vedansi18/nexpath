@@ -17,12 +17,18 @@ import type OpenAI from 'openai';
 import type { GeneratedOptions } from './OptionGenerator.js';
 import type { OptionEntry } from './options.js';
 import type { MaturityLevel } from './content-template-schema.js';
+import type { Store } from '../store/db.js';
+import type { PromptRecord } from '../classifier/types.js';
 import {
   composeAdvisory,
   deriveLadder,
+  retrieveGroundingFacts,
   type RecordCandidateLookup,
   type GroundingFact,
 } from './content-template-engine.js';
+import { loadRightGoodProfile } from '../classifier/right-good-aggregator.js';
+import { loadWorkStyleProfile } from '../classifier/work-style-traits.js';
+import { probeProject } from '../env/env-probe.js';
 
 export interface EngineGenerateInput {
   /** Source-cascade record lookup for the migrated signalType (dual-source). */
@@ -65,4 +71,23 @@ export async function generateFromEngine(
       l3: ladder.l3.map((e) => e.descBase),
     },
   };
+}
+
+/**
+ * §6.1 item 4 — assemble grounding facts from the AR param SOURCES at fire time, via the
+ * live store: AR-10 dev-env (`probeProject`), AR-9 workflow (`loadRightGoodProfile`),
+ * AR-3 work-style (`loadWorkStyleProfile`), and the recent prompts (prompt-derived, LLM).
+ * The engine maps + ranks/caps them; this is the store-load wiring.
+ */
+export async function buildEngineGrounding(
+  store: Store,
+  root: string,
+  history: readonly PromptRecord[],
+  client?: OpenAI,
+): Promise<GroundingFact[]> {
+  const env = probeProject(root).facts;
+  const rightGood = loadRightGoodProfile(store, root);
+  const workStyle = loadWorkStyleProfile(store, root);
+  const prompts = history.slice(-5).map((p) => p.text);
+  return retrieveGroundingFacts({ env, rightGood, workStyle, prompts }, client);
 }

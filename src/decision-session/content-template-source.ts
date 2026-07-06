@@ -25,6 +25,17 @@ export function hasShippedRecord(signalType: string): boolean {
 }
 
 /**
+ * The content-template record signalType for a fired flagType, via the
+ * `ABSENCE_<UPPER(key)>` convention (§6.1 item 10c coverage-map). Returns undefined for a
+ * non-absence flagType (stage transitions etc. have no content-template mapping today).
+ */
+export function recordSignalTypeForFlag(flagType: string): string | undefined {
+  return flagType.startsWith('absence:')
+    ? `ABSENCE_${flagType.slice('absence:'.length).toUpperCase()}`
+    : undefined;
+}
+
+/**
  * A source-cascade lookup for one signalType: the `shipped` tier yields that signal's
  * shipped record; the other tiers yield undefined (no per-user / closest-default
  * records ship yet). Handed to the engine's `resolveRecord` / `composeAdvisory`.

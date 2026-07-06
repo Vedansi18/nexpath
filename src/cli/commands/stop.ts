@@ -20,6 +20,13 @@ import { recentPromptMetadata } from '../../telemetry/recent-prompts.js';
 import { readStdin } from './auto.js';
 import { resolveDecisionContent } from '../../decision-session/options.js';
 import { generateOptionList } from '../../decision-session/OptionGenerator.js';
+import type { GeneratedOptions } from '../../decision-session/OptionGenerator.js';
+import { resolveContentSource, selectionRegister } from '../../decision-session/selection-registry.js';
+import { shippedRecordLookup, recordSignalTypeForFlag } from '../../decision-session/content-template-source.js';
+import { generateFromEngine, buildEngineGrounding } from '../../decision-session/engine-option-generator.js';
+import { getUserDepthLevel } from '../../store/user-depth-level.js';
+import type { MaturityLevel } from '../../decision-session/content-template-schema.js';
+import type { PromptRecord } from '../../classifier/types.js';
 import { resolveOpenAIKey, getKeySource } from '../../config/ApiKeyResolver.js';
 
 /**
@@ -146,19 +153,42 @@ export async function runStop(
     mgr.current.profile,
   );
 
-  const generatedOptions = await generateOptionList(
-    content,
-    mgr.current.profile ?? undefined,
-    effectiveLang,
-    mgr.current.promptHistory as import('../../classifier/types.js').PromptRecord[],
-    {
-      flagType:              advisory.flagType,
-      currentStage:          mgr.current.currentStage,
-      prevStage:             advisory.prevStage,
-      promptsInCurrentStage: mgr.current.promptsInCurrentStage,
-    },
-    openai,
-  );
+  // §6.1 dual-source dispatch: a MIGRATED signalType serves from the content-template
+  // engine (grounded + strength-laddered); every other serves from the static generate
+  // path. The migration marker is EMPTY (ship-dark) → today every signal takes the static
+  // path, byte-for-byte unchanged. Per-set migration flips one signal at a time (S8).
+  const recordSignalType = recordSignalTypeForFlag(advisory.flagType);
+  let generatedOptions: GeneratedOptions | null = null;
+  if (recordSignalType && resolveContentSource(recordSignalType) === 'content-template') {
+    const level = (getUserDepthLevel(store, payload.cwd)?.currentLevel ?? 2) as MaturityLevel;
+    const promptHistory = mgr.current.promptHistory as PromptRecord[];
+    const facts = await buildEngineGrounding(store, payload.cwd, promptHistory, openai);
+    generatedOptions = await generateFromEngine(
+      {
+        lookup:   shippedRecordLookup(recordSignalType),
+        level,
+        register: selectionRegister(mgr.current.profile?.nature),
+        facts,
+        factCap:  3,
+      },
+      openai,
+    );
+  }
+  if (!generatedOptions) {
+    generatedOptions = await generateOptionList(
+      content,
+      mgr.current.profile ?? undefined,
+      effectiveLang,
+      mgr.current.promptHistory as PromptRecord[],
+      {
+        flagType:              advisory.flagType,
+        currentStage:          mgr.current.currentStage,
+        prevStage:             advisory.prevStage,
+        promptsInCurrentStage: mgr.current.promptsInCurrentStage,
+      },
+      openai,
+    );
+  }
 
   writeTelemetry(payload.cwd, 'stop_advisory_shown', {
     flagType:         advisory.flagType,

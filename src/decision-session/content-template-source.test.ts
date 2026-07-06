@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { SHIPPED_CONTENT_TEMPLATES } from './content-template-tooling.js';
-import { hasShippedRecord, shippedRecordLookup } from './content-template-source.js';
+import { hasShippedRecord, shippedRecordLookup, recordSignalTypeForFlag } from './content-template-source.js';
 import { resolveRecord } from './content-template-engine.js';
 
 describe('§6.1 — content-template source lookup by signalType', () => {
@@ -28,5 +28,11 @@ describe('§6.1 — content-template source lookup by signalType', () => {
 
   it('hasShippedRecord is true for every shipped signalType', () => {
     for (const r of SHIPPED_CONTENT_TEMPLATES) expect(hasShippedRecord(r.signalType)).toBe(true);
+  });
+
+  it('recordSignalTypeForFlag maps absence:<key> → ABSENCE_<UPPER>, undefined otherwise', () => {
+    expect(recordSignalTypeForFlag('absence:context_loss')).toBe('ABSENCE_CONTEXT_LOSS');
+    expect(recordSignalTypeForFlag('absence:test_creation')).toBe('ABSENCE_TEST_CREATION');
+    expect(recordSignalTypeForFlag('stage_transition')).toBeUndefined();
   });
 });
