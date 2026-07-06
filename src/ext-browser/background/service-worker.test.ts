@@ -20,6 +20,7 @@ vi.mock('../adapters/llm-fetch.js', () => ({ FetchLLMAdapter: vi.fn() }));
 vi.mock('../adapters/storage-chrome.js', () => ({ ChromeStorageKeyAdapter: vi.fn() }));
 vi.mock('../adapters/clock-browser.js', () => ({ BrowserClockAdapter: vi.fn() }));
 vi.mock('../adapters/log-console.js', () => ({ ConsoleLogAdapter: vi.fn() }));
+vi.mock('../adapters/log-persistent.js', () => ({ PersistentLogAdapter: vi.fn() }));
 vi.mock('../adapters/embedding-offscreen.js', () => ({ OffscreenEmbeddingAdapter: vi.fn() }));
 vi.mock('../content/panel-adapter.js', () => ({ ContentScriptUIAdapter: vi.fn() }));
 
@@ -33,6 +34,7 @@ const { makeMemoryStoragePort } = await import('../adapters/memory-storage.js');
 const { ChromeStorageKeyAdapter } = await import('../adapters/storage-chrome.js');
 const { BrowserClockAdapter } = await import('../adapters/clock-browser.js');
 const { ConsoleLogAdapter } = await import('../adapters/log-console.js');
+const { PersistentLogAdapter } = await import('../adapters/log-persistent.js');
 const { ContentScriptUIAdapter } = await import('../content/panel-adapter.js');
 
 const idbLoadSessionState = vi.fn();
@@ -154,6 +156,11 @@ describe('service-worker.ts', () => {
     });
     vi.mocked(ConsoleLogAdapter).mockImplementation(function () {
       return { debug: logDebugMock, info: vi.fn(), warn: logWarnMock } as unknown as InstanceType<typeof ConsoleLogAdapter>;
+    });
+    // Passthrough: the persistence decorator's own behavior has its dedicated test
+    // file; here the SW's log assertions target the inner (console) adapter mocks.
+    vi.mocked(PersistentLogAdapter).mockImplementation(function (inner: unknown) {
+      return inner as InstanceType<typeof PersistentLogAdapter>;
     });
     vi.mocked(ContentScriptUIAdapter).mockImplementation(function () {
       return { showAdvisory: showAdvisoryMock } as unknown as InstanceType<typeof ContentScriptUIAdapter>;
@@ -621,6 +628,31 @@ describe('service-worker.ts', () => {
         reason: 'testing practices already demonstrated',
       }));
       expect(showAdvisoryMock).not.toHaveBeenCalled();
+      // The verdict must also be persisted — SW console lines die with the SW (MV3),
+      // so this record is the only after-the-fact answer to "why no advisory?".
+      expect(keyStoreSetKey).toHaveBeenCalledWith(
+        'nexpath_last_stage2_result',
+        expect.stringContaining('"reason":"testing practices already demonstrated"'),
+      );
+    });
+
+    it('persists a stage-2 ERROR record when runStage2 throws', async () => {
+      vi.mocked(shouldFireStage2).mockReturnValue({ kind: 'stage_transition' } as unknown as ReturnType<typeof shouldFireStage2>);
+      vi.mocked(runStage2).mockRejectedValue(new Error('AbortError: timeout'));
+      mockKeyStore3('sk-real-key', 'every_event', null);
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+
+      const sendResponse = vi.fn();
+      messageListener(
+        { type: 'nexpath:prompt-submit', promptText: 'ship it', projectRoot: 'https://bolt.new', agent: 'bolt', tabId: 7 },
+        {},
+        sendResponse,
+      );
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+      expect(keyStoreSetKey).toHaveBeenCalledWith(
+        'nexpath_last_stage2_result',
+        expect.stringContaining('AbortError: timeout'),
+      );
     });
 
     it('logs stage2_result with fire:true and advisory_showing on the fire path', async () => {

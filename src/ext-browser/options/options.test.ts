@@ -19,6 +19,7 @@ function setupDom(): void {
     <div id="frequency-group"></div>
     <div id="role-group"></div>
     <div id="self-check"></div>
+    <div id="recent-activity"></div>
   `;
 }
 
@@ -89,6 +90,61 @@ describe('options.ts', () => {
       await loadOptionsModule();
 
       expect(els().selfCheck.innerHTML).toContain('Saved');
+    });
+
+    it('renders "None yet" for the Stage-2 verdict row when nothing is persisted', async () => {
+      mockGet.mockResolvedValue({});
+      await loadOptionsModule();
+
+      expect(els().selfCheck.innerHTML).toContain('Last Stage-2 verdict');
+      expect(els().selfCheck.innerHTML).toContain('None yet');
+    });
+
+    it('renders the persisted Stage-2 decline verdict with its reason', async () => {
+      mockGet.mockResolvedValue({
+        nexpath_last_stage2_result: JSON.stringify({
+          at: 1751790000000, fire: false, stage: 'release', confidence: 0.93,
+          reason: 'testing practices already demonstrated',
+        }),
+      });
+      await loadOptionsModule();
+
+      const html = els().selfCheck.innerHTML;
+      expect(html).toContain('declined (release 0.93)');
+      expect(html).toContain('testing practices already demonstrated');
+    });
+
+    it('renders "No pipeline activity" when the recent-events buffer is empty', async () => {
+      mockGet.mockResolvedValue({});
+      await loadOptionsModule();
+
+      const recent = document.getElementById('recent-activity') as HTMLDivElement;
+      expect(recent.innerHTML).toContain('No pipeline activity recorded yet');
+    });
+
+    it('renders persisted recent events newest-first (the browser nexpath log)', async () => {
+      mockGet.mockResolvedValue({
+        nexpath_recent_events: JSON.stringify([
+          { at: 1751790000000, level: 'debug', key: 'prompt_submit_received', data: { agent: 'bolt' } },
+          { at: 1751790005000, level: 'debug', key: 'stage2_result', data: { fire: true } },
+        ]),
+      });
+      await loadOptionsModule();
+
+      const html = (document.getElementById('recent-activity') as HTMLDivElement).innerHTML;
+      expect(html).toContain('prompt_submit_received');
+      expect(html).toContain('stage2_result');
+      // newest first: stage2_result (later timestamp) must appear before prompt_submit_received
+      expect(html.indexOf('stage2_result')).toBeLessThan(html.indexOf('prompt_submit_received'));
+    });
+
+    it('renders a persisted Stage-2 error record', async () => {
+      mockGet.mockResolvedValue({
+        nexpath_last_stage2_result: JSON.stringify({ at: 1751790000000, error: 'AbortError: timeout' }),
+      });
+      await loadOptionsModule();
+
+      expect(els().selfCheck.innerHTML).toContain('AbortError: timeout');
     });
   });
 

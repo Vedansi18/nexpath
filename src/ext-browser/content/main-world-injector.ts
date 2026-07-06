@@ -78,12 +78,15 @@ function setupListeners(): void {
     // is the only way to inspect the last Stage-2 verdict from the page itself.
     // Strictly whitelisted (never the API key or any other storage content).
     if ((msg as { type?: unknown } | null)?.type === 'nexpath:debug-request') {
-      void browser.storage.local.get('nexpath_last_stage2_result').then((res) => {
+      void browser.storage.local.get(['nexpath_last_stage2_result', 'nexpath_recent_events']).then((res) => {
         window.postMessage(
           {
             type: 'nexpath:debug-state',
             lastStage2Result: typeof res['nexpath_last_stage2_result'] === 'string'
               ? res['nexpath_last_stage2_result']
+              : null,
+            recentEvents: typeof res['nexpath_recent_events'] === 'string'
+              ? res['nexpath_recent_events']
               : null,
           },
           window.location.origin,

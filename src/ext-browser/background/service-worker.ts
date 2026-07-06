@@ -10,6 +10,7 @@ import { FetchLLMAdapter } from '../adapters/llm-fetch.js';
 import { ChromeStorageKeyAdapter } from '../adapters/storage-chrome.js';
 import { BrowserClockAdapter } from '../adapters/clock-browser.js';
 import { ConsoleLogAdapter } from '../adapters/log-console.js';
+import { PersistentLogAdapter } from '../adapters/log-persistent.js';
 import { OffscreenEmbeddingAdapter } from '../adapters/embedding-offscreen.js';
 import { ContentScriptUIAdapter } from '../content/panel-adapter.js';
 import {
@@ -23,7 +24,10 @@ import type { Stage, UserRole } from '../../core/classifier/types.js';
 const idb = new IdbStorageAdapter();
 const keyStore = new ChromeStorageKeyAdapter();
 const clock = new BrowserClockAdapter();
-const log = new ConsoleLogAdapter('[nexpath-sw]');
+// Wrapped so every pipeline event also lands in the durable storage.local buffer —
+// SW console history dies with each MV3 instance; the buffer is what the options
+// page's "Recent activity" section (the browser's `nexpath log`) reads.
+const log = new PersistentLogAdapter(new ConsoleLogAdapter('[nexpath-sw]'));
 
 // ── Offscreen document management (Chrome only) ────────────────────────────────
 
@@ -104,6 +108,9 @@ browser.runtime.onMessage.addListener(
 // same text submitted twice deliberately within the window also collapses — same
 // accepted limitation as the kit's own lastEmittedText guard.
 const CROSS_PAGE_PROMPT_DEDUP_MS = 120_000;
+
+/** Last Stage-2 verdict (or error), persisted so it survives SW teardown. */
+const LAST_STAGE2_RESULT_KEY = 'nexpath_last_stage2_result';
 
 function lastPromptKeyFor(projectRoot: string): string {
   return `nexpath_last_prompt::${projectRoot}`;
@@ -318,6 +325,7 @@ async function handlePromptSubmit(
     );
   } catch (err) {
     log.warn('stage2_error', { error: String(err) });
+    await keyStore.setKey(LAST_STAGE2_RESULT_KEY, JSON.stringify({ at: now, error: String(err) }));
     return;
   }
 
@@ -330,6 +338,18 @@ async function handlePromptSubmit(
     confidence: stage2Out.stage_confidence,
     reason: stage2Out.reason,
   });
+  // Persisted too: SW console lines die with the SW (MV3 teardown), so the log alone
+  // is unreadable after the fact — the options page + the injector's debug channel
+  // surface this record instead.
+  await keyStore.setKey(LAST_STAGE2_RESULT_KEY, JSON.stringify({
+    at: now,
+    fire: stage2Out.fire_decision_session,
+    stage: stage2Out.stage,
+    confidence: stage2Out.stage_confidence,
+    reason: stage2Out.reason,
+    trigger: trigger.kind,
+    prevStage: prevStageBeforeUpdate,
+  }));
 
   if (!stage2Out.fire_decision_session) return;
 

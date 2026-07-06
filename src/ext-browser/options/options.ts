@@ -10,6 +10,7 @@ const saveBtn  = document.getElementById('save-key')     as HTMLButtonElement;
 const testBtn  = document.getElementById('test-key')     as HTMLButtonElement;
 const keyStatus = document.getElementById('key-status')  as HTMLParagraphElement;
 const checkEl  = document.getElementById('self-check')   as HTMLDivElement;
+const recentEl = document.getElementById('recent-activity') as HTMLDivElement;
 const freqGroup = document.getElementById('frequency-group') as HTMLDivElement;
 const roleGroup = document.getElementById('role-group')      as HTMLDivElement;
 
@@ -157,9 +158,10 @@ function escHtml(str: string): string {
 }
 
 async function renderSelfCheck(): Promise<void> {
-  const result = await browser.storage.local.get([KEY_NAME, FREQUENCY_KEY, ROLE_KEY, 'nexpath_last_capture']);
+  const result = await browser.storage.local.get([KEY_NAME, FREQUENCY_KEY, ROLE_KEY, 'nexpath_last_capture', 'nexpath_last_stage2_result']);
   const hasKey = typeof result[KEY_NAME] === 'string' && (result[KEY_NAME] as string).length > 0;
   const lastCapture = result['nexpath_last_capture'] as string | undefined;
+  const lastStage2 = formatLastStage2(result['nexpath_last_stage2_result']);
 
   const freqValue = typeof result[FREQUENCY_KEY] === 'string' ? result[FREQUENCY_KEY] as string : DEFAULT_FREQUENCY;
   const roleValue = typeof result[ROLE_KEY] === 'string' ? result[ROLE_KEY] as string : DEFAULT_ROLE;
@@ -184,10 +186,67 @@ async function renderSelfCheck(): Promise<void> {
       <span class="check-val">${lastCapture ? escHtml(lastCapture) : 'None yet — use Replit, Bolt, or Lovable'}</span>
     </div>
     <div class="check-row">
+      <span class="check-label">Last Stage-2 verdict</span>
+      <span class="check-val">${escHtml(lastStage2)}</span>
+    </div>
+    <div class="check-row">
       <span class="check-label">Capture sites</span>
       <span class="check-val ok">Replit · Bolt · Lovable ✅</span>
     </div>
   `;
 }
 
+/**
+ * Recent-activity list — the browser's `nexpath log`. Reads the rolling event
+ * buffer PersistentLogAdapter maintains in storage.local (SW console history
+ * dies with each MV3 instance; this survives). Newest first, capped at 20 rows.
+ */
+async function renderRecentActivity(): Promise<void> {
+  if (!recentEl) return;
+  const result = await browser.storage.local.get('nexpath_recent_events');
+  const raw = result['nexpath_recent_events'];
+  let events: Array<{ at?: number; level?: string; key?: string; data?: Record<string, unknown> }> = [];
+  if (typeof raw === 'string' && raw.length > 0) {
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (Array.isArray(parsed)) events = parsed as typeof events;
+    } catch { /* unreadable buffer — render as empty */ }
+  }
+  if (events.length === 0) {
+    recentEl.innerHTML = '<div class="check-row"><span class="check-val">No pipeline activity recorded yet</span></div>';
+    return;
+  }
+  const rows = events.slice(-20).reverse().map((e) => {
+    const when = typeof e.at === 'number' ? new Date(e.at).toLocaleTimeString() : '';
+    const dataStr = e.data ? JSON.stringify(e.data) : '';
+    const cls = e.level === 'warn' ? 'err' : '';
+    return `
+    <div class="check-row">
+      <span class="check-label">${escHtml(when)}</span>
+      <span class="check-val ${cls}">${escHtml(e.key ?? '?')}${dataStr ? ' ' + escHtml(dataStr.length > 120 ? dataStr.slice(0, 120) + '…' : dataStr) : ''}</span>
+    </div>`;
+  });
+  recentEl.innerHTML = rows.join('');
+}
+
+/**
+ * Human-readable one-liner for the persisted Stage-2 verdict record.
+ * The SW console's stage2_result log dies with the SW (MV3) — this row is the
+ * durable answer to "why did no advisory appear?".
+ */
+function formatLastStage2(raw: unknown): string {
+  if (typeof raw !== 'string' || raw.length === 0) return 'None yet';
+  try {
+    const r = JSON.parse(raw) as { at?: number; fire?: boolean; stage?: string; confidence?: number; reason?: string; error?: string };
+    const when = typeof r.at === 'number' ? new Date(r.at).toLocaleString() : '';
+    if (typeof r.error === 'string') return `Error at ${when}: ${r.error}`;
+    const verdict = r.fire ? 'FIRED ✅' : 'declined';
+    const conf = typeof r.confidence === 'number' ? ` ${r.confidence.toFixed(2)}` : '';
+    return `${verdict} (${r.stage ?? '?'}${conf}) at ${when} — ${r.reason ?? 'no reason given'}`;
+  } catch {
+    return 'Unreadable record';
+  }
+}
+
 loadKey();
+void renderRecentActivity();

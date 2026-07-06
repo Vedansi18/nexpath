@@ -158,11 +158,12 @@ describe('main-world-injector.ts', () => {
       dispatchWindowMessage({ type: 'nexpath:debug-request' });
       await new Promise((r) => setTimeout(r, 0));
 
-      expect(storageGetMock).toHaveBeenCalledWith('nexpath_last_stage2_result');
+      expect(storageGetMock).toHaveBeenCalledWith(['nexpath_last_stage2_result', 'nexpath_recent_events']);
       expect(postSpy).toHaveBeenCalledWith(
         {
           type: 'nexpath:debug-state',
           lastStage2Result: '{"fire":false,"reason":"testing already demonstrated"}',
+          recentEvents: null,
         },
         'https://replit.com',
       );
@@ -178,7 +179,7 @@ describe('main-world-injector.ts', () => {
       await new Promise((r) => setTimeout(r, 0));
 
       expect(postSpy).toHaveBeenCalledWith(
-        { type: 'nexpath:debug-state', lastStage2Result: null },
+        { type: 'nexpath:debug-state', lastStage2Result: null, recentEvents: null },
         'https://replit.com',
       );
       postSpy.mockRestore();
