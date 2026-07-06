@@ -251,7 +251,7 @@ export const ABSENCE_CONTEXT_LOSS: DecisionContent = {
   whyHelp:       WHY_HELP_BY_SIGNAL_TYPE['ABSENCE_CONTEXT_LOSS'],
   L1: [
     {
-      option: 'Summarize the current state of what was just built: what decisions have been made, what is working, what remains incomplete, and what has changed since the session started — use this as a re-anchor before continuing.',
+      option: 'Reconstruct the constraints, assumptions, and decision-thread for this session: list every constraint that was decided, every assumption baked in, and every decision the next step depends on — these need to be explicit and carried forward before continuing.',
       descBase: `{R4_OPEN}
 {R5_INJECT: ~1-2 lines — "Extended session; constraint / assumption / decision-thread reconstruction not done."}
 Active constraints, assumptions, and decision-thread for this session haven't been reconstructed — silent compounding of forgotten context could distort follow-on decisions.
@@ -277,14 +277,14 @@ List: significant decisions in this session / current implementation state / rem
   ],
   L2: [
     {
-      option: 'What is the current state of what was just built — what is working, what is still in progress, and what is the immediate next step?',
+      option: 'What constraints and assumptions from this session are still implicit — what conditions or decisions does the next step depend on, and which of those need to be made explicit right now before we continue?',
       descBase: `{R4_OPEN}
 {R5_INJECT: ~1 line — "Extended session; current-state anchor not done."}
 Lighter: working / in-progress / immediate next step — but in terms of remaining-constraints lens.
 {R4_CLOSE}`,
     },
     {
-      option: 'What is the most important technical decision made this session about this feature that must be explicitly carried forward before continuing?',
+      option: 'What is the decision-thread of this feature — the chain of decisions that the current work-in-progress depends on, the constraints that shaped each decision, and the assumptions baked into the current implementation?',
       descBase: `{R4_OPEN}
 {R5_INJECT: ~1 line — "Extended session; constraint/assumption carry-forward not flagged."}
 Narrower: the single most important constraint or assumption decision that must be carried forward — not "decision" generically, but the one whose loss would silently distort follow-on work.
@@ -293,7 +293,7 @@ Narrower: the single most important constraint or assumption decision that must 
   ],
   L3: [
     {
-      option: 'What is the one piece of context about this project that must not be lost before continuing — the single most important thing to anchor right now?',
+      option: 'What is the single most important constraint, assumption, or decision from this session that must be carried forward and made explicit before the next step — the one anchor that cannot be lost?',
       descBase: `{R4_OPEN}
 {R5_INJECT: ~1 line — "Extended session; decision-thread anchor not identified."}
 Minimum next step: the one decision-thread anchor without which follow-on work would silently drift — the single link in the goal-to-current-work chain that cannot be reconstructed if lost.

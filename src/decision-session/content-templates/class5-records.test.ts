@@ -88,9 +88,15 @@ describe('class-5 — per-record full-depth gates', () => {
         expect(frozen.L1[0].descBase).toContain(col3.whyDesc);
       });
 
-      it('keeps its keyword in every option and every authored why-desc (col-3 frozen core exempt)', () => {
+      it('keeps its keyword in every authored option and why-desc (col-3 frozen core exempt)', () => {
         const res = checkTopicKeyword(r, kw);
-        expect(res.missingInOption).toEqual([]);
+        // col-3 is the frozen shipped headline — it is authored elsewhere (the legacy
+        // DecisionContent), not to the per-column keyword methodology, so it is exempt
+        // from the keyword check in BOTH channels (as it already is for de-jargon).
+        // context_loss's frozen headline no longer carries "state": the collision re-author
+        // moved the FORMAL positions onto constraint/assumption/decision-thread, off the
+        // "state/status" framing that now belongs to session_length_checkpoint.
+        expect(res.missingInOption.filter((l) => l !== 3)).toEqual([]);
         expect(res.missingInWhyDesc.filter((l) => l !== 3)).toEqual([]);
       });
 
