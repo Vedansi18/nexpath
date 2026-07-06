@@ -64,13 +64,13 @@ export const ABSENCE_NO_PUSHBACK_RECORD: ContentTemplateRecord = {
   },
 };
 
-/** ABSENCE_CONTEXT_LOSS — recap session state, keyword "state". Produces a written note. */
+/** ABSENCE_CONTEXT_LOSS — reconstruct the session's constraint/assumption/decision-thread, keyword "decision". Produces a written note. */
 export const ABSENCE_CONTEXT_LOSS_RECORD: ContentTemplateRecord = {
   signalType: 'ABSENCE_CONTEXT_LOSS', source: 'shipped', schemaVersion: 1, slots: [],
   registerOverrides: { beginner: CONTEXT_LOSS_BEGINNER_OVERRIDE },
   paramAxes: SESSION_QUALITY_PARAM_AXES,
   levelForms: {
-    1: form("Note the current state of what was just built in one line before continuing — what is done and what is next.", "The lightest state recap: one line on done-and-next."),
+    1: form("Note the single most important decision and constraint from this session in one line before continuing — what was decided and what the next step now depends on.", "The lightest recap: one line on the key decision and what depends on it."),
     2: form("Summarize the working state of this session: the main decisions made and what remains, as a quick re-anchor.", "A light state summary: the main decisions and what remains."),
     3: form("Reconstruct the constraints, assumptions, and decision-thread for this session: list every constraint that was decided, every assumption baked in, and every decision the next step depends on — these need to be explicit and carried forward before continuing.", "Active constraints, assumptions, and decision-thread for this session haven't been reconstructed — silent compounding of forgotten context could distort follow-on decisions."),
     4: form("Reconstruct the full session state: the constraints in play, the assumptions still unverified, and the decision-thread from the goal to the current work — so nothing silently distorts what comes next.", "Beyond a quick recap: the full state of constraints, assumptions, and decisions reconstructed."),
