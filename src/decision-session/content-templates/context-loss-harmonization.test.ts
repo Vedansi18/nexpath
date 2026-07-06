@@ -26,8 +26,12 @@ describe('context_loss H-1 — CASUAL harmonized to the decision-thread frame', 
     expect(joined).toContain('constraint');
     expect(joined).toContain('assumption');
   });
-  it('preserves the casual first-person voice', () => {
-    expect(ABSENCE_CONTEXT_LOSS_CASUAL.L1[0].option.toLowerCase()).toMatch(/let's|\bwe\b/);
+  it('preserves the casual register across EVERY position (H-1 over-formalization guard)', () => {
+    // The H-1 risk: injecting formal Frame-D vocab (constraint/assumption/decision) into the
+    // casual register makes it read formal. Guard: every casual option keeps a casual marker
+    // (first-person "we/us/our/my/me/let's" or a contraction).
+    const CASUAL_MARKER = /\b(let's|we|us|our|my|me)\b|n't\b|'(s|ve|re|ll|d)\b/i;
+    for (const o of opts) expect(o).toMatch(CASUAL_MARKER);
   });
   it('every casual option is L2-compliant (§4.E6)', () => {
     for (const e of [...ABSENCE_CONTEXT_LOSS_CASUAL.L1, ...ABSENCE_CONTEXT_LOSS_CASUAL.L2, ...ABSENCE_CONTEXT_LOSS_CASUAL.L3]) {

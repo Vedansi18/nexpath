@@ -76,14 +76,19 @@ describe('context_loss role variants — de-jargon gate (CTA-C3)', () => {
   }
 });
 
-describe('context_loss role variants — register', () => {
-  it('founder + indie_hacker read casual (first-person "let\'s")', () => {
-    expect(ABSENCE_CONTEXT_LOSS_FOUNDER.L1[0].option.toLowerCase()).toContain("let's");
-    expect(ABSENCE_CONTEXT_LOSS_INDIE_HACKER.L1[0].option.toLowerCase()).toContain("let's");
+describe('context_loss role variants — register (casual founder/indie, formal PM)', () => {
+  // H-1 over-formalization guard, applied per role register across EVERY position.
+  const CASUAL_MARKER = /\b(let's|we|us|our|my|me)\b|n't\b|'(s|ve|re|ll|d)\b/i;
+
+  it('founder + indie_hacker read casual in every option', () => {
+    for (const o of [...options(ABSENCE_CONTEXT_LOSS_FOUNDER), ...options(ABSENCE_CONTEXT_LOSS_INDIE_HACKER)]) {
+      expect(o).toMatch(CASUAL_MARKER);
+    }
   });
-  it('PM reads formal (no casual "let\'s")', () => {
-    const pm = options(ABSENCE_CONTEXT_LOSS_PM).join(' ').toLowerCase();
-    expect(pm).not.toContain("let's");
+  it('PM reads formal in every option (no casual markers)', () => {
+    for (const o of options(ABSENCE_CONTEXT_LOSS_PM)) {
+      expect(o).not.toMatch(CASUAL_MARKER);
+    }
   });
 });
 
