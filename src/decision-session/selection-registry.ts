@@ -138,3 +138,41 @@ export function resolveSelection(
 
   return TASK_REVIEW_BY_REGISTER[register];
 }
+
+// ── Dual-source resolver + migration marker (§6.1 gate 1 / S2) ──────────────────
+//
+// Per-signalType content SOURCE. A *migrated* signalType is served from the
+// content-template engine; every other signalType is served from the static
+// `DecisionContent` set (via `resolveSelection`). Both sources feed the SAME
+// runtime — this is the load-bearing Phase-1 ↔ Phase-2 coexistence mechanism:
+// while the registry is live, an un-migrated static set and a migrated
+// content-template both resolve through the ONE dispatch point (S7).
+//
+// The marker starts EMPTY: nothing is migrated, so every signalType resolves
+// 'static' and the registry preserves EXACT cascade parity (ship-dark). Per-set
+// migration adds a signalType key here, one commit each (S8) — flipping only that
+// signal to the engine path while every other set is untouched.
+
+/** The content SOURCE for a signalType's advisory. */
+export type ContentSource = 'static' | 'content-template';
+
+/**
+ * SignalTypes migrated to the content-template engine. EMPTY = ship-dark: every
+ * signal serves from the static set, so runtime behaviour is byte-identical to
+ * today. Migration is per-set (S8) — add the signalType key here in its own
+ * migration commit, gated by the cascade-parity + contract tests.
+ */
+export const MIGRATED_SIGNALS: ReadonlySet<string> = new Set<string>();
+
+/**
+ * Resolve the content SOURCE for a signalType: `content-template` iff the signal
+ * has been migrated, else `static`. Single dispatch over the migration marker —
+ * the ONLY place a signal's source is decided. The marker is injectable for
+ * testing the migrated branch while the shipped `MIGRATED_SIGNALS` stays empty.
+ */
+export function resolveContentSource(
+  signalType: string,
+  marker: ReadonlySet<string> = MIGRATED_SIGNALS,
+): ContentSource {
+  return marker.has(signalType) ? 'content-template' : 'static';
+}
