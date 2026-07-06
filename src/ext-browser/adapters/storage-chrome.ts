@@ -8,4 +8,12 @@ export class ChromeStorageKeyAdapter implements KeyStorePort {
     const val = result[name];
     return typeof val === 'string' && val.length > 0 ? val : null;
   }
+
+  // Beyond KeyStorePort (read-only by design): the SW also needs to persist small
+  // records that must survive SW restarts AND page navigations (e.g. the cross-page
+  // prompt-dedup record) — storage.local is the only store that does both without
+  // an IDB schema migration.
+  async setKey(name: string, value: string): Promise<void> {
+    await browser.storage.local.set({ [name]: value });
+  }
 }

@@ -96,6 +96,19 @@ browser.runtime.onMessage.addListener(
 
 // ── Prompt submission pipeline ─────────────────────────────────────────────────
 
+// Cross-page duplicate window: Bolt's landing page captures the first prompt, then
+// hard-navigates to the new project page whose generation POST /api/chat/v2 carries
+// that same prompt as the newest user message — a fresh content-script instance
+// captures it again. The per-page capture-kit funnel cannot span a navigation, so
+// the SW (which survives it) is the only place this dedup can live. Trade-off: the
+// same text submitted twice deliberately within the window also collapses — same
+// accepted limitation as the kit's own lastEmittedText guard.
+const CROSS_PAGE_PROMPT_DEDUP_MS = 120_000;
+
+function lastPromptKeyFor(projectRoot: string): string {
+  return `nexpath_last_prompt::${projectRoot}`;
+}
+
 async function handlePromptSubmit(
   promptText: string,
   projectRoot: string,
@@ -105,13 +118,28 @@ async function handlePromptSubmit(
   const now = clock.now();
 
   // ── Step 1: Load persisted session state + config ───────────────────────────
-  const [loadedState, lang, apiKey, freqRaw, roleRaw] = await Promise.all([
+  const [loadedState, lang, apiKey, freqRaw, roleRaw, lastPromptRaw] = await Promise.all([
     idb.loadSessionState(projectRoot),
     idb.getProjectDetectedLanguage(projectRoot),
     keyStore.getKey('openai_api_key'),
     keyStore.getKey('advisory_frequency'),
     keyStore.getKey('role'),
+    keyStore.getKey(lastPromptKeyFor(projectRoot)),
   ]);
+
+  // ── Step 1.2: Cross-page duplicate guard (see CROSS_PAGE_PROMPT_DEDUP_MS) ───
+  if (lastPromptRaw) {
+    try {
+      const last = JSON.parse(lastPromptRaw) as { text?: unknown; at?: unknown };
+      if (last.text === promptText && typeof last.at === 'number' && now - last.at < CROSS_PAGE_PROMPT_DEDUP_MS) {
+        log.debug('prompt_submit_deduped', { projectRoot, ageMs: now - last.at });
+        return;
+      }
+    } catch {
+      // malformed record — treat as absent
+    }
+  }
+  await keyStore.setKey(lastPromptKeyFor(projectRoot), JSON.stringify({ text: promptText, at: now }));
 
   // ── Step 1.5: Resolve frequency + role config — mirrors cli/commands/auto.ts's
   // step 1.5 exactly (same fallback default, same resolveFrequencyConfig call) so
@@ -257,6 +285,12 @@ async function handlePromptSubmit(
   const llm = new FetchLLMAdapter(apiKey);
   const state = mgr.current as import('../../core/classifier/types.js').SessionState;
 
+  log.debug('stage2_started', {
+    trigger: trigger.kind,
+    prevStage: prevStageBeforeUpdate,
+    stage: mgr.current.currentStage,
+  });
+
   let stage2Out: import('../../core/stage2.js').Stage2Output;
   try {
     // Stage2Input's actual shape (confirmed against core/stage2.ts, 2026-07-02 — the
@@ -286,6 +320,16 @@ async function handlePromptSubmit(
     log.warn('stage2_error', { error: String(err) });
     return;
   }
+
+  // The LLM's verdict was previously invisible when it declined — the single most
+  // important pipeline decision must always leave a log line (found via a live manual
+  // test where "no panel" was indistinguishable from a crash).
+  log.debug('stage2_result', {
+    fire: stage2Out.fire_decision_session,
+    stage: stage2Out.stage,
+    confidence: stage2Out.stage_confidence,
+    reason: stage2Out.reason,
+  });
 
   if (!stage2Out.fire_decision_session) return;
 
@@ -347,6 +391,7 @@ async function handlePromptSubmit(
 
   const ui = new ContentScriptUIAdapter(tabId);
   try {
+    log.debug('advisory_showing', { tabId, advisoryId: payload.advisoryId, stage: payload.stage });
     const event = await ui.showAdvisory(payload);
     log.debug('advisory_dismissed', { eventType: event.type, advisoryId: payload.advisoryId });
 

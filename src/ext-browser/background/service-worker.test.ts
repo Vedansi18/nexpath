@@ -41,7 +41,13 @@ const idbSaveSessionState = vi.fn().mockResolvedValue(undefined);
 const idbSaveProjectDetectedLanguage = vi.fn().mockResolvedValue(undefined);
 
 const keyStoreGetKey = vi.fn();
+const keyStoreSetKey = vi.fn().mockResolvedValue(undefined);
 const clockNow = vi.fn().mockReturnValue(1000);
+
+// Shared across ConsoleLogAdapter instantiations so tests can assert on log events
+// (the SW's stage2_result/prompt_submit_deduped observability lines are behaviour).
+const logDebugMock = vi.fn();
+const logWarnMock = vi.fn();
 
 const showAdvisoryMock = vi.fn();
 
@@ -141,13 +147,13 @@ describe('service-worker.ts', () => {
       getLatestState: getLatestStateMock,
     });
     vi.mocked(ChromeStorageKeyAdapter).mockImplementation(function () {
-      return { getKey: keyStoreGetKey } as unknown as InstanceType<typeof ChromeStorageKeyAdapter>;
+      return { getKey: keyStoreGetKey, setKey: keyStoreSetKey } as unknown as InstanceType<typeof ChromeStorageKeyAdapter>;
     });
     vi.mocked(BrowserClockAdapter).mockImplementation(function () {
       return { now: clockNow } as unknown as InstanceType<typeof BrowserClockAdapter>;
     });
     vi.mocked(ConsoleLogAdapter).mockImplementation(function () {
-      return { debug: vi.fn(), info: vi.fn(), warn: vi.fn() } as unknown as InstanceType<typeof ConsoleLogAdapter>;
+      return { debug: logDebugMock, info: vi.fn(), warn: logWarnMock } as unknown as InstanceType<typeof ConsoleLogAdapter>;
     });
     vi.mocked(ContentScriptUIAdapter).mockImplementation(function () {
       return { showAdvisory: showAdvisoryMock } as unknown as InstanceType<typeof ContentScriptUIAdapter>;
@@ -336,7 +342,9 @@ describe('service-worker.ts', () => {
 
   describe('advisory frequency + role gating (mirrors cli/commands/auto.ts)', () => {
     // Promise.all calls getKey in declared order: openai_api_key, advisory_frequency,
-    // role — queue exactly 3 Once values so each call gets the intended answer.
+    // role, then the cross-page dedup record — queue exactly 3 Once values for the
+    // first three; the 4th call falls through to the default mockResolvedValue(null)
+    // (no prior prompt recorded → dedup guard passes).
     function mockKeyStore(apiKey: string | null, freq: string | null, role: string | null): void {
       keyStoreGetKey.mockResolvedValueOnce(apiKey).mockResolvedValueOnce(freq).mockResolvedValueOnce(role);
     }
@@ -517,6 +525,133 @@ describe('service-worker.ts', () => {
       );
       await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
       expect(mgrSetProfile).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('cross-page prompt dedup (Bolt landing→project double-capture)', () => {
+    // The dedup record is read via the 4th getKey in the Promise.all; a name-aware
+    // implementation answers only that key so the config keys keep their defaults.
+    function mockDedupRecord(record: { text: string; at: number } | null): void {
+      keyStoreGetKey.mockImplementation(async (name: string) =>
+        name.startsWith('nexpath_last_prompt::') && record ? JSON.stringify(record) : null,
+      );
+    }
+
+    function submit(messageListener: MessageListener, promptText: string): ReturnType<typeof vi.fn> {
+      const sendResponse = vi.fn();
+      messageListener(
+        { type: 'nexpath:prompt-submit', promptText, projectRoot: 'https://bolt.new', agent: 'bolt', tabId: 7 },
+        {},
+        sendResponse,
+      );
+      return sendResponse;
+    }
+
+    it('skips the whole pipeline when the same text repeats within the window', async () => {
+      mockDedupRecord({ text: 'Add a hero section component', at: 900 }); // clock.now() = 1000 → 100ms old
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+
+      const sendResponse = submit(messageListener, 'Add a hero section component');
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+      expect(classifyPrompt).not.toHaveBeenCalled();
+      expect(mgrProcessPrompt).not.toHaveBeenCalled();
+      expect(logDebugMock).toHaveBeenCalledWith('prompt_submit_deduped', expect.objectContaining({ projectRoot: 'https://bolt.new' }));
+    });
+
+    it('processes normally when the text differs and records the new prompt', async () => {
+      mockDedupRecord({ text: 'Add a hero section component', at: 900 });
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+
+      const sendResponse = submit(messageListener, 'Implement a card layout');
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+      expect(classifyPrompt).toHaveBeenCalledOnce();
+      expect(keyStoreSetKey).toHaveBeenCalledWith(
+        'nexpath_last_prompt::https://bolt.new',
+        JSON.stringify({ text: 'Implement a card layout', at: 1000 }),
+      );
+    });
+
+    it('processes normally when the identical text arrives after the window has expired', async () => {
+      mockDedupRecord({ text: 'Add a hero section component', at: 1000 - 200_000 });
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+
+      const sendResponse = submit(messageListener, 'Add a hero section component');
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+      expect(classifyPrompt).toHaveBeenCalledOnce();
+    });
+
+    it('treats a malformed stored record as absent and processes normally', async () => {
+      keyStoreGetKey.mockImplementation(async (name: string) =>
+        name.startsWith('nexpath_last_prompt::') ? 'not-json{{{' : null,
+      );
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+
+      const sendResponse = submit(messageListener, 'Add a hero section component');
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+      expect(classifyPrompt).toHaveBeenCalledOnce();
+    });
+  });
+
+  describe('stage-2 outcome observability (the LLM verdict must never be silent)', () => {
+    function mockKeyStore3(apiKey: string | null, freq: string | null, role: string | null): void {
+      keyStoreGetKey.mockResolvedValueOnce(apiKey).mockResolvedValueOnce(freq).mockResolvedValueOnce(role);
+    }
+
+    it('logs stage2_started and a stage2_result with fire:false + reason when the LLM declines', async () => {
+      vi.mocked(shouldFireStage2).mockReturnValue({ kind: 'stage_transition' } as unknown as ReturnType<typeof shouldFireStage2>);
+      vi.mocked(runStage2).mockResolvedValue({
+        fire_decision_session: false,
+        stage: 'release',
+        stage_confidence: 0.9,
+        reason: 'testing practices already demonstrated',
+      } as unknown as Awaited<ReturnType<typeof runStage2>>);
+      mockKeyStore3('sk-real-key', 'every_event', null);
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+
+      const sendResponse = vi.fn();
+      messageListener(
+        { type: 'nexpath:prompt-submit', promptText: 'ship it', projectRoot: 'https://bolt.new', agent: 'bolt', tabId: 7 },
+        {},
+        sendResponse,
+      );
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+      expect(logDebugMock).toHaveBeenCalledWith('stage2_started', expect.objectContaining({ trigger: 'stage_transition' }));
+      expect(logDebugMock).toHaveBeenCalledWith('stage2_result', expect.objectContaining({
+        fire: false,
+        reason: 'testing practices already demonstrated',
+      }));
+      expect(showAdvisoryMock).not.toHaveBeenCalled();
+    });
+
+    it('logs stage2_result with fire:true and advisory_showing on the fire path', async () => {
+      vi.mocked(shouldFireStage2).mockReturnValue({ kind: 'stage_transition' } as unknown as ReturnType<typeof shouldFireStage2>);
+      vi.mocked(runStage2).mockResolvedValue({
+        fire_decision_session: true,
+        stage: 'release',
+        stage_confidence: 0.95,
+        reason: 'release transition without testing evidence',
+      } as unknown as Awaited<ReturnType<typeof runStage2>>);
+      vi.mocked(resolveDecisionContent).mockReturnValue({
+        L1: [{ option: 'Run tests', descBase: 'd' }],
+        L2: [],
+        L3: [],
+        pinchFallback: 'Final Review',
+      } as unknown as ReturnType<typeof resolveDecisionContent>);
+      vi.mocked(generatePinchLabel).mockResolvedValue('Final Review');
+      showAdvisoryMock.mockResolvedValue({ type: 'dismiss' });
+      mockKeyStore3('sk-real-key', 'every_event', null);
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+
+      const sendResponse = vi.fn();
+      messageListener(
+        { type: 'nexpath:prompt-submit', promptText: 'ship it', projectRoot: 'https://bolt.new', agent: 'bolt', tabId: 7 },
+        {},
+        sendResponse,
+      );
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+      expect(logDebugMock).toHaveBeenCalledWith('stage2_result', expect.objectContaining({ fire: true }));
+      expect(logDebugMock).toHaveBeenCalledWith('advisory_showing', expect.objectContaining({ tabId: 7 }));
+      expect(showAdvisoryMock).toHaveBeenCalledOnce();
     });
   });
 

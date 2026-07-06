@@ -3,15 +3,16 @@ import { ChromeStorageKeyAdapter } from './storage-chrome.js';
 
 // vi.mock is hoisted above imports — vi.hoisted is the supported escape hatch
 // for identifiers the factory needs to reference (see src/ext-vscode precedent).
-const { mockGet } = vi.hoisted(() => ({ mockGet: vi.fn() }));
+const { mockGet, mockSet } = vi.hoisted(() => ({ mockGet: vi.fn(), mockSet: vi.fn() }));
 
 vi.mock('webextension-polyfill', () => ({
-  default: { storage: { local: { get: mockGet } } },
+  default: { storage: { local: { get: mockGet, set: mockSet } } },
 }));
 
 describe('ChromeStorageKeyAdapter', () => {
   beforeEach(() => {
     mockGet.mockClear();
+    mockSet.mockClear();
   });
 
   it('returns the key value when present in storage', async () => {
@@ -47,5 +48,12 @@ describe('ChromeStorageKeyAdapter', () => {
     const adapter = new ChromeStorageKeyAdapter();
     await adapter.getKey('some_key');
     expect(mockGet).toHaveBeenCalledWith('some_key');
+  });
+
+  it('setKey writes the value under the key name via storage.local.set', async () => {
+    mockSet.mockResolvedValueOnce(undefined);
+    const adapter = new ChromeStorageKeyAdapter();
+    await adapter.setKey('nexpath_last_prompt::https://bolt.new', '{"text":"hi","at":1}');
+    expect(mockSet).toHaveBeenCalledWith({ 'nexpath_last_prompt::https://bolt.new': '{"text":"hi","at":1}' });
   });
 });
