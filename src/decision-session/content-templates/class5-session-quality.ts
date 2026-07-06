@@ -309,52 +309,52 @@ export const ABSENCE_CONTEXT_LOSS_CASUAL: DecisionContent = {
   whyHelp:       WHY_HELP_BY_SIGNAL_TYPE['ABSENCE_CONTEXT_LOSS'],
   L1: [
     {
-      option: 'Let\'s get back on the same page — go through what was just built and give me a quick rundown: what\'s done, what\'s working, and what\'s still left to do.',
+      option: 'Let\'s get back on the same page — walk me through the decisions we\'ve locked in this session, the constraints we\'re working within, and the assumptions we\'ve been running with, so we don\'t lose the thread before continuing.',
       descBase: `{R4_OPEN}
-{R5_INJECT: ~1-2 lines first-person — "I've been in this session for a while; I haven't paused to reconstruct what's still in scope and what's been decided."}
-The session context hasn't been reconstructed — what's done / working / left is fuzzy.
-Quick rundown: what's done, what's working, what's still left.
+{R5_INJECT: ~1-2 lines first-person — "I've been in this session a while; I haven't paused to reconstruct the constraints, assumptions, and decisions I've been running with."}
+The decision-thread hasn't been reconstructed — the constraints, assumptions, and decisions in play are fuzzy.
+Quick rundown: the decisions locked in / the constraints we're working within / the assumptions not yet confirmed.
 {R4_CLOSE}`,
     },
     {
-      option: 'Take a minute to catch up on this project — what have we actually built this session, what decisions did we make, and what\'s coming next?',
+      option: 'Take a minute to catch up on this session — what decisions did we actually make, what constraints did we lock in, and which assumptions are we running with that we haven\'t double-checked yet?',
       descBase: `{R4_OPEN}
-{R5_INJECT: ~1-2 lines first-person — "Long session; recap of what was built / decided / coming-next not done."}
-The catch-up recap hasn't been done.
-Tell me: what we built / what decisions we made / what's coming next.
+{R5_INJECT: ~1-2 lines first-person — "Long session; recap of the decisions made / constraints set / assumptions still unconfirmed not done."}
+The catch-up on the decision-thread hasn't been done.
+Tell me: the decisions we made / the constraints we set / the assumptions we haven't confirmed.
 {R4_CLOSE}`,
     },
     {
-      option: 'Before going further with this feature — do a quick check: where are we, what\'s working, and what\'s the next thing that actually needs to happen?',
+      option: 'Before going further with this feature — quick check: which decisions does the next step actually depend on, and what constraints and assumptions are we carrying that we should make explicit first?',
       descBase: `{R4_OPEN}
-{R5_INJECT: ~1-2 lines first-person — "Long session; pre-continue check not done."}
-The pre-continue check hasn't been done.
-Where are we / what's working / what's the next thing that needs to happen.
+{R5_INJECT: ~1-2 lines first-person — "Long session; check of which decisions/constraints the next step leans on not done."}
+The pre-continue check on the decision-thread hasn't been done.
+Which decisions the next step depends on / what constraints and assumptions to make explicit first.
 {R4_CLOSE}`,
     },
   ],
   L2: [
     {
-      option: 'What\'s the situation with what was just built right now — what\'s working and what still needs to happen?',
+      option: 'What decisions and constraints from this session are still just in our heads — which ones does the next step depend on, and should we make them explicit right now?',
       descBase: `{R4_OPEN}
-{R5_INJECT: ~1 line first-person — "Long session; current situation unclear."}
-Lighter: situation now — working vs still-needs-to-happen.
+{R5_INJECT: ~1 line first-person — "Long session; the implicit decisions/constraints aren't flagged."}
+Lighter: the decisions and constraints still implicit — which the next step depends on.
 {R4_CLOSE}`,
     },
     {
-      option: 'What\'s the most important decision we made about this feature this session that you want to make sure we don\'t lose track of?',
+      option: 'What\'s the single most important decision or constraint we set about this feature this session that we\'ve got to carry forward so we don\'t lose the thread?',
       descBase: `{R4_OPEN}
-{R5_INJECT: ~1 line first-person — "Long session; key-decisions not flagged for carry-forward."}
-Narrower: the most important decision I shouldn't lose track of.
+{R5_INJECT: ~1 line first-person — "Long session; the key decision to carry forward isn't flagged."}
+Narrower: the one decision or constraint I shouldn't lose track of.
 {R4_CLOSE}`,
     },
   ],
   L3: [
     {
-      option: 'What\'s the one thing you most need to remember about where this project is right now before you keep going?',
+      option: 'What\'s the one decision, constraint, or assumption from this session you most need to lock in before you keep going — the anchor we can\'t afford to lose?',
       descBase: `{R4_OPEN}
 {R5_INJECT: ~1 line first-person — "Long session."}
-Minimum next step: the one thing I most need to remember before continuing.
+Minimum next step: the one decision or constraint I most need to lock in before continuing.
 {R4_CLOSE}`,
     },
   ],
