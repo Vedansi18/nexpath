@@ -68,6 +68,23 @@ CREATE TABLE IF NOT EXISTS pending_advisories (
 
 CREATE INDEX IF NOT EXISTS idx_pending_advisories_project
   ON pending_advisories (project_root, status, created_at);
+
+CREATE TABLE IF NOT EXISTS feedback_signals (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_root TEXT    NOT NULL,
+  kind         TEXT    NOT NULL,   -- 'advisory_fired' | 'option_selected'
+  occurred_at  INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_feedback_signals_project
+  ON feedback_signals (project_root, occurred_at);
+
+CREATE TABLE IF NOT EXISTS project_usage (
+  project_root     TEXT    PRIMARY KEY,
+  active_ms        INTEGER NOT NULL DEFAULT 0,
+  last_activity_at INTEGER,
+  last_feedback_at INTEGER
+);
 `;
 
 export function migrate(db: Database): void {

@@ -1,0 +1,135 @@
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { openStore, closeStore, type Store } from './db.js';
+import {
+  getInstalledAt,
+  setInstalledAtIfMissing,
+  recordAdvisoryFired,
+  recordOptionSelected,
+  readSignals,
+  pruneSignalsUpTo,
+} from './feedback-signals.js';
+
+let store: Store;
+
+beforeEach(async () => { store = await openStore(':memory:'); });
+afterEach(() => closeStore(store));
+
+describe('getInstalledAt', () => {
+  it('sets the install timestamp once when missing and returns it stably', () => {
+    const first  = getInstalledAt(store);
+    const second = getInstalledAt(store);
+    expect(first).toBeGreaterThan(0);
+    expect(second).toBe(first);
+  });
+
+  it('setInstalledAtIfMissing does not overwrite an existing value', () => {
+    setInstalledAtIfMissing(store, 1000);
+    setInstalledAtIfMissing(store, 9999);
+    expect(getInstalledAt(store)).toBe(1000);
+  });
+
+  it('returns a number, not the stored string', () => {
+    setInstalledAtIfMissing(store, 1234);
+    const value = getInstalledAt(store);
+    expect(value).toBe(1234);
+    expect(typeof value).toBe('number');
+  });
+});
+
+describe('recording signals', () => {
+  it('records advisory-fire and option-select timestamps, oldest first', () => {
+    recordAdvisoryFired(store, '/p', 100);
+    recordOptionSelected(store, '/p', 150);
+    recordAdvisoryFired(store, '/p', 200);
+
+    const signals = readSignals(store, '/p');
+    expect(signals.advisoryFireTs).toEqual([100, 200]);
+    expect(signals.optionSelectTs).toEqual([150]);
+  });
+
+  it('isolates signals per project', () => {
+    recordAdvisoryFired(store, '/a', 100);
+    recordAdvisoryFired(store, '/b', 200);
+    expect(readSignals(store, '/a').advisoryFireTs).toEqual([100]);
+    expect(readSignals(store, '/b').advisoryFireTs).toEqual([200]);
+  });
+
+  it('returns empty arrays for a project with no signals', () => {
+    expect(readSignals(store, '/none')).toEqual({ advisoryFireTs: [], optionSelectTs: [] });
+  });
+
+  it('defaults to the current time when no timestamp is given', () => {
+    const before = Date.now();
+    recordAdvisoryFired(store, '/p');
+    recordOptionSelected(store, '/p');
+    const after = Date.now();
+    const signals = readSignals(store, '/p');
+    expect(signals.advisoryFireTs).toHaveLength(1);
+    expect(signals.optionSelectTs).toHaveLength(1);
+    expect(signals.advisoryFireTs[0]).toBeGreaterThanOrEqual(before);
+    expect(signals.advisoryFireTs[0]).toBeLessThanOrEqual(after);
+  });
+});
+
+describe('content-free storage', () => {
+  it('feedback_signals holds only id, project_root, kind, occurred_at (no text/index)', () => {
+    const res  = store.db.exec('PRAGMA table_info(feedback_signals)');
+    const cols = (res[0]?.values ?? []).map((r) => r[1] as string).sort();
+    expect(cols).toEqual(['id', 'kind', 'occurred_at', 'project_root']);
+  });
+});
+
+describe('pruneSignalsUpTo', () => {
+  it('deletes signals at or before the cutoff, keeps newer ones', () => {
+    recordAdvisoryFired(store, '/p', 100);
+    recordOptionSelected(store, '/p', 150);
+    recordAdvisoryFired(store, '/p', 300);
+
+    pruneSignalsUpTo(store, '/p', 150);
+
+    const signals = readSignals(store, '/p');
+    expect(signals.advisoryFireTs).toEqual([300]);
+    expect(signals.optionSelectTs).toEqual([]);
+  });
+
+  it('only prunes the given project', () => {
+    recordAdvisoryFired(store, '/a', 100);
+    recordAdvisoryFired(store, '/b', 100);
+    pruneSignalsUpTo(store, '/a', 100);
+    expect(readSignals(store, '/a').advisoryFireTs).toEqual([]);
+    expect(readSignals(store, '/b').advisoryFireTs).toEqual([100]);
+  });
+
+  it('keeps everything when the cutoff is before all signals', () => {
+    recordAdvisoryFired(store, '/p', 100);
+    recordOptionSelected(store, '/p', 200);
+    pruneSignalsUpTo(store, '/p', 50);
+    expect(readSignals(store, '/p')).toEqual({ advisoryFireTs: [100], optionSelectTs: [200] });
+  });
+});
+
+describe('persistence across reopen (real DB file)', () => {
+  it('install timestamp and signals survive a close/reopen on an existing DB', async () => {
+    const dbPath = join(tmpdir(), `nexpath-feedback-signals-${randomUUID()}.db`);
+    try {
+      let s = await openStore(dbPath);
+      setInstalledAtIfMissing(s, 4242);
+      recordAdvisoryFired(s, '/proj', 100);
+      recordOptionSelected(s, '/proj', 200);
+      closeStore(s);
+
+      // Reopen: migrate() must find/keep the tables on an already-created file.
+      s = await openStore(dbPath);
+      expect(getInstalledAt(s)).toBe(4242);
+      expect(readSignals(s, '/proj')).toEqual({ advisoryFireTs: [100], optionSelectTs: [200] });
+      closeStore(s);
+    } finally {
+      rmSync(dbPath, { force: true });
+      rmSync(`${dbPath}.lock`, { force: true });
+    }
+  });
+});
