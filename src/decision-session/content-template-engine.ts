@@ -36,7 +36,7 @@
  */
 
 import type OpenAI from 'openai';
-import type { Engine, ContentSpec } from './engine-registry.js';
+import type { Engine, ContentSpec, EngineInput } from './engine-registry.js';
 import {
   validateContentTemplateRecord,
   resolveLevelForm,
@@ -59,13 +59,31 @@ import type { SignalDefinition } from '../classifier/types.js';
 import { SIGNAL_MAP } from '../classifier/signals.js';
 import { deriveSimplerCell, weaveWhyDesc, extractParamsFromPrompts, type ExtractedParam } from './content-template-grounding.js';
 
+/** The content-template engine's `run()` payload: the resolved record + resolution context. */
+export interface ContentTemplateRunPayload {
+  signalType?: string;
+  /** The source-cascade-resolved record, or null (no record → caller falls back to static). */
+  resolved: ResolvedRecord | null;
+  level: MaturityLevel;
+  register?: string;
+}
+
 export const contentTemplateEngine: Engine = {
   name: 'content-template',
   accepts: (polarity) => polarity === 'good_present',
-  run: (): ContentSpec => {
-    throw new Error(
-      'ContentTemplateEngine.run() is not yet wired live — the compositor stages exist, but record content, the render-path intercept, and the grounding runtime are authored/activated separately',
-    );
+  // §6.1 item 1: resolve the record SYNCHRONOUSLY via the injected source-cascade lookup
+  // (the dual-source resolver decides upstream whether this engine is called at all). Returns
+  // a real ContentSpec; the async grounding/compose weave (composeAdvisory) is the downstream
+  // live-caller step. No lookup / no record → resolved:null → the caller falls back to static.
+  run: (input: EngineInput): ContentSpec => {
+    const resolved = input.recordLookup ? resolveRecord(input.recordLookup) : null;
+    const payload: ContentTemplateRunPayload = {
+      signalType: input.signalType,
+      resolved,
+      level: (input.level ?? 1) as MaturityLevel,
+      register: input.register,
+    };
+    return { kind: 'content-template', payload };
   },
 };
 
