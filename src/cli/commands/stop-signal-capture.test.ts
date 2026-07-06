@@ -25,7 +25,7 @@ import type { SelectFn } from '../../decision-session/DecisionSession.js';
 import * as TtySelectFnModule from '../../decision-session/TtySelectFn.js';
 import { setConfig } from '../../store/config.js';
 import { readSignals } from '../../store/feedback-signals.js';
-import { readProjectUsage } from '../../store/project-usage.js';
+import { readCadence } from '../../store/feedback-cadence.js';
 
 const CWD = '/test/project';
 
@@ -62,21 +62,21 @@ afterEach(() => { closeStore(store); vi.restoreAllMocks(); });
 describe('usage recording', () => {
   it('records activity on a normal turn (even with no advisory)', async () => {
     await runStop(makePayload(), store);
-    expect(readProjectUsage(store, CWD)).not.toBeNull();
+    expect(readCadence(store).lastActivityAt).not.toBeNull();
   });
 
   it('does not record activity on the loop guard', async () => {
     await runStop(makePayload({ stop_hook_active: true }), store);
-    expect(readProjectUsage(store, CWD)).toBeNull();
+    expect(readCadence(store).lastActivityAt).toBeNull();
   });
 
-  it('accumulates usage across turns within the idle cap', async () => {
+  it('accumulates usage globally across turns within the idle cap', async () => {
     const nowSpy = vi.spyOn(Date, 'now');
     nowSpy.mockReturnValue(1_000_000);
-    await runStop(makePayload(), store);
+    await runStop(makePayload({ cwd: '/proj-a' }), store);
     nowSpy.mockReturnValue(1_000_000 + 60_000);
-    await runStop(makePayload(), store);
-    expect(readProjectUsage(store, CWD)?.activeMs).toBe(60_000);
+    await runStop(makePayload({ cwd: '/proj-b' }), store); // different project → same global counter
+    expect(readCadence(store).activeMs).toBe(60_000);
   });
 
   it('records activity even when the advisory frequency is off', async () => {
@@ -84,7 +84,7 @@ describe('usage recording', () => {
     insertAdvisory(store);
     const result = await runStop(makePayload(), store, mockSelect(SKIP_NOW));
     expect(result.outcome).toBe('skipped');
-    expect(readProjectUsage(store, CWD)).not.toBeNull();
+    expect(readCadence(store).lastActivityAt).not.toBeNull();
     // Freq-gated advisory is never shown → no fire recorded.
     expect(readSignals(store, CWD).advisoryFireTs).toHaveLength(0);
   });
@@ -94,7 +94,7 @@ describe('usage recording', () => {
     vi.spyOn(TtySelectFnModule, 'createTtySelectFn').mockReturnValue(null);
     const result = await runStop(makePayload(), store); // no selectFn → resolves TTY
     expect(result.outcome).toBe('no_tty');
-    expect(readProjectUsage(store, CWD)).not.toBeNull();
+    expect(readCadence(store).lastActivityAt).not.toBeNull();
     expect(readSignals(store, CWD).advisoryFireTs).toHaveLength(0);
   });
 });

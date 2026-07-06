@@ -3,7 +3,7 @@ import { platform } from 'node:process';
 import type { Store } from '../../store/db.js';
 import { openStore, closeStore, DEFAULT_DB_PATH } from '../../store/db.js';
 import { getPendingAdvisory, markAdvisoryShown } from '../../store/pending-advisories.js';
-import { recordActivity } from '../../store/project-usage.js';
+import { recordActivity } from '../../store/feedback-cadence.js';
 import { recordAdvisoryFired, recordOptionSelected } from '../../store/feedback-signals.js';
 import { runDecisionSession } from '../../decision-session/DecisionSession.js';
 import type { SelectFn } from '../../decision-session/DecisionSession.js';
@@ -79,9 +79,9 @@ export async function runStop(
     return { outcome: 'loop_guard' };
   }
 
-  // 1.2. Record active usage for this project — one heartbeat per turn,
-  //      independent of whether an advisory fires.
-  recordActivity(store, payload.cwd);
+  // 1.2. Record active usage — one heartbeat per turn, accumulated globally
+  //      across all projects, independent of whether an advisory fires.
+  recordActivity(store);
 
   // 1.5. Language detection — runs post-response, invisible latency
   //      Only fires when >= LANG_DETECT_INTERVAL prompts have been captured for this project.
