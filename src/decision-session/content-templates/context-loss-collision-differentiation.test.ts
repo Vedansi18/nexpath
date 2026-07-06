@@ -3,6 +3,7 @@ import {
   ABSENCE_CONTEXT_LOSS,
   ABSENCE_SESSION_LENGTH_CHECKPOINT_FORMAL,
 } from './class5-session-quality.js';
+import { detectL2TriggersInText } from '../r5-injection.js';
 
 // context_loss FORMAL and session_length_checkpoint FORMAL previously shared identical
 // L1[0]/L2[0]/L3[0] text (and near-identical L2[1]). The Frame-D re-author differentiates
@@ -47,5 +48,13 @@ describe('context_loss FORMAL — Frame-D collision differentiation', () => {
 
   it('the descBase layer stays Frame-D aligned (option-text + desc-base reinforce each other)', () => {
     expect(ctx.L1[0].descBase.toLowerCase()).toContain('decision-thread');
+  });
+
+  it('every FORMAL option is L2-compliant — no sensitive action, or a confirm-seek (§4.E6)', () => {
+    for (const e of [...ctx.L1, ...ctx.L2, ...ctx.L3]) {
+      const compliant = detectL2TriggersInText(e.option).length === 0
+        || /go-ahead|confirmation|ask me/i.test(e.descBase);
+      expect(compliant).toBe(true);
+    }
   });
 });

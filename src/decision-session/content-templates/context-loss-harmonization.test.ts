@@ -2,6 +2,11 @@ import { describe, it, expect } from 'vitest';
 import type { DecisionContent } from '../options.js';
 import { ABSENCE_CONTEXT_LOSS_CASUAL } from './class5-session-quality.js';
 import { CONTEXT_LOSS_BEGINNER_OVERRIDE } from './class5-records-beginner.js';
+import { detectL2TriggersInText } from '../r5-injection.js';
+
+/** §4.E6 CTA-C4 gate: an option proposing a sensitive action must carry a confirm-seek. */
+const l2Compliant = (option: string, whyDesc: string): boolean =>
+  detectL2TriggersInText(option).length === 0 || /go-ahead|confirmation|ask me/i.test(whyDesc);
 
 // H-1 (D-R12-2): the CASUAL + BEGINNER registers are fully harmonized to the Frame-D
 // decision-thread frame (constraint / assumption / decision-thread) in their own voice,
@@ -23,6 +28,11 @@ describe('context_loss H-1 — CASUAL harmonized to the decision-thread frame', 
   it('preserves the casual first-person voice', () => {
     expect(ABSENCE_CONTEXT_LOSS_CASUAL.L1[0].option.toLowerCase()).toMatch(/let's|\bwe\b/);
   });
+  it('every casual option is L2-compliant (§4.E6)', () => {
+    for (const e of [...ABSENCE_CONTEXT_LOSS_CASUAL.L1, ...ABSENCE_CONTEXT_LOSS_CASUAL.L2, ...ABSENCE_CONTEXT_LOSS_CASUAL.L3]) {
+      expect(l2Compliant(e.option, e.descBase)).toBe(true);
+    }
+  });
 });
 
 describe('context_loss H-1 — BEGINNER harmonized to the decision-thread frame', () => {
@@ -37,5 +47,8 @@ describe('context_loss H-1 — BEGINNER harmonized to the decision-thread frame'
     expect(joined).toMatch(/limit|constraint/);
     expect(joined).toMatch(/assum/);
     expect(joined).toMatch(/decision|thread/);
+  });
+  it('every beginner cell is L2-compliant (§4.E6)', () => {
+    for (const c of cells) expect(l2Compliant(c.option, c.whyDesc)).toBe(true);
   });
 });

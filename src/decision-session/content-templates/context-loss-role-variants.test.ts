@@ -2,6 +2,11 @@ import { describe, it, expect } from 'vitest';
 import type { UserProfile } from '../../classifier/types.js';
 import { resolveDecisionContent, type DecisionContent } from '../options.js';
 import { findVoiceViolations } from '../content-authoring-rules.js';
+import { detectL2TriggersInText } from '../r5-injection.js';
+
+/** §4.E6 CTA-C4 gate: an option proposing a sensitive action must carry a confirm-seek. */
+const l2Compliant = (option: string, whyDesc: string): boolean =>
+  detectL2TriggersInText(option).length === 0 || /go-ahead|confirmation|ask me/i.test(whyDesc);
 import {
   ABSENCE_CONTEXT_LOSS_FOUNDER,
   ABSENCE_CONTEXT_LOSS_INDIE_HACKER,
@@ -45,6 +50,16 @@ describe('context_loss role variants — voice (option = user message TO the age
       for (const e of [...c.L1, ...c.L2, ...c.L3]) {
         expect(findVoiceViolations(e.option)).toEqual([]);
         expect(findVoiceViolations(e.descBase)).toEqual([]);
+      }
+    });
+  }
+});
+
+describe('context_loss role variants — L2 safeguard gate (§4.E6)', () => {
+  for (const [role, c] of Object.entries(VARIANTS)) {
+    it(`${role}: every option is L2-compliant (no sensitive action, or a confirm-seek)`, () => {
+      for (const e of [...c.L1, ...c.L2, ...c.L3]) {
+        expect(l2Compliant(e.option, e.descBase)).toBe(true);
       }
     });
   }
