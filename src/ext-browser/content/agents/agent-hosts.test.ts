@@ -55,8 +55,19 @@ describe('resolveProjectRootFromLocation (per-project session roots — CLI pari
     expect(resolveProjectRootFromLocation('replit.com', '/', 'https://replit.com')).toBeNull();
   });
 
-  it('lovable → null until the B5 recon confirms its project URL shape', () => {
-    expect(resolveProjectRootFromLocation('lovable.dev', '/projects/my-app', 'https://lovable.dev')).toBeNull();
+  it('lovable project page → origin + /projects/<uuid> (B5 recon confirmed 2026-07-06)', () => {
+    expect(resolveProjectRootFromLocation('lovable.dev', '/projects/21239a50-17b8-4fa3-a8ca-03ab8d24d0c3', 'https://lovable.dev'))
+      .toBe('https://lovable.dev/projects/21239a50-17b8-4fa3-a8ca-03ab8d24d0c3');
+  });
+
+  it('lovable project sub-path still resolves to the project id only', () => {
+    expect(resolveProjectRootFromLocation('lovable.dev', '/projects/abc-123/settings', 'https://lovable.dev'))
+      .toBe('https://lovable.dev/projects/abc-123');
+  });
+
+  it('lovable dashboard and marketing home → null (no project context)', () => {
+    expect(resolveProjectRootFromLocation('lovable.dev', '/dashboard', 'https://lovable.dev')).toBeNull();
+    expect(resolveProjectRootFromLocation('lovable.dev', '/', 'https://lovable.dev')).toBeNull();
   });
 
   it('unknown hosts → null', () => {

@@ -38,6 +38,11 @@
       "matches": ["https://bolt.new/*", "https://*.stackblitz.com/*"],
       "js": ["content/agents/bolt.js"],
       "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://lovable.dev/*"],
+      "js": ["content/agents/lovable.js"],
+      "run_at": "document_idle"
     }
   ],
   "web_accessible_resources": [

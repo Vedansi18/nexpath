@@ -38,6 +38,11 @@ export function resolveProjectRootFromLocation(hostname: string, pathname: strin
     const m = pathname.match(/^\/(@[^/]+\/[^/]+)/);
     return m ? `${origin}/${m[1]}` : null;
   }
-  // lovable: project URL shape unknown until the B5 recon — no capture until then.
+  if (agent === 'lovable') {
+    // lovable.dev/projects/<uuid> (confirmed live in B5 recon 2026-07-06);
+    // /dashboard and the marketing home have no project context → null.
+    const m = pathname.match(/^\/projects\/([^/]+)/);
+    return m ? `${origin}/projects/${m[1]}` : null;
+  }
   return null;
 }

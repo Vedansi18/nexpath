@@ -70,9 +70,28 @@ const SEND_RETRY_DELAY_MS = 400;
 // SW's cross-page same-text dedup collapses the duplicate.
 const PENDING_CAPTURE_TTL_MS = 120_000;
 const PENDING_FLUSH_POLL_MS = 1_000;
+// sessionStorage (per-origin, per-tab, survives same-tab navigations, dies with the
+// tab): module memory alone loses the stash whenever the landing → project
+// transition is a HARD navigation — Lovable's dashboard flow is exactly that
+// (confirmed live 2026-07-06, lovable-recon §1), unlike Bolt/Replit's soft-navs.
+// The prompt text stays within the page's own storage, which already held it in
+// the composer the user typed it into.
+const PENDING_CAPTURE_STORAGE_KEY = 'nexpath_pending_capture';
 
 let pendingRejectedCapture: { promptText: string; agent: string; stashedAt: number } | null = null;
 let pendingFlushTimer: ReturnType<typeof setInterval> | null = null;
+
+function persistPendingCapture(): void {
+  try {
+    if (pendingRejectedCapture === null) {
+      window.sessionStorage.removeItem(PENDING_CAPTURE_STORAGE_KEY);
+    } else {
+      window.sessionStorage.setItem(PENDING_CAPTURE_STORAGE_KEY, JSON.stringify(pendingRejectedCapture));
+    }
+  } catch {
+    // storage unavailable (sandboxed page) — module memory still covers soft-navs
+  }
+}
 
 function stopPendingFlush(): void {
   if (pendingFlushTimer !== null) {
@@ -81,8 +100,7 @@ function stopPendingFlush(): void {
   }
 }
 
-function stashRejectedCapture(promptText: string, agent: string): void {
-  pendingRejectedCapture = { promptText, agent, stashedAt: Date.now() };
+function armPendingFlush(): void {
   // Always re-arm: a fresh interval per stash keeps the poll's lifetime tied to the
   // newest stash (and never leaves a stale timer from an earlier one running).
   stopPendingFlush();
@@ -94,6 +112,7 @@ function stashRejectedCapture(promptText: string, agent: string): void {
     if (Date.now() - pendingRejectedCapture.stashedAt > PENDING_CAPTURE_TTL_MS) {
       console.log('[nexpath] stashed prompt expired without entering a project — dropped');
       pendingRejectedCapture = null;
+      persistPendingCapture();
       stopPendingFlush();
       return;
     }
@@ -109,8 +128,38 @@ function stashRejectedCapture(promptText: string, agent: string): void {
     sendToServiceWorker(sw);
     console.log('[nexpath] stashed prompt delivered after navigating into the project');
     pendingRejectedCapture = null;
+    persistPendingCapture();
     stopPendingFlush();
   }, PENDING_FLUSH_POLL_MS);
+}
+
+function stashRejectedCapture(promptText: string, agent: string): void {
+  pendingRejectedCapture = { promptText, agent, stashedAt: Date.now() };
+  persistPendingCapture();
+  armPendingFlush();
+}
+
+/**
+ * Resume a stash written by a PREVIOUS page instance in this tab (hard navigation)
+ * or a previous extension generation (reload). Runs at module scope OUTSIDE the
+ * bootstrap guard — a stale-re-injection scenario must also resume, because only
+ * the NEWEST generation has a live runtime to deliver through.
+ */
+function resumePendingCaptureFromStorage(): void {
+  try {
+    const raw = window.sessionStorage.getItem(PENDING_CAPTURE_STORAGE_KEY);
+    if (!raw) return;
+    const rec = JSON.parse(raw) as { promptText?: unknown; agent?: unknown; stashedAt?: unknown };
+    if (typeof rec.promptText !== 'string' || typeof rec.agent !== 'string' || typeof rec.stashedAt !== 'number'
+        || Date.now() - rec.stashedAt > PENDING_CAPTURE_TTL_MS) {
+      window.sessionStorage.removeItem(PENDING_CAPTURE_STORAGE_KEY);
+      return;
+    }
+    pendingRejectedCapture = { promptText: rec.promptText, agent: rec.agent, stashedAt: rec.stashedAt };
+    armPendingFlush();
+  } catch {
+    // storage unavailable — nothing to resume
+  }
 }
 
 function sendToServiceWorker(msg: PromptSubmitMsg | ResponseStopMsg): void {
@@ -253,3 +302,6 @@ if (window.__nexpathMainWorldInjectorBootstrapped) {
 
   setupListeners();
 }
+
+// Runs for EVERY instance (see its doc comment) — after the guard block above.
+resumePendingCaptureFromStorage();

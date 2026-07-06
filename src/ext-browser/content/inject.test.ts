@@ -6,6 +6,7 @@ import type { AdvisoryPayload } from '../../core/ports/ui.port.js';
 const mountStubPanelMock = vi.fn().mockReturnValue({} as ShadowRoot);
 const injectPromptTextMock = vi.fn().mockResolvedValue(undefined);
 const injectPromptTextBoltMock = vi.fn().mockResolvedValue(undefined);
+const injectPromptTextLovableMock = vi.fn().mockResolvedValue(undefined);
 const clipboardFallbackMock = vi.fn().mockResolvedValue(undefined);
 // jsdom's hostname is localhost (agent 'unknown') — default to 'replit' so the
 // pre-B4 tests keep exercising the replit injector; dispatch tests override it.
@@ -19,6 +20,9 @@ vi.mock('./agents/replit-inject.js', () => ({
   injectPromptText: injectPromptTextMock,
 }));
 
+vi.mock('./agents/lovable-inject.js', () => ({
+  injectPromptText: injectPromptTextLovableMock,
+}));
 vi.mock('./agents/bolt-inject.js', () => ({
   injectPromptText: injectPromptTextBoltMock,
 }));
@@ -147,8 +151,19 @@ describe('inject.ts', () => {
       expect(injectPromptTextMock).not.toHaveBeenCalledWith('add tests to the app');
     });
 
-    it('degrades to the clipboard fallback on hosts with no injector yet', () => {
+    it('routes to the lovable injector on lovable hosts (B5)', () => {
       resolveAgentMock.mockReturnValue('lovable');
+      injectPromptTextLovableMock.mockClear();
+
+      emitSelect('make the cards responsive');
+
+      expect(injectPromptTextLovableMock).toHaveBeenCalledWith('make the cards responsive');
+      expect(injectPromptTextMock).not.toHaveBeenCalledWith('make the cards responsive');
+      expect(injectPromptTextBoltMock).not.toHaveBeenCalledWith('make the cards responsive');
+    });
+
+    it('degrades to the clipboard fallback on hosts with no injector (unknown agents)', () => {
+      resolveAgentMock.mockReturnValue('unknown');
       clipboardFallbackMock.mockClear();
 
       emitSelect('review the edge cases');
@@ -156,6 +171,7 @@ describe('inject.ts', () => {
       expect(clipboardFallbackMock).toHaveBeenCalledWith('review the edge cases');
       expect(injectPromptTextMock).not.toHaveBeenCalledWith('review the edge cases');
       expect(injectPromptTextBoltMock).not.toHaveBeenCalledWith('review the edge cases');
+      expect(injectPromptTextLovableMock).not.toHaveBeenCalledWith('review the edge cases');
     });
   });
 

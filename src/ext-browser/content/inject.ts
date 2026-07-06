@@ -7,16 +7,17 @@ import type { PanelEvent } from '../../core/ports/ui.port.js';
 // bug, fixed 2026-07-02 — see replit-inject.ts's header comment).
 import { injectPromptText as injectPromptTextReplit } from './agents/replit-inject.js';
 import { injectPromptText as injectPromptTextBolt } from './agents/bolt-inject.js';
+import { injectPromptText as injectPromptTextLovable } from './agents/lovable-inject.js';
 import { clipboardFallback } from './agents/inject-kit.js';
 import { resolveAgentFromHostname } from './agents/agent-hosts.js';
 
 // Per-agent inject-back dispatch (B4 — the per-agent split B3's comment planned).
-// A host with no injector yet (lovable until B5, unknown hosts) degrades to the
-// clipboard fallback rather than silently doing nothing or using the wrong
-// agent's editor mechanics.
+// A host with no injector (unknown hosts) degrades to the clipboard fallback
+// rather than silently doing nothing or using the wrong agent's editor mechanics.
 const INJECTORS: Record<string, (text: string) => Promise<void>> = {
   replit: injectPromptTextReplit,
   bolt: injectPromptTextBolt,
+  lovable: injectPromptTextLovable,
 };
 
 function injectPromptText(text: string): Promise<void> {

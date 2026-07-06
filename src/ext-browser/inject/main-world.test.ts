@@ -127,6 +127,59 @@ describe('fetch capture rules (B4 — Bolt transport, recon-confirmed)', () => {
     });
   });
 
+  describe('extractLovableMessage — strict body-shape guard (B5)', () => {
+    it('extracts the flat message field when id starts with umsg_', async () => {
+      const { extractLovableMessage } = await import('./main-world.js');
+      expect(extractLovableMessage(JSON.stringify({ id: 'umsg_01kwv', message: 'make it responsive', files: [] })))
+        .toBe('make it responsive');
+    });
+
+    it('returns null when id is missing or not a umsg_ id (lookalike payloads)', async () => {
+      const { extractLovableMessage } = await import('./main-world.js');
+      expect(extractLovableMessage(JSON.stringify({ message: 'no id at all' }))).toBeNull();
+      expect(extractLovableMessage(JSON.stringify({ id: 'amsg_x', message: 'assistant-shaped' }))).toBeNull();
+    });
+
+    it('returns null for empty messages and non-JSON bodies', async () => {
+      const { extractLovableMessage } = await import('./main-world.js');
+      expect(extractLovableMessage(JSON.stringify({ id: 'umsg_1', message: '   ' }))).toBeNull();
+      expect(extractLovableMessage('not-json{{{')).toBeNull();
+    });
+  });
+
+  it('captures Lovable POST api.lovable.dev/projects/<id>/chat via the pathEndsWith-pinned rule', async () => {
+    stubWindow('lovable.dev');
+    await import('./main-world.js');
+
+    void window.fetch('https://api.lovable.dev/projects/21239a50-abc/chat', {
+      method: 'POST',
+      body: JSON.stringify({ id: 'umsg_01kwv', message: 'make the cards responsive' }),
+    });
+    await flush();
+
+    expect(postMessageSpy).toHaveBeenCalledWith(
+      { type: 'nexpath:fetch-prompt', promptText: 'make the cards responsive', agent: 'lovable' },
+      'https://lovable.dev',
+    );
+  });
+
+  it('ignores Lovable sibling endpoints whose pathname does not END in /chat', async () => {
+    stubWindow('lovable.dev');
+    await import('./main-world.js');
+
+    void window.fetch('https://api.lovable.dev/projects/21239a50-abc/chat-history', {
+      method: 'POST',
+      body: JSON.stringify({ id: 'umsg_01kwv', message: 'should not capture' }),
+    });
+    void window.fetch('https://api.lovable.dev/projects/21239a50-abc/sandbox/extend-lease', {
+      method: 'POST',
+      body: JSON.stringify({ id: 'umsg_01kwv', message: 'nor this' }),
+    });
+    await flush();
+
+    expect(postMessageSpy).not.toHaveBeenCalled();
+  });
+
   it('declares a bolt rule for the /api/chat/v2 generation endpoint only', async () => {
     stubWindow('bolt.new');
     const { FETCH_CAPTURE_RULES } = await import('./main-world.js');

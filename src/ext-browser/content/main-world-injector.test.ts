@@ -129,10 +129,21 @@ describe('main-world-injector.ts', () => {
       expect(sendMessageMock).toHaveBeenCalledWith(expect.objectContaining({ agent: 'bolt' }));
     });
 
-    it('SKIPS capture on lovable.dev — project URL shape unknown until the B5 recon', () => {
+    it('forwards on a lovable.dev project page with the per-project root (B5 recon confirmed the URL shape)', () => {
       sendMessageMock.mockClear();
       setLocation('https://lovable.dev', 'lovable.dev', '/projects/some-app');
       dispatchWindowMessage({ type: 'nexpath:prompt-captured', promptText: 'hi', agent: '' });
+
+      expect(sendMessageMock).toHaveBeenCalledWith(expect.objectContaining({
+        agent: 'lovable',
+        projectRoot: 'https://lovable.dev/projects/some-app',
+      }));
+    });
+
+    it('SKIPS capture on the lovable.dev dashboard — no project context there', () => {
+      sendMessageMock.mockClear();
+      setLocation('https://lovable.dev', 'lovable.dev', '/dashboard');
+      dispatchWindowMessage({ type: 'nexpath:prompt-captured', promptText: 'hi', agent: 'lovable' });
 
       expect(sendMessageMock).not.toHaveBeenCalled();
     });
@@ -229,6 +240,70 @@ describe('main-world-injector.ts', () => {
       setLocation('https://bolt.new', 'bolt.new', '/~/sb1-late');
       vi.advanceTimersByTime(5_000);
 
+      expect(sendMessageMock).not.toHaveBeenCalled();
+    });
+
+    it('persists the stash to sessionStorage on rejection and clears it after delivery', () => {
+      sendMessageMock.mockClear();
+      window.sessionStorage.removeItem('nexpath_pending_capture');
+      setLocation('https://lovable.dev', 'lovable.dev', '/dashboard');
+      dispatchWindowMessage({ type: 'nexpath:prompt-captured', promptText: 'build a quotes page', agent: 'lovable' });
+
+      const stored = JSON.parse(window.sessionStorage.getItem('nexpath_pending_capture')!) as { promptText: string; agent: string };
+      expect(stored.promptText).toBe('build a quotes page');
+      expect(stored.agent).toBe('lovable');
+
+      setLocation('https://lovable.dev', 'lovable.dev', '/projects/21239a50-abc');
+      vi.advanceTimersByTime(1_100);
+
+      expect(sendMessageMock).toHaveBeenCalledWith(expect.objectContaining({
+        promptText: 'build a quotes page',
+        projectRoot: 'https://lovable.dev/projects/21239a50-abc',
+        agent: 'lovable',
+      }));
+      expect(window.sessionStorage.getItem('nexpath_pending_capture')).toBeNull();
+    });
+
+    it('RESUMES a stash across a HARD navigation (fresh module instance reads sessionStorage) — the Lovable dashboard flow', async () => {
+      // Simulate the project page after a hard nav: new module instance, the
+      // window bootstrap flag deliberately left SET so only the resume path runs
+      // (no duplicate listeners in this shared jsdom window).
+      sendMessageMock.mockClear();
+      window.sessionStorage.setItem('nexpath_pending_capture', JSON.stringify({
+        promptText: 'build a quotes page', agent: 'lovable', stashedAt: Date.now(),
+      }));
+      setLocation('https://lovable.dev', 'lovable.dev', '/projects/21239a50-abc');
+
+      vi.resetModules();
+      await import('./main-world-injector.js');
+      vi.advanceTimersByTime(1_100);
+
+      expect(sendMessageMock).toHaveBeenCalledWith(expect.objectContaining({
+        promptText: 'build a quotes page',
+        projectRoot: 'https://lovable.dev/projects/21239a50-abc',
+        agent: 'lovable',
+      }));
+      expect(window.sessionStorage.getItem('nexpath_pending_capture')).toBeNull();
+    });
+
+    it('discards an EXPIRED or corrupt stored stash on resume instead of delivering it', async () => {
+      sendMessageMock.mockClear();
+      window.sessionStorage.setItem('nexpath_pending_capture', JSON.stringify({
+        promptText: 'ancient prompt', agent: 'lovable', stashedAt: Date.now() - 500_000,
+      }));
+      setLocation('https://lovable.dev', 'lovable.dev', '/projects/21239a50-abc');
+
+      vi.resetModules();
+      await import('./main-world-injector.js');
+      vi.advanceTimersByTime(2_000);
+
+      expect(sendMessageMock).not.toHaveBeenCalled();
+      expect(window.sessionStorage.getItem('nexpath_pending_capture')).toBeNull();
+
+      window.sessionStorage.setItem('nexpath_pending_capture', 'corrupt{{{');
+      vi.resetModules();
+      await import('./main-world-injector.js');
+      vi.advanceTimersByTime(2_000);
       expect(sendMessageMock).not.toHaveBeenCalled();
     });
 

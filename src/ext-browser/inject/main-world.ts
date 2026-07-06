@@ -54,6 +54,14 @@ export interface FetchCaptureRule {
   agent: string;
   /** Substring the request URL must contain (matched only for POSTs on this agent's host). */
   urlIncludes: string;
+  /**
+   * Optional exact-path guard: the URL's pathname must END with this string.
+   * B4's lesson made concrete — a bare substring matched Bolt's project-persist
+   * endpoint and replayed historical prompts; when an agent's API has sibling
+   * endpoints (Lovable: `/projects/<id>/chat` vs other `/projects/<id>/…` calls),
+   * pin the pathname tail instead of widening the substring.
+   */
+  pathEndsWith?: string;
   /** Extract the newest user prompt from the raw request body, or null to ignore. */
   extractPrompt(bodyText: string): string | null;
 }
@@ -80,6 +88,24 @@ export function extractLastUserMessage(bodyText: string): string | null {
   }
 }
 
+/**
+ * Extract the prompt from Lovable's chat POST body. Strict shape guard (B4
+ * lesson): `{"id":"umsg_…","message":"<prompt>", …}` — both conditions must hold
+ * so any lookalike endpoint or non-user payload yields null instead of a capture.
+ * Confirmed live 2026-07-06 (docs/capture-recon/lovable-recon.md §2).
+ */
+export function extractLovableMessage(bodyText: string): string | null {
+  try {
+    const parsed = JSON.parse(bodyText) as { id?: unknown; message?: unknown };
+    if (typeof parsed.id !== 'string' || !parsed.id.startsWith('umsg_')) return null;
+    if (typeof parsed.message !== 'string') return null;
+    const text = parsed.message.trim();
+    return text.length > 0 ? text : null;
+  } catch {
+    return null;
+  }
+}
+
 export const FETCH_CAPTURE_RULES: FetchCaptureRule[] = [
   // '/api/chat/v2' exactly — NOT the broader '/api/chat' substring. Bolt also POSTs
   // its project-persist payload to /api/chats/<id> (matches the substring, carries
@@ -88,6 +114,9 @@ export const FETCH_CAPTURE_RULES: FetchCaptureRule[] = [
   // zero user action (observed live 2026-07-06). Only the generation endpoint
   // carries a prompt the user just submitted.
   { agent: 'bolt', urlIncludes: '/api/chat/v2', extractPrompt: extractLastUserMessage },
+  // Lovable: POST https://api.lovable.dev/projects/<uuid>/chat — pathname tail
+  // pinned exactly (§ pathEndsWith doc above), body shape guarded in the extractor.
+  { agent: 'lovable', urlIncludes: 'api.lovable.dev/projects/', pathEndsWith: '/chat', extractPrompt: extractLovableMessage },
 ];
 
 export function emitFetchPrompt(promptText: string, agent: string): void {
@@ -105,9 +134,17 @@ async function maybeCaptureFetch(input: RequestInfo | URL, init?: RequestInit): 
   ).toUpperCase();
   if (method !== 'POST') return;
   const agent = resolveAgentFromHostname(window.location.hostname);
-  const rule = FETCH_CAPTURE_RULES.find(
-    (r) => r.agent === agent && url.includes(r.urlIncludes),
-  );
+  const rule = FETCH_CAPTURE_RULES.find((r) => {
+    if (r.agent !== agent || !url.includes(r.urlIncludes)) return false;
+    if (r.pathEndsWith !== undefined) {
+      try {
+        if (!new URL(url, window.location.origin).pathname.endsWith(r.pathEndsWith)) return false;
+      } catch {
+        return false;
+      }
+    }
+    return true;
+  });
   if (!rule) return;
   let bodyText: string | null = typeof init?.body === 'string' ? init.body : null;
   if (bodyText === null && input instanceof Request) {

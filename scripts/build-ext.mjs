@@ -42,6 +42,7 @@ const contentScriptEntries = [
   { in: path.join(SRC, 'content', 'inject.ts'),               out: 'content/inject' },
   { in: path.join(SRC, 'content', 'agents', 'replit.ts'),     out: 'content/agents/replit' },
   { in: path.join(SRC, 'content', 'agents', 'bolt.ts'),       out: 'content/agents/bolt' },
+  { in: path.join(SRC, 'content', 'agents', 'lovable.ts'),    out: 'content/agents/lovable' },
 ];
 
 /**
