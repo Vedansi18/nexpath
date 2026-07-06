@@ -4,6 +4,7 @@ import {
   ABSENCE_SESSION_LENGTH_CHECKPOINT_FORMAL,
 } from './class5-session-quality.js';
 import { detectL2TriggersInText } from '../r5-injection.js';
+import { findJargonViolations } from '../content-authoring-rules.js';
 
 // context_loss FORMAL and session_length_checkpoint FORMAL previously shared identical
 // L1[0]/L2[0]/L3[0] text (and near-identical L2[1]). The Frame-D re-author differentiates
@@ -55,6 +56,13 @@ describe('context_loss FORMAL — Frame-D collision differentiation', () => {
       const compliant = detectL2TriggersInText(e.option).length === 0
         || /go-ahead|confirmation|ask me/i.test(e.descBase);
       expect(compliant).toBe(true);
+    }
+  });
+
+  it('every FORMAL option is de-jargon clean (CTA-C3)', () => {
+    for (const e of [...ctx.L1, ...ctx.L2, ...ctx.L3]) {
+      expect(findJargonViolations(e.option)).toEqual([]);
+      expect(findJargonViolations(e.descBase)).toEqual([]);
     }
   });
 });

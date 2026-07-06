@@ -3,6 +3,7 @@ import type { DecisionContent } from '../options.js';
 import { ABSENCE_CONTEXT_LOSS_CASUAL } from './class5-session-quality.js';
 import { CONTEXT_LOSS_BEGINNER_OVERRIDE } from './class5-records-beginner.js';
 import { detectL2TriggersInText } from '../r5-injection.js';
+import { findJargonViolations } from '../content-authoring-rules.js';
 
 /** §4.E6 CTA-C4 gate: an option proposing a sensitive action must carry a confirm-seek. */
 const l2Compliant = (option: string, whyDesc: string): boolean =>
@@ -33,6 +34,12 @@ describe('context_loss H-1 — CASUAL harmonized to the decision-thread frame', 
       expect(l2Compliant(e.option, e.descBase)).toBe(true);
     }
   });
+  it('every casual option is de-jargon clean (CTA-C3)', () => {
+    for (const e of [...ABSENCE_CONTEXT_LOSS_CASUAL.L1, ...ABSENCE_CONTEXT_LOSS_CASUAL.L2, ...ABSENCE_CONTEXT_LOSS_CASUAL.L3]) {
+      expect(findJargonViolations(e.option)).toEqual([]);
+      expect(findJargonViolations(e.descBase)).toEqual([]);
+    }
+  });
 });
 
 describe('context_loss H-1 — BEGINNER harmonized to the decision-thread frame', () => {
@@ -50,5 +57,11 @@ describe('context_loss H-1 — BEGINNER harmonized to the decision-thread frame'
   });
   it('every beginner cell is L2-compliant (§4.E6)', () => {
     for (const c of cells) expect(l2Compliant(c.option, c.whyDesc)).toBe(true);
+  });
+  it('every beginner cell is de-jargon clean (CTA-C3)', () => {
+    for (const c of cells) {
+      expect(findJargonViolations(c.option)).toEqual([]);
+      expect(findJargonViolations(c.whyDesc)).toEqual([]);
+    }
   });
 });

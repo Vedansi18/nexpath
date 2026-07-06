@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { UserProfile } from '../../classifier/types.js';
 import { resolveDecisionContent, type DecisionContent } from '../options.js';
-import { findVoiceViolations } from '../content-authoring-rules.js';
+import { findVoiceViolations, findJargonViolations } from '../content-authoring-rules.js';
 import { detectL2TriggersInText } from '../r5-injection.js';
 
 /** §4.E6 CTA-C4 gate: an option proposing a sensitive action must carry a confirm-seek. */
@@ -60,6 +60,17 @@ describe('context_loss role variants — L2 safeguard gate (§4.E6)', () => {
     it(`${role}: every option is L2-compliant (no sensitive action, or a confirm-seek)`, () => {
       for (const e of [...c.L1, ...c.L2, ...c.L3]) {
         expect(l2Compliant(e.option, e.descBase)).toBe(true);
+      }
+    });
+  }
+});
+
+describe('context_loss role variants — de-jargon gate (CTA-C3)', () => {
+  for (const [role, c] of Object.entries(VARIANTS)) {
+    it(`${role}: no bare deployment/coding jargon in any option or why-desc`, () => {
+      for (const e of [...c.L1, ...c.L2, ...c.L3]) {
+        expect(findJargonViolations(e.option)).toEqual([]);
+        expect(findJargonViolations(e.descBase)).toEqual([]);
       }
     });
   }
