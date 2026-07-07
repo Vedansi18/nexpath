@@ -1,5 +1,10 @@
 import { isShowAdvisoryMsg } from './ipc.js';
-import { mountStubPanel } from '../ui/stub-panel.js';
+import { mountNexpathPanel } from '../ui/panel.js';
+import type {
+  PanelController,
+  PanelEvent as UiPanelEvent,
+  AdvisoryPayload as UiAdvisoryPayload,
+} from '../ui/ui-contract.js';
 import type { PanelEvent } from '../../core/ports/ui.port.js';
 // Imports from the *-inject.ts modules, NOT the capture entries (replit.ts /
 // bolt.ts) — those auto-run their capture bootstrap at import time, and esbuild
@@ -33,11 +38,116 @@ declare global {
 
 const SUPPORTED_SCHEMA_VERSION = 1;
 
-let panelRoot: HTMLDivElement | null = null;
+// ── Real UI panel (B5b) ─────────────────────────────────────────────────────────
+//
+// B5b swaps the B2 stub for the UI developer's accepted panel.js (mountNexpathPanel).
+// Contract difference that shapes this file: the stub was mount-per-advisory; the
+// real panel is mount-ONCE per content-script lifetime, then driven via the
+// PanelController (show/setBusy/hide/destroy) — see src/ext-browser/ui/ui-contract.ts.
+//
+// The panel emits the 5 contract PanelEvents. They split into two classes:
+//   • TERMINAL (select/skip/dismiss) — end the advisory. Reported back to the SW via
+//     the existing `nexpath:panel-event` round-trip (main-world-injector.ts resolves
+//     ContentScriptUIAdapter.showAdvisory()'s awaited Promise with it), exactly as the
+//     stub did. The SW's showAdvisory result handling is generic over event.type, so
+//     nothing SW-side changes.
+//   • NON-TERMINAL (copy/show-simpler) — the panel stays open. Handled entirely here
+//     (clipboard write / level-nav is panel-internal); NOT sent through the
+//     `nexpath:panel-event` round-trip (that would prematurely resolve showAdvisory).
+//
+// This keeps B5b contained to this content-script file + the vendored panel — no
+// change to main-world-injector.ts, panel-adapter.ts, the SW, or core.
 
-function removePanel(): void {
-  panelRoot?.remove();
-  panelRoot = null;
+// The engine's AdvisoryPayload (core/ports/ui.port.ts) and the frozen UI contract's
+// AdvisoryPayload are structurally identical field-for-field; the engine's types are
+// the widened ones (stage: string vs the 8-value union, etc.), and the engine only
+// ever sends valid values. This one boundary cast is the "reconcile at B5b" the
+// architecture doc flagged — done here, once, with the runtime shapes proven equal.
+let controller: PanelController | null = null;
+let panelHost: HTMLDivElement | null = null;
+let currentPayload: UiAdvisoryPayload | null = null;
+
+function findOptionTitle(optionId: string): string {
+  const opt = currentPayload?.options.find((o) => o.id === optionId);
+  return opt?.title ?? '';
+}
+
+async function copyToClipboard(text: string): Promise<void> {
+  try {
+    await navigator.clipboard?.writeText(text);
+  } catch {
+    // Clipboard unavailable/denied — copy is a best-effort convenience; never throw.
+  }
+}
+
+/** Report a TERMINAL outcome to the SW (resolves showAdvisory's awaited Promise). */
+function reportTerminal(event: PanelEvent): void {
+  window.dispatchEvent(new CustomEvent('nexpath:panel-event', { detail: event }));
+}
+
+function handlePanelEvent(event: UiPanelEvent): void {
+  const advisoryId = currentPayload?.advisoryId ?? '';
+
+  switch (event.type) {
+    case 'select': {
+      // CLI parity (DecisionSession.ts): inject the selected option's SHORT text —
+      // payload `title` (= the CLI's OptionEntry.option), never the longer `body`
+      // (= descBase). Confirmed as the CLI's `selectedPrompt` and matches every live
+      // test to date. The panel also sends `event.body`, deliberately unused here.
+      const title = findOptionTitle(event.optionId);
+      controller?.setBusy(true);
+      void injectPromptText(title)
+        .catch(() => { /* clipboardFallback already handles paste failure internally */ })
+        .finally(() => {
+          controller?.setBusy(false);
+          controller?.hide();
+        });
+      reportTerminal({ type: 'select', advisoryId, selectedOptionId: event.optionId });
+      break;
+    }
+    case 'skip': {
+      controller?.hide();
+      reportTerminal({ type: 'skip', advisoryId });
+      break;
+    }
+    case 'dismiss': {
+      controller?.hide();
+      reportTerminal({ type: 'dismiss', advisoryId });
+      break;
+    }
+    case 'copy': {
+      // CLI `clipboard_only`: copy the SAME text a select would inject (the title).
+      // Panel stays open (contract) — no terminal report.
+      void copyToClipboard(findOptionTitle(event.optionId));
+      console.log('[nexpath] advisory option copied to clipboard');
+      break;
+    }
+    case 'show-simpler': {
+      // Panel manages its own L1→L2→L3 level display; engine just notes it. Panel
+      // stays open — no terminal report.
+      console.log('[nexpath] advisory: show-simpler (level navigation)');
+      break;
+    }
+  }
+}
+
+/** Lazily create the closed Shadow root + mount the panel ONCE (contract). */
+function ensurePanelMounted(): PanelController {
+  if (controller) return controller;
+
+  panelHost = document.createElement('div');
+  panelHost.id = 'nexpath-panel-host';
+  document.body.appendChild(panelHost);
+
+  // Engine owns the closed Shadow root (sign-off B); panel.js renders INTO the
+  // element we pass (it does root.appendChild, not root.attachShadow) — so the
+  // Shadow boundary here is what isolates the panel's CSS from the host page.
+  const shadow = panelHost.attachShadow({ mode: 'closed' });
+  const mountEl = document.createElement('div');
+  shadow.appendChild(mountEl);
+
+  controller = mountNexpathPanel(mountEl, { onEvent: handlePanelEvent });
+  return controller;
 }
 
 function setupListener(): void {
@@ -45,7 +155,7 @@ function setupListener(): void {
     const msg = (ev as CustomEvent<unknown>).detail;
     if (!isShowAdvisoryMsg(msg)) return;
 
-    // Guard against schema mismatches — log and bail rather than crash.
+    // Graceful schema guard — log and bail rather than crash or mount a bad payload.
     if (msg.payload.schemaVersion !== SUPPORTED_SCHEMA_VERSION) {
       console.warn(
         `[nexpath] Advisory schemaVersion mismatch: got ${msg.payload.schemaVersion}, expected ${SUPPORTED_SCHEMA_VERSION}. Ignoring.`,
@@ -53,31 +163,23 @@ function setupListener(): void {
       return;
     }
 
-    removePanel();
+    // See the boundary-cast note above: engine payload ≡ contract payload at runtime.
+    currentPayload = msg.payload as unknown as UiAdvisoryPayload;
+    const ctrl = ensurePanelMounted();
+    // Re-attach if the host was detached from the DOM (a host-page SPA re-render can
+    // wipe body children) — the mount-once panel is worthless if its host is orphaned.
+    if (panelHost && !panelHost.isConnected) document.body.appendChild(panelHost);
+    ctrl.show(currentPayload);
+  });
 
-    panelRoot = document.createElement('div');
-    panelRoot.id = 'nexpath-panel-root';
-    document.body.appendChild(panelRoot);
-
-    const payload = msg.payload;
-
-    // mountStubPanel returns the closed ShadowRoot reference (root.shadowRoot is null for closed).
-    mountStubPanel(panelRoot, payload, (event) => {
-      // Report the real outcome back to main-world-injector.ts, which is holding the
-      // SW's showAdvisory() reply open waiting for this — without it, every advisory
-      // resolves as a synthetic 'dismiss' on the SW side regardless of what the user
-      // actually clicked (see main-world-injector.ts's onMessage listener).
-      let panelEvent: PanelEvent;
-      if (event.type === 'select') {
-        const option = payload.options[event.optionIndex];
-        panelEvent = { type: 'select', advisoryId: payload.advisoryId, selectedOptionId: option?.id ?? '' };
-        injectPromptText(event.text).catch(() => { /* fallback-to-clipboard already handles failure internally */ });
-      } else {
-        panelEvent = { type: 'dismiss', advisoryId: payload.advisoryId };
-      }
-      window.dispatchEvent(new CustomEvent('nexpath:panel-event', { detail: panelEvent }));
-      removePanel();
-    });
+  // Content scripts have no clean unload hook; pagehide is the closest — tear the
+  // panel down so no listeners/timers leak across a navigation away from the agent.
+  window.addEventListener('pagehide', () => {
+    controller?.destroy();
+    controller = null;
+    panelHost?.remove();
+    panelHost = null;
+    currentPayload = null;
   });
 }
 

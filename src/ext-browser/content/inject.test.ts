@@ -2,38 +2,42 @@
 
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 import type { AdvisoryPayload } from '../../core/ports/ui.port.js';
+import type { PanelEvent as UiPanelEvent } from '../ui/ui-contract.js';
 
-const mountStubPanelMock = vi.fn().mockReturnValue({} as ShadowRoot);
+// Real panel (B5b): mountNexpathPanel mounts ONCE and returns a controller the
+// engine drives (show/setBusy/hide/destroy). Capture the onEvent callback so tests
+// can simulate each of the 5 contract events.
+const showMock = vi.fn();
+const setBusyMock = vi.fn();
+const hideMock = vi.fn();
+const destroyMock = vi.fn();
+const mountNexpathPanelMock = vi.fn((_root: HTMLElement, opts: { onEvent: (e: UiPanelEvent) => void }) => {
+  capturedOnEvent = opts.onEvent;
+  return { show: showMock, setBusy: setBusyMock, hide: hideMock, destroy: destroyMock };
+});
+let capturedOnEvent: ((e: UiPanelEvent) => void) | null = null;
+
 const injectPromptTextMock = vi.fn().mockResolvedValue(undefined);
 const injectPromptTextBoltMock = vi.fn().mockResolvedValue(undefined);
 const injectPromptTextLovableMock = vi.fn().mockResolvedValue(undefined);
 const clipboardFallbackMock = vi.fn().mockResolvedValue(undefined);
-// jsdom's hostname is localhost (agent 'unknown') — default to 'replit' so the
-// pre-B4 tests keep exercising the replit injector; dispatch tests override it.
+// jsdom hostname is localhost (agent 'unknown') — default to 'replit' so select
+// tests exercise the replit injector; dispatch tests override it.
 const resolveAgentMock = vi.fn().mockReturnValue('replit');
+const clipboardWriteTextMock = vi.fn().mockResolvedValue(undefined);
 
-vi.mock('../ui/stub-panel.js', () => ({
-  mountStubPanel: mountStubPanelMock,
+vi.mock('../ui/panel.js', () => ({
+  mountNexpathPanel: mountNexpathPanelMock,
 }));
+vi.mock('./agents/replit-inject.js', () => ({ injectPromptText: injectPromptTextMock }));
+vi.mock('./agents/lovable-inject.js', () => ({ injectPromptText: injectPromptTextLovableMock }));
+vi.mock('./agents/bolt-inject.js', () => ({ injectPromptText: injectPromptTextBoltMock }));
+vi.mock('./agents/inject-kit.js', () => ({ clipboardFallback: clipboardFallbackMock }));
+vi.mock('./agents/agent-hosts.js', () => ({ resolveAgentFromHostname: resolveAgentMock }));
 
-vi.mock('./agents/replit-inject.js', () => ({
-  injectPromptText: injectPromptTextMock,
-}));
-
-vi.mock('./agents/lovable-inject.js', () => ({
-  injectPromptText: injectPromptTextLovableMock,
-}));
-vi.mock('./agents/bolt-inject.js', () => ({
-  injectPromptText: injectPromptTextBoltMock,
-}));
-
-vi.mock('./agents/inject-kit.js', () => ({
-  clipboardFallback: clipboardFallbackMock,
-}));
-
-vi.mock('./agents/agent-hosts.js', () => ({
-  resolveAgentFromHostname: resolveAgentMock,
-}));
+function makeOption(level: 'L1' | 'L2' | 'L3', id: string, title: string) {
+  return { id, level, title, body: `${title} — full body text` };
+}
 
 function makePayload(overrides: Partial<AdvisoryPayload> = {}): AdvisoryPayload {
   return {
@@ -41,199 +45,167 @@ function makePayload(overrides: Partial<AdvisoryPayload> = {}): AdvisoryPayload 
     advisoryId: 'adv-1',
     pinchLabel: 'Hold up.',
     stage: 'implementation',
-    options: [],
+    options: [makeOption('L1', 'adv-1-L1', 'Run the tests now'), makeOption('L2', 'adv-1-L2', 'Quick check')],
     meta: { agent: 'replit', frequency: 'optimum' },
     ...overrides,
   };
 }
 
 function dispatchShowAdvisory(payload: AdvisoryPayload): void {
-  window.dispatchEvent(
-    new CustomEvent('nexpath:sw-message', {
-      detail: { type: 'nexpath:show-advisory', payload },
-    }),
-  );
+  window.dispatchEvent(new CustomEvent('nexpath:sw-message', {
+    detail: { type: 'nexpath:show-advisory', payload },
+  }));
 }
 
-describe('inject.ts', () => {
-  // The module attaches its 'nexpath:sw-message' listener once, at import time, to the
-  // real jsdom `window` (which persists across tests in this file) — so it must be
-  // imported exactly once, not re-imported per test (that would stack duplicate listeners).
+function lastTerminalEvent(): { type: string; advisoryId?: string; selectedOptionId?: string } | null {
+  const call = terminalSpy.mock.calls.at(-1);
+  return call ? (call[0] as CustomEvent).detail : null;
+}
+let terminalSpy: ReturnType<typeof vi.fn>;
+
+function flush(): Promise<void> {
+  return new Promise((r) => setTimeout(r, 0));
+}
+
+describe('inject.ts (B5b — real panel integration)', () => {
+  // Module attaches its 'nexpath:sw-message' listener once at import; import once.
   beforeAll(async () => {
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: clipboardWriteTextMock }, configurable: true,
+    });
     await import('./inject.js');
   });
 
   beforeEach(() => {
     document.body.innerHTML = '';
-    mountStubPanelMock.mockClear();
+    showMock.mockClear(); setBusyMock.mockClear(); hideMock.mockClear(); destroyMock.mockClear();
+    injectPromptTextMock.mockClear(); injectPromptTextBoltMock.mockClear();
+    injectPromptTextLovableMock.mockClear(); clipboardFallbackMock.mockClear();
+    clipboardWriteTextMock.mockClear();
+    resolveAgentMock.mockReturnValue('replit');
+    // Spy on the terminal round-trip (dispatched as 'nexpath:panel-event').
+    terminalSpy = vi.fn();
+    window.addEventListener('nexpath:panel-event', terminalSpy);
   });
 
-  it('ignores events that are not ShowAdvisoryMsg', () => {
-    window.dispatchEvent(new CustomEvent('nexpath:sw-message', { detail: { type: 'something-else' } }));
-    expect(mountStubPanelMock).not.toHaveBeenCalled();
+  afterEach(() => {
+    window.removeEventListener('nexpath:panel-event', terminalSpy);
   });
 
-  it('mounts the stub panel for a valid schemaVersion', () => {
-    const payload = makePayload();
-    dispatchShowAdvisory(payload);
-    expect(mountStubPanelMock).toHaveBeenCalledOnce();
-    const [rootArg, payloadArg] = mountStubPanelMock.mock.calls[0]!;
-    expect((rootArg as HTMLElement).id).toBe('nexpath-panel-root');
-    expect(payloadArg).toBe(payload);
+  it('ignores messages that are not ShowAdvisoryMsg', () => {
+    window.dispatchEvent(new CustomEvent('nexpath:sw-message', { detail: { type: 'nope' } }));
+    expect(showMock).not.toHaveBeenCalled();
   });
 
-  it('appends the panel root to document.body', () => {
+  it('mounts the panel ONCE and calls show(payload) for a valid advisory', () => {
+    const before = mountNexpathPanelMock.mock.calls.length;
     dispatchShowAdvisory(makePayload());
-    expect(document.getElementById('nexpath-panel-root')).not.toBeNull();
+    expect(showMock).toHaveBeenCalledTimes(1);
+    // Mounted at most once total across the whole file (idempotent controller reuse).
+    expect(mountNexpathPanelMock.mock.calls.length).toBeLessThanOrEqual(before + 1);
   });
 
-  it('bails on schemaVersion mismatch — no panel mounted, warns instead', () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    // @ts-expect-error — deliberately wrong schemaVersion to test the guard
-    dispatchShowAdvisory(makePayload({ schemaVersion: 2 }));
-    expect(mountStubPanelMock).not.toHaveBeenCalled();
-    expect(document.getElementById('nexpath-panel-root')).toBeNull();
-    expect(warnSpy).toHaveBeenCalledOnce();
-    expect(warnSpy.mock.calls[0]![0]).toContain('schemaVersion mismatch');
-    warnSpy.mockRestore();
-  });
-
-  it('removes the previous panel before mounting a new one', () => {
-    dispatchShowAdvisory(makePayload({ advisoryId: 'adv-1' }));
-    const firstRoot = document.getElementById('nexpath-panel-root');
-    expect(firstRoot).not.toBeNull();
-
+  it('re-shows on a second advisory WITHOUT remounting (mount-once contract)', () => {
+    const mounts = mountNexpathPanelMock.mock.calls.length;
     dispatchShowAdvisory(makePayload({ advisoryId: 'adv-2' }));
-    // Only one panel root should ever exist in the DOM at a time.
-    expect(document.querySelectorAll('#nexpath-panel-root').length).toBe(1);
-    expect(mountStubPanelMock).toHaveBeenCalledTimes(2);
+    dispatchShowAdvisory(makePayload({ advisoryId: 'adv-3' }));
+    expect(mountNexpathPanelMock.mock.calls.length).toBe(mounts); // no new mount
+    expect(showMock).toHaveBeenCalledTimes(2);
   });
 
-  it('removes the panel root when a dismiss event is emitted', () => {
+  it('bails on schemaVersion mismatch — no show, warns', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    dispatchShowAdvisory(makePayload({ schemaVersion: 2 as 1 }));
+    expect(showMock).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('schemaVersion mismatch'));
+    warn.mockRestore();
+  });
+
+  it('mounts the panel into a CLOSED shadow root (CSS isolation)', () => {
     dispatchShowAdvisory(makePayload());
-    expect(document.getElementById('nexpath-panel-root')).not.toBeNull();
-
-    const onEvent = mountStubPanelMock.mock.calls[0]![2] as (e: { type: string }) => void;
-    onEvent({ type: 'dismiss' });
-
-    expect(document.getElementById('nexpath-panel-root')).toBeNull();
+    const host = document.getElementById('nexpath-panel-host');
+    expect(host).not.toBeNull();
+    expect(host!.shadowRoot).toBeNull(); // closed → not exposed on the host
   });
 
-  it('injects the selected option text and removes the panel when a select event is emitted', () => {
-    dispatchShowAdvisory(makePayload());
-    injectPromptTextMock.mockClear();
+  describe('panel events', () => {
+    it("select: setBusy(true) → inject the option TITLE (CLI parity) → setBusy(false) → hide → terminal 'select'", async () => {
+      dispatchShowAdvisory(makePayload());
+      capturedOnEvent!({ type: 'select', optionId: 'adv-1-L1', body: 'the long body (must NOT be injected)' });
 
-    const onEvent = mountStubPanelMock.mock.calls[0]![2] as (e: { type: string; optionIndex?: number; text?: string }) => void;
-    onEvent({ type: 'select', optionIndex: 0, text: 'Write the tests now' });
+      // Terminal event reported immediately with the selected option id.
+      expect(lastTerminalEvent()).toEqual({ type: 'select', advisoryId: 'adv-1', selectedOptionId: 'adv-1-L1' });
+      expect(setBusyMock).toHaveBeenCalledWith(true);
+      // CLI parity: inject the TITLE, not the body.
+      expect(injectPromptTextMock).toHaveBeenCalledWith('Run the tests now');
 
-    expect(injectPromptTextMock).toHaveBeenCalledWith('Write the tests now');
-    expect(document.getElementById('nexpath-panel-root')).toBeNull();
-  });
-
-  describe('per-agent inject-back dispatch (B4)', () => {
-    afterEach(() => {
-      resolveAgentMock.mockReturnValue('replit');
+      await flush();
+      expect(setBusyMock).toHaveBeenCalledWith(false);
+      expect(hideMock).toHaveBeenCalled();
     });
 
-    function emitSelect(text: string): void {
+    it("skip: hide → terminal 'skip', no inject", () => {
       dispatchShowAdvisory(makePayload());
-      const onEvent = mountStubPanelMock.mock.calls.at(-1)![2] as (e: { type: string; optionIndex?: number; text?: string }) => void;
-      onEvent({ type: 'select', optionIndex: 0, text });
-    }
+      capturedOnEvent!({ type: 'skip' });
+      expect(hideMock).toHaveBeenCalled();
+      expect(lastTerminalEvent()).toEqual({ type: 'skip', advisoryId: 'adv-1' });
+      expect(injectPromptTextMock).not.toHaveBeenCalled();
+    });
 
+    it("dismiss: hide → terminal 'dismiss', no inject", () => {
+      dispatchShowAdvisory(makePayload());
+      capturedOnEvent!({ type: 'dismiss' });
+      expect(hideMock).toHaveBeenCalled();
+      expect(lastTerminalEvent()).toEqual({ type: 'dismiss', advisoryId: 'adv-1' });
+    });
+
+    it('copy: writes the option TITLE to clipboard, panel STAYS open (no hide, no terminal event)', () => {
+      dispatchShowAdvisory(makePayload());
+      terminalSpy.mockClear();
+      capturedOnEvent!({ type: 'copy', optionId: 'adv-1-L2' });
+      expect(clipboardWriteTextMock).toHaveBeenCalledWith('Quick check');
+      expect(hideMock).not.toHaveBeenCalled();
+      expect(terminalSpy).not.toHaveBeenCalled(); // non-terminal — must not resolve showAdvisory
+    });
+
+    it('show-simpler: no engine action, panel STAYS open (no hide, no terminal event)', () => {
+      dispatchShowAdvisory(makePayload());
+      terminalSpy.mockClear();
+      capturedOnEvent!({ type: 'show-simpler' });
+      expect(hideMock).not.toHaveBeenCalled();
+      expect(terminalSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('per-agent inject dispatch on select', () => {
     it('routes to the bolt injector on bolt hosts', () => {
       resolveAgentMock.mockReturnValue('bolt');
-      injectPromptTextBoltMock.mockClear();
-
-      emitSelect('add tests to the app');
-
-      expect(injectPromptTextBoltMock).toHaveBeenCalledWith('add tests to the app');
-      expect(injectPromptTextMock).not.toHaveBeenCalledWith('add tests to the app');
-    });
-
-    it('routes to the lovable injector on lovable hosts (B5)', () => {
-      resolveAgentMock.mockReturnValue('lovable');
-      injectPromptTextLovableMock.mockClear();
-
-      emitSelect('make the cards responsive');
-
-      expect(injectPromptTextLovableMock).toHaveBeenCalledWith('make the cards responsive');
-      expect(injectPromptTextMock).not.toHaveBeenCalledWith('make the cards responsive');
-      expect(injectPromptTextBoltMock).not.toHaveBeenCalledWith('make the cards responsive');
-    });
-
-    it('degrades to the clipboard fallback on hosts with no injector (unknown agents)', () => {
-      resolveAgentMock.mockReturnValue('unknown');
-      clipboardFallbackMock.mockClear();
-
-      emitSelect('review the edge cases');
-
-      expect(clipboardFallbackMock).toHaveBeenCalledWith('review the edge cases');
-      expect(injectPromptTextMock).not.toHaveBeenCalledWith('review the edge cases');
-      expect(injectPromptTextBoltMock).not.toHaveBeenCalledWith('review the edge cases');
-      expect(injectPromptTextLovableMock).not.toHaveBeenCalledWith('review the edge cases');
-    });
-  });
-
-  describe('nexpath:panel-event reporting (SW round-trip)', () => {
-    // Confirmed real bug 2026-07-02: without this, main-world-injector.ts's onMessage
-    // listener (which the SW's showAdvisory() awaits directly) never learns what the
-    // user did, so every advisory resolved as a synthetic dismiss on the SW side.
-    it('dispatches a select PanelEvent with the chosen option\'s id when an option is picked', () => {
-      const payload = makePayload({
-        options: [
-          { id: 'adv-1-L1', title: 'Do the thing', body: 'Full body text', level: 'L1' },
-        ],
-      });
-      dispatchShowAdvisory(payload);
-
-      const received = vi.fn();
-      window.addEventListener('nexpath:panel-event', (ev) => received((ev as CustomEvent).detail));
-
-      const onEvent = mountStubPanelMock.mock.calls[0]![2] as (e: { type: string; optionIndex?: number; text?: string }) => void;
-      onEvent({ type: 'select', optionIndex: 0, text: 'Do the thing' });
-
-      expect(received).toHaveBeenCalledWith({
-        type: 'select',
-        advisoryId: 'adv-1',
-        selectedOptionId: 'adv-1-L1',
-      });
-    });
-
-    it('dispatches a dismiss PanelEvent with the advisoryId when the panel is dismissed', () => {
-      const payload = makePayload({ advisoryId: 'adv-2' });
-      dispatchShowAdvisory(payload);
-
-      const received = vi.fn();
-      window.addEventListener('nexpath:panel-event', (ev) => received((ev as CustomEvent).detail));
-
-      const onEvent = mountStubPanelMock.mock.calls[0]![2] as (e: { type: string }) => void;
-      onEvent({ type: 'dismiss' });
-
-      expect(received).toHaveBeenCalledWith({ type: 'dismiss', advisoryId: 'adv-2' });
-    });
-  });
-
-  describe('idempotent-injection guard', () => {
-    it('does not re-register its listener on a second import into the same page', async () => {
-      // Simulates a stale content-script re-injection: the window flag from the earlier
-      // beforeAll import is still set (persists on the real jsdom window), so re-importing
-      // the module (as if the extension re-injected it into an already-open tab) must be
-      // a no-op this time.
-      expect(window.__nexpathInjectBootstrapped).toBe(true);
-
-      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-      vi.resetModules();
-      await import('./inject.js');
-
-      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('skipped, already bootstrapped'));
-
-      // A duplicate listener would double-mount the panel for the same event.
-      mountStubPanelMock.mockClear();
       dispatchShowAdvisory(makePayload());
-      expect(mountStubPanelMock).toHaveBeenCalledTimes(1);
-
-      logSpy.mockRestore();
+      capturedOnEvent!({ type: 'select', optionId: 'adv-1-L1', body: 'x' });
+      expect(injectPromptTextBoltMock).toHaveBeenCalledWith('Run the tests now');
+      expect(injectPromptTextMock).not.toHaveBeenCalledWith('Run the tests now');
     });
+
+    it('routes to the lovable injector on lovable hosts', () => {
+      resolveAgentMock.mockReturnValue('lovable');
+      dispatchShowAdvisory(makePayload());
+      capturedOnEvent!({ type: 'select', optionId: 'adv-1-L1', body: 'x' });
+      expect(injectPromptTextLovableMock).toHaveBeenCalledWith('Run the tests now');
+    });
+
+    it('degrades to clipboard fallback on unknown hosts', () => {
+      resolveAgentMock.mockReturnValue('unknown');
+      dispatchShowAdvisory(makePayload());
+      capturedOnEvent!({ type: 'select', optionId: 'adv-1-L1', body: 'x' });
+      expect(clipboardFallbackMock).toHaveBeenCalledWith('Run the tests now');
+    });
+  });
+
+  it('pagehide destroys the panel and clears the host', () => {
+    dispatchShowAdvisory(makePayload());
+    expect(document.getElementById('nexpath-panel-host')).not.toBeNull();
+    window.dispatchEvent(new Event('pagehide'));
+    expect(destroyMock).toHaveBeenCalled();
+    expect(document.getElementById('nexpath-panel-host')).toBeNull();
   });
 });
