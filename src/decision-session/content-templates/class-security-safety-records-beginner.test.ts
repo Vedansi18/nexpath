@@ -255,15 +255,20 @@ describe('A5 — NO_BACKUP_SAFETY beginner override (synthesized-record gates)',
     expect(synth.levelForms[5]!.cell.option).toMatch(ARTIFACT);
     expect(ARTIFACT.test(synth.levelForms[5]!.cell.option)).toBe(ARTIFACT.test(r.levelForms[5]!.cell.option));
   });
-  it('carries NO safeguard, and no beginner option proposes a destructive restore/overwrite (mild parity with base)', () => {
+  it('applies the per-option confirm-seek on restore/overwrite columns ONLY, never on base setup advice (A1 lock)', () => {
+    const CONFIRM_SEEK = /ask me for go-ahead|check with me|go-ahead before/i;
+    const RESTORE_OVERWRITE = /\brestor|\brecover|overwrit/i;
+    for (const lvl of [1, 2] as const) {
+      expect(RESTORE_OVERWRITE.test(synth.levelForms[lvl]!.cell.option)).toBe(false);
+      expect(CONFIRM_SEEK.test(synth.levelForms[lvl]!.cell.option)).toBe(false);
+    }
+    for (const lvl of [3, 4, 5] as const) {
+      expect(RESTORE_OVERWRITE.test(synth.levelForms[lvl]!.cell.option)).toBe(true);
+      expect(CONFIRM_SEEK.test(synth.levelForms[lvl]!.cell.option)).toBe(true);
+    }
+    // Per-option (option text), not a record-level line — base columns stay unguarded.
     expect(r.l2SafeguardRequired).toBeFalsy();
     expect(checkL2Safeguard(synth).ok).toBe(true);
-    expect(checkL2Safeguard(synth).unguardedLevels).toEqual([]);
-    const DESTRUCTIVE_RESTORE = /restore\s+over|overwrit|(?:restore|roll\s*back)[^.]*\b(?:live|existing|current|production)\b|\brm\s+-rf\b|\bwipe\b|\berase\b|\bdelete\b/i;
-    for (const c of optionsOf(synth.levelForms)) {
-      expect(c.option).not.toMatch(DESTRUCTIVE_RESTORE);
-      expect(c.whyDesc).not.toMatch(DESTRUCTIVE_RESTORE);
-    }
   });
 });
 
@@ -278,10 +283,15 @@ describe('A5 — NO_BACKUP_SAFETY beginner override (engine serving)', () => {
     expect(beg?.option).not.toBe(base?.option);
   });
 
-  it('appends no safeguard line to the served column (mild — nothing to append)', async () => {
-    for (const lvl of [1, 3, 5] as const) {
-      const out = await composeAdvisory({ lookup: lookupOf({ shipped: r }), level: lvl, register: 'beginner' }, mockClient(JSON.stringify({ whyDesc: 'woven' })));
-      expect(out?.whyDesc).not.toMatch(/ask me for go-ahead|before you/i);
+  it('serves the per-option confirm-seek VERBATIM on beginner restore columns, never on base (reliable option channel)', async () => {
+    const CONFIRM_SEEK = /ask me for go-ahead|check with me/i;
+    for (const lvl of [1, 2] as const) {
+      const out = await composeAdvisory({ lookup: lookupOf({ shipped: r }), level: lvl, register: 'beginner' }, mockClient(JSON.stringify({ whyDesc: 'w' })));
+      expect(out?.option ?? '').not.toMatch(CONFIRM_SEEK);
+    }
+    for (const lvl of [3, 4, 5] as const) {
+      const out = await composeAdvisory({ lookup: lookupOf({ shipped: r }), level: lvl, register: 'beginner' }, mockClient(JSON.stringify({ whyDesc: 'w' })));
+      expect(out?.option ?? '').toMatch(CONFIRM_SEEK);
     }
   });
 });

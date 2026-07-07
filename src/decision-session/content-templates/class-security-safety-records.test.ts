@@ -3,7 +3,7 @@ import { runBuildGate, checkTopicKeyword, checkOptionLengthBudget } from '../con
 import {
   reviewRecord, checkVoice, checkEscalation, checkL2Safeguard, findVoiceViolations, findJargonViolations,
 } from '../content-authoring-rules.js';
-import { composeWhyDesc } from '../content-template-engine.js';
+import { composeWhyDesc, composeOption } from '../content-template-engine.js';
 import {
   ABSENCE_SECRET_IN_PROMPT_RECORD, ABSENCE_NO_VERSION_CONTROL_RECORD, ABSENCE_NO_BACKUP_SAFETY_RECORD,
   SECURITY_SAFETY_PARAM_AXES,
@@ -223,20 +223,34 @@ describe('A5 — ABSENCE_NO_BACKUP_SAFETY (new signal, mild — no record-level 
       expect(c.whyDesc).not.toMatch(PLACEHOLDER);
     }
   });
-  it('carries NO record-level safeguard, and no base option proposes a destructive restore/overwrite (mild — A1 lock)', () => {
-    // The record must NOT be flagged: standing up + verifying backups is non-destructive.
+  it('applies the L2 safeguard as a per-option confirm-seek on the restore/overwrite columns ONLY, never on base setup advice (A1 lock)', () => {
+    const CONFIRM_SEEK = /ask me for go-ahead|check with me|go-ahead before/i;
+    const RESTORE_OVERWRITE = /\brestor|\brecover|overwrit/i;
+    // Base setup columns (1–2): no restore proposed, and NO safeguard.
+    for (const lvl of [1, 2] as const) {
+      expect(RESTORE_OVERWRITE.test(r.levelForms[lvl]!.cell.option)).toBe(false);
+      expect(CONFIRM_SEEK.test(r.levelForms[lvl]!.cell.option)).toBe(false);
+    }
+    // Restore/overwrite columns (3–5): propose a restore over existing data AND carry the confirm-seek.
+    for (const lvl of [3, 4, 5] as const) {
+      expect(RESTORE_OVERWRITE.test(r.levelForms[lvl]!.cell.option)).toBe(true);
+      expect(CONFIRM_SEEK.test(r.levelForms[lvl]!.cell.option)).toBe(true);
+    }
+    // The safeguard is PER-OPTION (in the option text), NOT a record-level line that the engine
+    // would append to the base columns too. So no record-level flag/line is set.
     expect(r.l2SafeguardRequired).toBeFalsy();
     expect(r.l2SafeguardLine).toBeUndefined();
-    // The safeguard gate passes because NO option is an L2 trigger (nothing to guard).
     expect(checkL2Safeguard(r).ok).toBe(true);
-    expect(checkL2Safeguard(r).unguardedLevels).toEqual([]);
-    // Belt-and-suspenders: no option proposes a restore/OVERWRITE of EXISTING (live) data — the
-    // destructive-adjacent case the A1 lock says WOULD demand a safeguard. Every restore here
-    // targets a separate scratch copy, so the "no safeguard" stays provably sound.
-    const DESTRUCTIVE_RESTORE = /restore\s+over|overwrit|(?:restore|roll\s*back)[^.]*\b(?:live|existing|current|production)\b|\brm\s+-rf\b|\bwipe\b|\berase\b|\bdelete\b/i;
-    for (const c of optionsOf(r.levelForms)) {
-      expect(c.option).not.toMatch(DESTRUCTIVE_RESTORE);
-      expect(c.whyDesc).not.toMatch(DESTRUCTIVE_RESTORE);
+  });
+  it('serves the confirm-seek VERBATIM on restore columns, never on base columns (composeOption — the reliable channel)', () => {
+    // composeOption serves the option text verbatim (slot-fill only, no LLM rewrite), so the
+    // per-option safeguard survives serving — unlike the why-desc, which the weave can reword.
+    const CONFIRM_SEEK = /ask me for go-ahead|check with me/i;
+    for (const lvl of [1, 2] as const) {
+      expect(composeOption({ cell: r.levelForms[lvl]!.cell, slots: r.slots })).not.toMatch(CONFIRM_SEEK);
+    }
+    for (const lvl of [3, 4, 5] as const) {
+      expect(composeOption({ cell: r.levelForms[lvl]!.cell, slots: r.slots })).toMatch(CONFIRM_SEEK);
     }
   });
 });

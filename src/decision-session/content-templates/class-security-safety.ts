@@ -78,12 +78,16 @@ export const ABSENCE_NO_VERSION_CONTROL_RECORD: ContentTemplateRecord = {
 
 /**
  * ABSENCE_NO_BACKUP_SAFETY — the project has no backup / safety net, keyword "backup".
- * MILD data-sensitivity: the advice is to STAND UP backups and verify them, which is
- * non-destructive. Per the locked design, an option proposing a restore/OVERWRITE of existing
- * data would be destructive-adjacent and would carry the L2 safeguard — so the ladder here
- * deliberately frames every restore as a check into a SEPARATE scratch copy (never over live
- * data). No option overwrites existing data, so no option is an L2 trigger and the record is
- * unflagged (verified by the A5 no-destructive-restore test).
+ * MILD data-sensitivity with a PER-OPTION safeguard. Standing up + scheduling a backup (cols
+ * 1–2) is non-destructive → unguarded. Proving recovery means actually restoring, and a real
+ * restore OVERWRITES the current data — the destructive-adjacent case the locked design says
+ * MUST carry the L2 safeguard. So cols 3–5 propose the restore AND carry an action-named
+ * confirm-seek; cols 1–2 (base "set up a backup" advice) do not.
+ *
+ * Placement note: the confirm-seek lives in the OPTION text, not the why-desc. The engine
+ * serves the option verbatim (composeOption), whereas the why-desc is LLM-rewoven — only a
+ * RECORD-level l2SafeguardLine survives that weave, and a record-level line would wrongly guard
+ * cols 1–2 too. The option text is therefore the reliable per-option safeguard channel.
  */
 export const ABSENCE_NO_BACKUP_SAFETY_RECORD: ContentTemplateRecord = {
   signalType: 'ABSENCE_NO_BACKUP_SAFETY', source: 'shipped', schemaVersion: 1, slots: [],
@@ -92,9 +96,9 @@ export const ABSENCE_NO_BACKUP_SAFETY_RECORD: ContentTemplateRecord = {
   levelForms: {
     1: form("Set up a backup for this project's important data, so a copy exists if the original is ever lost.", "The lightest step: a backup of the important data exists."),
     2: form("Set up a backup and schedule it to run on its own regularly, so the saved copy stays current instead of going stale.", "A light pass: a backup that runs on a schedule."),
-    3: form("Set up a scheduled backup and prove it works by restoring it into a separate scratch copy — a backup that has never been restored can't be trusted.", "The backup hasn't been restore-tested into a scratch copy yet."),
-    4: form("Set up an automated backup with sensible retention, and run a periodic restore drill into a scratch copy to confirm the data comes back intact and the backup is complete.", "Beyond a single backup: retention plus a rehearsed restore into a scratch copy."),
-    5: form("Write a short backup-and-recovery note for the project: what is backed up, how often, where the copies live, and the exact restore steps into a scratch copy — kept with the project so recovery is repeatable.", "A durable backup-and-recovery note of what's saved and how to restore it."),
+    3: form("Set up a scheduled backup, then prove recovery by restoring from it — a real restore overwrites the current data with the backed-up copy, so ask me for go-ahead before you run one.", "The backup hasn't been proven by a real restore yet."),
+    4: form("Set up an automated backup with sensible retention, and prove recovery on a schedule with a periodic restore drill — a restore overwrites what's there now, so ask me for go-ahead before running it against live data.", "Beyond one backup: a scheduled restore drill that proves recovery."),
+    5: form("Write a short backup-and-recovery runbook and rehearse a full restore from it: what is backed up, how often, and the recovery steps — and since a real recovery overwrites the current data, ask me for go-ahead before you run the restore.", "A durable backup-and-recovery runbook proven by a rehearsed restore."),
   },
 };
 
