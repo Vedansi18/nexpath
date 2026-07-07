@@ -11,12 +11,16 @@
 
 import type { Engine, EngineInput, ContentSpec } from './engine-registry.js';
 import { detectAbsenceFlags } from '../classifier/AbsenceDetector.js';
+import { buildRuntimeContext } from '../classifier/runtime-context.js';
 
 export const absenceSignalEngine: Engine = {
   name: 'absence-signal',
   accepts: (polarity) => polarity === 'corrective',
   run: (input: EngineInput): ContentSpec => ({
     kind: 'absence',
-    flags: detectAbsenceFlags(input.state, input.profile, input.projectType),
+    flags: detectAbsenceFlags(
+      input.state, input.profile, input.projectType, undefined, undefined,
+      buildRuntimeContext(input.state),
+    ),
   }),
 };

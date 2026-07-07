@@ -7,6 +7,7 @@ import { openStore, closeStore, DEFAULT_DB_PATH } from '../../store/db.js';
 import { classifyPrompt } from '../../classifier/PromptClassifier.js';
 import { SessionStateManager } from '../../classifier/SessionStateManager.js';
 import { detectAbsenceFlags, ABSENCE_MIN_PROMPTS } from '../../classifier/AbsenceDetector.js';
+import { buildRuntimeContext } from '../../classifier/runtime-context.js';
 import { classifyStreamBPresence } from '../../classifier/StreamBPresenceClassifier.js';
 import type { StreamBPresenceResult } from '../../classifier/StreamBPresenceClassifier.js';
 import { shouldFireStage2, runStage2 } from '../../classifier/Stage2Trigger.js';
@@ -218,6 +219,7 @@ export async function runAuto(
     projectType,
     freqConfig.signalAbsenceThresholdMultiplier,
     freqConfig.signalAbsenceMinFloor,
+    buildRuntimeContext(mgr.current as import('../../classifier/types.js').SessionState),
   );
   logger.debug('absence_flags', { new: newFlags.length, total: mgr.current.absenceFlags.length });
   writeTelemetry(input.projectRoot, 'absence_flags_detected', {

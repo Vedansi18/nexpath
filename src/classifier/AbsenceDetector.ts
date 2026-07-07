@@ -1,6 +1,20 @@
 import type { SessionState, AbsenceFlag, UserProfile } from './types.js';
 import { SIGNAL_MAP } from './signals.js';
 import { STAGE_CONFIRM_THRESHOLD } from './SessionStateManager.js';
+import { MISTAKE_CATEGORIES, type RuntimeContext } from './mistake-categories.js';
+
+// The 6 new §4.E2 absence signals fire on their mistake-category detect() reading the live
+// RuntimeContext (behavioural streaks + the AR-10 probe) — NOT the generic keyword-absence gate.
+// Their SignalDefinition.key equals the mistake-category name; look the category up to call detect().
+const REGISTRY_DETECTED_KEYS = [
+  'secret_in_prompt', 'no_version_control', 'no_backup_safety',
+  'no_separate_envs', 'no_automated_security_scanning', 'frustration_spiral',
+] as const;
+const REGISTRY_DETECTED_BY_KEY = new Map(
+  MISTAKE_CATEGORIES
+    .filter((c) => (REGISTRY_DETECTED_KEYS as readonly string[]).includes(c.name))
+    .map((c) => [c.name, c] as const),
+);
 
 // ── Phase 7 F1 custom detection constants ─────────────────────────────────────
 
@@ -101,6 +115,7 @@ export function detectAbsenceFlags(
   projectType?:        string,
   thresholdMultiplier = 1.0,
   absenceMinFloor     = 5,
+  runtimeContext:      RuntimeContext = {},
 ): AbsenceFlag[] {
   const { currentStage, stageConfidence, promptsInCurrentStage, promptCount } = state;
 
@@ -160,6 +175,10 @@ export function detectAbsenceFlags(
       if (promptCount < MIN_CONTEXT_LOSS_PROMPTS) continue;
       const counter = state.signalCounters[sig.key];
       if (!counter || counter.lastSeenAt !== null) continue;
+    } else if (REGISTRY_DETECTED_BY_KEY.has(sig.key)) {
+      // §4.E2 registry-detected signal — fire ONLY on its real condition (the mistake-category
+      // detect() reading the live RuntimeContext), never on the generic keyword-absence path.
+      if (REGISTRY_DETECTED_BY_KEY.get(sig.key)!.detect(state.promptHistory, runtimeContext) < 1) continue;
     } else {
       // Standard gate — signal never detected?
       const counter = state.signalCounters[sig.key];
