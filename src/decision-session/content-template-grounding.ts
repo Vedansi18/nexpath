@@ -175,11 +175,21 @@ export interface WeaveInput {
   maxLines?: number;
 }
 
+/**
+ * Confirm-seek phrasings that mark a PER-COLUMN safeguard baked into an authored why-desc (as
+ * opposed to the record-level `l2Safeguard` line). NO_BACKUP_SAFETY's restore columns use these.
+ * Bare "confirm" is deliberately excluded — it appears in non-safeguard why-descs ("confirm the
+ * tests pass") and would cause needless deterministic fallbacks; the CLAUDE.md safeguard pattern
+ * always uses an "ask me for go-ahead" / "check with me" phrasing, which this matches.
+ */
+const CONFIRM_SEEK_RE = /\bask me\b|\bcheck with me\b|\bgo-ahead\b|\bgo ahead\b/i;
+
 function buildWeavePrompt(input: WeaveInput): string {
   const factListing = input.facts
     .map((f) => `- [${f.tier === 'corroborated' ? 'established practice' : 'available capability'}] ${f.text}`)
     .join('\n');
-  return `Weave the core line and the supporting facts below into a smooth why-desc of at most ${input.maxLines ?? 5} short lines, read by a coding agent. Rules: keep the core line's meaning; do NOT invent facts beyond those given; do NOT add new instructions. Phrase each fact by its tier: an [established practice] fact = something the user reliably DOES (e.g. "you already…"); an [available capability] fact = something the user's environment HAS or COULD use (e.g. "your setup has…", "you could…") — never state a capability as an established habit. Drop the bracketed tier tags from the final text. Preserve any placeholder tokens (e.g. {{name}}, {R4_OPEN}, {R4_CLOSE}, {R5_INJECT: ...}) EXACTLY as they appear — never reword, translate, move out of context, or remove them.${input.l2Safeguard ? ' Keep the final safeguard sentence EXACTLY as given — never reword or drop it.' : ''}
+  const hasColumnGuard = !input.l2Safeguard && CONFIRM_SEEK_RE.test(input.coreLine);
+  return `Weave the core line and the supporting facts below into a smooth why-desc of at most ${input.maxLines ?? 5} short lines, read by a coding agent. Rules: keep the core line's meaning; do NOT invent facts beyond those given; do NOT add new instructions. Phrase each fact by its tier: an [established practice] fact = something the user reliably DOES (e.g. "you already…"); an [available capability] fact = something the user's environment HAS or COULD use (e.g. "your setup has…", "you could…") — never state a capability as an established habit. Drop the bracketed tier tags from the final text. Preserve any placeholder tokens (e.g. {{name}}, {R4_OPEN}, {R4_CLOSE}, {R5_INJECT: ...}) EXACTLY as they appear — never reword, translate, move out of context, or remove them.${input.l2Safeguard ? ' Keep the final safeguard sentence EXACTLY as given — never reword or drop it.' : ''}${hasColumnGuard ? ' The core line contains a confirm-before-acting request (e.g. "ask me for go-ahead"); keep that request intact — never reword it away or drop it.' : ''}
 
 Core line: ${JSON.stringify(input.coreLine)}
 Facts:
@@ -214,8 +224,15 @@ export async function weaveWhyDesc(input: WeaveInput, client?: OpenAI): Promise<
       logger.debug('content_template_weave_dropped_placeholder', { required });
       return deterministic;
     }
-    // Safeguard survival is non-negotiable: re-append if the weave dropped it.
+    // Record-level safeguard survival is non-negotiable: re-append if the weave dropped it.
     if (input.l2Safeguard && !woven.includes(input.l2Safeguard)) return `${woven}\n${input.l2Safeguard}`;
+    // Per-column safeguard survival: a confirm-seek baked into the authored core line (a per-column
+    // safeguard, e.g. NO_BACKUP_SAFETY's restore columns) is just as non-negotiable. If the weave
+    // dropped it, fall back to the deterministic assembly, which keeps the core line verbatim.
+    if (CONFIRM_SEEK_RE.test(input.coreLine) && !CONFIRM_SEEK_RE.test(woven)) {
+      logger.debug('content_template_weave_dropped_column_safeguard', {});
+      return deterministic;
+    }
     return woven;
   } catch (err) {
     logger.debug('content_template_weave_error', { error: String(err) });

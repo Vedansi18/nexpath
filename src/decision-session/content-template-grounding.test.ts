@@ -106,6 +106,30 @@ describe('content-template-grounding — why-desc weave', () => {
     expect(out.endsWith(safeguard)).toBe(true);
   });
 
+  // Per-column safeguard: a confirm-seek baked into the AUTHORED core line (no separate
+  // l2Safeguard line) — e.g. NO_BACKUP_SAFETY's restore columns — must survive the weave too.
+  const guardedCore = { coreLine: 'Prove recovery by restoring — ask me for go-ahead before running one.', facts: base.facts };
+
+  it('keeps the woven output when a per-column confirm-seek in the core line survives', async () => {
+    const client = mockClient(JSON.stringify({ whyDesc: 'Restore to prove recovery (Vitest, small team) — ask me for go-ahead first.' }));
+    const out = await weaveWhyDesc(guardedCore, client);
+    expect(out).toMatch(/ask me for go-ahead/i);
+    expect(out).toBe('Restore to prove recovery (Vitest, small team) — ask me for go-ahead first.');
+  });
+
+  it('falls back to the deterministic assembly when the weave drops a per-column confirm-seek', async () => {
+    const client = mockClient(JSON.stringify({ whyDesc: 'Just restore to prove recovery, uses Vitest.' })); // confirm-seek gone
+    const out = await weaveWhyDesc(guardedCore, client);
+    expect(out).toContain('ask me for go-ahead'); // survived via the deterministic fallback
+    expect(out).toBe('Prove recovery by restoring — ask me for go-ahead before running one.\nuses Vitest\nsmall team');
+  });
+
+  it('does NOT fall back for a core line with no confirm-seek (no false positive)', async () => {
+    const client = mockClient(JSON.stringify({ whyDesc: 'Review what changed — Vitest, small team.' }));
+    const out = await weaveWhyDesc(base, client); // base coreLine has no confirm-seek
+    expect(out).toBe('Review what changed — Vitest, small team.'); // woven kept, not deterministic
+  });
+
   it('falls back deterministically when the weave drops a runtime placeholder', async () => {
     const withToken = { coreLine: 'Review {R4_OPEN}the change{R4_CLOSE}.', facts: [{ text: 'uses Vitest', tier: 'capability' as const }] };
     // Model returns prose WITHOUT the {R...} tokens → must fall back (deterministic keeps them).
