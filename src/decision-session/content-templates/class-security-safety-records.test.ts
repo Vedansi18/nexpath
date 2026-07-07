@@ -63,11 +63,12 @@ describe('A3 — SECRET_IN_PROMPT beginner override', () => {
   it('retains "secret" in every beginner option', () => {
     for (const c of cells) expect(c.option.toLowerCase()).toContain('secret');
   });
-  it('is voice-clean + de-jargon clean', () => {
+  it('is voice-clean + de-jargon clean (both channels)', () => {
     for (const c of cells) {
       expect(findVoiceViolations(c.option)).toEqual([]);
       expect(findVoiceViolations(c.whyDesc)).toEqual([]);
       expect(findJargonViolations(c.option)).toEqual([]);
+      expect(findJargonViolations(c.whyDesc)).toEqual([]);
     }
   });
 });
