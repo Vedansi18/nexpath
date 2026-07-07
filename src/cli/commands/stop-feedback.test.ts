@@ -13,6 +13,11 @@ vi.mock('../../decision-session/OptionGenerator.js', () => ({
   generateOptionList: vi.fn().mockResolvedValue(null),
 }));
 
+vi.mock('../../telemetry/lifecycle-send.js', () => ({
+  sendAdvisoryFired: vi.fn().mockResolvedValue(true),
+  sendInstalled:     vi.fn().mockResolvedValue(true),
+}));
+
 import { openStore, closeStore, type Store } from '../../store/db.js';
 import { runStop, type StopPayload, type FeedbackDeps } from './stop.js';
 import { upsertPendingAdvisory } from '../../store/pending-advisories.js';

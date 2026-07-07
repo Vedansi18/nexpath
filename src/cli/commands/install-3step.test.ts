@@ -11,6 +11,11 @@ vi.mock('../../config/ApiKeyResolver.js', () => ({
   removeApiKey:    vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock('../../telemetry/lifecycle-send.js', () => ({
+  sendInstalled:     vi.fn().mockResolvedValue(true),
+  sendAdvisoryFired: vi.fn().mockResolvedValue(true),
+}));
+
 import {
   installAction,
   resolveAgentPaths,

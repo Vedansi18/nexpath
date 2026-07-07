@@ -6,6 +6,7 @@ import { getPendingAdvisory, markAdvisoryShown } from '../../store/pending-advis
 import { recordActivity, isFeedbackEligible, markFeedbackShown } from '../../store/feedback-cadence.js';
 import { recordAdvisoryFired, recordOptionSelected } from '../../store/feedback-signals.js';
 import { sendFeedback } from '../../telemetry/feedback-send.js';
+import { sendAdvisoryFired } from '../../telemetry/lifecycle-send.js';
 import { runFeedbackPopup, type FeedbackRenderFn } from '../../decision-session/feedback-popup.js';
 import { createFeedbackRenderFn } from '../../decision-session/feedback-tty.js';
 import { runDecisionSession } from '../../decision-session/DecisionSession.js';
@@ -203,6 +204,9 @@ export async function runStop(
     generatedOptions: !!generatedOptions,
   }, store);
   recordAdvisoryFired(store, payload.cwd);
+  // Emit an advisory-fired lifecycle event (installation id + timestamp).
+  // Fire-and-forget: the popup render that follows gives it time to complete.
+  void sendAdvisoryFired(store).catch(() => { /* best-effort */ });
 
   const dsResult = await runDecisionSession(
     {

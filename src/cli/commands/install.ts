@@ -7,7 +7,8 @@ import { SelectPrompt } from '@clack/core';
 import pc from 'picocolors';
 import { openStore, closeStore, DEFAULT_DB_PATH } from '../../store/db.js';
 import { isConfigSet, setConfig, getConfig } from '../../store/config.js';
-import { setInstalledAtIfMissing } from '../../store/feedback-signals.js';
+import { setInstalledAtIfMissing, getInstalledAt } from '../../store/feedback-signals.js';
+import { sendInstalled } from '../../telemetry/lifecycle-send.js';
 import {
   VALID_ROLES,
   setAdvisoryFrequency,
@@ -521,8 +522,13 @@ export async function installAction(
 
   const store = await openStore(dbPath);
 
-  // Record when nexpath was first installed (kept on re-runs).
+  // Record when nexpath was first installed (kept on re-runs), and emit a
+  // one-time install event on the very first install. Best-effort, non-blocking.
+  const firstInstall = getConfig(store.db, 'installed_at') === undefined;
   setInstalledAtIfMissing(store);
+  if (firstInstall) {
+    void sendInstalled(store, getInstalledAt(store)).catch(() => { /* never crash install */ });
+  }
 
   let apiKeySource:  InstallSummary['apiKey']['source'] = 'skipped';
   let telemetryEnabled = true;
