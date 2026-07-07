@@ -5,6 +5,7 @@ import {
   recordAdvisoryFired,
   recordOptionSelected,
   readAllSignals,
+  setInstalledAtIfMissing,
 } from '../store/feedback-signals.js';
 import { getInstallationId } from './identity.js';
 import { sendFeedback, FEEDBACK_EVENT } from './feedback-send.js';
@@ -67,6 +68,20 @@ describe('sendFeedback', () => {
     expect(env.properties.option_select_ts).toEqual([150]);
     expect(env.properties.feedback_at).toBe(9_000);
     expect(env.timestamp).toBe(new Date(9_000).toISOString());
+  });
+
+  it('includes the locally-saved install timestamp (consolidated model)', async () => {
+    setInstalledAtIfMissing(store, 5000);   // saved at install time
+    await sendFeedback(store, 1, { fetch: okFetch(cap) });
+    expect(cap.envelope?.properties.installed_at).toBe(5000);
+  });
+
+  it('defaults feedback_at to now when not provided', async () => {
+    const before = Date.now();
+    await sendFeedback(store, 1, { fetch: okFetch(cap) });
+    const fa = cap.envelope?.properties.feedback_at as number;
+    expect(fa).toBeGreaterThanOrEqual(before);
+    expect(fa).toBeLessThanOrEqual(Date.now());
   });
 
   it('aggregates signals globally across projects', async () => {
