@@ -53,6 +53,12 @@ describe('sendInstalled', () => {
     expect(await sendInstalled(store, 1, { fetch: failFetch(cap) })).toBe(false);
     expect(await sendInstalled(store, 1, { fetch: throwFetch(cap) })).toBe(false);
   });
+
+  it('posts to the configured endpoint', async () => {
+    setConfig(store, 'telemetry_sync_endpoint', 'https://custom.example/capture/');
+    await sendInstalled(store, 1, { fetch: okFetch(cap) });
+    expect(cap.url).toBe('https://custom.example/capture/');
+  });
 });
 
 describe('sendAdvisoryFired', () => {
@@ -69,5 +75,13 @@ describe('sendAdvisoryFired', () => {
     await sendAdvisoryFired(store, { fetch: okFetch(cap) });
     const props = cap.envelope?.properties ?? {};
     expect(Object.keys(props).sort()).toEqual(['$lib', '$lib_version', 'installation_id']);
+  });
+
+  it('defaults the timestamp to now', async () => {
+    const before = Date.now();
+    await sendAdvisoryFired(store, { fetch: okFetch(cap) });
+    const ts = new Date(cap.envelope!.timestamp).getTime();
+    expect(ts).toBeGreaterThanOrEqual(before);
+    expect(ts).toBeLessThanOrEqual(Date.now());
   });
 });
