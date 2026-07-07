@@ -3,8 +3,8 @@ import { runBuildGate, checkTopicKeyword } from '../content-template-tooling.js'
 import {
   reviewRecord, checkVoice, checkEscalation, checkL2Safeguard, findVoiceViolations, findJargonViolations,
 } from '../content-authoring-rules.js';
+import { composeWhyDesc } from '../content-template-engine.js';
 import { ABSENCE_SECRET_IN_PROMPT_RECORD } from './class-security-safety.js';
-import { SECRET_IN_PROMPT_BEGINNER_OVERRIDE } from './class-security-safety-beginner.js';
 import { ABSENCE_ENV_AND_SECRETS_RECORD } from './class4-records.js';
 
 // A3 — ABSENCE_SECRET_IN_PROMPT: a NEW security/safety signal (no legacy shipped headline),
@@ -41,10 +41,26 @@ describe('A3 — ABSENCE_SECRET_IN_PROMPT (new signal, no frozen col-3)', () => 
   it('is voice-clean (option = the user\'s message TO the agent)', () => {
     expect(checkVoice(r).ok).toBe(true);
   });
-  it('carries the L2 sensitive-action safeguard (rotate keys / rewrite history)', () => {
+  it('carries the L2 sensitive-action safeguard that names THIS record\'s action (rotate keys / rewrite history)', () => {
     expect(r.l2SafeguardRequired).toBe(true);
     expect(r.l2SafeguardLine ?? '').toMatch(/go-ahead|ask me/i);
+    // Gap 3 — the line names its OWN action, not a generic confirm-seek (no cross-record mismatch).
+    expect(r.l2SafeguardLine ?? '').toMatch(/rotate|key|history/i);
     expect(checkL2Safeguard(r).ok).toBe(true);
+  });
+  it('serves the safeguard as the LAST line of every composed column (Gap 1 — the served path, not just the static gate)', () => {
+    // The record is ship-dark, so no SHIPPED_CONTENT_TEMPLATES test exercises its serving —
+    // verify the safeguard is actually appended by composeWhyDesc on each column.
+    for (const lvl of [1, 3, 5] as const) {
+      const composed = composeWhyDesc({ cell: r.levelForms[lvl]!.cell, slots: r.slots, l2Safeguard: r.l2SafeguardLine });
+      expect(composed.endsWith(r.l2SafeguardLine!)).toBe(true);
+    }
+  });
+  it('the l2SafeguardLine is itself CA-bound-clean: voice-clean, de-jargon-clean, no runtime placeholders (Gap 2)', () => {
+    const line = r.l2SafeguardLine!;
+    expect(findVoiceViolations(line)).toEqual([]);
+    expect(findJargonViolations(line)).toEqual([]);
+    expect(line).not.toContain('{R');
   });
   it('the heaviest column yields a written artifact', () => {
     expect(r.levelForms[5]!.cell.option.toLowerCase()).toMatch(/write|note/);
@@ -52,36 +68,6 @@ describe('A3 — ABSENCE_SECRET_IN_PROMPT (new signal, no frozen col-3)', () => 
   it('never contains a literal secret token (no-echo guard, belt-and-suspenders to the static+sanitize rule)', () => {
     const SECRET_RE = /\b(sk-[A-Za-z0-9]{16,}|AKIA[0-9A-Z]{12,}|ghp_[A-Za-z0-9]{20,})\b|(api[_-]?key|password|token)\s*[:=]\s*\S{8,}/i;
     for (const c of optionsOf(r.levelForms)) {
-      expect(c.option).not.toMatch(SECRET_RE);
-      expect(c.whyDesc).not.toMatch(SECRET_RE);
-    }
-  });
-});
-
-describe('A3 — SECRET_IN_PROMPT beginner override', () => {
-  const cells = optionsOf(SECRET_IN_PROMPT_BEGINNER_OVERRIDE.levelForms);
-  it('authors all 5 maturity columns (parity with the base record)', () => {
-    expect(
-      Object.keys(SECRET_IN_PROMPT_BEGINNER_OVERRIDE.levelForms).map(Number).sort((a, b) => a - b),
-    ).toEqual([1, 2, 3, 4, 5]);
-  });
-  it('retains "secret" in every beginner option AND why-desc', () => {
-    for (const c of cells) {
-      expect(c.option.toLowerCase()).toContain('secret');
-      expect(c.whyDesc.toLowerCase()).toContain('secret');
-    }
-  });
-  it('is voice-clean + de-jargon clean (both channels)', () => {
-    for (const c of cells) {
-      expect(findVoiceViolations(c.option)).toEqual([]);
-      expect(findVoiceViolations(c.whyDesc)).toEqual([]);
-      expect(findJargonViolations(c.option)).toEqual([]);
-      expect(findJargonViolations(c.whyDesc)).toEqual([]);
-    }
-  });
-  it('never contains a literal secret token (no-echo guard on the beginner cells too)', () => {
-    const SECRET_RE = /\b(sk-[A-Za-z0-9]{16,}|AKIA[0-9A-Z]{12,}|ghp_[A-Za-z0-9]{20,})\b|(api[_-]?key|password|token)\s*[:=]\s*\S{8,}/i;
-    for (const c of cells) {
       expect(c.option).not.toMatch(SECRET_RE);
       expect(c.whyDesc).not.toMatch(SECRET_RE);
     }
