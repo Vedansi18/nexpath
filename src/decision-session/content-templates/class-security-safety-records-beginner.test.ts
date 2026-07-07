@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import type OpenAI from 'openai';
-import { checkVoice, checkL2Safeguard, findVoiceViolations, findJargonViolations } from '../content-authoring-rules.js';
+import {
+  reviewRecord, checkVoice, checkEscalation, checkL2Safeguard, findVoiceViolations, findJargonViolations,
+} from '../content-authoring-rules.js';
+import { checkOptionLengthBudget } from '../content-template-tooling.js';
 import {
   composeAdvisory, resolveRegisterForms, type RecordCandidateLookup,
 } from '../content-template-engine.js';
@@ -68,6 +71,22 @@ describe('A3 — SECRET_IN_PROMPT beginner override (synthesized-record gates)',
     expect(validateContentTemplateRecord(synth).ok).toBe(true);
     expect(Object.keys(synth.levelForms).map(Number).sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5]);
     expect(checkVoice(synth).ok).toBe(true);
+  });
+  it('is de-jargon clean, headline-only, full-coverage across the beginner columns (Gap 7)', () => {
+    const review = reviewRecord(synth, kw);
+    expect(review.jargonByLevel).toEqual({}); // new signal — no frozen col-3 exemption
+    expect(review.headlineOnly.ok).toBe(true);
+    expect(review.coverage.ok).toBe(true);
+  });
+  it('practice richness is monotonic; fits the copy-paste budget, col-1 ≤ col-5 (Gap 8)', () => {
+    expect(checkEscalation([1, 2, 3, 4, 5]).ok).toBe(true);
+    expect(checkOptionLengthBudget(synth).overLevels).toEqual([]);
+    expect(synth.levelForms[1]!.cell.option.length).toBeLessThanOrEqual(synth.levelForms[5]!.cell.option.length);
+  });
+  it('the heaviest column yields a written artifact, matching the base record\'s nature (Gap 9)', () => {
+    const ARTIFACT = /write|note/i;
+    expect(synth.levelForms[5]!.cell.option).toMatch(ARTIFACT);
+    expect(ARTIFACT.test(synth.levelForms[5]!.cell.option)).toBe(ARTIFACT.test(r.levelForms[5]!.cell.option));
   });
   it('inherits the base sensitive flag + line, so every beginner column is L2-guarded (Gap 5)', () => {
     expect(r.l2SafeguardRequired).toBe(true);

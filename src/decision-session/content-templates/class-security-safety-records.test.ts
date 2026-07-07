@@ -1,10 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { runBuildGate, checkTopicKeyword } from '../content-template-tooling.js';
+import { runBuildGate, checkTopicKeyword, checkOptionLengthBudget } from '../content-template-tooling.js';
 import {
   reviewRecord, checkVoice, checkEscalation, checkL2Safeguard, findVoiceViolations, findJargonViolations,
 } from '../content-authoring-rules.js';
 import { composeWhyDesc } from '../content-template-engine.js';
-import { ABSENCE_SECRET_IN_PROMPT_RECORD } from './class-security-safety.js';
+import { ABSENCE_SECRET_IN_PROMPT_RECORD, SECURITY_SAFETY_PARAM_AXES } from './class-security-safety.js';
 import { ABSENCE_ENV_AND_SECRETS_RECORD } from './class4-records.js';
 
 // A3 — ABSENCE_SECRET_IN_PROMPT: a NEW security/safety signal (no legacy shipped headline),
@@ -24,6 +24,11 @@ describe('A3 — ABSENCE_SECRET_IN_PROMPT (new signal, no frozen col-3)', () => 
   it('authors all 5 maturity columns', () => {
     expect(Object.keys(r.levelForms).map(Number).sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5]);
   });
+  it('declares the grounded param axes the engine filters facts by; no spine (Gap 1)', () => {
+    expect(r.paramAxes).toBeDefined();
+    expect(r.paramAxes).toEqual(SECURITY_SAFETY_PARAM_AXES);
+    expect(r.spine).toBeUndefined(); // security/safety family has no intensifying spine
+  });
   it('is de-jargon clean in EVERY column (col-3 authored → not exempt) + headline-only + full coverage', () => {
     const review = reviewRecord(r, kw);
     expect(review.jargonByLevel).toEqual({});
@@ -41,26 +46,31 @@ describe('A3 — ABSENCE_SECRET_IN_PROMPT (new signal, no frozen col-3)', () => 
   it('is voice-clean (option = the user\'s message TO the agent)', () => {
     expect(checkVoice(r).ok).toBe(true);
   });
+  it('fits the copy-paste budget in every column, col-1 ≤ col-5 (Gap 2)', () => {
+    expect(checkOptionLengthBudget(r).overLevels).toEqual([]);
+    expect(r.levelForms[1]!.cell.option.length).toBeLessThanOrEqual(r.levelForms[5]!.cell.option.length);
+  });
   it('carries the L2 sensitive-action safeguard that names THIS record\'s action (rotate keys / rewrite history)', () => {
     expect(r.l2SafeguardRequired).toBe(true);
     expect(r.l2SafeguardLine ?? '').toMatch(/go-ahead|ask me/i);
-    // Gap 3 — the line names its OWN action, not a generic confirm-seek (no cross-record mismatch).
+    // The line names its OWN action, not a generic confirm-seek (no cross-record mismatch).
     expect(r.l2SafeguardLine ?? '').toMatch(/rotate|key|history/i);
     expect(checkL2Safeguard(r).ok).toBe(true);
+    expect(checkL2Safeguard(r).unguardedLevels).toEqual([]); // record-level line covers all columns
   });
-  it('serves the safeguard as the LAST line of every composed column (Gap 1 — the served path, not just the static gate)', () => {
+  it('serves the safeguard as the LAST line of EVERY composed column (the served path, not just the static gate)', () => {
     // The record is ship-dark, so no SHIPPED_CONTENT_TEMPLATES test exercises its serving —
     // verify the safeguard is actually appended by composeWhyDesc on each column.
-    for (const lvl of [1, 3, 5] as const) {
+    for (const lvl of [1, 2, 3, 4, 5] as const) {
       const composed = composeWhyDesc({ cell: r.levelForms[lvl]!.cell, slots: r.slots, l2Safeguard: r.l2SafeguardLine });
       expect(composed.endsWith(r.l2SafeguardLine!)).toBe(true);
     }
   });
-  it('the l2SafeguardLine is itself CA-bound-clean: voice-clean, de-jargon-clean, no runtime placeholders (Gap 2)', () => {
+  it('the l2SafeguardLine is itself CA-bound-clean: voice-clean, de-jargon-clean, no runtime placeholders', () => {
     const line = r.l2SafeguardLine!;
     expect(findVoiceViolations(line)).toEqual([]);
     expect(findJargonViolations(line)).toEqual([]);
-    expect(line).not.toContain('{R');
+    expect(line).not.toMatch(/\{[R{]/); // no {R... bookends or {{ slots
   });
   it('the heaviest column yields a written artifact', () => {
     expect(r.levelForms[5]!.cell.option.toLowerCase()).toMatch(/write|note/);
@@ -70,6 +80,13 @@ describe('A3 — ABSENCE_SECRET_IN_PROMPT (new signal, no frozen col-3)', () => 
     for (const c of optionsOf(r.levelForms)) {
       expect(c.option).not.toMatch(SECRET_RE);
       expect(c.whyDesc).not.toMatch(SECRET_RE);
+    }
+  });
+  it('stored cells are bare core lines — no {R...} / {{...}} runtime grammar (record↔runtime boundary, Gap 3)', () => {
+    const PLACEHOLDER = /\{[R{]/; // runtime bookends "{R..." and slots "{{" — added at runtime, never stored
+    for (const c of optionsOf(r.levelForms)) {
+      expect(c.option).not.toMatch(PLACEHOLDER);
+      expect(c.whyDesc).not.toMatch(PLACEHOLDER);
     }
   });
 });
