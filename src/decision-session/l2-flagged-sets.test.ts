@@ -80,9 +80,11 @@ describe('L2 safeguard marker — flagged-set inventory', () => {
     expect(missing).toEqual([]);
   });
 
-  it('source contains exactly 32 occurrences of l2SafeguardRequired: true across the content-template files', () => {
+  it('source contains exactly 33 occurrences of l2SafeguardRequired: true across the content-template files', () => {
+    // 32 pre-existing + 1 new: ABSENCE_SECRET_IN_PROMPT (A3, class-security-safety.ts) — a
+    // sensitive leakage-event record (rotate/scrub the exposed secret).
     const src = readOptionsSources();
     const count = (src.match(/l2SafeguardRequired:\s*true/g) ?? []).length;
-    expect(count).toBe(32);
+    expect(count).toBe(33);
   });
 });
