@@ -117,13 +117,13 @@ describe('advisory-fire and option-select recording', () => {
     expect(signals.optionSelectTs).toHaveLength(1);
   });
 
-  it('records a fire but no selection when the option is copied to clipboard', async () => {
+  it('records a fire AND a selection when the option is copied to clipboard', async () => {
     insertAdvisory(store);
     const result = await runStop(makePayload(), store, mockSelect(CLIPBOARD_ONLY));
     expect(result.outcome).toBe('clipboard_only');
     const signals = readSignals(store, CWD);
     expect(signals.advisoryFireTs).toHaveLength(1);
-    expect(signals.optionSelectTs).toHaveLength(0);
+    expect(signals.optionSelectTs).toHaveLength(1);   // clipboard-copy counts as engagement
   });
 
   it('accumulates a fire per shown advisory across turns', async () => {

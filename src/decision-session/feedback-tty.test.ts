@@ -34,7 +34,7 @@ describe('resultToItem', () => {
   const layout = buildFeedbackRenderOptions(24, 80);
 
   it('maps a known value back to its option', () => {
-    const opt = FEEDBACK_OPTIONS[2]; // Fine
+    const opt = FEEDBACK_OPTIONS[2]; // Good (rating 3)
     const item = resultToItem(layout, opt.value);
     expect(item).toEqual({ value: opt.value, label: opt.label });
   });
@@ -62,7 +62,7 @@ describe('createFeedbackRenderFn (orchestration, injected spawn)', () => {
   });
 
   it('spawns the window, maps the picked rating, and cleans up temp files', async () => {
-    const opt = FEEDBACK_OPTIONS[2]; // Fine
+    const opt = FEEDBACK_OPTIONS[2]; // Good (rating 3)
     let seenPlan: SpawnPlan | undefined;
     let scriptReferencedResult = false;
     let resultPath = '';

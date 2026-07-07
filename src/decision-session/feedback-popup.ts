@@ -34,11 +34,11 @@ export interface FeedbackOption {
   rating: number;
 }
 
-/** Rating scale, top → bottom, as shown in the popup. */
+/** Rating scale, worst → best (top → bottom), as shown in the popup. */
 export const FEEDBACK_OPTIONS: readonly FeedbackOption[] = [
   { value: 'feedback-rating-1', label: 'Bad',       rating: 1 },
-  { value: 'feedback-rating-2', label: 'Good',      rating: 2 },
-  { value: 'feedback-rating-3', label: 'Fine',      rating: 3 },
+  { value: 'feedback-rating-2', label: 'Fine',      rating: 2 },
+  { value: 'feedback-rating-3', label: 'Good',      rating: 3 },
   { value: 'feedback-rating-4', label: 'Excellent', rating: 4 },
 ];
 

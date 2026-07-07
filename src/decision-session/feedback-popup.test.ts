@@ -30,8 +30,8 @@ describe('buildFeedbackRenderOptions', () => {
     expect(layout.question).toBe(FEEDBACK_QUESTION);
   });
 
-  it('renders the four ratings in order: Bad, Good, Fine, Excellent', () => {
-    expect(layout.options.map((o) => o.label)).toEqual(['Bad', 'Good', 'Fine', 'Excellent']);
+  it('renders the four ratings worst→best: Bad, Fine, Good, Excellent', () => {
+    expect(layout.options.map((o) => o.label)).toEqual(['Bad', 'Fine', 'Good', 'Excellent']);
   });
 
   it('includes the transparency note above the question (light gray, blank line after)', () => {
@@ -122,7 +122,7 @@ describe('renders with the real render loop', () => {
     expect(picked).toBeNull();
   });
 
-  it('arrow-down then Enter selects the second rating (Good)', async () => {
+  it('arrow-down then Enter selects the second rating (Fine)', async () => {
     const { out } = captureOut();
     const picked = await renderLoop({ layout: buildFeedbackRenderOptions(30, 100), keyEvents: keys('arrow-down', 'enter'), out });
     expect(picked?.value).toBe(FEEDBACK_OPTIONS[1].value);

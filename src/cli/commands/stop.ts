@@ -233,6 +233,8 @@ export async function runStop(
   }
 
   if (dsResult.outcome === 'clipboard_only') {
+    // Copy-to-clipboard is also engagement with an option (timestamp only).
+    recordOptionSelected(store, payload.cwd);
     logger.info('stop_clipboard_only', { cwd: payload.cwd });
     return { outcome: 'clipboard_only' };
   }
