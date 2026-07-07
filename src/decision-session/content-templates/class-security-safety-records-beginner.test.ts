@@ -11,9 +11,11 @@ import { validateContentTemplateRecord, type ContentTemplateRecord } from '../co
 import { CONFIRM_SEEK_RE } from '../content-template-grounding.js';
 import {
   ABSENCE_SECRET_IN_PROMPT_RECORD, ABSENCE_NO_VERSION_CONTROL_RECORD, ABSENCE_NO_BACKUP_SAFETY_RECORD,
+  ABSENCE_NO_SEPARATE_ENVS_RECORD,
 } from './class-security-safety.js';
 import {
   SECRET_IN_PROMPT_BEGINNER_OVERRIDE, NO_VERSION_CONTROL_BEGINNER_OVERRIDE, NO_BACKUP_SAFETY_BEGINNER_OVERRIDE,
+  NO_SEPARATE_ENVS_BEGINNER_OVERRIDE,
 } from './class-security-safety-beginner.js';
 
 // A3 — ABSENCE_SECRET_IN_PROMPT `_BEGINNER` register override. Mirrors the established
@@ -308,6 +310,85 @@ describe('A5 — NO_BACKUP_SAFETY beginner override (engine serving)', () => {
     for (const lvl of [3, 4, 5] as const) {
       const out = await composeAdvisory({ lookup: lookupOf({ shipped: r }), level: lvl, register: 'beginner' }, mockClient(JSON.stringify({ whyDesc: 'w' })));
       expect(out?.option ?? '').toMatch(CONFIRM_SEEK);
+    }
+  });
+});
+
+// A6 — ABSENCE_NO_SEPARATE_ENVS beginner override. HIGH-RISK, RECORD-LEVEL safeguard (A3 pattern):
+// the override only swaps levelForms, inheriting l2SafeguardRequired + l2SafeguardLine, so the
+// engine appends the safeguard to EVERY beginner served column.
+const kw6 = 'environment';
+
+describe('A6 — NO_SEPARATE_ENVS beginner override (authoring gates)', () => {
+  const cells = optionsOf(NO_SEPARATE_ENVS_BEGINNER_OVERRIDE.levelForms);
+
+  it('is a structurally-divergent register override (not a vocab tweak)', () => {
+    expect(NO_SEPARATE_ENVS_BEGINNER_OVERRIDE.divergence).toBe('structurally-divergent');
+  });
+  it('authors all 5 maturity columns (parity with the base record)', () => {
+    expect(
+      Object.keys(NO_SEPARATE_ENVS_BEGINNER_OVERRIDE.levelForms).map(Number).sort((a, b) => a - b),
+    ).toEqual([1, 2, 3, 4, 5]);
+  });
+  it('retains "environment" in every beginner option AND why-desc', () => {
+    for (const c of cells) {
+      expect(c.option.toLowerCase()).toContain(kw6);
+      expect(c.whyDesc.toLowerCase()).toContain(kw6);
+    }
+  });
+  it('is voice-clean + de-jargon clean (both channels)', () => {
+    for (const c of cells) {
+      expect(findVoiceViolations(c.option)).toEqual([]);
+      expect(findVoiceViolations(c.whyDesc)).toEqual([]);
+      expect(findJargonViolations(c.option)).toEqual([]);
+      expect(findJargonViolations(c.whyDesc)).toEqual([]);
+    }
+  });
+});
+
+describe('A6 — NO_SEPARATE_ENVS beginner override (synthesized-record gates)', () => {
+  const r = ABSENCE_NO_SEPARATE_ENVS_RECORD;
+  const synth = asOverrideRecord(r);
+
+  it('the beginner-substituted record is schema-valid, all-5-column, floored, voice-clean', () => {
+    expect(validateContentTemplateRecord(synth).ok).toBe(true);
+    expect(Object.keys(synth.levelForms).map(Number).sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5]);
+    expect(checkVoice(synth).ok).toBe(true);
+  });
+  it('is de-jargon clean, headline-only, full-coverage; monotonic; within budget; artifact parity', () => {
+    const review = reviewRecord(synth, kw6);
+    expect(review.jargonByLevel).toEqual({});
+    expect(review.headlineOnly.ok).toBe(true);
+    expect(review.coverage.ok).toBe(true);
+    expect(checkEscalation([1, 2, 3, 4, 5]).ok).toBe(true);
+    expect(checkOptionLengthBudget(synth).overLevels).toEqual([]);
+    const ARTIFACT = /write|note/i;
+    expect(synth.levelForms[5]!.cell.option).toMatch(ARTIFACT);
+    expect(ARTIFACT.test(synth.levelForms[5]!.cell.option)).toBe(ARTIFACT.test(r.levelForms[5]!.cell.option));
+  });
+  it('inherits the base sensitive flag + line, so every beginner column is L2-guarded', () => {
+    expect(r.l2SafeguardRequired).toBe(true);
+    expect(checkL2Safeguard(synth).ok).toBe(true);
+    expect(checkL2Safeguard(synth).unguardedLevels).toEqual([]);
+  });
+});
+
+describe('A6 — NO_SEPARATE_ENVS beginner override (engine serving)', () => {
+  const r = ABSENCE_NO_SEPARATE_ENVS_RECORD;
+
+  it('composeAdvisory serves the beginner override option when register=beginner, base otherwise', async () => {
+    const beg = await composeAdvisory({ lookup: lookupOf({ shipped: r }), level: 1, register: 'beginner' }, mockClient(JSON.stringify({ whyDesc: 'w' })));
+    const base = await composeAdvisory({ lookup: lookupOf({ shipped: r }), level: 1 }, mockClient(JSON.stringify({ whyDesc: 'w' })));
+    expect(beg?.option).toBe(resolveRegisterForms(r, 'beginner')[1]!.cell.option);
+    expect(base?.option).toBe(r.levelForms[1]!.cell.option);
+    expect(beg?.option).not.toBe(base?.option);
+  });
+
+  it('appends the action-specific l2SafeguardLine to the beginner-register served column too', async () => {
+    expect(r.l2SafeguardRequired).toBe(true);
+    for (const lvl of [1, 3, 5] as const) {
+      const out = await composeAdvisory({ lookup: lookupOf({ shipped: r }), level: lvl, register: 'beginner' }, mockClient(JSON.stringify({ whyDesc: 'woven' })));
+      expect(out?.whyDesc).toContain(r.l2SafeguardLine!);
     }
   });
 });

@@ -7,7 +7,7 @@ import { composeWhyDesc, composeOption } from '../content-template-engine.js';
 import { CONFIRM_SEEK_RE } from '../content-template-grounding.js';
 import {
   ABSENCE_SECRET_IN_PROMPT_RECORD, ABSENCE_NO_VERSION_CONTROL_RECORD, ABSENCE_NO_BACKUP_SAFETY_RECORD,
-  SECURITY_SAFETY_PARAM_AXES,
+  ABSENCE_NO_SEPARATE_ENVS_RECORD, SECURITY_SAFETY_PARAM_AXES,
 } from './class-security-safety.js';
 import { ABSENCE_ENV_AND_SECRETS_RECORD } from './class4-records.js';
 
@@ -270,6 +270,90 @@ describe('A5 — ABSENCE_NO_BACKUP_SAFETY (new signal, mild — no record-level 
     for (const lvl of [3, 4, 5] as const) {
       expect(CONFIRM_SEEK_RE.test(r.levelForms[lvl]!.cell.option)).toBe(true);
       expect(CONFIRM_SEEK_RE.test(r.levelForms[lvl]!.cell.whyDesc)).toBe(true);
+    }
+  });
+});
+
+// A6 — ABSENCE_NO_SEPARATE_ENVS: a NEW security/safety signal, keyword "environment". HIGH-RISK:
+// standing up separate environments touches production + moves credentials → RECORD-LEVEL
+// safeguard (the A3 mechanism: l2SafeguardRequired + l2SafeguardLine appended to every column).
+// About environment SEPARATION only — never restating ENV_AND_SECRETS's secrets-storage hygiene.
+
+describe('A6 — ABSENCE_NO_SEPARATE_ENVS (new signal, HIGH-RISK — record-level safeguard)', () => {
+  const r = ABSENCE_NO_SEPARATE_ENVS_RECORD;
+  const kw6 = 'environment';
+
+  it('passes the build gate (schema-valid + level-1 floor)', () => {
+    expect(runBuildGate([r]).ok).toBe(true);
+  });
+  it('authors all 5 maturity columns', () => {
+    expect(Object.keys(r.levelForms).map(Number).sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5]);
+  });
+  it('declares the grounded param axes; no spine', () => {
+    expect(r.paramAxes).toBeDefined();
+    expect(r.paramAxes).toEqual(SECURITY_SAFETY_PARAM_AXES);
+    expect(r.spine).toBeUndefined();
+  });
+  it('is de-jargon clean in every column + headline-only + full coverage', () => {
+    const review = reviewRecord(r, kw6);
+    expect(review.jargonByLevel).toEqual({});
+    expect(review.headlineOnly.ok).toBe(true);
+    expect(review.coverage.ok).toBe(true);
+  });
+  it('retains the "environment" keyword in every option AND why-desc', () => {
+    const res = checkTopicKeyword(r, kw6);
+    expect(res.missingInOption).toEqual([]);
+    expect(res.missingInWhyDesc).toEqual([]);
+  });
+  it('practice richness is monotonic', () => {
+    expect(checkEscalation([1, 2, 3, 4, 5]).ok).toBe(true);
+  });
+  it('is voice-clean (option = the user\'s message TO the agent)', () => {
+    expect(checkVoice(r).ok).toBe(true);
+  });
+  it('fits the copy-paste budget in every column, col-1 ≤ col-5', () => {
+    expect(checkOptionLengthBudget(r).overLevels).toEqual([]);
+    expect(r.levelForms[1]!.cell.option.length).toBeLessThanOrEqual(r.levelForms[5]!.cell.option.length);
+  });
+  it('the heaviest column yields a written artifact', () => {
+    expect(r.levelForms[5]!.cell.option.toLowerCase()).toMatch(/write|note/);
+  });
+  it('stored cells are bare core lines — no {R...} / {{...}} runtime grammar', () => {
+    const PLACEHOLDER = /\{[R{]/;
+    for (const c of optionsOf(r.levelForms)) {
+      expect(c.option).not.toMatch(PLACEHOLDER);
+      expect(c.whyDesc).not.toMatch(PLACEHOLDER);
+    }
+  });
+  it('carries the record-level L2 safeguard that names THIS record\'s action (touch production / move credentials)', () => {
+    expect(r.l2SafeguardRequired).toBe(true);
+    expect(r.l2SafeguardLine ?? '').toMatch(/go-ahead|ask me/i);
+    expect(r.l2SafeguardLine ?? '').toMatch(/production|environment|credential/i);
+    expect(checkL2Safeguard(r).ok).toBe(true);
+    expect(checkL2Safeguard(r).unguardedLevels).toEqual([]);
+  });
+  it('serves the safeguard as the LAST line of EVERY composed column (the served path)', () => {
+    for (const lvl of [1, 2, 3, 4, 5] as const) {
+      const composed = composeWhyDesc({ cell: r.levelForms[lvl]!.cell, slots: r.slots, l2Safeguard: r.l2SafeguardLine });
+      expect(composed.endsWith(r.l2SafeguardLine!)).toBe(true);
+    }
+  });
+  it('the l2SafeguardLine is itself CA-bound-clean: voice-clean, de-jargon-clean, no runtime placeholders', () => {
+    const line = r.l2SafeguardLine!;
+    expect(findVoiceViolations(line)).toEqual([]);
+    expect(findJargonViolations(line)).toEqual([]);
+    expect(line).not.toMatch(/\{[R{]/);
+  });
+});
+
+describe('A6 — differentiation vs ENV_AND_SECRETS + SECRET_IN_PROMPT (A2 dedup constraint)', () => {
+  it('NO_SEPARATE_ENVS shares no option text with ENV_AND_SECRETS or SECRET_IN_PROMPT', () => {
+    const envSep = optionsOf(ABSENCE_NO_SEPARATE_ENVS_RECORD.levelForms).map((c) => c.option);
+    const envSecrets = optionsOf(ABSENCE_ENV_AND_SECRETS_RECORD.levelForms).map((c) => c.option);
+    const secretInPrompt = optionsOf(ABSENCE_SECRET_IN_PROMPT_RECORD.levelForms).map((c) => c.option);
+    for (const opt of envSep) {
+      expect(envSecrets).not.toContain(opt);
+      expect(secretInPrompt).not.toContain(opt);
     }
   });
 });

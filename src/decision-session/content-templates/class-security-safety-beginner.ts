@@ -48,3 +48,17 @@ export const NO_BACKUP_SAFETY_BEGINNER_OVERRIDE: RegisterOverride = structural({
   4: form("Set up an automatic backup that keeps a few past copies, and every so often practice a restore to make sure the data really comes back — since a restore overwrites what's there, check with me before you run it.", "Beyond one backup: a practiced restore. Since a restore overwrites what's there, check with me before running it."),
   5: form("Write a short note on how this project's backup works and practice a restore once: what's saved, how often, where it's kept, and the steps to bring it back — since a restore overwrites what's there, check with me first.", "A simple note on how the backup is saved and restored — since a restore overwrites what's there, check with me first."),
 });
+
+/**
+ * NO_SEPARATE_ENVS (beginner) — keyword "environment". Plain "keep a separate place to try
+ * changes, apart from the live one". Record-level sensitive (inherits l2SafeguardRequired +
+ * l2SafeguardLine from the base — the override only swaps levelForms), so the engine appends the
+ * confirm-seek to every beginner column. About SEPARATION only — not secrets storage.
+ */
+export const NO_SEPARATE_ENVS_BEGINNER_OVERRIDE: RegisterOverride = structural({
+  1: form("Set up a second environment for this project — a separate place to try changes — so nothing is changed straight on the live one.", "The lightest step: a separate environment to try changes in."),
+  2: form("Set up a testing environment separate from the live one, and try every change there first, so a broken change is caught before real users see it.", "A light pass: a test environment that changes go through before the live one."),
+  3: form("Give the project three separate environments — one to build in, one to test in, and the live one — each kept apart, so work in one doesn't break another.", "The build, test, and live environments aren't separated yet."),
+  4: form("Set up the project's environments so a change moves along a path — build it, test it, then let it reach the live environment — with each kept separate and a change only moving forward once it holds up.", "Beyond a test step: separate environments with a path from build to live."),
+  5: form("Write a short note on this project's environments: what the build, test, and live ones are each for, how a change moves between them, and what keeps them separate.", "A simple note on the separate environments and how changes move."),
+});

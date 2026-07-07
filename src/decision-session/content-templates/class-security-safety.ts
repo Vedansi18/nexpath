@@ -17,6 +17,7 @@ import {
   SECRET_IN_PROMPT_BEGINNER_OVERRIDE,
   NO_VERSION_CONTROL_BEGINNER_OVERRIDE,
   NO_BACKUP_SAFETY_BEGINNER_OVERRIDE,
+  NO_SEPARATE_ENVS_BEGINNER_OVERRIDE,
 } from './class-security-safety-beginner.js';
 
 function form(option: string, whyDesc: string): LevelForm {
@@ -104,9 +105,34 @@ export const ABSENCE_NO_BACKUP_SAFETY_RECORD: ContentTemplateRecord = {
   },
 };
 
-/** All security/safety records (grows as A6–A7 add NO_SEPARATE_ENVS / NO_AUTOMATED_SECURITY_SCANNING). */
+/**
+ * ABSENCE_NO_SEPARATE_ENVS — the project has no dev/staging/production separation, keyword
+ * "environment". HIGH-RISK: standing up separate environments touches production and moves
+ * environment credentials → RECORD-LEVEL `l2SafeguardRequired` + an action-named safeguard line
+ * (the engine appends it to every served column). Deliberately about environment SEPARATION only
+ * (stand up distinct environments with a promotion path) — never restating ABSENCE_ENV_AND_SECRETS'
+ * secrets-storage hygiene (don't hardcode, use env vars, `.env.example`, rotation). No literal
+ * environment or credential value is echoed — the record is static and the grounding runs the
+ * secret/PII sanitize gate at fire time.
+ */
+export const ABSENCE_NO_SEPARATE_ENVS_RECORD: ContentTemplateRecord = {
+  signalType: 'ABSENCE_NO_SEPARATE_ENVS', source: 'shipped', schemaVersion: 1, slots: [],
+  registerOverrides: { beginner: NO_SEPARATE_ENVS_BEGINNER_OVERRIDE },
+  paramAxes: SECURITY_SAFETY_PARAM_AXES, l2SafeguardRequired: true,
+  l2SafeguardLine: 'Ask me for go-ahead before you touch production or move any environment credentials.',
+  levelForms: {
+    1: form("Set up a separate environment for this project so changes can be tried before they reach the live one — today there is a single environment and every change goes straight to where users are.", "The lightest step: a second environment, kept apart from the live one."),
+    2: form("Stand up a staging environment separate from production, and run changes there first — so a broken change is caught in staging instead of hitting production.", "A light pass: a staging environment that changes pass through before production."),
+    3: form("Separate this project into distinct development, staging, and production environments, each with its own configuration, so work in one never disturbs another.", "Development, staging, and production aren't separated into their own environments yet."),
+    4: form("Give the project a full environment separation with a promotion path — development to staging to production — where each environment is isolated and a change is promoted forward only after it holds up.", "Beyond a staging step: isolated environments with a promotion path from development to production."),
+    5: form("Write a short environments note for the project: what development, staging, and production are each for, how a change is promoted between them, and what keeps them isolated — kept with the project.", "A durable environments note of the separation and the promotion path."),
+  },
+};
+
+/** All security/safety records (grows as A7 adds NO_AUTOMATED_SECURITY_SCANNING). */
 export const CLASS_SECURITY_SAFETY_RECORDS: readonly ContentTemplateRecord[] = [
   ABSENCE_SECRET_IN_PROMPT_RECORD,
   ABSENCE_NO_VERSION_CONTROL_RECORD,
   ABSENCE_NO_BACKUP_SAFETY_RECORD,
+  ABSENCE_NO_SEPARATE_ENVS_RECORD,
 ];
