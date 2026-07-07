@@ -6,6 +6,7 @@ import {
   FEEDBACK_OPTIONS,
   FEEDBACK_QUESTION,
   FEEDBACK_PINCH_LABEL,
+  FEEDBACK_NOTE,
   type FeedbackRenderFn,
 } from './feedback-popup.js';
 import {
@@ -31,6 +32,11 @@ describe('buildFeedbackRenderOptions', () => {
 
   it('renders the four ratings in order: Bad, Good, Fine, Excellent', () => {
     expect(layout.options.map((o) => o.label)).toEqual(['Bad', 'Good', 'Fine', 'Excellent']);
+  });
+
+  it('includes the transparency note under the question', () => {
+    expect(layout.whyHelpBlock).toBe(FEEDBACK_NOTE);
+    expect(FEEDBACK_NOTE).toMatch(/installation ID/i);
   });
 
   it('options are plain content items (no desc-base, no separators/meta)', () => {
@@ -96,6 +102,7 @@ describe('renders with the real render loop', () => {
     expect(drawn).toContain('NEXPATH CLI');
     expect(drawn).toContain('feedback');
     expect(drawn).toContain("How's nexpath working out for you?");
+    expect(drawn).toContain('installation ID');
     for (const label of ['Bad', 'Good', 'Fine', 'Excellent']) expect(drawn).toContain(label);
   });
 

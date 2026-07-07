@@ -18,6 +18,9 @@ import {
 export const FEEDBACK_PINCH_LABEL = 'feedback';
 export const FEEDBACK_QUESTION = "How's nexpath working out for you?";
 
+/** Transparency note shown under the question — what a send transmits. */
+export const FEEDBACK_NOTE = 'On send: your installation ID and timestamps — no prompt text.';
+
 export interface FeedbackOption {
   /** Selection sentinel returned by the popup. */
   value:  string;
@@ -45,10 +48,11 @@ export type FeedbackResult =
 /** Build the pure popup layout for the given terminal dimensions. */
 export function buildFeedbackRenderOptions(rows: number, cols: number): RenderLoopOptions {
   return {
-    pageHeader: NEXPATH_HEADER,
-    pinchLabel: FEEDBACK_PINCH_LABEL,
-    question:   FEEDBACK_QUESTION,
-    options:    FEEDBACK_OPTIONS.map((o) => ({ value: o.value, label: o.label })),
+    pageHeader:   NEXPATH_HEADER,
+    pinchLabel:   FEEDBACK_PINCH_LABEL,
+    question:     FEEDBACK_QUESTION,
+    whyHelpBlock: FEEDBACK_NOTE,
+    options:      FEEDBACK_OPTIONS.map((o) => ({ value: o.value, label: o.label })),
     rows,
     cols,
   };
