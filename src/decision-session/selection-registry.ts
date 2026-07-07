@@ -162,7 +162,15 @@ export type ContentSource = 'static' | 'content-template';
  * today. Migration is per-set (S8) — add the signalType key here in its own
  * migration commit, gated by the cascade-parity + contract tests.
  */
-export const MIGRATED_SIGNALS: ReadonlySet<string> = new Set<string>();
+export const MIGRATED_SIGNALS: ReadonlySet<string> = new Set<string>([
+  // §4.E2 new signals (A12): served by the content-template engine (no static DecisionContent).
+  'ABSENCE_SECRET_IN_PROMPT',
+  'ABSENCE_NO_VERSION_CONTROL',
+  'ABSENCE_NO_BACKUP_SAFETY',
+  'ABSENCE_NO_SEPARATE_ENVS',
+  'ABSENCE_NO_AUTOMATED_SECURITY_SCANNING',
+  'ABSENCE_FRUSTRATION_SPIRAL',
+]);
 
 /**
  * Resolve the content SOURCE for a signalType: `content-template` iff the signal

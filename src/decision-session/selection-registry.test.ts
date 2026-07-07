@@ -114,8 +114,14 @@ describe('selection-registry — completeness', () => {
     }
   });
 
-  it('every one of the 136 mapped signalTypes resolves AND matches the cascade', () => {
-    const signalTypes = Object.keys(WHY_HELP_BY_SIGNAL_TYPE);
+  it('every one of the 136 legacy mapped signalTypes resolves AND matches the cascade', () => {
+    // The 6 new §4.E2 signals are served by the content-template engine (migrated, A12), not the
+    // static selection cascade — they have why-help entries but no static DecisionContent.
+    const NEW_E2 = new Set([
+      'ABSENCE_SECRET_IN_PROMPT', 'ABSENCE_NO_VERSION_CONTROL', 'ABSENCE_NO_BACKUP_SAFETY',
+      'ABSENCE_NO_SEPARATE_ENVS', 'ABSENCE_NO_AUTOMATED_SECURITY_SCANNING', 'ABSENCE_FRUSTRATION_SPIRAL',
+    ]);
+    const signalTypes = Object.keys(WHY_HELP_BY_SIGNAL_TYPE).filter((st) => !NEW_E2.has(st));
     expect(signalTypes.length).toBe(136);
     for (const nature of NATURES) {
       const p = profile(nature, undefined);

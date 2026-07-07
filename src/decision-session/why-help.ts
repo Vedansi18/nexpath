@@ -67,7 +67,9 @@ export type SignalClass =
   | 'class6_planning_idea_task'
   | 'class7_cool_geek_vibe_coder'
   | 'class8_role_cluster'
-  | 'class9_academic_hardcore_pro';
+  | 'class9_academic_hardcore_pro'
+  | 'class_security_safety'
+  | 'class_mood_meta';
 
 /**
  * Why-help content table keyed by signal class. Each entry's `structure`
@@ -150,6 +152,22 @@ export const WHY_HELP_PER_CLASS: Record<SignalClass, WhyHelpEntry> = {
       formal: "Recent prompts have moved into implementation without anchoring high-rigor engineering practices — failure-mode analysis, security threat modeling, observability-first design, or over-engineering audits. These practices typically anchor production-grade work. Teams lock them before any release-facing change.",
     },
   },
+  class_security_safety: {
+    structure: 'universal-triplet',
+    content: {
+      formal:   "The dev-environment probe shows a security or safety-net practice missing — version control, backups, environment separation, dependency scanning, or an exposed secret. These guardrails typically sit under production-facing work; teams lock them before a change can put data or credentials at risk.",
+      casual:   "Your setup is missing a safety net — things like version control, backups, separate environments, or catching an exposed secret. These are the guardrails worth having before something goes wrong. Good moment to pull one in.",
+      beginner: "A safety net hasn't been set up yet — like saving versions, backups, or catching an exposed secret. Let's put one of those in place first.",
+    },
+  },
+  class_mood_meta: {
+    structure: 'universal-triplet',
+    content: {
+      formal:   "Recent prompts show a repeating, stuck pattern without a step-back or recap. Persisting on the same problem tends to compound rather than resolve it. A brief pause to recap what's been tried and pick one small next step typically breaks the loop.",
+      casual:   "Your recent prompts have been circling the same stuck point without a pause. Pushing harder on a loop usually doesn't break it. Worth stepping back, recapping what's been tried, and picking one small next thing.",
+      beginner: "Recent prompts have been stuck on the same thing without a break. It's okay to pause. Let's step back, look at what's been tried, and pick one small next step.",
+    },
+  },
 };
 
 /** All signal-class keys as a const array — useful for exhaustive iteration in tests / dispatch tables. */
@@ -163,4 +181,6 @@ export const ALL_SIGNAL_CLASSES: readonly SignalClass[] = [
   'class7_cool_geek_vibe_coder',
   'class8_role_cluster',
   'class9_academic_hardcore_pro',
+  'class_security_safety',
+  'class_mood_meta',
 ] as const;

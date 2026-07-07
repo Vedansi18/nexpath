@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { MISTAKE_CATEGORIES } from './mistake-categories.js';
 import { SIGNAL_DEFINITIONS } from './signals.js';
 import { SHIPPED_CONTENT_TEMPLATES } from '../decision-session/content-template-tooling.js';
+import { MIGRATED_SIGNALS } from '../decision-session/selection-registry.js';
 
 // §6.1 item 10 — the mistake-category ACTIVATION GATE.
 //
@@ -17,10 +18,9 @@ const defKeys = new Set(SIGNAL_DEFINITIONS.map((s) => s.key));
 const recordSigs = new Set(SHIPPED_CONTENT_TEMPLATES.map((r) => r.signalType));
 const toKey = (target: string) => target.replace(/^ABSENCE_/, '').toLowerCase();
 
-// The 6 new detectable-now absence signals whose §4.E2 content is authored + SHIPPED (A9,
-// build-gate-validated) but NOT yet activated in SIGNAL_DEFINITIONS (A10) — so they cannot fire.
-// Staged: content ready, not live. (A12 later flips them from content-pending → served.)
-const CONTENT_PENDING = new Set([
+// The 6 new §4.E2 signals, fully ACTIVATED at A10 (SIGNAL_DEFINITIONS + why-help + pinch) + A12
+// (MIGRATED_SIGNALS): they fire live, each with a shipped record served by the engine.
+const NEW_E2 = new Set([
   'ABSENCE_SECRET_IN_PROMPT',
   'ABSENCE_NO_VERSION_CONTROL',
   'ABSENCE_NO_BACKUP_SAFETY',
@@ -32,27 +32,26 @@ const CONTENT_PENDING = new Set([
 describe('§6.1 item 10 — mistake-category activation gate', () => {
   const detectableNow = MISTAKE_CATEGORIES.filter((c) => c.routing === 'absence' && !c.requiresChannel);
 
-  it('every detectable-now absence category is either served (in SIGNAL_DEFINITIONS) or documented content-pending', () => {
+  it('every detectable-now absence category is served (in SIGNAL_DEFINITIONS)', () => {
     for (const c of detectableNow) {
-      const target = c.mapToAbsenceSignal!;
-      const served = defKeys.has(toKey(target));
-      const pending = CONTENT_PENDING.has(target);
-      expect(served || pending, `${target}: neither served nor documented content-pending`).toBe(true);
+      expect(defKeys.has(toKey(c.mapToAbsenceSignal!)), `${c.mapToAbsenceSignal}: not in SIGNAL_DEFINITIONS`).toBe(true);
     }
   });
 
-  it('no content-pending signal is activated in SIGNAL_DEFINITIONS, but each now has a shipped record (staged after A9)', () => {
-    for (const target of CONTENT_PENDING) {
-      expect(defKeys.has(toKey(target)), `${target} activated without being migrated`).toBe(false);
-      expect(recordSigs.has(target), `${target} should be shipped (A9) but has no record`).toBe(true);
+  it('the 6 new §4.E2 signals are fully activated: SIGNAL_DEFINITIONS + shipped record + migrated', () => {
+    for (const target of NEW_E2) {
+      expect(defKeys.has(toKey(target)), `${target} not defined`).toBe(true);
+      expect(recordSigs.has(target), `${target} has no shipped record`).toBe(true);
+      expect(MIGRATED_SIGNALS.has(target), `${target} not migrated → would serve contentless`).toBe(true);
     }
   });
 
-  it('the content-pending set matches the detectable-now signals that are staged (record shipped, not yet in SIGNAL_DEFINITIONS)', () => {
-    const staged = detectableNow
-      .map((c) => c.mapToAbsenceSignal!)
-      .filter((t) => !defKeys.has(toKey(t)) && recordSigs.has(t));
-    expect(new Set(staged)).toEqual(CONTENT_PENDING);
+  it('the CORE invariant: no NEW §4.E2 signal fires without served content — each is migrated (they have no static fallback)', () => {
+    // The 4 pre-existing detectable-now signals serve from the STATIC set (records + static, not
+    // migrated) — valid. The 6 new signals have NO static content, so each MUST be migrated.
+    for (const target of NEW_E2) {
+      expect(MIGRATED_SIGNALS.has(target), `${target} activated but not migrated → would fire contentless`).toBe(true);
+    }
   });
 
   it('channel-gated (requiresChannel) absence categories exist and remain deferred to Phase 3', () => {

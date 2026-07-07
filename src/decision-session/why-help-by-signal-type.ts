@@ -173,6 +173,14 @@ export const WHY_HELP_BY_SIGNAL_TYPE: Record<string, WhyHelpEntry> = {
   ABSENCE_DEPLOYMENT_STRATEGY_ABSENCE: WHY_HELP_PER_CLASS.class9_academic_hardcore_pro,
   ABSENCE_OPERATIONAL_RUNBOOK_GAP:     WHY_HELP_PER_CLASS.class9_academic_hardcore_pro,
   ABSENCE_SLO_DEFINITION_GAP:          WHY_HELP_PER_CLASS.class9_academic_hardcore_pro,
+
+  // ── §4.E2 new signals (A10) — security/safety cluster + mood/meta ────────
+  ABSENCE_SECRET_IN_PROMPT:               WHY_HELP_PER_CLASS.class_security_safety,
+  ABSENCE_NO_VERSION_CONTROL:             WHY_HELP_PER_CLASS.class_security_safety,
+  ABSENCE_NO_BACKUP_SAFETY:               WHY_HELP_PER_CLASS.class_security_safety,
+  ABSENCE_NO_SEPARATE_ENVS:               WHY_HELP_PER_CLASS.class_security_safety,
+  ABSENCE_NO_AUTOMATED_SECURITY_SCANNING: WHY_HELP_PER_CLASS.class_security_safety,
+  ABSENCE_FRUSTRATION_SPIRAL:             WHY_HELP_PER_CLASS.class_mood_meta,
 };
 
 /**

@@ -62,12 +62,12 @@ describe('why-help — type shape', () => {
 });
 
 describe('why-help — content table', () => {
-  it('WHY_HELP_PER_CLASS contains exactly 9 signal classes', () => {
-    expect(Object.keys(WHY_HELP_PER_CLASS)).toHaveLength(9);
+  it('WHY_HELP_PER_CLASS contains exactly 11 signal classes', () => {
+    expect(Object.keys(WHY_HELP_PER_CLASS)).toHaveLength(11);
   });
 
-  it('ALL_SIGNAL_CLASSES enumerates the 9 keys present in WHY_HELP_PER_CLASS', () => {
-    expect(ALL_SIGNAL_CLASSES).toHaveLength(9);
+  it('ALL_SIGNAL_CLASSES enumerates the 11 keys present in WHY_HELP_PER_CLASS', () => {
+    expect(ALL_SIGNAL_CLASSES).toHaveLength(11);
     for (const cls of ALL_SIGNAL_CLASSES) {
       expect(WHY_HELP_PER_CLASS[cls]).toBeDefined();
     }
@@ -129,7 +129,7 @@ describe('why-help — content table', () => {
       else if (entry.structure === 'class8-role-cluster') count += 3;
       else if (entry.structure === 'class9-formal-only') count += 1;
     }
-    expect(count).toBe(24);
+    expect(count).toBe(30);
   });
 
   it('no block contains banned third-person AI patterns (the AI / Claude / it says / its answer / its output)', () => {

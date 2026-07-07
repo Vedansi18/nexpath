@@ -1907,6 +1907,52 @@ export const SIGNAL_DEFINITIONS: SignalDefinition[] = [
     ],
     absenceThreshold: 20,
   },
+  // ── §4.E2 new signals (A10) — registry-detected via detectAbsenceFlags custom gates ─────────────
+  // These fire on their mistake-category detect() reading the live RuntimeContext (AR-10 probe +
+  // behavioural streaks), NOT the keyword-absence path; detectionKeywords are topical only. Content
+  // is served from the content-template engine (migrated in A12); why-help + pinch land in A10.
+  {
+    key: 'secret_in_prompt',
+    description: 'A secret/credential-shaped value was pasted into a prompt (leakage event) — rotate + scrub it.',
+    expectedStages: ['idea', 'prd', 'architecture', 'task_breakdown', 'implementation', 'review_testing', 'release', 'feedback_loop'],
+    detectionKeywords: ['rotate the secret', 'scrub the secret', 'the pasted secret'],
+    absenceThreshold: 5,
+  },
+  {
+    key: 'no_version_control',
+    description: 'The project is not under version control — set up git and commit.',
+    expectedStages: ['implementation', 'review_testing', 'release', 'feedback_loop'],
+    detectionKeywords: ['git init', 'under version control', 'first commit'],
+    absenceThreshold: 10,
+  },
+  {
+    key: 'no_backup_safety',
+    description: 'The project has no backup / safety net — stand up a backup and prove recovery.',
+    expectedStages: ['implementation', 'review_testing', 'release'],
+    detectionKeywords: ['set up a backup', 'restore drill', 'recovery plan'],
+    absenceThreshold: 10,
+  },
+  {
+    key: 'no_separate_envs',
+    description: 'No dev/staging/production separation — stand up separate environments.',
+    expectedStages: ['implementation', 'release'],
+    detectionKeywords: ['separate environments', 'staging environment', 'promotion path'],
+    absenceThreshold: 10,
+  },
+  {
+    key: 'no_automated_security_scanning',
+    description: 'No automated security scanning — add a dependency/code scan to the automatic checks.',
+    expectedStages: ['implementation', 'review_testing', 'release'],
+    detectionKeywords: ['security scan', 'dependency scan', 'vulnerability scan'],
+    absenceThreshold: 10,
+  },
+  {
+    key: 'frustration_spiral',
+    description: 'Persisting frustration across prompts with no step-back / recap — pause and reset.',
+    expectedStages: ['idea', 'prd', 'architecture', 'task_breakdown', 'implementation', 'review_testing', 'release', 'feedback_loop'],
+    detectionKeywords: ['let me pause', 'step back', 'take a break'],
+    absenceThreshold: 5,
+  },
 ];
 
 // ── Signal detection from prompt text ────────────────────────────────────────

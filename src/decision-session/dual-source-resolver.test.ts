@@ -11,11 +11,19 @@ import { resolveRecord } from './content-template-engine.js';
 // cascade parity is preserved; per-set migration flips one signal at a time (S8).
 
 describe('§6.1 gate 1 — dual-source resolver + migration marker', () => {
-  it('ships dark — the migration marker is empty (nothing migrated)', () => {
-    expect(MIGRATED_SIGNALS.size).toBe(0);
+  it('the migration marker holds exactly the 6 new §4.E2 signals (A12) — each resolves to the engine', () => {
+    const NEW_E2 = [
+      'ABSENCE_SECRET_IN_PROMPT', 'ABSENCE_NO_VERSION_CONTROL', 'ABSENCE_NO_BACKUP_SAFETY',
+      'ABSENCE_NO_SEPARATE_ENVS', 'ABSENCE_NO_AUTOMATED_SECURITY_SCANNING', 'ABSENCE_FRUSTRATION_SPIRAL',
+    ];
+    expect(MIGRATED_SIGNALS.size).toBe(6);
+    for (const s of NEW_E2) {
+      expect(MIGRATED_SIGNALS.has(s)).toBe(true);
+      expect(resolveContentSource(s)).toBe('content-template');
+    }
   });
 
-  it('resolves EVERY signalType to static while the marker is empty (parity preserved)', () => {
+  it('resolves every LEGACY signalType to static (only the 6 new signals are engine-served)', () => {
     for (const s of ['test_creation', 'context_loss', 'session_length_checkpoint', 'contract_testing_gap', 'x_unknown']) {
       expect(resolveContentSource(s)).toBe('static');
     }

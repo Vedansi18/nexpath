@@ -6,8 +6,8 @@ import {
 } from './why-help-by-signal-type.js';
 
 describe('why-help-by-signal-type — shape + coverage', () => {
-  it('contains exactly 136 entries across all 9 signal classes', () => {
-    expect(Object.keys(WHY_HELP_BY_SIGNAL_TYPE).length).toBe(136);
+  it('contains exactly 142 entries across all 11 signal classes', () => {
+    expect(Object.keys(WHY_HELP_BY_SIGNAL_TYPE).length).toBe(142);
   });
 
   it('every entry resolves to one of the 9 WHY_HELP_PER_CLASS entries', () => {
@@ -17,7 +17,7 @@ describe('why-help-by-signal-type — shape + coverage', () => {
     }
   });
 
-  it('per-class signalType counts match the canonical split (7/21/11/8/8/14/20/35/12)', () => {
+  it('per-class signalType counts match the canonical split (7/21/11/8/8/14/20/35/12 + 5/1 new)', () => {
     const expectedCounts: Record<string, number> = {
       class1_stage_transition:            7,
       class2_verification_quality:        21,
@@ -28,6 +28,8 @@ describe('why-help-by-signal-type — shape + coverage', () => {
       class7_cool_geek_vibe_coder:        20,
       class8_role_cluster:                35,
       class9_academic_hardcore_pro:       12,
+      class_security_safety:              5, // §4.E2 (A10): secret / version / backup / envs / scanning
+      class_mood_meta:                    1, // §4.E2 (A10): frustration_spiral
     };
 
     const actualCounts: Record<string, number> = {};
