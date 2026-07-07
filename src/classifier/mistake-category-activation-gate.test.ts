@@ -7,18 +7,19 @@ import { SHIPPED_CONTENT_TEMPLATES } from '../decision-session/content-template-
 //
 // A detectable-now absence category may be activated in SIGNAL_DEFINITIONS ONLY when its
 // content is served; else adding it fires a CONTENTLESS advisory (SignalDefinition has no
-// dark flag). This test guards that boundary: every detectable-now category is EITHER
-// already served (its signal is in SIGNAL_DEFINITIONS) OR in the documented content-pending
-// set — deliberately NOT activated until its §4.E2 content lands. The 26 channel-gated
-// (requiresChannel) categories stay dark until their reader ships (Channel X/M/c — Phase 3).
+// dark flag). This test guards that boundary: every detectable-now category is EITHER already
+// served (its signal is in SIGNAL_DEFINITIONS) OR content-pending — its §4.E2 content is
+// authored + shipped (A9) but it is deliberately NOT yet activated in SIGNAL_DEFINITIONS (A10)
+// or migrated (A12). The 26 channel-gated (requiresChannel) categories stay dark until their
+// reader ships (Channel X/M/c — Phase 3).
 
 const defKeys = new Set(SIGNAL_DEFINITIONS.map((s) => s.key));
 const recordSigs = new Set(SHIPPED_CONTENT_TEMPLATES.map((r) => r.signalType));
 const toKey = (target: string) => target.replace(/^ABSENCE_/, '').toLowerCase();
 
-// Genuinely-new detectable-now absence signals whose §4.E2 content is NOT yet authored
-// (no shipped record, no static DecisionContent). Activating any would fire a contentless
-// advisory, so they stay OUT of SIGNAL_DEFINITIONS until their content lands (§4.E2 OUTSTANDING).
+// The 6 new detectable-now absence signals whose §4.E2 content is authored + SHIPPED (A9,
+// build-gate-validated) but NOT yet activated in SIGNAL_DEFINITIONS (A10) — so they cannot fire.
+// Staged: content ready, not live. (A12 later flips them from content-pending → served.)
 const CONTENT_PENDING = new Set([
   'ABSENCE_SECRET_IN_PROMPT',
   'ABSENCE_NO_VERSION_CONTROL',
@@ -40,18 +41,18 @@ describe('§6.1 item 10 — mistake-category activation gate', () => {
     }
   });
 
-  it('no content-pending signal is activated in SIGNAL_DEFINITIONS (guards against contentless fires)', () => {
+  it('no content-pending signal is activated in SIGNAL_DEFINITIONS, but each now has a shipped record (staged after A9)', () => {
     for (const target of CONTENT_PENDING) {
-      expect(defKeys.has(toKey(target)), `${target} activated without content`).toBe(false);
-      expect(recordSigs.has(target), `${target} unexpectedly has a record`).toBe(false);
+      expect(defKeys.has(toKey(target)), `${target} activated without being migrated`).toBe(false);
+      expect(recordSigs.has(target), `${target} should be shipped (A9) but has no record`).toBe(true);
     }
   });
 
-  it('the content-pending set matches the actual detectable-now-without-content signals (no drift)', () => {
-    const actual = detectableNow
+  it('the content-pending set matches the detectable-now signals that are staged (record shipped, not yet in SIGNAL_DEFINITIONS)', () => {
+    const staged = detectableNow
       .map((c) => c.mapToAbsenceSignal!)
-      .filter((t) => !defKeys.has(toKey(t)) && !recordSigs.has(t));
-    expect(new Set(actual)).toEqual(CONTENT_PENDING);
+      .filter((t) => !defKeys.has(toKey(t)) && recordSigs.has(t));
+    expect(new Set(staged)).toEqual(CONTENT_PENDING);
   });
 
   it('channel-gated (requiresChannel) absence categories exist and remain deferred to Phase 3', () => {

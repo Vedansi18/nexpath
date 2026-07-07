@@ -55,24 +55,34 @@ describe('content-template-tooling — shipped registry completeness (all 9 clas
   const canonical = canonicalSignalTypes();
   const shipped = SHIPPED_CONTENT_TEMPLATES.map((r) => r.signalType);
 
+  // The 6 new §4.E2 signals: their records are SHIPPED at A9 (build-gate-validated) but their
+  // why-help/pinch entries land at A10 — so until then they are shipped records OUTSIDE the
+  // canonical why-help partition.
+  const NEW_E2_SIGNALS = [
+    'ABSENCE_SECRET_IN_PROMPT', 'ABSENCE_NO_VERSION_CONTROL', 'ABSENCE_NO_BACKUP_SAFETY',
+    'ABSENCE_NO_SEPARATE_ENVS', 'ABSENCE_NO_AUTOMATED_SECURITY_SCANNING', 'ABSENCE_FRUSTRATION_SPIRAL',
+  ];
+
   it('the canonical partition has 136 distinct signalTypes (7/21/11/8/8/14/20/35/12)', () => {
-    expect(canonical.length).toBe(136);
+    expect(canonical.length).toBe(136); // why-help still 136 — the 6 new get their entries at A10
     expect(new Set(canonical).size).toBe(136);
   });
 
-  it('the shipped registry covers the canonical 136 exactly — none missing, none extra, no duplicates', () => {
+  it('the shipped registry covers the canonical 136 + the 6 new §4.E2 signals (why-help pending A10)', () => {
     const cs = new Set(canonical);
     const rs = new Set(shipped);
     expect(canonical.filter((s) => !rs.has(s))).toEqual([]); // every canonical signal has a record
-    expect(shipped.filter((s) => !cs.has(s))).toEqual([]);   // no record outside the partition
+    // The only records OUTSIDE the canonical partition are the 6 new §4.E2 signals (shipped at A9;
+    // their why-help entries — and thus canonical-partition membership — land at A10).
+    expect(shipped.filter((s) => !cs.has(s)).sort()).toEqual([...NEW_E2_SIGNALS].sort());
     expect(shipped.filter((s, i) => shipped.indexOf(s) !== i)).toEqual([]); // no duplicate record
-    expect(shipped.length).toBe(136);
+    expect(shipped.length).toBe(142);
   });
 
   it('the whole shipped registry is all-5-columns, zero thin', () => {
     const cov = coverageMetric(SHIPPED_CONTENT_TEMPLATES);
-    expect(cov.total).toBe(136);
-    expect(cov.allLevels).toBe(136);
+    expect(cov.total).toBe(142);
+    expect(cov.allLevels).toBe(142);
     expect(cov.thin).toBe(0);
   });
 });
