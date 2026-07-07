@@ -84,10 +84,12 @@ export const ABSENCE_NO_VERSION_CONTROL_RECORD: ContentTemplateRecord = {
  * MUST carry the L2 safeguard. So cols 3–5 propose the restore AND carry an action-named
  * confirm-seek; cols 1–2 (base "set up a backup" advice) do not.
  *
- * Placement note: the confirm-seek lives in the OPTION text, not the why-desc. The engine
- * serves the option verbatim (composeOption), whereas the why-desc is LLM-rewoven — only a
- * RECORD-level l2SafeguardLine survives that weave, and a record-level line would wrongly guard
- * cols 1–2 too. The option text is therefore the reliable per-option safeguard channel.
+ * Placement note: the confirm-seek lives in BOTH channels of cols 3–5. The OPTION text is the
+ * reliably-served copy — composeOption serves it verbatim, so the agent always sees it. The
+ * why-desc carries it too, as the sensitive-action desc-base rule requires (the agent reads the
+ * why-desc as the detailed explanation); that copy is best-effort served, since the LLM weave
+ * can reword the why-desc — only a RECORD-level l2SafeguardLine survives the weave verbatim, and
+ * a record-level line would wrongly guard the base cols 1–2 too, so it is not used here.
  */
 export const ABSENCE_NO_BACKUP_SAFETY_RECORD: ContentTemplateRecord = {
   signalType: 'ABSENCE_NO_BACKUP_SAFETY', source: 'shipped', schemaVersion: 1, slots: [],
@@ -96,9 +98,9 @@ export const ABSENCE_NO_BACKUP_SAFETY_RECORD: ContentTemplateRecord = {
   levelForms: {
     1: form("Set up a backup for this project's important data, so a copy exists if the original is ever lost.", "The lightest step: a backup of the important data exists."),
     2: form("Set up a backup and schedule it to run on its own regularly, so the saved copy stays current instead of going stale.", "A light pass: a backup that runs on a schedule."),
-    3: form("Set up a scheduled backup, then prove recovery by restoring from it — a real restore overwrites the current data with the backed-up copy, so ask me for go-ahead before you run one.", "The backup hasn't been proven by a real restore yet."),
-    4: form("Set up an automated backup with sensible retention, and prove recovery on a schedule with a periodic restore drill — a restore overwrites what's there now, so ask me for go-ahead before running it against live data.", "Beyond one backup: a scheduled restore drill that proves recovery."),
-    5: form("Write a short backup-and-recovery runbook and rehearse a full restore from it: what is backed up, how often, and the recovery steps — and since a real recovery overwrites the current data, ask me for go-ahead before you run the restore.", "A durable backup-and-recovery runbook proven by a rehearsed restore."),
+    3: form("Set up a scheduled backup, then prove recovery by restoring from it — a real restore overwrites the current data with the backed-up copy, so ask me for go-ahead before you run one.", "The backup hasn't been proven by a real restore, which overwrites existing data — ask me for go-ahead before running one."),
+    4: form("Set up an automated backup with sensible retention, and prove recovery on a schedule with a periodic restore drill — a restore overwrites what's there now, so ask me for go-ahead before running it against live data.", "Beyond one backup: a scheduled restore drill. A restore overwrites the current data, so ask me for go-ahead before running it against live data."),
+    5: form("Write a short backup-and-recovery runbook and rehearse a full restore from it: what is backed up, how often, and the recovery steps — and since a real recovery overwrites the current data, ask me for go-ahead before you run the restore.", "A durable backup-and-recovery runbook proven by a rehearsed restore — and since recovery overwrites the current data, ask me for go-ahead before running the restore."),
   },
 };
 

@@ -226,15 +226,19 @@ describe('A5 — ABSENCE_NO_BACKUP_SAFETY (new signal, mild — no record-level 
   it('applies the L2 safeguard as a per-option confirm-seek on the restore/overwrite columns ONLY, never on base setup advice (A1 lock)', () => {
     const CONFIRM_SEEK = /ask me for go-ahead|check with me|go-ahead before/i;
     const RESTORE_OVERWRITE = /\brestor|\brecover|overwrit/i;
-    // Base setup columns (1–2): no restore proposed, and NO safeguard.
+    // Base setup columns (1–2): no restore proposed, and NO safeguard in EITHER channel.
     for (const lvl of [1, 2] as const) {
       expect(RESTORE_OVERWRITE.test(r.levelForms[lvl]!.cell.option)).toBe(false);
       expect(CONFIRM_SEEK.test(r.levelForms[lvl]!.cell.option)).toBe(false);
+      expect(CONFIRM_SEEK.test(r.levelForms[lvl]!.cell.whyDesc)).toBe(false);
     }
-    // Restore/overwrite columns (3–5): propose a restore over existing data AND carry the confirm-seek.
+    // Restore/overwrite columns (3–5): propose a restore over existing data AND carry the
+    // confirm-seek in BOTH channels — the option (reliably served) and the why-desc (the
+    // sensitive-action desc-base rule: the agent reads the why-desc as the detailed explanation).
     for (const lvl of [3, 4, 5] as const) {
       expect(RESTORE_OVERWRITE.test(r.levelForms[lvl]!.cell.option)).toBe(true);
       expect(CONFIRM_SEEK.test(r.levelForms[lvl]!.cell.option)).toBe(true);
+      expect(CONFIRM_SEEK.test(r.levelForms[lvl]!.cell.whyDesc)).toBe(true);
     }
     // The safeguard is PER-OPTION (in the option text), NOT a record-level line that the engine
     // would append to the base columns too. So no record-level flag/line is set.

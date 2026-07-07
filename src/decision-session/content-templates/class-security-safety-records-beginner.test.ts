@@ -261,10 +261,12 @@ describe('A5 — NO_BACKUP_SAFETY beginner override (synthesized-record gates)',
     for (const lvl of [1, 2] as const) {
       expect(RESTORE_OVERWRITE.test(synth.levelForms[lvl]!.cell.option)).toBe(false);
       expect(CONFIRM_SEEK.test(synth.levelForms[lvl]!.cell.option)).toBe(false);
+      expect(CONFIRM_SEEK.test(synth.levelForms[lvl]!.cell.whyDesc)).toBe(false);
     }
     for (const lvl of [3, 4, 5] as const) {
       expect(RESTORE_OVERWRITE.test(synth.levelForms[lvl]!.cell.option)).toBe(true);
       expect(CONFIRM_SEEK.test(synth.levelForms[lvl]!.cell.option)).toBe(true);
+      expect(CONFIRM_SEEK.test(synth.levelForms[lvl]!.cell.whyDesc)).toBe(true);
     }
     // Per-option (option text), not a record-level line — base columns stay unguarded.
     expect(r.l2SafeguardRequired).toBeFalsy();
