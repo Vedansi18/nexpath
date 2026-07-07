@@ -34,8 +34,10 @@ describe('buildFeedbackRenderOptions', () => {
     expect(layout.options.map((o) => o.label)).toEqual(['Bad', 'Good', 'Fine', 'Excellent']);
   });
 
-  it('includes the transparency note above the question (with a blank line)', () => {
-    expect(layout.subtitle).toBe(`${FEEDBACK_NOTE}\n`);
+  it('includes the transparency note above the question (light gray, blank line after)', () => {
+    expect(layout.subtitle).toContain(FEEDBACK_NOTE);
+    expect(layout.subtitle).toContain('\x1b[38;5;250m');   // light gray
+    expect(layout.subtitle?.endsWith('\n')).toBe(true);     // blank line before question
     expect(FEEDBACK_NOTE).toMatch(/installation ID/i);
   });
 

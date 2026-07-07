@@ -18,8 +18,12 @@ import {
 export const FEEDBACK_PINCH_LABEL = 'feedback';
 export const FEEDBACK_QUESTION = "How's nexpath working out for you?";
 
-/** Transparency note shown under the question — what a send transmits. */
+/** Transparency note shown under the label — what a send transmits. */
 export const FEEDBACK_NOTE = 'On send: your installation ID and timestamps — no prompt text.';
+
+// Light gray (xterm 250) so the note reads as a subdued sub-line, not a heading.
+const NOTE_GRAY_OPEN  = '\x1b[38;5;250m';
+const NOTE_GRAY_CLOSE = '\x1b[39m';
 
 export interface FeedbackOption {
   /** Selection sentinel returned by the popup. */
@@ -50,9 +54,9 @@ export function buildFeedbackRenderOptions(rows: number, cols: number): RenderLo
   return {
     pageHeader: NEXPATH_HEADER,
     pinchLabel: FEEDBACK_PINCH_LABEL,
-    // Note sits under the pinch label, above the question; the trailing newline
-    // leaves a blank line between the note and the question.
-    subtitle:   `${FEEDBACK_NOTE}\n`,
+    // Note sits under the pinch label, above the question (light gray); the
+    // trailing newline leaves a blank line between the note and the question.
+    subtitle:   `${NOTE_GRAY_OPEN}${FEEDBACK_NOTE}${NOTE_GRAY_CLOSE}\n`,
     question:   FEEDBACK_QUESTION,
     options:    FEEDBACK_OPTIONS.map((o) => ({ value: o.value, label: o.label })),
     rows,
