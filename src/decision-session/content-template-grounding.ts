@@ -49,10 +49,20 @@ function parseJson(raw: string): Record<string, unknown> | null {
   }
 }
 
+/**
+ * Confirm-seek phrasings that mark a PER-COLUMN safeguard baked into an authored cell (as
+ * opposed to the record-level `l2Safeguard` line). NO_BACKUP_SAFETY's restore columns use these.
+ * Bare "confirm" is deliberately excluded — it appears in non-safeguard text ("confirm the tests
+ * pass") and would cause needless fallbacks; the CLAUDE.md safeguard pattern always uses an
+ * "ask me for go-ahead" / "check with me" phrasing, which this matches.
+ */
+const CONFIRM_SEEK_RE = /\bask me\b|\bcheck with me\b|\bgo-ahead\b|\bgo ahead\b/i;
+
 // ── (b) one-notch-simpler derive ───────────────────────────────────────────────
 
 function buildSimplerPrompt(current: TwoChannelCell): string {
-  return `Rewrite this decision-session option ONE notch simpler — shorter, gentler, less jargon — WITHOUT changing what it asks for or dropping its key topic word. The "option" is the message the user sends to their coding agent; the "whyDesc" is the short explanation. If the option proposes a risky action (deleting, force-pushing, deploying, schema changes, secrets) that a "confirm with me first" sentence cannot adequately make safe, DROP the risky clause entirely while KEEPING the topic/keyword and the rest of the instruction — never carry an un-neutralizable risky action into a simpler form.
+  const guarded = CONFIRM_SEEK_RE.test(current.option) || CONFIRM_SEEK_RE.test(current.whyDesc);
+  return `Rewrite this decision-session option ONE notch simpler — shorter, gentler, less jargon — WITHOUT changing what it asks for or dropping its key topic word. The "option" is the message the user sends to their coding agent; the "whyDesc" is the short explanation. If the option proposes a risky action (deleting, force-pushing, deploying, schema changes, secrets) that a "confirm with me first" sentence cannot adequately make safe, DROP the risky clause entirely while KEEPING the topic/keyword and the rest of the instruction — never carry an un-neutralizable risky action into a simpler form.${guarded ? ' This option carries a confirm-before-acting request ("ask me for go-ahead" / "check with me"); if you keep the risky action, keep that request with it — never keep the risky action while dropping the request.' : ''}
 
 Current:
 ${JSON.stringify({ option: current.option, whyDesc: current.whyDesc })}
@@ -84,7 +94,19 @@ export async function deriveSimplerCell(
   }
   let whyDesc = obj.whyDesc;
   if (opts.l2Safeguard && !whyDesc.includes(opts.l2Safeguard)) whyDesc = `${whyDesc}\n${opts.l2Safeguard}`;
-  return { option: obj.option, whyDesc };
+  const derived = { option: obj.option, whyDesc };
+  // Per-column safeguard survival: if the CURRENT cell carried a confirm-seek (a per-column
+  // safeguard baked into the option/why-desc — e.g. NO_BACKUP_SAFETY's restore columns) and the
+  // simpler cell shed it from BOTH channels, reject. Rejection is safe: the strength ladder falls
+  // back to a cell that still carries it (deriveLadder chains l1Out / the prior tier as the
+  // fallback). A simpler sibling must never keep a risky action while dropping its safeguard.
+  const currentGuarded = CONFIRM_SEEK_RE.test(current.option) || CONFIRM_SEEK_RE.test(current.whyDesc);
+  const derivedGuarded = CONFIRM_SEEK_RE.test(derived.option) || CONFIRM_SEEK_RE.test(derived.whyDesc);
+  if (currentGuarded && !derivedGuarded) {
+    logger.debug('content_template_simpler_dropped_safeguard', {});
+    throw new Error('simpler-derive dropped the sensitive-action safeguard');
+  }
+  return derived;
 }
 
 // ── prompt-derived param extraction ─────────────────────────────────────────────
@@ -174,15 +196,6 @@ export interface WeaveInput {
   /** Soft line budget for the woven result. */
   maxLines?: number;
 }
-
-/**
- * Confirm-seek phrasings that mark a PER-COLUMN safeguard baked into an authored why-desc (as
- * opposed to the record-level `l2Safeguard` line). NO_BACKUP_SAFETY's restore columns use these.
- * Bare "confirm" is deliberately excluded — it appears in non-safeguard why-descs ("confirm the
- * tests pass") and would cause needless deterministic fallbacks; the CLAUDE.md safeguard pattern
- * always uses an "ask me for go-ahead" / "check with me" phrasing, which this matches.
- */
-const CONFIRM_SEEK_RE = /\bask me\b|\bcheck with me\b|\bgo-ahead\b|\bgo ahead\b/i;
 
 function buildWeavePrompt(input: WeaveInput): string {
   const factListing = input.facts

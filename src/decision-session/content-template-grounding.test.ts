@@ -72,6 +72,42 @@ describe('content-template-grounding — simpler derive (b)', () => {
     const cell = await deriveSimplerCell({ option: 'o', whyDesc: 'w' }, client, { l2Safeguard: safeguard });
     expect(cell.whyDesc.split(safeguard).length - 1).toBe(1); // appears exactly once
   });
+
+  // Per-column safeguard: a confirm-seek baked into the CURRENT cell's option/why-desc (e.g.
+  // NO_BACKUP_SAFETY's restore columns) must never be shed by the simpler derivation.
+  const guardedCell = {
+    option: 'Restore from the backup — ask me for go-ahead before running one.',
+    whyDesc: 'A restore overwrites current data — ask me for go-ahead before running one.',
+  };
+
+  it('rejects when the current cell carried a per-column confirm-seek and the simpler cell shed it from both channels', async () => {
+    const client = mockClient(JSON.stringify({ option: 'Restore the backup to recover the data.', whyDesc: 'Recover the data.' }));
+    await expect(deriveSimplerCell(guardedCell, client)).rejects.toThrow(/safeguard/i);
+  });
+
+  it('keeps the simpler cell when it preserves the per-column confirm-seek', async () => {
+    const client = mockClient(JSON.stringify({ option: 'Restore the backup — ask me for go-ahead first.', whyDesc: 'Recover the data.' }));
+    const cell = await deriveSimplerCell(guardedCell, client);
+    expect(cell.option).toMatch(/ask me for go-ahead/i);
+  });
+
+  it('does not reject an unguarded cell (no false positive)', async () => {
+    const client = mockClient(JSON.stringify({ option: 'simpler opt', whyDesc: 'simpler why' }));
+    const cell = await deriveSimplerCell({ option: 'plain option', whyDesc: 'plain why' }, client);
+    expect(cell.option).toBe('simpler opt');
+  });
+
+  it('the derive prompt tells the model to keep the confirm-request when the current cell is guarded', async () => {
+    let seen = '';
+    const spy = {
+      chat: { completions: { create: async (args: { messages: { content: string }[] }) => {
+        seen = args.messages[0].content;
+        return { choices: [{ message: { content: '{"option":"Restore — ask me for go-ahead.","whyDesc":"w"}' } }] };
+      } } },
+    } as unknown as import('openai').default;
+    await deriveSimplerCell(guardedCell, spy);
+    expect(seen).toMatch(/keep that request with it/i);
+  });
 });
 
 describe('content-template-grounding — why-desc weave', () => {
