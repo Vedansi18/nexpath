@@ -11,6 +11,8 @@ import {
   recordOptionSelected,
   readSignals,
   pruneSignalsUpTo,
+  readAllSignals,
+  pruneAllSignalsUpTo,
 } from './feedback-signals.js';
 
 let store: Store;
@@ -109,6 +111,35 @@ describe('pruneSignalsUpTo', () => {
     recordOptionSelected(store, '/p', 200);
     pruneSignalsUpTo(store, '/p', 50);
     expect(readSignals(store, '/p')).toEqual({ advisoryFireTs: [100], optionSelectTs: [200] });
+  });
+});
+
+describe('readAllSignals (global)', () => {
+  it('aggregates across all projects, oldest first, split by kind', () => {
+    recordAdvisoryFired(store, '/a', 300);
+    recordAdvisoryFired(store, '/b', 100);
+    recordOptionSelected(store, '/a', 200);
+    recordOptionSelected(store, '/b', 50);
+
+    const all = readAllSignals(store);
+    expect(all.advisoryFireTs).toEqual([100, 300]);
+    expect(all.optionSelectTs).toEqual([50, 200]);
+  });
+
+  it('returns empty arrays when nothing is recorded', () => {
+    expect(readAllSignals(store)).toEqual({ advisoryFireTs: [], optionSelectTs: [] });
+  });
+});
+
+describe('pruneAllSignalsUpTo (global)', () => {
+  it('deletes signals across every project at or before the cutoff', () => {
+    recordAdvisoryFired(store, '/a', 100);
+    recordAdvisoryFired(store, '/b', 150);
+    recordOptionSelected(store, '/a', 400);
+
+    pruneAllSignalsUpTo(store, 150);
+
+    expect(readAllSignals(store)).toEqual({ advisoryFireTs: [], optionSelectTs: [400] });
   });
 });
 

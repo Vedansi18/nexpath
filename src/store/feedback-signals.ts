@@ -99,3 +99,25 @@ export function pruneSignalsUpTo(store: Store, projectRoot: string, ts: number):
   );
   saveStore(store);
 }
+
+/** Read all recorded signals across every project, split by kind, oldest first. */
+export function readAllSignals(store: Store): FeedbackSignals {
+  const result = store.db.exec(
+    'SELECT kind, occurred_at FROM feedback_signals ORDER BY occurred_at ASC',
+  );
+  const advisoryFireTs: number[] = [];
+  const optionSelectTs: number[] = [];
+  for (const row of result[0]?.values ?? []) {
+    const kind = row[0] as string;
+    const ts   = row[1] as number;
+    if (kind === SIGNAL_ADVISORY_FIRED)  advisoryFireTs.push(ts);
+    else if (kind === SIGNAL_OPTION_SELECTED) optionSelectTs.push(ts);
+  }
+  return { advisoryFireTs, optionSelectTs };
+}
+
+/** Delete signals across all projects recorded at or before `ts` (after a send). */
+export function pruneAllSignalsUpTo(store: Store, ts: number): void {
+  store.db.run('DELETE FROM feedback_signals WHERE occurred_at <= ?', [ts]);
+  saveStore(store);
+}
