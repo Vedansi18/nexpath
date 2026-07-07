@@ -34,8 +34,8 @@ describe('buildFeedbackRenderOptions', () => {
     expect(layout.options.map((o) => o.label)).toEqual(['Bad', 'Good', 'Fine', 'Excellent']);
   });
 
-  it('includes the transparency note under the question', () => {
-    expect(layout.whyHelpBlock).toBe(FEEDBACK_NOTE);
+  it('includes the transparency note above the question (with a blank line)', () => {
+    expect(layout.subtitle).toBe(`${FEEDBACK_NOTE}\n`);
     expect(FEEDBACK_NOTE).toMatch(/installation ID/i);
   });
 
@@ -103,6 +103,8 @@ describe('renders with the real render loop', () => {
     expect(drawn).toContain('feedback');
     expect(drawn).toContain("How's nexpath working out for you?");
     expect(drawn).toContain('installation ID');
+    // Note is above the question.
+    expect(drawn.indexOf('installation ID')).toBeLessThan(drawn.indexOf("How's nexpath"));
     for (const label of ['Bad', 'Good', 'Fine', 'Excellent']) expect(drawn).toContain(label);
   });
 

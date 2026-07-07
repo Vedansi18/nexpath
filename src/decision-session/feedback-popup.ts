@@ -48,11 +48,13 @@ export type FeedbackResult =
 /** Build the pure popup layout for the given terminal dimensions. */
 export function buildFeedbackRenderOptions(rows: number, cols: number): RenderLoopOptions {
   return {
-    pageHeader:   NEXPATH_HEADER,
-    pinchLabel:   FEEDBACK_PINCH_LABEL,
-    question:     FEEDBACK_QUESTION,
-    whyHelpBlock: FEEDBACK_NOTE,
-    options:      FEEDBACK_OPTIONS.map((o) => ({ value: o.value, label: o.label })),
+    pageHeader: NEXPATH_HEADER,
+    pinchLabel: FEEDBACK_PINCH_LABEL,
+    // Note sits under the pinch label, above the question; the trailing newline
+    // leaves a blank line between the note and the question.
+    subtitle:   `${FEEDBACK_NOTE}\n`,
+    question:   FEEDBACK_QUESTION,
+    options:    FEEDBACK_OPTIONS.map((o) => ({ value: o.value, label: o.label })),
     rows,
     cols,
   };
