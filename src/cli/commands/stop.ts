@@ -3,8 +3,11 @@ import { platform } from 'node:process';
 import type { Store } from '../../store/db.js';
 import { openStore, closeStore, DEFAULT_DB_PATH } from '../../store/db.js';
 import { getPendingAdvisory, markAdvisoryShown } from '../../store/pending-advisories.js';
-import { recordActivity } from '../../store/feedback-cadence.js';
+import { recordActivity, isFeedbackEligible, markFeedbackShown } from '../../store/feedback-cadence.js';
 import { recordAdvisoryFired, recordOptionSelected } from '../../store/feedback-signals.js';
+import { sendFeedback } from '../../telemetry/feedback-send.js';
+import { runFeedbackPopup, type FeedbackRenderFn } from '../../decision-session/feedback-popup.js';
+import { createFeedbackRenderFn } from '../../decision-session/feedback-tty.js';
 import { runDecisionSession } from '../../decision-session/DecisionSession.js';
 import type { SelectFn } from '../../decision-session/DecisionSession.js';
 import { createTtySelectFn } from '../../decision-session/TtySelectFn.js';
@@ -56,7 +59,17 @@ export type StopOutcome =
   | { outcome: 'no_tty' }
   | { outcome: 'blocked';       reason: string }
   | { outcome: 'clipboard_only' }
+  | { outcome: 'feedback_shown' }
   | { outcome: 'skipped' };
+
+/**
+ * Injectable feedback popup dependencies. `render` is the terminal renderer
+ * (null when none is available, e.g. no TTY); `send` transmits the rating.
+ */
+export interface FeedbackDeps {
+  render: FeedbackRenderFn | null;
+  send:   (store: Store, rating: number) => Promise<boolean>;
+}
 
 // ── Core logic ─────────────────────────────────────────────────────────────────
 
@@ -68,10 +81,11 @@ export type StopOutcome =
  * @param selectFn  Optional select replacement (injected in tests)
  */
 export async function runStop(
-  payload:   StopPayload,
-  store:     Store,
-  selectFn?: SelectFn,
-  openai?:   OpenAI,
+  payload:       StopPayload,
+  store:         Store,
+  selectFn?:     SelectFn,
+  openai?:       OpenAI,
+  feedbackDeps?: FeedbackDeps,
 ): Promise<StopOutcome> {
   // 1. Loop guard — Claude is continuing because of a previous Stop block; let it land
   if (payload.stop_hook_active) {
@@ -82,6 +96,23 @@ export async function runStop(
   // 1.2. Record active usage — one heartbeat per turn, accumulated globally
   //      across all projects, independent of whether an advisory fires.
   recordActivity(store);
+
+  // 1.3. Feedback popup — when due, show it in place of the advisory this turn.
+  //      A rating is sent; either outcome resets the cadence. Skipped (without
+  //      consuming the cadence) when no renderer is available.
+  if (isFeedbackEligible(store)) {
+    const fbRender = feedbackDeps ? feedbackDeps.render : createFeedbackRenderFn();
+    const fbSend   = feedbackDeps ? feedbackDeps.send   : sendFeedback;
+    if (fbRender) {
+      const result = await runFeedbackPopup({ render: fbRender });
+      if (result.outcome === 'selected') {
+        await fbSend(store, result.rating);
+      }
+      markFeedbackShown(store);
+      logger.info('stop_feedback_shown', { cwd: payload.cwd, selected: result.outcome === 'selected' });
+      return { outcome: 'feedback_shown' };
+    }
+  }
 
   // 1.5. Language detection — runs post-response, invisible latency
   //      Only fires when >= LANG_DETECT_INTERVAL prompts have been captured for this project.
