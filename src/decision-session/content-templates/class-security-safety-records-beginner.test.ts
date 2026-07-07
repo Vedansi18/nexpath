@@ -344,6 +344,13 @@ describe('A6 — NO_SEPARATE_ENVS beginner override (authoring gates)', () => {
       expect(findJargonViolations(c.whyDesc)).toEqual([]);
     }
   });
+  it('never contains a literal secret/credential token (no-echo guard on the beginner cells too)', () => {
+    const SECRET_RE = /\b(sk-[A-Za-z0-9]{16,}|AKIA[0-9A-Z]{12,}|ghp_[A-Za-z0-9]{20,})\b|(api[_-]?key|password|token)\s*[:=]\s*\S{8,}/i;
+    for (const c of cells) {
+      expect(c.option).not.toMatch(SECRET_RE);
+      expect(c.whyDesc).not.toMatch(SECRET_RE);
+    }
+  });
 });
 
 describe('A6 — NO_SEPARATE_ENVS beginner override (synthesized-record gates)', () => {

@@ -5,6 +5,7 @@ import {
 } from '../content-authoring-rules.js';
 import { composeWhyDesc, composeOption } from '../content-template-engine.js';
 import { CONFIRM_SEEK_RE } from '../content-template-grounding.js';
+import { detectL2TriggersInText } from '../r5-injection.js';
 import {
   ABSENCE_SECRET_IN_PROMPT_RECORD, ABSENCE_NO_VERSION_CONTROL_RECORD, ABSENCE_NO_BACKUP_SAFETY_RECORD,
   ABSENCE_NO_SEPARATE_ENVS_RECORD, SECURITY_SAFETY_PARAM_AXES,
@@ -92,6 +93,10 @@ describe('A3 — ABSENCE_SECRET_IN_PROMPT (new signal, no frozen col-3)', () => 
       expect(c.option).not.toMatch(PLACEHOLDER);
       expect(c.whyDesc).not.toMatch(PLACEHOLDER);
     }
+  });
+  it('the options genuinely trip an L2 trigger (secret-env), so the record-level safeguard is warranted, not vacuous', () => {
+    const optionTriggers = new Set(optionsOf(r.levelForms).flatMap((c) => detectL2TriggersInText(c.option).map((t) => t.name)));
+    expect(optionTriggers.has('secret-env')).toBe(true); // "secret" → the record genuinely touches a sensitive action
   });
 });
 
@@ -343,6 +348,24 @@ describe('A6 — ABSENCE_NO_SEPARATE_ENVS (new signal, HIGH-RISK — record-leve
     expect(findVoiceViolations(line)).toEqual([]);
     expect(findJargonViolations(line)).toEqual([]);
     expect(line).not.toMatch(/\{[R{]/);
+  });
+  it('never contains a literal secret/credential token (no-echo guard, belt-and-suspenders to the static+sanitize rule)', () => {
+    const SECRET_RE = /\b(sk-[A-Za-z0-9]{16,}|AKIA[0-9A-Z]{12,}|ghp_[A-Za-z0-9]{20,})\b|(api[_-]?key|password|token)\s*[:=]\s*\S{8,}/i;
+    for (const c of optionsOf(r.levelForms)) {
+      expect(c.option).not.toMatch(SECRET_RE);
+      expect(c.whyDesc).not.toMatch(SECRET_RE);
+    }
+  });
+  it('the options trip an L2 trigger (deployment) so the record-level safeguard is warranted, not vacuous; the safeguard names both the production and credential actions the spec identifies', () => {
+    // Options are about SEPARATION (staging/production → the deployment trigger), deliberately
+    // without credential language (the ENV_AND_SECRETS differentiation). The credential aspect is
+    // named ABSTRACTLY in the safeguard line ("move any environment credentials") — the plural
+    // "credentials" does not trip the secret-env detector (\bcredential\b needs a word boundary),
+    // but the record-level safeguard is ALWAYS served, so it covers the action regardless.
+    const optionTriggers = new Set(optionsOf(r.levelForms).flatMap((c) => detectL2TriggersInText(c.option).map((t) => t.name)));
+    expect(optionTriggers.has('deployment')).toBe(true);
+    expect(r.l2SafeguardLine!).toMatch(/\bproduction\b/i);
+    expect(r.l2SafeguardLine!).toMatch(/\bcredential/i);
   });
 });
 
