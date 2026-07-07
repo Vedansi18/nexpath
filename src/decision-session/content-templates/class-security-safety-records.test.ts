@@ -4,6 +4,7 @@ import {
   reviewRecord, checkVoice, checkEscalation, checkL2Safeguard, findVoiceViolations, findJargonViolations,
 } from '../content-authoring-rules.js';
 import { composeWhyDesc, composeOption } from '../content-template-engine.js';
+import { CONFIRM_SEEK_RE } from '../content-template-grounding.js';
 import {
   ABSENCE_SECRET_IN_PROMPT_RECORD, ABSENCE_NO_VERSION_CONTROL_RECORD, ABSENCE_NO_BACKUP_SAFETY_RECORD,
   SECURITY_SAFETY_PARAM_AXES,
@@ -256,6 +257,19 @@ describe('A5 — ABSENCE_NO_BACKUP_SAFETY (new signal, mild — no record-level 
     }
     for (const lvl of [3, 4, 5] as const) {
       expect(composeOption({ cell: r.levelForms[lvl]!.cell, slots: r.slots })).toMatch(CONFIRM_SEEK);
+    }
+  });
+  it('the restore columns\' confirm-seek is recognized by the ENGINE\'s CONFIRM_SEEK_RE, so the weave + simpler-derive preserve it (base columns are not)', () => {
+    // Single source of truth: the hardening (weaveWhyDesc + deriveSimplerCell) only preserves a
+    // safeguard whose phrasing matches the engine's CONFIRM_SEEK_RE. Tie A5's ACTUAL content to
+    // that matcher so a future phrasing change can't silently defeat the preservation.
+    for (const lvl of [1, 2] as const) {
+      expect(CONFIRM_SEEK_RE.test(r.levelForms[lvl]!.cell.option)).toBe(false);
+      expect(CONFIRM_SEEK_RE.test(r.levelForms[lvl]!.cell.whyDesc)).toBe(false);
+    }
+    for (const lvl of [3, 4, 5] as const) {
+      expect(CONFIRM_SEEK_RE.test(r.levelForms[lvl]!.cell.option)).toBe(true);
+      expect(CONFIRM_SEEK_RE.test(r.levelForms[lvl]!.cell.whyDesc)).toBe(true);
     }
   });
 });

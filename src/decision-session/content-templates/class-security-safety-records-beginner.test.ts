@@ -8,6 +8,7 @@ import {
   composeAdvisory, resolveRegisterForms, type RecordCandidateLookup,
 } from '../content-template-engine.js';
 import { validateContentTemplateRecord, type ContentTemplateRecord } from '../content-template-schema.js';
+import { CONFIRM_SEEK_RE } from '../content-template-grounding.js';
 import {
   ABSENCE_SECRET_IN_PROMPT_RECORD, ABSENCE_NO_VERSION_CONTROL_RECORD, ABSENCE_NO_BACKUP_SAFETY_RECORD,
 } from './class-security-safety.js';
@@ -272,6 +273,18 @@ describe('A5 — NO_BACKUP_SAFETY beginner override (synthesized-record gates)',
     // Per-option (option text), not a record-level line — base columns stay unguarded.
     expect(r.l2SafeguardRequired).toBeFalsy();
     expect(checkL2Safeguard(synth).ok).toBe(true);
+  });
+  it('the beginner restore columns\' confirm-seek is recognized by the ENGINE\'s CONFIRM_SEEK_RE (base columns are not)', () => {
+    // The beginner-register forms are served through the same weave + simpler-derive paths, so
+    // their confirm-seek must match the engine's matcher for the hardening to preserve it.
+    for (const lvl of [1, 2] as const) {
+      expect(CONFIRM_SEEK_RE.test(synth.levelForms[lvl]!.cell.option)).toBe(false);
+      expect(CONFIRM_SEEK_RE.test(synth.levelForms[lvl]!.cell.whyDesc)).toBe(false);
+    }
+    for (const lvl of [3, 4, 5] as const) {
+      expect(CONFIRM_SEEK_RE.test(synth.levelForms[lvl]!.cell.option)).toBe(true);
+      expect(CONFIRM_SEEK_RE.test(synth.levelForms[lvl]!.cell.whyDesc)).toBe(true);
+    }
   });
 });
 

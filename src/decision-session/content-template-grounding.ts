@@ -56,7 +56,7 @@ function parseJson(raw: string): Record<string, unknown> | null {
  * pass") and would cause needless fallbacks; the CLAUDE.md safeguard pattern always uses an
  * "ask me for go-ahead" / "check with me" phrasing, which this matches.
  */
-const CONFIRM_SEEK_RE = /\bask me\b|\bcheck with me\b|\bgo-ahead\b|\bgo ahead\b/i;
+export const CONFIRM_SEEK_RE = /\bask me\b|\bcheck with me\b|\bgo-ahead\b|\bgo ahead\b/i;
 
 // ── (b) one-notch-simpler derive ───────────────────────────────────────────────
 
