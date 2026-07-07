@@ -247,6 +247,30 @@ const CI_FILES_ROOT = [
 ];
 const CI_FILES_NESTED = [join('.circleci', 'config.yml')];
 const SHAPE_MARKERS_ROOT = ['pnpm-workspace.yaml', 'lerna.json', 'turbo.json', 'nx.json'];
+// A backup/safety net = an off-machine copy (a git remote) OR an explicit backup config/dir/script.
+const BACKUP_FILES_ROOT = [
+  '.borgmatic.yaml', '.borgmatic.yml', 'borgmatic.yaml', 'restic.yml', '.resticrc',
+  'duplicity.conf', '.backup', 'backup.sh',
+];
+const BACKUP_DIRS = ['backups', 'backup', '.snapshots'];
+
+/** True when the repo has a configured git remote (an off-machine copy of the work). */
+function hasGitRemote(root: string): boolean {
+  try {
+    return /^\s*\[remote\b/im.test(readFileSync(join(root, '.git', 'config'), 'utf8'));
+  } catch {
+    return false;
+  }
+}
+
+/** A backup/safety net exists: a git remote, a backup-tool config/dir, or a `backup` script. */
+function detectHasBackups(root: string, entries: Set<string>, pkg: PackageJson | null): boolean {
+  if (hasGitRemote(root)) return true;
+  if (rootHasAny(entries, BACKUP_FILES_ROOT)) return true;
+  if (BACKUP_DIRS.some((d) => dirNonEmpty(root, d))) return true;
+  const backupScript = pkg?.scripts?.backup;
+  return typeof backupScript === 'string' && backupScript.trim() !== '';
+}
 
 function detectHasTestRunner(pkg: PackageJson | null): boolean {
   if (!pkg) return false;
@@ -291,6 +315,7 @@ export function probeProject(inputRoot: string, now: number = Date.now()): Proje
       now,
     ),
     has_env_separation:          fact(safe(() => rootHasAny(entries, ENV_SEP_FILES_ROOT)), 'high', now),
+    has_backups:                 fact(safe(() => detectHasBackups(r, entries, pkg)), 'high', now),
     has_lockfile:                fact(safe(() => rootHasAny(entries, LOCKFILES_ROOT)), 'high', now),
     project_framework:           fact(
       safe(() => (pkg ? resolveFramework(pkg.dependencyNames) : null)),

@@ -56,7 +56,7 @@ export const MACHINE_FACT_KEYS = [
 export type MachineFactKey = (typeof MACHINE_FACT_KEYS)[number];
 
 /**
- * The 9 project-fact keys (closed allowlist). Probed per session against the
+ * The 10 project-fact keys (closed allowlist). Probed per session against the
  * anchored repo root. `project_framework` is the single OPEN-NOMINAL value axis
  * (see framework-fingerprints) — its value is read/normalized, not enum-bound.
  */
@@ -68,6 +68,7 @@ export const PROJECT_FACT_KEYS = [
   'has_deploy_config',
   'has_security_scanner',
   'has_env_separation',
+  'has_backups',
   'has_lockfile',
   'project_framework',
 ] as const;
@@ -76,7 +77,7 @@ export type ProjectFactKey = (typeof PROJECT_FACT_KEYS)[number];
 /** Project shape, detected first so the project probe anchors at the repo root. */
 export type ProjectShape = 'single' | 'monorepo';
 
-/** Result of the project probe: the 9 facts plus the anchoring metadata used. */
+/** Result of the project probe: the 10 facts plus the anchoring metadata used. */
 export interface ProjectProbeResult {
   facts: FactMap;
   /** The repo root the probe anchored on (may be an ancestor of the input root). */
