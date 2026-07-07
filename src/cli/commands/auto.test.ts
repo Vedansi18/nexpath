@@ -14,7 +14,7 @@ import type { AutoInput } from './auto.js';
 import { getPendingAdvisory } from '../../store/pending-advisories.js';
 import { upsertProject, setDetectedLanguage, getProject } from '../../store/projects.js';
 import { setConfig } from '../../store/config.js';
-import { readCadence } from '../../store/feedback-cadence.js';
+import { readCadence, IDLE_CAP_MS } from '../../store/feedback-cadence.js';
 import type OpenAI from 'openai';
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -1755,6 +1755,16 @@ describe('runAuto — usage recording (feedback cadence)', () => {
     await runAuto(makeInput({ projectRoot: '/proj-b', promptText: 'b' }), store);
     nowSpy.mockRestore();
     expect(readCadence(store).activeMs).toBe(60_000);
+  });
+
+  it('does not count gaps longer than the idle cap', async () => {
+    const nowSpy = vi.spyOn(Date, 'now');
+    nowSpy.mockReturnValue(1_000_000);
+    await runAuto(makeInput({ promptText: 'a' }), store);
+    nowSpy.mockReturnValue(1_000_000 + IDLE_CAP_MS + 1);
+    await runAuto(makeInput({ promptText: 'b' }), store);
+    nowSpy.mockRestore();
+    expect(readCadence(store).activeMs).toBe(0);
   });
 
   it('does not record activity for an advisory-injected prompt', async () => {

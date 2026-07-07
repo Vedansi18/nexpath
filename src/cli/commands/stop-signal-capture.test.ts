@@ -25,6 +25,7 @@ import type { SelectFn } from '../../decision-session/DecisionSession.js';
 import * as TtySelectFnModule from '../../decision-session/TtySelectFn.js';
 import { setConfig } from '../../store/config.js';
 import { readSignals } from '../../store/feedback-signals.js';
+import { readCadence } from '../../store/feedback-cadence.js';
 
 const CWD = '/test/project';
 
@@ -57,6 +58,13 @@ const mockSelect = (value: string): SelectFn => vi.fn().mockResolvedValue(value)
 let store: Store;
 beforeEach(async () => { store = await openStore(':memory:'); });
 afterEach(() => { closeStore(store); vi.restoreAllMocks(); });
+
+describe('usage is NOT recorded by the stop hook', () => {
+  it('does not touch the usage accumulator (usage lives on the auto hook now)', async () => {
+    await runStop(makePayload(), store);
+    expect(readCadence(store).lastActivityAt).toBeNull();
+  });
+});
 
 describe('advisory not shown → no fire recorded', () => {
   it('does not record a fire when the advisory frequency is off', async () => {
