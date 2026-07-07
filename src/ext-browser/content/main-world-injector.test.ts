@@ -488,4 +488,45 @@ describe('main-world-injector.ts', () => {
       logSpy.mockRestore();
     });
   });
+
+  describe('CLI-parity panel footer intents → service worker (nexpath:footer-intent)', () => {
+    function dispatchFooterIntent(intent: unknown): void {
+      window.dispatchEvent(new CustomEvent('nexpath:footer-intent', { detail: { intent } }));
+    }
+
+    it('forwards disable-project with the resolved project root', () => {
+      sendMessageMock.mockClear();
+      setLocation('https://replit.com', 'replit.com', '/@vedansi18/Hello-World');
+      dispatchFooterIntent('disable-project');
+      expect(sendMessageMock).toHaveBeenCalledWith({
+        type: 'nexpath:advisory-footer-intent',
+        intent: 'disable-project',
+        projectRoot: 'https://replit.com/@vedansi18/Hello-World',
+      });
+    });
+
+    it('forwards open-settings with the resolved project root', () => {
+      sendMessageMock.mockClear();
+      setLocation('https://replit.com', 'replit.com', '/@vedansi18/Hello-World');
+      dispatchFooterIntent('open-settings');
+      expect(sendMessageMock).toHaveBeenCalledWith(expect.objectContaining({
+        type: 'nexpath:advisory-footer-intent',
+        intent: 'open-settings',
+      }));
+    });
+
+    it('ignores an unknown intent value', () => {
+      sendMessageMock.mockClear();
+      dispatchFooterIntent('nuke-everything');
+      expect(sendMessageMock).not.toHaveBeenCalled();
+    });
+
+    it('skips forwarding when the page has no project context (e.g. a landing page)', () => {
+      sendMessageMock.mockClear();
+      setLocation('https://replit.com', 'replit.com', '/~'); // home — resolveProjectRoot null
+      dispatchFooterIntent('disable-project');
+      expect(sendMessageMock).not.toHaveBeenCalled();
+      setLocation('https://replit.com', 'replit.com', '/@vedansi18/Hello-World'); // restore
+    });
+  });
 });

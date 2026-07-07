@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { ClassificationResult, SessionState } from '../../core/classifier/types.js';
+// Real (unmocked) — composeWhyHelpBlock + this table run for real in the payload
+// test, exactly as the SW uses them, so the whyHelp wiring is proven end to end.
+import { WHY_HELP_BY_SIGNAL_TYPE } from '../../decision-session/why-help-by-signal-type.js';
 
 /**
  * service-worker.ts orchestrates the core pipeline + browser adapters. Its own
@@ -724,6 +727,132 @@ describe('service-worker.ts', () => {
         'nexpath_last_stage2_result',
         expect.stringContaining('"fire":true'),
       );
+    });
+  });
+
+  describe('CLI-parity payload enrichment (question + whyHelp + per-level option lists)', () => {
+    function primeFirePath(whyHelpEntry: unknown): void {
+      vi.mocked(shouldFireStage2).mockReturnValue({ kind: 'stage_transition' } as unknown as ReturnType<typeof shouldFireStage2>);
+      keyStoreGetKey.mockResolvedValueOnce('sk-real-key'); // api-key; freq/role/proj → null default
+      vi.mocked(runStage2).mockResolvedValue({ fire_decision_session: true } as unknown as Awaited<ReturnType<typeof runStage2>>);
+      vi.mocked(resolveDecisionContent).mockReturnValue({
+        question: 'Before shipping — has it been reviewed and tested?',
+        whyHelp: whyHelpEntry,
+        // L1 has TWO options — the CLI-parity list the shipped flat `options` view can't carry.
+        L1: [{ option: 'Run the full suite', descBase: 'b1' }, { option: 'Run a focused review', descBase: 'b2' }],
+        L2: [{ option: 'Quick check', descBase: 'b3' }],
+        L3: [{ option: 'TODO comment', descBase: 'b4' }],
+        pinchFallback: 'fallback',
+      } as unknown as ReturnType<typeof resolveDecisionContent>);
+      vi.mocked(generatePinchLabel).mockResolvedValue('Before you ship.');
+      showAdvisoryMock.mockResolvedValue({ type: 'dismiss', advisoryId: 'x' });
+    }
+
+    it('sends question, per-level option ARRAYS, and a flat options view that is the first of each level', async () => {
+      primeFirePath(undefined); // no why-help entry → composeWhyHelpBlock returns null
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      messageListener(
+        { type: 'nexpath:prompt-submit', promptText: 'ship it', projectRoot: 'https://replit.com', agent: 'replit', tabId: 9 },
+        {}, vi.fn(),
+      );
+      await vi.waitFor(() => expect(showAdvisoryMock).toHaveBeenCalledOnce());
+      const payload = showAdvisoryMock.mock.calls[0]![0];
+
+      expect(payload.question).toBe('Before shipping — has it been reviewed and tested?');
+      expect(payload.whyHelp).toBeNull();
+      expect(payload.levels.L1).toEqual([
+        { id: 'l1-0', level: 'L1', title: 'Run the full suite', body: 'b1' },
+        { id: 'l1-1', level: 'L1', title: 'Run a focused review', body: 'b2' },
+      ]);
+      expect(payload.levels.L2).toEqual([{ id: 'l2-0', level: 'L2', title: 'Quick check', body: 'b3' }]);
+      expect(payload.levels.L3).toEqual([{ id: 'l3-0', level: 'L3', title: 'TODO comment', body: 'b4' }]);
+      // Shipped-panel back-compat: flat view = first of each level, same ids as before.
+      expect(payload.options).toEqual([
+        { id: 'l1-0', level: 'L1', title: 'Run the full suite', body: 'b1' },
+        { id: 'l2-0', level: 'L2', title: 'Quick check', body: 'b3' },
+        { id: 'l3-0', level: 'L3', title: 'TODO comment', body: 'b4' },
+      ]);
+    });
+
+    it('composes a non-null whyHelp block when the stage has a why-help entry (real composeWhyHelpBlock)', async () => {
+      primeFirePath(WHY_HELP_BY_SIGNAL_TYPE['IDEA_TO_PRD']);
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      messageListener(
+        { type: 'nexpath:prompt-submit', promptText: 'ship it', projectRoot: 'https://replit.com', agent: 'replit', tabId: 9 },
+        {}, vi.fn(),
+      );
+      await vi.waitFor(() => expect(showAdvisoryMock).toHaveBeenCalledOnce());
+      const payload = showAdvisoryMock.mock.calls[0]![0];
+      expect(typeof payload.whyHelp).toBe('string');
+      expect(payload.whyHelp.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe('per-project frequency override (CLI-parity Ctrl+X disable)', () => {
+    it('a per-project advisory_frequency:<root>=off fast-exits even while the global setting is active', async () => {
+      keyStoreGetKey.mockImplementation(async (name: string) => {
+        if (name === 'openai_api_key') return 'sk-real-key';
+        if (name === 'advisory_frequency') return 'every_event';        // global: on
+        if (name === 'advisory_frequency:https://replit.com') return 'off'; // this project: disabled
+        return null;
+      });
+      vi.mocked(shouldFireStage2).mockReturnValue({ kind: 'stage_transition' } as unknown as ReturnType<typeof shouldFireStage2>);
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+
+      const sendResponse = vi.fn();
+      messageListener(
+        { type: 'nexpath:prompt-submit', promptText: 'hi', projectRoot: 'https://replit.com', agent: 'replit', tabId: 7 },
+        {}, sendResponse,
+      );
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+      expect(shouldFireStage2).not.toHaveBeenCalled(); // off → fast-exit, same as global off
+    });
+
+    it('the per-project override wins over the global setting in the other direction too (global off, project on)', async () => {
+      keyStoreGetKey.mockImplementation(async (name: string) => {
+        if (name === 'openai_api_key') return 'sk-real-key';
+        if (name === 'advisory_frequency') return 'off';                       // global: disabled
+        if (name === 'advisory_frequency:https://replit.com') return 'every_event'; // this project: on
+        return null;
+      });
+      vi.mocked(shouldFireStage2).mockReturnValue({ kind: 'stage_transition' } as unknown as ReturnType<typeof shouldFireStage2>);
+      vi.mocked(runStage2).mockResolvedValue({ fire_decision_session: false } as unknown as Awaited<ReturnType<typeof runStage2>>);
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+
+      const sendResponse = vi.fn();
+      messageListener(
+        { type: 'nexpath:prompt-submit', promptText: 'hi', projectRoot: 'https://replit.com', agent: 'replit', tabId: 7 },
+        {}, sendResponse,
+      );
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+      expect(shouldFireStage2).toHaveBeenCalled(); // project override re-enabled → gating proceeds
+    });
+  });
+
+  describe('advisory footer intents (CLI-parity panel Ctrl+X / Ctrl+T shortcuts)', () => {
+    it("'disable-project' writes advisory_frequency:<root>=off and acks, without opening options", async () => {
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      const sendResponse = vi.fn();
+      const keepOpen = messageListener(
+        { type: 'nexpath:advisory-footer-intent', intent: 'disable-project', projectRoot: 'https://replit.com' },
+        {}, sendResponse,
+      );
+      expect(keepOpen).toBe(true);
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+      expect(keyStoreSetKey).toHaveBeenCalledWith('advisory_frequency:https://replit.com', 'off');
+      expect(openOptionsPageMock).not.toHaveBeenCalled();
+    });
+
+    it("'open-settings' opens the options page and acks, writing no frequency key", async () => {
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      const sendResponse = vi.fn();
+      messageListener(
+        { type: 'nexpath:advisory-footer-intent', intent: 'open-settings', projectRoot: 'https://replit.com' },
+        {}, sendResponse,
+      );
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+      expect(openOptionsPageMock).toHaveBeenCalledOnce();
+      expect(keyStoreSetKey).not.toHaveBeenCalledWith('advisory_frequency:https://replit.com', 'off');
     });
   });
 

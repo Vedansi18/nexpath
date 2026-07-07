@@ -3,6 +3,34 @@
   "advisoryId": "adv-mock-stage-transition-prd-0001",
   "pinchLabel": "Before coding.",
   "stage": "prd",
+  "question": "Before coding — is the PRD written and the scope agreed?",
+  "whyHelp": "Here is why this matters right now:\nCoding ahead of an agreed spec bakes in assumptions no one signed off on.\nLock the scope first; the build goes faster after.",
+  "levels": {
+    "L1": [
+      {
+        "level": "L1",
+        "id": "adv-mock-stage-transition-prd-0001-L1",
+        "title": "Write a short PRD before the next line of code",
+        "body": "Before writing any code, define the problem, target user, and core features with acceptance criteria. Note what's explicitly out of scope and any technical constraints. Produce the actual spec artifact — the document itself, with these sections named. A written PRD now prevents scope drift and rework later."
+      }
+    ],
+    "L2": [
+      {
+        "level": "L2",
+        "id": "adv-mock-stage-transition-prd-0001-L2",
+        "title": "Write a short PRD first",
+        "body": "Write a short PRD: problem, target user, core features, and what's out of scope. Doesn't need to be long — just written down before more code gets built."
+      }
+    ],
+    "L3": [
+      {
+        "level": "L3",
+        "id": "adv-mock-stage-transition-prd-0001-L3",
+        "title": "Write the problem down first",
+        "body": "Write down the problem, who it's for, and what's out of scope. Now, before more code."
+      }
+    ]
+  },
   "options": [
     {
       "level": "L1",

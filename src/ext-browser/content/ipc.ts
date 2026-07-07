@@ -54,7 +54,19 @@ export interface ResponseStopMsg {
   tabId: number;
 }
 
-export type ContentToSwMsg = PromptSubmitMsg | ResponseStopMsg;
+/**
+ * CLI-parity panel footer shortcuts (CLI Ctrl+X / Ctrl+T). Fire-and-forget content
+ * → SW; NOT part of the showAdvisory round-trip (that would prematurely resolve it).
+ *   - 'disable-project' → SW writes `advisory_frequency:<projectRoot>=off`.
+ *   - 'open-settings'   → SW opens the extension options page.
+ */
+export interface AdvisoryFooterIntentMsg {
+  type: 'nexpath:advisory-footer-intent';
+  intent: 'disable-project' | 'open-settings';
+  projectRoot: string;
+}
+
+export type ContentToSwMsg = PromptSubmitMsg | ResponseStopMsg | AdvisoryFooterIntentMsg;
 
 // ── Service Worker → Content ──────────────────────────────────────────────────
 
@@ -78,7 +90,8 @@ export type ExtensionMsg =
   | PromptSubmitMsg
   | ResponseStopMsg
   | ShowAdvisoryMsg
-  | PanelEventMsg;
+  | PanelEventMsg
+  | AdvisoryFooterIntentMsg;
 
 // ── Type guards ───────────────────────────────────────────────────────────────
 
@@ -115,4 +128,12 @@ export function isResponseStoppedMsg(msg: unknown): msg is ResponseStoppedMsg {
 export function isFetchPromptMsg(msg: unknown): msg is FetchPromptMsg {
   return typeof msg === 'object' && msg !== null &&
     (msg as Record<string, unknown>)['type'] === 'nexpath:fetch-prompt';
+}
+
+export function isAdvisoryFooterIntentMsg(msg: unknown): msg is AdvisoryFooterIntentMsg {
+  if (typeof msg !== 'object' || msg === null) return false;
+  const m = msg as Record<string, unknown>;
+  return m['type'] === 'nexpath:advisory-footer-intent' &&
+    (m['intent'] === 'disable-project' || m['intent'] === 'open-settings') &&
+    typeof m['projectRoot'] === 'string';
 }

@@ -42,9 +42,33 @@ export interface AdvisoryPayload {
     | 'feedback_loop';
 
   /**
-   * Always exactly 3 items in this order: L1, L2, L3.
-   * L1 = detailed (~60 words), L2 = medium (~35 words), L3 = brief (~20 words).
-   * Default displayed level is L1.
+   * CLI-parity: the question line the popup shows below the pinch label
+   * (element 5 in the CLI-parity brief). Bold, highest-contrast — the actual ask.
+   */
+  question: string;
+
+  /**
+   * CLI-parity: the pre-composed "why this matters right now" block
+   * (element 6). Multi-line; render verbatim, preserving line breaks. `null`
+   * when the stage has no why-help — then omit the block entirely.
+   */
+  whyHelp: string | null;
+
+  /**
+   * CLI-parity option lists — one ARRAY per level (the CLI shows a numbered
+   * LIST at each level, not a single option). Render every option in
+   * `levels[currentLevel]`. "Show simpler options →" advances L1→L2→L3.
+   */
+  levels: {
+    L1: AdvisoryOption[];
+    L2: AdvisoryOption[];
+    L3: AdvisoryOption[];
+  };
+
+  /**
+   * DEPRECATED (shipped pre-CLI-parity panel only): flat [L1[0], L2[0], L3[0]].
+   * The CLI-parity panel uses `levels` instead. Kept so the currently-shipped
+   * panel keeps working during the transition; will be removed afterward.
    */
   options: AdvisoryOption[];
 
@@ -114,12 +138,26 @@ export type CopyEvent      = { type: 'copy';      optionId: string };
  */
 export type ShowSimplerEvent = { type: 'show-simpler' };
 
+/**
+ * CLI-parity footer shortcut (CLI Ctrl+X): "Disable for this project".
+ * Engine sets this project's advisory frequency to `off`, then closes the panel.
+ */
+export type DisableProjectEvent = { type: 'disable-project' };
+
+/**
+ * CLI-parity footer shortcut (CLI Ctrl+T): "Adjust frequency or role".
+ * Engine opens the extension options page. Panel STAYS open.
+ */
+export type OpenSettingsEvent = { type: 'open-settings' };
+
 export type PanelEvent =
   | SelectEvent
   | SkipEvent
   | DismissEvent
   | CopyEvent
-  | ShowSimplerEvent;
+  | ShowSimplerEvent
+  | DisableProjectEvent
+  | OpenSettingsEvent;
 
 
 // ─── What you return from mountNexpathPanel ───────────────────────────

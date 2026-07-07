@@ -7,6 +7,7 @@ import {
   isPromptCapturedMsg,
   isResponseStoppedMsg,
   isFetchPromptMsg,
+  isAdvisoryFooterIntentMsg,
 } from './ipc.js';
 
 describe('IPC type guards', () => {
@@ -122,10 +123,49 @@ describe('IPC type guards', () => {
     });
   });
 
+  describe('isAdvisoryFooterIntentMsg', () => {
+    it('returns true for a valid disable-project intent', () => {
+      expect(isAdvisoryFooterIntentMsg({
+        type: 'nexpath:advisory-footer-intent',
+        intent: 'disable-project',
+        projectRoot: '/proj',
+      })).toBe(true);
+    });
+
+    it('returns true for a valid open-settings intent', () => {
+      expect(isAdvisoryFooterIntentMsg({
+        type: 'nexpath:advisory-footer-intent',
+        intent: 'open-settings',
+        projectRoot: '/proj',
+      })).toBe(true);
+    });
+
+    it('returns false for an unknown intent value', () => {
+      expect(isAdvisoryFooterIntentMsg({
+        type: 'nexpath:advisory-footer-intent',
+        intent: 'nuke-everything',
+        projectRoot: '/proj',
+      })).toBe(false);
+    });
+
+    it('returns false when projectRoot is missing/non-string', () => {
+      expect(isAdvisoryFooterIntentMsg({
+        type: 'nexpath:advisory-footer-intent',
+        intent: 'disable-project',
+      })).toBe(false);
+    });
+
+    it('returns false for wrong type / null', () => {
+      expect(isAdvisoryFooterIntentMsg({ type: 'nexpath:prompt-submit' })).toBe(false);
+      expect(isAdvisoryFooterIntentMsg(null)).toBe(false);
+    });
+  });
+
   it('all guards return false for empty object', () => {
     const guards = [
       isPromptSubmitMsg, isResponseStopMsg, isShowAdvisoryMsg,
       isPanelEventMsg, isPromptCapturedMsg, isResponseStoppedMsg,
+      isAdvisoryFooterIntentMsg,
     ];
     for (const guard of guards) {
       expect(guard({})).toBe(false);

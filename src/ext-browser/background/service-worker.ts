@@ -4,6 +4,8 @@ import { SessionStateManager } from '../../core/session-state.js';
 import { shouldFireStage2, runStage2 } from '../../core/stage2.js';
 import { generatePinchLabel } from '../../core/decision/pinch.js';
 import { resolveDecisionContent } from '../../decision-session/options.js';
+import { composeWhyHelpBlock } from '../../decision-session/why-help-compose.js';
+import { profileToRegister } from '../../decision-session/register.js';
 import { IdbStorageAdapter } from '../adapters/storage-idb.js';
 import { makeMemoryStoragePort } from '../adapters/memory-storage.js';
 import { FetchLLMAdapter } from '../adapters/llm-fetch.js';
@@ -16,6 +18,7 @@ import { ContentScriptUIAdapter } from '../content/panel-adapter.js';
 import {
   isPromptSubmitMsg,
   isResponseStopMsg,
+  isAdvisoryFooterIntentMsg,
 } from '../content/ipc.js';
 import { resolveFrequencyConfig, type AdvisoryFrequencyLevel } from '../../config/GlobalConfig.js';
 import type { AdvisoryPayload } from '../../core/ports/ui.port.js';
@@ -122,6 +125,18 @@ browser.runtime.onMessage.addListener(
       return true;
     }
 
+    if (isAdvisoryFooterIntentMsg(msg)) {
+      // CLI-parity panel footer shortcuts — see AdvisoryFooterIntentMsg.
+      log.debug('advisory_footer_intent', { intent: msg.intent, projectRoot: msg.projectRoot });
+      handleAdvisoryFooterIntent(msg.intent, msg.projectRoot)
+        .then(() => sendResponse({ ok: true }))
+        .catch((err: unknown) => {
+          log.warn('advisory_footer_intent_error', { error: String(err) });
+          sendResponse({ ok: false });
+        });
+      return true; // keep channel open for async response
+    }
+
     sendResponse(undefined);
     return true;
   },
@@ -145,6 +160,14 @@ function lastPromptKeyFor(projectRoot: string): string {
   return `nexpath_last_prompt::${projectRoot}`;
 }
 
+/**
+ * Per-project advisory-frequency key — matches the CLI's Ctrl+X opt-out key format
+ * (`advisory_frequency:<projectRoot>`) so the two surfaces read/write the same slot.
+ */
+function projectFreqKeyFor(projectRoot: string): string {
+  return `advisory_frequency:${projectRoot}`;
+}
+
 async function handlePromptSubmit(
   promptText: string,
   projectRoot: string,
@@ -154,13 +177,19 @@ async function handlePromptSubmit(
   const now = clock.now();
 
   // ── Step 1: Load persisted session state + config ───────────────────────────
-  const [loadedState, lang, apiKey, freqRaw, roleRaw, lastPromptRaw] = await Promise.all([
+  const [loadedState, lang, apiKey, freqRaw, roleRaw, lastPromptRaw, projectFreqRaw] = await Promise.all([
     idb.loadSessionState(projectRoot),
     idb.getProjectDetectedLanguage(projectRoot),
     keyStore.getKey('openai_api_key'),
     keyStore.getKey('advisory_frequency'),
     keyStore.getKey('role'),
     keyStore.getKey(lastPromptKeyFor(projectRoot)),
+    // Per-project frequency override (CLI parity: the CLI's Ctrl+X writes
+    // `advisory_frequency:<projectRoot>=off`). Kept LAST so the earlier getKey call
+    // order (api-key, frequency, role) is unchanged. Absent for every project the
+    // user never disabled — then null, and resolution falls through to the global
+    // key + default exactly as before (no behaviour change).
+    keyStore.getKey(projectFreqKeyFor(projectRoot)),
   ]);
 
   // ── Step 1.2: Cross-page duplicate guard (see CROSS_PAGE_PROMPT_DEDUP_MS) ───
@@ -181,7 +210,9 @@ async function handlePromptSubmit(
   // step 1.5 exactly (same fallback default, same resolveFrequencyConfig call) so
   // the browser's advisory-firing gating is the same logic as the CLI's, just fed
   // from browser.storage.local instead of the sql.js config table.
-  const freq = (freqRaw ?? 'every_event') as AdvisoryFrequencyLevel;
+  // Per-project override wins over the global setting (CLI parity); both fall back
+  // to the same 'every_event' default when unset.
+  const freq = (projectFreqRaw ?? freqRaw ?? 'every_event') as AdvisoryFrequencyLevel;
   const freqConfig = resolveFrequencyConfig(freq);
   const configuredRole = roleRaw as UserRole | null;
 
@@ -408,15 +439,42 @@ async function handlePromptSubmit(
     state.detectedLanguage,
   ).catch(() => content.pinchFallback);
 
+  // CLI parity: send per-level option LISTS (each level may hold >1 option), the
+  // question line, and the composed why-help block — everything the CLI popup shows.
+  // Option ids stay `<level>-<index>` so the flat `options` view below (ids l1-0/
+  // l2-0/l3-0, the shipped panel's selectors) is an exact subset of `levels`.
+  const mapLevel = (entries: typeof content.L1, tag: 'L1' | 'L2' | 'L3') =>
+    entries.map((e, i) => ({ id: `${tag.toLowerCase()}-${i}`, level: tag, title: e.option, body: e.descBase }));
+
+  const levels = {
+    L1: mapLevel(content.L1, 'L1'),
+    L2: mapLevel(content.L2, 'L2'),
+    L3: mapLevel(content.L3, 'L3'),
+  };
+
+  // Why-help register: use the engine's own profileToRegister — with no browser
+  // profile (state.profile === null) it returns 'casual', the CLI's identical
+  // no-profile default (register.ts), so the block renders as the CLI would.
+  const whyHelp = composeWhyHelpBlock(
+    content.whyHelp,
+    profileToRegister(state.profile),
+    state.profile?.mood,
+    configuredRole,
+  );
+
   const payload: AdvisoryPayload = {
     schemaVersion: 1,
     advisoryId: globalThis.crypto.randomUUID(),
     pinchLabel,
     stage: state.currentStage,
+    question: content.question,
+    whyHelp,
+    levels,
+    // Flat first-of-each-level view — the shipped panel indexes this by level.
     options: [
-      ...(content.L1[0] ? [{ id: 'l1-0', level: 'L1' as const, title: content.L1[0].option, body: content.L1[0].descBase }] : []),
-      ...(content.L2[0] ? [{ id: 'l2-0', level: 'L2' as const, title: content.L2[0].option, body: content.L2[0].descBase }] : []),
-      ...(content.L3[0] ? [{ id: 'l3-0', level: 'L3' as const, title: content.L3[0].option, body: content.L3[0].descBase }] : []),
+      ...(levels.L1[0] ? [levels.L1[0]] : []),
+      ...(levels.L2[0] ? [levels.L2[0]] : []),
+      ...(levels.L3[0] ? [levels.L3[0]] : []),
     ],
     meta: {
       agent,
@@ -458,4 +516,23 @@ async function handlePromptSubmit(
   } catch (err) {
     log.warn('show_advisory_error', { error: String(err) });
   }
+}
+
+/**
+ * CLI-parity panel footer shortcuts (see AdvisoryFooterIntentMsg).
+ *   - 'disable-project' → write `advisory_frequency:<projectRoot>=off` (the exact
+ *     slot the CLI's Ctrl+X writes; handlePromptSubmit reads it with precedence).
+ *   - 'open-settings'   → open the extension options page (CLI Ctrl+T equivalent).
+ */
+async function handleAdvisoryFooterIntent(
+  intent: 'disable-project' | 'open-settings',
+  projectRoot: string,
+): Promise<void> {
+  if (intent === 'disable-project') {
+    await keyStore.setKey(projectFreqKeyFor(projectRoot), 'off');
+    log.debug('advisory_disabled_for_project', { projectRoot });
+    return;
+  }
+  // open-settings
+  await browser.runtime.openOptionsPage();
 }

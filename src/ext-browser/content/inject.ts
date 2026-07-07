@@ -68,8 +68,24 @@ let panelHost: HTMLDivElement | null = null;
 let currentPayload: UiAdvisoryPayload | null = null;
 
 function findOptionTitle(optionId: string): string {
-  const opt = currentPayload?.options.find((o) => o.id === optionId);
-  return opt?.title ?? '';
+  if (!currentPayload) return '';
+  // Flat view first (shipped panel's ids: l1-0/l2-0/l3-0)…
+  const inFlat = currentPayload.options.find((o) => o.id === optionId);
+  if (inFlat) return inFlat.title;
+  // …then the CLI-parity per-level lists (ids like l1-1 that the flat view omits).
+  const lv = currentPayload.levels;
+  const all = lv ? [...lv.L1, ...lv.L2, ...lv.L3] : [];
+  return all.find((o) => o.id === optionId)?.title ?? '';
+}
+
+/**
+ * CLI-parity footer shortcuts. Fire-and-forget to the SW via a window event that
+ * main-world-injector.ts forwards (it holds the runtime.sendMessage + projectRoot).
+ * Kept off the `nexpath:panel-event` round-trip so open-settings doesn't resolve
+ * (and thereby end) the in-flight advisory.
+ */
+function dispatchFooterIntent(intent: 'disable-project' | 'open-settings'): void {
+  window.dispatchEvent(new CustomEvent('nexpath:footer-intent', { detail: { intent } }));
 }
 
 async function copyToClipboard(text: string): Promise<void> {
@@ -126,6 +142,20 @@ function handlePanelEvent(event: UiPanelEvent): void {
       // Panel manages its own L1→L2→L3 level display; engine just notes it. Panel
       // stays open — no terminal report.
       console.log('[nexpath] advisory: show-simpler (level navigation)');
+      break;
+    }
+    case 'disable-project': {
+      // CLI Ctrl+X: disable this project (SW writes advisory_frequency:<root>=off),
+      // then close the advisory. Resolve the round-trip as a plain dismiss (nothing
+      // recorded) — the disable itself travels on the separate footer-intent channel.
+      dispatchFooterIntent('disable-project');
+      controller?.hide();
+      reportTerminal({ type: 'dismiss', advisoryId });
+      break;
+    }
+    case 'open-settings': {
+      // CLI Ctrl+T: open the options page. Panel STAYS open — non-terminal, no report.
+      dispatchFooterIntent('open-settings');
       break;
     }
   }

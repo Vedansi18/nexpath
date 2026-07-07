@@ -3,6 +3,34 @@
   "advisoryId": "adv-mock-absence-test-creation-0002",
   "pinchLabel": "Quick check.",
   "stage": "review_testing",
+  "question": "Before moving on — has what you just built been tested?",
+  "whyHelp": "Here is why this matters right now:\nUntested logic written mid-session is where regressions hide.\nOne test while the code is fresh is worth five written at the end.",
+  "levels": {
+    "L1": [
+      {
+        "level": "L1",
+        "id": "adv-mock-absence-test-creation-0002-L1",
+        "title": "Write a test for the last thing you built",
+        "body": "Pick the single most critical behaviour you implemented in the last few prompts and write one test for it — the happy path only. A test written now, while the logic is fresh, is worth five written at the end of the session once context has drifted."
+      }
+    ],
+    "L2": [
+      {
+        "level": "L2",
+        "id": "adv-mock-absence-test-creation-0002-L2",
+        "title": "Write one test now",
+        "body": "Write one test for the riskiest thing you just built — happy path is enough. Do it now while it's fresh."
+      }
+    ],
+    "L3": [
+      {
+        "level": "L3",
+        "id": "adv-mock-absence-test-creation-0002-L3",
+        "title": "One test, right now",
+        "body": "Write one test for what you just built. Just the happy path."
+      }
+    ]
+  },
   "options": [
     {
       "level": "L1",

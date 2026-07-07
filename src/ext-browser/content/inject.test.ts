@@ -40,16 +40,32 @@ function makeOption(level: 'L1' | 'L2' | 'L3', id: string, title: string) {
 }
 
 function makePayload(overrides: Partial<AdvisoryPayload> = {}): AdvisoryPayload {
+  const l1 = makeOption('L1', 'adv-1-L1', 'Run the tests now');
+  const l1b = makeOption('L1', 'adv-1-L1-b', 'Run a focused review');
+  const l2 = makeOption('L2', 'adv-1-L2', 'Quick check');
   return {
     schemaVersion: 1,
     advisoryId: 'adv-1',
     pinchLabel: 'Hold up.',
     stage: 'implementation',
-    options: [makeOption('L1', 'adv-1-L1', 'Run the tests now'), makeOption('L2', 'adv-1-L2', 'Quick check')],
+    question: 'Before shipping — has it been reviewed and tested?',
+    whyHelp: 'Here is why this matters right now.\nTwo minutes here saves a rollback later.',
+    // Per-level lists carry an EXTRA L1 option (adv-1-L1-b) that the flat `options`
+    // view omits — exercises findOptionTitle's fall-through into `levels`.
+    levels: { L1: [l1, l1b], L2: [l2], L3: [] },
+    // Flat view = first-of-each-level (shipped-panel shape). Unchanged ids so the
+    // existing event tests keep resolving through the flat path.
+    options: [l1, l2],
     meta: { agent: 'replit', frequency: 'optimum' },
     ...overrides,
   };
 }
+
+function lastFooterIntent(): { intent?: string } | null {
+  const call = footerIntentSpy.mock.calls.at(-1);
+  return call ? (call[0] as CustomEvent).detail : null;
+}
+let footerIntentSpy: ReturnType<typeof vi.fn>;
 
 function dispatchShowAdvisory(payload: AdvisoryPayload): void {
   window.dispatchEvent(new CustomEvent('nexpath:sw-message', {
@@ -86,10 +102,14 @@ describe('inject.ts (B5b — real panel integration)', () => {
     // Spy on the terminal round-trip (dispatched as 'nexpath:panel-event').
     terminalSpy = vi.fn();
     window.addEventListener('nexpath:panel-event', terminalSpy);
+    // Spy on the footer-intent channel (dispatched as 'nexpath:footer-intent').
+    footerIntentSpy = vi.fn();
+    window.addEventListener('nexpath:footer-intent', footerIntentSpy);
   });
 
   afterEach(() => {
     window.removeEventListener('nexpath:panel-event', terminalSpy);
+    window.removeEventListener('nexpath:footer-intent', footerIntentSpy);
   });
 
   it('ignores messages that are not ShowAdvisoryMsg', () => {
@@ -172,6 +192,32 @@ describe('inject.ts (B5b — real panel integration)', () => {
       dispatchShowAdvisory(makePayload());
       terminalSpy.mockClear();
       capturedOnEvent!({ type: 'show-simpler' });
+      expect(hideMock).not.toHaveBeenCalled();
+      expect(terminalSpy).not.toHaveBeenCalled();
+    });
+
+    it('select resolves an id that exists ONLY in levels (CLI-parity per-level list), not the flat options view', () => {
+      dispatchShowAdvisory(makePayload());
+      // adv-1-L1-b is the extra L1 option — present in levels.L1, absent from options.
+      capturedOnEvent!({ type: 'select', optionId: 'adv-1-L1-b', body: 'x' });
+      expect(injectPromptTextMock).toHaveBeenCalledWith('Run a focused review');
+    });
+
+    it("disable-project: fires footer-intent 'disable-project', closes panel, terminal 'dismiss'", () => {
+      dispatchShowAdvisory(makePayload());
+      terminalSpy.mockClear();
+      capturedOnEvent!({ type: 'disable-project' });
+      expect(lastFooterIntent()).toEqual({ intent: 'disable-project' });
+      expect(hideMock).toHaveBeenCalled();
+      // Round-trip resolved as a plain dismiss (nothing recorded engine-side).
+      expect(lastTerminalEvent()).toEqual({ type: 'dismiss', advisoryId: 'adv-1' });
+    });
+
+    it("open-settings: fires footer-intent 'open-settings', panel STAYS open (no hide, no terminal event)", () => {
+      dispatchShowAdvisory(makePayload());
+      terminalSpy.mockClear();
+      capturedOnEvent!({ type: 'open-settings' });
+      expect(lastFooterIntent()).toEqual({ intent: 'open-settings' });
       expect(hideMock).not.toHaveBeenCalled();
       expect(terminalSpy).not.toHaveBeenCalled();
     });

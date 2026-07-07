@@ -1,7 +1,7 @@
 import browser from 'webextension-polyfill';
 import { resolveAgentFromHostname, resolveProjectRootFromLocation } from './agents/agent-hosts.js';
 import { isPromptCapturedMsg, isResponseStoppedMsg, isShowAdvisoryMsg } from './ipc.js';
-import type { PromptSubmitMsg, ResponseStopMsg } from './ipc.js';
+import type { PromptSubmitMsg, ResponseStopMsg, AdvisoryFooterIntentMsg } from './ipc.js';
 import type { PanelEvent } from '../../core/ports/ui.port.js';
 
 /**
@@ -162,7 +162,7 @@ function resumePendingCaptureFromStorage(): void {
   }
 }
 
-function sendToServiceWorker(msg: PromptSubmitMsg | ResponseStopMsg): void {
+function sendToServiceWorker(msg: PromptSubmitMsg | ResponseStopMsg | AdvisoryFooterIntentMsg): void {
   browser.runtime.sendMessage(msg).catch((firstErr: unknown) => {
     console.warn('[nexpath] sendMessage failed, retrying once:', msg.type, String(firstErr));
     setTimeout(() => {
@@ -242,6 +242,26 @@ function setupListeners(): void {
       };
       sendToServiceWorker(sw);
     }
+  });
+
+  // ── CLI-parity panel footer shortcuts → service worker ───────────────────────
+  //
+  // inject.ts (which has no runtime.sendMessage of its own) dispatches this window
+  // event for the "Disable for this project" / "Adjust frequency or role" links;
+  // we attach the project context and forward it fire-and-forget. Skipped when the
+  // page has no project context (same rule as capture) — nothing to disable.
+  window.addEventListener('nexpath:footer-intent', (ev) => {
+    const detail = (ev as CustomEvent<{ intent?: unknown }>).detail;
+    const intent = detail?.intent;
+    if (intent !== 'disable-project' && intent !== 'open-settings') return;
+    const projectRoot = resolveProjectRoot();
+    if (projectRoot === null) return;
+    const sw: AdvisoryFooterIntentMsg = {
+      type: 'nexpath:advisory-footer-intent',
+      intent,
+      projectRoot,
+    };
+    sendToServiceWorker(sw);
   });
 
   // ── Service worker → content → inject-back ───────────────────────────────────

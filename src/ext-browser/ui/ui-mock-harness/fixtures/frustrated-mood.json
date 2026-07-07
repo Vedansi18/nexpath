@@ -3,6 +3,34 @@
   "advisoryId": "adv-mock-frustrated-mood-0006",
   "pinchLabel": "Breathe.",
   "stage": "implementation",
+  "question": "Stuck for a bit — want to step back and re-frame the approach?",
+  "whyHelp": "Here is why this matters right now:\nGrinding on the same failing path rarely breaks the loop.\nA quick reset — state the goal, list what you have tried — often surfaces the missing piece.",
+  "levels": {
+    "L1": [
+      {
+        "level": "L1",
+        "id": "adv-mock-frustrated-mood-0006-L1",
+        "title": "Describe the problem in one sentence, without code",
+        "body": "Step back for a second. Describe the problem in plain English, without any code — what is it actually doing wrong? Often just writing that sentence reveals the fix. If you're stuck, note the last point where things worked and what's changed since."
+      }
+    ],
+    "L2": [
+      {
+        "level": "L2",
+        "id": "adv-mock-frustrated-mood-0006-L2",
+        "title": "Describe the bug in plain English",
+        "body": "Describe the bug in plain English, no code. Often the sentence itself reveals the fix. What was the last point it worked?"
+      }
+    ],
+    "L3": [
+      {
+        "level": "L3",
+        "id": "adv-mock-frustrated-mood-0006-L3",
+        "title": "What's actually going wrong?",
+        "body": "What's actually going wrong, in plain words? Often that's the fix."
+      }
+    ]
+  },
   "options": [
     {
       "level": "L1",

@@ -3,6 +3,34 @@
   "advisoryId": "adv-mock-absence-spec-before-code-0003",
   "pinchLabel": "Worth a pause.",
   "stage": "implementation",
+  "question": "Before building this out — is there a written spec for it?",
+  "whyHelp": "Here is why this matters right now:\nJumping straight to code on an unscoped feature is the most common source of rework — you build the wrong thing well.\nA few lines of spec now saves a rebuild later.",
+  "levels": {
+    "L1": [
+      {
+        "level": "L1",
+        "id": "adv-mock-absence-spec-before-code-0003-L1",
+        "title": "Write what \"done\" looks like before continuing",
+        "body": "Before continuing, write 3-5 bullet points describing what this feature does from the user's perspective — inputs, outputs, and edge cases. Complete the sentence \"this feature is done when...\" specifically enough that you could verify it with a single test. Vague done-criteria compound into scope creep."
+      }
+    ],
+    "L2": [
+      {
+        "level": "L2",
+        "id": "adv-mock-absence-spec-before-code-0003-L2",
+        "title": "Define done before continuing",
+        "body": "Write a few bullets on what this feature does — inputs, outputs, edge cases — and finish \"this is done when...\" before continuing."
+      }
+    ],
+    "L3": [
+      {
+        "level": "L3",
+        "id": "adv-mock-absence-spec-before-code-0003-L3",
+        "title": "What does done look like?",
+        "body": "What does \"done\" look like here? Write it down first."
+      }
+    ]
+  },
   "options": [
     {
       "level": "L1",
