@@ -35,3 +35,12 @@ export const NO_VERSION_CONTROL_BEGINNER_OVERRIDE: RegisterOverride = structural
   4: form("Set up version control with a steady habit: save small versions along the way, skip the throwaway files, and connect an online copy so the versions are safe if the machine is lost.", "Beyond saving locally: a habit of small versions and an online copy."),
   5: form("Write a short note on how this project saves versions: how to save a new version, how they're named, and which files to skip — so the habit is easy to repeat.", "A simple note on how the project saves its versions."),
 });
+
+/** NO_BACKUP_SAFETY (beginner) — keyword "backup". Plain "keep a spare copy and check it works". */
+export const NO_BACKUP_SAFETY_BEGINNER_OVERRIDE: RegisterOverride = structural({
+  1: form("Make a backup of this project's important stuff, so there's a spare copy if the original is ever lost.", "The lightest step: a backup copy exists."),
+  2: form("Make a backup and set it to happen automatically on a regular basis, so the spare copy stays up to date.", "A light pass: a backup that runs on its own."),
+  3: form("Make a backup that runs regularly, then test it by bringing the copy back into a separate spot — a backup nobody has tried to restore might not actually work.", "The backup hasn't been tested by restoring it yet."),
+  4: form("Set up an automatic backup that keeps a few past copies, and every so often practice bringing a copy back into a spare spot to make sure the data really returns.", "Beyond one backup: a few kept copies and a practiced restore."),
+  5: form("Write a short note on how this project's backup works: what's saved, how often, where it's kept, and the steps to bring it back into a spare spot — so recovery is easy to repeat.", "A simple note on how the backup is saved and brought back."),
+});

@@ -16,6 +16,7 @@ import type { ContentTemplateRecord, LevelForm, ParamAxisTag } from '../content-
 import {
   SECRET_IN_PROMPT_BEGINNER_OVERRIDE,
   NO_VERSION_CONTROL_BEGINNER_OVERRIDE,
+  NO_BACKUP_SAFETY_BEGINNER_OVERRIDE,
 } from './class-security-safety-beginner.js';
 
 function form(option: string, whyDesc: string): LevelForm {
@@ -75,8 +76,31 @@ export const ABSENCE_NO_VERSION_CONTROL_RECORD: ContentTemplateRecord = {
   },
 };
 
-/** All security/safety records (grows as A5–A7 add NO_BACKUP_SAFETY / NO_SEPARATE_ENVS / NO_AUTOMATED_SECURITY_SCANNING). */
+/**
+ * ABSENCE_NO_BACKUP_SAFETY — the project has no backup / safety net, keyword "backup".
+ * MILD data-sensitivity: the advice is to STAND UP backups and verify them, which is
+ * non-destructive. Per the locked design, an option proposing a restore/OVERWRITE of existing
+ * data would be destructive-adjacent and would carry the L2 safeguard — so the ladder here
+ * deliberately frames every restore as a check into a SEPARATE scratch copy (never over live
+ * data). No option overwrites existing data, so no option is an L2 trigger and the record is
+ * unflagged (verified by the A5 no-destructive-restore test).
+ */
+export const ABSENCE_NO_BACKUP_SAFETY_RECORD: ContentTemplateRecord = {
+  signalType: 'ABSENCE_NO_BACKUP_SAFETY', source: 'shipped', schemaVersion: 1, slots: [],
+  registerOverrides: { beginner: NO_BACKUP_SAFETY_BEGINNER_OVERRIDE },
+  paramAxes: SECURITY_SAFETY_PARAM_AXES,
+  levelForms: {
+    1: form("Set up a backup for this project's important data, so a copy exists if the original is ever lost.", "The lightest step: a backup of the important data exists."),
+    2: form("Set up a backup and schedule it to run on its own regularly, so the saved copy stays current instead of going stale.", "A light pass: a backup that runs on a schedule."),
+    3: form("Set up a scheduled backup and prove it works by restoring it into a separate scratch copy — a backup that has never been restored can't be trusted.", "The backup hasn't been restore-tested into a scratch copy yet."),
+    4: form("Set up an automated backup with sensible retention, and run a periodic restore drill into a scratch copy to confirm the data comes back intact and the backup is complete.", "Beyond a single backup: retention plus a rehearsed restore into a scratch copy."),
+    5: form("Write a short backup-and-recovery note for the project: what is backed up, how often, where the copies live, and the exact restore steps into a scratch copy — kept with the project so recovery is repeatable.", "A durable backup-and-recovery note of what's saved and how to restore it."),
+  },
+};
+
+/** All security/safety records (grows as A6–A7 add NO_SEPARATE_ENVS / NO_AUTOMATED_SECURITY_SCANNING). */
 export const CLASS_SECURITY_SAFETY_RECORDS: readonly ContentTemplateRecord[] = [
   ABSENCE_SECRET_IN_PROMPT_RECORD,
   ABSENCE_NO_VERSION_CONTROL_RECORD,
+  ABSENCE_NO_BACKUP_SAFETY_RECORD,
 ];
