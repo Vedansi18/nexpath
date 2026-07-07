@@ -76,6 +76,7 @@ function newSession(projectRoot: string, now: number): SessionState {
     lastAdvisoryPromptIndex:      -1,
     advisoryCount:                0,
     consecutiveAcceptanceStreak:  0,
+    consecutiveFrustratedPrompts: 0,
   };
 }
 
@@ -248,6 +249,15 @@ export class SessionStateManager {
       s.consecutiveAcceptanceStreak = 0;
     } else {
       s.consecutiveAcceptanceStreak = (s.consecutiveAcceptanceStreak ?? 0) + 1;
+    }
+
+    // ── Consecutive frustrated-mood streak (frustration-spiral detector input) ──
+    // The mood is LLM-classified onto s.profile (setProfile, before processPrompt);
+    // this rolling count is what the ABSENCE_FRUSTRATION_SPIRAL detector reads.
+    if (s.profile?.mood === 'frustrated') {
+      s.consecutiveFrustratedPrompts = (s.consecutiveFrustratedPrompts ?? 0) + 1;
+    } else {
+      s.consecutiveFrustratedPrompts = 0;
     }
 
     // ── Advance counter ───────────────────────────────────────────────────────

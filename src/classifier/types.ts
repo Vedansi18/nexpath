@@ -111,6 +111,8 @@ export interface SessionState {
    * Used by the decision_fatigue_pattern signal detector.
    */
   consecutiveAcceptanceStreak: number;
+  /** Consecutive processed prompts while the classified mood is 'frustrated' (frustration-spiral). Reset on any non-frustrated prompt. */
+  consecutiveFrustratedPrompts: number;
 }
 
 // ── User nature / mood / depth (item 9) ───────────────────────────────────────
