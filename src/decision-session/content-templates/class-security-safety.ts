@@ -13,7 +13,10 @@
  */
 
 import type { ContentTemplateRecord, LevelForm, ParamAxisTag } from '../content-template-schema.js';
-import { SECRET_IN_PROMPT_BEGINNER_OVERRIDE } from './class-security-safety-beginner.js';
+import {
+  SECRET_IN_PROMPT_BEGINNER_OVERRIDE,
+  NO_VERSION_CONTROL_BEGINNER_OVERRIDE,
+} from './class-security-safety-beginner.js';
 
 function form(option: string, whyDesc: string): LevelForm {
   return { kind: 'slot-variant', cell: { option, whyDesc } };
@@ -50,7 +53,30 @@ export const ABSENCE_SECRET_IN_PROMPT_RECORD: ContentTemplateRecord = {
   },
 };
 
-/** All security/safety records (grows as A4–A8 add NO_VERSION_CONTROL / NO_BACKUP_SAFETY / NO_SEPARATE_ENVS / NO_AUTOMATED_SECURITY_SCANNING). */
+/**
+ * ABSENCE_NO_VERSION_CONTROL — the project is not under version control, keyword "version".
+ * MILD sensitivity: establishing version control (initialize, commit, ignore-list, remote,
+ * workflow note) is non-destructive, so the record carries NO record-level safeguard — the
+ * base advice never proposes a history-rewrite or force-push. Per the locked design, the L2
+ * safeguard would attach ONLY to an option that touched history-rewrite/force-push; the ladder
+ * here deliberately contains none, so no option is an L2 trigger and the record is unflagged
+ * (verified by the A4 no-destructive-action test).
+ */
+export const ABSENCE_NO_VERSION_CONTROL_RECORD: ContentTemplateRecord = {
+  signalType: 'ABSENCE_NO_VERSION_CONTROL', source: 'shipped', schemaVersion: 1, slots: [],
+  registerOverrides: { beginner: NO_VERSION_CONTROL_BEGINNER_OVERRIDE },
+  paramAxes: SECURITY_SAFETY_PARAM_AXES,
+  levelForms: {
+    1: form("Set up version control for this project — initialize a git repository so the work is tracked from here on.", "The lightest step: the project put under version control."),
+    2: form("Put the project under version control and make the first commit, so a known-good version is saved and the work can be brought back to it.", "A light pass: version control started and the first version committed."),
+    3: form("Put the project under version control properly: initialize the repository, make a first commit, and add a .gitignore so generated files and local-only config stay out of the tracked version.", "The project isn't under version control with a clean ignore list yet."),
+    4: form("Put the project under version control with a working rhythm: initialize the repo, commit in small logical steps, keep a .gitignore current, and connect a remote so every version lives off this machine too.", "Beyond a local repo: a commit rhythm and an off-machine copy of every version."),
+    5: form("Write a short version-control note for the project: how to commit, the branch and commit-message convention, and what stays out of the tracked version — kept with the project so the rhythm is repeatable.", "A durable version-control note of the commit rhythm and conventions."),
+  },
+};
+
+/** All security/safety records (grows as A5–A7 add NO_BACKUP_SAFETY / NO_SEPARATE_ENVS / NO_AUTOMATED_SECURITY_SCANNING). */
 export const CLASS_SECURITY_SAFETY_RECORDS: readonly ContentTemplateRecord[] = [
   ABSENCE_SECRET_IN_PROMPT_RECORD,
+  ABSENCE_NO_VERSION_CONTROL_RECORD,
 ];

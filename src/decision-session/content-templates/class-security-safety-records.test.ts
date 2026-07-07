@@ -4,7 +4,9 @@ import {
   reviewRecord, checkVoice, checkEscalation, checkL2Safeguard, findVoiceViolations, findJargonViolations,
 } from '../content-authoring-rules.js';
 import { composeWhyDesc } from '../content-template-engine.js';
-import { ABSENCE_SECRET_IN_PROMPT_RECORD, SECURITY_SAFETY_PARAM_AXES } from './class-security-safety.js';
+import {
+  ABSENCE_SECRET_IN_PROMPT_RECORD, ABSENCE_NO_VERSION_CONTROL_RECORD, SECURITY_SAFETY_PARAM_AXES,
+} from './class-security-safety.js';
 import { ABSENCE_ENV_AND_SECRETS_RECORD } from './class4-records.js';
 
 // A3 — ABSENCE_SECRET_IN_PROMPT: a NEW security/safety signal (no legacy shipped headline),
@@ -96,5 +98,74 @@ describe('A3 — differentiation vs ENV_AND_SECRETS (A2 dedup constraint)', () =
     const a = optionsOf(ABSENCE_SECRET_IN_PROMPT_RECORD.levelForms).map((c) => c.option);
     const b = optionsOf(ABSENCE_ENV_AND_SECRETS_RECORD.levelForms).map((c) => c.option);
     for (const opt of a) expect(b).not.toContain(opt);
+  });
+});
+
+// A4 — ABSENCE_NO_VERSION_CONTROL: a NEW security/safety signal, keyword "version". MILD
+// sensitivity: establishing version control is non-destructive, so the record carries NO
+// record-level safeguard. The A4-specific gate proves that decision is sound — no option
+// proposes a history-rewrite / force-push, so no option is an L2 trigger.
+
+describe('A4 — ABSENCE_NO_VERSION_CONTROL (new signal, mild — no record-level safeguard)', () => {
+  const r = ABSENCE_NO_VERSION_CONTROL_RECORD;
+  const kw4 = 'version';
+
+  it('passes the build gate (schema-valid + level-1 floor)', () => {
+    expect(runBuildGate([r]).ok).toBe(true);
+  });
+  it('authors all 5 maturity columns', () => {
+    expect(Object.keys(r.levelForms).map(Number).sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5]);
+  });
+  it('declares the grounded param axes; no spine', () => {
+    expect(r.paramAxes).toBeDefined();
+    expect(r.paramAxes).toEqual(SECURITY_SAFETY_PARAM_AXES);
+    expect(r.spine).toBeUndefined();
+  });
+  it('is de-jargon clean in every column + headline-only + full coverage', () => {
+    const review = reviewRecord(r, kw4);
+    expect(review.jargonByLevel).toEqual({});
+    expect(review.headlineOnly.ok).toBe(true);
+    expect(review.coverage.ok).toBe(true);
+  });
+  it('retains the "version" keyword in every option AND why-desc', () => {
+    const res = checkTopicKeyword(r, kw4);
+    expect(res.missingInOption).toEqual([]);
+    expect(res.missingInWhyDesc).toEqual([]);
+  });
+  it('practice richness is monotonic', () => {
+    expect(checkEscalation([1, 2, 3, 4, 5]).ok).toBe(true);
+  });
+  it('is voice-clean (option = the user\'s message TO the agent)', () => {
+    expect(checkVoice(r).ok).toBe(true);
+  });
+  it('fits the copy-paste budget in every column, col-1 ≤ col-5', () => {
+    expect(checkOptionLengthBudget(r).overLevels).toEqual([]);
+    expect(r.levelForms[1]!.cell.option.length).toBeLessThanOrEqual(r.levelForms[5]!.cell.option.length);
+  });
+  it('the heaviest column yields a written artifact', () => {
+    expect(r.levelForms[5]!.cell.option.toLowerCase()).toMatch(/write|note/);
+  });
+  it('stored cells are bare core lines — no {R...} / {{...}} runtime grammar', () => {
+    const PLACEHOLDER = /\{[R{]/;
+    for (const c of optionsOf(r.levelForms)) {
+      expect(c.option).not.toMatch(PLACEHOLDER);
+      expect(c.whyDesc).not.toMatch(PLACEHOLDER);
+    }
+  });
+  it('carries NO record-level safeguard, and no base option proposes a destructive git action (mild — A1 lock)', () => {
+    // The record must NOT be flagged: base version-control advice is non-destructive.
+    expect(r.l2SafeguardRequired).toBeFalsy();
+    expect(r.l2SafeguardLine).toBeUndefined();
+    // The safeguard gate passes because NO option is an L2 trigger (nothing to guard).
+    expect(checkL2Safeguard(r).ok).toBe(true);
+    expect(checkL2Safeguard(r).unguardedLevels).toEqual([]);
+    // Belt-and-suspenders: no option contains history-rewrite / force-push language — this is
+    // what WOULD demand a safeguard per the A1 lock. Also catches the rebase/reset/filter-branch
+    // terms that detectL2TriggersInText does not model, so the "no safeguard" stays provably sound.
+    const DESTRUCTIVE_GIT = /force[- ]?push|--force|\brebase\b|reset\s+--hard|rewrite\s+history|filter-branch/i;
+    for (const c of optionsOf(r.levelForms)) {
+      expect(c.option).not.toMatch(DESTRUCTIVE_GIT);
+      expect(c.whyDesc).not.toMatch(DESTRUCTIVE_GIT);
+    }
   });
 });

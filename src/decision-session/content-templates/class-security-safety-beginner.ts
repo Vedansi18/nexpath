@@ -26,3 +26,12 @@ export const SECRET_IN_PROMPT_BEGINNER_OVERRIDE: RegisterOverride = structural({
   4: form("Replace the pasted secret with a new one, then find every place the old secret might still be — the chat, saved files, past commits — and clear it, so the leaked secret is gone everywhere.", "Beyond replacing it: the leaked secret cleared from every place it might still be."),
   5: form("Write a short note about the leaked secret: what it was for, that it was replaced, where it was cleared from, and one change that stops a secret being pasted again.", "A durable note of the leaked secret, its replacement, and the fix."),
 });
+
+/** NO_VERSION_CONTROL (beginner) — keyword "version". Plain "start saving versions of the work". */
+export const NO_VERSION_CONTROL_BEGINNER_OVERRIDE: RegisterOverride = structural({
+  1: form("Turn on version control for this project so the work is saved step by step — start by setting up a git project.", "The lightest step: the project starts saving versions."),
+  2: form("Set up version control and save the first version, so there's always a working copy to go back to.", "A light pass: version control on and the first version saved."),
+  3: form("Set up version control for the project: start the git project, save the first version, and mark which files to skip (like generated files) so only the real work is versioned.", "The project isn't saving clean versions yet."),
+  4: form("Set up version control with a steady habit: save small versions along the way, skip the throwaway files, and connect an online copy so the versions are safe if the machine is lost.", "Beyond saving locally: a habit of small versions and an online copy."),
+  5: form("Write a short note on how this project saves versions: how to save a new version, how they're named, and which files to skip — so the habit is easy to repeat.", "A simple note on how the project saves its versions."),
+});
