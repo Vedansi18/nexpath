@@ -60,8 +60,16 @@ describe('A3 — ABSENCE_SECRET_IN_PROMPT (new signal, no frozen col-3)', () => 
 
 describe('A3 — SECRET_IN_PROMPT beginner override', () => {
   const cells = optionsOf(SECRET_IN_PROMPT_BEGINNER_OVERRIDE.levelForms);
-  it('retains "secret" in every beginner option', () => {
-    for (const c of cells) expect(c.option.toLowerCase()).toContain('secret');
+  it('authors all 5 maturity columns (parity with the base record)', () => {
+    expect(
+      Object.keys(SECRET_IN_PROMPT_BEGINNER_OVERRIDE.levelForms).map(Number).sort((a, b) => a - b),
+    ).toEqual([1, 2, 3, 4, 5]);
+  });
+  it('retains "secret" in every beginner option AND why-desc', () => {
+    for (const c of cells) {
+      expect(c.option.toLowerCase()).toContain('secret');
+      expect(c.whyDesc.toLowerCase()).toContain('secret');
+    }
   });
   it('is voice-clean + de-jargon clean (both channels)', () => {
     for (const c of cells) {
@@ -69,6 +77,13 @@ describe('A3 — SECRET_IN_PROMPT beginner override', () => {
       expect(findVoiceViolations(c.whyDesc)).toEqual([]);
       expect(findJargonViolations(c.option)).toEqual([]);
       expect(findJargonViolations(c.whyDesc)).toEqual([]);
+    }
+  });
+  it('never contains a literal secret token (no-echo guard on the beginner cells too)', () => {
+    const SECRET_RE = /\b(sk-[A-Za-z0-9]{16,}|AKIA[0-9A-Z]{12,}|ghp_[A-Za-z0-9]{20,})\b|(api[_-]?key|password|token)\s*[:=]\s*\S{8,}/i;
+    for (const c of cells) {
+      expect(c.option).not.toMatch(SECRET_RE);
+      expect(c.whyDesc).not.toMatch(SECRET_RE);
     }
   });
 });
