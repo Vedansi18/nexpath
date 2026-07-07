@@ -11,11 +11,6 @@ vi.mock('../../config/ApiKeyResolver.js', () => ({
   removeApiKey:    vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock('../../telemetry/lifecycle-send.js', () => ({
-  sendInstalled:     vi.fn().mockResolvedValue(true),
-  sendAdvisoryFired: vi.fn().mockResolvedValue(true),
-}));
-
 import {
   installAction,
   resolveAgentPaths,
@@ -25,7 +20,6 @@ import {
 import * as resolver from '../../config/ApiKeyResolver.js';
 import { openStore, closeStore } from '../../store/db.js';
 import { getConfig, isConfigSet, setConfig } from '../../store/config.js';
-import { sendInstalled } from '../../telemetry/lifecycle-send.js';   // mocked above
 
 function tmpDirAgents(): { dir: string; cleanup: () => void } {
   const dir = join(tmpdir(), `nexpath-install3-${randomUUID()}`);
@@ -567,27 +561,6 @@ describe('install — install timestamp', () => {
       const second = getConfig(s.db, 'installed_at');
       closeStore(s);
       expect(second).toBe(first);
-    } finally { cleanup(); }
-  });
-
-  it('emits the install event on the first install only (not on re-run)', async () => {
-    const { dir, cleanup } = tmpDirAgents();
-    const dbPath = join(dir, 'store.db');
-    vi.spyOn(console, 'log').mockImplementation(() => {});
-    vi.mocked(sendInstalled).mockClear();
-    try {
-      const paths = resolveAgentPaths(dir, dir, dir);
-      const deps = {
-        paths, isWin: false, execFn: () => {}, skipClipboardCheck: true,
-        freqPromptFn: noopFreqPrompt, rolePromptFn: noopRolePrompt,
-        confirmFn: async () => true, promptFn: makePrompts(), dbPath,
-      };
-
-      await installAction({}, deps);
-      expect(sendInstalled).toHaveBeenCalledTimes(1);   // first install → event
-
-      await installAction({}, deps);
-      expect(sendInstalled).toHaveBeenCalledTimes(1);   // re-run → no second event
     } finally { cleanup(); }
   });
 });

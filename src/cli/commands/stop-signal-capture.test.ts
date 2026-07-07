@@ -13,11 +13,6 @@ vi.mock('../../decision-session/OptionGenerator.js', () => ({
   generateOptionList: vi.fn().mockResolvedValue(null),
 }));
 
-vi.mock('../../telemetry/lifecycle-send.js', () => ({
-  sendAdvisoryFired: vi.fn().mockResolvedValue(true),
-  sendInstalled:     vi.fn().mockResolvedValue(true),
-}));
-
 import { openStore, closeStore } from '../../store/db.js';
 import type { Store } from '../../store/db.js';
 import { runStop } from './stop.js';
@@ -31,7 +26,6 @@ import * as TtySelectFnModule from '../../decision-session/TtySelectFn.js';
 import { setConfig } from '../../store/config.js';
 import { readSignals } from '../../store/feedback-signals.js';
 import { readCadence } from '../../store/feedback-cadence.js';
-import { sendAdvisoryFired } from '../../telemetry/lifecycle-send.js';   // mocked above
 
 const CWD = '/test/project';
 
@@ -143,28 +137,5 @@ describe('advisory-fire and option-select recording', () => {
   it('records no signals when there is no pending advisory', async () => {
     await runStop(makePayload(), store);
     expect(readSignals(store, CWD)).toEqual({ advisoryFireTs: [], optionSelectTs: [] });
-  });
-});
-
-describe('advisory_fired lifecycle event', () => {
-  it('emits advisory_fired when an advisory is shown', async () => {
-    vi.mocked(sendAdvisoryFired).mockClear();
-    insertAdvisory(store);
-    await runStop(makePayload(), store, mockSelect(SKIP_NOW));
-    expect(sendAdvisoryFired).toHaveBeenCalledTimes(1);
-  });
-
-  it('does not emit advisory_fired when there is no pending advisory', async () => {
-    vi.mocked(sendAdvisoryFired).mockClear();
-    await runStop(makePayload(), store);
-    expect(sendAdvisoryFired).not.toHaveBeenCalled();
-  });
-
-  it('does not emit advisory_fired when the frequency gate blocks (not shown)', async () => {
-    vi.mocked(sendAdvisoryFired).mockClear();
-    setConfig(store, 'advisory_frequency', 'off');
-    insertAdvisory(store);
-    await runStop(makePayload(), store, mockSelect(SKIP_NOW));
-    expect(sendAdvisoryFired).not.toHaveBeenCalled();
   });
 });

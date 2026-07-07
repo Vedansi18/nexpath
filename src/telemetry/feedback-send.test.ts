@@ -65,6 +65,7 @@ describe('sendFeedback', () => {
     expect(typeof env.properties.installed_at).toBe('number');
     expect(env.properties.advisory_fire_ts).toEqual([100, 200]);
     expect(env.properties.option_select_ts).toEqual([150]);
+    expect(env.properties.feedback_at).toBe(9_000);
     expect(env.timestamp).toBe(new Date(9_000).toISOString());
   });
 

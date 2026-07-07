@@ -60,6 +60,7 @@ export async function sendFeedback(
         installed_at:     installedAt,
         advisory_fire_ts: advisoryFireTs,
         option_select_ts: optionSelectTs,
+        feedback_at:      now,
       },
     };
 

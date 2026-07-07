@@ -5,11 +5,6 @@ vi.mock('../../telemetry/index.js', () => ({
   TELEMETRY_PATH: '/mock/telemetry.jsonl',
 }));
 
-vi.mock('../../telemetry/lifecycle-send.js', () => ({
-  sendAdvisoryFired: vi.fn().mockResolvedValue(true),
-  sendInstalled:     vi.fn().mockResolvedValue(true),
-}));
-
 vi.mock('../../telemetry/recent-prompts.js', () => ({
   recentPromptMetadata: vi.fn().mockReturnValue([]),
 }));
