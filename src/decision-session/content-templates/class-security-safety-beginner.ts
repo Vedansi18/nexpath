@@ -62,3 +62,17 @@ export const NO_SEPARATE_ENVS_BEGINNER_OVERRIDE: RegisterOverride = structural({
   4: form("Set up the project's environments so a change moves along a path — build it, test it, then let it reach the live environment — with each kept separate and a change only moving forward once it holds up.", "Beyond a test step: separate environments with a path from build to live."),
   5: form("Write a short note on this project's environments: what the build, test, and live ones are each for, how a change moves between them, and what keeps them separate.", "A simple note on the separate environments and how changes move."),
 });
+
+/**
+ * NO_AUTOMATED_SECURITY_SCANNING (beginner) — keyword "scan". Plain "have something automatically
+ * check the outside code for known problems". Fully de-jargoned (no SAST/CVE/CI). Record-level
+ * sensitive (inherits l2SafeguardRequired + l2SafeguardLine — the override only swaps levelForms),
+ * so the engine appends the confirm-seek to every beginner column.
+ */
+export const NO_AUTOMATED_SECURITY_SCANNING_BEGINNER_OVERRIDE: RegisterOverride = structural({
+  1: form("Set up an automatic check that scans this project's building blocks for known security problems, so a risky one is caught early.", "The lightest step: a scan that catches known-risky building blocks."),
+  2: form("Add a scan that runs on its own and points out known security problems in the outside code this project uses, and look at what it finds before shipping.", "A light pass: a scan of the outside code for known problems."),
+  3: form("Set up a security scan for this project that runs every time something changes: it checks the outside code for known problems, and flags anything that should be updated.", "A security scan isn't running on every change yet."),
+  4: form("Make the security scan part of the project's automatic checks, so it runs on every change and a serious problem stops the change until the problem is dealt with.", "Beyond a one-off scan: a scan built into the automatic checks."),
+  5: form("Write a short note on this project's security scan: what it checks, how often it runs, and what happens when it finds something serious — so the scan stays a regular habit.", "A simple note on what the security scan checks and how findings are handled."),
+});

@@ -8,7 +8,7 @@ import { CONFIRM_SEEK_RE } from '../content-template-grounding.js';
 import { detectL2TriggersInText } from '../r5-injection.js';
 import {
   ABSENCE_SECRET_IN_PROMPT_RECORD, ABSENCE_NO_VERSION_CONTROL_RECORD, ABSENCE_NO_BACKUP_SAFETY_RECORD,
-  ABSENCE_NO_SEPARATE_ENVS_RECORD, SECURITY_SAFETY_PARAM_AXES,
+  ABSENCE_NO_SEPARATE_ENVS_RECORD, ABSENCE_NO_AUTOMATED_SECURITY_SCANNING_RECORD, SECURITY_SAFETY_PARAM_AXES,
 } from './class-security-safety.js';
 import { ABSENCE_ENV_AND_SECRETS_RECORD } from './class4-records.js';
 
@@ -378,5 +378,99 @@ describe('A6 — differentiation vs ENV_AND_SECRETS + SECRET_IN_PROMPT (A2 dedup
       expect(envSecrets).not.toContain(opt);
       expect(secretInPrompt).not.toContain(opt);
     }
+  });
+});
+
+// A7 — ABSENCE_NO_AUTOMATED_SECURITY_SCANNING: a NEW security/safety signal, keyword "scan".
+// HIGH-RISK: acting on scan results installs/upgrades dependencies + changes CI/deploy config →
+// RECORD-LEVEL safeguard (A3/A6 mechanism). Heavily de-jargoned: plain action leads; SAST/CVE/CI
+// appear ONLY inside a trailing parenthetical.
+
+describe('A7 — ABSENCE_NO_AUTOMATED_SECURITY_SCANNING (new signal, HIGH-RISK — record-level safeguard)', () => {
+  const r = ABSENCE_NO_AUTOMATED_SECURITY_SCANNING_RECORD;
+  const kw7 = 'scan';
+
+  it('passes the build gate (schema-valid + level-1 floor)', () => {
+    expect(runBuildGate([r]).ok).toBe(true);
+  });
+  it('authors all 5 maturity columns', () => {
+    expect(Object.keys(r.levelForms).map(Number).sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5]);
+  });
+  it('declares the grounded param axes; no spine', () => {
+    expect(r.paramAxes).toBeDefined();
+    expect(r.paramAxes).toEqual(SECURITY_SAFETY_PARAM_AXES);
+    expect(r.spine).toBeUndefined();
+  });
+  it('is de-jargon clean in every column + headline-only + full coverage', () => {
+    const review = reviewRecord(r, kw7);
+    expect(review.jargonByLevel).toEqual({});
+    expect(review.headlineOnly.ok).toBe(true);
+    expect(review.coverage.ok).toBe(true);
+  });
+  it('keeps SAST/CVE jargon OUT of the bare instruction — only inside a trailing parenthetical (heavy de-jargon, A1 lock)', () => {
+    const stripParens = (s: string) => s.replace(/\([^)]*\)/g, ' ');
+    const JARGON = /\bSAST\b|\bCVE\b/i;
+    for (const c of optionsOf(r.levelForms)) {
+      expect(stripParens(c.option)).not.toMatch(JARGON);
+      expect(stripParens(c.whyDesc)).not.toMatch(JARGON);
+    }
+  });
+  it('retains the "scan" keyword in every option AND why-desc', () => {
+    const res = checkTopicKeyword(r, kw7);
+    expect(res.missingInOption).toEqual([]);
+    expect(res.missingInWhyDesc).toEqual([]);
+  });
+  it('practice richness is monotonic', () => {
+    expect(checkEscalation([1, 2, 3, 4, 5]).ok).toBe(true);
+  });
+  it('is voice-clean (option = the user\'s message TO the agent)', () => {
+    expect(checkVoice(r).ok).toBe(true);
+  });
+  it('fits the copy-paste budget in every column, col-1 ≤ col-5', () => {
+    expect(checkOptionLengthBudget(r).overLevels).toEqual([]);
+    expect(r.levelForms[1]!.cell.option.length).toBeLessThanOrEqual(r.levelForms[5]!.cell.option.length);
+  });
+  it('the heaviest column yields a written artifact', () => {
+    expect(r.levelForms[5]!.cell.option.toLowerCase()).toMatch(/write|note/);
+  });
+  it('stored cells are bare core lines — no {R...} / {{...}} runtime grammar', () => {
+    const PLACEHOLDER = /\{[R{]/;
+    for (const c of optionsOf(r.levelForms)) {
+      expect(c.option).not.toMatch(PLACEHOLDER);
+      expect(c.whyDesc).not.toMatch(PLACEHOLDER);
+    }
+  });
+  it('never contains a literal secret/credential token (no-echo guard, belt-and-suspenders to the static+sanitize rule)', () => {
+    const SECRET_RE = /\b(sk-[A-Za-z0-9]{16,}|AKIA[0-9A-Z]{12,}|ghp_[A-Za-z0-9]{20,})\b|(api[_-]?key|password|token)\s*[:=]\s*\S{8,}/i;
+    for (const c of optionsOf(r.levelForms)) {
+      expect(c.option).not.toMatch(SECRET_RE);
+      expect(c.whyDesc).not.toMatch(SECRET_RE);
+    }
+  });
+  it('carries the record-level L2 safeguard that names THIS record\'s action (install/upgrade deps / change CI/deploy config)', () => {
+    expect(r.l2SafeguardRequired).toBe(true);
+    expect(r.l2SafeguardLine ?? '').toMatch(/go-ahead|ask me/i);
+    expect(r.l2SafeguardLine ?? '').toMatch(/upgrade|dependenc|deploy|CI/i);
+    expect(checkL2Safeguard(r).ok).toBe(true);
+    expect(checkL2Safeguard(r).unguardedLevels).toEqual([]);
+  });
+  it('serves the safeguard as the LAST line of EVERY composed column (the served path)', () => {
+    for (const lvl of [1, 2, 3, 4, 5] as const) {
+      const composed = composeWhyDesc({ cell: r.levelForms[lvl]!.cell, slots: r.slots, l2Safeguard: r.l2SafeguardLine });
+      expect(composed.endsWith(r.l2SafeguardLine!)).toBe(true);
+    }
+  });
+  it('the l2SafeguardLine is itself CA-bound-clean: voice-clean, de-jargon-clean, no runtime placeholders', () => {
+    const line = r.l2SafeguardLine!;
+    expect(findVoiceViolations(line)).toEqual([]);
+    expect(findJargonViolations(line)).toEqual([]);
+    expect(line).not.toMatch(/\{[R{]/);
+  });
+  it('the options trip an L2 trigger (dep-install) so the record-level safeguard is warranted; the safeguard names both the dependency and CI/deploy actions', () => {
+    const optionTriggers = new Set(optionsOf(r.levelForms).flatMap((c) => detectL2TriggersInText(c.option).map((t) => t.name)));
+    expect(optionTriggers.has('dep-install')).toBe(true); // "upgrade" → the record genuinely touches a sensitive action
+    const lineTriggers = new Set(detectL2TriggersInText(r.l2SafeguardLine!).map((t) => t.name));
+    expect(lineTriggers.has('dep-install')).toBe(true);  // "install or upgrade dependencies"
+    expect(lineTriggers.has('deployment')).toBe(true);   // "change the CI/deploy config"
   });
 });

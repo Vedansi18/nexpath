@@ -11,11 +11,11 @@ import { validateContentTemplateRecord, type ContentTemplateRecord } from '../co
 import { CONFIRM_SEEK_RE } from '../content-template-grounding.js';
 import {
   ABSENCE_SECRET_IN_PROMPT_RECORD, ABSENCE_NO_VERSION_CONTROL_RECORD, ABSENCE_NO_BACKUP_SAFETY_RECORD,
-  ABSENCE_NO_SEPARATE_ENVS_RECORD,
+  ABSENCE_NO_SEPARATE_ENVS_RECORD, ABSENCE_NO_AUTOMATED_SECURITY_SCANNING_RECORD,
 } from './class-security-safety.js';
 import {
   SECRET_IN_PROMPT_BEGINNER_OVERRIDE, NO_VERSION_CONTROL_BEGINNER_OVERRIDE, NO_BACKUP_SAFETY_BEGINNER_OVERRIDE,
-  NO_SEPARATE_ENVS_BEGINNER_OVERRIDE,
+  NO_SEPARATE_ENVS_BEGINNER_OVERRIDE, NO_AUTOMATED_SECURITY_SCANNING_BEGINNER_OVERRIDE,
 } from './class-security-safety-beginner.js';
 
 // A3 — ABSENCE_SECRET_IN_PROMPT `_BEGINNER` register override. Mirrors the established
@@ -382,6 +382,94 @@ describe('A6 — NO_SEPARATE_ENVS beginner override (synthesized-record gates)',
 
 describe('A6 — NO_SEPARATE_ENVS beginner override (engine serving)', () => {
   const r = ABSENCE_NO_SEPARATE_ENVS_RECORD;
+
+  it('composeAdvisory serves the beginner override option when register=beginner, base otherwise', async () => {
+    const beg = await composeAdvisory({ lookup: lookupOf({ shipped: r }), level: 1, register: 'beginner' }, mockClient(JSON.stringify({ whyDesc: 'w' })));
+    const base = await composeAdvisory({ lookup: lookupOf({ shipped: r }), level: 1 }, mockClient(JSON.stringify({ whyDesc: 'w' })));
+    expect(beg?.option).toBe(resolveRegisterForms(r, 'beginner')[1]!.cell.option);
+    expect(base?.option).toBe(r.levelForms[1]!.cell.option);
+    expect(beg?.option).not.toBe(base?.option);
+  });
+
+  it('appends the action-specific l2SafeguardLine to the beginner-register served column too', async () => {
+    expect(r.l2SafeguardRequired).toBe(true);
+    for (const lvl of [1, 3, 5] as const) {
+      const out = await composeAdvisory({ lookup: lookupOf({ shipped: r }), level: lvl, register: 'beginner' }, mockClient(JSON.stringify({ whyDesc: 'woven' })));
+      expect(out?.whyDesc).toContain(r.l2SafeguardLine!);
+    }
+  });
+});
+
+// A7 — ABSENCE_NO_AUTOMATED_SECURITY_SCANNING beginner override. HIGH-RISK, RECORD-LEVEL safeguard
+// (A3/A6 pattern): the override inherits l2SafeguardRequired + l2SafeguardLine, so the engine
+// appends the safeguard to every beginner served column. Fully de-jargoned (no SAST/CVE/CI).
+const kw7 = 'scan';
+
+describe('A7 — NO_AUTOMATED_SECURITY_SCANNING beginner override (authoring gates)', () => {
+  const cells = optionsOf(NO_AUTOMATED_SECURITY_SCANNING_BEGINNER_OVERRIDE.levelForms);
+
+  it('is a structurally-divergent register override (not a vocab tweak)', () => {
+    expect(NO_AUTOMATED_SECURITY_SCANNING_BEGINNER_OVERRIDE.divergence).toBe('structurally-divergent');
+  });
+  it('authors all 5 maturity columns (parity with the base record)', () => {
+    expect(
+      Object.keys(NO_AUTOMATED_SECURITY_SCANNING_BEGINNER_OVERRIDE.levelForms).map(Number).sort((a, b) => a - b),
+    ).toEqual([1, 2, 3, 4, 5]);
+  });
+  it('retains "scan" in every beginner option AND why-desc', () => {
+    for (const c of cells) {
+      expect(c.option.toLowerCase()).toContain(kw7);
+      expect(c.whyDesc.toLowerCase()).toContain(kw7);
+    }
+  });
+  it('is voice-clean + de-jargon clean (both channels); no SAST/CVE/CI jargon in the beginner register at all', () => {
+    for (const c of cells) {
+      expect(findVoiceViolations(c.option)).toEqual([]);
+      expect(findVoiceViolations(c.whyDesc)).toEqual([]);
+      expect(findJargonViolations(c.option)).toEqual([]);
+      expect(findJargonViolations(c.whyDesc)).toEqual([]);
+      expect(c.option).not.toMatch(/\bSAST\b|\bCVE\b/i);
+      expect(c.whyDesc).not.toMatch(/\bSAST\b|\bCVE\b/i);
+    }
+  });
+  it('never contains a literal secret/credential token (no-echo guard on the beginner cells too)', () => {
+    const SECRET_RE = /\b(sk-[A-Za-z0-9]{16,}|AKIA[0-9A-Z]{12,}|ghp_[A-Za-z0-9]{20,})\b|(api[_-]?key|password|token)\s*[:=]\s*\S{8,}/i;
+    for (const c of cells) {
+      expect(c.option).not.toMatch(SECRET_RE);
+      expect(c.whyDesc).not.toMatch(SECRET_RE);
+    }
+  });
+});
+
+describe('A7 — NO_AUTOMATED_SECURITY_SCANNING beginner override (synthesized-record gates)', () => {
+  const r = ABSENCE_NO_AUTOMATED_SECURITY_SCANNING_RECORD;
+  const synth = asOverrideRecord(r);
+
+  it('the beginner-substituted record is schema-valid, all-5-column, floored, voice-clean', () => {
+    expect(validateContentTemplateRecord(synth).ok).toBe(true);
+    expect(Object.keys(synth.levelForms).map(Number).sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5]);
+    expect(checkVoice(synth).ok).toBe(true);
+  });
+  it('is de-jargon clean, headline-only, full-coverage; monotonic; within budget; artifact parity', () => {
+    const review = reviewRecord(synth, kw7);
+    expect(review.jargonByLevel).toEqual({});
+    expect(review.headlineOnly.ok).toBe(true);
+    expect(review.coverage.ok).toBe(true);
+    expect(checkEscalation([1, 2, 3, 4, 5]).ok).toBe(true);
+    expect(checkOptionLengthBudget(synth).overLevels).toEqual([]);
+    const ARTIFACT = /write|note/i;
+    expect(synth.levelForms[5]!.cell.option).toMatch(ARTIFACT);
+    expect(ARTIFACT.test(synth.levelForms[5]!.cell.option)).toBe(ARTIFACT.test(r.levelForms[5]!.cell.option));
+  });
+  it('inherits the base sensitive flag + line, so every beginner column is L2-guarded', () => {
+    expect(r.l2SafeguardRequired).toBe(true);
+    expect(checkL2Safeguard(synth).ok).toBe(true);
+    expect(checkL2Safeguard(synth).unguardedLevels).toEqual([]);
+  });
+});
+
+describe('A7 — NO_AUTOMATED_SECURITY_SCANNING beginner override (engine serving)', () => {
+  const r = ABSENCE_NO_AUTOMATED_SECURITY_SCANNING_RECORD;
 
   it('composeAdvisory serves the beginner override option when register=beginner, base otherwise', async () => {
     const beg = await composeAdvisory({ lookup: lookupOf({ shipped: r }), level: 1, register: 'beginner' }, mockClient(JSON.stringify({ whyDesc: 'w' })));

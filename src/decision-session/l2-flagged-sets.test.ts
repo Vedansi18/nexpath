@@ -80,12 +80,13 @@ describe('L2 safeguard marker — flagged-set inventory', () => {
     expect(missing).toEqual([]);
   });
 
-  it('source contains exactly 34 occurrences of l2SafeguardRequired: true across the content-template files', () => {
-    // 32 pre-existing + 2 new record-level security/safety records (class-security-safety.ts):
+  it('source contains exactly 35 occurrences of l2SafeguardRequired: true across the content-template files', () => {
+    // 32 pre-existing + 3 new record-level security/safety records (class-security-safety.ts):
     // ABSENCE_SECRET_IN_PROMPT (A3, secret leakage) + ABSENCE_NO_SEPARATE_ENVS (A6, prod/env
-    // separation). A4/A5 add no record-level flag (A4 mild; A5 per-option in the option text).
+    // separation) + ABSENCE_NO_AUTOMATED_SECURITY_SCANNING (A7, dep-install + CI/deploy). A4/A5
+    // add no record-level flag (A4 mild; A5 per-option in the option text).
     const src = readOptionsSources();
     const count = (src.match(/l2SafeguardRequired:\s*true/g) ?? []).length;
-    expect(count).toBe(34);
+    expect(count).toBe(35);
   });
 });

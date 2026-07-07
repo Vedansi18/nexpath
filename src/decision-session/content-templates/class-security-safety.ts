@@ -18,6 +18,7 @@ import {
   NO_VERSION_CONTROL_BEGINNER_OVERRIDE,
   NO_BACKUP_SAFETY_BEGINNER_OVERRIDE,
   NO_SEPARATE_ENVS_BEGINNER_OVERRIDE,
+  NO_AUTOMATED_SECURITY_SCANNING_BEGINNER_OVERRIDE,
 } from './class-security-safety-beginner.js';
 
 function form(option: string, whyDesc: string): LevelForm {
@@ -129,10 +130,34 @@ export const ABSENCE_NO_SEPARATE_ENVS_RECORD: ContentTemplateRecord = {
   },
 };
 
-/** All security/safety records (grows as A7 adds NO_AUTOMATED_SECURITY_SCANNING). */
+/**
+ * ABSENCE_NO_AUTOMATED_SECURITY_SCANNING — the project has no automated security scanning,
+ * keyword "scan". HIGH-RISK: acting on scan results means installing/upgrading dependencies and
+ * changing the CI/deploy config → RECORD-LEVEL `l2SafeguardRequired` + an action-named safeguard
+ * line (the engine appends it to every served column). Heavily de-jargoned: the plain action
+ * leads ("scan the dependencies for known problems"), and SAST/CVE/CI appear ONLY as an optional
+ * trailing parenthetical. No literal dependency/credential value is echoed — static record + the
+ * fire-time secret/PII sanitize gate.
+ */
+export const ABSENCE_NO_AUTOMATED_SECURITY_SCANNING_RECORD: ContentTemplateRecord = {
+  signalType: 'ABSENCE_NO_AUTOMATED_SECURITY_SCANNING', source: 'shipped', schemaVersion: 1, slots: [],
+  registerOverrides: { beginner: NO_AUTOMATED_SECURITY_SCANNING_BEGINNER_OVERRIDE },
+  paramAxes: SECURITY_SAFETY_PARAM_AXES, l2SafeguardRequired: true,
+  l2SafeguardLine: 'Ask me for go-ahead before you install or upgrade dependencies or change the CI/deploy config.',
+  levelForms: {
+    1: form("Set up an automatic scan that flags known security problems in this project's dependencies, so a risky package is caught early.", "The lightest step: a scan that flags known-vulnerable dependencies."),
+    2: form("Add a security scan that runs on its own and reports known problems in the dependencies, and review what the scan finds before shipping.", "A light pass: a scan of the dependencies for known security problems."),
+    3: form("Set up automatic security scanning for this project: a scan of the dependencies for known problems (a SAST or dependency-vulnerability scan), run on every change, with a plan to upgrade anything the scan flags.", "Automatic security scanning of the dependencies isn't running on each change yet."),
+    4: form("Wire security scanning into the project's automatic checks so a dependency scan and a code scan run on every change, and make a serious finding block the change until the finding is resolved.", "Beyond a manual scan: scanning wired into the automatic checks, blocking serious findings."),
+    5: form("Write a short security-scanning note for the project: what is scanned (dependencies and code), how often the scan runs, and how a serious finding is handled — kept with the project.", "A durable security-scanning note of what is scanned and how findings are handled."),
+  },
+};
+
+/** All security/safety records (A3, A4, A5, A6, A7 authored; A8 FRUSTRATION_SPIRAL → class-mood-meta.ts). */
 export const CLASS_SECURITY_SAFETY_RECORDS: readonly ContentTemplateRecord[] = [
   ABSENCE_SECRET_IN_PROMPT_RECORD,
   ABSENCE_NO_VERSION_CONTROL_RECORD,
   ABSENCE_NO_BACKUP_SAFETY_RECORD,
   ABSENCE_NO_SEPARATE_ENVS_RECORD,
+  ABSENCE_NO_AUTOMATED_SECURITY_SCANNING_RECORD,
 ];
