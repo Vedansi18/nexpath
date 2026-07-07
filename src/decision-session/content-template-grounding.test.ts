@@ -80,15 +80,26 @@ describe('content-template-grounding — simpler derive (b)', () => {
     whyDesc: 'A restore overwrites current data — ask me for go-ahead before running one.',
   };
 
-  it('rejects when the current cell carried a per-column confirm-seek and the simpler cell shed it from both channels', async () => {
+  it('rejects when the simpler cell sheds the per-column confirm-seek from both channels', async () => {
     const client = mockClient(JSON.stringify({ option: 'Restore the backup to recover the data.', whyDesc: 'Recover the data.' }));
     await expect(deriveSimplerCell(guardedCell, client)).rejects.toThrow(/safeguard/i);
   });
 
-  it('keeps the simpler cell when it preserves the per-column confirm-seek', async () => {
+  it('rejects when the simpler cell keeps the confirm-seek in the why-desc but sheds it from the OPTION (the served instruction)', async () => {
+    const client = mockClient(JSON.stringify({ option: 'Restore the backup to recover the data.', whyDesc: 'Recover the data — ask me for go-ahead first.' }));
+    await expect(deriveSimplerCell(guardedCell, client)).rejects.toThrow(/safeguard/i);
+  });
+
+  it('rejects when the simpler cell keeps the confirm-seek in the option but sheds it from the why-desc (the desc-base)', async () => {
     const client = mockClient(JSON.stringify({ option: 'Restore the backup — ask me for go-ahead first.', whyDesc: 'Recover the data.' }));
+    await expect(deriveSimplerCell(guardedCell, client)).rejects.toThrow(/safeguard/i);
+  });
+
+  it('keeps the simpler cell when it preserves the per-column confirm-seek in BOTH channels', async () => {
+    const client = mockClient(JSON.stringify({ option: 'Restore the backup — ask me for go-ahead first.', whyDesc: 'Recover the data — ask me for go-ahead first.' }));
     const cell = await deriveSimplerCell(guardedCell, client);
     expect(cell.option).toMatch(/ask me for go-ahead/i);
+    expect(cell.whyDesc).toMatch(/ask me for go-ahead/i);
   });
 
   it('does not reject an unguarded cell (no false positive)', async () => {
@@ -102,7 +113,7 @@ describe('content-template-grounding — simpler derive (b)', () => {
     const spy = {
       chat: { completions: { create: async (args: { messages: { content: string }[] }) => {
         seen = args.messages[0].content;
-        return { choices: [{ message: { content: '{"option":"Restore — ask me for go-ahead.","whyDesc":"w"}' } }] };
+        return { choices: [{ message: { content: '{"option":"Restore — ask me for go-ahead.","whyDesc":"Recover — ask me for go-ahead."}' } }] };
       } } },
     } as unknown as import('openai').default;
     await deriveSimplerCell(guardedCell, spy);

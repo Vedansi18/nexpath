@@ -95,15 +95,17 @@ export async function deriveSimplerCell(
   let whyDesc = obj.whyDesc;
   if (opts.l2Safeguard && !whyDesc.includes(opts.l2Safeguard)) whyDesc = `${whyDesc}\n${opts.l2Safeguard}`;
   const derived = { option: obj.option, whyDesc };
-  // Per-column safeguard survival: if the CURRENT cell carried a confirm-seek (a per-column
-  // safeguard baked into the option/why-desc — e.g. NO_BACKUP_SAFETY's restore columns) and the
-  // simpler cell shed it from BOTH channels, reject. Rejection is safe: the strength ladder falls
-  // back to a cell that still carries it (deriveLadder chains l1Out / the prior tier as the
-  // fallback). A simpler sibling must never keep a risky action while dropping its safeguard.
-  const currentGuarded = CONFIRM_SEEK_RE.test(current.option) || CONFIRM_SEEK_RE.test(current.whyDesc);
-  const derivedGuarded = CONFIRM_SEEK_RE.test(derived.option) || CONFIRM_SEEK_RE.test(derived.whyDesc);
-  if (currentGuarded && !derivedGuarded) {
-    logger.debug('content_template_simpler_dropped_safeguard', {});
+  // Per-column safeguard survival (PER CHANNEL): a confirm-seek baked into the CURRENT cell (a
+  // per-column safeguard — e.g. NO_BACKUP_SAFETY's restore columns) must survive in EACH channel
+  // that carried it. The option is the instruction served verbatim, so it is non-negotiable; the
+  // why-desc is the desc-base the agent reads (CLAUDE.md "both places"). Reject if either channel
+  // shed the confirm-seek it had — rejection is safe: the strength ladder falls back to a cell
+  // that still carries it (deriveLadder chains l1Out / the prior tier). Record-level records are
+  // unaffected: their option carries no confirm-seek, and their why-desc line is re-appended above.
+  const optionShed = CONFIRM_SEEK_RE.test(current.option) && !CONFIRM_SEEK_RE.test(derived.option);
+  const whyDescShed = CONFIRM_SEEK_RE.test(current.whyDesc) && !CONFIRM_SEEK_RE.test(derived.whyDesc);
+  if (optionShed || whyDescShed) {
+    logger.debug('content_template_simpler_dropped_safeguard', { optionShed, whyDescShed });
     throw new Error('simpler-derive dropped the sensitive-action safeguard');
   }
   return derived;
