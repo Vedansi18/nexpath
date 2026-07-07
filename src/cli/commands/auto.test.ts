@@ -14,6 +14,7 @@ import type { AutoInput } from './auto.js';
 import { getPendingAdvisory } from '../../store/pending-advisories.js';
 import { upsertProject, setDetectedLanguage, getProject } from '../../store/projects.js';
 import { setConfig } from '../../store/config.js';
+import { readCadence } from '../../store/feedback-cadence.js';
 import type OpenAI from 'openai';
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -1734,5 +1735,33 @@ describe('SessionStateManager — applyStage2SignalUpdates', () => {
     expect(() => {
       mgr.applyStage2SignalUpdates(store, []);
     }).not.toThrow();
+  });
+});
+
+describe('runAuto — usage recording (feedback cadence)', () => {
+  let store: Store;
+  beforeEach(async () => { store = await openStore(':memory:'); });
+
+  it('records active usage on a genuine prompt', async () => {
+    await runAuto(makeInput({ promptText: 'do something' }), store);
+    expect(readCadence(store).lastActivityAt).not.toBeNull();
+  });
+
+  it('accumulates usage globally across prompts (any project → one counter)', async () => {
+    const nowSpy = vi.spyOn(Date, 'now');
+    nowSpy.mockReturnValue(1_000_000);
+    await runAuto(makeInput({ projectRoot: '/proj-a', promptText: 'a' }), store);
+    nowSpy.mockReturnValue(1_000_000 + 60_000);
+    await runAuto(makeInput({ projectRoot: '/proj-b', promptText: 'b' }), store);
+    nowSpy.mockRestore();
+    expect(readCadence(store).activeMs).toBe(60_000);
+  });
+
+  it('does not record activity for an advisory-injected prompt', async () => {
+    const { SessionStateManager } = await import('../../classifier/SessionStateManager.js');
+    const mgr = SessionStateManager.load(store, '/test/project');
+    mgr.setInjectedPrompt(store, 'INJECTED');
+    await runAuto(makeInput({ projectRoot: '/test/project', promptText: 'INJECTED' }), store);
+    expect(readCadence(store).lastActivityAt).toBeNull();
   });
 });

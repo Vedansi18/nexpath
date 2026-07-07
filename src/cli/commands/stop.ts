@@ -3,7 +3,7 @@ import { platform } from 'node:process';
 import type { Store } from '../../store/db.js';
 import { openStore, closeStore, DEFAULT_DB_PATH } from '../../store/db.js';
 import { getPendingAdvisory, markAdvisoryShown } from '../../store/pending-advisories.js';
-import { recordActivity, isFeedbackEligible, markFeedbackShown } from '../../store/feedback-cadence.js';
+import { isFeedbackEligible, markFeedbackShown } from '../../store/feedback-cadence.js';
 import { recordAdvisoryFired, recordOptionSelected } from '../../store/feedback-signals.js';
 import { sendFeedback } from '../../telemetry/feedback-send.js';
 import { runFeedbackPopup, type FeedbackRenderFn } from '../../decision-session/feedback-popup.js';
@@ -92,10 +92,6 @@ export async function runStop(
     logger.debug('stop_loop_guard', { cwd: payload.cwd });
     return { outcome: 'loop_guard' };
   }
-
-  // 1.2. Record active usage — one heartbeat per turn, accumulated globally
-  //      across all projects, independent of whether an advisory fires.
-  recordActivity(store);
 
   // 1.3. Feedback popup — when due, show it in place of the advisory this turn.
   //      A rating is sent; either outcome resets the cadence. Skipped (without
