@@ -37,6 +37,9 @@ function asOverrideRecord(r: ContentTemplateRecord): ContentTemplateRecord {
 describe('A3 — SECRET_IN_PROMPT beginner override (authoring gates)', () => {
   const cells = optionsOf(SECRET_IN_PROMPT_BEGINNER_OVERRIDE.levelForms);
 
+  it('is a structurally-divergent register override (not a vocab tweak)', () => {
+    expect(SECRET_IN_PROMPT_BEGINNER_OVERRIDE.divergence).toBe('structurally-divergent');
+  });
   it('authors all 5 maturity columns (parity with the base record)', () => {
     expect(
       Object.keys(SECRET_IN_PROMPT_BEGINNER_OVERRIDE.levelForms).map(Number).sort((a, b) => a - b),
@@ -124,6 +127,9 @@ const kw4 = 'version';
 describe('A4 — NO_VERSION_CONTROL beginner override (authoring gates)', () => {
   const cells = optionsOf(NO_VERSION_CONTROL_BEGINNER_OVERRIDE.levelForms);
 
+  it('is a structurally-divergent register override (not a vocab tweak)', () => {
+    expect(NO_VERSION_CONTROL_BEGINNER_OVERRIDE.divergence).toBe('structurally-divergent');
+  });
   it('authors all 5 maturity columns (parity with the base record)', () => {
     expect(
       Object.keys(NO_VERSION_CONTROL_BEGINNER_OVERRIDE.levelForms).map(Number).sort((a, b) => a - b),
