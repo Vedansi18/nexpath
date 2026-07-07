@@ -407,9 +407,9 @@ describe('A7 — ABSENCE_NO_AUTOMATED_SECURITY_SCANNING (new signal, HIGH-RISK �
     expect(review.headlineOnly.ok).toBe(true);
     expect(review.coverage.ok).toBe(true);
   });
-  it('keeps SAST/CVE jargon OUT of the bare instruction — only inside a trailing parenthetical (heavy de-jargon, A1 lock)', () => {
+  it('keeps SAST/CVE/CI jargon OUT of the bare instruction — only inside a trailing parenthetical (heavy de-jargon, A1 lock names all three)', () => {
     const stripParens = (s: string) => s.replace(/\([^)]*\)/g, ' ');
-    const JARGON = /\bSAST\b|\bCVE\b/i;
+    const JARGON = /\bSAST\b|\bCVE\b|\bCI\b/i;
     for (const c of optionsOf(r.levelForms)) {
       expect(stripParens(c.option)).not.toMatch(JARGON);
       expect(stripParens(c.whyDesc)).not.toMatch(JARGON);

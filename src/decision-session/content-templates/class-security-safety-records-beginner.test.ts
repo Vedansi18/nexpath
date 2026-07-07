@@ -428,8 +428,8 @@ describe('A7 — NO_AUTOMATED_SECURITY_SCANNING beginner override (authoring gat
       expect(findVoiceViolations(c.whyDesc)).toEqual([]);
       expect(findJargonViolations(c.option)).toEqual([]);
       expect(findJargonViolations(c.whyDesc)).toEqual([]);
-      expect(c.option).not.toMatch(/\bSAST\b|\bCVE\b/i);
-      expect(c.whyDesc).not.toMatch(/\bSAST\b|\bCVE\b/i);
+      expect(c.option).not.toMatch(/\bSAST\b|\bCVE\b|\bCI\b/i);
+      expect(c.whyDesc).not.toMatch(/\bSAST\b|\bCVE\b|\bCI\b/i);
     }
   });
   it('never contains a literal secret/credential token (no-echo guard on the beginner cells too)', () => {
