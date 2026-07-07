@@ -172,10 +172,11 @@ describe('A4 — ABSENCE_NO_VERSION_CONTROL (new signal, mild — no record-leve
 });
 
 // A5 — ABSENCE_NO_BACKUP_SAFETY: a NEW security/safety signal, keyword "backup". MILD
-// data-sensitivity: standing up backups + verifying them (restore into a SCRATCH copy) is
-// non-destructive, so the record carries NO record-level safeguard. Per the A1 lock, an option
-// that proposed a restore/OVERWRITE of existing data WOULD carry the safeguard — the A5 gate
-// proves the ladder contains none (every restore targets a separate scratch copy).
+// data-sensitivity with a PER-OPTION safeguard. Standing up + scheduling a backup (cols 1–2) is
+// non-destructive → unguarded. Proving recovery means an actual restore, which OVERWRITES the
+// current data — the destructive-adjacent case the A1 lock says MUST carry the safeguard. So
+// cols 3–5 propose the restore AND carry the confirm-seek in both channels (option + why-desc);
+// the record uses NO record-level l2SafeguardLine (that would wrongly guard the base cols too).
 
 describe('A5 — ABSENCE_NO_BACKUP_SAFETY (new signal, mild — no record-level safeguard)', () => {
   const r = ABSENCE_NO_BACKUP_SAFETY_RECORD;
@@ -240,8 +241,8 @@ describe('A5 — ABSENCE_NO_BACKUP_SAFETY (new signal, mild — no record-level 
       expect(CONFIRM_SEEK.test(r.levelForms[lvl]!.cell.option)).toBe(true);
       expect(CONFIRM_SEEK.test(r.levelForms[lvl]!.cell.whyDesc)).toBe(true);
     }
-    // The safeguard is PER-OPTION (in the option text), NOT a record-level line that the engine
-    // would append to the base columns too. So no record-level flag/line is set.
+    // The safeguard is PER-OPTION (in the option text + why-desc), NOT a record-level line that
+    // the engine would append to the base columns too. So no record-level flag/line is set.
     expect(r.l2SafeguardRequired).toBeFalsy();
     expect(r.l2SafeguardLine).toBeUndefined();
     expect(checkL2Safeguard(r).ok).toBe(true);

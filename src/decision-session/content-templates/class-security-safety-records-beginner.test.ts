@@ -204,8 +204,9 @@ describe('A4 — NO_VERSION_CONTROL beginner override (engine serving)', () => {
   });
 });
 
-// A5 — ABSENCE_NO_BACKUP_SAFETY beginner override. Mild signal: no safeguard on either channel,
-// and the beginner restore advice must also stay non-destructive (scratch copy, never live data).
+// A5 — ABSENCE_NO_BACKUP_SAFETY beginner override. Same per-option safeguard as the base:
+// making/scheduling a backup (cols 1–2) is safe and unguarded, but an actual restore overwrites
+// the current data (cols 3–5) → those carry a plain confirm-seek in both channels.
 const kw5 = 'backup';
 
 describe('A5 — NO_BACKUP_SAFETY beginner override (authoring gates)', () => {
