@@ -23,6 +23,22 @@ describe('§6.1 gate 1 — dual-source resolver + migration marker', () => {
     }
   });
 
+  it('every migrated §4.E2 record carries a non-empty popup question (stop.ts serving relies on it)', () => {
+    // A migrated signal has no static DecisionContent, so its own record.question is threaded
+    // to the popup via questionOverride. A missing question would silently fall back to a
+    // mismatched generic static question — assert each of the 6 supplies its own.
+    const NEW_E2 = [
+      'ABSENCE_SECRET_IN_PROMPT', 'ABSENCE_NO_VERSION_CONTROL', 'ABSENCE_NO_BACKUP_SAFETY',
+      'ABSENCE_NO_SEPARATE_ENVS', 'ABSENCE_NO_AUTOMATED_SECURITY_SCANNING', 'ABSENCE_FRUSTRATION_SPIRAL',
+    ];
+    for (const s of NEW_E2) {
+      const resolved = resolveRecord(shippedRecordLookup(s));
+      expect(resolved, `${s} resolves a record`).not.toBeNull();
+      expect(typeof resolved!.record.question, `${s} question is a string`).toBe('string');
+      expect(resolved!.record.question!.length, `${s} question is non-empty`).toBeGreaterThan(0);
+    }
+  });
+
   it('resolves every LEGACY signalType to static (only the 6 new signals are engine-served)', () => {
     for (const s of ['test_creation', 'context_loss', 'session_length_checkpoint', 'contract_testing_gap', 'x_unknown']) {
       expect(resolveContentSource(s)).toBe('static');

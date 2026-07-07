@@ -114,6 +114,12 @@ export interface DecisionSessionInput {
   decisionSessionCount: number;
   /** Personalised option text from OptionGenerator. When present, overrides static L1/L2/L3. */
   generatedOptions?:    GeneratedOptions;
+  /**
+   * Popup question override — a migrated signal has no static DecisionContent, so its own
+   * `question` (from the content-template record) is passed here to replace the mismatched
+   * static-fallback question. When absent, the resolved static `content.question` is used.
+   */
+  questionOverride?:    string;
   /** User profile — used to route beginner/cool_geek to BEGINNER content blocks. */
   profile?:             UserProfile | null;
   /** Last-5 prompt metadata for the `decision_session_started` telemetry event (Item B). */
@@ -243,6 +249,10 @@ export async function runLevel(
   store?:    Store,
 ): Promise<'skip' | 'next' | 'clipboard_only' | string> {
   const content  = resolveDecisionContent(input.stage, input.flagType, input.profile);
+  // A migrated signal has no static DecisionContent for its popup question, so the
+  // content-template record's own `question` is threaded in via `questionOverride`.
+  // Un-migrated signals leave it undefined and fall back to the static `content.question`.
+  const question = input.questionOverride ?? content.question;
   const gen      = input.generatedOptions;
   // Generated options carry only the user-facing text. Each option's
   // desc-base comes from either the runtime-substituted output on
@@ -275,7 +285,7 @@ export async function runLevel(
   const whyHelpBlock = content.whyHelp && register
     ? (composeWhyHelpBlock(content.whyHelp, register, input.profile?.mood, input.profile?.role) ?? undefined)
     : undefined;
-  const message  = buildSelectMessage(input.pinchLabel, content.question, level, {
+  const message  = buildSelectMessage(input.pinchLabel, question, level, {
     whyHelpEntry: content.whyHelp,
     register,
     mood:         input.profile?.mood,
@@ -365,7 +375,7 @@ export async function runLevel(
     options: clackOptions,
     pinchLabel: input.pinchLabel,
     subtitle,
-    question:   content.question,
+    question,
     whyHelpBlock,
   });
 

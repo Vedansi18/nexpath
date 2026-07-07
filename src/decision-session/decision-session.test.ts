@@ -2946,6 +2946,34 @@ describe('runLevel — help line injection', () => {
   });
 });
 
+describe('runLevel — questionOverride (migrated-signal popup question)', () => {
+  const OVERRIDE = 'A secret was just pasted into a prompt — treat it as leaked and rotate it?';
+
+  it('uses questionOverride for the select `question` field when present', async () => {
+    const spy = vi.fn().mockResolvedValue(SKIP_NOW);
+    await runLevel(makeInput({ questionOverride: OVERRIDE }), 1, spy as SelectFn);
+    const arg = (spy as ReturnType<typeof vi.fn>).mock.calls[0][0] as { question: string };
+    expect(arg.question).toBe(OVERRIDE);
+  });
+
+  it('threads questionOverride into the message header (buildSelectMessage question line)', async () => {
+    const spy = vi.fn().mockResolvedValue(SKIP_NOW);
+    await runLevel(makeInput({ questionOverride: OVERRIDE }), 1, spy as SelectFn);
+    const msg = (spy as ReturnType<typeof vi.fn>).mock.calls[0][0].message as string;
+    expect(msg).toContain(OVERRIDE);
+  });
+
+  it('falls back to the static content.question when no override is given', async () => {
+    const spy = vi.fn().mockResolvedValue(SKIP_NOW);
+    // Default input (stage_transition) resolves a real static DecisionContent question.
+    await runLevel(makeInput(), 1, spy as SelectFn);
+    const arg = (spy as ReturnType<typeof vi.fn>).mock.calls[0][0] as { question: string };
+    expect(arg.question).not.toBe(OVERRIDE);
+    expect(typeof arg.question).toBe('string');
+    expect(arg.question.length).toBeGreaterThan(0);
+  });
+});
+
 describe('runLevel — SKIP_NOW label split', () => {
   it('SKIP_NOW option has value === SKIP_NOW constant', async () => {
     const spy = vi.fn().mockResolvedValue(SKIP_NOW);

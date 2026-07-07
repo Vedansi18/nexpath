@@ -88,6 +88,13 @@ export interface ContentTemplateRecord {
   signalType: string;
   source: ContentTemplateSource;
   schemaVersion: number;
+  /**
+   * The user-facing popup question line (the "…?" shown above the options). A migrated signal has
+   * NO static DecisionContent, so the serving path uses this as the popup question (and the pinch
+   * label derives from it) — without it the popup would fall back to a mismatched static question.
+   * Optional + additive; required in practice for a migrated record with no static counterpart.
+   */
+  question?: string;
   /** Sparse maturity map: level → headline form. The level-1 floor is MANDATORY. */
   levelForms: Partial<Record<MaturityLevel, LevelForm>>;
   slots: Slot[];
@@ -159,6 +166,7 @@ export function validateContentTemplateRecord(record: unknown): ValidationResult
   if (!r || typeof r !== 'object') return { ok: false, errors: ['record is not an object'] };
 
   if (typeof r.signalType !== 'string' || r.signalType === '') errors.push('signalType must be a non-empty string');
+  if (r.question !== undefined && (typeof r.question !== 'string' || r.question === '')) errors.push('question must be a non-empty string when present');
   if (!CONTENT_TEMPLATE_SOURCES.includes(r.source)) errors.push(`source must be one of ${CONTENT_TEMPLATE_SOURCES.join('|')}`);
   if (typeof r.schemaVersion !== 'number' || r.schemaVersion > SCHEMA_VERSION) {
     errors.push(`schemaVersion must be a number <= ${SCHEMA_VERSION}`);

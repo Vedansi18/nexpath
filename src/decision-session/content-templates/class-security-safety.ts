@@ -44,6 +44,7 @@ export const SECURITY_SAFETY_PARAM_AXES: Readonly<Record<string, ParamAxisTag>> 
  */
 export const ABSENCE_SECRET_IN_PROMPT_RECORD: ContentTemplateRecord = {
   signalType: 'ABSENCE_SECRET_IN_PROMPT', source: 'shipped', schemaVersion: 1, slots: [],
+  question: 'A secret was just pasted into a prompt — treat it as leaked and rotate it?',
   registerOverrides: { beginner: SECRET_IN_PROMPT_BEGINNER_OVERRIDE },
   paramAxes: SECURITY_SAFETY_PARAM_AXES, l2SafeguardRequired: true,
   l2SafeguardLine: 'Ask me for go-ahead before you rotate any keys or rewrite git history.',
@@ -67,6 +68,7 @@ export const ABSENCE_SECRET_IN_PROMPT_RECORD: ContentTemplateRecord = {
  */
 export const ABSENCE_NO_VERSION_CONTROL_RECORD: ContentTemplateRecord = {
   signalType: 'ABSENCE_NO_VERSION_CONTROL', source: 'shipped', schemaVersion: 1, slots: [],
+  question: "This project isn't under version control yet — set that up?",
   registerOverrides: { beginner: NO_VERSION_CONTROL_BEGINNER_OVERRIDE },
   paramAxes: SECURITY_SAFETY_PARAM_AXES,
   levelForms: {
@@ -95,6 +97,7 @@ export const ABSENCE_NO_VERSION_CONTROL_RECORD: ContentTemplateRecord = {
  */
 export const ABSENCE_NO_BACKUP_SAFETY_RECORD: ContentTemplateRecord = {
   signalType: 'ABSENCE_NO_BACKUP_SAFETY', source: 'shipped', schemaVersion: 1, slots: [],
+  question: "There's no backup or safety net for this project's data — add one?",
   registerOverrides: { beginner: NO_BACKUP_SAFETY_BEGINNER_OVERRIDE },
   paramAxes: SECURITY_SAFETY_PARAM_AXES,
   levelForms: {
@@ -118,6 +121,7 @@ export const ABSENCE_NO_BACKUP_SAFETY_RECORD: ContentTemplateRecord = {
  */
 export const ABSENCE_NO_SEPARATE_ENVS_RECORD: ContentTemplateRecord = {
   signalType: 'ABSENCE_NO_SEPARATE_ENVS', source: 'shipped', schemaVersion: 1, slots: [],
+  question: "Dev, staging, and production aren't separated — stand up separate environments?",
   registerOverrides: { beginner: NO_SEPARATE_ENVS_BEGINNER_OVERRIDE },
   paramAxes: SECURITY_SAFETY_PARAM_AXES, l2SafeguardRequired: true,
   l2SafeguardLine: 'Ask me for go-ahead before you touch production or move any environment credentials.',
@@ -141,6 +145,7 @@ export const ABSENCE_NO_SEPARATE_ENVS_RECORD: ContentTemplateRecord = {
  */
 export const ABSENCE_NO_AUTOMATED_SECURITY_SCANNING_RECORD: ContentTemplateRecord = {
   signalType: 'ABSENCE_NO_AUTOMATED_SECURITY_SCANNING', source: 'shipped', schemaVersion: 1, slots: [],
+  question: 'No automated security scanning is set up — add a dependency/code scan?',
   registerOverrides: { beginner: NO_AUTOMATED_SECURITY_SCANNING_BEGINNER_OVERRIDE },
   paramAxes: SECURITY_SAFETY_PARAM_AXES, l2SafeguardRequired: true,
   l2SafeguardLine: 'Ask me for go-ahead before you install or upgrade dependencies or change the CI/deploy config.',

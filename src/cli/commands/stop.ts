@@ -24,6 +24,7 @@ import type { GeneratedOptions } from '../../decision-session/OptionGenerator.js
 import { resolveContentSource, selectionRegister } from '../../decision-session/selection-registry.js';
 import { shippedRecordLookup, recordSignalTypeForFlag } from '../../decision-session/content-template-source.js';
 import { generateFromEngine, buildEngineGrounding } from '../../decision-session/engine-option-generator.js';
+import { resolveRecord } from '../../decision-session/content-template-engine.js';
 import { getUserDepthLevel } from '../../store/user-depth-level.js';
 import type { MaturityLevel } from '../../decision-session/content-template-schema.js';
 import type { PromptRecord } from '../../classifier/types.js';
@@ -159,13 +160,18 @@ export async function runStop(
   // path, byte-for-byte unchanged. Per-set migration flips one signal at a time (S8).
   const recordSignalType = recordSignalTypeForFlag(advisory.flagType);
   let generatedOptions: GeneratedOptions | null = null;
+  // A migrated signal owns its popup question in the record (no matching static
+  // DecisionContent) — thread it to runDecisionSession as `questionOverride`.
+  let questionOverride: string | undefined;
   if (recordSignalType && resolveContentSource(recordSignalType) === 'content-template') {
+    const lookup = shippedRecordLookup(recordSignalType);
+    questionOverride = resolveRecord(lookup)?.record.question;
     const level = (getUserDepthLevel(store, payload.cwd)?.currentLevel ?? 2) as MaturityLevel;
     const promptHistory = mgr.current.promptHistory as PromptRecord[];
     const facts = await buildEngineGrounding(store, payload.cwd, promptHistory, openai);
     generatedOptions = await generateFromEngine(
       {
-        lookup:   shippedRecordLookup(recordSignalType),
+        lookup,
         level,
         register: selectionRegister(mgr.current.profile?.nature),
         facts,
@@ -206,6 +212,7 @@ export async function runStop(
       promptCount:          advisory.promptCount,
       decisionSessionCount,
       generatedOptions:     generatedOptions ?? undefined,
+      questionOverride,
       profile:              mgr.current.profile,
       // Phase 4 — Item B: last-5 prompt metadata for decision_session_started.
       recentPrompts:        recentPromptMetadata(mgr.current.promptHistory),
