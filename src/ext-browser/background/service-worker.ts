@@ -124,13 +124,18 @@ browser.runtime.onMessage.addListener(
       // browser's Stop-hook equivalent (cli/commands/stop.ts).
       log.debug('response_stop_received', { agent: msg.agent, projectRoot: msg.projectRoot });
       const tabId = sender.tab?.id ?? msg.tabId;
-      handleResponseStop(msg.projectRoot, tabId)
-        .then(() => sendResponse({ ok: true }))
-        .catch((err: unknown) => {
-          log.warn('response_stop_error', { error: String(err) });
-          sendResponse({ ok: false });
-        });
-      return true; // keep channel open for async response
+      // ACK IMMEDIATELY and run the show DETACHED. handleResponseStop → showAdvisory
+      // awaits the user's panel interaction (potentially minutes); if we held this
+      // content→SW channel open for that, the MV3 worker idling out or the tab
+      // navigating closes it → "message channel closed before a response was received"
+      // (observed live in floods on Bolt, 2026-07-08). The internal tabs.sendMessage
+      // inside showAdvisory is itself a pending extension call, so the worker stays
+      // alive for the advisory without us pinning this fire-and-forget channel.
+      sendResponse({ ok: true });
+      void handleResponseStop(msg.projectRoot, tabId).catch((err: unknown) => {
+        log.warn('response_stop_error', { error: String(err) });
+      });
+      return true;
     }
 
     if (isAdvisoryFooterIntentMsg(msg)) {

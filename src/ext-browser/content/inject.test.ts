@@ -148,14 +148,35 @@ describe('inject.ts (B5b — real panel integration)', () => {
     expect(host!.shadowRoot).toBeNull(); // closed → not exposed on the host
   });
 
-  it('positions the host as a fixed corner overlay (else it renders off-screen in page flow)', () => {
+  it('positions the host as a fixed CENTERED overlay (CLI parity; else off-screen in page flow)', () => {
     dispatchShowAdvisory(makePayload());
     const host = document.getElementById('nexpath-panel-host')!;
     expect(host.style.position).toBe('fixed');
-    // pinned to a corner + above the agent UI so it is actually visible
+    // centered on screen + above the agent UI so it is actually visible
     expect(host.style.zIndex).toBe('2147483647');
-    expect(host.style.right).not.toBe('');
-    expect(host.style.bottom).not.toBe('');
+    expect(host.style.top).toBe('50%');
+    expect(host.style.left).toBe('50%');
+    expect(host.style.transform).toMatch(/translate\(-50%,\s*-50%\)/);
+  });
+
+  it("move: drags the host by the delta (explicit px + transform:none so the user can move it aside)", () => {
+    dispatchShowAdvisory(makePayload());
+    const host = document.getElementById('nexpath-panel-host')!;
+    expect(host.style.transform).toMatch(/translate/); // starts centered
+    capturedOnEvent!({ type: 'move', dx: 30, dy: -20 } as UiPanelEvent);
+    expect(host.style.transform).toBe('none');
+    // jsdom getBoundingClientRect is 0,0, so the new left/top equals the delta
+    expect(host.style.left).toBe('30px');
+    expect(host.style.top).toBe('-20px');
+  });
+
+  it('re-centers the host on a NEW advisory (undoes a previous drag)', () => {
+    dispatchShowAdvisory(makePayload());
+    capturedOnEvent!({ type: 'move', dx: 100, dy: 100 } as UiPanelEvent);
+    const host = document.getElementById('nexpath-panel-host')!;
+    expect(host.style.transform).toBe('none'); // dragged
+    dispatchShowAdvisory(makePayload({ advisoryId: 'adv-2' }));
+    expect(host.style.transform).toMatch(/translate\(-50%,\s*-50%\)/); // re-centered
   });
 
   describe('panel events', () => {

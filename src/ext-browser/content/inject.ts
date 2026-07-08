@@ -158,7 +158,32 @@ function handlePanelEvent(event: UiPanelEvent): void {
       dispatchFooterIntent('open-settings');
       break;
     }
+    case 'move': {
+      // User is dragging the popup aside (by its header) to see the screen behind.
+      // The engine owns the host's placement, so the panel emits a delta and we move
+      // the host. First move converts the centered transform to explicit px so the
+      // delta applies without a jump.
+      moveHostBy(event.dx, event.dy);
+      break;
+    }
   }
+}
+
+/** Drag the panel host by a pixel delta (see the 'move' PanelEvent). */
+function moveHostBy(dx: number, dy: number): void {
+  if (!panelHost) return;
+  const r = panelHost.getBoundingClientRect(); // current visual position (incl. transform)
+  panelHost.style.left = `${Math.round(r.left + dx)}px`;
+  panelHost.style.top = `${Math.round(r.top + dy)}px`;
+  panelHost.style.transform = 'none';
+}
+
+/** Re-center the host (undo any drag) — called each time a NEW advisory is shown. */
+function recenterHost(): void {
+  if (!panelHost) return;
+  panelHost.style.left = '50%';
+  panelHost.style.top = '50%';
+  panelHost.style.transform = 'translate(-50%, -50%)';
 }
 
 /** Lazily create the closed Shadow root + mount the panel ONCE (contract). */
@@ -167,16 +192,18 @@ function ensurePanelMounted(): PanelController {
 
   panelHost = document.createElement('div');
   panelHost.id = 'nexpath-panel-host';
-  // Fixed corner overlay. The engine owns the host's PLACEMENT (the panel styles
-  // only its own content, inside the shadow — it can't position its own host).
-  // Without this the host is a static, in-flow block appended to <body>, so it
-  // rendered full-width at the very bottom of the page — off-screen below the fold
-  // (confirmed live on Bolt 2026-07-08: advisory fired but was never visible).
-  // z-index maxed so it sits above the agent's own UI; max-height + auto-scroll so
-  // a tall advisory can't overflow a short viewport.
+  // CENTERED overlay — CLI parity (the CLI popup is a centered "Action Required"
+  // window; user requirement 2026-07-08). The engine owns the host's PLACEMENT
+  // (the panel styles only its own content, inside the shadow — it can't position
+  // its own host). Without this the host is a static, in-flow block appended to
+  // <body>. z-index maxed so it sits above the agent's own UI; max-height +
+  // auto-scroll so a tall advisory can't overflow a short viewport. The panel is
+  // focused on show() (see panel.js) so ↑/↓/Enter work immediately; clicking back
+  // into the page releases the keys (focus-scoped, not a modal backdrop) so the
+  // user can still type in the agent's chat.
   panelHost.style.cssText =
-    'position:fixed;right:20px;bottom:20px;z-index:2147483647;' +
-    'max-height:calc(100vh - 40px);overflow-y:auto;';
+    'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);' +
+    'z-index:2147483647;max-height:calc(100vh - 40px);overflow-y:auto;';
   document.body.appendChild(panelHost);
 
   // Engine owns the closed Shadow root (sign-off B); panel.js renders INTO the
@@ -209,6 +236,7 @@ function setupListener(): void {
     // Re-attach if the host was detached from the DOM (a host-page SPA re-render can
     // wipe body children) — the mount-once panel is worthless if its host is orphaned.
     if (panelHost && !panelHost.isConnected) document.body.appendChild(panelHost);
+    recenterHost(); // each new advisory starts centered, undoing any previous drag
     ctrl.show(currentPayload);
   });
 

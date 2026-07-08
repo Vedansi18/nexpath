@@ -150,6 +150,15 @@ export type DisableProjectEvent = { type: 'disable-project' };
  */
 export type OpenSettingsEvent = { type: 'open-settings' };
 
+/**
+ * Emitted while the user DRAGS the panel by its header (the ▲ NEXPATH bar).
+ * `dx`/`dy` are the pointer movement in px since the previous move event. The
+ * engine repositions the panel host by that delta so the user can move the popup
+ * aside to see the screen behind it. Non-terminal (panel stays open); emit one per
+ * pointermove during a drag.
+ */
+export type MoveEvent = { type: 'move'; dx: number; dy: number };
+
 export type PanelEvent =
   | SelectEvent
   | SkipEvent
@@ -157,7 +166,8 @@ export type PanelEvent =
   | CopyEvent
   | ShowSimplerEvent
   | DisableProjectEvent
-  | OpenSettingsEvent;
+  | OpenSettingsEvent
+  | MoveEvent;
 
 
 // ─── What you return from mountNexpathPanel ───────────────────────────
