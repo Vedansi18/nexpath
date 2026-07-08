@@ -29,10 +29,10 @@
  *
  * The LLM-backed operations (the simpler-derive and the option/why-desc grounding
  * weave) are INJECTED seams: this module owns the deterministic orchestration and
- * composition; the caller supplies the grounding runtime. With no seam supplied,
- * the engine composes deterministically and fires nothing. `run()` stays dark
- * until the records, the live render-path wiring, and the grounding runtime are
- * in place (a later activation step).
+ * composition; the caller supplies the grounding runtime. With no LLM seam supplied,
+ * the engine composes deterministically (no grounding weave). `run()` itself is LIVE
+ * (§6.1 item 1): it resolves the record and returns a ContentSpec — the async
+ * grounding/compose weave (composeAdvisory) is the downstream live-caller step.
  */
 
 import type OpenAI from 'openai';
