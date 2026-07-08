@@ -299,13 +299,34 @@ export async function extractPromptFacts(prompts: readonly string[], client?: Op
  * value (e.g. the framework); a boolean capability carries its key (the weave
  * phrases it). Probe tier 'C'→capability / 'P'→corroborated; confidence sets weight.
  */
+/**
+ * Human phrasing for the boolean AR-10 project-fact keys — so a capability grounds as natural
+ * language ("the project has backups"), never the raw snake_case key ("has_backups"), which the
+ * LLM weave would otherwise echo verbatim into the CA-bound why-desc. String facts (e.g.
+ * project_framework) ground with their own value; an unknown boolean key falls back to the key.
+ */
+const ENV_FACT_PHRASE: Readonly<Record<string, string>> = {
+  has_version_control:         'the project is under version control',
+  has_persistent_context_file: 'the project keeps a persistent context/notes file',
+  has_test_runner:             'a test runner is set up',
+  has_ci_pipeline:             'a CI pipeline is set up',
+  has_deploy_config:           'a deployment configuration is present',
+  has_security_scanner:        'a security scanner is set up',
+  has_env_separation:          'the project separates environments (dev/staging/prod)',
+  has_backups:                 'the project has backups',
+  has_lockfile:                'a dependency lockfile is present',
+};
+
 export function envFactsToGrounding(facts: FactMap): GroundingFact[] {
   const out: GroundingFact[] = [];
   for (const [key, f] of Object.entries(facts)) {
     if (f.value === null || f.value === false) continue;
+    // Boolean capability facts ground with a human phrase (never the raw snake_case key);
+    // string facts (e.g. project_framework) ground with their value.
+    const value = typeof f.value === 'string' ? f.value : (ENV_FACT_PHRASE[key] ?? key);
     out.push({
       key,
-      value: typeof f.value === 'string' ? f.value : key,
+      value,
       weight: f.confidence === 'high' ? 1 : 0.5,
       tier: f.tier === 'P' ? 'corroborated' : 'capability',
     });

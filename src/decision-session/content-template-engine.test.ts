@@ -293,17 +293,31 @@ describe('content-template-engine — render-path bridge (deriveSimplerLevel)', 
 });
 
 describe('content-template-engine — param-source retrieval (AR-10 / AR-9 / AR-3)', () => {
-  it('envFactsToGrounding maps present capabilities, skips unknown/absent', () => {
+  it('envFactsToGrounding maps present capabilities to human phrases, skips unknown/absent', () => {
     const facts: FactMap = {
-      project_framework: { value: 'next.js', tier: 'C', confidence: 'high', detectedAt: 0 },
-      has_test_runner: { value: true, tier: 'C', confidence: 'high', detectedAt: 0 },
+      project_framework: { value: 'next.js', tier: 'C', confidence: 'high', detectedAt: 0 }, // string → its value
+      has_test_runner: { value: true, tier: 'C', confidence: 'high', detectedAt: 0 },         // bool → human phrase
       has_ci_pipeline: { value: false, tier: 'C', confidence: 'high', detectedAt: 0 }, // absent → skip
       shell_type: { value: null, tier: 'C', confidence: 'low', detectedAt: 0 },        // unknown → skip
     };
     expect(envFactsToGrounding(facts)).toEqual([
       { key: 'project_framework', value: 'next.js', weight: 1, tier: 'capability' },
-      { key: 'has_test_runner', value: 'has_test_runner', weight: 1, tier: 'capability' },
+      { key: 'has_test_runner', value: 'a test runner is set up', weight: 1, tier: 'capability' },
     ]);
+  });
+
+  it('envFactsToGrounding never grounds a boolean fact with its raw snake_case key (would leak into the why-desc)', () => {
+    // Every present boolean PROJECT_FACT_KEY grounds with a human phrase, not the raw key.
+    const facts: FactMap = Object.fromEntries(
+      ['has_version_control', 'has_persistent_context_file', 'has_test_runner', 'has_ci_pipeline',
+       'has_deploy_config', 'has_security_scanner', 'has_env_separation', 'has_backups', 'has_lockfile']
+        .map((k) => [k, { value: true, tier: 'C', confidence: 'high', detectedAt: 0 }]),
+    ) as FactMap;
+    for (const g of envFactsToGrounding(facts)) {
+      expect(g.value, `${g.key} grounded with its raw key`).not.toBe(g.key);
+      expect(g.value, `${g.key} value looks like a raw key`).not.toMatch(/^has_[a-z_]+$/);
+      expect(g.value.length).toBeGreaterThan(0);
+    }
   });
 
   it('envFactsToGrounding honours tier P (corroborated) and low confidence (weight 0.5)', () => {
