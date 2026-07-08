@@ -107,8 +107,9 @@ browser.runtime.onMessage.addListener(
   (msg: unknown, sender, sendResponse: (r?: unknown) => void): true => {
     if (isPromptSubmitMsg(msg)) {
       log.debug('prompt_submit_received', { agent: msg.agent, projectRoot: msg.projectRoot });
-      const tabId = sender.tab?.id ?? msg.tabId;
-      handlePromptSubmit(msg.promptText, msg.projectRoot, msg.agent, tabId)
+      // No tabId needed at submit: the advisory is only queued now, and shown later
+      // (with the response-stop event's own tabId) once the agent finishes responding.
+      handlePromptSubmit(msg.promptText, msg.projectRoot, msg.agent)
         .then(() => sendResponse({ ok: true }))
         .catch((err: unknown) => {
           log.warn('prompt_submit_error', { error: String(err) });
@@ -118,11 +119,18 @@ browser.runtime.onMessage.addListener(
     }
 
     if (isResponseStopMsg(msg)) {
-      // No pipeline action in B2 skeleton — acknowledge and return. Logged explicitly
-      // so response-stop receipt is directly visible/testable, not just inferred.
+      // CLI-parity popup timing: the agent just finished responding → show the
+      // advisory handlePromptSubmit queued for this project (if any). This is the
+      // browser's Stop-hook equivalent (cli/commands/stop.ts).
       log.debug('response_stop_received', { agent: msg.agent, projectRoot: msg.projectRoot });
-      sendResponse({ ok: true });
-      return true;
+      const tabId = sender.tab?.id ?? msg.tabId;
+      handleResponseStop(msg.projectRoot, tabId)
+        .then(() => sendResponse({ ok: true }))
+        .catch((err: unknown) => {
+          log.warn('response_stop_error', { error: String(err) });
+          sendResponse({ ok: false });
+        });
+      return true; // keep channel open for async response
     }
 
     if (isAdvisoryFooterIntentMsg(msg)) {
@@ -168,11 +176,19 @@ function projectFreqKeyFor(projectRoot: string): string {
   return `advisory_frequency:${projectRoot}`;
 }
 
+/**
+ * Pending-advisory key — the browser's equivalent of the CLI's pending-advisories
+ * table. handlePromptSubmit writes the built payload here; handleResponseStop reads
+ * + clears it so the popup shows only after the agent's response completes.
+ */
+function pendingAdvisoryKeyFor(projectRoot: string): string {
+  return `nexpath_pending_advisory::${projectRoot}`;
+}
+
 async function handlePromptSubmit(
   promptText: string,
   projectRoot: string,
   agent: string,
-  tabId: number,
 ): Promise<void> {
   const now = clock.now();
 
@@ -482,17 +498,70 @@ async function handlePromptSubmit(
     },
   };
 
-  // ── Step 9: Record advisory fired + persist ──────────────────────────────────
+  // ── Step 9: Record advisory + decision-session fired ─────────────────────────
+  // CLI parity (cli/commands/auto.ts:375,410): the DECISION happens now, at prompt
+  // submit — mark both fired here (so cooldown/session-cap/once-per-session gating
+  // counts this advisory immediately, exactly like the CLI's `auto` hook), even
+  // though the popup itself is shown later, when the agent's response completes.
   mgr.markAdvisoryFired(memHandle.port);
+  if (trigger.kind === 'stage_transition' || trigger.kind === 'absence') {
+    const sessionKey = trigger.kind === 'stage_transition'
+      ? `stage_transition:${prevStageBeforeUpdate}→${state.currentStage}`
+      : `absence:${trigger.qualifyingFlags?.[0]?.signalKey ?? 'unknown'}@${state.currentStage}`;
+    mgr.markDecisionSessionFired(memHandle.port, sessionKey);
+  }
 
   const stateAfterMark = memHandle.getLatestState();
   if (stateAfterMark) {
     await idb.saveSessionState(stateAfterMark);
   }
 
-  // ── Step 10: Show advisory in the tab ───────────────────────────────────────
+  // ── Step 10: Queue the advisory — shown on response-stop, NOT now ─────────────
+  // The CLI's popup appears on the Stop hook, after Claude finishes responding
+  // (cli/commands/stop.ts). We mirror that: persist the built payload and let the
+  // response-stop handler render it once the agent's turn completes — never before
+  // or mid-generation. Overwrites any still-pending advisory (latest wins, like the
+  // CLI's upsertPendingAdvisory).
+  await keyStore.setKey(pendingAdvisoryKeyFor(projectRoot), JSON.stringify(payload));
+  log.debug('advisory_pending', { projectRoot, advisoryId: payload.advisoryId, stage: payload.stage });
+}
+
+/**
+ * Response-stop handler — CLI-parity popup timing. Fires when the agent finishes
+ * responding (the browser equivalent of Claude Code's Stop hook). Shows the advisory
+ * that handlePromptSubmit queued for this project, if any — so the popup lands AFTER
+ * the response, never before/during it. Mirrors cli/commands/stop.ts (runStop):
+ * pull pending → clear immediately (dedup on rapid re-fires) → re-check the freq
+ * gate (honour a Ctrl+X pressed since queuing) → render.
+ */
+async function handleResponseStop(projectRoot: string, tabId: number | undefined): Promise<void> {
+  const key = pendingAdvisoryKeyFor(projectRoot);
+  const raw = await keyStore.getKey(key);
+  if (!raw) return; // nothing queued for this project
+
+  // Clear before showing so a second Stop event (agents re-fire it) can't double-show.
+  await keyStore.setKey(key, '');
+
+  // Honour opt-out / frequency=off toggled after the advisory was queued (CLI stop gate).
+  const [projFreqRaw, globalFreqRaw] = await Promise.all([
+    keyStore.getKey(projectFreqKeyFor(projectRoot)),
+    keyStore.getKey('advisory_frequency'),
+  ]);
+  if ((projFreqRaw ?? globalFreqRaw ?? 'every_event') === 'off') {
+    log.debug('pending_advisory_freq_off', { projectRoot });
+    return;
+  }
+
   if (!tabId) {
     log.warn('show_advisory_no_tab', {});
+    return;
+  }
+
+  let payload: AdvisoryPayload;
+  try {
+    payload = JSON.parse(raw) as AdvisoryPayload;
+  } catch {
+    log.warn('pending_advisory_parse_failed', { projectRoot });
     return;
   }
 
@@ -501,18 +570,6 @@ async function handlePromptSubmit(
     log.debug('advisory_showing', { tabId, advisoryId: payload.advisoryId, stage: payload.stage });
     const event = await ui.showAdvisory(payload);
     log.debug('advisory_dismissed', { eventType: event.type, advisoryId: payload.advisoryId });
-
-    if (trigger.kind === 'stage_transition' || trigger.kind === 'absence') {
-      const sessionKey = trigger.kind === 'stage_transition'
-        ? `stage_transition:${prevStageBeforeUpdate}→${state.currentStage}`
-        : `absence:${trigger.qualifyingFlags?.[0]?.signalKey ?? 'unknown'}@${state.currentStage}`;
-      mgr.markDecisionSessionFired(memHandle.port, sessionKey);
-
-      const finalState = memHandle.getLatestState();
-      if (finalState) {
-        await idb.saveSessionState(finalState);
-      }
-    }
   } catch (err) {
     log.warn('show_advisory_error', { error: String(err) });
   }

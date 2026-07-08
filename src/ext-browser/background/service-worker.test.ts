@@ -109,6 +109,14 @@ function baseClassification(): ClassificationResult {
   return { stage: 'implementation', confidence: 0.8, tier: 1 };
 }
 
+/** The advisory payload handlePromptSubmit queued (persisted under the pending key). */
+function pendingPayload(): Record<string, unknown> | null {
+  const call = keyStoreSetKey.mock.calls.find(
+    ([k]) => typeof k === 'string' && k.startsWith('nexpath_pending_advisory::'),
+  );
+  return call ? (JSON.parse(call[1] as string) as Record<string, unknown>) : null;
+}
+
 describe('service-worker.ts', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -220,11 +228,10 @@ describe('service-worker.ts', () => {
   });
 
   describe('onMessage routing', () => {
-    it('acknowledges nexpath:response-stop synchronously, calling sendResponse before returning', async () => {
-      // Always returns true — webextension-polyfill's OnMessageListenerCallback type
-      // requires the literal `true` for the 3-arg (sendResponse) form; `false` isn't a
-      // valid return for any of its 3 listener shapes, and calling sendResponse
-      // synchronously before returning true is harmless (the response is already sent).
+    it('keeps the channel open for nexpath:response-stop and resolves {ok:true} when nothing is queued', async () => {
+      // response-stop is now async (it shows any queued advisory — CLI popup-on-Stop
+      // timing), so it keeps the channel open and resolves via the Promise, like
+      // prompt-submit. With no pending advisory (getKey → null) it shows nothing.
       const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
       const sendResponse = vi.fn();
       const keepOpen = messageListener(
@@ -232,8 +239,9 @@ describe('service-worker.ts', () => {
         {},
         sendResponse,
       );
-      expect(sendResponse).toHaveBeenCalledWith({ ok: true });
       expect(keepOpen).toBe(true);
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+      expect(showAdvisoryMock).not.toHaveBeenCalled();
     });
 
     it('logs response_stop_received so receipt is directly visible in the console, not just inferred', async () => {
@@ -317,7 +325,7 @@ describe('service-worker.ts', () => {
       await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: false }));
     });
 
-    it('runs the full pipeline through to showAdvisory when stage2 fires and the key is present', async () => {
+    it('QUEUES the advisory on submit (does NOT show yet) when stage2 fires and the key is present — CLI popup-on-Stop timing', async () => {
       vi.mocked(shouldFireStage2).mockReturnValue({ kind: 'stage_transition' } as unknown as ReturnType<typeof shouldFireStage2>);
       // Promise.all calls getKey in declared order: openai_api_key, then
       // advisory_frequency, then role — mockResolvedValueOnce answers only the
@@ -333,7 +341,6 @@ describe('service-worker.ts', () => {
         pinchFallback: 'fallback pinch',
       } as unknown as ReturnType<typeof resolveDecisionContent>);
       vi.mocked(generatePinchLabel).mockResolvedValue('Hold up.');
-      showAdvisoryMock.mockResolvedValue({ type: 'dismiss', advisoryId: 'whatever' });
 
       const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
       const sendResponse = vi.fn();
@@ -343,8 +350,11 @@ describe('service-worker.ts', () => {
         sendResponse,
       );
 
-      await vi.waitFor(() => expect(showAdvisoryMock).toHaveBeenCalledOnce());
-      const payload = showAdvisoryMock.mock.calls[0]![0];
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+      // Shown on the response-stop event, NOT at submit.
+      expect(showAdvisoryMock).not.toHaveBeenCalled();
+      // The built payload is queued for this project.
+      const payload = pendingPayload();
       expect(payload).toMatchObject({
         schemaVersion: 1,
         pinchLabel: 'Hold up.',
@@ -356,9 +366,9 @@ describe('service-worker.ts', () => {
         ],
         meta: { agent: 'replit', frequency: 'every_event' },
       });
+      // Bookkeeping still happens at decision time (CLI auto parity).
       expect(mgrMarkAdvisoryFired).toHaveBeenCalledOnce();
       expect(mgrMarkDecisionSessionFired).toHaveBeenCalledOnce();
-      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
     });
 
     it('does not attempt to show an advisory when there is no tab id', async () => {
@@ -693,7 +703,7 @@ describe('service-worker.ts', () => {
       );
     });
 
-    it('logs stage2_result with fire:true and advisory_showing on the fire path', async () => {
+    it('logs stage2_result with fire:true and QUEUES the advisory (shown on response-stop, not at submit)', async () => {
       vi.mocked(shouldFireStage2).mockReturnValue({ kind: 'stage_transition' } as unknown as ReturnType<typeof shouldFireStage2>);
       vi.mocked(runStage2).mockResolvedValue({
         fire_decision_session: true,
@@ -708,7 +718,6 @@ describe('service-worker.ts', () => {
         pinchFallback: 'Final Review',
       } as unknown as ReturnType<typeof resolveDecisionContent>);
       vi.mocked(generatePinchLabel).mockResolvedValue('Final Review');
-      showAdvisoryMock.mockResolvedValue({ type: 'dismiss' });
       mockKeyStore3('sk-real-key', 'every_event', null);
       const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
 
@@ -720,8 +729,9 @@ describe('service-worker.ts', () => {
       );
       await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
       expect(logDebugMock).toHaveBeenCalledWith('stage2_result', expect.objectContaining({ fire: true }));
-      expect(logDebugMock).toHaveBeenCalledWith('advisory_showing', expect.objectContaining({ tabId: 7 }));
-      expect(showAdvisoryMock).toHaveBeenCalledOnce();
+      // Popup-on-Stop timing: queued now, not shown yet.
+      expect(logDebugMock).toHaveBeenCalledWith('advisory_pending', expect.objectContaining({ stage: 'implementation' }));
+      expect(showAdvisoryMock).not.toHaveBeenCalled();
       // The verdict record must persist on the FIRE path too, not just declines/errors.
       expect(keyStoreSetKey).toHaveBeenCalledWith(
         'nexpath_last_stage2_result',
@@ -751,12 +761,14 @@ describe('service-worker.ts', () => {
     it('sends question, per-level option ARRAYS, and a flat options view that is the first of each level', async () => {
       primeFirePath(undefined); // no why-help entry → composeWhyHelpBlock returns null
       const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      const sr = vi.fn();
       messageListener(
         { type: 'nexpath:prompt-submit', promptText: 'ship it', projectRoot: 'https://replit.com', agent: 'replit', tabId: 9 },
-        {}, vi.fn(),
+        {}, sr,
       );
-      await vi.waitFor(() => expect(showAdvisoryMock).toHaveBeenCalledOnce());
-      const payload = showAdvisoryMock.mock.calls[0]![0];
+      await vi.waitFor(() => expect(sr).toHaveBeenCalledWith({ ok: true }));
+      // The enriched payload is what gets QUEUED (shown later on response-stop).
+      const payload = pendingPayload();
 
       expect(payload.question).toBe('Before shipping — has it been reviewed and tested?');
       expect(payload.whyHelp).toBeNull();
@@ -777,14 +789,80 @@ describe('service-worker.ts', () => {
     it('composes a non-null whyHelp block when the stage has a why-help entry (real composeWhyHelpBlock)', async () => {
       primeFirePath(WHY_HELP_BY_SIGNAL_TYPE['IDEA_TO_PRD']);
       const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      const sr = vi.fn();
       messageListener(
         { type: 'nexpath:prompt-submit', promptText: 'ship it', projectRoot: 'https://replit.com', agent: 'replit', tabId: 9 },
-        {}, vi.fn(),
+        {}, sr,
       );
-      await vi.waitFor(() => expect(showAdvisoryMock).toHaveBeenCalledOnce());
-      const payload = showAdvisoryMock.mock.calls[0]![0];
+      await vi.waitFor(() => expect(sr).toHaveBeenCalledWith({ ok: true }));
+      const payload = pendingPayload();
       expect(typeof payload.whyHelp).toBe('string');
-      expect(payload.whyHelp.length).toBeGreaterThan(0);
+      expect((payload.whyHelp as string).length).toBeGreaterThan(0);
+    });
+  });
+
+  describe('response-stop shows the queued advisory (CLI popup-on-Stop timing)', () => {
+    const P = 'https://replit.com';
+    const PENDING_KEY = 'nexpath_pending_advisory::https://replit.com';
+    const samplePayload = {
+      schemaVersion: 1, advisoryId: 'adv-queued', pinchLabel: 'Hold up.', stage: 'implementation',
+      question: 'q', whyHelp: null, levels: { L1: [], L2: [], L3: [] }, options: [],
+      meta: { agent: 'replit', frequency: 'every_event' },
+    };
+    function stop(messageListener, tabId) {
+      const sendResponse = vi.fn();
+      messageListener(
+        { type: 'nexpath:response-stop', projectRoot: P, agent: 'replit', tabId: 0 },
+        tabId === undefined ? {} : { tab: { id: tabId } },
+        sendResponse,
+      );
+      return sendResponse;
+    }
+
+    it('shows the pending advisory when the agent finishes, logs advisory_showing, and clears the pending key', async () => {
+      keyStoreGetKey.mockImplementation(async (name) => (name === PENDING_KEY ? JSON.stringify(samplePayload) : null));
+      showAdvisoryMock.mockResolvedValue({ type: 'dismiss', advisoryId: 'adv-queued' });
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+
+      const sendResponse = stop(messageListener, 55);
+      await vi.waitFor(() => expect(showAdvisoryMock).toHaveBeenCalledOnce());
+      expect(showAdvisoryMock).toHaveBeenCalledWith(expect.objectContaining({ advisoryId: 'adv-queued' }));
+      expect(ContentScriptUIAdapter).toHaveBeenCalledWith(55); // uses the STOP event's tab
+      expect(logDebugMock).toHaveBeenCalledWith('advisory_showing', expect.objectContaining({ tabId: 55 }));
+      expect(keyStoreSetKey).toHaveBeenCalledWith(PENDING_KEY, ''); // cleared after read
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+    });
+
+    it('does nothing when no advisory is queued', async () => {
+      keyStoreGetKey.mockResolvedValue(null);
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+
+      const sendResponse = stop(messageListener, 55);
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+      expect(showAdvisoryMock).not.toHaveBeenCalled();
+    });
+
+    it('does NOT show when frequency was switched off after queuing (Ctrl+X honoured at stop)', async () => {
+      keyStoreGetKey.mockImplementation(async (name) => {
+        if (name === PENDING_KEY) return JSON.stringify(samplePayload);
+        if (name === 'advisory_frequency') return 'off';
+        return null;
+      });
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+
+      const sendResponse = stop(messageListener, 55);
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+      expect(showAdvisoryMock).not.toHaveBeenCalled();
+      expect(keyStoreSetKey).toHaveBeenCalledWith(PENDING_KEY, ''); // still cleared
+    });
+
+    it('does not show when the stop event has no tab id', async () => {
+      keyStoreGetKey.mockImplementation(async (name) => (name === PENDING_KEY ? JSON.stringify(samplePayload) : null));
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+
+      const sendResponse = stop(messageListener, undefined); // no sender.tab, msg.tabId = 0
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+      expect(showAdvisoryMock).not.toHaveBeenCalled();
     });
   });
 
