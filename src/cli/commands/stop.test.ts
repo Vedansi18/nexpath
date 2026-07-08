@@ -481,6 +481,44 @@ describe('runStop — generated options wiring', () => {
   });
 });
 
+// ── runStop — B6 role-precedence guard (context_loss keeps role variants) ────
+
+describe('runStop — B6 role-precedence guard', () => {
+  let store: Store;
+  beforeEach(async () => { store = await openStore(':memory:'); });
+  afterEach(() => { store.db.close(); vi.restoreAllMocks(); });
+
+  function seedProfile(role: string | null) {
+    const mgr = SessionStateManager.load(store, '/test/project');
+    mgr.setProfile({
+      nature: 'hardcore_pro', mood: 'focused', depth: 'high', role,
+      precisionOrdinal: 'high', playfulnessOrdinal: 'low',
+      precisionScore: 8, playfulnessScore: 2, depthScore: 8, computedAt: 0,
+    } as unknown as import('../../classifier/types.js').UserProfile);
+    mgr.setDetectedLanguage(store, undefined); // persists state incl. the profile
+    upsertPendingAdvisory(store, {
+      projectRoot: '/test/project', stage: 'implementation', flagType: 'absence:context_loss',
+      pinchLabel: 'Hold up.', sessionId: mgr.current.sessionId, promptCount: 5,
+    });
+  }
+
+  it('a founder user keeps context_loss on the STATIC path — the engine is NOT called (role variant preserved)', async () => {
+    seedProfile('founder');
+    vi.mocked(generateFromEngine).mockClear();
+    const result = await runStop(makePayload(), store, mockSelect(SKIP_NOW));
+    expect(generateFromEngine).not.toHaveBeenCalled();
+    expect(result.outcome).toBe('skipped');
+  });
+
+  it('a non-role user gets the ENGINE for the migrated context_loss', async () => {
+    seedProfile(null);
+    vi.mocked(generateFromEngine).mockClear();
+    const result = await runStop(makePayload(), store, mockSelect(SKIP_NOW));
+    expect(generateFromEngine).toHaveBeenCalled();
+    expect(result.outcome).toBe('skipped');
+  });
+});
+
 // ── runStop — NEXPATH_SIM=1 TTY bypass ───────────────────────────────────────
 
 describe('runStop — NEXPATH_SIM=1 TTY bypass', () => {

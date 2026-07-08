@@ -18,7 +18,7 @@ import { writeTelemetry } from '../../telemetry/index.js';
 import { triggerOpportunisticSync } from '../../telemetry/OpportunisticSync.js';
 import { recentPromptMetadata } from '../../telemetry/recent-prompts.js';
 import { readStdin } from './auto.js';
-import { resolveDecisionContent } from '../../decision-session/options.js';
+import { resolveDecisionContent, roleAbsenceContentExists } from '../../decision-session/options.js';
 import { generateOptionList } from '../../decision-session/OptionGenerator.js';
 import type { GeneratedOptions } from '../../decision-session/OptionGenerator.js';
 import { resolveContentSource, selectionRegister } from '../../decision-session/selection-registry.js';
@@ -67,6 +67,14 @@ export type StopOutcome =
   | { outcome: 'skipped' };
 
 // ── Core logic ─────────────────────────────────────────────────────────────────
+
+/**
+ * Migrated signalTypes whose static path carries genuinely role-specific content (founder /
+ * indie_hacker / pm variants that differ by role) which the register-only content-template engine
+ * cannot reproduce. For these, a role user is kept on the static path so the role variant is
+ * preserved. Extend/remove entries when role-through-engine serving lands (B9 role-cluster).
+ */
+const ROLE_SPECIFIC_STATIC_SIGNALS: ReadonlySet<string> = new Set(['ABSENCE_CONTEXT_LOSS']);
 
 /**
  * Run the Stop hook pipeline.
@@ -161,12 +169,19 @@ export async function runStop(
   // path. The marker holds the migrated signalTypes; every un-migrated signal takes the
   // static path, byte-for-byte unchanged. Per-set migration flips one signal at a time (S8).
   const recordSignalType = recordSignalTypeForFlag(advisory.flagType);
+  // Role-precedence guard: a migrated signal whose STATIC path carries genuinely role-specific
+  // content (per-role tailored — the register-only engine can't reproduce it) keeps serving that
+  // role variant for founder/indie/pm users. Today only context_loss; extend when role-through-
+  // engine serving lands (B9 role-cluster). Non-role users / other signals take the engine path.
+  const signalKey = advisory.flagType.startsWith('absence:') ? advisory.flagType.slice('absence:'.length) : '';
+  const keepRoleStatic = !!recordSignalType && ROLE_SPECIFIC_STATIC_SIGNALS.has(recordSignalType)
+    && roleAbsenceContentExists(mgr.current.profile, signalKey);
   let generatedOptions: GeneratedOptions | null = null;
   // A migrated signal owns its popup question + per-class why-help in the record (no matching
   // static DecisionContent) — thread them to runDecisionSession as overrides.
   let questionOverride: string | undefined;
   let whyHelpOverride: WhyHelpEntry | null | undefined;
-  if (recordSignalType && resolveContentSource(recordSignalType) === 'content-template') {
+  if (recordSignalType && resolveContentSource(recordSignalType) === 'content-template' && !keepRoleStatic) {
     const lookup = shippedRecordLookup(recordSignalType);
     // The overrides are static record fields (no LLM) — resolve them regardless of the engine.
     questionOverride = resolveRecord(lookup)?.record.question;

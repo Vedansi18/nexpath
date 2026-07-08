@@ -8,6 +8,8 @@ import { getWhyHelpForSignalType } from './why-help-by-signal-type.js';
 import { WHY_HELP_PER_CLASS } from './why-help.js';
 import { CLASS2_RECORDS } from './content-templates/class2-records.js';
 import { CLASS3_RECORDS } from './content-templates/class3-records.js';
+import { CLASS5_RECORDS } from './content-templates/class5-records.js';
+import { roleAbsenceContentExists } from './options.js';
 
 // §6.1 gate 1 (S2): the dual-source resolver decides, per signalType, whether an
 // advisory is served from the static DecisionContent set or the content-template
@@ -20,12 +22,12 @@ describe('§6.1 gate 1 — dual-source resolver + migration marker', () => {
     'ABSENCE_SECRET_IN_PROMPT', 'ABSENCE_NO_VERSION_CONTROL', 'ABSENCE_NO_BACKUP_SAFETY',
     'ABSENCE_NO_SEPARATE_ENVS', 'ABSENCE_NO_AUTOMATED_SECURITY_SCANNING', 'ABSENCE_FRUSTRATION_SPIRAL',
   ];
-  // Migrated existing Group-B classes, derived from their records (B3: class 2, B4: class 3).
-  const MIGRATED_CLASS_RECORDS = [...CLASS2_RECORDS, ...CLASS3_RECORDS];
+  // Migrated existing Group-B classes, derived from their records (B3: class 2, B4: class 3, B6: class 5).
+  const MIGRATED_CLASS_RECORDS = [...CLASS2_RECORDS, ...CLASS3_RECORDS, ...CLASS5_RECORDS];
 
-  it('the migration marker holds the 6 new §4.E2 signals (A12) + the migrated Group-B classes (B3: class 2, B4: class 3)', () => {
+  it('the migration marker holds the 6 new §4.E2 signals (A12) + the migrated Group-B classes (B3: class 2, B4: class 3, B6: class 5)', () => {
     const migratedClassSignals = MIGRATED_CLASS_RECORDS.map((r) => r.signalType);
-    expect(MIGRATED_SIGNALS.size).toBe(NEW_E2.length + migratedClassSignals.length); // 6 + 21 + 11 = 38
+    expect(MIGRATED_SIGNALS.size).toBe(NEW_E2.length + migratedClassSignals.length); // 6 + 21 + 11 + 8 = 46
     for (const s of [...NEW_E2, ...migratedClassSignals]) {
       expect(MIGRATED_SIGNALS.has(s)).toBe(true);
       expect(resolveContentSource(s)).toBe('content-template');
@@ -37,6 +39,7 @@ describe('§6.1 gate 1 — dual-source resolver + migration marker', () => {
     // typo'd MIGRATED_SIGNALS entry — or a missed / renamed record — is caught here.
     expect(CLASS2_RECORDS.length).toBe(21);
     expect(CLASS3_RECORDS.length).toBe(11);
+    expect(CLASS5_RECORDS.length).toBe(8);
     for (const rec of MIGRATED_CLASS_RECORDS) {
       expect(MIGRATED_SIGNALS.has(rec.signalType), `${rec.signalType} in MIGRATED_SIGNALS`).toBe(true);
       expect(resolveContentSource(rec.signalType)).toBe('content-template');
@@ -73,9 +76,10 @@ describe('§6.1 gate 1 — dual-source resolver + migration marker', () => {
   });
 
   it('resolves a not-yet-migrated signalType to static (un-migrated classes still serve from the static set)', () => {
-    // Real signalTypes from classes NOT yet in MIGRATED_SIGNALS (class 1/5/9) — still static.
-    // (class 3's ABSENCE_SPEC_ACCEPTANCE was here until B4 migrated it — the self-correcting canary.)
-    for (const s of ['IDEA_TO_PRD', 'ABSENCE_CONTEXT_LOSS', 'ABSENCE_CONTRACT_TESTING_GAP', 'x_unknown']) {
+    // Real signalTypes from classes NOT yet in MIGRATED_SIGNALS (class 1/6/9) — still static.
+    // (class 3's ABSENCE_SPEC_ACCEPTANCE, then class 5's ABSENCE_CONTEXT_LOSS, sat here until B4/B6
+    // migrated them — the self-correcting canary.)
+    for (const s of ['IDEA_TO_PRD', 'ABSENCE_PHASE_TRANSITION', 'ABSENCE_CONTRACT_TESTING_GAP', 'x_unknown']) {
       expect(resolveContentSource(s)).toBe('static');
     }
   });
@@ -90,6 +94,25 @@ describe('§6.1 gate 1 — dual-source resolver + migration marker', () => {
     const marker: ReadonlySet<string> = new Set(['a_migrated']);
     expect(resolveContentSource('a_migrated', marker)).toBe('content-template');
     expect(resolveContentSource('a_static', marker)).toBe('static');
+  });
+});
+
+describe('B6 role-precedence — roleAbsenceContentExists (context_loss role variants)', () => {
+  const p = (nature: string, role: string | null) => ({ nature, role } as unknown as UserProfile);
+
+  it('true when the role has a static variant for the signal (founder/indie/pm × context_loss)', () => {
+    expect(roleAbsenceContentExists(p('hardcore_pro', 'founder'), 'context_loss')).toBe(true);
+    expect(roleAbsenceContentExists(p('hardcore_pro', 'indie_hacker'), 'context_loss')).toBe(true);
+    expect(roleAbsenceContentExists(p('hardcore_pro', 'pm'), 'context_loss')).toBe(true);
+  });
+
+  it('false with no role, or a role whose map has no variant for the signal', () => {
+    expect(roleAbsenceContentExists(p('hardcore_pro', null), 'context_loss')).toBe(false);
+    expect(roleAbsenceContentExists(p('hardcore_pro', 'founder'), 'test_creation')).toBe(false);
+  });
+
+  it('false for a beginner (role maps are gated off), even with a role set', () => {
+    expect(roleAbsenceContentExists(p('beginner', 'founder'), 'context_loss')).toBe(false);
   });
 });
 

@@ -548,6 +548,18 @@ function selectNonBeginnerVariant(nature: UserProfile['nature'] | null | undefin
 }
 
 /**
+ * True when the STATIC path would serve genuinely role-specific content for this profile + signal
+ * — i.e. a founder / indie_hacker / pm variant exists (role maps are gated off for beginners,
+ * mirroring resolveDecisionContent's `isVibe` branch). The migration dispatch uses this to keep
+ * serving that role variant for a signal whose role-tailored content the register-only
+ * content-template engine cannot yet reproduce (today: context_loss).
+ */
+export function roleAbsenceContentExists(profile: UserProfile | null | undefined, signalKey: string): boolean {
+  if (profile?.nature === 'beginner') return false;
+  return !!selectRoleAbsenceMap(profile?.role)?.[signalKey];
+}
+
+/**
  * Resolve the decision content to display.
  *
  * Priority:

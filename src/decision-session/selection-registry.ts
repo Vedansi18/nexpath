@@ -206,6 +206,17 @@ export const MIGRATED_SIGNALS: ReadonlySet<string> = new Set<string>([
   'ABSENCE_ARCHITECTURE_NOTE_ABSENCE',
   'ABSENCE_API_CONTRACT_DEFINITION',
   'ABSENCE_BACKWARDS_COMPATIBILITY_CHECK',
+  // B6 — class 5 (session-quality, 8 signals, 0 sensitive): now engine-served.
+  // context_loss keeps its static role variant for founder/indie/pm users via stop.ts's
+  // role-precedence guard (the register-only engine can't reproduce role-tailored content).
+  'ABSENCE_COMPREHENSION',
+  'ABSENCE_NO_PUSHBACK',
+  'ABSENCE_CONTEXT_LOSS',
+  'ABSENCE_DECISION_FATIGUE_PATTERN',
+  'ABSENCE_WORK_RHYTHM_CHECK',
+  'ABSENCE_FOCUS_DRIFT_DETECTION',
+  'ABSENCE_SESSION_LENGTH_CHECKPOINT',
+  'ABSENCE_PROGRESS_CONSOLIDATION_GAP',
 ]);
 
 /**
