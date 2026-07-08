@@ -10,8 +10,9 @@ import { CLASS2_RECORDS } from './content-templates/class2-records.js';
 
 // §6.1 gate 1 (S2): the dual-source resolver decides, per signalType, whether an
 // advisory is served from the static DecisionContent set or the content-template
-// engine. The shipped marker is EMPTY (ship-dark) so every signal stays static and
-// cascade parity is preserved; per-set migration flips one signal at a time (S8).
+// engine. The marker holds the migrated signalTypes (the 6 §4.E2 signals + the
+// Group-B classes migrated so far); every un-migrated signal stays static and
+// cascade parity is preserved. Per-set migration flips one signal at a time (S8).
 
 describe('§6.1 gate 1 — dual-source resolver + migration marker', () => {
   it('the migration marker holds the 6 new §4.E2 signals (A12) + the migrated existing classes (B3: class 2)', () => {
