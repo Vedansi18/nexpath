@@ -16,6 +16,7 @@ import {
   readAllSignals,
   pruneAllSignalsUpTo,
   pruneSignalAt,
+  pruneSignalsOfKind,
   SIGNAL_ADVISORY_FIRED,
   SIGNAL_OPTION_SELECTED,
 } from './feedback-signals.js';
@@ -187,6 +188,24 @@ describe('pruneSignalAt (precise)', () => {
   it('is a no-op when nothing matches', () => {
     recordAdvisoryFired(store, '/p', 100);
     pruneSignalAt(store, SIGNAL_OPTION_SELECTED, 100);
+    expect(readAllSignals(store).advisoryFireTs).toEqual([100]);
+  });
+});
+
+describe('pruneSignalsOfKind', () => {
+  it('deletes every signal of the given kind, leaving other kinds untouched', () => {
+    recordOptionSelected(store, '/a', 100);
+    recordOptionSelected(store, '/b', 200);
+    recordAdvisoryFired(store, '/a', 150);
+
+    pruneSignalsOfKind(store, SIGNAL_OPTION_SELECTED);
+
+    expect(readAllSignals(store)).toEqual({ advisoryFireTs: [150], optionSelectTs: [] });
+  });
+
+  it('is a no-op when no signal of that kind exists', () => {
+    recordAdvisoryFired(store, '/a', 100);
+    pruneSignalsOfKind(store, SIGNAL_OPTION_SELECTED);
     expect(readAllSignals(store).advisoryFireTs).toEqual([100]);
   });
 });

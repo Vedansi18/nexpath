@@ -145,3 +145,9 @@ export function pruneSignalAt(store: Store, kind: string, occurredAt: number): v
   );
   saveStore(store);
 }
+
+/** Delete every signal of a given kind across all projects. */
+export function pruneSignalsOfKind(store: Store, kind: string): void {
+  store.db.run('DELETE FROM feedback_signals WHERE kind = ?', [kind]);
+  saveStore(store);
+}

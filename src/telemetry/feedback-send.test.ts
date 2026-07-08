@@ -1,12 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { openStore, closeStore, type Store } from '../store/db.js';
 import { setConfig } from '../store/config.js';
-import {
-  recordAdvisoryFired,
-  recordOptionSelected,
-  readAllSignals,
-  setInstalledAtIfMissing,
-} from '../store/feedback-signals.js';
 import { getInstallationId } from './identity.js';
 import { sendFeedback, FEEDBACK_EVENT } from './feedback-send.js';
 import type { FetchLike } from './TelemetryClient.js';
@@ -52,28 +46,25 @@ describe('sendFeedback', () => {
     expect(cap.envelope?.properties.rating).toBe(3);
   });
 
-  it('builds the payload: rating + all timestamps + installation id', async () => {
-    recordAdvisoryFired(store, '/p', 100);
-    recordOptionSelected(store, '/p', 150);
-    recordAdvisoryFired(store, '/p', 200);
-
+  it('builds a lean payload: rating + feedback timestamp + installation id', async () => {
     await sendFeedback(store, 4, { fetch: okFetch(cap), now: 9_000 });
 
     const env = cap.envelope!;
     const installId = getInstallationId(store);
     expect(env.distinct_id).toBe(installId);
     expect(env.properties.installation_id).toBe(installId);
-    expect(typeof env.properties.installed_at).toBe('number');
-    expect(env.properties.advisory_fire_ts).toEqual([100, 200]);
-    expect(env.properties.option_select_ts).toEqual([150]);
+    expect(env.properties.rating).toBe(4);
     expect(env.properties.feedback_at).toBe(9_000);
     expect(env.timestamp).toBe(new Date(9_000).toISOString());
   });
 
-  it('includes the locally-saved install timestamp (consolidated model)', async () => {
-    setInstalledAtIfMissing(store, 5000);   // saved at install time
-    await sendFeedback(store, 1, { fetch: okFetch(cap) });
-    expect(cap.envelope?.properties.installed_at).toBe(5000);
+  it('does not carry install or advisory context (those are their own events)', async () => {
+    await sendFeedback(store, 2, { fetch: okFetch(cap) });
+    const keys = Object.keys(cap.envelope!.properties).sort();
+    expect(keys).toEqual(['$lib', '$lib_version', 'feedback_at', 'installation_id', 'rating'].sort());
+    expect(cap.envelope?.properties.installed_at).toBeUndefined();
+    expect(cap.envelope?.properties.advisory_fire_ts).toBeUndefined();
+    expect(cap.envelope?.properties.option_select_ts).toBeUndefined();
   });
 
   it('defaults feedback_at to now when not provided', async () => {
@@ -84,33 +75,12 @@ describe('sendFeedback', () => {
     expect(fa).toBeLessThanOrEqual(Date.now());
   });
 
-  it('aggregates signals globally across projects', async () => {
-    recordAdvisoryFired(store, '/a', 100);
-    recordOptionSelected(store, '/b', 150);
-    await sendFeedback(store, 2, { fetch: okFetch(cap) });
-    expect(cap.envelope?.properties.advisory_fire_ts).toEqual([100]);
-    expect(cap.envelope?.properties.option_select_ts).toEqual([150]);
-  });
-
-  it('prunes sent signals on success', async () => {
-    recordAdvisoryFired(store, '/a', 100);
-    recordOptionSelected(store, '/b', 150);
-    await sendFeedback(store, 3, { fetch: okFetch(cap), now: 1_000 });
-    expect(readAllSignals(store)).toEqual({ advisoryFireTs: [], optionSelectTs: [] });
-  });
-
-  it('does not prune and returns false on an HTTP failure', async () => {
-    recordAdvisoryFired(store, '/a', 100);
-    const ok = await sendFeedback(store, 3, { fetch: failFetch(cap) });
-    expect(ok).toBe(false);
-    expect(readAllSignals(store).advisoryFireTs).toEqual([100]);
+  it('returns false on an HTTP failure', async () => {
+    expect(await sendFeedback(store, 3, { fetch: failFetch(cap) })).toBe(false);
   });
 
   it('swallows network errors and returns false', async () => {
-    recordAdvisoryFired(store, '/a', 100);
-    const ok = await sendFeedback(store, 3, { fetch: throwFetch(cap) });
-    expect(ok).toBe(false);
-    expect(readAllSignals(store).advisoryFireTs).toEqual([100]); // not pruned
+    expect(await sendFeedback(store, 3, { fetch: throwFetch(cap) })).toBe(false);
   });
 
   it('returns false and does not post when the api key is empty', async () => {
@@ -118,13 +88,6 @@ describe('sendFeedback', () => {
     const ok = await sendFeedback(store, 3, { fetch: okFetch(cap) });
     expect(ok).toBe(false);
     expect(cap.calls).toBe(0);
-  });
-
-  it('sends with empty timestamp arrays when no signals were recorded', async () => {
-    const ok = await sendFeedback(store, 1, { fetch: okFetch(cap) });
-    expect(ok).toBe(true);
-    expect(cap.envelope?.properties.advisory_fire_ts).toEqual([]);
-    expect(cap.envelope?.properties.option_select_ts).toEqual([]);
   });
 
   it('carries the configured api key and PostHog lib metadata', async () => {
@@ -140,10 +103,7 @@ describe('sendFeedback', () => {
     expect(cap.url).toBe('https://custom.example/capture/');
   });
 
-  it('returns false and does not prune on a 429 rate-limit', async () => {
-    recordAdvisoryFired(store, '/a', 100);
-    const ok = await sendFeedback(store, 3, { fetch: rateLimitedFetch(cap) });
-    expect(ok).toBe(false);
-    expect(readAllSignals(store).advisoryFireTs).toEqual([100]);
+  it('returns false on a 429 rate-limit', async () => {
+    expect(await sendFeedback(store, 3, { fetch: rateLimitedFetch(cap) })).toBe(false);
   });
 });

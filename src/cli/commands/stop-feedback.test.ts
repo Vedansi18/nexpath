@@ -13,7 +13,13 @@ vi.mock('../../decision-session/OptionGenerator.js', () => ({
   generateOptionList: vi.fn().mockResolvedValue(null),
 }));
 
+vi.mock('../../telemetry/lifecycle-flush.js', () => ({
+  flushIfTelemetryOn: vi.fn().mockResolvedValue(undefined),
+  flushLifecycle:     vi.fn().mockResolvedValue(undefined),
+}));
+
 import { openStore, closeStore, type Store } from '../../store/db.js';
+import { flushLifecycle } from '../../telemetry/lifecycle-flush.js';
 import { runStop, type StopPayload, type FeedbackDeps } from './stop.js';
 import { upsertPendingAdvisory } from '../../store/pending-advisories.js';
 import { SessionStateManager } from '../../classifier/SessionStateManager.js';
@@ -66,6 +72,7 @@ afterEach(() => { closeStore(store); vi.restoreAllMocks(); });
 
 describe('feedback popup integration', () => {
   it('shows feedback and sends the rating when eligible', async () => {
+    vi.mocked(flushLifecycle).mockClear();
     makeEligible(store);
     const send = vi.fn().mockResolvedValue(true);
     const deps: FeedbackDeps = { render: pickRating(3), send };
@@ -74,13 +81,16 @@ describe('feedback popup integration', () => {
 
     expect(result.outcome).toBe('feedback_shown');
     expect(send).toHaveBeenCalledWith(store, 3);
+    // consent gate: buffered lifecycle events flushed on a rating
+    expect(flushLifecycle).toHaveBeenCalledWith(store);
     // cadence reset
     const c = readCadence(store);
     expect(c.activeMs).toBe(0);
     expect(c.lastFeedbackAt).not.toBeNull();
   });
 
-  it('resets cadence but does not send on dismiss', async () => {
+  it('resets cadence but does not send or flush on dismiss', async () => {
+    vi.mocked(flushLifecycle).mockClear();
     makeEligible(store);
     const send = vi.fn().mockResolvedValue(true);
     const deps: FeedbackDeps = { render: dismissRender, send };
@@ -89,6 +99,7 @@ describe('feedback popup integration', () => {
 
     expect(result.outcome).toBe('feedback_shown');
     expect(send).not.toHaveBeenCalled();
+    expect(flushLifecycle).not.toHaveBeenCalled();   // no consent → no flush
     expect(readCadence(store).lastFeedbackAt).not.toBeNull();
   });
 

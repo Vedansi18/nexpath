@@ -9,6 +9,11 @@ vi.mock('../../telemetry/recent-prompts.js', () => ({
   recentPromptMetadata: vi.fn().mockReturnValue([]),
 }));
 
+vi.mock('../../telemetry/lifecycle-flush.js', () => ({
+  flushIfTelemetryOn: vi.fn().mockResolvedValue(undefined),
+  flushLifecycle:     vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock('../../decision-session/OptionGenerator.js', () => ({
   generateOptionList: vi.fn().mockResolvedValue(null),
 }));

@@ -1,4 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+
+vi.mock('../../telemetry/lifecycle-flush.js', () => ({
+  flushIfTelemetryOn: vi.fn().mockResolvedValue(undefined),
+  flushLifecycle:     vi.fn().mockResolvedValue(undefined),
+}));
 import { mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';

@@ -4,7 +4,7 @@ import type { Store } from '../../store/db.js';
 import { openStore, closeStore, DEFAULT_DB_PATH } from '../../store/db.js';
 import { getPendingAdvisory, markAdvisoryShown } from '../../store/pending-advisories.js';
 import { isFeedbackEligible, markFeedbackShown } from '../../store/feedback-cadence.js';
-import { recordAdvisoryFired, recordOptionSelected } from '../../store/feedback-signals.js';
+import { recordAdvisoryFired, recordOptionSelected, pruneSignalsOfKind, SIGNAL_OPTION_SELECTED } from '../../store/feedback-signals.js';
 import { sendFeedback } from '../../telemetry/feedback-send.js';
 import { runFeedbackPopup, type FeedbackRenderFn } from '../../decision-session/feedback-popup.js';
 import { createFeedbackRenderFn } from '../../decision-session/feedback-tty.js';
@@ -21,7 +21,7 @@ import type { LogLevel } from '../../logger.js';
 import { writeHookStats } from '../../store/hook-stats.js';
 import { writeTelemetry } from '../../telemetry/index.js';
 import { triggerOpportunisticSync } from '../../telemetry/OpportunisticSync.js';
-import { flushIfTelemetryOn } from '../../telemetry/lifecycle-flush.js';
+import { flushIfTelemetryOn, flushLifecycle } from '../../telemetry/lifecycle-flush.js';
 import { recentPromptMetadata } from '../../telemetry/recent-prompts.js';
 import { readStdin } from './auto.js';
 import { resolveDecisionContent } from '../../decision-session/options.js';
@@ -103,7 +103,14 @@ export async function runStop(
     if (fbRender) {
       const result = await runFeedbackPopup({ render: fbRender });
       if (result.outcome === 'selected') {
+        // The feedback click is the consent gate: flush any buffered lifecycle
+        // events (install + advisory), then send the rating. Flush regardless of
+        // telemetry.enabled — this explicit action is the consent.
+        await flushLifecycle(store);
         await fbSend(store, result.rating);
+        // Option-selected signals are never emitted; clear them at the consent
+        // point so local storage stays bounded.
+        pruneSignalsOfKind(store, SIGNAL_OPTION_SELECTED);
       }
       markFeedbackShown(store);
       logger.info('stop_feedback_shown', { cwd: payload.cwd, selected: result.outcome === 'selected' });
