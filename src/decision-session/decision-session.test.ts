@@ -2974,6 +2974,32 @@ describe('runLevel — questionOverride (migrated-signal popup question)', () =>
   });
 });
 
+describe('runLevel — whyHelpOverride (migrated-signal popup why-help)', () => {
+  const SECURITY = WHY_HELP_PER_CLASS.class_security_safety;
+  const securityFormal = (SECURITY.content as { formal: string }).formal;
+  // hardcore_pro → formal register (register.ts), so the formal why-help text is rendered.
+  const proProfile = {
+    nature: 'hardcore_pro', mood: 'focused', depth: 'high', role: null,
+    precisionOrdinal: 'high', playfulnessOrdinal: 'low',
+    precisionScore: 8, playfulnessScore: 2, depthScore: 8, computedAt: 0,
+  } as unknown as import('../classifier/types.js').UserProfile;
+
+  it('renders the override why-help (not the static fallback) in the popup message + block', async () => {
+    const spy = vi.fn().mockResolvedValue(SKIP_NOW);
+    await runLevel(makeInput({ profile: proProfile, whyHelpOverride: SECURITY }), 1, spy as SelectFn);
+    const arg = (spy as ReturnType<typeof vi.fn>).mock.calls[0][0] as { message: string; whyHelpBlock?: string };
+    expect(arg.message).toContain(securityFormal);
+    expect(arg.whyHelpBlock).toBeTruthy();
+  });
+
+  it('without an override, the static content.whyHelp is used — no security why-help leaks in', async () => {
+    const spy = vi.fn().mockResolvedValue(SKIP_NOW);
+    await runLevel(makeInput({ profile: proProfile }), 1, spy as SelectFn);
+    const arg = (spy as ReturnType<typeof vi.fn>).mock.calls[0][0] as { message: string };
+    expect(arg.message).not.toContain(securityFormal);
+  });
+});
+
 describe('runLevel — SKIP_NOW label split', () => {
   it('SKIP_NOW option has value === SKIP_NOW constant', async () => {
     const spy = vi.fn().mockResolvedValue(SKIP_NOW);

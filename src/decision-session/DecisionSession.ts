@@ -120,6 +120,12 @@ export interface DecisionSessionInput {
    * static-fallback question. When absent, the resolved static `content.question` is used.
    */
   questionOverride?:    string;
+  /**
+   * Popup why-help override — a migrated signal has no static DecisionContent, so its own
+   * per-class why-help (resolved by signalType from the content-template record) is passed here
+   * to replace the mismatched static-fallback why-help. When absent, `content.whyHelp` is used.
+   */
+  whyHelpOverride?:     WhyHelpEntry | null;
   /** User profile — used to route beginner/cool_geek to BEGINNER content blocks. */
   profile?:             UserProfile | null;
   /** Last-5 prompt metadata for the `decision_session_started` telemetry event (Item B). */
@@ -282,11 +288,14 @@ export async function runLevel(
   const { options } = buildOptionList(effective, level);
   const register     = profileToRegister(input.profile);
   const subtitle     = getLevelSubtitle(level) ?? undefined;
-  const whyHelpBlock = content.whyHelp && register
-    ? (composeWhyHelpBlock(content.whyHelp, register, input.profile?.mood, input.profile?.role) ?? undefined)
+  // A migrated signal has no static DecisionContent, so its own per-class why-help is threaded
+  // in via `whyHelpOverride`. Un-migrated signals leave it undefined and fall back to the static.
+  const whyHelp = input.whyHelpOverride ?? content.whyHelp;
+  const whyHelpBlock = whyHelp && register
+    ? (composeWhyHelpBlock(whyHelp, register, input.profile?.mood, input.profile?.role) ?? undefined)
     : undefined;
   const message  = buildSelectMessage(input.pinchLabel, question, level, {
-    whyHelpEntry: content.whyHelp,
+    whyHelpEntry: whyHelp,
     register,
     mood:         input.profile?.mood,
     role:         input.profile?.role,

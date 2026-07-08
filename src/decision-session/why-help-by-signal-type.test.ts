@@ -93,6 +93,16 @@ describe('getWhyHelpForSignalType — resolver', () => {
     expect(getWhyHelpForSignalType('ABSENCE_SECURITY_THREAT_MODELING')).toBe(WHY_HELP_PER_CLASS.class9_academic_hardcore_pro);
   });
 
+  it('returns the security/safety + mood/meta entries for the 6 §4.E2 migrated signalTypes', () => {
+    // stop.ts resolves the migrated signal's per-class why-help THROUGH this resolver
+    // (whyHelpOverride) — since a migrated signal has no static DecisionContent to carry it.
+    for (const s of ['ABSENCE_SECRET_IN_PROMPT', 'ABSENCE_NO_VERSION_CONTROL', 'ABSENCE_NO_BACKUP_SAFETY',
+      'ABSENCE_NO_SEPARATE_ENVS', 'ABSENCE_NO_AUTOMATED_SECURITY_SCANNING']) {
+      expect(getWhyHelpForSignalType(s)).toBe(WHY_HELP_PER_CLASS.class_security_safety);
+    }
+    expect(getWhyHelpForSignalType('ABSENCE_FRUSTRATION_SPIRAL')).toBe(WHY_HELP_PER_CLASS.class_mood_meta);
+  });
+
   it('returns null for unknown signalTypes (graceful-fail)', () => {
     expect(getWhyHelpForSignalType('NOT_A_REAL_SIGNAL')).toBeNull();
     expect(getWhyHelpForSignalType('')).toBeNull();

@@ -25,6 +25,8 @@ import { resolveContentSource, selectionRegister } from '../../decision-session/
 import { shippedRecordLookup, recordSignalTypeForFlag } from '../../decision-session/content-template-source.js';
 import { generateFromEngine, buildEngineGrounding } from '../../decision-session/engine-option-generator.js';
 import { resolveRecord } from '../../decision-session/content-template-engine.js';
+import { getWhyHelpForSignalType } from '../../decision-session/why-help-by-signal-type.js';
+import type { WhyHelpEntry } from '../../decision-session/why-help.js';
 import { getUserDepthLevel } from '../../store/user-depth-level.js';
 import type { MaturityLevel } from '../../decision-session/content-template-schema.js';
 import type { PromptRecord } from '../../classifier/types.js';
@@ -160,12 +162,14 @@ export async function runStop(
   // path, byte-for-byte unchanged. Per-set migration flips one signal at a time (S8).
   const recordSignalType = recordSignalTypeForFlag(advisory.flagType);
   let generatedOptions: GeneratedOptions | null = null;
-  // A migrated signal owns its popup question in the record (no matching static
-  // DecisionContent) — thread it to runDecisionSession as `questionOverride`.
+  // A migrated signal owns its popup question + per-class why-help in the record (no matching
+  // static DecisionContent) — thread them to runDecisionSession as overrides.
   let questionOverride: string | undefined;
+  let whyHelpOverride: WhyHelpEntry | null | undefined;
   if (recordSignalType && resolveContentSource(recordSignalType) === 'content-template') {
     const lookup = shippedRecordLookup(recordSignalType);
     questionOverride = resolveRecord(lookup)?.record.question;
+    whyHelpOverride = getWhyHelpForSignalType(recordSignalType);
     const level = (getUserDepthLevel(store, payload.cwd)?.currentLevel ?? 2) as MaturityLevel;
     const promptHistory = mgr.current.promptHistory as PromptRecord[];
     const facts = await buildEngineGrounding(store, payload.cwd, promptHistory, openai);
@@ -213,6 +217,7 @@ export async function runStop(
       decisionSessionCount,
       generatedOptions:     generatedOptions ?? undefined,
       questionOverride,
+      whyHelpOverride,
       profile:              mgr.current.profile,
       // Phase 4 — Item B: last-5 prompt metadata for decision_session_started.
       recentPrompts:        recentPromptMetadata(mgr.current.promptHistory),
