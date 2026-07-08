@@ -3983,6 +3983,54 @@ describe('SessionStateManager — consecutiveAcceptanceStreak', () => {
   });
 });
 
+// ── A11 — consecutiveFrustratedPrompts (frustration-spiral detector input) ─────
+
+describe('SessionStateManager — consecutiveFrustratedPrompts', () => {
+  // The streak is computed in processPrompt off the mood LLM-classified onto the profile via
+  // setProfile (mirrors the live flow). It is the sole input to ABSENCE_FRUSTRATION_SPIRAL, so
+  // the accumulation logic is tested here directly (every other test injects the value).
+  const withMood = (mood: string): import('./types.js').UserProfile => ({
+    nature: 'pro_geek_soul', mood, depth: 'medium', role: null,
+    precisionOrdinal: 'medium', playfulnessOrdinal: 'medium',
+    precisionScore: 5, playfulnessScore: 5, depthScore: 5, computedAt: 0,
+  } as unknown as import('./types.js').UserProfile);
+
+  it('initializes to 0 in a new session', async () => {
+    const store = await openStore(':memory:');
+    upsertProject(store, { projectRoot: '/project/fstreak-a', name: 'A' });
+    const mgr = SessionStateManager.load(store, '/project/fstreak-a');
+    expect(mgr.current.consecutiveFrustratedPrompts).toBe(0);
+    closeStore(store);
+  });
+
+  it('increments on each consecutive frustrated-mood prompt', async () => {
+    const store = await openStore(':memory:');
+    upsertProject(store, { projectRoot: '/project/fstreak-b', name: 'B' });
+    const mgr = SessionStateManager.load(store, '/project/fstreak-b');
+    for (let i = 1; i <= 3; i++) {
+      mgr.setProfile(withMood('frustrated'));
+      await mgr.processPrompt(store, `still broken, attempt ${i}`, makeResult('implementation', 0.8));
+      expect(mgr.current.consecutiveFrustratedPrompts).toBe(i);
+    }
+    closeStore(store);
+  });
+
+  it('resets to 0 on a non-frustrated prompt', async () => {
+    const store = await openStore(':memory:');
+    upsertProject(store, { projectRoot: '/project/fstreak-c', name: 'C' });
+    const mgr = SessionStateManager.load(store, '/project/fstreak-c');
+    mgr.setProfile(withMood('frustrated'));
+    await mgr.processPrompt(store, 'broken again', makeResult('implementation', 0.8));
+    mgr.setProfile(withMood('frustrated'));
+    await mgr.processPrompt(store, 'still not working', makeResult('implementation', 0.8));
+    expect(mgr.current.consecutiveFrustratedPrompts).toBe(2);
+    mgr.setProfile(withMood('focused'));
+    await mgr.processPrompt(store, 'great, that fixed it', makeResult('implementation', 0.8));
+    expect(mgr.current.consecutiveFrustratedPrompts).toBe(0);
+    closeStore(store);
+  });
+});
+
 // ── Phase 7 F1-F2 — signal definitions ───────────────────────────────────────
 
 describe('Phase 7 signals — SIGNAL_MAP and SIGNAL_DEFINITIONS', () => {

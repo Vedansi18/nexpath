@@ -281,7 +281,7 @@ function detectHasTestRunner(pkg: PackageJson | null): boolean {
 }
 
 /**
- * Probe project-scoped facts (9 keys) against the anchored repo root.
+ * Probe project-scoped facts (10 keys) against the anchored repo root.
  * Returns the facts plus the anchoring metadata used.
  */
 export function probeProject(inputRoot: string, now: number = Date.now()): ProjectProbeResult {
