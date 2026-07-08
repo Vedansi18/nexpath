@@ -74,4 +74,15 @@ describe('B8 — class 7 beginner-override serving through the engine (resolveRe
     expect(beginner!.l1[0]).not.toBe(base!.l1[0]);
     expect(beginner!.l1[0].length).toBeGreaterThan(0);
   });
+
+  it('a beginner-ANCHORED class-7 signal (no override) serves the base cleanly for register=beginner', async () => {
+    // 9 of the 20 class-7 signals are already beginner-anchored (no registerOverrides) — register=
+    // beginner must resolve the base forms without error, identical to any other register.
+    const sig = 'ABSENCE_ERROR_UNDERSTANDING';
+    const casual = await generateFromEngine({ lookup: shippedRecordLookup(sig), level: 3, register: 'casual', facts: [], factCap: 0 }, client);
+    const beginner = await generateFromEngine({ lookup: shippedRecordLookup(sig), level: 3, register: 'beginner', facts: [], factCap: 0 }, client);
+    expect(casual, 'casual resolves').not.toBeNull();
+    expect(beginner, 'beginner resolves').not.toBeNull();
+    expect(beginner!.l1[0]).toBe(casual!.l1[0]); // no override → same base option for both registers
+  });
 });
