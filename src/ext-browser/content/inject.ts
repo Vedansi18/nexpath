@@ -167,6 +167,16 @@ function ensurePanelMounted(): PanelController {
 
   panelHost = document.createElement('div');
   panelHost.id = 'nexpath-panel-host';
+  // Fixed corner overlay. The engine owns the host's PLACEMENT (the panel styles
+  // only its own content, inside the shadow — it can't position its own host).
+  // Without this the host is a static, in-flow block appended to <body>, so it
+  // rendered full-width at the very bottom of the page — off-screen below the fold
+  // (confirmed live on Bolt 2026-07-08: advisory fired but was never visible).
+  // z-index maxed so it sits above the agent's own UI; max-height + auto-scroll so
+  // a tall advisory can't overflow a short viewport.
+  panelHost.style.cssText =
+    'position:fixed;right:20px;bottom:20px;z-index:2147483647;' +
+    'max-height:calc(100vh - 40px);overflow-y:auto;';
   document.body.appendChild(panelHost);
 
   // Engine owns the closed Shadow root (sign-off B); panel.js renders INTO the

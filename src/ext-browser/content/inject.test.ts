@@ -148,6 +148,16 @@ describe('inject.ts (B5b — real panel integration)', () => {
     expect(host!.shadowRoot).toBeNull(); // closed → not exposed on the host
   });
 
+  it('positions the host as a fixed corner overlay (else it renders off-screen in page flow)', () => {
+    dispatchShowAdvisory(makePayload());
+    const host = document.getElementById('nexpath-panel-host')!;
+    expect(host.style.position).toBe('fixed');
+    // pinned to a corner + above the agent UI so it is actually visible
+    expect(host.style.zIndex).toBe('2147483647');
+    expect(host.style.right).not.toBe('');
+    expect(host.style.bottom).not.toBe('');
+  });
+
   describe('panel events', () => {
     it("select: setBusy(true) → inject the option TITLE (CLI parity) → setBusy(false) → hide → terminal 'select'", async () => {
       dispatchShowAdvisory(makePayload());
