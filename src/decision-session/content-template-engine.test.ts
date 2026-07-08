@@ -291,6 +291,20 @@ describe('content-template-engine — render-path bridge (deriveSimplerLevel)', 
     expect(ladder.l2).toEqual(fb.l2);
     expect(ladder.l3).toEqual(fb.l3);
   });
+
+  it('deriveLadder re-appends the record safeguard VERBATIM on every derived tier — even a line the confirm-seek guard cannot match', async () => {
+    // The record-safeguard survival guarantee is PHRASING-INDEPENDENT: threading l2Safeguard through
+    // opts re-appends the exact line on each simpler tier regardless of wording. Uses a safeguard line
+    // that deliberately does NOT match CONFIRM_SEEK_RE (no "ask me" / "go-ahead"), and a derive that
+    // DROPS it — so only the verbatim re-append (not the regex guard) can keep it. This is the
+    // primitive behind the sensitive stage-transition tiers surviving.
+    const SAFE = 'Loop me in before the production rollout.';
+    const l1: OptionEntry[] = [{ option: 'Ship it.', descBase: `heavy release gate\n${SAFE}` }];
+    const dropsSafe = mockClient(JSON.stringify({ option: 'ship', whyDesc: 'lighter release gate' }));
+    const ladder = await deriveLadder(l1, {}, dropsSafe, { l2Safeguard: SAFE });
+    expect(ladder.l2[0].descBase).toContain(SAFE);
+    expect(ladder.l3[0].descBase).toContain(SAFE);
+  });
 });
 
 describe('content-template-engine — param-source retrieval (AR-10 / AR-9 / AR-3)', () => {
