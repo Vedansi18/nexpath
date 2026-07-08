@@ -10,6 +10,7 @@ import { CLASS2_RECORDS } from './content-templates/class2-records.js';
 import { CLASS3_RECORDS } from './content-templates/class3-records.js';
 import { CLASS5_RECORDS } from './content-templates/class5-records.js';
 import { CLASS6_RECORDS } from './content-templates/class6-records.js';
+import { CLASS7_RECORDS } from './content-templates/class7-records.js';
 import { roleAbsenceContentExists } from './options.js';
 
 // §6.1 gate 1 (S2): the dual-source resolver decides, per signalType, whether an
@@ -23,12 +24,12 @@ describe('§6.1 gate 1 — dual-source resolver + migration marker', () => {
     'ABSENCE_SECRET_IN_PROMPT', 'ABSENCE_NO_VERSION_CONTROL', 'ABSENCE_NO_BACKUP_SAFETY',
     'ABSENCE_NO_SEPARATE_ENVS', 'ABSENCE_NO_AUTOMATED_SECURITY_SCANNING', 'ABSENCE_FRUSTRATION_SPIRAL',
   ];
-  // Migrated existing Group-B classes, derived from their records (B3: class 2, B4: class 3, B6: class 5, B7: class 6).
-  const MIGRATED_CLASS_RECORDS = [...CLASS2_RECORDS, ...CLASS3_RECORDS, ...CLASS5_RECORDS, ...CLASS6_RECORDS];
+  // Migrated existing Group-B classes, derived from their records (B3: cls 2, B4: cls 3, B6: cls 5, B7: cls 6, B8: cls 7).
+  const MIGRATED_CLASS_RECORDS = [...CLASS2_RECORDS, ...CLASS3_RECORDS, ...CLASS5_RECORDS, ...CLASS6_RECORDS, ...CLASS7_RECORDS];
 
-  it('the migration marker holds the 6 new §4.E2 signals (A12) + the migrated Group-B classes (B3: class 2, B4: class 3, B6: class 5, B7: class 6)', () => {
+  it('the migration marker holds the 6 new §4.E2 signals (A12) + the migrated Group-B classes (B3/B4/B6/B7/B8: cls 2/3/5/6/7)', () => {
     const migratedClassSignals = MIGRATED_CLASS_RECORDS.map((r) => r.signalType);
-    expect(MIGRATED_SIGNALS.size).toBe(NEW_E2.length + migratedClassSignals.length); // 6 + 21 + 11 + 8 + 14 = 60
+    expect(MIGRATED_SIGNALS.size).toBe(NEW_E2.length + migratedClassSignals.length); // 6 + 21 + 11 + 8 + 14 + 20 = 80
     for (const s of [...NEW_E2, ...migratedClassSignals]) {
       expect(MIGRATED_SIGNALS.has(s)).toBe(true);
       expect(resolveContentSource(s)).toBe('content-template');
@@ -42,6 +43,7 @@ describe('§6.1 gate 1 — dual-source resolver + migration marker', () => {
     expect(CLASS3_RECORDS.length).toBe(11);
     expect(CLASS5_RECORDS.length).toBe(8);
     expect(CLASS6_RECORDS.length).toBe(14);
+    expect(CLASS7_RECORDS.length).toBe(20);
     for (const rec of MIGRATED_CLASS_RECORDS) {
       expect(MIGRATED_SIGNALS.has(rec.signalType), `${rec.signalType} in MIGRATED_SIGNALS`).toBe(true);
       expect(resolveContentSource(rec.signalType)).toBe('content-template');

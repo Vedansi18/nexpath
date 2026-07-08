@@ -47,7 +47,8 @@ describe('A12 fire-time L2 safeguard — record-level-flagged migrated signals c
   // derived L2/L3 (deriveLadder step-simpler). Use a mock that DROPS the seek in both the weave
   // and the derive (worst case); the engine must re-append it, so the confirm-seek survives.
   const dropsSeek = mockClient(JSON.stringify({ option: 'a simpler option', whyDesc: 'grounded why-desc with no seek' }));
-  const FLAGGED = ['ABSENCE_SECRET_IN_PROMPT', 'ABSENCE_NO_SEPARATE_ENVS', 'ABSENCE_NO_AUTOMATED_SECURITY_SCANNING'];
+  const FLAGGED = ['ABSENCE_SECRET_IN_PROMPT', 'ABSENCE_NO_SEPARATE_ENVS', 'ABSENCE_NO_AUTOMATED_SECURITY_SCANNING',
+    'ABSENCE_DEPENDENCY_ADVENTURE']; // B8 — class 7's 1 sensitive record: safeguard confirmed through the engine
 
   for (const sig of FLAGGED) {
     it(`${sig}: the confirm-seek survives into the L1/L2/L3 desc-bases`, async () => {
@@ -59,4 +60,18 @@ describe('A12 fire-time L2 safeguard — record-level-flagged migrated signals c
       }
     });
   }
+});
+
+describe('B8 — class 7 beginner-override serving through the engine (resolveRegisterForms)', () => {
+  it('serves the structurally-divergent beginner override for register=beginner (differs from the base)', async () => {
+    const sig = 'ABSENCE_MVP_SCOPE_DISCIPLINE'; // class 7, has a structurally-divergent beginner override
+    const base = await generateFromEngine({ lookup: shippedRecordLookup(sig), level: 3, register: 'casual', facts: [], factCap: 0 }, client);
+    const beginner = await generateFromEngine({ lookup: shippedRecordLookup(sig), level: 3, register: 'beginner', facts: [], factCap: 0 }, client);
+    expect(base, 'base resolves').not.toBeNull();
+    expect(beginner, 'beginner resolves').not.toBeNull();
+    // The option is served verbatim (composeOption, no LLM); a divergent beginner override yields a
+    // different L1 option than the base register — proving the register override is served live.
+    expect(beginner!.l1[0]).not.toBe(base!.l1[0]);
+    expect(beginner!.l1[0].length).toBeGreaterThan(0);
+  });
 });
