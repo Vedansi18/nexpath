@@ -2853,6 +2853,47 @@ describe('SessionStateManager', () => {
   });
 });
 
+// ── AbsenceDetector — §4.E2 registry-detected gate ──────────────────────────────
+
+describe('AbsenceDetector — registry-detected signals fire on RuntimeContext, not keyword-absence', () => {
+  // The 6 §4.E2 signals are wired through REGISTRY_DETECTED_BY_KEY: each fires ONLY when its
+  // mistake-category detect() reads a firing RuntimeContext ("fire on false probe, stay dark on
+  // unknown"), never via the generic keyword-never-seen path. Default makeState() clears all
+  // gates 1–3 (stageConfidence 0.80, promptsInCurrentStage 20 ≥ every threshold).
+  const REGISTRY_KEYS = [
+    'secret_in_prompt', 'no_version_control', 'no_backup_safety',
+    'no_separate_envs', 'no_automated_security_scanning', 'frustration_spiral',
+  ];
+  const keysOf = (flags: { signalKey: string }[]) => new Set(flags.map((f) => f.signalKey));
+
+  it('stay DARK when RuntimeContext is empty — even though every generic gate is satisfied', () => {
+    const state = makeState({ currentStage: 'implementation', promptsInCurrentStage: 20, promptCount: 20 });
+    const fired = keysOf(detectAbsenceFlags(state)); // no runtimeContext → probes undefined
+    for (const k of REGISTRY_KEYS) expect(fired.has(k), `${k} fired on unknown context`).toBe(false);
+  });
+
+  it('no_version_control fires on hasVersionControl:false, dark on true/undefined', () => {
+    const state = makeState({ currentStage: 'implementation', promptsInCurrentStage: 20, promptCount: 20 });
+    expect(keysOf(detectAbsenceFlags(state, null, undefined, 1.0, 5, { hasVersionControl: false })).has('no_version_control')).toBe(true);
+    expect(keysOf(detectAbsenceFlags(state, null, undefined, 1.0, 5, { hasVersionControl: true })).has('no_version_control')).toBe(false);
+    expect(keysOf(detectAbsenceFlags(state, null, undefined, 1.0, 5, {})).has('no_version_control')).toBe(false);
+  });
+
+  it('frustration_spiral fires at consecutiveFrustratedPrompts ≥ 3, dark below', () => {
+    const state = makeState({ currentStage: 'implementation', promptsInCurrentStage: 20, promptCount: 20 });
+    expect(keysOf(detectAbsenceFlags(state, null, undefined, 1.0, 5, { consecutiveFrustratedPrompts: 3 })).has('frustration_spiral')).toBe(true);
+    expect(keysOf(detectAbsenceFlags(state, null, undefined, 1.0, 5, { consecutiveFrustratedPrompts: 2 })).has('frustration_spiral')).toBe(false);
+  });
+
+  it('secret_in_prompt fires on a secret in recent prompt history (context-independent), dark without', () => {
+    const secretPrompt = { index: 0, text: 'api_key: DUMMYPLACEHOLDERVALUE123', capturedAt: 1000, classifiedStage: 'implementation' as const, confidence: 0.85 };
+    const withSecret = makeState({ currentStage: 'implementation', promptsInCurrentStage: 20, promptCount: 20, promptHistory: [secretPrompt] });
+    const noSecret = makeState({ currentStage: 'implementation', promptsInCurrentStage: 20, promptCount: 20, promptHistory: [{ ...secretPrompt, text: 'add a login form' }] });
+    expect(keysOf(detectAbsenceFlags(withSecret, null, undefined, 1.0, 5, {})).has('secret_in_prompt')).toBe(true);
+    expect(keysOf(detectAbsenceFlags(noSecret, null, undefined, 1.0, 5, {})).has('secret_in_prompt')).toBe(false);
+  });
+});
+
 // ── AbsenceDetector ────────────────────────────────────────────────────────────
 
 describe('AbsenceDetector', () => {
