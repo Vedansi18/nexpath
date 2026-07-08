@@ -22,6 +22,7 @@ import {
   SIGNAL_ADVISORY_FIRED,
 } from '../store/feedback-signals.js';
 import { sendInstalled, sendAdvisoryFired, type SendLifecycleOptions } from './lifecycle-send.js';
+import { isTelemetryEnabled } from './telemetry-enabled.js';
 
 export async function flushLifecycle(
   store: Store,
@@ -43,5 +44,19 @@ export async function flushLifecycle(
     if (await sendAdvisoryFired(store, ts, opts)) {
       pruneSignalAt(store, SIGNAL_ADVISORY_FIRED, ts);
     }
+  }
+}
+
+/**
+ * Flush now only when telemetry is on. When it is off the events are left
+ * buffered locally for the feedback-consent flush. Used at the occurrence
+ * points (install, advisory fire) so on-mode users get immediate sends.
+ */
+export async function flushIfTelemetryOn(
+  store: Store,
+  opts:  SendLifecycleOptions = {},
+): Promise<void> {
+  if (isTelemetryEnabled(store)) {
+    await flushLifecycle(store, opts);
   }
 }

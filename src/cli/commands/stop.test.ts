@@ -13,6 +13,11 @@ vi.mock('../../decision-session/OptionGenerator.js', () => ({
   generateOptionList: vi.fn().mockResolvedValue(null),
 }));
 
+vi.mock('../../telemetry/lifecycle-flush.js', () => ({
+  flushIfTelemetryOn: vi.fn().mockResolvedValue(undefined),
+  flushLifecycle:     vi.fn().mockResolvedValue(undefined),
+}));
+
 import { openStore } from '../../store/db.js';
 import type { Store } from '../../store/db.js';
 import { runStop } from './stop.js';
@@ -30,6 +35,7 @@ import { writeTelemetry } from '../../telemetry/index.js';
 import { recentPromptMetadata } from '../../telemetry/recent-prompts.js';
 import { SessionStateManager } from '../../classifier/SessionStateManager.js';
 import { generateOptionList } from '../../decision-session/OptionGenerator.js';
+import { flushIfTelemetryOn } from '../../telemetry/lifecycle-flush.js';
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -174,6 +180,13 @@ describe('runStop — user picks option', () => {
     await runStop(makePayload(), store, mockSelect('some option'));
     const advisory = getPendingAdvisory(store, '/test/project');
     expect(advisory).toBeNull(); // shown advisory no longer returned as pending
+  });
+
+  it('flushes lifecycle events when an advisory fires (on-mode immediate / off-mode buffer)', async () => {
+    vi.mocked(flushIfTelemetryOn).mockClear();
+    insertAdvisory(store);
+    await runStop(makePayload(), store, mockSelect('some option'));
+    expect(flushIfTelemetryOn).toHaveBeenCalledWith(store);
   });
 });
 

@@ -21,6 +21,7 @@ import type { LogLevel } from '../../logger.js';
 import { writeHookStats } from '../../store/hook-stats.js';
 import { writeTelemetry } from '../../telemetry/index.js';
 import { triggerOpportunisticSync } from '../../telemetry/OpportunisticSync.js';
+import { flushIfTelemetryOn } from '../../telemetry/lifecycle-flush.js';
 import { recentPromptMetadata } from '../../telemetry/recent-prompts.js';
 import { readStdin } from './auto.js';
 import { resolveDecisionContent } from '../../decision-session/options.js';
@@ -199,6 +200,9 @@ export async function runStop(
     generatedOptions: !!generatedOptions,
   }, store);
   recordAdvisoryFired(store, payload.cwd);
+  // On-mode: emit the advisory-fired event now (backdated). Off-mode buffers it
+  // for the feedback-consent flush. Fire-and-forget so the popup is never blocked.
+  void flushIfTelemetryOn(store).catch(() => {});
 
   const dsResult = await runDecisionSession(
     {

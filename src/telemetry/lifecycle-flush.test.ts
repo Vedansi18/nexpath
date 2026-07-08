@@ -9,7 +9,7 @@ import {
   markInstalledEventSent,
   readAllSignals,
 } from '../store/feedback-signals.js';
-import { flushLifecycle } from './lifecycle-flush.js';
+import { flushLifecycle, flushIfTelemetryOn } from './lifecycle-flush.js';
 import { EVENT_INSTALLED, EVENT_ADVISORY_FIRED } from './lifecycle-send.js';
 import type { FetchLike } from './TelemetryClient.js';
 import type { PostHogSingleEnvelope } from './types.js';
@@ -135,5 +135,30 @@ describe('flushLifecycle', () => {
     await expect(flushLifecycle(store, { fetch: recordingFetch(sent) })).resolves.toBeUndefined();
     expect(isInstalledEventSent(store)).toBe(false);
     expect(readAllSignals(store).advisoryFireTs).toEqual([100]);
+  });
+});
+
+describe('flushIfTelemetryOn', () => {
+  it('flushes immediately when telemetry is on (default)', async () => {
+    setInstalledAtIfMissing(store, 5000);
+    recordAdvisoryFired(store, '/a', 100);
+
+    await flushIfTelemetryOn(store, { fetch: recordingFetch(sent) });
+
+    expect(sent.filter((s) => s.event === EVENT_INSTALLED)).toHaveLength(1);
+    expect(sent.filter((s) => s.event === EVENT_ADVISORY_FIRED)).toHaveLength(1);
+    expect(readAllSignals(store).advisoryFireTs).toEqual([]);   // sent + pruned
+  });
+
+  it('sends nothing and leaves everything buffered when telemetry is off', async () => {
+    setConfig(store, 'telemetry.enabled', 'false');
+    setInstalledAtIfMissing(store, 5000);
+    recordAdvisoryFired(store, '/a', 100);
+
+    await flushIfTelemetryOn(store, { fetch: recordingFetch(sent) });
+
+    expect(sent).toHaveLength(0);
+    expect(isInstalledEventSent(store)).toBe(false);           // not sent
+    expect(readAllSignals(store).advisoryFireTs).toEqual([100]); // still buffered
   });
 });
