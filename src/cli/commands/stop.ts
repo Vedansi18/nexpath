@@ -158,7 +158,7 @@ export async function runStop(
 
   // §6.1 dual-source dispatch: a MIGRATED signalType serves from the content-template
   // engine (grounded + strength-laddered); every other serves from the static generate
-  // path. The migration marker is EMPTY (ship-dark) → today every signal takes the static
+  // path. The marker holds the 6 §4.E2 signals; every other signal takes the static
   // path, byte-for-byte unchanged. Per-set migration flips one signal at a time (S8).
   const recordSignalType = recordSignalTypeForFlag(advisory.flagType);
   let generatedOptions: GeneratedOptions | null = null;
