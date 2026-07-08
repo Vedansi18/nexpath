@@ -106,8 +106,10 @@ describe('B6 role-precedence — roleAbsenceContentExists (context_loss role var
     expect(roleAbsenceContentExists(p('hardcore_pro', 'pm'), 'context_loss')).toBe(true);
   });
 
-  it('false with no role, or a role whose map has no variant for the signal', () => {
+  it('false with no role, a null profile, or a role whose map has no variant for the signal', () => {
     expect(roleAbsenceContentExists(p('hardcore_pro', null), 'context_loss')).toBe(false);
+    expect(roleAbsenceContentExists(null, 'context_loss')).toBe(false);       // <5-prompt session: profile not computed yet
+    expect(roleAbsenceContentExists(undefined, 'context_loss')).toBe(false);
     expect(roleAbsenceContentExists(p('hardcore_pro', 'founder'), 'test_creation')).toBe(false);
   });
 
