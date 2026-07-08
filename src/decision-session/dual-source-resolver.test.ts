@@ -6,6 +6,7 @@ import { shippedRecordLookup, recordSignalTypeForFlag } from './content-template
 import { resolveRecord } from './content-template-engine.js';
 import { getWhyHelpForSignalType } from './why-help-by-signal-type.js';
 import { WHY_HELP_PER_CLASS } from './why-help.js';
+import { CLASS2_RECORDS } from './content-templates/class2-records.js';
 
 // §6.1 gate 1 (S2): the dual-source resolver decides, per signalType, whether an
 // advisory is served from the static DecisionContent set or the content-template
@@ -31,6 +32,26 @@ describe('§6.1 gate 1 — dual-source resolver + migration marker', () => {
     for (const s of [...NEW_E2, ...CLASS2]) {
       expect(MIGRATED_SIGNALS.has(s)).toBe(true);
       expect(resolveContentSource(s)).toBe('content-template');
+    }
+  });
+
+  it('B3 — every class-2 record (derived from CLASS2_RECORDS) is migrated + resolves a shipped record', () => {
+    // Derived from the AUTHORITATIVE records source (not a hardcoded list), so a drifted or
+    // typo'd MIGRATED_SIGNALS entry — or a missed / renamed record — is caught here.
+    expect(CLASS2_RECORDS.length).toBe(21);
+    for (const rec of CLASS2_RECORDS) {
+      expect(MIGRATED_SIGNALS.has(rec.signalType), `${rec.signalType} in MIGRATED_SIGNALS`).toBe(true);
+      expect(resolveContentSource(rec.signalType)).toBe('content-template');
+      expect(resolveRecord(shippedRecordLookup(rec.signalType)), `${rec.signalType} resolves a record`).not.toBeNull();
+    }
+  });
+
+  it('every migrated signalType resolves a shipped content-template record (no contentless migration)', () => {
+    // Group-B invariant: a signalType in the marker with no shipped record would serve nothing
+    // (or silently fall through) — never migrate a signal that has no engine content.
+    for (const s of MIGRATED_SIGNALS) {
+      expect(resolveContentSource(s)).toBe('content-template');
+      expect(resolveRecord(shippedRecordLookup(s)), `${s} has a shipped record`).not.toBeNull();
     }
   });
 

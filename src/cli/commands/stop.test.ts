@@ -36,6 +36,7 @@ import { upsertProject, getProject } from '../../store/projects.js';
 import { LANG_DETECT_INTERVAL } from '../../classifier/LanguageDetector.js';
 import { writeTelemetry } from '../../telemetry/index.js';
 import { recentPromptMetadata } from '../../telemetry/recent-prompts.js';
+import { generateFromEngine } from '../../decision-session/engine-option-generator.js';
 import { SessionStateManager } from '../../classifier/SessionStateManager.js';
 import { generateOptionList } from '../../decision-session/OptionGenerator.js';
 
@@ -464,6 +465,19 @@ describe('runStop — generated options wiring', () => {
     const { TASK_REVIEW } = await import('../../decision-session/options.js');
     const result = await runStop(makePayload(), store, mockSelect(TASK_REVIEW.L1[0].option));
     expect(['blocked', 'skipped']).toContain(result.outcome);
+  });
+
+  it('degrades to static when the engine option-gen throws — the Stop hook never crashes (B3)', async () => {
+    // The fixture (absence:test_creation) is migrated (B3), so stop.ts runs the engine path.
+    // Force it to throw; stop.ts must CATCH it, fall back to the static generate path, and still
+    // complete the session — never reject/crash the hook.
+    vi.mocked(generateFromEngine).mockRejectedValueOnce(new Error('engine api down'));
+    insertAdvisory(store);
+    const { TASK_REVIEW } = await import('../../decision-session/options.js');
+    const picked = TASK_REVIEW.L1[0].option;
+    const result = await runStop(makePayload(), store, mockSelect(picked));
+    expect(result.outcome).toBe('blocked'); // caught → static fallback → session ran → user picked
+    if (result.outcome === 'blocked') expect(result.reason).toBe(picked);
   });
 });
 
