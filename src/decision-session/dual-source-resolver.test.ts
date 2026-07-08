@@ -9,6 +9,7 @@ import { WHY_HELP_PER_CLASS } from './why-help.js';
 import { CLASS2_RECORDS } from './content-templates/class2-records.js';
 import { CLASS3_RECORDS } from './content-templates/class3-records.js';
 import { CLASS5_RECORDS } from './content-templates/class5-records.js';
+import { CLASS6_RECORDS } from './content-templates/class6-records.js';
 import { roleAbsenceContentExists } from './options.js';
 
 // §6.1 gate 1 (S2): the dual-source resolver decides, per signalType, whether an
@@ -22,12 +23,12 @@ describe('§6.1 gate 1 — dual-source resolver + migration marker', () => {
     'ABSENCE_SECRET_IN_PROMPT', 'ABSENCE_NO_VERSION_CONTROL', 'ABSENCE_NO_BACKUP_SAFETY',
     'ABSENCE_NO_SEPARATE_ENVS', 'ABSENCE_NO_AUTOMATED_SECURITY_SCANNING', 'ABSENCE_FRUSTRATION_SPIRAL',
   ];
-  // Migrated existing Group-B classes, derived from their records (B3: class 2, B4: class 3, B6: class 5).
-  const MIGRATED_CLASS_RECORDS = [...CLASS2_RECORDS, ...CLASS3_RECORDS, ...CLASS5_RECORDS];
+  // Migrated existing Group-B classes, derived from their records (B3: class 2, B4: class 3, B6: class 5, B7: class 6).
+  const MIGRATED_CLASS_RECORDS = [...CLASS2_RECORDS, ...CLASS3_RECORDS, ...CLASS5_RECORDS, ...CLASS6_RECORDS];
 
-  it('the migration marker holds the 6 new §4.E2 signals (A12) + the migrated Group-B classes (B3: class 2, B4: class 3, B6: class 5)', () => {
+  it('the migration marker holds the 6 new §4.E2 signals (A12) + the migrated Group-B classes (B3: class 2, B4: class 3, B6: class 5, B7: class 6)', () => {
     const migratedClassSignals = MIGRATED_CLASS_RECORDS.map((r) => r.signalType);
-    expect(MIGRATED_SIGNALS.size).toBe(NEW_E2.length + migratedClassSignals.length); // 6 + 21 + 11 + 8 = 46
+    expect(MIGRATED_SIGNALS.size).toBe(NEW_E2.length + migratedClassSignals.length); // 6 + 21 + 11 + 8 + 14 = 60
     for (const s of [...NEW_E2, ...migratedClassSignals]) {
       expect(MIGRATED_SIGNALS.has(s)).toBe(true);
       expect(resolveContentSource(s)).toBe('content-template');
@@ -40,6 +41,7 @@ describe('§6.1 gate 1 — dual-source resolver + migration marker', () => {
     expect(CLASS2_RECORDS.length).toBe(21);
     expect(CLASS3_RECORDS.length).toBe(11);
     expect(CLASS5_RECORDS.length).toBe(8);
+    expect(CLASS6_RECORDS.length).toBe(14);
     for (const rec of MIGRATED_CLASS_RECORDS) {
       expect(MIGRATED_SIGNALS.has(rec.signalType), `${rec.signalType} in MIGRATED_SIGNALS`).toBe(true);
       expect(resolveContentSource(rec.signalType)).toBe('content-template');
@@ -76,10 +78,10 @@ describe('§6.1 gate 1 — dual-source resolver + migration marker', () => {
   });
 
   it('resolves a not-yet-migrated signalType to static (un-migrated classes still serve from the static set)', () => {
-    // Real signalTypes from classes NOT yet in MIGRATED_SIGNALS (class 1/6/9) — still static.
-    // (class 3's ABSENCE_SPEC_ACCEPTANCE, then class 5's ABSENCE_CONTEXT_LOSS, sat here until B4/B6
-    // migrated them — the self-correcting canary.)
-    for (const s of ['IDEA_TO_PRD', 'ABSENCE_PHASE_TRANSITION', 'ABSENCE_CONTRACT_TESTING_GAP', 'x_unknown']) {
+    // Real signalTypes from classes NOT yet in MIGRATED_SIGNALS (class 1/8/9) — still static.
+    // (SPEC_ACCEPTANCE/CONTEXT_LOSS/PHASE_TRANSITION each sat here until B4/B6/B7 migrated them — the
+    // self-correcting canary. ABSENCE_USER_VALUE_CHECK is class 8, migrating later at B9.)
+    for (const s of ['IDEA_TO_PRD', 'ABSENCE_USER_VALUE_CHECK', 'ABSENCE_CONTRACT_TESTING_GAP', 'x_unknown']) {
       expect(resolveContentSource(s)).toBe('static');
     }
   });
