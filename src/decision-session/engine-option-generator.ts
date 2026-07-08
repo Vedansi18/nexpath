@@ -58,8 +58,10 @@ export async function generateFromEngine(
   if (!advisory) return null;
 
   // The composed headline is the L1 strength tier; derive L2/L3 one notch simpler each.
+  // Thread the record's safeguard into the derive so each simpler tier re-appends it
+  // VERBATIM — the sensitive-action line survives every tier regardless of its phrasing.
   const l1: OptionEntry[] = [{ option: advisory.option, descBase: advisory.whyDesc }];
-  const ladder = await deriveLadder(l1, {}, client);
+  const ladder = await deriveLadder(l1, {}, client, { l2Safeguard: advisory.l2Safeguard });
 
   return {
     l1: ladder.l1.map((e) => e.option),

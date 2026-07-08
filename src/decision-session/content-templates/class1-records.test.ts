@@ -138,7 +138,7 @@ describe('class-1 records — sensitive-action safeguard', () => {
   // The record-SPECIFIC confirm-seek action — pins that each safeguard names ITS OWN
   // production action (no cross-record mismatch).
   const CONFIRM_SEEK: Record<string, RegExp> = {
-    REVIEW_TO_RELEASE: /confirm with me before (any )?releas\w* to production/i,
+    REVIEW_TO_RELEASE: /ask me for go-ahead before you releas\w* to production/i,
     RELEASE_TO_FEEDBACK: /ask me for go-ahead before changing production monitoring or alerting/i,
   };
 

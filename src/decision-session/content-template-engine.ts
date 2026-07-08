@@ -481,7 +481,7 @@ export async function deriveLadder(
   l1: readonly OptionEntry[],
   fallback: { l2?: readonly OptionEntry[]; l3?: readonly OptionEntry[] } = {},
   client?: OpenAI,
-  opts: { timeoutMs?: number } = {},
+  opts: { timeoutMs?: number; l2Safeguard?: string } = {},
 ): Promise<DerivedLadder> {
   const l1Out = [...l1];
   const l2 = await deriveSimplerLevel(l1Out, fallback.l2 ?? l1Out, client, opts);
@@ -527,6 +527,13 @@ export interface ComposedAdvisory {
   level: MaturityLevel;
   option: string;
   whyDesc: string;
+  /**
+   * The sensitive-action safeguard line applied to this advisory (from the record's
+   * l2SafeguardLine, unless overridden). Exposed so the caller can thread it into the
+   * strength-ladder derive — the derived simpler tiers re-append it VERBATIM, keeping
+   * the safeguard on every tier regardless of its phrasing (not reliant on a phrase match).
+   */
+  l2Safeguard?: string;
 }
 
 /**
@@ -551,12 +558,14 @@ export async function composeAdvisory(input: ComposeAdvisoryInput, client?: Open
   // axes this record declares (a no-op when the record declares all axes; narrows when
   // it declares a subset). Unattributable facts pass through.
   const facts = filterFactsByAxes(input.facts ?? [], resolved.record.paramAxes);
+  // Auto-source the sensitive-action safeguard from the record so the live wiring
+  // can never forget it: a flagged record's l2SafeguardLine is always applied (the
+  // explicit input wins only if a caller overrides it). Returned on the advisory so the
+  // caller threads it through the strength-ladder derive (verbatim re-append per tier).
+  const l2Safeguard = input.l2Safeguard ?? resolved.record.l2SafeguardLine;
   const whyDesc = await groundWhyDescLive({
     cell: col.form.cell, slots: resolved.record.slots, ctx: input.ctx, facts, factCap: input.factCap,
-    // Auto-source the sensitive-action safeguard from the record so the live wiring
-    // can never forget it: a flagged record's l2SafeguardLine is always applied (the
-    // explicit input wins only if a caller overrides it).
-    l2Safeguard: input.l2Safeguard ?? resolved.record.l2SafeguardLine,
+    l2Safeguard,
   }, client);
-  return { source: resolved.source, level: col.level, option, whyDesc };
+  return { source: resolved.source, level: col.level, option, whyDesc, l2Safeguard };
 }

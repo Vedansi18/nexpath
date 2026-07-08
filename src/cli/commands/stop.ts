@@ -168,7 +168,13 @@ export async function runStop(
   // engine (grounded + strength-laddered); every other serves from the static generate
   // path. The marker holds the migrated signalTypes; every un-migrated signal takes the
   // static path, byte-for-byte unchanged. Per-set migration flips one signal at a time (S8).
-  const recordSignalType = recordSignalTypeForFlag(advisory.flagType);
+  // Stage transitions fire as flagType 'stage_transition' (no absence: key), so they can't map
+  // through recordSignalTypeForFlag. The static `content` above already resolved the exact
+  // transition / TASK_REVIEW DecisionContent this fire serves; its signalType IS the record to
+  // serve — deriving from it keeps the engine path in lock-step with the static resolution.
+  const recordSignalType = advisory.flagType === 'stage_transition'
+    ? content.signalType
+    : recordSignalTypeForFlag(advisory.flagType);
   // Role-precedence guard: a migrated signal whose STATIC path carries genuinely role-specific
   // content (per-role tailored — the register-only engine can't reproduce it) keeps serving that
   // role variant for founder/indie/pm users. Today only context_loss; extend when role-through-

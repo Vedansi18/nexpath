@@ -255,6 +255,20 @@ export const MIGRATED_SIGNALS: ReadonlySet<string> = new Set<string>([
   'ABSENCE_SINGLE_RESPONSIBILITY_PROMPTING',
   'ABSENCE_ROLLBACK_AWARENESS',
   'ABSENCE_BUILD_VS_UNDERSTAND_RATIO',
+  // B2 — class 1 (stage transitions, 7 signals): now engine-served. These fire as flagType
+  // 'stage_transition' (not absence:X), so stop.ts derives the record signalType from the
+  // resolved static content's signalType (kept in lock-step with the static resolution). 2 sensitive
+  // (REVIEW_TO_RELEASE, RELEASE_TO_FEEDBACK, l2SafeguardRequired — safeguard confirmed on migration,
+  // preserved through every strength tier via the record-safeguard thread into deriveLadder);
+  // 6 carry structurally-divergent beginner overrides (served via the engine's resolveRegisterForms);
+  // TASK_REVIEW stays vocab-adaptable (no beginner override — base serves every register).
+  'IDEA_TO_PRD',
+  'PRD_TO_ARCHITECTURE',
+  'ARCHITECTURE_TO_TASKS',
+  'TASK_REVIEW',
+  'IMPLEMENTATION_TO_REVIEW',
+  'REVIEW_TO_RELEASE',
+  'RELEASE_TO_FEEDBACK',
 ]);
 
 /**

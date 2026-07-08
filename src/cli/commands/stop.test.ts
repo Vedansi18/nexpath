@@ -529,6 +529,43 @@ describe('runStop — B6 role-precedence guard', () => {
   });
 });
 
+// ── runStop — B2 stage-transition engine dispatch ────────────────────────────
+
+describe('runStop — B2 stage-transition engine dispatch', () => {
+  let store: Store;
+  beforeEach(async () => { store = await openStore(':memory:'); });
+  afterEach(() => { store.db.close(); vi.restoreAllMocks(); });
+
+  function seedTransition(stage: string) {
+    const mgr = SessionStateManager.load(store, '/test/project');
+    mgr.setDetectedLanguage(store, undefined); // persist session so runStop finds same UUID
+    upsertPendingAdvisory(store, {
+      projectRoot: '/test/project', stage: stage as import('../../classifier/types.js').Stage,
+      flagType: 'stage_transition', pinchLabel: 'Hold up.', sessionId: mgr.current.sessionId, promptCount: 5,
+    });
+  }
+
+  it('a stage_transition routes to the ENGINE — record signalType derived from the resolved content (IDEA_TO_PRD)', async () => {
+    // stage=prd → resolveDecisionContent serves IDEA_TO_PRD (migrated at B2); the dispatch derives
+    // the record from content.signalType (stage transitions carry no absence: key).
+    seedTransition('prd');
+    vi.mocked(generateFromEngine).mockClear();
+    const result = await runStop(makePayload(), store, mockSelect(SKIP_NOW));
+    expect(generateFromEngine).toHaveBeenCalled();
+    expect(result.outcome).toBe('skipped');
+  });
+
+  it('a transition with no destination-stage content resolves the TASK_REVIEW fallback record → ENGINE', async () => {
+    // stage=implementation has no TRANSITION_CONTENT entry → the TASK_REVIEW fallback (migrated) —
+    // still engine-served because its signalType is in MIGRATED_SIGNALS.
+    seedTransition('implementation');
+    vi.mocked(generateFromEngine).mockClear();
+    const result = await runStop(makePayload(), store, mockSelect(SKIP_NOW));
+    expect(generateFromEngine).toHaveBeenCalled();
+    expect(result.outcome).toBe('skipped');
+  });
+});
+
 // ── runStop — NEXPATH_SIM=1 TTY bypass ───────────────────────────────────────
 
 describe('runStop — NEXPATH_SIM=1 TTY bypass', () => {

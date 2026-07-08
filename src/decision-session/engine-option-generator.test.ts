@@ -4,6 +4,7 @@ import { SHIPPED_CONTENT_TEMPLATES } from './content-template-tooling.js';
 import { shippedRecordLookup } from './content-template-source.js';
 import { generateFromEngine } from './engine-option-generator.js';
 import { CONFIRM_SEEK_RE } from './content-template-grounding.js';
+import { REVIEW_TO_RELEASE_RECORD, RELEASE_TO_FEEDBACK_RECORD } from './content-templates/class1-records.js';
 
 // §6.1 items 2/5 — the engine-backed pre-generate path. The LLM seams (grounding weave +
 // ladder derive) are exercised via a mock client (no real spend), matching the engine's
@@ -85,4 +86,26 @@ describe('B8 — class 7 beginner-override serving through the engine (resolveRe
     expect(beginner, 'beginner resolves').not.toBeNull();
     expect(beginner!.l1[0]).toBe(casual!.l1[0]); // no override → same base option for both registers
   });
+});
+
+describe('B2 — class 1 sensitive stage-transition records carry their l2SafeguardLine through every tier', () => {
+  // The 2 flagged class-1 records (REVIEW→RELEASE, RELEASE→FEEDBACK). The A1 fix threads the record
+  // safeguard into deriveLadder, so the EXACT record line is re-appended VERBATIM on every derived
+  // tier — surviving L1/L2/L3 regardless of the line's phrasing (not reliant on a CONFIRM_SEEK match).
+  // Uses the adversarial drop-the-seek mock (worst case: the LLM drops the safeguard in weave + derive).
+  const dropsSeek = mockClient(JSON.stringify({ option: 'a simpler option', whyDesc: 'grounded why-desc with no seek' }));
+  const FLAGGED = [REVIEW_TO_RELEASE_RECORD, RELEASE_TO_FEEDBACK_RECORD];
+
+  for (const rec of FLAGGED) {
+    it(`${rec.signalType}: the exact record l2SafeguardLine survives into the L1/L2/L3 desc-bases`, async () => {
+      const line = rec.l2SafeguardLine!;
+      expect(line, `${rec.signalType} is flagged with a safeguard line`).toBeTruthy();
+      const gen = await generateFromEngine({ lookup: shippedRecordLookup(rec.signalType), level: 5 }, dropsSeek);
+      expect(gen, `${rec.signalType} resolves`).not.toBeNull();
+      const tiers = [gen!.generatedDescBases!.l1[0], gen!.generatedDescBases!.l2[0], gen!.generatedDescBases!.l3[0]];
+      for (let i = 0; i < tiers.length; i++) {
+        expect(tiers[i], `${rec.signalType} L${i + 1} carries the safeguard verbatim`).toContain(line);
+      }
+    });
+  }
 });

@@ -220,7 +220,7 @@ export const IMPLEMENTATION_TO_REVIEW_RECORD: ContentTemplateRecord = {
 export const REVIEW_TO_RELEASE_RECORD: ContentTemplateRecord = {
   signalType: 'REVIEW_TO_RELEASE',
   registerOverrides: { beginner: REVIEW_TO_RELEASE_BEGINNER_OVERRIDE },
-  l2SafeguardLine: 'Confirm with me before releasing to production.',
+  l2SafeguardLine: 'Ask me for go-ahead before you release to production.',
   source: 'shipped',
   schemaVersion: 1,
   slots: [],
