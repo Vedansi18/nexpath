@@ -158,13 +158,18 @@ export async function generatePinchLabel(
   client?:   OpenAI,
   profile?:  UserProfile,
   language?: string,
+  overrides?: { question?: string; pinchFallback?: string },
 ): Promise<string> {
   const content  = resolveDecisionContent(stage, flagType);
-  const fallback = content.pinchFallback;
+  // A migrated signal has no matching static DecisionContent, so resolveDecisionContent
+  // returns a generic fallback. When the caller supplies the migrated record's own
+  // question / pinchFallback, use them so the header matches the real signal.
+  const question = overrides?.question ?? content.question;
+  const fallback = overrides?.pinchFallback ?? content.pinchFallback;
 
   try {
     const openai   = client ?? new OpenAI();
-    const prompt   = buildPinchPrompt(content.question, flagType, stage, profile, language);
+    const prompt   = buildPinchPrompt(question, flagType, stage, profile, language);
 
     const response = await openai.chat.completions.create(
       {

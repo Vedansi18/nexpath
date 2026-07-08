@@ -295,6 +295,37 @@ describe('generatePinchLabel', () => {
   });
 });
 
+// ── overrides (migrated-signal pinch header) ──────────────────────────────────
+
+describe('generatePinchLabel — overrides for migrated signals', () => {
+  const OVERRIDE_Q  = 'A secret was just pasted into a prompt — treat it as leaked and rotate it?';
+  const OVERRIDE_PF = 'Secret exposed.';
+
+  it('seeds the LLM prompt from overrides.question, not the generic static question', async () => {
+    const client = makeMockClient('Hold up.');
+    // stage/flag that resolves to generic static content — the override must win.
+    await generatePinchLabel('implementation', 'absence:secret_in_prompt', client, undefined, 'en', {
+      question: OVERRIDE_Q, pinchFallback: OVERRIDE_PF,
+    });
+    const createFn = (client.chat.completions.create as ReturnType<typeof vi.fn>);
+    expect(createFn.mock.calls[0][0].messages[0].content).toContain(OVERRIDE_Q);
+  });
+
+  it('uses overrides.pinchFallback when the LLM call fails', async () => {
+    const result = await generatePinchLabel(
+      'implementation', 'absence:secret_in_prompt', makeErrorClient(), undefined, 'en',
+      { question: OVERRIDE_Q, pinchFallback: OVERRIDE_PF },
+    );
+    expect(result).toBe(OVERRIDE_PF);
+  });
+
+  it('falls back to the static content when no overrides are given (unchanged behaviour)', async () => {
+    const result = await generatePinchLabel('implementation', 'stage_transition', makeErrorClient());
+    expect(typeof result).toBe('string');
+    expect(result).not.toBe(OVERRIDE_PF);
+  });
+});
+
 // ── buildPinchPrompt — profile (Gap 1) ────────────────────────────────────────
 
 import type { UserProfile } from '../classifier/types.js';

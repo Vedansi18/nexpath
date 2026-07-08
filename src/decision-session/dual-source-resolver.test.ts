@@ -36,6 +36,9 @@ describe('§6.1 gate 1 — dual-source resolver + migration marker', () => {
       expect(resolved, `${s} resolves a record`).not.toBeNull();
       expect(typeof resolved!.record.question, `${s} question is a string`).toBe('string');
       expect(resolved!.record.question!.length, `${s} question is non-empty`).toBeGreaterThan(0);
+      // Pinch header fallback — served by auto.ts when the pinch LLM call fails.
+      expect(typeof resolved!.record.pinchFallback, `${s} pinchFallback is a string`).toBe('string');
+      expect(resolved!.record.pinchFallback!.length, `${s} pinchFallback is non-empty`).toBeGreaterThan(0);
     }
   });
 

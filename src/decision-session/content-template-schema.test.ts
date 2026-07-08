@@ -98,6 +98,15 @@ describe('content-template-schema — validation (the single gate)', () => {
     expect(bad.ok).toBe(false);
     expect(bad.errors.join(' ')).toMatch(/question/);
   });
+
+  it('validates the optional pinchFallback field (non-empty string when present)', () => {
+    expect(validateContentTemplateRecord(validRecord({ pinchFallback: 'Secret exposed.' })).ok).toBe(true);
+    expect(validateContentTemplateRecord(validRecord())).toEqual({ ok: true, errors: [] }); // omitted is fine
+    expect(validateContentTemplateRecord(validRecord({ pinchFallback: '' })).ok).toBe(false); // empty rejected
+    const bad = validateContentTemplateRecord(validRecord({ pinchFallback: 42 as never }));
+    expect(bad.ok).toBe(false);
+    expect(bad.errors.join(' ')).toMatch(/pinchFallback/);
+  });
 });
 
 describe('content-template-schema — two-phase compose (Phase-1 preserves {R...})', () => {

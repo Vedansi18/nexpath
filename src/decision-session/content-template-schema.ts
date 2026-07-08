@@ -95,6 +95,13 @@ export interface ContentTemplateRecord {
    * Optional + additive; required in practice for a migrated record with no static counterpart.
    */
   question?: string;
+  /**
+   * Static fallback for the 2-3 word pinch header, used ONLY when the pinch LLM call
+   * fails/times out. A migrated signal has no static DecisionContent, so without this the
+   * fallback header would be a mismatched generic label. The normal path still LLM-generates
+   * the header seeded from `question`. Optional + additive.
+   */
+  pinchFallback?: string;
   /** Sparse maturity map: level → headline form. The level-1 floor is MANDATORY. */
   levelForms: Partial<Record<MaturityLevel, LevelForm>>;
   slots: Slot[];
@@ -167,6 +174,7 @@ export function validateContentTemplateRecord(record: unknown): ValidationResult
 
   if (typeof r.signalType !== 'string' || r.signalType === '') errors.push('signalType must be a non-empty string');
   if (r.question !== undefined && (typeof r.question !== 'string' || r.question === '')) errors.push('question must be a non-empty string when present');
+  if (r.pinchFallback !== undefined && (typeof r.pinchFallback !== 'string' || r.pinchFallback === '')) errors.push('pinchFallback must be a non-empty string when present');
   if (!CONTENT_TEMPLATE_SOURCES.includes(r.source)) errors.push(`source must be one of ${CONTENT_TEMPLATE_SOURCES.join('|')}`);
   if (typeof r.schemaVersion !== 'number' || r.schemaVersion > SCHEMA_VERSION) {
     errors.push(`schemaVersion must be a number <= ${SCHEMA_VERSION}`);

@@ -35,6 +35,7 @@ export const MOOD_META_PARAM_AXES: Readonly<Record<string, ParamAxisTag>> = {
 export const ABSENCE_FRUSTRATION_SPIRAL_RECORD: ContentTemplateRecord = {
   signalType: 'ABSENCE_FRUSTRATION_SPIRAL', source: 'shipped', schemaVersion: 1, slots: [],
   question: 'This has been a stuck stretch — want to pause and reset before continuing?',
+  pinchFallback: 'Worth a pause.',
   registerOverrides: { beginner: FRUSTRATION_SPIRAL_BEGINNER_OVERRIDE },
   paramAxes: MOOD_META_PARAM_AXES,
   levelForms: {
