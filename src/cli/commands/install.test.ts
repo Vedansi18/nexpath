@@ -1,4 +1,10 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
+
+vi.mock('../../telemetry/lifecycle-flush.js', () => ({
+  flushIfTelemetryOn: vi.fn().mockResolvedValue(undefined),
+  flushLifecycle:     vi.fn().mockResolvedValue(undefined),
+}));
+
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';

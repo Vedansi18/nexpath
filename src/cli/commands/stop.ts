@@ -3,6 +3,11 @@ import { platform } from 'node:process';
 import type { Store } from '../../store/db.js';
 import { openStore, closeStore, DEFAULT_DB_PATH } from '../../store/db.js';
 import { getPendingAdvisory, markAdvisoryShown } from '../../store/pending-advisories.js';
+import { isFeedbackEligible, markFeedbackShown } from '../../store/feedback-cadence.js';
+import { recordAdvisoryFired, recordOptionSelected, pruneSignalsOfKind, SIGNAL_OPTION_SELECTED } from '../../store/feedback-signals.js';
+import { sendFeedback } from '../../telemetry/feedback-send.js';
+import { runFeedbackPopup, type FeedbackRenderFn } from '../../decision-session/feedback-popup.js';
+import { createFeedbackRenderFn } from '../../decision-session/feedback-tty.js';
 import { runDecisionSession } from '../../decision-session/DecisionSession.js';
 import type { SelectFn } from '../../decision-session/DecisionSession.js';
 import { createTtySelectFn } from '../../decision-session/TtySelectFn.js';
@@ -16,6 +21,7 @@ import type { LogLevel } from '../../logger.js';
 import { writeHookStats } from '../../store/hook-stats.js';
 import { writeTelemetry } from '../../telemetry/index.js';
 import { triggerOpportunisticSync } from '../../telemetry/OpportunisticSync.js';
+import { flushIfTelemetryOn, flushLifecycle } from '../../telemetry/lifecycle-flush.js';
 import { recentPromptMetadata } from '../../telemetry/recent-prompts.js';
 import { readStdin } from './auto.js';
 import { resolveDecisionContent } from '../../decision-session/options.js';
@@ -54,7 +60,17 @@ export type StopOutcome =
   | { outcome: 'no_tty' }
   | { outcome: 'blocked';       reason: string }
   | { outcome: 'clipboard_only' }
+  | { outcome: 'feedback_shown' }
   | { outcome: 'skipped' };
+
+/**
+ * Injectable feedback popup dependencies. `render` is the terminal renderer
+ * (null when none is available, e.g. no TTY); `send` transmits the rating.
+ */
+export interface FeedbackDeps {
+  render: FeedbackRenderFn | null;
+  send:   (store: Store, rating: number) => Promise<boolean>;
+}
 
 // ── Core logic ─────────────────────────────────────────────────────────────────
 
@@ -66,15 +82,40 @@ export type StopOutcome =
  * @param selectFn  Optional select replacement (injected in tests)
  */
 export async function runStop(
-  payload:   StopPayload,
-  store:     Store,
-  selectFn?: SelectFn,
-  openai?:   OpenAI,
+  payload:       StopPayload,
+  store:         Store,
+  selectFn?:     SelectFn,
+  openai?:       OpenAI,
+  feedbackDeps?: FeedbackDeps,
 ): Promise<StopOutcome> {
   // 1. Loop guard — Claude is continuing because of a previous Stop block; let it land
   if (payload.stop_hook_active) {
     logger.debug('stop_loop_guard', { cwd: payload.cwd });
     return { outcome: 'loop_guard' };
+  }
+
+  // 1.3. Feedback popup — when due, show it in place of the advisory this turn.
+  //      A rating is sent; either outcome resets the cadence. Skipped (without
+  //      consuming the cadence) when no renderer is available.
+  if (isFeedbackEligible(store)) {
+    const fbRender = feedbackDeps ? feedbackDeps.render : createFeedbackRenderFn();
+    const fbSend   = feedbackDeps ? feedbackDeps.send   : sendFeedback;
+    if (fbRender) {
+      const result = await runFeedbackPopup({ render: fbRender });
+      if (result.outcome === 'selected') {
+        // The feedback click is the consent gate: flush any buffered lifecycle
+        // events (install + advisory), then send the rating. Flush regardless of
+        // telemetry.enabled — this explicit action is the consent.
+        await flushLifecycle(store);
+        await fbSend(store, result.rating);
+        // Option-selected signals are never emitted; clear them at the consent
+        // point so local storage stays bounded.
+        pruneSignalsOfKind(store, SIGNAL_OPTION_SELECTED);
+      }
+      markFeedbackShown(store);
+      logger.info('stop_feedback_shown', { cwd: payload.cwd, selected: result.outcome === 'selected' });
+      return { outcome: 'feedback_shown' };
+    }
   }
 
   // 1.5. Language detection — runs post-response, invisible latency
@@ -165,6 +206,10 @@ export async function runStop(
     stage:            advisory.stage,
     generatedOptions: !!generatedOptions,
   }, store);
+  recordAdvisoryFired(store, payload.cwd);
+  // On-mode: emit the advisory-fired event now (backdated). Off-mode buffers it
+  // for the feedback-consent flush. Fire-and-forget so the popup is never blocked.
+  void flushIfTelemetryOn(store).catch(() => {});
 
   const dsResult = await runDecisionSession(
     {
@@ -185,6 +230,8 @@ export async function runStop(
   );
 
   if (dsResult.outcome === 'selected') {
+    // Record the selection (timestamp only — no option text or index).
+    recordOptionSelected(store, payload.cwd);
     // Store injected text in session — auto reads and clears this on its next invocation
     // to skip all pipeline processing for the advisory-injected prompt.
     mgr.setInjectedPrompt(store, dsResult.selectedPrompt);
@@ -193,6 +240,8 @@ export async function runStop(
   }
 
   if (dsResult.outcome === 'clipboard_only') {
+    // Copy-to-clipboard is also engagement with an option (timestamp only).
+    recordOptionSelected(store, payload.cwd);
     logger.info('stop_clipboard_only', { cwd: payload.cwd });
     return { outcome: 'clipboard_only' };
   }

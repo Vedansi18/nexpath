@@ -7,6 +7,8 @@ import { SelectPrompt } from '@clack/core';
 import pc from 'picocolors';
 import { openStore, closeStore, DEFAULT_DB_PATH } from '../../store/db.js';
 import { isConfigSet, setConfig, getConfig } from '../../store/config.js';
+import { setInstalledAtIfMissing } from '../../store/feedback-signals.js';
+import { flushIfTelemetryOn } from '../../telemetry/lifecycle-flush.js';
 import {
   VALID_ROLES,
   setAdvisoryFrequency,
@@ -520,6 +522,10 @@ export async function installAction(
 
   const store = await openStore(dbPath);
 
+  // Save the install timestamp locally (kept on re-runs). It is transmitted
+  // later, only when the user submits feedback.
+  setInstalledAtIfMissing(store);
+
   let apiKeySource:  InstallSummary['apiKey']['source'] = 'skipped';
   let telemetryEnabled = true;
 
@@ -750,6 +756,10 @@ export async function installAction(
 
   console.log('');
   console.log('Restart your agents to activate nexpath-prompt-store.');
+
+  // Emit the install event now when telemetry is on; when off it stays buffered
+  // locally until the user submits feedback.
+  await flushIfTelemetryOn(store);
 
   closeStore(store);
 

@@ -26,6 +26,7 @@ import type { LogLevel } from '../../logger.js';
 import { writeHookStats } from '../../store/hook-stats.js';
 import { upsertPendingAdvisory } from '../../store/pending-advisories.js';
 import { insertSkippedSession } from '../../store/skipped-sessions.js';
+import { recordActivity } from '../../store/feedback-cadence.js';
 import { writeTelemetry } from '../../telemetry/index.js';
 import { triggerOpportunisticSync } from '../../telemetry/OpportunisticSync.js';
 import { resolveFrequencyConfig, type AdvisoryFrequencyLevel } from '../../config/GlobalConfig.js';
@@ -123,6 +124,11 @@ export async function runAuto(
       }
     }
   }
+
+  // ── -0.5. Record active usage — one heartbeat per genuine user prompt,
+  //          accumulated globally (feeds the feedback popup cadence). Runs after
+  //          the advisory-injected guard so synthetic prompts do not count.
+  recordActivity(store);
 
   // ── 0.0. Implicit project registration (Issue 6) ─────────────────────────────
   if (!getProject(store, input.projectRoot)) {
