@@ -15,6 +15,7 @@ export const SIGNAL_ADVISORY_FIRED  = 'advisory_fired';
 export const SIGNAL_OPTION_SELECTED = 'option_selected';
 
 const INSTALLED_AT_KEY = 'installed_at';
+const INSTALLED_EVENT_SENT_KEY = 'installed_event_sent';
 
 export interface FeedbackSignals {
   /** Timestamps (epoch ms) at which advisories fired, oldest first. */
@@ -41,6 +42,16 @@ export function setInstalledAtIfMissing(store: Store, now: number = Date.now()):
   if (getConfig(store.db, INSTALLED_AT_KEY) === undefined) {
     setConfig(store, INSTALLED_AT_KEY, String(now));
   }
+}
+
+/** True once the install event has been successfully sent (so it fires only once). */
+export function isInstalledEventSent(store: Store): boolean {
+  return getConfig(store.db, INSTALLED_EVENT_SENT_KEY) === 'true';
+}
+
+/** Mark the install event as sent so it is not emitted again. */
+export function markInstalledEventSent(store: Store): void {
+  setConfig(store, INSTALLED_EVENT_SENT_KEY, 'true');
 }
 
 function recordSignal(store: Store, projectRoot: string, kind: string, occurredAt: number): void {
@@ -119,5 +130,18 @@ export function readAllSignals(store: Store): FeedbackSignals {
 /** Delete signals across all projects recorded at or before `ts` (after a send). */
 export function pruneAllSignalsUpTo(store: Store, ts: number): void {
   store.db.run('DELETE FROM feedback_signals WHERE occurred_at <= ?', [ts]);
+  saveStore(store);
+}
+
+/**
+ * Delete only the signals matching an exact (kind, occurred_at) pair. Used to
+ * remove a single signal after it has been successfully sent, without touching
+ * any other buffered — possibly unsent — signals.
+ */
+export function pruneSignalAt(store: Store, kind: string, occurredAt: number): void {
+  store.db.run(
+    'DELETE FROM feedback_signals WHERE kind = ? AND occurred_at = ?',
+    [kind, occurredAt],
+  );
   saveStore(store);
 }

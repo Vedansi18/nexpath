@@ -7,12 +7,17 @@ import { openStore, closeStore, type Store } from './db.js';
 import {
   getInstalledAt,
   setInstalledAtIfMissing,
+  isInstalledEventSent,
+  markInstalledEventSent,
   recordAdvisoryFired,
   recordOptionSelected,
   readSignals,
   pruneSignalsUpTo,
   readAllSignals,
   pruneAllSignalsUpTo,
+  pruneSignalAt,
+  SIGNAL_ADVISORY_FIRED,
+  SIGNAL_OPTION_SELECTED,
 } from './feedback-signals.js';
 
 let store: Store;
@@ -140,6 +145,49 @@ describe('pruneAllSignalsUpTo (global)', () => {
     pruneAllSignalsUpTo(store, 150);
 
     expect(readAllSignals(store)).toEqual({ advisoryFireTs: [], optionSelectTs: [400] });
+  });
+});
+
+describe('installed-event-sent flag', () => {
+  it('defaults to false before the install event is sent', () => {
+    expect(isInstalledEventSent(store)).toBe(false);
+  });
+
+  it('is true after markInstalledEventSent', () => {
+    markInstalledEventSent(store);
+    expect(isInstalledEventSent(store)).toBe(true);
+  });
+
+  it('stays true when marked again (idempotent)', () => {
+    markInstalledEventSent(store);
+    markInstalledEventSent(store);
+    expect(isInstalledEventSent(store)).toBe(true);
+  });
+});
+
+describe('pruneSignalAt (precise)', () => {
+  it('deletes only the exact (kind, ts) pair, leaving other kinds at the same ts', () => {
+    recordAdvisoryFired(store, '/p', 100);
+    recordOptionSelected(store, '/p', 100);
+
+    pruneSignalAt(store, SIGNAL_ADVISORY_FIRED, 100);
+
+    expect(readAllSignals(store)).toEqual({ advisoryFireTs: [], optionSelectTs: [100] });
+  });
+
+  it('leaves other timestamps of the same kind untouched', () => {
+    recordAdvisoryFired(store, '/p', 100);
+    recordAdvisoryFired(store, '/p', 200);
+
+    pruneSignalAt(store, SIGNAL_ADVISORY_FIRED, 100);
+
+    expect(readAllSignals(store).advisoryFireTs).toEqual([200]);
+  });
+
+  it('is a no-op when nothing matches', () => {
+    recordAdvisoryFired(store, '/p', 100);
+    pruneSignalAt(store, SIGNAL_OPTION_SELECTED, 100);
+    expect(readAllSignals(store).advisoryFireTs).toEqual([100]);
   });
 });
 
