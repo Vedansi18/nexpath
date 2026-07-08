@@ -30,6 +30,7 @@ import {
 } from './content-template-engine.js';
 import type { OptionEntry } from './options.js';
 import type { FactMap } from '../env/types.js';
+import { PROJECT_FACT_KEYS } from '../env/types.js';
 import type { RightGoodProfile } from './../classifier/right-good-aggregator.js';
 import type { WorkStyleProfile } from './../classifier/work-style-traits.js';
 import type { SignalDefinition } from '../classifier/types.js';
@@ -307,13 +308,15 @@ describe('content-template-engine — param-source retrieval (AR-10 / AR-9 / AR-
   });
 
   it('envFactsToGrounding never grounds a boolean fact with its raw snake_case key (would leak into the why-desc)', () => {
-    // Every present boolean PROJECT_FACT_KEY grounds with a human phrase, not the raw key.
+    // Derived from PROJECT_FACT_KEYS (project_framework is the only string fact) so a NEW boolean
+    // probe key that forgot its ENV_FACT_PHRASE entry is caught here, not just the ones known today.
+    const boolKeys = PROJECT_FACT_KEYS.filter((k) => k !== 'project_framework');
     const facts: FactMap = Object.fromEntries(
-      ['has_version_control', 'has_persistent_context_file', 'has_test_runner', 'has_ci_pipeline',
-       'has_deploy_config', 'has_security_scanner', 'has_env_separation', 'has_backups', 'has_lockfile']
-        .map((k) => [k, { value: true, tier: 'C', confidence: 'high', detectedAt: 0 }]),
+      boolKeys.map((k) => [k, { value: true, tier: 'C', confidence: 'high', detectedAt: 0 }]),
     ) as FactMap;
-    for (const g of envFactsToGrounding(facts)) {
+    const grounded = envFactsToGrounding(facts);
+    expect(grounded.length).toBe(boolKeys.length); // every present boolean fact grounds
+    for (const g of grounded) {
       expect(g.value, `${g.key} grounded with its raw key`).not.toBe(g.key);
       expect(g.value, `${g.key} value looks like a raw key`).not.toMatch(/^has_[a-z_]+$/);
       expect(g.value.length).toBeGreaterThan(0);
