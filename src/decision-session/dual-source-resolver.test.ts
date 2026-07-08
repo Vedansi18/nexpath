@@ -13,13 +13,22 @@ import { WHY_HELP_PER_CLASS } from './why-help.js';
 // cascade parity is preserved; per-set migration flips one signal at a time (S8).
 
 describe('§6.1 gate 1 — dual-source resolver + migration marker', () => {
-  it('the migration marker holds exactly the 6 new §4.E2 signals (A12) — each resolves to the engine', () => {
+  it('the migration marker holds the 6 new §4.E2 signals (A12) + the migrated existing classes (B3: class 2)', () => {
     const NEW_E2 = [
       'ABSENCE_SECRET_IN_PROMPT', 'ABSENCE_NO_VERSION_CONTROL', 'ABSENCE_NO_BACKUP_SAFETY',
       'ABSENCE_NO_SEPARATE_ENVS', 'ABSENCE_NO_AUTOMATED_SECURITY_SCANNING', 'ABSENCE_FRUSTRATION_SPIRAL',
     ];
-    expect(MIGRATED_SIGNALS.size).toBe(6);
-    for (const s of NEW_E2) {
+    // B3 — class 2 (verification-quality, 21 signals, 0 sensitive) migrated to the engine.
+    const CLASS2 = [
+      'BEHAVIOUR_TESTING', 'ABSENCE_TEST_CREATION', 'ABSENCE_REGRESSION_CHECK', 'ABSENCE_SECURITY_CHECK',
+      'ABSENCE_ERROR_HANDLING', 'ABSENCE_DOCUMENTATION', 'ABSENCE_REFACTORING', 'ABSENCE_CORRECTION_SEEKING',
+      'ABSENCE_PROBLEM_CORRECTION', 'ABSENCE_ACCESSIBILITY', 'ABSENCE_DATA_VALIDATION', 'ABSENCE_CODE_DOCUMENTATION_GAP',
+      'ABSENCE_TECHNICAL_DEBT_ACKNOWLEDGMENT', 'ABSENCE_TEST_DEPTH_CHECK', 'ABSENCE_SECURITY_REVIEW_GAP',
+      'ABSENCE_ERROR_HANDLING_COVERAGE', 'ABSENCE_REFACTORING_CHECKPOINT', 'ABSENCE_SELF_REVIEW_HABIT',
+      'ABSENCE_PERFORMANCE_AWARENESS', 'ABSENCE_DOCUMENTATION_BEFORE_ASK', 'ABSENCE_OUTPUT_VERIFICATION',
+    ];
+    expect(MIGRATED_SIGNALS.size).toBe(NEW_E2.length + CLASS2.length); // 6 + 21 = 27
+    for (const s of [...NEW_E2, ...CLASS2]) {
       expect(MIGRATED_SIGNALS.has(s)).toBe(true);
       expect(resolveContentSource(s)).toBe('content-template');
     }
@@ -44,8 +53,9 @@ describe('§6.1 gate 1 — dual-source resolver + migration marker', () => {
     }
   });
 
-  it('resolves every LEGACY signalType to static (only the 6 new signals are engine-served)', () => {
-    for (const s of ['test_creation', 'context_loss', 'session_length_checkpoint', 'contract_testing_gap', 'x_unknown']) {
+  it('resolves a not-yet-migrated signalType to static (un-migrated classes still serve from the static set)', () => {
+    // Real signalTypes from classes NOT yet in MIGRATED_SIGNALS (class 1/3/5/9) — still static.
+    for (const s of ['IDEA_TO_PRD', 'ABSENCE_SPEC_ACCEPTANCE', 'ABSENCE_CONTEXT_LOSS', 'ABSENCE_CONTRACT_TESTING_GAP', 'x_unknown']) {
       expect(resolveContentSource(s)).toBe('static');
     }
   });

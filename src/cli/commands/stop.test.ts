@@ -13,6 +13,14 @@ vi.mock('../../decision-session/OptionGenerator.js', () => ({
   generateOptionList: vi.fn().mockResolvedValue(null),
 }));
 
+// The engine path (migrated signals) is mocked to null like the static generateOptionList above,
+// so these flow tests stay deterministic and never make a live LLM call — regardless of which
+// signals are in MIGRATED_SIGNALS. A null return exercises the static-content fallback in runLevel.
+vi.mock('../../decision-session/engine-option-generator.js', () => ({
+  generateFromEngine: vi.fn().mockResolvedValue(null),
+  buildEngineGrounding: vi.fn().mockResolvedValue([]),
+}));
+
 import { openStore } from '../../store/db.js';
 import type { Store } from '../../store/db.js';
 import { runStop } from './stop.js';

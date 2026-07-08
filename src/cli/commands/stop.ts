@@ -168,21 +168,29 @@ export async function runStop(
   let whyHelpOverride: WhyHelpEntry | null | undefined;
   if (recordSignalType && resolveContentSource(recordSignalType) === 'content-template') {
     const lookup = shippedRecordLookup(recordSignalType);
+    // The overrides are static record fields (no LLM) — resolve them regardless of the engine.
     questionOverride = resolveRecord(lookup)?.record.question;
     whyHelpOverride = getWhyHelpForSignalType(recordSignalType);
-    const level = (getUserDepthLevel(store, payload.cwd)?.currentLevel ?? 2) as MaturityLevel;
-    const promptHistory = mgr.current.promptHistory as PromptRecord[];
-    const facts = await buildEngineGrounding(store, payload.cwd, promptHistory, openai);
-    generatedOptions = await generateFromEngine(
-      {
-        lookup,
-        level,
-        register: selectionRegister(mgr.current.profile?.nature),
-        facts,
-        factCap:  3,
-      },
-      openai,
-    );
+    // The engine grounding/weave needs an LLM client; on ANY failure (missing key, API error)
+    // degrade to the static generate path below — the Stop hook must never crash on option gen.
+    try {
+      const level = (getUserDepthLevel(store, payload.cwd)?.currentLevel ?? 2) as MaturityLevel;
+      const promptHistory = mgr.current.promptHistory as PromptRecord[];
+      const facts = await buildEngineGrounding(store, payload.cwd, promptHistory, openai);
+      generatedOptions = await generateFromEngine(
+        {
+          lookup,
+          level,
+          register: selectionRegister(mgr.current.profile?.nature),
+          facts,
+          factCap:  3,
+        },
+        openai,
+      );
+    } catch (err) {
+      logger.debug('stop_engine_option_gen_error', { error: String(err) });
+      generatedOptions = null;
+    }
   }
   if (!generatedOptions) {
     generatedOptions = await generateOptionList(
