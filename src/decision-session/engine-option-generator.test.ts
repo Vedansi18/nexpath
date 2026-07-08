@@ -3,6 +3,7 @@ import type OpenAI from 'openai';
 import { SHIPPED_CONTENT_TEMPLATES } from './content-template-tooling.js';
 import { shippedRecordLookup } from './content-template-source.js';
 import { generateFromEngine } from './engine-option-generator.js';
+import { CONFIRM_SEEK_RE } from './content-template-grounding.js';
 
 // §6.1 items 2/5 — the engine-backed pre-generate path. The LLM seams (grounding weave +
 // ladder derive) are exercised via a mock client (no real spend), matching the engine's
@@ -38,4 +39,24 @@ describe('§6.1 items 2/5 — engine-backed pre-generate path', () => {
     expect(gen).not.toBeNull();
     expect(gen!.l1[0].length).toBeGreaterThan(0);
   });
+});
+
+describe('A12 fire-time L2 safeguard — record-level-flagged migrated signals carry it through every tier', () => {
+  // The A12 guarantee: serving a record-level-flagged migrated signal via the engine keeps the
+  // l2SafeguardLine on EVERY served strength tier — L1 (composeAdvisory auto-source) AND the
+  // derived L2/L3 (deriveLadder step-simpler). Use a mock that DROPS the seek in both the weave
+  // and the derive (worst case); the engine must re-append it, so the confirm-seek survives.
+  const dropsSeek = mockClient(JSON.stringify({ option: 'a simpler option', whyDesc: 'grounded why-desc with no seek' }));
+  const FLAGGED = ['ABSENCE_SECRET_IN_PROMPT', 'ABSENCE_NO_SEPARATE_ENVS', 'ABSENCE_NO_AUTOMATED_SECURITY_SCANNING'];
+
+  for (const sig of FLAGGED) {
+    it(`${sig}: the confirm-seek survives into the L1/L2/L3 desc-bases`, async () => {
+      const gen = await generateFromEngine({ lookup: shippedRecordLookup(sig), level: 5 }, dropsSeek);
+      expect(gen, `${sig} resolves`).not.toBeNull();
+      const tiers = [gen!.generatedDescBases!.l1[0], gen!.generatedDescBases!.l2[0], gen!.generatedDescBases!.l3[0]];
+      for (let i = 0; i < tiers.length; i++) {
+        expect(tiers[i], `${sig} L${i + 1} desc-base carries the confirm-seek`).toMatch(CONFIRM_SEEK_RE);
+      }
+    });
+  }
 });
