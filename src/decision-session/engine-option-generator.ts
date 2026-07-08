@@ -10,7 +10,7 @@
  * The `{R...}`→F7 after-pass (item 3) is a no-op for content-template cells (they carry no
  * runtime `{R...}` tokens — the grounding + safeguard are composed engine-side, items 6/9),
  * so the engine output is served directly. Only reached for a signalType in
- * `MIGRATED_SIGNALS` (the 6 §4.E2 signals today; empty = ship-dark).
+ * `MIGRATED_SIGNALS` (the 6 §4.E2 signals + the Group-B classes migrated so far; empty = ship-dark).
  */
 
 import type OpenAI from 'openai';

@@ -149,18 +149,20 @@ export function resolveSelection(
 // content-template both resolve through the ONE dispatch point (S7).
 //
 // The marker started EMPTY (ship-dark: every signalType resolved 'static',
-// preserving EXACT cascade parity). The 6 §4.E2 signals are now migrated (A12);
-// every other set stays static. Per-set migration adds a signalType key here, one
+// preserving EXACT cascade parity). Migrated signalTypes are added here — the 6
+// §4.E2 signals (A12) plus the Group-B classes as they migrate (B3+); every
+// un-migrated set stays static. Per-set migration adds a signalType key here, one
 // commit each (S8) — flipping only that signal to the engine path.
 
 /** The content SOURCE for a signalType's advisory. */
 export type ContentSource = 'static' | 'content-template';
 
 /**
- * SignalTypes served by the content-template engine (else static). Holds the 6
- * §4.E2 signals (A12); an EMPTY marker = ship-dark (every signal static, runtime
- * byte-identical). Migration is per-set (S8) — add the signalType key here in its
- * own migration commit, gated by the cascade-parity + contract tests.
+ * SignalTypes served by the content-template engine (else static) — the 6 §4.E2
+ * signals (A12) plus the Group-B classes migrated so far (B3+). An EMPTY marker =
+ * ship-dark (every signal static, runtime byte-identical). Migration is per-set (S8)
+ * — add the signalType key here in its own migration commit, gated by the
+ * cascade-parity + contract tests.
  */
 export const MIGRATED_SIGNALS: ReadonlySet<string> = new Set<string>([
   // §4.E2 new signals (A12): served by the content-template engine (no static DecisionContent).
