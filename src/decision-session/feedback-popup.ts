@@ -19,7 +19,7 @@ export const FEEDBACK_PINCH_LABEL = 'feedback';
 export const FEEDBACK_QUESTION = "How's nexpath working out for you?";
 
 /** Transparency note shown under the label — what a send transmits. */
-export const FEEDBACK_NOTE = 'On send: your installation ID and timestamps — no prompt text.';
+export const FEEDBACK_NOTE = 'Press Enter to send: your installation ID and timestamps — no prompt text.';
 
 // Light gray (xterm 250) so the note reads as a subdued sub-line, not a heading.
 const NOTE_GRAY_OPEN  = '\x1b[38;5;250m';
