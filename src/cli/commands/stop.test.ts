@@ -488,7 +488,7 @@ describe('runStop — B6 role-precedence guard', () => {
   beforeEach(async () => { store = await openStore(':memory:'); });
   afterEach(() => { store.db.close(); vi.restoreAllMocks(); });
 
-  function seedProfile(role: string | null) {
+  function seedProfile(role: string | null, flagType = 'absence:context_loss') {
     const mgr = SessionStateManager.load(store, '/test/project');
     mgr.setProfile({
       nature: 'hardcore_pro', mood: 'focused', depth: 'high', role,
@@ -497,7 +497,7 @@ describe('runStop — B6 role-precedence guard', () => {
     } as unknown as import('../../classifier/types.js').UserProfile);
     mgr.setDetectedLanguage(store, undefined); // persists state incl. the profile
     upsertPendingAdvisory(store, {
-      projectRoot: '/test/project', stage: 'implementation', flagType: 'absence:context_loss',
+      projectRoot: '/test/project', stage: 'implementation', flagType,
       pinchLabel: 'Hold up.', sessionId: mgr.current.sessionId, promptCount: 5,
     });
   }
@@ -512,6 +512,16 @@ describe('runStop — B6 role-precedence guard', () => {
 
   it('a non-role user gets the ENGINE for the migrated context_loss', async () => {
     seedProfile(null);
+    vi.mocked(generateFromEngine).mockClear();
+    const result = await runStop(makePayload(), store, mockSelect(SKIP_NOW));
+    expect(generateFromEngine).toHaveBeenCalled();
+    expect(result.outcome).toBe('skipped');
+  });
+
+  it('the guard is SCOPED — a role-mapped but not role-specific signal (pm + decision_fatigue) still gets the ENGINE', async () => {
+    // decision_fatigue_pattern is in the PM role map (as a register _FORMAL variant, not role-
+    // tailored) and is NOT in ROLE_SPECIFIC_STATIC_SIGNALS — so a pm user must still get the engine.
+    seedProfile('pm', 'absence:decision_fatigue_pattern');
     vi.mocked(generateFromEngine).mockClear();
     const result = await runStop(makePayload(), store, mockSelect(SKIP_NOW));
     expect(generateFromEngine).toHaveBeenCalled();
