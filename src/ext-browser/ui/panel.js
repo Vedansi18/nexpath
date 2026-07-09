@@ -28,10 +28,13 @@ const STYLES = `
     line-height: 15px;
     color: #f5f5f4;
     background: #310823;
-    /* #2: fixed size across L1/L2/L3/confirm — do not let content reflow the box.
-       No position/inset here — the engine centers the host; we just size to content. */
+    /* #2: FIXED size across L1/L2/L3/confirm/expanded — the box never grows. When the
+       options don't fit (e.g. a details block is expanded) the OPTIONS area scrolls
+       (.np-scroll), while the header (▲ NEXPATH + pinch + question + why-help) and the
+       footer stay pinned — CLI-parity. No position/inset: the engine centers the host. */
     width: 620px;
-    min-height: 460px;
+    height: 500px;
+    max-height: calc(100vh - 40px);
     max-width: calc(100vw - 24px);
     padding: 16px 20px 16px 12px;
     border-radius: 10px;
@@ -39,6 +42,7 @@ const STYLES = `
     box-sizing: border-box;
     display: flex;
     flex-direction: column;
+    overflow: hidden;
     transition: opacity .15s ease, transform .15s ease;
   }
   .np-root * { box-sizing: border-box; }
@@ -54,6 +58,16 @@ const STYLES = `
 
   .np-body-wrap { flex: 1 1 auto; display:flex; flex-direction:column; min-height:0; }
   .np-root.np-busy .np-body-wrap { opacity:.4; pointer-events:none; }
+
+  /* #2: fixed header (pinch/question/why-help) + scrolling options + fixed footer. */
+  .np-fixed-top { flex: 0 0 auto; }
+  .np-scroll {
+    flex: 1 1 auto; overflow-y: auto; min-height: 0;
+    scrollbar-width: thin; scrollbar-color: #5a3a52 transparent;
+  }
+  .np-scroll::-webkit-scrollbar { width: 8px; }
+  .np-scroll::-webkit-scrollbar-thumb { background: #5a3a52; border-radius: 4px; }
+  .np-scroll::-webkit-scrollbar-track { background: transparent; }
 
   .np-row { display:flex; }
   .np-rail { flex:0 0 20px; color:#2a667b; padding-left:2px; }
@@ -89,7 +103,7 @@ const STYLES = `
   .np-control .np-control-sub { color:#7a8494; font-size:11px; margin-left:4px; }
 
   .np-footer {
-    margin-top:auto; padding-top:8px; padding-left:20px; font-size:11px; font-style:italic;
+    margin-top:10px; padding-top:8px; padding-left:20px; font-size:11px; font-style:italic;
     color:#6f7373; border-top:1px solid rgba(154,167,167,.16); flex: 0 0 auto;
   }
   .np-footer a { color:#c9a96a; cursor:pointer; text-decoration:none; }
@@ -224,21 +238,25 @@ export function mountNexpathPanel(root, { onEvent }) {
       `<div class="np-content">${escapeHtml(payload.pinchLabel)}` +
       (LEVEL_SUBTITLE[currentLevel] ? `<span class="np-subtitle">${LEVEL_SUBTITLE[currentLevel]}</span>` : '') +
       `</div>`;
-    bodyWrap.appendChild(pinchRow);
+    // FIXED header region — stays pinned; only the options below scroll (#2).
+    const fixedTop = document.createElement('div');
+    fixedTop.className = 'np-fixed-top';
+    fixedTop.appendChild(pinchRow);
 
     const qRow = document.createElement('div');
     qRow.className = 'np-row np-question-row';
     qRow.innerHTML = `<div class="np-rail">│</div><div class="np-content">${escapeHtml(payload.question)}</div>`;
-    bodyWrap.appendChild(qRow);
+    fixedTop.appendChild(qRow);
 
     if (payload.whyHelp) {
       payload.whyHelp.split('\n').forEach((line) => {
         const whyRow = document.createElement('div');
         whyRow.className = 'np-row np-why-row';
         whyRow.innerHTML = `<div class="np-rail">│</div><div class="np-content">${escapeHtml(line)}</div>`;
-        bodyWrap.appendChild(whyRow);
+        fixedTop.appendChild(whyRow);
       });
     }
+    bodyWrap.appendChild(fixedTop);
 
     const optionsWrap = document.createElement('div');
     optionsWrap.className = 'np-options';
@@ -292,7 +310,11 @@ export function mountNexpathPanel(root, { onEvent }) {
       }
     });
 
-    bodyWrap.appendChild(optionsWrap);
+    // SCROLL region — only the options scroll when they don't fit (#2).
+    const scrollWrap = document.createElement('div');
+    scrollWrap.className = 'np-scroll';
+    scrollWrap.appendChild(optionsWrap);
+    bodyWrap.appendChild(scrollWrap);
 
     const footer = document.createElement('div');
     footer.className = 'np-footer';
@@ -357,6 +379,11 @@ export function mountNexpathPanel(root, { onEvent }) {
       renderOptionsView();
     }
 
+    // Keep the focused row visible in the scroll region — auto-scroll on ↑/↓ nav so
+    // the user never has to scroll manually to reach an option below the fold.
+    const focusedEl = bodyWrap.querySelector('.np-focused');
+    if (focusedEl && focusedEl.scrollIntoView) focusedEl.scrollIntoView({ block: 'nearest' });
+
     el.classList.toggle('np-busy', busy);
     const oldSpinner = el.querySelector('.np-spinner');
     if (oldSpinner) oldSpinner.remove();
@@ -406,7 +433,10 @@ export function mountNexpathPanel(root, { onEvent }) {
     else if (e.key === ' ') {
       const row = rows[focusedIndex];
       if (row && row.kind === 'option') {
-        if (expanded.has(row.opt.id)) expanded.delete(row.opt.id); else expanded.add(row.opt.id);
+        // Exclusive: opening one option's details closes any other that was open.
+        const wasOpen = expanded.has(row.opt.id);
+        expanded.clear();
+        if (!wasOpen) expanded.add(row.opt.id);
         render();
       }
       e.preventDefault();
