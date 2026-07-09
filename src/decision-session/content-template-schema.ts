@@ -72,6 +72,19 @@ export interface RegisterOverride {
   levelForms?: Partial<Record<MaturityLevel, LevelForm>>;
 }
 
+/**
+ * A per-ROLE override entry (founder / indie_hacker / pm). Role-tailored content is
+ * genuinely different per role — the register-only engine cannot reproduce it by vocab
+ * adaptation — so a role override ALWAYS carries its own stored `levelForms` (a full
+ * structural rewrite, with the mandatory level-1 floor). This is the role dimension the
+ * B6 guard deferred; the engine's form resolver serves it with role → register → base
+ * precedence (role loses only to the exclusive `beginner` register, mirroring the static
+ * `isVibe` gate that turned role maps off for beginners).
+ */
+export interface RoleOverride {
+  levelForms: Partial<Record<MaturityLevel, LevelForm>>;
+}
+
 export interface Slot {
   /** Referenced in a cell as `{{name}}`. */
   name: string;
@@ -138,6 +151,15 @@ export interface ContentTemplateRecord {
    * register-override branch serves verbatim for that register. Optional + additive.
    */
   registerOverrides?: Record<string, RegisterOverride>;
+  /**
+   * Role-divergence overrides, keyed by role name (`founder` / `indie_hacker` / `pm`).
+   * A role ABSENT here falls through to the register/base content. A present entry carries
+   * its own `levelForms` (the role-tailored rewrite) which the engine serves for that role
+   * (role → register → base, beginner-exclusive). Optional + additive; today only
+   * `ABSENCE_CONTEXT_LOSS` carries them (the role-tailored set the engine could not serve
+   * before B11, previously kept static by the B6 guard).
+   */
+  roleOverrides?: Record<string, RoleOverride>;
 }
 
 // ── Validation (the single schema gate) ───────────────────────────────────────
@@ -245,6 +267,19 @@ export function validateContentTemplateRecord(record: unknown): ValidationResult
         } else if (ov.divergence === 'vocab-adaptable' && ov.levelForms !== undefined) {
           errors.push(`registerOverrides.${register}: vocab-adaptable carries no levelForms (the engine adapts the base)`);
         }
+      }
+    }
+  }
+
+  // roleOverrides — optional; each entry carries its own valid levelForms (role content is
+  // always a full structural rewrite — mandatory level-1 floor, well-formed forms).
+  if (r.roleOverrides !== undefined) {
+    if (typeof r.roleOverrides !== 'object' || r.roleOverrides === null) {
+      errors.push('roleOverrides must be an object when present');
+    } else {
+      for (const [role, ov] of Object.entries(r.roleOverrides)) {
+        if (!ov || typeof ov !== 'object') { errors.push(`roleOverrides.${role} must be an object`); continue; }
+        validateLevelFormsMap((ov as RoleOverride).levelForms, `roleOverrides.${role}.levelForms`, errors);
       }
     }
   }

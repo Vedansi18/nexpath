@@ -465,6 +465,27 @@ describe('content-template-engine — register-override branch (resolveRegisterF
     const r = record({ levelForms: base, registerOverrides: { beginner: { divergence: 'vocab-adaptable' } } });
     expect(resolveRegisterForms(r, 'beginner')).toBe(base);
   });
+
+  // B11 role dimension — role → register → base, beginner-exclusive (mirrors the static isVibe gate).
+  const founderForms = { 1: { kind: 'slot-variant', cell: cell('founder1') } } as ContentTemplateRecord['levelForms'];
+  const roleRec = record({
+    levelForms: base,
+    roleOverrides: { founder: { levelForms: founderForms } },
+    registerOverrides: { beginner: { divergence: 'structurally-divergent', levelForms: beg } },
+  });
+  it('serves the ROLE override forms for a matching role (role wins over the register/base)', () => {
+    expect(resolveRegisterForms(roleRec, 'casual', 'founder')).toBe(founderForms);
+    expect(resolveRegisterForms(roleRec, 'formal', 'founder')).toBe(founderForms);
+  });
+  it('a role with no override falls through to the register/base', () => {
+    expect(resolveRegisterForms(roleRec, 'casual', 'pm')).toBe(base);
+  });
+  it('beginner register is EXCLUSIVE — it beats a role override (static isVibe gate)', () => {
+    expect(resolveRegisterForms(roleRec, 'beginner', 'founder')).toBe(beg);
+  });
+  it('no role arg → register/base (backward-compatible with the 2-arg calls)', () => {
+    expect(resolveRegisterForms(roleRec, 'casual')).toBe(base);
+  });
   it('composeAdvisory serves the override option for the target register, base otherwise', async () => {
     const out = await composeAdvisory({ lookup: lookupOf({ shipped: rec }), level: 1, register: 'beginner' }, mockClient(JSON.stringify({ whyDesc: 'w' })));
     expect(out?.option).toBe('beginner1');

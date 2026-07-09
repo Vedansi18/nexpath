@@ -183,6 +183,34 @@ describe('content-template-schema — registerOverrides (§6.1 gate 3)', () => {
   });
 });
 
+describe('content-template-schema — roleOverrides (B11 role dimension)', () => {
+  it('accepts a role override with a floored levelForms', () => {
+    const r = validRecord({ roleOverrides: { founder: { levelForms: { 1: form() } } } });
+    expect(validateContentTemplateRecord(r)).toEqual({ ok: true, errors: [] });
+  });
+  it('accepts multiple roles', () => {
+    const r = validRecord({ roleOverrides: {
+      founder: { levelForms: { 1: form() } }, indie_hacker: { levelForms: { 1: form() } }, pm: { levelForms: { 1: form() } },
+    } });
+    expect(validateContentTemplateRecord(r).ok).toBe(true);
+  });
+  it('omitted is fine', () => {
+    expect(validateContentTemplateRecord(validRecord())).toEqual({ ok: true, errors: [] });
+  });
+  it('rejects a role override missing levelForms', () => {
+    const r = validRecord({ roleOverrides: { founder: {} } } as unknown as Partial<ContentTemplateRecord>);
+    const res = validateContentTemplateRecord(r);
+    expect(res.ok).toBe(false);
+    expect(res.errors.join(' ')).toMatch(/roleOverrides\.founder\.levelForms must be an object/);
+  });
+  it('rejects a role override missing the level-1 floor', () => {
+    const r = validRecord({ roleOverrides: { founder: { levelForms: { 3: form() } } } });
+    const res = validateContentTemplateRecord(r);
+    expect(res.ok).toBe(false);
+    expect(res.errors.join(' ')).toMatch(/roleOverrides\.founder\.levelForms is missing the mandatory level-1 floor/);
+  });
+});
+
 describe('content-template-schema — levelForms resolution (closest-level, floor, clamp)', () => {
   const lf = { 1: form('structural-variant'), 3: form(), 5: form() };
 

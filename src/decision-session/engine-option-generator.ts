@@ -37,6 +37,8 @@ export interface EngineGenerateInput {
   level: MaturityLevel;
   /** Target register (structurally-divergent override selection; else base). */
   register?: string;
+  /** Target role (founder / indie_hacker / pm) — selects a role override (role → register → base). */
+  role?: string;
   /** Grounding facts for the why-desc weave (AR-10 dev-env / AR-9 workflow / AR-3 work-style / prompt-derived). */
   facts?: readonly GroundingFact[];
   /** Grounding-line budget for the why-desc. */
@@ -52,7 +54,7 @@ export async function generateFromEngine(
   client?: OpenAI,
 ): Promise<GeneratedOptions | null> {
   const advisory = await composeAdvisory(
-    { lookup: input.lookup, level: input.level, register: input.register, facts: input.facts, factCap: input.factCap },
+    { lookup: input.lookup, level: input.level, register: input.register, role: input.role, facts: input.facts, factCap: input.factCap },
     client,
   );
   if (!advisory) return null;

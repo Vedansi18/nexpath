@@ -127,16 +127,29 @@ export function resolveColumn(record: ContentTemplateRecord, level: MaturityLeve
 // ── Register-override branch (§6.1 gate 3 / S6) ─────────────────────────────────
 
 /**
- * The register-override BRANCH: return the effective levelForms for a target register.
- * A `structurally-divergent` override (e.g. the `_BEGINNER` rewrite) serves its OWN
- * stored forms; a register with no override — or a `vocab-adaptable` one — uses the
- * base forms (the engine adapts vocabulary downstream, no branch). No register → base.
- * Single dispatch: one lookup, base fallback, no boolean-flag accumulation.
+ * The register/role-override BRANCH: return the effective levelForms for a target
+ * register + role. Precedence — role → register → base, with `beginner` EXCLUSIVE:
+ *   1. `beginner` register → its structurally-divergent override (else base); role is
+ *      IGNORED for beginners (mirrors the static `isVibe` gate that turned role maps off).
+ *   2. else a role override (role-tailored content the register can't reproduce) wins.
+ *   3. else a `structurally-divergent` register override; else the base forms (the engine
+ *      adapts vocabulary downstream, no branch).
+ * Single dispatch: ordered lookups, base fallback, no boolean-flag accumulation.
  */
 export function resolveRegisterForms(
   record: ContentTemplateRecord,
   register?: string,
+  role?: string,
 ): ContentTemplateRecord['levelForms'] {
+  if (register === 'beginner') {
+    const beg = record.registerOverrides?.['beginner'];
+    if (beg?.divergence === 'structurally-divergent' && beg.levelForms) return beg.levelForms;
+    return record.levelForms;
+  }
+  if (role) {
+    const roleOverride = record.roleOverrides?.[role];
+    if (roleOverride?.levelForms) return roleOverride.levelForms;
+  }
   const override = register ? record.registerOverrides?.[register] : undefined;
   if (override?.divergence === 'structurally-divergent' && override.levelForms) return override.levelForms;
   return record.levelForms;
@@ -520,6 +533,8 @@ export interface ComposeAdvisoryInput {
   lengthBudget?: number;
   /** Target register — selects a structurally-divergent override's forms when present (else base). */
   register?: string;
+  /** Target role (founder / indie_hacker / pm) — selects a role override's forms (role → register → base). */
+  role?: string;
 }
 
 export interface ComposedAdvisory {
@@ -549,7 +564,7 @@ export async function composeAdvisory(input: ComposeAdvisoryInput, client?: Open
   if (!resolved) return null;
   // Register-override branch first: serve a structurally-divergent register's own forms
   // (e.g. _BEGINNER) when present, else the base forms.
-  const col = resolveLevelForm(resolveRegisterForms(resolved.record, input.register), input.level);
+  const col = resolveLevelForm(resolveRegisterForms(resolved.record, input.register, input.role), input.level);
   if (!col) return null;
   const option = composeOption({
     cell: col.form.cell, slots: resolved.record.slots, ctx: input.ctx, anchor: input.anchor, lengthBudget: input.lengthBudget,
