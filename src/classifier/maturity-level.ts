@@ -220,3 +220,41 @@ export function updateProjectMaturity(
   upsertUserDepthLevel(store, next);
   return next;
 }
+
+/**
+ * Install-time SEED of the maturity column from the historical-import window.
+ * Unlike updateProjectMaturity's incremental +1/−1 graduation (gated by the
+ * stability/hysteresis counters — built for live drift), this places the INITIAL
+ * level DIRECTLY from the import-derived RIGHT&GOOD profile: a full ≤500-prompt
+ * history is enough to seat the level, not merely nudge it. With no import
+ * behaviour (near-empty profile) it falls back to the cross-project median seed.
+ * No-op if a row already exists (idempotent).
+ */
+export function seedProjectMaturity(
+  store:       Store,
+  projectRoot: string,
+  profile:     RightGoodProfile,
+  meta:        MaturityMeta,
+  now:         number = Date.now(),
+  opts:        MaturityScoreOptions = {},
+): UserDepthRow {
+  const existing = getUserDepthLevel(store, projectRoot);
+  if (existing) return existing;
+
+  const score = computeMaturityScore(profile, meta, opts);
+  const currentLevel: MaturityLevel = score.hasData
+    ? scoreToLevel(score.score)
+    : medianSeedLevel(listUserDepthLevels(store).map((r) => r.currentLevel));
+
+  const row: UserDepthRow = {
+    projectRoot,
+    currentLevel,
+    stabilityCounter:  0,
+    hysteresisCounter: 0,
+    lastGraduationAt:  null,
+    schemaVersion:     SCHEMA_VERSION,
+    updatedAt:         now,
+  };
+  upsertUserDepthLevel(store, row);
+  return row;
+}

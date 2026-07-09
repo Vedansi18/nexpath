@@ -9,6 +9,7 @@ import { upsertProject, getProject } from './projects.js';
 import { importHistoricalPrompts } from './historical-import.js';
 import { SessionStateManager } from '../classifier/SessionStateManager.js';
 import { readParamEvents } from '../telemetry/param-events.js';
+import { getUserDepthLevel } from './user-depth-level.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -209,6 +210,21 @@ describe('importHistoricalPrompts', () => {
     expect(mgr.current.profile).not.toBeNull();
     expect(mgr.current.profile?.nature).toBe('beginner'); // safe default
     expect(mgr.current.mood).toBeUndefined(); // mood now set by LLM via auto.ts, not at bootstrap
+  });
+
+  it('seeds the maturity column (user_depth_level) at bootstrap', async () => {
+    const projDir = setupProjDir(tmpDir);
+    const lines = Array.from({ length: 10 }, (_, i) =>
+      makeUserLine(`implement the feature module number ${i} with proper tests`),
+    );
+    writeJsonl(projDir, 'session.jsonl', lines);
+
+    await importHistoricalPrompts(store, PROJECT_ROOT);
+
+    // The bootstrap seeds a depth row. Here it is cold-start L2: the in-memory
+    // store writes no param-events to disk, so the import RIGHT&GOOD profile is
+    // empty (the from-history level derivation is covered in maturity-level.test.ts).
+    expect(getUserDepthLevel(store, PROJECT_ROOT)?.currentLevel).toBe(2);
   });
 
   // 12. Bootstrap — promptCount reflects total imported

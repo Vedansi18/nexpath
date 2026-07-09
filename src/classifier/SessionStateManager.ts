@@ -5,6 +5,8 @@ import type { SessionState, Stage, PromptRecord, ClassificationResult, UserProfi
 import { detectSignalsByChannel, initialSignalCounters } from './signals.js';
 import { buildSafeDefaults } from './LLMProfileClassifier.js';
 import { getProject } from '../store/projects.js';
+import { loadRightGoodProfile } from './right-good-aggregator.js';
+import { seedProjectMaturity } from './maturity-level.js';
 import type { StreamBPresenceResult } from './StreamBPresenceClassifier.js';
 import { appendParamEvents, type ParamEventChannel } from '../telemetry/param-events.js';
 
@@ -391,11 +393,21 @@ export class SessionStateManager {
     state.promptCount   = totalImported;
     state.lastPromptAt  = now;
     state.profile       = buildSafeDefaults(totalImported);
-    state.detectedLanguage =
-      getProject(store, projectRoot)?.detectedLanguage ?? undefined;
+    const project = getProject(store, projectRoot);
+    state.detectedLanguage = project?.detectedLanguage ?? undefined;
     // Conservative: start absence detection from the first real prompt after
     // bootstrap rather than estimating time-in-stage from imported history.
     state.promptsInCurrentStage = 0;
+
+    // Seed the longitudinal maturity column from the imported history at bootstrap.
+    // The workflow-pattern (RIGHT&GOOD) profile and the work-style traits are
+    // derived on demand from the param-events written during import, so they need
+    // no separate seed; the maturity column is the one PERSISTED value, seeded
+    // here directly from the import-derived RIGHT&GOOD profile.
+    seedProjectMaturity(store, projectRoot, loadRightGoodProfile(store, projectRoot), {
+      nature:      state.profile.nature,
+      projectType: project?.projectType ?? null,
+    });
 
     saveState(store, state);
   }

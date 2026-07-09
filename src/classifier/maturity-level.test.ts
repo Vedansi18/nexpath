@@ -5,6 +5,7 @@ import {
   medianSeedLevel,
   applyGraduation,
   updateProjectMaturity,
+  seedProjectMaturity,
   isActiveSignal,
   COLD_START_LEVEL,
   GRADUATION_STABILITY,
@@ -189,6 +190,44 @@ describe('maturity-level — updateProjectMaturity (store-backed)', () => {
     upsertUserDepthLevel(store, { projectRoot: '/p', currentLevel: 4, stabilityCounter: 0, hysteresisCounter: 0, lastGraduationAt: null, schemaVersion: SCHEMA_VERSION, updatedAt: NOW });
     const out = updateProjectMaturity(store, '/p', {}, meta, NOW + 1, { signalDefs: [def('A')] });
     expect(out.currentLevel).toBe(4); // unchanged
+    store.db.close();
+  });
+});
+
+describe('maturity-level — seedProjectMaturity (install-time direct seed)', () => {
+  const meta = {};
+  async function mem(): Promise<Store> { return openStore(':memory:'); }
+
+  it('seeds the level DIRECTLY from the import profile in ONE call (not incremental graduation)', async () => {
+    const store = await mem();
+    const out = seedProjectMaturity(store, '/p', profileOf({ A: rg(1.0) }), meta, NOW, { signalDefs: [def('A')] });
+    expect(out.currentLevel).toBe(5); // s_core 1.0 → L5 immediately (updateProjectMaturity would only +1/step)
+    expect(getUserDepthLevel(store, '/p')?.currentLevel).toBe(5);
+    store.db.close();
+  });
+
+  it('falls back to the cross-project median seed when the import has no data (Case A)', async () => {
+    const store = await mem();
+    for (const [p, l] of [['/a', 4], ['/b', 4], ['/c', 2]] as const) {
+      upsertUserDepthLevel(store, { projectRoot: p, currentLevel: l, stabilityCounter: 0, hysteresisCounter: 0, lastGraduationAt: null, schemaVersion: SCHEMA_VERSION, updatedAt: NOW });
+    }
+    const out = seedProjectMaturity(store, '/new', profileOf({}), meta, NOW, { signalDefs: [def('A')] });
+    expect(out.currentLevel).toBe(4); // median(4,4,2)
+    store.db.close();
+  });
+
+  it('cold-starts at L2 for a first-ever project with no data and no siblings', async () => {
+    const store = await mem();
+    const out = seedProjectMaturity(store, '/only', profileOf({}), meta, NOW, { signalDefs: [def('A')] });
+    expect(out.currentLevel).toBe(COLD_START_LEVEL);
+    store.db.close();
+  });
+
+  it('is idempotent — never overwrites an existing row', async () => {
+    const store = await mem();
+    upsertUserDepthLevel(store, { projectRoot: '/p', currentLevel: 3, stabilityCounter: 0, hysteresisCounter: 0, lastGraduationAt: null, schemaVersion: SCHEMA_VERSION, updatedAt: NOW });
+    const out = seedProjectMaturity(store, '/p', profileOf({ A: rg(1.0) }), meta, NOW + 1, { signalDefs: [def('A')] });
+    expect(out.currentLevel).toBe(3); // existing row wins — seed is a no-op
     store.db.close();
   });
 });
