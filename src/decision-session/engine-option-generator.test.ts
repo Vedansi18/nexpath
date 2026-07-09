@@ -5,6 +5,7 @@ import { shippedRecordLookup } from './content-template-source.js';
 import { generateFromEngine } from './engine-option-generator.js';
 import { CONFIRM_SEEK_RE } from './content-template-grounding.js';
 import { REVIEW_TO_RELEASE_RECORD, RELEASE_TO_FEEDBACK_RECORD } from './content-templates/class1-records.js';
+import { CLASS8_RECORDS } from './content-templates/class8-records.js';
 
 // §6.1 items 2/5 — the engine-backed pre-generate path. The LLM seams (grounding weave +
 // ladder derive) are exercised via a mock client (no real spend), matching the engine's
@@ -95,6 +96,34 @@ describe('B2 — class 1 sensitive stage-transition records carry their l2Safegu
   // Uses the adversarial drop-the-seek mock (worst case: the LLM drops the safeguard in weave + derive).
   const dropsSeek = mockClient(JSON.stringify({ option: 'a simpler option', whyDesc: 'grounded why-desc with no seek' }));
   const FLAGGED = [REVIEW_TO_RELEASE_RECORD, RELEASE_TO_FEEDBACK_RECORD];
+
+  for (const rec of FLAGGED) {
+    it(`${rec.signalType}: the exact record l2SafeguardLine survives into the L1/L2/L3 desc-bases`, async () => {
+      const line = rec.l2SafeguardLine!;
+      expect(line, `${rec.signalType} is flagged with a safeguard line`).toBeTruthy();
+      const gen = await generateFromEngine({ lookup: shippedRecordLookup(rec.signalType), level: 5 }, dropsSeek);
+      expect(gen, `${rec.signalType} resolves`).not.toBeNull();
+      const tiers = [gen!.generatedDescBases!.l1[0], gen!.generatedDescBases!.l2[0], gen!.generatedDescBases!.l3[0]];
+      for (let i = 0; i < tiers.length; i++) {
+        expect(tiers[i], `${rec.signalType} L${i + 1} carries the safeguard verbatim`).toContain(line);
+      }
+    });
+  }
+});
+
+describe('B9 — class 8 sensitive role-cluster records carry their l2SafeguardLine through every tier', () => {
+  // The 4 flagged class-8 records (publish launch / post publicly / contact stakeholder / notify team).
+  // Derived from CLASS8_RECORDS (drift-proof), each verified to keep its exact safeguard line on every
+  // served strength tier via the A1 record-safeguard thread, under the adversarial drop-the-seek mock.
+  const dropsSeek = mockClient(JSON.stringify({ option: 'a simpler option', whyDesc: 'grounded why-desc with no seek' }));
+  const FLAGGED = CLASS8_RECORDS.filter((r) => r.l2SafeguardRequired);
+
+  it('exactly the 4 intrinsically-sensitive class-8 records are flagged', () => {
+    expect(FLAGGED.map((r) => r.signalType).sort()).toEqual([
+      'ABSENCE_BUILD_IN_PUBLIC_OPPORTUNITY', 'ABSENCE_CROSS_TEAM_IMPACT_CHECK',
+      'ABSENCE_LAUNCH_STRATEGY_ABSENCE', 'ABSENCE_STAKEHOLDER_ALIGNMENT_CHECK',
+    ]);
+  });
 
   for (const rec of FLAGGED) {
     it(`${rec.signalType}: the exact record l2SafeguardLine survives into the L1/L2/L3 desc-bases`, async () => {

@@ -566,6 +566,45 @@ describe('runStop — B2 stage-transition engine dispatch', () => {
   });
 });
 
+// ── runStop — B9 class-8 role-cluster engine dispatch ────────────────────────
+
+describe('runStop — B9 class-8 role-cluster engine dispatch', () => {
+  let store: Store;
+  beforeEach(async () => { store = await openStore(':memory:'); });
+  afterEach(() => { store.db.close(); vi.restoreAllMocks(); });
+
+  function seedRole(role: string, flagType: string) {
+    const mgr = SessionStateManager.load(store, '/test/project');
+    mgr.setProfile({
+      nature: 'hardcore_pro', mood: 'focused', depth: 'high', role,
+      precisionOrdinal: 'high', playfulnessOrdinal: 'low',
+      precisionScore: 8, playfulnessScore: 2, depthScore: 8, computedAt: 0,
+    } as unknown as import('../../classifier/types.js').UserProfile);
+    mgr.setDetectedLanguage(store, undefined);
+    upsertPendingAdvisory(store, {
+      projectRoot: '/test/project', stage: 'implementation',
+      flagType: flagType as import('../../classifier/Stage2Trigger.js').FlagType,
+      pinchLabel: 'Hold up.', sessionId: mgr.current.sessionId, promptCount: 5,
+    });
+  }
+
+  it('a class-8 role-cluster signal routes to the ENGINE for a founder (single-register content → NOT kept static like context_loss)', async () => {
+    seedRole('founder', 'absence:user_value_check');
+    vi.mocked(generateFromEngine).mockClear();
+    const result = await runStop(makePayload(), store, mockSelect(SKIP_NOW));
+    expect(generateFromEngine).toHaveBeenCalled();
+    expect(result.outcome).toBe('skipped');
+  });
+
+  it('a sensitive class-8 signal (stakeholder sign-off) routes to the ENGINE for a pm', async () => {
+    seedRole('pm', 'absence:stakeholder_alignment_check');
+    vi.mocked(generateFromEngine).mockClear();
+    const result = await runStop(makePayload(), store, mockSelect(SKIP_NOW));
+    expect(generateFromEngine).toHaveBeenCalled();
+    expect(result.outcome).toBe('skipped');
+  });
+});
+
 // ── runStop — NEXPATH_SIM=1 TTY bypass ───────────────────────────────────────
 
 describe('runStop — NEXPATH_SIM=1 TTY bypass', () => {
