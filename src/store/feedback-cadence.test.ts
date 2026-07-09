@@ -220,6 +220,13 @@ describe('primeFeedbackEligible (dev seam)', () => {
     expect(readCadence(store).lastFeedbackAt).toBeNull();
     expect(isFeedbackEligible(store, 2000)).toBe(true);
   });
+
+  it('sets active usage to exactly the threshold, overwriting any prior accumulation', () => {
+    recordActivity(store, 0);
+    recordActivity(store, 5 * 60_000);              // partial accumulation (5 min)
+    primeFeedbackEligible(store, 5 * 60_000);
+    expect(readCadence(store).activeMs).toBe(USAGE_THRESHOLD_MS);   // set, not added
+  });
 });
 
 describe('persistence across reopen (real DB file)', () => {
