@@ -16,13 +16,17 @@
 import type OpenAI from 'openai';
 import type { GeneratedOptions } from './OptionGenerator.js';
 import type { OptionEntry } from './options.js';
-import type { MaturityLevel } from './content-template-schema.js';
+import { resolveLevelForm, type MaturityLevel } from './content-template-schema.js';
 import type { Store } from '../store/db.js';
 import type { PromptRecord } from '../classifier/types.js';
 import {
   composeAdvisory,
   deriveLadder,
   retrieveGroundingFacts,
+  composeOption,
+  composeWhyDesc,
+  resolveRegisterForms,
+  resolveRecord,
   type RecordCandidateLookup,
   type GroundingFact,
 } from './content-template-engine.js';
@@ -74,6 +78,38 @@ export async function generateFromEngine(
       l2: ladder.l2.map((e) => e.descBase),
       l3: ladder.l3.map((e) => e.descBase),
     },
+  };
+}
+
+/**
+ * DETERMINISTIC fallback options — composed from the record with NO LLM, for when the grounded engine
+ * path fails (missing key / API error, caught by the caller). The option is served verbatim and the
+ * why-desc is the deterministic assembly (core line + the record's safeguard line), register/role-aware.
+ * The simpler strength tiers (L2/L3) use one/two LOWER maturity columns (a lighter practice) since the
+ * LLM strength-derive is unavailable. Returns null when no record resolves (caller has nothing to serve).
+ */
+export function composeDeterministicOptions(
+  input: { lookup: RecordCandidateLookup; level: MaturityLevel; register?: string; role?: string },
+): GeneratedOptions | null {
+  const resolved = resolveRecord(input.lookup);
+  if (!resolved) return null;
+  const forms = resolveRegisterForms(resolved.record, input.register, input.role);
+  const l2Safeguard = resolved.record.l2SafeguardLine;
+  const clamp = (n: number): MaturityLevel => Math.max(1, Math.min(5, n)) as MaturityLevel;
+  const tier = (lv: MaturityLevel): OptionEntry | null => {
+    const col = resolveLevelForm(forms, lv);
+    if (!col) return null;
+    const option   = composeOption({ cell: col.form.cell, slots: resolved.record.slots });
+    const descBase = composeWhyDesc({ cell: col.form.cell, slots: resolved.record.slots, l2Safeguard });
+    return { option, descBase };
+  };
+  const t1 = tier(input.level);
+  if (!t1) return null;
+  const t2 = tier(clamp(input.level - 1)) ?? t1;
+  const t3 = tier(clamp(input.level - 2)) ?? t2;
+  return {
+    l1: [t1.option], l2: [t2.option], l3: [t3.option],
+    generatedDescBases: { l1: [t1.descBase], l2: [t2.descBase], l3: [t3.descBase] },
   };
 }
 

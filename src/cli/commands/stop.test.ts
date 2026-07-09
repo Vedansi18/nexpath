@@ -19,6 +19,9 @@ vi.mock('../../decision-session/OptionGenerator.js', () => ({
 vi.mock('../../decision-session/engine-option-generator.js', () => ({
   generateFromEngine: vi.fn().mockResolvedValue(null),
   buildEngineGrounding: vi.fn().mockResolvedValue([]),
+  // The deterministic fallback — mocked to null so flow tests fall through to the static generate
+  // path (also mocked null) and exercise the static-content fallback. Its real behavior is unit-tested.
+  composeDeterministicOptions: vi.fn().mockReturnValue(null),
 }));
 
 import { openStore } from '../../store/db.js';
@@ -36,7 +39,7 @@ import { upsertProject, getProject } from '../../store/projects.js';
 import { LANG_DETECT_INTERVAL } from '../../classifier/LanguageDetector.js';
 import { writeTelemetry } from '../../telemetry/index.js';
 import { recentPromptMetadata } from '../../telemetry/recent-prompts.js';
-import { generateFromEngine } from '../../decision-session/engine-option-generator.js';
+import { generateFromEngine, composeDeterministicOptions } from '../../decision-session/engine-option-generator.js';
 import { SessionStateManager } from '../../classifier/SessionStateManager.js';
 import { generateOptionList } from '../../decision-session/OptionGenerator.js';
 
@@ -476,8 +479,19 @@ describe('runStop — generated options wiring', () => {
     const { TASK_REVIEW } = await import('../../decision-session/options.js');
     const picked = TASK_REVIEW.L1[0].option;
     const result = await runStop(makePayload(), store, mockSelect(picked));
-    expect(result.outcome).toBe('blocked'); // caught → static fallback → session ran → user picked
+    expect(result.outcome).toBe('blocked'); // caught → fallback → session ran → user picked
     if (result.outcome === 'blocked') expect(result.reason).toBe(picked);
+  });
+
+  it('when the grounded engine throws, the DETERMINISTIC engine fallback is invoked (B11 iii — no static content)', async () => {
+    // The engine path throws; stop.ts must fall to composeDeterministicOptions (no LLM, from the record)
+    // BEFORE any static generate path — so an engine/key failure serves valid content without static content.
+    vi.mocked(generateFromEngine).mockRejectedValueOnce(new Error('engine api down'));
+    vi.mocked(composeDeterministicOptions).mockClear();
+    insertAdvisory(store);
+    const result = await runStop(makePayload(), store, mockSelect(SKIP_NOW));
+    expect(composeDeterministicOptions).toHaveBeenCalled();
+    expect(result.outcome).toBe('skipped');
   });
 });
 

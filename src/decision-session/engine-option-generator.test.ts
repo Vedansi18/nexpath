@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import type OpenAI from 'openai';
 import { SHIPPED_CONTENT_TEMPLATES } from './content-template-tooling.js';
 import { shippedRecordLookup } from './content-template-source.js';
-import { generateFromEngine } from './engine-option-generator.js';
+import { generateFromEngine, composeDeterministicOptions } from './engine-option-generator.js';
 import { CONFIRM_SEEK_RE } from './content-template-grounding.js';
 import { REVIEW_TO_RELEASE_RECORD, RELEASE_TO_FEEDBACK_RECORD } from './content-templates/class1-records.js';
 import { CLASS8_RECORDS } from './content-templates/class8-records.js';
@@ -201,4 +201,29 @@ describe('B5 — class 4 (release/observability/infra) is ALL-sensitive; every r
       }
     });
   }
+});
+
+describe('composeDeterministicOptions (B11 iii) — no-LLM fallback from the record', () => {
+  it('composes options + safeguard-carrying desc-bases with NO client (all three tiers)', () => {
+    const rec = CLASS4_RECORDS.find((r) => r.l2SafeguardRequired)!; // class 4 = all-sensitive
+    const gen = composeDeterministicOptions({ lookup: shippedRecordLookup(rec.signalType), level: 5 });
+    expect(gen, 'resolves').not.toBeNull();
+    expect(gen!.l1[0].length).toBeGreaterThan(0);
+    expect(gen!.l2[0].length).toBeGreaterThan(0);
+    expect(gen!.l3[0].length).toBeGreaterThan(0);
+    for (const d of [gen!.generatedDescBases!.l1[0], gen!.generatedDescBases!.l2[0], gen!.generatedDescBases!.l3[0]]) {
+      expect(d).toContain(rec.l2SafeguardLine!); // deterministic why-desc still carries the safeguard on every tier
+    }
+  });
+
+  it('serves the role override deterministically (context_loss founder differs from base)', () => {
+    const founder = composeDeterministicOptions({ lookup: shippedRecordLookup('ABSENCE_CONTEXT_LOSS'), level: 3, role: 'founder' });
+    const base    = composeDeterministicOptions({ lookup: shippedRecordLookup('ABSENCE_CONTEXT_LOSS'), level: 3 });
+    expect(founder, 'founder resolves').not.toBeNull();
+    expect(founder!.l1[0]).not.toBe(base!.l1[0]);
+  });
+
+  it('returns null for an unknown signal (caller falls through)', () => {
+    expect(composeDeterministicOptions({ lookup: shippedRecordLookup('no_such_signal_xyz'), level: 3 })).toBeNull();
+  });
 });

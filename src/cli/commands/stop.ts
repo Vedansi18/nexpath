@@ -23,7 +23,7 @@ import { generateOptionList } from '../../decision-session/OptionGenerator.js';
 import type { GeneratedOptions } from '../../decision-session/OptionGenerator.js';
 import { resolveContentSource, selectionRegister } from '../../decision-session/selection-registry.js';
 import { shippedRecordLookup, recordSignalTypeForFlag } from '../../decision-session/content-template-source.js';
-import { generateFromEngine, buildEngineGrounding } from '../../decision-session/engine-option-generator.js';
+import { generateFromEngine, buildEngineGrounding, composeDeterministicOptions } from '../../decision-session/engine-option-generator.js';
 import { resolvePinchFields } from '../../decision-session/signal-pinch-fields.js';
 import { getWhyHelpForSignalType } from '../../decision-session/why-help-by-signal-type.js';
 import type { WhyHelpEntry } from '../../decision-session/why-help.js';
@@ -178,30 +178,27 @@ export async function runStop(
   const register = selectionRegister(mgr.current.profile?.nature);
   if (recordSignalType && resolveContentSource(recordSignalType) === 'content-template') {
     const lookup = shippedRecordLookup(recordSignalType);
+    const level  = (getUserDepthLevel(store, payload.cwd)?.currentLevel ?? 2) as MaturityLevel;
+    const role   = mgr.current.profile?.role ?? undefined;
     // Popup question + per-class why-help are static (no LLM). The question comes from the
     // register-keyed pinch-fields map (the migrated question/pinchFallback layer), not the record.
     questionOverride = resolvePinchFields(recordSignalType, register)?.question;
     whyHelpOverride = getWhyHelpForSignalType(recordSignalType);
     // The engine grounding/weave needs an LLM client; on ANY failure (missing key, API error)
-    // degrade to the static generate path below — the Stop hook must never crash on option gen.
+    // degrade below — the Stop hook must never crash on option gen.
     try {
-      const level = (getUserDepthLevel(store, payload.cwd)?.currentLevel ?? 2) as MaturityLevel;
       const promptHistory = mgr.current.promptHistory as PromptRecord[];
       const facts = await buildEngineGrounding(store, payload.cwd, promptHistory, openai);
-      generatedOptions = await generateFromEngine(
-        {
-          lookup,
-          level,
-          register,
-          role:     mgr.current.profile?.role ?? undefined,
-          facts,
-          factCap:  3,
-        },
-        openai,
-      );
+      generatedOptions = await generateFromEngine({ lookup, level, register, role, facts, factCap: 3 }, openai);
     } catch (err) {
       logger.debug('stop_engine_option_gen_error', { error: String(err) });
       generatedOptions = null;
+    }
+    if (!generatedOptions) {
+      // The grounded engine failed (missing key / API error). Serve a DETERMINISTIC engine composition
+      // from the record — no LLM, register/role-aware, safeguard-carrying — so the fallback needs no
+      // static content. (Records are the whole content layer after the B11 cutover.)
+      generatedOptions = composeDeterministicOptions({ lookup, level, register, role });
     }
   }
   if (!generatedOptions) {
