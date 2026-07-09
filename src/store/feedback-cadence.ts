@@ -22,8 +22,8 @@ export const USAGE_THRESHOLD_MS = 2 * 60 * 60 * 1000;   // 2 hours
 /** Minimum time that must pass after the popup was last shown before it can reappear. */
 export const MIN_GAP_MS = 2 * 24 * 60 * 60 * 1000;      // 2 days
 
-/** Gaps between hook invocations longer than this are treated as idle (not counted). */
-export const IDLE_CAP_MS = 5 * 60 * 1000;               // 5 minutes
+/** Session idle window: a gap between hook invocations longer than this is treated as an idle break (not counted). */
+export const IDLE_CAP_MS = 15 * 60 * 1000;              // 15 minutes
 
 const KEY_ACTIVE_MS        = 'feedback_active_ms';
 const KEY_LAST_ACTIVITY_AT = 'feedback_last_activity_at';
@@ -78,17 +78,23 @@ export function recordActivity(store: Store, now: number = Date.now()): void {
  */
 export function isFeedbackEligible(store: Store, now: number = Date.now()): boolean {
   const state = readCadence(store);
-  if (state.activeMs < USAGE_THRESHOLD_MS) return false;
+  // Live clamp: count the in-progress turn (gap since last activity, capped) so the
+  // popup can become eligible in the same session that crosses the threshold. Null-safe.
+  const tail = state.lastActivityAt === null ? 0 : Math.min(now - state.lastActivityAt, IDLE_CAP_MS);
+  if (state.activeMs + tail < USAGE_THRESHOLD_MS) return false;
   if (state.lastFeedbackAt === null) return true;
   return now - state.lastFeedbackAt >= MIN_GAP_MS;
 }
 
 /**
- * Mark the popup as shown: reset the global accumulator and stamp the
- * last-shown time so the next cycle needs a fresh usage + gap window.
+ * Mark the popup as shown: reset the global accumulator and the last-activity
+ * marker, and stamp the last-shown time so the next cycle needs a fresh usage +
+ * gap window. Resetting last-activity prevents the pre-popup gap from leaking
+ * into the fresh accumulator on the next heartbeat.
  */
 export function markFeedbackShown(store: Store, now: number = Date.now()): void {
   writeNum(store, KEY_ACTIVE_MS, 0);
+  writeNum(store, KEY_LAST_ACTIVITY_AT, now);
   writeNum(store, KEY_LAST_SHOWN_AT, now);
   saveStore(store);
 }

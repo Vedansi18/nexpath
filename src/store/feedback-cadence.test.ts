@@ -133,13 +133,59 @@ describe('markFeedbackShown', () => {
     expect(state.lastFeedbackAt).toBe(5_000_000);
   });
 
-  it('leaves last_activity intact and resumes accumulation afterwards', () => {
+  it('resets last_activity on show so a later heartbeat does not bank the pre-popup gap', () => {
     recordActivity(store, 1000);
-    recordActivity(store, 61_000);        // activeMs 60_000, lastActivity 61_000
-    markFeedbackShown(store, 61_000);     // reset activeMs, stamp shown
-    expect(readCadence(store).lastActivityAt).toBe(61_000);
-    recordActivity(store, 61_000 + 30_000); // delta 30_000 within cap
-    expect(readCadence(store).activeMs).toBe(30_000);
+    recordActivity(store, 61_000);                // activeMs 60_000, lastActivity 61_000
+    const shownAt = 61_000 + 3 * 60_000;          // popup shown 3 min after the last activity
+    markFeedbackShown(store, shownAt);            // resets activeMs AND lastActivity to shownAt
+    expect(readCadence(store).lastActivityAt).toBe(shownAt);
+    // Next heartbeat 2 min after the popup: only that 2 min counts, not the 5 min since 61_000.
+    recordActivity(store, shownAt + 2 * 60_000);
+    expect(readCadence(store).activeMs).toBe(2 * 60_000);
+  });
+});
+
+describe('IDLE_CAP_MS (15-minute session idle window)', () => {
+  it('is 15 minutes', () => {
+    expect(IDLE_CAP_MS).toBe(15 * 60 * 1000);
+  });
+
+  it('accumulates a 10-minute gap (within the cap)', () => {
+    recordActivity(store, 0);
+    recordActivity(store, 10 * 60_000);
+    expect(readCadence(store).activeMs).toBe(10 * 60_000);
+  });
+
+  it('drops a 20-minute gap (beyond the cap)', () => {
+    recordActivity(store, 0);
+    recordActivity(store, 20 * 60_000);
+    expect(readCadence(store).activeMs).toBe(0);
+  });
+});
+
+describe('isFeedbackEligible — live clamp (in-progress turn)', () => {
+  it('is null-safe with no activity yet (tail 0, not eligible)', () => {
+    expect(isFeedbackEligible(store, 999_999_999)).toBe(false);
+  });
+
+  it('lets the in-progress turn push a just-under-threshold accumulator over', () => {
+    // Accumulate exactly threshold - one cap, so only the live tail can bridge it.
+    const steps = (USAGE_THRESHOLD_MS - IDLE_CAP_MS) / IDLE_CAP_MS;
+    let t = 0;
+    for (let i = 0; i <= steps; i++) { recordActivity(store, t); t += IDLE_CAP_MS; }
+    const state = readCadence(store);
+    expect(state.activeMs).toBe(USAGE_THRESHOLD_MS - IDLE_CAP_MS);
+    const lastAct = state.lastActivityAt as number;
+
+    // A tiny in-progress gap does not bridge the remaining cap → not eligible.
+    expect(isFeedbackEligible(store, lastAct + 1)).toBe(false);
+    // A full-cap in-progress gap bridges it → eligible in the same session.
+    expect(isFeedbackEligible(store, lastAct + IDLE_CAP_MS)).toBe(true);
+  });
+
+  it('caps the live tail at one idle window (a huge idle gap stays ineligible)', () => {
+    recordActivity(store, 0);   // activeMs 0, lastActivity 0
+    expect(isFeedbackEligible(store, 10 * USAGE_THRESHOLD_MS)).toBe(false);
   });
 });
 
