@@ -36,6 +36,27 @@ export function recordSignalTypeForFlag(flagType: string): string | undefined {
     : undefined;
 }
 
+/** Destination-stage → the stage-transition record's signalType. Static-content-independent. */
+const TRANSITION_SIGNAL_BY_STAGE: Readonly<Record<string, string>> = {
+  prd:            'IDEA_TO_PRD',
+  architecture:   'PRD_TO_ARCHITECTURE',
+  task_breakdown: 'ARCHITECTURE_TO_TASKS',
+  review_testing: 'IMPLEMENTATION_TO_REVIEW',
+  release:        'REVIEW_TO_RELEASE',
+  feedback_loop:  'RELEASE_TO_FEEDBACK',
+};
+
+/**
+ * The record signalType a fired advisory serves its pinch header / question from, for BOTH absence
+ * flags (the `ABSENCE_<UPPER>` convention) and stage transitions (by DESTINATION stage; the
+ * within-implementation fallback is TASK_REVIEW). Mirrors the static resolution's signalType without
+ * touching the static content — used to resolve the register-keyed pinch fields after the cutover.
+ */
+export function pinchSignalTypeForFlag(flagType: string, stage: string): string | undefined {
+  if (flagType === 'stage_transition') return TRANSITION_SIGNAL_BY_STAGE[stage] ?? 'TASK_REVIEW';
+  return recordSignalTypeForFlag(flagType);
+}
+
 /**
  * A source-cascade lookup for one signalType: the `shipped` tier yields that signal's
  * shipped record; the other tiers yield undefined (no per-user / closest-default

@@ -24,7 +24,7 @@ import type { GeneratedOptions } from '../../decision-session/OptionGenerator.js
 import { resolveContentSource, selectionRegister } from '../../decision-session/selection-registry.js';
 import { shippedRecordLookup, recordSignalTypeForFlag } from '../../decision-session/content-template-source.js';
 import { generateFromEngine, buildEngineGrounding } from '../../decision-session/engine-option-generator.js';
-import { resolveRecord } from '../../decision-session/content-template-engine.js';
+import { resolvePinchFields } from '../../decision-session/signal-pinch-fields.js';
 import { getWhyHelpForSignalType } from '../../decision-session/why-help-by-signal-type.js';
 import type { WhyHelpEntry } from '../../decision-session/why-help.js';
 import { getUserDepthLevel } from '../../store/user-depth-level.js';
@@ -175,10 +175,12 @@ export async function runStop(
   // static DecisionContent) — thread them to runDecisionSession as overrides.
   let questionOverride: string | undefined;
   let whyHelpOverride: WhyHelpEntry | null | undefined;
+  const register = selectionRegister(mgr.current.profile?.nature);
   if (recordSignalType && resolveContentSource(recordSignalType) === 'content-template') {
     const lookup = shippedRecordLookup(recordSignalType);
-    // The overrides are static record fields (no LLM) — resolve them regardless of the engine.
-    questionOverride = resolveRecord(lookup)?.record.question;
+    // Popup question + per-class why-help are static (no LLM). The question comes from the
+    // register-keyed pinch-fields map (the migrated question/pinchFallback layer), not the record.
+    questionOverride = resolvePinchFields(recordSignalType, register)?.question;
     whyHelpOverride = getWhyHelpForSignalType(recordSignalType);
     // The engine grounding/weave needs an LLM client; on ANY failure (missing key, API error)
     // degrade to the static generate path below — the Stop hook must never crash on option gen.
@@ -190,7 +192,7 @@ export async function runStop(
         {
           lookup,
           level,
-          register: selectionRegister(mgr.current.profile?.nature),
+          register,
           role:     mgr.current.profile?.role ?? undefined,
           facts,
           factCap:  3,

@@ -4,7 +4,8 @@ import {
   getSkippedSessions,
   deleteSkippedSession,
 } from '../../store/skipped-sessions.js';
-import { resolveDecisionContent } from '../../decision-session/options.js';
+import { pinchSignalTypeForFlag } from '../../decision-session/content-template-source.js';
+import { resolvePinchFields } from '../../decision-session/signal-pinch-fields.js';
 import { runDecisionSession } from '../../decision-session/DecisionSession.js';
 import type { SelectFn } from '../../decision-session/DecisionSession.js';
 import type { Stage } from '../../classifier/types.js';
@@ -88,7 +89,8 @@ export async function runOptimize(
     const item     = items[i];
     const stage    = item.stage    as Stage;
     const flagType = item.flagType as FlagType;
-    const content  = resolveDecisionContent(stage, flagType);
+    const pinchSignalType = pinchSignalTypeForFlag(flagType, stage);
+    const pinchFallback = (pinchSignalType ? resolvePinchFields(pinchSignalType)?.pinchFallback : undefined) ?? 'Quick check.';
 
     // Item header on stderr — keeps stdout clean for piping selected prompts
     process.stderr.write(
@@ -102,7 +104,7 @@ export async function runOptimize(
       {
         stage,
         flagType,
-        pinchLabel:           content.pinchFallback,
+        pinchLabel:           pinchFallback,
         sessionId:            item.sessionId,
         projectRoot:          input.projectRoot,
         promptCount:          item.skippedAtPromptCount,

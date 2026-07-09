@@ -12,9 +12,9 @@ import { classifyStreamBPresence } from '../../classifier/StreamBPresenceClassif
 import type { StreamBPresenceResult } from '../../classifier/StreamBPresenceClassifier.js';
 import { shouldFireStage2, runStage2 } from '../../classifier/Stage2Trigger.js';
 import { generatePinchLabel } from '../../decision-session/PinchGenerator.js';
-import { recordSignalTypeForFlag, shippedRecordLookup } from '../../decision-session/content-template-source.js';
-import { resolveContentSource } from '../../decision-session/selection-registry.js';
-import { resolveRecord } from '../../decision-session/content-template-engine.js';
+import { pinchSignalTypeForFlag } from '../../decision-session/content-template-source.js';
+import { selectionRegister } from '../../decision-session/selection-registry.js';
+import { resolvePinchFields } from '../../decision-session/signal-pinch-fields.js';
 import type { Stage } from '../../classifier/types.js';
 import type { FlagType, Stage2TriggerResult } from '../../classifier/Stage2Trigger.js';
 import { resolveLanguage } from '../../classifier/LanguageDetector.js';
@@ -374,16 +374,11 @@ export async function runAuto(
   const userProfile = mgr.current.profile ?? undefined;
 
   // ── 9. Pinch label — option gen runs in stop hook after Claude responds ──────
-  // A migrated signal has no static DecisionContent, so seed the pinch header (and its
-  // failure fallback) from the record's own question / pinchFallback instead of the
-  // generic content resolveDecisionContent would otherwise return.
-  const pinchRecordSignalType = recordSignalTypeForFlag(effectiveFlagType);
-  const pinchOverrides = pinchRecordSignalType
-    && resolveContentSource(pinchRecordSignalType) === 'content-template'
-    ? (() => {
-        const rec = resolveRecord(shippedRecordLookup(pinchRecordSignalType))?.record;
-        return rec ? { question: rec.question, pinchFallback: rec.pinchFallback } : undefined;
-      })()
+  // Seed the pinch header (+ its failure fallback) from the register-keyed pinch-fields map — the
+  // migrated question/pinchFallback layer that supersedes the static DecisionContent for every signal.
+  const pinchSignalType = pinchSignalTypeForFlag(effectiveFlagType, mgr.current.currentStage);
+  const pinchOverrides = pinchSignalType
+    ? resolvePinchFields(pinchSignalType, selectionRegister(userProfile?.nature))
     : undefined;
   const pinchLabel = await generatePinchLabel(
     mgr.current.currentStage,
