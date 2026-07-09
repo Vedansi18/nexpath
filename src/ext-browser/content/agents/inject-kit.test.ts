@@ -54,6 +54,35 @@ describe('content/agents/inject-kit.ts — injectViaSimulatedPaste', () => {
     expect(clipboardWriteTextMock).not.toHaveBeenCalled();
   });
 
+  it('auto-submits (dispatches Enter) after the paste lands — "Send to your agent now"', async () => {
+    const input = document.createElement('div');
+    input.id = 'composer';
+    document.body.appendChild(input);
+    input.addEventListener('paste', (ev) => {
+      input.textContent = (ev as ClipboardEvent).clipboardData?.getData('text/plain') ?? '';
+    });
+    const keys: string[] = [];
+    input.addEventListener('keydown', (e) => keys.push((e as KeyboardEvent).key));
+
+    await injectViaSimulatedPaste('#composer', 'run the tests');
+
+    expect(input.textContent).toBe('run the tests');
+    expect(keys).toContain('Enter'); // submitted so the agent acts on it
+  });
+
+  it('does NOT submit when the paste failed to land (falls back, no stray Enter)', async () => {
+    const input = document.createElement('div');
+    input.className = 'editor'; // no paste listener → text never lands
+    document.body.appendChild(input);
+    const keys: string[] = [];
+    input.addEventListener('keydown', (e) => keys.push((e as KeyboardEvent).key));
+
+    await injectViaSimulatedPaste('.editor', 'run the tests');
+
+    expect(keys).not.toContain('Enter');
+    expect(clipboardWriteTextMock).toHaveBeenCalledWith('run the tests');
+  });
+
   it('falls back to clipboard when the configured selector matches nothing', async () => {
     await injectViaSimulatedPaste('[data-testid="missing-editor"]', 'add dark mode');
     expect(clipboardWriteTextMock).toHaveBeenCalledWith('add dark mode');

@@ -52,6 +52,24 @@ export async function clipboardFallback(text: string): Promise<void> {
   }
 }
 
+/**
+ * Best-effort "send directly to your agent" (CLI parity — the CLI's "Send to your
+ * agent now"). After the paste lands, press Enter so the agent acts on the injected
+ * prompt without the user having to hit send. Bolt and Lovable both submit on Enter.
+ * Purely additive + safe: if an agent uses a different submit key or ignores
+ * synthetic keys, nothing breaks — the text still sits in the composer for the user
+ * to send manually, exactly as before this change.
+ */
+function dispatchSubmit(input: HTMLElement): void {
+  const init: KeyboardEventInit = {
+    key: 'Enter', code: 'Enter', keyCode: 13, which: 13,
+    bubbles: true, cancelable: true, composed: true,
+  } as KeyboardEventInit;
+  input.focus();
+  input.dispatchEvent(new KeyboardEvent('keydown', init));
+  input.dispatchEvent(new KeyboardEvent('keyup', init));
+}
+
 function dispatchSimulatedPaste(input: HTMLElement, text: string): void {
   input.focus();
   const selection = window.getSelection();
@@ -84,5 +102,8 @@ export async function injectViaSimulatedPaste(inputSelector: string, text: strin
   const landed = (input.textContent ?? '').trim().includes(text.trim().slice(0, 20));
   if (!landed) {
     await clipboardFallback(text);
+    return;
   }
+  // Landed → "Send to your agent now": auto-submit so the agent acts on it (CLI parity).
+  dispatchSubmit(input);
 }
