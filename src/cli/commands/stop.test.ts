@@ -481,9 +481,9 @@ describe('runStop — generated options wiring', () => {
   });
 });
 
-// ── runStop — B6 role-precedence guard (context_loss keeps role variants) ────
+// ── runStop — context_loss role-through-engine serving (B11: B6 guard removed) ────
 
-describe('runStop — B6 role-precedence guard', () => {
+describe('runStop — context_loss role-through-engine serving (B11)', () => {
   let store: Store;
   beforeEach(async () => { store = await openStore(':memory:'); });
   afterEach(() => { store.db.close(); vi.restoreAllMocks(); });
@@ -502,29 +502,35 @@ describe('runStop — B6 role-precedence guard', () => {
     });
   }
 
-  it('a founder user keeps context_loss on the STATIC path — the engine is NOT called (role variant preserved)', async () => {
+  it('a founder user gets the ENGINE for context_loss, with the role threaded (roleOverrides serve the founder variant)', async () => {
+    // B11: the role-tailored content is now engine-served via roleOverrides — the old B6 static
+    // guard is gone. The founder role must reach generateFromEngine so the resolver picks its variant.
     seedProfile('founder');
     vi.mocked(generateFromEngine).mockClear();
     const result = await runStop(makePayload(), store, mockSelect(SKIP_NOW));
-    expect(generateFromEngine).not.toHaveBeenCalled();
+    expect(generateFromEngine).toHaveBeenCalled();
+    expect(vi.mocked(generateFromEngine).mock.calls[0][0]).toMatchObject({ role: 'founder' });
     expect(result.outcome).toBe('skipped');
   });
 
-  it('a non-role user gets the ENGINE for the migrated context_loss', async () => {
+  it('a non-role user gets the ENGINE for context_loss (no role threaded)', async () => {
     seedProfile(null);
     vi.mocked(generateFromEngine).mockClear();
     const result = await runStop(makePayload(), store, mockSelect(SKIP_NOW));
     expect(generateFromEngine).toHaveBeenCalled();
+    expect(vi.mocked(generateFromEngine).mock.calls[0][0]).toMatchObject({ role: undefined });
     expect(result.outcome).toBe('skipped');
   });
 
-  it('the guard is SCOPED — a role-mapped but not role-specific signal (pm + decision_fatigue) still gets the ENGINE', async () => {
-    // decision_fatigue_pattern is in the PM role map (as a register _FORMAL variant, not role-
-    // tailored) and is NOT in ROLE_SPECIFIC_STATIC_SIGNALS — so a pm user must still get the engine.
+  it('a pm user on a register-varied signal (decision_fatigue) also gets the ENGINE, role threaded', async () => {
+    // decision_fatigue_pattern is register-varied (a PM _FORMAL variant, not role-tailored content);
+    // it has no roleOverrides, so the resolver falls through to register/base — but the engine path
+    // (and the role thread) is the same for every migrated signal now.
     seedProfile('pm', 'absence:decision_fatigue_pattern');
     vi.mocked(generateFromEngine).mockClear();
     const result = await runStop(makePayload(), store, mockSelect(SKIP_NOW));
     expect(generateFromEngine).toHaveBeenCalled();
+    expect(vi.mocked(generateFromEngine).mock.calls[0][0]).toMatchObject({ role: 'pm' });
     expect(result.outcome).toBe('skipped');
   });
 });
