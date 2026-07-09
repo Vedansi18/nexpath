@@ -9,7 +9,12 @@ import {
   filterEligibleTopics,
   selectDistinctiveTopics,
   applyCoverageFloor,
+  generatePerUserRecord,
+  generateAndStoreAutogenRecord,
 } from './auto-template-generator.js';
+import { validateContentTemplateRecord } from './content-template-schema.js';
+import { openStore } from '../store/db.js';
+import { getContentTemplate } from '../store/content-templates.js';
 
 function rg(state: RightGoodState): RightGoodSignal {
   return { score: 0.5, state, stability: { sessions: 2, occurrences: 5, stable: true }, lastUpdated: 1 };
@@ -114,5 +119,52 @@ describe('auto-template-generator — coverage floor (scale-to-confident)', () =
 
   it('does not pad below-bar topics to reach the target', () => {
     expect(applyCoverageFloor([{ signalType: 'X', confidence: 0.3 }], true, 0.6)).toEqual([]);
+  });
+});
+
+describe('auto-template-generator — per-topic generation (Stage C)', () => {
+  const okClient = mockClient(JSON.stringify({ option: 'my rewritten option', whyDesc: 'my rewritten why-desc' }));
+
+  it('produces a schema-valid, preset-seeded sparse record with source=autogen', async () => {
+    const rec = await generatePerUserRecord('ABSENCE_TEST_CREATION', 3, 'summary', okClient);
+    expect(rec).not.toBeNull();
+    expect(rec!.source).toBe('autogen');
+    expect(rec!.levelForms[1]).toBeDefined();                       // mandatory floor inherited from the preset
+    expect(rec!.levelForms[3]?.cell.option).toBe('my rewritten option'); // current column personalized
+    expect(validateContentTemplateRecord(rec!).ok).toBe(true);
+  });
+
+  it('at level 1 the personalized cell IS the floor (single-entry map)', async () => {
+    const rec = await generatePerUserRecord('ABSENCE_TEST_CREATION', 1, 'x', okClient);
+    expect(Object.keys(rec!.levelForms)).toEqual(['1']);
+    expect(rec!.levelForms[1]?.cell.whyDesc).toBe('my rewritten why-desc');
+  });
+
+  it('inherits the sensitive-action safeguard from the preset (a sensitive topic stays guarded)', async () => {
+    const rec = await generatePerUserRecord('REVIEW_TO_RELEASE', 3, 'x', okClient);
+    expect(rec!.l2SafeguardRequired).toBe(true);
+    expect(typeof rec!.l2SafeguardLine).toBe('string');
+    expect(rec!.l2SafeguardLine!.length).toBeGreaterThan(0);
+  });
+
+  it('sanitizes prompt-derived leakage out of the generated cell (C4 gate)', async () => {
+    const leaky = mockClient(JSON.stringify({ option: 'ping me at alice@corp.com about it', whyDesc: 'ok' }));
+    const rec = await generatePerUserRecord('ABSENCE_TEST_CREATION', 1, 'x', leaky);
+    expect(rec!.levelForms[1]?.cell.option).not.toContain('alice@corp.com');
+    expect(rec!.levelForms[1]?.cell.option).toMatch(/redacted/i);
+  });
+
+  it('returns null for a missing preset, a malformed reply, or an empty cell', async () => {
+    expect(await generatePerUserRecord('NOT_A_REAL_TOPIC', 1, 'x', okClient)).toBeNull();
+    expect(await generatePerUserRecord('ABSENCE_TEST_CREATION', 1, 'x', mockClient('not json'))).toBeNull();
+    expect(await generatePerUserRecord('ABSENCE_TEST_CREATION', 1, 'x', mockClient(JSON.stringify({ option: '', whyDesc: '' })))).toBeNull();
+  });
+
+  it('persists the generated record under source=autogen', async () => {
+    const store = await openStore(':memory:');
+    const stored = await generateAndStoreAutogenRecord(store, '/p', 'ABSENCE_TEST_CREATION', 2, 'x', okClient);
+    expect(stored).toBe(true);
+    expect(getContentTemplate(store.db, '/p', 'ABSENCE_TEST_CREATION', 'autogen')).not.toBeNull();
+    store.db.close();
   });
 });

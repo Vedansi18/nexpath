@@ -20,6 +20,12 @@ import OpenAI from 'openai';
 import type { RightGoodProfile } from '../classifier/right-good-aggregator.js';
 import { ANTI_PATTERN_KEYS } from '../classifier/maturity-level.js';
 import { SHIPPED_CONTENT_TEMPLATES } from './content-template-tooling.js';
+import type { ContentTemplateRecord, LevelForm, MaturityLevel, TwoChannelCell } from './content-template-schema.js';
+import { validateContentTemplateRecord, resolveLevelForm } from './content-template-schema.js';
+import { sanitizePromptDerivedValue } from './content-template-grounding.js';
+import { SCHEMA_VERSION } from '../store/schema.js';
+import { upsertContentTemplate } from '../store/content-templates.js';
+import type { Store } from '../store/db.js';
 
 /** The full set of personalizable topics — every shipped record's signalType. */
 export function topicUniverse(): string[] {
@@ -168,4 +174,119 @@ export function applyCoverageFloor(
   return ranked
     .filter((t) => t.confidence >= confidenceBar)
     .sort((a, b) => b.confidence - a.confidence);
+}
+
+// ── Per-topic generation (lazy first-fire) ─────────────────────────────────────
+
+function presetRecord(signalType: string): ContentTemplateRecord | undefined {
+  return SHIPPED_CONTENT_TEMPLATES.find((r) => r.signalType === signalType);
+}
+
+/**
+ * The generation prompt — inherit the topic keyword + skeleton, personalize wording
+ * only, and carry the no-echo safety rules inline (defence in depth behind the
+ * deterministic sanitize gate below).
+ */
+export function buildGenerationPrompt(presetCell: TwoChannelCell, summary: string): string {
+  return [
+    "Personalize a coding-agent advisory to a developer's OWN stable conventions, keeping its meaning.",
+    'Rewrite the option (the message the developer sends to the agent) and the why-desc (the explanation',
+    'the agent reads) to speak in the developer’s conventions — same intent, same topic keyword,',
+    'wording and style only.',
+    '',
+    'STRICT SAFETY: never include secrets, API keys, tokens, credentials, file paths, URLs, emails, or any',
+    'personal / identifying data, and never copy raw prompt text. Use only stable, general conventions.',
+    '',
+    `Baseline option: ${presetCell.option}`,
+    `Baseline why-desc: ${presetCell.whyDesc}`,
+    '',
+    "Developer's conventions (summary):",
+    summary,
+    '',
+    'Return strict JSON: {"option":"<rewritten option>","whyDesc":"<rewritten why-desc>"}.',
+  ].join('\n');
+}
+
+/** Generate one personalized cell, then run the sanitize gate. Null on any failure. */
+async function generateCell(client: OpenAI, prompt: string): Promise<TwoChannelCell | null> {
+  const raw = await chat(client, prompt);
+  if (!raw) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  const option = (parsed as { option?: unknown }).option;
+  const whyDesc = (parsed as { whyDesc?: unknown }).whyDesc;
+  if (typeof option !== 'string' || typeof whyDesc !== 'string') return null;
+  // Sanitize gate on generate — a prompt-derived value must never reach CA-bound content.
+  const cell: TwoChannelCell = {
+    option:  sanitizePromptDerivedValue(option),
+    whyDesc: sanitizePromptDerivedValue(whyDesc),
+  };
+  if (cell.option === '' || cell.whyDesc === '') return null;
+  return cell;
+}
+
+/**
+ * Generate a per-user record for one topic, seeded by its shipped preset. SPARSE —
+ * the mandatory level-1 floor (inherited from the preset) plus the user's current
+ * maturity column, personalized. The sensitive-action safeguard fields and the
+ * slot / param-axis structure are inherited from the preset unchanged, so a
+ * sensitive topic stays guarded. Returns null on a missing preset, a generation
+ * failure, or a record that fails schema validation (never store an invalid record —
+ * the read side then serves the preset).
+ */
+export async function generatePerUserRecord(
+  signalType:     string,
+  currentLevel:   MaturityLevel,
+  patternSummary: string,
+  client?: OpenAI,
+): Promise<ContentTemplateRecord | null> {
+  const preset = presetRecord(signalType);
+  if (!preset) return null;
+  const atLevel = resolveLevelForm(preset.levelForms, currentLevel);
+  const floor   = resolveLevelForm(preset.levelForms, 1 as MaturityLevel);
+  if (!atLevel || !floor) return null;
+
+  const openai = client ?? new OpenAI();
+  const cell = await generateCell(openai, buildGenerationPrompt(atLevel.form.cell, patternSummary));
+  if (!cell) return null;
+
+  const personalized: LevelForm = { kind: atLevel.form.kind, cell };
+  const levelForms: Partial<Record<MaturityLevel, LevelForm>> =
+    currentLevel === 1
+      ? { 1: personalized }
+      : { 1: floor.form, [currentLevel]: personalized };
+
+  const record: ContentTemplateRecord = {
+    signalType,
+    source:              'autogen',
+    schemaVersion:       SCHEMA_VERSION,
+    question:            preset.question,
+    pinchFallback:       preset.pinchFallback,
+    levelForms,
+    slots:               preset.slots,
+    paramAxes:           preset.paramAxes,
+    spine:               preset.spine,
+    l2SafeguardRequired: preset.l2SafeguardRequired,
+    l2SafeguardLine:     preset.l2SafeguardLine,
+  };
+  return validateContentTemplateRecord(record).ok ? record : null;
+}
+
+/** Generate + persist a per-user record (`source='autogen'`). Returns whether one was stored. */
+export async function generateAndStoreAutogenRecord(
+  store:          Store,
+  projectRoot:    string,
+  signalType:     string,
+  currentLevel:   MaturityLevel,
+  patternSummary: string,
+  client?: OpenAI,
+): Promise<boolean> {
+  const record = await generatePerUserRecord(signalType, currentLevel, patternSummary, client);
+  if (!record) return false;
+  upsertContentTemplate(store, { projectRoot, signalType, source: 'autogen', record });
+  return true;
 }
