@@ -61,6 +61,16 @@ describe('§6.1 gate 1 — dual-source resolver + migration marker', () => {
     }
   });
 
+  it('B5 completes the migration — EVERY shipped content-template record is now migrated (shipped ⊆ migrated)', () => {
+    // With class 4 migrated, the marker must cover the ENTIRE shipped set (142 = 136 canonical + 6 §4.E2).
+    // This is the reverse of the invariant below (migrated ⊆ shipped); together they prove marker == shipped,
+    // so no shipped record is left on the static path. Catches any shipped record that was never migrated.
+    for (const rec of SHIPPED_CONTENT_TEMPLATES) {
+      expect(MIGRATED_SIGNALS.has(rec.signalType), `${rec.signalType} is shipped but NOT migrated`).toBe(true);
+    }
+    expect(MIGRATED_SIGNALS.size).toBe(SHIPPED_CONTENT_TEMPLATES.length); // marker == shipped == 142
+  });
+
   it('every migrated signalType resolves a shipped content-template record (no contentless migration)', () => {
     // Group-B invariant: a signalType in the marker with no shipped record would serve nothing
     // (or silently fall through) — never migrate a signal that has no engine content.
