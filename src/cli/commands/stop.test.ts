@@ -437,20 +437,16 @@ describe('runStop — generated options wiring', () => {
   beforeEach(async () => { store = await openStore(':memory:'); });
   afterEach(() => { store.db.close(); });
 
-  it('calls generateOptionList before decision session (Phase 5: option gen runs in stop)', async () => {
-    vi.mocked(generateOptionList).mockResolvedValueOnce({
-      l1: ['gen opt a', 'gen opt b', 'gen opt c'],
-      l2: ['gen opt d', 'gen opt e'],
-      l3: ['gen opt f'],
-    });
+  it('runs the engine option-gen path before the decision session (Phase 5: option gen runs in stop)', async () => {
+    // The fixture (absence:test_creation) is migrated, so stop.ts generates options via the engine.
     insertAdvisory(store);
     const result = await runStop(makePayload(), store, mockSelect(SKIP_NOW));
-    expect(generateOptionList).toHaveBeenCalled();
+    expect(generateFromEngine).toHaveBeenCalled();
     expect(['blocked', 'skipped']).toContain(result.outcome);
   });
 
-  it('falls back to static options when option gen returns null (no API key in test env)', async () => {
-    // module mock: generateOptionList returns null → static options used
+  it('serves options when the engine path yields nothing (deterministic fallback / decision session)', async () => {
+    // engine + deterministic fallback are mocked to null here → the decision session serves content
     insertAdvisory(store);
     const { TASK_REVIEW } = await import('../../decision-session/options.js');
     const staticL1First = TASK_REVIEW.L1[0].option;
@@ -698,7 +694,7 @@ describe('runStop — telemetry events', () => {
   });
 
   it('emits stop_advisory_shown with generatedOptions:true when option gen succeeds', async () => {
-    vi.mocked(generateOptionList).mockResolvedValueOnce({
+    vi.mocked(generateFromEngine).mockResolvedValueOnce({
       l1: ['opt a'], l2: ['opt b'], l3: ['opt c'],
     });
     insertAdvisory(store);

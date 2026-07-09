@@ -18,11 +18,9 @@ import { writeTelemetry } from '../../telemetry/index.js';
 import { triggerOpportunisticSync } from '../../telemetry/OpportunisticSync.js';
 import { recentPromptMetadata } from '../../telemetry/recent-prompts.js';
 import { readStdin } from './auto.js';
-import { resolveDecisionContent } from '../../decision-session/options.js';
-import { generateOptionList } from '../../decision-session/OptionGenerator.js';
 import type { GeneratedOptions } from '../../decision-session/OptionGenerator.js';
 import { resolveContentSource, selectionRegister } from '../../decision-session/selection-registry.js';
-import { shippedRecordLookup, recordSignalTypeForFlag } from '../../decision-session/content-template-source.js';
+import { shippedRecordLookup, pinchSignalTypeForFlag } from '../../decision-session/content-template-source.js';
 import { generateFromEngine, buildEngineGrounding, composeDeterministicOptions } from '../../decision-session/engine-option-generator.js';
 import { resolvePinchFields } from '../../decision-session/signal-pinch-fields.js';
 import { getWhyHelpForSignalType } from '../../decision-session/why-help-by-signal-type.js';
@@ -150,23 +148,11 @@ export async function runStop(
   const detectedLang  = getProject(store, payload.cwd)?.detectedLanguage ?? undefined;
   const effectiveLang = resolveLanguage(langOverride, detectedLang);
 
-  const content = resolveDecisionContent(
-    advisory.stage,
-    advisory.flagType,
-    mgr.current.profile,
-  );
-
-  // §6.1 dual-source dispatch: a MIGRATED signalType serves from the content-template
-  // engine (grounded + strength-laddered); every other serves from the static generate
-  // path. The marker holds the migrated signalTypes; every un-migrated signal takes the
-  // static path, byte-for-byte unchanged. Per-set migration flips one signal at a time (S8).
-  // Stage transitions fire as flagType 'stage_transition' (no absence: key), so they can't map
-  // through recordSignalTypeForFlag. The static `content` above already resolved the exact
-  // transition / TASK_REVIEW DecisionContent this fire serves; its signalType IS the record to
-  // serve — deriving from it keeps the engine path in lock-step with the static resolution.
-  const recordSignalType = advisory.flagType === 'stage_transition'
-    ? content.signalType
-    : recordSignalTypeForFlag(advisory.flagType);
+  // Dispatch: every signal is migrated, so the fired advisory's record serves it via the engine.
+  // The record signalType comes from the flag (the `absence:` convention) or, for a stage transition
+  // (no absence: key), from the destination stage — both via pinchSignalTypeForFlag, which needs no
+  // static content (the B11 cutover removed it).
+  const recordSignalType = pinchSignalTypeForFlag(advisory.flagType, advisory.stage);
   // The engine now serves role-tailored content directly (B11 `roleOverrides` — context_loss's
   // founder / indie_hacker / pm variants), so there is no role-precedence static guard: every
   // migrated signal, role-tailored or not, takes the engine path (the role is passed below).
@@ -200,21 +186,6 @@ export async function runStop(
       // static content. (Records are the whole content layer after the B11 cutover.)
       generatedOptions = composeDeterministicOptions({ lookup, level, register, role });
     }
-  }
-  if (!generatedOptions) {
-    generatedOptions = await generateOptionList(
-      content,
-      mgr.current.profile ?? undefined,
-      effectiveLang,
-      mgr.current.promptHistory as PromptRecord[],
-      {
-        flagType:              advisory.flagType,
-        currentStage:          mgr.current.currentStage,
-        prevStage:             advisory.prevStage,
-        promptsInCurrentStage: mgr.current.promptsInCurrentStage,
-      },
-      openai,
-    );
   }
 
   writeTelemetry(payload.cwd, 'stop_advisory_shown', {
