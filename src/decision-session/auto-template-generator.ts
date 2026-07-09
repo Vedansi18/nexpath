@@ -25,6 +25,7 @@ import { validateContentTemplateRecord, resolveLevelForm } from './content-templ
 import { sanitizePromptDerivedValue } from './content-template-grounding.js';
 import { SCHEMA_VERSION } from '../store/schema.js';
 import { upsertContentTemplate } from '../store/content-templates.js';
+import { getConfig, isConfigSet, setConfig } from '../store/config.js';
 import type { Store } from '../store/db.js';
 
 /** The full set of personalizable topics — every shipped record's signalType. */
@@ -78,6 +79,56 @@ export function filterEligibleTopics(universe: readonly string[], rightGood: Rig
 export interface RankedTopic {
   signalType: string;
   confidence: number;
+}
+
+/**
+ * A compact behavioural summary the ranking / generation stages reason over —
+ * NEVER raw prompt text. Lists the practices the user reliably does well plus
+ * their maturity level.
+ */
+export function buildPatternSummary(rightGood: RightGoodProfile, maturityLevel: MaturityLevel): string {
+  const strong = Object.entries(rightGood)
+    .filter(([, s]) => s.state === 'right_good')
+    .sort((a, b) => b[1].score - a[1].score)
+    .map(([key]) => key);
+  return [
+    `Maturity level: ${maturityLevel} of 5.`,
+    strong.length
+      ? `Consistently good practices: ${strong.join(', ')}.`
+      : 'No consistently distinctive good practices yet.',
+  ].join('\n');
+}
+
+// ── Selection persistence (one ranking per project; the lazy trigger reads it) ──
+
+const selectionKey = (projectRoot: string): string => `autogen_selection:${projectRoot}`;
+
+/** Persist the ranked selection — records that the ranking has run, even if empty. */
+export function persistSelection(store: Store, projectRoot: string, ranked: readonly RankedTopic[]): void {
+  setConfig(store, selectionKey(projectRoot), JSON.stringify(ranked));
+}
+
+/** The persisted selection, or null if the ranking has not run for this project. */
+export function readSelection(store: Store, projectRoot: string): RankedTopic[] | null {
+  const raw = getConfig(store.db, selectionKey(projectRoot));
+  if (raw === undefined) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as RankedTopic[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Whether the one-time ranking has already run for this project. */
+export function selectionComputed(store: Store, projectRoot: string): boolean {
+  return isConfigSet(store.db, selectionKey(projectRoot));
+}
+
+/** Whether a topic is in the persisted selection. */
+export function isTopicSelected(store: Store, projectRoot: string, signalType: string): boolean {
+  const sel = readSelection(store, projectRoot);
+  return !!sel && sel.some((t) => t.signalType === signalType);
 }
 
 export interface SelectionInput {

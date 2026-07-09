@@ -11,6 +11,11 @@ import {
   applyCoverageFloor,
   generatePerUserRecord,
   generateAndStoreAutogenRecord,
+  buildPatternSummary,
+  persistSelection,
+  readSelection,
+  selectionComputed,
+  isTopicSelected,
 } from './auto-template-generator.js';
 import { validateContentTemplateRecord } from './content-template-schema.js';
 import { openStore } from '../store/db.js';
@@ -165,6 +170,41 @@ describe('auto-template-generator — per-topic generation (Stage C)', () => {
     const stored = await generateAndStoreAutogenRecord(store, '/p', 'ABSENCE_TEST_CREATION', 2, 'x', okClient);
     expect(stored).toBe(true);
     expect(getContentTemplate(store.db, '/p', 'ABSENCE_TEST_CREATION', 'autogen')).not.toBeNull();
+    store.db.close();
+  });
+});
+
+describe('auto-template-generator — pattern summary + selection persistence', () => {
+  it('summarizes the strong practices + maturity, never raw prompt text', () => {
+    const profile: RightGoodProfile = { test_creation: rg('right_good'), documentation: rg('mistake') };
+    const s = buildPatternSummary(profile, 3);
+    expect(s).toContain('Maturity level: 3');
+    expect(s).toContain('test_creation');
+    expect(s).not.toContain('documentation'); // only reliably-good practices are summarized
+  });
+
+  it('reports no distinctive practices for an empty profile', () => {
+    expect(buildPatternSummary({}, 2)).toContain('No consistently distinctive');
+  });
+
+  it('persists + reads the ranked selection round-trip', async () => {
+    const store = await openStore(':memory:');
+    expect(selectionComputed(store, '/p')).toBe(false);
+    expect(readSelection(store, '/p')).toBeNull();
+    persistSelection(store, '/p', [{ signalType: 'ABSENCE_TEST_CREATION', confidence: 0.9 }]);
+    expect(selectionComputed(store, '/p')).toBe(true);
+    expect(readSelection(store, '/p')).toEqual([{ signalType: 'ABSENCE_TEST_CREATION', confidence: 0.9 }]);
+    expect(isTopicSelected(store, '/p', 'ABSENCE_TEST_CREATION')).toBe(true);
+    expect(isTopicSelected(store, '/p', 'ABSENCE_DOCUMENTATION')).toBe(false);
+    store.db.close();
+  });
+
+  it('records an empty selection as computed (never re-ranks)', async () => {
+    const store = await openStore(':memory:');
+    persistSelection(store, '/p', []);
+    expect(selectionComputed(store, '/p')).toBe(true);
+    expect(readSelection(store, '/p')).toEqual([]);
+    expect(isTopicSelected(store, '/p', 'ANYTHING')).toBe(false);
     store.db.close();
   });
 });
