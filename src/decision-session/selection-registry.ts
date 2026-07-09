@@ -312,6 +312,24 @@ export const MIGRATED_SIGNALS: ReadonlySet<string> = new Set<string>([
   'ABSENCE_RISK_FLAG',
   'ABSENCE_SCOPE_CHANGE_IMPACT_ASSESSMENT',
   'ABSENCE_RETROSPECTIVE_HABIT',
+  // B10 — class 9 (academic/hardcore-pro, 12 signals): now engine-served. Formal-only register
+  // (served via the formal nature map, not role maps — no role-precedence complication); all 12 carry
+  // structurally-divergent beginner overrides (de-jargoned; served via resolveRegisterForms). 6 sensitive
+  // (OVER_ENGINEERING_CHECK, OBSERVABILITY_FIRST, FAILURE_MODE_ANALYSIS, SECURITY_THREAT_MODELING,
+  // DATABASE_MIGRATION_SAFETY, DEPLOYMENT_STRATEGY_ABSENCE — l2SafeguardRequired; safeguard confirmed
+  // through the engine on migration, preserved verbatim on every tier via the deriveLadder thread).
+  'ABSENCE_DECISION_RECORD_ABSENCE',
+  'ABSENCE_OVER_ENGINEERING_CHECK',
+  'ABSENCE_PAIR_REVIEW_ABSENCE',
+  'ABSENCE_OBSERVABILITY_FIRST',
+  'ABSENCE_FAILURE_MODE_ANALYSIS',
+  'ABSENCE_CONTRACT_TESTING_GAP',
+  'ABSENCE_CAPACITY_PLANNING_GAP',
+  'ABSENCE_SECURITY_THREAT_MODELING',
+  'ABSENCE_DATABASE_MIGRATION_SAFETY',
+  'ABSENCE_DEPLOYMENT_STRATEGY_ABSENCE',
+  'ABSENCE_OPERATIONAL_RUNBOOK_GAP',
+  'ABSENCE_SLO_DEFINITION_GAP',
 ]);
 
 /**

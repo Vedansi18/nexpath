@@ -6,6 +6,7 @@ import { generateFromEngine } from './engine-option-generator.js';
 import { CONFIRM_SEEK_RE } from './content-template-grounding.js';
 import { REVIEW_TO_RELEASE_RECORD, RELEASE_TO_FEEDBACK_RECORD } from './content-templates/class1-records.js';
 import { CLASS8_RECORDS } from './content-templates/class8-records.js';
+import { CLASS9_RECORDS } from './content-templates/class9-records.js';
 
 // §6.1 items 2/5 — the engine-backed pre-generate path. The LLM seams (grounding weave +
 // ladder derive) are exercised via a mock client (no real spend), matching the engine's
@@ -122,6 +123,36 @@ describe('B9 — class 8 sensitive role-cluster records carry their l2SafeguardL
     expect(FLAGGED.map((r) => r.signalType).sort()).toEqual([
       'ABSENCE_BUILD_IN_PUBLIC_OPPORTUNITY', 'ABSENCE_CROSS_TEAM_IMPACT_CHECK',
       'ABSENCE_LAUNCH_STRATEGY_ABSENCE', 'ABSENCE_STAKEHOLDER_ALIGNMENT_CHECK',
+    ]);
+  });
+
+  for (const rec of FLAGGED) {
+    it(`${rec.signalType}: the exact record l2SafeguardLine survives into the L1/L2/L3 desc-bases`, async () => {
+      const line = rec.l2SafeguardLine!;
+      expect(line, `${rec.signalType} is flagged with a safeguard line`).toBeTruthy();
+      const gen = await generateFromEngine({ lookup: shippedRecordLookup(rec.signalType), level: 5 }, dropsSeek);
+      expect(gen, `${rec.signalType} resolves`).not.toBeNull();
+      const tiers = [gen!.generatedDescBases!.l1[0], gen!.generatedDescBases!.l2[0], gen!.generatedDescBases!.l3[0]];
+      for (let i = 0; i < tiers.length; i++) {
+        expect(tiers[i], `${rec.signalType} L${i + 1} carries the safeguard verbatim`).toContain(line);
+      }
+    });
+  }
+});
+
+describe('B10 — class 9 sensitive academic/hardcore records carry their l2SafeguardLine through every tier', () => {
+  // The 6 flagged class-9 records (delete/restructure code, instrument across files, stability pattern,
+  // security control, schema migration, trigger deployment). Derived from CLASS9_RECORDS (drift-proof),
+  // each verified to keep its exact safeguard line on every served strength tier via the A1 thread,
+  // under the adversarial drop-the-seek mock. Class 9 is the highest-sensitive existing set (6 of 12).
+  const dropsSeek = mockClient(JSON.stringify({ option: 'a simpler option', whyDesc: 'grounded why-desc with no seek' }));
+  const FLAGGED = CLASS9_RECORDS.filter((r) => r.l2SafeguardRequired);
+
+  it('exactly the 6 intrinsically-sensitive class-9 records are flagged', () => {
+    expect(FLAGGED.map((r) => r.signalType).sort()).toEqual([
+      'ABSENCE_DATABASE_MIGRATION_SAFETY', 'ABSENCE_DEPLOYMENT_STRATEGY_ABSENCE',
+      'ABSENCE_FAILURE_MODE_ANALYSIS', 'ABSENCE_OBSERVABILITY_FIRST',
+      'ABSENCE_OVER_ENGINEERING_CHECK', 'ABSENCE_SECURITY_THREAT_MODELING',
     ]);
   });
 
