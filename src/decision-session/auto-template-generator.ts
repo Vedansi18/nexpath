@@ -29,8 +29,8 @@ import { validateContentTemplateRecord, resolveLevelForm } from './content-templ
 import { sanitizePromptDerivedValue } from './content-template-grounding.js';
 import { retainsTopicAnchor } from './content-anchor.js';
 import { SCHEMA_VERSION } from '../store/schema.js';
-import { upsertContentTemplate, getContentTemplate } from '../store/content-templates.js';
-import { getConfig, isConfigSet, setConfig } from '../store/config.js';
+import { upsertContentTemplate, getContentTemplate, deleteContentTemplate } from '../store/content-templates.js';
+import { getConfig, isConfigSet, setConfig, deleteConfig } from '../store/config.js';
 import { autogenBudgetAllows, recordAutogenCall } from './autogen-budget.js';
 import type { Store } from '../store/db.js';
 
@@ -163,6 +163,59 @@ export function isTopicSelected(store: Store, projectRoot: string, signalType: s
   return !!sel && sel.some((t) => t.signalType === signalType);
 }
 
+// ── Material-drift tracking: a polarity snapshot + a graduation refresh flag ─────
+
+const polarityKey = (projectRoot: string): string => `autogen_polarity:${projectRoot}`;
+const refreshKey  = (projectRoot: string): string => `autogen_refresh:${projectRoot}`;
+
+/** Snapshot each selected topic's polarity at selection time — the material-drift baseline. */
+export function persistPolaritySnapshot(
+  store: Store,
+  projectRoot: string,
+  topics: readonly RankedTopic[],
+  rightGood: RightGoodProfile,
+): void {
+  const snap: Record<string, TopicPolarity> = {};
+  for (const t of topics) snap[t.signalType] = classifyTopicPolarity(t.signalType, rightGood);
+  setConfig(store, polarityKey(projectRoot), JSON.stringify(snap));
+}
+
+/** The persisted polarity snapshot (empty when none / unreadable). */
+export function readPolaritySnapshot(store: Store, projectRoot: string): Record<string, TopicPolarity> {
+  const raw = getConfig(store.db, polarityKey(projectRoot));
+  if (raw === undefined) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, TopicPolarity>) : {};
+  } catch {
+    return {};
+  }
+}
+
+/** Mark that the per-user records need a Stage-E refresh (set on a maturity graduation). */
+export function markAutogenRefresh(store: Store, projectRoot: string): void {
+  setConfig(store, refreshKey(projectRoot), '1');
+}
+
+/** Whether a Stage-E refresh is pending for this project. */
+export function autogenRefreshPending(store: Store, projectRoot: string): boolean {
+  return isConfigSet(store.db, refreshKey(projectRoot));
+}
+
+/** Clear the pending Stage-E refresh flag. */
+export function clearAutogenRefresh(store: Store, projectRoot: string): void {
+  deleteConfig(store, refreshKey(projectRoot));
+}
+
+/** Whether a topic is still eligible under the live behaviour profile — a topic whose
+ *  signal now maps to a mistake / anti-pattern is never eligible. */
+function eligibleNow(signalType: string, rightGood: RightGoodProfile): boolean {
+  const polarity = classifyTopicPolarity(signalType, rightGood);
+  if (polarity === 'bad') return false;
+  if (polarity === 'in_between' && overlapsKnownMistake(signalType)) return false;
+  return true;
+}
+
 export interface SelectionInput {
   /** The longitudinal right/good profile (drives the absorb filter). */
   rightGood: RightGoodProfile;
@@ -233,10 +286,20 @@ function parseRanked(raw: string, eligible: ReadonlySet<string>): RankedTopic[] 
 
 /**
  * Rank the distinctive topics for a user via one bootstrap LLM call. Returns []
- * when nothing is eligible (a no-history project), so no call is made.
+ * when nothing is eligible (a no-history project), so no call is made. `restrictTo`
+ * confines ranking to a subset of topics — the Stage-E re-rank passes the current
+ * selection so a refresh re-ranks "only over those".
  */
-export async function selectDistinctiveTopics(input: SelectionInput, client?: OpenAI): Promise<RankedTopic[]> {
-  const eligible = filterEligibleTopics(topicUniverse(), input.rightGood);
+export async function selectDistinctiveTopics(
+  input: SelectionInput,
+  client?: OpenAI,
+  restrictTo?: readonly string[],
+): Promise<RankedTopic[]> {
+  let eligible = filterEligibleTopics(topicUniverse(), input.rightGood);
+  if (restrictTo) {
+    const allowed = new Set(restrictTo);
+    eligible = eligible.filter((st) => allowed.has(st));
+  }
   if (eligible.length === 0) return [];
   const openai = client ?? new OpenAI();
   const raw = await chat(openai, buildSelectionPrompt(input.patternSummary, eligible));
@@ -385,6 +448,72 @@ function hasHistory(rightGood: RightGoodProfile): boolean {
 }
 
 /**
+ * Behaviour drift (no model call): drop a selected topic that is no longer eligible
+ * (its signal now maps to a mistake / anti-pattern — never keep personalizing a bad
+ * habit) and evict its per-user record; for a topic whose signal drifted but is
+ * still eligible, evict its record so it regenerates at the next fire. Re-snapshot
+ * the surviving selection. Only the AFFECTED records are touched.
+ */
+function applyMaterialDrift(store: Store, projectRoot: string, rightGood: RightGoodProfile): void {
+  const selection = readSelection(store, projectRoot);
+  if (!selection || selection.length === 0) return;
+  const snapshot = readPolaritySnapshot(store, projectRoot);
+  const survivors: RankedTopic[] = [];
+  let changed = false;
+  for (const t of selection) {
+    if (!eligibleNow(t.signalType, rightGood)) {
+      deleteContentTemplate(store, projectRoot, t.signalType, 'autogen'); // drift → drop + evict
+      changed = true;
+      continue;
+    }
+    const live  = classifyTopicPolarity(t.signalType, rightGood);
+    const prior = snapshot[t.signalType];
+    if (prior !== undefined && prior !== live) {
+      deleteContentTemplate(store, projectRoot, t.signalType, 'autogen'); // drift → stale, regenerate
+      changed = true;
+    }
+    survivors.push(t);
+  }
+  if (changed) {
+    persistSelection(store, projectRoot, survivors);
+    persistPolaritySnapshot(store, projectRoot, survivors, rightGood);
+  }
+}
+
+/**
+ * Refresh on a maturity change (affected topics only): on a pending refresh (flagged
+ * when the project's maturity level changed), re-rank the already-selected topics at
+ * the new level — restricted to the current selection — drop any that no longer clear
+ * the confidence bar (evicting their records), and re-snapshot. Budget-gated; the
+ * flag survives a budget block so it retries when the budget resets. The maturity
+ * change already evicted the records, so the survivors regenerate lazily at the new level.
+ */
+async function applyGraduationRefresh(
+  store: Store,
+  projectRoot: string,
+  rightGood: RightGoodProfile,
+  summary: () => string,
+  client?: OpenAI,
+): Promise<void> {
+  if (!autogenRefreshPending(store, projectRoot)) return;
+  const current = readSelection(store, projectRoot) ?? [];
+  if (current.length === 0) { clearAutogenRefresh(store, projectRoot); return; }
+  if (!autogenBudgetAllows(store, projectRoot)) return; // keep the flag → retry when the budget resets
+  const reranked = await selectDistinctiveTopics(
+    { rightGood, patternSummary: summary() }, client, current.map((t) => t.signalType),
+  );
+  recordAutogenCall(store, projectRoot);
+  const floored = applyCoverageFloor(reranked, true);
+  const kept = new Set(floored.map((t) => t.signalType));
+  for (const t of current) {
+    if (!kept.has(t.signalType)) deleteContentTemplate(store, projectRoot, t.signalType, 'autogen');
+  }
+  persistSelection(store, projectRoot, floored);
+  persistPolaritySnapshot(store, projectRoot, floored, rightGood);
+  clearAutogenRefresh(store, projectRoot);
+}
+
+/**
  * Run the per-user loop for one fired topic. Best-effort + off the popup's critical
  * path (the caller runs it after the popup): (1) run the ONE-TIME ranking if it has
  * not run for this project (skipped with no history — no wasted call); (2) if the
@@ -413,27 +542,37 @@ export async function runAutogenForFire(input: {
       return (cachedSummary = buildPatternSummary(rightGood, currentLevel, workStyle, env));
     };
 
-    // (1) one-time ranking. Case A (no history) records an empty selection with no
+    // (1) one-time ranking. A no-history project records an empty selection with no
     // call; otherwise the ranking runs only within the budget — if it is exhausted,
-    // the selection is left uncomputed so it retries when the budget resets.
+    // the selection is left uncomputed so it retries when the budget resets. Once the
+    // selection exists, refresh the affected records instead.
     if (!selectionComputed(store, projectRoot)) {
       if (!hasHistory(rightGood)) {
         persistSelection(store, projectRoot, []);
       } else if (autogenBudgetAllows(store, projectRoot)) {
-        const ranked = await selectDistinctiveTopics({ rightGood, patternSummary: summary() }, client);
+        const ranked  = await selectDistinctiveTopics({ rightGood, patternSummary: summary() }, client);
         recordAutogenCall(store, projectRoot);
-        persistSelection(store, projectRoot, applyCoverageFloor(ranked, true));
+        const floored = applyCoverageFloor(ranked, true);
+        persistSelection(store, projectRoot, floored);
+        persistPolaritySnapshot(store, projectRoot, floored, rightGood);
       }
+    } else {
+      applyMaterialDrift(store, projectRoot, rightGood);                            // behaviour drift — no model call
+      await applyGraduationRefresh(store, projectRoot, rightGood, summary, client); // re-rank on a maturity change
     }
 
     // (2) lazy first-fire generation for a selected topic with no record yet — gated.
+    // A selected topic always has a shipped preset, so a generation attempt always
+    // makes one model call; count it against the budget whether or not the result
+    // passed the gates (else a topic that always fails the gate would retry forever,
+    // spending uncounted against the budget).
     if (
       isTopicSelected(store, projectRoot, signalType) &&
       !getContentTemplate(store.db, projectRoot, signalType, 'autogen') &&
       autogenBudgetAllows(store, projectRoot)
     ) {
-      const stored = await generateAndStoreAutogenRecord(store, projectRoot, signalType, currentLevel, summary(), client);
-      if (stored) recordAutogenCall(store, projectRoot);
+      await generateAndStoreAutogenRecord(store, projectRoot, signalType, currentLevel, summary(), client);
+      recordAutogenCall(store, projectRoot);
     }
   } catch {
     // best-effort — the per-user loop must never break the fire path

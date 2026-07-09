@@ -9,6 +9,7 @@ import { loadRightGoodProfile } from './right-good-aggregator.js';
 import { seedProjectMaturity, updateProjectMaturity } from './maturity-level.js';
 import { getUserDepthLevel } from '../store/user-depth-level.js';
 import { deleteAutogenRecordsForProject } from '../store/content-templates.js';
+import { markAutogenRefresh } from '../decision-session/auto-template-generator.js';
 import type { StreamBPresenceResult } from './StreamBPresenceClassifier.js';
 import { appendParamEvents, type ParamEventChannel } from '../telemetry/param-events.js';
 
@@ -113,8 +114,11 @@ export class SessionStateManager {
     }, now).currentLevel;
     if (before !== undefined && after !== before) {
       // Maturity graduated — the per-user records were generated for the old
-      // column; drop them so they regenerate at the new level on the next fire.
+      // column; drop them so they regenerate at the new level on the next fire, and
+      // flag a refresh so the next fire re-ranks the current selection at the new
+      // level (dropping any topic no longer distinctive there).
       deleteAutogenRecordsForProject(store, ended.projectRoot);
+      markAutogenRefresh(store, ended.projectRoot);
     }
   }
 

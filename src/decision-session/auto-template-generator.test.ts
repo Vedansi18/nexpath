@@ -16,13 +16,17 @@ import {
   readSelection,
   selectionComputed,
   isTopicSelected,
+  persistPolaritySnapshot,
+  markAutogenRefresh,
+  autogenRefreshPending,
   runAutogenForFire,
 } from './auto-template-generator.js';
 import { validateContentTemplateRecord } from './content-template-schema.js';
 import { topicAnchorWords } from './content-anchor.js';
 import { SHIPPED_CONTENT_TEMPLATES } from './content-template-tooling.js';
 import { openStore } from '../store/db.js';
-import { getContentTemplate } from '../store/content-templates.js';
+import { getContentTemplate, upsertContentTemplate } from '../store/content-templates.js';
+import { autogenCallsThisMonth } from './autogen-budget.js';
 import { setConfig } from '../store/config.js';
 
 function rg(state: RightGoodState): RightGoodSignal {
@@ -291,6 +295,89 @@ describe('auto-template-generator — live orchestration (runAutogenForFire)', (
     await runAutogenForFire({ store, projectRoot: '/p', signalType: 'ABSENCE_TEST_CREATION', currentLevel: 3, rightGood: profile, client: autogenMockClient() });
     expect(selectionComputed(store, '/p')).toBe(false); // budget-blocked → not computed → retries
     expect(getContentTemplate(store.db, '/p', 'ABSENCE_TEST_CREATION', 'autogen')).toBeNull();
+    store.db.close();
+  });
+});
+
+describe('auto-template-generator — budget accounting on a failed generation', () => {
+  const profile: RightGoodProfile = { test_creation: rg('right_good') };
+
+  it('counts the LLM call even when the generation fails the gate, and does not retry unboundedly', async () => {
+    const store = await openStore(':memory:');
+    persistSelection(store, '/p', [{ signalType: 'ABSENCE_TEST_CREATION', confidence: 0.9 }]);
+    persistPolaritySnapshot(store, '/p', [{ signalType: 'ABSENCE_TEST_CREATION', confidence: 0.9 }], profile);
+    setConfig(store, 'autogen_call_budget', '1'); // exactly one call allowed this month
+    // A reply that fails the topic-anchor gate → generateAndStore returns false, but a call WAS made.
+    const offAnchor = mockClient(JSON.stringify({ option: 'completely unrelated wording', whyDesc: 'nothing relevant' }));
+    await runAutogenForFire({ store, projectRoot: '/p', signalType: 'ABSENCE_TEST_CREATION', currentLevel: 3, rightGood: profile, client: offAnchor });
+    expect(autogenCallsThisMonth(store, '/p')).toBe(1);                                       // spend counted despite the failure
+    expect(getContentTemplate(store.db, '/p', 'ABSENCE_TEST_CREATION', 'autogen')).toBeNull();
+    // Second fire: the budget is now exhausted → no further call (no infinite uncounted retry).
+    await runAutogenForFire({ store, projectRoot: '/p', signalType: 'ABSENCE_TEST_CREATION', currentLevel: 3, rightGood: profile, client: offAnchor });
+    expect(autogenCallsThisMonth(store, '/p')).toBe(1);
+    store.db.close();
+  });
+});
+
+describe('auto-template-generator — refresh on drift + maturity change (affected topics only)', () => {
+  it('material drift: drops a selected topic that becomes a mistake and evicts its record', async () => {
+    const store = await openStore(':memory:');
+    persistSelection(store, '/p', [{ signalType: 'ABSENCE_TEST_CREATION', confidence: 0.9 }]);
+    persistPolaritySnapshot(store, '/p', [{ signalType: 'ABSENCE_TEST_CREATION', confidence: 0.9 }], { test_creation: rg('right_good') });
+    upsertContentTemplate(store, { projectRoot: '/p', signalType: 'ABSENCE_TEST_CREATION', source: 'autogen', record: { any: 'thing' } });
+    setConfig(store, 'autogen_call_budget', '0'); // isolate drift from any generation attempt
+    // The topic now maps to a mistake → must be dropped (never personalize a bad habit).
+    await runAutogenForFire({ store, projectRoot: '/p', signalType: 'ABSENCE_TEST_CREATION', currentLevel: 3, rightGood: { test_creation: rg('mistake') }, client: mockClient('{}') });
+    expect(isTopicSelected(store, '/p', 'ABSENCE_TEST_CREATION')).toBe(false);
+    expect(getContentTemplate(store.db, '/p', 'ABSENCE_TEST_CREATION', 'autogen')).toBeNull();
+    store.db.close();
+  });
+
+  it('material drift: evicts a still-eligible topic\'s record when its polarity drifted (regenerate)', async () => {
+    const store = await openStore(':memory:');
+    persistSelection(store, '/p', [{ signalType: 'IDEA_TO_PRD', confidence: 0.9 }]);
+    setConfig(store, 'autogen_polarity:/p', JSON.stringify({ IDEA_TO_PRD: 'good' })); // snapshot ≠ live in_between
+    upsertContentTemplate(store, { projectRoot: '/p', signalType: 'IDEA_TO_PRD', source: 'autogen', record: { any: 'thing' } });
+    setConfig(store, 'autogen_call_budget', '0'); // isolate drift from regeneration
+    await runAutogenForFire({ store, projectRoot: '/p', signalType: 'IDEA_TO_PRD', currentLevel: 3, rightGood: {}, client: mockClient('{}') });
+    expect(isTopicSelected(store, '/p', 'IDEA_TO_PRD')).toBe(true);                         // still eligible → kept
+    expect(getContentTemplate(store.db, '/p', 'IDEA_TO_PRD', 'autogen')).toBeNull();        // stale record evicted for regen
+    store.db.close();
+  });
+
+  it('graduation refresh: re-ranks over the current selection only, dropping below-bar topics + records', async () => {
+    const store = await openStore(':memory:');
+    const rgProfile: RightGoodProfile = { test_creation: rg('right_good'), documentation: rg('right_good') };
+    const selected = [
+      { signalType: 'ABSENCE_TEST_CREATION', confidence: 0.9 },
+      { signalType: 'ABSENCE_DOCUMENTATION', confidence: 0.9 },
+    ];
+    persistSelection(store, '/p', selected);
+    persistPolaritySnapshot(store, '/p', selected, rgProfile);
+    upsertContentTemplate(store, { projectRoot: '/p', signalType: 'ABSENCE_DOCUMENTATION', source: 'autogen', record: { any: 'x' } });
+    markAutogenRefresh(store, '/p'); // graduation flagged the refresh
+    // Re-rank keeps TEST_CREATION (0.9) and drops DOCUMENTATION (0.3, below the bar).
+    const client = mockClient(JSON.stringify({ topics: [
+      { signalType: 'ABSENCE_TEST_CREATION', confidence: 0.9 },
+      { signalType: 'ABSENCE_DOCUMENTATION', confidence: 0.3 },
+    ] }));
+    await runAutogenForFire({ store, projectRoot: '/p', signalType: 'ABSENCE_TEST_CREATION', currentLevel: 4, rightGood: rgProfile, client });
+    expect(autogenRefreshPending(store, '/p')).toBe(false);
+    expect(isTopicSelected(store, '/p', 'ABSENCE_TEST_CREATION')).toBe(true);
+    expect(isTopicSelected(store, '/p', 'ABSENCE_DOCUMENTATION')).toBe(false);
+    expect(getContentTemplate(store.db, '/p', 'ABSENCE_DOCUMENTATION', 'autogen')).toBeNull(); // dropped → record evicted
+    store.db.close();
+  });
+
+  it('graduation refresh: keeps the flag when the budget blocks the re-rank (retries later)', async () => {
+    const store = await openStore(':memory:');
+    const rgProfile: RightGoodProfile = { test_creation: rg('right_good') };
+    persistSelection(store, '/p', [{ signalType: 'ABSENCE_TEST_CREATION', confidence: 0.9 }]);
+    persistPolaritySnapshot(store, '/p', [{ signalType: 'ABSENCE_TEST_CREATION', confidence: 0.9 }], rgProfile);
+    markAutogenRefresh(store, '/p');
+    setConfig(store, 'autogen_call_budget', '0'); // no budget → re-rank cannot run
+    await runAutogenForFire({ store, projectRoot: '/p', signalType: 'ABSENCE_TEST_CREATION', currentLevel: 4, rightGood: rgProfile, client: mockClient('{}') });
+    expect(autogenRefreshPending(store, '/p')).toBe(true); // flag preserved → retries when budget resets
     store.db.close();
   });
 });
