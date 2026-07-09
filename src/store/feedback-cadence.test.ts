@@ -187,6 +187,22 @@ describe('isFeedbackEligible — live clamp (in-progress turn)', () => {
     recordActivity(store, 0);   // activeMs 0, lastActivity 0
     expect(isFeedbackEligible(store, 10 * USAGE_THRESHOLD_MS)).toBe(false);
   });
+
+  it('never bypasses the 2-day repeat gate, even when the tail bridges the threshold', () => {
+    const steps = (USAGE_THRESHOLD_MS - IDLE_CAP_MS) / IDLE_CAP_MS;
+    let t = 0;
+    for (let i = 0; i <= steps; i++) { recordActivity(store, t); t += IDLE_CAP_MS; }
+    const shownAt = (readCadence(store).lastActivityAt as number) + IDLE_CAP_MS;
+    expect(isFeedbackEligible(store, shownAt)).toBe(true);   // eligible via the clamp, never shown
+    markFeedbackShown(store, shownAt);
+
+    // Re-accumulate to just-under-threshold a day later — still inside the 2-day gate.
+    let t2 = shownAt + 24 * 60 * 60 * 1000;
+    for (let i = 0; i <= steps; i++) { recordActivity(store, t2); t2 += IDLE_CAP_MS; }
+    const lastAct2 = readCadence(store).lastActivityAt as number;
+    // The tail bridges the usage threshold, but the repeat gate has not elapsed → not eligible.
+    expect(isFeedbackEligible(store, lastAct2 + IDLE_CAP_MS)).toBe(false);
+  });
 });
 
 describe('persistence across reopen (real DB file)', () => {
