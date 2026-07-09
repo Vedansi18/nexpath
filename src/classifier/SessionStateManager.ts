@@ -6,7 +6,7 @@ import { detectSignalsByChannel, initialSignalCounters } from './signals.js';
 import { buildSafeDefaults } from './LLMProfileClassifier.js';
 import { getProject } from '../store/projects.js';
 import { loadRightGoodProfile } from './right-good-aggregator.js';
-import { seedProjectMaturity } from './maturity-level.js';
+import { seedProjectMaturity, updateProjectMaturity } from './maturity-level.js';
 import type { StreamBPresenceResult } from './StreamBPresenceClassifier.js';
 import { appendParamEvents, type ParamEventChannel } from '../telemetry/param-events.js';
 
@@ -96,6 +96,21 @@ export class SessionStateManager {
   }
 
   /**
+   * Fold one graduation observation for a just-ended session into the persisted
+   * maturity level. The depth level is read + updated once per session and
+   * graduates on months-scale behavioural stability (+1 via the stability
+   * counter, −1 via hysteresis); it reads the cumulative RIGHT&GOOD profile so
+   * the score survives the prompt / param-event pruning. No-op for an empty session.
+   */
+  private static foldEndedSessionMaturity(store: Store, ended: SessionState, now: number): void {
+    if (ended.promptCount <= 0) return;
+    updateProjectMaturity(store, ended.projectRoot, loadRightGoodProfile(store, ended.projectRoot), {
+      nature:      ended.profile?.nature,
+      projectType: getProject(store, ended.projectRoot)?.projectType ?? null,
+    }, now);
+  }
+
+  /**
    * Load or create session state for a project.
    * Resets to a new session if the last prompt was > SESSION_GAP_MS ago.
    */
@@ -104,6 +119,9 @@ export class SessionStateManager {
     if (persisted && now - persisted.lastPromptAt < SESSION_GAP_MS) {
       return new SessionStateManager(persisted);
     }
+    // New session after an inactivity gap — fold the ended session's observation
+    // into the maturity graduation before resetting to the fresh session.
+    if (persisted) this.foldEndedSessionMaturity(store, persisted, now);
     // New session — restore detected_language from projects table so it survives the gap
     const fresh = newSession(projectRoot, now);
     fresh.detectedLanguage = getProject(store, projectRoot)?.detectedLanguage ?? undefined;
@@ -125,6 +143,9 @@ export class SessionStateManager {
 
     // ── Gap reset check ──────────────────────────────────────────────────────
     if (s.promptCount > 0 && now - s.lastPromptAt >= SESSION_GAP_MS) {
+      // A session ended (inactivity gap) within this long-lived manager — fold its
+      // observation into the maturity graduation before resetting.
+      SessionStateManager.foldEndedSessionMaturity(store, s, now);
       // Increment windowsSinceLastSeen for all signals that were absent before reset
       for (const counter of Object.values(s.signalCounters)) {
         if (counter.lastSeenAt === null) counter.windowsSinceLastSeen += 1;
