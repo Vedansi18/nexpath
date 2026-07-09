@@ -5,8 +5,10 @@ import { getInstallationId } from './identity.js';
 import {
   sendInstalled,
   sendAdvisoryFired,
+  sendOptionSelected,
   EVENT_INSTALLED,
   EVENT_ADVISORY_FIRED,
+  EVENT_OPTION_SELECTED,
 } from './lifecycle-send.js';
 import type { FetchLike } from './TelemetryClient.js';
 import type { PostHogSingleEnvelope } from './types.js';
@@ -132,5 +134,40 @@ describe('sendAdvisoryFired', () => {
 
   it('swallows network errors and returns false', async () => {
     expect(await sendAdvisoryFired(store, 1234, { fetch: throwFetch(cap) })).toBe(false);
+  });
+});
+
+describe('sendOptionSelected', () => {
+  it('posts the option-selected event independent of telemetry.enabled', async () => {
+    setConfig(store, 'telemetry.enabled', 'false');
+    const ok = await sendOptionSelected(store, 1234, { fetch: okFetch(cap) });
+    expect(ok).toBe(true);
+    expect(cap.envelope?.event).toBe(EVENT_OPTION_SELECTED);
+  });
+
+  it('builds the payload: installation id + selection timestamp, backdated', async () => {
+    await sendOptionSelected(store, 1234, { fetch: okFetch(cap) });
+    const env = cap.envelope!;
+    const installId = getInstallationId(store);
+    expect(env.distinct_id).toBe(installId);
+    expect(env.properties.installation_id).toBe(installId);
+    expect(env.properties.option_select_ts).toBe(1234);
+    expect(env.timestamp).toBe(new Date(1234).toISOString());
+  });
+
+  it('is content-free — only lib metadata, installation id, selection timestamp', async () => {
+    await sendOptionSelected(store, 1234, { fetch: okFetch(cap) });
+    const keys = Object.keys(cap.envelope!.properties).sort();
+    expect(keys).toEqual(['$lib', '$lib_version', 'installation_id', 'option_select_ts'].sort());
+  });
+
+  it('returns false and does not post when the api key is empty', async () => {
+    setConfig(store, 'telemetry_sync_api_key', '');
+    expect(await sendOptionSelected(store, 1234, { fetch: okFetch(cap) })).toBe(false);
+    expect(cap.calls).toBe(0);
+  });
+
+  it('swallows network errors and returns false', async () => {
+    expect(await sendOptionSelected(store, 1234, { fetch: throwFetch(cap) })).toBe(false);
   });
 });

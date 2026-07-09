@@ -2,14 +2,13 @@
  * Flush buffered lifecycle events to PostHog.
  *
  * Sends the one-time install event (guarded so it fires only once) and every
- * buffered advisory-fired signal, backdated to when each occurred. A signal is
- * pruned only after its own send succeeds, so a failed send stays buffered for
- * the next flush and is never lost or double-counted. Best-effort: a send
- * failure never throws.
+ * buffered advisory-fired and option-selected signal, backdated to when each
+ * occurred. A signal is pruned only after its own send succeeds, so a failed
+ * send stays buffered for the next flush and is never lost or double-counted.
+ * Best-effort: a send failure never throws.
  *
  * The caller decides how often to flush: immediately at each occurrence when
  * telemetry is on, or once on the feedback consent when telemetry is off.
- * Option-selected signals are intentionally not emitted.
  */
 
 import type { Store } from '../store/db.js';
@@ -20,8 +19,9 @@ import {
   readAllSignals,
   pruneSignalAt,
   SIGNAL_ADVISORY_FIRED,
+  SIGNAL_OPTION_SELECTED,
 } from '../store/feedback-signals.js';
-import { sendInstalled, sendAdvisoryFired, type SendLifecycleOptions } from './lifecycle-send.js';
+import { sendInstalled, sendAdvisoryFired, sendOptionSelected, type SendLifecycleOptions } from './lifecycle-send.js';
 import { isTelemetryEnabled } from './telemetry-enabled.js';
 
 export async function flushLifecycle(
@@ -37,12 +37,17 @@ export async function flushLifecycle(
     }
   }
 
-  // Buffered advisory-fired signals — one event each, oldest first. Prune a
-  // signal only when its own send succeeds.
-  const { advisoryFireTs } = readAllSignals(store);
+  // Buffered advisory-fired and option-selected signals — one event each,
+  // oldest first. Prune a signal only when its own send succeeds.
+  const { advisoryFireTs, optionSelectTs } = readAllSignals(store);
   for (const ts of advisoryFireTs) {
     if (await sendAdvisoryFired(store, ts, opts)) {
       pruneSignalAt(store, SIGNAL_ADVISORY_FIRED, ts);
+    }
+  }
+  for (const ts of optionSelectTs) {
+    if (await sendOptionSelected(store, ts, opts)) {
+      pruneSignalAt(store, SIGNAL_OPTION_SELECTED, ts);
     }
   }
 }
