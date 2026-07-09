@@ -2992,6 +2992,24 @@ describe('runLevel — whyHelpOverride (migrated-signal popup why-help)', () => 
     expect(arg.whyHelpBlock).toBeTruthy();
   });
 
+  it('routes a migrated ROLE-CLUSTER override to the user role end-to-end (founder → founder_casual, not pm) — B9', async () => {
+    // The B9 role-cluster path: a migrated class-8 signal threads its role-structured why-help via
+    // whyHelpOverride, and runLevel must select the founder sub-field by profile.role (the piece that
+    // preserves the founder/indie/pm dimension the register-only engine can't carry in the option content).
+    const ROLE_CLUSTER = WHY_HELP_PER_CLASS.class8_role_cluster;
+    const c8 = ROLE_CLUSTER.content as { founder_casual: string; pm_formal: string };
+    const founderProfile = {
+      nature: 'hardcore_pro', mood: 'focused', depth: 'high', role: 'founder',
+      precisionOrdinal: 'high', playfulnessOrdinal: 'low',
+      precisionScore: 8, playfulnessScore: 2, depthScore: 8, computedAt: 0,
+    } as unknown as import('../classifier/types.js').UserProfile;
+    const spy = vi.fn().mockResolvedValue(SKIP_NOW);
+    await runLevel(makeInput({ profile: founderProfile, whyHelpOverride: ROLE_CLUSTER }), 1, spy as SelectFn);
+    const arg = (spy as ReturnType<typeof vi.fn>).mock.calls[0][0] as { message: string };
+    expect(arg.message).toContain(c8.founder_casual);      // the founder variant is selected...
+    expect(arg.message).not.toContain(c8.pm_formal);        // ...and not another role's
+  });
+
   it('without an override, the static content.whyHelp is used — no security why-help leaks in', async () => {
     const spy = vi.fn().mockResolvedValue(SKIP_NOW);
     await runLevel(makeInput({ profile: proProfile }), 1, spy as SelectFn);
