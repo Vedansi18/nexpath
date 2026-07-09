@@ -124,13 +124,13 @@ export function resolveColumn(record: ContentTemplateRecord, level: MaturityLeve
   return resolveLevelForm(record.levelForms, level);
 }
 
-// ── Register-override branch (§6.1 gate 3 / S6) ─────────────────────────────────
+// ── Register-override branch ────────────────────────────────────────────────────
 
 /**
  * The register/role-override BRANCH: return the effective levelForms for a target
  * register + role. Precedence — role → register → base, with `beginner` EXCLUSIVE:
  *   1. `beginner` register → its structurally-divergent override (else base); role is
- *      IGNORED for beginners (mirrors the static `isVibe` gate that turned role maps off).
+ *      IGNORED for beginners (the beginner register turns role overrides off).
  *   2. else a role override (role-tailored content the register can't reproduce) wins.
  *   3. else a `structurally-divergent` register override; else the base forms (the engine
  *      adapts vocabulary downstream, no branch).

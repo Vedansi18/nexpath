@@ -466,7 +466,7 @@ describe('content-template-engine — register-override branch (resolveRegisterF
     expect(resolveRegisterForms(r, 'beginner')).toBe(base);
   });
 
-  // B11 role dimension — role → register → base, beginner-exclusive (mirrors the static isVibe gate).
+  // Role dimension — role → register → base, beginner-exclusive (beginner turns role overrides off).
   const founderForms = { 1: { kind: 'slot-variant', cell: cell('founder1') } } as ContentTemplateRecord['levelForms'];
   const roleRec = record({
     levelForms: base,
@@ -480,7 +480,7 @@ describe('content-template-engine — register-override branch (resolveRegisterF
   it('a role with no override falls through to the register/base', () => {
     expect(resolveRegisterForms(roleRec, 'casual', 'pm')).toBe(base);
   });
-  it('beginner register is EXCLUSIVE — it beats a role override (static isVibe gate)', () => {
+  it('beginner register is EXCLUSIVE — it beats a role override (beginner turns role overrides off)', () => {
     expect(resolveRegisterForms(roleRec, 'beginner', 'founder')).toBe(beg);
   });
   it('no role arg → register/base (backward-compatible with the 2-arg calls)', () => {

@@ -76,10 +76,9 @@ export interface RegisterOverride {
  * A per-ROLE override entry (founder / indie_hacker / pm). Role-tailored content is
  * genuinely different per role — the register-only engine cannot reproduce it by vocab
  * adaptation — so a role override ALWAYS carries its own stored `levelForms` (a full
- * structural rewrite, with the mandatory level-1 floor). This is the role dimension the
- * B6 guard deferred; the engine's form resolver serves it with role → register → base
- * precedence (role loses only to the exclusive `beginner` register, mirroring the static
- * `isVibe` gate that turned role maps off for beginners).
+ * structural rewrite, with the mandatory level-1 floor). The engine's form resolver serves
+ * it with role → register → base precedence (role loses only to the exclusive `beginner`
+ * register, which turns role overrides off for beginners).
  */
 export interface RoleOverride {
   levelForms: Partial<Record<MaturityLevel, LevelForm>>;

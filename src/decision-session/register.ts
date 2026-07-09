@@ -3,9 +3,8 @@
 // supports.
 //
 // Single-dispatch helper: one switch over UserNature, every case
-// explicit. Mirrors the isVibe / selectAbsenceMap routing in
-// options.ts so the runtime stays consistent with the static-content
-// resolution layer.
+// explicit. This is the register resolver for the DecisionSession /
+// OptionGenerator render path.
 
 import type { UserProfile } from '../classifier/types.js';
 
@@ -15,7 +14,7 @@ export type Register = 'formal' | 'casual' | 'beginner';
 /**
  * Resolve the register for the given profile.
  *
- *   beginner       → 'beginner'  (matches the isVibe gate)
+ *   beginner       → 'beginner'  (beginner/vibe register)
  *   cool_geek      → 'beginner'  (vibe-coder routing)
  *   hardcore_pro   → 'formal'
  *   pro_geek_soul  → 'casual'
