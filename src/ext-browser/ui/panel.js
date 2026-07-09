@@ -128,7 +128,7 @@ export function mountNexpathPanel(root, { onEvent }) {
   root.appendChild(el);
 
   const head = document.createElement('div');
-  head.innerHTML = `<div class="np-wordmark"><span class="tri">▲</span>NEXPATH</div>`;
+  head.innerHTML = `<div class="np-wordmark"><span class="tri">▲</span>NEXPATH CLI</div>`;
   const hr = document.createElement('hr');
   hr.className = 'np-hr';
   el.appendChild(head);
@@ -371,8 +371,12 @@ export function mountNexpathPanel(root, { onEvent }) {
   // ── keyboard (per-instance; removed in destroy; scoped to this panel) ──────
   function onKeyDown(e) {
     if (el.classList.contains('np-hidden') || busy) return;
-    // Scope to this panel only — don't hijack typing elsewhere on the host page.
-    if (typeof e.composedPath === 'function' && !e.composedPath().includes(el)) return;
+    // Scope: the listener is attached to `el` (below), so it only fires when the panel
+    // (or a descendant) is focused — no composedPath check needed and no page-key hijack.
+    // (A document-level listener + composedPath().includes(el) does NOT work here: the
+    // engine mounts us in a CLOSED shadow root, and composedPath hides our internals from
+    // any listener outside that shadow, so the guard rejected every key — arrows/Enter did
+    // nothing. Confirmed live on Lovable 2026-07-09.)
 
     // CLI-parity keyboard shortcut: Ctrl+X = disable for this project (TtySelectFn \x18).
     // Works in any view. (The CLI's Ctrl+T for frequency/role is NOT bound here: Ctrl+T is
@@ -408,7 +412,7 @@ export function mountNexpathPanel(root, { onEvent }) {
       e.preventDefault();
     }
   }
-  document.addEventListener('keydown', onKeyDown, true);
+  el.addEventListener('keydown', onKeyDown); // el-scoped: fires only while the panel is focused
 
   // ── draggable header (#4) ────────────────────────────────────────────────
   let dragging = false;
@@ -467,7 +471,7 @@ export function mountNexpathPanel(root, { onEvent }) {
     },
 
     destroy() {
-      document.removeEventListener('keydown', onKeyDown, true);
+      el.removeEventListener('keydown', onKeyDown);
       head.removeEventListener('pointerdown', onHeaderPointerDown);
       head.removeEventListener('pointermove', onHeaderPointerMove);
       head.removeEventListener('pointerup', onHeaderPointerUp);
