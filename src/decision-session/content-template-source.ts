@@ -13,9 +13,10 @@
 
 import { SHIPPED_CONTENT_TEMPLATES } from './content-template-tooling.js';
 import type { RecordCandidateLookup } from './content-template-engine.js';
-import type { ContentTemplateRecord, LevelForm, MaturityLevel } from './content-template-schema.js';
+import type { ContentTemplateRecord, LevelForm, MaturityLevel, TwoChannelCell } from './content-template-schema.js';
 import { validateContentTemplateRecord, MATURITY_LEVELS } from './content-template-schema.js';
 import { sanitizePromptDerivedValue } from './content-template-grounding.js';
+import { retainsTopicAnchor } from './content-anchor.js';
 import { getContentTemplate } from '../store/content-templates.js';
 import type { Store } from '../store/db.js';
 
@@ -73,37 +74,30 @@ export function shippedRecordLookup(signalType: string): RecordCandidateLookup {
 // ── Per-user (autogen) overlay — the tier-b per-cell cascade over the preset ────
 
 /**
- * Read gate for one per-user cell: served only when it is well-formed (non-empty
- * option + why-desc). Runtime grounding is appended on top for every source, so a
- * well-formed cell never reduces grounding; a blank / degraded cell falls back to
- * the preset cell.
- */
-function autogenCellServable(form: LevelForm | undefined): form is LevelForm {
-  return !!form && form.cell.option.trim() !== '' && form.cell.whyDesc.trim() !== '';
-}
-
-/**
  * Overlay a per-user record on the shipped preset PER CELL: for each maturity level,
- * serve the per-user cell when it passes the read gate, else the preset cell — the
- * first source holding a cell wins the WHOLE cell (no intra-cell blending). The
- * per-user cell is re-sanitized on read (defence in depth). Structure + the
- * sensitive-action safeguard come from the preset unchanged.
+ * sanitize the per-user cell (AG-8 re-check on read), then serve it ONLY when it
+ * retains the topic anchor (AG-3/AG-4 non-degradation — a keyword-bearing topic must
+ * keep an anchor word, a keyword-less one must overlap the preset); otherwise fall
+ * back to the preset cell. The first source holding a cell wins the WHOLE cell (no
+ * intra-cell blending). Structure + the sensitive-action safeguard come from the
+ * preset unchanged.
  */
 function overlayAutogenOnPreset(autogen: ContentTemplateRecord, preset: ContentTemplateRecord): ContentTemplateRecord {
+  const floorCell = preset.levelForms[1]?.cell; // schema-mandated floor — the anchor reference
   const levelForms: Partial<Record<MaturityLevel, LevelForm>> = {};
   for (const lvl of MATURITY_LEVELS) {
     const a = autogen.levelForms[lvl];
-    if (autogenCellServable(a)) {
-      levelForms[lvl] = {
-        kind: a.kind,
-        cell: {
-          option:  sanitizePromptDerivedValue(a.cell.option),
-          whyDesc: sanitizePromptDerivedValue(a.cell.whyDesc),
-        },
+    if (a && floorCell) {
+      const sanitized: TwoChannelCell = {
+        option:  sanitizePromptDerivedValue(a.cell.option),
+        whyDesc: sanitizePromptDerivedValue(a.cell.whyDesc),
       };
-    } else if (preset.levelForms[lvl]) {
-      levelForms[lvl] = preset.levelForms[lvl]!;
+      if (retainsTopicAnchor(preset.signalType, sanitized, preset.levelForms[lvl]?.cell ?? floorCell)) {
+        levelForms[lvl] = { kind: a.kind, cell: sanitized };
+        continue;
+      }
     }
+    if (preset.levelForms[lvl]) levelForms[lvl] = preset.levelForms[lvl]!;
   }
   return { ...preset, source: 'autogen', levelForms };
 }

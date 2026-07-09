@@ -23,6 +23,7 @@ import { SHIPPED_CONTENT_TEMPLATES } from './content-template-tooling.js';
 import type { ContentTemplateRecord, LevelForm, MaturityLevel, TwoChannelCell } from './content-template-schema.js';
 import { validateContentTemplateRecord, resolveLevelForm } from './content-template-schema.js';
 import { sanitizePromptDerivedValue } from './content-template-grounding.js';
+import { retainsTopicAnchor } from './content-anchor.js';
 import { SCHEMA_VERSION } from '../store/schema.js';
 import { upsertContentTemplate, getContentTemplate } from '../store/content-templates.js';
 import { getConfig, isConfigSet, setConfig } from '../store/config.js';
@@ -139,10 +140,10 @@ export interface SelectionInput {
   patternSummary: string;
 }
 
-/** Default confidence bar a ranked topic must clear to be personalized. */
+/** Default confidence bar a ranked topic must clear to be personalized. The ≥12
+ *  coverage floor is EMERGENT — reached as more topics clear the bar with history —
+ *  never forced on thin history (Q-D scale-to-confident), so it is not a hard cap. */
 export const DEFAULT_CONFIDENCE_BAR = 0.6;
-/** The coverage target reached AS history accrues — never forced on thin history. */
-export const COVERAGE_TARGET = 12;
 
 export const SELECTION_MODEL = 'gpt-4o-mini';
 
@@ -305,6 +306,9 @@ export async function generatePerUserRecord(
   const openai = client ?? new OpenAI();
   const cell = await generateCell(openai, buildGenerationPrompt(atLevel.form.cell, patternSummary));
   if (!cell) return null;
+  // AG-3 / AG-4: the personalization must keep the topic anchor; else discard it (the
+  // read side serves the preset, and a later fire may regenerate).
+  if (!retainsTopicAnchor(signalType, cell, atLevel.form.cell)) return null;
 
   const personalized: LevelForm = { kind: atLevel.form.kind, cell };
   const levelForms: Partial<Record<MaturityLevel, LevelForm>> =

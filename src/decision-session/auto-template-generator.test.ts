@@ -19,6 +19,8 @@ import {
   runAutogenForFire,
 } from './auto-template-generator.js';
 import { validateContentTemplateRecord } from './content-template-schema.js';
+import { topicAnchorWords } from './content-anchor.js';
+import { SHIPPED_CONTENT_TEMPLATES } from './content-template-tooling.js';
 import { openStore } from '../store/db.js';
 import { getContentTemplate } from '../store/content-templates.js';
 import { setConfig } from '../store/config.js';
@@ -28,6 +30,14 @@ function rg(state: RightGoodState): RightGoodSignal {
 }
 function mockClient(reply: string): OpenAI {
   return { chat: { completions: { create: async () => ({ choices: [{ message: { content: reply } }] }) } } } as unknown as OpenAI;
+}
+/** A mock whose personalized cell contains the topic's anchor word (so it passes the read gate). */
+function anchoredReply(signalType: string): string {
+  const anchor = topicAnchorWords(signalType)[0] ?? 'this';
+  return JSON.stringify({ option: `personalized ${anchor} option`, whyDesc: `personalized ${anchor} explanation` });
+}
+function anchoredClient(signalType: string): OpenAI {
+  return mockClient(anchoredReply(signalType));
 }
 
 describe('auto-template-generator — topic mapping', () => {
@@ -130,32 +140,35 @@ describe('auto-template-generator — coverage floor (scale-to-confident)', () =
 });
 
 describe('auto-template-generator — per-topic generation (Stage C)', () => {
-  const okClient = mockClient(JSON.stringify({ option: 'my rewritten option', whyDesc: 'my rewritten why-desc' }));
+  const okClient = anchoredClient('ABSENCE_TEST_CREATION');
+  const testAnchor = topicAnchorWords('ABSENCE_TEST_CREATION')[0];
 
   it('produces a schema-valid, preset-seeded sparse record with source=autogen', async () => {
     const rec = await generatePerUserRecord('ABSENCE_TEST_CREATION', 3, 'summary', okClient);
     expect(rec).not.toBeNull();
     expect(rec!.source).toBe('autogen');
-    expect(rec!.levelForms[1]).toBeDefined();                       // mandatory floor inherited from the preset
-    expect(rec!.levelForms[3]?.cell.option).toBe('my rewritten option'); // current column personalized
+    expect(rec!.levelForms[1]).toBeDefined();                    // mandatory floor inherited from the preset
+    expect(rec!.levelForms[3]?.cell.option).toContain(testAnchor); // current column personalized, anchor kept
     expect(validateContentTemplateRecord(rec!).ok).toBe(true);
   });
 
   it('at level 1 the personalized cell IS the floor (single-entry map)', async () => {
     const rec = await generatePerUserRecord('ABSENCE_TEST_CREATION', 1, 'x', okClient);
     expect(Object.keys(rec!.levelForms)).toEqual(['1']);
-    expect(rec!.levelForms[1]?.cell.whyDesc).toBe('my rewritten why-desc');
+    expect(rec!.levelForms[1]?.cell.whyDesc).toContain(testAnchor);
   });
 
   it('inherits the sensitive-action safeguard from the preset (a sensitive topic stays guarded)', async () => {
-    const rec = await generatePerUserRecord('REVIEW_TO_RELEASE', 3, 'x', okClient);
+    const sensitive = SHIPPED_CONTENT_TEMPLATES.find(
+      (r) => r.l2SafeguardRequired && r.l2SafeguardLine && topicAnchorWords(r.signalType).length > 0,
+    )!;
+    const rec = await generatePerUserRecord(sensitive.signalType, 3, 'x', anchoredClient(sensitive.signalType));
     expect(rec!.l2SafeguardRequired).toBe(true);
-    expect(typeof rec!.l2SafeguardLine).toBe('string');
-    expect(rec!.l2SafeguardLine!.length).toBeGreaterThan(0);
+    expect(rec!.l2SafeguardLine).toBe(sensitive.l2SafeguardLine);
   });
 
   it('sanitizes prompt-derived leakage out of the generated cell (C4 gate)', async () => {
-    const leaky = mockClient(JSON.stringify({ option: 'ping me at alice@corp.com about it', whyDesc: 'ok' }));
+    const leaky = mockClient(JSON.stringify({ option: `ping me at alice@corp.com about the ${testAnchor}`, whyDesc: `ok ${testAnchor}` }));
     const rec = await generatePerUserRecord('ABSENCE_TEST_CREATION', 1, 'x', leaky);
     expect(rec!.levelForms[1]?.cell.option).not.toContain('alice@corp.com');
     expect(rec!.levelForms[1]?.cell.option).toMatch(/redacted/i);
@@ -165,6 +178,11 @@ describe('auto-template-generator — per-topic generation (Stage C)', () => {
     expect(await generatePerUserRecord('NOT_A_REAL_TOPIC', 1, 'x', okClient)).toBeNull();
     expect(await generatePerUserRecord('ABSENCE_TEST_CREATION', 1, 'x', mockClient('not json'))).toBeNull();
     expect(await generatePerUserRecord('ABSENCE_TEST_CREATION', 1, 'x', mockClient(JSON.stringify({ option: '', whyDesc: '' })))).toBeNull();
+  });
+
+  it('rejects a personalization that drops the topic anchor (returns null → preset serves)', async () => {
+    const offAnchor = mockClient(JSON.stringify({ option: 'completely unrelated wording here', whyDesc: 'nothing on the subject' }));
+    expect(await generatePerUserRecord('ABSENCE_TEST_CREATION', 1, 'x', offAnchor)).toBeNull();
   });
 
   it('persists the generated record under source=autogen', async () => {
@@ -220,7 +238,7 @@ describe('auto-template-generator — live orchestration (runAutogenForFire)', (
       const prompt = req.messages[0].content;
       const content = prompt.includes('rank which')
         ? JSON.stringify({ topics: [{ signalType: 'ABSENCE_TEST_CREATION', confidence: 0.9 }] })
-        : JSON.stringify({ option: 'personalized option', whyDesc: 'personalized why-desc' });
+        : JSON.stringify({ option: 'personalized test option', whyDesc: 'personalized test explanation' });
       return { choices: [{ message: { content } }] };
     } } } } as unknown as OpenAI;
   }

@@ -41,8 +41,8 @@ describe('§6.1 — content-template source lookup by signalType', () => {
 });
 
 describe('per-user (autogen) overlay — tier-b per-cell cascade', () => {
-  const preset = SHIPPED_CONTENT_TEMPLATES[0];
-  const AUTOGEN_L1 = { kind: 'slot-variant' as const, cell: { option: 'MY AUTOGEN OPTION', whyDesc: 'my autogen why-desc' } };
+  const preset = SHIPPED_CONTENT_TEMPLATES.find((r) => r.signalType === 'ABSENCE_TEST_CREATION')!;
+  const AUTOGEN_L1 = { kind: 'slot-variant' as const, cell: { option: 'my personalized test option', whyDesc: 'my personalized test explanation' } };
   function autogenRecord(levelForms: ContentTemplateRecord['levelForms']): ContentTemplateRecord {
     return { ...preset, source: 'autogen', levelForms };
   }
@@ -61,7 +61,7 @@ describe('per-user (autogen) overlay — tier-b per-cell cascade', () => {
     upsertContentTemplate(store, { projectRoot: '/p', signalType: preset.signalType, source: 'autogen', record: autogenRecord({ 1: AUTOGEN_L1 }) });
     const merged = resolveRecord(autogenAwareLookup(store, '/p', preset.signalType))!;
     expect(merged.source).toBe('autogen');
-    expect(merged.record.levelForms[1]?.cell.option).toBe('MY AUTOGEN OPTION');
+    expect(merged.record.levelForms[1]?.cell.option).toBe('my personalized test option');
     for (const k of Object.keys(preset.levelForms)) {
       const lvl = Number(k) as 1 | 2 | 3 | 4 | 5;
       expect(merged.record.levelForms[lvl]).toBeDefined();
@@ -80,7 +80,7 @@ describe('per-user (autogen) overlay — tier-b per-cell cascade', () => {
 
   it('re-sanitizes a leaky stored cell on read', async () => {
     const store = await openStore(':memory:');
-    const leaky = { kind: 'slot-variant' as const, cell: { option: 'contact me at bob@evil.com now', whyDesc: 'ok' } };
+    const leaky = { kind: 'slot-variant' as const, cell: { option: 'contact me at bob@evil.com about the test', whyDesc: 'ok test' } };
     upsertContentTemplate(store, { projectRoot: '/p', signalType: preset.signalType, source: 'autogen', record: autogenRecord({ 1: leaky }) });
     const merged = resolveRecord(autogenAwareLookup(store, '/p', preset.signalType))!;
     expect(merged.record.levelForms[1]?.cell.option).not.toContain('bob@evil.com');
@@ -93,6 +93,18 @@ describe('per-user (autogen) overlay — tier-b per-cell cascade', () => {
     const merged = resolveRecord(autogenAwareLookup(store, '/p', flagged.signalType))!;
     expect(merged.record.l2SafeguardRequired).toBe(true);
     expect(merged.record.l2SafeguardLine).toBe(flagged.l2SafeguardLine);
+    store.db.close();
+  });
+
+  it('falls back to the preset cell when the stored per-user cell dropped the topic anchor', async () => {
+    const store = await openStore(':memory:');
+    // Off-anchor content (no ABSENCE_TEST_CREATION keyword) — schema-valid but off-topic.
+    const offAnchor = { kind: 'slot-variant' as const, cell: { option: 'completely unrelated wording here', whyDesc: 'nothing on the subject' } };
+    upsertContentTemplate(store, { projectRoot: '/p', signalType: preset.signalType, source: 'autogen', record: autogenRecord({ 1: offAnchor }) });
+    const merged = resolveRecord(autogenAwareLookup(store, '/p', preset.signalType))!;
+    // The stored record is valid (served on the autogen tier), but the off-anchor cell is
+    // NOT served — the preset's level-1 cell fills it (AG-3 non-degradation).
+    expect(merged.record.levelForms[1]?.cell.option).toBe(preset.levelForms[1]!.cell.option);
     store.db.close();
   });
 });
