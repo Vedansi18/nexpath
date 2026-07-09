@@ -3261,13 +3261,15 @@ describe('runLevel — generatedOptions wiring', () => {
     expect(values).toContain(SKIP_NOW);
   });
 
-  it('uses static options when generatedOptions is undefined', async () => {
-    const staticContent = resolveDecisionContent('implementation', 'stage_transition');
+  it('composes options from the record when generatedOptions is undefined (B11 — no static content)', async () => {
+    const { composeDeterministicOptions } = await import('./engine-option-generator.js');
+    const { shippedRecordLookup } = await import('./content-template-source.js');
+    const recordGen = composeDeterministicOptions({ lookup: shippedRecordLookup('TASK_REVIEW'), level: 3, register: 'casual' });
     const spy = vi.fn().mockResolvedValue(SKIP_NOW);
     await runLevel(makeInput({ generatedOptions: undefined }), 1, spy as SelectFn);
     const opts = (spy as ReturnType<typeof vi.fn>).mock.calls[0][0].options as { value: string }[];
     const values = opts.map((o) => o.value);
-    expect(values).toContain(staticContent.L1[0].option);
+    expect(values).toContain(recordGen!.l1[0]); // record-composed option, not the deleted static content
   });
 });
 
@@ -3591,10 +3593,12 @@ describe('runLevel — NEXPATH_SIM=1 support', () => {
   it('auto-selects first content option without calling selectFn when NEXPATH_SIM=1', async () => {
     process.env['NEXPATH_SIM'] = '1';
     const selectFn = vi.fn();
-    const content = resolveDecisionContent('implementation', 'stage_transition');
+    const { composeDeterministicOptions } = await import('./engine-option-generator.js');
+    const { shippedRecordLookup } = await import('./content-template-source.js');
+    const recordGen = composeDeterministicOptions({ lookup: shippedRecordLookup('TASK_REVIEW'), level: 3, register: 'casual' });
     const result = await runLevel(makeInput(), 1, selectFn as SelectFn);
     expect(selectFn).not.toHaveBeenCalled();
-    expect(result).toBe(content.L1[0].option);
+    expect(result).toBe(recordGen!.l1[0]); // record-composed option (B11 — no static content)
   }, 2000);
 
   it('emits decision_session_sim_dismissed with level and autoSelectedText when NEXPATH_SIM=1', async () => {

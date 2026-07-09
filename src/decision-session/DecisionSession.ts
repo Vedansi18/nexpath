@@ -7,12 +7,17 @@ import { incrementDecisionSessionCount } from '../store/projects.js';
 import { setConfig } from '../store/config.js';
 import type { DecisionContent } from './options.js';
 import {
-  resolveDecisionContent,
   buildOptionList,
   getLevelSubtitle,
   SHOW_SIMPLER,
   SKIP_NOW,
 } from './options.js';
+import { pinchSignalTypeForFlag, shippedRecordLookup } from './content-template-source.js';
+import { resolvePinchFields } from './signal-pinch-fields.js';
+import { getWhyHelpForSignalType } from './why-help-by-signal-type.js';
+import { composeDeterministicOptions } from './engine-option-generator.js';
+import { selectionRegister } from './selection-registry.js';
+import type { MaturityLevel } from './content-template-schema.js';
 import type { GeneratedOptions } from './OptionGenerator.js';
 import { writeTelemetry } from '../telemetry/index.js';
 import { type RecentPromptMetadata } from '../telemetry/recent-prompts.js';
@@ -254,43 +259,32 @@ export async function runLevel(
   selectFn:  SelectFn,
   store?:    Store,
 ): Promise<'skip' | 'next' | 'clipboard_only' | string> {
-  const content  = resolveDecisionContent(input.stage, input.flagType, input.profile);
-  // A migrated signal has no static DecisionContent for its popup question, so the
-  // content-template record's own `question` is threaded in via `questionOverride`.
-  // Un-migrated signals leave it undefined and fall back to the static `content.question`.
-  const question = input.questionOverride ?? content.question;
-  const gen      = input.generatedOptions;
-  // Generated options carry only the user-facing text. Each option's
-  // desc-base comes from either the runtime-substituted output on
-  // `gen.generatedDescBases` (post R5 prompt-evidence injection +
-  // R4 bookend substitution + F7 L2 escalation) when OptionGenerator
-  // produced it, OR from the static DecisionContent as a fallback.
-  const wrapGen = (
-    texts:  string[],
-    source: { L1: typeof content.L1; L2: typeof content.L2; L3: typeof content.L3; },
-    key:    'L1' | 'L2' | 'L3',
-  ) => {
-    const lowerKey  = key.toLowerCase() as 'l1' | 'l2' | 'l3';
-    const substituted = gen?.generatedDescBases?.[lowerKey];
-    return texts.map((text, i) => ({
-      option:   text,
-      descBase: substituted?.[i] ?? source[key][i]?.descBase ?? '',
-    }));
+  // The content layer is the record set + the engine now (B11 cutover — no static DecisionContent).
+  // Question comes from the caller's override or the register-keyed pinch-fields map; why-help from the
+  // per-signal class map; options from the caller's engine-generated set, or a deterministic composition
+  // from the record when absent (e.g. the optimize replay).
+  const register   = profileToRegister(input.profile);
+  const regKey     = selectionRegister(input.profile?.nature);
+  const signalType = pinchSignalTypeForFlag(input.flagType, input.stage);
+  const question   = input.questionOverride
+    ?? (signalType ? resolvePinchFields(signalType, regKey)?.question : undefined) ?? '';
+  const whyHelp    = input.whyHelpOverride ?? (signalType ? getWhyHelpForSignalType(signalType) : null);
+  const gen: GeneratedOptions | undefined = input.generatedOptions ?? (signalType
+    ? composeDeterministicOptions({ lookup: shippedRecordLookup(signalType), level: 3 as MaturityLevel, register: regKey, role: input.profile?.role ?? undefined }) ?? undefined
+    : undefined);
+  const toEntries = (opts: readonly string[] | undefined, descBases: readonly string[] | undefined) =>
+    (opts ?? []).map((option, i) => ({ option, descBase: descBases?.[i] ?? '' }));
+  const effective: DecisionContent = {
+    signalType:    signalType ?? input.flagType,
+    question,
+    pinchFallback: '',
+    whyHelp:       whyHelp ?? undefined,
+    L1: toEntries(gen?.l1, gen?.generatedDescBases?.l1),
+    L2: toEntries(gen?.l2, gen?.generatedDescBases?.l2),
+    L3: toEntries(gen?.l3, gen?.generatedDescBases?.l3),
   };
-  const effective: DecisionContent = gen
-    ? {
-        ...content,
-        L1: wrapGen(gen.l1, content, 'L1'),
-        L2: wrapGen(gen.l2, content, 'L2'),
-        L3: wrapGen(gen.l3, content, 'L3'),
-      }
-    : content;
   const { options } = buildOptionList(effective, level);
-  const register     = profileToRegister(input.profile);
   const subtitle     = getLevelSubtitle(level) ?? undefined;
-  // A migrated signal has no static DecisionContent, so its own per-class why-help is threaded
-  // in via `whyHelpOverride`. Un-migrated signals leave it undefined and fall back to the static.
-  const whyHelp = input.whyHelpOverride ?? content.whyHelp;
   const whyHelpBlock = whyHelp && register
     ? (composeWhyHelpBlock(whyHelp, register, input.profile?.mood, input.profile?.role) ?? undefined)
     : undefined;
