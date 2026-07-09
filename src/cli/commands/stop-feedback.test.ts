@@ -18,6 +18,10 @@ vi.mock('../../telemetry/lifecycle-flush.js', () => ({
   flushLifecycle:     vi.fn().mockResolvedValue(undefined),
 }));
 
+import { rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { openStore, closeStore, type Store } from '../../store/db.js';
 import { flushLifecycle } from '../../telemetry/lifecycle-flush.js';
 import { runStop, type StopPayload, type FeedbackDeps } from './stop.js';
@@ -140,5 +144,31 @@ describe('feedback popup integration', () => {
     expect(send).not.toHaveBeenCalled();
     // cadence NOT reset (feedback wasn't shown)
     expect(readCadence(store).lastFeedbackAt).toBeNull();
+  });
+
+  it('persists the cadence reset after the popup with a real file store (D4 lock release + reload)', async () => {
+    const dbPath = join(tmpdir(), `nexpath-stopfb-${randomUUID()}.db`);
+    try {
+      let s = await openStore(dbPath);
+      makeEligible(s);
+      const send = vi.fn().mockResolvedValue(true);
+      const deps: FeedbackDeps = { render: pickRating(3), send };
+
+      const result = await runStop(makePayload(), s, undefined, undefined, deps);
+      expect(result.outcome).toBe('feedback_shown');
+      expect(send).toHaveBeenCalledWith(s, 3);
+      closeStore(s);
+
+      // Reopen: markFeedbackShown ran after release→popup→reacquire+reload, so the
+      // reset must have landed on the reloaded db and persisted to disk.
+      s = await openStore(dbPath);
+      const c = readCadence(s);
+      expect(c.activeMs).toBe(0);
+      expect(c.lastFeedbackAt).not.toBeNull();
+      closeStore(s);
+    } finally {
+      rmSync(dbPath, { force: true });
+      rmSync(`${dbPath}.lock`, { force: true });
+    }
   });
 });

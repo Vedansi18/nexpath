@@ -1,12 +1,12 @@
 import OpenAI from 'openai';
 import { platform } from 'node:process';
 import type { Store } from '../../store/db.js';
-import { openStore, closeStore, DEFAULT_DB_PATH } from '../../store/db.js';
+import { openStore, closeStore, releaseStoreLock, reacquireStoreLock, DEFAULT_DB_PATH } from '../../store/db.js';
 import { getPendingAdvisory, markAdvisoryShown } from '../../store/pending-advisories.js';
 import { isFeedbackEligible, markFeedbackShown } from '../../store/feedback-cadence.js';
-import { recordAdvisoryFired, recordOptionSelected, pruneSignalsOfKind, SIGNAL_OPTION_SELECTED } from '../../store/feedback-signals.js';
+import { recordAdvisoryFired, recordOptionSelected } from '../../store/feedback-signals.js';
 import { sendFeedback } from '../../telemetry/feedback-send.js';
-import { runFeedbackPopup, type FeedbackRenderFn } from '../../decision-session/feedback-popup.js';
+import { runFeedbackPopup, type FeedbackRenderFn, type FeedbackResult } from '../../decision-session/feedback-popup.js';
 import { createFeedbackRenderFn } from '../../decision-session/feedback-tty.js';
 import { runDecisionSession } from '../../decision-session/DecisionSession.js';
 import type { SelectFn } from '../../decision-session/DecisionSession.js';
@@ -101,16 +101,22 @@ export async function runStop(
     const fbRender = feedbackDeps ? feedbackDeps.render : createFeedbackRenderFn();
     const fbSend   = feedbackDeps ? feedbackDeps.send   : sendFeedback;
     if (fbRender) {
-      const result = await runFeedbackPopup({ render: fbRender });
+      // The popup blocks for user input; don't hold the global DB lock across it.
+      // Release before, re-acquire + reload after, so other sessions are not
+      // blocked and their concurrent writes are not clobbered. No-op for :memory:.
+      releaseStoreLock(store);
+      let result: FeedbackResult;
+      try {
+        result = await runFeedbackPopup({ render: fbRender });
+      } finally {
+        await reacquireStoreLock(store);
+      }
       if (result.outcome === 'selected') {
         // The feedback click is the consent gate: flush any buffered lifecycle
-        // events (install + advisory), then send the rating. Flush regardless of
-        // telemetry.enabled — this explicit action is the consent.
+        // events (install + advisory + option-selected), then send the rating.
+        // Flush regardless of telemetry.enabled — this explicit action is the consent.
         await flushLifecycle(store);
         await fbSend(store, result.rating);
-        // Option-selected signals are never emitted; clear them at the consent
-        // point so local storage stays bounded.
-        pruneSignalsOfKind(store, SIGNAL_OPTION_SELECTED);
       }
       markFeedbackShown(store);
       logger.info('stop_feedback_shown', { cwd: payload.cwd, selected: result.outcome === 'selected' });
@@ -232,6 +238,9 @@ export async function runStop(
   if (dsResult.outcome === 'selected') {
     // Record the selection (timestamp only — no option text or index).
     recordOptionSelected(store, payload.cwd);
+    // On-mode: emit the option-selected event now; off-mode buffers it for the
+    // feedback-consent flush. Fire-and-forget so the block decision is not delayed.
+    void flushIfTelemetryOn(store).catch(() => {});
     // Store injected text in session — auto reads and clears this on its next invocation
     // to skip all pipeline processing for the advisory-injected prompt.
     mgr.setInjectedPrompt(store, dsResult.selectedPrompt);

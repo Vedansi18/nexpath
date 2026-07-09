@@ -188,6 +188,15 @@ describe('runStop — user picks option', () => {
     await runStop(makePayload(), store, mockSelect('some option'));
     expect(flushIfTelemetryOn).toHaveBeenCalledWith(store);
   });
+
+  it('also emits option-selected immediately when an option is chosen (on-mode)', async () => {
+    vi.mocked(flushIfTelemetryOn).mockClear();
+    insertAdvisory(store);
+    const result = await runStop(makePayload(), store, mockSelect('some option'));
+    expect(result.outcome).toBe('blocked');
+    // advisory-fired flush + option-selected occurrence flush → at least two calls
+    expect(vi.mocked(flushIfTelemetryOn).mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
 });
 
 // ── runStop — clipboard only ──────────────────────────────────────────────────

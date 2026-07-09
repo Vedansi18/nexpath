@@ -1,5 +1,5 @@
 /**
- * Direct, one-shot lifecycle events (install, advisory-fired).
+ * Direct, one-shot lifecycle events (install, advisory-fired, option-selected).
  *
  * Each posts a single PostHog event carrying only an installation id and a
  * timestamp — no prompt, option, or project text. The event timestamp is the
@@ -18,8 +18,9 @@ import { postEvent, DEFAULT_POSTHOG_ENDPOINT, type FetchLike } from './Telemetry
 import { POSTHOG_LIB_NAME, POSTHOG_LIB_VERSION } from './TelemetryBatcher.js';
 import type { PostHogSingleEnvelope } from './types.js';
 
-export const EVENT_INSTALLED      = 'nexpath_installed';
-export const EVENT_ADVISORY_FIRED = 'advisory_fired';
+export const EVENT_INSTALLED       = 'nexpath_installed';
+export const EVENT_ADVISORY_FIRED  = 'advisory_fired';
+export const EVENT_OPTION_SELECTED = 'option_selected';
 
 export interface SendLifecycleOptions {
   fetch?: FetchLike;
@@ -80,4 +81,13 @@ export function sendAdvisoryFired(
   opts:       SendLifecycleOptions = {},
 ): Promise<boolean> {
   return sendLifecycle(store, EVENT_ADVISORY_FIRED, occurredAt, { advisory_fire_ts: occurredAt }, opts);
+}
+
+/** Emit an option-selected event (installation id + selection timestamp). */
+export function sendOptionSelected(
+  store:      Store,
+  occurredAt: number,
+  opts:       SendLifecycleOptions = {},
+): Promise<boolean> {
+  return sendLifecycle(store, EVENT_OPTION_SELECTED, occurredAt, { option_select_ts: occurredAt }, opts);
 }

@@ -10,7 +10,7 @@ import {
   readAllSignals,
 } from '../store/feedback-signals.js';
 import { flushLifecycle, flushIfTelemetryOn } from './lifecycle-flush.js';
-import { EVENT_INSTALLED, EVENT_ADVISORY_FIRED } from './lifecycle-send.js';
+import { EVENT_INSTALLED, EVENT_ADVISORY_FIRED, EVENT_OPTION_SELECTED } from './lifecycle-send.js';
 import type { FetchLike } from './TelemetryClient.js';
 import type { PostHogSingleEnvelope } from './types.js';
 
@@ -20,7 +20,7 @@ interface Sent { event: string; ts: number; timestamp: string }
 function recordingFetch(sent: Sent[], failOn: Array<[string, number]> = []): FetchLike {
   return async (_url, init) => {
     const env = JSON.parse(init.body) as PostHogSingleEnvelope;
-    const tsProp = (env.properties.advisory_fire_ts ?? env.properties.installed_at) as number;
+    const tsProp = (env.properties.advisory_fire_ts ?? env.properties.option_select_ts ?? env.properties.installed_at) as number;
     const fail = failOn.some(([e, t]) => e === env.event && t === tsProp);
     if (!fail) sent.push({ event: env.event, ts: tsProp, timestamp: env.timestamp });
     return { ok: !fail, status: fail ? 500 : 200, headers: { get: () => null } };
@@ -71,14 +71,45 @@ describe('flushLifecycle', () => {
     expect(readAllSignals(store).advisoryFireTs).toEqual([]);   // pruned on success
   });
 
-  it('does not send or prune option-selected signals', async () => {
+  it('sends one option_selected event per buffered signal, backdated, then prunes them', async () => {
+    markInstalledEventSent(store);
+    recordOptionSelected(store, '/a', 150);
+    recordOptionSelected(store, '/b', 350);
+
+    await flushLifecycle(store, { fetch: recordingFetch(sent) });
+
+    const opts = sent.filter((s) => s.event === EVENT_OPTION_SELECTED);
+    expect(opts.map((s) => s.ts)).toEqual([150, 350]);
+    expect(opts.map((s) => s.timestamp)).toEqual([
+      new Date(150).toISOString(),
+      new Date(350).toISOString(),
+    ]);
+    expect(readAllSignals(store).optionSelectTs).toEqual([]);   // pruned on success
+  });
+
+  it('keeps a failed option_selected signal buffered while pruning the ones that sent', async () => {
+    markInstalledEventSent(store);
+    recordOptionSelected(store, '/a', 150);
+    recordOptionSelected(store, '/a', 250);
+    recordOptionSelected(store, '/a', 350);
+
+    // Fail only the 250 send.
+    await flushLifecycle(store, { fetch: recordingFetch(sent, [[EVENT_OPTION_SELECTED, 250]]) });
+
+    expect(sent.filter((s) => s.event === EVENT_OPTION_SELECTED).map((s) => s.ts)).toEqual([150, 350]);
+    expect(readAllSignals(store).optionSelectTs).toEqual([250]);   // only the failed one remains
+  });
+
+  it('does not re-send an option_selected event on a second flush (no-resend)', async () => {
     markInstalledEventSent(store);
     recordOptionSelected(store, '/a', 150);
 
     await flushLifecycle(store, { fetch: recordingFetch(sent) });
+    await flushLifecycle(store, { fetch: recordingFetch(sent) });
 
-    expect(sent).toHaveLength(0);
-    expect(readAllSignals(store).optionSelectTs).toEqual([150]);  // left buffered
+    // Sent exactly once across both flushes; pruned after the first send.
+    expect(sent.filter((s) => s.event === EVENT_OPTION_SELECTED)).toHaveLength(1);
+    expect(readAllSignals(store).optionSelectTs).toEqual([]);
   });
 
   it('keeps a failed advisory signal buffered while pruning the ones that sent', async () => {
@@ -127,6 +158,19 @@ describe('flushLifecycle', () => {
     expect(sent.filter((s) => s.event === EVENT_ADVISORY_FIRED)).toHaveLength(2);
   });
 
+  it('sends install, advisories, and option-selected together in one flush', async () => {
+    setInstalledAtIfMissing(store, 5000);
+    recordAdvisoryFired(store, '/a', 100);
+    recordOptionSelected(store, '/a', 150);
+
+    await flushLifecycle(store, { fetch: recordingFetch(sent) });
+
+    expect(sent.filter((s) => s.event === EVENT_INSTALLED)).toHaveLength(1);
+    expect(sent.filter((s) => s.event === EVENT_ADVISORY_FIRED)).toHaveLength(1);
+    expect(sent.filter((s) => s.event === EVENT_OPTION_SELECTED)).toHaveLength(1);
+    expect(readAllSignals(store).optionSelectTs).toEqual([]);   // sent + pruned
+  });
+
   it('never throws and marks/prunes nothing when the api key is empty', async () => {
     setConfig(store, 'telemetry_sync_api_key', '');
     setInstalledAtIfMissing(store, 5000);
@@ -160,5 +204,20 @@ describe('flushIfTelemetryOn', () => {
     expect(sent).toHaveLength(0);
     expect(isInstalledEventSent(store)).toBe(false);           // not sent
     expect(readAllSignals(store).advisoryFireTs).toEqual([100]); // still buffered
+  });
+
+  it('leaves option-selected buffered when telemetry is off, then flushes it when on', async () => {
+    markInstalledEventSent(store);
+    recordOptionSelected(store, '/a', 150);
+
+    setConfig(store, 'telemetry.enabled', 'false');
+    await flushIfTelemetryOn(store, { fetch: recordingFetch(sent) });
+    expect(sent).toHaveLength(0);
+    expect(readAllSignals(store).optionSelectTs).toEqual([150]);   // buffered while off
+
+    setConfig(store, 'telemetry.enabled', 'true');
+    await flushIfTelemetryOn(store, { fetch: recordingFetch(sent) });
+    expect(sent.filter((s) => s.event === EVENT_OPTION_SELECTED)).toHaveLength(1);
+    expect(readAllSignals(store).optionSelectTs).toEqual([]);      // flushed on consent/on
   });
 });

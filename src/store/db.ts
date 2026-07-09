@@ -152,3 +152,32 @@ export function closeStore(store: Store): void {
   store.db.close();
   store._releaseLock();
 }
+
+/**
+ * Release this store's lock during a long blocking operation (e.g. the feedback
+ * popup) without closing the db, so other sessions are not blocked on it. No-op
+ * for ':memory:' stores (they hold no lock). Pair with reacquireStoreLock()
+ * before the next write.
+ */
+export function releaseStoreLock(store: Store): void {
+  store._releaseLock();
+  store._releaseLock = () => {};
+}
+
+/**
+ * Re-acquire the lock and reload the db from disk, so writes other sessions made
+ * while the lock was released are not clobbered by a stale in-memory image on the
+ * next save. No-op for ':memory:' (no lock, no disk).
+ */
+export async function reacquireStoreLock(store: Store): Promise<void> {
+  if (store.dbPath === ':memory:') return;
+  store._releaseLock = await acquireLock(store.dbPath + '.lock');
+  if (existsSync(store.dbPath)) {
+    const SQL   = await getSql();
+    const fresh = new SQL.Database(readFileSync(store.dbPath));
+    migrate(fresh);
+    applyIncrementalMigrations(fresh);
+    store.db.close();
+    store.db = fresh;
+  }
+}
