@@ -98,3 +98,16 @@ export function markFeedbackShown(store: Store, now: number = Date.now()): void 
   writeNum(store, KEY_LAST_SHOWN_AT, now);
   saveStore(store);
 }
+
+/**
+ * Dev seam (used by `nexpath feedback-test`): prime the cadence so the popup is
+ * eligible on the next Stop, without waiting for the real usage window. Sets
+ * active usage to the threshold, stamps last-activity to now, and clears the
+ * last-shown time so the repeat gate does not block. Not part of the normal flow.
+ */
+export function primeFeedbackEligible(store: Store, now: number = Date.now()): void {
+  writeNum(store, KEY_ACTIVE_MS, USAGE_THRESHOLD_MS);
+  writeNum(store, KEY_LAST_ACTIVITY_AT, now);
+  store.db.run('DELETE FROM config WHERE key = ?', [KEY_LAST_SHOWN_AT]);
+  saveStore(store);
+}

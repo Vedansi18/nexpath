@@ -25,6 +25,7 @@ import { registerStopCommand } from './commands/stop.js';
 import { registerWindsurfHookCommand } from './commands/windsurf-hook.js';
 import { registerOptimizeCommand } from './commands/optimize.js';
 import { registerStatusCommand } from './commands/status.js';
+import { registerFeedbackTestCommand } from './commands/feedback-test.js';
 import {
   telemetrySyncStatusAction,
   telemetrySyncEnableAction,
@@ -99,6 +100,10 @@ export function createProgram(): Command {
   // ── Status command ────────────────────────────────────────────────────────────
 
   registerStatusCommand(program);
+
+  // ── Dev command (hidden) ──────────────────────────────────────────────────────
+
+  registerFeedbackTestCommand(program);
 
   // ── Log command ───────────────────────────────────────────────────────────────
 

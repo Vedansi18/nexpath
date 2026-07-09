@@ -8,6 +8,7 @@ import {
   recordActivity,
   isFeedbackEligible,
   markFeedbackShown,
+  primeFeedbackEligible,
   readCadence,
   USAGE_THRESHOLD_MS,
   MIN_GAP_MS,
@@ -202,6 +203,22 @@ describe('isFeedbackEligible — live clamp (in-progress turn)', () => {
     const lastAct2 = readCadence(store).lastActivityAt as number;
     // The tail bridges the usage threshold, but the repeat gate has not elapsed → not eligible.
     expect(isFeedbackEligible(store, lastAct2 + IDLE_CAP_MS)).toBe(false);
+  });
+});
+
+describe('primeFeedbackEligible (dev seam)', () => {
+  it('makes the popup eligible immediately', () => {
+    expect(isFeedbackEligible(store, 1000)).toBe(false);
+    primeFeedbackEligible(store, 1000);
+    expect(readCadence(store).activeMs).toBe(USAGE_THRESHOLD_MS);
+    expect(isFeedbackEligible(store, 1000)).toBe(true);
+  });
+
+  it('clears last-shown so the repeat gate does not block after a prior popup', () => {
+    markFeedbackShown(store, 1000);                 // sets last-shown → repeat gate active
+    primeFeedbackEligible(store, 2000);
+    expect(readCadence(store).lastFeedbackAt).toBeNull();
+    expect(isFeedbackEligible(store, 2000)).toBe(true);
   });
 });
 
