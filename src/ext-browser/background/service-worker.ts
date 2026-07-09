@@ -4,6 +4,7 @@ import { SessionStateManager } from '../../core/session-state.js';
 import { shouldFireStage2, runStage2 } from '../../core/stage2.js';
 import { generatePinchLabel } from '../../core/decision/pinch.js';
 import { resolveDecisionContent } from '../../decision-session/options.js';
+import { generateOptionList } from '../../core/decision/options.js';
 import { composeWhyHelpBlock } from '../../decision-session/why-help-compose.js';
 import { profileToRegister } from '../../decision-session/register.js';
 import { IdbStorageAdapter } from '../adapters/storage-idb.js';
@@ -460,17 +461,56 @@ async function handlePromptSubmit(
     state.detectedLanguage,
   ).catch(() => content.pinchFallback);
 
+  // CLI parity (Option A): personalise the option titles + resolve their desc
+  // bodies via the SAME engine the CLI runs in stop.ts — vocabulary adaptation,
+  // feature-noun embedding, and R4/R5 runtime substitutions (which resolve the
+  // `{R4_OPEN}/{R5_INJECT}/{R4_CLOSE}` markers). Delegates through core/decision
+  // to the unchanged decision-session engine. Never throws; on any failure it
+  // returns null and we fall back to the static option text below.
+  const generatedOptions = await generateOptionList(
+    content,
+    state.profile ?? undefined,
+    state.detectedLanguage,
+    state.promptHistory,
+    {
+      flagType,
+      currentStage:          state.currentStage,
+      prevStage,
+      promptsInCurrentStage: state.promptsInCurrentStage,
+    },
+    llm,
+  ).catch(() => null);
+
   // CLI parity: send per-level option LISTS (each level may hold >1 option), the
   // question line, and the composed why-help block — everything the CLI popup shows.
   // Option ids stay `<level>-<index>` so the flat `options` view below (ids l1-0/
   // l2-0/l3-0, the shipped panel's selectors) is an exact subset of `levels`.
-  const mapLevel = (entries: typeof content.L1, tag: 'L1' | 'L2' | 'L3') =>
-    entries.map((e, i) => ({ id: `${tag.toLowerCase()}-${i}`, level: tag, title: e.option, body: e.descBase }));
+  //
+  // Title/body selection mirrors DecisionSession.wrapGen exactly: when the engine
+  // produced options, titles come from the generated list and each body comes from
+  // its resolved `generatedDescBases`, falling back per-index to the static
+  // desc-base; with no generated options, the static option text is used as before.
+  const mapLevel = (
+    staticEntries: typeof content.L1,
+    genTitles:     string[] | undefined,
+    genBodies:     string[] | undefined,
+    tag:           'L1' | 'L2' | 'L3',
+  ) => {
+    const lower  = tag.toLowerCase();
+    const titles = genTitles ?? staticEntries.map((e) => e.option);
+    return titles.map((title, i) => ({
+      id:    `${lower}-${i}`,
+      level: tag,
+      title,
+      body:  genBodies?.[i] ?? staticEntries[i]?.descBase ?? '',
+    }));
+  };
 
+  const gd = generatedOptions?.generatedDescBases;
   const levels = {
-    L1: mapLevel(content.L1, 'L1'),
-    L2: mapLevel(content.L2, 'L2'),
-    L3: mapLevel(content.L3, 'L3'),
+    L1: mapLevel(content.L1, generatedOptions?.l1, gd?.l1, 'L1'),
+    L2: mapLevel(content.L2, generatedOptions?.l2, gd?.l2, 'L2'),
+    L3: mapLevel(content.L3, generatedOptions?.l3, gd?.l3, 'L3'),
   };
 
   // Why-help register: use the engine's own profileToRegister — with no browser

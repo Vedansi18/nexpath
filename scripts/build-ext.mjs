@@ -21,6 +21,29 @@ const SRC  = path.join(ROOT, 'src', 'ext-browser');
 const watch = process.argv.includes('--watch');
 const targets = ['chrome', 'firefox'];
 
+/**
+ * Redirect the CLI's node:fs file-logger (src/logger.ts) to the browser-safe,
+ * console-backed stub. The engine modules (OptionGenerator + runtime-substitution
+ * deps) import the global `logger` directly; without this remap, bundling them
+ * into the service worker pulls node:fs/path/os and the build fails. Filename is
+ * unique in src (adapters use log-console/log-persistent), and we still verify the
+ * resolved path is exactly src/logger.ts so nothing else is caught.
+ */
+const ROOT_LOGGER    = path.join(ROOT, 'src', 'logger.ts');
+const BROWSER_LOGGER = path.join(SRC, 'adapters', 'logger-browser.ts');
+const browserLoggerPlugin = {
+  name: 'nexpath-browser-logger',
+  setup(build) {
+    build.onResolve({ filter: /logger(\.js|\.ts)?$/ }, (args) => {
+      if (args.kind === 'entry-point' || !args.importer) return null;
+      const abs = path
+        .resolve(path.dirname(args.importer), args.path)
+        .replace(/\.js$/, '.ts');
+      return abs === ROOT_LOGGER ? { path: BROWSER_LOGGER } : null;
+    });
+  },
+};
+
 /** Common esbuild options shared by every bundle entry point. */
 const commonOpts = {
   bundle:    true,
@@ -102,9 +125,9 @@ async function buildTarget(target) {
   const define = { 'globalThis.__NEXPATH_TARGET__': JSON.stringify(target) };
 
   /** @type {esbuild.BuildOptions} */
-  const contentScriptOpts = { ...commonOpts, format: 'iife', entryPoints: contentScriptEntries, outdir: outDir, define };
+  const contentScriptOpts = { ...commonOpts, format: 'iife', entryPoints: contentScriptEntries, outdir: outDir, define, plugins: [browserLoggerPlugin] };
   /** @type {esbuild.BuildOptions} */
-  const moduleOpts = { ...commonOpts, format: 'esm', entryPoints: moduleEntries, outdir: outDir, define };
+  const moduleOpts = { ...commonOpts, format: 'esm', entryPoints: moduleEntries, outdir: outDir, define, plugins: [browserLoggerPlugin] };
 
   if (watch) {
     const [csCtx, modCtx] = await Promise.all([
