@@ -19,6 +19,10 @@
 import OpenAI from 'openai';
 import type { RightGoodProfile } from '../classifier/right-good-aggregator.js';
 import { ANTI_PATTERN_KEYS } from '../classifier/maturity-level.js';
+import type { WorkStyleProfile } from '../classifier/work-style-traits.js';
+import { loadWorkStyleProfile } from '../classifier/work-style-traits.js';
+import { probeProject } from '../env/env-probe.js';
+import type { FactMap } from '../env/types.js';
 import { SHIPPED_CONTENT_TEMPLATES } from './content-template-tooling.js';
 import type { ContentTemplateRecord, LevelForm, MaturityLevel, TwoChannelCell } from './content-template-schema.js';
 import { validateContentTemplateRecord, resolveLevelForm } from './content-template-schema.js';
@@ -85,20 +89,46 @@ export interface RankedTopic {
 
 /**
  * A compact behavioural summary the ranking / generation stages reason over —
- * NEVER raw prompt text. Lists the practices the user reliably does well plus
- * their maturity level.
+ * NEVER raw prompt text. Reflects the detector output: the practices the user
+ * reliably does well (right/good), their maturity level, their work-style traits,
+ * and the dev-environment facts.
  */
-export function buildPatternSummary(rightGood: RightGoodProfile, maturityLevel: MaturityLevel): string {
+export function buildPatternSummary(
+  rightGood: RightGoodProfile,
+  maturityLevel: MaturityLevel,
+  workStyle?: WorkStyleProfile,
+  env?: FactMap,
+): string {
   const strong = Object.entries(rightGood)
     .filter(([, s]) => s.state === 'right_good')
     .sort((a, b) => b[1].score - a[1].score)
     .map(([key]) => key);
-  return [
+  const lines = [
     `Maturity level: ${maturityLevel} of 5.`,
     strong.length
       ? `Consistently good practices: ${strong.join(', ')}.`
       : 'No consistently distinctive good practices yet.',
-  ].join('\n');
+  ];
+
+  if (workStyle) {
+    const traits: string[] = [];
+    if (workStyle.decisionRhythm.value)   traits.push(`decision rhythm ${workStyle.decisionRhythm.value}`);
+    if (workStyle.explanationDepth.value) traits.push(`explanation ${workStyle.explanationDepth.value}`);
+    if (workStyle.abstractionLevel.value) traits.push(`abstraction ${workStyle.abstractionLevel.value}`);
+    if (traits.length) lines.push(`Work style: ${traits.join(', ')}.`);
+  }
+
+  if (env) {
+    const facts: string[] = [];
+    for (const [key, f] of Object.entries(env)) {
+      if (f.value === null) continue;
+      if (typeof f.value === 'boolean') { if (f.value) facts.push(key); }
+      else facts.push(`${key}: ${f.value}`);
+    }
+    if (facts.length) lines.push(`Dev environment: ${facts.join(', ')}.`);
+  }
+
+  return lines.join('\n');
 }
 
 // ── Selection persistence (one ranking per project; the lazy trigger reads it) ──
@@ -371,7 +401,17 @@ export async function runAutogenForFire(input: {
 }): Promise<void> {
   const { store, projectRoot, signalType, currentLevel, rightGood, client } = input;
   try {
-    const summary = buildPatternSummary(rightGood, currentLevel);
+    // Build the summary lazily (only when a ranking or generation actually runs) and
+    // defensively — a probe / work-style read failure just omits that part.
+    let cachedSummary: string | undefined;
+    const summary = (): string => {
+      if (cachedSummary !== undefined) return cachedSummary;
+      let workStyle: WorkStyleProfile | undefined;
+      let env: FactMap | undefined;
+      try { workStyle = loadWorkStyleProfile(store, projectRoot); } catch { /* best-effort */ }
+      try { env = probeProject(projectRoot).facts; } catch { /* best-effort */ }
+      return (cachedSummary = buildPatternSummary(rightGood, currentLevel, workStyle, env));
+    };
 
     // (1) one-time ranking. Case A (no history) records an empty selection with no
     // call; otherwise the ranking runs only within the budget — if it is exhausted,
@@ -380,7 +420,7 @@ export async function runAutogenForFire(input: {
       if (!hasHistory(rightGood)) {
         persistSelection(store, projectRoot, []);
       } else if (autogenBudgetAllows(store, projectRoot)) {
-        const ranked = await selectDistinctiveTopics({ rightGood, patternSummary: summary }, client);
+        const ranked = await selectDistinctiveTopics({ rightGood, patternSummary: summary() }, client);
         recordAutogenCall(store, projectRoot);
         persistSelection(store, projectRoot, applyCoverageFloor(ranked, true));
       }
@@ -392,7 +432,7 @@ export async function runAutogenForFire(input: {
       !getContentTemplate(store.db, projectRoot, signalType, 'autogen') &&
       autogenBudgetAllows(store, projectRoot)
     ) {
-      const stored = await generateAndStoreAutogenRecord(store, projectRoot, signalType, currentLevel, summary, client);
+      const stored = await generateAndStoreAutogenRecord(store, projectRoot, signalType, currentLevel, summary(), client);
       if (stored) recordAutogenCall(store, projectRoot);
     }
   } catch {

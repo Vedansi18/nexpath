@@ -203,6 +203,24 @@ describe('auto-template-generator — pattern summary + selection persistence', 
     expect(s).not.toContain('documentation'); // only reliably-good practices are summarized
   });
 
+  it('includes work-style traits and dev-environment facts when provided', () => {
+    const ws = {
+      decisionRhythm:   { value: 'deliberative', stable: true, observations: 5, sessions: 2, dormant: false },
+      explanationDepth: { value: null, stable: false, observations: 0, sessions: 0, dormant: true },
+      abstractionLevel: { value: 'architecture_first', stable: true, observations: 5, sessions: 2, dormant: false },
+    } as unknown as import('../classifier/work-style-traits.js').WorkStyleProfile;
+    const env = {
+      framework: { value: 'react' }, has_git: { value: true }, has_ci: { value: false }, unknown: { value: null },
+    } as unknown as import('../env/types.js').FactMap;
+    const s = buildPatternSummary({}, 3, ws, env);
+    expect(s).toContain('deliberative');          // work-style trait
+    expect(s).toContain('architecture_first');
+    expect(s).toContain('react');                 // env fact (string value)
+    expect(s).toContain('has_git');               // boolean true → key listed
+    expect(s).not.toContain('has_ci');            // boolean false → omitted
+    expect(s).not.toContain('unknown');           // null value → omitted
+  });
+
   it('reports no distinctive practices for an empty profile', () => {
     expect(buildPatternSummary({}, 2)).toContain('No consistently distinctive');
   });
