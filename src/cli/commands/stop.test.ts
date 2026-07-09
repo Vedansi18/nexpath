@@ -448,8 +448,9 @@ describe('runStop — generated options wiring', () => {
   it('serves options when the engine path yields nothing (deterministic fallback / decision session)', async () => {
     // engine + deterministic fallback are mocked to null here → the decision session serves content
     insertAdvisory(store);
-    const { TASK_REVIEW } = await import('../../decision-session/options.js');
-    const staticL1First = TASK_REVIEW.L1[0].option;
+    // runLevel echoes the selected value, so any option string exercises the serve path
+    // (engine + deterministic fallback are mocked null here; the static content sets are retired).
+    const staticL1First = 'A picked content prompt.';
     const result = await runStop(makePayload(), store, mockSelect(staticL1First));
     expect(result.outcome).toBe('blocked');
     if (result.outcome === 'blocked') {
@@ -461,19 +462,17 @@ describe('runStop — generated options wiring', () => {
     // Advisory L1/L2/L3 are null (Phase 4: auto no longer stores them)
     // stop.ts generates options live via generateOptionList — no crash expected
     insertAdvisory(store);
-    const { TASK_REVIEW } = await import('../../decision-session/options.js');
-    const result = await runStop(makePayload(), store, mockSelect(TASK_REVIEW.L1[0].option));
+    const result = await runStop(makePayload(), store, mockSelect('A picked content prompt.'));
     expect(['blocked', 'skipped']).toContain(result.outcome);
   });
 
-  it('degrades to static when the engine option-gen throws — the Stop hook never crashes (B3)', async () => {
+  it('degrades to the deterministic fallback when the engine option-gen throws — the Stop hook never crashes (B3)', async () => {
     // The fixture (absence:test_creation) is migrated (B3), so stop.ts runs the engine path.
-    // Force it to throw; stop.ts must CATCH it, fall back to the static generate path, and still
-    // complete the session — never reject/crash the hook.
+    // Force it to throw; stop.ts must CATCH it, fall back to the deterministic engine composition,
+    // and still complete the session — never reject/crash the hook.
     vi.mocked(generateFromEngine).mockRejectedValueOnce(new Error('engine api down'));
     insertAdvisory(store);
-    const { TASK_REVIEW } = await import('../../decision-session/options.js');
-    const picked = TASK_REVIEW.L1[0].option;
+    const picked = 'A picked content prompt.';
     const result = await runStop(makePayload(), store, mockSelect(picked));
     expect(result.outcome).toBe('blocked'); // caught → fallback → session ran → user picked
     if (result.outcome === 'blocked') expect(result.reason).toBe(picked);

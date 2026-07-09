@@ -5,13 +5,6 @@ import { resolveRegisterForms, composeAdvisory, type RecordCandidateLookup } fro
 import { reviewRecord, checkVoice, checkEscalation, checkL2Safeguard } from '../content-authoring-rules.js';
 import { checkTopicKeyword, checkOptionLengthBudget } from '../content-template-tooling.js';
 import { validateContentTemplateRecord, type ContentTemplateRecord } from '../content-template-schema.js';
-import {
-  ABSENCE_COMPREHENSION_BEGINNER, ABSENCE_NO_PUSHBACK_BEGINNER, ABSENCE_CONTEXT_LOSS_BEGINNER,
-  ABSENCE_DECISION_FATIGUE_PATTERN_BEGINNER, ABSENCE_WORK_RHYTHM_CHECK_BEGINNER,
-  ABSENCE_FOCUS_DRIFT_DETECTION_BEGINNER, ABSENCE_SESSION_LENGTH_CHECKPOINT_BEGINNER,
-  ABSENCE_PROGRESS_CONSOLIDATION_GAP_BEGINNER,
-} from './class5-session-quality.js';
-import type { DecisionContent } from '../options.js';
 
 function mockClient(reply: string): OpenAI {
   return { chat: { completions: { create: async () => ({ choices: [{ message: { content: reply } }] }) } } } as unknown as OpenAI;
@@ -30,17 +23,6 @@ const BEGINNER_KEYWORD: Record<string, string> = {
   ABSENCE_FOCUS_DRIFT_DETECTION: 'finish',
   ABSENCE_SESSION_LENGTH_CHECKPOINT: 'session',
   ABSENCE_PROGRESS_CONSOLIDATION_GAP: 'note',
-};
-
-const FROZEN_BEGINNER: Record<string, DecisionContent> = {
-  ABSENCE_COMPREHENSION: ABSENCE_COMPREHENSION_BEGINNER,
-  ABSENCE_NO_PUSHBACK: ABSENCE_NO_PUSHBACK_BEGINNER,
-  ABSENCE_CONTEXT_LOSS: ABSENCE_CONTEXT_LOSS_BEGINNER,
-  ABSENCE_DECISION_FATIGUE_PATTERN: ABSENCE_DECISION_FATIGUE_PATTERN_BEGINNER,
-  ABSENCE_WORK_RHYTHM_CHECK: ABSENCE_WORK_RHYTHM_CHECK_BEGINNER,
-  ABSENCE_FOCUS_DRIFT_DETECTION: ABSENCE_FOCUS_DRIFT_DETECTION_BEGINNER,
-  ABSENCE_SESSION_LENGTH_CHECKPOINT: ABSENCE_SESSION_LENGTH_CHECKPOINT_BEGINNER,
-  ABSENCE_PROGRESS_CONSOLIDATION_GAP: ABSENCE_PROGRESS_CONSOLIDATION_GAP_BEGINNER,
 };
 
 /** The two pure pacing/sequencing habits stay behavioural at col-5; the other six yield a file. */
@@ -71,13 +53,6 @@ describe('class-5 beginner overrides — per-variant T1-variant gates', () => {
       it('is a schema-valid, all-5-column, floored ladder', () => {
         expect(validateContentTemplateRecord(synth).ok).toBe(true);
         expect(Object.keys(synth.levelForms).map(Number).sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5]);
-      });
-
-      it('column 3 is the frozen beginner shipped text verbatim (option + a real frozen core line)', () => {
-        const frozen = FROZEN_BEGINNER[r.signalType];
-        const col3 = synth.levelForms[3]!.cell;
-        expect(col3.option).toBe(frozen.L1[0].option);
-        expect(frozen.L1[0].descBase).toContain(col3.whyDesc);
       });
 
       it('keeps its own beginner keyword in every option and every authored why-desc (col-3 frozen core exempt)', () => {

@@ -5,17 +5,6 @@ import {
   reviewRecord, checkVoice, checkL2Safeguard, checkEscalation, findVoiceViolations, findJargonViolations,
 } from '../content-authoring-rules.js';
 import { composeWhyDesc } from '../content-template-engine.js';
-import {
-  IDEA_TO_PRD, PRD_TO_ARCHITECTURE, ARCHITECTURE_TO_TASKS, TASK_REVIEW,
-  IMPLEMENTATION_TO_REVIEW, REVIEW_TO_RELEASE, RELEASE_TO_FEEDBACK,
-} from './class1-stage-transition.js';
-import type { DecisionContent } from '../options.js';
-
-/** signalType → the frozen DecisionContent whose L1[0] is the col-3 anchor. */
-const FROZEN: Record<string, DecisionContent> = {
-  IDEA_TO_PRD, PRD_TO_ARCHITECTURE, ARCHITECTURE_TO_TASKS, TASK_REVIEW,
-  IMPLEMENTATION_TO_REVIEW, REVIEW_TO_RELEASE, RELEASE_TO_FEEDBACK,
-};
 
 /** Per-column practice-richness weights (author-supplied; the escalation-monotonicity check). */
 const PRACTICE_WEIGHTS: Record<string, readonly number[]> = {
@@ -65,13 +54,6 @@ describe('class-1 records — per-record review gates', () => {
         expect(jargon).toEqual({});
         expect(review.headlineOnly.ok).toBe(true);
         expect(review.coverage.ok).toBe(true);
-      });
-
-      it('column 3 is the frozen text verbatim (option + a real frozen core line)', () => {
-        const frozen = FROZEN[r.signalType];
-        const col3 = r.levelForms[3]!.cell;
-        expect(col3.option).toBe(frozen.L1[0].option);              // verbatim anchor
-        expect(frozen.L1[0].descBase).toContain(col3.whyDesc);       // a real frozen core line, not invented
       });
 
       it('keeps its keyword in every column option, and in every AUTHORED why-desc (col-3 frozen core exempt)', () => {

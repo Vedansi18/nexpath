@@ -1,51 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { readFileSync, readdirSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
 import { applyRuntimeSubstitutionsAllLevels } from './runtime-substitutions.js';
 import type { DecisionContent } from './options.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-// The per-set DecisionContent now lives in the per-class content-template files.
-const CONTENT_DIR = join(__dirname, 'content-templates');
-
-// Pins the per-set descBaseEnabled outcome of the R1 opt-out evaluation:
-// every R3 sub-research's per-set opt-out section (R3.1-Sub1.7,
-// R3.2-Sub2.7, R3.3-Sub3.5, R3.4-Sub4.5, R3.5-Sub5.5, R3.6-Sub6.5,
-// R3.7-Sub7.5, R3.8-Sub8.5, R3.9-Sub9.5) concluded that ALL sets carry
-// desc-bases. None opt out. The DecisionContent.descBaseEnabled field
-// defaults to `true` when absent; this test guards against accidental
-// inclusion of `descBaseEnabled: false` that would silently disable a
-// set's desc-base pipeline against the locked decision.
-
-function readOptionsSources(): string {
-  return readdirSync(CONTENT_DIR)
-    .filter((f) => f.endsWith('.ts'))
-    .map((f) => readFileSync(join(CONTENT_DIR, f), 'utf-8'))
-    .join('\n');
-}
-
-describe('descBaseEnabled — per-set opt-out invariant', () => {
-  it('scans real content (guard against a vacuous pass)', () => {
-    // Every set carries desc-bases, so the content source must contain many.
-    expect((readOptionsSources().match(/descBase:/g) ?? []).length).toBeGreaterThan(200);
-  });
-
-  it('no set in the source has descBaseEnabled set to false', () => {
-    const src = readOptionsSources();
-    expect(src).not.toMatch(/descBaseEnabled:\s*false/);
-  });
-
-  it('any explicit descBaseEnabled in source uses the value true (rare; default is omit)', () => {
-    const src = readOptionsSources();
-    const explicitMatches = src.match(/descBaseEnabled:\s*(true|false)/g) ?? [];
-    for (const m of explicitMatches) {
-      expect(m).toMatch(/descBaseEnabled:\s*true/);
-    }
-  });
-});
+// The per-set opt-out SOURCE scan (every static DecisionContent set carried
+// desc-bases and none set `descBaseEnabled: false`) retired with the B11 cutover:
+// the static cascade is gone and the ContentTemplateRecord set carries no
+// descBaseEnabled field, so a record cannot silently disable its desc-base. The
+// capability itself is still honoured at runtime — pinned by the consumer test below.
 
 // The runtime consumer of the capability flag: the desc-base pipeline skips
 // processing when a set declares descBaseEnabled === false, and runs normally

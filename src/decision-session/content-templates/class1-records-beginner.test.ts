@@ -5,11 +5,6 @@ import { resolveRegisterForms, composeAdvisory, type RecordCandidateLookup } fro
 import { reviewRecord, checkVoice, checkEscalation, checkL2Safeguard } from '../content-authoring-rules.js';
 import { checkTopicKeyword, checkOptionLengthBudget } from '../content-template-tooling.js';
 import { validateContentTemplateRecord, type ContentTemplateRecord } from '../content-template-schema.js';
-import {
-  IDEA_TO_PRD_BEGINNER, PRD_TO_ARCHITECTURE_BEGINNER, ARCHITECTURE_TO_TASKS_BEGINNER,
-  IMPLEMENTATION_TO_REVIEW_BEGINNER, REVIEW_TO_RELEASE_BEGINNER, RELEASE_TO_FEEDBACK_BEGINNER,
-} from './class1-stage-transition.js';
-import type { DecisionContent } from '../options.js';
 
 /** Fake OpenAI returning a fixed weave (no real spend). */
 function mockClient(reply: string): OpenAI {
@@ -27,16 +22,6 @@ const BEGINNER_KEYWORD: Record<string, string> = {
   IMPLEMENTATION_TO_REVIEW: 'work',
   REVIEW_TO_RELEASE: 'ship',
   RELEASE_TO_FEEDBACK: 'break',
-};
-
-/** signalType → the frozen beginner DecisionContent whose L1[0] is the override's col-3 anchor. */
-const FROZEN_BEGINNER: Record<string, DecisionContent> = {
-  IDEA_TO_PRD: IDEA_TO_PRD_BEGINNER,
-  PRD_TO_ARCHITECTURE: PRD_TO_ARCHITECTURE_BEGINNER,
-  ARCHITECTURE_TO_TASKS: ARCHITECTURE_TO_TASKS_BEGINNER,
-  IMPLEMENTATION_TO_REVIEW: IMPLEMENTATION_TO_REVIEW_BEGINNER,
-  REVIEW_TO_RELEASE: REVIEW_TO_RELEASE_BEGINNER,
-  RELEASE_TO_FEEDBACK: RELEASE_TO_FEEDBACK_BEGINNER,
 };
 
 /** The class-1 signals that have a beginner override (TASK_REVIEW has no frozen beginner variant). */
@@ -66,13 +51,6 @@ describe('class-1 beginner overrides — per-variant T1-variant gates', () => {
       it('the override is a schema-valid, all-5-column, floored ladder', () => {
         expect(validateContentTemplateRecord(synth).ok).toBe(true);
         expect(Object.keys(synth.levelForms).map(Number).sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5]);
-      });
-
-      it('column 3 is the frozen beginner shipped text verbatim (option + a real frozen core line)', () => {
-        const frozen = FROZEN_BEGINNER[r.signalType];
-        const col3 = synth.levelForms[3]!.cell;
-        expect(col3.option).toBe(frozen.L1[0].option);
-        expect(frozen.L1[0].descBase).toContain(col3.whyDesc);
       });
 
       it('keeps its own beginner keyword in every option and every authored why-desc (col-3 frozen core exempt)', () => {

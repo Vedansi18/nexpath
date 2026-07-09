@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import type { UserProfile } from '../classifier/types.js';
-import { MIGRATED_SIGNALS, resolveContentSource, resolveSelection } from './selection-registry.js';
+import { MIGRATED_SIGNALS, resolveContentSource } from './selection-registry.js';
 import { SHIPPED_CONTENT_TEMPLATES } from './content-template-tooling.js';
 import { shippedRecordLookup, recordSignalTypeForFlag } from './content-template-source.js';
 import { resolveRecord } from './content-template-engine.js';
@@ -15,7 +14,6 @@ import { CLASS7_RECORDS } from './content-templates/class7-records.js';
 import { CLASS8_RECORDS } from './content-templates/class8-records.js';
 import { CLASS9_RECORDS } from './content-templates/class9-records.js';
 import { CLASS4_RECORDS } from './content-templates/class4-records.js';
-import { roleAbsenceContentExists } from './options.js';
 
 // §6.1 gate 1 (S2): the dual-source resolver decides, per signalType, whether an
 // advisory is served from the static DecisionContent set or the content-template
@@ -121,28 +119,7 @@ describe('§6.1 gate 1 — dual-source resolver + migration marker', () => {
   });
 });
 
-describe('B6 role-precedence — roleAbsenceContentExists (context_loss role variants)', () => {
-  const p = (nature: string, role: string | null) => ({ nature, role } as unknown as UserProfile);
-
-  it('true when the role has a static variant for the signal (founder/indie/pm × context_loss)', () => {
-    expect(roleAbsenceContentExists(p('hardcore_pro', 'founder'), 'context_loss')).toBe(true);
-    expect(roleAbsenceContentExists(p('hardcore_pro', 'indie_hacker'), 'context_loss')).toBe(true);
-    expect(roleAbsenceContentExists(p('hardcore_pro', 'pm'), 'context_loss')).toBe(true);
-  });
-
-  it('false with no role, a null profile, or a role whose map has no variant for the signal', () => {
-    expect(roleAbsenceContentExists(p('hardcore_pro', null), 'context_loss')).toBe(false);
-    expect(roleAbsenceContentExists(null, 'context_loss')).toBe(false);       // <5-prompt session: profile not computed yet
-    expect(roleAbsenceContentExists(undefined, 'context_loss')).toBe(false);
-    expect(roleAbsenceContentExists(p('hardcore_pro', 'founder'), 'test_creation')).toBe(false);
-  });
-
-  it('false for a beginner (role maps are gated off), even with a role set', () => {
-    expect(roleAbsenceContentExists(p('beginner', 'founder'), 'context_loss')).toBe(false);
-  });
-});
-
-describe('§6.1 gate 1 — dual-source coexistence (both sources resolve via the registry)', () => {
+describe('§6.1 gate 1 — content-template resolution via the registry', () => {
   const migrated = SHIPPED_CONTENT_TEMPLATES[0].signalType;
   const marker: ReadonlySet<string> = new Set([migrated]);
 
@@ -154,11 +131,10 @@ describe('§6.1 gate 1 — dual-source coexistence (both sources resolve via the
     expect(resolved!.record.signalType).toBe(migrated);
   });
 
-  it('an un-migrated signal resolves non-null DecisionContent from the static set, side by side', () => {
-    expect(resolveContentSource('context_loss', marker)).toBe('static');
-    const content = resolveSelection('implementation', 'absence:context_loss', { nature: 'hardcore_pro' } as unknown as UserProfile);
-    expect(content).toBeTruthy();
-    expect(content.signalType).toBe('ABSENCE_CONTEXT_LOSS');
+  it('an unknown signal takes the non-content-template default branch (nothing serves static after the cutover)', () => {
+    // The registry still has a 'static' default label for signals absent from the marker, but
+    // the static DecisionContent layer is gone — every shipped signal is migrated (marker == shipped).
+    expect(resolveContentSource('a_static', marker)).toBe('static');
   });
 });
 

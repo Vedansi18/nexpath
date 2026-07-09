@@ -7,13 +7,6 @@ import {
   runBuildGate, checkTopicKeyword, checkOptionLengthBudget, coverageMetric, SHIPPED_CONTENT_TEMPLATES,
 } from '../content-template-tooling.js';
 import { reviewRecord, checkVoice, checkEscalation, checkL2Safeguard } from '../content-authoring-rules.js';
-import {
-  ABSENCE_PHASE_TRANSITION, ABSENCE_IDEA_SCOPING, ABSENCE_IDEA_CONSTRAINT_CHECK, ABSENCE_IDEA_USER_DEFINITION,
-  ABSENCE_TASK_ORDERING, ABSENCE_TASK_SIZING, ABSENCE_TASK_DEFINITION_OF_DONE, ABSENCE_USER_FEEDBACK_REVIEW,
-  ABSENCE_ITERATION_PLANNING, ABSENCE_SCOPE_CREEP, ABSENCE_FEATURE_SCOPE, ABSENCE_IMPLEMENTATION_CHECKPOINT,
-  ABSENCE_SPEC_BEFORE_CODE, ABSENCE_INCREMENTAL_BUILD,
-} from './class6-planning-idea-task.js';
-import type { DecisionContent } from '../options.js';
 
 /** signalType → its own keyword (retained in every option + authored why-desc). */
 const KEYWORDS: Record<string, string> = {
@@ -31,14 +24,6 @@ const KEYWORDS: Record<string, string> = {
   ABSENCE_IMPLEMENTATION_CHECKPOINT: 'checkpoint',
   ABSENCE_SPEC_BEFORE_CODE: 'spec',
   ABSENCE_INCREMENTAL_BUILD: 'increment',
-};
-
-/** signalType → the frozen DecisionContent whose L1[0] is the col-3 anchor (the formal variant). */
-const FROZEN: Record<string, DecisionContent> = {
-  ABSENCE_PHASE_TRANSITION, ABSENCE_IDEA_SCOPING, ABSENCE_IDEA_CONSTRAINT_CHECK, ABSENCE_IDEA_USER_DEFINITION,
-  ABSENCE_TASK_ORDERING, ABSENCE_TASK_SIZING, ABSENCE_TASK_DEFINITION_OF_DONE, ABSENCE_USER_FEEDBACK_REVIEW,
-  ABSENCE_ITERATION_PLANNING, ABSENCE_SCOPE_CREEP, ABSENCE_FEATURE_SCOPE, ABSENCE_IMPLEMENTATION_CHECKPOINT,
-  ABSENCE_SPEC_BEFORE_CODE, ABSENCE_INCREMENTAL_BUILD,
 };
 
 /** Author-declared practice-richness weights (escalation input; named-practice judgment is human-review). */
@@ -79,13 +64,6 @@ describe('class-6 — per-record full-depth gates', () => {
         expect(jargon).toEqual({});
         expect(review.headlineOnly.ok).toBe(true);
         expect(review.coverage.ok).toBe(true);
-      });
-
-      it('column 3 is the frozen shipped text verbatim (option + a real frozen core line)', () => {
-        const frozen = FROZEN[r.signalType];
-        const col3 = r.levelForms[3]!.cell;
-        expect(col3.option).toBe(frozen.L1[0].option);
-        expect(frozen.L1[0].descBase).toContain(col3.whyDesc);
       });
 
       it('keeps its keyword in every option and every authored why-desc (col-3 frozen core exempt)', () => {

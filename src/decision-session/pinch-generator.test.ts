@@ -9,16 +9,18 @@ import {
   PINCH_MAX_CHARS,
   PINCH_MIN_CHARS,
 } from './PinchGenerator.js';
-import {
-  IDEA_TO_PRD,
-  PRD_TO_ARCHITECTURE,
-  ARCHITECTURE_TO_TASKS,
-  TASK_REVIEW,
-  IMPLEMENTATION_TO_REVIEW,
-  REVIEW_TO_RELEASE,
-  ABSENCE_TEST_CREATION,
-} from './options.js';
+import { pinchSignalTypeForFlag } from './content-template-source.js';
+import { resolvePinchFields } from './signal-pinch-fields.js';
+import { selectionRegister } from './selection-registry.js';
 import type OpenAI from 'openai';
+
+// The record/pinch-fields fallback generatePinchLabel uses when the LLM fails — mirrors
+// production exactly: pinchSignalTypeForFlag(flag, stage) → resolvePinchFields(signal,
+// register).pinchFallback. (The static DecisionContent pinchFallback fields were retired at B11.)
+function expectedFallback(flagType: string, stage: string): string | undefined {
+  const sig = pinchSignalTypeForFlag(flagType, stage);
+  return sig ? resolvePinchFields(sig, selectionRegister(undefined))?.pinchFallback : undefined;
+}
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -202,18 +204,18 @@ describe('generatePinchLabel', () => {
     const result = await generatePinchLabel('implementation', 'stage_transition', client);
     // implementation stage_transition → resolves to TASK_REVIEW fallback (no direct TRANSITION_CONTENT for implementation)
     // Actually 'implementation' is not in TRANSITION_CONTENT → falls to TASK_REVIEW
-    expect(result).toBe(TASK_REVIEW.pinchFallback);
+    expect(result).toBe(expectedFallback('stage_transition', 'implementation'));
   });
 
   it('falls back to pinchFallback when LLM returns too-long text', async () => {
     const client = makeMockClient('This is a very long label that is way too verbose for a pinch');
     const result = await generatePinchLabel('implementation', 'stage_transition', client);
-    expect(result).toBe(TASK_REVIEW.pinchFallback);
+    expect(result).toBe(expectedFallback('stage_transition', 'implementation'));
   });
 
   it('falls back to pinchFallback when API call throws', async () => {
     const result = await generatePinchLabel('implementation', 'stage_transition', makeErrorClient());
-    expect(result).toBe(TASK_REVIEW.pinchFallback);
+    expect(result).toBe(expectedFallback('stage_transition', 'implementation'));
   });
 
   it('never throws — returns a string even on API failure', async () => {
@@ -222,32 +224,32 @@ describe('generatePinchLabel', () => {
 
   it('uses IDEA_TO_PRD fallback for prd stage transition', async () => {
     const result = await generatePinchLabel('prd', 'stage_transition', makeErrorClient());
-    expect(result).toBe(IDEA_TO_PRD.pinchFallback);
+    expect(result).toBe(expectedFallback('stage_transition', 'prd'));
   });
 
   it('uses PRD_TO_ARCHITECTURE fallback for architecture stage transition', async () => {
     const result = await generatePinchLabel('architecture', 'stage_transition', makeErrorClient());
-    expect(result).toBe(PRD_TO_ARCHITECTURE.pinchFallback);
+    expect(result).toBe(expectedFallback('stage_transition', 'architecture'));
   });
 
   it('uses REVIEW_TO_RELEASE fallback for release stage transition', async () => {
     const result = await generatePinchLabel('release', 'stage_transition', makeErrorClient());
-    expect(result).toBe(REVIEW_TO_RELEASE.pinchFallback);
+    expect(result).toBe(expectedFallback('stage_transition', 'release'));
   });
 
   it('uses ABSENCE_TEST_CREATION fallback for absence:test_creation', async () => {
     const result = await generatePinchLabel('implementation', 'absence:test_creation', makeErrorClient());
-    expect(result).toBe(ABSENCE_TEST_CREATION.pinchFallback);
+    expect(result).toBe(expectedFallback('absence:test_creation', 'implementation'));
   });
 
   it('uses ARCHITECTURE_TO_TASKS fallback for task_breakdown stage transition', async () => {
     const result = await generatePinchLabel('task_breakdown', 'stage_transition', makeErrorClient());
-    expect(result).toBe(ARCHITECTURE_TO_TASKS.pinchFallback);
+    expect(result).toBe(expectedFallback('stage_transition', 'task_breakdown'));
   });
 
   it('uses IMPLEMENTATION_TO_REVIEW fallback for review_testing stage transition', async () => {
     const result = await generatePinchLabel('review_testing', 'stage_transition', makeErrorClient());
-    expect(result).toBe(IMPLEMENTATION_TO_REVIEW.pinchFallback);
+    expect(result).toBe(expectedFallback('stage_transition', 'review_testing'));
   });
 
   it('passes correct model, temperature, and timeout to the OpenAI API', async () => {

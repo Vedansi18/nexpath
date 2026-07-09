@@ -10,17 +10,6 @@ import {
   reviewRecord, checkVoice, checkEscalation, checkL2Safeguard, findVoiceViolations, findJargonViolations,
 } from '../content-authoring-rules.js';
 import { composeWhyDesc } from '../content-template-engine.js';
-import {
-  ABSENCE_FEATURE_COMPLETION_CHECK_CASUAL, ABSENCE_FINISHING_LINE_AWARENESS_CASUAL, ABSENCE_POLISH_VS_FUNCTION_CASUAL,
-  ABSENCE_MVP_SCOPE_DISCIPLINE_CASUAL, ABSENCE_IDEA_TO_SPEC_BRIDGE_CASUAL, ABSENCE_DEMO_VS_PRODUCT_CASUAL,
-  ABSENCE_USER_JOURNEY_CHECK_CASUAL, ABSENCE_TECHNICAL_SPIKE_TREATMENT_CASUAL, ABSENCE_DEPENDENCY_ADVENTURE_CASUAL,
-  ABSENCE_RESTART_IMPULSE_CHECK_CASUAL, ABSENCE_CREATIVE_VS_CORE_RATIO_CASUAL,
-  ABSENCE_ERROR_UNDERSTANDING_BEGINNER, ABSENCE_REQUIREMENT_CLARITY_BEGINNER, ABSENCE_COPY_PASTE_AWARENESS_BEGINNER,
-  ABSENCE_DEBUGGING_OBSERVATION_BEGINNER, ABSENCE_LEARNING_CONSOLIDATION_BEGINNER, ABSENCE_SIMPLE_SOLUTION_FIRST_BEGINNER,
-  ABSENCE_SINGLE_RESPONSIBILITY_PROMPTING_BEGINNER, ABSENCE_ROLLBACK_AWARENESS_BEGINNER,
-  ABSENCE_BUILD_VS_UNDERSTAND_RATIO_BEGINNER,
-} from './class7-cool-geek-vibe-coder.js';
-import type { DecisionContent } from '../options.js';
 
 /** signalType → its own keyword (retained in every option + authored why-desc). */
 const KEYWORDS: Record<string, string> = {
@@ -44,30 +33,6 @@ const KEYWORDS: Record<string, string> = {
   ABSENCE_SINGLE_RESPONSIBILITY_PROMPTING: 'message',
   ABSENCE_ROLLBACK_AWARENESS: 'commit',
   ABSENCE_BUILD_VS_UNDERSTAND_RATIO: 'understand',
-};
-
-/** signalType → the frozen DecisionContent whose L1[0] is the col-3 anchor (the single-register variant). */
-const FROZEN: Record<string, DecisionContent> = {
-  ABSENCE_FEATURE_COMPLETION_CHECK: ABSENCE_FEATURE_COMPLETION_CHECK_CASUAL,
-  ABSENCE_FINISHING_LINE_AWARENESS: ABSENCE_FINISHING_LINE_AWARENESS_CASUAL,
-  ABSENCE_POLISH_VS_FUNCTION: ABSENCE_POLISH_VS_FUNCTION_CASUAL,
-  ABSENCE_MVP_SCOPE_DISCIPLINE: ABSENCE_MVP_SCOPE_DISCIPLINE_CASUAL,
-  ABSENCE_IDEA_TO_SPEC_BRIDGE: ABSENCE_IDEA_TO_SPEC_BRIDGE_CASUAL,
-  ABSENCE_DEMO_VS_PRODUCT: ABSENCE_DEMO_VS_PRODUCT_CASUAL,
-  ABSENCE_USER_JOURNEY_CHECK: ABSENCE_USER_JOURNEY_CHECK_CASUAL,
-  ABSENCE_TECHNICAL_SPIKE_TREATMENT: ABSENCE_TECHNICAL_SPIKE_TREATMENT_CASUAL,
-  ABSENCE_DEPENDENCY_ADVENTURE: ABSENCE_DEPENDENCY_ADVENTURE_CASUAL,
-  ABSENCE_RESTART_IMPULSE_CHECK: ABSENCE_RESTART_IMPULSE_CHECK_CASUAL,
-  ABSENCE_CREATIVE_VS_CORE_RATIO: ABSENCE_CREATIVE_VS_CORE_RATIO_CASUAL,
-  ABSENCE_ERROR_UNDERSTANDING: ABSENCE_ERROR_UNDERSTANDING_BEGINNER,
-  ABSENCE_REQUIREMENT_CLARITY: ABSENCE_REQUIREMENT_CLARITY_BEGINNER,
-  ABSENCE_COPY_PASTE_AWARENESS: ABSENCE_COPY_PASTE_AWARENESS_BEGINNER,
-  ABSENCE_DEBUGGING_OBSERVATION: ABSENCE_DEBUGGING_OBSERVATION_BEGINNER,
-  ABSENCE_LEARNING_CONSOLIDATION: ABSENCE_LEARNING_CONSOLIDATION_BEGINNER,
-  ABSENCE_SIMPLE_SOLUTION_FIRST: ABSENCE_SIMPLE_SOLUTION_FIRST_BEGINNER,
-  ABSENCE_SINGLE_RESPONSIBILITY_PROMPTING: ABSENCE_SINGLE_RESPONSIBILITY_PROMPTING_BEGINNER,
-  ABSENCE_ROLLBACK_AWARENESS: ABSENCE_ROLLBACK_AWARENESS_BEGINNER,
-  ABSENCE_BUILD_VS_UNDERSTAND_RATIO: ABSENCE_BUILD_VS_UNDERSTAND_RATIO_BEGINNER,
 };
 
 /** Author-declared practice-richness weights (escalation input; named-practice judgment is human-review). */
@@ -123,13 +88,6 @@ describe('class-7 — per-record full-depth gates', () => {
         expect(jargon).toEqual({});
         expect(review.headlineOnly.ok).toBe(true);
         expect(review.coverage.ok).toBe(true);
-      });
-
-      it('column 3 is the frozen shipped text verbatim (option + a real frozen core line)', () => {
-        const frozen = FROZEN[r.signalType];
-        const col3 = r.levelForms[3]!.cell;
-        expect(col3.option).toBe(frozen.L1[0].option);
-        expect(frozen.L1[0].descBase).toContain(col3.whyDesc);
       });
 
       it('keeps its keyword in every option and every authored why-desc (col-3 frozen core exempt)', () => {
@@ -225,31 +183,6 @@ describe('class-7 — sensitive-action safeguard (only the dependency-add signal
     const others = CLASS7_RECORDS.filter((r) => !exempt.has(r.signalType));
     expect(others.filter((r) => r.l2SafeguardRequired).map((r) => r.signalType)).toEqual([]);
     expect(others.filter((r) => !checkL2Safeguard(r).ok).map((r) => r.signalType)).toEqual([]);
-  });
-});
-
-describe('class-7 — sensitivity parity vs the frozen source of truth', () => {
-  // The frozen DecisionContent is the authoritative "intrinsically sensitive" marker.
-  // Every signal the frozen source flags MUST have its content-template record flagged
-  // too — catches a frozen-sensitive signal authored without the flag (a silent hole).
-  const HERE = dirname(fileURLToPath(import.meta.url));
-  function frozenFlaggedSignals(): Set<string> {
-    const src = readFileSync(join(HERE, 'class7-cool-geek-vibe-coder.ts'), 'utf-8');
-    const blocks = src.split(/export const \w+: DecisionContent =/).slice(1);
-    const flagged = new Set<string>();
-    for (const b of blocks) {
-      const body = b.split('export const')[0];
-      const m = body.match(/signalType:\s*"(\w+)"/);
-      if (m && /l2SafeguardRequired:\s*true/.test(body)) flagged.add(m[1]);
-    }
-    return flagged;
-  }
-
-  it('every frozen-flagged class-7 signal has its content-template record flagged', () => {
-    const frozenFlagged = frozenFlaggedSignals();
-    expect(frozenFlagged.size).toBeGreaterThan(0); // not vacuous
-    const recordFlagged = new Set(CLASS7_RECORDS.filter((r) => r.l2SafeguardRequired).map((r) => r.signalType));
-    expect([...frozenFlagged].filter((s) => !recordFlagged.has(s))).toEqual([]);
   });
 });
 

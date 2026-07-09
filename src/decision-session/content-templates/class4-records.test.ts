@@ -12,12 +12,6 @@ import {
   reviewRecord, checkVoice, checkEscalation, checkL2Safeguard, findVoiceViolations, findJargonViolations,
 } from '../content-authoring-rules.js';
 import { composeWhyDesc } from '../content-template-engine.js';
-import {
-  ABSENCE_OBSERVABILITY, ABSENCE_ROLLBACK_PLANNING, ABSENCE_DEPLOYMENT_PLANNING, ABSENCE_DEPENDENCY_MGMT,
-  ABSENCE_ENV_AND_SECRETS, ABSENCE_CI_PIPELINE, ABSENCE_RATE_LIMITING,
-  ABSENCE_DEPENDENCY_AUDIT_GAP_CASUAL,
-} from './class4-release-observability-infra.js';
-import type { DecisionContent } from '../options.js';
 
 /** signalType → its own keyword (retained in every option + authored why-desc). */
 const KEYWORDS: Record<string, string> = {
@@ -29,13 +23,6 @@ const KEYWORDS: Record<string, string> = {
   ABSENCE_CI_PIPELINE: 'test',
   ABSENCE_RATE_LIMITING: 'limit',
   ABSENCE_DEPENDENCY_AUDIT_GAP: 'dependenc',
-};
-
-/** signalType → the frozen DecisionContent whose L1[0] is the col-3 anchor. */
-const FROZEN: Record<string, DecisionContent> = {
-  ABSENCE_OBSERVABILITY, ABSENCE_ROLLBACK_PLANNING, ABSENCE_DEPLOYMENT_PLANNING, ABSENCE_DEPENDENCY_MGMT,
-  ABSENCE_ENV_AND_SECRETS, ABSENCE_CI_PIPELINE, ABSENCE_RATE_LIMITING,
-  ABSENCE_DEPENDENCY_AUDIT_GAP: ABSENCE_DEPENDENCY_AUDIT_GAP_CASUAL,
 };
 
 /** Author-declared practice-richness weights (the escalation input; named-practice judgment is human-review). */
@@ -94,13 +81,6 @@ describe('class-4 — per-record full-depth gates', () => {
         expect(jargon).toEqual({});
         expect(review.headlineOnly.ok).toBe(true);
         expect(review.coverage.ok).toBe(true);
-      });
-
-      it('column 3 is the frozen shipped text verbatim (option + a real frozen core line)', () => {
-        const frozen = FROZEN[r.signalType];
-        const col3 = r.levelForms[3]!.cell;
-        expect(col3.option).toBe(frozen.L1[0].option);
-        expect(frozen.L1[0].descBase).toContain(col3.whyDesc);
       });
 
       it('keeps its keyword in every option and every authored why-desc (col-3 frozen core exempt)', () => {
@@ -172,33 +152,6 @@ describe('class-4 — sensitive-action safeguard (every record is intrinsically 
       });
     });
   }
-});
-
-describe('class-4 — sensitivity parity vs the frozen source of truth', () => {
-  // The frozen DecisionContent is the authoritative "intrinsically sensitive" marker
-  // (the l2SafeguardRequired flag). Every signal the frozen source flags MUST have its
-  // content-template record flagged too — catches a frozen-sensitive signal whose
-  // record was authored without the flag (a silent safeguard hole). The records may
-  // flag MORE than the frozen set (utmost-delicacy extras, e.g. dependency-audit-gap).
-  const HERE = dirname(fileURLToPath(import.meta.url));
-  function frozenFlaggedSignals(): Set<string> {
-    const src = readFileSync(join(HERE, 'class4-release-observability-infra.ts'), 'utf-8');
-    const blocks = src.split(/export const \w+: DecisionContent =/).slice(1);
-    const flagged = new Set<string>();
-    for (const b of blocks) {
-      const body = b.split('export const')[0]; // this block only, not the next
-      const m = body.match(/signalType:\s*"(\w+)"/);
-      if (m && /l2SafeguardRequired:\s*true/.test(body)) flagged.add(m[1]);
-    }
-    return flagged;
-  }
-
-  it('every frozen-flagged class-4 signal has its content-template record flagged', () => {
-    const frozenFlagged = frozenFlaggedSignals();
-    expect(frozenFlagged.size).toBeGreaterThan(0); // not vacuous: the frozen source must flag some
-    const recordFlagged = new Set(CLASS4_RECORDS.filter((r) => r.l2SafeguardRequired).map((r) => r.signalType));
-    expect([...frozenFlagged].filter((s) => !recordFlagged.has(s))).toEqual([]);
-  });
 });
 
 describe('class-4 — record↔runtime boundary (stored cells are bare core lines)', () => {
