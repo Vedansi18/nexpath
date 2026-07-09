@@ -15,11 +15,10 @@ import { CLASS8_RECORDS } from './content-templates/class8-records.js';
 import { CLASS9_RECORDS } from './content-templates/class9-records.js';
 import { CLASS4_RECORDS } from './content-templates/class4-records.js';
 
-// §6.1 gate 1 (S2): the dual-source resolver decides, per signalType, whether an
-// advisory is served from the static DecisionContent set or the content-template
-// engine. The marker holds the migrated signalTypes (the 6 §4.E2 signals + the
-// Group-B classes migrated so far); every un-migrated signal stays static and
-// cascade parity is preserved. Per-set migration flips one signal at a time (S8).
+// The content-source resolver decides, per signalType, whether an advisory is served
+// from the content-template engine or a 'static' no-op source. Every shipped signal is
+// migrated (the marker matches the shipped record set), so the engine is the sole
+// content source; a signalType with no shipped record resolves to the 'static' no-op.
 
 describe('§6.1 gate 1 — dual-source resolver + migration marker', () => {
   const NEW_E2 = [
@@ -141,8 +140,8 @@ describe('§6.1 gate 1 — content-template resolution via the registry', () => 
 describe('stop.ts override-resolution chain — the 6 migrated absence flags resolve every override', () => {
   // This is the exact chain stop.ts walks per migrated advisory: advisory.flagType →
   // recordSignalTypeForFlag → (migrated? record.question / record.pinchFallback /
-  // getWhyHelpForSignalType). A break anywhere silently falls the popup back to the generic
-  // resolveDecisionContent content — so assert the whole chain end-to-end, per flag.
+  // getWhyHelpForSignalType). A break anywhere silently drops the record's own question /
+  // pinch / why-help — so assert the whole chain end-to-end, per flag.
   const CASES: Array<[flag: string, whyHelpClass: keyof typeof WHY_HELP_PER_CLASS]> = [
     ['absence:secret_in_prompt',               'class_security_safety'],
     ['absence:no_version_control',             'class_security_safety'],
