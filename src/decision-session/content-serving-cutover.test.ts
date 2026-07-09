@@ -13,6 +13,9 @@
 // lives in single-dispatch-lint.test.ts.
 
 import { describe, it, expect } from 'vitest';
+import { readFileSync, readdirSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 import type OpenAI from 'openai';
 import { SHIPPED_CONTENT_TEMPLATES } from './content-template-tooling.js';
 import { generateFromEngine, composeDeterministicOptions } from './engine-option-generator.js';
@@ -115,5 +118,30 @@ describe('cutover sweep — completeness (the engine is the sole content source)
     for (const rec of SHIPPED_CONTENT_TEMPLATES) {
       expect(resolveContentSource(rec.signalType), `${rec.signalType} is engine-served`).toBe('content-template');
     }
+  });
+});
+
+describe('cutover sweep — no static DecisionContent data survives in the content source', () => {
+  // The §1052 grep-invariant, source-side: no production file declares a static
+  // DecisionContent map (`Record<..., DecisionContent>`) or a per-signal `const X:
+  // DecisionContent = {...}` cascade any more. Module-level only — the DecisionContent
+  // TYPE stays, and DecisionSession builds an `effective: DecisionContent` at runtime
+  // (indented, inside a function), which is NOT a stored static map.
+  const HERE = dirname(fileURLToPath(import.meta.url));
+  const STATIC_MAP_OR_CONST = /^(?:export\s+)?const\s+\w+\s*:\s*(?:DecisionContent\b|Record<[^=]*DecisionContent)/m;
+
+  function nonTestSources(dir: string): string[] {
+    return readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+      const p = join(dir, e.name);
+      if (e.isDirectory()) return nonTestSources(p);
+      return e.isFile() && e.name.endsWith('.ts') && !e.name.endsWith('.test.ts') ? [p] : [];
+    });
+  }
+
+  it('no production file under decision-session declares a static DecisionContent map or per-signal const', () => {
+    const sources = nonTestSources(HERE);
+    expect(sources.length).toBeGreaterThan(20); // not vacuous — the layer is scanned
+    const offenders = sources.filter((f) => STATIC_MAP_OR_CONST.test(readFileSync(f, 'utf-8')));
+    expect(offenders.map((f) => f.slice(HERE.length + 1))).toEqual([]);
   });
 });
