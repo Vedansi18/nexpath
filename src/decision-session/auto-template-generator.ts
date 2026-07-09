@@ -26,6 +26,7 @@ import { sanitizePromptDerivedValue } from './content-template-grounding.js';
 import { SCHEMA_VERSION } from '../store/schema.js';
 import { upsertContentTemplate, getContentTemplate } from '../store/content-templates.js';
 import { getConfig, isConfigSet, setConfig } from '../store/config.js';
+import { autogenBudgetAllows, recordAutogenCall } from './autogen-budget.js';
 import type { Store } from '../store/db.js';
 
 /** The full set of personalizable topics — every shipped record's signalType. */
@@ -368,19 +369,27 @@ export async function runAutogenForFire(input: {
   try {
     const summary = buildPatternSummary(rightGood, currentLevel);
 
-    // (1) one-time ranking — skip the LLM call entirely for a no-history project.
+    // (1) one-time ranking. Case A (no history) records an empty selection with no
+    // call; otherwise the ranking runs only within the budget — if it is exhausted,
+    // the selection is left uncomputed so it retries when the budget resets.
     if (!selectionComputed(store, projectRoot)) {
-      const history = hasHistory(rightGood);
-      const ranked = history ? await selectDistinctiveTopics({ rightGood, patternSummary: summary }, client) : [];
-      persistSelection(store, projectRoot, applyCoverageFloor(ranked, history));
+      if (!hasHistory(rightGood)) {
+        persistSelection(store, projectRoot, []);
+      } else if (autogenBudgetAllows(store, projectRoot)) {
+        const ranked = await selectDistinctiveTopics({ rightGood, patternSummary: summary }, client);
+        recordAutogenCall(store, projectRoot);
+        persistSelection(store, projectRoot, applyCoverageFloor(ranked, true));
+      }
     }
 
-    // (2) lazy first-fire generation for a selected topic with no record yet.
+    // (2) lazy first-fire generation for a selected topic with no record yet — gated.
     if (
       isTopicSelected(store, projectRoot, signalType) &&
-      !getContentTemplate(store.db, projectRoot, signalType, 'autogen')
+      !getContentTemplate(store.db, projectRoot, signalType, 'autogen') &&
+      autogenBudgetAllows(store, projectRoot)
     ) {
-      await generateAndStoreAutogenRecord(store, projectRoot, signalType, currentLevel, summary, client);
+      const stored = await generateAndStoreAutogenRecord(store, projectRoot, signalType, currentLevel, summary, client);
+      if (stored) recordAutogenCall(store, projectRoot);
     }
   } catch {
     // best-effort — the per-user loop must never break the fire path

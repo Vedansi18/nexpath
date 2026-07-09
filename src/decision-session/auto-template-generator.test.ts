@@ -21,6 +21,7 @@ import {
 import { validateContentTemplateRecord } from './content-template-schema.js';
 import { openStore } from '../store/db.js';
 import { getContentTemplate } from '../store/content-templates.js';
+import { setConfig } from '../store/config.js';
 
 function rg(state: RightGoodState): RightGoodSignal {
   return { score: 0.5, state, stability: { sessions: 2, occurrences: 5, stable: true }, lastUpdated: 1 };
@@ -245,6 +246,15 @@ describe('auto-template-generator — live orchestration (runAutogenForFire)', (
     expect(readSelection(store, '/p')).toEqual([]);
     expect(getContentTemplate(store.db, '/p', 'ABSENCE_TEST_CREATION', 'autogen')).toBeNull();
     expect(calls).toBe(0);
+    store.db.close();
+  });
+
+  it('spends nothing when the budget is exhausted — selection stays uncomputed to retry later', async () => {
+    const store = await openStore(':memory:');
+    setConfig(store, 'autogen_call_budget', '0'); // no calls allowed this month
+    await runAutogenForFire({ store, projectRoot: '/p', signalType: 'ABSENCE_TEST_CREATION', currentLevel: 3, rightGood: profile, client: autogenMockClient() });
+    expect(selectionComputed(store, '/p')).toBe(false); // budget-blocked → not computed → retries
+    expect(getContentTemplate(store.db, '/p', 'ABSENCE_TEST_CREATION', 'autogen')).toBeNull();
     store.db.close();
   });
 });
