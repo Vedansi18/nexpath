@@ -1,22 +1,17 @@
 /**
- * Single-dispatch param-keyed selection registry for decision-session content.
+ * Single-dispatch register + content-source resolution for decision-session content.
  *
- * Re-expresses the hand-coded selection cascade in `options.ts` (`selectAbsenceMap`
- * / `selectRoleAbsenceMap` / `isVibe` / `selectNonBeginnerVariant` +
- * `resolveDecisionContent`) as ONE map per axis chained by a single dispatch —
- * every case explicit, no scattered boolean-flag branches. Multi-axis resolution
- * is chained single-axis lookups, not tuple-widened keys.
+ * The one dispatch point for a signal's content SOURCE — every case explicit, no
+ * scattered boolean-flag branches. The content-template engine + the per-signal
+ * records are the whole content layer, so this registry is wired live: the Stop hook
+ * resolves a signal's source here, then serves it from the engine.
  *
- * It resolves the SAME `DecisionContent` as `resolveDecisionContent` (kept in
- * lock-step with it) and reuses the existing content maps verbatim — no new
- * content. Not yet wired into the live render path.
- *
- * Register note: this derives the register LOCALLY rather than via
+ * Register note: `selectionRegister` derives the register LOCALLY rather than via
  * `register.ts::profileToRegister`, because the two disagree on `cool_geek`:
- * `profileToRegister` maps `cool_geek → beginner`, but the content cascade treats
- * only `nature === 'beginner'` as beginner/vibe (so `cool_geek → casual`). Matching
- * the existing content output is the binding requirement here; the divergence is a
- * known inconsistency to reconcile later.
+ * `profileToRegister` maps `cool_geek → beginner`, but only `nature === 'beginner'`
+ * is treated as beginner/vibe here (so `cool_geek → casual`). The engine's register
+ * serving depends on this mapping; the divergence is a known inconsistency to
+ * reconcile later.
  */
 
 import type { UserProfile } from '../classifier/types.js';
@@ -38,30 +33,21 @@ export function selectionRegister(nature: UserProfile['nature'] | null | undefin
   }
 }
 
-// ── Dual-source resolver + migration marker (§6.1 gate 1 / S2) ──────────────────
+// ── Content-source resolver + serving marker ───────────────────────────────────
 //
-// Per-signalType content SOURCE. A *migrated* signalType is served from the
-// content-template engine; every other signalType is served from the static
-// `DecisionContent` set (via `resolveSelection`). Both sources feed the SAME
-// runtime — this is the load-bearing Phase-1 ↔ Phase-2 coexistence mechanism:
-// while the registry is live, an un-migrated static set and a migrated
-// content-template both resolve through the ONE dispatch point (S7).
-//
-// The marker started EMPTY (ship-dark: every signalType resolved 'static',
-// preserving EXACT cascade parity). Migrated signalTypes are added here — the 6
-// §4.E2 signals (A12) plus the Group-B classes as they migrate (B3+); every
-// un-migrated set stays static. Per-set migration adds a signalType key here, one
-// commit each (S8) — flipping only that signal to the engine path.
+// Per-signalType content SOURCE, decided in ONE place (the single extension point).
+// Every shipped signal is served from the content-template engine; there is no
+// static content layer any more. `resolveContentSource` returns 'static' only as a
+// safe no-op for a signalType with no shipped record — nothing is served from it.
 
 /** The content SOURCE for a signalType's advisory. */
 export type ContentSource = 'static' | 'content-template';
 
 /**
- * SignalTypes served by the content-template engine (else static) — the 6 §4.E2
- * signals (A12) plus the Group-B classes migrated so far (B3+). An EMPTY marker =
- * ship-dark (every signal static, runtime byte-identical). Migration is per-set (S8)
- * — add the signalType key here in its own migration commit, gated by the
- * cascade-parity + contract tests.
+ * SignalTypes served by the content-template engine. Every shipped signal is listed
+ * here (the marker matches the shipped record set), so the engine is the sole content
+ * source; a signalType absent here has no shipped record and resolves to the 'static'
+ * no-op.
  */
 export const MIGRATED_SIGNALS: ReadonlySet<string> = new Set<string>([
   // §4.E2 new signals (A12): served by the content-template engine (no static DecisionContent).
@@ -106,8 +92,8 @@ export const MIGRATED_SIGNALS: ReadonlySet<string> = new Set<string>([
   'ABSENCE_API_CONTRACT_DEFINITION',
   'ABSENCE_BACKWARDS_COMPATIBILITY_CHECK',
   // B6 — class 5 (session-quality, 8 signals, 0 sensitive): now engine-served.
-  // context_loss keeps its static role variant for founder/indie/pm users via stop.ts's
-  // role-precedence guard (the register-only engine can't reproduce role-tailored content).
+  // context_loss carries founder / indie_hacker / pm role variants as record roleOverrides,
+  // served role → register → base by the engine.
   'ABSENCE_COMPREHENSION',
   'ABSENCE_NO_PUSHBACK',
   'ABSENCE_CONTEXT_LOSS',

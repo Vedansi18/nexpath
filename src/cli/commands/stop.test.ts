@@ -561,8 +561,8 @@ describe('runStop — B2 stage-transition engine dispatch', () => {
   }
 
   it('a stage_transition routes to the ENGINE — record signalType derived from the resolved content (IDEA_TO_PRD)', async () => {
-    // stage=prd → resolveDecisionContent serves IDEA_TO_PRD (migrated at B2); the dispatch derives
-    // the record from content.signalType (stage transitions carry no absence: key).
+    // stage=prd → the engine serves IDEA_TO_PRD; the dispatch derives the record from the
+    // transition's signalType (stage transitions carry no absence: key).
     seedTransition('prd');
     vi.mocked(generateFromEngine).mockClear();
     const result = await runStop(makePayload(), store, mockSelect(SKIP_NOW));
