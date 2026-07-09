@@ -21,6 +21,8 @@ import { readStdin } from './auto.js';
 import type { GeneratedOptions } from '../../decision-session/OptionGenerator.js';
 import { resolveContentSource, selectionRegister } from '../../decision-session/selection-registry.js';
 import { autogenAwareLookup, pinchSignalTypeForFlag } from '../../decision-session/content-template-source.js';
+import { runAutogenForFire } from '../../decision-session/auto-template-generator.js';
+import { loadRightGoodProfile } from '../../classifier/right-good-aggregator.js';
 import { generateFromEngine, buildEngineGrounding, composeDeterministicOptions } from '../../decision-session/engine-option-generator.js';
 import { resolvePinchFields } from '../../decision-session/signal-pinch-fields.js';
 import { getWhyHelpForSignalType } from '../../decision-session/why-help-by-signal-type.js';
@@ -213,6 +215,21 @@ export async function runStop(
     store,
     effectiveSelectFn,
   );
+
+  // Per-user auto-gen loop — after the popup, off its critical path. The current
+  // fire already served (the preset, or a previously-cached per-user record); this
+  // runs the one-time ranking and lazily generates the fired topic's per-user record
+  // so the NEXT fire of a selected topic serves it. Best-effort — never breaks the outcome.
+  if (recordSignalType && resolveContentSource(recordSignalType) === 'content-template') {
+    await runAutogenForFire({
+      store,
+      projectRoot:  payload.cwd,
+      signalType:   recordSignalType,
+      currentLevel: (getUserDepthLevel(store, payload.cwd)?.currentLevel ?? 2) as MaturityLevel,
+      rightGood:    loadRightGoodProfile(store, payload.cwd),
+      client:       openai,
+    });
+  }
 
   if (dsResult.outcome === 'selected') {
     // Store injected text in session — auto reads and clears this on its next invocation

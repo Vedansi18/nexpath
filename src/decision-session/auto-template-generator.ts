@@ -24,7 +24,7 @@ import type { ContentTemplateRecord, LevelForm, MaturityLevel, TwoChannelCell } 
 import { validateContentTemplateRecord, resolveLevelForm } from './content-template-schema.js';
 import { sanitizePromptDerivedValue } from './content-template-grounding.js';
 import { SCHEMA_VERSION } from '../store/schema.js';
-import { upsertContentTemplate } from '../store/content-templates.js';
+import { upsertContentTemplate, getContentTemplate } from '../store/content-templates.js';
 import { getConfig, isConfigSet, setConfig } from '../store/config.js';
 import type { Store } from '../store/db.js';
 
@@ -340,4 +340,49 @@ export async function generateAndStoreAutogenRecord(
   if (!record) return false;
   upsertContentTemplate(store, { projectRoot, signalType, source: 'autogen', record });
   return true;
+}
+
+// ── Live orchestration (lazy-once selection + lazy first-fire generation) ───────
+
+/** True once the user has any recorded right/good behaviour (else Case A — no history). */
+function hasHistory(rightGood: RightGoodProfile): boolean {
+  return Object.values(rightGood).some((s) => s.stability.occurrences > 0);
+}
+
+/**
+ * Run the per-user loop for one fired topic. Best-effort + off the popup's critical
+ * path (the caller runs it after the popup): (1) run the ONE-TIME ranking if it has
+ * not run for this project (skipped with no history — no wasted call); (2) if the
+ * fired topic is in the selection and has no per-user record yet, generate + cache
+ * one for the next fire. Never throws into the caller.
+ */
+export async function runAutogenForFire(input: {
+  store: Store;
+  projectRoot: string;
+  signalType: string;
+  currentLevel: MaturityLevel;
+  rightGood: RightGoodProfile;
+  client?: OpenAI;
+}): Promise<void> {
+  const { store, projectRoot, signalType, currentLevel, rightGood, client } = input;
+  try {
+    const summary = buildPatternSummary(rightGood, currentLevel);
+
+    // (1) one-time ranking — skip the LLM call entirely for a no-history project.
+    if (!selectionComputed(store, projectRoot)) {
+      const history = hasHistory(rightGood);
+      const ranked = history ? await selectDistinctiveTopics({ rightGood, patternSummary: summary }, client) : [];
+      persistSelection(store, projectRoot, applyCoverageFloor(ranked, history));
+    }
+
+    // (2) lazy first-fire generation for a selected topic with no record yet.
+    if (
+      isTopicSelected(store, projectRoot, signalType) &&
+      !getContentTemplate(store.db, projectRoot, signalType, 'autogen')
+    ) {
+      await generateAndStoreAutogenRecord(store, projectRoot, signalType, currentLevel, summary, client);
+    }
+  } catch {
+    // best-effort — the per-user loop must never break the fire path
+  }
 }

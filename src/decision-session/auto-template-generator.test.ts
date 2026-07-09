@@ -16,6 +16,7 @@ import {
   readSelection,
   selectionComputed,
   isTopicSelected,
+  runAutogenForFire,
 } from './auto-template-generator.js';
 import { validateContentTemplateRecord } from './content-template-schema.js';
 import { openStore } from '../store/db.js';
@@ -205,6 +206,45 @@ describe('auto-template-generator — pattern summary + selection persistence', 
     expect(selectionComputed(store, '/p')).toBe(true);
     expect(readSelection(store, '/p')).toEqual([]);
     expect(isTopicSelected(store, '/p', 'ANYTHING')).toBe(false);
+    store.db.close();
+  });
+});
+
+describe('auto-template-generator — live orchestration (runAutogenForFire)', () => {
+  const profile: RightGoodProfile = { test_creation: rg('right_good') }; // has history (occurrences > 0)
+
+  // One mock that answers BOTH LLM calls: the ranking prompt → {topics}, the generation prompt → {option, whyDesc}.
+  function autogenMockClient(): OpenAI {
+    return { chat: { completions: { create: async (req: { messages: { content: string }[] }) => {
+      const prompt = req.messages[0].content;
+      const content = prompt.includes('rank which')
+        ? JSON.stringify({ topics: [{ signalType: 'ABSENCE_TEST_CREATION', confidence: 0.9 }] })
+        : JSON.stringify({ option: 'personalized option', whyDesc: 'personalized why-desc' });
+      return { choices: [{ message: { content } }] };
+    } } } } as unknown as OpenAI;
+  }
+
+  it('first fire runs the ranking + generates the selected topic; a second fire is a no-op', async () => {
+    const store = await openStore(':memory:');
+    expect(selectionComputed(store, '/p')).toBe(false);
+    await runAutogenForFire({ store, projectRoot: '/p', signalType: 'ABSENCE_TEST_CREATION', currentLevel: 3, rightGood: profile, client: autogenMockClient() });
+    expect(selectionComputed(store, '/p')).toBe(true);
+    expect(isTopicSelected(store, '/p', 'ABSENCE_TEST_CREATION')).toBe(true);
+    expect(getContentTemplate(store.db, '/p', 'ABSENCE_TEST_CREATION', 'autogen')).not.toBeNull();
+    await runAutogenForFire({ store, projectRoot: '/p', signalType: 'ABSENCE_TEST_CREATION', currentLevel: 3, rightGood: profile, client: autogenMockClient() });
+    expect(getContentTemplate(store.db, '/p', 'ABSENCE_TEST_CREATION', 'autogen')).not.toBeNull();
+    store.db.close();
+  });
+
+  it('Case A (no history): persists an empty selection, generates nothing, makes NO LLM call', async () => {
+    const store = await openStore(':memory:');
+    let calls = 0;
+    const client = { chat: { completions: { create: async () => { calls++; return { choices: [{ message: { content: '{}' } }] }; } } } } as unknown as OpenAI;
+    await runAutogenForFire({ store, projectRoot: '/p', signalType: 'ABSENCE_TEST_CREATION', currentLevel: 2, rightGood: {}, client });
+    expect(selectionComputed(store, '/p')).toBe(true);
+    expect(readSelection(store, '/p')).toEqual([]);
+    expect(getContentTemplate(store.db, '/p', 'ABSENCE_TEST_CREATION', 'autogen')).toBeNull();
+    expect(calls).toBe(0);
     store.db.close();
   });
 });
