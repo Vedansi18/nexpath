@@ -177,8 +177,10 @@ export async function runStop(
     : recordSignalTypeForFlag(advisory.flagType);
   // Role-precedence guard: a migrated signal whose STATIC path carries genuinely role-specific
   // content (per-role tailored — the register-only engine can't reproduce it) keeps serving that
-  // role variant for founder/indie/pm users. Today only context_loss; extend when role-through-
-  // engine serving lands (B9 role-cluster). Non-role users / other signals take the engine path.
+  // role variant for founder/indie/pm users. Only context_loss qualifies: the role-cluster migrated
+  // without needing this — its content is single-register (the role dimension serves through the
+  // role-structured why-help), so the engine reproduces it. Extend ROLE_SPECIFIC_STATIC_SIGNALS only
+  // for a future signal with genuine per-role content variants. Non-role users take the engine path.
   const signalKey = advisory.flagType.startsWith('absence:') ? advisory.flagType.slice('absence:'.length) : '';
   const keepRoleStatic = !!recordSignalType && ROLE_SPECIFIC_STATIC_SIGNALS.has(recordSignalType)
     && roleAbsenceContentExists(mgr.current.profile, signalKey);
