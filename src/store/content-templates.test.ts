@@ -5,6 +5,7 @@ import {
   upsertContentTemplate,
   getContentTemplate,
   deleteContentTemplate,
+  deleteAutogenRecordsForProject,
 } from './content-templates.js';
 
 function tableExists(store: Store, name: string): boolean {
@@ -90,6 +91,18 @@ describe('content-templates persistence', () => {
     upsertContentTemplate(store, { projectRoot: '/p', signalType: 'S', source: 'autogen', record: { who: 'gen' } });
     expect(getContentTemplate(store.db, '/p', 'S', 'uploaded')!.record).toEqual({ who: 'user' });
     expect(getContentTemplate(store.db, '/p', 'S', 'autogen')!.record).toEqual({ who: 'gen' });
+  });
+
+  it('deleteAutogenRecordsForProject removes only this project\'s autogen rows', () => {
+    upsertContentTemplate(store, { projectRoot: '/p', signalType: 'A', source: 'autogen', record: { v: 1 } });
+    upsertContentTemplate(store, { projectRoot: '/p', signalType: 'B', source: 'autogen', record: { v: 1 } });
+    upsertContentTemplate(store, { projectRoot: '/p', signalType: 'A', source: 'uploaded', record: { v: 1 } });
+    upsertContentTemplate(store, { projectRoot: '/q', signalType: 'A', source: 'autogen', record: { v: 1 } });
+    deleteAutogenRecordsForProject(store, '/p');
+    expect(getContentTemplate(store.db, '/p', 'A', 'autogen')).toBeNull();
+    expect(getContentTemplate(store.db, '/p', 'B', 'autogen')).toBeNull();
+    expect(getContentTemplate(store.db, '/p', 'A', 'uploaded')).not.toBeNull(); // other source untouched
+    expect(getContentTemplate(store.db, '/q', 'A', 'autogen')).not.toBeNull(); // other project untouched
   });
 
   it('accepts a row written by an older schema_version (<= current)', () => {

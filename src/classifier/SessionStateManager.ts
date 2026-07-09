@@ -7,6 +7,8 @@ import { buildSafeDefaults } from './LLMProfileClassifier.js';
 import { getProject } from '../store/projects.js';
 import { loadRightGoodProfile } from './right-good-aggregator.js';
 import { seedProjectMaturity, updateProjectMaturity } from './maturity-level.js';
+import { getUserDepthLevel } from '../store/user-depth-level.js';
+import { deleteAutogenRecordsForProject } from '../store/content-templates.js';
 import type { StreamBPresenceResult } from './StreamBPresenceClassifier.js';
 import { appendParamEvents, type ParamEventChannel } from '../telemetry/param-events.js';
 
@@ -104,10 +106,16 @@ export class SessionStateManager {
    */
   private static foldEndedSessionMaturity(store: Store, ended: SessionState, now: number): void {
     if (ended.promptCount <= 0) return;
-    updateProjectMaturity(store, ended.projectRoot, loadRightGoodProfile(store, ended.projectRoot), {
+    const before = getUserDepthLevel(store, ended.projectRoot)?.currentLevel;
+    const after = updateProjectMaturity(store, ended.projectRoot, loadRightGoodProfile(store, ended.projectRoot), {
       nature:      ended.profile?.nature,
       projectType: getProject(store, ended.projectRoot)?.projectType ?? null,
-    }, now);
+    }, now).currentLevel;
+    if (before !== undefined && after !== before) {
+      // Maturity graduated — the per-user records were generated for the old
+      // column; drop them so they regenerate at the new level on the next fire.
+      deleteAutogenRecordsForProject(store, ended.projectRoot);
+    }
   }
 
   /**

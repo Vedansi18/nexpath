@@ -111,3 +111,16 @@ export function deleteContentTemplate(
   );
   saveStore(store);
 }
+
+/**
+ * Delete ALL auto-gen records for a project. Used to invalidate the per-user
+ * records on a maturity graduation, so they regenerate at the new column on the
+ * next fire. Leaves other projects' and other sources' records untouched.
+ */
+export function deleteAutogenRecordsForProject(store: Store, projectRoot: string): void {
+  store.db.run(
+    "DELETE FROM content_templates WHERE project_root = ? AND source = 'autogen'",
+    [projectRoot],
+  );
+  saveStore(store);
+}
