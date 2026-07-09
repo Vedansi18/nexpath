@@ -13,7 +13,11 @@
 
 import { SHIPPED_CONTENT_TEMPLATES } from './content-template-tooling.js';
 import type { RecordCandidateLookup } from './content-template-engine.js';
-import type { ContentTemplateRecord } from './content-template-schema.js';
+import type { ContentTemplateRecord, LevelForm, MaturityLevel } from './content-template-schema.js';
+import { validateContentTemplateRecord, MATURITY_LEVELS } from './content-template-schema.js';
+import { sanitizePromptDerivedValue } from './content-template-grounding.js';
+import { getContentTemplate } from '../store/content-templates.js';
+import type { Store } from '../store/db.js';
 
 /** signalType → shipped content-template record (O(1) index over the shipped presets). */
 const SHIPPED_BY_SIGNAL: ReadonlyMap<string, ContentTemplateRecord> = new Map(
@@ -64,4 +68,64 @@ export function pinchSignalTypeForFlag(flagType: string, stage: string): string 
  */
 export function shippedRecordLookup(signalType: string): RecordCandidateLookup {
   return (source) => (source === 'shipped' ? SHIPPED_BY_SIGNAL.get(signalType) : undefined);
+}
+
+// ── Per-user (autogen) overlay — the tier-b per-cell cascade over the preset ────
+
+/**
+ * Read gate for one per-user cell: served only when it is well-formed (non-empty
+ * option + why-desc). Runtime grounding is appended on top for every source, so a
+ * well-formed cell never reduces grounding; a blank / degraded cell falls back to
+ * the preset cell.
+ */
+function autogenCellServable(form: LevelForm | undefined): form is LevelForm {
+  return !!form && form.cell.option.trim() !== '' && form.cell.whyDesc.trim() !== '';
+}
+
+/**
+ * Overlay a per-user record on the shipped preset PER CELL: for each maturity level,
+ * serve the per-user cell when it passes the read gate, else the preset cell — the
+ * first source holding a cell wins the WHOLE cell (no intra-cell blending). The
+ * per-user cell is re-sanitized on read (defence in depth). Structure + the
+ * sensitive-action safeguard come from the preset unchanged.
+ */
+function overlayAutogenOnPreset(autogen: ContentTemplateRecord, preset: ContentTemplateRecord): ContentTemplateRecord {
+  const levelForms: Partial<Record<MaturityLevel, LevelForm>> = {};
+  for (const lvl of MATURITY_LEVELS) {
+    const a = autogen.levelForms[lvl];
+    if (autogenCellServable(a)) {
+      levelForms[lvl] = {
+        kind: a.kind,
+        cell: {
+          option:  sanitizePromptDerivedValue(a.cell.option),
+          whyDesc: sanitizePromptDerivedValue(a.cell.whyDesc),
+        },
+      };
+    } else if (preset.levelForms[lvl]) {
+      levelForms[lvl] = preset.levelForms[lvl]!;
+    }
+  }
+  return { ...preset, source: 'autogen', levelForms };
+}
+
+/**
+ * A source-cascade lookup that overlays a stored per-user (autogen) record on the
+ * shipped preset, per cell. The `autogen` tier serves the merged record when a valid
+ * stored record exists (schema-validated on read — an invalid one is ignored); the
+ * `shipped` tier serves the raw preset as the fallback. Drop-in replacement for
+ * `shippedRecordLookup` that adds the per-user tier.
+ */
+export function autogenAwareLookup(store: Store, projectRoot: string, signalType: string): RecordCandidateLookup {
+  const preset = SHIPPED_BY_SIGNAL.get(signalType);
+  return (source) => {
+    if (source === 'autogen') {
+      if (!preset) return undefined;
+      const stored = getContentTemplate(store.db, projectRoot, signalType, 'autogen')?.record;
+      if (stored === undefined || stored === null) return undefined;
+      if (!validateContentTemplateRecord(stored).ok) return undefined; // read-side schema gate
+      return overlayAutogenOnPreset(stored as ContentTemplateRecord, preset);
+    }
+    if (source === 'shipped') return preset;
+    return undefined;
+  };
 }

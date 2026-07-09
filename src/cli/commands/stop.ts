@@ -20,7 +20,7 @@ import { recentPromptMetadata } from '../../telemetry/recent-prompts.js';
 import { readStdin } from './auto.js';
 import type { GeneratedOptions } from '../../decision-session/OptionGenerator.js';
 import { resolveContentSource, selectionRegister } from '../../decision-session/selection-registry.js';
-import { shippedRecordLookup, pinchSignalTypeForFlag } from '../../decision-session/content-template-source.js';
+import { autogenAwareLookup, pinchSignalTypeForFlag } from '../../decision-session/content-template-source.js';
 import { generateFromEngine, buildEngineGrounding, composeDeterministicOptions } from '../../decision-session/engine-option-generator.js';
 import { resolvePinchFields } from '../../decision-session/signal-pinch-fields.js';
 import { getWhyHelpForSignalType } from '../../decision-session/why-help-by-signal-type.js';
@@ -163,7 +163,7 @@ export async function runStop(
   let whyHelpOverride: WhyHelpEntry | null | undefined;
   const register = selectionRegister(mgr.current.profile?.nature);
   if (recordSignalType && resolveContentSource(recordSignalType) === 'content-template') {
-    const lookup = shippedRecordLookup(recordSignalType);
+    const lookup = autogenAwareLookup(store, payload.cwd, recordSignalType);
     const level  = (getUserDepthLevel(store, payload.cwd)?.currentLevel ?? 2) as MaturityLevel;
     const role   = mgr.current.profile?.role ?? undefined;
     // Popup question + per-class why-help are static (no LLM). The question comes from the
