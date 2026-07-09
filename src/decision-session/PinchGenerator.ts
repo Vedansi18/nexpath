@@ -2,15 +2,9 @@ import OpenAI from 'openai';
 import type { Stage, UserProfile } from '../classifier/types.js';
 import type { FlagType } from '../classifier/Stage2Trigger.js';
 import { isValidLanguageCode } from '../classifier/LanguageDetector.js';
-import {
-  IDEA_TO_PRD,
-  PRD_TO_ARCHITECTURE,
-  ARCHITECTURE_TO_TASKS,
-  TASK_REVIEW,
-  IMPLEMENTATION_TO_REVIEW,
-  REVIEW_TO_RELEASE,
-  resolveDecisionContent,
-} from './options.js';
+import { pinchSignalTypeForFlag } from './content-template-source.js';
+import { resolvePinchFields } from './signal-pinch-fields.js';
+import { selectionRegister } from './selection-registry.js';
 
 /**
  * Pinch word generator (per decision-session-ux-research.md Part 4).
@@ -38,19 +32,6 @@ export const PINCH_MAX_CHARS       = 40;
 export const PINCH_MIN_CHARS       = 2;
 
 // ── Static fallback table ──────────────────────────────────────────────────────
-
-/**
- * Static fallback labels per content block.
- * Used when the API call fails or returns unusable output.
- */
-export const PINCH_FALLBACK_TABLE: Record<string, string> = {
-  idea_to_prd:             IDEA_TO_PRD.pinchFallback,
-  prd_to_architecture:     PRD_TO_ARCHITECTURE.pinchFallback,
-  architecture_to_tasks:   ARCHITECTURE_TO_TASKS.pinchFallback,
-  task_review:             TASK_REVIEW.pinchFallback,
-  implementation_to_review: IMPLEMENTATION_TO_REVIEW.pinchFallback,
-  review_to_release:       REVIEW_TO_RELEASE.pinchFallback,
-};
 
 // ── CO-STAR prompt ─────────────────────────────────────────────────────────────
 
@@ -160,12 +141,12 @@ export async function generatePinchLabel(
   language?: string,
   overrides?: { question?: string; pinchFallback?: string },
 ): Promise<string> {
-  const content  = resolveDecisionContent(stage, flagType);
-  // A migrated signal has no matching static DecisionContent, so resolveDecisionContent
-  // returns a generic fallback. When the caller supplies the migrated record's own
-  // question / pinchFallback, use them so the header matches the real signal.
-  const question = overrides?.question ?? content.question;
-  const fallback = overrides?.pinchFallback ?? content.pinchFallback;
+  // The caller usually supplies the migrated record's own question / pinchFallback; otherwise resolve
+  // them from the register-keyed pinch-fields map (the whole question/pinch layer after the cutover).
+  const signalType = pinchSignalTypeForFlag(flagType, stage);
+  const fields   = signalType ? resolvePinchFields(signalType, selectionRegister(profile?.nature)) : undefined;
+  const question = overrides?.question ?? fields?.question ?? '';
+  const fallback = overrides?.pinchFallback ?? fields?.pinchFallback ?? '';
 
   try {
     const openai   = client ?? new OpenAI();

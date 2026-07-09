@@ -8,7 +8,6 @@ import {
   PINCH_TEMPERATURE,
   PINCH_MAX_CHARS,
   PINCH_MIN_CHARS,
-  PINCH_FALLBACK_TABLE,
 } from './PinchGenerator.js';
 import {
   IDEA_TO_PRD,
@@ -65,28 +64,8 @@ describe('PinchGenerator constants', () => {
     expect(PINCH_TEMPERATURE).toBe(0.9);
   });
 
-  it('PINCH_FALLBACK_TABLE has entries for all 6 transitions', () => {
-    expect(PINCH_FALLBACK_TABLE.idea_to_prd).toBe(IDEA_TO_PRD.pinchFallback);
-    expect(PINCH_FALLBACK_TABLE.prd_to_architecture).toBe(PRD_TO_ARCHITECTURE.pinchFallback);
-    expect(PINCH_FALLBACK_TABLE.architecture_to_tasks).toBe(ARCHITECTURE_TO_TASKS.pinchFallback);
-    expect(PINCH_FALLBACK_TABLE.task_review).toBe(TASK_REVIEW.pinchFallback);
-    expect(PINCH_FALLBACK_TABLE.implementation_to_review).toBe(IMPLEMENTATION_TO_REVIEW.pinchFallback);
-    expect(PINCH_FALLBACK_TABLE.review_to_release).toBe(REVIEW_TO_RELEASE.pinchFallback);
-  });
-
-  it('all static fallback labels are non-empty strings', () => {
-    for (const label of Object.values(PINCH_FALLBACK_TABLE)) {
-      expect(typeof label).toBe('string');
-      expect(label.length).toBeGreaterThan(0);
-    }
-  });
-
   it('PINCH_MIN_CHARS is 2 (minimum label length)', () => {
     expect(PINCH_MIN_CHARS).toBe(2);
-  });
-
-  it('PINCH_FALLBACK_TABLE has exactly 6 entries', () => {
-    expect(Object.keys(PINCH_FALLBACK_TABLE)).toHaveLength(6);
   });
 });
 
