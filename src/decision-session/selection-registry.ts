@@ -330,6 +330,21 @@ export const MIGRATED_SIGNALS: ReadonlySet<string> = new Set<string>([
   'ABSENCE_DEPLOYMENT_STRATEGY_ABSENCE',
   'ABSENCE_OPERATIONAL_RUNBOOK_GAP',
   'ABSENCE_SLO_DEFINITION_GAP',
+  // B5 — class 4 (release/observability/infra, 8 signals): now engine-served. ALL 8 are sensitive
+  // (l2SafeguardRequired — every record touches an ops action: logging sweep, rollback, deploy/infra,
+  // dependency install/upgrade, credential move, CI config, throttling, dependency adoption; each
+  // safeguard confirmed through the engine on migration, preserved verbatim on every tier via the
+  // deriveLadder thread). Register-varied (formal/casual via base + vocab weave); 7 carry beginner
+  // overrides (served via resolveRegisterForms), DEPENDENCY_AUDIT_GAP is casual-only. Migrated LAST —
+  // this completes the 136 canonical class signals (all now engine-served; B11 removes the legacy cascade).
+  'ABSENCE_OBSERVABILITY',
+  'ABSENCE_ROLLBACK_PLANNING',
+  'ABSENCE_DEPLOYMENT_PLANNING',
+  'ABSENCE_DEPENDENCY_MGMT',
+  'ABSENCE_ENV_AND_SECRETS',
+  'ABSENCE_CI_PIPELINE',
+  'ABSENCE_RATE_LIMITING',
+  'ABSENCE_DEPENDENCY_AUDIT_GAP',
 ]);
 
 /**

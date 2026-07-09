@@ -7,6 +7,7 @@ import { CONFIRM_SEEK_RE } from './content-template-grounding.js';
 import { REVIEW_TO_RELEASE_RECORD, RELEASE_TO_FEEDBACK_RECORD } from './content-templates/class1-records.js';
 import { CLASS8_RECORDS } from './content-templates/class8-records.js';
 import { CLASS9_RECORDS } from './content-templates/class9-records.js';
+import { CLASS4_RECORDS } from './content-templates/class4-records.js';
 
 // §6.1 items 2/5 — the engine-backed pre-generate path. The LLM seams (grounding weave +
 // ladder derive) are exercised via a mock client (no real spend), matching the engine's
@@ -153,6 +154,38 @@ describe('B10 — class 9 sensitive academic/hardcore records carry their l2Safe
       'ABSENCE_DATABASE_MIGRATION_SAFETY', 'ABSENCE_DEPLOYMENT_STRATEGY_ABSENCE',
       'ABSENCE_FAILURE_MODE_ANALYSIS', 'ABSENCE_OBSERVABILITY_FIRST',
       'ABSENCE_OVER_ENGINEERING_CHECK', 'ABSENCE_SECURITY_THREAT_MODELING',
+    ]);
+  });
+
+  for (const rec of FLAGGED) {
+    it(`${rec.signalType}: the exact record l2SafeguardLine survives into the L1/L2/L3 desc-bases`, async () => {
+      const line = rec.l2SafeguardLine!;
+      expect(line, `${rec.signalType} is flagged with a safeguard line`).toBeTruthy();
+      const gen = await generateFromEngine({ lookup: shippedRecordLookup(rec.signalType), level: 5 }, dropsSeek);
+      expect(gen, `${rec.signalType} resolves`).not.toBeNull();
+      const tiers = [gen!.generatedDescBases!.l1[0], gen!.generatedDescBases!.l2[0], gen!.generatedDescBases!.l3[0]];
+      for (let i = 0; i < tiers.length; i++) {
+        expect(tiers[i], `${rec.signalType} L${i + 1} carries the safeguard verbatim`).toContain(line);
+      }
+    });
+  }
+});
+
+describe('B5 — class 4 (release/observability/infra) is ALL-sensitive; every record carries its safeguard through every tier', () => {
+  // Class 4 is the all-sensitive set: every one of the 8 ops records is l2SafeguardRequired (logging sweep,
+  // rollback, deploy/infra, dependency install/upgrade, credential move, CI config, throttling, dependency
+  // adoption). Derived from CLASS4_RECORDS (drift-proof), each verified to keep its exact safeguard line on
+  // every served strength tier via the A1 thread, under the adversarial drop-the-seek mock. Migrated last.
+  const dropsSeek = mockClient(JSON.stringify({ option: 'a simpler option', whyDesc: 'grounded why-desc with no seek' }));
+  const FLAGGED = CLASS4_RECORDS.filter((r) => r.l2SafeguardRequired);
+
+  it('ALL 8 class-4 records are flagged sensitive (no unguarded ops record)', () => {
+    expect(CLASS4_RECORDS.length).toBe(8);
+    expect(FLAGGED.length).toBe(8); // every record, not a subset
+    expect(FLAGGED.map((r) => r.signalType).sort()).toEqual([
+      'ABSENCE_CI_PIPELINE', 'ABSENCE_DEPENDENCY_AUDIT_GAP', 'ABSENCE_DEPENDENCY_MGMT',
+      'ABSENCE_DEPLOYMENT_PLANNING', 'ABSENCE_ENV_AND_SECRETS', 'ABSENCE_OBSERVABILITY',
+      'ABSENCE_RATE_LIMITING', 'ABSENCE_ROLLBACK_PLANNING',
     ]);
   });
 
