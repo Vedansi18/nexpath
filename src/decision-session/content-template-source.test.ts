@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { SHIPPED_CONTENT_TEMPLATES } from './content-template-tooling.js';
 import { hasShippedRecord, shippedRecordLookup, recordSignalTypeForFlag, autogenAwareLookup } from './content-template-source.js';
 import { resolveRecord } from './content-template-engine.js';
+import { composeDeterministicOptions } from './engine-option-generator.js';
 import type { ContentTemplateRecord } from './content-template-schema.js';
 import { openStore } from '../store/db.js';
 import { upsertContentTemplate } from '../store/content-templates.js';
@@ -120,6 +121,26 @@ describe('per-user (autogen) overlay — tier-b per-cell cascade', () => {
     // The stored record is valid (served on the autogen tier), but the off-anchor cell is
     // NOT served — the preset's level-1 cell fills it (non-degradation).
     expect(merged.record.levelForms[1]?.cell.option).toBe(preset.levelForms[1]!.cell.option);
+    store.db.close();
+  });
+
+  it('covered vs missing parity — both fully grounded through the deterministic engine; only the base differs', async () => {
+    const store = await openStore(':memory:');
+    // Missing: no per-user record → the preset serves.
+    const missing = composeDeterministicOptions({ lookup: autogenAwareLookup(store, '/p', preset.signalType), level: 1 })!;
+    // Covered: a per-user record with an anchored L1 → the overlay serves.
+    upsertContentTemplate(store, { projectRoot: '/p', signalType: preset.signalType, source: 'autogen', record: autogenRecord({ 1: AUTOGEN_L1 }) });
+    const covered = composeDeterministicOptions({ lookup: autogenAwareLookup(store, '/p', preset.signalType), level: 1 })!;
+    // Both are fully grounded: a complete, non-null composition with every tier populated.
+    for (const g of [missing, covered]) {
+      expect(g.l1[0]).toBeTruthy();
+      expect(g.l2[0]).toBeTruthy();
+      expect(g.l3[0]).toBeTruthy();
+    }
+    // Only the base wording differs — covered carries the per-user base, missing the preset's.
+    expect(covered.l1[0]).not.toBe(missing.l1[0]);
+    expect(covered.l1[0]).toContain('personalized');
+    expect(missing.l1[0]).not.toContain('personalized');
     store.db.close();
   });
 });
