@@ -9,6 +9,7 @@ import { SessionStateManager } from '../../classifier/SessionStateManager.js';
 import { detectAbsenceFlags, ABSENCE_MIN_PROMPTS } from '../../classifier/AbsenceDetector.js';
 import { buildRuntimeContext } from '../../classifier/runtime-context.js';
 import { ACTIVE_AGENT_ID } from '../../env/agent-capabilities.js';
+import { recordEnvTrajectory } from '../../env/env-trajectory.js';
 import { classifyStreamBPresence } from '../../classifier/StreamBPresenceClassifier.js';
 import type { StreamBPresenceResult } from '../../classifier/StreamBPresenceClassifier.js';
 import { shouldFireStage2 } from '../../classifier/Stage2Trigger.js';
@@ -176,6 +177,20 @@ export async function runAuto(
   // Record the coding-agent's current mode (when the hook reported it) before the
   // pipeline builds its runtime context; persisted by processPrompt below.
   mgr.setAgentMode(input.currentAgentMode);
+
+  // Once per session (first prompt): record the dev-environment trajectory — probe the project's
+  // env facts, and emit a flap-damped change event if a fact moved since the last confirmed probe
+  // (e.g. version control added). Consent-gated + best-effort; never blocks the pipeline.
+  if (mgr.current.promptCount === 0) {
+    try {
+      recordEnvTrajectory(store, input.projectRoot, {
+        sessionId:       mgr.current.sessionId,
+        promptIndex:     mgr.current.promptCount,
+        stage:           mgr.current.currentStage,
+        stageConfidence: mgr.current.stageConfidence,
+      });
+    } catch { /* trajectory recording is non-fatal */ }
+  }
   const prevStage: Stage = mgr.current.currentStage;
   logger.debug('session_loaded', { promptCount: mgr.current.promptCount, stage: prevStage, project: input.projectRoot });
   writeTelemetry(input.projectRoot, 'prompt_received', { promptCount: mgr.current.promptCount }, store);

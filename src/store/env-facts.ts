@@ -71,6 +71,42 @@ export function getProjectEnvFacts(store: Store, projectRoot: string): StoredFac
   return { facts, detectedAt: (row[1] as number | null) ?? 0 };
 }
 
+// ── Env-trajectory state (baseline + pending, for change-event flap damping) ──
+
+/**
+ * The per-project trajectory state: `baseline` = the last CONFIRMED fact values (the
+ * change-event reference), `pending` = the most recent raw probe (used to require a value
+ * be stable across two consecutive probes before a change is confirmed — S4 flap damping).
+ */
+export interface EnvTrajectoryState {
+  baseline: FactMap;
+  pending: FactMap;
+}
+
+/** Read the trajectory state, or null when absent OR while consent is disabled (gated). */
+export function getEnvTrajectory(store: Store, projectRoot: string): EnvTrajectoryState | null {
+  if (!isEnvProbeEnabled(store.db)) return null;
+  const res = store.db.exec('SELECT env_trajectory FROM projects WHERE project_root = ?', [projectRoot]);
+  const raw = res[0]?.values[0]?.[0] as string | null | undefined;
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as EnvTrajectoryState;
+    if (!parsed || typeof parsed !== 'object' || !parsed.baseline || !parsed.pending) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+/** Persist the trajectory state on the projects row. No-op if the project is not registered. */
+export function setEnvTrajectory(store: Store, projectRoot: string, state: EnvTrajectoryState): void {
+  store.db.run(
+    'UPDATE projects SET env_trajectory = ? WHERE project_root = ?',
+    [JSON.stringify(state), projectRoot],
+  );
+  saveStore(store);
+}
+
 // ── Machine-scoped facts ─────────────────────────────────────────────────────
 
 /** Store machine facts in the config table (one JSON blob). */
@@ -99,22 +135,22 @@ export function getMachineFacts(store: Store): StoredFacts | null {
 
 // ── Purge (consent-off auto-purge + `nexpath env --clear`) ───────────────────
 
-/** Clear stored facts for one project, or all projects when no root is given. */
+/** Clear stored facts + trajectory state for one project, or all projects when no root is given. */
 export function clearProjectEnvFacts(store: Store, projectRoot?: string): void {
   if (projectRoot) {
     store.db.run(
-      'UPDATE projects SET env_facts = NULL, env_facts_detected_at = NULL WHERE project_root = ?',
+      'UPDATE projects SET env_facts = NULL, env_facts_detected_at = NULL, env_trajectory = NULL WHERE project_root = ?',
       [projectRoot],
     );
   } else {
-    store.db.run('UPDATE projects SET env_facts = NULL, env_facts_detected_at = NULL');
+    store.db.run('UPDATE projects SET env_facts = NULL, env_facts_detected_at = NULL, env_trajectory = NULL');
   }
   saveStore(store);
 }
 
-/** Purge ALL stored facts (project rows + machine blob). Used on consent-off. */
+/** Purge ALL stored facts + trajectory state (project rows + machine blob). Used on consent-off. */
 export function purgeAllEnvFacts(store: Store): void {
-  store.db.run('UPDATE projects SET env_facts = NULL, env_facts_detected_at = NULL');
+  store.db.run('UPDATE projects SET env_facts = NULL, env_facts_detected_at = NULL, env_trajectory = NULL');
   deleteConfig(store, MACHINE_FACTS_KEY);
   saveStore(store);
 }
