@@ -1120,7 +1120,7 @@ describe('service-worker.ts', () => {
       expect(vi.mocked(classifyStreamBPresence)).not.toHaveBeenCalled();
     });
 
-    it("'set-frequency' writes the CLI Ctrl+T per-project slot advisory_frequency:<root>=<value>", async () => {
+    it("'set-frequency' writes the GLOBAL slot (options-page sync) and clears the per-project override", async () => {
       const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
       const sendResponse = vi.fn();
       messageListener(
@@ -1128,10 +1128,11 @@ describe('service-worker.ts', () => {
         {}, sendResponse,
       );
       await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
-      expect(keyStoreSetKey).toHaveBeenCalledWith('advisory_frequency:https://replit.com', 'optimum');
+      expect(keyStoreSetKey).toHaveBeenCalledWith('advisory_frequency', 'optimum');
+      expect(keyStoreSetKey).toHaveBeenCalledWith('advisory_frequency:https://replit.com', '');
     });
 
-    it("'set-role' writes role:<root>=<value>; a non-whitelisted value is rejected without a write", async () => {
+    it("'set-role' writes the GLOBAL role slot (+clears per-project); a non-whitelisted value is rejected", async () => {
       const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
       const sendResponse = vi.fn();
       messageListener(
@@ -1139,7 +1140,8 @@ describe('service-worker.ts', () => {
         {}, sendResponse,
       );
       await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
-      expect(keyStoreSetKey).toHaveBeenCalledWith('role:https://replit.com', 'indie_hacker');
+      expect(keyStoreSetKey).toHaveBeenCalledWith('role', 'indie_hacker');
+      expect(keyStoreSetKey).toHaveBeenCalledWith('role:https://replit.com', '');
 
       keyStoreSetKey.mockClear();
       const sendResponse2 = vi.fn();

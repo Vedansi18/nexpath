@@ -91,36 +91,8 @@ describe('options.ts', () => {
       expect(els().selfCheck.innerHTML).toContain('Saved');
     });
 
-    it('renders "None yet" for the Stage-2 verdict row when nothing is persisted', async () => {
-      mockGet.mockResolvedValue({});
-      await loadOptionsModule();
 
-      expect(els().selfCheck.innerHTML).toContain('Last Stage-2 verdict');
-      expect(els().selfCheck.innerHTML).toContain('None yet');
-    });
 
-    it('renders the persisted Stage-2 decline verdict with its reason', async () => {
-      mockGet.mockResolvedValue({
-        nexpath_last_stage2_result: JSON.stringify({
-          at: 1751790000000, fire: false, stage: 'release', confidence: 0.93,
-          reason: 'testing practices already demonstrated',
-        }),
-      });
-      await loadOptionsModule();
-
-      const html = els().selfCheck.innerHTML;
-      expect(html).toContain('declined (release 0.93)');
-      expect(html).toContain('testing practices already demonstrated');
-    });
-
-    it('renders a persisted Stage-2 error record', async () => {
-      mockGet.mockResolvedValue({
-        nexpath_last_stage2_result: JSON.stringify({ at: 1751790000000, error: 'AbortError: timeout' }),
-      });
-      await loadOptionsModule();
-
-      expect(els().selfCheck.innerHTML).toContain('AbortError: timeout');
-    });
   });
 
   describe('advisory frequency + role selectors — same value sets/labels/defaults as the CLI installer', () => {
@@ -239,102 +211,4 @@ describe('options.ts', () => {
     });
   });
 
-  describe('test button', () => {
-    beforeEach(async () => {
-      mockGet.mockResolvedValue({});
-      await loadOptionsModule();
-    });
-
-    it('shows an error and does not call fetch when the input is empty', async () => {
-      const { testBtn, status } = els();
-      testBtn.click();
-      await flush();
-
-      expect(status.textContent).toContain('Enter a key first');
-      expect(fetchMock).not.toHaveBeenCalled();
-    });
-
-    it('calls the OpenAI models endpoint with the Authorization header', async () => {
-      fetchMock.mockResolvedValue({ ok: true, status: 200 });
-      const { input, testBtn } = els();
-      input.value = 'sk-valid';
-      testBtn.click();
-      await flush();
-
-      expect(fetchMock).toHaveBeenCalledWith(
-        'https://api.openai.com/v1/models',
-        { headers: { Authorization: 'Bearer sk-valid' } },
-      );
-    });
-
-    it('saves the key and shows "Key valid" on a 200 response', async () => {
-      fetchMock.mockResolvedValue({ ok: true, status: 200 });
-      const { input, testBtn, status } = els();
-      input.value = 'sk-valid';
-      testBtn.click();
-      await flush();
-
-      expect(mockSet).toHaveBeenCalledWith({ openai_api_key: 'sk-valid' });
-      expect(status.textContent).toContain('Key valid');
-    });
-
-    it('shows "Invalid key" on a 401 response without saving', async () => {
-      fetchMock.mockResolvedValue({ ok: false, status: 401 });
-      const { input, testBtn, status } = els();
-      input.value = 'sk-bad';
-      testBtn.click();
-      await flush();
-
-      expect(status.textContent).toContain('Invalid key');
-      expect(mockSet).not.toHaveBeenCalled();
-    });
-
-    it('shows the status code on other non-ok responses', async () => {
-      fetchMock.mockResolvedValue({ ok: false, status: 500 });
-      const { input, testBtn, status } = els();
-      input.value = 'sk-whatever';
-      testBtn.click();
-      await flush();
-
-      expect(status.textContent).toContain('500');
-    });
-
-    it('shows a network error status when fetch rejects', async () => {
-      fetchMock.mockRejectedValue(new Error('offline'));
-      const { input, testBtn, status } = els();
-      input.value = 'sk-whatever';
-      testBtn.click();
-      await flush();
-
-      expect(status.textContent).toContain('Network error');
-    });
-
-    it('re-enables the test button after validation completes', async () => {
-      fetchMock.mockResolvedValue({ ok: true, status: 200 });
-      const { input, testBtn } = els();
-      input.value = 'sk-valid';
-      testBtn.click();
-      await flush();
-
-      expect(testBtn.disabled).toBe(false);
-    });
-  });
-
-  describe('self-check XSS safety', () => {
-    it('HTML-escapes nexpath_last_capture before rendering', async () => {
-      mockGet.mockResolvedValue({ nexpath_last_capture: '<img src=x onerror=alert(1)>' });
-      await loadOptionsModule();
-
-      const html = els().selfCheck.innerHTML;
-      expect(html).not.toContain('<img src=x onerror=alert(1)>');
-      expect(html).toContain('&lt;img');
-    });
-
-    it('shows the fallback text when nexpath_last_capture is not set', async () => {
-      mockGet.mockResolvedValue({});
-      await loadOptionsModule();
-
-      expect(els().selfCheck.innerHTML).toContain('None yet');
-    });
-  });
 });

@@ -826,8 +826,12 @@ async function handleAdvisoryFooterIntent(
     log.debug('advisory_disabled_for_project', { projectRoot });
     return;
   }
-  // CLI Ctrl+T chooser writes — SAME per-project keys as TtySelectFn's
-  // runFrequencySubMenu / runRoleSubMenu (`advisory_frequency:<root>`, `role:<root>`).
+  // Ctrl+, chooser writes — GLOBAL keys, the same slots the options page reads and
+  // writes, so the popup chooser and the settings page are ONE setting (user
+  // decision 2026-07-10: the CLI's Ctrl+T writes per-project, but in the browser
+  // that silently diverged from the visible settings page — confusing). Also clear
+  // any per-project frequency override so a previously Ctrl+.-disabled or
+  // project-tuned root follows the new choice instead of shadowing it.
   // Values whitelisted to the chooser's own menu entries — a compromised page can
   // post arbitrary footer intents, so never write an unvalidated string into config.
   if (intent === 'set-frequency') {
@@ -835,8 +839,11 @@ async function handleAdvisoryFooterIntent(
       log.warn('advisory_set_frequency_rejected', { value: value ?? null });
       return;
     }
-    await keyStore.setKey(projectFreqKeyFor(projectRoot), value);
-    log.debug('advisory_frequency_set_for_project', { projectRoot, value });
+    await Promise.all([
+      keyStore.setKey('advisory_frequency', value),
+      keyStore.setKey(projectFreqKeyFor(projectRoot), ''),
+    ]);
+    log.debug('advisory_frequency_set', { projectRoot, value });
     return;
   }
   if (intent === 'set-role') {
@@ -844,8 +851,11 @@ async function handleAdvisoryFooterIntent(
       log.warn('advisory_set_role_rejected', { value: value ?? null });
       return;
     }
-    await keyStore.setKey(projectRoleKeyFor(projectRoot), value);
-    log.debug('advisory_role_set_for_project', { projectRoot, value });
+    await Promise.all([
+      keyStore.setKey('role', value),
+      keyStore.setKey(projectRoleKeyFor(projectRoot), ''),
+    ]);
+    log.debug('advisory_role_set', { projectRoot, value });
     return;
   }
   // open-settings
