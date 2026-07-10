@@ -86,6 +86,21 @@ describe('per-user (autogen) overlay — tier-b per-cell cascade', () => {
     expect(merged.record.levelForms[1]?.cell.option).not.toContain('bob@evil.com');
   });
 
+  it('keeps the preset structural grounding through the overlay (runtime layers apply identically regardless of source)', async () => {
+    const store = await openStore(':memory:');
+    upsertContentTemplate(store, { projectRoot: '/p', signalType: preset.signalType, source: 'autogen', record: autogenRecord({ 1: AUTOGEN_L1 }) });
+    const resolved = resolveRecord(autogenAwareLookup(store, '/p', preset.signalType))!;
+    expect(resolved.source).toBe('autogen');
+    const merged = resolved.record;
+    // The fields the runtime grounding keys off are the preset's, unchanged — only the base wording differs.
+    expect(merged.slots).toEqual(preset.slots);
+    expect(merged.paramAxes).toEqual(preset.paramAxes);
+    expect(merged.spine).toEqual(preset.spine);
+    expect(merged.question).toBe(preset.question);
+    expect(merged.pinchFallback).toBe(preset.pinchFallback);
+    store.db.close();
+  });
+
   it('preserves the preset sensitive-action safeguard through the overlay', async () => {
     const store = await openStore(':memory:');
     const flagged = SHIPPED_CONTENT_TEMPLATES.find((r) => r.l2SafeguardRequired && r.l2SafeguardLine)!;
