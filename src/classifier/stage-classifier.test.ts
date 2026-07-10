@@ -9,7 +9,9 @@ import {
   classifyStage,
   parseStageClassifierReply,
   buildStageClassifierUserMessage,
+  applyReleaseGuard,
 } from './stage-classifier.js';
+import type { StageClassifierResult } from './stage-classifier.js';
 
 // A mock chat client that returns `content` and (optionally) captures the request.
 function mockClient(content: string, capture?: (req: { model: string; messages: { role: string; content: string }[] }) => void): OpenAI {
@@ -131,6 +133,40 @@ describe('stage-classifier — system prompt encodes the hardening requirements'
     for (const label of ['Idea', 'PRD/Spec', 'Architecture', 'Task Breakdown', 'Implementation', 'Review/Testing', 'Release', 'Feedback Loop']) {
       expect(STAGE_CLASSIFIER_SYSTEM_PROMPT).toContain(label);
     }
+  });
+});
+
+describe('stage-classifier — deterministic release guard (scaffolding without a verification token is never a release)', () => {
+  function releaseResult(): StageClassifierResult {
+    return {
+      classification: { stage: 'release', confidence: 0.9, tier: 3, allScores: { release: 0.9 } },
+      signalsPresent: [], signalsAbsent: [], fireRecommendation: true, selectedSignalKey: '', reason: 'r', degraded: false,
+    };
+  }
+
+  it('neutralises a release for an init/scaffold window lacking a verification token', () => {
+    const guarded = applyReleaseGuard(releaseResult(), 'set up the project with docker and a ci/cd pipeline');
+    expect(guarded.classification.confidence).toBe(0);   // transition blocked upstream
+    expect(guarded.fireRecommendation).toBe(false);      // no advisory fires
+  });
+
+  it('leaves a genuine release (scaffolding present but a verification token too) untouched', () => {
+    const guarded = applyReleaseGuard(releaseResult(), 'scaffold is done — now deploy to production after tests pass');
+    expect(guarded.classification.confidence).toBe(0.9);
+    expect(guarded.fireRecommendation).toBe(true);
+  });
+
+  it('does not touch a non-release stage even in a scaffold window', () => {
+    const impl: StageClassifierResult = { ...releaseResult(), classification: { stage: 'implementation', confidence: 0.8, tier: 3, allScores: { implementation: 0.8 } } };
+    expect(applyReleaseGuard(impl, 'scaffold a new project').classification.confidence).toBe(0.8);
+  });
+
+  it('applies through classifyStage on the model path', async () => {
+    const client = mockClient(JSON.stringify({ stage: 'Release', stage_confidence: 0.95, signals_present: [], signals_absent: [], fire_decision_session: true, selected_signal_key: '', reason: 'r' }));
+    const out = await classifyStage(input('bootstrap a new project and wire up the ci/cd pipeline', 'idea'), client);
+    expect(out.classification.stage).toBe('release');
+    expect(out.classification.confidence).toBe(0);
+    expect(out.fireRecommendation).toBe(false);
   });
 });
 

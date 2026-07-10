@@ -248,10 +248,37 @@ async function degrade(promptText: string): Promise<StageClassifierResult> {
   };
 }
 
+/** Explicit scaffolding / project-initialization markers — a setup window, not a release. */
+const SCAFFOLDING_RE =
+  /\b(initiali[sz]e|scaffold(?:ing)?|bootstrap(?:ping)?|new project|project setup|from scratch)\b|set up (?:the |a )?(?:project|repo|new)|npm init|(?:npm|yarn|pnpm) create|create-[a-z]/i;
+/** Genuine release / verification-state tokens — a real deploy/ship imperative or a verification signal. */
+const VERIFICATION_RE =
+  /\b(deploy|deploying|deployed|publish(?:ing|ed)?|ship(?:ping|ped)?|go live|going live|push to prod|pushing to prod|roll ?back|release notes|tag(?:ging)? (?:a |the )?(?:release|version)|cut(?:ting)? (?:a |the )?release|tests? (?:are )?passing|passing tests|ready to ship|qa (?:approved|sign))\b/i;
+
+/**
+ * Deterministic backstop behind the prompt rules: a scaffolding/initialization window
+ * with NO release/verification token is never a real release, regardless of which
+ * production nouns appear. When the classifier returns `release` in that situation the
+ * classification is neutralised — confidence is forced to 0 (so the stage transition is
+ * blocked upstream) and the advisory is suppressed. Runs on BOTH the model path and the
+ * local fallback (the fallback cascade cannot make this distinction on its own).
+ */
+export function applyReleaseGuard(result: StageClassifierResult, windowText: string): StageClassifierResult {
+  if (result.classification.stage !== 'release') return result;
+  if (!SCAFFOLDING_RE.test(windowText) || VERIFICATION_RE.test(windowText)) return result;
+  return {
+    ...result,
+    classification: { ...result.classification, confidence: 0, allScores: { release: 0 } },
+    fireRecommendation: false,
+    reason: `${result.reason} [release suppressed: scaffolding window without a verification token]`,
+  };
+}
+
 /**
  * Classify one prompt with the single-LLM stage classifier. Makes the single
  * `gpt-4o-mini` call; on any failure (API error, timeout, empty, or unparseable
- * reply) returns the local degrade result. Never throws.
+ * reply) returns the local degrade result. A deterministic release guard runs on
+ * either path. Never throws.
  */
 export async function classifyStage(
   input: StageClassifierInput,
@@ -261,7 +288,9 @@ export async function classifyStage(
   const minConfidence = config?.minConfidence ?? STAGE2_LLM_MIN_CONFIDENCE;
   const contextWindow = config?.contextWindow ?? STAGE2_CONTEXT_WINDOW;
   const openai = client ?? new OpenAI();
+  const windowText = input.window.map((w) => w.text).join('\n');
 
+  let result: StageClassifierResult;
   try {
     const response = await openai.chat.completions.create(
       {
@@ -276,9 +305,9 @@ export async function classifyStage(
       { timeout: STAGE_CLASSIFIER_TIMEOUT_MS },
     );
     const rawReply = response.choices[0]?.message?.content ?? '';
-    if (!rawReply) return degrade(input.promptText);
-    return toResult(parseStageClassifierReply(rawReply, minConfidence));
+    result = rawReply ? toResult(parseStageClassifierReply(rawReply, minConfidence)) : await degrade(input.promptText);
   } catch {
-    return degrade(input.promptText);
+    result = await degrade(input.promptText);
   }
+  return applyReleaseGuard(result, windowText);
 }
