@@ -59,14 +59,49 @@ export interface ResponseStopMsg {
  * → SW; NOT part of the showAdvisory round-trip (that would prematurely resolve it).
  *   - 'disable-project' → SW writes `advisory_frequency:<projectRoot>=off`.
  *   - 'open-settings'   → SW opens the extension options page.
+ *   - 'set-frequency'   → SW writes `advisory_frequency:<projectRoot>=<value>`
+ *                         (the CLI Ctrl+T chooser's per-project write, TtySelectFn
+ *                         runFrequencySubMenu).
+ *   - 'set-role'        → SW writes `role:<projectRoot>=<value>` (runRoleSubMenu).
  */
 export interface AdvisoryFooterIntentMsg {
   type: 'nexpath:advisory-footer-intent';
-  intent: 'disable-project' | 'open-settings';
+  intent: 'disable-project' | 'open-settings' | 'set-frequency' | 'set-role';
   projectRoot: string;
+  /** Present only for set-frequency / set-role. */
+  value?: string;
 }
 
-export type ContentToSwMsg = PromptSubmitMsg | ResponseStopMsg | AdvisoryFooterIntentMsg;
+/**
+ * One-way select-notification: the panel's "Send to your agent now" is about to
+ * inject + auto-submit `text` into the composer. The SW records it as the last
+ * seen prompt so the capture pipeline dedups the auto-submitted echo — the
+ * browser equivalent of the CLI marking injected prompts to skip re-processing.
+ */
+export interface PromptInjectedMsg {
+  type: 'nexpath:prompt-injected';
+  projectRoot: string;
+  text: string;
+}
+
+/**
+ * One-way terminal-event report (select / skip / dismiss). The showAdvisory
+ * round-trip dies with the SW instance that opened it (MV3 teardown while the
+ * popup waits, observed live 2026-07-10) — this fire-and-forget message reaches
+ * whatever SW instance is alive, so the advisory_dismissed record survives.
+ */
+export interface AdvisoryTerminalMsg {
+  type: 'nexpath:advisory-terminal';
+  eventType: 'select' | 'skip' | 'dismiss';
+  advisoryId: string;
+}
+
+export type ContentToSwMsg =
+  | PromptSubmitMsg
+  | ResponseStopMsg
+  | AdvisoryFooterIntentMsg
+  | PromptInjectedMsg
+  | AdvisoryTerminalMsg;
 
 // ── Service Worker → Content ──────────────────────────────────────────────────
 
@@ -91,7 +126,9 @@ export type ExtensionMsg =
   | ResponseStopMsg
   | ShowAdvisoryMsg
   | PanelEventMsg
-  | AdvisoryFooterIntentMsg;
+  | AdvisoryFooterIntentMsg
+  | PromptInjectedMsg
+  | AdvisoryTerminalMsg;
 
 // ── Type guards ───────────────────────────────────────────────────────────────
 
@@ -134,6 +171,23 @@ export function isAdvisoryFooterIntentMsg(msg: unknown): msg is AdvisoryFooterIn
   if (typeof msg !== 'object' || msg === null) return false;
   const m = msg as Record<string, unknown>;
   return m['type'] === 'nexpath:advisory-footer-intent' &&
-    (m['intent'] === 'disable-project' || m['intent'] === 'open-settings') &&
-    typeof m['projectRoot'] === 'string';
+    (m['intent'] === 'disable-project' || m['intent'] === 'open-settings' ||
+     m['intent'] === 'set-frequency' || m['intent'] === 'set-role') &&
+    typeof m['projectRoot'] === 'string' &&
+    (m['value'] === undefined || typeof m['value'] === 'string');
+}
+
+export function isPromptInjectedMsg(msg: unknown): msg is PromptInjectedMsg {
+  if (typeof msg !== 'object' || msg === null) return false;
+  const m = msg as Record<string, unknown>;
+  return m['type'] === 'nexpath:prompt-injected' &&
+    typeof m['projectRoot'] === 'string' && typeof m['text'] === 'string';
+}
+
+export function isAdvisoryTerminalMsg(msg: unknown): msg is AdvisoryTerminalMsg {
+  if (typeof msg !== 'object' || msg === null) return false;
+  const m = msg as Record<string, unknown>;
+  return m['type'] === 'nexpath:advisory-terminal' &&
+    (m['eventType'] === 'select' || m['eventType'] === 'skip' || m['eventType'] === 'dismiss') &&
+    typeof m['advisoryId'] === 'string';
 }

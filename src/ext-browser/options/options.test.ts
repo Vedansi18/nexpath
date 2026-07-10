@@ -19,7 +19,6 @@ function setupDom(): void {
     <div id="frequency-group"></div>
     <div id="role-group"></div>
     <div id="self-check"></div>
-    <div id="recent-activity"></div>
   `;
 }
 
@@ -112,44 +111,6 @@ describe('options.ts', () => {
       const html = els().selfCheck.innerHTML;
       expect(html).toContain('declined (release 0.93)');
       expect(html).toContain('testing practices already demonstrated');
-    });
-
-    it('renders "No pipeline activity" when the recent-events buffer is empty', async () => {
-      mockGet.mockResolvedValue({});
-      await loadOptionsModule();
-
-      const recent = document.getElementById('recent-activity') as HTMLDivElement;
-      expect(recent.innerHTML).toContain('No pipeline activity recorded yet');
-    });
-
-    it('renders persisted recent events newest-first (the browser nexpath log)', async () => {
-      mockGet.mockResolvedValue({
-        nexpath_recent_events: JSON.stringify([
-          { at: 1751790000000, level: 'debug', key: 'prompt_submit_received', data: { agent: 'bolt' } },
-          { at: 1751790005000, level: 'debug', key: 'stage2_result', data: { fire: true } },
-        ]),
-      });
-      await loadOptionsModule();
-
-      const html = (document.getElementById('recent-activity') as HTMLDivElement).innerHTML;
-      expect(html).toContain('prompt_submit_received');
-      expect(html).toContain('stage2_result');
-      // newest first: stage2_result (later timestamp) must appear before prompt_submit_received
-      expect(html.indexOf('stage2_result')).toBeLessThan(html.indexOf('prompt_submit_received'));
-    });
-
-    it('Recent Activity shows at most 20 rows, newest first, dropping the oldest', async () => {
-      const events = Array.from({ length: 25 }, (_, i) => ({
-        at: 1751790000000 + i * 1000, level: 'debug', key: `event-${i}`,
-      }));
-      mockGet.mockResolvedValue({ nexpath_recent_events: JSON.stringify(events) });
-      await loadOptionsModule();
-
-      const html = (document.getElementById('recent-activity') as HTMLDivElement).innerHTML;
-      expect(html).toContain('event-24'); // newest kept
-      expect(html).toContain('event-5');  // 20th-newest kept
-      expect(html).not.toContain('event-4'); // 21st-newest dropped
-      expect(html.indexOf('event-24')).toBeLessThan(html.indexOf('event-5')); // newest first
     });
 
     it('renders a persisted Stage-2 error record', async () => {

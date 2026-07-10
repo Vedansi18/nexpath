@@ -15,8 +15,11 @@ import { WHY_HELP_BY_SIGNAL_TYPE } from '../../decision-session/why-help-by-sign
 vi.mock('../../core/classifier/PromptClassifier.js', () => ({ classifyPrompt: vi.fn() }));
 vi.mock('../../core/session-state.js', () => ({ SessionStateManager: { load: vi.fn() } }));
 vi.mock('../../core/stage2.js', () => ({ shouldFireStage2: vi.fn(), runStage2: vi.fn() }));
+vi.mock('../../core/classifier/AbsenceDetector.js', () => ({ detectAbsenceFlags: vi.fn(() => []) }));
+vi.mock('../../core/classifier/StreamBPresenceClassifier.js', () => ({ classifyStreamBPresence: vi.fn() }));
 vi.mock('../../core/decision/pinch.js', () => ({ generatePinchLabel: vi.fn() }));
 vi.mock('../../decision-session/options.js', () => ({ resolveDecisionContent: vi.fn() }));
+vi.mock('../../core/decision/options.js', () => ({ generateOptionList: vi.fn() }));
 vi.mock('../adapters/storage-idb.js', () => ({ IdbStorageAdapter: vi.fn() }));
 vi.mock('../adapters/memory-storage.js', () => ({ makeMemoryStoragePort: vi.fn() }));
 vi.mock('../adapters/llm-fetch.js', () => ({ FetchLLMAdapter: vi.fn() }));
@@ -30,8 +33,11 @@ vi.mock('../content/panel-adapter.js', () => ({ ContentScriptUIAdapter: vi.fn() 
 const { classifyPrompt } = await import('../../core/classifier/PromptClassifier.js');
 const { SessionStateManager } = await import('../../core/session-state.js');
 const { shouldFireStage2, runStage2 } = await import('../../core/stage2.js');
+const { detectAbsenceFlags } = await import('../../core/classifier/AbsenceDetector.js');
+const { classifyStreamBPresence } = await import('../../core/classifier/StreamBPresenceClassifier.js');
 const { generatePinchLabel } = await import('../../core/decision/pinch.js');
 const { resolveDecisionContent } = await import('../../decision-session/options.js');
+const { generateOptionList } = await import('../../core/decision/options.js');
 const { IdbStorageAdapter } = await import('../adapters/storage-idb.js');
 const { makeMemoryStoragePort } = await import('../adapters/memory-storage.js');
 const { ChromeStorageKeyAdapter } = await import('../adapters/storage-chrome.js');
@@ -60,6 +66,8 @@ const mgrProcessPrompt = vi.fn();
 const mgrMarkAdvisoryFired = vi.fn();
 const mgrMarkDecisionSessionFired = vi.fn();
 const mgrHasFiredDecisionSession = vi.fn();
+const mgrAddAbsenceFlag = vi.fn();
+const mgrApplyStage2SignalUpdates = vi.fn();
 const mgrSetProfile = vi.fn();
 let mgrCurrent: Partial<SessionState>;
 
@@ -131,6 +139,8 @@ describe('service-worker.ts', () => {
       firedDecisionSessions: [],
       lastAdvisoryPromptIndex: -1,
       advisoryCount: 0,
+      absenceFlags: [],
+      promptsInCurrentStage: 1,
     };
     idbLoadSessionState.mockResolvedValue(null);
     idbGetProjectDetectedLanguage.mockResolvedValue(undefined);
@@ -140,6 +150,8 @@ describe('service-worker.ts', () => {
     tabsQueryMock.mockResolvedValue([]);
 
     vi.mocked(classifyPrompt).mockResolvedValue(baseClassification());
+    // Default: no personalisation → handleResponseStop shows the static queued payload.
+    vi.mocked(generateOptionList).mockResolvedValue(null);
     vi.mocked(SessionStateManager.load).mockImplementation(function () {
       return {
         current: mgrCurrent,
@@ -148,6 +160,8 @@ describe('service-worker.ts', () => {
         markDecisionSessionFired: mgrMarkDecisionSessionFired,
         hasFiredDecisionSession: mgrHasFiredDecisionSession,
         setProfile: mgrSetProfile,
+        addAbsenceFlag: mgrAddAbsenceFlag,
+        applyStage2SignalUpdates: mgrApplyStage2SignalUpdates,
       } as unknown as ReturnType<typeof SessionStateManager.load>;
     });
     vi.mocked(shouldFireStage2).mockReturnValue(null as unknown as ReturnType<typeof shouldFireStage2>);
@@ -799,6 +813,24 @@ describe('service-worker.ts', () => {
       expect(typeof payload.whyHelp).toBe('string');
       expect((payload.whyHelp as string).length).toBeGreaterThan(0);
     });
+
+    it('does NOT run the option generator at submit — queuing stays instant (regression guard)', async () => {
+      // Regression: running generateOptionList (2 LLM calls) on the submit path delayed
+      // persisting the pending advisory, so a fast agent response reached response-stop
+      // before the advisory was queued → missed popup. Option-gen must run at STOP only.
+      primeFirePath(undefined);
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      const sr = vi.fn();
+      messageListener(
+        { type: 'nexpath:prompt-submit', promptText: 'ship it', projectRoot: 'https://replit.com', agent: 'replit', tabId: 9 },
+        {}, sr,
+      );
+      await vi.waitFor(() => expect(sr).toHaveBeenCalledWith({ ok: true }));
+      expect(generateOptionList).not.toHaveBeenCalled();
+      // Queued payload carries STATIC option text (raw desc-base) — personalised later, at stop.
+      const payload = pendingPayload() as unknown as { levels: { L1: { title: string; body: string }[] } };
+      expect(payload.levels.L1[0]).toMatchObject({ title: 'Run the full suite', body: 'b1' });
+    });
   });
 
   describe('response-stop shows the queued advisory (CLI popup-on-Stop timing)', () => {
@@ -833,6 +865,91 @@ describe('service-worker.ts', () => {
       await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
     });
 
+    it('personalises titles + resolves desc bodies at STOP (CLI stop.ts parity), then shows', async () => {
+      const OG_KEY = 'nexpath_pending_advisory_og::https://replit.com';
+      const og = {
+        stage: 'implementation', flagType: 'stage_transition', prevStage: 'implementation',
+        promptsInCurrentStage: 3, language: null, profile: null, promptHistory: [],
+      };
+      keyStoreGetKey.mockImplementation(async (name) => {
+        if (name === PENDING_KEY) return JSON.stringify(samplePayload);
+        if (name === OG_KEY) return JSON.stringify(og);
+        if (name === 'openai_api_key') return 'sk-real-key';
+        return null;
+      });
+      vi.mocked(resolveDecisionContent).mockReturnValue({
+        question: 'q', whyHelp: null,
+        L1: [{ option: 'static L1', descBase: 'static b1' }],
+        L2: [{ option: 'static L2', descBase: 'static b2' }],
+        L3: [{ option: 'static L3', descBase: 'static b3' }],
+        pinchFallback: 'f',
+      } as unknown as ReturnType<typeof resolveDecisionContent>);
+      vi.mocked(generateOptionList).mockResolvedValueOnce({
+        l1: ['Personalised L1'], l2: ['Personalised L2'], l3: ['Personalised L3'],
+        generatedDescBases: { l1: ['resolved body 1'], l2: ['resolved body 2'], l3: ['resolved body 3'] },
+      } as unknown as Awaited<ReturnType<typeof generateOptionList>>);
+      showAdvisoryMock.mockResolvedValue({ type: 'dismiss', advisoryId: 'adv-queued' });
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+
+      stop(messageListener, 55);
+      await vi.waitFor(() => expect(showAdvisoryMock).toHaveBeenCalledOnce());
+      expect(generateOptionList).toHaveBeenCalledOnce();
+      const shown = showAdvisoryMock.mock.calls[0]?.[0] as unknown as {
+        levels: { L1: { title: string; body: string }[] };
+        options: { title: string; body: string }[];
+      };
+      expect(shown.levels.L1[0]).toMatchObject({ title: 'Personalised L1', body: 'resolved body 1' });
+      expect(shown.options[0]).toMatchObject({ title: 'Personalised L1', body: 'resolved body 1' });
+    });
+
+    it('shows the STATIC queued payload when personalisation fails (no missed popup)', async () => {
+      keyStoreGetKey.mockImplementation(async (name) => {
+        if (name === PENDING_KEY) return JSON.stringify({ ...samplePayload, options: [{ id: 'l1-0', level: 'L1', title: 'static title', body: 'raw {R4_OPEN}' }] });
+        if (name === 'nexpath_pending_advisory_og::https://replit.com') return JSON.stringify({ stage: 'implementation', flagType: 'stage_transition', prevStage: null, promptsInCurrentStage: 1, language: null, profile: null, promptHistory: [] });
+        if (name === 'openai_api_key') return 'sk-real-key';
+        return null;
+      });
+      vi.mocked(generateOptionList).mockResolvedValueOnce(null); // engine failed → fall back to static
+      showAdvisoryMock.mockResolvedValue({ type: 'dismiss', advisoryId: 'adv-queued' });
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+
+      stop(messageListener, 55);
+      await vi.waitFor(() => expect(showAdvisoryMock).toHaveBeenCalledOnce());
+      const shown = showAdvisoryMock.mock.calls[0]?.[0] as unknown as { options: { title: string }[] };
+      expect(shown.options[0]?.title).toBe('static title'); // popup still shows, static content
+    });
+
+    it('logs the rejection reason when the generator rejects — never a silent swallow', async () => {
+      keyStoreGetKey.mockImplementation(async (name) => {
+        if (name === PENDING_KEY) return JSON.stringify(samplePayload);
+        if (name === 'nexpath_pending_advisory_og::https://replit.com') return JSON.stringify({ stage: 'implementation', flagType: 'stage_transition', prevStage: null, promptsInCurrentStage: 1, language: null, profile: null, promptHistory: [] });
+        if (name === 'openai_api_key') return 'sk-real-key';
+        return null;
+      });
+      vi.mocked(generateOptionList).mockRejectedValueOnce(new Error('instant network refusal'));
+      showAdvisoryMock.mockResolvedValue({ type: 'dismiss', advisoryId: 'adv-queued' });
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+
+      stop(messageListener, 55);
+      await vi.waitFor(() => expect(showAdvisoryMock).toHaveBeenCalledOnce()); // popup never missed
+      expect(logWarnMock).toHaveBeenCalledWith('advisory_personalize_rejected', expect.objectContaining({ error: expect.stringContaining('instant network refusal') }));
+    });
+
+    it('logs a guard skip (hasOg/hasApiKey) when the og sidecar or key is missing', async () => {
+      keyStoreGetKey.mockImplementation(async (name) => {
+        if (name === PENDING_KEY) return JSON.stringify(samplePayload);
+        if (name === 'openai_api_key') return 'sk-real-key';
+        return null; // og sidecar missing
+      });
+      showAdvisoryMock.mockResolvedValue({ type: 'dismiss', advisoryId: 'adv-queued' });
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+
+      stop(messageListener, 55);
+      await vi.waitFor(() => expect(showAdvisoryMock).toHaveBeenCalledOnce());
+      expect(generateOptionList).not.toHaveBeenCalled();
+      expect(logDebugMock).toHaveBeenCalledWith('advisory_personalize_skipped', { hasOg: false, hasApiKey: true });
+    });
+
     it('does nothing when no advisory is queued', async () => {
       keyStoreGetKey.mockResolvedValue(null);
       const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
@@ -852,8 +969,10 @@ describe('service-worker.ts', () => {
 
       const sendResponse = stop(messageListener, 55);
       await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+      // handleResponseStop runs detached; wait until it reaches the clear (which happens
+      // before the freq-off return) before asserting the popup was suppressed.
+      await vi.waitFor(() => expect(keyStoreSetKey).toHaveBeenCalledWith(PENDING_KEY, '')); // still cleared
       expect(showAdvisoryMock).not.toHaveBeenCalled();
-      expect(keyStoreSetKey).toHaveBeenCalledWith(PENDING_KEY, ''); // still cleared
     });
 
     it('does not show when the stop event has no tab id', async () => {
@@ -931,6 +1050,130 @@ describe('service-worker.ts', () => {
       await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
       expect(openOptionsPageMock).toHaveBeenCalledOnce();
       expect(keyStoreSetKey).not.toHaveBeenCalledWith('advisory_frequency:https://replit.com', 'off');
+    });
+
+    it('absence trigger: detector flags reach shouldFireStage2; Stage-2 SELECTED signal forms flagType + fired key (CLI auto.ts step 8)', async () => {
+      const flag = { signalKey: 'TEST_CREATION', stage: 'implementation', firstAbsentAt: 0, promptCountAtDetection: 3 };
+      vi.mocked(detectAbsenceFlags).mockReturnValue([flag] as never);
+      vi.mocked(shouldFireStage2).mockReturnValue({ kind: 'absence', qualifyingFlags: [flag] } as unknown as ReturnType<typeof shouldFireStage2>);
+      keyStoreGetKey.mockResolvedValueOnce('sk-real-key');
+      vi.mocked(runStage2).mockResolvedValue({
+        fire_decision_session: true,
+        selected_signal_key: 'SECURITY_REVIEW_GAP',
+        signals_present: ['TEST_CREATION'],
+      } as unknown as Awaited<ReturnType<typeof runStage2>>);
+      vi.mocked(resolveDecisionContent).mockReturnValue({
+        L1: [{ option: 'o1', descBase: 'b1' }], L2: [], L3: [], pinchFallback: 'f',
+      } as unknown as ReturnType<typeof resolveDecisionContent>);
+      vi.mocked(generatePinchLabel).mockResolvedValue('Pinch.');
+
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      const sendResponse = vi.fn();
+      messageListener(
+        { type: 'nexpath:prompt-submit', promptText: 'more code', projectRoot: 'https://replit.com', agent: 'replit', tabId: 42 },
+        {}, sendResponse,
+      );
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+
+      // Detector output flows into the trigger decision (was hardcoded [] pre-wiring).
+      expect(vi.mocked(shouldFireStage2)).toHaveBeenCalledWith(expect.anything(), undefined, [flag], expect.anything());
+      // CLI 6.8: newly-detected flags persisted when the trigger is absence —
+      // AND saved to IDB before the Stage-2 await (a Stage-2 error must not drop
+      // them, or the detector re-flags the same signals every prompt).
+      expect(mgrAddAbsenceFlag).toHaveBeenCalledWith(expect.anything(), flag);
+      expect(idbSaveSessionState.mock.invocationCallOrder.some(
+        (o) => o < vi.mocked(runStage2).mock.invocationCallOrder[0]!
+          && o > mgrAddAbsenceFlag.mock.invocationCallOrder[0]!,
+      )).toBe(true);
+      // CLI 7.5: Stage-2 signal assessments fed back into the counters.
+      expect(mgrApplyStage2SignalUpdates).toHaveBeenCalledWith(expect.anything(), ['TEST_CREATION']);
+      // CLI step 8: the fired key uses Stage 2's SELECTED signal, not the first qualifying flag.
+      expect(mgrMarkDecisionSessionFired).toHaveBeenCalledWith(expect.anything(), 'absence:SECURITY_REVIEW_GAP@implementation');
+      const ogCall = keyStoreSetKey.mock.calls.find((c) => (c[0] as string).startsWith('nexpath_pending_advisory_og'));
+      expect(ogCall).toBeDefined();
+      expect(JSON.parse(ogCall![1] as string)).toMatchObject({ flagType: 'absence:SECURITY_REVIEW_GAP' });
+    });
+
+    it('Stream B presence runs ONLY at implementation stage with >=3 prompts in it (CLI auto.ts 2.8 gate)', async () => {
+      vi.mocked(classifyStreamBPresence).mockResolvedValue({} as never);
+      mgrCurrent.promptsInCurrentStage = 3;
+      keyStoreGetKey.mockResolvedValueOnce('sk-real-key');
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      const sendResponse = vi.fn();
+      messageListener(
+        { type: 'nexpath:prompt-submit', promptText: 'p1', projectRoot: 'https://replit.com', agent: 'replit', tabId: 1 },
+        {}, sendResponse,
+      );
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+      expect(vi.mocked(classifyStreamBPresence)).toHaveBeenCalledTimes(1);
+
+      // Below the prompt floor the gate stays closed (no LLM call).
+      vi.mocked(classifyStreamBPresence).mockClear();
+      mgrCurrent.promptsInCurrentStage = 1;
+      keyStoreGetKey.mockResolvedValueOnce('sk-real-key');
+      const sendResponse2 = vi.fn();
+      messageListener(
+        { type: 'nexpath:prompt-submit', promptText: 'p2', projectRoot: 'https://replit.com', agent: 'replit', tabId: 1 },
+        {}, sendResponse2,
+      );
+      await vi.waitFor(() => expect(sendResponse2).toHaveBeenCalledWith({ ok: true }));
+      expect(vi.mocked(classifyStreamBPresence)).not.toHaveBeenCalled();
+    });
+
+    it("'set-frequency' writes the CLI Ctrl+T per-project slot advisory_frequency:<root>=<value>", async () => {
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      const sendResponse = vi.fn();
+      messageListener(
+        { type: 'nexpath:advisory-footer-intent', intent: 'set-frequency', projectRoot: 'https://replit.com', value: 'optimum' },
+        {}, sendResponse,
+      );
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+      expect(keyStoreSetKey).toHaveBeenCalledWith('advisory_frequency:https://replit.com', 'optimum');
+    });
+
+    it("'set-role' writes role:<root>=<value>; a non-whitelisted value is rejected without a write", async () => {
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      const sendResponse = vi.fn();
+      messageListener(
+        { type: 'nexpath:advisory-footer-intent', intent: 'set-role', projectRoot: 'https://replit.com', value: 'indie_hacker' },
+        {}, sendResponse,
+      );
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+      expect(keyStoreSetKey).toHaveBeenCalledWith('role:https://replit.com', 'indie_hacker');
+
+      keyStoreSetKey.mockClear();
+      const sendResponse2 = vi.fn();
+      messageListener(
+        { type: 'nexpath:advisory-footer-intent', intent: 'set-frequency', projectRoot: 'https://replit.com', value: 'off; DROP TABLE' },
+        {}, sendResponse2,
+      );
+      await vi.waitFor(() => expect(sendResponse2).toHaveBeenCalledWith({ ok: true }));
+      expect(keyStoreSetKey).not.toHaveBeenCalled();
+      expect(logWarnMock).toHaveBeenCalledWith('advisory_set_frequency_rejected', expect.anything());
+    });
+
+    it('nexpath:prompt-injected records the text in the cross-page dedup slot (injected-echo suppression)', async () => {
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      const sendResponse = vi.fn();
+      messageListener(
+        { type: 'nexpath:prompt-injected', projectRoot: 'https://replit.com', text: 'Run the full test suite' },
+        {}, sendResponse,
+      );
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+      const call = keyStoreSetKey.mock.calls.find((c) => c[0] === 'nexpath_last_prompt::https://replit.com');
+      expect(call).toBeDefined();
+      expect(JSON.parse(call![1] as string)).toMatchObject({ text: 'Run the full test suite' });
+    });
+
+    it('nexpath:advisory-terminal logs advisory_dismissed (survives SW-teardown of the round-trip)', async () => {
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      const sendResponse = vi.fn();
+      messageListener(
+        { type: 'nexpath:advisory-terminal', eventType: 'skip', advisoryId: 'adv-99' },
+        {}, sendResponse,
+      );
+      expect(sendResponse).toHaveBeenCalledWith({ ok: true });
+      expect(logDebugMock).toHaveBeenCalledWith('advisory_dismissed', { eventType: 'skip', advisoryId: 'adv-99' });
     });
   });
 

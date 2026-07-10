@@ -13,7 +13,7 @@ import type { PanelEvent } from '../../core/ports/ui.port.js';
 import { injectPromptText as injectPromptTextReplit } from './agents/replit-inject.js';
 import { injectPromptText as injectPromptTextBolt } from './agents/bolt-inject.js';
 import { injectPromptText as injectPromptTextLovable } from './agents/lovable-inject.js';
-import { clipboardFallback } from './agents/inject-kit.js';
+import { clipboardFallback, showToast } from './agents/inject-kit.js';
 import { resolveAgentFromHostname } from './agents/agent-hosts.js';
 
 // Per-agent inject-back dispatch (B4 — the per-agent split B3's comment planned).
@@ -84,8 +84,11 @@ function findOptionTitle(optionId: string): string {
  * Kept off the `nexpath:panel-event` round-trip so open-settings doesn't resolve
  * (and thereby end) the in-flight advisory.
  */
-function dispatchFooterIntent(intent: 'disable-project' | 'open-settings'): void {
-  window.dispatchEvent(new CustomEvent('nexpath:footer-intent', { detail: { intent } }));
+function dispatchFooterIntent(
+  intent: 'disable-project' | 'open-settings' | 'set-frequency' | 'set-role',
+  value?: string,
+): void {
+  window.dispatchEvent(new CustomEvent('nexpath:footer-intent', { detail: { intent, value } }));
 }
 
 async function copyToClipboard(text: string): Promise<void> {
@@ -99,6 +102,15 @@ async function copyToClipboard(text: string): Promise<void> {
 /** Report a TERMINAL outcome to the SW (resolves showAdvisory's awaited Promise). */
 function reportTerminal(event: PanelEvent): void {
   window.dispatchEvent(new CustomEvent('nexpath:panel-event', { detail: event }));
+  // ALSO fire-and-forget the outcome (main-world-injector → SW): the round-trip
+  // above resolves against the SW instance that opened it, which MV3 may have torn
+  // down while the popup sat open — this one-way notice reaches whichever SW
+  // instance is alive so the advisory_dismissed record always lands.
+  if (event.type === 'select' || event.type === 'skip' || event.type === 'dismiss') {
+    window.dispatchEvent(new CustomEvent('nexpath:advisory-terminal-notice', {
+      detail: { eventType: event.type, advisoryId: event.advisoryId },
+    }));
+  }
 }
 
 function handlePanelEvent(event: UiPanelEvent): void {
@@ -111,6 +123,11 @@ function handlePanelEvent(event: UiPanelEvent): void {
       // (= descBase). Confirmed as the CLI's `selectedPrompt` and matches every live
       // test to date. The panel also sends `event.body`, deliberately unused here.
       const title = findOptionTitle(event.optionId);
+      // Mark the injected text BEFORE it lands: the SW records it as the last seen
+      // prompt so the auto-submitted echo dedups instead of counting as a fresh
+      // user prompt (CLI parity — the CLI marks injected prompts to skip
+      // re-processing; before this the echo cost a promptCount++).
+      window.dispatchEvent(new CustomEvent('nexpath:prompt-injected-notice', { detail: { text: title } }));
       controller?.setBusy(true);
       void injectPromptText(title)
         .catch(() => { /* clipboardFallback already handles paste failure internally */ })
@@ -146,16 +163,30 @@ function handlePanelEvent(event: UiPanelEvent): void {
     }
     case 'disable-project': {
       // CLI Ctrl+X: disable this project (SW writes advisory_frequency:<root>=off),
-      // then close the advisory. Resolve the round-trip as a plain dismiss (nothing
-      // recorded) — the disable itself travels on the separate footer-intent channel.
+      // print the re-activation notice, close as SKIP — TtySelectFn's Ctrl+X handler
+      // does exactly this ("Advisory disabled. …" + cleanup(SKIP_NOW)).
       dispatchFooterIntent('disable-project');
+      showToast('Advisory disabled for this project.');
       controller?.hide();
-      reportTerminal({ type: 'dismiss', advisoryId });
+      reportTerminal({ type: 'skip', advisoryId });
       break;
     }
     case 'open-settings': {
-      // CLI Ctrl+T: open the options page. Panel STAYS open — non-terminal, no report.
+      // Open the extension options page. Panel STAYS open — non-terminal, no report.
+      // (The CLI-parity Ctrl+, frequency/role chooser is panel-INTERNAL; this event
+      // remains for any explicit options-page affordance.)
       dispatchFooterIntent('open-settings');
+      break;
+    }
+    case 'set-frequency': {
+      // CLI Ctrl+T → frequency submenu: SW writes advisory_frequency:<root>=<value>.
+      // Non-terminal — the panel loops back to its chooser exactly like the CLI.
+      dispatchFooterIntent('set-frequency', event.value);
+      break;
+    }
+    case 'set-role': {
+      // CLI Ctrl+T → role submenu: SW writes role:<root>=<value>. Non-terminal.
+      dispatchFooterIntent('set-role', event.value);
       break;
     }
     case 'move': {

@@ -10,7 +10,6 @@ const saveBtn  = document.getElementById('save-key')     as HTMLButtonElement;
 const testBtn  = document.getElementById('test-key')     as HTMLButtonElement;
 const keyStatus = document.getElementById('key-status')  as HTMLParagraphElement;
 const checkEl  = document.getElementById('self-check')   as HTMLDivElement;
-const recentEl = document.getElementById('recent-activity') as HTMLDivElement;
 const freqGroup = document.getElementById('frequency-group') as HTMLDivElement;
 const roleGroup = document.getElementById('role-group')      as HTMLDivElement;
 
@@ -197,39 +196,6 @@ async function renderSelfCheck(): Promise<void> {
 }
 
 /**
- * Recent-activity list — the browser's `nexpath log`. Reads the rolling event
- * buffer PersistentLogAdapter maintains in storage.local (SW console history
- * dies with each MV3 instance; this survives). Newest first, capped at 20 rows.
- */
-async function renderRecentActivity(): Promise<void> {
-  if (!recentEl) return;
-  const result = await browser.storage.local.get('nexpath_recent_events');
-  const raw = result['nexpath_recent_events'];
-  let events: Array<{ at?: number; level?: string; key?: string; data?: Record<string, unknown> }> = [];
-  if (typeof raw === 'string' && raw.length > 0) {
-    try {
-      const parsed = JSON.parse(raw) as unknown;
-      if (Array.isArray(parsed)) events = parsed as typeof events;
-    } catch { /* unreadable buffer — render as empty */ }
-  }
-  if (events.length === 0) {
-    recentEl.innerHTML = '<div class="check-row"><span class="check-val">No pipeline activity recorded yet</span></div>';
-    return;
-  }
-  const rows = events.slice(-20).reverse().map((e) => {
-    const when = typeof e.at === 'number' ? new Date(e.at).toLocaleTimeString() : '';
-    const dataStr = e.data ? JSON.stringify(e.data) : '';
-    const cls = e.level === 'warn' ? 'err' : '';
-    return `
-    <div class="check-row">
-      <span class="check-label">${escHtml(when)}</span>
-      <span class="check-val ${cls}">${escHtml(e.key ?? '?')}${dataStr ? ' ' + escHtml(dataStr.length > 120 ? dataStr.slice(0, 120) + '…' : dataStr) : ''}</span>
-    </div>`;
-  });
-  recentEl.innerHTML = rows.join('');
-}
-
-/**
  * Human-readable one-liner for the persisted Stage-2 verdict record.
  * The SW console's stage2_result log dies with the SW (MV3) — this row is the
  * durable answer to "why did no advisory appear?".
@@ -249,4 +215,3 @@ function formatLastStage2(raw: unknown): string {
 }
 
 loadKey();
-void renderRecentActivity();

@@ -8,6 +8,8 @@ import {
   isResponseStoppedMsg,
   isFetchPromptMsg,
   isAdvisoryFooterIntentMsg,
+  isPromptInjectedMsg,
+  isAdvisoryTerminalMsg,
 } from './ipc.js';
 
 describe('IPC type guards', () => {
@@ -146,6 +148,32 @@ describe('IPC type guards', () => {
         intent: 'nuke-everything',
         projectRoot: '/proj',
       })).toBe(false);
+    });
+
+    it('accepts set-frequency / set-role with a string value, rejects non-string values', () => {
+      expect(isAdvisoryFooterIntentMsg({
+        type: 'nexpath:advisory-footer-intent', intent: 'set-frequency', projectRoot: '/proj', value: 'optimum',
+      })).toBe(true);
+      expect(isAdvisoryFooterIntentMsg({
+        type: 'nexpath:advisory-footer-intent', intent: 'set-role', projectRoot: '/proj', value: 'pm',
+      })).toBe(true);
+      expect(isAdvisoryFooterIntentMsg({
+        type: 'nexpath:advisory-footer-intent', intent: 'set-role', projectRoot: '/proj', value: 42,
+      })).toBe(false);
+    });
+  });
+
+  describe('isPromptInjectedMsg / isAdvisoryTerminalMsg', () => {
+    it('validates the prompt-injected one-way message', () => {
+      expect(isPromptInjectedMsg({ type: 'nexpath:prompt-injected', projectRoot: '/p', text: 't' })).toBe(true);
+      expect(isPromptInjectedMsg({ type: 'nexpath:prompt-injected', projectRoot: '/p' })).toBe(false);
+      expect(isPromptInjectedMsg(null)).toBe(false);
+    });
+
+    it('validates the advisory-terminal one-way message', () => {
+      expect(isAdvisoryTerminalMsg({ type: 'nexpath:advisory-terminal', eventType: 'skip', advisoryId: 'a' })).toBe(true);
+      expect(isAdvisoryTerminalMsg({ type: 'nexpath:advisory-terminal', eventType: 'move', advisoryId: 'a' })).toBe(false);
+      expect(isAdvisoryTerminalMsg(null)).toBe(false);
     });
 
     it('returns false when projectRoot is missing/non-string', () => {

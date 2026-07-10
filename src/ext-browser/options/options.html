@@ -9,8 +9,13 @@
   <body>
     <main class="container">
       <header>
-        <h1>Nexpath Settings</h1>
-        <p class="subtitle">Configure your AI coding behaviour guide.</p>
+        <div class="brand-row">
+          <img class="brand-icon" src="../icons/icon48.png" alt="Nexpath" width="40" height="40" />
+          <div>
+            <h1>Nexpath Settings</h1>
+            <p class="subtitle">Configure your AI coding behaviour guide.</p>
+          </div>
+        </div>
       </header>
 
       <section class="card">
@@ -49,12 +54,9 @@
         <div id="self-check" class="self-check"></div>
       </section>
 
-      <section class="card">
-        <label>Recent Activity</label>
-        <p class="field-hint">Pipeline events survive service-worker restarts here (the browser's <code>nexpath log</code>). Reload this page to refresh.</p>
-        <div id="recent-activity" class="self-check"></div>
-      </section>
-
+      <!-- Recent Activity card removed 2026-07-10 (user: less professional on a settings
+           page). The nexpath_recent_events ring buffer itself STAYS — the injector's
+           debug channel still reads it for diagnostics. -->
       <section class="card">
         <label>Supported Agent Sites</label>
         <ul class="site-list">

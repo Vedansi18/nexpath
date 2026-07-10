@@ -126,9 +126,15 @@ export function mountNexpathPanel(root, { onEvent }) {
   const expanded = new Set();
   let busy = false;
 
-  let view = 'options';        // 'options' | 'confirm'
+  let view = 'options';        // 'options' | 'confirm' | 'adjust' | 'adjust-freq' | 'adjust-role'
   let pendingOption = null;    // option awaiting send/copy decision
   let confirmFocusedIndex = 0; // 0 = send now, 1 = copy
+
+  // ── Ctrl+, adjust chooser state (CLI Ctrl+T root chooser, TtySelectFn) ─────
+  let adjustFocusedIndex = 0;
+  let adjustNote = '';         // transient "Frequency set to: High" line (CLI submenu echo)
+  let currentFreq = null;      // local copies so "(current)" moves after a set —
+  let currentRole = null;      // payload.meta stays a snapshot of show() time.
 
   // ── DOM scaffold (built once) ─────────────────────────────────────────────
   const style = document.createElement('style');
@@ -139,6 +145,10 @@ export function mountNexpathPanel(root, { onEvent }) {
   el.className = 'np-root np-hidden';
   el.tabIndex = -1;              // focusable so composedPath() scoping works even if the
   el.style.outline = 'none';     // engine forgets to focus us; we focus ourselves on show().
+  // Agent pages aggressively re-grab focus (seen live on Lovable 2026-07-10);
+  // once blurred, the el-scoped keydown never fires again and keyboard nav is
+  // dead with no recovery. Any pointerdown inside the panel re-takes focus.
+  el.addEventListener('pointerdown', () => el.focus({ preventScroll: true }));
   root.appendChild(el);
 
   const head = document.createElement('div');
@@ -217,6 +227,7 @@ export function mountNexpathPanel(root, { onEvent }) {
       view = 'options';
       pendingOption = null;
       render();
+      el.focus({ preventScroll: true }); // keyboard flow must survive the copy round-trip
     }
   }
 
@@ -224,6 +235,113 @@ export function mountNexpathPanel(root, { onEvent }) {
     view = 'options';
     pendingOption = null;
     render();
+  }
+
+  // ── Ctrl+, adjust chooser (CLI Ctrl+T: TtySelectFn runCtrlTRootChooser +
+  //    runFrequencySubMenu / runRoleSubMenu — same entries, same loop-back,
+  //    same "Done!" closing the popup as a skip) ─────────────────────────────
+  const ADJUST_ROOT_CHOICES = [
+    { value: 'frequency', label: 'Adjust advisory frequency' },
+    { value: 'role',      label: 'Configure role' },
+    { value: 'done',      label: 'Done!' },
+  ];
+  // Active popup entries mirror the CLI menu exactly (once_per_session/off stay
+  // config-only there too — deliberately hidden from this chooser).
+  const ADJUST_FREQ_CHOICES = [
+    { value: 'optimum',     label: 'High' },
+    { value: 'every_event', label: 'Medium' },
+    { value: 'major_only',  label: 'Low' },
+  ];
+  const ADJUST_ROLE_CHOICES = [
+    { value: 'founder',      label: 'founder / product creator' },
+    { value: 'vibe_coder',   label: 'vibe coder' },
+    { value: 'indie_hacker', label: 'indie hacker' },
+    { value: 'pm',           label: 'product manager' },
+  ];
+
+  function openAdjust() {
+    view = 'adjust';
+    adjustFocusedIndex = 0;
+    adjustNote = '';
+    render();
+    el.focus({ preventScroll: true });
+  }
+
+  function adjustChoices() {
+    if (view === 'adjust-freq') return ADJUST_FREQ_CHOICES;
+    if (view === 'adjust-role') return ADJUST_ROLE_CHOICES;
+    return ADJUST_ROOT_CHOICES;
+  }
+
+  function activateAdjust(index) {
+    const choice = adjustChoices()[index];
+    if (!choice) return;
+    if (view === 'adjust') {
+      if (choice.value === 'frequency') { view = 'adjust-freq'; adjustFocusedIndex = 0; render(); return; }
+      if (choice.value === 'role')      { view = 'adjust-role'; adjustFocusedIndex = 0; render(); return; }
+      // Done! — CLI parity: the chooser closes the popup as a skip (cleanup(SKIP_NOW)).
+      emitSkip();
+      return;
+    }
+    if (view === 'adjust-freq') {
+      onEvent({ type: 'set-frequency', value: choice.value });
+      currentFreq = choice.value;
+      adjustNote = `Frequency set to: ${choice.label}`;
+    } else {
+      onEvent({ type: 'set-role', value: choice.value });
+      currentRole = choice.value;
+      adjustNote = `Role set to: ${choice.label}`;
+    }
+    // Loop back to the root chooser so the user can adjust the other one too (CLI).
+    view = 'adjust';
+    adjustFocusedIndex = 0;
+    render();
+  }
+
+  function renderAdjustView() {
+    const title = view === 'adjust-freq' ? 'Advisory frequency'
+      : view === 'adjust-role' ? 'Choose your role'
+      : 'What would you like to adjust?';
+
+    if (adjustNote && view === 'adjust') {
+      const note = document.createElement('div');
+      note.className = 'np-confirm-hint';
+      note.textContent = adjustNote;
+      bodyWrap.appendChild(note);
+    }
+
+    const pinchRow = document.createElement('div');
+    pinchRow.className = 'np-row np-pinch-row';
+    pinchRow.innerHTML = `<div class="np-rail">◆</div><div class="np-content">${escapeHtml(title)}</div>`;
+    bodyWrap.appendChild(pinchRow);
+
+    const currentValue = view === 'adjust-freq' ? currentFreq : view === 'adjust-role' ? currentRole : null;
+    const optionsWrap = document.createElement('div');
+    optionsWrap.className = 'np-options';
+    adjustChoices().forEach((choice, i) => {
+      const focused = i === adjustFocusedIndex;
+      const suffix = currentValue !== null && choice.value === currentValue ? '  (current)' : '';
+      const node = document.createElement('div');
+      node.className = 'np-option' + (focused ? ' np-focused' : '');
+      const labelRow = document.createElement('div');
+      labelRow.className = 'np-label-row';
+      labelRow.innerHTML =
+        `<div class="np-bullet">${focused ? '●' : '○'}</div>` +
+        `<div class="np-label">${escapeHtml(choice.label)}<span class="np-control-sub">${escapeHtml(suffix)}</span></div>`;
+      labelRow.addEventListener('click', () => { adjustFocusedIndex = i; activateAdjust(i); });
+      node.appendChild(labelRow);
+      optionsWrap.appendChild(node);
+    });
+    bodyWrap.appendChild(optionsWrap);
+
+    const back = document.createElement('div');
+    back.className = 'np-back';
+    back.textContent = view === 'adjust' ? '← back to advisory  (Esc)' : '← back  (Esc)';
+    back.addEventListener('click', () => {
+      if (view === 'adjust') { view = 'options'; } else { view = 'adjust'; adjustFocusedIndex = 0; }
+      render();
+    });
+    bodyWrap.appendChild(back);
   }
 
   // ── render: options view ─────────────────────────────────────────────────
@@ -319,10 +437,11 @@ export function mountNexpathPanel(root, { onEvent }) {
     const footer = document.createElement('div');
     footer.className = 'np-footer';
     footer.innerHTML =
-      `don't need nexpath here? <a data-np="disable">Disable for this project</a>` +
-      `<span class="np-sep">·</span><a data-np="settings">Adjust frequency or role</a>`;
+      `don't need nexpath here? <a data-np="disable">Disable for this project (Ctrl+.)</a>` +
+      `<span class="np-sep">·</span><a data-np="settings">Adjust frequency or role (Ctrl+,)</a>`;
     footer.querySelector('[data-np="disable"]').addEventListener('click', emitDisable);
-    footer.querySelector('[data-np="settings"]').addEventListener('click', emitSettings);
+    // Footer link and Ctrl+, are the same CLI Ctrl+T function → the in-panel chooser.
+    footer.querySelector('[data-np="settings"]').addEventListener('click', openAdjust);
     bodyWrap.appendChild(footer);
   }
 
@@ -375,6 +494,8 @@ export function mountNexpathPanel(root, { onEvent }) {
 
     if (view === 'confirm') {
       renderConfirmView();
+    } else if (view === 'adjust' || view === 'adjust-freq' || view === 'adjust-role') {
+      renderAdjustView();
     } else {
       renderOptionsView();
     }
@@ -405,12 +526,33 @@ export function mountNexpathPanel(root, { onEvent }) {
     // any listener outside that shadow, so the guard rejected every key — arrows/Enter did
     // nothing. Confirmed live on Lovable 2026-07-09.)
 
-    // CLI-parity keyboard shortcut: Ctrl+X = disable for this project (TtySelectFn \x18).
-    // Works in any view. (The CLI's Ctrl+T for frequency/role is NOT bound here: Ctrl+T is
-    // the browser's own new-tab shortcut and can't be reliably intercepted by page JS, so
-    // "Adjust frequency or role" stays a clickable footer link instead.)
-    if ((e.ctrlKey || e.metaKey) && (e.key === 'x' || e.key === 'X')) {
+    // Disable for this project (the CLI's Ctrl+X, TtySelectFn \x18 — remapped to
+    // Ctrl+. per user decision 2026-07-10: Ctrl+X is Cut everywhere and colliding
+    // with editing muscle-memory reads as a bug; Ctrl+. has NO default in any
+    // browser/OS, and pairs mnemonically with Ctrl+, next to it). Works in any view.
+    if (e.ctrlKey && !e.metaKey && e.key === '.') {
       emitDisable(); e.preventDefault(); return;
+    }
+    // Ctrl+, = adjust frequency/role (the CLI's Ctrl+T, \x14 — remapped: Ctrl+T is the
+    // browser's new-tab shortcut and non-interceptable in Chrome/Firefox on Win/Linux).
+    // Ctrl+, has NO default in any browser/OS and is the settings convention (VS Code,
+    // JetBrains, macOS Cmd+,). Deliberately ctrlKey-only: Cmd+, on macOS is the browser's
+    // own Preferences menu accelerator and must not be shadowed. Opens the CLI-parity
+    // IN-PANEL chooser (runCtrlTRootChooser), not the extension options page.
+    if (e.ctrlKey && !e.metaKey && e.key === ',') {
+      openAdjust(); e.preventDefault(); return;
+    }
+
+    if (view === 'adjust' || view === 'adjust-freq' || view === 'adjust-role') {
+      const n = adjustChoices().length;
+      if (e.key === 'ArrowDown') { adjustFocusedIndex = Math.min(n - 1, adjustFocusedIndex + 1); render(); e.preventDefault(); }
+      else if (e.key === 'ArrowUp') { adjustFocusedIndex = Math.max(0, adjustFocusedIndex - 1); render(); e.preventDefault(); }
+      else if (e.key === 'Enter') { activateAdjust(adjustFocusedIndex); e.preventDefault(); }
+      else if (e.key === 'Escape') {
+        if (view === 'adjust') { view = 'options'; } else { view = 'adjust'; adjustFocusedIndex = 0; }
+        render(); e.preventDefault();
+      }
+      return;
     }
 
     if (view === 'confirm') {
@@ -486,6 +628,10 @@ export function mountNexpathPanel(root, { onEvent }) {
       view = 'options';
       pendingOption = null;
       confirmFocusedIndex = 0;
+      adjustFocusedIndex = 0;
+      adjustNote = '';
+      currentFreq = (nextPayload.meta && nextPayload.meta.frequency) || null;
+      currentRole = (nextPayload.meta && nextPayload.meta.role) || null;
       el.classList.remove('np-hidden');
       render();
       el.focus({ preventScroll: true });

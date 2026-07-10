@@ -16,7 +16,7 @@
  * file — the toast/clipboard fallback below is reusable for it as-is.
  */
 
-function showToast(message: string): void {
+export function showToast(message: string): void {
   const host = document.createElement('div');
   const shadow = host.attachShadow({ mode: 'closed' });
   const style = document.createElement('style');

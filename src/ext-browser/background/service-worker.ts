@@ -1,10 +1,16 @@
 import browser from 'webextension-polyfill';
 import { classifyPrompt } from '../../core/classifier/PromptClassifier.js';
 import { SessionStateManager } from '../../core/session-state.js';
-import { shouldFireStage2, runStage2 } from '../../core/stage2.js';
+import { shouldFireStage2, runStage2, type FlagType } from '../../core/stage2.js';
+import { detectAbsenceFlags } from '../../core/classifier/AbsenceDetector.js';
+import {
+  classifyStreamBPresence,
+  type StreamBPresenceResult,
+} from '../../core/classifier/StreamBPresenceClassifier.js';
 import { generatePinchLabel } from '../../core/decision/pinch.js';
 import { resolveDecisionContent } from '../../decision-session/options.js';
-import { generateOptionList } from '../../core/decision/options.js';
+import { generateOptionList, type GeneratedOptions } from '../../core/decision/options.js';
+import type { DecisionContent } from '../../core/decision/options.js';
 import { composeWhyHelpBlock } from '../../decision-session/why-help-compose.js';
 import { profileToRegister } from '../../decision-session/register.js';
 import { IdbStorageAdapter } from '../adapters/storage-idb.js';
@@ -20,10 +26,12 @@ import {
   isPromptSubmitMsg,
   isResponseStopMsg,
   isAdvisoryFooterIntentMsg,
+  isPromptInjectedMsg,
+  isAdvisoryTerminalMsg,
 } from '../content/ipc.js';
 import { resolveFrequencyConfig, type AdvisoryFrequencyLevel } from '../../config/GlobalConfig.js';
 import type { AdvisoryPayload } from '../../core/ports/ui.port.js';
-import type { Stage, UserRole } from '../../core/classifier/types.js';
+import type { Stage, UserRole, UserProfile, PromptRecord } from '../../core/classifier/types.js';
 
 const idb = new IdbStorageAdapter();
 const keyStore = new ChromeStorageKeyAdapter();
@@ -142,13 +150,35 @@ browser.runtime.onMessage.addListener(
     if (isAdvisoryFooterIntentMsg(msg)) {
       // CLI-parity panel footer shortcuts — see AdvisoryFooterIntentMsg.
       log.debug('advisory_footer_intent', { intent: msg.intent, projectRoot: msg.projectRoot });
-      handleAdvisoryFooterIntent(msg.intent, msg.projectRoot)
+      handleAdvisoryFooterIntent(msg.intent, msg.projectRoot, msg.value)
         .then(() => sendResponse({ ok: true }))
         .catch((err: unknown) => {
           log.warn('advisory_footer_intent_error', { error: String(err) });
           sendResponse({ ok: false });
         });
       return true; // keep channel open for async response
+    }
+
+    if (isPromptInjectedMsg(msg)) {
+      // "Send to your agent now" is about to auto-submit this text — record it as
+      // the last seen prompt so the capture pipeline dedups the echo (the browser
+      // equivalent of the CLI marking injected prompts to skip re-processing;
+      // reuses the cross-page dedup slot Step 1.2 already checks).
+      log.debug('prompt_injected_marked', { projectRoot: msg.projectRoot });
+      keyStore.setKey(lastPromptKeyFor(msg.projectRoot), JSON.stringify({ text: msg.text, at: clock.now() }))
+        .then(() => sendResponse({ ok: true }))
+        .catch(() => sendResponse({ ok: false }));
+      return true;
+    }
+
+    if (isAdvisoryTerminalMsg(msg)) {
+      // Fire-and-forget terminal record — the showAdvisory round-trip's resolution
+      // dies with the SW instance that opened it (MV3 teardown while the popup sat
+      // open, observed live 2026-07-10); this message reaches whichever instance is
+      // alive, so the advisory_dismissed record always lands in the ring buffer.
+      log.debug('advisory_dismissed', { eventType: msg.eventType, advisoryId: msg.advisoryId });
+      sendResponse({ ok: true });
+      return true;
     }
 
     sendResponse(undefined);
@@ -182,6 +212,11 @@ function projectFreqKeyFor(projectRoot: string): string {
   return `advisory_frequency:${projectRoot}`;
 }
 
+/** Per-project role key — the CLI Ctrl+T role submenu's slot (`role:<projectRoot>`). */
+function projectRoleKeyFor(projectRoot: string): string {
+  return `role:${projectRoot}`;
+}
+
 /**
  * Pending-advisory key — the browser's equivalent of the CLI's pending-advisories
  * table. handlePromptSubmit writes the built payload here; handleResponseStop reads
@@ -189,6 +224,69 @@ function projectFreqKeyFor(projectRoot: string): string {
  */
 function pendingAdvisoryKeyFor(projectRoot: string): string {
   return `nexpath_pending_advisory::${projectRoot}`;
+}
+
+/**
+ * Sidecar to the pending advisory: the inputs handleResponseStop needs to run the
+ * personalised option generator at SHOW time (CLI stop.ts parity — the CLI runs
+ * generateOptionList in the Stop hook, not at submit). Stored separately from the
+ * AdvisoryPayload (the frozen UI contract) and cleared alongside it.
+ */
+interface PendingOgContext {
+  stage:                 Stage;
+  flagType:              FlagType;
+  prevStage:             Stage | null;
+  promptsInCurrentStage: number;
+  language:              string | null;
+  profile:               UserProfile | null;
+  promptHistory:         PromptRecord[];
+}
+
+function pendingAdvisoryOgKeyFor(projectRoot: string): string {
+  return `nexpath_pending_advisory_og::${projectRoot}`;
+}
+
+/**
+ * Build the per-level option lists for the advisory payload.
+ *
+ * With `gen` present (personalised), each title comes from the generated list and
+ * each body from its resolved `generatedDescBases` — mirroring DecisionSession.wrapGen
+ * exactly, falling back per-index to the static desc-base. With `gen` null this is the
+ * pre-Option-A static mapping (title = static option text, body = static desc-base),
+ * which handlePromptSubmit queues so the popup can appear the instant the response
+ * stops even before personalisation runs.
+ */
+function buildLevels(content: DecisionContent, gen: GeneratedOptions | null): AdvisoryPayload['levels'] {
+  const gd = gen?.generatedDescBases;
+  const map = (
+    staticEntries: DecisionContent['L1'],
+    genTitles:     string[] | undefined,
+    genBodies:     string[] | undefined,
+    tag:           'L1' | 'L2' | 'L3',
+  ): AdvisoryPayload['levels']['L1'] => {
+    const lower  = tag.toLowerCase();
+    const titles = genTitles ?? staticEntries.map((e) => e.option);
+    return titles.map((title, i) => ({
+      id:    `${lower}-${i}`,
+      level: tag,
+      title,
+      body:  genBodies?.[i] ?? staticEntries[i]?.descBase ?? '',
+    }));
+  };
+  return {
+    L1: map(content.L1, gen?.l1, gd?.l1, 'L1'),
+    L2: map(content.L2, gen?.l2, gd?.l2, 'L2'),
+    L3: map(content.L3, gen?.l3, gd?.l3, 'L3'),
+  };
+}
+
+/** Flat first-of-each-level view — the shipped panel indexes `options` by level. */
+function optionsFromLevels(levels: AdvisoryPayload['levels']): AdvisoryPayload['options'] {
+  return [
+    ...(levels.L1[0] ? [levels.L1[0]] : []),
+    ...(levels.L2[0] ? [levels.L2[0]] : []),
+    ...(levels.L3[0] ? [levels.L3[0]] : []),
+  ];
 }
 
 async function handlePromptSubmit(
@@ -199,7 +297,7 @@ async function handlePromptSubmit(
   const now = clock.now();
 
   // ── Step 1: Load persisted session state + config ───────────────────────────
-  const [loadedState, lang, apiKey, freqRaw, roleRaw, lastPromptRaw, projectFreqRaw] = await Promise.all([
+  const [loadedState, lang, apiKey, freqRaw, roleRaw, lastPromptRaw, projectFreqRaw, projectRoleRaw, langOverrideRaw] = await Promise.all([
     idb.loadSessionState(projectRoot),
     idb.getProjectDetectedLanguage(projectRoot),
     keyStore.getKey('openai_api_key'),
@@ -212,6 +310,11 @@ async function handlePromptSubmit(
     // user never disabled — then null, and resolution falls through to the global
     // key + default exactly as before (no behaviour change).
     keyStore.getKey(projectFreqKeyFor(projectRoot)),
+    // Per-project role (CLI parity: auto.ts reads `role:<projectRoot>` first, then
+    // the global `role` — the Ctrl+T role submenu writes the per-project slot).
+    keyStore.getKey(projectRoleKeyFor(projectRoot)),
+    // language_override (CLI auto.ts step 3.5's getConfig('language_override')).
+    keyStore.getKey('language_override'),
   ]);
 
   // ── Step 1.2: Cross-page duplicate guard (see CROSS_PAGE_PROMPT_DEDUP_MS) ───
@@ -236,7 +339,8 @@ async function handlePromptSubmit(
   // to the same 'every_event' default when unset.
   const freq = (projectFreqRaw ?? freqRaw ?? 'every_event') as AdvisoryFrequencyLevel;
   const freqConfig = resolveFrequencyConfig(freq);
-  const configuredRole = roleRaw as UserRole | null;
+  // CLI parity (auto.ts:159): per-project role first, then global, then null.
+  const configuredRole = (projectRoleRaw ?? roleRaw) as UserRole | null;
 
   // ── Step 2: Build sync in-memory port ───────────────────────────────────────
   const memHandle = makeMemoryStoragePort(loadedState, lang);
@@ -263,10 +367,26 @@ async function handlePromptSubmit(
     ? mgr.current.currentStage
     : undefined;
 
+  // ── Step 3.8: Stream B presence classification — mirrors auto.ts's step 2.8
+  // exactly (same gate: implementation stage + ≥3 prompts in it; same catch →
+  // undefined so vibeKeyword detection stands on failure). Runs BEFORE
+  // processPrompt so the presence overrides feed this prompt's signal counters,
+  // which is what makes absence detection (Step 5.4) meaningful.
+  let streamBOverrides: StreamBPresenceResult | undefined;
+  if (apiKey
+      && mgr.current.currentStage === 'implementation'
+      && mgr.current.promptsInCurrentStage >= 3) {
+    streamBOverrides = await classifyStreamBPresence(promptText, new FetchLLMAdapter(apiKey), log)
+      .catch(() => {
+        log.debug('stream_b_presence_failed', {});
+        return undefined;
+      });
+  }
+
   // freqConfig.minStageChangeConfidence mirrors auto.ts's step 3 exactly — same
   // gate the CLI uses to decide whether a cross-stage classification is confident
   // enough to actually move currentStage.
-  mgr.processPrompt(memHandle.port, promptText, classification, now, freqConfig.minStageChangeConfidence);
+  mgr.processPrompt(memHandle.port, promptText, classification, now, freqConfig.minStageChangeConfidence, streamBOverrides);
 
   // Inject the configured role into an existing profile — mirrors auto.ts's step
   // 2.7. A no-op today: LLM profile classification isn't wired into the browser
@@ -293,6 +413,20 @@ async function handlePromptSubmit(
     promptCount: mgr.current.promptCount,
   });
 
+  // ── Step 5.4: Absence detection (Stream B) — mirrors auto.ts's step 4 exactly:
+  // same pure detector over the just-updated session state, same freq-derived
+  // threshold multiplier + floor. projectType is undefined in the browser (no
+  // projects table) — the detector treats it as "no project-type boost", which is
+  // also what the CLI passes for projects it has no type for.
+  const newAbsenceFlags = detectAbsenceFlags(
+    mgr.current as import('../../core/classifier/types.js').SessionState,
+    mgr.current.profile,
+    undefined,
+    freqConfig.signalAbsenceThresholdMultiplier,
+    freqConfig.signalAbsenceMinFloor,
+  );
+  log.debug('absence_flags', { new: newAbsenceFlags.length, total: mgr.current.absenceFlags.length });
+
   // ── Step 5.5: Frequency off fast-exit + minimum-prompt guard — mirrors auto.ts's
   // step 4.5 exactly (same order, same gate values from freqConfig). ──────────────
   if (freq === 'off') {
@@ -311,7 +445,7 @@ async function handlePromptSubmit(
   const trigger = shouldFireStage2(
     mgr.current as import('../../core/classifier/types.js').SessionState,
     prevStage,
-    [], // newAbsenceFlags — AbsenceDetector not wired in B2 skeleton
+    newAbsenceFlags,
     freqConfig.stage2S1LowConfidence,
   );
 
@@ -368,6 +502,23 @@ async function handlePromptSubmit(
   if (!apiKey) {
     log.debug('stage2_skipped_no_key', {});
     return;
+  }
+
+  // ── Step 6.8: Persist newly-detected absence flags — mirrors auto.ts's step 6.8
+  // exactly (all newly-detected flags qualify for Stage 2 consideration).
+  if (trigger.kind === 'absence' && newAbsenceFlags.length > 0) {
+    for (const flag of newAbsenceFlags) {
+      mgr.addAbsenceFlag(memHandle.port, flag);
+    }
+    // Save NOW, before the Stage-2 await: the CLI's store persists each mutation
+    // durably at the call, but the browser's memory port only reaches IDB via an
+    // explicit save — without this, a Stage-2 error/decline dropped the flags and
+    // the detector re-flagged the same signals every prompt (absence cooldown never
+    // engaged; observed live on Lovable 2026-07-10, total stuck at 0).
+    const stateAfterFlags = memHandle.getLatestState();
+    if (stateAfterFlags) {
+      await idb.saveSessionState(stateAfterFlags);
+    }
   }
 
   // ── Step 7: Run Stage 2 LLM analysis ────────────────────────────────────────
@@ -435,16 +586,31 @@ async function handlePromptSubmit(
 
   if (!stage2Out.fire_decision_session) return;
 
-  // Persist state again after LLM call
+  // ── Step 7.5: Feed Stage 2 signal assessments back into signal counters —
+  // mirrors auto.ts's step 7.5 (keeps future absence detection honest about
+  // which practices Stage 2 saw evidence of).
+  mgr.applyStage2SignalUpdates(memHandle.port, stage2Out.signals_present);
+
+  // Persist state again after LLM call (now includes the signal updates)
   const stateAfterStage2 = memHandle.getLatestState();
   if (stateAfterStage2) {
     await idb.saveSessionState(stateAfterStage2);
   }
 
   // ── Step 8: Build advisory payload ──────────────────────────────────────────
+  // Effective flagType — mirrors auto.ts's step 8 exactly: for absence, Stage 2
+  // SELECTS the signal to surface (selected_signal_key), which may differ from the
+  // first qualifying flag.
   const flagType = trigger.kind === 'stage_transition'
     ? ('stage_transition' as const)
-    : (`absence:${trigger.qualifyingFlags?.[0]?.signalKey ?? 'unknown'}` as `absence:${string}`);
+    : (`absence:${stage2Out.selected_signal_key}` as `absence:${string}`);
+
+  // Effective language — mirrors auto.ts's step 3.5 (language_override wins over
+  // the detected language; the CLI additionally validates the override against its
+  // language table — the browser trusts the configured value as-is).
+  const effectiveLang = (langOverrideRaw && langOverrideRaw.trim())
+    ? langOverrideRaw.trim()
+    : mgr.current.detectedLanguage;
 
   const content = resolveDecisionContent(
     state.currentStage,
@@ -458,60 +624,17 @@ async function handlePromptSubmit(
     flagType,
     llm,
     state.profile ?? undefined,
-    state.detectedLanguage,
+    effectiveLang,
   ).catch(() => content.pinchFallback);
 
-  // CLI parity (Option A): personalise the option titles + resolve their desc
-  // bodies via the SAME engine the CLI runs in stop.ts — vocabulary adaptation,
-  // feature-noun embedding, and R4/R5 runtime substitutions (which resolve the
-  // `{R4_OPEN}/{R5_INJECT}/{R4_CLOSE}` markers). Delegates through core/decision
-  // to the unchanged decision-session engine. Never throws; on any failure it
-  // returns null and we fall back to the static option text below.
-  const generatedOptions = await generateOptionList(
-    content,
-    state.profile ?? undefined,
-    state.detectedLanguage,
-    state.promptHistory,
-    {
-      flagType,
-      currentStage:          state.currentStage,
-      prevStage,
-      promptsInCurrentStage: state.promptsInCurrentStage,
-    },
-    llm,
-  ).catch(() => null);
-
-  // CLI parity: send per-level option LISTS (each level may hold >1 option), the
-  // question line, and the composed why-help block — everything the CLI popup shows.
-  // Option ids stay `<level>-<index>` so the flat `options` view below (ids l1-0/
-  // l2-0/l3-0, the shipped panel's selectors) is an exact subset of `levels`.
-  //
-  // Title/body selection mirrors DecisionSession.wrapGen exactly: when the engine
-  // produced options, titles come from the generated list and each body comes from
-  // its resolved `generatedDescBases`, falling back per-index to the static
-  // desc-base; with no generated options, the static option text is used as before.
-  const mapLevel = (
-    staticEntries: typeof content.L1,
-    genTitles:     string[] | undefined,
-    genBodies:     string[] | undefined,
-    tag:           'L1' | 'L2' | 'L3',
-  ) => {
-    const lower  = tag.toLowerCase();
-    const titles = genTitles ?? staticEntries.map((e) => e.option);
-    return titles.map((title, i) => ({
-      id:    `${lower}-${i}`,
-      level: tag,
-      title,
-      body:  genBodies?.[i] ?? staticEntries[i]?.descBase ?? '',
-    }));
-  };
-
-  const gd = generatedOptions?.generatedDescBases;
-  const levels = {
-    L1: mapLevel(content.L1, generatedOptions?.l1, gd?.l1, 'L1'),
-    L2: mapLevel(content.L2, generatedOptions?.l2, gd?.l2, 'L2'),
-    L3: mapLevel(content.L3, generatedOptions?.l3, gd?.l3, 'L3'),
-  };
+  // CLI parity (Option A) — option personalisation happens at RESPONSE-STOP, NOT here.
+  // The CLI runs generateOptionList in the Stop hook (stop.ts), never at submit. Doing
+  // it here (2 extra LLM calls) would delay persisting the pending advisory below, and
+  // a fast agent response could reach response-stop before the advisory is queued →
+  // missed popup. So queue STATIC levels now (instant) and let handleResponseStop
+  // personalise + resolve the R4/R5 markers at show time. buildLevels(content, null)
+  // is the pre-Option-A static mapping (title = option, body = raw desc-base).
+  const levels = buildLevels(content, null);
 
   // Why-help register: use the engine's own profileToRegister — with no browser
   // profile (state.profile === null) it returns 'casual', the CLI's identical
@@ -532,14 +655,11 @@ async function handlePromptSubmit(
     whyHelp,
     levels,
     // Flat first-of-each-level view — the shipped panel indexes this by level.
-    options: [
-      ...(levels.L1[0] ? [levels.L1[0]] : []),
-      ...(levels.L2[0] ? [levels.L2[0]] : []),
-      ...(levels.L3[0] ? [levels.L3[0]] : []),
-    ],
+    options: optionsFromLevels(levels),
     meta: {
       agent,
       frequency: freq,
+      role: configuredRole,
     },
   };
 
@@ -548,11 +668,13 @@ async function handlePromptSubmit(
   // submit — mark both fired here (so cooldown/session-cap/once-per-session gating
   // counts this advisory immediately, exactly like the CLI's `auto` hook), even
   // though the popup itself is shown later, when the agent's response completes.
+  // The absence key uses the EFFECTIVE flagType (Stage 2's selected signal),
+  // matching auto.ts's buildFiredKey(effectiveFlagType, …) format `<flag>@<stage>`.
   mgr.markAdvisoryFired(memHandle.port);
   if (trigger.kind === 'stage_transition' || trigger.kind === 'absence') {
     const sessionKey = trigger.kind === 'stage_transition'
       ? `stage_transition:${prevStageBeforeUpdate}→${state.currentStage}`
-      : `absence:${trigger.qualifyingFlags?.[0]?.signalKey ?? 'unknown'}@${state.currentStage}`;
+      : `${flagType}@${state.currentStage}`;
     mgr.markDecisionSessionFired(memHandle.port, sessionKey);
   }
 
@@ -567,7 +689,19 @@ async function handlePromptSubmit(
   // response-stop handler render it once the agent's turn completes — never before
   // or mid-generation. Overwrites any still-pending advisory (latest wins, like the
   // CLI's upsertPendingAdvisory).
-  await keyStore.setKey(pendingAdvisoryKeyFor(projectRoot), JSON.stringify(payload));
+  const ogContext: PendingOgContext = {
+    stage:                 state.currentStage,
+    flagType,
+    prevStage:             prevStage ?? null,
+    promptsInCurrentStage: state.promptsInCurrentStage,
+    language:              effectiveLang ?? null,
+    profile:               state.profile ?? null,
+    promptHistory:         state.promptHistory,
+  };
+  await Promise.all([
+    keyStore.setKey(pendingAdvisoryKeyFor(projectRoot), JSON.stringify(payload)),
+    keyStore.setKey(pendingAdvisoryOgKeyFor(projectRoot), JSON.stringify(ogContext)),
+  ]);
   log.debug('advisory_pending', { projectRoot, advisoryId: payload.advisoryId, stage: payload.stage });
 }
 
@@ -580,12 +714,17 @@ async function handlePromptSubmit(
  * gate (honour a Ctrl+X pressed since queuing) → render.
  */
 async function handleResponseStop(projectRoot: string, tabId: number | undefined): Promise<void> {
-  const key = pendingAdvisoryKeyFor(projectRoot);
-  const raw = await keyStore.getKey(key);
+  const key   = pendingAdvisoryKeyFor(projectRoot);
+  const ogKey = pendingAdvisoryOgKeyFor(projectRoot);
+  const [raw, ogRaw, apiKey] = await Promise.all([
+    keyStore.getKey(key),
+    keyStore.getKey(ogKey),
+    keyStore.getKey('openai_api_key'),
+  ]);
   if (!raw) return; // nothing queued for this project
 
-  // Clear before showing so a second Stop event (agents re-fire it) can't double-show.
-  await keyStore.setKey(key, '');
+  // Clear both keys before showing so a second Stop event (agents re-fire it) can't double-show.
+  await Promise.all([keyStore.setKey(key, ''), keyStore.setKey(ogKey, '')]);
 
   // Honour opt-out / frequency=off toggled after the advisory was queued (CLI stop gate).
   const [projFreqRaw, globalFreqRaw] = await Promise.all([
@@ -610,11 +749,59 @@ async function handleResponseStop(projectRoot: string, tabId: number | undefined
     return;
   }
 
+  // ── CLI parity (Option A / stop.ts): personalise the option titles + resolve the
+  // R4/R5 desc markers NOW, at show time — exactly where the CLI runs generateOptionList
+  // (the Stop hook). Kept off the submit path so queuing the advisory stays instant and
+  // a fast response can't race past it. handleResponseStop runs detached (see the message
+  // dispatcher), so these LLM calls don't block the ack. On any failure we show the static
+  // levels already in the payload — degraded but never a missed popup.
+  if (ogRaw && apiKey) {
+    try {
+      const og      = JSON.parse(ogRaw) as PendingOgContext;
+      const content = resolveDecisionContent(og.stage, og.flagType, og.profile ?? undefined, og.prevStage ?? undefined);
+      const gen = await generateOptionList(
+        content,
+        og.profile ?? undefined,
+        og.language ?? undefined,
+        og.promptHistory ?? [],
+        {
+          flagType:              og.flagType,
+          currentStage:          og.stage,
+          prevStage:             og.prevStage ?? undefined,
+          promptsInCurrentStage: og.promptsInCurrentStage,
+        },
+        new FetchLLMAdapter(apiKey),
+      ).catch((err: unknown) => {
+        // The reason must reach the ring buffer: a swallowed rejection here is
+        // indistinguishable from a guard skip (cost a live debugging session, 2026-07-10).
+        log.warn('advisory_personalize_rejected', { error: String(err) });
+        return null;
+      });
+      if (gen) {
+        payload.levels  = buildLevels(content, gen);
+        payload.options = optionsFromLevels(payload.levels);
+        log.debug('advisory_personalized', { advisoryId: payload.advisoryId });
+      } else {
+        // Engine returned null without throwing — its internal retry/validation
+        // fallback. Details are on the SW console (engine logs option_gen_*).
+        log.debug('advisory_personalize_null', { advisoryId: payload.advisoryId });
+      }
+    } catch (err) {
+      log.warn('advisory_personalize_failed', { error: String(err) });
+    }
+  } else {
+    log.debug('advisory_personalize_skipped', { hasOg: !!ogRaw, hasApiKey: !!apiKey });
+  }
+
   const ui = new ContentScriptUIAdapter(tabId);
   try {
     log.debug('advisory_showing', { tabId, advisoryId: payload.advisoryId, stage: payload.stage });
-    const event = await ui.showAdvisory(payload);
-    log.debug('advisory_dismissed', { eventType: event.type, advisoryId: payload.advisoryId });
+    // The terminal outcome is RECORDED via the one-way nexpath:advisory-terminal
+    // message (dispatcher above), not here — this await's resolution dies whenever
+    // MV3 tears the SW down while the popup sits open (observed live 2026-07-10),
+    // so logging advisory_dismissed here both missed events and would now double
+    // them. The await itself stays: it keeps this SW instance alive while it can.
+    await ui.showAdvisory(payload);
   } catch (err) {
     log.warn('show_advisory_error', { error: String(err) });
   }
@@ -626,13 +813,39 @@ async function handleResponseStop(projectRoot: string, tabId: number | undefined
  *     slot the CLI's Ctrl+X writes; handlePromptSubmit reads it with precedence).
  *   - 'open-settings'   → open the extension options page (CLI Ctrl+T equivalent).
  */
+const PANEL_FREQUENCY_VALUES = new Set(['optimum', 'every_event', 'major_only']);
+const PANEL_ROLE_VALUES = new Set(['founder', 'vibe_coder', 'indie_hacker', 'pm']);
+
 async function handleAdvisoryFooterIntent(
-  intent: 'disable-project' | 'open-settings',
+  intent: 'disable-project' | 'open-settings' | 'set-frequency' | 'set-role',
   projectRoot: string,
+  value?: string,
 ): Promise<void> {
   if (intent === 'disable-project') {
     await keyStore.setKey(projectFreqKeyFor(projectRoot), 'off');
     log.debug('advisory_disabled_for_project', { projectRoot });
+    return;
+  }
+  // CLI Ctrl+T chooser writes — SAME per-project keys as TtySelectFn's
+  // runFrequencySubMenu / runRoleSubMenu (`advisory_frequency:<root>`, `role:<root>`).
+  // Values whitelisted to the chooser's own menu entries — a compromised page can
+  // post arbitrary footer intents, so never write an unvalidated string into config.
+  if (intent === 'set-frequency') {
+    if (!value || !PANEL_FREQUENCY_VALUES.has(value)) {
+      log.warn('advisory_set_frequency_rejected', { value: value ?? null });
+      return;
+    }
+    await keyStore.setKey(projectFreqKeyFor(projectRoot), value);
+    log.debug('advisory_frequency_set_for_project', { projectRoot, value });
+    return;
+  }
+  if (intent === 'set-role') {
+    if (!value || !PANEL_ROLE_VALUES.has(value)) {
+      log.warn('advisory_set_role_rejected', { value: value ?? null });
+      return;
+    }
+    await keyStore.setKey(projectRoleKeyFor(projectRoot), value);
+    log.debug('advisory_role_set_for_project', { projectRoot, value });
     return;
   }
   // open-settings

@@ -53,6 +53,8 @@ export interface AdvisoryPayload {
   meta: {
     agent: string;
     frequency: string;
+    /** Configured role or null — display only (Ctrl+, chooser "(current)" marker). */
+    role?: string | null;
   };
 }
 
@@ -63,7 +65,9 @@ export type PanelEventType =
   | 'copy'
   | 'dismiss'
   | 'disable-project'
-  | 'open-settings';
+  | 'open-settings'
+  | 'set-frequency'
+  | 'set-role';
 
 export interface PanelEvent {
   type: PanelEventType;

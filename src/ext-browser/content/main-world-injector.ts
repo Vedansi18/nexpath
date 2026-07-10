@@ -1,7 +1,7 @@
 import browser from 'webextension-polyfill';
 import { resolveAgentFromHostname, resolveProjectRootFromLocation } from './agents/agent-hosts.js';
 import { isPromptCapturedMsg, isResponseStoppedMsg, isShowAdvisoryMsg } from './ipc.js';
-import type { PromptSubmitMsg, ResponseStopMsg, AdvisoryFooterIntentMsg } from './ipc.js';
+import type { PromptSubmitMsg, ResponseStopMsg, AdvisoryFooterIntentMsg, PromptInjectedMsg, AdvisoryTerminalMsg } from './ipc.js';
 import type { PanelEvent } from '../../core/ports/ui.port.js';
 
 /**
@@ -162,7 +162,7 @@ function resumePendingCaptureFromStorage(): void {
   }
 }
 
-function sendToServiceWorker(msg: PromptSubmitMsg | ResponseStopMsg | AdvisoryFooterIntentMsg): void {
+function sendToServiceWorker(msg: PromptSubmitMsg | ResponseStopMsg | AdvisoryFooterIntentMsg | PromptInjectedMsg | AdvisoryTerminalMsg): void {
   browser.runtime.sendMessage(msg).catch((firstErr: unknown) => {
     console.warn('[nexpath] sendMessage failed, retrying once:', msg.type, String(firstErr));
     setTimeout(() => {
@@ -251,15 +251,48 @@ function setupListeners(): void {
   // we attach the project context and forward it fire-and-forget. Skipped when the
   // page has no project context (same rule as capture) — nothing to disable.
   window.addEventListener('nexpath:footer-intent', (ev) => {
-    const detail = (ev as CustomEvent<{ intent?: unknown }>).detail;
+    const detail = (ev as CustomEvent<{ intent?: unknown; value?: unknown }>).detail;
     const intent = detail?.intent;
-    if (intent !== 'disable-project' && intent !== 'open-settings') return;
+    if (intent !== 'disable-project' && intent !== 'open-settings' &&
+        intent !== 'set-frequency' && intent !== 'set-role') return;
     const projectRoot = resolveProjectRoot();
     if (projectRoot === null) return;
     const sw: AdvisoryFooterIntentMsg = {
       type: 'nexpath:advisory-footer-intent',
       intent,
       projectRoot,
+      ...(typeof detail?.value === 'string' ? { value: detail.value } : {}),
+    };
+    sendToServiceWorker(sw);
+  });
+
+  // One-way notice: the panel is injecting + auto-submitting this text — the SW
+  // marks it as the last seen prompt so the capture echo dedups (CLI parity with
+  // marking injected prompts). Same skip rule as capture: no project, no-op.
+  window.addEventListener('nexpath:prompt-injected-notice', (ev) => {
+    const detail = (ev as CustomEvent<{ text?: unknown }>).detail;
+    if (typeof detail?.text !== 'string') return;
+    const projectRoot = resolveProjectRoot();
+    if (projectRoot === null) return;
+    const sw: PromptInjectedMsg = {
+      type: 'nexpath:prompt-injected',
+      projectRoot,
+      text: detail.text,
+    };
+    sendToServiceWorker(sw);
+  });
+
+  // One-way terminal-outcome record — survives the SW teardown that kills the
+  // showAdvisory round-trip's resolution (see inject.ts reportTerminal).
+  window.addEventListener('nexpath:advisory-terminal-notice', (ev) => {
+    const detail = (ev as CustomEvent<{ eventType?: unknown; advisoryId?: unknown }>).detail;
+    const eventType = detail?.eventType;
+    if (eventType !== 'select' && eventType !== 'skip' && eventType !== 'dismiss') return;
+    if (typeof detail?.advisoryId !== 'string') return;
+    const sw: AdvisoryTerminalMsg = {
+      type: 'nexpath:advisory-terminal',
+      eventType,
+      advisoryId: detail.advisoryId,
     };
     sendToServiceWorker(sw);
   });

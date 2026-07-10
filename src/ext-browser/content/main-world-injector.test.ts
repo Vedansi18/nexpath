@@ -505,6 +505,41 @@ describe('main-world-injector.ts', () => {
       });
     });
 
+    it('forwards set-frequency / set-role WITH the value (CLI Ctrl+T chooser writes)', () => {
+      sendMessageMock.mockClear();
+      setLocation('https://replit.com', 'replit.com', '/@vedansi18/Hello-World');
+      window.dispatchEvent(new CustomEvent('nexpath:footer-intent', { detail: { intent: 'set-frequency', value: 'optimum' } }));
+      expect(sendMessageMock).toHaveBeenCalledWith(expect.objectContaining({
+        type: 'nexpath:advisory-footer-intent',
+        intent: 'set-frequency',
+        value: 'optimum',
+      }));
+      sendMessageMock.mockClear();
+      window.dispatchEvent(new CustomEvent('nexpath:footer-intent', { detail: { intent: 'set-role', value: 'pm' } }));
+      expect(sendMessageMock).toHaveBeenCalledWith(expect.objectContaining({ intent: 'set-role', value: 'pm' }));
+    });
+
+    it('forwards nexpath:prompt-injected-notice as a prompt-injected message with project root', () => {
+      sendMessageMock.mockClear();
+      setLocation('https://replit.com', 'replit.com', '/@vedansi18/Hello-World');
+      window.dispatchEvent(new CustomEvent('nexpath:prompt-injected-notice', { detail: { text: 'Run the tests' } }));
+      expect(sendMessageMock).toHaveBeenCalledWith({
+        type: 'nexpath:prompt-injected',
+        projectRoot: 'https://replit.com/@vedansi18/Hello-World',
+        text: 'Run the tests',
+      });
+    });
+
+    it('forwards nexpath:advisory-terminal-notice as an advisory-terminal message (no project needed)', () => {
+      sendMessageMock.mockClear();
+      window.dispatchEvent(new CustomEvent('nexpath:advisory-terminal-notice', { detail: { eventType: 'select', advisoryId: 'adv-7' } }));
+      expect(sendMessageMock).toHaveBeenCalledWith({
+        type: 'nexpath:advisory-terminal',
+        eventType: 'select',
+        advisoryId: 'adv-7',
+      });
+    });
+
     it('forwards open-settings with the resolved project root', () => {
       sendMessageMock.mockClear();
       setLocation('https://replit.com', 'replit.com', '/@vedansi18/Hello-World');

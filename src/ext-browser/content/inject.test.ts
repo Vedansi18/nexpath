@@ -21,6 +21,7 @@ const injectPromptTextMock = vi.fn().mockResolvedValue(undefined);
 const injectPromptTextBoltMock = vi.fn().mockResolvedValue(undefined);
 const injectPromptTextLovableMock = vi.fn().mockResolvedValue(undefined);
 const clipboardFallbackMock = vi.fn().mockResolvedValue(undefined);
+const showToastMock = vi.fn();
 // jsdom hostname is localhost (agent 'unknown') — default to 'replit' so select
 // tests exercise the replit injector; dispatch tests override it.
 const resolveAgentMock = vi.fn().mockReturnValue('replit');
@@ -32,7 +33,7 @@ vi.mock('../ui/panel.js', () => ({
 vi.mock('./agents/replit-inject.js', () => ({ injectPromptText: injectPromptTextMock }));
 vi.mock('./agents/lovable-inject.js', () => ({ injectPromptText: injectPromptTextLovableMock }));
 vi.mock('./agents/bolt-inject.js', () => ({ injectPromptText: injectPromptTextBoltMock }));
-vi.mock('./agents/inject-kit.js', () => ({ clipboardFallback: clipboardFallbackMock }));
+vi.mock('./agents/inject-kit.js', () => ({ clipboardFallback: clipboardFallbackMock, showToast: showToastMock }));
 vi.mock('./agents/agent-hosts.js', () => ({ resolveAgentFromHostname: resolveAgentMock }));
 
 function makeOption(level: 'L1' | 'L2' | 'L3', id: string, title: string) {
@@ -234,14 +235,26 @@ describe('inject.ts (B5b — real panel integration)', () => {
       expect(injectPromptTextMock).toHaveBeenCalledWith('Run a focused review');
     });
 
-    it("disable-project: fires footer-intent 'disable-project', closes panel, terminal 'dismiss'", () => {
+    it("disable-project: fires footer-intent 'disable-project', closes panel, terminal 'skip' (CLI Ctrl+X = SKIP_NOW)", () => {
       dispatchShowAdvisory(makePayload());
       terminalSpy.mockClear();
       capturedOnEvent!({ type: 'disable-project' });
-      expect(lastFooterIntent()).toEqual({ intent: 'disable-project' });
+      expect(lastFooterIntent()).toEqual({ intent: 'disable-project', value: undefined });
       expect(hideMock).toHaveBeenCalled();
-      // Round-trip resolved as a plain dismiss (nothing recorded engine-side).
-      expect(lastTerminalEvent()).toEqual({ type: 'dismiss', advisoryId: 'adv-1' });
+      // CLI parity: TtySelectFn's Ctrl+X prints the notice then cleanup(SKIP_NOW).
+      expect(lastTerminalEvent()).toEqual({ type: 'skip', advisoryId: 'adv-1' });
+      expect(showToastMock).toHaveBeenCalledWith(expect.stringContaining('Advisory disabled for this project'));
+    });
+
+    it('set-frequency / set-role: forward footer-intents WITH value, panel stays open', () => {
+      dispatchShowAdvisory(makePayload());
+      terminalSpy.mockClear();
+      capturedOnEvent!({ type: 'set-frequency', value: 'optimum' });
+      expect(lastFooterIntent()).toEqual({ intent: 'set-frequency', value: 'optimum' });
+      capturedOnEvent!({ type: 'set-role', value: 'indie_hacker' });
+      expect(lastFooterIntent()).toEqual({ intent: 'set-role', value: 'indie_hacker' });
+      expect(hideMock).not.toHaveBeenCalled();
+      expect(terminalSpy).not.toHaveBeenCalled();
     });
 
     it("open-settings: fires footer-intent 'open-settings', panel STAYS open (no hide, no terminal event)", () => {
