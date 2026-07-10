@@ -410,11 +410,17 @@ async function runPromptSubmitPipeline(
   if (apiKey
       && mgr.current.currentStage === 'implementation'
       && mgr.current.promptsInCurrentStage >= 3) {
-    streamBOverrides = await classifyStreamBPresence(promptText, new FetchLLMAdapter(apiKey), log)
-      .catch(() => {
-        log.debug('stream_b_presence_failed', {});
-        return undefined;
-      });
+    // Time-boxed: classifyStreamBPresence's chat call carries no timeoutMs, and an
+    // un-aborted fetch can stall for minutes on a bad network — hanging the whole
+    // submit pipeline (nothing after prompt_submit_received). Cap it here; on
+    // timeout the vibeKeyword detection stands, same as the failure path.
+    streamBOverrides = await Promise.race([
+      classifyStreamBPresence(promptText, new FetchLLMAdapter(apiKey), log),
+      new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 8_000)),
+    ]).catch(() => {
+      log.debug('stream_b_presence_failed', {});
+      return undefined;
+    });
   }
 
   // freqConfig.minStageChangeConfidence mirrors auto.ts's step 3 exactly — same
