@@ -33,6 +33,7 @@ import {
 import { loadRightGoodProfile } from '../classifier/right-good-aggregator.js';
 import { loadWorkStyleProfile } from '../classifier/work-style-traits.js';
 import { probeProject } from '../env/env-probe.js';
+import { promoteEnvFactsToTierP } from '../env/env-tier-promotion.js';
 
 export interface EngineGenerateInput {
   /** Source-cascade record lookup for the migrated signalType (dual-source). */
@@ -125,8 +126,10 @@ export async function buildEngineGrounding(
   history: readonly PromptRecord[],
   client?: OpenAI,
 ): Promise<GroundingFact[]> {
-  const env = probeProject(root).facts;
   const rightGood = loadRightGoodProfile(store, root);
+  // Promote corroborated capability facts to practice-grade (tier 'P') before grounding: a fact
+  // the project HAS grounds a discipline claim only when the matching behaviour reads RIGHT&GOOD.
+  const env = promoteEnvFactsToTierP(probeProject(root).facts, rightGood);
   const workStyle = loadWorkStyleProfile(store, root);
   const prompts = history.slice(-5).map((p) => p.text);
   return retrieveGroundingFacts({ env, rightGood, workStyle, prompts }, client);
