@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { matchKeywords } from './KeywordMatcher.js';
 import { classifyWithTFIDF, resetTFIDFModel } from './TFIDFClassifier.js';
-import { createEmbeddingClassifier } from './EmbeddingClassifier.js';
 import { classifyPrompt } from './PromptClassifier.js';
 import { SessionStateManager, SESSION_GAP_MS, STAGE_CONFIRM_THRESHOLD, MIN_STAGE_CHANGE_CONFIDENCE } from './SessionStateManager.js';
 import { detectAbsenceFlags, ABSENCE_MIN_PROMPTS, ABSENCE_COOLDOWN_PROMPTS } from './AbsenceDetector.js';
@@ -223,69 +222,7 @@ describe('TFIDFClassifier', () => {
   });
 });
 
-// ── EmbeddingClassifier ────────────────────────────────────────────────────────
-
-describe('EmbeddingClassifier', () => {
-  it('classifies using injected embedding function', async () => {
-    // Mock: 8-dim space; centroid call (texts.length===8) returns identity matrix
-    // so each stage i maps to basis vector e_i.
-    // Query call (texts.length===1) returns e_4 (implementation).
-    const dim = 8;
-    const mockEmbed = async (texts: string[]): Promise<number[][]> => {
-      if (texts.length === 8) {
-        // centroid build — return identity matrix rows
-        return texts.map((_, i) => { const v = new Array<number>(dim).fill(0); v[i] = 1; return v; });
-      }
-      // query — match implementation (index 4)
-      const v = new Array<number>(dim).fill(0); v[4] = 1;
-      return [v];
-    };
-
-    const classifier = await createEmbeddingClassifier(mockEmbed);
-    expect(classifier).not.toBeNull();
-
-    const result = await classifier!.classify('any text');
-    expect(result.stage).toBe('implementation'); // index 4 in STAGES
-    expect(result.tier).toBe(3);
-  });
-
-  it('returns null when embedding function throws', async () => {
-    const classifier = await createEmbeddingClassifier(async () => { throw new Error('fail'); });
-    expect(classifier).toBeNull();
-  });
-
-  it('classify() propagates errors from embedFn so caller can catch', async () => {
-    let callCount = 0;
-    const dim = 8;
-    const mockEmbed = async (texts: string[]): Promise<number[][]> => {
-      callCount++;
-      if (callCount === 1) {
-        // First call (centroid build) — succeeds
-        return texts.map((_, i) => { const v = new Array<number>(dim).fill(0); v[i % dim] = 1; return v; });
-      }
-      throw new Error('classify-time failure');
-    };
-    const classifier = await createEmbeddingClassifier(mockEmbed);
-    expect(classifier).not.toBeNull();
-    await expect(classifier!.classify('any text')).rejects.toThrow('classify-time failure');
-  });
-
-  it('allScores contains scores for all 8 stages', async () => {
-    const dim = 8;
-    const mockEmbed = async (texts: string[]): Promise<number[][]> => {
-      if (texts.length === 8) {
-        return texts.map((_, i) => { const v = new Array<number>(dim).fill(0); v[i] = 1; return v; });
-      }
-      // Query: slight lean toward index 2 (architecture)
-      return [new Array<number>(dim).fill(0).map((_, i) => i === 2 ? 0.9 : 0.1)];
-    };
-    const classifier = await createEmbeddingClassifier(mockEmbed);
-    const result = await classifier!.classify('any text');
-    expect(Object.keys(result.allScores).length).toBe(8);
-  });
-});
-
-// ── PromptClassifier cascade ──────────────────────────────────────────────────
+// ── PromptClassifier (two-tier keyword → TF-IDF) ─────────────────────────────
 
 describe('PromptClassifier', () => {
   it('Tier 1 handles high-confidence keyword prompt', async () => {
@@ -301,25 +238,7 @@ describe('PromptClassifier', () => {
     expect(result.tier).toBeLessThanOrEqual(2);
   });
 
-  it('uses Tier 3 when provided and earlier tiers are uncertain', async () => {
-    const dim = 8;
-    // Same identity-matrix mock: centroid call returns identity, query returns e_4 (implementation)
-    const mockEmbed = async (texts: string[]): Promise<number[][]> => {
-      if (texts.length === 8) {
-        return texts.map((_, i) => { const v = new Array<number>(dim).fill(0); v[i] = 1; return v; });
-      }
-      const v = new Array<number>(dim).fill(0); v[4] = 1;
-      return [v];
-    };
-    const embeddingClassifier = await createEmbeddingClassifier(mockEmbed);
-    // Use a very ambiguous, non-vocabulary prompt to ensure Tier 1+2 are uncertain
-    const result = await classifyPrompt('xyzzy plugh frobozz', { embeddingClassifier });
-    // Tier 3 should fire and resolve to implementation
-    expect(result.stage).toBe('implementation');
-    expect(result.tier).toBe(3);
-  });
-
-  it('returns a result even when all tiers uncertain and no embedding classifier', async () => {
+  it('returns a result even when all tiers uncertain', async () => {
     const result = await classifyPrompt('xyzzy plugh frobozz completely unknown text');
     expect(result).toBeDefined();
     expect(result.stage).toBeDefined();
@@ -342,27 +261,6 @@ describe('PromptClassifier', () => {
     const result = await classifyPrompt('deploy to production npm publish go live now');
     expect(result.tier).toBe(1);
     expect(result.stage).toBe('release');
-  });
-
-  it('when Tier 3 throws, falls back to best of Tier 1 / Tier 2', async () => {
-    let callCount = 0;
-    const dim = 8;
-    const badEmbed = async (texts: string[]): Promise<number[][]> => {
-      callCount++;
-      if (callCount === 1) {
-        // centroid build succeeds
-        return texts.map((_, i) => { const v = new Array<number>(dim).fill(0); v[i % dim] = 1; return v; });
-      }
-      throw new Error('tier3-fail');
-    };
-    const embeddingClassifier = await createEmbeddingClassifier(badEmbed);
-    // Ambiguous text so Tier 1 + Tier 2 both below thresholds
-    const result = await classifyPrompt('xyzzy plugh frobozz', { embeddingClassifier });
-    // Tier 3 throws — PromptClassifier catches and returns best T1/T2
-    expect(result).toBeDefined();
-    expect(result.stage).toBeDefined();
-    // tier should be 1 or 2 (T3 failed)
-    expect(result.tier).toBeLessThanOrEqual(2);
   });
 
   it('allScores has scores for both stages in a multi-intent prompt', async () => {

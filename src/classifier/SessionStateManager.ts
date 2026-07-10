@@ -380,9 +380,10 @@ export class SessionStateManager {
   }
 
   /**
-   * Feed Stage 2 signal assessments back into signal counters.
-   * Called in auto.ts after runStage2 confirms an advisory, before Step 8 dedup write.
-   * Only updates keys that exist in signalCounters — unknown LLM-returned keys are ignored.
+   * Feed the classifier's signal assessments back into signal counters.
+   * Called in auto.ts after the classifier's fire assessment confirms an advisory,
+   * before the Step-8 dedup write. Only updates keys that exist in signalCounters —
+   * unknown model-returned keys are ignored.
    */
   applyStage2SignalUpdates(store: Store, signalsPresent: string[]): void {
     const s = this.state;
