@@ -192,17 +192,17 @@ export function readPolaritySnapshot(store: Store, projectRoot: string): Record<
   }
 }
 
-/** Mark that the per-user records need a Stage-E refresh (set on a maturity graduation). */
+/** Mark that the per-user records need a refresh (set when the maturity level changes). */
 export function markAutogenRefresh(store: Store, projectRoot: string): void {
   setConfig(store, refreshKey(projectRoot), '1');
 }
 
-/** Whether a Stage-E refresh is pending for this project. */
+/** Whether a refresh is pending for this project. */
 export function autogenRefreshPending(store: Store, projectRoot: string): boolean {
   return isConfigSet(store.db, refreshKey(projectRoot));
 }
 
-/** Clear the pending Stage-E refresh flag. */
+/** Clear the pending refresh flag. */
 export function clearAutogenRefresh(store: Store, projectRoot: string): void {
   deleteConfig(store, refreshKey(projectRoot));
 }
@@ -225,7 +225,7 @@ export interface SelectionInput {
 
 /** Default confidence bar a ranked topic must clear to be personalized. The ≥12
  *  coverage floor is EMERGENT — reached as more topics clear the bar with history —
- *  never forced on thin history (Q-D scale-to-confident), so it is not a hard cap. */
+ *  never forced on thin history (scale-to-confident), so it is not a hard cap. */
 export const DEFAULT_CONFIDENCE_BAR = 0.6;
 
 export const SELECTION_MODEL = 'gpt-4o-mini';
@@ -287,8 +287,8 @@ function parseRanked(raw: string, eligible: ReadonlySet<string>): RankedTopic[] 
 /**
  * Rank the distinctive topics for a user via one bootstrap LLM call. Returns []
  * when nothing is eligible (a no-history project), so no call is made. `restrictTo`
- * confines ranking to a subset of topics — the Stage-E re-rank passes the current
- * selection so a refresh re-ranks "only over those".
+ * confines ranking to a subset of topics — the maturity-change re-rank passes the
+ * current selection so a refresh re-ranks only those.
  */
 export async function selectDistinctiveTopics(
   input: SelectionInput,
@@ -399,8 +399,8 @@ export async function generatePerUserRecord(
   const openai = client ?? new OpenAI();
   const cell = await generateCell(openai, buildGenerationPrompt(atLevel.form.cell, patternSummary));
   if (!cell) return null;
-  // AG-3 / AG-4: the personalization must keep the topic anchor; else discard it (the
-  // read side serves the preset, and a later fire may regenerate).
+  // The personalization must keep the topic anchor; else discard it (the read side
+  // serves the preset, and a later fire may regenerate).
   if (!retainsTopicAnchor(signalType, cell, atLevel.form.cell)) return null;
 
   const personalized: LevelForm = { kind: atLevel.form.kind, cell };
@@ -442,7 +442,7 @@ export async function generateAndStoreAutogenRecord(
 
 // ── Live orchestration (lazy-once selection + lazy first-fire generation) ───────
 
-/** True once the user has any recorded right/good behaviour (else Case A — no history). */
+/** True once the user has any recorded right/good behaviour (else a no-history project). */
 function hasHistory(rightGood: RightGoodProfile): boolean {
   return Object.values(rightGood).some((s) => s.stability.occurrences > 0);
 }

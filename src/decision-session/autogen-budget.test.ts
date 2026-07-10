@@ -52,7 +52,7 @@ describe('autogen-budget — the cost gate', () => {
     store.db.close();
   });
 
-  it('AG-11: the auto-gen source carries no hardcoded monthly budget figure', () => {
+  it('the auto-gen source carries no hardcoded monthly budget figure', () => {
     const dir = dirname(fileURLToPath(import.meta.url));
     const files = readdirSync(dir).filter(
       (f) => f.startsWith('auto') && f.endsWith('.ts') && !f.endsWith('.test.ts'),

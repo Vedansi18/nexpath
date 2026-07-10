@@ -58,7 +58,7 @@ describe('auto-template-generator — topic mapping', () => {
   });
 });
 
-describe('auto-template-generator — polarity + eligibility (AG-6 + overlap)', () => {
+describe('auto-template-generator — polarity + eligibility (filter + overlap)', () => {
   const profile: RightGoodProfile = {
     test_creation: rg('right_good'),
     documentation: rg('mistake'),
@@ -134,7 +134,7 @@ describe('auto-template-generator — coverage floor (scale-to-confident)', () =
     ]);
   });
 
-  it('personalizes nothing for a no-history project (Case A)', () => {
+  it('personalizes nothing for a no-history project', () => {
     expect(applyCoverageFloor(ranked, false, 0.6)).toEqual([]);
   });
 
@@ -143,7 +143,7 @@ describe('auto-template-generator — coverage floor (scale-to-confident)', () =
   });
 });
 
-describe('auto-template-generator — per-topic generation (Stage C)', () => {
+describe('auto-template-generator — per-topic generation', () => {
   const okClient = anchoredClient('ABSENCE_TEST_CREATION');
   const testAnchor = topicAnchorWords('ABSENCE_TEST_CREATION')[0];
 
@@ -277,7 +277,7 @@ describe('auto-template-generator — live orchestration (runAutogenForFire)', (
     store.db.close();
   });
 
-  it('Case A (no history): persists an empty selection, generates nothing, makes NO LLM call', async () => {
+  it('no history: persists an empty selection, generates nothing, makes NO LLM call', async () => {
     const store = await openStore(':memory:');
     let calls = 0;
     const client = { chat: { completions: { create: async () => { calls++; return { choices: [{ message: { content: '{}' } }] }; } } } } as unknown as OpenAI;

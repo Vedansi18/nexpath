@@ -6,7 +6,7 @@ import type { ContentTemplateRecord } from './content-template-schema.js';
 import { openStore } from '../store/db.js';
 import { upsertContentTemplate } from '../store/content-templates.js';
 
-describe('§6.1 — content-template source lookup by signalType', () => {
+describe('content-template source lookup by signalType', () => {
   const sample = SHIPPED_CONTENT_TEMPLATES[0];
 
   it('the shipped tier yields the signal record; other tiers yield undefined', () => {
@@ -103,7 +103,7 @@ describe('per-user (autogen) overlay — tier-b per-cell cascade', () => {
     upsertContentTemplate(store, { projectRoot: '/p', signalType: preset.signalType, source: 'autogen', record: autogenRecord({ 1: offAnchor }) });
     const merged = resolveRecord(autogenAwareLookup(store, '/p', preset.signalType))!;
     // The stored record is valid (served on the autogen tier), but the off-anchor cell is
-    // NOT served — the preset's level-1 cell fills it (AG-3 non-degradation).
+    // NOT served — the preset's level-1 cell fills it (non-degradation).
     expect(merged.record.levelForms[1]?.cell.option).toBe(preset.levelForms[1]!.cell.option);
     store.db.close();
   });

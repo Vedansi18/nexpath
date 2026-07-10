@@ -1,12 +1,12 @@
 /**
- * Content-template SOURCE lookup — the migrated-signal side of the §6.1 dual-source
+ * Content-template SOURCE lookup — the migrated-signal side of the dual-source
  * resolver. Bridges a signalType to a source-cascade `RecordCandidateLookup` that the
  * content-template engine (`resolveRecord` / `composeAdvisory`) walks.
  *
  * Only the `shipped` tier is populated today (the 142 shipped preset records — the 136 canonical
- * class-1..9 signals + the 6 new §4.E2 signals registered at A9). The
+ * class-1..9 signals + the 6 newer registered signals). The
  * `uploaded` / `autogen` / `default` tiers return undefined — per-user and
- * closest-default records are later phases (upload / AR-6 §4.E7). When no shipped
+ * closest-default records are later phases (upload / auto-gen). When no shipped
  * record exists for a signalType, every tier is undefined → the engine resolves
  * `null` → the live caller falls back to the static set (safe, no blank advisory).
  */
@@ -32,7 +32,7 @@ export function hasShippedRecord(signalType: string): boolean {
 
 /**
  * The content-template record signalType for a fired flagType, via the
- * `ABSENCE_<UPPER(key)>` convention (§6.1 item 10c coverage-map). Returns undefined for a
+ * `ABSENCE_<UPPER(key)>` convention (the coverage-map convention). Returns undefined for a
  * non-absence flagType (stage transitions etc. have no content-template mapping today).
  */
 export function recordSignalTypeForFlag(flagType: string): string | undefined {
@@ -75,8 +75,8 @@ export function shippedRecordLookup(signalType: string): RecordCandidateLookup {
 
 /**
  * Overlay a per-user record on the shipped preset PER CELL: for each maturity level,
- * sanitize the per-user cell (AG-8 re-check on read), then serve it ONLY when it
- * retains the topic anchor (AG-3/AG-4 non-degradation — a keyword-bearing topic must
+ * sanitize the per-user cell (re-sanitize on read), then serve it ONLY when it
+ * retains the topic anchor (non-degradation — a keyword-bearing topic must
  * keep an anchor word, a keyword-less one must overlap the preset); otherwise fall
  * back to the preset cell. The first source holding a cell wins the WHOLE cell (no
  * intra-cell blending). Structure + the sensitive-action safeguard come from the
