@@ -21,6 +21,8 @@ export function buildRuntimeContext(state: SessionState): RuntimeContext {
   };
   return {
     currentAgentMode:             state.currentAgentMode,
+    stage:                        state.currentStage,
+    stageConfidence:              state.stageConfidence,
     consecutiveAcceptanceStreak:  state.consecutiveAcceptanceStreak,
     consecutiveFrustratedPrompts: state.consecutiveFrustratedPrompts,
     hasVersionControl:  flag('has_version_control'),

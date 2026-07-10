@@ -60,11 +60,19 @@ describe('mistake-categories — full population (37 params + 1 meta)', () => {
     expect(new Set(names).size).toBe(names.length);
   });
 
-  it('every channel-gated detector (requiresChannel set) is dark — returns 0 regardless of input', () => {
+  it('every channel-gated detector whose reader is unshipped is dark — returns 0 regardless of input', () => {
     const richHistory = Array.from({ length: 60 }, () => p('still broken, same error again, fix it'));
-    const richCtx = { consecutiveAcceptanceStreak: 99, consecutiveFrustratedPrompts: 99, hasVersionControl: false, hasBackups: false, hasSeparateEnvs: false, hasSecurityScanner: false, currentAgentMode: 'execute' };
+    // A fully-populated context, including a genuine mode-vs-stage clash (execute mode in a
+    // planning stage) — so the assertion proves darkness under real input, not an omitted field.
+    const richCtx = { consecutiveAcceptanceStreak: 99, consecutiveFrustratedPrompts: 99, hasVersionControl: false, hasBackups: false, hasSeparateEnvs: false, hasSecurityScanner: false, currentAgentMode: 'auto', stage: 'idea' as const, stageConfidence: 1 };
     for (const c of MISTAKE_CATEGORIES) {
-      if (c.requiresChannel !== undefined) expect(c.detect(richHistory, richCtx)).toBe(0);
+      if (c.requiresChannel === undefined) continue;
+      // coding_agent_mode_mismatch's mode reader has shipped, so its detector is intentionally
+      // live (see agent-mode-mismatch.test.ts) — it would fire on richCtx. It cannot fire in
+      // production only because it is not served yet (mistake-category-activation-gate.test.ts).
+      // Every other channel-gated detector still has an unshipped reader and must be dark.
+      if (c.name === 'coding_agent_mode_mismatch') continue;
+      expect(c.detect(richHistory, richCtx)).toBe(0);
     }
   });
 });

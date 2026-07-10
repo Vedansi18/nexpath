@@ -14,7 +14,7 @@ function mkProject(): string {
 afterEach(() => { for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true }); });
 
 function stateFor(root: string, frustrated = 0, accepted = 0, currentAgentMode?: string): SessionState {
-  return { projectRoot: root, consecutiveFrustratedPrompts: frustrated, consecutiveAcceptanceStreak: accepted, currentAgentMode } as unknown as SessionState;
+  return { projectRoot: root, consecutiveFrustratedPrompts: frustrated, consecutiveAcceptanceStreak: accepted, currentAgentMode, currentStage: 'implementation', stageConfidence: 0.7 } as unknown as SessionState;
 }
 
 describe('buildRuntimeContext', () => {
@@ -48,5 +48,12 @@ describe('buildRuntimeContext', () => {
     const root = mkProject();
     const ctx = buildRuntimeContext(stateFor(root));
     expect(ctx.currentAgentMode).toBeUndefined();
+  });
+
+  it('threads the current stage and its confidence through', () => {
+    const root = mkProject();
+    const ctx = buildRuntimeContext(stateFor(root));
+    expect(ctx.stage).toBe('implementation');
+    expect(ctx.stageConfidence).toBe(0.7);
   });
 });

@@ -41,6 +41,13 @@ export const AGENT_CAPABILITIES: Record<string, AgentCapabilities> = {
 };
 
 /**
+ * The single coding agent nexpath integrates with today. Used to tag stored prompts and to
+ * resolve the current mode against the registry above. Multi-agent support will supply this
+ * from the capture path; it is centralised here so there is one source of the identity.
+ */
+export const ACTIVE_AGENT_ID = 'claude-code';
+
+/**
  * Resolve the operating band for a given agent + mode. Returns `undefined` when the agent
  * is unknown, the mode is unknown, or no mode is supplied — an unrecognised value is never
  * forced into a band.

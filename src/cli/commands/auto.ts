@@ -8,6 +8,7 @@ import { classifyStage } from '../../classifier/stage-classifier.js';
 import { SessionStateManager } from '../../classifier/SessionStateManager.js';
 import { detectAbsenceFlags, ABSENCE_MIN_PROMPTS } from '../../classifier/AbsenceDetector.js';
 import { buildRuntimeContext } from '../../classifier/runtime-context.js';
+import { ACTIVE_AGENT_ID } from '../../env/agent-capabilities.js';
 import { classifyStreamBPresence } from '../../classifier/StreamBPresenceClassifier.js';
 import type { StreamBPresenceResult } from '../../classifier/StreamBPresenceClassifier.js';
 import { shouldFireStage2 } from '../../classifier/Stage2Trigger.js';
@@ -81,9 +82,6 @@ export function buildFiredKey(flagType: FlagType, prevStage: Stage, currentStage
 }
 
 // ── Types ──────────────────────────────────────────────────────────────────────
-
-/** Single source for the integrated coding-agent's identity (used to tag stored prompts). */
-export const ACTIVE_AGENT_ID = 'claude-code';
 
 export interface AutoInput {
   /** Latest prompt text to classify. */
