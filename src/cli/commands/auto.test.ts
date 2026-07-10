@@ -1368,6 +1368,31 @@ describe('runAuto — keep-separate classifiers', () => {
   beforeEach(async () => { store = await openStore(':memory:'); });
   afterEach(() => { store.db.close(); });
 
+  it('the profile classifier runs BEFORE the stage classifier (classifier calibrates on the fresh profile)', async () => {
+    // Warm up enough history that the profile gate passes on the next call.
+    for (let i = 0; i < 3; i++) {
+      await runAuto(makeInput({ projectRoot: '/test/order' }), store);
+    }
+    const order: string[] = [];
+    const client = { chat: { completions: { create: vi.fn().mockImplementation((req: { messages: { role: string; content: string }[] }) => {
+      const text = req.messages.map((m) => m.content).join('\n');
+      // The stage-classifier system message identifies itself; the profile call does not.
+      order.push(text.includes('stage classifier') ? 'classifier' : 'profile-or-other');
+      return Promise.resolve({ choices: [{ message: { content: JSON.stringify({
+        stage: 'Implementation', stage_confidence: 0.3, signals_present: [], signals_absent: [],
+        fire_decision_session: false, selected_signal_key: '', reason: 'x',
+        nature: 'hardcore_pro', mood: 'focused', depth: 'high', precision: 'very_high', playfulness: 'low',
+      }) } }] });
+    }) } } } as unknown as OpenAI;
+    await runAuto(makeInput({ projectRoot: '/test/order' }), store, client);
+    const firstClassifier = order.indexOf('classifier');
+    const firstProfile    = order.indexOf('profile-or-other');
+    // Both fired, and a non-classifier (profile) call preceded the classifier call.
+    expect(firstClassifier).toBeGreaterThan(-1);
+    expect(firstProfile).toBeGreaterThan(-1);
+    expect(firstProfile).toBeLessThan(firstClassifier);
+  });
+
   it('Stream-B still fires as a call distinct from the stage classifier (implementation stage)', async () => {
     const { SessionStateManager } = await import('../../classifier/SessionStateManager.js');
     setConfig(store, 'advisory_frequency', 'optimum');

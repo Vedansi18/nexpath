@@ -158,23 +158,8 @@ export async function runAuto(
     null
   ) as import('../../classifier/types.js').UserRole | null;
 
-  // ── 2. Stage classifier — one LLM call, folds the former cascade + cross-confirm ──
-  const stageResult = await classifyStage(
-    {
-      promptText:        input.promptText,
-      window:            [...mgr.current.promptHistory.map((p) => ({ text: p.text })), { text: input.promptText }],
-      sessionStage:      prevStage,
-      sessionConfidence: mgr.current.stageConfidence,
-      profile:           mgr.current.profile,
-    },
-    openai,
-    { minConfidence: freqConfig.stage2MinConfidence, contextWindow: freqConfig.stage2ContextWindow },
-  );
-  const classification = stageResult.classification;
-  logger.debug('stage_classified', { stage: classification.stage, confidence: classification.confidence, fire: stageResult.fireRecommendation, degraded: stageResult.degraded });
-  writeTelemetry(input.projectRoot, 'prompt_classified', { stage: classification.stage, confidence: classification.confidence }, store);
-
-  // ── 2.5. LLM profile classification — async, before processPrompt ────────────
+  // ── 2. LLM profile classification — runs before the stage classifier so the classifier
+  //       calibrates on the freshly-computed profile ──────────────────────────────
   if (isProfileStale(mgr.current.profile, mgr.current.promptCount) &&
       mgr.current.promptHistory.length >= MIN_PROFILE_PROMPTS - 1) {
     const updatedProfile = await classifyUserProfileLLM(
@@ -212,6 +197,23 @@ export async function runAuto(
         return undefined; // fallback: vibeKeyword detection stands
       });
   }
+
+  // ── 2.9. Stage classifier — one LLM call (after profile + Stream-B, so it calibrates on the
+  //        fresh profile); folds the former cascade + cross-confirmation. Its stage feeds processPrompt. ──
+  const stageResult = await classifyStage(
+    {
+      promptText:        input.promptText,
+      window:            [...mgr.current.promptHistory.map((p) => ({ text: p.text })), { text: input.promptText }],
+      sessionStage:      prevStage,
+      sessionConfidence: mgr.current.stageConfidence,
+      profile:           mgr.current.profile,
+    },
+    openai,
+    { minConfidence: freqConfig.stage2MinConfidence, contextWindow: freqConfig.stage2ContextWindow },
+  );
+  const classification = stageResult.classification;
+  logger.debug('stage_classified', { stage: classification.stage, confidence: classification.confidence, fire: stageResult.fireRecommendation, degraded: stageResult.degraded });
+  writeTelemetry(input.projectRoot, 'prompt_classified', { stage: classification.stage, confidence: classification.confidence }, store);
 
   // ── 3. Process prompt → updates state (stage, history, counters) ─────────────
   mgr.processPrompt(store, input.promptText, classification, Date.now(),
