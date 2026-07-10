@@ -6,8 +6,9 @@ const mockGet = vi.fn();
 const mockSet = vi.fn();
 const fetchMock = vi.fn();
 
+const mockOnChanged = vi.fn();
 vi.mock('webextension-polyfill', () => ({
-  default: { storage: { local: { get: mockGet, set: mockSet } } },
+  default: { storage: { local: { get: mockGet, set: mockSet }, onChanged: { addListener: mockOnChanged } } },
 }));
 
 function setupDom(): void {
@@ -211,4 +212,17 @@ describe('options.ts', () => {
     });
   });
 
+
+  describe('live refresh (storage.onChanged)', () => {
+    it('re-renders the radio groups when the chooser writes the global keys', async () => {
+      await loadOptionsModule();
+      const listener = mockOnChanged.mock.calls.at(-1)?.[0] as (c: Record<string, unknown>, a: string) => void;
+      expect(listener).toBeTypeOf('function');
+      mockGet.mockResolvedValue({ advisory_frequency: 'major_only' });
+      listener({ advisory_frequency: { newValue: 'major_only' } }, 'local');
+      await flush();
+      const checked = document.querySelector('#frequency-group input[checked], #frequency-group input:checked') as HTMLInputElement | null;
+      expect(checked?.value).toBe('major_only');
+    });
+  });
 });

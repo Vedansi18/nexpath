@@ -186,3 +186,15 @@ async function renderSelfCheck(): Promise<void> {
 }
 
 loadKey();
+
+// Live-refresh: the popup's Ctrl+, chooser writes the SAME global keys this page
+// shows — without this listener the page displayed stale values until a manual
+// reload, which read as "the chooser and the settings are two different settings"
+// (user report, 2026-07-10). storage.onChanged re-renders on any relevant write.
+browser.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'local') return;
+  if (FREQUENCY_KEY in changes || ROLE_KEY in changes || KEY_NAME in changes) {
+    void loadFrequencyAndRole();
+    void renderSelfCheck();
+  }
+});
