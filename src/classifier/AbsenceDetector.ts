@@ -126,8 +126,11 @@ export function detectAbsenceFlags(
   const isVibeProfile    = profile?.nature === 'beginner' || profile?.nature === 'cool_geek';
   const profileMultiplier = isVibeProfile ? 0.5 : 1.0;
 
-  // Gate 2 — must have been in this stage long enough before checking
-  if (promptsInCurrentStage < absenceMinFloor) return [];
+  // Gate 2 — the in-stage accumulation floor is enforced PER-SIGNAL at gate 3 (below), not as a
+  // blanket early return: immediate-fire signals skip the floor, so the detector must still be
+  // entered before the stage has accumulated `absenceMinFloor` prompts. Non-immediate signals stay
+  // gated — gate 3's effectiveThreshold is always >= absenceMinFloor, so nothing the old early
+  // return blocked can slip through.
 
   const newFlags: AbsenceFlag[] = [];
 
@@ -145,9 +148,14 @@ export function detectAbsenceFlags(
     // Role gate — Dim2 signals: fire only when profile.role matches
     if (sig.role && sig.role !== profile?.role) continue;
 
-    // Gate 3 — per-signal threshold with profile multiplier and global frequency multiplier
-    const effectiveThreshold = Math.max(absenceMinFloor, Math.ceil(sig.absenceThreshold * profileMultiplier * thresholdMultiplier));
-    if (promptsInCurrentStage < effectiveThreshold) continue;
+    // Gate 3 — per-signal threshold with profile multiplier and global frequency multiplier.
+    // Immediate-fire signals skip this in-stage accumulation floor: they fire on first confident
+    // detection (their own detector is confidence-gated), still bounded by the cooldown below +
+    // the once-per-session dedup downstream.
+    if (!sig.immediateFire) {
+      const effectiveThreshold = Math.max(absenceMinFloor, Math.ceil(sig.absenceThreshold * profileMultiplier * thresholdMultiplier));
+      if (promptsInCurrentStage < effectiveThreshold) continue;
+    }
 
     // Custom detection gates — F1 signals use streak/velocity/domain-bucket logic; three signals add semantic preconditions
     if (sig.key === 'decision_fatigue_pattern') {

@@ -183,6 +183,13 @@ export interface SignalDefinition {
   vibeKeywords?: string[];
   /** Number of prompts in confirmed stage before checking absence. */
   absenceThreshold: number; // 15–20 per research
+  /**
+   * Fire on first confident detection, skipping the in-stage accumulation floor
+   * (the `promptsInCurrentStage` gate). For right-now signals whose own detector is
+   * already confidence-gated (e.g. a mode-vs-stage mismatch); still bounded by the
+   * per-signal cooldown + the once-per-session dedup downstream. Default: undefined (gated).
+   */
+  immediateFire?: boolean;
   /** Project types for which this signal is relevant. undefined = all project types. */
   relevantProjectTypes?: string[];
   /** Dim1: fire only when profile.nature matches. undefined = all natures (universal signal). */

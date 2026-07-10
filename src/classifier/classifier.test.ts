@@ -2790,6 +2790,27 @@ describe('AbsenceDetector — registry-detected signals fire on RuntimeContext, 
     expect(keysOf(detectAbsenceFlags(withSecret, null, undefined, 1.0, 5, {})).has('secret_in_prompt')).toBe(true);
     expect(keysOf(detectAbsenceFlags(noSecret, null, undefined, 1.0, 5, {})).has('secret_in_prompt')).toBe(false);
   });
+
+  // Immediate-fire: the mode-mismatch signals skip the in-stage accumulation floor and fire on
+  // first confident detection (still gated by their own detector's confidence bar + dedup).
+  it('coding_agent_mode_mismatch fires below the accumulation floor (promptsInCurrentStage=1, minFloor=5)', () => {
+    const state = makeState({ currentStage: 'idea', promptsInCurrentStage: 1, promptCount: 1 });
+    const ctx = { stage: 'idea' as const, currentAgentMode: 'auto', stageConfidence: 0.8 };
+    expect(keysOf(detectAbsenceFlags(state, null, undefined, 1.0, 5, ctx)).has('coding_agent_mode_mismatch')).toBe(true);
+  });
+
+  it('a NON-immediate registry signal (frustration_spiral) stays blocked by the floor at promptsInCurrentStage=1, fires once past it', () => {
+    const below = makeState({ currentStage: 'idea', promptsInCurrentStage: 1, promptCount: 1 });
+    const above = makeState({ currentStage: 'idea', promptsInCurrentStage: 20, promptCount: 20 });
+    expect(keysOf(detectAbsenceFlags(below, null, undefined, 1.0, 5, { consecutiveFrustratedPrompts: 3 })).has('frustration_spiral')).toBe(false);
+    expect(keysOf(detectAbsenceFlags(above, null, undefined, 1.0, 5, { consecutiveFrustratedPrompts: 3 })).has('frustration_spiral')).toBe(true);
+  });
+
+  it('the immediate-fire bypass still honours the detector confidence bar (low stageConfidence → no fire even below the floor)', () => {
+    const state = makeState({ currentStage: 'idea', promptsInCurrentStage: 1, promptCount: 1 });
+    const lowConf = { stage: 'idea' as const, currentAgentMode: 'auto', stageConfidence: 0.4 };
+    expect(keysOf(detectAbsenceFlags(state, null, undefined, 1.0, 5, lowConf)).has('coding_agent_mode_mismatch')).toBe(false);
+  });
 });
 
 // ── AbsenceDetector ────────────────────────────────────────────────────────────
