@@ -950,6 +950,51 @@ describe('service-worker.ts', () => {
       expect(logDebugMock).toHaveBeenCalledWith('advisory_personalize_skipped', { hasOg: false, hasApiKey: true });
     });
 
+    it('FAST-RESPONSE RACE: stop arriving BEFORE the decision queues still shows the popup (waits on the in-flight marker)', async () => {
+      // Reproduces the live 2026-07-10 bug: response_stop at +2.4s, advisory_pending
+      // at +3.3s, popup never shown. The fix: handleResponseStop waits while the
+      // decision-in-flight marker is up. Real in-memory store semantics needed here.
+      const store = new Map<string, string>();
+      keyStoreGetKey.mockImplementation(async (name: string) => store.get(name) || null);
+      keyStoreSetKey.mockImplementation(async (name: string, value: string) => { store.set(name, value); });
+      store.set('openai_api_key', 'sk-real-key');
+
+      vi.mocked(shouldFireStage2).mockReturnValue({ kind: 'stage_transition' } as unknown as ReturnType<typeof shouldFireStage2>);
+      // Slow decision: Stage 2 takes 1.2s — the stop below arrives long before.
+      vi.mocked(runStage2).mockImplementation(() => new Promise((resolve) =>
+        setTimeout(() => resolve({ fire_decision_session: true } as unknown as Awaited<ReturnType<typeof runStage2>>), 1200)));
+      vi.mocked(resolveDecisionContent).mockReturnValue({
+        L1: [{ option: 'o1', descBase: 'b1' }], L2: [], L3: [], pinchFallback: 'f',
+      } as unknown as ReturnType<typeof resolveDecisionContent>);
+      vi.mocked(generatePinchLabel).mockResolvedValue('Pinch.');
+      showAdvisoryMock.mockResolvedValue({ type: 'dismiss', advisoryId: 'x' });
+
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      const submitResponse = vi.fn();
+      messageListener(
+        { type: 'nexpath:prompt-submit', promptText: 'ship it now', projectRoot: 'https://replit.com', agent: 'replit', tabId: 42 },
+        {}, submitResponse,
+      );
+      // Stop arrives 50ms later — decision is still ~1.2s from queuing.
+      await new Promise((r) => setTimeout(r, 50));
+      const stopResponse = vi.fn();
+      stop(messageListener, 42, stopResponse);
+
+      await vi.waitFor(() => expect(showAdvisoryMock).toHaveBeenCalledOnce(), { timeout: 6000, interval: 100 });
+    }, 10000);
+
+    it('does not wait when the in-flight marker is stale (torn-down pipeline)', async () => {
+      keyStoreGetKey.mockImplementation(async (name: string) => {
+        if (name.startsWith('nexpath_decision_inflight::')) return JSON.stringify({ at: Date.now() - 120_000 });
+        return null;
+      });
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      const sendResponse = stop(messageListener, 55);
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+      await new Promise((r) => setTimeout(r, 700)); // longer than one poll interval
+      expect(showAdvisoryMock).not.toHaveBeenCalled();
+    });
+
     it('does nothing when no advisory is queued', async () => {
       keyStoreGetKey.mockResolvedValue(null);
       const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });

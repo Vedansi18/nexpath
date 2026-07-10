@@ -289,7 +289,41 @@ function optionsFromLevels(levels: AdvisoryPayload['levels']): AdvisoryPayload['
   ];
 }
 
+/**
+ * Decision-in-flight marker — the fix for the fast-response race. The CLI's
+ * UserPromptSubmit hook BLOCKS the agent until the decision completes, so its
+ * Stop hook can never outrun it. The browser captures passively: the agent
+ * responds IN PARALLEL with this pipeline's LLM calls (Stream B + Stage 2 +
+ * pinch, ~3-7s), so a fast response's stop event used to find no pending
+ * advisory and give up — the popup then NEVER showed (reproduced live:
+ * response_stop at +2436ms, advisory_pending at +3340ms, no panel, 2026-07-10).
+ * handlePromptSubmit holds this marker for the pipeline's whole run;
+ * handleResponseStop, finding no pending advisory but a fresh marker, WAITS for
+ * the decision to finish instead of returning.
+ */
+function decisionInflightKeyFor(projectRoot: string): string {
+  return `nexpath_decision_inflight::${projectRoot}`;
+}
+
+const DECISION_WAIT_POLL_MS = 500;
+const DECISION_WAIT_MAX_MS = 45_000;
+/** Marker older than this is a crashed/torn-down pipeline — don't wait on it. */
+const DECISION_INFLIGHT_STALE_MS = 60_000;
+
 async function handlePromptSubmit(
+  promptText: string,
+  projectRoot: string,
+  agent: string,
+): Promise<void> {
+  await keyStore.setKey(decisionInflightKeyFor(projectRoot), JSON.stringify({ at: clock.now() }));
+  try {
+    await runPromptSubmitPipeline(promptText, projectRoot, agent);
+  } finally {
+    await keyStore.setKey(decisionInflightKeyFor(projectRoot), '');
+  }
+}
+
+async function runPromptSubmitPipeline(
   promptText: string,
   projectRoot: string,
   agent: string,
@@ -716,12 +750,43 @@ async function handlePromptSubmit(
 async function handleResponseStop(projectRoot: string, tabId: number | undefined): Promise<void> {
   const key   = pendingAdvisoryKeyFor(projectRoot);
   const ogKey = pendingAdvisoryOgKeyFor(projectRoot);
-  const [raw, ogRaw, apiKey] = await Promise.all([
+  let [raw, ogRaw, apiKey] = await Promise.all([
     keyStore.getKey(key),
     keyStore.getKey(ogKey),
     keyStore.getKey('openai_api_key'),
   ]);
-  if (!raw) return; // nothing queued for this project
+
+  if (!raw) {
+    // Nothing queued YET — but the submit-path decision may still be running (see
+    // decisionInflightKeyFor: a fast agent response races the pipeline's LLM calls
+    // and used to lose the popup permanently). Wait for the decision to settle.
+    const inflightRaw = await keyStore.getKey(decisionInflightKeyFor(projectRoot));
+    if (!inflightRaw) return; // no decision running — genuinely nothing to show
+    try {
+      const inflight = JSON.parse(inflightRaw) as { at?: unknown };
+      if (typeof inflight.at !== 'number' || clock.now() - inflight.at > DECISION_INFLIGHT_STALE_MS) {
+        return; // stale marker from a torn-down pipeline — don't wait on it
+      }
+    } catch {
+      return;
+    }
+    log.debug('response_stop_waiting_for_decision', { projectRoot });
+    const deadline = clock.now() + DECISION_WAIT_MAX_MS;
+    while (clock.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, DECISION_WAIT_POLL_MS));
+      raw = await keyStore.getKey(key);
+      if (raw) break;
+      const stillInflight = await keyStore.getKey(decisionInflightKeyFor(projectRoot));
+      if (!stillInflight) {
+        // Decision finished. One last read — the pipeline queues the advisory
+        // BEFORE clearing the marker, so this catches the final write.
+        raw = await keyStore.getKey(key);
+        break;
+      }
+    }
+    if (!raw) return; // decision ended without queuing (gated/declined) or timed out
+    ogRaw = await keyStore.getKey(ogKey); // sidecar was written alongside the payload
+  }
 
   // Clear both keys before showing so a second Stop event (agents re-fire it) can't double-show.
   await Promise.all([keyStore.setKey(key, ''), keyStore.setKey(ogKey, '')]);
