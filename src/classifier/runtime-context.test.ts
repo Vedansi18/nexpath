@@ -13,8 +13,8 @@ function mkProject(): string {
 }
 afterEach(() => { for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true }); });
 
-function stateFor(root: string, frustrated = 0, accepted = 0): SessionState {
-  return { projectRoot: root, consecutiveFrustratedPrompts: frustrated, consecutiveAcceptanceStreak: accepted } as unknown as SessionState;
+function stateFor(root: string, frustrated = 0, accepted = 0, currentAgentMode?: string): SessionState {
+  return { projectRoot: root, consecutiveFrustratedPrompts: frustrated, consecutiveAcceptanceStreak: accepted, currentAgentMode } as unknown as SessionState;
 }
 
 describe('buildRuntimeContext', () => {
@@ -36,5 +36,17 @@ describe('buildRuntimeContext', () => {
     const ctx = buildRuntimeContext(stateFor(root));
     expect(ctx.hasVersionControl).toBe(true);
     expect(ctx.hasBackups).toBe(true); // git remote = an off-machine copy
+  });
+
+  it('threads the current agent mode through when set on state', () => {
+    const root = mkProject();
+    const ctx = buildRuntimeContext(stateFor(root, 0, 0, 'plan'));
+    expect(ctx.currentAgentMode).toBe('plan');
+  });
+
+  it('leaves the agent mode undefined when state carries none', () => {
+    const root = mkProject();
+    const ctx = buildRuntimeContext(stateFor(root));
+    expect(ctx.currentAgentMode).toBeUndefined();
   });
 });

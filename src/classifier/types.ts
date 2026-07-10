@@ -113,6 +113,12 @@ export interface SessionState {
   consecutiveAcceptanceStreak: number;
   /** Consecutive processed prompts while the classified mood is 'frustrated' (frustration-spiral). Reset on any non-frustrated prompt. */
   consecutiveFrustratedPrompts: number;
+  /**
+   * The coding-agent's current permission mode, as last reported by the hook payload.
+   * Sticky: a prompt that carries no mode keeps the last-known value. Undefined until a
+   * mode is first seen. Optional for backward compatibility with existing persisted state.
+   */
+  currentAgentMode?: string;
 }
 
 // ── User nature / mood / depth (item 9) ───────────────────────────────────────

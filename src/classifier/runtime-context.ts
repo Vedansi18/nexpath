@@ -20,6 +20,7 @@ export function buildRuntimeContext(state: SessionState): RuntimeContext {
     return typeof v === 'boolean' ? v : undefined;
   };
   return {
+    currentAgentMode:             state.currentAgentMode,
     consecutiveAcceptanceStreak:  state.consecutiveAcceptanceStreak,
     consecutiveFrustratedPrompts: state.consecutiveFrustratedPrompts,
     hasVersionControl:  flag('has_version_control'),

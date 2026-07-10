@@ -82,6 +82,7 @@ function newSession(projectRoot: string, now: number): SessionState {
     advisoryCount:                0,
     consecutiveAcceptanceStreak:  0,
     consecutiveFrustratedPrompts: 0,
+    currentAgentMode:             undefined,
   };
 }
 
@@ -349,6 +350,16 @@ export class SessionStateManager {
    */
   setProfile(profile: UserProfile): void {
     this.state.profile = profile;
+  }
+
+  /**
+   * Record the coding-agent's current mode reported by the hook, when present.
+   * Sticky: a prompt with no mode keeps the last-known value, so it is never cleared
+   * back to undefined by a subsequent modeless prompt. In-memory only — persisted by
+   * the next processPrompt() call, like setProfile().
+   */
+  setAgentMode(mode: string | undefined): void {
+    if (mode !== undefined) this.state.currentAgentMode = mode;
   }
 
   /**

@@ -82,11 +82,46 @@ export function buildFiredKey(flagType: FlagType, prevStage: Stage, currentStage
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
+/** Single source for the integrated coding-agent's identity (used to tag stored prompts). */
+export const ACTIVE_AGENT_ID = 'claude-code';
+
 export interface AutoInput {
   /** Latest prompt text to classify. */
   promptText:  string;
   /** Project root — used to look up session state. */
   projectRoot: string;
+  /**
+   * The coding-agent's current permission mode, when the hook payload reports it.
+   * Undefined when unavailable (CLI-argument mode, or an agent/version that does not
+   * send it). Threaded onto session state and read by the runtime context.
+   */
+  currentAgentMode?: string;
+}
+
+/** Parsed shape of the UserPromptSubmit hook stdin payload. */
+export interface AutoHookPayload {
+  promptText?:      string;
+  currentAgentMode?: string;
+}
+
+/**
+ * Parse the JSON payload the coding-agent hook writes to stdin.
+ *
+ * Captures the prompt text and the reported permission mode. The mode vocabulary
+ * evolves across agent versions, so an unrecognised value is passed through verbatim —
+ * it is never checked against a fixed list here. A missing mode or malformed JSON
+ * yields an empty result (the caller then treats the prompt as absent / mode unknown).
+ */
+export function parseAutoHookPayload(raw: string): AutoHookPayload {
+  try {
+    const payload = JSON.parse(raw) as { prompt?: string; permission_mode?: string };
+    return {
+      promptText:       payload.prompt?.trim(),
+      currentAgentMode: typeof payload.permission_mode === 'string' ? payload.permission_mode : undefined,
+    };
+  } catch {
+    return {};
+  }
 }
 
 export type AutoOutcome =
@@ -136,10 +171,13 @@ export async function runAuto(
   }
 
   // ── 0. Persist prompt text — runs before classifier so prompt is stored even if pipeline errors ──
-  insertPrompt(store, { projectRoot: input.projectRoot, promptText: input.promptText, agent: 'claude-code' });
+  insertPrompt(store, { projectRoot: input.projectRoot, promptText: input.promptText, agent: ACTIVE_AGENT_ID });
 
   // ── 1. Load session state ────────────────────────────────────────────────────
   const mgr = SessionStateManager.load(store, input.projectRoot);
+  // Record the coding-agent's current mode (when the hook reported it) before the
+  // pipeline builds its runtime context; persisted by processPrompt below.
+  mgr.setAgentMode(input.currentAgentMode);
   const prevStage: Stage = mgr.current.currentStage;
   logger.debug('session_loaded', { promptCount: mgr.current.promptCount, stage: prevStage, project: input.projectRoot });
   writeTelemetry(input.projectRoot, 'prompt_received', { promptCount: mgr.current.promptCount }, store);
@@ -466,17 +504,15 @@ export function registerAutoCommand(program: import('commander').Command): void 
     .argument('[prompt]', 'The latest prompt text (omit to read from stdin in hook mode)')
     .action(async (promptArg: string | undefined, opts: { project: string; db: string }) => {
       let promptText = promptArg?.trim();
+      let currentAgentMode: string | undefined;
 
       if (!promptText) {
         // Hook mode: read JSON payload from stdin (Claude Code UserPromptSubmit)
         const raw = await readStdin();
         if (raw) {
-          try {
-            const payload = JSON.parse(raw) as { prompt?: string };
-            promptText = payload.prompt?.trim();
-          } catch {
-            // Not valid JSON — fall through to the error below
-          }
+          const parsed = parseAutoHookPayload(raw);
+          promptText       = parsed.promptText;
+          currentAgentMode = parsed.currentAgentMode;
         }
       }
 
@@ -521,7 +557,7 @@ export function registerAutoCommand(program: import('commander').Command): void 
 
       try {
         const result = await runAuto(
-          { promptText, projectRoot: opts.project },
+          { promptText, projectRoot: opts.project, currentAgentMode },
           store,
         );
 
