@@ -333,7 +333,7 @@ export async function runAuto(
     return { outcome: 'no_action' };
   }
 
-  // ── 6.8. Persist newly-detected absence flags — all qualify for Stage 2 consideration ──
+  // ── 6.8. Persist newly-detected absence flags — all qualify for the fire consideration ──
   // Guard: Condition 2 only fires when newFlags is non-empty and trigger kind is absence.
   if (triggerResult.kind === 'absence' && newFlags.length > 0) {
     for (const flag of newFlags) {
@@ -496,7 +496,7 @@ export function registerAutoCommand(program: import('commander').Command): void 
       initLogger('auto', logLevel);
 
       // Diagnostic: log the source layer that produced the key so a missing
-      // key (Stage-2 failure) can be traced to the actual fallback chain.
+      // key (now a classifier degrade to local detection) can be traced to the fallback chain.
       const keySource = await getKeySource(opts.project);
       const keyFound  = !!process.env['OPENAI_API_KEY'];
       logger.debug('env_load', {
