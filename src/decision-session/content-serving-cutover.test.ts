@@ -113,7 +113,7 @@ describe('cutover sweep — context_loss role-tailored serving through the engin
 
 describe('cutover sweep — completeness (the engine is the sole content source)', () => {
   it('every shipped record is engine-served — marker == shipped == 142', () => {
-    expect(SHIPPED_CONTENT_TEMPLATES.length).toBe(142);
+    expect(SHIPPED_CONTENT_TEMPLATES.length).toBe(144);
     expect(MIGRATED_SIGNALS.size).toBe(SHIPPED_CONTENT_TEMPLATES.length);
     for (const rec of SHIPPED_CONTENT_TEMPLATES) {
       expect(resolveContentSource(rec.signalType), `${rec.signalType} is engine-served`).toBe('content-template');

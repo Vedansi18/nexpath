@@ -55,24 +55,24 @@ describe('content-template-tooling — shipped registry completeness (all 9 clas
   const canonical = canonicalSignalTypes();
   const shipped = SHIPPED_CONTENT_TEMPLATES.map((r) => r.signalType);
 
-  it('the canonical partition has 142 distinct signalTypes (136 legacy + the 6 new §4.E2 signals)', () => {
-    expect(canonical.length).toBe(142); // A10 added the 6 new signals' why-help entries
-    expect(new Set(canonical).size).toBe(142);
+  it('the canonical partition has 144 distinct signalTypes (136 legacy + 6 §4.E2 + 2 mode-mismatch)', () => {
+    expect(canonical.length).toBe(144);
+    expect(new Set(canonical).size).toBe(144);
   });
 
-  it('the shipped registry covers the canonical 142 exactly — none missing, none extra, no duplicates', () => {
+  it('the shipped registry covers the canonical 144 exactly — none missing, none extra, no duplicates', () => {
     const cs = new Set(canonical);
     const rs = new Set(shipped);
     expect(canonical.filter((s) => !rs.has(s))).toEqual([]); // every canonical signal has a record
     expect(shipped.filter((s) => !cs.has(s))).toEqual([]);   // and no record outside the partition
     expect(shipped.filter((s, i) => shipped.indexOf(s) !== i)).toEqual([]); // no duplicate record
-    expect(shipped.length).toBe(142);
+    expect(shipped.length).toBe(144);
   });
 
   it('the whole shipped registry is all-5-columns, zero thin', () => {
     const cov = coverageMetric(SHIPPED_CONTENT_TEMPLATES);
-    expect(cov.total).toBe(142);
-    expect(cov.allLevels).toBe(142);
+    expect(cov.total).toBe(144);
+    expect(cov.allLevels).toBe(144);
     expect(cov.thin).toBe(0);
   });
 });

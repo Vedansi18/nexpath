@@ -17,18 +17,18 @@
  * (b) behavioral telemetry, and the AR-10 dev-environment probe (Channel Y, shipped).
  * Categories whose detection needs a channel-reader that is NOT shipped yet carry a
  * `requiresChannel` marker and a dark detector (returns 0) until that reader lands —
- * this SEQUENCES a category to its channel; it is not a permanent block. The
- * channel-gated categories are: 'X' (agent-output / transcript diff reader — undesigned, expansion Task 7),
- * 'M' (coding-agent mode — its reader has now shipped, so the detector is live; the signal
- * stays unserved until its content is authored), and 'c' (LLM-presence semantic
- * extension of the Stream-B classifier). Categories on (a)/(b)/(Y) carry a real detector
+ * this SEQUENCES a category to its channel; it is not a permanent block. The still-gated
+ * channels are: 'X' (agent-output / transcript diff reader — undesigned, expansion Task 7)
+ * and 'c' (LLM-presence semantic extension of the Stream-B classifier). The coding-agent-mode
+ * reader ('M') has shipped and its two mode-mismatch categories are now live and served, so
+ * they carry a real detector and no `requiresChannel`. Categories on (a)/(b)/(Y) carry a real detector
  * and no `requiresChannel`. The full §4.E2 content for any genuinely-new `ABSENCE_*`
  * signal is authored separately; the registry ships dark.
  */
 
 import type { PromptRecord, Stage } from './types.js';
 import type { ParamPolarity } from '../decision-session/engine-registry.js';
-import { detectAgentModeMismatch } from './agent-mode-mismatch.js';
+import { detectExecuteDuringPlanning, detectRestrictedDuringBuild } from './agent-mode-mismatch.js';
 
 /** Detector confidence a mistake pattern is present: 0 (absent) … 1 (certain). */
 export type Confidence = number;
@@ -74,10 +74,9 @@ export interface MistakeCategory {
   /** Right-time severity tier. */
   severity: MistakeSeverity;
   /**
-   * Set when a category is not yet live. Usually its channel-reader is unshipped, so the
-   * detector is dark (returns 0). Exception: the coding-agent-mode reader has shipped, so
-   * that detector is live — the category stays marked until its served content lands.
-   * Absent = live and served.
+   * Set when a category's channel-reader is unshipped, so the detector is dark (returns 0)
+   * until that reader lands. Absent = detectable now (a real detector). The 'M' reader has
+   * shipped, so the mode-mismatch categories no longer carry this.
    */
   requiresChannel?: RequiresChannel;
   metadata?: { description: string };
@@ -305,9 +304,14 @@ export const MISTAKE_CATEGORIES: readonly MistakeCategory[] = [
     metadata: { description: 'no SAST / dependency / secret scanner in the workflow' },
   },
   {
-    name: 'coding_agent_mode_mismatch', routing: 'absence', mapToAbsenceSignal: 'ABSENCE_AGENT_MODE_MISMATCH',
-    severity: 'high', requiresChannel: 'M', detect: (_history, ctx) => detectAgentModeMismatch(ctx),
-    metadata: { description: 'wrong agent mode for the task (e.g. execute mode while still planning)' },
+    name: 'coding_agent_mode_mismatch', routing: 'absence', mapToAbsenceSignal: 'ABSENCE_CODING_AGENT_MODE_MISMATCH',
+    severity: 'high', detect: (_history, ctx) => detectExecuteDuringPlanning(ctx),
+    metadata: { description: 'an autonomous execute mode while the work is still in a planning stage (barreling ahead)' },
+  },
+  {
+    name: 'agent_mode_too_restricted', routing: 'absence', mapToAbsenceSignal: 'ABSENCE_AGENT_MODE_TOO_RESTRICTED',
+    severity: 'medium', detect: (_history, ctx) => detectRestrictedDuringBuild(ctx),
+    metadata: { description: 'a read-only/plan mode during hands-on implementation, blocking the agent from acting' },
   },
   // ── Family 8 — workflow & process discipline ──────────────────────────────────
   {

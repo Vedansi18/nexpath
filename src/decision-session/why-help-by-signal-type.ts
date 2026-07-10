@@ -181,6 +181,8 @@ export const WHY_HELP_BY_SIGNAL_TYPE: Record<string, WhyHelpEntry> = {
   ABSENCE_NO_SEPARATE_ENVS:               WHY_HELP_PER_CLASS.class_security_safety,
   ABSENCE_NO_AUTOMATED_SECURITY_SCANNING: WHY_HELP_PER_CLASS.class_security_safety,
   ABSENCE_FRUSTRATION_SPIRAL:             WHY_HELP_PER_CLASS.class_mood_meta,
+  ABSENCE_CODING_AGENT_MODE_MISMATCH:     WHY_HELP_PER_CLASS.class_agent_mode,
+  ABSENCE_AGENT_MODE_TOO_RESTRICTED:      WHY_HELP_PER_CLASS.class_agent_mode,
 };
 
 /**

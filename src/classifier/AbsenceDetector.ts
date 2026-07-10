@@ -9,6 +9,7 @@ import { MISTAKE_CATEGORIES, type RuntimeContext } from './mistake-categories.js
 const REGISTRY_DETECTED_KEYS = [
   'secret_in_prompt', 'no_version_control', 'no_backup_safety',
   'no_separate_envs', 'no_automated_security_scanning', 'frustration_spiral',
+  'coding_agent_mode_mismatch', 'agent_mode_too_restricted',
 ] as const;
 const REGISTRY_DETECTED_BY_KEY = new Map(
   MISTAKE_CATEGORIES

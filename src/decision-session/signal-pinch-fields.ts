@@ -22,6 +22,8 @@ export interface PinchFields {
 
 export const SIGNAL_PINCH_FIELDS: Readonly<Record<string, { base: PinchFields; casual?: PinchFields; beginner?: PinchFields }>> = {
   ABSENCE_ACCEPTANCE_CRITERIA_BEFORE_DEV: { base: { question: "Are acceptance criteria defined for this story before development begins?", pinchFallback: "Define acceptance criteria for this story before starting implementation." } },
+  ABSENCE_CODING_AGENT_MODE_MISMATCH: { base: { question: "This still looks like planning — pause before I start making changes?", pinchFallback: "Planning, not building yet." }, beginner: { question: "This still looks like planning — pause before changing anything?", pinchFallback: "Planning, not building yet." } },
+  ABSENCE_AGENT_MODE_TOO_RESTRICTED: { base: { question: "You're in read-only mode but we're building — get ready to switch?", pinchFallback: "Read-only during build." }, beginner: { question: "You can only look right now, but we're building — get ready to switch?", pinchFallback: "Look-only for now." } },
   ABSENCE_ACCESSIBILITY: { base: { question: "UI being built — accessibility checked?", pinchFallback: "Accessibility?" } },
   ABSENCE_ALTERNATIVES: { base: { question: "Decision made — alternatives considered?", pinchFallback: "No alternatives." }, casual: { question: "Decision made — any alternatives looked at?", pinchFallback: "No alternatives." }, beginner: { question: "Decision made — any alternatives looked at?", pinchFallback: "No alternatives." } },
   ABSENCE_API_CONTRACT_DEFINITION: { base: { question: "API being built — defined the contract first?", pinchFallback: "Define the interface before implementing." } },

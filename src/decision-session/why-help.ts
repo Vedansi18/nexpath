@@ -69,7 +69,8 @@ export type SignalClass =
   | 'class8_role_cluster'
   | 'class9_academic_hardcore_pro'
   | 'class_security_safety'
-  | 'class_mood_meta';
+  | 'class_mood_meta'
+  | 'class_agent_mode';
 
 /**
  * Why-help content table keyed by signal class. Each entry's `structure`
@@ -168,6 +169,14 @@ export const WHY_HELP_PER_CLASS: Record<SignalClass, WhyHelpEntry> = {
       beginner: "Recent prompts have been stuck on the same thing without a break. It's okay to pause. Let's step back, look at what's been tried, and pick one small next step.",
     },
   },
+  class_agent_mode: {
+    structure: 'universal-triplet',
+    content: {
+      formal:   "The agent's current operating mode looks out of step with the work — an autonomous mode while the approach is still being planned, or a read-only mode once implementation has begun. Aligning the mode to the stage keeps the agent from running ahead of a plan or being blocked from acting.",
+      casual:   "The mode the agent's in doesn't quite match what you're doing — running ahead while you're still planning, or stuck read-only once you're ready to build. A quick check that the mode fits the stage keeps things moving smoothly.",
+      beginner: "The agent's setting doesn't match what you're doing right now — building before there's a plan, or unable to change anything when you're ready to build. Let's make sure the mode fits the step you're on.",
+    },
+  },
 };
 
 /** All signal-class keys as a const array — useful for exhaustive iteration in tests / dispatch tables. */
@@ -183,4 +192,5 @@ export const ALL_SIGNAL_CLASSES: readonly SignalClass[] = [
   'class9_academic_hardcore_pro',
   'class_security_safety',
   'class_mood_meta',
+  'class_agent_mode',
 ] as const;

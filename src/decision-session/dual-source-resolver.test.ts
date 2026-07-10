@@ -24,6 +24,8 @@ describe('§6.1 gate 1 — dual-source resolver + migration marker', () => {
   const NEW_E2 = [
     'ABSENCE_SECRET_IN_PROMPT', 'ABSENCE_NO_VERSION_CONTROL', 'ABSENCE_NO_BACKUP_SAFETY',
     'ABSENCE_NO_SEPARATE_ENVS', 'ABSENCE_NO_AUTOMATED_SECURITY_SCANNING', 'ABSENCE_FRUSTRATION_SPIRAL',
+    // the two coding-agent-mode mismatch signals (both directions)
+    'ABSENCE_CODING_AGENT_MODE_MISMATCH', 'ABSENCE_AGENT_MODE_TOO_RESTRICTED',
   ];
   // The migrated Group-B classes, derived from their records (B3: cls 2, B4: cls 3, B6: cls 5, B7: cls 6,
   // B8: cls 7, B2: cls 1 stage transitions, B9: cls 8 role-cluster, B10: cls 9 academic/hardcore, B5: cls 4
@@ -32,7 +34,7 @@ describe('§6.1 gate 1 — dual-source resolver + migration marker', () => {
 
   it('the migration marker holds the 6 new §4.E2 signals (A12) + ALL 9 migrated Group-B classes (B3/B4/B6/B7/B8/B2/B9/B10/B5: cls 2/3/5/6/7/1/8/9/4)', () => {
     const migratedClassSignals = MIGRATED_CLASS_RECORDS.map((r) => r.signalType);
-    expect(MIGRATED_SIGNALS.size).toBe(NEW_E2.length + migratedClassSignals.length); // 6 + 21 + 11 + 8 + 14 + 20 + 7 + 35 + 12 + 8 = 142
+    expect(MIGRATED_SIGNALS.size).toBe(NEW_E2.length + migratedClassSignals.length); // (6 + 2 mode) + 136 = 144
     for (const s of [...NEW_E2, ...migratedClassSignals]) {
       expect(MIGRATED_SIGNALS.has(s)).toBe(true);
       expect(resolveContentSource(s)).toBe('content-template');

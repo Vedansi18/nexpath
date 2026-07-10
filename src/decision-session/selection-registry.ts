@@ -57,6 +57,9 @@ export const MIGRATED_SIGNALS: ReadonlySet<string> = new Set<string>([
   'ABSENCE_NO_SEPARATE_ENVS',
   'ABSENCE_NO_AUTOMATED_SECURITY_SCANNING',
   'ABSENCE_FRUSTRATION_SPIRAL',
+  // coding-agent-mode mismatch signals (both directions), engine-served.
+  'ABSENCE_CODING_AGENT_MODE_MISMATCH',
+  'ABSENCE_AGENT_MODE_TOO_RESTRICTED',
   // B3 — class 2 (verification-quality, 21 signals, 0 sensitive): now engine-served.
   'BEHAVIOUR_TESTING',
   'ABSENCE_TEST_CREATION',

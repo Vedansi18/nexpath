@@ -6,8 +6,8 @@ import {
 } from './why-help-by-signal-type.js';
 
 describe('why-help-by-signal-type — shape + coverage', () => {
-  it('contains exactly 142 entries across all 11 signal classes', () => {
-    expect(Object.keys(WHY_HELP_BY_SIGNAL_TYPE).length).toBe(142);
+  it('contains exactly 144 entries across all 12 signal classes', () => {
+    expect(Object.keys(WHY_HELP_BY_SIGNAL_TYPE).length).toBe(144);
   });
 
   it('every entry resolves to one of the 9 WHY_HELP_PER_CLASS entries', () => {
@@ -17,7 +17,7 @@ describe('why-help-by-signal-type — shape + coverage', () => {
     }
   });
 
-  it('per-class signalType counts match the canonical split (7/21/11/8/8/14/20/35/12 + 5/1 new)', () => {
+  it('per-class signalType counts match the canonical split (7/21/11/8/8/14/20/35/12 + 5/1/2 new)', () => {
     const expectedCounts: Record<string, number> = {
       class1_stage_transition:            7,
       class2_verification_quality:        21,
@@ -30,6 +30,7 @@ describe('why-help-by-signal-type — shape + coverage', () => {
       class9_academic_hardcore_pro:       12,
       class_security_safety:              5, // §4.E2 (A10): secret / version / backup / envs / scanning
       class_mood_meta:                    1, // §4.E2 (A10): frustration_spiral
+      class_agent_mode:                   2, // mode-mismatch: execute-while-planning / restricted-while-building
     };
 
     const actualCounts: Record<string, number> = {};

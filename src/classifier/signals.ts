@@ -1953,6 +1953,20 @@ export const SIGNAL_DEFINITIONS: SignalDefinition[] = [
     detectionKeywords: ['let me pause', 'step back', 'take a break'],
     absenceThreshold: 5,
   },
+  {
+    key: 'coding_agent_mode_mismatch',
+    description: 'An autonomous execute mode while the work is still in a planning stage — pause and plan first.',
+    expectedStages: ['idea', 'prd', 'architecture', 'task_breakdown'],
+    detectionKeywords: ['plan first', 'before building', 'outline the approach'],
+    absenceThreshold: 1, // near-immediate: the mode-vs-stage clash needs no accumulation
+  },
+  {
+    key: 'agent_mode_too_restricted',
+    description: 'A read-only/plan mode during implementation — lay out the plan and switch to an edit mode.',
+    expectedStages: ['implementation', 'review_testing'],
+    detectionKeywords: ['switch to edit', 'read-only mode', 'ready to build'],
+    absenceThreshold: 1, // near-immediate: the mode-vs-stage clash needs no accumulation
+  },
 ];
 
 // ── Signal detection from prompt text ────────────────────────────────────────

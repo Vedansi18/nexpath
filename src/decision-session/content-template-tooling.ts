@@ -35,6 +35,7 @@ import { CLASS8_RECORDS } from './content-templates/class8-records.js';
 import { CLASS9_RECORDS } from './content-templates/class9-records.js';
 import { CLASS_SECURITY_SAFETY_RECORDS } from './content-templates/class-security-safety.js';
 import { CLASS_MOOD_META_RECORDS } from './content-templates/class-mood-meta.js';
+import { CLASS_AGENT_MODE_RECORDS } from './content-templates/class-agent-mode.js';
 
 /**
  * The in-source shipped-preset records the engine resolves at the `shipped` tier.
@@ -56,6 +57,7 @@ export const SHIPPED_CONTENT_TEMPLATES: readonly ContentTemplateRecord[] = [
   ...CLASS9_RECORDS,
   ...CLASS_SECURITY_SAFETY_RECORDS,
   ...CLASS_MOOD_META_RECORDS,
+  ...CLASS_AGENT_MODE_RECORDS,
 ];
 
 // ── Set schema validation (one gate over the whole registry) ───────────────────
