@@ -287,11 +287,13 @@ export async function classifyStage(
 ): Promise<StageClassifierResult> {
   const minConfidence = config?.minConfidence ?? STAGE2_LLM_MIN_CONFIDENCE;
   const contextWindow = config?.contextWindow ?? STAGE2_CONTEXT_WINDOW;
-  const openai = client ?? new OpenAI();
   const windowText = input.window.map((w) => w.text).join('\n');
 
   let result: StageClassifierResult;
   try {
+    // Construct inside the try: with no client and no API key, `new OpenAI()` throws
+    // synchronously — degrade to the local classifier instead of crashing the caller.
+    const openai = client ?? new OpenAI();
     const response = await openai.chat.completions.create(
       {
         model: STAGE_CLASSIFIER_MODEL,

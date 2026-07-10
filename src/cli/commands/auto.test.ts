@@ -7,6 +7,20 @@ vi.mock('../../telemetry/index.js', () => ({
   writeTelemetry: vi.fn(),
   TELEMETRY_PATH: '/mock/telemetry.jsonl',
 }));
+// Fallback mock for any `new OpenAI()` a code path constructs when a test passes no
+// client — the stage classifier now fires every prompt, so without this a no-client
+// call would hit a real endpoint and time out. Returns a benign low-confidence, no-fire
+// classification; tests that pass an explicit client override this entirely.
+vi.mock('openai', () => ({
+  default: class {
+    chat = { completions: { create: vi.fn().mockResolvedValue({
+      choices: [{ message: { content: JSON.stringify({
+        stage: 'Implementation', stage_confidence: 0.3, signals_present: [], signals_absent: [],
+        fire_decision_session: false, selected_signal_key: '', reason: 'test fallback',
+      }) } }],
+    }) } };
+  },
+}));
 import { getRecentPrompts } from '../../store/prompts.js';
 import { buildFiredKey, runAuto, readStdin } from './auto.js';
 import { writeTelemetry } from '../../telemetry/index.js';
@@ -611,8 +625,9 @@ describe('runAuto — MIN_PROMPTS_BEFORE_ADVISORY guard', () => {
     const result2 = await runAuto(makeInput({ projectRoot: '/test/min-guard' }), store, openai);
     expect(result2.outcome).toBe('no_action');
 
-    // Stage 2 (OpenAI) was never reached — guard exited before shouldFireStage2
-    expect(createFn).not.toHaveBeenCalled();
+    // The classifier runs on every prompt (including below the min-prompts floor); the
+    // guard still blocks the advisory, so the outcome is no_action.
+    expect(createFn).toHaveBeenCalled();
   });
 
   it('guard does NOT block at promptCount >= 3 — pipeline proceeds to Stage 2', async () => {
@@ -782,7 +797,7 @@ describe('runAuto — advisory_frequency gate', () => {
     }
     const result = await runAuto(makeInput({ projectRoot: '/test/freq-off' }), store, openai);
     expect(result.outcome).toBe('no_action');
-    expect(createFn).not.toHaveBeenCalled();
+    expect(createFn).toHaveBeenCalled();  // classifier runs every prompt; the gate blocks the advisory
   });
 
   it('returns no_action when per-project advisory_frequency is "off" (overrides global)', async () => {
@@ -801,7 +816,7 @@ describe('runAuto — advisory_frequency gate', () => {
     }
     const result = await runAuto(makeInput({ projectRoot: '/test/freq-proj-off' }), store, openai);
     expect(result.outcome).toBe('no_action');
-    expect(createFn).not.toHaveBeenCalled();
+    expect(createFn).toHaveBeenCalled();  // classifier runs every prompt; the gate blocks the advisory
   });
 
   it('returns no_action for absence flag when frequency is "major_only"', async () => {
@@ -820,7 +835,7 @@ describe('runAuto — advisory_frequency gate', () => {
     // Force shouldFireStage2 to return an absence flag by running the already-flagged state
     const result = await runAuto(makeInput({ projectRoot: '/test/freq-major' }), store, openai);
     expect(result.outcome).toBe('no_action');
-    expect(createFn).not.toHaveBeenCalled();
+    expect(createFn).toHaveBeenCalled();  // classifier runs every prompt; the gate blocks the advisory
   });
 
   it('returns no_action for second event when frequency is "once_per_session"', async () => {
@@ -840,7 +855,7 @@ describe('runAuto — advisory_frequency gate', () => {
     const result = await runAuto(makeInput({ projectRoot: '/test/freq-once' }), store, openai);
     // once_per_session: already fired once → gate blocks
     expect(result.outcome).toBe('no_action');
-    expect(createFn).not.toHaveBeenCalled();
+    expect(createFn).toHaveBeenCalled();  // classifier runs every prompt; the gate blocks the advisory
   });
 
   it('every_event setting does not gate the pipeline (default behaviour)', async () => {
@@ -1306,22 +1321,16 @@ describe('runAuto — LLM profile classification gate', () => {
   afterEach(() => { store.db.close(); });
 
   it('LLM profile call is skipped when promptHistory has fewer than MIN_PROFILE_PROMPTS-1 prompts', async () => {
+    const { SessionStateManager } = await import('../../classifier/SessionStateManager.js');
     // Run 2 times — history has 2 entries before the 3rd call, below the gate (MIN_PROFILE_PROMPTS-1=3)
     for (let i = 0; i < 2; i++) {
       await runAuto(makeInput({ projectRoot: '/test/llm-gate-skip' }), store);
     }
-    // A mock that throws detects any unexpected LLM call
-    const detectingMock = {
-      chat: {
-        completions: {
-          create: vi.fn().mockRejectedValue(new Error('unexpected LLM profile call')),
-        },
-      },
-    } as unknown as OpenAI;
-    await expect(
-      runAuto(makeInput({ projectRoot: '/test/llm-gate-skip' }), store, detectingMock),
-    ).resolves.not.toThrow();
-    expect(detectingMock.chat.completions.create).not.toHaveBeenCalled();
+    // The stage classifier runs every prompt, but the profile classifier must NOT run
+    // yet (history below the gate) — assert the profile stays uncomputed.
+    await runAuto(makeInput({ projectRoot: '/test/llm-gate-skip' }), store, makeMockOpenAI(FIRE_NO_RESPONSE));
+    const mgr = SessionStateManager.load(store, '/test/llm-gate-skip');
+    expect(mgr.current.profile).toBeNull();
   });
 
   it('LLM profile call fires and profile is saved when history reaches MIN_PROFILE_PROMPTS and profile is null', async () => {
@@ -1349,6 +1358,39 @@ describe('runAuto — LLM profile classification gate', () => {
     expect(mgr.current.profile?.nature).toBe('hardcore_pro');
     expect(mgr.current.profile?.mood).toBe('focused');
     expect(mgr.current.profile?.depth).toBe('high');
+  });
+});
+
+// ── runAuto — keep-separate (the classifier does not fold profile / Stream-B) ──
+
+describe('runAuto — keep-separate classifiers', () => {
+  let store: Store;
+  beforeEach(async () => { store = await openStore(':memory:'); });
+  afterEach(() => { store.db.close(); });
+
+  it('Stream-B still fires as a call distinct from the stage classifier (implementation stage)', async () => {
+    const { SessionStateManager } = await import('../../classifier/SessionStateManager.js');
+    setConfig(store, 'advisory_frequency', 'optimum');
+    await runAuto(makeInput({ promptText: IMPL_PROMPT, projectRoot: '/test/keep-sep' }), store);
+    // Force implementation stage with promptsInCurrentStage >= 3 so Stream-B fires on the next call
+    // (Stream-B reads currentStage BEFORE processPrompt runs).
+    const mgr = SessionStateManager.load(store, '/test/keep-sep');
+    (mgr as unknown as { state: Record<string, unknown> }).state['currentStage']         = 'implementation';
+    (mgr as unknown as { state: Record<string, unknown> }).state['stageConfidence']       = 0.9;
+    (mgr as unknown as { state: Record<string, unknown> }).state['promptsInCurrentStage'] = 3;
+    mgr.setDetectedLanguage(store, 'en'); // persists the state above
+
+    const seen: string[] = [];
+    const client = { chat: { completions: { create: vi.fn().mockImplementation((req: { messages: { content: string }[] }) => {
+      seen.push(req.messages.map((m) => m.content).join('\n'));
+      return Promise.resolve({ choices: [{ message: { content: JSON.stringify(FIRE_NO_RESPONSE) } }] });
+    }) } } } as unknown as OpenAI;
+    await runAuto(makeInput({ promptText: IMPL_PROMPT, projectRoot: '/test/keep-sep' }), store, client);
+
+    // The stage classifier fired (its system prompt is present) AND Stream-B fired as a
+    // SEPARATE call — the wiring did not fold Stream-B into the single classifier call.
+    expect(seen.some((t) => t.includes('stage classifier'))).toBe(true);
+    expect(seen.length).toBeGreaterThanOrEqual(2);
   });
 });
 
@@ -1474,7 +1516,7 @@ describe('runAuto — telemetry events', () => {
     vi.mocked(writeTelemetry).mockClear();
     await runAuto(makeInput({ projectRoot: '/test/tel-s2' }), store, makeMockOpenAI(FIRE_YES_RESPONSE, 'Hold up.'));
 
-    const s2Call = vi.mocked(writeTelemetry).mock.calls.find(([, event]) => event === 'stage2_evaluated');
+    const s2Call = vi.mocked(writeTelemetry).mock.calls.find(([, event]) => event === 'classifier_fire_evaluated');
     if (s2Call) {
       expect(s2Call[2]).toEqual(expect.objectContaining({ confirmed: expect.any(Boolean) }));
     }
@@ -1621,7 +1663,7 @@ describe('runAuto — absence flag selective add', () => {
     const { SessionStateManager } = await import('../../classifier/SessionStateManager.js');
     const mgr = SessionStateManager.load(store, '/test/selective-add-decline');
     // Find a stage2_evaluated event for an absence trigger that declined
-    const s2Call = vi.mocked(writeTelemetry).mock.calls.find(([, ev]) => ev === 'stage2_evaluated');
+    const s2Call = vi.mocked(writeTelemetry).mock.calls.find(([, ev]) => ev === 'classifier_fire_evaluated');
     const absenceDeclined =
       s2Call !== undefined &&
       (s2Call[2] as Record<string, unknown>)?.['confirmed'] === false &&

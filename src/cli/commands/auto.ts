@@ -4,13 +4,13 @@ import { basename, join } from 'node:path';
 import { resolveOpenAIKey, getKeySource } from '../../config/ApiKeyResolver.js';
 import type { Store } from '../../store/db.js';
 import { openStore, closeStore, DEFAULT_DB_PATH } from '../../store/db.js';
-import { classifyPrompt } from '../../classifier/PromptClassifier.js';
+import { classifyStage } from '../../classifier/stage-classifier.js';
 import { SessionStateManager } from '../../classifier/SessionStateManager.js';
 import { detectAbsenceFlags, ABSENCE_MIN_PROMPTS } from '../../classifier/AbsenceDetector.js';
 import { buildRuntimeContext } from '../../classifier/runtime-context.js';
 import { classifyStreamBPresence } from '../../classifier/StreamBPresenceClassifier.js';
 import type { StreamBPresenceResult } from '../../classifier/StreamBPresenceClassifier.js';
-import { shouldFireStage2, runStage2 } from '../../classifier/Stage2Trigger.js';
+import { shouldFireStage2 } from '../../classifier/Stage2Trigger.js';
 import { generatePinchLabel } from '../../decision-session/PinchGenerator.js';
 import { pinchSignalTypeForFlag } from '../../decision-session/content-template-source.js';
 import { selectionRegister } from '../../decision-session/selection-registry.js';
@@ -25,7 +25,6 @@ import { importHistoricalPrompts } from '../../store/historical-import.js';
 import { classifyUserProfileLLM, MIN_PROFILE_PROMPTS } from '../../classifier/LLMProfileClassifier.js';
 import { isProfileStale } from '../../classifier/UserProfileClassifier.js';
 import { logger, initLogger } from '../../logger.js';
-import { extractApiError } from '../../utils/api-error.js';
 import type { LogLevel } from '../../logger.js';
 import { writeHookStats } from '../../store/hook-stats.js';
 import { upsertPendingAdvisory } from '../../store/pending-advisories.js';
@@ -40,10 +39,11 @@ import { recentPromptMetadata } from '../../telemetry/recent-prompts.js';
  *
  * Wires the full pipeline for between-prompt advisory checks:
  *
- *   1. Stage 1 classifier (keyword → TF-IDF → optional MiniLM)
+ *   1. Stage classifier — one gpt-4o-mini call per prompt (folds the former
+ *      keyword/TF-IDF cascade + the cross-confirmation into a single classification)
  *   2. Absence flag detection
- *   3. shouldFireStage2 decision
- *   4. Stage 2 LLM cross-confirmation (gpt-4o-mini)
+ *   3. shouldFireStage2 decision (deterministic trigger)
+ *   4. Fire cross-confirmation — from the classifier's own fire assessment (no extra call)
  *   5. Pinch label generation (gpt-4o-mini, separate call)
  *   6. Decision session UI (@clack/prompts, 3-level cascade)
  *
@@ -158,9 +158,20 @@ export async function runAuto(
     null
   ) as import('../../classifier/types.js').UserRole | null;
 
-  // ── 2. Stage 1 classifier ────────────────────────────────────────────────────
-  const classification = await classifyPrompt(input.promptText);
-  logger.debug('stage1_result', { classified: classification.stage, confidence: classification.confidence });
+  // ── 2. Stage classifier — one LLM call, folds the former cascade + cross-confirm ──
+  const stageResult = await classifyStage(
+    {
+      promptText:        input.promptText,
+      window:            [...mgr.current.promptHistory.map((p) => ({ text: p.text })), { text: input.promptText }],
+      sessionStage:      prevStage,
+      sessionConfidence: mgr.current.stageConfidence,
+      profile:           mgr.current.profile,
+    },
+    openai,
+    { minConfidence: freqConfig.stage2MinConfidence, contextWindow: freqConfig.stage2ContextWindow },
+  );
+  const classification = stageResult.classification;
+  logger.debug('stage_classified', { stage: classification.stage, confidence: classification.confidence, fire: stageResult.fireRecommendation, degraded: stageResult.degraded });
   writeTelemetry(input.projectRoot, 'prompt_classified', { stage: classification.stage, confidence: classification.confidence }, store);
 
   // ── 2.5. LLM profile classification — async, before processPrompt ────────────
@@ -330,43 +341,34 @@ export async function runAuto(
     }
   }
 
-  // ── 7. Stage 2 LLM cross-confirmation ───────────────────────────────────────
-  const stage2Input = {
-    state:          mgr.current as import('../../classifier/types.js').SessionState,
-    detectedStage:  mgr.current.currentStage,
-    confidence:     mgr.current.stageConfidence,
-    flagType:       triggerResult.kind as 'stage_transition' | 'absence',
-    qualifyingFlags: triggerResult.kind === 'absence' ? triggerResult.qualifyingFlags : undefined,
-  };
-
-  let stage2Output: import('../../classifier/Stage2Trigger.js').Stage2Output;
-  try {
-    stage2Output = await runStage2(stage2Input, openai, {
-      minConfidence: freqConfig.stage2MinConfidence,
-      contextWindow: freqConfig.stage2ContextWindow,
-    });
-    logger.debug('stage2_result', { fire: stage2Output.fire_decision_session, confidence: stage2Output.stage_confidence, reason: stage2Output.reason });
-    writeTelemetry(input.projectRoot, 'stage2_evaluated', { flagType: triggerResult.kind, confirmed: stage2Output.fire_decision_session }, store);
-  } catch (err) {
-    logger.warn('stage2_error', { ...extractApiError(err, 'openai'), stage: mgr.current.currentStage });
-    logger.info('pipeline_outcome', { outcome: 'no_action', reason: 'stage2_error' });
-    writeTelemetry(input.projectRoot, 'pipeline_no_action', { reason: 'stage2_error' }, store);
+  // ── 7. Fire cross-confirmation — from the stage classifier's assessment (computed above) ──
+  // The single classifier call already produced a per-signal assessment + a fire
+  // recommendation for this prompt; combine it with the deterministic trigger. A
+  // degraded classifier never recommends firing, so a model outage cleanly yields no
+  // advisory (the stage still classifies locally, so session tracking continues).
+  writeTelemetry(input.projectRoot, 'classifier_fire_evaluated', { flagType: triggerResult.kind, confirmed: stageResult.fireRecommendation }, store);
+  if (!stageResult.fireRecommendation) {
+    writeTelemetry(input.projectRoot, 'pipeline_no_action', { reason: 'classifier_declined' }, store);
+    logger.info('pipeline_outcome', { outcome: 'no_action', reason: 'classifier_declined', confidence: stageResult.classification.confidence, degraded: stageResult.degraded });
     return { outcome: 'no_action' };
   }
 
-  if (!stage2Output.fire_decision_session) {
-    writeTelemetry(input.projectRoot, 'pipeline_no_action', { reason: 'stage2_declined' }, store);
-    logger.info('pipeline_outcome', { outcome: 'no_action', reason: 'stage2_declined', stage2Confidence: stage2Output.stage_confidence });
-    return { outcome: 'no_action' };
+  // ── 7.5. Feed the classifier's signal assessments back into signal counters ──
+  mgr.applyStage2SignalUpdates(store, stageResult.signalsPresent);
+
+  // ── 8. Compute effective flagType from the classifier's selection, then mark fired ─
+  // For an absence trigger, use the classifier's selected signal when it is one of the
+  // qualifying flags; else fall back to the first qualifying flag (deterministic).
+  let effectiveFlagType: FlagType;
+  if (triggerResult.kind === 'stage_transition') {
+    effectiveFlagType = 'stage_transition';
+  } else {
+    const qualifyingKeys = new Set(triggerResult.qualifyingFlags.map((f) => f.signalKey));
+    const selectedKey = qualifyingKeys.has(stageResult.selectedSignalKey)
+      ? stageResult.selectedSignalKey
+      : triggerResult.qualifyingFlags[0]!.signalKey;
+    effectiveFlagType = `absence:${selectedKey}`;
   }
-
-  // ── 7.5. Feed Stage 2 signal assessments back into signal counters ───────────
-  mgr.applyStage2SignalUpdates(store, stage2Output.signals_present);
-
-  // ── 8. Compute effective flagType from Stage 2 selection, then mark as fired ─
-  const effectiveFlagType: FlagType = triggerResult.kind === 'stage_transition'
-    ? 'stage_transition'
-    : `absence:${stage2Output.selected_signal_key}`;
   const firedKey = buildFiredKey(effectiveFlagType, prevStage, mgr.current.currentStage);
   mgr.markDecisionSessionFired(store, firedKey);
 
@@ -504,14 +506,14 @@ export function registerAutoCommand(program: import('commander').Command): void 
         keyFound,
       });
 
-      // Surface a single visible warn line when no source produced a key. We
-      // do NOT exit here — Stage-1-only hook calls (prompt capture, blocking
-      // gates, low-confidence classifications) don't need the key and should
-      // still run. Stage-2 paths surface a richer OpenAI error if they fire.
+      // Surface a single visible warn line when no source produced a key. We do
+      // NOT exit here — the pipeline still runs: prompt capture and the blocking
+      // gates need no key, and the stage classifier degrades to the local
+      // keyword/TF-IDF classifier when the key is missing (no advisory fires).
       if (!keyFound) {
         logger.warn('openai_api_key_missing', {
           project:    opts.project,
-          actionable: 'Set OPENAI_API_KEY in the shell, in the project\'s .env file, or via the OS keychain — Stage 2 calls will fail until a key is configured.',
+          actionable: 'Set OPENAI_API_KEY in the shell, in the project\'s .env file, or via the OS keychain — the classifier falls back to local stage detection (no advisories) until a key is configured.',
         });
       }
 
