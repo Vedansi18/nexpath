@@ -571,36 +571,51 @@ async function runPromptSubmitPipeline(
     stage: mgr.current.currentStage,
   });
 
-  let stage2Out: import('../../core/stage2.js').Stage2Output;
-  try {
-    // Stage2Input's actual shape (confirmed against core/stage2.ts, 2026-07-02 — the
-    // object literal here previously omitted required fields `detectedStage`/`confidence`
-    // and included nonexistent fields `prevStage`/`promptHistory`, silently invisible
-    // because tsconfig.ext-browser.json was never invoked; buildStage2Prompt's
-    // `confidence.toFixed(2)` crashed on the resulting undefined at runtime, confirmed
-    // live). `flagType` is the bare category only ('stage_transition' | 'absence') —
-    // NOT the same as core/stage2.ts's separate `FlagType` template-literal type used
-    // by resolveDecisionContent/generatePinchLabel below; the specific signal is carried
-    // via `qualifyingFlags` instead.
-    stage2Out = await runStage2(
-      {
-        state,
-        detectedStage: classification.stage,
-        confidence: classification.confidence,
-        flagType: trigger.kind === 'stage_transition' ? 'stage_transition' : 'absence',
-        qualifyingFlags: trigger.kind === 'absence' ? trigger.qualifyingFlags : undefined,
-      },
-      llm,
-      log,
-      // Frequency-derived overrides — mirrors auto.ts's step 7 exactly, instead of
-      // always using runStage2's hardcoded defaults regardless of the user's setting.
-      { minConfidence: freqConfig.stage2MinConfidence, contextWindow: freqConfig.stage2ContextWindow },
-    );
-  } catch (err) {
-    log.warn('stage2_error', { error: String(err) });
-    await keyStore.setKey(LAST_STAGE2_RESULT_KEY, JSON.stringify({ at: now, error: String(err) }));
-    return;
+  // Stage2Input's actual shape (confirmed against core/stage2.ts, 2026-07-02 — the
+  // object literal here previously omitted required fields `detectedStage`/`confidence`
+  // and included nonexistent fields `prevStage`/`promptHistory`, silently invisible
+  // because tsconfig.ext-browser.json was never invoked; buildStage2Prompt's
+  // `confidence.toFixed(2)` crashed on the resulting undefined at runtime, confirmed
+  // live). `flagType` is the bare category only ('stage_transition' | 'absence') —
+  // NOT the same as core/stage2.ts's separate `FlagType` template-literal type used
+  // by resolveDecisionContent/generatePinchLabel below; the specific signal is carried
+  // via `qualifyingFlags` instead.
+  const stage2Input = {
+    state,
+    detectedStage: classification.stage,
+    confidence: classification.confidence,
+    flagType: (trigger.kind === 'stage_transition' ? 'stage_transition' : 'absence') as 'stage_transition' | 'absence',
+    qualifyingFlags: trigger.kind === 'absence' ? trigger.qualifyingFlags : undefined,
+  };
+  // Frequency-derived overrides — mirrors auto.ts's step 7 exactly, instead of
+  // always using runStage2's hardcoded defaults regardless of the user's setting.
+  const stage2Opts = { minConfidence: freqConfig.stage2MinConfidence, contextWindow: freqConfig.stage2ContextWindow };
+
+  let stage2Out: import('../../core/stage2.js').Stage2Output | undefined;
+  // Cold-start retry, timeout class ONLY. core/stage2's fixed 6s budget (unchanged
+  // since the module's first commit, 32d0914 — a CLI-era assumption) can be exceeded
+  // by the FIRST OpenAI call after an MV3 SW spin-up (DNS+TLS+cold pool); observed
+  // live 3× (2026-07-02/10/11), always first-call-after-idle, never on the warm
+  // retry. Without this, the trigger is consumed silently: the stage has already
+  // moved, so the same prompt never re-fires — a lost advisory. Non-timeout errors
+  // keep failing fast (no retry). The added ~6s worst case on the submit path is
+  // covered by the response-stop decision-inflight waiter, so it cannot re-open
+  // the fast-response race.
+  for (let attempt = 0; attempt < 2 && stage2Out === undefined; attempt++) {
+    try {
+      stage2Out = await runStage2(stage2Input, llm, log, stage2Opts);
+    } catch (err) {
+      const isTimeout = String(err).includes('AbortError');
+      if (attempt === 0 && isTimeout) {
+        log.debug('stage2_timeout_retry', {});
+        continue;
+      }
+      log.warn('stage2_error', { error: String(err) });
+      await keyStore.setKey(LAST_STAGE2_RESULT_KEY, JSON.stringify({ at: now, error: String(err) }));
+      return;
+    }
   }
+  if (stage2Out === undefined) return; // unreachable; satisfies narrowing
 
   // The LLM's verdict was previously invisible when it declined — the single most
   // important pipeline decision must always leave a log line (found via a live manual
@@ -794,6 +809,16 @@ async function handleResponseStop(projectRoot: string, tabId: number | undefined
     ogRaw = await keyStore.getKey(ogKey); // sidecar was written alongside the payload
   }
 
+  // No usable tab → leave the pending QUEUED for the next stop event. This check
+  // must run BEFORE the clear below: the old order cleared first and returned,
+  // silently DESTROYING the advisory whenever a stop event arrived without a
+  // resolvable tab id (found in the 2026-07-10 commit audit — a deterministic
+  // "advisory fired but no popup ever" path that left no trace but one warn line).
+  if (!tabId) {
+    log.warn('show_advisory_no_tab', {});
+    return;
+  }
+
   // Clear both keys before showing so a second Stop event (agents re-fire it) can't double-show.
   await Promise.all([keyStore.setKey(key, ''), keyStore.setKey(ogKey, '')]);
 
@@ -807,11 +832,7 @@ async function handleResponseStop(projectRoot: string, tabId: number | undefined
     return;
   }
 
-  if (!tabId) {
-    log.warn('show_advisory_no_tab', {});
-    return;
-  }
-
+  
   let payload: AdvisoryPayload;
   try {
     payload = JSON.parse(raw) as AdvisoryPayload;

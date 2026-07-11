@@ -80,6 +80,8 @@ const onInstalledAddListenerMock = vi.fn();
 const onMessageAddListenerMock = vi.fn();
 const tabsQueryMock = vi.fn();
 const tabsReloadMock = vi.fn().mockResolvedValue(undefined);
+const alarmsCreateMock = vi.fn();
+const onAlarmAddListenerMock = vi.fn();
 
 // browser.* (webextension-polyfill) covers everything except chrome.offscreen, which has no
 // cross-browser equivalent and stays a real chrome.* global — see importFreshServiceWorker below.
@@ -91,6 +93,7 @@ vi.mock('webextension-polyfill', () => ({
       openOptionsPage:  openOptionsPageMock,
     },
     tabs: { query: tabsQueryMock, reload: tabsReloadMock },
+    alarms: { create: alarmsCreateMock, onAlarm: { addListener: onAlarmAddListenerMock } },
   },
 }));
 
@@ -983,6 +986,47 @@ describe('service-worker.ts', () => {
       await vi.waitFor(() => expect(showAdvisoryMock).toHaveBeenCalledOnce(), { timeout: 6000, interval: 100 });
     }, 10000);
 
+
+
+    it('retries Stage 2 ONCE on the cold-start AbortError and still queues the advisory', async () => {
+      vi.mocked(shouldFireStage2).mockReturnValue({ kind: 'stage_transition' } as unknown as ReturnType<typeof shouldFireStage2>);
+      keyStoreGetKey.mockResolvedValueOnce('sk-real-key');
+      vi.mocked(runStage2)
+        .mockRejectedValueOnce(new Error('AbortError: signal is aborted without reason'))
+        .mockResolvedValueOnce({ fire_decision_session: true } as unknown as Awaited<ReturnType<typeof runStage2>>);
+      vi.mocked(resolveDecisionContent).mockReturnValue({
+        L1: [{ option: 'o1', descBase: 'b1' }], L2: [], L3: [], pinchFallback: 'f',
+      } as unknown as ReturnType<typeof resolveDecisionContent>);
+      vi.mocked(generatePinchLabel).mockResolvedValue('P.');
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      const sendResponse = vi.fn();
+      messageListener(
+        { type: 'nexpath:prompt-submit', promptText: 'ship it now', projectRoot: 'https://replit.com', agent: 'replit', tabId: 42 },
+        {}, sendResponse,
+      );
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+      expect(vi.mocked(runStage2)).toHaveBeenCalledTimes(2);
+      expect(logDebugMock).toHaveBeenCalledWith('stage2_timeout_retry', {});
+      // The advisory reached the queue despite the first attempt timing out.
+      const pendingCall = keyStoreSetKey.mock.calls.find((c) => c[0] === PENDING_KEY && (c[1] as string).length > 0);
+      expect(pendingCall).toBeDefined();
+    });
+
+    it('does NOT retry Stage 2 on a non-timeout error (fails fast, persists the error record)', async () => {
+      vi.mocked(shouldFireStage2).mockReturnValue({ kind: 'stage_transition' } as unknown as ReturnType<typeof shouldFireStage2>);
+      keyStoreGetKey.mockResolvedValueOnce('sk-real-key');
+      vi.mocked(runStage2).mockRejectedValue(new Error('OpenAI fetch error 401: invalid key'));
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      const sendResponse = vi.fn();
+      messageListener(
+        { type: 'nexpath:prompt-submit', promptText: 'ship it now', projectRoot: 'https://replit.com', agent: 'replit', tabId: 42 },
+        {}, sendResponse,
+      );
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+      expect(vi.mocked(runStage2)).toHaveBeenCalledTimes(1);
+      expect(logWarnMock).toHaveBeenCalledWith('stage2_error', expect.objectContaining({ error: expect.stringContaining('401') }));
+    });
+
     it('does not wait when the in-flight marker is stale (torn-down pipeline)', async () => {
       keyStoreGetKey.mockImplementation(async (name: string) => {
         if (name.startsWith('nexpath_decision_inflight::')) return JSON.stringify({ at: Date.now() - 120_000 });
@@ -1027,6 +1071,9 @@ describe('service-worker.ts', () => {
       const sendResponse = stop(messageListener, undefined); // no sender.tab, msg.tabId = 0
       await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
       expect(showAdvisoryMock).not.toHaveBeenCalled();
+      // The pending advisory must SURVIVE a tab-less stop (pre-2026-07-10 order
+      // cleared it first — silently destroying the advisory forever).
+      expect(keyStoreSetKey).not.toHaveBeenCalledWith(PENDING_KEY, '');
     });
   });
 
