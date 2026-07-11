@@ -69,8 +69,9 @@ describe('right-good-aggregator — opportunity-normalized score', () => {
       ...opportunities(6),
       ev({ promptIndex: 0 }),                       // keyword 1.0
       ev({ promptIndex: 1, channel: 'vibe' }),      // vibe 0.5
-      ev({ source: 'historical_import', stage: null, sessionId: 'historical-import' }), // hist ×0.5
-      ev({ source: 'historical_import', stage: null, sessionId: 'historical-import' }),
+      // Distinct promptIndex per historical prompt (the retro-population stamps each one's own index).
+      ev({ source: 'historical_import', stage: null, sessionId: 'historical-import', promptIndex: 0 }), // hist ×0.5
+      ev({ source: 'historical_import', stage: null, sessionId: 'historical-import', promptIndex: 1 }),
     ];
     const p = computeRightGoodProfile(events, { signalLookup: lookup() });
     // presence_live = 1.0 + 0.5 = 1.5; presence_hist = 2 → numerator 1.5 + 0.5*2 = 2.5; /6
@@ -216,6 +217,84 @@ describe('right-good-aggregator — channel-confidence ordering', () => {
   });
 });
 
+describe('right-good-aggregator — count-once corroboration + gaming defense', () => {
+  it('a keyword claim + transcript behaviour for the SAME prompt count ONCE at the verified weight', () => {
+    const events = [
+      ...opportunities(3),
+      ev({ promptIndex: 0, channel: 'keyword' }),
+      ev({ promptIndex: 0, channel: 'transcript' }),
+    ];
+    const p = computeRightGoodProfile(events, { signalLookup: lookup() });
+    // ONE observation at the transcript weight (1.5), NOT keyword + transcript (2.5).
+    expect(p.K.score).toBeCloseTo(CHANNEL_CONFIDENCE.transcript / 3, 5);
+    expect(p.K.stability.occurrences).toBe(1);
+  });
+
+  it('a keyword detection + its stage2 confirmation for the SAME prompt count ONCE at the LLM-assessed weight', () => {
+    // The live producer emits BOTH a keyword event and a stage2 event when the
+    // LLM confirms a key on the same prompt — provenance, not double credit.
+    const events = [
+      ...opportunities(4),
+      ev({ promptIndex: 0, channel: 'keyword' }),
+      ev({ promptIndex: 0, channel: 'stage2' }),
+    ];
+    const p = computeRightGoodProfile(events, { signalLookup: lookup() });
+    expect(p.K.score).toBeCloseTo(CHANNEL_CONFIDENCE.stage2 / 4, 5); // 1.25/4, not 2.25/4
+    expect(p.K.stability.occurrences).toBe(1);
+  });
+
+  it('channel order within a prompt does not matter — the highest-confidence channel wins', () => {
+    const forward = computeRightGoodProfile(
+      [...opportunities(3), ev({ promptIndex: 0, channel: 'transcript' }), ev({ promptIndex: 0, channel: 'vibe' })],
+      { signalLookup: lookup() },
+    );
+    const reverse = computeRightGoodProfile(
+      [...opportunities(3), ev({ promptIndex: 0, channel: 'vibe' }), ev({ promptIndex: 0, channel: 'transcript' })],
+      { signalLookup: lookup() },
+    );
+    expect(forward.K.score).toBeCloseTo(reverse.K.score, 10);
+    expect(forward.K.score).toBeCloseTo(CHANNEL_CONFIDENCE.transcript / 3, 5);
+  });
+
+  it('keyword-sprinkling without corroborating behaviour stays NEUTRAL', () => {
+    // 10 in-stage prompts across 2 sessions; the user sprinkles claim keywords
+    // into 2 of them but the behaviour never happens. Low presence over many
+    // opportunities → below the high threshold → nexpath says nothing.
+    const events = [
+      ...opportunities(5, 'implementation', 's1'),
+      ...opportunities(5, 'implementation', 's2'),
+      ev({ sessionId: 's1', promptIndex: 0, channel: 'keyword' }),
+      ev({ sessionId: 's2', promptIndex: 1, channel: 'keyword' }),
+      ev({ sessionId: 's2', promptIndex: 3, channel: 'keyword' }),
+    ];
+    const p = computeRightGoodProfile(events, { signalLookup: lookup() });
+    expect(p.K.score).toBeLessThan(HIGH_THRESHOLD); // 3 claims / 10 opportunities
+    expect(p.K.stability.stable).toBe(true); // stability alone is NOT enough
+    expect(p.K.state).toBe('neutral');
+  });
+
+  it('real transcript corroboration lifts the same sprinkled profile to RIGHT_GOOD', () => {
+    // Same claims as above, but the behaviour actually happened: the claimed
+    // prompts are transcript-corroborated AND the practice shows up verified in
+    // two more prompts the user never claimed.
+    const events = [
+      ...opportunities(5, 'implementation', 's1'),
+      ...opportunities(5, 'implementation', 's2'),
+      ev({ sessionId: 's1', promptIndex: 0, channel: 'keyword' }),
+      ev({ sessionId: 's1', promptIndex: 0, channel: 'transcript' }),
+      ev({ sessionId: 's2', promptIndex: 1, channel: 'keyword' }),
+      ev({ sessionId: 's2', promptIndex: 1, channel: 'transcript' }),
+      ev({ sessionId: 's2', promptIndex: 3, channel: 'keyword' }),
+      ev({ sessionId: 's1', promptIndex: 2, channel: 'transcript' }),
+      ev({ sessionId: 's2', promptIndex: 4, channel: 'transcript' }),
+    ];
+    const p = computeRightGoodProfile(events, { signalLookup: lookup() });
+    // (1.5 + 1.5 + 1.0 + 1.5 + 1.5) / 10 = 0.7 ≥ 0.5 — verified behaviour lifts it.
+    expect(p.K.score).toBeCloseTo(0.7, 5);
+    expect(p.K.state).toBe('right_good');
+  });
+});
+
 describe('right-good-aggregator — rolling window', () => {
   it('windowDays drops events older than the cutoff', () => {
     const recent = [
@@ -259,10 +338,12 @@ describe('right-good-aggregator — store integration + helpers', () => {
   });
 
   it('historical vibe events compound source×channel weight (0.5 × 0.5)', () => {
+    // Distinct promptIndex per historical prompt — mirrors the retro-population,
+    // which stamps each imported prompt's own index.
     const events = [
       ...opportunities(6),
-      ev({ source: 'historical_import', stage: null, channel: 'vibe', sessionId: 'historical-import' }),
-      ev({ source: 'historical_import', stage: null, channel: 'vibe', sessionId: 'historical-import' }),
+      ev({ source: 'historical_import', stage: null, channel: 'vibe', sessionId: 'historical-import', promptIndex: 0 }),
+      ev({ source: 'historical_import', stage: null, channel: 'vibe', sessionId: 'historical-import', promptIndex: 1 }),
     ];
     const p = computeRightGoodProfile(events, { signalLookup: lookup() });
     // presence_hist = 0.5 (vibe) × 2 = 1.0; numerator = 0 + HIST_WEIGHT(0.5)*1.0 = 0.5; /6
