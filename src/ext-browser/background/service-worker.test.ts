@@ -17,6 +17,8 @@ vi.mock('../../core/session-state.js', () => ({ SessionStateManager: { load: vi.
 vi.mock('../../core/stage2.js', () => ({ shouldFireStage2: vi.fn(), runStage2: vi.fn() }));
 vi.mock('../../core/classifier/AbsenceDetector.js', () => ({ detectAbsenceFlags: vi.fn(() => []) }));
 vi.mock('../../core/classifier/StreamBPresenceClassifier.js', () => ({ classifyStreamBPresence: vi.fn() }));
+vi.mock('../../core/classifier/LLMProfileClassifier.js', () => ({ classifyUserProfileLLM: vi.fn(), MIN_PROFILE_PROMPTS: 4 }));
+vi.mock('../../core/classifier/UserProfileClassifier.js', () => ({ isProfileStale: vi.fn(() => true) }));
 vi.mock('../../core/decision/pinch.js', () => ({ generatePinchLabel: vi.fn() }));
 vi.mock('../../decision-session/options.js', () => ({ resolveDecisionContent: vi.fn() }));
 vi.mock('../../core/decision/options.js', () => ({ generateOptionList: vi.fn() }));
@@ -35,6 +37,8 @@ const { SessionStateManager } = await import('../../core/session-state.js');
 const { shouldFireStage2, runStage2 } = await import('../../core/stage2.js');
 const { detectAbsenceFlags } = await import('../../core/classifier/AbsenceDetector.js');
 const { classifyStreamBPresence } = await import('../../core/classifier/StreamBPresenceClassifier.js');
+const { classifyUserProfileLLM } = await import('../../core/classifier/LLMProfileClassifier.js');
+const { isProfileStale } = await import('../../core/classifier/UserProfileClassifier.js');
 const { generatePinchLabel } = await import('../../core/decision/pinch.js');
 const { resolveDecisionContent } = await import('../../decision-session/options.js');
 const { generateOptionList } = await import('../../core/decision/options.js');
@@ -1184,6 +1188,81 @@ describe('service-worker.ts', () => {
       const ogCall = keyStoreSetKey.mock.calls.find((c) => (c[0] as string).startsWith('nexpath_pending_advisory_og'));
       expect(ogCall).toBeDefined();
       expect(JSON.parse(ogCall![1] as string)).toMatchObject({ flagType: 'absence:SECURITY_REVIEW_GAP' });
+    });
+
+    it('profile classifier RUNS when the gate is open (stale + history >= MIN_PROFILE_PROMPTS-1) and sets the profile', async () => {
+      mgrCurrent.promptHistory = [
+        { index: 0, text: 'a', capturedAt: 0, classifiedStage: 'implementation', confidence: 0.5 },
+        { index: 1, text: 'b', capturedAt: 0, classifiedStage: 'implementation', confidence: 0.5 },
+        { index: 2, text: 'c', capturedAt: 0, classifiedStage: 'implementation', confidence: 0.5 },
+      ]; // length 3 == MIN_PROFILE_PROMPTS(4) - 1 → gate open
+      vi.mocked(isProfileStale).mockReturnValue(true);
+      vi.mocked(classifyUserProfileLLM).mockResolvedValue({ nature: 'beginner', mood: 'rushed', depth: 'low', computedAt: 3 } as never);
+      keyStoreGetKey.mockResolvedValueOnce('sk-real-key');
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      const sendResponse = vi.fn();
+      messageListener(
+        { type: 'nexpath:prompt-submit', promptText: 'p', projectRoot: 'https://replit.com', agent: 'replit', tabId: 1 },
+        {}, sendResponse,
+      );
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+      expect(vi.mocked(classifyUserProfileLLM)).toHaveBeenCalledOnce();
+      expect(mgrSetProfile).toHaveBeenCalledWith(expect.objectContaining({ nature: 'beginner', mood: 'rushed' }));
+    });
+
+    it('profile classifier is SKIPPED for short history (gate closed → profile stays null, zero regression)', async () => {
+      mgrCurrent.promptHistory = [
+        { index: 0, text: 'a', capturedAt: 0, classifiedStage: 'implementation', confidence: 0.5 },
+      ]; // length 1 < 3 → gate closed
+      vi.mocked(isProfileStale).mockReturnValue(true);
+      keyStoreGetKey.mockResolvedValueOnce('sk-real-key');
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      const sendResponse = vi.fn();
+      messageListener(
+        { type: 'nexpath:prompt-submit', promptText: 'p', projectRoot: 'https://replit.com', agent: 'replit', tabId: 1 },
+        {}, sendResponse,
+      );
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+      expect(vi.mocked(classifyUserProfileLLM)).not.toHaveBeenCalled();
+      expect(mgrSetProfile).not.toHaveBeenCalledWith(expect.objectContaining({ nature: expect.anything() }));
+    });
+
+    it('profile classifier is SKIPPED when the profile is fresh (not stale), even with long history', async () => {
+      mgrCurrent.promptHistory = [
+        { index: 0, text: 'a', capturedAt: 0, classifiedStage: 'implementation', confidence: 0.5 },
+        { index: 1, text: 'b', capturedAt: 0, classifiedStage: 'implementation', confidence: 0.5 },
+        { index: 2, text: 'c', capturedAt: 0, classifiedStage: 'implementation', confidence: 0.5 },
+      ];
+      vi.mocked(isProfileStale).mockReturnValue(false); // fresh → skip
+      keyStoreGetKey.mockResolvedValueOnce('sk-real-key');
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      const sendResponse = vi.fn();
+      messageListener(
+        { type: 'nexpath:prompt-submit', promptText: 'p', projectRoot: 'https://replit.com', agent: 'replit', tabId: 1 },
+        {}, sendResponse,
+      );
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+      expect(vi.mocked(classifyUserProfileLLM)).not.toHaveBeenCalled();
+    });
+
+    it('profile classifier TIMEOUT/failure leaves profile unchanged (never blocks the pipeline)', async () => {
+      mgrCurrent.promptHistory = [
+        { index: 0, text: 'a', capturedAt: 0, classifiedStage: 'implementation', confidence: 0.5 },
+        { index: 1, text: 'b', capturedAt: 0, classifiedStage: 'implementation', confidence: 0.5 },
+        { index: 2, text: 'c', capturedAt: 0, classifiedStage: 'implementation', confidence: 0.5 },
+      ];
+      vi.mocked(isProfileStale).mockReturnValue(true);
+      vi.mocked(classifyUserProfileLLM).mockRejectedValue(new Error('AbortError'));
+      keyStoreGetKey.mockResolvedValueOnce('sk-real-key');
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      const sendResponse = vi.fn();
+      messageListener(
+        { type: 'nexpath:prompt-submit', promptText: 'p', projectRoot: 'https://replit.com', agent: 'replit', tabId: 1 },
+        {}, sendResponse,
+      );
+      // Pipeline still completes (ok:true), profile not set from the failed call.
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+      expect(mgrSetProfile).not.toHaveBeenCalledWith(expect.objectContaining({ nature: expect.anything() }));
     });
 
     it('Stream B presence runs ONLY at implementation stage with >=3 prompts in it (CLI auto.ts 2.8 gate)', async () => {

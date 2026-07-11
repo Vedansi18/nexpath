@@ -7,6 +7,8 @@ import {
   classifyStreamBPresence,
   type StreamBPresenceResult,
 } from '../../core/classifier/StreamBPresenceClassifier.js';
+import { classifyUserProfileLLM, MIN_PROFILE_PROMPTS } from '../../core/classifier/LLMProfileClassifier.js';
+import { isProfileStale } from '../../core/classifier/UserProfileClassifier.js';
 import { generatePinchLabel } from '../../core/decision/pinch.js';
 import { resolveDecisionContent } from '../../decision-session/options.js';
 import { generateOptionList, type GeneratedOptions } from '../../core/decision/options.js';
@@ -400,6 +402,45 @@ async function runPromptSubmitPipeline(
   const prevStage: Stage | undefined = mgr.current.currentStage !== classification.stage
     ? mgr.current.currentStage
     : undefined;
+
+  // ── Step 2.5: LLM user-profile classification — mirrors auto.ts's step 2.5.
+  // Populates mgr.current.profile {nature, mood, depth} so the popup CONTENT adapts
+  // to the user (register/tone/beginner-option-map) exactly like the CLI — the one
+  // thing the browser popup previously never did (profile was permanently null).
+  //
+  // STRICTLY ADDITIVE — cannot affect any already-running behaviour:
+  //   • Same gate as auto.ts (isProfileStale && promptHistory.length ≥
+  //     MIN_PROFILE_PROMPTS-1). For the first 3 prompts of a session the gate is
+  //     CLOSED → profile stays null → byte-identical to today. Existing tests use
+  //     empty/short history, so none of them enter this branch.
+  //   • Runs only when an API key exists (no key = no call = null profile as before).
+  //   • Time-boxed (8s Promise.race) + .catch → on any hang/failure the profile is
+  //     left exactly as it was. Nothing downstream can block on it.
+  //   • Only CONTENT reads profile (resolveDecisionContent/pinch/why-help). The
+  //     gating fields it also feeds (session-cap vibe ceiling, absence multiplier)
+  //     are the SAME CLI-parity effects auto.ts already applies once a profile
+  //     forms — and only after ≥3 real prompts, never on the fast fires the tests
+  //     and the day-to-day trigger exercise.
+  if (apiKey
+      && isProfileStale(mgr.current.profile, mgr.current.promptCount)
+      && mgr.current.promptHistory.length >= MIN_PROFILE_PROMPTS - 1) {
+    const classified = await Promise.race([
+      classifyUserProfileLLM(
+        mgr.current.promptHistory as PromptRecord[],
+        mgr.current.promptCount,
+        mgr.current.profile,
+        new FetchLLMAdapter(apiKey),
+        log,
+      ),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 8_000)),
+    ]).catch(() => null);
+    if (classified) {
+      mgr.setProfile(classified);
+      log.debug('profile_classified', {
+        nature: classified.nature, mood: classified.mood, depth: classified.depth,
+      });
+    }
+  }
 
   // ── Step 3.8: Stream B presence classification — mirrors auto.ts's step 2.8
   // exactly (same gate: implementation stage + ≥3 prompts in it; same catch →
