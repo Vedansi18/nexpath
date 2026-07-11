@@ -81,7 +81,7 @@ export interface AdvisoryPayload {
 
     /**
      * User's configured role, or null when unset — display only ("(current)"
-     * marker in the Ctrl+, adjust chooser). Additive; older panels ignore it.
+     * marker in the Alt+Shift+T adjust chooser). Additive; older panels ignore it.
      */
     role?: string | null;
   };
@@ -166,7 +166,7 @@ export type OpenSettingsEvent = { type: 'open-settings' };
 export type MoveEvent = { type: 'move'; dx: number; dy: number };
 
 /**
- * CLI-parity Ctrl+, adjust chooser (the CLI Ctrl+T root chooser's frequency
+ * CLI-parity Alt+Shift+T adjust chooser (the CLI Ctrl+T root chooser's frequency
  * submenu, TtySelectFn runFrequencySubMenu): engine writes the PER-PROJECT key
  * `advisory_frequency:<projectRoot>=<value>`. Non-terminal — the panel loops
  * back to its chooser exactly like the CLI.
@@ -174,7 +174,7 @@ export type MoveEvent = { type: 'move'; dx: number; dy: number };
 export type SetFrequencyEvent = { type: 'set-frequency'; value: 'optimum' | 'every_event' | 'major_only' };
 
 /**
- * CLI-parity Ctrl+, adjust chooser (runRoleSubMenu): engine writes the
+ * CLI-parity Alt+Shift+T adjust chooser (runRoleSubMenu): engine writes the
  * PER-PROJECT key `role:<projectRoot>=<value>`. Non-terminal.
  */
 export type SetRoleEvent = { type: 'set-role'; value: 'founder' | 'vibe_coder' | 'indie_hacker' | 'pm' };

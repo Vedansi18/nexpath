@@ -173,7 +173,7 @@ function handlePanelEvent(event: UiPanelEvent): void {
     }
     case 'open-settings': {
       // Open the extension options page. Panel STAYS open — non-terminal, no report.
-      // (The CLI-parity Ctrl+, frequency/role chooser is panel-INTERNAL; this event
+      // (The CLI-parity Alt+Shift+T frequency/role chooser is panel-INTERNAL; this event
       // remains for any explicit options-page affordance.)
       dispatchFooterIntent('open-settings');
       break;

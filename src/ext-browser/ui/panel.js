@@ -130,7 +130,7 @@ export function mountNexpathPanel(root, { onEvent }) {
   let pendingOption = null;    // option awaiting send/copy decision
   let confirmFocusedIndex = 0; // 0 = send now, 1 = copy
 
-  // ── Ctrl+, adjust chooser state (CLI Ctrl+T root chooser, TtySelectFn) ─────
+  // ── Alt+Shift+T adjust chooser state (CLI Ctrl+T root chooser, TtySelectFn) ─
   let adjustFocusedIndex = 0;
   let adjustNote = '';         // transient "Frequency set to: High" line (CLI submenu echo)
   let currentFreq = null;      // local copies so "(current)" moves after a set —
@@ -237,7 +237,7 @@ export function mountNexpathPanel(root, { onEvent }) {
     render();
   }
 
-  // ── Ctrl+, adjust chooser (CLI Ctrl+T: TtySelectFn runCtrlTRootChooser +
+  // ── Alt+Shift+T adjust chooser (CLI Ctrl+T: TtySelectFn runCtrlTRootChooser +
   //    runFrequencySubMenu / runRoleSubMenu — same entries, same loop-back,
   //    same "Done!" closing the popup as a skip) ─────────────────────────────
   const ADJUST_ROOT_CHOICES = [
@@ -437,10 +437,10 @@ export function mountNexpathPanel(root, { onEvent }) {
     const footer = document.createElement('div');
     footer.className = 'np-footer';
     footer.innerHTML =
-      `don't need nexpath here? <a data-np="disable">Disable for this project (Ctrl+.)</a>` +
-      `<span class="np-sep">·</span><a data-np="settings">Adjust frequency or role (Ctrl+,)</a>`;
+      `don't need nexpath here? <a data-np="disable">Disable for this project (Alt+Shift+X)</a>` +
+      `<span class="np-sep">·</span><a data-np="settings">Adjust frequency or role (Alt+Shift+T)</a>`;
     footer.querySelector('[data-np="disable"]').addEventListener('click', emitDisable);
-    // Footer link and Ctrl+, are the same CLI Ctrl+T function → the in-panel chooser.
+    // Footer link and Alt+Shift+T are the same CLI Ctrl+T function → the in-panel chooser.
     footer.querySelector('[data-np="settings"]').addEventListener('click', openAdjust);
     bodyWrap.appendChild(footer);
   }
@@ -527,19 +527,18 @@ export function mountNexpathPanel(root, { onEvent }) {
     // nothing. Confirmed live on Lovable 2026-07-09.)
 
     // Disable for this project (the CLI's Ctrl+X, TtySelectFn \x18 — remapped to
-    // Ctrl+. per user decision 2026-07-10: Ctrl+X is Cut everywhere and colliding
-    // with editing muscle-memory reads as a bug; Ctrl+. has NO default in any
-    // browser/OS, and pairs mnemonically with Ctrl+, next to it). Works in any view.
-    if (e.ctrlKey && !e.metaKey && e.key === '.') {
+    // Alt+Shift+X per user decision 2026-07-11). Matched on e.code (physical key):
+    // with Alt held, e.key is a composed character on macOS (Option+Shift+X types
+    // a symbol) and layout-dependent elsewhere — e.code 'KeyX' is stable on every
+    // OS/layout. No ctrl/meta so browser chords can't overlap. Works in any view.
+    if (e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey && e.code === 'KeyX') {
       emitDisable(); e.preventDefault(); return;
     }
-    // Ctrl+, = adjust frequency/role (the CLI's Ctrl+T, \x14 — remapped: Ctrl+T is the
-    // browser's new-tab shortcut and non-interceptable in Chrome/Firefox on Win/Linux).
-    // Ctrl+, has NO default in any browser/OS and is the settings convention (VS Code,
-    // JetBrains, macOS Cmd+,). Deliberately ctrlKey-only: Cmd+, on macOS is the browser's
-    // own Preferences menu accelerator and must not be shadowed. Opens the CLI-parity
-    // IN-PANEL chooser (runCtrlTRootChooser), not the extension options page.
-    if (e.ctrlKey && !e.metaKey && e.key === ',') {
+    // Adjust frequency/role (the CLI's Ctrl+T, \x14 — remapped to Alt+Shift+T per
+    // user decision 2026-07-11; plain Ctrl+T is the browser's new-tab shortcut and
+    // non-interceptable). Same e.code matching rationale as Alt+Shift+X above.
+    // Opens the CLI-parity IN-PANEL chooser (runCtrlTRootChooser), not the options page.
+    if (e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey && e.code === 'KeyT') {
       openAdjust(); e.preventDefault(); return;
     }
 
