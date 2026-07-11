@@ -9,6 +9,8 @@ import {
 } from './engine-registry.js';
 import { contentTemplateEngine } from './content-template-engine.js';
 import { absenceSignalEngine } from './absence-signal-engine.js';
+import { SHIPPED_CONTENT_TEMPLATES } from './content-template-tooling.js';
+import { shippedRecordLookup } from './content-template-source.js';
 import { openStore } from '../store/db.js';
 import { SessionStateManager } from '../classifier/SessionStateManager.js';
 
@@ -59,8 +61,22 @@ describe('ContentTemplateEngine', () => {
     expect(contentTemplateEngine.accepts('meta')).toBe(false);
   });
 
-  it('run() is not yet wired live (throws until records + render-path + grounding land)', () => {
-    expect(() => contentTemplateEngine.run({} as EngineInput)).toThrow(/not yet wired live/);
+  it('run() returns a content-template ContentSpec; no lookup → resolved:null (caller falls back to static)', () => {
+    const spec = contentTemplateEngine.run({} as EngineInput);
+    expect(spec.kind).toBe('content-template');
+    expect((spec as { payload: { resolved: unknown } }).payload.resolved).toBeNull();
+  });
+
+  it('run() resolves the record via the injected source lookup', () => {
+    const sample = SHIPPED_CONTENT_TEMPLATES[0];
+    const spec = contentTemplateEngine.run({
+      signalType: sample.signalType, level: 1, recordLookup: shippedRecordLookup(sample.signalType),
+    } as EngineInput);
+    expect(spec.kind).toBe('content-template');
+    const payload = (spec as { payload: { resolved: { record: { signalType: string } } | null; level: number } }).payload;
+    expect(payload.resolved).not.toBeNull();
+    expect(payload.resolved!.record.signalType).toBe(sample.signalType);
+    expect(payload.level).toBe(1);
   });
 });
 

@@ -9,12 +9,6 @@ import {
   runBuildGate, checkTopicKeyword, checkOptionLengthBudget, coverageMetric, SHIPPED_CONTENT_TEMPLATES,
 } from '../content-template-tooling.js';
 import { reviewRecord, checkVoice, checkEscalation, checkL2Safeguard } from '../content-authoring-rules.js';
-import {
-  BEHAVIOUR_TESTING, ABSENCE_TEST_CREATION, ABSENCE_REGRESSION_CHECK, ABSENCE_SECURITY_CHECK,
-  ABSENCE_ERROR_HANDLING, ABSENCE_DOCUMENTATION, ABSENCE_REFACTORING, ABSENCE_CORRECTION_SEEKING,
-  ABSENCE_PROBLEM_CORRECTION, ABSENCE_ACCESSIBILITY, ABSENCE_DATA_VALIDATION,
-} from './class2-verification-quality.js';
-import type { DecisionContent } from '../options.js';
 
 /** signalType → own keyword (retained across every authored column). */
 const KEYWORDS: Record<string, string> = {
@@ -29,13 +23,6 @@ const KEYWORDS: Record<string, string> = {
   ABSENCE_PROBLEM_CORRECTION: 'fix',
   ABSENCE_ACCESSIBILITY: 'accessible',
   ABSENCE_DATA_VALIDATION: 'validation',
-};
-
-/** signalType → frozen DecisionContent (col-3 anchor). */
-const FROZEN: Record<string, DecisionContent> = {
-  BEHAVIOUR_TESTING, ABSENCE_TEST_CREATION, ABSENCE_REGRESSION_CHECK, ABSENCE_SECURITY_CHECK,
-  ABSENCE_ERROR_HANDLING, ABSENCE_DOCUMENTATION, ABSENCE_REFACTORING, ABSENCE_CORRECTION_SEEKING,
-  ABSENCE_PROBLEM_CORRECTION, ABSENCE_ACCESSIBILITY, ABSENCE_DATA_VALIDATION,
 };
 
 /**
@@ -78,13 +65,6 @@ describe('class-2 batch A — per-record full-depth gates', () => {
         expect(jargon).toEqual({});
         expect(review.headlineOnly.ok).toBe(true);
         expect(review.coverage.ok).toBe(true);
-      });
-
-      it('column 3 is the frozen text verbatim (option + a real frozen core line)', () => {
-        const frozen = FROZEN[r.signalType];
-        const col3 = r.levelForms[3]!.cell;
-        expect(col3.option).toBe(frozen.L1[0].option);
-        expect(frozen.L1[0].descBase).toContain(col3.whyDesc);
       });
 
       it('keeps its keyword in every option, and every AUTHORED why-desc (col-3 frozen exempt)', () => {

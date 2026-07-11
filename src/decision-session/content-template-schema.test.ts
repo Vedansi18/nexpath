@@ -89,6 +89,24 @@ describe('content-template-schema — validation (the single gate)', () => {
     expect(bad.ok).toBe(false);
     expect(bad.errors.join(' ')).toMatch(/l2SafeguardLine/);
   });
+
+  it('validates the optional question field (non-empty string when present)', () => {
+    expect(validateContentTemplateRecord(validRecord({ question: 'Rotate the leaked secret?' })).ok).toBe(true);
+    expect(validateContentTemplateRecord(validRecord())).toEqual({ ok: true, errors: [] }); // omitted is fine
+    expect(validateContentTemplateRecord(validRecord({ question: '' })).ok).toBe(false); // empty rejected
+    const bad = validateContentTemplateRecord(validRecord({ question: 42 as never }));
+    expect(bad.ok).toBe(false);
+    expect(bad.errors.join(' ')).toMatch(/question/);
+  });
+
+  it('validates the optional pinchFallback field (non-empty string when present)', () => {
+    expect(validateContentTemplateRecord(validRecord({ pinchFallback: 'Secret exposed.' })).ok).toBe(true);
+    expect(validateContentTemplateRecord(validRecord())).toEqual({ ok: true, errors: [] }); // omitted is fine
+    expect(validateContentTemplateRecord(validRecord({ pinchFallback: '' })).ok).toBe(false); // empty rejected
+    const bad = validateContentTemplateRecord(validRecord({ pinchFallback: 42 as never }));
+    expect(bad.ok).toBe(false);
+    expect(bad.errors.join(' ')).toMatch(/pinchFallback/);
+  });
 });
 
 describe('content-template-schema — two-phase compose (Phase-1 preserves {R...})', () => {
@@ -162,6 +180,34 @@ describe('content-template-schema — registerOverrides (§6.1 gate 3)', () => {
     const res = validateContentTemplateRecord(r);
     expect(res.ok).toBe(false);
     expect(res.errors.join(' ')).toMatch(/divergence must be one of/);
+  });
+});
+
+describe('content-template-schema — roleOverrides (B11 role dimension)', () => {
+  it('accepts a role override with a floored levelForms', () => {
+    const r = validRecord({ roleOverrides: { founder: { levelForms: { 1: form() } } } });
+    expect(validateContentTemplateRecord(r)).toEqual({ ok: true, errors: [] });
+  });
+  it('accepts multiple roles', () => {
+    const r = validRecord({ roleOverrides: {
+      founder: { levelForms: { 1: form() } }, indie_hacker: { levelForms: { 1: form() } }, pm: { levelForms: { 1: form() } },
+    } });
+    expect(validateContentTemplateRecord(r).ok).toBe(true);
+  });
+  it('omitted is fine', () => {
+    expect(validateContentTemplateRecord(validRecord())).toEqual({ ok: true, errors: [] });
+  });
+  it('rejects a role override missing levelForms', () => {
+    const r = validRecord({ roleOverrides: { founder: {} } } as unknown as Partial<ContentTemplateRecord>);
+    const res = validateContentTemplateRecord(r);
+    expect(res.ok).toBe(false);
+    expect(res.errors.join(' ')).toMatch(/roleOverrides\.founder\.levelForms must be an object/);
+  });
+  it('rejects a role override missing the level-1 floor', () => {
+    const r = validRecord({ roleOverrides: { founder: { levelForms: { 3: form() } } } });
+    const res = validateContentTemplateRecord(r);
+    expect(res.ok).toBe(false);
+    expect(res.errors.join(' ')).toMatch(/roleOverrides\.founder\.levelForms is missing the mandatory level-1 floor/);
   });
 });
 

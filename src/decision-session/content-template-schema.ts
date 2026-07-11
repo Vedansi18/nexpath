@@ -72,6 +72,18 @@ export interface RegisterOverride {
   levelForms?: Partial<Record<MaturityLevel, LevelForm>>;
 }
 
+/**
+ * A per-ROLE override entry (founder / indie_hacker / pm). Role-tailored content is
+ * genuinely different per role — the register-only engine cannot reproduce it by vocab
+ * adaptation — so a role override ALWAYS carries its own stored `levelForms` (a full
+ * structural rewrite, with the mandatory level-1 floor). The engine's form resolver serves
+ * it with role → register → base precedence (role loses only to the exclusive `beginner`
+ * register, which turns role overrides off for beginners).
+ */
+export interface RoleOverride {
+  levelForms: Partial<Record<MaturityLevel, LevelForm>>;
+}
+
 export interface Slot {
   /** Referenced in a cell as `{{name}}`. */
   name: string;
@@ -88,6 +100,20 @@ export interface ContentTemplateRecord {
   signalType: string;
   source: ContentTemplateSource;
   schemaVersion: number;
+  /**
+   * The user-facing popup question line (the "…?" shown above the options). A migrated signal has
+   * NO static DecisionContent, so the serving path uses this as the popup question (and the pinch
+   * label derives from it) — without it the popup would fall back to a mismatched static question.
+   * Optional + additive; required in practice for a migrated record with no static counterpart.
+   */
+  question?: string;
+  /**
+   * Static fallback for the 2-3 word pinch header, used ONLY when the pinch LLM call
+   * fails/times out. A migrated signal has no static DecisionContent, so without this the
+   * fallback header would be a mismatched generic label. The normal path still LLM-generates
+   * the header seeded from `question`. Optional + additive.
+   */
+  pinchFallback?: string;
   /** Sparse maturity map: level → headline form. The level-1 floor is MANDATORY. */
   levelForms: Partial<Record<MaturityLevel, LevelForm>>;
   slots: Slot[];
@@ -124,6 +150,15 @@ export interface ContentTemplateRecord {
    * register-override branch serves verbatim for that register. Optional + additive.
    */
   registerOverrides?: Record<string, RegisterOverride>;
+  /**
+   * Role-divergence overrides, keyed by role name (`founder` / `indie_hacker` / `pm`).
+   * A role ABSENT here falls through to the register/base content. A present entry carries
+   * its own `levelForms` (the role-tailored rewrite) which the engine serves for that role
+   * (role → register → base, beginner-exclusive). Optional + additive; today only
+   * `ABSENCE_CONTEXT_LOSS` carries them (the role-tailored set the engine could not serve
+   * before B11, previously kept static by the B6 guard).
+   */
+  roleOverrides?: Record<string, RoleOverride>;
 }
 
 // ── Validation (the single schema gate) ───────────────────────────────────────
@@ -159,6 +194,8 @@ export function validateContentTemplateRecord(record: unknown): ValidationResult
   if (!r || typeof r !== 'object') return { ok: false, errors: ['record is not an object'] };
 
   if (typeof r.signalType !== 'string' || r.signalType === '') errors.push('signalType must be a non-empty string');
+  if (r.question !== undefined && (typeof r.question !== 'string' || r.question === '')) errors.push('question must be a non-empty string when present');
+  if (r.pinchFallback !== undefined && (typeof r.pinchFallback !== 'string' || r.pinchFallback === '')) errors.push('pinchFallback must be a non-empty string when present');
   if (!CONTENT_TEMPLATE_SOURCES.includes(r.source)) errors.push(`source must be one of ${CONTENT_TEMPLATE_SOURCES.join('|')}`);
   if (typeof r.schemaVersion !== 'number' || r.schemaVersion > SCHEMA_VERSION) {
     errors.push(`schemaVersion must be a number <= ${SCHEMA_VERSION}`);
@@ -229,6 +266,19 @@ export function validateContentTemplateRecord(record: unknown): ValidationResult
         } else if (ov.divergence === 'vocab-adaptable' && ov.levelForms !== undefined) {
           errors.push(`registerOverrides.${register}: vocab-adaptable carries no levelForms (the engine adapts the base)`);
         }
+      }
+    }
+  }
+
+  // roleOverrides — optional; each entry carries its own valid levelForms (role content is
+  // always a full structural rewrite — mandatory level-1 floor, well-formed forms).
+  if (r.roleOverrides !== undefined) {
+    if (typeof r.roleOverrides !== 'object' || r.roleOverrides === null) {
+      errors.push('roleOverrides must be an object when present');
+    } else {
+      for (const [role, ov] of Object.entries(r.roleOverrides)) {
+        if (!ov || typeof ov !== 'object') { errors.push(`roleOverrides.${role} must be an object`); continue; }
+        validateLevelFormsMap((ov as RoleOverride).levelForms, `roleOverrides.${role}.levelForms`, errors);
       }
     }
   }

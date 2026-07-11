@@ -39,4 +39,9 @@ describe('R13 Gap-2 — Pass-2 grounds the three new target phrases', () => {
     expect(prompt).toContain('this project');
     expect(prompt).toContain('this feature');
   });
+
+  it('includes a worked example grounding the new phrases (input phrase → feature-noun output)', () => {
+    expect(prompt).toContain('Add contract tests for this service');
+    expect(prompt).toContain('Add contract tests for the auth service');
+  });
 });

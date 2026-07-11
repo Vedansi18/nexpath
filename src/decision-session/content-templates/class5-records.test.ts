@@ -7,34 +7,17 @@ import {
   runBuildGate, checkTopicKeyword, checkOptionLengthBudget, coverageMetric, SHIPPED_CONTENT_TEMPLATES,
 } from '../content-template-tooling.js';
 import { reviewRecord, checkVoice, checkEscalation, checkL2Safeguard } from '../content-authoring-rules.js';
-import {
-  ABSENCE_COMPREHENSION, ABSENCE_NO_PUSHBACK, ABSENCE_CONTEXT_LOSS,
-  ABSENCE_DECISION_FATIGUE_PATTERN_FORMAL, ABSENCE_WORK_RHYTHM_CHECK_FORMAL,
-  ABSENCE_FOCUS_DRIFT_DETECTION_FORMAL, ABSENCE_SESSION_LENGTH_CHECKPOINT_FORMAL,
-  ABSENCE_PROGRESS_CONSOLIDATION_GAP_FORMAL,
-} from './class5-session-quality.js';
-import type { DecisionContent } from '../options.js';
 
 /** signalType → its own keyword (retained in every option + authored why-desc). */
 const KEYWORDS: Record<string, string> = {
   ABSENCE_COMPREHENSION: 'comprehension',
   ABSENCE_NO_PUSHBACK: 'question',
-  ABSENCE_CONTEXT_LOSS: 'state',
+  ABSENCE_CONTEXT_LOSS: 'decision',
   ABSENCE_DECISION_FATIGUE_PATTERN: 'review',
   ABSENCE_WORK_RHYTHM_CHECK: 'verif',
   ABSENCE_FOCUS_DRIFT_DETECTION: 'concern',
   ABSENCE_SESSION_LENGTH_CHECKPOINT: 'session',
   ABSENCE_PROGRESS_CONSOLIDATION_GAP: 'document',
-};
-
-/** signalType → the frozen DecisionContent whose L1[0] is the col-3 anchor (the formal variant). */
-const FROZEN: Record<string, DecisionContent> = {
-  ABSENCE_COMPREHENSION, ABSENCE_NO_PUSHBACK, ABSENCE_CONTEXT_LOSS,
-  ABSENCE_DECISION_FATIGUE_PATTERN: ABSENCE_DECISION_FATIGUE_PATTERN_FORMAL,
-  ABSENCE_WORK_RHYTHM_CHECK: ABSENCE_WORK_RHYTHM_CHECK_FORMAL,
-  ABSENCE_FOCUS_DRIFT_DETECTION: ABSENCE_FOCUS_DRIFT_DETECTION_FORMAL,
-  ABSENCE_SESSION_LENGTH_CHECKPOINT: ABSENCE_SESSION_LENGTH_CHECKPOINT_FORMAL,
-  ABSENCE_PROGRESS_CONSOLIDATION_GAP: ABSENCE_PROGRESS_CONSOLIDATION_GAP_FORMAL,
 };
 
 /** Author-declared practice-richness weights (escalation input; named-practice judgment is human-review). */
@@ -79,13 +62,6 @@ describe('class-5 — per-record full-depth gates', () => {
         expect(jargon).toEqual({});
         expect(review.headlineOnly.ok).toBe(true);
         expect(review.coverage.ok).toBe(true);
-      });
-
-      it('column 3 is the frozen shipped text verbatim (option + a real frozen core line)', () => {
-        const frozen = FROZEN[r.signalType];
-        const col3 = r.levelForms[3]!.cell;
-        expect(col3.option).toBe(frozen.L1[0].option);
-        expect(frozen.L1[0].descBase).toContain(col3.whyDesc);
       });
 
       it('keeps its keyword in every option and every authored why-desc (col-3 frozen core exempt)', () => {

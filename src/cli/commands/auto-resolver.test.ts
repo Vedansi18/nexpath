@@ -10,6 +10,19 @@ vi.mock('../../telemetry/index.js', () => ({
   writeTelemetry: vi.fn(),
   TELEMETRY_PATH: '/mock/telemetry.jsonl',
 }));
+// The stage classifier fires every prompt via a `new OpenAI()` the command constructs;
+// stub it so this wiring test never makes a real network call (it only asserts the
+// key-resolver wiring, not classification).
+vi.mock('openai', () => ({
+  default: class {
+    chat = { completions: { create: vi.fn().mockResolvedValue({
+      choices: [{ message: { content: JSON.stringify({
+        stage: 'Implementation', stage_confidence: 0.3, signals_present: [], signals_absent: [],
+        fire_decision_session: false, selected_signal_key: '', reason: 'test fallback',
+      }) } }],
+    }) } };
+  },
+}));
 
 import * as resolver from '../../config/ApiKeyResolver.js';
 

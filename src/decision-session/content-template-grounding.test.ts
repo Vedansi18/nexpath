@@ -72,6 +72,53 @@ describe('content-template-grounding — simpler derive (b)', () => {
     const cell = await deriveSimplerCell({ option: 'o', whyDesc: 'w' }, client, { l2Safeguard: safeguard });
     expect(cell.whyDesc.split(safeguard).length - 1).toBe(1); // appears exactly once
   });
+
+  // Per-column safeguard: a confirm-seek baked into the CURRENT cell's option/why-desc (e.g.
+  // NO_BACKUP_SAFETY's restore columns) must never be shed by the simpler derivation.
+  const guardedCell = {
+    option: 'Restore from the backup — ask me for go-ahead before running one.',
+    whyDesc: 'A restore overwrites current data — ask me for go-ahead before running one.',
+  };
+
+  it('rejects when the simpler cell sheds the per-column confirm-seek from both channels', async () => {
+    const client = mockClient(JSON.stringify({ option: 'Restore the backup to recover the data.', whyDesc: 'Recover the data.' }));
+    await expect(deriveSimplerCell(guardedCell, client)).rejects.toThrow(/safeguard/i);
+  });
+
+  it('rejects when the simpler cell keeps the confirm-seek in the why-desc but sheds it from the OPTION (the served instruction)', async () => {
+    const client = mockClient(JSON.stringify({ option: 'Restore the backup to recover the data.', whyDesc: 'Recover the data — ask me for go-ahead first.' }));
+    await expect(deriveSimplerCell(guardedCell, client)).rejects.toThrow(/safeguard/i);
+  });
+
+  it('rejects when the simpler cell keeps the confirm-seek in the option but sheds it from the why-desc (the desc-base)', async () => {
+    const client = mockClient(JSON.stringify({ option: 'Restore the backup — ask me for go-ahead first.', whyDesc: 'Recover the data.' }));
+    await expect(deriveSimplerCell(guardedCell, client)).rejects.toThrow(/safeguard/i);
+  });
+
+  it('keeps the simpler cell when it preserves the per-column confirm-seek in BOTH channels', async () => {
+    const client = mockClient(JSON.stringify({ option: 'Restore the backup — ask me for go-ahead first.', whyDesc: 'Recover the data — ask me for go-ahead first.' }));
+    const cell = await deriveSimplerCell(guardedCell, client);
+    expect(cell.option).toMatch(/ask me for go-ahead/i);
+    expect(cell.whyDesc).toMatch(/ask me for go-ahead/i);
+  });
+
+  it('does not reject an unguarded cell (no false positive)', async () => {
+    const client = mockClient(JSON.stringify({ option: 'simpler opt', whyDesc: 'simpler why' }));
+    const cell = await deriveSimplerCell({ option: 'plain option', whyDesc: 'plain why' }, client);
+    expect(cell.option).toBe('simpler opt');
+  });
+
+  it('the derive prompt tells the model to keep the confirm-request when the current cell is guarded', async () => {
+    let seen = '';
+    const spy = {
+      chat: { completions: { create: async (args: { messages: { content: string }[] }) => {
+        seen = args.messages[0].content;
+        return { choices: [{ message: { content: '{"option":"Restore — ask me for go-ahead.","whyDesc":"Recover — ask me for go-ahead."}' } }] };
+      } } },
+    } as unknown as import('openai').default;
+    await deriveSimplerCell(guardedCell, spy);
+    expect(seen).toMatch(/keep that request with it/i);
+  });
 });
 
 describe('content-template-grounding — why-desc weave', () => {
@@ -104,6 +151,30 @@ describe('content-template-grounding — why-desc weave', () => {
     const client = mockClient(JSON.stringify({ whyDesc: 'Review what changed (safeguard omitted by the model).' }));
     const out = await weaveWhyDesc({ ...base, l2Safeguard: safeguard }, client);
     expect(out.endsWith(safeguard)).toBe(true);
+  });
+
+  // Per-column safeguard: a confirm-seek baked into the AUTHORED core line (no separate
+  // l2Safeguard line) — e.g. NO_BACKUP_SAFETY's restore columns — must survive the weave too.
+  const guardedCore = { coreLine: 'Prove recovery by restoring — ask me for go-ahead before running one.', facts: base.facts };
+
+  it('keeps the woven output when a per-column confirm-seek in the core line survives', async () => {
+    const client = mockClient(JSON.stringify({ whyDesc: 'Restore to prove recovery (Vitest, small team) — ask me for go-ahead first.' }));
+    const out = await weaveWhyDesc(guardedCore, client);
+    expect(out).toMatch(/ask me for go-ahead/i);
+    expect(out).toBe('Restore to prove recovery (Vitest, small team) — ask me for go-ahead first.');
+  });
+
+  it('falls back to the deterministic assembly when the weave drops a per-column confirm-seek', async () => {
+    const client = mockClient(JSON.stringify({ whyDesc: 'Just restore to prove recovery, uses Vitest.' })); // confirm-seek gone
+    const out = await weaveWhyDesc(guardedCore, client);
+    expect(out).toContain('ask me for go-ahead'); // survived via the deterministic fallback
+    expect(out).toBe('Prove recovery by restoring — ask me for go-ahead before running one.\nuses Vitest\nsmall team');
+  });
+
+  it('does NOT fall back for a core line with no confirm-seek (no false positive)', async () => {
+    const client = mockClient(JSON.stringify({ whyDesc: 'Review what changed — Vitest, small team.' }));
+    const out = await weaveWhyDesc(base, client); // base coreLine has no confirm-seek
+    expect(out).toBe('Review what changed — Vitest, small team.'); // woven kept, not deterministic
   });
 
   it('falls back deterministically when the weave drops a runtime placeholder', async () => {

@@ -1,51 +1,23 @@
 /**
- * Single-dispatch param-keyed selection registry for decision-session content.
+ * Single-dispatch register + content-source resolution for decision-session content.
  *
- * Re-expresses the hand-coded selection cascade in `options.ts` (`selectAbsenceMap`
- * / `selectRoleAbsenceMap` / `isVibe` / `selectNonBeginnerVariant` +
- * `resolveDecisionContent`) as ONE map per axis chained by a single dispatch —
- * every case explicit, no scattered boolean-flag branches. Multi-axis resolution
- * is chained single-axis lookups, not tuple-widened keys.
+ * The one dispatch point for a signal's content SOURCE — every case explicit, no
+ * scattered boolean-flag branches. The content-template engine + the per-signal
+ * records are the whole content layer, so this registry is wired live: the Stop hook
+ * resolves a signal's source here, then serves it from the engine.
  *
- * It resolves the SAME `DecisionContent` as `resolveDecisionContent` (kept in
- * lock-step with it) and reuses the existing content maps verbatim — no new
- * content. Not yet wired into the live render path.
- *
- * Register note: this derives the register LOCALLY rather than via
+ * Register note: `selectionRegister` derives the register LOCALLY rather than via
  * `register.ts::profileToRegister`, because the two disagree on `cool_geek`:
- * `profileToRegister` maps `cool_geek → beginner`, but the content cascade treats
- * only `nature === 'beginner'` as beginner/vibe (so `cool_geek → casual`). Matching
- * the existing content output is the binding requirement here; the divergence is a
- * known inconsistency to reconcile later.
+ * `profileToRegister` maps `cool_geek → beginner`, but only `nature === 'beginner'`
+ * is treated as beginner/vibe here (so `cool_geek → casual`). The engine's register
+ * serving depends on this mapping; the divergence is a known inconsistency to
+ * reconcile later.
  */
 
-import type { Stage, UserProfile } from '../classifier/types.js';
-import type { FlagType } from '../classifier/Stage2Trigger.js';
-import type { DecisionContent } from './options.js';
-import {
-  ABSENCE_CONTENT,
-  ABSENCE_CONTENT_CASUAL,
-  ABSENCE_CONTENT_FOUNDER,
-  ABSENCE_CONTENT_INDIE_HACKER,
-  ABSENCE_CONTENT_PM,
-  ABSENCE_CONTENT_PRO_GEEK_SOUL,
-  TRANSITION_CONTENT,
-  TASK_REVIEW,
-  TASK_REVIEW_CASUAL,
-  resolveSkippedTransitionContent,
-} from './options.js';
-import {
-  ABSENCE_CONTENT_BEGINNER,
-  TRANSITION_CONTENT_BEGINNER,
-  TASK_REVIEW_BEGINNER,
-} from './options-beginner.js';
+import type { UserProfile } from '../classifier/types.js';
 
 /** The three register variants the content surface supports. */
 export type SelectionRegister = 'beginner' | 'formal' | 'casual';
-
-type AbsenceMap = Partial<Record<string, DecisionContent>>;
-type TransitionMap = Partial<Record<Stage, DecisionContent>>;
-type Role = NonNullable<UserProfile['role']>;
 
 /**
  * Register axis — single dispatch over nature (one switch, every case explicit).
@@ -61,80 +33,217 @@ export function selectionRegister(nature: UserProfile['nature'] | null | undefin
   }
 }
 
-// ── One map per axis ───────────────────────────────────────────────────────────
+// ── Content-source resolver + serving marker ───────────────────────────────────
+//
+// Per-signalType content SOURCE, decided in ONE place (the single extension point).
+// Every shipped signal is served from the content-template engine; there is no
+// static content layer any more. `resolveContentSource` returns 'static' only as a
+// safe no-op for a signalType with no shipped record — nothing is served from it.
 
-/** signalKey → absence content, keyed by register. */
-const ABSENCE_BY_REGISTER: Record<SelectionRegister, AbsenceMap> = {
-  beginner: ABSENCE_CONTENT_BEGINNER,
-  formal:   ABSENCE_CONTENT,
-  casual:   ABSENCE_CONTENT_CASUAL,
-};
-
-/** stage → transition content, keyed by register (formal + casual share the map). */
-const TRANSITION_BY_REGISTER: Record<SelectionRegister, TransitionMap> = {
-  beginner: TRANSITION_CONTENT_BEGINNER,
-  formal:   TRANSITION_CONTENT,
-  casual:   TRANSITION_CONTENT,
-};
-
-/** Within-stage / fallback content, keyed by register. */
-const TASK_REVIEW_BY_REGISTER: Record<SelectionRegister, DecisionContent> = {
-  beginner: TASK_REVIEW_BEGINNER,
-  formal:   TASK_REVIEW,
-  casual:   TASK_REVIEW_CASUAL,
-};
-
-/** signalKey → absence content, keyed by role (roles without an override are absent). */
-const ABSENCE_BY_ROLE: Partial<Record<Role, AbsenceMap>> = {
-  founder:      ABSENCE_CONTENT_FOUNDER,
-  indie_hacker: ABSENCE_CONTENT_INDIE_HACKER,
-  pm:           ABSENCE_CONTENT_PM,
-};
-
-// ── Single-dispatch resolution ─────────────────────────────────────────────────
+/** The content SOURCE for a signalType's advisory. */
+export type ContentSource = 'static' | 'content-template';
 
 /**
- * Resolve the `DecisionContent` for a fire, by chaining single-axis lookups.
- * Behaviourally identical to `resolveDecisionContent`.
- *
- * Order (highest precedence first):
- *   1. absence fire → role override → pro_geek_soul override → register absence map
- *   2. stage-transition skip → nearest intermediate transition content
- *   3. direct transition content for the current stage
- *   4. register fallback (within-stage / ultimate)
+ * SignalTypes served by the content-template engine. Every shipped signal is listed
+ * here (the marker matches the shipped record set), so the engine is the sole content
+ * source; a signalType absent here has no shipped record and resolves to the 'static'
+ * no-op.
  */
-export function resolveSelection(
-  currentStage: Stage,
-  flagType:     FlagType,
-  profile?:     UserProfile | null,
-  prevStage?:   Stage,
-): DecisionContent {
-  const register      = selectionRegister(profile?.nature);
-  const absenceMap    = ABSENCE_BY_REGISTER[register];
-  const transitionMap = TRANSITION_BY_REGISTER[register];
-  // Role overrides never apply to the beginner register (the cascade's isVibe gate).
-  const roleMap       = register === 'beginner' ? undefined
-    : profile?.role ? ABSENCE_BY_ROLE[profile.role] : undefined;
+export const MIGRATED_SIGNALS: ReadonlySet<string> = new Set<string>([
+  // §4.E2 new signals (A12): served by the content-template engine (no static DecisionContent).
+  'ABSENCE_SECRET_IN_PROMPT',
+  'ABSENCE_NO_VERSION_CONTROL',
+  'ABSENCE_NO_BACKUP_SAFETY',
+  'ABSENCE_NO_SEPARATE_ENVS',
+  'ABSENCE_NO_AUTOMATED_SECURITY_SCANNING',
+  'ABSENCE_FRUSTRATION_SPIRAL',
+  // coding-agent-mode mismatch signals (both directions), engine-served.
+  'ABSENCE_CODING_AGENT_MODE_MISMATCH',
+  'ABSENCE_AGENT_MODE_TOO_RESTRICTED',
+  // B3 — class 2 (verification-quality, 21 signals, 0 sensitive): now engine-served.
+  'BEHAVIOUR_TESTING',
+  'ABSENCE_TEST_CREATION',
+  'ABSENCE_REGRESSION_CHECK',
+  'ABSENCE_SECURITY_CHECK',
+  'ABSENCE_ERROR_HANDLING',
+  'ABSENCE_DOCUMENTATION',
+  'ABSENCE_REFACTORING',
+  'ABSENCE_CORRECTION_SEEKING',
+  'ABSENCE_PROBLEM_CORRECTION',
+  'ABSENCE_ACCESSIBILITY',
+  'ABSENCE_DATA_VALIDATION',
+  'ABSENCE_CODE_DOCUMENTATION_GAP',
+  'ABSENCE_TECHNICAL_DEBT_ACKNOWLEDGMENT',
+  'ABSENCE_TEST_DEPTH_CHECK',
+  'ABSENCE_SECURITY_REVIEW_GAP',
+  'ABSENCE_ERROR_HANDLING_COVERAGE',
+  'ABSENCE_REFACTORING_CHECKPOINT',
+  'ABSENCE_SELF_REVIEW_HABIT',
+  'ABSENCE_PERFORMANCE_AWARENESS',
+  'ABSENCE_DOCUMENTATION_BEFORE_ASK',
+  'ABSENCE_OUTPUT_VERIFICATION',
+  // B4 — class 3 (spec/architecture, 11 signals, 0 sensitive): now engine-served.
+  'ABSENCE_SPEC_ACCEPTANCE',
+  'ABSENCE_CROSS_CONFIRMING',
+  'ABSENCE_ALTERNATIVES',
+  'ABSENCE_ARCH_CONFLICT',
+  'ABSENCE_PROMPT_CONTEXT',
+  'ABSENCE_SPEC_CROSS_CONFIRM',
+  'ABSENCE_SPEC_REVISION',
+  'ABSENCE_API_DESIGN_REVIEW',
+  'ABSENCE_ARCHITECTURE_NOTE_ABSENCE',
+  'ABSENCE_API_CONTRACT_DEFINITION',
+  'ABSENCE_BACKWARDS_COMPATIBILITY_CHECK',
+  // B6 — class 5 (session-quality, 8 signals, 0 sensitive): now engine-served.
+  // context_loss carries founder / indie_hacker / pm role variants as record roleOverrides,
+  // served role → register → base by the engine.
+  'ABSENCE_COMPREHENSION',
+  'ABSENCE_NO_PUSHBACK',
+  'ABSENCE_CONTEXT_LOSS',
+  'ABSENCE_DECISION_FATIGUE_PATTERN',
+  'ABSENCE_WORK_RHYTHM_CHECK',
+  'ABSENCE_FOCUS_DRIFT_DETECTION',
+  'ABSENCE_SESSION_LENGTH_CHECKPOINT',
+  'ABSENCE_PROGRESS_CONSOLIDATION_GAP',
+  // B7 — class 6 (planning/idea/task, 14 signals, 0 sensitive, no role variants): now engine-served.
+  'ABSENCE_PHASE_TRANSITION',
+  'ABSENCE_IDEA_SCOPING',
+  'ABSENCE_IDEA_CONSTRAINT_CHECK',
+  'ABSENCE_IDEA_USER_DEFINITION',
+  'ABSENCE_TASK_ORDERING',
+  'ABSENCE_TASK_SIZING',
+  'ABSENCE_TASK_DEFINITION_OF_DONE',
+  'ABSENCE_USER_FEEDBACK_REVIEW',
+  'ABSENCE_ITERATION_PLANNING',
+  'ABSENCE_SCOPE_CREEP',
+  'ABSENCE_FEATURE_SCOPE',
+  'ABSENCE_IMPLEMENTATION_CHECKPOINT',
+  'ABSENCE_SPEC_BEFORE_CODE',
+  'ABSENCE_INCREMENTAL_BUILD',
+  // B8 — class 7 (cool-geek/vibe-coder, 20 signals): now engine-served. 1 sensitive
+  // (ABSENCE_DEPENDENCY_ADVENTURE, l2SafeguardRequired — safeguard confirmed on migration);
+  // beginner overrides served via the engine's resolveRegisterForms (register=beginner).
+  'ABSENCE_FEATURE_COMPLETION_CHECK',
+  'ABSENCE_FINISHING_LINE_AWARENESS',
+  'ABSENCE_POLISH_VS_FUNCTION',
+  'ABSENCE_MVP_SCOPE_DISCIPLINE',
+  'ABSENCE_IDEA_TO_SPEC_BRIDGE',
+  'ABSENCE_DEMO_VS_PRODUCT',
+  'ABSENCE_USER_JOURNEY_CHECK',
+  'ABSENCE_TECHNICAL_SPIKE_TREATMENT',
+  'ABSENCE_DEPENDENCY_ADVENTURE',
+  'ABSENCE_RESTART_IMPULSE_CHECK',
+  'ABSENCE_CREATIVE_VS_CORE_RATIO',
+  'ABSENCE_ERROR_UNDERSTANDING',
+  'ABSENCE_REQUIREMENT_CLARITY',
+  'ABSENCE_COPY_PASTE_AWARENESS',
+  'ABSENCE_DEBUGGING_OBSERVATION',
+  'ABSENCE_LEARNING_CONSOLIDATION',
+  'ABSENCE_SIMPLE_SOLUTION_FIRST',
+  'ABSENCE_SINGLE_RESPONSIBILITY_PROMPTING',
+  'ABSENCE_ROLLBACK_AWARENESS',
+  'ABSENCE_BUILD_VS_UNDERSTAND_RATIO',
+  // B2 — class 1 (stage transitions, 7 signals): now engine-served. These fire as flagType
+  // 'stage_transition' (not absence:X), so stop.ts derives the record signalType from the
+  // resolved static content's signalType (kept in lock-step with the static resolution). 2 sensitive
+  // (REVIEW_TO_RELEASE, RELEASE_TO_FEEDBACK, l2SafeguardRequired — safeguard confirmed on migration,
+  // preserved through every strength tier via the record-safeguard thread into deriveLadder);
+  // 6 carry structurally-divergent beginner overrides (served via the engine's resolveRegisterForms);
+  // TASK_REVIEW stays vocab-adaptable (no beginner override — base serves every register).
+  'IDEA_TO_PRD',
+  'PRD_TO_ARCHITECTURE',
+  'ARCHITECTURE_TO_TASKS',
+  'TASK_REVIEW',
+  'IMPLEMENTATION_TO_REVIEW',
+  'REVIEW_TO_RELEASE',
+  'RELEASE_TO_FEEDBACK',
+  // B9 — class 8 (role-cluster, 35 signals): now engine-served. Content is SINGLE-REGISTER per
+  // signal (23 casual-anchored founder/indie, 12 formal-anchored pm; no per-role content variant),
+  // so the engine reproduces it — no role-precedence guard needed (unlike context_loss). The role
+  // dimension is served through the role-structured why-help (composeWhyHelpBlock selects the
+  // founder/indie_hacker/pm sub-field by profile.role, preserved via whyHelpOverride). 4 sensitive
+  // (LAUNCH_STRATEGY_ABSENCE, BUILD_IN_PUBLIC_OPPORTUNITY, STAKEHOLDER_ALIGNMENT_CHECK,
+  // CROSS_TEAM_IMPACT_CHECK — l2SafeguardRequired; safeguard confirmed through the engine on migration);
+  // all 35 carry structurally-divergent beginner overrides (served via resolveRegisterForms).
+  'ABSENCE_USER_VALUE_CHECK',
+  'ABSENCE_OUTCOME_DEFINITION',
+  'ABSENCE_FEATURE_PRIORITIZATION',
+  'ABSENCE_USER_PERSONA_CLARITY',
+  'ABSENCE_COMPETITIVE_AWARENESS',
+  'ABSENCE_MVP_BOUNDARY_DISCIPLINE',
+  'ABSENCE_USER_ACQUISITION_CONSIDERATION',
+  'ABSENCE_RETENTION_MECHANISM_CHECK',
+  'ABSENCE_FEEDBACK_LOOP_ESTABLISHMENT',
+  'ABSENCE_HYPOTHESIS_BEFORE_BUILD',
+  'ABSENCE_TECHNICAL_VS_PRODUCT_TIME_BALANCE',
+  'ABSENCE_NORTH_STAR_ALIGNMENT',
+  'ABSENCE_TIME_TO_VALUE_CHECK',
+  'ABSENCE_SHIP_READINESS_DEFINITION',
+  'ABSENCE_MANUAL_BEFORE_AUTOMATE',
+  'ABSENCE_TECH_STACK_COMPLEXITY_CHECK',
+  'ABSENCE_LAUNCH_STRATEGY_ABSENCE',
+  'ABSENCE_EARLY_USER_FEEDBACK',
+  'ABSENCE_SOLO_MAINTAINABILITY',
+  'ABSENCE_DISTRIBUTION_THINKING',
+  'ABSENCE_MONETIZATION_PATH_CLARITY',
+  'ABSENCE_BUILD_IN_PUBLIC_OPPORTUNITY',
+  'ABSENCE_SCOPE_VS_TIME_CHECK',
+  'ABSENCE_ACCEPTANCE_CRITERIA_BEFORE_DEV',
+  'ABSENCE_STAKEHOLDER_ALIGNMENT_CHECK',
+  'ABSENCE_REQUIREMENTS_AMBIGUITY_FLAG',
+  'ABSENCE_DEPENDENCY_MAPPING',
+  'ABSENCE_DEFINITION_OF_DONE',
+  'ABSENCE_CROSS_TEAM_IMPACT_CHECK',
+  'ABSENCE_SUCCESS_METRIC_DEFINITION',
+  'ABSENCE_PRIORITY_JUSTIFICATION',
+  'ABSENCE_USER_STORY_COMPLETENESS',
+  'ABSENCE_RISK_FLAG',
+  'ABSENCE_SCOPE_CHANGE_IMPACT_ASSESSMENT',
+  'ABSENCE_RETROSPECTIVE_HABIT',
+  // B10 — class 9 (academic/hardcore-pro, 12 signals): now engine-served. Formal-only register
+  // (served via the formal nature map, not role maps — no role-precedence complication); all 12 carry
+  // structurally-divergent beginner overrides (de-jargoned; served via resolveRegisterForms). 6 sensitive
+  // (OVER_ENGINEERING_CHECK, OBSERVABILITY_FIRST, FAILURE_MODE_ANALYSIS, SECURITY_THREAT_MODELING,
+  // DATABASE_MIGRATION_SAFETY, DEPLOYMENT_STRATEGY_ABSENCE — l2SafeguardRequired; safeguard confirmed
+  // through the engine on migration, preserved verbatim on every tier via the deriveLadder thread).
+  'ABSENCE_DECISION_RECORD_ABSENCE',
+  'ABSENCE_OVER_ENGINEERING_CHECK',
+  'ABSENCE_PAIR_REVIEW_ABSENCE',
+  'ABSENCE_OBSERVABILITY_FIRST',
+  'ABSENCE_FAILURE_MODE_ANALYSIS',
+  'ABSENCE_CONTRACT_TESTING_GAP',
+  'ABSENCE_CAPACITY_PLANNING_GAP',
+  'ABSENCE_SECURITY_THREAT_MODELING',
+  'ABSENCE_DATABASE_MIGRATION_SAFETY',
+  'ABSENCE_DEPLOYMENT_STRATEGY_ABSENCE',
+  'ABSENCE_OPERATIONAL_RUNBOOK_GAP',
+  'ABSENCE_SLO_DEFINITION_GAP',
+  // B5 — class 4 (release/observability/infra, 8 signals): now engine-served. ALL 8 are sensitive
+  // (l2SafeguardRequired — every record touches an ops action: logging sweep, rollback, deploy/infra,
+  // dependency install/upgrade, credential move, CI config, throttling, dependency adoption; each
+  // safeguard confirmed through the engine on migration, preserved verbatim on every tier via the
+  // deriveLadder thread). Register-varied (formal/casual via base + vocab weave); 7 carry beginner
+  // overrides (served via resolveRegisterForms), DEPENDENCY_AUDIT_GAP is casual-only. Migrated LAST —
+  // this completes the 136 canonical class signals (all now engine-served; B11 removes the legacy cascade).
+  'ABSENCE_OBSERVABILITY',
+  'ABSENCE_ROLLBACK_PLANNING',
+  'ABSENCE_DEPLOYMENT_PLANNING',
+  'ABSENCE_DEPENDENCY_MGMT',
+  'ABSENCE_ENV_AND_SECRETS',
+  'ABSENCE_CI_PIPELINE',
+  'ABSENCE_RATE_LIMITING',
+  'ABSENCE_DEPENDENCY_AUDIT_GAP',
+]);
 
-  if (flagType.startsWith('absence:')) {
-    const signalKey = flagType.slice('absence:'.length);
-    const roleHit = roleMap?.[signalKey];
-    if (roleHit) return roleHit;
-    if (profile?.nature === 'pro_geek_soul') {
-      const pgOverride = ABSENCE_CONTENT_PRO_GEEK_SOUL[signalKey];
-      if (pgOverride) return pgOverride;
-    }
-    const override = absenceMap[signalKey];
-    if (override) return override;
-  }
-
-  if (flagType === 'stage_transition' && prevStage) {
-    const skipped = resolveSkippedTransitionContent(transitionMap, prevStage, currentStage);
-    if (skipped) return skipped;
-  }
-
-  const direct = transitionMap[currentStage];
-  if (direct) return direct;
-
-  return TASK_REVIEW_BY_REGISTER[register];
+/**
+ * Resolve the content SOURCE for a signalType: `content-template` iff the signal
+ * has been migrated, else `static`. Single dispatch over the migration marker —
+ * the ONLY place a signal's source is decided. The marker is injectable for
+ * testing the migrated branch while the shipped `MIGRATED_SIGNALS` stays empty.
+ */
+export function resolveContentSource(
+  signalType: string,
+  marker: ReadonlySet<string> = MIGRATED_SIGNALS,
+): ContentSource {
+  return marker.has(signalType) ? 'content-template' : 'static';
 }

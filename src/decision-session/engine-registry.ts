@@ -23,6 +23,7 @@
  */
 
 import type { AbsenceFlag, SessionState, UserProfile } from '../classifier/types.js';
+import type { RecordCandidateLookup } from './content-template-engine.js';
 import { contentTemplateEngine } from './content-template-engine.js';
 import { absenceSignalEngine } from './absence-signal-engine.js';
 
@@ -40,6 +41,14 @@ export interface EngineInput {
   state: SessionState;
   profile?: UserProfile | null;
   projectType?: string;
+  /** §6.1 — the fired signalType; the content-template engine resolves its record. */
+  signalType?: string;
+  /** §6.1 — the maturity column to resolve (defaults to the level-1 floor). */
+  level?: number;
+  /** §6.1 — the target register (selects a structurally-divergent override, else base). */
+  register?: string;
+  /** §6.1 — source-cascade record lookup for the signal, injected by the live caller. */
+  recordLookup?: RecordCandidateLookup;
 }
 
 /** An engine's output. `kind` discriminates the producing engine. */

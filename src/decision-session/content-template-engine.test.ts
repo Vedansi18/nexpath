@@ -30,6 +30,7 @@ import {
 } from './content-template-engine.js';
 import type { OptionEntry } from './options.js';
 import type { FactMap } from '../env/types.js';
+import { PROJECT_FACT_KEYS } from '../env/types.js';
 import type { RightGoodProfile } from './../classifier/right-good-aggregator.js';
 import type { WorkStyleProfile } from './../classifier/work-style-traits.js';
 import type { SignalDefinition } from '../classifier/types.js';
@@ -290,20 +291,50 @@ describe('content-template-engine — render-path bridge (deriveSimplerLevel)', 
     expect(ladder.l2).toEqual(fb.l2);
     expect(ladder.l3).toEqual(fb.l3);
   });
+
+  it('deriveLadder re-appends the record safeguard VERBATIM on every derived tier — even a line the confirm-seek guard cannot match', async () => {
+    // The record-safeguard survival guarantee is PHRASING-INDEPENDENT: threading l2Safeguard through
+    // opts re-appends the exact line on each simpler tier regardless of wording. Uses a safeguard line
+    // that deliberately does NOT match CONFIRM_SEEK_RE (no "ask me" / "go-ahead"), and a derive that
+    // DROPS it — so only the verbatim re-append (not the regex guard) can keep it. This is the
+    // primitive behind the sensitive stage-transition tiers surviving.
+    const SAFE = 'Loop me in before the production rollout.';
+    const l1: OptionEntry[] = [{ option: 'Ship it.', descBase: `heavy release gate\n${SAFE}` }];
+    const dropsSafe = mockClient(JSON.stringify({ option: 'ship', whyDesc: 'lighter release gate' }));
+    const ladder = await deriveLadder(l1, {}, dropsSafe, { l2Safeguard: SAFE });
+    expect(ladder.l2[0].descBase).toContain(SAFE);
+    expect(ladder.l3[0].descBase).toContain(SAFE);
+  });
 });
 
 describe('content-template-engine — param-source retrieval (AR-10 / AR-9 / AR-3)', () => {
-  it('envFactsToGrounding maps present capabilities, skips unknown/absent', () => {
+  it('envFactsToGrounding maps present capabilities to human phrases, skips unknown/absent', () => {
     const facts: FactMap = {
-      project_framework: { value: 'next.js', tier: 'C', confidence: 'high', detectedAt: 0 },
-      has_test_runner: { value: true, tier: 'C', confidence: 'high', detectedAt: 0 },
+      project_framework: { value: 'next.js', tier: 'C', confidence: 'high', detectedAt: 0 }, // string → its value
+      has_test_runner: { value: true, tier: 'C', confidence: 'high', detectedAt: 0 },         // bool → human phrase
       has_ci_pipeline: { value: false, tier: 'C', confidence: 'high', detectedAt: 0 }, // absent → skip
       shell_type: { value: null, tier: 'C', confidence: 'low', detectedAt: 0 },        // unknown → skip
     };
     expect(envFactsToGrounding(facts)).toEqual([
       { key: 'project_framework', value: 'next.js', weight: 1, tier: 'capability' },
-      { key: 'has_test_runner', value: 'has_test_runner', weight: 1, tier: 'capability' },
+      { key: 'has_test_runner', value: 'a test runner is set up', weight: 1, tier: 'capability' },
     ]);
+  });
+
+  it('envFactsToGrounding never grounds a boolean fact with its raw snake_case key (would leak into the why-desc)', () => {
+    // Derived from PROJECT_FACT_KEYS (project_framework is the only string fact) so a NEW boolean
+    // probe key that forgot its ENV_FACT_PHRASE entry is caught here, not just the ones known today.
+    const boolKeys = PROJECT_FACT_KEYS.filter((k) => k !== 'project_framework');
+    const facts: FactMap = Object.fromEntries(
+      boolKeys.map((k) => [k, { value: true, tier: 'C', confidence: 'high', detectedAt: 0 }]),
+    ) as FactMap;
+    const grounded = envFactsToGrounding(facts);
+    expect(grounded.length).toBe(boolKeys.length); // every present boolean fact grounds
+    for (const g of grounded) {
+      expect(g.value, `${g.key} grounded with its raw key`).not.toBe(g.key);
+      expect(g.value, `${g.key} value looks like a raw key`).not.toMatch(/^has_[a-z_]+$/);
+      expect(g.value.length).toBeGreaterThan(0);
+    }
   });
 
   it('envFactsToGrounding honours tier P (corroborated) and low confidence (weight 0.5)', () => {
@@ -433,6 +464,27 @@ describe('content-template-engine — register-override branch (resolveRegisterF
   it('serves the base forms for a vocab-adaptable register (the engine adapts the base)', () => {
     const r = record({ levelForms: base, registerOverrides: { beginner: { divergence: 'vocab-adaptable' } } });
     expect(resolveRegisterForms(r, 'beginner')).toBe(base);
+  });
+
+  // Role dimension — role → register → base, beginner-exclusive (beginner turns role overrides off).
+  const founderForms = { 1: { kind: 'slot-variant', cell: cell('founder1') } } as ContentTemplateRecord['levelForms'];
+  const roleRec = record({
+    levelForms: base,
+    roleOverrides: { founder: { levelForms: founderForms } },
+    registerOverrides: { beginner: { divergence: 'structurally-divergent', levelForms: beg } },
+  });
+  it('serves the ROLE override forms for a matching role (role wins over the register/base)', () => {
+    expect(resolveRegisterForms(roleRec, 'casual', 'founder')).toBe(founderForms);
+    expect(resolveRegisterForms(roleRec, 'formal', 'founder')).toBe(founderForms);
+  });
+  it('a role with no override falls through to the register/base', () => {
+    expect(resolveRegisterForms(roleRec, 'casual', 'pm')).toBe(base);
+  });
+  it('beginner register is EXCLUSIVE — it beats a role override (beginner turns role overrides off)', () => {
+    expect(resolveRegisterForms(roleRec, 'beginner', 'founder')).toBe(beg);
+  });
+  it('no role arg → register/base (backward-compatible with the 2-arg calls)', () => {
+    expect(resolveRegisterForms(roleRec, 'casual')).toBe(base);
   });
   it('composeAdvisory serves the override option for the target register, base otherwise', async () => {
     const out = await composeAdvisory({ lookup: lookupOf({ shipped: rec }), level: 1, register: 'beginner' }, mockClient(JSON.stringify({ whyDesc: 'w' })));

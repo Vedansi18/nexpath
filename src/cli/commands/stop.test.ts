@@ -13,6 +13,17 @@ vi.mock('../../decision-session/OptionGenerator.js', () => ({
   generateOptionList: vi.fn().mockResolvedValue(null),
 }));
 
+// The engine path (migrated signals) is mocked to null like the static generateOptionList above,
+// so these flow tests stay deterministic and never make a live LLM call — regardless of which
+// signals are in MIGRATED_SIGNALS. A null return exercises the static-content fallback in runLevel.
+vi.mock('../../decision-session/engine-option-generator.js', () => ({
+  generateFromEngine: vi.fn().mockResolvedValue(null),
+  buildEngineGrounding: vi.fn().mockResolvedValue([]),
+  // The deterministic fallback — mocked to null so flow tests fall through to the static generate
+  // path (also mocked null) and exercise the static-content fallback. Its real behavior is unit-tested.
+  composeDeterministicOptions: vi.fn().mockReturnValue(null),
+}));
+
 import { openStore } from '../../store/db.js';
 import type { Store } from '../../store/db.js';
 import { runStop } from './stop.js';
@@ -28,6 +39,7 @@ import { upsertProject, getProject } from '../../store/projects.js';
 import { LANG_DETECT_INTERVAL } from '../../classifier/LanguageDetector.js';
 import { writeTelemetry } from '../../telemetry/index.js';
 import { recentPromptMetadata } from '../../telemetry/recent-prompts.js';
+import { generateFromEngine, composeDeterministicOptions } from '../../decision-session/engine-option-generator.js';
 import { SessionStateManager } from '../../classifier/SessionStateManager.js';
 import { generateOptionList } from '../../decision-session/OptionGenerator.js';
 
@@ -425,23 +437,20 @@ describe('runStop — generated options wiring', () => {
   beforeEach(async () => { store = await openStore(':memory:'); });
   afterEach(() => { store.db.close(); });
 
-  it('calls generateOptionList before decision session (Phase 5: option gen runs in stop)', async () => {
-    vi.mocked(generateOptionList).mockResolvedValueOnce({
-      l1: ['gen opt a', 'gen opt b', 'gen opt c'],
-      l2: ['gen opt d', 'gen opt e'],
-      l3: ['gen opt f'],
-    });
+  it('runs the engine option-gen path before the decision session (Phase 5: option gen runs in stop)', async () => {
+    // The fixture (absence:test_creation) is migrated, so stop.ts generates options via the engine.
     insertAdvisory(store);
     const result = await runStop(makePayload(), store, mockSelect(SKIP_NOW));
-    expect(generateOptionList).toHaveBeenCalled();
+    expect(generateFromEngine).toHaveBeenCalled();
     expect(['blocked', 'skipped']).toContain(result.outcome);
   });
 
-  it('falls back to static options when option gen returns null (no API key in test env)', async () => {
-    // module mock: generateOptionList returns null → static options used
+  it('serves options when the engine path yields nothing (deterministic fallback / decision session)', async () => {
+    // engine + deterministic fallback are mocked to null here → the decision session serves content
     insertAdvisory(store);
-    const { TASK_REVIEW } = await import('../../decision-session/options.js');
-    const staticL1First = TASK_REVIEW.L1[0].option;
+    // runLevel echoes the selected value, so any option string exercises the serve path
+    // (engine + deterministic fallback are mocked null here; the static content sets are retired).
+    const staticL1First = 'A picked content prompt.';
     const result = await runStop(makePayload(), store, mockSelect(staticL1First));
     expect(result.outcome).toBe('blocked');
     if (result.outcome === 'blocked') {
@@ -453,9 +462,161 @@ describe('runStop — generated options wiring', () => {
     // Advisory L1/L2/L3 are null (Phase 4: auto no longer stores them)
     // stop.ts generates options live via generateOptionList — no crash expected
     insertAdvisory(store);
-    const { TASK_REVIEW } = await import('../../decision-session/options.js');
-    const result = await runStop(makePayload(), store, mockSelect(TASK_REVIEW.L1[0].option));
+    const result = await runStop(makePayload(), store, mockSelect('A picked content prompt.'));
     expect(['blocked', 'skipped']).toContain(result.outcome);
+  });
+
+  it('degrades to the deterministic fallback when the engine option-gen throws — the Stop hook never crashes (B3)', async () => {
+    // The fixture (absence:test_creation) is migrated (B3), so stop.ts runs the engine path.
+    // Force it to throw; stop.ts must CATCH it, fall back to the deterministic engine composition,
+    // and still complete the session — never reject/crash the hook.
+    vi.mocked(generateFromEngine).mockRejectedValueOnce(new Error('engine api down'));
+    insertAdvisory(store);
+    const picked = 'A picked content prompt.';
+    const result = await runStop(makePayload(), store, mockSelect(picked));
+    expect(result.outcome).toBe('blocked'); // caught → fallback → session ran → user picked
+    if (result.outcome === 'blocked') expect(result.reason).toBe(picked);
+  });
+
+  it('when the grounded engine throws, the DETERMINISTIC engine fallback is invoked (B11 iii — no static content)', async () => {
+    // The engine path throws; stop.ts must fall to composeDeterministicOptions (no LLM, from the record)
+    // BEFORE any static generate path — so an engine/key failure serves valid content without static content.
+    vi.mocked(generateFromEngine).mockRejectedValueOnce(new Error('engine api down'));
+    vi.mocked(composeDeterministicOptions).mockClear();
+    insertAdvisory(store);
+    const result = await runStop(makePayload(), store, mockSelect(SKIP_NOW));
+    expect(composeDeterministicOptions).toHaveBeenCalled();
+    expect(result.outcome).toBe('skipped');
+  });
+});
+
+// ── runStop — context_loss role-through-engine serving (B11: B6 guard removed) ────
+
+describe('runStop — context_loss role-through-engine serving (B11)', () => {
+  let store: Store;
+  beforeEach(async () => { store = await openStore(':memory:'); });
+  afterEach(() => { store.db.close(); vi.restoreAllMocks(); });
+
+  function seedProfile(role: string | null, flagType = 'absence:context_loss') {
+    const mgr = SessionStateManager.load(store, '/test/project');
+    mgr.setProfile({
+      nature: 'hardcore_pro', mood: 'focused', depth: 'high', role,
+      precisionOrdinal: 'high', playfulnessOrdinal: 'low',
+      precisionScore: 8, playfulnessScore: 2, depthScore: 8, computedAt: 0,
+    } as unknown as import('../../classifier/types.js').UserProfile);
+    mgr.setDetectedLanguage(store, undefined); // persists state incl. the profile
+    upsertPendingAdvisory(store, {
+      projectRoot: '/test/project', stage: 'implementation', flagType,
+      pinchLabel: 'Hold up.', sessionId: mgr.current.sessionId, promptCount: 5,
+    });
+  }
+
+  it('a founder user gets the ENGINE for context_loss, with the role threaded (roleOverrides serve the founder variant)', async () => {
+    // B11: the role-tailored content is now engine-served via roleOverrides — the old B6 static
+    // guard is gone. The founder role must reach generateFromEngine so the resolver picks its variant.
+    seedProfile('founder');
+    vi.mocked(generateFromEngine).mockClear();
+    const result = await runStop(makePayload(), store, mockSelect(SKIP_NOW));
+    expect(generateFromEngine).toHaveBeenCalled();
+    expect(vi.mocked(generateFromEngine).mock.calls[0][0]).toMatchObject({ role: 'founder' });
+    expect(result.outcome).toBe('skipped');
+  });
+
+  it('a non-role user gets the ENGINE for context_loss (no role threaded)', async () => {
+    seedProfile(null);
+    vi.mocked(generateFromEngine).mockClear();
+    const result = await runStop(makePayload(), store, mockSelect(SKIP_NOW));
+    expect(generateFromEngine).toHaveBeenCalled();
+    expect(vi.mocked(generateFromEngine).mock.calls[0][0]).toMatchObject({ role: undefined });
+    expect(result.outcome).toBe('skipped');
+  });
+
+  it('a pm user on a register-varied signal (decision_fatigue) also gets the ENGINE, role threaded', async () => {
+    // decision_fatigue_pattern is register-varied (a PM _FORMAL variant, not role-tailored content);
+    // it has no roleOverrides, so the resolver falls through to register/base — but the engine path
+    // (and the role thread) is the same for every migrated signal now.
+    seedProfile('pm', 'absence:decision_fatigue_pattern');
+    vi.mocked(generateFromEngine).mockClear();
+    const result = await runStop(makePayload(), store, mockSelect(SKIP_NOW));
+    expect(generateFromEngine).toHaveBeenCalled();
+    expect(vi.mocked(generateFromEngine).mock.calls[0][0]).toMatchObject({ role: 'pm' });
+    expect(result.outcome).toBe('skipped');
+  });
+});
+
+// ── runStop — B2 stage-transition engine dispatch ────────────────────────────
+
+describe('runStop — B2 stage-transition engine dispatch', () => {
+  let store: Store;
+  beforeEach(async () => { store = await openStore(':memory:'); });
+  afterEach(() => { store.db.close(); vi.restoreAllMocks(); });
+
+  function seedTransition(stage: string) {
+    const mgr = SessionStateManager.load(store, '/test/project');
+    mgr.setDetectedLanguage(store, undefined); // persist session so runStop finds same UUID
+    upsertPendingAdvisory(store, {
+      projectRoot: '/test/project', stage: stage as import('../../classifier/types.js').Stage,
+      flagType: 'stage_transition', pinchLabel: 'Hold up.', sessionId: mgr.current.sessionId, promptCount: 5,
+    });
+  }
+
+  it('a stage_transition routes to the ENGINE — record signalType derived from the resolved content (IDEA_TO_PRD)', async () => {
+    // stage=prd → the engine serves IDEA_TO_PRD; the dispatch derives the record from the
+    // transition's signalType (stage transitions carry no absence: key).
+    seedTransition('prd');
+    vi.mocked(generateFromEngine).mockClear();
+    const result = await runStop(makePayload(), store, mockSelect(SKIP_NOW));
+    expect(generateFromEngine).toHaveBeenCalled();
+    expect(result.outcome).toBe('skipped');
+  });
+
+  it('a transition with no destination-stage content resolves the TASK_REVIEW fallback record → ENGINE', async () => {
+    // stage=implementation has no TRANSITION_CONTENT entry → the TASK_REVIEW fallback (migrated) —
+    // still engine-served because its signalType is in MIGRATED_SIGNALS.
+    seedTransition('implementation');
+    vi.mocked(generateFromEngine).mockClear();
+    const result = await runStop(makePayload(), store, mockSelect(SKIP_NOW));
+    expect(generateFromEngine).toHaveBeenCalled();
+    expect(result.outcome).toBe('skipped');
+  });
+});
+
+// ── runStop — B9 class-8 role-cluster engine dispatch ────────────────────────
+
+describe('runStop — B9 class-8 role-cluster engine dispatch', () => {
+  let store: Store;
+  beforeEach(async () => { store = await openStore(':memory:'); });
+  afterEach(() => { store.db.close(); vi.restoreAllMocks(); });
+
+  function seedRole(role: string, flagType: string) {
+    const mgr = SessionStateManager.load(store, '/test/project');
+    mgr.setProfile({
+      nature: 'hardcore_pro', mood: 'focused', depth: 'high', role,
+      precisionOrdinal: 'high', playfulnessOrdinal: 'low',
+      precisionScore: 8, playfulnessScore: 2, depthScore: 8, computedAt: 0,
+    } as unknown as import('../../classifier/types.js').UserProfile);
+    mgr.setDetectedLanguage(store, undefined);
+    upsertPendingAdvisory(store, {
+      projectRoot: '/test/project', stage: 'implementation',
+      flagType: flagType as import('../../classifier/Stage2Trigger.js').FlagType,
+      pinchLabel: 'Hold up.', sessionId: mgr.current.sessionId, promptCount: 5,
+    });
+  }
+
+  it('a class-8 role-cluster signal routes to the ENGINE for a founder (single-register content → NOT kept static like context_loss)', async () => {
+    seedRole('founder', 'absence:user_value_check');
+    vi.mocked(generateFromEngine).mockClear();
+    const result = await runStop(makePayload(), store, mockSelect(SKIP_NOW));
+    expect(generateFromEngine).toHaveBeenCalled();
+    expect(result.outcome).toBe('skipped');
+  });
+
+  it('a sensitive class-8 signal (stakeholder sign-off) routes to the ENGINE for a pm', async () => {
+    seedRole('pm', 'absence:stakeholder_alignment_check');
+    vi.mocked(generateFromEngine).mockClear();
+    const result = await runStop(makePayload(), store, mockSelect(SKIP_NOW));
+    expect(generateFromEngine).toHaveBeenCalled();
+    expect(result.outcome).toBe('skipped');
   });
 });
 
@@ -532,7 +693,7 @@ describe('runStop — telemetry events', () => {
   });
 
   it('emits stop_advisory_shown with generatedOptions:true when option gen succeeds', async () => {
-    vi.mocked(generateOptionList).mockResolvedValueOnce({
+    vi.mocked(generateFromEngine).mockResolvedValueOnce({
       l1: ['opt a'], l2: ['opt b'], l3: ['opt c'],
     });
     insertAdvisory(store);

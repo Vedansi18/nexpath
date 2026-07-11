@@ -5,13 +5,6 @@ import { resolveRegisterForms, composeAdvisory, type RecordCandidateLookup } fro
 import { reviewRecord, checkVoice, checkEscalation, checkL2Safeguard } from '../content-authoring-rules.js';
 import { checkTopicKeyword, checkOptionLengthBudget } from '../content-template-tooling.js';
 import { validateContentTemplateRecord, type ContentTemplateRecord } from '../content-template-schema.js';
-import {
-  ABSENCE_TEST_CREATION_BEGINNER, ABSENCE_REGRESSION_CHECK_BEGINNER, BEHAVIOUR_TESTING_BEGINNER,
-  ABSENCE_SECURITY_CHECK_BEGINNER, ABSENCE_ERROR_HANDLING_BEGINNER, ABSENCE_DOCUMENTATION_BEGINNER,
-  ABSENCE_REFACTORING_BEGINNER, ABSENCE_CORRECTION_SEEKING_BEGINNER, ABSENCE_PROBLEM_CORRECTION_BEGINNER,
-  ABSENCE_ACCESSIBILITY_BEGINNER, ABSENCE_DATA_VALIDATION_BEGINNER,
-} from './class2-verification-quality.js';
-import type { DecisionContent } from '../options.js';
 
 function mockClient(reply: string): OpenAI {
   return { chat: { completions: { create: async () => ({ choices: [{ message: { content: reply } }] }) } } } as unknown as OpenAI;
@@ -33,20 +26,6 @@ const BEGINNER_KEYWORD: Record<string, string> = {
   ABSENCE_PROBLEM_CORRECTION: 'fix',
   ABSENCE_ACCESSIBILITY: 'label',
   ABSENCE_DATA_VALIDATION: 'data',
-};
-
-const FROZEN_BEGINNER: Record<string, DecisionContent> = {
-  ABSENCE_TEST_CREATION: ABSENCE_TEST_CREATION_BEGINNER,
-  ABSENCE_REGRESSION_CHECK: ABSENCE_REGRESSION_CHECK_BEGINNER,
-  BEHAVIOUR_TESTING: BEHAVIOUR_TESTING_BEGINNER,
-  ABSENCE_SECURITY_CHECK: ABSENCE_SECURITY_CHECK_BEGINNER,
-  ABSENCE_ERROR_HANDLING: ABSENCE_ERROR_HANDLING_BEGINNER,
-  ABSENCE_DOCUMENTATION: ABSENCE_DOCUMENTATION_BEGINNER,
-  ABSENCE_REFACTORING: ABSENCE_REFACTORING_BEGINNER,
-  ABSENCE_CORRECTION_SEEKING: ABSENCE_CORRECTION_SEEKING_BEGINNER,
-  ABSENCE_PROBLEM_CORRECTION: ABSENCE_PROBLEM_CORRECTION_BEGINNER,
-  ABSENCE_ACCESSIBILITY: ABSENCE_ACCESSIBILITY_BEGINNER,
-  ABSENCE_DATA_VALIDATION: ABSENCE_DATA_VALIDATION_BEGINNER,
 };
 
 const WITH_OVERRIDE = Object.keys(BEGINNER_KEYWORD);
@@ -78,13 +57,6 @@ describe('class-2 beginner overrides — per-variant T1-variant gates', () => {
       it('is a schema-valid, all-5-column, floored ladder', () => {
         expect(validateContentTemplateRecord(synth).ok).toBe(true);
         expect(Object.keys(synth.levelForms).map(Number).sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5]);
-      });
-
-      it('column 3 is the frozen beginner shipped text verbatim (option + a real frozen core line)', () => {
-        const frozen = FROZEN_BEGINNER[r.signalType];
-        const col3 = synth.levelForms[3]!.cell;
-        expect(col3.option).toBe(frozen.L1[0].option);
-        expect(frozen.L1[0].descBase).toContain(col3.whyDesc);
       });
 
       it('keeps its own beginner keyword in every option and every authored why-desc (col-3 frozen core exempt)', () => {

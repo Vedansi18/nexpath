@@ -10,13 +10,6 @@ import {
   runBuildGate, checkTopicKeyword, checkOptionLengthBudget, coverageMetric, SHIPPED_CONTENT_TEMPLATES,
 } from '../content-template-tooling.js';
 import { reviewRecord, checkVoice, checkEscalation, checkL2Safeguard } from '../content-authoring-rules.js';
-import {
-  ABSENCE_SPEC_ACCEPTANCE, ABSENCE_CROSS_CONFIRMING, ABSENCE_ALTERNATIVES, ABSENCE_ARCH_CONFLICT,
-  ABSENCE_PROMPT_CONTEXT, ABSENCE_SPEC_CROSS_CONFIRM, ABSENCE_SPEC_REVISION, ABSENCE_API_DESIGN_REVIEW,
-  ABSENCE_ARCHITECTURE_NOTE_ABSENCE_CASUAL, ABSENCE_API_CONTRACT_DEFINITION_CASUAL,
-  ABSENCE_BACKWARDS_COMPATIBILITY_CHECK_CASUAL,
-} from './class3-spec-architecture.js';
-import type { DecisionContent } from '../options.js';
 
 /** signalType → its own keyword (retained in every option + authored why-desc). */
 const KEYWORDS: Record<string, string> = {
@@ -31,15 +24,6 @@ const KEYWORDS: Record<string, string> = {
   ABSENCE_ARCHITECTURE_NOTE_ABSENCE: 'architect',
   ABSENCE_API_CONTRACT_DEFINITION: 'contract',
   ABSENCE_BACKWARDS_COMPATIBILITY_CHECK: 'compatib',
-};
-
-/** signalType → the frozen DecisionContent whose L1[0] is the col-3 anchor. */
-const FROZEN: Record<string, DecisionContent> = {
-  ABSENCE_SPEC_ACCEPTANCE, ABSENCE_CROSS_CONFIRMING, ABSENCE_ALTERNATIVES, ABSENCE_ARCH_CONFLICT,
-  ABSENCE_PROMPT_CONTEXT, ABSENCE_SPEC_CROSS_CONFIRM, ABSENCE_SPEC_REVISION, ABSENCE_API_DESIGN_REVIEW,
-  ABSENCE_ARCHITECTURE_NOTE_ABSENCE: ABSENCE_ARCHITECTURE_NOTE_ABSENCE_CASUAL,
-  ABSENCE_API_CONTRACT_DEFINITION: ABSENCE_API_CONTRACT_DEFINITION_CASUAL,
-  ABSENCE_BACKWARDS_COMPATIBILITY_CHECK: ABSENCE_BACKWARDS_COMPATIBILITY_CHECK_CASUAL,
 };
 
 /** Author-declared practice-richness weights (the escalation input; the named-practice judgment is human-review). */
@@ -89,13 +73,6 @@ describe('class-3 — per-record full-depth gates', () => {
         expect(jargon).toEqual({});
         expect(review.headlineOnly.ok).toBe(true);
         expect(review.coverage.ok).toBe(true);
-      });
-
-      it('column 3 is the frozen shipped text verbatim (option + a real frozen core line)', () => {
-        const frozen = FROZEN[r.signalType];
-        const col3 = r.levelForms[3]!.cell;
-        expect(col3.option).toBe(frozen.L1[0].option);
-        expect(frozen.L1[0].descBase).toContain(col3.whyDesc);
       });
 
       it('keeps its keyword in every option and every authored why-desc (col-3 frozen core exempt)', () => {

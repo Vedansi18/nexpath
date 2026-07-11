@@ -4,14 +4,6 @@ import {
 } from './class2-records.js';
 import { runBuildGate, checkTopicKeyword, checkOptionLengthBudget } from '../content-template-tooling.js';
 import { reviewRecord, checkVoice, checkEscalation } from '../content-authoring-rules.js';
-import {
-  ABSENCE_CODE_DOCUMENTATION_GAP_CASUAL, ABSENCE_TECHNICAL_DEBT_ACKNOWLEDGMENT_CASUAL,
-  ABSENCE_TEST_DEPTH_CHECK_CASUAL, ABSENCE_SECURITY_REVIEW_GAP_CASUAL,
-  ABSENCE_ERROR_HANDLING_COVERAGE_CASUAL, ABSENCE_REFACTORING_CHECKPOINT_CASUAL,
-  ABSENCE_SELF_REVIEW_HABIT_CASUAL, ABSENCE_PERFORMANCE_AWARENESS_CASUAL,
-  ABSENCE_DOCUMENTATION_BEFORE_ASK_BEGINNER, ABSENCE_OUTPUT_VERIFICATION_BEGINNER,
-} from './class2-verification-quality.js';
-import type { DecisionContent } from '../options.js';
 
 const KEYWORDS: Record<string, string> = {
   ABSENCE_CODE_DOCUMENTATION_GAP: 'comment',
@@ -24,20 +16,6 @@ const KEYWORDS: Record<string, string> = {
   ABSENCE_PERFORMANCE_AWARENESS: 'performance',
   ABSENCE_DOCUMENTATION_BEFORE_ASK: 'docs',
   ABSENCE_OUTPUT_VERIFICATION: 'run',
-};
-
-/** col-3 anchor frozen source (casual or beginner — no formal base exists). */
-const FROZEN: Record<string, DecisionContent> = {
-  ABSENCE_CODE_DOCUMENTATION_GAP: ABSENCE_CODE_DOCUMENTATION_GAP_CASUAL,
-  ABSENCE_TECHNICAL_DEBT_ACKNOWLEDGMENT: ABSENCE_TECHNICAL_DEBT_ACKNOWLEDGMENT_CASUAL,
-  ABSENCE_TEST_DEPTH_CHECK: ABSENCE_TEST_DEPTH_CHECK_CASUAL,
-  ABSENCE_SECURITY_REVIEW_GAP: ABSENCE_SECURITY_REVIEW_GAP_CASUAL,
-  ABSENCE_ERROR_HANDLING_COVERAGE: ABSENCE_ERROR_HANDLING_COVERAGE_CASUAL,
-  ABSENCE_REFACTORING_CHECKPOINT: ABSENCE_REFACTORING_CHECKPOINT_CASUAL,
-  ABSENCE_SELF_REVIEW_HABIT: ABSENCE_SELF_REVIEW_HABIT_CASUAL,
-  ABSENCE_PERFORMANCE_AWARENESS: ABSENCE_PERFORMANCE_AWARENESS_CASUAL,
-  ABSENCE_DOCUMENTATION_BEFORE_ASK: ABSENCE_DOCUMENTATION_BEFORE_ASK_BEGINNER,
-  ABSENCE_OUTPUT_VERIFICATION: ABSENCE_OUTPUT_VERIFICATION_BEGINNER,
 };
 
 /**
@@ -81,13 +59,6 @@ describe('class-2 batch B — per-record full-depth gates', () => {
         expect(jargon).toEqual({});
         expect(review.headlineOnly.ok).toBe(true);
         expect(review.coverage.ok).toBe(true);
-      });
-
-      it('column 3 is the frozen casual/beginner text verbatim (option + a real frozen core line)', () => {
-        const frozen = FROZEN[r.signalType];
-        const col3 = r.levelForms[3]!.cell;
-        expect(col3.option).toBe(frozen.L1[0].option);
-        expect(frozen.L1[0].descBase).toContain(col3.whyDesc);
       });
 
       it('keeps its keyword in every option, and every AUTHORED why-desc (col-3 frozen exempt)', () => {

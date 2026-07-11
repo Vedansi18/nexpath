@@ -43,8 +43,8 @@ export const NO_PUSHBACK_BEGINNER_OVERRIDE: RegisterOverride = structural({
 
 /** CONTEXT_LOSS (beginner) — keyword "track". File at col-5. */
 export const CONTEXT_LOSS_BEGINNER_OVERRIDE: RegisterOverride = structural({
-  1: form('Write one line to keep track of where what was just built stands — what is done and what is next.', 'The lightest step: one line to keep track of done-and-next.'),
-  2: form('Note the main things to keep track of this session — the key decisions made and what still needs doing — as a quick re-anchor.', 'A light pass: the main decisions and open work tracked as a re-anchor.'),
+  1: form('Write one line to keep track of the main decision so far and what the next step depends on.', 'The lightest step: one line to keep track of the key decision and what depends on it.'),
+  2: form("Note the main things to keep track of this session — the key decisions made, the limits you're working within, and what still needs doing — as a quick re-anchor.", 'A light pass: the main decisions and limits tracked as a re-anchor.'),
   3: form("1. Think about everything we've done with what was just built this session. 2. Write down what's working and what still needs to be done. 3. Share that with me before we keep going — it'll help us stay on track.", "Where we are with this feature hasn't been thought through."),
   4: form("Pull together the full picture to keep track of: the limits you're working within, the things you assumed but haven't confirmed, and the thread from the original goal to now — so nothing quietly slips.", 'Beyond a recap: the constraints, unconfirmed assumptions, and goal-to-now thread tracked.'),
   5: form('Write a short note to keep track of the session: the decisions made, where things stand, the open limits and assumptions, and the next two or three steps — the anchor for the rest of the session.', 'A durable note tracking the decisions, state, and next steps.'),

@@ -1,6 +1,21 @@
 import type { SessionState, AbsenceFlag, UserProfile } from './types.js';
 import { SIGNAL_MAP } from './signals.js';
 import { STAGE_CONFIRM_THRESHOLD } from './SessionStateManager.js';
+import { MISTAKE_CATEGORIES, type RuntimeContext } from './mistake-categories.js';
+
+// The 6 new §4.E2 absence signals fire on their mistake-category detect() reading the live
+// RuntimeContext (behavioural streaks + the AR-10 probe) — NOT the generic keyword-absence gate.
+// Their SignalDefinition.key equals the mistake-category name; look the category up to call detect().
+const REGISTRY_DETECTED_KEYS = [
+  'secret_in_prompt', 'no_version_control', 'no_backup_safety',
+  'no_separate_envs', 'no_automated_security_scanning', 'frustration_spiral',
+  'coding_agent_mode_mismatch', 'agent_mode_too_restricted',
+] as const;
+const REGISTRY_DETECTED_BY_KEY = new Map(
+  MISTAKE_CATEGORIES
+    .filter((c) => (REGISTRY_DETECTED_KEYS as readonly string[]).includes(c.name))
+    .map((c) => [c.name, c] as const),
+);
 
 // ── Phase 7 F1 custom detection constants ─────────────────────────────────────
 
@@ -101,6 +116,7 @@ export function detectAbsenceFlags(
   projectType?:        string,
   thresholdMultiplier = 1.0,
   absenceMinFloor     = 5,
+  runtimeContext:      RuntimeContext = {},
 ): AbsenceFlag[] {
   const { currentStage, stageConfidence, promptsInCurrentStage, promptCount } = state;
 
@@ -110,8 +126,11 @@ export function detectAbsenceFlags(
   const isVibeProfile    = profile?.nature === 'beginner' || profile?.nature === 'cool_geek';
   const profileMultiplier = isVibeProfile ? 0.5 : 1.0;
 
-  // Gate 2 — must have been in this stage long enough before checking
-  if (promptsInCurrentStage < absenceMinFloor) return [];
+  // Gate 2 — the in-stage accumulation floor is enforced PER-SIGNAL at gate 3 (below), not as a
+  // blanket early return: immediate-fire signals skip the floor, so the detector must still be
+  // entered before the stage has accumulated `absenceMinFloor` prompts. Non-immediate signals stay
+  // gated — gate 3's effectiveThreshold is always >= absenceMinFloor, so nothing the old early
+  // return blocked can slip through.
 
   const newFlags: AbsenceFlag[] = [];
 
@@ -129,9 +148,14 @@ export function detectAbsenceFlags(
     // Role gate — Dim2 signals: fire only when profile.role matches
     if (sig.role && sig.role !== profile?.role) continue;
 
-    // Gate 3 — per-signal threshold with profile multiplier and global frequency multiplier
-    const effectiveThreshold = Math.max(absenceMinFloor, Math.ceil(sig.absenceThreshold * profileMultiplier * thresholdMultiplier));
-    if (promptsInCurrentStage < effectiveThreshold) continue;
+    // Gate 3 — per-signal threshold with profile multiplier and global frequency multiplier.
+    // Immediate-fire signals skip this in-stage accumulation floor: they fire on first confident
+    // detection (their own detector is confidence-gated), still bounded by the cooldown below +
+    // the once-per-session dedup downstream.
+    if (!sig.immediateFire) {
+      const effectiveThreshold = Math.max(absenceMinFloor, Math.ceil(sig.absenceThreshold * profileMultiplier * thresholdMultiplier));
+      if (promptsInCurrentStage < effectiveThreshold) continue;
+    }
 
     // Custom detection gates — F1 signals use streak/velocity/domain-bucket logic; three signals add semantic preconditions
     if (sig.key === 'decision_fatigue_pattern') {
@@ -160,6 +184,10 @@ export function detectAbsenceFlags(
       if (promptCount < MIN_CONTEXT_LOSS_PROMPTS) continue;
       const counter = state.signalCounters[sig.key];
       if (!counter || counter.lastSeenAt !== null) continue;
+    } else if (REGISTRY_DETECTED_BY_KEY.has(sig.key)) {
+      // §4.E2 registry-detected signal — fire ONLY on its real condition (the mistake-category
+      // detect() reading the live RuntimeContext), never on the generic keyword-absence path.
+      if (REGISTRY_DETECTED_BY_KEY.get(sig.key)!.detect(state.promptHistory, runtimeContext) < 1) continue;
     } else {
       // Standard gate — signal never detected?
       const counter = state.signalCounters[sig.key];

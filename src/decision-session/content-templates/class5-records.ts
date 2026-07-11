@@ -22,6 +22,9 @@ import {
   FOCUS_DRIFT_DETECTION_BEGINNER_OVERRIDE, SESSION_LENGTH_CHECKPOINT_BEGINNER_OVERRIDE,
   PROGRESS_CONSOLIDATION_GAP_BEGINNER_OVERRIDE,
 } from './class5-records-beginner.js';
+import {
+  CONTEXT_LOSS_FOUNDER_OVERRIDE, CONTEXT_LOSS_INDIE_HACKER_OVERRIDE, CONTEXT_LOSS_PM_OVERRIDE,
+} from './context-loss-role-overrides.js';
 
 function form(option: string, whyDesc: string): LevelForm {
   return { kind: 'slot-variant', cell: { option, whyDesc } };
@@ -64,15 +67,22 @@ export const ABSENCE_NO_PUSHBACK_RECORD: ContentTemplateRecord = {
   },
 };
 
-/** ABSENCE_CONTEXT_LOSS — recap session state, keyword "state". Produces a written note. */
+/** ABSENCE_CONTEXT_LOSS — reconstruct the session's constraint/assumption/decision-thread, keyword "decision". Produces a written note. */
 export const ABSENCE_CONTEXT_LOSS_RECORD: ContentTemplateRecord = {
   signalType: 'ABSENCE_CONTEXT_LOSS', source: 'shipped', schemaVersion: 1, slots: [],
   registerOverrides: { beginner: CONTEXT_LOSS_BEGINNER_OVERRIDE },
+  // B11: role-tailored variants the register-only engine could not serve before (the B6 guard kept
+  // them static). Served by role → register → base; supersedes the frozen context-loss-role-variants.ts.
+  roleOverrides: {
+    founder:      CONTEXT_LOSS_FOUNDER_OVERRIDE,
+    indie_hacker: CONTEXT_LOSS_INDIE_HACKER_OVERRIDE,
+    pm:           CONTEXT_LOSS_PM_OVERRIDE,
+  },
   paramAxes: SESSION_QUALITY_PARAM_AXES,
   levelForms: {
-    1: form("Note the current state of what was just built in one line before continuing — what is done and what is next.", "The lightest state recap: one line on done-and-next."),
-    2: form("Summarize the working state of this session: the main decisions made and what remains, as a quick re-anchor.", "A light state summary: the main decisions and what remains."),
-    3: form("Summarize the current state of what was just built: what decisions have been made, what is working, what remains incomplete, and what has changed since the session started — use this as a re-anchor before continuing.", "Active constraints, assumptions, and decision-thread for this session haven't been reconstructed — silent compounding of forgotten context could distort follow-on decisions."),
+    1: form("Note the single most important decision and constraint from this session in one line before continuing — what was decided and what the next step now depends on.", "The lightest recap: one line on the key decision and what depends on it."),
+    2: form("Summarize the decisions made this session and the constraints they set — the main ones and what still depends on them, as a quick re-anchor.", "A light summary: the main decisions and the constraints they set."),
+    3: form("Reconstruct the constraints, assumptions, and decision-thread for this session: list every constraint that was decided, every assumption baked in, and every decision the next step depends on — these need to be explicit and carried forward before continuing.", "Active constraints, assumptions, and decision-thread for this session haven't been reconstructed — silent compounding of forgotten context could distort follow-on decisions."),
     4: form("Reconstruct the full session state: the constraints in play, the assumptions still unverified, and the decision-thread from the goal to the current work — so nothing silently distorts what comes next.", "Beyond a quick recap: the full state of constraints, assumptions, and decisions reconstructed."),
     5: form("Write a session-state summary note: the decisions made, the working state, the open constraints and assumptions, and the next two or three steps — kept as the re-anchor for the rest of the session.", "A durable session-state note of decisions, constraints, and next steps."),
   },

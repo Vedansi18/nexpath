@@ -33,10 +33,17 @@ import { CLASS6_RECORDS } from './content-templates/class6-records.js';
 import { CLASS7_RECORDS } from './content-templates/class7-records.js';
 import { CLASS8_RECORDS } from './content-templates/class8-records.js';
 import { CLASS9_RECORDS } from './content-templates/class9-records.js';
+import { CLASS_SECURITY_SAFETY_RECORDS } from './content-templates/class-security-safety.js';
+import { CLASS_MOOD_META_RECORDS } from './content-templates/class-mood-meta.js';
+import { CLASS_AGENT_MODE_RECORDS } from './content-templates/class-agent-mode.js';
 
 /**
  * The in-source shipped-preset records the engine resolves at the `shipped` tier.
  * Authored per class (§4.E2 CTA-D1); the build gate + harness operate over the set.
+ *
+ * The 6 new §4.E2 signals (5 security/safety + 1 mood/meta) are registered here (A9), activated
+ * in SIGNAL_DEFINITIONS (A10), and migrated in MIGRATED_SIGNALS (A12) — so the engine serves them
+ * live. The activation gate enforces that no signal is ever activated without served content.
  */
 export const SHIPPED_CONTENT_TEMPLATES: readonly ContentTemplateRecord[] = [
   ...CLASS1_RECORDS,
@@ -48,6 +55,9 @@ export const SHIPPED_CONTENT_TEMPLATES: readonly ContentTemplateRecord[] = [
   ...CLASS7_RECORDS,
   ...CLASS8_RECORDS,
   ...CLASS9_RECORDS,
+  ...CLASS_SECURITY_SAFETY_RECORDS,
+  ...CLASS_MOOD_META_RECORDS,
+  ...CLASS_AGENT_MODE_RECORDS,
 ];
 
 // ── Set schema validation (one gate over the whole registry) ───────────────────

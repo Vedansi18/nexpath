@@ -29,14 +29,14 @@
  *
  * The LLM-backed operations (the simpler-derive and the option/why-desc grounding
  * weave) are INJECTED seams: this module owns the deterministic orchestration and
- * composition; the caller supplies the grounding runtime. With no seam supplied,
- * the engine composes deterministically and fires nothing. `run()` stays dark
- * until the records, the live render-path wiring, and the grounding runtime are
- * in place (a later activation step).
+ * composition; the caller supplies the grounding runtime. With no LLM seam supplied,
+ * the engine composes deterministically (no grounding weave). `run()` itself is LIVE
+ * (§6.1 item 1): it resolves the record and returns a ContentSpec — the async
+ * grounding/compose weave (composeAdvisory) is the downstream live-caller step.
  */
 
 import type OpenAI from 'openai';
-import type { Engine, ContentSpec } from './engine-registry.js';
+import type { Engine, ContentSpec, EngineInput } from './engine-registry.js';
 import {
   validateContentTemplateRecord,
   resolveLevelForm,
@@ -59,13 +59,31 @@ import type { SignalDefinition } from '../classifier/types.js';
 import { SIGNAL_MAP } from '../classifier/signals.js';
 import { deriveSimplerCell, weaveWhyDesc, extractParamsFromPrompts, type ExtractedParam } from './content-template-grounding.js';
 
+/** The content-template engine's `run()` payload: the resolved record + resolution context. */
+export interface ContentTemplateRunPayload {
+  signalType?: string;
+  /** The source-cascade-resolved record, or null (no record → caller falls back to static). */
+  resolved: ResolvedRecord | null;
+  level: MaturityLevel;
+  register?: string;
+}
+
 export const contentTemplateEngine: Engine = {
   name: 'content-template',
   accepts: (polarity) => polarity === 'good_present',
-  run: (): ContentSpec => {
-    throw new Error(
-      'ContentTemplateEngine.run() is not yet wired live — the compositor stages exist, but record content, the render-path intercept, and the grounding runtime are authored/activated separately',
-    );
+  // §6.1 item 1: resolve the record SYNCHRONOUSLY via the injected source-cascade lookup
+  // (the dual-source resolver decides upstream whether this engine is called at all). Returns
+  // a real ContentSpec; the async grounding/compose weave (composeAdvisory) is the downstream
+  // live-caller step. No lookup / no record → resolved:null → the caller falls back to static.
+  run: (input: EngineInput): ContentSpec => {
+    const resolved = input.recordLookup ? resolveRecord(input.recordLookup) : null;
+    const payload: ContentTemplateRunPayload = {
+      signalType: input.signalType,
+      resolved,
+      level: (input.level ?? 1) as MaturityLevel,
+      register: input.register,
+    };
+    return { kind: 'content-template', payload };
   },
 };
 
@@ -106,19 +124,32 @@ export function resolveColumn(record: ContentTemplateRecord, level: MaturityLeve
   return resolveLevelForm(record.levelForms, level);
 }
 
-// ── Register-override branch (§6.1 gate 3 / S6) ─────────────────────────────────
+// ── Register-override branch ────────────────────────────────────────────────────
 
 /**
- * The register-override BRANCH: return the effective levelForms for a target register.
- * A `structurally-divergent` override (e.g. the `_BEGINNER` rewrite) serves its OWN
- * stored forms; a register with no override — or a `vocab-adaptable` one — uses the
- * base forms (the engine adapts vocabulary downstream, no branch). No register → base.
- * Single dispatch: one lookup, base fallback, no boolean-flag accumulation.
+ * The register/role-override BRANCH: return the effective levelForms for a target
+ * register + role. Precedence — role → register → base, with `beginner` EXCLUSIVE:
+ *   1. `beginner` register → its structurally-divergent override (else base); role is
+ *      IGNORED for beginners (the beginner register turns role overrides off).
+ *   2. else a role override (role-tailored content the register can't reproduce) wins.
+ *   3. else a `structurally-divergent` register override; else the base forms (the engine
+ *      adapts vocabulary downstream, no branch).
+ * Single dispatch: ordered lookups, base fallback, no boolean-flag accumulation.
  */
 export function resolveRegisterForms(
   record: ContentTemplateRecord,
   register?: string,
+  role?: string,
 ): ContentTemplateRecord['levelForms'] {
+  if (register === 'beginner') {
+    const beg = record.registerOverrides?.['beginner'];
+    if (beg?.divergence === 'structurally-divergent' && beg.levelForms) return beg.levelForms;
+    return record.levelForms;
+  }
+  if (role) {
+    const roleOverride = record.roleOverrides?.[role];
+    if (roleOverride?.levelForms) return roleOverride.levelForms;
+  }
   const override = register ? record.registerOverrides?.[register] : undefined;
   if (override?.divergence === 'structurally-divergent' && override.levelForms) return override.levelForms;
   return record.levelForms;
@@ -281,13 +312,34 @@ export async function extractPromptFacts(prompts: readonly string[], client?: Op
  * value (e.g. the framework); a boolean capability carries its key (the weave
  * phrases it). Probe tier 'C'→capability / 'P'→corroborated; confidence sets weight.
  */
+/**
+ * Human phrasing for the boolean AR-10 project-fact keys — so a capability grounds as natural
+ * language ("the project has backups"), never the raw snake_case key ("has_backups"), which the
+ * LLM weave would otherwise echo verbatim into the CA-bound why-desc. String facts (e.g.
+ * project_framework) ground with their own value; an unknown boolean key falls back to the key.
+ */
+const ENV_FACT_PHRASE: Readonly<Record<string, string>> = {
+  has_version_control:         'the project is under version control',
+  has_persistent_context_file: 'the project keeps a persistent context/notes file',
+  has_test_runner:             'a test runner is set up',
+  has_ci_pipeline:             'a CI pipeline is set up',
+  has_deploy_config:           'a deployment configuration is present',
+  has_security_scanner:        'a security scanner is set up',
+  has_env_separation:          'the project separates environments (dev/staging/prod)',
+  has_backups:                 'the project has backups',
+  has_lockfile:                'a dependency lockfile is present',
+};
+
 export function envFactsToGrounding(facts: FactMap): GroundingFact[] {
   const out: GroundingFact[] = [];
   for (const [key, f] of Object.entries(facts)) {
     if (f.value === null || f.value === false) continue;
+    // Boolean capability facts ground with a human phrase (never the raw snake_case key);
+    // string facts (e.g. project_framework) ground with their value.
+    const value = typeof f.value === 'string' ? f.value : (ENV_FACT_PHRASE[key] ?? key);
     out.push({
       key,
-      value: typeof f.value === 'string' ? f.value : key,
+      value,
       weight: f.confidence === 'high' ? 1 : 0.5,
       tier: f.tier === 'P' ? 'corroborated' : 'capability',
     });
@@ -442,7 +494,7 @@ export async function deriveLadder(
   l1: readonly OptionEntry[],
   fallback: { l2?: readonly OptionEntry[]; l3?: readonly OptionEntry[] } = {},
   client?: OpenAI,
-  opts: { timeoutMs?: number } = {},
+  opts: { timeoutMs?: number; l2Safeguard?: string } = {},
 ): Promise<DerivedLadder> {
   const l1Out = [...l1];
   const l2 = await deriveSimplerLevel(l1Out, fallback.l2 ?? l1Out, client, opts);
@@ -481,6 +533,8 @@ export interface ComposeAdvisoryInput {
   lengthBudget?: number;
   /** Target register — selects a structurally-divergent override's forms when present (else base). */
   register?: string;
+  /** Target role (founder / indie_hacker / pm) — selects a role override's forms (role → register → base). */
+  role?: string;
 }
 
 export interface ComposedAdvisory {
@@ -488,6 +542,13 @@ export interface ComposedAdvisory {
   level: MaturityLevel;
   option: string;
   whyDesc: string;
+  /**
+   * The sensitive-action safeguard line applied to this advisory (from the record's
+   * l2SafeguardLine, unless overridden). Exposed so the caller can thread it into the
+   * strength-ladder derive — the derived simpler tiers re-append it VERBATIM, keeping
+   * the safeguard on every tier regardless of its phrasing (not reliant on a phrase match).
+   */
+  l2Safeguard?: string;
 }
 
 /**
@@ -503,7 +564,7 @@ export async function composeAdvisory(input: ComposeAdvisoryInput, client?: Open
   if (!resolved) return null;
   // Register-override branch first: serve a structurally-divergent register's own forms
   // (e.g. _BEGINNER) when present, else the base forms.
-  const col = resolveLevelForm(resolveRegisterForms(resolved.record, input.register), input.level);
+  const col = resolveLevelForm(resolveRegisterForms(resolved.record, input.register, input.role), input.level);
   if (!col) return null;
   const option = composeOption({
     cell: col.form.cell, slots: resolved.record.slots, ctx: input.ctx, anchor: input.anchor, lengthBudget: input.lengthBudget,
@@ -512,12 +573,14 @@ export async function composeAdvisory(input: ComposeAdvisoryInput, client?: Open
   // axes this record declares (a no-op when the record declares all axes; narrows when
   // it declares a subset). Unattributable facts pass through.
   const facts = filterFactsByAxes(input.facts ?? [], resolved.record.paramAxes);
+  // Auto-source the sensitive-action safeguard from the record so the live wiring
+  // can never forget it: a flagged record's l2SafeguardLine is always applied (the
+  // explicit input wins only if a caller overrides it). Returned on the advisory so the
+  // caller threads it through the strength-ladder derive (verbatim re-append per tier).
+  const l2Safeguard = input.l2Safeguard ?? resolved.record.l2SafeguardLine;
   const whyDesc = await groundWhyDescLive({
     cell: col.form.cell, slots: resolved.record.slots, ctx: input.ctx, facts, factCap: input.factCap,
-    // Auto-source the sensitive-action safeguard from the record so the live wiring
-    // can never forget it: a flagged record's l2SafeguardLine is always applied (the
-    // explicit input wins only if a caller overrides it).
-    l2Safeguard: input.l2Safeguard ?? resolved.record.l2SafeguardLine,
+    l2Safeguard,
   }, client);
-  return { source: resolved.source, level: col.level, option, whyDesc };
+  return { source: resolved.source, level: col.level, option, whyDesc, l2Safeguard };
 }

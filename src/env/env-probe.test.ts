@@ -115,7 +115,7 @@ describe('probeProject', () => {
     for (const d of dirs) rmSync(d, { recursive: true, force: true });
   });
 
-  it('emits all 9 project keys, every fact Tier-C with the given detectedAt', () => {
+  it('emits all 10 project keys, every fact Tier-C with the given detectedAt', () => {
     const { facts } = probeProject(mkProject(), NOW);
     expect(Object.keys(facts).sort()).toEqual([...PROJECT_FACT_KEYS].sort());
     for (const k of PROJECT_FACT_KEYS) {
@@ -155,6 +155,26 @@ describe('probeProject', () => {
     expect(facts.has_ci_pipeline.value).toBe(true);
     expect(facts.has_security_scanner.value).toBe(true);
     expect(facts.has_test_runner.value).toBe(true);
+  });
+
+  it('detects has_backups from a git remote, a backup dir, or a backup script', () => {
+    const remoteRoot = mkProject();
+    mkdirSync(join(remoteRoot, '.git'), { recursive: true });
+    writeFileSync(join(remoteRoot, '.git', 'config'), '[remote "origin"]\n\turl = git@example.com:me/app.git\n');
+    expect(probeProject(remoteRoot, NOW).facts.has_backups.value).toBe(true);
+
+    const dirRoot = mkProject();
+    mkdirSync(join(dirRoot, 'backups'), { recursive: true });
+    writeFileSync(join(dirRoot, 'backups', 'snap.tar'), 'x');
+    expect(probeProject(dirRoot, NOW).facts.has_backups.value).toBe(true);
+
+    const scriptRoot = mkProject();
+    writeFileSync(join(scriptRoot, 'package.json'), JSON.stringify({ scripts: { backup: 'restic backup .' } }));
+    expect(probeProject(scriptRoot, NOW).facts.has_backups.value).toBe(true);
+  });
+
+  it('has_backups is false with no remote, backup dir, or script', () => {
+    expect(probeProject(mkProject(), NOW).facts.has_backups.value).toBe(false);
   });
 
   it('detects a test runner from a real test script, but not the npm placeholder', () => {

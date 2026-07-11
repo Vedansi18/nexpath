@@ -10,13 +10,6 @@ import {
   reviewRecord, checkVoice, checkEscalation, checkL2Safeguard, findVoiceViolations, findJargonViolations,
 } from '../content-authoring-rules.js';
 import { composeWhyDesc } from '../content-template-engine.js';
-import {
-  ABSENCE_DECISION_RECORD_ABSENCE_FORMAL, ABSENCE_OVER_ENGINEERING_CHECK_FORMAL, ABSENCE_PAIR_REVIEW_ABSENCE_FORMAL,
-  ABSENCE_OBSERVABILITY_FIRST_FORMAL, ABSENCE_FAILURE_MODE_ANALYSIS_FORMAL, ABSENCE_CONTRACT_TESTING_GAP_FORMAL,
-  ABSENCE_CAPACITY_PLANNING_GAP_FORMAL, ABSENCE_SECURITY_THREAT_MODELING_FORMAL, ABSENCE_DATABASE_MIGRATION_SAFETY_FORMAL,
-  ABSENCE_DEPLOYMENT_STRATEGY_ABSENCE_FORMAL, ABSENCE_OPERATIONAL_RUNBOOK_GAP_FORMAL, ABSENCE_SLO_DEFINITION_GAP_FORMAL,
-} from './class9-academic-hardcore-pro.js';
-import type { DecisionContent } from '../options.js';
 
 /** signalType → its own keyword (plain word, not the jargon label — kept in every option + authored why-desc). */
 const KEYWORDS: Record<string, string> = {
@@ -32,22 +25,6 @@ const KEYWORDS: Record<string, string> = {
   ABSENCE_DEPLOYMENT_STRATEGY_ABSENCE: 'rollback',
   ABSENCE_OPERATIONAL_RUNBOOK_GAP: 'runbook',
   ABSENCE_SLO_DEFINITION_GAP: 'slo',
-};
-
-/** signalType → the frozen DecisionContent whose L1[0] is the col-3 anchor (formal-only single register). */
-const FROZEN: Record<string, DecisionContent> = {
-  ABSENCE_DECISION_RECORD_ABSENCE: ABSENCE_DECISION_RECORD_ABSENCE_FORMAL,
-  ABSENCE_OVER_ENGINEERING_CHECK: ABSENCE_OVER_ENGINEERING_CHECK_FORMAL,
-  ABSENCE_PAIR_REVIEW_ABSENCE: ABSENCE_PAIR_REVIEW_ABSENCE_FORMAL,
-  ABSENCE_OBSERVABILITY_FIRST: ABSENCE_OBSERVABILITY_FIRST_FORMAL,
-  ABSENCE_FAILURE_MODE_ANALYSIS: ABSENCE_FAILURE_MODE_ANALYSIS_FORMAL,
-  ABSENCE_CONTRACT_TESTING_GAP: ABSENCE_CONTRACT_TESTING_GAP_FORMAL,
-  ABSENCE_CAPACITY_PLANNING_GAP: ABSENCE_CAPACITY_PLANNING_GAP_FORMAL,
-  ABSENCE_SECURITY_THREAT_MODELING: ABSENCE_SECURITY_THREAT_MODELING_FORMAL,
-  ABSENCE_DATABASE_MIGRATION_SAFETY: ABSENCE_DATABASE_MIGRATION_SAFETY_FORMAL,
-  ABSENCE_DEPLOYMENT_STRATEGY_ABSENCE: ABSENCE_DEPLOYMENT_STRATEGY_ABSENCE_FORMAL,
-  ABSENCE_OPERATIONAL_RUNBOOK_GAP: ABSENCE_OPERATIONAL_RUNBOOK_GAP_FORMAL,
-  ABSENCE_SLO_DEFINITION_GAP: ABSENCE_SLO_DEFINITION_GAP_FORMAL,
 };
 
 /** Author-declared practice-richness weights (escalation input; named-practice judgment is human-review). */
@@ -90,13 +67,6 @@ describe('class-9 — per-record full-depth gates', () => {
         expect(jargon).toEqual({});
         expect(review.headlineOnly.ok).toBe(true);
         expect(review.coverage.ok).toBe(true);
-      });
-
-      it('column 3 is the frozen shipped text verbatim (option + a real frozen core line)', () => {
-        const frozen = FROZEN[r.signalType];
-        const col3 = r.levelForms[3]!.cell;
-        expect(col3.option).toBe(frozen.L1[0].option);
-        expect(frozen.L1[0].descBase).toContain(col3.whyDesc);
       });
 
       it('keeps its keyword in every option and every authored why-desc (col-3 frozen core exempt)', () => {
@@ -201,28 +171,6 @@ describe('class-9 — sensitive-action safeguard (six intrinsically-sensitive si
     const others = CLASS9_RECORDS.filter((r) => !exempt.has(r.signalType));
     expect(others.filter((r) => r.l2SafeguardRequired).map((r) => r.signalType)).toEqual([]);
     expect(others.filter((r) => !checkL2Safeguard(r).ok).map((r) => r.signalType)).toEqual([]);
-  });
-});
-
-describe('class-9 — sensitivity parity vs the frozen source of truth', () => {
-  const HERE = dirname(fileURLToPath(import.meta.url));
-  function frozenFlaggedSignals(): Set<string> {
-    const src = readFileSync(join(HERE, 'class9-academic-hardcore-pro.ts'), 'utf-8');
-    const blocks = src.split(/export const \w+: DecisionContent =/).slice(1);
-    const flagged = new Set<string>();
-    for (const b of blocks) {
-      const body = b.split('export const')[0];
-      const m = body.match(/signalType:\s*"(\w+)"/);
-      if (m && /l2SafeguardRequired:\s*true/.test(body)) flagged.add(m[1]);
-    }
-    return flagged;
-  }
-
-  it('every frozen-flagged class-9 signal has its content-template record flagged', () => {
-    const frozenFlagged = frozenFlaggedSignals();
-    expect(frozenFlagged.size).toBe(6); // not vacuous; the six sensitive signals
-    const recordFlagged = new Set(CLASS9_RECORDS.filter((r) => r.l2SafeguardRequired).map((r) => r.signalType));
-    expect([...frozenFlagged].filter((s) => !recordFlagged.has(s))).toEqual([]);
   });
 });
 

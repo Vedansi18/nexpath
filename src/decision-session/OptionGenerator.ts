@@ -376,7 +376,12 @@ Input:  {"l1":["Set up the feedback loop for this feature: what signals tell you
 Feature noun: "invoice reminder"
 Output: {"l1":["Set up the feedback loop for the invoice reminder: what signals tell you it is working?","What are the top 3 signals to watch for the invoice reminder in the first 24 hours?"],"l2":["Is there a signal that would tell you if the invoice reminder breaks silently in production?"],"l3":["What is the most important thing to monitor for the invoice reminder?"]}
 
-Example 5 — no standard target phrase in any option — embed the feature noun at the most appropriate place with minimal rewrite:
+Example 5 — "this phase" / "this service" / "this boundary" grounded like the other generic phrases (one replacement per option):
+Input:  {"l1":["Add contract tests for this service before moving on.","Check the integration coverage of this phase."],"l2":["What breaks at this boundary under load?"],"l3":["Is this service safe to depend on yet?"]}
+Feature noun: "auth service"
+Output: {"l1":["Add contract tests for the auth service before moving on.","Check the integration coverage of the auth service."],"l2":["What breaks at the auth service boundary under load?"],"l3":["Is the auth service safe to depend on yet?"]}
+
+Example 6 — no standard target phrase in any option — embed the feature noun at the most appropriate place with minimal rewrite:
 Input:  {"l1":[["Check that everything still works — go through the main things before we ship.","Share the results before releasing.","Is there anything that could go wrong once it's live?"],"Check if this is ready to go live."],"l2":["What is the biggest risk in shipping this right now?"],"l3":["Is there anything that could break once it's live?"]}
 Feature noun: "login"
 Output: {"l1":[["Check that login is still working — go through the main things before we ship.","Share the results before releasing.","Is there anything about login that could go wrong once it's live?"],"Check if login is ready to go live."],"l2":["What is the biggest risk in shipping login right now?"],"l3":["Is there anything about login that could break once it's live?"]}

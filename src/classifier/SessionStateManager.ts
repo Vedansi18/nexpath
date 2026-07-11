@@ -5,6 +5,11 @@ import type { SessionState, Stage, PromptRecord, ClassificationResult, UserProfi
 import { detectSignalsByChannel, initialSignalCounters } from './signals.js';
 import { buildSafeDefaults } from './LLMProfileClassifier.js';
 import { getProject } from '../store/projects.js';
+import { loadRightGoodProfile } from './right-good-aggregator.js';
+import { seedProjectMaturity, updateProjectMaturity } from './maturity-level.js';
+import { getUserDepthLevel } from '../store/user-depth-level.js';
+import { deleteAutogenRecordsForProject } from '../store/content-templates.js';
+import { markAutogenRefresh, selectionComputed } from '../decision-session/auto-template-generator.js';
 import type { StreamBPresenceResult } from './StreamBPresenceClassifier.js';
 import { appendParamEvents, type ParamEventChannel } from '../telemetry/param-events.js';
 
@@ -76,6 +81,8 @@ function newSession(projectRoot: string, now: number): SessionState {
     lastAdvisoryPromptIndex:      -1,
     advisoryCount:                0,
     consecutiveAcceptanceStreak:  0,
+    consecutiveFrustratedPrompts: 0,
+    currentAgentMode:             undefined,
   };
 }
 
@@ -93,6 +100,33 @@ export class SessionStateManager {
   }
 
   /**
+   * Fold one graduation observation for a just-ended session into the persisted
+   * maturity level. The depth level is read + updated once per session and
+   * graduates on months-scale behavioural stability (+1 via the stability
+   * counter, −1 via hysteresis); it reads the cumulative RIGHT&GOOD profile so
+   * the score survives the prompt / param-event pruning. No-op for an empty session.
+   */
+  private static foldEndedSessionMaturity(store: Store, ended: SessionState, now: number): void {
+    if (ended.promptCount <= 0) return;
+    const before = getUserDepthLevel(store, ended.projectRoot)?.currentLevel;
+    const after = updateProjectMaturity(store, ended.projectRoot, loadRightGoodProfile(store, ended.projectRoot), {
+      nature:      ended.profile?.nature,
+      projectType: getProject(store, ended.projectRoot)?.projectType ?? null,
+    }, now).currentLevel;
+    if (before !== undefined && after !== before) {
+      // Maturity graduated — the per-user records were generated for the old
+      // column; drop them so they regenerate at the new level on the next fire, and
+      // flag a refresh so the next fire re-ranks the current selection at the new
+      // level (dropping any topic no longer distinctive there). Only flag when a
+      // selection already exists — if none has been computed yet, the upcoming
+      // bootstrap ranking already runs at the new level, so a flag would just force
+      // a redundant re-rank right after it.
+      deleteAutogenRecordsForProject(store, ended.projectRoot);
+      if (selectionComputed(store, ended.projectRoot)) markAutogenRefresh(store, ended.projectRoot);
+    }
+  }
+
+  /**
    * Load or create session state for a project.
    * Resets to a new session if the last prompt was > SESSION_GAP_MS ago.
    */
@@ -101,6 +135,9 @@ export class SessionStateManager {
     if (persisted && now - persisted.lastPromptAt < SESSION_GAP_MS) {
       return new SessionStateManager(persisted);
     }
+    // New session after an inactivity gap — fold the ended session's observation
+    // into the maturity graduation before resetting to the fresh session.
+    if (persisted) this.foldEndedSessionMaturity(store, persisted, now);
     // New session — restore detected_language from projects table so it survives the gap
     const fresh = newSession(projectRoot, now);
     fresh.detectedLanguage = getProject(store, projectRoot)?.detectedLanguage ?? undefined;
@@ -122,6 +159,9 @@ export class SessionStateManager {
 
     // ── Gap reset check ──────────────────────────────────────────────────────
     if (s.promptCount > 0 && now - s.lastPromptAt >= SESSION_GAP_MS) {
+      // A session ended (inactivity gap) within this long-lived manager — fold its
+      // observation into the maturity graduation before resetting.
+      SessionStateManager.foldEndedSessionMaturity(store, s, now);
       // Increment windowsSinceLastSeen for all signals that were absent before reset
       for (const counter of Object.values(s.signalCounters)) {
         if (counter.lastSeenAt === null) counter.windowsSinceLastSeen += 1;
@@ -250,6 +290,15 @@ export class SessionStateManager {
       s.consecutiveAcceptanceStreak = (s.consecutiveAcceptanceStreak ?? 0) + 1;
     }
 
+    // ── Consecutive frustrated-mood streak (frustration-spiral detector input) ──
+    // The mood is LLM-classified onto s.profile (setProfile, before processPrompt);
+    // this rolling count is what the ABSENCE_FRUSTRATION_SPIRAL detector reads.
+    if (s.profile?.mood === 'frustrated') {
+      s.consecutiveFrustratedPrompts = (s.consecutiveFrustratedPrompts ?? 0) + 1;
+    } else {
+      s.consecutiveFrustratedPrompts = 0;
+    }
+
     // ── Advance counter ───────────────────────────────────────────────────────
     s.promptCount   += 1;
     s.lastPromptAt   = now;
@@ -304,6 +353,16 @@ export class SessionStateManager {
   }
 
   /**
+   * Record the coding-agent's current mode reported by the hook, when present.
+   * Sticky: a prompt with no mode keeps the last-known value, so it is never cleared
+   * back to undefined by a subsequent modeless prompt. In-memory only — persisted by
+   * the next processPrompt() call, like setProfile().
+   */
+  setAgentMode(mode: string | undefined): void {
+    if (mode !== undefined) this.state.currentAgentMode = mode;
+  }
+
+  /**
    * Record that a decision session fired for the given event key.
    * Persists to the store so restarts within the same session don't re-fire.
    */
@@ -332,9 +391,10 @@ export class SessionStateManager {
   }
 
   /**
-   * Feed Stage 2 signal assessments back into signal counters.
-   * Called in auto.ts after runStage2 confirms an advisory, before Step 8 dedup write.
-   * Only updates keys that exist in signalCounters — unknown LLM-returned keys are ignored.
+   * Feed the classifier's signal assessments back into signal counters.
+   * Called in auto.ts after the classifier's fire assessment confirms an advisory,
+   * before the Step-8 dedup write. Only updates keys that exist in signalCounters —
+   * unknown model-returned keys are ignored.
    */
   applyStage2SignalUpdates(store: Store, signalsPresent: string[]): void {
     const s = this.state;
@@ -381,11 +441,21 @@ export class SessionStateManager {
     state.promptCount   = totalImported;
     state.lastPromptAt  = now;
     state.profile       = buildSafeDefaults(totalImported);
-    state.detectedLanguage =
-      getProject(store, projectRoot)?.detectedLanguage ?? undefined;
+    const project = getProject(store, projectRoot);
+    state.detectedLanguage = project?.detectedLanguage ?? undefined;
     // Conservative: start absence detection from the first real prompt after
     // bootstrap rather than estimating time-in-stage from imported history.
     state.promptsInCurrentStage = 0;
+
+    // Seed the longitudinal maturity column from the imported history at bootstrap.
+    // The workflow-pattern (RIGHT&GOOD) profile and the work-style traits are
+    // derived on demand from the param-events written during import, so they need
+    // no separate seed; the maturity column is the one PERSISTED value, seeded
+    // here directly from the import-derived RIGHT&GOOD profile.
+    seedProjectMaturity(store, projectRoot, loadRightGoodProfile(store, projectRoot), {
+      nature:      state.profile.nature,
+      projectType: project?.projectType ?? null,
+    });
 
     saveState(store, state);
   }

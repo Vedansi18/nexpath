@@ -5,14 +5,6 @@ import { resolveRegisterForms, composeAdvisory, type RecordCandidateLookup } fro
 import { reviewRecord, checkVoice, checkEscalation, checkL2Safeguard } from '../content-authoring-rules.js';
 import { checkTopicKeyword, checkOptionLengthBudget } from '../content-template-tooling.js';
 import { validateContentTemplateRecord, type ContentTemplateRecord } from '../content-template-schema.js';
-import {
-  ABSENCE_PHASE_TRANSITION_BEGINNER, ABSENCE_IDEA_SCOPING_BEGINNER, ABSENCE_IDEA_CONSTRAINT_CHECK_BEGINNER,
-  ABSENCE_IDEA_USER_DEFINITION_BEGINNER, ABSENCE_TASK_ORDERING_BEGINNER, ABSENCE_TASK_SIZING_BEGINNER,
-  ABSENCE_TASK_DEFINITION_OF_DONE_BEGINNER, ABSENCE_USER_FEEDBACK_REVIEW_BEGINNER,
-  ABSENCE_ITERATION_PLANNING_BEGINNER, ABSENCE_SCOPE_CREEP_BEGINNER, ABSENCE_FEATURE_SCOPE_BEGINNER,
-  ABSENCE_IMPLEMENTATION_CHECKPOINT_BEGINNER, ABSENCE_SPEC_BEFORE_CODE_BEGINNER, ABSENCE_INCREMENTAL_BUILD_BEGINNER,
-} from './class6-planning-idea-task.js';
-import type { DecisionContent } from '../options.js';
 
 function mockClient(reply: string): OpenAI {
   return { chat: { completions: { create: async () => ({ choices: [{ message: { content: reply } }] }) } } } as unknown as OpenAI;
@@ -37,23 +29,6 @@ const BEGINNER_KEYWORD: Record<string, string> = {
   ABSENCE_IMPLEMENTATION_CHECKPOINT: 'work',
   ABSENCE_SPEC_BEFORE_CODE: 'code',
   ABSENCE_INCREMENTAL_BUILD: 'test',
-};
-
-const FROZEN_BEGINNER: Record<string, DecisionContent> = {
-  ABSENCE_PHASE_TRANSITION: ABSENCE_PHASE_TRANSITION_BEGINNER,
-  ABSENCE_IDEA_SCOPING: ABSENCE_IDEA_SCOPING_BEGINNER,
-  ABSENCE_IDEA_CONSTRAINT_CHECK: ABSENCE_IDEA_CONSTRAINT_CHECK_BEGINNER,
-  ABSENCE_IDEA_USER_DEFINITION: ABSENCE_IDEA_USER_DEFINITION_BEGINNER,
-  ABSENCE_TASK_ORDERING: ABSENCE_TASK_ORDERING_BEGINNER,
-  ABSENCE_TASK_SIZING: ABSENCE_TASK_SIZING_BEGINNER,
-  ABSENCE_TASK_DEFINITION_OF_DONE: ABSENCE_TASK_DEFINITION_OF_DONE_BEGINNER,
-  ABSENCE_USER_FEEDBACK_REVIEW: ABSENCE_USER_FEEDBACK_REVIEW_BEGINNER,
-  ABSENCE_ITERATION_PLANNING: ABSENCE_ITERATION_PLANNING_BEGINNER,
-  ABSENCE_SCOPE_CREEP: ABSENCE_SCOPE_CREEP_BEGINNER,
-  ABSENCE_FEATURE_SCOPE: ABSENCE_FEATURE_SCOPE_BEGINNER,
-  ABSENCE_IMPLEMENTATION_CHECKPOINT: ABSENCE_IMPLEMENTATION_CHECKPOINT_BEGINNER,
-  ABSENCE_SPEC_BEFORE_CODE: ABSENCE_SPEC_BEFORE_CODE_BEGINNER,
-  ABSENCE_INCREMENTAL_BUILD: ABSENCE_INCREMENTAL_BUILD_BEGINNER,
 };
 
 /** The two verification cadences stay behavioural at col-5; the other twelve yield a file. */
@@ -84,13 +59,6 @@ describe('class-6 beginner overrides — per-variant T1-variant gates', () => {
       it('is a schema-valid, all-5-column, floored ladder', () => {
         expect(validateContentTemplateRecord(synth).ok).toBe(true);
         expect(Object.keys(synth.levelForms).map(Number).sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5]);
-      });
-
-      it('column 3 is the frozen beginner shipped text verbatim (option + a real frozen core line)', () => {
-        const frozen = FROZEN_BEGINNER[r.signalType];
-        const col3 = synth.levelForms[3]!.cell;
-        expect(col3.option).toBe(frozen.L1[0].option);
-        expect(frozen.L1[0].descBase).toContain(col3.whyDesc);
       });
 
       it('keeps its own beginner keyword in every option and every authored why-desc (col-3 frozen core exempt)', () => {

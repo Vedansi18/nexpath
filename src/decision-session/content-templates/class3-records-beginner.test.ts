@@ -5,12 +5,6 @@ import { resolveRegisterForms, composeAdvisory, type RecordCandidateLookup } fro
 import { reviewRecord, checkVoice, checkEscalation, checkL2Safeguard } from '../content-authoring-rules.js';
 import { checkTopicKeyword, checkOptionLengthBudget } from '../content-template-tooling.js';
 import { validateContentTemplateRecord, type ContentTemplateRecord } from '../content-template-schema.js';
-import {
-  ABSENCE_ALTERNATIVES_BEGINNER, ABSENCE_API_DESIGN_REVIEW_BEGINNER, ABSENCE_ARCH_CONFLICT_BEGINNER,
-  ABSENCE_CROSS_CONFIRMING_BEGINNER, ABSENCE_PROMPT_CONTEXT_BEGINNER, ABSENCE_SPEC_ACCEPTANCE_BEGINNER,
-  ABSENCE_SPEC_CROSS_CONFIRM_BEGINNER, ABSENCE_SPEC_REVISION_BEGINNER,
-} from './class3-spec-architecture.js';
-import type { DecisionContent } from '../options.js';
 
 function mockClient(reply: string): OpenAI {
   return { chat: { completions: { create: async () => ({ choices: [{ message: { content: reply } }] }) } } } as unknown as OpenAI;
@@ -28,17 +22,6 @@ const BEGINNER_KEYWORD: Record<string, string> = {
   ABSENCE_SPEC_ACCEPTANCE: 'plan',
   ABSENCE_SPEC_CROSS_CONFIRM: 'spec',
   ABSENCE_SPEC_REVISION: 'spec',
-};
-
-const FROZEN_BEGINNER: Record<string, DecisionContent> = {
-  ABSENCE_ALTERNATIVES: ABSENCE_ALTERNATIVES_BEGINNER,
-  ABSENCE_API_DESIGN_REVIEW: ABSENCE_API_DESIGN_REVIEW_BEGINNER,
-  ABSENCE_ARCH_CONFLICT: ABSENCE_ARCH_CONFLICT_BEGINNER,
-  ABSENCE_CROSS_CONFIRMING: ABSENCE_CROSS_CONFIRMING_BEGINNER,
-  ABSENCE_PROMPT_CONTEXT: ABSENCE_PROMPT_CONTEXT_BEGINNER,
-  ABSENCE_SPEC_ACCEPTANCE: ABSENCE_SPEC_ACCEPTANCE_BEGINNER,
-  ABSENCE_SPEC_CROSS_CONFIRM: ABSENCE_SPEC_CROSS_CONFIRM_BEGINNER,
-  ABSENCE_SPEC_REVISION: ABSENCE_SPEC_REVISION_BEGINNER,
 };
 
 const WITH_OVERRIDE = Object.keys(BEGINNER_KEYWORD);
@@ -80,13 +63,6 @@ describe('class-3 beginner overrides — per-variant T1-variant gates', () => {
       it('is a schema-valid, all-5-column, floored ladder', () => {
         expect(validateContentTemplateRecord(synth).ok).toBe(true);
         expect(Object.keys(synth.levelForms).map(Number).sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5]);
-      });
-
-      it('column 3 is the frozen beginner shipped text verbatim (option + a real frozen core line)', () => {
-        const frozen = FROZEN_BEGINNER[r.signalType];
-        const col3 = synth.levelForms[3]!.cell;
-        expect(col3.option).toBe(frozen.L1[0].option);
-        expect(frozen.L1[0].descBase).toContain(col3.whyDesc);
       });
 
       it('keeps its own beginner keyword in every option and every authored why-desc (col-3 frozen core exempt)', () => {

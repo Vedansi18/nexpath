@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS projects (
   decision_session_count INTEGER NOT NULL DEFAULT 0,
   env_facts              TEXT,
   env_facts_detected_at  INTEGER,
+  env_trajectory         TEXT,
   created_at             INTEGER NOT NULL
 );
 
@@ -144,6 +145,7 @@ export function applyIncrementalMigrations(db: Database): void {
   // v0.1.1 — dev-environment probe
   addIfMissing('projects', 'env_facts',             'TEXT');
   addIfMissing('projects', 'env_facts_detected_at', 'INTEGER');
+  addIfMissing('projects', 'env_trajectory',        'TEXT');
 }
 
 /**
@@ -178,4 +180,5 @@ export function runMigrations(db: Database): void {
   // v0.1.1 — dev-environment probe
   addIfMissing('projects', 'env_facts',             'TEXT');
   addIfMissing('projects', 'env_facts_detected_at', 'INTEGER');
+  addIfMissing('projects', 'env_trajectory',        'TEXT');
 }

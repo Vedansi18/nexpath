@@ -17,16 +17,18 @@
  * (b) behavioral telemetry, and the AR-10 dev-environment probe (Channel Y, shipped).
  * Categories whose detection needs a channel-reader that is NOT shipped yet carry a
  * `requiresChannel` marker and a dark detector (returns 0) until that reader lands —
- * this SEQUENCES a category to its channel; it is not a permanent block. The unshipped
- * channels are: 'X' (agent-output / transcript diff reader — undesigned, expansion Task 7),
- * 'M' (coding-agent mode — ships with AR-10 B2 / Phase 3), and 'c' (LLM-presence semantic
- * extension of the Stream-B classifier). Categories on (a)/(b)/(Y) carry a real detector
+ * this SEQUENCES a category to its channel; it is not a permanent block. The still-gated
+ * channels are: 'X' (agent-output / transcript diff reader — undesigned, expansion Task 7)
+ * and 'c' (LLM-presence semantic extension of the Stream-B classifier). The coding-agent-mode
+ * reader ('M') has shipped and its two mode-mismatch categories are now live and served, so
+ * they carry a real detector and no `requiresChannel`. Categories on (a)/(b)/(Y) carry a real detector
  * and no `requiresChannel`. The full §4.E2 content for any genuinely-new `ABSENCE_*`
  * signal is authored separately; the registry ships dark.
  */
 
-import type { PromptRecord } from './types.js';
+import type { PromptRecord, Stage } from './types.js';
 import type { ParamPolarity } from '../decision-session/engine-registry.js';
+import { detectExecuteDuringPlanning, detectRestrictedDuringBuild } from './agent-mode-mismatch.js';
 
 /** Detector confidence a mistake pattern is present: 0 (absent) … 1 (certain). */
 export type Confidence = number;
@@ -43,6 +45,10 @@ export type RequiresChannel = 'X' | 'M' | 'c';
 export interface RuntimeContext {
   /** Current coding-agent mode, when known (Channel M). */
   currentAgentMode?: string;
+  /** Current development stage, for detectors comparing the mode against the work in progress. */
+  stage?: Stage;
+  /** Confidence (0–1) in the current stage classification — a gate for stage-dependent detectors. */
+  stageConfidence?: number;
   /** Consecutive accepted prompts without a correction (fatigue / over-trust streak detectors). */
   consecutiveAcceptanceStreak?: number;
   /** Consecutive recent prompts carrying a 'frustrated' mood (frustration-spiral detector). */
@@ -67,7 +73,11 @@ export interface MistakeCategory {
   routing: MistakeRouting;
   /** Right-time severity tier. */
   severity: MistakeSeverity;
-  /** Set when the detector is dark pending an unshipped channel-reader; absent = detectable now. */
+  /**
+   * Set when a category's channel-reader is unshipped, so the detector is dark (returns 0)
+   * until that reader lands. Absent = detectable now (a real detector). The 'M' reader has
+   * shipped, so the mode-mismatch categories no longer carry this.
+   */
   requiresChannel?: RequiresChannel;
   metadata?: { description: string };
 }
@@ -294,9 +304,14 @@ export const MISTAKE_CATEGORIES: readonly MistakeCategory[] = [
     metadata: { description: 'no SAST / dependency / secret scanner in the workflow' },
   },
   {
-    name: 'coding_agent_mode_mismatch', routing: 'absence', mapToAbsenceSignal: 'ABSENCE_AGENT_MODE_MISMATCH',
-    severity: 'high', requiresChannel: 'M', detect: () => 0,
-    metadata: { description: 'wrong agent mode for the task (e.g. execute mode while still planning)' },
+    name: 'coding_agent_mode_mismatch', routing: 'absence', mapToAbsenceSignal: 'ABSENCE_CODING_AGENT_MODE_MISMATCH',
+    severity: 'high', detect: (_history, ctx) => detectExecuteDuringPlanning(ctx),
+    metadata: { description: 'an autonomous execute mode while the work is still in a planning stage (barreling ahead)' },
+  },
+  {
+    name: 'agent_mode_too_restricted', routing: 'absence', mapToAbsenceSignal: 'ABSENCE_AGENT_MODE_TOO_RESTRICTED',
+    severity: 'medium', detect: (_history, ctx) => detectRestrictedDuringBuild(ctx),
+    metadata: { description: 'a read-only/plan mode during hands-on implementation, blocking the agent from acting' },
   },
   // ── Family 8 — workflow & process discipline ──────────────────────────────────
   {

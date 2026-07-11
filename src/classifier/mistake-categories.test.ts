@@ -35,11 +35,11 @@ describe('mistake-categories — routing tag → polarity / engine', () => {
   });
 });
 
-describe('mistake-categories — full population (37 params + 1 meta)', () => {
-  it('holds 38 entries: 36 absence + 1 governance + 1 meta', () => {
-    expect(MISTAKE_CATEGORIES.length).toBe(38);
+describe('mistake-categories — full population (38 params + 1 meta)', () => {
+  it('holds 39 entries: 37 absence + 1 governance + 1 meta', () => {
+    expect(MISTAKE_CATEGORIES.length).toBe(39);
     const byRouting = (r: string) => MISTAKE_CATEGORIES.filter((c) => c.routing === r).length;
-    expect(byRouting('absence')).toBe(36);
+    expect(byRouting('absence')).toBe(37);
     expect(byRouting('governance')).toBe(1);
     expect(byRouting('meta')).toBe(1);
   });
@@ -60,11 +60,15 @@ describe('mistake-categories — full population (37 params + 1 meta)', () => {
     expect(new Set(names).size).toBe(names.length);
   });
 
-  it('every channel-gated detector (requiresChannel set) is dark — returns 0 regardless of input', () => {
+  it('every channel-gated detector (unshipped reader) is dark — returns 0 regardless of input', () => {
     const richHistory = Array.from({ length: 60 }, () => p('still broken, same error again, fix it'));
-    const richCtx = { consecutiveAcceptanceStreak: 99, consecutiveFrustratedPrompts: 99, hasVersionControl: false, hasBackups: false, hasSeparateEnvs: false, hasSecurityScanner: false, currentAgentMode: 'execute' };
+    // A fully-populated context, including a genuine mode-vs-stage clash — so the assertion
+    // proves darkness under real input, not an omitted field. (The mode-mismatch categories are
+    // now live/served and carry no requiresChannel, so they are excluded by the guard below.)
+    const richCtx = { consecutiveAcceptanceStreak: 99, consecutiveFrustratedPrompts: 99, hasVersionControl: false, hasBackups: false, hasSeparateEnvs: false, hasSecurityScanner: false, currentAgentMode: 'auto', stage: 'idea' as const, stageConfidence: 1 };
     for (const c of MISTAKE_CATEGORIES) {
-      if (c.requiresChannel !== undefined) expect(c.detect(richHistory, richCtx)).toBe(0);
+      if (c.requiresChannel === undefined) continue; // live detectors (incl. the two mode signals)
+      expect(c.detect(richHistory, richCtx)).toBe(0); // only the X / c channel-gated stubs remain
     }
   });
 });
@@ -182,11 +186,15 @@ describe('mistake-categories — coverage-map (each absence category → existin
 });
 
 describe('mistake-categories — seeded straddle entries (one per routing tag)', () => {
-  it('mode mismatch is absence-routed, channel-M-gated, with a mapToAbsenceSignal', () => {
-    const c = byName('coding_agent_mode_mismatch');
-    expect(c.routing).toBe('absence');
-    expect(c.mapToAbsenceSignal).toBe('ABSENCE_AGENT_MODE_MISMATCH');
-    expect(c.requiresChannel).toBe('M');
+  it('both mode-mismatch signals are absence-routed, live (no requiresChannel), with distinct signals', () => {
+    const exec = byName('coding_agent_mode_mismatch');
+    expect(exec.routing).toBe('absence');
+    expect(exec.mapToAbsenceSignal).toBe('ABSENCE_CODING_AGENT_MODE_MISMATCH');
+    expect(exec.requiresChannel).toBeUndefined();
+    const restricted = byName('agent_mode_too_restricted');
+    expect(restricted.routing).toBe('absence');
+    expect(restricted.mapToAbsenceSignal).toBe('ABSENCE_AGENT_MODE_TOO_RESTRICTED');
+    expect(restricted.requiresChannel).toBeUndefined();
   });
 
   it('prompt versioning gap is governance-routed with no mapToAbsenceSignal', () => {

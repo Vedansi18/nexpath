@@ -1,0 +1,146 @@
+import { describe, it, expect } from 'vitest';
+import { SHIPPED_CONTENT_TEMPLATES } from './content-template-tooling.js';
+import { hasShippedRecord, shippedRecordLookup, recordSignalTypeForFlag, autogenAwareLookup } from './content-template-source.js';
+import { resolveRecord } from './content-template-engine.js';
+import { composeDeterministicOptions } from './engine-option-generator.js';
+import type { ContentTemplateRecord } from './content-template-schema.js';
+import { openStore } from '../store/db.js';
+import { upsertContentTemplate } from '../store/content-templates.js';
+
+describe('content-template source lookup by signalType', () => {
+  const sample = SHIPPED_CONTENT_TEMPLATES[0];
+
+  it('the shipped tier yields the signal record; other tiers yield undefined', () => {
+    const lookup = shippedRecordLookup(sample.signalType);
+    expect(lookup('shipped')).toBe(sample);
+    expect(lookup('uploaded')).toBeUndefined();
+    expect(lookup('autogen')).toBeUndefined();
+    expect(lookup('default')).toBeUndefined();
+  });
+
+  it('feeds the engine source-cascade: resolveRecord returns the schema-valid shipped record', () => {
+    const resolved = resolveRecord(shippedRecordLookup(sample.signalType));
+    expect(resolved).not.toBeNull();
+    expect(resolved!.record.signalType).toBe(sample.signalType);
+    expect(resolved!.source).toBe('shipped');
+  });
+
+  it('unknown signalType → resolveRecord null (caller falls back to static, no blank)', () => {
+    expect(resolveRecord(shippedRecordLookup('no_such_signal_xyz'))).toBeNull();
+    expect(hasShippedRecord('no_such_signal_xyz')).toBe(false);
+  });
+
+  it('hasShippedRecord is true for every shipped signalType', () => {
+    for (const r of SHIPPED_CONTENT_TEMPLATES) expect(hasShippedRecord(r.signalType)).toBe(true);
+  });
+
+  it('recordSignalTypeForFlag maps absence:<key> → ABSENCE_<UPPER>, undefined otherwise', () => {
+    expect(recordSignalTypeForFlag('absence:context_loss')).toBe('ABSENCE_CONTEXT_LOSS');
+    expect(recordSignalTypeForFlag('absence:test_creation')).toBe('ABSENCE_TEST_CREATION');
+    expect(recordSignalTypeForFlag('stage_transition')).toBeUndefined();
+  });
+});
+
+describe('per-user (autogen) overlay — tier-b per-cell cascade', () => {
+  const preset = SHIPPED_CONTENT_TEMPLATES.find((r) => r.signalType === 'ABSENCE_TEST_CREATION')!;
+  const AUTOGEN_L1 = { kind: 'slot-variant' as const, cell: { option: 'my personalized test option', whyDesc: 'my personalized test explanation' } };
+  function autogenRecord(levelForms: ContentTemplateRecord['levelForms']): ContentTemplateRecord {
+    return { ...preset, source: 'autogen', levelForms };
+  }
+
+  it('no stored record → autogen tier undefined; the raw preset serves', async () => {
+    const store = await openStore(':memory:');
+    const lookup = autogenAwareLookup(store, '/p', preset.signalType);
+    expect(lookup('autogen')).toBeUndefined();
+    expect(lookup('shipped')).toBe(preset);
+    expect(resolveRecord(lookup)!.source).toBe('shipped');
+    store.db.close();
+  });
+
+  it('overlays per cell: the autogen cell wins its level, the preset fills the rest', async () => {
+    const store = await openStore(':memory:');
+    upsertContentTemplate(store, { projectRoot: '/p', signalType: preset.signalType, source: 'autogen', record: autogenRecord({ 1: AUTOGEN_L1 }) });
+    const merged = resolveRecord(autogenAwareLookup(store, '/p', preset.signalType))!;
+    expect(merged.source).toBe('autogen');
+    expect(merged.record.levelForms[1]?.cell.option).toBe('my personalized test option');
+    for (const k of Object.keys(preset.levelForms)) {
+      const lvl = Number(k) as 1 | 2 | 3 | 4 | 5;
+      expect(merged.record.levelForms[lvl]).toBeDefined();
+      if (lvl !== 1) expect(merged.record.levelForms[lvl]).toBe(preset.levelForms[lvl]); // preset cell, unchanged
+    }
+    store.db.close();
+  });
+
+  it('ignores an invalid stored record on read (schema gate) → preset serves', async () => {
+    const store = await openStore(':memory:');
+    // No level-1 floor → schema-invalid.
+    upsertContentTemplate(store, { projectRoot: '/p', signalType: preset.signalType, source: 'autogen', record: { signalType: preset.signalType, source: 'autogen', levelForms: {} } });
+    expect(resolveRecord(autogenAwareLookup(store, '/p', preset.signalType))!.source).toBe('shipped');
+    store.db.close();
+  });
+
+  it('re-sanitizes a leaky stored cell on read', async () => {
+    const store = await openStore(':memory:');
+    const leaky = { kind: 'slot-variant' as const, cell: { option: 'contact me at bob@evil.com about the test', whyDesc: 'ok test' } };
+    upsertContentTemplate(store, { projectRoot: '/p', signalType: preset.signalType, source: 'autogen', record: autogenRecord({ 1: leaky }) });
+    const merged = resolveRecord(autogenAwareLookup(store, '/p', preset.signalType))!;
+    expect(merged.record.levelForms[1]?.cell.option).not.toContain('bob@evil.com');
+  });
+
+  it('keeps the preset structural grounding through the overlay (runtime layers apply identically regardless of source)', async () => {
+    const store = await openStore(':memory:');
+    upsertContentTemplate(store, { projectRoot: '/p', signalType: preset.signalType, source: 'autogen', record: autogenRecord({ 1: AUTOGEN_L1 }) });
+    const resolved = resolveRecord(autogenAwareLookup(store, '/p', preset.signalType))!;
+    expect(resolved.source).toBe('autogen');
+    const merged = resolved.record;
+    // The fields the runtime grounding keys off are the preset's, unchanged — only the base wording differs.
+    expect(merged.slots).toEqual(preset.slots);
+    expect(merged.paramAxes).toEqual(preset.paramAxes);
+    expect(merged.spine).toEqual(preset.spine);
+    expect(merged.question).toBe(preset.question);
+    expect(merged.pinchFallback).toBe(preset.pinchFallback);
+    store.db.close();
+  });
+
+  it('preserves the preset sensitive-action safeguard through the overlay', async () => {
+    const store = await openStore(':memory:');
+    const flagged = SHIPPED_CONTENT_TEMPLATES.find((r) => r.l2SafeguardRequired && r.l2SafeguardLine)!;
+    upsertContentTemplate(store, { projectRoot: '/p', signalType: flagged.signalType, source: 'autogen', record: { ...flagged, source: 'autogen', levelForms: { 1: AUTOGEN_L1 } } });
+    const merged = resolveRecord(autogenAwareLookup(store, '/p', flagged.signalType))!;
+    expect(merged.record.l2SafeguardRequired).toBe(true);
+    expect(merged.record.l2SafeguardLine).toBe(flagged.l2SafeguardLine);
+    store.db.close();
+  });
+
+  it('falls back to the preset cell when the stored per-user cell dropped the topic anchor', async () => {
+    const store = await openStore(':memory:');
+    // Off-anchor content (no ABSENCE_TEST_CREATION keyword) — schema-valid but off-topic.
+    const offAnchor = { kind: 'slot-variant' as const, cell: { option: 'completely unrelated wording here', whyDesc: 'nothing on the subject' } };
+    upsertContentTemplate(store, { projectRoot: '/p', signalType: preset.signalType, source: 'autogen', record: autogenRecord({ 1: offAnchor }) });
+    const merged = resolveRecord(autogenAwareLookup(store, '/p', preset.signalType))!;
+    // The stored record is valid (served on the autogen tier), but the off-anchor cell is
+    // NOT served — the preset's level-1 cell fills it (non-degradation).
+    expect(merged.record.levelForms[1]?.cell.option).toBe(preset.levelForms[1]!.cell.option);
+    store.db.close();
+  });
+
+  it('covered vs missing parity — both fully grounded through the deterministic engine; only the base differs', async () => {
+    const store = await openStore(':memory:');
+    // Missing: no per-user record → the preset serves.
+    const missing = composeDeterministicOptions({ lookup: autogenAwareLookup(store, '/p', preset.signalType), level: 1 })!;
+    // Covered: a per-user record with an anchored L1 → the overlay serves.
+    upsertContentTemplate(store, { projectRoot: '/p', signalType: preset.signalType, source: 'autogen', record: autogenRecord({ 1: AUTOGEN_L1 }) });
+    const covered = composeDeterministicOptions({ lookup: autogenAwareLookup(store, '/p', preset.signalType), level: 1 })!;
+    // Both are fully grounded: a complete, non-null composition with every tier populated.
+    for (const g of [missing, covered]) {
+      expect(g.l1[0]).toBeTruthy();
+      expect(g.l2[0]).toBeTruthy();
+      expect(g.l3[0]).toBeTruthy();
+    }
+    // Only the base wording differs — covered carries the per-user base, missing the preset's.
+    expect(covered.l1[0]).not.toBe(missing.l1[0]);
+    expect(covered.l1[0]).toContain('personalized');
+    expect(missing.l1[0]).not.toContain('personalized');
+    store.db.close();
+  });
+});
