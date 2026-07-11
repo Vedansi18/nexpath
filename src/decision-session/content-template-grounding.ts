@@ -132,7 +132,7 @@ const PII_PATTERNS: readonly RegExp[] = [
  * (§4.E6 leakage gate). Masks secrets (reused) + strips PII / paths / URLs. This
  * is the deterministic defensive layer behind the extraction prompt's
  * "abstracted, never literal" instruction. ONLY prompt-derived values are
- * sanitized — DB-stored hard facts (AR-10 probe) are not subject to this gate.
+ * sanitized — DB-stored hard facts (the dev-env probe) are not subject to this gate.
  */
 export function sanitizePromptDerivedValue(value: string): string {
   let out = maskSecretsInText(value);

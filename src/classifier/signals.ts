@@ -1908,7 +1908,7 @@ export const SIGNAL_DEFINITIONS: SignalDefinition[] = [
     absenceThreshold: 20,
   },
   // ── §4.E2 new signals (A10) — registry-detected via detectAbsenceFlags custom gates ─────────────
-  // These fire on their mistake-category detect() reading the live RuntimeContext (AR-10 probe +
+  // These fire on their mistake-category detect() reading the live RuntimeContext (the dev-env probe +
   // behavioural streaks), NOT the keyword-absence path; detectionKeywords are topical only. Content
   // is served from the content-template engine (migrated in A12); why-help + pinch land in A10.
   {
