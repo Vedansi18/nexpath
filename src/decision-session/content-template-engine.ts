@@ -349,8 +349,13 @@ export function envFactsToGrounding(facts: FactMap): GroundingFact[] {
 
 /**
  * AR-9 workflow aggregate → grounding facts. Only the GOOD side grounds the
- * content-template engine (signals the user reliably DOES → corroborated). The
- * human phrasing reuses the existing signal `description` (not new content).
+ * content-template engine. The human phrasing reuses the existing signal
+ * `description` (not new content).
+ *
+ * Tier honesty: `corroborated` means the practice was behaviourally OBSERVED
+ * (transcript-verified), so only verified signals ground practice-grade. A
+ * right_good state reached on prompt claims alone still grounds — as useful
+ * context — but at the `capability` tier, never as a "reliably does" claim.
  */
 export function rightGoodToGrounding(
   profile: RightGoodProfile,
@@ -359,7 +364,12 @@ export function rightGoodToGrounding(
   const out: GroundingFact[] = [];
   for (const [key, sig] of Object.entries(profile)) {
     if (sig.state !== 'right_good') continue;
-    out.push({ key, value: lookup(key)?.description ?? key, weight: sig.score, tier: 'corroborated' });
+    out.push({
+      key,
+      value: lookup(key)?.description ?? key,
+      weight: sig.score,
+      tier: sig.behaviourVerified ? 'corroborated' : 'capability',
+    });
   }
   return out;
 }

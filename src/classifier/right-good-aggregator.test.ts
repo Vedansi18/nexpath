@@ -228,6 +228,7 @@ describe('right-good-aggregator — count-once corroboration + gaming defense', 
     // ONE observation at the transcript weight (1.5), NOT keyword + transcript (2.5).
     expect(p.K.score).toBeCloseTo(CHANNEL_CONFIDENCE.transcript / 3, 5);
     expect(p.K.stability.occurrences).toBe(1);
+    expect(p.K.behaviourVerified).toBe(true); // transcript evidence present
   });
 
   it('a keyword detection + its stage2 confirmation for the SAME prompt count ONCE at the LLM-assessed weight', () => {
@@ -271,6 +272,7 @@ describe('right-good-aggregator — count-once corroboration + gaming defense', 
     expect(p.K.score).toBeLessThan(HIGH_THRESHOLD); // 3 claims / 10 opportunities
     expect(p.K.stability.stable).toBe(true); // stability alone is NOT enough
     expect(p.K.state).toBe('neutral');
+    expect(p.K.behaviourVerified).toBe(false); // claims only — nothing observed
   });
 
   it('real transcript corroboration lifts the same sprinkled profile to RIGHT_GOOD', () => {
