@@ -297,6 +297,86 @@ describe('right-good-aggregator — count-once corroboration + gaming defense', 
   });
 });
 
+describe('right-good-aggregator — serving rows are provenance, never behaviour', () => {
+  it('a variant-served row contributes nothing: no presence, no stability, no entry on its own', () => {
+    const servedOnly = computeRightGoodProfile(
+      [ev({ channel: 'served', signalKey: 'test_creation' })],
+      { signalLookup: lookup() },
+    );
+    expect(servedOnly.test_creation).toBeUndefined();
+
+    const mixed = computeRightGoodProfile(
+      [...opportunities(3), ev({ signalKey: 'test_creation', promptIndex: 0 }), ev({ channel: 'served', signalKey: 'test_creation', promptIndex: 1 })],
+      { signalLookup: lookup() },
+    );
+    const sig = mixed.test_creation!;
+    expect(sig.score).toBeCloseTo(1 / 3, 5); // only the real detection counted
+    expect(sig.stability.occurrences).toBe(1); // the served row never inflates stability
+  });
+});
+
+describe('right-good-aggregator — environment-movement credit', () => {
+  const movement = (fact: string, over: Partial<ParamEvent> = {}): ParamEvent =>
+    ev({ signalKey: `env_fact_changed:${fact}:acquired`, channel: 'probe', ...over });
+
+  it('acquiring a capability lifts the mapped practice score across the threshold', () => {
+    // Real practice at 2/5 = 0.4 (below 0.5), stable across 2 sessions; the
+    // user then adds a test runner → 0.4 + 1/5 = 0.6 → RIGHT_GOOD.
+    const events = [
+      ...opportunities(3, 'implementation', 's1'),
+      ...opportunities(2, 'implementation', 's2'),
+      ev({ signalKey: 'test_creation', sessionId: 's1', promptIndex: 0 }),
+      ev({ signalKey: 'test_creation', sessionId: 's1', promptIndex: 1 }),
+      ev({ signalKey: 'test_creation', sessionId: 's2', promptIndex: 0 }),
+    ];
+    const without = computeRightGoodProfile(events, { signalLookup: lookup() });
+    expect(without.test_creation!.score).toBeCloseTo(0.6, 5); // 3/5
+    const p = computeRightGoodProfile([...events, movement('has_test_runner')], { signalLookup: lookup() });
+    expect(p.test_creation!.score).toBeCloseTo(0.8, 5); // (3+1)/5
+    expect(p.test_creation!.state).toBe('right_good');
+  });
+
+  it('movement alone never mints a strength: no stability, no verification, neutral state', () => {
+    const p = computeRightGoodProfile(
+      [...opportunities(3), movement('has_test_runner')],
+      { signalLookup: lookup() },
+    );
+    const sig = p.test_creation!;
+    expect(sig.score).toBeCloseTo(1 / 3, 5); // credit over opportunities
+    expect(sig.stability).toEqual({ sessions: 0, occurrences: 0, stable: false });
+    expect(sig.behaviourVerified).toBe(false);
+    expect(sig.state).toBe('neutral');
+  });
+
+  it('trajectory rows never appear in the profile as their own entries', () => {
+    const p = computeRightGoodProfile(
+      [movement('has_test_runner'), movement('has_version_control'), ev({ signalKey: 'env_fact_changed:x:lost', channel: 'probe' })],
+      { signalLookup: lookup() },
+    );
+    expect(Object.keys(p).filter((k) => k.startsWith('env_fact_changed:'))).toEqual([]);
+  });
+
+  it('a movement event outside the rolling window earns no credit', () => {
+    const p = computeRightGoodProfile(
+      [...opportunities(3).map((e) => ({ ...e, ts: NOW })), movement('has_test_runner', { ts: NOW - 60 * 24 * 60 * 60 * 1000 })],
+      { signalLookup: lookup(), now: NOW, windowDays: 30 },
+    );
+    expect(p.test_creation).toBeUndefined();
+  });
+
+  it('movement events never inflate the opportunity denominator', () => {
+    // 3 real in-stage prompts; the movement row carries a stage but must not
+    // add a 4th opportunity.
+    const events = [
+      ...opportunities(3),
+      ev({ signalKey: 'test_creation', promptIndex: 0 }),
+      movement('has_test_runner', { stage: 'implementation', promptIndex: 9 }),
+    ];
+    const p = computeRightGoodProfile(events, { signalLookup: lookup() });
+    expect(p.filler!.score).toBeCloseTo(3 / 3, 5); // denominator stayed 3
+  });
+});
+
 describe('right-good-aggregator — rolling window', () => {
   it('windowDays drops events older than the cutoff', () => {
     const recent = [
