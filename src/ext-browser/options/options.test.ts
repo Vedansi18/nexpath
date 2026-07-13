@@ -92,8 +92,14 @@ describe('options.ts', () => {
       expect(els().selfCheck.innerHTML).toContain('Saved');
     });
 
+    it('surfaces an error status when the initial load fails (no silent unhandled rejection)', async () => {
+      // e.g. an invalidated extension context — storage.get rejects. The fire-and-forget
+      // init must report this to the user, not drop it as an unhandled rejection.
+      mockGet.mockRejectedValue(new Error('Extension context invalidated'));
+      await loadOptionsModule();
 
-
+      expect(els().status.textContent).toContain("Couldn't load saved settings");
+    });
   });
 
   describe('advisory frequency + role selectors — same value sets/labels/defaults as the CLI installer', () => {
@@ -215,6 +221,7 @@ describe('options.ts', () => {
 
   describe('live refresh (storage.onChanged)', () => {
     it('re-renders the radio groups when the chooser writes the global keys', async () => {
+      mockGet.mockResolvedValue({}); // arrange the initial-load read BEFORE importing the module
       await loadOptionsModule();
       const listener = mockOnChanged.mock.calls.at(-1)?.[0] as (c: Record<string, unknown>, a: string) => void;
       expect(listener).toBeTypeOf('function');
@@ -223,6 +230,18 @@ describe('options.ts', () => {
       await flush();
       const checked = document.querySelector('#frequency-group input[checked], #frequency-group input:checked') as HTMLInputElement | null;
       expect(checked?.value).toBe('major_only');
+    });
+
+    it('surfaces an error status when a live-refresh read fails (no silent unhandled rejection)', async () => {
+      mockGet.mockResolvedValue({});
+      await loadOptionsModule();
+      const listener = mockOnChanged.mock.calls.at(-1)?.[0] as (c: Record<string, unknown>, a: string) => void;
+
+      mockGet.mockRejectedValue(new Error('read failed'));
+      listener({ role: { newValue: 'pm' } }, 'local');
+      await flush();
+
+      expect(els().status.textContent).toContain("Couldn't refresh settings");
     });
   });
 });

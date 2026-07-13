@@ -185,7 +185,11 @@ async function renderSelfCheck(): Promise<void> {
   `;
 }
 
-loadKey();
+// Fire-and-forget page init: surface a load failure to the user rather than letting it
+// become a silent unhandled promise rejection (storage / invalidated-extension-context
+// errors). Nothing awaits this, so without the .catch() a failure vanishes with the page
+// left half-rendered and no explanation.
+void loadKey().catch((err) => setKeyStatus(`Couldn't load saved settings: ${String(err)}`, 'err'));
 
 // Live-refresh: the popup's Alt+Shift+T chooser writes the SAME global keys this page
 // shows — without this listener the page displayed stale values until a manual
@@ -194,7 +198,9 @@ loadKey();
 browser.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;
   if (FREQUENCY_KEY in changes || ROLE_KEY in changes || KEY_NAME in changes) {
-    void loadFrequencyAndRole();
-    void renderSelfCheck();
+    // Same fire-and-forget hardening as the init call above: a refresh failure surfaces
+    // to the user instead of becoming a silent unhandled rejection.
+    void Promise.all([loadFrequencyAndRole(), renderSelfCheck()])
+      .catch((err) => setKeyStatus(`Couldn't refresh settings: ${String(err)}`, 'err'));
   }
 });
