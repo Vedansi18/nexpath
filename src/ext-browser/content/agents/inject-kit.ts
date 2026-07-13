@@ -9,9 +9,11 @@
  * setting textContent shows text visually but leaves that model out of sync, likely
  * producing broken or reverted text on the next keystroke or re-render. Editors
  * already handle real paste events correctly, so a synthetic paste goes through
- * their own update path. Self-verified after dispatch; falls back to
- * clipboard-copy + an on-page toast if the text didn't actually land — same
- * fallback contract as a missing input. If a future agent's input turns out to be
+ * their own update path. Self-verified after dispatch: if the text didn't land
+ * (Firefox drops a synthetic ClipboardEvent's clipboardData) it retries through
+ * execCommand('insertText') — trusted input events these editors also honor — and
+ * only then falls back to clipboard-copy + an on-page toast, same fallback contract
+ * as a missing input. If a future agent's input turns out to be
  * a plain <textarea>, add a native-setter variant here rather than in the agent
  * file — the toast/clipboard fallback below is reusable for it as-is.
  */
@@ -70,13 +72,17 @@ function dispatchSubmit(input: HTMLElement): void {
   input.dispatchEvent(new KeyboardEvent('keyup', init));
 }
 
-function dispatchSimulatedPaste(input: HTMLElement, text: string): void {
+function focusAndSelectAll(input: HTMLElement): void {
   input.focus();
   const selection = window.getSelection();
   const range = document.createRange();
   range.selectNodeContents(input);
   selection?.removeAllRanges();
   selection?.addRange(range);
+}
+
+function dispatchSimulatedPaste(input: HTMLElement, text: string): void {
+  focusAndSelectAll(input);
 
   const dataTransfer = new DataTransfer();
   dataTransfer.setData('text/plain', text);
@@ -88,6 +94,30 @@ function dispatchSimulatedPaste(input: HTMLElement, text: string): void {
   input.dispatchEvent(pasteEvent);
 }
 
+/**
+ * Firefox fallback. Firefox drops a script-constructed ClipboardEvent's
+ * clipboardData (security), so the simulated paste above is a silent no-op there and
+ * the text never enters the editor. execCommand('insertText') emits the *trusted*
+ * beforeinput/input events that ProseMirror (Bolt/Lovable) and CodeMirror (Replit)
+ * both honor, and it works in Firefox. This runs ONLY after the paste failed to land,
+ * so Chrome — where the paste lands on the first check — never reaches it and its
+ * behavior is unchanged. execCommand is deprecated but still universally supported;
+ * guarded so a throwing/absent impl routes to the clipboard fallback rather than
+ * breaking injection.
+ */
+function insertViaExecCommand(input: HTMLElement, text: string): void {
+  focusAndSelectAll(input);
+  try {
+    document.execCommand('insertText', false, text);
+  } catch {
+    /* deprecated API — the landed-check below routes to the clipboard fallback */
+  }
+}
+
+function hasLanded(input: HTMLElement, text: string): boolean {
+  return (input.textContent ?? '').trim().includes(text.trim().slice(0, 20));
+}
+
 export async function injectViaSimulatedPaste(inputSelector: string, text: string): Promise<void> {
   const input = document.querySelector<HTMLElement>(inputSelector);
   if (!input) {
@@ -96,11 +126,18 @@ export async function injectViaSimulatedPaste(inputSelector: string, text: strin
   }
 
   dispatchSimulatedPaste(input, text);
-
   // Give the editor a tick to process the paste before checking whether it landed.
   await new Promise((resolve) => setTimeout(resolve, 50));
-  const landed = (input.textContent ?? '').trim().includes(text.trim().slice(0, 20));
-  if (!landed) {
+
+  // Firefox: the synthetic paste is inert (see insertViaExecCommand). Retry the
+  // insertion through the trusted execCommand path, then re-check. No-op on Chrome,
+  // which has already landed — its path stays byte-identical.
+  if (!hasLanded(input, text)) {
+    insertViaExecCommand(input, text);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+
+  if (!hasLanded(input, text)) {
     await clipboardFallback(text);
     return;
   }

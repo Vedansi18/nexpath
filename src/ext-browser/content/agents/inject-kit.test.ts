@@ -37,6 +37,14 @@ describe('content/agents/inject-kit.ts — injectViaSimulatedPaste', () => {
         }
       });
     }
+
+    // Default execCommand to an inert no-op so the paste-fallback tests are
+    // deterministic (jsdom doesn't implement it). The Firefox-path test below
+    // overrides this to simulate an editor honoring execCommand('insertText').
+    Object.defineProperty(document, 'execCommand', {
+      value: vi.fn().mockReturnValue(false),
+      configurable: true,
+    });
   });
 
   it('injects into an element matched by an arbitrary configured selector', async () => {
@@ -96,6 +104,46 @@ describe('content/agents/inject-kit.ts — injectViaSimulatedPaste', () => {
     await injectViaSimulatedPaste('.lovable-editor', 'add dark mode');
 
     expect(clipboardWriteTextMock).toHaveBeenCalledWith('add dark mode');
+  });
+
+  it('Firefox path: synthetic paste is inert, execCommand insertText lands → submits, no clipboard', async () => {
+    // Reproduces Firefox: the ClipboardEvent carries no usable clipboardData, so the
+    // paste listener sees nothing and the text never lands via paste. The editor DOES
+    // honor the trusted execCommand('insertText') that runs as the fallback.
+    const input = document.createElement('div');
+    input.className = 'ff-editor';
+    document.body.appendChild(input);
+    input.addEventListener('paste', () => { /* Firefox: clipboardData empty, nothing inserted */ });
+    const keys: string[] = [];
+    input.addEventListener('keydown', (e) => keys.push((e as KeyboardEvent).key));
+
+    const execMock = vi.fn((cmd: string, _ui?: boolean, value?: string) => {
+      if (cmd === 'insertText') { input.textContent = value ?? ''; return true; }
+      return false;
+    });
+    Object.defineProperty(document, 'execCommand', { value: execMock, configurable: true });
+
+    await injectViaSimulatedPaste('.ff-editor', 'ship the release');
+
+    expect(execMock).toHaveBeenCalledWith('insertText', false, 'ship the release');
+    expect(input.textContent).toBe('ship the release');
+    expect(keys).toContain('Enter');                       // auto-submitted, same as Chrome
+    expect(clipboardWriteTextMock).not.toHaveBeenCalled(); // did NOT degrade to clipboard
+  });
+
+  it('Chrome path is unchanged: paste lands first try, execCommand is never invoked', async () => {
+    const input = document.createElement('div');
+    input.id = 'chrome-composer';
+    document.body.appendChild(input);
+    input.addEventListener('paste', (ev) => {
+      input.textContent = (ev as ClipboardEvent).clipboardData?.getData('text/plain') ?? '';
+    });
+    const execSpy = document.execCommand as unknown as ReturnType<typeof vi.fn>;
+
+    await injectViaSimulatedPaste('#chrome-composer', 'run the tests');
+
+    expect(input.textContent).toBe('run the tests');
+    expect(execSpy).not.toHaveBeenCalled(); // Firefox fallback never runs when paste lands
   });
 
   it('clipboardFallback (exported for hosts with no injector) copies and toasts', async () => {
