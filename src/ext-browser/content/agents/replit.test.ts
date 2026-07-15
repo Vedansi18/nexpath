@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { observeUserMessages, observeSubmitButton, observeWorkedForLabel, observeComposerSubmit, bootstrap, __resetResponseStopDedupForTests, __resetPromptCaptureStateForTests } from './replit.js';
+import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
+import { observeUserMessages, observeSubmitButton, observeWorkedForLabel, observeComposerSubmit, bootstrap, __resetResponseStopDedupForTests, __resetPromptCaptureStateForTests, __teardownAutoBootstrapForTests } from './replit.js';
 
 function flush(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
@@ -35,11 +35,11 @@ describe('content/agents/replit.ts', () => {
 
   beforeEach(async () => {
     document.body.innerHTML = '';
-    // The module's own auto-run bootstrap() (import-time side effect, never
-    // disconnected) keeps a long-lived observer alive on document.body for the whole
-    // file. Clearing innerHTML above is itself a mutation it reacts to — drain that
-    // notification against the outgoing spy before installing a fresh one, so it can
-    // never land inside a later test's assertion window.
+    // The module's own auto-run bootstrap() (import-time side effect) keeps a
+    // long-lived observer alive on document.body for the whole file (disposed once in
+    // afterAll below). Clearing innerHTML above is itself a mutation it reacts to —
+    // drain that notification against the outgoing spy before installing a fresh one,
+    // so it can never land inside a later test's assertion window.
     await flush();
     postMessageSpy = vi.spyOn(window, 'postMessage').mockImplementation(() => {});
     observers = [];
@@ -57,6 +57,11 @@ describe('content/agents/replit.ts', () => {
     observers.forEach((o) => o.disconnect());
     postMessageSpy.mockRestore();
   });
+
+  // Dispose the import-time auto-bootstrap's observers + 1.5s poll interval so nothing
+  // fires against a torn-down document after this file finishes (was the source of the
+  // post-run "document is not defined" console noise).
+  afterAll(() => __teardownAutoBootstrapForTests());
 
   describe('observeUserMessages', () => {
     it('emits nexpath:prompt-captured with the rendered-markdown text when a user-message node is added', async () => {
@@ -900,7 +905,9 @@ describe('content/agents/replit.ts', () => {
 
     it('logs the capture tier (console.log, not .debug — Verbose is hidden by default in DevTools) and wires up all three observers', async () => {
       const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-      bootstrap();
+      // beforeEach cleared the flag, so this bootstrap() really wires observers +
+      // the poll — capture its teardown so afterEach disposes them (no leak).
+      observers.push({ disconnect: bootstrap() });
 
       expect(logSpy).toHaveBeenCalledWith('[nexpath] capture: mutation-observer');
 
@@ -924,8 +931,8 @@ describe('content/agents/replit.ts', () => {
     it('is idempotent — a second bootstrap() call in the same page does not re-register observers (stale re-injection guard)', async () => {
       const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
-      bootstrap(); // first call — real setup
-      bootstrap(); // simulates a stale duplicate content-script re-injection
+      observers.push({ disconnect: bootstrap() }); // first call — real setup (capture to dispose)
+      observers.push({ disconnect: bootstrap() }); // stale duplicate re-injection (no-op teardown)
 
       expect(logSpy).toHaveBeenCalledWith('[nexpath] capture: mutation-observer');
       expect(logSpy).toHaveBeenCalledWith(

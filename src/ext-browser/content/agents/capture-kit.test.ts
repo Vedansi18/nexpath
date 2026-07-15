@@ -11,8 +11,9 @@ function flush(): Promise<void> {
 // that the machinery works against whatever selectors an agent config supplies —
 // these tests are the proof of that parameterization (Replit-shaped coverage lives
 // in replit.test.ts, which exercises the same kit through the real Replit config).
-// Each test uses its own selector/flag values so the never-disconnected observers a
-// bootstrap() test leaves behind can't react to a later test's DOM.
+// bootstrap() returns a teardown; every test captures it (into `teardowns`) so
+// afterEach disconnects the observers AND clears observeStopButton's poll interval,
+// leaving nothing wired to fire against a torn-down document after the test ends.
 function makeConfig(overrides: Partial<CaptureKitConfig> = {}): CaptureKitConfig {
   return {
     agent: 'test-agent',
@@ -28,16 +29,19 @@ function makeConfig(overrides: Partial<CaptureKitConfig> = {}): CaptureKitConfig
 describe('content/agents/capture-kit.ts', () => {
   let postMessageSpy: ReturnType<typeof vi.spyOn>;
   let observers: Array<{ disconnect(): void }>;
+  let teardowns: Array<() => void>;
 
   beforeEach(async () => {
     document.body.innerHTML = '';
     await flush();
     postMessageSpy = vi.spyOn(window, 'postMessage').mockImplementation(() => {});
     observers = [];
+    teardowns = [];
   });
 
   afterEach(() => {
     observers.forEach((o) => o.disconnect());
+    teardowns.forEach((t) => t());
     postMessageSpy.mockRestore();
   });
 
@@ -47,7 +51,7 @@ describe('content/agents/capture-kit.ts', () => {
       const kit = createCaptureKit(makeConfig({
         bootstrapFlag: '__nexpathObsDefault', userMessageSelector: '[data-testid="m"]',
       }));
-      kit.bootstrap();
+      teardowns.push(kit.bootstrap());
       await flush();
 
       // A user message inserted after bootstrap must be captured (observer live).
@@ -68,7 +72,7 @@ describe('content/agents/capture-kit.ts', () => {
         bootstrapFlag: '__nexpathObsOff', observeRenderedMessages: false,
         userMessageSelector: '[data-testid="m2"]',
       }));
-      kit.bootstrap();
+      teardowns.push(kit.bootstrap());
       await flush();
 
       // An inserted (re-rendered) message must NOT be captured — this is the flood
@@ -432,13 +436,13 @@ describe('content/agents/capture-kit.ts', () => {
           stopButtonSelector: '[data-testid="kit-bs-stop"]',
         }),
       );
-      kit.bootstrap();
+      teardowns.push(kit.bootstrap());
       expect((window as unknown as Record<string, boolean>)[flag]).toBe(true);
       expect(logSpy).toHaveBeenCalledWith('[nexpath] capture: mutation-observer');
 
       // Second bootstrap (stale re-injection) is a logged no-op.
       logSpy.mockClear();
-      kit.bootstrap();
+      teardowns.push(kit.bootstrap());
       expect(logSpy).toHaveBeenCalledWith(
         expect.stringContaining('skipped, already bootstrapped in this page'),
       );
@@ -452,6 +456,44 @@ describe('content/agents/capture-kit.ts', () => {
       expect(postMessageSpy).toHaveBeenCalledWith(
         expect.objectContaining({ promptText: 'post-bootstrap capture' }),
         window.location.origin,
+      );
+    } finally {
+      logSpy.mockRestore();
+      delete (window as unknown as Record<string, boolean | undefined>)[flag];
+    }
+  });
+
+  it('the teardown bootstrap() returns disconnects the channels and clears the guard', async () => {
+    const flag = '__nexpathKitTeardownTest';
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const kit = createCaptureKit(makeConfig({
+        bootstrapFlag: flag, userMessageSelector: '[data-testid="teardown-msg"]',
+      }));
+
+      const teardown = kit.bootstrap();
+      expect((window as unknown as Record<string, boolean>)[flag]).toBe(true);
+
+      // Tear down — must disconnect the rendered-message observer AND (the reason
+      // this exists) leave nothing that reacts to the DOM after this point. This is
+      // what removes the post-test "document is not defined" observer/poll firing.
+      teardown();
+      expect((window as unknown as Record<string, boolean | undefined>)[flag]).toBe(false);
+
+      // A message inserted AFTER teardown must NOT be captured — the observer is gone.
+      postMessageSpy.mockClear();
+      const el = document.createElement('div');
+      el.setAttribute('data-testid', 'teardown-msg');
+      el.textContent = 'inserted after teardown';
+      document.body.appendChild(el);
+      await flush();
+      expect(postMessageSpy).not.toHaveBeenCalled();
+
+      // Guard cleared ⇒ a fresh bootstrap() legitimately re-wires (not a stale no-op).
+      logSpy.mockClear();
+      teardowns.push(kit.bootstrap());
+      expect(logSpy).not.toHaveBeenCalledWith(
+        expect.stringContaining('skipped, already bootstrapped in this page'),
       );
     } finally {
       logSpy.mockRestore();

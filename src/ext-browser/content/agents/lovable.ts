@@ -95,8 +95,14 @@ export const __resetPromptCaptureStateForTests = kit.resetPromptCaptureStateForT
 // to import inject-back without esbuild inlining that auto-run into its own
 // bundle (the B3 duplicate-bundling bug).
 
+// Import-time auto-bootstrap. Capture its teardown so a test that imports this module
+// (which triggers the auto-run) can dispose the long-lived observers + 1.5s poll
+// interval instead of leaking them past its jsdom-environment teardown. Production
+// ignores it — the content script runs for the page's whole lifetime.
+let autoBootstrapTeardown: (() => void) | undefined;
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', bootstrap);
+  document.addEventListener('DOMContentLoaded', () => { autoBootstrapTeardown = bootstrap(); });
 } else {
-  bootstrap();
+  autoBootstrapTeardown = bootstrap();
 }
+export const __teardownAutoBootstrapForTests = (): void => autoBootstrapTeardown?.();

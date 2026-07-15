@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
 import {
   observeUserMessages,
   observeComposerSubmit,
@@ -10,6 +10,7 @@ import {
   bootstrap,
   __resetResponseStopDedupForTests,
   __resetPromptCaptureStateForTests,
+  __teardownAutoBootstrapForTests,
 } from './bolt.js';
 
 function flush(): Promise<void> {
@@ -77,10 +78,9 @@ describe('content/agents/bolt.ts', () => {
 
   beforeEach(async () => {
     document.body.innerHTML = '';
-    // Same rationale as replit.test.ts: the module's import-time auto-bootstrap keeps
-    // never-disconnected observers alive on document.body for the whole file — drain
-    // the mutation notification from the innerHTML clear against the outgoing spy
-    // before installing a fresh one.
+    // The module's import-time auto-bootstrap keeps observers live on document.body for
+    // the whole file (disposed once in afterAll) — drain the mutation notification from
+    // the innerHTML clear against the outgoing spy before installing a fresh one.
     await flush();
     postMessageSpy = vi.spyOn(window, 'postMessage').mockImplementation(() => {});
     observers = [];
@@ -92,6 +92,11 @@ describe('content/agents/bolt.ts', () => {
     observers.forEach((o) => o.disconnect());
     postMessageSpy.mockRestore();
   });
+
+  // Dispose the import-time auto-bootstrap's observers + 1.5s poll interval so nothing
+  // fires against a torn-down document after this file finishes (was the source of the
+  // post-run "document is not defined" console noise).
+  afterAll(() => __teardownAutoBootstrapForTests());
 
   describe('observeComposerSubmit — TipTap composer', () => {
     it('captures the composer text on Enter, joining <p> lines with newlines', () => {

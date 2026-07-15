@@ -116,7 +116,17 @@ export interface CaptureKit {
   observeCompletionLabel(root: Element): MutationObserver;
   observeFetchPrompts(win: Window): { disconnect(): void };
   observeCaptureRejections(win: Window): { disconnect(): void };
-  bootstrap(): void;
+  /**
+   * Wire every capture channel for this agent. Idempotent per page (see
+   * bootstrapFlag). Returns a teardown that disconnects everything this call
+   * wired — the observers AND observeStopButton's poll interval — and clears the
+   * idempotency guard so a later bootstrap() can re-wire. Production entry points
+   * ignore the return (the content script lives for the page's lifetime); it
+   * exists so callers that DO have a lifecycle (tests, any future re-init) can
+   * release the long-lived MutationObservers + setInterval deterministically
+   * instead of leaking them.
+   */
+  bootstrap(): () => void;
   resetResponseStopDedupForTests(): void;
   resetPromptCaptureStateForTests(): void;
 }
@@ -514,13 +524,13 @@ export function createCaptureKit(config: CaptureKitConfig): CaptureKit {
 
   // ── Bootstrap ───────────────────────────────────────────────────────────────────
 
-  function bootstrap(): void {
+  function bootstrap(): () => void {
     // Idempotent-injection guard — see CaptureKitConfig.bootstrapFlag. First
     // generation per page wins; every later stale generation becomes a logged no-op.
     const w = window as unknown as Record<string, boolean | undefined>;
     if (w[config.bootstrapFlag]) {
       console.log(`[nexpath] capture: ${config.captureTier} — skipped, already bootstrapped in this page (stale re-injection guard)`);
-      return;
+      return () => {}; // nothing was wired this generation, so nothing to tear down
     }
     w[config.bootstrapFlag] = true;
 
@@ -528,12 +538,23 @@ export function createCaptureKit(config: CaptureKitConfig): CaptureKit {
     // (which .debug is categorized as) unless the user explicitly enables it in the
     // level filter. This line is meant to be visible by default, per devplan §8.1.
     console.log(`[nexpath] capture: ${config.captureTier}`);
-    if (config.listenForFetchPrompts) observeFetchPrompts(window);
-    observeCaptureRejections(window);
-    if (config.composer) observeComposerSubmit(document);
-    if (config.observeRenderedMessages !== false) observeUserMessages(document.body);
-    observeStopButton(document.body);
-    if (config.completionLabel) observeCompletionLabel(document.body);
+    // Collect each channel's disconnect so bootstrap can hand back one teardown for
+    // all of them. Every observeX returns a { disconnect() } (observeStopButton's
+    // wrapped disconnect also clears its poll interval), so disposing is uniform.
+    const wired: Array<{ disconnect(): void }> = [];
+    if (config.listenForFetchPrompts) wired.push(observeFetchPrompts(window));
+    wired.push(observeCaptureRejections(window));
+    if (config.composer) wired.push(observeComposerSubmit(document));
+    if (config.observeRenderedMessages !== false) wired.push(observeUserMessages(document.body));
+    wired.push(observeStopButton(document.body));
+    if (config.completionLabel) wired.push(observeCompletionLabel(document.body));
+
+    return () => {
+      for (const channel of wired) channel.disconnect();
+      // Torn down ⇒ not bootstrapped: clearing the guard lets a later bootstrap()
+      // legitimately re-wire (a no-op in production, correct for re-init/tests).
+      w[config.bootstrapFlag] = false;
+    };
   }
 
   // ── Test-only resets ────────────────────────────────────────────────────────────
