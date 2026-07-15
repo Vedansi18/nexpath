@@ -29,7 +29,6 @@ vi.mock('../adapters/storage-chrome.js', () => ({ ChromeStorageKeyAdapter: vi.fn
 vi.mock('../adapters/clock-browser.js', () => ({ BrowserClockAdapter: vi.fn() }));
 vi.mock('../adapters/log-console.js', () => ({ ConsoleLogAdapter: vi.fn() }));
 vi.mock('../adapters/log-persistent.js', () => ({ PersistentLogAdapter: vi.fn() }));
-vi.mock('../adapters/embedding-offscreen.js', () => ({ OffscreenEmbeddingAdapter: vi.fn() }));
 vi.mock('../content/panel-adapter.js', () => ({ ContentScriptUIAdapter: vi.fn() }));
 
 const { classifyPrompt } = await import('../../core/classifier/PromptClassifier.js');
@@ -909,6 +908,82 @@ describe('service-worker.ts', () => {
       expect(shown.options[0]).toMatchObject({ title: 'Personalised L1', body: 'resolved body 1' });
     });
 
+    const OG_KEY = 'nexpath_pending_advisory_og::https://replit.com';
+    const staticContent = {
+      question: 'q', whyHelp: null,
+      L1: [{ option: 'static L1', descBase: 'b1' }],
+      L2: [{ option: 'static L2', descBase: 'b2' }],
+      L3: [{ option: 'static L3', descBase: 'b3' }],
+      pinchFallback: 'f',
+    } as unknown as ReturnType<typeof resolveDecisionContent>;
+    const genResult = {
+      l1: ['P1'], l2: ['P2'], l3: ['P3'],
+      generatedDescBases: { l1: ['rb1'], l2: ['rb2'], l3: ['rb3'] },
+    } as unknown as Awaited<ReturnType<typeof generateOptionList>>;
+
+    it('detects the prompt language at STOP (stop.ts §1.5), persists it, and generates options in it', async () => {
+      // CLI parity: tinyld runs over the recent-prompt window once >= LANG_DETECT_INTERVAL
+      // prompts exist. Unambiguously-Spanish window → generateOptionList gets 'es', and the
+      // detected code is persisted so later submits localise too (auto.ts reads it).
+      const es = [
+        'por favor construye la aplicacion de recetas con un formulario',
+        'anade el boton para guardar las recetas en el almacenamiento local',
+        'implementa la busqueda de recetas por nombre y por categoria',
+        'necesito validar los campos del formulario antes de enviar',
+        'crea la pagina de detalle de cada receta con los ingredientes',
+        'quiero mostrar un mensaje de error cuando falte un ingrediente',
+        'agrega la funcionalidad para eliminar una receta de la lista',
+        'haz que el diseno sea responsivo para telefonos moviles',
+      ];
+      const promptHistory = [...es, ...es].map((text, i) => ({
+        index: i, text, capturedAt: 0, classifiedStage: 'implementation', confidence: 1,
+      }));
+      const og = {
+        stage: 'implementation', flagType: 'stage_transition', prevStage: 'implementation',
+        promptsInCurrentStage: 3, language: null, profile: null, promptHistory,
+      };
+      keyStoreGetKey.mockImplementation(async (name) => {
+        if (name === PENDING_KEY) return JSON.stringify(samplePayload);
+        if (name === OG_KEY) return JSON.stringify(og);
+        if (name === 'openai_api_key') return 'sk-real-key';
+        return null; // language_override unset
+      });
+      idbGetProjectDetectedLanguage.mockResolvedValue(undefined);
+      vi.mocked(resolveDecisionContent).mockReturnValue(staticContent);
+      vi.mocked(generateOptionList).mockResolvedValueOnce(genResult);
+      showAdvisoryMock.mockResolvedValue({ type: 'dismiss', advisoryId: 'adv-queued' });
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+
+      stop(messageListener, 55);
+      await vi.waitFor(() => expect(generateOptionList).toHaveBeenCalledOnce());
+      // 3rd positional arg to generateOptionList is the resolved language.
+      expect(vi.mocked(generateOptionList).mock.calls[0]![2]).toBe('es');
+      expect(idbSaveProjectDetectedLanguage).toHaveBeenCalledWith('https://replit.com', 'es');
+    });
+
+    it('skips detection below LANG_DETECT_INTERVAL prompts and keeps the submit-time language', async () => {
+      const og = {
+        stage: 'implementation', flagType: 'stage_transition', prevStage: 'implementation',
+        promptsInCurrentStage: 3, language: 'fr', profile: null,
+        promptHistory: [{ index: 0, text: 'bonjour le monde', capturedAt: 0, classifiedStage: 'implementation', confidence: 1 }],
+      };
+      keyStoreGetKey.mockImplementation(async (name) => {
+        if (name === PENDING_KEY) return JSON.stringify(samplePayload);
+        if (name === OG_KEY) return JSON.stringify(og);
+        if (name === 'openai_api_key') return 'sk-real-key';
+        return null;
+      });
+      vi.mocked(resolveDecisionContent).mockReturnValue(staticContent);
+      vi.mocked(generateOptionList).mockResolvedValueOnce(genResult);
+      showAdvisoryMock.mockResolvedValue({ type: 'dismiss', advisoryId: 'adv-queued' });
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+
+      stop(messageListener, 55);
+      await vi.waitFor(() => expect(generateOptionList).toHaveBeenCalledOnce());
+      expect(vi.mocked(generateOptionList).mock.calls[0]![2]).toBe('fr'); // submit-time value passes through
+      expect(idbSaveProjectDetectedLanguage).not.toHaveBeenCalled();
+    });
+
     it('shows the STATIC queued payload when personalisation fails (no missed popup)', async () => {
       keyStoreGetKey.mockImplementation(async (name) => {
         if (name === PENDING_KEY) return JSON.stringify({ ...samplePayload, options: [{ id: 'l1-0', level: 'L1', title: 'static title', body: 'raw {R4_OPEN}' }] });
@@ -1350,51 +1425,4 @@ describe('service-worker.ts', () => {
     });
   });
 
-  describe('ensureOffscreen (Chrome offscreen document lifecycle)', () => {
-    it('creates the offscreen document when none exists yet', async () => {
-      hasDocumentMock.mockResolvedValue(false);
-      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
-
-      const sendResponse = vi.fn();
-      messageListener(
-        { type: 'nexpath:prompt-submit', promptText: 'hi', projectRoot: 'https://replit.com', agent: 'replit', tabId: 7 },
-        {},
-        sendResponse,
-      );
-      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
-      expect(createDocumentMock).toHaveBeenCalledWith({
-        url: 'offscreen/offscreen.html',
-        reasons: ['WORKERS'],
-        justification: expect.any(String),
-      });
-    });
-
-    it('does not recreate the offscreen document when one already exists', async () => {
-      hasDocumentMock.mockResolvedValue(true);
-      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
-
-      const sendResponse = vi.fn();
-      messageListener(
-        { type: 'nexpath:prompt-submit', promptText: 'hi', projectRoot: 'https://replit.com', agent: 'replit', tabId: 7 },
-        {},
-        sendResponse,
-      );
-      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
-      expect(createDocumentMock).not.toHaveBeenCalled();
-    });
-
-    it('does not throw on Firefox, which has no chrome.offscreen API at all', async () => {
-      const { messageListener } = await importFreshServiceWorker(undefined);
-
-      const sendResponse = vi.fn();
-      messageListener(
-        { type: 'nexpath:prompt-submit', promptText: 'hi', projectRoot: 'https://replit.com', agent: 'replit', tabId: 7 },
-        {},
-        sendResponse,
-      );
-      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
-      expect(hasDocumentMock).not.toHaveBeenCalled();
-      expect(createDocumentMock).not.toHaveBeenCalled();
-    });
-  });
 });

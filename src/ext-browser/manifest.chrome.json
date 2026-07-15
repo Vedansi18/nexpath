@@ -6,8 +6,7 @@
   "permissions": [
     "storage",
     "tabs",
-    "scripting",
-    "offscreen"
+    "scripting"
   ],
   "host_permissions": [
     "https://*.replit.com/*",

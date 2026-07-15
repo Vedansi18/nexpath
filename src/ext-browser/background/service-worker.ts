@@ -1,5 +1,15 @@
 import browser from 'webextension-polyfill';
 import { classifyPrompt } from '../../core/classifier/PromptClassifier.js';
+import { classifyWithTFIDFBrowser } from '../../core/classifier/tfidf-browser.js';
+// LanguageDetector is browser-safe (its only dependency is `tinyld`, which ships a
+// browser build esbuild resolves automatically). Imported directly so the browser and
+// the CLI share ONE detector — same tinyld model, same thresholds, guaranteed parity.
+import {
+  detectLanguage,
+  resolveLanguage,
+  LANG_WINDOW,
+  LANG_DETECT_INTERVAL,
+} from '../../classifier/LanguageDetector.js';
 import { SessionStateManager } from '../../core/session-state.js';
 import { shouldFireStage2, runStage2, type FlagType } from '../../core/stage2.js';
 import { detectAbsenceFlags } from '../../core/classifier/AbsenceDetector.js';
@@ -22,7 +32,6 @@ import { ChromeStorageKeyAdapter } from '../adapters/storage-chrome.js';
 import { BrowserClockAdapter } from '../adapters/clock-browser.js';
 import { ConsoleLogAdapter } from '../adapters/log-console.js';
 import { PersistentLogAdapter } from '../adapters/log-persistent.js';
-import { OffscreenEmbeddingAdapter } from '../adapters/embedding-offscreen.js';
 import { ContentScriptUIAdapter } from '../content/panel-adapter.js';
 import {
   isPromptSubmitMsg,
@@ -43,32 +52,6 @@ const clock = new BrowserClockAdapter();
 // page's "Recent activity" section (the browser's `nexpath log`) reads.
 const log = new PersistentLogAdapter(new ConsoleLogAdapter('[nexpath-sw]'));
 
-// ── Offscreen document management (Chrome only) ────────────────────────────────
-
-const OFFSCREEN_URL = 'offscreen/offscreen.html';
-
-// chrome.offscreen has no cross-browser equivalent (Chrome-only API, no Firefox support) —
-// stays as chrome.*, not webextension-polyfill, deliberately. Already feature-detected below.
-type ChromeWithOffscreen = typeof chrome & {
-  offscreen: {
-    createDocument(opts: { url: string; reasons: string[]; justification: string }): Promise<void>;
-    hasDocument(): Promise<boolean>;
-  };
-};
-
-async function ensureOffscreen(): Promise<void> {
-  const offscreenApi = (chrome as ChromeWithOffscreen).offscreen;
-  if (!offscreenApi) return; // Firefox — no offscreen API
-
-  // hasDocument() prevents double-create errors when the SW restarts.
-  if (await offscreenApi.hasDocument()) return;
-
-  await offscreenApi.createDocument({
-    url: OFFSCREEN_URL,
-    reasons: ['WORKERS'],
-    justification: 'Runs Transformers.js embedding model outside the service worker',
-  });
-}
 
 // ── First-install: open options page ──────────────────────────────────────────
 
@@ -381,18 +364,17 @@ async function runPromptSubmitPipeline(
   // ── Step 2: Build sync in-memory port ───────────────────────────────────────
   const memHandle = makeMemoryStoragePort(loadedState, lang);
 
-  // ── Step 3: Classify prompt (Tier 1 + optional Tier 3 via offscreen) ────────
-  let embeddingAdapter: OffscreenEmbeddingAdapter | undefined;
-  try {
-    await ensureOffscreen();
-    embeddingAdapter = new OffscreenEmbeddingAdapter();
-  } catch {
-    // Offscreen not available (Firefox MV3) — fall through without embedding
-  }
-
+  // ── Step 3: Classify prompt (Tier 1 keyword → Tier 2 TF-IDF) — CLI parity ────
+  // The CLI (auto.ts) runs classifyPrompt with the natural-backed classifyWithTFIDF
+  // and NO embedding tier. We mirror that EXACTLY with classifyWithTFIDFBrowser —
+  // the browser-safe TF-IDF whose weights are precomputed from `natural` and proven
+  // byte-identical in tfidf-browser.test.ts. The former offscreen "Tier 3" was a
+  // stub that returned implementation/0.0 and (being present) OVERRODE Tier 2's
+  // result — so before this, any prompt that missed a keyword classified as
+  // implementation/0. That is the browser's keyword-only gap, now closed. Upstream
+  // deleted the embedding tier for the same reason.
   const classification = await classifyPrompt(promptText, {
-    // tidfClassifier omitted — not available in browser (uses node:module)
-    embeddingClassifier: embeddingAdapter,
+    tidfClassifier: classifyWithTFIDFBrowser,
   });
 
   // ── Step 4: Update session state (sync) ─────────────────────────────────────
@@ -701,12 +683,15 @@ async function runPromptSubmitPipeline(
     ? ('stage_transition' as const)
     : (`absence:${stage2Out.selected_signal_key}` as `absence:${string}`);
 
-  // Effective language — mirrors auto.ts's step 3.5 (language_override wins over
-  // the detected language; the CLI additionally validates the override against its
-  // language table — the browser trusts the configured value as-is).
-  const effectiveLang = (langOverrideRaw && langOverrideRaw.trim())
-    ? langOverrideRaw.trim()
-    : mgr.current.detectedLanguage;
+  // Effective language — mirrors auto.ts's step 3.5 exactly via the shared
+  // resolveLanguage (override wins IFF it is a valid language code, else the detected
+  // language, else undefined = LLM default). detectedLanguage is populated by the
+  // response-stop detection below, exactly like the CLI's auto reads the value that
+  // `nexpath stop` detected and stored.
+  const effectiveLang = resolveLanguage(
+    langOverrideRaw ?? undefined,
+    mgr.current.detectedLanguage,
+  );
 
   const content = resolveDecisionContent(
     state.currentStage,
@@ -892,10 +877,39 @@ async function handleResponseStop(projectRoot: string, tabId: number | undefined
     try {
       const og      = JSON.parse(ogRaw) as PendingOgContext;
       const content = resolveDecisionContent(og.stage, og.flagType, og.profile ?? undefined, og.prevStage ?? undefined);
+
+      // ── CLI parity (stop.ts §1.5): natural-language detection over recent prompts,
+      // run post-response like the CLI. Only fires once >= LANG_DETECT_INTERVAL prompts
+      // exist for this project. tinyld runs locally (no API cost). The detected code is
+      // persisted so later submits pick it up (auto.ts reads the stored value), and the
+      // freshly-resolved language is what this advisory's options are generated in —
+      // before this, detectedLanguage was NEVER set, so a non-English user's popup only
+      // localised if they manually set language_override. Failure is swallowed (English
+      // default) — language must never block the popup.
+      let optionLanguage = og.language ?? undefined;
+      try {
+        const history = og.promptHistory ?? [];
+        if (history.length >= LANG_DETECT_INTERVAL) {
+          const priorDetected = await idb.getProjectDetectedLanguage(projectRoot);
+          const detected = detectLanguage(
+            history.slice(-LANG_WINDOW).map((p) => p.text),
+            priorDetected ?? undefined,
+          );
+          if (detected && detected !== priorDetected) {
+            await idb.saveProjectDetectedLanguage(projectRoot, detected);
+          }
+          const override = await keyStore.getKey('language_override');
+          optionLanguage = resolveLanguage(override ?? undefined, detected);
+          log.debug('stop_lang_detected', { detected: detected ?? null });
+        }
+      } catch (err) {
+        log.warn('lang_detect_failed', { error: String(err) });
+      }
+
       const gen = await generateOptionList(
         content,
         og.profile ?? undefined,
-        og.language ?? undefined,
+        optionLanguage,
         og.promptHistory ?? [],
         {
           flagType:              og.flagType,

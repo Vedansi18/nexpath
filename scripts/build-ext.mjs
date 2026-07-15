@@ -71,13 +71,12 @@ const contentScriptEntries = [
 /**
  * Entries loaded as real ES modules — the MV3 service worker (manifest declares
  * background.type: 'module'), main-world.ts (injected via a dynamic
- * `<script type="module">` tag), and offscreen.ts/options.ts (their HTML files use
+ * `<script type="module">` tag), and options.ts (its HTML uses
  * `<script type="module">` directly). format: 'esm' is correct and required here.
  */
 const moduleEntries = [
   { in: path.join(SRC, 'background', 'service-worker.ts'), out: 'service-worker' },
   { in: path.join(SRC, 'inject',     'main-world.ts'),     out: 'inject/main-world' },
-  { in: path.join(SRC, 'offscreen',  'offscreen.ts'),      out: 'offscreen/offscreen' },
   { in: path.join(SRC, 'options',    'options.ts'),        out: 'options/options' },
 ];
 
@@ -86,7 +85,6 @@ const moduleEntries = [
  * [src relative to SRC, dst relative to dist/<target>/]
  */
 const staticFiles = [
-  ['offscreen/offscreen.html', 'offscreen/offscreen.html'],
   ['options/options.html',     'options/options.html'],
   ['options/options.css',      'options/options.css'],
   ['icons/icon16.png',         'icons/icon16.png'],
