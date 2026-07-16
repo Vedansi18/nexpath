@@ -11,6 +11,7 @@
     "build": "tsc",
     "postbuild": "node -e \"['dist/cli/index.js','dist/server/index.js'].forEach(f => require('fs').chmodSync(f, 0o755))\"",
     "build:ext": "node scripts/build-ext.mjs",
+    "package:ext": "node scripts/package-ext.mjs",
     "build:ui-harness": "esbuild src/ext-browser/ui/ui-mock-harness/index.ts --bundle --format=esm --external:../../../ext-browser/ui/ui.js --outfile=src/ext-browser/ui/ui-mock-harness/index.js",
     "dev:cli": "tsx src/cli/index.ts",
     "dev:server": "tsx src/server/index.ts",
