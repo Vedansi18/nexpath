@@ -211,13 +211,16 @@ describe('inject.ts (B5b — real panel integration)', () => {
       expect(lastTerminalEvent()).toEqual({ type: 'dismiss', advisoryId: 'adv-1' });
     });
 
-    it('copy: writes the option TITLE to clipboard, panel STAYS open (no hide, no terminal event)', () => {
+    it('copy: writes the option TITLE to clipboard, then CLOSES (CLI clipboard_only parity — hide + terminal skip)', () => {
       dispatchShowAdvisory(makePayload());
       terminalSpy.mockClear();
       capturedOnEvent!({ type: 'copy', optionId: 'adv-1-L2' });
       expect(clipboardWriteTextMock).toHaveBeenCalledWith('Quick check');
-      expect(hideMock).not.toHaveBeenCalled();
-      expect(terminalSpy).not.toHaveBeenCalled(); // non-terminal — must not resolve showAdvisory
+      // CLI parity: copy resolves clipboard_only and exits — it does NOT return to
+      // the option list. So the panel hides and a terminal outcome is reported
+      // (as a skip, like disable-project) so showAdvisory resolves + the dismissal lands.
+      expect(hideMock).toHaveBeenCalled();
+      expect(lastTerminalEvent()).toEqual({ type: 'skip', advisoryId: 'adv-1' });
     });
 
     it('show-simpler: no engine action, panel STAYS open (no hide, no terminal event)', () => {

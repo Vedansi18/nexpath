@@ -46,13 +46,14 @@ const SUPPORTED_SCHEMA_VERSION = 1;
 // PanelController (show/setBusy/hide/destroy) — see src/ext-browser/ui/ui-contract.ts.
 //
 // The panel emits the 5 contract PanelEvents. They split into two classes:
-//   • TERMINAL (select/skip/dismiss) — end the advisory. Reported back to the SW via
-//     the existing `nexpath:panel-event` round-trip (main-world-injector.ts resolves
+//   • TERMINAL (select/skip/dismiss/copy) — end the advisory. Reported back to the SW
+//     via the existing `nexpath:panel-event` round-trip (main-world-injector.ts resolves
 //     ContentScriptUIAdapter.showAdvisory()'s awaited Promise with it), exactly as the
 //     stub did. The SW's showAdvisory result handling is generic over event.type, so
-//     nothing SW-side changes.
-//   • NON-TERMINAL (copy/show-simpler) — the panel stays open. Handled entirely here
-//     (clipboard write / level-nav is panel-internal); NOT sent through the
+//     nothing SW-side changes. copy CLOSES too (CLI clipboard_only resolves + exits) —
+//     the clipboard write happens here, then it reports as a skip like disable-project.
+//   • NON-TERMINAL (show-simpler) — the panel stays open. Handled entirely here
+//     (level-nav is panel-internal); NOT sent through the
 //     `nexpath:panel-event` round-trip (that would prematurely resolve showAdvisory).
 //
 // This keeps B5b contained to this content-script file + the vendored panel — no
@@ -149,10 +150,14 @@ function handlePanelEvent(event: UiPanelEvent): void {
       break;
     }
     case 'copy': {
-      // CLI `clipboard_only`: copy the SAME text a select would inject (the title).
-      // Panel stays open (contract) — no terminal report.
+      // CLI `clipboard_only` parity: copy the SAME text a select would inject (the
+      // title), then CLOSE — the CLI resolves clipboard_only and exits; it does NOT
+      // return to the option list. Terminal like disable-project: hide + record the
+      // dismissal so showAdvisory resolves and advisory_dismissed lands.
       void copyToClipboard(findOptionTitle(event.optionId));
       console.log('[nexpath] advisory option copied to clipboard');
+      controller?.hide();
+      reportTerminal({ type: 'skip', advisoryId });
       break;
     }
     case 'show-simpler': {

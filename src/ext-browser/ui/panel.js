@@ -222,12 +222,12 @@ export function mountNexpathPanel(root, { onEvent }) {
     if (index === 0) {
       emitSelect(pendingOption);
     } else {
+      // CLI clipboard_only parity: copy the option and CLOSE (the CLI resolves
+      // clipboard_only and exits — it does NOT return to the option list). The
+      // controller (inject.ts) hides the panel on this copy event; we leave the
+      // confirm view up until then so the close fades from here, with no flash of
+      // the option list on the way out.
       emitCopy(pendingOption);
-      // Copy keeps the panel open (per contract) — return to the option list.
-      view = 'options';
-      pendingOption = null;
-      render();
-      el.focus({ preventScroll: true }); // keyboard flow must survive the copy round-trip
     }
   }
 
