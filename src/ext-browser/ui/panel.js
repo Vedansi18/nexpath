@@ -91,7 +91,7 @@ const STYLES = `
   .np-option .np-label { color:#a8a9a8; }
   .np-option.np-focused .np-label { color:#f5f5f4; font-weight:600; }
 
-  .np-body-row .np-content { color:#8a8f8f; font-style:italic; }
+  .np-body-row .np-content { color:#d0d0d0; }
   .np-hint-row .np-content { color:#9ba7a7; font-style:italic; }
 
   .np-control { margin-top:8px; cursor:pointer; }
@@ -574,10 +574,10 @@ export function mountNexpathPanel(root, { onEvent }) {
     else if (e.key === ' ') {
       const row = rows[focusedIndex];
       if (row && row.kind === 'option') {
-        // Exclusive: opening one option's details closes any other that was open.
-        const wasOpen = expanded.has(row.opt.id);
-        expanded.clear();
-        if (!wasOpen) expanded.add(row.opt.id);
+        // Non-exclusive toggle — CLI defaultOnSpace parity (render-loop.ts): Space
+        // toggles ONLY the focused option; any others already expanded stay open.
+        if (expanded.has(row.opt.id)) expanded.delete(row.opt.id);
+        else expanded.add(row.opt.id);
         render();
       }
       e.preventDefault();
