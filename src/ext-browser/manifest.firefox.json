@@ -59,7 +59,7 @@
   "options_page": "options/options.html",
   "browser_specific_settings": {
     "gecko": {
-      "id": "nexpath@emptyops.com",
+      "id": "{1c62eba0-51eb-4052-a4b2-30c66e5aa995}",
       "strict_min_version": "109.0"
     }
   },
