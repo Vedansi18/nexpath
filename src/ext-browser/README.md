@@ -64,7 +64,7 @@ workflow without slowing it down.
 
 ## Requirements
 
-- **Chrome** (or Edge/Chromium) or **Firefox 109+**.
+- **Chrome** (or Edge/Chromium) or **Firefox 112+**.
 - An **OpenAI API key** — <https://platform.openai.com/api-keys>. Without a valid key, prompts are
   tracked but no decision session is generated.
 

@@ -62,12 +62,19 @@ Because the extension is bundled by esbuild, AMO reviewers require the source + 
 Provide these at submission:
 
 ```
-Requirements: Node.js 20 LTS
-Build:        npm install && npm run build:ext
+Requirements: Node.js 24 LTS   (matches AMO's reviewer build environment)
+Build:        npm ci && npm run build:ext
 Output:       dist/ext-firefox   (the uploaded zip's contents)
 ```
 
-The committed source at the tagged release reproduces the uploaded package exactly.
+The committed source at the tagged release reproduces the uploaded package exactly. AMO reviewers
+rebuild from these steps and byte-diff the result against the upload — use `npm ci` (exact lockfile),
+not `npm install`, and match the Node version above.
+
+The Firefox manifest sets `strict_min_version` **112** and declares
+`browser_specific_settings.gecko.data_collection_permissions.required = ["authenticationInfo",
+"websiteContent"]` (Mozilla's built-in data-consent) — keep these in sync with the store data
+disclosures (the API key + prompt text).
 
 ---
 
