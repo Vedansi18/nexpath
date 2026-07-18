@@ -91,7 +91,11 @@ const STYLES = `
   .np-option .np-label { color:#a8a9a8; }
   .np-option.np-focused .np-label { color:#f5f5f4; font-weight:600; }
 
-  .np-body-row .np-content { color:#d0d0d0; }
+  /* CLI 4-tier parity: expanded details fade with focus like the CLI styler —
+     focused desc = #d0d0d0 (xterm-252 tier), unfocused desc = #7d8686 (SGR-90
+     gray tier, darker than the #a8a9a8 unfocused label above it). */
+  .np-body-row .np-content { color:#7d8686; }
+  .np-option.np-focused .np-body-row .np-content { color:#d0d0d0; }
   .np-hint-row .np-content { color:#9ba7a7; font-style:italic; }
 
   .np-control { margin-top:8px; cursor:pointer; }
@@ -396,6 +400,12 @@ export function mountNexpathPanel(root, { onEvent }) {
         node.appendChild(labelRow);
 
         if (expanded.has(opt.id)) {
+          // Blank gap row between label and details (CLI parity: computeLayout
+          // emits a rail-only spacer row before every desc-base block).
+          const gapRow = document.createElement('div');
+          gapRow.className = 'np-row np-body-row';
+          gapRow.innerHTML = `<div class="np-rail">│</div><div class="np-content"></div>`;
+          node.appendChild(gapRow);
           const bodyRow = document.createElement('div');
           bodyRow.className = 'np-row np-body-row';
           bodyRow.innerHTML = `<div class="np-rail">│</div><div class="np-content">↳ ${escapeHtml(opt.body)}</div>`;
