@@ -316,6 +316,10 @@ export const LADDER_META_TERMS: readonly string[] = [
   'durable note',
   'durable test',
   'the minimum next step',
+  // detector-tuning variants (Phase 1) — catch "a light test floor", "the minimum X":
+  'a light',
+  'the minimum',
+  'light floor',
 ];
 
 export interface WhyDescVoicePattern {
