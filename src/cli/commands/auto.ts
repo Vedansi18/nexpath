@@ -16,6 +16,7 @@ import type { StreamBPresenceResult } from '../../classifier/StreamBPresenceClas
 import { shouldFireStage2 } from '../../classifier/Stage2Trigger.js';
 import { generatePinchLabel } from '../../decision-session/PinchGenerator.js';
 import { pinchSignalTypeForFlag } from '../../decision-session/content-template-source.js';
+import { isInjectedPromptEcho } from '../../decision-session/whydesc-delivery.js';
 import { selectionRegister } from '../../decision-session/selection-registry.js';
 import { resolvePinchFields } from '../../decision-session/signal-pinch-fields.js';
 import type { Stage } from '../../classifier/types.js';
@@ -169,7 +170,9 @@ export async function runAuto(
     const injectedText = guardMgr.current.lastInjectedPrompt ?? null;
     if (injectedText !== null) {
       guardMgr.clearInjectedPrompt(store);
-      if (injectedText === input.promptText) {
+      // Robust echo match (not exact ===): the delivered prompt may be option + why-desc
+      // (multi-line) and the agent can reformat it, so recognise it by normalized / option-prefix.
+      if (isInjectedPromptEcho(injectedText, input.promptText)) {
         logger.info('pipeline_outcome', { outcome: 'no_action', reason: 'advisory_injected' });
         return { outcome: 'no_action' };
       }
