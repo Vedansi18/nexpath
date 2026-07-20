@@ -59,6 +59,22 @@ describe('content-template-grounding — simpler derive (b)', () => {
     expect(seen).toMatch(/KEEPING the topic\/keyword/i);
   });
 
+  it('the derive prompt keeps the whyDesc in agent voice (Phase 16.2)', async () => {
+    let seen = '';
+    const spy = {
+      chat: { completions: { create: async (args: { messages: { content: string }[] }) => {
+        seen = args.messages[0].content;
+        return { choices: [{ message: { content: '{"option":"o","whyDesc":"w"}' } }] };
+      } } },
+    } as unknown as import('openai').default;
+    await deriveSimplerCell({ option: 'o', whyDesc: 'w' }, spy);
+    // The simplified whyDesc must stay agent-voice — a direct instruction to the coding agent.
+    expect(seen).toMatch(/agent voice/i);
+    expect(seen).toMatch(/direct instruction to the coding agent/i);
+    // The option channel is still framed as the message the user sends to the agent.
+    expect(seen).toMatch(/message the user sends to their coding agent/i);
+  });
+
   it('re-appends the L2 safeguard if the simplified why-desc dropped it', async () => {
     const safeguard = 'still, confirm with me before deleting anything';
     const client = mockClient(JSON.stringify({ option: 'simpler', whyDesc: 'simpler why (no safeguard)' }));
