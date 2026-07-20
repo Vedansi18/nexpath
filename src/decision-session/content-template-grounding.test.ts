@@ -208,6 +208,24 @@ describe('content-template-grounding — why-desc weave', () => {
     expect(seen).toMatch(/established practice/i);   // corroborated → practice wording
     expect(seen).toMatch(/available capability/i);   // capability → capability wording
   });
+
+  it('the weave prompt directs agent voice and grounds facts as project context (not "you already")', async () => {
+    let seen = '';
+    const spy = {
+      chat: { completions: { create: async (args: { messages: { content: string }[] }) => {
+        seen = args.messages[0].content;
+        return { choices: [{ message: { content: '{"whyDesc":"x"}' } }] };
+      } } },
+    } as unknown as import('openai').default;
+    await weaveWhyDesc({ coreLine: 'c', facts: [{ text: 'reliably writes tests', tier: 'corroborated' }] }, spy);
+    // Phase 16.1: the woven why-desc must stay agent-voice — a direct instruction to the coding agent.
+    expect(seen).toMatch(/agent voice/i);
+    expect(seen).toMatch(/instruction addressed to the coding agent/i);
+    // Facts are grounded as project/environment context, not "you already…" (which the agent reads as itself).
+    expect(seen).toMatch(/the project already/i);
+    expect(seen).not.toMatch(/you already/i);
+    expect(seen).not.toMatch(/your setup has/i);
+  });
 });
 
 describe('content-template-grounding — prompt-derived param extraction', () => {
