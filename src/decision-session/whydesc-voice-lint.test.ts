@@ -72,7 +72,7 @@ describe('whydesc-voice-lint — per-pattern units', () => {
 describe('whydesc-voice-lint — shipped worklist (Phase-1 red-count)', () => {
   // BASELINE ratchet: the current flagged-cell count. Authoring (Phases 3–15) only DECREASES it.
   // The gate never lets it grow. Update DOWN as classes go green; must reach 0 by Phase 15.
-  const BASELINE = 910;
+  const BASELINE = 891;
 
   it('reports the worklist and never exceeds the baseline', () => {
     const report = scanWhyDescVoice(SHIPPED_CONTENT_TEMPLATES);
