@@ -415,7 +415,7 @@ export function mountNexpathPanel(root, { onEvent }) {
         if (focused) {
           const hintRow = document.createElement('div');
           hintRow.className = 'np-row np-hint-row';
-          hintRow.innerHTML = `<div class="np-rail"></div><div class="np-content">press Space for details</div>`;
+          hintRow.innerHTML = `<div class="np-rail"></div><div class="np-content">press Space to toggle details</div>`;
           node.appendChild(hintRow);
         }
 
