@@ -69,16 +69,14 @@ describe('whydesc-voice-lint — per-pattern units', () => {
   });
 });
 
-describe('whydesc-voice-lint — shipped worklist (Phase-1 red-count)', () => {
-  // BASELINE ratchet: the flagged-cell count. Authoring only DECREASED it, one class at a
-  // time, and it has now reached 0 — every shipped static why-desc cell is agent-voice-clean.
-  // This is now a terminal regression lock: no static cell may drift back to caption voice.
-  const BASELINE = 0;
-
-  it('every shipped static why-desc cell is agent-voice-clean (worklist at 0)', () => {
+describe('whydesc-voice-lint — permanent agent-voice CI gate', () => {
+  // Permanent regression gate (no baseline / ratchet): every shipped static why-desc cell must be
+  // agent-voice-clean. Any cell drifting back to caption, situation-statement, user-narration, or
+  // human-only voice fails the build.
+  it('every shipped static why-desc cell is agent-voice-clean', () => {
     const report = scanWhyDescVoice(SHIPPED_CONTENT_TEMPLATES);
     // eslint-disable-next-line no-console
     console.log('[whydesc-voice-lint] flagged cells:', report.total, 'byPattern:', JSON.stringify(report.byPattern));
-    expect(report.total, `${report.total} static cell(s) drifted back to caption voice: ${JSON.stringify(report.byPattern)}`).toBe(BASELINE);
+    expect(report.total, `${report.total} static cell(s) drifted from agent voice: ${JSON.stringify(report.byPattern)}`).toBe(0);
   });
 });
