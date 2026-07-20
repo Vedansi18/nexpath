@@ -535,6 +535,20 @@ export function mountNexpathPanel(root, { onEvent }) {
     // engine mounts us in a CLOSED shadow root, and composedPath hides our internals from
     // any listener outside that shadow, so the guard rejected every key — arrows/Enter did
     // nothing. Confirmed live on Lovable 2026-07-09.)
+    //
+    // stopPropagation on every handled key (below): preventDefault alone only cancels the
+    // browser's OWN default action — it does NOT stop the same event from continuing to
+    // bubble past `el`, out of this closed shadow root, into the host page's document. Agent
+    // pages commonly bind their own document-level key handlers (e.g. ArrowUp to recall the
+    // last prompt in the chat box) that don't care about our shadow internals; left unblocked,
+    // that handler still runs on OUR arrow/Enter/Escape presses and can refocus the agent's own
+    // textarea out from under us — matching the reported symptom (Alt+Shift+T opens the
+    // adjust chooser fine, since it's a modified combo agent history-recall handlers ignore,
+    // but the following bare ArrowUp/ArrowDown gets reinterpreted by the page and steals focus,
+    // so nothing in the popup responds again until a manual click re-triggers the pointerdown
+    // refocus above). stopPropagation makes every key we fully handle invisible to the host
+    // page, closing that path without touching the intentional click-away-releases-focus
+    // design (that's driven by pointerdown/click, never by keydown, so it's unaffected).
 
     // Disable for this project (the CLI's Ctrl+X, TtySelectFn \x18 — remapped to
     // Alt+Shift+X per user decision 2026-07-11). Matched on e.code (physical key):
@@ -542,24 +556,24 @@ export function mountNexpathPanel(root, { onEvent }) {
     // a symbol) and layout-dependent elsewhere — e.code 'KeyX' is stable on every
     // OS/layout. No ctrl/meta so browser chords can't overlap. Works in any view.
     if (e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey && e.code === 'KeyX') {
-      emitDisable(); e.preventDefault(); return;
+      emitDisable(); e.preventDefault(); e.stopPropagation(); return;
     }
     // Adjust frequency/role (the CLI's Ctrl+T, \x14 — remapped to Alt+Shift+T per
     // user decision 2026-07-11; plain Ctrl+T is the browser's new-tab shortcut and
     // non-interceptable). Same e.code matching rationale as Alt+Shift+X above.
     // Opens the CLI-parity IN-PANEL chooser (runCtrlTRootChooser), not the options page.
     if (e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey && e.code === 'KeyT') {
-      openAdjust(); e.preventDefault(); return;
+      openAdjust(); e.preventDefault(); e.stopPropagation(); return;
     }
 
     if (view === 'adjust' || view === 'adjust-freq' || view === 'adjust-role') {
       const n = adjustChoices().length;
-      if (e.key === 'ArrowDown') { adjustFocusedIndex = Math.min(n - 1, adjustFocusedIndex + 1); render(); e.preventDefault(); }
-      else if (e.key === 'ArrowUp') { adjustFocusedIndex = Math.max(0, adjustFocusedIndex - 1); render(); e.preventDefault(); }
-      else if (e.key === 'Enter') { activateAdjust(adjustFocusedIndex); e.preventDefault(); }
+      if (e.key === 'ArrowDown') { adjustFocusedIndex = Math.min(n - 1, adjustFocusedIndex + 1); render(); e.preventDefault(); e.stopPropagation(); }
+      else if (e.key === 'ArrowUp') { adjustFocusedIndex = Math.max(0, adjustFocusedIndex - 1); render(); e.preventDefault(); e.stopPropagation(); }
+      else if (e.key === 'Enter') { activateAdjust(adjustFocusedIndex); e.preventDefault(); e.stopPropagation(); }
       else if (e.key === 'Escape') {
         if (view === 'adjust') { view = 'options'; } else { view = 'adjust'; adjustFocusedIndex = 0; }
-        render(); e.preventDefault();
+        render(); e.preventDefault(); e.stopPropagation();
       }
       return;
     }
@@ -567,20 +581,20 @@ export function mountNexpathPanel(root, { onEvent }) {
     if (view === 'confirm') {
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         confirmFocusedIndex = confirmFocusedIndex === 0 ? 1 : 0;
-        render(); e.preventDefault();
+        render(); e.preventDefault(); e.stopPropagation();
       } else if (e.key === 'Enter') {
-        activateConfirm(confirmFocusedIndex); e.preventDefault();
+        activateConfirm(confirmFocusedIndex); e.preventDefault(); e.stopPropagation();
       } else if (e.key === 'Escape') {
-        backFromConfirm(); e.preventDefault();
+        backFromConfirm(); e.preventDefault(); e.stopPropagation();
       }
       return;
     }
 
     const rows = focusables();
-    if (e.key === 'ArrowDown') { focusedIndex = Math.min(rows.length - 1, focusedIndex + 1); render(); e.preventDefault(); }
-    else if (e.key === 'ArrowUp') { focusedIndex = Math.max(0, focusedIndex - 1); render(); e.preventDefault(); }
-    else if (e.key === 'Enter') { activate(rows[focusedIndex]); e.preventDefault(); }
-    else if (e.key === 'Escape') { emitSkip(); e.preventDefault(); } // CLI parity: Esc = skip (was dismiss)
+    if (e.key === 'ArrowDown') { focusedIndex = Math.min(rows.length - 1, focusedIndex + 1); render(); e.preventDefault(); e.stopPropagation(); }
+    else if (e.key === 'ArrowUp') { focusedIndex = Math.max(0, focusedIndex - 1); render(); e.preventDefault(); e.stopPropagation(); }
+    else if (e.key === 'Enter') { activate(rows[focusedIndex]); e.preventDefault(); e.stopPropagation(); }
+    else if (e.key === 'Escape') { emitSkip(); e.preventDefault(); e.stopPropagation(); } // CLI parity: Esc = skip (was dismiss)
     else if (e.key === ' ') {
       const row = rows[focusedIndex];
       if (row && row.kind === 'option') {
@@ -590,7 +604,7 @@ export function mountNexpathPanel(root, { onEvent }) {
         else expanded.add(row.opt.id);
         render();
       }
-      e.preventDefault();
+      e.preventDefault(); e.stopPropagation();
     }
   }
   el.addEventListener('keydown', onKeyDown); // el-scoped: fires only while the panel is focused
