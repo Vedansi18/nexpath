@@ -198,11 +198,11 @@ export const ABSENCE_CREATIVE_VS_CORE_RATIO_RECORD: ContentTemplateRecord = {
   registerOverrides: { beginner: CREATIVE_VS_CORE_RATIO_BEGINNER_OVERRIDE },
   paramAxes: VIBE_PARAM_AXES,
   levelForms: {
-    1: form("Quick gut-check: is more effort going to creative extras than to the core product right now?", "The lightest ratio check: creative-versus-core effort sensed before the next extra."),
-    2: form("Eyeball the split: roughly how much of this session went to creative extras versus core function?", "A light pass: the creative-versus-core effort split estimated for the session."),
-    3: form("Value-driven development: 'features that generate the maximum value for the users without creating the maximum cost.' Before the next creative or aesthetic feature — look at this session: what proportion of prompts went to core product functionality vs. creative/extra features? If more than 30-40% is creative, the core is under-served.", "Session ratio of core vs creative effort hasn't been audited — creative work risks outweighing core user value."),
-    4: form("Tally the ratio honestly: count the prompts spent on core product function versus creative or aesthetic extras, and rebalance toward core if the extras are winning.", "Beyond a gut-check: the creative-versus-core ratio tallied and rebalanced toward core."),
-    5: form("Write a quick ratio note: core-function effort versus creative effort this session, where it's out of balance, and the rebalance plan — so creative work supports the core instead of outweighing it.", "A durable ratio note of core-versus-creative effort and the rebalance plan."),
+    1: form("Quick gut-check: is more effort going to creative extras than to the core product right now?", "Just a rough sense of whether creative extras are outweighing the core right now — no exact count needed yet."),
+    2: form("Eyeball the split: roughly how much of this session went to creative extras versus core function?", "Estimate the split by feel — roughly what share of the session went to creative extras versus core — not a precise tally yet."),
+    3: form("Value-driven development: 'features that generate the maximum value for the users without creating the maximum cost.' Before the next creative or aesthetic feature — look at this session: what proportion of prompts went to core product functionality vs. creative/extra features? If more than 30-40% is creative, the core is under-served.", "Compare, for this session, the share of prompts spent on core product function versus creative extras — if creative runs past 30-40%, treat the core as under-served and rebalance."),
+    4: form("Tally the ratio honestly: count the prompts spent on core product function versus creative or aesthetic extras, and rebalance toward core if the extras are winning.", "Base the tally on actual prompt counts, not impression — core function versus creative extras — and call it balanced only once core is clearly ahead."),
+    5: form("Write a quick ratio note: core-function effort versus creative effort this session, where it's out of balance, and the rebalance plan — so creative work supports the core instead of outweighing it.", "Capture a short ratio note — core-function effort versus creative effort this session, where it's out of balance, and the rebalance plan — so creative work stays in support of the core, not ahead of it."),
   },
 };
 
@@ -213,11 +213,11 @@ export const ABSENCE_ERROR_UNDERSTANDING_RECORD: ContentTemplateRecord = {
   signalType: 'ABSENCE_ERROR_UNDERSTANDING', source: 'shipped', schemaVersion: 1, slots: [],
   paramAxes: VIBE_PARAM_AXES,
   levelForms: {
-    1: form("Before asking me to fix this error, read the error message once and tell me what it says.", "The lightest step: the error message read and put in plain words before a fix."),
-    2: form("Read the error message, then tell me what you think went wrong and where.", "A light pass: the error read and a first guess at the cause shared."),
-    3: form("1. Before asking to fix this error — read the error message carefully.\n2. Share with me: what do you think it's saying went wrong?\n3. Then tell me: does your explanation match where the problem is in the code?", "The error message hasn't been read and explained — fixing without understanding leads to repeating the same class of error."),
-    4: form("Read the whole error, not just the last line: the message, the exact file and line it points to, and what changed just before it appeared — then name which of those is the actual cause.", "Beyond a first read: the full error traced to a file, line, and recent change, and the real cause named."),
-    5: form("Make read-the-error-first a habit: every time, read the error message and explain it before any fix — so fixes target the real cause, not a guess.", "A standing habit: the error read and understood before any fix is attempted."),
+    1: form("Before asking me to fix this error, read the error message once and tell me what it says.", "Just put what the error message reports into plain words first — understand it before any fix, don't guess at it."),
+    2: form("Read the error message, then tell me what you think went wrong and where.", "Take one read of the error, then give a first guess at what went wrong and where — the cause, not just the text."),
+    3: form("1. Before asking to fix this error — read the error message carefully.\n2. Share with me: what do you think it's saying went wrong?\n3. Then tell me: does your explanation match where the problem is in the code?", "Trace the error to what it actually reports, say that back, then confirm it matches where the problem sits in the code — so the fix targets the cause, not a symptom."),
+    4: form("Read the whole error, not just the last line: the message, the exact file and line it points to, and what changed just before it appeared — then name which of those is the actual cause.", "Take the whole error — message, the file and line it points to, and what changed just before it appeared — and name which of those is the real cause, not just the last line."),
+    5: form("Make read-the-error-first a habit: every time, read the error message and explain it before any fix — so fixes target the real cause, not a guess.", "Hold read-the-error-first as a standing habit — every error gets read and explained before any fix, so fixes land on the real cause instead of a guess."),
   },
 };
 
@@ -226,11 +226,11 @@ export const ABSENCE_REQUIREMENT_CLARITY_RECORD: ContentTemplateRecord = {
   signalType: 'ABSENCE_REQUIREMENT_CLARITY', source: 'shipped', schemaVersion: 1, slots: [],
   paramAxes: VIBE_PARAM_AXES,
   levelForms: {
-    1: form("Before I build this, tell me in one line what it should do when it's working.", "The lightest step: what working looks like stated in one line before building."),
-    2: form("Tell me what it should do, what working looks like, and one thing it should not do.", "A light pass: the goal, the working result, and one non-goal described."),
-    3: form("1. Before I build this — tell me specifically what you want it to do.\n2. Share with me: what does it look like when it's working correctly?\n3. Then tell me: what should NOT happen — is there anything it should avoid doing?", "What 'working' looks like hasn't been described — building proceeds without a target."),
-    4: form("Pin the target with an example: what it does, what 'working' looks like shown as one concrete input and the result it should give, and what it must avoid — so done is checkable, not a feeling.", "Beyond a description: the working result shown as a concrete input-and-result example."),
-    5: form("Write a short requirements note: what it should do, what 'working' looks like in concrete terms, and what it must avoid — the target we build and check against.", "A durable requirements note of the working target and what to avoid."),
+    1: form("Before I build this, tell me in one line what it should do when it's working.", "Just one line on what working looks like before building — a target to aim at, not the full spec yet."),
+    2: form("Tell me what it should do, what working looks like, and one thing it should not do.", "Name the goal, what a working result looks like, and one thing it must not do — enough to build against, no more."),
+    3: form("1. Before I build this — tell me specifically what you want it to do.\n2. Share with me: what does it look like when it's working correctly?\n3. Then tell me: what should NOT happen — is there anything it should avoid doing?", "Pin down what it should do, what working correctly looks like, and what must not happen — so building has a target instead of a guess."),
+    4: form("Pin the target with an example: what it does, what 'working' looks like shown as one concrete input and the result it should give, and what it must avoid — so done is checkable, not a feeling.", "Anchor the target to one concrete example — the input and the working result it should give — plus what it must avoid, so done is checkable, not a feeling."),
+    5: form("Write a short requirements note: what it should do, what 'working' looks like in concrete terms, and what it must avoid — the target we build and check against.", "Capture a short requirements note — what it does, what working looks like in concrete terms, and what it must avoid — the target the build is checked against."),
   },
 };
 
@@ -239,11 +239,11 @@ export const ABSENCE_COPY_PASTE_AWARENESS_RECORD: ContentTemplateRecord = {
   signalType: 'ABSENCE_COPY_PASTE_AWARENESS', source: 'shipped', schemaVersion: 1, slots: [],
   paramAxes: VIBE_PARAM_AXES,
   levelForms: {
-    1: form("Before adding the generated code, read through it once.", "The lightest step: the generated code read once before it's added."),
-    2: form("Read the generated code and tell me, in plain words, what the main parts do.", "A light pass: the generated code read and its main parts explained."),
-    3: form("1. Before adding the generated code to your project — read through it.\n2. Share with me: what does each part do in plain words?\n3. If there's a part you're not sure about, point it out and we'll go through it together before it goes in.", "Generated code hasn't been read for understanding — using code one can't explain creates future-debugging debt."),
-    4: form("Before it goes in, read every part and actively check the one you're least sure of — confirm it does what you think by reading it closely or running it — and only then keep any of it.", "Beyond reading: the least-sure part actively confirmed, not just read."),
-    5: form("Make read-before-use the rule: never add generated code you can't explain — read it, understand each part, and only then keep it.", "A standing rule: generated code is read and understood before it's ever kept."),
+    1: form("Before adding the generated code, read through it once.", "Just enough of a read to know what the generated code does before adding it — not a full audit yet."),
+    2: form("Read the generated code and tell me, in plain words, what the main parts do.", "Go through the generated code once and put its main parts in plain words — so nothing goes in unexamined; a read, not a skim."),
+    3: form("1. Before adding the generated code to your project — read through it.\n2. Share with me: what does each part do in plain words?\n3. If there's a part you're not sure about, point it out and we'll go through it together before it goes in.", "Walk the generated code part by part, say what each does in plain words, and flag anything you're unsure of to resolve before it goes in — using code you can't explain builds debugging debt."),
+    4: form("Before it goes in, read every part and actively check the one you're least sure of — confirm it does what you think by reading it closely or running it — and only then keep any of it.", "Give every part a real read before it goes in, and actively test the one you're least sure of — confirm it by reading closely or running it — keeping only what you can vouch for."),
+    5: form("Make read-before-use the rule: never add generated code you can't explain — read it, understand each part, and only then keep it.", "Hold read-before-use as the rule — never keep generated code you can't explain; read it, understand each part, then keep it."),
   },
 };
 
@@ -252,11 +252,11 @@ export const ABSENCE_DEBUGGING_OBSERVATION_RECORD: ContentTemplateRecord = {
   signalType: 'ABSENCE_DEBUGGING_OBSERVATION', source: 'shipped', schemaVersion: 1, slots: [],
   paramAxes: VIBE_PARAM_AXES,
   levelForms: {
-    1: form("Before I look at the bug, tell me what actually happened.", "The lightest step: what happened with the bug described before a fix."),
-    2: form("Describe the bug: what you expected, what happened instead, and any error shown.", "A light pass: expected-versus-actual and any error captured for the bug."),
-    3: form("1. Before I look at the bug — describe what happened.\n2. Share with me: what did you expect to happen, and what actually happened instead?\n3. Then tell me: is there an error message, and if so, what does it say?", "What happened vs expected hasn't been described — fixing without observation guesses at the bug."),
-    4: form("Pin the bug down: the exact steps that trigger it, what you expected versus what happened, and the precise error or wrong output — the facts a fix can target.", "Beyond a description: the bug's repro steps and exact symptom pinned down."),
-    5: form("Make observe-before-fixing the habit: every bug gets described — steps, expected, actual, error — before any fix, so the fix targets the real behaviour.", "A standing habit: each bug observed and described before a fix is tried."),
+    1: form("Before I look at the bug, tell me what actually happened.", "Just what actually happened with the bug, in plain terms, before any fix — the symptom first, not a guess at the cause."),
+    2: form("Describe the bug: what you expected, what happened instead, and any error shown.", "Give the bug's expected-versus-actual and any error shown — the observation a fix can start from."),
+    3: form("1. Before I look at the bug — describe what happened.\n2. Share with me: what did you expect to happen, and what actually happened instead?\n3. Then tell me: is there an error message, and if so, what does it say?", "Set down what you expected, what happened instead, and any error message for the bug — fixing without that observation is guessing."),
+    4: form("Pin the bug down: the exact steps that trigger it, what you expected versus what happened, and the precise error or wrong output — the facts a fix can target.", "Nail the bug to facts — the exact steps that trigger it, expected versus actual, and the precise error or wrong output — so the fix has something concrete to target."),
+    5: form("Make observe-before-fixing the habit: every bug gets described — steps, expected, actual, error — before any fix, so the fix targets the real behaviour.", "Hold observe-before-fixing as the habit — every bug gets its steps, expected, actual, and error written down before any fix, so the fix targets real behaviour."),
   },
 };
 
@@ -265,11 +265,11 @@ export const ABSENCE_LEARNING_CONSOLIDATION_RECORD: ContentTemplateRecord = {
   signalType: 'ABSENCE_LEARNING_CONSOLIDATION', source: 'shipped', schemaVersion: 1, slots: [],
   paramAxes: VIBE_PARAM_AXES,
   levelForms: {
-    1: form("Before we wrap up, tell me one thing you learned this session.", "The lightest step: one thing learned this session named before wrapping up."),
-    2: form("Recap what you learned: the main thing you understand now, and anything still unclear.", "A light pass: the main learning recapped and the unclear parts named."),
-    3: form("1. We've covered a lot in this session — take a moment and think about what you actually learned.\n2. Share with me: what's the most important thing you now understand that you didn't before?\n3. Then tell me: is there anything we covered that still feels unclear or confusing?", "Session learning hasn't been recapped — built code without understanding becomes a maintenance problem."),
-    4: form("Consolidate the learning: the key things you now understand, how they connect, and the specific parts still fuzzy enough to revisit next time.", "Beyond a recap: the learning connected and the fuzzy parts marked to revisit."),
-    5: form("Write a short learning note: what you understood this session, how the pieces fit, and what to revisit — so the learning sticks instead of fading.", "A durable learning note of what was understood and what to revisit."),
+    1: form("Before we wrap up, tell me one thing you learned this session.", "Just one thing learned this session, named before wrapping up — a single takeaway, not a full recap."),
+    2: form("Recap what you learned: the main thing you understand now, and anything still unclear.", "Pull together the main thing learned and name whatever's still unclear — the session's takeaway plus its open gaps."),
+    3: form("1. We've covered a lot in this session — take a moment and think about what you actually learned.\n2. Share with me: what's the most important thing you now understand that you didn't before?\n3. Then tell me: is there anything we covered that still feels unclear or confusing?", "Name the most important thing learned this session that you didn't understand before, and flag anything still confusing — so the learning consolidates instead of fading."),
+    4: form("Consolidate the learning: the key things you now understand, how they connect, and the specific parts still fuzzy enough to revisit next time.", "Connect the learning — the key things now understood, how they fit together, and the parts still fuzzy enough to revisit next time — not just a list of topics."),
+    5: form("Write a short learning note: what you understood this session, how the pieces fit, and what to revisit — so the learning sticks instead of fading.", "Capture a short learning note — what was understood this session, how the pieces fit, and what to revisit — so it sticks instead of fading."),
   },
 };
 
@@ -278,11 +278,11 @@ export const ABSENCE_SIMPLE_SOLUTION_FIRST_RECORD: ContentTemplateRecord = {
   signalType: 'ABSENCE_SIMPLE_SOLUTION_FIRST', source: 'shipped', schemaVersion: 1, slots: [],
   paramAxes: VIBE_PARAM_AXES,
   levelForms: {
-    1: form("Before building something complex, ask: is there a simpler way to get the same result?", "The lightest step: a simpler path considered before the complex one."),
-    2: form("Describe what you're trying to do in plain terms, and let's find the simplest version that works first.", "A light pass: the goal stated plainly and the simplest working version tried first."),
-    3: form("1. Before building something complex — ask: is there a simpler way to get the same result? The simplest solution that works is almost always the right one to start with.\n2. Share what you're trying to do in plain terms. Let's find the simple version first.", "Simple-first solution hasn't been tried — complexity-first creates code that can't be unsimplified."),
-    4: form("Start from the simplest thing that could work: write it, see if it's enough, and add complexity only where the simple version actually falls short.", "Beyond trying simple: the simplest version built first and complexity added only where it's needed."),
-    5: form("Make simple-first the habit: always reach for the simplest solution that works and add complexity only when a real need proves it — so code stays easy to change.", "A standing habit: the simplest working solution first, complexity only when proven needed."),
+    1: form("Before building something complex, ask: is there a simpler way to get the same result?", "Just check for a simpler way to the same result before reaching for something complex — one honest look, not a redesign."),
+    2: form("Describe what you're trying to do in plain terms, and let's find the simplest version that works first.", "State the goal plainly, then try the simplest version that works before anything heavier — prove the easy path can't carry it first."),
+    3: form("1. Before building something complex — ask: is there a simpler way to get the same result? The simplest solution that works is almost always the right one to start with.\n2. Share what you're trying to do in plain terms. Let's find the simple version first.", "Reach for the simplest thing that works before anything complex, and escalate only if it genuinely can't carry the case — the simple solution is almost always the right start."),
+    4: form("Start from the simplest thing that could work: write it, see if it's enough, and add complexity only where the simple version actually falls short.", "Build the simplest thing that could work first, see if it's enough, and add complexity only where that version actually falls short — not preemptively."),
+    5: form("Make simple-first the habit: always reach for the simplest solution that works and add complexity only when a real need proves it — so code stays easy to change.", "Hold simple-first as the habit — always reach for the simplest working solution and add complexity only when a real need proves it, so the code stays easy to change."),
   },
 };
 
@@ -291,11 +291,11 @@ export const ABSENCE_SINGLE_RESPONSIBILITY_PROMPTING_RECORD: ContentTemplateReco
   signalType: 'ABSENCE_SINGLE_RESPONSIBILITY_PROMPTING', source: 'shipped', schemaVersion: 1, slots: [],
   paramAxes: VIBE_PARAM_AXES,
   levelForms: {
-    1: form("Send just one thing in this message instead of several at once.", "The lightest step: a single ask in the message instead of many."),
-    2: form("Pick the most important thing and put only that in this message; we'll do the next one after.", "A light pass: the top item sent alone in the message, the rest deferred."),
-    3: form("1. When you send several things at once, the results get messy and hard to check. Try focusing on just one thing per message.\n2. What's the most important thing to do right now? Start with that — then we'll move to the next.", "Single-responsibility prompting hasn't been applied — multiple things asked in one message make responses harder to verify and harder to fix."),
-    4: form("If a task has several parts, break it into a short numbered list and send one part per message, checking each result before sending the next.", "Beyond one ask: a multi-part task split into one-per-message steps, checked between each."),
-    5: form("Make one-ask-per-message the habit: send a single focused request each time and move to the next only once it's done — so nothing gets muddled or skipped.", "A standing habit: one focused request per message, taken in sequence."),
+    1: form("Send just one thing in this message instead of several at once.", "Just one ask in this message instead of several — a single focus keeps the result checkable."),
+    2: form("Pick the most important thing and put only that in this message; we'll do the next one after.", "Put only the most important thing in this message and defer the rest — one item, checked, before the next."),
+    3: form("1. When you send several things at once, the results get messy and hard to check. Try focusing on just one thing per message.\n2. What's the most important thing to do right now? Start with that — then we'll move to the next.", "Keep each message to a single ask rather than several at once — bundled asks get messy and hard to verify; take the most important first and move on once it's done."),
+    4: form("If a task has several parts, break it into a short numbered list and send one part per message, checking each result before sending the next.", "For a multi-part task, split it into a short numbered list and send one part per message, checking each result before the next goes out."),
+    5: form("Make one-ask-per-message the habit: send a single focused request each time and move to the next only once it's done — so nothing gets muddled or skipped.", "Hold one-ask-per-message as the habit — a single focused request each time, moving on only once it's done, so nothing gets muddled or skipped."),
   },
 };
 
@@ -304,11 +304,11 @@ export const ABSENCE_ROLLBACK_AWARENESS_RECORD: ContentTemplateRecord = {
   signalType: 'ABSENCE_ROLLBACK_AWARENESS', source: 'shipped', schemaVersion: 1, slots: [],
   paramAxes: VIBE_PARAM_AXES,
   levelForms: {
-    1: form("Before a big change, do a git commit so there's a snapshot to go back to.", "The lightest safety step: a commit saved before a big change."),
-    2: form("Commit the working state first (git add . then git commit), then make the change.", "A light pass: the working state committed before the change is made."),
-    3: form("1. Before making a big change to your code — do a git commit first. This saves a snapshot you can always go back to if something breaks.\n2. Not sure how? Try: git add . then git commit -m 'working before change'. Then make your change safely.", "Current working state hasn't been committed to git — change-without-snapshot leaves no return path."),
-    4: form("Commit at safe points: a working commit before each risky change, with a clear message, so any step can be rolled back without losing the rest.", "Beyond one snapshot: a clear working commit before each risky step for clean rollback."),
-    5: form("Make commit-before-change the habit: save a working commit before every significant change, so there's always a clean point to roll back to.", "A standing habit: a working commit before every significant change."),
+    1: form("Before a big change, do a git commit so there's a snapshot to go back to.", "Just a git commit before the big change — a snapshot to return to if it breaks, nothing more involved."),
+    2: form("Commit the working state first (git add . then git commit), then make the change.", "Snapshot the working state with a commit first, then make the change — so there's a clean point to return to."),
+    3: form("1. Before making a big change to your code — do a git commit first. This saves a snapshot you can always go back to if something breaks.\n2. Not sure how? Try: git add . then git commit -m 'working before change'. Then make your change safely.", "Save the current working state as a git commit before the big change — without that snapshot a broken change leaves no return path."),
+    4: form("Commit at safe points: a working commit before each risky change, with a clear message, so any step can be rolled back without losing the rest.", "Put a clear working commit before each risky change, with a descriptive message, so any single step can be rolled back without losing the rest."),
+    5: form("Make commit-before-change the habit: save a working commit before every significant change, so there's always a clean point to roll back to.", "Hold commit-before-change as the habit — a working commit before every significant change, so there's always a clean point to roll back to."),
   },
 };
 
@@ -317,11 +317,11 @@ export const ABSENCE_BUILD_VS_UNDERSTAND_RATIO_RECORD: ContentTemplateRecord = {
   signalType: 'ABSENCE_BUILD_VS_UNDERSTAND_RATIO', source: 'shipped', schemaVersion: 1, slots: [],
   paramAxes: VIBE_PARAM_AXES,
   levelForms: {
-    1: form("Pause and check your understanding: in your own words, what does the code we just added do?", "The lightest understanding check: the just-added code explained in plain words."),
-    2: form("Explain the main pieces we built and flag anything you don't fully understand.", "A light pass: the main pieces explained and the gaps in understanding flagged."),
-    3: form("1. We've added a lot of code — can you explain in your own words what it does? Even a rough description is fine.\n2. Understanding what you've built is as important as building it. Code you don't understand becomes a problem you can't fix later.", "Built code understanding hasn't been verified — code one can't explain becomes a problem one can't fix."),
-    4: form("Check understanding across the build: walk each main part, explain what it does and why, and mark the parts you couldn't explain to learn before building more.", "Beyond one explanation: each main part explained and the gaps in understanding marked."),
-    5: form("Make understand-as-you-build the habit: keep the code you can explain level with the code you've added, so you never rely on a part you don't understand.", "A standing habit: understanding kept level with the code being built."),
+    1: form("Pause and check your understanding: in your own words, what does the code we just added do?", "Just put the just-added code in your own words to confirm you understand it — a quick check before moving on, not a full walkthrough."),
+    2: form("Explain the main pieces we built and flag anything you don't fully understand.", "Talk through the main pieces built and flag whatever you don't fully understand — surface the gaps, not only the parts you know."),
+    3: form("1. We've added a lot of code — can you explain in your own words what it does? Even a rough description is fine.\n2. Understanding what you've built is as important as building it. Code you don't understand becomes a problem you can't fix later.", "Put the added code in your own words and name what you can't yet — understanding it matters as much as building it, since code you can't explain becomes a problem you can't fix."),
+    4: form("Check understanding across the build: walk each main part, explain what it does and why, and mark the parts you couldn't explain to learn before building more.", "Go part by part across the build — explain what each does and why, and mark whatever you couldn't explain to understand before building further."),
+    5: form("Make understand-as-you-build the habit: keep the code you can explain level with the code you've added, so you never rely on a part you don't understand.", "Hold understand-as-you-build as the habit — keep the code you can explain level with the code you've added, so you never lean on a part you don't understand."),
   },
 };
 
