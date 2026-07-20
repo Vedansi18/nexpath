@@ -1,9 +1,13 @@
 import { describe, it, expect, vi } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { runDecisionSession, type DecisionSessionInput, type SelectFn } from './DecisionSession.js';
 import { SKIP_NOW } from './options.js';
 import type { GeneratedOptions } from './OptionGenerator.js';
 import { openStore } from '../store/index.js';
 import { setConfig } from '../store/config.js';
+import { findWhyDescVoiceViolations } from './whydesc-voice-lint.js';
 
 // End-to-end for Bug 2: drive the real runDecisionSession selection→prompt path and confirm the
 // delivery combine (2.1) resolves the gate (2.2) through the real DecisionSession wiring — for a
@@ -79,5 +83,40 @@ describe('whydesc-delivery integration — runDecisionSession selection→prompt
     const store = await storeWithGate(true);
     const result = await runDecisionSession(makeInput({ generatedOptions: gen }), store, mockSelect(SKIP_NOW));
     expect(result.outcome).toBe('skipped');
+  });
+
+  // Phase 17.2: drive the real selection→prompt path on an ISOLATED TEMP DB with the gate UNSET,
+  // so delivery resolves through the NEW default (ON). Inspect the injected prompt = option +
+  // agent-voiced why-desc, and confirm the popup sub-line (descBase) shows the same agent-voiced
+  // text (dual-audience "reads well"), and that the why-desc is voice-lint clean.
+  it('default (gate unset) on a temp DB → agent receives option + agent-voiced why-desc; popup reads well', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'nexpath-1702-'));
+    try {
+      const store = await openStore(join(dir, 'prompt-store.db')); // real on-disk DB; whydesc_delivery_enabled NOT set → default
+
+      let popupSubLine = '';
+      const pick: SelectFn = vi.fn(async (input: Parameters<SelectFn>[0]) => {
+        const chosen = input.options.find((o) => o.value === OPTION) ?? input.options[0];
+        popupSubLine = chosen.descBase ?? ''; // the ↳ sub-line the user sees in the popup
+        return chosen.value;
+      });
+
+      const result = await runDecisionSession(makeInput({ generatedOptions: gen }), store, pick);
+      expect(result.outcome).toBe('selected');
+      if (result.outcome !== 'selected') return;
+
+      // The injected prompt the agent receives = option + blank line + why-desc (default-ON, via real wiring).
+      expect(result.selectedPrompt).toBe(`${OPTION}\n\n${WHYDESC}`);
+      // Dual-audience: the popup showed the SAME agent-voiced why-desc as its sub-line.
+      expect(popupSubLine).toBe(WHYDESC);
+      // What reaches the agent is agent-voice clean (no caption / user-narration / human-only drift).
+      expect(findWhyDescVoiceViolations(WHYDESC, OPTION)).toEqual([]);
+
+      // eslint-disable-next-line no-console
+      console.log('[17.2] INJECTED PROMPT >>>\n' + result.selectedPrompt + '\n<<< POPUP SUB-LINE: ' + popupSubLine);
+      store.db.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

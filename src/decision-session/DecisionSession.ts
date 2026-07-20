@@ -424,7 +424,7 @@ export async function runLevel(
   if (result === SHOW_SIMPLER) return 'next';
 
   writeTelemetry(input.projectRoot, 'option_selected', { level, selectedText: (result as string).slice(0, 120) }, store);
-  // Bug 2 delivery (gated by the whydesc_delivery_enabled config, default OFF): deliver the
+  // Bug 2 delivery (gated by the whydesc_delivery_enabled config, default ON): deliver the
   // selected option + its rendered why-desc to the agent. The telemetry above already captured
   // the pure option, so it stays clean.
   return deliverSelectedPrompt(result as string, descBaseByOption.get(result as string), isWhyDescDeliveryEnabled(store));
