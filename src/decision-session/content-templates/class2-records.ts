@@ -227,11 +227,11 @@ export const ABSENCE_CODE_DOCUMENTATION_GAP_RECORD: ContentTemplateRecord = {
   signalType: 'ABSENCE_CODE_DOCUMENTATION_GAP', source: 'shipped', schemaVersion: 1, slots: [],
   paramAxes: VERIFICATION_PARAM_AXES, spine: A6_SPINE,
   levelForms: {
-    1: form('Add a one-line comment on the least-obvious thing just written — the WHY, not the what.', 'One WHY-comment on the least-obvious code is the lightest documentation step.'),
-    2: form('Add WHY-comments on the non-obvious logic just written — the reasoning or edge case each handles.', 'A light pass: WHY-comments capturing the reasoning on the non-obvious logic.'),
-    3: form("Clean Code principle: 'Don't use comments to explain WHAT the code is doing — use them to explain WHY you did it.' For the non-obvious logic just added — add a comment explaining the reasoning, constraint, or edge case it handles. Future maintainers (including you) will need this context.", "The WHY behind non-obvious code just written hasn't been captured in comments."),
-    4: form('Comment the non-obvious logic thoroughly: a WHY-comment per block (reasoning, constraint, edge case) plus docstrings on the public functions.', 'Beyond inline notes: a WHY-comment per non-obvious block plus docstrings on the public surface.'),
-    5: form('Write the doc comments into the code: a WHY-comment on every non-obvious block and a docstring (params, returns, edge behaviour) on each public function — kept with the code.', 'The doc comments and docstrings written into the code so the WHY survives in the file.'),
+    1: form('Add a one-line comment on the least-obvious thing just written — the WHY, not the what.', "Just one WHY-comment on the least-obvious thing just written — the reason it's there, not what it does."),
+    2: form('Add WHY-comments on the non-obvious logic just written — the reasoning or edge case each handles.', "Capture the reasoning behind the non-obvious logic in WHY-comments — the constraint or edge case each handles, not a restatement of the code."),
+    3: form("Clean Code principle: 'Don't use comments to explain WHAT the code is doing — use them to explain WHY you did it.' For the non-obvious logic just added — add a comment explaining the reasoning, constraint, or edge case it handles. Future maintainers (including you) will need this context.", "For the non-obvious logic just added, add a comment explaining the reasoning, constraint, or edge case it handles — a future maintainer, including you, will need that context."),
+    4: form('Comment the non-obvious logic thoroughly: a WHY-comment per block (reasoning, constraint, edge case) plus docstrings on the public functions.', "Put a WHY-comment on every non-obvious block (reasoning, constraint, edge case) plus docstrings on the public functions — thorough, not just the trickiest line."),
+    5: form('Write the doc comments into the code: a WHY-comment on every non-obvious block and a docstring (params, returns, edge behaviour) on each public function — kept with the code.', "Keep the doc comments in the code — a WHY-comment on every non-obvious block and a docstring (params, returns, edge behaviour) on each public function — so the WHY survives in the file."),
   },
 };
 
@@ -240,11 +240,11 @@ export const ABSENCE_TECHNICAL_DEBT_ACKNOWLEDGMENT_RECORD: ContentTemplateRecord
   signalType: 'ABSENCE_TECHNICAL_DEBT_ACKNOWLEDGMENT', source: 'shipped', schemaVersion: 1, slots: [],
   paramAxes: VERIFICATION_PARAM_AXES, spine: A6_SPINE,
   levelForms: {
-    1: form('Tag the shortcut just taken with a TODO so the debt is visible.', 'One TODO on the shortcut is the lightest way to make the debt visible.'),
-    2: form('Tag the shortcut as debt: a TODO/FIXME naming what to fix and why it was deferred.', 'A light pass: the shortcut tagged as debt with what-to-fix and why-deferred.'),
-    3: form("Martin Fowler's Technical Debt Quadrant: 'Prudent Deliberate' debt — acknowledged and added to the backlog — is acceptable. 'Reckless Deliberate' — shortcuts taken without acknowledgment — compounds invisibly. Tag any shortcut with a TODO or FIXME comment before moving on.", "The just-taken shortcut hasn't been tagged as debt — invisible accumulation risk."),
-    4: form('Acknowledge the debt properly: a TODO/FIXME per shortcut (what to fix, why deferred, the risk) and a backlog item so it is tracked, not lost.', 'Beyond a bare tag: each debt item described and tracked on the backlog, not just marked.'),
-    5: form('Write a tech-debt note: each shortcut taken, what it defers, the risk, and the fix plan — tracked as backlog items so the debt stays prudent, not reckless.', 'A durable tech-debt note tracking each shortcut, its risk, and the fix plan.'),
+    1: form('Tag the shortcut just taken with a TODO so the debt is visible.', "Just a TODO on the shortcut just taken so the debt is visible — one tag, not a full write-up."),
+    2: form('Tag the shortcut as debt: a TODO/FIXME naming what to fix and why it was deferred.', "Mark the shortcut as debt with a TODO/FIXME that names what to fix and why it was deferred."),
+    3: form("Martin Fowler's Technical Debt Quadrant: 'Prudent Deliberate' debt — acknowledged and added to the backlog — is acceptable. 'Reckless Deliberate' — shortcuts taken without acknowledgment — compounds invisibly. Tag any shortcut with a TODO or FIXME comment before moving on.", "Tag any shortcut just taken with a TODO or FIXME before moving on — acknowledged debt on the backlog stays prudent; an untagged shortcut compounds invisibly."),
+    4: form('Acknowledge the debt properly: a TODO/FIXME per shortcut (what to fix, why deferred, the risk) and a backlog item so it is tracked, not lost.', "Describe each debt item and track it on the backlog — a TODO/FIXME per shortcut (what to fix, why deferred, the risk) — not just a bare mark."),
+    5: form('Write a tech-debt note: each shortcut taken, what it defers, the risk, and the fix plan — tracked as backlog items so the debt stays prudent, not reckless.', "Capture a tech-debt note — each shortcut taken, what it defers, the risk, and the fix plan — tracked as backlog items so the debt stays prudent, not reckless."),
   },
 };
 
@@ -253,11 +253,11 @@ export const ABSENCE_TEST_DEPTH_CHECK_RECORD: ContentTemplateRecord = {
   signalType: 'ABSENCE_TEST_DEPTH_CHECK', source: 'shipped', schemaVersion: 1, slots: [],
   paramAxes: VERIFICATION_PARAM_AXES, spine: A3_SPINE,
   levelForms: {
-    1: form('Add one test beyond the happy path — an edge case or an error case.', 'One non-happy-path test is the lightest depth check beyond what exists.'),
-    2: form('Add an edge-case test and an error-path test for what was just built.', 'A light depth pass: one edge-case and one error-path test added.'),
-    3: form("Testing pyramid (Mike Cohn, 2009): tests must cover happy paths, edge cases, and negative scenarios. 'Start with happy path tests, then add error cases that verify graceful failure handling.' Happy-path-only tests provide false confidence — everything looks green but real-world conditions break the code.", "Test coverage beyond happy-path (edge cases + negative scenarios) hasn't been added."),
-    4: form('Add tests across the depth categories: boundary values (empty, null, max, min), error paths, and negative cases (invalid input, unexpected state) — at least one each.', 'Beyond a couple cases: a test per depth category — boundary, error, negative.'),
-    5: form('Write the depth tests into the test file: boundary, error-path, and negative cases per decision branch, so coverage is real and the cases run before merging.', 'A durable test file covering boundary, error, and negative branches — real depth, not happy-path-only.'),
+    1: form('Add one test beyond the happy path — an edge case or an error case.', "Just one test past the happy path — an edge case or an error case — a first depth check on what exists."),
+    2: form('Add an edge-case test and an error-path test for what was just built.', "Cover one edge case and one error path with tests for what was just built — depth past the happy path."),
+    3: form("Testing pyramid (Mike Cohn, 2009): tests must cover happy paths, edge cases, and negative scenarios. 'Start with happy path tests, then add error cases that verify graceful failure handling.' Happy-path-only tests provide false confidence — everything looks green but real-world conditions break the code.", "Cover happy paths, edge cases, and negative scenarios with tests — happy-path-only tests give false confidence, looking green while real-world conditions break the code."),
+    4: form('Add tests across the depth categories: boundary values (empty, null, max, min), error paths, and negative cases (invalid input, unexpected state) — at least one each.', "Put at least one test in each depth category — boundary values (empty, null, max, min), error paths, and negative cases (invalid input, unexpected state)."),
+    5: form('Write the depth tests into the test file: boundary, error-path, and negative cases per decision branch, so coverage is real and the cases run before merging.', "Capture the depth tests in the test file — boundary, error-path, and negative cases per decision branch — so coverage is real and the cases run before merging."),
   },
 };
 
@@ -266,11 +266,11 @@ export const ABSENCE_SECURITY_REVIEW_GAP_RECORD: ContentTemplateRecord = {
   signalType: 'ABSENCE_SECURITY_REVIEW_GAP', source: 'shipped', schemaVersion: 1, slots: [],
   paramAxes: VERIFICATION_PARAM_AXES, spine: A3_SPINE,
   levelForms: {
-    1: form('Do a quick security check on the surface just touched — is the input validated?', 'A quick security spot-check is the lightest pass: the most obvious unvalidated input.'),
-    2: form('Do a light security pass on what was just touched: input validation and access checks.', 'A light security pass: input validation plus access checks on the touched surface.'),
-    3: form("OWASP Secure by Design: security must be designed in, not bolted on. For what was just implemented — what security surfaces were introduced? Input validation (are all inputs sanitized?), authorization (is access properly gated?), injection prevention (SQL, command, path traversal). These checks belong during implementation, not as a post-implementation audit. Shift-left: add the check when the surface is created.", "Security review (input validation / authorization / injection prevention) of the just-touched surfaces hasn't been done."),
-    4: form('Audit the security of the touched surfaces thoroughly: input validation, authorization gating, and injection safety (SQL, command, path) per surface, ranked by severity.', 'Beyond a spot-check: a per-surface, severity-ranked security audit of what was touched.'),
-    5: form('Write a security review note: the surfaces, the findings by severity, a dependency check, and the fixes — and make these security checks part of the pre-merge gate.', 'A durable security review note with severity-ranked findings and pre-merge gating.'),
+    1: form('Do a quick security check on the surface just touched — is the input validated?', "Just a quick security check on the surface just touched — is the input validated? — the most obvious gap first."),
+    2: form('Do a light security pass on what was just touched: input validation and access checks.', "Run a quick security pass on what was just touched — input validation and access checks."),
+    3: form("OWASP Secure by Design: security must be designed in, not bolted on. For what was just implemented — what security surfaces were introduced? Input validation (are all inputs sanitized?), authorization (is access properly gated?), injection prevention (SQL, command, path traversal). These checks belong during implementation, not as a post-implementation audit. Shift-left: add the check when the surface is created.", "For what was just implemented, check the security surfaces introduced — input validation (are all inputs sanitized?), authorization (is access gated?), injection prevention (SQL, command, path) — adding the check as the surface is created, not as a later audit."),
+    4: form('Audit the security of the touched surfaces thoroughly: input validation, authorization gating, and injection safety (SQL, command, path) per surface, ranked by severity.', "Take the touched surfaces through a thorough security audit — input validation, authorization gating, and injection safety (SQL, command, path) per surface, ranked by severity."),
+    5: form('Write a security review note: the surfaces, the findings by severity, a dependency check, and the fixes — and make these security checks part of the pre-merge gate.', "Capture a security review note — the surfaces, the findings by severity, a dependency check, and the fixes — and make these security checks part of the pre-merge gate."),
   },
 };
 
@@ -279,11 +279,11 @@ export const ABSENCE_ERROR_HANDLING_COVERAGE_RECORD: ContentTemplateRecord = {
   signalType: 'ABSENCE_ERROR_HANDLING_COVERAGE', source: 'shipped', schemaVersion: 1, slots: [],
   paramAxes: VERIFICATION_PARAM_AXES, spine: A3_SPINE,
   levelForms: {
-    1: form('Handle the most likely error in what was just built — a failed call or bad input.', 'Handling the single most-likely error is the lightest coverage step.'),
-    2: form('Add explicit error handling for the main failure cases in what was just built.', 'A light pass: the main error cases handled rather than left to break.'),
-    3: form("McConnell's defensive programming (Code Complete): 'Defensive programming mandates covering all failure paths, not just happy paths.' For what was just implemented — what are the error states? What happens when an external call fails? What happens when input is malformed? What happens when a database write fails? Each needs explicit handling: error state, fallback behavior, user-facing message. Code that only works on the happy path is incomplete by construction standards.", "Error-path coverage (external failures / malformed input / DB / edge states) for what was just built hasn't been verified."),
-    4: form('Cover the error paths by category: external failures, input validation failures, and edge states — each with explicit handling, a fallback, and a safe message.', 'Beyond the main cases: every error category handled with a fallback and a safe message.'),
-    5: form('Write an error-coverage note plus the handling: the failure modes per category, the fallback behaviour, and tests for the critical error paths — kept with the feature.', 'A durable error-coverage note of failure modes, fallbacks, and the critical-path tests.'),
+    1: form('Handle the most likely error in what was just built — a failed call or bad input.', "Just the single most likely error in what was just built — a failed call or bad input — handled before moving on."),
+    2: form('Add explicit error handling for the main failure cases in what was just built.', "Give the main failure cases explicit error handling in what was just built — handled, not left to break."),
+    3: form("McConnell's defensive programming (Code Complete): 'Defensive programming mandates covering all failure paths, not just happy paths.' For what was just implemented — what are the error states? What happens when an external call fails? What happens when input is malformed? What happens when a database write fails? Each needs explicit handling: error state, fallback behavior, user-facing message. Code that only works on the happy path is incomplete by construction standards.", "For what was just implemented, spell out the error states — what happens when an external call fails, input is malformed, or a database write fails — each with an explicit error state, fallback, and user-facing message, since happy-path-only code is incomplete."),
+    4: form('Cover the error paths by category: external failures, input validation failures, and edge states — each with explicit handling, a fallback, and a safe message.', "Handle the error paths category by category — external failures, input validation failures, and edge states — each with explicit handling, a fallback, and a safe message."),
+    5: form('Write an error-coverage note plus the handling: the failure modes per category, the fallback behaviour, and tests for the critical error paths — kept with the feature.', "Capture an error-coverage note plus the handling — the failure modes per category, the fallback behaviour, and tests for the critical error paths — kept with the feature."),
   },
 };
 
@@ -292,11 +292,11 @@ export const ABSENCE_REFACTORING_CHECKPOINT_RECORD: ContentTemplateRecord = {
   signalType: 'ABSENCE_REFACTORING_CHECKPOINT', source: 'shipped', schemaVersion: 1, slots: [],
   paramAxes: VERIFICATION_PARAM_AXES, spine: A6_SPINE,
   levelForms: {
-    1: form('Before extending the messy code, do one quick refactor — extract or rename the worst part.', 'One small refactor before extending is the lightest checkpoint against compounding mess.'),
-    2: form('Do a refactor pass on the messy code before adding to it: extract repeated logic and rename the confusing parts.', 'A light refactor checkpoint: extract and rename before the feature lands on the mess.'),
-    3: form("Boy Scout Rule (Clean Code): 'Leave the code cleaner than you found it.' Before adding a feature to code that was already acknowledged as messy or complex — do a refactoring pass first. The alternative is adding features on top of complexity, which makes the next change harder, not the same difficulty. The refactoring pass before extending is the investment that prevents compound complexity debt.", "A pre-extension refactor pass on the existing messy code hasn't been done."),
-    4: form('Refactor thoroughly before extending: extract repeated logic into named helpers, simplify the nested conditionals, and rename anything that needed a comment — then add the feature.', 'Beyond one fix: the extract / simplify / rename refactor pass done before the feature lands.'),
-    5: form('Write a refactor note for the cleanup before extending: the extractions, simplifications, and renames done — committed as a checkpoint so the feature lands on clean ground.', 'A durable refactor-checkpoint note of the cleanup committed before the feature was added.'),
+    1: form('Before extending the messy code, do one quick refactor — extract or rename the worst part.', "Just one quick refactor before extending the messy code — extract or rename the worst part — so the mess doesn't compound."),
+    2: form('Do a refactor pass on the messy code before adding to it: extract repeated logic and rename the confusing parts.', "Make a refactor pass on the messy code before adding to it — extract repeated logic and rename the confusing parts."),
+    3: form("Boy Scout Rule (Clean Code): 'Leave the code cleaner than you found it.' Before adding a feature to code that was already acknowledged as messy or complex — do a refactoring pass first. The alternative is adding features on top of complexity, which makes the next change harder, not the same difficulty. The refactoring pass before extending is the investment that prevents compound complexity debt.", "Before adding a feature to code already acknowledged as messy, make a refactoring pass first — extending on top of complexity makes the next change harder, so the pass now prevents compounding debt."),
+    4: form('Refactor thoroughly before extending: extract repeated logic into named helpers, simplify the nested conditionals, and rename anything that needed a comment — then add the feature.', "Clean the code before extending — extract repeated logic into named helpers, simplify the nested conditionals, and rename anything that needed a comment — a full refactor pass, then add the feature."),
+    5: form('Write a refactor note for the cleanup before extending: the extractions, simplifications, and renames done — committed as a checkpoint so the feature lands on clean ground.', "Capture a refactor note for the cleanup before extending — the extractions, simplifications, and renames done — committed as a checkpoint so the feature lands on clean ground."),
   },
 };
 
@@ -305,11 +305,11 @@ export const ABSENCE_SELF_REVIEW_HABIT_RECORD: ContentTemplateRecord = {
   signalType: 'ABSENCE_SELF_REVIEW_HABIT', source: 'shipped', schemaVersion: 1, slots: [],
   paramAxes: VERIFICATION_PARAM_AXES, spine: A3_SPINE,
   levelForms: {
-    1: form('Review the diff of what was just built before moving on.', 'One diff-readback review is the lightest catch after a long run.'),
-    2: form('Review the diff for drift and gaps: does it match intent, and is anything missing?', 'A light review: the diff read back for intent-match and obvious gaps.'),
-    3: form("Google Engineering Practices: 'The author is the first reviewer.' Before submitting or continuing, read back through the diff: does the code do what was intended? Are there naming inconsistencies? Is anything more complex than it needs to be? Are tests missing? The self-review pass catches what was obvious in the context of writing but invisible in isolation — logic errors, naming drift, gaps in coverage.", "The diff-readback self-review hasn't been done."),
-    4: form('Review the whole run end-to-end: intent match, naming and structure coherence, redundancy or conflicts between early and late decisions, and coverage gaps.', 'Beyond a quick read: a whole-run review for coherence, conflicts, and coverage gaps.'),
-    5: form('Write a self-review note: the diff findings (drift, gaps, inconsistencies), the fixes made, and a commit checkpoint — so the review is a habit, not a one-off.', 'A durable self-review note of the findings and fixes, committed as a checkpoint.'),
+    1: form('Review the diff of what was just built before moving on.', "Just read back the diff of what was just built before moving on — a quick self-review, not a rewrite."),
+    2: form('Review the diff for drift and gaps: does it match intent, and is anything missing?', "Read the diff for drift and gaps — does it match intent, and is anything missing? — a quick review of the change itself."),
+    3: form("Google Engineering Practices: 'The author is the first reviewer.' Before submitting or continuing, read back through the diff: does the code do what was intended? Are there naming inconsistencies? Is anything more complex than it needs to be? Are tests missing? The self-review pass catches what was obvious in the context of writing but invisible in isolation — logic errors, naming drift, gaps in coverage.", "Before submitting or continuing, read back through the diff — does the code do what was intended, is naming consistent, is anything more complex than needed, are tests missing? — the self-review catches what was obvious while writing but invisible in isolation."),
+    4: form('Review the whole run end-to-end: intent match, naming and structure coherence, redundancy or conflicts between early and late decisions, and coverage gaps.', "Read the whole run end-to-end in review — intent match, naming and structure coherence, redundancy or conflicts between early and late decisions, and coverage gaps."),
+    5: form('Write a self-review note: the diff findings (drift, gaps, inconsistencies), the fixes made, and a commit checkpoint — so the review is a habit, not a one-off.', "Capture a self-review note — the diff findings (drift, gaps, inconsistencies), the fixes made, and a commit checkpoint — so the review is a habit, not a one-off."),
   },
 };
 
@@ -318,11 +318,11 @@ export const ABSENCE_PERFORMANCE_AWARENESS_RECORD: ContentTemplateRecord = {
   signalType: 'ABSENCE_PERFORMANCE_AWARENESS', source: 'shipped', schemaVersion: 1, slots: [],
   paramAxes: VERIFICATION_PARAM_AXES, spine: A3_SPINE,
   levelForms: {
-    1: form('Check what was just built for one obvious performance problem — an N+1 or an unbounded fetch.', 'A quick check for one obvious performance problem is the lightest awareness step.'),
-    2: form('Do a light performance check: N+1 queries and unbounded fetches in what was just built.', 'A light performance pass: the N+1 and unbounded-fetch patterns checked.'),
-    3: form("Knuth (1974): 'We should not pass up our opportunities in that critical 3%.' The full quote is not an excuse to avoid performance — it's a prioritization rule: ignore the 97% of noncritical paths, but act on the critical 3%. For what was just built — is this in the critical 3%? A full-table fetch, N+1 in a loop, or unthrottled list render qualifies. The check here is awareness, not micro-optimization: is there an obvious performance problem worth addressing before it ships?", "Critical-3%-path awareness check (N+1 / full-table fetch / unthrottled render) hasn't been done."),
-    4: form('Audit the data-heavy paths for performance: N+1 queries, unbounded fetches, and expensive unthrottled renders, plus behaviour at 10x and 100x load.', 'Beyond one issue: the data-heavy patterns audited for performance at projected load.'),
-    5: form('Write a performance note: the data-heavy paths, the findings (N+1, unbounded fetch, expensive render), the load projections, and the fixes — kept with the feature.', 'A durable performance note of the heavy paths, findings, and fixes before ship.'),
+    1: form('Check what was just built for one obvious performance problem — an N+1 or an unbounded fetch.', "Just the one obvious performance problem in what was just built — an N+1 or an unbounded fetch — caught before moving on."),
+    2: form('Do a light performance check: N+1 queries and unbounded fetches in what was just built.', "Run a quick performance check — N+1 queries and unbounded fetches in what was just built."),
+    3: form("Knuth (1974): 'We should not pass up our opportunities in that critical 3%.' The full quote is not an excuse to avoid performance — it's a prioritization rule: ignore the 97% of noncritical paths, but act on the critical 3%. For what was just built — is this in the critical 3%? A full-table fetch, N+1 in a loop, or unthrottled list render qualifies. The check here is awareness, not micro-optimization: is there an obvious performance problem worth addressing before it ships?", "Judge whether what was just built sits in the critical few percent — a full-table fetch, N+1 in a loop, or unthrottled list render qualifies — and address any obvious performance problem before it ships; this is awareness, not micro-optimization."),
+    4: form('Audit the data-heavy paths for performance: N+1 queries, unbounded fetches, and expensive unthrottled renders, plus behaviour at 10x and 100x load.', "Put the data-heavy paths through a performance audit — N+1 queries, unbounded fetches, and expensive unthrottled renders — plus behaviour at 10x and 100x load."),
+    5: form('Write a performance note: the data-heavy paths, the findings (N+1, unbounded fetch, expensive render), the load projections, and the fixes — kept with the feature.', "Capture a performance note — the data-heavy paths, the findings (N+1, unbounded fetch, expensive render), the load projections, and the fixes — kept with the feature."),
   },
 };
 
@@ -331,11 +331,11 @@ export const ABSENCE_DOCUMENTATION_BEFORE_ASK_RECORD: ContentTemplateRecord = {
   signalType: 'ABSENCE_DOCUMENTATION_BEFORE_ASK', source: 'shipped', schemaVersion: 1, slots: [],
   paramAxes: VERIFICATION_PARAM_AXES, spine: A6_SPINE,
   levelForms: {
-    1: form('Check the official docs for this before asking, and tell me what you find.', 'A quick docs check before asking is the lightest step against a guessed answer.'),
-    2: form('Look up the official docs for this, share what you find, then ask what is still unclear.', 'A light pass: the docs checked and what-was-found shared before the question.'),
-    3: form("1. Before asking me this question — check the official documentation for this library or API.\n2. Share with me: what did you find, and is the answer there?\n3. Then ask me what you still couldn't find in the docs.", "An official-docs check before asking hasn't been shared."),
-    4: form('Search the official docs thoroughly for this — the relevant guide, API reference, and examples — share what you found, and name exactly what the docs do not cover.', 'Beyond a quick look: the docs searched across guide and reference, with the gap named.'),
-    5: form('Write a short note from the docs: the relevant doc links, what they answer, and the specific gap that still needs me — so the docs are the first source, not the last.', 'A durable note of the doc sources checked and the remaining gap — docs first, ask second.'),
+    1: form('Check the official docs for this before asking, and tell me what you find.', "Just look up the official docs for this before asking, and share what you find — the docs first, not a guess."),
+    2: form('Look up the official docs for this, share what you find, then ask what is still unclear.', "Search the official docs for this, share what you find, then ask what's still unclear — the docs before the question."),
+    3: form("1. Before asking me this question — check the official documentation for this library or API.\n2. Share with me: what did you find, and is the answer there?\n3. Then ask me what you still couldn't find in the docs.", "Before asking, check the official documentation for this library or API, share what you found and whether the answer's there, then ask only what you still couldn't find in the docs."),
+    4: form('Search the official docs thoroughly for this — the relevant guide, API reference, and examples — share what you found, and name exactly what the docs do not cover.', "Go through the official docs thoroughly — the relevant guide, API reference, and examples — share what you found, and name exactly what the docs don't cover."),
+    5: form('Write a short note from the docs: the relevant doc links, what they answer, and the specific gap that still needs me — so the docs are the first source, not the last.', "Capture a short note from the docs — the relevant doc links, what they answer, and the specific gap that still needs me — so the docs are the first source, not the last."),
   },
 };
 
@@ -344,11 +344,11 @@ export const ABSENCE_OUTPUT_VERIFICATION_RECORD: ContentTemplateRecord = {
   signalType: 'ABSENCE_OUTPUT_VERIFICATION', source: 'shipped', schemaVersion: 1, slots: [],
   paramAxes: VERIFICATION_PARAM_AXES, spine: A3_SPINE,
   levelForms: {
-    1: form('Actually run what was just built and tell me what happens.', 'Running it once is the lightest check that the generated code actually works.'),
-    2: form('Run what was just built on the main path and share whether it behaves as expected.', 'A light pass: the main path run and the actual-vs-expected behaviour shared.'),
-    3: form("1. Before moving on from what was just built — actually run it or try it.\n2. Share with me: does it behave the way you expected?\n3. If anything looks off, tell me what happened and we'll look at it together.", "Whether the generated code actually works hasn't been verified."),
-    4: form('Run what was just built across the main and edge cases, compare each result to what was expected, and report anything that behaves differently.', 'Beyond one run: the main and edge cases run and compared against expectations.'),
-    5: form('Write a quick verification note: the cases you run, the expected vs actual result for each, and anything off — so "it works" is something you ran, not assumed.', 'A durable note of what was run and the expected-vs-actual results — verified, not assumed.'),
+    1: form('Actually run what was just built and tell me what happens.', "Just run what was just built once and say what happens — a real run, not an assumption it works."),
+    2: form('Run what was just built on the main path and share whether it behaves as expected.', "Take what was just built through its main path and share whether it behaves as expected — a real run, not a guess."),
+    3: form("1. Before moving on from what was just built — actually run it or try it.\n2. Share with me: does it behave the way you expected?\n3. If anything looks off, tell me what happened and we'll look at it together.", "Before moving on, actually run or try what was just built, say whether it behaves the way you expected, and flag anything that looks off to look at together."),
+    4: form('Run what was just built across the main and edge cases, compare each result to what was expected, and report anything that behaves differently.', "Put what was just built through the main and edge cases in a run, compare each result to what was expected, and report anything that behaves differently."),
+    5: form('Write a quick verification note: the cases you run, the expected vs actual result for each, and anything off — so "it works" is something you ran, not assumed.', 'Capture a quick verification note — the cases you run, the expected vs actual result for each, and anything off — so "it works" is something you ran, not assumed.'),
   },
 };
 
