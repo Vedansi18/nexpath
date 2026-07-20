@@ -5,19 +5,18 @@
  * why-desc (CA-bound) is shown in the popup but never delivered. This module combines the
  * selected option with its rendered why-desc into the prompt the agent receives.
  *
- * GATED OFF by default: user-voiced why-descs must not reach the agent until the voice pass is
- * complete. The gate is the `whydesc_delivery_enabled` config key (default 'false'); it is read
- * from the store at the delivery point. The combine is a pure function so it can be unit-tested
- * with the gate injected.
+ * Enabled by default now that the why-desc voice pass is complete (the why-descs are agent-voiced).
+ * The gate is the `whydesc_delivery_enabled` config key (default 'true'; set it to 'false' to opt
+ * out); it is read from the store at the delivery point. The combine is a pure function so it can
+ * be unit-tested with the gate injected.
  */
 
 import { getConfig } from '../store/config.js';
 import type { Store } from '../store/db.js';
 
 /**
- * Config key gating why-desc delivery. Default 'false' (see `DEFAULT_CONFIG`) — flipping this ON
- * while cells are still user-voiced would ship worse text to the agent than today. It is enabled
- * only after the why-desc voice rewrite is complete.
+ * Config key gating why-desc delivery. Default 'true' (see `DEFAULT_CONFIG`) now that the why-desc
+ * voice rewrite is complete and the why-descs are agent-voiced; set it to 'false' to opt out.
  */
 export const WHYDESC_DELIVERY_CONFIG_KEY = 'whydesc_delivery_enabled';
 

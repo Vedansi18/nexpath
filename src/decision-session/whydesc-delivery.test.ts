@@ -33,12 +33,12 @@ describe('whydesc-delivery — deliver (gate injected)', () => {
   });
 });
 
-describe('whydesc-delivery — config gate (Decision 2: default OFF)', () => {
+describe('whydesc-delivery — config gate (default ON after the voice pass)', () => {
   it('no store → OFF', () => {
     expect(isWhyDescDeliveryEnabled(undefined)).toBe(false);
   });
-  it('key unset → default OFF', () => {
-    expect(isWhyDescDeliveryEnabled(fakeStore(undefined))).toBe(false);
+  it('key unset → default ON', () => {
+    expect(isWhyDescDeliveryEnabled(fakeStore(undefined))).toBe(true);
   });
   it("explicit 'false' → OFF", () => {
     expect(isWhyDescDeliveryEnabled(fakeStore('false'))).toBe(false);
