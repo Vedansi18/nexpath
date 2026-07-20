@@ -70,15 +70,15 @@ describe('whydesc-voice-lint — per-pattern units', () => {
 });
 
 describe('whydesc-voice-lint — shipped worklist (Phase-1 red-count)', () => {
-  // BASELINE ratchet: the current flagged-cell count. Authoring (Phases 3–15) only DECREASES it.
-  // The gate never lets it grow. Update DOWN as classes go green; must reach 0 by Phase 15.
-  const BASELINE = 74;
+  // BASELINE ratchet: the flagged-cell count. Authoring only DECREASED it, one class at a
+  // time, and it has now reached 0 — every shipped static why-desc cell is agent-voice-clean.
+  // This is now a terminal regression lock: no static cell may drift back to caption voice.
+  const BASELINE = 0;
 
-  it('reports the worklist and never exceeds the baseline', () => {
+  it('every shipped static why-desc cell is agent-voice-clean (worklist at 0)', () => {
     const report = scanWhyDescVoice(SHIPPED_CONTENT_TEMPLATES);
     // eslint-disable-next-line no-console
     console.log('[whydesc-voice-lint] flagged cells:', report.total, 'byPattern:', JSON.stringify(report.byPattern));
-    expect(report.total).toBeGreaterThan(0);
-    expect(report.total, `worklist grew past baseline ${BASELINE} → ${report.total}`).toBeLessThanOrEqual(BASELINE);
+    expect(report.total, `${report.total} static cell(s) drifted back to caption voice: ${JSON.stringify(report.byPattern)}`).toBe(BASELINE);
   });
 });
