@@ -20,6 +20,7 @@ import {
   type SupportedPlatform,
 } from './commands/supported-agents-by-platform.js';
 import { initAction } from './commands/init.js';
+import { envAction } from './commands/env.js';
 import { registerAutoCommand } from './commands/auto.js';
 import { registerStopCommand } from './commands/stop.js';
 import { registerWindsurfHookCommand } from './commands/windsurf-hook.js';
@@ -34,6 +35,7 @@ import {
   telemetrySyncRunAction,
   telemetrySyncPingAction,
 } from './commands/telemetry-sync.js';
+import { contentTemplateCreateAction, contentTemplateValidateAction } from './commands/content-template.js';
 
 export function createProgram(): Command {
   const program = new Command();
@@ -105,6 +107,18 @@ export function createProgram(): Command {
 
   registerFeedbackTestCommand(program);
 
+  // ── Env command (dev-environment probe transparency) ────────────────────────────
+
+  program
+    .command('env')
+    .description('Show locally-probed dev-environment facts (or --clear to purge them)')
+    .option('--clear', 'Purge stored dev-env facts instead of probing')
+    .option('--project <path>', 'Target project root (defaults to cwd)')
+    .option('--db <path>', 'Path to the SQLite database file')
+    .action(async (opts: { clear?: boolean; project?: string; db?: string }) => {
+      await envAction(opts);
+    });
+
   // ── Log command ───────────────────────────────────────────────────────────────
 
   program
@@ -172,6 +186,28 @@ export function createProgram(): Command {
     .description('Remove the stored OpenAI API key from both the keychain and the fallback file')
     .action(async () => {
       await configRemoveApiKeyAction();
+    });
+
+  // ── Content-template authoring command ─────────────────────────────────────────
+
+  const contentTemplateCmd = program
+    .command('content-template')
+    .description('Author and validate shipped-preset content-template records');
+
+  contentTemplateCmd
+    .command('create <signalType>')
+    .description('Scaffold a content-template record skeleton')
+    .option('--shape', 'Scaffold the full 5-column maturity ladder (default: level-1 floor only)')
+    .action((signalType: string, opts: { shape?: boolean }) => {
+      contentTemplateCreateAction(signalType, opts);
+    });
+
+  contentTemplateCmd
+    .command('validate <file>')
+    .description('Schema-validate a record file and run the review gates')
+    .option('--keyword <keyword>', 'Run the same-topic keyword-retention gate for this keyword')
+    .action((file: string, opts: { keyword?: string }) => {
+      contentTemplateValidateAction(file, opts);
     });
 
   // ── Store command ─────────────────────────────────────────────────────────────

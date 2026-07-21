@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { matchKeywords } from './KeywordMatcher.js';
 import { classifyWithTFIDF, resetTFIDFModel } from './TFIDFClassifier.js';
-import { createEmbeddingClassifier } from './EmbeddingClassifier.js';
 import { classifyPrompt } from './PromptClassifier.js';
 import { SessionStateManager, SESSION_GAP_MS, STAGE_CONFIRM_THRESHOLD, MIN_STAGE_CHANGE_CONFIDENCE } from './SessionStateManager.js';
 import { detectAbsenceFlags, ABSENCE_MIN_PROMPTS, ABSENCE_COOLDOWN_PROMPTS } from './AbsenceDetector.js';
@@ -223,69 +222,7 @@ describe('TFIDFClassifier', () => {
   });
 });
 
-// ── EmbeddingClassifier ────────────────────────────────────────────────────────
-
-describe('EmbeddingClassifier', () => {
-  it('classifies using injected embedding function', async () => {
-    // Mock: 8-dim space; centroid call (texts.length===8) returns identity matrix
-    // so each stage i maps to basis vector e_i.
-    // Query call (texts.length===1) returns e_4 (implementation).
-    const dim = 8;
-    const mockEmbed = async (texts: string[]): Promise<number[][]> => {
-      if (texts.length === 8) {
-        // centroid build — return identity matrix rows
-        return texts.map((_, i) => { const v = new Array<number>(dim).fill(0); v[i] = 1; return v; });
-      }
-      // query — match implementation (index 4)
-      const v = new Array<number>(dim).fill(0); v[4] = 1;
-      return [v];
-    };
-
-    const classifier = await createEmbeddingClassifier(mockEmbed);
-    expect(classifier).not.toBeNull();
-
-    const result = await classifier!.classify('any text');
-    expect(result.stage).toBe('implementation'); // index 4 in STAGES
-    expect(result.tier).toBe(3);
-  });
-
-  it('returns null when embedding function throws', async () => {
-    const classifier = await createEmbeddingClassifier(async () => { throw new Error('fail'); });
-    expect(classifier).toBeNull();
-  });
-
-  it('classify() propagates errors from embedFn so caller can catch', async () => {
-    let callCount = 0;
-    const dim = 8;
-    const mockEmbed = async (texts: string[]): Promise<number[][]> => {
-      callCount++;
-      if (callCount === 1) {
-        // First call (centroid build) — succeeds
-        return texts.map((_, i) => { const v = new Array<number>(dim).fill(0); v[i % dim] = 1; return v; });
-      }
-      throw new Error('classify-time failure');
-    };
-    const classifier = await createEmbeddingClassifier(mockEmbed);
-    expect(classifier).not.toBeNull();
-    await expect(classifier!.classify('any text')).rejects.toThrow('classify-time failure');
-  });
-
-  it('allScores contains scores for all 8 stages', async () => {
-    const dim = 8;
-    const mockEmbed = async (texts: string[]): Promise<number[][]> => {
-      if (texts.length === 8) {
-        return texts.map((_, i) => { const v = new Array<number>(dim).fill(0); v[i] = 1; return v; });
-      }
-      // Query: slight lean toward index 2 (architecture)
-      return [new Array<number>(dim).fill(0).map((_, i) => i === 2 ? 0.9 : 0.1)];
-    };
-    const classifier = await createEmbeddingClassifier(mockEmbed);
-    const result = await classifier!.classify('any text');
-    expect(Object.keys(result.allScores).length).toBe(8);
-  });
-});
-
-// ── PromptClassifier cascade ──────────────────────────────────────────────────
+// ── PromptClassifier (two-tier keyword → TF-IDF) ─────────────────────────────
 
 describe('PromptClassifier', () => {
   it('Tier 1 handles high-confidence keyword prompt', async () => {
@@ -301,25 +238,7 @@ describe('PromptClassifier', () => {
     expect(result.tier).toBeLessThanOrEqual(2);
   });
 
-  it('uses Tier 3 when provided and earlier tiers are uncertain', async () => {
-    const dim = 8;
-    // Same identity-matrix mock: centroid call returns identity, query returns e_4 (implementation)
-    const mockEmbed = async (texts: string[]): Promise<number[][]> => {
-      if (texts.length === 8) {
-        return texts.map((_, i) => { const v = new Array<number>(dim).fill(0); v[i] = 1; return v; });
-      }
-      const v = new Array<number>(dim).fill(0); v[4] = 1;
-      return [v];
-    };
-    const embeddingClassifier = await createEmbeddingClassifier(mockEmbed);
-    // Use a very ambiguous, non-vocabulary prompt to ensure Tier 1+2 are uncertain
-    const result = await classifyPrompt('xyzzy plugh frobozz', { embeddingClassifier });
-    // Tier 3 should fire and resolve to implementation
-    expect(result.stage).toBe('implementation');
-    expect(result.tier).toBe(3);
-  });
-
-  it('returns a result even when all tiers uncertain and no embedding classifier', async () => {
+  it('returns a result even when all tiers uncertain', async () => {
     const result = await classifyPrompt('xyzzy plugh frobozz completely unknown text');
     expect(result).toBeDefined();
     expect(result.stage).toBeDefined();
@@ -342,27 +261,6 @@ describe('PromptClassifier', () => {
     const result = await classifyPrompt('deploy to production npm publish go live now');
     expect(result.tier).toBe(1);
     expect(result.stage).toBe('release');
-  });
-
-  it('when Tier 3 throws, falls back to best of Tier 1 / Tier 2', async () => {
-    let callCount = 0;
-    const dim = 8;
-    const badEmbed = async (texts: string[]): Promise<number[][]> => {
-      callCount++;
-      if (callCount === 1) {
-        // centroid build succeeds
-        return texts.map((_, i) => { const v = new Array<number>(dim).fill(0); v[i % dim] = 1; return v; });
-      }
-      throw new Error('tier3-fail');
-    };
-    const embeddingClassifier = await createEmbeddingClassifier(badEmbed);
-    // Ambiguous text so Tier 1 + Tier 2 both below thresholds
-    const result = await classifyPrompt('xyzzy plugh frobozz', { embeddingClassifier });
-    // Tier 3 throws — PromptClassifier catches and returns best T1/T2
-    expect(result).toBeDefined();
-    expect(result.stage).toBeDefined();
-    // tier should be 1 or 2 (T3 failed)
-    expect(result.tier).toBeLessThanOrEqual(2);
   });
 
   it('allScores has scores for both stages in a multi-intent prompt', async () => {
@@ -576,9 +474,9 @@ describe('detectSignals', () => {
     expect(counters['behaviour_testing'].lastSeenAt).toBeNull();
   });
 
-  it('initialSignalCounters covers exactly 129 signals', () => {
+  it('initialSignalCounters covers exactly 137 signals', () => {
     const counters = initialSignalCounters();
-    expect(Object.keys(counters)).toHaveLength(129);
+    expect(Object.keys(counters)).toHaveLength(137);
   });
 
   // ── vibeKeywords — 0.5-weight detection ──────────────────────────────────────
@@ -2853,6 +2751,68 @@ describe('SessionStateManager', () => {
   });
 });
 
+// ── AbsenceDetector — §4.E2 registry-detected gate ──────────────────────────────
+
+describe('AbsenceDetector — registry-detected signals fire on RuntimeContext, not keyword-absence', () => {
+  // The 6 §4.E2 signals are wired through REGISTRY_DETECTED_BY_KEY: each fires ONLY when its
+  // mistake-category detect() reads a firing RuntimeContext ("fire on false probe, stay dark on
+  // unknown"), never via the generic keyword-never-seen path. Default makeState() clears all
+  // gates 1–3 (stageConfidence 0.80, promptsInCurrentStage 20 ≥ every threshold).
+  const REGISTRY_KEYS = [
+    'secret_in_prompt', 'no_version_control', 'no_backup_safety',
+    'no_separate_envs', 'no_automated_security_scanning', 'frustration_spiral',
+  ];
+  const keysOf = (flags: { signalKey: string }[]) => new Set(flags.map((f) => f.signalKey));
+
+  it('stay DARK when RuntimeContext is empty — even though every generic gate is satisfied', () => {
+    const state = makeState({ currentStage: 'implementation', promptsInCurrentStage: 20, promptCount: 20 });
+    const fired = keysOf(detectAbsenceFlags(state)); // no runtimeContext → probes undefined
+    for (const k of REGISTRY_KEYS) expect(fired.has(k), `${k} fired on unknown context`).toBe(false);
+  });
+
+  it('no_version_control fires on hasVersionControl:false, dark on true/undefined', () => {
+    const state = makeState({ currentStage: 'implementation', promptsInCurrentStage: 20, promptCount: 20 });
+    expect(keysOf(detectAbsenceFlags(state, null, undefined, 1.0, 5, { hasVersionControl: false })).has('no_version_control')).toBe(true);
+    expect(keysOf(detectAbsenceFlags(state, null, undefined, 1.0, 5, { hasVersionControl: true })).has('no_version_control')).toBe(false);
+    expect(keysOf(detectAbsenceFlags(state, null, undefined, 1.0, 5, {})).has('no_version_control')).toBe(false);
+  });
+
+  it('frustration_spiral fires at consecutiveFrustratedPrompts ≥ 3, dark below', () => {
+    const state = makeState({ currentStage: 'implementation', promptsInCurrentStage: 20, promptCount: 20 });
+    expect(keysOf(detectAbsenceFlags(state, null, undefined, 1.0, 5, { consecutiveFrustratedPrompts: 3 })).has('frustration_spiral')).toBe(true);
+    expect(keysOf(detectAbsenceFlags(state, null, undefined, 1.0, 5, { consecutiveFrustratedPrompts: 2 })).has('frustration_spiral')).toBe(false);
+  });
+
+  it('secret_in_prompt fires on a secret in recent prompt history (context-independent), dark without', () => {
+    const secretPrompt = { index: 0, text: 'api_key: DUMMYPLACEHOLDERVALUE123', capturedAt: 1000, classifiedStage: 'implementation' as const, confidence: 0.85 };
+    const withSecret = makeState({ currentStage: 'implementation', promptsInCurrentStage: 20, promptCount: 20, promptHistory: [secretPrompt] });
+    const noSecret = makeState({ currentStage: 'implementation', promptsInCurrentStage: 20, promptCount: 20, promptHistory: [{ ...secretPrompt, text: 'add a login form' }] });
+    expect(keysOf(detectAbsenceFlags(withSecret, null, undefined, 1.0, 5, {})).has('secret_in_prompt')).toBe(true);
+    expect(keysOf(detectAbsenceFlags(noSecret, null, undefined, 1.0, 5, {})).has('secret_in_prompt')).toBe(false);
+  });
+
+  // Immediate-fire: the mode-mismatch signals skip the in-stage accumulation floor and fire on
+  // first confident detection (still gated by their own detector's confidence bar + dedup).
+  it('coding_agent_mode_mismatch fires below the accumulation floor (promptsInCurrentStage=1, minFloor=5)', () => {
+    const state = makeState({ currentStage: 'idea', promptsInCurrentStage: 1, promptCount: 1 });
+    const ctx = { stage: 'idea' as const, currentAgentMode: 'auto', stageConfidence: 0.8 };
+    expect(keysOf(detectAbsenceFlags(state, null, undefined, 1.0, 5, ctx)).has('coding_agent_mode_mismatch')).toBe(true);
+  });
+
+  it('a NON-immediate registry signal (frustration_spiral) stays blocked by the floor at promptsInCurrentStage=1, fires once past it', () => {
+    const below = makeState({ currentStage: 'idea', promptsInCurrentStage: 1, promptCount: 1 });
+    const above = makeState({ currentStage: 'idea', promptsInCurrentStage: 20, promptCount: 20 });
+    expect(keysOf(detectAbsenceFlags(below, null, undefined, 1.0, 5, { consecutiveFrustratedPrompts: 3 })).has('frustration_spiral')).toBe(false);
+    expect(keysOf(detectAbsenceFlags(above, null, undefined, 1.0, 5, { consecutiveFrustratedPrompts: 3 })).has('frustration_spiral')).toBe(true);
+  });
+
+  it('the immediate-fire bypass still honours the detector confidence bar (low stageConfidence → no fire even below the floor)', () => {
+    const state = makeState({ currentStage: 'idea', promptsInCurrentStage: 1, promptCount: 1 });
+    const lowConf = { stage: 'idea' as const, currentAgentMode: 'auto', stageConfidence: 0.4 };
+    expect(keysOf(detectAbsenceFlags(state, null, undefined, 1.0, 5, lowConf)).has('coding_agent_mode_mismatch')).toBe(false);
+  });
+});
+
 // ── AbsenceDetector ────────────────────────────────────────────────────────────
 
 describe('AbsenceDetector', () => {
@@ -3938,6 +3898,54 @@ describe('SessionStateManager — consecutiveAcceptanceStreak', () => {
     expect(mgr.current.consecutiveAcceptanceStreak).toBe(0);
     await mgr.processPrompt(store, 'add another feature', makeResult('implementation', 0.8));
     expect(mgr.current.consecutiveAcceptanceStreak).toBe(1);
+    closeStore(store);
+  });
+});
+
+// ── A11 — consecutiveFrustratedPrompts (frustration-spiral detector input) ─────
+
+describe('SessionStateManager — consecutiveFrustratedPrompts', () => {
+  // The streak is computed in processPrompt off the mood LLM-classified onto the profile via
+  // setProfile (mirrors the live flow). It is the sole input to ABSENCE_FRUSTRATION_SPIRAL, so
+  // the accumulation logic is tested here directly (every other test injects the value).
+  const withMood = (mood: string): import('./types.js').UserProfile => ({
+    nature: 'pro_geek_soul', mood, depth: 'medium', role: null,
+    precisionOrdinal: 'medium', playfulnessOrdinal: 'medium',
+    precisionScore: 5, playfulnessScore: 5, depthScore: 5, computedAt: 0,
+  } as unknown as import('./types.js').UserProfile);
+
+  it('initializes to 0 in a new session', async () => {
+    const store = await openStore(':memory:');
+    upsertProject(store, { projectRoot: '/project/fstreak-a', name: 'A' });
+    const mgr = SessionStateManager.load(store, '/project/fstreak-a');
+    expect(mgr.current.consecutiveFrustratedPrompts).toBe(0);
+    closeStore(store);
+  });
+
+  it('increments on each consecutive frustrated-mood prompt', async () => {
+    const store = await openStore(':memory:');
+    upsertProject(store, { projectRoot: '/project/fstreak-b', name: 'B' });
+    const mgr = SessionStateManager.load(store, '/project/fstreak-b');
+    for (let i = 1; i <= 3; i++) {
+      mgr.setProfile(withMood('frustrated'));
+      await mgr.processPrompt(store, `still broken, attempt ${i}`, makeResult('implementation', 0.8));
+      expect(mgr.current.consecutiveFrustratedPrompts).toBe(i);
+    }
+    closeStore(store);
+  });
+
+  it('resets to 0 on a non-frustrated prompt', async () => {
+    const store = await openStore(':memory:');
+    upsertProject(store, { projectRoot: '/project/fstreak-c', name: 'C' });
+    const mgr = SessionStateManager.load(store, '/project/fstreak-c');
+    mgr.setProfile(withMood('frustrated'));
+    await mgr.processPrompt(store, 'broken again', makeResult('implementation', 0.8));
+    mgr.setProfile(withMood('frustrated'));
+    await mgr.processPrompt(store, 'still not working', makeResult('implementation', 0.8));
+    expect(mgr.current.consecutiveFrustratedPrompts).toBe(2);
+    mgr.setProfile(withMood('focused'));
+    await mgr.processPrompt(store, 'great, that fixed it', makeResult('implementation', 0.8));
+    expect(mgr.current.consecutiveFrustratedPrompts).toBe(0);
     closeStore(store);
   });
 });

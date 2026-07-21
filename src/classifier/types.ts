@@ -111,6 +111,14 @@ export interface SessionState {
    * Used by the decision_fatigue_pattern signal detector.
    */
   consecutiveAcceptanceStreak: number;
+  /** Consecutive processed prompts while the classified mood is 'frustrated' (frustration-spiral). Reset on any non-frustrated prompt. */
+  consecutiveFrustratedPrompts: number;
+  /**
+   * The coding-agent's current permission mode, as last reported by the hook payload.
+   * Sticky: a prompt that carries no mode keeps the last-known value. Undefined until a
+   * mode is first seen. Optional for backward compatibility with existing persisted state.
+   */
+  currentAgentMode?: string;
 }
 
 // ── User nature / mood / depth (item 9) ───────────────────────────────────────
@@ -175,6 +183,13 @@ export interface SignalDefinition {
   vibeKeywords?: string[];
   /** Number of prompts in confirmed stage before checking absence. */
   absenceThreshold: number; // 15–20 per research
+  /**
+   * Fire on first confident detection, skipping the in-stage accumulation floor
+   * (the `promptsInCurrentStage` gate). For right-now signals whose own detector is
+   * already confidence-gated (e.g. a mode-vs-stage mismatch); still bounded by the
+   * per-signal cooldown + the once-per-session dedup downstream. Default: undefined (gated).
+   */
+  immediateFire?: boolean;
   /** Project types for which this signal is relevant. undefined = all project types. */
   relevantProjectTypes?: string[];
   /** Dim1: fire only when profile.nature matches. undefined = all natures (universal signal). */

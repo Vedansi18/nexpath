@@ -24,8 +24,18 @@ import { triggerOpportunisticSync } from '../../telemetry/OpportunisticSync.js';
 import { flushIfTelemetryOn, flushLifecycle } from '../../telemetry/lifecycle-flush.js';
 import { recentPromptMetadata } from '../../telemetry/recent-prompts.js';
 import { readStdin } from './auto.js';
-import { resolveDecisionContent } from '../../decision-session/options.js';
-import { generateOptionList } from '../../decision-session/OptionGenerator.js';
+import type { GeneratedOptions } from '../../decision-session/OptionGenerator.js';
+import { resolveContentSource, selectionRegister } from '../../decision-session/selection-registry.js';
+import { autogenAwareLookup, pinchSignalTypeForFlag } from '../../decision-session/content-template-source.js';
+import { runAutogenForFire } from '../../decision-session/auto-template-generator.js';
+import { loadRightGoodProfile } from '../../classifier/right-good-aggregator.js';
+import { generateFromEngine, buildEngineGrounding, composeDeterministicOptions } from '../../decision-session/engine-option-generator.js';
+import { resolvePinchFields } from '../../decision-session/signal-pinch-fields.js';
+import { getWhyHelpForSignalType } from '../../decision-session/why-help-by-signal-type.js';
+import type { WhyHelpEntry } from '../../decision-session/why-help.js';
+import { getUserDepthLevel } from '../../store/user-depth-level.js';
+import type { MaturityLevel } from '../../decision-session/content-template-schema.js';
+import type { PromptRecord } from '../../classifier/types.js';
 import { resolveOpenAIKey, getKeySource } from '../../config/ApiKeyResolver.js';
 
 /**
@@ -187,25 +197,45 @@ export async function runStop(
   const detectedLang  = getProject(store, payload.cwd)?.detectedLanguage ?? undefined;
   const effectiveLang = resolveLanguage(langOverride, detectedLang);
 
-  const content = resolveDecisionContent(
-    advisory.stage,
-    advisory.flagType,
-    mgr.current.profile,
-  );
-
-  const generatedOptions = await generateOptionList(
-    content,
-    mgr.current.profile ?? undefined,
-    effectiveLang,
-    mgr.current.promptHistory as import('../../classifier/types.js').PromptRecord[],
-    {
-      flagType:              advisory.flagType,
-      currentStage:          mgr.current.currentStage,
-      prevStage:             advisory.prevStage,
-      promptsInCurrentStage: mgr.current.promptsInCurrentStage,
-    },
-    openai,
-  );
+  // Dispatch: every signal is migrated, so the fired advisory's record serves it via the engine.
+  // The record signalType comes from the flag (the `absence:` convention) or, for a stage transition
+  // (no absence: key), from the destination stage — both via pinchSignalTypeForFlag, which needs no
+  // static content (the B11 cutover removed it).
+  const recordSignalType = pinchSignalTypeForFlag(advisory.flagType, advisory.stage);
+  // The engine now serves role-tailored content directly (B11 `roleOverrides` — context_loss's
+  // founder / indie_hacker / pm variants), so there is no role-precedence static guard: every
+  // migrated signal, role-tailored or not, takes the engine path (the role is passed below).
+  let generatedOptions: GeneratedOptions | null = null;
+  // A migrated signal owns its popup question + per-class why-help in the record (no matching
+  // static DecisionContent) — thread them to runDecisionSession as overrides.
+  let questionOverride: string | undefined;
+  let whyHelpOverride: WhyHelpEntry | null | undefined;
+  const register = selectionRegister(mgr.current.profile?.nature);
+  if (recordSignalType && resolveContentSource(recordSignalType) === 'content-template') {
+    const lookup = autogenAwareLookup(store, payload.cwd, recordSignalType);
+    const level  = (getUserDepthLevel(store, payload.cwd)?.currentLevel ?? 2) as MaturityLevel;
+    const role   = mgr.current.profile?.role ?? undefined;
+    // Popup question + per-class why-help are static (no LLM). The question comes from the
+    // register-keyed pinch-fields map (the migrated question/pinchFallback layer), not the record.
+    questionOverride = resolvePinchFields(recordSignalType, register)?.question;
+    whyHelpOverride = getWhyHelpForSignalType(recordSignalType);
+    // The engine grounding/weave needs an LLM client; on ANY failure (missing key, API error)
+    // degrade below — the Stop hook must never crash on option gen.
+    try {
+      const promptHistory = mgr.current.promptHistory as PromptRecord[];
+      const facts = await buildEngineGrounding(store, payload.cwd, promptHistory, openai);
+      generatedOptions = await generateFromEngine({ lookup, level, register, role, facts, factCap: 3 }, openai);
+    } catch (err) {
+      logger.debug('stop_engine_option_gen_error', { error: String(err) });
+      generatedOptions = null;
+    }
+    if (!generatedOptions) {
+      // The grounded engine failed (missing key / API error). Serve a DETERMINISTIC engine composition
+      // from the record — no LLM, register/role-aware, safeguard-carrying — so the fallback needs no
+      // static content. (Records are the whole content layer after the B11 cutover.)
+      generatedOptions = composeDeterministicOptions({ lookup, level, register, role });
+    }
+  }
 
   writeTelemetry(payload.cwd, 'stop_advisory_shown', {
     flagType:         advisory.flagType,
@@ -227,6 +257,8 @@ export async function runStop(
       promptCount:          advisory.promptCount,
       decisionSessionCount,
       generatedOptions:     generatedOptions ?? undefined,
+      questionOverride,
+      whyHelpOverride,
       profile:              mgr.current.profile,
       // Phase 4 — Item B: last-5 prompt metadata for decision_session_started.
       recentPrompts:        recentPromptMetadata(mgr.current.promptHistory),
@@ -234,6 +266,21 @@ export async function runStop(
     store,
     effectiveSelectFn,
   );
+
+  // Per-user auto-gen loop — after the popup, off its critical path. The current
+  // fire already served (the preset, or a previously-cached per-user record); this
+  // runs the one-time ranking and lazily generates the fired topic's per-user record
+  // so the NEXT fire of a selected topic serves it. Best-effort — never breaks the outcome.
+  if (recordSignalType && resolveContentSource(recordSignalType) === 'content-template') {
+    await runAutogenForFire({
+      store,
+      projectRoot:  payload.cwd,
+      signalType:   recordSignalType,
+      currentLevel: (getUserDepthLevel(store, payload.cwd)?.currentLevel ?? 2) as MaturityLevel,
+      rightGood:    loadRightGoodProfile(store, payload.cwd),
+      client:       openai,
+    });
+  }
 
   if (dsResult.outcome === 'selected') {
     // Record the selection (timestamp only — no option text or index).
