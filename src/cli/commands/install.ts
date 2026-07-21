@@ -7,6 +7,8 @@ import { SelectPrompt } from '@clack/core';
 import pc from 'picocolors';
 import { openStore, closeStore, DEFAULT_DB_PATH } from '../../store/db.js';
 import { isConfigSet, setConfig, getConfig } from '../../store/config.js';
+import { setInstalledAtIfMissing } from '../../store/feedback-signals.js';
+import { flushIfTelemetryOn } from '../../telemetry/lifecycle-flush.js';
 import {
   VALID_ROLES,
   setAdvisoryFrequency,
@@ -520,6 +522,10 @@ export async function installAction(
 
   const store = await openStore(dbPath);
 
+  // Save the install timestamp locally (kept on re-runs). It is transmitted
+  // later, only when the user submits feedback.
+  setInstalledAtIfMissing(store);
+
   let apiKeySource:  InstallSummary['apiKey']['source'] = 'skipped';
   let telemetryEnabled = true;
 
@@ -567,22 +573,6 @@ export async function installAction(
       telemetryEnabled = consent.kind === 'enable';
       setConfig(store, 'telemetry.enabled',      String(telemetryEnabled));
       setConfig(store, 'telemetry_sync_enabled', String(telemetryEnabled));
-
-      // Dev-environment probe disclosure. Local-only, on by default — no
-      // separate consent prompt (nothing leaves the machine).
-      note(
-        [
-          'nexpath reads a few local facts about your machine + project',
-          '(OS, version control, test runner, framework, etc.) to give',
-          'more relevant guidance.',
-          '',
-          'These facts stay on your machine — they are NEVER transmitted.',
-          '',
-          'See them:  nexpath env',
-          'Turn off:  nexpath config set env_probe_enabled false',
-        ].join('\n'),
-        'Dev-environment facts (local-only)',
-      );
     } else {
       // --yes (non-interactive): preserve an existing telemetry choice. A re-run
       // — e.g. the VS Code extension's two-pass setup (`--for cli` interactive,
@@ -604,13 +594,29 @@ export async function installAction(
   }
 
   // ── Step 3: Agent detection + registration ────────────────────────────────
+  // When the VS Code extension drives setup it targets ONLY the IDE the user is
+  // in (NEXPATH_ONLY_AGENT = cursor|windsurf). Additive: with the env unset this
+  // is a no-op and the legacy multi-agent behaviour is byte-identical.
+  // NOTE: we do NOT filter `agents` itself — the API-key/telemetry/frequency/role
+  // prompt gating below keys off `agents.length`, so filtering here could skip
+  // those prompts. We only (a) suppress the multi-agent "Detected/Not found"
+  // notices and (b) gate the per-adapter install loop further down on onlyAgent.
+  const onlyAgent   = process.env.NEXPATH_ONLY_AGENT;
   const agents      = detectAgentsForPlatform(paths, platform);
   const detectedIds = new Set(agents.map((a) => a.id));
   const missing     = supportedAgentsForPlatform(platform).filter((sa) => !detectedIds.has(sa.id));
-  if (agents.length > 0) {
+  if (onlyAgent) {
+    // Extension-driven single-IDE setup: the extension runs INSIDE the target IDE,
+    // so it's definitely present — show just that one (matches the CLI's "Detected: X")
+    // regardless of the file-based detection above.
+    const onlyLabel = supportedAgentsForPlatform(platform).find((sa) => sa.id === onlyAgent)?.label ?? onlyAgent;
+    console.log(`Detected: ${onlyLabel}`);
+  } else if (agents.length > 0) {
     console.log(`Detected: ${agents.map((a) => a.label).join(', ')}`);
   }
-  if (missing.length > 0) {
+  // Skip the "Not found" notice when deliberately targeting a single IDE — the
+  // other agents aren't "missing", they're just not the target.
+  if (missing.length > 0 && !onlyAgent) {
     console.log(`Not found: ${missing.map((sa) => sa.label).join(', ')}`);
     console.log('nexpath currently supports Claude Code only — support for Cursor, Windsurf, and other agents is coming in future updates.');
   }
@@ -620,7 +626,7 @@ export async function installAction(
   // only when a supported agent (Claude Code) is actually present on disk. The
   // registry-driven adapter installs further below run regardless, so Cursor /
   // Windsurf VSCode extensions are still offered on machines without Claude Code.
-  if (agents.length > 0) {
+  if (agents.length > 0 || onlyAgent) {
     if (!opts.yes) {
       const ok = await confirmFn();
       if (!ok) {
@@ -658,6 +664,7 @@ export async function installAction(
               // object still control the target file independently of homedir().
               settingsPath: paths.claudeSettings,
             });
+            registered.push(agent.label);
           }
         } else if (REGISTER_MCP_SERVER) {
           if (agent.type === 'cline') {
@@ -731,19 +738,28 @@ export async function installAction(
   const eligibleCategories  = eligibleCategoriesForPlatform(platform);
   for (const adapter of detectedAdapters) {
     if (adapter.id === 'claude-code') continue;
+    // Extension-driven single-IDE setup: install only the target agent.
+    if (onlyAgent && adapter.id !== onlyAgent) continue;
     // Platform gate: only run adapter.install() for adapters whose category
     // matches the chosen install platform. Under --for cli, vscode-extension
     // and browser-extension adapters stay silent.
     if (!eligibleCategories.has(adapter.category)) continue;
     try {
-      await adapter.install(adapterCtx);
+      const res = await adapter.install(adapterCtx);
+      if (res.status === 'installed' || res.status === 'already-installed') registered.push(adapter.label);
+      else if (res.status === 'failed') failed.push(adapter.label);
     } catch (err) {
       console.log(`\u2717 ${adapter.label.padEnd(12)} \u2014 failed: ${(err as Error).message}`);
+      failed.push(adapter.label);
     }
   }
 
   console.log('');
   console.log('Restart your agents to activate nexpath-prompt-store.');
+
+  // Emit the install event now when telemetry is on; when off it stays buffered
+  // locally until the user submits feedback.
+  await flushIfTelemetryOn(store);
 
   closeStore(store);
 
@@ -775,6 +791,26 @@ export async function installAction(
     failed.length > 0 ? `Failed:     ${failed.join(', ')}` : null,
     extrasLine,
   ].filter((l): l is string => l !== null).join('\n');
+
+  // Dev-environment + prompt-capture disclosure, shown just above the Setup
+  // Complete summary in interactive installs (skipped under --yes). Facts and
+  // prompts are stored locally; only ChatGPT API calls leave the machine.
+  if (!opts.yes) {
+    note(
+      [
+        'To time its guidance, nexpath takes a basic read of your',
+        "project and your agent's responses — only what it needs, all",
+        'on your machine.',
+        '',
+        'It reads and stores your prompts too — everything stays local',
+        'and is processed using the ChatGPT API, and is NEVER',
+        'transmitted elsewhere.',
+        '',
+        "This capture is core to nexpath — without it, nexpath won't work.",
+      ].join('\n'),
+      'Dev-environment facts - Notes',
+    );
+  }
   note(summaryLines, 'Setup Complete');
   outro('Done!');
 

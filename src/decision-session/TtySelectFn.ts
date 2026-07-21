@@ -21,6 +21,7 @@ import {
   formatQuestion,
 } from './DecisionSession.js';
 import { SKIP_NOW, SHOW_SIMPLER } from './options.js';
+import { isWhyDescDeliveryEnabled } from './whydesc-delivery.js';
 import type { Store } from '../store/db.js';
 import { getConfig, setConfig } from '../store/config.js';
 import { ROLE_OPTIONS, buildRoleDescriptionLines, buildRoleMenuLines } from '../cli/shared/role-description.js';
@@ -46,21 +47,13 @@ type ClipboardCmd = [cmd: string, args: string[]];
  * fallback chain for Linux (xclip → wl-copy → xsel).
  */
 /**
- * Display name of the agent the popup will "Send to", derived from the
- * `NEXPATH_AGENT` env var set by whoever triggered the popup — the VS Code
- * extension (Cursor / Windsurf) or the windsurf-hook. Defaults to 'Claude'
- * (the original label, left unchanged) for the Claude Code hook path which sets
- * nothing — so only the Cursor / Windsurf surfaces get their own name, and
- * Claude's existing wording is untouched. Devin (the Windsurf rebrand) is
- * detected as windsurf and shown as "Windsurf".
+ * Display name the popup uses in its "Send to …" wording. A single, agent-
+ * neutral label is shown across every surface (Claude Code, Cursor, Windsurf /
+ * Devin) so the same popup code serves all agents — there is no per-agent
+ * wording to keep in sync.
  */
-export function nexpathAgentLabel(env: NodeJS.ProcessEnv = process.env): string {
-  switch ((env.NEXPATH_AGENT ?? '').trim().toLowerCase()) {
-    case 'cursor':   return 'Cursor';
-    case 'windsurf': return 'Windsurf';
-    case 'devin':    return 'Windsurf';
-    default:         return 'Claude';
-  }
+export function nexpathAgentLabel(): string {
+  return 'your agent';
 }
 
 function buildMjsScript(
@@ -69,6 +62,7 @@ function buildMjsScript(
   resultFileFwd: string,
   clipboardCmds: ClipboardCmd[],
   renderLoopUrl: string,
+  deliveryEnabled: boolean,
 ): string {
   const agentLabel = nexpathAgentLabel();
   return `import { select, isCancel } from '${clackUrl}';
@@ -234,9 +228,19 @@ if (typeof picked === 'string'
     if (action === 'send') {
       writeFileSync('${resultFileFwd}', picked, 'utf8');
     } else {
+      // Clipboard consistency: copy what SEND would deliver to the agent — the option plus its
+      // why-desc when delivery is enabled (mirrors combineOptionWithWhyDesc), else the option
+      // alone. Keeps "copy to edit before sending" identical to the direct-send text.
+      const _deliverWhyDesc = ${deliveryEnabled};
+      let _clipText = picked;
+      if (_deliverWhyDesc) {
+        const _sel = _layout.options.find((o) => o.value === picked);
+        const _wd = _sel && _sel.descBase ? String(_sel.descBase).trim() : '';
+        if (_wd) _clipText = picked + '\\n\\n' + _wd;
+      }
       const _clipCmds = ${JSON.stringify(clipboardCmds)};
       for (const [_c, _a] of _clipCmds) {
-        const _r = spawnSync(_c, _a, { input: picked, encoding: 'utf8', stdio: ['pipe', 'ignore', 'ignore'] });
+        const _r = spawnSync(_c, _a, { input: _clipText, encoding: 'utf8', stdio: ['pipe', 'ignore', 'ignore'] });
         if (_r.status === 0) break;
       }
       writeFileSync('${resultFileFwd}', '__CLIP__', 'utf8');
@@ -537,7 +541,7 @@ function buildWindowsNewWindowSelectFn(store?: Store, projectRoot?: string): Sel
         'utf8',
       );
 
-      writeFileSync(scriptFile, buildMjsScript(clackUrl, optFileFwd, resultFileFwd, [['clip', []]], resolveRenderLoopEsmUrl()), 'utf8');
+      writeFileSync(scriptFile, buildMjsScript(clackUrl, optFileFwd, resultFileFwd, [['clip', []]], resolveRenderLoopEsmUrl(), isWhyDescDeliveryEnabled(store)), 'utf8');
 
       // Textual cue in Claude terminal regardless of whether window is visible
       process.stderr.write('\n[nexpath] Please select an action in the new window\n');
@@ -838,7 +842,7 @@ function buildLinuxNewWindowSelectFn(store?: Store, projectRoot?: string): Selec
         'utf8',
       );
 
-      writeFileSync(scriptFile, buildMjsScript(clackUrl, optFileFwd, resultFileFwd, LINUX_CLIPBOARD_CMDS, resolveRenderLoopEsmUrl()), 'utf8');
+      writeFileSync(scriptFile, buildMjsScript(clackUrl, optFileFwd, resultFileFwd, LINUX_CLIPBOARD_CMDS, resolveRenderLoopEsmUrl(), isWhyDescDeliveryEnabled(store)), 'utf8');
 
       process.stderr.write('\n[nexpath] Please select an action in the new window\n');
 
@@ -973,7 +977,7 @@ function buildMacNewWindowSelectFn(store?: Store, projectRoot?: string): SelectF
         'utf8',
       );
 
-      writeFileSync(scriptFile, buildMjsScript(clackUrl, optFileFwd, resultFileFwd, MAC_CLIPBOARD_CMDS, resolveRenderLoopEsmUrl()), 'utf8');
+      writeFileSync(scriptFile, buildMjsScript(clackUrl, optFileFwd, resultFileFwd, MAC_CLIPBOARD_CMDS, resolveRenderLoopEsmUrl(), isWhyDescDeliveryEnabled(store)), 'utf8');
 
       process.stderr.write('\n[nexpath] Please select an action in the new window\n');
 

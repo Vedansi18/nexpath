@@ -13,6 +13,11 @@ vi.mock('../../decision-session/OptionGenerator.js', () => ({
   generateOptionList: vi.fn().mockResolvedValue(null),
 }));
 
+vi.mock('../../telemetry/lifecycle-flush.js', () => ({
+  flushIfTelemetryOn: vi.fn().mockResolvedValue(undefined),
+  flushLifecycle:     vi.fn().mockResolvedValue(undefined),
+}));
+
 // The engine path (migrated signals) is mocked to null like the static generateOptionList above,
 // so these flow tests stay deterministic and never make a live LLM call — regardless of which
 // signals are in MIGRATED_SIGNALS. A null return exercises the static-content fallback in runLevel.
@@ -42,6 +47,7 @@ import { recentPromptMetadata } from '../../telemetry/recent-prompts.js';
 import { generateFromEngine, composeDeterministicOptions } from '../../decision-session/engine-option-generator.js';
 import { SessionStateManager } from '../../classifier/SessionStateManager.js';
 import { generateOptionList } from '../../decision-session/OptionGenerator.js';
+import { flushIfTelemetryOn } from '../../telemetry/lifecycle-flush.js';
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -186,6 +192,22 @@ describe('runStop — user picks option', () => {
     await runStop(makePayload(), store, mockSelect('some option'));
     const advisory = getPendingAdvisory(store, '/test/project');
     expect(advisory).toBeNull(); // shown advisory no longer returned as pending
+  });
+
+  it('flushes lifecycle events when an advisory fires (on-mode immediate / off-mode buffer)', async () => {
+    vi.mocked(flushIfTelemetryOn).mockClear();
+    insertAdvisory(store);
+    await runStop(makePayload(), store, mockSelect('some option'));
+    expect(flushIfTelemetryOn).toHaveBeenCalledWith(store);
+  });
+
+  it('also emits option-selected immediately when an option is chosen (on-mode)', async () => {
+    vi.mocked(flushIfTelemetryOn).mockClear();
+    insertAdvisory(store);
+    const result = await runStop(makePayload(), store, mockSelect('some option'));
+    expect(result.outcome).toBe('blocked');
+    // advisory-fired flush + option-selected occurrence flush → at least two calls
+    expect(vi.mocked(flushIfTelemetryOn).mock.calls.length).toBeGreaterThanOrEqual(2);
   });
 });
 

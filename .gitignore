@@ -11,3 +11,5 @@ src/ext-vscode/nexpath-cli/
 src/ext-vscode/dist-vsix/
 
 src/prompt-enhancement/
+# better-sqlite3 multi-ABI prebuilds (build output, produced by package-with-electron-abi.mjs)
+src/ext-vscode/prebuilds/
