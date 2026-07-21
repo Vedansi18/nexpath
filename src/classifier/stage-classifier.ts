@@ -31,7 +31,7 @@ import {
  */
 
 /** Timeout for the single classification call (ms). */
-export const STAGE_CLASSIFIER_TIMEOUT_MS = 6_000;
+export const STAGE_CLASSIFIER_TIMEOUT_MS = 12_000;
 
 /** The model behind the stage classifier (shared with the former cross-confirmation call). */
 export const STAGE_CLASSIFIER_MODEL = STAGE2_MODEL;
