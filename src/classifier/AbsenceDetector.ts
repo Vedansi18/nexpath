@@ -4,7 +4,7 @@ import { STAGE_CONFIRM_THRESHOLD } from './SessionStateManager.js';
 import { MISTAKE_CATEGORIES, type RuntimeContext } from './mistake-categories.js';
 
 // The 6 new §4.E2 absence signals fire on their mistake-category detect() reading the live
-// RuntimeContext (behavioural streaks + the AR-10 probe) — NOT the generic keyword-absence gate.
+// RuntimeContext (behavioural streaks + the dev-env probe) — NOT the generic keyword-absence gate.
 // Their SignalDefinition.key equals the mistake-category name; look the category up to call detect().
 const REGISTRY_DETECTED_KEYS = [
   'secret_in_prompt', 'no_version_control', 'no_backup_safety',
