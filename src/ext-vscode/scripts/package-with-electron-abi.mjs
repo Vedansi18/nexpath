@@ -26,12 +26,15 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, cpSync, mkdirSync, rmSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
+import { dirname, resolve, join } from 'node:path';
+import { createRequire } from 'node:module';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const subPkgRoot = resolve(__dirname, '..');
+const require = createRequire(import.meta.url);
+const nodeAbi = require('node-abi');
 
 function readTargetElectron() {
   const pkg = JSON.parse(
@@ -64,31 +67,73 @@ function run(label, cmd, args, opts = {}) {
   return r.status ?? 1;
 }
 
+// The SCALABLE set of Electron versions to bundle (package.json#nexpathTargets
+// .electronVersions). We build better-sqlite3 once per version and stash the
+// binary in prebuilds/<NODE_MODULE_VERSION>/ so the runtime can load whichever
+// matches the host's process.versions.modules — works on any Cursor/VS Code in
+// range, not just one pinned version. The PRIMARY (nexpathTargets.electron) is
+// built LAST so node_modules/.../build/Release stays the primary ABI (back-compat).
+function readElectronVersions(primary) {
+  const pkg = JSON.parse(readFileSync(resolve(subPkgRoot, 'package.json'), 'utf8'));
+  const list = pkg?.nexpathTargets?.electronVersions;
+  const versions = Array.isArray(list) && list.length ? list.slice() : [primary];
+  // de-dupe, ensure the primary is present, and put it LAST.
+  const others = [...new Set(versions.filter((v) => v !== primary))];
+  return [...others, primary];
+}
+
 const electronVersion = readTargetElectron();
+const versionsToBuild = readElectronVersions(electronVersion);
 const extraArgs = process.argv.slice(2);
 
-console.log(`Packaging nexpath-vscode with better-sqlite3 rebuilt against Electron ${electronVersion}`);
+// ── Cross-compile support ────────────────────────────────────────────────────
+// Derive the TARGET cpu arch from the `--target <os>-<arch>` flag that the CI
+// forwards to `vsce package` (e.g. "darwin-x64" → "x64"). We pass it to
+// @electron/rebuild as `--arch`, so a build host can produce a binary for a
+// DIFFERENT arch of the same OS family. Concretely: the darwin-x64 (Intel-Mac)
+// binary is cross-compiled on the Apple-Silicon runner (macos-14) — the macOS
+// toolchain is universal, so this yields a genuine Intel-Mac binary WITHOUT a
+// (scarce, deprecated) Intel macOS runner. When the target arch already matches
+// the host it's a normal native build; with no `--target` (local `npm run
+// package`) it falls back to the host arch — unchanged behaviour.
+function readTargetArch(argv) {
+  const i = argv.indexOf('--target');
+  const target = i >= 0 ? argv[i + 1] : undefined; // e.g. "darwin-x64"
+  const arch = typeof target === 'string' ? target.split('-')[1] : undefined;
+  return arch || process.arch; // x64 | arm64 | …
+}
+const targetArch = readTargetArch(extraArgs);
+const releaseBinary = resolve(subPkgRoot, 'node_modules', 'better-sqlite3', 'build', 'Release', 'better_sqlite3.node');
+const prebuildsDir = resolve(subPkgRoot, 'prebuilds');
+
+console.log(`Packaging nexpath-vscode with better-sqlite3 prebuilds for Electron ${versionsToBuild.join(', ')}`);
 console.log('');
 
-// `--force` is required. Without it, @electron/rebuild detects "already
-// built for this Electron version" via a marker it left from a prior run,
-// AND skips rebuilding — even when the binary currently on disk is the
-// Node-ABI prebuilt restored by the prior orchestrator run's cleanup step.
-// Net effect of skipping the rebuild + then npm rebuild restoring Node-ABI:
-// the .vsix ships the Node-ABI binary, Cursor fails to activate with the
-// NODE_MODULE_VERSION mismatch error. This is exactly the bug that the
-// "Round 1 install" surfaced.
-const rebuildElectronCode = run(
-  `Rebuild better-sqlite3 → Electron ${electronVersion} (ABI for Cursor)`,
-  'npx',
-  ['electron-rebuild', '--version', electronVersion, '--force', '--only', 'better-sqlite3', '--module-dir', '.'],
-);
-if (rebuildElectronCode !== 0) {
-  console.error(`✗ electron-rebuild failed with exit ${rebuildElectronCode} — aborting before vsce package.`);
-  // Best-effort restore so the dev tree isn't left half-built.
-  run('Cleanup: restore Node-ABI binary', 'npm', ['rebuild', 'better-sqlite3']);
-  process.exit(rebuildElectronCode);
+// Fresh prebuilds dir each run.
+rmSync(prebuildsDir, { recursive: true, force: true });
+
+// Build one binary per Electron version → prebuilds/<abi>/better_sqlite3.node.
+// `--force` is required. Without it, @electron/rebuild detects "already built"
+// via a marker and SKIPS the rebuild, leaving the wrong-ABI binary on disk → the
+// NODE_MODULE_VERSION mismatch error users have seen.
+for (const v of versionsToBuild) {
+  const abi = String(nodeAbi.getAbi(v, 'electron'));
+  const rebuildCode = run(
+    `Rebuild better-sqlite3 → Electron ${v} (ABI ${abi}, arch ${targetArch})`,
+    'npx',
+    ['electron-rebuild', '--version', v, '--arch', targetArch, '--force', '--only', 'better-sqlite3', '--module-dir', '.'],
+  );
+  if (rebuildCode !== 0 || !existsSync(releaseBinary)) {
+    console.error(`✗ electron-rebuild failed for Electron ${v} (exit ${rebuildCode}) — aborting before vsce package.`);
+    run('Cleanup: restore Node-ABI binary', 'npm', ['rebuild', 'better-sqlite3']);
+    process.exit(rebuildCode || 1);
+  }
+  const dest = join(prebuildsDir, abi);
+  mkdirSync(dest, { recursive: true });
+  cpSync(releaseBinary, join(dest, 'better_sqlite3.node'));
+  console.log(`  ✓ prebuilds/${abi}/better_sqlite3.node`);
 }
+// build/Release now holds the PRIMARY ABI (last in the loop).
 
 let packageCode = 0;
 try {

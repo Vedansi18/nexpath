@@ -1,7 +1,8 @@
 /**
- * Bring the Layer-C advisory popup window to the foreground — Linux only.
+ * Bring the Layer-C popup window (advisory OR feedback) to the foreground — Linux only.
  *
- * The decision-session popup is a SEPARATE OS window opened by `nexpath stop`
+ * `nexpath stop` opens either the advisory decision-session popup or the
+ * feedback popup (never both in one turn) as a SEPARATE OS window
  * (Layer C, untouched). macOS and Windows already foreground it at launch:
  *   - macOS:   `osascript … tell application "Terminal" activate`
  *   - Windows: `cmd /c start …`  (ShellExecuteEx → SW_SHOWNORMAL)
@@ -17,15 +18,24 @@
  */
 import { spawnSync } from 'node:child_process';
 
-/** Must match the title Layer C's TtySelectFn gives the popup window. */
+/** Advisory popup title — must match Layer C's TtySelectFn `WINDOW_TITLE`. */
 export const POPUP_WINDOW_TITLE = 'Nexpath — Action Required';
+/** Feedback popup title — must match Layer C's feedback-tty `WINDOW_TITLE`. */
+export const FEEDBACK_WINDOW_TITLE = 'Nexpath — Feedback';
+
+/**
+ * Titles bringPopupToFront tries to raise. Only one popup is open at a time
+ * (`nexpath stop` shows the feedback popup OR the advisory popup, never both),
+ * so each poll tick tries both and raises whichever window exists.
+ */
+const POPUP_TITLES: readonly string[] = [POPUP_WINDOW_TITLE, FEEDBACK_WINDOW_TITLE];
 
 export interface ForegroundDeps {
   platform?: NodeJS.Platform;
   env?: NodeJS.ProcessEnv;
   /** Injected runner for tests; returns true if the command "succeeded". */
   hasCommand?: (cmd: string) => boolean;
-  activate?: (tool: 'wmctrl' | 'xdotool') => boolean;
+  activate?: (tool: 'wmctrl' | 'xdotool', title: string) => boolean;
   setInterval?: typeof setInterval;
   clearInterval?: typeof clearInterval;
   /** Poll cadence / cap (defaults: every 500ms, up to ~6s). */
@@ -41,14 +51,14 @@ function defaultHasCommand(cmd: string): boolean {
   }
 }
 
-/** Try once to raise the window. Returns true when the activation reports success. */
-function defaultActivate(tool: 'wmctrl' | 'xdotool'): boolean {
+/** Try once to raise the window with `title`. Returns true when activation reports success. */
+function defaultActivate(tool: 'wmctrl' | 'xdotool', title: string): boolean {
   try {
     if (tool === 'wmctrl') {
       // `-a` matches a window by title substring and activates it.
-      return spawnSync('wmctrl', ['-a', POPUP_WINDOW_TITLE], { stdio: 'ignore', timeout: 2000 }).status === 0;
+      return spawnSync('wmctrl', ['-a', title], { stdio: 'ignore', timeout: 2000 }).status === 0;
     }
-    const found = spawnSync('xdotool', ['search', '--name', POPUP_WINDOW_TITLE], {
+    const found = spawnSync('xdotool', ['search', '--name', title], {
       encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 2000,
     });
     const id = (found.stdout ?? '').trim().split('\n').filter(Boolean)[0];
@@ -89,7 +99,9 @@ export function bringPopupToFront(deps: ForegroundDeps = {}): void {
   const stop = (): void => { if (timer !== undefined) _clearInterval(timer); };
   timer = _setInterval(() => {
     tries += 1;
-    const ok = activate(tool);
+    // Raise whichever popup is open — advisory or feedback. `.some` short-circuits
+    // so at most one activation runs once a window is found.
+    const ok = POPUP_TITLES.some((title) => activate(tool, title));
     if (ok || tries >= maxTries) stop();
   }, intervalMs);
   // Don't keep the extension host event loop alive for this.

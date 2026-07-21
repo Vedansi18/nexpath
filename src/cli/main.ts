@@ -26,6 +26,7 @@ import { registerStopCommand } from './commands/stop.js';
 import { registerWindsurfHookCommand } from './commands/windsurf-hook.js';
 import { registerOptimizeCommand } from './commands/optimize.js';
 import { registerStatusCommand } from './commands/status.js';
+import { registerFeedbackTestCommand } from './commands/feedback-test.js';
 import {
   telemetrySyncStatusAction,
   telemetrySyncEnableAction,
@@ -42,7 +43,7 @@ export function createProgram(): Command {
   program
     .name('nexpath')
     .description('Behaviour guidance system for vibe coders using AI coding agents')
-    .version('0.1.2');
+    .version('0.1.3');
 
   // ── Lifecycle commands ────────────────────────────────────────────────────────
 
@@ -101,6 +102,10 @@ export function createProgram(): Command {
   // ── Status command ────────────────────────────────────────────────────────────
 
   registerStatusCommand(program);
+
+  // ── Dev command (hidden) ──────────────────────────────────────────────────────
+
+  registerFeedbackTestCommand(program);
 
   // ── Env command (dev-environment probe transparency) ────────────────────────────
 
