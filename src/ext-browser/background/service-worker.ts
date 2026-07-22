@@ -20,7 +20,7 @@ import {
 import { classifyUserProfileLLM, MIN_PROFILE_PROMPTS } from '../../core/classifier/LLMProfileClassifier.js';
 import { isProfileStale } from '../../core/classifier/UserProfileClassifier.js';
 import { generatePinchLabel } from '../../core/decision/pinch.js';
-import { resolveDecisionContent } from '../../decision-session/options.js';
+import { resolveDecisionContent } from '../../core/decision/static-content.js';
 import { generateOptionList, type GeneratedOptions } from '../../core/decision/options.js';
 import type { DecisionContent } from '../../core/decision/options.js';
 import { composeWhyHelpBlock } from '../../decision-session/why-help-compose.js';

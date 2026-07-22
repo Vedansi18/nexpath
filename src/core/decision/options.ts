@@ -1,11 +1,13 @@
-// Re-export bridge — keeps src/decision-session/options.ts in place (10k+ lines, zero regression risk).
-// Core and browser callers import types + resolver from here; the static content stays in its original file.
-export type { OptionEntry, DecisionContent } from '../../decision-session/options.js';
-export { resolveDecisionContent, SHOW_SIMPLER, SKIP_NOW } from '../../decision-session/options.js';
+// Re-export bridge — static content lives in ./static-content.ts (10k+ lines, zero regression
+// risk). Relocated there (from src/decision-session/options.ts) because sub-11's B11 cutover
+// deleted the CLI's copy of this content in favour of the content-template engine; the browser
+// extension has no engine equivalent, so it keeps its own copy under core/, out of upstream's way.
+export type { OptionEntry, DecisionContent } from './static-content.js';
+export { resolveDecisionContent, SHOW_SIMPLER, SKIP_NOW } from './static-content.js';
 
 import type { LLMPort } from '../ports/llm.port.js';
 import type { UserProfile, PromptRecord } from '../classifier/types.js';
-import type { DecisionContent } from '../../decision-session/options.js';
+import type { DecisionContent } from './static-content.js';
 import {
   generateOptionList as generateOptionListImpl,
   type GeneratedOptions,

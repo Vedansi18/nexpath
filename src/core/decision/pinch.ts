@@ -1,7 +1,7 @@
 import type { LLMPort } from '../ports/llm.port.js';
 import type { Stage, UserProfile } from '../classifier/types.js';
 import type { FlagType } from '../stage2.js';
-import { resolveDecisionContent } from '../../decision-session/options.js';
+import { resolveDecisionContent } from './static-content.js';
 
 /**
  * Pinch word generator (per decision-session-ux-research.md Part 4).

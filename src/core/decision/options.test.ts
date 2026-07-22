@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { generateOptionList } from './options.js';
-import { TASK_REVIEW } from '../../decision-session/options.js';
+import { TASK_REVIEW } from './static-content.js';
 import type { LLMPort } from '../ports/llm.port.js';
 
 // Identity "adaptation" — structurally valid so the engine's validator accepts it

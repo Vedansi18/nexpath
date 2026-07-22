@@ -20,7 +20,7 @@ vi.mock('../../core/classifier/StreamBPresenceClassifier.js', () => ({ classifyS
 vi.mock('../../core/classifier/LLMProfileClassifier.js', () => ({ classifyUserProfileLLM: vi.fn(), MIN_PROFILE_PROMPTS: 4 }));
 vi.mock('../../core/classifier/UserProfileClassifier.js', () => ({ isProfileStale: vi.fn(() => true) }));
 vi.mock('../../core/decision/pinch.js', () => ({ generatePinchLabel: vi.fn() }));
-vi.mock('../../decision-session/options.js', () => ({ resolveDecisionContent: vi.fn() }));
+vi.mock('../../core/decision/static-content.js', () => ({ resolveDecisionContent: vi.fn() }));
 vi.mock('../../core/decision/options.js', () => ({ generateOptionList: vi.fn() }));
 vi.mock('../adapters/storage-idb.js', () => ({ IdbStorageAdapter: vi.fn() }));
 vi.mock('../adapters/memory-storage.js', () => ({ makeMemoryStoragePort: vi.fn() }));
@@ -39,7 +39,7 @@ const { classifyStreamBPresence } = await import('../../core/classifier/StreamBP
 const { classifyUserProfileLLM } = await import('../../core/classifier/LLMProfileClassifier.js');
 const { isProfileStale } = await import('../../core/classifier/UserProfileClassifier.js');
 const { generatePinchLabel } = await import('../../core/decision/pinch.js');
-const { resolveDecisionContent } = await import('../../decision-session/options.js');
+const { resolveDecisionContent } = await import('../../core/decision/static-content.js');
 const { generateOptionList } = await import('../../core/decision/options.js');
 const { IdbStorageAdapter } = await import('../adapters/storage-idb.js');
 const { makeMemoryStoragePort } = await import('../adapters/memory-storage.js');

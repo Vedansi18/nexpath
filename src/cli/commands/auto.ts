@@ -254,7 +254,7 @@ export async function runAuto(
   let streamBOverrides: StreamBPresenceResult | undefined;
   if (mgr.current.currentStage === 'implementation'
       && mgr.current.promptsInCurrentStage >= 3) {
-    streamBOverrides = await classifyStreamBPresence(input.promptText, llmAdapter, loggerAdapter)
+    streamBOverrides = await classifyStreamBPresence(input.promptText, openai)
       .catch(() => {
         logger.debug('stream_b_presence_failed', { prompt: input.promptText.slice(0, 60) });
         return undefined; // fallback: vibeKeyword detection stands

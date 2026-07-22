@@ -43,6 +43,7 @@ function newSession(projectRoot: string, now: number): SessionState {
     lastAdvisoryPromptIndex:      -1,
     advisoryCount:                0,
     consecutiveAcceptanceStreak:  0,
+    consecutiveFrustratedPrompts: 0,
   };
 }
 
