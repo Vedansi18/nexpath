@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Nexpath Settings</title>
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <main class="container">
+      <header>
+        <div class="brand-row">
+          <img class="brand-icon" src="../icons/icon48.png" alt="Nexpath" width="40" height="40" />
+          <div>
+            <h1>Nexpath Settings</h1>
+            <p class="subtitle">Configure your AI coding behaviour guide.</p>
+          </div>
+        </div>
+      </header>
+
+      <section class="card">
+        <label for="api-key">OpenAI API Key</label>
+        <div class="input-row">
+          <input
+            type="password"
+            id="api-key"
+            placeholder="sk-..."
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <button id="test-key">Test</button>
+          <button id="save-key">Save</button>
+        </div>
+        <p id="key-status" class="status"></p>
+      </section>
+
+      <section class="card">
+        <label>Advisory Frequency</label>
+        <p class="field-hint">How often nexpath should surface advisories.</p>
+        <div id="frequency-group" class="radio-group" role="radiogroup" aria-label="Advisory frequency"></div>
+      </section>
+
+      <section class="card">
+        <label>Project Role</label>
+        <p class="field-hint">
+          Your role tells nexpath what kind of project you're building and your level
+          of involvement, so it can assume your dev flow and tailor its advisories.
+        </p>
+        <div id="role-group" class="radio-group" role="radiogroup" aria-label="Project role"></div>
+      </section>
+
+      <section class="card">
+        <label>Status</label>
+        <div id="self-check" class="self-check"></div>
+      </section>
+
+      <!-- Recent Activity card removed 2026-07-10 (user: less professional on a settings
+           page). The nexpath_recent_events ring buffer itself STAYS — the injector's
+           debug channel still reads it for diagnostics. -->
+      <section class="card">
+        <label>Supported Agent Sites</label>
+        <ul class="site-list">
+          <li>Replit <span class="badge">replit.com</span></li>
+          <li>Bolt.new <span class="badge">bolt.new / stackblitz.com</span></li>
+          <li>Lovable <span class="badge">lovable.dev</span></li>
+        </ul>
+      </section>
+
+      <footer>
+        <p>nexpath v0.1.5 · <a href="https://nexpath.dev" target="_blank" rel="noopener">nexpath.dev</a></p>
+      </footer>
+    </main>
+    <script type="module" src="options.js"></script>
+  </body>
+</html>

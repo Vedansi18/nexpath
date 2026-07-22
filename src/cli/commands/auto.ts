@@ -18,14 +18,16 @@ import { pinchSignalTypeForFlag } from '../../decision-session/content-template-
 import { selectionRegister } from '../../decision-session/selection-registry.js';
 import { resolvePinchFields } from '../../decision-session/signal-pinch-fields.js';
 import type { Stage } from '../../classifier/types.js';
-import type { FlagType, Stage2TriggerResult } from '../../classifier/Stage2Trigger.js';
+import type { FlagType, Stage2TriggerResult } from '../../core/stage2.js';
 import { resolveLanguage } from '../../classifier/LanguageDetector.js';
 import { insertPrompt } from '../../store/prompts.js';
 import { getConfig } from '../../store/config.js';
 import { getProject, upsertProject } from '../../store/projects.js';
 import { importHistoricalPrompts } from '../../store/historical-import.js';
-import { classifyUserProfileLLM, MIN_PROFILE_PROMPTS } from '../../classifier/LLMProfileClassifier.js';
+import { classifyUserProfileLLM, MIN_PROFILE_PROMPTS } from '../../core/classifier/LLMProfileClassifier.js';
 import { isProfileStale } from '../../classifier/UserProfileClassifier.js';
+import { OpenAILLMAdapter } from '../adapters/llm.adapter.js';
+import { loggerAdapter } from '../adapters/log.adapter.js';
 import { logger, initLogger } from '../../logger.js';
 import type { LogLevel } from '../../logger.js';
 import { writeHookStats } from '../../store/hook-stats.js';
@@ -143,6 +145,9 @@ export async function runAuto(
   store:   Store,
   openai?: OpenAI,
 ): Promise<AutoOutcome> {
+  // ── Adapters — wire platform-specific deps to core port interfaces ───────────
+  const llmAdapter = new OpenAILLMAdapter(openai);
+
   // ── -1. Advisory-injected prompt guard ──────────────────────────────────────
   // When the stop hook injects an advisory option as a new Claude turn (block decision),
   // Claude Code fires UserPromptSubmit with that option text — it arrives here like any
@@ -213,17 +218,18 @@ export async function runAuto(
     getConfig(store.db, `role:${input.projectRoot}`) ??
     getConfig(store.db, 'role') ??
     null
-  ) as import('../../classifier/types.js').UserRole | null;
+  ) as import('../../core/classifier/types.js').UserRole | null;
 
   // ── 2. LLM profile classification — runs before the stage classifier so the classifier
   //       calibrates on the freshly-computed profile ──────────────────────────────
   if (isProfileStale(mgr.current.profile, mgr.current.promptCount) &&
       mgr.current.promptHistory.length >= MIN_PROFILE_PROMPTS - 1) {
     const updatedProfile = await classifyUserProfileLLM(
-      mgr.current.promptHistory as import('../../classifier/types.js').PromptRecord[],
+      mgr.current.promptHistory as import('../../core/classifier/types.js').PromptRecord[],
       mgr.current.promptCount,
       mgr.current.profile,
-      openai,
+      llmAdapter,
+      loggerAdapter,
     );
     mgr.setProfile(updatedProfile);
     logger.debug('profile_classified', { nature: updatedProfile.nature, mood: updatedProfile.mood, depth: updatedProfile.depth });
@@ -287,7 +293,7 @@ export async function runAuto(
 
   // ── 4. Absence detection ─────────────────────────────────────────────────────
   const newFlags = detectAbsenceFlags(
-    mgr.current as import('../../classifier/types.js').SessionState,
+    mgr.current as import('../../core/classifier/types.js').SessionState,
     mgr.current.profile,
     projectType,
     freqConfig.signalAbsenceThresholdMultiplier,
@@ -315,7 +321,7 @@ export async function runAuto(
 
   // ── 5. Should Stage 2 fire? ──────────────────────────────────────────────────
   const triggerResult: Stage2TriggerResult = shouldFireStage2(
-    mgr.current as import('../../classifier/types.js').SessionState,
+    mgr.current as import('../../core/classifier/types.js').SessionState,
     prevStage,
     newFlags,
     freqConfig.stage2S1LowConfidence,
