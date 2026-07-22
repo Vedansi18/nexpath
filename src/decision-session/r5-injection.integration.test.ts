@@ -6,8 +6,31 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { generateOptionList } from './OptionGenerator.js';
-import { TASK_REVIEW, type DecisionContent } from './options.js';
+import type { DecisionContent } from './options.js';
 import type { UserProfile, PromptRecord } from '../classifier/types.js';
+
+// Local DecisionContent fixture. The static TASK_REVIEW set was retired in the B11
+// cutover; this file exercises the (still-live) generateOptionList → injectR5 →
+// substituteCAFacingBookend substitution wiring, so the fixture carries the
+// {R4_OPEN}/{R5_INJECT}/{R4_CLOSE} placeholders the pipeline substitutes away.
+// signalType stays 'TASK_REVIEW' — a key in R5_D_FALLBACKS (the Strategy-D table).
+const TASK_REVIEW: DecisionContent = {
+  signalType:    'TASK_REVIEW',
+  question:      'Review before moving on?',
+  pinchFallback: 'Quick check.',
+  L1: [
+    { option: 'Check the login flow end to end.',        descBase: '{R4_OPEN}\n{R5_INJECT: ~1 line — "the login flow"}\nConfirm the primary path holds before moving on.\n{R4_CLOSE}' },
+    { option: 'Run the tests and read the output.',       descBase: '{R4_OPEN}\n{R5_INJECT: ~1 line — "the tests"}\nGreen output, not just a run.\n{R4_CLOSE}' },
+    { option: 'Flag any gaps you are unsure about.',       descBase: '{R4_OPEN}\nName the weak spots.\n{R4_CLOSE}' },
+  ],
+  L2: [
+    { option: 'Quick sanity check of what changed.', descBase: '{R4_OPEN}\nA light pass.\n{R4_CLOSE}' },
+    { option: 'Verify the main path still works.',   descBase: '{R4_OPEN}\nThe happy path.\n{R4_CLOSE}' },
+  ],
+  L3: [
+    { option: 'Anything obviously broken?', descBase: '{R4_OPEN}\nOne quick look.\n{R4_CLOSE}' },
+  ],
+};
 import { GroundingConfig } from '../config/GroundingConfig.js';
 import { applyRuntimeSubstitutionsAllLevels } from './runtime-substitutions.js';
 import type { R5RewriteClient } from './r5-injection.js';

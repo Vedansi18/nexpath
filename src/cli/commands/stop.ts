@@ -1,15 +1,19 @@
 import OpenAI from 'openai';
 import { platform } from 'node:process';
 import type { Store } from '../../store/db.js';
-import { openStore, closeStore, DEFAULT_DB_PATH } from '../../store/db.js';
+import { openStore, closeStore, releaseStoreLock, reacquireStoreLock, DEFAULT_DB_PATH } from '../../store/db.js';
 import { getPendingAdvisory, markAdvisoryShown } from '../../store/pending-advisories.js';
+import { isFeedbackEligible, markFeedbackShown } from '../../store/feedback-cadence.js';
+import { recordAdvisoryFired, recordOptionSelected } from '../../store/feedback-signals.js';
+import { sendFeedback } from '../../telemetry/feedback-send.js';
+import { runFeedbackPopup, type FeedbackRenderFn, type FeedbackResult } from '../../decision-session/feedback-popup.js';
+import { createFeedbackRenderFn } from '../../decision-session/feedback-tty.js';
 import { runDecisionSession } from '../../decision-session/DecisionSession.js';
 import type { SelectFn } from '../../decision-session/DecisionSession.js';
 import { createTtySelectFn } from '../../decision-session/TtySelectFn.js';
 import { getConfig } from '../../store/config.js';
 import { detectLanguage, resolveLanguage, LANG_WINDOW, LANG_DETECT_INTERVAL } from '../../classifier/LanguageDetector.js';
-import { SessionStateManager } from '../../core/session-state.js';
-import { SqlJsStorageAdapter } from '../adapters/storage.adapter.js';
+import { SessionStateManager } from '../../classifier/SessionStateManager.js';
 import { getRecentPrompts } from '../../store/prompts.js';
 import { getProject, setDetectedLanguage } from '../../store/projects.js';
 import { logger, initLogger } from '../../logger.js';
@@ -17,10 +21,21 @@ import type { LogLevel } from '../../logger.js';
 import { writeHookStats } from '../../store/hook-stats.js';
 import { writeTelemetry } from '../../telemetry/index.js';
 import { triggerOpportunisticSync } from '../../telemetry/OpportunisticSync.js';
+import { flushIfTelemetryOn, flushLifecycle } from '../../telemetry/lifecycle-flush.js';
 import { recentPromptMetadata } from '../../telemetry/recent-prompts.js';
 import { readStdin } from './auto.js';
-import { resolveDecisionContent } from '../../decision-session/options.js';
-import { generateOptionList } from '../../decision-session/OptionGenerator.js';
+import type { GeneratedOptions } from '../../decision-session/OptionGenerator.js';
+import { resolveContentSource, selectionRegister } from '../../decision-session/selection-registry.js';
+import { autogenAwareLookup, pinchSignalTypeForFlag } from '../../decision-session/content-template-source.js';
+import { runAutogenForFire } from '../../decision-session/auto-template-generator.js';
+import { loadRightGoodProfile } from '../../classifier/right-good-aggregator.js';
+import { generateFromEngine, buildEngineGrounding, composeDeterministicOptions } from '../../decision-session/engine-option-generator.js';
+import { resolvePinchFields } from '../../decision-session/signal-pinch-fields.js';
+import { getWhyHelpForSignalType } from '../../decision-session/why-help-by-signal-type.js';
+import type { WhyHelpEntry } from '../../decision-session/why-help.js';
+import { getUserDepthLevel } from '../../store/user-depth-level.js';
+import type { MaturityLevel } from '../../decision-session/content-template-schema.js';
+import type { PromptRecord } from '../../classifier/types.js';
 import { resolveOpenAIKey, getKeySource } from '../../config/ApiKeyResolver.js';
 
 /**
@@ -55,7 +70,17 @@ export type StopOutcome =
   | { outcome: 'no_tty' }
   | { outcome: 'blocked';       reason: string }
   | { outcome: 'clipboard_only' }
+  | { outcome: 'feedback_shown' }
   | { outcome: 'skipped' };
+
+/**
+ * Injectable feedback popup dependencies. `render` is the terminal renderer
+ * (null when none is available, e.g. no TTY); `send` transmits the rating.
+ */
+export interface FeedbackDeps {
+  render: FeedbackRenderFn | null;
+  send:   (store: Store, rating: number) => Promise<boolean>;
+}
 
 // ── Core logic ─────────────────────────────────────────────────────────────────
 
@@ -67,15 +92,46 @@ export type StopOutcome =
  * @param selectFn  Optional select replacement (injected in tests)
  */
 export async function runStop(
-  payload:   StopPayload,
-  store:     Store,
-  selectFn?: SelectFn,
-  openai?:   OpenAI,
+  payload:       StopPayload,
+  store:         Store,
+  selectFn?:     SelectFn,
+  openai?:       OpenAI,
+  feedbackDeps?: FeedbackDeps,
 ): Promise<StopOutcome> {
   // 1. Loop guard — Claude is continuing because of a previous Stop block; let it land
   if (payload.stop_hook_active) {
     logger.debug('stop_loop_guard', { cwd: payload.cwd });
     return { outcome: 'loop_guard' };
+  }
+
+  // 1.3. Feedback popup — when due, show it in place of the advisory this turn.
+  //      A rating is sent; either outcome resets the cadence. Skipped (without
+  //      consuming the cadence) when no renderer is available.
+  if (isFeedbackEligible(store)) {
+    const fbRender = feedbackDeps ? feedbackDeps.render : createFeedbackRenderFn();
+    const fbSend   = feedbackDeps ? feedbackDeps.send   : sendFeedback;
+    if (fbRender) {
+      // The popup blocks for user input; don't hold the global DB lock across it.
+      // Release before, re-acquire + reload after, so other sessions are not
+      // blocked and their concurrent writes are not clobbered. No-op for :memory:.
+      releaseStoreLock(store);
+      let result: FeedbackResult;
+      try {
+        result = await runFeedbackPopup({ render: fbRender });
+      } finally {
+        await reacquireStoreLock(store);
+      }
+      if (result.outcome === 'selected') {
+        // The feedback click is the consent gate: flush any buffered lifecycle
+        // events (install + advisory + option-selected), then send the rating.
+        // Flush regardless of telemetry.enabled — this explicit action is the consent.
+        await flushLifecycle(store);
+        await fbSend(store, result.rating);
+      }
+      markFeedbackShown(store);
+      logger.info('stop_feedback_shown', { cwd: payload.cwd, selected: result.outcome === 'selected' });
+      return { outcome: 'feedback_shown' };
+    }
   }
 
   // 1.5. Language detection — runs post-response, invisible latency
@@ -93,8 +149,7 @@ export async function runStop(
   const decisionSessionCount = getProject(store, payload.cwd)?.decisionSessionCount ?? 0;
 
   // 2. Load session state — needed for session filter and option gen
-  const storageAdapter = new SqlJsStorageAdapter(store);
-  const mgr = SessionStateManager.load(storageAdapter, payload.cwd);
+  const mgr = SessionStateManager.load(store, payload.cwd);
 
   // 3. Check for a pending advisory stored by the auto hook
   const advisory = getPendingAdvisory(store, payload.cwd, mgr.current.sessionId);
@@ -142,31 +197,55 @@ export async function runStop(
   const detectedLang  = getProject(store, payload.cwd)?.detectedLanguage ?? undefined;
   const effectiveLang = resolveLanguage(langOverride, detectedLang);
 
-  const content = resolveDecisionContent(
-    advisory.stage,
-    advisory.flagType,
-    mgr.current.profile,
-  );
-
-  const generatedOptions = await generateOptionList(
-    content,
-    mgr.current.profile ?? undefined,
-    effectiveLang,
-    mgr.current.promptHistory as import('../../core/classifier/types.js').PromptRecord[],
-    {
-      flagType:              advisory.flagType,
-      currentStage:          mgr.current.currentStage,
-      prevStage:             advisory.prevStage,
-      promptsInCurrentStage: mgr.current.promptsInCurrentStage,
-    },
-    openai,
-  );
+  // Dispatch: every signal is migrated, so the fired advisory's record serves it via the engine.
+  // The record signalType comes from the flag (the `absence:` convention) or, for a stage transition
+  // (no absence: key), from the destination stage — both via pinchSignalTypeForFlag, which needs no
+  // static content (the B11 cutover removed it).
+  const recordSignalType = pinchSignalTypeForFlag(advisory.flagType, advisory.stage);
+  // The engine now serves role-tailored content directly (B11 `roleOverrides` — context_loss's
+  // founder / indie_hacker / pm variants), so there is no role-precedence static guard: every
+  // migrated signal, role-tailored or not, takes the engine path (the role is passed below).
+  let generatedOptions: GeneratedOptions | null = null;
+  // A migrated signal owns its popup question + per-class why-help in the record (no matching
+  // static DecisionContent) — thread them to runDecisionSession as overrides.
+  let questionOverride: string | undefined;
+  let whyHelpOverride: WhyHelpEntry | null | undefined;
+  const register = selectionRegister(mgr.current.profile?.nature);
+  if (recordSignalType && resolveContentSource(recordSignalType) === 'content-template') {
+    const lookup = autogenAwareLookup(store, payload.cwd, recordSignalType);
+    const level  = (getUserDepthLevel(store, payload.cwd)?.currentLevel ?? 2) as MaturityLevel;
+    const role   = mgr.current.profile?.role ?? undefined;
+    // Popup question + per-class why-help are static (no LLM). The question comes from the
+    // register-keyed pinch-fields map (the migrated question/pinchFallback layer), not the record.
+    questionOverride = resolvePinchFields(recordSignalType, register)?.question;
+    whyHelpOverride = getWhyHelpForSignalType(recordSignalType);
+    // The engine grounding/weave needs an LLM client; on ANY failure (missing key, API error)
+    // degrade below — the Stop hook must never crash on option gen.
+    try {
+      const promptHistory = mgr.current.promptHistory as PromptRecord[];
+      const facts = await buildEngineGrounding(store, payload.cwd, promptHistory, openai);
+      generatedOptions = await generateFromEngine({ lookup, level, register, role, facts, factCap: 3 }, openai);
+    } catch (err) {
+      logger.debug('stop_engine_option_gen_error', { error: String(err) });
+      generatedOptions = null;
+    }
+    if (!generatedOptions) {
+      // The grounded engine failed (missing key / API error). Serve a DETERMINISTIC engine composition
+      // from the record — no LLM, register/role-aware, safeguard-carrying — so the fallback needs no
+      // static content. (Records are the whole content layer after the B11 cutover.)
+      generatedOptions = composeDeterministicOptions({ lookup, level, register, role });
+    }
+  }
 
   writeTelemetry(payload.cwd, 'stop_advisory_shown', {
     flagType:         advisory.flagType,
     stage:            advisory.stage,
     generatedOptions: !!generatedOptions,
   }, store);
+  recordAdvisoryFired(store, payload.cwd);
+  // On-mode: emit the advisory-fired event now (backdated). Off-mode buffers it
+  // for the feedback-consent flush. Fire-and-forget so the popup is never blocked.
+  void flushIfTelemetryOn(store).catch(() => {});
 
   const dsResult = await runDecisionSession(
     {
@@ -178,6 +257,8 @@ export async function runStop(
       promptCount:          advisory.promptCount,
       decisionSessionCount,
       generatedOptions:     generatedOptions ?? undefined,
+      questionOverride,
+      whyHelpOverride,
       profile:              mgr.current.profile,
       // Phase 4 — Item B: last-5 prompt metadata for decision_session_started.
       recentPrompts:        recentPromptMetadata(mgr.current.promptHistory),
@@ -186,15 +267,37 @@ export async function runStop(
     effectiveSelectFn,
   );
 
+  // Per-user auto-gen loop — after the popup, off its critical path. The current
+  // fire already served (the preset, or a previously-cached per-user record); this
+  // runs the one-time ranking and lazily generates the fired topic's per-user record
+  // so the NEXT fire of a selected topic serves it. Best-effort — never breaks the outcome.
+  if (recordSignalType && resolveContentSource(recordSignalType) === 'content-template') {
+    await runAutogenForFire({
+      store,
+      projectRoot:  payload.cwd,
+      signalType:   recordSignalType,
+      currentLevel: (getUserDepthLevel(store, payload.cwd)?.currentLevel ?? 2) as MaturityLevel,
+      rightGood:    loadRightGoodProfile(store, payload.cwd),
+      client:       openai,
+    });
+  }
+
   if (dsResult.outcome === 'selected') {
+    // Record the selection (timestamp only — no option text or index).
+    recordOptionSelected(store, payload.cwd);
+    // On-mode: emit the option-selected event now; off-mode buffers it for the
+    // feedback-consent flush. Fire-and-forget so the block decision is not delayed.
+    void flushIfTelemetryOn(store).catch(() => {});
     // Store injected text in session — auto reads and clears this on its next invocation
     // to skip all pipeline processing for the advisory-injected prompt.
-    mgr.setInjectedPrompt(storageAdapter, dsResult.selectedPrompt);
+    mgr.setInjectedPrompt(store, dsResult.selectedPrompt);
     logger.info('stop_blocked', { cwd: payload.cwd, reason: dsResult.selectedPrompt });
     return { outcome: 'blocked', reason: dsResult.selectedPrompt };
   }
 
   if (dsResult.outcome === 'clipboard_only') {
+    // Copy-to-clipboard is also engagement with an option (timestamp only).
+    recordOptionSelected(store, payload.cwd);
     logger.info('stop_clipboard_only', { cwd: payload.cwd });
     return { outcome: 'clipboard_only' };
   }

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { bringPopupToFront, POPUP_WINDOW_TITLE } from './popup-foreground.js';
+import { bringPopupToFront, POPUP_WINDOW_TITLE, FEEDBACK_WINDOW_TITLE } from './popup-foreground.js';
 
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
@@ -78,7 +78,65 @@ describe('bringPopupToFront', () => {
   it('gives up after maxTries when activation never succeeds', () => {
     const h = setup({ tools: ['wmctrl'], maxTries: 5 }); // never succeeds
     vi.advanceTimersByTime(10_000);
-    expect(h.calls()).toBe(5);
+    // 2 titles (advisory + feedback) attempted per tick × 5 ticks = 10 calls.
+    expect(h.calls()).toBe(10);
+  });
+
+  it('tries to raise BOTH the advisory and the feedback popup titles', () => {
+    const titles: string[] = [];
+    bringPopupToFront({
+      platform: 'linux',
+      env: { DISPLAY: ':0' },
+      hasCommand: () => true,
+      activate: (_tool, title) => { titles.push(title); return false; }, // never succeeds → tries both
+      intervalMs: 500,
+      maxTries: 1,
+    });
+    vi.advanceTimersByTime(1_000);
+    expect(titles).toContain(POPUP_WINDOW_TITLE);
+    expect(titles).toContain(FEEDBACK_WINDOW_TITLE);
+  });
+
+  // ── Requirement: raise WHICHEVER popup is open (advisory OR feedback) ──────────
+
+  it('raises the FEEDBACK popup when only the feedback window exists', () => {
+    const attempted: string[] = [];
+    let raised: string | null = null;
+    bringPopupToFront({
+      platform: 'linux',
+      env: { DISPLAY: ':0' },
+      hasCommand: () => true,
+      activate: (_tool, title) => {
+        attempted.push(title);
+        if (title === FEEDBACK_WINDOW_TITLE) { raised = title; return true; }
+        return false; // advisory window not present this turn
+      },
+      intervalMs: 500,
+      maxTries: 12,
+    });
+    vi.advanceTimersByTime(10_000);
+    expect(raised).toBe(FEEDBACK_WINDOW_TITLE);        // the feedback popup was raised
+    expect(attempted).toEqual([POPUP_WINDOW_TITLE, FEEDBACK_WINDOW_TITLE]); // advisory tried first, then feedback → stopped
+  });
+
+  it('still raises the ADVISORY popup when the advisory window exists (regression)', () => {
+    const attempted: string[] = [];
+    let raised: string | null = null;
+    bringPopupToFront({
+      platform: 'linux',
+      env: { DISPLAY: ':0' },
+      hasCommand: () => true,
+      activate: (_tool, title) => {
+        attempted.push(title);
+        if (title === POPUP_WINDOW_TITLE) { raised = title; return true; }
+        return false;
+      },
+      intervalMs: 500,
+      maxTries: 12,
+    });
+    vi.advanceTimersByTime(10_000);
+    expect(raised).toBe(POPUP_WINDOW_TITLE);           // advisory still foregrounded
+    expect(attempted).toEqual([POPUP_WINDOW_TITLE]);   // advisory found first → feedback not attempted (short-circuit)
   });
 
   it('honours WAYLAND_DISPLAY as a valid display', () => {

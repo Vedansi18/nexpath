@@ -5,6 +5,7 @@ export type TelemetryEventName =
   | 'profile_computed'
   | 'absence_flags_detected'
   | 'stage2_evaluated'
+  | 'classifier_fire_evaluated'
   // Advisory gating
   | 'advisory_min_prompts_blocked'
   | 'advisory_cooldown_blocked'

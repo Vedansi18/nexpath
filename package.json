@@ -8,6 +8,7 @@
     "nexpath-serve": "./dist/server/index.js"
   },
   "scripts": {
+    "prebuild": "tsx scripts/check-build-gate.ts",
     "build": "tsc",
     "postbuild": "node -e \"['dist/cli/index.js','dist/server/index.js'].forEach(f => require('fs').chmodSync(f, 0o755))\"",
     "build:ext": "node scripts/build-ext.mjs",
@@ -24,7 +25,6 @@
     "@anthropic-ai/sdk": "^0.100.1",
     "@clack/prompts": "^0.9",
     "@modelcontextprotocol/sdk": "latest",
-    "@xenova/transformers": "^2.0.1",
     "commander": "^12",
     "cross-keychain": "^1.1.0",
     "dotenv": "^17.4.2",

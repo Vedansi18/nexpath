@@ -6,8 +6,8 @@ import {
 } from './why-help-by-signal-type.js';
 
 describe('why-help-by-signal-type — shape + coverage', () => {
-  it('contains exactly 136 entries across all 9 signal classes', () => {
-    expect(Object.keys(WHY_HELP_BY_SIGNAL_TYPE).length).toBe(136);
+  it('contains exactly 144 entries across all 12 signal classes', () => {
+    expect(Object.keys(WHY_HELP_BY_SIGNAL_TYPE).length).toBe(144);
   });
 
   it('every entry resolves to one of the 9 WHY_HELP_PER_CLASS entries', () => {
@@ -17,7 +17,7 @@ describe('why-help-by-signal-type — shape + coverage', () => {
     }
   });
 
-  it('per-class signalType counts match the canonical split (7/21/11/8/8/14/20/35/12)', () => {
+  it('per-class signalType counts match the canonical split (7/21/11/8/8/14/20/35/12 + 5/1/2 new)', () => {
     const expectedCounts: Record<string, number> = {
       class1_stage_transition:            7,
       class2_verification_quality:        21,
@@ -28,6 +28,9 @@ describe('why-help-by-signal-type — shape + coverage', () => {
       class7_cool_geek_vibe_coder:        20,
       class8_role_cluster:                35,
       class9_academic_hardcore_pro:       12,
+      class_security_safety:              5, // §4.E2 (A10): secret / version / backup / envs / scanning
+      class_mood_meta:                    1, // §4.E2 (A10): frustration_spiral
+      class_agent_mode:                   2, // mode-mismatch: execute-while-planning / restricted-while-building
     };
 
     const actualCounts: Record<string, number> = {};
@@ -89,6 +92,16 @@ describe('getWhyHelpForSignalType — resolver', () => {
   it('returns the class-9 entry for academic / hardcore_pro signalTypes', () => {
     expect(getWhyHelpForSignalType('ABSENCE_FAILURE_MODE_ANALYSIS')).toBe(WHY_HELP_PER_CLASS.class9_academic_hardcore_pro);
     expect(getWhyHelpForSignalType('ABSENCE_SECURITY_THREAT_MODELING')).toBe(WHY_HELP_PER_CLASS.class9_academic_hardcore_pro);
+  });
+
+  it('returns the security/safety + mood/meta entries for the 6 §4.E2 migrated signalTypes', () => {
+    // stop.ts resolves the migrated signal's per-class why-help THROUGH this resolver
+    // (whyHelpOverride) — since a migrated signal has no static DecisionContent to carry it.
+    for (const s of ['ABSENCE_SECRET_IN_PROMPT', 'ABSENCE_NO_VERSION_CONTROL', 'ABSENCE_NO_BACKUP_SAFETY',
+      'ABSENCE_NO_SEPARATE_ENVS', 'ABSENCE_NO_AUTOMATED_SECURITY_SCANNING']) {
+      expect(getWhyHelpForSignalType(s)).toBe(WHY_HELP_PER_CLASS.class_security_safety);
+    }
+    expect(getWhyHelpForSignalType('ABSENCE_FRUSTRATION_SPIRAL')).toBe(WHY_HELP_PER_CLASS.class_mood_meta);
   });
 
   it('returns null for unknown signalTypes (graceful-fail)', () => {

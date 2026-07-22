@@ -13,7 +13,7 @@ export type RegisterPartial = Partial<Record<Register, string>>;
 
 // ──────────────────────────────────────────────────────────────────────────
 // Per-class fallback tables. Each table is keyed by the signal_type name
-// (matching the ABSENCE_* constants in options.ts and options-beginner.ts).
+// (the ABSENCE_* / stage-transition signal_type constants).
 // ──────────────────────────────────────────────────────────────────────────
 
 const CLASS_1_FALLBACKS = {

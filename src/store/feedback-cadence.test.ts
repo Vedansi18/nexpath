@@ -1,0 +1,250 @@
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { openStore, closeStore, type Store } from './db.js';
+import {
+  recordActivity,
+  isFeedbackEligible,
+  markFeedbackShown,
+  primeFeedbackEligible,
+  readCadence,
+  USAGE_THRESHOLD_MS,
+  MIN_GAP_MS,
+  IDLE_CAP_MS,
+} from './feedback-cadence.js';
+
+let store: Store;
+
+beforeEach(async () => { store = await openStore(':memory:'); });
+afterEach(() => closeStore(store));
+
+describe('readCadence', () => {
+  it('defaults to zero / null on a fresh store', () => {
+    expect(readCadence(store)).toEqual({ activeMs: 0, lastActivityAt: null, lastFeedbackAt: null });
+  });
+
+  it('returns numbers, not the stored strings', () => {
+    recordActivity(store, 1000);
+    const state = readCadence(store);
+    expect(typeof state.activeMs).toBe('number');
+    expect(typeof state.lastActivityAt).toBe('number');
+  });
+});
+
+describe('recordActivity', () => {
+  it('starts at zero active time on the first invocation', () => {
+    recordActivity(store, 1000);
+    const state = readCadence(store);
+    expect(state.activeMs).toBe(0);
+    expect(state.lastActivityAt).toBe(1000);
+  });
+
+  it('adds gaps within the idle cap', () => {
+    recordActivity(store, 1000);
+    recordActivity(store, 1000 + 60_000);
+    expect(readCadence(store).activeMs).toBe(60_000);
+  });
+
+  it('does not count gaps longer than the idle cap', () => {
+    recordActivity(store, 1000);
+    recordActivity(store, 1000 + IDLE_CAP_MS + 1);
+    expect(readCadence(store).activeMs).toBe(0);
+  });
+
+  it('ignores non-positive gaps (equal or backward clock)', () => {
+    recordActivity(store, 1000);
+    recordActivity(store, 1000);   // delta 0 → not counted
+    recordActivity(store, 500);    // delta negative → not counted
+    const state = readCadence(store);
+    expect(state.activeMs).toBe(0);
+    expect(state.lastActivityAt).toBe(500);
+  });
+
+  it('advances last_activity even when the gap is not counted', () => {
+    recordActivity(store, 1000);
+    recordActivity(store, 1000 + IDLE_CAP_MS + 1);
+    expect(readCadence(store).lastActivityAt).toBe(1000 + IDLE_CAP_MS + 1);
+  });
+
+  it('accumulates globally regardless of which project drove the activity', () => {
+    // No project parameter exists — every call feeds the one global counter.
+    recordActivity(store, 0);
+    recordActivity(store, IDLE_CAP_MS);       // +cap
+    recordActivity(store, 2 * IDLE_CAP_MS);   // +cap
+    expect(readCadence(store).activeMs).toBe(2 * IDLE_CAP_MS);
+  });
+});
+
+describe('isFeedbackEligible', () => {
+  it('is false with no usage yet', () => {
+    expect(isFeedbackEligible(store, 1000)).toBe(false);
+  });
+
+  it('is false below the usage threshold', () => {
+    recordActivity(store, 0);
+    recordActivity(store, IDLE_CAP_MS);
+    expect(isFeedbackEligible(store)).toBe(false);
+  });
+
+  it('is true once threshold reached and never shown', () => {
+    let t = 0;
+    while (readCadence(store).activeMs < USAGE_THRESHOLD_MS) {
+      recordActivity(store, t);
+      t += IDLE_CAP_MS;
+    }
+    expect(isFeedbackEligible(store, t)).toBe(true);
+  });
+
+  it('is true exactly at the usage threshold boundary', () => {
+    expect(USAGE_THRESHOLD_MS % IDLE_CAP_MS).toBe(0);
+    const steps = USAGE_THRESHOLD_MS / IDLE_CAP_MS;
+    for (let i = 0; i <= steps; i++) recordActivity(store, i * IDLE_CAP_MS);
+    expect(readCadence(store).activeMs).toBe(USAGE_THRESHOLD_MS);
+    expect(isFeedbackEligible(store, steps * IDLE_CAP_MS)).toBe(true);
+  });
+
+  it('respects the minimum gap after being shown', () => {
+    let t = 0;
+    while (readCadence(store).activeMs < USAGE_THRESHOLD_MS) {
+      recordActivity(store, t);
+      t += IDLE_CAP_MS;
+    }
+    const shownAt = t;
+    markFeedbackShown(store, shownAt);
+
+    let t2 = shownAt + IDLE_CAP_MS;
+    while (readCadence(store).activeMs < USAGE_THRESHOLD_MS) {
+      recordActivity(store, t2);
+      t2 += IDLE_CAP_MS;
+    }
+    expect(isFeedbackEligible(store, shownAt + MIN_GAP_MS - 1)).toBe(false);
+    expect(isFeedbackEligible(store, shownAt + MIN_GAP_MS)).toBe(true);
+  });
+});
+
+describe('markFeedbackShown', () => {
+  it('resets the accumulator and stamps last-shown', () => {
+    recordActivity(store, 1000);
+    recordActivity(store, 1000 + 60_000);
+    markFeedbackShown(store, 5_000_000);
+    const state = readCadence(store);
+    expect(state.activeMs).toBe(0);
+    expect(state.lastFeedbackAt).toBe(5_000_000);
+  });
+
+  it('resets last_activity on show so a later heartbeat does not bank the pre-popup gap', () => {
+    recordActivity(store, 1000);
+    recordActivity(store, 61_000);                // activeMs 60_000, lastActivity 61_000
+    const shownAt = 61_000 + 3 * 60_000;          // popup shown 3 min after the last activity
+    markFeedbackShown(store, shownAt);            // resets activeMs AND lastActivity to shownAt
+    expect(readCadence(store).lastActivityAt).toBe(shownAt);
+    // Next heartbeat 2 min after the popup: only that 2 min counts, not the 5 min since 61_000.
+    recordActivity(store, shownAt + 2 * 60_000);
+    expect(readCadence(store).activeMs).toBe(2 * 60_000);
+  });
+});
+
+describe('IDLE_CAP_MS (15-minute session idle window)', () => {
+  it('is 15 minutes', () => {
+    expect(IDLE_CAP_MS).toBe(15 * 60 * 1000);
+  });
+
+  it('accumulates a 10-minute gap (within the cap)', () => {
+    recordActivity(store, 0);
+    recordActivity(store, 10 * 60_000);
+    expect(readCadence(store).activeMs).toBe(10 * 60_000);
+  });
+
+  it('drops a 20-minute gap (beyond the cap)', () => {
+    recordActivity(store, 0);
+    recordActivity(store, 20 * 60_000);
+    expect(readCadence(store).activeMs).toBe(0);
+  });
+});
+
+describe('isFeedbackEligible — live clamp (in-progress turn)', () => {
+  it('is null-safe with no activity yet (tail 0, not eligible)', () => {
+    expect(isFeedbackEligible(store, 999_999_999)).toBe(false);
+  });
+
+  it('lets the in-progress turn push a just-under-threshold accumulator over', () => {
+    // Accumulate exactly threshold - one cap, so only the live tail can bridge it.
+    const steps = (USAGE_THRESHOLD_MS - IDLE_CAP_MS) / IDLE_CAP_MS;
+    let t = 0;
+    for (let i = 0; i <= steps; i++) { recordActivity(store, t); t += IDLE_CAP_MS; }
+    const state = readCadence(store);
+    expect(state.activeMs).toBe(USAGE_THRESHOLD_MS - IDLE_CAP_MS);
+    const lastAct = state.lastActivityAt as number;
+
+    // A tiny in-progress gap does not bridge the remaining cap → not eligible.
+    expect(isFeedbackEligible(store, lastAct + 1)).toBe(false);
+    // A full-cap in-progress gap bridges it → eligible in the same session.
+    expect(isFeedbackEligible(store, lastAct + IDLE_CAP_MS)).toBe(true);
+  });
+
+  it('caps the live tail at one idle window (a huge idle gap stays ineligible)', () => {
+    recordActivity(store, 0);   // activeMs 0, lastActivity 0
+    expect(isFeedbackEligible(store, 10 * USAGE_THRESHOLD_MS)).toBe(false);
+  });
+
+  it('never bypasses the 2-day repeat gate, even when the tail bridges the threshold', () => {
+    const steps = (USAGE_THRESHOLD_MS - IDLE_CAP_MS) / IDLE_CAP_MS;
+    let t = 0;
+    for (let i = 0; i <= steps; i++) { recordActivity(store, t); t += IDLE_CAP_MS; }
+    const shownAt = (readCadence(store).lastActivityAt as number) + IDLE_CAP_MS;
+    expect(isFeedbackEligible(store, shownAt)).toBe(true);   // eligible via the clamp, never shown
+    markFeedbackShown(store, shownAt);
+
+    // Re-accumulate to just-under-threshold a day later — still inside the 2-day gate.
+    let t2 = shownAt + 24 * 60 * 60 * 1000;
+    for (let i = 0; i <= steps; i++) { recordActivity(store, t2); t2 += IDLE_CAP_MS; }
+    const lastAct2 = readCadence(store).lastActivityAt as number;
+    // The tail bridges the usage threshold, but the repeat gate has not elapsed → not eligible.
+    expect(isFeedbackEligible(store, lastAct2 + IDLE_CAP_MS)).toBe(false);
+  });
+});
+
+describe('primeFeedbackEligible (dev seam)', () => {
+  it('makes the popup eligible immediately', () => {
+    expect(isFeedbackEligible(store, 1000)).toBe(false);
+    primeFeedbackEligible(store, 1000);
+    expect(readCadence(store).activeMs).toBe(USAGE_THRESHOLD_MS);
+    expect(isFeedbackEligible(store, 1000)).toBe(true);
+  });
+
+  it('clears last-shown so the repeat gate does not block after a prior popup', () => {
+    markFeedbackShown(store, 1000);                 // sets last-shown → repeat gate active
+    primeFeedbackEligible(store, 2000);
+    expect(readCadence(store).lastFeedbackAt).toBeNull();
+    expect(isFeedbackEligible(store, 2000)).toBe(true);
+  });
+
+  it('sets active usage to exactly the threshold, overwriting any prior accumulation', () => {
+    recordActivity(store, 0);
+    recordActivity(store, 5 * 60_000);              // partial accumulation (5 min)
+    primeFeedbackEligible(store, 5 * 60_000);
+    expect(readCadence(store).activeMs).toBe(USAGE_THRESHOLD_MS);   // set, not added
+  });
+});
+
+describe('persistence across reopen (real DB file)', () => {
+  it('global usage survives close/reopen and keeps accumulating', async () => {
+    const dbPath = join(tmpdir(), `nexpath-cadence-${randomUUID()}.db`);
+    try {
+      let s = await openStore(dbPath);
+      recordActivity(s, 1_000_000);         // sets last_activity, activeMs 0
+      closeStore(s);
+
+      // Each real Stop hook opens a fresh store — the accumulator must persist.
+      s = await openStore(dbPath);
+      recordActivity(s, 1_000_000 + 60_000); // delta uses persisted last_activity
+      expect(readCadence(s).activeMs).toBe(60_000);
+      closeStore(s);
+    } finally {
+      rmSync(dbPath, { force: true });
+      rmSync(`${dbPath}.lock`, { force: true });
+    }
+  });
+});

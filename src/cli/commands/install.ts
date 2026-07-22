@@ -7,6 +7,8 @@ import { SelectPrompt } from '@clack/core';
 import pc from 'picocolors';
 import { openStore, closeStore, DEFAULT_DB_PATH } from '../../store/db.js';
 import { isConfigSet, setConfig, getConfig } from '../../store/config.js';
+import { setInstalledAtIfMissing } from '../../store/feedback-signals.js';
+import { flushIfTelemetryOn } from '../../telemetry/lifecycle-flush.js';
 import {
   VALID_ROLES,
   setAdvisoryFrequency,
@@ -520,6 +522,10 @@ export async function installAction(
 
   const store = await openStore(dbPath);
 
+  // Save the install timestamp locally (kept on re-runs). It is transmitted
+  // later, only when the user submits feedback.
+  setInstalledAtIfMissing(store);
+
   let apiKeySource:  InstallSummary['apiKey']['source'] = 'skipped';
   let telemetryEnabled = true;
 
@@ -567,6 +573,22 @@ export async function installAction(
       telemetryEnabled = consent.kind === 'enable';
       setConfig(store, 'telemetry.enabled',      String(telemetryEnabled));
       setConfig(store, 'telemetry_sync_enabled', String(telemetryEnabled));
+
+      // Dev-environment probe disclosure. Local-only, on by default — no
+      // separate consent prompt (nothing leaves the machine).
+      note(
+        [
+          'nexpath reads a few local facts about your machine + project',
+          '(OS, version control, test runner, framework, etc.) to give',
+          'more relevant guidance.',
+          '',
+          'These facts stay on your machine — they are NEVER transmitted.',
+          '',
+          'See them:  nexpath env',
+          'Turn off:  nexpath config set env_probe_enabled false',
+        ].join('\n'),
+        'Dev-environment facts (local-only)',
+      );
     } else {
       // --yes (non-interactive): preserve an existing telemetry choice. A re-run
       // — e.g. the VS Code extension's two-pass setup (`--for cli` interactive,
@@ -750,6 +772,10 @@ export async function installAction(
 
   console.log('');
   console.log('Restart your agents to activate nexpath-prompt-store.');
+
+  // Emit the install event now when telemetry is on; when off it stays buffered
+  // locally until the user submits feedback.
+  await flushIfTelemetryOn(store);
 
   closeStore(store);
 
