@@ -118,8 +118,35 @@ function hasLanded(input: HTMLElement, text: string): boolean {
   return (input.textContent ?? '').trim().includes(text.trim().slice(0, 20));
 }
 
-export async function injectViaSimulatedPaste(inputSelector: string, text: string): Promise<void> {
-  const input = document.querySelector<HTMLElement>(inputSelector);
+/**
+ * Resolve the agent's composer from ONE selector or a PRIORITISED LIST. Purely
+ * additive over the original single-`querySelector` lookup and can never do worse:
+ *   • a bare string behaves exactly as before;
+ *   • a list is tried in order — the FIRST selector that matches wins, so the
+ *     original/most-specific selector stays authoritative and every later entry is
+ *     only a fallback for when a site renames its composer (e.g. Lovable relabelled
+ *     its input's aria-label "Chat input" → "Ask Lovable…", which silently routed
+ *     "Send to your agent" to the clipboard fallback);
+ *   • when a selector matches several nodes, the first RENDERED one is preferred
+ *     (getClientRects covers position:fixed, which offsetParent misses), hardening
+ *     every agent against duplicate/off-screen editors.
+ * If nothing is rendered it still returns the first raw match — so the existing
+ * clipboard-fallback contract (null → clipboard) is unchanged.
+ */
+function resolveComposer(selectors: string | string[]): HTMLElement | null {
+  const list = Array.isArray(selectors) ? selectors : [selectors];
+  let firstMatch: HTMLElement | null = null;
+  for (const selector of list) {
+    for (const el of document.querySelectorAll<HTMLElement>(selector)) {
+      firstMatch ??= el;
+      if (el.getClientRects().length > 0) return el;
+    }
+  }
+  return firstMatch;
+}
+
+export async function injectViaSimulatedPaste(inputSelector: string | string[], text: string): Promise<void> {
+  const input = resolveComposer(inputSelector);
   if (!input) {
     await clipboardFallback(text);
     return;
