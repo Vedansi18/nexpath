@@ -62,17 +62,43 @@ describe('lovable-inject.ts — injectPromptText', () => {
     expect(clipboardWriteTextMock).toHaveBeenCalledWith('add dark mode');
   });
 
-  it('ignores a TipTap editor without the "Chat input" aria-label (wrong element) and falls back', async () => {
-    const other = document.createElement('div');
-    other.className = 'tiptap ProseMirror';
-    other.setAttribute('contenteditable', 'true');
-    other.addEventListener('paste', () => { other.textContent = 'should never land here'; });
-    document.body.appendChild(other);
+  it('injects into a RELABELLED composer (aria-label "Chat input" → "Ask Lovable…") — the drift fix, no clipboard fallback', async () => {
+    // Reproduces the 2026-07-23 tester bug: Lovable renamed the composer's aria-label,
+    // so the old exact-label selector matched nothing and "Send to your agent" copied
+    // to clipboard instead of pasting. The fallback list must now find it.
+    const relabelled = document.createElement('div');
+    relabelled.className = 'tiptap ProseMirror';
+    relabelled.setAttribute('contenteditable', 'true');
+    relabelled.setAttribute('aria-label', 'Ask Lovable to create something amazing');
+    relabelled.addEventListener('paste', (ev) => {
+      relabelled.textContent = (ev as ClipboardEvent).clipboardData?.getData('text/plain') ?? '';
+    });
+    document.body.appendChild(relabelled);
 
     await injectPromptText('add dark mode');
 
-    expect(other.textContent).not.toBe('should never land here');
-    expect(clipboardWriteTextMock).toHaveBeenCalledWith('add dark mode');
+    expect(relabelled.textContent).toBe('add dark mode');
+    expect(clipboardWriteTextMock).not.toHaveBeenCalled();
+  });
+
+  it('still prefers the exact "Chat input" composer when it is present (selector priority preserved)', async () => {
+    const other = document.createElement('div');
+    other.className = 'tiptap ProseMirror';
+    other.setAttribute('contenteditable', 'true');
+    other.setAttribute('aria-label', 'Some other editor');
+    other.addEventListener('paste', () => { other.textContent = 'WRONG'; });
+    document.body.appendChild(other); // appears first in the DOM
+
+    const chat = makeTipTapInput(); // the real composer (aria-label "Chat input")
+    chat.addEventListener('paste', (ev) => {
+      chat.textContent = (ev as ClipboardEvent).clipboardData?.getData('text/plain') ?? '';
+    });
+
+    await injectPromptText('add dark mode');
+
+    expect(chat.textContent).toBe('add dark mode');
+    expect(other.textContent).not.toBe('WRONG');
+    expect(clipboardWriteTextMock).not.toHaveBeenCalled();
   });
 
   it('falls back to clipboard when the paste does not visibly land', async () => {

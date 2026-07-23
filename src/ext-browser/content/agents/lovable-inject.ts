@@ -8,14 +8,24 @@ import { injectViaSimulatedPaste } from './inject-kit.js';
  * importing from the auto-bootstrapping capture entry would duplicate its
  * observers into inject.js's bundle (the B3 duplicate-bundling bug).
  *
- * Lovable's prompt input is TipTap/ProseMirror with aria-label "Chat input"
- * (docs/capture-recon/lovable-recon.md §3) — the same editor family whose
- * simulated-paste mechanism is live-verified on Bolt. NOT yet live-verified on
- * Lovable itself (B5 E2E gate item).
+ * Lovable's prompt input is a TipTap/ProseMirror contenteditable. It historically
+ * carried aria-label "Chat input" (docs/capture-recon/lovable-recon.md §3); Lovable
+ * later relabelled it "Ask Lovable to create …" (confirmed live 2026-07-23), which
+ * silently broke the aria-label-pinned selector → "Send to your agent" fell back to
+ * clipboard-copy instead of pasting + auto-submitting.
+ *
+ * The selector is now a PRIORITISED FALLBACK LIST (resolved by resolveComposer in
+ * inject-kit.ts): the original exact label FIRST (still authoritative if Lovable
+ * reverts), then the current label prefix, then the label-independent structural
+ * class as a last resort. Nothing is removed — each entry only adds resilience.
  */
 
-const INPUT_SELECTOR = '.tiptap.ProseMirror[aria-label="Chat input"]';
+const INPUT_SELECTORS = [
+  '.tiptap.ProseMirror[aria-label="Chat input"]',   // original label — kept, still preferred
+  '.tiptap.ProseMirror[aria-label^="Ask Lovable"]', // current label (live 2026-07-23)
+  '.tiptap.ProseMirror',                            // structural fallback (label-independent)
+];
 
 export async function injectPromptText(text: string): Promise<void> {
-  await injectViaSimulatedPaste(INPUT_SELECTOR, text);
+  await injectViaSimulatedPaste(INPUT_SELECTORS, text);
 }

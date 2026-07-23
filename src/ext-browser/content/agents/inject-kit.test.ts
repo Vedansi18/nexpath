@@ -150,4 +150,65 @@ describe('content/agents/inject-kit.ts — injectViaSimulatedPaste', () => {
     await clipboardFallback('option text for an agent without inject-back yet');
     expect(clipboardWriteTextMock).toHaveBeenCalledWith('option text for an agent without inject-back yet');
   });
+
+  // ── prioritised selector list + rendered-element preference (site-drift resilience) ──
+  it('accepts a prioritised selector LIST and uses the first selector that matches', async () => {
+    const input = document.createElement('div');
+    input.className = 'tiptap ProseMirror';
+    input.setAttribute('aria-label', 'Ask Lovable to create something');
+    document.body.appendChild(input);
+    input.addEventListener('paste', (ev) => {
+      input.textContent = (ev as ClipboardEvent).clipboardData?.getData('text/plain') ?? '';
+    });
+
+    // The original exact-label selector matches nothing (site relabelled it); a later
+    // fallback selector does — must inject, NOT fall back to clipboard.
+    await injectViaSimulatedPaste(
+      [
+        '.tiptap.ProseMirror[aria-label="Chat input"]',
+        '.tiptap.ProseMirror[aria-label^="Ask Lovable"]',
+        '.tiptap.ProseMirror',
+      ],
+      'run all tests',
+    );
+
+    expect(input.textContent).toBe('run all tests');
+    expect(clipboardWriteTextMock).not.toHaveBeenCalled();
+  });
+
+  it('prefers the first RENDERED element when a selector matches several nodes', async () => {
+    const hidden = document.createElement('div');
+    hidden.className = 'tiptap ProseMirror';
+    hidden.addEventListener('paste', () => { hidden.textContent = 'WRONG (hidden)'; });
+    const visible = document.createElement('div');
+    visible.className = 'tiptap ProseMirror';
+    visible.addEventListener('paste', (ev) => {
+      visible.textContent = (ev as ClipboardEvent).clipboardData?.getData('text/plain') ?? '';
+    });
+    document.body.append(hidden, visible); // hidden is first in document order
+
+    // jsdom performs no layout, so drive getClientRects explicitly: only `visible` renders.
+    hidden.getClientRects = () => [] as unknown as DOMRectList;
+    visible.getClientRects = () => [{ width: 200, height: 24 } as DOMRect] as unknown as DOMRectList;
+
+    await injectViaSimulatedPaste('.tiptap.ProseMirror', 'ship it');
+
+    expect(visible.textContent).toBe('ship it');
+    expect(hidden.textContent).not.toBe('WRONG (hidden)');
+    expect(clipboardWriteTextMock).not.toHaveBeenCalled();
+  });
+
+  it('backward-compatible: a bare string selector still resolves to its first match', async () => {
+    const input = document.createElement('div');
+    input.id = 'legacy-composer';
+    document.body.appendChild(input);
+    input.addEventListener('paste', (ev) => {
+      input.textContent = (ev as ClipboardEvent).clipboardData?.getData('text/plain') ?? '';
+    });
+
+    await injectViaSimulatedPaste('#legacy-composer', 'still works');
+
+    expect(input.textContent).toBe('still works');
+    expect(clipboardWriteTextMock).not.toHaveBeenCalled();
+  });
 });
