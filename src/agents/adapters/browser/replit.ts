@@ -22,7 +22,7 @@ export const replitAdapter: BrowserExtensionAdapter = {
 
   origins: ['https://*.replit.com/*'],
 
-  // 'fetch' and 'websocket' confirmed non-viable for Replit — see docs/capture-recon/replit-recon.md.
+  // 'fetch' and 'websocket' confirmed non-viable for Replit — internal recon.
   // 'dom-events' added 2026-07-04: the source-side composer capture channel (capture-phase
   // Enter/click reading the composer at submit, fb2014b) is the devplan's ladder tier 4 —
   // it became necessary when live testing proved rendered-message selectors don't hold for

@@ -73,7 +73,7 @@ const PENDING_FLUSH_POLL_MS = 1_000;
 // sessionStorage (per-origin, per-tab, survives same-tab navigations, dies with the
 // tab): module memory alone loses the stash whenever the landing → project
 // transition is a HARD navigation — Lovable's dashboard flow is exactly that
-// (confirmed live 2026-07-06, lovable-recon §1), unlike Bolt/Replit's soft-navs.
+// (confirmed live 2026-07-06, internal recon), unlike Bolt/Replit's soft-navs.
 // The prompt text stays within the page's own storage, which already held it in
 // the composer the user typed it into.
 const PENDING_CAPTURE_STORAGE_KEY = 'nexpath_pending_capture';

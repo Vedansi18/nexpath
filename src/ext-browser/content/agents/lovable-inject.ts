@@ -9,7 +9,7 @@ import { injectViaSimulatedPaste } from './inject-kit.js';
  * observers into inject.js's bundle (the B3 duplicate-bundling bug).
  *
  * Lovable's prompt input is a TipTap/ProseMirror contenteditable. It historically
- * carried aria-label "Chat input" (docs/capture-recon/lovable-recon.md §3); Lovable
+ * carried aria-label "Chat input" (internal recon); Lovable
  * later relabelled it "Ask Lovable to create …" (confirmed live 2026-07-23), which
  * silently broke the aria-label-pinned selector → "Send to your agent" fell back to
  * clipboard-copy instead of pasting + auto-submitting.

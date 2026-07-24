@@ -3,7 +3,7 @@ import { createCaptureKit } from './capture-kit.js';
 /**
  * Bolt.new capture — B4. Thin agent config over the shared capture kit.
  *
- * Recon (docs/capture-recon/bolt-recon.md) confirmed — live, via automated
+ * Recon (internal recon) confirmed — live, via automated
  * browser session 2026-07-04 — that Bolt's prompt travels in a page-context
  * `POST /api/chat/v2` (AI-SDK data stream response), so the PRIMARY channel here
  * is fetch interception (inject/main-world.ts's FETCH_CAPTURE_RULES → the kit's

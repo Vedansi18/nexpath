@@ -3,7 +3,7 @@ import { createCaptureKit } from './capture-kit.js';
 /**
  * Lovable capture — B5. Thin agent config over the shared capture kit.
  *
- * Recon (docs/capture-recon/lovable-recon.md) confirmed — live, via automated
+ * Recon (internal recon) confirmed — live, via automated
  * browser session 2026-07-06 — that Lovable's prompt travels in a page-context
  * `POST https://api.lovable.dev/projects/<uuid>/chat` (flat `message` field;
  * the devplan's WebSocket guess was wrong), so the PRIMARY channel is fetch

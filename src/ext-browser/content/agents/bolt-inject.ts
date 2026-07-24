@@ -9,7 +9,7 @@ import { injectViaSimulatedPaste } from './inject-kit.js';
  * bundle (the B3 duplicate-bundling bug).
  *
  * Bolt's prompt input is TipTap/ProseMirror (confirmed via live DOM inspection —
- * see docs/capture-recon/bolt-recon.md §2.1), a contenteditable editor with its
+ * internal recon), a contenteditable editor with its
  * own internal model — hence the simulated-paste mechanism (see inject-kit.ts for
  * why direct textContent writes don't work on such editors). NOT yet
  * live-verified against Bolt's real editor.

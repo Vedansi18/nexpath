@@ -18,7 +18,7 @@ export const boltAdapter: BrowserExtensionAdapter = {
 
   origins: ['https://bolt.new/*', 'https://*.stackblitz.com/*'],
 
-  // Recon-confirmed 2026-07-04 (docs/capture-recon/bolt-recon.md §3): 'fetch' is
+  // Recon-confirmed 2026-07-04 (internal recon): 'fetch' is
   // the primary tier (page-context POST /api/chat/v2 — the exact opposite of
   // Replit, where fetch/WS were non-viable); 'dom-events' = the composer-read
   // channel; 'mutation-observer' = message-bubble observation + response-stop.

@@ -18,7 +18,7 @@ export const lovableAdapter: BrowserExtensionAdapter = {
 
   origins: ['https://lovable.dev/*'],
 
-  // Recon-confirmed 2026-07-06 (docs/capture-recon/lovable-recon.md §7): 'fetch'
+  // Recon-confirmed 2026-07-06 (internal recon): 'fetch'
   // is the primary tier (page-context POST api.lovable.dev/projects/<id>/chat —
   // the devplan's WebSocket guess was wrong); 'dom-events' = the composer-read
   // channel; 'mutation-observer' = message-bubble observation + response-stop.

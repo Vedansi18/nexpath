@@ -25,6 +25,11 @@ First release candidate — CLI‑parity classifier and popup.
   the CLI (fixes non‑keyword prompts previously defaulting to `implementation/0`).
 - Firefox inject‑back: `execCommand('insertText')` fallback so "Send to your agent" reliably lands
   and submits on Firefox (WebKit/Gecko clipboard‑event differences).
+- **Drift‑resilient composer lookup:** "Send to your agent" now resolves the agent's chat input via a
+  prioritised selector fallback list and prefers the first *rendered* match (`resolveComposer` in
+  `inject-kit.ts`) instead of one pinned selector — fixes Lovable's inject‑back silently falling back
+  to clipboard after Lovable renamed the composer's aria‑label (`"Chat input"` → `"Ask Lovable…"`).
+  Purely additive: every original selector is kept as the top priority. Live‑verified on lovable.dev.
 - Popup detail text brightened to a readable light gray, non‑italic (matches the CLI).
 - Space now toggles a single option's details without collapsing others (non‑exclusive, CLI parity).
 - "Copy to clipboard" now closes the popup instead of returning to the option list (CLI
