@@ -3,7 +3,7 @@ import { createCaptureKit } from './capture-kit.js';
 /**
  * Replit capture — B3. Thin agent config over the shared capture kit.
  *
- * Recon (docs/capture-recon/replit-recon.md) confirmed Replit's Agent chat runs
+ * Recon (internal recon) confirmed Replit's Agent chat runs
  * over a proprietary binary WebSocket (MessagePack) — not fetch, not a readable
  * WebSocket. Capture uses DOM observation against confirmed selectors instead of
  * the MAIN-world fetch/WebSocket wrapper (main-world-injector.ts still runs on

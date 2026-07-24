@@ -41,7 +41,7 @@ export function emitResponseStopped(agent: string): void {
 // B4 (Bolt) is the first real consumer: recon confirmed the prompt travels in a
 // page-context `POST /api/chat/v2` whose JSON body carries the full `messages`
 // history with the newest entry `{role:'user', content:'<prompt string>'}` — see
-// docs/capture-recon/bolt-recon.md §1. Replit deliberately has NO rule here (its
+// internal recon. Replit deliberately has NO rule here (its
 // chat is binary MessagePack over WS — fetch confirmed non-viable in B3 recon).
 //
 // The extracted prompt is posted as `nexpath:fetch-prompt` — a DISTINCT message
@@ -92,7 +92,7 @@ export function extractLastUserMessage(bodyText: string): string | null {
  * Extract the prompt from Lovable's chat POST body. Strict shape guard (B4
  * lesson): `{"id":"umsg_…","message":"<prompt>", …}` — both conditions must hold
  * so any lookalike endpoint or non-user payload yields null instead of a capture.
- * Confirmed live 2026-07-06 (docs/capture-recon/lovable-recon.md §2).
+ * Confirmed live 2026-07-06 (internal recon).
  */
 export function extractLovableMessage(bodyText: string): string | null {
   try {

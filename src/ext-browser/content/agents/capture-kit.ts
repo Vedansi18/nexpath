@@ -82,7 +82,7 @@ export interface CaptureKitConfig {
   /**
    * Listen for `nexpath:fetch-prompt` messages posted by inject/main-world.ts's
    * fetch-interception rules (B4: Bolt's POST /api/chat/v2 — see
-   * docs/capture-recon/bolt-recon.md §1). Enable only for agents whose recon
+   * internal recon). Enable only for agents whose recon
    * confirmed a page-context fetch transport. The fetch rule posts a DISTINCT
    * message type precisely so the text enters through THIS kit's emitIfNewText
    * funnel — never forwarded to the SW directly — keeping the no-double-emit

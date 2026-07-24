@@ -16,7 +16,7 @@ import { injectViaSimulatedPaste } from './inject-kit.js';
  * file existed.
  *
  * Replit's prompt input is CodeMirror 6 (confirmed via DOM inspection — see
- * docs/capture-recon/replit-recon.md §2.4), not a plain <textarea> — hence the
+ * internal recon), not a plain <textarea> — hence the
  * simulated-paste mechanism (see inject-kit.ts for why native-setter/textContent
  * writes don't work on editors with an internal model).
  */
