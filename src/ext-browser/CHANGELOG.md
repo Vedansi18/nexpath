@@ -34,6 +34,10 @@ First release candidate — CLI‑parity classifier and popup.
 - Space now toggles a single option's details without collapsing others (non‑exclusive, CLI parity).
 - "Copy to clipboard" now closes the popup instead of returning to the option list (CLI
   `clipboard_only` parity).
+- **Minimised permissions:** removed the unused `scripting` permission from both manifests —
+  all injection is declarative (`content_scripts` + `web_accessible_resources`), so it was
+  never used. The extension now requests only `storage` and `tabs`. A manifest guard test
+  pins this surface so an unused permission can't be reintroduced.
 
 ### Notes
 - Bring‑your‑own OpenAI key; nothing is sent anywhere except the user's own OpenAI account.
