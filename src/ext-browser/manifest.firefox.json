@@ -5,8 +5,7 @@
   "description": "Behaviour guidance for vibe coders using AI coding agents.",
   "permissions": [
     "storage",
-    "tabs",
-    "scripting"
+    "tabs"
   ],
   "host_permissions": [
     "https://*.replit.com/*",
