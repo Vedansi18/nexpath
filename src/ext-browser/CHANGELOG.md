@@ -34,6 +34,10 @@ First release candidate — CLI‑parity classifier and popup.
 - Space now toggles a single option's details without collapsing others (non‑exclusive, CLI parity).
 - "Copy to clipboard" now closes the popup instead of returning to the option list (CLI
   `clipboard_only` parity).
+- **Store summary aligned to brand:** the manifest `description` (which Chrome uses as the store
+  summary) now reads "AI coding assistant for Replit, Bolt, StackBlitz, and Lovable — a
+  behaviour-guidance layer for vibe coders." — the same pattern the Nexpath VS Code extension uses,
+  kept within Chrome's 132-char summary limit (guard-tested).
 - **Minimised permissions:** removed the unused `scripting` permission from both manifests —
   all injection is declarative (`content_scripts` + `web_accessible_resources`), so it was
   never used. The extension now requests only `storage` and `tabs`. A manifest guard test
