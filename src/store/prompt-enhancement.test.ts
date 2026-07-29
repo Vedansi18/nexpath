@@ -669,7 +669,7 @@ describe('prompt-enhancement store, memory, and feedback contract', () => {
         sourceKind: 'content_template_fact',
         sourceId: 'ct:debug',
         useKind: 'body_section',
-      })).toThrow('source_use_id_required');
+      })).toThrow('source_use_id_public_safe_token_required');
       expect(() => recordPromptEnhancementGeneratedOrigin(store, {
         generatedOriginId: 'origin-1',
         projectRoot: '/repo/a',
@@ -679,7 +679,7 @@ describe('prompt-enhancement store, memory, and feedback contract', () => {
         generatedOriginState: 'pe_generated_body',
         deliveryChannel: 'cli_stop_bridge',
         promptSubmitProcessingPolicy: 'pe_generated_delivery_skip_classification',
-      })).toThrow('enhancement_id_required');
+      })).toThrow('enhancement_id_public_safe_token_required');
       expect(() => recordPromptEnhancementFeedbackEvent(store, {
         feedbackEventId: 'feedback-1',
         projectRoot: '/repo/a',
@@ -690,7 +690,60 @@ describe('prompt-enhancement store, memory, and feedback contract', () => {
         feedbackScopeKey: 'scope-a',
         learningEligibility: 'pending_policy',
         safetyImpactState: 'unknown',
-      })).toThrow('body_id_required');
+      })).toThrow('body_id_public_safe_token_required');
+      expect(() => recordPromptEnhancementSourceUse(store, {
+        sourceUseId: 'source-use-raw',
+        projectRoot: '/repo/a',
+        enhancementId: 'enh-1',
+        bodyId: 'body-1',
+        bodyRevision: 1,
+        sourceKind: 'content template fact',
+        sourceId: 'ct:debug',
+        useKind: 'body_section',
+      })).toThrow('source_kind_public_safe_token_required');
+      expect(() => recordPromptEnhancementSourceUse(store, {
+        sourceUseId: 'source-use-raw',
+        projectRoot: '/repo/a',
+        enhancementId: 'enh-1',
+        bodyId: 'body-1',
+        bodyRevision: 1,
+        sourceKind: 'content_template_fact',
+        sourceId: 'raw source excerpt should not persist',
+        useKind: 'body_section',
+      })).toThrow('source_id_public_safe_token_required');
+      expect(() => recordPromptEnhancementGeneratedOrigin(store, {
+        generatedOriginId: 'origin-raw',
+        projectRoot: '/repo/a',
+        enhancementId: 'enh-1',
+        bodyId: 'body-1',
+        bodyRevision: 1,
+        generatedOriginState: 'pe_generated_body',
+        deliveryChannel: 'cli_stop_bridge',
+        promptSubmitProcessingPolicy: 'pe_generated_delivery_skip_classification',
+        sourceUseIds: ['source-use-1', 'raw source use should not persist'],
+      })).toThrow('source_use_id_public_safe_token_required');
+      expect(() => recordPromptEnhancementGeneratedOrigin(store, {
+        generatedOriginId: 'origin-raw',
+        projectRoot: '/repo/a',
+        enhancementId: 'enh-1',
+        bodyId: 'body-1',
+        bodyRevision: 1,
+        generatedOriginState: 'pe_generated_body',
+        deliveryChannel: 'cli_stop_bridge',
+        promptSubmitProcessingPolicy: 'pe_generated_delivery_skip_classification',
+        actionIds: ['use_current', 'raw action label should not persist'],
+      })).toThrow('action_id_public_safe_token_required');
+      expect(() => recordPromptEnhancementFeedbackEvent(store, {
+        feedbackEventId: 'feedback-raw',
+        projectRoot: '/repo/a',
+        enhancementId: 'enh-1',
+        bodyId: 'body-1',
+        bodyRevision: 1,
+        feedbackCategory: 'custom_typed',
+        feedbackScopeKey: 'raw custom feedback should not persist',
+        learningEligibility: 'pending_policy',
+        safetyImpactState: 'unknown',
+      })).toThrow('feedback_scope_key_public_safe_token_required');
 
       expect(getPromptEnhancementStoreStatus(store).memoryRows).toBe(0);
       expect(getPromptEnhancementStoreStatus(store).sourceUseRows).toBe(0);

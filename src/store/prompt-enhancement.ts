@@ -1397,70 +1397,87 @@ function peTables(): readonly string[] {
 
 function assertProjectSignal(projectRoot: string, signalKey: string): void {
   assertNonEmpty('project_root_required', projectRoot);
-  assertNonEmpty('signal_key_required', signalKey);
+  assertPublicSafeToken('signal_key_public_safe_token_required', signalKey);
 }
 
 function assertSourceUseInput(input: PromptEnhancementSourceUseInput): void {
-  assertNonEmpty('source_use_id_required', input.sourceUseId);
+  assertPublicSafeToken('source_use_id_public_safe_token_required', input.sourceUseId);
   assertNonEmpty('project_root_required', input.projectRoot);
-  assertNonEmpty('enhancement_id_required', input.enhancementId);
-  assertNonEmpty('body_id_required', input.bodyId);
-  assertNonEmpty('source_kind_required', input.sourceKind);
-  assertNonEmpty('source_id_required', input.sourceId);
+  assertPublicSafeToken('enhancement_id_public_safe_token_required', input.enhancementId);
+  assertPublicSafeToken('body_id_public_safe_token_required', input.bodyId);
+  assertPublicSafeToken('source_kind_public_safe_token_required', input.sourceKind);
+  assertPublicSafeToken('source_id_public_safe_token_required', input.sourceId);
 }
 
 function assertGeneratedOriginInput(input: PromptEnhancementGeneratedOriginInput): void {
-  assertNonEmpty('generated_origin_id_required', input.generatedOriginId);
+  assertPublicSafeToken('generated_origin_id_public_safe_token_required', input.generatedOriginId);
   assertNonEmpty('project_root_required', input.projectRoot);
-  assertNonEmpty('enhancement_id_required', input.enhancementId);
-  assertNonEmpty('body_id_required', input.bodyId);
-  assertNonEmpty('generated_origin_state_required', input.generatedOriginState);
-  assertNonEmpty('delivery_channel_required', input.deliveryChannel);
-  assertNonEmpty('prompt_submit_processing_policy_required', input.promptSubmitProcessingPolicy);
+  assertPublicSafeToken('enhancement_id_public_safe_token_required', input.enhancementId);
+  assertPublicSafeToken('body_id_public_safe_token_required', input.bodyId);
+  assertPublicSafeToken('generated_origin_state_public_safe_token_required', input.generatedOriginState);
+  assertPublicSafeToken('delivery_channel_public_safe_token_required', input.deliveryChannel);
+  assertPublicSafeToken('prompt_submit_processing_policy_public_safe_token_required', input.promptSubmitProcessingPolicy);
+  assertPublicSafeTokens('source_use_id_public_safe_token_required', input.sourceUseIds ?? []);
+  assertPublicSafeTokens('action_id_public_safe_token_required', input.actionIds ?? []);
+  if (input.fallbackState !== undefined) assertPublicSafeToken('fallback_state_public_safe_token_required', input.fallbackState);
+  if (input.privacyStoragePolicy !== undefined) assertPublicSafeToken('privacy_storage_policy_public_safe_token_required', input.privacyStoragePolicy);
 }
 
 function assertFeedbackInput(input: PromptEnhancementFeedbackInput): void {
-  assertNonEmpty('feedback_event_id_required', input.feedbackEventId);
+  assertPublicSafeToken('feedback_event_id_public_safe_token_required', input.feedbackEventId);
   assertNonEmpty('project_root_required', input.projectRoot);
-  assertNonEmpty('enhancement_id_required', input.enhancementId);
-  assertNonEmpty('body_id_required', input.bodyId);
-  assertNonEmpty('feedback_scope_key_required', input.feedbackScopeKey);
+  assertPublicSafeToken('enhancement_id_public_safe_token_required', input.enhancementId);
+  assertPublicSafeToken('body_id_public_safe_token_required', input.bodyId);
+  assertPublicSafeToken('feedback_scope_key_public_safe_token_required', input.feedbackScopeKey);
 }
 
 function assertPreparedBodyInput(input: PromptEnhancementPreparedBodyInput): void {
-  assertNonEmpty('prepared_body_id_required', input.preparedBodyId);
+  assertPublicSafeToken('prepared_body_id_public_safe_token_required', input.preparedBodyId);
   assertNonEmpty('project_root_required', input.projectRoot);
-  assertNonEmpty('enhancement_id_required', input.enhancementId);
-  assertNonEmpty('body_id_required', input.bodyId);
-  assertNonEmpty('generated_origin_state_required', input.generatedOriginState);
-  assertNonEmpty('delivery_channel_required', input.deliveryChannel);
-  assertNonEmpty('prompt_submit_processing_policy_required', input.promptSubmitProcessingPolicy);
+  assertPublicSafeToken('enhancement_id_public_safe_token_required', input.enhancementId);
+  assertPublicSafeToken('body_id_public_safe_token_required', input.bodyId);
+  assertPublicSafeToken('generated_origin_state_public_safe_token_required', input.generatedOriginState);
+  assertPublicSafeToken('delivery_channel_public_safe_token_required', input.deliveryChannel);
+  assertPublicSafeToken('prompt_submit_processing_policy_public_safe_token_required', input.promptSubmitProcessingPolicy);
+  assertPublicSafeTokens('source_use_id_public_safe_token_required', input.sourceUseIds ?? []);
+  assertPublicSafeTokens('action_id_public_safe_token_required', input.actionIds ?? []);
+  if (input.fallbackState !== undefined) assertPublicSafeToken('fallback_state_public_safe_token_required', input.fallbackState);
+  if (input.privacyStoragePolicy !== undefined) assertPublicSafeToken('privacy_storage_policy_public_safe_token_required', input.privacyStoragePolicy);
 }
 
 function assertExposureInput(input: PromptEnhancementExposureInput): void {
-  assertNonEmpty('exposure_event_id_required', input.exposureEventId);
+  assertPublicSafeToken('exposure_event_id_public_safe_token_required', input.exposureEventId);
   assertNonEmpty('project_root_required', input.projectRoot);
-  assertNonEmpty('enhancement_id_required', input.enhancementId);
-  assertNonEmpty('body_id_required', input.bodyId);
-  assertNonEmpty('exposure_state_required', input.exposureState);
-  assertNonEmpty('action_availability_state_required', input.actionAvailabilityState);
+  assertPublicSafeToken('enhancement_id_public_safe_token_required', input.enhancementId);
+  assertPublicSafeToken('body_id_public_safe_token_required', input.bodyId);
+  assertPublicSafeToken('exposure_state_public_safe_token_required', input.exposureState);
+  assertPublicSafeToken('action_availability_state_public_safe_token_required', input.actionAvailabilityState);
 }
 
 function assertActionInput(input: PromptEnhancementActionInput): void {
-  assertNonEmpty('action_event_id_required', input.actionEventId);
+  assertPublicSafeToken('action_event_id_public_safe_token_required', input.actionEventId);
   assertNonEmpty('project_root_required', input.projectRoot);
-  assertNonEmpty('enhancement_id_required', input.enhancementId);
-  assertNonEmpty('body_id_required', input.bodyId);
+  assertPublicSafeToken('enhancement_id_public_safe_token_required', input.enhancementId);
+  assertPublicSafeToken('body_id_public_safe_token_required', input.bodyId);
+  if (input.feedbackScopeKey !== undefined) assertPublicSafeToken('feedback_scope_key_public_safe_token_required', input.feedbackScopeKey);
 }
 
 function assertMemoryUseInput(input: PromptEnhancementMemoryUseInput): void {
-  assertNonEmpty('source_use_id_required', input.sourceUseId);
-  assertNonEmpty('enhancement_id_required', input.enhancementId);
-  assertNonEmpty('body_id_required', input.bodyId);
+  assertPublicSafeToken('source_use_id_public_safe_token_required', input.sourceUseId);
+  assertPublicSafeToken('enhancement_id_public_safe_token_required', input.enhancementId);
+  assertPublicSafeToken('body_id_public_safe_token_required', input.bodyId);
 }
 
 function assertNonEmpty(errorCode: string, value: string): void {
   if (value.trim().length === 0) throw new Error(errorCode);
+}
+
+function assertPublicSafeToken(errorCode: string, value: string): void {
+  if (cleanPublicSafeToken(value) === null) throw new Error(errorCode);
+}
+
+function assertPublicSafeTokens(errorCode: string, values: readonly string[]): void {
+  for (const value of values) assertPublicSafeToken(errorCode, value);
 }
 
 function isNegativeFeedbackCategory(category: PromptEnhancementFeedbackCategory): boolean {
