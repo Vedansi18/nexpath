@@ -142,6 +142,16 @@ export interface PromptEnhancementStoreStatus {
   rawContentStoredByDefault: false;
   oldStoreSurfacesAreAuthority: false;
   reasonCodes: readonly string[];
+  lastPruneAt: number | null;
+  lastDecayAt: number | null;
+  fallbackCount: number;
+  errorCount: number;
+}
+
+export interface PromptEnhancementPruneResult {
+  deletedRows: number;
+  decayedRows: number;
+  reasonCodes: readonly string[];
 }
 
 const SELECT_MEMORY = `
@@ -468,7 +478,7 @@ export function decayPromptEnhancementMemory(store: Store, projectRoot: string, 
 export function prunePromptEnhancementMemory(
   store: Store,
   input: { projectRoot?: string; olderThan?: number; maxRowsPerProject?: number; maxEstimatedBytes?: number; now?: number },
-): { deletedRows: number; decayedRows: number; reasonCodes: readonly string[] } {
+): PromptEnhancementPruneResult {
   const reasonCodes: string[] = [];
   let deletedRows = 0;
   let decayedRows = 0;
@@ -538,6 +548,53 @@ export function prunePromptEnhancementMemory(
   return { deletedRows, decayedRows, reasonCodes: [...new Set(reasonCodes)] };
 }
 
+export function prunePromptEnhancementFeedbackAndSourceUse(
+  store: Store,
+  input: { projectRoot?: string; olderThan?: number; now?: number },
+): PromptEnhancementPruneResult {
+  if (typeof input.olderThan !== 'number') return { deletedRows: 0, decayedRows: 0, reasonCodes: [] };
+  const now = input.now ?? Date.now();
+  let deletedRows = 0;
+  const projectClause = input.projectRoot ? 'AND project_root = ?' : '';
+  const params = input.projectRoot ? [input.olderThan, input.projectRoot] : [input.olderThan];
+  for (const table of ['prompt_enhancement_source_use', 'prompt_enhancement_generated_origin', 'prompt_enhancement_feedback']) {
+    store.db.run(
+      `DELETE FROM ${table}
+        WHERE created_at < ?
+          ${projectClause}`,
+      params,
+    );
+    deletedRows += store.db.getRowsModified();
+  }
+  if (deletedRows > 0) store.db.run('VACUUM');
+  setPromptEnhancementStatus(store, {
+    projectRoot: input.projectRoot ?? '__all_projects__',
+    statusKey: 'last_lifecycle_prune',
+    statusValue: JSON.stringify({
+      deletedRows,
+      olderThan: input.olderThan,
+      reasonCodes: ['lifecycle_rows_pruned_without_prompt_fifo'],
+      at: now,
+    }),
+    now,
+  });
+  saveStore(store);
+  return { deletedRows, decayedRows: 0, reasonCodes: ['lifecycle_rows_pruned_without_prompt_fifo'] };
+}
+
+export function prunePromptEnhancementRows(
+  store: Store,
+  input: { projectRoot?: string; olderThan?: number; maxRowsPerProject?: number; maxEstimatedBytes?: number; now?: number },
+): PromptEnhancementPruneResult {
+  const memory = prunePromptEnhancementMemory(store, input);
+  const lifecycle = prunePromptEnhancementFeedbackAndSourceUse(store, input);
+  return {
+    deletedRows: memory.deletedRows + lifecycle.deletedRows,
+    decayedRows: memory.decayedRows + lifecycle.decayedRows,
+    reasonCodes: [...new Set([...memory.reasonCodes, ...lifecycle.reasonCodes])],
+  };
+}
+
 export function deletePromptEnhancementMemoryForProject(store: Store, projectRoot: string): number {
   assertNonEmpty('project_root_required', projectRoot);
   return deletePromptEnhancementProjectRows(store, projectRoot);
@@ -554,6 +611,10 @@ export function deleteAllPromptEnhancementMemory(store: Store): number {
   return deletedRows;
 }
 
+export function deleteAllPromptEnhancementRows(store: Store): number {
+  return deleteAllPromptEnhancementMemory(store);
+}
+
 export function deletePromptEnhancementProjectRows(store: Store, projectRoot: string): number {
   assertNonEmpty('project_root_required', projectRoot);
   const tables = peTables();
@@ -564,6 +625,14 @@ export function deletePromptEnhancementProjectRows(store: Store, projectRoot: st
   }
   saveStore(store);
   return deletedRows;
+}
+
+export function resetPromptEnhancementProjectRows(store: Store, projectRoot: string): number {
+  return deletePromptEnhancementProjectRows(store, projectRoot);
+}
+
+export function resetAllPromptEnhancementRows(store: Store): number {
+  return deleteAllPromptEnhancementRows(store);
 }
 
 export function setPromptEnhancementStatus(store: Store, input: PromptEnhancementStatusInput): void {
@@ -615,16 +684,22 @@ export function deletePromptEnhancementFeedbackForProject(store: Store, projectR
 }
 
 export function deleteAllPromptEnhancementSourceUse(store: Store): number {
-  store.db.run('DELETE FROM prompt_enhancement_source_use');
-  const deletedRows = store.db.getRowsModified();
+  let deletedRows = 0;
+  for (const table of ['prompt_enhancement_source_use', 'prompt_enhancement_generated_origin']) {
+    store.db.run(`DELETE FROM ${table}`);
+    deletedRows += store.db.getRowsModified();
+  }
   saveStore(store);
   return deletedRows;
 }
 
 export function deletePromptEnhancementSourceUseForProject(store: Store, projectRoot: string): number {
   assertNonEmpty('project_root_required', projectRoot);
-  store.db.run('DELETE FROM prompt_enhancement_source_use WHERE project_root = ?', [projectRoot]);
-  const deletedRows = store.db.getRowsModified();
+  let deletedRows = 0;
+  for (const table of ['prompt_enhancement_source_use', 'prompt_enhancement_generated_origin']) {
+    store.db.run(`DELETE FROM ${table} WHERE project_root = ?`, [projectRoot]);
+    deletedRows += store.db.getRowsModified();
+  }
   saveStore(store);
   return deletedRows;
 }
@@ -639,6 +714,16 @@ export function getPromptEnhancementStoreStatus(store: Store, projectRoot?: stri
   const generatedOriginRows = countRows(store, 'prompt_enhancement_generated_origin', projectRoot);
   const feedbackRows = countRows(store, 'prompt_enhancement_feedback', projectRoot);
   const statusRows = countRows(store, 'prompt_enhancement_status', projectRoot);
+  const pruneStatus = readStatusValue(store, projectRoot, 'last_prune') ?? readStatusValue(store, '__all_projects__', 'last_prune');
+  const lifecyclePruneStatus = readStatusValue(store, projectRoot, 'last_lifecycle_prune')
+    ?? readStatusValue(store, '__all_projects__', 'last_lifecycle_prune');
+  const decayStatus = readStatusValue(store, projectRoot, 'last_decay');
+  const lastReasonCodes = [
+    ...extractReasonCodes(pruneStatus),
+    ...extractReasonCodes(lifecyclePruneStatus),
+  ];
+  const errorCount = countStatusKeyMatches(store, projectRoot, 'error');
+  const fallbackCount = countStatusKeyMatches(store, projectRoot, 'fallback');
   return {
     projectRoot,
     memoryRows,
@@ -647,13 +732,19 @@ export function getPromptEnhancementStoreStatus(store: Store, projectRoot?: stri
     feedbackRows,
     statusRows,
     estimatedBytes: estimatePromptEnhancementBytes(store, projectRoot),
-    capState: memoryRows + sourceUseRows + generatedOriginRows + feedbackRows + statusRows === 0
-      ? 'policy_disabled_or_no_data'
-      : 'within_bounds',
+    capState: lastReasonCodes.some((code) => code.includes('cap_enforced'))
+      ? 'over_row_cap_pruned'
+      : memoryRows + sourceUseRows + generatedOriginRows + feedbackRows + statusRows === 0
+        ? 'policy_disabled_or_no_data'
+        : 'within_bounds',
     telemetryPolicy: 'ids_enums_counts_status_timing_only',
     rawContentStoredByDefault: false,
     oldStoreSurfacesAreAuthority: false,
-    reasonCodes: [],
+    reasonCodes: [...new Set(lastReasonCodes)],
+    lastPruneAt: latestNumber(extractAt(pruneStatus), extractAt(lifecyclePruneStatus)),
+    lastDecayAt: extractAt(decayStatus),
+    fallbackCount,
+    errorCount,
   };
 }
 
@@ -747,6 +838,53 @@ function countRows(store: Store, tableName: string, projectRoot?: string): numbe
     ? store.db.exec(`SELECT COUNT(*) FROM ${tableName} WHERE project_root = ?`, [projectRoot])
     : store.db.exec(`SELECT COUNT(*) FROM ${tableName}`);
   return (res[0]?.values[0]?.[0] as number | undefined) ?? 0;
+}
+
+function countStatusKeyMatches(store: Store, projectRoot: string | undefined, pattern: string): number {
+  const likePattern = `%${pattern}%`;
+  const res = projectRoot
+    ? store.db.exec(
+      'SELECT COUNT(*) FROM prompt_enhancement_status WHERE project_root = ? AND status_key LIKE ?',
+      [projectRoot, likePattern],
+    )
+    : store.db.exec(
+      'SELECT COUNT(*) FROM prompt_enhancement_status WHERE status_key LIKE ?',
+      [likePattern],
+    );
+  return (res[0]?.values[0]?.[0] as number | undefined) ?? 0;
+}
+
+function readStatusValue(store: Store, projectRoot: string | undefined, statusKey: string): Record<string, unknown> | null {
+  if (!projectRoot) return null;
+  const res = store.db.exec(
+    `SELECT status_value
+       FROM prompt_enhancement_status
+      WHERE project_root = ? AND status_key = ? AND schema_version <= ?`,
+    [projectRoot, statusKey, SCHEMA_VERSION],
+  );
+  const value = res[0]?.values[0]?.[0];
+  if (typeof value !== 'string') return null;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
+}
+
+function extractReasonCodes(statusValue: Record<string, unknown> | null): readonly string[] {
+  const reasonCodes = statusValue?.reasonCodes;
+  return Array.isArray(reasonCodes) ? reasonCodes.filter((item): item is string => typeof item === 'string') : [];
+}
+
+function extractAt(statusValue: Record<string, unknown> | null): number | null {
+  return typeof statusValue?.at === 'number' ? statusValue.at : null;
+}
+
+function latestNumber(left: number | null, right: number | null): number | null {
+  if (left === null) return right;
+  if (right === null) return left;
+  return Math.max(left, right);
 }
 
 function estimatePromptEnhancementBytes(store: Store, projectRoot?: string): number {

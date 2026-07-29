@@ -5,20 +5,26 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   closeStore,
   deleteAllPromptEnhancementMemory,
+  deleteAllPromptEnhancementRows,
   deletePromptEnhancementProjectRows,
   deletePromptEnhancementStatusForProject,
+  deletePromptEnhancementSourceUseForProject,
   getPromptEnhancementMemory,
   getPromptEnhancementSchemaVersionState,
   getPromptEnhancementStoreStatus,
   markPromptEnhancementMemoryUsed,
   openStore,
+  prunePromptEnhancementFeedbackAndSourceUse,
   prunePromptEnhancementMemory,
+  prunePromptEnhancementRows,
   queryRelevantPromptEnhancementMemory,
   recordPromptEnhancementFeedbackEvent,
   recordPromptEnhancementGeneratedOrigin,
   recordPromptEnhancementMemoryEvidence,
   recordPromptEnhancementMemoryFeedback,
   recordPromptEnhancementSourceUse,
+  resetAllPromptEnhancementRows,
+  resetPromptEnhancementProjectRows,
   setPromptEnhancementStatus,
   type Store,
 } from './index.js';
@@ -336,6 +342,121 @@ describe('prompt-enhancement store, memory, and feedback contract', () => {
       expect(getPromptEnhancementMemory(store, '/repo/a', 'protected-safety')).not.toBeNull();
       expect(getPromptEnhancementMemory(store, '/repo/a', 'recent-low')).not.toBeNull();
       expect(getPromptEnhancementStoreStatus(store, '/repo/a').statusRows).toBeGreaterThan(0);
+      expect(getPromptEnhancementStoreStatus(store, '/repo/a')).toMatchObject({
+        capState: 'over_row_cap_pruned',
+        lastPruneAt: 300,
+        lastDecayAt: 300,
+      });
+      expect(getPromptEnhancementStoreStatus(store, '/repo/a').reasonCodes).toEqual(expect.arrayContaining([
+        'stale_low_value_rows_pruned',
+        'row_cap_enforced_without_prompt_fifo',
+      ]));
+    } finally {
+      closeStore(store);
+    }
+  });
+
+  it('prunes PE feedback, source-use, and generated-origin lifecycle rows without prompt FIFO cleanup', async () => {
+    const store = await openStore(':memory:');
+    try {
+      recordPromptEnhancementSourceUse(store, {
+        sourceUseId: 'source-use-old-a',
+        projectRoot: '/repo/a',
+        enhancementId: 'enh-a',
+        bodyId: 'body-a',
+        bodyRevision: 1,
+        sourceKind: 'content_template_fact',
+        sourceId: 'ct:a',
+        useKind: 'body_section',
+        now: 100,
+      });
+      recordPromptEnhancementGeneratedOrigin(store, {
+        generatedOriginId: 'origin-old-a',
+        projectRoot: '/repo/a',
+        enhancementId: 'enh-a',
+        bodyId: 'body-a',
+        bodyRevision: 1,
+        generatedOriginState: 'pe_generated_body',
+        deliveryChannel: 'cli_stop_bridge',
+        promptSubmitProcessingPolicy: 'pe_generated_delivery_skip_classification',
+        now: 101,
+      });
+      recordPromptEnhancementFeedbackEvent(store, {
+        feedbackEventId: 'feedback-old-a',
+        projectRoot: '/repo/a',
+        enhancementId: 'enh-a',
+        bodyId: 'body-a',
+        bodyRevision: 1,
+        feedbackCategory: 'skip_cancel',
+        feedbackScopeKey: 'scope-a',
+        learningEligibility: 'not_eligible',
+        safetyImpactState: 'none',
+        now: 102,
+      });
+      recordPromptEnhancementSourceUse(store, {
+        sourceUseId: 'source-use-old-b',
+        projectRoot: '/repo/b',
+        enhancementId: 'enh-b',
+        bodyId: 'body-b',
+        bodyRevision: 1,
+        sourceKind: 'content_template_fact',
+        sourceId: 'ct:b',
+        useKind: 'body_section',
+        now: 100,
+      });
+
+      const result = prunePromptEnhancementFeedbackAndSourceUse(store, {
+        projectRoot: '/repo/a',
+        olderThan: 200,
+        now: 300,
+      });
+
+      expect(result).toMatchObject({
+        deletedRows: 3,
+        decayedRows: 0,
+      });
+      expect(result.reasonCodes).toContain('lifecycle_rows_pruned_without_prompt_fifo');
+      expect(getPromptEnhancementStoreStatus(store, '/repo/a')).toMatchObject({
+        sourceUseRows: 0,
+        generatedOriginRows: 0,
+        feedbackRows: 0,
+        lastPruneAt: 300,
+      });
+      expect(getPromptEnhancementStoreStatus(store, '/repo/b').sourceUseRows).toBe(1);
+      expect(store.db.exec('SELECT COUNT(*) FROM prompts')[0]?.values[0]?.[0]).toBe(0);
+    } finally {
+      closeStore(store);
+    }
+  });
+
+  it('prunes all PE row classes through the combined reset-safe prune port', async () => {
+    const store = await openStore(':memory:');
+    try {
+      recordMemory(store, '/repo/a', 'memory-old', 100);
+      recordPromptEnhancementFeedbackEvent(store, {
+        feedbackEventId: 'feedback-old',
+        projectRoot: '/repo/a',
+        enhancementId: 'enh-a',
+        bodyId: 'body-a',
+        bodyRevision: 1,
+        feedbackCategory: 'reject',
+        feedbackScopeKey: 'memory-old',
+        learningEligibility: 'not_eligible',
+        safetyImpactState: 'none',
+        now: 100,
+      });
+
+      const result = prunePromptEnhancementRows(store, {
+        projectRoot: '/repo/a',
+        olderThan: 200,
+        now: 300,
+      });
+
+      expect(result.deletedRows).toBe(2);
+      expect(getPromptEnhancementStoreStatus(store, '/repo/a')).toMatchObject({
+        memoryRows: 0,
+        feedbackRows: 0,
+      });
     } finally {
       closeStore(store);
     }
@@ -434,6 +555,33 @@ describe('prompt-enhancement store, memory, and feedback contract', () => {
     }
   });
 
+  it('reports public-safe fallback and error counts in PE status/debug', async () => {
+    const store = await openStore(':memory:');
+    try {
+      setPromptEnhancementStatus(store, {
+        projectRoot: '/repo/a',
+        statusKey: 'last_fallback',
+        statusValue: JSON.stringify({ fallbackCode: 'no_memory', rawContentStored: false, at: 100 }),
+        now: 100,
+      });
+      setPromptEnhancementStatus(store, {
+        projectRoot: '/repo/a',
+        statusKey: 'last_error',
+        statusValue: JSON.stringify({ errorCode: 'fixture_error', rawContentStored: false, at: 101 }),
+        now: 101,
+      });
+
+      expect(getPromptEnhancementStoreStatus(store, '/repo/a')).toMatchObject({
+        fallbackCount: 1,
+        errorCount: 1,
+        rawContentStoredByDefault: false,
+        telemetryPolicy: 'ids_enums_counts_status_timing_only',
+      });
+    } finally {
+      closeStore(store);
+    }
+  });
+
   it('deletes PE rows idempotently by project without touching old store rows', async () => {
     const store = await openStore(':memory:');
     try {
@@ -461,6 +609,48 @@ describe('prompt-enhancement store, memory, and feedback contract', () => {
       expect(store.db.exec('SELECT COUNT(*) FROM feedback_signals')[0]?.values[0]?.[0]).toBe(1);
       expect(deleteAllPromptEnhancementMemory(store)).toBe(2);
       expect(getPromptEnhancementStoreStatus(store).memoryRows).toBe(0);
+    } finally {
+      closeStore(store);
+    }
+  });
+
+  it('cleans generated-origin with source-use helpers and exposes reset aliases', async () => {
+    const store = await openStore(':memory:');
+    try {
+      recordPromptEnhancementSourceUse(store, {
+        sourceUseId: 'source-use-a',
+        projectRoot: '/repo/a',
+        enhancementId: 'enh-a',
+        bodyId: 'body-a',
+        bodyRevision: 1,
+        sourceKind: 'content_template_fact',
+        sourceId: 'ct:a',
+        useKind: 'body_section',
+      });
+      recordPromptEnhancementGeneratedOrigin(store, {
+        generatedOriginId: 'origin-a',
+        projectRoot: '/repo/a',
+        enhancementId: 'enh-a',
+        bodyId: 'body-a',
+        bodyRevision: 1,
+        generatedOriginState: 'pe_generated_body',
+        deliveryChannel: 'cli_stop_bridge',
+        promptSubmitProcessingPolicy: 'pe_generated_delivery_skip_classification',
+      });
+
+      expect(deletePromptEnhancementSourceUseForProject(store, '/repo/a')).toBe(2);
+      expect(getPromptEnhancementStoreStatus(store, '/repo/a')).toMatchObject({
+        sourceUseRows: 0,
+        generatedOriginRows: 0,
+      });
+
+      recordMemory(store, '/repo/a', 'signal-a', 100);
+      recordMemory(store, '/repo/b', 'signal-b', 100);
+      expect(resetPromptEnhancementProjectRows(store, '/repo/a')).toBe(4);
+      expect(getPromptEnhancementMemory(store, '/repo/a', 'signal-a')).toBeNull();
+      expect(getPromptEnhancementMemory(store, '/repo/b', 'signal-b')).not.toBeNull();
+      expect(deleteAllPromptEnhancementRows(store)).toBe(2);
+      expect(resetAllPromptEnhancementRows(store)).toBe(0);
     } finally {
       closeStore(store);
     }

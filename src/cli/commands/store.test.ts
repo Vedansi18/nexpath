@@ -13,7 +13,10 @@ import {
   getSkippedSessionCount,
   pruneSkippedSessions,
   getPromptEnhancementStoreStatus,
+  recordPromptEnhancementFeedbackEvent,
+  recordPromptEnhancementGeneratedOrigin,
   recordPromptEnhancementMemoryEvidence,
+  recordPromptEnhancementSourceUse,
 } from '../../store/index.js';
 import { parsePeriod, storeDeleteAction, storeEnableAction, storeDisableAction, storePruneAction } from './store.js';
 
@@ -430,6 +433,70 @@ describe('storePruneAction — prunes prompt-enhancement rows', () => {
     const store = await openStore(path);
     expect(getPromptEnhancementStoreStatus(store, '/proj/a').memoryRows).toBe(0);
     expect(getPromptEnhancementStoreStatus(store, '/proj/b').memoryRows).toBe(1);
+    closeStore(store);
+    cleanup();
+  });
+
+  it('prunes PE lifecycle rows through store prune for the selected project', async () => {
+    const old = Date.now() - 2 * 24 * 60 * 60 * 1000;
+    const { path, cleanup } = await tempDb((store) => {
+      recordPromptEnhancementSourceUse(store, {
+        sourceUseId: 'source-use-a',
+        projectRoot: '/proj/a',
+        enhancementId: 'enh-a',
+        bodyId: 'body-a',
+        bodyRevision: 1,
+        sourceKind: 'content_template_fact',
+        sourceId: 'ct:a',
+        useKind: 'body_section',
+        now: old,
+      });
+      recordPromptEnhancementGeneratedOrigin(store, {
+        generatedOriginId: 'origin-a',
+        projectRoot: '/proj/a',
+        enhancementId: 'enh-a',
+        bodyId: 'body-a',
+        bodyRevision: 1,
+        generatedOriginState: 'pe_generated_body',
+        deliveryChannel: 'cli_stop_bridge',
+        promptSubmitProcessingPolicy: 'pe_generated_delivery_skip_classification',
+        now: old,
+      });
+      recordPromptEnhancementFeedbackEvent(store, {
+        feedbackEventId: 'feedback-a',
+        projectRoot: '/proj/a',
+        enhancementId: 'enh-a',
+        bodyId: 'body-a',
+        bodyRevision: 1,
+        feedbackCategory: 'fallback',
+        feedbackScopeKey: 'scope-a',
+        learningEligibility: 'not_eligible',
+        safetyImpactState: 'none',
+        now: old,
+      });
+      recordPromptEnhancementSourceUse(store, {
+        sourceUseId: 'source-use-b',
+        projectRoot: '/proj/b',
+        enhancementId: 'enh-b',
+        bodyId: 'body-b',
+        bodyRevision: 1,
+        sourceKind: 'content_template_fact',
+        sourceId: 'ct:b',
+        useKind: 'body_section',
+        now: old,
+      });
+    });
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    await storePruneAction({ olderThan: '1d', project: '/proj/a' }, path);
+    expect(spy.mock.calls[0][0]).toMatch(/3 prompt-enhancement row\(s\)/);
+
+    const store = await openStore(path);
+    expect(getPromptEnhancementStoreStatus(store, '/proj/a')).toMatchObject({
+      sourceUseRows: 0,
+      generatedOriginRows: 0,
+      feedbackRows: 0,
+    });
+    expect(getPromptEnhancementStoreStatus(store, '/proj/b').sourceUseRows).toBe(1);
     closeStore(store);
     cleanup();
   });
