@@ -60,6 +60,22 @@ describe('prompt-enhancement store, memory, and feedback contract', () => {
         { tableName: 'prompt_enhancement_feedback', exists: true },
         { tableName: 'prompt_enhancement_status', exists: true },
       ]));
+      const indexNames = store.db.exec(
+        "SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'idx_pe_%' ORDER BY name ASC",
+      )[0]?.values.map((row) => row[0]);
+      expect(indexNames).toEqual(expect.arrayContaining([
+        'idx_pe_memory_project_updated',
+        'idx_pe_memory_project_status_updated',
+        'idx_pe_source_use_project_body',
+        'idx_pe_source_use_project_source',
+        'idx_pe_source_use_project_created',
+        'idx_pe_generated_origin_project_body',
+        'idx_pe_generated_origin_project_created',
+        'idx_pe_feedback_project_body',
+        'idx_pe_feedback_project_category',
+        'idx_pe_feedback_project_scope',
+        'idx_pe_status_project_updated',
+      ]));
     } finally {
       closeStore(store);
     }
@@ -963,6 +979,7 @@ describe('prompt-enhancement store, memory, and feedback contract', () => {
     try {
       recordMemory(store, '/repo/a', 'newer-schema', 100);
       recordMemory(store, '/repo/a', 'corrupt-provenance', 100);
+      recordMemory(store, '/repo/a', 'corrupt-state', 100);
       store.db.run(
         'UPDATE prompt_enhancement_memory SET schema_version = ? WHERE project_root = ? AND signal_key = ?',
         [999, '/repo/a', 'newer-schema'],
@@ -971,10 +988,122 @@ describe('prompt-enhancement store, memory, and feedback contract', () => {
         'UPDATE prompt_enhancement_memory SET provenance_json = ? WHERE project_root = ? AND signal_key = ?',
         ['{"memoryEvidenceOnly":false,"rawTextStored":true}', '/repo/a', 'corrupt-provenance'],
       );
+      store.db.run(
+        'UPDATE prompt_enhancement_memory SET current_evidence_state = ? WHERE project_root = ? AND signal_key = ?',
+        ['raw prompt text should not be trusted', '/repo/a', 'corrupt-state'],
+      );
 
       expect(getPromptEnhancementMemory(store, '/repo/a', 'newer-schema')).toBeNull();
       expect(getPromptEnhancementMemory(store, '/repo/a', 'corrupt-provenance')).toBeNull();
-      expect(queryRelevantPromptEnhancementMemory(store, '/repo/a', ['newer-schema', 'corrupt-provenance'])).toEqual([]);
+      expect(getPromptEnhancementMemory(store, '/repo/a', 'corrupt-state')).toBeNull();
+      expect(queryRelevantPromptEnhancementMemory(store, '/repo/a', [
+        'newer-schema',
+        'corrupt-provenance',
+        'corrupt-state',
+      ])).toEqual([]);
+    } finally {
+      closeStore(store);
+    }
+  });
+
+  it('uses neutral no-data fallback for newer or corrupt lifecycle rows', async () => {
+    const store = await openStore(':memory:');
+    try {
+      recordPromptEnhancementSourceUse(store, {
+        sourceUseId: 'source-use-safe',
+        projectRoot: '/repo/a',
+        enhancementId: 'enh-1',
+        bodyId: 'body-1',
+        bodyRevision: 1,
+        sourceKind: 'content_template_fact',
+        sourceId: 'ct:safe',
+        useKind: 'body_section',
+        memoryEvidence: true,
+        now: 100,
+      });
+      recordPromptEnhancementFeedbackEvent(store, {
+        feedbackEventId: 'feedback-safe',
+        projectRoot: '/repo/a',
+        enhancementId: 'enh-1',
+        bodyId: 'body-1',
+        bodyRevision: 1,
+        feedbackCategory: 'accept_send',
+        feedbackScopeKey: 'scope-safe',
+        learningEligibility: 'eligible_scoped',
+        safetyImpactState: 'none',
+        memoryEvidence: true,
+        now: 101,
+      });
+      recordPromptEnhancementGeneratedOrigin(store, {
+        generatedOriginId: 'origin-safe',
+        projectRoot: '/repo/a',
+        enhancementId: 'enh-1',
+        bodyId: 'body-1',
+        bodyRevision: 1,
+        generatedOriginState: 'pe_generated_body',
+        deliveryChannel: 'cli_stop_bridge',
+        promptSubmitProcessingPolicy: 'pe_generated_delivery_skip_classification',
+        now: 102,
+      });
+      store.db.run(
+        'UPDATE prompt_enhancement_source_use SET source_kind = ?, use_kind = ? WHERE source_use_id = ?',
+        ['raw source excerpt should not return', 'raw use kind should not return', 'source-use-safe'],
+      );
+      store.db.run(
+        'UPDATE prompt_enhancement_feedback SET feedback_category = ?, raw_text_stored = 1 WHERE feedback_event_id = ?',
+        ['raw custom feedback should not return', 'feedback-safe'],
+      );
+      store.db.run(
+        'UPDATE prompt_enhancement_generated_origin SET generated_origin_state = ? WHERE generated_origin_id = ?',
+        ['raw generated body should not resolve', 'origin-safe'],
+      );
+      recordPromptEnhancementSourceUse(store, {
+        sourceUseId: 'source-use-newer',
+        projectRoot: '/repo/a',
+        enhancementId: 'enh-1',
+        bodyId: 'body-1',
+        bodyRevision: 1,
+        sourceKind: 'stage_or_absence_signal',
+        sourceId: 'absence:safe',
+        useKind: 'trust_cue',
+        memoryEvidence: true,
+        now: 103,
+      });
+      recordPromptEnhancementFeedbackEvent(store, {
+        feedbackEventId: 'feedback-newer',
+        projectRoot: '/repo/a',
+        enhancementId: 'enh-1',
+        bodyId: 'body-1',
+        bodyRevision: 1,
+        feedbackCategory: 'wrong_tone',
+        feedbackScopeKey: 'scope-safe',
+        learningEligibility: 'eligible_scoped',
+        safetyImpactState: 'none',
+        memoryEvidence: true,
+        now: 104,
+      });
+      store.db.run('UPDATE prompt_enhancement_source_use SET schema_version = ? WHERE source_use_id = ?', [999, 'source-use-newer']);
+      store.db.run('UPDATE prompt_enhancement_feedback SET schema_version = ? WHERE feedback_event_id = ?', [999, 'feedback-newer']);
+
+      const sourceSummary = getPromptEnhancementSourceUseSummary(store, '/repo/a', 'body-1');
+      const feedbackSummary = getPromptEnhancementFeedbackSummary(store, '/repo/a', 'scope-safe');
+      const serialized = JSON.stringify({ sourceSummary, feedbackSummary });
+
+      expect(sourceSummary).toMatchObject({ totalSourceUses: 0, memoryEvidenceRows: 0 });
+      expect(sourceSummary.sourceKindCounts).toEqual([]);
+      expect(sourceSummary.useKindCounts).toEqual([]);
+      expect(feedbackSummary).toMatchObject({ totalEvents: 0, memoryEvidenceEvents: 0, rawTextStoredEvents: 0 });
+      expect(feedbackSummary.categoryCounts).toEqual([]);
+      expect(resolvePromptEnhancementGeneratedOrigin(store, {
+        projectRoot: '/repo/a',
+        bodyId: 'body-1',
+        bodyRevision: 1,
+      })).toBeNull();
+      expect(serialized).not.toContain('raw source excerpt');
+      expect(serialized).not.toContain('raw use kind');
+      expect(serialized).not.toContain('raw custom feedback');
+      expect(() => getPromptEnhancementSourceUseSummary(store, '/repo/a', 'raw body id should fail')).toThrow('body_id_public_safe_token_required');
+      expect(() => getPromptEnhancementFeedbackSummary(store, '/repo/a', 'raw scope should fail')).toThrow('feedback_scope_key_public_safe_token_required');
     } finally {
       closeStore(store);
     }

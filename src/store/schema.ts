@@ -148,6 +148,9 @@ CREATE TABLE IF NOT EXISTS prompt_enhancement_memory (
 CREATE INDEX IF NOT EXISTS idx_pe_memory_project_updated
   ON prompt_enhancement_memory (project_root, updated_at);
 
+CREATE INDEX IF NOT EXISTS idx_pe_memory_project_status_updated
+  ON prompt_enhancement_memory (project_root, status, updated_at);
+
 CREATE TABLE IF NOT EXISTS prompt_enhancement_source_use (
   source_use_id        TEXT    PRIMARY KEY,
   project_root         TEXT    NOT NULL,
@@ -166,6 +169,12 @@ CREATE TABLE IF NOT EXISTS prompt_enhancement_source_use (
 
 CREATE INDEX IF NOT EXISTS idx_pe_source_use_project_body
   ON prompt_enhancement_source_use (project_root, body_id, body_revision);
+
+CREATE INDEX IF NOT EXISTS idx_pe_source_use_project_source
+  ON prompt_enhancement_source_use (project_root, source_kind, source_id);
+
+CREATE INDEX IF NOT EXISTS idx_pe_source_use_project_created
+  ON prompt_enhancement_source_use (project_root, created_at);
 
 CREATE TABLE IF NOT EXISTS prompt_enhancement_generated_origin (
   generated_origin_id          TEXT    PRIMARY KEY,
@@ -190,6 +199,9 @@ CREATE TABLE IF NOT EXISTS prompt_enhancement_generated_origin (
 CREATE INDEX IF NOT EXISTS idx_pe_generated_origin_project_body
   ON prompt_enhancement_generated_origin (project_root, body_id, body_revision);
 
+CREATE INDEX IF NOT EXISTS idx_pe_generated_origin_project_created
+  ON prompt_enhancement_generated_origin (project_root, created_at);
+
 CREATE TABLE IF NOT EXISTS prompt_enhancement_feedback (
   feedback_event_id     TEXT    PRIMARY KEY,
   project_root          TEXT    NOT NULL,
@@ -209,6 +221,12 @@ CREATE TABLE IF NOT EXISTS prompt_enhancement_feedback (
 
 CREATE INDEX IF NOT EXISTS idx_pe_feedback_project_body
   ON prompt_enhancement_feedback (project_root, body_id, body_revision);
+
+CREATE INDEX IF NOT EXISTS idx_pe_feedback_project_category
+  ON prompt_enhancement_feedback (project_root, feedback_category, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_pe_feedback_project_scope
+  ON prompt_enhancement_feedback (project_root, feedback_scope_key, created_at);
 
 CREATE TABLE IF NOT EXISTS prompt_enhancement_status (
   project_root       TEXT    NOT NULL,

@@ -1066,7 +1066,7 @@ export function resolvePromptEnhancementGeneratedOrigin(
   input: { projectRoot: string; bodyId: string; bodyRevision: number },
 ): PromptEnhancementGeneratedOriginResolution | null {
   assertNonEmpty('project_root_required', input.projectRoot);
-  assertNonEmpty('body_id_required', input.bodyId);
+  assertPublicSafeToken('body_id_public_safe_token_required', input.bodyId);
   const res = store.db.exec(
     `SELECT generated_origin_id, project_root, enhancement_id, body_id, body_revision, generated_origin_state,
             delivery_channel, prompt_submit_processing_policy, learning_eligible, learning_eligibility_json, source_use_ids_json,
@@ -1082,21 +1082,41 @@ export function resolvePromptEnhancementGeneratedOrigin(
   );
   const row = res[0]?.values[0];
   if (!row) return null;
+  const generatedOriginId = readPublicSafeToken(row[0]);
+  const enhancementId = readPublicSafeToken(row[2]);
+  const bodyId = readPublicSafeToken(row[3]);
+  const generatedOriginState = readPublicSafeToken(row[5]);
+  const deliveryChannel = readPublicSafeToken(row[6]);
+  const promptSubmitProcessingPolicy = readPublicSafeToken(row[7]);
+  const fallbackState = readPublicSafeToken(row[12]);
+  const privacyStoragePolicy = readPublicSafeToken(row[13]);
+  if (
+    !generatedOriginId ||
+    !enhancementId ||
+    !bodyId ||
+    !generatedOriginState ||
+    !deliveryChannel ||
+    !promptSubmitProcessingPolicy ||
+    !fallbackState ||
+    !privacyStoragePolicy
+  ) {
+    return null;
+  }
   return {
-    generatedOriginId: row[0] as string,
+    generatedOriginId,
     projectRoot: row[1] as string,
-    enhancementId: row[2] as string,
-    bodyId: row[3] as string,
+    enhancementId,
+    bodyId,
     bodyRevision: row[4] as number,
-    generatedOriginState: row[5] as string,
-    deliveryChannel: row[6] as string,
-    promptSubmitProcessingPolicy: row[7] as string,
+    generatedOriginState,
+    deliveryChannel,
+    promptSubmitProcessingPolicy,
     learningEligible: row[8] === 1,
     learningEligibilityFlags: parseLearningEligibilityFlags(row[9] as string, row[8] === 1),
     sourceUseIds: parseStringArray(row[10] as string),
     actionIds: parseStringArray(row[11] as string),
-    fallbackState: row[12] as string,
-    privacyStoragePolicy: row[13] as string,
+    fallbackState,
+    privacyStoragePolicy,
     reasonCodes: parseStringArray(row[14] as string),
     createdAt: row[15] as number,
   };
@@ -1108,34 +1128,39 @@ export function getPromptEnhancementFeedbackSummary(
   feedbackScopeKey?: string,
 ): PromptEnhancementFeedbackSummary {
   assertNonEmpty('project_root_required', projectRoot);
+  if (feedbackScopeKey !== undefined) assertPublicSafeToken('feedback_scope_key_public_safe_token_required', feedbackScopeKey);
   const scopeClause = feedbackScopeKey ? 'AND feedback_scope_key = ?' : '';
-  const params = feedbackScopeKey ? [projectRoot, feedbackScopeKey] : [projectRoot];
-  const categoryRows = store.db.exec(
-    `SELECT feedback_category, COUNT(*)
+  const params = feedbackScopeKey ? [projectRoot, feedbackScopeKey, SCHEMA_VERSION] : [projectRoot, SCHEMA_VERSION];
+  const rows = store.db.exec(
+    `SELECT feedback_category, memory_evidence, raw_text_stored
        FROM prompt_enhancement_feedback
       WHERE project_root = ?
         ${scopeClause}
-      GROUP BY feedback_category
+        AND schema_version <= ?
       ORDER BY feedback_category ASC`,
     params,
   )[0]?.values ?? [];
-  const totals = store.db.exec(
-    `SELECT COUNT(*), COALESCE(SUM(memory_evidence), 0), COALESCE(SUM(raw_text_stored), 0)
-       FROM prompt_enhancement_feedback
-      WHERE project_root = ?
-        ${scopeClause}`,
-    params,
-  )[0]?.values[0] ?? [0, 0, 0];
+  const counts = new Map<string, number>();
+  let totalEvents = 0;
+  let memoryEvidenceEvents = 0;
+  let rawTextStoredEvents = 0;
+  for (const row of rows) {
+    const feedbackCategory = readKnownValue(row[0], FEEDBACK_CATEGORIES);
+    if (!feedbackCategory) continue;
+    totalEvents += 1;
+    counts.set(feedbackCategory, (counts.get(feedbackCategory) ?? 0) + 1);
+    if (row[1] === 1) memoryEvidenceEvents += 1;
+    if (row[2] === 1) rawTextStoredEvents += 1;
+  }
   return {
     projectRoot,
     feedbackScopeKey,
-    totalEvents: totals[0] as number,
-    categoryCounts: categoryRows.map((row) => ({
-      feedbackCategory: row[0] as string,
-      count: row[1] as number,
-    })),
-    memoryEvidenceEvents: totals[1] as number,
-    rawTextStoredEvents: totals[2] as number,
+    totalEvents,
+    categoryCounts: [...counts.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([feedbackCategory, count]) => ({ feedbackCategory, count })),
+    memoryEvidenceEvents,
+    rawTextStoredEvents,
   };
 }
 
@@ -1145,46 +1170,42 @@ export function getPromptEnhancementSourceUseSummary(
   bodyId?: string,
 ): PromptEnhancementSourceUseSummary {
   assertNonEmpty('project_root_required', projectRoot);
+  if (bodyId !== undefined) assertPublicSafeToken('body_id_public_safe_token_required', bodyId);
   const bodyClause = bodyId ? 'AND body_id = ?' : '';
-  const params = bodyId ? [projectRoot, bodyId] : [projectRoot];
-  const sourceKindRows = store.db.exec(
-    `SELECT source_kind, COUNT(*)
+  const params = bodyId ? [projectRoot, bodyId, SCHEMA_VERSION] : [projectRoot, SCHEMA_VERSION];
+  const rows = store.db.exec(
+    `SELECT source_kind, use_kind, memory_evidence
        FROM prompt_enhancement_source_use
       WHERE project_root = ?
         ${bodyClause}
-      GROUP BY source_kind
-      ORDER BY source_kind ASC`,
+        AND schema_version <= ?
+      ORDER BY source_kind ASC, use_kind ASC`,
     params,
   )[0]?.values ?? [];
-  const useKindRows = store.db.exec(
-    `SELECT use_kind, COUNT(*)
-       FROM prompt_enhancement_source_use
-      WHERE project_root = ?
-        ${bodyClause}
-      GROUP BY use_kind
-      ORDER BY use_kind ASC`,
-    params,
-  )[0]?.values ?? [];
-  const totals = store.db.exec(
-    `SELECT COUNT(*), COALESCE(SUM(memory_evidence), 0)
-       FROM prompt_enhancement_source_use
-      WHERE project_root = ?
-        ${bodyClause}`,
-    params,
-  )[0]?.values[0] ?? [0, 0];
+  const sourceKindCounts = new Map<string, number>();
+  const useKindCounts = new Map<string, number>();
+  let totalSourceUses = 0;
+  let memoryEvidenceRows = 0;
+  for (const row of rows) {
+    const sourceKind = readPublicSafeToken(row[0]);
+    const useKind = readKnownValue(row[1], SOURCE_USE_KINDS);
+    if (!sourceKind || !useKind) continue;
+    totalSourceUses += 1;
+    sourceKindCounts.set(sourceKind, (sourceKindCounts.get(sourceKind) ?? 0) + 1);
+    useKindCounts.set(useKind, (useKindCounts.get(useKind) ?? 0) + 1);
+    if (row[2] === 1) memoryEvidenceRows += 1;
+  }
   return {
     projectRoot,
     bodyId,
-    totalSourceUses: totals[0] as number,
-    sourceKindCounts: sourceKindRows.map((row) => ({
-      sourceKind: row[0] as string,
-      count: row[1] as number,
-    })),
-    useKindCounts: useKindRows.map((row) => ({
-      useKind: row[0] as string,
-      count: row[1] as number,
-    })),
-    memoryEvidenceRows: totals[1] as number,
+    totalSourceUses,
+    sourceKindCounts: [...sourceKindCounts.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([sourceKind, count]) => ({ sourceKind, count })),
+    useKindCounts: [...useKindCounts.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([useKind, count]) => ({ useKind, count })),
+    memoryEvidenceRows,
   };
 }
 
@@ -1216,26 +1237,37 @@ export function getPromptEnhancementMemory(
 function mapMemoryRow(row: (string | number | null | Uint8Array)[]): PromptEnhancementMemoryRow | null {
   const schemaVersion = row[2] as number;
   if (schemaVersion > SCHEMA_VERSION) return null;
+  const signalKey = readPublicSafeToken(row[1]);
+  const currentEvidenceState = readKnownValue(row[6], MEMORY_EVIDENCE_STATES);
+  const confidenceBand = readKnownValue(row[7], MEMORY_CONFIDENCE_BANDS);
+  const sourceStrength = readKnownValue(row[8], MEMORY_SOURCE_STRENGTHS);
+  const protectionState = readKnownValue(row[9], MEMORY_PROTECTION_STATES);
+  const fatigueState = readKnownValue(row[10], MEMORY_FATIGUE_STATES);
+  const suppressionState = readKnownValue(row[11], MEMORY_SUPPRESSION_STATES);
+  const status = readKnownValue(row[15], MEMORY_STATUSES);
+  if (!signalKey || !currentEvidenceState || !confidenceBand || !sourceStrength || !protectionState || !fatigueState || !suppressionState || !status) {
+    return null;
+  }
   const reasonCodes = parseStringArray(row[16] as string);
   const provenance = parseProvenance(row[17] as string);
   if (!provenance) return null;
   return {
     projectRoot: row[0] as string,
-    signalKey: row[1] as string,
+    signalKey,
     schemaVersion,
     evidenceCount: row[3] as number,
     positiveCount: row[4] as number,
     negativeCount: row[5] as number,
-    currentEvidenceState: row[6] as PromptEnhancementMemoryEvidenceState,
-    confidenceBand: row[7] as PromptEnhancementMemoryConfidenceBand,
-    sourceStrength: row[8] as PromptEnhancementMemorySourceStrength,
-    protectionState: row[9] as PromptEnhancementMemoryProtectionState,
-    fatigueState: row[10] as PromptEnhancementMemoryFatigueState,
-    suppressionState: row[11] as PromptEnhancementMemorySuppressionState,
+    currentEvidenceState,
+    confidenceBand,
+    sourceStrength,
+    protectionState,
+    fatigueState,
+    suppressionState,
     lastUsedAt: row[12] as number | null,
     lastEvidenceAt: row[13] as number | null,
     decayAfter: row[14] as number | null,
-    status: row[15] as PromptEnhancementMemoryStatus,
+    status,
     reasonCodes,
     provenance,
     createdAt: row[18] as number,
@@ -1265,6 +1297,14 @@ function cleanPublicSafeToken(value: string): string | null {
 function cleanOptionalPublicSafeToken(value: string | undefined): string | undefined {
   if (value === undefined) return undefined;
   return cleanPublicSafeToken(value) ?? undefined;
+}
+
+function readPublicSafeToken(value: unknown): string | null {
+  return typeof value === 'string' ? cleanPublicSafeToken(value) : null;
+}
+
+function readKnownValue<T extends string>(value: unknown, allowedValues: readonly T[]): T | null {
+  return typeof value === 'string' && allowedValues.includes(value as T) ? value as T : null;
 }
 
 function resolveLearningEligibilityFlags(
