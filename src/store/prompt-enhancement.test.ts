@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, describe, expect, it } from 'vitest';
+import { reacquireStoreLock, releaseStoreLock } from './db.js';
 import {
   closeStore,
   deleteAllPromptEnhancementMemory,
@@ -1169,6 +1170,98 @@ describe('prompt-enhancement store, memory, and feedback contract', () => {
       }
     } finally {
       if (store) closeStore(store);
+    }
+  });
+
+  it('reacquires and reloads the disk store before writing PE action after a long popup wait', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'nexpath-pe-long-popup-'));
+    cleanupDirs.push(dir);
+    const dbPath = join(dir, 'prompt-store.db');
+    let popupStore: Store | null = await openStore(dbPath);
+    try {
+      recordPromptEnhancementPreparedBody(popupStore, {
+        preparedBodyId: 'prepared-before-popup',
+        projectRoot: '/repo/a',
+        enhancementId: 'enh-1',
+        bodyId: 'body-1',
+        bodyRevision: 1,
+        generatedOriginState: 'pe_generated_body',
+        deliveryChannel: 'cli_stop_bridge',
+        promptSubmitProcessingPolicy: 'pe_generated_delivery_skip_classification',
+        learningEligibilityFlags: {
+          promptHistory: false,
+          profile: false,
+          stage: false,
+          language: false,
+          missingSignalMemory: false,
+          feedback: false,
+          telemetry: false,
+          sourceUseTracking: true,
+        },
+        sourceUseIds: ['source-use-prepared'],
+        actionIds: ['action-use-current'],
+        fallbackState: 'not_fallback',
+        privacyStoragePolicy: 'raw_text_excluded_by_default',
+        now: 100,
+      });
+
+      releaseStoreLock(popupStore);
+      const concurrentStore = await openStore(dbPath);
+      try {
+        recordPromptEnhancementSourceUse(concurrentStore, {
+          sourceUseId: 'source-use-concurrent',
+          projectRoot: '/repo/a',
+          enhancementId: 'enh-1',
+          bodyId: 'body-1',
+          bodyRevision: 1,
+          sourceKind: 'content_template_fact',
+          sourceId: 'ct:debug',
+          useKind: 'body_section',
+          now: 150,
+        });
+      } finally {
+        closeStore(concurrentStore);
+      }
+
+      await reacquireStoreLock(popupStore);
+      recordPromptEnhancementAction(popupStore, {
+        actionEventId: 'action-use-current',
+        projectRoot: '/repo/a',
+        enhancementId: 'enh-1',
+        bodyId: 'body-1',
+        bodyRevision: 1,
+        actionCategory: 'accept_send',
+        feedbackScopeKey: 'body-1',
+        learningEligibility: 'not_eligible',
+        safetyImpactState: 'none',
+        now: 200,
+      });
+      closeStore(popupStore);
+      popupStore = null;
+
+      const reopened = await openStore(dbPath);
+      try {
+        expect(resolvePromptEnhancementGeneratedOrigin(reopened, {
+          projectRoot: '/repo/a',
+          bodyId: 'body-1',
+          bodyRevision: 1,
+        })).toMatchObject({
+          generatedOriginId: 'prepared-before-popup',
+          actionIds: ['action-use-current'],
+          fallbackState: 'not_fallback',
+        });
+        expect(getPromptEnhancementSourceUseSummary(reopened, '/repo/a', 'body-1')).toMatchObject({
+          totalSourceUses: 1,
+        });
+        expect(getPromptEnhancementFeedbackSummary(reopened, '/repo/a', 'body-1')).toMatchObject({
+          totalEvents: 1,
+          categoryCounts: [{ feedbackCategory: 'accept_send', count: 1 }],
+        });
+      } finally {
+        closeStore(reopened);
+      }
+    } finally {
+      if (popupStore) closeStore(popupStore);
     }
   });
 });
