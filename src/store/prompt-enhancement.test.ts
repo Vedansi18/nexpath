@@ -302,6 +302,20 @@ describe('prompt-enhancement store, memory, and feedback contract', () => {
         reasonCodes: ['typed_feedback_category'],
         now: 101,
       });
+      recordPromptEnhancementMemoryFeedback(store, {
+        feedbackEventId: 'feedback-2',
+        projectRoot: '/repo/a',
+        enhancementId: 'enh-1',
+        bodyId: 'body-1',
+        bodyRevision: 1,
+        feedbackCategory: 'not_relevant_enough',
+        feedbackScopeKey: 'debugging_observation_gap',
+        learningEligibility: 'eligible_scoped',
+        safetyImpactState: 'none',
+        memoryEvidence: true,
+        reasonCodes: ['duplicate_replay_must_not_relearn'],
+        now: 102,
+      });
 
       const feedbackSignalCount = store.db.exec('SELECT COUNT(*) FROM feedback_signals')[0]?.values[0]?.[0];
       const row = getPromptEnhancementMemory(store, '/repo/a', 'debugging_observation_gap');
@@ -309,6 +323,7 @@ describe('prompt-enhancement store, memory, and feedback contract', () => {
 
       expect(feedbackSignalCount).toBe(0);
       expect(feedbackRawFlags).toEqual([[0], [0]]);
+      expect(row?.evidenceCount).toBe(1);
       expect(row?.negativeCount).toBe(1);
       expect(row?.reasonCodes).toContain('feedback_candidate_not_global_preference');
     } finally {
@@ -1016,6 +1031,13 @@ describe('prompt-enhancement store, memory, and feedback contract', () => {
         bodyId: 'body-1',
         bodyRevision: 2,
         reasonCodes: ['section:verification'],
+      })).toBe(true);
+      expect(markPromptEnhancementMemoryUsed(store, '/repo/a', 'missing_repro_steps', 250, {
+        sourceUseId: 'memory-use-1',
+        enhancementId: 'enh-1',
+        bodyId: 'body-1',
+        bodyRevision: 2,
+        reasonCodes: ['duplicate_replay_must_not_touch_memory'],
       })).toBe(true);
       expect(markPromptEnhancementMemoryUsed(store, '/repo/a', 'unknown-signal', 201, {
         sourceUseId: 'memory-use-missing',

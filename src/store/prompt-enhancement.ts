@@ -400,6 +400,7 @@ export function markPromptEnhancementMemoryUsed(
 ): boolean {
   assertProjectSignal(projectRoot, signalKey);
   if (usage) assertMemoryUseInput(usage);
+  if (usage && sourceUseExists(store, usage.sourceUseId)) return true;
   store.db.run(
     `UPDATE prompt_enhancement_memory
         SET last_used_at = ?, updated_at = ?
@@ -444,7 +445,8 @@ export function recordPromptEnhancementMemoryFeedback(
   store: Store,
   input: PromptEnhancementFeedbackInput,
 ): void {
-  recordPromptEnhancementFeedbackEvent(store, input);
+  const inserted = recordPromptEnhancementFeedbackEvent(store, input);
+  if (!inserted) return;
   if (input.learningEligibility !== 'eligible_scoped' || input.safetyImpactState !== 'none' || input.memoryEvidence !== true) return;
   recordPromptEnhancementMemoryEvidence(store, {
     projectRoot: input.projectRoot,
@@ -556,7 +558,7 @@ export function recordPromptEnhancementGeneratedOrigin(store: Store, input: Prom
   saveStore(store);
 }
 
-export function recordPromptEnhancementFeedbackEvent(store: Store, input: PromptEnhancementFeedbackInput): void {
+export function recordPromptEnhancementFeedbackEvent(store: Store, input: PromptEnhancementFeedbackInput): boolean {
   assertFeedbackInput(input);
   const now = input.now ?? Date.now();
   store.db.run(
@@ -581,6 +583,7 @@ export function recordPromptEnhancementFeedbackEvent(store: Store, input: Prompt
       now,
     ],
   );
+  const inserted = store.db.getRowsModified() > 0;
   setPromptEnhancementStatus(store, {
     projectRoot: input.projectRoot,
     statusKey: 'last_feedback_event',
@@ -598,6 +601,7 @@ export function recordPromptEnhancementFeedbackEvent(store: Store, input: Prompt
     now,
   });
   saveStore(store);
+  return inserted;
 }
 
 export function recordPromptEnhancementPreparedBody(store: Store, input: PromptEnhancementPreparedBodyInput): void {
@@ -1324,6 +1328,14 @@ function tableExists(store: Store, tableName: string): boolean {
   const res = store.db.exec(
     "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
     [tableName],
+  );
+  return Boolean(res[0]?.values[0]);
+}
+
+function sourceUseExists(store: Store, sourceUseId: string): boolean {
+  const res = store.db.exec(
+    'SELECT 1 FROM prompt_enhancement_source_use WHERE source_use_id = ? LIMIT 1',
+    [sourceUseId],
   );
   return Boolean(res[0]?.values[0]);
 }
