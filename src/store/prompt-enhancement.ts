@@ -318,14 +318,14 @@ export function recordPromptEnhancementMemoryEvidence(
   const negativeDelta = input.evidenceKind === 'negative' ? 1 : 0;
   const existingProvenance = existing?.provenance;
   const provenance = {
-    promptIntent: input.promptIntent ?? existingProvenance?.promptIntent,
-    templateFamily: input.templateFamily ?? existingProvenance?.templateFamily,
-    sourceIds: unionStrings(existingProvenance?.sourceIds ?? [], input.sourceIds ?? []),
-    sectionIds: unionStrings(existingProvenance?.sectionIds ?? [], input.sectionIds ?? []),
+    promptIntent: cleanOptionalPublicSafeToken(input.promptIntent) ?? existingProvenance?.promptIntent,
+    templateFamily: cleanOptionalPublicSafeToken(input.templateFamily) ?? existingProvenance?.templateFamily,
+    sourceIds: unionStrings(existingProvenance?.sourceIds ?? [], cleanPublicSafeTokens(input.sourceIds ?? [])),
+    sectionIds: unionStrings(existingProvenance?.sectionIds ?? [], cleanPublicSafeTokens(input.sectionIds ?? [])),
     memoryEvidenceOnly: true as const,
     rawTextStored: false as const,
   };
-  const reasonCodes = unionStrings(existing?.reasonCodes ?? [], input.reasonCodes ?? []);
+  const reasonCodes = unionStrings(existing?.reasonCodes ?? [], cleanPublicSafeTokens(input.reasonCodes ?? []));
   store.db.run(
     `INSERT INTO prompt_enhancement_memory
        (project_root, signal_key, schema_version, evidence_count, positive_count, negative_count,
@@ -481,11 +481,11 @@ export function recordPromptEnhancementSourceUse(store: Store, input: PromptEnha
       input.bodyRevision,
       input.sourceKind,
       input.sourceId,
-      JSON.stringify(input.sectionIds ?? []),
+      JSON.stringify(cleanPublicSafeTokens(input.sectionIds ?? [])),
       input.useKind,
       input.memoryEvidence === true ? 1 : 0,
       SCHEMA_VERSION,
-      JSON.stringify(input.reasonCodes ?? []),
+      JSON.stringify(cleanPublicSafeTokens(input.reasonCodes ?? [])),
       now,
     ],
   );
@@ -532,7 +532,7 @@ export function recordPromptEnhancementGeneratedOrigin(store: Store, input: Prom
       input.fallbackState ?? 'unknown_not_applicable',
       input.privacyStoragePolicy ?? 'raw_text_excluded_by_default',
       SCHEMA_VERSION,
-      JSON.stringify(input.reasonCodes ?? []),
+      JSON.stringify(cleanPublicSafeTokens(input.reasonCodes ?? [])),
       now,
     ],
   );
@@ -579,7 +579,7 @@ export function recordPromptEnhancementFeedbackEvent(store: Store, input: Prompt
       input.safetyImpactState,
       input.memoryEvidence === true ? 1 : 0,
       SCHEMA_VERSION,
-      JSON.stringify(input.reasonCodes ?? []),
+      JSON.stringify(cleanPublicSafeTokens(input.reasonCodes ?? [])),
       now,
     ],
   );
@@ -886,7 +886,7 @@ export function setPromptEnhancementStatus(store: Store, input: PromptEnhancemen
        status_value = excluded.status_value,
        schema_version = excluded.schema_version,
        updated_at = excluded.updated_at`,
-    [input.projectRoot, input.statusKey, input.statusValue, SCHEMA_VERSION, now],
+    [input.projectRoot, input.statusKey, sanitizeStatusValue(input.statusValue), SCHEMA_VERSION, now],
   );
   saveStore(store);
 }
@@ -1179,10 +1179,25 @@ function mapMemoryRow(row: (string | number | null | Uint8Array)[]): PromptEnhan
 function parseStringArray(value: string): readonly string[] {
   try {
     const parsed = JSON.parse(value);
-    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : [];
+    return Array.isArray(parsed) ? cleanPublicSafeTokens(parsed.filter((item): item is string => typeof item === 'string')) : [];
   } catch {
     return [];
   }
+}
+
+function cleanPublicSafeTokens(values: readonly string[]): readonly string[] {
+  return [...new Set(values.map(cleanPublicSafeToken).filter((value): value is string => value !== null))];
+}
+
+function cleanPublicSafeToken(value: string): string | null {
+  const trimmed = value.trim();
+  if (trimmed.length === 0 || trimmed.length > 200) return null;
+  return /^[A-Za-z0-9._:/#@+-]+$/.test(trimmed) ? trimmed : null;
+}
+
+function cleanOptionalPublicSafeToken(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  return cleanPublicSafeToken(value) ?? undefined;
 }
 
 function resolveLearningEligibilityFlags(
@@ -1225,10 +1240,10 @@ function parseProvenance(value: string): PromptEnhancementMemoryRow['provenance'
     const parsed = JSON.parse(value) as Partial<PromptEnhancementMemoryRow['provenance']>;
     if (parsed.memoryEvidenceOnly !== true || parsed.rawTextStored !== false) return null;
     return {
-      promptIntent: typeof parsed.promptIntent === 'string' ? parsed.promptIntent : undefined,
-      templateFamily: typeof parsed.templateFamily === 'string' ? parsed.templateFamily : undefined,
-      sourceIds: Array.isArray(parsed.sourceIds) ? parsed.sourceIds.filter((item): item is string => typeof item === 'string') : [],
-      sectionIds: Array.isArray(parsed.sectionIds) ? parsed.sectionIds.filter((item): item is string => typeof item === 'string') : [],
+      promptIntent: typeof parsed.promptIntent === 'string' ? cleanOptionalPublicSafeToken(parsed.promptIntent) : undefined,
+      templateFamily: typeof parsed.templateFamily === 'string' ? cleanOptionalPublicSafeToken(parsed.templateFamily) : undefined,
+      sourceIds: Array.isArray(parsed.sourceIds) ? cleanPublicSafeTokens(parsed.sourceIds.filter((item): item is string => typeof item === 'string')) : [],
+      sectionIds: Array.isArray(parsed.sectionIds) ? cleanPublicSafeTokens(parsed.sectionIds.filter((item): item is string => typeof item === 'string')) : [],
       memoryEvidenceOnly: true,
       rawTextStored: false,
     };
@@ -1276,9 +1291,39 @@ function readStatusValue(store: Store, projectRoot: string | undefined, statusKe
   }
 }
 
+function sanitizeStatusValue(value: string): string {
+  try {
+    const parsed = JSON.parse(value);
+    const sanitized = sanitizeStatusJson(parsed);
+    if (sanitized && typeof sanitized === 'object' && !Array.isArray(sanitized)) return JSON.stringify(sanitized);
+  } catch {
+    // Non-JSON status payloads are replaced so raw text cannot persist through PE status rows.
+  }
+  return JSON.stringify({ status: 'unsafe_or_non_json_status_value_discarded', rawContentStored: false });
+}
+
+function sanitizeStatusJson(value: unknown): unknown {
+  if (value === null || typeof value === 'boolean' || typeof value === 'number') return value;
+  if (typeof value === 'string') return cleanPublicSafeToken(value) ?? 'unsafe_text_discarded';
+  if (Array.isArray(value)) {
+    return value
+      .map(sanitizeStatusJson)
+      .filter((item) => item !== undefined);
+  }
+  if (typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [key, child] of Object.entries(value)) {
+      const safeKey = cleanPublicSafeToken(key);
+      if (safeKey) out[safeKey] = sanitizeStatusJson(child);
+    }
+    return out;
+  }
+  return undefined;
+}
+
 function extractReasonCodes(statusValue: Record<string, unknown> | null): readonly string[] {
   const reasonCodes = statusValue?.reasonCodes;
-  return Array.isArray(reasonCodes) ? reasonCodes.filter((item): item is string => typeof item === 'string') : [];
+  return Array.isArray(reasonCodes) ? cleanPublicSafeTokens(reasonCodes.filter((item): item is string => typeof item === 'string')) : [];
 }
 
 function extractAt(statusValue: Record<string, unknown> | null): number | null {

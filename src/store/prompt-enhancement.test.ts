@@ -598,6 +598,56 @@ describe('prompt-enhancement store, memory, and feedback contract', () => {
     }
   });
 
+  it('keeps raw-looking text out of PE memory and source-use metadata', async () => {
+    const store = await openStore(':memory:');
+    try {
+      recordPromptEnhancementMemoryEvidence(store, {
+        projectRoot: '/repo/a',
+        signalKey: 'safe_signal_key',
+        evidenceKind: 'positive',
+        currentEvidenceState: 'live_current',
+        confidenceBand: 'high',
+        sourceStrength: 'strong',
+        promptIntent: 'debug intent with raw words',
+        templateFamily: 'debug_family',
+        sourceIds: ['source:safe', 'raw source excerpt should not persist'],
+        sectionIds: ['section:safe', 'generated body text should not persist'],
+        reasonCodes: ['safe_reason', 'raw custom feedback should not persist'],
+        now: 100,
+      });
+      recordPromptEnhancementSourceUse(store, {
+        sourceUseId: 'source-use-1',
+        projectRoot: '/repo/a',
+        enhancementId: 'enh-1',
+        bodyId: 'body-1',
+        bodyRevision: 1,
+        sourceKind: 'source_a_point_ref',
+        sourceId: 'source:safe',
+        sectionIds: ['section:safe', 'raw section label should not persist'],
+        useKind: 'body_section',
+        reasonCodes: ['safe_source_reason', 'raw prompt text should not persist'],
+        now: 101,
+      });
+
+      const row = getPromptEnhancementMemory(store, '/repo/a', 'safe_signal_key');
+      expect(row?.provenance).toMatchObject({
+        promptIntent: undefined,
+        templateFamily: 'debug_family',
+        sourceIds: ['source:safe'],
+        sectionIds: ['section:safe'],
+      });
+      expect(row?.reasonCodes).toEqual(['safe_reason']);
+      const sourceUse = store.db.exec(
+        'SELECT section_ids_json, reason_codes_json FROM prompt_enhancement_source_use WHERE source_use_id = ?',
+        ['source-use-1'],
+      )[0]?.values[0];
+      expect(sourceUse?.[0]).toBe('["section:safe"]');
+      expect(sourceUse?.[1]).toBe('["safe_source_reason"]');
+    } finally {
+      closeStore(store);
+    }
+  });
+
   it('rejects invalid typed identities before mutating PE rows', async () => {
     const store = await openStore(':memory:');
     try {
@@ -884,6 +934,44 @@ describe('prompt-enhancement store, memory, and feedback contract', () => {
       expect(deletePromptEnhancementStatusForProject(store, '/repo/a')).toBe(3);
       expect(getPromptEnhancementStoreStatus(store, '/repo/a').statusRows).toBe(0);
       expect(getPromptEnhancementMemory(store, '/repo/a', 'signal-a')).not.toBeNull();
+    } finally {
+      closeStore(store);
+    }
+  });
+
+  it('sanitizes PE status rows so they cannot become a raw-text store', async () => {
+    const store = await openStore(':memory:');
+    try {
+      setPromptEnhancementStatus(store, {
+        projectRoot: '/repo/a',
+        statusKey: 'last_raw_attempt',
+        statusValue: 'raw generated body should not persist',
+        now: 100,
+      });
+      setPromptEnhancementStatus(store, {
+        projectRoot: '/repo/a',
+        statusKey: 'last_structured_attempt',
+        statusValue: JSON.stringify({
+          reasonCodes: ['safe_reason', 'raw source excerpt should not persist'],
+          fallbackCode: 'fallback_safe',
+          rawPrompt: 'delete production database',
+          nested: { safeKey: 'safe_value', rawField: 'custom feedback with spaces' },
+        }),
+        now: 101,
+      });
+
+      const rows = store.db.exec(
+        'SELECT status_key, status_value FROM prompt_enhancement_status WHERE project_root = ? ORDER BY status_key',
+        ['/repo/a'],
+      )[0]?.values ?? [];
+      const serialized = JSON.stringify(rows);
+      expect(serialized).not.toContain('raw generated body');
+      expect(serialized).not.toContain('delete production database');
+      expect(serialized).not.toContain('raw source excerpt');
+      expect(serialized).not.toContain('custom feedback with spaces');
+      expect(serialized).toContain('unsafe_or_non_json_status_value_discarded');
+      expect(serialized).toContain('safe_reason');
+      expect(getPromptEnhancementStoreStatus(store, '/repo/a').reasonCodes).toEqual([]);
     } finally {
       closeStore(store);
     }
