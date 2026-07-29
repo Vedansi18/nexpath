@@ -98,6 +98,15 @@ export interface PromptEnhancementSourceUseInput {
   now?: number;
 }
 
+export interface PromptEnhancementMemoryUseInput {
+  sourceUseId: string;
+  enhancementId: string;
+  bodyId: string;
+  bodyRevision: number;
+  useKind?: PromptEnhancementSourceUseInput['useKind'];
+  reasonCodes?: readonly string[];
+}
+
 export interface PromptEnhancementGeneratedOriginInput {
   generatedOriginId: string;
   projectRoot: string;
@@ -179,6 +188,8 @@ export interface PromptEnhancementStatusInput {
 
 export interface PromptEnhancementStoreStatus {
   projectRoot?: string;
+  schemaVersion: number;
+  enabledState: 'local_store_enabled' | 'policy_disabled_or_no_data';
   memoryRows: number;
   sourceUseRows: number;
   generatedOriginRows: number;
@@ -361,8 +372,10 @@ export function markPromptEnhancementMemoryUsed(
   projectRoot: string,
   signalKey: string,
   now: number = Date.now(),
+  usage?: PromptEnhancementMemoryUseInput,
 ): boolean {
   assertProjectSignal(projectRoot, signalKey);
+  if (usage) assertMemoryUseInput(usage);
   store.db.run(
     `UPDATE prompt_enhancement_memory
         SET last_used_at = ?, updated_at = ?
@@ -371,10 +384,31 @@ export function markPromptEnhancementMemoryUsed(
   );
   const changed = store.db.getRowsModified();
   if (changed > 0) {
+    if (usage) {
+      recordPromptEnhancementSourceUse(store, {
+        sourceUseId: usage.sourceUseId,
+        projectRoot,
+        enhancementId: usage.enhancementId,
+        bodyId: usage.bodyId,
+        bodyRevision: usage.bodyRevision,
+        sourceKind: 'memory_ref',
+        sourceId: signalKey,
+        useKind: usage.useKind ?? 'body_section',
+        memoryEvidence: false,
+        reasonCodes: unionStrings(['memory_used_in_body'], usage.reasonCodes ?? []),
+        now,
+      });
+    }
     setPromptEnhancementStatus(store, {
       projectRoot,
       statusKey: 'last_memory_used',
-      statusValue: JSON.stringify({ signalKey, at: now }),
+      statusValue: JSON.stringify({
+        signalKey,
+        sourceUseId: usage?.sourceUseId,
+        bodyId: usage?.bodyId,
+        bodyRevision: usage?.bodyRevision,
+        at: now,
+      }),
       now,
     });
   }
@@ -749,10 +783,20 @@ export function prunePromptEnhancementRows(
 
 export function deletePromptEnhancementMemoryForProject(store: Store, projectRoot: string): number {
   assertNonEmpty('project_root_required', projectRoot);
-  return deletePromptEnhancementProjectRows(store, projectRoot);
+  store.db.run('DELETE FROM prompt_enhancement_memory WHERE project_root = ?', [projectRoot]);
+  const deletedRows = store.db.getRowsModified();
+  saveStore(store);
+  return deletedRows;
 }
 
 export function deleteAllPromptEnhancementMemory(store: Store): number {
+  store.db.run('DELETE FROM prompt_enhancement_memory');
+  const deletedRows = store.db.getRowsModified();
+  saveStore(store);
+  return deletedRows;
+}
+
+export function deleteAllPromptEnhancementRows(store: Store): number {
   const tables = peTables();
   let deletedRows = 0;
   for (const table of tables) {
@@ -761,10 +805,6 @@ export function deleteAllPromptEnhancementMemory(store: Store): number {
   }
   saveStore(store);
   return deletedRows;
-}
-
-export function deleteAllPromptEnhancementRows(store: Store): number {
-  return deleteAllPromptEnhancementMemory(store);
 }
 
 export function deletePromptEnhancementProjectRows(store: Store, projectRoot: string): number {
@@ -878,6 +918,10 @@ export function getPromptEnhancementStoreStatus(store: Store, projectRoot?: stri
   const fallbackCount = countStatusKeyMatches(store, projectRoot, 'fallback');
   return {
     projectRoot,
+    schemaVersion: SCHEMA_VERSION,
+    enabledState: memoryRows + sourceUseRows + generatedOriginRows + feedbackRows + statusRows === 0
+      ? 'policy_disabled_or_no_data'
+      : 'local_store_enabled',
     memoryRows,
     sourceUseRows,
     generatedOriginRows,
@@ -1267,6 +1311,12 @@ function assertExposureInput(input: PromptEnhancementExposureInput): void {
 function assertActionInput(input: PromptEnhancementActionInput): void {
   assertNonEmpty('action_event_id_required', input.actionEventId);
   assertNonEmpty('project_root_required', input.projectRoot);
+  assertNonEmpty('enhancement_id_required', input.enhancementId);
+  assertNonEmpty('body_id_required', input.bodyId);
+}
+
+function assertMemoryUseInput(input: PromptEnhancementMemoryUseInput): void {
+  assertNonEmpty('source_use_id_required', input.sourceUseId);
   assertNonEmpty('enhancement_id_required', input.enhancementId);
   assertNonEmpty('body_id_required', input.bodyId);
 }

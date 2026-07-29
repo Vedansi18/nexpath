@@ -89,6 +89,7 @@ export {
   type PromptEnhancementFeedbackCategory,
   type PromptEnhancementMemoryRow,
   type PromptEnhancementMemoryEvidenceInput,
+  type PromptEnhancementMemoryUseInput,
   type PromptEnhancementSourceUseInput,
   type PromptEnhancementGeneratedOriginInput,
   type PromptEnhancementFeedbackInput,

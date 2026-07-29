@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { openStore, closeStore, DEFAULT_DB_PATH } from '../../store/db.js';
+import { SCHEMA_VERSION } from '../../store/schema.js';
 import { getPromptStats } from '../../store/prompts.js';
 import { getPromptEnhancementStoreStatus, type PromptEnhancementStoreStatus } from '../../store/prompt-enhancement.js';
 import { getAllConfig, DEFAULT_CONFIG } from '../../store/config.js';
@@ -165,6 +166,8 @@ export async function runStatus(input: StatusInput): Promise<StatusResult> {
       perProject:   [],
     };
     promptEnhancement = {
+      schemaVersion: SCHEMA_VERSION,
+      enabledState: 'policy_disabled_or_no_data',
       memoryRows: 0,
       sourceUseRows: 0,
       generatedOriginRows: 0,
@@ -248,6 +251,8 @@ export function renderStatus(result: StatusResult): string {
   lines.push('');
 
   lines.push('Prompt enhancement');
+  lines.push(`  Enabled state    : ${result.promptEnhancement.enabledState}`);
+  lines.push(`  Schema version   : ${result.promptEnhancement.schemaVersion}`);
   lines.push(`  Memory rows      : ${result.promptEnhancement.memoryRows.toLocaleString()}`);
   lines.push(`  Source-use rows  : ${result.promptEnhancement.sourceUseRows.toLocaleString()}`);
   lines.push(`  Generated-origin : ${result.promptEnhancement.generatedOriginRows.toLocaleString()}`);

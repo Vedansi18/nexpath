@@ -6,6 +6,7 @@ import {
   closeStore,
   deleteAllPromptEnhancementMemory,
   deleteAllPromptEnhancementRows,
+  deletePromptEnhancementMemoryForProject,
   deletePromptEnhancementProjectRows,
   deletePromptEnhancementStatusForProject,
   deletePromptEnhancementSourceUseForProject,
@@ -161,6 +162,8 @@ describe('prompt-enhancement store, memory, and feedback contract', () => {
 
       const status = getPromptEnhancementStoreStatus(store, '/repo/a');
       expect(status).toMatchObject({
+        schemaVersion: 1,
+        enabledState: 'local_store_enabled',
         memoryRows: 0,
         sourceUseRows: 1,
         generatedOriginRows: 1,
@@ -780,8 +783,36 @@ describe('prompt-enhancement store, memory, and feedback contract', () => {
       expect(getPromptEnhancementMemory(store, '/repo/a', 'signal-a')).toBeNull();
       expect(getPromptEnhancementMemory(store, '/repo/b', 'signal-b')).not.toBeNull();
       expect(store.db.exec('SELECT COUNT(*) FROM feedback_signals')[0]?.values[0]?.[0]).toBe(1);
-      expect(deleteAllPromptEnhancementMemory(store)).toBe(2);
+      expect(deleteAllPromptEnhancementMemory(store)).toBe(1);
       expect(getPromptEnhancementStoreStatus(store).memoryRows).toBe(0);
+      expect(getPromptEnhancementStoreStatus(store).statusRows).toBe(1);
+    } finally {
+      closeStore(store);
+    }
+  });
+
+  it('keeps memory-specific delete helpers narrower than lifecycle cleanup', async () => {
+    const store = await openStore(':memory:');
+    try {
+      recordMemory(store, '/repo/a', 'signal-a', 100);
+      recordPromptEnhancementSourceUse(store, {
+        sourceUseId: 'source-use-a',
+        projectRoot: '/repo/a',
+        enhancementId: 'enh-a',
+        bodyId: 'body-a',
+        bodyRevision: 1,
+        sourceKind: 'source_a_point_ref',
+        sourceId: 'point:a',
+        useKind: 'body_section',
+      });
+
+      expect(deletePromptEnhancementMemoryForProject(store, '/repo/a')).toBe(1);
+      expect(getPromptEnhancementStoreStatus(store, '/repo/a')).toMatchObject({
+        memoryRows: 0,
+        sourceUseRows: 1,
+        statusRows: 2,
+      });
+      expect(deletePromptEnhancementProjectRows(store, '/repo/a')).toBe(3);
     } finally {
       closeStore(store);
     }
@@ -824,6 +855,43 @@ describe('prompt-enhancement store, memory, and feedback contract', () => {
       expect(getPromptEnhancementMemory(store, '/repo/b', 'signal-b')).not.toBeNull();
       expect(deleteAllPromptEnhancementRows(store)).toBe(2);
       expect(resetAllPromptEnhancementRows(store)).toBe(0);
+    } finally {
+      closeStore(store);
+    }
+  });
+
+  it('binds a used memory row to a body source-use ref without making it memory evidence', async () => {
+    const store = await openStore(':memory:');
+    try {
+      recordMemory(store, '/repo/a', 'missing_repro_steps', 100, {
+        status: 'qualified',
+      });
+
+      expect(markPromptEnhancementMemoryUsed(store, '/repo/a', 'missing_repro_steps', 200, {
+        sourceUseId: 'memory-use-1',
+        enhancementId: 'enh-1',
+        bodyId: 'body-1',
+        bodyRevision: 2,
+        reasonCodes: ['section:verification'],
+      })).toBe(true);
+      expect(markPromptEnhancementMemoryUsed(store, '/repo/a', 'unknown-signal', 201, {
+        sourceUseId: 'memory-use-missing',
+        enhancementId: 'enh-1',
+        bodyId: 'body-1',
+        bodyRevision: 2,
+      })).toBe(false);
+
+      const sourceSummary = getPromptEnhancementSourceUseSummary(store, '/repo/a', 'body-1');
+      expect(sourceSummary).toMatchObject({
+        totalSourceUses: 1,
+        memoryEvidenceRows: 0,
+      });
+      expect(sourceSummary.sourceKindCounts).toEqual([{ sourceKind: 'memory_ref', count: 1 }]);
+      expect(getPromptEnhancementStoreStatus(store, '/repo/a')).toMatchObject({
+        memoryRows: 1,
+        sourceUseRows: 1,
+      });
+      expect(getPromptEnhancementMemory(store, '/repo/a', 'missing_repro_steps')?.lastUsedAt).toBe(200);
     } finally {
       closeStore(store);
     }

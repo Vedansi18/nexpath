@@ -471,6 +471,8 @@ function makeResult(overrides: Partial<StatusResult> = {}): StatusResult {
       perProject:   [],
     },
     promptEnhancement: {
+      schemaVersion: 1,
+      enabledState: 'policy_disabled_or_no_data',
       memoryRows: 0,
       sourceUseRows: 0,
       generatedOriginRows: 0,
@@ -534,6 +536,8 @@ describe('renderStatus — sections', () => {
   it('includes public-safe prompt-enhancement status/debug lines', () => {
     const out = renderStatus(makeResult({
       promptEnhancement: {
+        schemaVersion: 1,
+        enabledState: 'local_store_enabled',
         memoryRows: 3,
         sourceUseRows: 2,
         generatedOriginRows: 1,
@@ -552,6 +556,8 @@ describe('renderStatus — sections', () => {
       },
     }));
     expect(out).toContain('Prompt enhancement');
+    expect(out).toContain('Enabled state    : local_store_enabled');
+    expect(out).toContain('Schema version   : 1');
     expect(out).toContain('Memory rows      : 3');
     expect(out).toContain('Source-use rows  : 2');
     expect(out).toContain('Generated-origin : 1');
