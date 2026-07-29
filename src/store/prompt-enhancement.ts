@@ -8,6 +8,31 @@ export type PromptEnhancementMemoryProtectionState = 'none' | 'current_source_a'
 export type PromptEnhancementMemoryFatigueState = 'none' | 'candidate' | 'fatigued';
 export type PromptEnhancementMemorySuppressionState = 'none' | 'candidate_scoped' | 'suppressed_scoped';
 export type PromptEnhancementMemoryStatus = 'qualified' | 'candidate' | 'decayed' | 'disabled_by_policy' | 'malformed_ignored';
+export type PromptEnhancementFeedbackCategory =
+  | 'surface_exposed'
+  | 'accept_send'
+  | 'use_original'
+  | 'close_no_send'
+  | 'edit'
+  | 'edit_before_send'
+  | 'skip_cancel'
+  | 'reject'
+  | 'remove'
+  | 'not_needed'
+  | 'directional_action'
+  | 'additional_details_apply'
+  | 'fallback'
+  | 'multi_prompt_disposition'
+  | 'not_relevant_enough'
+  | 'too_much_or_too_long'
+  | 'too_long'
+  | 'too_shallow'
+  | 'not_project_grounded'
+  | 'wrong_tone'
+  | 'custom_typed'
+  | 'section_removed_by_edit'
+  | 'user_deleted_generated_section'
+  | 'action_result_rejected';
 
 export interface PromptEnhancementMemoryRow {
   projectRoot: string;
@@ -94,29 +119,52 @@ export interface PromptEnhancementFeedbackInput {
   enhancementId: string;
   bodyId: string;
   bodyRevision: number;
-  feedbackCategory:
-    | 'accept_send'
-    | 'edit'
-    | 'skip_cancel'
-    | 'reject'
-    | 'remove'
-    | 'not_needed'
-    | 'directional_action'
-    | 'fallback'
-    | 'multi_prompt_disposition'
-    | 'not_relevant_enough'
-    | 'too_much_or_too_long'
-    | 'too_long'
-    | 'too_shallow'
-    | 'not_project_grounded'
-    | 'wrong_tone'
-    | 'custom_typed'
-    | 'section_removed_by_edit'
-    | 'user_deleted_generated_section'
-    | 'action_result_rejected';
+  feedbackCategory: PromptEnhancementFeedbackCategory;
   feedbackScopeKey: string;
   learningEligibility: 'eligible_scoped' | 'not_eligible' | 'pending_policy';
   safetyImpactState: 'none' | 'safety_floor_touched' | 'source_floor_touched' | 'unknown';
+  memoryEvidence?: boolean;
+  reasonCodes?: readonly string[];
+  now?: number;
+}
+
+export interface PromptEnhancementPreparedBodyInput {
+  preparedBodyId: string;
+  projectRoot: string;
+  enhancementId: string;
+  bodyId: string;
+  bodyRevision: number;
+  generatedOriginState: 'pe_generated_body' | 'user_edited_pe_body' | 'user_original' | 'old_ds_injected_text' | 'ordinary_user_prompt' | string;
+  deliveryChannel: string;
+  promptSubmitProcessingPolicy: string;
+  learningEligible?: boolean;
+  sourceUseIds?: readonly string[];
+  reasonCodes?: readonly string[];
+  now?: number;
+}
+
+export interface PromptEnhancementExposureInput {
+  exposureEventId: string;
+  projectRoot: string;
+  enhancementId: string;
+  bodyId: string;
+  bodyRevision: number;
+  exposureState: string;
+  actionAvailabilityState: string;
+  reasonCodes?: readonly string[];
+  now?: number;
+}
+
+export interface PromptEnhancementActionInput {
+  actionEventId: string;
+  projectRoot: string;
+  enhancementId: string;
+  bodyId: string;
+  bodyRevision: number;
+  actionCategory: PromptEnhancementFeedbackCategory;
+  feedbackScopeKey?: string;
+  learningEligibility?: PromptEnhancementFeedbackInput['learningEligibility'];
+  safetyImpactState?: PromptEnhancementFeedbackInput['safetyImpactState'];
   memoryEvidence?: boolean;
   reasonCodes?: readonly string[];
   now?: number;
@@ -152,6 +200,39 @@ export interface PromptEnhancementPruneResult {
   deletedRows: number;
   decayedRows: number;
   reasonCodes: readonly string[];
+}
+
+export interface PromptEnhancementGeneratedOriginResolution {
+  generatedOriginId: string;
+  projectRoot: string;
+  enhancementId: string;
+  bodyId: string;
+  bodyRevision: number;
+  generatedOriginState: string;
+  deliveryChannel: string;
+  promptSubmitProcessingPolicy: string;
+  learningEligible: boolean;
+  sourceUseIds: readonly string[];
+  reasonCodes: readonly string[];
+  createdAt: number;
+}
+
+export interface PromptEnhancementFeedbackSummary {
+  projectRoot: string;
+  feedbackScopeKey?: string;
+  totalEvents: number;
+  categoryCounts: readonly { feedbackCategory: string; count: number }[];
+  memoryEvidenceEvents: number;
+  rawTextStoredEvents: number;
+}
+
+export interface PromptEnhancementSourceUseSummary {
+  projectRoot: string;
+  bodyId?: string;
+  totalSourceUses: number;
+  sourceKindCounts: readonly { sourceKind: string; count: number }[];
+  useKindCounts: readonly { useKind: string; count: number }[];
+  memoryEvidenceRows: number;
 }
 
 const SELECT_MEMORY = `
@@ -448,6 +529,77 @@ export function recordPromptEnhancementFeedbackEvent(store: Store, input: Prompt
     now,
   });
   saveStore(store);
+}
+
+export function recordPromptEnhancementPreparedBody(store: Store, input: PromptEnhancementPreparedBodyInput): void {
+  assertPreparedBodyInput(input);
+  recordPromptEnhancementGeneratedOrigin(store, {
+    generatedOriginId: input.preparedBodyId,
+    projectRoot: input.projectRoot,
+    enhancementId: input.enhancementId,
+    bodyId: input.bodyId,
+    bodyRevision: input.bodyRevision,
+    generatedOriginState: input.generatedOriginState,
+    deliveryChannel: input.deliveryChannel,
+    promptSubmitProcessingPolicy: input.promptSubmitProcessingPolicy,
+    learningEligible: input.learningEligible,
+    sourceUseIds: input.sourceUseIds,
+    reasonCodes: input.reasonCodes,
+    now: input.now,
+  });
+  setPromptEnhancementStatus(store, {
+    projectRoot: input.projectRoot,
+    statusKey: 'last_prepared_body',
+    statusValue: JSON.stringify({
+      preparedBodyId: input.preparedBodyId,
+      bodyId: input.bodyId,
+      bodyRevision: input.bodyRevision,
+      generatedOriginState: input.generatedOriginState,
+      rawTextStored: false,
+      at: input.now ?? Date.now(),
+    }),
+    now: input.now,
+  });
+  saveStore(store);
+}
+
+export function recordPromptEnhancementExposure(store: Store, input: PromptEnhancementExposureInput): void {
+  assertExposureInput(input);
+  recordPromptEnhancementFeedbackEvent(store, {
+    feedbackEventId: input.exposureEventId,
+    projectRoot: input.projectRoot,
+    enhancementId: input.enhancementId,
+    bodyId: input.bodyId,
+    bodyRevision: input.bodyRevision,
+    feedbackCategory: 'surface_exposed',
+    feedbackScopeKey: input.bodyId,
+    learningEligibility: 'not_eligible',
+    safetyImpactState: 'none',
+    memoryEvidence: false,
+    reasonCodes: unionStrings(input.reasonCodes ?? [], [
+      `exposure_state:${input.exposureState}`,
+      `action_availability:${input.actionAvailabilityState}`,
+    ]),
+    now: input.now,
+  });
+}
+
+export function recordPromptEnhancementAction(store: Store, input: PromptEnhancementActionInput): void {
+  assertActionInput(input);
+  recordPromptEnhancementFeedbackEvent(store, {
+    feedbackEventId: input.actionEventId,
+    projectRoot: input.projectRoot,
+    enhancementId: input.enhancementId,
+    bodyId: input.bodyId,
+    bodyRevision: input.bodyRevision,
+    feedbackCategory: input.actionCategory,
+    feedbackScopeKey: input.feedbackScopeKey ?? input.bodyId,
+    learningEligibility: input.learningEligibility ?? 'not_eligible',
+    safetyImpactState: input.safetyImpactState ?? 'none',
+    memoryEvidence: input.memoryEvidence,
+    reasonCodes: input.reasonCodes,
+    now: input.now,
+  });
 }
 
 export function decayPromptEnhancementMemory(store: Store, projectRoot: string, now: number = Date.now()): number {
@@ -752,6 +904,129 @@ export function getPromptEnhancementDebugSummary(store: Store, projectRoot?: str
   return getPromptEnhancementStoreStatus(store, projectRoot);
 }
 
+export function resolvePromptEnhancementGeneratedOrigin(
+  store: Store,
+  input: { projectRoot: string; bodyId: string; bodyRevision: number },
+): PromptEnhancementGeneratedOriginResolution | null {
+  assertNonEmpty('project_root_required', input.projectRoot);
+  assertNonEmpty('body_id_required', input.bodyId);
+  const res = store.db.exec(
+    `SELECT generated_origin_id, project_root, enhancement_id, body_id, body_revision, generated_origin_state,
+            delivery_channel, prompt_submit_processing_policy, learning_eligible, source_use_ids_json,
+            reason_codes_json, created_at
+       FROM prompt_enhancement_generated_origin
+      WHERE project_root = ?
+        AND body_id = ?
+        AND body_revision = ?
+        AND schema_version <= ?
+      ORDER BY created_at DESC, generated_origin_id ASC
+      LIMIT 1`,
+    [input.projectRoot, input.bodyId, input.bodyRevision, SCHEMA_VERSION],
+  );
+  const row = res[0]?.values[0];
+  if (!row) return null;
+  return {
+    generatedOriginId: row[0] as string,
+    projectRoot: row[1] as string,
+    enhancementId: row[2] as string,
+    bodyId: row[3] as string,
+    bodyRevision: row[4] as number,
+    generatedOriginState: row[5] as string,
+    deliveryChannel: row[6] as string,
+    promptSubmitProcessingPolicy: row[7] as string,
+    learningEligible: row[8] === 1,
+    sourceUseIds: parseStringArray(row[9] as string),
+    reasonCodes: parseStringArray(row[10] as string),
+    createdAt: row[11] as number,
+  };
+}
+
+export function getPromptEnhancementFeedbackSummary(
+  store: Store,
+  projectRoot: string,
+  feedbackScopeKey?: string,
+): PromptEnhancementFeedbackSummary {
+  assertNonEmpty('project_root_required', projectRoot);
+  const scopeClause = feedbackScopeKey ? 'AND feedback_scope_key = ?' : '';
+  const params = feedbackScopeKey ? [projectRoot, feedbackScopeKey] : [projectRoot];
+  const categoryRows = store.db.exec(
+    `SELECT feedback_category, COUNT(*)
+       FROM prompt_enhancement_feedback
+      WHERE project_root = ?
+        ${scopeClause}
+      GROUP BY feedback_category
+      ORDER BY feedback_category ASC`,
+    params,
+  )[0]?.values ?? [];
+  const totals = store.db.exec(
+    `SELECT COUNT(*), COALESCE(SUM(memory_evidence), 0), COALESCE(SUM(raw_text_stored), 0)
+       FROM prompt_enhancement_feedback
+      WHERE project_root = ?
+        ${scopeClause}`,
+    params,
+  )[0]?.values[0] ?? [0, 0, 0];
+  return {
+    projectRoot,
+    feedbackScopeKey,
+    totalEvents: totals[0] as number,
+    categoryCounts: categoryRows.map((row) => ({
+      feedbackCategory: row[0] as string,
+      count: row[1] as number,
+    })),
+    memoryEvidenceEvents: totals[1] as number,
+    rawTextStoredEvents: totals[2] as number,
+  };
+}
+
+export function getPromptEnhancementSourceUseSummary(
+  store: Store,
+  projectRoot: string,
+  bodyId?: string,
+): PromptEnhancementSourceUseSummary {
+  assertNonEmpty('project_root_required', projectRoot);
+  const bodyClause = bodyId ? 'AND body_id = ?' : '';
+  const params = bodyId ? [projectRoot, bodyId] : [projectRoot];
+  const sourceKindRows = store.db.exec(
+    `SELECT source_kind, COUNT(*)
+       FROM prompt_enhancement_source_use
+      WHERE project_root = ?
+        ${bodyClause}
+      GROUP BY source_kind
+      ORDER BY source_kind ASC`,
+    params,
+  )[0]?.values ?? [];
+  const useKindRows = store.db.exec(
+    `SELECT use_kind, COUNT(*)
+       FROM prompt_enhancement_source_use
+      WHERE project_root = ?
+        ${bodyClause}
+      GROUP BY use_kind
+      ORDER BY use_kind ASC`,
+    params,
+  )[0]?.values ?? [];
+  const totals = store.db.exec(
+    `SELECT COUNT(*), COALESCE(SUM(memory_evidence), 0)
+       FROM prompt_enhancement_source_use
+      WHERE project_root = ?
+        ${bodyClause}`,
+    params,
+  )[0]?.values[0] ?? [0, 0];
+  return {
+    projectRoot,
+    bodyId,
+    totalSourceUses: totals[0] as number,
+    sourceKindCounts: sourceKindRows.map((row) => ({
+      sourceKind: row[0] as string,
+      count: row[1] as number,
+    })),
+    useKindCounts: useKindRows.map((row) => ({
+      useKind: row[0] as string,
+      count: row[1] as number,
+    })),
+    memoryEvidenceRows: totals[1] as number,
+  };
+}
+
 export function getPromptEnhancementSchemaVersionState(store: Store): {
   schemaVersion: number;
   tableStates: readonly { tableName: string; exists: boolean }[];
@@ -970,11 +1245,37 @@ function assertFeedbackInput(input: PromptEnhancementFeedbackInput): void {
   assertNonEmpty('feedback_scope_key_required', input.feedbackScopeKey);
 }
 
+function assertPreparedBodyInput(input: PromptEnhancementPreparedBodyInput): void {
+  assertNonEmpty('prepared_body_id_required', input.preparedBodyId);
+  assertNonEmpty('project_root_required', input.projectRoot);
+  assertNonEmpty('enhancement_id_required', input.enhancementId);
+  assertNonEmpty('body_id_required', input.bodyId);
+  assertNonEmpty('generated_origin_state_required', input.generatedOriginState);
+  assertNonEmpty('delivery_channel_required', input.deliveryChannel);
+  assertNonEmpty('prompt_submit_processing_policy_required', input.promptSubmitProcessingPolicy);
+}
+
+function assertExposureInput(input: PromptEnhancementExposureInput): void {
+  assertNonEmpty('exposure_event_id_required', input.exposureEventId);
+  assertNonEmpty('project_root_required', input.projectRoot);
+  assertNonEmpty('enhancement_id_required', input.enhancementId);
+  assertNonEmpty('body_id_required', input.bodyId);
+  assertNonEmpty('exposure_state_required', input.exposureState);
+  assertNonEmpty('action_availability_state_required', input.actionAvailabilityState);
+}
+
+function assertActionInput(input: PromptEnhancementActionInput): void {
+  assertNonEmpty('action_event_id_required', input.actionEventId);
+  assertNonEmpty('project_root_required', input.projectRoot);
+  assertNonEmpty('enhancement_id_required', input.enhancementId);
+  assertNonEmpty('body_id_required', input.bodyId);
+}
+
 function assertNonEmpty(errorCode: string, value: string): void {
   if (value.trim().length === 0) throw new Error(errorCode);
 }
 
-function isNegativeFeedbackCategory(category: PromptEnhancementFeedbackInput['feedbackCategory']): boolean {
+function isNegativeFeedbackCategory(category: PromptEnhancementFeedbackCategory): boolean {
   return [
     'not_relevant_enough',
     'too_much_or_too_long',

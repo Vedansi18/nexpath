@@ -10,7 +10,9 @@ import {
   deletePromptEnhancementStatusForProject,
   deletePromptEnhancementSourceUseForProject,
   getPromptEnhancementMemory,
+  getPromptEnhancementFeedbackSummary,
   getPromptEnhancementSchemaVersionState,
+  getPromptEnhancementSourceUseSummary,
   getPromptEnhancementStoreStatus,
   markPromptEnhancementMemoryUsed,
   openStore,
@@ -20,9 +22,13 @@ import {
   queryRelevantPromptEnhancementMemory,
   recordPromptEnhancementFeedbackEvent,
   recordPromptEnhancementGeneratedOrigin,
+  recordPromptEnhancementAction,
+  recordPromptEnhancementExposure,
   recordPromptEnhancementMemoryEvidence,
   recordPromptEnhancementMemoryFeedback,
+  recordPromptEnhancementPreparedBody,
   recordPromptEnhancementSourceUse,
+  resolvePromptEnhancementGeneratedOrigin,
   resetAllPromptEnhancementRows,
   resetPromptEnhancementProjectRows,
   setPromptEnhancementStatus,
@@ -207,6 +213,173 @@ describe('prompt-enhancement store, memory, and feedback contract', () => {
       expect(feedbackRawFlags).toEqual([[0], [0]]);
       expect(row?.negativeCount).toBe(1);
       expect(row?.reasonCodes).toContain('feedback_candidate_not_global_preference');
+    } finally {
+      closeStore(store);
+    }
+  });
+
+  it('records prepared body, exposure, and action through explicit PE store ports idempotently', async () => {
+    const store = await openStore(':memory:');
+    try {
+      recordPromptEnhancementPreparedBody(store, {
+        preparedBodyId: 'prepared-1',
+        projectRoot: '/repo/a',
+        enhancementId: 'enh-1',
+        bodyId: 'body-1',
+        bodyRevision: 1,
+        generatedOriginState: 'pe_generated_body',
+        deliveryChannel: 'cli_stop_bridge',
+        promptSubmitProcessingPolicy: 'pe_generated_delivery_skip_classification',
+        learningEligible: false,
+        sourceUseIds: ['source-use-1'],
+        reasonCodes: ['prepared_before_popup'],
+        now: 100,
+      });
+      recordPromptEnhancementExposure(store, {
+        exposureEventId: 'exposure-1',
+        projectRoot: '/repo/a',
+        enhancementId: 'enh-1',
+        bodyId: 'body-1',
+        bodyRevision: 1,
+        exposureState: 'popup_current_body_shown',
+        actionAvailabilityState: 'actions_available',
+        now: 101,
+      });
+      recordPromptEnhancementExposure(store, {
+        exposureEventId: 'exposure-1',
+        projectRoot: '/repo/a',
+        enhancementId: 'enh-1',
+        bodyId: 'body-1',
+        bodyRevision: 1,
+        exposureState: 'popup_current_body_shown',
+        actionAvailabilityState: 'actions_available',
+        now: 102,
+      });
+      recordPromptEnhancementAction(store, {
+        actionEventId: 'action-1',
+        projectRoot: '/repo/a',
+        enhancementId: 'enh-1',
+        bodyId: 'body-1',
+        bodyRevision: 1,
+        actionCategory: 'use_original',
+        now: 103,
+      });
+
+      expect(getPromptEnhancementStoreStatus(store, '/repo/a')).toMatchObject({
+        generatedOriginRows: 1,
+        feedbackRows: 2,
+      });
+      expect(store.db.exec('SELECT COUNT(*) FROM feedback_signals')[0]?.values[0]?.[0]).toBe(0);
+      expect(store.db.exec('SELECT SUM(raw_text_stored) FROM prompt_enhancement_feedback')[0]?.values[0]?.[0]).toBe(0);
+    } finally {
+      closeStore(store);
+    }
+  });
+
+  it('resolves generated-origin identity without text-only authority', async () => {
+    const store = await openStore(':memory:');
+    try {
+      recordPromptEnhancementPreparedBody(store, {
+        preparedBodyId: 'prepared-1',
+        projectRoot: '/repo/a',
+        enhancementId: 'enh-1',
+        bodyId: 'body-1',
+        bodyRevision: 2,
+        generatedOriginState: 'user_edited_pe_body',
+        deliveryChannel: 'cli_stop_bridge',
+        promptSubmitProcessingPolicy: 'pe_generated_delivery_skip_classification',
+        learningEligible: true,
+        sourceUseIds: ['source-use-1', 'source-use-2'],
+        reasonCodes: ['body_revision_bound'],
+        now: 100,
+      });
+
+      expect(resolvePromptEnhancementGeneratedOrigin(store, {
+        projectRoot: '/repo/a',
+        bodyId: 'body-1',
+        bodyRevision: 2,
+      })).toMatchObject({
+        generatedOriginId: 'prepared-1',
+        projectRoot: '/repo/a',
+        enhancementId: 'enh-1',
+        bodyId: 'body-1',
+        bodyRevision: 2,
+        generatedOriginState: 'user_edited_pe_body',
+        learningEligible: true,
+        sourceUseIds: ['source-use-1', 'source-use-2'],
+        reasonCodes: ['body_revision_bound'],
+      });
+      expect(resolvePromptEnhancementGeneratedOrigin(store, {
+        projectRoot: '/repo/a',
+        bodyId: 'body-1',
+        bodyRevision: 3,
+      })).toBeNull();
+    } finally {
+      closeStore(store);
+    }
+  });
+
+  it('returns public-safe feedback and source-use summaries', async () => {
+    const store = await openStore(':memory:');
+    try {
+      recordPromptEnhancementSourceUse(store, {
+        sourceUseId: 'source-use-1',
+        projectRoot: '/repo/a',
+        enhancementId: 'enh-1',
+        bodyId: 'body-1',
+        bodyRevision: 1,
+        sourceKind: 'content_template_fact',
+        sourceId: 'ct:debug',
+        useKind: 'body_section',
+        memoryEvidence: true,
+        now: 100,
+      });
+      recordPromptEnhancementSourceUse(store, {
+        sourceUseId: 'source-use-2',
+        projectRoot: '/repo/a',
+        enhancementId: 'enh-1',
+        bodyId: 'body-1',
+        bodyRevision: 1,
+        sourceKind: 'stage_or_absence_signal',
+        sourceId: 'absence:debug',
+        useKind: 'trust_cue',
+        memoryEvidence: false,
+        now: 101,
+      });
+      recordPromptEnhancementAction(store, {
+        actionEventId: 'action-accept',
+        projectRoot: '/repo/a',
+        enhancementId: 'enh-1',
+        bodyId: 'body-1',
+        bodyRevision: 1,
+        actionCategory: 'accept_send',
+        feedbackScopeKey: 'scope-a',
+        learningEligibility: 'eligible_scoped',
+        safetyImpactState: 'none',
+        memoryEvidence: true,
+        now: 102,
+      });
+
+      expect(getPromptEnhancementSourceUseSummary(store, '/repo/a', 'body-1')).toMatchObject({
+        projectRoot: '/repo/a',
+        bodyId: 'body-1',
+        totalSourceUses: 2,
+        memoryEvidenceRows: 1,
+      });
+      expect(getPromptEnhancementSourceUseSummary(store, '/repo/a', 'body-1').sourceKindCounts).toEqual([
+        { sourceKind: 'content_template_fact', count: 1 },
+        { sourceKind: 'stage_or_absence_signal', count: 1 },
+      ]);
+      expect(getPromptEnhancementFeedbackSummary(store, '/repo/a', 'scope-a')).toMatchObject({
+        projectRoot: '/repo/a',
+        feedbackScopeKey: 'scope-a',
+        totalEvents: 1,
+        memoryEvidenceEvents: 1,
+        rawTextStoredEvents: 0,
+      });
+      expect(getPromptEnhancementFeedbackSummary(store, '/repo/a', 'scope-a').categoryCounts).toEqual([
+        { feedbackCategory: 'accept_send', count: 1 },
+      ]);
     } finally {
       closeStore(store);
     }
