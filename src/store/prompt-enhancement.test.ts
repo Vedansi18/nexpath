@@ -980,6 +980,8 @@ describe('prompt-enhancement store, memory, and feedback contract', () => {
       recordMemory(store, '/repo/a', 'newer-schema', 100);
       recordMemory(store, '/repo/a', 'corrupt-provenance', 100);
       recordMemory(store, '/repo/a', 'corrupt-state', 100);
+      recordMemory(store, '/repo/a', 'policy-disabled', 100);
+      recordMemory(store, '/repo/a', 'malformed-status', 100);
       store.db.run(
         'UPDATE prompt_enhancement_memory SET schema_version = ? WHERE project_root = ? AND signal_key = ?',
         [999, '/repo/a', 'newer-schema'],
@@ -992,14 +994,26 @@ describe('prompt-enhancement store, memory, and feedback contract', () => {
         'UPDATE prompt_enhancement_memory SET current_evidence_state = ? WHERE project_root = ? AND signal_key = ?',
         ['raw prompt text should not be trusted', '/repo/a', 'corrupt-state'],
       );
+      store.db.run(
+        'UPDATE prompt_enhancement_memory SET status = ? WHERE project_root = ? AND signal_key = ?',
+        ['disabled_by_policy', '/repo/a', 'policy-disabled'],
+      );
+      store.db.run(
+        'UPDATE prompt_enhancement_memory SET status = ? WHERE project_root = ? AND signal_key = ?',
+        ['malformed_ignored', '/repo/a', 'malformed-status'],
+      );
 
       expect(getPromptEnhancementMemory(store, '/repo/a', 'newer-schema')).toBeNull();
       expect(getPromptEnhancementMemory(store, '/repo/a', 'corrupt-provenance')).toBeNull();
       expect(getPromptEnhancementMemory(store, '/repo/a', 'corrupt-state')).toBeNull();
+      expect(getPromptEnhancementMemory(store, '/repo/a', 'policy-disabled')).toBeNull();
+      expect(getPromptEnhancementMemory(store, '/repo/a', 'malformed-status')).toBeNull();
       expect(queryRelevantPromptEnhancementMemory(store, '/repo/a', [
         'newer-schema',
         'corrupt-provenance',
         'corrupt-state',
+        'policy-disabled',
+        'malformed-status',
       ])).toEqual([]);
     } finally {
       closeStore(store);
@@ -1104,6 +1118,39 @@ describe('prompt-enhancement store, memory, and feedback contract', () => {
       expect(serialized).not.toContain('raw custom feedback');
       expect(() => getPromptEnhancementSourceUseSummary(store, '/repo/a', 'raw body id should fail')).toThrow('body_id_public_safe_token_required');
       expect(() => getPromptEnhancementFeedbackSummary(store, '/repo/a', 'raw scope should fail')).toThrow('feedback_scope_key_public_safe_token_required');
+    } finally {
+      closeStore(store);
+    }
+  });
+
+  it('enforces default PE memory row caps on writes without using prompt FIFO cleanup', async () => {
+    const store = await openStore(':memory:');
+    try {
+      store.db.run('BEGIN TRANSACTION');
+      try {
+        for (let index = 0; index < 1000; index += 1) {
+          insertMemoryRowDirectly(store, '/repo/a', `signal-${index}`, index);
+        }
+        store.db.run('COMMIT');
+      } catch (error) {
+        store.db.run('ROLLBACK');
+        throw error;
+      }
+      recordMemory(store, '/repo/a', 'signal-1000', 1000);
+      recordMemory(store, '/repo/b', 'other-project-signal', 2000);
+
+      const statusA = getPromptEnhancementStoreStatus(store, '/repo/a');
+      expect(statusA).toMatchObject({
+        memoryRows: 1000,
+        rowCapState: 'over_row_cap_pruned',
+        capState: 'over_row_cap_pruned',
+        lastCleanupOutcome: 'row_cap_enforced_without_prompt_fifo',
+      });
+      expect(statusA.reasonCodes).toContain('row_cap_enforced_without_prompt_fifo');
+      expect(getPromptEnhancementMemory(store, '/repo/a', 'signal-0')).toBeNull();
+      expect(getPromptEnhancementMemory(store, '/repo/a', 'signal-1000')).not.toBeNull();
+      expect(getPromptEnhancementMemory(store, '/repo/b', 'other-project-signal')).not.toBeNull();
+      expect(store.db.exec('SELECT COUNT(*) FROM prompts')[0]?.values[0]?.[0]).toBe(0);
     } finally {
       closeStore(store);
     }
@@ -1531,4 +1578,29 @@ function recordMemory(
     now,
     ...overrides,
   });
+}
+
+function insertMemoryRowDirectly(store: Store, projectRoot: string, signalKey: string, now: number): void {
+  store.db.run(
+    `INSERT INTO prompt_enhancement_memory
+       (project_root, signal_key, schema_version, evidence_count, positive_count, negative_count,
+        current_evidence_state, confidence_band, source_strength, protection_state, fatigue_state,
+        suppression_state, last_used_at, last_evidence_at, decay_after, status, reason_codes_json,
+        provenance_json, created_at, updated_at)
+     VALUES (?, ?, 1, 1, 1, 0, 'historical_candidate', 'low', 'weak', 'none', 'none', 'none',
+       NULL, ?, NULL, 'candidate', '[]', ?, ?, ?)`,
+    [
+      projectRoot,
+      signalKey,
+      now,
+      JSON.stringify({
+        sourceIds: [],
+        sectionIds: [],
+        memoryEvidenceOnly: true,
+        rawTextStored: false,
+      }),
+      now,
+      now,
+    ],
+  );
 }

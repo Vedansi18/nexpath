@@ -287,7 +287,10 @@ const MEMORY_PROTECTION_STATES: readonly PromptEnhancementMemoryProtectionState[
 const MEMORY_FATIGUE_STATES: readonly PromptEnhancementMemoryFatigueState[] = ['none', 'candidate', 'fatigued'];
 const MEMORY_SUPPRESSION_STATES: readonly PromptEnhancementMemorySuppressionState[] = ['none', 'candidate_scoped', 'suppressed_scoped'];
 const MEMORY_STATUSES: readonly PromptEnhancementMemoryStatus[] = ['qualified', 'candidate', 'decayed', 'disabled_by_policy', 'malformed_ignored'];
+const ACTIVE_MEMORY_STATUSES: readonly PromptEnhancementMemoryStatus[] = ['qualified', 'candidate', 'decayed'];
 const SOURCE_USE_KINDS: readonly PromptEnhancementSourceUseInput['useKind'][] = ['body_section', 'trust_cue', 'fallback_reason', 'handoff_metadata'];
+const DEFAULT_MEMORY_ACTIVE_ROWS_PER_PROJECT = 1_000;
+const DEFAULT_MEMORY_ESTIMATED_BYTES_PER_PROJECT = 10 * 1024 * 1024;
 const FEEDBACK_CATEGORIES: readonly PromptEnhancementFeedbackCategory[] = [
   'surface_exposed',
   'accept_send',
@@ -435,7 +438,10 @@ export function recordPromptEnhancementMemoryEvidence(
     now,
   });
   saveStore(store);
-  return getPromptEnhancementMemory(store, input.projectRoot, input.signalKey) as PromptEnhancementMemoryRow;
+  enforcePromptEnhancementMemoryWriteCaps(store, input.projectRoot, now);
+  const written = getPromptEnhancementMemory(store, input.projectRoot, input.signalKey);
+  if (!written) throw new Error('prompt_enhancement_memory_write_not_readable');
+  return written;
 }
 
 export function markPromptEnhancementMemoryUsed(
@@ -762,6 +768,10 @@ export function prunePromptEnhancementMemory(
   let deletedRows = 0;
   let decayedRows = 0;
   const now = input.now ?? Date.now();
+  const rowCapWasExceeded = typeof input.maxRowsPerProject === 'number' && input.maxRowsPerProject > 0
+    ? (input.projectRoot ? [input.projectRoot] : listMemoryProjects(store))
+      .some((projectRoot) => countRows(store, 'prompt_enhancement_memory', projectRoot) > (input.maxRowsPerProject as number))
+    : false;
   if (input.projectRoot) decayedRows += decayPromptEnhancementMemory(store, input.projectRoot, now);
   if (typeof input.olderThan === 'number') {
     const projectClause = input.projectRoot ? 'AND project_root = ?' : '';
@@ -795,9 +805,10 @@ export function prunePromptEnhancementMemory(
       );
       deletedRows += store.db.getRowsModified();
     }
-    reasonCodes.push('row_cap_enforced_without_prompt_fifo');
+    if (rowCapWasExceeded) reasonCodes.push('row_cap_enforced_without_prompt_fifo');
   }
   if (typeof input.maxEstimatedBytes === 'number' && input.maxEstimatedBytes >= 0) {
+    let byteCapDeletedRows = 0;
     while (estimatePromptEnhancementBytes(store, input.projectRoot) > input.maxEstimatedBytes) {
       const victim = findBytePressureVictim(store, input.projectRoot);
       if (!victim) break;
@@ -805,9 +816,11 @@ export function prunePromptEnhancementMemory(
         'DELETE FROM prompt_enhancement_memory WHERE project_root = ? AND signal_key = ?',
         [victim.projectRoot, victim.signalKey],
       );
-      deletedRows += store.db.getRowsModified();
+      const changed = store.db.getRowsModified();
+      byteCapDeletedRows += changed;
+      deletedRows += changed;
     }
-    reasonCodes.push('byte_cap_enforced_without_prompt_fifo');
+    if (byteCapDeletedRows > 0) reasonCodes.push('byte_cap_enforced_without_prompt_fifo');
   }
   if (deletedRows > 0) store.db.run('VACUUM');
   setPromptEnhancementStatus(store, {
@@ -1248,6 +1261,7 @@ function mapMemoryRow(row: (string | number | null | Uint8Array)[]): PromptEnhan
   if (!signalKey || !currentEvidenceState || !confidenceBand || !sourceStrength || !protectionState || !fatigueState || !suppressionState || !status) {
     return null;
   }
+  if (!ACTIVE_MEMORY_STATUSES.includes(status)) return null;
   const reasonCodes = parseStringArray(row[16] as string);
   const provenance = parseProvenance(row[17] as string);
   if (!provenance) return null;
@@ -1474,6 +1488,18 @@ function findBytePressureVictim(store: Store, projectRoot?: string): { projectRo
   );
   const row = res[0]?.values[0];
   return row ? { projectRoot: row[0] as string, signalKey: row[1] as string } : null;
+}
+
+function enforcePromptEnhancementMemoryWriteCaps(store: Store, projectRoot: string, now: number): void {
+  const rowCount = countRows(store, 'prompt_enhancement_memory', projectRoot);
+  const estimatedBytes = estimatePromptEnhancementBytes(store, projectRoot);
+  if (rowCount <= DEFAULT_MEMORY_ACTIVE_ROWS_PER_PROJECT && estimatedBytes <= DEFAULT_MEMORY_ESTIMATED_BYTES_PER_PROJECT) return;
+  prunePromptEnhancementMemory(store, {
+    projectRoot,
+    maxRowsPerProject: DEFAULT_MEMORY_ACTIVE_ROWS_PER_PROJECT,
+    maxEstimatedBytes: DEFAULT_MEMORY_ESTIMATED_BYTES_PER_PROJECT,
+    now,
+  });
 }
 
 function tableExists(store: Store, tableName: string): boolean {
