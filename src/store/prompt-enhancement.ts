@@ -92,6 +92,7 @@ export interface PromptEnhancementSourceUseInput {
   bodyRevision: number;
   sourceKind: string;
   sourceId: string;
+  sectionIds?: readonly string[];
   useKind: 'body_section' | 'trust_cue' | 'fallback_reason' | 'handoff_metadata';
   memoryEvidence?: boolean;
   reasonCodes?: readonly string[];
@@ -118,6 +119,9 @@ export interface PromptEnhancementGeneratedOriginInput {
   promptSubmitProcessingPolicy: string;
   learningEligible?: boolean;
   sourceUseIds?: readonly string[];
+  actionIds?: readonly string[];
+  fallbackState?: string;
+  privacyStoragePolicy?: string;
   reasonCodes?: readonly string[];
   now?: number;
 }
@@ -148,6 +152,9 @@ export interface PromptEnhancementPreparedBodyInput {
   promptSubmitProcessingPolicy: string;
   learningEligible?: boolean;
   sourceUseIds?: readonly string[];
+  actionIds?: readonly string[];
+  fallbackState?: string;
+  privacyStoragePolicy?: string;
   reasonCodes?: readonly string[];
   now?: number;
 }
@@ -224,6 +231,9 @@ export interface PromptEnhancementGeneratedOriginResolution {
   promptSubmitProcessingPolicy: string;
   learningEligible: boolean;
   sourceUseIds: readonly string[];
+  actionIds: readonly string[];
+  fallbackState: string;
+  privacyStoragePolicy: string;
   reasonCodes: readonly string[];
   createdAt: number;
 }
@@ -445,8 +455,8 @@ export function recordPromptEnhancementSourceUse(store: Store, input: PromptEnha
   store.db.run(
     `INSERT OR REPLACE INTO prompt_enhancement_source_use
        (source_use_id, project_root, enhancement_id, body_id, body_revision, source_kind, source_id,
-        use_kind, memory_evidence, schema_version, reason_codes_json, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        section_ids_json, use_kind, memory_evidence, schema_version, reason_codes_json, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       input.sourceUseId,
       input.projectRoot,
@@ -455,6 +465,7 @@ export function recordPromptEnhancementSourceUse(store: Store, input: PromptEnha
       input.bodyRevision,
       input.sourceKind,
       input.sourceId,
+      JSON.stringify(input.sectionIds ?? []),
       input.useKind,
       input.memoryEvidence === true ? 1 : 0,
       SCHEMA_VERSION,
@@ -471,6 +482,7 @@ export function recordPromptEnhancementSourceUse(store: Store, input: PromptEnha
       bodyRevision: input.bodyRevision,
       sourceKind: input.sourceKind,
       useKind: input.useKind,
+      sectionIds: input.sectionIds ?? [],
       memoryEvidence: input.memoryEvidence === true,
       at: now,
     }),
@@ -486,8 +498,8 @@ export function recordPromptEnhancementGeneratedOrigin(store: Store, input: Prom
     `INSERT OR REPLACE INTO prompt_enhancement_generated_origin
        (generated_origin_id, project_root, enhancement_id, body_id, body_revision, generated_origin_state,
         delivery_channel, prompt_submit_processing_policy, learning_eligible, source_use_ids_json,
-        schema_version, reason_codes_json, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        action_ids_json, fallback_state, privacy_storage_policy, schema_version, reason_codes_json, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       input.generatedOriginId,
       input.projectRoot,
@@ -499,6 +511,9 @@ export function recordPromptEnhancementGeneratedOrigin(store: Store, input: Prom
       input.promptSubmitProcessingPolicy,
       input.learningEligible === true ? 1 : 0,
       JSON.stringify(input.sourceUseIds ?? []),
+      JSON.stringify(input.actionIds ?? []),
+      input.fallbackState ?? 'unknown_not_applicable',
+      input.privacyStoragePolicy ?? 'raw_text_excluded_by_default',
       SCHEMA_VERSION,
       JSON.stringify(input.reasonCodes ?? []),
       now,
@@ -514,6 +529,10 @@ export function recordPromptEnhancementGeneratedOrigin(store: Store, input: Prom
       generatedOriginState: input.generatedOriginState,
       deliveryChannel: input.deliveryChannel,
       learningEligible: input.learningEligible === true,
+      sourceUseIds: input.sourceUseIds ?? [],
+      actionIds: input.actionIds ?? [],
+      fallbackState: input.fallbackState ?? 'unknown_not_applicable',
+      privacyStoragePolicy: input.privacyStoragePolicy ?? 'raw_text_excluded_by_default',
       at: now,
     }),
     now,
@@ -578,6 +597,9 @@ export function recordPromptEnhancementPreparedBody(store: Store, input: PromptE
     promptSubmitProcessingPolicy: input.promptSubmitProcessingPolicy,
     learningEligible: input.learningEligible,
     sourceUseIds: input.sourceUseIds,
+    actionIds: input.actionIds,
+    fallbackState: input.fallbackState,
+    privacyStoragePolicy: input.privacyStoragePolicy,
     reasonCodes: input.reasonCodes,
     now: input.now,
   });
@@ -589,6 +611,9 @@ export function recordPromptEnhancementPreparedBody(store: Store, input: PromptE
       bodyId: input.bodyId,
       bodyRevision: input.bodyRevision,
       generatedOriginState: input.generatedOriginState,
+      actionIds: input.actionIds ?? [],
+      fallbackState: input.fallbackState ?? 'unknown_not_applicable',
+      privacyStoragePolicy: input.privacyStoragePolicy ?? 'raw_text_excluded_by_default',
       rawTextStored: false,
       at: input.now ?? Date.now(),
     }),
@@ -957,7 +982,7 @@ export function resolvePromptEnhancementGeneratedOrigin(
   const res = store.db.exec(
     `SELECT generated_origin_id, project_root, enhancement_id, body_id, body_revision, generated_origin_state,
             delivery_channel, prompt_submit_processing_policy, learning_eligible, source_use_ids_json,
-            reason_codes_json, created_at
+            action_ids_json, fallback_state, privacy_storage_policy, reason_codes_json, created_at
        FROM prompt_enhancement_generated_origin
       WHERE project_root = ?
         AND body_id = ?
@@ -980,8 +1005,11 @@ export function resolvePromptEnhancementGeneratedOrigin(
     promptSubmitProcessingPolicy: row[7] as string,
     learningEligible: row[8] === 1,
     sourceUseIds: parseStringArray(row[9] as string),
-    reasonCodes: parseStringArray(row[10] as string),
-    createdAt: row[11] as number,
+    actionIds: parseStringArray(row[10] as string),
+    fallbackState: row[11] as string,
+    privacyStoragePolicy: row[12] as string,
+    reasonCodes: parseStringArray(row[13] as string),
+    createdAt: row[14] as number,
   };
 }
 

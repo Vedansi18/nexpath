@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -15,6 +15,7 @@ import {
   getPromptEnhancementSchemaVersionState,
   getPromptEnhancementSourceUseSummary,
   getPromptEnhancementStoreStatus,
+  getSql,
   markPromptEnhancementMemoryUsed,
   openStore,
   prunePromptEnhancementFeedbackAndSourceUse,
@@ -57,6 +58,61 @@ describe('prompt-enhancement store, memory, and feedback contract', () => {
         { tableName: 'prompt_enhancement_generated_origin', exists: true },
         { tableName: 'prompt_enhancement_feedback', exists: true },
         { tableName: 'prompt_enhancement_status', exists: true },
+      ]));
+    } finally {
+      closeStore(store);
+    }
+  });
+
+  it('migrates existing PE lifecycle tables to carry section, action, fallback, and privacy metadata', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'nexpath-pe-migration-'));
+    cleanupDirs.push(dir);
+    const dbPath = join(dir, 'prompt-store.db');
+    const SQL = await getSql();
+    const oldDb = new SQL.Database();
+    oldDb.run(`
+      CREATE TABLE prompt_enhancement_source_use (
+        source_use_id TEXT PRIMARY KEY,
+        project_root TEXT NOT NULL,
+        enhancement_id TEXT NOT NULL,
+        body_id TEXT NOT NULL,
+        body_revision INTEGER NOT NULL,
+        source_kind TEXT NOT NULL,
+        source_id TEXT NOT NULL,
+        use_kind TEXT NOT NULL,
+        memory_evidence INTEGER NOT NULL DEFAULT 0,
+        schema_version INTEGER NOT NULL,
+        reason_codes_json TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+      CREATE TABLE prompt_enhancement_generated_origin (
+        generated_origin_id TEXT PRIMARY KEY,
+        project_root TEXT NOT NULL,
+        enhancement_id TEXT NOT NULL,
+        body_id TEXT NOT NULL,
+        body_revision INTEGER NOT NULL,
+        generated_origin_state TEXT NOT NULL,
+        delivery_channel TEXT NOT NULL,
+        prompt_submit_processing_policy TEXT NOT NULL,
+        learning_eligible INTEGER NOT NULL DEFAULT 0,
+        source_use_ids_json TEXT NOT NULL,
+        schema_version INTEGER NOT NULL,
+        reason_codes_json TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+    `);
+    writeFileSync(dbPath, oldDb.export());
+    oldDb.close();
+
+    const store = await openStore(dbPath);
+    try {
+      const sourceUseColumns = store.db.exec('PRAGMA table_info(prompt_enhancement_source_use)')[0]?.values.map((row) => row[1]);
+      const originColumns = store.db.exec('PRAGMA table_info(prompt_enhancement_generated_origin)')[0]?.values.map((row) => row[1]);
+      expect(sourceUseColumns).toContain('section_ids_json');
+      expect(originColumns).toEqual(expect.arrayContaining([
+        'action_ids_json',
+        'fallback_state',
+        'privacy_storage_policy',
       ]));
     } finally {
       closeStore(store);
@@ -141,6 +197,7 @@ describe('prompt-enhancement store, memory, and feedback contract', () => {
         bodyRevision: 1,
         sourceKind: 'content_template_fact',
         sourceId: 'ct:debug',
+        sectionIds: ['section:context', 'section:verification'],
         useKind: 'body_section',
         memoryEvidence: false,
         reasonCodes: ['source_use_only'],
@@ -156,6 +213,9 @@ describe('prompt-enhancement store, memory, and feedback contract', () => {
         deliveryChannel: 'cli_stop_bridge',
         promptSubmitProcessingPolicy: 'pe_generated_delivery_skip_classification',
         sourceUseIds: ['source-use-1'],
+        actionIds: ['use_current', 'use_original'],
+        fallbackState: 'not_fallback',
+        privacyStoragePolicy: 'raw_text_excluded_by_default',
         reasonCodes: ['origin_guard_required'],
         now: 101,
       });
@@ -170,6 +230,20 @@ describe('prompt-enhancement store, memory, and feedback contract', () => {
         feedbackRows: 0,
         rawContentStoredByDefault: false,
         oldStoreSurfacesAreAuthority: false,
+      });
+      expect(store.db.exec(
+        'SELECT section_ids_json FROM prompt_enhancement_source_use WHERE source_use_id = ?',
+        ['source-use-1'],
+      )[0]?.values[0]?.[0]).toBe('["section:context","section:verification"]');
+      expect(resolvePromptEnhancementGeneratedOrigin(store, {
+        projectRoot: '/repo/a',
+        bodyId: 'body-1',
+        bodyRevision: 1,
+      })).toMatchObject({
+        sourceUseIds: ['source-use-1'],
+        actionIds: ['use_current', 'use_original'],
+        fallbackState: 'not_fallback',
+        privacyStoragePolicy: 'raw_text_excluded_by_default',
       });
     } finally {
       closeStore(store);
@@ -235,6 +309,9 @@ describe('prompt-enhancement store, memory, and feedback contract', () => {
         promptSubmitProcessingPolicy: 'pe_generated_delivery_skip_classification',
         learningEligible: false,
         sourceUseIds: ['source-use-1'],
+        actionIds: ['use_current', 'use_original', 'close'],
+        fallbackState: 'fallback_available_not_used',
+        privacyStoragePolicy: 'raw_text_excluded_by_default',
         reasonCodes: ['prepared_before_popup'],
         now: 100,
       });
@@ -274,6 +351,15 @@ describe('prompt-enhancement store, memory, and feedback contract', () => {
       });
       expect(store.db.exec('SELECT COUNT(*) FROM feedback_signals')[0]?.values[0]?.[0]).toBe(0);
       expect(store.db.exec('SELECT SUM(raw_text_stored) FROM prompt_enhancement_feedback')[0]?.values[0]?.[0]).toBe(0);
+      expect(resolvePromptEnhancementGeneratedOrigin(store, {
+        projectRoot: '/repo/a',
+        bodyId: 'body-1',
+        bodyRevision: 1,
+      })).toMatchObject({
+        actionIds: ['use_current', 'use_original', 'close'],
+        fallbackState: 'fallback_available_not_used',
+        privacyStoragePolicy: 'raw_text_excluded_by_default',
+      });
     } finally {
       closeStore(store);
     }
@@ -293,6 +379,9 @@ describe('prompt-enhancement store, memory, and feedback contract', () => {
         promptSubmitProcessingPolicy: 'pe_generated_delivery_skip_classification',
         learningEligible: true,
         sourceUseIds: ['source-use-1', 'source-use-2'],
+        actionIds: ['send_current'],
+        fallbackState: 'not_fallback',
+        privacyStoragePolicy: 'raw_text_excluded_by_default',
         reasonCodes: ['body_revision_bound'],
         now: 100,
       });
@@ -310,6 +399,9 @@ describe('prompt-enhancement store, memory, and feedback contract', () => {
         generatedOriginState: 'user_edited_pe_body',
         learningEligible: true,
         sourceUseIds: ['source-use-1', 'source-use-2'],
+        actionIds: ['send_current'],
+        fallbackState: 'not_fallback',
+        privacyStoragePolicy: 'raw_text_excluded_by_default',
         reasonCodes: ['body_revision_bound'],
       });
       expect(resolvePromptEnhancementGeneratedOrigin(store, {

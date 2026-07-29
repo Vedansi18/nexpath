@@ -156,6 +156,7 @@ CREATE TABLE IF NOT EXISTS prompt_enhancement_source_use (
   body_revision        INTEGER NOT NULL,
   source_kind          TEXT    NOT NULL,
   source_id            TEXT    NOT NULL,
+  section_ids_json     TEXT    NOT NULL,
   use_kind             TEXT    NOT NULL,
   memory_evidence      INTEGER NOT NULL DEFAULT 0,
   schema_version       INTEGER NOT NULL,
@@ -177,6 +178,9 @@ CREATE TABLE IF NOT EXISTS prompt_enhancement_generated_origin (
   prompt_submit_processing_policy TEXT NOT NULL,
   learning_eligible            INTEGER NOT NULL DEFAULT 0,
   source_use_ids_json          TEXT    NOT NULL,
+  action_ids_json              TEXT    NOT NULL,
+  fallback_state               TEXT    NOT NULL,
+  privacy_storage_policy       TEXT    NOT NULL,
   schema_version               INTEGER NOT NULL,
   reason_codes_json            TEXT    NOT NULL,
   created_at                   INTEGER NOT NULL
@@ -252,6 +256,12 @@ export function applyIncrementalMigrations(db: Database): void {
   addIfMissing('projects', 'env_facts',             'TEXT');
   addIfMissing('projects', 'env_facts_detected_at', 'INTEGER');
   addIfMissing('projects', 'env_trajectory',        'TEXT');
+
+  // sub-11 prompt enhancement store contract
+  addIfMissing('prompt_enhancement_source_use', 'section_ids_json', "TEXT NOT NULL DEFAULT '[]'");
+  addIfMissing('prompt_enhancement_generated_origin', 'action_ids_json', "TEXT NOT NULL DEFAULT '[]'");
+  addIfMissing('prompt_enhancement_generated_origin', 'fallback_state', "TEXT NOT NULL DEFAULT 'unknown_not_applicable'");
+  addIfMissing('prompt_enhancement_generated_origin', 'privacy_storage_policy', "TEXT NOT NULL DEFAULT 'raw_text_excluded_by_default'");
 }
 
 /**
@@ -287,4 +297,10 @@ export function runMigrations(db: Database): void {
   addIfMissing('projects', 'env_facts',             'TEXT');
   addIfMissing('projects', 'env_facts_detected_at', 'INTEGER');
   addIfMissing('projects', 'env_trajectory',        'TEXT');
+
+  // sub-11 prompt enhancement store contract
+  addIfMissing('prompt_enhancement_source_use', 'section_ids_json', "TEXT NOT NULL DEFAULT '[]'");
+  addIfMissing('prompt_enhancement_generated_origin', 'action_ids_json', "TEXT NOT NULL DEFAULT '[]'");
+  addIfMissing('prompt_enhancement_generated_origin', 'fallback_state', "TEXT NOT NULL DEFAULT 'unknown_not_applicable'");
+  addIfMissing('prompt_enhancement_generated_origin', 'privacy_storage_policy', "TEXT NOT NULL DEFAULT 'raw_text_excluded_by_default'");
 }
