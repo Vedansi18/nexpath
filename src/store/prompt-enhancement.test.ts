@@ -206,6 +206,111 @@ describe('prompt-enhancement store, memory, and feedback contract', () => {
     }
   });
 
+  it('supports stable PE feedback categories without raw custom feedback storage', async () => {
+    const store = await openStore(':memory:');
+    try {
+      recordPromptEnhancementMemoryFeedback(store, {
+        feedbackEventId: 'feedback-grounding',
+        projectRoot: '/repo/a',
+        enhancementId: 'enh-1',
+        bodyId: 'body-1',
+        bodyRevision: 1,
+        feedbackCategory: 'not_project_grounded',
+        feedbackScopeKey: 'grounding_scope',
+        learningEligibility: 'eligible_scoped',
+        safetyImpactState: 'none',
+        memoryEvidence: true,
+        now: 100,
+      });
+      recordPromptEnhancementMemoryFeedback(store, {
+        feedbackEventId: 'feedback-tone',
+        projectRoot: '/repo/a',
+        enhancementId: 'enh-1',
+        bodyId: 'body-1',
+        bodyRevision: 1,
+        feedbackCategory: 'wrong_tone',
+        feedbackScopeKey: 'tone_scope',
+        learningEligibility: 'eligible_scoped',
+        safetyImpactState: 'none',
+        memoryEvidence: true,
+        now: 101,
+      });
+      recordPromptEnhancementMemoryFeedback(store, {
+        feedbackEventId: 'feedback-accept',
+        projectRoot: '/repo/a',
+        enhancementId: 'enh-1',
+        bodyId: 'body-1',
+        bodyRevision: 1,
+        feedbackCategory: 'accept_send',
+        feedbackScopeKey: 'positive_scope',
+        learningEligibility: 'eligible_scoped',
+        safetyImpactState: 'none',
+        memoryEvidence: true,
+        now: 102,
+      });
+
+      expect(getPromptEnhancementMemory(store, '/repo/a', 'grounding_scope')?.negativeCount).toBe(1);
+      expect(getPromptEnhancementMemory(store, '/repo/a', 'tone_scope')?.negativeCount).toBe(1);
+      expect(getPromptEnhancementMemory(store, '/repo/a', 'positive_scope')?.positiveCount).toBe(1);
+      expect(store.db.exec('SELECT SUM(raw_text_stored) FROM prompt_enhancement_feedback')[0]?.values[0]?.[0]).toBe(0);
+    } finally {
+      closeStore(store);
+    }
+  });
+
+  it('rejects invalid typed identities before mutating PE rows', async () => {
+    const store = await openStore(':memory:');
+    try {
+      expect(() => recordPromptEnhancementMemoryEvidence(store, {
+        projectRoot: ' ',
+        signalKey: 'signal-a',
+        evidenceKind: 'positive',
+        currentEvidenceState: 'historical_candidate',
+        confidenceBand: 'low',
+        sourceStrength: 'weak',
+      })).toThrow('project_root_required');
+      expect(() => recordPromptEnhancementSourceUse(store, {
+        sourceUseId: '',
+        projectRoot: '/repo/a',
+        enhancementId: 'enh-1',
+        bodyId: 'body-1',
+        bodyRevision: 1,
+        sourceKind: 'content_template_fact',
+        sourceId: 'ct:debug',
+        useKind: 'body_section',
+      })).toThrow('source_use_id_required');
+      expect(() => recordPromptEnhancementGeneratedOrigin(store, {
+        generatedOriginId: 'origin-1',
+        projectRoot: '/repo/a',
+        enhancementId: '',
+        bodyId: 'body-1',
+        bodyRevision: 1,
+        generatedOriginState: 'pe_generated_body',
+        deliveryChannel: 'cli_stop_bridge',
+        promptSubmitProcessingPolicy: 'pe_generated_delivery_skip_classification',
+      })).toThrow('enhancement_id_required');
+      expect(() => recordPromptEnhancementFeedbackEvent(store, {
+        feedbackEventId: 'feedback-1',
+        projectRoot: '/repo/a',
+        enhancementId: 'enh-1',
+        bodyId: ' ',
+        bodyRevision: 1,
+        feedbackCategory: 'custom_typed',
+        feedbackScopeKey: 'scope-a',
+        learningEligibility: 'pending_policy',
+        safetyImpactState: 'unknown',
+      })).toThrow('body_id_required');
+
+      expect(getPromptEnhancementStoreStatus(store).memoryRows).toBe(0);
+      expect(getPromptEnhancementStoreStatus(store).sourceUseRows).toBe(0);
+      expect(getPromptEnhancementStoreStatus(store).generatedOriginRows).toBe(0);
+      expect(getPromptEnhancementStoreStatus(store).feedbackRows).toBe(0);
+      expect(getPromptEnhancementStoreStatus(store).statusRows).toBe(0);
+    } finally {
+      closeStore(store);
+    }
+  });
+
   it('prunes low-value stale rows while preserving protected current or safety rows', async () => {
     const store = await openStore(':memory:');
     try {
@@ -231,6 +336,55 @@ describe('prompt-enhancement store, memory, and feedback contract', () => {
       expect(getPromptEnhancementMemory(store, '/repo/a', 'protected-safety')).not.toBeNull();
       expect(getPromptEnhancementMemory(store, '/repo/a', 'recent-low')).not.toBeNull();
       expect(getPromptEnhancementStoreStatus(store, '/repo/a').statusRows).toBeGreaterThan(0);
+    } finally {
+      closeStore(store);
+    }
+  });
+
+  it('uses neutral no-memory fallback for newer or corrupt aggregate rows', async () => {
+    const store = await openStore(':memory:');
+    try {
+      recordMemory(store, '/repo/a', 'newer-schema', 100);
+      recordMemory(store, '/repo/a', 'corrupt-provenance', 100);
+      store.db.run(
+        'UPDATE prompt_enhancement_memory SET schema_version = ? WHERE project_root = ? AND signal_key = ?',
+        [999, '/repo/a', 'newer-schema'],
+      );
+      store.db.run(
+        'UPDATE prompt_enhancement_memory SET provenance_json = ? WHERE project_root = ? AND signal_key = ?',
+        ['{"memoryEvidenceOnly":false,"rawTextStored":true}', '/repo/a', 'corrupt-provenance'],
+      );
+
+      expect(getPromptEnhancementMemory(store, '/repo/a', 'newer-schema')).toBeNull();
+      expect(getPromptEnhancementMemory(store, '/repo/a', 'corrupt-provenance')).toBeNull();
+      expect(queryRelevantPromptEnhancementMemory(store, '/repo/a', ['newer-schema', 'corrupt-provenance'])).toEqual([]);
+    } finally {
+      closeStore(store);
+    }
+  });
+
+  it('enforces PE byte pressure independently of prompt FIFO cleanup', async () => {
+    const store = await openStore(':memory:');
+    try {
+      recordMemory(store, '/repo/a', 'old-low-a', 100, { sourceIds: ['source-a'.repeat(30)] });
+      recordMemory(store, '/repo/a', 'old-low-b', 101, { sourceIds: ['source-b'.repeat(30)] });
+      recordMemory(store, '/repo/a', 'protected', 50, {
+        protectionState: 'mandatory_protected',
+        sourceIds: ['protected'.repeat(30)],
+      });
+
+      const result = prunePromptEnhancementMemory(store, {
+        projectRoot: '/repo/a',
+        maxEstimatedBytes: 1,
+        now: 300,
+      });
+
+      expect(result.reasonCodes).toContain('byte_cap_enforced_without_prompt_fifo');
+      expect(result.deletedRows).toBe(2);
+      expect(getPromptEnhancementMemory(store, '/repo/a', 'old-low-a')).toBeNull();
+      expect(getPromptEnhancementMemory(store, '/repo/a', 'old-low-b')).toBeNull();
+      expect(getPromptEnhancementMemory(store, '/repo/a', 'protected')).not.toBeNull();
+      expect(store.db.exec('SELECT COUNT(*) FROM prompts')[0]?.values[0]?.[0]).toBe(0);
     } finally {
       closeStore(store);
     }

@@ -94,7 +94,26 @@ export interface PromptEnhancementFeedbackInput {
   enhancementId: string;
   bodyId: string;
   bodyRevision: number;
-  feedbackCategory: 'not_relevant_enough' | 'too_much_or_too_long' | 'custom_typed' | 'section_removed_by_edit' | 'action_result_rejected';
+  feedbackCategory:
+    | 'accept_send'
+    | 'edit'
+    | 'skip_cancel'
+    | 'reject'
+    | 'remove'
+    | 'not_needed'
+    | 'directional_action'
+    | 'fallback'
+    | 'multi_prompt_disposition'
+    | 'not_relevant_enough'
+    | 'too_much_or_too_long'
+    | 'too_long'
+    | 'too_shallow'
+    | 'not_project_grounded'
+    | 'wrong_tone'
+    | 'custom_typed'
+    | 'section_removed_by_edit'
+    | 'user_deleted_generated_section'
+    | 'action_result_rejected';
   feedbackScopeKey: string;
   learningEligibility: 'eligible_scoped' | 'not_eligible' | 'pending_policy';
   safetyImpactState: 'none' | 'safety_floor_touched' | 'source_floor_touched' | 'unknown';
@@ -281,8 +300,10 @@ export function recordPromptEnhancementMemoryFeedback(
   recordPromptEnhancementMemoryEvidence(store, {
     projectRoot: input.projectRoot,
     signalKey: input.feedbackScopeKey,
-    evidenceKind: input.feedbackCategory === 'not_relevant_enough' || input.feedbackCategory === 'too_much_or_too_long'
+    evidenceKind: isNegativeFeedbackCategory(input.feedbackCategory)
       ? 'negative'
+      : input.feedbackCategory === 'accept_send'
+        ? 'positive'
       : 'neutral',
     currentEvidenceState: 'feedback_derived',
     confidenceBand: 'low',
@@ -294,6 +315,7 @@ export function recordPromptEnhancementMemoryFeedback(
 }
 
 export function recordPromptEnhancementSourceUse(store: Store, input: PromptEnhancementSourceUseInput): void {
+  assertSourceUseInput(input);
   const now = input.now ?? Date.now();
   store.db.run(
     `INSERT OR REPLACE INTO prompt_enhancement_source_use
@@ -333,6 +355,7 @@ export function recordPromptEnhancementSourceUse(store: Store, input: PromptEnha
 }
 
 export function recordPromptEnhancementGeneratedOrigin(store: Store, input: PromptEnhancementGeneratedOriginInput): void {
+  assertGeneratedOriginInput(input);
   const now = input.now ?? Date.now();
   store.db.run(
     `INSERT OR REPLACE INTO prompt_enhancement_generated_origin
@@ -374,6 +397,7 @@ export function recordPromptEnhancementGeneratedOrigin(store: Store, input: Prom
 }
 
 export function recordPromptEnhancementFeedbackEvent(store: Store, input: PromptEnhancementFeedbackInput): void {
+  assertFeedbackInput(input);
   const now = input.now ?? Date.now();
   store.db.run(
     `INSERT OR IGNORE INTO prompt_enhancement_feedback
@@ -417,6 +441,7 @@ export function recordPromptEnhancementFeedbackEvent(store: Store, input: Prompt
 }
 
 export function decayPromptEnhancementMemory(store: Store, projectRoot: string, now: number = Date.now()): number {
+  assertNonEmpty('project_root_required', projectRoot);
   store.db.run(
     `UPDATE prompt_enhancement_memory
         SET status = 'decayed',
@@ -442,7 +467,7 @@ export function decayPromptEnhancementMemory(store: Store, projectRoot: string, 
 
 export function prunePromptEnhancementMemory(
   store: Store,
-  input: { projectRoot?: string; olderThan?: number; maxRowsPerProject?: number; now?: number },
+  input: { projectRoot?: string; olderThan?: number; maxRowsPerProject?: number; maxEstimatedBytes?: number; now?: number },
 ): { deletedRows: number; decayedRows: number; reasonCodes: readonly string[] } {
   const reasonCodes: string[] = [];
   let deletedRows = 0;
@@ -483,6 +508,18 @@ export function prunePromptEnhancementMemory(
     }
     reasonCodes.push('row_cap_enforced_without_prompt_fifo');
   }
+  if (typeof input.maxEstimatedBytes === 'number' && input.maxEstimatedBytes >= 0) {
+    while (estimatePromptEnhancementBytes(store, input.projectRoot) > input.maxEstimatedBytes) {
+      const victim = findBytePressureVictim(store, input.projectRoot);
+      if (!victim) break;
+      store.db.run(
+        'DELETE FROM prompt_enhancement_memory WHERE project_root = ? AND signal_key = ?',
+        [victim.projectRoot, victim.signalKey],
+      );
+      deletedRows += store.db.getRowsModified();
+    }
+    reasonCodes.push('byte_cap_enforced_without_prompt_fifo');
+  }
   if (deletedRows > 0) store.db.run('VACUUM');
   setPromptEnhancementStatus(store, {
     projectRoot: input.projectRoot ?? '__all_projects__',
@@ -502,6 +539,7 @@ export function prunePromptEnhancementMemory(
 }
 
 export function deletePromptEnhancementMemoryForProject(store: Store, projectRoot: string): number {
+  assertNonEmpty('project_root_required', projectRoot);
   return deletePromptEnhancementProjectRows(store, projectRoot);
 }
 
@@ -517,6 +555,7 @@ export function deleteAllPromptEnhancementMemory(store: Store): number {
 }
 
 export function deletePromptEnhancementProjectRows(store: Store, projectRoot: string): number {
+  assertNonEmpty('project_root_required', projectRoot);
   const tables = peTables();
   let deletedRows = 0;
   for (const table of tables) {
@@ -546,6 +585,7 @@ export function setPromptEnhancementStatus(store: Store, input: PromptEnhancemen
 }
 
 export function deletePromptEnhancementStatusForProject(store: Store, projectRoot: string): number {
+  assertNonEmpty('project_root_required', projectRoot);
   store.db.run('DELETE FROM prompt_enhancement_status WHERE project_root = ?', [projectRoot]);
   const deletedRows = store.db.getRowsModified();
   saveStore(store);
@@ -567,6 +607,7 @@ export function deleteAllPromptEnhancementFeedback(store: Store): number {
 }
 
 export function deletePromptEnhancementFeedbackForProject(store: Store, projectRoot: string): number {
+  assertNonEmpty('project_root_required', projectRoot);
   store.db.run('DELETE FROM prompt_enhancement_feedback WHERE project_root = ?', [projectRoot]);
   const deletedRows = store.db.getRowsModified();
   saveStore(store);
@@ -581,6 +622,7 @@ export function deleteAllPromptEnhancementSourceUse(store: Store): number {
 }
 
 export function deletePromptEnhancementSourceUseForProject(store: Store, projectRoot: string): number {
+  assertNonEmpty('project_root_required', projectRoot);
   store.db.run('DELETE FROM prompt_enhancement_source_use WHERE project_root = ?', [projectRoot]);
   const deletedRows = store.db.getRowsModified();
   saveStore(store);
@@ -723,6 +765,23 @@ function listMemoryProjects(store: Store): string[] {
   return (res[0]?.values ?? []).map((row) => row[0] as string);
 }
 
+function findBytePressureVictim(store: Store, projectRoot?: string): { projectRoot: string; signalKey: string } | null {
+  const projectClause = projectRoot ? 'AND project_root = ?' : '';
+  const params = projectRoot ? [projectRoot] : [];
+  const res = store.db.exec(
+    `SELECT project_root, signal_key
+       FROM prompt_enhancement_memory
+      WHERE protection_state = 'none'
+        AND status IN ('candidate', 'decayed', 'malformed_ignored', 'disabled_by_policy')
+        ${projectClause}
+      ORDER BY updated_at ASC, signal_key ASC
+      LIMIT 1`,
+    params,
+  );
+  const row = res[0]?.values[0];
+  return row ? { projectRoot: row[0] as string, signalKey: row[1] as string } : null;
+}
+
 function tableExists(store: Store, tableName: string): boolean {
   const res = store.db.exec(
     "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
@@ -742,8 +801,56 @@ function peTables(): readonly string[] {
 }
 
 function assertProjectSignal(projectRoot: string, signalKey: string): void {
-  if (projectRoot.trim().length === 0) throw new Error('project_root_required');
-  if (signalKey.trim().length === 0) throw new Error('signal_key_required');
+  assertNonEmpty('project_root_required', projectRoot);
+  assertNonEmpty('signal_key_required', signalKey);
+}
+
+function assertSourceUseInput(input: PromptEnhancementSourceUseInput): void {
+  assertNonEmpty('source_use_id_required', input.sourceUseId);
+  assertNonEmpty('project_root_required', input.projectRoot);
+  assertNonEmpty('enhancement_id_required', input.enhancementId);
+  assertNonEmpty('body_id_required', input.bodyId);
+  assertNonEmpty('source_kind_required', input.sourceKind);
+  assertNonEmpty('source_id_required', input.sourceId);
+}
+
+function assertGeneratedOriginInput(input: PromptEnhancementGeneratedOriginInput): void {
+  assertNonEmpty('generated_origin_id_required', input.generatedOriginId);
+  assertNonEmpty('project_root_required', input.projectRoot);
+  assertNonEmpty('enhancement_id_required', input.enhancementId);
+  assertNonEmpty('body_id_required', input.bodyId);
+  assertNonEmpty('generated_origin_state_required', input.generatedOriginState);
+  assertNonEmpty('delivery_channel_required', input.deliveryChannel);
+  assertNonEmpty('prompt_submit_processing_policy_required', input.promptSubmitProcessingPolicy);
+}
+
+function assertFeedbackInput(input: PromptEnhancementFeedbackInput): void {
+  assertNonEmpty('feedback_event_id_required', input.feedbackEventId);
+  assertNonEmpty('project_root_required', input.projectRoot);
+  assertNonEmpty('enhancement_id_required', input.enhancementId);
+  assertNonEmpty('body_id_required', input.bodyId);
+  assertNonEmpty('feedback_scope_key_required', input.feedbackScopeKey);
+}
+
+function assertNonEmpty(errorCode: string, value: string): void {
+  if (value.trim().length === 0) throw new Error(errorCode);
+}
+
+function isNegativeFeedbackCategory(category: PromptEnhancementFeedbackInput['feedbackCategory']): boolean {
+  return [
+    'not_relevant_enough',
+    'too_much_or_too_long',
+    'too_long',
+    'too_shallow',
+    'not_project_grounded',
+    'wrong_tone',
+    'section_removed_by_edit',
+    'user_deleted_generated_section',
+    'action_result_rejected',
+    'reject',
+    'remove',
+    'not_needed',
+  ].includes(category);
 }
 
 function unionStrings(left: readonly string[], right: readonly string[]): readonly string[] {
