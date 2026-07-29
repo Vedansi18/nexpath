@@ -686,6 +686,14 @@ describe('prompt-enhancement store, memory, and feedback contract', () => {
         sourceId: 'ct:debug',
         useKind: 'body_section',
       })).toThrow('source_use_id_public_safe_token_required');
+      expect(() => recordPromptEnhancementMemoryEvidence(store, {
+        projectRoot: '/repo/a',
+        signalKey: ' signal-a ',
+        evidenceKind: 'positive',
+        currentEvidenceState: 'historical_candidate',
+        confidenceBand: 'low',
+        sourceStrength: 'weak',
+      })).toThrow('signal_key_public_safe_token_required');
       expect(() => recordPromptEnhancementGeneratedOrigin(store, {
         generatedOriginId: 'origin-1',
         projectRoot: '/repo/a',
@@ -738,6 +746,16 @@ describe('prompt-enhancement store, memory, and feedback contract', () => {
         promptSubmitProcessingPolicy: 'pe_generated_delivery_skip_classification',
         sourceUseIds: ['source-use-1', 'raw source use should not persist'],
       })).toThrow('source_use_id_public_safe_token_required');
+      expect(() => recordPromptEnhancementGeneratedOrigin(store, {
+        generatedOriginId: ' origin-raw ',
+        projectRoot: '/repo/a',
+        enhancementId: 'enh-1',
+        bodyId: 'body-1',
+        bodyRevision: 1,
+        generatedOriginState: 'pe_generated_body',
+        deliveryChannel: 'cli_stop_bridge',
+        promptSubmitProcessingPolicy: 'pe_generated_delivery_skip_classification',
+      })).toThrow('generated_origin_id_public_safe_token_required');
       expect(() => recordPromptEnhancementGeneratedOrigin(store, {
         generatedOriginId: 'origin-raw',
         projectRoot: '/repo/a',
@@ -1150,6 +1168,40 @@ describe('prompt-enhancement store, memory, and feedback contract', () => {
       expect(getPromptEnhancementMemory(store, '/repo/a', 'signal-0')).toBeNull();
       expect(getPromptEnhancementMemory(store, '/repo/a', 'signal-1000')).not.toBeNull();
       expect(getPromptEnhancementMemory(store, '/repo/b', 'other-project-signal')).not.toBeNull();
+      expect(store.db.exec('SELECT COUNT(*) FROM prompts')[0]?.values[0]?.[0]).toBe(0);
+    } finally {
+      closeStore(store);
+    }
+  });
+
+  it('enforces default global PE memory row caps on writes without using prompt FIFO cleanup', async () => {
+    const store = await openStore(':memory:');
+    try {
+      store.db.run('BEGIN TRANSACTION');
+      try {
+        for (let index = 0; index < 1000; index += 1) {
+          insertMemoryRowDirectly(store, '/repo/a', `signal-a-${index}`, index);
+          insertMemoryRowDirectly(store, '/repo/b', `signal-b-${index}`, index + 1000);
+          insertMemoryRowDirectly(store, '/repo/c', `signal-c-${index}`, index + 2000);
+        }
+        store.db.run('COMMIT');
+      } catch (error) {
+        store.db.run('ROLLBACK');
+        throw error;
+      }
+
+      recordMemory(store, '/repo/d', 'signal-d-3000', 3000);
+
+      const status = getPromptEnhancementStoreStatus(store);
+      expect(status).toMatchObject({
+        globalMemoryRows: 3000,
+        rowCapState: 'over_row_cap_pruned',
+        capState: 'over_row_cap_pruned',
+        lastCleanupOutcome: 'row_cap_enforced_without_prompt_fifo',
+      });
+      expect(status.reasonCodes).toContain('row_cap_enforced_without_prompt_fifo');
+      expect(getPromptEnhancementMemory(store, '/repo/a', 'signal-a-0')).toBeNull();
+      expect(getPromptEnhancementMemory(store, '/repo/d', 'signal-d-3000')).not.toBeNull();
       expect(store.db.exec('SELECT COUNT(*) FROM prompts')[0]?.values[0]?.[0]).toBe(0);
     } finally {
       closeStore(store);

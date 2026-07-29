@@ -291,6 +291,8 @@ const ACTIVE_MEMORY_STATUSES: readonly PromptEnhancementMemoryStatus[] = ['quali
 const SOURCE_USE_KINDS: readonly PromptEnhancementSourceUseInput['useKind'][] = ['body_section', 'trust_cue', 'fallback_reason', 'handoff_metadata'];
 const DEFAULT_MEMORY_ACTIVE_ROWS_PER_PROJECT = 1_000;
 const DEFAULT_MEMORY_ESTIMATED_BYTES_PER_PROJECT = 10 * 1024 * 1024;
+const DEFAULT_MEMORY_ACTIVE_ROWS_GLOBAL = 3_000;
+const DEFAULT_MEMORY_ESTIMATED_BYTES_GLOBAL = 10 * 1024 * 1024;
 const FEEDBACK_CATEGORIES: readonly PromptEnhancementFeedbackCategory[] = [
   'surface_exposed',
   'accept_send',
@@ -762,7 +764,7 @@ export function decayPromptEnhancementMemory(store: Store, projectRoot: string, 
 
 export function prunePromptEnhancementMemory(
   store: Store,
-  input: { projectRoot?: string; olderThan?: number; maxRowsPerProject?: number; maxEstimatedBytes?: number; now?: number },
+  input: { projectRoot?: string; olderThan?: number; maxRowsPerProject?: number; maxRowsGlobal?: number; maxEstimatedBytes?: number; now?: number },
 ): PromptEnhancementPruneResult {
   const reasonCodes: string[] = [];
   let deletedRows = 0;
@@ -772,6 +774,11 @@ export function prunePromptEnhancementMemory(
     ? (input.projectRoot ? [input.projectRoot] : listMemoryProjects(store))
       .some((projectRoot) => countRows(store, 'prompt_enhancement_memory', projectRoot) > (input.maxRowsPerProject as number))
     : false;
+  const maxRowsGlobal = !input.projectRoot && typeof input.maxRowsGlobal === 'number' && input.maxRowsGlobal > 0
+    ? input.maxRowsGlobal
+    : null;
+  const globalRowCapWasExceeded = maxRowsGlobal !== null
+    && countRows(store, 'prompt_enhancement_memory') > maxRowsGlobal;
   if (input.projectRoot) decayedRows += decayPromptEnhancementMemory(store, input.projectRoot, now);
   if (typeof input.olderThan === 'number') {
     const projectClause = input.projectRoot ? 'AND project_root = ?' : '';
@@ -807,6 +814,20 @@ export function prunePromptEnhancementMemory(
     }
     if (rowCapWasExceeded) reasonCodes.push('row_cap_enforced_without_prompt_fifo');
   }
+  if (globalRowCapWasExceeded) {
+    store.db.run(
+      `DELETE FROM prompt_enhancement_memory
+        WHERE rowid IN (
+          SELECT rowid FROM prompt_enhancement_memory
+           WHERE protection_state = 'none'
+           ORDER BY updated_at ASC, project_root ASC, signal_key ASC
+           LIMIT MAX(0, (SELECT COUNT(*) FROM prompt_enhancement_memory) - ?)
+        )`,
+      [maxRowsGlobal],
+    );
+    deletedRows += store.db.getRowsModified();
+    reasonCodes.push('row_cap_enforced_without_prompt_fifo');
+  }
   if (typeof input.maxEstimatedBytes === 'number' && input.maxEstimatedBytes >= 0) {
     let byteCapDeletedRows = 0;
     while (estimatePromptEnhancementBytes(store, input.projectRoot) > input.maxEstimatedBytes) {
@@ -831,6 +852,7 @@ export function prunePromptEnhancementMemory(
       decayedRows,
       olderThan: input.olderThan,
       maxRowsPerProject: input.maxRowsPerProject,
+      maxRowsGlobal: input.maxRowsGlobal,
       reasonCodes: [...new Set(reasonCodes)],
       at: now,
     }),
@@ -876,7 +898,7 @@ export function prunePromptEnhancementFeedbackAndSourceUse(
 
 export function prunePromptEnhancementRows(
   store: Store,
-  input: { projectRoot?: string; olderThan?: number; maxRowsPerProject?: number; maxEstimatedBytes?: number; now?: number },
+  input: { projectRoot?: string; olderThan?: number; maxRowsPerProject?: number; maxRowsGlobal?: number; maxEstimatedBytes?: number; now?: number },
 ): PromptEnhancementPruneResult {
   const memory = prunePromptEnhancementMemory(store, input);
   const lifecycle = prunePromptEnhancementFeedbackAndSourceUse(store, input);
@@ -1491,15 +1513,25 @@ function findBytePressureVictim(store: Store, projectRoot?: string): { projectRo
 }
 
 function enforcePromptEnhancementMemoryWriteCaps(store: Store, projectRoot: string, now: number): void {
-  const rowCount = countRows(store, 'prompt_enhancement_memory', projectRoot);
-  const estimatedBytes = estimatePromptEnhancementBytes(store, projectRoot);
-  if (rowCount <= DEFAULT_MEMORY_ACTIVE_ROWS_PER_PROJECT && estimatedBytes <= DEFAULT_MEMORY_ESTIMATED_BYTES_PER_PROJECT) return;
-  prunePromptEnhancementMemory(store, {
-    projectRoot,
-    maxRowsPerProject: DEFAULT_MEMORY_ACTIVE_ROWS_PER_PROJECT,
-    maxEstimatedBytes: DEFAULT_MEMORY_ESTIMATED_BYTES_PER_PROJECT,
-    now,
-  });
+  const projectRowCount = countRows(store, 'prompt_enhancement_memory', projectRoot);
+  const projectEstimatedBytes = estimatePromptEnhancementBytes(store, projectRoot);
+  if (projectRowCount > DEFAULT_MEMORY_ACTIVE_ROWS_PER_PROJECT || projectEstimatedBytes > DEFAULT_MEMORY_ESTIMATED_BYTES_PER_PROJECT) {
+    prunePromptEnhancementMemory(store, {
+      projectRoot,
+      maxRowsPerProject: DEFAULT_MEMORY_ACTIVE_ROWS_PER_PROJECT,
+      maxEstimatedBytes: DEFAULT_MEMORY_ESTIMATED_BYTES_PER_PROJECT,
+      now,
+    });
+  }
+  const globalRowCount = countRows(store, 'prompt_enhancement_memory');
+  const globalEstimatedBytes = estimatePromptEnhancementBytes(store);
+  if (globalRowCount > DEFAULT_MEMORY_ACTIVE_ROWS_GLOBAL || globalEstimatedBytes > DEFAULT_MEMORY_ESTIMATED_BYTES_GLOBAL) {
+    prunePromptEnhancementMemory(store, {
+      maxRowsGlobal: DEFAULT_MEMORY_ACTIVE_ROWS_GLOBAL,
+      maxEstimatedBytes: DEFAULT_MEMORY_ESTIMATED_BYTES_GLOBAL,
+      now,
+    });
+  }
 }
 
 function tableExists(store: Store, tableName: string): boolean {
@@ -1625,7 +1657,7 @@ function assertNonEmpty(errorCode: string, value: string): void {
 }
 
 function assertPublicSafeToken(errorCode: string, value: string): void {
-  if (cleanPublicSafeToken(value) === null) throw new Error(errorCode);
+  if (cleanPublicSafeToken(value) !== value) throw new Error(errorCode);
 }
 
 function assertPublicSafeTokens(errorCode: string, values: readonly string[]): void {
