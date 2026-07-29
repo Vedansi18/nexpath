@@ -173,9 +173,17 @@ export async function runStatus(input: StatusInput): Promise<StatusResult> {
       generatedOriginRows: 0,
       feedbackRows: 0,
       statusRows: 0,
+      globalMemoryRows: 0,
+      globalSourceUseRows: 0,
+      globalGeneratedOriginRows: 0,
+      globalFeedbackRows: 0,
+      globalStatusRows: 0,
       estimatedBytes: 0,
       exportedDbBytes: 0,
       capState: 'policy_disabled_or_no_data',
+      rowCapState: 'policy_disabled_or_no_data',
+      byteThresholdState: 'policy_disabled_or_no_data',
+      lastCleanupOutcome: 'none',
       telemetryPolicy: 'ids_enums_counts_status_timing_only',
       rawContentStoredByDefault: false,
       oldStoreSurfacesAreAuthority: false,
@@ -259,9 +267,13 @@ export function renderStatus(result: StatusResult): string {
   lines.push(`  Generated-origin : ${result.promptEnhancement.generatedOriginRows.toLocaleString()}`);
   lines.push(`  Feedback rows    : ${result.promptEnhancement.feedbackRows.toLocaleString()}`);
   lines.push(`  Status rows      : ${result.promptEnhancement.statusRows.toLocaleString()}`);
+  lines.push(`  Global rows      : memory ${result.promptEnhancement.globalMemoryRows.toLocaleString()}, source-use ${result.promptEnhancement.globalSourceUseRows.toLocaleString()}, generated-origin ${result.promptEnhancement.globalGeneratedOriginRows.toLocaleString()}, feedback ${result.promptEnhancement.globalFeedbackRows.toLocaleString()}, status ${result.promptEnhancement.globalStatusRows.toLocaleString()}`);
   lines.push(`  Estimated bytes  : ${formatBytes(result.promptEnhancement.estimatedBytes)}`);
   lines.push(`  Exported DB bytes: ${formatBytes(result.promptEnhancement.exportedDbBytes)}`);
   lines.push(`  Cap state        : ${result.promptEnhancement.capState}`);
+  lines.push(`  Row cap state    : ${result.promptEnhancement.rowCapState}`);
+  lines.push(`  Byte state       : ${result.promptEnhancement.byteThresholdState}`);
+  lines.push(`  Last cleanup     : ${result.promptEnhancement.lastCleanupOutcome}`);
   lines.push(`  Last prune       : ${formatOptionalTimestamp(result.promptEnhancement.lastPruneAt)}`);
   lines.push(`  Last decay       : ${formatOptionalTimestamp(result.promptEnhancement.lastDecayAt)}`);
   lines.push(`  Fallback/errors  : ${result.promptEnhancement.fallbackCount}/${result.promptEnhancement.errorCount}`);

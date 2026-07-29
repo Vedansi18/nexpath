@@ -835,6 +835,11 @@ describe('prompt-enhancement store, memory, and feedback contract', () => {
       expect(getPromptEnhancementStoreStatus(store, '/repo/a').statusRows).toBeGreaterThan(0);
       expect(getPromptEnhancementStoreStatus(store, '/repo/a')).toMatchObject({
         capState: 'over_row_cap_pruned',
+        rowCapState: 'over_row_cap_pruned',
+        byteThresholdState: 'within_bounds',
+        lastCleanupOutcome: 'row_cap_enforced_without_prompt_fifo',
+        memoryRows: 2,
+        globalMemoryRows: 2,
         lastPruneAt: 300,
         lastDecayAt: 300,
       });
@@ -996,6 +1001,13 @@ describe('prompt-enhancement store, memory, and feedback contract', () => {
       expect(getPromptEnhancementMemory(store, '/repo/a', 'old-low-a')).toBeNull();
       expect(getPromptEnhancementMemory(store, '/repo/a', 'old-low-b')).toBeNull();
       expect(getPromptEnhancementMemory(store, '/repo/a', 'protected')).not.toBeNull();
+      expect(getPromptEnhancementStoreStatus(store, '/repo/a')).toMatchObject({
+        rowCapState: 'within_bounds',
+        byteThresholdState: 'over_byte_threshold_pruned',
+        lastCleanupOutcome: 'byte_cap_enforced_without_prompt_fifo',
+        memoryRows: 1,
+        globalMemoryRows: 1,
+      });
       expect(store.db.exec('SELECT COUNT(*) FROM prompts')[0]?.values[0]?.[0]).toBe(0);
     } finally {
       closeStore(store);

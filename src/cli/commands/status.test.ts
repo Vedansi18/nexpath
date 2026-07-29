@@ -210,9 +210,17 @@ describe('runStatus — store not initialised', () => {
       generatedOriginRows: 0,
       feedbackRows: 0,
       statusRows: 0,
+      globalMemoryRows: 0,
+      globalSourceUseRows: 0,
+      globalGeneratedOriginRows: 0,
+      globalFeedbackRows: 0,
+      globalStatusRows: 0,
       estimatedBytes: 0,
       exportedDbBytes: 0,
       capState: 'policy_disabled_or_no_data',
+      rowCapState: 'policy_disabled_or_no_data',
+      byteThresholdState: 'policy_disabled_or_no_data',
+      lastCleanupOutcome: 'none',
     });
   });
 
@@ -330,6 +338,8 @@ describe('runStatus — with populated store', () => {
       generatedOriginRows: 0,
       feedbackRows: 0,
       statusRows: 2,
+      globalMemoryRows: 1,
+      globalSourceUseRows: 1,
       rawContentStoredByDefault: false,
       oldStoreSurfacesAreAuthority: false,
     });
@@ -480,9 +490,17 @@ function makeResult(overrides: Partial<StatusResult> = {}): StatusResult {
       generatedOriginRows: 0,
       feedbackRows: 0,
       statusRows: 0,
+      globalMemoryRows: 0,
+      globalSourceUseRows: 0,
+      globalGeneratedOriginRows: 0,
+      globalFeedbackRows: 0,
+      globalStatusRows: 0,
       estimatedBytes: 0,
       exportedDbBytes: 0,
       capState: 'policy_disabled_or_no_data',
+      rowCapState: 'policy_disabled_or_no_data',
+      byteThresholdState: 'policy_disabled_or_no_data',
+      lastCleanupOutcome: 'none',
       telemetryPolicy: 'ids_enums_counts_status_timing_only',
       rawContentStoredByDefault: false,
       oldStoreSurfacesAreAuthority: false,
@@ -546,9 +564,17 @@ describe('renderStatus — sections', () => {
         generatedOriginRows: 1,
         feedbackRows: 4,
         statusRows: 5,
+        globalMemoryRows: 30,
+        globalSourceUseRows: 20,
+        globalGeneratedOriginRows: 10,
+        globalFeedbackRows: 40,
+        globalStatusRows: 50,
         estimatedBytes: 2048,
         exportedDbBytes: 4096,
         capState: 'within_bounds',
+        rowCapState: 'within_bounds',
+        byteThresholdState: 'within_bounds',
+        lastCleanupOutcome: 'row_cap_enforced_without_prompt_fifo',
         telemetryPolicy: 'ids_enums_counts_status_timing_only',
         rawContentStoredByDefault: false,
         oldStoreSurfacesAreAuthority: false,
@@ -565,9 +591,13 @@ describe('renderStatus — sections', () => {
     expect(out).toContain('Memory rows      : 3');
     expect(out).toContain('Source-use rows  : 2');
     expect(out).toContain('Generated-origin : 1');
+    expect(out).toContain('Global rows      : memory 30, source-use 20, generated-origin 10, feedback 40, status 50');
     expect(out).toContain('Estimated bytes  : 2.0 KB');
     expect(out).toContain('Exported DB bytes: 4.0 KB');
     expect(out).toContain('Cap state        : within_bounds');
+    expect(out).toContain('Row cap state    : within_bounds');
+    expect(out).toContain('Byte state       : within_bounds');
+    expect(out).toContain('Last cleanup     : row_cap_enforced_without_prompt_fifo');
     expect(out).toContain('Fallback/errors  : 6/7');
     expect(out).toContain('row_cap_enforced_without_prompt_fifo');
   });

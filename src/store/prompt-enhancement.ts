@@ -215,9 +215,17 @@ export interface PromptEnhancementStoreStatus {
   generatedOriginRows: number;
   feedbackRows: number;
   statusRows: number;
+  globalMemoryRows: number;
+  globalSourceUseRows: number;
+  globalGeneratedOriginRows: number;
+  globalFeedbackRows: number;
+  globalStatusRows: number;
   estimatedBytes: number;
   exportedDbBytes: number;
   capState: 'within_bounds' | 'over_row_cap_pruned' | 'policy_disabled_or_no_data';
+  rowCapState: 'within_bounds' | 'over_row_cap_pruned' | 'policy_disabled_or_no_data';
+  byteThresholdState: 'within_bounds' | 'over_byte_threshold_pruned' | 'policy_disabled_or_no_data';
+  lastCleanupOutcome: string;
   telemetryPolicy: 'ids_enums_counts_status_timing_only';
   rawContentStoredByDefault: false;
   oldStoreSurfacesAreAuthority: false;
@@ -990,6 +998,11 @@ export function getPromptEnhancementStoreStatus(store: Store, projectRoot?: stri
   const generatedOriginRows = countRows(store, 'prompt_enhancement_generated_origin', projectRoot);
   const feedbackRows = countRows(store, 'prompt_enhancement_feedback', projectRoot);
   const statusRows = countRows(store, 'prompt_enhancement_status', projectRoot);
+  const globalMemoryRows = countRows(store, 'prompt_enhancement_memory');
+  const globalSourceUseRows = countRows(store, 'prompt_enhancement_source_use');
+  const globalGeneratedOriginRows = countRows(store, 'prompt_enhancement_generated_origin');
+  const globalFeedbackRows = countRows(store, 'prompt_enhancement_feedback');
+  const globalStatusRows = countRows(store, 'prompt_enhancement_status');
   const pruneStatus = readStatusValue(store, projectRoot, 'last_prune') ?? readStatusValue(store, '__all_projects__', 'last_prune');
   const lifecyclePruneStatus = readStatusValue(store, projectRoot, 'last_lifecycle_prune')
     ?? readStatusValue(store, '__all_projects__', 'last_lifecycle_prune');
@@ -1000,24 +1013,39 @@ export function getPromptEnhancementStoreStatus(store: Store, projectRoot?: stri
   ];
   const errorCount = countStatusKeyMatches(store, projectRoot, 'error');
   const fallbackCount = countStatusKeyMatches(store, projectRoot, 'fallback');
+  const hasScopedData = memoryRows + sourceUseRows + generatedOriginRows + feedbackRows + statusRows > 0;
+  const rowCapState = lastReasonCodes.some((code) => code === 'row_cap_enforced_without_prompt_fifo')
+    ? 'over_row_cap_pruned'
+    : hasScopedData
+      ? 'within_bounds'
+      : 'policy_disabled_or_no_data';
+  const byteThresholdState = lastReasonCodes.some((code) => code === 'byte_cap_enforced_without_prompt_fifo')
+    ? 'over_byte_threshold_pruned'
+    : hasScopedData
+      ? 'within_bounds'
+      : 'policy_disabled_or_no_data';
   return {
     projectRoot,
     schemaVersion: SCHEMA_VERSION,
-    enabledState: memoryRows + sourceUseRows + generatedOriginRows + feedbackRows + statusRows === 0
-      ? 'policy_disabled_or_no_data'
-      : 'local_store_enabled',
+    enabledState: hasScopedData
+      ? 'local_store_enabled'
+      : 'policy_disabled_or_no_data',
     memoryRows,
     sourceUseRows,
     generatedOriginRows,
     feedbackRows,
     statusRows,
+    globalMemoryRows,
+    globalSourceUseRows,
+    globalGeneratedOriginRows,
+    globalFeedbackRows,
+    globalStatusRows,
     estimatedBytes: estimatePromptEnhancementBytes(store, projectRoot),
     exportedDbBytes: store.db.export().byteLength,
-    capState: lastReasonCodes.some((code) => code.includes('cap_enforced'))
-      ? 'over_row_cap_pruned'
-      : memoryRows + sourceUseRows + generatedOriginRows + feedbackRows + statusRows === 0
-        ? 'policy_disabled_or_no_data'
-        : 'within_bounds',
+    capState: rowCapState,
+    rowCapState,
+    byteThresholdState,
+    lastCleanupOutcome: lastReasonCodes[lastReasonCodes.length - 1] ?? 'none',
     telemetryPolicy: 'ids_enums_counts_status_timing_only',
     rawContentStoredByDefault: false,
     oldStoreSurfacesAreAuthority: false,
