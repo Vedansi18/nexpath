@@ -177,6 +177,7 @@ CREATE TABLE IF NOT EXISTS prompt_enhancement_generated_origin (
   delivery_channel             TEXT    NOT NULL,
   prompt_submit_processing_policy TEXT NOT NULL,
   learning_eligible            INTEGER NOT NULL DEFAULT 0,
+  learning_eligibility_json     TEXT    NOT NULL,
   source_use_ids_json          TEXT    NOT NULL,
   action_ids_json              TEXT    NOT NULL,
   fallback_state               TEXT    NOT NULL,
@@ -259,6 +260,7 @@ export function applyIncrementalMigrations(db: Database): void {
 
   // sub-11 prompt enhancement store contract
   addIfMissing('prompt_enhancement_source_use', 'section_ids_json', "TEXT NOT NULL DEFAULT '[]'");
+  addIfMissing('prompt_enhancement_generated_origin', 'learning_eligibility_json', "TEXT NOT NULL DEFAULT '{}'");
   addIfMissing('prompt_enhancement_generated_origin', 'action_ids_json', "TEXT NOT NULL DEFAULT '[]'");
   addIfMissing('prompt_enhancement_generated_origin', 'fallback_state', "TEXT NOT NULL DEFAULT 'unknown_not_applicable'");
   addIfMissing('prompt_enhancement_generated_origin', 'privacy_storage_policy', "TEXT NOT NULL DEFAULT 'raw_text_excluded_by_default'");
@@ -300,6 +302,7 @@ export function runMigrations(db: Database): void {
 
   // sub-11 prompt enhancement store contract
   addIfMissing('prompt_enhancement_source_use', 'section_ids_json', "TEXT NOT NULL DEFAULT '[]'");
+  addIfMissing('prompt_enhancement_generated_origin', 'learning_eligibility_json', "TEXT NOT NULL DEFAULT '{}'");
   addIfMissing('prompt_enhancement_generated_origin', 'action_ids_json', "TEXT NOT NULL DEFAULT '[]'");
   addIfMissing('prompt_enhancement_generated_origin', 'fallback_state', "TEXT NOT NULL DEFAULT 'unknown_not_applicable'");
   addIfMissing('prompt_enhancement_generated_origin', 'privacy_storage_policy', "TEXT NOT NULL DEFAULT 'raw_text_excluded_by_default'");

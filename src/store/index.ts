@@ -90,6 +90,7 @@ export {
   type PromptEnhancementMemoryRow,
   type PromptEnhancementMemoryEvidenceInput,
   type PromptEnhancementMemoryUseInput,
+  type PromptEnhancementLearningEligibilityFlags,
   type PromptEnhancementSourceUseInput,
   type PromptEnhancementGeneratedOriginInput,
   type PromptEnhancementFeedbackInput,

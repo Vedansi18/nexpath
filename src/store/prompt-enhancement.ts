@@ -108,6 +108,17 @@ export interface PromptEnhancementMemoryUseInput {
   reasonCodes?: readonly string[];
 }
 
+export interface PromptEnhancementLearningEligibilityFlags {
+  promptHistory: boolean;
+  profile: boolean;
+  stage: boolean;
+  language: boolean;
+  missingSignalMemory: boolean;
+  feedback: boolean;
+  telemetry: boolean;
+  sourceUseTracking: boolean;
+}
+
 export interface PromptEnhancementGeneratedOriginInput {
   generatedOriginId: string;
   projectRoot: string;
@@ -118,6 +129,7 @@ export interface PromptEnhancementGeneratedOriginInput {
   deliveryChannel: string;
   promptSubmitProcessingPolicy: string;
   learningEligible?: boolean;
+  learningEligibilityFlags?: Partial<PromptEnhancementLearningEligibilityFlags>;
   sourceUseIds?: readonly string[];
   actionIds?: readonly string[];
   fallbackState?: string;
@@ -151,6 +163,7 @@ export interface PromptEnhancementPreparedBodyInput {
   deliveryChannel: string;
   promptSubmitProcessingPolicy: string;
   learningEligible?: boolean;
+  learningEligibilityFlags?: Partial<PromptEnhancementLearningEligibilityFlags>;
   sourceUseIds?: readonly string[];
   actionIds?: readonly string[];
   fallbackState?: string;
@@ -230,6 +243,7 @@ export interface PromptEnhancementGeneratedOriginResolution {
   deliveryChannel: string;
   promptSubmitProcessingPolicy: string;
   learningEligible: boolean;
+  learningEligibilityFlags: PromptEnhancementLearningEligibilityFlags;
   sourceUseIds: readonly string[];
   actionIds: readonly string[];
   fallbackState: string;
@@ -497,9 +511,9 @@ export function recordPromptEnhancementGeneratedOrigin(store: Store, input: Prom
   store.db.run(
     `INSERT OR REPLACE INTO prompt_enhancement_generated_origin
        (generated_origin_id, project_root, enhancement_id, body_id, body_revision, generated_origin_state,
-        delivery_channel, prompt_submit_processing_policy, learning_eligible, source_use_ids_json,
+        delivery_channel, prompt_submit_processing_policy, learning_eligible, learning_eligibility_json, source_use_ids_json,
         action_ids_json, fallback_state, privacy_storage_policy, schema_version, reason_codes_json, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       input.generatedOriginId,
       input.projectRoot,
@@ -510,6 +524,7 @@ export function recordPromptEnhancementGeneratedOrigin(store: Store, input: Prom
       input.deliveryChannel,
       input.promptSubmitProcessingPolicy,
       input.learningEligible === true ? 1 : 0,
+      JSON.stringify(resolveLearningEligibilityFlags(input.learningEligibilityFlags, input.learningEligible === true)),
       JSON.stringify(input.sourceUseIds ?? []),
       JSON.stringify(input.actionIds ?? []),
       input.fallbackState ?? 'unknown_not_applicable',
@@ -529,6 +544,7 @@ export function recordPromptEnhancementGeneratedOrigin(store: Store, input: Prom
       generatedOriginState: input.generatedOriginState,
       deliveryChannel: input.deliveryChannel,
       learningEligible: input.learningEligible === true,
+      learningEligibilityFlags: resolveLearningEligibilityFlags(input.learningEligibilityFlags, input.learningEligible === true),
       sourceUseIds: input.sourceUseIds ?? [],
       actionIds: input.actionIds ?? [],
       fallbackState: input.fallbackState ?? 'unknown_not_applicable',
@@ -596,6 +612,7 @@ export function recordPromptEnhancementPreparedBody(store: Store, input: PromptE
     deliveryChannel: input.deliveryChannel,
     promptSubmitProcessingPolicy: input.promptSubmitProcessingPolicy,
     learningEligible: input.learningEligible,
+    learningEligibilityFlags: input.learningEligibilityFlags,
     sourceUseIds: input.sourceUseIds,
     actionIds: input.actionIds,
     fallbackState: input.fallbackState,
@@ -981,7 +998,7 @@ export function resolvePromptEnhancementGeneratedOrigin(
   assertNonEmpty('body_id_required', input.bodyId);
   const res = store.db.exec(
     `SELECT generated_origin_id, project_root, enhancement_id, body_id, body_revision, generated_origin_state,
-            delivery_channel, prompt_submit_processing_policy, learning_eligible, source_use_ids_json,
+            delivery_channel, prompt_submit_processing_policy, learning_eligible, learning_eligibility_json, source_use_ids_json,
             action_ids_json, fallback_state, privacy_storage_policy, reason_codes_json, created_at
        FROM prompt_enhancement_generated_origin
       WHERE project_root = ?
@@ -1004,12 +1021,13 @@ export function resolvePromptEnhancementGeneratedOrigin(
     deliveryChannel: row[6] as string,
     promptSubmitProcessingPolicy: row[7] as string,
     learningEligible: row[8] === 1,
-    sourceUseIds: parseStringArray(row[9] as string),
-    actionIds: parseStringArray(row[10] as string),
-    fallbackState: row[11] as string,
-    privacyStoragePolicy: row[12] as string,
-    reasonCodes: parseStringArray(row[13] as string),
-    createdAt: row[14] as number,
+    learningEligibilityFlags: parseLearningEligibilityFlags(row[9] as string, row[8] === 1),
+    sourceUseIds: parseStringArray(row[10] as string),
+    actionIds: parseStringArray(row[11] as string),
+    fallbackState: row[12] as string,
+    privacyStoragePolicy: row[13] as string,
+    reasonCodes: parseStringArray(row[14] as string),
+    createdAt: row[15] as number,
   };
 }
 
@@ -1160,6 +1178,41 @@ function parseStringArray(value: string): readonly string[] {
     return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : [];
   } catch {
     return [];
+  }
+}
+
+function resolveLearningEligibilityFlags(
+  flags: Partial<PromptEnhancementLearningEligibilityFlags> | undefined,
+  broadLearningEligible: boolean,
+): PromptEnhancementLearningEligibilityFlags {
+  const defaultAllowed = broadLearningEligible === true;
+  return {
+    promptHistory: flags?.promptHistory ?? defaultAllowed,
+    profile: flags?.profile ?? defaultAllowed,
+    stage: flags?.stage ?? defaultAllowed,
+    language: flags?.language ?? defaultAllowed,
+    missingSignalMemory: flags?.missingSignalMemory ?? defaultAllowed,
+    feedback: flags?.feedback ?? defaultAllowed,
+    telemetry: flags?.telemetry ?? false,
+    sourceUseTracking: flags?.sourceUseTracking ?? true,
+  };
+}
+
+function parseLearningEligibilityFlags(value: string, broadLearningEligible: boolean): PromptEnhancementLearningEligibilityFlags {
+  try {
+    const parsed = JSON.parse(value) as Partial<Record<keyof PromptEnhancementLearningEligibilityFlags, unknown>>;
+    return resolveLearningEligibilityFlags({
+      promptHistory: typeof parsed.promptHistory === 'boolean' ? parsed.promptHistory : undefined,
+      profile: typeof parsed.profile === 'boolean' ? parsed.profile : undefined,
+      stage: typeof parsed.stage === 'boolean' ? parsed.stage : undefined,
+      language: typeof parsed.language === 'boolean' ? parsed.language : undefined,
+      missingSignalMemory: typeof parsed.missingSignalMemory === 'boolean' ? parsed.missingSignalMemory : undefined,
+      feedback: typeof parsed.feedback === 'boolean' ? parsed.feedback : undefined,
+      telemetry: typeof parsed.telemetry === 'boolean' ? parsed.telemetry : undefined,
+      sourceUseTracking: typeof parsed.sourceUseTracking === 'boolean' ? parsed.sourceUseTracking : undefined,
+    }, broadLearningEligible);
+  } catch {
+    return resolveLearningEligibilityFlags(undefined, broadLearningEligible);
   }
 }
 
