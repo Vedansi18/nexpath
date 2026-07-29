@@ -15,6 +15,7 @@ import {
 import { MCP_SERVER_NAME } from './install.js';
 import { openStore, closeStore } from '../../store/db.js';
 import { insertPrompt } from '../../store/prompts.js';
+import { recordPromptEnhancementMemoryEvidence, recordPromptEnhancementSourceUse } from '../../store/prompt-enhancement.js';
 
 // ── Test fixtures ─────────────────────────────────────────────────────────────
 
@@ -203,6 +204,15 @@ describe('runStatus — store not initialised', () => {
     expect(result.store.totalPrompts).toBe(0);
     expect(result.store.dbSizeBytes).toBe(0);
     expect(result.store.perProject).toHaveLength(0);
+    expect(result.promptEnhancement).toMatchObject({
+      memoryRows: 0,
+      sourceUseRows: 0,
+      generatedOriginRows: 0,
+      feedbackRows: 0,
+      statusRows: 0,
+      estimatedBytes: 0,
+      capState: 'policy_disabled_or_no_data',
+    });
   });
 
   it('config falls back to defaults when DB is absent', async () => {
@@ -284,6 +294,45 @@ describe('runStatus — with populated store', () => {
 
     const result = await runStatus({ dbPath, agents: [], settingsPath: join(dir, 's.json') });
     expect(result.config['prompt_capture_enabled']).toBe('false');
+  });
+
+  it('reports prompt-enhancement status/debug counters from the DB', async () => {
+    const store = await openStore(dbPath);
+    recordPromptEnhancementMemoryEvidence(store, {
+      projectRoot: '/proj/a',
+      signalKey: 'debugging_observation_gap',
+      evidenceKind: 'positive',
+      currentEvidenceState: 'historical_candidate',
+      confidenceBand: 'low',
+      sourceStrength: 'weak',
+      status: 'candidate',
+      now: 100,
+    });
+    recordPromptEnhancementSourceUse(store, {
+      sourceUseId: 'source-use-1',
+      projectRoot: '/proj/a',
+      enhancementId: 'enh-1',
+      bodyId: 'body-1',
+      bodyRevision: 1,
+      sourceKind: 'content_template_fact',
+      sourceId: 'ct:debug',
+      useKind: 'body_section',
+      now: 101,
+    });
+    closeStore(store);
+
+    const result = await runStatus({ dbPath, agents: [], settingsPath: join(dir, 's.json') });
+
+    expect(result.promptEnhancement).toMatchObject({
+      memoryRows: 1,
+      sourceUseRows: 1,
+      generatedOriginRows: 0,
+      feedbackRows: 0,
+      statusRows: 2,
+      rawContentStoredByDefault: false,
+      oldStoreSurfacesAreAuthority: false,
+    });
+    expect(result.promptEnhancement.estimatedBytes).toBeGreaterThan(0);
   });
 });
 
@@ -421,6 +470,23 @@ function makeResult(overrides: Partial<StatusResult> = {}): StatusResult {
       dbSizeBytes:  0,
       perProject:   [],
     },
+    promptEnhancement: {
+      memoryRows: 0,
+      sourceUseRows: 0,
+      generatedOriginRows: 0,
+      feedbackRows: 0,
+      statusRows: 0,
+      estimatedBytes: 0,
+      capState: 'policy_disabled_or_no_data',
+      telemetryPolicy: 'ids_enums_counts_status_timing_only',
+      rawContentStoredByDefault: false,
+      oldStoreSurfacesAreAuthority: false,
+      reasonCodes: [],
+      lastPruneAt: null,
+      lastDecayAt: null,
+      fallbackCount: 0,
+      errorCount: 0,
+    },
     config: { prompt_capture_enabled: 'true', prompt_store_max_per_project: '500', prompt_store_max_db_mb: '100' },
     hookStats: [],
     ...overrides,
@@ -453,13 +519,46 @@ describe('renderStatus — sections', () => {
     expect(out.endsWith('\n')).toBe(true);
   });
 
-  it('sections appear in order: Prompt store → Hook activity → Config', () => {
+  it('sections appear in order: Prompt store → Prompt enhancement → Hook activity → Config', () => {
     const out = renderStatus(makeResult());
     const storeIdx = out.indexOf('Prompt store');
+    const peIdx = out.indexOf('Prompt enhancement');
     const hookIdx  = out.indexOf('Hook activity');
     const cfgIdx   = out.indexOf('Config');
+    expect(storeIdx).toBeLessThan(peIdx);
+    expect(peIdx).toBeLessThan(hookIdx);
     expect(storeIdx).toBeLessThan(hookIdx);
     expect(hookIdx).toBeLessThan(cfgIdx);
+  });
+
+  it('includes public-safe prompt-enhancement status/debug lines', () => {
+    const out = renderStatus(makeResult({
+      promptEnhancement: {
+        memoryRows: 3,
+        sourceUseRows: 2,
+        generatedOriginRows: 1,
+        feedbackRows: 4,
+        statusRows: 5,
+        estimatedBytes: 2048,
+        capState: 'within_bounds',
+        telemetryPolicy: 'ids_enums_counts_status_timing_only',
+        rawContentStoredByDefault: false,
+        oldStoreSurfacesAreAuthority: false,
+        reasonCodes: ['row_cap_enforced_without_prompt_fifo'],
+        lastPruneAt: 1000,
+        lastDecayAt: 2000,
+        fallbackCount: 6,
+        errorCount: 7,
+      },
+    }));
+    expect(out).toContain('Prompt enhancement');
+    expect(out).toContain('Memory rows      : 3');
+    expect(out).toContain('Source-use rows  : 2');
+    expect(out).toContain('Generated-origin : 1');
+    expect(out).toContain('Estimated bytes  : 2.0 KB');
+    expect(out).toContain('Cap state        : within_bounds');
+    expect(out).toContain('Fallback/errors  : 6/7');
+    expect(out).toContain('row_cap_enforced_without_prompt_fifo');
   });
 
   it('includes "Hook activity" header', () => {
