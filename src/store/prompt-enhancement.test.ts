@@ -744,6 +744,59 @@ describe('prompt-enhancement store, memory, and feedback contract', () => {
         learningEligibility: 'pending_policy',
         safetyImpactState: 'unknown',
       })).toThrow('feedback_scope_key_public_safe_token_required');
+      expect(() => recordPromptEnhancementMemoryEvidence(store, {
+        projectRoot: '/repo/a',
+        signalKey: 'signal-a',
+        evidenceKind: 'raw_feedback_text' as never,
+        currentEvidenceState: 'historical_candidate',
+        confidenceBand: 'low',
+        sourceStrength: 'weak',
+      })).toThrow('evidence_kind_known_value_required');
+      expect(() => recordPromptEnhancementMemoryEvidence(store, {
+        projectRoot: '/repo/a',
+        signalKey: 'signal-a',
+        evidenceKind: 'positive',
+        currentEvidenceState: 'raw source sentence' as never,
+        confidenceBand: 'low',
+        sourceStrength: 'weak',
+      })).toThrow('current_evidence_state_known_value_required');
+      expect(() => recordPromptEnhancementSourceUse(store, {
+        sourceUseId: 'source-use-kind',
+        projectRoot: '/repo/a',
+        enhancementId: 'enh-1',
+        bodyId: 'body-1',
+        bodyRevision: 1,
+        sourceKind: 'content_template_fact',
+        sourceId: 'ct:debug',
+        useKind: 'raw_action_label' as never,
+      })).toThrow('source_use_kind_known_value_required');
+      expect(() => recordPromptEnhancementFeedbackEvent(store, {
+        feedbackEventId: 'feedback-category',
+        projectRoot: '/repo/a',
+        enhancementId: 'enh-1',
+        bodyId: 'body-1',
+        bodyRevision: 1,
+        feedbackCategory: 'raw_feedback_category' as never,
+        feedbackScopeKey: 'scope-a',
+        learningEligibility: 'pending_policy',
+        safetyImpactState: 'unknown',
+      })).toThrow('feedback_category_known_value_required');
+      expect(() => recordPromptEnhancementFeedbackEvent(store, {
+        feedbackEventId: 'feedback-learning',
+        projectRoot: '/repo/a',
+        enhancementId: 'enh-1',
+        bodyId: 'body-1',
+        bodyRevision: 1,
+        feedbackCategory: 'custom_typed',
+        feedbackScopeKey: 'scope-a',
+        learningEligibility: 'raw_learning_claim' as never,
+        safetyImpactState: 'unknown',
+      })).toThrow('feedback_learning_eligibility_known_value_required');
+      expect(() => setPromptEnhancementStatus(store, {
+        projectRoot: '/repo/a',
+        statusKey: 'raw status key should not persist',
+        statusValue: JSON.stringify({ safe: 'value' }),
+      })).toThrow('status_key_public_safe_token_required');
 
       expect(getPromptEnhancementStoreStatus(store).memoryRows).toBe(0);
       expect(getPromptEnhancementStoreStatus(store).sourceUseRows).toBe(0);

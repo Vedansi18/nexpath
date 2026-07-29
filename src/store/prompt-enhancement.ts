@@ -270,6 +270,44 @@ export interface PromptEnhancementSourceUseSummary {
   memoryEvidenceRows: number;
 }
 
+const MEMORY_EVIDENCE_KINDS = ['positive', 'negative', 'neutral'] as const;
+const MEMORY_EVIDENCE_STATES: readonly PromptEnhancementMemoryEvidenceState[] = ['live_current', 'historical_candidate', 'feedback_derived', 'unknown_neutral'];
+const MEMORY_CONFIDENCE_BANDS: readonly PromptEnhancementMemoryConfidenceBand[] = ['low', 'medium', 'high'];
+const MEMORY_SOURCE_STRENGTHS: readonly PromptEnhancementMemorySourceStrength[] = ['weak', 'moderate', 'strong'];
+const MEMORY_PROTECTION_STATES: readonly PromptEnhancementMemoryProtectionState[] = ['none', 'current_source_a', 'safety_protected', 'mandatory_protected', 'high_risk_protected'];
+const MEMORY_FATIGUE_STATES: readonly PromptEnhancementMemoryFatigueState[] = ['none', 'candidate', 'fatigued'];
+const MEMORY_SUPPRESSION_STATES: readonly PromptEnhancementMemorySuppressionState[] = ['none', 'candidate_scoped', 'suppressed_scoped'];
+const MEMORY_STATUSES: readonly PromptEnhancementMemoryStatus[] = ['qualified', 'candidate', 'decayed', 'disabled_by_policy', 'malformed_ignored'];
+const SOURCE_USE_KINDS: readonly PromptEnhancementSourceUseInput['useKind'][] = ['body_section', 'trust_cue', 'fallback_reason', 'handoff_metadata'];
+const FEEDBACK_CATEGORIES: readonly PromptEnhancementFeedbackCategory[] = [
+  'surface_exposed',
+  'accept_send',
+  'use_original',
+  'close_no_send',
+  'edit',
+  'edit_before_send',
+  'skip_cancel',
+  'reject',
+  'remove',
+  'not_needed',
+  'directional_action',
+  'additional_details_apply',
+  'fallback',
+  'multi_prompt_disposition',
+  'not_relevant_enough',
+  'too_much_or_too_long',
+  'too_long',
+  'too_shallow',
+  'not_project_grounded',
+  'wrong_tone',
+  'custom_typed',
+  'section_removed_by_edit',
+  'user_deleted_generated_section',
+  'action_result_rejected',
+];
+const FEEDBACK_LEARNING_ELIGIBILITY: readonly PromptEnhancementFeedbackInput['learningEligibility'][] = ['eligible_scoped', 'not_eligible', 'pending_policy'];
+const FEEDBACK_SAFETY_IMPACT_STATES: readonly PromptEnhancementFeedbackInput['safetyImpactState'][] = ['none', 'safety_floor_touched', 'source_floor_touched', 'unknown'];
+
 const SELECT_MEMORY = `
   project_root, signal_key, schema_version, evidence_count, positive_count, negative_count,
   current_evidence_state, confidence_band, source_strength, protection_state, fatigue_state,
@@ -282,7 +320,7 @@ export function queryRelevantPromptEnhancementMemory(
   projectRoot: string,
   signalKeys: readonly string[],
 ): PromptEnhancementMemoryRow[] {
-  const stableSignalKeys = [...new Set(signalKeys.filter((signalKey) => signalKey.trim().length > 0))];
+  const stableSignalKeys = cleanPublicSafeTokens(signalKeys);
   if (!projectRoot || stableSignalKeys.length === 0) return [];
   const placeholders = stableSignalKeys.map(() => '?').join(', ');
   const res = store.db.exec(
@@ -311,7 +349,7 @@ export function recordPromptEnhancementMemoryEvidence(
   store: Store,
   input: PromptEnhancementMemoryEvidenceInput,
 ): PromptEnhancementMemoryRow {
-  assertProjectSignal(input.projectRoot, input.signalKey);
+  assertMemoryEvidenceInput(input);
   const now = input.now ?? Date.now();
   const existing = getPromptEnhancementMemory(store, input.projectRoot, input.signalKey);
   const positiveDelta = input.evidenceKind === 'positive' ? 1 : 0;
@@ -874,9 +912,8 @@ export function resetAllPromptEnhancementRows(store: Store): number {
 }
 
 export function setPromptEnhancementStatus(store: Store, input: PromptEnhancementStatusInput): void {
-  if (!input.projectRoot || !input.statusKey) {
-    throw new Error('projectRoot and statusKey are required');
-  }
+  assertNonEmpty('project_root_required', input.projectRoot);
+  assertPublicSafeToken('status_key_public_safe_token_required', input.statusKey);
   const now = input.now ?? Date.now();
   store.db.run(
     `INSERT INTO prompt_enhancement_status
@@ -1400,6 +1437,18 @@ function assertProjectSignal(projectRoot: string, signalKey: string): void {
   assertPublicSafeToken('signal_key_public_safe_token_required', signalKey);
 }
 
+function assertMemoryEvidenceInput(input: PromptEnhancementMemoryEvidenceInput): void {
+  assertProjectSignal(input.projectRoot, input.signalKey);
+  assertOneOf('evidence_kind_known_value_required', input.evidenceKind, MEMORY_EVIDENCE_KINDS);
+  assertOneOf('current_evidence_state_known_value_required', input.currentEvidenceState, MEMORY_EVIDENCE_STATES);
+  assertOneOf('confidence_band_known_value_required', input.confidenceBand, MEMORY_CONFIDENCE_BANDS);
+  assertOneOf('source_strength_known_value_required', input.sourceStrength, MEMORY_SOURCE_STRENGTHS);
+  if (input.protectionState !== undefined) assertOneOf('protection_state_known_value_required', input.protectionState, MEMORY_PROTECTION_STATES);
+  if (input.fatigueState !== undefined) assertOneOf('fatigue_state_known_value_required', input.fatigueState, MEMORY_FATIGUE_STATES);
+  if (input.suppressionState !== undefined) assertOneOf('suppression_state_known_value_required', input.suppressionState, MEMORY_SUPPRESSION_STATES);
+  if (input.status !== undefined) assertOneOf('memory_status_known_value_required', input.status, MEMORY_STATUSES);
+}
+
 function assertSourceUseInput(input: PromptEnhancementSourceUseInput): void {
   assertPublicSafeToken('source_use_id_public_safe_token_required', input.sourceUseId);
   assertNonEmpty('project_root_required', input.projectRoot);
@@ -1407,6 +1456,7 @@ function assertSourceUseInput(input: PromptEnhancementSourceUseInput): void {
   assertPublicSafeToken('body_id_public_safe_token_required', input.bodyId);
   assertPublicSafeToken('source_kind_public_safe_token_required', input.sourceKind);
   assertPublicSafeToken('source_id_public_safe_token_required', input.sourceId);
+  assertOneOf('source_use_kind_known_value_required', input.useKind, SOURCE_USE_KINDS);
 }
 
 function assertGeneratedOriginInput(input: PromptEnhancementGeneratedOriginInput): void {
@@ -1428,7 +1478,10 @@ function assertFeedbackInput(input: PromptEnhancementFeedbackInput): void {
   assertNonEmpty('project_root_required', input.projectRoot);
   assertPublicSafeToken('enhancement_id_public_safe_token_required', input.enhancementId);
   assertPublicSafeToken('body_id_public_safe_token_required', input.bodyId);
+  assertOneOf('feedback_category_known_value_required', input.feedbackCategory, FEEDBACK_CATEGORIES);
   assertPublicSafeToken('feedback_scope_key_public_safe_token_required', input.feedbackScopeKey);
+  assertOneOf('feedback_learning_eligibility_known_value_required', input.learningEligibility, FEEDBACK_LEARNING_ELIGIBILITY);
+  assertOneOf('feedback_safety_impact_state_known_value_required', input.safetyImpactState, FEEDBACK_SAFETY_IMPACT_STATES);
 }
 
 function assertPreparedBodyInput(input: PromptEnhancementPreparedBodyInput): void {
@@ -1459,7 +1512,10 @@ function assertActionInput(input: PromptEnhancementActionInput): void {
   assertNonEmpty('project_root_required', input.projectRoot);
   assertPublicSafeToken('enhancement_id_public_safe_token_required', input.enhancementId);
   assertPublicSafeToken('body_id_public_safe_token_required', input.bodyId);
+  assertOneOf('feedback_category_known_value_required', input.actionCategory, FEEDBACK_CATEGORIES);
   if (input.feedbackScopeKey !== undefined) assertPublicSafeToken('feedback_scope_key_public_safe_token_required', input.feedbackScopeKey);
+  if (input.learningEligibility !== undefined) assertOneOf('feedback_learning_eligibility_known_value_required', input.learningEligibility, FEEDBACK_LEARNING_ELIGIBILITY);
+  if (input.safetyImpactState !== undefined) assertOneOf('feedback_safety_impact_state_known_value_required', input.safetyImpactState, FEEDBACK_SAFETY_IMPACT_STATES);
 }
 
 function assertMemoryUseInput(input: PromptEnhancementMemoryUseInput): void {
@@ -1478,6 +1534,10 @@ function assertPublicSafeToken(errorCode: string, value: string): void {
 
 function assertPublicSafeTokens(errorCode: string, values: readonly string[]): void {
   for (const value of values) assertPublicSafeToken(errorCode, value);
+}
+
+function assertOneOf(errorCode: string, value: string, allowedValues: readonly string[]): void {
+  if (!allowedValues.includes(value)) throw new Error(errorCode);
 }
 
 function isNegativeFeedbackCategory(category: PromptEnhancementFeedbackCategory): boolean {
