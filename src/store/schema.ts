@@ -120,6 +120,102 @@ CREATE TABLE IF NOT EXISTS user_depth_level (
   schema_version     INTEGER NOT NULL,
   updated_at         INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS prompt_enhancement_memory (
+  project_root          TEXT    NOT NULL,
+  signal_key            TEXT    NOT NULL,
+  schema_version        INTEGER NOT NULL,
+  evidence_count        INTEGER NOT NULL DEFAULT 0,
+  positive_count        INTEGER NOT NULL DEFAULT 0,
+  negative_count        INTEGER NOT NULL DEFAULT 0,
+  current_evidence_state TEXT   NOT NULL,
+  confidence_band       TEXT    NOT NULL,
+  source_strength       TEXT    NOT NULL,
+  protection_state      TEXT    NOT NULL,
+  fatigue_state         TEXT    NOT NULL,
+  suppression_state     TEXT    NOT NULL,
+  last_used_at          INTEGER,
+  last_evidence_at      INTEGER,
+  decay_after           INTEGER,
+  status                TEXT    NOT NULL,
+  reason_codes_json     TEXT    NOT NULL,
+  provenance_json       TEXT    NOT NULL,
+  created_at            INTEGER NOT NULL,
+  updated_at            INTEGER NOT NULL,
+  PRIMARY KEY (project_root, signal_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_pe_memory_project_updated
+  ON prompt_enhancement_memory (project_root, updated_at);
+
+CREATE TABLE IF NOT EXISTS prompt_enhancement_source_use (
+  source_use_id        TEXT    PRIMARY KEY,
+  project_root         TEXT    NOT NULL,
+  enhancement_id       TEXT    NOT NULL,
+  body_id              TEXT    NOT NULL,
+  body_revision        INTEGER NOT NULL,
+  source_kind          TEXT    NOT NULL,
+  source_id            TEXT    NOT NULL,
+  use_kind             TEXT    NOT NULL,
+  memory_evidence      INTEGER NOT NULL DEFAULT 0,
+  schema_version       INTEGER NOT NULL,
+  reason_codes_json    TEXT    NOT NULL,
+  created_at           INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_pe_source_use_project_body
+  ON prompt_enhancement_source_use (project_root, body_id, body_revision);
+
+CREATE TABLE IF NOT EXISTS prompt_enhancement_generated_origin (
+  generated_origin_id          TEXT    PRIMARY KEY,
+  project_root                 TEXT    NOT NULL,
+  enhancement_id               TEXT    NOT NULL,
+  body_id                      TEXT    NOT NULL,
+  body_revision                INTEGER NOT NULL,
+  generated_origin_state       TEXT    NOT NULL,
+  delivery_channel             TEXT    NOT NULL,
+  prompt_submit_processing_policy TEXT NOT NULL,
+  learning_eligible            INTEGER NOT NULL DEFAULT 0,
+  source_use_ids_json          TEXT    NOT NULL,
+  schema_version               INTEGER NOT NULL,
+  reason_codes_json            TEXT    NOT NULL,
+  created_at                   INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_pe_generated_origin_project_body
+  ON prompt_enhancement_generated_origin (project_root, body_id, body_revision);
+
+CREATE TABLE IF NOT EXISTS prompt_enhancement_feedback (
+  feedback_event_id     TEXT    PRIMARY KEY,
+  project_root          TEXT    NOT NULL,
+  enhancement_id        TEXT    NOT NULL,
+  body_id               TEXT    NOT NULL,
+  body_revision         INTEGER NOT NULL,
+  feedback_category     TEXT    NOT NULL,
+  feedback_scope_key    TEXT    NOT NULL,
+  learning_eligibility  TEXT    NOT NULL,
+  safety_impact_state   TEXT    NOT NULL,
+  raw_text_stored       INTEGER NOT NULL DEFAULT 0,
+  memory_evidence       INTEGER NOT NULL DEFAULT 0,
+  schema_version        INTEGER NOT NULL,
+  reason_codes_json     TEXT    NOT NULL,
+  created_at            INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_pe_feedback_project_body
+  ON prompt_enhancement_feedback (project_root, body_id, body_revision);
+
+CREATE TABLE IF NOT EXISTS prompt_enhancement_status (
+  project_root       TEXT    NOT NULL,
+  status_key         TEXT    NOT NULL,
+  status_value       TEXT    NOT NULL,
+  schema_version     INTEGER NOT NULL,
+  updated_at         INTEGER NOT NULL,
+  PRIMARY KEY (project_root, status_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_pe_status_project_updated
+  ON prompt_enhancement_status (project_root, updated_at);
 `;
 
 export function migrate(db: Database): void {
