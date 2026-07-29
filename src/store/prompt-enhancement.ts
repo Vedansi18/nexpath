@@ -216,6 +216,7 @@ export interface PromptEnhancementStoreStatus {
   feedbackRows: number;
   statusRows: number;
   estimatedBytes: number;
+  exportedDbBytes: number;
   capState: 'within_bounds' | 'over_row_cap_pruned' | 'policy_disabled_or_no_data';
   telemetryPolicy: 'ids_enums_counts_status_timing_only';
   rawContentStoredByDefault: false;
@@ -1011,6 +1012,7 @@ export function getPromptEnhancementStoreStatus(store: Store, projectRoot?: stri
     feedbackRows,
     statusRows,
     estimatedBytes: estimatePromptEnhancementBytes(store, projectRoot),
+    exportedDbBytes: store.db.export().byteLength,
     capState: lastReasonCodes.some((code) => code.includes('cap_enforced'))
       ? 'over_row_cap_pruned'
       : memoryRows + sourceUseRows + generatedOriginRows + feedbackRows + statusRows === 0

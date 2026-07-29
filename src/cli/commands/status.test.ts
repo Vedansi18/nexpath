@@ -211,6 +211,7 @@ describe('runStatus — store not initialised', () => {
       feedbackRows: 0,
       statusRows: 0,
       estimatedBytes: 0,
+      exportedDbBytes: 0,
       capState: 'policy_disabled_or_no_data',
     });
   });
@@ -333,6 +334,7 @@ describe('runStatus — with populated store', () => {
       oldStoreSurfacesAreAuthority: false,
     });
     expect(result.promptEnhancement.estimatedBytes).toBeGreaterThan(0);
+    expect(result.promptEnhancement.exportedDbBytes).toBeGreaterThan(0);
   });
 });
 
@@ -479,6 +481,7 @@ function makeResult(overrides: Partial<StatusResult> = {}): StatusResult {
       feedbackRows: 0,
       statusRows: 0,
       estimatedBytes: 0,
+      exportedDbBytes: 0,
       capState: 'policy_disabled_or_no_data',
       telemetryPolicy: 'ids_enums_counts_status_timing_only',
       rawContentStoredByDefault: false,
@@ -544,6 +547,7 @@ describe('renderStatus — sections', () => {
         feedbackRows: 4,
         statusRows: 5,
         estimatedBytes: 2048,
+        exportedDbBytes: 4096,
         capState: 'within_bounds',
         telemetryPolicy: 'ids_enums_counts_status_timing_only',
         rawContentStoredByDefault: false,
@@ -562,6 +566,7 @@ describe('renderStatus — sections', () => {
     expect(out).toContain('Source-use rows  : 2');
     expect(out).toContain('Generated-origin : 1');
     expect(out).toContain('Estimated bytes  : 2.0 KB');
+    expect(out).toContain('Exported DB bytes: 4.0 KB');
     expect(out).toContain('Cap state        : within_bounds');
     expect(out).toContain('Fallback/errors  : 6/7');
     expect(out).toContain('row_cap_enforced_without_prompt_fifo');

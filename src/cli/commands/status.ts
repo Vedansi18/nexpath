@@ -174,6 +174,7 @@ export async function runStatus(input: StatusInput): Promise<StatusResult> {
       feedbackRows: 0,
       statusRows: 0,
       estimatedBytes: 0,
+      exportedDbBytes: 0,
       capState: 'policy_disabled_or_no_data',
       telemetryPolicy: 'ids_enums_counts_status_timing_only',
       rawContentStoredByDefault: false,
@@ -259,6 +260,7 @@ export function renderStatus(result: StatusResult): string {
   lines.push(`  Feedback rows    : ${result.promptEnhancement.feedbackRows.toLocaleString()}`);
   lines.push(`  Status rows      : ${result.promptEnhancement.statusRows.toLocaleString()}`);
   lines.push(`  Estimated bytes  : ${formatBytes(result.promptEnhancement.estimatedBytes)}`);
+  lines.push(`  Exported DB bytes: ${formatBytes(result.promptEnhancement.exportedDbBytes)}`);
   lines.push(`  Cap state        : ${result.promptEnhancement.capState}`);
   lines.push(`  Last prune       : ${formatOptionalTimestamp(result.promptEnhancement.lastPruneAt)}`);
   lines.push(`  Last decay       : ${formatOptionalTimestamp(result.promptEnhancement.lastDecayAt)}`);
