@@ -16,6 +16,7 @@
 
 import { existsSync, readFileSync, statSync, readdirSync, opendirSync } from 'node:fs';
 import { join, dirname, basename } from 'node:path';
+import { tmpdir } from 'node:os';
 import {
   type EnvFact,
   type FactValue,
@@ -143,7 +144,7 @@ function anchorRepoRoot(start: string): string {
   let dir = start;
   for (let i = 0; i < MAX_ANCHOR_LEVELS; i++) {
     try {
-      if (existsSync(join(dir, '.git'))) return dir;
+      if (existsSync(join(dir, '.git')) && !isSystemTempBoundary(dir)) return dir;
     } catch {
       /* keep climbing */
     }
@@ -152,6 +153,11 @@ function anchorRepoRoot(start: string): string {
     dir = parent;
   }
   return start; // no .git found — fall back to the input root
+}
+
+function isSystemTempBoundary(dir: string): boolean {
+  const configuredTmp = tmpdir();
+  return dir === configuredTmp || dir === dirname(configuredTmp) || dir === '/tmp' || dir === '/var/tmp';
 }
 
 function detectProjectShape(entries: Set<string>, pkg: PackageJson | null): ProjectShape {
