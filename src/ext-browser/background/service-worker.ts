@@ -717,6 +717,19 @@ async function runPromptSubmitPipeline(
   // is the pre-Option-A static mapping (title = option, body = raw desc-base).
   const levels = buildLevels(content, null);
 
+  // ─── [NX-DEBUG] TEMP instrumentation — popup-empty-options bug. REMOVE after capture. ───
+  // Submit-time = the STATIC content path (buildLevels(content, null)). If the popup is
+  // already degenerate here, the static DecisionContent itself is empty (resolveDecisionContent),
+  // NOT the LLM. Compare static_L1_count vs options_count.
+  console.log('[NX-DEBUG submit]', JSON.stringify({
+    stage: state.currentStage,
+    static_L1_titles: content.L1?.map((e) => e.option) ?? null,
+    static_L1_count: content.L1?.length ?? 0,
+    levels_L1_count: levels.L1.length,
+    options_count: optionsFromLevels(levels).length,
+  }));
+  // ───────────────────────────────────────────────────────────────────────────────────────
+
   // Why-help register: use the engine's own profileToRegister — with no browser
   // profile (state.profile === null) it returns 'casual', the CLI's identical
   // no-profile default (register.ts), so the block renders as the CLI would.
@@ -925,8 +938,28 @@ async function handleResponseStop(projectRoot: string, tabId: number | undefined
         return null;
       });
       if (gen) {
+        // ─── [NX-DEBUG] TEMP instrumentation — popup-empty-options bug. REMOVE after capture. ───
+        // Show-time = the LLM path. gen is truthy here, so buildLevels(content, gen) runs.
+        //  • gen_l1 === []            → #3  (the `??`-on-empty-array bug in buildLevels)
+        //  • echo_L1 === true         → #4  (LLM echoed the user's prompt as the option)
+        //  • options_count === 0      → level(s) collapsed to empty
+        const lastPrompt = og.promptHistory?.[og.promptHistory.length - 1]?.text ?? null;
+        console.log('[NX-DEBUG show]', JSON.stringify({
+          advisoryId: payload.advisoryId,
+          gen_l1: gen.l1,
+          gen_l1_count: gen.l1?.length ?? 0,
+          gen_l2_count: gen.l2?.length ?? 0,
+          gen_l3_count: gen.l3?.length ?? 0,
+          lastPrompt,
+          echo_L1: !!(gen.l1 && gen.l1[0] && lastPrompt && gen.l1[0].trim() === lastPrompt.trim()),
+        }));
         payload.levels  = buildLevels(content, gen);
         payload.options = optionsFromLevels(payload.levels);
+        console.log('[NX-DEBUG show levels]', JSON.stringify({
+          levels_L1_titles: payload.levels.L1.map((o) => o.title),
+          options_count: payload.options.length,
+        }));
+        // ─────────────────────────────────────────────────────────────────────────────────────
         log.debug('advisory_personalized', { advisoryId: payload.advisoryId });
       } else {
         // Engine returned null without throwing — its internal retry/validation
