@@ -35,6 +35,8 @@ import { SessionStateManager } from '../../classifier/SessionStateManager.js';
 import { buildSafeDefaults } from '../../classifier/LLMProfileClassifier.js';
 import { preparePromptEnhancement } from '../../prompt-enhancement/facade.js';
 import { validatePromptEnhancementPrepareRequestV1 } from '../../prompt-enhancement/contracts.js';
+import { buildPromptEnhancementUiBoundarySessionV1 } from '../../prompt-enhancement/ui-boundary.js';
+import { createPromptEnhancementPopupEventV1 } from '../../prompt-enhancement/popup-session.js';
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -2033,6 +2035,71 @@ describe('H1.1 — validated PE preparation boundary', () => {
       });
       expect(noPopupResult.safeFallback).toBe(false);
       expect(noPopupResult.disposition).toBe('no_popup_not_applicable');
+    } finally {
+      store.db.close();
+    }
+  });
+
+  it('binds the validated H1.1 result to one typed H1.2 session and user event', async () => {
+    const store = await openStore(':memory:');
+    try {
+      const request = makeBoundaryRequest(store, '/test/h1-2-boundary');
+      const prepared = await preparePromptEnhancement(request);
+      const boundary = buildPromptEnhancementUiBoundarySessionV1({
+        result: prepared,
+        timestampMs: 100,
+        deliverySurface: prepared.delivery.deliveryChannel,
+      });
+
+      expect(boundary.state).toBe('session_ready');
+      if (boundary.state !== 'session_ready') throw new Error('expected typed H1.2 session');
+      expect(boundary.session.enhancementId).toBe(prepared.enhancementId);
+      expect(boundary.session.currentBodyId).toBe(prepared.uiView.body.currentBodyId);
+      expect(boundary.session.bodyRevision).toBe(prepared.uiView.body.bodyRevision);
+      expect(boundary.session.validationDecisionId).toBe(prepared.validationDecisionId);
+      expect(boundary.session.invariants.oneEditableBodyOnly).toBe(true);
+      expect(boundary.session.invariants.autoSendRejected).toBe(true);
+
+      const actionId = prepared.uiView.actions.find((action) => action.actionType === 'use_current_body')?.actionId;
+      expect(actionId).toBeDefined();
+      const event = createPromptEnhancementPopupEventV1({
+        session: boundary.session,
+        eventType: 'deliver_current_body',
+        actionId: actionId!,
+        currentBodyId: boundary.session.currentBodyId,
+        bodyRevision: boundary.session.bodyRevision,
+        editedBodyText: boundary.session.currentBodyText,
+        timestampMs: 101,
+        realUserInitiated: true,
+      });
+      expect(event.staleOrMismatched).toBe(false);
+      expect(event.realUserInitiated).toBe(true);
+      expect(event.enhancementId).toBe(boundary.session.enhancementId);
+
+      const staleEvent = createPromptEnhancementPopupEventV1({
+        session: boundary.session,
+        eventType: 'deliver_current_body',
+        actionId: actionId!,
+        currentBodyId: boundary.session.currentBodyId,
+        bodyRevision: boundary.session.bodyRevision + 1,
+        editedBodyText: boundary.session.currentBodyText,
+        timestampMs: 102,
+        realUserInitiated: true,
+      });
+      expect(staleEvent.staleOrMismatched).toBe(true);
+
+      const mismatch = buildPromptEnhancementUiBoundarySessionV1({
+        result: prepared,
+        timestampMs: 100,
+        deliverySurface: 'extension_bridge',
+      });
+      expect(mismatch).toMatchObject({ state: 'no_popup', reasonCodes: ['delivery_surface_mismatch'] });
+
+      const invalidTimestamp = buildPromptEnhancementUiBoundarySessionV1({
+        result: prepared,
+        timestampMs: Number.NaN,
+      });
+      expect(invalidTimestamp).toMatchObject({ state: 'no_popup', reasonCodes: ['invalid_render_timestamp'] });
     } finally {
       store.db.close();
     }
