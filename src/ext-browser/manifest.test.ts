@@ -41,6 +41,13 @@ describe('ext-browser manifests — permission surface', () => {
         expect(manifest.manifest_version).toBe(3);
         expect(manifest.version).toMatch(/^\d+\.\d+\.\d+$/);
       });
+
+      it('has a store-summary description within the Chrome 132-char limit', () => {
+        // Chrome derives the store SUMMARY from the manifest `description` (not editable in the
+        // dashboard) and caps it at 132 chars — over-length silently truncates on the listing.
+        expect(manifest.description.length).toBeGreaterThan(0);
+        expect(manifest.description.length).toBeLessThanOrEqual(132);
+      });
     });
   }
 
@@ -50,5 +57,6 @@ describe('ext-browser manifests — permission surface', () => {
     expect(firefox.permissions).toEqual(chrome.permissions);
     expect(firefox.host_permissions).toEqual(chrome.host_permissions);
     expect(firefox.version).toEqual(chrome.version);
+    expect(firefox.description).toEqual(chrome.description);
   });
 });
