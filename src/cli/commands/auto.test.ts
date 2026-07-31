@@ -22,7 +22,7 @@ vi.mock('openai', () => ({
   },
 }));
 import { getRecentPrompts } from '../../store/prompts.js';
-import { buildFiredKey, runAuto, readStdin } from './auto.js';
+import { buildFiredKey, preparePromptEnhancementForAuto, runAuto, readStdin } from './auto.js';
 import { writeTelemetry } from '../../telemetry/index.js';
 import type { AutoInput } from './auto.js';
 import { getPendingAdvisory } from '../../store/pending-advisories.js';
@@ -1840,5 +1840,57 @@ describe('runAuto — usage recording (feedback cadence)', () => {
     mgr.setInjectedPrompt(store, 'INJECTED');
     await runAuto(makeInput({ projectRoot: '/test/project', promptText: 'INJECTED' }), store);
     expect(readCadence(store).lastActivityAt).toBeNull();
+  });
+});
+describe('H1.1 — validated PE preparation boundary', () => {
+  const invalidRequest = {
+    schemaVersion: 1,
+    requestId: 'invalid-request',
+  } as never;
+
+  it('does not call the facade when the typed request is invalid', async () => {
+    const prepare = vi.fn();
+    const result = await preparePromptEnhancementForAuto({ request: invalidRequest, prepare });
+
+    expect(prepare).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      disposition: 'no_popup_not_applicable',
+      safeFallback: true,
+      reasonCode: 'invalid_request',
+    });
+  });
+
+  it('does not invoke a facade for a request missing the required typed source packet', async () => {
+    const request = {
+      ...invalidRequest,
+      projectRoot: '/test/project',
+      sourcePrompt: { text: 'review this change' },
+    } as never;
+    const prepare = vi.fn().mockRejectedValue(new Error('provider unavailable'));
+    const result = await preparePromptEnhancementForAuto({ request, prepare });
+
+    expect(prepare).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      disposition: 'no_popup_not_applicable',
+      safeFallback: true,
+      reasonCode: 'invalid_request',
+    });
+  });
+
+  it('keeps a malformed producer result out of the UI disposition sink when request validation fails first', async () => {
+    const request = {
+      ...invalidRequest,
+      projectRoot: '/test/project',
+      sourcePrompt: { text: 'review this change' },
+    } as never;
+    const prepare = vi.fn().mockResolvedValue({ disposition: 'show_current_body' });
+    const result = await preparePromptEnhancementForAuto({ request, prepare });
+
+    expect(prepare).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      disposition: 'no_popup_not_applicable',
+      safeFallback: true,
+      reasonCode: 'invalid_request',
+    });
   });
 });

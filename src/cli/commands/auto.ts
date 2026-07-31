@@ -38,6 +38,14 @@ import { writeTelemetry } from '../../telemetry/index.js';
 import { triggerOpportunisticSync } from '../../telemetry/OpportunisticSync.js';
 import { resolveFrequencyConfig, type AdvisoryFrequencyLevel } from '../../config/GlobalConfig.js';
 import { recentPromptMetadata } from '../../telemetry/recent-prompts.js';
+import {
+  validatePromptEnhancementPrepareRequestV1,
+  validatePromptEnhancementPrepareResultV1,
+  type PromptEnhancementPrepareFacadeV1,
+  type PromptEnhancementPrepareRequestV1,
+  type PromptEnhancementPrepareResultV1,
+  type PromptEnhancementDisposition,
+} from '../../prompt-enhancement/contracts.js';
 
 /**
  * nexpath auto — orchestration command (per decision-session-ux-research.md).
@@ -115,6 +123,69 @@ export interface AutoHookPayload {
 }
 
 /**
+ * Optional H1.1 integration seam. The request builder and semantic producer remain
+ * outside runAuto; this boundary only validates the approved typed packet/result and
+ * exposes a safe disposition to the application caller.
+ */
+export interface AutoPromptEnhancementIntegration {
+  request: PromptEnhancementPrepareRequestV1;
+  prepare: PromptEnhancementPrepareFacadeV1;
+  onResult?: (result: AutoPromptEnhancementPreparationResult) => void | Promise<void>;
+}
+
+export type AutoPromptEnhancementPreparationResult =
+  | {
+      disposition: PromptEnhancementDisposition;
+      result: PromptEnhancementPrepareResultV1;
+      safeFallback: false;
+    }
+  | {
+      disposition: 'no_popup_not_applicable';
+      result?: undefined;
+      safeFallback: true;
+      reasonCode: 'invalid_request' | 'invalid_result' | 'facade_error';
+      validationReasonCodes?: readonly string[];
+    };
+
+/**
+ * Validate the typed H1.1 request/result boundary without creating PE semantics.
+ * Invalid, thrown, or malformed producer output is reduced to the public-safe
+ * no-popup disposition; it never mutates the submitted prompt or legacy DS state.
+ */
+export async function preparePromptEnhancementForAuto(
+  integration: AutoPromptEnhancementIntegration,
+): Promise<AutoPromptEnhancementPreparationResult> {
+  const requestValidation = validatePromptEnhancementPrepareRequestV1(integration.request);
+  if (!requestValidation.ok) {
+    return {
+      disposition: 'no_popup_not_applicable',
+      safeFallback: true,
+      reasonCode: 'invalid_request',
+      validationReasonCodes: requestValidation.reasonCodes,
+    };
+  }
+
+  try {
+    const result = await integration.prepare(integration.request);
+    const resultValidation = validatePromptEnhancementPrepareResultV1(result);
+    if (!resultValidation.ok) {
+      return {
+        disposition: 'no_popup_not_applicable',
+        safeFallback: true,
+        reasonCode: 'invalid_result',
+        validationReasonCodes: resultValidation.reasonCodes,
+      };
+    }
+    return { disposition: result.disposition, result, safeFallback: false };
+  } catch {
+    return {
+      disposition: 'no_popup_not_applicable',
+      safeFallback: true,
+      reasonCode: 'facade_error',
+    };
+  }
+}
+/**
  * Parse the JSON payload the coding-agent hook writes to stdin.
  *
  * Captures the prompt text, the reported permission mode, and the session
@@ -157,6 +228,7 @@ export async function runAuto(
   input:   AutoInput,
   store:   Store,
   openai?: OpenAI,
+  promptEnhancement?: AutoPromptEnhancementIntegration,
 ): Promise<AutoOutcome> {
   // ── -1. Advisory-injected prompt guard ──────────────────────────────────────
   // When the stop hook injects an advisory option as a new Claude turn (block decision),
@@ -464,6 +536,20 @@ export async function runAuto(
   }
   const firedKey = buildFiredKey(effectiveFlagType, prevStage, mgr.current.currentStage);
   mgr.markDecisionSessionFired(store, firedKey);
+
+  // ── 8.1. H1.1 typed PE preparation seam ────────────────────────────────────
+  // The seam is opt-in until the approved request builder and executable Hiren
+  // producer are wired by the application entrypoint. It never changes shared
+  // gates, submitted prompt text, legacy DS authority, or delivery behavior.
+  if (promptEnhancement) {
+    const preparation = await preparePromptEnhancementForAuto(promptEnhancement);
+    await promptEnhancement.onResult?.(preparation);
+    logger.debug('prompt_enhancement_prepare_boundary', {
+      disposition: preparation.disposition,
+      safeFallback: preparation.safeFallback,
+      reasonCode: 'reasonCode' in preparation ? preparation.reasonCode : undefined,
+    });
+  }
 
   // ── 8.5. Read user profile (computed in processPrompt, null if < 5 prompts) ──
   const userProfile = mgr.current.profile ?? undefined;
