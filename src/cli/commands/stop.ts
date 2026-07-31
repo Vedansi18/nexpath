@@ -247,6 +247,28 @@ export async function runStop(
       generatedOptions = composeDeterministicOptions({ lookup, level, register, role });
       composePath = 'deterministic';
     }
+    // ─── [NX-DEBUG] TEMP instrumentation — popup-empty-options bug (CLI). REMOVE after capture. ───
+    // CLI option-DATA discriminator (mirrors the browser's nx_debug_show). Goes to `nexpath log`
+    // and NEXPATH_DEBUG=1 stderr.
+    //   • gen_l1_count === 0  → DATA bug (engine produced no L1 options)
+    //   • echo_L1 === true    → LLM echoed the user's prompt as the option (#4)
+    // If these look healthy (gen_l1_count>=1, echo_L1:false) but the popup still shows no options,
+    // the fault is the RENDER path (#1) — confirm via ${TMPDIR}/nexpath-render-debug.txt (avail=0).
+    {
+      const _lastPrompt = (mgr.current.promptHistory as PromptRecord[])?.slice(-1)[0]?.text ?? null;
+      const _l1First = generatedOptions?.l1?.[0] ?? null;
+      logger.debug('nx_debug_cli_options', {
+        stage:        advisory.stage,
+        signal:       recordSignalType,
+        composePath,
+        gen_null:     !generatedOptions,
+        gen_l1_count: generatedOptions?.l1?.length ?? 0,
+        gen_l2_count: generatedOptions?.l2?.length ?? 0,
+        gen_l3_count: generatedOptions?.l3?.length ?? 0,
+        echo_L1:      !!(_l1First && _lastPrompt && _l1First.trim() === _lastPrompt.trim()),
+      });
+    }
+    // ───────────────────────────────────────────────────────────────────────────────────────────
     // Record WHICH content variant was served (identity only — level / register /
     // role / record source / compose path; never any option text) so downstream
     // measurement can compare served variants against outcomes. Best-effort —
