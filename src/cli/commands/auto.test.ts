@@ -27,10 +27,12 @@ import { writeTelemetry } from '../../telemetry/index.js';
 import type { AutoInput } from './auto.js';
 import { getPendingAdvisory } from '../../store/pending-advisories.js';
 import { upsertProject, setDetectedLanguage, getProject } from '../../store/projects.js';
+import { upsertPendingAdvisory } from '../../store/pending-advisories.js';
 import { setConfig } from '../../store/config.js';
 import { readCadence, IDLE_CAP_MS } from '../../store/feedback-cadence.js';
 import type OpenAI from 'openai';
 import { SessionStateManager } from '../../classifier/SessionStateManager.js';
+import { buildSafeDefaults } from '../../classifier/LLMProfileClassifier.js';
 import { preparePromptEnhancement } from '../../prompt-enhancement/facade.js';
 import { validatePromptEnhancementPrepareRequestV1 } from '../../prompt-enhancement/contracts.js';
 
@@ -107,6 +109,41 @@ const FIRE_NO_RESPONSE = {
   fire_decision_session: false,
   reason:                'All signals present.',
 };
+
+function makeBoundaryRequest(store: Store, projectRoot: string, promptText = IMPL_PROMPT) {
+  const session = SessionStateManager.load(store, projectRoot);
+  return buildPromptEnhancementRequestForAuto({
+    auto: makeInput({ projectRoot, promptText, currentAgentMode: 'workspace-write' }),
+    store,
+    session,
+    project: null,
+    effectiveLanguage: 'en',
+    configuredRole: null,
+    effectiveFlagType: 'stage_transition',
+    firedKey: 'stage_transition:idea→implementation',
+    previousStage: 'idea',
+    trigger: { kind: 'stage_transition' },
+    stageResult: {
+      classification: { stage: 'implementation', confidence: 0.9, tier: 3, allScores: {} },
+      signalsPresent: [],
+      signalsAbsent: [],
+      fireRecommendation: true,
+      selectedSignalKey: '',
+      reason: 'test',
+      degraded: false,
+    },
+    streamBOutputs: [],
+  });
+}
+
+function primeTaskBreakdownSession(store: Store, projectRoot: string): SessionStateManager {
+  const session = SessionStateManager.load(store, projectRoot);
+  const classification = { stage: 'task_breakdown' as const, confidence: 0.85, tier: 3 as const, allScores: {} };
+  for (let i = 0; i < 4; i++) session.processPrompt(store, `warmup ${i}`, classification);
+  session.setProfile(buildSafeDefaults(100));
+  session.processPrompt(store, 'profile baseline', classification);
+  return session;
+}
 
 // ── buildFiredKey ─────────────────────────────────────────────────────────────
 
@@ -1882,6 +1919,173 @@ describe('H1.1 — validated PE preparation boundary', () => {
       const result = await preparePromptEnhancement(request);
       expect(result.disposition).toBe('show_current_body');
       expect(result.currentBody.originalPromptText).toBe(request.sourcePrompt.text);
+    } finally {
+      store.db.close();
+    }
+  });
+
+  it('calls the injected facade once for one eligible shared trigger', async () => {
+    const store = await openStore(':memory:');
+    try {
+      const projectRoot = '/test/h1-1-eligible';
+      primeTaskBreakdownSession(store, projectRoot);
+      const request = makeBoundaryRequest(store, projectRoot);
+      const facadeResult = await preparePromptEnhancement(request);
+      const prepare = vi.fn().mockResolvedValue(facadeResult);
+      const onResult = vi.fn();
+
+      const result = await runAuto(
+        makeInput({ projectRoot }),
+        store,
+        makeMockOpenAI(FIRE_YES_RESPONSE, 'Hold up.'),
+        { request, prepare, onResult },
+      );
+
+      expect(result.outcome).toBe('pending');
+      expect(prepare).toHaveBeenCalledTimes(1);
+      expect(onResult).toHaveBeenCalledTimes(1);
+      expect(request.reviewMomentContext.triggerProvenance.promptStartCanReplaceSameTurn).toBe(false);
+      expect(request.sourceSignals.sourceAOriginalPromptRef.sourceKind).toBe('source_a_user_prompt');
+    } finally {
+      store.db.close();
+    }
+  });
+
+  it('keeps the PE facade at zero calls across representative shared early gates', async () => {
+    const cases: Array<{ name: string; configure: (store: Store, projectRoot: string) => OpenAI | undefined; promptText?: string }> = [
+      {
+        name: 'frequency-off',
+        configure: (store) => { setConfig(store, 'advisory_frequency', 'off'); return undefined; },
+      },
+      {
+        name: 'minimum-prompt',
+        configure: () => undefined,
+        promptText: 'ok',
+      },
+      {
+        name: 'classifier-declined',
+        configure: (store, projectRoot) => {
+          SessionStateManager.load(store, projectRoot).addAbsenceFlag(store, {
+            signalKey: 'test_creation', stage: 'implementation', raisedAtIndex: 1, cooldownUntil: 100,
+          });
+          return makeMockOpenAI(FIRE_NO_RESPONSE);
+        },
+      },
+      {
+        name: 'dedup',
+        configure: (store, projectRoot) => {
+          SessionStateManager.load(store, projectRoot).markDecisionSessionFired(store, 'stage_transition:idea→implementation');
+          return makeMockOpenAI(FIRE_YES_RESPONSE);
+        },
+      },
+    ];
+
+    for (const testCase of cases) {
+      const store = await openStore(':memory:');
+      const projectRoot = `/test/h1-1-gate-${testCase.name}`;
+      try {
+        const request = makeBoundaryRequest(store, projectRoot, testCase.promptText ?? IMPL_PROMPT);
+        const prepare = vi.fn();
+        const openai = testCase.configure(store, projectRoot);
+        await runAuto(
+          makeInput({ projectRoot, promptText: testCase.promptText ?? IMPL_PROMPT }),
+          store,
+          openai,
+          { request, prepare },
+        );
+        expect(prepare, testCase.name).not.toHaveBeenCalled();
+      } finally {
+        store.db.close();
+      }
+    }
+  });
+
+  it('passes validated current, original-fallback, and no-popup dispositions without inventing UI authority', async () => {
+    const store = await openStore(':memory:');
+    try {
+      const request = makeBoundaryRequest(store, '/test/h1-1-dispositions');
+      const current = await preparePromptEnhancement(request);
+      const currentResult = await preparePromptEnhancementForAuto({
+        request,
+        prepare: vi.fn().mockResolvedValue(current),
+      });
+      expect(currentResult.safeFallback).toBe(false);
+      expect(currentResult.disposition).toBe('show_current_body');
+
+      // The H1.1 boundary consumes the already-validated closed disposition;
+      // action recomposition itself remains covered by the private PE suite.
+      const fallback = { ...current, disposition: 'fallback_to_original' as const };
+      const fallbackResult = await preparePromptEnhancementForAuto({
+        request,
+        prepare: vi.fn().mockResolvedValue(fallback),
+      });
+      expect(fallbackResult.safeFallback).toBe(false);
+      expect(fallbackResult.disposition).toBe('fallback_to_original');
+
+      const noPopupRequest = {
+        ...request,
+        sourcePrompt: { ...request.sourcePrompt, origin: 'pe_generated_echo' as const, generatedOriginPolicy: 'exclude_from_ordinary_learning' as const },
+      };
+      const noPopup = await preparePromptEnhancement(noPopupRequest);
+      const noPopupResult = await preparePromptEnhancementForAuto({
+        request: noPopupRequest,
+        prepare: vi.fn().mockResolvedValue(noPopup),
+      });
+      expect(noPopupResult.safeFallback).toBe(false);
+      expect(noPopupResult.disposition).toBe('no_popup_not_applicable');
+    } finally {
+      store.db.close();
+    }
+  });
+
+  it('reduces thrown and validator-rejected producer output to safe no-popup', async () => {
+    const store = await openStore(':memory:');
+    try {
+      const request = makeBoundaryRequest(store, '/test/h1-1-failures');
+      const thrown = await preparePromptEnhancementForAuto({
+        request,
+        prepare: vi.fn().mockRejectedValue(new Error('timeout')),
+      });
+      expect(thrown).toMatchObject({ disposition: 'no_popup_not_applicable', safeFallback: true, reasonCode: 'facade_error' });
+
+      const rejected = await preparePromptEnhancementForAuto({
+        request,
+        prepare: vi.fn().mockResolvedValue({ disposition: 'show_current_body' }),
+      });
+      expect(rejected).toMatchObject({ disposition: 'no_popup_not_applicable', safeFallback: true, reasonCode: 'invalid_result' });
+      expect(request.sourcePrompt.text).toBe(IMPL_PROMPT);
+    } finally {
+      store.db.close();
+    }
+  });
+
+  it('never treats an old pending Decision Session advisory as PE authority', async () => {
+    const store = await openStore(':memory:');
+    try {
+      const projectRoot = '/test/h1-1-old-ds';
+      const session = primeTaskBreakdownSession(store, projectRoot);
+      upsertPendingAdvisory(store, {
+        projectRoot,
+        stage: 'implementation',
+        flagType: 'stage_transition',
+        pinchLabel: 'old DS payload',
+        sessionId: session.current.sessionId,
+        promptCount: 1,
+      });
+      const request = makeBoundaryRequest(store, projectRoot);
+      const facadeResult = await preparePromptEnhancement(request);
+      const prepare = vi.fn().mockResolvedValue(facadeResult);
+
+      await runAuto(
+        makeInput({ projectRoot }),
+        store,
+        makeMockOpenAI(FIRE_YES_RESPONSE, 'New advisory.'),
+        { request, prepare },
+      );
+
+      expect(prepare).toHaveBeenCalledTimes(1);
+      expect(request.sourcePrompt.text).toBe(IMPL_PROMPT);
+      expect(getPendingAdvisory(store, projectRoot)?.pinchLabel).not.toBe('old DS payload');
     } finally {
       store.db.close();
     }
