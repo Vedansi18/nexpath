@@ -535,8 +535,6 @@ export async function runAuto(
     effectiveFlagType = `absence:${selectedKey}`;
   }
   const firedKey = buildFiredKey(effectiveFlagType, prevStage, mgr.current.currentStage);
-  mgr.markDecisionSessionFired(store, firedKey);
-
   // ── 8.1. H1.1 typed PE preparation seam ────────────────────────────────────
   // The seam is opt-in until the approved request builder and executable Hiren
   // producer are wired by the application entrypoint. It never changes shared
@@ -550,6 +548,10 @@ export async function runAuto(
       reasonCode: 'reasonCode' in preparation ? preparation.reasonCode : undefined,
     });
   }
+
+  // H1.3 keeps legacy Decision Session bookkeeping after preparation; PE preparation
+  // remains capture/classification-only and cannot gain DS authority.
+  mgr.markDecisionSessionFired(store, firedKey);
 
   // ── 8.5. Read user profile (computed in processPrompt, null if < 5 prompts) ──
   const userProfile = mgr.current.profile ?? undefined;

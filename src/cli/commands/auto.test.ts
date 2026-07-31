@@ -1894,3 +1894,44 @@ describe('H1.1 — validated PE preparation boundary', () => {
     });
   });
 });
+
+
+describe('H1.3 - preparation-only execution constraints', () => {
+  let store: Store;
+
+  beforeEach(async () => { store = await openStore(':memory:'); });
+  afterEach(() => { store.db.close(); });
+
+  it('keeps a non-eligible prompt in the existing AutoOutcome and prompt boundary', async () => {
+    const projectRoot = '/test/h1-3-non-eligible';
+    const promptText = 'ok';
+    const prepare = vi.fn();
+    const onResult = vi.fn();
+
+    const result = await runAuto(
+      makeInput({ projectRoot, promptText }),
+      store,
+      undefined,
+      { request: { schemaVersion: 1, requestId: 'not-eligible' } as never, prepare, onResult },
+    );
+
+    expect(result.outcome).toBe('no_action');
+    expect(prepare).not.toHaveBeenCalled();
+    expect(onResult).not.toHaveBeenCalled();
+    expect(getRecentPrompts(store, projectRoot, 10).map((prompt) => prompt.text)).toEqual([promptText]);
+
+    const { SessionStateManager } = await import('../../classifier/SessionStateManager.js');
+    expect(SessionStateManager.load(store, projectRoot).current.lastInjectedPrompt ?? null).toBeNull();
+  });
+
+  it('keeps malformed PE preparation on safe no-popup without invoking a facade', async () => {
+    const prepare = vi.fn().mockResolvedValue({ disposition: 'show_current_body' });
+    const result = await preparePromptEnhancementForAuto({
+      request: { schemaVersion: 1, requestId: 'malformed' } as never,
+      prepare,
+    });
+
+    expect(result).toMatchObject({ disposition: 'no_popup_not_applicable', safeFallback: true, reasonCode: 'invalid_request' });
+    expect(prepare).not.toHaveBeenCalled();
+  });
+});
