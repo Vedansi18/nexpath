@@ -21,6 +21,7 @@ import { selectionRegister } from '../../decision-session/selection-registry.js'
 import { resolvePinchFields } from '../../decision-session/signal-pinch-fields.js';
 import type { Stage } from '../../classifier/types.js';
 import type { FlagType, Stage2TriggerResult } from '../../classifier/Stage2Trigger.js';
+import type { StageClassifierResult } from '../../classifier/stage-classifier.js';
 import { resolveLanguage } from '../../classifier/LanguageDetector.js';
 import { insertPrompt } from '../../store/prompts.js';
 import { getConfig } from '../../store/config.js';
@@ -39,13 +40,18 @@ import { triggerOpportunisticSync } from '../../telemetry/OpportunisticSync.js';
 import { resolveFrequencyConfig, type AdvisoryFrequencyLevel } from '../../config/GlobalConfig.js';
 import { recentPromptMetadata } from '../../telemetry/recent-prompts.js';
 import {
+  PROMPT_ENHANCEMENT_CONTRACT_VERSION,
   validatePromptEnhancementPrepareRequestV1,
   validatePromptEnhancementPrepareResultV1,
   type PromptEnhancementPrepareFacadeV1,
   type PromptEnhancementPrepareRequestV1,
   type PromptEnhancementPrepareResultV1,
   type PromptEnhancementDisposition,
+  type PromptEnhancementSourceRefV1,
 } from '../../prompt-enhancement/contracts.js';
+import { preparePromptEnhancement } from '../../prompt-enhancement/facade.js';
+import { buildPromptEnhancementCostVisibilityMetadataV1 } from '../../prompt-enhancement/cost-observability.js';
+import { getSourceRealityAdaptersSnapshot } from '../../prompt-enhancement/source-reality.js';
 
 /**
  * nexpath auto — orchestration command (per decision-session-ux-research.md).
@@ -131,6 +137,191 @@ export interface AutoPromptEnhancementIntegration {
   request: PromptEnhancementPrepareRequestV1;
   prepare: PromptEnhancementPrepareFacadeV1;
   onResult?: (result: AutoPromptEnhancementPreparationResult) => void | Promise<void>;
+}
+
+/**
+ * Build the approved H1.1 typed PE request from the values already produced by
+ * runAuto. This is an adapter only: it records existing classifier/session/source
+ * facts and does not create new routing, delivery, or semantic authority.
+ */
+export function buildPromptEnhancementRequestForAuto(input: {
+  auto: AutoInput;
+  store: Store;
+  session: SessionStateManager;
+  project: ReturnType<typeof getProject>;
+  effectiveLanguage?: string;
+  configuredRole?: string | null;
+  effectiveFlagType: FlagType;
+  firedKey: string;
+  previousStage: Stage;
+  trigger: Exclude<Stage2TriggerResult, null>;
+  stageResult: StageClassifierResult;
+  streamBOutputs: readonly string[];
+}): PromptEnhancementPrepareRequestV1 {
+  const promptIndex = input.session.current.promptCount - 1;
+  const currentStage = input.session.current.currentStage;
+  const register = selectionRegister(input.session.current.profile?.nature);
+  const source = getSourceRealityAdaptersSnapshot({
+    flagType: input.effectiveFlagType,
+    stage: currentStage,
+    projectRoot: input.auto.projectRoot,
+    register,
+    role: input.configuredRole ?? undefined,
+    level: 1,
+    store: input.store,
+  });
+  const content = source.contentTemplate;
+  const sourceId = `prompt:${promptIndex}`;
+  const originalPromptRef: PromptEnhancementSourceRefV1 = {
+    sourceRefId: `source-a:${sourceId}`,
+    sourceKind: 'source_a_user_prompt',
+    sourceId,
+    sourceAuthorization: 'source_fact_only',
+    evidenceStatus: 'present',
+    freshness: 'current',
+    confidence: 'high',
+    privacyClass: 'local_private',
+  };
+  const triggerRef: PromptEnhancementSourceRefV1 = {
+    sourceRefId: `trigger:${input.effectiveFlagType}`,
+    sourceKind: 'stage_or_absence_signal',
+    sourceId: input.effectiveFlagType,
+    sourceAuthorization: 'source_fact_only',
+    evidenceStatus: 'present',
+    freshness: 'current',
+    confidence: input.stageResult.classification.confidence >= 0.8
+      ? 'high'
+      : input.stageResult.classification.confidence >= 0.5 ? 'medium' : 'low',
+    privacyClass: 'public_safe',
+  };
+  const contentRef = content.resolvedRecordIdentity
+    ? {
+        sourceRefId: `content:${content.resolvedRecordIdentity}`,
+        sourceKind: 'content_template_fact' as const,
+        sourceId: content.resolvedRecordIdentity,
+        sourceAuthorization: content.authorization,
+        evidenceStatus: 'present' as const,
+        freshness: 'current' as const,
+        confidence: 'medium' as const,
+        privacyClass: 'public_safe' as const,
+      }
+    : undefined;
+  const sourceRefs = [originalPromptRef, triggerRef, ...(contentRef ? [contentRef] : [])];
+  const triggerKind = input.trigger.kind;
+  const absenceSignal = triggerKind === 'absence'
+    ? input.effectiveFlagType.replace(/^absence:/, '')
+    : undefined;
+  const recentRefs = recentPromptMetadata(input.session.current.promptHistory)
+    .map((prompt) => `prompt:${prompt.index}`);
+
+  return {
+    schemaVersion: PROMPT_ENHANCEMENT_CONTRACT_VERSION,
+    requestId: `pe:auto:${input.session.current.sessionId}:${promptIndex}:${input.effectiveFlagType}`,
+    projectRoot: input.auto.projectRoot,
+    hostSurface: 'cli_stop_bridge',
+    sourcePrompt: {
+      text: input.auto.promptText,
+      origin: 'user',
+      capturedAt: Date.now(),
+      promptIndex,
+      generatedOriginPolicy: 'ordinary_source_a',
+    },
+    reviewMomentContext: {
+      reviewMoment: 'UserPromptSubmit_preparation',
+      currentAgentMode: input.auto.currentAgentMode ?? 'unknown',
+      projectId: input.project?.projectRoot ?? input.auto.projectRoot,
+      sessionId: input.session.current.sessionId,
+      detectedLanguage: input.effectiveLanguage ?? 'unknown',
+      stageCandidate: currentStage,
+      promptCount: input.session.current.promptCount,
+      recentPromptMetadataRefs: recentRefs,
+      triggerProvenance: {
+        currentStage,
+        prevStage: input.previousStage,
+        triggerKind,
+        firedKey: input.firedKey,
+        effectiveFiredSource: input.effectiveFlagType,
+        selectedQualifyingAbsence: absenceSignal,
+        absenceGateReason: absenceSignal ? 'qualifying_absence_signal' : undefined,
+        classifierState: input.stageResult.degraded ? 'degraded_no_fire' : 'fire_recommended',
+        degradedNoActionState: input.stageResult.degraded ? 'degraded_no_fire' : 'none',
+        promptStartBoundary: source.promptStartStop.hookBoundary,
+        deliveryBoundary: source.promptStartStop.deliveryBoundary,
+        promptStartCanReplaceSameTurn: source.promptStartStop.runAutoCanHoldOrReplaceSubmittedPrompt,
+        promptId: sourceId,
+        sessionId: input.session.current.sessionId,
+        promptIndex,
+      },
+    },
+    sourceSignals: {
+      sourceAOriginalPromptRef: originalPromptRef,
+      sourceRefs,
+      normalizedStageAbsenceSignalRefs: absenceSignal ? [absenceSignal] : [],
+      contentTemplateRecordFactRefs: content.resolvedRecordIdentity ? [content.resolvedRecordIdentity] : [],
+      popupQuestionSourceRefs: content.resolvedRecordIdentity ? [`${content.resolvedRecordIdentity}:question`] : [],
+      whyHelpSourceRefs: content.resolvedRecordIdentity ? [`${content.resolvedRecordIdentity}:why-help`] : [],
+      profileRoleModeRefs: input.configuredRole ? [`role:${input.configuredRole}`] : [],
+      rightGoodWorkStyleEnvRuntimeRefs: [],
+      missingMemoryCandidateRefs: [],
+      sourceLabels: [
+        { sourceRefId: originalPromptRef.sourceRefId, label: 'original_prompt', evidenceStatus: 'present' },
+        { sourceRefId: triggerRef.sourceRefId, label: 'stage_absence_signal', evidenceStatus: 'present' },
+        ...(contentRef ? [{ sourceRefId: contentRef.sourceRefId, label: 'content_template_fact' as const, evidenceStatus: 'present' as const }] : []),
+      ],
+      contentTemplate: {
+        recordSignalType: content.recordSignalType,
+        contentSource: content.contentSource,
+        resolvedRecordIdentity: content.resolvedRecordIdentity,
+        resolvedSource: content.resolvedSource,
+        sourceCascade: content.sourceCascade,
+        registerOverridePath: content.registerOverridePath,
+        safeguardRequired: content.safeguardRequired,
+        questionServing: content.questionServing,
+      },
+      promptStartStop: {
+        hookBoundary: source.promptStartStop.hookBoundary,
+        deliveryBoundary: source.promptStartStop.deliveryBoundary,
+        runAutoCanHoldOrReplaceSubmittedPrompt: source.promptStartStop.runAutoCanHoldOrReplaceSubmittedPrompt,
+        sharedSignalCount: source.promptStartStop.sharedSignalCount,
+        classifierDegradedNoFireReasons: source.promptStartStop.classifierDegradedNoFireReasons,
+      },
+      store: {
+        schemaVersion: source.store.schemaVersion,
+        missingPromptEnhancementTables: source.store.missingPromptEnhancementTables,
+        cleanupGaps: source.store.cleanupGaps,
+      },
+      historicalBootstrap: source.historicalBootstrap,
+      launchBoundary: source.launchBoundary,
+      permissionMode: input.auto.currentAgentMode ?? 'unknown',
+      transcriptPathState: input.auto.transcriptPath ? 'provided' : 'not_authority',
+      streamBOutputs: input.streamBOutputs,
+      paramEventChannels: [],
+      servedVariantIdentityRefs: [],
+      deliveryGateRefs: [],
+      sourceOnlyHardFactRefs: [],
+    },
+    userPreferenceContext: {
+      levelState: 'default',
+      scopedFeedbackEvidenceRefs: [],
+    },
+    configSnapshot: {
+      sequenceEnabledState: 'not_enabled_v1',
+      validatedEffectiveConfigState: 'valid',
+      arbitraryConfigRowsAreAuthority: false,
+    },
+    callVisibilityState: buildPromptEnhancementCostVisibilityMetadataV1('baseline_pe_composer', {
+      callVisibilityMode: 'deterministic',
+      plannedCallCount: 0,
+      usedCallCount: 0,
+    }),
+    privacyAndStoragePolicy: {
+      sensitivityClass: 'normal',
+      localStorageEligibility: 'ids_and_categories_only',
+      telemetryEligibility: 'allowlisted_counts_only',
+      llmSharingEligibility: 'allowed_minimal',
+      generatedBodyStoragePolicy: 'do_not_store_raw_by_default',
+    },
+  };
 }
 
 export type AutoPromptEnhancementPreparationResult =
@@ -536,18 +727,37 @@ export async function runAuto(
   }
   const firedKey = buildFiredKey(effectiveFlagType, prevStage, mgr.current.currentStage);
   // ── 8.1. H1.1 typed PE preparation seam ────────────────────────────────────
-  // The seam is opt-in until the approved request builder and executable Hiren
-  // producer are wired by the application entrypoint. It never changes shared
-  // gates, submitted prompt text, legacy DS authority, or delivery behavior.
-  if (promptEnhancement) {
-    const preparation = await preparePromptEnhancementForAuto(promptEnhancement);
-    await promptEnhancement.onResult?.(preparation);
-    logger.debug('prompt_enhancement_prepare_boundary', {
-      disposition: preparation.disposition,
-      safeFallback: preparation.safeFallback,
-      reasonCode: 'reasonCode' in preparation ? preparation.reasonCode : undefined,
-    });
-  }
+  // Build and consume the approved PE packet by default. An injected integration
+  // remains available for boundary tests, while the default path now exercises
+  // the executable Hiren facade without changing legacy DS or delivery authority.
+  const peIntegration = promptEnhancement ?? {
+    request: buildPromptEnhancementRequestForAuto({
+      auto: input,
+      store,
+      session: mgr,
+      project,
+      effectiveLanguage: effectiveLang,
+      configuredRole,
+      effectiveFlagType,
+      firedKey,
+      previousStage: prevStage,
+      trigger: triggerResult,
+      stageResult,
+      streamBOutputs: streamBOverrides
+        ? Object.entries(streamBOverrides)
+          .filter(([, present]) => present)
+          .map(([signal]) => `stream_b:${signal}`)
+        : [],
+    }),
+    prepare: preparePromptEnhancement,
+  };
+  const preparation = await preparePromptEnhancementForAuto(peIntegration);
+  await peIntegration.onResult?.(preparation);
+  logger.debug('prompt_enhancement_prepare_boundary', {
+    disposition: preparation.disposition,
+    safeFallback: preparation.safeFallback,
+    reasonCode: 'reasonCode' in preparation ? preparation.reasonCode : undefined,
+  });
 
   // H1.3 keeps legacy Decision Session bookkeeping after preparation; PE preparation
   // remains capture/classification-only and cannot gain DS authority.

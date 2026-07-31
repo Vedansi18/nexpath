@@ -22,7 +22,7 @@ vi.mock('openai', () => ({
   },
 }));
 import { getRecentPrompts } from '../../store/prompts.js';
-import { buildFiredKey, preparePromptEnhancementForAuto, runAuto, readStdin } from './auto.js';
+import { buildFiredKey, buildPromptEnhancementRequestForAuto, preparePromptEnhancementForAuto, runAuto, readStdin } from './auto.js';
 import { writeTelemetry } from '../../telemetry/index.js';
 import type { AutoInput } from './auto.js';
 import { getPendingAdvisory } from '../../store/pending-advisories.js';
@@ -30,6 +30,9 @@ import { upsertProject, setDetectedLanguage, getProject } from '../../store/proj
 import { setConfig } from '../../store/config.js';
 import { readCadence, IDLE_CAP_MS } from '../../store/feedback-cadence.js';
 import type OpenAI from 'openai';
+import { SessionStateManager } from '../../classifier/SessionStateManager.js';
+import { preparePromptEnhancement } from '../../prompt-enhancement/facade.js';
+import { validatePromptEnhancementPrepareRequestV1 } from '../../prompt-enhancement/contracts.js';
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -1843,6 +1846,47 @@ describe('runAuto — usage recording (feedback cadence)', () => {
   });
 });
 describe('H1.1 — validated PE preparation boundary', () => {
+  it('builds a valid source-backed request and runs the approved facade', async () => {
+    const store = await openStore(':memory:');
+    try {
+      const projectRoot = '/test/h1-1-builder';
+      const session = SessionStateManager.load(store, projectRoot);
+      const request = buildPromptEnhancementRequestForAuto({
+        auto: makeInput({ projectRoot, currentAgentMode: 'workspace-write' }),
+        store,
+        session,
+        project: null,
+        effectiveLanguage: 'en',
+        configuredRole: null,
+        effectiveFlagType: 'stage_transition',
+        firedKey: 'stage_transition:task_breakdown→implementation',
+        previousStage: 'task_breakdown',
+        trigger: { kind: 'stage_transition' },
+        stageResult: {
+          classification: { stage: 'implementation', confidence: 0.9, tier: 3, allScores: {} },
+          signalsPresent: [],
+          signalsAbsent: [],
+          fireRecommendation: true,
+          selectedSignalKey: '',
+          reason: 'test',
+          degraded: false,
+        },
+        streamBOutputs: [],
+      });
+
+      expect(validatePromptEnhancementPrepareRequestV1(request).ok).toBe(true);
+      expect(request.sourceSignals.sourceAOriginalPromptRef.sourceKind).toBe('source_a_user_prompt');
+      expect(request.reviewMomentContext.triggerProvenance.firedKey).toContain('stage_transition');
+      expect(request.sourceSignals.promptStartStop.runAutoCanHoldOrReplaceSubmittedPrompt).toBe(false);
+
+      const result = await preparePromptEnhancement(request);
+      expect(result.disposition).toBe('show_current_body');
+      expect(result.currentBody.originalPromptText).toBe(request.sourcePrompt.text);
+    } finally {
+      store.db.close();
+    }
+  });
+
   const invalidRequest = {
     schemaVersion: 1,
     requestId: 'invalid-request',
