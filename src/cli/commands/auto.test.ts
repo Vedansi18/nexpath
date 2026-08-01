@@ -2154,6 +2154,178 @@ describe('H1.1 — validated PE preparation boundary', () => {
     }
   });
 
+  it('DEP-TEST-01-B1.1-01: renders only the approved typed popup surface', async () => {
+    const store = await openStore(':memory:');
+    try {
+      const prepared = await preparePromptEnhancement(makeBoundaryRequest(store, '/test/dep-test-01-01'));
+      const renderModel = buildPromptEnhancementPopupRenderModelV1({
+        result: prepared,
+        timestampMs: 203,
+        deliverySurface: prepared.delivery.deliveryChannel,
+      });
+
+      expect(renderModel.state).toBe('render_model_ready');
+      if (renderModel.state !== 'render_model_ready') throw new Error('expected DEP-TEST-01 popup');
+      expect(renderModel.model.title).toBe('Nexpath · Prompt enhancement');
+      expect(renderModel.model.layout).toEqual([
+        'header',
+        'pre_send_public_copy',
+        'editor_heading',
+        'enhanced_body',
+        'additional_details',
+        'directional_actions',
+        'use_original',
+        'keyboard_help',
+      ]);
+      expect(renderModel.model.body.text).toBe(prepared.uiView.body.text);
+      expect(renderModel.model.identity).toMatchObject({
+        enhancementId: prepared.enhancementId,
+        currentBodyId: prepared.uiView.body.currentBodyId,
+        bodyRevision: prepared.uiView.body.bodyRevision,
+        validationDecisionId: prepared.validationDecisionId,
+      });
+    } finally {
+      store.db.close();
+    }
+  });
+
+  it('DEP-TEST-01-B1.1-02: keeps no_popup_not_applicable absent from the UI surface', async () => {
+    const store = await openStore(':memory:');
+    try {
+      const request = makeBoundaryRequest(store, '/test/dep-test-01-02');
+      const noPopup = await preparePromptEnhancement({
+        ...request,
+        sourcePrompt: {
+          ...request.sourcePrompt,
+          origin: 'pe_generated_echo' as const,
+          generatedOriginPolicy: 'exclude_from_ordinary_learning' as const,
+        },
+      });
+      const renderModel = buildPromptEnhancementPopupRenderModelV1({ result: noPopup, timestampMs: 204 });
+
+      expect(renderModel).toEqual({
+        state: 'no_popup',
+        reasonCodes: ['typed_no_popup_disposition'],
+      });
+    } finally {
+      store.db.close();
+    }
+  });
+
+  it('DEP-TEST-01-B1.1-03: preserves typed locked/loading state without locally enabling edit or send', async () => {
+    const store = await openStore(':memory:');
+    try {
+      const prepared = await preparePromptEnhancement(makeBoundaryRequest(store, '/test/dep-test-01-03'));
+      const loadingResult = {
+        ...prepared,
+        uiView: {
+          ...prepared.uiView,
+          body: { ...prepared.uiView.body, actionLoadingState: 'loading_action' as const },
+        },
+      };
+      const renderModel = buildPromptEnhancementPopupRenderModelV1({
+        result: loadingResult,
+        timestampMs: 205,
+        deliverySurface: loadingResult.delivery.deliveryChannel,
+      });
+
+      expect(renderModel.state).toBe('render_model_ready');
+      if (renderModel.state !== 'render_model_ready') throw new Error('expected loading render model');
+      expect(renderModel.model.session.popupLifecycleState).toBe('action_loading');
+      expect(renderModel.model.body.editabilityState).toBe('locked_action_loading');
+      expect(renderModel.model.body.editable).toBe(false);
+      expect(renderModel.model.session.requiresUserFinalSubmit).toBe(true);
+      expect(renderModel.model.session.sendabilityState).toBe('send_current');
+    } finally {
+      store.db.close();
+    }
+  });
+
+  it('DEP-TEST-01-B1.1-04: rejects stale or mismatched typed action identity before render', async () => {
+    const store = await openStore(':memory:');
+    try {
+      const prepared = await preparePromptEnhancement(makeBoundaryRequest(store, '/test/dep-test-01-04'));
+      const staleResult = {
+        ...prepared,
+        uiView: {
+          ...prepared.uiView,
+          actions: prepared.uiView.actions.map((action) => ({
+            ...action,
+            bodyRevision: action.bodyRevision + 1,
+          })),
+        },
+      };
+      const renderModel = buildPromptEnhancementPopupRenderModelV1({ result: staleResult, timestampMs: 206 });
+
+      expect(renderModel.state).toBe('no_popup');
+      expect(renderModel.reasonCodes).toEqual([
+        'invalid_popup_session',
+        'stale_popup_action:use_current_body',
+        'stale_popup_action:use_original',
+        'stale_popup_action:shorter',
+        'stale_popup_action:more_thorough',
+        'stale_popup_action:more_project_grounded',
+        'stale_popup_action:apply_details',
+        'stale_popup_action:feedback',
+        'stale_popup_action:close',
+      ]);
+    } finally {
+      store.db.close();
+    }
+  });
+
+  it('DEP-TEST-01-B1.1-05: keeps fallback/provider state read-only and exposes no automatic delivery claim', async () => {
+    const store = await openStore(':memory:');
+    try {
+      const prepared = await preparePromptEnhancement(makeBoundaryRequest(store, '/test/dep-test-01-05'));
+      const fallbackResult = {
+        ...prepared,
+        uiView: {
+          ...prepared.uiView,
+          body: {
+            ...prepared.uiView.body,
+            fallbackMode: 'provider_api_unavailable' as const,
+            sendPolicy: 'send_original' as const,
+          },
+        },
+      };
+      const renderModel = buildPromptEnhancementPopupRenderModelV1({ result: fallbackResult, timestampMs: 207 });
+
+      expect(renderModel.state).toBe('render_model_ready');
+      if (renderModel.state !== 'render_model_ready') throw new Error('expected fallback render model');
+      expect(renderModel.model.body.editabilityState).toBe('read_only_fallback');
+      expect(renderModel.model.body.editable).toBe(false);
+      expect(renderModel.model.session.sendabilityState).toBe('send_original');
+      expect(renderModel.model.rejectedControls).toContain('auto_submit');
+      expect(renderModel.model.session.sendDeliveryMode).not.toBe('clipboard_only_manual_paste_required');
+    } finally {
+      store.db.close();
+    }
+  });
+
+  it('DEP-TEST-01-B1.1-06: keeps the public boundary free of legacy labels, private diagnostics, and delivery authority', async () => {
+    const store = await openStore(':memory:');
+    try {
+      const prepared = await preparePromptEnhancement(makeBoundaryRequest(store, '/test/dep-test-01-06'));
+      const renderModel = buildPromptEnhancementPopupRenderModelV1({ result: prepared, timestampMs: 208 });
+
+      expect(renderModel.state).toBe('render_model_ready');
+      if (renderModel.state !== 'render_model_ready') throw new Error('expected privacy render model');
+      const publicSerialized = JSON.stringify(renderModel.model.publicCopy);
+      expect(publicSerialized).not.toContain('Review enhanced prompt');
+      expect(publicSerialized).not.toContain('raw_internal_source_diagnostics');
+      expect(publicSerialized).not.toContain('clipboard_manual_copy');
+      expect(publicSerialized).not.toContain('auto_submit');
+      expect(renderModel.model.publicCopy.diagnostics.every((diagnostic) => diagnostic.rawPromptExcluded)).toBe(true);
+      expect(renderModel.model.rejectedControls).toEqual(expect.arrayContaining([
+        'raw_internal_source_diagnostics',
+        'auto_submit',
+      ]));
+    } finally {
+      store.db.close();
+    }
+  });
+
   it('fail-closes B1.1 for typed no-popup and invalid producer input', async () => {
     const store = await openStore(':memory:');
     try {
