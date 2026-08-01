@@ -44,6 +44,12 @@ import {
   updatePromptEnhancementAdditionalDetailsDraftV1,
   updatePromptEnhancementCurrentBodyDraftV1,
 } from '../../prompt-enhancement/local-draft.js';
+import {
+  beginPromptEnhancementActionV1,
+  buildPromptEnhancementActionAdapterStateV1,
+  buildPromptEnhancementActionRequestV1,
+  resolvePromptEnhancementActionV1,
+} from '../../prompt-enhancement/action-adapter.js';
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -2449,6 +2455,180 @@ describe('H1.1 — validated PE preparation boundary', () => {
       });
       expect(event.sendPolicy).toBe('no_send');
       expect(event.reasonCodes).toContain('dirty_additional_details_requires_apply_or_clear_before_send');
+    } finally {
+      store.db.close();
+    }
+  });
+
+  it('B1.3: builds one typed action request from the supplied identity and availability', async () => {
+    const store = await openStore(':memory:');
+    try {
+      const baseRequest = makeBoundaryRequest(store, '/test/b1-3-request');
+      const prepared = await preparePromptEnhancement(baseRequest);
+      const boundary = buildPromptEnhancementUiBoundarySessionV1({ result: prepared, timestampMs: 215 });
+      expect(boundary.state).toBe('session_ready');
+      if (boundary.state !== 'session_ready') throw new Error('expected B1.3 session');
+      const action = prepared.uiView.actions.find((entry) => entry.actionType === 'shorter');
+      expect(action).toBeDefined();
+      if (!action) throw new Error('expected shorter action');
+
+      const built = buildPromptEnhancementActionRequestV1({
+        baseRequest,
+        session: boundary.session,
+        action,
+        editedBodyText: boundary.session.currentBodyText,
+        timestampMs: 216,
+      });
+      expect(built.state).toBe('request_ready');
+      if (built.state !== 'request_ready') throw new Error('expected action request');
+      expect(built.request.action.actionType).toBe('shorter');
+      expect(built.request.currentBodyBinding).toMatchObject({
+        currentBodyId: boundary.session.currentBodyId,
+        bodyRevision: boundary.session.bodyRevision,
+        validationDecisionId: boundary.session.validationDecisionId,
+        editedBodyText: boundary.session.currentBodyText,
+        realUserInitiated: true,
+      });
+      expect(built.request.currentBodyBinding.sectionSpanEditEvents).toEqual([]);
+    } finally {
+      store.db.close();
+    }
+  });
+
+  it('B1.3: prevents duplicate activation and blocks unavailable or stale actions without a request', async () => {
+    const store = await openStore(':memory:');
+    try {
+      const baseRequest = makeBoundaryRequest(store, '/test/b1-3-gates');
+      const prepared = await preparePromptEnhancement(baseRequest);
+      const boundary = buildPromptEnhancementUiBoundarySessionV1({ result: prepared, timestampMs: 217 });
+      expect(boundary.state).toBe('session_ready');
+      if (boundary.state !== 'session_ready') throw new Error('expected B1.3 session');
+      const action = prepared.uiView.actions.find((entry) => entry.actionType === 'more_thorough');
+      if (!action) throw new Error('expected more thorough action');
+      const initial = buildPromptEnhancementActionAdapterStateV1(boundary.session);
+      const started = beginPromptEnhancementActionV1({
+        adapterState: initial,
+        baseRequest,
+        action,
+        editedBodyText: boundary.session.currentBodyText,
+        timestampMs: 218,
+      });
+      expect(started.state).toBe('request_ready');
+      if (started.state !== 'request_ready') throw new Error('expected in-flight request');
+      const duplicate = beginPromptEnhancementActionV1({
+        adapterState: started.adapterState,
+        baseRequest,
+        action,
+        editedBodyText: boundary.session.currentBodyText,
+        timestampMs: 219,
+      });
+      expect(duplicate).toMatchObject({ state: 'no_request', reasonCodes: ['duplicate_action_while_in_flight'] });
+
+      const unavailable = buildPromptEnhancementActionRequestV1({
+        baseRequest,
+        session: boundary.session,
+        action: { ...action, availability: 'disabled_provider_unavailable' },
+        editedBodyText: boundary.session.currentBodyText,
+        timestampMs: 220,
+      });
+      expect(unavailable).toMatchObject({ state: 'no_request', reasonCodes: ['action_not_available'] });
+
+      const stale = buildPromptEnhancementActionRequestV1({
+        baseRequest,
+        session: boundary.session,
+        action: { ...action, bodyRevision: action.bodyRevision + 1 },
+        editedBodyText: boundary.session.currentBodyText,
+        timestampMs: 221,
+      });
+      expect(stale).toMatchObject({ state: 'no_request', reasonCodes: ['stale_or_mismatched_action_body_binding'] });
+    } finally {
+      store.db.close();
+    }
+  });
+
+  it('B1.3: keeps dirty Additional Details on the bounded Apply request and never creates delivery intent', async () => {
+    const store = await openStore(':memory:');
+    try {
+      const baseRequest = makeBoundaryRequest(store, '/test/b1-3-apply');
+      const prepared = await preparePromptEnhancement(baseRequest);
+      const boundary = buildPromptEnhancementUiBoundarySessionV1({
+        result: prepared,
+        timestampMs: 222,
+        sessionOverrides: { additionalDetailsState: 'dirty_unsubmitted' },
+      });
+      expect(boundary.state).toBe('session_ready');
+      if (boundary.state !== 'session_ready') throw new Error('expected apply session');
+      const action = prepared.uiView.actions.find((entry) => entry.actionType === 'apply_details');
+      if (!action) throw new Error('expected apply details action');
+      const built = buildPromptEnhancementActionRequestV1({
+        baseRequest,
+        session: boundary.session,
+        action,
+        editedBodyText: boundary.session.currentBodyText,
+        additionalDetailsText: 'add verification coverage',
+        timestampMs: 223,
+      });
+      expect(built.state).toBe('request_ready');
+      if (built.state !== 'request_ready') throw new Error('expected Apply request');
+      expect(built.request.userPreferenceContext.actionRequest).toBe('apply_details');
+      expect(built.request.userPreferenceContext.additionalDetails).toEqual({
+        text: 'add verification coverage',
+        targetBodyId: boundary.session.currentBodyId,
+        targetBodyRevision: boundary.session.bodyRevision,
+      });
+      expect('delivery' in built.request).toBe(false);
+
+      const currentAction = prepared.uiView.actions.find((entry) => entry.actionType === 'use_current_body');
+      if (!currentAction) throw new Error('expected current body action');
+      const blockedCurrent = buildPromptEnhancementActionRequestV1({
+        baseRequest,
+        session: boundary.session,
+        action: currentAction,
+        editedBodyText: boundary.session.currentBodyText,
+        additionalDetailsText: 'add verification coverage',
+        timestampMs: 224,
+      });
+      expect(blockedCurrent).toMatchObject({
+        state: 'no_request',
+        reasonCodes: ['dirty_additional_details_requires_apply_or_clear_before_send'],
+      });
+    } finally {
+      store.db.close();
+    }
+  });
+
+  it('B1.3: accepts only a matching complete result and fail-closes malformed or late results', async () => {
+    const store = await openStore(':memory:');
+    try {
+      const baseRequest = makeBoundaryRequest(store, '/test/b1-3-results');
+      const prepared = await preparePromptEnhancement(baseRequest);
+      const boundary = buildPromptEnhancementUiBoundarySessionV1({ result: prepared, timestampMs: 225 });
+      expect(boundary.state).toBe('session_ready');
+      if (boundary.state !== 'session_ready') throw new Error('expected result session');
+      const action = prepared.uiView.actions.find((entry) => entry.actionType === 'shorter');
+      if (!action) throw new Error('expected result action');
+      const started = beginPromptEnhancementActionV1({
+        adapterState: buildPromptEnhancementActionAdapterStateV1(boundary.session),
+        baseRequest,
+        action,
+        editedBodyText: boundary.session.currentBodyText,
+        timestampMs: 226,
+      });
+      if (started.state !== 'request_ready') throw new Error('expected result request');
+
+      const late = resolvePromptEnhancementActionV1(started.adapterState, { ...prepared, requestId: 'late-request' });
+      expect(late).toMatchObject({ state: 'stale_result_ignored', reasonCodes: ['stale_or_superseded_action_result'] });
+      expect(late.adapterState.inFlight).toBeDefined();
+
+      const malformed = resolvePromptEnhancementActionV1(started.adapterState, { disposition: 'show_current_body' });
+      expect(malformed.state).toBe('failed_keep_previous');
+      expect(malformed.adapterState.inFlight).toBeUndefined();
+
+      const accepted = resolvePromptEnhancementActionV1(started.adapterState, prepared);
+      expect(accepted.state).toBe('accepted_result');
+      if (accepted.state !== 'accepted_result') throw new Error('expected accepted result');
+      expect(accepted.result).toBe(prepared);
+      expect(accepted.adapterState.status).toBe('idle');
     } finally {
       store.db.close();
     }
