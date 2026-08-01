@@ -38,6 +38,12 @@ import { validatePromptEnhancementPrepareRequestV1 } from '../../prompt-enhancem
 import { buildPromptEnhancementUiBoundarySessionV1 } from '../../prompt-enhancement/ui-boundary.js';
 import { createPromptEnhancementPopupEventV1 } from '../../prompt-enhancement/popup-session.js';
 import { buildPromptEnhancementPopupRenderModelV1 } from '../../prompt-enhancement/popup-render-model.js';
+import {
+  buildPromptEnhancementLocalDraftV1,
+  reconcilePromptEnhancementLocalDraftV1,
+  updatePromptEnhancementAdditionalDetailsDraftV1,
+  updatePromptEnhancementCurrentBodyDraftV1,
+} from '../../prompt-enhancement/local-draft.js';
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -2321,6 +2327,128 @@ describe('H1.1 — validated PE preparation boundary', () => {
         'raw_internal_source_diagnostics',
         'auto_submit',
       ]));
+    } finally {
+      store.db.close();
+    }
+  });
+
+  it('B1.2: preserves a dirty same-identity draft and refreshes only clean canonical state', async () => {
+    const store = await openStore(':memory:');
+    try {
+      const prepared = await preparePromptEnhancement(makeBoundaryRequest(store, '/test/b1-2-same-identity'));
+      const firstRender = buildPromptEnhancementPopupRenderModelV1({ result: prepared, timestampMs: 209 });
+      expect(firstRender.state).toBe('render_model_ready');
+      if (firstRender.state !== 'render_model_ready') throw new Error('expected B1.2 render model');
+      const initial = buildPromptEnhancementLocalDraftV1(firstRender.model.session);
+      expect(initial.state).toBe('draft_ready');
+      if (initial.state !== 'draft_ready') throw new Error('expected B1.2 draft');
+
+      const dirty = updatePromptEnhancementCurrentBodyDraftV1(initial.draft, 'local unsent edit', 7);
+      const withDetails = updatePromptEnhancementAdditionalDetailsDraftV1(dirty, 'keep this local detail', 10);
+      const sameIdentity = reconcilePromptEnhancementLocalDraftV1(withDetails, firstRender.model.session);
+
+      expect(sameIdentity).toMatchObject({ state: 'updated', identityChanged: false });
+      if (sameIdentity.state !== 'updated') throw new Error('expected same-identity update');
+      expect(sameIdentity.draft.currentBody.text).toBe('local unsent edit');
+      expect(sameIdentity.draft.currentBody.dirty).toBe(true);
+      expect(sameIdentity.draft.additionalDetails.text).toBe('keep this local detail');
+      expect(sameIdentity.draft.additionalDetailsState).toBe('dirty_unsubmitted');
+    } finally {
+      store.db.close();
+    }
+  });
+
+  it('B1.2: starts a distinct draft for a new canonical revision and ignores stale input', async () => {
+    const store = await openStore(':memory:');
+    try {
+      const first = await preparePromptEnhancement(makeBoundaryRequest(store, '/test/b1-2-revision-a'));
+      const second = await preparePromptEnhancement(makeBoundaryRequest(store, '/test/b1-2-revision-b'));
+      const firstRender = buildPromptEnhancementPopupRenderModelV1({ result: first, timestampMs: 210 });
+      const secondRender = buildPromptEnhancementPopupRenderModelV1({ result: second, timestampMs: 211 });
+      expect(firstRender.state).toBe('render_model_ready');
+      expect(secondRender.state).toBe('render_model_ready');
+      if (firstRender.state !== 'render_model_ready' || secondRender.state !== 'render_model_ready') throw new Error('expected revision render models');
+      const initial = buildPromptEnhancementLocalDraftV1(firstRender.model.session);
+      expect(initial.state).toBe('draft_ready');
+      if (initial.state !== 'draft_ready') throw new Error('expected initial draft');
+      const dirty = updatePromptEnhancementCurrentBodyDraftV1(initial.draft, 'old dirty revision');
+
+      const stale = reconcilePromptEnhancementLocalDraftV1(dirty, secondRender.model.session, true);
+      expect(stale).toMatchObject({ state: 'ignored_stale', reasonCodes: ['stale_or_mismatched_draft'] });
+      if (stale.state !== 'ignored_stale') throw new Error('expected stale draft ignore');
+      expect(stale.draft.currentBody.text).toBe('old dirty revision');
+
+      const next = reconcilePromptEnhancementLocalDraftV1(dirty, secondRender.model.session);
+      expect(next).toMatchObject({ state: 'updated', identityChanged: true });
+      if (next.state !== 'updated') throw new Error('expected new revision draft');
+      expect(next.draft.identity.currentBodyId).toBe(secondRender.model.session.currentBodyId);
+      expect(next.draft.currentBody.text).toBe(secondRender.model.session.currentBodyText);
+      expect(next.draft.currentBody.dirty).toBe(false);
+    } finally {
+      store.db.close();
+    }
+  });
+
+  it('B1.2: locks local mutation for loading/fallback typed editability states', async () => {
+    const store = await openStore(':memory:');
+    try {
+      const prepared = await preparePromptEnhancement(makeBoundaryRequest(store, '/test/b1-2-locked'));
+      const loading = {
+        ...prepared,
+        uiView: {
+          ...prepared.uiView,
+          body: { ...prepared.uiView.body, actionLoadingState: 'loading_action' as const },
+        },
+      };
+      const render = buildPromptEnhancementPopupRenderModelV1({ result: loading, timestampMs: 212 });
+      expect(render.state).toBe('render_model_ready');
+      if (render.state !== 'render_model_ready') throw new Error('expected locked render model');
+      const initial = buildPromptEnhancementLocalDraftV1(render.model.session);
+      expect(initial.state).toBe('draft_ready');
+      if (initial.state !== 'draft_ready') throw new Error('expected locked draft');
+      expect(initial.draft.editabilityState).toBe('locked_action_loading');
+      expect(updatePromptEnhancementCurrentBodyDraftV1(initial.draft, 'must not mutate')).toBe(initial.draft);
+      expect(updatePromptEnhancementAdditionalDetailsDraftV1(initial.draft, 'must not mutate')).toBe(initial.draft);
+    } finally {
+      store.db.close();
+    }
+  });
+
+  it('B1.2: marks dirty Additional Details for the typed no-send Apply boundary', async () => {
+    const store = await openStore(':memory:');
+    try {
+      const prepared = await preparePromptEnhancement(makeBoundaryRequest(store, '/test/b1-2-details'));
+      const boundary = buildPromptEnhancementUiBoundarySessionV1({
+        result: prepared,
+        timestampMs: 213,
+        sessionOverrides: { additionalDetailsState: 'dirty_unsubmitted' },
+      });
+      expect(boundary.state).toBe('session_ready');
+      if (boundary.state !== 'session_ready') throw new Error('expected details session');
+      const draft = buildPromptEnhancementLocalDraftV1(boundary.session);
+      expect(draft.state).toBe('draft_ready');
+      if (draft.state !== 'draft_ready') throw new Error('expected details draft');
+      const edited = updatePromptEnhancementAdditionalDetailsDraftV1(draft.draft, 'add a test note');
+      expect(edited.additionalDetailsState).toBe('dirty_unsubmitted');
+
+      const applyAction = boundary.session.directionalActionSet.find((entry) => entry.action.actionType === 'apply_details');
+      const sendAction = boundary.session.preSendBoundaryState.essentialControlSet.includes('use_current_body')
+        ? boundary.session.preSendBoundaryState.essentialControlSet[0]
+        : 'use_current_body';
+      expect(applyAction?.action.actionType).toBe('apply_details');
+      const event = createPromptEnhancementPopupEventV1({
+        session: boundary.session,
+        eventType: 'deliver_current_body',
+        actionId: `${boundary.session.currentBodyId}:action:${sendAction}`,
+        currentBodyId: boundary.session.currentBodyId,
+        bodyRevision: boundary.session.bodyRevision,
+        editedBodyText: edited.currentBody.text,
+        additionalDetailsText: edited.additionalDetails.text,
+        timestampMs: 214,
+        realUserInitiated: true,
+      });
+      expect(event.sendPolicy).toBe('no_send');
+      expect(event.reasonCodes).toContain('dirty_additional_details_requires_apply_or_clear_before_send');
     } finally {
       store.db.close();
     }
