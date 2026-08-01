@@ -37,6 +37,7 @@ import { preparePromptEnhancement } from '../../prompt-enhancement/facade.js';
 import { validatePromptEnhancementPrepareRequestV1 } from '../../prompt-enhancement/contracts.js';
 import { buildPromptEnhancementUiBoundarySessionV1 } from '../../prompt-enhancement/ui-boundary.js';
 import { createPromptEnhancementPopupEventV1 } from '../../prompt-enhancement/popup-session.js';
+import { buildPromptEnhancementPopupRenderModelV1 } from '../../prompt-enhancement/popup-render-model.js';
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -2100,6 +2101,54 @@ describe('H1.1 — validated PE preparation boundary', () => {
         timestampMs: Number.NaN,
       });
       expect(invalidTimestamp).toMatchObject({ state: 'no_popup', reasonCodes: ['invalid_render_timestamp'] });
+    } finally {
+      store.db.close();
+    }
+  });
+
+  it('maps the validated result to the locked B1.1 title, body, identity, and controls', async () => {
+    const store = await openStore(':memory:');
+    try {
+      const request = makeBoundaryRequest(store, '/test/b1-1-render-model');
+      const prepared = await preparePromptEnhancement(request);
+      const renderModel = buildPromptEnhancementPopupRenderModelV1({
+        result: prepared,
+        timestampMs: 200,
+        deliverySurface: prepared.delivery.deliveryChannel,
+      });
+
+      expect(renderModel.state).toBe('render_model_ready');
+      if (renderModel.state !== 'render_model_ready') throw new Error('expected B1.1 render model');
+      expect(renderModel.model.title).toBe('Nexpath · Prompt enhancement');
+      expect(renderModel.model.title).not.toBe('Review enhanced prompt');
+      expect(renderModel.model.editorHeading).toBe('Use enhanced prompt');
+      expect(renderModel.model.layout).toEqual([
+        'header',
+        'pre_send_public_copy',
+        'editor_heading',
+        'enhanced_body',
+        'additional_details',
+        'directional_actions',
+        'use_original',
+        'keyboard_help',
+      ]);
+      expect(renderModel.model.identity).toMatchObject({
+        enhancementId: prepared.enhancementId,
+        currentBodyId: prepared.uiView.body.currentBodyId,
+        bodyRevision: prepared.uiView.body.bodyRevision,
+        validationDecisionId: prepared.validationDecisionId,
+      });
+      expect(renderModel.model.body.text).toBe(prepared.uiView.body.text);
+      expect(renderModel.model.body.editable).toBe(true);
+      expect(renderModel.model.controls.currentBody.actionType).toBe('use_current_body');
+      expect(renderModel.model.controls.original.actionType).toBe('use_original');
+      expect(renderModel.model.controls.close.actionType).toBe('close');
+      expect(renderModel.model.rejectedControls).toEqual(expect.arrayContaining([
+        'decision_session_option_list',
+        'auto_submit',
+        'raw_internal_source_diagnostics',
+      ]));
+      expect(renderModel.model.publicCopy.diagnostics.every((diagnostic) => diagnostic.rawPromptExcluded)).toBe(true);
     } finally {
       store.db.close();
     }
