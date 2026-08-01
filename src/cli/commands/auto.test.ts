@@ -2461,7 +2461,7 @@ describe('H1.1 — validated PE preparation boundary', () => {
     }
   });
 
-  it('B1.3: builds one typed action request from the supplied identity and availability', async () => {
+  it('DEP-TEST-01-B1.3-01: builds one typed action request from supplied identity and availability', async () => {
     const store = await openStore(':memory:');
     try {
       const baseRequest = makeBoundaryRequest(store, '/test/b1-3-request');
@@ -2496,7 +2496,7 @@ describe('H1.1 — validated PE preparation boundary', () => {
     }
   });
 
-  it('B1.3: prevents duplicate activation and blocks unavailable or stale actions without a request', async () => {
+  it('DEP-TEST-01-B1.3-02: prevents duplicate activation and blocks unavailable or stale actions without a request', async () => {
     const store = await openStore(':memory:');
     try {
       const baseRequest = makeBoundaryRequest(store, '/test/b1-3-gates');
@@ -2547,7 +2547,7 @@ describe('H1.1 — validated PE preparation boundary', () => {
     }
   });
 
-  it('B1.3: keeps dirty Additional Details on the bounded Apply request and never creates delivery intent', async () => {
+  it('DEP-TEST-01-B1.3-03: keeps dirty Additional Details on bounded Apply request and never creates delivery intent', async () => {
     const store = await openStore(':memory:');
     try {
       const baseRequest = makeBoundaryRequest(store, '/test/b1-3-apply');
@@ -2598,7 +2598,7 @@ describe('H1.1 — validated PE preparation boundary', () => {
     }
   });
 
-  it('B1.3: accepts only a matching complete result and fail-closes malformed or late results', async () => {
+  it('DEP-TEST-01-B1.3-04: accepts only a matching complete result and fail-closes malformed or late results', async () => {
     const store = await openStore(':memory:');
     try {
       const baseRequest = makeBoundaryRequest(store, '/test/b1-3-results');
@@ -2635,7 +2635,7 @@ describe('H1.1 — validated PE preparation boundary', () => {
     }
   });
 
-  it('B1.3 source fixture: executes Apply through the approved facade and accepts one canonical revision', async () => {
+  it('DEP-TEST-01-B1.3-05: executes Apply through the typed facade and accepts one canonical revision', async () => {
     const store = await openStore(':memory:');
     try {
       const baseRequest = makeBoundaryRequest(store, '/test/b1-3-facade-apply');
@@ -2672,12 +2672,13 @@ describe('H1.1 — validated PE preparation boundary', () => {
       expect(execution.result.currentBody.bodyRevision).toBe(boundary.session.bodyRevision + 1);
       expect(execution.result.currentBody.text).toContain('Keep verification coverage in scope.');
       expect('delivery' in execution.request).toBe(false);
+      expect(JSON.stringify(execution.request)).not.toMatch(/(?:selectedPrompt|L1|L2|L3|show_simpler_options)/);
     } finally {
       store.db.close();
     }
   });
 
-  it('B1.3 source fixture: facade rejection keeps the previous typed session without delivery', async () => {
+  it('DEP-TEST-01-B1.3-06: facade rejection keeps the previous typed session without delivery', async () => {
     const store = await openStore(':memory:');
     try {
       const baseRequest = makeBoundaryRequest(store, '/test/b1-3-facade-failure');
@@ -2699,6 +2700,43 @@ describe('H1.1 — validated PE preparation boundary', () => {
       expect(execution).toMatchObject({ state: 'failed_keep_previous', reasonCodes: ['facade_error'] });
       expect(execution.adapterState.session).toBe(boundary.session);
       expect(execution.adapterState.inFlight).toBeUndefined();
+    } finally {
+      store.db.close();
+    }
+  });
+
+  it('DEP-TEST-01-B1.3-07: Apply exposes only the public-safe 5K truncation notice', async () => {
+    const store = await openStore(':memory:');
+    try {
+      const baseRequest = makeBoundaryRequest(store, '/test/b1-3-apply-cap');
+      const prepared = await preparePromptEnhancement(baseRequest);
+      const boundary = buildPromptEnhancementUiBoundarySessionV1({
+        result: prepared,
+        timestampMs: 231,
+        sessionOverrides: { additionalDetailsState: 'dirty_unsubmitted' },
+      });
+      expect(boundary.state).toBe('session_ready');
+      if (boundary.state !== 'session_ready') throw new Error('expected Apply-cap session');
+      const action = prepared.uiView.actions.find((entry) => entry.actionType === 'apply_details');
+      if (!action) throw new Error('expected Apply-cap action');
+      const longDetails = Array.from({ length: 5001 }, (_, index) => `word${index}`).join(' ');
+
+      const execution = await executePromptEnhancementActionV1({
+        adapterState: buildPromptEnhancementActionAdapterStateV1(boundary.session),
+        baseRequest,
+        action,
+        editedBodyText: boundary.session.currentBodyText,
+        additionalDetailsText: longDetails,
+        timestampMs: 232,
+        facade: applyPromptEnhancementAction,
+      });
+      expect(execution.state).toBe('accepted_result');
+      if (execution.state !== 'accepted_result') throw new Error('expected capped Apply result');
+      expect(execution.result.currentBody.text).toContain('[truncated_to_apply_details_5000_word_cap]');
+      expect(execution.result.currentBody.text).not.toContain('word5000');
+      expect(execution.result.uiView.body.text).not.toContain('[truncated_to_apply_details_5000_word_cap]');
+      expect(execution.result.uiView.body.text).not.toContain('word5000');
+      expect(execution.result.diagnostics.some((diagnostic) => diagnostic.publicSafeText.includes('5,000 words'))).toBe(true);
     } finally {
       store.db.close();
     }
