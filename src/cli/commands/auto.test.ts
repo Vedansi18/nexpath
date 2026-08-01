@@ -2650,12 +2650,13 @@ describe('H1.1 — validated PE preparation boundary', () => {
       const action = prepared.uiView.actions.find((entry) => entry.actionType === 'apply_details');
       if (!action) throw new Error('expected facade Apply action');
 
+      const editedBodyText = `${boundary.session.currentBodyText}\n\nUser edit: keep rollback evidence.`;
       const facade = vi.fn(applyPromptEnhancementAction);
       const execution = await executePromptEnhancementActionV1({
         adapterState: buildPromptEnhancementActionAdapterStateV1(boundary.session),
         baseRequest,
         action,
-        editedBodyText: boundary.session.currentBodyText,
+        editedBodyText: editedBodyText,
         additionalDetailsText: 'Keep verification coverage in scope.',
         timestampMs: 228,
         facade,
@@ -2670,6 +2671,9 @@ describe('H1.1 — validated PE preparation boundary', () => {
       });
       expect(execution.result.currentBody.currentBodyId).toBe(boundary.session.currentBodyId);
       expect(execution.result.currentBody.bodyRevision).toBe(boundary.session.bodyRevision + 1);
+      expect(execution.result.currentBody.text).toContain('User edit: keep rollback evidence.');
+      expect(execution.result.currentBody.generatedOriginState).toBe('pe_user_edited_body');
+      expect(execution.result.currentBody.userDirtyState).toBe('dirty_user_edited');
       expect(execution.result.currentBody.text).toContain('Keep verification coverage in scope.');
       expect('delivery' in execution.request).toBe(false);
       expect(JSON.stringify(execution.request)).not.toMatch(/(?:selectedPrompt|L1|L2|L3|show_simpler_options)/);
