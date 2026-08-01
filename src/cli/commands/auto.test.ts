@@ -2154,6 +2154,32 @@ describe('H1.1 — validated PE preparation boundary', () => {
     }
   });
 
+  it('fail-closes B1.1 for typed no-popup and invalid producer input', async () => {
+    const store = await openStore(':memory:');
+    try {
+      const request = makeBoundaryRequest(store, '/test/b1-1-negative');
+      const noPopupRequest = {
+        ...request,
+        sourcePrompt: { ...request.sourcePrompt, origin: 'pe_generated_echo' as const, generatedOriginPolicy: 'exclude_from_ordinary_learning' as const },
+      };
+      const noPopup = await preparePromptEnhancement(noPopupRequest);
+      const noPopupModel = buildPromptEnhancementPopupRenderModelV1({
+        result: noPopup,
+        timestampMs: 201,
+      });
+      expect(noPopupModel).toMatchObject({ state: 'no_popup', reasonCodes: ['typed_no_popup_disposition'] });
+
+      const invalidModel = buildPromptEnhancementPopupRenderModelV1({
+        result: { disposition: 'show_current_body' } as never,
+        timestampMs: 202,
+      });
+      expect(invalidModel.state).toBe('no_popup');
+      expect(invalidModel.reasonCodes).toContain('invalid_prepare_result');
+    } finally {
+      store.db.close();
+    }
+  });
+
   it('reduces thrown and validator-rejected producer output to safe no-popup', async () => {
     const store = await openStore(':memory:');
     try {
