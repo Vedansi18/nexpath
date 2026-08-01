@@ -33,7 +33,7 @@ import { readCadence, IDLE_CAP_MS } from '../../store/feedback-cadence.js';
 import type OpenAI from 'openai';
 import { SessionStateManager } from '../../classifier/SessionStateManager.js';
 import { buildSafeDefaults } from '../../classifier/LLMProfileClassifier.js';
-import { preparePromptEnhancement } from '../../prompt-enhancement/facade.js';
+import { applyPromptEnhancementAction, preparePromptEnhancement } from '../../prompt-enhancement/facade.js';
 import { validatePromptEnhancementPrepareRequestV1 } from '../../prompt-enhancement/contracts.js';
 import { buildPromptEnhancementUiBoundarySessionV1 } from '../../prompt-enhancement/ui-boundary.js';
 import { createPromptEnhancementPopupEventV1 } from '../../prompt-enhancement/popup-session.js';
@@ -48,6 +48,7 @@ import {
   beginPromptEnhancementActionV1,
   buildPromptEnhancementActionAdapterStateV1,
   buildPromptEnhancementActionRequestV1,
+  executePromptEnhancementActionV1,
   resolvePromptEnhancementActionV1,
 } from '../../prompt-enhancement/action-adapter.js';
 
@@ -2629,6 +2630,75 @@ describe('H1.1 — validated PE preparation boundary', () => {
       if (accepted.state !== 'accepted_result') throw new Error('expected accepted result');
       expect(accepted.result).toBe(prepared);
       expect(accepted.adapterState.status).toBe('idle');
+    } finally {
+      store.db.close();
+    }
+  });
+
+  it('B1.3 source fixture: executes Apply through the approved facade and accepts one canonical revision', async () => {
+    const store = await openStore(':memory:');
+    try {
+      const baseRequest = makeBoundaryRequest(store, '/test/b1-3-facade-apply');
+      const prepared = await preparePromptEnhancement(baseRequest);
+      const boundary = buildPromptEnhancementUiBoundarySessionV1({
+        result: prepared,
+        timestampMs: 227,
+        sessionOverrides: { additionalDetailsState: 'dirty_unsubmitted' },
+      });
+      expect(boundary.state).toBe('session_ready');
+      if (boundary.state !== 'session_ready') throw new Error('expected facade Apply session');
+      const action = prepared.uiView.actions.find((entry) => entry.actionType === 'apply_details');
+      if (!action) throw new Error('expected facade Apply action');
+
+      const facade = vi.fn(applyPromptEnhancementAction);
+      const execution = await executePromptEnhancementActionV1({
+        adapterState: buildPromptEnhancementActionAdapterStateV1(boundary.session),
+        baseRequest,
+        action,
+        editedBodyText: boundary.session.currentBodyText,
+        additionalDetailsText: 'Keep verification coverage in scope.',
+        timestampMs: 228,
+        facade,
+      });
+      expect(facade).toHaveBeenCalledTimes(1);
+      expect(execution.state).toBe('accepted_result');
+      if (execution.state !== 'accepted_result') throw new Error('expected facade result');
+      expect(execution.request.userPreferenceContext.additionalDetails).toEqual({
+        text: 'Keep verification coverage in scope.',
+        targetBodyId: boundary.session.currentBodyId,
+        targetBodyRevision: boundary.session.bodyRevision,
+      });
+      expect(execution.result.currentBody.currentBodyId).toBe(boundary.session.currentBodyId);
+      expect(execution.result.currentBody.bodyRevision).toBe(boundary.session.bodyRevision + 1);
+      expect(execution.result.currentBody.text).toContain('Keep verification coverage in scope.');
+      expect('delivery' in execution.request).toBe(false);
+    } finally {
+      store.db.close();
+    }
+  });
+
+  it('B1.3 source fixture: facade rejection keeps the previous typed session without delivery', async () => {
+    const store = await openStore(':memory:');
+    try {
+      const baseRequest = makeBoundaryRequest(store, '/test/b1-3-facade-failure');
+      const prepared = await preparePromptEnhancement(baseRequest);
+      const boundary = buildPromptEnhancementUiBoundarySessionV1({ result: prepared, timestampMs: 229 });
+      expect(boundary.state).toBe('session_ready');
+      if (boundary.state !== 'session_ready') throw new Error('expected facade failure session');
+      const action = prepared.uiView.actions.find((entry) => entry.actionType === 'more_thorough');
+      if (!action) throw new Error('expected directional action');
+
+      const execution = await executePromptEnhancementActionV1({
+        adapterState: buildPromptEnhancementActionAdapterStateV1(boundary.session),
+        baseRequest,
+        action,
+        editedBodyText: boundary.session.currentBodyText,
+        timestampMs: 230,
+        facade: vi.fn().mockRejectedValue(new Error('provider timeout')),
+      });
+      expect(execution).toMatchObject({ state: 'failed_keep_previous', reasonCodes: ['facade_error'] });
+      expect(execution.adapterState.session).toBe(boundary.session);
+      expect(execution.adapterState.inFlight).toBeUndefined();
     } finally {
       store.db.close();
     }
