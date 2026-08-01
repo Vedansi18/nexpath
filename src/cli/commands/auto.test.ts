@@ -2239,6 +2239,43 @@ describe('H1.3 - preparation-only execution constraints', () => {
     expect(SessionStateManager.load(store, projectRoot).current.lastInjectedPrompt ?? null).toBeNull();
   });
 
+  it('keeps eligible PE preparation preparation-only with no delivery, mutation, or sequence side effects', async () => {
+    const projectRoot = '/test/h1-3-eligible';
+    primeTaskBreakdownSession(store, projectRoot);
+    const request = makeBoundaryRequest(store, projectRoot);
+    const prepared = await preparePromptEnhancement(request);
+    const prepare = vi.fn().mockResolvedValue(prepared);
+    const onResult = vi.fn();
+    const stdout = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    const exit = vi.spyOn(process, 'exit').mockImplementation((() => {
+      throw new Error('unexpected process.exit during H1.3 preparation');
+    }) as never);
+
+    try {
+      const result = await runAuto(
+        makeInput({ projectRoot }),
+        store,
+        makeMockOpenAI(FIRE_YES_RESPONSE, 'H1.3 test advisory'),
+        { request, prepare, onResult },
+      );
+
+      expect(result.outcome).toBe('pending');
+      expect(prepare).toHaveBeenCalledTimes(1);
+      expect(onResult).toHaveBeenCalledTimes(1);
+      expect(onResult.mock.calls[0]?.[0]).toMatchObject({
+        disposition: 'show_current_body',
+        safeFallback: false,
+      });
+      expect(stdout).not.toHaveBeenCalled();
+      expect(exit).not.toHaveBeenCalled();
+      expect(SessionStateManager.load(store, projectRoot).current.lastInjectedPrompt ?? null).toBeNull();
+      expect(getPendingAdvisory(store, projectRoot)?.pinchLabel).toBe('H1.3 test advisory');
+    } finally {
+      stdout.mockRestore();
+      exit.mockRestore();
+    }
+  });
+
   it('keeps malformed PE preparation on safe no-popup without invoking a facade', async () => {
     const prepare = vi.fn().mockResolvedValue({ disposition: 'show_current_body' });
     const result = await preparePromptEnhancementForAuto({
