@@ -1532,11 +1532,14 @@ describe('buildHookEntry', () => {
     expect(hooks[0].type).toBe('command');
   });
 
-  it('does NOT include a timeout field (uses Claude Code default)', () => {
+  it('sets an explicit 60-second timeout for Claude Code hooks', () => {
     const entry  = buildHookEntry('/home/user', 'linux');
     const groups = entry.UserPromptSubmit as Array<Record<string, unknown>>;
     const hooks  = groups[0].hooks as Array<Record<string, unknown>>;
-    expect(hooks[0]).not.toHaveProperty('timeout');
+    expect(hooks[0].timeout).toBe(60);
+    const stopGroups = entry.Stop as Array<Record<string, unknown>>;
+    const stopHooks = stopGroups[0].hooks as Array<Record<string, unknown>>;
+    expect(stopHooks[0].timeout).toBe(60);
   });
 
   it('UserPromptSubmit hook command contains nexpath auto --db', () => {

@@ -60,6 +60,9 @@ export function buildStopHookCommand(home: string, platform = process.platform):
   return `node "${cliPath}" stop --db "${dbPath}"`;
 }
 
+/** Claude Code hook timeout is expressed in seconds in settings.json. */
+export const CLAUDE_HOOK_TIMEOUT_SECONDS = 60 as const;
+
 /**
  * Build the UserPromptSubmit + Stop hook entry objects.
  *
@@ -67,8 +70,9 @@ export function buildStopHookCommand(home: string, platform = process.platform):
  * marker — it survives path changes across reinstalls, unlike scanning the
  * command string.
  *
- * No `timeout` field is set so Claude Code uses its default (600 s), which is
- * required for hooks that block for UI interaction (the decision session).
+ * Set an explicit 60-second timeout because current Claude Code installations
+ * may default UserPromptSubmit to 30 seconds. Without this field a slow PE
+ * preparation hook can be discarded before its typed result is returned.
  */
 export function buildHookEntry(home: string, platform = process.platform): Record<string, unknown> {
   return {
@@ -80,6 +84,7 @@ export function buildHookEntry(home: string, platform = process.platform): Recor
           {
             type:    'command',
             command: buildHookCommand(home, platform),
+            timeout: CLAUDE_HOOK_TIMEOUT_SECONDS,
           },
         ],
       },
@@ -92,6 +97,7 @@ export function buildHookEntry(home: string, platform = process.platform): Recor
           {
             type:    'command',
             command: buildStopHookCommand(home, platform),
+            timeout: CLAUDE_HOOK_TIMEOUT_SECONDS,
           },
         ],
       },
@@ -196,10 +202,10 @@ export const claudeCodeAdapter: HookAdapter = {
     return ctx.settingsPath ?? getClaudeSettingsPath(ctx.home);
   },
 
-  buildHooks(ctx: InstallContext): Record<string, Array<{ type: string; command: string }>> {
+  buildHooks(ctx: InstallContext): Record<string, Array<{ type: string; command: string; timeout?: number }>> {
     return {
-      UserPromptSubmit: [{ type: 'command', command: buildHookCommand(ctx.home) }],
-      Stop:             [{ type: 'command', command: buildStopHookCommand(ctx.home) }],
+      UserPromptSubmit: [{ type: 'command', command: buildHookCommand(ctx.home), timeout: CLAUDE_HOOK_TIMEOUT_SECONDS }],
+      Stop:             [{ type: 'command', command: buildStopHookCommand(ctx.home), timeout: CLAUDE_HOOK_TIMEOUT_SECONDS }],
     };
   },
 
