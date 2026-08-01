@@ -1,8 +1,10 @@
 import type { Database } from 'sql.js';
 import { saveStore, type Store } from './db.js';
+import { PROMPT_ENHANCEMENT_SEQUENCE_ENABLED_DEFAULT, PROMPT_ENHANCEMENT_SEQUENCE_ENABLED_KEY } from '../config/prompt-enhancement-keys.js';
 
 // Defaults applied when a key has not been explicitly set by the user
 export const DEFAULT_CONFIG: Record<string, string> = {
+  [PROMPT_ENHANCEMENT_SEQUENCE_ENABLED_KEY]: PROMPT_ENHANCEMENT_SEQUENCE_ENABLED_DEFAULT,
   prompt_capture_enabled: 'true',
   env_probe_enabled: 'true',
   whydesc_delivery_enabled: 'true',
