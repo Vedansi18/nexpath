@@ -7,6 +7,30 @@
 
 import { STYLE_PASSTHROUGH_ENV } from './styler.js';
 
+const NO_COLOR_ENV = 'NO_COLOR';
+
+function withNoColorDisabled<T>(fn: () => T): T {
+  const previous = process.env[NO_COLOR_ENV];
+  try {
+    delete process.env[NO_COLOR_ENV];
+    return fn();
+  } finally {
+    if (previous === undefined) delete process.env[NO_COLOR_ENV];
+    else process.env[NO_COLOR_ENV] = previous;
+  }
+}
+
+async function withNoColorDisabledAsync<T>(fn: () => Promise<T>): Promise<T> {
+  const previous = process.env[NO_COLOR_ENV];
+  try {
+    delete process.env[NO_COLOR_ENV];
+    return await fn();
+  } finally {
+    if (previous === undefined) delete process.env[NO_COLOR_ENV];
+    else process.env[NO_COLOR_ENV] = previous;
+  }
+}
+
 /**
  * Run `fn` with the `NEXPATH_STYLE_PASSTHROUGH` env-var set to `value`
  * (or unset when `value` is `undefined`). Restores the prior env-var
@@ -55,7 +79,7 @@ export async function withStylerEnvAsync<T>(value: '1' | undefined, fn: () => Pr
  */
 export function captureStyledAndUnstyled<T>(produce: () => T): { styled: T; unstyled: T } {
   const unstyled = withStylerEnv('1',       produce);
-  const styled   = withStylerEnv(undefined, produce);
+  const styled   = withNoColorDisabled(() => withStylerEnv(undefined, produce));
   return { styled, unstyled };
 }
 
@@ -64,6 +88,6 @@ export async function captureStyledAndUnstyledAsync<T>(
   produce: () => Promise<T>,
 ): Promise<{ styled: T; unstyled: T }> {
   const unstyled = await withStylerEnvAsync('1',       produce);
-  const styled   = await withStylerEnvAsync(undefined, produce);
+  const styled   = await withNoColorDisabledAsync(() => withStylerEnvAsync(undefined, produce));
   return { styled, unstyled };
 }
