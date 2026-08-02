@@ -7,9 +7,7 @@ import type {
   PromptEnhancementPrepareRequestV1,
   PromptEnhancementPrepareResultV1,
 } from '../prompt-enhancement/contracts.js';
-import type {
-  PromptEnhancementCliPopupResultV1,
-} from '../prompt-enhancement/cli-submit-popup.js';
+import { validatePromptEnhancementCliPopupResultV1 } from '../prompt-enhancement/cli-submit-popup.js';
 import type {
   PromptEnhancementPopupHostInputV1,
   PromptEnhancementPopupHostOutputV1,
@@ -241,16 +239,6 @@ function writeInputFile(path: string, input: PromptEnhancementPopupHostInputV1):
   chmodSync(path, 0o600);
 }
 
-function isPopupResult(value: unknown): value is PromptEnhancementCliPopupResultV1 {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  const result = value as Record<string, unknown>;
-  if (result.state === 'selected_current') return typeof result.bodyText === 'string';
-  if (result.state === 'selected_original' || result.state === 'closed_no_send') return true;
-  return result.state === 'not_shown'
-    && Array.isArray(result.reasonCodes)
-    && result.reasonCodes.every((reasonCode) => typeof reasonCode === 'string');
-}
-
 function readResultFile(path: string): PromptEnhancementPopupHostOutputV1 | undefined {
   if (!existsSync(path)) return undefined;
   try {
@@ -259,7 +247,7 @@ function readResultFile(path: string): PromptEnhancementPopupHostOutputV1 | unde
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
     const output = parsed as Record<string, unknown>;
     if (output.protocolVersion !== PROMPT_ENHANCEMENT_POPUP_HOST_PROTOCOL_VERSION_V1) return undefined;
-    if (!isPopupResult(output.result)) return undefined;
+    if (!validatePromptEnhancementCliPopupResultV1(output.result)) return undefined;
     return {
       protocolVersion: PROMPT_ENHANCEMENT_POPUP_HOST_PROTOCOL_VERSION_V1,
       result: output.result,

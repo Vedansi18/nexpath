@@ -57,6 +57,7 @@ import { getSourceRealityAdaptersSnapshot } from '../../prompt-enhancement/sourc
 import {
   buildClaudeUserPromptSubmitHookOutputV1,
   runPromptEnhancementCliSubmitPopupV1,
+  validatePromptEnhancementCliPopupResultV1,
   type ClaudeUserPromptSubmitHookOutputV1,
   type PromptEnhancementCliPopupResultV1,
 } from '../../prompt-enhancement/cli-submit-popup.js';
@@ -507,7 +508,11 @@ export interface PromptEnhancementCliHostConsumerDependenciesV1 {
 function popupResultFromHostLaunchV1(
   result: PromptEnhancementCliPopupHostLaunchResultV1,
 ): PromptEnhancementCliPopupResultV1 {
-  if (result.state === 'completed') return result.output.result;
+  if (result.state === 'completed') {
+    return validatePromptEnhancementCliPopupResultV1(result.output.result)
+      ? result.output.result
+      : { state: 'not_shown', reasonCodes: ['invalid_host_result'] };
+  }
   if (result.state === 'timed_out') return { state: 'closed_no_send' };
   return {
     state: 'not_shown',

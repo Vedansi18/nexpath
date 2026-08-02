@@ -3108,6 +3108,45 @@ describe('PE2.1 - hook-mode PE host consumer wiring', () => {
     expect(onHookOutput).toHaveBeenCalledWith(undefined);
   });
 
+  it('forwards an explicitly selected bounded current body only through Claude additionalContext', async () => {
+    const { request, preparation } = await validPreparation('/test/pe2-2-current');
+    const onHookOutput = vi.fn();
+    const consumer = createPromptEnhancementCliHostConsumerV1({
+      store,
+      dbPath: ':memory:',
+      cliEntryPath: '/opt/nexpath/dist/cli/index.js',
+      resolveCapability: () => ({ state: 'available', method: 'linux_terminal', terminalCommand: 'gnome-terminal' }),
+      launchHost: vi.fn().mockResolvedValue({ state: 'completed', output: { protocolVersion: 1, result: { state: 'selected_current', bodyText: 'Use the validated enhanced body.' } } }),
+      onHookOutput,
+    });
+
+    await expect(consumer(preparation, request)).resolves.toBe('continue');
+    expect(onHookOutput).toHaveBeenCalledWith(expect.objectContaining({
+      hookSpecificOutput: expect.objectContaining({ additionalContext: expect.stringContaining('Use the validated enhanced body.') }),
+    }));
+  });
+
+  it('fails closed to not-shown when a child returns an invalid or oversized body', async () => {
+    const { request, preparation } = await validPreparation('/test/pe2-2-invalid-child');
+    const rawBody = 'private invalid child body';
+    const onHookOutput = vi.fn();
+    const consumer = createPromptEnhancementCliHostConsumerV1({
+      store,
+      dbPath: ':memory:',
+      cliEntryPath: '/opt/nexpath/dist/cli/index.js',
+      resolveCapability: () => ({ state: 'available', method: 'linux_terminal', terminalCommand: 'gnome-terminal' }),
+      launchHost: vi.fn().mockResolvedValue({
+        state: 'completed',
+        output: { protocolVersion: 1, result: { state: 'selected_current', bodyText: rawBody.repeat(10_000) } },
+      }),
+      onHookOutput,
+    });
+
+    await expect(consumer(preparation, request)).resolves.toBe('continue');
+    expect(onHookOutput).toHaveBeenCalledWith(undefined);
+    expect(JSON.stringify(onHookOutput.mock.calls)).not.toContain(rawBody);
+  });
+
   it('keeps an unavailable host on original-prompt pass-through without launching a child', async () => {
     const { request, preparation } = await validPreparation('/test/pe2-1-unavailable');
     const launchHost = vi.fn();
