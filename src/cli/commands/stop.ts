@@ -155,13 +155,29 @@ export async function runStop(
   const mgr = SessionStateManager.load(store, payload.cwd);
 
   // 3. Check for a pending advisory stored by the auto hook
+  logger.debug('stop_pending_lookup', {
+    cwd: payload.cwd,
+    sessionId: mgr.current.sessionId,
+  });
   const advisory = getPendingAdvisory(store, payload.cwd, mgr.current.sessionId);
   if (!advisory) {
+    const projectPending = getPendingAdvisory(store, payload.cwd);
+    logger.debug('stop_pending_miss', {
+      cwd: payload.cwd,
+      sessionId: mgr.current.sessionId,
+      projectPending: projectPending !== null,
+      pendingSessionId: projectPending?.sessionId ?? null,
+    });
     logger.debug('stop_no_pending', { cwd: payload.cwd });
     writeTelemetry(payload.cwd, 'stop_no_pending', undefined, store);
     return { outcome: 'no_pending' };
   }
 
+  logger.debug('stop_pending_hit', {
+    cwd: payload.cwd,
+    sessionId: mgr.current.sessionId,
+    advisoryId: advisory.id,
+  });
   // 3. Mark as shown immediately — prevents duplicate UI on rapid Stop re-fires
   markAdvisoryShown(store, advisory.id);
 

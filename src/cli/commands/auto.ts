@@ -792,6 +792,13 @@ export async function runAuto(
     promptCount: mgr.current.promptCount,
     prevStage,
   });
+  logger.debug('pending_advisory_stored', {
+    projectRoot: input.projectRoot,
+    sessionId: mgr.current.sessionId,
+    promptCount: mgr.current.promptCount,
+    flagType: effectiveFlagType,
+    peDisposition: preparation.disposition,
+  });
   writeTelemetry(input.projectRoot, 'pipeline_advisory_pending', {
     flagType:                      effectiveFlagType,
     stage:                         mgr.current.currentStage,
