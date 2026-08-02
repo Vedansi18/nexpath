@@ -1949,19 +1949,48 @@ describe('H1.1 — validated PE preparation boundary', () => {
       const facadeResult = await preparePromptEnhancement(request);
       const prepare = vi.fn().mockResolvedValue(facadeResult);
       const onResult = vi.fn();
+      const consumer = vi.fn();
 
       const result = await runAuto(
         makeInput({ projectRoot }),
         store,
         makeMockOpenAI(FIRE_YES_RESPONSE, 'Hold up.'),
         { request, prepare, onResult },
+        consumer,
       );
 
       expect(result.outcome).toBe('pending');
       expect(prepare).toHaveBeenCalledTimes(1);
       expect(onResult).toHaveBeenCalledTimes(1);
+      expect(consumer).toHaveBeenCalledWith(
+        expect.objectContaining({ disposition: facadeResult.disposition, safeFallback: false }),
+        request,
+      );
       expect(request.reviewMomentContext.triggerProvenance.promptStartCanReplaceSameTurn).toBe(false);
       expect(request.sourceSignals.sourceAOriginalPromptRef.sourceKind).toBe('source_a_user_prompt');
+    } finally {
+      store.db.close();
+    }
+  });
+
+  it("does not leave a legacy pending advisory when the live PE popup closes no-send", async () => {
+    const store = await openStore(":memory:");
+    try {
+      const projectRoot = "/test/h1-live-close";
+      primeTaskBreakdownSession(store, projectRoot);
+      const request = makeBoundaryRequest(store, projectRoot);
+      const facadeResult = await preparePromptEnhancement(request);
+
+      const result = await runAuto(
+        makeInput({ projectRoot }),
+        store,
+        makeMockOpenAI(FIRE_YES_RESPONSE, "Hold up."),
+        { request, prepare: vi.fn().mockResolvedValue(facadeResult) },
+        vi.fn().mockResolvedValue("handled_no_send"),
+      );
+
+      expect(result).toEqual({ outcome: "no_action" });
+      expect(getPendingAdvisory(store, projectRoot)).toBeNull();
     } finally {
       store.db.close();
     }

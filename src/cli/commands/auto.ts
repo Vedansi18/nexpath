@@ -52,6 +52,11 @@ import {
 import { preparePromptEnhancement } from '../../prompt-enhancement/facade.js';
 import { buildPromptEnhancementCostVisibilityMetadataV1 } from '../../prompt-enhancement/cost-observability.js';
 import { getSourceRealityAdaptersSnapshot } from '../../prompt-enhancement/source-reality.js';
+import {
+  buildClaudeUserPromptSubmitHookOutputV1,
+  runPromptEnhancementCliSubmitPopupV1,
+  type ClaudeUserPromptSubmitHookOutputV1,
+} from '../../prompt-enhancement/cli-submit-popup.js';
 
 /**
  * nexpath auto — orchestration command (per decision-session-ux-research.md).
@@ -138,6 +143,13 @@ export interface AutoPromptEnhancementIntegration {
   prepare: PromptEnhancementPrepareFacadeV1;
   onResult?: (result: AutoPromptEnhancementPreparationResult) => void | Promise<void>;
 }
+
+export type AutoPromptEnhancementConsumerDispositionV1 = 'continue' | 'handled_no_send';
+
+export type AutoPromptEnhancementConsumerV1 = (
+  preparation: AutoPromptEnhancementPreparationResult,
+  request: PromptEnhancementPrepareRequestV1,
+) => AutoPromptEnhancementConsumerDispositionV1 | void | Promise<AutoPromptEnhancementConsumerDispositionV1 | void>;
 
 /**
  * Build the approved H1.1 typed PE request from the values already produced by
@@ -420,6 +432,7 @@ export async function runAuto(
   store:   Store,
   openai?: OpenAI,
   promptEnhancement?: AutoPromptEnhancementIntegration,
+  promptEnhancementConsumer?: AutoPromptEnhancementConsumerV1,
 ): Promise<AutoOutcome> {
   // ── -1. Advisory-injected prompt guard ──────────────────────────────────────
   // When the stop hook injects an advisory option as a new Claude turn (block decision),
@@ -753,11 +766,16 @@ export async function runAuto(
   };
   const preparation = await preparePromptEnhancementForAuto(peIntegration);
   await peIntegration.onResult?.(preparation);
+  const consumerDisposition = await promptEnhancementConsumer?.(preparation, peIntegration.request);
   logger.debug('prompt_enhancement_prepare_boundary', {
     disposition: preparation.disposition,
     safeFallback: preparation.safeFallback,
     reasonCode: 'reasonCode' in preparation ? preparation.reasonCode : undefined,
   });
+  if (consumerDisposition === 'handled_no_send') {
+    logger.info('pipeline_outcome', { outcome: 'no_action', reason: 'prompt_enhancement_closed_no_send' });
+    return { outcome: 'no_action' };
+  }
 
   // H1.3 keeps legacy Decision Session bookkeeping after preparation; PE preparation
   // remains capture/classification-only and cannot gain DS authority.
@@ -864,6 +882,7 @@ export function registerAutoCommand(program: import('commander').Command): void 
       let promptText = promptArg?.trim();
       let currentAgentMode: string | undefined;
       let transcriptPath: string | undefined;
+      let hookMode = false;
 
       if (!promptText) {
         // Hook mode: read JSON payload from stdin (Claude Code UserPromptSubmit)
@@ -873,6 +892,7 @@ export function registerAutoCommand(program: import('commander').Command): void 
           promptText       = parsed.promptText;
           currentAgentMode = parsed.currentAgentMode;
           transcriptPath   = parsed.transcriptPath;
+          hookMode         = parsed.promptText !== undefined;
         }
       }
 
@@ -916,14 +936,35 @@ export function registerAutoCommand(program: import('commander').Command): void 
       }
 
       try {
+        let hookOutput: ClaudeUserPromptSubmitHookOutputV1 | undefined;
         const result = await runAuto(
           { promptText, projectRoot: opts.project, currentAgentMode, transcriptPath },
           store,
+          undefined,
+          undefined,
+          hookMode
+            ? async (preparation, request) => {
+                if (preparation.safeFallback || !preparation.result) return;
+                const popupResult = await runPromptEnhancementCliSubmitPopupV1({
+                  request,
+                  result: preparation.result,
+                });
+                hookOutput = buildClaudeUserPromptSubmitHookOutputV1(popupResult);
+                logger.debug('prompt_enhancement_cli_submit_consumer', {
+                  state: popupResult.state,
+                  hookOutput: hookOutput
+                    ? hookOutput.decision === 'block' ? 'block_no_send' : 'additional_context'
+                    : 'allow_original_or_not_shown',
+                });
+                return popupResult.state === 'closed_no_send' ? 'handled_no_send' : 'continue';
+              }
+            : undefined,
         );
 
         writeHookStats(opts.project, result.outcome);
         void triggerOpportunisticSync(store).catch(() => {});
-        // 'no_action' and 'pending' → exit silently (Stop hook handles UI)
+        if (hookOutput) process.stdout.write(JSON.stringify(hookOutput) + '\n');
+        // No PE choice output means normal original-prompt pass-through.
       } finally {
         closeStore(store);
       }
