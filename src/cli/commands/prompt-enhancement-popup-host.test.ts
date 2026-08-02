@@ -1,6 +1,6 @@
-import { mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { createProgram } from '../main.js';
 import { PROMPT_ENHANCEMENT_CONTRACT_VERSION, type PromptEnhancementPrepareRequestV1, type PromptEnhancementSourceRefV1 } from '../../prompt-enhancement/contracts.js';
@@ -129,6 +129,27 @@ describe('PE1.2 — hidden prompt-enhancement popup child command', () => {
     );
 
     expect(recordFeedback).toHaveBeenCalledWith(store, '/tmp/pe1-2-project', event);
+  });
+
+  it('writes the private readiness marker only after the popup reports its first render', async () => {
+    const paths = files();
+    const readinessFile = join(dirname(paths.resultFile), 'ready');
+    const input = await validInput();
+    writeFileSync(paths.inputFile, JSON.stringify(input), 'utf8');
+    const runPopup = vi.fn(async ({ onFirstRender }: { onFirstRender?: () => void }) => {
+      expect(existsSync(readinessFile)).toBe(false);
+      onFirstRender?.();
+      return { state: 'selected_original' as const };
+    });
+
+    await runPromptEnhancementPopupHostCommandV1(
+      { ...paths, readinessFile, db: ':memory:' },
+      { openStore: async () => ({} as Store), closeStore: vi.fn(), runPopup },
+    );
+
+    expect(runPopup).toHaveBeenCalledTimes(1);
+    expect(readFileSync(readinessFile, 'utf8')).toBe('ready');
+    expect(statSync(readinessFile).mode & 0o777).toBe(0o600);
   });
 
   it('registers the child command as hidden, outside the public help surface', () => {

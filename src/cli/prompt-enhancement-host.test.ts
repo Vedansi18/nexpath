@@ -1,4 +1,5 @@
-import { readFileSync, statSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import {
@@ -205,18 +206,18 @@ describe('PE1.3 — Linux PE popup host launcher', () => {
     const input = launchInput();
     const gnome = planPromptEnhancementLinuxTerminalLaunchV1({
       terminalCommand: 'gnome-terminal', nodePath: input.nodePath, cliEntryPath: input.cliEntryPath,
-      inputFile: '/tmp/private/input.json', resultFile: '/tmp/private/result.json', dbPath: input.dbPath,
+      inputFile: '/tmp/private/input.json', resultFile: '/tmp/private/result.json', readinessFile: '/tmp/private/ready', dbPath: input.dbPath,
     });
     const xdg = planPromptEnhancementLinuxTerminalLaunchV1({
       terminalCommand: 'xdg-terminal-exec', nodePath: input.nodePath, cliEntryPath: input.cliEntryPath,
-      inputFile: '/tmp/private/input.json', resultFile: '/tmp/private/result.json', dbPath: input.dbPath,
+      inputFile: '/tmp/private/input.json', resultFile: '/tmp/private/result.json', readinessFile: '/tmp/private/ready', dbPath: input.dbPath,
     });
 
     expect(gnome).toEqual({
       command: 'gnome-terminal',
-      args: ['--wait', '--title=Nexpath · Prompt enhancement', '--', '/usr/bin/node', '/opt/nexpath/dist/cli/index.js', 'prompt-enhancement-popup-host', '--input-file', '/tmp/private/input.json', '--result-file', '/tmp/private/result.json', '--db', '/tmp/nexpath-test.db'],
+      args: ['--wait', '--title=Nexpath · Prompt enhancement', '--', '/usr/bin/node', '/opt/nexpath/dist/cli/index.js', 'prompt-enhancement-popup-host', '--input-file', '/tmp/private/input.json', '--result-file', '/tmp/private/result.json', '--readiness-file', '/tmp/private/ready', '--db', '/tmp/nexpath-test.db'],
     });
-    expect(xdg.args).toEqual(['/usr/bin/node', '/opt/nexpath/dist/cli/index.js', 'prompt-enhancement-popup-host', '--input-file', '/tmp/private/input.json', '--result-file', '/tmp/private/result.json', '--db', '/tmp/nexpath-test.db']);
+    expect(xdg.args).toEqual(['/usr/bin/node', '/opt/nexpath/dist/cli/index.js', 'prompt-enhancement-popup-host', '--input-file', '/tmp/private/input.json', '--result-file', '/tmp/private/result.json', '--readiness-file', '/tmp/private/ready', '--db', '/tmp/nexpath-test.db']);
     expect(JSON.stringify(gnome.args)).not.toContain('RAW PE REQUEST');
     expect(JSON.stringify(gnome.args)).not.toContain('RAW ENHANCED BODY');
   });
@@ -236,6 +237,7 @@ describe('PE1.3 — Linux PE popup host launcher', () => {
         return fakeChild;
       },
       readResultFile: () => ({ protocolVersion: 1, result: { state: 'selected_original' } }),
+      readReadyFile: () => true,
     });
 
     expect(result).toEqual({ state: 'completed', output: { protocolVersion: 1, result: { state: 'selected_original' } } });
@@ -287,6 +289,7 @@ describe('PE1.3 — Linux PE popup host launcher', () => {
       readResultFile: () => undefined,
       now: () => 0,
       sleep,
+      readReadyFile: () => true,
       cleanupTempDir,
     });
 
@@ -295,6 +298,64 @@ describe('PE1.3 — Linux PE popup host launcher', () => {
     expect(sleep).not.toHaveBeenCalled();
     expect(fakeChild.kill).toHaveBeenCalledWith('SIGTERM');
     expect(cleanupTempDir).toHaveBeenCalledWith('/tmp/pe1-3-timeout');
+  });
+
+  it('fails closed to a pre-visible launch failure when no first-render marker arrives', async () => {
+    const cleanupTempDir = vi.fn();
+    const fakeChild = child();
+    const result = await runPromptEnhancementCliPopupHostLaunchV1({ ...launchInput(), deadlineMs: 0 }, {
+      makeTempDir: () => '/tmp/pe3-1-not-ready',
+      writeInputFile: vi.fn(),
+      spawnTerminal: async () => fakeChild,
+      readResultFile: () => undefined,
+      readReadyFile: () => false,
+      now: () => 0,
+      cleanupTempDir,
+    });
+
+    expect(result).toEqual({ state: 'launch_failed', reasonCode: 'terminal_renderer_not_ready' });
+    expect(fakeChild.kill).toHaveBeenCalledWith('SIGTERM');
+    expect(cleanupTempDir).toHaveBeenCalledWith('/tmp/pe3-1-not-ready');
+  });
+
+  it('rejects a child result that arrives before the first-render marker', async () => {
+    const rawBody = 'must-not-cross-pre-visible-boundary';
+    const result = await runPromptEnhancementCliPopupHostLaunchV1({ ...launchInput(), deadlineMs: 0 }, {
+      makeTempDir: () => '/tmp/pe3-1-unready-result',
+      writeInputFile: vi.fn(),
+      spawnTerminal: async () => child(),
+      readReadyFile: () => false,
+      readResultFile: () => ({ protocolVersion: 1, result: { state: 'selected_current', bodyText: rawBody } }),
+      cleanupTempDir: vi.fn(),
+    });
+
+    expect(result).toEqual({ state: 'launch_failed', reasonCode: 'terminal_renderer_not_ready' });
+    expect(JSON.stringify(result)).not.toContain(rawBody);
+  });
+
+  it('fails closed when a ready child exposes a symlink result path', async () => {
+    const externalDir = mkdtempSync('/tmp/nexpath-pe3-1-symlink-');
+    const externalResult = `${externalDir}/external-result.json`;
+    const rawBody = 'must-not-read-through-result-symlink';
+    writeFileSync(externalResult, JSON.stringify({ protocolVersion: 1, result: { state: 'selected_current', bodyText: rawBody } }), 'utf8');
+
+    try {
+      const result = await runPromptEnhancementCliPopupHostLaunchV1({ ...launchInput(), deadlineMs: 0 }, {
+        spawnTerminal: async (plan) => {
+          const args = [...plan.args];
+          const readinessFile = args[args.indexOf('--readiness-file') + 1]!;
+          const resultFile = args[args.indexOf('--result-file') + 1]!;
+          writeFileSync(readinessFile, 'ready', { mode: 0o600 });
+          symlinkSync(externalResult, resultFile);
+          return child();
+        },
+      });
+
+      expect(result).toEqual({ state: 'timed_out' });
+      expect(JSON.stringify(result)).not.toContain(rawBody);
+    } finally {
+      rmSync(externalDir, { recursive: true, force: true });
+    }
   });
 
   it('does not allocate files for direct-TTY or unavailable host capability', async () => {

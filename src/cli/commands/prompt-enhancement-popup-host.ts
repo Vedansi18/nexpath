@@ -1,4 +1,4 @@
-import { chmodSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync, closeSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import type { Command } from 'commander';
 import { closeStore, openStore, DEFAULT_DB_PATH, type Store } from '../../store/db.js';
@@ -31,6 +31,7 @@ export interface PromptEnhancementPopupHostOutputV1 {
 export interface PromptEnhancementPopupHostCommandOptionsV1 {
   inputFile: string;
   resultFile: string;
+  readinessFile?: string;
   db?: string;
 }
 
@@ -41,6 +42,7 @@ export interface PromptEnhancementPopupHostDependenciesV1 {
   closeStore: (store: Store) => void;
   runPopup: typeof runPromptEnhancementCliSubmitPopupV1;
   recordFeedback: typeof recordPromptEnhancementCliFeedbackV1;
+  markReady: (path: string) => void;
 }
 
 const SAFE_NON_DELIVERY_RESULT_V1: PromptEnhancementCliPopupResultV1 = {
@@ -55,6 +57,7 @@ function defaultDependencies(): PromptEnhancementPopupHostDependenciesV1 {
     closeStore,
     runPopup: runPromptEnhancementCliSubmitPopupV1,
     recordFeedback: recordPromptEnhancementCliFeedbackV1,
+    markReady: writePromptEnhancementPopupHostReadyMarkerV1,
   };
 }
 
@@ -107,6 +110,9 @@ export async function runPromptEnhancementPopupHostCommandV1(
         popupResult = await dependencies.runPopup({
           request: input.request,
           result: input.result,
+          onFirstRender: options.readinessFile
+            ? () => dependencies.markReady(options.readinessFile!)
+            : undefined,
           feedbackSink: (event: PromptEnhancementPopupEventV1) => dependencies.recordFeedback(
             store!,
             input.request.projectRoot,
@@ -148,12 +154,23 @@ export function writePromptEnhancementPopupHostResultAtomicallyV1(
   }
 }
 
+export function writePromptEnhancementPopupHostReadyMarkerV1(readinessFile: string): void {
+  const fd = openSync(readinessFile, 'wx', 0o600);
+  try {
+    writeFileSync(fd, 'ready', 'utf8');
+    chmodSync(readinessFile, 0o600);
+  } finally {
+    closeSync(fd);
+  }
+}
+
 export function registerPromptEnhancementPopupHostCommand(program: Command): void {
   program
     .command('prompt-enhancement-popup-host', { hidden: true })
     .description('Internal PE popup child-process host')
     .requiredOption('--input-file <path>', 'Private validated PE request/result file')
     .requiredOption('--result-file <path>', 'Private typed popup-result file')
+    .option('--readiness-file <path>', 'Private first-render readiness marker')
     .option('--db <path>', 'Path to the SQLite database file')
     .action(async (opts: PromptEnhancementPopupHostCommandOptionsV1) => {
       await runPromptEnhancementPopupHostCommandV1(opts);

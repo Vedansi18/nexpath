@@ -66,7 +66,7 @@ export interface PromptEnhancementLinuxTerminalLaunchPlanV1 {
 export type PromptEnhancementCliPopupHostLaunchResultV1 =
   | { state: 'not_applicable'; reasonCode: 'direct_tty' }
   | { state: 'host_unavailable'; reasonCode: 'unsupported_platform' | 'no_gui_session' | 'no_supported_terminal' }
-  | { state: 'launch_failed'; reasonCode: 'terminal_spawn_failed' | 'terminal_exit_nonzero' }
+  | { state: 'launch_failed'; reasonCode: 'terminal_spawn_failed' | 'terminal_exit_nonzero' | 'terminal_renderer_not_ready' }
   | { state: 'timed_out' }
   | { state: 'completed'; output: PromptEnhancementPopupHostOutputV1 };
 
@@ -81,6 +81,7 @@ export interface PromptEnhancementCliPopupHostLaunchDependenciesV1 {
   writeInputFile: (path: string, input: PromptEnhancementPopupHostInputV1) => void;
   spawnTerminal: (plan: PromptEnhancementLinuxTerminalLaunchPlanV1) => Promise<PromptEnhancementSpawnedTerminalV1>;
   readResultFile: (path: string) => PromptEnhancementPopupHostOutputV1 | undefined;
+  readReadyFile: (path: string) => boolean;
   sleep: (milliseconds: number) => Promise<void>;
   now: () => number;
   cleanupTempDir: (path: string) => void;
@@ -192,6 +193,7 @@ export function planPromptEnhancementLinuxTerminalLaunchV1(input: {
   cliEntryPath: string;
   inputFile: string;
   resultFile: string;
+  readinessFile: string;
   dbPath: string;
 }): PromptEnhancementLinuxTerminalLaunchPlanV1 {
   const childArgs = [
@@ -200,6 +202,7 @@ export function planPromptEnhancementLinuxTerminalLaunchV1(input: {
     'prompt-enhancement-popup-host',
     '--input-file', input.inputFile,
     '--result-file', input.resultFile,
+    '--readiness-file', input.readinessFile,
     '--db', input.dbPath,
   ];
 
@@ -235,8 +238,22 @@ function makeTempDir(): string {
 }
 
 function writeInputFile(path: string, input: PromptEnhancementPopupHostInputV1): void {
-  writeFileSync(path, JSON.stringify(input), { encoding: 'utf8', mode: 0o600 });
-  chmodSync(path, 0o600);
+  const fd = openSync(path, 'wx', 0o600);
+  try {
+    writeFileSync(fd, JSON.stringify(input), 'utf8');
+    chmodSync(path, 0o600);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function readReadyFile(path: string): boolean {
+  if (!existsSync(path)) return false;
+  try {
+    return lstatSync(path).isFile() && readFileSync(path, 'utf8') === 'ready';
+  } catch {
+    return false;
+  }
 }
 
 function readResultFile(path: string): PromptEnhancementPopupHostOutputV1 | undefined {
@@ -281,6 +298,7 @@ function defaultLaunchDependencies(): PromptEnhancementCliPopupHostLaunchDepende
     writeInputFile,
     spawnTerminal,
     readResultFile,
+    readReadyFile,
     sleep,
     now: () => Date.now(),
     cleanupTempDir,
@@ -311,8 +329,10 @@ export async function runPromptEnhancementCliPopupHostLaunchV1(input: {
   const tempDir = dependencies.makeTempDir();
   const inputFile = join(tempDir, 'input.json');
   const resultFile = join(tempDir, 'result.json');
+  const readinessFile = join(tempDir, 'ready');
   let child: PromptEnhancementSpawnedTerminalV1 | undefined;
   let terminalExitNonZero = false;
+  let rendererReady = false;
 
   try {
     const childInput: PromptEnhancementPopupHostInputV1 = {
@@ -327,6 +347,7 @@ export async function runPromptEnhancementCliPopupHostLaunchV1(input: {
       cliEntryPath: input.cliEntryPath,
       inputFile,
       resultFile,
+      readinessFile,
       dbPath: input.dbPath,
     });
     try {
@@ -340,10 +361,19 @@ export async function runPromptEnhancementCliPopupHostLaunchV1(input: {
 
     const deadlineAt = dependencies.now() + deadlineMs;
     for (;;) {
+      rendererReady ||= dependencies.readReadyFile(readinessFile);
       const output = dependencies.readResultFile(resultFile);
-      if (output) return { state: 'completed', output };
+      if (output) {
+        return rendererReady
+          ? { state: 'completed', output }
+          : { state: 'launch_failed', reasonCode: 'terminal_renderer_not_ready' };
+      }
       if (terminalExitNonZero) return { state: 'launch_failed', reasonCode: 'terminal_exit_nonzero' };
-      if (dependencies.now() >= deadlineAt) return { state: 'timed_out' };
+      if (dependencies.now() >= deadlineAt) {
+        return rendererReady
+          ? { state: 'timed_out' }
+          : { state: 'launch_failed', reasonCode: 'terminal_renderer_not_ready' };
+      }
       await dependencies.sleep(Math.min(PROMPT_ENHANCEMENT_POPUP_HOST_POLL_INTERVAL_MS_V1, Math.max(1, deadlineAt - dependencies.now())));
     }
   } finally {
