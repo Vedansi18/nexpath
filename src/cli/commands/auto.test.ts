@@ -26,6 +26,7 @@ import {
   buildFiredKey,
   buildPromptEnhancementCliSubmitConsumerDiagnosticV1,
   buildPromptEnhancementRequestForAuto,
+  createPromptEnhancementCliHostConsumerV1,
   preparePromptEnhancementForAuto,
   recordPromptEnhancementCliFeedbackV1,
   runAuto,
@@ -3068,6 +3069,102 @@ describe('H1.3 - preparation-only execution constraints', () => {
 
     expect(result).toMatchObject({ disposition: 'no_popup_not_applicable', safeFallback: true, reasonCode: 'invalid_request' });
     expect(prepare).not.toHaveBeenCalled();
+  });
+});
+
+describe('PE2.1 - hook-mode PE host consumer wiring', () => {
+  let store: Store;
+
+  beforeEach(async () => { store = await openStore(':memory:'); });
+  afterEach(() => { store.db.close(); });
+
+  async function validPreparation(projectRoot: string) {
+    const request = makeBoundaryRequest(store, projectRoot);
+    return {
+      request,
+      preparation: await preparePromptEnhancementForAuto({
+        request,
+        prepare: vi.fn().mockResolvedValue(await preparePromptEnhancement(request)),
+      }),
+    };
+  }
+
+  it('calls the Linux private-file host exactly once for an eligible preparation and forwards the explicit result', async () => {
+    const { request, preparation } = await validPreparation('/test/pe2-1-linux');
+    const launchHost = vi.fn().mockResolvedValue({ state: 'completed', output: { protocolVersion: 1, result: { state: 'selected_original' } } });
+    const onHookOutput = vi.fn();
+    const consumer = createPromptEnhancementCliHostConsumerV1({
+      store,
+      dbPath: ':memory:',
+      cliEntryPath: '/opt/nexpath/dist/cli/index.js',
+      resolveCapability: () => ({ state: 'available', method: 'linux_terminal', terminalCommand: 'gnome-terminal' }),
+      launchHost,
+      onHookOutput,
+    });
+
+    await expect(consumer(preparation, request)).resolves.toBe('continue');
+    expect(launchHost).toHaveBeenCalledTimes(1);
+    expect(launchHost).toHaveBeenCalledWith(expect.objectContaining({ capability: { state: 'available', method: 'linux_terminal', terminalCommand: 'gnome-terminal' }, request, result: preparation.result }));
+    expect(onHookOutput).toHaveBeenCalledWith(undefined);
+  });
+
+  it('keeps an unavailable host on original-prompt pass-through without launching a child', async () => {
+    const { request, preparation } = await validPreparation('/test/pe2-1-unavailable');
+    const launchHost = vi.fn();
+    const onHookOutput = vi.fn();
+    const consumer = createPromptEnhancementCliHostConsumerV1({
+      store,
+      dbPath: ':memory:',
+      cliEntryPath: '/opt/nexpath/dist/cli/index.js',
+      resolveCapability: () => ({ state: 'unavailable', method: 'none', reasonCode: 'no_gui_session' }),
+      launchHost,
+      onHookOutput,
+    });
+
+    await expect(consumer(preparation, request)).resolves.toBe('continue');
+    expect(launchHost).not.toHaveBeenCalled();
+    expect(onHookOutput).toHaveBeenCalledWith(undefined);
+  });
+
+  it('maps a visible child close to no-send block without creating a pending advisory', async () => {
+    const projectRoot = '/test/pe2-1-close';
+    primeTaskBreakdownSession(store, projectRoot);
+    const { request, preparation } = await validPreparation(projectRoot);
+    const onHookOutput = vi.fn();
+    const consumer = createPromptEnhancementCliHostConsumerV1({
+      store,
+      dbPath: ':memory:',
+      cliEntryPath: '/opt/nexpath/dist/cli/index.js',
+      resolveCapability: () => ({ state: 'available', method: 'linux_terminal', terminalCommand: 'gnome-terminal' }),
+      launchHost: vi.fn().mockResolvedValue({ state: 'completed', output: { protocolVersion: 1, result: { state: 'closed_no_send' } } }),
+      onHookOutput,
+    });
+
+    const prepare = vi.fn().mockResolvedValue(preparation.result);
+    const outcome = await runAuto(
+      makeInput({ projectRoot }),
+      store,
+      makeMockOpenAI(FIRE_YES_RESPONSE, 'must not persist'),
+      { request, prepare },
+      consumer,
+    );
+
+    expect(outcome).toEqual({ outcome: 'no_action' });
+    expect(prepare).toHaveBeenCalledTimes(1);
+    expect(onHookOutput).toHaveBeenCalledWith(expect.objectContaining({ decision: 'block', suppressOriginalPrompt: true }));
+    expect(getPendingAdvisory(store, projectRoot)).toBeNull();
+  });
+
+  it('does not invoke the host consumer when runAuto exits through an existing non-eligible gate', async () => {
+    const hostConsumer = vi.fn();
+    await runAuto(
+      makeInput({ projectRoot: '/test/pe2-1-gated', promptText: 'ok' }),
+      store,
+      undefined,
+      undefined,
+      hostConsumer,
+    );
+    expect(hostConsumer).not.toHaveBeenCalled();
   });
 });
 

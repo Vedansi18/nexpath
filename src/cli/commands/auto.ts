@@ -60,6 +60,12 @@ import {
   type ClaudeUserPromptSubmitHookOutputV1,
   type PromptEnhancementCliPopupResultV1,
 } from '../../prompt-enhancement/cli-submit-popup.js';
+import {
+  resolvePromptEnhancementCliHostCapabilityV1,
+  runPromptEnhancementCliPopupHostLaunchV1,
+  type PromptEnhancementCliHostCapabilityV1,
+  type PromptEnhancementCliPopupHostLaunchResultV1,
+} from '../prompt-enhancement-host.js';
 
 /**
  * nexpath auto — orchestration command (per decision-session-ux-research.md).
@@ -440,7 +446,7 @@ const PROMPT_ENHANCEMENT_CLI_DIAGNOSTIC_REASON_LIMIT_V1 = 8;
 export interface PromptEnhancementCliSubmitConsumerDiagnosticV1 {
   [key: string]: unknown;
   state: PromptEnhancementCliPopupResultV1['state'];
-  hostAdapter: 'direct_tty';
+  hostAdapter: 'direct_tty' | 'linux_terminal' | 'unavailable';
   hookOutput: 'block_no_send' | 'additional_context' | 'allow_original_or_not_shown';
   reasonCodes: readonly string[];
 }
@@ -455,6 +461,7 @@ export interface PromptEnhancementCliSubmitConsumerDiagnosticV1 {
 export function buildPromptEnhancementCliSubmitConsumerDiagnosticV1(
   popupResult: PromptEnhancementCliPopupResultV1,
   hookOutput: ClaudeUserPromptSubmitHookOutputV1 | undefined,
+  hostAdapter: PromptEnhancementCliSubmitConsumerDiagnosticV1['hostAdapter'] = 'direct_tty',
 ): PromptEnhancementCliSubmitConsumerDiagnosticV1 {
   const reasonCodes: string[] = [];
   if (popupResult.state === 'not_shown') {
@@ -469,11 +476,95 @@ export function buildPromptEnhancementCliSubmitConsumerDiagnosticV1(
 
   return {
     state: popupResult.state,
-    hostAdapter: 'direct_tty',
+    hostAdapter,
     hookOutput: hookOutput
       ? hookOutput.decision === 'block' ? 'block_no_send' : 'additional_context'
       : 'allow_original_or_not_shown',
     reasonCodes,
+  };
+}
+
+export interface PromptEnhancementCliHostConsumerDependenciesV1 {
+  store: Store;
+  dbPath: string;
+  cliEntryPath: string;
+  resolveCapability?: () => PromptEnhancementCliHostCapabilityV1;
+  launchHost?: (input: {
+    capability: PromptEnhancementCliHostCapabilityV1;
+    request: PromptEnhancementPrepareRequestV1;
+    result: PromptEnhancementPrepareResultV1;
+    cliEntryPath: string;
+    dbPath: string;
+  }) => Promise<PromptEnhancementCliPopupHostLaunchResultV1>;
+  showDirectPopup?: (input: {
+    request: PromptEnhancementPrepareRequestV1;
+    result: PromptEnhancementPrepareResultV1;
+    feedbackSink: (event: PromptEnhancementPopupEventV1) => ReturnType<typeof recordPromptEnhancementCliFeedbackV1>;
+  }) => Promise<PromptEnhancementCliPopupResultV1>;
+  onHookOutput?: (output: ClaudeUserPromptSubmitHookOutputV1 | undefined) => void;
+}
+
+function popupResultFromHostLaunchV1(
+  result: PromptEnhancementCliPopupHostLaunchResultV1,
+): PromptEnhancementCliPopupResultV1 {
+  if (result.state === 'completed') return result.output.result;
+  if (result.state === 'timed_out') return { state: 'closed_no_send' };
+  return {
+    state: 'not_shown',
+    reasonCodes: [result.state === 'host_unavailable' ? 'no_tty' : 'host_launch_failed'],
+  };
+}
+
+/**
+ * Hook-only PE host selector. It preserves the existing direct-TTY popup path,
+ * uses the PE1.3 private-file launcher for a supported Linux terminal, and
+ * keeps unavailable/launch-failed hosts on normal original-prompt pass-through.
+ */
+export function createPromptEnhancementCliHostConsumerV1(
+  dependencies: PromptEnhancementCliHostConsumerDependenciesV1,
+): AutoPromptEnhancementConsumerV1 {
+  const resolveCapability = dependencies.resolveCapability ?? resolvePromptEnhancementCliHostCapabilityV1;
+  const launchHost = dependencies.launchHost ?? runPromptEnhancementCliPopupHostLaunchV1;
+  const showDirectPopup = dependencies.showDirectPopup ?? runPromptEnhancementCliSubmitPopupV1;
+
+  return async (preparation, request) => {
+    if (preparation.safeFallback || !preparation.result) return;
+
+    const capability = resolveCapability();
+    let popupResult: PromptEnhancementCliPopupResultV1;
+    let hostAdapter: PromptEnhancementCliSubmitConsumerDiagnosticV1['hostAdapter'];
+    if (capability.state === 'unavailable') {
+      hostAdapter = 'unavailable';
+      popupResult = { state: 'not_shown', reasonCodes: ['no_tty'] };
+    } else if (capability.method === 'direct_tty') {
+      hostAdapter = 'direct_tty';
+      popupResult = await showDirectPopup({
+        request,
+        result: preparation.result,
+        feedbackSink: (event) => recordPromptEnhancementCliFeedbackV1(dependencies.store, request.projectRoot, event),
+      });
+    } else {
+      hostAdapter = 'linux_terminal';
+      try {
+        popupResult = popupResultFromHostLaunchV1(await launchHost({
+          capability,
+          request,
+          result: preparation.result,
+          cliEntryPath: dependencies.cliEntryPath,
+          dbPath: dependencies.dbPath,
+        }));
+      } catch {
+        popupResult = { state: 'not_shown', reasonCodes: ['host_launch_failed'] };
+      }
+    }
+
+    const hookOutput = buildClaudeUserPromptSubmitHookOutputV1(popupResult);
+    dependencies.onHookOutput?.(hookOutput);
+    logger.debug(
+      'prompt_enhancement_cli_submit_consumer',
+      buildPromptEnhancementCliSubmitConsumerDiagnosticV1(popupResult, hookOutput, hostAdapter),
+    );
+    return popupResult.state === 'closed_no_send' ? 'handled_no_send' : 'continue';
   };
 }
 
@@ -997,27 +1088,20 @@ export function registerAutoCommand(program: import('commander').Command): void 
 
       try {
         let hookOutput: ClaudeUserPromptSubmitHookOutputV1 | undefined;
+        const promptEnhancementConsumer = hookMode
+          ? createPromptEnhancementCliHostConsumerV1({
+              store,
+              dbPath: opts.db,
+              cliEntryPath: process.argv[1] ?? '',
+              onHookOutput: (output) => { hookOutput = output; },
+            })
+          : undefined;
         const result = await runAuto(
           { promptText, projectRoot: opts.project, currentAgentMode, transcriptPath },
           store,
           undefined,
           undefined,
-          hookMode
-            ? async (preparation, request) => {
-                if (preparation.safeFallback || !preparation.result) return;
-                const popupResult = await runPromptEnhancementCliSubmitPopupV1({
-                  request,
-                  result: preparation.result,
-                  feedbackSink: (event) => recordPromptEnhancementCliFeedbackV1(store, request.projectRoot, event),
-                });
-                hookOutput = buildClaudeUserPromptSubmitHookOutputV1(popupResult);
-                logger.debug(
-                  'prompt_enhancement_cli_submit_consumer',
-                  buildPromptEnhancementCliSubmitConsumerDiagnosticV1(popupResult, hookOutput),
-                );
-                return popupResult.state === 'closed_no_send' ? 'handled_no_send' : 'continue';
-              }
-            : undefined,
+          promptEnhancementConsumer,
         );
 
         writeHookStats(opts.project, result.outcome);
