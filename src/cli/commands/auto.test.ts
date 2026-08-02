@@ -22,7 +22,8 @@ vi.mock('openai', () => ({
   },
 }));
 import { getRecentPrompts } from '../../store/prompts.js';
-import { buildFiredKey, buildPromptEnhancementRequestForAuto, preparePromptEnhancementForAuto, runAuto, readStdin } from './auto.js';
+import { buildFiredKey, buildPromptEnhancementRequestForAuto, preparePromptEnhancementForAuto, recordPromptEnhancementCliFeedbackV1, runAuto, readStdin } from './auto.js';
+import { getPromptEnhancementFeedbackSummary } from '../../store/prompt-enhancement.js';
 import { writeTelemetry } from '../../telemetry/index.js';
 import type { AutoInput } from './auto.js';
 import { getPendingAdvisory } from '../../store/pending-advisories.js';
@@ -2981,5 +2982,56 @@ describe('H1.3 - preparation-only execution constraints', () => {
 
     expect(result).toMatchObject({ disposition: 'no_popup_not_applicable', safeFallback: true, reasonCode: 'invalid_request' });
     expect(prepare).not.toHaveBeenCalled();
+  });
+});
+
+describe('B1.4a - live CLI PEF sink wiring', () => {
+  it('persists one typed category with conservative policy and no raw text or send authority', async () => {
+    const store = await openStore(':memory:');
+    try {
+      const projectRoot = '/test/b1-4a-feedback';
+      const prepared = await preparePromptEnhancement(makeBoundaryRequest(store, projectRoot));
+      const boundary = buildPromptEnhancementUiBoundarySessionV1({
+        result: prepared,
+        timestampMs: 700,
+      });
+      expect(boundary.state).toBe('session_ready');
+      if (boundary.state !== 'session_ready') throw new Error('expected feedback session');
+      const actionId = boundary.session.feedbackEntry.actionId;
+      if (!actionId) throw new Error('expected feedback action');
+      const event = createPromptEnhancementPopupEventV1({
+        session: boundary.session,
+        eventType: 'explicit_feedback',
+        actionId,
+        currentBodyId: boundary.session.currentBodyId,
+        bodyRevision: boundary.session.bodyRevision,
+        feedbackCategory: 'not_relevant_enough',
+        timestampMs: 701,
+        realUserInitiated: true,
+      });
+
+      const accepted = recordPromptEnhancementCliFeedbackV1(store, projectRoot, event);
+      const duplicate = recordPromptEnhancementCliFeedbackV1(store, projectRoot, event);
+      const summary = getPromptEnhancementFeedbackSummary(
+        store,
+        projectRoot,
+        boundary.session.currentBodyId,
+      );
+
+      expect(event.sendPolicy).toBe('no_send');
+      expect(accepted.status).toBe('accepted');
+      expect(accepted.publicSafeText).toBe('Feedback saved. Your prompt is unchanged.');
+      expect(duplicate.status).toBe('rejected');
+      expect(summary).toMatchObject({
+        totalEvents: 1,
+        memoryEvidenceEvents: 0,
+        rawTextStoredEvents: 0,
+      });
+      expect(summary.categoryCounts).toEqual([
+        { feedbackCategory: 'not_relevant_enough', count: 1 },
+      ]);
+    } finally {
+      store.db.close();
+    }
   });
 });

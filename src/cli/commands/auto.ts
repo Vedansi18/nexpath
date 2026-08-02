@@ -50,6 +50,8 @@ import {
   type PromptEnhancementSourceRefV1,
 } from '../../prompt-enhancement/contracts.js';
 import { preparePromptEnhancement } from '../../prompt-enhancement/facade.js';
+import { recordPromptEnhancementFeedbackV1 } from '../../prompt-enhancement/feedback-sink.js';
+import type { PromptEnhancementPopupEventV1 } from '../../prompt-enhancement/popup-session.js';
 import { buildPromptEnhancementCostVisibilityMetadataV1 } from '../../prompt-enhancement/cost-observability.js';
 import { getSourceRealityAdaptersSnapshot } from '../../prompt-enhancement/source-reality.js';
 import {
@@ -948,6 +950,7 @@ export function registerAutoCommand(program: import('commander').Command): void 
                 const popupResult = await runPromptEnhancementCliSubmitPopupV1({
                   request,
                   result: preparation.result,
+                  feedbackSink: (event) => recordPromptEnhancementCliFeedbackV1(store, request.projectRoot, event),
                 });
                 hookOutput = buildClaudeUserPromptSubmitHookOutputV1(popupResult);
                 logger.debug('prompt_enhancement_cli_submit_consumer', {
@@ -969,4 +972,31 @@ export function registerAutoCommand(program: import('commander').Command): void 
         closeStore(store);
       }
     });
+}
+
+export function recordPromptEnhancementCliFeedbackV1(
+  store: Store,
+  projectRoot: string,
+  event: PromptEnhancementPopupEventV1,
+) {
+  const acknowledgement = recordPromptEnhancementFeedbackV1({
+    store,
+    event,
+    policy: {
+      projectRoot,
+      feedbackScopeKey: event.currentBodyId,
+      learningEligibility: 'pending_policy',
+      safetyImpactState: 'unknown',
+      memoryEvidence: false,
+    },
+  });
+  return {
+    stableEventIdentity: acknowledgement.stableEventIdentity,
+    status: acknowledgement.status,
+    publicSafeText: acknowledgement.status === 'accepted'
+      ? 'Feedback saved. Your prompt is unchanged.'
+      : acknowledgement.status === 'rejected'
+        ? 'Feedback was not saved. Your prompt is unchanged.'
+        : 'Feedback is unavailable right now. Your prompt is unchanged.',
+  };
 }
