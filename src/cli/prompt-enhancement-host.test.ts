@@ -130,7 +130,26 @@ describe('PE1.1 — prompt enhancement CLI host capability resolver', () => {
     });
   });
 
-  it('returns no_supported_terminal when probes fail or no known command is available', () => {
+  it('returns no_supported_terminal when no known terminal command is installed', () => {
+    const commandExists = unavailableCommands();
+    const result = resolvePromptEnhancementCliHostCapabilityV1({
+      platform: 'linux',
+      env: { DISPLAY: ':0' },
+      probeDirectTty: () => false,
+      commandExists,
+    });
+
+    expect(result).toEqual({
+      state: 'unavailable',
+      method: 'none',
+      reasonCode: 'no_supported_terminal',
+    });
+    expect(commandExists).toHaveBeenCalledTimes(
+      PROMPT_ENHANCEMENT_LINUX_TERMINAL_COMMANDS_V1.length,
+    );
+  });
+
+  it('returns no_supported_terminal when capability probes throw', () => {
     const result = resolvePromptEnhancementCliHostCapabilityV1({
       platform: 'linux',
       env: { DISPLAY: ':0' },
