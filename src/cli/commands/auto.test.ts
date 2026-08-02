@@ -22,7 +22,15 @@ vi.mock('openai', () => ({
   },
 }));
 import { getRecentPrompts } from '../../store/prompts.js';
-import { buildFiredKey, buildPromptEnhancementRequestForAuto, preparePromptEnhancementForAuto, recordPromptEnhancementCliFeedbackV1, runAuto, readStdin } from './auto.js';
+import {
+  buildFiredKey,
+  buildPromptEnhancementCliSubmitConsumerDiagnosticV1,
+  buildPromptEnhancementRequestForAuto,
+  preparePromptEnhancementForAuto,
+  recordPromptEnhancementCliFeedbackV1,
+  runAuto,
+  readStdin,
+} from './auto.js';
 import { getPromptEnhancementFeedbackSummary } from '../../store/prompt-enhancement.js';
 import { writeTelemetry } from '../../telemetry/index.js';
 import type { AutoInput } from './auto.js';
@@ -161,6 +169,84 @@ function primeTaskBreakdownSession(store: Store, projectRoot: string): SessionSt
   session.processPrompt(store, 'profile baseline', classification);
   return session;
 }
+
+// ── PE0.1 live-consumer diagnostics ───────────────────────────────────────────
+
+describe('PE0.1 — live PE consumer diagnostics', () => {
+  it('preserves the bounded host failure enums needed to distinguish live failures', () => {
+    const diagnostic = buildPromptEnhancementCliSubmitConsumerDiagnosticV1(
+      {
+        state: 'not_shown',
+        reasonCodes: ['no_tty', 'host_launch_failed', 'invalid_host_result', 'renderer_failure'],
+      },
+      undefined,
+    );
+
+    expect(diagnostic).toEqual({
+      state: 'not_shown',
+      hostAdapter: 'direct_tty',
+      hookOutput: 'allow_original_or_not_shown',
+      reasonCodes: ['no_tty', 'host_launch_failed', 'invalid_host_result', 'renderer_failure'],
+    });
+  });
+
+  it('redacts unknown reason text, deduplicates it, and caps the diagnostic array', () => {
+    const privateReason = '/home/user/private/project: raw prompt body';
+    const diagnostic = buildPromptEnhancementCliSubmitConsumerDiagnosticV1(
+      {
+        state: 'not_shown',
+        reasonCodes: [
+          privateReason,
+          privateReason,
+          'no_tty',
+          'renderer_failure',
+          'invalid_prepare_result',
+          'invalid_popup_session',
+          'popup_identity_mismatch',
+          'missing_required_popup_action',
+          'typed_no_popup_disposition',
+          'delivery_surface_mismatch',
+        ],
+      },
+      undefined,
+    );
+
+    expect(diagnostic.reasonCodes).toHaveLength(8);
+    expect(diagnostic.reasonCodes[0]).toBe('unrecognized_reason_code');
+    expect(diagnostic.reasonCodes).toContain('no_tty');
+    expect(JSON.stringify(diagnostic)).not.toContain(privateReason);
+  });
+
+  it('classifies selected and closed hook outputs without logging the enhanced body', () => {
+    const selected = buildPromptEnhancementCliSubmitConsumerDiagnosticV1(
+      { state: 'selected_current', bodyText: 'private enhanced body' },
+      {
+        hookSpecificOutput: {
+          hookEventName: 'UserPromptSubmit',
+          additionalContext: 'private enhanced body',
+        },
+      },
+    );
+    const closed = buildPromptEnhancementCliSubmitConsumerDiagnosticV1(
+      { state: 'closed_no_send' },
+      { decision: 'block', reason: 'Nothing was sent.', suppressOriginalPrompt: true },
+    );
+
+    expect(selected).toEqual({
+      state: 'selected_current',
+      hostAdapter: 'direct_tty',
+      hookOutput: 'additional_context',
+      reasonCodes: [],
+    });
+    expect(closed).toEqual({
+      state: 'closed_no_send',
+      hostAdapter: 'direct_tty',
+      hookOutput: 'block_no_send',
+      reasonCodes: [],
+    });
+    expect(JSON.stringify(selected)).not.toContain('private enhanced body');
+  });
+});
 
 // ── buildFiredKey ─────────────────────────────────────────────────────────────
 

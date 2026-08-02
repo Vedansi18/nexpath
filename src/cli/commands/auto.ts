@@ -58,6 +58,7 @@ import {
   buildClaudeUserPromptSubmitHookOutputV1,
   runPromptEnhancementCliSubmitPopupV1,
   type ClaudeUserPromptSubmitHookOutputV1,
+  type PromptEnhancementCliPopupResultV1,
 } from '../../prompt-enhancement/cli-submit-popup.js';
 
 /**
@@ -418,6 +419,63 @@ export function parseAutoHookPayload(raw: string): AutoHookPayload {
 export type AutoOutcome =
   | { outcome: 'no_action' }
   | { outcome: 'pending' };
+
+const PROMPT_ENHANCEMENT_CLI_DIAGNOSTIC_REASON_CODES_V1 = new Set([
+  'no_tty',
+  'renderer_failure',
+  'action_result_not_renderable',
+  'invalid_prepare_result',
+  'invalid_popup_session',
+  'popup_identity_mismatch',
+  'missing_required_popup_action',
+  'typed_no_popup_disposition',
+  'invalid_render_timestamp',
+  'delivery_surface_mismatch',
+  'host_launch_failed',
+  'invalid_host_result',
+]);
+
+const PROMPT_ENHANCEMENT_CLI_DIAGNOSTIC_REASON_LIMIT_V1 = 8;
+
+export interface PromptEnhancementCliSubmitConsumerDiagnosticV1 {
+  [key: string]: unknown;
+  state: PromptEnhancementCliPopupResultV1['state'];
+  hostAdapter: 'direct_tty';
+  hookOutput: 'block_no_send' | 'additional_context' | 'allow_original_or_not_shown';
+  reasonCodes: readonly string[];
+}
+
+/**
+ * Build the public-safe PE live-consumer diagnostic payload.
+ *
+ * The popup result can carry body text and its reason array crosses a runtime
+ * boundary, so neither is logged directly. Only allowlisted enum values are
+ * retained; any unknown value is collapsed to one bounded marker.
+ */
+export function buildPromptEnhancementCliSubmitConsumerDiagnosticV1(
+  popupResult: PromptEnhancementCliPopupResultV1,
+  hookOutput: ClaudeUserPromptSubmitHookOutputV1 | undefined,
+): PromptEnhancementCliSubmitConsumerDiagnosticV1 {
+  const reasonCodes: string[] = [];
+  if (popupResult.state === 'not_shown') {
+    for (const reasonCode of popupResult.reasonCodes) {
+      const safeReasonCode = PROMPT_ENHANCEMENT_CLI_DIAGNOSTIC_REASON_CODES_V1.has(reasonCode)
+        ? reasonCode
+        : 'unrecognized_reason_code';
+      if (!reasonCodes.includes(safeReasonCode)) reasonCodes.push(safeReasonCode);
+      if (reasonCodes.length === PROMPT_ENHANCEMENT_CLI_DIAGNOSTIC_REASON_LIMIT_V1) break;
+    }
+  }
+
+  return {
+    state: popupResult.state,
+    hostAdapter: 'direct_tty',
+    hookOutput: hookOutput
+      ? hookOutput.decision === 'block' ? 'block_no_send' : 'additional_context'
+      : 'allow_original_or_not_shown',
+    reasonCodes,
+  };
+}
 
 // ── Core orchestration ─────────────────────────────────────────────────────────
 
@@ -953,12 +1011,10 @@ export function registerAutoCommand(program: import('commander').Command): void 
                   feedbackSink: (event) => recordPromptEnhancementCliFeedbackV1(store, request.projectRoot, event),
                 });
                 hookOutput = buildClaudeUserPromptSubmitHookOutputV1(popupResult);
-                logger.debug('prompt_enhancement_cli_submit_consumer', {
-                  state: popupResult.state,
-                  hookOutput: hookOutput
-                    ? hookOutput.decision === 'block' ? 'block_no_send' : 'additional_context'
-                    : 'allow_original_or_not_shown',
-                });
+                logger.debug(
+                  'prompt_enhancement_cli_submit_consumer',
+                  buildPromptEnhancementCliSubmitConsumerDiagnosticV1(popupResult, hookOutput),
+                );
                 return popupResult.state === 'closed_no_send' ? 'handled_no_send' : 'continue';
               }
             : undefined,
