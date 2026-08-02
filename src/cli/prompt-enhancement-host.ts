@@ -1,5 +1,19 @@
-import { closeSync, openSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
+import { chmodSync, closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import type {
+  PromptEnhancementPrepareRequestV1,
+  PromptEnhancementPrepareResultV1,
+} from '../prompt-enhancement/contracts.js';
+import type {
+  PromptEnhancementCliPopupResultV1,
+} from '../prompt-enhancement/cli-submit-popup.js';
+import type {
+  PromptEnhancementPopupHostInputV1,
+  PromptEnhancementPopupHostOutputV1,
+} from './commands/prompt-enhancement-popup-host.js';
 
 export const PROMPT_ENHANCEMENT_LINUX_TERMINAL_COMMANDS_V1 = [
   'xdg-terminal-exec',
@@ -39,6 +53,39 @@ export interface PromptEnhancementCliHostProbeDependenciesV1 {
   probeDirectTty?: () => boolean;
   commandExists?: (command: PromptEnhancementLinuxTerminalCommandV1) => boolean;
   readCommandVersion?: (command: PromptEnhancementLinuxTerminalCommandV1) => string | undefined;
+}
+
+export const PROMPT_ENHANCEMENT_POPUP_HOST_DEADLINE_MS_V1 = 52_000;
+const PROMPT_ENHANCEMENT_POPUP_HOST_POLL_INTERVAL_MS_V1 = 50;
+const PROMPT_ENHANCEMENT_POPUP_HOST_PROTOCOL_VERSION_V1 = 1;
+const PROMPT_ENHANCEMENT_POPUP_WINDOW_TITLE_V1 = 'Nexpath · Prompt enhancement';
+
+export interface PromptEnhancementLinuxTerminalLaunchPlanV1 {
+  command: PromptEnhancementLinuxTerminalCommandV1;
+  args: readonly string[];
+}
+
+export type PromptEnhancementCliPopupHostLaunchResultV1 =
+  | { state: 'not_applicable'; reasonCode: 'direct_tty' }
+  | { state: 'host_unavailable'; reasonCode: 'unsupported_platform' | 'no_gui_session' | 'no_supported_terminal' }
+  | { state: 'launch_failed'; reasonCode: 'terminal_spawn_failed' | 'terminal_exit_nonzero' }
+  | { state: 'timed_out' }
+  | { state: 'completed'; output: PromptEnhancementPopupHostOutputV1 };
+
+interface PromptEnhancementSpawnedTerminalV1 {
+  unref(): void;
+  kill(signal?: NodeJS.Signals | number): boolean;
+  once(event: 'exit', listener: (code: number | null, signal: NodeJS.Signals | null) => void): this;
+}
+
+export interface PromptEnhancementCliPopupHostLaunchDependenciesV1 {
+  makeTempDir: () => string;
+  writeInputFile: (path: string, input: PromptEnhancementPopupHostInputV1) => void;
+  spawnTerminal: (plan: PromptEnhancementLinuxTerminalLaunchPlanV1) => Promise<PromptEnhancementSpawnedTerminalV1>;
+  readResultFile: (path: string) => PromptEnhancementPopupHostOutputV1 | undefined;
+  sleep: (milliseconds: number) => Promise<void>;
+  now: () => number;
+  cleanupTempDir: (path: string) => void;
 }
 
 function probeDirectTty(): boolean {
@@ -135,4 +182,186 @@ export function resolvePromptEnhancementCliHostCapabilityV1(
   }
 
   return { state: 'unavailable', method: 'none', reasonCode: 'no_supported_terminal' };
+}
+
+/**
+ * Build only the generic Linux terminal argv for the already-resolved PE host.
+ * The request/result body is private-file data and never becomes an argv value.
+ */
+export function planPromptEnhancementLinuxTerminalLaunchV1(input: {
+  terminalCommand: PromptEnhancementLinuxTerminalCommandV1;
+  nodePath: string;
+  cliEntryPath: string;
+  inputFile: string;
+  resultFile: string;
+  dbPath: string;
+}): PromptEnhancementLinuxTerminalLaunchPlanV1 {
+  const childArgs = [
+    input.nodePath,
+    input.cliEntryPath,
+    'prompt-enhancement-popup-host',
+    '--input-file', input.inputFile,
+    '--result-file', input.resultFile,
+    '--db', input.dbPath,
+  ];
+
+  switch (input.terminalCommand) {
+    case 'xdg-terminal-exec':
+      return { command: input.terminalCommand, args: childArgs };
+    case 'gnome-terminal':
+      return { command: input.terminalCommand, args: ['--wait', `--title=${PROMPT_ENHANCEMENT_POPUP_WINDOW_TITLE_V1}`, '--', ...childArgs] };
+    case 'konsole':
+      return { command: input.terminalCommand, args: ['-p', `tabtitle=${PROMPT_ENHANCEMENT_POPUP_WINDOW_TITLE_V1}`, '-e', ...childArgs] };
+    case 'xfce4-terminal':
+      return { command: input.terminalCommand, args: ['--disable-server', `--title=${PROMPT_ENHANCEMENT_POPUP_WINDOW_TITLE_V1}`, '-x', ...childArgs] };
+    case 'kitty':
+      return { command: input.terminalCommand, args: ['--title', PROMPT_ENHANCEMENT_POPUP_WINDOW_TITLE_V1, ...childArgs] };
+    case 'alacritty':
+      return { command: input.terminalCommand, args: ['--title', PROMPT_ENHANCEMENT_POPUP_WINDOW_TITLE_V1, '-e', ...childArgs] };
+    case 'wezterm':
+      return { command: input.terminalCommand, args: ['start', '--', ...childArgs] };
+    case 'foot':
+      return { command: input.terminalCommand, args: [`--title=${PROMPT_ENHANCEMENT_POPUP_WINDOW_TITLE_V1}`, ...childArgs] };
+    case 'x-terminal-emulator':
+      return { command: input.terminalCommand, args: ['-e', ...childArgs] };
+    case 'xterm':
+      return { command: input.terminalCommand, args: ['-T', PROMPT_ENHANCEMENT_POPUP_WINDOW_TITLE_V1, '-e', ...childArgs] };
+  }
+}
+
+function makeTempDir(): string {
+  const dir = join(tmpdir(), `nexpath-pe-popup-host-${randomUUID()}`);
+  mkdirSync(dir, { mode: 0o700 });
+  chmodSync(dir, 0o700);
+  return dir;
+}
+
+function writeInputFile(path: string, input: PromptEnhancementPopupHostInputV1): void {
+  writeFileSync(path, JSON.stringify(input), { encoding: 'utf8', mode: 0o600 });
+  chmodSync(path, 0o600);
+}
+
+function isPopupResult(value: unknown): value is PromptEnhancementCliPopupResultV1 {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const result = value as Record<string, unknown>;
+  if (result.state === 'selected_current') return typeof result.bodyText === 'string';
+  if (result.state === 'selected_original' || result.state === 'closed_no_send') return true;
+  return result.state === 'not_shown'
+    && Array.isArray(result.reasonCodes)
+    && result.reasonCodes.every((reasonCode) => typeof reasonCode === 'string');
+}
+
+function readResultFile(path: string): PromptEnhancementPopupHostOutputV1 | undefined {
+  if (!existsSync(path)) return undefined;
+  try {
+    if (!lstatSync(path).isFile()) return undefined;
+    const parsed = JSON.parse(readFileSync(path, 'utf8')) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
+    const output = parsed as Record<string, unknown>;
+    if (output.protocolVersion !== PROMPT_ENHANCEMENT_POPUP_HOST_PROTOCOL_VERSION_V1) return undefined;
+    if (!isPopupResult(output.result)) return undefined;
+    return {
+      protocolVersion: PROMPT_ENHANCEMENT_POPUP_HOST_PROTOCOL_VERSION_V1,
+      result: output.result,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function sleep(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function spawnTerminal(plan: PromptEnhancementLinuxTerminalLaunchPlanV1): Promise<PromptEnhancementSpawnedTerminalV1> {
+  const child = spawn(plan.command, [...plan.args], { detached: true, stdio: 'ignore', shell: false });
+  await new Promise<void>((resolve, reject) => {
+    child.once('spawn', resolve);
+    child.once('error', reject);
+  });
+  child.unref();
+  return child;
+}
+
+function cleanupTempDir(path: string): void {
+  rmSync(path, { recursive: true, force: true });
+}
+
+function defaultLaunchDependencies(): PromptEnhancementCliPopupHostLaunchDependenciesV1 {
+  return {
+    makeTempDir,
+    writeInputFile,
+    spawnTerminal,
+    readResultFile,
+    sleep,
+    now: () => Date.now(),
+    cleanupTempDir,
+  };
+}
+
+/**
+ * Launch the already-built hidden popup child through a resolved Linux terminal
+ * and exchange only private typed files. It does not decide hook output or
+ * mutate PE semantics; PE1.3 returns transport status for the later adapter.
+ */
+export async function runPromptEnhancementCliPopupHostLaunchV1(input: {
+  capability: PromptEnhancementCliHostCapabilityV1;
+  request: PromptEnhancementPrepareRequestV1;
+  result: PromptEnhancementPrepareResultV1;
+  cliEntryPath: string;
+  dbPath: string;
+  nodePath?: string;
+  deadlineMs?: number;
+}, overrides: Partial<PromptEnhancementCliPopupHostLaunchDependenciesV1> = {}): Promise<PromptEnhancementCliPopupHostLaunchResultV1> {
+  if (input.capability.state === 'unavailable') {
+    return { state: 'host_unavailable', reasonCode: input.capability.reasonCode };
+  }
+  if (input.capability.method === 'direct_tty') return { state: 'not_applicable', reasonCode: 'direct_tty' };
+
+  const dependencies = { ...defaultLaunchDependencies(), ...overrides };
+  const deadlineMs = input.deadlineMs ?? PROMPT_ENHANCEMENT_POPUP_HOST_DEADLINE_MS_V1;
+  const tempDir = dependencies.makeTempDir();
+  const inputFile = join(tempDir, 'input.json');
+  const resultFile = join(tempDir, 'result.json');
+  let child: PromptEnhancementSpawnedTerminalV1 | undefined;
+  let terminalExitNonZero = false;
+
+  try {
+    const childInput: PromptEnhancementPopupHostInputV1 = {
+      protocolVersion: PROMPT_ENHANCEMENT_POPUP_HOST_PROTOCOL_VERSION_V1,
+      request: input.request,
+      result: input.result,
+    };
+    dependencies.writeInputFile(inputFile, childInput);
+    const plan = planPromptEnhancementLinuxTerminalLaunchV1({
+      terminalCommand: input.capability.terminalCommand,
+      nodePath: input.nodePath ?? process.execPath,
+      cliEntryPath: input.cliEntryPath,
+      inputFile,
+      resultFile,
+      dbPath: input.dbPath,
+    });
+    try {
+      child = await dependencies.spawnTerminal(plan);
+      child.once('exit', (code, signal) => {
+        terminalExitNonZero = code !== 0 || signal !== null;
+      });
+    } catch {
+      return { state: 'launch_failed', reasonCode: 'terminal_spawn_failed' };
+    }
+
+    const deadlineAt = dependencies.now() + deadlineMs;
+    for (;;) {
+      const output = dependencies.readResultFile(resultFile);
+      if (output) return { state: 'completed', output };
+      if (terminalExitNonZero) return { state: 'launch_failed', reasonCode: 'terminal_exit_nonzero' };
+      if (dependencies.now() >= deadlineAt) return { state: 'timed_out' };
+      await dependencies.sleep(Math.min(PROMPT_ENHANCEMENT_POPUP_HOST_POLL_INTERVAL_MS_V1, Math.max(1, deadlineAt - dependencies.now())));
+    }
+  } finally {
+    if (child) {
+      try { child.kill('SIGTERM'); } catch { /* best-effort timeout/cleanup termination */ }
+    }
+    try { dependencies.cleanupTempDir(tempDir); } catch { /* cleanup must not crash the hook */ }
+  }
 }
