@@ -12,6 +12,7 @@
 import type { Command } from 'commander';
 import type { ChildProcess } from 'node:child_process';
 import { runWindsurfHook, type RunResult } from '../../windsurf-hook/handler.js';
+import { bringPopupToFront } from '../../windsurf-hook/foreground.js';
 
 /**
  * Resolve once the spawned `auto`/`stop` child exits (so the hook has finished its
@@ -83,6 +84,14 @@ export function registerWindsurfHookCommand(program: Command): void {
         // baseOpts), so setting it here makes the Windsurf popup say "Windsurf".
         process.env.NEXPATH_AGENT = 'windsurf';
         const result = await handleWindsurfHookCli(event, opts);
+        // The stop event opens Layer C's popup window (advisory or feedback). On
+        // Linux, GNOME opens it behind Windsurf — raise it to the front. The
+        // extension's popup-foreground never runs here (Windsurf spawns `stop`
+        // via this hook, not via ipc). Fire-and-forget; unref'd so it never keeps
+        // the hook process alive.
+        if (event === 'post_cascade_response' && result.child) {
+          bringPopupToFront();
+        }
         // Await the Layer-C child so the prompt is fully written + auto has
         // persisted the advisory (and stop has rendered the popup) before we exit.
         await awaitChild(result.child);

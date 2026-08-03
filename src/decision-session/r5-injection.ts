@@ -697,6 +697,11 @@ const L2_TRIGGER_PATTERNS: readonly { name: string; re: RegExp }[] = [
   // destructive verbs not previously covered by the rm -rf / delete / drop / truncate
   // alternation.
   { name: 'destructive-fs',    re: /\brm\s+-rf\b|\bdelete\b|\bdrop\s+table\b|\btruncate\b|\bdestroy\b|\bwipe\b|\bpurge\b|\berase\b/i },
+  // destructive-data: an action that overwrites existing/live data in place (e.g. a
+  // restore that overwrites the current data with a backed-up copy). Distinct from
+  // destructive-fs (filesystem removal) — the data is replaced, not deleted. Gates the
+  // recovery/restore actions that overwrite current state at both authoring and runtime.
+  { name: 'destructive-data',  re: /\boverwrit\w*/i },
   { name: 'schema-migration',  re: /\bmigrate\b|\balter\s+table\b|\bdrop\s+column\b/i },
   { name: 'dep-install',       re: /\b(?:npm|pip|apt)\s+install\b|\bupgrade\b/i },
   { name: 'secret-env',        re: /\benv\b|\.env\b|\bsecret\b|\bcredential\b/i },
@@ -816,6 +821,20 @@ export function f7DetectL2TriggerMatches(history: readonly PromptRecord[]): L2Tr
         });
       }
     }
+  }
+  return out;
+}
+
+/**
+ * String-level L2 trigger detection (reuses the same trigger patterns). Used by
+ * the authoring-side L2 gate to tell whether a single authored form proposes a
+ * sensitive action (so it can require the safeguard). `promptIndex` is always 0.
+ */
+export function detectL2TriggersInText(text: string): L2TriggerMatch[] {
+  const out: L2TriggerMatch[] = [];
+  for (const { name, re } of L2_TRIGGER_PATTERNS) {
+    const m = text.match(re);
+    if (m) out.push({ name, matchedText: m[0].replace(/\s+/g, ' ').trim(), promptIndex: 0 });
   }
   return out;
 }

@@ -8,19 +8,23 @@
     "nexpath-serve": "./dist/server/index.js"
   },
   "scripts": {
+    "prebuild": "tsx scripts/check-build-gate.ts",
     "build": "tsc",
     "postbuild": "node -e \"['dist/cli/index.js','dist/server/index.js'].forEach(f => require('fs').chmodSync(f, 0o755))\"",
+    "build:ext": "node scripts/build-ext.mjs",
+    "package:ext": "node scripts/package-ext.mjs",
+    "build:ui-harness": "esbuild src/ext-browser/ui/ui-mock-harness/index.ts --bundle --format=esm --external:../../../ext-browser/ui/ui.js --outfile=src/ext-browser/ui/ui-mock-harness/index.js",
     "dev:cli": "tsx src/cli/index.ts",
     "dev:server": "tsx src/server/index.ts",
     "typecheck": "tsc --noEmit",
+    "typecheck:ext": "tsc --noEmit -p tsconfig.ext-browser.json",
     "test": "vitest run",
     "test:watch": "vitest"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.100.1",
     "@clack/prompts": "^0.9",
-    "@modelcontextprotocol/sdk": "latest",
-    "@xenova/transformers": "^2.0.1",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "commander": "^12",
     "cross-keychain": "^1.1.0",
     "dotenv": "^17.4.2",
@@ -28,12 +32,17 @@
     "openai": "^6.34.0",
     "sql.js": "^1",
     "tinyld": "^1",
+    "webextension-polyfill": "^0.12.0",
     "zod": "^3"
   },
   "devDependencies": {
+    "@types/chrome": "^0.0.270",
     "@types/natural": "^5.1.5",
     "@types/node": "^20",
     "@types/sql.js": "^1",
+    "@types/webextension-polyfill": "^0.12.5",
+    "esbuild": "^0.24.0",
+    "jsdom": "^25.0.0",
     "tsx": "^4",
     "typescript": "^5",
     "vitest": "^4.1.8"

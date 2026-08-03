@@ -7,6 +7,8 @@ import { SelectPrompt } from '@clack/core';
 import pc from 'picocolors';
 import { openStore, closeStore, DEFAULT_DB_PATH } from '../../store/db.js';
 import { isConfigSet, setConfig, getConfig } from '../../store/config.js';
+import { setInstalledAtIfMissing } from '../../store/feedback-signals.js';
+import { flushIfTelemetryOn } from '../../telemetry/lifecycle-flush.js';
 import {
   VALID_ROLES,
   setAdvisoryFrequency,
@@ -520,6 +522,10 @@ export async function installAction(
 
   const store = await openStore(dbPath);
 
+  // Save the install timestamp locally (kept on re-runs). It is transmitted
+  // later, only when the user submits feedback.
+  setInstalledAtIfMissing(store);
+
   let apiKeySource:  InstallSummary['apiKey']['source'] = 'skipped';
   let telemetryEnabled = true;
 
@@ -751,6 +757,10 @@ export async function installAction(
   console.log('');
   console.log('Restart your agents to activate nexpath-prompt-store.');
 
+  // Emit the install event now when telemetry is on; when off it stays buffered
+  // locally until the user submits feedback.
+  await flushIfTelemetryOn(store);
+
   closeStore(store);
 
   let clipboardResult: ClipboardEnsureResult = { installed: false, toolName: null, alreadyHad: false };
@@ -781,6 +791,26 @@ export async function installAction(
     failed.length > 0 ? `Failed:     ${failed.join(', ')}` : null,
     extrasLine,
   ].filter((l): l is string => l !== null).join('\n');
+
+  // Dev-environment + prompt-capture disclosure, shown just above the Setup
+  // Complete summary in interactive installs (skipped under --yes). Facts and
+  // prompts are stored locally; only ChatGPT API calls leave the machine.
+  if (!opts.yes) {
+    note(
+      [
+        'To time its guidance, nexpath takes a basic read of your',
+        "project and your agent's responses — only what it needs, all",
+        'on your machine.',
+        '',
+        'It reads and stores your prompts too — everything stays local',
+        'and is processed using the ChatGPT API, and is NEVER',
+        'transmitted elsewhere.',
+        '',
+        "This capture is core to nexpath — without it, nexpath won't work.",
+      ].join('\n'),
+      'Dev-environment facts - Notes',
+    );
+  }
   note(summaryLines, 'Setup Complete');
   outro('Done!');
 

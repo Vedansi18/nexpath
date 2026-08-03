@@ -1,4 +1,4 @@
-import OpenAI from 'openai';
+import type OpenAI from 'openai';
 import type { UserProfile, PromptRecord, Stage } from '../classifier/types.js';
 import type { FlagType } from '../classifier/Stage2Trigger.js';
 import type { DecisionContent, OptionEntry } from './options.js';
@@ -52,11 +52,13 @@ export interface OptionGenContext {
   currentStage:          Stage;
   prevStage?:            Stage;
   promptsInCurrentStage: number;
+  /** Optional 2–5-word must-follow action anchor, merged into the Pass-2 call. */
+  actionAnchor?:         string;
 }
 
 // ── Project grounding — completed artifact detection ──────────────────────────
 
-interface ArtifactConfidence {
+export interface ArtifactConfidence {
   spec:          number;
   unitTests:     number;
   e2eTests:      number;
@@ -104,8 +106,16 @@ function scoreArtifacts(history: PromptRecord[]): ArtifactConfidence {
   return conf;
 }
 
-function buildGroundingLines(conf: ArtifactConfidence): string {
+export function buildGroundingLines(conf: ArtifactConfidence): string {
   const lines: string[] = [];
+
+  // Early-session forward-looking band (R13 Gap-1): when NO implementation artifacts are
+  // detected at all (artifact-confidence all-zero — keyed on artifacts, NOT a generic
+  // "planning phase" guess), ground test/verification options forward-looking rather than
+  // as a review of code that may not exist yet.
+  if (conf.spec === 0 && conf.unitTests === 0 && conf.e2eTests === 0) {
+    lines.push('No implementation artifacts detected yet (early session). Phrase any option about tests or verification FORWARD-LOOKING — e.g. "as you start building this, set up tests from the start" — not as a review of existing code. Do not assume there is already a spec, code, or tests to inspect.');
+  }
 
   // Spec
   if (conf.spec < 30) {
@@ -333,11 +343,15 @@ export function buildEmbeddingPrompt(
     l3: adaptedOptions.l3.map(toPromptItem),
   });
 
-  return `${groundingSection.trimStart()}
+  const anchorSection = context?.actionAnchor
+    ? `\nAction anchor: also merge this short must-follow step into the single most relevant option where it reads naturally — keep it 2–5 words, merge it into ONE option only, and do NOT force it into options where it does not fit: ${JSON.stringify(context.actionAnchor)}\n`
+    : '';
+
+  return `${groundingSection.trimStart()}${anchorSection}
 
 Embed the extracted feature noun into each adapted option below. Prefer replacing a standard generic phrase if present:
   "what was just built", "what was just made", "what was just created",
-  "this project", "this feature".
+  "this project", "this feature", "this phase", "this service", "this boundary".
 If none of these phrases survived adaptation, embed the feature noun at the most appropriate place with minimal rewrite — preserve the option's meaning, action, and intent. Replace one occurrence per option only.
 
 Schema examples — each shows adapted input → grounded output:
@@ -362,7 +376,12 @@ Input:  {"l1":["Set up the feedback loop for this feature: what signals tell you
 Feature noun: "invoice reminder"
 Output: {"l1":["Set up the feedback loop for the invoice reminder: what signals tell you it is working?","What are the top 3 signals to watch for the invoice reminder in the first 24 hours?"],"l2":["Is there a signal that would tell you if the invoice reminder breaks silently in production?"],"l3":["What is the most important thing to monitor for the invoice reminder?"]}
 
-Example 5 — no standard target phrase in any option — embed the feature noun at the most appropriate place with minimal rewrite:
+Example 5 — "this phase" / "this service" / "this boundary" grounded like the other generic phrases (one replacement per option):
+Input:  {"l1":["Add contract tests for this service before moving on.","Check the integration coverage of this phase."],"l2":["What breaks at this boundary under load?"],"l3":["Is this service safe to depend on yet?"]}
+Feature noun: "auth service"
+Output: {"l1":["Add contract tests for the auth service before moving on.","Check the integration coverage of the auth service."],"l2":["What breaks at the auth service boundary under load?"],"l3":["Is the auth service safe to depend on yet?"]}
+
+Example 6 — no standard target phrase in any option — embed the feature noun at the most appropriate place with minimal rewrite:
 Input:  {"l1":[["Check that everything still works — go through the main things before we ship.","Share the results before releasing.","Is there anything that could go wrong once it's live?"],"Check if this is ready to go live."],"l2":["What is the biggest risk in shipping this right now?"],"l3":["Is there anything that could break once it's live?"]}
 Feature noun: "login"
 Output: {"l1":[["Check that login is still working — go through the main things before we ship.","Share the results before releasing.","Is there anything about login that could go wrong once it's live?"],"Check if login is ready to go live."],"l2":["What is the biggest risk in shipping login right now?"],"l3":["Is there anything about login that could break once it's live?"]}
@@ -516,12 +535,18 @@ export async function generateOptionList(
 
   // ── Pass 1: vocabulary adaptation ─────────────────────────────────────────────
   let pass1Output: GeneratedOptions | null = null;
-  // Constructor is inside the try so a missing OPENAI_API_KEY surfaces as a null
-  // return (graceful fallback to static options), not a synchronous throw.
-  let openai!: OpenAI;
+  // The LLM client is dependency-injected: the CLI binds an OpenAI client
+  // (stop.ts); the browser binds an LLMPort→SDK shim (core/decision/options.ts).
+  // With no client we can't call the API, so return null → caller falls back to
+  // static options — the same observable outcome as the previous
+  // `new OpenAI()`-with-missing-key throw-then-catch path.
+  if (!client) {
+    logger.debug('option_gen_no_client');
+    return null;
+  }
+  const openai: OpenAI = client;
 
   try {
-    openai = client ?? new OpenAI();
     const prompt = buildAdaptationPrompt(content, profile, language, history);
     const messages: Array<{ role: 'user' | 'assistant'; content: string }> = [
       { role: 'user', content: prompt },

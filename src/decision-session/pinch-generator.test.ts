@@ -8,18 +8,19 @@ import {
   PINCH_TEMPERATURE,
   PINCH_MAX_CHARS,
   PINCH_MIN_CHARS,
-  PINCH_FALLBACK_TABLE,
 } from './PinchGenerator.js';
-import {
-  IDEA_TO_PRD,
-  PRD_TO_ARCHITECTURE,
-  ARCHITECTURE_TO_TASKS,
-  TASK_REVIEW,
-  IMPLEMENTATION_TO_REVIEW,
-  REVIEW_TO_RELEASE,
-  ABSENCE_TEST_CREATION,
-} from './options.js';
+import { pinchSignalTypeForFlag } from './content-template-source.js';
+import { resolvePinchFields } from './signal-pinch-fields.js';
+import { selectionRegister } from './selection-registry.js';
 import type OpenAI from 'openai';
+
+// The record/pinch-fields fallback generatePinchLabel uses when the LLM fails — mirrors
+// production exactly: pinchSignalTypeForFlag(flag, stage) → resolvePinchFields(signal,
+// register).pinchFallback. (The static DecisionContent pinchFallback fields were retired at B11.)
+function expectedFallback(flagType: string, stage: string): string | undefined {
+  const sig = pinchSignalTypeForFlag(flagType, stage);
+  return sig ? resolvePinchFields(sig, selectionRegister(undefined))?.pinchFallback : undefined;
+}
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -65,28 +66,8 @@ describe('PinchGenerator constants', () => {
     expect(PINCH_TEMPERATURE).toBe(0.9);
   });
 
-  it('PINCH_FALLBACK_TABLE has entries for all 6 transitions', () => {
-    expect(PINCH_FALLBACK_TABLE.idea_to_prd).toBe(IDEA_TO_PRD.pinchFallback);
-    expect(PINCH_FALLBACK_TABLE.prd_to_architecture).toBe(PRD_TO_ARCHITECTURE.pinchFallback);
-    expect(PINCH_FALLBACK_TABLE.architecture_to_tasks).toBe(ARCHITECTURE_TO_TASKS.pinchFallback);
-    expect(PINCH_FALLBACK_TABLE.task_review).toBe(TASK_REVIEW.pinchFallback);
-    expect(PINCH_FALLBACK_TABLE.implementation_to_review).toBe(IMPLEMENTATION_TO_REVIEW.pinchFallback);
-    expect(PINCH_FALLBACK_TABLE.review_to_release).toBe(REVIEW_TO_RELEASE.pinchFallback);
-  });
-
-  it('all static fallback labels are non-empty strings', () => {
-    for (const label of Object.values(PINCH_FALLBACK_TABLE)) {
-      expect(typeof label).toBe('string');
-      expect(label.length).toBeGreaterThan(0);
-    }
-  });
-
   it('PINCH_MIN_CHARS is 2 (minimum label length)', () => {
     expect(PINCH_MIN_CHARS).toBe(2);
-  });
-
-  it('PINCH_FALLBACK_TABLE has exactly 6 entries', () => {
-    expect(Object.keys(PINCH_FALLBACK_TABLE)).toHaveLength(6);
   });
 });
 
@@ -223,18 +204,18 @@ describe('generatePinchLabel', () => {
     const result = await generatePinchLabel('implementation', 'stage_transition', client);
     // implementation stage_transition → resolves to TASK_REVIEW fallback (no direct TRANSITION_CONTENT for implementation)
     // Actually 'implementation' is not in TRANSITION_CONTENT → falls to TASK_REVIEW
-    expect(result).toBe(TASK_REVIEW.pinchFallback);
+    expect(result).toBe(expectedFallback('stage_transition', 'implementation'));
   });
 
   it('falls back to pinchFallback when LLM returns too-long text', async () => {
     const client = makeMockClient('This is a very long label that is way too verbose for a pinch');
     const result = await generatePinchLabel('implementation', 'stage_transition', client);
-    expect(result).toBe(TASK_REVIEW.pinchFallback);
+    expect(result).toBe(expectedFallback('stage_transition', 'implementation'));
   });
 
   it('falls back to pinchFallback when API call throws', async () => {
     const result = await generatePinchLabel('implementation', 'stage_transition', makeErrorClient());
-    expect(result).toBe(TASK_REVIEW.pinchFallback);
+    expect(result).toBe(expectedFallback('stage_transition', 'implementation'));
   });
 
   it('never throws — returns a string even on API failure', async () => {
@@ -243,32 +224,32 @@ describe('generatePinchLabel', () => {
 
   it('uses IDEA_TO_PRD fallback for prd stage transition', async () => {
     const result = await generatePinchLabel('prd', 'stage_transition', makeErrorClient());
-    expect(result).toBe(IDEA_TO_PRD.pinchFallback);
+    expect(result).toBe(expectedFallback('stage_transition', 'prd'));
   });
 
   it('uses PRD_TO_ARCHITECTURE fallback for architecture stage transition', async () => {
     const result = await generatePinchLabel('architecture', 'stage_transition', makeErrorClient());
-    expect(result).toBe(PRD_TO_ARCHITECTURE.pinchFallback);
+    expect(result).toBe(expectedFallback('stage_transition', 'architecture'));
   });
 
   it('uses REVIEW_TO_RELEASE fallback for release stage transition', async () => {
     const result = await generatePinchLabel('release', 'stage_transition', makeErrorClient());
-    expect(result).toBe(REVIEW_TO_RELEASE.pinchFallback);
+    expect(result).toBe(expectedFallback('stage_transition', 'release'));
   });
 
   it('uses ABSENCE_TEST_CREATION fallback for absence:test_creation', async () => {
     const result = await generatePinchLabel('implementation', 'absence:test_creation', makeErrorClient());
-    expect(result).toBe(ABSENCE_TEST_CREATION.pinchFallback);
+    expect(result).toBe(expectedFallback('absence:test_creation', 'implementation'));
   });
 
   it('uses ARCHITECTURE_TO_TASKS fallback for task_breakdown stage transition', async () => {
     const result = await generatePinchLabel('task_breakdown', 'stage_transition', makeErrorClient());
-    expect(result).toBe(ARCHITECTURE_TO_TASKS.pinchFallback);
+    expect(result).toBe(expectedFallback('stage_transition', 'task_breakdown'));
   });
 
   it('uses IMPLEMENTATION_TO_REVIEW fallback for review_testing stage transition', async () => {
     const result = await generatePinchLabel('review_testing', 'stage_transition', makeErrorClient());
-    expect(result).toBe(IMPLEMENTATION_TO_REVIEW.pinchFallback);
+    expect(result).toBe(expectedFallback('stage_transition', 'review_testing'));
   });
 
   it('passes correct model, temperature, and timeout to the OpenAI API', async () => {
@@ -292,6 +273,37 @@ describe('generatePinchLabel', () => {
     const call = createFn.mock.calls[0][0];
     expect(call.messages[0].role).toBe('user');
     expect(call.messages[0].content).toContain('2-3 word');
+  });
+});
+
+// ── overrides (migrated-signal pinch header) ──────────────────────────────────
+
+describe('generatePinchLabel — overrides for migrated signals', () => {
+  const OVERRIDE_Q  = 'A secret was just pasted into a prompt — treat it as leaked and rotate it?';
+  const OVERRIDE_PF = 'Secret exposed.';
+
+  it('seeds the LLM prompt from overrides.question, not the generic static question', async () => {
+    const client = makeMockClient('Hold up.');
+    // stage/flag that resolves to generic static content — the override must win.
+    await generatePinchLabel('implementation', 'absence:secret_in_prompt', client, undefined, 'en', {
+      question: OVERRIDE_Q, pinchFallback: OVERRIDE_PF,
+    });
+    const createFn = (client.chat.completions.create as ReturnType<typeof vi.fn>);
+    expect(createFn.mock.calls[0][0].messages[0].content).toContain(OVERRIDE_Q);
+  });
+
+  it('uses overrides.pinchFallback when the LLM call fails', async () => {
+    const result = await generatePinchLabel(
+      'implementation', 'absence:secret_in_prompt', makeErrorClient(), undefined, 'en',
+      { question: OVERRIDE_Q, pinchFallback: OVERRIDE_PF },
+    );
+    expect(result).toBe(OVERRIDE_PF);
+  });
+
+  it('falls back to the static content when no overrides are given (unchanged behaviour)', async () => {
+    const result = await generatePinchLabel('implementation', 'stage_transition', makeErrorClient());
+    expect(typeof result).toBe('string');
+    expect(result).not.toBe(OVERRIDE_PF);
   });
 });
 

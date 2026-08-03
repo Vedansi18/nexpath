@@ -7,12 +7,18 @@ import { incrementDecisionSessionCount } from '../store/projects.js';
 import { setConfig } from '../store/config.js';
 import type { DecisionContent } from './options.js';
 import {
-  resolveDecisionContent,
   buildOptionList,
   getLevelSubtitle,
   SHOW_SIMPLER,
   SKIP_NOW,
 } from './options.js';
+import { pinchSignalTypeForFlag, shippedRecordLookup } from './content-template-source.js';
+import { resolvePinchFields } from './signal-pinch-fields.js';
+import { getWhyHelpForSignalType } from './why-help-by-signal-type.js';
+import { composeDeterministicOptions } from './engine-option-generator.js';
+import { deliverSelectedPrompt, isWhyDescDeliveryEnabled } from './whydesc-delivery.js';
+import { selectionRegister } from './selection-registry.js';
+import type { MaturityLevel } from './content-template-schema.js';
 import type { GeneratedOptions } from './OptionGenerator.js';
 import { writeTelemetry } from '../telemetry/index.js';
 import { type RecentPromptMetadata } from '../telemetry/recent-prompts.js';
@@ -114,6 +120,18 @@ export interface DecisionSessionInput {
   decisionSessionCount: number;
   /** Personalised option text from OptionGenerator. When present, overrides static L1/L2/L3. */
   generatedOptions?:    GeneratedOptions;
+  /**
+   * Popup question override — a migrated signal has no static DecisionContent, so its own
+   * `question` (from the content-template record) is passed here to replace the mismatched
+   * static-fallback question. When absent, the resolved static `content.question` is used.
+   */
+  questionOverride?:    string;
+  /**
+   * Popup why-help override — a migrated signal has no static DecisionContent, so its own
+   * per-class why-help (resolved by signalType from the content-template record) is passed here
+   * to replace the mismatched static-fallback why-help. When absent, `content.whyHelp` is used.
+   */
+  whyHelpOverride?:     WhyHelpEntry | null;
   /** User profile — used to route beginner/cool_geek to BEGINNER content blocks. */
   profile?:             UserProfile | null;
   /** Last-5 prompt metadata for the `decision_session_started` telemetry event (Item B). */
@@ -242,41 +260,37 @@ export async function runLevel(
   selectFn:  SelectFn,
   store?:    Store,
 ): Promise<'skip' | 'next' | 'clipboard_only' | string> {
-  const content  = resolveDecisionContent(input.stage, input.flagType, input.profile);
-  const gen      = input.generatedOptions;
-  // Generated options carry only the user-facing text. Each option's
-  // desc-base comes from either the runtime-substituted output on
-  // `gen.generatedDescBases` (post R5 prompt-evidence injection +
-  // R4 bookend substitution + F7 L2 escalation) when OptionGenerator
-  // produced it, OR from the static DecisionContent as a fallback.
-  const wrapGen = (
-    texts:  string[],
-    source: { L1: typeof content.L1; L2: typeof content.L2; L3: typeof content.L3; },
-    key:    'L1' | 'L2' | 'L3',
-  ) => {
-    const lowerKey  = key.toLowerCase() as 'l1' | 'l2' | 'l3';
-    const substituted = gen?.generatedDescBases?.[lowerKey];
-    return texts.map((text, i) => ({
-      option:   text,
-      descBase: substituted?.[i] ?? source[key][i]?.descBase ?? '',
-    }));
+  // The content layer is the record set + the engine now (B11 cutover — no static DecisionContent).
+  // Question comes from the caller's override or the register-keyed pinch-fields map; why-help from the
+  // per-signal class map; options from the caller's engine-generated set, or a deterministic composition
+  // from the record when absent (e.g. the optimize replay).
+  const register   = profileToRegister(input.profile);
+  const regKey     = selectionRegister(input.profile?.nature);
+  const signalType = pinchSignalTypeForFlag(input.flagType, input.stage);
+  const question   = input.questionOverride
+    ?? (signalType ? resolvePinchFields(signalType, regKey)?.question : undefined) ?? '';
+  const whyHelp    = input.whyHelpOverride ?? (signalType ? getWhyHelpForSignalType(signalType) : null);
+  const gen: GeneratedOptions | undefined = input.generatedOptions ?? (signalType
+    ? composeDeterministicOptions({ lookup: shippedRecordLookup(signalType), level: 3 as MaturityLevel, register: regKey, role: input.profile?.role ?? undefined }) ?? undefined
+    : undefined);
+  const toEntries = (opts: readonly string[] | undefined, descBases: readonly string[] | undefined) =>
+    (opts ?? []).map((option, i) => ({ option, descBase: descBases?.[i] ?? '' }));
+  const effective: DecisionContent = {
+    signalType:    signalType ?? input.flagType,
+    question,
+    pinchFallback: '',
+    whyHelp:       whyHelp ?? undefined,
+    L1: toEntries(gen?.l1, gen?.generatedDescBases?.l1),
+    L2: toEntries(gen?.l2, gen?.generatedDescBases?.l2),
+    L3: toEntries(gen?.l3, gen?.generatedDescBases?.l3),
   };
-  const effective: DecisionContent = gen
-    ? {
-        ...content,
-        L1: wrapGen(gen.l1, content, 'L1'),
-        L2: wrapGen(gen.l2, content, 'L2'),
-        L3: wrapGen(gen.l3, content, 'L3'),
-      }
-    : content;
   const { options } = buildOptionList(effective, level);
-  const register     = profileToRegister(input.profile);
   const subtitle     = getLevelSubtitle(level) ?? undefined;
-  const whyHelpBlock = content.whyHelp && register
-    ? (composeWhyHelpBlock(content.whyHelp, register, input.profile?.mood, input.profile?.role) ?? undefined)
+  const whyHelpBlock = whyHelp && register
+    ? (composeWhyHelpBlock(whyHelp, register, input.profile?.mood, input.profile?.role) ?? undefined)
     : undefined;
-  const message  = buildSelectMessage(input.pinchLabel, content.question, level, {
-    whyHelpEntry: content.whyHelp,
+  const message  = buildSelectMessage(input.pinchLabel, question, level, {
+    whyHelpEntry: whyHelp,
     register,
     mood:         input.profile?.mood,
     role:         input.profile?.role,
@@ -365,7 +379,7 @@ export async function runLevel(
     options: clackOptions,
     pinchLabel: input.pinchLabel,
     subtitle,
-    question:   content.question,
+    question,
     whyHelpBlock,
   });
 
@@ -410,7 +424,10 @@ export async function runLevel(
   if (result === SHOW_SIMPLER) return 'next';
 
   writeTelemetry(input.projectRoot, 'option_selected', { level, selectedText: (result as string).slice(0, 120) }, store);
-  return result as string;
+  // Bug 2 delivery (gated by the whydesc_delivery_enabled config, default ON): deliver the
+  // selected option + its rendered why-desc to the agent. The telemetry above already captured
+  // the pure option, so it stays clean.
+  return deliverSelectedPrompt(result as string, descBaseByOption.get(result as string), isWhyDescDeliveryEnabled(store));
 }
 
 // ── Public API ─────────────────────────────────────────────────────────────────

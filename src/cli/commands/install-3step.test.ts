@@ -1,4 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+
+vi.mock('../../telemetry/lifecycle-flush.js', () => ({
+  flushIfTelemetryOn: vi.fn().mockResolvedValue(undefined),
+  flushLifecycle:     vi.fn().mockResolvedValue(undefined),
+}));
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -530,5 +535,37 @@ describe('getKeychainName', () => {
 
   it('falls back to the encrypted-file message on other platforms', () => {
     expect(getKeychainName('freebsd' as NodeJS.Platform)).toMatch(/Encrypted file/);
+  });
+});
+
+// ── Install timestamp ─────────────────────────────────────────────────────────
+
+describe('install — install timestamp', () => {
+  it('records installed_at on install and keeps it unchanged on re-run', async () => {
+    const { dir, cleanup } = tmpDirAgents();
+    const dbPath = join(dir, 'store.db');
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const paths = resolveAgentPaths(dir, dir, dir);
+      const deps = {
+        paths, isWin: false, execFn: () => {}, skipClipboardCheck: true,
+        freqPromptFn: noopFreqPrompt, rolePromptFn: noopRolePrompt,
+        confirmFn: async () => true, promptFn: makePrompts(), dbPath,
+      };
+
+      await installAction({}, deps);
+      let s = await openStore(dbPath);
+      const first = getConfig(s.db, 'installed_at');
+      closeStore(s);
+      expect(first).toBeDefined();
+      expect(Number(first)).toBeGreaterThan(0);
+
+      // Re-running install must not overwrite the original install time.
+      await installAction({}, deps);
+      s = await openStore(dbPath);
+      const second = getConfig(s.db, 'installed_at');
+      closeStore(s);
+      expect(second).toBe(first);
+    } finally { cleanup(); }
   });
 });

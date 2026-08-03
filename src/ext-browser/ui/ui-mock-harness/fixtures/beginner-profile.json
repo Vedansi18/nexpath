@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "advisoryId": "adv-mock-beginner-profile-0004",
+  "pinchLabel": "Hold on.",
+  "stage": "idea",
+  "question": "Before we start — what problem is this solving, and for whom?",
+  "whyHelp": "Here is why this matters right now:\nA clear problem statement is what keeps the build from drifting.\nTwo minutes naming the goal makes every later step easier.",
+  "levels": {
+    "L1": [
+      {
+        "level": "L1",
+        "id": "adv-mock-beginner-profile-0004-L1",
+        "title": "Who is this for, and what problem does it solve?",
+        "body": "Before building anything, get clear on two things: who's going to use this, and what problem or frustration does it fix for them? Write two or three sentences answering both — no technical words needed, just the plain idea."
+      }
+    ],
+    "L2": [
+      {
+        "level": "L2",
+        "id": "adv-mock-beginner-profile-0004-L2",
+        "title": "Who's it for, and what problem does it fix?",
+        "body": "Who is this for, and what problem does it solve? Write a couple of sentences — keep it simple, no tech talk needed."
+      }
+    ],
+    "L3": [
+      {
+        "level": "L3",
+        "id": "adv-mock-beginner-profile-0004-L3",
+        "title": "Who's it for? What problem?",
+        "body": "Who's it for? What problem does it fix? Write it in plain words."
+      }
+    ]
+  },
+  "options": [
+    {
+      "level": "L1",
+      "id": "adv-mock-beginner-profile-0004-L1",
+      "title": "Who is this for, and what problem does it solve?",
+      "body": "Before building anything, get clear on two things: who's going to use this, and what problem or frustration does it fix for them? Write two or three sentences answering both — no technical words needed, just the plain idea."
+    },
+    {
+      "level": "L2",
+      "id": "adv-mock-beginner-profile-0004-L2",
+      "title": "Who's it for, and what problem does it fix?",
+      "body": "Who is this for, and what problem does it solve? Write a couple of sentences — keep it simple, no tech talk needed."
+    },
+    {
+      "level": "L3",
+      "id": "adv-mock-beginner-profile-0004-L3",
+      "title": "Who's it for? What problem?",
+      "body": "Who's it for? What problem does it fix? Write it in plain words."
+    }
+  ],
+  "meta": {
+    "agent": "replit",
+    "frequency": "optimum"
+  }
+}
