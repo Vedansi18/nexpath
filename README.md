@@ -4,44 +4,23 @@
 
 Nexpath gives developers meaningful direction while they work with AI coding agents and AI code tools — helpful suggestions at the right moment that protect developer productivity, without slowing you down.
 
+
+## Prompt Enhancement — A Practical Twist
+
+Within Nexpath's broader behaviour-guidance vision, Prompt Enhancement is the first feature we're introducing as a practical twist: it saves vibe coders from writing every prompt detail by hand while preserving their original intent. When a task needs more rigour, it can suggest missing development practices, verification, or confirmation steps — encouraging users to give a mature development flow the time it needs to finish.
+
+
 ---
 
 ## What Is Nexpath CLI?
 
 - A behaviour guidance system and developer productivity layer for builders using AI coding agents and AI code tools.
 - Monitors your development sessions and understands where you are in your project lifecycle.
-- Surfaces **"the decision session"** — which we also call the **advisory popup** — a lightweight prompt that gives direction without forcing your hand.
-- Presents pre-filled agent prompts you select with one keypress — ready-to-send, not just tips.
-- Want to tweak one first? Copy it to your clipboard, then paste and edit before sending.
-- None fit? Skip it and revisit skipped items later in one focused session.
+- Adds a **Prompt Quality Layer** at useful review moments, helping turn the prompt you already wrote into a stronger, editable version without changing its intent.
+- Brings relevant advisory and absence-signal guidance into the prompt as practical sections — not as disconnected tips or a separate option list.
+- Adds verification, confirmation, safety, or workflow structure only when the task and available signals call for it.
+- Keeps you in control: review and edit the full prompt, use it, or return to your original request before anything is sent.
 
----
-
-## Architecture
-
-```mermaid
-flowchart TB
-    Agent["AI Coding Agent<br/>Claude Code — fully supported"]
-    subgraph NS["nexpath-serve"]
-        Capture["capture_prompt handler"]
-    end
-    DB[("prompt-store.db<br/>SQLite · ~/.nexpath/")]
-    subgraph Pipeline["Advisory Pipeline — fires automatically after agent responds"]
-        S1["Stage 1: Prompt Classifier<br/>Tier 1: Keyword Match — under 1ms<br/>Tier 2: TF-IDF Scoring — under 5ms"]
-        SM["Session State Manager<br/>stage tracking · signal counters<br/>absence detection · user profile"]
-        subgraph LLM["LLM Calls — gpt-4o-mini (only if Stage 2 approves)"]
-            S2["Stage 2: Cross-Confirmation<br/>validate stage · decide if advisory fires"]
-            PL["Pinch Label<br/>2–3 word header"]
-            OPT["Option Adaptation<br/>vocabulary + feature embedding"]
-        end
-        DS["Decision Session UI<br/>question → L1 / L2 / L3<br/>selected prompt → back to agent"]
-    end
-    Agent --> NS
-    NS --> DB
-    Agent --> Pipeline
-    S1 --> SM --> S2 --> PL --> OPT --> DS
-    DS -->|"selected prompt"| Agent
-```
 
 ---
 
@@ -50,18 +29,18 @@ flowchart TB
 - AI coding agents and coding AI tools can generate entire features from a single sentence.
 - But speed of generation often outpaces the discipline of process.
 - Developers skip reviews, forget regression checks, ship without acceptance tests — out of momentum, not laziness.
-- Nexpath appears at the right moments with the right questions, closing the gap between what AI generates and what disciplined development requires.
+- Nexpath uses workflow and absence signals to bring the right missing practices into the prompt itself, closing the gap between fast AI generation and disciplined development.
 
 Built during AI Hackfest 2026 by MLH.
 
 ---
 
-## The Decision Session — How It Works
+## The Prompt Quality Layer — How It Works
 
-1. **Detection** — As you work, Nexpath captures each prompt and classifies your development stage.
-2. **Trigger** — On a stage transition, a lightweight LLM call confirms before the decision session fires. The session is shown by the Stop hook **after** the agent has fully responded — never mid-response.
-3. **Presentation** — A 2–3 word creative label appears (e.g., "Before coding.", "Quick check."), followed by a question and pre-filled options across three levels.
-4. **Selection** — Pick an option to send it straight to your agent, copy it to your clipboard to edit before sending, or choose "Show simpler options" for lighter alternatives.
+1. **Understand** — Nexpath reviews the prompt, the current development stage, and relevant workflow signals while preserving the complete original request.
+2. **Structure** — It builds one editable prompt with the sections the task needs, such as scope, constraints, acceptance expectations, verification, or missing-practice guidance.
+3. **Safeguard** — Higher-risk work can receive confirmation, safety, rollback, or evidence requirements. Complex work can also receive a sequence-aware breakdown when multiple prompts would be more effective.
+4. **Review** — You inspect and edit the result before sending it, or return to the original prompt. Nexpath provides the quality layer; you keep the final decision.
 
 ---
 
@@ -71,28 +50,36 @@ Built during AI Hackfest 2026 by MLH.
 
 ## Nexpath CLI Features & Capabilities
 
-### The Decision Session
+### One Editable Quality Review
 
-The core interaction:
+The core interaction keeps your request and the added workflow guidance together:
 
-- Fires when Nexpath detects a stage transition in your workflow.
-- Presents structured options aligned with where you are in your project.
-- Each option is a pre-filled prompt — pick it to send straight to your AI agent, or copy it to edit first.
+- Preserves your complete original request inside the quality-reviewed prompt.
+- Adds a clearer task structure without inventing requirements or expanding the scope without evidence.
+- Lets you directly edit any part of the prompt before choosing the reviewed version or the original.
+- Keeps the interface focused on one useful prompt body instead of several competing prompt options.
 
-The decision session cascades through three levels:
-- **Level 1** — Full-depth recommendations for thorough development practice
-- **Level 2** — Lighter alternatives when you're short on time
-- **Level 3** — Minimum viable step — one small action that still moves you forward
+### Signal-Based Guidance Sections
 
-Select "Show simpler options →" to move down a level. Select "Skip for now" to record the item
-and revisit it later with `nexpath optimize` (available in future versions). Want to adjust a prompt before sending? Select
-**"Copy to clipboard — edit before sending"** — it lands on your clipboard to paste and tweak.
+- Relevant advisory signals become contextual sections inside the reviewed prompt rather than a separate advisory popup.
+- Absence signals can add practices that are missing from the current workflow, such as tests, acceptance criteria, regression checks, or project grounding.
+
+### Verification, Confirmation, and Safety
+
+- Verification and test expectations are added for debugging, maintenance, planning, review, and other tasks that need proof of completion.
+- Sensitive or high-risk actions can receive explicit confirmation, rollback, backup, or safety requirements.
+
+### Sequence-Aware Multi-Prompt Support
+
+- Complex work can be decomposed into a clear current task plus a compact, ordered sequence plan.
+- Each step remains user-reviewed; the quality layer does not silently auto-send prompts or treat an agent response as proof of completion.
+- Full continuation across prompts remains behind runtime and host-safety gates while the current version focuses on a safe, editable first prompt and sequence-ready handoff.
 
 ### Absence Detection
 
 - Tracks which development signals are present or missing in your session.
-- If you've coded 15+ prompts in a confirmed stage without mentioning tests, cross-confirmation, or regression checks, it raises an absence flag.
-- Offers relevant suggestions to fill the gap.
+- When a relevant practice is missing, it can contribute a grounded section to the quality-reviewed prompt.
+- Weak or unrelated signals are not used as filler; guidance must match the current task.
 
 ### Supported AI Coding Agents & Developer Tools
 
@@ -164,8 +151,8 @@ data and caches.
 
 ### Privacy Controls
 
-All data is stored **locally only** at `~/.nexpath/`. Only targeted LLM calls per decision
-session leave your machine.
+All data is stored **locally only** at `~/.nexpath/`. Only targeted LLM calls used to classify or
+prepare relevant guidance leave your machine.
 
 - **Automatic secret redaction** — API keys (`sk-*`, `ghp_*`, `ghu_*`), bearer tokens, and
   PEM blocks are automatically stripped from prompts before storage.
@@ -217,7 +204,7 @@ Contribution guide coming once the initial implementation is stable.
 
 - **Major League Hacking (MLH)** — For organizing AI Hackfest 2026
 - **Anthropic** — For Claude Code, our primary development environment
-- **OpenAI** — For gpt-4o-mini, used for cross-confirmation and pinch label generation
+- **OpenAI** — For models used in targeted classification and prompt-quality tasks
 - **Google** — For Gemini AI, planned as an alternative LLM provider alongside OpenAI
 
 Built with insights from the vibe coding community and developers building real projects with AI coding agents, coding AI tools, and AI developer tools.
