@@ -2555,11 +2555,12 @@ describe('H1.1 — validated PE preparation boundary', () => {
       const edited = updatePromptEnhancementAdditionalDetailsDraftV1(draft.draft, 'add a test note');
       expect(edited.additionalDetailsState).toBe('dirty_unsubmitted');
 
-      const applyAction = boundary.session.directionalActionSet.find((entry) => entry.action.actionType === 'apply_details');
       const sendAction = boundary.session.preSendBoundaryState.essentialControlSet.includes('use_current_body')
         ? boundary.session.preSendBoundaryState.essentialControlSet[0]
         : 'use_current_body';
-      expect(applyAction?.action.actionType).toBe('apply_details');
+      // UI-8: apply_details is NOT a standalone directional row; it stays available via the details row.
+      expect(boundary.session.directionalActionSet.find((entry) => entry.action.actionType === 'apply_details')).toBeUndefined();
+      expect(boundary.session.additionalDetailsActionId).toBeTruthy();
       const event = createPromptEnhancementPopupEventV1({
         session: boundary.session,
         eventType: 'deliver_current_body',
