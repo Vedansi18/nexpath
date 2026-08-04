@@ -1532,11 +1532,12 @@ describe('buildHookEntry', () => {
     expect(hooks[0].type).toBe('command');
   });
 
-  it('sets an explicit 60-second timeout for Claude Code hooks', () => {
+  it('gives the PE-hosting UserPromptSubmit hook a 24h timeout so the popup never times out, and keeps Stop at 60s', () => {
     const entry  = buildHookEntry('/home/user', 'linux');
     const groups = entry.UserPromptSubmit as Array<Record<string, unknown>>;
     const hooks  = groups[0].hooks as Array<Record<string, unknown>>;
-    expect(hooks[0].timeout).toBe(60);
+    // Owner decision: the PE popup must never be killed while the user is deciding.
+    expect(hooks[0].timeout).toBe(86_400);
     const stopGroups = entry.Stop as Array<Record<string, unknown>>;
     const stopHooks = stopGroups[0].hooks as Array<Record<string, unknown>>;
     expect(stopHooks[0].timeout).toBe(60);

@@ -3,7 +3,6 @@ import { tmpdir } from 'node:os';
 import { dirname } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import {
-  PROMPT_ENHANCEMENT_POPUP_HOST_DEADLINE_MS_V1,
   PROMPT_ENHANCEMENT_LINUX_TERMINAL_COMMANDS_V1,
   planPromptEnhancementLinuxTerminalLaunchV1,
   resolvePromptEnhancementCliHostCapabilityV1,
@@ -244,7 +243,7 @@ describe('PE1.3 — Linux PE popup host launcher', () => {
   it('creates private files, parses a typed child result, and cleans its temp directory', async () => {
     const observed: { dir?: string; inputText?: string; inputMode?: number; dirMode?: number; plan?: unknown } = {};
     const fakeChild = child();
-    const result = await runPromptEnhancementCliPopupHostLaunchV1({ ...launchInput(), deadlineMs: 0 }, {
+    const result = await runPromptEnhancementCliPopupHostLaunchV1(launchInput(), {
       spawnTerminal: async (plan) => {
         observed.plan = plan;
         const args = [...plan.args];
@@ -297,49 +296,33 @@ describe('PE1.3 — Linux PE popup host launcher', () => {
     expect(cleanupTempDir).toHaveBeenCalledWith('/tmp/pe1-3-signal-failed');
   });
 
-  it('returns timed_out for a missing child result within the bounded host deadline and cleans up', async () => {
+  it('polls indefinitely with no deadline — the popup waits for the user until a result appears', async () => {
     const cleanupTempDir = vi.fn();
     const sleep = vi.fn(async () => {});
     const fakeChild = child();
-    const result = await runPromptEnhancementCliPopupHostLaunchV1({ ...launchInput(), deadlineMs: 0 }, {
-      makeTempDir: () => '/tmp/pe1-3-timeout',
+    // The result is absent for the first few polls (user is still deciding),
+    // then the renderer writes it. With no timeout, the host must keep polling
+    // rather than cut the user off.
+    let polls = 0;
+    const result = await runPromptEnhancementCliPopupHostLaunchV1(launchInput(), {
+      makeTempDir: () => '/tmp/pe1-3-wait',
       writeInputFile: vi.fn(),
       spawnTerminal: async () => fakeChild,
-      readResultFile: () => undefined,
-      now: () => 0,
+      readResultFile: () => (polls++ < 25 ? undefined : { protocolVersion: 1, result: { state: 'selected_original' } }),
       sleep,
       readReadyFile: () => true,
       cleanupTempDir,
     });
 
-    expect(PROMPT_ENHANCEMENT_POPUP_HOST_DEADLINE_MS_V1).toBe(86_392_000);
-    expect(result).toEqual({ state: 'timed_out' });
-    expect(sleep).not.toHaveBeenCalled();
+    expect(result).toEqual({ state: 'completed', output: { protocolVersion: 1, result: { state: 'selected_original' } } });
+    expect(sleep).toHaveBeenCalledTimes(25);
     expect(fakeChild.kill).toHaveBeenCalledWith('SIGTERM');
-    expect(cleanupTempDir).toHaveBeenCalledWith('/tmp/pe1-3-timeout');
-  });
-
-  it('fails closed to a pre-visible launch failure when no first-render marker arrives', async () => {
-    const cleanupTempDir = vi.fn();
-    const fakeChild = child();
-    const result = await runPromptEnhancementCliPopupHostLaunchV1({ ...launchInput(), deadlineMs: 0 }, {
-      makeTempDir: () => '/tmp/pe3-1-not-ready',
-      writeInputFile: vi.fn(),
-      spawnTerminal: async () => fakeChild,
-      readResultFile: () => undefined,
-      readReadyFile: () => false,
-      now: () => 0,
-      cleanupTempDir,
-    });
-
-    expect(result).toEqual({ state: 'launch_failed', reasonCode: 'terminal_renderer_not_ready' });
-    expect(fakeChild.kill).toHaveBeenCalledWith('SIGTERM');
-    expect(cleanupTempDir).toHaveBeenCalledWith('/tmp/pe3-1-not-ready');
+    expect(cleanupTempDir).toHaveBeenCalledWith('/tmp/pe1-3-wait');
   });
 
   it('rejects a child result that arrives before the first-render marker', async () => {
     const rawBody = 'must-not-cross-pre-visible-boundary';
-    const result = await runPromptEnhancementCliPopupHostLaunchV1({ ...launchInput(), deadlineMs: 0 }, {
+    const result = await runPromptEnhancementCliPopupHostLaunchV1(launchInput(), {
       makeTempDir: () => '/tmp/pe3-1-unready-result',
       writeInputFile: vi.fn(),
       spawnTerminal: async () => child(),
@@ -359,18 +342,21 @@ describe('PE1.3 — Linux PE popup host launcher', () => {
     writeFileSync(externalResult, JSON.stringify({ protocolVersion: 1, result: { state: 'selected_current', bodyText: rawBody } }), 'utf8');
 
     try {
-      const result = await runPromptEnhancementCliPopupHostLaunchV1({ ...launchInput(), deadlineMs: 0 }, {
+      // The child exits (non-zero) after planting a symlinked result path. With
+      // no timeout, the host ends on that exit — and because it refuses to read
+      // through the symlink, the raw body never crosses back.
+      const result = await runPromptEnhancementCliPopupHostLaunchV1(launchInput(), {
         spawnTerminal: async (plan) => {
           const args = [...plan.args];
           const readinessFile = args[args.indexOf('--readiness-file') + 1]!;
           const resultFile = args[args.indexOf('--result-file') + 1]!;
           writeFileSync(readinessFile, 'ready', { mode: 0o600 });
           symlinkSync(externalResult, resultFile);
-          return child();
+          return child(1);
         },
       });
 
-      expect(result).toEqual({ state: 'timed_out' });
+      expect(result).toEqual({ state: 'launch_failed', reasonCode: 'terminal_exit_nonzero' });
       expect(JSON.stringify(result)).not.toContain(rawBody);
     } finally {
       rmSync(externalDir, { recursive: true, force: true });

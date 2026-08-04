@@ -513,7 +513,6 @@ function popupResultFromHostLaunchV1(
       ? result.output.result
       : { state: 'not_shown', reasonCodes: ['invalid_host_result'] };
   }
-  if (result.state === 'timed_out') return { state: 'closed_no_send' };
   return {
     state: 'not_shown',
     reasonCodes: [result.state === 'host_unavailable' ? 'no_tty' : 'host_launch_failed'],

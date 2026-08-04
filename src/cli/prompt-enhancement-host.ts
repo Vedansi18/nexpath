@@ -54,10 +54,9 @@ export interface PromptEnhancementCliHostProbeDependenciesV1 {
   readCommandVersion?: (command: PromptEnhancementLinuxTerminalCommandV1) => string | undefined;
 }
 
-// Owner decision: the PE popup must NEVER time out — it waits for the user. The
-// internal deadline is set just under the 24h UserPromptSubmit hook timeout
-// (8s reserve for cleanup + final JSON), so in practice the popup never expires.
-export const PROMPT_ENHANCEMENT_POPUP_HOST_DEADLINE_MS_V1 = 86_392_000;
+// Owner decision: the PE popup has NO timeout — the host waits for the user
+// indefinitely. The poll loop only ends when the renderer writes a result or the
+// terminal exits; there is no deadline.
 const PROMPT_ENHANCEMENT_POPUP_HOST_POLL_INTERVAL_MS_V1 = 50;
 const PROMPT_ENHANCEMENT_POPUP_HOST_PROTOCOL_VERSION_V1 = 1;
 const PROMPT_ENHANCEMENT_POPUP_WINDOW_TITLE_V1 = 'Nexpath · Prompt enhancement';
@@ -71,7 +70,6 @@ export type PromptEnhancementCliPopupHostLaunchResultV1 =
   | { state: 'not_applicable'; reasonCode: 'direct_tty' }
   | { state: 'host_unavailable'; reasonCode: 'unsupported_platform' | 'no_gui_session' | 'no_supported_terminal' }
   | { state: 'launch_failed'; reasonCode: 'terminal_spawn_failed' | 'terminal_exit_nonzero' | 'terminal_renderer_not_ready' }
-  | { state: 'timed_out' }
   | { state: 'completed'; output: PromptEnhancementPopupHostOutputV1 };
 
 interface PromptEnhancementSpawnedTerminalV1 {
@@ -87,7 +85,6 @@ export interface PromptEnhancementCliPopupHostLaunchDependenciesV1 {
   readResultFile: (path: string) => PromptEnhancementPopupHostOutputV1 | undefined;
   readReadyFile: (path: string) => boolean;
   sleep: (milliseconds: number) => Promise<void>;
-  now: () => number;
   cleanupTempDir: (path: string) => void;
   detectPopupGeometry: () => Promise<PopupGeometry | undefined>;
 }
@@ -318,7 +315,6 @@ function defaultLaunchDependencies(): PromptEnhancementCliPopupHostLaunchDepende
     readResultFile,
     readReadyFile,
     sleep,
-    now: () => Date.now(),
     cleanupTempDir,
     detectPopupGeometry: async () => {
       try {
@@ -343,7 +339,6 @@ export async function runPromptEnhancementCliPopupHostLaunchV1(input: {
   cliEntryPath: string;
   dbPath: string;
   nodePath?: string;
-  deadlineMs?: number;
 }, overrides: Partial<PromptEnhancementCliPopupHostLaunchDependenciesV1> = {}): Promise<PromptEnhancementCliPopupHostLaunchResultV1> {
   if (input.capability.state === 'unavailable') {
     return { state: 'host_unavailable', reasonCode: input.capability.reasonCode };
@@ -351,7 +346,6 @@ export async function runPromptEnhancementCliPopupHostLaunchV1(input: {
   if (input.capability.method === 'direct_tty') return { state: 'not_applicable', reasonCode: 'direct_tty' };
 
   const dependencies = { ...defaultLaunchDependencies(), ...overrides };
-  const deadlineMs = input.deadlineMs ?? PROMPT_ENHANCEMENT_POPUP_HOST_DEADLINE_MS_V1;
   const tempDir = dependencies.makeTempDir();
   const inputFile = join(tempDir, 'input.json');
   const resultFile = join(tempDir, 'result.json');
@@ -387,7 +381,9 @@ export async function runPromptEnhancementCliPopupHostLaunchV1(input: {
       return { state: 'launch_failed', reasonCode: 'terminal_spawn_failed' };
     }
 
-    const deadlineAt = dependencies.now() + deadlineMs;
+    // No deadline — the popup waits for the user indefinitely (owner decision).
+    // The loop ends only when the renderer writes a result, or the terminal
+    // exits without one (crash / window closed emits a non-zero exit or signal).
     for (;;) {
       rendererReady ||= dependencies.readReadyFile(readinessFile);
       const output = dependencies.readResultFile(resultFile);
@@ -397,12 +393,7 @@ export async function runPromptEnhancementCliPopupHostLaunchV1(input: {
           : { state: 'launch_failed', reasonCode: 'terminal_renderer_not_ready' };
       }
       if (terminalExitNonZero) return { state: 'launch_failed', reasonCode: 'terminal_exit_nonzero' };
-      if (dependencies.now() >= deadlineAt) {
-        return rendererReady
-          ? { state: 'timed_out' }
-          : { state: 'launch_failed', reasonCode: 'terminal_renderer_not_ready' };
-      }
-      await dependencies.sleep(Math.min(PROMPT_ENHANCEMENT_POPUP_HOST_POLL_INTERVAL_MS_V1, Math.max(1, deadlineAt - dependencies.now())));
+      await dependencies.sleep(PROMPT_ENHANCEMENT_POPUP_HOST_POLL_INTERVAL_MS_V1);
     }
   } finally {
     if (child) {

@@ -3195,25 +3195,6 @@ describe('PE2.1 - hook-mode PE host consumer wiring', () => {
     expect(getPendingAdvisory(store, projectRoot)).toBeNull();
   });
 
-  it('maps a visible Linux child timeout to the existing explicit no-send hook block', async () => {
-    const { request, preparation } = await validPreparation('/test/pe4-1-timeout');
-    const onHookOutput = vi.fn();
-    const consumer = createPromptEnhancementCliHostConsumerV1({
-      store,
-      dbPath: ':memory:',
-      cliEntryPath: '/opt/nexpath/dist/cli/index.js',
-      resolveCapability: () => ({ state: 'available', method: 'linux_terminal', terminalCommand: 'gnome-terminal' }),
-      launchHost: vi.fn().mockResolvedValue({ state: 'timed_out' }),
-      onHookOutput,
-    });
-
-    await expect(consumer(preparation, request)).resolves.toBe('handled_no_send');
-    expect(onHookOutput).toHaveBeenCalledWith(expect.objectContaining({
-      decision: 'block',
-      suppressOriginalPrompt: true,
-    }));
-  });
-
   it('keeps a pre-visible Linux renderer failure on original-prompt pass-through', async () => {
     const { request, preparation } = await validPreparation('/test/pe4-1-not-ready');
     const onHookOutput = vi.fn();
