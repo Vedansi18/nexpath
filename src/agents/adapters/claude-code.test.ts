@@ -10,7 +10,6 @@ import {
   buildStopHookCommand,
   buildHookEntry,
   CLAUDE_HOOK_TIMEOUT_SECONDS,
-  CLAUDE_PROMPT_HOOK_TIMEOUT_SECONDS,
   writeHookEntry,
   removeHookEntry,
 } from './claude-code.js';
@@ -87,7 +86,8 @@ describe('claude-code adapter + helpers', () => {
       expect(stop._nexpath_hook).toBe(true);
       const stopHooks = stop.hooks as Array<{ type: string; command: string }>;
       expect(stopHooks[0].command).toContain('stop');
-      expect(stopHooks[0]).toMatchObject({ timeout: CLAUDE_PROMPT_HOOK_TIMEOUT_SECONDS });
+      // Owner decision A (2026-08-04): no explicit Stop timeout — inherits Claude Code's default.
+      expect(stopHooks[0]).not.toHaveProperty('timeout');
     });
   });
 
@@ -184,7 +184,7 @@ describe('claude-code adapter + helpers', () => {
       expect(hooks.UserPromptSubmit[0].command).toContain('auto');
       expect(hooks.UserPromptSubmit[0].timeout).toBe(CLAUDE_HOOK_TIMEOUT_SECONDS);
       expect(hooks.Stop[0].command).toContain('stop');
-      expect(hooks.Stop[0].timeout).toBe(CLAUDE_PROMPT_HOOK_TIMEOUT_SECONDS);
+      expect(hooks.Stop[0].timeout).toBeUndefined();
     });
   });
 
@@ -197,7 +197,7 @@ describe('claude-code adapter + helpers', () => {
       const parsed = JSON.parse(readFileSync(settingsPath, 'utf8'));
       expect(parsed.hooks.UserPromptSubmit[0]._nexpath_hook).toBe(true);
       expect(parsed.hooks.UserPromptSubmit[0].hooks[0].timeout).toBe(CLAUDE_HOOK_TIMEOUT_SECONDS);
-      expect(parsed.hooks.Stop[0].hooks[0].timeout).toBe(CLAUDE_PROMPT_HOOK_TIMEOUT_SECONDS);
+      expect(parsed.hooks.Stop[0].hooks[0].timeout).toBeUndefined();
     });
 
     it('logs the success line containing the settings path', async () => {

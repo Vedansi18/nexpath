@@ -64,24 +64,21 @@ export function buildStopHookCommand(home: string, platform = process.platform):
 export const CLAUDE_HOOK_TIMEOUT_SECONDS = 60 as const;
 
 /**
- * The Stop hook hosts the interactive PE popup (owner decision B-i, 2026-08-04):
- * the PE popup is deferred to the Stop hook and must NEVER time out. Set a very
- * long Stop timeout so Claude Code does not kill the hook while the popup is open.
- * UserPromptSubmit keeps the normal 60s bound — it only prepares + persists the PE
- * and returns immediately (no popup there).
- */
-export const CLAUDE_PROMPT_HOOK_TIMEOUT_SECONDS = 86_400 as const; // 24h ≈ never
-
-/**
  * Build the UserPromptSubmit + Stop hook entry objects.
  *
  * The `_nexpath_hook: true` field is the reliable deduplication and removal
  * marker — it survives path changes across reinstalls, unlike scanning the
  * command string.
  *
- * Set an explicit 60-second timeout because current Claude Code installations
- * may default UserPromptSubmit to 30 seconds. Without this field a slow PE
- * preparation hook can be discarded before its typed result is returned.
+ * UserPromptSubmit gets an explicit 60-second timeout because Claude Code reduces
+ * its default to 30s, and the PE preparation on this hook may call the LLM.
+ *
+ * The Stop hook hosts the interactive PE popup (owner decision B-i). Owner decision
+ * (2026-08-04): do NOT set a large "never times out" number here. Claude Code has no
+ * infinite-timeout option, so the Stop hook is left WITHOUT an explicit timeout and
+ * inherits Claude Code's default Stop-hook budget (~600s / 10 minutes). The popup can
+ * stay open for that window; there is no way to make it truly unlimited without a
+ * magic number, which the owner declined.
  */
 export function buildHookEntry(home: string, platform = process.platform): Record<string, unknown> {
   return {
@@ -104,9 +101,10 @@ export function buildHookEntry(home: string, platform = process.platform): Recor
         matcher:       '',
         hooks: [
           {
+            // No explicit timeout — inherits Claude Code's default Stop-hook budget so the
+            // PE popup is not cut off by an arbitrary number (owner decision, 2026-08-04).
             type:    'command',
             command: buildStopHookCommand(home, platform),
-            timeout: CLAUDE_PROMPT_HOOK_TIMEOUT_SECONDS,
           },
         ],
       },
@@ -214,7 +212,7 @@ export const claudeCodeAdapter: HookAdapter = {
   buildHooks(ctx: InstallContext): Record<string, Array<{ type: string; command: string; timeout?: number }>> {
     return {
       UserPromptSubmit: [{ type: 'command', command: buildHookCommand(ctx.home), timeout: CLAUDE_HOOK_TIMEOUT_SECONDS }],
-      Stop:             [{ type: 'command', command: buildStopHookCommand(ctx.home), timeout: CLAUDE_PROMPT_HOOK_TIMEOUT_SECONDS }],
+      Stop:             [{ type: 'command', command: buildStopHookCommand(ctx.home) }],
     };
   },
 
