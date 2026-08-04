@@ -28,12 +28,16 @@ import { writeTelemetry } from '../../telemetry/index.js';
 import { triggerOpportunisticSync } from '../../telemetry/OpportunisticSync.js';
 import { flushIfTelemetryOn, flushLifecycle } from '../../telemetry/lifecycle-flush.js';
 import { recentPromptMetadata } from '../../telemetry/recent-prompts.js';
-import { readStdin } from './auto.js';
+import { readStdin, recordPromptEnhancementCliFeedbackV1 } from './auto.js';
 import {
   resolvePromptEnhancementCliHostCapabilityV1,
   runPromptEnhancementCliPopupHostLaunchV1,
 } from '../prompt-enhancement-host.js';
-import { validatePromptEnhancementCliPopupResultV1 } from '../../prompt-enhancement/cli-submit-popup.js';
+import {
+  validatePromptEnhancementCliPopupResultV1,
+  runPromptEnhancementCliSubmitPopupV1,
+  type PromptEnhancementCliPopupResultV1,
+} from '../../prompt-enhancement/cli-submit-popup.js';
 import type { GeneratedOptions } from '../../decision-session/OptionGenerator.js';
 import { resolveContentSource, selectionRegister } from '../../decision-session/selection-registry.js';
 import { autogenAwareLookup, pinchSignalTypeForFlag } from '../../decision-session/content-template-source.js';
@@ -168,23 +172,21 @@ export async function runStop(
   //      UserPromptSubmit hook. Shown after Claude's response, before the advisory. One-popup
   //      priority: feedback → PE → advisory. "Use enhanced" injects the enhanced prompt as a new
   //      turn (block decision); original/close inject nothing; no usable host falls through to the
-  //      advisory. A GUI terminal is required — a pure-TTY session has no PE host and falls through.
+  //      advisory. The launcher renders in-process on /dev/tty (like the advisory) or, with no
+  //      direct TTY, spawns a GUI terminal; a fully headless session has no host and falls through.
+  //      Store-lock handling lives in the launcher: the in-process popup holds the lock (matching
+  //      the advisory), while the spawned path releases it so the child process can reach the DB.
   if (peLaunch) {
     const pendingPe = getPendingPromptEnhancement(store, payload.cwd);
     if (pendingPe) {
       // Consume once (mirrors the advisory's mark-shown) so a Stop re-fire cannot re-show it.
       markPromptEnhancementShown(store, pendingPe.id);
-      // The popup blocks for user input; release the global DB lock across it (as the feedback
-      // popup does) so other sessions are not blocked, then re-acquire on return.
-      releaseStoreLock(store);
       let decision: PromptEnhancementStopDecision;
       try {
         decision = await peLaunch(pendingPe);
       } catch (err) {
         logger.debug('stop_prompt_enhancement_error', { cwd: payload.cwd, error: String(err) });
         decision = { kind: 'not_shown' };
-      } finally {
-        await reacquireStoreLock(store);
       }
       if (decision.kind === 'inject') {
         // Record the injected enhanced prompt so the next UserPromptSubmit recognises it as an
@@ -467,15 +469,35 @@ export function registerStopCommand(program: import('commander').Command): void 
       // advisory path runs instead.
       const peLaunch: PromptEnhancementStopLaunchFn = async (pending) => {
         const capability = resolvePromptEnhancementCliHostCapabilityV1();
-        const launch = await runPromptEnhancementCliPopupHostLaunchV1({
-          capability,
-          request: pending.request,
-          result: pending.result,
-          cliEntryPath: process.argv[1] ?? '',
-          dbPath: opts.db,
-        });
-        if (launch.state !== 'completed') return { kind: 'not_shown' };
-        const popup = launch.output.result;
+        if (capability.state === 'unavailable') return { kind: 'not_shown' };
+        let popup: PromptEnhancementCliPopupResultV1;
+        if (capability.method === 'direct_tty') {
+          // Primary path: render the PE popup in-process on /dev/tty (the same channel the
+          // advisory uses on the Stop hook). The store lock stays held for the duration, matching
+          // the advisory popup; feedback is recorded through the store-backed sink.
+          popup = await runPromptEnhancementCliSubmitPopupV1({
+            request: pending.request,
+            result: pending.result,
+            feedbackSink: (event) => recordPromptEnhancementCliFeedbackV1(store, payload.cwd, event),
+          });
+        } else {
+          // No direct TTY but a GUI session exists: spawn a terminal popup. Release the DB lock
+          // across the blocking child so the child process (its own connection) can reach the DB.
+          releaseStoreLock(store);
+          try {
+            const launch = await runPromptEnhancementCliPopupHostLaunchV1({
+              capability,
+              request: pending.request,
+              result: pending.result,
+              cliEntryPath: process.argv[1] ?? '',
+              dbPath: opts.db,
+            });
+            if (launch.state !== 'completed') return { kind: 'not_shown' };
+            popup = launch.output.result;
+          } finally {
+            await reacquireStoreLock(store);
+          }
+        }
         if (
           validatePromptEnhancementCliPopupResultV1(popup)
           && popup.state === 'selected_current'
