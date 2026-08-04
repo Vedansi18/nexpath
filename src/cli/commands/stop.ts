@@ -3,6 +3,11 @@ import { platform } from 'node:process';
 import type { Store } from '../../store/db.js';
 import { openStore, closeStore, releaseStoreLock, reacquireStoreLock, DEFAULT_DB_PATH } from '../../store/db.js';
 import { getPendingAdvisory, markAdvisoryShown } from '../../store/pending-advisories.js';
+import {
+  getPendingPromptEnhancement,
+  markPromptEnhancementShown,
+  type PendingPromptEnhancement,
+} from '../../store/pending-prompt-enhancements.js';
 import { isFeedbackEligible, markFeedbackShown } from '../../store/feedback-cadence.js';
 import { recordAdvisoryFired, recordOptionSelected } from '../../store/feedback-signals.js';
 import { sendFeedback } from '../../telemetry/feedback-send.js';
@@ -24,6 +29,11 @@ import { triggerOpportunisticSync } from '../../telemetry/OpportunisticSync.js';
 import { flushIfTelemetryOn, flushLifecycle } from '../../telemetry/lifecycle-flush.js';
 import { recentPromptMetadata } from '../../telemetry/recent-prompts.js';
 import { readStdin } from './auto.js';
+import {
+  resolvePromptEnhancementCliHostCapabilityV1,
+  runPromptEnhancementCliPopupHostLaunchV1,
+} from '../prompt-enhancement-host.js';
+import { validatePromptEnhancementCliPopupResultV1 } from '../../prompt-enhancement/cli-submit-popup.js';
 import type { GeneratedOptions } from '../../decision-session/OptionGenerator.js';
 import { resolveContentSource, selectionRegister } from '../../decision-session/selection-registry.js';
 import { autogenAwareLookup, pinchSignalTypeForFlag } from '../../decision-session/content-template-source.js';
@@ -74,7 +84,23 @@ export type StopOutcome =
   | { outcome: 'blocked';       reason: string }
   | { outcome: 'clipboard_only' }
   | { outcome: 'feedback_shown' }
+  | { outcome: 'prompt_enhancement_shown' }
   | { outcome: 'skipped' };
+
+/**
+ * Outcome of showing the deferred PE popup on the Stop hook (owner decision B-i).
+ * `inject` → the user chose the enhanced prompt; its text is injected as a new Claude turn.
+ * `shown`  → the popup was shown but nothing is injected (original / close).
+ * `not_shown` → no usable popup host (e.g. no GUI terminal); the advisory path may still run.
+ */
+export type PromptEnhancementStopDecision =
+  | { kind: 'inject'; text: string }
+  | { kind: 'shown' }
+  | { kind: 'not_shown' };
+
+/** Injectable Stop-hook PE popup launcher (production wires the real host; tests mock it). */
+export type PromptEnhancementStopLaunchFn =
+  (pending: PendingPromptEnhancement) => Promise<PromptEnhancementStopDecision>;
 
 /**
  * Injectable feedback popup dependencies. `render` is the terminal renderer
@@ -100,6 +126,7 @@ export async function runStop(
   selectFn?:     SelectFn,
   openai?:       OpenAI,
   feedbackDeps?: FeedbackDeps,
+  peLaunch?:     PromptEnhancementStopLaunchFn,
 ): Promise<StopOutcome> {
   // 1. Loop guard — Claude is continuing because of a previous Stop block; let it land
   if (payload.stop_hook_active) {
@@ -134,6 +161,40 @@ export async function runStop(
       markFeedbackShown(store);
       logger.info('stop_feedback_shown', { cwd: payload.cwd, selected: result.outcome === 'selected' });
       return { outcome: 'feedback_shown' };
+    }
+  }
+
+  // 1.4. Pending Prompt Enhancement popup (owner decision B-i, 2026-08-04) — deferred from the
+  //      UserPromptSubmit hook. Shown after Claude's response, before the advisory. One-popup
+  //      priority: feedback → PE → advisory. "Use enhanced" injects the enhanced prompt as a new
+  //      turn (block decision); original/close inject nothing; no usable host falls through to the
+  //      advisory. A GUI terminal is required — a pure-TTY session has no PE host and falls through.
+  if (peLaunch) {
+    const pendingPe = getPendingPromptEnhancement(store, payload.cwd);
+    if (pendingPe) {
+      // Consume once (mirrors the advisory's mark-shown) so a Stop re-fire cannot re-show it.
+      markPromptEnhancementShown(store, pendingPe.id);
+      // The popup blocks for user input; release the global DB lock across it (as the feedback
+      // popup does) so other sessions are not blocked, then re-acquire on return.
+      releaseStoreLock(store);
+      let decision: PromptEnhancementStopDecision;
+      try {
+        decision = await peLaunch(pendingPe);
+      } catch (err) {
+        logger.debug('stop_prompt_enhancement_error', { cwd: payload.cwd, error: String(err) });
+        decision = { kind: 'not_shown' };
+      } finally {
+        await reacquireStoreLock(store);
+      }
+      if (decision.kind === 'inject') {
+        logger.info('stop_prompt_enhancement_injected', { cwd: payload.cwd });
+        return { outcome: 'blocked', reason: decision.text };
+      }
+      if (decision.kind === 'shown') {
+        logger.info('stop_prompt_enhancement_shown', { cwd: payload.cwd });
+        return { outcome: 'prompt_enhancement_shown' };
+      }
+      // not_shown → no usable PE host this turn; fall through to the advisory path below.
     }
   }
 
@@ -396,8 +457,34 @@ export function registerStopCommand(program: import('commander').Command): void 
         });
       }
 
+      // Owner decision B-i: the deferred PE popup is shown here on the Stop hook. Launch the
+      // real spawned-terminal PE host; "Use enhanced" returns the enhanced body to inject as a
+      // new turn. A GUI terminal is required — with no usable host the PE is skipped and the
+      // advisory path runs instead.
+      const peLaunch: PromptEnhancementStopLaunchFn = async (pending) => {
+        const capability = resolvePromptEnhancementCliHostCapabilityV1();
+        const launch = await runPromptEnhancementCliPopupHostLaunchV1({
+          capability,
+          request: pending.request,
+          result: pending.result,
+          cliEntryPath: process.argv[1] ?? '',
+          dbPath: opts.db,
+        });
+        if (launch.state !== 'completed') return { kind: 'not_shown' };
+        const popup = launch.output.result;
+        if (
+          validatePromptEnhancementCliPopupResultV1(popup)
+          && popup.state === 'selected_current'
+          && typeof popup.bodyText === 'string'
+          && popup.bodyText.length > 0
+        ) {
+          return { kind: 'inject', text: popup.bodyText };
+        }
+        return { kind: 'shown' };
+      };
+
       try {
-        const result = await runStop(payload, store);
+        const result = await runStop(payload, store, undefined, undefined, undefined, peLaunch);
         writeHookStats(payload.cwd, result.outcome);
 
         if (result.outcome === 'blocked') {

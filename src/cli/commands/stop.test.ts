@@ -34,6 +34,10 @@ import type { Store } from '../../store/db.js';
 import { runStop } from './stop.js';
 import type { StopPayload } from './stop.js';
 import { upsertPendingAdvisory, getPendingAdvisory } from '../../store/pending-advisories.js';
+import { upsertPendingPromptEnhancement, getPendingPromptEnhancement } from '../../store/pending-prompt-enhancements.js';
+import { buildPromptEnhancementRequestForAuto } from './auto.js';
+import { preparePromptEnhancement } from '../../prompt-enhancement/facade.js';
+import type { PromptEnhancementStopLaunchFn } from './stop.js';
 import { getSkippedSessions } from '../../store/skipped-sessions.js';
 import { SKIP_NOW } from '../../decision-session/options.js';
 import { CLIPBOARD_ONLY } from '../../decision-session/DecisionSession.js';
@@ -86,6 +90,84 @@ function insertAdvisory(store: Store, projectRoot = '/test/project') {
   mgr.setDetectedLanguage(store, undefined); // persist session to DB so runStop finds same UUID
   upsertPendingAdvisory(store, { ...makeAdvisory(projectRoot), sessionId: mgr.current.sessionId });
 }
+
+async function insertPendingPe(store: Store, projectRoot = '/test/project') {
+  const session = SessionStateManager.load(store, projectRoot);
+  const request = buildPromptEnhancementRequestForAuto({
+    auto: { promptText: 'implement the login flow', projectRoot, currentAgentMode: 'workspace-write' },
+    store,
+    session,
+    project: null,
+    effectiveLanguage: 'en',
+    configuredRole: null,
+    effectiveFlagType: 'stage_transition',
+    firedKey: 'stage_transition:idea→implementation',
+    previousStage: 'idea',
+    trigger: { kind: 'stage_transition' },
+    stageResult: {
+      classification: { stage: 'implementation', confidence: 0.9, tier: 3, allScores: {} },
+      signalsPresent: [], signalsAbsent: [], fireRecommendation: true,
+      selectedSignalKey: '', reason: 'test', degraded: false,
+    },
+    streamBOutputs: [],
+  });
+  const result = await preparePromptEnhancement(request);
+  upsertPendingPromptEnhancement(store, { projectRoot, sessionId: session.current.sessionId, promptCount: 5, request, result });
+}
+
+// Owner decision B-i: the deferred PE popup is shown on the Stop hook, before the advisory.
+describe('runStop — deferred Prompt Enhancement popup (B-i)', () => {
+  let store: Store;
+  beforeEach(async () => { store = await openStore(':memory:'); });
+  afterEach(() => { store.db.close(); });
+
+  const inject = (text: string): PromptEnhancementStopLaunchFn => vi.fn().mockResolvedValue({ kind: 'inject', text });
+  const shown = (): PromptEnhancementStopLaunchFn => vi.fn().mockResolvedValue({ kind: 'shown' });
+  const notShown = (): PromptEnhancementStopLaunchFn => vi.fn().mockResolvedValue({ kind: 'not_shown' });
+
+  it('injects the enhanced prompt as a new turn when the user picks Use enhanced', async () => {
+    await insertPendingPe(store);
+    const result = await runStop(makePayload(), store, undefined, undefined, undefined, inject('ENHANCED PROMPT BODY'));
+    expect(result).toEqual({ outcome: 'blocked', reason: 'ENHANCED PROMPT BODY' });
+  });
+
+  it('marks the pending PE shown so a Stop re-fire does not re-show it', async () => {
+    await insertPendingPe(store);
+    await runStop(makePayload(), store, undefined, undefined, undefined, inject('BODY'));
+    expect(getPendingPromptEnhancement(store, '/test/project')).toBeNull();
+  });
+
+  it('returns prompt_enhancement_shown when the popup shows but nothing is sent', async () => {
+    await insertPendingPe(store);
+    const result = await runStop(makePayload(), store, undefined, undefined, undefined, shown());
+    expect(result).toEqual({ outcome: 'prompt_enhancement_shown' });
+  });
+
+  it('falls through to the advisory path when no PE host is available', async () => {
+    await insertPendingPe(store); // pending PE exists, but the host cannot show it
+    // No advisory seeded → falling through reaches the advisory lookup and finds nothing.
+    const result = await runStop(makePayload(), store, undefined, undefined, undefined, notShown());
+    expect(result).toEqual({ outcome: 'no_pending' });
+  });
+
+  it('takes priority over the advisory (one popup per Stop): PE injects, advisory stays pending', async () => {
+    await insertPendingPe(store);
+    insertAdvisory(store);
+    const result = await runStop(makePayload(), store, undefined, undefined, undefined, inject('ENH'));
+    expect(result).toEqual({ outcome: 'blocked', reason: 'ENH' });
+    // The advisory was not consumed this turn — it remains for a later Stop.
+    expect(getPendingAdvisory(store, '/test/project')).not.toBeNull();
+  });
+
+  it('does not show the PE popup when no launcher is wired (default runStop)', async () => {
+    await insertPendingPe(store);
+    // No peLaunch arg → PE step skipped; with no advisory, outcome is no_pending.
+    const result = await runStop(makePayload(), store);
+    expect(result).toEqual({ outcome: 'no_pending' });
+    // The pending PE is untouched (not consumed) when there is no launcher.
+    expect(getPendingPromptEnhancement(store, '/test/project')).not.toBeNull();
+  });
+});
 
 // ── runStop — loop guard ──────────────────────────────────────────────────────
 

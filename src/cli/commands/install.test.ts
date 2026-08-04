@@ -1532,15 +1532,16 @@ describe('buildHookEntry', () => {
     expect(hooks[0].type).toBe('command');
   });
 
-  it('gives the PE-hosting UserPromptSubmit hook a 24h timeout so the popup never times out, and keeps Stop at 60s', () => {
+  it('gives the PE-hosting Stop hook a 24h timeout so the popup never times out, and keeps UserPromptSubmit at 60s', () => {
     const entry  = buildHookEntry('/home/user', 'linux');
     const groups = entry.UserPromptSubmit as Array<Record<string, unknown>>;
     const hooks  = groups[0].hooks as Array<Record<string, unknown>>;
-    // Owner decision: the PE popup must never be killed while the user is deciding.
-    expect(hooks[0].timeout).toBe(86_400);
+    // Owner decision B-i: the PE popup runs on the Stop hook and must never be killed while the
+    // user is deciding; UserPromptSubmit only prepares + persists the PE and returns immediately.
+    expect(hooks[0].timeout).toBe(60);
     const stopGroups = entry.Stop as Array<Record<string, unknown>>;
     const stopHooks = stopGroups[0].hooks as Array<Record<string, unknown>>;
-    expect(stopHooks[0].timeout).toBe(60);
+    expect(stopHooks[0].timeout).toBe(86_400);
   });
 
   it('UserPromptSubmit hook command contains nexpath auto --db', () => {
