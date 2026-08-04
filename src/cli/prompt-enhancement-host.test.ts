@@ -312,7 +312,7 @@ describe('PE1.3 — Linux PE popup host launcher', () => {
       cleanupTempDir,
     });
 
-    expect(PROMPT_ENHANCEMENT_POPUP_HOST_DEADLINE_MS_V1).toBe(52_000);
+    expect(PROMPT_ENHANCEMENT_POPUP_HOST_DEADLINE_MS_V1).toBe(86_392_000);
     expect(result).toEqual({ state: 'timed_out' });
     expect(sleep).not.toHaveBeenCalled();
     expect(fakeChild.kill).toHaveBeenCalledWith('SIGTERM');

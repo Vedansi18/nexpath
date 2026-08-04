@@ -54,7 +54,10 @@ export interface PromptEnhancementCliHostProbeDependenciesV1 {
   readCommandVersion?: (command: PromptEnhancementLinuxTerminalCommandV1) => string | undefined;
 }
 
-export const PROMPT_ENHANCEMENT_POPUP_HOST_DEADLINE_MS_V1 = 52_000;
+// Owner decision: the PE popup must NEVER time out — it waits for the user. The
+// internal deadline is set just under the 24h UserPromptSubmit hook timeout
+// (8s reserve for cleanup + final JSON), so in practice the popup never expires.
+export const PROMPT_ENHANCEMENT_POPUP_HOST_DEADLINE_MS_V1 = 86_392_000;
 const PROMPT_ENHANCEMENT_POPUP_HOST_POLL_INTERVAL_MS_V1 = 50;
 const PROMPT_ENHANCEMENT_POPUP_HOST_PROTOCOL_VERSION_V1 = 1;
 const PROMPT_ENHANCEMENT_POPUP_WINDOW_TITLE_V1 = 'Nexpath · Prompt enhancement';

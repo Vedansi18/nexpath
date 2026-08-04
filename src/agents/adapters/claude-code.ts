@@ -64,6 +64,14 @@ export function buildStopHookCommand(home: string, platform = process.platform):
 export const CLAUDE_HOOK_TIMEOUT_SECONDS = 60 as const;
 
 /**
+ * The UserPromptSubmit hook hosts the interactive PE popup, which waits for the
+ * user (owner decision: the popup must NEVER time out). Set a very long hook
+ * timeout so Claude Code does not kill the hook while the popup is open. Stop
+ * keeps the normal 60s bound since it must return quickly.
+ */
+export const CLAUDE_PROMPT_HOOK_TIMEOUT_SECONDS = 86_400 as const; // 24h ≈ never
+
+/**
  * Build the UserPromptSubmit + Stop hook entry objects.
  *
  * The `_nexpath_hook: true` field is the reliable deduplication and removal
@@ -84,7 +92,7 @@ export function buildHookEntry(home: string, platform = process.platform): Recor
           {
             type:    'command',
             command: buildHookCommand(home, platform),
-            timeout: CLAUDE_HOOK_TIMEOUT_SECONDS,
+            timeout: CLAUDE_PROMPT_HOOK_TIMEOUT_SECONDS,
           },
         ],
       },
@@ -204,7 +212,7 @@ export const claudeCodeAdapter: HookAdapter = {
 
   buildHooks(ctx: InstallContext): Record<string, Array<{ type: string; command: string; timeout?: number }>> {
     return {
-      UserPromptSubmit: [{ type: 'command', command: buildHookCommand(ctx.home), timeout: CLAUDE_HOOK_TIMEOUT_SECONDS }],
+      UserPromptSubmit: [{ type: 'command', command: buildHookCommand(ctx.home), timeout: CLAUDE_PROMPT_HOOK_TIMEOUT_SECONDS }],
       Stop:             [{ type: 'command', command: buildStopHookCommand(ctx.home), timeout: CLAUDE_HOOK_TIMEOUT_SECONDS }],
     };
   },
