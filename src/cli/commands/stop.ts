@@ -187,6 +187,10 @@ export async function runStop(
         await reacquireStoreLock(store);
       }
       if (decision.kind === 'inject') {
+        // Record the injected enhanced prompt so the next UserPromptSubmit recognises it as an
+        // echo and does not prepare another PE for it (mirrors the advisory injection at the
+        // bottom of this function — otherwise the enhanced turn would re-trigger the PE popup).
+        SessionStateManager.load(store, payload.cwd).setInjectedPrompt(store, decision.text);
         logger.info('stop_prompt_enhancement_injected', { cwd: payload.cwd });
         return { outcome: 'blocked', reason: decision.text };
       }

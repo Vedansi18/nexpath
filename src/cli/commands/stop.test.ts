@@ -137,6 +137,13 @@ describe('runStop — deferred Prompt Enhancement popup (B-i)', () => {
     expect(getPendingPromptEnhancement(store, '/test/project')).toBeNull();
   });
 
+  it('arms the injected-prompt echo guard so the enhanced turn does not re-trigger a PE', async () => {
+    await insertPendingPe(store);
+    await runStop(makePayload(), store, undefined, undefined, undefined, inject('ENHANCED BODY TEXT'));
+    // The enhanced body is recorded as the last injected prompt; auto's -1 guard uses it to skip.
+    expect(SessionStateManager.load(store, '/test/project').current.lastInjectedPrompt).toBe('ENHANCED BODY TEXT');
+  });
+
   it('returns prompt_enhancement_shown when the popup shows but nothing is sent', async () => {
     await insertPendingPe(store);
     const result = await runStop(makePayload(), store, undefined, undefined, undefined, shown());
