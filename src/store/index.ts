@@ -51,6 +51,13 @@ export {
   type UpsertPendingAdvisoryInput,
 } from './pending-advisories.js';
 export {
+  upsertPendingPromptEnhancement,
+  getPendingPromptEnhancement,
+  markPromptEnhancementShown,
+  type PendingPromptEnhancement,
+  type UpsertPendingPromptEnhancementInput,
+} from './pending-prompt-enhancements.js';
+export {
   queryRelevantPromptEnhancementMemory,
   recordPromptEnhancementMemoryEvidence,
   markPromptEnhancementMemoryUsed,
