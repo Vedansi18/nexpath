@@ -3,6 +3,11 @@ import { platform } from 'node:process';
 import type { Store } from '../../store/db.js';
 import { openStore, closeStore, releaseStoreLock, reacquireStoreLock, DEFAULT_DB_PATH } from '../../store/db.js';
 import { getPendingAdvisory, markAdvisoryShown } from '../../store/pending-advisories.js';
+import {
+  getPendingPromptEnhancement,
+  markPromptEnhancementShown,
+  type PendingPromptEnhancement,
+} from '../../store/pending-prompt-enhancements.js';
 import { isFeedbackEligible, markFeedbackShown } from '../../store/feedback-cadence.js';
 import { recordAdvisoryFired, recordOptionSelected } from '../../store/feedback-signals.js';
 import { sendFeedback } from '../../telemetry/feedback-send.js';
@@ -23,7 +28,16 @@ import { writeTelemetry } from '../../telemetry/index.js';
 import { triggerOpportunisticSync } from '../../telemetry/OpportunisticSync.js';
 import { flushIfTelemetryOn, flushLifecycle } from '../../telemetry/lifecycle-flush.js';
 import { recentPromptMetadata } from '../../telemetry/recent-prompts.js';
-import { readStdin } from './auto.js';
+import { readStdin, recordPromptEnhancementCliFeedbackV1 } from './auto.js';
+import {
+  resolvePromptEnhancementCliHostCapabilityV1,
+  runPromptEnhancementCliPopupHostLaunchV1,
+} from '../prompt-enhancement-host.js';
+import {
+  validatePromptEnhancementCliPopupResultV1,
+  runPromptEnhancementCliSubmitPopupV1,
+  type PromptEnhancementCliPopupResultV1,
+} from '../../prompt-enhancement/cli-submit-popup.js';
 import type { GeneratedOptions } from '../../decision-session/OptionGenerator.js';
 import { resolveContentSource, selectionRegister } from '../../decision-session/selection-registry.js';
 import { autogenAwareLookup, pinchSignalTypeForFlag } from '../../decision-session/content-template-source.js';
@@ -74,7 +88,23 @@ export type StopOutcome =
   | { outcome: 'blocked';       reason: string }
   | { outcome: 'clipboard_only' }
   | { outcome: 'feedback_shown' }
+  | { outcome: 'prompt_enhancement_shown' }
   | { outcome: 'skipped' };
+
+/**
+ * Outcome of showing the deferred PE popup on the Stop hook (owner decision B-i).
+ * `inject` → the user chose the enhanced prompt; its text is injected as a new Claude turn.
+ * `shown`  → the popup was shown but nothing is injected (original / close).
+ * `not_shown` → no usable popup host (e.g. no GUI terminal); the advisory path may still run.
+ */
+export type PromptEnhancementStopDecision =
+  | { kind: 'inject'; text: string }
+  | { kind: 'shown' }
+  | { kind: 'not_shown' };
+
+/** Injectable Stop-hook PE popup launcher (production wires the real host; tests mock it). */
+export type PromptEnhancementStopLaunchFn =
+  (pending: PendingPromptEnhancement) => Promise<PromptEnhancementStopDecision>;
 
 /**
  * Injectable feedback popup dependencies. `render` is the terminal renderer
@@ -100,6 +130,7 @@ export async function runStop(
   selectFn?:     SelectFn,
   openai?:       OpenAI,
   feedbackDeps?: FeedbackDeps,
+  peLaunch?:     PromptEnhancementStopLaunchFn,
 ): Promise<StopOutcome> {
   // 1. Loop guard — Claude is continuing because of a previous Stop block; let it land
   if (payload.stop_hook_active) {
@@ -137,6 +168,42 @@ export async function runStop(
     }
   }
 
+  // 1.4. Pending Prompt Enhancement popup (owner decision B-i, 2026-08-04) — deferred from the
+  //      UserPromptSubmit hook. Shown after Claude's response, before the advisory. One-popup
+  //      priority: feedback → PE → advisory. "Use enhanced" injects the enhanced prompt as a new
+  //      turn (block decision); original/close inject nothing; no usable host falls through to the
+  //      advisory. The launcher renders in-process on /dev/tty (like the advisory) or, with no
+  //      direct TTY, spawns a GUI terminal; a fully headless session has no host and falls through.
+  //      Store-lock handling lives in the launcher: the in-process popup holds the lock (matching
+  //      the advisory), while the spawned path releases it so the child process can reach the DB.
+  if (peLaunch) {
+    const pendingPe = getPendingPromptEnhancement(store, payload.cwd);
+    if (pendingPe) {
+      // Consume once (mirrors the advisory's mark-shown) so a Stop re-fire cannot re-show it.
+      markPromptEnhancementShown(store, pendingPe.id);
+      let decision: PromptEnhancementStopDecision;
+      try {
+        decision = await peLaunch(pendingPe);
+      } catch (err) {
+        logger.debug('stop_prompt_enhancement_error', { cwd: payload.cwd, error: String(err) });
+        decision = { kind: 'not_shown' };
+      }
+      if (decision.kind === 'inject') {
+        // Record the injected enhanced prompt so the next UserPromptSubmit recognises it as an
+        // echo and does not prepare another PE for it (mirrors the advisory injection at the
+        // bottom of this function — otherwise the enhanced turn would re-trigger the PE popup).
+        SessionStateManager.load(store, payload.cwd).setInjectedPrompt(store, decision.text);
+        logger.info('stop_prompt_enhancement_injected', { cwd: payload.cwd });
+        return { outcome: 'blocked', reason: decision.text };
+      }
+      if (decision.kind === 'shown') {
+        logger.info('stop_prompt_enhancement_shown', { cwd: payload.cwd });
+        return { outcome: 'prompt_enhancement_shown' };
+      }
+      // not_shown → no usable PE host this turn; fall through to the advisory path below.
+    }
+  }
+
   // 1.5. Language detection — runs post-response, invisible latency
   //      Only fires when >= LANG_DETECT_INTERVAL prompts have been captured for this project.
   const recentPrompts = getRecentPrompts(store, payload.cwd, LANG_WINDOW);
@@ -155,13 +222,29 @@ export async function runStop(
   const mgr = SessionStateManager.load(store, payload.cwd);
 
   // 3. Check for a pending advisory stored by the auto hook
+  logger.debug('stop_pending_lookup', {
+    cwd: payload.cwd,
+    sessionId: mgr.current.sessionId,
+  });
   const advisory = getPendingAdvisory(store, payload.cwd, mgr.current.sessionId);
   if (!advisory) {
+    const projectPending = getPendingAdvisory(store, payload.cwd);
+    logger.debug('stop_pending_miss', {
+      cwd: payload.cwd,
+      sessionId: mgr.current.sessionId,
+      projectPending: projectPending !== null,
+      pendingSessionId: projectPending?.sessionId ?? null,
+    });
     logger.debug('stop_no_pending', { cwd: payload.cwd });
     writeTelemetry(payload.cwd, 'stop_no_pending', undefined, store);
     return { outcome: 'no_pending' };
   }
 
+  logger.debug('stop_pending_hit', {
+    cwd: payload.cwd,
+    sessionId: mgr.current.sessionId,
+    advisoryId: advisory.id,
+  });
   // 3. Mark as shown immediately — prevents duplicate UI on rapid Stop re-fires
   markAdvisoryShown(store, advisory.id);
 
@@ -380,8 +463,54 @@ export function registerStopCommand(program: import('commander').Command): void 
         });
       }
 
+      // Owner decision B-i: the deferred PE popup is shown here on the Stop hook. Launch the
+      // real spawned-terminal PE host; "Use enhanced" returns the enhanced body to inject as a
+      // new turn. A GUI terminal is required — with no usable host the PE is skipped and the
+      // advisory path runs instead.
+      const peLaunch: PromptEnhancementStopLaunchFn = async (pending) => {
+        const capability = resolvePromptEnhancementCliHostCapabilityV1();
+        if (capability.state === 'unavailable') return { kind: 'not_shown' };
+        let popup: PromptEnhancementCliPopupResultV1;
+        if (capability.method === 'direct_tty') {
+          // Primary path: render the PE popup in-process on /dev/tty (the same channel the
+          // advisory uses on the Stop hook). The store lock stays held for the duration, matching
+          // the advisory popup; feedback is recorded through the store-backed sink.
+          popup = await runPromptEnhancementCliSubmitPopupV1({
+            request: pending.request,
+            result: pending.result,
+            feedbackSink: (event) => recordPromptEnhancementCliFeedbackV1(store, payload.cwd, event),
+          });
+        } else {
+          // No direct TTY but a GUI session exists: spawn a terminal popup. Release the DB lock
+          // across the blocking child so the child process (its own connection) can reach the DB.
+          releaseStoreLock(store);
+          try {
+            const launch = await runPromptEnhancementCliPopupHostLaunchV1({
+              capability,
+              request: pending.request,
+              result: pending.result,
+              cliEntryPath: process.argv[1] ?? '',
+              dbPath: opts.db,
+            });
+            if (launch.state !== 'completed') return { kind: 'not_shown' };
+            popup = launch.output.result;
+          } finally {
+            await reacquireStoreLock(store);
+          }
+        }
+        if (
+          validatePromptEnhancementCliPopupResultV1(popup)
+          && popup.state === 'selected_current'
+          && typeof popup.bodyText === 'string'
+          && popup.bodyText.length > 0
+        ) {
+          return { kind: 'inject', text: popup.bodyText };
+        }
+        return { kind: 'shown' };
+      };
+
       try {
-        const result = await runStop(payload, store);
+        const result = await runStop(payload, store, undefined, undefined, undefined, peLaunch);
         writeHookStats(payload.cwd, result.outcome);
 
         if (result.outcome === 'blocked') {

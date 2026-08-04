@@ -9,6 +9,7 @@ import {
   buildHookCommand,
   buildStopHookCommand,
   buildHookEntry,
+  CLAUDE_HOOK_TIMEOUT_SECONDS,
   writeHookEntry,
   removeHookEntry,
 } from './claude-code.js';
@@ -80,10 +81,13 @@ describe('claude-code adapter + helpers', () => {
       expect(upsHooks).toHaveLength(1);
       expect(upsHooks[0].type).toBe('command');
       expect(upsHooks[0].command).toContain('auto');
+      expect(upsHooks[0]).toMatchObject({ timeout: CLAUDE_HOOK_TIMEOUT_SECONDS });
       const stop = (entry.Stop as Array<Record<string, unknown>>)[0];
       expect(stop._nexpath_hook).toBe(true);
       const stopHooks = stop.hooks as Array<{ type: string; command: string }>;
       expect(stopHooks[0].command).toContain('stop');
+      // Owner decision A (2026-08-04): no explicit Stop timeout — inherits Claude Code's default.
+      expect(stopHooks[0]).not.toHaveProperty('timeout');
     });
   });
 
@@ -178,7 +182,9 @@ describe('claude-code adapter + helpers', () => {
       expect(hooks.UserPromptSubmit).toHaveLength(1);
       expect(hooks.UserPromptSubmit[0].type).toBe('command');
       expect(hooks.UserPromptSubmit[0].command).toContain('auto');
+      expect(hooks.UserPromptSubmit[0].timeout).toBe(CLAUDE_HOOK_TIMEOUT_SECONDS);
       expect(hooks.Stop[0].command).toContain('stop');
+      expect(hooks.Stop[0].timeout).toBeUndefined();
     });
   });
 
@@ -190,6 +196,8 @@ describe('claude-code adapter + helpers', () => {
       expect(existsSync(settingsPath)).toBe(true);
       const parsed = JSON.parse(readFileSync(settingsPath, 'utf8'));
       expect(parsed.hooks.UserPromptSubmit[0]._nexpath_hook).toBe(true);
+      expect(parsed.hooks.UserPromptSubmit[0].hooks[0].timeout).toBe(CLAUDE_HOOK_TIMEOUT_SECONDS);
+      expect(parsed.hooks.Stop[0].hooks[0].timeout).toBeUndefined();
     });
 
     it('logs the success line containing the settings path', async () => {

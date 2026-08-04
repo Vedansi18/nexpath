@@ -1,5 +1,7 @@
 import { setConfig } from '../../store/config.js';
 import type { Store } from '../../store/db.js';
+import { ConfigValidationError } from '../../config/prompt-enhancement-errors.js';
+export { ConfigValidationError } from '../../config/prompt-enhancement-errors.js';
 
 export const VALID_ROLES = ['founder', 'indie_hacker', 'pm', 'vibe_coder'] as const;
 export type RoleValue = typeof VALID_ROLES[number];
@@ -12,14 +14,6 @@ export const VALID_ADVISORY_FREQUENCY_LEVELS = [
   'optimum',
 ] as const;
 export type AdvisoryFrequencyValue = typeof VALID_ADVISORY_FREQUENCY_LEVELS[number];
-
-/** Thrown when an attempted role / frequency write does not pass validation. */
-export class ConfigValidationError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'ConfigValidationError';
-  }
-}
 
 /**
  * Validate and persist an advisory_frequency value at the given config key

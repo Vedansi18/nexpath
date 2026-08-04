@@ -17,11 +17,16 @@ import { captureStyledAndUnstyled } from './styler-snapshot.js';
 // this the non-TTY safeguard short-circuits the OFF path to pass-through
 // and the dual snapshots collapse to identical output.
 let origIsTTY: boolean | undefined;
+let origNoColor: string | undefined;
 beforeAll(() => {
+  origNoColor = process.env['NO_COLOR'];
+  delete process.env['NO_COLOR'];
   origIsTTY = process.stdout.isTTY;
   process.stdout.isTTY = true;
 });
 afterAll(() => {
+  if (origNoColor === undefined) delete process.env['NO_COLOR'];
+  else process.env['NO_COLOR'] = origNoColor;
   process.stdout.isTTY = origIsTTY;
 });
 

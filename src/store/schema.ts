@@ -82,6 +82,24 @@ CREATE TABLE IF NOT EXISTS pending_advisories (
 CREATE INDEX IF NOT EXISTS idx_pending_advisories_project
   ON pending_advisories (project_root, status, created_at);
 
+-- Prompt Enhancement popup deferred to the Stop hook (owner decision B-i, 2026-08-04).
+-- The UserPromptSubmit auto hook prepares the PE and stores it here without showing a
+-- popup; the Stop hook reads the pending row, shows the PE popup, and injects the enhanced
+-- prompt as a new turn. request_json / result_json hold the typed prepared PE payload.
+CREATE TABLE IF NOT EXISTS pending_prompt_enhancements (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_root TEXT    NOT NULL,
+  session_id   TEXT    NOT NULL,
+  prompt_count INTEGER NOT NULL,
+  status       TEXT    NOT NULL DEFAULT 'pending',
+  created_at   INTEGER NOT NULL,
+  request_json TEXT    NOT NULL,
+  result_json  TEXT    NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_pending_prompt_enhancements_project
+  ON pending_prompt_enhancements (project_root, status, created_at);
+
 CREATE TABLE IF NOT EXISTS feedback_signals (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
   project_root TEXT    NOT NULL,

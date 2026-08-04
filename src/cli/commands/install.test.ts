@@ -1532,11 +1532,17 @@ describe('buildHookEntry', () => {
     expect(hooks[0].type).toBe('command');
   });
 
-  it('does NOT include a timeout field (uses Claude Code default)', () => {
+  it('sets UserPromptSubmit to 60s and leaves the PE-hosting Stop hook without an explicit timeout', () => {
     const entry  = buildHookEntry('/home/user', 'linux');
     const groups = entry.UserPromptSubmit as Array<Record<string, unknown>>;
     const hooks  = groups[0].hooks as Array<Record<string, unknown>>;
-    expect(hooks[0]).not.toHaveProperty('timeout');
+    // UserPromptSubmit prepares + persists the PE (may call the LLM) → explicit 60s headroom.
+    expect(hooks[0].timeout).toBe(60);
+    // Owner decision A (2026-08-04): the Stop hook (PE popup) has NO explicit timeout — it
+    // inherits Claude Code's default Stop budget, avoiding an arbitrary "never times out" number.
+    const stopGroups = entry.Stop as Array<Record<string, unknown>>;
+    const stopHooks = stopGroups[0].hooks as Array<Record<string, unknown>>;
+    expect(stopHooks[0]).not.toHaveProperty('timeout');
   });
 
   it('UserPromptSubmit hook command contains nexpath auto --db', () => {

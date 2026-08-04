@@ -6,6 +6,7 @@ import {
   setAdvisoryFrequency,
   setRole,
 } from '../shared/config-setters.js';
+import { setPromptEnhancementSequenceEnabled } from '../../config/PromptEnhancementConfig.js';
 import {
   storeApiKey,
   removeApiKey,
@@ -32,6 +33,8 @@ export async function configSetAction(key: string, value: string, dbPath = DEFAU
       setRole(store, key, value);
     } else if (key === 'advisory_frequency' || key.startsWith('advisory_frequency:')) {
       setAdvisoryFrequency(store, key, value);
+    } else if (key === 'prompt_enhancement.sequence.enabled' || key.startsWith('prompt_enhancement.sequence.enabled:')) {
+      setPromptEnhancementSequenceEnabled(store, key, value);
     } else {
       setConfig(store, key, value);
       // S6: turning the dev-env probe off purges the stored facts (data-at-rest

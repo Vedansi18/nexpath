@@ -60,6 +60,9 @@ export function buildStopHookCommand(home: string, platform = process.platform):
   return `node "${cliPath}" stop --db "${dbPath}"`;
 }
 
+/** Claude Code hook timeout is expressed in seconds in settings.json. */
+export const CLAUDE_HOOK_TIMEOUT_SECONDS = 60 as const;
+
 /**
  * Build the UserPromptSubmit + Stop hook entry objects.
  *
@@ -67,8 +70,15 @@ export function buildStopHookCommand(home: string, platform = process.platform):
  * marker — it survives path changes across reinstalls, unlike scanning the
  * command string.
  *
- * No `timeout` field is set so Claude Code uses its default (600 s), which is
- * required for hooks that block for UI interaction (the decision session).
+ * UserPromptSubmit gets an explicit 60-second timeout because Claude Code reduces
+ * its default to 30s, and the PE preparation on this hook may call the LLM.
+ *
+ * The Stop hook hosts the interactive PE popup (owner decision B-i). Owner decision
+ * (2026-08-04): do NOT set a large "never times out" number here. Claude Code has no
+ * infinite-timeout option, so the Stop hook is left WITHOUT an explicit timeout and
+ * inherits Claude Code's default Stop-hook budget (~600s / 10 minutes). The popup can
+ * stay open for that window; there is no way to make it truly unlimited without a
+ * magic number, which the owner declined.
  */
 export function buildHookEntry(home: string, platform = process.platform): Record<string, unknown> {
   return {
@@ -80,6 +90,7 @@ export function buildHookEntry(home: string, platform = process.platform): Recor
           {
             type:    'command',
             command: buildHookCommand(home, platform),
+            timeout: CLAUDE_HOOK_TIMEOUT_SECONDS,
           },
         ],
       },
@@ -90,6 +101,8 @@ export function buildHookEntry(home: string, platform = process.platform): Recor
         matcher:       '',
         hooks: [
           {
+            // No explicit timeout — inherits Claude Code's default Stop-hook budget so the
+            // PE popup is not cut off by an arbitrary number (owner decision, 2026-08-04).
             type:    'command',
             command: buildStopHookCommand(home, platform),
           },
@@ -196,9 +209,9 @@ export const claudeCodeAdapter: HookAdapter = {
     return ctx.settingsPath ?? getClaudeSettingsPath(ctx.home);
   },
 
-  buildHooks(ctx: InstallContext): Record<string, Array<{ type: string; command: string }>> {
+  buildHooks(ctx: InstallContext): Record<string, Array<{ type: string; command: string; timeout?: number }>> {
     return {
-      UserPromptSubmit: [{ type: 'command', command: buildHookCommand(ctx.home) }],
+      UserPromptSubmit: [{ type: 'command', command: buildHookCommand(ctx.home), timeout: CLAUDE_HOOK_TIMEOUT_SECONDS }],
       Stop:             [{ type: 'command', command: buildStopHookCommand(ctx.home) }],
     };
   },
