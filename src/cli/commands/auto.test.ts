@@ -36,6 +36,7 @@ import { getPromptEnhancementFeedbackSummary } from '../../store/prompt-enhancem
 import { writeTelemetry } from '../../telemetry/index.js';
 import type { AutoInput } from './auto.js';
 import { getPendingAdvisory } from '../../store/pending-advisories.js';
+import { getPendingPromptEnhancement } from '../../store/pending-prompt-enhancements.js';
 import { upsertProject, setDetectedLanguage, getProject } from '../../store/projects.js';
 import { upsertPendingAdvisory } from '../../store/pending-advisories.js';
 import { setConfig } from '../../store/config.js';
@@ -2037,23 +2038,22 @@ describe('H1.1 — validated PE preparation boundary', () => {
       const facadeResult = await preparePromptEnhancement(request);
       const prepare = vi.fn().mockResolvedValue(facadeResult);
       const onResult = vi.fn();
-      const consumer = vi.fn();
 
       const result = await runAuto(
         makeInput({ projectRoot }),
         store,
         makeMockOpenAI(FIRE_YES_RESPONSE, 'Hold up.'),
         { request, prepare, onResult },
-        consumer,
       );
 
       expect(result.outcome).toBe('pending');
       expect(prepare).toHaveBeenCalledTimes(1);
       expect(onResult).toHaveBeenCalledTimes(1);
-      expect(consumer).toHaveBeenCalledWith(
-        expect.objectContaining({ disposition: facadeResult.disposition, safeFallback: false }),
-        request,
-      );
+      // Owner decision B-i: no popup on UserPromptSubmit — the prepared PE is persisted for the
+      // Stop hook instead of being shown here.
+      const pendingPe = getPendingPromptEnhancement(store, projectRoot);
+      expect(pendingPe).not.toBeNull();
+      expect(pendingPe!.result.disposition).toBe(facadeResult.disposition);
       expect(request.reviewMomentContext.triggerProvenance.promptStartCanReplaceSameTurn).toBe(false);
       expect(request.sourceSignals.sourceAOriginalPromptRef.sourceKind).toBe('source_a_user_prompt');
     } finally {
@@ -2061,7 +2061,7 @@ describe('H1.1 — validated PE preparation boundary', () => {
     }
   });
 
-  it("does not leave a legacy pending advisory when the live PE popup closes no-send", async () => {
+  it("persists a pending PE for the Stop hook and still queues the advisory (B-i)", async () => {
     const store = await openStore(":memory:");
     try {
       const projectRoot = "/test/h1-live-close";
@@ -2074,11 +2074,13 @@ describe('H1.1 — validated PE preparation boundary', () => {
         store,
         makeMockOpenAI(FIRE_YES_RESPONSE, "Hold up."),
         { request, prepare: vi.fn().mockResolvedValue(facadeResult) },
-        vi.fn().mockResolvedValue("handled_no_send"),
       );
 
-      expect(result).toEqual({ outcome: "no_action" });
-      expect(getPendingAdvisory(store, projectRoot)).toBeNull();
+      // B-i: the PE popup is deferred to the Stop hook, so on UserPromptSubmit the PE is stored
+      // (not shown) and the advisory is still queued — both surface later on Stop.
+      expect(result).toEqual({ outcome: "pending" });
+      expect(getPendingPromptEnhancement(store, projectRoot)).not.toBeNull();
+      expect(getPendingAdvisory(store, projectRoot)).not.toBeNull();
     } finally {
       store.db.close();
     }
@@ -3166,9 +3168,8 @@ describe('PE2.1 - hook-mode PE host consumer wiring', () => {
     expect(onHookOutput).toHaveBeenCalledWith(undefined);
   });
 
-  it('maps a visible child close to no-send block without creating a pending advisory', async () => {
+  it('maps a visible child close to a no-send block disposition (consumer, reused on Stop)', async () => {
     const projectRoot = '/test/pe2-1-close';
-    primeTaskBreakdownSession(store, projectRoot);
     const { request, preparation } = await validPreparation(projectRoot);
     const onHookOutput = vi.fn();
     const consumer = createPromptEnhancementCliHostConsumerV1({
@@ -3180,19 +3181,10 @@ describe('PE2.1 - hook-mode PE host consumer wiring', () => {
       onHookOutput,
     });
 
-    const prepare = vi.fn().mockResolvedValue(preparation.result);
-    const outcome = await runAuto(
-      makeInput({ projectRoot }),
-      store,
-      makeMockOpenAI(FIRE_YES_RESPONSE, 'must not persist'),
-      { request, prepare },
-      consumer,
-    );
-
-    expect(outcome).toEqual({ outcome: 'no_action' });
-    expect(prepare).toHaveBeenCalledTimes(1);
+    // The popup no longer runs on UserPromptSubmit (B-i); this exercises the consumer directly —
+    // the same popup+delivery unit the Stop hook reuses. A visible close maps to a no-send block.
+    await expect(consumer(preparation, request)).resolves.toBe('handled_no_send');
     expect(onHookOutput).toHaveBeenCalledWith(expect.objectContaining({ decision: 'block', suppressOriginalPrompt: true }));
-    expect(getPendingAdvisory(store, projectRoot)).toBeNull();
   });
 
   it('keeps a pre-visible Linux renderer failure on original-prompt pass-through', async () => {

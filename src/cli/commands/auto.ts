@@ -33,6 +33,7 @@ import { logger, initLogger } from '../../logger.js';
 import type { LogLevel } from '../../logger.js';
 import { writeHookStats } from '../../store/hook-stats.js';
 import { upsertPendingAdvisory } from '../../store/pending-advisories.js';
+import { upsertPendingPromptEnhancement } from '../../store/pending-prompt-enhancements.js';
 import { insertSkippedSession } from '../../store/skipped-sessions.js';
 import { recordActivity } from '../../store/feedback-cadence.js';
 import { writeTelemetry } from '../../telemetry/index.js';
@@ -587,7 +588,6 @@ export async function runAuto(
   store:   Store,
   openai?: OpenAI,
   promptEnhancement?: AutoPromptEnhancementIntegration,
-  promptEnhancementConsumer?: AutoPromptEnhancementConsumerV1,
 ): Promise<AutoOutcome> {
   // ── -1. Advisory-injected prompt guard ──────────────────────────────────────
   // When the stop hook injects an advisory option as a new Claude turn (block decision),
@@ -921,15 +921,28 @@ export async function runAuto(
   };
   const preparation = await preparePromptEnhancementForAuto(peIntegration);
   await peIntegration.onResult?.(preparation);
-  const consumerDisposition = await promptEnhancementConsumer?.(preparation, peIntegration.request);
   logger.debug('prompt_enhancement_prepare_boundary', {
     disposition: preparation.disposition,
     safeFallback: preparation.safeFallback,
     reasonCode: 'reasonCode' in preparation ? preparation.reasonCode : undefined,
   });
-  if (consumerDisposition === 'handled_no_send') {
-    logger.info('pipeline_outcome', { outcome: 'no_action', reason: 'prompt_enhancement_closed_no_send' });
-    return { outcome: 'no_action' };
+  // Owner decision B-i (2026-08-04): the PE popup is deferred to the Stop hook. Do NOT show a
+  // popup on UserPromptSubmit — the prompt passes through raw. When a real (non-fallback) result
+  // exists, persist it so the Stop hook can show the PE popup after Claude responds.
+  if (!preparation.safeFallback && preparation.result) {
+    upsertPendingPromptEnhancement(store, {
+      projectRoot: input.projectRoot,
+      sessionId:   mgr.current.sessionId,
+      promptCount: mgr.current.promptCount,
+      request:     peIntegration.request,
+      result:      preparation.result,
+    });
+    logger.debug('pending_prompt_enhancement_stored', {
+      projectRoot: input.projectRoot,
+      sessionId:   mgr.current.sessionId,
+      promptCount: mgr.current.promptCount,
+      disposition: preparation.disposition,
+    });
   }
 
   // H1.3 keeps legacy Decision Session bookkeeping after preparation; PE preparation
@@ -1037,7 +1050,6 @@ export function registerAutoCommand(program: import('commander').Command): void 
       let promptText = promptArg?.trim();
       let currentAgentMode: string | undefined;
       let transcriptPath: string | undefined;
-      let hookMode = false;
 
       if (!promptText) {
         // Hook mode: read JSON payload from stdin (Claude Code UserPromptSubmit)
@@ -1047,7 +1059,6 @@ export function registerAutoCommand(program: import('commander').Command): void 
           promptText       = parsed.promptText;
           currentAgentMode = parsed.currentAgentMode;
           transcriptPath   = parsed.transcriptPath;
-          hookMode         = parsed.promptText !== undefined;
         }
       }
 
@@ -1091,27 +1102,18 @@ export function registerAutoCommand(program: import('commander').Command): void 
       }
 
       try {
-        let hookOutput: ClaudeUserPromptSubmitHookOutputV1 | undefined;
-        const promptEnhancementConsumer = hookMode
-          ? createPromptEnhancementCliHostConsumerV1({
-              store,
-              dbPath: opts.db,
-              cliEntryPath: process.argv[1] ?? '',
-              onHookOutput: (output) => { hookOutput = output; },
-            })
-          : undefined;
+        // Owner decision B-i (2026-08-04): the PE popup is deferred to the Stop hook, so the
+        // UserPromptSubmit hook never shows a popup and never emits a hook output — the prompt
+        // always passes through raw. runAuto prepares + persists the pending PE; the Stop hook
+        // (`nexpath stop`) reads it, shows the popup, and injects the enhanced prompt as a new turn.
         const result = await runAuto(
           { promptText, projectRoot: opts.project, currentAgentMode, transcriptPath },
           store,
-          undefined,
-          undefined,
-          promptEnhancementConsumer,
         );
 
         writeHookStats(opts.project, result.outcome);
         void triggerOpportunisticSync(store).catch(() => {});
-        if (hookOutput) process.stdout.write(JSON.stringify(hookOutput) + '\n');
-        // No PE choice output means normal original-prompt pass-through.
+        // No popup on UserPromptSubmit → always normal original-prompt pass-through.
       } finally {
         closeStore(store);
       }
