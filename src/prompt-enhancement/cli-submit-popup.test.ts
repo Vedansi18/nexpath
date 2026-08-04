@@ -27,7 +27,12 @@ import {
   type PromptEnhancementCliPopupInteractionV1,
   type PromptEnhancementCliPopupViewV1,
 } from './cli-submit-popup.js';
-import type { PromptEnhancementEditorBufferV1 } from './multiline-editor.js';
+import {
+  buildPromptEnhancementMultilineEditorStateV1,
+  promptEnhancementCursorVisualPositionV1,
+  promptEnhancementKeepFieldCursorVisibleV1,
+  type PromptEnhancementEditorBufferV1,
+} from './multiline-editor.js';
 import {
   buildPromptEnhancementPopupRenderModelV1,
   type PromptEnhancementPopupRenderModelV1,
@@ -463,6 +468,49 @@ describe('UI-1 action-row model', () => {
     // "Use enhanced prompt" label/bullet row.
     expect(lines[caretOut.row - 1]).toContain('line-two');
     expect(lines[caretOut.row - 1]).not.toContain('Use enhanced prompt');
+  });
+
+  it('opens the enhanced body with the window at the top and the end cursor off-window (renderer hides it, no stray cursor)', () => {
+    const longBody = Array.from({ length: 60 }, (_, i) => `line-${i}`).join('\n');
+    const state = buildPromptEnhancementCliInteractionStateV1({
+      model: fakeRenderModel(),
+      editedBodyText: longBody,
+      additionalDetailsText: '',
+      fieldWidth: 80,
+      viewportRows: 8,
+    });
+    const body = state.editor.buffers.enhanced_body;
+    // Window at the top on open (the prompt is readable from its start).
+    expect(body.scrollVisualRow).toBe(0);
+    // Cursor at end-of-text so typing appends.
+    expect(body.cursor).toBe(longBody.length);
+    // The end cursor sits below the 8-row top window → the render caret guard hides it rather
+    // than stranding it at the screen bottom (the stray-cursor bug).
+    const pos = promptEnhancementCursorVisualPositionV1(body, 80);
+    expect(pos.row - body.scrollVisualRow).toBeGreaterThanOrEqual(8);
+  });
+
+  it('syncs a focused field so a cursor-at-end long buffer keeps its caret inside the viewport (no stray bottom cursor)', () => {
+    const longBody = Array.from({ length: 60 }, (_, i) => `line-${i}`).join('\n');
+    const editor = buildPromptEnhancementMultilineEditorStateV1({
+      identity: { enhancementId: 'e', currentBodyId: 'b', bodyRevision: 1, validationDecisionId: 'v' },
+      enhancedBodyText: longBody,
+      additionalDetailsText: '',
+      fieldWidth: 80,
+      viewportRows: 8,
+      focusedField: 'enhanced_body',
+      editable: true,
+    });
+    const raw = editor.buffers.enhanced_body; // buffer factory seeds the cursor at end-of-text, scroll 0
+    // Before sync the caret is far below an 8-row window — this is the stray-cursor cause.
+    const before = promptEnhancementCursorVisualPositionV1(raw, 80);
+    expect(before.row - raw.scrollVisualRow).toBeGreaterThanOrEqual(8);
+    // After sync the caret is inside the viewport [0, 8).
+    const synced = promptEnhancementKeepFieldCursorVisibleV1(raw, 80, 8);
+    const after = promptEnhancementCursorVisualPositionV1(synced, 80);
+    const visualRow = after.row - synced.scrollVisualRow;
+    expect(visualRow).toBeGreaterThanOrEqual(0);
+    expect(visualRow).toBeLessThan(8);
   });
 
   it('marks the focused editable row with a filled bullet and shows its help', () => {

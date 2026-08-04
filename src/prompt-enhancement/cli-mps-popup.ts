@@ -17,7 +17,7 @@ import type { PromptEnhancementMpsContinuationPopupModelV1 } from './b3-continua
 // step and is intentionally not created here.
 // ---------------------------------------------------------------------------
 
-export const PROMPT_ENHANCEMENT_MPS_CLI_FOOTER_V1 = 'Enter send · Esc actions · Ctrl+J new line' as const;
+export const PROMPT_ENHANCEMENT_MPS_CLI_FOOTER_V1 = 'Enter send · Esc actions' as const;
 export const PROMPT_ENHANCEMENT_MPS_CLI_SEQUENCE_PLAN_LABEL_V1 = 'Sequence plan' as const;
 export const PROMPT_ENHANCEMENT_MPS_CLI_ADDITIONAL_DETAILS_LABEL_V1 = 'Additional details' as const;
 /** Editing keys shown under a focused editable field (owner request), matching the PE popup. */

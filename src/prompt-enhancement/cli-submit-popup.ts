@@ -35,6 +35,7 @@ import {
   buildPromptEnhancementVisualLineMapV1,
   decodePromptEnhancementEditorInputV1,
   promptEnhancementCursorVisualPositionV1,
+  promptEnhancementKeepFieldCursorVisibleV1,
   reducePromptEnhancementMultilineEditorV1,
   resizePromptEnhancementMultilineEditorV1,
   type PromptEnhancementEditorBufferV1,
@@ -421,7 +422,7 @@ export function buildClaudeUserPromptSubmitHookOutputV1(
 // renderer is UI-2 (interaction wiring); this phase delivers the renderer only.
 // ---------------------------------------------------------------------------
 
-export const PROMPT_ENHANCEMENT_CLI_FOOTER_V1 = '↑↓ move · Esc cancel · Ctrl+J new line' as const;
+export const PROMPT_ENHANCEMENT_CLI_FOOTER_V1 = '↑↓ move · Esc cancel' as const;
 // Light-gray action hints shown under each editable heading (placeholder copy pending the screenshot).
 const PROMPT_ENHANCEMENT_CLI_BODY_HINT_V1 = 'Enter sends this prompt' as const;
 const PROMPT_ENHANCEMENT_CLI_DETAILS_HINT_V1 = 'Enter applies these details · unapplied details are not sent' as const;
@@ -791,6 +792,10 @@ export function buildPromptEnhancementCliInteractionStateV1(input: {
     focusedField: editableFieldForRow(rows[0]),
     editable: input.model.body.editable,
   });
+  // The enhanced body opens with the cursor at end-of-text (so typing appends) and the window
+  // at the top (scrollVisualRow 0). On open the cursor is therefore off the top window and the
+  // renderer HIDES it (never strands it at the screen bottom); it appears in view as soon as the
+  // user scrolls or edits. See render()'s caret guard.
   return { focusIndex: 0, helpExpanded: false, editor };
 }
 
@@ -900,7 +905,7 @@ export interface PromptEnhancementCliFeedbackStateV1 {
 }
 
 const PROMPT_ENHANCEMENT_CLI_FEEDBACK_ROWS_V1 = ['Not relevant enough', 'Too much or too long', 'Other'] as const;
-const PROMPT_ENHANCEMENT_CLI_FEEDBACK_FOOTER_V1 = 'Enter submit · Esc skip · Ctrl+J new line' as const;
+const PROMPT_ENHANCEMENT_CLI_FEEDBACK_FOOTER_V1 = 'Enter submit · Esc skip' as const;
 
 /** Other feedback uses the editor's additional_details field; focus starts on the first reason. */
 function feedbackEditorFieldForFocus(focusIndex: number): PromptEnhancementEditorFieldV1 | null {
@@ -1096,28 +1101,42 @@ function createPromptEnhancementCliPopupInteractionV1(onFirstRender?: () => void
     const editorWidth = current.editor.fieldWidth;
     const bodyRows = current.editor.viewportRows;
     const detailsRows = Math.min(current.editor.viewportRows, 5);
-    // Display only the visible viewport of each editable field so the frame fits
-    // the terminal and redraws in place (no repeat on scroll). The full text stays
-    // in current.editor for editing/apply/send. Both fields follow the editor's own
-    // scroll position (maintained by keepCursorVisible) so Ctrl+Up/Ctrl+Down scroll
-    // the viewport to reveal the whole prompt/details.
-    const bodyDisplay = windowPromptEnhancementFieldForDisplayV1(current.editor.buffers.enhanced_body, editorWidth, bodyRows);
-    const detailsDisplay = current.editor.buffers.additional_details.text
-      ? windowPromptEnhancementFieldForDisplayV1(current.editor.buffers.additional_details, editorWidth, detailsRows)
-      : '';
-    // Determine the focused editable field (if any) and its caret's window-relative visual
-    // position, so the renderer can record the caret's exact screen line as it builds the frame.
+    // Which editable row (if any) has focus — computed first so we can sync that field's
+    // scroll to its cursor BEFORE the field is windowed and the caret placed.
     const rows = buildPromptEnhancementCliActionRowsV1(view.model, { refinement: view.refinement });
     const focusedRow = rows[current.focusIndex];
     const focusedField: PromptEnhancementEditorFieldV1 | null =
       focusedRow?.kind === 'editor_heading' ? 'enhanced_body'
         : focusedRow?.kind === 'additional_details' ? 'additional_details'
           : null;
+    // The body's scroll is already kept consistent with its viewport by the editor reducer
+    // (keepCursorVisible on every edit/move, using the same viewportRows the display windows to),
+    // so it is rendered from its own scroll — this leaves the window at the TOP on open while the
+    // off-window end cursor is simply hidden by the caret guard below (never stranded). The details
+    // field's display is capped at 5 rows (< the reducer's viewportRows), so sync it here to that
+    // cap when focused, or its caret could fall outside the shown lines.
+    const bodyBuffer = current.editor.buffers.enhanced_body;
+    const detailsBuffer = focusedField === 'additional_details'
+      ? promptEnhancementKeepFieldCursorVisibleV1(current.editor.buffers.additional_details, editorWidth, detailsRows)
+      : current.editor.buffers.additional_details;
+    // Display only the visible viewport of each editable field so the frame fits the terminal
+    // and redraws in place. The full text stays in current.editor for editing/apply/send.
+    const bodyDisplay = windowPromptEnhancementFieldForDisplayV1(bodyBuffer, editorWidth, bodyRows);
+    const detailsDisplay = detailsBuffer.text
+      ? windowPromptEnhancementFieldForDisplayV1(detailsBuffer, editorWidth, detailsRows)
+      : '';
+    // Caret row is window-relative, from the SAME synced buffer used for the display. If it
+    // still falls outside the shown lines, leave the caret unset so the cursor is hidden rather
+    // than placed on a wrong row.
     let caret: PromptEnhancementCliFrameStateV1['caret'];
     if (focusedField) {
-      const buffer = current.editor.buffers[focusedField];
+      const buffer = focusedField === 'enhanced_body' ? bodyBuffer : detailsBuffer;
+      const shownLines = (focusedField === 'enhanced_body' ? bodyDisplay : detailsDisplay).split('\n').length;
       const pos = promptEnhancementCursorVisualPositionV1(buffer, editorWidth);
-      caret = { field: focusedField, visualRow: Math.max(0, pos.row - buffer.scrollVisualRow), visualColumn: pos.column };
+      const visualRow = pos.row - buffer.scrollVisualRow;
+      if (visualRow >= 0 && visualRow < shownLines) {
+        caret = { field: focusedField, visualRow, visualColumn: pos.column };
+      }
     }
     const caretOut = { row: -1, col: -1 };
     const frame = renderPromptEnhancementPopupFrameV1(
@@ -1126,12 +1145,11 @@ function createPromptEnhancementCliPopupInteractionV1(onFirstRender?: () => void
     );
     paint(frame);
 
-    // Cursor: shown at the real caret only on an editable field (the renderer filled caretOut at the
-    // exact built line — no fragile re-counting); hidden otherwise so no stray cursor sits on a
-    // footer/action row.
-    if (focusedField && caretOut.row > 0) {
-      const cursorRow = Math.min(caretOut.row, Math.max(1, (output.rows ?? 24) - 1));
-      output.write(`${ESC}[${cursorRow};${caretOut.col}H${SHOW_CURSOR}`);
+    // Cursor: shown only where the renderer recorded a real caret inside the focused field's
+    // rendered block (caretOut > 0) AND that row is on-screen. Never clamp to the screen bottom
+    // — an off-window caret leaves the cursor hidden, not stranded on a footer row.
+    if (focusedField && caret && caretOut.row > 0 && caretOut.row <= Math.max(1, (output.rows ?? 24) - 1)) {
+      output.write(`${ESC}[${caretOut.row};${caretOut.col}H${SHOW_CURSOR}`);
     } else {
       output.write(HIDE_CURSOR);
     }

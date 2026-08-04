@@ -89,7 +89,7 @@ describe('UI-6 MPS first-popup frame renderer (§3.3)', () => {
     // Title is the first line and the footer is the last line, verbatim.
     const frameLines = frame.split('\n');
     expect(frameLines[0]).toBe('◆ NEXPATH CLI · Multi-prompt sequence');
-    expect(frameLines[frameLines.length - 1]).toBe('Enter send · Esc actions · Ctrl+J new line');
+    expect(frameLines[frameLines.length - 1]).toBe('Enter send · Esc actions');
     // Body precedes Additional details precedes Cancel precedes Sequence plan.
     expect(frame.indexOf('Use enhanced sequence prompt')).toBeLessThan(frame.indexOf('Additional details'));
     expect(frame.indexOf('Additional details')).toBeLessThan(frame.indexOf('Cancel (remaining'));
@@ -234,7 +234,7 @@ describe('UI-7 MPS continuation-popup frame renderer (§3.4)', () => {
     expect(frame).toContain(PROMPT_ENHANCEMENT_MPS_CLI_FOOTER_V1);
     const frameLines = frame.split('\n');
     expect(frameLines[0]).toBe('◆ NEXPATH CLI · Multi-prompt sequence');
-    expect(frameLines[frameLines.length - 1]).toBe('Enter send · Esc actions · Ctrl+J new line');
+    expect(frameLines[frameLines.length - 1]).toBe('Enter send · Esc actions');
     // Body → Additional details → interruption → Cancel.
     expect(frame.indexOf('Use enhanced sequence prompt')).toBeLessThan(frame.indexOf('Additional details'));
     expect(frame.indexOf('Additional details')).toBeLessThan(frame.indexOf('I need to do something else first'));
