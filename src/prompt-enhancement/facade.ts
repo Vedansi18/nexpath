@@ -1,0 +1,485 @@
+import {
+  PROMPT_ENHANCEMENT_CONTRACT_VERSION,
+  validatePromptEnhancementPrepareRequestV1,
+  type PromptEnhancementActionFacadeV1,
+  type PromptEnhancementActionRequestV1,
+  type PromptEnhancementCurrentBodyV1,
+  type PromptEnhancementDeliveryMetadataV1,
+  type PromptEnhancementGeneratedOriginMetadataV1,
+  type PromptEnhancementPrepareFacadeV1,
+  type PromptEnhancementPrepareRequestV1,
+  type PromptEnhancementPrepareResultV1,
+  type PromptEnhancementPublicDiagnosticV1,
+  type PromptEnhancementPublicTrustCueV1,
+  type PromptEnhancementSectionFeedbackViewV1,
+  type PromptEnhancementUiViewPayloadV1,
+  type PromptEnhancementWhyHelpV1,
+} from './contracts.js';
+import { composePromptEnhancementBody, type PromptEnhancementComposeResult } from './compose-enhancement.js';
+import { planPromptEnhancementSections } from './templates/section-plan.js';
+import { routePromptEnhancement, type PromptEnhancementCapabilityId } from './routing-taxonomy.js';
+import { buildPromptEnhancementPinchLabelV1, buildPromptEnhancementWhyHelpV1 } from './pe-header-copy.js';
+import {
+  validatePromptEnhancementSafety,
+  type PromptEnhancementSafetyValidationResult,
+} from './safety-sendability.js';
+
+/**
+ * The single PE content-engine entry point.
+ *
+ * This is intentionally a small orchestration layer. Routing, section planning,
+ * composition, and safety remain independently testable modules; application
+ * code must call this facade rather than reaching into those modules directly.
+ */
+export const preparePromptEnhancement: PromptEnhancementPrepareFacadeV1 = async (request) => {
+  assertPrepareRequest(request);
+  return prepare(request);
+};
+
+/** Apply a bounded directional/details action against the current body contract. */
+export const applyPromptEnhancementAction: PromptEnhancementActionFacadeV1 = async (request) => {
+  assertPrepareRequest(request);
+  const base = await prepare(
+    request,
+    request.action.actionType === 'use_original' ? undefined : request.action.actionType,
+    request,
+  );
+  if (request.action.actionType === 'use_current_body') {
+    const editedBodyText = request.currentBodyBinding.editedBodyText;
+    const safety = validatePromptEnhancementSafety({
+      currentBody: base.currentBody,
+      editedBodyText,
+      actionType: 'use_current_body',
+      callVisibilityMode: base.callAndVisibilityMetadata.callVisibilityMode,
+    });
+    return rebuildWithEditedBodySafety(request, base, editedBodyText, safety);
+  }
+  if (request.action.actionType !== 'use_original') return base;
+
+  const originalSafety = validatePromptEnhancementSafety({
+    currentBody: base.currentBody,
+    editedBodyText: request.currentBodyBinding.editedBodyText,
+    actionType: 'use_original',
+    callVisibilityMode: 'fallback_no_llm',
+  });
+  return rebuildWithSafety(base, originalSafety, 'fallback_to_original');
+};
+
+async function prepare(
+  request: PromptEnhancementPrepareRequestV1,
+  action?: PromptEnhancementActionRequestV1['action']['actionType'],
+  actionRequest?: PromptEnhancementActionRequestV1,
+): Promise<PromptEnhancementPrepareResultV1> {
+  const enhancementId = `pe:${request.requestId}`;
+  const route = routePromptEnhancement({
+    routeDecisionId: `${enhancementId}:route`,
+    promptText: request.sourcePrompt.text,
+    currentStage: request.reviewMomentContext.triggerProvenance.currentStage,
+    prevStage: request.reviewMomentContext.triggerProvenance.prevStage,
+    triggerKind: request.reviewMomentContext.triggerProvenance.triggerKind,
+    firedKey: request.reviewMomentContext.triggerProvenance.firedKey,
+    effectiveFiredSource: request.reviewMomentContext.triggerProvenance.effectiveFiredSource,
+    selectedQualifyingAbsence: request.reviewMomentContext.triggerProvenance.selectedQualifyingAbsence,
+    absenceGateReason: request.reviewMomentContext.triggerProvenance.absenceGateReason,
+    classifierState: request.reviewMomentContext.triggerProvenance.classifierState,
+    degradedNoActionState: request.reviewMomentContext.triggerProvenance.degradedNoActionState,
+    sourceSnapshot: request.sourceSignals,
+    sourceFactRefs: request.sourceSignals.sourceRefs.map((source) => source.sourceRefId),
+    contentTemplateFactRefs: request.sourceSignals.contentTemplateRecordFactRefs,
+    recentPromptEvidenceRefs: request.reviewMomentContext.recentPromptMetadataRefs,
+    memoryFeedbackRefs: request.userPreferenceContext.scopedFeedbackEvidenceRefs,
+    permissionMode: request.sourceSignals.permissionMode,
+    transcriptPathState: request.sourceSignals.transcriptPathState,
+    streamBOutputRefs: request.sourceSignals.streamBOutputs,
+    paramEventChannels: request.sourceSignals.paramEventChannels,
+    runtimeEnvFactRefs: request.sourceSignals.rightGoodWorkStyleEnvRuntimeRefs,
+    rightGoodWorkStyleRefs: request.sourceSignals.rightGoodWorkStyleEnvRuntimeRefs,
+    stage2SelectionState: request.reviewMomentContext.triggerProvenance.triggerKind === 'absence'
+      ? 'selected'
+      : 'supplementary_present',
+    generatedOriginState: request.sourcePrompt.origin === 'pe_generated_echo'
+      ? 'pe_generated'
+      : 'ordinary_user_prompt',
+    oldDecisionSessionPayloadPresent: false,
+  });
+
+  const planning = planPromptEnhancementSections({
+    routeResult: route,
+    sourceRefs: request.sourceSignals.sourceRefs,
+  });
+  const composed = composePromptEnhancementBody({
+    enhancementId,
+    originalPromptText: request.sourcePrompt.text,
+    sectionPlanningResult: planning,
+    action: action === 'use_original' || action === 'feedback' || action === 'close' || action === 'use_current_body'
+      ? undefined
+      : action,
+    additionalDetailsText: actionRequest?.userPreferenceContext.additionalDetails?.text,
+    editedBodyText: actionRequest?.currentBodyBinding.editedBodyText,
+    acceptedAdditionalDetailsText: actionRequest?.userPreferenceContext.additionalDetails?.text,
+    priorBodyId: actionRequest?.currentBodyBinding.currentBodyId,
+    priorBodyRevision: actionRequest?.currentBodyBinding.bodyRevision,
+    timestampMs: request.sourcePrompt.capturedAt,
+  });
+  const safety = validatePromptEnhancementSafety({
+    currentBody: composed.currentBody,
+    actionType: route.noPopup ? 'use_original' : undefined,
+    callVisibilityMode: composed.callVisibilityMode,
+    optionalCallAvailabilityState: composed.callVisibilityMode === 'deterministic' ? 'deterministic_only' : undefined,
+  });
+  return buildResult(request, enhancementId, route, planning, composed, safety);
+}
+
+function buildResult(
+  request: PromptEnhancementPrepareRequestV1,
+  enhancementId: string,
+  route: ReturnType<typeof routePromptEnhancement>,
+  planning: ReturnType<typeof planPromptEnhancementSections>,
+  composed: PromptEnhancementComposeResult,
+  safety: PromptEnhancementSafetyValidationResult,
+): PromptEnhancementPrepareResultV1 {
+  const currentBody: PromptEnhancementCurrentBodyV1 = {
+    ...composed.currentBody,
+    generatedSafeStatus: safety.generatedSafeStatus,
+  };
+  const disposition = dispositionFor(route.noPopup, currentBody, safety);
+  const diagnostics = diagnosticsFor(enhancementId, [...composed.diagnostics, ...safety.publicDiagnostics]);
+  const composerCallVisibility = composed.composerBoundary.inputContract.callVisibilityState;
+  const callAndVisibilityMetadata = {
+    ...composerCallVisibility,
+    callOwner: 'hiren_content_api' as const,
+    callTrigger: 'prepare' as const,
+    productValueDiscussionIsRuntimeLimiter: false as const,
+  };
+  const validationSummary = safety.safetySummary;
+  const generatedOrigin = buildGeneratedOrigin(request, enhancementId, currentBody);
+  const delivery = buildDelivery(request, safety, route.noPopup);
+  const trustCues = buildTrustCues(currentBody, composed.sourceGuidanceCoverage, safety);
+  // UI-9 / PE-AR-10: deterministic header copy — pinch label always (when a popup
+  // shows), why-help only when a safety/risk/sensitive-action reason exists.
+  const pinchLabel = route.noPopup
+    ? undefined
+    : buildPromptEnhancementPinchLabelV1({ familyId: route.familyId, capabilityOverlays: route.capabilityOverlays });
+  const whyHelp = route.noPopup
+    ? undefined
+    : buildPromptEnhancementWhyHelpV1({
+        capabilityOverlays: route.capabilityOverlays,
+        hasSensitiveAction: safety.sensitiveActionFindings.some((finding) => finding.requiresConfirmation),
+      });
+  const uiView: PromptEnhancementUiViewPayloadV1 = {
+    ...buildUiView(request, enhancementId, currentBody, composed, safety, trustCues, diagnostics, route.noPopup),
+    ...(pinchLabel ? { pinchLabel } : {}),
+    ...(whyHelp ? { whyHelp } : {}),
+  };
+
+  return {
+    schemaVersion: PROMPT_ENHANCEMENT_CONTRACT_VERSION,
+    enhancementId,
+    requestId: request.requestId,
+    projectRoot: request.projectRoot,
+    modelVersion: 'pe-ar10-deterministic-v1',
+    disposition,
+    validationDecisionId: safety.validationDecisionId,
+    currentBody,
+    availableActions: composed.availableActions,
+    sourceGuidanceCoverage: route.noPopup ? 'not_applicable' : composed.sourceGuidanceCoverage,
+    routingAndFeedbackDecision: {
+      state: route.noPopup ? 'suppress' : route.fallbackMode === 'planning_first' ? 'clarify' : 'show',
+      confidence: routeConfidence(route.routeConfidence),
+      reasonCodes: route.reasonCodes,
+      scopedPromptKindKey: route.primaryIntent,
+      priorFeedbackEvidenceRefs: request.userPreferenceContext.scopedFeedbackEvidenceRefs,
+      resetExpiryState: 'not_applicable',
+      selectedFamilyId: route.familyId,
+      selectedTagIds: route.secondaryIntentTags,
+      selectedLevelState: request.userPreferenceContext.levelState,
+      selectedSectionPivotIds: planning.sectionPlans.map((section) => section.sectionId),
+    },
+    routeDecision: route.contractDecision,
+    bodyPlan: planning.bodyPlan,
+    composerBoundary: composed.composerBoundary,
+    validationSummary,
+    safetySummary: validationSummary,
+    validationGraph: safety.validationGraph,
+    callAndVisibilityMetadata,
+    uiView,
+    generatedOrigin,
+    delivery,
+    ownership: {
+      owners: ['hiren_content_api', 'bhavnesh_ui_app'],
+      sourceSnapshotVersion: PROMPT_ENHANCEMENT_CONTRACT_VERSION,
+      fixtureIds: [...route.contractDecision.registryLinkedFixtureIds],
+      launchBoundaryRecheckRef: 'launch_boundary_recheck_pending',
+      excludesPrivatePlanningLeakage: true,
+    },
+    diagnostics,
+  };
+}
+
+/**
+ * UI-9: recompute the header why-help against a rebuilt safety result. The route
+ * capability overlays are stable across body edits (they come from the original
+ * prompt intent), so only the sensitive-action reason can change on an edit; the
+ * pinch label stays as-is because it is keyed on the unchanged route family.
+ */
+function rebuildWhyHelpForSafety(
+  result: PromptEnhancementPrepareResultV1,
+  safety: PromptEnhancementSafetyValidationResult,
+): PromptEnhancementWhyHelpV1 | undefined {
+  return buildPromptEnhancementWhyHelpV1({
+    capabilityOverlays: result.routeDecision.capabilityOverlays as readonly PromptEnhancementCapabilityId[],
+    hasSensitiveAction: safety.sensitiveActionFindings.some((finding) => finding.requiresConfirmation),
+  });
+}
+
+function rebuildWithEditedBodySafety(
+  request: PromptEnhancementActionRequestV1,
+  result: PromptEnhancementPrepareResultV1,
+  editedBodyText: string,
+  safety: PromptEnhancementSafetyValidationResult,
+): PromptEnhancementPrepareResultV1 {
+  const currentBody: PromptEnhancementCurrentBodyV1 = {
+    ...result.currentBody,
+    renderedPromptBody: editedBodyText,
+    text: editedBodyText,
+    generatedOriginState: 'pe_user_edited_body',
+    generatedSafeStatus: safety.generatedSafeStatus,
+    userDirtyState: 'dirty_user_edited',
+  };
+  const publicDiagnostics = diagnosticsFor(result.enhancementId, safety.publicDiagnostics);
+  const { whyHelp: _priorWhyHelp, ...priorUiView } = result.uiView;
+  const whyHelp = rebuildWhyHelpForSafety(result, safety);
+  return {
+    ...result,
+    disposition: dispositionFor(false, currentBody, safety),
+    validationDecisionId: safety.validationDecisionId,
+    currentBody,
+    validationSummary: safety.safetySummary,
+    safetySummary: safety.safetySummary,
+    validationGraph: safety.validationGraph,
+    generatedOrigin: buildGeneratedOrigin(request, result.enhancementId, currentBody),
+    delivery: buildDelivery(request, safety, false),
+    uiView: {
+      ...priorUiView,
+      ...(whyHelp ? { whyHelp } : {}),
+      body: {
+        ...priorUiView.body,
+        text: editedBodyText,
+        generatedOriginState: 'pe_user_edited_body',
+        dirtyState: 'dirty_user_edited',
+        sendPolicy: safety.sendPolicy,
+        fallbackMode: safety.fallbackMode,
+      },
+      diagnostics: [...priorUiView.diagnostics, ...publicDiagnostics],
+    },
+    diagnostics: [...result.diagnostics, ...publicDiagnostics],
+  };
+}
+
+function rebuildWithSafety(
+  result: PromptEnhancementPrepareResultV1,
+  safety: PromptEnhancementSafetyValidationResult,
+  disposition: PromptEnhancementPrepareResultV1['disposition'],
+): PromptEnhancementPrepareResultV1 {
+  const currentBody = { ...result.currentBody, generatedSafeStatus: safety.generatedSafeStatus };
+  const { whyHelp: _priorWhyHelp, ...priorUiView } = result.uiView;
+  const whyHelp = rebuildWhyHelpForSafety(result, safety);
+  return {
+    ...result,
+    disposition,
+    validationDecisionId: safety.validationDecisionId,
+    currentBody,
+    validationSummary: safety.safetySummary,
+    safetySummary: safety.safetySummary,
+    validationGraph: safety.validationGraph,
+    delivery: { ...result.delivery, sendPolicy: safety.sendPolicy },
+    uiView: {
+      ...priorUiView,
+      ...(whyHelp ? { whyHelp } : {}),
+      body: { ...priorUiView.body, text: currentBody.text, sendPolicy: safety.sendPolicy },
+    },
+  };
+}
+
+function assertPrepareRequest(request: unknown): asserts request is PromptEnhancementPrepareRequestV1 {
+  const validation = validatePromptEnhancementPrepareRequestV1(request);
+  if (!validation.ok) throw new Error(`invalid_prompt_enhancement_request:${validation.reasonCodes.join(',')}`);
+}
+
+function dispositionFor(
+  noPopup: boolean,
+  body: PromptEnhancementCurrentBodyV1,
+  safety: PromptEnhancementSafetyValidationResult,
+): PromptEnhancementPrepareResultV1['disposition'] {
+  if (noPopup) return 'no_popup_not_applicable';
+  if (safety.sendPolicy === 'no_send' || safety.generatedSafeStatus === 'invalid_non_sendable') return 'blocked_no_send';
+  if (safety.sendPolicy === 'send_original' || body.generatedOriginState === 'user_original') return 'fallback_to_original';
+  return 'show_current_body';
+}
+
+function routeConfidence(value: ReturnType<typeof routePromptEnhancement>['routeConfidence']) {
+  if (value === 'strong') return 'high' as const;
+  if (value === 'partial') return 'medium' as const;
+  if (value === 'missing') return 'none' as const;
+  return 'low' as const;
+}
+
+function buildGeneratedOrigin(
+  request: PromptEnhancementPrepareRequestV1,
+  enhancementId: string,
+  body: PromptEnhancementCurrentBodyV1,
+): PromptEnhancementGeneratedOriginMetadataV1 {
+  return {
+    generatedOriginId: `${enhancementId}:origin:${body.currentBodyId}:${body.bodyRevision}`,
+    generatedOriginState: body.generatedOriginState,
+    enhancementId,
+    bodyId: body.currentBodyId,
+    bodyRevision: body.bodyRevision,
+    deliveryChannel: request.hostSurface,
+    sourceUseIds: body.sourceAttribution.map((source) => source.sourceRefId),
+    echoRecursionGuard: {
+      bodyFingerprintRef: `${body.currentBodyId}:${body.bodyRevision}`,
+      sourcePromptEchoState: request.sourcePrompt.origin === 'pe_generated_echo' ? 'pe_generated_echo' : 'not_echo',
+      lastInjectedPromptIsAuthority: false,
+    },
+    learningEligibility: {
+      promptHistory: false,
+      profile: false,
+      stage: false,
+      language: false,
+      memory: false,
+      telemetry: false,
+      sourceUseTracking: body.sourceAttribution.length > 0,
+    },
+  };
+}
+
+function buildDelivery(
+  request: PromptEnhancementPrepareRequestV1,
+  safety: PromptEnhancementSafetyValidationResult,
+  noPopup: boolean,
+): PromptEnhancementDeliveryMetadataV1 {
+  const stopBridge = request.hostSurface === 'cli_stop_bridge';
+  return {
+    deliveryChannel: request.hostSurface,
+    sendPolicy: noPopup ? 'no_popup' : safety.sendPolicy,
+    stopReasonCarriesTextOnly: stopBridge,
+    rawTransportIsSemanticAuthority: false,
+    hostCapabilityState: stopBridge ? 'stop_bridge_only' : 'unsupported',
+    extensionPayloadState: request.hostSurface === 'extension_bridge' ? 'typed_payload_required' : 'not_applicable',
+    hostCapabilityEvidenceRefs: request.sourceSignals.deliveryGateRefs,
+    exposureAcknowledgementState: noPopup ? 'not_shown' : 'not_shown',
+  };
+}
+
+function buildTrustCues(
+  body: PromptEnhancementCurrentBodyV1,
+  sourceGuidanceCoverage: PromptEnhancementComposeResult['sourceGuidanceCoverage'],
+  safety: PromptEnhancementSafetyValidationResult,
+): readonly PromptEnhancementPublicTrustCueV1[] {
+  const cues: PromptEnhancementPublicTrustCueV1[] = [
+    { cueId: 'original-prompt', label: 'original_prompt', publicSafeText: 'Your original request remains visible.', sourceRefIds: [], rawPrivateDataExcluded: true },
+    { cueId: 'generated-origin', label: 'generated_source_state', publicSafeText: body.generatedOriginState === 'pe_generated_body' ? 'This body was prepared by Nexpath.' : 'The original request is preserved.', sourceRefIds: [], rawPrivateDataExcluded: true },
+    { cueId: 'safety-state', label: 'safety_safeguard', publicSafeText: safety.safetySummary.noAutomaticSend ? 'Nexpath does not send automatically.' : 'Review the supplied send policy before continuing.', sourceRefIds: [], rawPrivateDataExcluded: true },
+    { cueId: 'source-guidance', label: sourceGuidanceCoverage === 'covered' ? 'source_signal_guidance' : 'fallback_or_no_popup', publicSafeText: sourceGuidanceCoverage === 'covered' ? 'Grounded guidance is attached.' : 'No generated guidance was safely produced.', sourceRefIds: [], rawPrivateDataExcluded: true },
+  ];
+  return cues;
+}
+
+function diagnosticsFor(
+  enhancementId: string,
+  diagnostics: readonly { category: PromptEnhancementPublicDiagnosticV1['category']; reasonCode: string }[],
+): readonly PromptEnhancementPublicDiagnosticV1[] {
+  return diagnostics.map((diagnostic, index) => ({
+    diagnosticId: `${enhancementId}:diagnostic:${index + 1}`,
+    category: diagnostic.category,
+    publicSafeText: diagnostic.reasonCode === 'additional_details_truncated_public_notice'
+      ? 'Content beyond 5,000 words was truncated before recomposition.'
+      : diagnostic.category === 'generated' ? 'Prepared prompt-enhancement body is available.' : 'Prompt-enhancement state was safely reduced.',
+    rawPromptExcluded: true,
+    rawGeneratedBodyExcluded: true,
+    rawSourceExcerptExcluded: true,
+    rawFeedbackExcluded: true,
+    privateIdsExcluded: true,
+    researchLabelsExcluded: true,
+    rawReasonValuesExcluded: true,
+  }));
+}
+
+function buildUiView(
+  request: PromptEnhancementPrepareRequestV1,
+  enhancementId: string,
+  body: PromptEnhancementCurrentBodyV1,
+  composed: PromptEnhancementComposeResult,
+  safety: PromptEnhancementSafetyValidationResult,
+  trustCues: readonly PromptEnhancementPublicTrustCueV1[],
+  diagnostics: readonly PromptEnhancementPublicDiagnosticV1[],
+  noPopup: boolean,
+): PromptEnhancementUiViewPayloadV1 {
+  const timestampMs = request.sourcePrompt.capturedAt ?? Date.now();
+  const sectionsForFeedback: readonly PromptEnhancementSectionFeedbackViewV1[] = body.sections.map((section) => ({
+    sectionId: section.sectionId,
+    sectionKind: section.sectionKind,
+    label: section.title,
+    templateType: section.templateType,
+    familyId: section.familyId,
+    primaryIntent: section.primaryIntent,
+    sourceKinds: [section.sourceKind],
+    sourceIds: section.sourceIds,
+    baselineSourceSignalSlot: section.baselineSourceSignalSlot,
+    sourceEvidenceStatus: section.sourceEvidenceStatus,
+    slotEvidenceStatus: section.slotEvidenceStatus,
+    requirementSourceStatus: section.requirementSourceStatus,
+    validationStatus: section.validationStatus,
+    safetyFlags: section.safetyFlags,
+    sensitivityFlags: section.sensitivityFlags,
+    publicSafeExplanationCategory: section.publicExplanationCategory,
+    fallbackMode: section.fallbackBehavior,
+    callVisibilityMode: section.callVisibilityMode,
+    spanRefs: section.spanRefs,
+    preciseFeedbackAllowed: section.feedbackSensitivity === 'typed_feedback_allowed',
+  }));
+  return {
+    viewPayloadVersion: PROMPT_ENHANCEMENT_CONTRACT_VERSION,
+    enhancementId,
+    body: {
+      text: body.text.replace(
+        ' [truncated_to_apply_details_5000_word_cap]',
+        '',
+      ),
+      currentBodyId: body.currentBodyId,
+      bodyRevision: body.bodyRevision,
+      generatedOriginState: body.generatedOriginState,
+      dirtyState: body.userDirtyState,
+      originalPromptPreservation: body.originalPromptPreservation,
+      levelState: request.userPreferenceContext.levelState,
+      actionLoadingState: 'idle',
+      sendPolicy: noPopup ? 'no_popup' : safety.sendPolicy,
+      fallbackMode: composed.fallbackMode,
+    },
+    sectionsForFeedback,
+    publicTrustCues: trustCues,
+    actions: composed.availableActions,
+    actionInputContract: {
+      actionInputVersion: PROMPT_ENHANCEMENT_CONTRACT_VERSION,
+      enhancementId,
+      currentBodyId: body.currentBodyId,
+      bodyRevision: body.bodyRevision,
+      actionId: `${body.currentBodyId}:action:use_current_body`,
+      hostSurface: request.hostSurface,
+      deliveryChannel: request.hostSurface,
+      rendererState: noPopup ? 'not_shown' : 'not_shown',
+      exposureAcknowledgementState: 'not_shown',
+      timestampMs,
+      realUserInitiated: false,
+      editedBodyTextPolicy: 'required_when_body_may_be_dirty',
+      sectionSpanEditEventsPolicy: 'only_when_span_map_exact',
+      additionalDetailsPolicy: 'bounded_recomposition_input_only',
+    },
+    diagnostics,
+    hidesVisibleSectionControls: true,
+    exposesPromptVariants: false,
+    exposesForegroundSafer: false,
+    textOnlyDeliveryIsAuthority: false,
+  };
+}
