@@ -8,6 +8,7 @@ import type {
   PromptEnhancementPrepareResultV1,
 } from '../prompt-enhancement/contracts.js';
 import { validatePromptEnhancementCliPopupResultV1 } from '../prompt-enhancement/cli-submit-popup.js';
+import { computePopupGeometry, detectScreenResolution, type PopupGeometry } from '../decision-session/screen-geometry.js';
 import type {
   PromptEnhancementPopupHostInputV1,
   PromptEnhancementPopupHostOutputV1,
@@ -85,6 +86,7 @@ export interface PromptEnhancementCliPopupHostLaunchDependenciesV1 {
   sleep: (milliseconds: number) => Promise<void>;
   now: () => number;
   cleanupTempDir: (path: string) => void;
+  detectPopupGeometry: () => Promise<PopupGeometry | undefined>;
 }
 
 function probeDirectTty(): boolean {
@@ -195,6 +197,8 @@ export function planPromptEnhancementLinuxTerminalLaunchV1(input: {
   resultFile: string;
   readinessFile: string;
   dbPath: string;
+  /** ~70% × 70% centred popup window geometry; omitted → the terminal's default size. */
+  geometry?: PopupGeometry;
 }): PromptEnhancementLinuxTerminalLaunchPlanV1 {
   const childArgs = [
     input.nodePath,
@@ -206,27 +210,38 @@ export function planPromptEnhancementLinuxTerminalLaunchV1(input: {
     '--db', input.dbPath,
   ];
 
+  // Size the popup window to the supplied ~70%×70% geometry, using each
+  // emulator's native flag (char cells for X11-style; pixels for kitty/foot).
+  // Reused from the decision-session screen-geometry pattern.
+  const g = input.geometry;
+  const cellGeom = g ? [`--geometry=${g.cols}x${g.rows}+${g.xPx}+${g.yPx}`] : [];
+  const xtermGeom = g ? ['-geometry', `${g.cols}x${g.rows}+${g.xPx}+${g.yPx}`] : [];
+  const kittyGeom = g ? ['-o', `initial_window_width=${g.widthPx}px`, '-o', `initial_window_height=${g.heightPx}px`, '-o', 'remember_window_size=no'] : [];
+  const alacrittyGeom = g ? ['--dimensions', `${g.cols}`, `${g.rows}`] : [];
+  const footGeom = g ? [`--window-size-pixels=${g.widthPx}x${g.heightPx}`] : [];
+  const T = PROMPT_ENHANCEMENT_POPUP_WINDOW_TITLE_V1;
+
   switch (input.terminalCommand) {
     case 'xdg-terminal-exec':
       return { command: input.terminalCommand, args: childArgs };
     case 'gnome-terminal':
-      return { command: input.terminalCommand, args: ['--wait', `--title=${PROMPT_ENHANCEMENT_POPUP_WINDOW_TITLE_V1}`, '--', ...childArgs] };
+      return { command: input.terminalCommand, args: ['--wait', `--title=${T}`, ...cellGeom, '--', ...childArgs] };
     case 'konsole':
-      return { command: input.terminalCommand, args: ['-p', `tabtitle=${PROMPT_ENHANCEMENT_POPUP_WINDOW_TITLE_V1}`, '-e', ...childArgs] };
+      return { command: input.terminalCommand, args: ['-p', `tabtitle=${T}`, '-e', ...childArgs] };
     case 'xfce4-terminal':
-      return { command: input.terminalCommand, args: ['--disable-server', `--title=${PROMPT_ENHANCEMENT_POPUP_WINDOW_TITLE_V1}`, '-x', ...childArgs] };
+      return { command: input.terminalCommand, args: ['--disable-server', `--title=${T}`, ...cellGeom, '-x', ...childArgs] };
     case 'kitty':
-      return { command: input.terminalCommand, args: ['--title', PROMPT_ENHANCEMENT_POPUP_WINDOW_TITLE_V1, ...childArgs] };
+      return { command: input.terminalCommand, args: [...kittyGeom, '--title', T, ...childArgs] };
     case 'alacritty':
-      return { command: input.terminalCommand, args: ['--title', PROMPT_ENHANCEMENT_POPUP_WINDOW_TITLE_V1, '-e', ...childArgs] };
+      return { command: input.terminalCommand, args: [...alacrittyGeom, '--title', T, '-e', ...childArgs] };
     case 'wezterm':
       return { command: input.terminalCommand, args: ['start', '--', ...childArgs] };
     case 'foot':
-      return { command: input.terminalCommand, args: [`--title=${PROMPT_ENHANCEMENT_POPUP_WINDOW_TITLE_V1}`, ...childArgs] };
+      return { command: input.terminalCommand, args: [...footGeom, `--title=${T}`, ...childArgs] };
     case 'x-terminal-emulator':
       return { command: input.terminalCommand, args: ['-e', ...childArgs] };
     case 'xterm':
-      return { command: input.terminalCommand, args: ['-T', PROMPT_ENHANCEMENT_POPUP_WINDOW_TITLE_V1, '-e', ...childArgs] };
+      return { command: input.terminalCommand, args: [...xtermGeom, '-T', T, '-e', ...childArgs] };
   }
 }
 
@@ -302,6 +317,14 @@ function defaultLaunchDependencies(): PromptEnhancementCliPopupHostLaunchDepende
     sleep,
     now: () => Date.now(),
     cleanupTempDir,
+    detectPopupGeometry: async () => {
+      try {
+        const screen = await detectScreenResolution();
+        return screen ? computePopupGeometry(screen) : undefined;
+      } catch {
+        return undefined;
+      }
+    },
   };
 }
 
@@ -341,10 +364,12 @@ export async function runPromptEnhancementCliPopupHostLaunchV1(input: {
       result: input.result,
     };
     dependencies.writeInputFile(inputFile, childInput);
+    const geometry = await dependencies.detectPopupGeometry();
     const plan = planPromptEnhancementLinuxTerminalLaunchV1({
       terminalCommand: input.capability.terminalCommand,
       nodePath: input.nodePath ?? process.execPath,
       cliEntryPath: input.cliEntryPath,
+      geometry,
       inputFile,
       resultFile,
       readinessFile,

@@ -222,6 +222,25 @@ describe('PE1.3 — Linux PE popup host launcher', () => {
     expect(JSON.stringify(gnome.args)).not.toContain('RAW ENHANCED BODY');
   });
 
+  it('inserts a ~70% popup window geometry when supplied, before the child args', () => {
+    const input = launchInput();
+    const geometry = { widthPx: 1344, heightPx: 756, xPx: 288, yPx: 162, cols: 134, rows: 37 };
+    const withGeom = planPromptEnhancementLinuxTerminalLaunchV1({
+      terminalCommand: 'gnome-terminal', nodePath: input.nodePath, cliEntryPath: input.cliEntryPath,
+      inputFile: '/tmp/private/input.json', resultFile: '/tmp/private/result.json', readinessFile: '/tmp/private/ready', dbPath: input.dbPath,
+      geometry,
+    });
+    expect(withGeom.args).toContain('--geometry=134x37+288+162');
+    // The geometry is a gnome-terminal option, so it precedes the -- separator.
+    expect(withGeom.args.indexOf('--geometry=134x37+288+162')).toBeLessThan(withGeom.args.indexOf('--'));
+    // Omitting geometry falls back to the terminal's default size (no --geometry).
+    const plain = planPromptEnhancementLinuxTerminalLaunchV1({
+      terminalCommand: 'gnome-terminal', nodePath: input.nodePath, cliEntryPath: input.cliEntryPath,
+      inputFile: '/tmp/private/input.json', resultFile: '/tmp/private/result.json', readinessFile: '/tmp/private/ready', dbPath: input.dbPath,
+    });
+    expect(plain.args.some((argument) => argument.startsWith('--geometry'))).toBe(false);
+  });
+
   it('creates private files, parses a typed child result, and cleans its temp directory', async () => {
     const observed: { dir?: string; inputText?: string; inputMode?: number; dirMode?: number; plan?: unknown } = {};
     const fakeChild = child();
