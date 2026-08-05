@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import type { InstallContext } from '../types.js';
 import {
   claudeCodeAdapter,
@@ -59,14 +59,20 @@ describe('claude-code adapter + helpers', () => {
   describe('buildHookCommand', () => {
     it('produces a node command with the resolved CLI path and the prompt-store DB path', () => {
       const cmd = buildHookCommand(tmpHome);
-      expect(cmd).toBe(`node "/fixture/nexpath/dist/cli/index.js" auto --db "${tmpHome}/.nexpath/prompt-store.db"`);
+      // Rebuild the expected paths the way the code does — resolve() + forward-slash — so the assertion
+      // holds on Windows (drive letter + `\`→`/`) and Linux alike, instead of hardcoding a Linux path.
+      const cli = resolve('/fixture/nexpath/dist/cli/index.js').replace(/\\/g, '/');
+      const db = join(tmpHome, '.nexpath', 'prompt-store.db').replace(/\\/g, '/');
+      expect(cmd).toBe(`node "${cli}" auto --db "${db}"`);
     });
   });
 
   describe('buildStopHookCommand', () => {
     it('produces a node command ending in `stop`', () => {
       const cmd = buildStopHookCommand(tmpHome);
-      expect(cmd).toBe(`node "/fixture/nexpath/dist/cli/index.js" stop --db "${tmpHome}/.nexpath/prompt-store.db"`);
+      const cli = resolve('/fixture/nexpath/dist/cli/index.js').replace(/\\/g, '/');
+      const db = join(tmpHome, '.nexpath', 'prompt-store.db').replace(/\\/g, '/');
+      expect(cmd).toBe(`node "${cli}" stop --db "${db}"`);
     });
   });
 
