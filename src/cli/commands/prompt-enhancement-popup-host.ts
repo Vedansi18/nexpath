@@ -1,5 +1,7 @@
-import { chmodSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync, closeSync } from 'node:fs';
+import { appendFileSync, chmodSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync, closeSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import type { Command } from 'commander';
 import { closeStore, openStore, DEFAULT_DB_PATH, type Store } from '../../store/db.js';
 import {
@@ -99,6 +101,7 @@ export async function runPromptEnhancementPopupHostCommandV1(
 ): Promise<PromptEnhancementPopupHostOutputV1> {
   const dependencies = { ...defaultDependencies(), ...overrides };
   let popupResult: PromptEnhancementCliPopupResultV1 = SAFE_NON_DELIVERY_RESULT_V1;
+  let diagnosticError = 'none';
 
   try {
     const parsed = JSON.parse(dependencies.readInputFile(options.inputFile)) as unknown;
@@ -122,9 +125,26 @@ export async function runPromptEnhancementPopupHostCommandV1(
       } finally {
         if (store) dependencies.closeStore(store);
       }
+    } else {
+      diagnosticError = 'input_invalid_or_stale';
     }
-  } catch {
+  } catch (error) {
+    diagnosticError = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
     popupResult = SAFE_NON_DELIVERY_RESULT_V1;
+  }
+
+  // NEXPATH_DEBUG diagnostics → a persistent file (temp dir is cleaned up, and the window may vanish),
+  // so a render-then-close can be diagnosed with a simple `cat`. No prompt/body text — only TTY state,
+  // the resolved result state, and any caught error class/message.
+  if (process.env.NEXPATH_DEBUG) {
+    try {
+      const debugDir = join(homedir(), '.nexpath');
+      mkdirSync(debugDir, { recursive: true });
+      appendFileSync(
+        join(debugDir, 'pe-popup-child-debug.log'),
+        `[${new Date().toISOString()}] stdin.isTTY=${Boolean(process.stdin.isTTY)} stdout.isTTY=${Boolean(process.stdout.isTTY)} platform=${process.platform} result=${popupResult.state} error=${diagnosticError}\n`,
+      );
+    } catch { /* diagnostics are best-effort */ }
   }
 
   const output: PromptEnhancementPopupHostOutputV1 = {
