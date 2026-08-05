@@ -93,6 +93,7 @@ function insertAdvisory(store: Store, projectRoot = '/test/project') {
 
 async function insertPendingPe(store: Store, projectRoot = '/test/project') {
   const session = SessionStateManager.load(store, projectRoot);
+  session.setDetectedLanguage(store, undefined); // persist session to DB so runStop finds the same UUID (matches insertAdvisory)
   const request = buildPromptEnhancementRequestForAuto({
     auto: { promptText: 'implement the login flow', projectRoot, currentAgentMode: 'workspace-write' },
     store,
@@ -170,6 +171,16 @@ describe('runStop — deferred Prompt Enhancement popup (B-i)', () => {
     await runStop(makePayload(), store, undefined, undefined, undefined, shown());
     // Displayed → consumed so a Stop re-fire cannot re-show it.
     expect(getPendingPromptEnhancement(store, '/test/project')).toBeNull();
+  });
+
+  it('ignores a pending PE queued under a different session (Bug 4 — session-scoped lookup)', async () => {
+    await insertPendingPe(store);
+    // Re-point the stored PE to a foreign session id, as if it were queued in an unrelated session.
+    store.db.run("UPDATE pending_prompt_enhancements SET session_id = 'sess-unrelated-xyz'");
+    const launch = notShown(); // spy — must NOT run for a foreign-session PE
+    const result = await runStop(makePayload(), store, undefined, undefined, undefined, launch);
+    expect(launch).not.toHaveBeenCalled();
+    expect(result).toEqual({ outcome: 'no_pending' });
   });
 
   it('takes priority over the advisory (one popup per Stop): PE injects, advisory stays pending', async () => {

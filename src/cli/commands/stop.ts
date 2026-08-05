@@ -176,8 +176,13 @@ export async function runStop(
   //      direct TTY, spawns a GUI terminal; a fully headless session has no host and falls through.
   //      Store-lock handling lives in the launcher: the in-process popup holds the lock (matching
   //      the advisory), while the spawned path releases it so the child process can reach the DB.
+  // Load session state up front so the PE popup and the advisory lookup below both scope their
+  // pending records to THIS session (a PE queued in one session must not surface in a later,
+  // unrelated one — matching getPendingAdvisory's scoping).
+  const mgr = SessionStateManager.load(store, payload.cwd);
+
   if (peLaunch) {
-    const pendingPe = getPendingPromptEnhancement(store, payload.cwd);
+    const pendingPe = getPendingPromptEnhancement(store, payload.cwd, mgr.current.sessionId);
     if (pendingPe) {
       let decision: PromptEnhancementStopDecision;
       try {
@@ -223,8 +228,8 @@ export async function runStop(
   // 1.7. Read decision_session_count for help-line gating in the decision session UI
   const decisionSessionCount = getProject(store, payload.cwd)?.decisionSessionCount ?? 0;
 
-  // 2. Load session state — needed for session filter and option gen
-  const mgr = SessionStateManager.load(store, payload.cwd);
+  // 2. Session state (`mgr`) was loaded up front (before the PE popup) so both the PE and advisory
+  //    lookups are session-scoped; it is reused here for the advisory path below.
 
   // 3. Check for a pending advisory stored by the auto hook
   logger.debug('stop_pending_lookup', {
