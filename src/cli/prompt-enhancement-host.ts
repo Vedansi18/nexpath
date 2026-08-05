@@ -308,9 +308,10 @@ export function buildPromptEnhancementWindowsLauncherScriptV1(input: {
     '--readiness-file', quote(input.readinessFile),
     '--db', quote(input.dbPath),
   ].join(' ');
-  // `@echo off` for a clean window; CRLF line endings for a well-formed .cmd. The window closes when
-  // the child exits (default `cmd /c` behaviour), matching the advisory popup.
-  return ['@echo off', command, ''].join('\r\n');
+  // `@echo off` for a clean window; CRLF line endings for a well-formed .cmd. On success the child
+  // exits 0 and the window closes; on any real error (non-zero exit) `pause` keeps the window open so
+  // the message is visible instead of the window flashing and vanishing (better UX + diagnosis).
+  return ['@echo off', command, 'if errorlevel 1 pause', ''].join('\r\n');
 }
 
 /**

@@ -309,6 +309,8 @@ describe('PE1.3 — Linux PE popup host launcher', () => {
     expect(script).toContain('"C:/Program Files/nodejs/node.exe" "C:/Users/Admin/Desktop/nexpath testing/nexpath/dist/cli/index.js" prompt-enhancement-popup-host');
     expect(script).toContain('--input-file "C:/Temp/pe/input.json"');
     expect(script).toContain('--db "C:/Users/Admin/.nexpath/prompt-store.db"');
+    // On a real error the window stays open (shows the message) instead of flashing shut.
+    expect(script).toContain('if errorlevel 1 pause');
   });
 
   it('plans a macOS Terminal.app spawn via osascript that runs the shell launcher', () => {
