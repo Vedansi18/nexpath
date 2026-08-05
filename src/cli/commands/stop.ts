@@ -508,6 +508,16 @@ export function registerStopCommand(program: import('commander').Command): void 
             await reacquireStoreLock(store);
           }
         }
+        // A popup that never actually rendered (e.g. no usable console) returns not_shown. Report it
+        // honestly as not_shown — so the record stays pending and the advisory path runs — instead of
+        // the previous false "shown" that consumed the record while nothing appeared on screen.
+        if (validatePromptEnhancementCliPopupResultV1(popup) && popup.state === 'not_shown') {
+          logger.debug('stop_prompt_enhancement_not_rendered', {
+            cwd: payload.cwd,
+            reasonCodes: 'reasonCodes' in popup ? popup.reasonCodes : undefined,
+          });
+          return { kind: 'not_shown' };
+        }
         if (
           validatePromptEnhancementCliPopupResultV1(popup)
           && popup.state === 'selected_current'
