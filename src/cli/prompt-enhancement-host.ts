@@ -47,6 +47,12 @@ export type PromptEnhancementCliHostCapabilityV1 =
       method: 'windows_terminal';
     }
   | {
+      // macOS: the popup is rendered in a NEW Terminal.app window spawned via `osascript` (the Stop
+      // hook may have no usable /dev/tty). Mirrors the advisory's macOS path.
+      state: 'available';
+      method: 'mac_terminal';
+    }
+  | {
       state: 'unavailable';
       method: 'none';
       reasonCode: 'unsupported_platform' | 'no_gui_session' | 'no_supported_terminal';
@@ -161,29 +167,26 @@ export function resolvePromptEnhancementCliHostCapabilityV1(
   if (platform === 'win32') {
     // Windows: the Stop hook has no usable in-process console — opening CONIN$/CONOUT$ there renders
     // to a NON-VISIBLE console, so the popup "shows" invisibly. Always spawn a new window instead
-    // (like the advisory's `cmd /c start` and the Linux terminal path); the child renders in that
-    // window's real, visible console.
+    // (mirrors the advisory's `cmd /c start`); the child renders in that window's real console.
     return { state: 'available', method: 'windows_terminal' };
   }
-  if (platform !== 'linux' && platform !== 'darwin') {
+  if (platform === 'darwin') {
+    // macOS: always spawn a new Terminal.app window (mirrors the advisory's osascript path) — the Stop
+    // hook may have no usable in-process /dev/tty, so never rely on it. Matches the old popup's
+    // all-platform "always a spawned window" behaviour.
+    return { state: 'available', method: 'mac_terminal' };
+  }
+  if (platform !== 'linux') {
     return { state: 'unavailable', method: 'none', reasonCode: 'unsupported_platform' };
   }
 
-  // Direct interactive console — Linux + macOS via /dev/tty. The in-process Stop-hook surface when the
-  // hook has a controlling terminal.
+  // Linux: prefer the in-process /dev/tty when the hook has a controlling terminal, otherwise spawn a
+  // GUI terminal below (unchanged behaviour).
   const directTtyAvailable = dependencies.probeDirectTty ?? probeDirectTty;
   try {
     if (directTtyAvailable()) return { state: 'available', method: 'direct_tty' };
   } catch {
-    // Continue to the platform fallback below.
-  }
-
-  // The GUI-terminal spawn fallback below is Linux-only (X11/Wayland detection + `which` + Linux
-  // terminal emulators). On macOS the direct console above is the supported in-process surface; if it
-  // is unavailable, fail closed. (A macOS window-spawn, mirroring buildMacNewWindowSelectFn, is a
-  // follow-up.)
-  if (platform !== 'linux') {
-    return { state: 'unavailable', method: 'none', reasonCode: 'no_supported_terminal' };
+    // Continue to the Linux terminal-spawn fallback below.
   }
 
   const env = dependencies.env ?? process.env;
@@ -329,6 +332,82 @@ export function planPromptEnhancementWindowsTerminalLaunchV1(input: {
   };
 }
 
+/**
+ * The shell launcher executed inside the spawned macOS Terminal.app window. Every path is
+ * single-quoted so /bin/sh handles spaces natively, and node is invoked by its ABSOLUTE path — the
+ * same robust approach as the Windows batch launcher (no fragile inline quoting).
+ */
+export function buildPromptEnhancementMacLauncherScriptV1(input: {
+  nodeExecPath: string;
+  cliEntryPath: string;
+  inputFile: string;
+  resultFile: string;
+  readinessFile: string;
+  dbPath: string;
+}): string {
+  // Paths never legitimately contain a single-quote; strip any defensively so the sh quoting holds.
+  const quote = (p: string): string => `'${p.replace(/'/g, '')}'`;
+  const command = [
+    quote(input.nodeExecPath),
+    quote(input.cliEntryPath),
+    'prompt-enhancement-popup-host',
+    '--input-file', quote(input.inputFile),
+    '--result-file', quote(input.resultFile),
+    '--readiness-file', quote(input.readinessFile),
+    '--db', quote(input.dbPath),
+  ].join(' ');
+  return ['#!/bin/sh', command, ''].join('\n');
+}
+
+/**
+ * AppleScript that opens a new Terminal.app window, runs `shellCommand; exit`, waits for it to finish,
+ * then closes the window. Replicated from the advisory's buildTerminalAppleScript so the PE host does
+ * not import the heavy decision-session tty module.
+ */
+function buildPromptEnhancementMacAppleScriptV1(shellCommand: string, geom: PopupGeometry | null): string {
+  const escaped = shellCommand.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  const sizeBlock = geom
+    ? `try
+        set bounds of (first window whose selected tab is theTab) to {${geom.xPx}, ${geom.yPx}, ${geom.xPx + geom.widthPx}, ${geom.yPx + geom.heightPx}}
+    end try`
+    : 'set number of rows of (first window whose selected tab is theTab) to 50';
+  return `tell application "Terminal"
+    activate
+    set theTab to do script "${escaped}; exit"
+    ${sizeBlock}
+    delay 1
+    repeat
+        delay 0.5
+        try
+            if not (busy of theTab) then exit repeat
+        on error
+            exit repeat
+        end try
+    end repeat
+    try
+        close (first window whose selected tab is theTab)
+    end try
+end tell`;
+}
+
+/**
+ * macOS popup launch: open a NEW Terminal.app window (via `osascript`) that runs the shell launcher
+ * above through `sh`. The launcher path lives in a temp dir (no spaces), so the AppleScript embedding
+ * is clean; every real, possibly-space-containing path is quoted INSIDE the launcher. osascript is
+ * synchronous — the AppleScript waits for the child to finish, then closes the window. Mirrors the
+ * advisory's macOS path.
+ */
+export function planPromptEnhancementMacTerminalLaunchV1(input: {
+  launcherScriptPath: string;
+  geometry?: PopupGeometry;
+}): PromptEnhancementLinuxTerminalLaunchPlanV1 {
+  const shCommand = `sh '${input.launcherScriptPath.replace(/'/g, '')}'`;
+  return {
+    command: 'osascript',
+    args: ['-e', buildPromptEnhancementMacAppleScriptV1(shCommand, input.geometry ?? null)],
+  };
+}
+
 function makeTempDir(): string {
   const dir = join(tmpdir(), `nexpath-pe-popup-host-${randomUUID()}`);
   mkdirSync(dir, { mode: 0o700 });
@@ -460,6 +539,19 @@ export async function runPromptEnhancementCliPopupHostLaunchV1(input: {
         dbPath: input.dbPath,
       }), 'utf8');
       plan = planPromptEnhancementWindowsTerminalLaunchV1({ launcherScriptPath });
+    } else if (input.capability.method === 'mac_terminal') {
+      // Write the shell launcher (0o700) into the temp dir, then open a Terminal.app window that runs
+      // it. All real paths are quoted inside the launcher, so the AppleScript stays clean.
+      const launcherScriptPath = join(tempDir, 'launch.sh');
+      writeFileSync(launcherScriptPath, buildPromptEnhancementMacLauncherScriptV1({
+        nodeExecPath: input.nodePath ?? process.execPath,
+        cliEntryPath: input.cliEntryPath,
+        inputFile,
+        resultFile,
+        readinessFile,
+        dbPath: input.dbPath,
+      }), { mode: 0o700 });
+      plan = planPromptEnhancementMacTerminalLaunchV1({ launcherScriptPath, geometry });
     } else {
       plan = planPromptEnhancementLinuxTerminalLaunchV1({
         terminalCommand: input.capability.terminalCommand,

@@ -4,8 +4,10 @@ import { dirname } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import {
   PROMPT_ENHANCEMENT_LINUX_TERMINAL_COMMANDS_V1,
+  buildPromptEnhancementMacLauncherScriptV1,
   buildPromptEnhancementWindowsLauncherScriptV1,
   planPromptEnhancementLinuxTerminalLaunchV1,
+  planPromptEnhancementMacTerminalLaunchV1,
   planPromptEnhancementWindowsTerminalLaunchV1,
   resolvePromptEnhancementCliHostCapabilityV1,
   runPromptEnhancementCliPopupHostLaunchV1,
@@ -50,15 +52,17 @@ describe('PE1.1 — prompt enhancement CLI host capability resolver', () => {
     expect(commandExists).not.toHaveBeenCalled();
   });
 
-  it('supports macOS via the direct /dev/tty console', () => {
+  it('always spawns a Terminal.app window on macOS (never the in-process /dev/tty)', () => {
     const commandExists = unavailableCommands();
+    const probeDirectTty = vi.fn(() => true);
     const result = resolvePromptEnhancementCliHostCapabilityV1({
       platform: 'darwin',
       env: {},
-      probeDirectTty: () => true,
+      probeDirectTty, // ignored on darwin — it always spawns
       commandExists,
     });
-    expect(result).toEqual({ state: 'available', method: 'direct_tty' });
+    expect(result).toEqual({ state: 'available', method: 'mac_terminal' });
+    expect(probeDirectTty).not.toHaveBeenCalled();
     expect(commandExists).not.toHaveBeenCalled();
   });
 
@@ -77,12 +81,12 @@ describe('PE1.1 — prompt enhancement CLI host capability resolver', () => {
     expect(commandExists).not.toHaveBeenCalled();
   });
 
-  it('fails closed on macOS when the direct console is unavailable, while Windows still spawns', () => {
+  it('Windows and macOS both spawn a window regardless of the in-process console (like the old popup)', () => {
     const commandExists = unavailableCommands();
     const mac = resolvePromptEnhancementCliHostCapabilityV1({
       platform: 'darwin', env: {}, probeDirectTty: () => false, commandExists,
     });
-    expect(mac).toEqual({ state: 'unavailable', method: 'none', reasonCode: 'no_supported_terminal' });
+    expect(mac).toEqual({ state: 'available', method: 'mac_terminal' });
     const win = resolvePromptEnhancementCliHostCapabilityV1({
       platform: 'win32', env: {}, probeDirectTty: () => false, commandExists,
     });
@@ -304,6 +308,31 @@ describe('PE1.3 — Linux PE popup host launcher', () => {
     expect(script).toContain('"C:/Program Files/nodejs/node.exe" "C:/Users/Admin/Desktop/nexpath testing/nexpath/dist/cli/index.js" prompt-enhancement-popup-host');
     expect(script).toContain('--input-file "C:/Temp/pe/input.json"');
     expect(script).toContain('--db "C:/Users/Admin/.nexpath/prompt-store.db"');
+  });
+
+  it('plans a macOS Terminal.app spawn via osascript that runs the shell launcher', () => {
+    const plan = planPromptEnhancementMacTerminalLaunchV1({ launcherScriptPath: '/tmp/pe/launch.sh' });
+    expect(plan.command).toBe('osascript');
+    expect(plan.args[0]).toBe('-e');
+    const script = plan.args[1]!;
+    expect(script).toContain('tell application "Terminal"');
+    expect(script).toContain("sh '/tmp/pe/launch.sh'"); // launcher run via sh, quoted
+    expect(script).toContain('do script');
+  });
+
+  it('builds a macOS shell launcher with node by absolute path and every path single-quoted (spaces intact)', () => {
+    const script = buildPromptEnhancementMacLauncherScriptV1({
+      nodeExecPath: '/usr/local/bin/node',
+      cliEntryPath: '/Users/admin/Desktop/nexpath testing/nexpath/dist/cli/index.js',
+      inputFile: '/tmp/pe/input.json',
+      resultFile: '/tmp/pe/result.json',
+      readinessFile: '/tmp/pe/ready',
+      dbPath: '/Users/admin/.nexpath/prompt-store.db',
+    });
+    expect(script.startsWith('#!/bin/sh')).toBe(true);
+    expect(script).toContain("'/usr/local/bin/node' '/Users/admin/Desktop/nexpath testing/nexpath/dist/cli/index.js' prompt-enhancement-popup-host");
+    expect(script).toContain("--input-file '/tmp/pe/input.json'");
+    expect(script).toContain("--db '/Users/admin/.nexpath/prompt-store.db'");
   });
 
   it('creates private files, parses a typed child result, and cleans its temp directory', async () => {
