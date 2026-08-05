@@ -56,8 +56,10 @@ import type { PromptEnhancementPopupEventV1 } from '../../prompt-enhancement/pop
 import { buildPromptEnhancementCostVisibilityMetadataV1 } from '../../prompt-enhancement/cost-observability.js';
 import { getSourceRealityAdaptersSnapshot } from '../../prompt-enhancement/source-reality.js';
 import { loadRightGoodProfile } from '../../classifier/right-good-aggregator.js';
-import { loadWorkStyleProfile } from '../../classifier/work-style-traits.js';
-import { getPromptEnhancementFeedbackSummary } from '../../store/prompt-enhancement.js';
+import { computeWorkStyleProfile } from '../../classifier/work-style-traits.js';
+import { readParamEvents } from '../../telemetry/param-events.js';
+import { getProjectEnvFacts } from '../../store/env-facts.js';
+import { getPromptEnhancementFeedbackSummary, queryRelevantPromptEnhancementMemory } from '../../store/prompt-enhancement.js';
 import {
   buildClaudeUserPromptSubmitHookOutputV1,
   runPromptEnhancementCliSubmitPopupV1,
@@ -171,16 +173,22 @@ export type AutoPromptEnhancementConsumerV1 = (
  * facts and does not create new routing, delivery, or semantic authority.
  */
 /**
- * E1 / P1-G1 — PE grounding-evidence refs: the Source-B grounding the guidance-fact seam (E2) consumes.
- * Ref-ID convention (E2 parses these): `right_good:<key>` / `mistake:<key>` (RIGHT&GOOD non-neutral signals),
- * `work_style:<trait>:<value>` (set work-style traits), `feedback:<category>:<count>` (scoped feedback).
- * Each aggregator is read DEFENSIVELY — an empty or failed read yields no refs (the deterministic no-data
- * fallback), so the fields stay `[]` when there is nothing to ground on. NB (remaining E1): env-probe / runtime /
- * param-event channels / source-only hard facts are wired next; those feed the same field set.
+ * E1 / P1-G1 + AR6-G1(query) — PE grounding-evidence refs that the guidance-fact seam (E2) consumes.
+ * Ref-ID convention (E2 parses these): `right_good:<key>` / `mistake:<key>` (RIGHT&GOOD non-neutral signals);
+ * `work_style:<trait>:<value>` (set work-style traits); `hard_fact:<key>` (source-derived project env facts);
+ * `feedback:<category>:<count>` (scoped feedback); `memory:<signalKey>` (missing-signal memory candidates —
+ * empty until E3 records evidence). `paramEventChannels` = the distinct detection channels present.
+ * Every read is DEFENSIVE — an empty or failed read yields no refs (deterministic no-data fallback). The
+ * param-event log is read ONCE and reused for work-style + channels (RIGHT&GOOD keeps its own read; its
+ * `computeRightGoodProfile` is not exported). NB: env facts map to `sourceOnlyHardFactRefs`; runtime context is
+ * already carried by the request's agent-mode/permission fields, so it is not duplicated here.
  */
-function buildPromptEnhancementGroundingRefsV1(store: Store, projectRoot: string): {
+function buildPromptEnhancementGroundingRefsV1(store: Store, projectRoot: string, signalKeys: readonly string[]): {
   rightGoodWorkStyleEnvRuntimeRefs: readonly string[];
+  paramEventChannels: readonly string[];
+  sourceOnlyHardFactRefs: readonly string[];
   scopedFeedbackEvidenceRefs: readonly string[];
+  missingMemoryCandidateRefs: readonly string[];
 } {
   const rightGoodWorkStyleEnvRuntimeRefs: string[] = [];
   try {
@@ -188,18 +196,38 @@ function buildPromptEnhancementGroundingRefsV1(store: Store, projectRoot: string
       if (signal.state !== 'neutral') rightGoodWorkStyleEnvRuntimeRefs.push(`${signal.state}:${key}`);
     }
   } catch { /* no RIGHT&GOOD grounding available — leave empty */ }
+  const paramEventChannels: string[] = [];
   try {
-    for (const [trait, value] of Object.entries(loadWorkStyleProfile(store, projectRoot))) {
-      if (value.value !== null) rightGoodWorkStyleEnvRuntimeRefs.push(`work_style:${trait}:${value.value}`);
+    const events = readParamEvents(store, projectRoot);
+    for (const [trait, tv] of Object.entries(computeWorkStyleProfile(events))) {
+      if (tv.value !== null) rightGoodWorkStyleEnvRuntimeRefs.push(`work_style:${trait}:${tv.value}`);
     }
-  } catch { /* no work-style grounding available — leave empty */ }
+    for (const channel of new Set(events.map((event) => event.channel))) paramEventChannels.push(channel);
+  } catch { /* no param-event grounding available — leave empty */ }
+  const sourceOnlyHardFactRefs: string[] = [];
+  try {
+    const stored = getProjectEnvFacts(store, projectRoot);
+    if (stored) for (const factKey of Object.keys(stored.facts)) sourceOnlyHardFactRefs.push(`hard_fact:${factKey}`);
+  } catch { /* no source hard facts available — leave empty */ }
   const scopedFeedbackEvidenceRefs: string[] = [];
   try {
     for (const category of getPromptEnhancementFeedbackSummary(store, projectRoot).categoryCounts) {
       scopedFeedbackEvidenceRefs.push(`feedback:${category.feedbackCategory}:${category.count}`);
     }
   } catch { /* no scoped feedback available — leave empty */ }
-  return { rightGoodWorkStyleEnvRuntimeRefs, scopedFeedbackEvidenceRefs };
+  const missingMemoryCandidateRefs: string[] = [];
+  try {
+    for (const row of queryRelevantPromptEnhancementMemory(store, projectRoot, signalKeys)) {
+      missingMemoryCandidateRefs.push(`memory:${row.signalKey}`);
+    }
+  } catch { /* no missing-signal memory yet (until E3 records) — leave empty */ }
+  return {
+    rightGoodWorkStyleEnvRuntimeRefs,
+    paramEventChannels,
+    sourceOnlyHardFactRefs,
+    scopedFeedbackEvidenceRefs,
+    missingMemoryCandidateRefs,
+  };
 }
 
 export function buildPromptEnhancementRequestForAuto(input: {
@@ -271,7 +299,8 @@ export function buildPromptEnhancementRequestForAuto(input: {
     : undefined;
   const recentRefs = recentPromptMetadata(input.session.current.promptHistory)
     .map((prompt) => `prompt:${prompt.index}`);
-  const grounding = buildPromptEnhancementGroundingRefsV1(input.store, input.auto.projectRoot);
+  const groundingSignalKeys = [input.firedKey, ...(absenceSignal ? [absenceSignal] : [])];
+  const grounding = buildPromptEnhancementGroundingRefsV1(input.store, input.auto.projectRoot, groundingSignalKeys);
 
   return {
     schemaVersion: PROMPT_ENHANCEMENT_CONTRACT_VERSION,
@@ -321,7 +350,7 @@ export function buildPromptEnhancementRequestForAuto(input: {
       whyHelpSourceRefs: content.resolvedRecordIdentity ? [`${content.resolvedRecordIdentity}:why-help`] : [],
       profileRoleModeRefs: input.configuredRole ? [`role:${input.configuredRole}`] : [],
       rightGoodWorkStyleEnvRuntimeRefs: grounding.rightGoodWorkStyleEnvRuntimeRefs,
-      missingMemoryCandidateRefs: [],
+      missingMemoryCandidateRefs: grounding.missingMemoryCandidateRefs,
       sourceLabels: [
         { sourceRefId: originalPromptRef.sourceRefId, label: 'original_prompt', evidenceStatus: 'present' },
         { sourceRefId: triggerRef.sourceRefId, label: 'stage_absence_signal', evidenceStatus: 'present' },
@@ -354,10 +383,10 @@ export function buildPromptEnhancementRequestForAuto(input: {
       permissionMode: input.auto.currentAgentMode ?? 'unknown',
       transcriptPathState: input.auto.transcriptPath ? 'provided' : 'not_authority',
       streamBOutputs: input.streamBOutputs,
-      paramEventChannels: [],
+      paramEventChannels: grounding.paramEventChannels,
       servedVariantIdentityRefs: [],
       deliveryGateRefs: [],
-      sourceOnlyHardFactRefs: [],
+      sourceOnlyHardFactRefs: grounding.sourceOnlyHardFactRefs,
     },
     userPreferenceContext: {
       levelState: 'default',
