@@ -179,8 +179,6 @@ export async function runStop(
   if (peLaunch) {
     const pendingPe = getPendingPromptEnhancement(store, payload.cwd);
     if (pendingPe) {
-      // Consume once (mirrors the advisory's mark-shown) so a Stop re-fire cannot re-show it.
-      markPromptEnhancementShown(store, pendingPe.id);
       let decision: PromptEnhancementStopDecision;
       try {
         decision = await peLaunch(pendingPe);
@@ -189,6 +187,10 @@ export async function runStop(
         decision = { kind: 'not_shown' };
       }
       if (decision.kind === 'inject') {
+        // Consume the record only now that it was actually displayed/injected, so a host that
+        // could not display it (e.g. an unsupported platform → not_shown) leaves the record
+        // pending for the next Stop instead of burning it silently.
+        markPromptEnhancementShown(store, pendingPe.id);
         // Record the injected enhanced prompt so the next UserPromptSubmit recognises it as an
         // echo and does not prepare another PE for it (mirrors the advisory injection at the
         // bottom of this function — otherwise the enhanced turn would re-trigger the PE popup).
@@ -197,10 +199,13 @@ export async function runStop(
         return { outcome: 'blocked', reason: decision.text };
       }
       if (decision.kind === 'shown') {
+        // Displayed (incl. dismissed / use-original) → consume so a Stop re-fire cannot re-show it.
+        markPromptEnhancementShown(store, pendingPe.id);
         logger.info('stop_prompt_enhancement_shown', { cwd: payload.cwd });
         return { outcome: 'prompt_enhancement_shown' };
       }
-      // not_shown → no usable PE host this turn; fall through to the advisory path below.
+      // not_shown → no usable PE host this turn; the record stays PENDING (not marked shown) so a
+      // later Stop with a working host can still show it. Fall through to the advisory path below.
     }
   }
 

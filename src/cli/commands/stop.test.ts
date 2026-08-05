@@ -157,6 +157,21 @@ describe('runStop — deferred Prompt Enhancement popup (B-i)', () => {
     expect(result).toEqual({ outcome: 'no_pending' });
   });
 
+  it('leaves the pending PE PENDING on not_shown so a later Stop can retry it (Bug 2 — no silent loss)', async () => {
+    await insertPendingPe(store);
+    // Host could not display it this turn (e.g. an unsupported platform → not_shown).
+    await runStop(makePayload(), store, undefined, undefined, undefined, notShown());
+    // The record must NOT be consumed — a working host on a later Stop can still show it.
+    expect(getPendingPromptEnhancement(store, '/test/project')).not.toBeNull();
+  });
+
+  it('consumes the pending PE only after it was actually shown (Bug 2 — mark after launch)', async () => {
+    await insertPendingPe(store);
+    await runStop(makePayload(), store, undefined, undefined, undefined, shown());
+    // Displayed → consumed so a Stop re-fire cannot re-show it.
+    expect(getPendingPromptEnhancement(store, '/test/project')).toBeNull();
+  });
+
   it('takes priority over the advisory (one popup per Stop): PE injects, advisory stays pending', async () => {
     await insertPendingPe(store);
     insertAdvisory(store);
