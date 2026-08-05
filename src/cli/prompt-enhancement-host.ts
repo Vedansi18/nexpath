@@ -315,10 +315,15 @@ export function buildPromptEnhancementWindowsLauncherScriptV1(input: {
 
 /**
  * Windows popup launch: open a NEW console window that runs the batch launcher above, via
- * `cmd /c start /WAIT "<title>" "<launcher.cmd>"`. The launcher path lives in a temp dir (no spaces),
- * so `start` needs no fragile quoting; every real, possibly-space-containing path is quoted INSIDE the
- * batch. `/WAIT` keeps the parent alive until the window closes; the child renders in that window's
- * real, visible console (where CONIN$/CONOUT$ are interactive). Mirrors the advisory's `cmd /c start`.
+ * `cmd /c start /WAIT "<title>" cmd /c "<launcher.cmd>"`.
+ *
+ * IMPORTANT: `start` must run a *program* (here `cmd /c <launcher.cmd>`), NOT the `.cmd` file directly.
+ * `start "<title>" "<launch.cmd>"` routes the `.cmd` through ShellExecute's file association, which
+ * fails on real Windows with "The system cannot find the path specified." — this is exactly the shape
+ * the working advisory popup uses (`start … node <script>` runs a program too). The launcher path is
+ * in a temp dir (no spaces), so `start` needs no fragile quoting; every real, possibly-space-containing
+ * path is quoted INSIDE the batch. `/WAIT` keeps the parent alive until the window closes; the child
+ * renders in that window's real, visible console.
  */
 export function planPromptEnhancementWindowsTerminalLaunchV1(input: {
   launcherScriptPath: string;
@@ -328,7 +333,7 @@ export function planPromptEnhancementWindowsTerminalLaunchV1(input: {
     // `cmd.exe` on PATH — this works across non-standard Windows installs and locales. Falls back to
     // the on-PATH `cmd.exe` only if the env var is absent.
     command: process.env.ComSpec ?? 'cmd.exe',
-    args: ['/c', 'start', '/WAIT', PROMPT_ENHANCEMENT_POPUP_WINDOW_TITLE_V1, input.launcherScriptPath],
+    args: ['/c', 'start', '/WAIT', PROMPT_ENHANCEMENT_POPUP_WINDOW_TITLE_V1, 'cmd', '/c', input.launcherScriptPath],
   };
 }
 
@@ -563,6 +568,9 @@ export async function runPromptEnhancementCliPopupHostLaunchV1(input: {
         readinessFile,
         dbPath: input.dbPath,
       });
+    }
+    if (process.env.NEXPATH_DEBUG) {
+      process.stderr.write(`[nexpath] PE popup spawn: ${plan.command} ${JSON.stringify(plan.args)}\n`);
     }
     try {
       child = await dependencies.spawnTerminal(plan);

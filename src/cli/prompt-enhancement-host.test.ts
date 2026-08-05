@@ -287,11 +287,12 @@ describe('PE1.3 — Linux PE popup host launcher', () => {
     expect(plain.args.some((argument) => argument.startsWith('--geometry'))).toBe(false);
   });
 
-  it('plans a Windows new-window spawn that runs the batch launcher (cmd /c start /WAIT)', () => {
+  it('plans a Windows new-window spawn that runs the batch via cmd /c (not start file-association)', () => {
     const plan = planPromptEnhancementWindowsTerminalLaunchV1({ launcherScriptPath: 'C:/Temp/pe/launch.cmd' });
     expect(plan.command).toBe(process.env.ComSpec ?? 'cmd.exe'); // system interpreter, not a hardcoded path
-    // The launcher path lives in a temp dir (no spaces) — start needs no fragile arg quoting.
-    expect(plan.args).toEqual(['/c', 'start', '/WAIT', 'Nexpath · Prompt enhancement', 'C:/Temp/pe/launch.cmd']);
+    // start runs a PROGRAM (`cmd /c <launch.cmd>`), never the .cmd directly — running the .cmd via
+    // start's file-association fails with "The system cannot find the path specified." on Windows.
+    expect(plan.args).toEqual(['/c', 'start', '/WAIT', 'Nexpath · Prompt enhancement', 'cmd', '/c', 'C:/Temp/pe/launch.cmd']);
   });
 
   it('builds a Windows batch launcher with node by absolute path and every path quoted (spaces intact)', () => {
