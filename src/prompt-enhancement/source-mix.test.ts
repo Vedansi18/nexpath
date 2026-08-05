@@ -63,6 +63,13 @@ describe('applyPromptEnhancementSourceMixV1 (E2 / 2.2)', () => {
     expect(result.renderedFacts.map((f) => f.factId)).toEqual(['a1', 'h1']);
   });
 
+  it('multiple Source A with no Source B -> source_a_only (no-B is the hallmark, not supporting-A count)', () => {
+    const result = applyPromptEnhancementSourceMixV1([absence('a1'), absence('a2')]);
+    expect(result.profile).toBe('source_a_only');
+    // a1 anchors, a2 is supporting within the default cap — both rendered, still no Source B.
+    expect(result.renderedFacts.map((f) => f.factId)).toEqual(['a1', 'a2']);
+  });
+
   it('strong Source A + multiple Source B -> balanced_dual_source', () => {
     const result = applyPromptEnhancementSourceMixV1([absence('a1'), hardFact('h1'), hardFact('h2')]);
     expect(result.profile).toBe('balanced_dual_source');

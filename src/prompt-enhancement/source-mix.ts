@@ -242,7 +242,9 @@ function determineProfile(input: {
 }): PromptEnhancementSourceMixProfile {
   if (isSourceCritical(input.requiredSurvivor)) return 'source_a_heavy_high_risk';
   if (input.overCap) return 'over_token_or_source_cap_compressed';
-  if (input.sourceBSelected === 0 && input.supportingSourceASelected === 0) return 'source_a_only';
-  if (input.sourceBSelected <= 1 && input.supportingSourceASelected === 0) return 'source_a_with_light_grounding';
+  // "No useful Source B fact" is the source_a_only hallmark (PE-AR-2), regardless of
+  // how many supporting Source A facts were selected.
+  if (input.sourceBSelected === 0) return 'source_a_only';
+  if (input.sourceBSelected === 1 && input.supportingSourceASelected === 0) return 'source_a_with_light_grounding';
   return 'balanced_dual_source';
 }
