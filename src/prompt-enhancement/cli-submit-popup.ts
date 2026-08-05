@@ -1038,16 +1038,34 @@ export function renderPromptEnhancementCliFeedbackFrameV1(
  * Enter is per-row, Esc/Ctrl+C cancel. Multi-command results (a dirty-body
  * `edit_body` before an action) are drained across successive next() calls.
  */
-function createPromptEnhancementCliPopupInteractionV1(onFirstRender?: () => void): PromptEnhancementCliPopupInteractionV1 | null {
-  let input: ReadStream;
-  let output: WriteStream;
+/**
+ * Open the interactive console for the raw-TTY popup, cross-platform. The Stop hook's own
+ * stdin/stdout are piped, so the popup attaches directly to the controlling terminal:
+ *   - Linux + macOS: `/dev/tty` — one fd, read+write.
+ *   - Windows: the console device — `CONIN$` for input, `CONOUT$` for output (there is no
+ *     `/dev/tty` on Windows). The two streams own separate fds; teardown destroys both.
+ * Returns null when no console is reachable (e.g. a headless session); the caller then reports the
+ * popup as not shown, and (per the Stop-hook wiring) the pending record is left for a later Stop.
+ */
+function openPromptEnhancementInteractiveConsoleV1(): { input: ReadStream; output: WriteStream } | null {
   try {
+    if (process.platform === 'win32') {
+      return {
+        input: new ReadStream(openSync('\\\\.\\CONIN$', 'r')),
+        output: new WriteStream(openSync('\\\\.\\CONOUT$', 'w')),
+      };
+    }
     const fd = openSync('/dev/tty', 'r+');
-    input = new ReadStream(fd);
-    output = new WriteStream(fd);
+    return { input: new ReadStream(fd), output: new WriteStream(fd) };
   } catch {
     return null;
   }
+}
+
+function createPromptEnhancementCliPopupInteractionV1(onFirstRender?: () => void): PromptEnhancementCliPopupInteractionV1 | null {
+  const consoleStreams = openPromptEnhancementInteractiveConsoleV1();
+  if (!consoleStreams) return null;
+  const { input, output } = consoleStreams;
 
   const ESC = String.fromCharCode(27);
   // In-place redraw: home the cursor, write the frame, then clear anything below

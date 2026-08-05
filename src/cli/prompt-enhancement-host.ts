@@ -90,14 +90,22 @@ export interface PromptEnhancementCliPopupHostLaunchDependenciesV1 {
 }
 
 function probeDirectTty(): boolean {
-  let fd: number | undefined;
+  // Mirror the popup's console open (cli-submit-popup.ts): Linux + macOS use /dev/tty; Windows uses
+  // the console device (CONIN$ for input, CONOUT$ for output). Probe the same device(s) so this
+  // capability accurately predicts whether the popup can attach.
+  const fds: number[] = [];
   try {
-    fd = openSync('/dev/tty', 'r+');
+    if (process.platform === 'win32') {
+      fds.push(openSync('\\\\.\\CONIN$', 'r'));
+      fds.push(openSync('\\\\.\\CONOUT$', 'w'));
+    } else {
+      fds.push(openSync('/dev/tty', 'r+'));
+    }
     return true;
   } catch {
     return false;
   } finally {
-    if (fd !== undefined) {
+    for (const fd of fds) {
       try {
         closeSync(fd);
       } catch {
@@ -142,15 +150,24 @@ export function resolvePromptEnhancementCliHostCapabilityV1(
   dependencies: PromptEnhancementCliHostProbeDependenciesV1 = {},
 ): PromptEnhancementCliHostCapabilityV1 {
   const platform = dependencies.platform ?? process.platform;
-  if (platform !== 'linux') {
+  if (platform !== 'linux' && platform !== 'darwin' && platform !== 'win32') {
     return { state: 'unavailable', method: 'none', reasonCode: 'unsupported_platform' };
   }
 
+  // Direct interactive console — Linux + macOS via /dev/tty, Windows via CONIN$/CONOUT$. This is the
+  // primary Stop-hook popup surface on all three platforms.
   const directTtyAvailable = dependencies.probeDirectTty ?? probeDirectTty;
   try {
     if (directTtyAvailable()) return { state: 'available', method: 'direct_tty' };
   } catch {
-    // Continue to the GUI terminal capability path.
+    // Continue to the platform fallback below.
+  }
+
+  // The GUI-terminal spawn fallback below is Linux-only (X11/Wayland detection + `which` + Linux
+  // terminal emulators). On macOS/Windows the direct console above is the supported surface; if it
+  // is unavailable (e.g. a headless session) fail closed rather than spawn.
+  if (platform !== 'linux') {
+    return { state: 'unavailable', method: 'none', reasonCode: 'no_supported_terminal' };
   }
 
   const env = dependencies.env ?? process.env;

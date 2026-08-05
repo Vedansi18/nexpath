@@ -29,11 +29,11 @@ describe('PE1.1 — prompt enhancement CLI host capability resolver', () => {
     expect(commandExists).not.toHaveBeenCalled();
   });
 
-  it('fails closed on an unsupported platform without probing host resources', () => {
+  it('fails closed on a genuinely unsupported platform without probing host resources', () => {
     const probeDirectTty = vi.fn(() => true);
     const commandExists = unavailableCommands();
     const result = resolvePromptEnhancementCliHostCapabilityV1({
-      platform: 'win32',
+      platform: 'aix', // not linux / darwin / win32
       env: { DISPLAY: ':0' },
       probeDirectTty,
       commandExists,
@@ -45,6 +45,45 @@ describe('PE1.1 — prompt enhancement CLI host capability resolver', () => {
       reasonCode: 'unsupported_platform',
     });
     expect(probeDirectTty).not.toHaveBeenCalled();
+    expect(commandExists).not.toHaveBeenCalled();
+  });
+
+  it('supports macOS via the direct /dev/tty console', () => {
+    const commandExists = unavailableCommands();
+    const result = resolvePromptEnhancementCliHostCapabilityV1({
+      platform: 'darwin',
+      env: {},
+      probeDirectTty: () => true,
+      commandExists,
+    });
+    expect(result).toEqual({ state: 'available', method: 'direct_tty' });
+    expect(commandExists).not.toHaveBeenCalled();
+  });
+
+  it('supports Windows via the direct CONIN$/CONOUT$ console', () => {
+    const commandExists = unavailableCommands();
+    const result = resolvePromptEnhancementCliHostCapabilityV1({
+      platform: 'win32',
+      env: {},
+      probeDirectTty: () => true,
+      commandExists,
+    });
+    expect(result).toEqual({ state: 'available', method: 'direct_tty' });
+    expect(commandExists).not.toHaveBeenCalled();
+  });
+
+  it('fails closed (no spawn) on Windows/macOS when the direct console is unavailable', () => {
+    const commandExists = unavailableCommands();
+    for (const platform of ['win32', 'darwin'] as const) {
+      const result = resolvePromptEnhancementCliHostCapabilityV1({
+        platform,
+        env: {},
+        probeDirectTty: () => false,
+        commandExists,
+      });
+      expect(result).toEqual({ state: 'unavailable', method: 'none', reasonCode: 'no_supported_terminal' });
+    }
+    // The Linux-only terminal-spawn path is never probed on Windows/macOS.
     expect(commandExists).not.toHaveBeenCalled();
   });
 
