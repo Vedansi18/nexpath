@@ -321,7 +321,10 @@ export function planPromptEnhancementWindowsTerminalLaunchV1(input: {
   launcherScriptPath: string;
 }): PromptEnhancementLinuxTerminalLaunchPlanV1 {
   return {
-    command: 'cmd.exe',
+    // Resolve the command interpreter from the system (`%ComSpec%`) rather than assuming a fixed
+    // `cmd.exe` on PATH — this works across non-standard Windows installs and locales. Falls back to
+    // the on-PATH `cmd.exe` only if the env var is absent.
+    command: process.env.ComSpec ?? 'cmd.exe',
     args: ['/c', 'start', '/WAIT', PROMPT_ENHANCEMENT_POPUP_WINDOW_TITLE_V1, input.launcherScriptPath],
   };
 }
