@@ -1,8 +1,8 @@
-# Nexpath CLI — Build Fast. Skip Nothing. 
+  # Nexpath CLI — Build Fast. Ship with Confidence.
 
-> **A behaviour guidance layer for builders working with AI coding agents — vibe coders, indie hackers, founders, and product managers.**
+> **A local-first behaviour guidance layer that helps builders catch missing checks before AI-generated work becomes shipped risk.**
 
-Nexpath gives developers meaningful direction while they work with AI coding agents and AI code tools — helpful suggestions at the right moment that protect developer productivity, without slowing you down.
+AI coding agents make it easy to move fast. Nexpath helps reduce the chance that speed quietly becomes an unverified bug, an unsafe change, an unmaintainable codebase, or hours of manual review later.
 
 
 ## Prompt Enhancement — A Practical Twist
@@ -12,24 +12,24 @@ Within Nexpath's broader behaviour-guidance vision, Prompt Enhancement is the fi
 
 ---
 
-## What Is Nexpath CLI?
+## Why Nexpath Exists
 
-- A behaviour guidance system and developer productivity layer for builders using AI coding agents and AI code tools.
-- Monitors your development sessions and understands where you are in your project lifecycle.
-- Adds a **Prompt Quality Layer** at useful review moments, helping turn the prompt you already wrote into a stronger, editable version without changing its intent.
-- Brings relevant advisory and absence-signal guidance into the prompt as practical sections — not as disconnected tips or a separate option list.
-- Adds verification, confirmation, safety, or workflow structure only when the task and available signals call for it.
-- Keeps you in control: review and edit the full prompt, use it, or return to your original request before anything is sent.
+- AI can introduce a bug without making the risk obvious.
+- Fast generation can leave a codebase harder to maintain after every change.
+- Security, rollback, regression, and acceptance checks are easy to miss while momentum is high.
+- Reviewing every AI-generated decision manually can cost more time than the generation saved.
 
+Nexpath reduces these risks by noticing what the current workflow is missing and bringing the relevant check into the work at the right moment. It does not replace developer judgement or promise bug-free code; it helps make that judgement faster, more structured, and harder to skip.
 
 ---
 
-## Why AI Coding Assistant for Builders
+## A Workflow, Not Another Tool
 
-- AI coding agents and coding AI tools can generate entire features from a single sentence.
-- But speed of generation often outpaces the discipline of process.
-- Developers skip reviews, forget regression checks, ship without acceptance tests — out of momentum, not laziness.
-- Nexpath uses workflow and absence signals to bring the right missing practices into the prompt itself, closing the gap between fast AI generation and disciplined development.
+1. **Build with your AI coding agent** — Work in the tools and flow you already use.
+2. **Review with Nexpath** — Let the Prompt Quality Layer surface missing verification, safety, scope, or maintenance steps while the context is still fresh.
+3. **Ship confidently** — Move forward after the important checks are visible, reviewed, and included in the task.
+
+Nexpath is one focused step inside a better shipping workflow — not a new place where development has to happen.
 
 Built during AI Hackfest 2026 by MLH.
 
@@ -44,42 +44,33 @@ Built during AI Hackfest 2026 by MLH.
 
 ---
 
-![Nexpath CLI demo](assets/nexpath_new.gif)
+## How Nexpath Reduces Risk
 
----
+### Fewer Silent Bugs and Missed Checks
 
-## Nexpath CLI Features & Capabilities
-
-### One Editable Quality Review
-
+- Verification and test expectations can be added for debugging, maintenance, planning, review, and other tasks that need proof of completion.
+- Absence signals can surface missing regression checks, acceptance criteria, reproduction evidence, or project grounding.
+- Weak or unrelated signals are not used as filler; guidance must match the current task.
 The core interaction keeps your request and the added workflow guidance together:
 
-- Preserves your complete original request inside the quality-reviewed prompt.
-- Adds a clearer task structure without inventing requirements or expanding the scope without evidence.
-- Lets you directly edit any part of the prompt before choosing the reviewed version or the original.
-- Keeps the interface focused on one useful prompt body instead of several competing prompt options.
+### Safer High-Risk Changes
 
-### Signal-Based Guidance Sections
+- Sensitive actions can receive explicit confirmation, rollback, backup, or safety requirements before the reviewed prompt is used.
+- Double confirmation, cross-confirmation, and final confirmation are used only when the task's complexity or risk justifies them.
+- The quality layer does not silently expand authority, auto-send work, or treat an agent response as proof of completion.
 
-- Relevant advisory signals become contextual sections inside the reviewed prompt rather than a separate advisory popup.
-- Absence signals can add practices that are missing from the current workflow, such as tests, acceptance criteria, regression checks, or project grounding.
+### A More Maintainable Development Flow
 
-### Verification, Confirmation, and Safety
-
-- Verification and test expectations are added for debugging, maintenance, planning, review, and other tasks that need proof of completion.
-- Sensitive or high-risk actions can receive explicit confirmation, rollback, backup, or safety requirements.
-
-### Sequence-Aware Multi-Prompt Support
-
+- Scope, constraints, acceptance expectations, affected surfaces, and behaviour-preservation needs stay visible instead of being lost in a fast request.
 - Complex work can be decomposed into a clear current task plus a compact, ordered sequence plan.
-- Each step remains user-reviewed; the quality layer does not silently auto-send prompts or treat an agent response as proof of completion.
 - Full continuation across prompts remains behind runtime and host-safety gates while the current version focuses on a safe, editable first prompt and sequence-ready handoff.
 
-### Absence Detection
+### Less Review Overhead, Without Losing Control
 
-- Tracks which development signals are present or missing in your session.
-- When a relevant practice is missing, it can contribute a grounded section to the quality-reviewed prompt.
-- Weak or unrelated signals are not used as filler; guidance must match the current task.
+- Your complete original request stays visible inside one editable, quality-reviewed prompt.
+- You can edit the result, use it, or return to the original request before the reviewed version is sent.
+
+---
 
 ### Supported AI Coding Agents & Developer Tools
 
@@ -97,7 +88,7 @@ Nexpath CLI is built for prompt capture across AI coding agents.
 
 ---
 
-## Claude Code Setup & Installation
+## Add Nexpath to Your Development Workflow — Installation
 
 ```bash
 # Clone and build from source
