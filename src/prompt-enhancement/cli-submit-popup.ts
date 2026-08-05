@@ -371,7 +371,12 @@ export async function runPromptEnhancementCliSubmitPopupV1(input: {
       model = rendered.model;
       editedBodyText = model.body.text;
       additionalDetailsText = '';
-      publicNotice = currentResult.uiView.diagnostics.at(-1)?.publicSafeText;
+      // Show only a meaningful notice after a refinement — the generic "Prepared prompt-enhancement
+      // body is available." diagnostic (category 'generated') is redundant with the header cues and
+      // must not appear under the options (owner request); keep real notices like the 5,000-word cap.
+      publicNotice = currentResult.uiView.diagnostics
+        .filter((diagnostic) => diagnostic.category !== 'generated')
+        .at(-1)?.publicSafeText;
     }
   } catch {
     return { state: 'not_shown', reasonCodes: ['renderer_failure'] };
@@ -1047,16 +1052,26 @@ export function renderPromptEnhancementCliFeedbackFrameV1(
  * Returns null when no console is reachable (e.g. a headless session); the caller then reports the
  * popup as not shown, and (per the Stop-hook wiring) the pending record is left for a later Stop.
  */
-function openPromptEnhancementInteractiveConsoleV1(): { input: ReadStream; output: WriteStream } | null {
+function openPromptEnhancementInteractiveConsoleV1(): { input: ReadStream; output: WriteStream; owned: boolean } | null {
+  // In a spawned popup WINDOW (Windows cmd / macOS Terminal.app / Linux gnome-terminal) the process's
+  // OWN stdin/stdout ARE the interactive console — use them directly, exactly like the advisory popup.
+  // This is the reliable path on every OS and is what makes the spawned window actually render and
+  // accept keystrokes (re-opening the console device instead can render to a non-interactive handle,
+  // so the window flashes and closes). `owned: false` → teardown must NOT destroy the process stdio.
+  if (process.stdin.isTTY && process.stdout.isTTY) {
+    return { input: process.stdin as ReadStream, output: process.stdout as WriteStream, owned: false };
+  }
+  // In-process Stop-hook fallback: stdin is piped (not a TTY), so attach to the console device.
   try {
     if (process.platform === 'win32') {
       return {
         input: new ReadStream(openSync('\\\\.\\CONIN$', 'r')),
         output: new WriteStream(openSync('\\\\.\\CONOUT$', 'w')),
+        owned: true,
       };
     }
     const fd = openSync('/dev/tty', 'r+');
-    return { input: new ReadStream(fd), output: new WriteStream(fd) };
+    return { input: new ReadStream(fd), output: new WriteStream(fd), owned: true };
   } catch {
     return null;
   }
@@ -1065,7 +1080,7 @@ function openPromptEnhancementInteractiveConsoleV1(): { input: ReadStream; outpu
 function createPromptEnhancementCliPopupInteractionV1(onFirstRender?: () => void): PromptEnhancementCliPopupInteractionV1 | null {
   const consoleStreams = openPromptEnhancementInteractiveConsoleV1();
   if (!consoleStreams) return null;
-  const { input, output } = consoleStreams;
+  const { input, output, owned } = consoleStreams;
 
   const ESC = String.fromCharCode(27);
   // In-place redraw: home the cursor, write the frame, then clear anything below
@@ -1288,8 +1303,13 @@ function createPromptEnhancementCliPopupInteractionV1(onFirstRender?: () => void
       output.off('resize', onResize);
       if (input.isTTY) input.setRawMode?.(false);
       input.pause();
-      try { input.destroy(); } catch { /* already closed */ }
-      try { output.destroy(); } catch { /* shares the fd; may already be closed (BF-3) */ }
+      // Only destroy fds we opened ourselves (the console device). When we reused the process's own
+      // stdin/stdout (spawned window), leave them intact — destroying process stdio can crash the
+      // child before it writes its result.
+      if (owned) {
+        try { input.destroy(); } catch { /* already closed */ }
+        try { output.destroy(); } catch { /* shares the fd; may already be closed (BF-3) */ }
+      }
     },
   };
 }
