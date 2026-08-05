@@ -63,7 +63,6 @@ The core interaction keeps your request and the added workflow guidance together
 
 - Scope, constraints, acceptance expectations, affected surfaces, and behaviour-preservation needs stay visible instead of being lost in a fast request.
 - Complex work can be decomposed into a clear current task plus a compact, ordered sequence plan.
-- Full continuation across prompts remains behind runtime and host-safety gates while the current version focuses on a safe, editable first prompt and sequence-ready handoff.
 
 ### Less Review Overhead, Without Losing Control
 
