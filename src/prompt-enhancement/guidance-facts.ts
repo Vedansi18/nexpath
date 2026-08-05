@@ -119,10 +119,33 @@ export function buildPromptEnhancementGuidanceFactsV1(
     });
   }
 
-  // Source B — RIGHT&GOOD / work-style / env-runtime profile signals. Weak
-  // tie-breakers only (PE-AR-1): they adapt register/emphasis, never override
-  // instructions/safety/routing. Render as metadata, not their own section.
+  // RIGHT&GOOD / work-style / env-runtime profile signals.
   for (const ref of signals.rightGoodWorkStyleEnvRuntimeRefs) {
+    if (ref.startsWith('mistake:')) {
+      // A recurring mistake is a negative-capability signal: a missing practice, so
+      // it belongs in Source A (fix-plan §4b), NOT the positive Source-B pattern lane.
+      facts.push({
+        factId: nextId('mistake'),
+        sourceType: 'absence_signal',
+        sourceIds: [ref],
+        guidanceKind: 'missing_practice',
+        suggestedActionKind: 'no_action_render_context_only',
+        targetFamily: 'family_agnostic',
+        targetSectionKind: 'source_signal_guidance',
+        sourceEvidenceState: 'partial',
+        priority: 'normal',
+        renderPolicy: 'render_as_section',
+        riskLevel: 'low',
+        safetyHooks: [],
+        privacyClass: 'local_private',
+        sanitizationState: 'identity_only_event',
+        publicCopySafe: true,
+      });
+      continue;
+    }
+    // Positive RIGHT&GOOD and work-style signals are weak Source-B tie-breakers only
+    // (PE-AR-1): they adapt register/emphasis, never override instructions/safety/
+    // routing. Render as metadata, not their own section.
     const isWorkStyle = ref.startsWith('work_style:');
     facts.push({
       factId: nextId('profile'),

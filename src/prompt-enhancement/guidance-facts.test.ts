@@ -83,6 +83,16 @@ describe('buildPromptEnhancementGuidanceFactsV1 (E2 / 2.1)', () => {
     expect(workStyle?.suggestedActionKind).toBe('no_action_render_context_only');
   });
 
+  it('routes a mistake signal into Source A missing-practice, not the positive Source-B lane', () => {
+    const [fact] = buildPromptEnhancementGuidanceFactsV1(
+      requestWithSignals({ rightGoodWorkStyleEnvRuntimeRefs: ['mistake:skips_verification'] }),
+    );
+    expect(fact.sourceType).toBe('absence_signal');
+    expect(fact.guidanceKind).toBe('missing_practice');
+    expect(fact.renderPolicy).toBe('render_as_section');
+    expect(fact.sourceIds).toEqual(['mistake:skips_verification']);
+  });
+
   it('dedupes facts that share source type + source id', () => {
     const facts = buildPromptEnhancementGuidanceFactsV1(
       requestWithSignals({ sourceOnlyHardFactRefs: ['hard_fact:react', 'hard_fact:react'] }),

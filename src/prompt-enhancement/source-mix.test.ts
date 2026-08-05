@@ -133,6 +133,14 @@ describe('applyPromptEnhancementSourceMixV1 (E2 / 2.2)', () => {
     expect(a3?.selectionRole).toBe('selected_source_label_only');
   });
 
+  it('excludes suppressed-priority facts from selection (e.g. a conflict-suppressed positive fact)', () => {
+    const suppressed = fact({ factId: 'rg1', sourceType: 'right_good_pattern', priority: 'suppressed', renderPolicy: 'suppress_with_reason' });
+    const result = applyPromptEnhancementSourceMixV1([absence('a1'), suppressed]);
+    // rg1 is suppressed -> not a Source B candidate; only a1 renders, so no useful B.
+    expect(result.profile).toBe('source_a_only');
+    expect(result.classifiedFacts.some((c) => c.fact.factId === 'rg1')).toBe(false);
+  });
+
   it('invalid Source A (no source ids) with none valid remaining -> source_invalid_fallback', () => {
     const bad = fact({ factId: 'bad', sourceType: 'absence_signal', priority: 'required_survivor', sourceIds: [] });
     const result = applyPromptEnhancementSourceMixV1([bad, hardFact('h1')]);

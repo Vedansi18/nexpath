@@ -71,6 +71,13 @@ const SOURCE_A_TYPES: ReadonlySet<PromptEnhancementGuidanceSourceType> = new Set
 
 const TOTAL_FACT_CAP = 5;
 
+const RENDERABLE_PRIORITIES: ReadonlySet<PromptEnhancementGuidanceFact['priority']> = new Set([
+  'required_survivor',
+  'high',
+  'normal',
+  'low',
+]);
+
 function laneFor(fact: PromptEnhancementGuidanceFact): PromptEnhancementSourceMixLane {
   return SOURCE_A_TYPES.has(fact.sourceType) ? 'source_a' : 'source_b';
 }
@@ -113,11 +120,15 @@ export function applyPromptEnhancementSourceMixV1(
   const caps = capsForLevel(levelState);
   const classified: PromptEnhancementSourceMixFact[] = [];
 
-  const validFacts = facts.filter(isValidFact);
   const rejectedSourceA = facts.some((fact) => !isValidFact(fact) && laneFor(fact) === 'source_a');
 
-  const sourceA = validFacts.filter((fact) => laneFor(fact) === 'source_a');
-  const sourceB = validFacts.filter((fact) => laneFor(fact) === 'source_b');
+  // Only render-eligible priorities are mix candidates; suppressed / handoff-only /
+  // deferred facts (e.g. a conflict-suppressed positive fact) carry provenance but
+  // are not selected into the shown body.
+  const renderableFacts = facts.filter((fact) => isValidFact(fact) && RENDERABLE_PRIORITIES.has(fact.priority));
+
+  const sourceA = renderableFacts.filter((fact) => laneFor(fact) === 'source_a');
+  const sourceB = renderableFacts.filter((fact) => laneFor(fact) === 'source_b');
 
   // No valid Source A survivor -> DR2-G1: skip, never build filler from Source B.
   if (sourceA.length === 0) {
