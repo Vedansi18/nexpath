@@ -71,7 +71,8 @@ describe('PE1.2 — hidden prompt-enhancement popup child command', () => {
 
     expect(output).toEqual({ protocolVersion: 1, result: { state: 'selected_original' } });
     expect(JSON.parse(readFileSync(paths.resultFile, 'utf8'))).toEqual(output);
-    expect(statSync(paths.resultFile).mode & 0o777).toBe(0o600);
+    // POSIX file mode — Windows has no 0o600 equivalent, so assert it only off win32 (P5).
+    if (process.platform !== 'win32') expect(statSync(paths.resultFile).mode & 0o777).toBe(0o600);
     expect(runPopup).toHaveBeenCalledTimes(1);
     expect(stdout).not.toHaveBeenCalled();
     expect(stderr).not.toHaveBeenCalled();
@@ -149,7 +150,8 @@ describe('PE1.2 — hidden prompt-enhancement popup child command', () => {
 
     expect(runPopup).toHaveBeenCalledTimes(1);
     expect(readFileSync(readinessFile, 'utf8')).toBe('ready');
-    expect(statSync(readinessFile).mode & 0o777).toBe(0o600);
+    // POSIX file mode — assert only off win32 (P5).
+    if (process.platform !== 'win32') expect(statSync(readinessFile).mode & 0o777).toBe(0o600);
   });
 
   it('registers the child command as hidden, outside the public help surface', () => {

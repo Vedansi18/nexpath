@@ -1,12 +1,15 @@
-import { defineConfig } from 'vitest/config';
+import { defineConfig, configDefaults } from 'vitest/config';
 
-// Minimal config for Bug 5 / Phase P4:
-//  - setupFiles redirects the nexpath home to a temp dir so tests never mutate the real ~/.nexpath.
-//  - globalSetup's returned teardown removes those temp dirs once, after the whole run.
-// Test discovery keeps vitest's defaults — the ext-vscode exclusion and POSIX-portability work is P5.
+// Config for Phases P4 + P5:
+//  - setupFiles redirects the nexpath home to a temp dir so tests never mutate the real ~/.nexpath (P4).
+//  - globalSetup's returned teardown removes those temp dirs once, after the whole run (P4).
+//  - exclude src/ext-vscode/** (P5): that sub-package has its own package.json + native better-sqlite3
+//    dependency and is not installed at the root, so the root `tsconfig.json` already excludes it; the
+//    root test run must exclude it too, or it fails with "Cannot find package 'better-sqlite3'".
 export default defineConfig({
   test: {
     setupFiles: ['./vitest.setup.ts'],
     globalSetup: ['./vitest.global-setup.ts'],
+    exclude: [...configDefaults.exclude, 'src/ext-vscode/**'],
   },
 });
