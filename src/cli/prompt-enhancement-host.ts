@@ -535,14 +535,16 @@ export async function runPromptEnhancementCliPopupHostLaunchV1(input: {
       // Write the batch launcher into the temp dir (cleaned up in `finally`), then spawn a window
       // that runs it. All real paths are quoted inside the batch, so the spawn command stays clean.
       const launcherScriptPath = join(tempDir, 'launch.cmd');
-      writeFileSync(launcherScriptPath, buildPromptEnhancementWindowsLauncherScriptV1({
+      const launcherScript = buildPromptEnhancementWindowsLauncherScriptV1({
         nodeExecPath: input.nodePath ?? process.execPath,
         cliEntryPath: input.cliEntryPath,
         inputFile,
         resultFile,
         readinessFile,
         dbPath: input.dbPath,
-      }), 'utf8');
+      });
+      writeFileSync(launcherScriptPath, launcherScript, 'utf8');
+      if (process.env.NEXPATH_DEBUG) process.stderr.write(`[nexpath] launch.cmd (${launcherScriptPath}):\n${launcherScript}\n`);
       plan = planPromptEnhancementWindowsTerminalLaunchV1({ launcherScriptPath });
     } else if (input.capability.method === 'mac_terminal') {
       // Write the shell launcher (0o700) into the temp dir, then open a Terminal.app window that runs
