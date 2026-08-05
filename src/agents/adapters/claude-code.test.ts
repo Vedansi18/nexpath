@@ -132,6 +132,51 @@ describe('claude-code adapter + helpers', () => {
       expect(foreignGroup.hooks[0].command).toBe('other-tool');
     });
 
+    it('dedups marker-stripped nexpath hooks by their command shape (Bug 3 — survives marker stripping)', () => {
+      const settingsPath = getClaudeSettingsPath(tmpHome);
+      const { mkdirSync, writeFileSync } = require('node:fs') as typeof import('node:fs');
+      mkdirSync(join(tmpHome, '.claude'), { recursive: true });
+      // Prior nexpath hooks WITHOUT the marker (as if an external rewriter stripped it): one via the
+      // bin symlink form, one via the dist path form; plus a foreign hook that must be preserved.
+      writeFileSync(settingsPath, JSON.stringify({
+        hooks: {
+          UserPromptSubmit: [
+            { matcher: '', hooks: [{ type: 'command', command: 'node "/home/u/.npm-global/bin/nexpath" auto --db "/home/u/.nexpath/prompt-store.db"' }] },
+            { matcher: '', hooks: [{ type: 'command', command: 'node "/proj/nexpath/dist/cli/index.js" auto --db "/home/u/.nexpath/prompt-store.db"' }] },
+            { matcher: '', hooks: [{ type: 'command', command: 'other-tool' }] },
+          ],
+          Stop: [
+            { matcher: '', hooks: [{ type: 'command', command: 'node "/home/u/.npm-global/bin/nexpath" stop --db "/home/u/.nexpath/prompt-store.db"' }] },
+          ],
+        },
+      }), 'utf8');
+      writeHookEntry(settingsPath, tmpHome);
+      const parsed = JSON.parse(readFileSync(settingsPath, 'utf8'));
+      // Both marker-stripped nexpath groups removed; exactly one fresh (marked) group remains; foreign preserved.
+      expect(parsed.hooks.UserPromptSubmit).toHaveLength(2);
+      expect(parsed.hooks.UserPromptSubmit.filter((g: { _nexpath_hook?: boolean }) => g._nexpath_hook)).toHaveLength(1);
+      expect(parsed.hooks.UserPromptSubmit.some((g: { hooks?: Array<{ command?: string }> }) => g.hooks?.[0]?.command === 'other-tool')).toBe(true);
+      expect(parsed.hooks.Stop).toHaveLength(1);
+    });
+
+    it('removeHookEntry strips a marker-stripped nexpath hook by its command shape (Bug 3)', () => {
+      const settingsPath = getClaudeSettingsPath(tmpHome);
+      const { mkdirSync, writeFileSync } = require('node:fs') as typeof import('node:fs');
+      mkdirSync(join(tmpHome, '.claude'), { recursive: true });
+      writeFileSync(settingsPath, JSON.stringify({
+        hooks: {
+          UserPromptSubmit: [
+            { matcher: '', hooks: [{ type: 'command', command: 'node "/home/u/.npm-global/bin/nexpath" auto --db "/db"' }] },
+            { matcher: '', hooks: [{ type: 'command', command: 'other-tool' }] },
+          ],
+        },
+      }), 'utf8');
+      expect(removeHookEntry(settingsPath)).toBe(true);
+      const parsed = JSON.parse(readFileSync(settingsPath, 'utf8'));
+      expect(parsed.hooks.UserPromptSubmit).toHaveLength(1);
+      expect(parsed.hooks.UserPromptSubmit[0].hooks[0].command).toBe('other-tool');
+    });
+
     it('removeHookEntry returns true and strips only the nexpath group', () => {
       const settingsPath = getClaudeSettingsPath(tmpHome);
       writeHookEntry(settingsPath, tmpHome);
