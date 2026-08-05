@@ -428,6 +428,27 @@ const PROMPT_ENHANCEMENT_CLI_BODY_HINT_V1 = 'Enter sends this prompt' as const;
 const PROMPT_ENHANCEMENT_CLI_DETAILS_HINT_V1 = 'Enter applies these details · unapplied details are not sent' as const;
 /** Editing keys shown under a focused editable field (owner request). */
 const PROMPT_ENHANCEMENT_CLI_EDIT_KEYS_HINT_V1 = 'Ctrl+J new line · Ctrl+↑/↓ move line' as const;
+
+/** Left indent applied to every wrapped line of editable content (body / details). */
+export const PROMPT_ENHANCEMENT_CLI_CONTENT_INDENT_V1 = 6 as const;
+
+/**
+ * Terminal viewport sizing for the popup. Editable content is wrapped to `fieldWidth` and then
+ * rendered with a {@link PROMPT_ENHANCEMENT_CLI_CONTENT_INDENT_V1}-space indent, so `fieldWidth`
+ * MUST leave room for that indent (+ a 2-column margin). Otherwise a wrapped line overflows the
+ * terminal, the terminal re-wraps it (splitting words mid-line AND doubling the body's height),
+ * and the whole frame grows past the window and scrolls — which loses/repeats the title and puts
+ * the on-screen caret off the row it was computed for. `viewportRows` reserves space for the fixed
+ * chrome (header, hints, option rows, footer).
+ */
+export function promptEnhancementCliViewportV1(columns: number, rows: number): { fieldWidth: number; viewportRows: number } {
+  const cols = Number.isFinite(columns) && columns > 0 ? Math.trunc(columns) : 80;
+  const rowCount = Number.isFinite(rows) && rows > 0 ? Math.trunc(rows) : 24;
+  return {
+    fieldWidth: Math.max(24, cols - PROMPT_ENHANCEMENT_CLI_CONTENT_INDENT_V1 - 2),
+    viewportRows: Math.max(4, rowCount - 26),
+  };
+}
 const PROMPT_ENHANCEMENT_CLI_ADDITIONAL_DETAILS_LABEL_V1 = 'Additional details' as const;
 const PROMPT_ENHANCEMENT_CLI_USE_ORIGINAL_LABEL_V1 = 'Use original prompt' as const;
 const PROMPT_ENHANCEMENT_CLI_GO_BACK_LABEL_V1 = '← Go back' as const;
@@ -628,7 +649,7 @@ export function renderPromptEnhancementPopupFrameV1(
   const recordCaret = (field: PromptEnhancementEditorFieldV1): void => {
     if (frameState.caret?.field === field && frameState.caretOut) {
       frameState.caretOut.row = lines.length + 1 + Math.max(0, frameState.caret.visualRow); // 1-based first content line + caret row
-      frameState.caretOut.col = 7 + Math.max(0, frameState.caret.visualColumn); // col 7 = after the 6-space indent
+      frameState.caretOut.col = 7 + Math.max(0, frameState.caret.visualColumn); // col 7 = after the rail (2) + 4-space indent
     }
   };
 
@@ -642,34 +663,37 @@ export function renderPromptEnhancementPopupFrameV1(
     }
     const focused = index === focusIndex;
     const disabled = row.available ? '' : '  (unavailable)';
-    // Every row is an old-popup radio option: filled/green bullet when focused,
-    // hollow/gray otherwise, on a cyan rail with a dim non-focused label (§8.1).
+    // Every row is an old-popup radio option: filled/green bullet when focused, hollow/gray
+    // otherwise, with a dim non-focused label (§8.1). The cyan left rail is applied to every
+    // line as a single continuous border in the post-pass below (not per-row here).
     if (c) {
       const bullet = focused ? `${c.green}●${c.reset}` : `${c.gray}○${c.reset}`;
       const label = focused ? `${c.bold}${publicText(row.label)}${c.reset}` : `${c.dim}${publicText(row.label)}${c.reset}`;
-      lines.push(`${c.cyan}│${c.reset} ${bullet} ${label}${disabled}`);
+      lines.push(`${bullet} ${label}${disabled}`);
     } else {
-      lines.push(`  ${focused ? '●' : '○'} ${publicText(row.label)}${disabled}`);
+      lines.push(`${focused ? '●' : '○'} ${publicText(row.label)}${disabled}`);
     }
     // The editor heading and Additional details are radio rows that are also
     // editable: their field body renders beneath the row.
     // Light-gray action hint shown under an editable heading (§ UI-8 / owner request).
-    const hint = (text: string) => (c ? `      ${c.gray}${text}${c.reset}` : `      ${text}`);
+    // Content is indented 4 spaces; with the 2-char rail added in the post-pass the text lands at
+    // screen column 7 (matching the caret column formula in recordCaret).
+    const hint = (text: string) => (c ? `    ${c.gray}${text}${c.reset}` : `    ${text}`);
     if (row.kind === 'editor_heading') {
       recordCaret('enhanced_body');
-      for (const bodyLine of publicText(view.editedBodyText).split('\n')) lines.push(`      ${bodyLine}`);
+      for (const bodyLine of publicText(view.editedBodyText).split('\n')) lines.push(`    ${bodyLine}`);
       lines.push(hint(PROMPT_ENHANCEMENT_CLI_BODY_HINT_V1));
     } else if (row.kind === 'additional_details') {
       // UI-8: no "Apply" button — pressing Enter on this row applies the details.
       // An empty field renders blank (§8.5). Sending the body ignores unapplied details.
       recordCaret('additional_details');
       const details = view.additionalDetailsText ? publicText(view.additionalDetailsText) : '';
-      for (const detailLine of details.split('\n')) lines.push(`      ${detailLine}`);
+      for (const detailLine of details.split('\n')) lines.push(`    ${detailLine}`);
       lines.push(hint(PROMPT_ENHANCEMENT_CLI_DETAILS_HINT_V1));
     }
 
     if (focused && row.help) {
-      lines.push(`      ${publicText(frameState.helpExpanded ? row.help.full : row.help.short)}`);
+      lines.push(`    ${publicText(frameState.helpExpanded ? row.help.full : row.help.short)}`);
     }
     // Owner request: show the editing keys under the focused editable field (enhanced body /
     // Additional details) so the user knows how to add lines and move between them.
@@ -685,7 +709,11 @@ export function renderPromptEnhancementPopupFrameV1(
   }
   lines.push(c ? `${c.dim}${PROMPT_ENHANCEMENT_CLI_FOOTER_V1}${c.reset}` : PROMPT_ENHANCEMENT_CLI_FOOTER_V1);
 
-  return lines.join('\n');
+  // Continuous cyan left rail (owner request): draw the rail on EVERY line so the left edge is one
+  // unbroken vertical border, not the per-row segments it used to be. A blank line becomes the rail
+  // alone; every other line gets "│ " + its content (rail 2 chars keeps content text at column 7).
+  const rail = c ? `${c.cyan}│${c.reset}` : '│';
+  return lines.map((line) => (line.length === 0 ? rail : `${rail} ${line}`)).join('\n');
 }
 
 /**
@@ -1060,8 +1088,8 @@ function createPromptEnhancementCliPopupInteractionV1(onFirstRender?: () => void
   // geometry), so here the content simply fills that window: use most of the
   // width, and give the enhanced body the height that remains after the chrome.
   // Kept bounded so the frame always fits and redraws in place (no repeat).
-  const fieldWidth = () => Math.max(24, (output.columns ?? 80) - 4);
-  const viewportRows = () => Math.max(4, (output.rows ?? 24) - 26);
+  const fieldWidth = () => promptEnhancementCliViewportV1(output.columns ?? 80, output.rows ?? 24).fieldWidth;
+  const viewportRows = () => promptEnhancementCliViewportV1(output.columns ?? 80, output.rows ?? 24).viewportRows;
 
   // Persistent listeners with a key buffer so no keystroke is dropped between reads.
   const keyBuffer: string[] = [];

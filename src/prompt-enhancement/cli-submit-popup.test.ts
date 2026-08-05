@@ -14,8 +14,10 @@ import {
   buildPromptEnhancementCliFeedbackStateV1,
   buildPromptEnhancementCliInteractionStateV1,
   decodePromptEnhancementCliKeyV1,
+  PROMPT_ENHANCEMENT_CLI_CONTENT_INDENT_V1,
   PROMPT_ENHANCEMENT_CLI_CUSTOM_FEEDBACK_MAX_CHARS_V1,
   PROMPT_ENHANCEMENT_CLI_FOOTER_V1,
+  promptEnhancementCliViewportV1,
   reducePromptEnhancementCliFeedbackV1,
   reducePromptEnhancementCliInteractionV1,
   renderPromptEnhancementCliFeedbackFrameV1,
@@ -468,6 +470,31 @@ describe('UI-1 action-row model', () => {
     // "Use enhanced prompt" label/bullet row.
     expect(lines[caretOut.row - 1]).toContain('line-two');
     expect(lines[caretOut.row - 1]).not.toContain('Use enhanced prompt');
+  });
+
+  it('viewport width leaves room for the content indent so wrapped lines never overflow the terminal', () => {
+    for (const cols of [80, 100, 120, 146, 200]) {
+      const { fieldWidth } = promptEnhancementCliViewportV1(cols, 40);
+      // A wrapped content line is rendered with the 6-space indent; indent + wrap width must fit
+      // the terminal, or the terminal re-wraps the line (splitting words) and the frame scrolls.
+      expect(fieldWidth + PROMPT_ENHANCEMENT_CLI_CONTENT_INDENT_V1).toBeLessThanOrEqual(cols);
+    }
+  });
+
+  it('renders a long body with no line wider than the terminal (else it re-wraps and scrolls)', () => {
+    const cols = 146;
+    const { fieldWidth, viewportRows } = promptEnhancementCliViewportV1(cols, 36);
+    const longBody = Array.from({ length: 45 }, (_, i) =>
+      `- Ground the request in current project facts and source references without inventing missing implementation details line ${i}`).join('\n');
+    const buffer = { text: longBody, cursor: 0, desiredVisualColumn: 0, scrollVisualRow: 0, dirty: false, focused: true } as PromptEnhancementEditorBufferV1;
+    const bodyDisplay = windowPromptEnhancementFieldForDisplayV1(buffer, fieldWidth, viewportRows);
+    const frame = renderPromptEnhancementPopupFrameV1(
+      { model: fakeRenderModel(), editedBodyText: bodyDisplay, additionalDetailsText: '' },
+      { focusIndex: 0, helpExpanded: false },
+    );
+    for (const line of frame.split('\n')) {
+      expect([...line].length).toBeLessThanOrEqual(cols);
+    }
   });
 
   it('opens the enhanced body with the window at the top and the end cursor off-window (renderer hides it, no stray cursor)', () => {
