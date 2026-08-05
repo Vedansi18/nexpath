@@ -55,6 +55,9 @@ import { recordPromptEnhancementFeedbackV1 } from '../../prompt-enhancement/feed
 import type { PromptEnhancementPopupEventV1 } from '../../prompt-enhancement/popup-session.js';
 import { buildPromptEnhancementCostVisibilityMetadataV1 } from '../../prompt-enhancement/cost-observability.js';
 import { getSourceRealityAdaptersSnapshot } from '../../prompt-enhancement/source-reality.js';
+import { loadRightGoodProfile } from '../../classifier/right-good-aggregator.js';
+import { loadWorkStyleProfile } from '../../classifier/work-style-traits.js';
+import { getPromptEnhancementFeedbackSummary } from '../../store/prompt-enhancement.js';
 import {
   buildClaudeUserPromptSubmitHookOutputV1,
   runPromptEnhancementCliSubmitPopupV1,
@@ -167,6 +170,38 @@ export type AutoPromptEnhancementConsumerV1 = (
  * runAuto. This is an adapter only: it records existing classifier/session/source
  * facts and does not create new routing, delivery, or semantic authority.
  */
+/**
+ * E1 / P1-G1 — PE grounding-evidence refs: the Source-B grounding the guidance-fact seam (E2) consumes.
+ * Ref-ID convention (E2 parses these): `right_good:<key>` / `mistake:<key>` (RIGHT&GOOD non-neutral signals),
+ * `work_style:<trait>:<value>` (set work-style traits), `feedback:<category>:<count>` (scoped feedback).
+ * Each aggregator is read DEFENSIVELY — an empty or failed read yields no refs (the deterministic no-data
+ * fallback), so the fields stay `[]` when there is nothing to ground on. NB (remaining E1): env-probe / runtime /
+ * param-event channels / source-only hard facts are wired next; those feed the same field set.
+ */
+function buildPromptEnhancementGroundingRefsV1(store: Store, projectRoot: string): {
+  rightGoodWorkStyleEnvRuntimeRefs: readonly string[];
+  scopedFeedbackEvidenceRefs: readonly string[];
+} {
+  const rightGoodWorkStyleEnvRuntimeRefs: string[] = [];
+  try {
+    for (const [key, signal] of Object.entries(loadRightGoodProfile(store, projectRoot))) {
+      if (signal.state !== 'neutral') rightGoodWorkStyleEnvRuntimeRefs.push(`${signal.state}:${key}`);
+    }
+  } catch { /* no RIGHT&GOOD grounding available — leave empty */ }
+  try {
+    for (const [trait, value] of Object.entries(loadWorkStyleProfile(store, projectRoot))) {
+      if (value.value !== null) rightGoodWorkStyleEnvRuntimeRefs.push(`work_style:${trait}:${value.value}`);
+    }
+  } catch { /* no work-style grounding available — leave empty */ }
+  const scopedFeedbackEvidenceRefs: string[] = [];
+  try {
+    for (const category of getPromptEnhancementFeedbackSummary(store, projectRoot).categoryCounts) {
+      scopedFeedbackEvidenceRefs.push(`feedback:${category.feedbackCategory}:${category.count}`);
+    }
+  } catch { /* no scoped feedback available — leave empty */ }
+  return { rightGoodWorkStyleEnvRuntimeRefs, scopedFeedbackEvidenceRefs };
+}
+
 export function buildPromptEnhancementRequestForAuto(input: {
   auto: AutoInput;
   store: Store;
@@ -236,6 +271,7 @@ export function buildPromptEnhancementRequestForAuto(input: {
     : undefined;
   const recentRefs = recentPromptMetadata(input.session.current.promptHistory)
     .map((prompt) => `prompt:${prompt.index}`);
+  const grounding = buildPromptEnhancementGroundingRefsV1(input.store, input.auto.projectRoot);
 
   return {
     schemaVersion: PROMPT_ENHANCEMENT_CONTRACT_VERSION,
@@ -284,7 +320,7 @@ export function buildPromptEnhancementRequestForAuto(input: {
       popupQuestionSourceRefs: content.resolvedRecordIdentity ? [`${content.resolvedRecordIdentity}:question`] : [],
       whyHelpSourceRefs: content.resolvedRecordIdentity ? [`${content.resolvedRecordIdentity}:why-help`] : [],
       profileRoleModeRefs: input.configuredRole ? [`role:${input.configuredRole}`] : [],
-      rightGoodWorkStyleEnvRuntimeRefs: [],
+      rightGoodWorkStyleEnvRuntimeRefs: grounding.rightGoodWorkStyleEnvRuntimeRefs,
       missingMemoryCandidateRefs: [],
       sourceLabels: [
         { sourceRefId: originalPromptRef.sourceRefId, label: 'original_prompt', evidenceStatus: 'present' },
@@ -325,7 +361,7 @@ export function buildPromptEnhancementRequestForAuto(input: {
     },
     userPreferenceContext: {
       levelState: 'default',
-      scopedFeedbackEvidenceRefs: [],
+      scopedFeedbackEvidenceRefs: grounding.scopedFeedbackEvidenceRefs,
     },
     configSnapshot: {
       sequenceEnabledState: 'not_enabled_v1',
