@@ -72,32 +72,63 @@ export async function handleWindsurfHookCli(
   return run(event, raw, { cwd });
 }
 
+export interface WindsurfHookActionDeps {
+  handle?: (event: string, opts: { project?: string }) => Promise<RunResult>;
+  raisePopup?: () => void;
+  waitForChild?: (child: ChildProcess | null | undefined) => Promise<void>;
+  exit?: (code: number) => void;
+  env?: NodeJS.ProcessEnv;
+}
+
+/**
+ * The `windsurf-hook` command body.
+ *
+ * Extracted from the command action purely so it can be tested. The action
+ * resolves its own stdin and ends in `process.exit`, so calling it from a test
+ * blocks on real stdin and then tears down the runner — which is why the
+ * popup-raise gate below had no coverage. Every dependency defaults to exactly
+ * what the action already used, so shipped behaviour is byte-identical.
+ */
+export async function runWindsurfHookAction(
+  event: string,
+  opts: { project?: string },
+  deps: WindsurfHookActionDeps = {},
+): Promise<void> {
+  const handle = deps.handle ?? handleWindsurfHookCli;
+  const raisePopup = deps.raisePopup ?? bringPopupToFront;
+  const waitForChild = deps.waitForChild ?? awaitChild;
+  const exit = deps.exit ?? ((code: number) => process.exit(code));
+  const env = deps.env ?? process.env;
+
+  try {
+    // Name this surface for Layer C's popup "Send to …" label. The spawned
+    // `nexpath stop` child inherits process.env (see windsurf-hook/spawn.ts
+    // baseOpts), so setting it here makes the Windsurf popup say "Windsurf".
+    env.NEXPATH_AGENT = 'windsurf';
+    const result = await handle(event, opts);
+    // The stop event opens Layer C's popup window (advisory, feedback, or
+    // prompt-enhancement). On Linux, GNOME opens it behind Windsurf — raise it
+    // to the front. The extension's popup-foreground never runs here (Windsurf
+    // spawns `stop` via this hook, not via ipc). Fire-and-forget; unref'd so it
+    // never keeps the hook process alive.
+    if (event === 'post_cascade_response' && result.child) {
+      raisePopup();
+    }
+    // Await the Layer-C child so the prompt is fully written + auto has
+    // persisted the advisory (and stop has rendered the popup) before we exit.
+    await waitForChild(result.child);
+  } catch {
+    // Never break Cascade — swallow any error and exit cleanly.
+  }
+  exit(0);
+}
+
 export function registerWindsurfHookCommand(program: Command): void {
   program
     .command('windsurf-hook <event>')
     .description('Internal: bridge a Windsurf Cascade hook to nexpath auto/stop (configured by `nexpath install`).')
     .option('-p, --project <dir>', 'Project root (defaults to the current working directory)')
     .action(async (event: string, opts: { project?: string }) => {
-      try {
-        // Name this surface for Layer C's popup "Send to …" label. The spawned
-        // `nexpath stop` child inherits process.env (see windsurf-hook/spawn.ts
-        // baseOpts), so setting it here makes the Windsurf popup say "Windsurf".
-        process.env.NEXPATH_AGENT = 'windsurf';
-        const result = await handleWindsurfHookCli(event, opts);
-        // The stop event opens Layer C's popup window (advisory or feedback). On
-        // Linux, GNOME opens it behind Windsurf — raise it to the front. The
-        // extension's popup-foreground never runs here (Windsurf spawns `stop`
-        // via this hook, not via ipc). Fire-and-forget; unref'd so it never keeps
-        // the hook process alive.
-        if (event === 'post_cascade_response' && result.child) {
-          bringPopupToFront();
-        }
-        // Await the Layer-C child so the prompt is fully written + auto has
-        // persisted the advisory (and stop has rendered the popup) before we exit.
-        await awaitChild(result.child);
-      } catch {
-        // Never break Cascade — swallow any error and exit cleanly.
-      }
-      process.exit(0);
+      await runWindsurfHookAction(event, opts);
     });
 }
