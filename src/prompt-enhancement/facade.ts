@@ -15,7 +15,14 @@ import {
   type PromptEnhancementUiViewPayloadV1,
   type PromptEnhancementWhyHelpV1,
 } from './contracts.js';
-import { composePromptEnhancementBody, type PromptEnhancementComposeResult } from './compose-enhancement.js';
+import {
+  composePromptEnhancementBody,
+  type PromptEnhancementComposeResult,
+  type PromptEnhancementStructuredComposerOutputV1,
+} from './compose-enhancement.js';
+import { composeStructuredComposerOutputV1 } from './llm-composer.js';
+import { isPromptEnhancementNlpHeavyCaseV1 } from './composer-gate.js';
+import { isValidApiKey } from '../config/ApiKeyResolver.js';
 import { planPromptEnhancementSections } from './templates/section-plan.js';
 import { routePromptEnhancement, type PromptEnhancementCapabilityId } from './routing-taxonomy.js';
 import { buildPromptEnhancementGuidanceFactsV1 } from './guidance-facts.js';
@@ -122,10 +129,31 @@ async function prepare(
     sourceRefs: request.sourceSignals.sourceRefs,
     guidanceFacts: sourceMix.renderedFacts,
   });
+
+  // E4: bounded LLM composer wording for a shown, NLP-heavy popup on the baseline
+  // compose (no action). Gated on a valid key so the whole test suite (no key) and
+  // any obvious/clear prompt render deterministically. Any failure -> undefined ->
+  // composePromptEnhancementBody validates + falls back deterministically.
+  let structuredComposerOutput: PromptEnhancementStructuredComposerOutputV1 | undefined;
+  if (
+    action === undefined &&
+    !noPopup &&
+    isPromptEnhancementNlpHeavyCaseV1(route) &&
+    isValidApiKey(process.env['OPENAI_API_KEY'] ?? '')
+  ) {
+    structuredComposerOutput = await composeStructuredComposerOutputV1({
+      enhancementId,
+      originalPromptText: request.sourcePrompt.text,
+      planning,
+    });
+  }
+
   const composed = composePromptEnhancementBody({
     enhancementId,
     originalPromptText: request.sourcePrompt.text,
     sectionPlanningResult: planning,
+    composerRuntimeState: structuredComposerOutput ? 'accepted_structured_output' : undefined,
+    structuredComposerOutput,
     action: action === 'use_original' || action === 'feedback' || action === 'close' || action === 'use_current_body'
       ? undefined
       : action,
@@ -195,7 +223,7 @@ function buildResult(
     enhancementId,
     requestId: request.requestId,
     projectRoot: request.projectRoot,
-    modelVersion: 'pe-ar10-deterministic-v1',
+    modelVersion: composed.callVisibilityMode === 'llm_wording' ? 'pe-ar10-llm-wording-v1' : 'pe-ar10-deterministic-v1',
     disposition,
     validationDecisionId: safety.validationDecisionId,
     currentBody,
