@@ -2,7 +2,7 @@
  * S3 / P14-G1 — owner-run public-launch recheck (owner design decision #1: owner-run, no CI gate).
  *
  * MANDATORY pre-promotion checklist action: run this BEFORE promoting the prompt-enhancement tree to
- * public. It executes the PE-CR-5 / G8 launch-recheck gate against real repo facts and hard-BLOCKS
+ * public. It executes the G8 confidentiality launch-recheck gate against real repo facts and hard-BLOCKS
  * (exit 1) unless the gate is ready + the owner has explicitly approved public promotion. There is
  * deliberately no CI backstop — skipping this step is exactly what caused the confidentiality incident.
  *
