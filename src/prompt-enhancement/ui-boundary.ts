@@ -29,7 +29,7 @@ export interface PromptEnhancementUiBoundaryInputV1 {
 }
 
 /**
- * Host-independent H1.2 adapter. It is the only boundary allowed to turn a
+ * Host-independent stage-1-2 adapter. It is the only boundary allowed to turn a
  * validated PE result into popup-session state. A renderer/host must consume the
  * returned typed session; it must not infer authority from body text or transport.
  */
@@ -77,9 +77,13 @@ export function buildPromptEnhancementUiBoundarySessionV1(
     timestampMs: input.timestampMs,
   });
 
+  // D2 (P7-G1): a blocked_no_send result still returns a session (so the block state is shown), but
+  // the body is excluded by the layers below — tag it so a consuming host/observer sees the exclusion.
+  const reasonCodes = result.disposition === 'blocked_no_send' ? ['blocked_no_send_body_excluded'] : [];
+
   return {
     state: 'session_ready',
-    reasonCodes: [],
+    reasonCodes,
     session,
   };
 }

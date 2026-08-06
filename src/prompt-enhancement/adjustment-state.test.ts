@@ -141,7 +141,7 @@ async function preparedState() {
   return { baseRequest, result, session, draft: builtDraft.draft, state: buildPromptEnhancementAdjustmentStateV1(snapshot) };
 }
 
-describe('B1.3a locked adjustment comparison and instant Back state', () => {
+describe('stage-1-3a locked adjustment comparison and instant Back state', () => {
   it('hides the main surface, creates a distinct request identity, and Back performs no facade request', async () => {
     const fixture = await preparedState();
     const action = adjustment(fixture.state.mainSnapshot);

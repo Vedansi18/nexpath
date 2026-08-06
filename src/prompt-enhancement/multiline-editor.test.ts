@@ -26,7 +26,7 @@ function editor(overrides: Partial<Parameters<typeof buildPromptEnhancementMulti
   });
 }
 
-describe('B1.2a pure multiline editor state machine', () => {
+describe('stage-1-2a pure multiline editor state machine', () => {
   it('maps actual newlines and wrapped visual rows without changing the text', () => {
     const lines = buildPromptEnhancementVisualLineMapV1('abcd\nef', 3);
     expect(lines.map((line) => line.text)).toEqual(['abc', 'd', 'ef']);

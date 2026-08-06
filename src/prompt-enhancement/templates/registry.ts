@@ -88,7 +88,7 @@ export function getPromptEnhancementTemplateRef(
     contentTemplateInputRefs: record.contentTemplateInputRefs,
     safetyHookIds: record.safetyHooks,
     sensitivityPolicy: 'deterministic_flags_required',
-    voicePolicyRef: 'pe-ar3-source-honest-user-to-agent-voice',
+    voicePolicyRef: 'source-honest-user-to-agent-voice',
     confirmationRequirementPolicy: 'preserve_when_required',
     supportedDirectionalActions: ['shorter', 'more_thorough', 'more_project_grounded', 'apply_details'],
     composerPolicy: 'deterministic_only',
@@ -106,7 +106,7 @@ export function getPromptEnhancementTemplateRef(
       'no_source_b_only_popup',
       'no_precomputed_directional_variants',
     ],
-    ownerArea: 'hiren_content_api',
+    ownerArea: 'content_semantics',
     launchVisibility: 'private_until_launch_recheck',
     publicSafeSourceNotes: [
       'DS content-template refs are Source B only.',

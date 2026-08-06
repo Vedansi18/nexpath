@@ -122,6 +122,20 @@ function keepCursorVisible(buffer: PromptEnhancementEditorBufferV1, width: numbe
   return { ...buffer, desiredVisualColumn: position.column, scrollVisualRow: clampNonNegative(scroll) };
 }
 
+/**
+ * Sync a buffer's scroll so its cursor is inside the given viewport. Exported for the
+ * raw-TTY popup render, which windows the display and places the hardware caret from the
+ * SAME scroll position — if the two disagree (cursor off-window) the caret would fall
+ * outside the visible field and get clamped to the screen bottom (a stray cursor).
+ */
+export function promptEnhancementKeepFieldCursorVisibleV1(
+  buffer: PromptEnhancementEditorBufferV1,
+  width: number,
+  viewportRows: number,
+): PromptEnhancementEditorBufferV1 {
+  return keepCursorVisible(buffer, width, viewportRows);
+}
+
 function bufferFor(text: string, focused: boolean, width: number): PromptEnhancementEditorBufferV1 {
   return {
     text,

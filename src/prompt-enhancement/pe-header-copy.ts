@@ -8,7 +8,7 @@ import type {
 } from './routing-taxonomy.js';
 
 // ---------------------------------------------------------------------------
-// UI-9 / PE-AR-10 — deterministic header copy (pinch label + why-help).
+// UI-9 / transform-rule-10 — deterministic header copy (pinch label + why-help).
 //
 // Locked decisions (plan §8.6, owner 2026-08-03):
 //  - Deterministic only — NO LLM call before first render.

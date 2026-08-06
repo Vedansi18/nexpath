@@ -76,14 +76,14 @@ export type PromptEnhancementCostCallUserVisibleTriggerV1 =
   | 'not_user_visible_included_in_baseline';
 
 export type PromptEnhancementCostWorksheetCostStateV1 =
-  | 'accepted_in_private_pe_g4_packet_not_public_constant'
+  | 'accepted_in_private_cost_visibility_packet_not_public_constant'
   | 'zero_no_separate_call'
   | 'future_scope_not_bounded';
 
 export interface PromptEnhancementAcceptedCostCallInventoryRowV1 {
   callId: PromptEnhancementCostCallIdV1;
-  owner: 'hiren_content_api';
-  ownerResearchItem: 'PE-EM-1_PE-G4';
+  owner: 'content_semantics';
+  ownerResearchItem: 'cost_visibility';
   implementationModule: 'src/prompt-enhancement/cost-observability.ts';
   trigger: PromptEnhancementCostCallTriggerV1;
   userVisibleTrigger: PromptEnhancementCostCallUserVisibleTriggerV1;
@@ -124,7 +124,7 @@ export interface PromptEnhancementAcceptedCostCallInventoryRowV1 {
   separateLlmCallInV1: boolean;
   skipCondition: string;
   passFailStatus: 'accepted_with_product_scope_notes' | 'future_scope';
-  openHirenDecision:
+  openOwnerDecision:
     | 'none_for_accepted_product_scope'
     | 'later_written_yes_no_required_for_architecture_reopen'
     | 'future_product_scope_requires_new_decision';
@@ -154,7 +154,7 @@ export interface PromptEnhancementCostMeasurementInputV1 {
 
 export interface PromptEnhancementCostMeasurementRecordV1 {
   callId: PromptEnhancementCostCallIdV1;
-  owner: 'hiren_content_api';
+  owner: 'content_semantics';
   trigger: PromptEnhancementCostCallTriggerV1;
   provider: typeof PROMPT_ENHANCEMENT_COST_PROVIDER_V1;
   model: typeof PROMPT_ENHANCEMENT_COST_MODEL_V1;
@@ -254,7 +254,7 @@ export interface PromptEnhancementCostWeakeningCheckInputV1 {
 }
 
 export type PromptEnhancementCurrentSourceCostWorksheetStateV1 =
-  | 'blocked_pending_hiren'
+  | 'blocked_pending_owner'
   | 'accepted_zero_unless_source_proven'
   | 'accepted_source_mean_assumption';
 
@@ -270,7 +270,7 @@ export interface PromptEnhancementCurrentSourceCostCallInventoryRowV1 {
     | 'current_content_template_simpler_derive'
     | 'current_content_template_autogen';
   sourceLayer: string;
-  ownerResearchItem: 'PE-EM-1_PE-G4';
+  ownerResearchItem: 'cost_visibility';
   implementationModule: string;
   budgetBucket: 'current_always_on_nexpath_baseline_not_pe';
   currentVsNew: 'current_source_call_surface';
@@ -311,16 +311,16 @@ export interface PromptEnhancementCurrentSourceCostCallInventoryRowV1 {
   expectedCallsPerMonth: number | PromptEnhancementCurrentSourceCostWorksheetStateV1;
   heavyCallsPerMonth: number | PromptEnhancementCurrentSourceCostWorksheetStateV1;
   worstCaseCallsPerMonth: number | PromptEnhancementCurrentSourceCostWorksheetStateV1 | 'source_undefined';
-  conservativeMonthlyCostState: 'accepted_in_private_pe_g4_packet_not_public_constant' | 'zero_no_separate_call';
-  expectedMonthlyCostState: 'accepted_in_private_pe_g4_packet_not_public_constant' | 'zero_no_separate_call';
-  heavyMonthlyCostState: 'accepted_in_private_pe_g4_packet_not_public_constant' | 'zero_no_separate_call';
+  conservativeMonthlyCostState: 'accepted_in_private_cost_visibility_packet_not_public_constant' | 'zero_no_separate_call';
+  expectedMonthlyCostState: 'accepted_in_private_cost_visibility_packet_not_public_constant' | 'zero_no_separate_call';
+  heavyMonthlyCostState: 'accepted_in_private_cost_visibility_packet_not_public_constant' | 'zero_no_separate_call';
   worksheetStatus: PromptEnhancementCurrentSourceCostWorksheetStateV1;
   passFailStatus:
-    | 'blocked_pending_hiren'
+    | 'blocked_pending_owner'
     | 'blocked_pending_source_value'
     | 'accepted_zero_unless_source_proven'
     | 'accepted_source_mean_assumption';
-  openHirenDecision:
+  openOwnerDecision:
     | 'current_source_monthly_values_pending'
     | 'source_reachability_reopen_if_proven'
     | 'source_input_value_pending'
@@ -354,6 +354,22 @@ const CALL_ROWS: readonly PromptEnhancementAcceptedCostCallInventoryRowV1[] = [
     reasonCodes: ['baseline_composer_llm_backed'],
   }),
   row({
+    // E6: bounded LLM route decision for NL-heavy prompts the deterministic keyword
+    // router soft-skipped. Separate v1 call (route precedes planning, so combining with
+    // the composer is a future optimization). Exact cost numbers get gate-rule-4 sign-off at
+    // R-track; small output (a route-decision JSON), never a runtime gate.
+    callId: 'llm_route_decision_call',
+    trigger: 'prepare',
+    userVisibleTrigger: 'enhancement_popup_shown',
+    hiddenRuntimeTrigger: 'baseline prepare soft-skipped an NL-heavy prompt (source_b_only / weak-ambiguous) and provider/key/source/safety state permits the bounded route decision',
+    requirementState: 'required_when_contract_executes',
+    productState: 'accepted_v1_llm_backed',
+    calls: [90, 180, 300, 300],
+    separateLlmCallInV1: true,
+    skipCondition: 'skip unless a baseline prepare soft-skipped an NL-heavy prompt and a valid key/provider is available; the deterministic route is always the fallback (never blocks send)',
+    reasonCodes: ['llm_route_decision_llm_backed'],
+  }),
+  row({
     callId: 'source_signal_guidance_in_baseline',
     trigger: 'prepare',
     userVisibleTrigger: 'not_user_visible_included_in_baseline',
@@ -362,7 +378,7 @@ const CALL_ROWS: readonly PromptEnhancementAcceptedCostCallInventoryRowV1[] = [
     productState: 'included_in_baseline_no_separate_v1_call',
     calls: [0, 0, 0, 0],
     separateLlmCallInV1: false,
-    skipCondition: 'included in baseline composer or deterministic renderer; no separate call unless Hiren reopens architecture',
+    skipCondition: 'included in baseline composer or deterministic renderer; no separate call unless content-owner reopens architecture',
     reasonCodes: ['source_signal_guidance_included_in_baseline_composer'],
   }),
   row({
@@ -453,7 +469,7 @@ const CALL_ROWS: readonly PromptEnhancementAcceptedCostCallInventoryRowV1[] = [
     callId: 'optional_safety_review',
     trigger: 'safety_review',
     userVisibleTrigger: 'safety_review_needed',
-    hiddenRuntimeTrigger: 'optional LLM safety review is triggered beyond deterministic PE-DR-5 validation',
+    hiddenRuntimeTrigger: 'optional LLM safety review is triggered beyond deterministic decision-rule-5 validation',
     requirementState: 'optional_product_selected_when_triggered',
     productState: 'accepted_v1_llm_backed',
     calls: [47.25, 101.25, 180, 180],
@@ -489,7 +505,7 @@ const CALL_ROWS: readonly PromptEnhancementAcceptedCostCallInventoryRowV1[] = [
     callId: 'future_regenerate_flow',
     trigger: 'future_action',
     userVisibleTrigger: 'future_explicit_action',
-    hiddenRuntimeTrigger: 'future explicit regenerate action after a later written product decision and PE-EM-1 row',
+    hiddenRuntimeTrigger: 'future explicit regenerate action after a later written product decision and eval-rule-1 row',
     requirementState: 'future_only_not_v1',
     productState: 'future_product_scope_not_in_v1',
     calls: [0, 0, 0, 'not_bounded_for_future_v1'],
@@ -501,7 +517,7 @@ const CALL_ROWS: readonly PromptEnhancementAcceptedCostCallInventoryRowV1[] = [
     callId: 'future_modification_instruction_flow',
     trigger: 'future_action',
     userVisibleTrigger: 'future_explicit_action',
-    hiddenRuntimeTrigger: 'future heavier modification-instruction action after a later written product decision and PE-EM-1 row',
+    hiddenRuntimeTrigger: 'future heavier modification-instruction action after a later written product decision and eval-rule-1 row',
     requirementState: 'future_only_not_v1',
     productState: 'future_product_scope_not_in_v1',
     calls: [0, 0, 0, 'not_bounded_for_future_v1'],
@@ -525,13 +541,13 @@ const CURRENT_SOURCE_BASELINE_ROWS: readonly PromptEnhancementCurrentSourceCostC
     userVisibleTrigger: 'prompt_submit',
     hiddenRuntimeTrigger: 'profile missing or stale and enough actual prompt history exists',
     skipCondition: 'generated-origin prompts do not increment actual-user prompt cadence; normal user prompts remain eligible',
-    calls: ['blocked_pending_hiren', 'blocked_pending_hiren', 'blocked_pending_hiren', 'blocked_pending_hiren'],
+    calls: ['blocked_pending_owner', 'blocked_pending_owner', 'blocked_pending_owner', 'blocked_pending_owner'],
     costStates: [
-      'accepted_in_private_pe_g4_packet_not_public_constant',
-      'accepted_in_private_pe_g4_packet_not_public_constant',
-      'accepted_in_private_pe_g4_packet_not_public_constant',
+      'accepted_in_private_cost_visibility_packet_not_public_constant',
+      'accepted_in_private_cost_visibility_packet_not_public_constant',
+      'accepted_in_private_cost_visibility_packet_not_public_constant',
     ],
-    worksheetStatus: 'blocked_pending_hiren',
+    worksheetStatus: 'blocked_pending_owner',
   }),
   currentSourceRow({
     baselineCallId: 'current_stream_b_presence_classifier',
@@ -544,13 +560,13 @@ const CURRENT_SOURCE_BASELINE_ROWS: readonly PromptEnhancementCurrentSourceCostC
     userVisibleTrigger: 'prompt_submit',
     hiddenRuntimeTrigger: 'implementation-stage prompt with promptsInCurrentStage >= 3',
     skipCondition: 'skip outside implementation-stage source condition or when source classifier cannot run',
-    calls: ['blocked_pending_hiren', 'blocked_pending_hiren', 'blocked_pending_hiren', 'blocked_pending_hiren'],
+    calls: ['blocked_pending_owner', 'blocked_pending_owner', 'blocked_pending_owner', 'blocked_pending_owner'],
     costStates: [
-      'accepted_in_private_pe_g4_packet_not_public_constant',
-      'accepted_in_private_pe_g4_packet_not_public_constant',
-      'accepted_in_private_pe_g4_packet_not_public_constant',
+      'accepted_in_private_cost_visibility_packet_not_public_constant',
+      'accepted_in_private_cost_visibility_packet_not_public_constant',
+      'accepted_in_private_cost_visibility_packet_not_public_constant',
     ],
-    worksheetStatus: 'blocked_pending_hiren',
+    worksheetStatus: 'blocked_pending_owner',
   }),
   currentSourceRow({
     baselineCallId: 'current_stage_classifier',
@@ -563,13 +579,13 @@ const CURRENT_SOURCE_BASELINE_ROWS: readonly PromptEnhancementCurrentSourceCostC
     userVisibleTrigger: 'prompt_submit',
     hiddenRuntimeTrigger: 'real prompt-submit classification pipeline after profile and Stream-B checks',
     skipCondition: 'generated-origin prompts are excluded from normal submit volume before current-source lifecycle accounting',
-    calls: ['blocked_pending_hiren', 'blocked_pending_hiren', 'blocked_pending_hiren', 'blocked_pending_hiren'],
+    calls: ['blocked_pending_owner', 'blocked_pending_owner', 'blocked_pending_owner', 'blocked_pending_owner'],
     costStates: [
-      'accepted_in_private_pe_g4_packet_not_public_constant',
-      'accepted_in_private_pe_g4_packet_not_public_constant',
-      'accepted_in_private_pe_g4_packet_not_public_constant',
+      'accepted_in_private_cost_visibility_packet_not_public_constant',
+      'accepted_in_private_cost_visibility_packet_not_public_constant',
+      'accepted_in_private_cost_visibility_packet_not_public_constant',
     ],
-    worksheetStatus: 'blocked_pending_hiren',
+    worksheetStatus: 'blocked_pending_owner',
   }),
   currentSourceRow({
     baselineCallId: 'current_pinch_label_generator',
@@ -582,13 +598,13 @@ const CURRENT_SOURCE_BASELINE_ROWS: readonly PromptEnhancementCurrentSourceCostC
     userVisibleTrigger: 'stop_decision_session',
     hiddenRuntimeTrigger: 'Stop decision-session advisory with source-supported pinch label need',
     skipCondition: 'skip when no decision-session advisory is fired or source provides deterministic/static fallback',
-    calls: ['blocked_pending_hiren', 'blocked_pending_hiren', 'blocked_pending_hiren', 'blocked_pending_hiren'],
+    calls: ['blocked_pending_owner', 'blocked_pending_owner', 'blocked_pending_owner', 'blocked_pending_owner'],
     costStates: [
-      'accepted_in_private_pe_g4_packet_not_public_constant',
-      'accepted_in_private_pe_g4_packet_not_public_constant',
-      'accepted_in_private_pe_g4_packet_not_public_constant',
+      'accepted_in_private_cost_visibility_packet_not_public_constant',
+      'accepted_in_private_cost_visibility_packet_not_public_constant',
+      'accepted_in_private_cost_visibility_packet_not_public_constant',
     ],
-    worksheetStatus: 'blocked_pending_hiren',
+    worksheetStatus: 'blocked_pending_owner',
   }),
   currentSourceRow({
     baselineCallId: 'current_decision_session_option_generator',
@@ -616,13 +632,13 @@ const CURRENT_SOURCE_BASELINE_ROWS: readonly PromptEnhancementCurrentSourceCostC
     userVisibleTrigger: 'stop_decision_session',
     hiddenRuntimeTrigger: 'after Claude response for pending decision-session grounding or weave',
     skipCondition: 'skip when no pending decision session requires content-template grounding',
-    calls: ['blocked_pending_hiren', 'blocked_pending_hiren', 'blocked_pending_hiren', 'blocked_pending_hiren'],
+    calls: ['blocked_pending_owner', 'blocked_pending_owner', 'blocked_pending_owner', 'blocked_pending_owner'],
     costStates: [
-      'accepted_in_private_pe_g4_packet_not_public_constant',
-      'accepted_in_private_pe_g4_packet_not_public_constant',
-      'accepted_in_private_pe_g4_packet_not_public_constant',
+      'accepted_in_private_cost_visibility_packet_not_public_constant',
+      'accepted_in_private_cost_visibility_packet_not_public_constant',
+      'accepted_in_private_cost_visibility_packet_not_public_constant',
     ],
-    worksheetStatus: 'blocked_pending_hiren',
+    worksheetStatus: 'blocked_pending_owner',
   }),
   currentSourceRow({
     baselineCallId: 'current_content_template_prompt_param_extraction',
@@ -635,13 +651,13 @@ const CURRENT_SOURCE_BASELINE_ROWS: readonly PromptEnhancementCurrentSourceCostC
     userVisibleTrigger: 'stop_decision_session',
     hiddenRuntimeTrigger: 'recent-prompt prompt-derived param extraction before content-template grounding facts are built',
     skipCondition: 'skip when there are no recent prompts to mine or content-template grounding does not request prompt-derived param facts',
-    calls: ['blocked_pending_hiren', 'blocked_pending_hiren', 'blocked_pending_hiren', 'blocked_pending_hiren'],
+    calls: ['blocked_pending_owner', 'blocked_pending_owner', 'blocked_pending_owner', 'blocked_pending_owner'],
     costStates: [
-      'accepted_in_private_pe_g4_packet_not_public_constant',
-      'accepted_in_private_pe_g4_packet_not_public_constant',
-      'accepted_in_private_pe_g4_packet_not_public_constant',
+      'accepted_in_private_cost_visibility_packet_not_public_constant',
+      'accepted_in_private_cost_visibility_packet_not_public_constant',
+      'accepted_in_private_cost_visibility_packet_not_public_constant',
     ],
-    worksheetStatus: 'blocked_pending_hiren',
+    worksheetStatus: 'blocked_pending_owner',
   }),
   currentSourceRow({
     baselineCallId: 'current_content_template_simpler_derive',
@@ -654,13 +670,13 @@ const CURRENT_SOURCE_BASELINE_ROWS: readonly PromptEnhancementCurrentSourceCostC
     userVisibleTrigger: 'stop_decision_session',
     hiddenRuntimeTrigger: 'content-template simpler-variant derivation when source template runtime asks for it',
     skipCondition: 'skip when selected content template already has an authored simpler variant or no derivation is requested',
-    calls: ['blocked_pending_hiren', 'blocked_pending_hiren', 'blocked_pending_hiren', 'blocked_pending_hiren'],
+    calls: ['blocked_pending_owner', 'blocked_pending_owner', 'blocked_pending_owner', 'blocked_pending_owner'],
     costStates: [
-      'accepted_in_private_pe_g4_packet_not_public_constant',
-      'accepted_in_private_pe_g4_packet_not_public_constant',
-      'accepted_in_private_pe_g4_packet_not_public_constant',
+      'accepted_in_private_cost_visibility_packet_not_public_constant',
+      'accepted_in_private_cost_visibility_packet_not_public_constant',
+      'accepted_in_private_cost_visibility_packet_not_public_constant',
     ],
-    worksheetStatus: 'blocked_pending_hiren',
+    worksheetStatus: 'blocked_pending_owner',
   }),
   currentSourceRow({
     baselineCallId: 'current_content_template_autogen',
@@ -675,9 +691,9 @@ const CURRENT_SOURCE_BASELINE_ROWS: readonly PromptEnhancementCurrentSourceCostC
     skipCondition: 'best-effort source autogen only; no PE composer budget and no runtime weakening based on its cost',
     calls: [1, 2, 4, 'source_undefined'],
     costStates: [
-      'accepted_in_private_pe_g4_packet_not_public_constant',
-      'accepted_in_private_pe_g4_packet_not_public_constant',
-      'accepted_in_private_pe_g4_packet_not_public_constant',
+      'accepted_in_private_cost_visibility_packet_not_public_constant',
+      'accepted_in_private_cost_visibility_packet_not_public_constant',
+      'accepted_in_private_cost_visibility_packet_not_public_constant',
     ],
     worksheetStatus: 'accepted_source_mean_assumption',
   }),
@@ -895,7 +911,7 @@ export function validatePromptEnhancementCostInventoryV1(
     ids.add(inventoryRow.callId);
     if (inventoryRow.provider !== PROMPT_ENHANCEMENT_COST_PROVIDER_V1) reasonCodes.push(`provider_mismatch:${inventoryRow.callId}`);
     if (inventoryRow.model !== PROMPT_ENHANCEMENT_COST_MODEL_V1) reasonCodes.push(`model_mismatch:${inventoryRow.callId}`);
-    if (inventoryRow.ownerResearchItem !== 'PE-EM-1_PE-G4') reasonCodes.push(`owner_research_item_missing:${inventoryRow.callId}`);
+    if (inventoryRow.ownerResearchItem !== 'cost_visibility') reasonCodes.push(`owner_research_item_missing:${inventoryRow.callId}`);
     if (inventoryRow.implementationModule !== 'src/prompt-enhancement/cost-observability.ts') {
       reasonCodes.push(`implementation_module_missing:${inventoryRow.callId}`);
     }
@@ -931,7 +947,7 @@ export function validatePromptEnhancementCostInventoryV1(
     if (!inventoryRow.deterministicLocalFallback) reasonCodes.push(`deterministic_fallback_missing:${inventoryRow.callId}`);
     if (!inventoryRow.sendOriginalFallbackState) reasonCodes.push(`send_original_fallback_missing:${inventoryRow.callId}`);
     if (!inventoryRow.passFailStatus) reasonCodes.push(`pass_fail_status_missing:${inventoryRow.callId}`);
-    if (!inventoryRow.openHirenDecision) reasonCodes.push(`open_hiren_decision_missing:${inventoryRow.callId}`);
+    if (!inventoryRow.openOwnerDecision) reasonCodes.push(`open_owner_decision_missing:${inventoryRow.callId}`);
     if (inventoryRow.costVisibilityCanWeakenBehavior) reasonCodes.push(`cost_limiter_enabled:${inventoryRow.callId}`);
     if (inventoryRow.costVisibilityCanDisableCall) reasonCodes.push(`cost_disable_enabled:${inventoryRow.callId}`);
     if (inventoryRow.telemetrySafeMeasurementFields.length !== PROMPT_ENHANCEMENT_COST_MEASUREMENT_FIELDS_V1.length) {
@@ -952,7 +968,7 @@ export function validatePromptEnhancementCurrentSourceCostInventoryV1(
   for (const inventoryRow of rows) {
     if (ids.has(inventoryRow.baselineCallId)) reasonCodes.push(`duplicate_current_source_call_id:${inventoryRow.baselineCallId}`);
     ids.add(inventoryRow.baselineCallId);
-    if (inventoryRow.ownerResearchItem !== 'PE-EM-1_PE-G4') reasonCodes.push(`owner_research_item_missing:${inventoryRow.baselineCallId}`);
+    if (inventoryRow.ownerResearchItem !== 'cost_visibility') reasonCodes.push(`owner_research_item_missing:${inventoryRow.baselineCallId}`);
     if (!inventoryRow.implementationModule) reasonCodes.push(`implementation_module_missing:${inventoryRow.baselineCallId}`);
     if (inventoryRow.budgetBucket !== 'current_always_on_nexpath_baseline_not_pe') {
       reasonCodes.push(`budget_bucket_mismatch:${inventoryRow.baselineCallId}`);
@@ -1006,7 +1022,7 @@ export function validatePromptEnhancementCurrentSourceCostInventoryV1(
     if (!inventoryRow.expectedMonthlyCostState) reasonCodes.push(`expected_cost_state_missing:${inventoryRow.baselineCallId}`);
     if (!inventoryRow.heavyMonthlyCostState) reasonCodes.push(`heavy_cost_state_missing:${inventoryRow.baselineCallId}`);
     if (!inventoryRow.passFailStatus) reasonCodes.push(`pass_fail_status_missing:${inventoryRow.baselineCallId}`);
-    if (!inventoryRow.openHirenDecision) reasonCodes.push(`open_hiren_decision_missing:${inventoryRow.baselineCallId}`);
+    if (!inventoryRow.openOwnerDecision) reasonCodes.push(`open_owner_decision_missing:${inventoryRow.baselineCallId}`);
     if (!inventoryRow.rawPromptTextExcludedFromTelemetry) reasonCodes.push(`raw_prompt_telemetry_not_excluded:${inventoryRow.baselineCallId}`);
     if (!inventoryRow.notPeComposerBudget) reasonCodes.push(`pe_budget_leak:${inventoryRow.baselineCallId}`);
     if (inventoryRow.costVisibilityCanWeakenBehavior) reasonCodes.push(`cost_limiter_enabled:${inventoryRow.baselineCallId}`);
@@ -1031,8 +1047,8 @@ function row(input: {
 }): PromptEnhancementAcceptedCostCallInventoryRowV1 {
   return {
     callId: input.callId,
-    owner: 'hiren_content_api',
-    ownerResearchItem: 'PE-EM-1_PE-G4',
+    owner: 'content_semantics',
+    ownerResearchItem: 'cost_visibility',
     implementationModule: 'src/prompt-enhancement/cost-observability.ts',
     trigger: input.trigger,
     userVisibleTrigger: input.userVisibleTrigger,
@@ -1079,7 +1095,7 @@ function row(input: {
     passFailStatus: input.productState === 'future_product_scope_not_in_v1'
       ? 'future_scope'
       : 'accepted_with_product_scope_notes',
-    openHirenDecision: openDecisionFor(input.callId, input.productState),
+    openOwnerDecision: openDecisionFor(input.callId, input.productState),
     costVisibilityCanWeakenBehavior: false,
     costVisibilityCanDisableCall: false,
     reasonCodes: input.reasonCodes,
@@ -1111,12 +1127,12 @@ function currentSourceRow(input: {
   ];
   worksheetStatus: PromptEnhancementCurrentSourceCostWorksheetStateV1;
   passFailStatus?: PromptEnhancementCurrentSourceCostCallInventoryRowV1['passFailStatus'];
-  openHirenDecision?: PromptEnhancementCurrentSourceCostCallInventoryRowV1['openHirenDecision'];
+  openOwnerDecision?: PromptEnhancementCurrentSourceCostCallInventoryRowV1['openOwnerDecision'];
 }): PromptEnhancementCurrentSourceCostCallInventoryRowV1 {
   return {
     baselineCallId: input.baselineCallId,
     sourceLayer: input.sourceLayer,
-    ownerResearchItem: 'PE-EM-1_PE-G4',
+    ownerResearchItem: 'cost_visibility',
     implementationModule: input.sourceLayer,
     budgetBucket: 'current_always_on_nexpath_baseline_not_pe',
     currentVsNew: 'current_source_call_surface',
@@ -1150,7 +1166,7 @@ function currentSourceRow(input: {
     heavyMonthlyCostState: input.costStates[2],
     worksheetStatus: input.worksheetStatus,
     passFailStatus: input.passFailStatus ?? currentSourcePassFailStatusFor(input.assumedInputTokens, input.worksheetStatus),
-    openHirenDecision: input.openHirenDecision ?? currentSourceOpenDecisionFor(input.baselineCallId, input.assumedInputTokens, input.timeoutMs, input.worksheetStatus),
+    openOwnerDecision: input.openOwnerDecision ?? currentSourceOpenDecisionFor(input.baselineCallId, input.assumedInputTokens, input.timeoutMs, input.worksheetStatus),
     rawPromptTextExcludedFromTelemetry: true,
     notPeComposerBudget: true,
     costVisibilityCanWeakenBehavior: false,
@@ -1200,7 +1216,7 @@ function currentSourceOpenDecisionFor(
   assumedInputTokens: PromptEnhancementCurrentSourceCostCallInventoryRowV1['assumedInputTokens'],
   timeoutMs: PromptEnhancementCurrentSourceCostCallInventoryRowV1['timeoutMs'],
   worksheetStatus: PromptEnhancementCurrentSourceCostWorksheetStateV1,
-): PromptEnhancementCurrentSourceCostCallInventoryRowV1['openHirenDecision'] {
+): PromptEnhancementCurrentSourceCostCallInventoryRowV1['openOwnerDecision'] {
   if (baselineCallId === 'current_decision_session_option_generator') return 'source_reachability_reopen_if_proven';
   if (assumedInputTokens === 'blocked_pending_source_value') return 'source_input_value_pending';
   if (timeoutMs === 'source_undefined') return 'source_timeout_measurement_pending';
@@ -1229,13 +1245,13 @@ function monthlyCostStateFor(
 ): PromptEnhancementCostWorksheetCostStateV1 {
   if (productState === 'future_product_scope_not_in_v1') return 'future_scope_not_bounded';
   if (callsPerMonth === 0) return 'zero_no_separate_call';
-  return 'accepted_in_private_pe_g4_packet_not_public_constant';
+  return 'accepted_in_private_cost_visibility_packet_not_public_constant';
 }
 
 function openDecisionFor(
   callId: PromptEnhancementCostCallIdV1,
   productState: PromptEnhancementCostCallProductStateV1,
-): PromptEnhancementAcceptedCostCallInventoryRowV1['openHirenDecision'] {
+): PromptEnhancementAcceptedCostCallInventoryRowV1['openOwnerDecision'] {
   if (callId === 'source_signal_guidance_in_baseline') return 'later_written_yes_no_required_for_architecture_reopen';
   if (productState === 'future_product_scope_not_in_v1') return 'future_product_scope_requires_new_decision';
   return 'none_for_accepted_product_scope';

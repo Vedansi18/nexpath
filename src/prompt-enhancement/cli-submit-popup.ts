@@ -35,6 +35,7 @@ import {
   buildPromptEnhancementVisualLineMapV1,
   decodePromptEnhancementEditorInputV1,
   promptEnhancementCursorVisualPositionV1,
+  promptEnhancementKeepFieldCursorVisibleV1,
   reducePromptEnhancementMultilineEditorV1,
   resizePromptEnhancementMultilineEditorV1,
   type PromptEnhancementEditorBufferV1,
@@ -182,13 +183,16 @@ function selectedOriginal(
 /**
  * Claude CLI live consumer for the already-validated PE result. It owns only
  * terminal presentation and typed user intent. Semantic actions stay behind
- * the existing Hiren facade and no prompt is auto-selected.
+ * the existing content-owner facade and no prompt is auto-selected.
  */
 export async function runPromptEnhancementCliSubmitPopupV1(input: {
   request: PromptEnhancementPrepareRequestV1;
   result: PromptEnhancementPrepareResultV1;
   interaction?: PromptEnhancementCliPopupInteractionV1 | null;
   feedbackSink?: PromptEnhancementCliFeedbackSinkV1;
+  // E9: measured per E8 directional/apply-details action call (observability-only). The loop
+  // stays free of the cost module — it hands the produced result to the caller's sink.
+  costObservabilitySink?: (result: PromptEnhancementPrepareResultV1) => void;
   onFirstRender?: () => void;
 }): Promise<PromptEnhancementCliPopupResultV1> {
   let currentResult = input.result;
@@ -336,6 +340,8 @@ export async function runPromptEnhancementCliSubmitPopupV1(input: {
         continue;
       }
       const details = command.type === 'apply_details' ? command.text : additionalDetailsText;
+      // Owner decision (2026-08-06): the recompose here is DETERMINISTIC-instant (the facade
+      // never calls the LLM for popup actions), so no busy/wait state is needed or shown.
       const execution = await executePromptEnhancementActionV1({
         adapterState: buildPromptEnhancementActionAdapterStateV1(model.session),
         baseRequest: input.request,
@@ -359,6 +365,11 @@ export async function runPromptEnhancementCliSubmitPopupV1(input: {
       }
 
       currentResult = execution.result;
+      // E9 (P12-G1): this directional/apply-details action is a real E8 LLM call — measure it
+      // at the popup_action surface so repeated recompositions are counted, not silently free.
+      // Observability is best-effort: a telemetry failure must NEVER abort the popup (the outer
+      // catch returns not_shown), so swallow any sink error — same discipline as feedbackSink.
+      try { input.costObservabilitySink?.(execution.result); } catch { /* observability only */ }
       rendered = buildPromptEnhancementPopupRenderModelV1({
         result: currentResult,
         timestampMs: Date.now(),
@@ -370,7 +381,12 @@ export async function runPromptEnhancementCliSubmitPopupV1(input: {
       model = rendered.model;
       editedBodyText = model.body.text;
       additionalDetailsText = '';
-      publicNotice = currentResult.uiView.diagnostics.at(-1)?.publicSafeText;
+      // Show only a meaningful notice after a refinement — the generic "Prepared prompt-enhancement
+      // body is available." diagnostic (category 'generated') is redundant with the header cues and
+      // must not appear under the options (owner request); keep real notices like the 5,000-word cap.
+      publicNotice = currentResult.uiView.diagnostics
+        .filter((diagnostic) => diagnostic.category !== 'generated')
+        .at(-1)?.publicSafeText;
     }
   } catch {
     return { state: 'not_shown', reasonCodes: ['renderer_failure'] };
@@ -421,12 +437,33 @@ export function buildClaudeUserPromptSubmitHookOutputV1(
 // renderer is UI-2 (interaction wiring); this phase delivers the renderer only.
 // ---------------------------------------------------------------------------
 
-export const PROMPT_ENHANCEMENT_CLI_FOOTER_V1 = '↑↓ move · Esc cancel · Ctrl+J new line' as const;
+export const PROMPT_ENHANCEMENT_CLI_FOOTER_V1 = '↑↓ move · Esc cancel' as const;
 // Light-gray action hints shown under each editable heading (placeholder copy pending the screenshot).
 const PROMPT_ENHANCEMENT_CLI_BODY_HINT_V1 = 'Enter sends this prompt' as const;
 const PROMPT_ENHANCEMENT_CLI_DETAILS_HINT_V1 = 'Enter applies these details · unapplied details are not sent' as const;
 /** Editing keys shown under a focused editable field (owner request). */
 const PROMPT_ENHANCEMENT_CLI_EDIT_KEYS_HINT_V1 = 'Ctrl+J new line · Ctrl+↑/↓ move line' as const;
+
+/** Left indent applied to every wrapped line of editable content (body / details). */
+export const PROMPT_ENHANCEMENT_CLI_CONTENT_INDENT_V1 = 6 as const;
+
+/**
+ * Terminal viewport sizing for the popup. Editable content is wrapped to `fieldWidth` and then
+ * rendered with a {@link PROMPT_ENHANCEMENT_CLI_CONTENT_INDENT_V1}-space indent, so `fieldWidth`
+ * MUST leave room for that indent (+ a 2-column margin). Otherwise a wrapped line overflows the
+ * terminal, the terminal re-wraps it (splitting words mid-line AND doubling the body's height),
+ * and the whole frame grows past the window and scrolls — which loses/repeats the title and puts
+ * the on-screen caret off the row it was computed for. `viewportRows` reserves space for the fixed
+ * chrome (header, hints, option rows, footer).
+ */
+export function promptEnhancementCliViewportV1(columns: number, rows: number): { fieldWidth: number; viewportRows: number } {
+  const cols = Number.isFinite(columns) && columns > 0 ? Math.trunc(columns) : 80;
+  const rowCount = Number.isFinite(rows) && rows > 0 ? Math.trunc(rows) : 24;
+  return {
+    fieldWidth: Math.max(24, cols - PROMPT_ENHANCEMENT_CLI_CONTENT_INDENT_V1 - 2),
+    viewportRows: Math.max(4, rowCount - 26),
+  };
+}
 const PROMPT_ENHANCEMENT_CLI_ADDITIONAL_DETAILS_LABEL_V1 = 'Additional details' as const;
 const PROMPT_ENHANCEMENT_CLI_USE_ORIGINAL_LABEL_V1 = 'Use original prompt' as const;
 const PROMPT_ENHANCEMENT_CLI_GO_BACK_LABEL_V1 = '← Go back' as const;
@@ -451,7 +488,7 @@ export interface PromptEnhancementCliActionRowV1 {
   help?: PromptEnhancementCliRowHelpV1;
 }
 
-/** Locked B1.2a Space-help copy (short label / Space-expanded full), keyed by row. */
+/** Locked stage-1-2a Space-help copy (short label / Space-expanded full), keyed by row. */
 const PROMPT_ENHANCEMENT_CLI_ROW_HELP_V1: Readonly<Record<string, PromptEnhancementCliRowHelpV1>> = {
   editor_heading: {
     short: 'Edit current prompt',
@@ -484,7 +521,7 @@ const PROMPT_ENHANCEMENT_CLI_ROW_HELP_V1: Readonly<Record<string, PromptEnhancem
 };
 
 /**
- * The ordered, navigable action rows for the PE frame, in the locked B1.2a
+ * The ordered, navigable action rows for the PE frame, in the locked stage-1-2a
  * focus order: editor heading, Additional details, directional actions,
  * Feedback (only when typed available), Use original prompt last, and — in a
  * refinement view — a final dim Go back. Availability comes from typed state
@@ -587,7 +624,7 @@ const PROMPT_ENHANCEMENT_CLI_SGR_V1 = (() => {
 
 /**
  * Render the single redrawable PE frame from typed state. The focused row is
- * marked and shows its short help, or the full B1.2a help when Space-expanded.
+ * marked and shows its short help, or the full stage-1-2a help when Space-expanded.
  * Editor-heading and Additional-details rows show their field body beneath them.
  */
 export function renderPromptEnhancementPopupFrameV1(
@@ -627,7 +664,7 @@ export function renderPromptEnhancementPopupFrameV1(
   const recordCaret = (field: PromptEnhancementEditorFieldV1): void => {
     if (frameState.caret?.field === field && frameState.caretOut) {
       frameState.caretOut.row = lines.length + 1 + Math.max(0, frameState.caret.visualRow); // 1-based first content line + caret row
-      frameState.caretOut.col = 7 + Math.max(0, frameState.caret.visualColumn); // col 7 = after the 6-space indent
+      frameState.caretOut.col = 7 + Math.max(0, frameState.caret.visualColumn); // col 7 = after the rail (2) + 4-space indent
     }
   };
 
@@ -641,34 +678,37 @@ export function renderPromptEnhancementPopupFrameV1(
     }
     const focused = index === focusIndex;
     const disabled = row.available ? '' : '  (unavailable)';
-    // Every row is an old-popup radio option: filled/green bullet when focused,
-    // hollow/gray otherwise, on a cyan rail with a dim non-focused label (§8.1).
+    // Every row is an old-popup radio option: filled/green bullet when focused, hollow/gray
+    // otherwise, with a dim non-focused label (§8.1). The cyan left rail is applied to every
+    // line as a single continuous border in the post-pass below (not per-row here).
     if (c) {
       const bullet = focused ? `${c.green}●${c.reset}` : `${c.gray}○${c.reset}`;
       const label = focused ? `${c.bold}${publicText(row.label)}${c.reset}` : `${c.dim}${publicText(row.label)}${c.reset}`;
-      lines.push(`${c.cyan}│${c.reset} ${bullet} ${label}${disabled}`);
+      lines.push(`${bullet} ${label}${disabled}`);
     } else {
-      lines.push(`  ${focused ? '●' : '○'} ${publicText(row.label)}${disabled}`);
+      lines.push(`${focused ? '●' : '○'} ${publicText(row.label)}${disabled}`);
     }
     // The editor heading and Additional details are radio rows that are also
     // editable: their field body renders beneath the row.
     // Light-gray action hint shown under an editable heading (§ UI-8 / owner request).
-    const hint = (text: string) => (c ? `      ${c.gray}${text}${c.reset}` : `      ${text}`);
+    // Content is indented 4 spaces; with the 2-char rail added in the post-pass the text lands at
+    // screen column 7 (matching the caret column formula in recordCaret).
+    const hint = (text: string) => (c ? `    ${c.gray}${text}${c.reset}` : `    ${text}`);
     if (row.kind === 'editor_heading') {
       recordCaret('enhanced_body');
-      for (const bodyLine of publicText(view.editedBodyText).split('\n')) lines.push(`      ${bodyLine}`);
+      for (const bodyLine of publicText(view.editedBodyText).split('\n')) lines.push(`    ${bodyLine}`);
       lines.push(hint(PROMPT_ENHANCEMENT_CLI_BODY_HINT_V1));
     } else if (row.kind === 'additional_details') {
       // UI-8: no "Apply" button — pressing Enter on this row applies the details.
       // An empty field renders blank (§8.5). Sending the body ignores unapplied details.
       recordCaret('additional_details');
       const details = view.additionalDetailsText ? publicText(view.additionalDetailsText) : '';
-      for (const detailLine of details.split('\n')) lines.push(`      ${detailLine}`);
+      for (const detailLine of details.split('\n')) lines.push(`    ${detailLine}`);
       lines.push(hint(PROMPT_ENHANCEMENT_CLI_DETAILS_HINT_V1));
     }
 
     if (focused && row.help) {
-      lines.push(`      ${publicText(frameState.helpExpanded ? row.help.full : row.help.short)}`);
+      lines.push(`    ${publicText(frameState.helpExpanded ? row.help.full : row.help.short)}`);
     }
     // Owner request: show the editing keys under the focused editable field (enhanced body /
     // Additional details) so the user knows how to add lines and move between them.
@@ -684,7 +724,11 @@ export function renderPromptEnhancementPopupFrameV1(
   }
   lines.push(c ? `${c.dim}${PROMPT_ENHANCEMENT_CLI_FOOTER_V1}${c.reset}` : PROMPT_ENHANCEMENT_CLI_FOOTER_V1);
 
-  return lines.join('\n');
+  // Continuous cyan left rail (owner request): draw the rail on EVERY line so the left edge is one
+  // unbroken vertical border, not the per-row segments it used to be. A blank line becomes the rail
+  // alone; every other line gets "│ " + its content (rail 2 chars keeps content text at column 7).
+  const rail = c ? `${c.cyan}│${c.reset}` : '│';
+  return lines.map((line) => (line.length === 0 ? rail : `${rail} ${line}`)).join('\n');
 }
 
 /**
@@ -791,6 +835,10 @@ export function buildPromptEnhancementCliInteractionStateV1(input: {
     focusedField: editableFieldForRow(rows[0]),
     editable: input.model.body.editable,
   });
+  // The enhanced body opens with the cursor at end-of-text (so typing appends) and the window
+  // at the top (scrollVisualRow 0). On open the cursor is therefore off the top window and the
+  // renderer HIDES it (never strands it at the screen bottom); it appears in view as soon as the
+  // user scrolls or edits. See render()'s caret guard.
   return { focusIndex: 0, helpExpanded: false, editor };
 }
 
@@ -900,7 +948,7 @@ export interface PromptEnhancementCliFeedbackStateV1 {
 }
 
 const PROMPT_ENHANCEMENT_CLI_FEEDBACK_ROWS_V1 = ['Not relevant enough', 'Too much or too long', 'Other'] as const;
-const PROMPT_ENHANCEMENT_CLI_FEEDBACK_FOOTER_V1 = 'Enter submit · Esc skip · Ctrl+J new line' as const;
+const PROMPT_ENHANCEMENT_CLI_FEEDBACK_FOOTER_V1 = 'Enter submit · Esc skip' as const;
 
 /** Other feedback uses the editor's additional_details field; focus starts on the first reason. */
 function feedbackEditorFieldForFocus(focusIndex: number): PromptEnhancementEditorFieldV1 | null {
@@ -1005,16 +1053,44 @@ export function renderPromptEnhancementCliFeedbackFrameV1(
  * Enter is per-row, Esc/Ctrl+C cancel. Multi-command results (a dirty-body
  * `edit_body` before an action) are drained across successive next() calls.
  */
-function createPromptEnhancementCliPopupInteractionV1(onFirstRender?: () => void): PromptEnhancementCliPopupInteractionV1 | null {
-  let input: ReadStream;
-  let output: WriteStream;
+/**
+ * Open the interactive console for the raw-TTY popup, cross-platform. The Stop hook's own
+ * stdin/stdout are piped, so the popup attaches directly to the controlling terminal:
+ *   - Linux + macOS: `/dev/tty` — one fd, read+write.
+ *   - Windows: the console device — `CONIN$` for input, `CONOUT$` for output (there is no
+ *     `/dev/tty` on Windows). The two streams own separate fds; teardown destroys both.
+ * Returns null when no console is reachable (e.g. a headless session); the caller then reports the
+ * popup as not shown, and (per the Stop-hook wiring) the pending record is left for a later Stop.
+ */
+export function openPromptEnhancementInteractiveConsoleV1(): { input: ReadStream; output: WriteStream; owned: boolean } | null {
+  // In a spawned popup WINDOW (Windows cmd / macOS Terminal.app / Linux gnome-terminal) the process's
+  // OWN stdin/stdout ARE the interactive console — use them directly, exactly like the advisory popup.
+  // This is the reliable path on every OS and is what makes the spawned window actually render and
+  // accept keystrokes (re-opening the console device instead can render to a non-interactive handle,
+  // so the window flashes and closes). `owned: false` → teardown must NOT destroy the process stdio.
+  if (process.stdin.isTTY && process.stdout.isTTY) {
+    return { input: process.stdin as ReadStream, output: process.stdout as WriteStream, owned: false };
+  }
+  // In-process Stop-hook fallback: stdin is piped (not a TTY), so attach to the console device.
   try {
+    if (process.platform === 'win32') {
+      return {
+        input: new ReadStream(openSync('\\\\.\\CONIN$', 'r')),
+        output: new WriteStream(openSync('\\\\.\\CONOUT$', 'w')),
+        owned: true,
+      };
+    }
     const fd = openSync('/dev/tty', 'r+');
-    input = new ReadStream(fd);
-    output = new WriteStream(fd);
+    return { input: new ReadStream(fd), output: new WriteStream(fd), owned: true };
   } catch {
     return null;
   }
+}
+
+function createPromptEnhancementCliPopupInteractionV1(onFirstRender?: () => void): PromptEnhancementCliPopupInteractionV1 | null {
+  const consoleStreams = openPromptEnhancementInteractiveConsoleV1();
+  if (!consoleStreams) return null;
+  const { input, output, owned } = consoleStreams;
 
   const ESC = String.fromCharCode(27);
   // In-place redraw: home the cursor, write the frame, then clear anything below
@@ -1055,8 +1131,8 @@ function createPromptEnhancementCliPopupInteractionV1(onFirstRender?: () => void
   // geometry), so here the content simply fills that window: use most of the
   // width, and give the enhanced body the height that remains after the chrome.
   // Kept bounded so the frame always fits and redraws in place (no repeat).
-  const fieldWidth = () => Math.max(24, (output.columns ?? 80) - 4);
-  const viewportRows = () => Math.max(4, (output.rows ?? 24) - 26);
+  const fieldWidth = () => promptEnhancementCliViewportV1(output.columns ?? 80, output.rows ?? 24).fieldWidth;
+  const viewportRows = () => promptEnhancementCliViewportV1(output.columns ?? 80, output.rows ?? 24).viewportRows;
 
   // Persistent listeners with a key buffer so no keystroke is dropped between reads.
   const keyBuffer: string[] = [];
@@ -1096,28 +1172,42 @@ function createPromptEnhancementCliPopupInteractionV1(onFirstRender?: () => void
     const editorWidth = current.editor.fieldWidth;
     const bodyRows = current.editor.viewportRows;
     const detailsRows = Math.min(current.editor.viewportRows, 5);
-    // Display only the visible viewport of each editable field so the frame fits
-    // the terminal and redraws in place (no repeat on scroll). The full text stays
-    // in current.editor for editing/apply/send. Both fields follow the editor's own
-    // scroll position (maintained by keepCursorVisible) so Ctrl+Up/Ctrl+Down scroll
-    // the viewport to reveal the whole prompt/details.
-    const bodyDisplay = windowPromptEnhancementFieldForDisplayV1(current.editor.buffers.enhanced_body, editorWidth, bodyRows);
-    const detailsDisplay = current.editor.buffers.additional_details.text
-      ? windowPromptEnhancementFieldForDisplayV1(current.editor.buffers.additional_details, editorWidth, detailsRows)
-      : '';
-    // Determine the focused editable field (if any) and its caret's window-relative visual
-    // position, so the renderer can record the caret's exact screen line as it builds the frame.
+    // Which editable row (if any) has focus — computed first so we can sync that field's
+    // scroll to its cursor BEFORE the field is windowed and the caret placed.
     const rows = buildPromptEnhancementCliActionRowsV1(view.model, { refinement: view.refinement });
     const focusedRow = rows[current.focusIndex];
     const focusedField: PromptEnhancementEditorFieldV1 | null =
       focusedRow?.kind === 'editor_heading' ? 'enhanced_body'
         : focusedRow?.kind === 'additional_details' ? 'additional_details'
           : null;
+    // The body's scroll is already kept consistent with its viewport by the editor reducer
+    // (keepCursorVisible on every edit/move, using the same viewportRows the display windows to),
+    // so it is rendered from its own scroll — this leaves the window at the TOP on open while the
+    // off-window end cursor is simply hidden by the caret guard below (never stranded). The details
+    // field's display is capped at 5 rows (< the reducer's viewportRows), so sync it here to that
+    // cap when focused, or its caret could fall outside the shown lines.
+    const bodyBuffer = current.editor.buffers.enhanced_body;
+    const detailsBuffer = focusedField === 'additional_details'
+      ? promptEnhancementKeepFieldCursorVisibleV1(current.editor.buffers.additional_details, editorWidth, detailsRows)
+      : current.editor.buffers.additional_details;
+    // Display only the visible viewport of each editable field so the frame fits the terminal
+    // and redraws in place. The full text stays in current.editor for editing/apply/send.
+    const bodyDisplay = windowPromptEnhancementFieldForDisplayV1(bodyBuffer, editorWidth, bodyRows);
+    const detailsDisplay = detailsBuffer.text
+      ? windowPromptEnhancementFieldForDisplayV1(detailsBuffer, editorWidth, detailsRows)
+      : '';
+    // Caret row is window-relative, from the SAME synced buffer used for the display. If it
+    // still falls outside the shown lines, leave the caret unset so the cursor is hidden rather
+    // than placed on a wrong row.
     let caret: PromptEnhancementCliFrameStateV1['caret'];
     if (focusedField) {
-      const buffer = current.editor.buffers[focusedField];
+      const buffer = focusedField === 'enhanced_body' ? bodyBuffer : detailsBuffer;
+      const shownLines = (focusedField === 'enhanced_body' ? bodyDisplay : detailsDisplay).split('\n').length;
       const pos = promptEnhancementCursorVisualPositionV1(buffer, editorWidth);
-      caret = { field: focusedField, visualRow: Math.max(0, pos.row - buffer.scrollVisualRow), visualColumn: pos.column };
+      const visualRow = pos.row - buffer.scrollVisualRow;
+      if (visualRow >= 0 && visualRow < shownLines) {
+        caret = { field: focusedField, visualRow, visualColumn: pos.column };
+      }
     }
     const caretOut = { row: -1, col: -1 };
     const frame = renderPromptEnhancementPopupFrameV1(
@@ -1126,12 +1216,11 @@ function createPromptEnhancementCliPopupInteractionV1(onFirstRender?: () => void
     );
     paint(frame);
 
-    // Cursor: shown at the real caret only on an editable field (the renderer filled caretOut at the
-    // exact built line — no fragile re-counting); hidden otherwise so no stray cursor sits on a
-    // footer/action row.
-    if (focusedField && caretOut.row > 0) {
-      const cursorRow = Math.min(caretOut.row, Math.max(1, (output.rows ?? 24) - 1));
-      output.write(`${ESC}[${cursorRow};${caretOut.col}H${SHOW_CURSOR}`);
+    // Cursor: shown only where the renderer recorded a real caret inside the focused field's
+    // rendered block (caretOut > 0) AND that row is on-screen. Never clamp to the screen bottom
+    // — an off-window caret leaves the cursor hidden, not stranded on a footer row.
+    if (focusedField && caret && caretOut.row > 0 && caretOut.row <= Math.max(1, (output.rows ?? 24) - 1)) {
+      output.write(`${ESC}[${caretOut.row};${caretOut.col}H${SHOW_CURSOR}`);
     } else {
       output.write(HIDE_CURSOR);
     }
@@ -1224,8 +1313,13 @@ function createPromptEnhancementCliPopupInteractionV1(onFirstRender?: () => void
       output.off('resize', onResize);
       if (input.isTTY) input.setRawMode?.(false);
       input.pause();
-      try { input.destroy(); } catch { /* already closed */ }
-      try { output.destroy(); } catch { /* shares the fd; may already be closed (BF-3) */ }
+      // Only destroy fds we opened ourselves (the console device). When we reused the process's own
+      // stdin/stdout (spawned window), leave them intact — destroying process stdio can crash the
+      // child before it writes its result.
+      if (owned) {
+        try { input.destroy(); } catch { /* already closed */ }
+        try { output.destroy(); } catch { /* shares the fd; may already be closed (BF-3) */ }
+      }
     },
   };
 }

@@ -178,7 +178,7 @@ export function buildPromptEnhancementAdjustmentStateV1(
   snapshot: PromptEnhancementAdjustmentPresentationSnapshotV1,
 ): PromptEnhancementAdjustmentStateV1 {
   if (!isValidSnapshot(snapshot)) {
-    throw new Error('invalid B1.3a main snapshot identity');
+    throw new Error('invalid stage-1-3a main snapshot identity');
   }
   return {
     surface: 'main',

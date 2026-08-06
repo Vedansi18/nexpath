@@ -8,6 +8,9 @@ import type {
   PromptEnhancementTemplateRegistryRefV1,
 } from './contracts.js';
 import { PROMPT_ENHANCEMENT_CONTRACT_VERSION } from './contracts.js';
+// Type-only import (erased at runtime) so the enum runtime dep stays one-directional
+// (llm-route-decision -> routing-taxonomy); no runtime import cycle.
+import type { PromptEnhancementLlmRouteDecisionV1 } from './llm-route-decision.js';
 import { getContentTemplateSourceSnapshot, getPromptStartStopSourceSnapshot } from './source-reality.js';
 
 export type PromptEnhancementFamilyId =
@@ -186,6 +189,11 @@ export interface PromptEnhancementRouteResult {
   routeEvidenceRefs: readonly string[];
   reasonCodes: readonly string[];
   noPopup: boolean;
+  // P3-G3 (narrowed claim): the deterministic route consumes shared-signal evidence
+  // (firedKey / stage / absence) for gating, skip, and evidence decisions and uses NO
+  // PE-only classifier or old DS map. It does NOT, however, fuse those signals into
+  // primary-intent selection — `selectPrimaryIntent` is prompt-text keyword matching.
+  // Shared-signal + NL intent fusion is E6's bounded LLM route decision, not this path.
   usesSharedSignalEvidenceOnly: true;
   usesPeOnlyClassifier: false;
   usesOldStaticDecisionSessionMap: false;
@@ -380,8 +388,8 @@ function preset(input: {
     slotEvidenceStatus: 'prompt_provided_or_explicit_missing',
     requirementSourceStatus: 'prompt_provided_context_derived_missing_or_not_applicable',
     handoffFlags: input.handoffFlags ?? ['metadata_only_no_sequence_runtime'],
-    routeFixtureIds: [`pe-ar3-route-${input.routeFixtureSuffix}`],
-    evaluationFixtureIds: [`pe-em3-eval-${input.evaluationFixtureSuffix}`],
+    routeFixtureIds: [`route-${input.routeFixtureSuffix}`],
+    evaluationFixtureIds: [`eval-${input.evaluationFixtureSuffix}`],
     metadataContract: BASE_METADATA_CONTRACT,
     callVisibilityMode: 'deterministic',
     llmCallPolicy: 'no_call',
@@ -391,7 +399,7 @@ function preset(input: {
       sendOriginalPreserved: true,
     },
     noPopupContract: {
-      skipNoPopupFixtureId: `pe-ar3-no-popup-${input.routeFixtureSuffix}`,
+      skipNoPopupFixtureId: `no-popup-${input.routeFixtureSuffix}`,
       sendOriginalPreserved: true,
     },
   };
@@ -771,7 +779,7 @@ export function getPromptEnhancementRoutingSourceGateSnapshot() {
 export function getPromptEnhancementG1AApprovalInventory() {
   return {
     gateId: 'routing_taxonomy_approval_inventory',
-    status: 'pending_hiren_review',
+    status: 'pending_owner_review',
     families: PROMPT_ENHANCEMENT_FAMILIES,
     primaryIntents: PROMPT_ENHANCEMENT_TAXONOMY_PRESETS.map((presetRecord) => presetRecord.primaryIntent),
     capabilityOverlays: PROMPT_ENHANCEMENT_CAPABILITIES,
@@ -857,7 +865,10 @@ export function findPromptEnhancementTaxonomyGaps(): string[] {
   return gaps;
 }
 
-export function routePromptEnhancement(input: PromptEnhancementRouteInput): PromptEnhancementRouteResult {
+export function routePromptEnhancement(
+  input: PromptEnhancementRouteInput,
+  llmRouteDecision?: PromptEnhancementLlmRouteDecisionV1,
+): PromptEnhancementRouteResult {
   const normalized = input.promptText.toLowerCase();
   const evidenceRefs = buildRouteEvidenceRefs(input);
   const origin = input.generatedOriginState ?? 'ordinary_user_prompt';
@@ -871,6 +882,14 @@ export function routePromptEnhancement(input: PromptEnhancementRouteInput): Prom
   }
   if (isFirstTriggerBlocked(input.firstTriggerGateState)) {
     return noPopupResult(input, 'first_trigger_gate_blocked_no_popup', evidenceRefs);
+  }
+
+  // E6: an accepted bounded LLM route decision overrides the deterministic keyword
+  // routing for the NL-heavy prompts the facade routed to the LLM. The hard skips
+  // above (old/generated origin, degraded classifier, first-trigger gate) are NOT
+  // overridable. Everything below stays the deterministic path + fallback.
+  if (llmRouteDecision) {
+    return buildRouteResultFromLlmDecision(input, llmRouteDecision, normalized, evidenceRefs);
   }
 
   const hasSourceAIntent = hasExplicitRouteWords(normalized);
@@ -1001,6 +1020,43 @@ function noPopupResult(input: PromptEnhancementRouteInput, reasonCode: string, e
   };
 }
 
+/**
+ * E6: build a consistent route result from an accepted bounded LLM route decision.
+ * The intent drives the preset (family + required sections); the LLM's capabilities
+ * merge with the preset + forced safety overlays; the LLM's ambiguityState is honored;
+ * `skip_no_useful_guidance` still legitimately skips (weak evidence ≠ forced popup).
+ * The route stays typed + validated — no freeform route output.
+ */
+function buildRouteResultFromLlmDecision(
+  input: PromptEnhancementRouteInput,
+  decision: PromptEnhancementLlmRouteDecisionV1,
+  normalized: string,
+  evidenceRefs: readonly string[],
+): PromptEnhancementRouteResult {
+  const selectedPreset = presetForIntent(decision.primaryIntent);
+  const capabilityOverlays = mergeCapabilities([...selectedPreset.capabilityOverlays, ...decision.capabilities], normalized, input);
+  const noPopup = decision.ambiguityState === 'skip_no_useful_guidance';
+  const fallbackMode: PromptEnhancementRouteFallbackMode = noPopup ? 'skip_no_popup' : 'none';
+  const reasonCodes = ['llm_route_decision_accepted'];
+  const routeConfidence: PromptEnhancementRouteConfidence = 'partial';
+  return {
+    contractDecision: toContractDecision(input, selectedPreset, capabilityOverlays, evidenceRefs, reasonCodes, noPopup, routeConfidence, fallbackMode, true, decision.ambiguityState),
+    selectedPreset,
+    familyId: selectedPreset.family,
+    primaryIntent: selectedPreset.primaryIntent,
+    secondaryIntentTags: secondaryIntentTagsFor(normalized, selectedPreset.primaryIntent),
+    capabilityOverlays,
+    routeConfidence,
+    fallbackMode,
+    routeEvidenceRefs: evidenceRefs,
+    reasonCodes,
+    noPopup,
+    usesSharedSignalEvidenceOnly: true,
+    usesPeOnlyClassifier: false,
+    usesOldStaticDecisionSessionMap: false,
+  };
+}
+
 function toContractDecision(
   input: PromptEnhancementRouteInput,
   selectedPreset: PromptEnhancementTaxonomyPreset,
@@ -1010,6 +1066,9 @@ function toContractDecision(
   noPopup: boolean,
   routeConfidence: PromptEnhancementRouteConfidence,
   fallbackMode: PromptEnhancementRouteFallbackMode,
+  // E6: set when the bounded LLM route decision produced this route.
+  llmRouteUsed: boolean = false,
+  ambiguityStateOverride?: PromptEnhancementRouteDecisionV1['ambiguityState'],
 ): PromptEnhancementRouteDecisionV1 {
   const rejectedRoutes = noPopup
     ? [{
@@ -1045,12 +1104,12 @@ function toContractDecision(
       : selectedPreset.requiredSections.map((sectionKind, index) => `${input.routeDecisionId}:section:${index + 1}:${sectionKind}`),
     fallbackMode,
     llmRoutePolicy: {
-      mode: 'no_call',
-      owner: 'hiren_content_api',
-      peEm1WorksheetRow: 'not_applicable_deterministic',
+      mode: llmRouteUsed ? 'llm_route_decision_call' : 'no_call',
+      owner: 'content_semantics',
+      costWorksheetRow: llmRouteUsed ? 'llm_route_decision_call' : 'not_applicable_deterministic',
       freeformRouteOutputAllowed: false,
     },
-    ambiguityState: ambiguityStateFor(reasonCodes, noPopup, fallbackMode),
+    ambiguityState: ambiguityStateOverride ?? ambiguityStateFor(reasonCodes, noPopup, fallbackMode),
     suppressionState: suppressionStateFor(noPopup, reasonCodes),
     routeInputEvidenceRefs: evidenceRefs,
     routeEvidence: evidenceRefs,
@@ -1069,8 +1128,6 @@ function nonPrimaryUserIntentHandlingFor(
     case 'multi_point_same_intent':
     case 'multi_intent_one_prompt':
       return 'covered_by_secondary_tag';
-    case 'multi_intent_needs_handoff':
-      return 'handoff_candidate';
     case 'ambiguous_multi_intent':
       return 'requires_clarification';
   }
@@ -1157,6 +1214,19 @@ function userPointCoverageRefsFor(promptText: string): readonly string[] {
     .map((point) => point.trim())
     .filter(Boolean);
   return (points.length > 0 ? points : [promptText]).map((_, index) => `user_point:${index + 1}`);
+}
+
+/**
+ * Sequence-shaped prompt text: multiple intent families in one prompt, or a genuine multi-step
+ * list of one family (>= 3 user points). The SAME shape rule the facade uses to emit the MPS
+ * handoff/sequence summary — shared so the UserPromptSubmit pipeline can prepare a sequence-shaped
+ * prompt even on a non-trigger turn (otherwise the MPS popup only ever appears by trigger
+ * coincidence). Pure text predicate; creates no route or runtime state.
+ */
+export function isPromptEnhancementSequenceShapedTextV1(promptText: string): boolean {
+  const compoundState = compoundPromptStateFor(promptText);
+  return compoundState === 'multi_intent_one_prompt'
+    || (compoundState === 'multi_point_same_intent' && userPointCoverageRefsFor(promptText).length >= 3);
 }
 
 function routeCandidatesFor(
@@ -1328,7 +1398,7 @@ function toTemplateRegistryRef(presetRecord: PromptEnhancementTaxonomyPreset): P
     contentTemplateInputRefs: presetRecord.contentTemplateInputRefs,
     safetyHookIds: presetRecord.safetyHooks,
     sensitivityPolicy: 'deterministic_flags_required',
-    voicePolicyRef: 'pe-ar3-source-honest-user-to-agent-voice',
+    voicePolicyRef: 'source-honest-user-to-agent-voice',
     confirmationRequirementPolicy: 'preserve_when_required',
     supportedDirectionalActions: ['shorter', 'more_thorough', 'more_project_grounded', 'apply_details'],
     composerPolicy: 'deterministic_only',
@@ -1346,7 +1416,7 @@ function toTemplateRegistryRef(presetRecord: PromptEnhancementTaxonomyPreset): P
       'no_source_b_only_popup',
       'no_precomputed_directional_variants',
     ],
-    ownerArea: 'hiren_content_api',
+    ownerArea: 'content_semantics',
     launchVisibility: 'private_until_launch_recheck',
     publicSafeSourceNotes: [
       'DS content-template refs are Source B only.',
@@ -1461,14 +1531,29 @@ function hasConflictingEvidence(input: PromptEnhancementRouteInput): boolean {
 }
 
 function selectPrimaryIntent(normalized: string): PromptEnhancementPrimaryIntent {
+  // P3-G1: a clear build/implement intent must not be captured by an incidental broad
+  // verb that merely NAMES the thing being built (e.g. "implement a code review tool",
+  // "add audit logging", "here's the plan: build X"). Gate the broad review/audit/plan
+  // catch-alls behind "no build intent"; the specific multi-word review/planning
+  // keywords below stay first.
+  // 'build' is ambiguous — a NOUN in "the build process" / "a build system" but a VERB
+  // in "build a payment module". Count it as a build intent only when it is NOT an
+  // article-led noun phrase, so "review the build process" stays a review while
+  // "here's the plan: build X" is a feature. implement/create/develop/add are verbs.
+  const buildIsNounPhrase = /\b(?:the|a|this|our|nightly|ci|prod|staging|last|next)\s+build\b/.test(normalized);
+  const hasBuildAsVerb = normalized.includes('build') && !buildIsNounPhrase;
+  const hasBuildVerb = hasBuildAsVerb || hasAny(normalized, ['implement', 'add', 'create', 'develop']);
+  const hasStrongBuildVerb = hasBuildAsVerb || hasAny(normalized, ['implement', 'create', 'develop']);
+  const buildsANamedArtifact = hasStrongBuildVerb && hasAny(normalized, ['tool', 'system', 'feature', 'app', 'service', 'dashboard', 'ui', 'module', 'component']);
+
   if (hasAny(normalized, ['security review', 'threat'])) return 'review.security_review';
   if (hasAny(normalized, ['architecture review'])) return 'review.architecture_review';
   if (hasAny(normalized, ['performance review'])) return 'review.performance_review';
   if (hasAny(normalized, ['api review', 'contract review'])) return 'review.api_contract_review';
   if (hasAny(normalized, ['test review'])) return 'review.test_review';
-  if (hasAny(normalized, ['diff review', 'code review', 'review this code'])) return 'review.code_or_diff_review';
+  if (hasAny(normalized, ['diff review', 'code review', 'review this code']) && !buildsANamedArtifact) return 'review.code_or_diff_review';
   if (hasAny(normalized, ['requirements fit', 'acceptance fit'])) return 'review.requirements_fit_review';
-  if (hasAny(normalized, ['review', 'verify', 'audit'])) return 'review.verification_request';
+  if (hasAny(normalized, ['review', 'verify', 'audit']) && !hasBuildVerb) return 'review.verification_request';
 
   if (hasAny(normalized, ['rollout', 'release plan'])) return 'planning.rollout_release_plan';
   if (hasAny(normalized, ['migration plan']) || (normalized.includes('plan') && normalized.includes('migration'))) return 'planning.migration_plan';
@@ -1476,7 +1561,8 @@ function selectPrimaryIntent(normalized: string): PromptEnhancementPrimaryIntent
   if (hasAny(normalized, ['refactor plan'])) return 'planning.refactor_plan';
   if (hasAny(normalized, ['architecture', 'design']) && normalized.includes('plan')) return 'planning.architecture_or_design';
   if (hasAny(normalized, ['break down', 'task breakdown', 'decompose'])) return 'planning.task_breakdown';
-  if (hasAny(normalized, ['plan', 'prd', 'write a spec', 'create a spec'])) return 'planning.spec_or_prd';
+  if (hasAny(normalized, ['prd', 'write a spec', 'create a spec'])) return 'planning.spec_or_prd';
+  if (normalized.includes('plan') && !hasStrongBuildVerb) return 'planning.spec_or_prd';
   if (normalized.trim() === 'continue') return 'planning.task_breakdown';
 
   if (hasAny(normalized, ['production', 'incident', 'support ticket', 'outage'])) return 'issue_debug.production_incident_or_support';

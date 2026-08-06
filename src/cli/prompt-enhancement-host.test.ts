@@ -4,7 +4,11 @@ import { dirname } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import {
   PROMPT_ENHANCEMENT_LINUX_TERMINAL_COMMANDS_V1,
+  buildPromptEnhancementMacLauncherScriptV1,
+  buildPromptEnhancementWindowsLauncherScriptV1,
   planPromptEnhancementLinuxTerminalLaunchV1,
+  planPromptEnhancementMacTerminalLaunchV1,
+  planPromptEnhancementWindowsTerminalLaunchV1,
   resolvePromptEnhancementCliHostCapabilityV1,
   runPromptEnhancementCliPopupHostLaunchV1,
   type PromptEnhancementLinuxTerminalCommandV1,
@@ -29,11 +33,11 @@ describe('PE1.1 — prompt enhancement CLI host capability resolver', () => {
     expect(commandExists).not.toHaveBeenCalled();
   });
 
-  it('fails closed on an unsupported platform without probing host resources', () => {
+  it('fails closed on a genuinely unsupported platform without probing host resources', () => {
     const probeDirectTty = vi.fn(() => true);
     const commandExists = unavailableCommands();
     const result = resolvePromptEnhancementCliHostCapabilityV1({
-      platform: 'win32',
+      platform: 'aix', // not linux / darwin / win32
       env: { DISPLAY: ':0' },
       probeDirectTty,
       commandExists,
@@ -45,6 +49,49 @@ describe('PE1.1 — prompt enhancement CLI host capability resolver', () => {
       reasonCode: 'unsupported_platform',
     });
     expect(probeDirectTty).not.toHaveBeenCalled();
+    expect(commandExists).not.toHaveBeenCalled();
+  });
+
+  it('always spawns a Terminal.app window on macOS (never the in-process /dev/tty)', () => {
+    const commandExists = unavailableCommands();
+    const probeDirectTty = vi.fn(() => true);
+    const result = resolvePromptEnhancementCliHostCapabilityV1({
+      platform: 'darwin',
+      env: {},
+      probeDirectTty, // ignored on darwin — it always spawns
+      commandExists,
+    });
+    expect(result).toEqual({ state: 'available', method: 'mac_terminal' });
+    expect(probeDirectTty).not.toHaveBeenCalled();
+    expect(commandExists).not.toHaveBeenCalled();
+  });
+
+  it('always spawns a new console window on Windows (never the invisible in-process console)', () => {
+    const commandExists = unavailableCommands();
+    const probeDirectTty = vi.fn(() => true);
+    const result = resolvePromptEnhancementCliHostCapabilityV1({
+      platform: 'win32',
+      env: {},
+      probeDirectTty, // ignored on win32 — it always spawns
+      commandExists,
+    });
+    expect(result).toEqual({ state: 'available', method: 'windows_terminal' });
+    // Windows never probes the in-process console or the Linux terminals.
+    expect(probeDirectTty).not.toHaveBeenCalled();
+    expect(commandExists).not.toHaveBeenCalled();
+  });
+
+  it('Windows and macOS both spawn a window regardless of the in-process console (like the old popup)', () => {
+    const commandExists = unavailableCommands();
+    const mac = resolvePromptEnhancementCliHostCapabilityV1({
+      platform: 'darwin', env: {}, probeDirectTty: () => false, commandExists,
+    });
+    expect(mac).toEqual({ state: 'available', method: 'mac_terminal' });
+    const win = resolvePromptEnhancementCliHostCapabilityV1({
+      platform: 'win32', env: {}, probeDirectTty: () => false, commandExists,
+    });
+    expect(win).toEqual({ state: 'available', method: 'windows_terminal' });
+    // The Linux-only terminal-spawn path is never probed on Windows/macOS.
     expect(commandExists).not.toHaveBeenCalled();
   });
 
@@ -240,6 +287,57 @@ describe('PE1.3 — Linux PE popup host launcher', () => {
     expect(plain.args.some((argument) => argument.startsWith('--geometry'))).toBe(false);
   });
 
+  it('plans a Windows new-window spawn that runs the batch via cmd /c (not start file-association)', () => {
+    const plan = planPromptEnhancementWindowsTerminalLaunchV1({ launcherScriptPath: 'C:/Temp/pe/launch.cmd' });
+    expect(plan.command).toBe(process.env.ComSpec ?? 'cmd.exe'); // system interpreter, not a hardcoded path
+    // start runs a PROGRAM (`cmd /c <launch.cmd>`), never the .cmd directly — running the .cmd via
+    // start's file-association fails with "The system cannot find the path specified." on Windows.
+    expect(plan.args).toEqual(['/c', 'start', '/WAIT', 'Nexpath · Prompt enhancement', 'cmd', '/c', 'C:/Temp/pe/launch.cmd']);
+  });
+
+  it('builds a Windows batch launcher with node by absolute path and every path quoted (spaces intact)', () => {
+    const script = buildPromptEnhancementWindowsLauncherScriptV1({
+      nodeExecPath: 'C:/Program Files/nodejs/node.exe',
+      cliEntryPath: 'C:/Users/Admin/Desktop/nexpath testing/nexpath/dist/cli/index.js',
+      inputFile: 'C:/Temp/pe/input.json',
+      resultFile: 'C:/Temp/pe/result.json',
+      readinessFile: 'C:/Temp/pe/ready',
+      dbPath: 'C:/Users/Admin/.nexpath/prompt-store.db',
+    });
+    expect(script).toContain('@echo off');
+    // node invoked by its absolute (quoted) path; the space-containing CLI path stays quoted + intact.
+    expect(script).toContain('"C:/Program Files/nodejs/node.exe" "C:/Users/Admin/Desktop/nexpath testing/nexpath/dist/cli/index.js" prompt-enhancement-popup-host');
+    expect(script).toContain('--input-file "C:/Temp/pe/input.json"');
+    expect(script).toContain('--db "C:/Users/Admin/.nexpath/prompt-store.db"');
+    // On a real error the window stays open (shows the message) instead of flashing shut.
+    expect(script).toContain('if errorlevel 1 pause');
+  });
+
+  it('plans a macOS Terminal.app spawn via osascript that runs the shell launcher', () => {
+    const plan = planPromptEnhancementMacTerminalLaunchV1({ launcherScriptPath: '/tmp/pe/launch.sh' });
+    expect(plan.command).toBe('osascript');
+    expect(plan.args[0]).toBe('-e');
+    const script = plan.args[1]!;
+    expect(script).toContain('tell application "Terminal"');
+    expect(script).toContain("sh '/tmp/pe/launch.sh'"); // launcher run via sh, quoted
+    expect(script).toContain('do script');
+  });
+
+  it('builds a macOS shell launcher with node by absolute path and every path single-quoted (spaces intact)', () => {
+    const script = buildPromptEnhancementMacLauncherScriptV1({
+      nodeExecPath: '/usr/local/bin/node',
+      cliEntryPath: '/Users/admin/Desktop/nexpath testing/nexpath/dist/cli/index.js',
+      inputFile: '/tmp/pe/input.json',
+      resultFile: '/tmp/pe/result.json',
+      readinessFile: '/tmp/pe/ready',
+      dbPath: '/Users/admin/.nexpath/prompt-store.db',
+    });
+    expect(script.startsWith('#!/bin/sh')).toBe(true);
+    expect(script).toContain("'/usr/local/bin/node' '/Users/admin/Desktop/nexpath testing/nexpath/dist/cli/index.js' prompt-enhancement-popup-host");
+    expect(script).toContain("--input-file '/tmp/pe/input.json'");
+    expect(script).toContain("--db '/Users/admin/.nexpath/prompt-store.db'");
+  });
+
   it('creates private files, parses a typed child result, and cleans its temp directory', async () => {
     const observed: { dir?: string; inputText?: string; inputMode?: number; dirMode?: number; plan?: unknown } = {};
     const fakeChild = child();
@@ -259,8 +357,11 @@ describe('PE1.3 — Linux PE popup host launcher', () => {
     });
 
     expect(result).toEqual({ state: 'completed', output: { protocolVersion: 1, result: { state: 'selected_original' } } });
-    expect(observed.inputMode).toBe(0o600);
-    expect(observed.dirMode).toBe(0o700);
+    // POSIX file modes — Windows has no 0o600/0o700 equivalent, so assert them only off win32 (P5).
+    if (process.platform !== 'win32') {
+      expect(observed.inputMode).toBe(0o600);
+      expect(observed.dirMode).toBe(0o700);
+    }
     expect(observed.inputText).toContain('RAW PE REQUEST MUST STAY OUT OF ARGV');
     expect(JSON.stringify(observed.plan)).not.toContain('RAW PE REQUEST');
     expect(fakeChild.kill).toHaveBeenCalledWith('SIGTERM');
@@ -335,7 +436,9 @@ describe('PE1.3 — Linux PE popup host launcher', () => {
     expect(JSON.stringify(result)).not.toContain(rawBody);
   });
 
-  it('fails closed when a ready child exposes a symlink result path', async () => {
+  // symlinkSync throws EPERM on Windows without Developer Mode, so this POSIX-symlink safety case is
+  // skipped there (P5); the fail-closed behaviour it guards is exercised on Linux/macOS.
+  it.skipIf(process.platform === 'win32')('fails closed when a ready child exposes a symlink result path', async () => {
     const externalDir = mkdtempSync('/tmp/nexpath-pe3-1-symlink-');
     const externalResult = `${externalDir}/external-result.json`;
     const rawBody = 'must-not-read-through-result-symlink';

@@ -33,7 +33,12 @@ import { logger, initLogger } from '../../logger.js';
 import type { LogLevel } from '../../logger.js';
 import { writeHookStats } from '../../store/hook-stats.js';
 import { upsertPendingAdvisory } from '../../store/pending-advisories.js';
-import { upsertPendingPromptEnhancement } from '../../store/pending-prompt-enhancements.js';
+import { upsertPendingPromptEnhancement, type PendingPromptEnhancement } from '../../store/pending-prompt-enhancements.js';
+import {
+  preparePromptEnhancementStopBridgeDelivery,
+  type PromptEnhancementDeliveryRequestV1,
+  type PromptEnhancementDeliveryResultV1,
+} from '../../prompt-enhancement/delivery.js';
 import { insertSkippedSession } from '../../store/skipped-sessions.js';
 import { recordActivity } from '../../store/feedback-cadence.js';
 import { writeTelemetry } from '../../telemetry/index.js';
@@ -50,11 +55,25 @@ import {
   type PromptEnhancementDisposition,
   type PromptEnhancementSourceRefV1,
 } from '../../prompt-enhancement/contracts.js';
-import { preparePromptEnhancement } from '../../prompt-enhancement/facade.js';
+import { preparePromptEnhancement, explainPromptEnhancementSequenceSummaryAbsenceV1 } from '../../prompt-enhancement/facade.js';
 import { recordPromptEnhancementFeedbackV1 } from '../../prompt-enhancement/feedback-sink.js';
+import { derivePromptEnhancementFeedbackPolicyV1 } from '../../prompt-enhancement/feedback-policy.js';
 import type { PromptEnhancementPopupEventV1 } from '../../prompt-enhancement/popup-session.js';
 import { buildPromptEnhancementCostVisibilityMetadataV1 } from '../../prompt-enhancement/cost-observability.js';
+import { emitPromptEnhancementCostObservabilityV1 } from '../../prompt-enhancement/cost-measurement.js';
+import { isPromptEnhancementSequenceShapedTextV1 } from '../../prompt-enhancement/routing-taxonomy.js';
 import { getSourceRealityAdaptersSnapshot } from '../../prompt-enhancement/source-reality.js';
+import { loadRightGoodProfile } from '../../classifier/right-good-aggregator.js';
+import { computeWorkStyleProfile } from '../../classifier/work-style-traits.js';
+import { readParamEvents } from '../../telemetry/param-events.js';
+import { getProjectEnvFacts } from '../../store/env-facts.js';
+import { getPromptEnhancementFeedbackSummary, queryRelevantPromptEnhancementMemory, recordPromptEnhancementMemoryEvidence, markPromptEnhancementMemoryUsed } from '../../store/prompt-enhancement.js';
+import { scorePromptEnhancementMemoryCandidates } from '../../prompt-enhancement/memory-scoring.js';
+import {
+  promptEnhancementStageSignalKeyV1,
+  promptEnhancementAbsenceSignalKeyV1,
+} from '../../prompt-enhancement/guidance-facts.js';
+import { resolvePromptEnhancementGuidanceOutcomeV1 } from '../../prompt-enhancement/guidance-outcome.js';
 import {
   buildClaudeUserPromptSubmitHookOutputV1,
   runPromptEnhancementCliSubmitPopupV1,
@@ -167,6 +186,67 @@ export type AutoPromptEnhancementConsumerV1 = (
  * runAuto. This is an adapter only: it records existing classifier/session/source
  * facts and does not create new routing, delivery, or semantic authority.
  */
+/**
+ * E1 / P1-G1 + AR6-G1(query) — PE grounding-evidence refs that the guidance-fact seam (E2) consumes.
+ * Ref-ID convention (E2 parses these): `right_good:<key>` / `mistake:<key>` (RIGHT&GOOD non-neutral signals);
+ * `work_style:<trait>:<value>` (set work-style traits); `hard_fact:<key>` (source-derived project env facts);
+ * `feedback:<category>:<count>` (scoped feedback); `memory:<signalKey>` (missing-signal memory candidates —
+ * empty until E3 records evidence). `paramEventChannels` = the distinct detection channels present.
+ * Every read is DEFENSIVE — an empty or failed read yields no refs (deterministic no-data fallback). The
+ * param-event log is read ONCE and reused for work-style + channels (RIGHT&GOOD keeps its own read; its
+ * `computeRightGoodProfile` is not exported). NB: env facts map to `sourceOnlyHardFactRefs`; runtime context is
+ * already carried by the request's agent-mode/permission fields, so it is not duplicated here.
+ */
+function buildPromptEnhancementGroundingRefsV1(store: Store, projectRoot: string, signalKeys: readonly string[]): {
+  rightGoodWorkStyleEnvRuntimeRefs: readonly string[];
+  paramEventChannels: readonly string[];
+  sourceOnlyHardFactRefs: readonly string[];
+  scopedFeedbackEvidenceRefs: readonly string[];
+  missingMemoryCandidateRefs: readonly string[];
+} {
+  const rightGoodWorkStyleEnvRuntimeRefs: string[] = [];
+  try {
+    for (const [key, signal] of Object.entries(loadRightGoodProfile(store, projectRoot))) {
+      if (signal.state !== 'neutral') rightGoodWorkStyleEnvRuntimeRefs.push(`${signal.state}:${key}`);
+    }
+  } catch { /* no RIGHT&GOOD grounding available — leave empty */ }
+  const paramEventChannels: string[] = [];
+  try {
+    const events = readParamEvents(store, projectRoot);
+    for (const [trait, tv] of Object.entries(computeWorkStyleProfile(events))) {
+      if (tv.value !== null) rightGoodWorkStyleEnvRuntimeRefs.push(`work_style:${trait}:${tv.value}`);
+    }
+    for (const channel of new Set(events.map((event) => event.channel))) paramEventChannels.push(channel);
+  } catch { /* no param-event grounding available — leave empty */ }
+  const sourceOnlyHardFactRefs: string[] = [];
+  try {
+    const stored = getProjectEnvFacts(store, projectRoot);
+    if (stored) for (const factKey of Object.keys(stored.facts)) sourceOnlyHardFactRefs.push(`hard_fact:${factKey}`);
+  } catch { /* no source hard facts available — leave empty */ }
+  const scopedFeedbackEvidenceRefs: string[] = [];
+  try {
+    for (const category of getPromptEnhancementFeedbackSummary(store, projectRoot).categoryCounts) {
+      scopedFeedbackEvidenceRefs.push(`feedback:${category.feedbackCategory}:${category.count}`);
+    }
+  } catch { /* no scoped feedback available — leave empty */ }
+  const missingMemoryCandidateRefs: string[] = [];
+  try {
+    // E3/3.2c: score the queried rows so a fatigued / edited-out-twice signal does
+    // not re-surface (fix-plan §4c query-time fatigue/suppression).
+    const rows = queryRelevantPromptEnhancementMemory(store, projectRoot, signalKeys);
+    for (const candidate of scorePromptEnhancementMemoryCandidates(rows).eligible) {
+      missingMemoryCandidateRefs.push(`memory:${candidate.signalKey}`);
+    }
+  } catch { /* no missing-signal memory yet (until E3 records) — leave empty */ }
+  return {
+    rightGoodWorkStyleEnvRuntimeRefs,
+    paramEventChannels,
+    sourceOnlyHardFactRefs,
+    scopedFeedbackEvidenceRefs,
+    missingMemoryCandidateRefs,
+  };
+}
+
 export function buildPromptEnhancementRequestForAuto(input: {
   auto: AutoInput;
   store: Store;
@@ -236,6 +316,13 @@ export function buildPromptEnhancementRequestForAuto(input: {
     : undefined;
   const recentRefs = recentPromptMetadata(input.session.current.promptHistory)
     .map((prompt) => `prompt:${prompt.index}`);
+  // Read memory under the SAME canonical keys the guidance builder writes, or a
+  // repeatedly-edited-out signal would never be found and suppressed (E3/3.2c).
+  const groundingSignalKeys = [
+    ...(triggerKind === 'stage_transition' ? [promptEnhancementStageSignalKeyV1(input.previousStage, currentStage)] : []),
+    ...(absenceSignal ? [promptEnhancementAbsenceSignalKeyV1(absenceSignal)] : []),
+  ];
+  const grounding = buildPromptEnhancementGroundingRefsV1(input.store, input.auto.projectRoot, groundingSignalKeys);
 
   return {
     schemaVersion: PROMPT_ENHANCEMENT_CONTRACT_VERSION,
@@ -284,8 +371,8 @@ export function buildPromptEnhancementRequestForAuto(input: {
       popupQuestionSourceRefs: content.resolvedRecordIdentity ? [`${content.resolvedRecordIdentity}:question`] : [],
       whyHelpSourceRefs: content.resolvedRecordIdentity ? [`${content.resolvedRecordIdentity}:why-help`] : [],
       profileRoleModeRefs: input.configuredRole ? [`role:${input.configuredRole}`] : [],
-      rightGoodWorkStyleEnvRuntimeRefs: [],
-      missingMemoryCandidateRefs: [],
+      rightGoodWorkStyleEnvRuntimeRefs: grounding.rightGoodWorkStyleEnvRuntimeRefs,
+      missingMemoryCandidateRefs: grounding.missingMemoryCandidateRefs,
       sourceLabels: [
         { sourceRefId: originalPromptRef.sourceRefId, label: 'original_prompt', evidenceStatus: 'present' },
         { sourceRefId: triggerRef.sourceRefId, label: 'stage_absence_signal', evidenceStatus: 'present' },
@@ -318,14 +405,14 @@ export function buildPromptEnhancementRequestForAuto(input: {
       permissionMode: input.auto.currentAgentMode ?? 'unknown',
       transcriptPathState: input.auto.transcriptPath ? 'provided' : 'not_authority',
       streamBOutputs: input.streamBOutputs,
-      paramEventChannels: [],
+      paramEventChannels: grounding.paramEventChannels,
       servedVariantIdentityRefs: [],
       deliveryGateRefs: [],
-      sourceOnlyHardFactRefs: [],
+      sourceOnlyHardFactRefs: grounding.sourceOnlyHardFactRefs,
     },
     userPreferenceContext: {
       levelState: 'default',
-      scopedFeedbackEvidenceRefs: [],
+      scopedFeedbackEvidenceRefs: grounding.scopedFeedbackEvidenceRefs,
     },
     configSnapshot: {
       sequenceEnabledState: 'not_enabled_v1',
@@ -502,6 +589,7 @@ export interface PromptEnhancementCliHostConsumerDependenciesV1 {
     request: PromptEnhancementPrepareRequestV1;
     result: PromptEnhancementPrepareResultV1;
     feedbackSink: (event: PromptEnhancementPopupEventV1) => ReturnType<typeof recordPromptEnhancementCliFeedbackV1>;
+    costObservabilitySink?: (result: PromptEnhancementPrepareResultV1) => void;
   }) => Promise<PromptEnhancementCliPopupResultV1>;
   onHookOutput?: (output: ClaudeUserPromptSubmitHookOutputV1 | undefined) => void;
 }
@@ -546,7 +634,8 @@ export function createPromptEnhancementCliHostConsumerV1(
       popupResult = await showDirectPopup({
         request,
         result: preparation.result,
-        feedbackSink: (event) => recordPromptEnhancementCliFeedbackV1(dependencies.store, request.projectRoot, event),
+        feedbackSink: (event) => recordPromptEnhancementCliFeedbackV1(dependencies.store, request.projectRoot, event, request),
+        costObservabilitySink: (result) => emitPromptEnhancementCostObservabilityV1(result, 'popup_action', logger),
       });
     } else {
       hostAdapter = 'linux_terminal';
@@ -766,6 +855,74 @@ export async function runAuto(
     flagKeys:        newFlags.map((f) => f.signalKey),
   }, store);
 
+  // ── 4.6. Sequence-shaped PE fallback (team-leader approved fix, 2026-08-06) ──
+  // PE preparation historically ran ONLY inside the decision-trigger branch, so a multi-step
+  // (MPS-eligible) prompt reached the engine only when it coincidentally landed on a trigger
+  // turn — making the MPS popup effectively untestable. For SEQUENCE-SHAPED prompts only
+  // (multi-intent, or a >=3-point list), prepare + store the pending PE on every no-action
+  // exit below, exactly like the fired path (the popup still shows on the Stop hook). It
+  // creates NO advisory, marks NO decision-session fired, and ordinary prompts keep the
+  // existing trigger cadence. Frequency 'off' stays fully silent (checked before this runs).
+  let sequencePeFallbackDone = false;
+  const prepareSequenceShapedPeFallback = async (): Promise<void> => {
+    // Injected boundary-test integrations keep their own single explicit path.
+    if (sequencePeFallbackDone || promptEnhancement !== undefined) return;
+    if (!isPromptEnhancementSequenceShapedTextV1(input.promptText)) return;
+    sequencePeFallbackDone = true;
+    const request = buildPromptEnhancementRequestForAuto({
+      auto: input,
+      store,
+      session: mgr,
+      project,
+      effectiveLanguage: effectiveLang,
+      configuredRole,
+      effectiveFlagType: 'stage_transition',
+      firedKey: `sequence_shaped:${mgr.current.promptCount}`,
+      previousStage: prevStage,
+      trigger: { kind: 'stage_transition' },
+      stageResult,
+      streamBOutputs: [],
+    });
+    const preparation = await preparePromptEnhancementForAuto({ request, prepare: preparePromptEnhancement });
+    logger.debug('prompt_enhancement_prepare_boundary', {
+      disposition: preparation.disposition,
+      safeFallback: preparation.safeFallback,
+      reasonCode: 'reasonCode' in preparation ? preparation.reasonCode : undefined,
+      validationReasonCodes: 'validationReasonCodes' in preparation && preparation.validationReasonCodes
+        ? preparation.validationReasonCodes.slice(0, 10)
+        : undefined,
+      sequenceShapedFallback: true,
+    });
+    if (!preparation.safeFallback && preparation.result) {
+      upsertPendingPromptEnhancement(store, {
+        projectRoot: input.projectRoot,
+        sessionId:   mgr.current.sessionId,
+        promptCount: mgr.current.promptCount,
+        request,
+        result:      preparation.result,
+      });
+      const handoffPresent = Boolean(preparation.result.uiView.handoffAndSequenceSummary);
+      logger.debug('pending_prompt_enhancement_stored', {
+        projectRoot: input.projectRoot,
+        sessionId:   mgr.current.sessionId,
+        promptCount: mgr.current.promptCount,
+        disposition: preparation.disposition,
+        sequenceShapedFallback: true,
+        // Diagnosability: whether this stored row can ever open the MPS popup.
+        handoffPresent,
+      });
+      // A sequence-shaped prompt that stored WITHOUT a summary is the exact anomaly that was
+      // previously untraceable — name the reason (deterministic re-explain) in the log.
+      if (!handoffPresent) {
+        logger.warn('sequence_summary_absent', {
+          projectRoot: input.projectRoot,
+          reasonCodes: explainPromptEnhancementSequenceSummaryAbsenceV1(request, preparation.result).slice(0, 8),
+        });
+      }
+      emitPromptEnhancementCostObservabilityV1(preparation.result, 'prepare', logger);
+    }
+  };
+
   // ── 4.5. Frequency off fast-exit + minimum prompt guard ────────────────────
   if (freq === 'off') {
     writeTelemetry(input.projectRoot, 'advisory_freq_blocked', { freq }, store);
@@ -773,6 +930,7 @@ export async function runAuto(
     return { outcome: 'no_action' };
   }
   if (mgr.current.promptCount < freqConfig.minPromptsBeforeAdvisory) {
+    await prepareSequenceShapedPeFallback();
     writeTelemetry(input.projectRoot, 'advisory_min_prompts_blocked', { promptCount: mgr.current.promptCount, minRequired: freqConfig.minPromptsBeforeAdvisory }, store);
     logger.info('pipeline_outcome', { outcome: 'no_action', reason: 'min_prompts_not_reached' });
     return { outcome: 'no_action' };
@@ -788,6 +946,7 @@ export async function runAuto(
   logger.debug('should_fire', { trigger: triggerResult?.kind ?? null });
 
   if (!triggerResult) {
+    await prepareSequenceShapedPeFallback();
     writeTelemetry(input.projectRoot, 'pipeline_no_action', { reason: 'no_flag' }, store);
     logger.info('pipeline_outcome', { outcome: 'no_action', reason: 'no_flag' });
     return { outcome: 'no_action' };
@@ -801,6 +960,7 @@ export async function runAuto(
   const alreadyFired = mgr.hasFiredDecisionSession(preCheckFiredKey);
   logger.debug('dedup', { firedKey: preCheckFiredKey, alreadyFired });
   if (alreadyFired) {
+    await prepareSequenceShapedPeFallback();
     writeTelemetry(input.projectRoot, 'advisory_dedup_blocked', { firedKey: preCheckFiredKey }, store);
     logger.info('pipeline_outcome', { outcome: 'no_action', reason: 'already_fired', firedKey: preCheckFiredKey });
     return { outcome: 'no_action' };
@@ -808,11 +968,13 @@ export async function runAuto(
 
   // ── 6.5. Advisory frequency gate ────────────────────────────────────────────
   if (freq === 'major_only' && triggerResult.kind !== 'stage_transition') {
+    await prepareSequenceShapedPeFallback();
     writeTelemetry(input.projectRoot, 'advisory_freq_blocked', { freq, flagType: triggerResult.kind }, store);
     logger.info('pipeline_outcome', { outcome: 'no_action', reason: 'freq_major_only', flagType: triggerResult.kind });
     return { outcome: 'no_action' };
   }
   if (freq === 'once_per_session' && mgr.current.firedDecisionSessions.length > 0) {
+    await prepareSequenceShapedPeFallback();
     writeTelemetry(input.projectRoot, 'advisory_freq_blocked', { freq, flagType: triggerResult.kind }, store);
     logger.info('pipeline_outcome', { outcome: 'no_action', reason: 'freq_once_per_session' });
     return { outcome: 'no_action' };
@@ -821,6 +983,7 @@ export async function runAuto(
   // ── 6.6. Post-advisory cooldown — suppress rapid back-to-back advisories ─────
   const lastAdvisory = mgr.current.lastAdvisoryPromptIndex ?? -1;
   if (lastAdvisory >= 0 && mgr.current.promptCount - lastAdvisory < freqConfig.postAdvisoryCooldown) {
+    await prepareSequenceShapedPeFallback();
     writeTelemetry(input.projectRoot, 'advisory_cooldown_blocked', {
       promptCount:       mgr.current.promptCount,
       lastAdvisoryAt:    lastAdvisory,
@@ -839,6 +1002,7 @@ export async function runAuto(
     : freqConfig.sessionAdvisoryCapDefault;
   const advisoryCount = mgr.current.advisoryCount ?? 0;
   if (advisoryCount >= advisoryCap) {
+    await prepareSequenceShapedPeFallback();
     insertSkippedSession(store, {
       projectRoot:          input.projectRoot,
       sessionId:            mgr.current.sessionId,
@@ -872,6 +1036,7 @@ export async function runAuto(
   // advisory (the stage still classifies locally, so session tracking continues).
   writeTelemetry(input.projectRoot, 'classifier_fire_evaluated', { flagType: triggerResult.kind, confirmed: stageResult.fireRecommendation }, store);
   if (!stageResult.fireRecommendation) {
+    await prepareSequenceShapedPeFallback();
     writeTelemetry(input.projectRoot, 'pipeline_no_action', { reason: 'classifier_declined' }, store);
     logger.info('pipeline_outcome', { outcome: 'no_action', reason: 'classifier_declined', confidence: stageResult.classification.confidence, degraded: stageResult.degraded });
     return { outcome: 'no_action' };
@@ -925,6 +1090,11 @@ export async function runAuto(
     disposition: preparation.disposition,
     safeFallback: preparation.safeFallback,
     reasonCode: 'reasonCode' in preparation ? preparation.reasonCode : undefined,
+    // Diagnosability (2026-08-06): a bare invalid_result was undebuggable from the log — record
+    // WHICH validation checks failed so a live boundary rejection names its exact cause.
+    validationReasonCodes: 'validationReasonCodes' in preparation && preparation.validationReasonCodes
+      ? preparation.validationReasonCodes.slice(0, 10)
+      : undefined,
   });
   // Owner decision B-i (2026-08-04): the PE popup is deferred to the Stop hook. Do NOT show a
   // popup on UserPromptSubmit — the prompt passes through raw. When a real (non-fallback) result
@@ -937,12 +1107,28 @@ export async function runAuto(
       request:     peIntegration.request,
       result:      preparation.result,
     });
+    const handoffPresent = Boolean(preparation.result.uiView.handoffAndSequenceSummary);
     logger.debug('pending_prompt_enhancement_stored', {
       projectRoot: input.projectRoot,
       sessionId:   mgr.current.sessionId,
       promptCount: mgr.current.promptCount,
       disposition: preparation.disposition,
+      // Diagnosability: whether this stored row can ever open the MPS popup.
+      handoffPresent,
     });
+    // A sequence-shaped prompt that stored WITHOUT a summary is the exact anomaly that was
+    // previously untraceable — name the reason (deterministic re-explain) in the log.
+    if (!handoffPresent && isPromptEnhancementSequenceShapedTextV1(input.promptText)) {
+      logger.warn('sequence_summary_absent', {
+        projectRoot: input.projectRoot,
+        reasonCodes: explainPromptEnhancementSequenceSummaryAbsenceV1(peIntegration.request, preparation.result).slice(0, 8),
+      });
+    }
+    // E9 (P12-G1/G2): measure cost off the result's REAL call-visibility (mode + planned/used
+    // counts come from the composer, not the hardcoded request placeholder), and run the PE-G4
+    // "cost never weakens behavior" check. Observability-only — this never gates the popup. The
+    // E8 popup-action calls are measured at their own surface via the popup costObservabilitySink.
+    emitPromptEnhancementCostObservabilityV1(preparation.result, 'prepare', logger);
   }
 
   // H1.3 keeps legacy Decision Session bookkeeping after preparation; PE preparation
@@ -1120,22 +1306,103 @@ export function registerAutoCommand(program: import('commander').Command): void 
     });
 }
 
+/**
+ * Record that the popup's Source-A signals were shown (E3/3.2b, fix-plan §4b):
+ * neutral candidate evidence per rendered Source-A signal so the "shown" count
+ * accumulates cross-session. The signal keys come from re-running the E2 pipeline
+ * on the request (Path A). Safety-critical signals are protected so they survive
+ * fatigue. Best-effort — a memory-write failure must never block the popup.
+ */
+export function recordPromptEnhancementShownMemoryV1(
+  store: Store,
+  projectRoot: string,
+  request: PromptEnhancementPrepareRequestV1,
+  now: number = Date.now(),
+): void {
+  try {
+    for (const signal of resolvePromptEnhancementGuidanceOutcomeV1(request).renderedSourceASignals) {
+      recordPromptEnhancementMemoryEvidence(store, {
+        projectRoot,
+        signalKey: signal.signalKey,
+        evidenceKind: 'neutral',
+        currentEvidenceState: 'live_current',
+        confidenceBand: 'medium',
+        sourceStrength: 'moderate',
+        protectionState:
+          signal.riskLevel === 'high' || signal.riskLevel === 'sensitive_authority_risky'
+            ? 'high_risk_protected'
+            : undefined,
+        status: 'candidate',
+        now,
+      });
+    }
+  } catch { /* memory record is best-effort; never block the popup */ }
+}
+
+/**
+ * Mark the popup's Source-A signals as used (E3/3.2b, fix-plan §4b "markUsed on
+ * use") when the enhanced body is kept/injected. Signal keys come from re-running
+ * the E2 pipeline (Path A); the memory rows already exist from the show recording.
+ * Best-effort — a memory-write failure must never block delivery.
+ */
+export function markPromptEnhancementUsedMemoryV1(
+  store: Store,
+  projectRoot: string,
+  request: PromptEnhancementPrepareRequestV1,
+  now: number = Date.now(),
+): void {
+  try {
+    for (const signal of resolvePromptEnhancementGuidanceOutcomeV1(request).renderedSourceASignals) {
+      markPromptEnhancementMemoryUsed(store, projectRoot, signal.signalKey, now);
+    }
+  } catch { /* memory record is best-effort; never block delivery */ }
+}
+
+/**
+ * D1 (P9-G1 / resolves P9-G2): wire the live Stop injection through the typed Stop-bridge delivery
+ * contract. `preparePromptEnhancementStopBridgeDelivery` records **source-use before transport** and
+ * writes the **generated-origin** metadata (`learningEligible:false`, `raw_text_excluded`) — the
+ * audit/lineage tables (`prompt_enhancement_source_use` / `prompt_enhancement_generated_origin`) that
+ * the ad-hoc block+inject path never wrote live. The kept enhanced body is a `send_current` delivery
+ * on the `cli_stop_bridge` channel; raw text is never the transport authority. Returns the typed
+ * result for the caller to log (the actual injected carrier text is unchanged — 4d).
+ */
+export function recordPromptEnhancementStopBridgeDeliveryV1(
+  store: Store,
+  pending: PendingPromptEnhancement,
+): PromptEnhancementDeliveryResultV1 {
+  const body = pending.result.currentBody;
+  const request: PromptEnhancementDeliveryRequestV1 = {
+    deliveryAttemptId: `pe-delivery:${pending.result.enhancementId}:${pending.id}`,
+    projectRoot: pending.projectRoot,
+    enhancementId: pending.result.enhancementId,
+    currentBody: body,
+    actionId: `${body.currentBodyId}:send_current`,
+    sendPolicy: 'send_current',
+    deliveryChannel: 'cli_stop_bridge',
+  };
+  return preparePromptEnhancementStopBridgeDelivery(store, request);
+}
+
 export function recordPromptEnhancementCliFeedbackV1(
   store: Store,
   projectRoot: string,
   event: PromptEnhancementPopupEventV1,
+  request?: PromptEnhancementPrepareRequestV1,
 ) {
-  const acknowledgement = recordPromptEnhancementFeedbackV1({
-    store,
-    event,
-    policy: {
-      projectRoot,
-      feedbackScopeKey: event.currentBodyId,
-      learningEligibility: 'pending_policy',
-      safetyImpactState: 'unknown',
-      memoryEvidence: false,
-    },
-  });
+  // With the prepare request, derive the real feedback->memory eligibility policy
+  // (E3/3.2a): the memory signal key + safety come from re-running the E2 pipeline
+  // (Path A). Without it, fall back to the inert placeholder (no memory learning).
+  const policy = request
+    ? derivePromptEnhancementFeedbackPolicyV1(event, request, projectRoot)
+    : {
+        projectRoot,
+        feedbackScopeKey: event.currentBodyId,
+        learningEligibility: 'pending_policy' as const,
+        safetyImpactState: 'unknown' as const,
+        memoryEvidence: false,
+      };
+  const acknowledgement = recordPromptEnhancementFeedbackV1({ store, event, policy });
   return {
     stableEventIdentity: acknowledgement.stableEventIdentity,
     status: acknowledgement.status,

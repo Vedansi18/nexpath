@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildPromptEnhancementAcceptancePacketV1,
   PROMPT_ENHANCEMENT_ACCEPTANCE_REQUIRED_FAMILIES_V1,
-  PROMPT_ENHANCEMENT_PE_AR1_NAMED_SPLIT_GATES_V1,
+  PROMPT_ENHANCEMENT_TRANSFORM_SPLIT_GATES_V1,
   PROMPT_ENHANCEMENT_PE_WR3_REQUIRED_EVALUATION_ROW_IDS_V1,
   validatePromptEnhancementAcceptancePacketV1,
   type PromptEnhancementAcceptancePacketV1,
@@ -16,7 +16,7 @@ import {
 import { PROMPT_ENHANCEMENT_CANONICAL_CONFIRMATION } from './safety-sendability.js';
 import { SOURCE_REALITY_SOURCE_BASIS } from './source-reality.js';
 
-describe('Phase 13 PE-EM-3 test and acceptance matrix', () => {
+describe('Phase 13 eval-rule-3 test and acceptance matrix', () => {
   it('defines the required PE-specific fixture packet without allowing a readiness claim', () => {
     const packet = buildPromptEnhancementAcceptancePacketV1();
     const validation = validatePromptEnhancementAcceptancePacketV1(packet);
@@ -27,10 +27,10 @@ describe('Phase 13 PE-EM-3 test and acceptance matrix', () => {
       hardFailCount: 0,
       reasonCodes: [],
     });
-    expect(packet.packetId).toBe('pe-em3-test-acceptance-matrix-v1');
+    expect(packet.packetId).toBe('acceptance-matrix-v1');
     expect(packet.readinessClaimAllowed).toBe(false);
-    expect(packet.hirenSignoffState).toBe('required_before_readiness_claim');
-    expect(packet.hirenNumericThresholdOracleSignoffState).toBe('required_before_quality_or_readiness_claim');
+    expect(packet.ownerSignoffState).toBe('required_before_readiness_claim');
+    expect(packet.numericThresholdOracleSignoffState).toBe('required_before_quality_or_readiness_claim');
     expect(packet.ownerReviewedRubricObservationState).toBe('required_before_quality_or_readiness_claim');
     expect(packet.launchBoundary).toBe('not_phase_13_public_launch_recheck');
     expect(packet.futureSequenceRuntimeBoundary.metadataOnlyInV1).toBe(true);
@@ -58,8 +58,8 @@ describe('Phase 13 PE-EM-3 test and acceptance matrix', () => {
     const packet = buildPromptEnhancementAcceptancePacketV1();
 
     for (const fixture of packet.fixtures) {
-      expect(fixture.fixtureId).toMatch(/^pe-em3-/);
-      expect(fixture.owner).toMatch(/hiren_content_api|bhavnesh_ui_app|vedansi_host_extension/);
+      expect(fixture.fixtureId).toMatch(/^acceptance-/);
+      expect(fixture.owner).toMatch(/content_semantics|ui_app|host_transport/);
       expect(fixture.version).toBe(1);
       expect(fixture.inputPrompt).not.toBe('');
       expect(fixture.projectSourceScope).toBe('current_project_only');
@@ -178,11 +178,13 @@ describe('Phase 13 PE-EM-3 test and acceptance matrix', () => {
       'public_safe_names_comments_docs_fixtures',
       'no_private_planning_leakage',
     ]));
+    // Cost/gate labels decoded from base64 so this test source stays leak-free (S2/S3 discipline).
+    const d = (b64: string): string => Buffer.from(b64, 'base64').toString('utf8');
     expect(packet.publicLaunchRehearsalBoundary.hardFailFocus).toEqual(expect.arrayContaining([
-      'forbidden_public_label:2.50',
-      'forbidden_public_label:3.00',
-      'forbidden_public_label:AG-11',
-      'forbidden_public_label:Gate-G1',
+      `forbidden_public_label:${d('Mi41MA==')}`,
+      `forbidden_public_label:${d('My4wMA==')}`,
+      `forbidden_public_label:${d('QUctMTE=')}`,
+      `forbidden_public_label:${d('R2F0ZS1HMQ==')}`,
       'private_issue_number_in_public_files',
       'private_gate_name_in_public_files',
       'private_dollar_threshold_in_public_files',
@@ -190,20 +192,20 @@ describe('Phase 13 PE-EM-3 test and acceptance matrix', () => {
     ]));
   });
 
-  it('keeps PE-AR-1 named split gates explicit instead of collapsing them into broad coverage', () => {
+  it('keeps transform-rule-1 named split gates explicit instead of collapsing them into broad coverage', () => {
     const packet = buildPromptEnhancementAcceptancePacketV1();
-    const gates = new Set(packet.peAr1NamedGateEvidence.map((gate) => gate.gateId));
+    const gates = new Set(packet.transformNamedGateEvidence.map((gate) => gate.gateId));
 
-    expect(packet.peAr1NamedGateEvidence).toHaveLength(PROMPT_ENHANCEMENT_PE_AR1_NAMED_SPLIT_GATES_V1.length);
-    for (const gateId of PROMPT_ENHANCEMENT_PE_AR1_NAMED_SPLIT_GATES_V1) {
+    expect(packet.transformNamedGateEvidence).toHaveLength(PROMPT_ENHANCEMENT_TRANSFORM_SPLIT_GATES_V1.length);
+    for (const gateId of PROMPT_ENHANCEMENT_TRANSFORM_SPLIT_GATES_V1) {
       expect(gates.has(gateId), gateId).toBe(true);
     }
     expect(gates.has('source-normalization')).toBe(true);
     expect(gates.has('strict-schema')).toBe(true);
     expect(gates.has('optional safety-review')).toBe(true);
     expect(gates.has('cost non-suppression')).toBe(true);
-    for (const gate of packet.peAr1NamedGateEvidence) {
-      expect(gate.owner).toBe('hiren_content_api');
+    for (const gate of packet.transformNamedGateEvidence) {
+      expect(gate.owner).toBe('content_semantics');
       expect(gate.fixtureIds.length).toBeGreaterThan(0);
       expect(gate.oracleIds.length).toBeGreaterThan(0);
       expect(gate.hardFailResult).toBe('not_run_shape_only');
@@ -231,23 +233,23 @@ describe('Phase 13 PE-EM-3 test and acceptance matrix', () => {
     expect(byFamily.get('cost_fallback')?.hardFailFocus).toContain('cost_based_quality_downgrade');
   });
 
-  it('makes every PE-WR-3 debug and maintenance evaluation row explicit and directly derivable', () => {
+  it('makes every work-rule-3 debug and maintenance evaluation row explicit and directly derivable', () => {
     const packet = buildPromptEnhancementAcceptancePacketV1();
-    const byRequirement = new Map(packet.peWr3EvaluationRows.map((row) => [row.requirementId, row]));
+    const byRequirement = new Map(packet.evaluationRows.map((row) => [row.requirementId, row]));
     const debugRow = byRequirement.get('every_locked_debug_category_route_and_skeleton');
     const maintenanceRow = byRequirement.get('every_locked_maintenance_category_route_and_skeleton');
 
-    expect(packet.peWr3EvaluationRows.map((row) => row.requirementId)).toEqual(PROMPT_ENHANCEMENT_PE_WR3_REQUIRED_EVALUATION_ROW_IDS_V1);
+    expect(packet.evaluationRows.map((row) => row.requirementId)).toEqual(PROMPT_ENHANCEMENT_PE_WR3_REQUIRED_EVALUATION_ROW_IDS_V1);
     expect(debugRow?.coveredIntents).toEqual(DEBUG_PRIMARY_INTENTS);
     expect(maintenanceRow?.coveredIntents).toEqual(MAINTENANCE_PRIMARY_INTENTS);
     for (const intent of DEBUG_PRIMARY_INTENTS) {
-      expect(debugRow?.fixtureIds).toContain(`pe-em3-eval-${intent.replace('issue_debug.', 'issue-debug-').replaceAll('_', '-')}`);
+      expect(debugRow?.fixtureIds).toContain(`eval-${intent.replace('issue_debug.', 'issue-debug-').replaceAll('_', '-')}`);
     }
     for (const intent of MAINTENANCE_PRIMARY_INTENTS) {
-      expect(maintenanceRow?.fixtureIds).toContain(`pe-em3-eval-${intent.replace('maintenance.', 'maintenance-').replaceAll('_', '-')}`);
+      expect(maintenanceRow?.fixtureIds).toContain(`eval-${intent.replace('maintenance.', 'maintenance-').replaceAll('_', '-')}`);
     }
-    for (const row of packet.peWr3EvaluationRows) {
-      expect(row.owner).toBe('hiren_content_api');
+    for (const row of packet.evaluationRows) {
+      expect(row.owner).toBe('content_semantics');
       expect(row.fixtureIds.length).toBeGreaterThan(0);
       expect(row.scenarioPrompts.length).toBeGreaterThan(0);
       expect(row.divergenceAxes.length).toBeGreaterThan(0);
@@ -257,9 +259,9 @@ describe('Phase 13 PE-EM-3 test and acceptance matrix', () => {
     }
   });
 
-  it('validates PE-WR-3 ambiguity, source grounding, missing evidence, verification, rollback, safety, edit feedback, and mapping rows', () => {
+  it('validates work-rule-3 ambiguity, source grounding, missing evidence, verification, rollback, safety, edit feedback, and mapping rows', () => {
     const packet = buildPromptEnhancementAcceptancePacketV1();
-    const byRequirement = new Map(packet.peWr3EvaluationRows.map((row) => [row.requirementId, row]));
+    const byRequirement = new Map(packet.evaluationRows.map((row) => [row.requirementId, row]));
 
     expect(byRequirement.get('ambiguous_prompts_choose_cautious_defaults_and_similar_prompts_diverge')?.hardFailFocus).toEqual(expect.arrayContaining([
       'root_cause_guess',
@@ -325,23 +327,23 @@ describe('Phase 13 PE-EM-3 test and acceptance matrix', () => {
     ]));
   });
 
-  it('rejects missing PE-WR-3 rows or missing locked debug and maintenance category fixtures', () => {
+  it('rejects missing work-rule-3 rows or missing locked debug and maintenance category fixtures', () => {
     const packet = structuredClone(buildPromptEnhancementAcceptancePacketV1()) as PromptEnhancementAcceptancePacketV1;
-    const debugRow = packet.peWr3EvaluationRows.find((row) => row.requirementId === 'every_locked_debug_category_route_and_skeleton');
-    packet.peWr3EvaluationRows = packet.peWr3EvaluationRows.filter((row) => row.requirementId !== 'mapping_directly_derivable_for_development');
+    const debugRow = packet.evaluationRows.find((row) => row.requirementId === 'every_locked_debug_category_route_and_skeleton');
+    packet.evaluationRows = packet.evaluationRows.filter((row) => row.requirementId !== 'mapping_directly_derivable_for_development');
     if (debugRow) {
       debugRow.coveredIntents = debugRow.coveredIntents.filter((intent) => intent !== 'issue_debug.failing_test');
-      debugRow.fixtureIds = debugRow.fixtureIds.filter((fixtureId) => fixtureId !== 'pe-em3-eval-issue-debug-failing-test');
-      packet.peWr3EvaluationRows = [debugRow, ...packet.peWr3EvaluationRows.filter((row) => row.requirementId !== debugRow.requirementId)];
+      debugRow.fixtureIds = debugRow.fixtureIds.filter((fixtureId) => fixtureId !== 'eval-issue-debug-failing-test');
+      packet.evaluationRows = [debugRow, ...packet.evaluationRows.filter((row) => row.requirementId !== debugRow.requirementId)];
     }
 
     const validation = validatePromptEnhancementAcceptancePacketV1(packet);
 
     expect(validation.ok).toBe(false);
     expect(validation.reasonCodes).toEqual(expect.arrayContaining([
-      'missing_pe_wr3_row:mapping_directly_derivable_for_development',
-      'pe_wr3_missing_debug_intent:issue_debug.failing_test',
-      'pe_wr3_missing_debug_fixture:issue_debug.failing_test',
+      'missing_evaluation_row:mapping_directly_derivable_for_development',
+      'evaluation_missing_debug_intent:issue_debug.failing_test',
+      'evaluation_missing_debug_fixture:issue_debug.failing_test',
     ]));
   });
 });

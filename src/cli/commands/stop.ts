@@ -28,7 +28,7 @@ import { writeTelemetry } from '../../telemetry/index.js';
 import { triggerOpportunisticSync } from '../../telemetry/OpportunisticSync.js';
 import { flushIfTelemetryOn, flushLifecycle } from '../../telemetry/lifecycle-flush.js';
 import { recentPromptMetadata } from '../../telemetry/recent-prompts.js';
-import { readStdin, recordPromptEnhancementCliFeedbackV1 } from './auto.js';
+import { readStdin, recordPromptEnhancementCliFeedbackV1, recordPromptEnhancementShownMemoryV1, markPromptEnhancementUsedMemoryV1, recordPromptEnhancementStopBridgeDeliveryV1 } from './auto.js';
 import {
   resolvePromptEnhancementCliHostCapabilityV1,
   runPromptEnhancementCliPopupHostLaunchV1,
@@ -38,6 +38,10 @@ import {
   runPromptEnhancementCliSubmitPopupV1,
   type PromptEnhancementCliPopupResultV1,
 } from '../../prompt-enhancement/cli-submit-popup.js';
+import { emitPromptEnhancementCostObservabilityV1 } from '../../prompt-enhancement/cost-measurement.js';
+import { evaluatePromptEnhancementMpsIntakeDecisionV1 } from '../../prompt-enhancement/intake-decision.js';
+import { buildPromptEnhancementCliMpsIntakeEvidenceV1 } from '../../prompt-enhancement/cli-mps-intake-evidence.js';
+import { runPromptEnhancementCliMpsFirstPopupV1 } from '../../prompt-enhancement/cli-mps-run.js';
 import type { GeneratedOptions } from '../../decision-session/OptionGenerator.js';
 import { resolveContentSource, selectionRegister } from '../../decision-session/selection-registry.js';
 import { autogenAwareLookup, pinchSignalTypeForFlag } from '../../decision-session/content-template-source.js';
@@ -176,11 +180,14 @@ export async function runStop(
   //      direct TTY, spawns a GUI terminal; a fully headless session has no host and falls through.
   //      Store-lock handling lives in the launcher: the in-process popup holds the lock (matching
   //      the advisory), while the spawned path releases it so the child process can reach the DB.
+  // Load session state up front so the PE popup and the advisory lookup below both scope their
+  // pending records to THIS session (a PE queued in one session must not surface in a later,
+  // unrelated one — matching getPendingAdvisory's scoping).
+  const mgr = SessionStateManager.load(store, payload.cwd);
+
   if (peLaunch) {
-    const pendingPe = getPendingPromptEnhancement(store, payload.cwd);
+    const pendingPe = getPendingPromptEnhancement(store, payload.cwd, mgr.current.sessionId);
     if (pendingPe) {
-      // Consume once (mirrors the advisory's mark-shown) so a Stop re-fire cannot re-show it.
-      markPromptEnhancementShown(store, pendingPe.id);
       let decision: PromptEnhancementStopDecision;
       try {
         decision = await peLaunch(pendingPe);
@@ -189,18 +196,43 @@ export async function runStop(
         decision = { kind: 'not_shown' };
       }
       if (decision.kind === 'inject') {
+        // Consume the record only now that it was actually displayed/injected, so a host that
+        // could not display it (e.g. an unsupported platform → not_shown) leaves the record
+        // pending for the next Stop instead of burning it silently.
+        markPromptEnhancementShown(store, pendingPe.id);
+        // D1 (P9-G1 / resolves P9-G2): record source-use + generated-origin BEFORE transport via
+        // the typed Stop-bridge delivery contract — the audit/lineage tables the ad-hoc path never
+        // wrote live. Best-effort: an audit-write failure must never lose the injection (4d).
+        try {
+          const delivered = recordPromptEnhancementStopBridgeDeliveryV1(store, pendingPe);
+          logger.debug('stop_prompt_enhancement_delivery_recorded', {
+            cwd: payload.cwd,
+            outcome: delivered.outcome,
+            sourceUseCount: delivered.sourceUseIds.length,
+            sourceUseRecordedBeforeTransport: delivered.invariants.sourceUseRecordedBeforeTransport,
+            generatedOriginId: delivered.generatedOrigin?.generatedOriginId,
+          });
+        } catch (err) {
+          logger.debug('stop_prompt_enhancement_delivery_record_failed', { cwd: payload.cwd, error: String(err) });
+        }
         // Record the injected enhanced prompt so the next UserPromptSubmit recognises it as an
         // echo and does not prepare another PE for it (mirrors the advisory injection at the
         // bottom of this function — otherwise the enhanced turn would re-trigger the PE popup).
+        // NB: the typed origin guard (resolvePromptEnhancementPromptSubmitOrigin) is evidence-based
+        // (generatedOriginId), which the CLI text-injection cannot carry — it becomes authoritative
+        // on the EXTENSION delivery path (Vedansi handoff). The CLI echo stays text-based here.
         SessionStateManager.load(store, payload.cwd).setInjectedPrompt(store, decision.text);
         logger.info('stop_prompt_enhancement_injected', { cwd: payload.cwd });
         return { outcome: 'blocked', reason: decision.text };
       }
       if (decision.kind === 'shown') {
+        // Displayed (incl. dismissed / use-original) → consume so a Stop re-fire cannot re-show it.
+        markPromptEnhancementShown(store, pendingPe.id);
         logger.info('stop_prompt_enhancement_shown', { cwd: payload.cwd });
         return { outcome: 'prompt_enhancement_shown' };
       }
-      // not_shown → no usable PE host this turn; fall through to the advisory path below.
+      // not_shown → no usable PE host this turn; the record stays PENDING (not marked shown) so a
+      // later Stop with a working host can still show it. Fall through to the advisory path below.
     }
   }
 
@@ -218,8 +250,8 @@ export async function runStop(
   // 1.7. Read decision_session_count for help-line gating in the decision session UI
   const decisionSessionCount = getProject(store, payload.cwd)?.decisionSessionCount ?? 0;
 
-  // 2. Load session state — needed for session filter and option gen
-  const mgr = SessionStateManager.load(store, payload.cwd);
+  // 2. Session state (`mgr`) was loaded up front (before the PE popup) so both the PE and advisory
+  //    lookups are session-scoped; it is reused here for the advisory path below.
 
   // 3. Check for a pending advisory stored by the auto hook
   logger.debug('stop_pending_lookup', {
@@ -469,16 +501,52 @@ export function registerStopCommand(program: import('commander').Command): void 
       // advisory path runs instead.
       const peLaunch: PromptEnhancementStopLaunchFn = async (pending) => {
         const capability = resolvePromptEnhancementCliHostCapabilityV1();
+        // Diagnosability (2026-08-06): record WHICH host branch the PE popup takes + whether the
+        // pending row can open MPS — the two facts a missing-MPS report needs from the log.
+        logger.debug('stop_pe_launch', {
+          cwd: payload.cwd,
+          capabilityState: capability.state,
+          method: capability.state === 'available' ? capability.method : 'none',
+          handoffPresent: Boolean(pending.result.uiView.handoffAndSequenceSummary),
+        });
         if (capability.state === 'unavailable') return { kind: 'not_shown' };
         let popup: PromptEnhancementCliPopupResultV1;
         if (capability.method === 'direct_tty') {
+          // MPS first popup (owner ruling 2026-08-06: CLI surface complete; extension surface stays
+          // with host_transport). For a compound multi-intent prompt the engine emits a typed
+          // handoff/sequence summary; when the CLI-scoped intake gate permits, show the MPS
+          // sequence popup first — Enter injects the enhanced first prompt, Esc falls through to
+          // the regular PE popup (full editing lives there). Fail-closed on any gate block.
+          if (pending.result.uiView.handoffAndSequenceSummary) {
+            const mpsEvidence = buildPromptEnhancementCliMpsIntakeEvidenceV1(pending.result);
+            const mpsGate = evaluatePromptEnhancementMpsIntakeDecisionV1({
+              surface: 'cli_stop_bridge',
+              evidence: mpsEvidence ? [...mpsEvidence] : undefined,
+            });
+            logger.debug('stop_mps_intake_gate', {
+              cwd: payload.cwd,
+              renderPermission: mpsGate.renderPermission,
+              reasonCodes: mpsGate.reasonCodes.slice(0, 6),
+            });
+            if (mpsGate.renderPermission === 'mps_render_permitted') {
+              const mps = await runPromptEnhancementCliMpsFirstPopupV1({ result: pending.result });
+              logger.info('stop_mps_first_popup', { cwd: payload.cwd, outcome: mps.state });
+              if (mps.state === 'send' && mps.bodyText.trim().length > 0) {
+                recordPromptEnhancementShownMemoryV1(store, payload.cwd, pending.request);
+                markPromptEnhancementUsedMemoryV1(store, payload.cwd, pending.request);
+                return { kind: 'inject', text: mps.bodyText };
+              }
+              // declined / not_shown -> fall through to the regular PE popup below.
+            }
+          }
           // Primary path: render the PE popup in-process on /dev/tty (the same channel the
           // advisory uses on the Stop hook). The store lock stays held for the duration, matching
           // the advisory popup; feedback is recorded through the store-backed sink.
           popup = await runPromptEnhancementCliSubmitPopupV1({
             request: pending.request,
             result: pending.result,
-            feedbackSink: (event) => recordPromptEnhancementCliFeedbackV1(store, payload.cwd, event),
+            feedbackSink: (event) => recordPromptEnhancementCliFeedbackV1(store, payload.cwd, event, pending.request),
+            costObservabilitySink: (result) => emitPromptEnhancementCostObservabilityV1(result, 'popup_action', logger),
           });
         } else {
           // No direct TTY but a GUI session exists: spawn a terminal popup. Release the DB lock
@@ -498,12 +566,27 @@ export function registerStopCommand(program: import('commander').Command): void 
             await reacquireStoreLock(store);
           }
         }
+        // A popup that never actually rendered (e.g. no usable console) returns not_shown. Report it
+        // honestly as not_shown — so the record stays pending and the advisory path runs — instead of
+        // the previous false "shown" that consumed the record while nothing appeared on screen.
+        if (validatePromptEnhancementCliPopupResultV1(popup) && popup.state === 'not_shown') {
+          logger.debug('stop_prompt_enhancement_not_rendered', {
+            cwd: payload.cwd,
+            reasonCodes: 'reasonCodes' in popup ? popup.reasonCodes : undefined,
+          });
+          return { kind: 'not_shown' };
+        }
+        // The popup rendered: record that its Source-A signals were shown so the
+        // missing-signal memory accumulates cross-session (E3/3.2b).
+        recordPromptEnhancementShownMemoryV1(store, payload.cwd, pending.request);
         if (
           validatePromptEnhancementCliPopupResultV1(popup)
           && popup.state === 'selected_current'
           && typeof popup.bodyText === 'string'
           && popup.bodyText.length > 0
         ) {
+          // The enhanced body was kept and injected: mark its Source-A signals used.
+          markPromptEnhancementUsedMemoryV1(store, payload.cwd, pending.request);
           return { kind: 'inject', text: popup.bodyText };
         }
         return { kind: 'shown' };

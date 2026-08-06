@@ -9,14 +9,14 @@ const copy = (state: string, actionLabel: string | null = null) => ({
   actionLabel,
 });
 
-describe('B4.2 onboarding and trust-copy boundary', () => {
+describe('stage-4-2 onboarding and trust-copy boundary', () => {
   it('renders each supplied typed state with no interactive or product claims', () => {
     for (const state of ['enabled', 'disabled', 'unavailable', 'unsupported', 'policy_disabled', 'fallback']) {
       const model = buildPromptEnhancementOnboardingTrustCopyModelV1({ configState: state, approvedCopy: copy(state) });
       expect(model.state).toBe(state);
       expect(model.interactive).toBe(false);
       expect(model.actionLabel).toBeNull();
-      expect(model.copyAuthority).toBe('supplied_hiren_approved_public_copy_only');
+      expect(model.copyAuthority).toBe('supplied_owner_approved_public_copy_only');
       expect(model.claims.installed).toBe(false);
       expect(model.claims.sent).toBe(false);
     }

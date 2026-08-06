@@ -41,6 +41,18 @@ export type PromptEnhancementCliHostCapabilityV1 =
       terminalCommand: PromptEnhancementLinuxTerminalCommandV1;
     }
   | {
+      // Windows: the popup is rendered in a NEW console window spawned via `cmd /c start` (the Stop
+      // hook has no usable in-process console). Mirrors the advisory's Windows path.
+      state: 'available';
+      method: 'windows_terminal';
+    }
+  | {
+      // macOS: the popup is rendered in a NEW Terminal.app window spawned via `osascript` (the Stop
+      // hook may have no usable /dev/tty). Mirrors the advisory's macOS path.
+      state: 'available';
+      method: 'mac_terminal';
+    }
+  | {
       state: 'unavailable';
       method: 'none';
       reasonCode: 'unsupported_platform' | 'no_gui_session' | 'no_supported_terminal';
@@ -62,7 +74,9 @@ const PROMPT_ENHANCEMENT_POPUP_HOST_PROTOCOL_VERSION_V1 = 1;
 const PROMPT_ENHANCEMENT_POPUP_WINDOW_TITLE_V1 = 'Nexpath · Prompt enhancement';
 
 export interface PromptEnhancementLinuxTerminalLaunchPlanV1 {
-  command: PromptEnhancementLinuxTerminalCommandV1;
+  // A bare argv: `command` is the program to spawn and `args` its arguments. Widened to `string` so
+  // the Windows launcher can use `cmd.exe` (the Linux plan still returns a terminal-command name).
+  command: string;
   args: readonly string[];
 }
 
@@ -90,14 +104,22 @@ export interface PromptEnhancementCliPopupHostLaunchDependenciesV1 {
 }
 
 function probeDirectTty(): boolean {
-  let fd: number | undefined;
+  // Mirror the popup's console open (cli-submit-popup.ts): Linux + macOS use /dev/tty; Windows uses
+  // the console device (CONIN$ for input, CONOUT$ for output). Probe the same device(s) so this
+  // capability accurately predicts whether the popup can attach.
+  const fds: number[] = [];
   try {
-    fd = openSync('/dev/tty', 'r+');
+    if (process.platform === 'win32') {
+      fds.push(openSync('\\\\.\\CONIN$', 'r'));
+      fds.push(openSync('\\\\.\\CONOUT$', 'w'));
+    } else {
+      fds.push(openSync('/dev/tty', 'r+'));
+    }
     return true;
   } catch {
     return false;
   } finally {
-    if (fd !== undefined) {
+    for (const fd of fds) {
       try {
         closeSync(fd);
       } catch {
@@ -142,15 +164,29 @@ export function resolvePromptEnhancementCliHostCapabilityV1(
   dependencies: PromptEnhancementCliHostProbeDependenciesV1 = {},
 ): PromptEnhancementCliHostCapabilityV1 {
   const platform = dependencies.platform ?? process.platform;
+  if (platform === 'win32') {
+    // Windows: the Stop hook has no usable in-process console — opening CONIN$/CONOUT$ there renders
+    // to a NON-VISIBLE console, so the popup "shows" invisibly. Always spawn a new window instead
+    // (mirrors the advisory's `cmd /c start`); the child renders in that window's real console.
+    return { state: 'available', method: 'windows_terminal' };
+  }
+  if (platform === 'darwin') {
+    // macOS: always spawn a new Terminal.app window (mirrors the advisory's osascript path) — the Stop
+    // hook may have no usable in-process /dev/tty, so never rely on it. Matches the old popup's
+    // all-platform "always a spawned window" behaviour.
+    return { state: 'available', method: 'mac_terminal' };
+  }
   if (platform !== 'linux') {
     return { state: 'unavailable', method: 'none', reasonCode: 'unsupported_platform' };
   }
 
+  // Linux: prefer the in-process /dev/tty when the hook has a controlling terminal, otherwise spawn a
+  // GUI terminal below (unchanged behaviour).
   const directTtyAvailable = dependencies.probeDirectTty ?? probeDirectTty;
   try {
     if (directTtyAvailable()) return { state: 'available', method: 'direct_tty' };
   } catch {
-    // Continue to the GUI terminal capability path.
+    // Continue to the Linux terminal-spawn fallback below.
   }
 
   const env = dependencies.env ?? process.env;
@@ -243,6 +279,139 @@ export function planPromptEnhancementLinuxTerminalLaunchV1(input: {
     case 'xterm':
       return { command: input.terminalCommand, args: [...xtermGeom, '-T', T, '-e', ...childArgs] };
   }
+}
+
+/**
+ * The batch launcher executed inside the spawned Windows console window. Every path is double-quoted
+ * so cmd.exe handles spaces natively — no reliance on `start`/argv escaping, which is fragile for
+ * space-containing paths (e.g. a clone under "nexpath testing\"). Node is invoked by its ABSOLUTE
+ * path, so it does not depend on the new window's PATH. This is the robust, standard way to launch a
+ * child process with arbitrary paths on Windows.
+ */
+export function buildPromptEnhancementWindowsLauncherScriptV1(input: {
+  nodeExecPath: string;
+  cliEntryPath: string;
+  inputFile: string;
+  resultFile: string;
+  readinessFile: string;
+  dbPath: string;
+}): string {
+  // Paths never legitimately contain a double-quote; strip any defensively so the quoting can't be
+  // broken out of (the request body itself is passed as a file, never on this command line).
+  const quote = (p: string): string => `"${p.replace(/"/g, '')}"`;
+  const command = [
+    quote(input.nodeExecPath),
+    quote(input.cliEntryPath),
+    'prompt-enhancement-popup-host',
+    '--input-file', quote(input.inputFile),
+    '--result-file', quote(input.resultFile),
+    '--readiness-file', quote(input.readinessFile),
+    '--db', quote(input.dbPath),
+  ].join(' ');
+  // `@echo off` for a clean window; CRLF line endings for a well-formed .cmd. On success the child
+  // exits 0 and the window closes; on any real error (non-zero exit) `pause` keeps the window open so
+  // the message is visible instead of the window flashing and vanishing (better UX + diagnosis).
+  return ['@echo off', command, 'if errorlevel 1 pause', ''].join('\r\n');
+}
+
+/**
+ * Windows popup launch: open a NEW console window that runs the batch launcher above, via
+ * `cmd /c start /WAIT "<title>" cmd /c "<launcher.cmd>"`.
+ *
+ * IMPORTANT: `start` must run a *program* (here `cmd /c <launcher.cmd>`), NOT the `.cmd` file directly.
+ * `start "<title>" "<launch.cmd>"` routes the `.cmd` through ShellExecute's file association, which
+ * fails on real Windows with "The system cannot find the path specified." — this is exactly the shape
+ * the working advisory popup uses (`start … node <script>` runs a program too). The launcher path is
+ * in a temp dir (no spaces), so `start` needs no fragile quoting; every real, possibly-space-containing
+ * path is quoted INSIDE the batch. `/WAIT` keeps the parent alive until the window closes; the child
+ * renders in that window's real, visible console.
+ */
+export function planPromptEnhancementWindowsTerminalLaunchV1(input: {
+  launcherScriptPath: string;
+}): PromptEnhancementLinuxTerminalLaunchPlanV1 {
+  return {
+    // Resolve the command interpreter from the system (`%ComSpec%`) rather than assuming a fixed
+    // `cmd.exe` on PATH — this works across non-standard Windows installs and locales. Falls back to
+    // the on-PATH `cmd.exe` only if the env var is absent.
+    command: process.env.ComSpec ?? 'cmd.exe',
+    args: ['/c', 'start', '/WAIT', PROMPT_ENHANCEMENT_POPUP_WINDOW_TITLE_V1, 'cmd', '/c', input.launcherScriptPath],
+  };
+}
+
+/**
+ * The shell launcher executed inside the spawned macOS Terminal.app window. Every path is
+ * single-quoted so /bin/sh handles spaces natively, and node is invoked by its ABSOLUTE path — the
+ * same robust approach as the Windows batch launcher (no fragile inline quoting).
+ */
+export function buildPromptEnhancementMacLauncherScriptV1(input: {
+  nodeExecPath: string;
+  cliEntryPath: string;
+  inputFile: string;
+  resultFile: string;
+  readinessFile: string;
+  dbPath: string;
+}): string {
+  // Paths never legitimately contain a single-quote; strip any defensively so the sh quoting holds.
+  const quote = (p: string): string => `'${p.replace(/'/g, '')}'`;
+  const command = [
+    quote(input.nodeExecPath),
+    quote(input.cliEntryPath),
+    'prompt-enhancement-popup-host',
+    '--input-file', quote(input.inputFile),
+    '--result-file', quote(input.resultFile),
+    '--readiness-file', quote(input.readinessFile),
+    '--db', quote(input.dbPath),
+  ].join(' ');
+  return ['#!/bin/sh', command, ''].join('\n');
+}
+
+/**
+ * AppleScript that opens a new Terminal.app window, runs `shellCommand; exit`, waits for it to finish,
+ * then closes the window. Replicated from the advisory's buildTerminalAppleScript so the PE host does
+ * not import the heavy decision-session tty module.
+ */
+function buildPromptEnhancementMacAppleScriptV1(shellCommand: string, geom: PopupGeometry | null): string {
+  const escaped = shellCommand.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  const sizeBlock = geom
+    ? `try
+        set bounds of (first window whose selected tab is theTab) to {${geom.xPx}, ${geom.yPx}, ${geom.xPx + geom.widthPx}, ${geom.yPx + geom.heightPx}}
+    end try`
+    : 'set number of rows of (first window whose selected tab is theTab) to 50';
+  return `tell application "Terminal"
+    activate
+    set theTab to do script "${escaped}; exit"
+    ${sizeBlock}
+    delay 1
+    repeat
+        delay 0.5
+        try
+            if not (busy of theTab) then exit repeat
+        on error
+            exit repeat
+        end try
+    end repeat
+    try
+        close (first window whose selected tab is theTab)
+    end try
+end tell`;
+}
+
+/**
+ * macOS popup launch: open a NEW Terminal.app window (via `osascript`) that runs the shell launcher
+ * above through `sh`. The launcher path lives in a temp dir (no spaces), so the AppleScript embedding
+ * is clean; every real, possibly-space-containing path is quoted INSIDE the launcher. osascript is
+ * synchronous — the AppleScript waits for the child to finish, then closes the window. Mirrors the
+ * advisory's macOS path.
+ */
+export function planPromptEnhancementMacTerminalLaunchV1(input: {
+  launcherScriptPath: string;
+  geometry?: PopupGeometry;
+}): PromptEnhancementLinuxTerminalLaunchPlanV1 {
+  const shCommand = `sh '${input.launcherScriptPath.replace(/'/g, '')}'`;
+  return {
+    command: 'osascript',
+    args: ['-e', buildPromptEnhancementMacAppleScriptV1(shCommand, input.geometry ?? null)],
+  };
 }
 
 function makeTempDir(): string {
@@ -362,16 +531,50 @@ export async function runPromptEnhancementCliPopupHostLaunchV1(input: {
     };
     dependencies.writeInputFile(inputFile, childInput);
     const geometry = await dependencies.detectPopupGeometry();
-    const plan = planPromptEnhancementLinuxTerminalLaunchV1({
-      terminalCommand: input.capability.terminalCommand,
-      nodePath: input.nodePath ?? process.execPath,
-      cliEntryPath: input.cliEntryPath,
-      geometry,
-      inputFile,
-      resultFile,
-      readinessFile,
-      dbPath: input.dbPath,
-    });
+    let plan: PromptEnhancementLinuxTerminalLaunchPlanV1;
+    if (input.capability.method === 'windows_terminal') {
+      // Write the batch launcher into the temp dir (cleaned up in `finally`), then spawn a window
+      // that runs it. All real paths are quoted inside the batch, so the spawn command stays clean.
+      const launcherScriptPath = join(tempDir, 'launch.cmd');
+      const launcherScript = buildPromptEnhancementWindowsLauncherScriptV1({
+        nodeExecPath: input.nodePath ?? process.execPath,
+        cliEntryPath: input.cliEntryPath,
+        inputFile,
+        resultFile,
+        readinessFile,
+        dbPath: input.dbPath,
+      });
+      writeFileSync(launcherScriptPath, launcherScript, 'utf8');
+      if (process.env.NEXPATH_DEBUG) process.stderr.write(`[nexpath] launch.cmd (${launcherScriptPath}):\n${launcherScript}\n`);
+      plan = planPromptEnhancementWindowsTerminalLaunchV1({ launcherScriptPath });
+    } else if (input.capability.method === 'mac_terminal') {
+      // Write the shell launcher (0o700) into the temp dir, then open a Terminal.app window that runs
+      // it. All real paths are quoted inside the launcher, so the AppleScript stays clean.
+      const launcherScriptPath = join(tempDir, 'launch.sh');
+      writeFileSync(launcherScriptPath, buildPromptEnhancementMacLauncherScriptV1({
+        nodeExecPath: input.nodePath ?? process.execPath,
+        cliEntryPath: input.cliEntryPath,
+        inputFile,
+        resultFile,
+        readinessFile,
+        dbPath: input.dbPath,
+      }), { mode: 0o700 });
+      plan = planPromptEnhancementMacTerminalLaunchV1({ launcherScriptPath, geometry });
+    } else {
+      plan = planPromptEnhancementLinuxTerminalLaunchV1({
+        terminalCommand: input.capability.terminalCommand,
+        nodePath: input.nodePath ?? process.execPath,
+        cliEntryPath: input.cliEntryPath,
+        geometry,
+        inputFile,
+        resultFile,
+        readinessFile,
+        dbPath: input.dbPath,
+      });
+    }
+    if (process.env.NEXPATH_DEBUG) {
+      process.stderr.write(`[nexpath] PE popup spawn: ${plan.command} ${JSON.stringify(plan.args)}\n`);
+    }
     try {
       child = await dependencies.spawnTerminal(plan);
       child.once('exit', (code, signal) => {

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { evaluatePromptEnhancementHostCapability, type PromptEnhancementHostCapabilityEvidenceState } from './delivery.js';
 import { buildPromptEnhancementHostCapabilityDisplayModelV1 } from './host-capability-display.js';
 
-describe('B2.4 typed host-capability display boundary', () => {
+describe('stage-2-4 typed host-capability display boundary', () => {
   it('keeps every typed capability/result label distinct and non-authoritative', () => {
     const cases: Array<[PromptEnhancementHostCapabilityEvidenceState, string]> = [
       ['direct_insert_success_text_only', 'inserted'],

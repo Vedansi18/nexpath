@@ -34,7 +34,7 @@ function request(overrides: Partial<PromptEnhancementPrepareRequestV1> = {}): Pr
   };
 }
 
-describe('B1.5 safe UI boundary', () => {
+describe('stage-1-5 safe UI boundary', () => {
   it('fails closed to an error shell for invalid or stale input', () => {
     const model = buildPromptEnhancementSafeUiModelV1({ result: { body: '<script>secret</script>' }, timestampMs: 1 });
     expect(model.state).toBe('error_shell');

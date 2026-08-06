@@ -102,7 +102,7 @@ function draftFor(
 }
 
 /**
- * Build ephemeral B1.2 local draft state from the typed popup session.
+ * Build ephemeral stage-1-2 local draft state from the typed popup session.
  * This model has no store, telemetry, clipboard, host, or delivery side effect.
  */
 export function buildPromptEnhancementLocalDraftV1(
