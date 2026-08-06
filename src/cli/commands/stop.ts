@@ -41,7 +41,7 @@ import {
 import { emitPromptEnhancementCostObservabilityV1 } from '../../prompt-enhancement/cost-measurement.js';
 import { evaluatePromptEnhancementMpsIntakeDecisionV1 } from '../../prompt-enhancement/intake-decision.js';
 import { buildPromptEnhancementCliMpsIntakeEvidenceV1 } from '../../prompt-enhancement/cli-mps-intake-evidence.js';
-import { runPromptEnhancementCliMpsFirstPopupV1 } from '../../prompt-enhancement/cli-mps-run.js';
+import { runPromptEnhancementCliMpsFirstPopupV1, buildPromptEnhancementMpsCancelFeedbackEventV1 } from '../../prompt-enhancement/cli-mps-run.js';
 import type { GeneratedOptions } from '../../decision-session/OptionGenerator.js';
 import { resolveContentSource, selectionRegister } from '../../decision-session/selection-registry.js';
 import { autogenAwareLookup, pinchSignalTypeForFlag } from '../../decision-session/content-template-source.js';
@@ -536,7 +536,22 @@ export function registerStopCommand(program: import('commander').Command): void 
                 markPromptEnhancementUsedMemoryV1(store, payload.cwd, pending.request);
                 return { kind: 'inject', text: mps.bodyText };
               }
-              // declined / not_shown -> fall through to the regular PE popup below.
+              if (mps.state === 'cancelled') {
+                // Cancel ends the flow (owner request 2026-08-06): the MPS shell already showed
+                // the PEF feedback popup — the PE popup must NOT open. Record any collected
+                // feedback (best-effort) and report shown, no injection.
+                if (mps.feedback) {
+                  const feedbackEvent = buildPromptEnhancementMpsCancelFeedbackEventV1(pending.result, mps.feedback, Date.now());
+                  if (feedbackEvent) {
+                    try {
+                      await recordPromptEnhancementCliFeedbackV1(store, payload.cwd, feedbackEvent, pending.request);
+                    } catch { /* feedback recording is best-effort — never blocks the cancel */ }
+                  }
+                }
+                recordPromptEnhancementShownMemoryV1(store, payload.cwd, pending.request);
+                return { kind: 'shown' };
+              }
+              // declined (Esc) / not_shown -> fall through to the regular PE popup below.
             }
           }
           // Primary path: render the PE popup in-process on /dev/tty (the same channel the

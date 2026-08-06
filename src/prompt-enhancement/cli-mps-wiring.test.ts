@@ -9,7 +9,7 @@ import { preparePromptEnhancement } from './facade.js';
 import { getPromptStartStopSourceSnapshot } from './source-reality.js';
 import { evaluatePromptEnhancementMpsIntakeDecisionV1 } from './intake-decision.js';
 import { buildPromptEnhancementCliMpsIntakeEvidenceV1 } from './cli-mps-intake-evidence.js';
-import { runPromptEnhancementCliMpsFirstPopupV1 } from './cli-mps-run.js';
+import { runPromptEnhancementCliMpsFirstPopupV1, buildPromptEnhancementMpsCancelFeedbackEventV1 } from './cli-mps-run.js';
 import { isPromptEnhancementSequenceShapedTextV1 } from './routing-taxonomy.js';
 
 const MULTI_INTENT = 'Fix the failing payment test and add a rate limiter to the login endpoint.';
@@ -36,13 +36,21 @@ function request(text: string): PromptEnhancementPrepareRequestV1 {
 // Raw key sequences (the shell decodes them with the shared PE key decoder).
 const KEY = { enter: '\r', escape: '', up: '[A', down: '[B' } as const;
 
-function scripted(keys: readonly string[]): { next(frame: string): Promise<string>; close(): void; frames: string[] } {
+function scripted(keys: readonly string[]): {
+  next(frame: string, cursor?: { row: number; col: number } | null): Promise<string>;
+  close(): void;
+  frames: string[];
+  cursors: ({ row: number; col: number } | null)[];
+} {
   const queue = [...keys];
   const frames: string[] = [];
+  const cursors: ({ row: number; col: number } | null)[] = [];
   return {
     frames,
-    async next(frame) {
+    cursors,
+    async next(frame, cursor) {
       frames.push(frame);
+      cursors.push(cursor ?? null);
       const key = queue.shift();
       if (key === undefined) throw new Error('missing scripted key');
       return key;
@@ -125,6 +133,11 @@ describe('MPS CLI wiring (owner ruling 2026-08-06: CLI complete, extension pendi
     expect(ui.frames[0]).toContain('Cancel (remaining multi-prompt sequence)');
     expect(ui.frames[0]).toContain('Sequence plan');
     expect(ui.frames[0]).toContain('Enter send · Esc actions');
+    // The hardware cursor is placed in the focused editable body on open (owner request): the
+    // body opens at the TOP with the caret on its first content line, at column 7.
+    expect(ui.cursors[0]).not.toBeNull();
+    expect(ui.cursors[0]!.col).toBe(7);
+    expect(ui.cursors[0]!.row).toBeGreaterThan(1);
   });
 
   it('no-scroll: every frame fits the reported window height (stacking regression guard)', async () => {
@@ -139,13 +152,33 @@ describe('MPS CLI wiring (owner ruling 2026-08-06: CLI complete, extension pendi
     }
   });
 
-  it('row navigation: Down twice focuses Cancel; Enter there declines (falls through to the PE popup)', async () => {
+  it('Cancel opens the PEF feedback popup and ends the flow as cancelled — never the PE popup (owner request)', async () => {
     const result = await preparePromptEnhancement(request(MULTI_INTENT));
+    // Down×2 -> Cancel; Enter -> the PEF feedback popup opens; Esc skips feedback -> cancelled.
+    const ui = scripted([KEY.down, KEY.down, KEY.enter, KEY.escape]);
+    const outcome = await runPromptEnhancementCliMpsFirstPopupV1({ result, interaction: ui });
+    expect(outcome.state).toBe('cancelled');
+    if (outcome.state === 'cancelled') expect(outcome.feedback).toBeUndefined();
+    // The frame painted after Enter-on-Cancel is the PEF feedback popup, not the PE popup.
+    expect(ui.frames[ui.frames.length - 1]).toContain('Prompt enhancement feedback');
+    expect(ui.frames[ui.frames.length - 1]).toContain('Not relevant enough');
+  });
+
+  it('Cancel -> feedback reason submitted -> cancelled WITH the typed feedback, and it builds a valid PEF event', async () => {
+    const result = await preparePromptEnhancement(request(MULTI_INTENT));
+    // Enter on Cancel opens feedback; Enter on the first reason submits it.
     const outcome = await runPromptEnhancementCliMpsFirstPopupV1({
       result,
-      interaction: scripted([KEY.down, KEY.down, KEY.enter]),
+      interaction: scripted([KEY.down, KEY.down, KEY.enter, KEY.enter]),
     });
-    expect(outcome.state).toBe('declined');
+    expect(outcome.state).toBe('cancelled');
+    if (outcome.state !== 'cancelled') return;
+    expect(outcome.feedback).toEqual({ kind: 'suggested', category: 'not_relevant_enough' });
+    // The caller records it through the SAME typed PEF event chain the PE popup uses.
+    const event = buildPromptEnhancementMpsCancelFeedbackEventV1(result, outcome.feedback!, Date.now());
+    expect(event).not.toBeNull();
+    expect(event!.eventType).toBe('explicit_feedback');
+    expect(event!.feedbackCategory).toBe('not_relevant_enough');
   });
 
   it('Additional details: focus the field, type, Enter sends body PLUS the typed details', async () => {
