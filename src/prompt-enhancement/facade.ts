@@ -18,6 +18,10 @@ import {
 import { composePromptEnhancementBody, type PromptEnhancementComposeResult } from './compose-enhancement.js';
 import { planPromptEnhancementSections } from './templates/section-plan.js';
 import { routePromptEnhancement, type PromptEnhancementCapabilityId } from './routing-taxonomy.js';
+import { buildPromptEnhancementGuidanceFactsV1 } from './guidance-facts.js';
+import { resolvePromptEnhancementSourceConflictsV1 } from './conflict-resolution.js';
+import { applyPromptEnhancementSourceMixV1 } from './source-mix.js';
+import { applyPromptEnhancementGuidanceGateV1 } from './guidance-gate.js';
 import { buildPromptEnhancementPinchLabelV1, buildPromptEnhancementWhyHelpV1 } from './pe-header-copy.js';
 import {
   validatePromptEnhancementSafety,
@@ -103,9 +107,20 @@ async function prepare(
     oldDecisionSessionPayloadPresent: false,
   });
 
+  // E2 guidance pipeline: source signals -> typed facts -> cross-lane conflict
+  // resolution -> PE-AR-2 dual-lane source mix -> DR2-G1 gate. The mix's rendered
+  // facts feed section planning; the gate can force skip_no_popup when there is no
+  // useful Source-A survivor (never a filler body).
+  const guidanceFacts = buildPromptEnhancementGuidanceFactsV1(request);
+  const resolvedFacts = resolvePromptEnhancementSourceConflictsV1(guidanceFacts).facts;
+  const sourceMix = applyPromptEnhancementSourceMixV1(resolvedFacts, request.userPreferenceContext.levelState);
+  const guidanceGate = applyPromptEnhancementGuidanceGateV1(sourceMix);
+  const noPopup = route.noPopup || !guidanceGate.show;
+
   const planning = planPromptEnhancementSections({
     routeResult: route,
     sourceRefs: request.sourceSignals.sourceRefs,
+    guidanceFacts: sourceMix.renderedFacts,
   });
   const composed = composePromptEnhancementBody({
     enhancementId,
@@ -123,11 +138,11 @@ async function prepare(
   });
   const safety = validatePromptEnhancementSafety({
     currentBody: composed.currentBody,
-    actionType: route.noPopup ? 'use_original' : undefined,
+    actionType: noPopup ? 'use_original' : undefined,
     callVisibilityMode: composed.callVisibilityMode,
     optionalCallAvailabilityState: composed.callVisibilityMode === 'deterministic' ? 'deterministic_only' : undefined,
   });
-  return buildResult(request, enhancementId, route, planning, composed, safety);
+  return buildResult(request, enhancementId, route, planning, composed, safety, noPopup);
 }
 
 function buildResult(
@@ -137,12 +152,15 @@ function buildResult(
   planning: ReturnType<typeof planPromptEnhancementSections>,
   composed: PromptEnhancementComposeResult,
   safety: PromptEnhancementSafetyValidationResult,
+  // Effective no-popup = route.noPopup OR the DR2-G1 gate skip (no useful Source-A
+  // survivor / weak evidence). Both collapse to the same not-applicable disposition.
+  noPopup: boolean,
 ): PromptEnhancementPrepareResultV1 {
   const currentBody: PromptEnhancementCurrentBodyV1 = {
     ...composed.currentBody,
     generatedSafeStatus: safety.generatedSafeStatus,
   };
-  const disposition = dispositionFor(route.noPopup, currentBody, safety);
+  const disposition = dispositionFor(noPopup, currentBody, safety);
   const diagnostics = diagnosticsFor(enhancementId, [...composed.diagnostics, ...safety.publicDiagnostics]);
   const composerCallVisibility = composed.composerBoundary.inputContract.callVisibilityState;
   const callAndVisibilityMetadata = {
@@ -153,21 +171,21 @@ function buildResult(
   };
   const validationSummary = safety.safetySummary;
   const generatedOrigin = buildGeneratedOrigin(request, enhancementId, currentBody);
-  const delivery = buildDelivery(request, safety, route.noPopup);
+  const delivery = buildDelivery(request, safety, noPopup);
   const trustCues = buildTrustCues(currentBody, composed.sourceGuidanceCoverage, safety);
   // UI-9 / PE-AR-10: deterministic header copy — pinch label always (when a popup
   // shows), why-help only when a safety/risk/sensitive-action reason exists.
-  const pinchLabel = route.noPopup
+  const pinchLabel = noPopup
     ? undefined
     : buildPromptEnhancementPinchLabelV1({ familyId: route.familyId, capabilityOverlays: route.capabilityOverlays });
-  const whyHelp = route.noPopup
+  const whyHelp = noPopup
     ? undefined
     : buildPromptEnhancementWhyHelpV1({
         capabilityOverlays: route.capabilityOverlays,
         hasSensitiveAction: safety.sensitiveActionFindings.some((finding) => finding.requiresConfirmation),
       });
   const uiView: PromptEnhancementUiViewPayloadV1 = {
-    ...buildUiView(request, enhancementId, currentBody, composed, safety, trustCues, diagnostics, route.noPopup),
+    ...buildUiView(request, enhancementId, currentBody, composed, safety, trustCues, diagnostics, noPopup),
     ...(pinchLabel ? { pinchLabel } : {}),
     ...(whyHelp ? { whyHelp } : {}),
   };
@@ -182,9 +200,9 @@ function buildResult(
     validationDecisionId: safety.validationDecisionId,
     currentBody,
     availableActions: composed.availableActions,
-    sourceGuidanceCoverage: route.noPopup ? 'not_applicable' : composed.sourceGuidanceCoverage,
+    sourceGuidanceCoverage: noPopup ? 'not_applicable' : composed.sourceGuidanceCoverage,
     routingAndFeedbackDecision: {
-      state: route.noPopup ? 'suppress' : route.fallbackMode === 'planning_first' ? 'clarify' : 'show',
+      state: noPopup ? 'suppress' : route.fallbackMode === 'planning_first' ? 'clarify' : 'show',
       confidence: routeConfidence(route.routeConfidence),
       reasonCodes: route.reasonCodes,
       scopedPromptKindKey: route.primaryIntent,

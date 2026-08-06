@@ -2,14 +2,17 @@ import { describe, expect, it } from 'vitest';
 import type {
   PromptEnhancementPrepareRequestV1,
   PromptEnhancementSourceInputSnapshotV1,
+  PromptEnhancementTriggerProvenanceV1,
 } from './contracts.js';
 import { buildPromptEnhancementGuidanceFactsV1 } from './guidance-facts.js';
 
-// The builder only reads request.sourceSignals, so a focused fixture carrying just
-// the signal snapshot (cast to the full request type) keeps these tests on the unit
-// under test rather than the whole prepare-request contract.
+// The builder reads request.sourceSignals + the review-moment trigger, so a focused
+// fixture carrying just those (cast to the full request type) keeps these tests on the
+// unit under test rather than the whole prepare-request contract. The trigger defaults
+// to 'none' so ref-driven cases stay isolated from the current-trigger fact.
 function requestWithSignals(
   overrides: Partial<PromptEnhancementSourceInputSnapshotV1>,
+  trigger: PromptEnhancementTriggerProvenanceV1 = { triggerKind: 'none', currentStage: 'implementation' },
 ): PromptEnhancementPrepareRequestV1 {
   const sourceSignals = {
     normalizedStageAbsenceSignalRefs: [],
@@ -19,12 +22,38 @@ function requestWithSignals(
     sourceOnlyHardFactRefs: [],
     ...overrides,
   } as unknown as PromptEnhancementSourceInputSnapshotV1;
-  return { sourceSignals } as unknown as PromptEnhancementPrepareRequestV1;
+  return { sourceSignals, reviewMomentContext: { triggerProvenance: trigger } } as unknown as PromptEnhancementPrepareRequestV1;
 }
 
 describe('buildPromptEnhancementGuidanceFactsV1 (E2 / 2.1)', () => {
   it('returns no facts when no source signals are present', () => {
     expect(buildPromptEnhancementGuidanceFactsV1(requestWithSignals({}))).toEqual([]);
+  });
+
+  it('builds a Source-A stage_transition fact from a current stage-transition trigger', () => {
+    const facts = buildPromptEnhancementGuidanceFactsV1(
+      requestWithSignals({}, { triggerKind: 'stage_transition', currentStage: 'implementation', prevStage: 'task_breakdown' }),
+    );
+    expect(facts).toHaveLength(1);
+    expect(facts[0].sourceType).toBe('stage_transition');
+    expect(facts[0].guidanceKind).toBe('stage_transition_discipline');
+    expect(facts[0].priority).toBe('high');
+    expect(facts[0].sourceIds).toEqual(['stage:task_breakdown->implementation']);
+  });
+
+  it('builds a Source-A absence fact from a current absence trigger', () => {
+    const facts = buildPromptEnhancementGuidanceFactsV1(
+      requestWithSignals({}, { triggerKind: 'absence', currentStage: 'implementation', selectedQualifyingAbsence: 'acceptance_criteria' }),
+    );
+    expect(facts).toHaveLength(1);
+    expect(facts[0].sourceType).toBe('absence_signal');
+    expect(facts[0].priority).toBe('required_survivor');
+    expect(facts[0].sourceIds).toEqual(['absence:acceptance_criteria']);
+  });
+
+  it('adds no current-trigger fact for a manual/none trigger', () => {
+    expect(buildPromptEnhancementGuidanceFactsV1(requestWithSignals({}, { triggerKind: 'manual', currentStage: 'implementation' }))).toEqual([]);
+    expect(buildPromptEnhancementGuidanceFactsV1(requestWithSignals({}, { triggerKind: 'none', currentStage: 'implementation' }))).toEqual([]);
   });
 
   it('normalizes a shown stage/absence signal into a required-survivor source-signal fact', () => {

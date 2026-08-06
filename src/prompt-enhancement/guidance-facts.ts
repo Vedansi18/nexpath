@@ -28,6 +28,49 @@ export function buildPromptEnhancementGuidanceFactsV1(
   let seq = 0;
   const nextId = (kind: string): string => `pe-fact-${kind}-${seq++}`;
 
+  // Source A — the current review-moment trigger. This is the live stage/absence
+  // Source-A candidate (analysis L5567): even when nothing is persisted in the
+  // signal refs yet, a fresh stage transition or absence anchors the popup.
+  const trigger = request.reviewMomentContext.triggerProvenance;
+  if (trigger.triggerKind === 'stage_transition') {
+    facts.push({
+      factId: nextId('stage'),
+      sourceType: 'stage_transition',
+      sourceIds: [`stage:${trigger.prevStage ?? 'unknown'}->${trigger.currentStage}`],
+      guidanceKind: 'stage_transition_discipline',
+      suggestedActionKind: 'no_action_render_context_only',
+      targetFamily: 'family_agnostic',
+      targetSectionKind: 'source_signal_guidance',
+      sourceEvidenceState: 'strong',
+      priority: 'high',
+      renderPolicy: 'render_as_section',
+      riskLevel: 'low',
+      safetyHooks: [],
+      privacyClass: 'public_safe',
+      sanitizationState: 'not_applicable',
+      publicCopySafe: true,
+    });
+  } else if (trigger.triggerKind === 'absence') {
+    facts.push({
+      factId: nextId('signal'),
+      sourceType: 'absence_signal',
+      sourceIds: [`absence:${trigger.selectedQualifyingAbsence ?? trigger.firedKey ?? trigger.currentStage}`],
+      guidanceKind: 'missing_practice',
+      suggestedActionKind: 'no_action_render_context_only',
+      targetFamily: 'family_agnostic',
+      targetSectionKind: 'source_signal_guidance',
+      sourceEvidenceState: 'strong',
+      priority: 'required_survivor',
+      renderPolicy: 'render_as_section',
+      riskLevel: 'low',
+      safetyHooks: [],
+      privacyClass: 'public_safe',
+      sanitizationState: 'not_applicable',
+      requiredBecause: 'source_signal_guidance_shown_in_popup',
+      publicCopySafe: true,
+    });
+  }
+
   // Source A — required survivors. Stage/absence signals shown in the popup are
   // PE-AR-4/5/9 floors ("source/signal guidance in a shown popup"): must survive.
   for (const ref of signals.normalizedStageAbsenceSignalRefs) {
