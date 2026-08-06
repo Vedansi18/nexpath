@@ -11,9 +11,10 @@ import {
   buildPromptEnhancementUiBoundarySessionV1,
   type PromptEnhancementUiBoundaryInputV1,
 } from './ui-boundary.js';
-import type {
-  PromptEnhancementPopupActionStateV1,
-  PromptEnhancementPopupSessionV1,
+import {
+  isPromptEnhancementBlockedNoSendPolicyV1,
+  type PromptEnhancementPopupActionStateV1,
+  type PromptEnhancementPopupSessionV1,
 } from './popup-session.js';
 
 export const PROMPT_ENHANCEMENT_POPUP_TITLE_V1 = 'Nexpath · Prompt enhancement' as const;
@@ -129,7 +130,9 @@ export function buildPromptEnhancementPopupRenderModelV1(
       },
       session,
       body: {
-        text: session.currentBodyText,
+        // D2 (P7-G1): independent self-scrub — even if a caller hands in a session whose text
+        // was not scrubbed, a blocked/no-send body renders no generated text at this layer too.
+        text: isPromptEnhancementBlockedNoSendPolicyV1(session.sendabilityState) ? '' : session.currentBodyText,
         displayState: session.preSendBoundaryState.bodyDisplayState,
         editabilityState: session.preSendBoundaryState.editabilityState,
         editable: session.preSendBoundaryState.editabilityState === 'editable',

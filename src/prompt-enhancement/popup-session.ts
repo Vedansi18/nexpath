@@ -402,6 +402,17 @@ const DIRECTIONAL_ROW_ACTIONS = new Set<PromptEnhancementActionType>([
   'more_project_grounded',
 ]);
 
+/**
+ * D2 (P7-G1 / PE-DR-5): a `no_send` (blocked) or `no_popup` body must never carry the offending
+ * generated text through the typed UI chain. Every UI layer self-scrubs on this predicate — the
+ * body is excluded (empty), not relied on the terminal `ui-safety` scrub alone (defense-in-depth).
+ */
+export function isPromptEnhancementBlockedNoSendPolicyV1(
+  sendPolicy: PromptEnhancementUiViewPayloadV1['body']['sendPolicy'],
+): boolean {
+  return sendPolicy === 'no_send' || sendPolicy === 'no_popup';
+}
+
 export function buildPromptEnhancementPopupSessionV1(
   input: PromptEnhancementPopupSessionInputV1,
 ): PromptEnhancementPopupSessionV1 {
@@ -421,7 +432,8 @@ export function buildPromptEnhancementPopupSessionV1(
     surfaceKind: 'enhancement_popup_single_body',
     popupLifecycleState: lifecycleState,
     currentBodyId: viewPayload.body.currentBodyId,
-    currentBodyText: viewPayload.body.text,
+    // D2 (P7-G1): self-scrub — a blocked/no-send body carries no generated text through this layer.
+    currentBodyText: isPromptEnhancementBlockedNoSendPolicyV1(viewPayload.body.sendPolicy) ? '' : viewPayload.body.text,
     bodyRevision: viewPayload.body.bodyRevision,
     acceptedCanonicalBodyRevisionId: `${viewPayload.body.currentBodyId}:revision:${viewPayload.body.bodyRevision}`,
     originalPromptPreservationState: viewPayload.body.originalPromptPreservation === 'visible_verbatim'
