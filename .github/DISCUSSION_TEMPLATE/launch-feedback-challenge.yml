@@ -4,10 +4,38 @@ labels:
 title: "[Launch Feedback]: "
 
 body:
+  - type: dropdown
+    id: stage
+    attributes:
+      label: How far did you get with NexPath?
+      description: Select the option that best matches your experience.
+      options:
+        - Option 1
+        - Option 2
+        - Option 3
+        - Option 4
+        - Option 5
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: interests
+    attributes:
+      label: Which areas are you interested in?
+      description: You can select more than one option.
+      options:
+        - label: Option 1
+        - label: Option 2
+        - label: Option 3
+        - label: Option 4
+    validations:
+      required: true
+
   - type: textarea
     id: feedback
     attributes:
-      label: Feedback
-      description: Tell us your experience.
+      label: Share your feedback
+      description: Tell us what stopped you from using NexPath, what you liked, what confused you, and what we should improve.
+      placeholder: Write your honest feedback here...
     validations:
       required: true
