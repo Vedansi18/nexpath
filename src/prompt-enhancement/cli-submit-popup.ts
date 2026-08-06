@@ -365,7 +365,9 @@ export async function runPromptEnhancementCliSubmitPopupV1(input: {
       currentResult = execution.result;
       // E9 (P12-G1): this directional/apply-details action is a real E8 LLM call — measure it
       // at the popup_action surface so repeated recompositions are counted, not silently free.
-      input.costObservabilitySink?.(execution.result);
+      // Observability is best-effort: a telemetry failure must NEVER abort the popup (the outer
+      // catch returns not_shown), so swallow any sink error — same discipline as feedbackSink.
+      try { input.costObservabilitySink?.(execution.result); } catch { /* observability only */ }
       rendered = buildPromptEnhancementPopupRenderModelV1({
         result: currentResult,
         timestampMs: Date.now(),

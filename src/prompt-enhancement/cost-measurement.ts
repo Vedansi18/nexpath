@@ -109,24 +109,31 @@ export function emitPromptEnhancementCostObservabilityV1(
   result: PromptEnhancementPrepareResultV1,
   surface: PromptEnhancementCostObservabilitySurfaceV1,
   sink: PromptEnhancementCostObservabilitySinkV1,
-): PromptEnhancementCostObservabilityV1 {
-  const observability = buildPromptEnhancementCostObservabilityV1(result);
-  sink.debug('prompt_enhancement_cost_measurement', {
-    surface,
-    callId: observability.measurement.callId,
-    callVisibilityMode: result.callAndVisibilityMetadata.callVisibilityMode,
-    status: observability.measurement.status,
-    plannedCallCount: observability.measurement.plannedCallCount,
-    usedCallCount: observability.measurement.usedCallCount,
-    rawFieldsExcluded: observability.measurement.rawPromptBodyExcluded,
-    inventoryOk: observability.inventoryOk,
-  });
-  if (observability.costWeakeningDetected) {
-    // PE-G4 invariant: unreachable in v1 (cost is never a gate); surface it loudly if it fires.
-    sink.warn('prompt_enhancement_cost_weakening_detected', {
+): PromptEnhancementCostObservabilityV1 | undefined {
+  // Observability-only: measuring/logging cost must NEVER break the runtime path it rides on
+  // (prepare pipeline or the interactive popup), so any failure — including a throwing logger —
+  // is swallowed and returns undefined rather than propagating.
+  try {
+    const observability = buildPromptEnhancementCostObservabilityV1(result);
+    sink.debug('prompt_enhancement_cost_measurement', {
       surface,
-      reasonCodes: [...observability.weakeningReasonCodes],
+      callId: observability.measurement.callId,
+      callVisibilityMode: result.callAndVisibilityMetadata.callVisibilityMode,
+      status: observability.measurement.status,
+      plannedCallCount: observability.measurement.plannedCallCount,
+      usedCallCount: observability.measurement.usedCallCount,
+      rawFieldsExcluded: observability.measurement.rawPromptBodyExcluded,
+      inventoryOk: observability.inventoryOk,
     });
+    if (observability.costWeakeningDetected) {
+      // PE-G4 invariant: unreachable in v1 (cost is never a gate); surface it loudly if it fires.
+      sink.warn('prompt_enhancement_cost_weakening_detected', {
+        surface,
+        reasonCodes: [...observability.weakeningReasonCodes],
+      });
+    }
+    return observability;
+  } catch {
+    return undefined;
   }
-  return observability;
 }

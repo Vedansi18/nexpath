@@ -59,7 +59,15 @@ describe('emitPromptEnhancementCostObservabilityV1 (E9 — surface emission)', (
       surface: 'popup_action', usedCallCount: 1, rawFieldsExcluded: true,
     }));
     expect(sink.warn).not.toHaveBeenCalled(); // PE-G4: clean -> no weakening warning
-    expect(obs.costWeakeningDetected).toBe(false);
+    expect(obs?.costWeakeningDetected).toBe(false);
+  });
+
+  it('is best-effort: a throwing sink is swallowed (never breaks the runtime path)', () => {
+    const throwingSink = { debug: () => { throw new Error('logger down'); }, warn: vi.fn() };
+    expect(() => emitPromptEnhancementCostObservabilityV1(resultWith('llm_wording', 1, 1), 'popup_action', throwingSink))
+      .not.toThrow();
+    expect(emitPromptEnhancementCostObservabilityV1(resultWith('llm_wording', 1, 1), 'popup_action', throwingSink))
+      .toBeUndefined();
   });
 
   it('labels the prepare surface distinctly', () => {
