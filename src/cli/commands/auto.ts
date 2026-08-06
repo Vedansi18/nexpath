@@ -55,6 +55,7 @@ import { recordPromptEnhancementFeedbackV1 } from '../../prompt-enhancement/feed
 import { derivePromptEnhancementFeedbackPolicyV1 } from '../../prompt-enhancement/feedback-policy.js';
 import type { PromptEnhancementPopupEventV1 } from '../../prompt-enhancement/popup-session.js';
 import { buildPromptEnhancementCostVisibilityMetadataV1 } from '../../prompt-enhancement/cost-observability.js';
+import { buildPromptEnhancementCostObservabilityV1 } from '../../prompt-enhancement/cost-measurement.js';
 import { getSourceRealityAdaptersSnapshot } from '../../prompt-enhancement/source-reality.js';
 import { loadRightGoodProfile } from '../../classifier/right-good-aggregator.js';
 import { computeWorkStyleProfile } from '../../classifier/work-style-traits.js';
@@ -1023,6 +1024,25 @@ export async function runAuto(
       promptCount: mgr.current.promptCount,
       disposition: preparation.disposition,
     });
+    // E9 (P12-G1/G2): measure cost off the result's REAL call-visibility (mode + planned/used
+    // counts come from the composer, not the hardcoded request placeholder), and run the PE-G4
+    // "cost never weakens behavior" check. Observability-only — this never gates the popup.
+    const costObservability = buildPromptEnhancementCostObservabilityV1(preparation.result);
+    logger.debug('prompt_enhancement_cost_measurement', {
+      callId: costObservability.measurement.callId,
+      callVisibilityMode: preparation.result.callAndVisibilityMetadata.callVisibilityMode,
+      plannedCallCount: costObservability.measurement.plannedCallCount,
+      usedCallCount: costObservability.measurement.usedCallCount,
+      rawFieldsExcluded: costObservability.measurement.rawPromptBodyExcluded,
+      inventoryOk: costObservability.inventoryOk,
+    });
+    if (costObservability.costWeakeningDetected) {
+      // PE-G4 invariant: no runtime path may weaken behavior because of cost. This should
+      // be unreachable in v1 (cost is never a gate); surface it loudly if it ever fires.
+      logger.warn('prompt_enhancement_cost_weakening_detected', {
+        reasonCodes: costObservability.weakeningReasonCodes,
+      });
+    }
   }
 
   // H1.3 keeps legacy Decision Session bookkeeping after preparation; PE preparation

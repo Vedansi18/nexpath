@@ -1,0 +1,51 @@
+import { describe, expect, it } from 'vitest';
+import { buildPromptEnhancementCostObservabilityV1 } from './cost-measurement.js';
+import { buildPromptEnhancementCostVisibilityMetadataV1 } from './cost-observability.js';
+import type { PromptEnhancementCallVisibilityMode } from './contracts.js';
+import type { PromptEnhancementPrepareResultV1 } from './contracts.js';
+
+// The helper reads only enhancementId / requestId / callAndVisibilityMetadata from the
+// result, so a partial fixture with a REAL visibility packet is a faithful stand-in.
+function resultWith(mode: PromptEnhancementCallVisibilityMode, planned: number, used: number): PromptEnhancementPrepareResultV1 {
+  return {
+    enhancementId: 'pe:req-1',
+    requestId: 'req-1',
+    callAndVisibilityMetadata: buildPromptEnhancementCostVisibilityMetadataV1('baseline_pe_composer', {
+      callVisibilityMode: mode,
+      plannedCallCount: planned,
+      usedCallCount: used,
+    }),
+  } as unknown as PromptEnhancementPrepareResultV1;
+}
+
+describe('buildPromptEnhancementCostObservabilityV1 (E9 / P12-G1+G2)', () => {
+  it('measures an llm_wording result off its REAL visibility (mode + used count), sanitized', () => {
+    const obs = buildPromptEnhancementCostObservabilityV1(resultWith('llm_wording', 1, 1));
+    expect(obs.measurement.status).toBe('used');
+    expect(obs.measurement.usedCallCount).toBe(1); // P12-G2: real count, not the hardcoded 0
+    expect(obs.measurement.plannedCallCount).toBe(1);
+    // The sanitizer excludes every raw field + affirms cost cannot weaken behavior.
+    expect(obs.measurement.rawPromptBodyExcluded).toBe(true);
+    expect(obs.measurement.costVisibilityCanWeakenBehavior).toBe(false);
+  });
+
+  it('a deterministic result measures 0 used calls with a non-weakening status', () => {
+    const obs = buildPromptEnhancementCostObservabilityV1(resultWith('deterministic', 0, 0));
+    expect(obs.measurement.usedCallCount).toBe(0);
+    expect(obs.measurement.status).toBe('planned');
+  });
+
+  it('PE-G4: the weakening check runs and reports NO cost-based weakening (clean sentinel only)', () => {
+    const obs = buildPromptEnhancementCostObservabilityV1(resultWith('llm_wording', 1, 1));
+    expect(obs.costWeakeningDetected).toBe(false);
+    expect(obs.weakeningReasonCodes).toEqual(['cost_visibility_is_not_runtime_limiter']);
+  });
+
+  it('validates the accepted-call inventory and builds runtime flow evidence across surfaces', () => {
+    const obs = buildPromptEnhancementCostObservabilityV1(resultWith('fallback_no_llm', 1, 0));
+    expect(obs.inventoryOk).toBe(true);
+    expect(obs.measurement.status).toBe('fallback');
+    // Flow evidence is built from the same result (prompt-start -> popup -> delivery).
+    expect(obs.flowEvidence).toBeDefined();
+  });
+});
