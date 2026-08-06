@@ -71,4 +71,14 @@ describe('D2 4a — facade self-scrubs a blocked body at source (P6-G1)', () => 
     expect(result.currentBody.renderedPromptBody).toBe(ORIGINAL);
     expect(result.uiView.body.text).not.toContain('Enhanced plan');
   });
+
+  it('blocked_no_send → no OTHER result field carries the generated body (sections + composer boundary)', async () => {
+    const result = await preparePromptEnhancement(request());
+    expect(result.disposition).toBe('blocked_no_send');
+    // Per-section generated text is emptied.
+    expect(result.currentBody.sections.every((section) => section.bodyText === '')).toBe(true);
+    // The composer boundary's audit copy of the rendered body falls back to the original.
+    expect(result.composerBoundary.renderedPromptBody).toBe(ORIGINAL);
+    expect(result.composerBoundary.renderedPromptBody).not.toContain('Enhanced plan');
+  });
 });

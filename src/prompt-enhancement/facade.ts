@@ -232,14 +232,27 @@ function buildResult(
     generatedSafeStatus: safety.generatedSafeStatus,
   };
   const disposition = dispositionFor(noPopup, currentBody, safety);
+  const blockedNoSend = disposition === 'blocked_no_send';
   // D2 4a (P6-G1 / PE-DR-5): on a hard block, make the engine payload self-safe AT SOURCE. A host
-  // reading result.currentBody.text / uiView.body.text DIRECTLY (before the typed UI layers scrub
-  // it) must not receive the offending generated content. Replace the body text with the user's
-  // own original prompt (the use_original fallback); the send policy already forbids transport, and
-  // the UI layers exclude it too — defense-in-depth (engine + every UI layer), not one terminal scrub.
-  const safeCurrentBody: PromptEnhancementCurrentBodyV1 = disposition === 'blocked_no_send'
-    ? { ...currentBody, text: currentBody.originalPromptText, renderedPromptBody: currentBody.originalPromptText }
+  // reading the result DIRECTLY (before the typed UI layers scrub it) must not receive the offending
+  // generated content from ANY field. The full-body fields fall back to the user's own original
+  // prompt (the use_original fallback); the per-section text is emptied (a blocked section has no
+  // safe per-section fallback). The send policy already forbids transport and the UI layers exclude
+  // it too — defense-in-depth (engine + every UI layer), not one terminal scrub. Fields carrying the
+  // generated body: currentBody.text / .renderedPromptBody / .sections[].bodyText and the composer
+  // boundary's renderedPromptBody (audit copy) — all covered here; every other result text field is
+  // deterministic UI copy or request input.
+  const safeCurrentBody: PromptEnhancementCurrentBodyV1 = blockedNoSend
+    ? {
+        ...currentBody,
+        text: currentBody.originalPromptText,
+        renderedPromptBody: currentBody.originalPromptText,
+        sections: currentBody.sections.map((section) => ({ ...section, bodyText: '' })),
+      }
     : currentBody;
+  const safeComposerBoundary = blockedNoSend
+    ? { ...composed.composerBoundary, renderedPromptBody: composed.currentBody.originalPromptText }
+    : composed.composerBoundary;
   const diagnostics = diagnosticsFor(enhancementId, [...composed.diagnostics, ...safety.publicDiagnostics]);
   const composerCallVisibility = composed.composerBoundary.inputContract.callVisibilityState;
   const callAndVisibilityMetadata = {
@@ -294,7 +307,7 @@ function buildResult(
     },
     routeDecision: route.contractDecision,
     bodyPlan: planning.bodyPlan,
-    composerBoundary: composed.composerBoundary,
+    composerBoundary: safeComposerBoundary,
     validationSummary,
     safetySummary: validationSummary,
     validationGraph: safety.validationGraph,
