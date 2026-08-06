@@ -5,6 +5,7 @@ import {
   PROMPT_ENHANCEMENT_COST_MODEL_V1,
   PROMPT_ENHANCEMENT_COST_OUTPUT_TOKEN_CAP_V1,
   PROMPT_ENHANCEMENT_COST_TIMEOUT_MS_V1,
+  PROMPT_ENHANCEMENT_COST_VALIDATION_RETRY_COUNT_V1,
 } from './cost-observability.js';
 
 /**
@@ -119,25 +120,41 @@ export async function composeStructuredComposerOutputV1(
   );
   if (sections.length === 0) return undefined;
 
+  let openai: PromptEnhancementComposerClientV1;
   try {
-    const openai = client ?? (new OpenAI() as unknown as PromptEnhancementComposerClientV1);
-    const response = await openai.chat.completions.create(
-      {
-        model: PROMPT_ENHANCEMENT_COST_MODEL_V1,
-        max_tokens: PROMPT_ENHANCEMENT_COST_OUTPUT_TOKEN_CAP_V1,
-        messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
-          { role: 'user', content: buildUserPrompt(input.originalPromptText, sections) },
-        ],
-        response_format: { type: 'json_object' },
-      },
-      { timeout: PROMPT_ENHANCEMENT_COST_TIMEOUT_MS_V1 },
-    );
-    const raw = response.choices?.[0]?.message?.content;
-    if (!raw) return undefined;
-    return parseStructuredComposerOutput(raw, input.enhancementId);
+    // With no injected client and no key, `new OpenAI()` throws -> deterministic fallback.
+    openai = client ?? (new OpenAI() as unknown as PromptEnhancementComposerClientV1);
   } catch {
-    // No key / provider unavailable / timeout / malformed reply -> deterministic fallback.
     return undefined;
   }
+
+  const userPrompt = buildUserPrompt(input.originalPromptText, sections);
+  // Malformed / empty replies retry up to the locked count (analysis §33348: retry up
+  // to 3 times); a thrown error (provider unavailable / timeout) is NOT retried — it is
+  // a fast deterministic fallback rather than repeated slow waits before the popup.
+  for (let attempt = 0; attempt <= PROMPT_ENHANCEMENT_COST_VALIDATION_RETRY_COUNT_V1; attempt++) {
+    let raw: string | null | undefined;
+    try {
+      const response = await openai.chat.completions.create(
+        {
+          model: PROMPT_ENHANCEMENT_COST_MODEL_V1,
+          max_tokens: PROMPT_ENHANCEMENT_COST_OUTPUT_TOKEN_CAP_V1,
+          messages: [
+            { role: 'system', content: SYSTEM_PROMPT },
+            { role: 'user', content: userPrompt },
+          ],
+          response_format: { type: 'json_object' },
+        },
+        { timeout: PROMPT_ENHANCEMENT_COST_TIMEOUT_MS_V1 },
+      );
+      raw = response.choices?.[0]?.message?.content;
+    } catch {
+      return undefined;
+    }
+    const parsed = raw ? parseStructuredComposerOutput(raw, input.enhancementId) : undefined;
+    if (parsed) return parsed;
+    // malformed / empty -> retry (loop continues)
+  }
+  // Retries exhausted -> deterministic fallback.
+  return undefined;
 }
