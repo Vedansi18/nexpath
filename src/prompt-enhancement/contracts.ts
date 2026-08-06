@@ -399,11 +399,13 @@ export interface PromptEnhancementRouteDecisionV1 {
   familyId: string;
   primaryIntent: string;
   capabilityOverlays: readonly string[];
+  // P3-G2: 'multi_intent_needs_handoff' removed — compoundPromptStateFor never emits
+  // it and route-level handoff candidacy is sourced from the handoff-metadata producer
+  // (PE-AR-8), not the router.
   compoundPromptState:
     | 'single_intent'
     | 'multi_point_same_intent'
     | 'multi_intent_one_prompt'
-    | 'multi_intent_needs_handoff'
     | 'ambiguous_multi_intent';
   userPointCoverageRefs: readonly string[];
   nonPrimaryUserIntentHandling:

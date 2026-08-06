@@ -15,7 +15,7 @@ import type { PromptEnhancementRouteResult } from './routing-taxonomy.js';
  */
 const COMPOUND_NLP_HEAVY_STATES: ReadonlySet<
   PromptEnhancementRouteResult['contractDecision']['compoundPromptState']
-> = new Set(['multi_intent_one_prompt', 'multi_intent_needs_handoff', 'ambiguous_multi_intent']);
+> = new Set(['multi_intent_one_prompt', 'ambiguous_multi_intent']);
 
 export function isPromptEnhancementNlpHeavyCaseV1(route: PromptEnhancementRouteResult): boolean {
   const decision = route.contractDecision;

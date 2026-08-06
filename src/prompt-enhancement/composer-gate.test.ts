@@ -29,7 +29,6 @@ describe('isPromptEnhancementNlpHeavyCaseV1 (E4 / 4.2)', () => {
 
   it.each([
     'multi_intent_one_prompt',
-    'multi_intent_needs_handoff',
     'ambiguous_multi_intent',
   ] as const)('a multi-intent compound state (%s) is NLP-heavy even when ambiguity is clear', (compound) => {
     expect(isPromptEnhancementNlpHeavyCaseV1(route('clear', compound))).toBe(true);

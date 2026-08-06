@@ -353,6 +353,25 @@ describe('prompt-enhancement routing and taxonomy', () => {
     expect(result.contractDecision.usesOldStaticDecisionSessionMap).toBe(false);
   });
 
+  describe('P3-G1 — a build/implement intent is not misrouted by an incidental broad noun', () => {
+    it.each([
+      ['implement a code review tool', 'feature_delivery', 'feature.fresh_implementation'],
+      ['add audit logging', 'feature_delivery', 'feature.fresh_implementation'],
+      ["here's the plan: build a payment module", 'feature_delivery', 'feature.fresh_implementation'],
+    ] as const)('%s -> %s / %s (not review/planning)', (promptText, family, intent) => {
+      const result = routePromptEnhancement(routeInput({ promptText }));
+      expect(result.noPopup).toBe(false);
+      expect(result.familyId).toBe(family);
+      expect(result.primaryIntent).toBe(intent);
+    });
+
+    it('does not over-correct genuine review / planning prompts', () => {
+      expect(routePromptEnhancement(routeInput({ promptText: 'review this code for bugs' })).primaryIntent).toBe('review.code_or_diff_review');
+      expect(routePromptEnhancement(routeInput({ promptText: 'verify the payment fix' })).primaryIntent).toBe('review.verification_request');
+      expect(routePromptEnhancement(routeInput({ promptText: 'write a spec for the new api' })).primaryIntent).toBe('planning.spec_or_prd');
+    });
+  });
+
   it.each([
     ['idea', 'prd'],
     ['prd', 'architecture'],

@@ -189,6 +189,11 @@ export interface PromptEnhancementRouteResult {
   routeEvidenceRefs: readonly string[];
   reasonCodes: readonly string[];
   noPopup: boolean;
+  // P3-G3 (narrowed claim): the deterministic route consumes shared-signal evidence
+  // (firedKey / stage / absence) for gating, skip, and evidence decisions and uses NO
+  // PE-only classifier or old DS map. It does NOT, however, fuse those signals into
+  // primary-intent selection — `selectPrimaryIntent` is prompt-text keyword matching.
+  // Shared-signal + NL intent fusion is E6's bounded LLM route decision, not this path.
   usesSharedSignalEvidenceOnly: true;
   usesPeOnlyClassifier: false;
   usesOldStaticDecisionSessionMap: false;
@@ -1123,8 +1128,6 @@ function nonPrimaryUserIntentHandlingFor(
     case 'multi_point_same_intent':
     case 'multi_intent_one_prompt':
       return 'covered_by_secondary_tag';
-    case 'multi_intent_needs_handoff':
-      return 'handoff_candidate';
     case 'ambiguous_multi_intent':
       return 'requires_clarification';
   }
@@ -1515,14 +1518,23 @@ function hasConflictingEvidence(input: PromptEnhancementRouteInput): boolean {
 }
 
 function selectPrimaryIntent(normalized: string): PromptEnhancementPrimaryIntent {
+  // P3-G1: a clear build/implement intent must not be captured by an incidental broad
+  // verb that merely NAMES the thing being built (e.g. "implement a code review tool",
+  // "add audit logging", "here's the plan: build X"). Gate the broad review/audit/plan
+  // catch-alls behind "no build intent"; the specific multi-word review/planning
+  // keywords below stay first.
+  const hasBuildVerb = hasAny(normalized, ['implement', 'build', 'add', 'create', 'develop']);
+  const hasStrongBuildVerb = hasAny(normalized, ['implement', 'build', 'create', 'develop']);
+  const buildsANamedArtifact = hasStrongBuildVerb && hasAny(normalized, ['tool', 'system', 'feature', 'app', 'service', 'dashboard', 'ui', 'module', 'component']);
+
   if (hasAny(normalized, ['security review', 'threat'])) return 'review.security_review';
   if (hasAny(normalized, ['architecture review'])) return 'review.architecture_review';
   if (hasAny(normalized, ['performance review'])) return 'review.performance_review';
   if (hasAny(normalized, ['api review', 'contract review'])) return 'review.api_contract_review';
   if (hasAny(normalized, ['test review'])) return 'review.test_review';
-  if (hasAny(normalized, ['diff review', 'code review', 'review this code'])) return 'review.code_or_diff_review';
+  if (hasAny(normalized, ['diff review', 'code review', 'review this code']) && !buildsANamedArtifact) return 'review.code_or_diff_review';
   if (hasAny(normalized, ['requirements fit', 'acceptance fit'])) return 'review.requirements_fit_review';
-  if (hasAny(normalized, ['review', 'verify', 'audit'])) return 'review.verification_request';
+  if (hasAny(normalized, ['review', 'verify', 'audit']) && !hasBuildVerb) return 'review.verification_request';
 
   if (hasAny(normalized, ['rollout', 'release plan'])) return 'planning.rollout_release_plan';
   if (hasAny(normalized, ['migration plan']) || (normalized.includes('plan') && normalized.includes('migration'))) return 'planning.migration_plan';
@@ -1530,7 +1542,8 @@ function selectPrimaryIntent(normalized: string): PromptEnhancementPrimaryIntent
   if (hasAny(normalized, ['refactor plan'])) return 'planning.refactor_plan';
   if (hasAny(normalized, ['architecture', 'design']) && normalized.includes('plan')) return 'planning.architecture_or_design';
   if (hasAny(normalized, ['break down', 'task breakdown', 'decompose'])) return 'planning.task_breakdown';
-  if (hasAny(normalized, ['plan', 'prd', 'write a spec', 'create a spec'])) return 'planning.spec_or_prd';
+  if (hasAny(normalized, ['prd', 'write a spec', 'create a spec'])) return 'planning.spec_or_prd';
+  if (normalized.includes('plan') && !hasStrongBuildVerb) return 'planning.spec_or_prd';
   if (normalized.trim() === 'continue') return 'planning.task_breakdown';
 
   if (hasAny(normalized, ['production', 'incident', 'support ticket', 'outage'])) return 'issue_debug.production_incident_or_support';
