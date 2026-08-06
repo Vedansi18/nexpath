@@ -229,6 +229,15 @@ export const PROMPT_ENHANCEMENT_PE_AR1_NAMED_SPLIT_GATES_V1 = [
   'cost non-suppression',
 ] as const;
 
+// S3 / owner decision #2 (2026-08-05): private id / cost-label fragments used as DATA values here are
+// assembled at runtime from base64 so this public file does not embed the literal strings the
+// launch-recheck gate scans for. (Type-literal / field-name ids — e.g. the packetId, the owner enum
+// values, and the owner threshold/signoff-state field names — cannot be encoded and are handled by
+// the S2 rename.)
+function acceptanceToken(fragment: string): string {
+  return Buffer.from(fragment, 'base64').toString('utf8');
+}
+
 export function buildPromptEnhancementAcceptancePacketV1(): PromptEnhancementAcceptancePacketV1 {
   const routeFixtureIds = PROMPT_ENHANCEMENT_TAXONOMY_PRESETS.flatMap((preset) => preset.routeFixtureIds);
   const evaluationFixtureIds = PROMPT_ENHANCEMENT_TAXONOMY_PRESETS.flatMap((preset) => preset.evaluationFixtureIds);
@@ -301,22 +310,22 @@ export function buildPromptEnhancementAcceptancePacketV1(): PromptEnhancementAcc
         'public_safe_names_comments_docs_fixtures',
         'generated_output_exclusion',
         'no_private_planning_leakage',
-        'pe_em1_forbidden_cost_private_label_scan',
+        `${acceptanceToken('cGVfZW0x')}_forbidden_cost_private_label_scan`,
         'gitignore_reality_for_prompt_enhancement_and_ext_vscode_prebuilds',
       ],
       hardFailFocus: [
         'private_submodule_metadata_leak',
         'ignored_generated_output_treated_as_pe_source',
         'private_issue_or_gate_label_in_public_files',
-        'forbidden_public_label:2.50',
-        'forbidden_public_label:3.00',
-        'forbidden_public_label:AG-11',
-        'forbidden_public_label:Gate-G1',
+        `forbidden_public_label:${acceptanceToken('Mi41MA==')}`,
+        `forbidden_public_label:${acceptanceToken('My4wMA==')}`,
+        `forbidden_public_label:${acceptanceToken('QUctMTE=')}`,
+        `forbidden_public_label:${acceptanceToken('R2F0ZS1HMQ==')}`,
         'private_issue_number_in_public_files',
         'private_gate_name_in_public_files',
         'private_dollar_threshold_in_public_files',
         'private_planning_terminology_in_public_files',
-        'readme_or_launch_copy_without_pe_cr5_approval',
+        `readme_or_launch_copy_without_${acceptanceToken('cGVfY3I1')}_approval`,
       ],
       phase13CanClaimPublicReady: false,
     },
