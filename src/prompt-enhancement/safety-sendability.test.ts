@@ -935,12 +935,14 @@ describe('prompt-enhancement safety, privacy, and sendability validation', () =>
     });
   });
 
-  it('marks user edits that remove source-honesty trace as non-sendable', () => {
-    const currentBody = composedBody();
-    const editedBodyText = currentBody.text
-      .split('\n')
-      .filter((line) => !line.includes('Source basis:') && !line.includes('Source ids stay in typed metadata'))
-      .join('\n');
+  it('marks user edits that remove source-honesty trace as non-sendable (legacy trace-bearing bodies)', () => {
+    // Newly composed bodies carry NO trace lines (provenance is typed-metadata-only, 2026-08-06),
+    // so the comparative guard is inert for them. It still protects LEGACY bodies (e.g. pending
+    // rows composed before the change) — simulate one by appending a trace line, then editing
+    // it out: the count reduction must stay non-sendable.
+    const base = composedBody();
+    const currentBody = { ...base, text: `${base.text}\n- Source basis: current original prompt.` };
+    const editedBodyText = base.text; // the user's edit dropped the trace line
     const result = validatePromptEnhancementSafety({ currentBody, editedBodyText, actionType: 'use_current_body' });
 
     expect(result.generatedSafeStatus).toBe('invalid_non_sendable');

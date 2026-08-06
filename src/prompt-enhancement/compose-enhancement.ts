@@ -580,7 +580,9 @@ function renderSection(input: {
 
   const llmDraft = input.llmDraftsBySectionId?.get(sectionPlan.sectionId);
   if (llmDraft) {
-    const lines = [llmDraft, `- ${sourceTraceLine(sectionPlan)}`];
+    // Body quality (2026-08-06): provenance lives ONLY in the typed section metadata (sourceKind /
+    // evidence statuses on the plan + sectionsForFeedback) — never rendered into the prompt body.
+    const lines = [llmDraft];
     if (input.insertCanonicalConfirmation === true) {
       lines.push(`- ${buildPromptEnhancementCanonicalConfirmation(input.originalPromptText)}`);
     }
@@ -593,7 +595,7 @@ function renderSection(input: {
     };
   }
 
-  const lines = instructionLinesForSection(sectionPlan.sectionKind, action, input.originalPromptText);
+  const lines = instructionLinesForSection(sectionPlan.sectionKind, action, input.originalPromptText, heading);
   if (action === 'more_thorough') {
     lines.push(...moreThoroughLines(sectionPlan));
   }
@@ -605,7 +607,8 @@ function renderSection(input: {
   } else if (sectionPlan.sectionKind === 'context_and_constraints' && input.additionalDetailsText) {
     lines.push(`Keep these accepted additional details covered: ${boundedAdditionalDetails(input.additionalDetailsText)}`);
   }
-  lines.push(sourceTraceLine(sectionPlan));
+  // Body quality (2026-08-06): no per-section provenance sentence in the editable body — that
+  // information already lives in the typed section metadata.
   if (input.insertCanonicalConfirmation === true) {
     lines.push(buildPromptEnhancementCanonicalConfirmation(input.originalPromptText));
   }
@@ -623,6 +626,7 @@ function instructionLinesForSection(
   sectionKind: string,
   action: PromptEnhancementComposerAction,
   originalPromptText: string,
+  sectionTitle: string,
 ): string[] {
   const concise = action === 'shorter';
   const line = (longText: string, shortText: string) => concise ? shortText : longText;
@@ -701,10 +705,12 @@ function instructionLinesForSection(
     ],
   };
 
+  // Body quality (2026-08-06): template-derived sections (kinds outside the map) each name their
+  // OWN topic instead of repeating one identical generic line for every section.
   return [...(map[sectionKind] ?? [
     line(
-      'Convert the selected section requirement into a source-backed task instruction.',
-      'Use this source-backed section requirement.',
+      `Cover ${sectionTitle} for this request with concrete, source-backed specifics — state what is required, how to implement it, and how to verify it.`,
+      `Cover ${sectionTitle} concretely.`,
     ),
   ])];
 }
@@ -723,14 +729,6 @@ function projectGroundingLine(sectionPlan: PromptEnhancementSectionPlanItemV1): 
     return 'Known project grounding is unavailable for this section; keep the prompt scoped to the provided request and ask only for blocking missing project facts.';
   }
   return `Use the typed project/source metadata attached to this section as grounding; do not invent unavailable project facts.`;
-}
-
-function sourceTraceLine(sectionPlan: PromptEnhancementSectionPlanItemV1): string {
-  return [
-    `Source basis: ${publicSourceBasis(sectionPlan.sourceKind)}.`,
-    `Evidence status is ${sectionPlan.sourceEvidenceStatus}; requirement source status is ${sectionPlan.requirementSourceStatus}.`,
-    'Source ids stay in typed metadata, not in the editable prompt body.',
-  ].join(' ');
 }
 
 function publicSourceBasis(sourceKind: PromptEnhancementSectionPlanItemV1['sourceKind']): string {

@@ -239,8 +239,9 @@ describe('prompt-enhancement composer and deterministic fallback', () => {
     });
 
     expect(result.currentBody.text).toContain('Capture the failing behavior, reproduction path, observed evidence, and expected behavior before changing code.');
-    expect(result.currentBody.text).toContain('Source basis: content-template source evidence.');
-    expect(result.currentBody.text).toContain('Source ids stay in typed metadata, not in the editable prompt body.');
+    // Body quality (2026-08-06): provenance sentences live ONLY in typed metadata, never in the body.
+    expect(result.currentBody.text).not.toContain('Source basis:');
+    expect(result.currentBody.text).not.toContain('Source ids stay in typed metadata');
     expect(result.currentBody.text).not.toContain('ABSENCE_DEBUGGING_OBSERVATION');
     expect(result.currentBody.text).not.toContain('whyDesc');
     expect(result.currentBody.text).not.toContain('descBase');
@@ -478,7 +479,8 @@ describe('prompt-enhancement composer and deterministic fallback', () => {
       expect(span?.spanMappingStatus).toBe('exact');
       expect(span?.startOffset).toBeGreaterThanOrEqual(0);
       expect(span?.endOffset).toBeGreaterThan(span?.startOffset ?? -1);
-      expect(result.currentBody.text.slice(span?.startOffset, span?.endOffset)).toContain(section.sectionKind === 'original_request_or_goal' ? 'My original request' : 'Source basis');
+      // Every section's span covers its own rendered block — identified by its own heading/title.
+      expect(result.currentBody.text.slice(span?.startOffset, span?.endOffset)).toContain(section.title);
       expect(span?.sourceRefs.length).toBeGreaterThan(0);
     }
     expect(result.composerBoundary.outputContract.preservesSectionIds).toBe(true);
@@ -515,7 +517,7 @@ describe('prompt-enhancement composer and deterministic fallback', () => {
     expect(result.currentBody.generatedOriginState).toBe('pe_generated_body');
     expect(result.currentBody.text).toContain('My original request (verbatim):\nFix the auth migration and verify rollback behavior.');
     expect(result.currentBody.text).toContain('Keep confirmation and rollback checks.');
-    expect(result.currentBody.text).toContain('Source basis:');
+    expect(result.currentBody.text).not.toContain('Source basis:');
     expect(result.availableActions.find((action) => action.actionType === 'shorter')?.availability).toBe('available');
   });
 
@@ -690,7 +692,7 @@ describe('prompt-enhancement composer and deterministic fallback', () => {
     expect(detailsSection).toBeDefined();
     expect(result.composerBoundary.inputContract.sectionPlanIds).toContain(`${detailsSection?.sectionId.replace(':section:', ':section-plan:')}`);
     expect(result.currentBody.text).toContain('The CSV fixture must keep semicolon delimiters and blank trailing columns.');
-    expect(result.currentBody.text).toContain('Source basis: current original prompt.');
+    expect(result.currentBody.text).not.toContain('Source basis:');
     expect(result.currentBody.text).not.toContain('prompt:current');
     expect(detailsSection?.sourceIds).toContain('prompt:current');
   });
@@ -705,7 +707,8 @@ describe('prompt-enhancement composer and deterministic fallback', () => {
 
     expect(result.currentBody.text).not.toContain('ABSENCE_DEBUGGING_OBSERVATION');
     expect(result.currentBody.text).not.toContain('project_fact:test-suite-present');
-    expect(result.currentBody.text).toContain('Source ids stay in typed metadata, not in the editable prompt body.');
+    // Provenance prose is also excluded — source honesty lives entirely in typed metadata below.
+    expect(result.currentBody.text).not.toContain('Source ids stay in typed metadata');
     expect(result.currentBody.sections.flatMap((section) => section.sourceIds)).toEqual(
       expect.arrayContaining(['prompt:current', 'ABSENCE_DEBUGGING_OBSERVATION', 'project_fact:test-suite-present']),
     );
