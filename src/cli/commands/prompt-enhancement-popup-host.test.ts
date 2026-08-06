@@ -54,6 +54,84 @@ function files() {
   return { inputFile: join(dir, 'input.json'), resultFile: join(dir, 'result.json') };
 }
 
+describe('spawned-window MPS parity (fix 2026-08-06)', () => {
+  const MULTI_INTENT = 'Fix the failing payment test and add a rate limiter to the login endpoint.';
+
+  async function sequenceInput(): Promise<PromptEnhancementPopupHostInputV1> {
+    const base = request();
+    const preparedRequest = { ...base, sourcePrompt: { ...base.sourcePrompt, text: MULTI_INTENT } };
+    return { protocolVersion: 1, request: preparedRequest, result: await preparePromptEnhancement(preparedRequest) };
+  }
+
+  it('a handoff-bearing input shows the MPS popup first; Enter-send returns selected_current (PE popup skipped)', async () => {
+    const paths = files();
+    const input = await sequenceInput();
+    expect((input.result as { uiView: { handoffAndSequenceSummary?: unknown } }).uiView.handoffAndSequenceSummary).toBeDefined();
+    writeFileSync(paths.inputFile, JSON.stringify(input), 'utf8');
+    const runPopup = vi.fn(async () => ({ state: 'selected_original' as const }));
+    const runMpsPopup = vi.fn(async () => ({ state: 'send' as const, bodyText: 'ENHANCED FIRST PROMPT' }));
+
+    const output = await runPromptEnhancementPopupHostCommandV1(
+      { ...paths, db: ':memory:' },
+      { openStore: async () => ({} as Store), closeStore: vi.fn(), runPopup, runMpsPopup },
+    );
+
+    expect(output.result).toEqual({ state: 'selected_current', bodyText: 'ENHANCED FIRST PROMPT' });
+    expect(runMpsPopup).toHaveBeenCalledTimes(1);
+    expect(runPopup).not.toHaveBeenCalled(); // MPS send resolves the popup turn; PE popup skipped
+  });
+
+  it('MPS declined (Esc) falls through to the regular PE popup in the same window', async () => {
+    const paths = files();
+    writeFileSync(paths.inputFile, JSON.stringify(await sequenceInput()), 'utf8');
+    const runPopup = vi.fn(async () => ({ state: 'selected_original' as const }));
+    const runMpsPopup = vi.fn(async () => ({ state: 'declined' as const }));
+
+    const output = await runPromptEnhancementPopupHostCommandV1(
+      { ...paths, db: ':memory:' },
+      { openStore: async () => ({} as Store), closeStore: vi.fn(), runPopup, runMpsPopup },
+    );
+
+    expect(output.result).toEqual({ state: 'selected_original' });
+    expect(runMpsPopup).toHaveBeenCalledTimes(1);
+    expect(runPopup).toHaveBeenCalledTimes(1);
+  });
+
+  it('a non-sequence input never invokes the MPS popup (parity guard)', async () => {
+    const paths = files();
+    writeFileSync(paths.inputFile, JSON.stringify(await validInput()), 'utf8');
+    const runPopup = vi.fn(async () => ({ state: 'closed_no_send' as const }));
+    const runMpsPopup = vi.fn(async () => ({ state: 'declined' as const }));
+
+    await runPromptEnhancementPopupHostCommandV1(
+      { ...paths, db: ':memory:' },
+      { openStore: async () => ({} as Store), closeStore: vi.fn(), runPopup, runMpsPopup },
+    );
+
+    expect(runMpsPopup).not.toHaveBeenCalled();
+    expect(runPopup).toHaveBeenCalledTimes(1);
+  });
+
+  it('the readiness marker is written exactly once when MPS renders first then PE falls through', async () => {
+    const paths = files();
+    const readinessFile = join(paths.inputFile, '..', 'ready');
+    writeFileSync(paths.inputFile, JSON.stringify(await sequenceInput()), 'utf8');
+    const markReady = vi.fn();
+    const runPopup = vi.fn(async (input: { onFirstRender?: () => void }) => {
+      input.onFirstRender?.(); // the PE popup's own first render must NOT double-write
+      return { state: 'selected_original' as const };
+    });
+    const runMpsPopup = vi.fn(async () => ({ state: 'declined' as const }));
+
+    await runPromptEnhancementPopupHostCommandV1(
+      { ...paths, readinessFile, db: ':memory:' },
+      { openStore: async () => ({} as Store), closeStore: vi.fn(), runPopup, runMpsPopup, markReady },
+    );
+
+    expect(markReady).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('PE1.2 — hidden prompt-enhancement popup child command', () => {
   it('revalidates typed input and atomically writes the selected result without stdout output', async () => {
     const paths = files();

@@ -16,6 +16,9 @@ import {
 } from '../../prompt-enhancement/cli-submit-popup.js';
 import type { PromptEnhancementPopupEventV1 } from '../../prompt-enhancement/popup-session.js';
 import { emitPromptEnhancementCostObservabilityV1 } from '../../prompt-enhancement/cost-measurement.js';
+import { evaluatePromptEnhancementMpsIntakeDecisionV1 } from '../../prompt-enhancement/intake-decision.js';
+import { buildPromptEnhancementCliMpsIntakeEvidenceV1 } from '../../prompt-enhancement/cli-mps-intake-evidence.js';
+import { runPromptEnhancementCliMpsFirstPopupV1 } from '../../prompt-enhancement/cli-mps-run.js';
 import { recordPromptEnhancementCliFeedbackV1 } from './auto.js';
 import { logger } from '../../logger.js';
 
@@ -45,6 +48,7 @@ export interface PromptEnhancementPopupHostDependenciesV1 {
   openStore: (path: string) => Promise<Store>;
   closeStore: (store: Store) => void;
   runPopup: typeof runPromptEnhancementCliSubmitPopupV1;
+  runMpsPopup: typeof runPromptEnhancementCliMpsFirstPopupV1;
   recordFeedback: typeof recordPromptEnhancementCliFeedbackV1;
   markReady: (path: string) => void;
 }
@@ -60,6 +64,7 @@ function defaultDependencies(): PromptEnhancementPopupHostDependenciesV1 {
     openStore,
     closeStore,
     runPopup: runPromptEnhancementCliSubmitPopupV1,
+    runMpsPopup: runPromptEnhancementCliMpsFirstPopupV1,
     recordFeedback: recordPromptEnhancementCliFeedbackV1,
     markReady: writePromptEnhancementPopupHostReadyMarkerV1,
   };
@@ -112,20 +117,56 @@ export async function runPromptEnhancementPopupHostCommandV1(
       let store: Store | undefined;
       try {
         store = await dependencies.openStore(options.db ?? DEFAULT_DB_PATH);
-        popupResult = await dependencies.runPopup({
-          request: input.request,
-          result: input.result,
-          onFirstRender: options.readinessFile
-            ? () => dependencies.markReady(options.readinessFile!)
-            : undefined,
-          feedbackSink: (event: PromptEnhancementPopupEventV1) => dependencies.recordFeedback(
-            store!,
-            input.request.projectRoot,
-            event,
-            input.request,
-          ),
-          costObservabilitySink: (result) => emitPromptEnhancementCostObservabilityV1(result, 'popup_action', logger),
-        });
+        // MPS-first (spawned-window parity fix, 2026-08-06): the direct-TTY Stop branch shows the
+        // MPS sequence popup before the PE popup — this child (the spawned-window host) must do the
+        // SAME, or environments whose Stop hook has no TTY can never see MPS. Enter returns the
+        // existing selected_current shape (the parent's inject path handles it unchanged);
+        // Esc/declined/gate-blocked falls through to the regular PE popup below. Fail-closed.
+        // The readiness marker uses 'wx' (throws on a second write), so guard it to fire ONCE
+        // whether the first rendered frame is the MPS popup or the PE popup fallthrough.
+        let readyMarked = false;
+        const markReadyOnce = (): void => {
+          if (readyMarked || !options.readinessFile) return;
+          readyMarked = true;
+          dependencies.markReady(options.readinessFile);
+        };
+        let mpsHandled = false;
+        if (input.result.uiView.handoffAndSequenceSummary) {
+          const mpsEvidence = buildPromptEnhancementCliMpsIntakeEvidenceV1(input.result);
+          const mpsGate = evaluatePromptEnhancementMpsIntakeDecisionV1({
+            surface: 'cli_stop_bridge',
+            evidence: mpsEvidence ? [...mpsEvidence] : undefined,
+          });
+          logger.debug('popup_host_mps_intake_gate', {
+            projectRoot: input.request.projectRoot,
+            renderPermission: mpsGate.renderPermission,
+            reasonCodes: mpsGate.reasonCodes.slice(0, 6),
+          });
+          if (mpsGate.renderPermission === 'mps_render_permitted') {
+            markReadyOnce();
+            const mps = await dependencies.runMpsPopup({ result: input.result });
+            logger.info('popup_host_mps_first_popup', { projectRoot: input.request.projectRoot, outcome: mps.state });
+            if (mps.state === 'send' && mps.bodyText.trim().length > 0) {
+              popupResult = { state: 'selected_current', bodyText: mps.bodyText };
+              mpsHandled = true;
+            }
+            // declined / not_shown -> fall through to the regular PE popup below.
+          }
+        }
+        if (!mpsHandled) {
+          popupResult = await dependencies.runPopup({
+            request: input.request,
+            result: input.result,
+            onFirstRender: options.readinessFile ? markReadyOnce : undefined,
+            feedbackSink: (event: PromptEnhancementPopupEventV1) => dependencies.recordFeedback(
+              store!,
+              input.request.projectRoot,
+              event,
+              input.request,
+            ),
+            costObservabilitySink: (result) => emitPromptEnhancementCostObservabilityV1(result, 'popup_action', logger),
+          });
+        }
       } finally {
         if (store) dependencies.closeStore(store);
       }
