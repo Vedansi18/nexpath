@@ -61,6 +61,7 @@ import { derivePromptEnhancementFeedbackPolicyV1 } from '../../prompt-enhancemen
 import type { PromptEnhancementPopupEventV1 } from '../../prompt-enhancement/popup-session.js';
 import { buildPromptEnhancementCostVisibilityMetadataV1 } from '../../prompt-enhancement/cost-observability.js';
 import { emitPromptEnhancementCostObservabilityV1 } from '../../prompt-enhancement/cost-measurement.js';
+import { isPromptEnhancementSequenceShapedTextV1 } from '../../prompt-enhancement/routing-taxonomy.js';
 import { getSourceRealityAdaptersSnapshot } from '../../prompt-enhancement/source-reality.js';
 import { loadRightGoodProfile } from '../../classifier/right-good-aggregator.js';
 import { computeWorkStyleProfile } from '../../classifier/work-style-traits.js';
@@ -854,6 +855,63 @@ export async function runAuto(
     flagKeys:        newFlags.map((f) => f.signalKey),
   }, store);
 
+  // ── 4.6. Sequence-shaped PE fallback (team-leader approved fix, 2026-08-06) ──
+  // PE preparation historically ran ONLY inside the decision-trigger branch, so a multi-step
+  // (MPS-eligible) prompt reached the engine only when it coincidentally landed on a trigger
+  // turn — making the MPS popup effectively untestable. For SEQUENCE-SHAPED prompts only
+  // (multi-intent, or a >=3-point list), prepare + store the pending PE on every no-action
+  // exit below, exactly like the fired path (the popup still shows on the Stop hook). It
+  // creates NO advisory, marks NO decision-session fired, and ordinary prompts keep the
+  // existing trigger cadence. Frequency 'off' stays fully silent (checked before this runs).
+  let sequencePeFallbackDone = false;
+  const prepareSequenceShapedPeFallback = async (): Promise<void> => {
+    // Injected boundary-test integrations keep their own single explicit path.
+    if (sequencePeFallbackDone || promptEnhancement !== undefined) return;
+    if (!isPromptEnhancementSequenceShapedTextV1(input.promptText)) return;
+    sequencePeFallbackDone = true;
+    const request = buildPromptEnhancementRequestForAuto({
+      auto: input,
+      store,
+      session: mgr,
+      project,
+      effectiveLanguage: effectiveLang,
+      configuredRole,
+      effectiveFlagType: 'stage_transition',
+      firedKey: `sequence_shaped:${mgr.current.promptCount}`,
+      previousStage: prevStage,
+      trigger: { kind: 'stage_transition' },
+      stageResult,
+      streamBOutputs: [],
+    });
+    const preparation = await preparePromptEnhancementForAuto({ request, prepare: preparePromptEnhancement });
+    logger.debug('prompt_enhancement_prepare_boundary', {
+      disposition: preparation.disposition,
+      safeFallback: preparation.safeFallback,
+      reasonCode: 'reasonCode' in preparation ? preparation.reasonCode : undefined,
+      validationReasonCodes: 'validationReasonCodes' in preparation && preparation.validationReasonCodes
+        ? preparation.validationReasonCodes.slice(0, 10)
+        : undefined,
+      sequenceShapedFallback: true,
+    });
+    if (!preparation.safeFallback && preparation.result) {
+      upsertPendingPromptEnhancement(store, {
+        projectRoot: input.projectRoot,
+        sessionId:   mgr.current.sessionId,
+        promptCount: mgr.current.promptCount,
+        request,
+        result:      preparation.result,
+      });
+      logger.debug('pending_prompt_enhancement_stored', {
+        projectRoot: input.projectRoot,
+        sessionId:   mgr.current.sessionId,
+        promptCount: mgr.current.promptCount,
+        disposition: preparation.disposition,
+        sequenceShapedFallback: true,
+      });
+      emitPromptEnhancementCostObservabilityV1(preparation.result, 'prepare', logger);
+    }
+  };
+
   // ── 4.5. Frequency off fast-exit + minimum prompt guard ────────────────────
   if (freq === 'off') {
     writeTelemetry(input.projectRoot, 'advisory_freq_blocked', { freq }, store);
@@ -861,6 +919,7 @@ export async function runAuto(
     return { outcome: 'no_action' };
   }
   if (mgr.current.promptCount < freqConfig.minPromptsBeforeAdvisory) {
+    await prepareSequenceShapedPeFallback();
     writeTelemetry(input.projectRoot, 'advisory_min_prompts_blocked', { promptCount: mgr.current.promptCount, minRequired: freqConfig.minPromptsBeforeAdvisory }, store);
     logger.info('pipeline_outcome', { outcome: 'no_action', reason: 'min_prompts_not_reached' });
     return { outcome: 'no_action' };
@@ -876,6 +935,7 @@ export async function runAuto(
   logger.debug('should_fire', { trigger: triggerResult?.kind ?? null });
 
   if (!triggerResult) {
+    await prepareSequenceShapedPeFallback();
     writeTelemetry(input.projectRoot, 'pipeline_no_action', { reason: 'no_flag' }, store);
     logger.info('pipeline_outcome', { outcome: 'no_action', reason: 'no_flag' });
     return { outcome: 'no_action' };
@@ -889,6 +949,7 @@ export async function runAuto(
   const alreadyFired = mgr.hasFiredDecisionSession(preCheckFiredKey);
   logger.debug('dedup', { firedKey: preCheckFiredKey, alreadyFired });
   if (alreadyFired) {
+    await prepareSequenceShapedPeFallback();
     writeTelemetry(input.projectRoot, 'advisory_dedup_blocked', { firedKey: preCheckFiredKey }, store);
     logger.info('pipeline_outcome', { outcome: 'no_action', reason: 'already_fired', firedKey: preCheckFiredKey });
     return { outcome: 'no_action' };
@@ -896,11 +957,13 @@ export async function runAuto(
 
   // ── 6.5. Advisory frequency gate ────────────────────────────────────────────
   if (freq === 'major_only' && triggerResult.kind !== 'stage_transition') {
+    await prepareSequenceShapedPeFallback();
     writeTelemetry(input.projectRoot, 'advisory_freq_blocked', { freq, flagType: triggerResult.kind }, store);
     logger.info('pipeline_outcome', { outcome: 'no_action', reason: 'freq_major_only', flagType: triggerResult.kind });
     return { outcome: 'no_action' };
   }
   if (freq === 'once_per_session' && mgr.current.firedDecisionSessions.length > 0) {
+    await prepareSequenceShapedPeFallback();
     writeTelemetry(input.projectRoot, 'advisory_freq_blocked', { freq, flagType: triggerResult.kind }, store);
     logger.info('pipeline_outcome', { outcome: 'no_action', reason: 'freq_once_per_session' });
     return { outcome: 'no_action' };
@@ -909,6 +972,7 @@ export async function runAuto(
   // ── 6.6. Post-advisory cooldown — suppress rapid back-to-back advisories ─────
   const lastAdvisory = mgr.current.lastAdvisoryPromptIndex ?? -1;
   if (lastAdvisory >= 0 && mgr.current.promptCount - lastAdvisory < freqConfig.postAdvisoryCooldown) {
+    await prepareSequenceShapedPeFallback();
     writeTelemetry(input.projectRoot, 'advisory_cooldown_blocked', {
       promptCount:       mgr.current.promptCount,
       lastAdvisoryAt:    lastAdvisory,
@@ -927,6 +991,7 @@ export async function runAuto(
     : freqConfig.sessionAdvisoryCapDefault;
   const advisoryCount = mgr.current.advisoryCount ?? 0;
   if (advisoryCount >= advisoryCap) {
+    await prepareSequenceShapedPeFallback();
     insertSkippedSession(store, {
       projectRoot:          input.projectRoot,
       sessionId:            mgr.current.sessionId,
@@ -960,6 +1025,7 @@ export async function runAuto(
   // advisory (the stage still classifies locally, so session tracking continues).
   writeTelemetry(input.projectRoot, 'classifier_fire_evaluated', { flagType: triggerResult.kind, confirmed: stageResult.fireRecommendation }, store);
   if (!stageResult.fireRecommendation) {
+    await prepareSequenceShapedPeFallback();
     writeTelemetry(input.projectRoot, 'pipeline_no_action', { reason: 'classifier_declined' }, store);
     logger.info('pipeline_outcome', { outcome: 'no_action', reason: 'classifier_declined', confidence: stageResult.classification.confidence, degraded: stageResult.degraded });
     return { outcome: 'no_action' };

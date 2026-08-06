@@ -1216,6 +1216,19 @@ function userPointCoverageRefsFor(promptText: string): readonly string[] {
   return (points.length > 0 ? points : [promptText]).map((_, index) => `user_point:${index + 1}`);
 }
 
+/**
+ * Sequence-shaped prompt text: multiple intent families in one prompt, or a genuine multi-step
+ * list of one family (>= 3 user points). The SAME shape rule the facade uses to emit the MPS
+ * handoff/sequence summary — shared so the UserPromptSubmit pipeline can prepare a sequence-shaped
+ * prompt even on a non-trigger turn (otherwise the MPS popup only ever appears by trigger
+ * coincidence). Pure text predicate; creates no route or runtime state.
+ */
+export function isPromptEnhancementSequenceShapedTextV1(promptText: string): boolean {
+  const compoundState = compoundPromptStateFor(promptText);
+  return compoundState === 'multi_intent_one_prompt'
+    || (compoundState === 'multi_point_same_intent' && userPointCoverageRefsFor(promptText).length >= 3);
+}
+
 function routeCandidatesFor(
   selectedPreset: PromptEnhancementTaxonomyPreset,
   selectedCapabilityOverlays: readonly PromptEnhancementCapabilityId[],

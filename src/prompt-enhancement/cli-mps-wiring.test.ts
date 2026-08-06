@@ -10,6 +10,7 @@ import { getPromptStartStopSourceSnapshot } from './source-reality.js';
 import { evaluatePromptEnhancementMpsIntakeDecisionV1 } from './intake-decision.js';
 import { buildPromptEnhancementCliMpsIntakeEvidenceV1 } from './cli-mps-intake-evidence.js';
 import { runPromptEnhancementCliMpsFirstPopupV1, type PromptEnhancementCliMpsKeyV1 } from './cli-mps-run.js';
+import { isPromptEnhancementSequenceShapedTextV1 } from './routing-taxonomy.js';
 
 const MULTI_INTENT = 'Fix the failing payment test and add a rate limiter to the login endpoint.';
 const SINGLE_INTENT = 'Fix the failing payment test.';
@@ -76,6 +77,17 @@ describe('MPS CLI wiring (owner ruling 2026-08-06: CLI complete, extension pendi
     // "add X and Y" is list-shaped but not a real multi-step sequence — MPS must not hijack it.
     const result = await preparePromptEnhancement(request('Add a tax field and a discount field to the invoice page.'));
     expect(result.uiView.handoffAndSequenceSummary).toBeUndefined();
+  });
+
+  it('the shared sequence-shape text predicate matches the facade emission rule (used by the auto fallback)', () => {
+    // The UserPromptSubmit fallback uses this predicate to prepare sequence prompts on
+    // NON-trigger turns — it must agree with what the facade will actually emit for.
+    expect(isPromptEnhancementSequenceShapedTextV1(MULTI_INTENT)).toBe(true);
+    expect(isPromptEnhancementSequenceShapedTextV1(
+      'Build the whole recurring-billing flow: schema, cron job, email sender, and the dashboard widget — do it as one sequence.',
+    )).toBe(true);
+    expect(isPromptEnhancementSequenceShapedTextV1(SINGLE_INTENT)).toBe(false);
+    expect(isPromptEnhancementSequenceShapedTextV1('Add a tax field and a discount field to the invoice page.')).toBe(false);
   });
 
   it('CLI surface gate PERMITS with the three non-extension evidence rows', async () => {
