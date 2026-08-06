@@ -64,6 +64,16 @@ describe('bringPopupToFront (windsurf-hook)', () => {
     expect(h.calls()).toBe(1);
   });
 
+  // Parity with the extension raiser's give-up test. Nothing here covered the
+  // multi-tick budget, so a title silently dropped from the list would not have
+  // been caught on this path — only on the extension one.
+  it('attempts every title on every tick, then gives up after maxTries', () => {
+    const h = setup({ tools: ['wmctrl'], maxTries: 5 }); // never succeeds
+    vi.advanceTimersByTime(10_000);
+    // 3 titles (advisory + feedback + prompt-enhancement) × 5 ticks = 15 calls.
+    expect(h.calls()).toBe(15);
+  });
+
   it('raises the FEEDBACK popup when only the feedback window exists', () => {
     const attempted: string[] = [];
     let raised: string | null = null;
