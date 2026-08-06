@@ -31,6 +31,7 @@ import { resolvePromptEnhancementSourceConflictsV1 } from './conflict-resolution
 import { applyPromptEnhancementSourceMixV1 } from './source-mix.js';
 import { applyPromptEnhancementGuidanceGateV1 } from './guidance-gate.js';
 import { buildPromptEnhancementPinchLabelV1, buildPromptEnhancementWhyHelpV1 } from './pe-header-copy.js';
+import { buildPromptEnhancementHandoffMetadataV1 } from './handoff-metadata.js';
 import {
   validatePromptEnhancementSafety,
   type PromptEnhancementSafetyValidationResult,
@@ -274,10 +275,27 @@ function buildResult(
         capabilityOverlays: route.capabilityOverlays,
         hasSensitiveAction: safety.sensitiveActionFindings.some((finding) => finding.requiresConfirmation),
       });
+  // MPS (owner ruling 2026-08-06): for a compound multi-intent prompt the engine emits the typed
+  // handoff/sequence summary so the CLI MPS first popup can render the sequence plan. Metadata
+  // only — the builder itself locks `sequenceActivationPolicy: blocked_pending_…` and
+  // `receiverCanActivateRuntime: false`; no sequence runtime is created here.
+  const handoffAndSequenceSummary = !noPopup
+    && disposition === 'show_current_body'
+    && route.contractDecision.compoundPromptState === 'multi_intent_one_prompt'
+    ? buildPromptEnhancementHandoffMetadataV1({
+        handoffDecisionId: `${enhancementId}:handoff`,
+        requestId: request.requestId,
+        projectRoot: request.projectRoot,
+        currentBody: safeCurrentBody,
+        safetySummary: validationSummary,
+        handoffKind: 'compact_sequence_summary_candidate',
+      })
+    : undefined;
   const uiView: PromptEnhancementUiViewPayloadV1 = {
     ...buildUiView(request, enhancementId, safeCurrentBody, composed, safety, trustCues, diagnostics, noPopup),
     ...(pinchLabel ? { pinchLabel } : {}),
     ...(whyHelp ? { whyHelp } : {}),
+    ...(handoffAndSequenceSummary ? { handoffAndSequenceSummary } : {}),
   };
 
   return {

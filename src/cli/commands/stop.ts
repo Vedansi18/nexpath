@@ -39,6 +39,9 @@ import {
   type PromptEnhancementCliPopupResultV1,
 } from '../../prompt-enhancement/cli-submit-popup.js';
 import { emitPromptEnhancementCostObservabilityV1 } from '../../prompt-enhancement/cost-measurement.js';
+import { evaluatePromptEnhancementMpsIntakeDecisionV1 } from '../../prompt-enhancement/intake-decision.js';
+import { buildPromptEnhancementCliMpsIntakeEvidenceV1 } from '../../prompt-enhancement/cli-mps-intake-evidence.js';
+import { runPromptEnhancementCliMpsFirstPopupV1 } from '../../prompt-enhancement/cli-mps-run.js';
 import type { GeneratedOptions } from '../../decision-session/OptionGenerator.js';
 import { resolveContentSource, selectionRegister } from '../../decision-session/selection-registry.js';
 import { autogenAwareLookup, pinchSignalTypeForFlag } from '../../decision-session/content-template-source.js';
@@ -501,6 +504,33 @@ export function registerStopCommand(program: import('commander').Command): void 
         if (capability.state === 'unavailable') return { kind: 'not_shown' };
         let popup: PromptEnhancementCliPopupResultV1;
         if (capability.method === 'direct_tty') {
+          // MPS first popup (owner ruling 2026-08-06: CLI surface complete; extension surface stays
+          // with host_transport). For a compound multi-intent prompt the engine emits a typed
+          // handoff/sequence summary; when the CLI-scoped intake gate permits, show the MPS
+          // sequence popup first — Enter injects the enhanced first prompt, Esc falls through to
+          // the regular PE popup (full editing lives there). Fail-closed on any gate block.
+          if (pending.result.uiView.handoffAndSequenceSummary) {
+            const mpsEvidence = buildPromptEnhancementCliMpsIntakeEvidenceV1(pending.result);
+            const mpsGate = evaluatePromptEnhancementMpsIntakeDecisionV1({
+              surface: 'cli_stop_bridge',
+              evidence: mpsEvidence ? [...mpsEvidence] : undefined,
+            });
+            logger.debug('stop_mps_intake_gate', {
+              cwd: payload.cwd,
+              renderPermission: mpsGate.renderPermission,
+              reasonCodes: mpsGate.reasonCodes.slice(0, 6),
+            });
+            if (mpsGate.renderPermission === 'mps_render_permitted') {
+              const mps = await runPromptEnhancementCliMpsFirstPopupV1({ result: pending.result });
+              logger.info('stop_mps_first_popup', { cwd: payload.cwd, outcome: mps.state });
+              if (mps.state === 'send' && mps.bodyText.trim().length > 0) {
+                recordPromptEnhancementShownMemoryV1(store, payload.cwd, pending.request);
+                markPromptEnhancementUsedMemoryV1(store, payload.cwd, pending.request);
+                return { kind: 'inject', text: mps.bodyText };
+              }
+              // declined / not_shown -> fall through to the regular PE popup below.
+            }
+          }
           // Primary path: render the PE popup in-process on /dev/tty (the same channel the
           // advisory uses on the Stop hook). The store lock stays held for the duration, matching
           // the advisory popup; feedback is recorded through the store-backed sink.

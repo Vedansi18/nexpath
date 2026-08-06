@@ -21,8 +21,18 @@ export interface PromptEnhancementB3ContractEvidenceV1 {
   fixtureIds?: readonly string[];
 }
 
+export type PromptEnhancementB3ContractIntakeSurfaceV1 = 'cli_stop_bridge' | 'extension_host';
+
 export interface PromptEnhancementB3ContractIntakeInputV1 {
   evidence?: readonly PromptEnhancementB3ContractEvidenceV1[];
+  /**
+   * Owner ruling (2026-08-06): the `host_runtime` evidence (DEP-stage-3-02) is EXTENSION-host
+   * evidence owned by host_transport — the CLI stop-bridge surface runs on the ui-owner's own
+   * live direct-TTY host and is NOT gated on it. `cli_stop_bridge` therefore requires the other
+   * three evidence kinds only. Default (no surface) keeps the full four-evidence requirement,
+   * so the extension surface stays fail-closed until the host evidence lands.
+   */
+  surface?: PromptEnhancementB3ContractIntakeSurfaceV1;
 }
 
 export interface PromptEnhancementB3ContractIntakePacketV1 {
@@ -56,7 +66,10 @@ export function buildPromptEnhancementB3ContractIntakePacketV1(
   input: PromptEnhancementB3ContractIntakeInputV1 = {},
 ): PromptEnhancementB3ContractIntakePacketV1 {
   const supplied = input.evidence ?? [];
-  const evidence = REQUIRED_EVIDENCE.map((required) => supplied.find((row) => row.kind === required.kind) ?? {
+  const requiredEvidence = input.surface === 'cli_stop_bridge'
+    ? REQUIRED_EVIDENCE.filter((required) => required.kind !== 'host_runtime')
+    : REQUIRED_EVIDENCE;
+  const evidence = requiredEvidence.map((required) => supplied.find((row) => row.kind === required.kind) ?? {
     evidenceId: required.evidenceId,
     kind: required.kind,
     owner: required.owner,

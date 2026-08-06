@@ -1062,7 +1062,7 @@ export function renderPromptEnhancementCliFeedbackFrameV1(
  * Returns null when no console is reachable (e.g. a headless session); the caller then reports the
  * popup as not shown, and (per the Stop-hook wiring) the pending record is left for a later Stop.
  */
-function openPromptEnhancementInteractiveConsoleV1(): { input: ReadStream; output: WriteStream; owned: boolean } | null {
+export function openPromptEnhancementInteractiveConsoleV1(): { input: ReadStream; output: WriteStream; owned: boolean } | null {
   // In a spawned popup WINDOW (Windows cmd / macOS Terminal.app / Linux gnome-terminal) the process's
   // OWN stdin/stdout ARE the interactive console — use them directly, exactly like the advisory popup.
   // This is the reliable path on every OS and is what makes the spawned window actually render and
