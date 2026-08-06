@@ -1346,14 +1346,17 @@ describe('uninstallAction', () => {
     const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
     try {
       mkdirSync(join(dir, '.config', 'Cursor'), { recursive: true });
-      vi.stubEnv('HOME', dir);
       const paths = resolveAgentPaths(dir, dir, dir);
-      await uninstallAction({ paths, execFn: () => {}, apiKeyConfirmFn: async () => false, dbPath: ':memory:' });
+      // home/platform overrides (not vi.stubEnv('HOME', ...)) — os.homedir() reads
+      // USERPROFILE on Windows, not HOME, so stubbing HOME alone doesn't redirect it there.
+      await uninstallAction({
+        paths, execFn: () => {}, apiKeyConfirmFn: async () => false, dbPath: ':memory:',
+        home: dir, platform: 'linux',
+      });
       const output = spy.mock.calls.map((c) => c[0] as string).join('\n');
       expect(output).toContain('Cursor');
       expect(output).toContain('cursor --uninstall-extension');
     } finally {
-      vi.unstubAllEnvs();
       cleanup();
     }
   });
@@ -1363,14 +1366,15 @@ describe('uninstallAction', () => {
     const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
     try {
       mkdirSync(join(dir, '.config', 'Windsurf'), { recursive: true });
-      vi.stubEnv('HOME', dir);
       const paths = resolveAgentPaths(dir, dir, dir);
-      await uninstallAction({ paths, execFn: () => {}, apiKeyConfirmFn: async () => false, dbPath: ':memory:' });
+      await uninstallAction({
+        paths, execFn: () => {}, apiKeyConfirmFn: async () => false, dbPath: ':memory:',
+        home: dir, platform: 'linux',
+      });
       const output = spy.mock.calls.map((c) => c[0] as string).join('\n');
       expect(output).toContain('Windsurf');
       expect(output).toContain('windsurf --uninstall-extension');
     } finally {
-      vi.unstubAllEnvs();
       cleanup();
     }
   });
@@ -1385,9 +1389,11 @@ describe('uninstallAction', () => {
     try {
       mkdirSync(join(dir, '.config', 'Cursor'), { recursive: true });
       mkdirSync(join(dir, '.config', 'Windsurf'), { recursive: true });
-      vi.stubEnv('HOME', dir);
       const paths = resolveAgentPaths(dir, dir, dir);
-      await uninstallAction({ paths, execFn: () => {}, apiKeyConfirmFn: async () => false, dbPath: ':memory:' });
+      await uninstallAction({
+        paths, execFn: () => {}, apiKeyConfirmFn: async () => false, dbPath: ':memory:',
+        home: dir, platform: 'linux',
+      });
       const output = spy.mock.calls.map((c) => c[0] as string).join('\n');
       expect(uninstallSpy).toHaveBeenCalledOnce();
       expect(output).toMatch(/failed:.*synthetic uninstall failure/);
@@ -1395,7 +1401,6 @@ describe('uninstallAction', () => {
       expect(output).toContain('windsurf --uninstall-extension');
     } finally {
       uninstallSpy.mockRestore();
-      vi.unstubAllEnvs();
       cleanup();
     }
   });

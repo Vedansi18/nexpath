@@ -10,6 +10,10 @@ const makeCtx = (home: string): InstallContext => ({
   cwd: join(home, 'cwd'),
   yes: true,
   dbPath: ':memory:',
+  // Fixed platform so these tests are hermetic regardless of the host OS running them —
+  // without this, detect()/install()/uninstall() fall back to process.platform and, on
+  // win32, would read the real machine's APPDATA instead of the tmp fixture below.
+  platform: 'linux',
 });
 
 describe('cursorConfigDir', () => {
@@ -26,7 +30,7 @@ describe('cursorConfigDir', () => {
   it('returns the win32 path under APPDATA when provided', () => {
     expect(
       cursorConfigDir('C:\\Users\\u', 'win32', 'C:\\Users\\u\\AppData\\Roaming'),
-    ).toBe('C:\\Users\\u\\AppData\\Roaming/Cursor');
+    ).toBe('C:\\Users\\u\\AppData\\Roaming\\Cursor');
   });
 
   it('falls back to <home>/AppData/Roaming on win32 when APPDATA missing', () => {

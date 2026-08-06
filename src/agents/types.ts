@@ -31,6 +31,20 @@ export interface InstallContext {
    * BrowserExtensionAdapter) ignore this field.
    */
   settingsPath?: string;
+  /**
+   * Optional platform override for adapters whose config-dir detection branches
+   * on OS (Cursor, Windsurf). If omitted, adapters fall back to `process.platform`
+   * — unchanged real-install behaviour. Tests inject a fixed value so detection
+   * doesn't depend on the host OS running the test.
+   */
+  platform?: NodeJS.Platform;
+  /**
+   * Optional APPDATA override for the win32 branch of those same adapters. If
+   * omitted, adapters fall back to `process.env.APPDATA` — unchanged real-install
+   * behaviour. Tests inject a fixed value so detection doesn't depend on the
+   * test-runner machine's real environment.
+   */
+  appdata?: string;
 }
 
 export interface InstallResult {

@@ -11,7 +11,7 @@
  * **Layer C untouched** — this only writes a config file that Windsurf reads.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, posix, resolve } from 'node:path';
 
 /** Every Cascade event nexpath has ever owned — iterated on cleanup/removal. */
 export const WINDSURF_HOOK_EVENTS = ['pre_user_prompt', 'post_cascade_response'] as const;
@@ -34,9 +34,13 @@ export type WindsurfWriteEvent = (typeof WINDSURF_WRITE_EVENTS)[number];
 
 interface HookEntry { command?: string; powershell?: string; [k: string]: unknown }
 
-/** Path to Windsurf's user-level hooks file: `~/.codeium/windsurf/hooks.json`. */
+/**
+ * Path to Windsurf's user-level hooks file: `~/.codeium/windsurf/hooks.json`.
+ * Always posix-style — this is an intentionally OS-agnostic dotfile path, not a
+ * host-native one, so `path.join()` (which follows the host separator) is wrong here.
+ */
 export function getWindsurfHooksPath(home: string): string {
-  return join(home, '.codeium', 'windsurf', 'hooks.json');
+  return posix.join(home, '.codeium', 'windsurf', 'hooks.json');
 }
 
 /**

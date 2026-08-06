@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import {
   getWindsurfHooksPath,
   buildWindsurfHookCommand,
@@ -29,7 +29,10 @@ describe('paths + command', () => {
   });
   it('command embeds absolute node + cli (both quoted, forward-slashed)', () => {
     const cmd = buildWindsurfHookCommand('/abs/dist/cli/index.js', 'pre_user_prompt', '/usr/bin/node');
-    expect(cmd).toBe('"/usr/bin/node" "/abs/dist/cli/index.js" windsurf-hook pre_user_prompt');
+    // resolve() is host-native (drive-relative on Windows for a bare "/..." path) — compute
+    // the expected value the same way the source does rather than hardcoding a POSIX literal.
+    const abs = resolve('/abs/dist/cli/index.js').replace(/\\/g, '/');
+    expect(cmd).toBe(`"/usr/bin/node" "${abs}" windsurf-hook pre_user_prompt`);
   });
   it('forward-slashes a Windows node path (sanitized-PATH safety)', () => {
     const cmd = buildWindsurfHookCommand(
@@ -37,8 +40,9 @@ describe('paths + command', () => {
       'post_cascade_response',
       'C:\\Program Files\\nodejs\\node.exe',
     );
+    const abs = resolve('/abs/cli.js').replace(/\\/g, '/');
     expect(cmd).toBe(
-      '"C:/Program Files/nodejs/node.exe" "/abs/cli.js" windsurf-hook post_cascade_response',
+      `"C:/Program Files/nodejs/node.exe" "${abs}" windsurf-hook post_cascade_response`,
     );
   });
   it('powershell variant uses the & call operator + native node path (Windows)', () => {
@@ -48,12 +52,15 @@ describe('paths + command', () => {
       'C:\\Program Files\\nodejs\\node.exe',
     );
     // PowerShell needs `&` to run a quoted executable path; node path stays native.
-    expect(ps).toBe('& "C:\\Program Files\\nodejs\\node.exe" "/abs/cli.js" windsurf-hook pre_user_prompt');
+    const abs = resolve('/abs/cli.js');
+    expect(ps).toBe(`& "C:\\Program Files\\nodejs\\node.exe" "${abs}" windsurf-hook pre_user_prompt`);
   });
   it('hook entry carries BOTH command (bash) and powershell (Windows)', () => {
     const e = buildWindsurfHookEntry('/abs/cli.js', 'post_cascade_response', '/usr/bin/node');
-    expect(e.command).toBe('"/usr/bin/node" "/abs/cli.js" windsurf-hook post_cascade_response');
-    expect(e.powershell).toBe('& "/usr/bin/node" "/abs/cli.js" windsurf-hook post_cascade_response');
+    const absForward = resolve('/abs/cli.js').replace(/\\/g, '/');
+    const absNative = resolve('/abs/cli.js');
+    expect(e.command).toBe(`"/usr/bin/node" "${absForward}" windsurf-hook post_cascade_response`);
+    expect(e.powershell).toBe(`& "/usr/bin/node" "${absNative}" windsurf-hook post_cascade_response`);
   });
   it('config writes both events with both platform commands', () => {
     const cfg = buildWindsurfHooksConfig('/abs/cli.js');

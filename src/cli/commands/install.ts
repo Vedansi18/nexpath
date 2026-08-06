@@ -1001,6 +1001,9 @@ export async function uninstallAction(
     yes = false,
     projectRoot = process.cwd(),
     dbPath,
+    home = homedir(),
+    platform = process.platform,
+    appdata,
   }: {
     paths?:           AgentPaths;
     execFn?:          ExecFn;
@@ -1008,6 +1011,12 @@ export async function uninstallAction(
     yes?:             boolean;
     projectRoot?:     string;
     dbPath?:          string;
+    /** Overrides for the registry-driven adapter uninstalls below. Defaults to the
+     *  real host (unchanged production behaviour) — tests inject fixed values so
+     *  cursor/windsurf detection doesn't depend on the machine running the test. */
+    home?:            string;
+    platform?:        NodeJS.Platform;
+    appdata?:         string;
   } = {},
 ): Promise<void> {
   // Uninstall must clean up registration entries from agents that may have
@@ -1055,10 +1064,12 @@ export async function uninstallAction(
   // touched. Errors are surfaced as a single line per adapter \u2014 they don't
   // halt the rest of the uninstall.
   const adapterCtx: InstallContext = {
-    home: homedir(),
+    home,
     cwd:  process.cwd(),
     yes:  false,
     dbPath: ':memory:',
+    platform,
+    appdata,
   };
   const detectedAdapters = await detectAll(adapterCtx);
   for (const adapter of detectedAdapters) {

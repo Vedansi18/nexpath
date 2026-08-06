@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join, resolve, posix, win32 } from 'node:path';
 import { registerAdapter } from '../registry.js';
 import {
   getWindsurfHooksPath,
@@ -53,23 +53,26 @@ export function windsurfConfigDir(
   platform: NodeJS.Platform = process.platform,
   appdata?: string,
 ): string {
+  // Keyed strictly on `platform`, never the host — path.join() would silently use the
+  // host's own separator regardless of which OS branch fired, breaking cross-OS testing.
   switch (platform) {
     case 'darwin':
-      return join(home, 'Library', 'Application Support', 'Windsurf');
+      return posix.join(home, 'Library', 'Application Support', 'Windsurf');
     case 'win32':
-      return join(appdata ?? process.env.APPDATA ?? join(home, 'AppData', 'Roaming'), 'Windsurf');
+      return win32.join(appdata ?? process.env.APPDATA ?? win32.join(home, 'AppData', 'Roaming'), 'Windsurf');
     default:
-      return join(home, '.config', 'Windsurf');
+      return posix.join(home, '.config', 'Windsurf');
   }
 }
 
 /**
  * Legacy Cascade data directory (per-user, OS-agnostic). Windsurf may
  * still drop JSON chat files here in addition to the VS Code-style
- * workspaceStorage path.
+ * workspaceStorage path. Always posix-style — `.codeium/windsurf` is an
+ * intentionally OS-agnostic dotfile path (matches getWindsurfHooksPath).
  */
 function codeiumCascadeDir(home: string): string {
-  return join(home, '.codeium', 'windsurf');
+  return posix.join(home, '.codeium', 'windsurf');
 }
 
 export const windsurfAdapter: VSCodeExtensionAdapter = {
@@ -80,14 +83,16 @@ export const windsurfAdapter: VSCodeExtensionAdapter = {
 
   detect(ctx: InstallContext): boolean {
     return (
-      existsSync(windsurfConfigDir(ctx.home)) ||
+      existsSync(windsurfConfigDir(ctx.home, ctx.platform, ctx.appdata)) ||
       existsSync(codeiumCascadeDir(ctx.home))
     );
   },
 
   chatHistoryPaths(ctx: InstallContext): string[] {
+    const platform = ctx.platform ?? process.platform;
+    const joinFn = platform === 'win32' ? win32.join : posix.join;
     return [
-      join(windsurfConfigDir(ctx.home), 'User', 'workspaceStorage'),
+      joinFn(windsurfConfigDir(ctx.home, ctx.platform, ctx.appdata), 'User', 'workspaceStorage'),
       codeiumCascadeDir(ctx.home),
     ];
   },
@@ -127,7 +132,7 @@ export const windsurfAdapter: VSCodeExtensionAdapter = {
     // WORKSPACE-level `.windsurf/hooks.json`, which Devin Next DOES honor — so on
     // Windows write that too, relative to the project the user runs install in. Gated
     // to win32 so platforms that already fire the user-level hook don't double-capture.
-    if (process.platform === 'win32') {
+    if ((ctx.platform ?? process.platform) === 'win32') {
       const wsHooksPath = join(ctx.cwd, '.windsurf', 'hooks.json');
       writeWindsurfHooks(wsHooksPath, cliPath);
       console.log(`   ${' '.repeat(12)}   + workspace hook (Windows/Devin Next): ${wsHooksPath}`);
@@ -159,7 +164,7 @@ export const windsurfAdapter: VSCodeExtensionAdapter = {
       ? `✓ ${'Windsurf'.padEnd(12)} — Cascade capture hook removed`
       : `-  ${'Windsurf'.padEnd(12)} — no Cascade capture hook found`);
     // Mirror the install: remove the Windows workspace-level hook too (no-op elsewhere).
-    if (process.platform === 'win32') {
+    if ((ctx.platform ?? process.platform) === 'win32') {
       removeWindsurfHooks(join(ctx.cwd, '.windsurf', 'hooks.json'));
     }
     console.log(`   ${' '.repeat(12)}   Uninstall the Nexpath extension from the Windsurf Extensions panel`);

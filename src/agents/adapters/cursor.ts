@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { posix, win32 } from 'node:path';
 import { registerAdapter } from '../registry.js';
 import type {
   InstallContext,
@@ -52,13 +52,15 @@ export function cursorConfigDir(
   platform: NodeJS.Platform = process.platform,
   appdata?: string,
 ): string {
+  // Keyed strictly on `platform`, never the host — path.join() would silently use the
+  // host's own separator regardless of which OS branch fired, breaking cross-OS testing.
   switch (platform) {
     case 'darwin':
-      return join(home, 'Library', 'Application Support', 'Cursor');
+      return posix.join(home, 'Library', 'Application Support', 'Cursor');
     case 'win32':
-      return join(appdata ?? process.env.APPDATA ?? join(home, 'AppData', 'Roaming'), 'Cursor');
+      return win32.join(appdata ?? process.env.APPDATA ?? win32.join(home, 'AppData', 'Roaming'), 'Cursor');
     default:
-      return join(home, '.config', 'Cursor');
+      return posix.join(home, '.config', 'Cursor');
   }
 }
 
@@ -69,14 +71,16 @@ export const cursorAdapter: VSCodeExtensionAdapter = {
   marketplace: { openVsx: MARKETPLACE_ID, vsCode: MARKETPLACE_ID },
 
   detect(ctx: InstallContext): boolean {
-    return existsSync(cursorConfigDir(ctx.home));
+    return existsSync(cursorConfigDir(ctx.home, ctx.platform, ctx.appdata));
   },
 
   chatHistoryPaths(ctx: InstallContext): string[] {
     // Return the base workspaceStorage directory; per-workspace state.vscdb
     // enumeration happens at extension activation time (we can't enumerate
     // here because the user may open new workspaces after install runs).
-    return [join(cursorConfigDir(ctx.home), 'User', 'workspaceStorage')];
+    const platform = ctx.platform ?? process.platform;
+    const join = platform === 'win32' ? win32.join : posix.join;
+    return [join(cursorConfigDir(ctx.home, ctx.platform, ctx.appdata), 'User', 'workspaceStorage')];
   },
 
   /**
