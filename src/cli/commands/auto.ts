@@ -33,7 +33,12 @@ import { logger, initLogger } from '../../logger.js';
 import type { LogLevel } from '../../logger.js';
 import { writeHookStats } from '../../store/hook-stats.js';
 import { upsertPendingAdvisory } from '../../store/pending-advisories.js';
-import { upsertPendingPromptEnhancement } from '../../store/pending-prompt-enhancements.js';
+import { upsertPendingPromptEnhancement, type PendingPromptEnhancement } from '../../store/pending-prompt-enhancements.js';
+import {
+  preparePromptEnhancementStopBridgeDelivery,
+  type PromptEnhancementDeliveryRequestV1,
+  type PromptEnhancementDeliveryResultV1,
+} from '../../prompt-enhancement/delivery.js';
 import { insertSkippedSession } from '../../store/skipped-sessions.js';
 import { recordActivity } from '../../store/feedback-cadence.js';
 import { writeTelemetry } from '../../telemetry/index.js';
@@ -1258,6 +1263,32 @@ export function markPromptEnhancementUsedMemoryV1(
       markPromptEnhancementMemoryUsed(store, projectRoot, signal.signalKey, now);
     }
   } catch { /* memory record is best-effort; never block delivery */ }
+}
+
+/**
+ * D1 (P9-G1 / resolves P9-G2): wire the live Stop injection through the typed Stop-bridge delivery
+ * contract. `preparePromptEnhancementStopBridgeDelivery` records **source-use before transport** and
+ * writes the **generated-origin** metadata (`learningEligible:false`, `raw_text_excluded`) — the
+ * audit/lineage tables (`prompt_enhancement_source_use` / `prompt_enhancement_generated_origin`) that
+ * the ad-hoc block+inject path never wrote live. The kept enhanced body is a `send_current` delivery
+ * on the `cli_stop_bridge` channel; raw text is never the transport authority. Returns the typed
+ * result for the caller to log (the actual injected carrier text is unchanged — 4d).
+ */
+export function recordPromptEnhancementStopBridgeDeliveryV1(
+  store: Store,
+  pending: PendingPromptEnhancement,
+): PromptEnhancementDeliveryResultV1 {
+  const body = pending.result.currentBody;
+  const request: PromptEnhancementDeliveryRequestV1 = {
+    deliveryAttemptId: `pe-delivery:${pending.result.enhancementId}:${pending.id}`,
+    projectRoot: pending.projectRoot,
+    enhancementId: pending.result.enhancementId,
+    currentBody: body,
+    actionId: `${body.currentBodyId}:send_current`,
+    sendPolicy: 'send_current',
+    deliveryChannel: 'cli_stop_bridge',
+  };
+  return preparePromptEnhancementStopBridgeDelivery(store, request);
 }
 
 export function recordPromptEnhancementCliFeedbackV1(

@@ -28,7 +28,7 @@ import { writeTelemetry } from '../../telemetry/index.js';
 import { triggerOpportunisticSync } from '../../telemetry/OpportunisticSync.js';
 import { flushIfTelemetryOn, flushLifecycle } from '../../telemetry/lifecycle-flush.js';
 import { recentPromptMetadata } from '../../telemetry/recent-prompts.js';
-import { readStdin, recordPromptEnhancementCliFeedbackV1, recordPromptEnhancementShownMemoryV1, markPromptEnhancementUsedMemoryV1 } from './auto.js';
+import { readStdin, recordPromptEnhancementCliFeedbackV1, recordPromptEnhancementShownMemoryV1, markPromptEnhancementUsedMemoryV1, recordPromptEnhancementStopBridgeDeliveryV1 } from './auto.js';
 import {
   resolvePromptEnhancementCliHostCapabilityV1,
   runPromptEnhancementCliPopupHostLaunchV1,
@@ -197,9 +197,27 @@ export async function runStop(
         // could not display it (e.g. an unsupported platform → not_shown) leaves the record
         // pending for the next Stop instead of burning it silently.
         markPromptEnhancementShown(store, pendingPe.id);
+        // D1 (P9-G1 / resolves P9-G2): record source-use + generated-origin BEFORE transport via
+        // the typed Stop-bridge delivery contract — the audit/lineage tables the ad-hoc path never
+        // wrote live. Best-effort: an audit-write failure must never lose the injection (4d).
+        try {
+          const delivered = recordPromptEnhancementStopBridgeDeliveryV1(store, pendingPe);
+          logger.debug('stop_prompt_enhancement_delivery_recorded', {
+            cwd: payload.cwd,
+            outcome: delivered.outcome,
+            sourceUseCount: delivered.sourceUseIds.length,
+            sourceUseRecordedBeforeTransport: delivered.invariants.sourceUseRecordedBeforeTransport,
+            generatedOriginId: delivered.generatedOrigin?.generatedOriginId,
+          });
+        } catch (err) {
+          logger.debug('stop_prompt_enhancement_delivery_record_failed', { cwd: payload.cwd, error: String(err) });
+        }
         // Record the injected enhanced prompt so the next UserPromptSubmit recognises it as an
         // echo and does not prepare another PE for it (mirrors the advisory injection at the
         // bottom of this function — otherwise the enhanced turn would re-trigger the PE popup).
+        // NB: the typed origin guard (resolvePromptEnhancementPromptSubmitOrigin) is evidence-based
+        // (generatedOriginId), which the CLI text-injection cannot carry — it becomes authoritative
+        // on the EXTENSION delivery path (Vedansi handoff). The CLI echo stays text-based here.
         SessionStateManager.load(store, payload.cwd).setInjectedPrompt(store, decision.text);
         logger.info('stop_prompt_enhancement_injected', { cwd: payload.cwd });
         return { outcome: 'blocked', reason: decision.text };
