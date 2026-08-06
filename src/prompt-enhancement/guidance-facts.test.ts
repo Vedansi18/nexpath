@@ -38,7 +38,7 @@ describe('buildPromptEnhancementGuidanceFactsV1 (E2 / 2.1)', () => {
     expect(facts[0].sourceType).toBe('stage_transition');
     expect(facts[0].guidanceKind).toBe('stage_transition_discipline');
     expect(facts[0].priority).toBe('high');
-    expect(facts[0].sourceIds).toEqual(['stage:task_breakdown->implementation']);
+    expect(facts[0].sourceIds).toEqual(['stage:task_breakdown-to-implementation']);
   });
 
   it('builds a Source-A absence fact from a current absence trigger', () => {

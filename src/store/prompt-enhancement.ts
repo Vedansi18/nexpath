@@ -1675,7 +1675,7 @@ function assertOneOf(errorCode: string, value: string, allowedValues: readonly s
   if (!allowedValues.includes(value)) throw new Error(errorCode);
 }
 
-function isNegativeFeedbackCategory(category: PromptEnhancementFeedbackCategory): boolean {
+export function isNegativeFeedbackCategory(category: PromptEnhancementFeedbackCategory): boolean {
   return [
     'not_relevant_enough',
     'too_much_or_too_long',

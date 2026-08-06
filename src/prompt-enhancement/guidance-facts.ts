@@ -36,7 +36,9 @@ export function buildPromptEnhancementGuidanceFactsV1(
     facts.push({
       factId: nextId('stage'),
       sourceType: 'stage_transition',
-      sourceIds: [`stage:${trigger.prevStage ?? 'unknown'}->${trigger.currentStage}`],
+      // Token-safe separator ('>' is not a public-safe token char, and this id
+      // becomes a persisted memory signal key in E3).
+      sourceIds: [`stage:${trigger.prevStage ?? 'unknown'}-to-${trigger.currentStage}`],
       guidanceKind: 'stage_transition_discipline',
       suggestedActionKind: 'no_action_render_context_only',
       targetFamily: 'family_agnostic',

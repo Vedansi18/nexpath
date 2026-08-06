@@ -120,6 +120,7 @@ export async function runPromptEnhancementPopupHostCommandV1(
             store!,
             input.request.projectRoot,
             event,
+            input.request,
           ),
         });
       } finally {

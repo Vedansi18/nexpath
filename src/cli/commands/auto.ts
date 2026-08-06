@@ -52,6 +52,7 @@ import {
 } from '../../prompt-enhancement/contracts.js';
 import { preparePromptEnhancement } from '../../prompt-enhancement/facade.js';
 import { recordPromptEnhancementFeedbackV1 } from '../../prompt-enhancement/feedback-sink.js';
+import { derivePromptEnhancementFeedbackPolicyV1 } from '../../prompt-enhancement/feedback-policy.js';
 import type { PromptEnhancementPopupEventV1 } from '../../prompt-enhancement/popup-session.js';
 import { buildPromptEnhancementCostVisibilityMetadataV1 } from '../../prompt-enhancement/cost-observability.js';
 import { getSourceRealityAdaptersSnapshot } from '../../prompt-enhancement/source-reality.js';
@@ -611,7 +612,7 @@ export function createPromptEnhancementCliHostConsumerV1(
       popupResult = await showDirectPopup({
         request,
         result: preparation.result,
-        feedbackSink: (event) => recordPromptEnhancementCliFeedbackV1(dependencies.store, request.projectRoot, event),
+        feedbackSink: (event) => recordPromptEnhancementCliFeedbackV1(dependencies.store, request.projectRoot, event, request),
       });
     } else {
       hostAdapter = 'linux_terminal';
@@ -1189,18 +1190,21 @@ export function recordPromptEnhancementCliFeedbackV1(
   store: Store,
   projectRoot: string,
   event: PromptEnhancementPopupEventV1,
+  request?: PromptEnhancementPrepareRequestV1,
 ) {
-  const acknowledgement = recordPromptEnhancementFeedbackV1({
-    store,
-    event,
-    policy: {
-      projectRoot,
-      feedbackScopeKey: event.currentBodyId,
-      learningEligibility: 'pending_policy',
-      safetyImpactState: 'unknown',
-      memoryEvidence: false,
-    },
-  });
+  // With the prepare request, derive the real feedback->memory eligibility policy
+  // (E3/3.2a): the memory signal key + safety come from re-running the E2 pipeline
+  // (Path A). Without it, fall back to the inert placeholder (no memory learning).
+  const policy = request
+    ? derivePromptEnhancementFeedbackPolicyV1(event, request, projectRoot)
+    : {
+        projectRoot,
+        feedbackScopeKey: event.currentBodyId,
+        learningEligibility: 'pending_policy' as const,
+        safetyImpactState: 'unknown' as const,
+        memoryEvidence: false,
+      };
+  const acknowledgement = recordPromptEnhancementFeedbackV1({ store, event, policy });
   return {
     stableEventIdentity: acknowledgement.stableEventIdentity,
     status: acknowledgement.status,

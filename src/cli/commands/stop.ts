@@ -488,7 +488,7 @@ export function registerStopCommand(program: import('commander').Command): void 
           popup = await runPromptEnhancementCliSubmitPopupV1({
             request: pending.request,
             result: pending.result,
-            feedbackSink: (event) => recordPromptEnhancementCliFeedbackV1(store, payload.cwd, event),
+            feedbackSink: (event) => recordPromptEnhancementCliFeedbackV1(store, payload.cwd, event, pending.request),
           });
         } else {
           // No direct TTY but a GUI session exists: spawn a terminal popup. Release the DB lock

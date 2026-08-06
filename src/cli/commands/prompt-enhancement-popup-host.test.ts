@@ -129,7 +129,14 @@ describe('PE1.2 — hidden prompt-enhancement popup child command', () => {
       { openStore: async () => store, closeStore: vi.fn(), runPopup, recordFeedback },
     );
 
-    expect(recordFeedback).toHaveBeenCalledWith(store, '/tmp/pe1-2-project', event);
+    // The request is threaded through so the feedback->memory policy (E3/3.2a) can
+    // re-derive the signal key + safety from it.
+    expect(recordFeedback).toHaveBeenCalledWith(
+      store,
+      '/tmp/pe1-2-project',
+      event,
+      expect.objectContaining({ requestId: 'pe1-2-request', projectRoot: '/tmp/pe1-2-project' }),
+    );
   });
 
   it('writes the private readiness marker only after the popup reports its first render', async () => {

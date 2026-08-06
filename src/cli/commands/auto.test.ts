@@ -32,7 +32,8 @@ import {
   runAuto,
   readStdin,
 } from './auto.js';
-import { getPromptEnhancementFeedbackSummary } from '../../store/prompt-enhancement.js';
+import { getPromptEnhancementFeedbackSummary, queryRelevantPromptEnhancementMemory } from '../../store/prompt-enhancement.js';
+import { resolvePromptEnhancementGuidanceOutcomeV1 } from '../../prompt-enhancement/guidance-outcome.js';
 import { writeTelemetry } from '../../telemetry/index.js';
 import type { AutoInput } from './auto.js';
 import { getPendingAdvisory } from '../../store/pending-advisories.js';
@@ -3262,6 +3263,52 @@ describe('B1.4a - live CLI PEF sink wiring', () => {
       expect(summary.categoryCounts).toEqual([
         { feedbackCategory: 'not_relevant_enough', count: 1 },
       ]);
+    } finally {
+      store.db.close();
+    }
+  });
+
+  it('E3/3.2a: eligible feedback WITH the request writes memory keyed on the signal (Path A)', async () => {
+    const store = await openStore(':memory:');
+    try {
+      const projectRoot = '/test/b1-4a-memory';
+      const request = makeBoundaryRequest(store, projectRoot);
+      const signalKey = resolvePromptEnhancementGuidanceOutcomeV1(request).primarySignalKey;
+      expect(signalKey).not.toBeNull();
+
+      const prepared = await preparePromptEnhancement(request);
+      const boundary = buildPromptEnhancementUiBoundarySessionV1({ result: prepared, timestampMs: 700 });
+      if (boundary.state !== 'session_ready') throw new Error('expected feedback session');
+      const actionId = boundary.session.feedbackEntry.actionId;
+      if (!actionId) throw new Error('expected feedback action');
+      const event = createPromptEnhancementPopupEventV1({
+        session: boundary.session,
+        eventType: 'explicit_feedback',
+        actionId,
+        currentBodyId: boundary.session.currentBodyId,
+        bodyRevision: boundary.session.bodyRevision,
+        feedbackCategory: 'user_deleted_generated_section',
+        timestampMs: 701,
+        realUserInitiated: true,
+      });
+
+      // 4-arg call (with request) derives the real eligibility policy and bridges to memory.
+      const accepted = recordPromptEnhancementCliFeedbackV1(store, projectRoot, event, request);
+      expect(accepted.status).toBe('accepted');
+
+      const memory = queryRelevantPromptEnhancementMemory(store, projectRoot, [signalKey!]);
+      expect(memory).toHaveLength(1);
+      expect(memory[0].currentEvidenceState).toBe('feedback_derived');
+      expect(memory[0].negativeCount).toBe(1);
+
+      // The 3-arg (no request) placeholder path must NOT learn — regression guard.
+      const store2 = await openStore(':memory:');
+      try {
+        recordPromptEnhancementCliFeedbackV1(store2, projectRoot, event);
+        expect(queryRelevantPromptEnhancementMemory(store2, projectRoot, [signalKey!])).toEqual([]);
+      } finally {
+        store2.db.close();
+      }
     } finally {
       store.db.close();
     }
