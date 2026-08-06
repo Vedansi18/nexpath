@@ -91,7 +91,7 @@ describe('E4 — facade LLM composer wiring', () => {
     expect(result.modelVersion).toBe('deterministic-v1');
   });
 
-  it('E8: a directional action (shorter) LLM-recomposes, passing the action to the composer', async () => {
+  it('popup actions are INSTANT deterministic (owner decision 2026-08-06): a directional action never calls the LLM', async () => {
     process.env['OPENAI_API_KEY'] = `sk-${'x'.repeat(40)}`;
     const base = await preparePromptEnhancement(request());
     const shorter = base.availableActions.find((entry) => entry.actionType === 'shorter');
@@ -113,8 +113,11 @@ describe('E4 — facade LLM composer wiring', () => {
     } as unknown as Parameters<typeof applyPromptEnhancementAction>[0];
 
     const result = await applyPromptEnhancementAction(actionRequest);
-    expect(composeStructuredComposerOutputV1).toHaveBeenCalledWith(expect.objectContaining({ action: 'shorter' }));
-    expect(result.callAndVisibilityMetadata.callVisibilityMode).toBe('llm_wording');
+    // Even WITH a valid key, the in-popup recompose must not wait on the LLM — instant
+    // deterministic, exactly like before (an in-popup LLM wait reads as a frozen popup).
+    expect(composeStructuredComposerOutputV1).not.toHaveBeenCalled();
+    expect(result.callAndVisibilityMetadata.callVisibilityMode).not.toBe('llm_wording');
+    expect(result.disposition).toBe('show_current_body');
   });
 
   it('safety still runs on the composed body regardless of the LLM path (validation summary present)', async () => {

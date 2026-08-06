@@ -169,12 +169,13 @@ async function prepare(
   // any obvious/clear prompt render deterministically. Any failure -> undefined ->
   // composePromptEnhancementBody validates + falls back deterministically.
   // E8: a directional action (Shorter / More-thorough / More-project-grounded /
-  // Apply-details) always LLM-recomposes when a key is present (gate-rule-4 required LLM
-  // path — the user explicitly requested the recompose). The baseline compose fires
-  // the LLM only when NL-heavy (E4). Deterministic fallback preserved either way.
-  const isDirectionalAction =
-    action === 'shorter' || action === 'more_thorough' || action === 'more_project_grounded' || action === 'apply_details';
-  const wantsLlmWording = isDirectionalAction || (action === undefined && isPromptEnhancementNlpHeavyCaseV1(route));
+  // Owner decision (2026-08-06): the interactive popup actions (Shorter / More-thorough /
+  // More-project-grounded / Apply-details) must stay INSTANT — deterministic recompose only,
+  // exactly like before. An in-popup LLM wait reads as a frozen popup, so the bounded LLM
+  // wording call runs ONLY on the initial prepare (action === undefined, in the background
+  // before the popup shows), never inside the popup interaction. The composer's
+  // action-directive seam stays available for a future non-blocking use.
+  const wantsLlmWording = action === undefined && isPromptEnhancementNlpHeavyCaseV1(route);
   let structuredComposerOutput: PromptEnhancementStructuredComposerOutputV1 | undefined;
   if (
     wantsLlmWording &&
@@ -185,9 +186,6 @@ async function prepare(
       enhancementId,
       originalPromptText: request.sourcePrompt.text,
       planning,
-      action: isDirectionalAction ? action : undefined,
-      additionalDetailsText:
-        action === 'apply_details' ? actionRequest?.userPreferenceContext.additionalDetails?.text : undefined,
     });
   }
 

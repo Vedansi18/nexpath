@@ -193,26 +193,6 @@ describe('Claude CLI UserPromptSubmit PE popup consumer', () => {
     expect(ui.views[1]!.editedBodyText).not.toBe(ui.views[0]!.editedBodyText);
   });
 
-  it('freeze fix: the busy window (beginBusy/endBusy) wraps every directional/apply-details recompose', async () => {
-    const baseRequest = request();
-    const prepared = await preparePromptEnhancement(baseRequest);
-    const events: string[] = [];
-    const ui = {
-      ...interaction([
-        { type: 'shorter' } as const,
-        { type: 'apply_details', text: 'keep it tight' } as const,
-        { type: 'use_current' } as const,
-      ]),
-      beginBusy(notice: string) { events.push(`begin:${notice.length > 0}`); },
-      endBusy() { events.push('end'); },
-    };
-    const result = await runPromptEnhancementCliSubmitPopupV1({ request: baseRequest, result: prepared, interaction: ui });
-    expect(result.state).toBe('selected_current');
-    // One begin/end pair per recompose action (shorter + apply_details); use_current (plain
-    // send) is fast and shows no busy notice.
-    expect(events).toEqual(['begin:true', 'end', 'begin:true', 'end']);
-  });
-
   it('E9: fires the cost-observability sink once per E8 directional/apply-details action, not on plain selection', async () => {
     const baseRequest = request();
     const prepared = await preparePromptEnhancement(baseRequest);
