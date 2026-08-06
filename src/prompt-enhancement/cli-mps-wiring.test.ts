@@ -9,7 +9,7 @@ import { preparePromptEnhancement } from './facade.js';
 import { getPromptStartStopSourceSnapshot } from './source-reality.js';
 import { evaluatePromptEnhancementMpsIntakeDecisionV1 } from './intake-decision.js';
 import { buildPromptEnhancementCliMpsIntakeEvidenceV1 } from './cli-mps-intake-evidence.js';
-import { runPromptEnhancementCliMpsFirstPopupV1, type PromptEnhancementCliMpsKeyV1 } from './cli-mps-run.js';
+import { runPromptEnhancementCliMpsFirstPopupV1 } from './cli-mps-run.js';
 import { isPromptEnhancementSequenceShapedTextV1 } from './routing-taxonomy.js';
 
 const MULTI_INTENT = 'Fix the failing payment test and add a rate limiter to the login endpoint.';
@@ -33,7 +33,10 @@ function request(text: string): PromptEnhancementPrepareRequestV1 {
   };
 }
 
-function scripted(keys: readonly PromptEnhancementCliMpsKeyV1[]): { next(frame: string): Promise<PromptEnhancementCliMpsKeyV1>; close(): void; frames: string[] } {
+// Raw key sequences (the shell decodes them with the shared PE key decoder).
+const KEY = { enter: '\r', escape: '', up: '[A', down: '[B' } as const;
+
+function scripted(keys: readonly string[]): { next(frame: string): Promise<string>; close(): void; frames: string[] } {
   const queue = [...keys];
   const frames: string[] = [];
   return {
@@ -41,7 +44,7 @@ function scripted(keys: readonly PromptEnhancementCliMpsKeyV1[]): { next(frame: 
     async next(frame) {
       frames.push(frame);
       const key = queue.shift();
-      if (!key) throw new Error('missing scripted key');
+      if (key === undefined) throw new Error('missing scripted key');
       return key;
     },
     close() { /* noop */ },
@@ -106,22 +109,61 @@ describe('MPS CLI wiring (owner ruling 2026-08-06: CLI complete, extension pendi
     expect(gate.intakePacket.missingEvidenceKinds).toContain('host_runtime');
   });
 
-  it('MPS first popup: Enter sends the enhanced first-prompt body', async () => {
+  it('MPS first popup: Enter sends the enhanced first-prompt body; the frame shows ALL locked rows', async () => {
     const result = await preparePromptEnhancement(request(MULTI_INTENT));
-    const ui = scripted(['other', 'enter']); // a stray key redraws; Enter sends
+    const ui = scripted([KEY.enter]);
     const outcome = await runPromptEnhancementCliMpsFirstPopupV1({ result, interaction: ui });
     expect(outcome.state).toBe('send');
     if (outcome.state === 'send') {
       expect(outcome.bodyText).toContain('Fix the failing payment test');
       expect(outcome.bodyText.length).toBeGreaterThan(result.currentBody.originalPromptText.length);
     }
+    // The locked §3.3 frame: header + all 3 interactive rows + dim plan + footer, in ONE frame.
     expect(ui.frames[0]).toContain('Multi-prompt sequence');
+    expect(ui.frames[0]).toContain('Use enhanced sequence prompt');
+    expect(ui.frames[0]).toContain('Additional details');
+    expect(ui.frames[0]).toContain('Cancel (remaining multi-prompt sequence)');
     expect(ui.frames[0]).toContain('Sequence plan');
+    expect(ui.frames[0]).toContain('Enter send · Esc actions');
+  });
+
+  it('no-scroll: every frame fits the reported window height (stacking regression guard)', async () => {
+    const result = await preparePromptEnhancement(request(MULTI_INTENT));
+    const ui = { ...scripted([KEY.down, KEY.up, KEY.enter]), size: () => ({ columns: 90, rows: 32 }) };
+    const outcome = await runPromptEnhancementCliMpsFirstPopupV1({ result, interaction: ui });
+    expect(outcome.state).toBe('send');
+    // The body is windowed so the WHOLE frame fits the window — the render can never scroll,
+    // which is what previously stacked stale frames in scrollback.
+    for (const frame of ui.frames) {
+      expect(frame.split('\n').length).toBeLessThanOrEqual(31);
+    }
+  });
+
+  it('row navigation: Down twice focuses Cancel; Enter there declines (falls through to the PE popup)', async () => {
+    const result = await preparePromptEnhancement(request(MULTI_INTENT));
+    const outcome = await runPromptEnhancementCliMpsFirstPopupV1({
+      result,
+      interaction: scripted([KEY.down, KEY.down, KEY.enter]),
+    });
+    expect(outcome.state).toBe('declined');
+  });
+
+  it('Additional details: focus the field, type, Enter sends body PLUS the typed details', async () => {
+    const result = await preparePromptEnhancement(request(MULTI_INTENT));
+    const outcome = await runPromptEnhancementCliMpsFirstPopupV1({
+      result,
+      interaction: scripted([KEY.down, 'u', 's', 'e', ' ', 'p', 'g', KEY.enter]),
+    });
+    expect(outcome.state).toBe('send');
+    if (outcome.state === 'send') {
+      expect(outcome.bodyText).toContain('Additional details to incorporate:\nuse pg');
+      expect(outcome.bodyText).toContain('Fix the failing payment test');
+    }
   });
 
   it('MPS first popup: Esc declines (caller falls through to the regular PE popup)', async () => {
     const result = await preparePromptEnhancement(request(MULTI_INTENT));
-    const outcome = await runPromptEnhancementCliMpsFirstPopupV1({ result, interaction: scripted(['escape']) });
+    const outcome = await runPromptEnhancementCliMpsFirstPopupV1({ result, interaction: scripted([KEY.escape]) });
     expect(outcome.state).toBe('declined');
   });
 
