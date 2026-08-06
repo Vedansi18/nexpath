@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import {
-  recordPromptEnhancementFeedbackEvent,
+  recordPromptEnhancementMemoryFeedback,
   type PromptEnhancementFeedbackCategory,
   type PromptEnhancementFeedbackInput,
 } from '../store/prompt-enhancement.js';
@@ -64,7 +64,11 @@ export function recordPromptEnhancementFeedbackV1(
   };
 
   try {
-    const inserted = recordPromptEnhancementFeedbackEvent(input.store, storeInput);
+    // P8-G2: record the event AND bridge eligible feedback into missing-signal
+    // memory evidence (the bridge is a no-op unless the policy marks it eligible +
+    // safety none + memoryEvidence). Previously this called the event-only writer,
+    // so eligible feedback never became memory evidence.
+    const inserted = recordPromptEnhancementMemoryFeedback(input.store, storeInput);
     return {
       stableEventIdentity,
       status: inserted ? 'accepted' : 'rejected',

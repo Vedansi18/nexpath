@@ -496,13 +496,19 @@ export function markPromptEnhancementMemoryUsed(
   return changed > 0;
 }
 
+/**
+ * Records the feedback event AND, when eligible, bridges it into missing-signal
+ * memory evidence. Returns whether the event was newly inserted (false on a
+ * duplicate) so callers can report accepted-vs-duplicate — the memory bridge is a
+ * side effect gated on eligibility, not part of the insertion result.
+ */
 export function recordPromptEnhancementMemoryFeedback(
   store: Store,
   input: PromptEnhancementFeedbackInput,
-): void {
+): boolean {
   const inserted = recordPromptEnhancementFeedbackEvent(store, input);
-  if (!inserted) return;
-  if (input.learningEligibility !== 'eligible_scoped' || input.safetyImpactState !== 'none' || input.memoryEvidence !== true) return;
+  if (!inserted) return false;
+  if (input.learningEligibility !== 'eligible_scoped' || input.safetyImpactState !== 'none' || input.memoryEvidence !== true) return true;
   recordPromptEnhancementMemoryEvidence(store, {
     projectRoot: input.projectRoot,
     signalKey: input.feedbackScopeKey,
@@ -518,6 +524,7 @@ export function recordPromptEnhancementMemoryFeedback(
     reasonCodes: ['feedback_candidate_not_global_preference'],
     now: input.now,
   });
+  return true;
 }
 
 export function recordPromptEnhancementSourceUse(store: Store, input: PromptEnhancementSourceUseInput): void {
