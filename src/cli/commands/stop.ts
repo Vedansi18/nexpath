@@ -28,7 +28,7 @@ import { writeTelemetry } from '../../telemetry/index.js';
 import { triggerOpportunisticSync } from '../../telemetry/OpportunisticSync.js';
 import { flushIfTelemetryOn, flushLifecycle } from '../../telemetry/lifecycle-flush.js';
 import { recentPromptMetadata } from '../../telemetry/recent-prompts.js';
-import { readStdin, recordPromptEnhancementCliFeedbackV1, recordPromptEnhancementShownMemoryV1 } from './auto.js';
+import { readStdin, recordPromptEnhancementCliFeedbackV1, recordPromptEnhancementShownMemoryV1, markPromptEnhancementUsedMemoryV1 } from './auto.js';
 import {
   resolvePromptEnhancementCliHostCapabilityV1,
   runPromptEnhancementCliPopupHostLaunchV1,
@@ -527,6 +527,8 @@ export function registerStopCommand(program: import('commander').Command): void 
           && typeof popup.bodyText === 'string'
           && popup.bodyText.length > 0
         ) {
+          // The enhanced body was kept and injected: mark its Source-A signals used.
+          markPromptEnhancementUsedMemoryV1(store, payload.cwd, pending.request);
           return { kind: 'inject', text: popup.bodyText };
         }
         return { kind: 'shown' };

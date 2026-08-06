@@ -60,7 +60,7 @@ import { loadRightGoodProfile } from '../../classifier/right-good-aggregator.js'
 import { computeWorkStyleProfile } from '../../classifier/work-style-traits.js';
 import { readParamEvents } from '../../telemetry/param-events.js';
 import { getProjectEnvFacts } from '../../store/env-facts.js';
-import { getPromptEnhancementFeedbackSummary, queryRelevantPromptEnhancementMemory, recordPromptEnhancementMemoryEvidence } from '../../store/prompt-enhancement.js';
+import { getPromptEnhancementFeedbackSummary, queryRelevantPromptEnhancementMemory, recordPromptEnhancementMemoryEvidence, markPromptEnhancementMemoryUsed } from '../../store/prompt-enhancement.js';
 import { scorePromptEnhancementMemoryCandidates } from '../../prompt-enhancement/memory-scoring.js';
 import {
   promptEnhancementStageSignalKeyV1,
@@ -1231,6 +1231,25 @@ export function recordPromptEnhancementShownMemoryV1(
       });
     }
   } catch { /* memory record is best-effort; never block the popup */ }
+}
+
+/**
+ * Mark the popup's Source-A signals as used (E3/3.2b, fix-plan §4b "markUsed on
+ * use") when the enhanced body is kept/injected. Signal keys come from re-running
+ * the E2 pipeline (Path A); the memory rows already exist from the show recording.
+ * Best-effort — a memory-write failure must never block delivery.
+ */
+export function markPromptEnhancementUsedMemoryV1(
+  store: Store,
+  projectRoot: string,
+  request: PromptEnhancementPrepareRequestV1,
+  now: number = Date.now(),
+): void {
+  try {
+    for (const signal of resolvePromptEnhancementGuidanceOutcomeV1(request).renderedSourceASignals) {
+      markPromptEnhancementMemoryUsed(store, projectRoot, signal.signalKey, now);
+    }
+  } catch { /* memory record is best-effort; never block delivery */ }
 }
 
 export function recordPromptEnhancementCliFeedbackV1(

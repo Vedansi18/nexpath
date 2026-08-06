@@ -30,6 +30,7 @@ import {
   preparePromptEnhancementForAuto,
   recordPromptEnhancementCliFeedbackV1,
   recordPromptEnhancementShownMemoryV1,
+  markPromptEnhancementUsedMemoryV1,
   runAuto,
   readStdin,
 } from './auto.js';
@@ -3287,6 +3288,24 @@ describe('B1.4a - live CLI PEF sink wiring', () => {
       expect(memory.evidenceCount).toBe(2);
       expect(memory.negativeCount).toBe(0);
       expect(memory.currentEvidenceState).toBe('live_current');
+    } finally {
+      store.db.close();
+    }
+  });
+
+  it('E3/3.2b: keeping/injecting the body marks the Source-A signal used (lastUsedAt set)', async () => {
+    const store = await openStore(':memory:');
+    try {
+      const projectRoot = '/test/e3-2b-used';
+      const request = makeBoundaryRequest(store, projectRoot);
+      const signalKey = resolvePromptEnhancementGuidanceOutcomeV1(request).primarySignalKey!;
+
+      // The signal must be recorded (shown) before it can be marked used.
+      recordPromptEnhancementShownMemoryV1(store, projectRoot, request, 500);
+      expect(queryRelevantPromptEnhancementMemory(store, projectRoot, [signalKey])[0].lastUsedAt).toBeNull();
+
+      markPromptEnhancementUsedMemoryV1(store, projectRoot, request, 600);
+      expect(queryRelevantPromptEnhancementMemory(store, projectRoot, [signalKey])[0].lastUsedAt).toBe(600);
     } finally {
       store.db.close();
     }
