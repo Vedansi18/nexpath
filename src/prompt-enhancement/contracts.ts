@@ -465,9 +465,11 @@ export interface PromptEnhancementRouteDecisionV1 {
     | 'fallback_safe_floor_only'
     | 'disabled_with_reason';
   llmRoutePolicy: {
-    mode: 'no_call';
+    // E6: 'llm_route_decision_call' marks a route decided by the bounded LLM route
+    // call; 'no_call' remains the deterministic default + fallback.
+    mode: 'no_call' | 'llm_route_decision_call';
     owner: 'hiren_content_api';
-    peEm1WorksheetRow: 'not_applicable_deterministic';
+    peEm1WorksheetRow: 'not_applicable_deterministic' | 'llm_route_decision_call';
     freeformRouteOutputAllowed: false;
   };
   ambiguityState:

@@ -22,9 +22,10 @@ import {
 } from './compose-enhancement.js';
 import { composeStructuredComposerOutputV1 } from './llm-composer.js';
 import { isPromptEnhancementNlpHeavyCaseV1 } from './composer-gate.js';
+import { decidePromptEnhancementRouteViaLlmV1 } from './llm-route-decision.js';
 import { isValidApiKey } from '../config/ApiKeyResolver.js';
 import { planPromptEnhancementSections } from './templates/section-plan.js';
-import { routePromptEnhancement, type PromptEnhancementCapabilityId } from './routing-taxonomy.js';
+import { routePromptEnhancement, type PromptEnhancementCapabilityId, type PromptEnhancementRouteInput } from './routing-taxonomy.js';
 import { buildPromptEnhancementGuidanceFactsV1 } from './guidance-facts.js';
 import { resolvePromptEnhancementSourceConflictsV1 } from './conflict-resolution.js';
 import { applyPromptEnhancementSourceMixV1 } from './source-mix.js';
@@ -76,13 +77,22 @@ export const applyPromptEnhancementAction: PromptEnhancementActionFacadeV1 = asy
   return rebuildWithSafety(base, originalSafety, 'fallback_to_original');
 };
 
+// E6: soft deterministic-route skips an LLM route decision may rescue (the keyword
+// router gave up because the prompt has no explicit intent / is weak-ambiguous).
+// Hard-guard skips (degraded classifier, old/generated origin, first-trigger gate) are
+// deliberately excluded.
+const LLM_ROUTE_RESCUABLE_SKIP_REASONS: ReadonlySet<string> = new Set([
+  'source_b_only_cannot_open_popup',
+  'ambiguous_weak_evidence_skip_no_popup',
+]);
+
 async function prepare(
   request: PromptEnhancementPrepareRequestV1,
   action?: PromptEnhancementActionRequestV1['action']['actionType'],
   actionRequest?: PromptEnhancementActionRequestV1,
 ): Promise<PromptEnhancementPrepareResultV1> {
   const enhancementId = `pe:${request.requestId}`;
-  const route = routePromptEnhancement({
+  const routeInput: PromptEnhancementRouteInput = {
     routeDecisionId: `${enhancementId}:route`,
     promptText: request.sourcePrompt.text,
     currentStage: request.reviewMomentContext.triggerProvenance.currentStage,
@@ -112,7 +122,31 @@ async function prepare(
       ? 'pe_generated'
       : 'ordinary_user_prompt',
     oldDecisionSessionPayloadPresent: false,
-  });
+  };
+  let route = routePromptEnhancement(routeInput);
+
+  // E6: for a baseline prepare where the deterministic keyword router SOFT-skipped an
+  // NL-heavy prompt it could not route (no explicit intent / weak-ambiguous), ask the
+  // bounded LLM to decide the real route and re-route with it. Gated on a valid key so
+  // the suite (no key) keeps the deterministic route; any LLM failure -> keep the
+  // deterministic skip (the mandatory fallback). Hard-guard skips (old/generated
+  // origin, degraded classifier, first-trigger gate) are NOT rescued. The LLM may
+  // still legitimately decide skip_no_useful_guidance.
+  if (
+    action === undefined &&
+    route.noPopup &&
+    route.reasonCodes.some((reason) => LLM_ROUTE_RESCUABLE_SKIP_REASONS.has(reason)) &&
+    isValidApiKey(process.env['OPENAI_API_KEY'] ?? '')
+  ) {
+    const llmRouteDecision = await decidePromptEnhancementRouteViaLlmV1({
+      promptText: request.sourcePrompt.text,
+      deterministicFamilyId: route.familyId,
+      deterministicPrimaryIntent: route.primaryIntent,
+    });
+    if (llmRouteDecision) {
+      route = routePromptEnhancement(routeInput, llmRouteDecision);
+    }
+  }
 
   // E2 guidance pipeline: source signals -> typed facts -> cross-lane conflict
   // resolution -> PE-AR-2 dual-lane source mix -> DR2-G1 gate. The mix's rendered

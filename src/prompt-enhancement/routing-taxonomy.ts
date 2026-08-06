@@ -8,6 +8,9 @@ import type {
   PromptEnhancementTemplateRegistryRefV1,
 } from './contracts.js';
 import { PROMPT_ENHANCEMENT_CONTRACT_VERSION } from './contracts.js';
+// Type-only import (erased at runtime) so the enum runtime dep stays one-directional
+// (llm-route-decision -> routing-taxonomy); no runtime import cycle.
+import type { PromptEnhancementLlmRouteDecisionV1 } from './llm-route-decision.js';
 import { getContentTemplateSourceSnapshot, getPromptStartStopSourceSnapshot } from './source-reality.js';
 
 export type PromptEnhancementFamilyId =
@@ -857,7 +860,10 @@ export function findPromptEnhancementTaxonomyGaps(): string[] {
   return gaps;
 }
 
-export function routePromptEnhancement(input: PromptEnhancementRouteInput): PromptEnhancementRouteResult {
+export function routePromptEnhancement(
+  input: PromptEnhancementRouteInput,
+  llmRouteDecision?: PromptEnhancementLlmRouteDecisionV1,
+): PromptEnhancementRouteResult {
   const normalized = input.promptText.toLowerCase();
   const evidenceRefs = buildRouteEvidenceRefs(input);
   const origin = input.generatedOriginState ?? 'ordinary_user_prompt';
@@ -871,6 +877,14 @@ export function routePromptEnhancement(input: PromptEnhancementRouteInput): Prom
   }
   if (isFirstTriggerBlocked(input.firstTriggerGateState)) {
     return noPopupResult(input, 'first_trigger_gate_blocked_no_popup', evidenceRefs);
+  }
+
+  // E6: an accepted bounded LLM route decision overrides the deterministic keyword
+  // routing for the NL-heavy prompts the facade routed to the LLM. The hard skips
+  // above (old/generated origin, degraded classifier, first-trigger gate) are NOT
+  // overridable. Everything below stays the deterministic path + fallback.
+  if (llmRouteDecision) {
+    return buildRouteResultFromLlmDecision(input, llmRouteDecision, normalized, evidenceRefs);
   }
 
   const hasSourceAIntent = hasExplicitRouteWords(normalized);
@@ -1001,6 +1015,43 @@ function noPopupResult(input: PromptEnhancementRouteInput, reasonCode: string, e
   };
 }
 
+/**
+ * E6: build a consistent route result from an accepted bounded LLM route decision.
+ * The intent drives the preset (family + required sections); the LLM's capabilities
+ * merge with the preset + forced safety overlays; the LLM's ambiguityState is honored;
+ * `skip_no_useful_guidance` still legitimately skips (weak evidence ≠ forced popup).
+ * The route stays typed + validated — no freeform route output.
+ */
+function buildRouteResultFromLlmDecision(
+  input: PromptEnhancementRouteInput,
+  decision: PromptEnhancementLlmRouteDecisionV1,
+  normalized: string,
+  evidenceRefs: readonly string[],
+): PromptEnhancementRouteResult {
+  const selectedPreset = presetForIntent(decision.primaryIntent);
+  const capabilityOverlays = mergeCapabilities([...selectedPreset.capabilityOverlays, ...decision.capabilities], normalized, input);
+  const noPopup = decision.ambiguityState === 'skip_no_useful_guidance';
+  const fallbackMode: PromptEnhancementRouteFallbackMode = noPopup ? 'skip_no_popup' : 'none';
+  const reasonCodes = ['llm_route_decision_accepted'];
+  const routeConfidence: PromptEnhancementRouteConfidence = 'partial';
+  return {
+    contractDecision: toContractDecision(input, selectedPreset, capabilityOverlays, evidenceRefs, reasonCodes, noPopup, routeConfidence, fallbackMode, true, decision.ambiguityState),
+    selectedPreset,
+    familyId: selectedPreset.family,
+    primaryIntent: selectedPreset.primaryIntent,
+    secondaryIntentTags: secondaryIntentTagsFor(normalized, selectedPreset.primaryIntent),
+    capabilityOverlays,
+    routeConfidence,
+    fallbackMode,
+    routeEvidenceRefs: evidenceRefs,
+    reasonCodes,
+    noPopup,
+    usesSharedSignalEvidenceOnly: true,
+    usesPeOnlyClassifier: false,
+    usesOldStaticDecisionSessionMap: false,
+  };
+}
+
 function toContractDecision(
   input: PromptEnhancementRouteInput,
   selectedPreset: PromptEnhancementTaxonomyPreset,
@@ -1010,6 +1061,9 @@ function toContractDecision(
   noPopup: boolean,
   routeConfidence: PromptEnhancementRouteConfidence,
   fallbackMode: PromptEnhancementRouteFallbackMode,
+  // E6: set when the bounded LLM route decision produced this route.
+  llmRouteUsed: boolean = false,
+  ambiguityStateOverride?: PromptEnhancementRouteDecisionV1['ambiguityState'],
 ): PromptEnhancementRouteDecisionV1 {
   const rejectedRoutes = noPopup
     ? [{
@@ -1045,12 +1099,12 @@ function toContractDecision(
       : selectedPreset.requiredSections.map((sectionKind, index) => `${input.routeDecisionId}:section:${index + 1}:${sectionKind}`),
     fallbackMode,
     llmRoutePolicy: {
-      mode: 'no_call',
+      mode: llmRouteUsed ? 'llm_route_decision_call' : 'no_call',
       owner: 'hiren_content_api',
-      peEm1WorksheetRow: 'not_applicable_deterministic',
+      peEm1WorksheetRow: llmRouteUsed ? 'llm_route_decision_call' : 'not_applicable_deterministic',
       freeformRouteOutputAllowed: false,
     },
-    ambiguityState: ambiguityStateFor(reasonCodes, noPopup, fallbackMode),
+    ambiguityState: ambiguityStateOverride ?? ambiguityStateFor(reasonCodes, noPopup, fallbackMode),
     suppressionState: suppressionStateFor(noPopup, reasonCodes),
     routeInputEvidenceRefs: evidenceRefs,
     routeEvidence: evidenceRefs,
