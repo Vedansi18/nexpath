@@ -8,7 +8,7 @@ function row(overrides: Partial<PromptEnhancementMemoryRow> & { signalKey: strin
     schemaVersion: 1,
     evidenceCount: 3,
     positiveCount: 0,
-    negativeCount: 3,
+    negativeCount: 0,
     currentEvidenceState: 'historical_candidate',
     confidenceBand: 'medium',
     sourceStrength: 'moderate',
@@ -88,6 +88,30 @@ describe('scorePromptEnhancementMemoryCandidates (E2 / 2.4)', () => {
       row({ signalKey: 's', suppressionState: 'candidate_scoped' }),
     ]);
     expect(result.eligible.map((c) => c.factPriority)).toEqual(['low', 'low']);
+  });
+
+  it('acceptance #1: a signal edited-out twice (negativeCount>=2) is suppressed at query time', () => {
+    const result = scorePromptEnhancementMemoryCandidates([row({ signalKey: 's1', negativeCount: 2 })]);
+    expect(result.eligible).toEqual([]);
+    expect(result.suppressed).toEqual([{ signalKey: 's1', reasonCode: 'memory_suppressed_scoped' }]);
+  });
+
+  it('edited-out once (negativeCount===1) is kept but deprioritized to low (near threshold)', () => {
+    const result = scorePromptEnhancementMemoryCandidates([row({ signalKey: 's1', negativeCount: 1 })]);
+    expect(result.eligible).toHaveLength(1);
+    expect(result.eligible[0].factPriority).toBe('low');
+  });
+
+  it('a fresh signal (no edit-outs) still surfaces', () => {
+    const result = scorePromptEnhancementMemoryCandidates([row({ signalKey: 's1', negativeCount: 0 })]);
+    expect(result.eligible.map((c) => c.signalKey)).toEqual(['s1']);
+  });
+
+  it('safety-protected memory survives even after two edit-outs', () => {
+    const result = scorePromptEnhancementMemoryCandidates([
+      row({ signalKey: 's1', negativeCount: 3, protectionState: 'safety_protected' }),
+    ]);
+    expect(result.eligible.map((c) => c.factPriority)).toEqual(['required_survivor']);
   });
 
   it('unknown-neutral evidence is weak_low_risk', () => {

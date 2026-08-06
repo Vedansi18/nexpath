@@ -61,6 +61,11 @@ import { computeWorkStyleProfile } from '../../classifier/work-style-traits.js';
 import { readParamEvents } from '../../telemetry/param-events.js';
 import { getProjectEnvFacts } from '../../store/env-facts.js';
 import { getPromptEnhancementFeedbackSummary, queryRelevantPromptEnhancementMemory } from '../../store/prompt-enhancement.js';
+import { scorePromptEnhancementMemoryCandidates } from '../../prompt-enhancement/memory-scoring.js';
+import {
+  promptEnhancementStageSignalKeyV1,
+  promptEnhancementAbsenceSignalKeyV1,
+} from '../../prompt-enhancement/guidance-facts.js';
 import {
   buildClaudeUserPromptSubmitHookOutputV1,
   runPromptEnhancementCliSubmitPopupV1,
@@ -218,8 +223,11 @@ function buildPromptEnhancementGroundingRefsV1(store: Store, projectRoot: string
   } catch { /* no scoped feedback available — leave empty */ }
   const missingMemoryCandidateRefs: string[] = [];
   try {
-    for (const row of queryRelevantPromptEnhancementMemory(store, projectRoot, signalKeys)) {
-      missingMemoryCandidateRefs.push(`memory:${row.signalKey}`);
+    // E3/3.2c: score the queried rows so a fatigued / edited-out-twice signal does
+    // not re-surface (fix-plan §4c query-time fatigue/suppression).
+    const rows = queryRelevantPromptEnhancementMemory(store, projectRoot, signalKeys);
+    for (const candidate of scorePromptEnhancementMemoryCandidates(rows).eligible) {
+      missingMemoryCandidateRefs.push(`memory:${candidate.signalKey}`);
     }
   } catch { /* no missing-signal memory yet (until E3 records) — leave empty */ }
   return {
@@ -300,7 +308,12 @@ export function buildPromptEnhancementRequestForAuto(input: {
     : undefined;
   const recentRefs = recentPromptMetadata(input.session.current.promptHistory)
     .map((prompt) => `prompt:${prompt.index}`);
-  const groundingSignalKeys = [input.firedKey, ...(absenceSignal ? [absenceSignal] : [])];
+  // Read memory under the SAME canonical keys the guidance builder writes, or a
+  // repeatedly-edited-out signal would never be found and suppressed (E3/3.2c).
+  const groundingSignalKeys = [
+    ...(triggerKind === 'stage_transition' ? [promptEnhancementStageSignalKeyV1(input.previousStage, currentStage)] : []),
+    ...(absenceSignal ? [promptEnhancementAbsenceSignalKeyV1(absenceSignal)] : []),
+  ];
   const grounding = buildPromptEnhancementGroundingRefsV1(input.store, input.auto.projectRoot, groundingSignalKeys);
 
   return {

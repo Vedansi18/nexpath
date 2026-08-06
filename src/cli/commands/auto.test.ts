@@ -32,8 +32,9 @@ import {
   runAuto,
   readStdin,
 } from './auto.js';
-import { getPromptEnhancementFeedbackSummary, queryRelevantPromptEnhancementMemory } from '../../store/prompt-enhancement.js';
+import { getPromptEnhancementFeedbackSummary, queryRelevantPromptEnhancementMemory, recordPromptEnhancementMemoryEvidence } from '../../store/prompt-enhancement.js';
 import { resolvePromptEnhancementGuidanceOutcomeV1 } from '../../prompt-enhancement/guidance-outcome.js';
+import { promptEnhancementStageSignalKeyV1 } from '../../prompt-enhancement/guidance-facts.js';
 import { writeTelemetry } from '../../telemetry/index.js';
 import type { AutoInput } from './auto.js';
 import { getPendingAdvisory } from '../../store/pending-advisories.js';
@@ -3265,6 +3266,48 @@ describe('B1.4a - live CLI PEF sink wiring', () => {
       ]);
     } finally {
       store.db.close();
+    }
+  });
+
+  it('E3/3.2c: a signal edited-out twice is suppressed from the memory query; a fresh one surfaces', async () => {
+    const seedNegatives = (store: Store, projectRoot: string, signalKey: string, count: number) => {
+      for (let i = 0; i < count; i++) {
+        recordPromptEnhancementMemoryEvidence(store, {
+          projectRoot, signalKey, evidenceKind: 'negative',
+          currentEvidenceState: 'historical_candidate', confidenceBand: 'medium', sourceStrength: 'moderate',
+          status: 'candidate', now: 100 + i,
+        });
+      }
+    };
+
+    // Suppressed: the current stage signal was edited-out twice across sessions.
+    const suppressedStore = await openStore(':memory:');
+    try {
+      const projectRoot = '/test/e3-2c-suppressed';
+      const tp = makeBoundaryRequest(suppressedStore, projectRoot).reviewMomentContext.triggerProvenance;
+      const signalKey = promptEnhancementStageSignalKeyV1(tp.prevStage, tp.currentStage);
+      seedNegatives(suppressedStore, projectRoot, signalKey, 2);
+      const rebuilt = makeBoundaryRequest(suppressedStore, projectRoot);
+      expect(rebuilt.sourceSignals.missingMemoryCandidateRefs).not.toContain(`memory:${signalKey}`);
+    } finally {
+      suppressedStore.db.close();
+    }
+
+    // Fresh (no edit-outs): the same signal still surfaces as a memory candidate.
+    const freshStore = await openStore(':memory:');
+    try {
+      const projectRoot = '/test/e3-2c-fresh';
+      const tp = makeBoundaryRequest(freshStore, projectRoot).reviewMomentContext.triggerProvenance;
+      const signalKey = promptEnhancementStageSignalKeyV1(tp.prevStage, tp.currentStage);
+      recordPromptEnhancementMemoryEvidence(freshStore, {
+        projectRoot, signalKey, evidenceKind: 'neutral',
+        currentEvidenceState: 'historical_candidate', confidenceBand: 'medium', sourceStrength: 'moderate',
+        status: 'candidate', now: 100,
+      });
+      const rebuilt = makeBoundaryRequest(freshStore, projectRoot);
+      expect(rebuilt.sourceSignals.missingMemoryCandidateRefs).toContain(`memory:${signalKey}`);
+    } finally {
+      freshStore.db.close();
     }
   });
 

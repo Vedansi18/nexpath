@@ -20,6 +20,19 @@ import type {
  * refinement (absence -> verification vs reproduction, etc.) is PE-EM-3 / R1 data;
  * v1 defaults it safely to `no_action_render_context_only` where unknown.
  */
+/**
+ * Canonical missing-signal memory keys. The builder (write side) and the auto.ts
+ * memory query (read side) MUST agree on these, or memory never suppresses a repeat
+ * signal. Kept token-safe (no '>' etc.) because they become persisted memory keys.
+ */
+export function promptEnhancementStageSignalKeyV1(prevStage: string | undefined, currentStage: string): string {
+  return `stage:${prevStage ?? 'unknown'}-to-${currentStage}`;
+}
+
+export function promptEnhancementAbsenceSignalKeyV1(absenceKey: string): string {
+  return `absence:${absenceKey}`;
+}
+
 export function buildPromptEnhancementGuidanceFactsV1(
   request: PromptEnhancementPrepareRequestV1,
 ): readonly PromptEnhancementGuidanceFact[] {
@@ -36,9 +49,7 @@ export function buildPromptEnhancementGuidanceFactsV1(
     facts.push({
       factId: nextId('stage'),
       sourceType: 'stage_transition',
-      // Token-safe separator ('>' is not a public-safe token char, and this id
-      // becomes a persisted memory signal key in E3).
-      sourceIds: [`stage:${trigger.prevStage ?? 'unknown'}-to-${trigger.currentStage}`],
+      sourceIds: [promptEnhancementStageSignalKeyV1(trigger.prevStage, trigger.currentStage)],
       guidanceKind: 'stage_transition_discipline',
       suggestedActionKind: 'no_action_render_context_only',
       targetFamily: 'family_agnostic',
@@ -56,7 +67,7 @@ export function buildPromptEnhancementGuidanceFactsV1(
     facts.push({
       factId: nextId('signal'),
       sourceType: 'absence_signal',
-      sourceIds: [`absence:${trigger.selectedQualifyingAbsence ?? trigger.firedKey ?? trigger.currentStage}`],
+      sourceIds: [promptEnhancementAbsenceSignalKeyV1(trigger.selectedQualifyingAbsence ?? trigger.firedKey ?? trigger.currentStage)],
       guidanceKind: 'missing_practice',
       suggestedActionKind: 'no_action_render_context_only',
       targetFamily: 'family_agnostic',
