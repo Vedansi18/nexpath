@@ -146,7 +146,9 @@ export async function decidePromptEnhancementRouteViaLlmV1(
           ],
           response_format: { type: 'json_object' },
         },
-        { timeout: PROMPT_ENHANCEMENT_COST_TIMEOUT_MS_V1 },
+        // maxRetries: 0 — the SDK's default internal retries would multiply the bounded
+        // timeout into a long stall; failure here falls back to the deterministic route.
+        { timeout: PROMPT_ENHANCEMENT_COST_TIMEOUT_MS_V1, maxRetries: 0 },
       );
       raw = response.choices?.[0]?.message?.content;
     } catch {

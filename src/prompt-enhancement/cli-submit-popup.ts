@@ -70,6 +70,12 @@ export interface PromptEnhancementCliPopupViewV1 {
 export interface PromptEnhancementCliPopupInteractionV1 {
   next(view: PromptEnhancementCliPopupViewV1): Promise<PromptEnhancementCliPopupCommandV1>;
   close(): void;
+  // Busy window around a slow action (the E8 LLM recompose): beginBusy repaints the frame with a
+  // working notice and swallows keystrokes (so hammering Enter on a "frozen" popup cannot queue
+  // more recomposes); endBusy re-enables input and drops anything pressed meanwhile. Optional so
+  // scripted/test interactions need not implement them.
+  beginBusy?(notice: string): void;
+  endBusy?(): void;
 }
 
 export type PromptEnhancementCliPopupResultV1 =
@@ -340,15 +346,24 @@ export async function runPromptEnhancementCliSubmitPopupV1(input: {
         continue;
       }
       const details = command.type === 'apply_details' ? command.text : additionalDetailsText;
-      const execution = await executePromptEnhancementActionV1({
-        adapterState: buildPromptEnhancementActionAdapterStateV1(model.session),
-        baseRequest: input.request,
-        action,
-        editedBodyText,
-        ...(details.length > 0 ? { additionalDetailsText: details } : {}),
-        timestampMs: Date.now(),
-        facade: applyPromptEnhancementAction,
-      });
+      // The directional/apply-details recompose can call the LLM (several seconds). Show a
+      // working notice + swallow keystrokes so the popup never LOOKS frozen and hammered
+      // Enters cannot queue extra recomposes (freeze bug fix).
+      interaction.beginBusy?.('Recomposing with AI — this can take a few seconds…');
+      let execution: Awaited<ReturnType<typeof executePromptEnhancementActionV1>>;
+      try {
+        execution = await executePromptEnhancementActionV1({
+          adapterState: buildPromptEnhancementActionAdapterStateV1(model.session),
+          baseRequest: input.request,
+          action,
+          editedBodyText,
+          ...(details.length > 0 ? { additionalDetailsText: details } : {}),
+          timestampMs: Date.now(),
+          facade: applyPromptEnhancementAction,
+        });
+      } finally {
+        interaction.endBusy?.();
+      }
       if (execution.state !== 'accepted_result') {
         publicNotice = PUBLIC_ACTION_FAILURE;
         continue;
@@ -1136,8 +1151,12 @@ function createPromptEnhancementCliPopupInteractionV1(onFirstRender?: () => void
   const keyBuffer: string[] = [];
   let pending: { resolve: (key: string) => void; reject: (error: Error) => void } | null = null;
   let lastView: PromptEnhancementCliPopupViewV1 | null = null;
+  // While a slow action (LLM recompose) runs, swallow keystrokes: buffering them would queue
+  // ANOTHER recompose per extra Enter pressed on the seemingly-frozen popup (the freeze bug).
+  let busy = false;
   const onKeypress = (str: string | undefined, key: readline.Key | undefined): void => {
     const sequence = key?.sequence ?? str ?? '';
+    if (busy) return;
     if (pending) { const { resolve } = pending; pending = null; resolve(sequence); }
     else keyBuffer.push(sequence);
   };
@@ -1298,6 +1317,17 @@ function createPromptEnhancementCliPopupInteractionV1(onFirstRender?: () => void
         }
         render(view, state);
       }
+    },
+    beginBusy(notice) {
+      busy = true;
+      keyBuffer.length = 0; // stale keys from before the action
+      // Repaint the current frame with the working notice so the user SEES progress
+      // instead of a frozen popup while the LLM recompose runs.
+      if (lastView && state) render({ ...lastView, publicNotice: notice }, state);
+    },
+    endBusy() {
+      busy = false;
+      keyBuffer.length = 0; // keys hammered during the busy window are discarded, not replayed
     },
     close() {
       if (closed) return;

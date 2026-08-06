@@ -39,7 +39,7 @@ export interface PromptEnhancementComposerClientV1 {
           messages: readonly { role: 'system' | 'user'; content: string }[];
           response_format?: { type: 'json_object' };
         },
-        options?: { timeout?: number },
+        options?: { timeout?: number; maxRetries?: number },
       ) => Promise<{ choices?: readonly { message?: { content?: string | null } }[] }>;
     };
   };
@@ -194,7 +194,9 @@ export async function composeStructuredComposerOutputV1(
           ],
           response_format: { type: 'json_object' },
         },
-        { timeout: PROMPT_ENHANCEMENT_COST_TIMEOUT_MS_V1 },
+        // maxRetries: 0 — THIS loop implements the locked retry policy; the SDK's own default
+        // (2 internal retries per attempt) would multiply it into a minutes-long UI freeze.
+        { timeout: PROMPT_ENHANCEMENT_COST_TIMEOUT_MS_V1, maxRetries: 0 },
       );
       raw = response.choices?.[0]?.message?.content;
     } catch {
