@@ -298,6 +298,45 @@ describe('prompt-enhancement composer and deterministic fallback', () => {
     });
   });
 
+  it('E5/5.4: derives language provenance from the composer self-report on the LLM path', () => {
+    const planned = planningResult();
+    const sourceGuidanceSection = planned.sectionPlans.find((section) => section.sectionKind === 'source_signal_guidance');
+    const llmSourceFactId = sourceGuidanceSection?.structuredContentPartRefs[0] ?? 'missing-source-fact';
+    const result = composePromptEnhancementBody({
+      enhancementId: 'enh-phase5-language',
+      originalPromptText: 'importCsv me bug fix karo aur regression verify karo.',
+      sectionPlanningResult: planned,
+      composerRuntimeState: 'accepted_structured_output',
+      structuredComposerOutput: {
+        outputId: 'llm-output-lang',
+        detectedLanguageSelfReport: 'hi-Latn',
+        sectionDrafts: [
+          {
+            sectionId: sourceGuidanceSection?.sectionId ?? 'missing',
+            bodyText: 'Reproduction, parser behavior aur verification evidence ke saath fix ko tie rakho.',
+            sourceFactIds: [llmSourceFactId],
+          },
+        ],
+        composerClaims: [`claim:${llmSourceFactId}`],
+      },
+    });
+
+    expect(result.currentBody.languageSource).toBe('detected_from_prompt');
+    expect(result.currentBody.languagePolicy).toBe('preserve_user_language');
+    expect(result.currentBody.languagePolicyApplied).toBe('preserve_user_language');
+    expect(result.currentBody.effectiveLanguageState).toBe('known');
+  });
+
+  it('E5/5.4: keeps technical-English provenance on the deterministic path', () => {
+    const result = composePromptEnhancementBody({
+      enhancementId: 'enh-phase5-lang-det',
+      originalPromptText: 'Fix importCsv and verify the regression.',
+      sectionPlanningResult: planningResult(),
+    });
+    expect(result.currentBody.languageSource).toBe('technical_english_default');
+    expect(result.currentBody.effectiveLanguageState).toBe('unknown_default');
+  });
+
   it('rejects unsafe structured LLM wording and keeps deterministic fallback wording', () => {
     const planned = planningResult();
     const sourceGuidanceSection = planned.sectionPlans.find((section) => section.sectionKind === 'source_signal_guidance');

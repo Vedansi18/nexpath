@@ -353,6 +353,11 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
   const sourceAttribution = sourceAttributionFor(sectionPlans);
   const originalPromptSectionId = sections.find((section) => section.sectionKind === 'original_request_or_goal')?.sectionId ?? 'not_applicable_original_only';
   const sentPromptOrigin = sentPromptOriginFor(action, deterministicFallback);
+  // E5/5.4: when the LLM wrote the body it adapted to (and self-reported) the user's
+  // language, so the language provenance is detected-from-prompt / preserve-user-language
+  // instead of the hardcoded technical-English default. Deterministic/fallback bodies
+  // stay technical-English.
+  const detectedLanguage = usesLlmWording ? input.structuredComposerOutput?.detectedLanguageSelfReport : undefined;
 
   const currentBody: PromptEnhancementCurrentBodyV1 = {
       currentBodyId,
@@ -368,12 +373,12 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
       sourceAttribution,
       llmCallPolicy,
       composerMode,
-      languagePolicyApplied: 'technical_english_default',
+      languagePolicyApplied: detectedLanguage ? 'preserve_user_language' : 'technical_english_default',
       languageValidationStatus: 'valid',
-      effectiveLanguageState: 'unknown_default',
-      languageSource: 'technical_english_default',
-      languageConfidence: 'unknown',
-      languagePolicy: 'technical_english_default',
+      effectiveLanguageState: detectedLanguage ? 'known' : 'unknown_default',
+      languageSource: detectedLanguage ? 'detected_from_prompt' : 'technical_english_default',
+      languageConfidence: detectedLanguage ? 'medium' : 'unknown',
+      languagePolicy: detectedLanguage ? 'preserve_user_language' : 'technical_english_default',
       instructionPrecedenceState: 'generated_sections_qualify_original',
       originalAsSourceStatus: 'local_verbatim_source_context',
       composerClaims,
