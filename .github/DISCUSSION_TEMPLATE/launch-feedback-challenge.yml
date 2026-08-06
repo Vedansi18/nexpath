@@ -1,0 +1,13 @@
+labels:
+  - feedback
+
+title: "[Launch Feedback]: "
+
+body:
+  - type: textarea
+    id: feedback
+    attributes:
+      label: Feedback
+      description: Tell us your experience.
+    validations:
+      required: true
