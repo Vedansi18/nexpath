@@ -89,6 +89,25 @@ describe('popup window title contract', () => {
     expect(EXPECTED_PE_TITLE).not.toContain('—');
   });
 
+  // The guard is only as good as its extractor. If `declaredString` silently
+  // stopped matching, every assertion above would compare null to null in the
+  // agreement test and the whole guard would pass while proving nothing.
+  it('the extractor reports null for a declaration that is not there', () => {
+    const source = "const SOMETHING_ELSE = 'value';";
+    expect(declaredString(source, 'PROMPT_ENHANCEMENT_POPUP_TITLE')).toBeNull();
+  });
+
+  it('the extractor reads a declaration it can see', () => {
+    expect(declaredString("const A = 'x';", 'A')).toBe('x');
+    expect(declaredString("const B: string = 'y';", 'B')).toBe('y');
+  });
+
+  // Guards the agreement test itself: three nulls must not read as "agree".
+  it('a renamed upstream constant is caught, not silently tolerated', () => {
+    const renamed = "const PE_TITLE_RENAMED = 'Nexpath · Prompt enhancement';";
+    expect(declaredString(renamed, 'PROMPT_ENHANCEMENT_POPUP_WINDOW_TITLE_V1')).toBeNull();
+  });
+
   it('the two pre-existing titles are unchanged in both raisers', () => {
     const hook = read('windsurf-hook', 'foreground.ts');
     const ext = read('ext-vscode', 'src', 'popup-foreground.ts');

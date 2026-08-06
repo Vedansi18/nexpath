@@ -105,6 +105,29 @@ describe('bringPopupToFront', () => {
     expect(titles).toContain(PROMPT_ENHANCEMENT_WINDOW_TITLE);
   });
 
+  // Order is the behavioural invariant of this change: the prompt-enhancement
+  // title is APPENDED, so the advisory and feedback popups keep the priority
+  // they had before. `.some` short-circuits, so putting PE first would change
+  // which window wins when more than one matches. Parity with the Cascade-hook
+  // raiser, which already asserts the exact order.
+  it('attempts the titles in a stable order with prompt-enhancement last', () => {
+    const attempted: string[] = [];
+    bringPopupToFront({
+      platform: 'linux',
+      env: { DISPLAY: ':0' },
+      hasCommand: () => true,
+      activate: (_tool, title) => { attempted.push(title); return false; },
+      intervalMs: 500,
+      maxTries: 1,
+    });
+    vi.advanceTimersByTime(1_000);
+    expect(attempted).toEqual([
+      POPUP_WINDOW_TITLE,
+      FEEDBACK_WINDOW_TITLE,
+      PROMPT_ENHANCEMENT_WINDOW_TITLE,
+    ]);
+  });
+
   // The PE host matches windows by literal title text, and its separator is a
   // middle dot while the other two use an em dash. Pin the exact string: a
   // silently wrong character would raise nothing and look like "no popup".
