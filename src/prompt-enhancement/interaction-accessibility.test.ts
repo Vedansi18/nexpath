@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildPromptEnhancementMpsInteractionAccessibilityModelV1 } from './interaction-accessibility.js';
 
-describe('B3.5 MPS interaction, accessibility, and visual hierarchy', () => {
+describe('stage-3-5 MPS interaction, accessibility, and visual hierarchy', () => {
   it('keeps first-popup focus order and first-only Sequence plan distinct from Cancel', () => {
     const model = buildPromptEnhancementMpsInteractionAccessibilityModelV1('first_popup');
     expect(model.focusOrder).toEqual(['enhanced_body', 'additional_details', 'cancel_remaining_sequence', 'sequence_plan']);

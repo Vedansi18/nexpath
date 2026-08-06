@@ -8,7 +8,7 @@ const typed = (state: string, freshness = 'current') => ({
   legacyDecisionSessionConfigIsAuthority: false,
 });
 
-describe('B4.1 validated configuration display boundary', () => {
+describe('stage-4-1 validated configuration display boundary', () => {
   it('keeps every supplied typed state distinct and non-interactive', () => {
     for (const state of ['enabled', 'disabled', 'unavailable', 'unsupported', 'policy_disabled', 'fallback']) {
       const model = buildPromptEnhancementValidatedConfigDisplayModelV1({ configResult: typed(state) });

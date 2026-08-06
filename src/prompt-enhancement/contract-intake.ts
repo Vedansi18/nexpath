@@ -26,7 +26,7 @@ export interface PromptEnhancementB3ContractIntakeInputV1 {
 }
 
 export interface PromptEnhancementB3ContractIntakePacketV1 {
-  packetId: 'b3-mps-contract-intake-v1';
+  packetId: 'mps-contract-intake-v1';
   status: 'blocked_pending_external_evidence' | 'ready_for_review';
   readinessClaimAllowed: false;
   readyForPhaseWideClosure: boolean;
@@ -78,7 +78,7 @@ export function buildPromptEnhancementB3ContractIntakePacketV1(
   }
   const readyForPhaseWideClosure = reasonCodes.length === 0 && missingEvidenceKinds.length === 0;
   return {
-    packetId: 'b3-mps-contract-intake-v1',
+    packetId: 'mps-contract-intake-v1',
     status: readyForPhaseWideClosure ? 'ready_for_review' : 'blocked_pending_external_evidence',
     readinessClaimAllowed: false,
     readyForPhaseWideClosure,

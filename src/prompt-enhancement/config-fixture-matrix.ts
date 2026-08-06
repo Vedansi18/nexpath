@@ -36,7 +36,7 @@ export interface PromptEnhancementB4ConfigMatrixObservationV1 {
 }
 
 export interface PromptEnhancementB4ConfigFixtureMatrixV1 {
-  matrixId: 'b4-config-fixture-matrix-v1';
+  matrixId: 'config-fixture-matrix-v1';
   contractRevision: 'pe-config-v1';
   status: 'local_source_backed';
   readinessClaimAllowed: false;
@@ -54,16 +54,16 @@ function typed(state: string, freshness = 'current', extras: Record<string, unkn
 }
 
 const ROWS: readonly PromptEnhancementB4ConfigMatrixFixtureV1[] = [
-  row('LOCAL-B4.5-01', 'approved_enabled_default', 'enabled', typed('enabled')),
-  row('LOCAL-B4.5-02', 'approved_disabled', 'disabled', typed('disabled')),
-  row('LOCAL-B4.5-03', 'unsupported', 'unsupported', typed('unsupported')),
-  row('LOCAL-B4.5-04', 'policy_disabled', 'policy_disabled', typed('policy_disabled')),
-  row('LOCAL-B4.5-05', 'missing', 'unavailable', undefined),
-  row('LOCAL-B4.5-06', 'unknown', 'unavailable', typed('new_state')),
-  row('LOCAL-B4.5-07', 'malformed', 'unavailable', { state: 'enabled' }),
-  row('LOCAL-B4.5-08', 'invalid', 'unavailable', typed('invalid_state')),
-  row('LOCAL-B4.5-09', 'stale', 'fallback', typed('enabled', 'stale')),
-  row('LOCAL-B4.5-10', 'legacy_isolation', 'enabled', typed('enabled', 'current', {
+  row('LOCAL-stage-4-5-01', 'approved_enabled_default', 'enabled', typed('enabled')),
+  row('LOCAL-stage-4-5-02', 'approved_disabled', 'disabled', typed('disabled')),
+  row('LOCAL-stage-4-5-03', 'unsupported', 'unsupported', typed('unsupported')),
+  row('LOCAL-stage-4-5-04', 'policy_disabled', 'policy_disabled', typed('policy_disabled')),
+  row('LOCAL-stage-4-5-05', 'missing', 'unavailable', undefined),
+  row('LOCAL-stage-4-5-06', 'unknown', 'unavailable', typed('new_state')),
+  row('LOCAL-stage-4-5-07', 'malformed', 'unavailable', { state: 'enabled' }),
+  row('LOCAL-stage-4-5-08', 'invalid', 'unavailable', typed('invalid_state')),
+  row('LOCAL-stage-4-5-09', 'stale', 'fallback', typed('enabled', 'stale')),
+  row('LOCAL-stage-4-5-10', 'legacy_isolation', 'enabled', typed('enabled', 'current', {
     prompt_enhancement_sequence_enabled: 'legacy-value-must-not-render',
     decisionSessionRole: 'legacy-role-must-not-render',
     advisoryFrequency: 'legacy-frequency-must-not-render',
@@ -95,7 +95,7 @@ function row(
 
 export function buildPromptEnhancementB4ConfigFixtureMatrixV1(): PromptEnhancementB4ConfigFixtureMatrixV1 {
   return {
-    matrixId: 'b4-config-fixture-matrix-v1',
+    matrixId: 'config-fixture-matrix-v1',
     contractRevision: 'pe-config-v1',
     status: 'local_source_backed',
     readinessClaimAllowed: false,

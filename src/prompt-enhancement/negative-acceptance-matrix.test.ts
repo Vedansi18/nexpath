@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildPromptEnhancementB5_2NegativeAcceptanceMatrixV1 } from './negative-acceptance-matrix.js';
 
-describe('B5.2 cross-layer negative acceptance matrix', () => {
+describe('stage-5-2 cross-layer negative acceptance matrix', () => {
   it('defines all planned authority-negative inputs and remains evidence-blocked', () => {
     const packet = buildPromptEnhancementB5_2NegativeAcceptanceMatrixV1();
 

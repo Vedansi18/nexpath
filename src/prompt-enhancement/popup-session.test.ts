@@ -806,7 +806,7 @@ describe('prompt-enhancement popup session and UI contract', () => {
     expect(staleSkip.staleOrMismatched).toBe(true);
     expect(staleSkip.reasonCodes).toContain('stale_or_mismatched_popup_event');
   });
-  it("B1.4 feedback adapter emits one scoped no-send event and isolates acknowledgement", () => {
+  it("stage-1-4 feedback adapter emits one scoped no-send event and isolates acknowledgement", () => {
     const session = buildPromptEnhancementPopupSessionV1({
       viewPayload: viewPayload(),
       validationDecisionId: "body-1:validation:1:final_body",
@@ -860,7 +860,7 @@ describe('prompt-enhancement popup session and UI contract', () => {
     expect(stale.reasonCodes).toContain("stale_or_mismatched_popup_event");
   });
 
-  it('DEP-TEST-01-B1.2-01 preserves a dirty current-body draft on same-identity redraw', () => {
+  it('DEP-TEST-01-stage-1-2-01 preserves a dirty current-body draft on same-identity redraw', () => {
     const session = buildPromptEnhancementPopupSessionV1({
       viewPayload: viewPayload(),
       validationDecisionId: 'body-1:validation:1:final_body',
@@ -877,7 +877,7 @@ describe('prompt-enhancement popup session and UI contract', () => {
     expect(redraw.draft.currentBody).toMatchObject({ text: 'Edited current body', cursorOffset: 7, dirty: true });
   });
 
-  it('DEP-TEST-01-B1.2-02 starts a distinct draft for a new canonical revision', () => {
+  it('DEP-TEST-01-stage-1-2-02 starts a distinct draft for a new canonical revision', () => {
     const session = buildPromptEnhancementPopupSessionV1({
       viewPayload: viewPayload(),
       validationDecisionId: 'body-1:validation:1:final_body',
@@ -902,7 +902,7 @@ describe('prompt-enhancement popup session and UI contract', () => {
     expect(reconciled.draft.currentBody.text).toBe('New canonical body');
   });
 
-  it('DEP-TEST-01-B1.2-03 ignores stale input and keeps dirty details local', () => {
+  it('DEP-TEST-01-stage-1-2-03 ignores stale input and keeps dirty details local', () => {
     const session = buildPromptEnhancementPopupSessionV1({
       viewPayload: viewPayload(),
       validationDecisionId: 'body-1:validation:1:final_body',

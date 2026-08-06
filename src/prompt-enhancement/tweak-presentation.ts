@@ -1,5 +1,5 @@
 /**
- * B4.3 application boundary for the Prompt Enhancement CTRL+T surface.
+ * stage-4-3 application boundary for the Prompt Enhancement CTRL+T surface.
  *
  * content-owner owns the meaning, defaults, validation, persistence, and runtime
  * policy of PE settings. This module only presents an already validated,

@@ -4,10 +4,10 @@ import {
   runPromptEnhancementB4AcceptanceFixtureV1,
 } from './acceptance-fixtures.js';
 
-describe('B4.4 configuration/tweak UI acceptance fixtures', () => {
+describe('stage-4-4 configuration/tweak UI acceptance fixtures', () => {
   it('defines every required local UI-only state fixture without readiness claim', () => {
     const packet = buildPromptEnhancementB4AcceptanceFixturePacketV1();
-    expect(packet.packetId).toBe('b4-ui-owner-acceptance-fixtures-v1');
+    expect(packet.packetId).toBe('ui-owner-acceptance-fixtures-v1');
     expect(packet.status).toBe('local_source_backed');
     expect(packet.readinessClaimAllowed).toBe(false);
     expect(packet.rows).toHaveLength(11);
@@ -31,10 +31,10 @@ describe('B4.4 configuration/tweak UI acceptance fixtures', () => {
     const packet = buildPromptEnhancementB4AcceptanceFixturePacketV1();
     const observations = packet.rows.map(runPromptEnhancementB4AcceptanceFixtureV1);
     const byId = new Map(observations.map((observation) => [observation.fixtureId, observation]));
-    expect(byId.get('LOCAL-B4.4-07')?.observedStatus).toBe('unavailable');
-    expect(byId.get('LOCAL-B4.4-08')?.observedStatus).toBe('fallback');
-    expect(byId.get('LOCAL-B4.4-09')?.observedStatus).toBe('unavailable');
-    expect(byId.get('LOCAL-B4.4-10')?.observedStatus).toBe('outside_v1');
+    expect(byId.get('LOCAL-stage-4-4-07')?.observedStatus).toBe('unavailable');
+    expect(byId.get('LOCAL-stage-4-4-08')?.observedStatus).toBe('fallback');
+    expect(byId.get('LOCAL-stage-4-4-09')?.observedStatus).toBe('unavailable');
+    expect(byId.get('LOCAL-stage-4-4-10')?.observedStatus).toBe('outside_v1');
   });
 
   it('proves legacy chooser-like values cannot control PE presentation or leak', () => {

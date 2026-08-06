@@ -5,7 +5,7 @@ import {
 } from './evidence-register.js';
 
 const completeRow: PromptEnhancementB5EvidenceRowV1 = {
-  rowId: 'b5-api-ui-stop-store-launch',
+  rowId: 'api-ui-stop-store-launch',
   apiContractRef: 'content-owner:pe-contract:v1',
   uiSurfaceRef: 'ui-owner:pe-ui:v1',
   stopExtensionRef: 'host-owner:host-runtime:v1',
@@ -25,7 +25,7 @@ const completeRow: PromptEnhancementB5EvidenceRowV1 = {
   closureDecision: 'ready_for_owner_review',
 };
 
-describe('B5.1 evidence intake and owner register', () => {
+describe('stage-5-1 evidence intake and owner register', () => {
   it('fails closed with explicit owner dependencies and safe fallback when evidence is absent', () => {
     const packet = buildPromptEnhancementB5EvidenceRegisterV1();
 

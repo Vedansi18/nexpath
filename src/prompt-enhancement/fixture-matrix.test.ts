@@ -4,10 +4,10 @@ import {
   runPromptEnhancementB3FixtureRowV1,
 } from './fixture-matrix.js';
 
-describe('B3.4 MPS UI fixture matrix', () => {
+describe('stage-3-4 MPS UI fixture matrix', () => {
   it('defines the locked first/later/interruption/cancel/negative scenarios', () => {
     const matrix = buildPromptEnhancementB3FixtureMatrixV1();
-    expect(matrix.matrixId).toBe('b3-sequence-ui-fixture-matrix-v1');
+    expect(matrix.matrixId).toBe('sequence-ui-fixture-matrix-v1');
     expect(matrix.status).toBe('local_source_backed');
     expect(matrix.readinessClaimAllowed).toBe(false);
     expect(matrix.rows).toHaveLength(5);

@@ -4,10 +4,10 @@ import {
   runPromptEnhancementB4ConfigFixtureV1,
 } from './config-fixture-matrix.js';
 
-describe('B4.5 configuration UI fixture matrix', () => {
+describe('stage-4-5 configuration UI fixture matrix', () => {
   it('defines every configuration matrix row without claiming readiness', () => {
     const matrix = buildPromptEnhancementB4ConfigFixtureMatrixV1();
-    expect(matrix.matrixId).toBe('b4-config-fixture-matrix-v1');
+    expect(matrix.matrixId).toBe('config-fixture-matrix-v1');
     expect(matrix.contractRevision).toBe('pe-config-v1');
     expect(matrix.status).toBe('local_source_backed');
     expect(matrix.readinessClaimAllowed).toBe(false);
@@ -32,10 +32,10 @@ describe('B4.5 configuration UI fixture matrix', () => {
     const matrix = buildPromptEnhancementB4ConfigFixtureMatrixV1();
     const observations = matrix.rows.map(runPromptEnhancementB4ConfigFixtureV1);
     const byId = new Map(observations.map((observation) => [observation.fixtureId, observation]));
-    for (const id of ['LOCAL-B4.5-05', 'LOCAL-B4.5-06', 'LOCAL-B4.5-07', 'LOCAL-B4.5-08']) {
+    for (const id of ['LOCAL-stage-4-5-05', 'LOCAL-stage-4-5-06', 'LOCAL-stage-4-5-07', 'LOCAL-stage-4-5-08']) {
       expect(byId.get(id)?.observedStatus).toBe('unavailable');
     }
-    expect(byId.get('LOCAL-B4.5-09')?.observedStatus).toBe('fallback');
+    expect(byId.get('LOCAL-stage-4-5-09')?.observedStatus).toBe('fallback');
   });
 
   it('proves legacy config/chooser values cannot control or leak into PE output', () => {

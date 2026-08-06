@@ -46,7 +46,7 @@ async function fixture() {
   return { result, handoff, popup: popup.model };
 }
 
-describe('B3.3 typed MPS result presentation', () => {
+describe('stage-3-3 typed MPS result presentation', () => {
   it('preserves the reviewed body/details for typed send pending and does not claim delivery', async () => {
     const fixtureData = await fixture();
     const intent = { type: 'send_current_body' as const, identity: fixtureData.popup.identity, editedBodyText: 'Reviewed body', additionalDetailsText: 'Details', additionalDetailsRevision: 1 };

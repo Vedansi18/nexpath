@@ -121,7 +121,7 @@ export type PromptEnhancementMpsIntentResultV1 =
   | { state: 'intent_ready'; reasonCodes: readonly []; intent: PromptEnhancementMpsFirstPopupIntentV1 };
 
 /**
- * Projects one validated content-owner first-item handoff into the locked B3.1 UI
+ * Projects one validated content-owner first-item handoff into the locked stage-3-1 UI
  * shape. It deliberately has no queue, pointer, transport, or send side
  * effect; those remain runtime/host-owned boundaries.
  */

@@ -40,7 +40,7 @@ export interface PromptEnhancementB5_1aH1FixtureRowV1 {
 }
 
 export interface PromptEnhancementB5_1aH1RegressionMapPacketV1 {
-  packetId: 'b5-1a-h1-regression-acceptance-map-v1';
+  packetId: 'regression-acceptance-map-v1';
   status: 'acceptance_blocked_pending_approved_inputs' | 'ready_for_execution';
   readinessClaimAllowed: false;
   requiredDependencies: typeof PROMPT_ENHANCEMENT_B5_1A_H1_REQUIRED_DEPENDENCIES_V1;
@@ -53,7 +53,7 @@ export interface PromptEnhancementB5_1aH1RegressionMapPacketV1 {
 }
 
 const BASELINE_COMMAND = 'npx vitest run src/cli/commands/auto.test.ts src/cli/commands/auto-hook-payload.test.ts src/cli/commands/auto-resolver.test.ts src/cli/commands/windsurf-hook.test.ts';
-const FOCUSED_COMMAND = 'npx vitest run src/cli/commands/auto.test.ts -t "B5.1a-H1"';
+const FOCUSED_COMMAND = 'npx vitest run src/cli/commands/auto.test.ts -t "stage-5-1a-H1"';
 
 const ROWS: readonly PromptEnhancementB5_1aH1FixtureRowV1[] = [
   {
@@ -126,7 +126,7 @@ const ROWS: readonly PromptEnhancementB5_1aH1FixtureRowV1[] = [
 
 export function buildPromptEnhancementB5_1aH1RegressionMapV1(): PromptEnhancementB5_1aH1RegressionMapPacketV1 {
   return {
-    packetId: 'b5-1a-h1-regression-acceptance-map-v1',
+    packetId: 'regression-acceptance-map-v1',
     status: 'acceptance_blocked_pending_approved_inputs',
     readinessClaimAllowed: false,
     requiredDependencies: PROMPT_ENHANCEMENT_B5_1A_H1_REQUIRED_DEPENDENCIES_V1,

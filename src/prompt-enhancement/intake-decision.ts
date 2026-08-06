@@ -9,7 +9,7 @@ import {
 //
 // Dev-plan scope (alignment plan §290-302, phase table "Gate evaluation only —
 // ui-owner consumes"): this is the ONLY ui-owner-owned step of UI-5. It consumes
-// the already-locked B3.6 contract-intake packet and turns it into a single
+// the already-locked stage-3-6 contract-intake packet and turns it into a single
 // typed render-permission decision that a CLI MPS surface (UI-6/UI-7) must check
 // before rendering the first/continuation projections.
 //

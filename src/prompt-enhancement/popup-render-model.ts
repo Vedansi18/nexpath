@@ -76,7 +76,7 @@ export interface PromptEnhancementPopupRenderModelInputV1 extends PromptEnhancem
 }
 
 /**
- * Build the host-independent B1.1 presentation model from the validated PE
+ * Build the host-independent stage-1-1 presentation model from the validated PE
  * result. This function only maps typed state to locked presentation fields;
  * it does not create delivery, transport, sequence, or semantic authority.
  */

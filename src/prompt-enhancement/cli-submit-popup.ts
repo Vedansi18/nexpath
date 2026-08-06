@@ -486,7 +486,7 @@ export interface PromptEnhancementCliActionRowV1 {
   help?: PromptEnhancementCliRowHelpV1;
 }
 
-/** Locked B1.2a Space-help copy (short label / Space-expanded full), keyed by row. */
+/** Locked stage-1-2a Space-help copy (short label / Space-expanded full), keyed by row. */
 const PROMPT_ENHANCEMENT_CLI_ROW_HELP_V1: Readonly<Record<string, PromptEnhancementCliRowHelpV1>> = {
   editor_heading: {
     short: 'Edit current prompt',
@@ -519,7 +519,7 @@ const PROMPT_ENHANCEMENT_CLI_ROW_HELP_V1: Readonly<Record<string, PromptEnhancem
 };
 
 /**
- * The ordered, navigable action rows for the PE frame, in the locked B1.2a
+ * The ordered, navigable action rows for the PE frame, in the locked stage-1-2a
  * focus order: editor heading, Additional details, directional actions,
  * Feedback (only when typed available), Use original prompt last, and — in a
  * refinement view — a final dim Go back. Availability comes from typed state
@@ -622,7 +622,7 @@ const PROMPT_ENHANCEMENT_CLI_SGR_V1 = (() => {
 
 /**
  * Render the single redrawable PE frame from typed state. The focused row is
- * marked and shows its short help, or the full B1.2a help when Space-expanded.
+ * marked and shows its short help, or the full stage-1-2a help when Space-expanded.
  * Editor-heading and Additional-details rows show their field body beneath them.
  */
 export function renderPromptEnhancementPopupFrameV1(

@@ -6,7 +6,7 @@ import {
 } from './popup-session.js';
 
 /**
- * B2.2 UI/application boundary. This emits a typed user intent only; it does
+ * stage-2-2 UI/application boundary. This emits a typed user intent only; it does
  * not validate content, deliver text, invoke a host, or claim execution.
  */
 export interface PromptEnhancementSendIntentAdapterStateV1 {

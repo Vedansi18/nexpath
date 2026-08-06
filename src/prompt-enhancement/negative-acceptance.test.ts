@@ -7,7 +7,7 @@ import {
 } from './delivery.js';
 
 /**
- * R2 §4b — b5-2 negative-acceptance fixtures for the ui-owner/content-owner-owned rows.
+ * R2 §4b — stage-5-2 negative-acceptance fixtures for the ui-owner/content-owner-owned rows.
  *
  * Each row proves an INVALID / old-source input creates NO_SIDE_EFFECTS (no PE popup activation, no
  * send/delivery, no sequence, no feedback, no generated-origin, no launch-readiness) — i.e. it holds
@@ -17,11 +17,11 @@ import {
  *  - `validatePromptEnhancementExtensionDeliveryPayload`: legacy-DS / raw-transport keys are rejected,
  *    so the extension never delivers them.
  *
- * The 4 host-owner-owned rows (B5.2-04/06/08/09 — raw_stop_reason, clipboard_text, extension_labels,
+ * The 4 host-owner-owned rows (stage-5-2-04/06/08/09 — raw_stop_reason, clipboard_text, extension_labels,
  * missing_host_capability) are handed off (see the R2 host-owner handoff), as they exercise the
  * extension host path.
  */
-const PROJECT = '/tmp/b5-2';
+const PROJECT = '/tmp/stage-5-2';
 
 function evidence(evidenceKind: PromptEnhancementPromptSubmitOriginEvidenceV1['evidenceKind']): PromptEnhancementPromptSubmitOriginEvidenceV1 {
   return { evidenceKind, projectRoot: PROJECT };
@@ -36,39 +36,39 @@ function expectNoAuthority(store: Store, evidenceKind: PromptEnhancementPromptSu
   expect(resolution.normalUserPromptFullProcessingPreserved).toBe(true); // falls back to a normal prompt, no PE side effects
 }
 
-describe('R2 §4b — b5-2 negative acceptance (ui-owner/content-owner-owned rows)', () => {
+describe('R2 §4b — stage-5-2 negative acceptance (ui-owner/content-owner-owned rows)', () => {
   let store: Store;
   beforeEach(async () => { store = await openStore(':memory:'); });
 
-  it('B5.2-01 old_decision_session_rows — old DS rows are not PE input (no authority)', () => {
+  it('stage-5-2-01 old_decision_session_rows — old DS rows are not PE input (no authority)', () => {
     expectNoAuthority(store, 'old_ds_row');
     // And an old-DS-shaped extension payload is rejected outright (no delivery).
     expect(validatePromptEnhancementExtensionDeliveryPayload({ advisory: {}, options: [] }).ok).toBe(false);
   });
 
-  it('B5.2-02 product_feedback — feedback cannot activate or explain PE (no authority)', () => {
+  it('stage-5-2-02 product_feedback — feedback cannot activate or explain PE (no authority)', () => {
     expectNoAuthority(store, 'product_feedback');
   });
 
-  it('B5.2-03 prompt_history — history / served variants cannot activate PE (no authority)', () => {
+  it('stage-5-2-03 prompt_history — history / served variants cannot activate PE (no authority)', () => {
     expectNoAuthority(store, 'prompt_history');
     expectNoAuthority(store, 'served_variant_row');
   });
 
-  it('B5.2-05 selected_prompt — selectedPrompt cannot authorize PE (payload rejected)', () => {
+  it('stage-5-2-05 selected_prompt — selectedPrompt cannot authorize PE (payload rejected)', () => {
     const rejected = validatePromptEnhancementExtensionDeliveryPayload({ selectedPrompt: 'x' });
     expect(rejected.ok).toBe(false);
     expect(rejected.reasonCodes).toContain('legacy_decision_session_payload_rejected');
     expect(validatePromptEnhancementExtensionDeliveryPayload({ selected_prompt: 'x' }).ok).toBe(false);
   });
 
-  it('B5.2-07 last_injected_prompt — prior injection cannot create current PE origin (no authority)', () => {
+  it('stage-5-2-07 last_injected_prompt — prior injection cannot create current PE origin (no authority)', () => {
     expectNoAuthority(store, 'last_injected_prompt_only');
     // The legacy lastInjectedPrompt key is also rejected as an extension payload.
     expect(validatePromptEnhancementExtensionDeliveryPayload({ lastInjectedPrompt: 'x' }).ok).toBe(false);
   });
 
-  it('B5.2-10 missing_or_malformed_generated_origin — origin absence cannot become origin proof (no authority)', () => {
+  it('stage-5-2-10 missing_or_malformed_generated_origin — origin absence cannot become origin proof (no authority)', () => {
     expectNoAuthority(store, 'malformed_generated_origin');
     expectNoAuthority(store, 'missing');
   });

@@ -73,7 +73,7 @@ async function validContinuation() {
   });
 }
 
-describe('B3.2 later MPS continuation popup', () => {
+describe('stage-3-2 later MPS continuation popup', () => {
   it('renders the locked continuation layout without the first-popup plan summary', async () => {
     const built = await validContinuation();
     expect(built.state).toBe('ready');

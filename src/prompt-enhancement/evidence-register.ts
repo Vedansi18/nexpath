@@ -30,7 +30,7 @@ export interface PromptEnhancementB5EvidenceRowV1 {
 }
 
 export interface PromptEnhancementB5EvidenceRegisterPacketV1 {
-  packetId: 'b5-evidence-owner-register-v1';
+  packetId: 'evidence-owner-register-v1';
   status: PromptEnhancementB5RegisterStatusV1;
   readinessClaimAllowed: false;
   requiredDependencies: typeof PROMPT_ENHANCEMENT_B5_1_REQUIRED_DEPENDENCIES_V1;
@@ -46,7 +46,7 @@ export interface PromptEnhancementB5EvidenceRegisterPacketV1 {
 }
 
 const REQUIRED_ROW_IDS = [
-  'b5-api-ui-stop-store-launch',
+  'api-ui-stop-store-launch',
 ] as const;
 
 function defaultRow(): PromptEnhancementB5EvidenceRowV1 {
@@ -88,7 +88,7 @@ export function buildPromptEnhancementB5EvidenceRegisterV1(
   if (!complete) reasonCodes.push('cross_layer_evidence_incomplete_or_owner_blocked');
 
   return {
-    packetId: 'b5-evidence-owner-register-v1',
+    packetId: 'evidence-owner-register-v1',
     status: complete ? 'ready_for_owner_review' : 'blocked_pending_evidence',
     readinessClaimAllowed: false,
     requiredDependencies: PROMPT_ENHANCEMENT_B5_1_REQUIRED_DEPENDENCIES_V1,

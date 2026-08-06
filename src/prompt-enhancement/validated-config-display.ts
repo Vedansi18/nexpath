@@ -1,5 +1,5 @@
 /**
- * B4.1 application boundary for a validated PE configuration result.
+ * stage-4-1 application boundary for a validated PE configuration result.
  *
  * The content-owner/CLI producer owns config keys, defaults, validation, persistence,
  * availability, and business meaning.  This module only converts an already

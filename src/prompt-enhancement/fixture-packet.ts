@@ -23,7 +23,7 @@ export interface PromptEnhancementB4FixtureRowV1 {
 }
 
 export interface PromptEnhancementB4FixturePacketV1 {
-  packetId: 'b4-ui-owner-config-fixture-packet-v1';
+  packetId: 'ui-owner-config-fixture-packet-v1';
   status: 'blocked_pending_external_inputs';
   readinessClaimAllowed: false;
   requiredExternalInputs: readonly ['DEP-B4-01', 'DEP-TEST-01'];
@@ -62,13 +62,13 @@ const FOCUSED_COMMAND = 'npx vitest run src/prompt-enhancement/fixture-packet.te
 
 export function buildPromptEnhancementB4FixturePacketV1(): PromptEnhancementB4FixturePacketV1 {
   return {
-    packetId: 'b4-ui-owner-config-fixture-packet-v1',
+    packetId: 'ui-owner-config-fixture-packet-v1',
     status: 'blocked_pending_external_inputs',
     readinessClaimAllowed: false,
     requiredExternalInputs: [...REQUIRED_DEPENDENCIES],
     rows: [
       {
-        rowId: 'b4-state-mapping', group: 'state_mapping', owner: 'ui_app',
+        rowId: 'state-mapping', group: 'state_mapping', owner: 'ui_app',
         requiredExternalDependencies: [...REQUIRED_DEPENDENCIES], approvedFixtureId: null, contractRevision: null,
         expectedVisibleOutcomes: ['enabled, disabled, unavailable, unsupported, policy-disabled, and fallback remain distinct and non-interactive'],
         negativeOracle: 'UI cannot invent a state, default, action, or availability from local labels or host state',
@@ -76,7 +76,7 @@ export function buildPromptEnhancementB4FixturePacketV1(): PromptEnhancementB4Fi
         passFail: 'blocked_pending_external_inputs', closureDecision: 'blocked_pending_external_inputs',
       },
       {
-        rowId: 'b4-safe-fallback', group: 'safe_fallback', owner: 'ui_app',
+        rowId: 'safe-fallback', group: 'safe_fallback', owner: 'ui_app',
         requiredExternalDependencies: [...REQUIRED_DEPENDENCIES], approvedFixtureId: null, contractRevision: null,
         expectedVisibleOutcomes: ['missing, malformed, invalid, unknown, stale, provider-unavailable, and outside-V1 states show approved safe unavailable/fallback copy'],
         negativeOracle: 'invalid or stale input cannot enable PE or expose a substitute control',
@@ -84,7 +84,7 @@ export function buildPromptEnhancementB4FixturePacketV1(): PromptEnhancementB4Fi
         passFail: 'blocked_pending_external_inputs', closureDecision: 'blocked_pending_external_inputs',
       },
       {
-        rowId: 'b4-legacy-isolation', group: 'legacy_isolation', owner: 'ui_app',
+        rowId: 'legacy-isolation', group: 'legacy_isolation', owner: 'ui_app',
         requiredExternalDependencies: [...REQUIRED_DEPENDENCIES], approvedFixtureId: null, contractRevision: null,
         expectedVisibleOutcomes: ['Prompt Enhancement presentation remains independent from old Decision Session settings and chooser labels'],
         negativeOracle: 'old role, advisory, frequency, history, or chooser values cannot control PE configuration display',
@@ -92,7 +92,7 @@ export function buildPromptEnhancementB4FixturePacketV1(): PromptEnhancementB4Fi
         passFail: 'blocked_pending_external_inputs', closureDecision: 'blocked_pending_external_inputs',
       },
       {
-        rowId: 'b4-privacy-boundary', group: 'privacy_boundary', owner: 'ui_app',
+        rowId: 'privacy-boundary', group: 'privacy_boundary', owner: 'ui_app',
         requiredExternalDependencies: [...REQUIRED_DEPENDENCIES], approvedFixtureId: null, contractRevision: null,
         expectedVisibleOutcomes: ['public-safe labels and diagnostics exclude raw config, private paths, storage details, provider errors, and planning terms'],
         negativeOracle: 'raw config or internal/provider detail cannot enter the rendered model or diagnostics',
@@ -110,7 +110,7 @@ export function validatePromptEnhancementB4FixturePacketV1(
   packet: PromptEnhancementB4FixturePacketV1,
 ): PromptEnhancementB4FixturePacketValidationV1 {
   const reasonCodes: string[] = [];
-  if (packet.packetId !== 'b4-ui-owner-config-fixture-packet-v1') reasonCodes.push('packet_id_mismatch');
+  if (packet.packetId !== 'ui-owner-config-fixture-packet-v1') reasonCodes.push('packet_id_mismatch');
   if (packet.status !== 'blocked_pending_external_inputs') reasonCodes.push('external_inputs_not_supplied');
   if (packet.readinessClaimAllowed !== false) reasonCodes.push('readiness_claim_must_remain_false');
   if (packet.rows.length !== REQUIRED_GROUPS.length) reasonCodes.push('fixture_group_count_mismatch');

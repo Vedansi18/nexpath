@@ -35,7 +35,7 @@ export interface PromptEnhancementB5_1bH1NegativeRowV1 {
 }
 
 export interface PromptEnhancementB5_1bH1NegativeMapPacketV1 {
-  packetId: 'b5-1b-h1-negative-disposition-map-v1';
+  packetId: 'negative-disposition-map-v1';
   status: 'acceptance_blocked_pending_approved_inputs' | 'ready_for_execution';
   readinessClaimAllowed: false;
   requiredDependencies: typeof PROMPT_ENHANCEMENT_B5_1B_H1_REQUIRED_DEPENDENCIES_V1;
@@ -48,7 +48,7 @@ export interface PromptEnhancementB5_1bH1NegativeMapPacketV1 {
   reasonCodes: readonly string[];
 }
 
-const FOCUSED_COMMAND = 'npx vitest run src/cli/commands/auto.test.ts -t "B5.1b-H1"';
+const FOCUSED_COMMAND = 'npx vitest run src/cli/commands/auto.test.ts -t "stage-5-1b-H1"';
 
 const COMMON_NO_SIDE_EFFECTS = [
   'no_pe_popup_session',
@@ -69,7 +69,7 @@ const COMMON_FORBIDDEN = [
 
 const ROWS: readonly PromptEnhancementB5_1bH1NegativeRowV1[] = [
   {
-    rowId: 'B5.1b-H1-01',
+    rowId: 'stage-5-1b-H1-01',
     condition: 'shared_gate_not_permitted',
     requiredDisposition: 'no PE-facade call; no PE disposition fabricated',
     expectedSink: 'no_pe_facade_call',
@@ -81,7 +81,7 @@ const ROWS: readonly PromptEnhancementB5_1bH1NegativeRowV1[] = [
     oracleOwner: 'cross_layer_acceptance', observedOutcome: 'not_run_pending_approved_inputs', passFail: 'blocked_pending_approved_inputs',
   },
   {
-    rowId: 'B5.1b-H1-02',
+    rowId: 'stage-5-1b-H1-02',
     condition: 'unselected_or_degraded_no_fire',
     requiredDisposition: 'no PE-facade call or validated no_popup_not_applicable',
     expectedSink: 'no_popup_not_applicable',
@@ -93,7 +93,7 @@ const ROWS: readonly PromptEnhancementB5_1bH1NegativeRowV1[] = [
     oracleOwner: 'content_semantics', observedOutcome: 'not_run_pending_approved_inputs', passFail: 'blocked_pending_approved_inputs',
   },
   {
-    rowId: 'B5.1b-H1-03',
+    rowId: 'stage-5-1b-H1-03',
     condition: 'malformed_provider_timeout_or_unsupported',
     requiredDisposition: 'validated fallback_to_original, blocked_no_send, or no_popup_not_applicable',
     expectedSink: 'typed_fallback_or_blocked_no_send',
@@ -105,7 +105,7 @@ const ROWS: readonly PromptEnhancementB5_1bH1NegativeRowV1[] = [
     oracleOwner: 'content_semantics', observedOutcome: 'not_run_pending_approved_inputs', passFail: 'blocked_pending_approved_inputs',
   },
   {
-    rowId: 'B5.1b-H1-04',
+    rowId: 'stage-5-1b-H1-04',
     condition: 'valid_typed_current_body',
     requiredDisposition: 'show_current_body',
     expectedSink: 'show_current_body',
@@ -117,7 +117,7 @@ const ROWS: readonly PromptEnhancementB5_1bH1NegativeRowV1[] = [
     oracleOwner: 'ui_app', observedOutcome: 'not_run_pending_approved_inputs', passFail: 'blocked_pending_approved_inputs',
   },
   {
-    rowId: 'B5.1b-H1-05',
+    rowId: 'stage-5-1b-H1-05',
     condition: 'closed_disposition_no_side_effects',
     requiredDisposition: 'preserve unrelated runtime; keep typed fallback/blocked/no-popup state no-send',
     expectedSink: 'typed_closed_state_no_side_effects',
@@ -132,7 +132,7 @@ const ROWS: readonly PromptEnhancementB5_1bH1NegativeRowV1[] = [
 
 export function buildPromptEnhancementB5_1bH1NegativeMapV1(): PromptEnhancementB5_1bH1NegativeMapPacketV1 {
   return {
-    packetId: 'b5-1b-h1-negative-disposition-map-v1',
+    packetId: 'negative-disposition-map-v1',
     status: 'acceptance_blocked_pending_approved_inputs',
     readinessClaimAllowed: false,
     requiredDependencies: PROMPT_ENHANCEMENT_B5_1B_H1_REQUIRED_DEPENDENCIES_V1,

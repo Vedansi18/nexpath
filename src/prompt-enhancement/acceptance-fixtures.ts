@@ -38,7 +38,7 @@ export interface PromptEnhancementB4AcceptanceObservationV1 {
 }
 
 export interface PromptEnhancementB4AcceptancePacketV1 {
-  packetId: 'b4-ui-owner-acceptance-fixtures-v1';
+  packetId: 'ui-owner-acceptance-fixtures-v1';
   contractRevision: 'pe-tweak-v1';
   status: 'local_source_backed';
   readinessClaimAllowed: false;
@@ -60,20 +60,20 @@ function typed(state: string, freshness = 'current', extras: Record<string, unkn
 }
 
 const ROWS: readonly PromptEnhancementB4AcceptanceFixtureV1[] = [
-  row('LOCAL-B4.4-01', 'enabled', 'enabled', typed('enabled')),
-  row('LOCAL-B4.4-02', 'disabled', 'disabled', typed('disabled')),
-  row('LOCAL-B4.4-03', 'unavailable', 'unavailable', typed('unavailable')),
-  row('LOCAL-B4.4-04', 'unsupported', 'unsupported', typed('unsupported')),
-  row('LOCAL-B4.4-05', 'policy_disabled', 'policy_disabled', typed('policy_disabled')),
-  row('LOCAL-B4.4-06', 'fallback', 'fallback', typed('fallback')),
-  row('LOCAL-B4.4-07', 'malformed', 'unavailable', { state: 'unknown' }),
-  row('LOCAL-B4.4-08', 'stale', 'fallback', typed('enabled', 'stale')),
-  row('LOCAL-B4.4-09', 'provider_api_unavailable', 'unavailable', typed('unavailable', 'current', {
+  row('LOCAL-stage-4-4-01', 'enabled', 'enabled', typed('enabled')),
+  row('LOCAL-stage-4-4-02', 'disabled', 'disabled', typed('disabled')),
+  row('LOCAL-stage-4-4-03', 'unavailable', 'unavailable', typed('unavailable')),
+  row('LOCAL-stage-4-4-04', 'unsupported', 'unsupported', typed('unsupported')),
+  row('LOCAL-stage-4-4-05', 'policy_disabled', 'policy_disabled', typed('policy_disabled')),
+  row('LOCAL-stage-4-4-06', 'fallback', 'fallback', typed('fallback')),
+  row('LOCAL-stage-4-4-07', 'malformed', 'unavailable', { state: 'unknown' }),
+  row('LOCAL-stage-4-4-08', 'stale', 'fallback', typed('enabled', 'stale')),
+  row('LOCAL-stage-4-4-09', 'provider_api_unavailable', 'unavailable', typed('unavailable', 'current', {
     providerApiAvailable: false,
     providerError: 'private-provider-error-must-not-render',
   })),
-  row('LOCAL-B4.4-10', 'outside_v1', 'outside_v1', typed('outside_v1')),
-  row('LOCAL-B4.4-11', 'legacy_isolation', 'enabled', typed('enabled', 'current', {
+  row('LOCAL-stage-4-4-10', 'outside_v1', 'outside_v1', typed('outside_v1')),
+  row('LOCAL-stage-4-4-11', 'legacy_isolation', 'enabled', typed('enabled', 'current', {
     decisionSessionRole: 'legacy-role-must-not-render',
     advisoryFrequency: 'legacy-frequency-must-not-render',
     promptHistory: 'legacy-history-must-not-render',
@@ -104,7 +104,7 @@ function row(
 
 export function buildPromptEnhancementB4AcceptanceFixturePacketV1(): PromptEnhancementB4AcceptancePacketV1 {
   return {
-    packetId: 'b4-ui-owner-acceptance-fixtures-v1',
+    packetId: 'ui-owner-acceptance-fixtures-v1',
     contractRevision: CONTRACT_REVISION,
     status: 'local_source_backed',
     readinessClaimAllowed: false,

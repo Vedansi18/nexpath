@@ -123,7 +123,7 @@ async function validFirstPopup() {
   });
 }
 
-describe('B3.1 first MPS popup', () => {
+describe('stage-3-1 first MPS popup', () => {
   it('renders only the validated first body, details, cancel, and compact plan in locked order', async () => {
     const built = await validFirstPopup();
     expect(built.state).toBe('ready');

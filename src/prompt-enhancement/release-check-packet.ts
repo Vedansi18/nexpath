@@ -32,7 +32,7 @@ export interface PromptEnhancementB5_3ReleaseCheckInputV1 {
 }
 
 export interface PromptEnhancementB5_3ReleaseCheckPacketV1 {
-  packetId: 'b5-3-release-check-evidence-packet-v1';
+  packetId: 'stage-5-3-release-check-evidence-packet-v1';
   status: 'blocked_pending_release_evidence' | 'blocked_by_public_launch_hard_fail' | 'ready_for_owner_review';
   readinessClaimAllowed: false;
   observedPrivateRevision: string | null;
@@ -107,7 +107,7 @@ export function buildPromptEnhancementB5_3ReleaseCheckPacketV1(
   const hardFail = publicLaunchPacket.status === 'blocked_by_public_launch_hard_fail';
 
   return {
-    packetId: 'b5-3-release-check-evidence-packet-v1',
+    packetId: 'stage-5-3-release-check-evidence-packet-v1',
     status: hardFail ? 'blocked_by_public_launch_hard_fail' : reasonCodes.length === 0 ? 'ready_for_owner_review' : 'blocked_pending_release_evidence',
     readinessClaimAllowed: false,
     observedPrivateRevision: merged.observedPrivateRevision,

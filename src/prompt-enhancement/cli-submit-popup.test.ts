@@ -438,7 +438,7 @@ describe('UI-1 PE frame renderer', () => {
 });
 
 describe('UI-1 action-row model', () => {
-  it('orders rows per B1.2a, drops Feedback entirely (§8.3), and reflects typed availability', () => {
+  it('orders rows per stage-1-2a, drops Feedback entirely (§8.3), and reflects typed availability', () => {
     const rows = buildPromptEnhancementCliActionRowsV1(fakeRenderModel());
     expect(rows.map((row) => row.rowKey)).toEqual([
       'editor_heading', 'additional_details', 'shorter', 'more_thorough', 'more_project_grounded', 'use_original',

@@ -9,7 +9,7 @@ const copy = (state: string, actionLabel: string | null = null) => ({
   actionLabel,
 });
 
-describe('B4.2 onboarding and trust-copy boundary', () => {
+describe('stage-4-2 onboarding and trust-copy boundary', () => {
   it('renders each supplied typed state with no interactive or product claims', () => {
     for (const state of ['enabled', 'disabled', 'unavailable', 'unsupported', 'policy_disabled', 'fallback']) {
       const model = buildPromptEnhancementOnboardingTrustCopyModelV1({ configState: state, approvedCopy: copy(state) });

@@ -29,8 +29,8 @@ function event(overrides: Partial<PromptEnhancementPopupEventV1> = {}): PromptEn
   };
 }
 
-describe('DEP-TEST-01 B1.4 feedback sink acceptance', () => {
-  it('DEP-TEST-01-B1.4-01 records a typed scoped event without raw custom text', async () => {
+describe('DEP-TEST-01 stage-1-4 feedback sink acceptance', () => {
+  it('DEP-TEST-01-stage-1-4-01 records a typed scoped event without raw custom text', async () => {
     const store = await openStore(':memory:');
     try {
       const acknowledgement = recordPromptEnhancementFeedbackV1({
@@ -52,7 +52,7 @@ describe('DEP-TEST-01 B1.4 feedback sink acceptance', () => {
     }
   });
 
-  it('DEP-TEST-01-B1.4-02 rejects duplicate identities and invalid feedback events', async () => {
+  it('DEP-TEST-01-stage-1-4-02 rejects duplicate identities and invalid feedback events', async () => {
     const store = await openStore(':memory:');
     try {
       const input = {

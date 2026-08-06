@@ -11,7 +11,7 @@ const completeEvidence: readonly PromptEnhancementB3ContractEvidenceV1[] = [
   { evidenceId: 'PE-B3-PRIVACY-FEEDBACK', kind: 'privacy_feedback_contract', owner: 'privacy_feedback', state: 'supplied', contractRevision: 'privacy-feedback-v1', sourceRefs: ['content-owner:privacy:v1'] },
 ];
 
-describe('B3.6 MPS contract intake gate', () => {
+describe('stage-3-6 MPS contract intake gate', () => {
   it('fails closed when external evidence is absent and never claims readiness', () => {
     const packet = buildPromptEnhancementB3ContractIntakePacketV1();
     expect(packet.status).toBe('blocked_pending_external_evidence');

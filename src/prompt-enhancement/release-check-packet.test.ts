@@ -35,7 +35,7 @@ const approvedFacts: PromptEnhancementB5_3ReleaseCheckInputV1 = {
   },
 };
 
-describe('B5.3 release-check evidence packet', () => {
+describe('stage-5-3 release-check evidence packet', () => {
   it('keeps the current private boundary and missing release evidence blocked', () => {
     const packet = buildPromptEnhancementB5_3ReleaseCheckPacketV1();
 

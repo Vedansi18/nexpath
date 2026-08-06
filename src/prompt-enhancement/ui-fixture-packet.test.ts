@@ -4,8 +4,8 @@ import {
   validatePromptEnhancementB2FixturePacketV1,
 } from './ui-fixture-packet.js';
 
-describe('B2.5 ui-owner UI fixture and acceptance packet', () => {
-  it('defines all B2.1-B2.4 UI fixture groups without making a readiness claim', () => {
+describe('stage-2-5 ui-owner UI fixture and acceptance packet', () => {
+  it('defines all stage-2-1-stage-2-4 UI fixture groups without making a readiness claim', () => {
     const packet = buildPromptEnhancementB2FixturePacketV1();
     expect(validatePromptEnhancementB2FixturePacketV1(packet)).toEqual({
       ok: true,
@@ -50,8 +50,8 @@ describe('B2.5 ui-owner UI fixture and acceptance packet', () => {
     expect(validation.ok).toBe(false);
     expect(validation.reasonCodes).toEqual(expect.arrayContaining([
       'external_inputs_not_supplied',
-      'unapproved_fixture_claim:b2-5-lifecycle',
-      'unapproved_contract_claim:b2-5-explicit-intent',
+      'unapproved_fixture_claim:stage-2-5-lifecycle',
+      'unapproved_contract_claim:stage-2-5-explicit-intent',
     ]));
   });
 
