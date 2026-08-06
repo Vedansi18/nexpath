@@ -150,6 +150,49 @@ export class NexpathMalformedPayloadError extends Error {
   }
 }
 
+/**
+ * Redacted description of a child `nexpath` process that exited non-zero.
+ *
+ * The child's stderr is NOT safe to quote. `NEXPATH_DEBUG=1` routes verbose
+ * pipeline logging there, and Layer C writes prompt-related lines of its own
+ * (`stop.ts` "Prompt sent to …"). Embedding it put up to the 64 KB cap of that
+ * output into an Error message, which the extension then logged. Same rule as
+ * the malformed-payload path: record the shape, never the content.
+ */
+export interface ChildFailureShape {
+  /** Process exit code, or null when the child was killed by a signal. */
+  exitCode: number | null;
+  /** stderr size in UTF-8 bytes, capped as accumulated. Text never retained. */
+  stderrByteLength: number;
+}
+
+export function describeChildFailure(
+  exitCode: number | null,
+  stderr: string,
+): ChildFailureShape {
+  return { exitCode, stderrByteLength: Buffer.byteLength(stderr, 'utf8') };
+}
+
+/**
+ * A spawned `nexpath` command exited non-zero.
+ *
+ * Deliberately carries no stderr text — only the exit code and how many bytes
+ * were produced, which is enough to tell "failed silently" from "failed loudly"
+ * without publishing what was said.
+ */
+export class NexpathChildExitError extends Error {
+  readonly shape: ChildFailureShape;
+
+  constructor(command: 'auto' | 'stop', shape: ChildFailureShape) {
+    super(
+      `nexpath ${command} exited with code ${shape.exitCode} ` +
+        `(stderr ${shape.stderrByteLength} bytes, not captured)`,
+    );
+    this.name = 'NexpathChildExitError';
+    this.shape = shape;
+  }
+}
+
 function resolveBinaryPath(opts: IpcOptions): string {
   return opts.binaryPath ?? process.env.NEXPATH_BIN ?? 'nexpath';
 }
@@ -260,11 +303,7 @@ export function spawnAuto(
         resolve();
         return;
       }
-      reject(
-        new Error(
-          `nexpath auto exited with code ${code}. stderr: ${stderr.trim()}`,
-        ),
-      );
+      reject(new NexpathChildExitError('auto', describeChildFailure(code, stderr)));
     });
 
     child.stdin?.end(
@@ -378,9 +417,7 @@ export function spawnStop(
         }
 
         // 3. Genuine failure with nothing to recover.
-        reject(
-          new Error(`nexpath stop exited with code ${code}. stderr: ${stderr.trim()}`),
-        );
+        reject(new NexpathChildExitError('stop', describeChildFailure(code, stderr)));
       })();
     });
 

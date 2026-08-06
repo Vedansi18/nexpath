@@ -7,7 +7,9 @@ import {
   resolveSpawnEnv,
   NexpathBinaryNotFoundError,
   NexpathMalformedPayloadError,
+  NexpathChildExitError,
   describeMalformedPayload,
+  describeChildFailure,
 } from './ipc.js';
 
 interface FakeChildOptions {
@@ -118,6 +120,59 @@ describe('spawnAuto', () => {
     await expect(
       spawnAuto('p', 's', { spawnFn: spawnFn as never }),
     ).rejects.toThrow(/exited with code 1/);
+  });
+
+  // A non-zero exit used to embed the child's stderr in the Error message, and
+  // the extension logs `record.message`. NEXPATH_DEBUG=1 routes verbose
+  // pipeline logging to stderr and Layer C writes prompt-related lines there,
+  // so that put child output into the Output channel and the dev console.
+  it('never carries the child stderr text into the failure', async () => {
+    const LEAK = 'ZZQX_STDERR_MARKER_7741';
+    const spawnFn = vi.fn(() =>
+      makeFakeChild({ exitCode: 1, stderrChunks: [`[nexpath] prompt was ${LEAK}\n`] }),
+    );
+
+    const err = await spawnAuto('p', 's', { spawnFn: spawnFn as never }).catch(
+      (e: unknown) => e,
+    );
+
+    expect(err).toBeInstanceOf(NexpathChildExitError);
+    const exitErr = err as InstanceType<typeof NexpathChildExitError>;
+
+    expect(exitErr.message).not.toContain(LEAK);
+    expect(exitErr.message).not.toContain('[nexpath]');
+    expect(JSON.stringify(exitErr.shape)).not.toContain(LEAK);
+    // Nothing on the object holds the text either.
+    expect(JSON.stringify({ ...exitErr })).not.toContain(LEAK);
+  });
+
+  it('records the exit code and the stderr byte length instead', async () => {
+    const stderrText = 'boom\n';
+    const spawnFn = vi.fn(() =>
+      makeFakeChild({ exitCode: 3, stderrChunks: [stderrText] }),
+    );
+
+    const err = (await spawnAuto('p', 's', { spawnFn: spawnFn as never }).catch(
+      (e: unknown) => e,
+    )) as InstanceType<typeof NexpathChildExitError>;
+
+    expect(err.shape.exitCode).toBe(3);
+    expect(err.shape.stderrByteLength).toBe(Buffer.byteLength(stderrText, 'utf8'));
+    expect(err.message).toContain('exited with code 3');
+    expect(err.message).toContain('not captured');
+  });
+
+  it('distinguishes a silent failure from a loud one by byte length alone', () => {
+    expect(describeChildFailure(1, '').stderrByteLength).toBe(0);
+    expect(describeChildFailure(1, 'x'.repeat(50)).stderrByteLength).toBe(50);
+    // Multi-byte stderr is measured in bytes, matching the transport.
+    expect(describeChildFailure(1, 'café').stderrByteLength).toBe(5);
+  });
+
+  it('tolerates a null exit code (child killed by a signal)', () => {
+    const shape = describeChildFailure(null, 'partial');
+    expect(shape.exitCode).toBeNull();
+    expect(new NexpathChildExitError('stop', shape).message).toContain('exited with code null');
   });
 });
 
@@ -255,6 +310,30 @@ describe('spawnStop', () => {
   // Buffer.byteLength(raw,'utf8') and not raw.length — a prompt body with an
   // emoji or an accented character makes those two disagree, and a wrong size
   // would misreport how much of the payload arrived before it was cut.
+  // The classifier only recognises V8's fixed message prefixes. Anything else —
+  // a non-Error throw, a future V8 wording, a localized runtime — must degrade
+  // to 'unknown' and omit the offset, never guess and never surface the text.
+  it('falls back to an unknown kind when the failure is not a recognised parser error', () => {
+    const shape = describeMalformedPayload('{"reason":"x"', 'not an Error object');
+    expect(shape.parseErrorKind).toBe('unknown');
+    expect(shape.byteOffset).toBeUndefined();
+    expect(shape).not.toHaveProperty('byteOffset');
+  });
+
+  it('omits the byte offset when the parser reported no position', () => {
+    const shape = describeMalformedPayload('{"reason":"x"', new Error('Unexpected end of JSON input'));
+    expect(shape.parseErrorKind).toBe('unexpected_end');
+    expect(shape.byteOffset).toBeUndefined();
+    // The message carries no position, so nothing is invented.
+    expect(new NexpathMalformedPayloadError(shape).message).not.toContain('at byte');
+  });
+
+  it('includes the byte offset in the message when the parser reported one', () => {
+    const shape = describeMalformedPayload('{"a":1} x', new Error("Unexpected token 'x' in JSON at position 8"));
+    expect(shape.byteOffset).toBe(8);
+    expect(new NexpathMalformedPayloadError(shape).message).toContain('at byte 8');
+  });
+
   it('reports the payload size in bytes, not characters', () => {
     const raw = '{"reason":"café"';           // 16 chars, 17 bytes — é is 2 bytes
     expect(raw.length).toBe(16);
@@ -268,6 +347,27 @@ describe('spawnStop', () => {
     await expect(
       spawnStop('s', { spawnFn: spawnFn as never, recoverSelection: async () => null }),
     ).rejects.toThrow(/exited with code 2/);
+  });
+
+  // spawnStop has its own throw site, so it needs its own proof. This is the
+  // higher-risk one: `nexpath stop` is the PE delivery channel, so its stderr
+  // is the most likely to carry body-adjacent text.
+  it('never carries the child stderr text into the stop failure', async () => {
+    const LEAK = 'ZZQX_STOP_STDERR_MARKER_7741';
+    const spawnFn = vi.fn(() =>
+      makeFakeChild({ exitCode: 2, stderrChunks: [`[nexpath] ${LEAK}\n`] }),
+    );
+
+    const err = await spawnStop('s', {
+      spawnFn: spawnFn as never,
+      recoverSelection: async () => null,
+    }).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(NexpathChildExitError);
+    const exitErr = err as InstanceType<typeof NexpathChildExitError>;
+    expect(exitErr.message).not.toContain(LEAK);
+    expect(JSON.stringify(exitErr.shape)).not.toContain(LEAK);
+    expect(exitErr.shape.exitCode).toBe(2);
   });
 
   it('recovers the selection from the store when stop crashes on exit (Windows libuv)', async () => {
