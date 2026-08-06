@@ -20,7 +20,7 @@ export interface PromptEnhancementB5_3ReleaseCheckInputV1 {
   observedPrivateRevision: string | null;
   approvedFinalPrivateRevision: string | null;
   publicGoingInventory: readonly string[];
-  peCr5G8ScopeApproval: 'missing' | 'blocked' | 'approved';
+  confidentialityG8ScopeApproval: 'missing' | 'blocked' | 'approved';
   depB501EvidenceRevision: string | null;
   buildTestImportEvidence: PromptEnhancementB5_3EvidenceItemV1;
   publicSafetyEvidence: PromptEnhancementB5_3EvidenceItemV1;
@@ -38,7 +38,7 @@ export interface PromptEnhancementB5_3ReleaseCheckPacketV1 {
   observedPrivateRevision: string | null;
   approvedFinalPrivateRevision: string | null;
   publicGoingInventory: readonly string[];
-  peCr5G8ScopeApproval: PromptEnhancementB5_3ReleaseCheckInputV1['peCr5G8ScopeApproval'];
+  confidentialityG8ScopeApproval: PromptEnhancementB5_3ReleaseCheckInputV1['confidentialityG8ScopeApproval'];
   depB501EvidenceRevision: string | null;
   buildTestImportEvidence: PromptEnhancementB5_3EvidenceItemV1;
   publicSafetyEvidence: PromptEnhancementB5_3EvidenceItemV1;
@@ -74,7 +74,7 @@ const DEFAULT_INPUT: PromptEnhancementB5_3ReleaseCheckInputV1 = {
   observedPrivateRevision: 'ae17793',
   approvedFinalPrivateRevision: null,
   publicGoingInventory: [],
-  peCr5G8ScopeApproval: 'missing',
+  confidentialityG8ScopeApproval: 'missing',
   depB501EvidenceRevision: null,
   buildTestImportEvidence: DEFAULT_EVIDENCE,
   publicSafetyEvidence: DEFAULT_EVIDENCE,
@@ -97,7 +97,7 @@ export function buildPromptEnhancementB5_3ReleaseCheckPacketV1(
   const reasonCodes: string[] = [];
   if (!merged.approvedFinalPrivateRevision) reasonCodes.push('approved_final_private_revision_missing');
   if (merged.publicGoingInventory.length === 0) reasonCodes.push('public_going_inventory_missing');
-  if (merged.peCr5G8ScopeApproval !== 'approved') reasonCodes.push('confidentiality_g8_scope_not_approved');
+  if (merged.confidentialityG8ScopeApproval !== 'approved') reasonCodes.push('confidentiality_g8_scope_not_approved');
   if (!merged.depB501EvidenceRevision) reasonCodes.push('dep_b5_01_evidence_revision_missing');
   if (merged.buildTestImportEvidence.state !== 'pass') reasonCodes.push('build_test_import_evidence_missing_or_unpassed');
   if (merged.publicSafetyEvidence.state !== 'pass') reasonCodes.push('public_safety_evidence_missing_or_unpassed');
@@ -113,7 +113,7 @@ export function buildPromptEnhancementB5_3ReleaseCheckPacketV1(
     observedPrivateRevision: merged.observedPrivateRevision,
     approvedFinalPrivateRevision: merged.approvedFinalPrivateRevision,
     publicGoingInventory: merged.publicGoingInventory,
-    peCr5G8ScopeApproval: merged.peCr5G8ScopeApproval,
+    confidentialityG8ScopeApproval: merged.confidentialityG8ScopeApproval,
     depB501EvidenceRevision: merged.depB501EvidenceRevision,
     buildTestImportEvidence: merged.buildTestImportEvidence,
     publicSafetyEvidence: merged.publicSafetyEvidence,

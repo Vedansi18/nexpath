@@ -245,11 +245,11 @@ describe('Phase 11 future sequence runtime gate', () => {
   it('transform-rule-11.5 rejects runtime acceptance even when caller claims all gates passed', () => {
     const result = evaluate('runtime_acceptance', {
       evidence: {
-        peDr4LifecyclePolicyApproved: true,
-        peAr10ReceiverContractApproved: true,
-        peAr11RuntimeSourceAvailable: true,
-        peEm1NumericAcceptanceApproved: true,
-        peDr6OwnerSnapshotApproved: true,
+        lifecyclePolicyApproved: true,
+        engineReceiverContractApproved: true,
+        futureSequenceRuntimeSourceAvailable: true,
+        costNumericAcceptanceApproved: true,
+        crossLayerOwnerSnapshotApproved: true,
         signedOwnerByDeliverableRegisterApproved: true,
         pendingNamedOwnerRegisterRowsClosed: true,
         hostHoldCommitContractProven: true,
@@ -268,11 +268,11 @@ describe('Phase 11 future sequence runtime gate', () => {
   it('keeps decision-rule-6 owner registers and provider/API availability as required runtime gates', () => {
     const result = evaluate('runtime_acceptance', {
       evidence: {
-        peDr4LifecyclePolicyApproved: true,
-        peAr10ReceiverContractApproved: true,
-        peAr11RuntimeSourceAvailable: true,
-        peEm1NumericAcceptanceApproved: true,
-        peDr6OwnerSnapshotApproved: true,
+        lifecyclePolicyApproved: true,
+        engineReceiverContractApproved: true,
+        futureSequenceRuntimeSourceAvailable: true,
+        costNumericAcceptanceApproved: true,
+        crossLayerOwnerSnapshotApproved: true,
         hostHoldCommitContractProven: true,
         privacyStoragePolicyApproved: true,
         focusedRuntimeFixturesPassed: true,

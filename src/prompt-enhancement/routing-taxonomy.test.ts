@@ -491,7 +491,7 @@ describe('prompt-enhancement routing and taxonomy', () => {
     expect(result.contractDecision.llmRoutePolicy).toEqual({
       mode: 'no_call',
       owner: 'content_semantics',
-      peEm1WorksheetRow: 'not_applicable_deterministic',
+      costWorksheetRow: 'not_applicable_deterministic',
       freeformRouteOutputAllowed: false,
     });
     expect(result.contractDecision.selectedTemplateRef.registryNamespace).toBe('prompt-enhancement-templates');

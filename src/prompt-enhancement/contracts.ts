@@ -471,7 +471,7 @@ export interface PromptEnhancementRouteDecisionV1 {
     // call; 'no_call' remains the deterministic default + fallback.
     mode: 'no_call' | 'llm_route_decision_call';
     owner: 'content_semantics';
-    peEm1WorksheetRow: 'not_applicable_deterministic' | 'llm_route_decision_call';
+    costWorksheetRow: 'not_applicable_deterministic' | 'llm_route_decision_call';
     freeformRouteOutputAllowed: false;
   };
   ambiguityState:
@@ -1320,11 +1320,11 @@ export type PromptEnhancementFutureSequenceRuntimeMissingGateCodeV1 =
   | 'current_v1_runtime_implementation_no_go';
 
 export interface PromptEnhancementFutureSequenceRuntimeGateEvidenceV1 {
-  peDr4LifecyclePolicyApproved?: boolean;
-  peAr10ReceiverContractApproved?: boolean;
-  peAr11RuntimeSourceAvailable?: boolean;
-  peEm1NumericAcceptanceApproved?: boolean;
-  peDr6OwnerSnapshotApproved?: boolean;
+  lifecyclePolicyApproved?: boolean;
+  engineReceiverContractApproved?: boolean;
+  futureSequenceRuntimeSourceAvailable?: boolean;
+  costNumericAcceptanceApproved?: boolean;
+  crossLayerOwnerSnapshotApproved?: boolean;
   signedOwnerByDeliverableRegisterApproved?: boolean;
   pendingNamedOwnerRegisterRowsClosed?: boolean;
   hostHoldCommitContractProven?: boolean;

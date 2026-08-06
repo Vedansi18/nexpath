@@ -7,13 +7,13 @@ describe('stage-5-1b-H1 negative-disposition execution map', () => {
 
     expect(packet.status).toBe('acceptance_blocked_pending_approved_inputs');
     expect(packet.readinessClaimAllowed).toBe(false);
-    expect(packet.requiredDependencies).toEqual(['DEP-B5-02', 'DEP-TEST-01']);
+    expect(packet.requiredDependencies).toEqual(['DEP-stage-5-02', 'DEP-TEST-01']);
     expect(packet.rows.map((row) => row.rowId)).toEqual([
-      'stage-5-1b-H1-01',
-      'stage-5-1b-H1-02',
-      'stage-5-1b-H1-03',
-      'stage-5-1b-H1-04',
-      'stage-5-1b-H1-05',
+      'stage-5-1b-stage-1-01',
+      'stage-5-1b-stage-1-02',
+      'stage-5-1b-stage-1-03',
+      'stage-5-1b-stage-1-04',
+      'stage-5-1b-stage-1-05',
     ]);
     expect(packet.reasonCodes).toEqual([
       'approved_h1_contract_revision_missing',
@@ -39,8 +39,8 @@ describe('stage-5-1b-H1 negative-disposition execution map', () => {
 
   it('keeps the valid positive boundary distinct from all negative sinks', () => {
     const packet = buildPromptEnhancementB5_1bH1NegativeMapV1();
-    const positive = packet.rows.find((row) => row.rowId === 'stage-5-1b-H1-04');
-    const negative = packet.rows.filter((row) => row.rowId !== 'stage-5-1b-H1-04');
+    const positive = packet.rows.find((row) => row.rowId === 'stage-5-1b-stage-1-04');
+    const negative = packet.rows.filter((row) => row.rowId !== 'stage-5-1b-stage-1-04');
 
     expect(positive?.expectedSink).toBe('show_current_body');
     expect(negative.every((row) => row.expectedSink !== 'show_current_body')).toBe(true);

@@ -7,7 +7,7 @@ describe('stage-5-2 cross-layer negative acceptance matrix', () => {
 
     expect(packet.status).toBe('acceptance_blocked_pending_owner_evidence');
     expect(packet.readinessClaimAllowed).toBe(false);
-    expect(packet.requiredDependencies).toEqual(['DEP-B5-02', 'DEP-TEST-01']);
+    expect(packet.requiredDependencies).toEqual(['DEP-stage-5-02', 'DEP-TEST-01']);
     expect(packet.rows).toHaveLength(10);
     expect(packet.rows.map((row) => row.invalidInput)).toEqual([
       'old_decision_session_rows',

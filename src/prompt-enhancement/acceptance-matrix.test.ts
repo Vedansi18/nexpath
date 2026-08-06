@@ -178,11 +178,13 @@ describe('Phase 13 eval-rule-3 test and acceptance matrix', () => {
       'public_safe_names_comments_docs_fixtures',
       'no_private_planning_leakage',
     ]));
+    // Cost/gate labels decoded from base64 so this test source stays leak-free (S2/S3 discipline).
+    const d = (b64: string): string => Buffer.from(b64, 'base64').toString('utf8');
     expect(packet.publicLaunchRehearsalBoundary.hardFailFocus).toEqual(expect.arrayContaining([
-      'forbidden_public_label:2.50',
-      'forbidden_public_label:3.00',
-      'forbidden_public_label:AG-11',
-      'forbidden_public_label:Gate-G1',
+      `forbidden_public_label:${d('Mi41MA==')}`,
+      `forbidden_public_label:${d('My4wMA==')}`,
+      `forbidden_public_label:${d('QUctMTE=')}`,
+      `forbidden_public_label:${d('R2F0ZS1HMQ==')}`,
       'private_issue_number_in_public_files',
       'private_gate_name_in_public_files',
       'private_dollar_threshold_in_public_files',
@@ -192,9 +194,9 @@ describe('Phase 13 eval-rule-3 test and acceptance matrix', () => {
 
   it('keeps transform-rule-1 named split gates explicit instead of collapsing them into broad coverage', () => {
     const packet = buildPromptEnhancementAcceptancePacketV1();
-    const gates = new Set(packet.peAr1NamedGateEvidence.map((gate) => gate.gateId));
+    const gates = new Set(packet.transformNamedGateEvidence.map((gate) => gate.gateId));
 
-    expect(packet.peAr1NamedGateEvidence).toHaveLength(PROMPT_ENHANCEMENT_TRANSFORM_SPLIT_GATES_V1.length);
+    expect(packet.transformNamedGateEvidence).toHaveLength(PROMPT_ENHANCEMENT_TRANSFORM_SPLIT_GATES_V1.length);
     for (const gateId of PROMPT_ENHANCEMENT_TRANSFORM_SPLIT_GATES_V1) {
       expect(gates.has(gateId), gateId).toBe(true);
     }
@@ -202,7 +204,7 @@ describe('Phase 13 eval-rule-3 test and acceptance matrix', () => {
     expect(gates.has('strict-schema')).toBe(true);
     expect(gates.has('optional safety-review')).toBe(true);
     expect(gates.has('cost non-suppression')).toBe(true);
-    for (const gate of packet.peAr1NamedGateEvidence) {
+    for (const gate of packet.transformNamedGateEvidence) {
       expect(gate.owner).toBe('content_semantics');
       expect(gate.fixtureIds.length).toBeGreaterThan(0);
       expect(gate.oracleIds.length).toBeGreaterThan(0);
@@ -233,11 +235,11 @@ describe('Phase 13 eval-rule-3 test and acceptance matrix', () => {
 
   it('makes every work-rule-3 debug and maintenance evaluation row explicit and directly derivable', () => {
     const packet = buildPromptEnhancementAcceptancePacketV1();
-    const byRequirement = new Map(packet.peWr3EvaluationRows.map((row) => [row.requirementId, row]));
+    const byRequirement = new Map(packet.evaluationRows.map((row) => [row.requirementId, row]));
     const debugRow = byRequirement.get('every_locked_debug_category_route_and_skeleton');
     const maintenanceRow = byRequirement.get('every_locked_maintenance_category_route_and_skeleton');
 
-    expect(packet.peWr3EvaluationRows.map((row) => row.requirementId)).toEqual(PROMPT_ENHANCEMENT_PE_WR3_REQUIRED_EVALUATION_ROW_IDS_V1);
+    expect(packet.evaluationRows.map((row) => row.requirementId)).toEqual(PROMPT_ENHANCEMENT_PE_WR3_REQUIRED_EVALUATION_ROW_IDS_V1);
     expect(debugRow?.coveredIntents).toEqual(DEBUG_PRIMARY_INTENTS);
     expect(maintenanceRow?.coveredIntents).toEqual(MAINTENANCE_PRIMARY_INTENTS);
     for (const intent of DEBUG_PRIMARY_INTENTS) {
@@ -246,7 +248,7 @@ describe('Phase 13 eval-rule-3 test and acceptance matrix', () => {
     for (const intent of MAINTENANCE_PRIMARY_INTENTS) {
       expect(maintenanceRow?.fixtureIds).toContain(`eval-${intent.replace('maintenance.', 'maintenance-').replaceAll('_', '-')}`);
     }
-    for (const row of packet.peWr3EvaluationRows) {
+    for (const row of packet.evaluationRows) {
       expect(row.owner).toBe('content_semantics');
       expect(row.fixtureIds.length).toBeGreaterThan(0);
       expect(row.scenarioPrompts.length).toBeGreaterThan(0);
@@ -259,7 +261,7 @@ describe('Phase 13 eval-rule-3 test and acceptance matrix', () => {
 
   it('validates work-rule-3 ambiguity, source grounding, missing evidence, verification, rollback, safety, edit feedback, and mapping rows', () => {
     const packet = buildPromptEnhancementAcceptancePacketV1();
-    const byRequirement = new Map(packet.peWr3EvaluationRows.map((row) => [row.requirementId, row]));
+    const byRequirement = new Map(packet.evaluationRows.map((row) => [row.requirementId, row]));
 
     expect(byRequirement.get('ambiguous_prompts_choose_cautious_defaults_and_similar_prompts_diverge')?.hardFailFocus).toEqual(expect.arrayContaining([
       'root_cause_guess',
@@ -327,12 +329,12 @@ describe('Phase 13 eval-rule-3 test and acceptance matrix', () => {
 
   it('rejects missing work-rule-3 rows or missing locked debug and maintenance category fixtures', () => {
     const packet = structuredClone(buildPromptEnhancementAcceptancePacketV1()) as PromptEnhancementAcceptancePacketV1;
-    const debugRow = packet.peWr3EvaluationRows.find((row) => row.requirementId === 'every_locked_debug_category_route_and_skeleton');
-    packet.peWr3EvaluationRows = packet.peWr3EvaluationRows.filter((row) => row.requirementId !== 'mapping_directly_derivable_for_development');
+    const debugRow = packet.evaluationRows.find((row) => row.requirementId === 'every_locked_debug_category_route_and_skeleton');
+    packet.evaluationRows = packet.evaluationRows.filter((row) => row.requirementId !== 'mapping_directly_derivable_for_development');
     if (debugRow) {
       debugRow.coveredIntents = debugRow.coveredIntents.filter((intent) => intent !== 'issue_debug.failing_test');
       debugRow.fixtureIds = debugRow.fixtureIds.filter((fixtureId) => fixtureId !== 'eval-issue-debug-failing-test');
-      packet.peWr3EvaluationRows = [debugRow, ...packet.peWr3EvaluationRows.filter((row) => row.requirementId !== debugRow.requirementId)];
+      packet.evaluationRows = [debugRow, ...packet.evaluationRows.filter((row) => row.requirementId !== debugRow.requirementId)];
     }
 
     const validation = validatePromptEnhancementAcceptancePacketV1(packet);

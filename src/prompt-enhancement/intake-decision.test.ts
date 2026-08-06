@@ -3,8 +3,8 @@ import { evaluatePromptEnhancementMpsIntakeDecisionV1 } from './intake-decision.
 import type { PromptEnhancementB3ContractEvidenceV1 } from './contract-intake.js';
 
 const completeEvidence: readonly PromptEnhancementB3ContractEvidenceV1[] = [
-  { evidenceId: 'DEP-B3-01', kind: 'mps_handoff', owner: 'engine_contract', state: 'supplied', contractRevision: 'content-owner-mps-v1', sourceRefs: ['content-owner:handoff:v1'] },
-  { evidenceId: 'DEP-B3-02', kind: 'host_runtime', owner: 'host_transport', state: 'supplied', contractRevision: 'host-runtime-v1', sourceRefs: ['host-owner:host:v1'] },
+  { evidenceId: 'DEP-stage-3-01', kind: 'mps_handoff', owner: 'engine_contract', state: 'supplied', contractRevision: 'content-owner-mps-v1', sourceRefs: ['content-owner:handoff:v1'] },
+  { evidenceId: 'DEP-stage-3-02', kind: 'host_runtime', owner: 'host_transport', state: 'supplied', contractRevision: 'host-runtime-v1', sourceRefs: ['host-owner:host:v1'] },
   { evidenceId: 'DEP-TEST-01', kind: 'approved_b3_fixtures', owner: 'test_owner', state: 'supplied', contractRevision: 'fixtures-v1', sourceRefs: ['test:dep-b3'], fixtureIds: ['DEP-TEST-01-B3'] },
   { evidenceId: 'PE-B3-PRIVACY-FEEDBACK', kind: 'privacy_feedback_contract', owner: 'privacy_feedback', state: 'supplied', contractRevision: 'privacy-feedback-v1', sourceRefs: ['content-owner:privacy:v1'] },
 ];

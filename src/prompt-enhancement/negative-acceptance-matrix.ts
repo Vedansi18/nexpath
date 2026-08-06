@@ -1,5 +1,5 @@
 export const PROMPT_ENHANCEMENT_B5_2_REQUIRED_DEPENDENCIES_V1 = [
-  'DEP-B5-02',
+  'DEP-stage-5-02',
   'DEP-TEST-01',
 ] as const;
 
@@ -78,7 +78,7 @@ const ROWS: readonly PromptEnhancementB5_2NegativeRowV1[] = [
   expectedNoSideEffects: NO_SIDE_EFFECTS,
   owner,
   focusedCommand: FOCUSED_COMMAND,
-  environment: 'NO_COLOR=1; DEP-B5-02/DEP-TEST-01 evidence pending',
+  environment: 'NO_COLOR=1; DEP-stage-5-02/DEP-TEST-01 evidence pending',
   observedResult: 'not_run_pending_owner_evidence',
   passFail: 'blocked_pending_owner_evidence',
   evidenceRefs: [],

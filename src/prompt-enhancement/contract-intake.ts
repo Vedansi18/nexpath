@@ -46,8 +46,8 @@ const REQUIRED_EVIDENCE: readonly {
   evidenceId: string;
   owner: PromptEnhancementB3ContractEvidenceV1['owner'];
 }[] = [
-  { kind: 'mps_handoff', evidenceId: 'DEP-B3-01', owner: 'engine_contract' },
-  { kind: 'host_runtime', evidenceId: 'DEP-B3-02', owner: 'host_transport' },
+  { kind: 'mps_handoff', evidenceId: 'DEP-stage-3-01', owner: 'engine_contract' },
+  { kind: 'host_runtime', evidenceId: 'DEP-stage-3-02', owner: 'host_transport' },
   { kind: 'approved_b3_fixtures', evidenceId: 'DEP-TEST-01', owner: 'test_owner' },
   { kind: 'privacy_feedback_contract', evidenceId: 'PE-B3-PRIVACY-FEEDBACK', owner: 'privacy_feedback' },
 ];

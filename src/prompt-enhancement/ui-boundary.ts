@@ -29,7 +29,7 @@ export interface PromptEnhancementUiBoundaryInputV1 {
 }
 
 /**
- * Host-independent H1.2 adapter. It is the only boundary allowed to turn a
+ * Host-independent stage-1-2 adapter. It is the only boundary allowed to turn a
  * validated PE result into popup-session state. A renderer/host must consume the
  * returned typed session; it must not infer authority from body text or transport.
  */

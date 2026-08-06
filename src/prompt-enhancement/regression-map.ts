@@ -1,6 +1,6 @@
 export const PROMPT_ENHANCEMENT_B5_1A_H1_REQUIRED_DEPENDENCIES_V1 = [
-  'DEP-B5-01',
-  'DEP-B5-02',
+  'DEP-stage-5-01',
+  'DEP-stage-5-02',
   'DEP-TEST-01',
 ] as const;
 

@@ -10,7 +10,7 @@ export interface PromptEnhancementB4FixtureRowV1 {
   rowId: string;
   group: PromptEnhancementB4FixtureGroupV1;
   owner: 'ui_app';
-  requiredExternalDependencies: readonly ['DEP-B4-01', 'DEP-TEST-01'];
+  requiredExternalDependencies: readonly ['DEP-stage-4-01', 'DEP-TEST-01'];
   approvedFixtureId: string | null;
   contractRevision: string | null;
   expectedVisibleOutcomes: readonly string[];
@@ -26,7 +26,7 @@ export interface PromptEnhancementB4FixturePacketV1 {
   packetId: 'ui-owner-config-fixture-packet-v1';
   status: 'blocked_pending_external_inputs';
   readinessClaimAllowed: false;
-  requiredExternalInputs: readonly ['DEP-B4-01', 'DEP-TEST-01'];
+  requiredExternalInputs: readonly ['DEP-stage-4-01', 'DEP-TEST-01'];
   rows: readonly PromptEnhancementB4FixtureRowV1[];
   focusedCommand: 'npx vitest run src/prompt-enhancement/fixture-packet.test.ts';
   evidenceRule: 'render_and_public_boundary_assertions_only';
@@ -53,8 +53,8 @@ const REQUIRED_GROUPS: readonly PromptEnhancementB4FixtureGroupV1[] = [
   'privacy_boundary',
 ];
 
-const REQUIRED_DEPENDENCIES: readonly ['DEP-B4-01', 'DEP-TEST-01'] = [
-  'DEP-B4-01',
+const REQUIRED_DEPENDENCIES: readonly ['DEP-stage-4-01', 'DEP-TEST-01'] = [
+  'DEP-stage-4-01',
   'DEP-TEST-01',
 ];
 

@@ -1,5 +1,5 @@
 export const PROMPT_ENHANCEMENT_B5_1B_H1_REQUIRED_DEPENDENCIES_V1 = [
-  'DEP-B5-02',
+  'DEP-stage-5-02',
   'DEP-TEST-01',
 ] as const;
 
@@ -69,7 +69,7 @@ const COMMON_FORBIDDEN = [
 
 const ROWS: readonly PromptEnhancementB5_1bH1NegativeRowV1[] = [
   {
-    rowId: 'stage-5-1b-H1-01',
+    rowId: 'stage-5-1b-stage-1-01',
     condition: 'shared_gate_not_permitted',
     requiredDisposition: 'no PE-facade call; no PE disposition fabricated',
     expectedSink: 'no_pe_facade_call',
@@ -81,7 +81,7 @@ const ROWS: readonly PromptEnhancementB5_1bH1NegativeRowV1[] = [
     oracleOwner: 'cross_layer_acceptance', observedOutcome: 'not_run_pending_approved_inputs', passFail: 'blocked_pending_approved_inputs',
   },
   {
-    rowId: 'stage-5-1b-H1-02',
+    rowId: 'stage-5-1b-stage-1-02',
     condition: 'unselected_or_degraded_no_fire',
     requiredDisposition: 'no PE-facade call or validated no_popup_not_applicable',
     expectedSink: 'no_popup_not_applicable',
@@ -93,7 +93,7 @@ const ROWS: readonly PromptEnhancementB5_1bH1NegativeRowV1[] = [
     oracleOwner: 'content_semantics', observedOutcome: 'not_run_pending_approved_inputs', passFail: 'blocked_pending_approved_inputs',
   },
   {
-    rowId: 'stage-5-1b-H1-03',
+    rowId: 'stage-5-1b-stage-1-03',
     condition: 'malformed_provider_timeout_or_unsupported',
     requiredDisposition: 'validated fallback_to_original, blocked_no_send, or no_popup_not_applicable',
     expectedSink: 'typed_fallback_or_blocked_no_send',
@@ -105,7 +105,7 @@ const ROWS: readonly PromptEnhancementB5_1bH1NegativeRowV1[] = [
     oracleOwner: 'content_semantics', observedOutcome: 'not_run_pending_approved_inputs', passFail: 'blocked_pending_approved_inputs',
   },
   {
-    rowId: 'stage-5-1b-H1-04',
+    rowId: 'stage-5-1b-stage-1-04',
     condition: 'valid_typed_current_body',
     requiredDisposition: 'show_current_body',
     expectedSink: 'show_current_body',
@@ -117,7 +117,7 @@ const ROWS: readonly PromptEnhancementB5_1bH1NegativeRowV1[] = [
     oracleOwner: 'ui_app', observedOutcome: 'not_run_pending_approved_inputs', passFail: 'blocked_pending_approved_inputs',
   },
   {
-    rowId: 'stage-5-1b-H1-05',
+    rowId: 'stage-5-1b-stage-1-05',
     condition: 'closed_disposition_no_side_effects',
     requiredDisposition: 'preserve unrelated runtime; keep typed fallback/blocked/no-popup state no-send',
     expectedSink: 'typed_closed_state_no_side_effects',

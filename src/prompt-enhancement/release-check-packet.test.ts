@@ -8,7 +8,7 @@ const approvedFacts: PromptEnhancementB5_3ReleaseCheckInputV1 = {
   observedPrivateRevision: 'ae17793',
   approvedFinalPrivateRevision: 'ae17793',
   publicGoingInventory: ['src/prompt-enhancement/public-launch-recheck.ts'],
-  peCr5G8ScopeApproval: 'approved',
+  confidentialityG8ScopeApproval: 'approved',
   depB501EvidenceRevision: '6b74b3f',
   buildTestImportEvidence: {
     state: 'pass', revision: 'ae17793', command: 'npm run build && npx vitest run src/prompt-enhancement',

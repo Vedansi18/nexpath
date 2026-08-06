@@ -4,7 +4,7 @@ import {
   validatePromptEnhancementB4FixturePacketV1,
 } from './fixture-packet.js';
 
-describe('DEP-B4-01 / DEP-TEST-01 B4 fixture intake boundary', () => {
+describe('DEP-stage-4-01 / DEP-TEST-01 B4 fixture intake boundary', () => {
   it('defines all B4 fixture groups without claiming readiness', () => {
     const packet = buildPromptEnhancementB4FixturePacketV1();
     expect(packet.rows.map((row) => row.group)).toEqual([
@@ -17,7 +17,7 @@ describe('DEP-B4-01 / DEP-TEST-01 B4 fixture intake boundary', () => {
   it('keeps every row linked to both external dependencies and blocked', () => {
     const packet = buildPromptEnhancementB4FixturePacketV1();
     for (const row of packet.rows) {
-      expect(row.requiredExternalDependencies).toEqual(['DEP-B4-01', 'DEP-TEST-01']);
+      expect(row.requiredExternalDependencies).toEqual(['DEP-stage-4-01', 'DEP-TEST-01']);
       expect(row.approvedFixtureId).toBeNull();
       expect(row.contractRevision).toBeNull();
       expect(row.observedOutcome).toBe('not_run_pending_external_inputs');

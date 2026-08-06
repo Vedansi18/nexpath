@@ -16,7 +16,7 @@ export interface PromptEnhancementB2FixtureRowV1 {
   group: PromptEnhancementB2FixtureGroupV1;
   phaseRefs: readonly ('stage-2-1' | 'stage-2-2' | 'stage-2-3' | 'stage-2-4')[];
   owner: 'ui_app';
-  requiredExternalDependencies: readonly ('DEP-B2-01' | 'DEP-B2-02' | 'DEP-TEST-01')[];
+  requiredExternalDependencies: readonly ('DEP-stage-2-01' | 'DEP-stage-2-02' | 'DEP-TEST-01')[];
   approvedFixtureId: string | null;
   contractRevision: string | null;
   expectedVisibleOutcomes: readonly string[];
@@ -34,8 +34,8 @@ export interface PromptEnhancementB2FixturePacketV1 {
   status: PromptEnhancementB2FixturePacketStatusV1;
   readinessClaimAllowed: false;
   requiredExternalInputs: readonly [
-    'DEP-B2-01',
-    'DEP-B2-02',
+    'DEP-stage-2-01',
+    'DEP-stage-2-02',
     'DEP-TEST-01',
   ];
   rows: readonly PromptEnhancementB2FixtureRowV1[];
@@ -66,19 +66,19 @@ const REQUIRED_GROUPS: readonly PromptEnhancementB2FixtureGroupV1[] = [
   'regression_boundary',
 ];
 
-const REQUIRED_DEPENDENCIES: readonly ('DEP-B2-01' | 'DEP-B2-02' | 'DEP-TEST-01')[] = [
-  'DEP-B2-01',
-  'DEP-B2-02',
+const REQUIRED_DEPENDENCIES: readonly ('DEP-stage-2-01' | 'DEP-stage-2-02' | 'DEP-TEST-01')[] = [
+  'DEP-stage-2-01',
+  'DEP-stage-2-02',
   'DEP-TEST-01',
 ];
 
 export function buildPromptEnhancementB2FixturePacketV1(): PromptEnhancementB2FixturePacketV1 {
-  const dependencyRefs = [...REQUIRED_DEPENDENCIES] as readonly ('DEP-B2-01' | 'DEP-B2-02' | 'DEP-TEST-01')[];
+  const dependencyRefs = [...REQUIRED_DEPENDENCIES] as readonly ('DEP-stage-2-01' | 'DEP-stage-2-02' | 'DEP-TEST-01')[];
   return {
     packetId: 'ui-owner-ui-fixture-packet-v1',
     status: 'blocked_pending_external_inputs',
     readinessClaimAllowed: false,
-    requiredExternalInputs: ['DEP-B2-01', 'DEP-B2-02', 'DEP-TEST-01'],
+    requiredExternalInputs: ['DEP-stage-2-01', 'DEP-stage-2-02', 'DEP-TEST-01'],
     rows: [
       {
         rowId: 'stage-2-5-lifecycle', group: 'lifecycle', phaseRefs: ['stage-2-1'], owner: 'ui_app',

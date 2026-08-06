@@ -1106,7 +1106,7 @@ function toContractDecision(
     llmRoutePolicy: {
       mode: llmRouteUsed ? 'llm_route_decision_call' : 'no_call',
       owner: 'content_semantics',
-      peEm1WorksheetRow: llmRouteUsed ? 'llm_route_decision_call' : 'not_applicable_deterministic',
+      costWorksheetRow: llmRouteUsed ? 'llm_route_decision_call' : 'not_applicable_deterministic',
       freeformRouteOutputAllowed: false,
     },
     ambiguityState: ambiguityStateOverride ?? ambiguityStateFor(reasonCodes, noPopup, fallbackMode),

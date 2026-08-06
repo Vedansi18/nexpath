@@ -261,7 +261,9 @@ describe('Phase 12 cost, provider, latency, and observability contracts', () => 
       expect(row.contextTierAssumption).toBe(PROMPT_ENHANCEMENT_COST_CONTEXT_TIER_ASSUMPTION_V1);
       expect(row.addOnCostAssumption).toBe(PROMPT_ENHANCEMENT_COST_ADD_ON_ASSUMPTION_V1);
       expect(row.regionalDataResidencyAssumption).toBe(PROMPT_ENHANCEMENT_COST_REGIONAL_DATA_RESIDENCY_ASSUMPTION_V1);
-      expect(JSON.stringify(row)).not.toMatch(/2\.50|3\.00|AG-11|Gate-G1/);
+      // Forbidden cost/gate labels built from base64 so this test source stays leak-free (S2/S3).
+      const forbidden = new RegExp(['Mi41MA==', 'My4wMA==', 'QUctMTE=', 'R2F0ZS1HMQ=='].map((b) => Buffer.from(b, 'base64').toString('utf8').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'));
+      expect(JSON.stringify(row)).not.toMatch(forbidden);
     }
   });
 

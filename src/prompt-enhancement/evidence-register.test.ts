@@ -15,7 +15,7 @@ const completeRow: PromptEnhancementB5EvidenceRowV1 = {
   evidenceState: 'supplied',
   contractRevision: 'contracts-v1',
   sourceRevision: '221d379',
-  fixtureIds: ['DEP-TEST-01-B5-01'],
+  fixtureIds: ['DEP-TEST-01-stage-5-01'],
   focusedCommand: 'npx vitest run src/prompt-enhancement/evidence-register.test.ts',
   expectedOutput: 'Each cross-layer row records typed evidence and owner closure.',
   observedOutput: 'Evidence packet observed with all required fields.',
@@ -31,7 +31,7 @@ describe('stage-5-1 evidence intake and owner register', () => {
 
     expect(packet.status).toBe('blocked_pending_evidence');
     expect(packet.readinessClaimAllowed).toBe(false);
-    expect(packet.requiredDependencies).toEqual(['DEP-B5-01', 'DEP-B5-02', 'DEP-TEST-01']);
+    expect(packet.requiredDependencies).toEqual(['DEP-stage-5-01', 'DEP-stage-5-02', 'DEP-TEST-01']);
     expect(packet.rows).toHaveLength(1);
     expect(packet.rows[0]?.safeFallback).toBe('blocked_no_send');
     expect(packet.rows[0]?.closureDecision).toBe('blocked_pending_owner_evidence');
@@ -56,7 +56,7 @@ describe('stage-5-1 evidence intake and owner register', () => {
       stopExtensionRef: 'host-owner:host-runtime:v1',
       storeGeneratedOriginRef: 'content-owner:store-origin:v1',
       launchAcceptanceRef: 'content-owner:confidentiality-g8:v1',
-      fixtureIds: ['DEP-TEST-01-B5-01'],
+      fixtureIds: ['DEP-TEST-01-stage-5-01'],
       closureDecision: 'ready_for_owner_review',
     });
   });

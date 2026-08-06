@@ -24,10 +24,10 @@ describe('stage-2-5 ui-owner UI fixture and acceptance packet', () => {
     expect(packet.rows.every((row) => row.approvedFixtureId === null && row.contractRevision === null)).toBe(true);
   });
 
-  it('keeps every row blocked until DEP-B2-01/02 and DEP-TEST-01 inputs arrive', () => {
+  it('keeps every row blocked until DEP-stage-2-01/02 and DEP-TEST-01 inputs arrive', () => {
     const packet = buildPromptEnhancementB2FixturePacketV1();
     for (const row of packet.rows) {
-      expect(row.requiredExternalDependencies).toEqual(['DEP-B2-01', 'DEP-B2-02', 'DEP-TEST-01']);
+      expect(row.requiredExternalDependencies).toEqual(['DEP-stage-2-01', 'DEP-stage-2-02', 'DEP-TEST-01']);
       expect(row.observedOutcome).toBe('not_run_pending_external_inputs');
       expect(row.passFail).toBe('blocked_pending_external_inputs');
       expect(row.closureDecision).toBe('blocked_pending_external_inputs');

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildPromptEnhancementUiBoundarySessionV1 } from './ui-boundary.js';
 
-describe('H1.2 host-independent UI boundary', () => {
+describe('stage-1-2 host-independent UI boundary', () => {
   it('rejects an invalid prepare result before any session/render state is created', () => {
     const result = buildPromptEnhancementUiBoundarySessionV1({
       result: { disposition: 'show_current_body' },

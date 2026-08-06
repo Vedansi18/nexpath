@@ -1,6 +1,6 @@
 export const PROMPT_ENHANCEMENT_B5_1_REQUIRED_DEPENDENCIES_V1 = [
-  'DEP-B5-01',
-  'DEP-B5-02',
+  'DEP-stage-5-01',
+  'DEP-stage-5-02',
   'DEP-TEST-01',
 ] as const;
 
@@ -52,11 +52,11 @@ const REQUIRED_ROW_IDS = [
 function defaultRow(): PromptEnhancementB5EvidenceRowV1 {
   return {
     rowId: REQUIRED_ROW_IDS[0],
-    apiContractRef: 'pending_DEP-B5-02_api_contract',
+    apiContractRef: 'pending_DEP-stage-5-02_api_contract',
     uiSurfaceRef: 'pending_ui_consumer',
-    stopExtensionRef: 'pending_DEP-B5-02_host_contract',
-    storeGeneratedOriginRef: 'pending_DEP-B5-02_store_generated_origin',
-    launchAcceptanceRef: 'pending_DEP-B5-01_launch_acceptance',
+    stopExtensionRef: 'pending_DEP-stage-5-02_host_contract',
+    storeGeneratedOriginRef: 'pending_DEP-stage-5-02_store_generated_origin',
+    launchAcceptanceRef: 'pending_DEP-stage-5-01_launch_acceptance',
     owner: 'cross_layer_acceptance',
     evidenceState: 'missing',
     contractRevision: null,
@@ -66,7 +66,7 @@ function defaultRow(): PromptEnhancementB5EvidenceRowV1 {
     expectedOutput: 'All cross-layer evidence fields are supplied or remain explicitly blocked.',
     observedOutput: null,
     safeFallback: 'blocked_no_send',
-    unresolvedQuestion: 'Await DEP-B5-01, DEP-B5-02, and DEP-TEST-01 owner evidence.',
+    unresolvedQuestion: 'Await DEP-stage-5-01, DEP-stage-5-02, and DEP-TEST-01 owner evidence.',
     evidenceDate: null,
     closureDecision: 'blocked_pending_owner_evidence',
   };

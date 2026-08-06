@@ -113,8 +113,8 @@ export interface PromptEnhancementAcceptancePacketV1 {
   acceptanceTargetSurfaces: readonly string[];
   requiredFamilies: readonly PromptEnhancementAcceptanceFixtureFamilyV1[];
   fixtures: readonly PromptEnhancementAcceptanceFixtureV1[];
-  peAr1NamedGateEvidence: readonly PromptEnhancementNamedGateEvidenceV1[];
-  peWr3EvaluationRows: readonly PromptEnhancementPeWr3EvaluationRowV1[];
+  transformNamedGateEvidence: readonly PromptEnhancementNamedGateEvidenceV1[];
+  evaluationRows: readonly PromptEnhancementPeWr3EvaluationRowV1[];
   registryLinkProof: {
     registryNamespace: 'prompt-enhancement-templates';
     routeFixtureIds: readonly string[];
@@ -262,14 +262,14 @@ export function buildPromptEnhancementAcceptancePacketV1(): PromptEnhancementAcc
     ],
     requiredFamilies: PROMPT_ENHANCEMENT_ACCEPTANCE_REQUIRED_FAMILIES_V1,
     fixtures,
-    peAr1NamedGateEvidence: PROMPT_ENHANCEMENT_TRANSFORM_SPLIT_GATES_V1.map((gateId) => ({
+    transformNamedGateEvidence: PROMPT_ENHANCEMENT_TRANSFORM_SPLIT_GATES_V1.map((gateId) => ({
       gateId,
       owner: 'content_semantics',
       fixtureIds: fixtureIdsForGate(gateId),
       oracleIds: [`oracle:${slug(gateId)}`],
       hardFailResult: 'not_run_shape_only',
     })),
-    peWr3EvaluationRows: buildPeWr3EvaluationRows(evaluationFixtureIds),
+    evaluationRows: buildPeWr3EvaluationRows(evaluationFixtureIds),
     registryLinkProof: {
       registryNamespace: 'prompt-enhancement-templates',
       routeFixtureIds,
@@ -381,8 +381,8 @@ export function validatePromptEnhancementAcceptancePacketV1(
   }
   if (packet.registryLinkProof.missingEvaluationFixtureIds.length > 0) reasonCodes.push('registry_missing_evaluation_fixture_ids');
 
-  const gateIds = new Set(packet.peAr1NamedGateEvidence.map((gate) => gate.gateId));
-  for (const gate of packet.peAr1NamedGateEvidence) {
+  const gateIds = new Set(packet.transformNamedGateEvidence.map((gate) => gate.gateId));
+  for (const gate of packet.transformNamedGateEvidence) {
     for (const fixtureId of gate.fixtureIds) {
       if (!fixtureIds.has(fixtureId)) reasonCodes.push(`gate_unknown_fixture:${gate.gateId}:${fixtureId}`);
     }
@@ -391,11 +391,11 @@ export function validatePromptEnhancementAcceptancePacketV1(
     if (!gateIds.has(gateId)) reasonCodes.push(`missing_transform_gate:${gateId}`);
   }
 
-  const wr3Rows = new Map(packet.peWr3EvaluationRows.map((row) => [row.requirementId, row]));
+  const wr3Rows = new Map(packet.evaluationRows.map((row) => [row.requirementId, row]));
   for (const requirementId of PROMPT_ENHANCEMENT_PE_WR3_REQUIRED_EVALUATION_ROW_IDS_V1) {
     if (!wr3Rows.has(requirementId)) reasonCodes.push(`missing_evaluation_row:${requirementId}`);
   }
-  for (const row of packet.peWr3EvaluationRows) {
+  for (const row of packet.evaluationRows) {
     if (row.owner !== 'content_semantics') reasonCodes.push(`evaluation_owner_mismatch:${row.requirementId}`);
     if (row.fixtureIds.length === 0) reasonCodes.push(`evaluation_missing_fixture:${row.requirementId}`);
     if (row.scenarioPrompts.length === 0) reasonCodes.push(`evaluation_missing_scenario_prompts:${row.requirementId}`);
@@ -414,7 +414,7 @@ export function validatePromptEnhancementAcceptancePacketV1(
     if (!maintenanceCategoryRow?.coveredIntents.includes(intent)) reasonCodes.push(`evaluation_missing_maintenance_intent:${intent}`);
     if (!maintenanceCategoryRow?.fixtureIds.includes(evaluationFixtureIdForIntent(intent))) reasonCodes.push(`evaluation_missing_maintenance_fixture:${intent}`);
   }
-  for (const gate of packet.peAr1NamedGateEvidence) {
+  for (const gate of packet.transformNamedGateEvidence) {
     if (gate.owner !== 'content_semantics') reasonCodes.push(`gate_owner_mismatch:${gate.gateId}`);
     if (gate.fixtureIds.length === 0) reasonCodes.push(`gate_missing_fixture:${gate.gateId}`);
     if (gate.oracleIds.length === 0) reasonCodes.push(`gate_missing_oracle:${gate.gateId}`);
@@ -435,7 +435,7 @@ export function validatePromptEnhancementAcceptancePacketV1(
 
   const hardFailCount = [
     ...packet.fixtures.map((fixture) => fixture.hardFailResult),
-    ...packet.peAr1NamedGateEvidence.map((gate) => gate.hardFailResult),
+    ...packet.transformNamedGateEvidence.map((gate) => gate.hardFailResult),
   ].filter((state) => state === 'hard_fail').length;
   if (hardFailCount > 0) reasonCodes.push('hard_fail_count_nonzero');
 
@@ -469,7 +469,7 @@ function buildPeWr3EvaluationRows(evaluationFixtureIds: readonly string[]): read
   const allWorkflowFixtureIds = [...debugFixtureIds, ...maintenanceFixtureIds].filter((id) => evaluationFixtureIds.includes(id));
 
   return [
-    peWr3Row({
+    evaluationRow({
       requirementId: 'every_locked_debug_category_route_and_skeleton',
       fixtureIds: debugFixtureIds,
       coveredIntents: DEBUG_PRIMARY_INTENTS,
@@ -478,7 +478,7 @@ function buildPeWr3EvaluationRows(evaluationFixtureIds: readonly string[]): read
       requiredObservableSlots: ['route', 'skeleton_or_variation', 'required_slots', 'evaluationFixtureIds'],
       hardFailFocus: ['debug_category_missing_route', 'debug_category_missing_skeleton', 'debug_category_missing_fixture_link'],
     }),
-    peWr3Row({
+    evaluationRow({
       requirementId: 'every_locked_maintenance_category_route_and_skeleton',
       fixtureIds: maintenanceFixtureIds,
       coveredIntents: MAINTENANCE_PRIMARY_INTENTS,
@@ -487,7 +487,7 @@ function buildPeWr3EvaluationRows(evaluationFixtureIds: readonly string[]): read
       requiredObservableSlots: ['route', 'skeleton_or_variation', 'required_slots', 'evaluationFixtureIds'],
       hardFailFocus: ['maintenance_category_missing_route', 'maintenance_category_missing_skeleton', 'maintenance_category_missing_fixture_link'],
     }),
-    peWr3Row({
+    evaluationRow({
       requirementId: 'ambiguous_prompts_choose_cautious_defaults_and_similar_prompts_diverge',
       fixtureIds: ['eval-issue-debug-reproduction-discovery', 'eval-maintenance-refactor-no-behavior-change'],
       coveredIntents: ['issue_debug.reproduction_discovery', 'maintenance.refactor_no_behavior_change'],
@@ -496,7 +496,7 @@ function buildPeWr3EvaluationRows(evaluationFixtureIds: readonly string[]): read
       requiredObservableSlots: ['weak_and_strong_evidence_variants', 'route_reason', 'no_popup_or_cautious_default', 'similar_surface_divergence_reason'],
       hardFailFocus: ['root_cause_guess', 'broad_rewrite_guess', 'same_route_without_divergence_reason'],
     }),
-    peWr3Row({
+    evaluationRow({
       requirementId: 'short_prompts_can_still_get_rich_workflow_guidance',
       fixtureIds: ['eval-issue-debug-failing-test', 'eval-maintenance-migration-schema-change', 'eval-maintenance-risk-rollback-heavy'],
       coveredIntents: ['issue_debug.failing_test', 'maintenance.migration_schema_change', 'maintenance.risk_rollback_heavy'],
@@ -505,7 +505,7 @@ function buildPeWr3EvaluationRows(evaluationFixtureIds: readonly string[]): read
       requiredObservableSlots: ['reproduction_or_evidence', 'verification_or_test_plan', 'risk_safety_or_confirmation', 'rollback_recovery'],
       hardFailFocus: ['short_prompt_removed_reproduction', 'short_prompt_removed_verification', 'short_prompt_removed_risk_or_rollback'],
     }),
-    peWr3Row({
+    evaluationRow({
       requirementId: 'long_prompts_can_stay_narrow',
       fixtureIds: ['eval-maintenance-refactor-no-behavior-change', 'eval-maintenance-incremental-module-layer-cleanup'],
       coveredIntents: ['maintenance.refactor_no_behavior_change', 'maintenance.incremental_module_layer_cleanup'],
@@ -514,7 +514,7 @@ function buildPeWr3EvaluationRows(evaluationFixtureIds: readonly string[]): read
       requiredObservableSlots: ['behavior_preservation', 'scope_non_goals', 'narrow_fix_boundary'],
       hardFailFocus: ['length_caused_feature_scope', 'length_caused_broad_rewrite', 'unrelated_scope_added'],
     }),
-    peWr3Row({
+    evaluationRow({
       requirementId: 'source_grounding_appears_in_right_slots',
       fixtureIds: allWorkflowFixtureIds,
       coveredIntents: [...DEBUG_PRIMARY_INTENTS, ...MAINTENANCE_PRIMARY_INTENTS],
@@ -523,7 +523,7 @@ function buildPeWr3EvaluationRows(evaluationFixtureIds: readonly string[]): read
       requiredObservableSlots: ['source_signal_guidance', 'source_ids', 'project_grounding', 'missing_source_note'],
       hardFailFocus: ['generic_filler_source', 'untraceable_source_claim', 'ds_content_template_copy_as_prompt_authority'],
     }),
-    peWr3Row({
+    evaluationRow({
       requirementId: 'missing_evidence_requested_not_hallucinated',
       fixtureIds: ['eval-issue-debug-reproduction-discovery', 'eval-issue-debug-new-bug-report'],
       coveredIntents: ['issue_debug.reproduction_discovery', 'issue_debug.new_bug_report'],
@@ -532,7 +532,7 @@ function buildPeWr3EvaluationRows(evaluationFixtureIds: readonly string[]): read
       requiredObservableSlots: ['missing_information_refs', 'reproduction_or_evidence', 'expected_actual_boundary', 'logs_env_config_request'],
       hardFailFocus: ['fabricated_repro', 'fabricated_root_cause', 'fabricated_files_or_commands'],
     }),
-    peWr3Row({
+    evaluationRow({
       requirementId: 'verification_in_every_debug_and_maintenance_skeleton',
       fixtureIds: allWorkflowFixtureIds,
       coveredIntents: [...DEBUG_PRIMARY_INTENTS, ...MAINTENANCE_PRIMARY_INTENTS],
@@ -541,7 +541,7 @@ function buildPeWr3EvaluationRows(evaluationFixtureIds: readonly string[]): read
       requiredObservableSlots: ['verification_or_test_plan'],
       hardFailFocus: ['debug_missing_verification', 'maintenance_missing_verification', 'action_removed_verification'],
     }),
-    peWr3Row({
+    evaluationRow({
       requirementId: 'rollback_recovery_where_relevant',
       fixtureIds: [
         'eval-maintenance-migration-schema-change',
@@ -560,7 +560,7 @@ function buildPeWr3EvaluationRows(evaluationFixtureIds: readonly string[]): read
       requiredObservableSlots: ['rollback_recovery', 'backup_dry_run', 'migration_order', 'compatibility'],
       hardFailFocus: ['rollback_missing_for_migration', 'rollback_missing_for_dependency', 'incident_recovery_missing'],
     }),
-    peWr3Row({
+    evaluationRow({
       requirementId: 'safety_baseline_mandatory',
       fixtureIds: [
         'eval-maintenance-migration-schema-change',
@@ -579,7 +579,7 @@ function buildPeWr3EvaluationRows(evaluationFixtureIds: readonly string[]): read
       requiredObservableSlots: ['risk_safety_or_confirmation', 'no_secret_leakage', 'source_honesty', 'redaction'],
       hardFailFocus: ['safety_floor_optional', 'safety_hidden_in_ui_only', 'safety_learned_away'],
     }),
-    peWr3Row({
+    evaluationRow({
       requirementId: 'edit_remove_feedback_identifies_removed_workflow_sections',
       fixtureIds: ['acceptance-store-memory-feedback', 'acceptance-composer-body-actions'],
       coveredIntents: ['feedback.section_removed_by_edit', 'composer.action_recomposition'],
@@ -588,7 +588,7 @@ function buildPeWr3EvaluationRows(evaluationFixtureIds: readonly string[]): read
       requiredObservableSlots: ['removed_section_id', 'removed_slot_kind', 'feedback_scope_key', 'protected_guidance_not_learned_away'],
       hardFailFocus: ['removed_slot_not_identified', 'deletion_learns_away_protected_guidance'],
     }),
-    peWr3Row({
+    evaluationRow({
       requirementId: 'mapping_directly_derivable_for_development',
       fixtureIds: allWorkflowFixtureIds,
       coveredIntents: [...DEBUG_PRIMARY_INTENTS, ...MAINTENANCE_PRIMARY_INTENTS],
@@ -600,7 +600,7 @@ function buildPeWr3EvaluationRows(evaluationFixtureIds: readonly string[]): read
   ];
 }
 
-function peWr3Row(input: Omit<PromptEnhancementPeWr3EvaluationRowV1, 'owner' | 'directlyDerivableForDevelopment'>): PromptEnhancementPeWr3EvaluationRowV1 {
+function evaluationRow(input: Omit<PromptEnhancementPeWr3EvaluationRowV1, 'owner' | 'directlyDerivableForDevelopment'>): PromptEnhancementPeWr3EvaluationRowV1 {
   return {
     owner: 'content_semantics',
     directlyDerivableForDevelopment: true,
