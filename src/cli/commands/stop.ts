@@ -501,6 +501,14 @@ export function registerStopCommand(program: import('commander').Command): void 
       // advisory path runs instead.
       const peLaunch: PromptEnhancementStopLaunchFn = async (pending) => {
         const capability = resolvePromptEnhancementCliHostCapabilityV1();
+        // Diagnosability (2026-08-06): record WHICH host branch the PE popup takes + whether the
+        // pending row can open MPS — the two facts a missing-MPS report needs from the log.
+        logger.debug('stop_pe_launch', {
+          cwd: payload.cwd,
+          capabilityState: capability.state,
+          method: capability.state === 'available' ? capability.method : 'none',
+          handoffPresent: Boolean(pending.result.uiView.handoffAndSequenceSummary),
+        });
         if (capability.state === 'unavailable') return { kind: 'not_shown' };
         let popup: PromptEnhancementCliPopupResultV1;
         if (capability.method === 'direct_tty') {

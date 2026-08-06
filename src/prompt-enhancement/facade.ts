@@ -624,3 +624,42 @@ function buildUiView(
     textOnlyDeliveryIsAuthority: false,
   };
 }
+
+/**
+ * Diagnosability (2026-08-06): explain why a prepared result carries NO handoff/sequence summary.
+ * Pure + deterministic — reproduces the emission decision from the result itself so the runtime
+ * (auto.ts) can LOG the exact failing handoff-validation checks that the self-guard, by design,
+ * swallows (the public-diagnostics contract excludes raw reason values). Never throws.
+ */
+export function explainPromptEnhancementSequenceSummaryAbsenceV1(
+  request: PromptEnhancementPrepareRequestV1,
+  result: PromptEnhancementPrepareResultV1,
+): readonly string[] {
+  try {
+    if (result.uiView.handoffAndSequenceSummary) return ['summary_present'];
+    if (result.disposition !== 'show_current_body') return [`disposition:${result.disposition}`];
+    const compound = result.routeDecision.compoundPromptState;
+    const isCandidate = compound === 'multi_intent_one_prompt'
+      || (compound === 'multi_point_same_intent' && result.routeDecision.userPointCoverageRefs.length >= 3);
+    if (!isCandidate) return [`not_sequence_candidate:${compound}`];
+    const handoff = buildPromptEnhancementHandoffMetadataV1({
+      handoffDecisionId: `${result.enhancementId}:handoff`,
+      requestId: request.requestId,
+      projectRoot: request.projectRoot,
+      currentBody: result.currentBody,
+      safetySummary: result.validationSummary,
+      handoffKind: 'compact_sequence_summary_candidate',
+    });
+    const validation = validatePromptEnhancementHandoffMetadataV1(
+      handoff,
+      result.currentBody,
+      result.validationSummary,
+      { requestId: request.requestId, projectRoot: request.projectRoot },
+    );
+    return validation.ok
+      ? ['validation_ok_summary_unexpectedly_absent']
+      : ['summary_dropped_by_validation', ...validation.reasonCodes.slice(0, 6)];
+  } catch (error) {
+    return [`explain_failed:${error instanceof Error ? error.name : 'unknown'}`];
+  }
+}

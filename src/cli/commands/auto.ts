@@ -55,7 +55,7 @@ import {
   type PromptEnhancementDisposition,
   type PromptEnhancementSourceRefV1,
 } from '../../prompt-enhancement/contracts.js';
-import { preparePromptEnhancement } from '../../prompt-enhancement/facade.js';
+import { preparePromptEnhancement, explainPromptEnhancementSequenceSummaryAbsenceV1 } from '../../prompt-enhancement/facade.js';
 import { recordPromptEnhancementFeedbackV1 } from '../../prompt-enhancement/feedback-sink.js';
 import { derivePromptEnhancementFeedbackPolicyV1 } from '../../prompt-enhancement/feedback-policy.js';
 import type { PromptEnhancementPopupEventV1 } from '../../prompt-enhancement/popup-session.js';
@@ -901,13 +901,24 @@ export async function runAuto(
         request,
         result:      preparation.result,
       });
+      const handoffPresent = Boolean(preparation.result.uiView.handoffAndSequenceSummary);
       logger.debug('pending_prompt_enhancement_stored', {
         projectRoot: input.projectRoot,
         sessionId:   mgr.current.sessionId,
         promptCount: mgr.current.promptCount,
         disposition: preparation.disposition,
         sequenceShapedFallback: true,
+        // Diagnosability: whether this stored row can ever open the MPS popup.
+        handoffPresent,
       });
+      // A sequence-shaped prompt that stored WITHOUT a summary is the exact anomaly that was
+      // previously untraceable — name the reason (deterministic re-explain) in the log.
+      if (!handoffPresent) {
+        logger.warn('sequence_summary_absent', {
+          projectRoot: input.projectRoot,
+          reasonCodes: explainPromptEnhancementSequenceSummaryAbsenceV1(request, preparation.result).slice(0, 8),
+        });
+      }
       emitPromptEnhancementCostObservabilityV1(preparation.result, 'prepare', logger);
     }
   };
@@ -1096,12 +1107,23 @@ export async function runAuto(
       request:     peIntegration.request,
       result:      preparation.result,
     });
+    const handoffPresent = Boolean(preparation.result.uiView.handoffAndSequenceSummary);
     logger.debug('pending_prompt_enhancement_stored', {
       projectRoot: input.projectRoot,
       sessionId:   mgr.current.sessionId,
       promptCount: mgr.current.promptCount,
       disposition: preparation.disposition,
+      // Diagnosability: whether this stored row can ever open the MPS popup.
+      handoffPresent,
     });
+    // A sequence-shaped prompt that stored WITHOUT a summary is the exact anomaly that was
+    // previously untraceable — name the reason (deterministic re-explain) in the log.
+    if (!handoffPresent && isPromptEnhancementSequenceShapedTextV1(input.promptText)) {
+      logger.warn('sequence_summary_absent', {
+        projectRoot: input.projectRoot,
+        reasonCodes: explainPromptEnhancementSequenceSummaryAbsenceV1(peIntegration.request, preparation.result).slice(0, 8),
+      });
+    }
     // E9 (P12-G1/G2): measure cost off the result's REAL call-visibility (mode + planned/used
     // counts come from the composer, not the hardcoded request placeholder), and run the PE-G4
     // "cost never weakens behavior" check. Observability-only — this never gates the popup. The
