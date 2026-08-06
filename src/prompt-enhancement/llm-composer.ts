@@ -7,6 +7,12 @@ import {
   PROMPT_ENHANCEMENT_COST_TIMEOUT_MS_V1,
   PROMPT_ENHANCEMENT_COST_VALIDATION_RETRY_COUNT_V1,
 } from './cost-observability.js';
+import { isPromptEnhancementLanguageConsistentV1 } from './language-consistency.js';
+
+const STRONGER_LANGUAGE_DIRECTIVE =
+  '\n\nIMPORTANT: your previous reply drifted from the original language. Write EVERY section' +
+  " strictly in the original prompt's language, slang, and script (do NOT switch to English), and set" +
+  ' detectedLanguageSelfReport correctly.';
 
 /**
  * E4 — bounded LLM composer wording call.
@@ -140,9 +146,11 @@ export async function composeStructuredComposerOutputV1(
   }
 
   const userPrompt = buildUserPrompt(input.originalPromptText, sections);
-  // Malformed / empty replies retry up to the locked count (analysis §33348: retry up
-  // to 3 times); a thrown error (provider unavailable / timeout) is NOT retried — it is
-  // a fast deterministic fallback rather than repeated slow waits before the popup.
+  // Malformed / empty / language-inconsistent replies retry up to the locked count
+  // (§33348: retry up to 3 times). A thrown error (provider unavailable / timeout) is
+  // NOT retried — fast deterministic fallback rather than repeated slow waits. On a
+  // language mismatch the retry carries a stronger language directive (E5/5.3).
+  let languageRetry = false;
   for (let attempt = 0; attempt <= PROMPT_ENHANCEMENT_COST_VALIDATION_RETRY_COUNT_V1; attempt++) {
     let raw: string | null | undefined;
     try {
@@ -152,7 +160,7 @@ export async function composeStructuredComposerOutputV1(
           max_tokens: PROMPT_ENHANCEMENT_COST_OUTPUT_TOKEN_CAP_V1,
           messages: [
             { role: 'system', content: SYSTEM_PROMPT },
-            { role: 'user', content: userPrompt },
+            { role: 'user', content: languageRetry ? userPrompt + STRONGER_LANGUAGE_DIRECTIVE : userPrompt },
           ],
           response_format: { type: 'json_object' },
         },
@@ -163,9 +171,15 @@ export async function composeStructuredComposerOutputV1(
       return undefined;
     }
     const parsed = raw ? parseStructuredComposerOutput(raw, input.enhancementId) : undefined;
-    if (parsed) return parsed;
-    // malformed / empty -> retry (loop continues)
+    if (!parsed) continue; // malformed / empty -> retry
+    if (!isPromptEnhancementLanguageConsistentV1(input.originalPromptText, parsed)) {
+      // Uncovered language or English drift -> retry with a stronger directive.
+      languageRetry = true;
+      continue;
+    }
+    return parsed;
   }
-  // Retries exhausted -> deterministic fallback.
+  // Retries exhausted (malformed or persistent language mismatch) -> deterministic
+  // English fallback (never ship English generated sections for a non-English prompt).
   return undefined;
 }

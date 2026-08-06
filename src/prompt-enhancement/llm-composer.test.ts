@@ -32,6 +32,7 @@ const input = { enhancementId: 'pe:req-1', originalPromptText: 'Fix the failing 
 describe('composeStructuredComposerOutputV1 (E4 / 4.1)', () => {
   it('parses a well-formed model reply into a structured composer output', async () => {
     const reply = JSON.stringify({
+      detectedLanguageSelfReport: 'en',
       sectionDrafts: [{ sectionId: 'sec-verify', bodyText: 'Add a failing test that reproduces the bug, then make it pass.', sourceFactIds: ['fact-a'] }],
       composerClaims: ['claim:fact-a'],
     });
@@ -60,13 +61,14 @@ describe('composeStructuredComposerOutputV1 (E4 / 4.1)', () => {
     expect(sentSystemPrompt).toContain('detectedLanguageSelfReport');
   });
 
-  it('leaves detectedLanguageSelfReport undefined when the model omits it', async () => {
+  it('rejects a reply that omits the self-report (uncovered -> English fallback)', async () => {
+    // No detectedLanguageSelfReport -> not a covered v1 language -> gate rejects ->
+    // retries exhaust -> undefined (deterministic English fallback).
     const reply = JSON.stringify({
       sectionDrafts: [{ sectionId: 'sec-verify', bodyText: 'Verify it.', sourceFactIds: ['fact-a'] }],
       composerClaims: ['claim:fact-a'],
     });
-    const output = await composeStructuredComposerOutputV1(input, client(reply));
-    expect(output!.detectedLanguageSelfReport).toBeUndefined();
+    expect(await composeStructuredComposerOutputV1(input, client(reply))).toBeUndefined();
   });
 
   it('returns undefined on a provider error (deterministic fallback)', async () => {
@@ -99,6 +101,7 @@ describe('composeStructuredComposerOutputV1 (E4 / 4.1)', () => {
 
   it('retries a malformed reply and succeeds on a later valid one (§4d retry 3)', async () => {
     const good = JSON.stringify({
+      detectedLanguageSelfReport: 'en',
       sectionDrafts: [{ sectionId: 'sec-verify', bodyText: 'Verify it.', sourceFactIds: ['fact-a'] }],
       composerClaims: ['claim:fact-a'],
     });
@@ -120,6 +123,29 @@ describe('composeStructuredComposerOutputV1 (E4 / 4.1)', () => {
     expect(calls).toBe(4); // 1 initial + 3 retries
   });
 
+  it('retries a language-drifted reply with a stronger directive, then falls back if it persists', async () => {
+    // Original is Devanagari; the model keeps replying in Latin -> drift -> retries
+    // exhaust -> undefined (English fallback). The retry carries the stronger directive.
+    const devanagariInput = { ...input, originalPromptText: 'लॉगिन बग ठीक करो' };
+    const drifted = JSON.stringify({
+      detectedLanguageSelfReport: 'hi',
+      sectionDrafts: [{ sectionId: 'sec-verify', bodyText: 'Write a failing test first.', sourceFactIds: ['fact-a'] }],
+      composerClaims: ['claim:fact-a'],
+    });
+    let calls = 0;
+    let sawStrongerDirective = false;
+    const driftingClient: PromptEnhancementComposerClientV1 = {
+      chat: { completions: { create: async (body) => {
+        calls += 1;
+        if (body.messages.some((m) => m.content.includes('drifted from the original language'))) sawStrongerDirective = true;
+        return { choices: [{ message: { content: drifted } }] };
+      } } },
+    };
+    expect(await composeStructuredComposerOutputV1(devanagariInput, driftingClient)).toBeUndefined();
+    expect(calls).toBe(4);
+    expect(sawStrongerDirective).toBe(true);
+  });
+
   it('does NOT retry a thrown provider error (fast fallback)', async () => {
     let calls = 0;
     const throwing: PromptEnhancementComposerClientV1 = {
@@ -131,6 +157,7 @@ describe('composeStructuredComposerOutputV1 (E4 / 4.1)', () => {
 
   it('drops non-string source fact ids while keeping the draft', async () => {
     const reply = JSON.stringify({
+      detectedLanguageSelfReport: 'en',
       sectionDrafts: [{ sectionId: 'sec-verify', bodyText: 'Verify it.', sourceFactIds: ['fact-a', 3, null] }],
       composerClaims: ['claim:fact-a'],
     });
