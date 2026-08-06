@@ -26,6 +26,7 @@ import type { PromptEnhancementCostCallIdV1 } from './contracts.js';
 
 const requiredCallIds: readonly PromptEnhancementCostCallIdV1[] = [
   'baseline_pe_composer',
+  'llm_route_decision_call',
   'source_signal_guidance_in_baseline',
   'action_shorter',
   'action_more_thorough',

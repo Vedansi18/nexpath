@@ -354,6 +354,22 @@ const CALL_ROWS: readonly PromptEnhancementAcceptedCostCallInventoryRowV1[] = [
     reasonCodes: ['baseline_composer_llm_backed'],
   }),
   row({
+    // E6: bounded LLM route decision for NL-heavy prompts the deterministic keyword
+    // router soft-skipped. Separate v1 call (route precedes planning, so combining with
+    // the composer is a future optimization). Exact cost numbers get PE-G4 sign-off at
+    // R-track; small output (a route-decision JSON), never a runtime gate.
+    callId: 'llm_route_decision_call',
+    trigger: 'prepare',
+    userVisibleTrigger: 'enhancement_popup_shown',
+    hiddenRuntimeTrigger: 'baseline prepare soft-skipped an NL-heavy prompt (source_b_only / weak-ambiguous) and provider/key/source/safety state permits the bounded route decision',
+    requirementState: 'required_when_contract_executes',
+    productState: 'accepted_v1_llm_backed',
+    calls: [90, 180, 300, 300],
+    separateLlmCallInV1: true,
+    skipCondition: 'skip unless a baseline prepare soft-skipped an NL-heavy prompt and a valid key/provider is available; the deterministic route is always the fallback (never blocks send)',
+    reasonCodes: ['llm_route_decision_llm_backed'],
+  }),
+  row({
     callId: 'source_signal_guidance_in_baseline',
     trigger: 'prepare',
     userVisibleTrigger: 'not_user_visible_included_in_baseline',
