@@ -36,8 +36,8 @@ export interface PromptEnhancementB5EvidenceRegisterPacketV1 {
   requiredDependencies: typeof PROMPT_ENHANCEMENT_B5_1_REQUIRED_DEPENDENCIES_V1;
   rows: readonly PromptEnhancementB5EvidenceRowV1[];
   ownerBoundaries: {
-    hirenSemanticsStorePrivacyCost: 'external';
-    vedansiHostExtension: 'external';
+    contentSemanticsStorePrivacyCost: 'external';
+    hostTransport: 'external';
     testOracle: 'external';
     launchScope: 'external';
   };
@@ -94,8 +94,8 @@ export function buildPromptEnhancementB5EvidenceRegisterV1(
     requiredDependencies: PROMPT_ENHANCEMENT_B5_1_REQUIRED_DEPENDENCIES_V1,
     rows,
     ownerBoundaries: {
-      hirenSemanticsStorePrivacyCost: 'external',
-      vedansiHostExtension: 'external',
+      contentSemanticsStorePrivacyCost: 'external',
+      hostTransport: 'external',
       testOracle: 'external',
       launchScope: 'external',
     },

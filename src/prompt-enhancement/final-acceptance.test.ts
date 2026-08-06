@@ -50,9 +50,9 @@ describe('Phase 15 cross-layer final acceptance', () => {
       surfaceEvidence,
       negativeAuthorityChecks,
       signoff: {
-        hirenFinalSignoff: 'missing',
-        bhavneshCrossLayerAcceptance: 'missing',
-        hirenTestSignoff: 'missing',
+        finalSignoff: 'missing',
+        crossLayerAcceptance: 'missing',
+        testSignoff: 'missing',
       },
     });
 
@@ -94,9 +94,9 @@ describe('Phase 15 cross-layer final acceptance', () => {
       surfaceEvidence,
       negativeAuthorityChecks,
       signoff: {
-        hirenFinalSignoff: 'approved',
-        bhavneshCrossLayerAcceptance: 'approved',
-        hirenTestSignoff: 'approved',
+        finalSignoff: 'approved',
+        crossLayerAcceptance: 'approved',
+        testSignoff: 'approved',
       },
     });
 
@@ -133,9 +133,9 @@ describe('Phase 15 cross-layer final acceptance', () => {
           }
         : row),
       signoff: {
-        hirenFinalSignoff: 'approved',
-        bhavneshCrossLayerAcceptance: 'approved',
-        hirenTestSignoff: 'approved',
+        finalSignoff: 'approved',
+        crossLayerAcceptance: 'approved',
+        testSignoff: 'approved',
       },
     });
 
@@ -175,9 +175,9 @@ describe('Phase 15 cross-layer final acceptance', () => {
       surfaceEvidence,
       negativeAuthorityChecks,
       signoff: {
-        hirenFinalSignoff: 'approved',
-        bhavneshCrossLayerAcceptance: 'approved',
-        hirenTestSignoff: 'approved',
+        finalSignoff: 'approved',
+        crossLayerAcceptance: 'approved',
+        testSignoff: 'approved',
       },
     });
 
@@ -198,9 +198,9 @@ describe('Phase 15 cross-layer final acceptance', () => {
       surfaceEvidence,
       negativeAuthorityChecks,
       signoff: {
-        hirenFinalSignoff: 'approved',
-        bhavneshCrossLayerAcceptance: 'approved',
-        hirenTestSignoff: 'approved',
+        finalSignoff: 'approved',
+        crossLayerAcceptance: 'approved',
+        testSignoff: 'approved',
       },
     });
 

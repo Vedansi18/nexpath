@@ -18,7 +18,7 @@ const approvedFacts: PromptEnhancementB5_3ReleaseCheckInputV1 = {
     state: 'pass', revision: 'ae17793', command: 'private-boundary scan',
     output: 'no forbidden public findings', owner: 'release_check', unresolved: null,
   },
-  ownerSignoffs: { hirenLaunch: 'approved', layerOwners: 'approved' },
+  ownerSignoffs: { ownerLaunch: 'approved', layerOwners: 'approved' },
   publicLaunchFacts: {
     projectRoot: '/approved-recheck',
     gitignoreText: 'src/prompt-enhancement/\nsrc/ext-vscode/prebuilds/\n',

@@ -72,9 +72,9 @@ export interface PromptEnhancementFinalAcceptanceNegativeAuthorityCheckV1 {
 }
 
 export interface PromptEnhancementFinalAcceptanceSignoffV1 {
-  hirenFinalSignoff: 'missing' | 'approved';
-  bhavneshCrossLayerAcceptance: 'missing' | 'approved';
-  hirenTestSignoff: 'missing' | 'approved';
+  finalSignoff: 'missing' | 'approved';
+  crossLayerAcceptance: 'missing' | 'approved';
+  testSignoff: 'missing' | 'approved';
 }
 
 export interface PromptEnhancementFinalConsistencyEvidenceV1 {
@@ -364,8 +364,8 @@ function validatePromptEnhancementFinalAcceptanceInputV1(input: {
     if (row.evidenceRefs.length === 0) reasonCodes.push(`negative_authority_missing_evidence_ref:${authority}`);
   }
 
-  if (input.signoff.hirenFinalSignoff !== 'approved') reasonCodes.push('final_signoff_missing:hiren');
-  if (input.signoff.bhavneshCrossLayerAcceptance !== 'approved') reasonCodes.push('final_signoff_missing:cross_layer_acceptance');
-  if (input.signoff.hirenTestSignoff !== 'approved') reasonCodes.push('final_signoff_missing:hiren_test');
+  if (input.signoff.finalSignoff !== 'approved') reasonCodes.push('final_signoff_missing:hiren');
+  if (input.signoff.crossLayerAcceptance !== 'approved') reasonCodes.push('final_signoff_missing:cross_layer_acceptance');
+  if (input.signoff.testSignoff !== 'approved') reasonCodes.push('final_signoff_missing:hiren_test');
   return reasonCodes;
 }

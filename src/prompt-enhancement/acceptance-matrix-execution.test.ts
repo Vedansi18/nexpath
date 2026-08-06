@@ -69,7 +69,7 @@ describe('R1 — PE-EM-3 acceptance-matrix execution (Bhavnesh release-check)', 
     const packet = buildPromptEnhancementAcceptancePacketV1();
     // The matrix must NOT self-certify: readiness flip + numeric threshold are Hiren's release sign-off.
     expect(packet.readinessClaimAllowed).toBe(false);
-    expect(packet.hirenNumericThresholdOracleSignoffState).toBe('required_before_quality_or_readiness_claim');
+    expect(packet.numericThresholdOracleSignoffState).toBe('required_before_quality_or_readiness_claim');
     const validation = validatePromptEnhancementAcceptancePacketV1(packet);
     expect(validation.ok).toBe(true); // honest shape validates; it does not claim readiness
     // Every required family has a fixture (coverage) — the corpus the manual test-plan evaluates.

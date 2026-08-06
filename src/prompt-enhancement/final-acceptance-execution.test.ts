@@ -60,7 +60,7 @@ function todayInput(): PromptEnhancementFinalAcceptanceInputV1 {
         'delivery.ts:baseInvariants',                                       // same-turn / auto-send claims held false
       ])),
     // Bhavnesh cross-layer acceptance IS provided; Hiren's two sign-offs are genuinely outstanding.
-    signoff: { hirenFinalSignoff: 'missing', bhavneshCrossLayerAcceptance: 'approved', hirenTestSignoff: 'missing' },
+    signoff: { finalSignoff: 'missing', crossLayerAcceptance: 'approved', testSignoff: 'missing' },
     finalConsistencyEvidence: {
       sourceSyncScanRerunAgainstLatestCheckout: true,
       staleActiveInstructionScanPassed: true,

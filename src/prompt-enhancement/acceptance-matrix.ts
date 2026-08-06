@@ -106,8 +106,8 @@ export interface PromptEnhancementAcceptancePacketV1 {
   schemaVersion: typeof PROMPT_ENHANCEMENT_CONTRACT_VERSION;
   packetId: 'pe-em3-test-acceptance-matrix-v1';
   status: PromptEnhancementAcceptanceStatusV1;
-  hirenSignoffState: 'required_before_readiness_claim';
-  hirenNumericThresholdOracleSignoffState: 'required_before_quality_or_readiness_claim';
+  ownerSignoffState: 'required_before_readiness_claim';
+  numericThresholdOracleSignoffState: 'required_before_quality_or_readiness_claim';
   ownerReviewedRubricObservationState: 'required_before_quality_or_readiness_claim';
   readinessClaimAllowed: false;
   acceptanceTargetSurfaces: readonly string[];
@@ -249,8 +249,8 @@ export function buildPromptEnhancementAcceptancePacketV1(): PromptEnhancementAcc
     schemaVersion: PROMPT_ENHANCEMENT_CONTRACT_VERSION,
     packetId: 'pe-em3-test-acceptance-matrix-v1',
     status: 'matrix_defined_waiting_for_execution',
-    hirenSignoffState: 'required_before_readiness_claim',
-    hirenNumericThresholdOracleSignoffState: 'required_before_quality_or_readiness_claim',
+    ownerSignoffState: 'required_before_readiness_claim',
+    numericThresholdOracleSignoffState: 'required_before_quality_or_readiness_claim',
     ownerReviewedRubricObservationState: 'required_before_quality_or_readiness_claim',
     readinessClaimAllowed: false,
     acceptanceTargetSurfaces: [
@@ -344,8 +344,8 @@ export function validatePromptEnhancementAcceptancePacketV1(
   if (packet.schemaVersion !== PROMPT_ENHANCEMENT_CONTRACT_VERSION) reasonCodes.push('schema_version_mismatch');
   if (packet.packetId !== 'pe-em3-test-acceptance-matrix-v1') reasonCodes.push('packet_id_mismatch');
   if (packet.readinessClaimAllowed !== false) reasonCodes.push('readiness_claim_must_remain_false');
-  if (packet.hirenSignoffState !== 'required_before_readiness_claim') reasonCodes.push('hiren_signoff_gate_missing');
-  if (packet.hirenNumericThresholdOracleSignoffState !== 'required_before_quality_or_readiness_claim') reasonCodes.push('hiren_numeric_threshold_oracle_signoff_missing');
+  if (packet.ownerSignoffState !== 'required_before_readiness_claim') reasonCodes.push('hiren_signoff_gate_missing');
+  if (packet.numericThresholdOracleSignoffState !== 'required_before_quality_or_readiness_claim') reasonCodes.push('hiren_numeric_threshold_oracle_signoff_missing');
   if (packet.ownerReviewedRubricObservationState !== 'required_before_quality_or_readiness_claim') reasonCodes.push('owner_reviewed_rubric_observation_gate_missing');
   for (const targetSurface of ['src/prompt-enhancement/contracts', 'src/prompt-enhancement/engine', 'src/prompt-enhancement/popup', 'src/prompt-enhancement/store_ports', 'src/prompt-enhancement/delivery_boundary']) {
     if (!packet.acceptanceTargetSurfaces.includes(targetSurface)) reasonCodes.push(`missing_acceptance_target_surface:${targetSurface}`);

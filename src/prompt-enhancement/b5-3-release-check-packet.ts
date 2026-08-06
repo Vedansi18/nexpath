@@ -25,7 +25,7 @@ export interface PromptEnhancementB5_3ReleaseCheckInputV1 {
   buildTestImportEvidence: PromptEnhancementB5_3EvidenceItemV1;
   publicSafetyEvidence: PromptEnhancementB5_3EvidenceItemV1;
   ownerSignoffs: {
-    hirenLaunch: 'missing' | 'approved';
+    ownerLaunch: 'missing' | 'approved';
     layerOwners: 'missing' | 'partial' | 'approved';
   };
   publicLaunchFacts: PromptEnhancementPublicLaunchFileFactsV1;
@@ -78,7 +78,7 @@ const DEFAULT_INPUT: PromptEnhancementB5_3ReleaseCheckInputV1 = {
   depB501EvidenceRevision: null,
   buildTestImportEvidence: DEFAULT_EVIDENCE,
   publicSafetyEvidence: DEFAULT_EVIDENCE,
-  ownerSignoffs: { hirenLaunch: 'missing', layerOwners: 'missing' },
+  ownerSignoffs: { ownerLaunch: 'missing', layerOwners: 'missing' },
   publicLaunchFacts: BLOCKED_PUBLIC_FACTS,
 };
 
@@ -101,7 +101,7 @@ export function buildPromptEnhancementB5_3ReleaseCheckPacketV1(
   if (!merged.depB501EvidenceRevision) reasonCodes.push('dep_b5_01_evidence_revision_missing');
   if (merged.buildTestImportEvidence.state !== 'pass') reasonCodes.push('build_test_import_evidence_missing_or_unpassed');
   if (merged.publicSafetyEvidence.state !== 'pass') reasonCodes.push('public_safety_evidence_missing_or_unpassed');
-  if (merged.ownerSignoffs.hirenLaunch !== 'approved') reasonCodes.push('hiren_launch_signoff_missing');
+  if (merged.ownerSignoffs.ownerLaunch !== 'approved') reasonCodes.push('hiren_launch_signoff_missing');
   if (merged.ownerSignoffs.layerOwners !== 'approved') reasonCodes.push('layer_owner_signoff_missing');
   if (!publicLaunchPacket.publicPromotionAllowed) reasonCodes.push('public_launch_recheck_not_ready');
   const hardFail = publicLaunchPacket.status === 'blocked_by_public_launch_hard_fail';

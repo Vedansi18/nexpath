@@ -37,8 +37,8 @@ describe('B5.1 evidence intake and owner register', () => {
     expect(packet.rows[0]?.closureDecision).toBe('blocked_pending_owner_evidence');
     expect(packet.reasonCodes).toContain('cross_layer_evidence_incomplete_or_owner_blocked');
     expect(packet.ownerBoundaries).toEqual({
-      hirenSemanticsStorePrivacyCost: 'external',
-      vedansiHostExtension: 'external',
+      contentSemanticsStorePrivacyCost: 'external',
+      hostTransport: 'external',
       testOracle: 'external',
       launchScope: 'external',
     });

@@ -29,8 +29,8 @@ describe('Phase 13 PE-EM-3 test and acceptance matrix', () => {
     });
     expect(packet.packetId).toBe('pe-em3-test-acceptance-matrix-v1');
     expect(packet.readinessClaimAllowed).toBe(false);
-    expect(packet.hirenSignoffState).toBe('required_before_readiness_claim');
-    expect(packet.hirenNumericThresholdOracleSignoffState).toBe('required_before_quality_or_readiness_claim');
+    expect(packet.ownerSignoffState).toBe('required_before_readiness_claim');
+    expect(packet.numericThresholdOracleSignoffState).toBe('required_before_quality_or_readiness_claim');
     expect(packet.ownerReviewedRubricObservationState).toBe('required_before_quality_or_readiness_claim');
     expect(packet.launchBoundary).toBe('not_phase_13_public_launch_recheck');
     expect(packet.futureSequenceRuntimeBoundary.metadataOnlyInV1).toBe(true);
