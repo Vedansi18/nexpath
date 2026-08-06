@@ -28,7 +28,7 @@ export interface PromptEnhancementB4FixturePacketV1 {
   readinessClaimAllowed: false;
   requiredExternalInputs: readonly ['DEP-B4-01', 'DEP-TEST-01'];
   rows: readonly PromptEnhancementB4FixtureRowV1[];
-  focusedCommand: 'npx vitest run src/prompt-enhancement/b4-fixture-packet.test.ts';
+  focusedCommand: 'npx vitest run src/prompt-enhancement/fixture-packet.test.ts';
   evidenceRule: 'render_and_public_boundary_assertions_only';
   forbiddenEvidence: readonly [
     'config_validation_or_defaults',
@@ -58,7 +58,7 @@ const REQUIRED_DEPENDENCIES: readonly ['DEP-B4-01', 'DEP-TEST-01'] = [
   'DEP-TEST-01',
 ];
 
-const FOCUSED_COMMAND = 'npx vitest run src/prompt-enhancement/b4-fixture-packet.test.ts';
+const FOCUSED_COMMAND = 'npx vitest run src/prompt-enhancement/fixture-packet.test.ts';
 
 export function buildPromptEnhancementB4FixturePacketV1(): PromptEnhancementB4FixturePacketV1 {
   return {

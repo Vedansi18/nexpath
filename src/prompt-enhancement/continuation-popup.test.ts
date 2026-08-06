@@ -14,7 +14,7 @@ import {
   createPromptEnhancementMpsContinuationCancelIntentV1,
   createPromptEnhancementMpsContinuationSendIntentV1,
   createPromptEnhancementMpsCustomInterruptionIntentV1,
-} from './b3-continuation-popup.js';
+} from './continuation-popup.js';
 
 function request(): PromptEnhancementPrepareRequestV1 {
   const sourceRef: PromptEnhancementSourceRefV1 = {

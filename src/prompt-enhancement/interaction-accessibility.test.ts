@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildPromptEnhancementMpsInteractionAccessibilityModelV1 } from './b3-interaction-accessibility.js';
+import { buildPromptEnhancementMpsInteractionAccessibilityModelV1 } from './interaction-accessibility.js';
 
 describe('B3.5 MPS interaction, accessibility, and visual hierarchy', () => {
   it('keeps first-popup focus order and first-only Sequence plan distinct from Cancel', () => {

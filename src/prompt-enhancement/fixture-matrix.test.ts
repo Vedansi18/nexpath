@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildPromptEnhancementB3FixtureMatrixV1,
   runPromptEnhancementB3FixtureRowV1,
-} from './b3-fixture-matrix.js';
+} from './fixture-matrix.js';
 
 describe('B3.4 MPS UI fixture matrix', () => {
   it('defines the locked first/later/interruption/cancel/negative scenarios', () => {

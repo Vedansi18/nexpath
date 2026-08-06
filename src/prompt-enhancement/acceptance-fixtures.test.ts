@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildPromptEnhancementB4AcceptanceFixturePacketV1,
   runPromptEnhancementB4AcceptanceFixtureV1,
-} from './b4-acceptance-fixtures.js';
+} from './acceptance-fixtures.js';
 
 describe('B4.4 configuration/tweak UI acceptance fixtures', () => {
   it('defines every required local UI-only state fixture without readiness claim', () => {

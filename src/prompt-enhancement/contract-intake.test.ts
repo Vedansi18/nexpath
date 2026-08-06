@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildPromptEnhancementB3ContractIntakePacketV1,
   type PromptEnhancementB3ContractEvidenceV1,
-} from './b3-contract-intake.js';
+} from './contract-intake.js';
 
 const completeEvidence: readonly PromptEnhancementB3ContractEvidenceV1[] = [
   { evidenceId: 'DEP-B3-01', kind: 'mps_handoff', owner: 'engine_contract', state: 'supplied', contractRevision: 'content-owner-mps-v1', sourceRefs: ['content-owner:handoff:v1'] },

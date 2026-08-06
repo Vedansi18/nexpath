@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildPromptEnhancementB5_1aH1RegressionMapV1 } from './b5-1a-h1-regression-map.js';
+import { buildPromptEnhancementB5_1aH1RegressionMapV1 } from './regression-map.js';
 
 describe('B5.1a-H1 prompt-start regression and acceptance mapping', () => {
   it('records the current legacy baseline separately from PE acceptance', () => {

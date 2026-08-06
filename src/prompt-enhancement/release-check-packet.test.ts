@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildPromptEnhancementB5_3ReleaseCheckPacketV1,
   type PromptEnhancementB5_3ReleaseCheckInputV1,
-} from './b5-3-release-check-packet.js';
+} from './release-check-packet.js';
 
 const approvedFacts: PromptEnhancementB5_3ReleaseCheckInputV1 = {
   observedPrivateRevision: 'ae17793',

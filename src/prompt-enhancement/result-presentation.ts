@@ -7,7 +7,7 @@ import { validatePromptEnhancementHandoffMetadataV1 } from './handoff-metadata.j
 import type {
   PromptEnhancementMpsContinuationIdentityV1,
   PromptEnhancementMpsContinuationIntentV1,
-} from './b3-continuation-popup.js';
+} from './continuation-popup.js';
 
 export type PromptEnhancementMpsTypedResultStateV1 =
   | 'send_current_pending'

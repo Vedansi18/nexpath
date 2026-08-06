@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildPromptEnhancementB4ConfigFixtureMatrixV1,
   runPromptEnhancementB4ConfigFixtureV1,
-} from './b4-config-fixture-matrix.js';
+} from './config-fixture-matrix.js';
 
 describe('B4.5 configuration UI fixture matrix', () => {
   it('defines every configuration matrix row without claiming readiness', () => {

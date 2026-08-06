@@ -9,7 +9,7 @@ import {
   PROMPT_ENHANCEMENT_MPS_FIRST_POPUP_LAYOUT_V1,
   PROMPT_ENHANCEMENT_MPS_FIRST_POPUP_TITLE_V1,
   type PromptEnhancementMpsFirstPopupModelV1,
-} from './b3-first-popup.js';
+} from './first-popup.js';
 import {
   PROMPT_ENHANCEMENT_MPS_CONTINUATION_LAYOUT_V1,
   PROMPT_ENHANCEMENT_MPS_CONTINUATION_POPUP_HEADING_V1,
@@ -20,7 +20,7 @@ import {
   createPromptEnhancementMpsContinuationSendIntentV1,
   createPromptEnhancementMpsCustomInterruptionIntentV1,
   type PromptEnhancementMpsContinuationPopupModelV1,
-} from './b3-continuation-popup.js';
+} from './continuation-popup.js';
 
 const ESC = String.fromCharCode(27);
 

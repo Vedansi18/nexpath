@@ -9,8 +9,8 @@ import { buildPromptEnhancementHandoffMetadataV1 } from './handoff-metadata.js';
 import { preparePromptEnhancement } from './facade.js';
 import { buildPromptEnhancementCostVisibilityMetadataV1 } from './cost-observability.js';
 import { getPromptStartStopSourceSnapshot } from './source-reality.js';
-import { buildPromptEnhancementMpsContinuationPopupV1 } from './b3-continuation-popup.js';
-import { buildPromptEnhancementMpsResultPresentationV1 } from './b3-result-presentation.js';
+import { buildPromptEnhancementMpsContinuationPopupV1 } from './continuation-popup.js';
+import { buildPromptEnhancementMpsResultPresentationV1 } from './result-presentation.js';
 
 function request(): PromptEnhancementPrepareRequestV1 {
   const sourceRef: PromptEnhancementSourceRefV1 = {

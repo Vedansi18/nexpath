@@ -46,7 +46,7 @@ export interface PromptEnhancementB5_2NegativeAcceptanceMatrixV1 {
   reasonCodes: readonly string[];
 }
 
-const FOCUSED_COMMAND = 'npx vitest run src/prompt-enhancement/b5-2-negative-acceptance-matrix.test.ts';
+const FOCUSED_COMMAND = 'npx vitest run src/prompt-enhancement/negative-acceptance-matrix.test.ts';
 const NO_SIDE_EFFECTS = [
   'no_pe_popup_activation',
   'no_send_or_delivery',

@@ -42,7 +42,7 @@ export interface PromptEnhancementB4AcceptancePacketV1 {
   contractRevision: 'pe-tweak-v1';
   status: 'local_source_backed';
   readinessClaimAllowed: false;
-  focusedCommand: 'npx vitest run src/prompt-enhancement/b4-acceptance-fixtures.test.ts';
+  focusedCommand: 'npx vitest run src/prompt-enhancement/acceptance-fixtures.test.ts';
   rows: readonly PromptEnhancementB4AcceptanceFixtureV1[];
 }
 
@@ -108,7 +108,7 @@ export function buildPromptEnhancementB4AcceptanceFixturePacketV1(): PromptEnhan
     contractRevision: CONTRACT_REVISION,
     status: 'local_source_backed',
     readinessClaimAllowed: false,
-    focusedCommand: 'npx vitest run src/prompt-enhancement/b4-acceptance-fixtures.test.ts',
+    focusedCommand: 'npx vitest run src/prompt-enhancement/acceptance-fixtures.test.ts',
     rows: ROWS,
   };
 }

@@ -34,7 +34,7 @@ export interface PromptEnhancementB3FixtureMatrixV1 {
   matrixId: 'b3-sequence-ui-fixture-matrix-v1';
   status: 'local_source_backed';
   readinessClaimAllowed: false;
-  focusedCommand: 'npx vitest run src/prompt-enhancement/b3-fixture-matrix.test.ts';
+  focusedCommand: 'npx vitest run src/prompt-enhancement/fixture-matrix.test.ts';
   rows: readonly PromptEnhancementB3FixtureRowV1[];
 }
 
@@ -86,7 +86,7 @@ export function buildPromptEnhancementB3FixtureMatrixV1(): PromptEnhancementB3Fi
     matrixId: 'b3-sequence-ui-fixture-matrix-v1',
     status: 'local_source_backed',
     readinessClaimAllowed: false,
-    focusedCommand: 'npx vitest run src/prompt-enhancement/b3-fixture-matrix.test.ts',
+    focusedCommand: 'npx vitest run src/prompt-enhancement/fixture-matrix.test.ts',
     rows: ROWS,
   };
 }

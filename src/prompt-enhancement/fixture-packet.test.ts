@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildPromptEnhancementB4FixturePacketV1,
   validatePromptEnhancementB4FixturePacketV1,
-} from './b4-fixture-packet.js';
+} from './fixture-packet.js';
 
 describe('DEP-B4-01 / DEP-TEST-01 B4 fixture intake boundary', () => {
   it('defines all B4 fixture groups without claiming readiness', () => {

@@ -2,7 +2,7 @@ import {
   buildPromptEnhancementB3ContractIntakePacketV1,
   type PromptEnhancementB3ContractIntakeInputV1,
   type PromptEnhancementB3ContractIntakePacketV1,
-} from './b3-contract-intake.js';
+} from './contract-intake.js';
 
 // ---------------------------------------------------------------------------
 // UI-5 — MPS typed-runtime intake gate (ui-owner consumer).

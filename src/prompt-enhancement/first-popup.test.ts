@@ -10,7 +10,7 @@ import {
   buildPromptEnhancementMpsFirstPopupV1,
   createPromptEnhancementMpsCancelIntentV1,
   createPromptEnhancementMpsCurrentBodyIntentV1,
-} from './b3-first-popup.js';
+} from './first-popup.js';
 import { buildPromptEnhancementCostVisibilityMetadataV1 } from './cost-observability.js';
 import { getPromptStartStopSourceSnapshot } from './source-reality.js';
 

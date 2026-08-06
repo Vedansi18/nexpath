@@ -62,7 +62,7 @@ function defaultRow(): PromptEnhancementB5EvidenceRowV1 {
     contractRevision: null,
     sourceRevision: null,
     fixtureIds: [],
-    focusedCommand: 'npx vitest run src/prompt-enhancement/b5-evidence-register.test.ts',
+    focusedCommand: 'npx vitest run src/prompt-enhancement/evidence-register.test.ts',
     expectedOutput: 'All cross-layer evidence fields are supplied or remain explicitly blocked.',
     observedOutput: null,
     safeFallback: 'blocked_no_send',

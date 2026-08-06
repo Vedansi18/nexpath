@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildPromptEnhancementB5EvidenceRegisterV1,
   type PromptEnhancementB5EvidenceRowV1,
-} from './b5-evidence-register.js';
+} from './evidence-register.js';
 
 const completeRow: PromptEnhancementB5EvidenceRowV1 = {
   rowId: 'b5-api-ui-stop-store-launch',
@@ -16,7 +16,7 @@ const completeRow: PromptEnhancementB5EvidenceRowV1 = {
   contractRevision: 'contracts-v1',
   sourceRevision: '221d379',
   fixtureIds: ['DEP-TEST-01-B5-01'],
-  focusedCommand: 'npx vitest run src/prompt-enhancement/b5-evidence-register.test.ts',
+  focusedCommand: 'npx vitest run src/prompt-enhancement/evidence-register.test.ts',
   expectedOutput: 'Each cross-layer row records typed evidence and owner closure.',
   observedOutput: 'Evidence packet observed with all required fields.',
   safeFallback: 'typed_state_only',

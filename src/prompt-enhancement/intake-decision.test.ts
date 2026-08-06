@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { evaluatePromptEnhancementMpsIntakeDecisionV1 } from './b3-intake-decision.js';
-import type { PromptEnhancementB3ContractEvidenceV1 } from './b3-contract-intake.js';
+import { evaluatePromptEnhancementMpsIntakeDecisionV1 } from './intake-decision.js';
+import type { PromptEnhancementB3ContractEvidenceV1 } from './contract-intake.js';
 
 const completeEvidence: readonly PromptEnhancementB3ContractEvidenceV1[] = [
   { evidenceId: 'DEP-B3-01', kind: 'mps_handoff', owner: 'engine_contract', state: 'supplied', contractRevision: 'content-owner-mps-v1', sourceRefs: ['content-owner:handoff:v1'] },

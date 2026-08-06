@@ -55,7 +55,7 @@ function todayInput(): PromptEnhancementFinalAcceptanceInputV1 {
     ],
     negativeAuthorityChecks: PROMPT_ENHANCEMENT_FINAL_ACCEPTANCE_REQUIRED_NEGATIVE_AUTHORITIES_V1.map((authority) =>
       blockedNegative(authority, [
-        'b5-2-negative-acceptance.test.ts',                                 // rigorous per-input negative fixtures (R2 §4b)
+        'negative-acceptance.test.ts',                                 // rigorous per-input negative fixtures (R2 §4b)
         'delivery.ts:validatePromptEnhancementExtensionDeliveryPayload',    // legacy-DS + raw key rejection
         'delivery.ts:baseInvariants',                                       // same-turn / auto-send claims held false
       ])),

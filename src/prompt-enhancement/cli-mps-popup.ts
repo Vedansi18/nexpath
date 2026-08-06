@@ -1,11 +1,11 @@
-import type { PromptEnhancementMpsFirstPopupModelV1 } from './b3-first-popup.js';
-import type { PromptEnhancementMpsContinuationPopupModelV1 } from './b3-continuation-popup.js';
+import type { PromptEnhancementMpsFirstPopupModelV1 } from './first-popup.js';
+import type { PromptEnhancementMpsContinuationPopupModelV1 } from './continuation-popup.js';
 
 // ---------------------------------------------------------------------------
 // UI-6 — MPS first-popup host rendering (alignment plan §3.3).
 //
 // Pure, host-independent projection: it renders a validated first-popup model
-// (built by `b3-first-popup.ts`) into the locked §3.3 terminal frame. It has NO
+// (built by `first-popup.ts`) into the locked §3.3 terminal frame. It has NO
 // runtime, queue, pointer, Stop correlation, terminality, delivery, or host
 // transport, and never renders `Use original`, future prompt text, a queue
 // pointer, or an automatic send/advance. Focus is a display cue only

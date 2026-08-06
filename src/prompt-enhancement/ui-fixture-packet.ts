@@ -39,7 +39,7 @@ export interface PromptEnhancementB2FixturePacketV1 {
     'DEP-TEST-01',
   ];
   rows: readonly PromptEnhancementB2FixtureRowV1[];
-  focusedCommand: 'npx vitest run src/prompt-enhancement/b2-fixture-packet.test.ts';
+  focusedCommand: 'npx vitest run src/prompt-enhancement/ui-fixture-packet.test.ts';
   evidenceRule: 'render_and_typed_event_assertions_only';
   forbiddenEvidence: readonly [
     'host_transport_success',
@@ -86,7 +86,7 @@ export function buildPromptEnhancementB2FixturePacketV1(): PromptEnhancementB2Fi
         expectedVisibleOutcomes: ['typed eligible/open renders one popup', 'typed no-popup/deferred/stale/unavailable renders no interactive send surface'],
         expectedTypedEvents: ['render emits no send, feedback, cancel, or delivery event'],
         negativeOracle: 'legacy Decision Session, product feedback, or missing typed state cannot create PE authority',
-        focusedCommand: 'npx vitest run src/prompt-enhancement/b2-fixture-packet.test.ts', observedOutcome: 'not_run_pending_external_inputs', oracleOwner: 'external_owner_not_supplied', passFail: 'blocked_pending_external_inputs', closureDecision: 'blocked_pending_external_inputs',
+        focusedCommand: 'npx vitest run src/prompt-enhancement/ui-fixture-packet.test.ts', observedOutcome: 'not_run_pending_external_inputs', oracleOwner: 'external_owner_not_supplied', passFail: 'blocked_pending_external_inputs', closureDecision: 'blocked_pending_external_inputs',
       },
       {
         rowId: 'b2-5-explicit-intent', group: 'explicit_intent', phaseRefs: ['B2.2'], owner: 'ui_app',
@@ -94,7 +94,7 @@ export function buildPromptEnhancementB2FixturePacketV1(): PromptEnhancementB2Fi
         expectedVisibleOutcomes: ['current-body and original controls remain distinct and identity-bound'],
         expectedTypedEvents: ['current control emits exactly one typed current intent', 'original control emits exactly one typed original intent', 'render/focus/retry/adjustment emits no send intent'],
         negativeOracle: 'stale, duplicate, dirty-detail, or non-user event cannot produce delivery intent',
-        focusedCommand: 'npx vitest run src/prompt-enhancement/b2-fixture-packet.test.ts', observedOutcome: 'not_run_pending_external_inputs', oracleOwner: 'external_owner_not_supplied', passFail: 'blocked_pending_external_inputs', closureDecision: 'blocked_pending_external_inputs',
+        focusedCommand: 'npx vitest run src/prompt-enhancement/ui-fixture-packet.test.ts', observedOutcome: 'not_run_pending_external_inputs', oracleOwner: 'external_owner_not_supplied', passFail: 'blocked_pending_external_inputs', closureDecision: 'blocked_pending_external_inputs',
       },
       {
         rowId: 'b2-5-cancel-recovery', group: 'cancel_recovery', phaseRefs: ['B2.3'], owner: 'ui_app',
@@ -102,7 +102,7 @@ export function buildPromptEnhancementB2FixturePacketV1(): PromptEnhancementB2Fi
         expectedVisibleOutcomes: ['cancel/no-send, timeout, invalid/stale, unsupported, and failure show typed safe recovery'],
         expectedTypedEvents: ['no automatic send; only a fresh explicit typed fallback/cancel action may be presented'],
         negativeOracle: 'recovery state cannot silently convert into current/original delivery or transport',
-        focusedCommand: 'npx vitest run src/prompt-enhancement/b2-fixture-packet.test.ts', observedOutcome: 'not_run_pending_external_inputs', oracleOwner: 'external_owner_not_supplied', passFail: 'blocked_pending_external_inputs', closureDecision: 'blocked_pending_external_inputs',
+        focusedCommand: 'npx vitest run src/prompt-enhancement/ui-fixture-packet.test.ts', observedOutcome: 'not_run_pending_external_inputs', oracleOwner: 'external_owner_not_supplied', passFail: 'blocked_pending_external_inputs', closureDecision: 'blocked_pending_external_inputs',
       },
       {
         rowId: 'b2-5-host-status', group: 'host_status_display', phaseRefs: ['B2.4'], owner: 'ui_app',
@@ -110,7 +110,7 @@ export function buildPromptEnhancementB2FixturePacketV1(): PromptEnhancementB2Fi
         expectedVisibleOutcomes: ['inserted, copied, manual-paste, manual-submit, failed, unknown, unsupported, and waiting remain distinct'],
         expectedTypedEvents: ['display emits no transport, execution, consent, completion, or sequence event'],
         negativeOracle: 'platform, foreground, copy/paste, insertion, or transport attempt cannot become sent/execution proof',
-        focusedCommand: 'npx vitest run src/prompt-enhancement/b2-fixture-packet.test.ts', observedOutcome: 'not_run_pending_external_inputs', oracleOwner: 'external_owner_not_supplied', passFail: 'blocked_pending_external_inputs', closureDecision: 'blocked_pending_external_inputs',
+        focusedCommand: 'npx vitest run src/prompt-enhancement/ui-fixture-packet.test.ts', observedOutcome: 'not_run_pending_external_inputs', oracleOwner: 'external_owner_not_supplied', passFail: 'blocked_pending_external_inputs', closureDecision: 'blocked_pending_external_inputs',
       },
       {
         rowId: 'b2-5-regression-boundary', group: 'regression_boundary', phaseRefs: ['B2.1', 'B2.2', 'B2.3', 'B2.4'], owner: 'ui_app',
@@ -118,10 +118,10 @@ export function buildPromptEnhancementB2FixturePacketV1(): PromptEnhancementB2Fi
         expectedVisibleOutcomes: ['only the supplied typed PE state is rendered'],
         expectedTypedEvents: ['old Decision Session, raw Stop reason, selectedPrompt, clipboard/manual text, foreground, and transport attempt emit no PE authority'],
         negativeOracle: 'legacy/runtime/transport evidence cannot activate popup, send, delivery, feedback, or sequence progress',
-        focusedCommand: 'npx vitest run src/prompt-enhancement/b2-fixture-packet.test.ts', observedOutcome: 'not_run_pending_external_inputs', oracleOwner: 'external_owner_not_supplied', passFail: 'blocked_pending_external_inputs', closureDecision: 'blocked_pending_external_inputs',
+        focusedCommand: 'npx vitest run src/prompt-enhancement/ui-fixture-packet.test.ts', observedOutcome: 'not_run_pending_external_inputs', oracleOwner: 'external_owner_not_supplied', passFail: 'blocked_pending_external_inputs', closureDecision: 'blocked_pending_external_inputs',
       },
     ],
-    focusedCommand: 'npx vitest run src/prompt-enhancement/b2-fixture-packet.test.ts',
+    focusedCommand: 'npx vitest run src/prompt-enhancement/ui-fixture-packet.test.ts',
     evidenceRule: 'render_and_typed_event_assertions_only',
     forbiddenEvidence: ['host_transport_success', 'stop_bridge_internals', 'semantic_validation', 'old_decision_session', 'raw_stop_reason', 'clipboard_or_foreground'],
   };

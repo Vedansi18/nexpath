@@ -40,7 +40,7 @@ export interface PromptEnhancementB4ConfigFixtureMatrixV1 {
   contractRevision: 'pe-config-v1';
   status: 'local_source_backed';
   readinessClaimAllowed: false;
-  focusedCommand: 'npx vitest run src/prompt-enhancement/b4-config-fixture-matrix.test.ts';
+  focusedCommand: 'npx vitest run src/prompt-enhancement/config-fixture-matrix.test.ts';
   rows: readonly PromptEnhancementB4ConfigMatrixFixtureV1[];
 }
 
@@ -99,7 +99,7 @@ export function buildPromptEnhancementB4ConfigFixtureMatrixV1(): PromptEnhanceme
     contractRevision: 'pe-config-v1',
     status: 'local_source_backed',
     readinessClaimAllowed: false,
-    focusedCommand: 'npx vitest run src/prompt-enhancement/b4-config-fixture-matrix.test.ts',
+    focusedCommand: 'npx vitest run src/prompt-enhancement/config-fixture-matrix.test.ts',
     rows: ROWS,
   };
 }

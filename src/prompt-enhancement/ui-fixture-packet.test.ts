@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildPromptEnhancementB2FixturePacketV1,
   validatePromptEnhancementB2FixturePacketV1,
-} from './b2-fixture-packet.js';
+} from './ui-fixture-packet.js';
 
 describe('B2.5 ui-owner UI fixture and acceptance packet', () => {
   it('defines all B2.1-B2.4 UI fixture groups without making a readiness claim', () => {

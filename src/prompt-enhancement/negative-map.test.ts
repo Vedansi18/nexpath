@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildPromptEnhancementB5_1bH1NegativeMapV1 } from './b5-1b-h1-negative-map.js';
+import { buildPromptEnhancementB5_1bH1NegativeMapV1 } from './negative-map.js';
 
 describe('B5.1b-H1 negative-disposition execution map', () => {
   it('defines all five approved routing rows and keeps the map acceptance-blocked', () => {
