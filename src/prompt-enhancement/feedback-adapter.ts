@@ -69,7 +69,7 @@ export function editPromptEnhancementOtherFeedbackV1(
   draftText: string,
 ): PromptEnhancementFeedbackAdapterStateV1 {
   if (state.status !== 'open' && state.status !== 'other_editing') return state;
-  const boundedDraft = draftText; // Hiren sink applies the approved bound; UI keeps this draft transient only.
+  const boundedDraft = draftText; // content-owner sink applies the approved bound; UI keeps this draft transient only.
   return { ...state, status: 'other_editing', draftText: boundedDraft, reasonCodes: [] };
 }
 

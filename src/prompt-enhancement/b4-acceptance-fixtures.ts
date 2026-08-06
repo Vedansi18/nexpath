@@ -38,7 +38,7 @@ export interface PromptEnhancementB4AcceptanceObservationV1 {
 }
 
 export interface PromptEnhancementB4AcceptancePacketV1 {
-  packetId: 'b4-bhavnesh-acceptance-fixtures-v1';
+  packetId: 'b4-ui-owner-acceptance-fixtures-v1';
   contractRevision: 'pe-tweak-v1';
   status: 'local_source_backed';
   readinessClaimAllowed: false;
@@ -104,7 +104,7 @@ function row(
 
 export function buildPromptEnhancementB4AcceptanceFixturePacketV1(): PromptEnhancementB4AcceptancePacketV1 {
   return {
-    packetId: 'b4-bhavnesh-acceptance-fixtures-v1',
+    packetId: 'b4-ui-owner-acceptance-fixtures-v1',
     contractRevision: CONTRACT_REVISION,
     status: 'local_source_backed',
     readinessClaimAllowed: false,

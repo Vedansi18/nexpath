@@ -6,11 +6,11 @@ import {
 
 const completeRow: PromptEnhancementB5EvidenceRowV1 = {
   rowId: 'b5-api-ui-stop-store-launch',
-  apiContractRef: 'hiren:pe-contract:v1',
-  uiSurfaceRef: 'bhavnesh:pe-ui:v1',
-  stopExtensionRef: 'vedansi:host-runtime:v1',
-  storeGeneratedOriginRef: 'hiren:store-origin:v1',
-  launchAcceptanceRef: 'hiren:pe-cr-5-g8:v1',
+  apiContractRef: 'content-owner:pe-contract:v1',
+  uiSurfaceRef: 'ui-owner:pe-ui:v1',
+  stopExtensionRef: 'host-owner:host-runtime:v1',
+  storeGeneratedOriginRef: 'content-owner:store-origin:v1',
+  launchAcceptanceRef: 'content-owner:pe-cr-5-g8:v1',
   owner: 'cross_layer_acceptance',
   evidenceState: 'supplied',
   contractRevision: 'contracts-v1',
@@ -51,11 +51,11 @@ describe('B5.1 evidence intake and owner register', () => {
     expect(packet.readinessClaimAllowed).toBe(false);
     expect(packet.reasonCodes).toEqual([]);
     expect(packet.rows[0]).toMatchObject({
-      apiContractRef: 'hiren:pe-contract:v1',
-      uiSurfaceRef: 'bhavnesh:pe-ui:v1',
-      stopExtensionRef: 'vedansi:host-runtime:v1',
-      storeGeneratedOriginRef: 'hiren:store-origin:v1',
-      launchAcceptanceRef: 'hiren:pe-cr-5-g8:v1',
+      apiContractRef: 'content-owner:pe-contract:v1',
+      uiSurfaceRef: 'ui-owner:pe-ui:v1',
+      stopExtensionRef: 'host-owner:host-runtime:v1',
+      storeGeneratedOriginRef: 'content-owner:store-origin:v1',
+      launchAcceptanceRef: 'content-owner:pe-cr-5-g8:v1',
       fixtureIds: ['DEP-TEST-01-B5-01'],
       closureDecision: 'ready_for_owner_review',
     });

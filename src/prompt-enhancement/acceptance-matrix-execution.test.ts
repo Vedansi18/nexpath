@@ -14,11 +14,11 @@ import {
 } from './acceptance-matrix.js';
 
 /**
- * R1 — PE-EM-3 acceptance-matrix execution harness (Bhavnesh release-check role).
+ * R1 — PE-EM-3 acceptance-matrix execution harness (ui-owner release-check role).
  *
- * The matrix (`acceptance-matrix.ts`, Hiren-content) is SHAPE-ONLY by design and STRUCTURALLY
+ * The matrix (`acceptance-matrix.ts`, content-owner-content) is SHAPE-ONLY by design and STRUCTURALLY
  * refuses to claim readiness (`readinessClaimAllowed: false` literal; the validator enforces it).
- * The final readiness flip + numeric-threshold sign-off stay Hiren's — see the manual test-plan
+ * The final readiness flip + numeric-threshold sign-off stay content-owner's — see the manual test-plan
  * `docs/dev/user-experience-improvements-sub-11-r1-pe-em3-acceptance-execution-test-plan-2026-08-06.md`.
  *
  * This harness executes the ONE thing the gate exists to catch programmatically: the
@@ -44,7 +44,7 @@ function request(text: string): PromptEnhancementPrepareRequestV1 {
   };
 }
 
-describe('R1 — PE-EM-3 acceptance-matrix execution (Bhavnesh release-check)', () => {
+describe('R1 — PE-EM-3 acceptance-matrix execution (ui-owner release-check)', () => {
   it('HARD-FAIL GATE: a real debug prompt yields a grounded, source-covered body — NOT the canned skeleton', async () => {
     // The regression BUG-PE-ENGINE-NO-LLM shipped: this exact class of prompt returned a generic
     // skeleton. Post E1-E9 the wired engine must ground it (multi-section, covered).
@@ -65,9 +65,9 @@ describe('R1 — PE-EM-3 acceptance-matrix execution (Bhavnesh release-check)', 
     expect(result.currentBody.text).toContain('payment test');
   });
 
-  it('the acceptance packet stays HONEST: shape-only, readiness structurally refused until Hiren sign-off', () => {
+  it('the acceptance packet stays HONEST: shape-only, readiness structurally refused until content-owner sign-off', () => {
     const packet = buildPromptEnhancementAcceptancePacketV1();
-    // The matrix must NOT self-certify: readiness flip + numeric threshold are Hiren's release sign-off.
+    // The matrix must NOT self-certify: readiness flip + numeric threshold are content-owner's release sign-off.
     expect(packet.readinessClaimAllowed).toBe(false);
     expect(packet.numericThresholdOracleSignoffState).toBe('required_before_quality_or_readiness_claim');
     const validation = validatePromptEnhancementAcceptancePacketV1(packet);

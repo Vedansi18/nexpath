@@ -83,7 +83,7 @@ describe('Phase 12 cost, provider, latency, and observability contracts', () => 
       expect(row.deterministicLocalFallback).toBe('public_safe_no_generated_content_or_previous_valid_body');
       expect(row.sendOriginalFallbackState).toMatch(/send_original_available_when_safety_allows|not_applicable_future_scope/);
       expect(row.passFailStatus).toMatch(/accepted_with_product_scope_notes|future_scope/);
-      expect(row.openHirenDecision).toMatch(/none_for_accepted_product_scope|later_written_yes_no_required_for_architecture_reopen|future_product_scope_requires_new_decision/);
+      expect(row.openOwnerDecision).toMatch(/none_for_accepted_product_scope|later_written_yes_no_required_for_architecture_reopen|future_product_scope_requires_new_decision/);
       expect(row.telemetrySafeMeasurementFields).toEqual(PROMPT_ENHANCEMENT_COST_MEASUREMENT_FIELDS_V1);
       expect(row.productValueSignoffRef).toBe('accepted_with_product_scope_notes');
       expect(row.costVisibilityCanWeakenBehavior).toBe(false);
@@ -113,7 +113,7 @@ describe('Phase 12 cost, provider, latency, and observability contracts', () => 
       heavyCallsPerMonth: 0,
       conservativeMonthlyCostState: 'zero_no_separate_call',
       separateLlmCallInV1: false,
-      openHirenDecision: 'later_written_yes_no_required_for_architecture_reopen',
+      openOwnerDecision: 'later_written_yes_no_required_for_architecture_reopen',
     });
     expect(byId.get('later_popup_feedback_decision')).toMatchObject({
       productState: 'conditional_v1_later_popup_if_llm_reasoning',
@@ -134,7 +134,7 @@ describe('Phase 12 cost, provider, latency, and observability contracts', () => 
         heavyMonthlyCostState: 'future_scope_not_bounded',
         separateLlmCallInV1: false,
         passFailStatus: 'future_scope',
-        openHirenDecision: 'future_product_scope_requires_new_decision',
+        openOwnerDecision: 'future_product_scope_requires_new_decision',
       });
     }
   });
@@ -174,8 +174,8 @@ describe('Phase 12 cost, provider, latency, and observability contracts', () => 
       expect(row.sendOriginalFallbackState).toBe('not_applicable_current_source_baseline');
       expect(row.latencyImpact).toMatch(/current_prompt_submit_pipeline_latency|current_stop_decision_session_latency|current_post_popup_best_effort_latency|not_user_visible_current_source_latency/);
       expect(row.uiProviderApiLatencyStateLabel).toMatch(/current_source_fail_safe_no_pe_content|current_source_static_or_null_fallback|current_source_best_effort_no_popup_block|current_source_unknown_timeout_measurement/);
-      expect(row.passFailStatus).toMatch(/blocked_pending_hiren|blocked_pending_source_value|accepted_zero_unless_source_proven|accepted_source_mean_assumption/);
-      expect(row.openHirenDecision).toMatch(/current_source_monthly_values_pending|source_reachability_reopen_if_proven|source_input_value_pending|source_timeout_measurement_pending|none_for_source_mean_assumption/);
+      expect(row.passFailStatus).toMatch(/blocked_pending_owner|blocked_pending_source_value|accepted_zero_unless_source_proven|accepted_source_mean_assumption/);
+      expect(row.openOwnerDecision).toMatch(/current_source_monthly_values_pending|source_reachability_reopen_if_proven|source_input_value_pending|source_timeout_measurement_pending|none_for_source_mean_assumption/);
     }
   });
 
@@ -188,16 +188,16 @@ describe('Phase 12 cost, provider, latency, and observability contracts', () => 
       expect(row.userVisibleTrigger).toMatch(/prompt_submit|stop_decision_session|post_popup_best_effort|not_user_visible/);
       expect(row.hiddenRuntimeTrigger).not.toBe('');
       expect(row.skipCondition).not.toBe('');
-      expect(row.worksheetStatus).toMatch(/blocked_pending_hiren|accepted_zero_unless_source_proven|accepted_source_mean_assumption/);
+      expect(row.worksheetStatus).toMatch(/blocked_pending_owner|accepted_zero_unless_source_proven|accepted_source_mean_assumption/);
       expect(row.conservativeMonthlyCostState).toMatch(/accepted_in_private_pe_g4_packet_not_public_constant|zero_no_separate_call/);
       expect(row.expectedMonthlyCostState).toMatch(/accepted_in_private_pe_g4_packet_not_public_constant|zero_no_separate_call/);
       expect(row.heavyMonthlyCostState).toMatch(/accepted_in_private_pe_g4_packet_not_public_constant|zero_no_separate_call/);
     }
     expect(byId.get('current_profile_classifier')).toMatchObject({
-      conservativeCallsPerMonth: 'blocked_pending_hiren',
-      expectedCallsPerMonth: 'blocked_pending_hiren',
-      heavyCallsPerMonth: 'blocked_pending_hiren',
-      worksheetStatus: 'blocked_pending_hiren',
+      conservativeCallsPerMonth: 'blocked_pending_owner',
+      expectedCallsPerMonth: 'blocked_pending_owner',
+      heavyCallsPerMonth: 'blocked_pending_owner',
+      worksheetStatus: 'blocked_pending_owner',
     });
     expect(byId.get('current_decision_session_option_generator')).toMatchObject({
       requirementState: 'current_source_row_if_reachable',
@@ -211,7 +211,7 @@ describe('Phase 12 cost, provider, latency, and observability contracts', () => 
       heavyMonthlyCostState: 'zero_no_separate_call',
       worksheetStatus: 'accepted_zero_unless_source_proven',
       passFailStatus: 'accepted_zero_unless_source_proven',
-      openHirenDecision: 'source_reachability_reopen_if_proven',
+      openOwnerDecision: 'source_reachability_reopen_if_proven',
     });
     expect(byId.get('current_content_template_prompt_param_extraction')).toMatchObject({
       sourceLayer: 'src/decision-session/content-template-grounding.ts',
@@ -219,9 +219,9 @@ describe('Phase 12 cost, provider, latency, and observability contracts', () => 
       maxOutputTokens: 400,
       timeoutMs: 12_000,
       hiddenRuntimeTrigger: 'recent-prompt prompt-derived param extraction before content-template grounding facts are built',
-      worksheetStatus: 'blocked_pending_hiren',
+      worksheetStatus: 'blocked_pending_owner',
       passFailStatus: 'blocked_pending_source_value',
-      openHirenDecision: 'source_input_value_pending',
+      openOwnerDecision: 'source_input_value_pending',
     });
     expect(byId.get('current_content_template_autogen')).toMatchObject({
       userVisibleTrigger: 'post_popup_best_effort',
@@ -232,7 +232,7 @@ describe('Phase 12 cost, provider, latency, and observability contracts', () => 
       worstCaseCallsPerMonth: 'source_undefined',
       worksheetStatus: 'accepted_source_mean_assumption',
       passFailStatus: 'accepted_source_mean_assumption',
-      openHirenDecision: 'source_timeout_measurement_pending',
+      openOwnerDecision: 'source_timeout_measurement_pending',
       uiProviderApiLatencyStateLabel: 'current_source_unknown_timeout_measurement',
     });
   });
@@ -272,7 +272,7 @@ describe('Phase 12 cost, provider, latency, and observability contracts', () => 
       ownerResearchItem: 'PE-EM-1_PE-G4',
       userVisibleTrigger: 'enhancement_popup_shown',
       passFailStatus: 'accepted_with_product_scope_notes',
-      openHirenDecision: 'none_for_accepted_product_scope',
+      openOwnerDecision: 'none_for_accepted_product_scope',
       sendOriginalFallbackState: 'send_original_available_when_safety_allows',
     });
     expect(byId.get('additional_details_recomposition')).toMatchObject({
@@ -284,7 +284,7 @@ describe('Phase 12 cost, provider, latency, and observability contracts', () => 
       userVisibleTrigger: 'future_explicit_action',
       passFailStatus: 'future_scope',
       sendOriginalFallbackState: 'not_applicable_future_scope',
-      openHirenDecision: 'future_product_scope_requires_new_decision',
+      openOwnerDecision: 'future_product_scope_requires_new_decision',
     });
   });
 

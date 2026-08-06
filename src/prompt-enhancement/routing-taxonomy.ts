@@ -779,7 +779,7 @@ export function getPromptEnhancementRoutingSourceGateSnapshot() {
 export function getPromptEnhancementG1AApprovalInventory() {
   return {
     gateId: 'routing_taxonomy_approval_inventory',
-    status: 'pending_hiren_review',
+    status: 'pending_owner_review',
     families: PROMPT_ENHANCEMENT_FAMILIES,
     primaryIntents: PROMPT_ENHANCEMENT_TAXONOMY_PRESETS.map((presetRecord) => presetRecord.primaryIntent),
     capabilityOverlays: PROMPT_ENHANCEMENT_CAPABILITIES,

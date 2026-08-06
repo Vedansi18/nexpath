@@ -30,7 +30,7 @@ export interface PromptEnhancementB2FixtureRowV1 {
 }
 
 export interface PromptEnhancementB2FixturePacketV1 {
-  packetId: 'b2-bhavnesh-ui-fixture-packet-v1';
+  packetId: 'b2-ui-owner-ui-fixture-packet-v1';
   status: PromptEnhancementB2FixturePacketStatusV1;
   readinessClaimAllowed: false;
   requiredExternalInputs: readonly [
@@ -44,7 +44,7 @@ export interface PromptEnhancementB2FixturePacketV1 {
   forbiddenEvidence: readonly [
     'host_transport_success',
     'stop_bridge_internals',
-    'hiren_semantic_validation',
+    'semantic_validation',
     'old_decision_session',
     'raw_stop_reason',
     'clipboard_or_foreground',
@@ -75,7 +75,7 @@ const REQUIRED_DEPENDENCIES: readonly ('DEP-B2-01' | 'DEP-B2-02' | 'DEP-TEST-01'
 export function buildPromptEnhancementB2FixturePacketV1(): PromptEnhancementB2FixturePacketV1 {
   const dependencyRefs = [...REQUIRED_DEPENDENCIES] as readonly ('DEP-B2-01' | 'DEP-B2-02' | 'DEP-TEST-01')[];
   return {
-    packetId: 'b2-bhavnesh-ui-fixture-packet-v1',
+    packetId: 'b2-ui-owner-ui-fixture-packet-v1',
     status: 'blocked_pending_external_inputs',
     readinessClaimAllowed: false,
     requiredExternalInputs: ['DEP-B2-01', 'DEP-B2-02', 'DEP-TEST-01'],
@@ -123,7 +123,7 @@ export function buildPromptEnhancementB2FixturePacketV1(): PromptEnhancementB2Fi
     ],
     focusedCommand: 'npx vitest run src/prompt-enhancement/b2-fixture-packet.test.ts',
     evidenceRule: 'render_and_typed_event_assertions_only',
-    forbiddenEvidence: ['host_transport_success', 'stop_bridge_internals', 'hiren_semantic_validation', 'old_decision_session', 'raw_stop_reason', 'clipboard_or_foreground'],
+    forbiddenEvidence: ['host_transport_success', 'stop_bridge_internals', 'semantic_validation', 'old_decision_session', 'raw_stop_reason', 'clipboard_or_foreground'],
   };
 }
 
@@ -131,7 +131,7 @@ export function validatePromptEnhancementB2FixturePacketV1(
   packet: PromptEnhancementB2FixturePacketV1,
 ): PromptEnhancementB2FixturePacketValidationV1 {
   const reasonCodes: string[] = [];
-  if (packet.packetId !== 'b2-bhavnesh-ui-fixture-packet-v1') reasonCodes.push('packet_id_mismatch');
+  if (packet.packetId !== 'b2-ui-owner-ui-fixture-packet-v1') reasonCodes.push('packet_id_mismatch');
   if (packet.readinessClaimAllowed !== false) reasonCodes.push('readiness_claim_must_remain_false');
   if (packet.status !== 'blocked_pending_external_inputs') reasonCodes.push('external_inputs_not_supplied');
   if (packet.rows.length !== REQUIRED_GROUPS.length) reasonCodes.push('fixture_group_count_mismatch');

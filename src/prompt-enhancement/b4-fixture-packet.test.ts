@@ -41,7 +41,7 @@ describe('DEP-B4-01 / DEP-TEST-01 B4 fixture intake boundary', () => {
   it('keeps evidence limited to UI/public-boundary assertions', () => {
     const packet = buildPromptEnhancementB4FixturePacketV1();
     expect(packet.evidenceRule).toBe('render_and_public_boundary_assertions_only');
-    expect(packet.forbiddenEvidence).toContain('hiren_config_validation_or_defaults');
+    expect(packet.forbiddenEvidence).toContain('config_validation_or_defaults');
     expect(packet.forbiddenEvidence).toContain('old_decision_session_settings');
     expect(packet.forbiddenEvidence).toContain('launch_or_readiness_claim');
   });

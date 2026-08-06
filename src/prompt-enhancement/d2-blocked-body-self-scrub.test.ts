@@ -17,7 +17,7 @@ import { buildPromptEnhancementPopupRenderModelV1 } from './popup-render-model.j
 
 // A deterministic result never blocks today (D2 is latent until E4 wires the LLM), so simulate a
 // hard block by mutating a real prepared result: blocked_no_send + no_send + a deliberately-unsafe
-// body. Every Bhavnesh UI layer must self-scrub it, not rely on the terminal ui-safety scrub alone.
+// body. Every ui-owner UI layer must self-scrub it, not rely on the terminal ui-safety scrub alone.
 const UNSAFE = 'LEAKED SECRET sk-must-never-render-abcdef and rm -rf /';
 
 function request(): PromptEnhancementPrepareRequestV1 {
@@ -60,7 +60,7 @@ function blocked(result: PromptEnhancementPrepareResultV1): PromptEnhancementPre
   };
 }
 
-describe('D2 — blocked body self-scrubs at every Bhavnesh UI layer (P7-G1 / PE-DR-5)', () => {
+describe('D2 — blocked body self-scrubs at every ui-owner UI layer (P7-G1 / PE-DR-5)', () => {
   it('the shared predicate flags no_send / no_popup, not sendable policies', () => {
     expect(isPromptEnhancementBlockedNoSendPolicyV1('no_send')).toBe(true);
     expect(isPromptEnhancementBlockedNoSendPolicyV1('no_popup')).toBe(true);

@@ -7,7 +7,7 @@ import {
 describe('B4.4 configuration/tweak UI acceptance fixtures', () => {
   it('defines every required local UI-only state fixture without readiness claim', () => {
     const packet = buildPromptEnhancementB4AcceptanceFixturePacketV1();
-    expect(packet.packetId).toBe('b4-bhavnesh-acceptance-fixtures-v1');
+    expect(packet.packetId).toBe('b4-ui-owner-acceptance-fixtures-v1');
     expect(packet.status).toBe('local_source_backed');
     expect(packet.readinessClaimAllowed).toBe(false);
     expect(packet.rows).toHaveLength(11);

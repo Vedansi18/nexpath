@@ -12,7 +12,7 @@ import {
 
 /**
  * Derive the feedback->memory eligibility policy for a popup feedback event
- * (E3 / phase 3.2a). Resolved from source + Hiren's locked decisions:
+ * (E3 / phase 3.2a). Resolved from source + content-owner's locked decisions:
  *
  *  - PE-AR-6: consume STABLE typed categories, no hidden LLM classifier -> the map is
  *    deterministic off the typed feedbackCategory.

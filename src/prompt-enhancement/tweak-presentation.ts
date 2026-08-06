@@ -1,7 +1,7 @@
 /**
  * B4.3 application boundary for the Prompt Enhancement CTRL+T surface.
  *
- * Hiren owns the meaning, defaults, validation, persistence, and runtime
+ * content-owner owns the meaning, defaults, validation, persistence, and runtime
  * policy of PE settings. This module only presents an already validated,
  * typed state. It never creates a setting, writes config, or exposes a
  * sequence/runtime toggle. The legacy Decision Session chooser is not an
@@ -41,7 +41,7 @@ export interface PromptEnhancementTweakPresentationModelV1 {
   interactive: false;
   action: null;
   contractRevision: string | null;
-  authority: 'typed_hiren_pe_tweak_contract_only';
+  authority: 'typed_owner_pe_tweak_contract_only';
   claims: {
     configCreated: false;
     configPersisted: false;
@@ -130,7 +130,7 @@ function model(
     interactive: false,
     action: null,
     contractRevision,
-    authority: 'typed_hiren_pe_tweak_contract_only',
+    authority: 'typed_owner_pe_tweak_contract_only',
     claims: {
       configCreated: false,
       configPersisted: false,

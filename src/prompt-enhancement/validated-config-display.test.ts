@@ -14,7 +14,7 @@ describe('B4.1 validated configuration display boundary', () => {
       const model = buildPromptEnhancementValidatedConfigDisplayModelV1({ configResult: typed(state) });
       expect(model.status).toBe(state);
       expect(model.interactive).toBe(false);
-      expect(model.configAuthority).toBe('typed_validated_hiren_cli_result_only');
+      expect(model.configAuthority).toBe('typed_validated_owner_cli_result_only');
     }
   });
 

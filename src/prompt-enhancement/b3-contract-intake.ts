@@ -1,6 +1,6 @@
 export type PromptEnhancementB3ContractEvidenceKindV1 =
-  | 'hiren_mps_handoff'
-  | 'vedansi_host_runtime'
+  | 'mps_handoff'
+  | 'host_runtime'
   | 'approved_b3_fixtures'
   | 'privacy_feedback_contract';
 
@@ -14,7 +14,7 @@ export type PromptEnhancementB3ContractEvidenceStateV1 =
 export interface PromptEnhancementB3ContractEvidenceV1 {
   evidenceId: string;
   kind: PromptEnhancementB3ContractEvidenceKindV1;
-  owner: 'hiren_pe_contract' | 'vedansi_runtime' | 'hiren_test_owner' | 'hiren_privacy_feedback';
+  owner: 'engine_contract' | 'host_transport' | 'test_owner' | 'privacy_feedback';
   state: PromptEnhancementB3ContractEvidenceStateV1;
   contractRevision?: string;
   sourceRefs?: readonly string[];
@@ -46,10 +46,10 @@ const REQUIRED_EVIDENCE: readonly {
   evidenceId: string;
   owner: PromptEnhancementB3ContractEvidenceV1['owner'];
 }[] = [
-  { kind: 'hiren_mps_handoff', evidenceId: 'DEP-B3-01', owner: 'hiren_pe_contract' },
-  { kind: 'vedansi_host_runtime', evidenceId: 'DEP-B3-02', owner: 'vedansi_runtime' },
-  { kind: 'approved_b3_fixtures', evidenceId: 'DEP-TEST-01', owner: 'hiren_test_owner' },
-  { kind: 'privacy_feedback_contract', evidenceId: 'PE-B3-PRIVACY-FEEDBACK', owner: 'hiren_privacy_feedback' },
+  { kind: 'mps_handoff', evidenceId: 'DEP-B3-01', owner: 'engine_contract' },
+  { kind: 'host_runtime', evidenceId: 'DEP-B3-02', owner: 'host_transport' },
+  { kind: 'approved_b3_fixtures', evidenceId: 'DEP-TEST-01', owner: 'test_owner' },
+  { kind: 'privacy_feedback_contract', evidenceId: 'PE-B3-PRIVACY-FEEDBACK', owner: 'privacy_feedback' },
 ];
 
 export function buildPromptEnhancementB3ContractIntakePacketV1(

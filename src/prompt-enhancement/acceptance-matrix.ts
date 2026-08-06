@@ -46,7 +46,7 @@ export type PromptEnhancementAcceptanceEvidenceSourceKindV1 =
 
 export type PromptEnhancementAcceptanceStatusV1 =
   | 'matrix_defined_waiting_for_execution'
-  | 'ready_for_hiren_threshold_review'
+  | 'ready_for_owner_threshold_review'
   | 'blocked_by_hard_fail'
   | 'invalid_packet';
 
@@ -344,8 +344,8 @@ export function validatePromptEnhancementAcceptancePacketV1(
   if (packet.schemaVersion !== PROMPT_ENHANCEMENT_CONTRACT_VERSION) reasonCodes.push('schema_version_mismatch');
   if (packet.packetId !== 'pe-em3-test-acceptance-matrix-v1') reasonCodes.push('packet_id_mismatch');
   if (packet.readinessClaimAllowed !== false) reasonCodes.push('readiness_claim_must_remain_false');
-  if (packet.ownerSignoffState !== 'required_before_readiness_claim') reasonCodes.push('hiren_signoff_gate_missing');
-  if (packet.numericThresholdOracleSignoffState !== 'required_before_quality_or_readiness_claim') reasonCodes.push('hiren_numeric_threshold_oracle_signoff_missing');
+  if (packet.ownerSignoffState !== 'required_before_readiness_claim') reasonCodes.push('signoff_gate_missing');
+  if (packet.numericThresholdOracleSignoffState !== 'required_before_quality_or_readiness_claim') reasonCodes.push('numeric_threshold_oracle_signoff_missing');
   if (packet.ownerReviewedRubricObservationState !== 'required_before_quality_or_readiness_claim') reasonCodes.push('owner_reviewed_rubric_observation_gate_missing');
   for (const targetSurface of ['src/prompt-enhancement/contracts', 'src/prompt-enhancement/engine', 'src/prompt-enhancement/popup', 'src/prompt-enhancement/store_ports', 'src/prompt-enhancement/delivery_boundary']) {
     if (!packet.acceptanceTargetSurfaces.includes(targetSurface)) reasonCodes.push(`missing_acceptance_target_surface:${targetSurface}`);

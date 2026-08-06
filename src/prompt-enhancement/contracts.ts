@@ -802,7 +802,7 @@ export interface PromptEnhancementValidationGraphV1 {
     | 'unavailable_by_provider_api'
     | 'product_scope_not_in_v1'
     | 'deterministic_only'
-    | 'hiren_visibility_required';
+    | 'visibility_required';
   rawTransportIsValidationProof: false;
   evaluatesAgentResponseQuality: false;
   canAutoAdvanceSequencePointer: false;
@@ -1451,7 +1451,7 @@ export interface PromptEnhancementCostVisibilityMetadataV1 {
     | 'unavailable_by_provider_api'
     | 'product_scope_not_in_v1'
     | 'deterministic_only'
-    | 'hiren_visibility_required';
+    | 'visibility_required';
   provider?: string;
   model?: string;
   pricingSourceUrl?: string;
@@ -1617,7 +1617,7 @@ export interface PromptEnhancementPrepareResultV1 {
   projectRoot: string;
   modelVersion: string;
   disposition: PromptEnhancementDisposition;
-  // Hiren-owned safety decision identity for this exact body revision.
+  // content-owner-owned safety decision identity for this exact body revision.
   validationDecisionId: string;
   currentBody: PromptEnhancementCurrentBodyV1;
   availableActions: readonly PromptEnhancementActionEntryV1[];

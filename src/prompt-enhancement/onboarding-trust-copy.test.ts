@@ -16,7 +16,7 @@ describe('B4.2 onboarding and trust-copy boundary', () => {
       expect(model.state).toBe(state);
       expect(model.interactive).toBe(false);
       expect(model.actionLabel).toBeNull();
-      expect(model.copyAuthority).toBe('supplied_hiren_approved_public_copy_only');
+      expect(model.copyAuthority).toBe('supplied_owner_approved_public_copy_only');
       expect(model.claims.installed).toBe(false);
       expect(model.claims.sent).toBe(false);
     }

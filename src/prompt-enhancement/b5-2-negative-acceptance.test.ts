@@ -7,7 +7,7 @@ import {
 } from './delivery.js';
 
 /**
- * R2 §4b — b5-2 negative-acceptance fixtures for the Bhavnesh/Hiren-owned rows.
+ * R2 §4b — b5-2 negative-acceptance fixtures for the ui-owner/content-owner-owned rows.
  *
  * Each row proves an INVALID / old-source input creates NO_SIDE_EFFECTS (no PE popup activation, no
  * send/delivery, no sequence, no feedback, no generated-origin, no launch-readiness) — i.e. it holds
@@ -17,8 +17,8 @@ import {
  *  - `validatePromptEnhancementExtensionDeliveryPayload`: legacy-DS / raw-transport keys are rejected,
  *    so the extension never delivers them.
  *
- * The 4 Vedansi-owned rows (B5.2-04/06/08/09 — raw_stop_reason, clipboard_text, extension_labels,
- * missing_host_capability) are handed off (see the R2 Vedansi handoff), as they exercise the
+ * The 4 host-owner-owned rows (B5.2-04/06/08/09 — raw_stop_reason, clipboard_text, extension_labels,
+ * missing_host_capability) are handed off (see the R2 host-owner handoff), as they exercise the
  * extension host path.
  */
 const PROJECT = '/tmp/b5-2';
@@ -36,7 +36,7 @@ function expectNoAuthority(store: Store, evidenceKind: PromptEnhancementPromptSu
   expect(resolution.normalUserPromptFullProcessingPreserved).toBe(true); // falls back to a normal prompt, no PE side effects
 }
 
-describe('R2 §4b — b5-2 negative acceptance (Bhavnesh/Hiren-owned rows)', () => {
+describe('R2 §4b — b5-2 negative acceptance (ui-owner/content-owner-owned rows)', () => {
   let store: Store;
   beforeEach(async () => { store = await openStore(':memory:'); });
 

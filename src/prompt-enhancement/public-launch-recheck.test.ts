@@ -55,7 +55,7 @@ describe('Phase 14 public launch recheck', () => {
     const packet = buildPromptEnhancementPublicLaunchRecheckPacketV1(launchFacts());
 
     expect(packet.gateId).toBe('G8-PE-CR-5-public-launch');
-    expect(packet.owner).toBe('bhavnesh_coordinating_release_check');
+    expect(packet.owner).toBe('coordinating_release_check');
     expect(packet.status).toBe('ready_for_owner_launch_review');
     expect(packet.publicPromotionAllowed).toBe(true);
     expect(packet.launchReadyClaimAllowed).toBe(true);

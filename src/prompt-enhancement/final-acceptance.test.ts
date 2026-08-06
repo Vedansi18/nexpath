@@ -79,9 +79,9 @@ describe('Phase 15 cross-layer final acceptance', () => {
     expect(packet.reasonCodes).toEqual(expect.arrayContaining([
       'public_launch_packet:not_approved_for_public_promotion',
       'public_launch_packet:launch_ready_claim_blocked',
-      'final_signoff_missing:hiren',
+      'final_signoff_missing:owner',
       'final_signoff_missing:cross_layer_acceptance',
-      'final_signoff_missing:hiren_test',
+      'final_signoff_missing:owner_test',
     ]));
     expect(validatePromptEnhancementFinalAcceptancePacketV1(packet).ok).toBe(false);
   });

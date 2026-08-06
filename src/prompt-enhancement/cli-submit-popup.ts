@@ -183,7 +183,7 @@ function selectedOriginal(
 /**
  * Claude CLI live consumer for the already-validated PE result. It owns only
  * terminal presentation and typed user intent. Semantic actions stay behind
- * the existing Hiren facade and no prompt is auto-selected.
+ * the existing content-owner facade and no prompt is auto-selected.
  */
 export async function runPromptEnhancementCliSubmitPopupV1(input: {
   request: PromptEnhancementPrepareRequestV1;

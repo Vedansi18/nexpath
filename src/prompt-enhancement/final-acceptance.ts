@@ -47,8 +47,8 @@ export type PromptEnhancementFinalConsistencyTargetV1 =
   | 'trigger_surface_and_prompt_start_stop_boundary'
   | 'store_memory_feedback_and_bootstrap'
   | 'safety_privacy_and_sensitive_actions'
-  | 'bhavnesh_ui_handoff'
-  | 'vedansi_host_transport'
+  | 'ui_handoff'
+  | 'host_transport'
   | 'cost_latency_and_pe_g4'
   | 'test_and_readiness_evidence'
   | 'stale_term_scan';
@@ -163,8 +163,8 @@ export const PROMPT_ENHANCEMENT_FINAL_CONSISTENCY_TARGETS_V1: readonly PromptEnh
   'trigger_surface_and_prompt_start_stop_boundary',
   'store_memory_feedback_and_bootstrap',
   'safety_privacy_and_sensitive_actions',
-  'bhavnesh_ui_handoff',
-  'vedansi_host_transport',
+  'ui_handoff',
+  'host_transport',
   'cost_latency_and_pe_g4',
   'test_and_readiness_evidence',
   'stale_term_scan',
@@ -364,8 +364,8 @@ function validatePromptEnhancementFinalAcceptanceInputV1(input: {
     if (row.evidenceRefs.length === 0) reasonCodes.push(`negative_authority_missing_evidence_ref:${authority}`);
   }
 
-  if (input.signoff.finalSignoff !== 'approved') reasonCodes.push('final_signoff_missing:hiren');
+  if (input.signoff.finalSignoff !== 'approved') reasonCodes.push('final_signoff_missing:owner');
   if (input.signoff.crossLayerAcceptance !== 'approved') reasonCodes.push('final_signoff_missing:cross_layer_acceptance');
-  if (input.signoff.testSignoff !== 'approved') reasonCodes.push('final_signoff_missing:hiren_test');
+  if (input.signoff.testSignoff !== 'approved') reasonCodes.push('final_signoff_missing:owner_test');
   return reasonCodes;
 }

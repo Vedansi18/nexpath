@@ -1,7 +1,7 @@
 /**
  * B4.1 application boundary for a validated PE configuration result.
  *
- * The Hiren/CLI producer owns config keys, defaults, validation, persistence,
+ * The content-owner/CLI producer owns config keys, defaults, validation, persistence,
  * availability, and business meaning.  This module only converts an already
  * validated, typed state into a public-safe display model.  It deliberately
  * accepts `unknown` at the boundary so an absent or newer producer packet can
@@ -30,7 +30,7 @@ export interface PromptEnhancementValidatedConfigDisplayModelV1 {
   status: PromptEnhancementValidatedConfigDisplayStateV1;
   publicLabel: string;
   interactive: false;
-  configAuthority: 'typed_validated_hiren_cli_result_only';
+  configAuthority: 'typed_validated_owner_cli_result_only';
   claims: {
     defaultChosen: false;
     persisted: false;
@@ -128,7 +128,7 @@ function model(
     status,
     publicLabel: PUBLIC_LABELS[status],
     interactive: false,
-    configAuthority: 'typed_validated_hiren_cli_result_only',
+    configAuthority: 'typed_validated_owner_cli_result_only',
     claims: {
       defaultChosen: false,
       persisted: false,

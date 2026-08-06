@@ -23,7 +23,7 @@ export interface PromptEnhancementB4FixtureRowV1 {
 }
 
 export interface PromptEnhancementB4FixturePacketV1 {
-  packetId: 'b4-bhavnesh-config-fixture-packet-v1';
+  packetId: 'b4-ui-owner-config-fixture-packet-v1';
   status: 'blocked_pending_external_inputs';
   readinessClaimAllowed: false;
   requiredExternalInputs: readonly ['DEP-B4-01', 'DEP-TEST-01'];
@@ -31,7 +31,7 @@ export interface PromptEnhancementB4FixturePacketV1 {
   focusedCommand: 'npx vitest run src/prompt-enhancement/b4-fixture-packet.test.ts';
   evidenceRule: 'render_and_public_boundary_assertions_only';
   forbiddenEvidence: readonly [
-    'hiren_config_validation_or_defaults',
+    'config_validation_or_defaults',
     'provider_or_policy_authority',
     'old_decision_session_settings',
     'raw_config_or_private_paths',
@@ -62,7 +62,7 @@ const FOCUSED_COMMAND = 'npx vitest run src/prompt-enhancement/b4-fixture-packet
 
 export function buildPromptEnhancementB4FixturePacketV1(): PromptEnhancementB4FixturePacketV1 {
   return {
-    packetId: 'b4-bhavnesh-config-fixture-packet-v1',
+    packetId: 'b4-ui-owner-config-fixture-packet-v1',
     status: 'blocked_pending_external_inputs',
     readinessClaimAllowed: false,
     requiredExternalInputs: [...REQUIRED_DEPENDENCIES],
@@ -102,7 +102,7 @@ export function buildPromptEnhancementB4FixturePacketV1(): PromptEnhancementB4Fi
     ],
     focusedCommand: FOCUSED_COMMAND,
     evidenceRule: 'render_and_public_boundary_assertions_only',
-    forbiddenEvidence: ['hiren_config_validation_or_defaults', 'provider_or_policy_authority', 'old_decision_session_settings', 'raw_config_or_private_paths', 'launch_or_readiness_claim'],
+    forbiddenEvidence: ['config_validation_or_defaults', 'provider_or_policy_authority', 'old_decision_session_settings', 'raw_config_or_private_paths', 'launch_or_readiness_claim'],
   };
 }
 
@@ -110,7 +110,7 @@ export function validatePromptEnhancementB4FixturePacketV1(
   packet: PromptEnhancementB4FixturePacketV1,
 ): PromptEnhancementB4FixturePacketValidationV1 {
   const reasonCodes: string[] = [];
-  if (packet.packetId !== 'b4-bhavnesh-config-fixture-packet-v1') reasonCodes.push('packet_id_mismatch');
+  if (packet.packetId !== 'b4-ui-owner-config-fixture-packet-v1') reasonCodes.push('packet_id_mismatch');
   if (packet.status !== 'blocked_pending_external_inputs') reasonCodes.push('external_inputs_not_supplied');
   if (packet.readinessClaimAllowed !== false) reasonCodes.push('readiness_claim_must_remain_false');
   if (packet.rows.length !== REQUIRED_GROUPS.length) reasonCodes.push('fixture_group_count_mismatch');

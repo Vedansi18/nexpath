@@ -8,7 +8,7 @@ import type { Store } from '../store/db.js';
 import type { PromptEnhancementPopupEventV1 } from './popup-session.js';
 
 /**
- * Hiren-owned policy inputs which must be supplied by the application/store
+ * content-owner-owned policy inputs which must be supplied by the application/store
  * boundary.  The popup adapter deliberately does not guess learning or safety
  * semantics from a visible label or from the custom-feedback draft.
  */
@@ -36,7 +36,7 @@ export interface PromptEnhancementFeedbackSinkAcknowledgementV1 {
  * Persist one already-validated, typed PE feedback event through the focused
  * store port.  This is intentionally not a UI-owned learning implementation:
  * scope, eligibility, safety impact, and memory evidence remain explicit
- * Hiren/store policy inputs.
+ * content-owner/store policy inputs.
  */
 export function recordPromptEnhancementFeedbackV1(
   input: PromptEnhancementFeedbackSinkInputV1,

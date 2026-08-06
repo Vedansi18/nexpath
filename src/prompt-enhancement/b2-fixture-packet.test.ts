@@ -4,7 +4,7 @@ import {
   validatePromptEnhancementB2FixturePacketV1,
 } from './b2-fixture-packet.js';
 
-describe('B2.5 Bhavnesh UI fixture and acceptance packet', () => {
+describe('B2.5 ui-owner UI fixture and acceptance packet', () => {
   it('defines all B2.1-B2.4 UI fixture groups without making a readiness claim', () => {
     const packet = buildPromptEnhancementB2FixturePacketV1();
     expect(validatePromptEnhancementB2FixturePacketV1(packet)).toEqual({
@@ -55,13 +55,13 @@ describe('B2.5 Bhavnesh UI fixture and acceptance packet', () => {
     ]));
   });
 
-  it('keeps transport and legacy evidence outside the Bhavnesh packet authority', () => {
+  it('keeps transport and legacy evidence outside the ui-owner packet authority', () => {
     const packet = buildPromptEnhancementB2FixturePacketV1();
     expect(packet.evidenceRule).toBe('render_and_typed_event_assertions_only');
     expect(packet.forbiddenEvidence).toEqual(expect.arrayContaining([
       'host_transport_success',
       'stop_bridge_internals',
-      'hiren_semantic_validation',
+      'semantic_validation',
       'old_decision_session',
       'raw_stop_reason',
       'clipboard_or_foreground',

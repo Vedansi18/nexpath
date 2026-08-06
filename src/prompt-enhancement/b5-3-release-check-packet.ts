@@ -101,7 +101,7 @@ export function buildPromptEnhancementB5_3ReleaseCheckPacketV1(
   if (!merged.depB501EvidenceRevision) reasonCodes.push('dep_b5_01_evidence_revision_missing');
   if (merged.buildTestImportEvidence.state !== 'pass') reasonCodes.push('build_test_import_evidence_missing_or_unpassed');
   if (merged.publicSafetyEvidence.state !== 'pass') reasonCodes.push('public_safety_evidence_missing_or_unpassed');
-  if (merged.ownerSignoffs.ownerLaunch !== 'approved') reasonCodes.push('hiren_launch_signoff_missing');
+  if (merged.ownerSignoffs.ownerLaunch !== 'approved') reasonCodes.push('launch_signoff_missing');
   if (merged.ownerSignoffs.layerOwners !== 'approved') reasonCodes.push('layer_owner_signoff_missing');
   if (!publicLaunchPacket.publicPromotionAllowed) reasonCodes.push('public_launch_recheck_not_ready');
   const hardFail = publicLaunchPacket.status === 'blocked_by_public_launch_hard_fail';

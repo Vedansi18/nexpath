@@ -191,7 +191,7 @@ describe('prompt-enhancement routing and taxonomy', () => {
     const inventory = getPromptEnhancementG1AApprovalInventory();
 
     expect(inventory.gateId).toBe('routing_taxonomy_approval_inventory');
-    expect(inventory.status).toBe('pending_hiren_review');
+    expect(inventory.status).toBe('pending_owner_review');
     expect(inventory.families).toEqual(PROMPT_ENHANCEMENT_FAMILIES);
     expect(inventory.routeFixtureIds.length).toBe(PROMPT_ENHANCEMENT_TAXONOMY_PRESETS.length);
     expect(inventory.evaluationFixtureIds.length).toBe(PROMPT_ENHANCEMENT_TAXONOMY_PRESETS.length);

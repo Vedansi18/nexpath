@@ -24,7 +24,7 @@ import type { PromptEnhancementUiBoundaryInputV1 } from './ui-boundary.js';
  * B1.5 is deliberately a host-independent safety presentation boundary. It
  * consumes the already-typed popup model, strips private identifiers and
  * unsafe display text, and exposes only stable UI state. It does not decide
- * Hiren-owned safety meaning or perform host/transport work.
+ * content-owner-owned safety meaning or perform host/transport work.
  */
 export type PromptEnhancementSafeUiStateV1 =
   | 'loading'

@@ -53,7 +53,7 @@ function defaultRow(): PromptEnhancementB5EvidenceRowV1 {
   return {
     rowId: REQUIRED_ROW_IDS[0],
     apiContractRef: 'pending_DEP-B5-02_api_contract',
-    uiSurfaceRef: 'pending_bhavnesh_ui_consumer',
+    uiSurfaceRef: 'pending_ui_consumer',
     stopExtensionRef: 'pending_DEP-B5-02_host_contract',
     storeGeneratedOriginRef: 'pending_DEP-B5-02_store_generated_origin',
     launchAcceptanceRef: 'pending_DEP-B5-01_launch_acceptance',

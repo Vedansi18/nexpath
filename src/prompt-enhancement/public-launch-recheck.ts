@@ -55,7 +55,7 @@ export interface PromptEnhancementPublicLaunchCheckV1 {
 
 export interface PromptEnhancementPublicLaunchRecheckPacketV1 {
   gateId: 'G8-PE-CR-5-public-launch';
-  owner: 'bhavnesh_coordinating_release_check';
+  owner: 'coordinating_release_check';
   status: PromptEnhancementPublicLaunchRecheckStatusV1;
   publicPromotionAllowed: boolean;
   launchReadyClaimAllowed: boolean;
@@ -263,7 +263,7 @@ export function buildPromptEnhancementPublicLaunchRecheckPacketV1(
     ),
     check(
       'explicit_owner_launch_decision',
-      'Bhavnesh coordinating release-check owner has approved public promotion',
+      'ui-owner coordinating release-check owner has approved public promotion',
       facts.ownerLaunchDecision,
       facts.ownerLaunchDecision === 'approved_public_promotion',
     ),
@@ -274,7 +274,7 @@ export function buildPromptEnhancementPublicLaunchRecheckPacketV1(
 
   return {
     gateId: 'G8-PE-CR-5-public-launch',
-    owner: 'bhavnesh_coordinating_release_check',
+    owner: 'coordinating_release_check',
     status: allOk ? 'ready_for_owner_launch_review' : hardFailed ? 'blocked_by_public_launch_hard_fail' : 'blocked_pending_live_recheck',
     publicPromotionAllowed: allOk,
     launchReadyClaimAllowed: allOk,
