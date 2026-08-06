@@ -54,7 +54,11 @@ function todayInput(): PromptEnhancementFinalAcceptanceInputV1 {
       { surface: 'public_launch_recheck', evidenceState: 'blocked', owner: 'bhavnesh_release_check', evidenceRefs: ['S3-not-yet-executed'] },
     ],
     negativeAuthorityChecks: PROMPT_ENHANCEMENT_FINAL_ACCEPTANCE_REQUIRED_NEGATIVE_AUTHORITIES_V1.map((authority) =>
-      blockedNegative(authority, ['delivery.ts:validatePromptEnhancementExtensionDeliveryPayload', 'delivery.ts:baseInvariants'])),
+      blockedNegative(authority, [
+        'b5-2-negative-acceptance.test.ts',                                 // rigorous per-input negative fixtures (R2 §4b)
+        'delivery.ts:validatePromptEnhancementExtensionDeliveryPayload',    // legacy-DS + raw key rejection
+        'delivery.ts:baseInvariants',                                       // same-turn / auto-send claims held false
+      ])),
     // Bhavnesh cross-layer acceptance IS provided; Hiren's two sign-offs are genuinely outstanding.
     signoff: { hirenFinalSignoff: 'missing', bhavneshCrossLayerAcceptance: 'approved', hirenTestSignoff: 'missing' },
     finalConsistencyEvidence: {
