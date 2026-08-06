@@ -213,7 +213,7 @@ describe('prompt-enhancement routing and taxonomy', () => {
       expect(preset.conditionalSections.length).toBeGreaterThan(0);
       expect(preset.routeFixtureIds.length).toBeGreaterThan(0);
       expect(preset.evaluationFixtureIds.length).toBeGreaterThan(0);
-      expect(preset.noPopupFixtureId).toMatch(/^pe-ar3-no-popup-/);
+      expect(preset.noPopupFixtureId).toMatch(/^no-popup-/);
     }
     expect(inventory.unsupportedOrDeferredScenarios).toContain('pe_only_classifier');
     expect(inventory.unsupportedOrDeferredScenarios).toContain('source_b_only_popup_authority');
@@ -265,8 +265,8 @@ describe('prompt-enhancement routing and taxonomy', () => {
     for (const section of requiredSections) {
       expect(preset?.requiredSections).toContain(section);
     }
-    expect(preset?.routeFixtureIds[0]).toMatch(/^pe-ar3-route-/);
-    expect(preset?.evaluationFixtureIds[0]).toMatch(/^pe-em3-eval-/);
+    expect(preset?.routeFixtureIds[0]).toMatch(/^route-/);
+    expect(preset?.evaluationFixtureIds[0]).toMatch(/^eval-/);
   });
 
   it.each([
@@ -495,8 +495,8 @@ describe('prompt-enhancement routing and taxonomy', () => {
       freeformRouteOutputAllowed: false,
     });
     expect(result.contractDecision.selectedTemplateRef.registryNamespace).toBe('prompt-enhancement-templates');
-    expect(result.contractDecision.registryLinkedFixtureIds).toContain('pe-ar3-route-issue-debug-failing-test');
-    expect(result.contractDecision.registryLinkedFixtureIds).toContain('pe-em3-eval-issue-debug-failing-test');
+    expect(result.contractDecision.registryLinkedFixtureIds).toContain('route-issue-debug-failing-test');
+    expect(result.contractDecision.registryLinkedFixtureIds).toContain('eval-issue-debug-failing-test');
   });
 
   it.each([

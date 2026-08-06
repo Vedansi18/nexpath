@@ -10,7 +10,7 @@ const completeRow: PromptEnhancementB5EvidenceRowV1 = {
   uiSurfaceRef: 'ui-owner:pe-ui:v1',
   stopExtensionRef: 'host-owner:host-runtime:v1',
   storeGeneratedOriginRef: 'content-owner:store-origin:v1',
-  launchAcceptanceRef: 'content-owner:pe-cr-5-g8:v1',
+  launchAcceptanceRef: 'content-owner:confidentiality-g8:v1',
   owner: 'cross_layer_acceptance',
   evidenceState: 'supplied',
   contractRevision: 'contracts-v1',
@@ -55,7 +55,7 @@ describe('B5.1 evidence intake and owner register', () => {
       uiSurfaceRef: 'ui-owner:pe-ui:v1',
       stopExtensionRef: 'host-owner:host-runtime:v1',
       storeGeneratedOriginRef: 'content-owner:store-origin:v1',
-      launchAcceptanceRef: 'content-owner:pe-cr-5-g8:v1',
+      launchAcceptanceRef: 'content-owner:confidentiality-g8:v1',
       fixtureIds: ['DEP-TEST-01-B5-01'],
       closureDecision: 'ready_for_owner_review',
     });

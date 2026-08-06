@@ -56,7 +56,7 @@ describe('Phase 15 cross-layer final acceptance', () => {
       },
     });
 
-    expect(packet.packetId).toBe('pe-dr6-cross-layer-final-acceptance-v1');
+    expect(packet.packetId).toBe('cross-layer-final-acceptance-v1');
     expect(packet.owner).toBe('cross_layer_acceptance');
     expect(packet.status).toBe('blocked_by_failed_gate');
     expect(packet.readinessClaimAllowed).toBe(false);

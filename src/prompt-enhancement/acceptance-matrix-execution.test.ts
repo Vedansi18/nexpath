@@ -19,7 +19,7 @@ import {
  * The matrix (`acceptance-matrix.ts`, content-owner-content) is SHAPE-ONLY by design and STRUCTURALLY
  * refuses to claim readiness (`readinessClaimAllowed: false` literal; the validator enforces it).
  * The final readiness flip + numeric-threshold sign-off stay content-owner's — see the manual test-plan
- * `docs/dev/user-experience-improvements-sub-11-r1-pe-em3-acceptance-execution-test-plan-2026-08-06.md`.
+ * `docs/dev/user-experience-improvements-sub-11-r1-acceptance-execution-test-plan-2026-08-06.md`.
  *
  * This harness executes the ONE thing the gate exists to catch programmatically: the
  * `BUG-PE-ENGINE-NO-LLM` regression — a debug/feature prompt returning the canned deterministic

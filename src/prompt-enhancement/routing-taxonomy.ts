@@ -388,8 +388,8 @@ function preset(input: {
     slotEvidenceStatus: 'prompt_provided_or_explicit_missing',
     requirementSourceStatus: 'prompt_provided_context_derived_missing_or_not_applicable',
     handoffFlags: input.handoffFlags ?? ['metadata_only_no_sequence_runtime'],
-    routeFixtureIds: [`pe-ar3-route-${input.routeFixtureSuffix}`],
-    evaluationFixtureIds: [`pe-em3-eval-${input.evaluationFixtureSuffix}`],
+    routeFixtureIds: [`route-${input.routeFixtureSuffix}`],
+    evaluationFixtureIds: [`eval-${input.evaluationFixtureSuffix}`],
     metadataContract: BASE_METADATA_CONTRACT,
     callVisibilityMode: 'deterministic',
     llmCallPolicy: 'no_call',
@@ -399,7 +399,7 @@ function preset(input: {
       sendOriginalPreserved: true,
     },
     noPopupContract: {
-      skipNoPopupFixtureId: `pe-ar3-no-popup-${input.routeFixtureSuffix}`,
+      skipNoPopupFixtureId: `no-popup-${input.routeFixtureSuffix}`,
       sendOriginalPreserved: true,
     },
   };
@@ -1385,7 +1385,7 @@ function toTemplateRegistryRef(presetRecord: PromptEnhancementTaxonomyPreset): P
     contentTemplateInputRefs: presetRecord.contentTemplateInputRefs,
     safetyHookIds: presetRecord.safetyHooks,
     sensitivityPolicy: 'deterministic_flags_required',
-    voicePolicyRef: 'pe-ar3-source-honest-user-to-agent-voice',
+    voicePolicyRef: 'source-honest-user-to-agent-voice',
     confirmationRequirementPolicy: 'preserve_when_required',
     supportedDirectionalActions: ['shorter', 'more_thorough', 'more_project_grounded', 'apply_details'],
     composerPolicy: 'deterministic_only',

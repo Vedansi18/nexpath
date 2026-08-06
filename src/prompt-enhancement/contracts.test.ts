@@ -364,7 +364,7 @@ const templateRef = {
   composerPolicy: 'deterministic_only',
   deterministicRendererId: 'deterministic-joined-body-v1',
   llmCallPolicy: 'no_call',
-  tokenTimeoutProfileRef: 'pe-em1-default',
+  tokenTimeoutProfileRef: 'cost-default',
   validationRequirementIds: ['original_preserved', 'source_honesty'],
   fallbackReasonCodes: ['provider_unavailable', 'validation_failed', 'not_applicable'],
   publicSafeDiagnosticCodes: ['generated', 'source_coverage', 'validation_failed'],

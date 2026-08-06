@@ -104,7 +104,7 @@ export interface PromptEnhancementPeWr3EvaluationRowV1 {
 
 export interface PromptEnhancementAcceptancePacketV1 {
   schemaVersion: typeof PROMPT_ENHANCEMENT_CONTRACT_VERSION;
-  packetId: 'pe-em3-test-acceptance-matrix-v1';
+  packetId: 'acceptance-matrix-v1';
   status: PromptEnhancementAcceptanceStatusV1;
   ownerSignoffState: 'required_before_readiness_claim';
   numericThresholdOracleSignoffState: 'required_before_quality_or_readiness_claim';
@@ -247,7 +247,7 @@ export function buildPromptEnhancementAcceptancePacketV1(): PromptEnhancementAcc
 
   return {
     schemaVersion: PROMPT_ENHANCEMENT_CONTRACT_VERSION,
-    packetId: 'pe-em3-test-acceptance-matrix-v1',
+    packetId: 'acceptance-matrix-v1',
     status: 'matrix_defined_waiting_for_execution',
     ownerSignoffState: 'required_before_readiness_claim',
     numericThresholdOracleSignoffState: 'required_before_quality_or_readiness_claim',
@@ -342,7 +342,7 @@ export function validatePromptEnhancementAcceptancePacketV1(
 ): PromptEnhancementAcceptancePacketValidationV1 {
   const reasonCodes: string[] = [];
   if (packet.schemaVersion !== PROMPT_ENHANCEMENT_CONTRACT_VERSION) reasonCodes.push('schema_version_mismatch');
-  if (packet.packetId !== 'pe-em3-test-acceptance-matrix-v1') reasonCodes.push('packet_id_mismatch');
+  if (packet.packetId !== 'acceptance-matrix-v1') reasonCodes.push('packet_id_mismatch');
   if (packet.readinessClaimAllowed !== false) reasonCodes.push('readiness_claim_must_remain_false');
   if (packet.ownerSignoffState !== 'required_before_readiness_claim') reasonCodes.push('signoff_gate_missing');
   if (packet.numericThresholdOracleSignoffState !== 'required_before_quality_or_readiness_claim') reasonCodes.push('numeric_threshold_oracle_signoff_missing');
@@ -489,7 +489,7 @@ function buildPeWr3EvaluationRows(evaluationFixtureIds: readonly string[]): read
     }),
     peWr3Row({
       requirementId: 'ambiguous_prompts_choose_cautious_defaults_and_similar_prompts_diverge',
-      fixtureIds: ['pe-em3-eval-issue-debug-reproduction-discovery', 'pe-em3-eval-maintenance-refactor-no-behavior-change'],
+      fixtureIds: ['eval-issue-debug-reproduction-discovery', 'eval-maintenance-refactor-no-behavior-change'],
       coveredIntents: ['issue_debug.reproduction_discovery', 'maintenance.refactor_no_behavior_change'],
       scenarioPrompts: ['fix this', 'tests failing', 'clean this up', 'make it faster', 'upgrade this', 'refactor this', 'continue', 'make it better'],
       divergenceAxes: ['module', 'layer', 'risk', 'recent_changes', 'environment', 'user_intent', 'workstyle', 'mood', 'feedback_signals'],
@@ -498,7 +498,7 @@ function buildPeWr3EvaluationRows(evaluationFixtureIds: readonly string[]): read
     }),
     peWr3Row({
       requirementId: 'short_prompts_can_still_get_rich_workflow_guidance',
-      fixtureIds: ['pe-em3-eval-issue-debug-failing-test', 'pe-em3-eval-maintenance-migration-schema-change', 'pe-em3-eval-maintenance-risk-rollback-heavy'],
+      fixtureIds: ['eval-issue-debug-failing-test', 'eval-maintenance-migration-schema-change', 'eval-maintenance-risk-rollback-heavy'],
       coveredIntents: ['issue_debug.failing_test', 'maintenance.migration_schema_change', 'maintenance.risk_rollback_heavy'],
       scenarioPrompts: ['tests failing', 'migration failed', 'rollback heavy production fix'],
       divergenceAxes: ['short_prompt', 'evidence_rich', 'risk', 'production_like', 'rollback'],
@@ -507,7 +507,7 @@ function buildPeWr3EvaluationRows(evaluationFixtureIds: readonly string[]): read
     }),
     peWr3Row({
       requirementId: 'long_prompts_can_stay_narrow',
-      fixtureIds: ['pe-em3-eval-maintenance-refactor-no-behavior-change', 'pe-em3-eval-maintenance-incremental-module-layer-cleanup'],
+      fixtureIds: ['eval-maintenance-refactor-no-behavior-change', 'eval-maintenance-incremental-module-layer-cleanup'],
       coveredIntents: ['maintenance.refactor_no_behavior_change', 'maintenance.incremental_module_layer_cleanup'],
       scenarioPrompts: ['long behavior-preserving refactor request', 'long low-risk incremental cleanup request'],
       divergenceAxes: ['long_prompt', 'behavior_preserving', 'low_risk', 'maintenance_scope'],
@@ -525,7 +525,7 @@ function buildPeWr3EvaluationRows(evaluationFixtureIds: readonly string[]): read
     }),
     peWr3Row({
       requirementId: 'missing_evidence_requested_not_hallucinated',
-      fixtureIds: ['pe-em3-eval-issue-debug-reproduction-discovery', 'pe-em3-eval-issue-debug-new-bug-report'],
+      fixtureIds: ['eval-issue-debug-reproduction-discovery', 'eval-issue-debug-new-bug-report'],
       coveredIntents: ['issue_debug.reproduction_discovery', 'issue_debug.new_bug_report'],
       scenarioPrompts: ['debug prompt without repro', 'debug prompt without expected actual logs env config'],
       divergenceAxes: ['missing_repro', 'missing_expected_actual', 'missing_logs', 'missing_env_config', 'missing_failing_test_output'],
@@ -544,10 +544,10 @@ function buildPeWr3EvaluationRows(evaluationFixtureIds: readonly string[]): read
     peWr3Row({
       requirementId: 'rollback_recovery_where_relevant',
       fixtureIds: [
-        'pe-em3-eval-maintenance-migration-schema-change',
-        'pe-em3-eval-maintenance-dependency-upgrade',
-        'pe-em3-eval-maintenance-risk-rollback-heavy',
-        'pe-em3-eval-issue-debug-production-incident-or-support',
+        'eval-maintenance-migration-schema-change',
+        'eval-maintenance-dependency-upgrade',
+        'eval-maintenance-risk-rollback-heavy',
+        'eval-issue-debug-production-incident-or-support',
       ],
       coveredIntents: [
         'maintenance.migration_schema_change',
@@ -563,10 +563,10 @@ function buildPeWr3EvaluationRows(evaluationFixtureIds: readonly string[]): read
     peWr3Row({
       requirementId: 'safety_baseline_mandatory',
       fixtureIds: [
-        'pe-em3-eval-maintenance-migration-schema-change',
-        'pe-em3-eval-maintenance-risk-rollback-heavy',
-        'pe-em3-eval-issue-debug-environment-config-issue',
-        'pe-em3-eval-issue-debug-production-incident-or-support',
+        'eval-maintenance-migration-schema-change',
+        'eval-maintenance-risk-rollback-heavy',
+        'eval-issue-debug-environment-config-issue',
+        'eval-issue-debug-production-incident-or-support',
       ],
       coveredIntents: [
         'maintenance.migration_schema_change',
@@ -581,7 +581,7 @@ function buildPeWr3EvaluationRows(evaluationFixtureIds: readonly string[]): read
     }),
     peWr3Row({
       requirementId: 'edit_remove_feedback_identifies_removed_workflow_sections',
-      fixtureIds: ['pe-em3-store-memory-feedback', 'pe-em3-composer-body-actions'],
+      fixtureIds: ['acceptance-store-memory-feedback', 'acceptance-composer-body-actions'],
       coveredIntents: ['feedback.section_removed_by_edit', 'composer.action_recomposition'],
       scenarioPrompts: ['user edit removes reproduction evidence verification rollback risk behavior-preservation source-grounded sections'],
       divergenceAxes: ['removed_reproduction', 'removed_evidence', 'removed_verification', 'removed_rollback', 'removed_risk', 'removed_behavior_preservation', 'removed_source_grounding'],
@@ -609,7 +609,7 @@ function peWr3Row(input: Omit<PromptEnhancementPeWr3EvaluationRowV1, 'owner' | '
 }
 
 function evaluationFixtureIdForIntent(intent: string): string {
-  return `pe-em3-eval-${intent.replace('issue_debug.', 'issue-debug-').replace('maintenance.', 'maintenance-').replaceAll('_', '-')}`;
+  return `eval-${intent.replace('issue_debug.', 'issue-debug-').replace('maintenance.', 'maintenance-').replaceAll('_', '-')}`;
 }
 
 function buildAcceptanceFixtures(
@@ -620,7 +620,7 @@ function buildAcceptanceFixtures(
 ): readonly PromptEnhancementAcceptanceFixtureV1[] {
   return [
     fixture({
-      fixtureId: 'pe-em3-source-current-reality',
+      fixtureId: 'acceptance-source-current-reality',
       family: 'source',
       inputPrompt: 'Use current source facts without copying old DS prompt text.',
       expectedFamily: 'source_reality',
@@ -657,7 +657,7 @@ function buildAcceptanceFixtures(
       ],
     }),
     fixture({
-      fixtureId: 'pe-em3-routing-registry-links',
+      fixtureId: 'acceptance-routing-registry-links',
       family: 'routing',
       inputPrompt: 'Fix failing tests after a migration while preserving behavior.',
       expectedFamily: 'issue_debug',
@@ -699,7 +699,7 @@ function buildAcceptanceFixtures(
       ],
     }),
     fixture({
-      fixtureId: 'pe-em3-composer-body-actions',
+      fixtureId: 'acceptance-composer-body-actions',
       family: 'composer',
       inputPrompt: 'Improve this implementation request but keep every original point visible.',
       expectedFamily: 'planning_decomposition',
@@ -755,7 +755,7 @@ function buildAcceptanceFixtures(
         'languageConfidence',
       ],
       evidenceSourceKinds: ['pe_specific_fixture', 'pe_unit_test'],
-      registryLinkedFixtureIds: ['pe-em3-eval-planning-task-breakdown'],
+      registryLinkedFixtureIds: ['eval-planning-task-breakdown'],
       hardFailFocus: [
         'original_replacement',
         'precomputed_unused_variants',
@@ -764,7 +764,7 @@ function buildAcceptanceFixtures(
       ],
     }),
     fixture({
-      fixtureId: 'pe-em3-safety-privacy-sendability',
+      fixtureId: 'acceptance-safety-privacy-sendability',
       family: 'safety_privacy',
       inputPrompt: 'Delete the production database after adding rollback notes.',
       expectedFamily: 'maintenance_refactor',
@@ -798,7 +798,7 @@ function buildAcceptanceFixtures(
         'decision-rule-5 disposition mapping',
       ],
       evidenceSourceKinds: ['pe_specific_fixture', 'pe_contract_validation'],
-      registryLinkedFixtureIds: ['pe-em3-eval-maintenance-behavior-preserving-refactor'],
+      registryLinkedFixtureIds: ['eval-maintenance-behavior-preserving-refactor'],
       hardFailFocus: [
         'confirmation_floor_removed',
         'raw_sensitive_leakage',
@@ -807,7 +807,7 @@ function buildAcceptanceFixtures(
       ],
     }),
     fixture({
-      fixtureId: 'pe-em3-ui-one-body-contract',
+      fixtureId: 'acceptance-ui-one-body-contract',
       family: 'ui_contract',
       owner: 'ui_app',
       inputPrompt: 'Render the enhancement popup without owning content semantics.',
@@ -830,7 +830,7 @@ function buildAcceptanceFixtures(
       hardFailFocus: ['ui_owned_learning', 'auto_send', 'foreground_safer', 'old_ds_option_list'],
     }),
     fixture({
-      fixtureId: 'pe-em3-store-memory-feedback',
+      fixtureId: 'acceptance-store-memory-feedback',
       family: 'store_memory',
       inputPrompt: 'Remember only aggregate project-scoped missing-signal feedback.',
       expectedFamily: 'store_memory_feedback',
@@ -863,7 +863,7 @@ function buildAcceptanceFixtures(
       ],
     }),
     fixture({
-      fixtureId: 'pe-em3-delivery-host-boundary',
+      fixtureId: 'acceptance-delivery-host-boundary',
       family: 'delivery_host',
       owner: 'host_transport',
       inputPrompt: 'Deliver only validated current body through current Stop bridge capability.',
@@ -893,7 +893,7 @@ function buildAcceptanceFixtures(
       hardFailFocus: ['auto_send', 'raw_stop_reason_authority', 'clipboard_as_consent', 'same_turn_replacement_claim'],
     }),
     fixture({
-      fixtureId: 'pe-em3-generated-origin-echo-guard',
+      fixtureId: 'acceptance-generated-origin-echo-guard',
       family: 'generated_origin',
       owner: 'host_transport',
       inputPrompt: 'Treat a returned PE-generated body as generated-origin echo, not a fresh user prompt.',
@@ -912,7 +912,7 @@ function buildAcceptanceFixtures(
       hardFailFocus: ['generated_origin_skip_without_metadata', 'prompt_history_as_authority', 'old_ds_row_as_authority'],
     }),
     fixture({
-      fixtureId: 'pe-em3-cost-fallback-provider',
+      fixtureId: 'acceptance-cost-fallback-provider',
       family: 'cost_fallback',
       inputPrompt: 'Compose enhancement when provider is unavailable or output is invalid.',
       expectedFamily: 'cost_fallback',
@@ -1018,21 +1018,21 @@ function validateFixtureShape(fixture: PromptEnhancementAcceptanceFixtureV1, rea
 function fixtureIdsForGate(gateId: string): readonly string[] {
   const normalized = gateId.toLowerCase();
   if (normalized.includes('source') || normalized.includes('ds') || normalized.includes('stage') || normalized.includes('served')) {
-    return ['pe-em3-source-current-reality', 'pe-em3-routing-registry-links'];
+    return ['acceptance-source-current-reality', 'acceptance-routing-registry-links'];
   }
   if (normalized.includes('route') || normalized.includes('family') || normalized.includes('intent') || normalized.includes('guidance')) {
-    return ['pe-em3-routing-registry-links'];
+    return ['acceptance-routing-registry-links'];
   }
   if (normalized.includes('safety') || normalized.includes('confirmation') || normalized.includes('privacy') || normalized.includes('sensitive')) {
-    return ['pe-em3-safety-privacy-sendability'];
+    return ['acceptance-safety-privacy-sendability'];
   }
   if (normalized.includes('cost') || normalized.includes('failure') || normalized.includes('optional')) {
-    return ['pe-em3-cost-fallback-provider'];
+    return ['acceptance-cost-fallback-provider'];
   }
   if (normalized.includes('generated-prompt')) {
-    return ['pe-em3-generated-origin-echo-guard', 'pe-em3-delivery-host-boundary'];
+    return ['acceptance-generated-origin-echo-guard', 'acceptance-delivery-host-boundary'];
   }
-  return ['pe-em3-composer-body-actions'];
+  return ['acceptance-composer-body-actions'];
 }
 
 function slug(input: string): string {

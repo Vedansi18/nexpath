@@ -27,7 +27,7 @@ describe('Phase 13 eval-rule-3 test and acceptance matrix', () => {
       hardFailCount: 0,
       reasonCodes: [],
     });
-    expect(packet.packetId).toBe('pe-em3-test-acceptance-matrix-v1');
+    expect(packet.packetId).toBe('acceptance-matrix-v1');
     expect(packet.readinessClaimAllowed).toBe(false);
     expect(packet.ownerSignoffState).toBe('required_before_readiness_claim');
     expect(packet.numericThresholdOracleSignoffState).toBe('required_before_quality_or_readiness_claim');
@@ -58,7 +58,7 @@ describe('Phase 13 eval-rule-3 test and acceptance matrix', () => {
     const packet = buildPromptEnhancementAcceptancePacketV1();
 
     for (const fixture of packet.fixtures) {
-      expect(fixture.fixtureId).toMatch(/^pe-em3-/);
+      expect(fixture.fixtureId).toMatch(/^acceptance-/);
       expect(fixture.owner).toMatch(/content_semantics|ui_app|host_transport/);
       expect(fixture.version).toBe(1);
       expect(fixture.inputPrompt).not.toBe('');
@@ -241,10 +241,10 @@ describe('Phase 13 eval-rule-3 test and acceptance matrix', () => {
     expect(debugRow?.coveredIntents).toEqual(DEBUG_PRIMARY_INTENTS);
     expect(maintenanceRow?.coveredIntents).toEqual(MAINTENANCE_PRIMARY_INTENTS);
     for (const intent of DEBUG_PRIMARY_INTENTS) {
-      expect(debugRow?.fixtureIds).toContain(`pe-em3-eval-${intent.replace('issue_debug.', 'issue-debug-').replaceAll('_', '-')}`);
+      expect(debugRow?.fixtureIds).toContain(`eval-${intent.replace('issue_debug.', 'issue-debug-').replaceAll('_', '-')}`);
     }
     for (const intent of MAINTENANCE_PRIMARY_INTENTS) {
-      expect(maintenanceRow?.fixtureIds).toContain(`pe-em3-eval-${intent.replace('maintenance.', 'maintenance-').replaceAll('_', '-')}`);
+      expect(maintenanceRow?.fixtureIds).toContain(`eval-${intent.replace('maintenance.', 'maintenance-').replaceAll('_', '-')}`);
     }
     for (const row of packet.peWr3EvaluationRows) {
       expect(row.owner).toBe('content_semantics');
@@ -331,7 +331,7 @@ describe('Phase 13 eval-rule-3 test and acceptance matrix', () => {
     packet.peWr3EvaluationRows = packet.peWr3EvaluationRows.filter((row) => row.requirementId !== 'mapping_directly_derivable_for_development');
     if (debugRow) {
       debugRow.coveredIntents = debugRow.coveredIntents.filter((intent) => intent !== 'issue_debug.failing_test');
-      debugRow.fixtureIds = debugRow.fixtureIds.filter((fixtureId) => fixtureId !== 'pe-em3-eval-issue-debug-failing-test');
+      debugRow.fixtureIds = debugRow.fixtureIds.filter((fixtureId) => fixtureId !== 'eval-issue-debug-failing-test');
       packet.peWr3EvaluationRows = [debugRow, ...packet.peWr3EvaluationRows.filter((row) => row.requirementId !== debugRow.requirementId)];
     }
 

@@ -99,7 +99,7 @@ export interface PromptEnhancementFinalAcceptanceInputV1 {
 
 export interface PromptEnhancementFinalAcceptancePacketV1 {
   schemaVersion: typeof PROMPT_ENHANCEMENT_CONTRACT_VERSION;
-  packetId: 'pe-dr6-cross-layer-final-acceptance-v1';
+  packetId: 'cross-layer-final-acceptance-v1';
   owner: 'cross_layer_acceptance';
   status: PromptEnhancementFinalAcceptanceStatusV1;
   readinessClaimAllowed: boolean;
@@ -215,7 +215,7 @@ export function buildPromptEnhancementFinalAcceptancePacketV1(
 
   return {
     schemaVersion: PROMPT_ENHANCEMENT_CONTRACT_VERSION,
-    packetId: 'pe-dr6-cross-layer-final-acceptance-v1',
+    packetId: 'cross-layer-final-acceptance-v1',
     owner: 'cross_layer_acceptance',
     status: allOk
       ? 'accepted_for_readiness_claim'
@@ -255,7 +255,7 @@ export function validatePromptEnhancementFinalAcceptancePacketV1(
 ): PromptEnhancementFinalAcceptanceValidationV1 {
   const reasonCodes = validatePromptEnhancementFinalAcceptanceInputV1(packet);
   if (packet.schemaVersion !== PROMPT_ENHANCEMENT_CONTRACT_VERSION) reasonCodes.push('schema_version_mismatch');
-  if (packet.packetId !== 'pe-dr6-cross-layer-final-acceptance-v1') reasonCodes.push('packet_id_mismatch');
+  if (packet.packetId !== 'cross-layer-final-acceptance-v1') reasonCodes.push('packet_id_mismatch');
   if (packet.owner !== 'cross_layer_acceptance') reasonCodes.push('owner_mismatch');
   for (const surface of PROMPT_ENHANCEMENT_FINAL_ACCEPTANCE_REQUIRED_SURFACES_V1) {
     if (!packet.requiredSurfaces.includes(surface)) reasonCodes.push(`missing_required_surface:${surface}`);
