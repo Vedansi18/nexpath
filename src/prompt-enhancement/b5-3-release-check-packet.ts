@@ -12,7 +12,7 @@ export interface PromptEnhancementB5_3EvidenceItemV1 {
   revision: string | null;
   command: string | null;
   output: string | null;
-  owner: 'hiren_content_api' | 'bhavnesh_ui_app' | 'vedansi_host_extension' | 'bhavnesh_release_check' | 'bhavnesh_cross_layer_acceptance';
+  owner: 'content_semantics' | 'ui_app' | 'host_transport' | 'release_check' | 'cross_layer_acceptance';
   unresolved: string | null;
 }
 
@@ -67,7 +67,7 @@ const BLOCKED_PUBLIC_FACTS: PromptEnhancementPublicLaunchFileFactsV1 = {
 
 const DEFAULT_EVIDENCE: PromptEnhancementB5_3EvidenceItemV1 = {
   state: 'missing', revision: null, command: null, output: null,
-  owner: 'bhavnesh_release_check', unresolved: 'Owner evidence not supplied.',
+  owner: 'release_check', unresolved: 'Owner evidence not supplied.',
 };
 
 const DEFAULT_INPUT: PromptEnhancementB5_3ReleaseCheckInputV1 = {

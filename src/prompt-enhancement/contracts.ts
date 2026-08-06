@@ -214,11 +214,11 @@ export type PromptEnhancementRuntimeBlockReason =
   | 'not_applicable';
 
 export type PromptEnhancementOwnerArea =
-  | 'hiren_content_api'
-  | 'bhavnesh_ui_app'
-  | 'vedansi_host_extension'
-  | 'bhavnesh_release_check'
-  | 'bhavnesh_cross_layer_acceptance';
+  | 'content_semantics'
+  | 'ui_app'
+  | 'host_transport'
+  | 'release_check'
+  | 'cross_layer_acceptance';
 
 export type PromptEnhancementPublicTrustCueLabel =
   | 'original_prompt'
@@ -374,7 +374,7 @@ export interface PromptEnhancementTemplateRegistryRefV1 {
   fallbackPolicy: PromptEnhancementFallbackMode;
   testFixtureIds: readonly string[];
   invariantIds: readonly string[];
-  ownerArea: 'hiren_content_api';
+  ownerArea: 'content_semantics';
   launchVisibility: 'private_until_launch_recheck';
   publicSafeSourceNotes: readonly string[];
   routeFixtureIds: readonly string[];
@@ -470,7 +470,7 @@ export interface PromptEnhancementRouteDecisionV1 {
     // E6: 'llm_route_decision_call' marks a route decided by the bounded LLM route
     // call; 'no_call' remains the deterministic default + fallback.
     mode: 'no_call' | 'llm_route_decision_call';
-    owner: 'hiren_content_api';
+    owner: 'content_semantics';
     peEm1WorksheetRow: 'not_applicable_deterministic' | 'llm_route_decision_call';
     freeformRouteOutputAllowed: false;
   };
@@ -792,7 +792,7 @@ export interface PromptEnhancementValidationPhaseStateV1 {
 
 export interface PromptEnhancementValidationGraphV1 {
   graphVersion: PromptEnhancementSchemaVersion;
-  graphOwner: 'hiren_content_api';
+  graphOwner: 'content_semantics';
   phaseStates: readonly PromptEnhancementValidationPhaseStateV1[];
   failures: readonly PromptEnhancementValidationFailureV1[];
   safetyState: PromptEnhancementSafetySummaryV1;
@@ -1286,9 +1286,9 @@ export interface PromptEnhancementHandoffMetadataV1 {
   runtimeGuards: PromptEnhancementHandoffRuntimeGuardsV1;
   privacyStoragePolicy: PromptEnhancementHandoffPrivacyStoragePolicyV1;
   ownerBoundary: {
-    semanticOwner: 'hiren_content_api';
-    uiConsumer: 'bhavnesh_ui_app';
-    hostOwner: 'vedansi_host_extension';
+    semanticOwner: 'content_semantics';
+    uiConsumer: 'ui_app';
+    hostOwner: 'host_transport';
     runtimeOwnerState: 'future_pe_ar11_only_after_gates';
   };
   reasonCodes: readonly string[];
@@ -2136,7 +2136,7 @@ function isCompleteValidationGraph(value: unknown): boolean {
   const graph = asRecord(value);
   if (!graph) return false;
   if (graph['graphVersion'] !== PROMPT_ENHANCEMENT_CONTRACT_VERSION) return false;
-  if (graph['graphOwner'] !== 'hiren_content_api') return false;
+  if (graph['graphOwner'] !== 'content_semantics') return false;
   if (graph['rawTransportIsValidationProof'] !== false) return false;
   if (graph['evaluatesAgentResponseQuality'] !== false) return false;
   if (graph['canAutoAdvanceSequencePointer'] !== false) return false;
@@ -2541,9 +2541,9 @@ function isCompleteHandoffPrivacyStoragePolicy(value: unknown): boolean {
 function isCompleteHandoffOwnerBoundary(value: unknown): boolean {
   const owner = asRecord(value);
   return !!owner
-    && owner['semanticOwner'] === 'hiren_content_api'
-    && owner['uiConsumer'] === 'bhavnesh_ui_app'
-    && owner['hostOwner'] === 'vedansi_host_extension'
+    && owner['semanticOwner'] === 'content_semantics'
+    && owner['uiConsumer'] === 'ui_app'
+    && owner['hostOwner'] === 'host_transport'
     && owner['runtimeOwnerState'] === 'future_pe_ar11_only_after_gates';
 }
 

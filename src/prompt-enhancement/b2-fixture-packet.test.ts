@@ -20,7 +20,7 @@ describe('B2.5 Bhavnesh UI fixture and acceptance packet', () => {
       'host_status_display',
       'regression_boundary',
     ]);
-    expect(packet.rows.every((row) => row.owner === 'bhavnesh_ui_app')).toBe(true);
+    expect(packet.rows.every((row) => row.owner === 'ui_app')).toBe(true);
     expect(packet.rows.every((row) => row.approvedFixtureId === null && row.contractRevision === null)).toBe(true);
   });
 
@@ -59,7 +59,7 @@ describe('B2.5 Bhavnesh UI fixture and acceptance packet', () => {
     const packet = buildPromptEnhancementB2FixturePacketV1();
     expect(packet.evidenceRule).toBe('render_and_typed_event_assertions_only');
     expect(packet.forbiddenEvidence).toEqual(expect.arrayContaining([
-      'vedansi_transport_success',
+      'host_transport_success',
       'stop_bridge_internals',
       'hiren_semantic_validation',
       'old_decision_session',

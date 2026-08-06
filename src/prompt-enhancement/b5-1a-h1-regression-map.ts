@@ -32,7 +32,7 @@ export interface PromptEnhancementB5_1aH1FixtureRowV1 {
   contractRevision: string | null;
   expectedSink: string;
   forbiddenEffects: readonly string[];
-  oracleOwner: 'hiren_content_api' | 'bhavnesh_ui_app' | 'vedansi_host_extension' | 'bhavnesh_cross_layer_acceptance';
+  oracleOwner: 'content_semantics' | 'ui_app' | 'host_transport' | 'cross_layer_acceptance';
   exactCommand: string;
   environment: string;
   observedOutcome: PromptEnhancementB5_1aH1ObservedOutcomeV1;
@@ -66,7 +66,7 @@ const ROWS: readonly PromptEnhancementB5_1aH1FixtureRowV1[] = [
     contractRevision: null,
     expectedSink: 'PE preparation call occurs only after existing runAuto gates pass; blocked gates produce no facade call.',
     forbiddenEffects: ['new_pe_classifier', 'second_shared_gate', 'changed_gate_meaning'],
-    oracleOwner: 'bhavnesh_cross_layer_acceptance',
+    oracleOwner: 'cross_layer_acceptance',
     exactCommand: FOCUSED_COMMAND,
     environment: 'NO_COLOR=1; approved H1 contract/source revision pending',
     observedOutcome: 'not_run_pending_approved_inputs',
@@ -81,7 +81,7 @@ const ROWS: readonly PromptEnhancementB5_1aH1FixtureRowV1[] = [
     contractRevision: null,
     expectedSink: 'Only supplied typed no-popup, fallback, or blocked state is consumed; no body, send, delivery, or sequence effect.',
     forbiddenEffects: ['inferred_body', 'automatic_send', 'delivery_claim', 'sequence_activation'],
-    oracleOwner: 'hiren_content_api',
+    oracleOwner: 'content_semantics',
     exactCommand: FOCUSED_COMMAND,
     environment: 'NO_COLOR=1; approved H1 contract/source revision pending',
     observedOutcome: 'not_run_pending_approved_inputs',
@@ -98,7 +98,7 @@ const ROWS: readonly PromptEnhancementB5_1aH1FixtureRowV1[] = [
     contractRevision: null,
     expectedSink: 'Only typed show_current_body authorizes editable enhancement-body rendering.',
     forbiddenEffects: ['legacy_decision_session_authority', 'feedback_authority', 'history_authority', 'raw_transport_authority', 'clipboard_authority', 'missing_origin_authority'],
-    oracleOwner: 'bhavnesh_ui_app',
+    oracleOwner: 'ui_app',
     exactCommand: FOCUSED_COMMAND,
     environment: 'NO_COLOR=1; approved H1 contract/source revision pending',
     observedOutcome: 'not_run_pending_approved_inputs',
@@ -116,7 +116,7 @@ const ROWS: readonly PromptEnhancementB5_1aH1FixtureRowV1[] = [
     contractRevision: null,
     expectedSink: 'Existing Decision Session, product-feedback, classifier, and hook behavior remains unchanged.',
     forbiddenEffects: ['legacy_behavior_rewrite', 'ownership_transfer', 'public_launch_claim'],
-    oracleOwner: 'bhavnesh_cross_layer_acceptance',
+    oracleOwner: 'cross_layer_acceptance',
     exactCommand: BASELINE_COMMAND,
     environment: 'NO_COLOR=1',
     observedOutcome: 'pass',

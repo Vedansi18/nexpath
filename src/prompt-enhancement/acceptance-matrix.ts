@@ -84,7 +84,7 @@ export interface PromptEnhancementAcceptanceFixtureV1 {
 
 export interface PromptEnhancementNamedGateEvidenceV1 {
   gateId: string;
-  owner: 'hiren_content_api';
+  owner: 'content_semantics';
   fixtureIds: readonly string[];
   oracleIds: readonly string[];
   hardFailResult: PromptEnhancementAcceptanceHardFailStateV1;
@@ -92,7 +92,7 @@ export interface PromptEnhancementNamedGateEvidenceV1 {
 
 export interface PromptEnhancementPeWr3EvaluationRowV1 {
   requirementId: string;
-  owner: 'hiren_content_api';
+  owner: 'content_semantics';
   fixtureIds: readonly string[];
   coveredIntents: readonly string[];
   scenarioPrompts: readonly string[];
@@ -264,7 +264,7 @@ export function buildPromptEnhancementAcceptancePacketV1(): PromptEnhancementAcc
     fixtures,
     peAr1NamedGateEvidence: PROMPT_ENHANCEMENT_PE_AR1_NAMED_SPLIT_GATES_V1.map((gateId) => ({
       gateId,
-      owner: 'hiren_content_api',
+      owner: 'content_semantics',
       fixtureIds: fixtureIdsForGate(gateId),
       oracleIds: [`oracle:${slug(gateId)}`],
       hardFailResult: 'not_run_shape_only',
@@ -396,7 +396,7 @@ export function validatePromptEnhancementAcceptancePacketV1(
     if (!wr3Rows.has(requirementId)) reasonCodes.push(`missing_pe_wr3_row:${requirementId}`);
   }
   for (const row of packet.peWr3EvaluationRows) {
-    if (row.owner !== 'hiren_content_api') reasonCodes.push(`pe_wr3_owner_mismatch:${row.requirementId}`);
+    if (row.owner !== 'content_semantics') reasonCodes.push(`pe_wr3_owner_mismatch:${row.requirementId}`);
     if (row.fixtureIds.length === 0) reasonCodes.push(`pe_wr3_missing_fixture:${row.requirementId}`);
     if (row.scenarioPrompts.length === 0) reasonCodes.push(`pe_wr3_missing_scenario_prompts:${row.requirementId}`);
     if (row.divergenceAxes.length === 0) reasonCodes.push(`pe_wr3_missing_divergence_axes:${row.requirementId}`);
@@ -415,7 +415,7 @@ export function validatePromptEnhancementAcceptancePacketV1(
     if (!maintenanceCategoryRow?.fixtureIds.includes(evaluationFixtureIdForIntent(intent))) reasonCodes.push(`pe_wr3_missing_maintenance_fixture:${intent}`);
   }
   for (const gate of packet.peAr1NamedGateEvidence) {
-    if (gate.owner !== 'hiren_content_api') reasonCodes.push(`gate_owner_mismatch:${gate.gateId}`);
+    if (gate.owner !== 'content_semantics') reasonCodes.push(`gate_owner_mismatch:${gate.gateId}`);
     if (gate.fixtureIds.length === 0) reasonCodes.push(`gate_missing_fixture:${gate.gateId}`);
     if (gate.oracleIds.length === 0) reasonCodes.push(`gate_missing_oracle:${gate.gateId}`);
   }
@@ -602,7 +602,7 @@ function buildPeWr3EvaluationRows(evaluationFixtureIds: readonly string[]): read
 
 function peWr3Row(input: Omit<PromptEnhancementPeWr3EvaluationRowV1, 'owner' | 'directlyDerivableForDevelopment'>): PromptEnhancementPeWr3EvaluationRowV1 {
   return {
-    owner: 'hiren_content_api',
+    owner: 'content_semantics',
     directlyDerivableForDevelopment: true,
     ...input,
   };
@@ -809,7 +809,7 @@ function buildAcceptanceFixtures(
     fixture({
       fixtureId: 'pe-em3-ui-one-body-contract',
       family: 'ui_contract',
-      owner: 'bhavnesh_ui_app',
+      owner: 'ui_app',
       inputPrompt: 'Render the enhancement popup without owning content semantics.',
       expectedFamily: 'ui_contract',
       expectedIntent: 'one_body_popup',
@@ -865,7 +865,7 @@ function buildAcceptanceFixtures(
     fixture({
       fixtureId: 'pe-em3-delivery-host-boundary',
       family: 'delivery_host',
-      owner: 'vedansi_host_extension',
+      owner: 'host_transport',
       inputPrompt: 'Deliver only validated current body through current Stop bridge capability.',
       expectedFamily: 'delivery_host',
       expectedIntent: 'stop_bridge_delivery',
@@ -895,7 +895,7 @@ function buildAcceptanceFixtures(
     fixture({
       fixtureId: 'pe-em3-generated-origin-echo-guard',
       family: 'generated_origin',
-      owner: 'vedansi_host_extension',
+      owner: 'host_transport',
       inputPrompt: 'Treat a returned PE-generated body as generated-origin echo, not a fresh user prompt.',
       expectedFamily: 'generated_origin',
       expectedIntent: 'echo_guard',
@@ -965,7 +965,7 @@ function fixture(input: Partial<PromptEnhancementAcceptanceFixtureV1> & Pick<
   | 'hardFailFocus'
 >): PromptEnhancementAcceptanceFixtureV1 {
   return {
-    owner: input.owner ?? 'hiren_content_api',
+    owner: input.owner ?? 'content_semantics',
     version: PROMPT_ENHANCEMENT_CONTRACT_VERSION,
     sourceContextClass: input.sourceContextClass ?? 'current_source_plus_pe_fixture',
     projectSourceScope: 'current_project_only',

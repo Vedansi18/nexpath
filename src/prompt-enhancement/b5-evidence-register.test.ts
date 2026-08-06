@@ -11,7 +11,7 @@ const completeRow: PromptEnhancementB5EvidenceRowV1 = {
   stopExtensionRef: 'vedansi:host-runtime:v1',
   storeGeneratedOriginRef: 'hiren:store-origin:v1',
   launchAcceptanceRef: 'hiren:pe-cr-5-g8:v1',
-  owner: 'bhavnesh_cross_layer_acceptance',
+  owner: 'cross_layer_acceptance',
   evidenceState: 'supplied',
   contractRevision: 'contracts-v1',
   sourceRevision: '221d379',

@@ -257,7 +257,7 @@ function buildResult(
   const composerCallVisibility = composed.composerBoundary.inputContract.callVisibilityState;
   const callAndVisibilityMetadata = {
     ...composerCallVisibility,
-    callOwner: 'hiren_content_api' as const,
+    callOwner: 'content_semantics' as const,
     callTrigger: 'prepare' as const,
     productValueDiscussionIsRuntimeLimiter: false as const,
   };
@@ -316,7 +316,7 @@ function buildResult(
     generatedOrigin,
     delivery,
     ownership: {
-      owners: ['hiren_content_api', 'bhavnesh_ui_app'],
+      owners: ['content_semantics', 'ui_app'],
       sourceSnapshotVersion: PROMPT_ENHANCEMENT_CONTRACT_VERSION,
       fixtureIds: [...route.contractDecision.registryLinkedFixtureIds],
       launchBoundaryRecheckRef: 'launch_boundary_recheck_pending',

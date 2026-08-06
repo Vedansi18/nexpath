@@ -490,7 +490,7 @@ describe('prompt-enhancement routing and taxonomy', () => {
     expect(result.contractDecision.routeEvidence).toEqual(result.routeEvidenceRefs);
     expect(result.contractDecision.llmRoutePolicy).toEqual({
       mode: 'no_call',
-      owner: 'hiren_content_api',
+      owner: 'content_semantics',
       peEm1WorksheetRow: 'not_applicable_deterministic',
       freeformRouteOutputAllowed: false,
     });

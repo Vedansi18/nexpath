@@ -49,7 +49,7 @@ describe('Phase 12 cost, provider, latency, and observability contracts', () => 
     expect(validatePromptEnhancementCostInventoryV1(inventory)).toEqual({ ok: true, reasonCodes: [] });
     expect(inventory.map((row) => row.callId)).toEqual(requiredCallIds);
     for (const row of inventory) {
-      expect(row.owner).toBe('hiren_content_api');
+      expect(row.owner).toBe('content_semantics');
       expect(row.ownerResearchItem).toBe('PE-EM-1_PE-G4');
       expect(row.implementationModule).toBe('src/prompt-enhancement/cost-observability.ts');
       expect(row.userVisibleTrigger).not.toBe('');
@@ -299,7 +299,7 @@ describe('Phase 12 cost, provider, latency, and observability contracts', () => 
 
     expect(metadata).toMatchObject({
       callId: 'action_more_thorough',
-      callOwner: 'hiren_content_api',
+      callOwner: 'content_semantics',
       callVisibilityMode: 'llm_wording',
       optionalCallAvailabilityState: 'allowed',
       provider: 'openai',
@@ -377,7 +377,7 @@ describe('Phase 12 cost, provider, latency, and observability contracts', () => 
 
     expect(record).toMatchObject({
       callId: 'feedback_reason_rewrite',
-      owner: 'hiren_content_api',
+      owner: 'content_semantics',
       plannedCallCount: 1,
       usedCallCount: 1,
       latencyMs: 842,

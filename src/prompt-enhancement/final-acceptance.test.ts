@@ -57,7 +57,7 @@ describe('Phase 15 cross-layer final acceptance', () => {
     });
 
     expect(packet.packetId).toBe('pe-dr6-cross-layer-final-acceptance-v1');
-    expect(packet.owner).toBe('bhavnesh_cross_layer_acceptance');
+    expect(packet.owner).toBe('cross_layer_acceptance');
     expect(packet.status).toBe('blocked_by_failed_gate');
     expect(packet.readinessClaimAllowed).toBe(false);
     expect(packet.acceptedForPublicLaunch).toBe(false);
@@ -80,7 +80,7 @@ describe('Phase 15 cross-layer final acceptance', () => {
       'public_launch_packet:not_approved_for_public_promotion',
       'public_launch_packet:launch_ready_claim_blocked',
       'final_signoff_missing:hiren',
-      'final_signoff_missing:bhavnesh_cross_layer_acceptance',
+      'final_signoff_missing:cross_layer_acceptance',
       'final_signoff_missing:hiren_test',
     ]));
     expect(validatePromptEnhancementFinalAcceptancePacketV1(packet).ok).toBe(false);
@@ -260,14 +260,14 @@ function ownerForSurface(
 ): PromptEnhancementFinalAcceptanceSurfaceEvidenceV1['owner'] {
   switch (surface) {
     case 'ui_popup_session':
-      return 'bhavnesh_ui_app';
+      return 'ui_app';
     case 'stop_bridge_delivery':
     case 'extension_payload_contract':
-      return 'vedansi_host_extension';
+      return 'host_transport';
     case 'public_launch_recheck':
-      return 'bhavnesh_release_check';
+      return 'release_check';
     case 'api_contract':
     case 'store_memory_feedback':
-      return 'hiren_content_api';
+      return 'content_semantics';
   }
 }

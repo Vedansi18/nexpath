@@ -9,7 +9,7 @@ export type PromptEnhancementB4FixtureGroupV1 =
 export interface PromptEnhancementB4FixtureRowV1 {
   rowId: string;
   group: PromptEnhancementB4FixtureGroupV1;
-  owner: 'bhavnesh_ui_app';
+  owner: 'ui_app';
   requiredExternalDependencies: readonly ['DEP-B4-01', 'DEP-TEST-01'];
   approvedFixtureId: string | null;
   contractRevision: string | null;
@@ -68,7 +68,7 @@ export function buildPromptEnhancementB4FixturePacketV1(): PromptEnhancementB4Fi
     requiredExternalInputs: [...REQUIRED_DEPENDENCIES],
     rows: [
       {
-        rowId: 'b4-state-mapping', group: 'state_mapping', owner: 'bhavnesh_ui_app',
+        rowId: 'b4-state-mapping', group: 'state_mapping', owner: 'ui_app',
         requiredExternalDependencies: [...REQUIRED_DEPENDENCIES], approvedFixtureId: null, contractRevision: null,
         expectedVisibleOutcomes: ['enabled, disabled, unavailable, unsupported, policy-disabled, and fallback remain distinct and non-interactive'],
         negativeOracle: 'UI cannot invent a state, default, action, or availability from local labels or host state',
@@ -76,7 +76,7 @@ export function buildPromptEnhancementB4FixturePacketV1(): PromptEnhancementB4Fi
         passFail: 'blocked_pending_external_inputs', closureDecision: 'blocked_pending_external_inputs',
       },
       {
-        rowId: 'b4-safe-fallback', group: 'safe_fallback', owner: 'bhavnesh_ui_app',
+        rowId: 'b4-safe-fallback', group: 'safe_fallback', owner: 'ui_app',
         requiredExternalDependencies: [...REQUIRED_DEPENDENCIES], approvedFixtureId: null, contractRevision: null,
         expectedVisibleOutcomes: ['missing, malformed, invalid, unknown, stale, provider-unavailable, and outside-V1 states show approved safe unavailable/fallback copy'],
         negativeOracle: 'invalid or stale input cannot enable PE or expose a substitute control',
@@ -84,7 +84,7 @@ export function buildPromptEnhancementB4FixturePacketV1(): PromptEnhancementB4Fi
         passFail: 'blocked_pending_external_inputs', closureDecision: 'blocked_pending_external_inputs',
       },
       {
-        rowId: 'b4-legacy-isolation', group: 'legacy_isolation', owner: 'bhavnesh_ui_app',
+        rowId: 'b4-legacy-isolation', group: 'legacy_isolation', owner: 'ui_app',
         requiredExternalDependencies: [...REQUIRED_DEPENDENCIES], approvedFixtureId: null, contractRevision: null,
         expectedVisibleOutcomes: ['Prompt Enhancement presentation remains independent from old Decision Session settings and chooser labels'],
         negativeOracle: 'old role, advisory, frequency, history, or chooser values cannot control PE configuration display',
@@ -92,7 +92,7 @@ export function buildPromptEnhancementB4FixturePacketV1(): PromptEnhancementB4Fi
         passFail: 'blocked_pending_external_inputs', closureDecision: 'blocked_pending_external_inputs',
       },
       {
-        rowId: 'b4-privacy-boundary', group: 'privacy_boundary', owner: 'bhavnesh_ui_app',
+        rowId: 'b4-privacy-boundary', group: 'privacy_boundary', owner: 'ui_app',
         requiredExternalDependencies: [...REQUIRED_DEPENDENCIES], approvedFixtureId: null, contractRevision: null,
         expectedVisibleOutcomes: ['public-safe labels and diagnostics exclude raw config, private paths, storage details, provider errors, and planning terms'],
         negativeOracle: 'raw config or internal/provider detail cannot enter the rendered model or diagnostics',
@@ -117,7 +117,7 @@ export function validatePromptEnhancementB4FixturePacketV1(
   const groups = new Set(packet.rows.map((row) => row.group));
   for (const group of REQUIRED_GROUPS) if (!groups.has(group)) reasonCodes.push(`missing_fixture_group:${group}`);
   for (const row of packet.rows) {
-    if (row.owner !== 'bhavnesh_ui_app') reasonCodes.push(`owner_mismatch:${row.rowId}`);
+    if (row.owner !== 'ui_app') reasonCodes.push(`owner_mismatch:${row.rowId}`);
     if (row.approvedFixtureId !== null) reasonCodes.push(`unapproved_fixture_claim:${row.rowId}`);
     if (row.contractRevision !== null) reasonCodes.push(`unapproved_contract_claim:${row.rowId}`);
     if (row.requiredExternalDependencies.length !== REQUIRED_DEPENDENCIES.length) reasonCodes.push(`dependency_refs_incomplete:${row.rowId}`);

@@ -242,9 +242,9 @@ function handoffSummary(kind: PromptEnhancementHandoffMetadataV1['handoffKind'])
       telemetryPolicy: 'ids_counts_status_only',
     },
     ownerBoundary: {
-      semanticOwner: 'hiren_content_api',
-      uiConsumer: 'bhavnesh_ui_app',
-      hostOwner: 'vedansi_host_extension',
+      semanticOwner: 'content_semantics',
+      uiConsumer: 'ui_app',
+      hostOwner: 'host_transport',
       runtimeOwnerState: 'future_pe_ar11_only_after_gates',
     },
     reasonCodes: ['v1_handoff_metadata_only', 'v1_no_active_sequence_runtime'],

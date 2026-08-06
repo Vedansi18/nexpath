@@ -45,13 +45,13 @@ function todayInput(): PromptEnhancementFinalAcceptanceInputV1 {
   return {
     // Bhavnesh + engine-owned surfaces are GREEN, with evidence refs to the wired tests.
     surfaceEvidence: [
-      { surface: 'api_contract', evidenceState: 'pass', owner: 'hiren_content_api', evidenceRefs: ['contracts.test.ts', 'facade-llm.test.ts'] },
-      { surface: 'ui_popup_session', evidenceState: 'pass', owner: 'bhavnesh_ui_app', evidenceRefs: ['popup-session.test.ts', 'd2-blocked-body-self-scrub.test.ts'] },
-      { surface: 'stop_bridge_delivery', evidenceState: 'pass', owner: 'bhavnesh_ui_app', evidenceRefs: ['auto-stop-bridge-delivery.test.ts'] },
-      { surface: 'store_memory_feedback', evidenceState: 'pass', owner: 'hiren_content_api', evidenceRefs: ['memory-scoring.test.ts', 'feedback-policy.test.ts'] },
+      { surface: 'api_contract', evidenceState: 'pass', owner: 'content_semantics', evidenceRefs: ['contracts.test.ts', 'facade-llm.test.ts'] },
+      { surface: 'ui_popup_session', evidenceState: 'pass', owner: 'ui_app', evidenceRefs: ['popup-session.test.ts', 'd2-blocked-body-self-scrub.test.ts'] },
+      { surface: 'stop_bridge_delivery', evidenceState: 'pass', owner: 'ui_app', evidenceRefs: ['auto-stop-bridge-delivery.test.ts'] },
+      { surface: 'store_memory_feedback', evidenceState: 'pass', owner: 'content_semantics', evidenceRefs: ['memory-scoring.test.ts', 'feedback-policy.test.ts'] },
       // Outstanding — NOT Bhavnesh's to certify:
-      { surface: 'extension_payload_contract', evidenceState: 'blocked', owner: 'vedansi_host_extension', evidenceRefs: ['vedansi-d1-extension-delivery-handoff-2026-08-06'] },
-      { surface: 'public_launch_recheck', evidenceState: 'blocked', owner: 'bhavnesh_release_check', evidenceRefs: ['S3-not-yet-executed'] },
+      { surface: 'extension_payload_contract', evidenceState: 'blocked', owner: 'host_transport', evidenceRefs: ['vedansi-d1-extension-delivery-handoff-2026-08-06'] },
+      { surface: 'public_launch_recheck', evidenceState: 'blocked', owner: 'release_check', evidenceRefs: ['S3-not-yet-executed'] },
     ],
     negativeAuthorityChecks: PROMPT_ENHANCEMENT_FINAL_ACCEPTANCE_REQUIRED_NEGATIVE_AUTHORITIES_V1.map((authority) =>
       blockedNegative(authority, [
@@ -94,7 +94,7 @@ describe('R2 — cross-layer final-acceptance capstone (Bhavnesh execution)', ()
     expect(packet.reasonCodes).not.toContain('surface_blocked:ui_popup_session');
     expect(packet.reasonCodes).not.toContain('surface_blocked:stop_bridge_delivery');
     expect(packet.reasonCodes).not.toContain('surface_blocked:store_memory_feedback');
-    expect(packet.reasonCodes).not.toContain('final_signoff_missing:bhavnesh_cross_layer_acceptance');
+    expect(packet.reasonCodes).not.toContain('final_signoff_missing:cross_layer_acceptance');
     // No negative authority leaked through — all 8 are blocked by the wired contracts.
     expect(packet.reasonCodes.some((r) => r.startsWith('negative_authority_not_blocked:'))).toBe(false);
   });

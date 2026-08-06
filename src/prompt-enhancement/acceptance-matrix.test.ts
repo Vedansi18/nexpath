@@ -59,7 +59,7 @@ describe('Phase 13 PE-EM-3 test and acceptance matrix', () => {
 
     for (const fixture of packet.fixtures) {
       expect(fixture.fixtureId).toMatch(/^pe-em3-/);
-      expect(fixture.owner).toMatch(/hiren_content_api|bhavnesh_ui_app|vedansi_host_extension/);
+      expect(fixture.owner).toMatch(/content_semantics|ui_app|host_transport/);
       expect(fixture.version).toBe(1);
       expect(fixture.inputPrompt).not.toBe('');
       expect(fixture.projectSourceScope).toBe('current_project_only');
@@ -203,7 +203,7 @@ describe('Phase 13 PE-EM-3 test and acceptance matrix', () => {
     expect(gates.has('optional safety-review')).toBe(true);
     expect(gates.has('cost non-suppression')).toBe(true);
     for (const gate of packet.peAr1NamedGateEvidence) {
-      expect(gate.owner).toBe('hiren_content_api');
+      expect(gate.owner).toBe('content_semantics');
       expect(gate.fixtureIds.length).toBeGreaterThan(0);
       expect(gate.oracleIds.length).toBeGreaterThan(0);
       expect(gate.hardFailResult).toBe('not_run_shape_only');
@@ -247,7 +247,7 @@ describe('Phase 13 PE-EM-3 test and acceptance matrix', () => {
       expect(maintenanceRow?.fixtureIds).toContain(`pe-em3-eval-${intent.replace('maintenance.', 'maintenance-').replaceAll('_', '-')}`);
     }
     for (const row of packet.peWr3EvaluationRows) {
-      expect(row.owner).toBe('hiren_content_api');
+      expect(row.owner).toBe('content_semantics');
       expect(row.fixtureIds.length).toBeGreaterThan(0);
       expect(row.scenarioPrompts.length).toBeGreaterThan(0);
       expect(row.divergenceAxes.length).toBeGreaterThan(0);

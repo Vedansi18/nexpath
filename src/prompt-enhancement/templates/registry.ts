@@ -106,7 +106,7 @@ export function getPromptEnhancementTemplateRef(
       'no_source_b_only_popup',
       'no_precomputed_directional_variants',
     ],
-    ownerArea: 'hiren_content_api',
+    ownerArea: 'content_semantics',
     launchVisibility: 'private_until_launch_recheck',
     publicSafeSourceNotes: [
       'DS content-template refs are Source B only.',

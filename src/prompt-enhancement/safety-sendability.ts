@@ -344,7 +344,7 @@ export function validatePromptEnhancementSafety(
   };
   const validationGraph: PromptEnhancementValidationGraphV1 = {
     graphVersion: PROMPT_ENHANCEMENT_CONTRACT_VERSION,
-    graphOwner: 'hiren_content_api',
+    graphOwner: 'content_semantics',
     phaseStates: runPromptEnhancementPhaseValidators({
       failures,
       hasBlockingFailure,
@@ -402,7 +402,7 @@ function originalOnlyValidationResult(
   return {
     validationGraph: {
       graphVersion: PROMPT_ENHANCEMENT_CONTRACT_VERSION,
-      graphOwner: 'hiren_content_api',
+      graphOwner: 'content_semantics',
       phaseStates: runPromptEnhancementOriginalOnlyPhaseValidators(fallbackMode),
       failures: [],
       safetyState: safetySummary,

@@ -82,7 +82,7 @@ export type PromptEnhancementCostWorksheetCostStateV1 =
 
 export interface PromptEnhancementAcceptedCostCallInventoryRowV1 {
   callId: PromptEnhancementCostCallIdV1;
-  owner: 'hiren_content_api';
+  owner: 'content_semantics';
   ownerResearchItem: 'PE-EM-1_PE-G4';
   implementationModule: 'src/prompt-enhancement/cost-observability.ts';
   trigger: PromptEnhancementCostCallTriggerV1;
@@ -154,7 +154,7 @@ export interface PromptEnhancementCostMeasurementInputV1 {
 
 export interface PromptEnhancementCostMeasurementRecordV1 {
   callId: PromptEnhancementCostCallIdV1;
-  owner: 'hiren_content_api';
+  owner: 'content_semantics';
   trigger: PromptEnhancementCostCallTriggerV1;
   provider: typeof PROMPT_ENHANCEMENT_COST_PROVIDER_V1;
   model: typeof PROMPT_ENHANCEMENT_COST_MODEL_V1;
@@ -1047,7 +1047,7 @@ function row(input: {
 }): PromptEnhancementAcceptedCostCallInventoryRowV1 {
   return {
     callId: input.callId,
-    owner: 'hiren_content_api',
+    owner: 'content_semantics',
     ownerResearchItem: 'PE-EM-1_PE-G4',
     implementationModule: 'src/prompt-enhancement/cost-observability.ts',
     trigger: input.trigger,

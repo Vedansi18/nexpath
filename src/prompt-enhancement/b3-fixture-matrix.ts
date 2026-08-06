@@ -19,7 +19,7 @@ export interface PromptEnhancementB3FixtureRowV1 {
   expectedTypedEvents: readonly PromptEnhancementB3FixtureEventV1[];
   negativeOracle: string;
   forbiddenUiSurfaces: readonly string[];
-  oracleOwner: 'bhavnesh_ui_app';
+  oracleOwner: 'ui_app';
 }
 
 export interface PromptEnhancementB3FixtureObservationV1 {
@@ -45,7 +45,7 @@ const ROWS: readonly PromptEnhancementB3FixtureRowV1[] = [
     expectedTypedEvents: ['send_current_body'],
     negativeOracle: 'First popup cannot render Use original, future prompt text, queue state, or automatic send/advance.',
     forbiddenUiSurfaces: ['Use original', 'future prompt text', 'queue pointer', 'automatic send', 'automatic advance'],
-    oracleOwner: 'bhavnesh_ui_app',
+    oracleOwner: 'ui_app',
   },
   {
     fixtureId: 'LOCAL-B3.4-02', kind: 'valid_later_continuation', phaseRefs: ['B3.2'],
@@ -53,7 +53,7 @@ const ROWS: readonly PromptEnhancementB3FixtureRowV1[] = [
     expectedTypedEvents: ['send_current_body'],
     negativeOracle: 'Continuation cannot repeat Sequence plan, show future text, create a custom textbox, or move a pointer.',
     forbiddenUiSurfaces: ['Sequence plan repeat', 'future prompt text', 'custom text field', 'automatic send', 'pointer advance'],
-    oracleOwner: 'bhavnesh_ui_app',
+    oracleOwner: 'ui_app',
   },
   {
     fixtureId: 'LOCAL-B3.4-03', kind: 'custom_interruption', phaseRefs: ['B3.2', 'B3.3'],
@@ -61,7 +61,7 @@ const ROWS: readonly PromptEnhancementB3FixtureRowV1[] = [
     expectedTypedEvents: ['custom_interruption'],
     negativeOracle: 'Custom interruption cannot become prompt injection, completion, skip, manual resume, or pointer movement.',
     forbiddenUiSurfaces: ['Nexpath custom text field', 'prompt injection', 'completion', 'manual resume', 'pointer advance'],
-    oracleOwner: 'bhavnesh_ui_app',
+    oracleOwner: 'ui_app',
   },
   {
     fixtureId: 'LOCAL-B3.4-04', kind: 'cancel', phaseRefs: ['B3.1', 'B3.2', 'B3.3'],
@@ -69,7 +69,7 @@ const ROWS: readonly PromptEnhancementB3FixtureRowV1[] = [
     expectedTypedEvents: ['cancel_remaining_sequence'],
     negativeOracle: 'Cancel cannot send a body, cancel unrelated behavior, open product rating, duplicate, or reopen terminal state.',
     forbiddenUiSurfaces: ['product rating', 'body send', 'duplicate cancel', 'terminal reopen', 'unrelated cancellation'],
-    oracleOwner: 'bhavnesh_ui_app',
+    oracleOwner: 'ui_app',
   },
   {
     fixtureId: 'LOCAL-B3.4-05', kind: 'invalid_stale_unsupported_failure', phaseRefs: ['B3.3'],
@@ -77,7 +77,7 @@ const ROWS: readonly PromptEnhancementB3FixtureRowV1[] = [
     expectedTypedEvents: ['none'],
     negativeOracle: 'Invalid, stale, unsupported, cross-project, duplicate, and failure results cannot guess retry, recovery, or replacement action.',
     forbiddenUiSurfaces: ['guessed retry', 'guessed recovery', 'replacement action', 'raw diagnostics', 'state overwrite'],
-    oracleOwner: 'bhavnesh_ui_app',
+    oracleOwner: 'ui_app',
   },
 ];
 
@@ -97,7 +97,7 @@ export function runPromptEnhancementB3FixtureRowV1(
   const serialized = JSON.stringify({ outcome: row.expectedVisibleOutcome, events: row.expectedTypedEvents });
   const forbiddenSurfaceLeaks = row.forbiddenUiSurfaces.filter((surface) => serialized.includes(surface));
   const shapeSafe = row.fixtureId.startsWith('LOCAL-B3.4-')
-    && row.oracleOwner === 'bhavnesh_ui_app'
+    && row.oracleOwner === 'ui_app'
     && row.expectedVisibleOutcome.length > 0
     && row.negativeOracle.length > 0
     && row.expectedTypedEvents.length > 0;

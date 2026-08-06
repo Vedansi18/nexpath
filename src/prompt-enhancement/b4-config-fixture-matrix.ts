@@ -23,7 +23,7 @@ export interface PromptEnhancementB4ConfigMatrixFixtureV1 {
   expectedStatus: PromptEnhancementValidatedConfigDisplayModelV1['status'];
   expectedEvent: 'render_config_status_only';
   negativeOracle: string;
-  oracleOwner: 'bhavnesh_ui_app';
+  oracleOwner: 'ui_app';
 }
 
 export interface PromptEnhancementB4ConfigMatrixObservationV1 {
@@ -89,7 +89,7 @@ function row(
     expectedStatus,
     expectedEvent: 'render_config_status_only',
     negativeOracle: 'UI renders only validated typed state; no key, default, legacy value, host state, or label controls it.',
-    oracleOwner: 'bhavnesh_ui_app',
+    oracleOwner: 'ui_app',
   };
 }
 

@@ -24,7 +24,7 @@ export interface PromptEnhancementB4AcceptanceFixtureV1 {
   expectedStatus: PromptEnhancementTweakPresentationModelV1['status'];
   expectedEvent: 'render_status_only';
   negativeOracle: string;
-  oracleOwner: 'bhavnesh_ui_app';
+  oracleOwner: 'ui_app';
 }
 
 export interface PromptEnhancementB4AcceptanceObservationV1 {
@@ -98,7 +98,7 @@ function row(
     expectedStatus,
     expectedEvent: 'render_status_only',
     negativeOracle: 'UI renders only typed state; no local config, provider, legacy, host, or label authority can alter it.',
-    oracleOwner: 'bhavnesh_ui_app',
+    oracleOwner: 'ui_app',
   };
 }
 

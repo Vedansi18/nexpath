@@ -15,7 +15,7 @@ export interface PromptEnhancementB2FixtureRowV1 {
   rowId: string;
   group: PromptEnhancementB2FixtureGroupV1;
   phaseRefs: readonly ('B2.1' | 'B2.2' | 'B2.3' | 'B2.4')[];
-  owner: 'bhavnesh_ui_app';
+  owner: 'ui_app';
   requiredExternalDependencies: readonly ('DEP-B2-01' | 'DEP-B2-02' | 'DEP-TEST-01')[];
   approvedFixtureId: string | null;
   contractRevision: string | null;
@@ -42,7 +42,7 @@ export interface PromptEnhancementB2FixturePacketV1 {
   focusedCommand: 'npx vitest run src/prompt-enhancement/b2-fixture-packet.test.ts';
   evidenceRule: 'render_and_typed_event_assertions_only';
   forbiddenEvidence: readonly [
-    'vedansi_transport_success',
+    'host_transport_success',
     'stop_bridge_internals',
     'hiren_semantic_validation',
     'old_decision_session',
@@ -81,7 +81,7 @@ export function buildPromptEnhancementB2FixturePacketV1(): PromptEnhancementB2Fi
     requiredExternalInputs: ['DEP-B2-01', 'DEP-B2-02', 'DEP-TEST-01'],
     rows: [
       {
-        rowId: 'b2-5-lifecycle', group: 'lifecycle', phaseRefs: ['B2.1'], owner: 'bhavnesh_ui_app',
+        rowId: 'b2-5-lifecycle', group: 'lifecycle', phaseRefs: ['B2.1'], owner: 'ui_app',
         requiredExternalDependencies: dependencyRefs, approvedFixtureId: null, contractRevision: null,
         expectedVisibleOutcomes: ['typed eligible/open renders one popup', 'typed no-popup/deferred/stale/unavailable renders no interactive send surface'],
         expectedTypedEvents: ['render emits no send, feedback, cancel, or delivery event'],
@@ -89,7 +89,7 @@ export function buildPromptEnhancementB2FixturePacketV1(): PromptEnhancementB2Fi
         focusedCommand: 'npx vitest run src/prompt-enhancement/b2-fixture-packet.test.ts', observedOutcome: 'not_run_pending_external_inputs', oracleOwner: 'external_owner_not_supplied', passFail: 'blocked_pending_external_inputs', closureDecision: 'blocked_pending_external_inputs',
       },
       {
-        rowId: 'b2-5-explicit-intent', group: 'explicit_intent', phaseRefs: ['B2.2'], owner: 'bhavnesh_ui_app',
+        rowId: 'b2-5-explicit-intent', group: 'explicit_intent', phaseRefs: ['B2.2'], owner: 'ui_app',
         requiredExternalDependencies: dependencyRefs, approvedFixtureId: null, contractRevision: null,
         expectedVisibleOutcomes: ['current-body and original controls remain distinct and identity-bound'],
         expectedTypedEvents: ['current control emits exactly one typed current intent', 'original control emits exactly one typed original intent', 'render/focus/retry/adjustment emits no send intent'],
@@ -97,7 +97,7 @@ export function buildPromptEnhancementB2FixturePacketV1(): PromptEnhancementB2Fi
         focusedCommand: 'npx vitest run src/prompt-enhancement/b2-fixture-packet.test.ts', observedOutcome: 'not_run_pending_external_inputs', oracleOwner: 'external_owner_not_supplied', passFail: 'blocked_pending_external_inputs', closureDecision: 'blocked_pending_external_inputs',
       },
       {
-        rowId: 'b2-5-cancel-recovery', group: 'cancel_recovery', phaseRefs: ['B2.3'], owner: 'bhavnesh_ui_app',
+        rowId: 'b2-5-cancel-recovery', group: 'cancel_recovery', phaseRefs: ['B2.3'], owner: 'ui_app',
         requiredExternalDependencies: dependencyRefs, approvedFixtureId: null, contractRevision: null,
         expectedVisibleOutcomes: ['cancel/no-send, timeout, invalid/stale, unsupported, and failure show typed safe recovery'],
         expectedTypedEvents: ['no automatic send; only a fresh explicit typed fallback/cancel action may be presented'],
@@ -105,7 +105,7 @@ export function buildPromptEnhancementB2FixturePacketV1(): PromptEnhancementB2Fi
         focusedCommand: 'npx vitest run src/prompt-enhancement/b2-fixture-packet.test.ts', observedOutcome: 'not_run_pending_external_inputs', oracleOwner: 'external_owner_not_supplied', passFail: 'blocked_pending_external_inputs', closureDecision: 'blocked_pending_external_inputs',
       },
       {
-        rowId: 'b2-5-host-status', group: 'host_status_display', phaseRefs: ['B2.4'], owner: 'bhavnesh_ui_app',
+        rowId: 'b2-5-host-status', group: 'host_status_display', phaseRefs: ['B2.4'], owner: 'ui_app',
         requiredExternalDependencies: dependencyRefs, approvedFixtureId: null, contractRevision: null,
         expectedVisibleOutcomes: ['inserted, copied, manual-paste, manual-submit, failed, unknown, unsupported, and waiting remain distinct'],
         expectedTypedEvents: ['display emits no transport, execution, consent, completion, or sequence event'],
@@ -113,7 +113,7 @@ export function buildPromptEnhancementB2FixturePacketV1(): PromptEnhancementB2Fi
         focusedCommand: 'npx vitest run src/prompt-enhancement/b2-fixture-packet.test.ts', observedOutcome: 'not_run_pending_external_inputs', oracleOwner: 'external_owner_not_supplied', passFail: 'blocked_pending_external_inputs', closureDecision: 'blocked_pending_external_inputs',
       },
       {
-        rowId: 'b2-5-regression-boundary', group: 'regression_boundary', phaseRefs: ['B2.1', 'B2.2', 'B2.3', 'B2.4'], owner: 'bhavnesh_ui_app',
+        rowId: 'b2-5-regression-boundary', group: 'regression_boundary', phaseRefs: ['B2.1', 'B2.2', 'B2.3', 'B2.4'], owner: 'ui_app',
         requiredExternalDependencies: dependencyRefs, approvedFixtureId: null, contractRevision: null,
         expectedVisibleOutcomes: ['only the supplied typed PE state is rendered'],
         expectedTypedEvents: ['old Decision Session, raw Stop reason, selectedPrompt, clipboard/manual text, foreground, and transport attempt emit no PE authority'],
@@ -123,7 +123,7 @@ export function buildPromptEnhancementB2FixturePacketV1(): PromptEnhancementB2Fi
     ],
     focusedCommand: 'npx vitest run src/prompt-enhancement/b2-fixture-packet.test.ts',
     evidenceRule: 'render_and_typed_event_assertions_only',
-    forbiddenEvidence: ['vedansi_transport_success', 'stop_bridge_internals', 'hiren_semantic_validation', 'old_decision_session', 'raw_stop_reason', 'clipboard_or_foreground'],
+    forbiddenEvidence: ['host_transport_success', 'stop_bridge_internals', 'hiren_semantic_validation', 'old_decision_session', 'raw_stop_reason', 'clipboard_or_foreground'],
   };
 }
 
@@ -138,7 +138,7 @@ export function validatePromptEnhancementB2FixturePacketV1(
   const groups = new Set(packet.rows.map((row) => row.group));
   for (const group of REQUIRED_GROUPS) if (!groups.has(group)) reasonCodes.push(`missing_fixture_group:${group}`);
   for (const row of packet.rows) {
-    if (row.owner !== 'bhavnesh_ui_app') reasonCodes.push(`owner_mismatch:${row.rowId}`);
+    if (row.owner !== 'ui_app') reasonCodes.push(`owner_mismatch:${row.rowId}`);
     if (row.approvedFixtureId !== null) reasonCodes.push(`unapproved_fixture_claim:${row.rowId}`);
     if (row.contractRevision !== null) reasonCodes.push(`unapproved_contract_claim:${row.rowId}`);
     if (row.requiredExternalDependencies.length !== REQUIRED_DEPENDENCIES.length) reasonCodes.push(`dependency_refs_incomplete:${row.rowId}`);

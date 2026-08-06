@@ -15,7 +15,7 @@ export interface PromptEnhancementB5EvidenceRowV1 {
   stopExtensionRef: string;
   storeGeneratedOriginRef: string;
   launchAcceptanceRef: string;
-  owner: 'hiren_content_api' | 'bhavnesh_ui_app' | 'vedansi_host_extension' | 'bhavnesh_release_check' | 'bhavnesh_cross_layer_acceptance';
+  owner: 'content_semantics' | 'ui_app' | 'host_transport' | 'release_check' | 'cross_layer_acceptance';
   evidenceState: PromptEnhancementB5EvidenceStateV1;
   contractRevision: string | null;
   sourceRevision: string | null;
@@ -57,7 +57,7 @@ function defaultRow(): PromptEnhancementB5EvidenceRowV1 {
     stopExtensionRef: 'pending_DEP-B5-02_host_contract',
     storeGeneratedOriginRef: 'pending_DEP-B5-02_store_generated_origin',
     launchAcceptanceRef: 'pending_DEP-B5-01_launch_acceptance',
-    owner: 'bhavnesh_cross_layer_acceptance',
+    owner: 'cross_layer_acceptance',
     evidenceState: 'missing',
     contractRevision: null,
     sourceRevision: null,

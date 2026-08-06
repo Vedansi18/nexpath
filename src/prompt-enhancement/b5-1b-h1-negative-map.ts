@@ -29,7 +29,7 @@ export interface PromptEnhancementB5_1bH1NegativeRowV1 {
   environment: string;
   expectedNoSideEffects: readonly string[];
   forbiddenInference: readonly string[];
-  oracleOwner: 'hiren_content_api' | 'bhavnesh_ui_app' | 'vedansi_host_extension' | 'bhavnesh_cross_layer_acceptance';
+  oracleOwner: 'content_semantics' | 'ui_app' | 'host_transport' | 'cross_layer_acceptance';
   observedOutcome: 'not_run_pending_approved_inputs' | 'pass' | 'hard_fail';
   passFail: 'blocked_pending_approved_inputs' | 'pass' | 'hard_fail';
 }
@@ -78,7 +78,7 @@ const ROWS: readonly PromptEnhancementB5_1bH1NegativeRowV1[] = [
     environment: 'NO_COLOR=1; approved H1 contract/source revision pending',
     expectedNoSideEffects: COMMON_NO_SIDE_EFFECTS,
     forbiddenInference: [...COMMON_FORBIDDEN, 'rerun_classifier', 'generic_prompt_authority'],
-    oracleOwner: 'bhavnesh_cross_layer_acceptance', observedOutcome: 'not_run_pending_approved_inputs', passFail: 'blocked_pending_approved_inputs',
+    oracleOwner: 'cross_layer_acceptance', observedOutcome: 'not_run_pending_approved_inputs', passFail: 'blocked_pending_approved_inputs',
   },
   {
     rowId: 'B5.1b-H1-02',
@@ -90,7 +90,7 @@ const ROWS: readonly PromptEnhancementB5_1bH1NegativeRowV1[] = [
     environment: 'NO_COLOR=1; approved H1 contract/source revision pending',
     expectedNoSideEffects: COMMON_NO_SIDE_EFFECTS,
     forbiddenInference: [...COMMON_FORBIDDEN, 'metadata_to_popup', 'metadata_to_body', 'metadata_to_delivery'],
-    oracleOwner: 'hiren_content_api', observedOutcome: 'not_run_pending_approved_inputs', passFail: 'blocked_pending_approved_inputs',
+    oracleOwner: 'content_semantics', observedOutcome: 'not_run_pending_approved_inputs', passFail: 'blocked_pending_approved_inputs',
   },
   {
     rowId: 'B5.1b-H1-03',
@@ -102,7 +102,7 @@ const ROWS: readonly PromptEnhancementB5_1bH1NegativeRowV1[] = [
     environment: 'NO_COLOR=1; approved H1 contract/source revision pending',
     expectedNoSideEffects: COMMON_NO_SIDE_EFFECTS,
     forbiddenInference: [...COMMON_FORBIDDEN, 'user_selected_fallback_inference', 'prompt_mutation'],
-    oracleOwner: 'hiren_content_api', observedOutcome: 'not_run_pending_approved_inputs', passFail: 'blocked_pending_approved_inputs',
+    oracleOwner: 'content_semantics', observedOutcome: 'not_run_pending_approved_inputs', passFail: 'blocked_pending_approved_inputs',
   },
   {
     rowId: 'B5.1b-H1-04',
@@ -114,7 +114,7 @@ const ROWS: readonly PromptEnhancementB5_1bH1NegativeRowV1[] = [
     environment: 'NO_COLOR=1; approved H1 contract/source revision pending',
     expectedNoSideEffects: ['no_delivery_proof_from_render', 'no_execution_proof_from_focus_or_text', 'no_host_transport_claim'],
     forbiddenInference: ['render_to_delivery', 'focus_to_execution', 'legacy_field_authority', 'transport_field_authority'],
-    oracleOwner: 'bhavnesh_ui_app', observedOutcome: 'not_run_pending_approved_inputs', passFail: 'blocked_pending_approved_inputs',
+    oracleOwner: 'ui_app', observedOutcome: 'not_run_pending_approved_inputs', passFail: 'blocked_pending_approved_inputs',
   },
   {
     rowId: 'B5.1b-H1-05',
@@ -126,7 +126,7 @@ const ROWS: readonly PromptEnhancementB5_1bH1NegativeRowV1[] = [
     environment: 'NO_COLOR=1; approved H1 contract/source revision pending',
     expectedNoSideEffects: COMMON_NO_SIDE_EFFECTS,
     forbiddenInference: [...COMMON_FORBIDDEN, 'suppress_unrelated_decision_session', 'alter_product_feedback'],
-    oracleOwner: 'bhavnesh_cross_layer_acceptance', observedOutcome: 'not_run_pending_approved_inputs', passFail: 'blocked_pending_approved_inputs',
+    oracleOwner: 'cross_layer_acceptance', observedOutcome: 'not_run_pending_approved_inputs', passFail: 'blocked_pending_approved_inputs',
   },
 ];
 

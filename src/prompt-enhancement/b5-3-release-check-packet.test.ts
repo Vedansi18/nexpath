@@ -12,11 +12,11 @@ const approvedFacts: PromptEnhancementB5_3ReleaseCheckInputV1 = {
   depB501EvidenceRevision: '6b74b3f',
   buildTestImportEvidence: {
     state: 'pass', revision: 'ae17793', command: 'npm run build && npx vitest run src/prompt-enhancement',
-    output: 'build and full PE suite passed', owner: 'bhavnesh_release_check', unresolved: null,
+    output: 'build and full PE suite passed', owner: 'release_check', unresolved: null,
   },
   publicSafetyEvidence: {
     state: 'pass', revision: 'ae17793', command: 'private-boundary scan',
-    output: 'no forbidden public findings', owner: 'bhavnesh_release_check', unresolved: null,
+    output: 'no forbidden public findings', owner: 'release_check', unresolved: null,
   },
   ownerSignoffs: { hirenLaunch: 'approved', layerOwners: 'approved' },
   publicLaunchFacts: {

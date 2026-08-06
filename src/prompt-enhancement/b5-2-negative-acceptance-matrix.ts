@@ -24,7 +24,7 @@ export interface PromptEnhancementB5_2NegativeRowV1 {
   expectedNoAuthorityOutcome: string;
   expectedUiFallback: 'blocked_no_send' | 'no_popup_not_applicable' | 'fallback_to_original' | 'typed_state_only';
   expectedNoSideEffects: readonly string[];
-  owner: 'hiren_content_api' | 'bhavnesh_ui_app' | 'vedansi_host_extension' | 'bhavnesh_cross_layer_acceptance';
+  owner: 'content_semantics' | 'ui_app' | 'host_transport' | 'cross_layer_acceptance';
   focusedCommand: string;
   environment: string;
   observedResult: 'not_run_pending_owner_evidence' | 'pass' | 'hard_fail';
@@ -57,16 +57,16 @@ const NO_SIDE_EFFECTS = [
 ] as const;
 
 const ROWS: readonly PromptEnhancementB5_2NegativeRowV1[] = [
-  ['B5.2-01', 'old_decision_session_rows', 'hiren_content_api', 'typed no-authority state; old Decision Session rows are not PE input', 'typed_state_only'],
-  ['B5.2-02', 'product_feedback', 'hiren_content_api', 'typed no-authority state; product feedback cannot activate or explain PE', 'typed_state_only'],
-  ['B5.2-03', 'prompt_history', 'hiren_content_api', 'typed no-authority state; history/served variants cannot activate PE', 'typed_state_only'],
-  ['B5.2-04', 'raw_stop_reason', 'vedansi_host_extension', 'typed no-authority state; raw Stop reason is transport data only', 'typed_state_only'],
-  ['B5.2-05', 'selected_prompt', 'hiren_content_api', 'typed no-authority state; selectedPrompt cannot authorize PE', 'typed_state_only'],
-  ['B5.2-06', 'clipboard_text', 'vedansi_host_extension', 'typed no-authority state; clipboard text is not semantic or delivery proof', 'typed_state_only'],
-  ['B5.2-07', 'last_injected_prompt', 'bhavnesh_ui_app', 'typed no-authority state; prior injection cannot create current PE origin', 'typed_state_only'],
-  ['B5.2-08', 'extension_labels', 'vedansi_host_extension', 'typed no-authority state; visible host labels cannot create capability or completion proof', 'typed_state_only'],
-  ['B5.2-09', 'missing_host_capability', 'vedansi_host_extension', 'typed unsupported/blocked no-send state; missing capability cannot become delivery proof', 'blocked_no_send'],
-  ['B5.2-10', 'missing_or_malformed_generated_origin', 'hiren_content_api', 'typed no-popup/blocked state; origin absence cannot become generated-origin proof', 'no_popup_not_applicable'],
+  ['B5.2-01', 'old_decision_session_rows', 'content_semantics', 'typed no-authority state; old Decision Session rows are not PE input', 'typed_state_only'],
+  ['B5.2-02', 'product_feedback', 'content_semantics', 'typed no-authority state; product feedback cannot activate or explain PE', 'typed_state_only'],
+  ['B5.2-03', 'prompt_history', 'content_semantics', 'typed no-authority state; history/served variants cannot activate PE', 'typed_state_only'],
+  ['B5.2-04', 'raw_stop_reason', 'host_transport', 'typed no-authority state; raw Stop reason is transport data only', 'typed_state_only'],
+  ['B5.2-05', 'selected_prompt', 'content_semantics', 'typed no-authority state; selectedPrompt cannot authorize PE', 'typed_state_only'],
+  ['B5.2-06', 'clipboard_text', 'host_transport', 'typed no-authority state; clipboard text is not semantic or delivery proof', 'typed_state_only'],
+  ['B5.2-07', 'last_injected_prompt', 'ui_app', 'typed no-authority state; prior injection cannot create current PE origin', 'typed_state_only'],
+  ['B5.2-08', 'extension_labels', 'host_transport', 'typed no-authority state; visible host labels cannot create capability or completion proof', 'typed_state_only'],
+  ['B5.2-09', 'missing_host_capability', 'host_transport', 'typed unsupported/blocked no-send state; missing capability cannot become delivery proof', 'blocked_no_send'],
+  ['B5.2-10', 'missing_or_malformed_generated_origin', 'content_semantics', 'typed no-popup/blocked state; origin absence cannot become generated-origin proof', 'no_popup_not_applicable'],
 ].map(([rowId, invalidInput, owner, expectedNoAuthorityOutcome, expectedUiFallback]) => ({
   rowId,
   invalidInput,

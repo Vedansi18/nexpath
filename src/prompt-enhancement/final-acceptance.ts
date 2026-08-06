@@ -57,7 +57,7 @@ export interface PromptEnhancementFinalAcceptanceSurfaceEvidenceV1 {
   surface: PromptEnhancementFinalAcceptanceSurfaceV1;
   evidenceState: PromptEnhancementFinalAcceptanceEvidenceStateV1;
   evidenceRefs: readonly string[];
-  owner: 'hiren_content_api' | 'bhavnesh_ui_app' | 'vedansi_host_extension' | 'bhavnesh_release_check';
+  owner: 'content_semantics' | 'ui_app' | 'host_transport' | 'release_check';
 }
 
 export interface PromptEnhancementFinalAcceptanceNegativeAuthorityCheckV1 {
@@ -100,7 +100,7 @@ export interface PromptEnhancementFinalAcceptanceInputV1 {
 export interface PromptEnhancementFinalAcceptancePacketV1 {
   schemaVersion: typeof PROMPT_ENHANCEMENT_CONTRACT_VERSION;
   packetId: 'pe-dr6-cross-layer-final-acceptance-v1';
-  owner: 'bhavnesh_cross_layer_acceptance';
+  owner: 'cross_layer_acceptance';
   status: PromptEnhancementFinalAcceptanceStatusV1;
   readinessClaimAllowed: boolean;
   acceptedForPublicLaunch: boolean;
@@ -216,7 +216,7 @@ export function buildPromptEnhancementFinalAcceptancePacketV1(
   return {
     schemaVersion: PROMPT_ENHANCEMENT_CONTRACT_VERSION,
     packetId: 'pe-dr6-cross-layer-final-acceptance-v1',
-    owner: 'bhavnesh_cross_layer_acceptance',
+    owner: 'cross_layer_acceptance',
     status: allOk
       ? 'accepted_for_readiness_claim'
       : hardGateFailed
@@ -256,7 +256,7 @@ export function validatePromptEnhancementFinalAcceptancePacketV1(
   const reasonCodes = validatePromptEnhancementFinalAcceptanceInputV1(packet);
   if (packet.schemaVersion !== PROMPT_ENHANCEMENT_CONTRACT_VERSION) reasonCodes.push('schema_version_mismatch');
   if (packet.packetId !== 'pe-dr6-cross-layer-final-acceptance-v1') reasonCodes.push('packet_id_mismatch');
-  if (packet.owner !== 'bhavnesh_cross_layer_acceptance') reasonCodes.push('owner_mismatch');
+  if (packet.owner !== 'cross_layer_acceptance') reasonCodes.push('owner_mismatch');
   for (const surface of PROMPT_ENHANCEMENT_FINAL_ACCEPTANCE_REQUIRED_SURFACES_V1) {
     if (!packet.requiredSurfaces.includes(surface)) reasonCodes.push(`missing_required_surface:${surface}`);
   }
@@ -365,7 +365,7 @@ function validatePromptEnhancementFinalAcceptanceInputV1(input: {
   }
 
   if (input.signoff.hirenFinalSignoff !== 'approved') reasonCodes.push('final_signoff_missing:hiren');
-  if (input.signoff.bhavneshCrossLayerAcceptance !== 'approved') reasonCodes.push('final_signoff_missing:bhavnesh_cross_layer_acceptance');
+  if (input.signoff.bhavneshCrossLayerAcceptance !== 'approved') reasonCodes.push('final_signoff_missing:cross_layer_acceptance');
   if (input.signoff.hirenTestSignoff !== 'approved') reasonCodes.push('final_signoff_missing:hiren_test');
   return reasonCodes;
 }
