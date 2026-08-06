@@ -88,3 +88,45 @@ export function buildPromptEnhancementCostObservabilityV1(
 
   return { measurement, weakeningReasonCodes, costWeakeningDetected, flowEvidence, inventoryOk };
 }
+
+/** The runtime surface a measured result was produced at (§4a flow: prepare -> popup action). */
+export type PromptEnhancementCostObservabilitySurfaceV1 = 'prepare' | 'popup_action';
+
+/** Logger-shaped emit target; injected so this module stays pure (never imports the CLI logger). */
+export interface PromptEnhancementCostObservabilitySinkV1 {
+  debug: (event: string, data?: Record<string, unknown>) => void;
+  warn: (event: string, data?: Record<string, unknown>) => void;
+}
+
+/**
+ * Measure a produced result's cost and emit it through the injected logger-shaped sink.
+ * Called at EVERY runtime point a real result is produced: prepare (E4/E6, `auto.ts`) and
+ * the interactive popup directional/apply-details action (E8, the popup host loop) — so a
+ * repeated "Shorter" click is measured, not silently uncounted. Observability-only; the raw
+ * fields are excluded and the PE-G4 weakening check runs (warns only if it ever trips).
+ */
+export function emitPromptEnhancementCostObservabilityV1(
+  result: PromptEnhancementPrepareResultV1,
+  surface: PromptEnhancementCostObservabilitySurfaceV1,
+  sink: PromptEnhancementCostObservabilitySinkV1,
+): PromptEnhancementCostObservabilityV1 {
+  const observability = buildPromptEnhancementCostObservabilityV1(result);
+  sink.debug('prompt_enhancement_cost_measurement', {
+    surface,
+    callId: observability.measurement.callId,
+    callVisibilityMode: result.callAndVisibilityMetadata.callVisibilityMode,
+    status: observability.measurement.status,
+    plannedCallCount: observability.measurement.plannedCallCount,
+    usedCallCount: observability.measurement.usedCallCount,
+    rawFieldsExcluded: observability.measurement.rawPromptBodyExcluded,
+    inventoryOk: observability.inventoryOk,
+  });
+  if (observability.costWeakeningDetected) {
+    // PE-G4 invariant: unreachable in v1 (cost is never a gate); surface it loudly if it fires.
+    sink.warn('prompt_enhancement_cost_weakening_detected', {
+      surface,
+      reasonCodes: [...observability.weakeningReasonCodes],
+    });
+  }
+  return observability;
+}

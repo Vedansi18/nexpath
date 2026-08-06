@@ -38,6 +38,7 @@ import {
   runPromptEnhancementCliSubmitPopupV1,
   type PromptEnhancementCliPopupResultV1,
 } from '../../prompt-enhancement/cli-submit-popup.js';
+import { emitPromptEnhancementCostObservabilityV1 } from '../../prompt-enhancement/cost-measurement.js';
 import type { GeneratedOptions } from '../../decision-session/OptionGenerator.js';
 import { resolveContentSource, selectionRegister } from '../../decision-session/selection-registry.js';
 import { autogenAwareLookup, pinchSignalTypeForFlag } from '../../decision-session/content-template-source.js';
@@ -489,6 +490,7 @@ export function registerStopCommand(program: import('commander').Command): void 
             request: pending.request,
             result: pending.result,
             feedbackSink: (event) => recordPromptEnhancementCliFeedbackV1(store, payload.cwd, event, pending.request),
+            costObservabilitySink: (result) => emitPromptEnhancementCostObservabilityV1(result, 'popup_action', logger),
           });
         } else {
           // No direct TTY but a GUI session exists: spawn a terminal popup. Release the DB lock

@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { buildPromptEnhancementCostObservabilityV1 } from './cost-measurement.js';
+import { describe, expect, it, vi } from 'vitest';
+import { buildPromptEnhancementCostObservabilityV1, emitPromptEnhancementCostObservabilityV1 } from './cost-measurement.js';
 import { buildPromptEnhancementCostVisibilityMetadataV1 } from './cost-observability.js';
 import type { PromptEnhancementCallVisibilityMode } from './contracts.js';
 import type { PromptEnhancementPrepareResultV1 } from './contracts.js';
@@ -47,5 +47,26 @@ describe('buildPromptEnhancementCostObservabilityV1 (E9 / P12-G1+G2)', () => {
     expect(obs.measurement.status).toBe('fallback');
     // Flow evidence is built from the same result (prompt-start -> popup -> delivery).
     expect(obs.flowEvidence).toBeDefined();
+  });
+});
+
+describe('emitPromptEnhancementCostObservabilityV1 (E9 — surface emission)', () => {
+  it('emits the sanitized measurement (surface-labelled) and does NOT warn when nothing weakens', () => {
+    const sink = { debug: vi.fn(), warn: vi.fn() };
+    const obs = emitPromptEnhancementCostObservabilityV1(resultWith('llm_wording', 1, 1), 'popup_action', sink);
+    expect(sink.debug).toHaveBeenCalledTimes(1);
+    expect(sink.debug).toHaveBeenCalledWith('prompt_enhancement_cost_measurement', expect.objectContaining({
+      surface: 'popup_action', usedCallCount: 1, rawFieldsExcluded: true,
+    }));
+    expect(sink.warn).not.toHaveBeenCalled(); // PE-G4: clean -> no weakening warning
+    expect(obs.costWeakeningDetected).toBe(false);
+  });
+
+  it('labels the prepare surface distinctly', () => {
+    const sink = { debug: vi.fn(), warn: vi.fn() };
+    emitPromptEnhancementCostObservabilityV1(resultWith('deterministic', 0, 0), 'prepare', sink);
+    expect(sink.debug).toHaveBeenCalledWith('prompt_enhancement_cost_measurement', expect.objectContaining({
+      surface: 'prepare', usedCallCount: 0,
+    }));
   });
 });

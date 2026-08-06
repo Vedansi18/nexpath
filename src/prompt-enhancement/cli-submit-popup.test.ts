@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   PROMPT_ENHANCEMENT_CONTRACT_VERSION,
   type PromptEnhancementPrepareRequestV1,
+  type PromptEnhancementPrepareResultV1,
   type PromptEnhancementSourceRefV1,
 } from './contracts.js';
 import { buildPromptEnhancementCostVisibilityMetadataV1 } from './cost-observability.js';
@@ -190,6 +191,27 @@ describe('Claude CLI UserPromptSubmit PE popup consumer', () => {
     expect(ui.views).toHaveLength(2);
     expect(ui.views[1]!.model.identity.bodyRevision).toBeGreaterThan(ui.views[0]!.model.identity.bodyRevision);
     expect(ui.views[1]!.editedBodyText).not.toBe(ui.views[0]!.editedBodyText);
+  });
+
+  it('E9: fires the cost-observability sink once per E8 directional/apply-details action, not on plain selection', async () => {
+    const baseRequest = request();
+    const prepared = await preparePromptEnhancement(baseRequest);
+    const measured: PromptEnhancementPrepareResultV1[] = [];
+    const ui = interaction([
+      { type: 'shorter' },
+      { type: 'apply_details', text: 'Keep verification concise.' },
+      { type: 'use_current' },
+    ]);
+    const result = await runPromptEnhancementCliSubmitPopupV1({
+      request: baseRequest,
+      result: prepared,
+      interaction: ui,
+      costObservabilitySink: (r) => measured.push(r),
+    });
+    expect(result.state).toBe('selected_current');
+    // Two action recompositions were measured; use_current (plain send) is not an action call.
+    expect(measured).toHaveLength(2);
+    expect(measured.every((r) => r.callAndVisibilityMetadata !== undefined)).toBe(true);
   });
 
   it('restores the main body when Go back is selected after a refinement (GAP-1 end-to-end)', async () => {

@@ -55,7 +55,7 @@ import { recordPromptEnhancementFeedbackV1 } from '../../prompt-enhancement/feed
 import { derivePromptEnhancementFeedbackPolicyV1 } from '../../prompt-enhancement/feedback-policy.js';
 import type { PromptEnhancementPopupEventV1 } from '../../prompt-enhancement/popup-session.js';
 import { buildPromptEnhancementCostVisibilityMetadataV1 } from '../../prompt-enhancement/cost-observability.js';
-import { buildPromptEnhancementCostObservabilityV1 } from '../../prompt-enhancement/cost-measurement.js';
+import { emitPromptEnhancementCostObservabilityV1 } from '../../prompt-enhancement/cost-measurement.js';
 import { getSourceRealityAdaptersSnapshot } from '../../prompt-enhancement/source-reality.js';
 import { loadRightGoodProfile } from '../../classifier/right-good-aggregator.js';
 import { computeWorkStyleProfile } from '../../classifier/work-style-traits.js';
@@ -583,6 +583,7 @@ export interface PromptEnhancementCliHostConsumerDependenciesV1 {
     request: PromptEnhancementPrepareRequestV1;
     result: PromptEnhancementPrepareResultV1;
     feedbackSink: (event: PromptEnhancementPopupEventV1) => ReturnType<typeof recordPromptEnhancementCliFeedbackV1>;
+    costObservabilitySink?: (result: PromptEnhancementPrepareResultV1) => void;
   }) => Promise<PromptEnhancementCliPopupResultV1>;
   onHookOutput?: (output: ClaudeUserPromptSubmitHookOutputV1 | undefined) => void;
 }
@@ -628,6 +629,7 @@ export function createPromptEnhancementCliHostConsumerV1(
         request,
         result: preparation.result,
         feedbackSink: (event) => recordPromptEnhancementCliFeedbackV1(dependencies.store, request.projectRoot, event, request),
+        costObservabilitySink: (result) => emitPromptEnhancementCostObservabilityV1(result, 'popup_action', logger),
       });
     } else {
       hostAdapter = 'linux_terminal';
@@ -1026,23 +1028,9 @@ export async function runAuto(
     });
     // E9 (P12-G1/G2): measure cost off the result's REAL call-visibility (mode + planned/used
     // counts come from the composer, not the hardcoded request placeholder), and run the PE-G4
-    // "cost never weakens behavior" check. Observability-only — this never gates the popup.
-    const costObservability = buildPromptEnhancementCostObservabilityV1(preparation.result);
-    logger.debug('prompt_enhancement_cost_measurement', {
-      callId: costObservability.measurement.callId,
-      callVisibilityMode: preparation.result.callAndVisibilityMetadata.callVisibilityMode,
-      plannedCallCount: costObservability.measurement.plannedCallCount,
-      usedCallCount: costObservability.measurement.usedCallCount,
-      rawFieldsExcluded: costObservability.measurement.rawPromptBodyExcluded,
-      inventoryOk: costObservability.inventoryOk,
-    });
-    if (costObservability.costWeakeningDetected) {
-      // PE-G4 invariant: no runtime path may weaken behavior because of cost. This should
-      // be unreachable in v1 (cost is never a gate); surface it loudly if it ever fires.
-      logger.warn('prompt_enhancement_cost_weakening_detected', {
-        reasonCodes: costObservability.weakeningReasonCodes,
-      });
-    }
+    // "cost never weakens behavior" check. Observability-only — this never gates the popup. The
+    // E8 popup-action calls are measured at their own surface via the popup costObservabilitySink.
+    emitPromptEnhancementCostObservabilityV1(preparation.result, 'prepare', logger);
   }
 
   // H1.3 keeps legacy Decision Session bookkeeping after preparation; PE preparation

@@ -190,6 +190,9 @@ export async function runPromptEnhancementCliSubmitPopupV1(input: {
   result: PromptEnhancementPrepareResultV1;
   interaction?: PromptEnhancementCliPopupInteractionV1 | null;
   feedbackSink?: PromptEnhancementCliFeedbackSinkV1;
+  // E9: measured per E8 directional/apply-details action call (observability-only). The loop
+  // stays free of the cost module — it hands the produced result to the caller's sink.
+  costObservabilitySink?: (result: PromptEnhancementPrepareResultV1) => void;
   onFirstRender?: () => void;
 }): Promise<PromptEnhancementCliPopupResultV1> {
   let currentResult = input.result;
@@ -360,6 +363,9 @@ export async function runPromptEnhancementCliSubmitPopupV1(input: {
       }
 
       currentResult = execution.result;
+      // E9 (P12-G1): this directional/apply-details action is a real E8 LLM call — measure it
+      // at the popup_action surface so repeated recompositions are counted, not silently free.
+      input.costObservabilitySink?.(execution.result);
       rendered = buildPromptEnhancementPopupRenderModelV1({
         result: currentResult,
         timestampMs: Date.now(),

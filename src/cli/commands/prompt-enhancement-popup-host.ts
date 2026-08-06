@@ -15,7 +15,9 @@ import {
   type PromptEnhancementCliPopupResultV1,
 } from '../../prompt-enhancement/cli-submit-popup.js';
 import type { PromptEnhancementPopupEventV1 } from '../../prompt-enhancement/popup-session.js';
+import { emitPromptEnhancementCostObservabilityV1 } from '../../prompt-enhancement/cost-measurement.js';
 import { recordPromptEnhancementCliFeedbackV1 } from './auto.js';
+import { logger } from '../../logger.js';
 
 const POPUP_HOST_PROTOCOL_VERSION_V1 = 1;
 
@@ -122,6 +124,7 @@ export async function runPromptEnhancementPopupHostCommandV1(
             event,
             input.request,
           ),
+          costObservabilitySink: (result) => emitPromptEnhancementCostObservabilityV1(result, 'popup_action', logger),
         });
       } finally {
         if (store) dependencies.closeStore(store);
