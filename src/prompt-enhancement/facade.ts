@@ -31,7 +31,7 @@ import { resolvePromptEnhancementSourceConflictsV1 } from './conflict-resolution
 import { applyPromptEnhancementSourceMixV1 } from './source-mix.js';
 import { applyPromptEnhancementGuidanceGateV1 } from './guidance-gate.js';
 import { buildPromptEnhancementPinchLabelV1, buildPromptEnhancementWhyHelpV1 } from './pe-header-copy.js';
-import { buildPromptEnhancementHandoffMetadataV1 } from './handoff-metadata.js';
+import { buildPromptEnhancementHandoffMetadataV1, validatePromptEnhancementHandoffMetadataV1 } from './handoff-metadata.js';
 import {
   validatePromptEnhancementSafety,
   type PromptEnhancementSafetyValidationResult,
@@ -275,13 +275,16 @@ function buildResult(
         capabilityOverlays: route.capabilityOverlays,
         hasSensitiveAction: safety.sensitiveActionFindings.some((finding) => finding.requiresConfirmation),
       });
-  // MPS (owner ruling 2026-08-06): for a compound multi-intent prompt the engine emits the typed
-  // handoff/sequence summary so the CLI MPS first popup can render the sequence plan. Metadata
-  // only — the builder itself locks `sequenceActivationPolicy: blocked_pending_…` and
-  // `receiverCanActivateRuntime: false`; no sequence runtime is created here.
-  const handoffAndSequenceSummary = !noPopup
-    && disposition === 'show_current_body'
-    && route.contractDecision.compoundPromptState === 'multi_intent_one_prompt'
+  // MPS (owner ruling 2026-08-06): for a compound prompt the engine emits the typed
+  // handoff/sequence summary so the CLI MPS first popup can render the sequence plan. Compound =
+  // multiple intent families in one prompt, OR a genuine multi-step list of the same family
+  // (>= 3 user points — "schema, cron job, email sender, and the widget"; a plain "add X and Y"
+  // stays on the PE popup). Metadata only — the builder itself locks
+  // `sequenceActivationPolicy: blocked_pending_…` and `receiverCanActivateRuntime: false`.
+  const compoundPromptState = route.contractDecision.compoundPromptState;
+  const isSequenceCandidate = compoundPromptState === 'multi_intent_one_prompt'
+    || (compoundPromptState === 'multi_point_same_intent' && route.contractDecision.userPointCoverageRefs.length >= 3);
+  let handoffAndSequenceSummary = !noPopup && disposition === 'show_current_body' && isSequenceCandidate
     ? buildPromptEnhancementHandoffMetadataV1({
         handoffDecisionId: `${enhancementId}:handoff`,
         requestId: request.requestId,
@@ -291,6 +294,18 @@ function buildResult(
         handoffKind: 'compact_sequence_summary_candidate',
       })
     : undefined;
+  // Self-guard: emit the summary ONLY if it passes the same handoff validation the boundary
+  // enforces — a summary that would make the whole result invalid must never cost the user the
+  // PE popup (drop the summary, keep the result; MPS simply skips for that prompt).
+  if (handoffAndSequenceSummary) {
+    const handoffValidation = validatePromptEnhancementHandoffMetadataV1(
+      handoffAndSequenceSummary,
+      safeCurrentBody,
+      validationSummary,
+      { requestId: request.requestId, projectRoot: request.projectRoot },
+    );
+    if (!handoffValidation.ok) handoffAndSequenceSummary = undefined;
+  }
   const uiView: PromptEnhancementUiViewPayloadV1 = {
     ...buildUiView(request, enhancementId, safeCurrentBody, composed, safety, trustCues, diagnostics, noPopup),
     ...(pinchLabel ? { pinchLabel } : {}),

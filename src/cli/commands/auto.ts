@@ -1013,6 +1013,11 @@ export async function runAuto(
     disposition: preparation.disposition,
     safeFallback: preparation.safeFallback,
     reasonCode: 'reasonCode' in preparation ? preparation.reasonCode : undefined,
+    // Diagnosability (2026-08-06): a bare invalid_result was undebuggable from the log — record
+    // WHICH validation checks failed so a live boundary rejection names its exact cause.
+    validationReasonCodes: 'validationReasonCodes' in preparation && preparation.validationReasonCodes
+      ? preparation.validationReasonCodes.slice(0, 10)
+      : undefined,
   });
   // Owner decision B-i (2026-08-04): the PE popup is deferred to the Stop hook. Do NOT show a
   // popup on UserPromptSubmit — the prompt passes through raw. When a real (non-fallback) result

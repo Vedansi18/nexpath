@@ -63,6 +63,21 @@ describe('MPS CLI wiring (owner ruling 2026-08-06: CLI complete, extension pendi
     expect(result.uiView.handoffAndSequenceSummary).toBeUndefined();
   });
 
+  it('a multi-POINT same-family list (>=3 points) also emits the sequence summary (script-style sequence prompt)', async () => {
+    const result = await preparePromptEnhancement(request(
+      'Build the whole recurring-billing flow: schema, cron job, email sender, and the dashboard widget - do it as one sequence.',
+    ));
+    const handoff = result.uiView.handoffAndSequenceSummary;
+    expect(handoff).toBeDefined();
+    expect(handoff!.handoffKind).toBe('compact_sequence_summary_candidate');
+  });
+
+  it('a plain two-part same-family prompt stays on the PE popup (no sequence summary)', async () => {
+    // "add X and Y" is list-shaped but not a real multi-step sequence — MPS must not hijack it.
+    const result = await preparePromptEnhancement(request('Add a tax field and a discount field to the invoice page.'));
+    expect(result.uiView.handoffAndSequenceSummary).toBeUndefined();
+  });
+
   it('CLI surface gate PERMITS with the three non-extension evidence rows', async () => {
     const result = await preparePromptEnhancement(request(MULTI_INTENT));
     const evidence = buildPromptEnhancementCliMpsIntakeEvidenceV1(result);
