@@ -22,13 +22,37 @@ import { spawnSync } from 'node:child_process';
 export const POPUP_WINDOW_TITLE = 'Nexpath — Action Required';
 /** Feedback popup title — must match Layer C's feedback-tty `WINDOW_TITLE`. */
 export const FEEDBACK_WINDOW_TITLE = 'Nexpath — Feedback';
+/**
+ * Prompt-enhancement popup title.
+ *
+ * Must match `PROMPT_ENHANCEMENT_POPUP_WINDOW_TITLE_V1` in
+ * `src/cli/prompt-enhancement-host.ts`, which passes it as `--title` to each
+ * terminal emulator it launches. That constant is not exported and lives in a
+ * separate package, so the literal is duplicated here — the same deliberate
+ * duplication the two titles above already use.
+ *
+ * Note the separator: this one is a middle dot (`·`), NOT the em dash (`—`)
+ * used by the advisory and feedback titles. wmctrl/xdotool match on the literal
+ * text, so the wrong character silently fails to raise anything.
+ */
+export const PROMPT_ENHANCEMENT_WINDOW_TITLE = 'Nexpath · Prompt enhancement';
 
 /**
  * Titles bringPopupToFront tries to raise. Only one popup is open at a time
- * (`nexpath stop` shows the feedback popup OR the advisory popup, never both),
- * so each poll tick tries both and raises whichever window exists.
+ * (`nexpath stop` shows the feedback popup, the advisory popup, or the
+ * prompt-enhancement popup — never two), so each poll tick tries each and
+ * raises whichever window exists.
+ *
+ * The prompt-enhancement popup only opens a window on the spawn-terminal path;
+ * on the in-process `/dev/tty` path it renders in the existing terminal and
+ * there is nothing to raise. A title that matches no window is a no-op, so
+ * listing it is safe on both paths.
  */
-const POPUP_TITLES: readonly string[] = [POPUP_WINDOW_TITLE, FEEDBACK_WINDOW_TITLE];
+const POPUP_TITLES: readonly string[] = [
+  POPUP_WINDOW_TITLE,
+  FEEDBACK_WINDOW_TITLE,
+  PROMPT_ENHANCEMENT_WINDOW_TITLE,
+];
 
 export interface ForegroundDeps {
   platform?: NodeJS.Platform;

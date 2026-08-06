@@ -4,6 +4,8 @@ import { bringPopupToFront } from './foreground.js';
 // Must match the titles the helper duplicates (Layer C TtySelectFn / feedback-tty).
 const ADVISORY_TITLE = 'Nexpath — Action Required';
 const FEEDBACK_TITLE = 'Nexpath — Feedback';
+// Set by the PE host as `--title`. Separator is a middle dot, not an em dash.
+const PROMPT_ENHANCEMENT_TITLE = 'Nexpath · Prompt enhancement';
 
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
@@ -77,6 +79,26 @@ describe('bringPopupToFront (windsurf-hook)', () => {
     vi.advanceTimersByTime(10_000);
     expect(raised).toBe(FEEDBACK_TITLE);
     expect(attempted).toEqual([ADVISORY_TITLE, FEEDBACK_TITLE]); // advisory tried first, then feedback
+  });
+
+  // On Windsurf the extension is not in the hook chain — this Cascade-hook path
+  // is the only thing that can raise the PE popup window.
+  it('raises the PROMPT-ENHANCEMENT popup when only that window exists', () => {
+    const attempted: string[] = [];
+    let raised: string | null = null;
+    bringPopupToFront({
+      platform: 'linux', env: { DISPLAY: ':0' }, hasCommand: () => true,
+      activate: (_tool, title) => {
+        attempted.push(title);
+        if (title === PROMPT_ENHANCEMENT_TITLE) { raised = title; return true; }
+        return false;
+      },
+      intervalMs: 500, maxTries: 12,
+    });
+    vi.advanceTimersByTime(10_000);
+    expect(raised).toBe(PROMPT_ENHANCEMENT_TITLE);
+    // Tried last, after the two pre-existing titles — their order is unchanged.
+    expect(attempted).toEqual([ADVISORY_TITLE, FEEDBACK_TITLE, PROMPT_ENHANCEMENT_TITLE]);
   });
 
   it('still raises the ADVISORY popup when the advisory window exists (regression)', () => {

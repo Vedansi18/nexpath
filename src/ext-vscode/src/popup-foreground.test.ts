@@ -1,5 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { bringPopupToFront, POPUP_WINDOW_TITLE, FEEDBACK_WINDOW_TITLE } from './popup-foreground.js';
+import {
+  bringPopupToFront,
+  POPUP_WINDOW_TITLE,
+  FEEDBACK_WINDOW_TITLE,
+  PROMPT_ENHANCEMENT_WINDOW_TITLE,
+} from './popup-foreground.js';
 
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
@@ -78,23 +83,51 @@ describe('bringPopupToFront', () => {
   it('gives up after maxTries when activation never succeeds', () => {
     const h = setup({ tools: ['wmctrl'], maxTries: 5 }); // never succeeds
     vi.advanceTimersByTime(10_000);
-    // 2 titles (advisory + feedback) attempted per tick × 5 ticks = 10 calls.
-    expect(h.calls()).toBe(10);
+    // Justification for the count change (was 10): the prompt-enhancement popup
+    // title joined the list, so each tick attempts 3 titles, not 2.
+    // 3 titles × 5 ticks = 15 calls. The give-up budget itself is unchanged.
+    expect(h.calls()).toBe(15);
   });
 
-  it('tries to raise BOTH the advisory and the feedback popup titles', () => {
+  it('tries to raise the advisory, feedback AND prompt-enhancement titles', () => {
     const titles: string[] = [];
     bringPopupToFront({
       platform: 'linux',
       env: { DISPLAY: ':0' },
       hasCommand: () => true,
-      activate: (_tool, title) => { titles.push(title); return false; }, // never succeeds → tries both
+      activate: (_tool, title) => { titles.push(title); return false; }, // never succeeds → tries all
       intervalMs: 500,
       maxTries: 1,
     });
     vi.advanceTimersByTime(1_000);
     expect(titles).toContain(POPUP_WINDOW_TITLE);
     expect(titles).toContain(FEEDBACK_WINDOW_TITLE);
+    expect(titles).toContain(PROMPT_ENHANCEMENT_WINDOW_TITLE);
+  });
+
+  // The PE host matches windows by literal title text, and its separator is a
+  // middle dot while the other two use an em dash. Pin the exact string: a
+  // silently wrong character would raise nothing and look like "no popup".
+  it('uses the exact prompt-enhancement window title the PE host sets', () => {
+    expect(PROMPT_ENHANCEMENT_WINDOW_TITLE).toBe('Nexpath · Prompt enhancement');
+    expect(PROMPT_ENHANCEMENT_WINDOW_TITLE).not.toContain('—');
+  });
+
+  it('raises the PROMPT-ENHANCEMENT popup when only that window exists', () => {
+    let raised: string | null = null;
+    bringPopupToFront({
+      platform: 'linux',
+      env: { DISPLAY: ':0' },
+      hasCommand: () => true,
+      activate: (_tool, title) => {
+        if (title === PROMPT_ENHANCEMENT_WINDOW_TITLE) { raised = title; return true; }
+        return false;
+      },
+      intervalMs: 500,
+      maxTries: 3,
+    });
+    vi.advanceTimersByTime(2_000);
+    expect(raised).toBe(PROMPT_ENHANCEMENT_WINDOW_TITLE);
   });
 
   // ── Requirement: raise WHICHEVER popup is open (advisory OR feedback) ──────────
