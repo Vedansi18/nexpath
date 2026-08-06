@@ -68,6 +68,10 @@ export interface PromptEnhancementStructuredComposerOutputV1 {
     sourceFactIds: readonly string[];
   }[];
   composerClaims: readonly string[];
+  // E5: the composer self-reports the detected language of the original prompt
+  // (BCP-47-ish, e.g. 'en' / 'hi' / 'hi-Latn' Hinglish / 'gu-Latn' Gujlish). Read by
+  // the E5 language-consistency gate; optional so pre-E5 callers stay valid.
+  detectedLanguageSelfReport?: string;
 }
 
 export interface PromptEnhancementComposeResult {

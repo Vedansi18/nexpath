@@ -51,12 +51,19 @@ const SYSTEM_PROMPT = [
   'voice as direct, methodical instructions, never as advice ABOUT the user and never mentioning',
   'Nexpath. Do not restate the original request; other sections handle that.',
   '',
+  'Language fidelity (E5 — critical):',
+  '- Write ALL generated section wording in the SAME language, slang, and code-switching as the',
+  "  user's original prompt below. Mirror their exact register — do NOT normalize to formal English",
+  '  or to a standard language (Hinglish is NOT Hindi; Gujlish is NOT Gujarati). Preserve even slight slang.',
+  '- Report the detected language of the original prompt in "detectedLanguageSelfReport" as a BCP-47-ish',
+  '  code (e.g. "en", "hi", "hi-Latn" for Hinglish, "gu", "gu-Latn" for Gujlish).',
+  '',
   'Rules:',
   '- Use ONLY the provided sectionId values; never invent a section or output the original-request section.',
   '- For each section, cite in sourceFactIds only the allowed source fact ids listed for THAT section.',
   '- Do not include internal ids, section kinds, or planning labels in bodyText.',
   '- Reply with STRICT JSON only, matching:',
-  '  {"sectionDrafts":[{"sectionId":"...","bodyText":"...","sourceFactIds":["..."]}],"composerClaims":["claim:<sourceFactId>"]}',
+  '  {"detectedLanguageSelfReport":"...","sectionDrafts":[{"sectionId":"...","bodyText":"...","sourceFactIds":["..."]}],"composerClaims":["claim:<sourceFactId>"]}',
   '- composerClaims must be the union of every sourceFactId you used, each prefixed with "claim:".',
 ].join('\n');
 
@@ -108,7 +115,11 @@ function parseStructuredComposerOutput(
     ? obj['composerClaims'].filter((claim): claim is string => typeof claim === 'string')
     : [];
 
-  return { outputId: `${enhancementId}:composer-llm`, sectionDrafts, composerClaims };
+  const detectedLanguageSelfReport = typeof obj['detectedLanguageSelfReport'] === 'string'
+    ? obj['detectedLanguageSelfReport']
+    : undefined;
+
+  return { outputId: `${enhancementId}:composer-llm`, sectionDrafts, composerClaims, detectedLanguageSelfReport };
 }
 
 export async function composeStructuredComposerOutputV1(

@@ -44,6 +44,31 @@ describe('composeStructuredComposerOutputV1 (E4 / 4.1)', () => {
     expect(output!.composerClaims).toEqual(['claim:fact-a']);
   });
 
+  it('parses the E5 detectedLanguageSelfReport and passes the mirror-language instruction', async () => {
+    const reply = JSON.stringify({
+      detectedLanguageSelfReport: 'hi-Latn',
+      sectionDrafts: [{ sectionId: 'sec-verify', bodyText: 'Ek failing test likho jo bug reproduce kare.', sourceFactIds: ['fact-a'] }],
+      composerClaims: ['claim:fact-a'],
+    });
+    let sentSystemPrompt = '';
+    const capturing: PromptEnhancementComposerClientV1 = {
+      chat: { completions: { create: async (body) => { sentSystemPrompt = body.messages.find((m) => m.role === 'system')?.content ?? ''; return { choices: [{ message: { content: reply } }] }; } } },
+    };
+    const output = await composeStructuredComposerOutputV1(input, capturing);
+    expect(output!.detectedLanguageSelfReport).toBe('hi-Latn');
+    expect(sentSystemPrompt).toContain('SAME language');
+    expect(sentSystemPrompt).toContain('detectedLanguageSelfReport');
+  });
+
+  it('leaves detectedLanguageSelfReport undefined when the model omits it', async () => {
+    const reply = JSON.stringify({
+      sectionDrafts: [{ sectionId: 'sec-verify', bodyText: 'Verify it.', sourceFactIds: ['fact-a'] }],
+      composerClaims: ['claim:fact-a'],
+    });
+    const output = await composeStructuredComposerOutputV1(input, client(reply));
+    expect(output!.detectedLanguageSelfReport).toBeUndefined();
+  });
+
   it('returns undefined on a provider error (deterministic fallback)', async () => {
     expect(await composeStructuredComposerOutputV1(input, client(null, { throws: true }))).toBeUndefined();
   });
