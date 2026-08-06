@@ -29,6 +29,7 @@ import {
   createPromptEnhancementCliHostConsumerV1,
   preparePromptEnhancementForAuto,
   recordPromptEnhancementCliFeedbackV1,
+  recordPromptEnhancementShownMemoryV1,
   runAuto,
   readStdin,
 } from './auto.js';
@@ -3264,6 +3265,28 @@ describe('B1.4a - live CLI PEF sink wiring', () => {
       expect(summary.categoryCounts).toEqual([
         { feedbackCategory: 'not_relevant_enough', count: 1 },
       ]);
+    } finally {
+      store.db.close();
+    }
+  });
+
+  it('E3/3.2b: showing the popup records neutral candidate evidence for the Source-A signal', async () => {
+    const store = await openStore(':memory:');
+    try {
+      const projectRoot = '/test/e3-2b-shown';
+      const request = makeBoundaryRequest(store, projectRoot);
+      const signalKey = resolvePromptEnhancementGuidanceOutcomeV1(request).primarySignalKey!;
+      expect(signalKey).not.toBeNull();
+
+      recordPromptEnhancementShownMemoryV1(store, projectRoot, request, 500);
+      recordPromptEnhancementShownMemoryV1(store, projectRoot, request, 501);
+
+      const [memory] = queryRelevantPromptEnhancementMemory(store, projectRoot, [signalKey]);
+      expect(memory).toBeDefined();
+      // Two shows -> evidenceCount 2, and no negative evidence (a show is not a reject).
+      expect(memory.evidenceCount).toBe(2);
+      expect(memory.negativeCount).toBe(0);
+      expect(memory.currentEvidenceState).toBe('live_current');
     } finally {
       store.db.close();
     }

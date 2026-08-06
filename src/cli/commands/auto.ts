@@ -60,12 +60,13 @@ import { loadRightGoodProfile } from '../../classifier/right-good-aggregator.js'
 import { computeWorkStyleProfile } from '../../classifier/work-style-traits.js';
 import { readParamEvents } from '../../telemetry/param-events.js';
 import { getProjectEnvFacts } from '../../store/env-facts.js';
-import { getPromptEnhancementFeedbackSummary, queryRelevantPromptEnhancementMemory } from '../../store/prompt-enhancement.js';
+import { getPromptEnhancementFeedbackSummary, queryRelevantPromptEnhancementMemory, recordPromptEnhancementMemoryEvidence } from '../../store/prompt-enhancement.js';
 import { scorePromptEnhancementMemoryCandidates } from '../../prompt-enhancement/memory-scoring.js';
 import {
   promptEnhancementStageSignalKeyV1,
   promptEnhancementAbsenceSignalKeyV1,
 } from '../../prompt-enhancement/guidance-facts.js';
+import { resolvePromptEnhancementGuidanceOutcomeV1 } from '../../prompt-enhancement/guidance-outcome.js';
 import {
   buildClaudeUserPromptSubmitHookOutputV1,
   runPromptEnhancementCliSubmitPopupV1,
@@ -1197,6 +1198,39 @@ export function registerAutoCommand(program: import('commander').Command): void 
         closeStore(store);
       }
     });
+}
+
+/**
+ * Record that the popup's Source-A signals were shown (E3/3.2b, fix-plan §4b):
+ * neutral candidate evidence per rendered Source-A signal so the "shown" count
+ * accumulates cross-session. The signal keys come from re-running the E2 pipeline
+ * on the request (Path A). Safety-critical signals are protected so they survive
+ * fatigue. Best-effort — a memory-write failure must never block the popup.
+ */
+export function recordPromptEnhancementShownMemoryV1(
+  store: Store,
+  projectRoot: string,
+  request: PromptEnhancementPrepareRequestV1,
+  now: number = Date.now(),
+): void {
+  try {
+    for (const signal of resolvePromptEnhancementGuidanceOutcomeV1(request).renderedSourceASignals) {
+      recordPromptEnhancementMemoryEvidence(store, {
+        projectRoot,
+        signalKey: signal.signalKey,
+        evidenceKind: 'neutral',
+        currentEvidenceState: 'live_current',
+        confidenceBand: 'medium',
+        sourceStrength: 'moderate',
+        protectionState:
+          signal.riskLevel === 'high' || signal.riskLevel === 'sensitive_authority_risky'
+            ? 'high_risk_protected'
+            : undefined,
+        status: 'candidate',
+        now,
+      });
+    }
+  } catch { /* memory record is best-effort; never block the popup */ }
 }
 
 export function recordPromptEnhancementCliFeedbackV1(

@@ -28,7 +28,7 @@ import { writeTelemetry } from '../../telemetry/index.js';
 import { triggerOpportunisticSync } from '../../telemetry/OpportunisticSync.js';
 import { flushIfTelemetryOn, flushLifecycle } from '../../telemetry/lifecycle-flush.js';
 import { recentPromptMetadata } from '../../telemetry/recent-prompts.js';
-import { readStdin, recordPromptEnhancementCliFeedbackV1 } from './auto.js';
+import { readStdin, recordPromptEnhancementCliFeedbackV1, recordPromptEnhancementShownMemoryV1 } from './auto.js';
 import {
   resolvePromptEnhancementCliHostCapabilityV1,
   runPromptEnhancementCliPopupHostLaunchV1,
@@ -518,6 +518,9 @@ export function registerStopCommand(program: import('commander').Command): void 
           });
           return { kind: 'not_shown' };
         }
+        // The popup rendered: record that its Source-A signals were shown so the
+        // missing-signal memory accumulates cross-session (E3/3.2b).
+        recordPromptEnhancementShownMemoryV1(store, payload.cwd, pending.request);
         if (
           validatePromptEnhancementCliPopupResultV1(popup)
           && popup.state === 'selected_current'
