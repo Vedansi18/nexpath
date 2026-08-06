@@ -212,7 +212,7 @@ export function buildPromptEnhancementHandoffMetadataV1(
       semanticOwner: 'content_semantics',
       uiConsumer: 'ui_app',
       hostOwner: 'host_transport',
-      runtimeOwnerState: 'future_pe_ar11_only_after_gates',
+      runtimeOwnerState: 'future_future_sequence_only_after_gates',
     },
     reasonCodes: uniqueNonEmpty([...(input.reasonCodes ?? []), ...NON_RUNTIME_REASON_CODES]),
   };
@@ -534,7 +534,7 @@ function hasOwnerBoundary(value: unknown): boolean {
   return boundary.semanticOwner === 'content_semantics'
     && boundary.uiConsumer === 'ui_app'
     && boundary.hostOwner === 'host_transport'
-    && boundary.runtimeOwnerState === 'future_pe_ar11_only_after_gates';
+    && boundary.runtimeOwnerState === 'future_future_sequence_only_after_gates';
 }
 
 function hasUnsafeCompactSummary(metadata: PromptEnhancementHandoffMetadataV1): boolean {

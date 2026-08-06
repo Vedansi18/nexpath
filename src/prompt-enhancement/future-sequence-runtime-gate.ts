@@ -9,11 +9,11 @@ import {
 } from './contracts.js';
 
 const REQUIRED_GATE_CODES: readonly PromptEnhancementFutureSequenceRuntimeMissingGateCodeV1[] = [
-  'pe_dr4_lifecycle_policy_pending',
-  'pe_ar10_receiver_contract_pending',
-  'pe_ar11_runtime_source_pending',
-  'pe_em1_numeric_acceptance_pending',
-  'pe_dr6_owner_snapshot_pending',
+  'lifecycle_policy_pending',
+  'engine_receiver_contract_pending',
+  'future_sequence_runtime_source_pending',
+  'cost_numeric_acceptance_pending',
+  'cross_layer_snapshot_pending',
   'signed_owner_by_deliverable_register_pending',
   'pending_named_owner_register_rows_pending',
   'host_hold_commit_contract_pending',
@@ -24,26 +24,26 @@ const REQUIRED_GATE_CODES: readonly PromptEnhancementFutureSequenceRuntimeMissin
 ];
 
 const OPERATION_REASON_CODES: Record<PromptEnhancementFutureSequenceRuntimeOperationV1, string> = {
-  create_sequence_state: 'pe_ar11_1_sequence_identity_state_no_go',
-  accept_handoff_start_order: 'pe_ar11_2_handoff_start_order_no_go',
-  continue_current_item: 'pe_ar11_3_continuation_no_go',
-  custom_prompt_path: 'pe_ar11_3_custom_prompt_path_no_go',
-  cancel_active_sequence: 'pe_ar11_3_cancel_no_go',
-  abandon_active_sequence: 'pe_ar11_3_abandon_no_go',
-  resume_active_sequence: 'pe_ar11_3_resume_no_go',
-  response_finished_stop_completion: 'pe_ar11_4_stop_completion_non_proof',
-  runtime_acceptance: 'pe_ar11_5_runtime_acceptance_no_go',
+  create_sequence_state: 'future_sequence_1_sequence_identity_state_no_go',
+  accept_handoff_start_order: 'future_sequence_2_handoff_start_order_no_go',
+  continue_current_item: 'future_sequence_3_continuation_no_go',
+  custom_prompt_path: 'future_sequence_3_custom_prompt_path_no_go',
+  cancel_active_sequence: 'future_sequence_3_cancel_no_go',
+  abandon_active_sequence: 'future_sequence_3_abandon_no_go',
+  resume_active_sequence: 'future_sequence_3_resume_no_go',
+  response_finished_stop_completion: 'future_sequence_4_stop_completion_non_proof',
+  runtime_acceptance: 'future_sequence_5_runtime_acceptance_no_go',
 };
 
 const EVIDENCE_TO_GATE_CODE: readonly [
   keyof PromptEnhancementFutureSequenceRuntimeGateEvidenceV1,
   PromptEnhancementFutureSequenceRuntimeMissingGateCodeV1,
 ][] = [
-  ['peDr4LifecyclePolicyApproved', 'pe_dr4_lifecycle_policy_pending'],
-  ['peAr10ReceiverContractApproved', 'pe_ar10_receiver_contract_pending'],
-  ['peAr11RuntimeSourceAvailable', 'pe_ar11_runtime_source_pending'],
-  ['peEm1NumericAcceptanceApproved', 'pe_em1_numeric_acceptance_pending'],
-  ['peDr6OwnerSnapshotApproved', 'pe_dr6_owner_snapshot_pending'],
+  ['peDr4LifecyclePolicyApproved', 'lifecycle_policy_pending'],
+  ['peAr10ReceiverContractApproved', 'engine_receiver_contract_pending'],
+  ['peAr11RuntimeSourceAvailable', 'future_sequence_runtime_source_pending'],
+  ['peEm1NumericAcceptanceApproved', 'cost_numeric_acceptance_pending'],
+  ['peDr6OwnerSnapshotApproved', 'cross_layer_snapshot_pending'],
   ['signedOwnerByDeliverableRegisterApproved', 'signed_owner_by_deliverable_register_pending'],
   ['pendingNamedOwnerRegisterRowsClosed', 'pending_named_owner_register_rows_pending'],
   ['hostHoldCommitContractProven', 'host_hold_commit_contract_pending'],

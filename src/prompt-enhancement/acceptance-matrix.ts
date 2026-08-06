@@ -388,31 +388,31 @@ export function validatePromptEnhancementAcceptancePacketV1(
     }
   }
   for (const gateId of PROMPT_ENHANCEMENT_PE_AR1_NAMED_SPLIT_GATES_V1) {
-    if (!gateIds.has(gateId)) reasonCodes.push(`missing_pe_ar1_named_gate:${gateId}`);
+    if (!gateIds.has(gateId)) reasonCodes.push(`missing_transform_gate:${gateId}`);
   }
 
   const wr3Rows = new Map(packet.peWr3EvaluationRows.map((row) => [row.requirementId, row]));
   for (const requirementId of PROMPT_ENHANCEMENT_PE_WR3_REQUIRED_EVALUATION_ROW_IDS_V1) {
-    if (!wr3Rows.has(requirementId)) reasonCodes.push(`missing_pe_wr3_row:${requirementId}`);
+    if (!wr3Rows.has(requirementId)) reasonCodes.push(`missing_evaluation_row:${requirementId}`);
   }
   for (const row of packet.peWr3EvaluationRows) {
-    if (row.owner !== 'content_semantics') reasonCodes.push(`pe_wr3_owner_mismatch:${row.requirementId}`);
-    if (row.fixtureIds.length === 0) reasonCodes.push(`pe_wr3_missing_fixture:${row.requirementId}`);
-    if (row.scenarioPrompts.length === 0) reasonCodes.push(`pe_wr3_missing_scenario_prompts:${row.requirementId}`);
-    if (row.divergenceAxes.length === 0) reasonCodes.push(`pe_wr3_missing_divergence_axes:${row.requirementId}`);
-    if (row.requiredObservableSlots.length === 0) reasonCodes.push(`pe_wr3_missing_observable_slots:${row.requirementId}`);
-    if (row.hardFailFocus.length === 0) reasonCodes.push(`pe_wr3_missing_hard_fail_focus:${row.requirementId}`);
-    if (row.directlyDerivableForDevelopment !== true) reasonCodes.push(`pe_wr3_not_directly_derivable:${row.requirementId}`);
+    if (row.owner !== 'content_semantics') reasonCodes.push(`evaluation_owner_mismatch:${row.requirementId}`);
+    if (row.fixtureIds.length === 0) reasonCodes.push(`evaluation_missing_fixture:${row.requirementId}`);
+    if (row.scenarioPrompts.length === 0) reasonCodes.push(`evaluation_missing_scenario_prompts:${row.requirementId}`);
+    if (row.divergenceAxes.length === 0) reasonCodes.push(`evaluation_missing_divergence_axes:${row.requirementId}`);
+    if (row.requiredObservableSlots.length === 0) reasonCodes.push(`evaluation_missing_observable_slots:${row.requirementId}`);
+    if (row.hardFailFocus.length === 0) reasonCodes.push(`evaluation_missing_hard_fail_focus:${row.requirementId}`);
+    if (row.directlyDerivableForDevelopment !== true) reasonCodes.push(`evaluation_not_directly_derivable:${row.requirementId}`);
   }
   const debugCategoryRow = wr3Rows.get('every_locked_debug_category_route_and_skeleton');
   const maintenanceCategoryRow = wr3Rows.get('every_locked_maintenance_category_route_and_skeleton');
   for (const intent of DEBUG_PRIMARY_INTENTS) {
-    if (!debugCategoryRow?.coveredIntents.includes(intent)) reasonCodes.push(`pe_wr3_missing_debug_intent:${intent}`);
-    if (!debugCategoryRow?.fixtureIds.includes(evaluationFixtureIdForIntent(intent))) reasonCodes.push(`pe_wr3_missing_debug_fixture:${intent}`);
+    if (!debugCategoryRow?.coveredIntents.includes(intent)) reasonCodes.push(`evaluation_missing_debug_intent:${intent}`);
+    if (!debugCategoryRow?.fixtureIds.includes(evaluationFixtureIdForIntent(intent))) reasonCodes.push(`evaluation_missing_debug_fixture:${intent}`);
   }
   for (const intent of MAINTENANCE_PRIMARY_INTENTS) {
-    if (!maintenanceCategoryRow?.coveredIntents.includes(intent)) reasonCodes.push(`pe_wr3_missing_maintenance_intent:${intent}`);
-    if (!maintenanceCategoryRow?.fixtureIds.includes(evaluationFixtureIdForIntent(intent))) reasonCodes.push(`pe_wr3_missing_maintenance_fixture:${intent}`);
+    if (!maintenanceCategoryRow?.coveredIntents.includes(intent)) reasonCodes.push(`evaluation_missing_maintenance_intent:${intent}`);
+    if (!maintenanceCategoryRow?.fixtureIds.includes(evaluationFixtureIdForIntent(intent))) reasonCodes.push(`evaluation_missing_maintenance_fixture:${intent}`);
   }
   for (const gate of packet.peAr1NamedGateEvidence) {
     if (gate.owner !== 'content_semantics') reasonCodes.push(`gate_owner_mismatch:${gate.gateId}`);

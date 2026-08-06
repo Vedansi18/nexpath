@@ -49,7 +49,7 @@ export type PromptEnhancementFinalConsistencyTargetV1 =
   | 'safety_privacy_and_sensitive_actions'
   | 'ui_handoff'
   | 'host_transport'
-  | 'cost_latency_and_pe_g4'
+  | 'cost_latency_and_cost_visibility'
   | 'test_and_readiness_evidence'
   | 'stale_term_scan';
 
@@ -165,7 +165,7 @@ export const PROMPT_ENHANCEMENT_FINAL_CONSISTENCY_TARGETS_V1: readonly PromptEnh
   'safety_privacy_and_sensitive_actions',
   'ui_handoff',
   'host_transport',
-  'cost_latency_and_pe_g4',
+  'cost_latency_and_cost_visibility',
   'test_and_readiness_evidence',
   'stale_term_scan',
 ];

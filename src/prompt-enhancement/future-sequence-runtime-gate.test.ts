@@ -154,7 +154,7 @@ describe('Phase 11 future sequence runtime gate', () => {
     const result = evaluate('create_sequence_state');
 
     expect(assertPromptEnhancementFutureSequenceRuntimeBlockedV1(result)).toBe(true);
-    expect(result.reasonCodes).toContain('pe_ar11_1_sequence_identity_state_no_go');
+    expect(result.reasonCodes).toContain('future_sequence_1_sequence_identity_state_no_go');
     expect(result.missingGateCodes).toEqual(PROMPT_ENHANCEMENT_FUTURE_SEQUENCE_RUNTIME_REQUIRED_GATES_V1);
     expect(result.sequenceIdentityState).toBe('not_created_v1');
     expect(result.terminalReopenState).toBe('rejected_v1');
@@ -177,7 +177,7 @@ describe('Phase 11 future sequence runtime gate', () => {
     expect(result.queueState).toBe('not_created_v1');
     expect(result.handoffRuntimeAuthorityState).toBe('metadata_only_no_runtime');
     expect(result.reasonCodes).toEqual(expect.arrayContaining([
-      'pe_ar11_2_handoff_start_order_no_go',
+      'future_sequence_2_handoff_start_order_no_go',
       'handoff_metadata_is_metadata_only_no_runtime',
       'runtime_event_created_at_missing',
       'runtime_event_idempotency_key_missing',
@@ -185,11 +185,11 @@ describe('Phase 11 future sequence runtime gate', () => {
   });
 
   it.each([
-    ['continue_current_item', 'pe_ar11_3_continuation_no_go'],
-    ['custom_prompt_path', 'pe_ar11_3_custom_prompt_path_no_go'],
-    ['cancel_active_sequence', 'pe_ar11_3_cancel_no_go'],
-    ['abandon_active_sequence', 'pe_ar11_3_abandon_no_go'],
-    ['resume_active_sequence', 'pe_ar11_3_resume_no_go'],
+    ['continue_current_item', 'future_sequence_3_continuation_no_go'],
+    ['custom_prompt_path', 'future_sequence_3_custom_prompt_path_no_go'],
+    ['cancel_active_sequence', 'future_sequence_3_cancel_no_go'],
+    ['abandon_active_sequence', 'future_sequence_3_abandon_no_go'],
+    ['resume_active_sequence', 'future_sequence_3_resume_no_go'],
   ] as const)('PE-AR-11.3 blocks %s without mutation or follow-up', (operation, reasonCode) => {
     const result = evaluate(operation, {
       event: {
@@ -235,7 +235,7 @@ describe('Phase 11 future sequence runtime gate', () => {
     expect(result.stopCompletionState).toBe('not_proof_v1');
     expect(result.stopOrResponseEventAuthorityState).toBe('non_proof_no_runtime');
     expect(result.reasonCodes).toEqual(expect.arrayContaining([
-      'pe_ar11_4_stop_completion_non_proof',
+      'future_sequence_4_stop_completion_non_proof',
       'stop_or_response_finished_is_non_proof',
       'runtime_event_duplicate_noop',
       'legacy_ds_hook_ui_transport_authority_rejected',
@@ -262,7 +262,7 @@ describe('Phase 11 future sequence runtime gate', () => {
     expect(result.allowed).toBe(false);
     expect(result.runtimeAcceptanceState).toBe('no_go_v1');
     expect(result.missingGateCodes).toEqual(['current_v1_runtime_implementation_no_go']);
-    expect(result.reasonCodes).toContain('pe_ar11_5_runtime_acceptance_no_go');
+    expect(result.reasonCodes).toContain('future_sequence_5_runtime_acceptance_no_go');
   });
 
   it('keeps PE-DR-6 owner registers and provider/API availability as required runtime gates', () => {
@@ -353,7 +353,7 @@ describe('Phase 11 future sequence runtime gate', () => {
     expect(result.reasonCodes).toEqual(expect.arrayContaining([
       'runtime_event_created_at_missing',
       'runtime_event_idempotency_key_missing',
-      'pe_ar11_3_continuation_no_go',
+      'future_sequence_3_continuation_no_go',
     ]));
     expect(result.continuationState).toBe('not_created_v1');
   });
@@ -380,7 +380,7 @@ describe('Phase 11 future sequence runtime gate', () => {
     expect(result.reasonCodes).toEqual(expect.arrayContaining([
       'runtime_event_action_state_mismatch',
       'terminal_transition_rejected_v1',
-      'pe_ar11_3_cancel_no_go',
+      'future_sequence_3_cancel_no_go',
     ]));
     expect(result.terminalReopenState).toBe('rejected_v1');
   });
@@ -411,7 +411,7 @@ describe('Phase 11 future sequence runtime gate', () => {
     expect(result.configState).toBe('validated_on_no_runtime');
     expect(result.reasonCodes).toEqual(expect.arrayContaining([
       'sequence_config_key_rejected_as_pe_runtime_authority',
-      'pe_ar11_5_runtime_acceptance_no_go',
+      'future_sequence_5_runtime_acceptance_no_go',
     ]));
     expect(result.allowed).toBe(false);
   });

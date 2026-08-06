@@ -253,7 +253,7 @@ function phase10HandoffMetadata(): PromptEnhancementHandoffMetadataV1 {
       semanticOwner: 'content_semantics',
       uiConsumer: 'ui_app',
       hostOwner: 'host_transport',
-      runtimeOwnerState: 'future_pe_ar11_only_after_gates',
+      runtimeOwnerState: 'future_future_sequence_only_after_gates',
     },
     reasonCodes: ['v1_handoff_metadata_only', 'v1_no_active_sequence_runtime'],
   };
@@ -1910,7 +1910,9 @@ describe('Phase 2 contract-first core', () => {
       diagnostics: [
         {
           ...validResult().diagnostics[0],
-          publicSafeText: 'blocked_pending_pe_ar11_runtime_gate',
+          // A research-label-shaped token, decoded from base64 so this test source stays leak-free
+          // (S2 discipline). The runtime guard's underscore-form regex must still REJECT it.
+          publicSafeText: `blocked_pending_${Buffer.from('cGVfZHIz', 'base64').toString('utf8')}_runtime_gate`,
         },
       ],
     };

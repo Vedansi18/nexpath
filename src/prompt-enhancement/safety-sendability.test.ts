@@ -1057,14 +1057,14 @@ describe('prompt-enhancement safety, privacy, and sendability validation', () =>
       currentBody.text,
       '',
       'Private diagnostic leakage:',
-      '- Route this through pe_ar9_split5 and phase6_validation before send.',
+      '- Route this through safety_boundary_split5 and phase6_validation before send.',
     ].join('\n');
     const result = validatePromptEnhancementSafety({ currentBody, editedBodyText: leakedGeneratedBody });
 
     expect(result.sendPolicy).toBe('no_send');
     expect(result.safetySummary.privacyState).toBe('invalid_non_sendable');
     expect(result.failures.map((failure) => failure.failureCode)).toContain('sensitive_data_leak:private_planning_label_literal');
-    expect(result.publicDiagnostics.every((diagnostic) => !diagnostic.reasonCode.includes('pe_ar9'))).toBe(true);
+    expect(result.publicDiagnostics.every((diagnostic) => !diagnostic.reasonCode.includes('safety_boundary'))).toBe(true);
     expect(result.publicDiagnostics.every((diagnostic) => !diagnostic.reasonCode.includes('phase6'))).toBe(true);
   });
 

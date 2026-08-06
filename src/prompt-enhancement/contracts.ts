@@ -1289,7 +1289,7 @@ export interface PromptEnhancementHandoffMetadataV1 {
     semanticOwner: 'content_semantics';
     uiConsumer: 'ui_app';
     hostOwner: 'host_transport';
-    runtimeOwnerState: 'future_pe_ar11_only_after_gates';
+    runtimeOwnerState: 'future_future_sequence_only_after_gates';
   };
   reasonCodes: readonly string[];
 }
@@ -1306,11 +1306,11 @@ export type PromptEnhancementFutureSequenceRuntimeOperationV1 =
   | 'runtime_acceptance';
 
 export type PromptEnhancementFutureSequenceRuntimeMissingGateCodeV1 =
-  | 'pe_dr4_lifecycle_policy_pending'
-  | 'pe_ar10_receiver_contract_pending'
-  | 'pe_ar11_runtime_source_pending'
-  | 'pe_em1_numeric_acceptance_pending'
-  | 'pe_dr6_owner_snapshot_pending'
+  | 'lifecycle_policy_pending'
+  | 'engine_receiver_contract_pending'
+  | 'future_sequence_runtime_source_pending'
+  | 'cost_numeric_acceptance_pending'
+  | 'cross_layer_snapshot_pending'
   | 'signed_owner_by_deliverable_register_pending'
   | 'pending_named_owner_register_rows_pending'
   | 'host_hold_commit_contract_pending'
@@ -2544,7 +2544,7 @@ function isCompleteHandoffOwnerBoundary(value: unknown): boolean {
     && owner['semanticOwner'] === 'content_semantics'
     && owner['uiConsumer'] === 'ui_app'
     && owner['hostOwner'] === 'host_transport'
-    && owner['runtimeOwnerState'] === 'future_pe_ar11_only_after_gates';
+    && owner['runtimeOwnerState'] === 'future_future_sequence_only_after_gates';
 }
 
 function isCompleteUiActionInputContract(value: unknown): boolean {

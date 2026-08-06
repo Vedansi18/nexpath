@@ -48,7 +48,7 @@ describe('B5.3 release-check evidence packet', () => {
     expect(packet.publicLaunchMutationAllowed).toBe(false);
     expect(packet.reasonCodes).toEqual(expect.arrayContaining([
       'approved_final_private_revision_missing',
-      'pe_cr5_g8_scope_not_approved',
+      'confidentiality_g8_scope_not_approved',
       'public_launch_recheck_not_ready',
     ]));
   });

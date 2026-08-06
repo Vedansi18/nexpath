@@ -339,9 +339,9 @@ describe('Phase 13 PE-EM-3 test and acceptance matrix', () => {
 
     expect(validation.ok).toBe(false);
     expect(validation.reasonCodes).toEqual(expect.arrayContaining([
-      'missing_pe_wr3_row:mapping_directly_derivable_for_development',
-      'pe_wr3_missing_debug_intent:issue_debug.failing_test',
-      'pe_wr3_missing_debug_fixture:issue_debug.failing_test',
+      'missing_evaluation_row:mapping_directly_derivable_for_development',
+      'evaluation_missing_debug_intent:issue_debug.failing_test',
+      'evaluation_missing_debug_fixture:issue_debug.failing_test',
     ]));
   });
 });

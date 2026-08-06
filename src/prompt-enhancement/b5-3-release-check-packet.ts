@@ -97,7 +97,7 @@ export function buildPromptEnhancementB5_3ReleaseCheckPacketV1(
   const reasonCodes: string[] = [];
   if (!merged.approvedFinalPrivateRevision) reasonCodes.push('approved_final_private_revision_missing');
   if (merged.publicGoingInventory.length === 0) reasonCodes.push('public_going_inventory_missing');
-  if (merged.peCr5G8ScopeApproval !== 'approved') reasonCodes.push('pe_cr5_g8_scope_not_approved');
+  if (merged.peCr5G8ScopeApproval !== 'approved') reasonCodes.push('confidentiality_g8_scope_not_approved');
   if (!merged.depB501EvidenceRevision) reasonCodes.push('dep_b5_01_evidence_revision_missing');
   if (merged.buildTestImportEvidence.state !== 'pass') reasonCodes.push('build_test_import_evidence_missing_or_unpassed');
   if (merged.publicSafetyEvidence.state !== 'pass') reasonCodes.push('public_safety_evidence_missing_or_unpassed');

@@ -77,9 +77,9 @@ describe('Phase 12 cost, provider, latency, and observability contracts', () => 
       expect(row.conservativeCallsPerMonth).toBeGreaterThanOrEqual(0);
       expect(row.expectedCallsPerMonth).toBeGreaterThanOrEqual(0);
       expect(row.heavyCallsPerMonth).toBeGreaterThanOrEqual(0);
-      expect(row.conservativeMonthlyCostState).toMatch(/accepted_in_private_pe_g4_packet_not_public_constant|zero_no_separate_call|future_scope_not_bounded/);
-      expect(row.expectedMonthlyCostState).toMatch(/accepted_in_private_pe_g4_packet_not_public_constant|zero_no_separate_call|future_scope_not_bounded/);
-      expect(row.heavyMonthlyCostState).toMatch(/accepted_in_private_pe_g4_packet_not_public_constant|zero_no_separate_call|future_scope_not_bounded/);
+      expect(row.conservativeMonthlyCostState).toMatch(/accepted_in_private_cost_visibility_packet_not_public_constant|zero_no_separate_call|future_scope_not_bounded/);
+      expect(row.expectedMonthlyCostState).toMatch(/accepted_in_private_cost_visibility_packet_not_public_constant|zero_no_separate_call|future_scope_not_bounded/);
+      expect(row.heavyMonthlyCostState).toMatch(/accepted_in_private_cost_visibility_packet_not_public_constant|zero_no_separate_call|future_scope_not_bounded/);
       expect(row.deterministicLocalFallback).toBe('public_safe_no_generated_content_or_previous_valid_body');
       expect(row.sendOriginalFallbackState).toMatch(/send_original_available_when_safety_allows|not_applicable_future_scope/);
       expect(row.passFailStatus).toMatch(/accepted_with_product_scope_notes|future_scope/);
@@ -189,9 +189,9 @@ describe('Phase 12 cost, provider, latency, and observability contracts', () => 
       expect(row.hiddenRuntimeTrigger).not.toBe('');
       expect(row.skipCondition).not.toBe('');
       expect(row.worksheetStatus).toMatch(/blocked_pending_owner|accepted_zero_unless_source_proven|accepted_source_mean_assumption/);
-      expect(row.conservativeMonthlyCostState).toMatch(/accepted_in_private_pe_g4_packet_not_public_constant|zero_no_separate_call/);
-      expect(row.expectedMonthlyCostState).toMatch(/accepted_in_private_pe_g4_packet_not_public_constant|zero_no_separate_call/);
-      expect(row.heavyMonthlyCostState).toMatch(/accepted_in_private_pe_g4_packet_not_public_constant|zero_no_separate_call/);
+      expect(row.conservativeMonthlyCostState).toMatch(/accepted_in_private_cost_visibility_packet_not_public_constant|zero_no_separate_call/);
+      expect(row.expectedMonthlyCostState).toMatch(/accepted_in_private_cost_visibility_packet_not_public_constant|zero_no_separate_call/);
+      expect(row.heavyMonthlyCostState).toMatch(/accepted_in_private_cost_visibility_packet_not_public_constant|zero_no_separate_call/);
     }
     expect(byId.get('current_profile_classifier')).toMatchObject({
       conservativeCallsPerMonth: 'blocked_pending_owner',

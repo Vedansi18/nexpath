@@ -76,7 +76,7 @@ export type PromptEnhancementCostCallUserVisibleTriggerV1 =
   | 'not_user_visible_included_in_baseline';
 
 export type PromptEnhancementCostWorksheetCostStateV1 =
-  | 'accepted_in_private_pe_g4_packet_not_public_constant'
+  | 'accepted_in_private_cost_visibility_packet_not_public_constant'
   | 'zero_no_separate_call'
   | 'future_scope_not_bounded';
 
@@ -311,9 +311,9 @@ export interface PromptEnhancementCurrentSourceCostCallInventoryRowV1 {
   expectedCallsPerMonth: number | PromptEnhancementCurrentSourceCostWorksheetStateV1;
   heavyCallsPerMonth: number | PromptEnhancementCurrentSourceCostWorksheetStateV1;
   worstCaseCallsPerMonth: number | PromptEnhancementCurrentSourceCostWorksheetStateV1 | 'source_undefined';
-  conservativeMonthlyCostState: 'accepted_in_private_pe_g4_packet_not_public_constant' | 'zero_no_separate_call';
-  expectedMonthlyCostState: 'accepted_in_private_pe_g4_packet_not_public_constant' | 'zero_no_separate_call';
-  heavyMonthlyCostState: 'accepted_in_private_pe_g4_packet_not_public_constant' | 'zero_no_separate_call';
+  conservativeMonthlyCostState: 'accepted_in_private_cost_visibility_packet_not_public_constant' | 'zero_no_separate_call';
+  expectedMonthlyCostState: 'accepted_in_private_cost_visibility_packet_not_public_constant' | 'zero_no_separate_call';
+  heavyMonthlyCostState: 'accepted_in_private_cost_visibility_packet_not_public_constant' | 'zero_no_separate_call';
   worksheetStatus: PromptEnhancementCurrentSourceCostWorksheetStateV1;
   passFailStatus:
     | 'blocked_pending_owner'
@@ -543,9 +543,9 @@ const CURRENT_SOURCE_BASELINE_ROWS: readonly PromptEnhancementCurrentSourceCostC
     skipCondition: 'generated-origin prompts do not increment actual-user prompt cadence; normal user prompts remain eligible',
     calls: ['blocked_pending_owner', 'blocked_pending_owner', 'blocked_pending_owner', 'blocked_pending_owner'],
     costStates: [
-      'accepted_in_private_pe_g4_packet_not_public_constant',
-      'accepted_in_private_pe_g4_packet_not_public_constant',
-      'accepted_in_private_pe_g4_packet_not_public_constant',
+      'accepted_in_private_cost_visibility_packet_not_public_constant',
+      'accepted_in_private_cost_visibility_packet_not_public_constant',
+      'accepted_in_private_cost_visibility_packet_not_public_constant',
     ],
     worksheetStatus: 'blocked_pending_owner',
   }),
@@ -562,9 +562,9 @@ const CURRENT_SOURCE_BASELINE_ROWS: readonly PromptEnhancementCurrentSourceCostC
     skipCondition: 'skip outside implementation-stage source condition or when source classifier cannot run',
     calls: ['blocked_pending_owner', 'blocked_pending_owner', 'blocked_pending_owner', 'blocked_pending_owner'],
     costStates: [
-      'accepted_in_private_pe_g4_packet_not_public_constant',
-      'accepted_in_private_pe_g4_packet_not_public_constant',
-      'accepted_in_private_pe_g4_packet_not_public_constant',
+      'accepted_in_private_cost_visibility_packet_not_public_constant',
+      'accepted_in_private_cost_visibility_packet_not_public_constant',
+      'accepted_in_private_cost_visibility_packet_not_public_constant',
     ],
     worksheetStatus: 'blocked_pending_owner',
   }),
@@ -581,9 +581,9 @@ const CURRENT_SOURCE_BASELINE_ROWS: readonly PromptEnhancementCurrentSourceCostC
     skipCondition: 'generated-origin prompts are excluded from normal submit volume before current-source lifecycle accounting',
     calls: ['blocked_pending_owner', 'blocked_pending_owner', 'blocked_pending_owner', 'blocked_pending_owner'],
     costStates: [
-      'accepted_in_private_pe_g4_packet_not_public_constant',
-      'accepted_in_private_pe_g4_packet_not_public_constant',
-      'accepted_in_private_pe_g4_packet_not_public_constant',
+      'accepted_in_private_cost_visibility_packet_not_public_constant',
+      'accepted_in_private_cost_visibility_packet_not_public_constant',
+      'accepted_in_private_cost_visibility_packet_not_public_constant',
     ],
     worksheetStatus: 'blocked_pending_owner',
   }),
@@ -600,9 +600,9 @@ const CURRENT_SOURCE_BASELINE_ROWS: readonly PromptEnhancementCurrentSourceCostC
     skipCondition: 'skip when no decision-session advisory is fired or source provides deterministic/static fallback',
     calls: ['blocked_pending_owner', 'blocked_pending_owner', 'blocked_pending_owner', 'blocked_pending_owner'],
     costStates: [
-      'accepted_in_private_pe_g4_packet_not_public_constant',
-      'accepted_in_private_pe_g4_packet_not_public_constant',
-      'accepted_in_private_pe_g4_packet_not_public_constant',
+      'accepted_in_private_cost_visibility_packet_not_public_constant',
+      'accepted_in_private_cost_visibility_packet_not_public_constant',
+      'accepted_in_private_cost_visibility_packet_not_public_constant',
     ],
     worksheetStatus: 'blocked_pending_owner',
   }),
@@ -634,9 +634,9 @@ const CURRENT_SOURCE_BASELINE_ROWS: readonly PromptEnhancementCurrentSourceCostC
     skipCondition: 'skip when no pending decision session requires content-template grounding',
     calls: ['blocked_pending_owner', 'blocked_pending_owner', 'blocked_pending_owner', 'blocked_pending_owner'],
     costStates: [
-      'accepted_in_private_pe_g4_packet_not_public_constant',
-      'accepted_in_private_pe_g4_packet_not_public_constant',
-      'accepted_in_private_pe_g4_packet_not_public_constant',
+      'accepted_in_private_cost_visibility_packet_not_public_constant',
+      'accepted_in_private_cost_visibility_packet_not_public_constant',
+      'accepted_in_private_cost_visibility_packet_not_public_constant',
     ],
     worksheetStatus: 'blocked_pending_owner',
   }),
@@ -653,9 +653,9 @@ const CURRENT_SOURCE_BASELINE_ROWS: readonly PromptEnhancementCurrentSourceCostC
     skipCondition: 'skip when there are no recent prompts to mine or content-template grounding does not request prompt-derived param facts',
     calls: ['blocked_pending_owner', 'blocked_pending_owner', 'blocked_pending_owner', 'blocked_pending_owner'],
     costStates: [
-      'accepted_in_private_pe_g4_packet_not_public_constant',
-      'accepted_in_private_pe_g4_packet_not_public_constant',
-      'accepted_in_private_pe_g4_packet_not_public_constant',
+      'accepted_in_private_cost_visibility_packet_not_public_constant',
+      'accepted_in_private_cost_visibility_packet_not_public_constant',
+      'accepted_in_private_cost_visibility_packet_not_public_constant',
     ],
     worksheetStatus: 'blocked_pending_owner',
   }),
@@ -672,9 +672,9 @@ const CURRENT_SOURCE_BASELINE_ROWS: readonly PromptEnhancementCurrentSourceCostC
     skipCondition: 'skip when selected content template already has an authored simpler variant or no derivation is requested',
     calls: ['blocked_pending_owner', 'blocked_pending_owner', 'blocked_pending_owner', 'blocked_pending_owner'],
     costStates: [
-      'accepted_in_private_pe_g4_packet_not_public_constant',
-      'accepted_in_private_pe_g4_packet_not_public_constant',
-      'accepted_in_private_pe_g4_packet_not_public_constant',
+      'accepted_in_private_cost_visibility_packet_not_public_constant',
+      'accepted_in_private_cost_visibility_packet_not_public_constant',
+      'accepted_in_private_cost_visibility_packet_not_public_constant',
     ],
     worksheetStatus: 'blocked_pending_owner',
   }),
@@ -691,9 +691,9 @@ const CURRENT_SOURCE_BASELINE_ROWS: readonly PromptEnhancementCurrentSourceCostC
     skipCondition: 'best-effort source autogen only; no PE composer budget and no runtime weakening based on its cost',
     calls: [1, 2, 4, 'source_undefined'],
     costStates: [
-      'accepted_in_private_pe_g4_packet_not_public_constant',
-      'accepted_in_private_pe_g4_packet_not_public_constant',
-      'accepted_in_private_pe_g4_packet_not_public_constant',
+      'accepted_in_private_cost_visibility_packet_not_public_constant',
+      'accepted_in_private_cost_visibility_packet_not_public_constant',
+      'accepted_in_private_cost_visibility_packet_not_public_constant',
     ],
     worksheetStatus: 'accepted_source_mean_assumption',
   }),
@@ -1245,7 +1245,7 @@ function monthlyCostStateFor(
 ): PromptEnhancementCostWorksheetCostStateV1 {
   if (productState === 'future_product_scope_not_in_v1') return 'future_scope_not_bounded';
   if (callsPerMonth === 0) return 'zero_no_separate_call';
-  return 'accepted_in_private_pe_g4_packet_not_public_constant';
+  return 'accepted_in_private_cost_visibility_packet_not_public_constant';
 }
 
 function openDecisionFor(
