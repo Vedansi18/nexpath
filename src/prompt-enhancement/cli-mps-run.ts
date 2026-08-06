@@ -99,6 +99,15 @@ export async function runPromptEnhancementCliMpsFirstPopupV1(input: {
     viewportRows: bodyRows(),
     focusedField: 'enhanced_body',
   });
+  // Open with the body at the TOP (the buffer builder parks the cursor at the end, and resize
+  // scrolls to the cursor — which would show the tail first). Matches the PE popup's open state.
+  editor = {
+    ...editor,
+    buffers: {
+      ...editor.buffers,
+      enhanced_body: { ...editor.buffers.enhanced_body, cursor: 0, desiredVisualColumn: 0, scrollVisualRow: 0 },
+    },
+  };
 
   const focusedField = (): PromptEnhancementEditorFieldV1 | null =>
     focusIndex === 0 ? 'enhanced_body' : focusIndex === 1 ? 'additional_details' : null;
