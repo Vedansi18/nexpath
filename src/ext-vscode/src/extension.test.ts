@@ -482,6 +482,89 @@ describe('activate', () => {
     expect(trackedHandler).toHaveBeenCalledWith(event);
   });
 
+  // ── Watcher event logging: never the prompt text ─────────────────────────
+  // BUG-VEDANSI-AR9-G1 vector 1. This line used to write the first 80 chars of
+  // the user's prompt to the Output channel, the dev console AND
+  // ~/.nexpath/nexpath.log. The routing test above proves the event reaches the
+  // handler; these prove what the event does NOT put into a log sink.
+
+  function watcherEvent(overrides: Record<string, unknown> = {}) {
+    return {
+      prompt: 'ZZQX_PROMPT_MARKER_7741 refactor the auth module',
+      rawSessionId: 'ZZQX_SESSION_MARKER_7741',
+      capturedAt: new Date(0),
+      sourcePath: '/fake/ws/a/state.vscdb',
+      extractorId: 'cursor-v2025-q2',
+      ...overrides,
+    };
+  }
+
+  /** Everything the local `log()` helper wrote during this test. */
+  function loggedLines(): string {
+    return logSpy.mock.calls.map((c) => String(c[0])).join('\n');
+  }
+
+  it('watcher event logging never emits the prompt text', async () => {
+    const opts = await activateWithWatcher();
+    const event = watcherEvent();
+    opts.onEvent(event);
+
+    const written = loggedLines();
+    expect(written).toContain('watcher event:');
+    expect(written).not.toContain('ZZQX_PROMPT_MARKER_7741');
+    expect(written).not.toContain('refactor the auth module');
+  });
+
+  it('watcher event logging never emits the raw session id', async () => {
+    const opts = await activateWithWatcher();
+    opts.onEvent(watcherEvent());
+
+    expect(loggedLines()).not.toContain('ZZQX_SESSION_MARKER_7741');
+  });
+
+  it('watcher event logging keeps the correlatable fields', async () => {
+    const opts = await activateWithWatcher();
+    const event = watcherEvent();
+    opts.onEvent(event);
+
+    const written = loggedLines();
+    // Length, not content — enough to correlate without storing the prompt.
+    expect(written).toContain(`prompt_len=${event.prompt.length}`);
+    expect(written).toContain('extractor=cursor-v2025-q2');
+    // 12 lowercase hex characters, i.e. a truncated digest and not the id.
+    expect(written).toMatch(/session=[0-9a-f]{12}\b/);
+  });
+
+  it('the session fingerprint is stable for the same id and differs across ids', async () => {
+    const readFingerprint = (): string => {
+      const m = /session=([0-9a-f]{12})\b/.exec(loggedLines());
+      if (!m) throw new Error('no session fingerprint was logged');
+      return m[1]!;
+    };
+
+    const first = await activateWithWatcher();
+    first.onEvent(watcherEvent({ rawSessionId: 'session-A' }));
+    const a1 = readFingerprint();
+
+    logSpy.mockClear();
+    first.onEvent(watcherEvent({ rawSessionId: 'session-A' }));
+    const a2 = readFingerprint();
+
+    logSpy.mockClear();
+    first.onEvent(watcherEvent({ rawSessionId: 'session-B' }));
+    const b = readFingerprint();
+
+    expect(a1).toBe(a2);      // stable → log lines stay joinable
+    expect(a1).not.toBe(b);   // distinguishing → still useful as an identifier
+  });
+
+  it('an empty prompt still logs a zero length rather than nothing', async () => {
+    const opts = await activateWithWatcher();
+    opts.onEvent(watcherEvent({ prompt: '' }));
+
+    expect(loggedLines()).toContain('prompt_len=0');
+  });
+
   it('watcher onSchemaUnknown surfaces a visible info toast with path + observed keys', async () => {
     const opts = await activateWithWatcher();
     opts.onSchemaUnknown({

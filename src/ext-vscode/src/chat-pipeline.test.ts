@@ -189,4 +189,47 @@ describe('createChatEventHandler', () => {
     });
     await expect(handler(makeEvent())).resolves.toBeUndefined();
   });
+
+  // ── Default logger redaction ─────────────────────────────────────────────
+  // Every test above injects a logger, so the built-in one was never exercised.
+  // extension.ts injects its own in production, but the default must be safe on
+  // its own: this pipeline catches spawnAuto/spawnStop failures, and those
+  // errors can carry a delivered body or the user's prompt in a `cause` chain.
+
+  it('the default logger redacts the error instead of logging the raw object', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const leaky = new Error('spawnAuto failed', {
+        cause: new Error('stop stdout was ZZQX_BODY_MARKER_7741'),
+      });
+      spawnAuto.mockRejectedValueOnce(leaky);
+
+      // No `logger` key — exercise the built-in default.
+      const handler = createChatEventHandler({ spawnAuto, spawnStop, injectSelection });
+      await expect(handler(makeEvent())).resolves.toBeUndefined();
+
+      expect(consoleError).toHaveBeenCalled();
+      const [, payload] = consoleError.mock.calls[0]!;
+
+      // A closed record, not the Error — so no stack and no cause payload.
+      expect(payload).not.toBeInstanceOf(Error);
+      expect(payload).toEqual(
+        expect.objectContaining({ name: 'Error', message: 'spawnAuto failed', causeChainDepth: 1 }),
+      );
+      expect(JSON.stringify(payload)).not.toContain('ZZQX_BODY_MARKER_7741');
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  it('the default logger keeps the handler non-throwing', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      spawnAuto.mockRejectedValueOnce(new Error('boom'));
+      const handler = createChatEventHandler({ spawnAuto, spawnStop, injectSelection });
+      await expect(handler(makeEvent())).resolves.toBeUndefined();
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
 });
