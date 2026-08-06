@@ -14,6 +14,7 @@
     "dev:cli": "tsx src/cli/index.ts",
     "dev:server": "tsx src/server/index.ts",
     "typecheck": "tsc --noEmit",
+  "pe:launch-recheck": "tsx scripts/pe-public-launch-recheck.ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },

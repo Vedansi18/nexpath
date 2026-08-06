@@ -81,21 +81,48 @@ export const PROMPT_ENHANCEMENT_PUBLIC_LAUNCH_REQUIRED_FOCUS_V1 = [
   'no_private_planning_leakage',
 ] as const;
 
-export const PROMPT_ENHANCEMENT_PUBLIC_LAUNCH_FORBIDDEN_PATTERNS_V1 = [
-  '2.50',
-  '3.00',
-  'AG-11',
-  'Gate-G1',
-  'PE-AR',
-  'PE-CR',
-  'PE-DR',
-  'private planning',
-  'private dollar',
-  'private issue number',
-  'private gate name',
-  'private dollar threshold',
-  'private planning terminology',
-] as const;
+/**
+ * Launch-recheck forbidden-token detection (owner design decision #2, 2026-08-05). The detection tokens
+ * are assembled at runtime from base64 fragments so THIS scanner source never contains the literal
+ * private strings it scans for — otherwise, once the working tree is renamed, this file would be the
+ * one place those strings survived and it would flag itself. The research-id and phase-code matchers
+ * are pattern regexes (they hold no literal private id), so they stay as source regexes; the
+ * teammate-name and exact cost/label tokens are decoded from fragments.
+ */
+export type PromptEnhancementPublicLaunchForbiddenCategoryV1 =
+  | 'id_code'
+  | 'phase_code'
+  | 'teammate_name'
+  | 'cost_label';
+
+export interface PromptEnhancementPublicLaunchForbiddenPatternV1 {
+  category: PromptEnhancementPublicLaunchForbiddenCategoryV1;
+  test: RegExp;
+}
+
+function decodeToken(fragment: string): string {
+  return Buffer.from(fragment, 'base64').toString('utf8');
+}
+
+function escapeForRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+export function buildPromptEnhancementPublicLaunchForbiddenPatternsV1(): readonly PromptEnhancementPublicLaunchForbiddenPatternV1[] {
+  const teammateNames = ['aGlyZW4=', 'Ymhhdm5lc2g=', 'dmVkYW5zaQ=='].map(decodeToken);
+  const costLabels = ['Mi41MA==', 'My4wMA==', 'QUctMTE=', 'R2F0ZS1HMQ=='].map(decodeToken);
+  return [
+    // research / gate id codes — both hyphen and underscore forms, any casing.
+    { category: 'id_code', test: /\bpe[-_]?(ar|cr|dr|em|wr|g)[-_]?\d/i },
+    // private phase codes — dotted and dash/underscore forms.
+    { category: 'phase_code', test: /\b[bh]\d\.\d\b/i },
+    { category: 'phase_code', test: /\b[bh]\d[-_]\d/i },
+    // teammate names + owner-enum values (the enum values embed the bare name).
+    { category: 'teammate_name', test: new RegExp(teammateNames.map(escapeForRegExp).join('|'), 'i') },
+    // exact private cost / label tokens.
+    { category: 'cost_label', test: new RegExp(costLabels.map(escapeForRegExp).join('|')) },
+  ];
+}
 
 export function readPromptEnhancementPublicLaunchFileFactsV1(input: {
   projectRoot: string;
@@ -195,43 +222,43 @@ export function buildPromptEnhancementPublicLaunchRecheckPacketV1(
     check(
       'private_planning_leakage',
       'no private planning leakage in public-going files',
-      forbiddenFindings.filter((finding) => finding.includes('private planning')).length === 0 ? 'none' : 'private planning leakage',
-      forbiddenFindings.filter((finding) => finding.includes('private planning')).length === 0,
+      findingsInCategories(forbiddenFindings, ['teammate_name', 'phase_code']).join(',') || 'none',
+      findingsInCategories(forbiddenFindings, ['teammate_name', 'phase_code']).length === 0,
       true,
     ),
     check(
       'forbidden_cost_private_label_scan',
       'public-going files do not expose forbidden private cost/gate labels',
-      forbiddenFindings.filter((finding) => /2\.50|3\.00|AG-11|Gate-G1|private dollar/.test(finding)).join(',') || 'none',
-      forbiddenFindings.filter((finding) => /2\.50|3\.00|AG-11|Gate-G1|private dollar/.test(finding)).length === 0,
+      findingsInCategories(forbiddenFindings, ['cost_label']).join(',') || 'none',
+      findingsInCategories(forbiddenFindings, ['cost_label']).length === 0,
       true,
     ),
     check(
       'private_issue_number_scan',
       'public-going files do not expose private issue numbers',
-      forbiddenFindings.filter((finding) => finding.includes('private issue number')).join(',') || 'none',
-      forbiddenFindings.filter((finding) => finding.includes('private issue number')).length === 0,
+      findingsInCategories(forbiddenFindings, ['phase_code']).join(',') || 'none',
+      findingsInCategories(forbiddenFindings, ['phase_code']).length === 0,
       true,
     ),
     check(
       'private_gate_name_scan',
       'public-going files do not expose private gate names',
-      forbiddenFindings.filter((finding) => finding.includes('private gate name')).join(',') || 'none',
-      forbiddenFindings.filter((finding) => finding.includes('private gate name')).length === 0,
+      findingsInCategories(forbiddenFindings, ['id_code']).join(',') || 'none',
+      findingsInCategories(forbiddenFindings, ['id_code']).length === 0,
       true,
     ),
     check(
       'private_dollar_threshold_scan',
       'public-going files do not expose private dollar thresholds',
-      forbiddenFindings.filter((finding) => finding.includes('private dollar threshold')).join(',') || 'none',
-      forbiddenFindings.filter((finding) => finding.includes('private dollar threshold')).length === 0,
+      findingsInCategories(forbiddenFindings, ['cost_label']).join(',') || 'none',
+      findingsInCategories(forbiddenFindings, ['cost_label']).length === 0,
       true,
     ),
     check(
       'private_planning_terminology_scan',
       'public-going files do not expose private planning terminology',
-      forbiddenFindings.filter((finding) => finding.includes('private planning terminology')).join(',') || 'none',
-      forbiddenFindings.filter((finding) => finding.includes('private planning terminology')).length === 0,
+      findingsInCategories(forbiddenFindings, ['teammate_name']).join(',') || 'none',
+      findingsInCategories(forbiddenFindings, ['teammate_name']).length === 0,
       true,
     ),
     check(
@@ -329,11 +356,21 @@ function importStabilityActual(files: readonly { path: string; text: string }[])
   return badFiles.length === 0 ? 'no private path imports' : badFiles.join(',');
 }
 
+function findingsInCategories(
+  findings: readonly string[],
+  categories: readonly PromptEnhancementPublicLaunchForbiddenCategoryV1[],
+): readonly string[] {
+  // Findings are `path:category:match`; filter by the safe category label (never by a leaked literal).
+  return findings.filter((finding) => categories.some((category) => finding.includes(`:${category}:`)));
+}
+
 function findForbiddenPublicLaunchFindings(files: readonly { path: string; text: string }[]): readonly string[] {
+  const patterns = buildPromptEnhancementPublicLaunchForbiddenPatternsV1();
   const findings: string[] = [];
   for (const file of files) {
-    for (const pattern of PROMPT_ENHANCEMENT_PUBLIC_LAUNCH_FORBIDDEN_PATTERNS_V1) {
-      if (file.text.includes(pattern)) findings.push(`${file.path}:${pattern}`);
+    for (const { category, test } of patterns) {
+      const match = test.exec(file.text);
+      if (match) findings.push(`${file.path}:${category}:${match[0]}`);
     }
   }
   return findings;
