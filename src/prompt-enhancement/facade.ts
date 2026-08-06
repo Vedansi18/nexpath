@@ -232,6 +232,14 @@ function buildResult(
     generatedSafeStatus: safety.generatedSafeStatus,
   };
   const disposition = dispositionFor(noPopup, currentBody, safety);
+  // D2 4a (P6-G1 / PE-DR-5): on a hard block, make the engine payload self-safe AT SOURCE. A host
+  // reading result.currentBody.text / uiView.body.text DIRECTLY (before the typed UI layers scrub
+  // it) must not receive the offending generated content. Replace the body text with the user's
+  // own original prompt (the use_original fallback); the send policy already forbids transport, and
+  // the UI layers exclude it too — defense-in-depth (engine + every UI layer), not one terminal scrub.
+  const safeCurrentBody: PromptEnhancementCurrentBodyV1 = disposition === 'blocked_no_send'
+    ? { ...currentBody, text: currentBody.originalPromptText, renderedPromptBody: currentBody.originalPromptText }
+    : currentBody;
   const diagnostics = diagnosticsFor(enhancementId, [...composed.diagnostics, ...safety.publicDiagnostics]);
   const composerCallVisibility = composed.composerBoundary.inputContract.callVisibilityState;
   const callAndVisibilityMetadata = {
@@ -256,7 +264,7 @@ function buildResult(
         hasSensitiveAction: safety.sensitiveActionFindings.some((finding) => finding.requiresConfirmation),
       });
   const uiView: PromptEnhancementUiViewPayloadV1 = {
-    ...buildUiView(request, enhancementId, currentBody, composed, safety, trustCues, diagnostics, noPopup),
+    ...buildUiView(request, enhancementId, safeCurrentBody, composed, safety, trustCues, diagnostics, noPopup),
     ...(pinchLabel ? { pinchLabel } : {}),
     ...(whyHelp ? { whyHelp } : {}),
   };
@@ -269,7 +277,7 @@ function buildResult(
     modelVersion: composed.callVisibilityMode === 'llm_wording' ? 'pe-ar10-llm-wording-v1' : 'pe-ar10-deterministic-v1',
     disposition,
     validationDecisionId: safety.validationDecisionId,
-    currentBody,
+    currentBody: safeCurrentBody,
     availableActions: composed.availableActions,
     sourceGuidanceCoverage: noPopup ? 'not_applicable' : composed.sourceGuidanceCoverage,
     routingAndFeedbackDecision: {
