@@ -29,7 +29,7 @@ vi.mock('./llm-composer.js', () => ({
   }),
 }));
 
-const { preparePromptEnhancement } = await import('./facade.js');
+const { preparePromptEnhancement, applyPromptEnhancementAction } = await import('./facade.js');
 const { composeStructuredComposerOutputV1 } = await import('./llm-composer.js');
 
 function request(): PromptEnhancementPrepareRequestV1 {
@@ -89,6 +89,32 @@ describe('E4 — facade LLM composer wiring', () => {
     expect(composeStructuredComposerOutputV1).not.toHaveBeenCalled();
     expect(result.callAndVisibilityMetadata.callVisibilityMode).not.toBe('llm_wording');
     expect(result.modelVersion).toBe('pe-ar10-deterministic-v1');
+  });
+
+  it('E8: a directional action (shorter) LLM-recomposes, passing the action to the composer', async () => {
+    process.env['OPENAI_API_KEY'] = `sk-${'x'.repeat(40)}`;
+    const base = await preparePromptEnhancement(request());
+    const shorter = base.availableActions.find((entry) => entry.actionType === 'shorter');
+    expect(shorter).toBeDefined();
+    vi.clearAllMocks(); // ignore the composer call from the base prepare
+
+    const actionRequest = {
+      ...request(),
+      action: shorter!,
+      currentBodyBinding: {
+        currentBodyId: base.currentBody.currentBodyId,
+        bodyRevision: base.currentBody.bodyRevision,
+        validationDecisionId: base.validationDecisionId,
+        editedBodyText: base.currentBody.text,
+        actionSubmittedAtMs: 2,
+        realUserInitiated: true,
+        sectionSpanEditEvents: [],
+      },
+    } as unknown as Parameters<typeof applyPromptEnhancementAction>[0];
+
+    const result = await applyPromptEnhancementAction(actionRequest);
+    expect(composeStructuredComposerOutputV1).toHaveBeenCalledWith(expect.objectContaining({ action: 'shorter' }));
+    expect(result.callAndVisibilityMetadata.callVisibilityMode).toBe('llm_wording');
   });
 
   it('safety still runs on the composed body regardless of the LLM path (validation summary present)', async () => {

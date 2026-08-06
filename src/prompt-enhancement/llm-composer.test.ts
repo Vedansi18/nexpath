@@ -71,6 +71,29 @@ describe('composeStructuredComposerOutputV1 (E4 / 4.1)', () => {
     expect(await composeStructuredComposerOutputV1(input, client(reply))).toBeUndefined();
   });
 
+  it('E8: includes the directional action wording directive in the prompt', async () => {
+    const reply = JSON.stringify({ detectedLanguageSelfReport: 'en', sectionDrafts: [{ sectionId: 'sec-verify', bodyText: 'Verify it.', sourceFactIds: ['fact-a'] }], composerClaims: ['claim:fact-a'] });
+    let sentUser = '';
+    const capturing: PromptEnhancementComposerClientV1 = {
+      chat: { completions: { create: async (body) => { sentUser = body.messages.find((m) => m.role === 'user')?.content ?? ''; return { choices: [{ message: { content: reply } }] }; } } },
+    };
+    await composeStructuredComposerOutputV1({ ...input, action: 'shorter' }, capturing);
+    expect(sentUser).toContain('SHORTER');
+    await composeStructuredComposerOutputV1({ ...input, action: 'more_thorough' }, capturing);
+    expect(sentUser).toContain('MORE THOROUGH');
+  });
+
+  it('E8: apply_details embeds the additional details in the directive', async () => {
+    const reply = JSON.stringify({ detectedLanguageSelfReport: 'en', sectionDrafts: [{ sectionId: 'sec-verify', bodyText: 'Verify it.', sourceFactIds: ['fact-a'] }], composerClaims: ['claim:fact-a'] });
+    let sentUser = '';
+    const capturing: PromptEnhancementComposerClientV1 = {
+      chat: { completions: { create: async (body) => { sentUser = body.messages.find((m) => m.role === 'user')?.content ?? ''; return { choices: [{ message: { content: reply } }] }; } } },
+    };
+    await composeStructuredComposerOutputV1({ ...input, action: 'apply_details', additionalDetailsText: 'use postgres, not mysql' }, capturing);
+    expect(sentUser).toContain('APPLY DETAILS');
+    expect(sentUser).toContain('use postgres, not mysql');
+  });
+
   it('returns undefined on a provider error (deterministic fallback)', async () => {
     expect(await composeStructuredComposerOutputV1(input, client(null, { throws: true }))).toBeUndefined();
   });

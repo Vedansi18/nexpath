@@ -168,17 +168,26 @@ async function prepare(
   // compose (no action). Gated on a valid key so the whole test suite (no key) and
   // any obvious/clear prompt render deterministically. Any failure -> undefined ->
   // composePromptEnhancementBody validates + falls back deterministically.
+  // E8: a directional action (Shorter / More-thorough / More-project-grounded /
+  // Apply-details) always LLM-recomposes when a key is present (PE-G4 required LLM
+  // path — the user explicitly requested the recompose). The baseline compose fires
+  // the LLM only when NL-heavy (E4). Deterministic fallback preserved either way.
+  const isDirectionalAction =
+    action === 'shorter' || action === 'more_thorough' || action === 'more_project_grounded' || action === 'apply_details';
+  const wantsLlmWording = isDirectionalAction || (action === undefined && isPromptEnhancementNlpHeavyCaseV1(route));
   let structuredComposerOutput: PromptEnhancementStructuredComposerOutputV1 | undefined;
   if (
-    action === undefined &&
+    wantsLlmWording &&
     !noPopup &&
-    isPromptEnhancementNlpHeavyCaseV1(route) &&
     isValidApiKey(process.env['OPENAI_API_KEY'] ?? '')
   ) {
     structuredComposerOutput = await composeStructuredComposerOutputV1({
       enhancementId,
       originalPromptText: request.sourcePrompt.text,
       planning,
+      action: isDirectionalAction ? action : undefined,
+      additionalDetailsText:
+        action === 'apply_details' ? actionRequest?.userPreferenceContext.additionalDetails?.text : undefined,
     });
   }
 

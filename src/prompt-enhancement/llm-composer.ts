@@ -45,10 +45,40 @@ export interface PromptEnhancementComposerClientV1 {
   };
 }
 
+export type PromptEnhancementComposerDirectionalActionV1 =
+  | 'shorter'
+  | 'more_thorough'
+  | 'more_project_grounded'
+  | 'apply_details';
+
 export interface PromptEnhancementComposerLlmInputV1 {
   enhancementId: string;
   originalPromptText: string;
   planning: PromptEnhancementSectionPlanningResult;
+  // E8: when set, word the recomposition in this directional action's style; the
+  // section set / canonical state is chosen by composePromptEnhancementBody.
+  action?: PromptEnhancementComposerDirectionalActionV1;
+  additionalDetailsText?: string;
+}
+
+// E8: per-action wording directive (the section selection + canonical-state transitions
+// stay in composePromptEnhancementBody / adjustment-state; this only shapes wording).
+function actionWordingDirective(
+  action: PromptEnhancementComposerDirectionalActionV1 | undefined,
+  additionalDetailsText: string | undefined,
+): string {
+  switch (action) {
+    case 'shorter':
+      return "\n\nRecomposition style — SHORTER: make each section as concise as possible while keeping every required point, safety/confirmation, and source-signal guidance. Cut filler, never substance.";
+    case 'more_thorough':
+      return '\n\nRecomposition style — MORE THOROUGH: add depth and completeness (specific steps, edge cases, verification) without inventing scope or adding alternative variants.';
+    case 'more_project_grounded':
+      return '\n\nRecomposition style — MORE PROJECT-GROUNDED: ground each section in the available project facts and source references provided; do not invent project details.';
+    case 'apply_details':
+      return `\n\nRecomposition style — APPLY DETAILS: incorporate these additional user details into the relevant sections and recompose the whole prompt to reflect them:\n${additionalDetailsText ?? ''}`;
+    default:
+      return '';
+  }
 }
 
 const SYSTEM_PROMPT = [
@@ -145,7 +175,7 @@ export async function composeStructuredComposerOutputV1(
     return undefined;
   }
 
-  const userPrompt = buildUserPrompt(input.originalPromptText, sections);
+  const userPrompt = buildUserPrompt(input.originalPromptText, sections) + actionWordingDirective(input.action, input.additionalDetailsText);
   // Malformed / empty / language-inconsistent replies retry up to the locked count
   // (§33348: retry up to 3 times). A thrown error (provider unavailable / timeout) is
   // NOT retried — fast deterministic fallback rather than repeated slow waits. On a
