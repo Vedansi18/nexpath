@@ -1,5 +1,6 @@
 import type { ChatHistoryEvent } from './chat-history-types.js';
 import type { StopSelection } from './ipc.js';
+import { toSafeErrorRecord } from './diagnostics.js';
 
 /**
  * Chat pipeline orchestrator (M13 of M2 Branch 5).
@@ -83,8 +84,12 @@ export interface ChatPipelineDeps {
   logger?: { error: (msg: string, err: unknown) => void };
 }
 
+// Redacts before logging: this pipeline catches spawnAuto/spawnStop failures,
+// whose errors can carry the delivered body or the user's prompt in a `cause`
+// chain or an attached property. extension.ts injects its own logger, but the
+// default must be safe on its own.
 const defaultLogger = {
-  error: (msg: string, err: unknown) => console.error(msg, err),
+  error: (msg: string, err: unknown) => console.error(msg, toSafeErrorRecord(err)),
 };
 
 /**

@@ -7,6 +7,7 @@ import {
   resolveSpawnEnv,
   NexpathBinaryNotFoundError,
   NexpathMalformedPayloadError,
+  describeMalformedPayload,
 } from './ipc.js';
 
 interface FakeChildOptions {
@@ -173,6 +174,86 @@ describe('spawnStop', () => {
     await expect(
       spawnStop('s', { spawnFn: spawnFn as never }),
     ).rejects.toBeInstanceOf(NexpathMalformedPayloadError);
+  });
+
+  // BUG-VEDANSI-AR9-G1 vector 2 (`transport_channel_violation`). The stop
+  // stdout is `{decision:'block', reason:<body>}` — on the PE path that reason
+  // IS the generated body. A malformed payload must therefore never surface the
+  // content, only the shape of the failure.
+  it('never surfaces payload content when the stop output is malformed', async () => {
+    const BODY = 'SENSITIVE_PE_BODY_MARKER';
+    const spawnFn = vi.fn(() =>
+      makeFakeChild({
+        stdoutChunks: [`{"decision":"block","reason":"${BODY}" TRUNCATED`],
+        exitCode: 0,
+      }),
+    );
+
+    const err = await spawnStop('s', { spawnFn: spawnFn as never }).catch(
+      (e: unknown) => e,
+    );
+
+    expect(err).toBeInstanceOf(NexpathMalformedPayloadError);
+    const malformed = err as InstanceType<typeof NexpathMalformedPayloadError>;
+
+    // Not in the message, not on the object, not in anything serialized from it.
+    expect(malformed.message).not.toContain(BODY);
+    expect(malformed).not.toHaveProperty('rawStdout');
+    expect(malformed.cause).toBeUndefined();
+    expect(JSON.stringify(malformed.shape)).not.toContain(BODY);
+    expect(`${malformed.message}${JSON.stringify(malformed.shape)}`).not.toContain('decision');
+  });
+
+  it('records a redacted failure shape for a malformed payload', () => {
+    const raw = '{"decision":"block","reason":"x" TRUNCATED';
+    let parseError: unknown;
+    try { JSON.parse(raw); } catch (e) { parseError = e; }
+
+    const shape = describeMalformedPayload(raw, parseError);
+
+    expect(shape.byteLength).toBe(Buffer.byteLength(raw, 'utf8'));
+    expect(['unexpected_token', 'unexpected_end', 'unknown']).toContain(shape.parseErrorKind);
+    if (shape.byteOffset !== undefined) expect(Number.isInteger(shape.byteOffset)).toBe(true);
+  });
+
+  // V8 distinguishes these two: cut mid-value gives "Unexpected end of JSON
+  // input"; cut after a complete value gives "Expected ',' or '}' …".
+  it('classifies a payload cut mid-value as an unexpected end', () => {
+    const raw = '{"decision":"block","reason":';
+    let parseError: unknown;
+    try { JSON.parse(raw); } catch (e) { parseError = e; }
+
+    expect(describeMalformedPayload(raw, parseError).parseErrorKind).toBe('unexpected_end');
+  });
+
+  it('classifies a payload cut after a complete value as an unexpected token', () => {
+    const raw = '{"decision":"block"';
+    let parseError: unknown;
+    try { JSON.parse(raw); } catch (e) { parseError = e; }
+
+    expect(describeMalformedPayload(raw, parseError).parseErrorKind).toBe('unexpected_token');
+  });
+
+  // The SyntaxError message itself quotes a leading excerpt of the input
+  // (`Unexpected token 'P', "PE_LEAK no"... is not valid JSON`) — V8 caps it at
+  // 10 characters, but 10 characters of a delivered body is still a leak. That
+  // is exactly why the parser error is classified and discarded, never stored.
+  it('does not carry the parser message, which itself quotes the payload', () => {
+    const raw = 'PE_LEAK not json {{';
+    let parseError: unknown;
+    try { JSON.parse(raw); } catch (e) { parseError = e; }
+
+    // Prove the premise: the raw parser message really does contain payload.
+    expect((parseError as Error).message).toContain('PE_LEAK');
+
+    const shape = describeMalformedPayload(raw, parseError);
+    expect(JSON.stringify(shape)).not.toContain('PE_LEAK');
+    expect(new NexpathMalformedPayloadError(shape).message).not.toContain('PE_LEAK');
+  });
+
+  it('counts bytes, not characters, for a multi-byte payload', () => {
+    const raw = '语言模型';
+    expect(describeMalformedPayload(raw, new Error('x')).byteLength).toBe(12);
   });
 
   it('rejects when nexpath stop exits non-zero AND nothing can be recovered', async () => {

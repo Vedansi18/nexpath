@@ -288,7 +288,14 @@ describe('activate', () => {
     mockShowOnboarding.mockRejectedValueOnce(new Error('onboarding boom'));
     mockDetectHost.mockReturnValueOnce('cursor');
     await expect(activate(makeCtx(true) as never)).resolves.toBeUndefined();
+    // BUG-VEDANSI-AR9-G1 vector 4: the raw Error is no longer passed to
+    // console.error — a closed, serializable record is, so no stack or nested
+    // `cause` payload can reach the dev console or the log file.
     expect(errorSpy).toHaveBeenCalledWith(
+      '[nexpath] onboarding failed:',
+      expect.objectContaining({ name: 'Error', message: 'onboarding boom' }),
+    );
+    expect(errorSpy).not.toHaveBeenCalledWith(
       '[nexpath] onboarding failed:',
       expect.any(Error),
     );
@@ -490,9 +497,14 @@ describe('activate', () => {
 
   it('watcher onError logs to console.error (does not crash the extension)', async () => {
     const opts = await activateWithWatcher();
+    // BUG-VEDANSI-AR9-G1 vector 4: a redacted record replaces the raw Error.
     const watcherErr = new Error('watch boom');
     expect(() => opts.onError(watcherErr)).not.toThrow();
-    expect(errorSpy).toHaveBeenCalledWith('[nexpath] watcher error:', watcherErr);
+    expect(errorSpy).toHaveBeenCalledWith(
+      '[nexpath] watcher error:',
+      expect.objectContaining({ name: 'Error', message: 'watch boom' }),
+    );
+    expect(errorSpy).not.toHaveBeenCalledWith('[nexpath] watcher error:', watcherErr);
   });
 
   // ── Pipeline logger wiring (B1.4 follow-up — spawn errors in Output) ──────
@@ -523,10 +535,17 @@ describe('activate', () => {
       code: 'ENOENT',
     });
     handlerDeps.logger!.error('[nexpath] spawnAuto failed:', enoent);
+    // BUG-VEDANSI-AR9-G1 vector 4: redacted record, not the raw Error. The
+    // errno code is kept — it is a fixed vocabulary and carries no payload.
     expect(errorSpy).toHaveBeenCalledWith(
       '[nexpath] spawnAuto failed:',
-      enoent,
+      expect.objectContaining({
+        name: 'Error',
+        message: 'spawn nexpath ENOENT',
+        code: 'ENOENT',
+      }),
     );
+    expect(errorSpy).not.toHaveBeenCalledWith('[nexpath] spawnAuto failed:', enoent);
     expect(logSpy).toHaveBeenCalledWith(
       expect.stringContaining('spawn nexpath ENOENT'),
     );

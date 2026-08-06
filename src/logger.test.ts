@@ -114,6 +114,62 @@ describe('logger', () => {
     expect(() => logger.debug('d')).not.toThrow();
   });
 
+  it('never throws on a circular payload, and still writes the event line', async () => {
+    const { initLogger, log, LOG_PATH } = await import('./logger.js');
+    let written = '';
+    vi.spyOn(await import('node:fs'), 'appendFileSync').mockImplementation((_p, data) => {
+      if (_p === LOG_PATH) written += String(data);
+    });
+    vi.spyOn(await import('node:fs'), 'existsSync').mockReturnValue(false);
+    vi.spyOn(await import('node:fs'), 'mkdirSync').mockImplementation(() => undefined as never);
+
+    const circular: Record<string, unknown> = { kind: 'transport' };
+    circular.self = circular;
+
+    initLogger('auto', 'info');
+    expect(() => log('error', 'delivery_failed', circular)).not.toThrow();
+
+    expect(written).toContain('delivery_failed');
+    expect(written).toContain('diagnostic_serialization_failed');
+  });
+
+  it('never throws when a payload getter throws, and still writes the event line', async () => {
+    const { initLogger, log, LOG_PATH } = await import('./logger.js');
+    let written = '';
+    vi.spyOn(await import('node:fs'), 'appendFileSync').mockImplementation((_p, data) => {
+      if (_p === LOG_PATH) written += String(data);
+    });
+    vi.spyOn(await import('node:fs'), 'existsSync').mockReturnValue(false);
+    vi.spyOn(await import('node:fs'), 'mkdirSync').mockImplementation(() => undefined as never);
+
+    const hostile = {
+      get payload(): string { throw new Error('cannot read payload'); },
+    } as unknown as Record<string, unknown>;
+
+    initLogger('auto', 'info');
+    expect(() => log('error', 'diagnostic_write', hostile)).not.toThrow();
+
+    expect(written).toContain('diagnostic_write');
+    expect(written).toContain('diagnostic_serialization_failed');
+  });
+
+  it('serializable payloads are unaffected by the failure guard', async () => {
+    const { initLogger, log, LOG_PATH } = await import('./logger.js');
+    let written = '';
+    vi.spyOn(await import('node:fs'), 'appendFileSync').mockImplementation((_p, data) => {
+      if (_p === LOG_PATH) written += String(data);
+    });
+    vi.spyOn(await import('node:fs'), 'existsSync').mockReturnValue(false);
+    vi.spyOn(await import('node:fs'), 'mkdirSync').mockImplementation(() => undefined as never);
+
+    initLogger('auto', 'info');
+    log('info', 'pipeline_done', { outcome: 'no_action', count: 3 });
+
+    expect(written).toContain('"outcome":"no_action"');
+    expect(written).toContain('"count":3');
+    expect(written).not.toContain('diagnostic_serialization_failed');
+  });
+
   it('LOG_PATH is exported as a string containing nexpath.log', async () => {
     const { LOG_PATH } = await import('./logger.js');
     expect(typeof LOG_PATH).toBe('string');
