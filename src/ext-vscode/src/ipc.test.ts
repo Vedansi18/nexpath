@@ -251,9 +251,14 @@ describe('spawnStop', () => {
     expect(new NexpathMalformedPayloadError(shape).message).not.toContain('PE_LEAK');
   });
 
-  it('counts bytes, not characters, for a multi-byte payload', () => {
-    const raw = '语言模型';
-    expect(describeMalformedPayload(raw, new Error('x')).byteLength).toBe(12);
+  // byteLength is the transport's size, so it must come from
+  // Buffer.byteLength(raw,'utf8') and not raw.length — a prompt body with an
+  // emoji or an accented character makes those two disagree, and a wrong size
+  // would misreport how much of the payload arrived before it was cut.
+  it('reports the payload size in bytes, not characters', () => {
+    const raw = '{"reason":"café"';           // 16 chars, 17 bytes — é is 2 bytes
+    expect(raw.length).toBe(16);
+    expect(describeMalformedPayload(raw, new Error('x')).byteLength).toBe(17);
   });
 
   it('rejects when nexpath stop exits non-zero AND nothing can be recovered', async () => {
