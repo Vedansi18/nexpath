@@ -1523,8 +1523,14 @@ function selectPrimaryIntent(normalized: string): PromptEnhancementPrimaryIntent
   // "add audit logging", "here's the plan: build X"). Gate the broad review/audit/plan
   // catch-alls behind "no build intent"; the specific multi-word review/planning
   // keywords below stay first.
-  const hasBuildVerb = hasAny(normalized, ['implement', 'build', 'add', 'create', 'develop']);
-  const hasStrongBuildVerb = hasAny(normalized, ['implement', 'build', 'create', 'develop']);
+  // 'build' is ambiguous — a NOUN in "the build process" / "a build system" but a VERB
+  // in "build a payment module". Count it as a build intent only when it is NOT an
+  // article-led noun phrase, so "review the build process" stays a review while
+  // "here's the plan: build X" is a feature. implement/create/develop/add are verbs.
+  const buildIsNounPhrase = /\b(?:the|a|this|our|nightly|ci|prod|staging|last|next)\s+build\b/.test(normalized);
+  const hasBuildAsVerb = normalized.includes('build') && !buildIsNounPhrase;
+  const hasBuildVerb = hasBuildAsVerb || hasAny(normalized, ['implement', 'add', 'create', 'develop']);
+  const hasStrongBuildVerb = hasBuildAsVerb || hasAny(normalized, ['implement', 'create', 'develop']);
   const buildsANamedArtifact = hasStrongBuildVerb && hasAny(normalized, ['tool', 'system', 'feature', 'app', 'service', 'dashboard', 'ui', 'module', 'component']);
 
   if (hasAny(normalized, ['security review', 'threat'])) return 'review.security_review';

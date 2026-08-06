@@ -369,6 +369,8 @@ describe('prompt-enhancement routing and taxonomy', () => {
       expect(routePromptEnhancement(routeInput({ promptText: 'review this code for bugs' })).primaryIntent).toBe('review.code_or_diff_review');
       expect(routePromptEnhancement(routeInput({ promptText: 'verify the payment fix' })).primaryIntent).toBe('review.verification_request');
       expect(routePromptEnhancement(routeInput({ promptText: 'write a spec for the new api' })).primaryIntent).toBe('planning.spec_or_prd');
+      // 'build' as a NOUN ("the build process") must not be mistaken for a build intent.
+      expect(routePromptEnhancement(routeInput({ promptText: 'review the build process for issues' })).primaryIntent).toBe('review.verification_request');
     });
   });
 
