@@ -448,7 +448,7 @@ describe('prompt-enhancement composer and deterministic fallback', () => {
         sectionDrafts: [
           {
             sectionId: sourceGuidanceSection?.sectionId ?? 'missing',
-            bodyText: 'You forgot PE-AR-1 source-review coverage in this action below.',
+            bodyText: 'You forgot transform-rule-1 source-review coverage in this action below.',
             sourceFactIds: [llmSourceFactId],
           },
         ],
@@ -458,7 +458,7 @@ describe('prompt-enhancement composer and deterministic fallback', () => {
 
     expect(result.currentBody.composerMode).toBe('baseline_deterministic_render');
     expect(result.fallbackMode).toBe('deterministic_body');
-    expect(result.currentBody.text).not.toContain('PE-AR-1');
+    expect(result.currentBody.text).not.toContain('transform-rule-1');
     expect(result.currentBody.text).not.toContain('source-review');
     expect(result.currentBody.text).not.toContain('You forgot');
     expect(result.currentBody.text).not.toContain('this action below');

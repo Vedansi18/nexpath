@@ -35,7 +35,7 @@ describe('buildPromptEnhancementCostObservabilityV1 (E9 / P12-G1+G2)', () => {
     expect(obs.measurement.status).toBe('planned');
   });
 
-  it('PE-G4: the weakening check runs and reports NO cost-based weakening (clean sentinel only)', () => {
+  it('gate-rule-4: the weakening check runs and reports NO cost-based weakening (clean sentinel only)', () => {
     const obs = buildPromptEnhancementCostObservabilityV1(resultWith('llm_wording', 1, 1));
     expect(obs.costWeakeningDetected).toBe(false);
     expect(obs.weakeningReasonCodes).toEqual(['cost_visibility_is_not_runtime_limiter']);
@@ -58,7 +58,7 @@ describe('emitPromptEnhancementCostObservabilityV1 (E9 — surface emission)', (
     expect(sink.debug).toHaveBeenCalledWith('prompt_enhancement_cost_measurement', expect.objectContaining({
       surface: 'popup_action', usedCallCount: 1, rawFieldsExcluded: true,
     }));
-    expect(sink.warn).not.toHaveBeenCalled(); // PE-G4: clean -> no weakening warning
+    expect(sink.warn).not.toHaveBeenCalled(); // gate-rule-4: clean -> no weakening warning
     expect(obs?.costWeakeningDetected).toBe(false);
   });
 

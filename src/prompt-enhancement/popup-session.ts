@@ -403,7 +403,7 @@ const DIRECTIONAL_ROW_ACTIONS = new Set<PromptEnhancementActionType>([
 ]);
 
 /**
- * D2 (P7-G1 / PE-DR-5): a `no_send` (blocked) or `no_popup` body must never carry the offending
+ * D2 (P7-G1 / decision-rule-5): a `no_send` (blocked) or `no_popup` body must never carry the offending
  * generated text through the typed UI chain. Every UI layer self-scrubs on this predicate — the
  * body is excluded (empty), not relied on the terminal `ui-safety` scrub alone (defense-in-depth).
  */

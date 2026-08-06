@@ -5,7 +5,7 @@ import type {
 } from './templates/section-plan.js';
 
 /**
- * PE-AR-6 memory consumption scorer (E2 / phase 2.4).
+ * transform-rule-6 memory consumption scorer (E2 / phase 2.4).
  *
  * The query (`queryRelevantPromptEnhancementMemory`, wired in auto.ts / E1) returns
  * memory rows filtered only by status. This is the shared scoring seam the fix-plan

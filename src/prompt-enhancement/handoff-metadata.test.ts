@@ -196,7 +196,7 @@ describe('Phase 10 multi-prompt handoff metadata', () => {
     });
   });
 
-  it('carries PE-AR-11.2 addendum applicability states without runtime authority', () => {
+  it('carries transform-rule-11.2 addendum applicability states without runtime authority', () => {
     const result = metadata();
 
     expect(result.applicability).toMatchObject({
@@ -286,7 +286,7 @@ describe('Phase 10 multi-prompt handoff metadata', () => {
     expect(result.reasonCodes).toContain('handoff_scope_unsafe');
   });
 
-  it('rejects applicability metadata that drops PE-AR-11.2 target and ordering state', () => {
+  it('rejects applicability metadata that drops transform-rule-11.2 target and ordering state', () => {
     const result = validatePromptEnhancementHandoffMetadataV1({
       ...metadata(),
       applicability: {
@@ -300,7 +300,7 @@ describe('Phase 10 multi-prompt handoff metadata', () => {
     expect(result.reasonCodes).toContain('applicability_state_mismatch');
   });
 
-  it('rejects applicability metadata that drops PE-AR-11.2 addendum states', () => {
+  it('rejects applicability metadata that drops transform-rule-11.2 addendum states', () => {
     const result = validatePromptEnhancementHandoffMetadataV1({
       ...metadata(),
       applicability: {

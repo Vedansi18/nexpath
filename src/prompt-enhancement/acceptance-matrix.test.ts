@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildPromptEnhancementAcceptancePacketV1,
   PROMPT_ENHANCEMENT_ACCEPTANCE_REQUIRED_FAMILIES_V1,
-  PROMPT_ENHANCEMENT_PE_AR1_NAMED_SPLIT_GATES_V1,
+  PROMPT_ENHANCEMENT_TRANSFORM_SPLIT_GATES_V1,
   PROMPT_ENHANCEMENT_PE_WR3_REQUIRED_EVALUATION_ROW_IDS_V1,
   validatePromptEnhancementAcceptancePacketV1,
   type PromptEnhancementAcceptancePacketV1,
@@ -16,7 +16,7 @@ import {
 import { PROMPT_ENHANCEMENT_CANONICAL_CONFIRMATION } from './safety-sendability.js';
 import { SOURCE_REALITY_SOURCE_BASIS } from './source-reality.js';
 
-describe('Phase 13 PE-EM-3 test and acceptance matrix', () => {
+describe('Phase 13 eval-rule-3 test and acceptance matrix', () => {
   it('defines the required PE-specific fixture packet without allowing a readiness claim', () => {
     const packet = buildPromptEnhancementAcceptancePacketV1();
     const validation = validatePromptEnhancementAcceptancePacketV1(packet);
@@ -190,12 +190,12 @@ describe('Phase 13 PE-EM-3 test and acceptance matrix', () => {
     ]));
   });
 
-  it('keeps PE-AR-1 named split gates explicit instead of collapsing them into broad coverage', () => {
+  it('keeps transform-rule-1 named split gates explicit instead of collapsing them into broad coverage', () => {
     const packet = buildPromptEnhancementAcceptancePacketV1();
     const gates = new Set(packet.peAr1NamedGateEvidence.map((gate) => gate.gateId));
 
-    expect(packet.peAr1NamedGateEvidence).toHaveLength(PROMPT_ENHANCEMENT_PE_AR1_NAMED_SPLIT_GATES_V1.length);
-    for (const gateId of PROMPT_ENHANCEMENT_PE_AR1_NAMED_SPLIT_GATES_V1) {
+    expect(packet.peAr1NamedGateEvidence).toHaveLength(PROMPT_ENHANCEMENT_TRANSFORM_SPLIT_GATES_V1.length);
+    for (const gateId of PROMPT_ENHANCEMENT_TRANSFORM_SPLIT_GATES_V1) {
       expect(gates.has(gateId), gateId).toBe(true);
     }
     expect(gates.has('source-normalization')).toBe(true);
@@ -231,7 +231,7 @@ describe('Phase 13 PE-EM-3 test and acceptance matrix', () => {
     expect(byFamily.get('cost_fallback')?.hardFailFocus).toContain('cost_based_quality_downgrade');
   });
 
-  it('makes every PE-WR-3 debug and maintenance evaluation row explicit and directly derivable', () => {
+  it('makes every work-rule-3 debug and maintenance evaluation row explicit and directly derivable', () => {
     const packet = buildPromptEnhancementAcceptancePacketV1();
     const byRequirement = new Map(packet.peWr3EvaluationRows.map((row) => [row.requirementId, row]));
     const debugRow = byRequirement.get('every_locked_debug_category_route_and_skeleton');
@@ -257,7 +257,7 @@ describe('Phase 13 PE-EM-3 test and acceptance matrix', () => {
     }
   });
 
-  it('validates PE-WR-3 ambiguity, source grounding, missing evidence, verification, rollback, safety, edit feedback, and mapping rows', () => {
+  it('validates work-rule-3 ambiguity, source grounding, missing evidence, verification, rollback, safety, edit feedback, and mapping rows', () => {
     const packet = buildPromptEnhancementAcceptancePacketV1();
     const byRequirement = new Map(packet.peWr3EvaluationRows.map((row) => [row.requirementId, row]));
 
@@ -325,7 +325,7 @@ describe('Phase 13 PE-EM-3 test and acceptance matrix', () => {
     ]));
   });
 
-  it('rejects missing PE-WR-3 rows or missing locked debug and maintenance category fixtures', () => {
+  it('rejects missing work-rule-3 rows or missing locked debug and maintenance category fixtures', () => {
     const packet = structuredClone(buildPromptEnhancementAcceptancePacketV1()) as PromptEnhancementAcceptancePacketV1;
     const debugRow = packet.peWr3EvaluationRows.find((row) => row.requirementId === 'every_locked_debug_category_route_and_skeleton');
     packet.peWr3EvaluationRows = packet.peWr3EvaluationRows.filter((row) => row.requirementId !== 'mapping_directly_derivable_for_development');

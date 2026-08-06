@@ -1,7 +1,7 @@
 import type { PromptEnhancementGuidanceFact } from './templates/section-plan.js';
 
 /**
- * PE-AR-2 subresearch-2 cross-lane conflict resolution (E2 / phase 2.4b).
+ * transform-rule-2 subresearch-2 cross-lane conflict resolution (E2 / phase 2.4b).
  *
  * Locked rule (analysis L5592-5594): "RIGHT/GOOD facts can be amplified only while
  * still current enough and not contradicted by active absence/mistake evidence.

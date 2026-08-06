@@ -14,7 +14,7 @@ import {
 } from './acceptance-matrix.js';
 
 /**
- * R1 — PE-EM-3 acceptance-matrix execution harness (ui-owner release-check role).
+ * R1 — eval-rule-3 acceptance-matrix execution harness (ui-owner release-check role).
  *
  * The matrix (`acceptance-matrix.ts`, content-owner-content) is SHAPE-ONLY by design and STRUCTURALLY
  * refuses to claim readiness (`readinessClaimAllowed: false` literal; the validator enforces it).
@@ -44,7 +44,7 @@ function request(text: string): PromptEnhancementPrepareRequestV1 {
   };
 }
 
-describe('R1 — PE-EM-3 acceptance-matrix execution (ui-owner release-check)', () => {
+describe('R1 — eval-rule-3 acceptance-matrix execution (ui-owner release-check)', () => {
   it('HARD-FAIL GATE: a real debug prompt yields a grounded, source-covered body — NOT the canned skeleton', async () => {
     // The regression BUG-PE-ENGINE-NO-LLM shipped: this exact class of prompt returned a generic
     // skeleton. Post E1-E9 the wired engine must ground it (multi-section, covered).

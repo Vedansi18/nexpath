@@ -401,7 +401,7 @@ export interface PromptEnhancementRouteDecisionV1 {
   capabilityOverlays: readonly string[];
   // P3-G2: 'multi_intent_needs_handoff' removed — compoundPromptStateFor never emits
   // it and route-level handoff candidacy is sourced from the handoff-metadata producer
-  // (PE-AR-8), not the router.
+  // (transform-rule-8), not the router.
   compoundPromptState:
     | 'single_intent'
     | 'multi_point_same_intent'
@@ -845,7 +845,7 @@ export interface PromptEnhancementUiActionInputContractV1 {
 }
 
 /**
- * UI-9 / PE-AR-10 — deterministic header copy. Both are payload-supplied and
+ * UI-9 / transform-rule-10 — deterministic header copy. Both are payload-supplied and
  * public-safe; the UI never invents them. Pinch is a short funny/light label
  * (§8.6, owner decision); why-help is present ONLY when a safety/risk/override
  * reason exists and names that source-backed reason.

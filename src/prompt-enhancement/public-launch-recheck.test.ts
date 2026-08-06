@@ -54,7 +54,7 @@ describe('Phase 14 public launch recheck', () => {
   it('allows public promotion only when every G8 launch recheck row is explicitly satisfied', () => {
     const packet = buildPromptEnhancementPublicLaunchRecheckPacketV1(launchFacts());
 
-    expect(packet.gateId).toBe('G8-PE-CR-5-public-launch');
+    expect(packet.gateId).toBe('G8-confidentiality-rule-5-public-launch');
     expect(packet.owner).toBe('coordinating_release_check');
     expect(packet.status).toBe('ready_for_owner_launch_review');
     expect(packet.publicPromotionAllowed).toBe(true);

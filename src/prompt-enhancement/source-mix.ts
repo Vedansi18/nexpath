@@ -5,10 +5,10 @@ import type {
 } from './templates/section-plan.js';
 
 /**
- * PE-AR-2 split 1 — dual-lane source mixer (E2 / phase 2.2).
+ * transform-rule-2 split 1 — dual-lane source mixer (E2 / phase 2.2).
  *
  * Takes the ranked guidance facts from {@link buildPromptEnhancementGuidanceFactsV1}
- * (phase 2.1) and applies the locked PE-AR-2 source-mixing model deterministically
+ * (phase 2.1) and applies the locked transform-rule-2 source-mixing model deterministically
  * before any composer wording:
  *
  *  - Source A (missing-practice / required-survivor lane): stage/absence, memory,
@@ -16,7 +16,7 @@ import type {
  *  - Source B (grounding lane): hard facts, RIGHT/GOOD, work-style. Selected only
  *    after the Source A survivor is known; it grounds, it never chooses the objective.
  *
- * Caps (split-1 defaults, PE-AR-2): requiredSourceAFacts = 1; supportingSourceAFacts
+ * Caps (split-1 defaults, transform-rule-2): requiredSourceAFacts = 1; supportingSourceAFacts
  * 0-1 (up to 2 for More thorough / high-risk); sourceBFacts 0-2 (up to 3 for More
  * project-grounded / More thorough); total rendered <= 5. Facts over cap become
  * `deferred_to_handoff` / `selected_source_label_only` / `suppressed_by_payload_cap`
@@ -253,7 +253,7 @@ function determineProfile(input: {
 }): PromptEnhancementSourceMixProfile {
   if (isSourceCritical(input.requiredSurvivor)) return 'source_a_heavy_high_risk';
   if (input.overCap) return 'over_token_or_source_cap_compressed';
-  // "No useful Source B fact" is the source_a_only hallmark (PE-AR-2), regardless of
+  // "No useful Source B fact" is the source_a_only hallmark (transform-rule-2), regardless of
   // how many supporting Source A facts were selected.
   if (input.sourceBSelected === 0) return 'source_a_only';
   if (input.sourceBSelected === 1 && input.supportingSourceASelected === 0) return 'source_a_with_light_grounding';

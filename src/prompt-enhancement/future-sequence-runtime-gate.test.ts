@@ -150,7 +150,7 @@ function evaluate(operation: PromptEnhancementFutureSequenceRuntimeOperationV1, 
 }
 
 describe('Phase 11 future sequence runtime gate', () => {
-  it('PE-AR-11.1 blocks sequence identity and state creation in current v1', () => {
+  it('transform-rule-11.1 blocks sequence identity and state creation in current v1', () => {
     const result = evaluate('create_sequence_state');
 
     expect(assertPromptEnhancementFutureSequenceRuntimeBlockedV1(result)).toBe(true);
@@ -160,7 +160,7 @@ describe('Phase 11 future sequence runtime gate', () => {
     expect(result.terminalReopenState).toBe('rejected_v1');
   });
 
-  it('PE-AR-11.2 rejects accepted handoff start/order even with v1-safe metadata', () => {
+  it('transform-rule-11.2 rejects accepted handoff start/order even with v1-safe metadata', () => {
     const result = evaluate('accept_handoff_start_order', {
       event: {
         requestId: 'request-1',
@@ -190,7 +190,7 @@ describe('Phase 11 future sequence runtime gate', () => {
     ['cancel_active_sequence', 'future_sequence_3_cancel_no_go'],
     ['abandon_active_sequence', 'future_sequence_3_abandon_no_go'],
     ['resume_active_sequence', 'future_sequence_3_resume_no_go'],
-  ] as const)('PE-AR-11.3 blocks %s without mutation or follow-up', (operation, reasonCode) => {
+  ] as const)('transform-rule-11.3 blocks %s without mutation or follow-up', (operation, reasonCode) => {
     const result = evaluate(operation, {
       event: {
         sequenceId: 'seq-1',
@@ -214,7 +214,7 @@ describe('Phase 11 future sequence runtime gate', () => {
     expect(result.pointerAdvancementState).toBe('prohibited_v1');
   });
 
-  it('PE-AR-11.4 treats Stop and response-finished signals as non-proof', () => {
+  it('transform-rule-11.4 treats Stop and response-finished signals as non-proof', () => {
     const result = evaluate('response_finished_stop_completion', {
       event: {
         requestId: 'request-1',
@@ -242,7 +242,7 @@ describe('Phase 11 future sequence runtime gate', () => {
     ]));
   });
 
-  it('PE-AR-11.5 rejects runtime acceptance even when caller claims all gates passed', () => {
+  it('transform-rule-11.5 rejects runtime acceptance even when caller claims all gates passed', () => {
     const result = evaluate('runtime_acceptance', {
       evidence: {
         peDr4LifecyclePolicyApproved: true,
@@ -265,7 +265,7 @@ describe('Phase 11 future sequence runtime gate', () => {
     expect(result.reasonCodes).toContain('future_sequence_5_runtime_acceptance_no_go');
   });
 
-  it('keeps PE-DR-6 owner registers and provider/API availability as required runtime gates', () => {
+  it('keeps decision-rule-6 owner registers and provider/API availability as required runtime gates', () => {
     const result = evaluate('runtime_acceptance', {
       evidence: {
         peDr4LifecyclePolicyApproved: true,

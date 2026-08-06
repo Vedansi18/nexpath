@@ -5,19 +5,19 @@ import type {
 } from './templates/section-plan.js';
 
 /**
- * PE-AR-1 split 1 — guidance-fact builder (E2 / phase 2.1).
+ * transform-rule-1 split 1 — guidance-fact builder (E2 / phase 2.1).
  *
  * Normalizes the request's already-collected source signals (E1 feeds) into typed
  * {@link PromptEnhancementGuidanceFact} records. This is the deterministic seam that
- * PE-AR-1 requires *before* {@link planPromptEnhancementSections} and *before* any
+ * transform-rule-1 requires *before* {@link planPromptEnhancementSections} and *before* any
  * composer wording — no LLM, no direct copy of content-template option/whyDesc text.
  *
- * Scope of 2.1: construct + dedupe + rank the raw fact set with PE-AR-1-correct
+ * Scope of 2.1: construct + dedupe + rank the raw fact set with transform-rule-1-correct
  * required fields (sourceType / guidanceKind / priority / renderPolicy / risk /
- * privacy / sanitization). The PE-AR-2 dual-lane source-mix caps (2.2) and the
+ * privacy / sanitization). The transform-rule-2 dual-lane source-mix caps (2.2) and the
  * DR2-G1 gate (2.3) are applied on top of this list in their own sub-phases; the
  * `planPromptEnhancementSections` wiring is 2.5. Per-signal `suggestedActionKind`
- * refinement (absence -> verification vs reproduction, etc.) is PE-EM-3 / R1 data;
+ * refinement (absence -> verification vs reproduction, etc.) is eval-rule-3 / R1 data;
  * v1 defaults it safely to `no_action_render_context_only` where unknown.
  */
 /**
@@ -85,7 +85,7 @@ export function buildPromptEnhancementGuidanceFactsV1(
   }
 
   // Source A — required survivors. Stage/absence signals shown in the popup are
-  // PE-AR-4/5/9 floors ("source/signal guidance in a shown popup"): must survive.
+  // transform-rule-4/5/9 floors ("source/signal guidance in a shown popup"): must survive.
   for (const ref of signals.normalizedStageAbsenceSignalRefs) {
     facts.push({
       factId: nextId('signal'),
@@ -132,7 +132,7 @@ export function buildPromptEnhancementGuidanceFactsV1(
   }
 
   // Source A — persistent missing-signal memory (populated by E3). Shape is ready
-  // now per PE-AR-1: frequency/recency/confidence/fatigue must fit the same record.
+  // now per transform-rule-1: frequency/recency/confidence/fatigue must fit the same record.
   for (const ref of signals.missingMemoryCandidateRefs) {
     facts.push({
       factId: nextId('mem'),
@@ -154,7 +154,7 @@ export function buildPromptEnhancementGuidanceFactsV1(
   }
 
   // Source B — hard facts (env-derived project grounding). Bounded grounding, not
-  // a required survivor; PE-AR-2 (2.2) owns final relevance/priority mixing.
+  // a required survivor; transform-rule-2 (2.2) owns final relevance/priority mixing.
   for (const ref of signals.sourceOnlyHardFactRefs) {
     facts.push({
       factId: nextId('hard'),
@@ -200,7 +200,7 @@ export function buildPromptEnhancementGuidanceFactsV1(
       continue;
     }
     // Positive RIGHT&GOOD and work-style signals are weak Source-B tie-breakers only
-    // (PE-AR-1): they adapt register/emphasis, never override instructions/safety/
+    // (transform-rule-1): they adapt register/emphasis, never override instructions/safety/
     // routing. Render as metadata, not their own section.
     const isWorkStyle = ref.startsWith('work_style:');
     facts.push({

@@ -164,7 +164,7 @@ export const PROMPT_ENHANCEMENT_ACCEPTANCE_REQUIRED_FAMILIES_V1: readonly Prompt
   'cost_fallback',
 ];
 
-export const PROMPT_ENHANCEMENT_PE_AR1_NAMED_SPLIT_GATES_V1 = [
+export const PROMPT_ENHANCEMENT_TRANSFORM_SPLIT_GATES_V1 = [
   'source-normalization',
   'source-impact identity',
   'question/why-desc boundary',
@@ -178,7 +178,7 @@ export const PROMPT_ENHANCEMENT_PE_AR1_NAMED_SPLIT_GATES_V1 = [
   'source-attribution',
   'duplicate/DS-boundary',
   'LLM-structured-output',
-  'PE-AR-10 contract',
+  'engine_contract',
   'exact-family',
   'exact-intent',
   'guidance-to-section',
@@ -214,7 +214,7 @@ export const PROMPT_ENHANCEMENT_PE_AR1_NAMED_SPLIT_GATES_V1 = [
   'composer-path',
   'body-section bijection',
   'generated-prompt processing',
-  'PE-CR source-boundary',
+  'confidentiality_source_boundary',
   'source-impact item 7',
   'template-token',
   'public fallback/error-copy',
@@ -262,7 +262,7 @@ export function buildPromptEnhancementAcceptancePacketV1(): PromptEnhancementAcc
     ],
     requiredFamilies: PROMPT_ENHANCEMENT_ACCEPTANCE_REQUIRED_FAMILIES_V1,
     fixtures,
-    peAr1NamedGateEvidence: PROMPT_ENHANCEMENT_PE_AR1_NAMED_SPLIT_GATES_V1.map((gateId) => ({
+    peAr1NamedGateEvidence: PROMPT_ENHANCEMENT_TRANSFORM_SPLIT_GATES_V1.map((gateId) => ({
       gateId,
       owner: 'content_semantics',
       fixtureIds: fixtureIdsForGate(gateId),
@@ -387,7 +387,7 @@ export function validatePromptEnhancementAcceptancePacketV1(
       if (!fixtureIds.has(fixtureId)) reasonCodes.push(`gate_unknown_fixture:${gate.gateId}:${fixtureId}`);
     }
   }
-  for (const gateId of PROMPT_ENHANCEMENT_PE_AR1_NAMED_SPLIT_GATES_V1) {
+  for (const gateId of PROMPT_ENHANCEMENT_TRANSFORM_SPLIT_GATES_V1) {
     if (!gateIds.has(gateId)) reasonCodes.push(`missing_transform_gate:${gateId}`);
   }
 
@@ -790,12 +790,12 @@ function buildAcceptanceFixtures(
         ...PROMPT_ENHANCEMENT_VALIDATION_STAGES,
       ],
       sourceReasonMetadata: [
-        'PE-AR-9 split-1 voice_policy',
-        'PE-AR-9 split-2 sensitive_action_taxonomy',
-        'PE-AR-9 split-3 confirmation_seek_insertion',
-        'PE-AR-9 split-4 sensitive_data_handling',
-        'PE-AR-9 split-5 validation_failure_modes',
-        'PE-DR-5 disposition mapping',
+        'transform-rule-9 split-1 voice_policy',
+        'transform-rule-9 split-2 sensitive_action_taxonomy',
+        'transform-rule-9 split-3 confirmation_seek_insertion',
+        'transform-rule-9 split-4 sensitive_data_handling',
+        'transform-rule-9 split-5 validation_failure_modes',
+        'decision-rule-5 disposition mapping',
       ],
       evidenceSourceKinds: ['pe_specific_fixture', 'pe_contract_validation'],
       registryLinkedFixtureIds: ['pe-em3-eval-maintenance-behavior-preserving-refactor'],
@@ -824,7 +824,7 @@ function buildAcceptanceFixtures(
         'no_old_ds_option_list',
         'no_auto_send',
       ],
-      sourceReasonMetadata: ['PE-AR-7', 'PE-DR-3', 'typed_state_only'],
+      sourceReasonMetadata: ['transform-rule-7', 'decision-rule-3', 'typed_state_only'],
       evidenceSourceKinds: ['pe_specific_fixture', 'pe_contract_validation'],
       registryLinkedFixtureIds: [],
       hardFailFocus: ['ui_owned_learning', 'auto_send', 'foreground_safer', 'old_ds_option_list'],
@@ -852,7 +852,7 @@ function buildAcceptanceFixtures(
         'no_raw_durable_text',
         'disk_and_memory_store_behavior',
       ],
-      sourceReasonMetadata: ['PE-AR-6', 'PE-EM-2', 'H5'],
+      sourceReasonMetadata: ['transform-rule-6', 'eval-rule-2', 'H5'],
       evidenceSourceKinds: ['pe_specific_fixture', 'pe_unit_test'],
       registryLinkedFixtureIds: [],
       hardFailFocus: [
@@ -887,7 +887,7 @@ function buildAcceptanceFixtures(
         'no raw transport semantic authority',
         'old_ds_compatibility_no_duplicate_advisory_processing',
       ],
-      sourceReasonMetadata: ['PE-CR-2', 'PE-AR-7', 'PE-AR-10'],
+      sourceReasonMetadata: ['confidentiality-rule-2', 'transform-rule-7', 'transform-rule-10'],
       evidenceSourceKinds: ['pe_specific_fixture', 'pe_contract_validation'],
       registryLinkedFixtureIds: [],
       hardFailFocus: ['auto_send', 'raw_stop_reason_authority', 'clipboard_as_consent', 'same_turn_replacement_claim'],

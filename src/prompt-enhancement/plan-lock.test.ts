@@ -139,7 +139,7 @@ describe('Phase 0 source sync and plan lock', () => {
 
   it('blocks unreconciled active pending rows before coding', () => {
     const evaluation = evaluateSourceSyncAndPlanLock(lockedFacts({
-      unreconciledActiveRows: ['PE-AR-7 PENDING from stale top-level handoff row'],
+      unreconciledActiveRows: ['transform-rule-7 PENDING from stale top-level handoff row'],
     }));
 
     expect(evaluation.locked).toBe(false);

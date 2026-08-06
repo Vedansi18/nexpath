@@ -1784,7 +1784,7 @@ describe('Phase 2 contract-first core', () => {
   it('rejects string diagnostics because diagnostics must be public-safe typed records', () => {
     const result = {
       ...validResult(),
-      diagnostics: ['PE-AR-10 raw internal reason'],
+      diagnostics: ['transform-rule-10 raw internal reason'],
     };
 
     const validation = validatePromptEnhancementPrepareResultV1(result);
@@ -1858,7 +1858,7 @@ describe('Phase 2 contract-first core', () => {
       diagnostics: [
         {
           ...validResult().diagnostics[0],
-          publicSafeText: 'PE-AR-9 failed while handling /home/alice/client-x/prod.env with sk-live-example12345',
+          publicSafeText: 'transform-rule-9 failed while handling /home/alice/client-x/prod.env with sk-live-example12345',
         },
       ],
     };

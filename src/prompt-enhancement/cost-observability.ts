@@ -83,7 +83,7 @@ export type PromptEnhancementCostWorksheetCostStateV1 =
 export interface PromptEnhancementAcceptedCostCallInventoryRowV1 {
   callId: PromptEnhancementCostCallIdV1;
   owner: 'content_semantics';
-  ownerResearchItem: 'PE-EM-1_PE-G4';
+  ownerResearchItem: 'cost_visibility';
   implementationModule: 'src/prompt-enhancement/cost-observability.ts';
   trigger: PromptEnhancementCostCallTriggerV1;
   userVisibleTrigger: PromptEnhancementCostCallUserVisibleTriggerV1;
@@ -270,7 +270,7 @@ export interface PromptEnhancementCurrentSourceCostCallInventoryRowV1 {
     | 'current_content_template_simpler_derive'
     | 'current_content_template_autogen';
   sourceLayer: string;
-  ownerResearchItem: 'PE-EM-1_PE-G4';
+  ownerResearchItem: 'cost_visibility';
   implementationModule: string;
   budgetBucket: 'current_always_on_nexpath_baseline_not_pe';
   currentVsNew: 'current_source_call_surface';
@@ -356,7 +356,7 @@ const CALL_ROWS: readonly PromptEnhancementAcceptedCostCallInventoryRowV1[] = [
   row({
     // E6: bounded LLM route decision for NL-heavy prompts the deterministic keyword
     // router soft-skipped. Separate v1 call (route precedes planning, so combining with
-    // the composer is a future optimization). Exact cost numbers get PE-G4 sign-off at
+    // the composer is a future optimization). Exact cost numbers get gate-rule-4 sign-off at
     // R-track; small output (a route-decision JSON), never a runtime gate.
     callId: 'llm_route_decision_call',
     trigger: 'prepare',
@@ -469,7 +469,7 @@ const CALL_ROWS: readonly PromptEnhancementAcceptedCostCallInventoryRowV1[] = [
     callId: 'optional_safety_review',
     trigger: 'safety_review',
     userVisibleTrigger: 'safety_review_needed',
-    hiddenRuntimeTrigger: 'optional LLM safety review is triggered beyond deterministic PE-DR-5 validation',
+    hiddenRuntimeTrigger: 'optional LLM safety review is triggered beyond deterministic decision-rule-5 validation',
     requirementState: 'optional_product_selected_when_triggered',
     productState: 'accepted_v1_llm_backed',
     calls: [47.25, 101.25, 180, 180],
@@ -505,7 +505,7 @@ const CALL_ROWS: readonly PromptEnhancementAcceptedCostCallInventoryRowV1[] = [
     callId: 'future_regenerate_flow',
     trigger: 'future_action',
     userVisibleTrigger: 'future_explicit_action',
-    hiddenRuntimeTrigger: 'future explicit regenerate action after a later written product decision and PE-EM-1 row',
+    hiddenRuntimeTrigger: 'future explicit regenerate action after a later written product decision and eval-rule-1 row',
     requirementState: 'future_only_not_v1',
     productState: 'future_product_scope_not_in_v1',
     calls: [0, 0, 0, 'not_bounded_for_future_v1'],
@@ -517,7 +517,7 @@ const CALL_ROWS: readonly PromptEnhancementAcceptedCostCallInventoryRowV1[] = [
     callId: 'future_modification_instruction_flow',
     trigger: 'future_action',
     userVisibleTrigger: 'future_explicit_action',
-    hiddenRuntimeTrigger: 'future heavier modification-instruction action after a later written product decision and PE-EM-1 row',
+    hiddenRuntimeTrigger: 'future heavier modification-instruction action after a later written product decision and eval-rule-1 row',
     requirementState: 'future_only_not_v1',
     productState: 'future_product_scope_not_in_v1',
     calls: [0, 0, 0, 'not_bounded_for_future_v1'],
@@ -911,7 +911,7 @@ export function validatePromptEnhancementCostInventoryV1(
     ids.add(inventoryRow.callId);
     if (inventoryRow.provider !== PROMPT_ENHANCEMENT_COST_PROVIDER_V1) reasonCodes.push(`provider_mismatch:${inventoryRow.callId}`);
     if (inventoryRow.model !== PROMPT_ENHANCEMENT_COST_MODEL_V1) reasonCodes.push(`model_mismatch:${inventoryRow.callId}`);
-    if (inventoryRow.ownerResearchItem !== 'PE-EM-1_PE-G4') reasonCodes.push(`owner_research_item_missing:${inventoryRow.callId}`);
+    if (inventoryRow.ownerResearchItem !== 'cost_visibility') reasonCodes.push(`owner_research_item_missing:${inventoryRow.callId}`);
     if (inventoryRow.implementationModule !== 'src/prompt-enhancement/cost-observability.ts') {
       reasonCodes.push(`implementation_module_missing:${inventoryRow.callId}`);
     }
@@ -968,7 +968,7 @@ export function validatePromptEnhancementCurrentSourceCostInventoryV1(
   for (const inventoryRow of rows) {
     if (ids.has(inventoryRow.baselineCallId)) reasonCodes.push(`duplicate_current_source_call_id:${inventoryRow.baselineCallId}`);
     ids.add(inventoryRow.baselineCallId);
-    if (inventoryRow.ownerResearchItem !== 'PE-EM-1_PE-G4') reasonCodes.push(`owner_research_item_missing:${inventoryRow.baselineCallId}`);
+    if (inventoryRow.ownerResearchItem !== 'cost_visibility') reasonCodes.push(`owner_research_item_missing:${inventoryRow.baselineCallId}`);
     if (!inventoryRow.implementationModule) reasonCodes.push(`implementation_module_missing:${inventoryRow.baselineCallId}`);
     if (inventoryRow.budgetBucket !== 'current_always_on_nexpath_baseline_not_pe') {
       reasonCodes.push(`budget_bucket_mismatch:${inventoryRow.baselineCallId}`);
@@ -1048,7 +1048,7 @@ function row(input: {
   return {
     callId: input.callId,
     owner: 'content_semantics',
-    ownerResearchItem: 'PE-EM-1_PE-G4',
+    ownerResearchItem: 'cost_visibility',
     implementationModule: 'src/prompt-enhancement/cost-observability.ts',
     trigger: input.trigger,
     userVisibleTrigger: input.userVisibleTrigger,
@@ -1132,7 +1132,7 @@ function currentSourceRow(input: {
   return {
     baselineCallId: input.baselineCallId,
     sourceLayer: input.sourceLayer,
-    ownerResearchItem: 'PE-EM-1_PE-G4',
+    ownerResearchItem: 'cost_visibility',
     implementationModule: input.sourceLayer,
     budgetBucket: 'current_always_on_nexpath_baseline_not_pe',
     currentVsNew: 'current_source_call_surface',

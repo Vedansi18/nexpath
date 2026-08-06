@@ -54,7 +54,7 @@ export interface PromptEnhancementPublicLaunchCheckV1 {
 }
 
 export interface PromptEnhancementPublicLaunchRecheckPacketV1 {
-  gateId: 'G8-PE-CR-5-public-launch';
+  gateId: 'G8-confidentiality-rule-5-public-launch';
   owner: 'coordinating_release_check';
   status: PromptEnhancementPublicLaunchRecheckStatusV1;
   publicPromotionAllowed: boolean;
@@ -273,7 +273,7 @@ export function buildPromptEnhancementPublicLaunchRecheckPacketV1(
   const allOk = checks.every((item) => item.ok);
 
   return {
-    gateId: 'G8-PE-CR-5-public-launch',
+    gateId: 'G8-confidentiality-rule-5-public-launch',
     owner: 'coordinating_release_check',
     status: allOk ? 'ready_for_owner_launch_review' : hardFailed ? 'blocked_by_public_launch_hard_fail' : 'blocked_pending_live_recheck',
     publicPromotionAllowed: allOk,

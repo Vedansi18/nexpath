@@ -149,7 +149,7 @@ async function prepare(
   }
 
   // E2 guidance pipeline: source signals -> typed facts -> cross-lane conflict
-  // resolution -> PE-AR-2 dual-lane source mix -> DR2-G1 gate. The mix's rendered
+  // resolution -> transform-rule-2 dual-lane source mix -> DR2-G1 gate. The mix's rendered
   // facts feed section planning; the gate can force skip_no_popup when there is no
   // useful Source-A survivor (never a filler body).
   const guidanceFacts = buildPromptEnhancementGuidanceFactsV1(request);
@@ -169,7 +169,7 @@ async function prepare(
   // any obvious/clear prompt render deterministically. Any failure -> undefined ->
   // composePromptEnhancementBody validates + falls back deterministically.
   // E8: a directional action (Shorter / More-thorough / More-project-grounded /
-  // Apply-details) always LLM-recomposes when a key is present (PE-G4 required LLM
+  // Apply-details) always LLM-recomposes when a key is present (gate-rule-4 required LLM
   // path — the user explicitly requested the recompose). The baseline compose fires
   // the LLM only when NL-heavy (E4). Deterministic fallback preserved either way.
   const isDirectionalAction =
@@ -233,7 +233,7 @@ function buildResult(
   };
   const disposition = dispositionFor(noPopup, currentBody, safety);
   const blockedNoSend = disposition === 'blocked_no_send';
-  // D2 4a (P6-G1 / PE-DR-5): on a hard block, make the engine payload self-safe AT SOURCE. A host
+  // D2 4a (P6-G1 / decision-rule-5): on a hard block, make the engine payload self-safe AT SOURCE. A host
   // reading the result DIRECTLY (before the typed UI layers scrub it) must not receive the offending
   // generated content from ANY field. The full-body fields fall back to the user's own original
   // prompt (the use_original fallback); the per-section text is emptied (a blocked section has no
@@ -265,7 +265,7 @@ function buildResult(
   const generatedOrigin = buildGeneratedOrigin(request, enhancementId, currentBody);
   const delivery = buildDelivery(request, safety, noPopup);
   const trustCues = buildTrustCues(currentBody, composed.sourceGuidanceCoverage, safety);
-  // UI-9 / PE-AR-10: deterministic header copy — pinch label always (when a popup
+  // UI-9 / transform-rule-10: deterministic header copy — pinch label always (when a popup
   // shows), why-help only when a safety/risk/sensitive-action reason exists.
   const pinchLabel = noPopup
     ? undefined
@@ -287,7 +287,7 @@ function buildResult(
     enhancementId,
     requestId: request.requestId,
     projectRoot: request.projectRoot,
-    modelVersion: composed.callVisibilityMode === 'llm_wording' ? 'pe-ar10-llm-wording-v1' : 'pe-ar10-deterministic-v1',
+    modelVersion: composed.callVisibilityMode === 'llm_wording' ? 'llm-wording-v1' : 'deterministic-v1',
     disposition,
     validationDecisionId: safety.validationDecisionId,
     currentBody: safeCurrentBody,

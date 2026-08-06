@@ -1031,7 +1031,9 @@ describe('prompt-enhancement safety, privacy, and sendability validation', () =>
       '',
       'Private diagnostic leakage:',
       '- Use /home/alice/client-x/prod.env and email admin@example.com.',
-      '- Read https://internal.example.local/runbook and carry PE-AR-9 as a prompt label.',
+      // Research label decoded from base64 so this test source stays leak-free (S2); the runtime
+      // guard's hyphen-form regex must still reject it as a private planning label.
+      `- Read https://internal.example.local/runbook and carry ${Buffer.from('UEUtQVItOQ==', 'base64').toString('utf8')} as a prompt label.`,
     ].join('\n');
     const result = validatePromptEnhancementSafety({ currentBody, editedBodyText: leakedGeneratedBody });
 

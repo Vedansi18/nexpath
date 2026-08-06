@@ -60,7 +60,7 @@ function blocked(result: PromptEnhancementPrepareResultV1): PromptEnhancementPre
   };
 }
 
-describe('D2 — blocked body self-scrubs at every ui-owner UI layer (P7-G1 / PE-DR-5)', () => {
+describe('D2 — blocked body self-scrubs at every ui-owner UI layer (P7-G1 / decision-rule-5)', () => {
   it('the shared predicate flags no_send / no_popup, not sendable policies', () => {
     expect(isPromptEnhancementBlockedNoSendPolicyV1('no_send')).toBe(true);
     expect(isPromptEnhancementBlockedNoSendPolicyV1('no_popup')).toBe(true);

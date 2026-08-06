@@ -50,7 +50,7 @@ describe('Phase 12 cost, provider, latency, and observability contracts', () => 
     expect(inventory.map((row) => row.callId)).toEqual(requiredCallIds);
     for (const row of inventory) {
       expect(row.owner).toBe('content_semantics');
-      expect(row.ownerResearchItem).toBe('PE-EM-1_PE-G4');
+      expect(row.ownerResearchItem).toBe('cost_visibility');
       expect(row.implementationModule).toBe('src/prompt-enhancement/cost-observability.ts');
       expect(row.userVisibleTrigger).not.toBe('');
       expect(row.hiddenRuntimeTrigger).not.toBe('');
@@ -157,7 +157,7 @@ describe('Phase 12 cost, provider, latency, and observability contracts', () => 
     ]);
     for (const row of baseline) {
       expect(peCallIds.has(row.baselineCallId as PromptEnhancementCostCallIdV1)).toBe(false);
-      expect(row.ownerResearchItem).toBe('PE-EM-1_PE-G4');
+      expect(row.ownerResearchItem).toBe('cost_visibility');
       expect(row.implementationModule).toBe(row.sourceLayer);
       expect(row.budgetBucket).toBe('current_always_on_nexpath_baseline_not_pe');
       expect(row.pricingSourceUrl).toBe(PROMPT_ENHANCEMENT_COST_PRICING_SOURCE_URL_V1);
@@ -269,7 +269,7 @@ describe('Phase 12 cost, provider, latency, and observability contracts', () => 
     const byId = new Map(getPromptEnhancementAcceptedCostCallInventoryV1().map((row) => [row.callId, row]));
 
     expect(byId.get('baseline_pe_composer')).toMatchObject({
-      ownerResearchItem: 'PE-EM-1_PE-G4',
+      ownerResearchItem: 'cost_visibility',
       userVisibleTrigger: 'enhancement_popup_shown',
       passFailStatus: 'accepted_with_product_scope_notes',
       openOwnerDecision: 'none_for_accepted_product_scope',

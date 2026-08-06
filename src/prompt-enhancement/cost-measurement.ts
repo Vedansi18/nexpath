@@ -13,19 +13,19 @@ import {
  * E9 — cost measurement / observability wiring (P12-G1 + P12-G2).
  *
  * The cost VISIBILITY was wired live; the MEASUREMENT functions had zero callers — so
- * cost was never measured/aggregated and the PE-G4 "no cost-based weakening" check
+ * cost was never measured/aggregated and the gate-rule-4 "no cost-based weakening" check
  * never ran. This builds the observability off the prepare result's REAL visibility
  * (P12-G2: `callVisibilityMode` / planned / used counts come from the composer, not the
  * hardcoded request placeholder), calling all four measurement functions.
  *
- * Cost is OBSERVABILITY-ONLY (PE-G4 / `costVisibilityCanWeakenBehavior:false`): no
+ * Cost is OBSERVABILITY-ONLY (gate-rule-4 / `costVisibilityCanWeakenBehavior:false`): no
  * runtime path in E4-E8 weakens behavior because of cost, so every "becauseOfCost"
  * flag is false and the weakening check must return []. The sanitizer excludes every
  * raw field — no raw prompt/generated/source text enters cost logs.
  */
 export interface PromptEnhancementCostObservabilityV1 {
   measurement: PromptEnhancementCostMeasurementRecordV1;
-  /** Raw output of the PE-G4 weakening check. A clean run is the single sentinel below. */
+  /** Raw output of the gate-rule-4 weakening check. A clean run is the single sentinel below. */
   weakeningReasonCodes: readonly string[];
   /** True only if a REAL cost-based weakening reason is present (the sentinel is not one). */
   costWeakeningDetected: boolean;
@@ -36,7 +36,7 @@ export interface PromptEnhancementCostObservabilityV1 {
 /**
  * The weakening check returns this single code when nothing weakened behavior — it is a
  * POSITIVE "cost is not a runtime limiter" assertion, NOT a violation. So `[]` never
- * happens: a clean PE-G4 result is exactly `[COST_CLEAN_SENTINEL]`.
+ * happens: a clean gate-rule-4 result is exactly `[COST_CLEAN_SENTINEL]`.
  */
 const COST_CLEAN_SENTINEL = 'cost_visibility_is_not_runtime_limiter';
 
@@ -103,7 +103,7 @@ export interface PromptEnhancementCostObservabilitySinkV1 {
  * Called at EVERY runtime point a real result is produced: prepare (E4/E6, `auto.ts`) and
  * the interactive popup directional/apply-details action (E8, the popup host loop) — so a
  * repeated "Shorter" click is measured, not silently uncounted. Observability-only; the raw
- * fields are excluded and the PE-G4 weakening check runs (warns only if it ever trips).
+ * fields are excluded and the gate-rule-4 weakening check runs (warns only if it ever trips).
  */
 export function emitPromptEnhancementCostObservabilityV1(
   result: PromptEnhancementPrepareResultV1,
@@ -126,7 +126,7 @@ export function emitPromptEnhancementCostObservabilityV1(
       inventoryOk: observability.inventoryOk,
     });
     if (observability.costWeakeningDetected) {
-      // PE-G4 invariant: unreachable in v1 (cost is never a gate); surface it loudly if it fires.
+      // gate-rule-4 invariant: unreachable in v1 (cost is never a gate); surface it loudly if it fires.
       sink.warn('prompt_enhancement_cost_weakening_detected', {
         surface,
         reasonCodes: [...observability.weakeningReasonCodes],

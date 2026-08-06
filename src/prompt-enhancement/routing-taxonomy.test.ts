@@ -273,7 +273,7 @@ describe('prompt-enhancement routing and taxonomy', () => {
     ...DEBUG_PRIMARY_INTENTS.map((intent) => [intent, ['reproduction', 'evidence', 'verification']] as const),
     ...MAINTENANCE_PRIMARY_INTENTS.map((intent) => [intent, ['verification']] as const),
     ...REVIEW_PRIMARY_INTENTS.map((intent) => [intent, ['finding', 'verification']] as const),
-  ] as const)('keeps locked PE-WR-3 category %s distinct with registry fixture links', (intent, expectedWords) => {
+  ] as const)('keeps locked work-rule-3 category %s distinct with registry fixture links', (intent, expectedWords) => {
     const preset = PROMPT_ENHANCEMENT_TAXONOMY_PRESETS.find((record) => record.primaryIntent === intent);
     const searchableSlots = [
       ...(preset?.requiredSections ?? []),

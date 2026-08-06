@@ -14,12 +14,12 @@ import {
  * Derive the feedback->memory eligibility policy for a popup feedback event
  * (E3 / phase 3.2a). Resolved from source + content-owner's locked decisions:
  *
- *  - PE-AR-6: consume STABLE typed categories, no hidden LLM classifier -> the map is
+ *  - transform-rule-6: consume STABLE typed categories, no hidden LLM classifier -> the map is
  *    deterministic off the typed feedbackCategory.
- *  - PE-AR-7: feedback uses stable scoped categories; action clicks are per-popup
+ *  - transform-rule-7: feedback uses stable scoped categories; action clicks are per-popup
  *    signals, not durable preferences -> only per-signal keep/reject categories
  *    (isNegativeFeedbackCategory + accept_send) are `eligible_scoped`.
- *  - PE-AR-7: memory "cannot learn away safety/confirmation/source/authority floors"
+ *  - transform-rule-7: memory "cannot learn away safety/confirmation/source/authority floors"
  *    -> a safety-critical survivor sets safetyImpactState so the bridge does not learn.
  *
  * The stable signal key + risk come from re-running the E2 pipeline on the persisted

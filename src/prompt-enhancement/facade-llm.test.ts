@@ -78,7 +78,7 @@ describe('E4 — facade LLM composer wiring', () => {
     expect(result.disposition).toBe('show_current_body');
     expect(composeStructuredComposerOutputV1).toHaveBeenCalledTimes(1);
     expect(result.callAndVisibilityMetadata.callVisibilityMode).toBe('llm_wording');
-    expect(result.modelVersion).toBe('pe-ar10-llm-wording-v1');
+    expect(result.modelVersion).toBe('llm-wording-v1');
     expect(result.currentBody.text).toContain('Tailored LLM wording');
   });
 
@@ -88,7 +88,7 @@ describe('E4 — facade LLM composer wiring', () => {
     expect(result.disposition).toBe('show_current_body');
     expect(composeStructuredComposerOutputV1).not.toHaveBeenCalled();
     expect(result.callAndVisibilityMetadata.callVisibilityMode).not.toBe('llm_wording');
-    expect(result.modelVersion).toBe('pe-ar10-deterministic-v1');
+    expect(result.modelVersion).toBe('deterministic-v1');
   });
 
   it('E8: a directional action (shorter) LLM-recomposes, passing the action to the composer', async () => {
