@@ -681,10 +681,14 @@ describe('UI-2 interaction reducer', () => {
     let dirty = reducePromptEnhancementCliInteractionV1(state('ab'), rows(), { kind: 'editor', raw: 'Z' }).state;
     expect(reducePromptEnhancementCliInteractionV1(dirty, rows(), { kind: 'enter' }).commands)
       .toEqual([{ type: 'edit_body', text: 'abZ' }, { type: 'use_current' }]);
-    // Enter on Additional details => apply_details with the details text
+    // Enter on Additional details => APPLY into the body locally (MPS parity, owner request
+    // 2026-08-07): one edit_body with the merged prompt; details cleared; focus back on the body.
     let s = reducePromptEnhancementCliInteractionV1(state('BODY', 'notes'), rows(), { kind: 'down' }).state;
-    expect(reducePromptEnhancementCliInteractionV1(s, rows(), { kind: 'enter' }).commands)
-      .toEqual([{ type: 'apply_details', text: 'notes' }]);
+    const applied = reducePromptEnhancementCliInteractionV1(s, rows(), { kind: 'enter' });
+    expect(applied.commands)
+      .toEqual([{ type: 'edit_body', text: 'BODY\n\nAdditional details to incorporate:\nnotes' }]);
+    expect(applied.state.editor.buffers.additional_details.text).toBe('');
+    expect(rows()[applied.state.focusIndex]!.kind).toBe('editor_heading');
     // Enter on a directional row (focus 2 = Shorter)
     let d = reducePromptEnhancementCliInteractionV1(state(), rows(), { kind: 'down' }).state;
     d = reducePromptEnhancementCliInteractionV1(d, rows(), { kind: 'down' }).state;
@@ -692,13 +696,14 @@ describe('UI-2 interaction reducer', () => {
       .toEqual([{ type: 'shorter' }]);
   });
 
-  it('commits a dirty body before Apply details, and no-ops an empty details draft', () => {
-    // Edit the body (dirty), move to details, type a note, then Apply.
+  it('applies details onto the EDITED body (dirty edits kept), and no-ops an empty details draft', () => {
+    // Edit the body (dirty), move to details, type a note, then Apply: the merge starts from the
+    // edited body text, so nothing the user typed is lost.
     let s = reducePromptEnhancementCliInteractionV1(state('BODY', ''), rows(), { kind: 'editor', raw: 'Z' }).state;
     s = reducePromptEnhancementCliInteractionV1(s, rows(), { kind: 'down' }).state;
     s = reducePromptEnhancementCliInteractionV1(s, rows(), { kind: 'editor', raw: 'n' }).state;
     expect(reducePromptEnhancementCliInteractionV1(s, rows(), { kind: 'enter' }).commands)
-      .toEqual([{ type: 'edit_body', text: 'BODYZ' }, { type: 'apply_details', text: 'n' }]);
+      .toEqual([{ type: 'edit_body', text: 'BODYZ\n\nAdditional details to incorporate:\nn' }]);
     // Enter on an empty details draft does nothing.
     const empty = reducePromptEnhancementCliInteractionV1(state('BODY', ''), rows(), { kind: 'down' }).state;
     expect(reducePromptEnhancementCliInteractionV1(empty, rows(), { kind: 'enter' }).commands).toEqual([]);

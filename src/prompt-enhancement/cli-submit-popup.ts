@@ -934,11 +934,35 @@ export function reducePromptEnhancementCliInteractionV1(
         // Never send an empty/whitespace body; stay in the editor (BF-1).
         if (bodyBlank) return { state, commands: [] };
         return { state, commands: [...commitBody, { type: 'use_current' }] };
-      case 'additional_details':
-        // A blank body or empty details draft cannot drive a recomposition (BF-1 / bug B).
+      case 'additional_details': {
+        // A blank body or empty details draft cannot drive an apply (BF-1 / bug B).
         if (bodyBlank || detailsText.trim().length === 0) return { state, commands: [] };
-        // Commit a dirty body first so recomposition uses the edited body, not the original.
-        return { state, commands: [...commitBody, { type: 'apply_details', text: detailsText }] };
+        // Owner request 2026-08-07 (MPS parity): Enter APPLIES the typed details INTO the
+        // enhanced body locally — merged verbatim under 'Additional details to incorporate:',
+        // the details field clears, and focus returns to the editor heading so the next Enter
+        // sends the merged prompt. Instant and deterministic — no engine recompose (the
+        // apply_details action seam stays available to other surfaces). The rebuilt body parks
+        // its cursor at the end, so the view scrolls to where the details landed.
+        const mergedBody = `${bodyBuffer.text}\n\nAdditional details to incorporate:\n${detailsText.trim()}`;
+        const editorRowIndex = rows.findIndex((row) => row.kind === 'editor_heading');
+        const mergedEditor = buildPromptEnhancementMultilineEditorStateV1({
+          identity: state.editor.identity,
+          enhancedBodyText: mergedBody,
+          additionalDetailsText: '',
+          fieldWidth: state.editor.fieldWidth,
+          viewportRows: state.editor.viewportRows,
+          focusedField: 'enhanced_body',
+        });
+        return {
+          state: {
+            ...state,
+            focusIndex: editorRowIndex >= 0 ? editorRowIndex : state.focusIndex,
+            helpExpanded: false,
+            editor: mergedEditor,
+          },
+          commands: [{ type: 'edit_body', text: mergedBody }],
+        };
+      }
       case 'directional': {
         // A blank body cannot be refined; never run a directional on the stale body (bug B).
         if (bodyBlank) return { state, commands: [] };
