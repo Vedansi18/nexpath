@@ -47,9 +47,9 @@ export type PromptEnhancementFinalConsistencyTargetV1 =
   | 'trigger_surface_and_prompt_start_stop_boundary'
   | 'store_memory_feedback_and_bootstrap'
   | 'safety_privacy_and_sensitive_actions'
-  | 'bhavnesh_ui_handoff'
-  | 'vedansi_host_transport'
-  | 'cost_latency_and_pe_g4'
+  | 'ui_handoff'
+  | 'host_transport'
+  | 'cost_latency_and_cost_visibility'
   | 'test_and_readiness_evidence'
   | 'stale_term_scan';
 
@@ -57,7 +57,7 @@ export interface PromptEnhancementFinalAcceptanceSurfaceEvidenceV1 {
   surface: PromptEnhancementFinalAcceptanceSurfaceV1;
   evidenceState: PromptEnhancementFinalAcceptanceEvidenceStateV1;
   evidenceRefs: readonly string[];
-  owner: 'hiren_content_api' | 'bhavnesh_ui_app' | 'vedansi_host_extension' | 'bhavnesh_release_check';
+  owner: 'content_semantics' | 'ui_app' | 'host_transport' | 'release_check';
 }
 
 export interface PromptEnhancementFinalAcceptanceNegativeAuthorityCheckV1 {
@@ -72,9 +72,9 @@ export interface PromptEnhancementFinalAcceptanceNegativeAuthorityCheckV1 {
 }
 
 export interface PromptEnhancementFinalAcceptanceSignoffV1 {
-  hirenFinalSignoff: 'missing' | 'approved';
-  bhavneshCrossLayerAcceptance: 'missing' | 'approved';
-  hirenTestSignoff: 'missing' | 'approved';
+  finalSignoff: 'missing' | 'approved';
+  crossLayerAcceptance: 'missing' | 'approved';
+  testSignoff: 'missing' | 'approved';
 }
 
 export interface PromptEnhancementFinalConsistencyEvidenceV1 {
@@ -99,8 +99,8 @@ export interface PromptEnhancementFinalAcceptanceInputV1 {
 
 export interface PromptEnhancementFinalAcceptancePacketV1 {
   schemaVersion: typeof PROMPT_ENHANCEMENT_CONTRACT_VERSION;
-  packetId: 'pe-dr6-cross-layer-final-acceptance-v1';
-  owner: 'bhavnesh_cross_layer_acceptance';
+  packetId: 'cross-layer-final-acceptance-v1';
+  owner: 'cross_layer_acceptance';
   status: PromptEnhancementFinalAcceptanceStatusV1;
   readinessClaimAllowed: boolean;
   acceptedForPublicLaunch: boolean;
@@ -163,9 +163,9 @@ export const PROMPT_ENHANCEMENT_FINAL_CONSISTENCY_TARGETS_V1: readonly PromptEnh
   'trigger_surface_and_prompt_start_stop_boundary',
   'store_memory_feedback_and_bootstrap',
   'safety_privacy_and_sensitive_actions',
-  'bhavnesh_ui_handoff',
-  'vedansi_host_transport',
-  'cost_latency_and_pe_g4',
+  'ui_handoff',
+  'host_transport',
+  'cost_latency_and_cost_visibility',
   'test_and_readiness_evidence',
   'stale_term_scan',
 ];
@@ -215,8 +215,8 @@ export function buildPromptEnhancementFinalAcceptancePacketV1(
 
   return {
     schemaVersion: PROMPT_ENHANCEMENT_CONTRACT_VERSION,
-    packetId: 'pe-dr6-cross-layer-final-acceptance-v1',
-    owner: 'bhavnesh_cross_layer_acceptance',
+    packetId: 'cross-layer-final-acceptance-v1',
+    owner: 'cross_layer_acceptance',
     status: allOk
       ? 'accepted_for_readiness_claim'
       : hardGateFailed
@@ -255,8 +255,8 @@ export function validatePromptEnhancementFinalAcceptancePacketV1(
 ): PromptEnhancementFinalAcceptanceValidationV1 {
   const reasonCodes = validatePromptEnhancementFinalAcceptanceInputV1(packet);
   if (packet.schemaVersion !== PROMPT_ENHANCEMENT_CONTRACT_VERSION) reasonCodes.push('schema_version_mismatch');
-  if (packet.packetId !== 'pe-dr6-cross-layer-final-acceptance-v1') reasonCodes.push('packet_id_mismatch');
-  if (packet.owner !== 'bhavnesh_cross_layer_acceptance') reasonCodes.push('owner_mismatch');
+  if (packet.packetId !== 'cross-layer-final-acceptance-v1') reasonCodes.push('packet_id_mismatch');
+  if (packet.owner !== 'cross_layer_acceptance') reasonCodes.push('owner_mismatch');
   for (const surface of PROMPT_ENHANCEMENT_FINAL_ACCEPTANCE_REQUIRED_SURFACES_V1) {
     if (!packet.requiredSurfaces.includes(surface)) reasonCodes.push(`missing_required_surface:${surface}`);
   }
@@ -364,8 +364,8 @@ function validatePromptEnhancementFinalAcceptanceInputV1(input: {
     if (row.evidenceRefs.length === 0) reasonCodes.push(`negative_authority_missing_evidence_ref:${authority}`);
   }
 
-  if (input.signoff.hirenFinalSignoff !== 'approved') reasonCodes.push('final_signoff_missing:hiren');
-  if (input.signoff.bhavneshCrossLayerAcceptance !== 'approved') reasonCodes.push('final_signoff_missing:bhavnesh_cross_layer_acceptance');
-  if (input.signoff.hirenTestSignoff !== 'approved') reasonCodes.push('final_signoff_missing:hiren_test');
+  if (input.signoff.finalSignoff !== 'approved') reasonCodes.push('final_signoff_missing:owner');
+  if (input.signoff.crossLayerAcceptance !== 'approved') reasonCodes.push('final_signoff_missing:cross_layer_acceptance');
+  if (input.signoff.testSignoff !== 'approved') reasonCodes.push('final_signoff_missing:owner_test');
   return reasonCodes;
 }

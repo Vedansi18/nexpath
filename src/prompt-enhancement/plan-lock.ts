@@ -174,7 +174,7 @@ export function evaluateSourceSyncAndPlanLock(facts: SourceSyncFacts): PlanLockE
     ),
     check(
       'public-tracked-prompt-enhancement',
-      '0 public tracked files before PE-CR-5 launch recheck',
+      '0 public tracked files before confidentiality-rule-5 launch recheck',
       String(trackedPromptEnhancementFiles.length),
       'Phase 0 must preserve that public Nexpath does not yet track PE implementation files.',
       trackedPromptEnhancementFiles.length === 0,
@@ -195,7 +195,7 @@ export function evaluateSourceSyncAndPlanLock(facts: SourceSyncFacts): PlanLockE
     ),
     check(
       'prompt-enhancement-nested-git',
-      'present until PE-CR-5 remove-only launch gate',
+      'present until confidentiality-rule-5 remove-only launch gate',
       facts.promptEnhancementNestedGitExists ? 'present' : 'absent',
       'Nested private git metadata is a launch-boundary fact and must not be silently removed in Phase 0.',
       facts.promptEnhancementNestedGitExists,

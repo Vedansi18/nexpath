@@ -242,10 +242,10 @@ function handoffSummary(kind: PromptEnhancementHandoffMetadataV1['handoffKind'])
       telemetryPolicy: 'ids_counts_status_only',
     },
     ownerBoundary: {
-      semanticOwner: 'hiren_content_api',
-      uiConsumer: 'bhavnesh_ui_app',
-      hostOwner: 'vedansi_host_extension',
-      runtimeOwnerState: 'future_pe_ar11_only_after_gates',
+      semanticOwner: 'content_semantics',
+      uiConsumer: 'ui_app',
+      hostOwner: 'host_transport',
+      runtimeOwnerState: 'future_future_sequence_only_after_gates',
     },
     reasonCodes: ['v1_handoff_metadata_only', 'v1_no_active_sequence_runtime'],
   };
@@ -407,7 +407,7 @@ describe('prompt-enhancement popup session and UI contract', () => {
     expect(session.peExposureCountPolicy).toBe('count_after_visible_ack_only');
     expect(session.deliveryEvidenceState).toBe('submit_unconfirmed_manual_user_action_required');
     expect(session.promptOriginPolicyState).toBe('pe_generated_body_requires_origin_guard');
-    expect(session.preExecutionPromptHoldState).toBe('host_cannot_hold_non_old_copy_delivery_pending_pe_dr3');
+    expect(session.preExecutionPromptHoldState).toBe('host_cannot_hold_non_old_copy_delivery_pending_future_host_capability');
     expect(session.originalPromptDispositionState).toBe('replaced_by_validated_enhanced_body');
     expect(session.holdCommitPolicyState).toBe('current_stop_bridge_original_already_processed');
     expect(session.deliveryOriginGuardState).toBe('pe_generated_next_submit_guard_required');
@@ -540,7 +540,7 @@ describe('prompt-enhancement popup session and UI contract', () => {
 
     expect(session.popupLifecycleState).toBe('fallback_current_or_original');
     expect(session.currentTreatmentMode).toBe('fallback_original_or_current');
-    expect(session.sendDeliveryMode).toBe('non_clipboard_user_controlled_delivery_pending_pe_dr3');
+    expect(session.sendDeliveryMode).toBe('non_clipboard_user_controlled_delivery_pending_future_host_capability');
     expect(session.invariants.clipboardManualCopyFallbackRejected).toBe(true);
     expect(JSON.stringify(session)).not.toMatch(/clipboard_for_user_paste|manual_copy_needed|manual-copy|manual copy/i);
   });
@@ -731,7 +731,7 @@ describe('prompt-enhancement popup session and UI contract', () => {
       timestampMs: 10,
     });
 
-    expect(session.preExecutionPromptHoldState).toBe('host_cannot_hold_non_old_copy_delivery_pending_pe_dr3');
+    expect(session.preExecutionPromptHoldState).toBe('host_cannot_hold_non_old_copy_delivery_pending_future_host_capability');
     expect(session.holdCommitPolicyState).toBe('current_stop_bridge_original_already_processed');
     expect(session.sameTurnUserPromptSubmitReplacementClaimed).toBe(false);
     expect(session.deliveryOriginGuardState).toBe('pe_generated_next_submit_guard_required');
@@ -750,7 +750,7 @@ describe('prompt-enhancement popup session and UI contract', () => {
 
     expect(session.handoffSummaryState).toBe('compact_first_popup_summary');
     expect(session.sequenceSummaryState).toBe('compact_first_popup_summary_available');
-    expect(session.firstPopupSequenceDispositionState).toBe('disposition_pending_pe_dr3');
+    expect(session.firstPopupSequenceDispositionState).toBe('disposition_pending_future_host_capability');
     expect(session.preSendBoundaryState.surfaceMode).toBe('future_sequence_surface');
     expect(session.invariants.activeSequenceRuntimeRejected).toBe(true);
   });
@@ -806,7 +806,7 @@ describe('prompt-enhancement popup session and UI contract', () => {
     expect(staleSkip.staleOrMismatched).toBe(true);
     expect(staleSkip.reasonCodes).toContain('stale_or_mismatched_popup_event');
   });
-  it("B1.4 feedback adapter emits one scoped no-send event and isolates acknowledgement", () => {
+  it("stage-1-4 feedback adapter emits one scoped no-send event and isolates acknowledgement", () => {
     const session = buildPromptEnhancementPopupSessionV1({
       viewPayload: viewPayload(),
       validationDecisionId: "body-1:validation:1:final_body",
@@ -860,7 +860,7 @@ describe('prompt-enhancement popup session and UI contract', () => {
     expect(stale.reasonCodes).toContain("stale_or_mismatched_popup_event");
   });
 
-  it('DEP-TEST-01-B1.2-01 preserves a dirty current-body draft on same-identity redraw', () => {
+  it('DEP-TEST-01-stage-1-2-01 preserves a dirty current-body draft on same-identity redraw', () => {
     const session = buildPromptEnhancementPopupSessionV1({
       viewPayload: viewPayload(),
       validationDecisionId: 'body-1:validation:1:final_body',
@@ -877,7 +877,7 @@ describe('prompt-enhancement popup session and UI contract', () => {
     expect(redraw.draft.currentBody).toMatchObject({ text: 'Edited current body', cursorOffset: 7, dirty: true });
   });
 
-  it('DEP-TEST-01-B1.2-02 starts a distinct draft for a new canonical revision', () => {
+  it('DEP-TEST-01-stage-1-2-02 starts a distinct draft for a new canonical revision', () => {
     const session = buildPromptEnhancementPopupSessionV1({
       viewPayload: viewPayload(),
       validationDecisionId: 'body-1:validation:1:final_body',
@@ -902,7 +902,7 @@ describe('prompt-enhancement popup session and UI contract', () => {
     expect(reconciled.draft.currentBody.text).toBe('New canonical body');
   });
 
-  it('DEP-TEST-01-B1.2-03 ignores stale input and keeps dirty details local', () => {
+  it('DEP-TEST-01-stage-1-2-03 ignores stale input and keeps dirty details local', () => {
     const session = buildPromptEnhancementPopupSessionV1({
       viewPayload: viewPayload(),
       validationDecisionId: 'body-1:validation:1:final_body',

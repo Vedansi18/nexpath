@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   PROMPT_ENHANCEMENT_CONTRACT_VERSION,
   type PromptEnhancementPrepareRequestV1,
+  type PromptEnhancementPrepareResultV1,
   type PromptEnhancementSourceRefV1,
 } from './contracts.js';
 import { buildPromptEnhancementCostVisibilityMetadataV1 } from './cost-observability.js';
@@ -14,8 +15,10 @@ import {
   buildPromptEnhancementCliFeedbackStateV1,
   buildPromptEnhancementCliInteractionStateV1,
   decodePromptEnhancementCliKeyV1,
+  PROMPT_ENHANCEMENT_CLI_CONTENT_INDENT_V1,
   PROMPT_ENHANCEMENT_CLI_CUSTOM_FEEDBACK_MAX_CHARS_V1,
   PROMPT_ENHANCEMENT_CLI_FOOTER_V1,
+  promptEnhancementCliViewportV1,
   reducePromptEnhancementCliFeedbackV1,
   reducePromptEnhancementCliInteractionV1,
   renderPromptEnhancementCliFeedbackFrameV1,
@@ -27,7 +30,12 @@ import {
   type PromptEnhancementCliPopupInteractionV1,
   type PromptEnhancementCliPopupViewV1,
 } from './cli-submit-popup.js';
-import type { PromptEnhancementEditorBufferV1 } from './multiline-editor.js';
+import {
+  buildPromptEnhancementMultilineEditorStateV1,
+  promptEnhancementCursorVisualPositionV1,
+  promptEnhancementKeepFieldCursorVisibleV1,
+  type PromptEnhancementEditorBufferV1,
+} from './multiline-editor.js';
 import {
   buildPromptEnhancementPopupRenderModelV1,
   type PromptEnhancementPopupRenderModelV1,
@@ -183,6 +191,27 @@ describe('Claude CLI UserPromptSubmit PE popup consumer', () => {
     expect(ui.views).toHaveLength(2);
     expect(ui.views[1]!.model.identity.bodyRevision).toBeGreaterThan(ui.views[0]!.model.identity.bodyRevision);
     expect(ui.views[1]!.editedBodyText).not.toBe(ui.views[0]!.editedBodyText);
+  });
+
+  it('E9: fires the cost-observability sink once per E8 directional/apply-details action, not on plain selection', async () => {
+    const baseRequest = request();
+    const prepared = await preparePromptEnhancement(baseRequest);
+    const measured: PromptEnhancementPrepareResultV1[] = [];
+    const ui = interaction([
+      { type: 'shorter' },
+      { type: 'apply_details', text: 'Keep verification concise.' },
+      { type: 'use_current' },
+    ]);
+    const result = await runPromptEnhancementCliSubmitPopupV1({
+      request: baseRequest,
+      result: prepared,
+      interaction: ui,
+      costObservabilitySink: (r) => measured.push(r),
+    });
+    expect(result.state).toBe('selected_current');
+    // Two action recompositions were measured; use_current (plain send) is not an action call.
+    expect(measured).toHaveLength(2);
+    expect(measured.every((r) => r.callAndVisibilityMetadata !== undefined)).toBe(true);
   });
 
   it('restores the main body when Go back is selected after a refinement (GAP-1 end-to-end)', async () => {
@@ -409,7 +438,7 @@ describe('UI-1 PE frame renderer', () => {
 });
 
 describe('UI-1 action-row model', () => {
-  it('orders rows per B1.2a, drops Feedback entirely (§8.3), and reflects typed availability', () => {
+  it('orders rows per stage-1-2a, drops Feedback entirely (§8.3), and reflects typed availability', () => {
     const rows = buildPromptEnhancementCliActionRowsV1(fakeRenderModel());
     expect(rows.map((row) => row.rowKey)).toEqual([
       'editor_heading', 'additional_details', 'shorter', 'more_thorough', 'more_project_grounded', 'use_original',
@@ -463,6 +492,74 @@ describe('UI-1 action-row model', () => {
     // "Use enhanced prompt" label/bullet row.
     expect(lines[caretOut.row - 1]).toContain('line-two');
     expect(lines[caretOut.row - 1]).not.toContain('Use enhanced prompt');
+  });
+
+  it('viewport width leaves room for the content indent so wrapped lines never overflow the terminal', () => {
+    for (const cols of [80, 100, 120, 146, 200]) {
+      const { fieldWidth } = promptEnhancementCliViewportV1(cols, 40);
+      // A wrapped content line is rendered with the 6-space indent; indent + wrap width must fit
+      // the terminal, or the terminal re-wraps the line (splitting words) and the frame scrolls.
+      expect(fieldWidth + PROMPT_ENHANCEMENT_CLI_CONTENT_INDENT_V1).toBeLessThanOrEqual(cols);
+    }
+  });
+
+  it('renders a long body with no line wider than the terminal (else it re-wraps and scrolls)', () => {
+    const cols = 146;
+    const { fieldWidth, viewportRows } = promptEnhancementCliViewportV1(cols, 36);
+    const longBody = Array.from({ length: 45 }, (_, i) =>
+      `- Ground the request in current project facts and source references without inventing missing implementation details line ${i}`).join('\n');
+    const buffer = { text: longBody, cursor: 0, desiredVisualColumn: 0, scrollVisualRow: 0, dirty: false, focused: true } as PromptEnhancementEditorBufferV1;
+    const bodyDisplay = windowPromptEnhancementFieldForDisplayV1(buffer, fieldWidth, viewportRows);
+    const frame = renderPromptEnhancementPopupFrameV1(
+      { model: fakeRenderModel(), editedBodyText: bodyDisplay, additionalDetailsText: '' },
+      { focusIndex: 0, helpExpanded: false },
+    );
+    for (const line of frame.split('\n')) {
+      expect([...line].length).toBeLessThanOrEqual(cols);
+    }
+  });
+
+  it('opens the enhanced body with the window at the top and the end cursor off-window (renderer hides it, no stray cursor)', () => {
+    const longBody = Array.from({ length: 60 }, (_, i) => `line-${i}`).join('\n');
+    const state = buildPromptEnhancementCliInteractionStateV1({
+      model: fakeRenderModel(),
+      editedBodyText: longBody,
+      additionalDetailsText: '',
+      fieldWidth: 80,
+      viewportRows: 8,
+    });
+    const body = state.editor.buffers.enhanced_body;
+    // Window at the top on open (the prompt is readable from its start).
+    expect(body.scrollVisualRow).toBe(0);
+    // Cursor at end-of-text so typing appends.
+    expect(body.cursor).toBe(longBody.length);
+    // The end cursor sits below the 8-row top window → the render caret guard hides it rather
+    // than stranding it at the screen bottom (the stray-cursor bug).
+    const pos = promptEnhancementCursorVisualPositionV1(body, 80);
+    expect(pos.row - body.scrollVisualRow).toBeGreaterThanOrEqual(8);
+  });
+
+  it('syncs a focused field so a cursor-at-end long buffer keeps its caret inside the viewport (no stray bottom cursor)', () => {
+    const longBody = Array.from({ length: 60 }, (_, i) => `line-${i}`).join('\n');
+    const editor = buildPromptEnhancementMultilineEditorStateV1({
+      identity: { enhancementId: 'e', currentBodyId: 'b', bodyRevision: 1, validationDecisionId: 'v' },
+      enhancedBodyText: longBody,
+      additionalDetailsText: '',
+      fieldWidth: 80,
+      viewportRows: 8,
+      focusedField: 'enhanced_body',
+      editable: true,
+    });
+    const raw = editor.buffers.enhanced_body; // buffer factory seeds the cursor at end-of-text, scroll 0
+    // Before sync the caret is far below an 8-row window — this is the stray-cursor cause.
+    const before = promptEnhancementCursorVisualPositionV1(raw, 80);
+    expect(before.row - raw.scrollVisualRow).toBeGreaterThanOrEqual(8);
+    // After sync the caret is inside the viewport [0, 8).
+    const synced = promptEnhancementKeepFieldCursorVisibleV1(raw, 80, 8);
+    const after = promptEnhancementCursorVisualPositionV1(synced, 80);
+    const visualRow = after.row - synced.scrollVisualRow;
+    expect(visualRow).toBeGreaterThanOrEqual(0);
+    expect(visualRow).toBeLessThan(8);
   });
 
   it('marks the focused editable row with a filled bullet and shows its help', () => {

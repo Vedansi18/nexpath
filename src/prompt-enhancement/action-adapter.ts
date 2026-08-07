@@ -193,7 +193,7 @@ export function beginPromptEnhancementActionV1(input: {
   return { state: 'request_ready', adapterState, request: built.request, token };
 }
 
-/** Execute one approved action request through Hiren's typed facade boundary. */
+/** Execute one approved action request through the typed facade boundary. */
 export async function executePromptEnhancementActionV1(input: {
   adapterState: PromptEnhancementActionAdapterStateV1;
   baseRequest: PromptEnhancementPrepareRequestV1;

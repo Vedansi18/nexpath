@@ -12,7 +12,7 @@ export interface PromptEnhancementOnboardingTrustCopyModelV1 {
   privacyNotice: string | null;
   actionLabel: null;
   interactive: false;
-  copyAuthority: 'supplied_hiren_approved_public_copy_only';
+  copyAuthority: 'supplied_owner_approved_public_copy_only';
   claims: {
     installed: false;
     sent: false;
@@ -140,7 +140,7 @@ function model(
     privacyNotice,
     actionLabel: null,
     interactive: false,
-    copyAuthority: 'supplied_hiren_approved_public_copy_only',
+    copyAuthority: 'supplied_owner_approved_public_copy_only',
     claims: {
       installed: false,
       sent: false,

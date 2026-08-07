@@ -113,11 +113,32 @@ export function buildHookEntry(home: string, platform = process.platform): Recor
 }
 
 /**
+ * True if a hook group is one nexpath wrote — either by our `_nexpath_hook` marker, or (fallback)
+ * by its command matching the nexpath hook shape: `node "<cliPath>" auto|stop --db "<dbPath>"`,
+ * where `cliPath` is the nexpath CLI (its bin symlink `…/nexpath` or `…/dist/cli/index.js`).
+ *
+ * The command-string fallback lets install/uninstall recognise and replace prior entries even when
+ * an external rewriter of settings.json (e.g. the host agent) strips the custom `_nexpath_hook`
+ * marker — otherwise duplicate hook groups accumulate and the hook runs N times per event (BUG-3).
+ */
+function isNexpathHookGroupV1(group: Record<string, unknown> | undefined): boolean {
+  if (group?._nexpath_hook === true) return true;
+  const groupHooks = Array.isArray(group?.hooks) ? (group!.hooks as Array<Record<string, unknown>>) : [];
+  return groupHooks.some((entry) => {
+    const command = typeof entry?.command === 'string' ? entry.command : '';
+    const isNexpathCli = /\bnexpath\b/i.test(command) || /dist[\\/]+cli[\\/]+index\.js/i.test(command);
+    const isHookVerb = /\b(?:auto|stop)\b\s+--db\b/.test(command);
+    return isNexpathCli && isHookVerb;
+  });
+}
+
+/**
  * Write the nexpath UserPromptSubmit and Stop hooks into ~/.claude/settings.json.
  *
  * Uses a read-filter-append pattern so existing hooks written by other tools are
- * preserved.  Any prior nexpath hook group (identified by `_nexpath_hook: true`)
- * is removed before appending the fresh entry, making this operation idempotent.
+ * preserved.  Any prior nexpath hook group (by the `_nexpath_hook` marker OR the nexpath command
+ * shape — see {@link isNexpathHookGroupV1}) is removed before appending the fresh entry, making
+ * this operation idempotent even if the marker was stripped by an external rewriter.
  */
 export function writeHookEntry(filePath: string, home: string, platform = process.platform): void {
   const data  = readJsonSafe(filePath);
@@ -127,14 +148,14 @@ export function writeHookEntry(filePath: string, home: string, platform = proces
   // UserPromptSubmit
   const existingUPS = (hooks.UserPromptSubmit as Array<Record<string, unknown>> | undefined) ?? [];
   hooks.UserPromptSubmit = [
-    ...existingUPS.filter((g) => !g._nexpath_hook),
+    ...existingUPS.filter((g) => !isNexpathHookGroupV1(g)),
     ...(entry.UserPromptSubmit as unknown[]),
   ];
 
   // Stop
   const existingStop = (hooks.Stop as Array<Record<string, unknown>> | undefined) ?? [];
   hooks.Stop = [
-    ...existingStop.filter((g) => !g._nexpath_hook),
+    ...existingStop.filter((g) => !isNexpathHookGroupV1(g)),
     ...(entry.Stop as unknown[]),
   ];
 
@@ -145,7 +166,8 @@ export function writeHookEntry(filePath: string, home: string, platform = proces
 /**
  * Remove the nexpath UserPromptSubmit and Stop hooks from ~/.claude/settings.json.
  *
- * Identifies nexpath-written hook groups by the `_nexpath_hook: true` field.
+ * Identifies nexpath-written hook groups by the `_nexpath_hook` marker OR the nexpath command shape
+ * (see {@link isNexpathHookGroupV1}), so marker-stripped duplicates are still removed.
  * Returns false if the file does not exist or no nexpath hooks were found.
  */
 export function removeHookEntry(filePath: string): boolean {
@@ -159,7 +181,7 @@ export function removeHookEntry(filePath: string): boolean {
   // UserPromptSubmit
   const upsGroups = hooks.UserPromptSubmit as Array<Record<string, unknown>> | undefined;
   if (upsGroups) {
-    const filtered = upsGroups.filter((g) => !g._nexpath_hook);
+    const filtered = upsGroups.filter((g) => !isNexpathHookGroupV1(g));
     if (filtered.length < upsGroups.length) {
       removed = true;
       if (filtered.length === 0) delete hooks.UserPromptSubmit;
@@ -170,7 +192,7 @@ export function removeHookEntry(filePath: string): boolean {
   // Stop
   const stopGroups = hooks.Stop as Array<Record<string, unknown>> | undefined;
   if (stopGroups) {
-    const filtered = stopGroups.filter((g) => !g._nexpath_hook);
+    const filtered = stopGroups.filter((g) => !isNexpathHookGroupV1(g));
     if (filtered.length < stopGroups.length) {
       removed = true;
       if (filtered.length === 0) delete hooks.Stop;

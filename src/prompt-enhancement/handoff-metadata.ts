@@ -209,10 +209,10 @@ export function buildPromptEnhancementHandoffMetadataV1(
     runtimeGuards: { ...RUNTIME_GUARDS },
     privacyStoragePolicy: { ...PRIVACY_STORAGE_POLICY },
     ownerBoundary: {
-      semanticOwner: 'hiren_content_api',
-      uiConsumer: 'bhavnesh_ui_app',
-      hostOwner: 'vedansi_host_extension',
-      runtimeOwnerState: 'future_pe_ar11_only_after_gates',
+      semanticOwner: 'content_semantics',
+      uiConsumer: 'ui_app',
+      hostOwner: 'host_transport',
+      runtimeOwnerState: 'future_future_sequence_only_after_gates',
     },
     reasonCodes: uniqueNonEmpty([...(input.reasonCodes ?? []), ...NON_RUNTIME_REASON_CODES]),
   };
@@ -531,10 +531,10 @@ function hasPrivacyStoragePolicy(value: unknown): boolean {
 
 function hasOwnerBoundary(value: unknown): boolean {
   const boundary = asRecord(value);
-  return boundary.semanticOwner === 'hiren_content_api'
-    && boundary.uiConsumer === 'bhavnesh_ui_app'
-    && boundary.hostOwner === 'vedansi_host_extension'
-    && boundary.runtimeOwnerState === 'future_pe_ar11_only_after_gates';
+  return boundary.semanticOwner === 'content_semantics'
+    && boundary.uiConsumer === 'ui_app'
+    && boundary.hostOwner === 'host_transport'
+    && boundary.runtimeOwnerState === 'future_future_sequence_only_after_gates';
 }
 
 function hasUnsafeCompactSummary(metadata: PromptEnhancementHandoffMetadataV1): boolean {

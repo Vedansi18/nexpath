@@ -9,7 +9,7 @@ const typed = (state: string, freshness = 'current', contractRevision = 'pe-twea
   legacyDecisionSessionConfigIsAuthority: false,
 });
 
-describe('B4.3 CTRL+T Prompt Enhancement tweak presentation boundary', () => {
+describe('stage-4-3 CTRL+T Prompt Enhancement tweak presentation boundary', () => {
   it('keeps every supplied typed state distinct and non-interactive', () => {
     for (const state of ['enabled', 'disabled', 'policy_disabled', 'unavailable', 'unsupported', 'outside_v1', 'fallback']) {
       const model = buildPromptEnhancementTweakPresentationModelV1({ contract: typed(state) });

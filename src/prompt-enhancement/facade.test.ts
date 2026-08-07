@@ -112,6 +112,42 @@ describe('PE executable facade', () => {
     expect(result.delivery.rawTransportIsSemanticAuthority).toBe(false);
   });
 
+  it('E2: the guidance pipeline feeds a source_signal_guidance section for a stage-transition trigger', async () => {
+    const result = await preparePromptEnhancement(request());
+    expect(result.disposition).toBe('show_current_body');
+    expect(result.routingAndFeedbackDecision.selectedSectionPivotIds.some((id) => id.includes('source_signal_guidance'))).toBe(true);
+  });
+
+  it('E2 / DR2-G1: no Source-A survivor (no trigger, no signals) returns skip_no_popup, not a filler body', async () => {
+    const promptStartStop = getPromptStartStopSourceSnapshot();
+    const result = await preparePromptEnhancement(
+      request({
+        reviewMomentContext: {
+          reviewMoment: 'UserPromptSubmit_preparation',
+          currentAgentMode: 'workspace-write',
+          projectId: 'project-1',
+          sessionId: 'session-1',
+          detectedLanguage: 'en',
+          stageCandidate: 'implementation',
+          promptCount: 1,
+          recentPromptMetadataRefs: [],
+          triggerProvenance: {
+            currentStage: 'implementation',
+            triggerKind: 'none',
+            classifierState: 'fire_recommended',
+            degradedNoActionState: 'none',
+            promptStartBoundary: promptStartStop.hookBoundary,
+            deliveryBoundary: promptStartStop.deliveryBoundary,
+            promptStartCanReplaceSameTurn: false,
+          },
+        },
+      }),
+    );
+    expect(result.disposition).toBe('no_popup_not_applicable');
+    expect(result.sourceGuidanceCoverage).toBe('not_applicable');
+    expect(result.routingAndFeedbackDecision.state).toBe('suppress');
+  });
+
   it('UI-9: recomputes the header why-help when an edit introduces a sensitive action (not stale)', async () => {
     const base = await preparePromptEnhancement(request({ requestId: 'facade-whyhelp-1' }));
     expect(base.disposition).toBe('show_current_body');
