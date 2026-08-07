@@ -46,7 +46,7 @@ vi.mock('./llm-route-decision.js', () => ({
 }));
 // The LLM composer never runs in this suite (deterministic wording path).
 vi.mock('./llm-composer.js', () => ({
-  composeStructuredComposerOutputV1: vi.fn(async () => undefined),
+  composeStructuredComposerOutputV1: vi.fn(async () => ({ ok: false as const, reason: 'no_key' as const })),
 }));
 
 function request(text: string): PromptEnhancementPrepareRequestV1 {

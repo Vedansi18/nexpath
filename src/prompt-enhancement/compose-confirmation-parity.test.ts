@@ -45,8 +45,8 @@ vi.mock('./llm-composer.js', async (importOriginal) => {
       const plans = input.planning.sectionPlans.filter(
         (plan) => plan.sectionKind !== 'original_request_or_goal' && plan.structuredContentPartRefs.length > 0,
       );
-      if (plans.length === 0) return undefined;
-      return {
+      if (plans.length === 0) return { ok: false, reason: 'no_eligible_sections' };
+      return { ok: true, output: {
         outputId: 'llm-out-parity-test',
         sectionDrafts: plans.map((plan) => ({
           sectionId: plan.sectionId,
@@ -55,7 +55,7 @@ vi.mock('./llm-composer.js', async (importOriginal) => {
         })),
         composerClaims: [`claim:${plans[0]!.structuredContentPartRefs[0]!}`],
         detectedLanguageSelfReport: 'en',
-      };
+      } };
     }),
   };
 });

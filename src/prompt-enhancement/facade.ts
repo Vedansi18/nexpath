@@ -18,6 +18,7 @@ import {
 import {
   composePromptEnhancementBody,
   type PromptEnhancementComposeResult,
+  type PromptEnhancementComposerRuntimeState,
   type PromptEnhancementStructuredComposerOutputV1,
 } from './compose-enhancement.js';
 import { composeStructuredComposerOutputV1 } from './llm-composer.js';
@@ -203,16 +204,34 @@ async function prepare(
   // action-directive seam stays available for a future non-blocking use.
   const wantsLlmWording = action === undefined && isPromptEnhancementNlpHeavyCaseV1(route);
   let structuredComposerOutput: PromptEnhancementStructuredComposerOutputV1 | undefined;
+  // TI-2 (2026-08-07): the composer now reports WHY it failed, and the facade maps that onto the
+  // runtime states that already exist instead of collapsing everything to `undefined` — which made
+  // a real provider timeout byte-identical to "never eligible for an LLM call" in the UI, logs,
+  // and cost metadata. `no_key` / `no_eligible_sections` stay `undefined` (genuinely "not
+  // requested"); downstream, the failure states already produce `callVisibilityMode
+  // 'fallback_no_llm'` + a populated `providerFailureState` via `fallbackModeForRuntime`.
+  let composerRuntimeState: PromptEnhancementComposerRuntimeState | undefined;
   if (
     wantsLlmWording &&
     !noPopup &&
     isValidApiKey(process.env['OPENAI_API_KEY'] ?? '')
   ) {
-    structuredComposerOutput = await composeStructuredComposerOutputV1({
+    const composerCall = await composeStructuredComposerOutputV1({
       enhancementId,
       originalPromptText: request.sourcePrompt.text,
       planning,
     });
+    if (composerCall.ok) {
+      structuredComposerOutput = composerCall.output;
+      composerRuntimeState = 'accepted_structured_output';
+    } else if (composerCall.reason === 'timeout') {
+      composerRuntimeState = 'timeout';
+    } else if (composerCall.reason === 'provider_error') {
+      composerRuntimeState = 'provider_unavailable';
+    } else if (composerCall.reason === 'invalid_output') {
+      composerRuntimeState = 'invalid_output';
+    }
+    // 'no_key' / 'no_eligible_sections' -> undefined: the call was genuinely not made.
   }
 
   const composeInput = {
@@ -231,7 +250,7 @@ async function prepare(
   };
   let composed = composePromptEnhancementBody({
     ...composeInput,
-    composerRuntimeState: structuredComposerOutput ? 'accepted_structured_output' : undefined,
+    composerRuntimeState,
     structuredComposerOutput,
   });
   const validateComposed = (candidate: typeof composed) => validatePromptEnhancementSafety({
