@@ -45,6 +45,15 @@ const OPEN_VSX_URL = `https://open-vsx.org/extension/${MARKETPLACE_ID.replace(
 const VS_CODE_MARKETPLACE_URL = `https://marketplace.visualstudio.com/items?itemName=${MARKETPLACE_ID}`;
 
 /**
+ * Local, adapter-only platform override. Kept out of the shared
+ * `InstallContext` interface (`src/agents/types.ts`) on purpose — that file
+ * is outside this adapter's domain. A real `InstallContext` never carries
+ * these properties, so `ctx.platform`/`ctx.appdata` below simply read as
+ * `undefined` and fall back to `process.platform`/`process.env.APPDATA`.
+ */
+export type PlatformOverride = { platform?: NodeJS.Platform; appdata?: string };
+
+/**
  * OS-specific Windsurf configuration directory. Used both as the primary
  * detection heuristic and as the base for the workspace-storage path.
  *
@@ -85,18 +94,20 @@ export const windsurfAdapter: VSCodeExtensionAdapter = {
   marketplace: { openVsx: MARKETPLACE_ID, vsCode: MARKETPLACE_ID },
 
   detect(ctx: InstallContext): boolean {
+    const c = ctx as InstallContext & PlatformOverride;
     return (
-      existsSync(windsurfConfigDir(ctx.home, ctx.platform, ctx.appdata)) ||
-      existsSync(codeiumCascadeDir(ctx.home))
+      existsSync(windsurfConfigDir(c.home, c.platform, c.appdata)) ||
+      existsSync(codeiumCascadeDir(c.home))
     );
   },
 
   chatHistoryPaths(ctx: InstallContext): string[] {
-    const platform = ctx.platform ?? process.platform;
+    const c = ctx as InstallContext & PlatformOverride;
+    const platform = c.platform ?? process.platform;
     const path = platform === 'win32' ? win32Path : posixPath;
     return [
-      path.join(windsurfConfigDir(ctx.home, ctx.platform, ctx.appdata), 'User', 'workspaceStorage'),
-      codeiumCascadeDir(ctx.home),
+      path.join(windsurfConfigDir(c.home, c.platform, c.appdata), 'User', 'workspaceStorage'),
+      codeiumCascadeDir(c.home),
     ];
   },
 

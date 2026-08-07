@@ -31,20 +31,6 @@ export interface InstallContext {
    * BrowserExtensionAdapter) ignore this field.
    */
   settingsPath?: string;
-  /**
-   * Optional platform override. Defaults to `process.platform`. Real callers
-   * never set this — the host running `nexpath install` always wants its own
-   * platform's paths. Exists so tests can exercise every OS's path shape
-   * (Linux/macOS/Windows) in one run, regardless of which OS the test itself
-   * happens to execute on.
-   */
-  platform?: NodeJS.Platform;
-  /**
-   * Optional `%APPDATA%` override (Windows only). Defaults to
-   * `process.env.APPDATA`. Same rationale as `platform` — lets a test assert
-   * Windows path construction without depending on the real environment.
-   */
-  appdata?: string;
 }
 
 export interface InstallResult {

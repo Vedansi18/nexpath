@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, mkdirSync, rmSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { windsurfAdapter, windsurfConfigDir } from './windsurf.js';
+import { windsurfAdapter, windsurfConfigDir, type PlatformOverride } from './windsurf.js';
 import { getWindsurfHooksPath } from '../../windsurf-hook/install.js';
 import type { InstallContext } from '../types.js';
 
@@ -15,7 +15,7 @@ const fwd = (p: string): string => p.replace(/\\/g, '/');
 // detect()/chatHistoryPaths() always fell back to the real host platform, so
 // on a real Windows machine they built an APPDATA-shaped path that could never
 // match a fixture directory created at `<tmp>/.config/Windsurf`.
-const makeCtx = (home: string): InstallContext => ({
+const makeCtx = (home: string): InstallContext & PlatformOverride => ({
   home,
   cwd: join(home, 'cwd'),
   yes: true,

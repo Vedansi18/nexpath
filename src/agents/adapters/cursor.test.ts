@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { cursorAdapter, cursorConfigDir } from './cursor.js';
+import { cursorAdapter, cursorConfigDir, type PlatformOverride } from './cursor.js';
 import type { InstallContext } from '../types.js';
 
 // Fixed at 'linux' (not process.platform) so these ctx-driven tests exercise
@@ -11,7 +11,7 @@ import type { InstallContext } from '../types.js';
 // detect()/chatHistoryPaths() always fell back to the real host platform, so
 // on a real Windows machine they built an APPDATA-shaped path that could never
 // match a fixture directory created at `<tmp>/.config/Cursor`.
-const makeCtx = (home: string): InstallContext => ({
+const makeCtx = (home: string): InstallContext & PlatformOverride => ({
   home,
   cwd: join(home, 'cwd'),
   yes: true,
