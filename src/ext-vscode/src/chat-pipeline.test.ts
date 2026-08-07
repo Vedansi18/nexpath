@@ -279,6 +279,38 @@ describe('createChatEventHandler', () => {
       await handler(makeEvent());
       expect(checkPeOrigin).not.toHaveBeenCalled();
     });
+
+    it('calls neither injectSelection nor injectPeResult when there is no selection, even when checkPeOrigin is true', async () => {
+      checkPeOrigin.mockResolvedValueOnce(true);
+      spawnStop.mockResolvedValueOnce(null);
+      const handler = createChatEventHandler({
+        spawnAuto, spawnStop, injectSelection, onAfterCapture,
+        checkPeOrigin, injectPeResult,
+        logger: { error: errorLog },
+      });
+      await handler(makeEvent());
+      expect(injectSelection).not.toHaveBeenCalled();
+      expect(injectPeResult).not.toHaveBeenCalled();
+    });
+
+    it('runs checkPeOrigin right after spawnAuto, before onAfterCapture and spawnStop', async () => {
+      spawnStop.mockResolvedValueOnce(fakeSelection);
+      const handler = createChatEventHandler({
+        spawnAuto, spawnStop, injectSelection, onAfterCapture,
+        checkPeOrigin, injectPeResult,
+        logger: { error: errorLog },
+      });
+      await handler(makeEvent());
+      expect(spawnAuto.mock.invocationCallOrder[0]).toBeLessThan(
+        checkPeOrigin.mock.invocationCallOrder[0],
+      );
+      expect(checkPeOrigin.mock.invocationCallOrder[0]).toBeLessThan(
+        onAfterCapture.mock.invocationCallOrder[0],
+      );
+      expect(checkPeOrigin.mock.invocationCallOrder[0]).toBeLessThan(
+        spawnStop.mock.invocationCallOrder[0],
+      );
+    });
   });
 
   describe('F6 self-echo guard (isPeEcho)', () => {
@@ -300,6 +332,19 @@ describe('createChatEventHandler', () => {
       expect(onAfterCapture).not.toHaveBeenCalled();
       expect(injectSelection).not.toHaveBeenCalled();
       expect(errorLog).not.toHaveBeenCalled();
+    });
+
+    it('runs isPeEcho before spawnAuto when it reports false (checked first, but does not block)', async () => {
+      isPeEcho.mockResolvedValueOnce(false);
+      spawnStop.mockResolvedValueOnce(fakeSelection);
+      const handler = createChatEventHandler({
+        spawnAuto, spawnStop, injectSelection, onAfterCapture, isPeEcho,
+        logger: { error: errorLog },
+      });
+      await handler(makeEvent());
+      expect(isPeEcho.mock.invocationCallOrder[0]).toBeLessThan(
+        spawnAuto.mock.invocationCallOrder[0],
+      );
     });
 
     it('proceeds normally when isPeEcho reports false', async () => {
