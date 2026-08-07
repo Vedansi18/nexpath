@@ -1,9 +1,18 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { cursorAdapter, cursorConfigDir, type PlatformOverride } from './cursor.js';
 import type { InstallContext } from '../types.js';
+
+// Passes through to the real implementation for every other test in this
+// file — only wrapped so a single test below can assert the exact path
+// string the adapter builds, without depending on real fs semantics for a
+// win32-shaped (backslash) path that isn't a real path on this host.
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+  return { ...actual, existsSync: vi.fn(actual.existsSync) };
+});
 
 // Fixed at 'linux' (not process.platform) so these ctx-driven tests exercise
 // the same POSIX fixture shape (mkdirSync(join(tmp, '.config', 'Cursor')))
@@ -93,6 +102,35 @@ describe('cursorAdapter.chatHistoryPaths', () => {
     expect(paths).toHaveLength(1);
     expect(paths[0]).toContain('Cursor');
     expect(paths[0]).toContain('User/workspaceStorage');
+  });
+
+  it('joins with backslashes on win32 ctx, proving the adapter forwards platform/appdata (not just cursorConfigDir in isolation)', () => {
+    const ctx = {
+      ...makeCtx('C:\\Users\\u'),
+      platform: 'win32' as const,
+      appdata: 'C:\\Users\\u\\AppData\\Roaming',
+    };
+    const paths = cursorAdapter.chatHistoryPaths(ctx);
+    expect(paths).toHaveLength(1);
+    expect(paths[0]).toBe('C:\\Users\\u\\AppData\\Roaming\\Cursor\\User\\workspaceStorage');
+  });
+});
+
+describe('cursorAdapter.detect on win32 ctx', () => {
+  // win32Path.join always returns a backslash-separated string, even on a
+  // POSIX host — that string is never a real filesystem path on this
+  // machine, so this proves platform/appdata forwarding via the exact
+  // argument passed to existsSync rather than via real fs side effects.
+  it('checks a backslash-joined win32 path, proving detect() forwards platform/appdata', () => {
+    const mocked = vi.mocked(existsSync);
+    mocked.mockClear();
+    const ctx = {
+      ...makeCtx('C:\\Users\\u'),
+      platform: 'win32' as const,
+      appdata: 'C:\\Users\\u\\AppData\\Roaming',
+    };
+    cursorAdapter.detect(ctx);
+    expect(mocked).toHaveBeenCalledWith('C:\\Users\\u\\AppData\\Roaming\\Cursor');
   });
 });
 

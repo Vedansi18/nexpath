@@ -6,6 +6,15 @@ import { windsurfAdapter, windsurfConfigDir, type PlatformOverride } from './win
 import { getWindsurfHooksPath } from '../../windsurf-hook/install.js';
 import type { InstallContext } from '../types.js';
 
+// Passes through to the real implementation for every other test in this
+// file — only wrapped so a single test below can assert the exact path
+// string the adapter builds, without depending on real fs semantics for a
+// win32-shaped (backslash) path that isn't a real path on this host.
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+  return { ...actual, existsSync: vi.fn(actual.existsSync) };
+});
+
 /** Normalise path separators so the codeium-Cascade assertion holds on Windows too. */
 const fwd = (p: string): string => p.replace(/\\/g, '/');
 
@@ -105,6 +114,33 @@ describe('windsurfAdapter.chatHistoryPaths', () => {
     // built with the host-native join() — correct for real filesystem access,
     // but its separator matches whichever OS runs the test, not always '/'.
     expect(paths.some((p) => fwd(p).endsWith('.codeium/windsurf'))).toBe(true);
+  });
+
+  it('joins the workspaceStorage path with backslashes on win32 ctx, proving the adapter forwards platform/appdata', () => {
+    const ctx = {
+      ...makeCtx('C:\\Users\\u'),
+      platform: 'win32' as const,
+      appdata: 'C:\\Users\\u\\AppData\\Roaming',
+    };
+    const paths = windsurfAdapter.chatHistoryPaths(ctx);
+    expect(paths).toContain('C:\\Users\\u\\AppData\\Roaming\\Windsurf\\User\\workspaceStorage');
+  });
+});
+
+describe('windsurfAdapter.detect on win32 ctx', () => {
+  // windsurfConfigDir always returns a backslash-joined string for win32,
+  // even on a POSIX host, so this proves platform/appdata forwarding via the
+  // exact argument passed to existsSync rather than real fs side effects.
+  it('checks a backslash-joined win32 path, proving detect() forwards platform/appdata', () => {
+    const mocked = vi.mocked(existsSync);
+    mocked.mockClear();
+    const ctx = {
+      ...makeCtx('C:\\Users\\u'),
+      platform: 'win32' as const,
+      appdata: 'C:\\Users\\u\\AppData\\Roaming',
+    };
+    windsurfAdapter.detect(ctx);
+    expect(mocked).toHaveBeenCalledWith('C:\\Users\\u\\AppData\\Roaming\\Windsurf');
   });
 });
 
