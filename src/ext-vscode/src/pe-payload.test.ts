@@ -60,6 +60,12 @@ describe('parsePromptEnhancementExtensionPayloadV1', () => {
       delete raw[field];
       expect(parsePromptEnhancementExtensionPayloadV1(JSON.stringify(raw))).toBeNull();
     });
+
+    it(`returns null when ${field} is a non-string truthy value (proves a real typeof check, not just truthiness)`, () => {
+      const raw = JSON.parse(rawResult());
+      raw[field] = 12345;
+      expect(parsePromptEnhancementExtensionPayloadV1(JSON.stringify(raw))).toBeNull();
+    });
   }
 
   it('returns null when uiView is missing', () => {
