@@ -63,6 +63,38 @@ export const POPUP_SIZE_RATIO = 0.7;
 /** Hardcoded last-resort screen size for cases where every detection path fails but a popup is still attempted. */
 export const FALLBACK_SCREEN_SIZE: ScreenSize = { widthPx: 1920, heightPx: 1080 };
 
+// ── Right-dock popup geometry (owner request 2026-08-08) ─────────────────────
+// A right-side docked panel: ~60% width × 100% working-area height, flush to the
+// right edge. Separate from the centred `computePopupGeometry` above so existing
+// (centred) callers are unaffected; this is opt-in geometry for the docked mode.
+
+/** Default fraction of the WORKING-AREA width the docked popup occupies. */
+export const DEFAULT_POPUP_WIDTH_RATIO = 0.60;
+
+/** Minimum popup width in character cells — the docked panel never narrows below this. */
+export const POPUP_MIN_COLS = 80;
+
+/** Maximum popup width in pixels — an ultrawide guard so 60% of a very wide screen stays readable. */
+export const POPUP_MAX_WIDTH_PX = 1600;
+
+/** Which screen edge the docked popup is flush to. */
+export type PopupDockSide = 'right' | 'left' | 'center';
+
+/** Default dock side (owner request: right). */
+export const DEFAULT_POPUP_DOCK_SIDE: PopupDockSide = 'right';
+
+/**
+ * A rectangular region the popup docks within — the screen's WORKING AREA
+ * (screen minus taskbar / menu bar / panels). `x`/`y` are the region's origin
+ * in screen pixels (usually 0,0, but non-zero when the taskbar is on the left/top).
+ */
+export interface WorkArea {
+  x:        number;
+  y:        number;
+  widthPx:  number;
+  heightPx: number;
+}
+
 // ── Env-var keys ────────────────────────────────────────────────────────────
 
 /** Screen width override (pixels). Bypasses OS detection when both width + height are set. */
@@ -76,6 +108,12 @@ export const ENV_CELL_WIDTH    = 'NEXPATH_CELL_WIDTH_PX';
 
 /** Cell-height override (pixels) for cells-only emulators. */
 export const ENV_CELL_HEIGHT   = 'NEXPATH_CELL_HEIGHT_PX';
+
+/** Docked-popup width-ratio override (0 < r ≤ 1). Bypasses DEFAULT_POPUP_WIDTH_RATIO when valid. */
+export const ENV_POPUP_WIDTH_RATIO = 'NEXPATH_POPUP_WIDTH_RATIO';
+
+/** Docked-popup dock-side override (`right` | `left` | `center`). Also the opt-in signal on Linux. */
+export const ENV_POPUP_DOCK = 'NEXPATH_POPUP_DOCK';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -92,6 +130,29 @@ function getCellWidth(): number {
 
 function getCellHeight(): number {
   return parsePositiveInt(process.env[ENV_CELL_HEIGHT]) ?? DEFAULT_CELL_HEIGHT_PX;
+}
+
+/**
+ * Effective docked-popup width ratio: the NEXPATH_POPUP_WIDTH_RATIO override when it parses to a
+ * value in (0, 1]; otherwise DEFAULT_POPUP_WIDTH_RATIO. Exported for unit testability.
+ */
+export function getPopupWidthRatio(): number {
+  const raw = process.env[ENV_POPUP_WIDTH_RATIO];
+  if (raw !== undefined && raw !== '') {
+    const n = Number(raw);
+    if (Number.isFinite(n) && n > 0 && n <= 1) return n;
+  }
+  return DEFAULT_POPUP_WIDTH_RATIO;
+}
+
+/**
+ * Effective dock side: the NEXPATH_POPUP_DOCK override when it is `right`|`left`|`center`
+ * (case-insensitive); otherwise DEFAULT_POPUP_DOCK_SIDE. Exported for unit testability.
+ */
+export function getPopupDockSide(): PopupDockSide {
+  const raw = process.env[ENV_POPUP_DOCK]?.trim().toLowerCase();
+  if (raw === 'right' || raw === 'left' || raw === 'center') return raw;
+  return DEFAULT_POPUP_DOCK_SIDE;
 }
 
 /**
@@ -333,4 +394,108 @@ export function computePopupGeometry(screen: ScreenSize): PopupGeometry {
   const rows  = Math.max(1, Math.floor(heightPx / cellH));
 
   return { widthPx, heightPx, xPx, yPx, cols, rows };
+}
+
+/**
+ * Pure: compute a right-docked popup geometry within a working area — ~60% width × 100% height,
+ * flush to the chosen edge (default right). Returns px + cell dims, same shape as
+ * `computePopupGeometry`, so every spawn path can pick whichever its emulator accepts.
+ *
+ * Width is clamped: never wider than `maxWidthPx` (ultrawide guard), never narrower than
+ * `minCols` cells, and never wider than the work area itself. Height is 100% of the work area.
+ * `ratio` and `dock` default to the env-overridable effective values.
+ *
+ * Edge cases:
+ *   - a work area narrower than `minCols` cells → width is the full work-area width (cannot exceed it).
+ *   - `cols`/`rows` are floored and clamped to ≥ 1 so a zero-cell popup is impossible.
+ */
+export function computeDockedPopupGeometry(
+  work: WorkArea,
+  opts: {
+    ratio?:     number;
+    dock?:      PopupDockSide;
+    minCols?:   number;
+    maxWidthPx?: number;
+  } = {},
+): PopupGeometry {
+  const ratio      = opts.ratio      ?? getPopupWidthRatio();
+  const dock       = opts.dock       ?? getPopupDockSide();
+  const minCols    = opts.minCols    ?? POPUP_MIN_COLS;
+  const maxWidthPx = opts.maxWidthPx ?? POPUP_MAX_WIDTH_PX;
+
+  const cellW = getCellWidth();
+  const cellH = getCellHeight();
+
+  const minWidthPx = minCols * cellW;
+  let widthPx = Math.round(work.widthPx * ratio);
+  widthPx = Math.min(widthPx, maxWidthPx);   // ultrawide guard
+  widthPx = Math.max(widthPx, minWidthPx);   // readability floor
+  widthPx = Math.min(widthPx, work.widthPx); // never exceed the work area
+  const heightPx = work.heightPx;            // 100% of the working-area height
+
+  const xPx = dock === 'right'
+    ? work.x + work.widthPx - widthPx
+    : dock === 'left'
+      ? work.x
+      : work.x + Math.round((work.widthPx - widthPx) / 2);
+  const yPx = work.y;
+
+  const cols = Math.max(1, Math.floor(widthPx  / cellW));
+  const rows = Math.max(1, Math.floor(heightPx / cellH));
+
+  return { widthPx, heightPx, xPx, yPx, cols, rows };
+}
+
+/**
+ * Parse PowerShell `PrimaryScreen.WorkingArea` output — four lines: X, Y, Width, Height — into a
+ * WorkArea. Returns null on malformed / short input (X and Y may legitimately be 0). Exported for
+ * unit testability.
+ */
+export function parseWorkAreaPowerShellOutput(stdout: string): WorkArea | null {
+  const lines = stdout.trim().split(/\r?\n/).map((l) => l.trim());
+  if (lines.length < 4) return null;
+  const x = parseInt(lines[0], 10);
+  const y = parseInt(lines[1], 10);
+  const widthPx  = parsePositiveInt(lines[2]);
+  const heightPx = parsePositiveInt(lines[3]);
+  if (!Number.isFinite(x) || x < 0) return null;
+  if (!Number.isFinite(y) || y < 0) return null;
+  if (widthPx === null || heightPx === null) return null;
+  return { x, y, widthPx, heightPx };
+}
+
+function detectWorkAreaWindows(): WorkArea | null {
+  try {
+    const r = spawnSync('powershell', [
+      '-NoProfile', '-NonInteractive', '-Command',
+      'Add-Type -AssemblyName System.Windows.Forms; ' +
+      '$w = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea; ' +
+      'Write-Output $w.X; Write-Output $w.Y; Write-Output $w.Width; Write-Output $w.Height',
+    ], { encoding: 'utf8', timeout: 5000 });
+    if (r.status === 0 && r.stdout) {
+      const parsed = parseWorkAreaPowerShellOutput(r.stdout);
+      if (parsed) return parsed;
+    }
+  } catch { /* fall through */ }
+  return null;
+}
+
+/**
+ * Detect the primary screen's WORKING AREA (screen minus taskbar / menu bar / panels) as a
+ * dockable region. Fallback chain, never throws:
+ *   1. Windows → PowerShell PrimaryScreen.WorkingArea (excludes the taskbar).
+ *   2. Any OS  → full-screen detection (`detectScreenResolution`) with origin {0,0}. On macOS the
+ *      Finder desktop bounds already exclude the menu bar; on Linux panels are not auto-excluded
+ *      (minor overlap, refined per-emulator when wired).
+ *   3. FALLBACK_SCREEN_SIZE with origin {0,0}.
+ * Always resolves — the docked geometry can always be computed.
+ */
+export async function detectWorkArea(): Promise<WorkArea> {
+  if (process.platform === 'win32') {
+    const win = detectWorkAreaWindows();
+    if (win) return win;
+  }
+  const screen = await detectScreenResolution();
+  if (screen) return { x: 0, y: 0, widthPx: screen.widthPx, heightPx: screen.heightPx };
+  return { x: 0, y: 0, widthPx: FALLBACK_SCREEN_SIZE.widthPx, heightPx: FALLBACK_SCREEN_SIZE.heightPx };
 }
