@@ -46,6 +46,10 @@ describe('routePeWebviewMessage — pe_deliver_current_body', () => {
     expect(routePeWebviewMessage({ type: 'pe_deliver_current_body', bodyId: 'body-1', bodyRevision: 3 }, ctx)).toBeNull();
   });
 
+  it('returns null when bodyText is present but not a string (proves a real typeof check, not just truthiness)', () => {
+    expect(routePeWebviewMessage({ type: 'pe_deliver_current_body', bodyId: 'body-1', bodyRevision: 3, bodyText: 12345 }, ctx)).toBeNull();
+  });
+
   it('flags staleOrMismatched when the message bodyId disagrees with the context', () => {
     const out = routePeWebviewMessage(
       { type: 'pe_deliver_current_body', bodyId: 'stale-body', bodyRevision: 3, bodyText: 'x' },
@@ -135,6 +139,10 @@ describe('routePeWebviewMessage — pe_submit_additional_details', () => {
 
   it('returns null when additionalDetailsText is missing', () => {
     expect(routePeWebviewMessage({ type: 'pe_submit_additional_details', bodyId: 'body-1', bodyRevision: 3 }, ctx)).toBeNull();
+  });
+
+  it('returns null when additionalDetailsText is present but not a string (proves a real typeof check, not just truthiness)', () => {
+    expect(routePeWebviewMessage({ type: 'pe_submit_additional_details', bodyId: 'body-1', bodyRevision: 3, additionalDetailsText: 12345 }, ctx)).toBeNull();
   });
 
   it('flags staleOrMismatched consistently with the other message types', () => {
