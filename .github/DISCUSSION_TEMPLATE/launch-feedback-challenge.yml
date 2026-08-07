@@ -8,7 +8,6 @@ body:
     id: operating-system
     attributes:
       label: Operating System
-      description: Where did you try NexPath?
       options:
         - Ubuntu / Linux
         - Mac
