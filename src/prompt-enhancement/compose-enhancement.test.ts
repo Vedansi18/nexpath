@@ -294,7 +294,7 @@ describe('prompt-enhancement composer and deterministic fallback', () => {
       outputTokenCap: 2000,
       estimatedInputTokens: 0,
       estimatedOutputTokens: 0,
-      timeoutMs: 10_000,
+      timeoutMs: 45_000,
       productValueDiscussionIsRuntimeLimiter: false,
     });
   });
