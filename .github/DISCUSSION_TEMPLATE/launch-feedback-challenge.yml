@@ -1,21 +1,7 @@
-title: "[Launch Feedback]: "
-
 labels:
   - feedback
 
 body:
-  - type: markdown
-    attributes:
-      value: |
-        Thanks for taking the time.
-
-        **Please finish the title above** so it says what your feedback covers, for example
-        `[Launch Feedback]: Windows install broke at npm link` or
-        `[Launch Feedback]: README did not tell me what this is for`.
-
-        Honest beats positive. If something broke or did not make sense, that is the most
-        useful thing you can tell us.
-
   - type: dropdown
     id: operating-system
     attributes:
@@ -106,4 +92,4 @@ body:
         For a surprise: what did you expect to happen, and what happened instead. For
         confusion: the moment you were not sure what NexPath wanted from you, or what it
         had just done.
-      placeholder: I expected... but what actually happened was...
+      placeholder: I expected... but what actually happened was..
