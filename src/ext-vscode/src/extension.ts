@@ -9,6 +9,7 @@ import {
   NexpathPromptEnhancementViewProvider,
   PE_VIEW_ID,
 } from './webview/pe-view-provider.js';
+import { routePeWebviewMessage, describePeEventSafely } from './pe-events.js';
 import { handleOptionSelection } from './webview/prompt-injection.js';
 import {
   detectHost,
@@ -243,11 +244,27 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   );
 
   // P5 (VED-PE-2): PE gets its own view, never sharing state or markup with
-  // the DS view above. Rendering-only for now — message routing (P6),
-  // validation gating (P7), and typed delivery (P8) are later phases; this
-  // registration's only job right now is to make the renderer real and
-  // reachable, not to wire a live data path into it yet.
-  peViewProvider = new NexpathPromptEnhancementViewProvider(context.extensionUri);
+  // the DS view above.
+  // P6 (VED-PE-3): route raw webview messages into typed PE events
+  // (pe-events.ts) and log only their safe, redacted summary — extends the
+  // P1 invariant (delivery body / feedback text is delivery-only, never
+  // logged) to PE events. Routing needs the currently-published body
+  // id/revision as context; if nothing has been published yet there is
+  // nothing to route against. Validation gating (P7) and typed delivery
+  // (P8) don't exist yet, so a routed event is logged, not yet acted upon.
+  peViewProvider = new NexpathPromptEnhancementViewProvider(
+    context.extensionUri,
+    (raw) => {
+      const current = peViewProvider?.getCurrentPayload();
+      if (!current) return;
+      const event = routePeWebviewMessage(raw, {
+        currentBodyId: current.currentBodyId,
+        bodyRevision: current.bodyRevision,
+      });
+      if (!event) return;
+      log(`[nexpath] PE event: ${JSON.stringify(describePeEventSafely(event))}`);
+    },
+  );
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(PE_VIEW_ID, peViewProvider),
   );

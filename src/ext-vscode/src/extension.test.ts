@@ -80,10 +80,16 @@ vi.mock('./webview/view-provider.js', () => ({
 vi.mock('./webview/pe-view-provider.js', () => ({
   PE_VIEW_ID: 'nexpath.promptEnhancement',
   NexpathPromptEnhancementViewProvider: class {
+    private currentPayload: unknown = null;
     constructor(...args: unknown[]) {
       mockPeProviderCtor(...args);
     }
-    publishPayload(): void {}
+    publishPayload(payload: unknown): void {
+      this.currentPayload = payload;
+    }
+    getCurrentPayload(): unknown {
+      return this.currentPayload;
+    }
   },
 }));
 vi.mock('./webview/prompt-injection.js', () => ({
@@ -131,7 +137,7 @@ vi.mock('./advisory-poller.js', () => ({
   })),
 }));
 
-import { activate, deactivate, getViewProvider } from './extension.js';
+import { activate, deactivate, getViewProvider, getPeViewProvider } from './extension.js';
 
 interface FakeContext {
   extensionUri: { __uri: true };
@@ -209,6 +215,53 @@ describe('activate', () => {
     expect(mockRegisterWebviewViewProvider).toHaveBeenCalledTimes(2);
     expect(mockRegisterWebviewViewProvider).toHaveBeenCalledWith('nexpath.status', expect.anything());
     expect(mockRegisterWebviewViewProvider).toHaveBeenCalledWith('nexpath.promptEnhancement', expect.anything());
+  });
+
+  describe('PE onMessage wiring (P6)', () => {
+    function capturedOnMessage(): (raw: unknown) => void {
+      return mockPeProviderCtor.mock.calls[0]![1] as (raw: unknown) => void;
+    }
+
+    it('does nothing when no PE payload has been published yet', async () => {
+      mockShowOnboarding.mockResolvedValueOnce(undefined);
+      await activate(makeCtx() as never);
+      logSpy.mockClear();
+      capturedOnMessage()({ type: 'pe_close', actionId: 'a1' });
+      expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining('PE event'));
+    });
+
+    it('logs a safe, redacted summary when a routable message arrives with a published payload', async () => {
+      mockShowOnboarding.mockResolvedValueOnce(undefined);
+      await activate(makeCtx() as never);
+      const provider = getPeViewProvider() as unknown as { publishPayload: (p: unknown) => void };
+      provider.publishPayload({ currentBodyId: 'body-1', bodyRevision: 3 });
+      logSpy.mockClear();
+      capturedOnMessage()({ type: 'pe_close', actionId: 'a1' });
+      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('"eventType":"close_no_send"'));
+    });
+
+    it('never logs the raw edited body text — only the safe summary (raw-text leak test)', async () => {
+      mockShowOnboarding.mockResolvedValueOnce(undefined);
+      await activate(makeCtx() as never);
+      const provider = getPeViewProvider() as unknown as { publishPayload: (p: unknown) => void };
+      provider.publishPayload({ currentBodyId: 'body-1', bodyRevision: 3 });
+      logSpy.mockClear();
+      const MARKER = 'ZZQX_EXT_WIRING_LEAK_MARKER_4471';
+      capturedOnMessage()({ type: 'pe_deliver_current_body', bodyId: 'body-1', bodyRevision: 3, bodyText: MARKER });
+      const allLogs = logSpy.mock.calls.map((c) => String(c[0])).join('\n');
+      expect(allLogs).not.toContain(MARKER);
+      expect(allLogs).toContain('"hasEditedBody":true');
+    });
+
+    it('does nothing for an unroutable message', async () => {
+      mockShowOnboarding.mockResolvedValueOnce(undefined);
+      await activate(makeCtx() as never);
+      const provider = getPeViewProvider() as unknown as { publishPayload: (p: unknown) => void };
+      provider.publishPayload({ currentBodyId: 'body-1', bodyRevision: 3 });
+      logSpy.mockClear();
+      capturedOnMessage()({ type: 'bogus_type' });
+      expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining('PE event'));
+    });
   });
 
   it('does NOT start the watcher when consent is undefined (first launch, user has not answered)', async () => {
