@@ -1242,7 +1242,6 @@ function createPromptEnhancementCliPopupInteractionV1(onFirstRender?: () => void
   const render = (view: PromptEnhancementCliPopupViewV1, current: PromptEnhancementCliInteractionStateV1): void => {
     lastView = view;
     const editorWidth = current.editor.fieldWidth;
-    const bodyRows = current.editor.viewportRows;
     const detailsRows = Math.min(current.editor.viewportRows, 5);
     // Which editable row (if any) has focus — computed first so we can sync that field's
     // scroll to its cursor BEFORE the field is windowed and the caret placed.
@@ -1252,22 +1251,35 @@ function createPromptEnhancementCliPopupInteractionV1(onFirstRender?: () => void
       focusedRow?.kind === 'editor_heading' ? 'enhanced_body'
         : focusedRow?.kind === 'additional_details' ? 'additional_details'
           : null;
-    // The body's scroll is already kept consistent with its viewport by the editor reducer
-    // (keepCursorVisible on every edit/move, using the same viewportRows the display windows to),
-    // so it is rendered from its own scroll — this leaves the window at the TOP on open while the
-    // off-window end cursor is simply hidden by the caret guard below (never stranded). The details
-    // field's display is capped at 5 rows (< the reducer's viewportRows), so sync it here to that
-    // cap when focused, or its caret could fall outside the shown lines.
-    const bodyBuffer = current.editor.buffers.enhanced_body;
+    // The details field's display is capped at 5 rows (< the body viewport), so sync it here to
+    // that cap when focused, or its caret could fall outside the shown lines. Details is windowed
+    // FIRST because it feeds the chrome measurement that sizes the body.
     const detailsBuffer = focusedField === 'additional_details'
       ? promptEnhancementKeepFieldCursorVisibleV1(current.editor.buffers.additional_details, editorWidth, detailsRows)
       : current.editor.buffers.additional_details;
-    // Display only the visible viewport of each editable field so the frame fits the terminal
-    // and redraws in place. The full text stays in current.editor for editing/apply/send.
-    const bodyDisplay = windowPromptEnhancementFieldForDisplayV1(bodyBuffer, editorWidth, bodyRows);
     const detailsDisplay = detailsBuffer.text
       ? windowPromptEnhancementFieldForDisplayV1(detailsBuffer, editorWidth, detailsRows)
       : '';
+    // Fill the window (owner request 2026-08-07 — the body was small with dead space below the
+    // footer): MEASURE the exact non-body chrome by rendering a 1-line-body probe with the same
+    // focus/refinement/details, then give the body every remaining row (rows-1 for the no-scroll
+    // cap). This adapts to the variable header (pinch + trust cues + why-help), the directional
+    // rows, and the current details block — no hardcoded chrome constant — so the frame always
+    // fills to the window bottom and never overflows/scrolls. The reducer's own viewportRows is
+    // resized to match, so cursor-keeping and the display agree.
+    const probeChrome = renderPromptEnhancementPopupFrameV1(
+      { model: view.model, editedBodyText: 'x', additionalDetailsText: detailsDisplay, publicNotice: view.publicNotice },
+      { focusIndex: current.focusIndex, helpExpanded: current.helpExpanded, refinement: view.refinement, colorize: false },
+    ).split('\n').length - 1;
+    const measuredBodyRows = Math.max(4, (output.rows ?? 24) - 1 - probeChrome);
+    if (current === state) {
+      state = { ...current, editor: resizePromptEnhancementMultilineEditorV1(current.editor, editorWidth, measuredBodyRows) };
+      current = state;
+    }
+    // Display only the visible viewport of each editable field so the frame fits the terminal
+    // and redraws in place. The full text stays in current.editor for editing/apply/send.
+    const bodyBuffer = current.editor.buffers.enhanced_body;
+    const bodyDisplay = windowPromptEnhancementFieldForDisplayV1(bodyBuffer, editorWidth, measuredBodyRows);
     // Caret row is window-relative, from the SAME synced buffer used for the display. If it
     // still falls outside the shown lines, leave the caret unset so the cursor is hidden rather
     // than placed on a wrong row.

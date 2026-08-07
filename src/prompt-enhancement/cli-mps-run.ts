@@ -109,11 +109,23 @@ export async function runPromptEnhancementCliMpsFirstPopupV1(input: {
 
   const size = (): { columns: number; rows: number } => interaction.size?.() ?? { columns: 80, rows: 24 };
   const fieldWidth = (): number => promptEnhancementCliViewportV1(size().columns, size().rows).fieldWidth;
-  // The body viewport leaves room for the frame chrome so the WHOLE frame fits the window.
-  const bodyRows = (): number => Math.max(3, Math.min(
-    promptEnhancementCliViewportV1(size().columns, size().rows).viewportRows,
-    size().rows - FRAME_CHROME_LINES - DETAILS_DISPLAY_ROWS,
-  ));
+  // A rough body height for editor init / feedback state only; the real per-frame height is
+  // MEASURED in renderFrame (two-pass) so the body fills the window exactly (owner request
+  // 2026-08-07 — the body was tiny with a lot of dead space below the footer).
+  const bodyRows = (): number => Math.max(3, size().rows - FRAME_CHROME_LINES - DETAILS_DISPLAY_ROWS);
+  // Measure the exact non-body chrome by rendering a 1-line-body probe with the SAME focus and
+  // details content, then give the body every remaining row (rows - 1 for the no-scroll cap).
+  // This adapts to the variable header (pinch/why) and the current details block with no hardcoded
+  // chrome constant, so the frame always fills to the window bottom and never scrolls.
+  const measureBodyViewport = (detailsDisplay: string): number => {
+    const probeModel: PromptEnhancementMpsFirstPopupModelV1 = {
+      ...model,
+      body: { ...model.body, text: 'x' },
+      additionalDetails: { ...model.additionalDetails, text: detailsDisplay },
+    };
+    const chromeLines = renderPromptEnhancementMpsFirstPopupFrameV1(probeModel, { focusIndex, colorize: false }).split('\n').length - 1;
+    return Math.max(3, size().rows - 1 - chromeLines);
+  };
 
   let focusIndex = 0;
   const editorIdentity = {
@@ -144,20 +156,22 @@ export async function runPromptEnhancementCliMpsFirstPopupV1(input: {
     focusIndex === 0 ? 'enhanced_body' : focusIndex === 1 ? 'additional_details' : null;
 
   const renderFrame = (): { frame: string; cursor: { row: number; col: number } | null } => {
-    editor = resizePromptEnhancementMultilineEditorV1(editor, fieldWidth(), bodyRows());
-    const width = editor.fieldWidth;
+    const width = fieldWidth();
     const field = focusedField();
-    // The details display is capped at DETAILS_DISPLAY_ROWS (< the reducer's viewportRows), so
-    // sync its scroll to that cap when focused — or its caret could fall outside the shown lines.
-    // Same discipline as the PE shell's render().
-    const bodyBuffer = editor.buffers.enhanced_body;
+    // The details display is capped at DETAILS_DISPLAY_ROWS (< the body viewport), so sync its
+    // scroll to that cap when focused — or its caret could fall outside the shown lines. Same
+    // discipline as the PE shell's render(). Details is windowed FIRST because it feeds the chrome
+    // measurement that sizes the body.
     const detailsBuffer = field === 'additional_details'
       ? promptEnhancementKeepFieldCursorVisibleV1(editor.buffers.additional_details, width, DETAILS_DISPLAY_ROWS)
       : editor.buffers.additional_details;
-    const bodyDisplay = windowPromptEnhancementFieldForDisplayV1(bodyBuffer, width, editor.viewportRows);
     const detailsDisplay = detailsBuffer.text
       ? windowPromptEnhancementFieldForDisplayV1(detailsBuffer, width, DETAILS_DISPLAY_ROWS)
       : '';
+    // Size the body to fill the window (two-pass measured chrome), then resize the editor to it.
+    editor = resizePromptEnhancementMultilineEditorV1(editor, width, measureBodyViewport(detailsDisplay));
+    const bodyBuffer = editor.buffers.enhanced_body;
+    const bodyDisplay = windowPromptEnhancementFieldForDisplayV1(bodyBuffer, width, editor.viewportRows);
     // Caret row is window-relative, from the SAME synced buffer used for the display. If it falls
     // outside the shown lines, leave it unset so the cursor is hidden rather than misplaced.
     let caret: { field: PromptEnhancementEditorFieldV1; visualRow: number; visualColumn: number } | undefined;
@@ -325,6 +339,18 @@ function createDefaultMpsInteractionV1(): PromptEnhancementCliMpsInteractionV1 |
     resolve(key?.sequence ?? str ?? '');
   };
   input.on('keypress', onKeypress);
+  // Repaint on window resize (parity with the PE shell): a spawned terminal often opens at a
+  // default small size and is resized to its real geometry a moment later. Resolve the pending
+  // read with an empty sentinel so the shell loop re-renders at the new size (the empty key is a
+  // no-op in the reducer). Without this, MPS stayed stuck at the initial small height — a tiny
+  // body with dead space below (live iMac/Windows report 2026-08-07).
+  const onResize = (): void => {
+    if (closed || !pending) return;
+    const { resolve } = pending;
+    pending = null;
+    resolve('');
+  };
+  output.on('resize', onResize);
 
   return {
     size() {
@@ -350,6 +376,7 @@ function createDefaultMpsInteractionV1(): PromptEnhancementCliMpsInteractionV1 |
       closed = true;
       try { output.write(`${ESC}[?25h`); } catch { /* fd may already be closed */ }
       input.off('keypress', onKeypress);
+      output.off('resize', onResize);
       if (input.isTTY) input.setRawMode?.(false);
       input.pause();
       if (owned) {

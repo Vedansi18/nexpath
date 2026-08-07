@@ -152,6 +152,24 @@ describe('MPS CLI wiring (owner ruling 2026-08-06: CLI complete, extension pendi
     }
   });
 
+  it('the body FILLS the window height (owner request 2026-08-07 — no dead space below the footer)', async () => {
+    const result = await preparePromptEnhancement(request(MULTI_INTENT));
+    // At several window heights the enhanced body must expand so the frame uses the window down
+    // to (rows-1), never leaving a large empty gap AND never overflowing (which would scroll).
+    for (const rows of [30, 40, 50]) {
+      const ui = { ...scripted([KEY.escape]), size: () => ({ columns: 100, rows }) };
+      await runPromptEnhancementCliMpsFirstPopupV1({ result, interaction: ui });
+      const frame = ui.frames[0]!;
+      const frameLines = frame.split('\n').length;
+      expect(frameLines).toBeLessThanOrEqual(rows - 1); // never overflow -> never scroll/stack
+      // Either the body grew to fill the window (frame reaches near the bottom), or the whole
+      // body is already shown (nothing clipped) — never a tiny body with a large dead gap, which
+      // is what the reservation bug produced (frame pinned ~22 lines regardless of window height).
+      const bodyFullyShown = !frame.includes('more lines below');
+      expect(frameLines >= rows - 3 || bodyFullyShown).toBe(true);
+    }
+  });
+
   it('Cancel opens the PEF feedback popup and ends the flow as cancelled — never the PE popup (owner request)', async () => {
     const result = await preparePromptEnhancement(request(MULTI_INTENT));
     // Down×2 -> Cancel; Enter -> the PEF feedback popup opens; Esc skips feedback -> cancelled.
