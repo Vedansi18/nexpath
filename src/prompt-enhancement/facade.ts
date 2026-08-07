@@ -257,7 +257,12 @@ async function prepare(
     currentBody: candidate.currentBody,
     actionType: noPopup ? 'use_original' : undefined,
     callVisibilityMode: candidate.callVisibilityMode,
-    optionalCallAvailabilityState: candidate.callVisibilityMode === 'deterministic' ? 'deterministic_only' : undefined,
+    // ONE source of truth (TI-2, 2026-08-07): the validation graph must carry the SAME
+    // optionalCallAvailabilityState the composed boundary metadata carries — the result validator
+    // enforces graph === metadata === boundary ('mismatched_call_visibility_state'). The composed
+    // metadata already derived it correctly for every mode, including the provider-failure states
+    // ('unavailable_by_provider_api'), so read it from there instead of re-deriving here.
+    optionalCallAvailabilityState: candidate.composerBoundary.inputContract.callVisibilityState.optionalCallAvailabilityState,
   });
   let safety = validateComposed(composed);
   // Blocked-popup fix part 2 (2026-08-07) — deterministic-fallback safety net. The composer's

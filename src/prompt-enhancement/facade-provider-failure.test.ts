@@ -6,6 +6,12 @@ import {
 } from './contracts.js';
 import { buildPromptEnhancementCostVisibilityMetadataV1 } from './cost-observability.js';
 import { getPromptStartStopSourceSnapshot } from './source-reality.js';
+import {
+  buildPromptEnhancementPopupRenderModelV1,
+  PROMPT_ENHANCEMENT_PROVIDER_FAILURE_NOTICE_V1,
+} from './popup-render-model.js';
+import { validatePromptEnhancementPrepareResultV1 } from './contracts.js';
+import { renderPromptEnhancementPopupFrameV1 } from './cli-submit-popup.js';
 
 // ---------------------------------------------------------------------------
 // TI-2 (2026-08-07) — facade maps the composer's typed failure reason onto the
@@ -76,6 +82,9 @@ describe('TI-2: facade maps composer failure reasons onto the existing runtime s
   it('timeout -> fallback_no_llm / fallbackReason timeout / providerFailureState timeout / LOCKED no-generated-content disposition', async () => {
     mockCall.result = { ok: false, reason: 'timeout' };
     const result = await prepared();
+    // The result MUST pass the boundary validator — otherwise auto.ts would reduce it to
+    // invalid_result and NO popup would open (the regression this assertion guards).
+    expect(validatePromptEnhancementPrepareResultV1(result)).toEqual({ ok: true, reasonCodes: [] });
     expect(result.callAndVisibilityMetadata.callVisibilityMode).toBe('fallback_no_llm');
     expect(result.callAndVisibilityMetadata.plannedCallCount).toBe(1);
     // A provider-unavailable failure counts NO completed billable call (builder forces used 0).
@@ -93,37 +102,69 @@ describe('TI-2: facade maps composer failure reasons onto the existing runtime s
     // The fallback diagnostic reaches the result as its public-safe CATEGORY (the reason code is
     // stripped by the rawReasonValuesExcluded contract — category is the assertable signal).
     expect(result.uiView.diagnostics.some((d) => d.category === 'fallback_or_no_popup')).toBe(true);
+    // TI-2 UI half (end-to-end): the popup MODEL carries the public-safe failure notice and the
+    // FRAME renders it persistently — the user is SHOWN the failure (locked disposition part a).
+    const rendered = buildPromptEnhancementPopupRenderModelV1({ result, timestampMs: Date.now(), deliverySurface: result.delivery.deliveryChannel });
+    expect(rendered.state).toBe('render_model_ready');
+    if (rendered.state !== 'render_model_ready') return;
+    expect(rendered.model.providerFailureNotice).toBe(PROMPT_ENHANCEMENT_PROVIDER_FAILURE_NOTICE_V1);
+    const view = { model: rendered.model, editedBodyText: rendered.model.body.text, additionalDetailsText: '' };
+    const frame0 = renderPromptEnhancementPopupFrameV1(view, { focusIndex: 0, helpExpanded: false });
+    const frame2 = renderPromptEnhancementPopupFrameV1(view, { focusIndex: 2, helpExpanded: false });
+    expect(frame0).toContain(PROMPT_ENHANCEMENT_PROVIDER_FAILURE_NOTICE_V1);
+    expect(frame2).toContain(PROMPT_ENHANCEMENT_PROVIDER_FAILURE_NOTICE_V1); // persists across focus moves
+    // Yellow caution tone in colour mode; appears exactly once per frame.
+    const colored = renderPromptEnhancementPopupFrameV1(view, { focusIndex: 0, helpExpanded: false, colorize: true });
+    const ESC = String.fromCharCode(27);
+    expect(colored).toContain(`${ESC}[33m${PROMPT_ENHANCEMENT_PROVIDER_FAILURE_NOTICE_V1}`);
+    expect(frame0.split(PROMPT_ENHANCEMENT_PROVIDER_FAILURE_NOTICE_V1).length - 1).toBe(1);
   });
 
   it('provider_error -> provider_unavailable mode / fallbackReason provider_unavailable / no generated content', async () => {
     mockCall.result = { ok: false, reason: 'provider_error' };
     const result = await prepared();
+    // The result MUST pass the boundary validator — otherwise auto.ts would reduce it to
+    // invalid_result and NO popup would open (the regression this assertion guards).
+    expect(validatePromptEnhancementPrepareResultV1(result)).toEqual({ ok: true, reasonCodes: [] });
     expect(result.callAndVisibilityMetadata.callVisibilityMode).toBe('provider_unavailable');
     expect(result.callAndVisibilityMetadata.fallbackReason).toBe('provider_unavailable');
     expect(result.callAndVisibilityMetadata.providerFailureState).toBe('provider_api_unavailable');
     expect(result.disposition).toBe('fallback_to_original');
     expect(result.currentBody.sections).toEqual([]);
     expect(result.uiView.diagnostics.some((d) => d.category === 'fallback_or_no_popup')).toBe(true);
+    const rendered = buildPromptEnhancementPopupRenderModelV1({ result, timestampMs: Date.now(), deliverySurface: result.delivery.deliveryChannel });
+    expect(rendered.state === 'render_model_ready' && rendered.model.providerFailureNotice).toBe(PROMPT_ENHANCEMENT_PROVIDER_FAILURE_NOTICE_V1);
   });
 
   it('invalid_output -> fallback_no_llm with fallbackReason validation_failed; body renders the FULL deterministic sections', async () => {
     mockCall.result = { ok: false, reason: 'invalid_output' };
     const result = await prepared();
+    // The result MUST pass the boundary validator — otherwise auto.ts would reduce it to
+    // invalid_result and NO popup would open (the regression this assertion guards).
+    expect(validatePromptEnhancementPrepareResultV1(result)).toEqual({ ok: true, reasonCodes: [] });
     expect(result.callAndVisibilityMetadata.callVisibilityMode).toBe('fallback_no_llm');
     expect(result.callAndVisibilityMetadata.fallbackReason).toBe('validation_failed');
     expect(result.callAndVisibilityMetadata.providerFailureState).toBe('none');
     // invalid_output falls back to the normal deterministic BODY (not the original-only shell).
     expect(result.disposition).toBe('show_current_body');
     expect(result.currentBody.sections.length).toBeGreaterThan(0);
+    // No provider-failure notice for invalid_output (per the UI fix plan): frame unchanged.
+    const rendered = buildPromptEnhancementPopupRenderModelV1({ result, timestampMs: Date.now(), deliverySurface: result.delivery.deliveryChannel });
+    expect(rendered.state === 'render_model_ready' && rendered.model.providerFailureNotice).toBeUndefined();
   });
 
   it('no_key stays byte-identical to "genuinely not requested" (deterministic / 0 / 0)', async () => {
     mockCall.result = { ok: false, reason: 'no_key' };
     const result = await prepared();
+    // The result MUST pass the boundary validator — otherwise auto.ts would reduce it to
+    // invalid_result and NO popup would open (the regression this assertion guards).
+    expect(validatePromptEnhancementPrepareResultV1(result)).toEqual({ ok: true, reasonCodes: [] });
     expect(result.callAndVisibilityMetadata.callVisibilityMode).toBe('deterministic');
     expect(result.callAndVisibilityMetadata.plannedCallCount).toBe(0);
     expect(result.callAndVisibilityMetadata.usedCallCount).toBe(0);
     expect(result.callAndVisibilityMetadata.providerFailureState).toBe('none');
     expect(result.disposition).toBe('show_current_body');
+    const rendered = buildPromptEnhancementPopupRenderModelV1({ result, timestampMs: Date.now(), deliverySurface: result.delivery.deliveryChannel });
+    expect(rendered.state === 'render_model_ready' && rendered.model.providerFailureNotice).toBeUndefined();
   });
 });

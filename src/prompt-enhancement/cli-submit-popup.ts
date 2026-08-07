@@ -663,6 +663,8 @@ const PROMPT_ENHANCEMENT_CLI_SGR_V1 = (() => {
     // 16-colour that stays readable on every terminal (owner request 2026-08-07: keep it
     // properly visible on all OSes, unlike the faint attribute).
     lightYellow: `${e}[93m`,
+    // Caution tone (normal yellow) — the provider-failure notice; matches the MPS Cancel row.
+    yellow: `${e}[33m`,
     dim: `${e}[2m`,
     bold: `${e}[1m`,
     reset: `${e}[0m`,
@@ -704,6 +706,14 @@ export function renderPromptEnhancementPopupFrameV1(
   if (model.whyHelp) {
     const why = publicText(model.whyHelp.text);
     lines.push(c ? `${c.gray}${why}${c.reset}` : why);
+  }
+  // TI-2 UI half (2026-08-07, locked disposition): on a REAL provider failure the user must be
+  // SHOWN it happened. One persistent public-safe line, yellow caution tone, every repaint —
+  // display only (no control/behaviour keys on it). Absent on every non-failure run, so normal
+  // frames stay byte-identical.
+  if (model.providerFailureNotice) {
+    const notice = publicText(model.providerFailureNotice);
+    lines.push(c ? `${c.yellow}${notice}${c.reset}` : notice);
   }
   lines.push('');
 
