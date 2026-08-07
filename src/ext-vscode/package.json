@@ -73,6 +73,11 @@
           "id": "nexpath.status",
           "name": "Nexpath",
           "type": "webview"
+        },
+        {
+          "id": "nexpath.promptEnhancement",
+          "name": "Prompt Enhancement",
+          "type": "webview"
         }
       ]
     },

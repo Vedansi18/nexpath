@@ -5,6 +5,10 @@ import {
   NexpathDecisionSessionViewProvider,
   VIEW_ID,
 } from './webview/view-provider.js';
+import {
+  NexpathPromptEnhancementViewProvider,
+  PE_VIEW_ID,
+} from './webview/pe-view-provider.js';
 import { handleOptionSelection } from './webview/prompt-injection.js';
 import {
   detectHost,
@@ -50,6 +54,7 @@ const FALLBACK_HINT_KEY = 'nexpath.fallbackHintShown';
  * outside the natural watcher → pipeline → view-provider chain.
  */
 let viewProvider: NexpathDecisionSessionViewProvider | undefined;
+let peViewProvider: NexpathPromptEnhancementViewProvider | undefined;
 let watcher: ChatHistoryWatcher | undefined;
 let advisoryPoller: AdvisoryPoller | undefined;
 let logChannel: vscode.OutputChannel | undefined;
@@ -235,6 +240,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   );
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(VIEW_ID, viewProvider),
+  );
+
+  // P5 (VED-PE-2): PE gets its own view, never sharing state or markup with
+  // the DS view above. Rendering-only for now — message routing (P6),
+  // validation gating (P7), and typed delivery (P8) are later phases; this
+  // registration's only job right now is to make the renderer real and
+  // reachable, not to wire a live data path into it yet.
+  peViewProvider = new NexpathPromptEnhancementViewProvider(context.extensionUri);
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(PE_VIEW_ID, peViewProvider),
   );
 
   // 2b. In-editor advisory fallback. Layer C's terminal popup is the primary
@@ -536,10 +551,16 @@ export function deactivate(): void {
   advisoryPoller?.stop();
   advisoryPoller = undefined;
   viewProvider = undefined;
+  peViewProvider = undefined;
   logChannel = undefined;
 }
 
 /** Lookup for other extension modules that want to publish payloads. */
 export function getViewProvider(): NexpathDecisionSessionViewProvider | undefined {
   return viewProvider;
+}
+
+/** Lookup for other extension modules that want to publish PE payloads. */
+export function getPeViewProvider(): NexpathPromptEnhancementViewProvider | undefined {
+  return peViewProvider;
 }

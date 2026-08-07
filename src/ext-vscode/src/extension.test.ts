@@ -6,6 +6,7 @@ const {
   mockShowOnboarding,
   mockRegisterWebviewViewProvider,
   mockProviderCtor,
+  mockPeProviderCtor,
   mockDetectHost,
   mockWorkspaceStorageDir,
   mockWindsurfCodeiumDir,
@@ -21,6 +22,7 @@ const {
   mockShowOnboarding: vi.fn(),
   mockRegisterWebviewViewProvider: vi.fn(),
   mockProviderCtor: vi.fn(),
+  mockPeProviderCtor: vi.fn(),
   mockDetectHost: vi.fn(() => 'vscode-generic'),
   mockWorkspaceStorageDir: vi.fn(() => null),
   mockWindsurfCodeiumDir: vi.fn(() => '/home/u/.codeium/windsurf'),
@@ -71,6 +73,15 @@ vi.mock('./webview/view-provider.js', () => ({
   NexpathDecisionSessionViewProvider: class {
     constructor(...args: unknown[]) {
       mockProviderCtor(...args);
+    }
+    publishPayload(): void {}
+  },
+}));
+vi.mock('./webview/pe-view-provider.js', () => ({
+  PE_VIEW_ID: 'nexpath.promptEnhancement',
+  NexpathPromptEnhancementViewProvider: class {
+    constructor(...args: unknown[]) {
+      mockPeProviderCtor(...args);
     }
     publishPayload(): void {}
   },
@@ -149,6 +160,7 @@ describe('activate', () => {
     mockShowOnboarding.mockReset();
     mockRegisterWebviewViewProvider.mockReset();
     mockProviderCtor.mockReset();
+    mockPeProviderCtor.mockReset();
     mockDetectHost.mockReset().mockReturnValue('vscode-generic');
     mockWorkspaceStorageDir.mockReset().mockReturnValue(null);
     mockWindsurfCodeiumDir.mockReset().mockReturnValue('/home/u/.codeium/windsurf');
@@ -189,11 +201,14 @@ describe('activate', () => {
     expect(mockShowOnboarding).toHaveBeenCalledWith(ctx);
   });
 
-  it('registers the view provider on every activation regardless of consent', async () => {
+  it('registers both the DS and PE view providers on every activation regardless of consent', async () => {
     mockShowOnboarding.mockResolvedValueOnce(undefined);
     await activate(makeCtx(false) as never); // user denied
     expect(mockProviderCtor).toHaveBeenCalledOnce();
-    expect(mockRegisterWebviewViewProvider).toHaveBeenCalledOnce();
+    expect(mockPeProviderCtor).toHaveBeenCalledOnce();
+    expect(mockRegisterWebviewViewProvider).toHaveBeenCalledTimes(2);
+    expect(mockRegisterWebviewViewProvider).toHaveBeenCalledWith('nexpath.status', expect.anything());
+    expect(mockRegisterWebviewViewProvider).toHaveBeenCalledWith('nexpath.promptEnhancement', expect.anything());
   });
 
   it('does NOT start the watcher when consent is undefined (first launch, user has not answered)', async () => {
@@ -555,6 +570,7 @@ describe('deactivate', () => {
     mockShowOnboarding.mockReset();
     mockRegisterWebviewViewProvider.mockReset();
     mockProviderCtor.mockReset();
+    mockPeProviderCtor.mockReset();
     mockDetectHost.mockReset().mockReturnValue('vscode-generic');
     mockWorkspaceStorageDir.mockReset().mockReturnValue(null);
     mockWindsurfCodeiumDir.mockReset().mockReturnValue('/home/u/.codeium/windsurf');
