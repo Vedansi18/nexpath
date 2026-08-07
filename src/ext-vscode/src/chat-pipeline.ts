@@ -24,6 +24,19 @@ import type { StopSelection } from './ipc.js';
  *      fallback. No selection (dismissed / no-advisory / popup couldn't open) →
  *      the armed fallback stays as the escape hatch.
  *
+ * **PE branch (VED-PE-10 / D-6, additive — DS behaviour above is unchanged
+ * when the three optional PE deps are omitted):**
+ *   0. Before any of the above: `isPeEcho` (if provided) checks whether this
+ *      event is a self-echo of a PE body the extension itself just injected
+ *      (F6). If so, the handler returns immediately — no `auto`/`stop` at all.
+ *   3a. Right after `auto` succeeds, `checkPeOrigin` (if provided) decides
+ *       from typed store evidence — never from Stop's returned text — whether
+ *       THIS turn parked a Prompt Enhancement rather than a DS advisory.
+ *   4a. A PE-origin result routes to `injectPeResult` instead of step 4's
+ *       `injectSelection`. Omitting `injectPeResult` falls back to step 4
+ *       unchanged, so a partial wiring degrades safely rather than dropping
+ *       the result.
+ *
  * **Timing simplification for B5 smoke test:** `auto` and `stop` are
  * called back-to-back. In production we'd want `stop` to fire after the
  * agent's response completes (so the advisory has the latest context),
