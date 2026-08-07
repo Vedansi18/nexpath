@@ -42,6 +42,8 @@ import { emitPromptEnhancementCostObservabilityV1 } from '../../prompt-enhanceme
 import { evaluatePromptEnhancementMpsIntakeDecisionV1 } from '../../prompt-enhancement/intake-decision.js';
 import { buildPromptEnhancementCliMpsIntakeEvidenceV1 } from '../../prompt-enhancement/cli-mps-intake-evidence.js';
 import { runPromptEnhancementCliMpsFirstPopupV1, buildPromptEnhancementMpsCancelFeedbackEventV1 } from '../../prompt-enhancement/cli-mps-run.js';
+import { intakePromptEnhancementSequenceOnFirstSendV1 } from '../../prompt-enhancement/sequence-intake.js';
+import { upsertPendingPromptSequence } from '../../store/pending-sequences.js';
 import type { GeneratedOptions } from '../../decision-session/OptionGenerator.js';
 import { resolveContentSource, selectionRegister } from '../../decision-session/selection-registry.js';
 import { autogenAwareLookup, pinchSignalTypeForFlag } from '../../decision-session/content-template-source.js';
@@ -534,6 +536,28 @@ export function registerStopCommand(program: import('commander').Command): void 
               if (mps.state === 'send' && mps.bodyText.trim().length > 0) {
                 recordPromptEnhancementShownMemoryV1(store, payload.cwd, pending.request);
                 markPromptEnhancementUsedMemoryV1(store, payload.cwd, pending.request);
+                // Continuation bookkeeping (2026-08-08): the user EXPLICITLY sent the first
+                // sequence prompt — record the local pending-sequence row (ids/counts only,
+                // never prompt text). Fail-closed typed no-op on any invalid handoff; the row
+                // authorizes nothing by itself (the runtime gate stays the popup authority),
+                // and nothing reads it until the continuation launcher exists.
+                const sequenceIntake = intakePromptEnhancementSequenceOnFirstSendV1({
+                  result: pending.result,
+                  projectRoot: payload.cwd,
+                  // The pending PE row's session is the one that prepared this sequence — the
+                  // continuation row binds to it (a foreign-session row is scrubbed on read).
+                  sessionId: pending.sessionId,
+                });
+                if (sequenceIntake.state === 'sequence_recorded') {
+                  upsertPendingPromptSequence(store, sequenceIntake.runtime);
+                }
+                logger.debug('stop_mps_sequence_intake', {
+                  cwd: payload.cwd,
+                  state: sequenceIntake.state,
+                  ...(sequenceIntake.state === 'sequence_recorded'
+                    ? { itemCount: sequenceIntake.runtime.itemCount }
+                    : { reasonCode: sequenceIntake.reasonCode }),
+                });
                 return { kind: 'inject', text: mps.bodyText };
               }
               if (mps.state === 'cancelled') {
