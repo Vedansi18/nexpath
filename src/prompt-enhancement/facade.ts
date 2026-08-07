@@ -15,10 +15,23 @@ import {
   type PromptEnhancementUiViewPayloadV1,
   type PromptEnhancementWhyHelpV1,
 } from './contracts.js';
-import { composePromptEnhancementBody, type PromptEnhancementComposeResult } from './compose-enhancement.js';
+import {
+  composePromptEnhancementBody,
+  type PromptEnhancementComposeResult,
+  type PromptEnhancementStructuredComposerOutputV1,
+} from './compose-enhancement.js';
+import { composeStructuredComposerOutputV1 } from './llm-composer.js';
+import { isPromptEnhancementNlpHeavyCaseV1 } from './composer-gate.js';
+import { decidePromptEnhancementRouteViaLlmV1 } from './llm-route-decision.js';
+import { isValidApiKey } from '../config/ApiKeyResolver.js';
 import { planPromptEnhancementSections } from './templates/section-plan.js';
-import { routePromptEnhancement, type PromptEnhancementCapabilityId } from './routing-taxonomy.js';
+import { routePromptEnhancement, type PromptEnhancementCapabilityId, type PromptEnhancementRouteInput } from './routing-taxonomy.js';
+import { buildPromptEnhancementGuidanceFactsV1 } from './guidance-facts.js';
+import { resolvePromptEnhancementSourceConflictsV1 } from './conflict-resolution.js';
+import { applyPromptEnhancementSourceMixV1 } from './source-mix.js';
+import { applyPromptEnhancementGuidanceGateV1 } from './guidance-gate.js';
 import { buildPromptEnhancementPinchLabelV1, buildPromptEnhancementWhyHelpV1 } from './pe-header-copy.js';
+import { buildPromptEnhancementHandoffMetadataV1, validatePromptEnhancementHandoffMetadataV1 } from './handoff-metadata.js';
 import {
   validatePromptEnhancementSafety,
   type PromptEnhancementSafetyValidationResult,
@@ -65,13 +78,22 @@ export const applyPromptEnhancementAction: PromptEnhancementActionFacadeV1 = asy
   return rebuildWithSafety(base, originalSafety, 'fallback_to_original');
 };
 
+// E6: soft deterministic-route skips an LLM route decision may rescue (the keyword
+// router gave up because the prompt has no explicit intent / is weak-ambiguous).
+// Hard-guard skips (degraded classifier, old/generated origin, first-trigger gate) are
+// deliberately excluded.
+const LLM_ROUTE_RESCUABLE_SKIP_REASONS: ReadonlySet<string> = new Set([
+  'source_b_only_cannot_open_popup',
+  'ambiguous_weak_evidence_skip_no_popup',
+]);
+
 async function prepare(
   request: PromptEnhancementPrepareRequestV1,
   action?: PromptEnhancementActionRequestV1['action']['actionType'],
   actionRequest?: PromptEnhancementActionRequestV1,
 ): Promise<PromptEnhancementPrepareResultV1> {
   const enhancementId = `pe:${request.requestId}`;
-  const route = routePromptEnhancement({
+  const routeInput: PromptEnhancementRouteInput = {
     routeDecisionId: `${enhancementId}:route`,
     promptText: request.sourcePrompt.text,
     currentStage: request.reviewMomentContext.triggerProvenance.currentStage,
@@ -101,16 +123,79 @@ async function prepare(
       ? 'pe_generated'
       : 'ordinary_user_prompt',
     oldDecisionSessionPayloadPresent: false,
-  });
+  };
+  let route = routePromptEnhancement(routeInput);
+
+  // E6: for a baseline prepare where the deterministic keyword router SOFT-skipped an
+  // NL-heavy prompt it could not route (no explicit intent / weak-ambiguous), ask the
+  // bounded LLM to decide the real route and re-route with it. Gated on a valid key so
+  // the suite (no key) keeps the deterministic route; any LLM failure -> keep the
+  // deterministic skip (the mandatory fallback). Hard-guard skips (old/generated
+  // origin, degraded classifier, first-trigger gate) are NOT rescued. The LLM may
+  // still legitimately decide skip_no_useful_guidance.
+  if (
+    action === undefined &&
+    route.noPopup &&
+    route.reasonCodes.some((reason) => LLM_ROUTE_RESCUABLE_SKIP_REASONS.has(reason)) &&
+    isValidApiKey(process.env['OPENAI_API_KEY'] ?? '')
+  ) {
+    const llmRouteDecision = await decidePromptEnhancementRouteViaLlmV1({
+      promptText: request.sourcePrompt.text,
+      deterministicFamilyId: route.familyId,
+      deterministicPrimaryIntent: route.primaryIntent,
+    });
+    if (llmRouteDecision) {
+      route = routePromptEnhancement(routeInput, llmRouteDecision);
+    }
+  }
+
+  // E2 guidance pipeline: source signals -> typed facts -> cross-lane conflict
+  // resolution -> transform-rule-2 dual-lane source mix -> DR2-G1 gate. The mix's rendered
+  // facts feed section planning; the gate can force skip_no_popup when there is no
+  // useful Source-A survivor (never a filler body).
+  const guidanceFacts = buildPromptEnhancementGuidanceFactsV1(request);
+  const resolvedFacts = resolvePromptEnhancementSourceConflictsV1(guidanceFacts).facts;
+  const sourceMix = applyPromptEnhancementSourceMixV1(resolvedFacts, request.userPreferenceContext.levelState);
+  const guidanceGate = applyPromptEnhancementGuidanceGateV1(sourceMix);
+  const noPopup = route.noPopup || !guidanceGate.show;
 
   const planning = planPromptEnhancementSections({
     routeResult: route,
     sourceRefs: request.sourceSignals.sourceRefs,
+    guidanceFacts: sourceMix.renderedFacts,
   });
+
+  // E4: bounded LLM composer wording for a shown, NLP-heavy popup on the baseline
+  // compose (no action). Gated on a valid key so the whole test suite (no key) and
+  // any obvious/clear prompt render deterministically. Any failure -> undefined ->
+  // composePromptEnhancementBody validates + falls back deterministically.
+  // E8: a directional action (Shorter / More-thorough / More-project-grounded /
+  // Owner decision (2026-08-06): the interactive popup actions (Shorter / More-thorough /
+  // More-project-grounded / Apply-details) must stay INSTANT — deterministic recompose only,
+  // exactly like before. An in-popup LLM wait reads as a frozen popup, so the bounded LLM
+  // wording call runs ONLY on the initial prepare (action === undefined, in the background
+  // before the popup shows), never inside the popup interaction. The composer's
+  // action-directive seam stays available for a future non-blocking use.
+  const wantsLlmWording = action === undefined && isPromptEnhancementNlpHeavyCaseV1(route);
+  let structuredComposerOutput: PromptEnhancementStructuredComposerOutputV1 | undefined;
+  if (
+    wantsLlmWording &&
+    !noPopup &&
+    isValidApiKey(process.env['OPENAI_API_KEY'] ?? '')
+  ) {
+    structuredComposerOutput = await composeStructuredComposerOutputV1({
+      enhancementId,
+      originalPromptText: request.sourcePrompt.text,
+      planning,
+    });
+  }
+
   const composed = composePromptEnhancementBody({
     enhancementId,
     originalPromptText: request.sourcePrompt.text,
     sectionPlanningResult: planning,
+    composerRuntimeState: structuredComposerOutput ? 'accepted_structured_output' : undefined,
+    structuredComposerOutput,
     action: action === 'use_original' || action === 'feedback' || action === 'close' || action === 'use_current_body'
       ? undefined
       : action,
@@ -123,11 +208,11 @@ async function prepare(
   });
   const safety = validatePromptEnhancementSafety({
     currentBody: composed.currentBody,
-    actionType: route.noPopup ? 'use_original' : undefined,
+    actionType: noPopup ? 'use_original' : undefined,
     callVisibilityMode: composed.callVisibilityMode,
     optionalCallAvailabilityState: composed.callVisibilityMode === 'deterministic' ? 'deterministic_only' : undefined,
   });
-  return buildResult(request, enhancementId, route, planning, composed, safety);
+  return buildResult(request, enhancementId, route, planning, composed, safety, noPopup);
 }
 
 function buildResult(
@@ -137,39 +222,95 @@ function buildResult(
   planning: ReturnType<typeof planPromptEnhancementSections>,
   composed: PromptEnhancementComposeResult,
   safety: PromptEnhancementSafetyValidationResult,
+  // Effective no-popup = route.noPopup OR the DR2-G1 gate skip (no useful Source-A
+  // survivor / weak evidence). Both collapse to the same not-applicable disposition.
+  noPopup: boolean,
 ): PromptEnhancementPrepareResultV1 {
   const currentBody: PromptEnhancementCurrentBodyV1 = {
     ...composed.currentBody,
     generatedSafeStatus: safety.generatedSafeStatus,
   };
-  const disposition = dispositionFor(route.noPopup, currentBody, safety);
+  const disposition = dispositionFor(noPopup, currentBody, safety);
+  const blockedNoSend = disposition === 'blocked_no_send';
+  // D2 4a (P6-G1 / decision-rule-5): on a hard block, make the engine payload self-safe AT SOURCE. A host
+  // reading the result DIRECTLY (before the typed UI layers scrub it) must not receive the offending
+  // generated content from ANY field. The full-body fields fall back to the user's own original
+  // prompt (the use_original fallback); the per-section text is emptied (a blocked section has no
+  // safe per-section fallback). The send policy already forbids transport and the UI layers exclude
+  // it too — defense-in-depth (engine + every UI layer), not one terminal scrub. Fields carrying the
+  // generated body: currentBody.text / .renderedPromptBody / .sections[].bodyText and the composer
+  // boundary's renderedPromptBody (audit copy) — all covered here; every other result text field is
+  // deterministic UI copy or request input.
+  const safeCurrentBody: PromptEnhancementCurrentBodyV1 = blockedNoSend
+    ? {
+        ...currentBody,
+        text: currentBody.originalPromptText,
+        renderedPromptBody: currentBody.originalPromptText,
+        sections: currentBody.sections.map((section) => ({ ...section, bodyText: '' })),
+      }
+    : currentBody;
+  const safeComposerBoundary = blockedNoSend
+    ? { ...composed.composerBoundary, renderedPromptBody: composed.currentBody.originalPromptText }
+    : composed.composerBoundary;
   const diagnostics = diagnosticsFor(enhancementId, [...composed.diagnostics, ...safety.publicDiagnostics]);
   const composerCallVisibility = composed.composerBoundary.inputContract.callVisibilityState;
   const callAndVisibilityMetadata = {
     ...composerCallVisibility,
-    callOwner: 'hiren_content_api' as const,
+    callOwner: 'content_semantics' as const,
     callTrigger: 'prepare' as const,
     productValueDiscussionIsRuntimeLimiter: false as const,
   };
   const validationSummary = safety.safetySummary;
   const generatedOrigin = buildGeneratedOrigin(request, enhancementId, currentBody);
-  const delivery = buildDelivery(request, safety, route.noPopup);
+  const delivery = buildDelivery(request, safety, noPopup);
   const trustCues = buildTrustCues(currentBody, composed.sourceGuidanceCoverage, safety);
-  // UI-9 / PE-AR-10: deterministic header copy — pinch label always (when a popup
+  // UI-9 / transform-rule-10: deterministic header copy — pinch label always (when a popup
   // shows), why-help only when a safety/risk/sensitive-action reason exists.
-  const pinchLabel = route.noPopup
+  const pinchLabel = noPopup
     ? undefined
     : buildPromptEnhancementPinchLabelV1({ familyId: route.familyId, capabilityOverlays: route.capabilityOverlays });
-  const whyHelp = route.noPopup
+  const whyHelp = noPopup
     ? undefined
     : buildPromptEnhancementWhyHelpV1({
         capabilityOverlays: route.capabilityOverlays,
         hasSensitiveAction: safety.sensitiveActionFindings.some((finding) => finding.requiresConfirmation),
       });
+  // MPS (owner ruling 2026-08-06): for a compound prompt the engine emits the typed
+  // handoff/sequence summary so the CLI MPS first popup can render the sequence plan. Compound =
+  // multiple intent families in one prompt, OR a genuine multi-step list of the same family
+  // (>= 3 user points — "schema, cron job, email sender, and the widget"; a plain "add X and Y"
+  // stays on the PE popup). Metadata only — the builder itself locks
+  // `sequenceActivationPolicy: blocked_pending_…` and `receiverCanActivateRuntime: false`.
+  const compoundPromptState = route.contractDecision.compoundPromptState;
+  const isSequenceCandidate = compoundPromptState === 'multi_intent_one_prompt'
+    || (compoundPromptState === 'multi_point_same_intent' && route.contractDecision.userPointCoverageRefs.length >= 3);
+  let handoffAndSequenceSummary = !noPopup && disposition === 'show_current_body' && isSequenceCandidate
+    ? buildPromptEnhancementHandoffMetadataV1({
+        handoffDecisionId: `${enhancementId}:handoff`,
+        requestId: request.requestId,
+        projectRoot: request.projectRoot,
+        currentBody: safeCurrentBody,
+        safetySummary: validationSummary,
+        handoffKind: 'compact_sequence_summary_candidate',
+      })
+    : undefined;
+  // Self-guard: emit the summary ONLY if it passes the same handoff validation the boundary
+  // enforces — a summary that would make the whole result invalid must never cost the user the
+  // PE popup (drop the summary, keep the result; MPS simply skips for that prompt).
+  if (handoffAndSequenceSummary) {
+    const handoffValidation = validatePromptEnhancementHandoffMetadataV1(
+      handoffAndSequenceSummary,
+      safeCurrentBody,
+      validationSummary,
+      { requestId: request.requestId, projectRoot: request.projectRoot },
+    );
+    if (!handoffValidation.ok) handoffAndSequenceSummary = undefined;
+  }
   const uiView: PromptEnhancementUiViewPayloadV1 = {
-    ...buildUiView(request, enhancementId, currentBody, composed, safety, trustCues, diagnostics, route.noPopup),
+    ...buildUiView(request, enhancementId, safeCurrentBody, composed, safety, trustCues, diagnostics, noPopup),
     ...(pinchLabel ? { pinchLabel } : {}),
     ...(whyHelp ? { whyHelp } : {}),
+    ...(handoffAndSequenceSummary ? { handoffAndSequenceSummary } : {}),
   };
 
   return {
@@ -177,14 +318,14 @@ function buildResult(
     enhancementId,
     requestId: request.requestId,
     projectRoot: request.projectRoot,
-    modelVersion: 'pe-ar10-deterministic-v1',
+    modelVersion: composed.callVisibilityMode === 'llm_wording' ? 'llm-wording-v1' : 'deterministic-v1',
     disposition,
     validationDecisionId: safety.validationDecisionId,
-    currentBody,
+    currentBody: safeCurrentBody,
     availableActions: composed.availableActions,
-    sourceGuidanceCoverage: route.noPopup ? 'not_applicable' : composed.sourceGuidanceCoverage,
+    sourceGuidanceCoverage: noPopup ? 'not_applicable' : composed.sourceGuidanceCoverage,
     routingAndFeedbackDecision: {
-      state: route.noPopup ? 'suppress' : route.fallbackMode === 'planning_first' ? 'clarify' : 'show',
+      state: noPopup ? 'suppress' : route.fallbackMode === 'planning_first' ? 'clarify' : 'show',
       confidence: routeConfidence(route.routeConfidence),
       reasonCodes: route.reasonCodes,
       scopedPromptKindKey: route.primaryIntent,
@@ -197,7 +338,7 @@ function buildResult(
     },
     routeDecision: route.contractDecision,
     bodyPlan: planning.bodyPlan,
-    composerBoundary: composed.composerBoundary,
+    composerBoundary: safeComposerBoundary,
     validationSummary,
     safetySummary: validationSummary,
     validationGraph: safety.validationGraph,
@@ -206,7 +347,7 @@ function buildResult(
     generatedOrigin,
     delivery,
     ownership: {
-      owners: ['hiren_content_api', 'bhavnesh_ui_app'],
+      owners: ['content_semantics', 'ui_app'],
       sourceSnapshotVersion: PROMPT_ENHANCEMENT_CONTRACT_VERSION,
       fixtureIds: [...route.contractDecision.registryLinkedFixtureIds],
       launchBoundaryRecheckRef: 'launch_boundary_recheck_pending',
@@ -482,4 +623,43 @@ function buildUiView(
     exposesForegroundSafer: false,
     textOnlyDeliveryIsAuthority: false,
   };
+}
+
+/**
+ * Diagnosability (2026-08-06): explain why a prepared result carries NO handoff/sequence summary.
+ * Pure + deterministic — reproduces the emission decision from the result itself so the runtime
+ * (auto.ts) can LOG the exact failing handoff-validation checks that the self-guard, by design,
+ * swallows (the public-diagnostics contract excludes raw reason values). Never throws.
+ */
+export function explainPromptEnhancementSequenceSummaryAbsenceV1(
+  request: PromptEnhancementPrepareRequestV1,
+  result: PromptEnhancementPrepareResultV1,
+): readonly string[] {
+  try {
+    if (result.uiView.handoffAndSequenceSummary) return ['summary_present'];
+    if (result.disposition !== 'show_current_body') return [`disposition:${result.disposition}`];
+    const compound = result.routeDecision.compoundPromptState;
+    const isCandidate = compound === 'multi_intent_one_prompt'
+      || (compound === 'multi_point_same_intent' && result.routeDecision.userPointCoverageRefs.length >= 3);
+    if (!isCandidate) return [`not_sequence_candidate:${compound}`];
+    const handoff = buildPromptEnhancementHandoffMetadataV1({
+      handoffDecisionId: `${result.enhancementId}:handoff`,
+      requestId: request.requestId,
+      projectRoot: request.projectRoot,
+      currentBody: result.currentBody,
+      safetySummary: result.validationSummary,
+      handoffKind: 'compact_sequence_summary_candidate',
+    });
+    const validation = validatePromptEnhancementHandoffMetadataV1(
+      handoff,
+      result.currentBody,
+      result.validationSummary,
+      { requestId: request.requestId, projectRoot: request.projectRoot },
+    );
+    return validation.ok
+      ? ['validation_ok_summary_unexpectedly_absent']
+      : ['summary_dropped_by_validation', ...validation.reasonCodes.slice(0, 6)];
+  } catch (error) {
+    return [`explain_failed:${error instanceof Error ? error.name : 'unknown'}`];
+  }
 }

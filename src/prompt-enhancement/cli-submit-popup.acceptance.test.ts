@@ -70,7 +70,7 @@ function evaluatePromptEnhancementCliAcceptanceV1(
   }
 
   // The editor heading is allowed exactly once; a second occurrence is a
-  // forbidden separate enhanced-send/confirmation row (B1.1).
+  // forbidden separate enhanced-send/confirmation row (stage-1-1).
   const headingOccurrences = frame.split(PROMPT_ENHANCEMENT_EDITOR_HEADING).length - 1;
   if (headingOccurrences > 1) violations.push('second_enhanced_send_row');
 

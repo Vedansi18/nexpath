@@ -191,7 +191,7 @@ describe('prompt-enhancement routing and taxonomy', () => {
     const inventory = getPromptEnhancementG1AApprovalInventory();
 
     expect(inventory.gateId).toBe('routing_taxonomy_approval_inventory');
-    expect(inventory.status).toBe('pending_hiren_review');
+    expect(inventory.status).toBe('pending_owner_review');
     expect(inventory.families).toEqual(PROMPT_ENHANCEMENT_FAMILIES);
     expect(inventory.routeFixtureIds.length).toBe(PROMPT_ENHANCEMENT_TAXONOMY_PRESETS.length);
     expect(inventory.evaluationFixtureIds.length).toBe(PROMPT_ENHANCEMENT_TAXONOMY_PRESETS.length);
@@ -213,7 +213,7 @@ describe('prompt-enhancement routing and taxonomy', () => {
       expect(preset.conditionalSections.length).toBeGreaterThan(0);
       expect(preset.routeFixtureIds.length).toBeGreaterThan(0);
       expect(preset.evaluationFixtureIds.length).toBeGreaterThan(0);
-      expect(preset.noPopupFixtureId).toMatch(/^pe-ar3-no-popup-/);
+      expect(preset.noPopupFixtureId).toMatch(/^no-popup-/);
     }
     expect(inventory.unsupportedOrDeferredScenarios).toContain('pe_only_classifier');
     expect(inventory.unsupportedOrDeferredScenarios).toContain('source_b_only_popup_authority');
@@ -265,15 +265,15 @@ describe('prompt-enhancement routing and taxonomy', () => {
     for (const section of requiredSections) {
       expect(preset?.requiredSections).toContain(section);
     }
-    expect(preset?.routeFixtureIds[0]).toMatch(/^pe-ar3-route-/);
-    expect(preset?.evaluationFixtureIds[0]).toMatch(/^pe-em3-eval-/);
+    expect(preset?.routeFixtureIds[0]).toMatch(/^route-/);
+    expect(preset?.evaluationFixtureIds[0]).toMatch(/^eval-/);
   });
 
   it.each([
     ...DEBUG_PRIMARY_INTENTS.map((intent) => [intent, ['reproduction', 'evidence', 'verification']] as const),
     ...MAINTENANCE_PRIMARY_INTENTS.map((intent) => [intent, ['verification']] as const),
     ...REVIEW_PRIMARY_INTENTS.map((intent) => [intent, ['finding', 'verification']] as const),
-  ] as const)('keeps locked PE-WR-3 category %s distinct with registry fixture links', (intent, expectedWords) => {
+  ] as const)('keeps locked work-rule-3 category %s distinct with registry fixture links', (intent, expectedWords) => {
     const preset = PROMPT_ENHANCEMENT_TAXONOMY_PRESETS.find((record) => record.primaryIntent === intent);
     const searchableSlots = [
       ...(preset?.requiredSections ?? []),
@@ -351,6 +351,27 @@ describe('prompt-enhancement routing and taxonomy', () => {
     expect(result.contractDecision.registryLinkedFixtureIds.length).toBeGreaterThanOrEqual(2);
     expect(result.contractDecision.usesPeOnlyClassifier).toBe(false);
     expect(result.contractDecision.usesOldStaticDecisionSessionMap).toBe(false);
+  });
+
+  describe('P3-G1 — a build/implement intent is not misrouted by an incidental broad noun', () => {
+    it.each([
+      ['implement a code review tool', 'feature_delivery', 'feature.fresh_implementation'],
+      ['add audit logging', 'feature_delivery', 'feature.fresh_implementation'],
+      ["here's the plan: build a payment module", 'feature_delivery', 'feature.fresh_implementation'],
+    ] as const)('%s -> %s / %s (not review/planning)', (promptText, family, intent) => {
+      const result = routePromptEnhancement(routeInput({ promptText }));
+      expect(result.noPopup).toBe(false);
+      expect(result.familyId).toBe(family);
+      expect(result.primaryIntent).toBe(intent);
+    });
+
+    it('does not over-correct genuine review / planning prompts', () => {
+      expect(routePromptEnhancement(routeInput({ promptText: 'review this code for bugs' })).primaryIntent).toBe('review.code_or_diff_review');
+      expect(routePromptEnhancement(routeInput({ promptText: 'verify the payment fix' })).primaryIntent).toBe('review.verification_request');
+      expect(routePromptEnhancement(routeInput({ promptText: 'write a spec for the new api' })).primaryIntent).toBe('planning.spec_or_prd');
+      // 'build' as a NOUN ("the build process") must not be mistaken for a build intent.
+      expect(routePromptEnhancement(routeInput({ promptText: 'review the build process for issues' })).primaryIntent).toBe('review.verification_request');
+    });
   });
 
   it.each([
@@ -469,13 +490,13 @@ describe('prompt-enhancement routing and taxonomy', () => {
     expect(result.contractDecision.routeEvidence).toEqual(result.routeEvidenceRefs);
     expect(result.contractDecision.llmRoutePolicy).toEqual({
       mode: 'no_call',
-      owner: 'hiren_content_api',
-      peEm1WorksheetRow: 'not_applicable_deterministic',
+      owner: 'content_semantics',
+      costWorksheetRow: 'not_applicable_deterministic',
       freeformRouteOutputAllowed: false,
     });
     expect(result.contractDecision.selectedTemplateRef.registryNamespace).toBe('prompt-enhancement-templates');
-    expect(result.contractDecision.registryLinkedFixtureIds).toContain('pe-ar3-route-issue-debug-failing-test');
-    expect(result.contractDecision.registryLinkedFixtureIds).toContain('pe-em3-eval-issue-debug-failing-test');
+    expect(result.contractDecision.registryLinkedFixtureIds).toContain('route-issue-debug-failing-test');
+    expect(result.contractDecision.registryLinkedFixtureIds).toContain('eval-issue-debug-failing-test');
   });
 
   it.each([

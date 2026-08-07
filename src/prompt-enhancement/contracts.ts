@@ -214,11 +214,11 @@ export type PromptEnhancementRuntimeBlockReason =
   | 'not_applicable';
 
 export type PromptEnhancementOwnerArea =
-  | 'hiren_content_api'
-  | 'bhavnesh_ui_app'
-  | 'vedansi_host_extension'
-  | 'bhavnesh_release_check'
-  | 'bhavnesh_cross_layer_acceptance';
+  | 'content_semantics'
+  | 'ui_app'
+  | 'host_transport'
+  | 'release_check'
+  | 'cross_layer_acceptance';
 
 export type PromptEnhancementPublicTrustCueLabel =
   | 'original_prompt'
@@ -374,7 +374,7 @@ export interface PromptEnhancementTemplateRegistryRefV1 {
   fallbackPolicy: PromptEnhancementFallbackMode;
   testFixtureIds: readonly string[];
   invariantIds: readonly string[];
-  ownerArea: 'hiren_content_api';
+  ownerArea: 'content_semantics';
   launchVisibility: 'private_until_launch_recheck';
   publicSafeSourceNotes: readonly string[];
   routeFixtureIds: readonly string[];
@@ -399,11 +399,13 @@ export interface PromptEnhancementRouteDecisionV1 {
   familyId: string;
   primaryIntent: string;
   capabilityOverlays: readonly string[];
+  // P3-G2: 'multi_intent_needs_handoff' removed — compoundPromptStateFor never emits
+  // it and route-level handoff candidacy is sourced from the handoff-metadata producer
+  // (transform-rule-8), not the router.
   compoundPromptState:
     | 'single_intent'
     | 'multi_point_same_intent'
     | 'multi_intent_one_prompt'
-    | 'multi_intent_needs_handoff'
     | 'ambiguous_multi_intent';
   userPointCoverageRefs: readonly string[];
   nonPrimaryUserIntentHandling:
@@ -465,9 +467,11 @@ export interface PromptEnhancementRouteDecisionV1 {
     | 'fallback_safe_floor_only'
     | 'disabled_with_reason';
   llmRoutePolicy: {
-    mode: 'no_call';
-    owner: 'hiren_content_api';
-    peEm1WorksheetRow: 'not_applicable_deterministic';
+    // E6: 'llm_route_decision_call' marks a route decided by the bounded LLM route
+    // call; 'no_call' remains the deterministic default + fallback.
+    mode: 'no_call' | 'llm_route_decision_call';
+    owner: 'content_semantics';
+    costWorksheetRow: 'not_applicable_deterministic' | 'llm_route_decision_call';
     freeformRouteOutputAllowed: false;
   };
   ambiguityState:
@@ -788,7 +792,7 @@ export interface PromptEnhancementValidationPhaseStateV1 {
 
 export interface PromptEnhancementValidationGraphV1 {
   graphVersion: PromptEnhancementSchemaVersion;
-  graphOwner: 'hiren_content_api';
+  graphOwner: 'content_semantics';
   phaseStates: readonly PromptEnhancementValidationPhaseStateV1[];
   failures: readonly PromptEnhancementValidationFailureV1[];
   safetyState: PromptEnhancementSafetySummaryV1;
@@ -798,7 +802,7 @@ export interface PromptEnhancementValidationGraphV1 {
     | 'unavailable_by_provider_api'
     | 'product_scope_not_in_v1'
     | 'deterministic_only'
-    | 'hiren_visibility_required';
+    | 'visibility_required';
   rawTransportIsValidationProof: false;
   evaluatesAgentResponseQuality: false;
   canAutoAdvanceSequencePointer: false;
@@ -841,7 +845,7 @@ export interface PromptEnhancementUiActionInputContractV1 {
 }
 
 /**
- * UI-9 / PE-AR-10 — deterministic header copy. Both are payload-supplied and
+ * UI-9 / transform-rule-10 — deterministic header copy. Both are payload-supplied and
  * public-safe; the UI never invents them. Pinch is a short funny/light label
  * (§8.6, owner decision); why-help is present ONLY when a safety/risk/override
  * reason exists and names that source-backed reason.
@@ -1282,10 +1286,10 @@ export interface PromptEnhancementHandoffMetadataV1 {
   runtimeGuards: PromptEnhancementHandoffRuntimeGuardsV1;
   privacyStoragePolicy: PromptEnhancementHandoffPrivacyStoragePolicyV1;
   ownerBoundary: {
-    semanticOwner: 'hiren_content_api';
-    uiConsumer: 'bhavnesh_ui_app';
-    hostOwner: 'vedansi_host_extension';
-    runtimeOwnerState: 'future_pe_ar11_only_after_gates';
+    semanticOwner: 'content_semantics';
+    uiConsumer: 'ui_app';
+    hostOwner: 'host_transport';
+    runtimeOwnerState: 'future_future_sequence_only_after_gates';
   };
   reasonCodes: readonly string[];
 }
@@ -1302,11 +1306,11 @@ export type PromptEnhancementFutureSequenceRuntimeOperationV1 =
   | 'runtime_acceptance';
 
 export type PromptEnhancementFutureSequenceRuntimeMissingGateCodeV1 =
-  | 'pe_dr4_lifecycle_policy_pending'
-  | 'pe_ar10_receiver_contract_pending'
-  | 'pe_ar11_runtime_source_pending'
-  | 'pe_em1_numeric_acceptance_pending'
-  | 'pe_dr6_owner_snapshot_pending'
+  | 'lifecycle_policy_pending'
+  | 'engine_receiver_contract_pending'
+  | 'future_sequence_runtime_source_pending'
+  | 'cost_numeric_acceptance_pending'
+  | 'cross_layer_snapshot_pending'
   | 'signed_owner_by_deliverable_register_pending'
   | 'pending_named_owner_register_rows_pending'
   | 'host_hold_commit_contract_pending'
@@ -1316,11 +1320,11 @@ export type PromptEnhancementFutureSequenceRuntimeMissingGateCodeV1 =
   | 'current_v1_runtime_implementation_no_go';
 
 export interface PromptEnhancementFutureSequenceRuntimeGateEvidenceV1 {
-  peDr4LifecyclePolicyApproved?: boolean;
-  peAr10ReceiverContractApproved?: boolean;
-  peAr11RuntimeSourceAvailable?: boolean;
-  peEm1NumericAcceptanceApproved?: boolean;
-  peDr6OwnerSnapshotApproved?: boolean;
+  lifecyclePolicyApproved?: boolean;
+  engineReceiverContractApproved?: boolean;
+  futureSequenceRuntimeSourceAvailable?: boolean;
+  costNumericAcceptanceApproved?: boolean;
+  crossLayerOwnerSnapshotApproved?: boolean;
   signedOwnerByDeliverableRegisterApproved?: boolean;
   pendingNamedOwnerRegisterRowsClosed?: boolean;
   hostHoldCommitContractProven?: boolean;
@@ -1447,7 +1451,7 @@ export interface PromptEnhancementCostVisibilityMetadataV1 {
     | 'unavailable_by_provider_api'
     | 'product_scope_not_in_v1'
     | 'deterministic_only'
-    | 'hiren_visibility_required';
+    | 'visibility_required';
   provider?: string;
   model?: string;
   pricingSourceUrl?: string;
@@ -1486,6 +1490,7 @@ export interface PromptEnhancementCostVisibilityMetadataV1 {
 
 export type PromptEnhancementCostCallIdV1 =
   | 'baseline_pe_composer'
+  | 'llm_route_decision_call'
   | 'source_signal_guidance_in_baseline'
   | 'action_shorter'
   | 'action_more_thorough'
@@ -1612,7 +1617,7 @@ export interface PromptEnhancementPrepareResultV1 {
   projectRoot: string;
   modelVersion: string;
   disposition: PromptEnhancementDisposition;
-  // Hiren-owned safety decision identity for this exact body revision.
+  // content-owner-owned safety decision identity for this exact body revision.
   validationDecisionId: string;
   currentBody: PromptEnhancementCurrentBodyV1;
   availableActions: readonly PromptEnhancementActionEntryV1[];
@@ -2131,7 +2136,7 @@ function isCompleteValidationGraph(value: unknown): boolean {
   const graph = asRecord(value);
   if (!graph) return false;
   if (graph['graphVersion'] !== PROMPT_ENHANCEMENT_CONTRACT_VERSION) return false;
-  if (graph['graphOwner'] !== 'hiren_content_api') return false;
+  if (graph['graphOwner'] !== 'content_semantics') return false;
   if (graph['rawTransportIsValidationProof'] !== false) return false;
   if (graph['evaluatesAgentResponseQuality'] !== false) return false;
   if (graph['canAutoAdvanceSequencePointer'] !== false) return false;
@@ -2536,10 +2541,10 @@ function isCompleteHandoffPrivacyStoragePolicy(value: unknown): boolean {
 function isCompleteHandoffOwnerBoundary(value: unknown): boolean {
   const owner = asRecord(value);
   return !!owner
-    && owner['semanticOwner'] === 'hiren_content_api'
-    && owner['uiConsumer'] === 'bhavnesh_ui_app'
-    && owner['hostOwner'] === 'vedansi_host_extension'
-    && owner['runtimeOwnerState'] === 'future_pe_ar11_only_after_gates';
+    && owner['semanticOwner'] === 'content_semantics'
+    && owner['uiConsumer'] === 'ui_app'
+    && owner['hostOwner'] === 'host_transport'
+    && owner['runtimeOwnerState'] === 'future_future_sequence_only_after_gates';
 }
 
 function isCompleteUiActionInputContract(value: unknown): boolean {

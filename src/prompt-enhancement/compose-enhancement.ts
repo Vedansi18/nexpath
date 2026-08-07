@@ -68,6 +68,10 @@ export interface PromptEnhancementStructuredComposerOutputV1 {
     sourceFactIds: readonly string[];
   }[];
   composerClaims: readonly string[];
+  // E5: the composer self-reports the detected language of the original prompt
+  // (BCP-47-ish, e.g. 'en' / 'hi' / 'hi-Latn' Hinglish / 'gu-Latn' Gujlish). Read by
+  // the E5 language-consistency gate; optional so pre-E5 callers stay valid.
+  detectedLanguageSelfReport?: string;
 }
 
 export interface PromptEnhancementComposeResult {
@@ -349,6 +353,11 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
   const sourceAttribution = sourceAttributionFor(sectionPlans);
   const originalPromptSectionId = sections.find((section) => section.sectionKind === 'original_request_or_goal')?.sectionId ?? 'not_applicable_original_only';
   const sentPromptOrigin = sentPromptOriginFor(action, deterministicFallback);
+  // E5/5.4: when the LLM wrote the body it adapted to (and self-reported) the user's
+  // language, so the language provenance is detected-from-prompt / preserve-user-language
+  // instead of the hardcoded technical-English default. Deterministic/fallback bodies
+  // stay technical-English.
+  const detectedLanguage = usesLlmWording ? input.structuredComposerOutput?.detectedLanguageSelfReport : undefined;
 
   const currentBody: PromptEnhancementCurrentBodyV1 = {
       currentBodyId,
@@ -364,12 +373,12 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
       sourceAttribution,
       llmCallPolicy,
       composerMode,
-      languagePolicyApplied: 'technical_english_default',
+      languagePolicyApplied: detectedLanguage ? 'preserve_user_language' : 'technical_english_default',
       languageValidationStatus: 'valid',
-      effectiveLanguageState: 'unknown_default',
-      languageSource: 'technical_english_default',
-      languageConfidence: 'unknown',
-      languagePolicy: 'technical_english_default',
+      effectiveLanguageState: detectedLanguage ? 'known' : 'unknown_default',
+      languageSource: detectedLanguage ? 'detected_from_prompt' : 'technical_english_default',
+      languageConfidence: detectedLanguage ? 'medium' : 'unknown',
+      languagePolicy: detectedLanguage ? 'preserve_user_language' : 'technical_english_default',
       instructionPrecedenceState: 'generated_sections_qualify_original',
       originalAsSourceStatus: 'local_verbatim_source_context',
       composerClaims,
@@ -571,7 +580,9 @@ function renderSection(input: {
 
   const llmDraft = input.llmDraftsBySectionId?.get(sectionPlan.sectionId);
   if (llmDraft) {
-    const lines = [llmDraft, `- ${sourceTraceLine(sectionPlan)}`];
+    // Body quality (2026-08-06): provenance lives ONLY in the typed section metadata (sourceKind /
+    // evidence statuses on the plan + sectionsForFeedback) — never rendered into the prompt body.
+    const lines = [llmDraft];
     if (input.insertCanonicalConfirmation === true) {
       lines.push(`- ${buildPromptEnhancementCanonicalConfirmation(input.originalPromptText)}`);
     }
@@ -584,7 +595,7 @@ function renderSection(input: {
     };
   }
 
-  const lines = instructionLinesForSection(sectionPlan.sectionKind, action, input.originalPromptText);
+  const lines = instructionLinesForSection(sectionPlan.sectionKind, action, input.originalPromptText, heading);
   if (action === 'more_thorough') {
     lines.push(...moreThoroughLines(sectionPlan));
   }
@@ -596,7 +607,8 @@ function renderSection(input: {
   } else if (sectionPlan.sectionKind === 'context_and_constraints' && input.additionalDetailsText) {
     lines.push(`Keep these accepted additional details covered: ${boundedAdditionalDetails(input.additionalDetailsText)}`);
   }
-  lines.push(sourceTraceLine(sectionPlan));
+  // Body quality (2026-08-06): no per-section provenance sentence in the editable body — that
+  // information already lives in the typed section metadata.
   if (input.insertCanonicalConfirmation === true) {
     lines.push(buildPromptEnhancementCanonicalConfirmation(input.originalPromptText));
   }
@@ -614,6 +626,7 @@ function instructionLinesForSection(
   sectionKind: string,
   action: PromptEnhancementComposerAction,
   originalPromptText: string,
+  sectionTitle: string,
 ): string[] {
   const concise = action === 'shorter';
   const line = (longText: string, shortText: string) => concise ? shortText : longText;
@@ -692,10 +705,12 @@ function instructionLinesForSection(
     ],
   };
 
+  // Body quality (2026-08-06): template-derived sections (kinds outside the map) each name their
+  // OWN topic instead of repeating one identical generic line for every section.
   return [...(map[sectionKind] ?? [
     line(
-      'Convert the selected section requirement into a source-backed task instruction.',
-      'Use this source-backed section requirement.',
+      `Cover ${sectionTitle} for this request with concrete, source-backed specifics — state what is required, how to implement it, and how to verify it.`,
+      `Cover ${sectionTitle} concretely.`,
     ),
   ])];
 }
@@ -714,14 +729,6 @@ function projectGroundingLine(sectionPlan: PromptEnhancementSectionPlanItemV1): 
     return 'Known project grounding is unavailable for this section; keep the prompt scoped to the provided request and ask only for blocking missing project facts.';
   }
   return `Use the typed project/source metadata attached to this section as grounding; do not invent unavailable project facts.`;
-}
-
-function sourceTraceLine(sectionPlan: PromptEnhancementSectionPlanItemV1): string {
-  return [
-    `Source basis: ${publicSourceBasis(sectionPlan.sourceKind)}.`,
-    `Evidence status is ${sectionPlan.sourceEvidenceStatus}; requirement source status is ${sectionPlan.requirementSourceStatus}.`,
-    'Source ids stay in typed metadata, not in the editable prompt body.',
-  ].join(' ');
 }
 
 function publicSourceBasis(sourceKind: PromptEnhancementSectionPlanItemV1['sourceKind']): string {

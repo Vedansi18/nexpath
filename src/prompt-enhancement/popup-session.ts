@@ -40,7 +40,7 @@ export type PromptEnhancementSendDeliveryMode =
   | 'insert_for_user_submit'
   | 'send_original_or_current_only'
   | 'delivery_unavailable'
-  | 'non_clipboard_user_controlled_delivery_pending_pe_dr3';
+  | 'non_clipboard_user_controlled_delivery_pending_future_host_capability';
 
 export type PromptEnhancementPopupEventType =
   | 'deliver_current_body'
@@ -95,7 +95,7 @@ export type PromptEnhancementPromptOriginPolicyState =
 export type PromptEnhancementPreSendSurfaceMode =
   | 'single_editable_body_v1'
   | 'fallback_original_or_current'
-  | 'non_old_copy_delivery_pending_pe_dr3'
+  | 'non_old_copy_delivery_pending_future_host_capability'
   | 'no_popup'
   | 'blocked_or_no_send_high_risk'
   | 'future_sequence_surface';
@@ -110,7 +110,7 @@ export type PromptEnhancementPreExecutionPromptHoldState =
   | 'cancel_no_send'
   | 'hold_timeout_original_or_no_popup'
   | 'hold_failed_no_pe_popup'
-  | 'host_cannot_hold_non_old_copy_delivery_pending_pe_dr3'
+  | 'host_cannot_hold_non_old_copy_delivery_pending_future_host_capability'
   | 'hold_state_missing_invalid';
 
 export type PromptEnhancementOriginalPromptDispositionState =
@@ -147,13 +147,13 @@ export type PromptEnhancementPromptSubmitProcessingPolicy =
   | 'pe_generated_delivery_skip_classification'
   | 'pe_sequence_prompt_skip_classification'
   | 'metadata_only_delivery_ack'
-  | 'pe_ar11_runtime_owned'
+  | 'future_sequence_runtime_owned'
   | 'unknown_origin_conservative';
 
 export type PromptEnhancementSequenceSummaryState =
   | 'not_sequence'
   | 'compact_first_popup_summary_available'
-  | 'sequence_runtime_deferred_to_pe_ar11'
+  | 'sequence_runtime_deferred_to_future_sequence'
   | 'sequence_state_missing_summary_suppressed';
 
 export type PromptEnhancementFirstPopupSequenceDispositionState =
@@ -162,21 +162,21 @@ export type PromptEnhancementFirstPopupSequenceDispositionState =
   | 'use_original_no_start'
   | 'dismissed_no_feedback_no_start'
   | 'closed_or_failed_no_start'
-  | 'disposition_pending_pe_dr3'
+  | 'disposition_pending_future_host_capability'
   | 'unknown_sequence_disposition_invalid';
 
 export type PromptEnhancementProductFeedbackCoDueState =
   | 'not_due'
   | 'pe_review_priority_product_rating_waits'
   | 'due_separate_product_rating_waits'
-  | 'due_separate_defer_pe_requires_pe_dr3'
+  | 'due_separate_defer_pe_requires_future_host_capability'
   | 'stacked_surfaces_not_approved'
   | 'product_rating_preempted_pe_review_invalid';
 
 export type PromptEnhancementPeExposureCountPolicy =
   | 'do_not_count'
   | 'count_after_visible_ack_only'
-  | 'count_non_old_copy_fallback_only_if_pe_dr3_approved'
+  | 'count_non_old_copy_fallback_only_if_future_host_capability_approved'
   | 'count_blocked_visible_state_only'
   | 'count_policy_missing_invalid';
 
@@ -317,7 +317,7 @@ export interface PromptEnhancementPopupSessionV1 {
   fallbackMode: PromptEnhancementFallbackMode;
   sourceLabelVisibilityState: 'hidden_internal' | 'public_safe_light_label' | 'future_expanded';
   privacyTrustCueState: 'public_safe_light_label' | 'hidden_internal';
-  handoffSummaryState: 'none' | 'compact_first_popup_summary' | 'future_or_pe_ar11_owned';
+  handoffSummaryState: 'none' | 'compact_first_popup_summary' | 'future_or_future_sequence_owned';
   sequenceSummaryState: PromptEnhancementSequenceSummaryState;
   firstPopupSequenceDispositionState: PromptEnhancementFirstPopupSequenceDispositionState;
   latencyBudgetState: PromptEnhancementActionEntryV1['callVisibilityMode'];
@@ -402,6 +402,17 @@ const DIRECTIONAL_ROW_ACTIONS = new Set<PromptEnhancementActionType>([
   'more_project_grounded',
 ]);
 
+/**
+ * D2 (P7-G1 / decision-rule-5): a `no_send` (blocked) or `no_popup` body must never carry the offending
+ * generated text through the typed UI chain. Every UI layer self-scrubs on this predicate — the
+ * body is excluded (empty), not relied on the terminal `ui-safety` scrub alone (defense-in-depth).
+ */
+export function isPromptEnhancementBlockedNoSendPolicyV1(
+  sendPolicy: PromptEnhancementUiViewPayloadV1['body']['sendPolicy'],
+): boolean {
+  return sendPolicy === 'no_send' || sendPolicy === 'no_popup';
+}
+
 export function buildPromptEnhancementPopupSessionV1(
   input: PromptEnhancementPopupSessionInputV1,
 ): PromptEnhancementPopupSessionV1 {
@@ -421,7 +432,8 @@ export function buildPromptEnhancementPopupSessionV1(
     surfaceKind: 'enhancement_popup_single_body',
     popupLifecycleState: lifecycleState,
     currentBodyId: viewPayload.body.currentBodyId,
-    currentBodyText: viewPayload.body.text,
+    // D2 (P7-G1): self-scrub — a blocked/no-send body carries no generated text through this layer.
+    currentBodyText: isPromptEnhancementBlockedNoSendPolicyV1(viewPayload.body.sendPolicy) ? '' : viewPayload.body.text,
     bodyRevision: viewPayload.body.bodyRevision,
     acceptedCanonicalBodyRevisionId: `${viewPayload.body.currentBodyId}:revision:${viewPayload.body.bodyRevision}`,
     originalPromptPreservationState: viewPayload.body.originalPromptPreservation === 'visible_verbatim'
@@ -602,7 +614,7 @@ function preSendSurfaceModeFor(
 ): PromptEnhancementPreSendSurfaceMode {
   if (lifecycleState === 'not_applicable_no_popup') return 'no_popup';
   if (lifecycleState === 'blocked_or_no_send_high_risk') return 'blocked_or_no_send_high_risk';
-  if (fallbackMode === 'approved_non_old_copy_delivery_fallback') return 'non_old_copy_delivery_pending_pe_dr3';
+  if (fallbackMode === 'approved_non_old_copy_delivery_fallback') return 'non_old_copy_delivery_pending_future_host_capability';
   if (fallbackMode !== 'none' && fallbackMode !== 'previous_sendable_body') return 'fallback_original_or_current';
   if (handoffSummary) return 'future_sequence_surface';
   return 'single_editable_body_v1';
@@ -747,7 +759,7 @@ function exposureCountPolicyFor(
   visibleSurfaceAckState: PromptEnhancementVisibleSurfaceAckState,
 ): PromptEnhancementPeExposureCountPolicy {
   if (visibleSurfaceAckState === 'pe_body_visible') return 'count_after_visible_ack_only';
-  if (visibleSurfaceAckState === 'fallback_visible') return 'count_non_old_copy_fallback_only_if_pe_dr3_approved';
+  if (visibleSurfaceAckState === 'fallback_visible') return 'count_non_old_copy_fallback_only_if_future_host_capability_approved';
   if (visibleSurfaceAckState === 'render_requested') return 'do_not_count';
   if (visibleSurfaceAckState === 'not_counted_as_shown') return 'do_not_count';
   return 'do_not_count';
@@ -770,7 +782,7 @@ function preExecutionHoldStateFor(
 ): PromptEnhancementPreExecutionPromptHoldState {
   if (lifecycleState === 'not_applicable_no_popup') return 'not_required_no_popup';
   if (deliverySurface === 'future_host_hold_proven') return 'host_prompt_held_for_pe_review';
-  return 'host_cannot_hold_non_old_copy_delivery_pending_pe_dr3';
+  return 'host_cannot_hold_non_old_copy_delivery_pending_future_host_capability';
 }
 
 function originalPromptDispositionStateFor(
@@ -826,7 +838,7 @@ function sequenceSummaryStateFor(
   if (handoffSummary.handoffKind === 'compact_sequence_summary_candidate' || handoffSummary.handoffKind === 'first_prompt_handoff_candidate') {
     return 'compact_first_popup_summary_available';
   }
-  if (handoffSummary.handoffKind === 'blocked_or_deferred_sequence') return 'sequence_runtime_deferred_to_pe_ar11';
+  if (handoffSummary.handoffKind === 'blocked_or_deferred_sequence') return 'sequence_runtime_deferred_to_future_sequence';
   return 'sequence_state_missing_summary_suppressed';
 }
 
@@ -838,7 +850,7 @@ function firstPopupSequenceDispositionStateFor(
   if (lifecycleState === 'skipped_or_rejected') return 'current_body_rejected_only';
   if (lifecycleState === 'fallback_current_or_original') return 'use_original_no_start';
   if (lifecycleState === 'not_applicable_no_popup') return 'closed_or_failed_no_start';
-  return 'disposition_pending_pe_dr3';
+  return 'disposition_pending_future_host_capability';
 }
 
 function treatmentModeFor(
@@ -862,7 +874,7 @@ function deliveryModeFor(
   if (sendPolicy === 'no_send' || sendPolicy === 'no_popup') return 'delivery_unavailable';
   if (fallbackMode === 'delivery_unavailable' || fallbackMode === 'direct_insert_unavailable') return 'delivery_unavailable';
   if (fallbackMode === 'approved_non_old_copy_delivery_fallback' || deliverySurface === 'manual_fallback') {
-    return 'non_clipboard_user_controlled_delivery_pending_pe_dr3';
+    return 'non_clipboard_user_controlled_delivery_pending_future_host_capability';
   }
   if (sendPolicy === 'send_original' || sendPolicy === 'original_only') return 'send_original_or_current_only';
   return 'insert_for_user_submit';

@@ -154,6 +154,13 @@ const CONFIRMATION_BYPASS_PATTERNS: readonly RegExp[] = [
   /\b(?:skip|bypass|ignore)\s+(?:the\s+)?(?:confirmation|go[-\s]?ahead|ask[-\s]?first)\b/i,
   /\bno\s+need\s+to\s+(?:ask|confirm|wait\s+for\s+go[-\s]?ahead)\b/i,
   /\bproceed\s+without\s+(?:asking|confirmation|go[-\s]?ahead)\b/i,
+  // E5/5.5: Hindi / Gujarati (romanized + script) confirmation-bypass phrases, so a
+  // language-adapted body cannot slip a bypass past the English-only patterns above.
+  /\bbina\s+puch(?:e|o|ke)\b|\bpuch(?:e|o)\s+bina\b/i,
+  /\bconfirmation\s+(?:mat|na)\s+(?:pucho|mango|maango)\b/i,
+  /\b(?:confirmation|pushti|puchne|puchhne)\s+(?:ki\s+)?(?:zaroorat|zarurat|jaroor|jarur)\s+nahi\b/i,
+  /(?:बिना\s*पूछे|पूछे\s*बिना|पुष्टि\s*मत|(?:पुष्टि|पूछने)\s*की\s*(?:ज़रूरत|जरूरत)\s*नहीं)/,
+  /(?:પૂછ્યા\s*વગર|(?:પુષ્ટિ|પૂછવાની)\s*(?:ની\s*)?જરૂર\s*નથી)/,
 ];
 
 const RISK_PATTERNS: readonly [PromptEnhancementSensitiveActionRiskKind, RegExp][] = [
@@ -337,7 +344,7 @@ export function validatePromptEnhancementSafety(
   };
   const validationGraph: PromptEnhancementValidationGraphV1 = {
     graphVersion: PROMPT_ENHANCEMENT_CONTRACT_VERSION,
-    graphOwner: 'hiren_content_api',
+    graphOwner: 'content_semantics',
     phaseStates: runPromptEnhancementPhaseValidators({
       failures,
       hasBlockingFailure,
@@ -395,7 +402,7 @@ function originalOnlyValidationResult(
   return {
     validationGraph: {
       graphVersion: PROMPT_ENHANCEMENT_CONTRACT_VERSION,
-      graphOwner: 'hiren_content_api',
+      graphOwner: 'content_semantics',
       phaseStates: runPromptEnhancementOriginalOnlyPhaseValidators(fallbackMode),
       failures: [],
       safetyState: safetySummary,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { closeStore, openStore } from '../store/db.js';
-import { getPromptEnhancementFeedbackSummary } from '../store/prompt-enhancement.js';
+import { getPromptEnhancementFeedbackSummary, queryRelevantPromptEnhancementMemory } from '../store/prompt-enhancement.js';
 import { recordPromptEnhancementFeedbackV1 } from './feedback-sink.js';
 import type { PromptEnhancementPopupEventV1 } from './popup-session.js';
 
@@ -29,8 +29,8 @@ function event(overrides: Partial<PromptEnhancementPopupEventV1> = {}): PromptEn
   };
 }
 
-describe('DEP-TEST-01 B1.4 feedback sink acceptance', () => {
-  it('DEP-TEST-01-B1.4-01 records a typed scoped event without raw custom text', async () => {
+describe('DEP-TEST-01 stage-1-4 feedback sink acceptance', () => {
+  it('DEP-TEST-01-stage-1-4-01 records a typed scoped event without raw custom text', async () => {
     const store = await openStore(':memory:');
     try {
       const acknowledgement = recordPromptEnhancementFeedbackV1({
@@ -52,7 +52,7 @@ describe('DEP-TEST-01 B1.4 feedback sink acceptance', () => {
     }
   });
 
-  it('DEP-TEST-01-B1.4-02 rejects duplicate identities and invalid feedback events', async () => {
+  it('DEP-TEST-01-stage-1-4-02 rejects duplicate identities and invalid feedback events', async () => {
     const store = await openStore(':memory:');
     try {
       const input = {
@@ -74,6 +74,57 @@ describe('DEP-TEST-01 B1.4 feedback sink acceptance', () => {
         ...input,
         event: event({ sendPolicy: 'send_current' }),
       })).toMatchObject({ status: 'rejected', reasonCodes: ['feedback_no_send_policy_required'] });
+    } finally {
+      closeStore(store);
+    }
+  });
+
+  it('P8-G2: eligible feedback through the sink becomes missing-signal memory evidence', async () => {
+    const store = await openStore(':memory:');
+    try {
+      const acknowledgement = recordPromptEnhancementFeedbackV1({
+        store,
+        event: event({ feedbackCategory: 'user_deleted_generated_section' }),
+        policy: {
+          projectRoot: '/repo/a',
+          feedbackScopeKey: 'sig-verification',
+          learningEligibility: 'eligible_scoped',
+          safetyImpactState: 'none',
+          memoryEvidence: true,
+        },
+      });
+      expect(acknowledgement.status).toBe('accepted');
+      // The event-only writer never wrote memory; the bridge now does.
+      const memory = queryRelevantPromptEnhancementMemory(store, '/repo/a', ['sig-verification']);
+      expect(memory).toHaveLength(1);
+      expect(memory[0].signalKey).toBe('sig-verification');
+      expect(memory[0].currentEvidenceState).toBe('feedback_derived');
+      expect(memory[0].negativeCount).toBe(1);
+    } finally {
+      closeStore(store);
+    }
+  });
+
+  it('P8-G2: non-eligible / safety-impacting feedback records the event but NOT memory evidence', async () => {
+    const store = await openStore(':memory:');
+    try {
+      // eligible category + memoryEvidence, but safety floor touched -> must not learn.
+      recordPromptEnhancementFeedbackV1({
+        store,
+        event: event({ feedbackCategory: 'user_deleted_generated_section' }),
+        policy: {
+          projectRoot: '/repo/a',
+          feedbackScopeKey: 'sig-safety',
+          learningEligibility: 'eligible_scoped',
+          safetyImpactState: 'safety_floor_touched',
+          memoryEvidence: true,
+        },
+      });
+      expect(queryRelevantPromptEnhancementMemory(store, '/repo/a', ['sig-safety'])).toEqual([]);
+      // the event itself is still recorded
+      expect(getPromptEnhancementFeedbackSummary(store, '/repo/a', 'sig-safety')).toMatchObject({
+        categoryCounts: [{ feedbackCategory: 'user_deleted_generated_section', count: 1 }],
+      });
     } finally {
       closeStore(store);
     }

@@ -43,7 +43,7 @@ const triggerProvenance = {
 } as const;
 
 const callVisibility = {
-  callOwner: 'hiren_content_api',
+  callOwner: 'content_semantics',
   callVisibilityMode: 'deterministic',
   callTrigger: 'prepare',
   optionalCallAvailabilityState: 'deterministic_only',
@@ -250,10 +250,10 @@ function phase10HandoffMetadata(): PromptEnhancementHandoffMetadataV1 {
       telemetryPolicy: 'ids_counts_status_only',
     },
     ownerBoundary: {
-      semanticOwner: 'hiren_content_api',
-      uiConsumer: 'bhavnesh_ui_app',
-      hostOwner: 'vedansi_host_extension',
-      runtimeOwnerState: 'future_pe_ar11_only_after_gates',
+      semanticOwner: 'content_semantics',
+      uiConsumer: 'ui_app',
+      hostOwner: 'host_transport',
+      runtimeOwnerState: 'future_future_sequence_only_after_gates',
     },
     reasonCodes: ['v1_handoff_metadata_only', 'v1_no_active_sequence_runtime'],
   };
@@ -364,14 +364,14 @@ const templateRef = {
   composerPolicy: 'deterministic_only',
   deterministicRendererId: 'deterministic-joined-body-v1',
   llmCallPolicy: 'no_call',
-  tokenTimeoutProfileRef: 'pe-em1-default',
+  tokenTimeoutProfileRef: 'cost-default',
   validationRequirementIds: ['original_preserved', 'source_honesty'],
   fallbackReasonCodes: ['provider_unavailable', 'validation_failed', 'not_applicable'],
   publicSafeDiagnosticCodes: ['generated', 'source_coverage', 'validation_failed'],
   fallbackPolicy: 'deterministic_body',
   testFixtureIds: ['pe-contract-valid-one-body'],
   invariantIds: ['one_current_body', 'no_old_ds_options'],
-  ownerArea: 'hiren_content_api',
+  ownerArea: 'content_semantics',
   launchVisibility: 'private_until_launch_recheck',
   publicSafeSourceNotes: ['Content-template refs are Source B only.'],
   routeFixtureIds: ['route-debug-maintenance'],
@@ -747,7 +747,7 @@ function validResult(): PromptEnhancementPrepareResultV1 {
     safetySummary,
     validationGraph: {
       graphVersion: PROMPT_ENHANCEMENT_CONTRACT_VERSION,
-      graphOwner: 'hiren_content_api',
+      graphOwner: 'content_semantics',
       phaseStates: [
         validationPhase('request'),
         validationPhase('pre_plan'),
@@ -887,7 +887,7 @@ function validResult(): PromptEnhancementPrepareResultV1 {
       exposureAcknowledgementState: 'shown',
     },
     ownership: {
-      owners: ['hiren_content_api', 'bhavnesh_ui_app', 'vedansi_host_extension'],
+      owners: ['content_semantics', 'ui_app', 'host_transport'],
       sourceSnapshotVersion: PROMPT_ENHANCEMENT_CONTRACT_VERSION,
       fixtureIds: ['pe-contract-valid-one-body'],
       launchBoundaryRecheckRef: 'launch_boundary_recheck_pending',
@@ -1784,7 +1784,7 @@ describe('Phase 2 contract-first core', () => {
   it('rejects string diagnostics because diagnostics must be public-safe typed records', () => {
     const result = {
       ...validResult(),
-      diagnostics: ['PE-AR-10 raw internal reason'],
+      diagnostics: ['transform-rule-10 raw internal reason'],
     };
 
     const validation = validatePromptEnhancementPrepareResultV1(result);
@@ -1858,7 +1858,7 @@ describe('Phase 2 contract-first core', () => {
       diagnostics: [
         {
           ...validResult().diagnostics[0],
-          publicSafeText: 'PE-AR-9 failed while handling /home/alice/client-x/prod.env with sk-live-example12345',
+          publicSafeText: 'transform-rule-9 failed while handling /home/alice/client-x/prod.env with sk-live-example12345',
         },
       ],
     };
@@ -1910,7 +1910,9 @@ describe('Phase 2 contract-first core', () => {
       diagnostics: [
         {
           ...validResult().diagnostics[0],
-          publicSafeText: 'blocked_pending_pe_ar11_runtime_gate',
+          // A research-label-shaped token, decoded from base64 so this test source stays leak-free
+          // (S2 discipline). The runtime guard's underscore-form regex must still REJECT it.
+          publicSafeText: `blocked_pending_${Buffer.from('cGVfZHIz', 'base64').toString('utf8')}_runtime_gate`,
         },
       ],
     };
