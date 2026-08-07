@@ -26,6 +26,7 @@ import { buildPromptEnhancementCostVisibilityMetadataV1 } from './cost-observabi
 import type { PromptEnhancementPrimaryIntent } from './routing-taxonomy.js';
 import {
   buildPromptEnhancementCanonicalConfirmation,
+  promptEnhancementGeneratedBodyRequiresConfirmationV1,
   requiresPromptEnhancementExecutionConfirmationForPrompt,
   validatePromptEnhancementSafety,
 } from './safety-sendability.js';
@@ -318,7 +319,7 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
         sectionPlan.safetyFlags.includes('sensitive_action_confirmation')
       ))?.sectionId
     : undefined;
-  const renderedSections = sectionPlans.map((sectionPlan) =>
+  const renderSectionsWithConfirmation = (confirmationSectionId: string | undefined) => sectionPlans.map((sectionPlan) =>
       renderSection({
         sectionPlan,
         originalPromptText: input.originalPromptText,
@@ -326,14 +327,39 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
         additionalDetailsText: action === 'apply_details' ? input.additionalDetailsText : input.acceptedAdditionalDetailsText,
         sectionPlanningResult: input.sectionPlanningResult,
         llmDraftsBySectionId: validatedLlmDrafts.draftsBySectionId,
-        insertCanonicalConfirmation: sectionPlan.sectionId === canonicalConfirmationSectionId,
+        insertCanonicalConfirmation: sectionPlan.sectionId === confirmationSectionId,
       }),
   );
-  const canonicalText = renderedSections.map((section) => section.text).join('\n\n');
-  const text = action === "apply_details" && typeof input.editedBodyText === "string"
+  let renderedSections = renderSectionsWithConfirmation(canonicalConfirmationSectionId);
+  let canonicalText = renderedSections.map((section) => section.text).join('\n\n');
+  let text = action === "apply_details" && typeof input.editedBodyText === "string"
     ? applyEditedBodyWithAdditionalDetails(input.editedBodyText, input.additionalDetailsText)
     : canonicalText;
-  const sections = attachSpanRefs(sectionPlans, renderedSections, text);
+  let sections = attachSpanRefs(sectionPlans, renderedSections, text);
+  // Validator-parity confirmation guard (blocked-popup fix 2026-08-07): the prompt-based gate
+  // above cannot see risk phrasing the GENERATED wording introduces (an LLM draft is free text),
+  // but validatePromptEnhancementSafety scans the generated body and hard-blocks a body that
+  // needs the canonical confirmation and lacks it — the user then gets an empty all-unavailable
+  // popup. Mirror the validator on the assembled body; when it will demand the confirmation,
+  // re-render with the confirmation appended to the LAST generated section, so the body ENDS
+  // with it and the validator's "sensitive execution after the confirmation" (hidden/overridden)
+  // rule cannot trip either. The classifier ignores the canonical sentence itself, so this
+  // converges in one pass. Edited bodies keep their own edit-stage rules (text === canonicalText
+  // guard); prompts the prompt-based gate already covers are unaffected (confirmation present).
+  if (
+    canonicalConfirmationSectionId === undefined
+    && text === canonicalText
+    && promptEnhancementGeneratedBodyRequiresConfirmationV1({ sections, originalPromptText: input.originalPromptText }, text)
+  ) {
+    const lastGeneratedSectionId = [...sectionPlans].reverse()
+      .find((sectionPlan) => sectionPlan.sectionKind !== 'original_request_or_goal')?.sectionId;
+    if (lastGeneratedSectionId !== undefined) {
+      renderedSections = renderSectionsWithConfirmation(lastGeneratedSectionId);
+      canonicalText = renderedSections.map((section) => section.text).join('\n\n');
+      text = canonicalText;
+      sections = attachSpanRefs(sectionPlans, renderedSections, text);
+    }
+  }
   const generatedSafeStatus: PromptEnhancementValidationStatus = deterministicFallback === 'none' ? 'valid' : 'valid_with_fallback';
   const callVisibilityMode: PromptEnhancementCallVisibilityMode = usesLlmWording
     ? 'llm_wording'
