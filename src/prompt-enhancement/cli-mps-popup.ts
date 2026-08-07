@@ -29,6 +29,36 @@ const PROMPT_ENHANCEMENT_MPS_CLI_EDIT_KEYS_HINT_V1 = process.platform === 'darwi
 /** Details helpers (owner request 2026-08-07): the same wording the PE popup shows — Enter on the
  * details row APPLIES the details into the enhanced sequence prompt above; it never sends. */
 const PROMPT_ENHANCEMENT_MPS_CLI_DETAILS_HINT_V1 = 'Enter applies these details · unapplied details are not sent' as const;
+/** The "whole prompt is included" reassurance moves OFF the "↓ N more lines below" scroll marker
+ * and ONTO the body's edit-keys hint (owner request 2026-08-07 — MPS only). */
+const PROMPT_ENHANCEMENT_MPS_CLI_WHOLE_PROMPT_SUFFIX_V1 = ' · the whole prompt is included' as const;
+
+/**
+ * Render an MPS body: strip the "· the whole prompt is included" suffix off the "↓ N more lines
+ * below" marker, dim the scroll markers, and report whether hidden-below content exists so the
+ * caller can append the reassurance to the edit-keys hint instead.
+ */
+function renderMpsBodyLinesV1(
+  bodyText: string,
+  c: typeof PROMPT_ENHANCEMENT_MPS_CLI_SGR_V1 | null,
+): { lines: readonly string[]; hiddenBelow: boolean } {
+  let hiddenBelow = false;
+  const lines = bodyText.split('\n').map((rawLine) => {
+    let line = rawLine;
+    if (rawLine.endsWith(PROMPT_ENHANCEMENT_MPS_CLI_WHOLE_PROMPT_SUFFIX_V1) && /^↓ \d+ more lines below/.test(rawLine)) {
+      hiddenBelow = true;
+      line = rawLine.slice(0, -PROMPT_ENHANCEMENT_MPS_CLI_WHOLE_PROMPT_SUFFIX_V1.length);
+    }
+    return c && isPromptEnhancementScrollMarkerLineV1(line) ? `    ${c.gray}${line}${c.reset}` : `    ${line}`;
+  });
+  return { lines, hiddenBelow };
+}
+
+/** The body's edit-keys hint, optionally carrying the "whole prompt is included" reassurance. */
+function mpsEditKeysHintV1(c: typeof PROMPT_ENHANCEMENT_MPS_CLI_SGR_V1 | null, withWholePrompt: boolean): string {
+  const text = PROMPT_ENHANCEMENT_MPS_CLI_EDIT_KEYS_HINT_V1 + (withWholePrompt ? PROMPT_ENHANCEMENT_MPS_CLI_WHOLE_PROMPT_SUFFIX_V1 : '');
+  return c ? `      ${c.gray}${text}${c.reset}` : `      ${text}`;
+}
 
 /**
  * ANSI tones, matching the PE popup: cyan title + rail, green (focused) / gray (unfocused)
@@ -136,12 +166,15 @@ export function renderPromptEnhancementMpsFirstPopupFrameV1(
   const contentLine = (line: string): string =>
     c && isPromptEnhancementScrollMarkerLineV1(line) ? `    ${c.gray}${line}${c.reset}` : `    ${line}`;
 
-  // Enhanced sequence body — primary, interactive row 0.
+  // Enhanced sequence body — primary, interactive row 0. The "· the whole prompt is included"
+  // reassurance rides on the edit-keys hint (owner request 2026-08-07), not the "↓ N more lines
+  // below" marker.
   const heading = publicText(model.heading);
   lines.push(radioRow(0, heading));
   recordCaret('enhanced_body');
-  for (const bodyLine of publicText(model.body.text).split('\n')) lines.push(contentLine(bodyLine));
-  if (focusIndex === 0) lines.push(editKeysHint()); // owner request: editing keys under the focused editable field
+  const bodyRender = renderMpsBodyLinesV1(publicText(model.body.text), c);
+  for (const bodyLine of bodyRender.lines) lines.push(bodyLine);
+  if (focusIndex === 0) lines.push(mpsEditKeysHintV1(c, bodyRender.hiddenBelow));
   lines.push('');
 
   // Additional details — interactive row 1. The apply hint is always visible; moving onto the row
@@ -256,11 +289,13 @@ export function renderPromptEnhancementMpsContinuationFrameV1(
   const contentLine = (line: string): string =>
     c && isPromptEnhancementScrollMarkerLineV1(line) ? `    ${c.gray}${line}${c.reset}` : `    ${line}`;
 
-  // Enhanced next sequence body — primary, interactive row 0.
+  // Enhanced next sequence body — primary, interactive row 0. Same "whole prompt is included" on
+  // the edit-keys hint as the first popup (owner request 2026-08-07).
   const heading = publicText(model.heading);
   lines.push(radioRow(0, heading));
-  for (const bodyLine of publicText(model.body.text).split('\n')) lines.push(contentLine(bodyLine));
-  if (focusIndex === 0) lines.push(editKeysHint()); // owner request: editing keys under the focused editable field
+  const bodyRender = renderMpsBodyLinesV1(publicText(model.body.text), c);
+  for (const bodyLine of bodyRender.lines) lines.push(bodyLine);
+  if (focusIndex === 0) lines.push(mpsEditKeysHintV1(c, bodyRender.hiddenBelow));
   lines.push('');
 
   // Additional details — interactive row 1. Same PE-parity helpers as the first popup: apply hint

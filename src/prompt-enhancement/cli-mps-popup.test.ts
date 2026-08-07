@@ -118,6 +118,25 @@ describe('UI-6 MPS first-popup frame renderer (§3.3)', () => {
     expect(bodyLine).not.toContain(gray); // …real prompt text is not.
   });
 
+  it('moves "· the whole prompt is included" from the ↓ marker onto the edit-keys hint (owner request 2026-08-07)', () => {
+    const withMarker = model({
+      body: { text: 'real line\n↓ 16 more lines below · the whole prompt is included', editable: true, originalPromptText: 'x', originalPromptPreservation: 'visible_verbatim' },
+    });
+    const frame = renderPromptEnhancementMpsFirstPopupFrameV1(withMarker, { focusIndex: 0, colorize: false });
+    const markerLine = frame.split('\n').find((l) => l.includes('more lines below'));
+    const keysLine = frame.split('\n').find((l) => l.includes('Ctrl+J new line'));
+    // The marker is now just "↓ N more lines below" — the reassurance moved off it…
+    expect(markerLine).toContain('↓ 16 more lines below');
+    expect(markerLine).not.toContain('the whole prompt is included');
+    // …and onto the edit-keys hint line.
+    expect(keysLine).toContain('the whole prompt is included');
+    // When there is NO hidden content, the edit-keys hint carries no reassurance.
+    const noMarker = renderPromptEnhancementMpsFirstPopupFrameV1(model({
+      body: { text: 'short body', editable: true, originalPromptText: 'x', originalPromptPreservation: 'visible_verbatim' },
+    }), { focusIndex: 0, colorize: false });
+    expect(noMarker.split('\n').find((l) => l.includes('Ctrl+J new line'))).not.toContain('the whole prompt is included');
+  });
+
   it('renders a multi-line body as indented lines and an empty Additional details field', () => {
     const frame = renderPromptEnhancementMpsFirstPopupFrameV1(model({
       body: { text: 'line one\nline two', editable: true, originalPromptText: 'x', originalPromptPreservation: 'visible_verbatim' },

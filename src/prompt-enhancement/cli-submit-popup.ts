@@ -745,27 +745,26 @@ export function renderPromptEnhancementPopupFrameV1(
     if (row.kind === 'editor_heading') {
       recordCaret('enhanced_body');
       for (const bodyLine of publicText(view.editedBodyText).split('\n')) lines.push(contentLine(bodyLine));
+      // Body block order (owner request 2026-08-07): content -> Ctrl+J edit-keys (when focused) ->
+      // "Enter sends this prompt" as the LAST line.
+      if (focused) lines.push(hint(PROMPT_ENHANCEMENT_CLI_EDIT_KEYS_HINT_V1));
       lines.push(hint(PROMPT_ENHANCEMENT_CLI_BODY_HINT_V1));
     } else if (row.kind === 'additional_details') {
       // UI-8: no "Apply" button — pressing Enter on this row applies the details.
       // An empty field renders blank (§8.5). Sending the body ignores unapplied details.
+      // Details block order stays as-is (owner: "additional details is fine"): content ->
+      // "Enter applies these details …" -> Ctrl+J edit-keys (when focused).
       recordCaret('additional_details');
       const details = view.additionalDetailsText ? publicText(view.additionalDetailsText) : '';
       for (const detailLine of details.split('\n')) lines.push(contentLine(detailLine));
       lines.push(hint(PROMPT_ENHANCEMENT_CLI_DETAILS_HINT_V1));
+      if (focused) lines.push(hint(PROMPT_ENHANCEMENT_CLI_EDIT_KEYS_HINT_V1));
     }
 
-    // The editable rows drop their sub-label help ("Edit current prompt" / "Add extra requirement")
-    // — owner request 2026-08-07: it was one wasted line each, so removing it lets the body show
-    // more lines and leaves the Ctrl+J edit-keys hint as the LAST line of the block. Non-editable
-    // rows (directionals) keep their focused help.
+    // Non-editable rows (directionals) keep their focused help; the editable rows dropped their
+    // sub-label help earlier (owner request 2026-08-07) so the body shows more lines.
     if (focused && row.help && !editable) {
       lines.push(`    ${publicText(frameState.helpExpanded ? row.help.full : row.help.short)}`);
-    }
-    // Owner request: show the editing keys as the LAST line under the focused editable field
-    // (enhanced body / Additional details).
-    if (focused && editable) {
-      lines.push(hint(PROMPT_ENHANCEMENT_CLI_EDIT_KEYS_HINT_V1));
     }
   });
 

@@ -435,13 +435,13 @@ describe('UI-1 PE frame renderer', () => {
     // The 'Edit current prompt' / full-help sub-label is gone so the body shows more lines…
     expect(frame).not.toContain('Edit current prompt');
     expect(frame).not.toContain('Open this inline editor to change the enhanced body.');
-    // …and the block is: body -> 'Enter sends this prompt' -> Ctrl+J (last).
+    // …and the block order is: body -> Ctrl+J -> 'Enter sends this prompt' (LAST, owner request).
     const lines = frame.split('\n').map((l) => l.replace(/^│ ?/, ''));
     const bodyIdx = lines.findIndex((l) => l.includes('CONTROLLED-BODY'));
-    const enterIdx = lines.findIndex((l) => l.includes('Enter sends this prompt'));
     const ctrlIdx = lines.findIndex((l) => l.includes('Ctrl+J new line'));
-    expect(bodyIdx).toBeLessThan(enterIdx);
-    expect(enterIdx).toBeLessThan(ctrlIdx);
+    const enterIdx = lines.findIndex((l) => l.includes('Enter sends this prompt'));
+    expect(bodyIdx).toBeLessThan(ctrlIdx);
+    expect(ctrlIdx).toBeLessThan(enterIdx);
   });
 });
 
