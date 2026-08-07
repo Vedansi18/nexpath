@@ -22,7 +22,9 @@ export const PROMPT_ENHANCEMENT_MPS_CLI_FOOTER_V1 = 'Enter send · Esc actions' 
 export const PROMPT_ENHANCEMENT_MPS_CLI_SEQUENCE_PLAN_LABEL_V1 = 'Sequence plan' as const;
 export const PROMPT_ENHANCEMENT_MPS_CLI_ADDITIONAL_DETAILS_LABEL_V1 = 'Additional details' as const;
 /** Editing keys shown under a focused editable field (owner request), matching the PE popup. */
-const PROMPT_ENHANCEMENT_MPS_CLI_EDIT_KEYS_HINT_V1 = 'Ctrl+J new line · Ctrl+↑/↓ move line' as const;
+const PROMPT_ENHANCEMENT_MPS_CLI_EDIT_KEYS_HINT_V1 = process.platform === 'darwin'
+  ? 'Cmd+J new line · Cmd+↑/↓ move line'
+  : 'Ctrl+J new line · Ctrl+↑/↓ move line';
 /** Details helpers (owner request 2026-08-07): the same wording the PE popup shows — Enter on the
  * details row APPLIES the details into the enhanced sequence prompt above; it never sends. */
 const PROMPT_ENHANCEMENT_MPS_CLI_DETAILS_HINT_V1 = 'Enter applies these details · unapplied details are not sent' as const;

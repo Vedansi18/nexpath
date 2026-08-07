@@ -482,7 +482,10 @@ export const PROMPT_ENHANCEMENT_CLI_FOOTER_V1 = '↑↓ move · Esc cancel' as c
 const PROMPT_ENHANCEMENT_CLI_BODY_HINT_V1 = 'Enter sends this prompt' as const;
 const PROMPT_ENHANCEMENT_CLI_DETAILS_HINT_V1 = 'Enter applies these details · unapplied details are not sent' as const;
 /** Editing keys shown under a focused editable field (owner request). */
-const PROMPT_ENHANCEMENT_CLI_EDIT_KEYS_HINT_V1 = 'Ctrl+J new line · Ctrl+↑/↓ move line' as const;
+// macOS shows the Mac key names (owner request 2026-08-07); other platforms are untouched.
+const PROMPT_ENHANCEMENT_CLI_EDIT_KEYS_HINT_V1 = process.platform === 'darwin'
+  ? 'Cmd+J new line · Cmd+↑/↓ move line'
+  : 'Ctrl+J new line · Ctrl+↑/↓ move line';
 
 /** Left indent applied to every wrapped line of editable content (body / details). */
 export const PROMPT_ENHANCEMENT_CLI_CONTENT_INDENT_V1 = 6 as const;
@@ -943,7 +946,12 @@ export function reducePromptEnhancementCliInteractionV1(
         // sends the merged prompt. Instant and deterministic — no engine recompose (the
         // apply_details action seam stays available to other surfaces). The rebuilt body parks
         // its cursor at the end, so the view scrolls to where the details landed.
-        const mergedBody = `${bodyBuffer.text}\n\nAdditional details to incorporate:\n${detailsText.trim()}`;
+        // Repeated applies extend the ONE details block (live iMac report 2026-08-07: a second
+        // apply used to add a second 'Additional details to incorporate:' heading).
+        const detailsHeading = 'Additional details to incorporate:';
+        const mergedBody = bodyBuffer.text.includes(detailsHeading)
+          ? `${bodyBuffer.text}\n${detailsText.trim()}`
+          : `${bodyBuffer.text}\n\n${detailsHeading}\n${detailsText.trim()}`;
         const editorRowIndex = rows.findIndex((row) => row.kind === 'editor_heading');
         const mergedEditor = buildPromptEnhancementMultilineEditorStateV1({
           identity: state.editor.identity,

@@ -231,7 +231,12 @@ export async function runPromptEnhancementCliMpsFirstPopupV1(input: {
           // row, so the next Enter sends the merged prompt. Blank details apply nothing.
           const details = editor.buffers.additional_details.text.trim();
           if (details.length === 0) continue;
-          const mergedBody = `${editor.buffers.enhanced_body.text}\n\nAdditional details to incorporate:\n${details}`;
+          // Repeated applies extend the ONE details block (no duplicate headings — same rule as
+          // the PE popup).
+          const detailsHeading = 'Additional details to incorporate:';
+          const mergedBody = editor.buffers.enhanced_body.text.includes(detailsHeading)
+            ? `${editor.buffers.enhanced_body.text}\n${details}`
+            : `${editor.buffers.enhanced_body.text}\n\n${detailsHeading}\n${details}`;
           editor = buildPromptEnhancementMultilineEditorStateV1({
             identity: editorIdentity,
             enhancedBodyText: mergedBody,

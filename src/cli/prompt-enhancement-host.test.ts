@@ -368,6 +368,50 @@ describe('PE1.3 — Linux PE popup host launcher', () => {
     expect(() => statSync(observed.dir!)).toThrow();
   });
 
+  it('macOS: gives osascript a BOUNDED window to close the Terminal window before returning (never a hang)', async () => {
+    // Live iMac report 2026-08-07: the parent killed osascript the instant the result file
+    // appeared, so its AppleScript never reached the close-window step — the Terminal window
+    // stayed open showing "[Process completed]" over a stale frame.
+    const sleeps: number[] = [];
+    const macChild = child(); // never exits -> the wait must still end after the bounded polls
+    const result = await runPromptEnhancementCliPopupHostLaunchV1(
+      { ...launchInput(), capability: { state: 'available' as const, method: 'mac_terminal' as const } },
+      {
+        spawnTerminal: async () => macChild,
+        readResultFile: () => ({ protocolVersion: 1, result: { state: 'selected_original' } }),
+        readReadyFile: () => true,
+        sleep: async (ms: number) => { sleeps.push(ms); },
+      },
+    );
+    expect(result.state).toBe('completed');
+    expect(sleeps.filter((ms) => ms === 200)).toHaveLength(40); // bounded close-wait ran fully
+    expect(macChild.kill).toHaveBeenCalledWith('SIGTERM'); // fallback kill still fires after the wait
+  });
+
+  it('macOS: returns immediately once osascript exits on its own (window already closed) — and Linux never waits', async () => {
+    const sleeps: number[] = [];
+    const macDone = await runPromptEnhancementCliPopupHostLaunchV1(
+      { ...launchInput(), capability: { state: 'available' as const, method: 'mac_terminal' as const } },
+      {
+        spawnTerminal: async () => child(0), // AppleScript already closed the window and exited
+        readResultFile: () => ({ protocolVersion: 1, result: { state: 'selected_original' } }),
+        readReadyFile: () => true,
+        sleep: async (ms: number) => { sleeps.push(ms); },
+      },
+    );
+    expect(macDone.state).toBe('completed');
+    expect(sleeps.filter((ms) => ms === 200)).toHaveLength(0);
+    const linuxSleeps: number[] = [];
+    const linux = await runPromptEnhancementCliPopupHostLaunchV1(launchInput(), {
+      spawnTerminal: async () => child(),
+      readResultFile: () => ({ protocolVersion: 1, result: { state: 'selected_original' } }),
+      readReadyFile: () => true,
+      sleep: async (ms: number) => { linuxSleeps.push(ms); },
+    });
+    expect(linux.state).toBe('completed');
+    expect(linuxSleeps.filter((ms) => ms === 200)).toHaveLength(0); // Linux flow unchanged: no close-wait
+  });
+
   it('returns launch_failed and cleans up when terminal spawn fails or exits non-zero', async () => {
     const cleanupTempDir = vi.fn();
     const spawnFailed = await runPromptEnhancementCliPopupHostLaunchV1(launchInput(), {

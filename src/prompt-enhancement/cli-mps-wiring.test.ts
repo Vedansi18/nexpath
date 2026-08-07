@@ -199,6 +199,20 @@ describe('MPS CLI wiring (owner ruling 2026-08-06: CLI complete, extension pendi
     expect(afterApply).toContain('Enter applies these details · unapplied details are not sent');
   });
 
+  it('a second Apply extends the ONE details block — never a duplicate heading (iMac report 2026-08-07)', async () => {
+    const result = await preparePromptEnhancement(request(MULTI_INTENT));
+    // apply 'a', then apply 'b', then send: one heading, both detail lines under it.
+    const outcome = await runPromptEnhancementCliMpsFirstPopupV1({
+      result,
+      interaction: scripted([KEY.down, 'a', KEY.enter, KEY.down, 'b', KEY.enter, KEY.enter]),
+    });
+    expect(outcome.state).toBe('send');
+    if (outcome.state === 'send') {
+      expect(outcome.bodyText.match(/Additional details to incorporate:/g)).toHaveLength(1);
+      expect(outcome.bodyText.endsWith('a\nb')).toBe(true);
+    }
+  });
+
   it('UNAPPLIED details are not sent: typing details and sending from the body row sends the body only (PE parity)', async () => {
     const result = await preparePromptEnhancement(request(MULTI_INTENT));
     const outcome = await runPromptEnhancementCliMpsFirstPopupV1({

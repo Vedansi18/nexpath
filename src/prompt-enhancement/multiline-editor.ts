@@ -321,6 +321,12 @@ export function decodePromptEnhancementEditorInputV1(
   if (raw === '\u001b[C') return { type: 'move_right' };
   if (raw === '\u001b[1;5A' || raw === '\u001b[5A') return { type: 'move_visual_up' };
   if (raw === '\u001b[1;5B' || raw === '\u001b[5B') return { type: 'move_visual_down' };
+  // macOS (owner request 2026-08-07): accept the Cmd/Option modifier variants terminals emit for
+  // modified arrows - xterm modifier 9 (Meta/Cmd, iTerm2-style), modifier 3 (Option/Alt), and the
+  // ESC-prefixed legacy form - so Cmd+up/down moves the line wherever the terminal forwards it.
+  // Purely additive: the Ctrl variants above stay the Linux/Windows bindings, unchanged.
+  if (raw === '\u001b[1;9A' || raw === '\u001b[1;3A' || raw === '\u001b\u001b[A') return { type: 'move_visual_up' };
+  if (raw === '\u001b[1;9B' || raw === '\u001b[1;3B' || raw === '\u001b\u001b[B') return { type: 'move_visual_down' };
   if (raw === '\u001b' || raw === '\r') return raw === '\u001b' ? { type: 'escape' } : { type: 'plain_enter' };
   if (raw === '\n') return { type: 'insert_newline' };
   // Delete key (ESC[3~), then Backspace (DEL 0x7f / BS 0x08).

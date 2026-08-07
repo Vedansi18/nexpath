@@ -709,6 +709,18 @@ describe('UI-2 interaction reducer', () => {
     expect(reducePromptEnhancementCliInteractionV1(empty, rows(), { kind: 'enter' }).commands).toEqual([]);
   });
 
+  it('a second Apply extends the ONE details block — never a duplicate heading (iMac report 2026-08-07)', () => {
+    let s = reducePromptEnhancementCliInteractionV1(state('BODY', 'first'), rows(), { kind: 'down' }).state;
+    s = reducePromptEnhancementCliInteractionV1(s, rows(), { kind: 'enter' }).state; // apply #1 -> focus back on body
+    s = reducePromptEnhancementCliInteractionV1(s, rows(), { kind: 'down' }).state;  // back to details
+    s = reducePromptEnhancementCliInteractionV1(s, rows(), { kind: 'editor', raw: 's' }).state;
+    const second = reducePromptEnhancementCliInteractionV1(s, rows(), { kind: 'enter' });
+    expect(second.commands).toHaveLength(1);
+    const text = (second.commands[0] as { type: 'edit_body'; text: string }).text;
+    expect(text.match(/Additional details to incorporate:/g)).toHaveLength(1);
+    expect(text.endsWith('first\ns')).toBe(true);
+  });
+
   it('never sends an empty/whitespace body (BF-1)', () => {
     expect(reducePromptEnhancementCliInteractionV1(state('', ''), rows(), { kind: 'enter' }).commands).toEqual([]);
     expect(reducePromptEnhancementCliInteractionV1(state('   ', ''), rows(), { kind: 'enter' }).commands).toEqual([]);
