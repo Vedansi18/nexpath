@@ -22,7 +22,7 @@ import {
 } from './compose-enhancement.js';
 import { composeStructuredComposerOutputV1 } from './llm-composer.js';
 import { isPromptEnhancementNlpHeavyCaseV1 } from './composer-gate.js';
-import { decidePromptEnhancementRouteViaLlmV1 } from './llm-route-decision.js';
+import { decidePromptEnhancementRouteViaLlmV1, type PromptEnhancementLlmRouteDecisionV1 } from './llm-route-decision.js';
 import { isValidApiKey } from '../config/ApiKeyResolver.js';
 import { planPromptEnhancementSections } from './templates/section-plan.js';
 import { routePromptEnhancement, type PromptEnhancementCapabilityId, type PromptEnhancementRouteInput } from './routing-taxonomy.js';
@@ -149,6 +149,24 @@ async function prepare(
     }
   }
 
+  // F1b (send-block fix 2026-08-07): an ACTION re-prepare re-routes with the SAME decision its
+  // popup was prepared with (carried from result.routeDecision). Without this, a prompt that
+  // routed only via the prepare-only E6 rescue above soft-skips again here and the action
+  // manufactures a no-popup-shaped result — the popup's own Enter/adjustments then fail (live
+  // Windows report). Deterministic re-application of an already-made decision; never an LLM call.
+  if (
+    actionRequest?.routeCarryover !== undefined &&
+    route.noPopup &&
+    route.reasonCodes.some((reason) => LLM_ROUTE_RESCUABLE_SKIP_REASONS.has(reason))
+  ) {
+    route = routePromptEnhancement(routeInput, {
+      familyId: actionRequest.routeCarryover.familyId,
+      primaryIntent: actionRequest.routeCarryover.primaryIntent,
+      capabilities: [],
+      ambiguityState: 'clear',
+    } as PromptEnhancementLlmRouteDecisionV1);
+  }
+
   // E2 guidance pipeline: source signals -> typed facts -> cross-lane conflict
   // resolution -> transform-rule-2 dual-lane source mix -> DR2-G1 gate. The mix's rendered
   // facts feed section planning; the gate can force skip_no_popup when there is no
@@ -157,7 +175,14 @@ async function prepare(
   const resolvedFacts = resolvePromptEnhancementSourceConflictsV1(guidanceFacts).facts;
   const sourceMix = applyPromptEnhancementSourceMixV1(resolvedFacts, request.userPreferenceContext.levelState);
   const guidanceGate = applyPromptEnhancementGuidanceGateV1(sourceMix);
-  const noPopup = route.noPopup || !guidanceGate.show;
+  // F1 (send-block fix 2026-08-07): an ACTION never re-decides popup existence. The popup the
+  // action came from already exists — its route/no-popup decision was made at PREPARE (possibly
+  // via the E6 LLM route-rescue above, which is gated to prepare only). Re-running the gate here
+  // could "un-route" an approved open popup and fail its own actions/send (live Windows report:
+  // Enter on an approved body -> malformed no-popup action result -> send blocked). The action
+  // recompose below still runs the FULL safety validation on the recomposed body — this bypass
+  // only stops an action from cancelling a popup that is already on screen.
+  const noPopup = actionRequest !== undefined ? false : (route.noPopup || !guidanceGate.show);
 
   const planning = planPromptEnhancementSections({
     routeResult: route,

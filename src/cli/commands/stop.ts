@@ -562,6 +562,14 @@ export function registerStopCommand(program: import('commander').Command): void 
             result: pending.result,
             feedbackSink: (event) => recordPromptEnhancementCliFeedbackV1(store, payload.cwd, event, pending.request),
             costObservabilitySink: (result) => emitPromptEnhancementCostObservabilityV1(result, 'popup_action', logger),
+            // F3 (2026-08-07): the popup keeps a failed action silent on screen — the typed
+            // reason codes land here so the log stays the diagnosable source of truth.
+            actionDiagnosticsSink: (event) => logger.debug('pe_action_failed', {
+              cwd: payload.cwd,
+              actionType: event.actionType,
+              state: event.state,
+              reasonCodes: event.reasonCodes.slice(0, 8),
+            }),
           });
         } else {
           // No direct TTY but a GUI session exists: spawn a terminal popup. Release the DB lock

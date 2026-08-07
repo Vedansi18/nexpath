@@ -109,7 +109,9 @@ export interface ClaudeUserPromptSubmitHookOutputV1 {
   };
 }
 
-const PUBLIC_ACTION_FAILURE = 'That adjustment could not be applied. The previous prompt is still available.';
+// Owner ruling 2026-08-07: the popup shows NO action-failure line ("That adjustment could not be
+// applied…" removed). A failed action keeps the previous prompt on screen silently — the smooth
+// path — and the typed reason codes go to the host's diagnostics sink (logged, never rendered).
 
 const PUBLIC_FEEDBACK_ACCEPTED = 'Feedback saved. Your prompt is unchanged.';
 const PUBLIC_FEEDBACK_REJECTED = 'Feedback was not saved. Your prompt is unchanged.';
@@ -193,6 +195,12 @@ export async function runPromptEnhancementCliSubmitPopupV1(input: {
   // E9: measured per E8 directional/apply-details action call (observability-only). The loop
   // stays free of the cost module — it hands the produced result to the caller's sink.
   costObservabilitySink?: (result: PromptEnhancementPrepareResultV1) => void;
+  /**
+   * F3 (owner ruling 2026-08-07): action failures render NOTHING in the popup (previous prompt
+   * kept silently); the typed reason codes go here so the host can log them — the only way a
+   * live failure stays diagnosable. Codes only, never body text.
+   */
+  actionDiagnosticsSink?: (event: { actionType: string; state: string; reasonCodes: readonly string[] }) => void;
   onFirstRender?: () => void;
 }): Promise<PromptEnhancementCliPopupResultV1> {
   let currentResult = input.result;
@@ -215,6 +223,17 @@ export async function runPromptEnhancementCliSubmitPopupV1(input: {
   // Refinement (directional-action) tracking so "Go back" can restore the main state.
   let inRefinement = false;
   let savedMain: { result: PromptEnhancementPrepareResultV1; body: string } | null = null;
+  // F1b: every engine action re-routes with the decision ITS result was prepared with, so a
+  // prompt that routed only via the prepare-only LLM rescue keeps its route across actions.
+  const routeCarryoverFor = (result: PromptEnhancementPrepareResultV1): { familyId: string; primaryIntent: string } => ({
+    familyId: result.routeDecision.familyId,
+    primaryIntent: result.routeDecision.primaryIntent,
+  });
+  // Silent-keep discipline (owner ruling 2026-08-07): a failed action changes NOTHING on screen;
+  // the reason codes are reported to the host's log sink only. Best-effort — never throws.
+  const reportActionFailure = (actionType: string, state: string, reasonCodes: readonly string[] = []): void => {
+    try { input.actionDiagnosticsSink?.({ actionType, state, reasonCodes }); } catch { /* diagnostics only */ }
+  };
 
   try {
     for (;;) {
@@ -242,20 +261,29 @@ export async function runPromptEnhancementCliSubmitPopupV1(input: {
       }
       if (command.type === 'edit_body') {
         if (model.body.editable && command.text.trim().length > 0) editedBodyText = command.text;
-        else publicNotice = PUBLIC_ACTION_FAILURE;
+        else reportActionFailure('edit_body', 'rejected_empty_or_uneditable');
         continue;
       }
       if (command.type === 'use_current') {
+        // F2 (owner ruling 2026-08-07 — smooth send): an UNEDITED body was already validated
+        // sendable when this popup rendered — Enter sends exactly that body directly, with no
+        // engine round-trip that could fail. An EDITED body keeps the full validation path
+        // below (the edit-stage safety rules stay authoritative for user changes).
+        if (editedBodyText === model.body.text) {
+          const direct = selectedCurrent(model, editedBodyText);
+          if (direct) return direct;
+        }
         const execution = await executePromptEnhancementActionV1({
           adapterState: buildPromptEnhancementActionAdapterStateV1(model.session),
           baseRequest: input.request,
           action: model.controls.currentBody,
           editedBodyText,
           timestampMs: Date.now(),
+          routeCarryover: routeCarryoverFor(currentResult),
           facade: applyPromptEnhancementAction,
         });
         if (execution.state !== 'accepted_result') {
-          publicNotice = PUBLIC_ACTION_FAILURE;
+          reportActionFailure('use_current_body', execution.state, 'reasonCodes' in execution ? execution.reasonCodes : []);
           continue;
         }
         const accepted = buildPromptEnhancementPopupRenderModelV1({
@@ -267,13 +295,17 @@ export async function runPromptEnhancementCliSubmitPopupV1(input: {
           const selected = selectedCurrent(accepted.model, accepted.model.body.text);
           if (selected) return selected;
         }
-        publicNotice = PUBLIC_ACTION_FAILURE;
+        reportActionFailure(
+          'use_current_body',
+          'action_result_not_renderable',
+          accepted.state === 'render_model_ready' ? ['send_intent_not_ready'] : accepted.reasonCodes,
+        );
         continue;
       }
       if (command.type === 'use_original') {
         const selected = selectedOriginal(model, currentResult);
         if (selected) return selected;
-        publicNotice = PUBLIC_ACTION_FAILURE;
+        reportActionFailure('use_original', 'original_intent_not_ready');
         continue;
       }
 
@@ -336,7 +368,7 @@ export async function runPromptEnhancementCliSubmitPopupV1(input: {
       const actionType = command.type === 'apply_details' ? 'apply_details' : command.type;
       const action = actionFor(model, actionType);
       if (!action || action.availability !== 'available') {
-        publicNotice = PUBLIC_ACTION_FAILURE;
+        reportActionFailure(actionType, 'action_unavailable');
         continue;
       }
       const details = command.type === 'apply_details' ? command.text : additionalDetailsText;
@@ -349,10 +381,25 @@ export async function runPromptEnhancementCliSubmitPopupV1(input: {
         editedBodyText,
         ...(details.length > 0 ? { additionalDetailsText: details } : {}),
         timestampMs: Date.now(),
+        routeCarryover: routeCarryoverFor(currentResult),
         facade: applyPromptEnhancementAction,
       });
       if (execution.state !== 'accepted_result') {
-        publicNotice = PUBLIC_ACTION_FAILURE;
+        reportActionFailure(actionType, execution.state, 'reasonCodes' in execution ? execution.reasonCodes : []);
+        continue;
+      }
+
+      // Render the action result BEFORE committing any state: a non-renderable result keeps the
+      // previous popup exactly as it was (owner ruling 2026-08-07 — the popup used to CLOSE
+      // silently here, losing the user's approved prompt; now nothing on screen changes and the
+      // reason codes go to the diagnostics sink).
+      const renderedAction = buildPromptEnhancementPopupRenderModelV1({
+        result: execution.result,
+        timestampMs: Date.now(),
+        deliverySurface: execution.result.delivery.deliveryChannel,
+      });
+      if (renderedAction.state === 'no_popup') {
+        reportActionFailure(actionType, 'action_result_not_renderable', renderedAction.reasonCodes);
         continue;
       }
 
@@ -370,15 +417,8 @@ export async function runPromptEnhancementCliSubmitPopupV1(input: {
       // Observability is best-effort: a telemetry failure must NEVER abort the popup (the outer
       // catch returns not_shown), so swallow any sink error — same discipline as feedbackSink.
       try { input.costObservabilitySink?.(execution.result); } catch { /* observability only */ }
-      rendered = buildPromptEnhancementPopupRenderModelV1({
-        result: currentResult,
-        timestampMs: Date.now(),
-        deliverySurface: currentResult.delivery.deliveryChannel,
-      });
-      if (rendered.state === 'no_popup') {
-        return { state: 'not_shown', reasonCodes: ['action_result_not_renderable', ...rendered.reasonCodes] };
-      }
-      model = rendered.model;
+      rendered = renderedAction;
+      model = renderedAction.model;
       editedBodyText = model.body.text;
       additionalDetailsText = '';
       // Show only a meaningful notice after a refinement — the generic "Prepared prompt-enhancement

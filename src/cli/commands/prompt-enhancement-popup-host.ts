@@ -179,6 +179,14 @@ export async function runPromptEnhancementPopupHostCommandV1(
               input.request,
             ),
             costObservabilitySink: (result) => emitPromptEnhancementCostObservabilityV1(result, 'popup_action', logger),
+            // F3 (2026-08-07): failed actions stay silent in the popup — reason codes go to the
+            // log so a spawned-window failure (the live Windows report) is diagnosable post-hoc.
+            actionDiagnosticsSink: (event) => logger.debug('pe_action_failed', {
+              projectRoot: input.request.projectRoot,
+              actionType: event.actionType,
+              state: event.state,
+              reasonCodes: event.reasonCodes.slice(0, 8),
+            }),
           });
         }
       } finally {
