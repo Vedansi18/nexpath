@@ -531,10 +531,58 @@ function authorityModeFor(text: string): PromptEnhancementAuthorityMode {
   return 'observe_or_literal';
 }
 
+/**
+ * Actions dangerous enough to count as an authority escalation on sight, whatever surrounds them.
+ * Deliberately tiny: only wording with no benign reading. This is the floor that sentence scoping
+ * below can never soften.
+ */
+const ALWAYS_ESCALATE_PATTERN = /\b(?:force[-\s]?push|rm\s+-rf|drop\s+table|truncate|reset\s+--hard|rewrite\s+history)\b/i;
+
+/**
+ * Split generated wording into the units an execution verb and a risk term must SHARE to count as an
+ * escalation.
+ *
+ * Splitting on newlines alone is not enough: a single rendered line can carry several numbered items
+ * ("1. Execute automated tests… 2. Perform stress tests on database operations"), and treating that as
+ * one unit lets `execute` pair with `database` from a different item — the exact false positive this
+ * scoping exists to remove. Sentence boundaries are therefore split too.
+ *
+ * The lookahead requires an uppercase letter or digit after the terminator, so version numbers
+ * (`v1.2`), file names (`package.json`) and `e.g.` stay intact instead of fragmenting a sentence and
+ * hiding a genuine escalation.
+ */
+function authorityScopeUnits(text: string): readonly string[] {
+  return text
+    .split(/\r?\n+/)
+    .flatMap((line) => line.split(/(?<=[.!?])\s+(?=[A-Z0-9])/))
+    .map((unit) => unit.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Does the generated wording actually escalate, rather than merely contain an execution verb?
+ *
+ * `EXECUTION_VERB` includes `run`, `execute`, `write`, `apply` and `modify` — verbs no verification or
+ * test-plan section can avoid, and every template requires such a section. Matching them anywhere in
+ * the body therefore rejected bodies for doing their job. Requiring a risk term in the SAME unit
+ * separates "execute the tests" from "execute the rollback"; body-level risk matching cannot, because
+ * risk patterns fire on the prompt's topic (`database`, `upgrade`) rather than on the action.
+ */
+function generatedRiskEscalationPresent(generatedText: string): boolean {
+  if (ALWAYS_ESCALATE_PATTERN.test(generatedText)) return true;
+  return authorityScopeUnits(generatedText).some((unit) =>
+    EXECUTION_VERB.test(unit) && RISK_PATTERNS.some(([, pattern]) => pattern.test(unit)),
+  );
+}
+
 function generatedEscalatesAuthority(originalPromptText: string, generatedBodyText: string): boolean {
   const originalAuthority = authorityModeFor(originalPromptText);
-  const generatedAuthority = authorityModeFor(generatedBodyText.replace(buildPromptEnhancementCanonicalConfirmation(originalPromptText), ''));
-  return originalAuthority === 'plan_or_review' && generatedAuthority === 'execute_requested';
+  if (originalAuthority !== 'plan_or_review') return false;
+  const generatedRiskText = generatedBodyText.replace(buildPromptEnhancementCanonicalConfirmation(originalPromptText), '');
+  if (authorityModeFor(generatedRiskText) !== 'execute_requested') return false;
+  // Pure narrowing: both original conditions still hold above, and this can only turn a `true` into a
+  // `false`. It can never make previously-safe wording escalate.
+  return generatedRiskEscalationPresent(generatedRiskText);
 }
 
 function addsSensitiveExecution(previousBodyText: string, editedBodyText: string): boolean {

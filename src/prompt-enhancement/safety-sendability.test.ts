@@ -1159,3 +1159,48 @@ function countOccurrences(value: string, search: string): number {
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
+
+describe('authority escalation is sentence-scoped, not whole-body keyword matching', () => {
+  const planPrompt = 'Break down the work to upgrade the database driver, and plan the rollback.';
+  const escalated = (generatedLine: string) => {
+    const currentBody = composedBody({ originalPromptText: planPrompt, route: { promptText: planPrompt } });
+    const result = validatePromptEnhancementSafety({
+      currentBody,
+      editedBodyText: `${currentBody.text}\n\nVerification Or Test Plan:\n- ${generatedLine}`,
+    });
+    return result.failures.map((failure) => failure.failureCode).includes('authority_escalation:planning_to_execution');
+  };
+
+  // The measured false positive: a verification section doing exactly its job. "execute" is an
+  // execution verb but nothing risky shares its sentence.
+  it('does NOT flag ordinary verification wording', () => {
+    expect(escalated('Execute automated tests to check new driver functionality.')).toBe(false);
+  });
+
+  // The case that silently defeats the fix if sentence splitting is wrong: TWO numbered items on ONE
+  // line. Split badly and "execute" co-occurs with "database", reproducing the false positive.
+  it('does NOT flag two numbered items on one line where verb and risk term are in DIFFERENT items', () => {
+    expect(escalated('1. Execute automated tests to check new driver functionality. 2. Perform stress tests on database operations.')).toBe(false);
+  });
+
+  // Genuine escalation: execution verb and risk term in the SAME sentence.
+  it('DOES flag an execution verb and a risk term in the same sentence', () => {
+    expect(escalated('Execute the rollback script and confirm the database returns to the prior schema.')).toBe(true);
+  });
+
+  it('DOES flag a production deployment instruction', () => {
+    expect(escalated('Deploy the package to production during the scheduled downtime.')).toBe(true);
+  });
+
+  // The always-escalate floor holds with no risk term anywhere near the verb.
+  it('DOES flag always-escalate patterns regardless of sentence scoping', () => {
+    expect(escalated('Then force-push the branch.')).toBe(true);
+    expect(escalated('Run rm -rf on the folder.')).toBe(true);
+  });
+
+  // Accepted trade, recorded as a test rather than a footnote: narrowing to sentence scope means a
+  // verb and its risky object split across two sentences now passes. This is a KNOWN false negative.
+  it('KNOWN TRADE: verb and risk term in adjacent but separate sentences is no longer flagged', () => {
+    expect(escalated('Execute the rollback script. The database will return to the prior schema.')).toBe(false);
+  });
+});
