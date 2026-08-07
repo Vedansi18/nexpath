@@ -344,6 +344,24 @@ describe('activate', () => {
       capturedOnMessage()({ type: 'pe_close', actionId: 'a1' });
       expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining('PE send intent'));
     });
+
+    it('re-evaluates against the latest published payload, not a stale snapshot from an earlier message', async () => {
+      mockShowOnboarding.mockResolvedValueOnce(undefined);
+      await activate(makeCtx() as never);
+      const provider = getPeViewProvider() as unknown as { publishPayload: (p: unknown) => void };
+
+      provider.publishPayload(sendablePayload);
+      logSpy.mockClear();
+      capturedOnMessage()({ type: 'pe_deliver_current_body', bodyId: 'body-1', bodyRevision: 3, bodyText: 'x' });
+      expect(logSpy.mock.calls.map((c) => String(c[0])).join('\n')).toContain('"state":"intent_ready"');
+
+      provider.publishPayload({ ...sendablePayload, sendPolicy: 'no_send' });
+      logSpy.mockClear();
+      capturedOnMessage()({ type: 'pe_deliver_current_body', bodyId: 'body-1', bodyRevision: 3, bodyText: 'x' });
+      const secondLogs = logSpy.mock.calls.map((c) => String(c[0])).join('\n');
+      expect(secondLogs).toContain('current_body_not_sendable');
+      expect(secondLogs).not.toContain('"state":"intent_ready"');
+    });
   });
 
   it('does NOT start the watcher when consent is undefined (first launch, user has not answered)', async () => {
