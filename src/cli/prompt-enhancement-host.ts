@@ -575,9 +575,11 @@ export async function runPromptEnhancementCliPopupHostLaunchV1(input: {
     if (process.env.NEXPATH_DEBUG) {
       process.stderr.write(`[nexpath] PE popup spawn: ${plan.command} ${JSON.stringify(plan.args)}\n`);
     }
+    let childExited = false;
     try {
       child = await dependencies.spawnTerminal(plan);
       child.once('exit', (code, signal) => {
+        childExited = true;
         terminalExitNonZero = code !== 0 || signal !== null;
       });
     } catch {
@@ -591,9 +593,20 @@ export async function runPromptEnhancementCliPopupHostLaunchV1(input: {
       rendererReady ||= dependencies.readReadyFile(readinessFile);
       const output = dependencies.readResultFile(resultFile);
       if (output) {
-        return rendererReady
-          ? { state: 'completed', output }
-          : { state: 'launch_failed', reasonCode: 'terminal_renderer_not_ready' };
+        if (!rendererReady) return { state: 'launch_failed', reasonCode: 'terminal_renderer_not_ready' };
+        // macOS (live iMac report 2026-08-07): `child` here is the osascript process whose
+        // AppleScript CLOSES the Terminal.app window only AFTER the popup process exits.
+        // Returning immediately made the `finally` kill it first, so the window stayed open
+        // showing "[Process completed]" over a stale frame. Give the AppleScript a bounded
+        // window (~8s of polls) to close the Terminal window and exit on its own; the kill in
+        // `finally` then hits an already-dead process. Linux/Windows terminal windows close
+        // themselves when their command exits — their flow is unchanged (no extra waiting).
+        if (input.capability.method === 'mac_terminal') {
+          for (let pollCount = 0; pollCount < 40 && !childExited; pollCount += 1) {
+            await dependencies.sleep(200);
+          }
+        }
+        return { state: 'completed', output };
       }
       if (terminalExitNonZero) return { state: 'launch_failed', reasonCode: 'terminal_exit_nonzero' };
       await dependencies.sleep(PROMPT_ENHANCEMENT_POPUP_HOST_POLL_INTERVAL_MS_V1);

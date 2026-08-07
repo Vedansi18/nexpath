@@ -428,12 +428,22 @@ describe('UI-1 PE frame renderer', () => {
     expect(frame).toContain(PROMPT_ENHANCEMENT_CLI_FOOTER_V1);
   });
 
-  it('shows the focused row short help and the locked full help when Space-expanded', async () => {
+  it('the focused editable body drops its sub-label help and ends with the Ctrl+J hint (owner request 2026-08-07)', async () => {
     const model = await renderModel();
     const view: PromptEnhancementCliPopupViewV1 = { model, editedBodyText: 'CONTROLLED-BODY', additionalDetailsText: '' };
-    expect(renderPromptEnhancementPopupFrameV1(view, { focusIndex: 0, helpExpanded: false })).toContain('Edit current prompt');
-    expect(renderPromptEnhancementPopupFrameV1(view, { focusIndex: 0, helpExpanded: true }))
-      .toContain('Open this inline editor to change the enhanced body.');
+    const frame = renderPromptEnhancementPopupFrameV1(view, { focusIndex: 0, helpExpanded: false });
+    // The 'Edit current prompt' / full-help sub-label is gone so the body shows more lines…
+    expect(frame).not.toContain('Edit current prompt');
+    expect(frame).not.toContain('Open this inline editor to change the enhanced body.');
+    // …and the Ctrl+J edit-keys + 'Enter sends this prompt' share ONE line below the body
+    // (owner request 2026-08-07 — one fewer line so the body shows one more).
+    const lines = frame.split('\n').map((l) => l.replace(/^│ ?/, ''));
+    const bodyIdx = lines.findIndex((l) => l.includes('CONTROLLED-BODY'));
+    const hintIdx = lines.findIndex((l) => l.includes('Ctrl+J new line') && l.includes('Enter sends this prompt'));
+    expect(hintIdx).toBeGreaterThan(bodyIdx);
+    // The two hints are NOT on separate lines.
+    expect(lines.filter((l) => l.includes('Enter sends this prompt'))).toHaveLength(1);
+    expect(lines.filter((l) => l.includes('Ctrl+J new line'))).toHaveLength(1);
   });
 });
 
@@ -562,13 +572,14 @@ describe('UI-1 action-row model', () => {
     expect(visualRow).toBeLessThan(8);
   });
 
-  it('marks the focused editable row with a filled bullet and shows its help', () => {
+  it('marks the focused editable row with a filled bullet and the editing-keys hint (no sub-label help)', () => {
     const view: PromptEnhancementCliPopupViewV1 = { model: fakeRenderModel(), editedBodyText: 'BODY-LINE', additionalDetailsText: '' };
     const frame = renderPromptEnhancementPopupFrameV1(view, { focusIndex: 0, helpExpanded: false });
     expect(frame).toContain('● Use enhanced prompt');
     expect(frame).toContain('BODY-LINE');
-    expect(frame).toContain('Edit current prompt');
-    // Owner request: the editable body shows the editing-keys hint under its help.
+    // Owner request 2026-08-07: the 'Edit current prompt' sub-label is removed…
+    expect(frame).not.toContain('Edit current prompt');
+    // …and the editable body still shows the editing-keys hint (now the last line of its block).
     expect(frame).toContain('Ctrl+J new line');
     // Directional rows and Use original prompt carry no description (owner request).
     expect(renderPromptEnhancementPopupFrameV1(view, { focusIndex: 2, helpExpanded: true }))
@@ -598,15 +609,18 @@ describe('UI-1 action-row model', () => {
     expect(framePinch).not.toContain('Shown because');
   });
 
-  it('shows a light-gray action hint under each editable heading (UI-8)', () => {
+  it('shows a light-yellow action hint under each editable heading (UI-8)', () => {
     const ESC = String.fromCharCode(27);
     const view: PromptEnhancementCliPopupViewV1 = { model: fakeRenderModel(), editedBodyText: 'BODY', additionalDetailsText: '' };
     const plain = renderPromptEnhancementPopupFrameV1(view, { focusIndex: 0, helpExpanded: false });
     expect(plain).toContain('Enter sends this prompt');
     expect(plain).toContain('Enter applies these details · unapplied details are not sent');
-    // In colour mode the hints are gray.
+    // The focused body's edit-keys + send hint share ONE line (owner request 2026-08-07).
+    expect(plain).toContain('Ctrl+J new line · Ctrl+↑/↓ move line · Enter sends this prompt');
+    // In colour mode that combined hint line is LIGHT YELLOW (owner request 2026-08-07 — a
+    // distinct, all-OS-visible shortcut colour).
     const colored = renderPromptEnhancementPopupFrameV1(view, { focusIndex: 0, helpExpanded: false, colorize: true });
-    expect(colored).toContain(`${ESC}[90mEnter sends this prompt`);
+    expect(colored).toContain(`${ESC}[93mCtrl+J new line · Ctrl+↑/↓ move line · Enter sends this prompt`);
   });
 
   it('applies the old-popup radio colours only when colorize is on (§8.1)', () => {
@@ -681,10 +695,14 @@ describe('UI-2 interaction reducer', () => {
     let dirty = reducePromptEnhancementCliInteractionV1(state('ab'), rows(), { kind: 'editor', raw: 'Z' }).state;
     expect(reducePromptEnhancementCliInteractionV1(dirty, rows(), { kind: 'enter' }).commands)
       .toEqual([{ type: 'edit_body', text: 'abZ' }, { type: 'use_current' }]);
-    // Enter on Additional details => apply_details with the details text
+    // Enter on Additional details => APPLY into the body locally (MPS parity, owner request
+    // 2026-08-07): one edit_body with the merged prompt; details cleared; focus back on the body.
     let s = reducePromptEnhancementCliInteractionV1(state('BODY', 'notes'), rows(), { kind: 'down' }).state;
-    expect(reducePromptEnhancementCliInteractionV1(s, rows(), { kind: 'enter' }).commands)
-      .toEqual([{ type: 'apply_details', text: 'notes' }]);
+    const applied = reducePromptEnhancementCliInteractionV1(s, rows(), { kind: 'enter' });
+    expect(applied.commands)
+      .toEqual([{ type: 'edit_body', text: 'BODY\n\nAdditional details to incorporate:\nnotes' }]);
+    expect(applied.state.editor.buffers.additional_details.text).toBe('');
+    expect(rows()[applied.state.focusIndex]!.kind).toBe('editor_heading');
     // Enter on a directional row (focus 2 = Shorter)
     let d = reducePromptEnhancementCliInteractionV1(state(), rows(), { kind: 'down' }).state;
     d = reducePromptEnhancementCliInteractionV1(d, rows(), { kind: 'down' }).state;
@@ -692,16 +710,29 @@ describe('UI-2 interaction reducer', () => {
       .toEqual([{ type: 'shorter' }]);
   });
 
-  it('commits a dirty body before Apply details, and no-ops an empty details draft', () => {
-    // Edit the body (dirty), move to details, type a note, then Apply.
+  it('applies details onto the EDITED body (dirty edits kept), and no-ops an empty details draft', () => {
+    // Edit the body (dirty), move to details, type a note, then Apply: the merge starts from the
+    // edited body text, so nothing the user typed is lost.
     let s = reducePromptEnhancementCliInteractionV1(state('BODY', ''), rows(), { kind: 'editor', raw: 'Z' }).state;
     s = reducePromptEnhancementCliInteractionV1(s, rows(), { kind: 'down' }).state;
     s = reducePromptEnhancementCliInteractionV1(s, rows(), { kind: 'editor', raw: 'n' }).state;
     expect(reducePromptEnhancementCliInteractionV1(s, rows(), { kind: 'enter' }).commands)
-      .toEqual([{ type: 'edit_body', text: 'BODYZ' }, { type: 'apply_details', text: 'n' }]);
+      .toEqual([{ type: 'edit_body', text: 'BODYZ\n\nAdditional details to incorporate:\nn' }]);
     // Enter on an empty details draft does nothing.
     const empty = reducePromptEnhancementCliInteractionV1(state('BODY', ''), rows(), { kind: 'down' }).state;
     expect(reducePromptEnhancementCliInteractionV1(empty, rows(), { kind: 'enter' }).commands).toEqual([]);
+  });
+
+  it('a second Apply extends the ONE details block — never a duplicate heading (iMac report 2026-08-07)', () => {
+    let s = reducePromptEnhancementCliInteractionV1(state('BODY', 'first'), rows(), { kind: 'down' }).state;
+    s = reducePromptEnhancementCliInteractionV1(s, rows(), { kind: 'enter' }).state; // apply #1 -> focus back on body
+    s = reducePromptEnhancementCliInteractionV1(s, rows(), { kind: 'down' }).state;  // back to details
+    s = reducePromptEnhancementCliInteractionV1(s, rows(), { kind: 'editor', raw: 's' }).state;
+    const second = reducePromptEnhancementCliInteractionV1(s, rows(), { kind: 'enter' });
+    expect(second.commands).toHaveLength(1);
+    const text = (second.commands[0] as { type: 'edit_body'; text: string }).text;
+    expect(text.match(/Additional details to incorporate:/g)).toHaveLength(1);
+    expect(text.endsWith('first\ns')).toBe(true);
   });
 
   it('never sends an empty/whitespace body (BF-1)', () => {

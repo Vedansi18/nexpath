@@ -449,6 +449,21 @@ export type AutoPromptEnhancementPreparationResult =
     };
 
 /**
+ * Diagnosability (blocked-popup fix 2026-08-07): a blocked_no_send prepare previously logged
+ * only its disposition — the BLOCKING failure codes were unrecoverable once the pending row was
+ * overwritten. Surface the typed codes (public-safe enums, never body text) in the boundary log.
+ */
+function blockedFailureCodesForLog(
+  preparation: AutoPromptEnhancementPreparationResult,
+): readonly string[] | undefined {
+  if (preparation.disposition !== 'blocked_no_send' || !preparation.result) return undefined;
+  return preparation.result.validationGraph.failures
+    .filter((failure) => failure.blocking)
+    .map((failure) => failure.failureCode)
+    .slice(0, 6);
+}
+
+/**
  * Validate the typed H1.1 request/result boundary without creating PE semantics.
  * Invalid, thrown, or malformed producer output is reduced to the public-safe
  * no-popup disposition; it never mutates the submitted prompt or legacy DS state.
@@ -891,6 +906,7 @@ export async function runAuto(
       validationReasonCodes: 'validationReasonCodes' in preparation && preparation.validationReasonCodes
         ? preparation.validationReasonCodes.slice(0, 10)
         : undefined,
+      blockedFailureCodes: blockedFailureCodesForLog(preparation),
       sequenceShapedFallback: true,
     });
     if (!preparation.safeFallback && preparation.result) {
@@ -1095,6 +1111,7 @@ export async function runAuto(
     validationReasonCodes: 'validationReasonCodes' in preparation && preparation.validationReasonCodes
       ? preparation.validationReasonCodes.slice(0, 10)
       : undefined,
+    blockedFailureCodes: blockedFailureCodesForLog(preparation),
   });
   // Owner decision B-i (2026-08-04): the PE popup is deferred to the Stop hook. Do NOT show a
   // popup on UserPromptSubmit — the prompt passes through raw. When a real (non-fallback) result

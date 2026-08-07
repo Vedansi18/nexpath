@@ -108,6 +108,11 @@ describe('stage-1-2a pure multiline editor state machine', () => {
     expect(decodePromptEnhancementEditorInputV1('\r', 'enhanced_body')).toEqual({ type: 'plain_enter' });
     expect(decodePromptEnhancementEditorInputV1('\u001b[A', 'enhanced_body')).toEqual({ type: 'plain_up' });
     expect(decodePromptEnhancementEditorInputV1('\u001b[1;5B', 'enhanced_body')).toEqual({ type: 'move_visual_down' });
+    // macOS Cmd/Option modifier variants (owner request 2026-08-07) — additive to the Ctrl bindings.
+    expect(decodePromptEnhancementEditorInputV1('\u001b[1;9A', 'enhanced_body')).toEqual({ type: 'move_visual_up' });
+    expect(decodePromptEnhancementEditorInputV1('\u001b[1;9B', 'enhanced_body')).toEqual({ type: 'move_visual_down' });
+    expect(decodePromptEnhancementEditorInputV1('\u001b[1;3A', 'enhanced_body')).toEqual({ type: 'move_visual_up' });
+    expect(decodePromptEnhancementEditorInputV1('\u001b\u001b[B', 'enhanced_body')).toEqual({ type: 'move_visual_down' });
     expect(decodePromptEnhancementEditorInputV1('\u001b', 'enhanced_body')).toEqual({ type: 'escape' });
     expect(decodePromptEnhancementEditorInputV1(' ', 'enhanced_body')).toEqual({ type: 'insert_text', text: ' ' });
     expect(decodePromptEnhancementEditorInputV1('\u001b[Z', 'enhanced_body')).toEqual({ type: 'unsupported' });

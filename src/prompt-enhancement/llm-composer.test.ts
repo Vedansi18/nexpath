@@ -36,13 +36,14 @@ describe('composeStructuredComposerOutputV1 (E4 / 4.1)', () => {
       sectionDrafts: [{ sectionId: 'sec-verify', bodyText: 'Add a failing test that reproduces the bug, then make it pass.', sourceFactIds: ['fact-a'] }],
       composerClaims: ['claim:fact-a'],
     });
-    const output = await composeStructuredComposerOutputV1(input, client(reply));
-    expect(output).toBeDefined();
-    expect(output!.outputId).toBe('pe:req-1:composer-llm');
-    expect(output!.sectionDrafts).toEqual([
+    const result = await composeStructuredComposerOutputV1(input, client(reply));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.output.outputId).toBe('pe:req-1:composer-llm');
+    expect(result.output.sectionDrafts).toEqual([
       { sectionId: 'sec-verify', bodyText: 'Add a failing test that reproduces the bug, then make it pass.', sourceFactIds: ['fact-a'] },
     ]);
-    expect(output!.composerClaims).toEqual(['claim:fact-a']);
+    expect(result.output.composerClaims).toEqual(['claim:fact-a']);
   });
 
   it('parses the E5 detectedLanguageSelfReport and passes the mirror-language instruction', async () => {
@@ -55,8 +56,8 @@ describe('composeStructuredComposerOutputV1 (E4 / 4.1)', () => {
     const capturing: PromptEnhancementComposerClientV1 = {
       chat: { completions: { create: async (body) => { sentSystemPrompt = body.messages.find((m) => m.role === 'system')?.content ?? ''; return { choices: [{ message: { content: reply } }] }; } } },
     };
-    const output = await composeStructuredComposerOutputV1(input, capturing);
-    expect(output!.detectedLanguageSelfReport).toBe('hi-Latn');
+    const result = await composeStructuredComposerOutputV1(input, capturing);
+    expect(result.ok && result.output.detectedLanguageSelfReport).toBe('hi-Latn');
     expect(sentSystemPrompt).toContain('SAME language');
     expect(sentSystemPrompt).toContain('detectedLanguageSelfReport');
   });
@@ -68,7 +69,7 @@ describe('composeStructuredComposerOutputV1 (E4 / 4.1)', () => {
       sectionDrafts: [{ sectionId: 'sec-verify', bodyText: 'Verify it.', sourceFactIds: ['fact-a'] }],
       composerClaims: ['claim:fact-a'],
     });
-    expect(await composeStructuredComposerOutputV1(input, client(reply))).toBeUndefined();
+    expect(await composeStructuredComposerOutputV1(input, client(reply))).toEqual({ ok: false, reason: 'invalid_output' });
   });
 
   it('E8: includes the directional action wording directive in the prompt', async () => {
@@ -94,21 +95,46 @@ describe('composeStructuredComposerOutputV1 (E4 / 4.1)', () => {
     expect(sentUser).toContain('use postgres, not mysql');
   });
 
-  it('returns undefined on a provider error (deterministic fallback)', async () => {
-    expect(await composeStructuredComposerOutputV1(input, client(null, { throws: true }))).toBeUndefined();
+  it('TI-2: reports a thrown provider error as provider_error (deterministic fallback)', async () => {
+    expect(await composeStructuredComposerOutputV1(input, client(null, { throws: true }))).toEqual({ ok: false, reason: 'provider_error' });
   });
 
-  it('returns undefined on an empty reply', async () => {
-    expect(await composeStructuredComposerOutputV1(input, client(null))).toBeUndefined();
+  it('TI-2: classifies an SDK timeout error (APIConnectionTimeoutError) as timeout', async () => {
+    const timeoutClient: PromptEnhancementComposerClientV1 = {
+      chat: { completions: { create: async () => { throw Object.assign(new Error('Request timed out.'), { name: 'APIConnectionTimeoutError' }); } } },
+    };
+    expect(await composeStructuredComposerOutputV1(input, timeoutClient)).toEqual({ ok: false, reason: 'timeout' });
   });
 
-  it('returns undefined on malformed JSON', async () => {
-    expect(await composeStructuredComposerOutputV1(input, client('not json {'))).toBeUndefined();
+  it('TI-2: classifies a timeout by message shape when the error name is generic', async () => {
+    const timeoutClient: PromptEnhancementComposerClientV1 = {
+      chat: { completions: { create: async () => { throw new Error('connection timed out after 45000ms'); } } },
+    };
+    expect(await composeStructuredComposerOutputV1(input, timeoutClient)).toEqual({ ok: false, reason: 'timeout' });
   });
 
-  it('returns undefined when the reply has no usable section drafts', async () => {
+  it('TI-2: reports no_key when no client is injected and no API key exists', async () => {
+    const savedKey = process.env['OPENAI_API_KEY'];
+    delete process.env['OPENAI_API_KEY'];
+    try {
+      // `new OpenAI()` throws at construction (no key) BEFORE any network access.
+      expect(await composeStructuredComposerOutputV1(input)).toEqual({ ok: false, reason: 'no_key' });
+    } finally {
+      if (savedKey !== undefined) process.env['OPENAI_API_KEY'] = savedKey;
+    }
+  });
+
+  it('TI-2: reports invalid_output on an empty reply (retries exhausted)', async () => {
+    expect(await composeStructuredComposerOutputV1(input, client(null))).toEqual({ ok: false, reason: 'invalid_output' });
+  });
+
+  it('TI-2: reports invalid_output on malformed JSON (retries exhausted)', async () => {
+    expect(await composeStructuredComposerOutputV1(input, client('not json {'))).toEqual({ ok: false, reason: 'invalid_output' });
+  });
+
+  it('TI-2: reports invalid_output when the reply has no usable section drafts', async () => {
     const reply = JSON.stringify({ sectionDrafts: [{ sectionId: '', bodyText: '' }], composerClaims: [] });
-    expect(await composeStructuredComposerOutputV1(input, client(reply))).toBeUndefined();
+    expect(await composeStructuredComposerOutputV1(input, client(reply))).toEqual({ ok: false, reason: 'invalid_output' });
   });
 
   it('does not call the model when there is no renderable (non-original, ref-backed) section', async () => {
@@ -117,8 +143,8 @@ describe('composeStructuredComposerOutputV1 (E4 / 4.1)', () => {
       chat: { completions: { create: async () => { called = true; return { choices: [] }; } } },
     };
     const onlyOriginal = planning([{ sectionId: 'sec-orig', sectionKind: 'original_request_or_goal', structuredContentPartRefs: ['fact-x'] }]);
-    const output = await composeStructuredComposerOutputV1({ ...input, planning: onlyOriginal }, spyClient);
-    expect(output).toBeUndefined();
+    const result = await composeStructuredComposerOutputV1({ ...input, planning: onlyOriginal }, spyClient);
+    expect(result).toEqual({ ok: false, reason: 'no_eligible_sections' });
     expect(called).toBe(false);
   });
 
@@ -132,8 +158,8 @@ describe('composeStructuredComposerOutputV1 (E4 / 4.1)', () => {
     const flaky: PromptEnhancementComposerClientV1 = {
       chat: { completions: { create: async () => { calls += 1; return { choices: [{ message: { content: calls < 3 ? 'not json' : good } }] }; } } },
     };
-    const output = await composeStructuredComposerOutputV1(input, flaky);
-    expect(output).toBeDefined();
+    const result = await composeStructuredComposerOutputV1(input, flaky);
+    expect(result.ok).toBe(true);
     expect(calls).toBe(3);
   });
 
@@ -142,7 +168,7 @@ describe('composeStructuredComposerOutputV1 (E4 / 4.1)', () => {
     const alwaysBad: PromptEnhancementComposerClientV1 = {
       chat: { completions: { create: async () => { calls += 1; return { choices: [{ message: { content: 'not json' } }] }; } } },
     };
-    expect(await composeStructuredComposerOutputV1(input, alwaysBad)).toBeUndefined();
+    expect(await composeStructuredComposerOutputV1(input, alwaysBad)).toEqual({ ok: false, reason: 'invalid_output' });
     expect(calls).toBe(4); // 1 initial + 3 retries
   });
 
@@ -164,7 +190,7 @@ describe('composeStructuredComposerOutputV1 (E4 / 4.1)', () => {
         return { choices: [{ message: { content: drifted } }] };
       } } },
     };
-    expect(await composeStructuredComposerOutputV1(devanagariInput, driftingClient)).toBeUndefined();
+    expect(await composeStructuredComposerOutputV1(devanagariInput, driftingClient)).toEqual({ ok: false, reason: 'invalid_output' });
     expect(calls).toBe(4);
     expect(sawStrongerDirective).toBe(true);
   });
@@ -174,7 +200,7 @@ describe('composeStructuredComposerOutputV1 (E4 / 4.1)', () => {
     const throwing: PromptEnhancementComposerClientV1 = {
       chat: { completions: { create: async () => { calls += 1; throw new Error('provider down'); } } },
     };
-    expect(await composeStructuredComposerOutputV1(input, throwing)).toBeUndefined();
+    expect(await composeStructuredComposerOutputV1(input, throwing)).toEqual({ ok: false, reason: 'provider_error' });
     expect(calls).toBe(1);
   });
 
@@ -184,7 +210,7 @@ describe('composeStructuredComposerOutputV1 (E4 / 4.1)', () => {
       sectionDrafts: [{ sectionId: 'sec-verify', bodyText: 'Verify it.', sourceFactIds: ['fact-a', 3, null] }],
       composerClaims: ['claim:fact-a'],
     });
-    const output = await composeStructuredComposerOutputV1(input, client(reply));
-    expect(output!.sectionDrafts[0].sourceFactIds).toEqual(['fact-a']);
+    const result = await composeStructuredComposerOutputV1(input, client(reply));
+    expect(result.ok && result.output.sectionDrafts[0].sourceFactIds).toEqual(['fact-a']);
   });
 });

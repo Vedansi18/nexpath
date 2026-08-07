@@ -64,7 +64,31 @@ export interface PromptEnhancementPopupRenderModelV1 {
   /** UI-9 header copy: pinch label (when supplied) and why-help (only when a reason exists). */
   pinchLabel?: PromptEnhancementPinchLabelV1;
   whyHelp?: PromptEnhancementWhyHelpV1;
+  /**
+   * TI-2 UI half (2026-08-07): the locked failure disposition requires the user to be SHOWN that
+   * a provider failure happened. Set ONLY when the result's typed cost metadata carries a real
+   * provider failure (`providerFailureState 'timeout' | 'provider_api_unavailable'` — populated
+   * by the TI-2 wiring fix). A fixed public-safe sentence: no reason codes, ids, or body text,
+   * so the public-diagnostics contracts are untouched. Display-only — no control, gate, or
+   * sendability behaviour keys on it.
+   */
+  providerFailureNotice?: typeof PROMPT_ENHANCEMENT_PROVIDER_FAILURE_NOTICE_V1;
   rejectedControls: PromptEnhancementPopupSessionV1['preSendBoundaryState']['rejectedControlSet'];
+}
+
+/** Public-safe provider-failure copy (the locked disposition leaves the exact wording to the UI owner). */
+export const PROMPT_ENHANCEMENT_PROVIDER_FAILURE_NOTICE_V1 =
+  'AI wording was unavailable (provider issue) — your original prompt is shown unchanged.' as const;
+
+/** True when the typed cost metadata records a REAL provider failure (never for no-key /
+ * never-eligible / invalid-output runs — those keep today's frames byte-identical). */
+function providerFailureNoticeFor(
+  result: PromptEnhancementPrepareResultV1,
+): typeof PROMPT_ENHANCEMENT_PROVIDER_FAILURE_NOTICE_V1 | undefined {
+  const failureState = result.callAndVisibilityMetadata.providerFailureState;
+  return failureState === 'timeout' || failureState === 'provider_api_unavailable'
+    ? PROMPT_ENHANCEMENT_PROVIDER_FAILURE_NOTICE_V1
+    : undefined;
 }
 
 export type PromptEnhancementPopupRenderModelResultV1 =
@@ -151,6 +175,7 @@ export function buildPromptEnhancementPopupRenderModelV1(
       },
       pinchLabel: result.uiView.pinchLabel,
       whyHelp: result.uiView.whyHelp,
+      providerFailureNotice: providerFailureNoticeFor(result),
       rejectedControls: session.preSendBoundaryState.rejectedControlSet,
     },
   };

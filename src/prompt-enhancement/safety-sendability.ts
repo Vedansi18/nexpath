@@ -446,23 +446,20 @@ export function requiresPromptEnhancementExecutionConfirmationForPrompt(original
 }
 
 /**
- * Does the FINISHED body require the canonical confirmation line?
- *
- * `requiresPromptEnhancementExecutionConfirmationForPrompt` answers the same question from the user's
- * prompt alone, which is what the composer used to decide whether to insert the line. But the check
- * that later rejects the body reads the generated text too, and fires on
- * `execute_generated_escalation` — generated wording says "do" where the prompt only said "plan". A
- * body could therefore be judged against a safeguard that was never offered.
- *
- * This runs the validator's own classification (`classifySensitiveActions` over
- * `generatedOnlyText`) so the composer can ask exactly the question the validator will ask, using the
- * finished text rather than a prediction made before it existed.
+ * Validator-parity predicate for the COMPOSER (blocked-popup fix 2026-08-07). The composer's
+ * prompt-based gate above cannot see sensitive-action risk phrasing that the GENERATED wording
+ * introduces (LLM drafts are free text), but `validatePromptEnhancementSafety` scans the generated
+ * body too and hard-blocks a body that needs the canonical confirmation and lacks it
+ * (`missing_or_weak_confirmation:canonical_confirmation_absent` → blocked_no_send → an empty,
+ * all-unavailable popup). This applies EXACTLY the validator's own rule — same classifier, same
+ * generated-only text derivation — so the composer can guarantee the confirmation is present
+ * whenever the validator will demand it.
  */
-export function requiresPromptEnhancementConfirmationForFinishedBodyV1(
+export function promptEnhancementGeneratedBodyRequiresConfirmationV1(
   currentBody: Pick<PromptEnhancementCurrentBodyV1, 'sections' | 'originalPromptText'>,
-  fullBodyText: string,
+  bodyText: string,
 ): boolean {
-  const generatedBodyText = generatedOnlyText(fullBodyText, currentBody.originalPromptText);
+  const generatedBodyText = generatedOnlyText(bodyText, currentBody.originalPromptText);
   return classifySensitiveActions(currentBody, generatedBodyText).some((finding) => finding.requiresConfirmation);
 }
 
