@@ -152,6 +152,11 @@ describe('renderPromptEnhancementHtml — embedded script source (mirrors html.t
     expect(html).toContain("type: 'pe_submit_additional_details'");
   });
 
+  it('computes hasDirtyAdditionalDetails live from the details field at click time (P7 gate signal)', () => {
+    const html = renderPromptEnhancementHtml(readyPayload, { cspSource: CSP_SRC, nonce: FIXED_NONCE });
+    expect(html).toContain('hasDirtyAdditionalDetails: !!(detailsEl && detailsEl.value.trim().length > 0)');
+  });
+
   it('guards against clicking a disabled directional action', () => {
     const html = renderPromptEnhancementHtml(readyPayload, { cspSource: CSP_SRC, nonce: FIXED_NONCE });
     expect(html).toContain('if (btn.disabled) return;');

@@ -156,6 +156,12 @@ ${detailsHtml}
       bodyId: bodyEl.dataset.bodyId,
       bodyRevision: Number(bodyEl.dataset.bodyRevision),
       bodyText: bodyEl.value,
+      // P7 (VED-PE-7): unsubmitted text in the details field must block
+      // delivery (dirty_additional_details_requires_apply_or_clear) until
+      // the user presses Enter there (submits) or clears it — this is the
+      // only signal proving that, computed live at click time since the
+      // extension has no other way to know the field's current dirtiness.
+      hasDirtyAdditionalDetails: !!(detailsEl && detailsEl.value.trim().length > 0),
     });
   });
   document.getElementById('pe-close').addEventListener('click', (ev) => {

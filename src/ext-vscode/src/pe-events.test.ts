@@ -37,6 +37,7 @@ describe('routePeWebviewMessage — pe_deliver_current_body', () => {
       currentBodyId: 'body-1',
       bodyRevision: 3,
       editedBodyText: 'edited body',
+      hasDirtyAdditionalDetails: false,
       staleOrMismatched: false,
       timestampMs: 1700000000000,
     });
@@ -48,6 +49,20 @@ describe('routePeWebviewMessage — pe_deliver_current_body', () => {
 
   it('returns null when bodyText is present but not a string (proves a real typeof check, not just truthiness)', () => {
     expect(routePeWebviewMessage({ type: 'pe_deliver_current_body', bodyId: 'body-1', bodyRevision: 3, bodyText: 12345 }, ctx)).toBeNull();
+  });
+
+  it('carries hasDirtyAdditionalDetails: true through when the message says so (P7 gate signal)', () => {
+    const out = routePeWebviewMessage(
+      { type: 'pe_deliver_current_body', bodyId: 'body-1', bodyRevision: 3, bodyText: 'x', hasDirtyAdditionalDetails: true },
+      ctx,
+    );
+    expect(out?.hasDirtyAdditionalDetails).toBe(true);
+  });
+
+  it('defaults hasDirtyAdditionalDetails to false when omitted or not exactly true (defensive === true check)', () => {
+    expect(routePeWebviewMessage({ type: 'pe_deliver_current_body', bodyId: 'body-1', bodyRevision: 3, bodyText: 'x' }, ctx)?.hasDirtyAdditionalDetails).toBe(false);
+    expect(routePeWebviewMessage({ type: 'pe_deliver_current_body', bodyId: 'body-1', bodyRevision: 3, bodyText: 'x', hasDirtyAdditionalDetails: 'true' }, ctx)?.hasDirtyAdditionalDetails).toBe(false);
+    expect(routePeWebviewMessage({ type: 'pe_deliver_current_body', bodyId: 'body-1', bodyRevision: 3, bodyText: 'x', hasDirtyAdditionalDetails: 1 }, ctx)?.hasDirtyAdditionalDetails).toBe(false);
   });
 
   it('flags staleOrMismatched when the message bodyId disagrees with the context', () => {

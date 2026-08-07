@@ -264,6 +264,88 @@ describe('activate', () => {
     });
   });
 
+  describe('PE send-intent gating (P7)', () => {
+    function capturedOnMessage(): (raw: unknown) => void {
+      return mockPeProviderCtor.mock.calls[0]![1] as (raw: unknown) => void;
+    }
+
+    const sendablePayload = {
+      currentBodyId: 'body-1',
+      bodyRevision: 3,
+      sendPolicy: 'send_current',
+      renderState: 'ready',
+    };
+
+    it('logs intent_ready when the current body is sendable, editable, clean, and not stale', async () => {
+      mockShowOnboarding.mockResolvedValueOnce(undefined);
+      await activate(makeCtx() as never);
+      const provider = getPeViewProvider() as unknown as { publishPayload: (p: unknown) => void };
+      provider.publishPayload(sendablePayload);
+      logSpy.mockClear();
+      capturedOnMessage()({ type: 'pe_deliver_current_body', bodyId: 'body-1', bodyRevision: 3, bodyText: 'x' });
+      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('"state":"intent_ready"'));
+    });
+
+    it('rejects with current_body_not_sendable when sendPolicy is not send_current — proves no insertion occurs', async () => {
+      mockShowOnboarding.mockResolvedValueOnce(undefined);
+      await activate(makeCtx() as never);
+      const provider = getPeViewProvider() as unknown as { publishPayload: (p: unknown) => void };
+      provider.publishPayload({ ...sendablePayload, sendPolicy: 'no_send' });
+      logSpy.mockClear();
+      capturedOnMessage()({ type: 'pe_deliver_current_body', bodyId: 'body-1', bodyRevision: 3, bodyText: 'x' });
+      const allLogs = logSpy.mock.calls.map((c) => String(c[0])).join('\n');
+      expect(allLogs).toContain('"state":"no_intent"');
+      expect(allLogs).toContain('current_body_not_sendable');
+      expect(allLogs).not.toContain('"state":"intent_ready"');
+    });
+
+    it('rejects with current_body_not_editable when renderState is not ready', async () => {
+      mockShowOnboarding.mockResolvedValueOnce(undefined);
+      await activate(makeCtx() as never);
+      const provider = getPeViewProvider() as unknown as { publishPayload: (p: unknown) => void };
+      provider.publishPayload({ ...sendablePayload, renderState: 'loading' });
+      logSpy.mockClear();
+      capturedOnMessage()({ type: 'pe_deliver_current_body', bodyId: 'body-1', bodyRevision: 3, bodyText: 'x' });
+      const allLogs = logSpy.mock.calls.map((c) => String(c[0])).join('\n');
+      expect(allLogs).toContain('current_body_not_editable');
+      expect(allLogs).not.toContain('"state":"intent_ready"');
+    });
+
+    it('rejects with dirty_additional_details_requires_apply_or_clear when the message reports dirty details', async () => {
+      mockShowOnboarding.mockResolvedValueOnce(undefined);
+      await activate(makeCtx() as never);
+      const provider = getPeViewProvider() as unknown as { publishPayload: (p: unknown) => void };
+      provider.publishPayload(sendablePayload);
+      logSpy.mockClear();
+      capturedOnMessage()({ type: 'pe_deliver_current_body', bodyId: 'body-1', bodyRevision: 3, bodyText: 'x', hasDirtyAdditionalDetails: true });
+      const allLogs = logSpy.mock.calls.map((c) => String(c[0])).join('\n');
+      expect(allLogs).toContain('dirty_additional_details_requires_apply_or_clear');
+      expect(allLogs).not.toContain('"state":"intent_ready"');
+    });
+
+    it('rejects with stale_or_mismatched_send_identity when bodyId/bodyRevision disagree with the published payload', async () => {
+      mockShowOnboarding.mockResolvedValueOnce(undefined);
+      await activate(makeCtx() as never);
+      const provider = getPeViewProvider() as unknown as { publishPayload: (p: unknown) => void };
+      provider.publishPayload(sendablePayload);
+      logSpy.mockClear();
+      capturedOnMessage()({ type: 'pe_deliver_current_body', bodyId: 'stale-body', bodyRevision: 3, bodyText: 'x' });
+      const allLogs = logSpy.mock.calls.map((c) => String(c[0])).join('\n');
+      expect(allLogs).toContain('stale_or_mismatched_send_identity');
+      expect(allLogs).not.toContain('"state":"intent_ready"');
+    });
+
+    it('does not run send-intent gating for non-deliver event types', async () => {
+      mockShowOnboarding.mockResolvedValueOnce(undefined);
+      await activate(makeCtx() as never);
+      const provider = getPeViewProvider() as unknown as { publishPayload: (p: unknown) => void };
+      provider.publishPayload({ ...sendablePayload, sendPolicy: 'no_send' }); // would reject if gated
+      logSpy.mockClear();
+      capturedOnMessage()({ type: 'pe_close', actionId: 'a1' });
+      expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining('PE send intent'));
+    });
+  });
+
   it('does NOT start the watcher when consent is undefined (first launch, user has not answered)', async () => {
     mockShowOnboarding.mockResolvedValueOnce(undefined);
     mockDetectHost.mockReturnValueOnce('cursor');

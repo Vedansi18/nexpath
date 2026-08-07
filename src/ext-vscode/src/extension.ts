@@ -10,6 +10,7 @@ import {
   PE_VIEW_ID,
 } from './webview/pe-view-provider.js';
 import { routePeWebviewMessage, describePeEventSafely } from './pe-events.js';
+import { resolvePeSendIntent } from './pe-send-intent.js';
 import { handleOptionSelection } from './webview/prompt-injection.js';
 import {
   detectHost,
@@ -263,6 +264,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       });
       if (!event) return;
       log(`[nexpath] PE event: ${JSON.stringify(describePeEventSafely(event))}`);
+      // P7 (VED-PE-7): gate the one event type that actually attempts
+      // delivery today. No real insertion exists yet (P8/P9) — logging the
+      // gate decision here proves "delivery unreachable unless intent_ready"
+      // is true in this codebase now, not just in pe-send-intent.ts's own
+      // unit tests, and gives a future delivery call site somewhere correct
+      // to plug into.
+      if (event.eventType === 'deliver_current_body') {
+        const intent = resolvePeSendIntent({
+          sendPolicy: current.sendPolicy,
+          renderState: current.renderState,
+          staleOrMismatched: event.staleOrMismatched,
+          hasDirtyAdditionalDetails: event.hasDirtyAdditionalDetails === true,
+        });
+        log(`[nexpath] PE send intent: ${JSON.stringify(intent)}`);
+      }
     },
   );
   context.subscriptions.push(

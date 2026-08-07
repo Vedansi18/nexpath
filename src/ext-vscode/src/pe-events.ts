@@ -64,6 +64,14 @@ export interface PeEventV1 {
   editedBodyText?: string;
   additionalDetailsText?: string;
   feedbackCategory?: string;
+  /**
+   * Only meaningful on `deliver_current_body`: true when the additional-details
+   * field had unsubmitted text at the moment the user clicked deliver (P7,
+   * VED-PE-7's `dirty_additional_details_requires_apply_or_clear` gate).
+   * Computed client-side in `pe-html.ts` — this extension has no other way
+   * to observe the field's live dirtiness.
+   */
+  hasDirtyAdditionalDetails?: boolean;
   /** True when the message's own bodyId/bodyRevision disagree with the routing context's. Routed, not rejected — P7 gates delivery on this. */
   staleOrMismatched: boolean;
   timestampMs: number;
@@ -123,6 +131,7 @@ export function routePeWebviewMessage(
         currentBodyId: ctx.currentBodyId,
         bodyRevision: ctx.bodyRevision,
         editedBodyText: msg.bodyText,
+        hasDirtyAdditionalDetails: msg.hasDirtyAdditionalDetails === true,
         staleOrMismatched: staleAgainst(msg.bodyId, msg.bodyRevision),
         timestampMs,
       };
