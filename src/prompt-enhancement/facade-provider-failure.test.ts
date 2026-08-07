@@ -156,14 +156,18 @@ describe('TI-2: facade maps composer failure reasons onto the existing runtime s
     expect(frame).toContain(`${ESC}[33m${PROMPT_ENHANCEMENT_PROVIDER_FAILURE_NOTICE_V1}`);
   });
 
-  it('invalid_output -> fallback_no_llm with fallbackReason validation_failed; body renders the FULL deterministic sections', async () => {
+  // The reason is `malformed_output`, NOT `validation_failed`: the composer gave up after exhausting
+  // its retries, which is a different failure from a body whose drafts were REJECTED by the draft
+  // validator. Both used to report `validation_failed`, which made them indistinguishable in the logs
+  // and cost metadata and cost real debugging time.
+  it('invalid_output -> fallback_no_llm with fallbackReason malformed_output; body renders the FULL deterministic sections', async () => {
     mockCall.result = { ok: false, reason: 'invalid_output' };
     const result = await prepared();
     // The result MUST pass the boundary validator — otherwise auto.ts would reduce it to
     // invalid_result and NO popup would open (the regression this assertion guards).
     expect(validatePromptEnhancementPrepareResultV1(result)).toEqual({ ok: true, reasonCodes: [] });
     expect(result.callAndVisibilityMetadata.callVisibilityMode).toBe('fallback_no_llm');
-    expect(result.callAndVisibilityMetadata.fallbackReason).toBe('validation_failed');
+    expect(result.callAndVisibilityMetadata.fallbackReason).toBe('malformed_output');
     expect(result.callAndVisibilityMetadata.providerFailureState).toBe('none');
     // invalid_output falls back to the normal deterministic BODY (not the original-only shell).
     expect(result.disposition).toBe('show_current_body');

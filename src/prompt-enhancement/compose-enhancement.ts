@@ -398,7 +398,7 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
       llmCallPolicy,
       rawComposerOutput: structuredComposerRejected ? 'rejected_or_unavailable' : undefined,
       composerClaims,
-    }),
+    }, effectiveRuntimeState),
     availableActions: buildActionEntries(currentBodyId, bodyRevision, 'available', callVisibilityMode),
     bodySectionAgreement: 'exact',
     sourceGuidanceCoverage: hasSourceGuidanceSection(sectionPlans) ? 'covered' : 'fallback_no_generated_body',
@@ -970,6 +970,7 @@ function buildComposerBoundary(
     rawComposerOutput?: PromptEnhancementComposerBoundaryV1['rawComposerOutput'];
     composerClaims?: readonly string[];
   },
+  runtimeState?: PromptEnhancementComposerRuntimeState,
 ): PromptEnhancementComposerBoundaryV1 {
   const sourceRefs = selectedSectionPlans.flatMap((section) => section.sourceRefs);
   const originalPromptRef = selectedSectionPlans
@@ -1047,14 +1048,14 @@ function buildComposerBoundary(
       'output_cap_exceeded',
       'unsafe_metadata_copy',
     ],
-    fallbackReasonCodes: [runtimeBlockReasonFor(fallbackMode) ?? 'not_applicable'],
+    fallbackReasonCodes: [runtimeBlockReasonFor(fallbackMode, runtimeState) ?? 'not_applicable'],
     inputContract: {
       originalPromptRef,
       bodyPlanId: input.sectionPlanningResult.bodyPlan.bodyPlanId,
       sectionPlanIds: selectedSectionPlans.map((section) => section.sectionPlanId),
       boundedSourceSummaryRefs: unique(sourceRefs.map((ref) => ref.sourceRefId)),
       privacyApprovedFactsOnly: true,
-      callVisibilityState: callVisibilityState(callVisibilityMode, fallbackMode, input.action ?? 'default', llmCallPolicy),
+      callVisibilityState: callVisibilityState(callVisibilityMode, fallbackMode, input.action ?? 'default', llmCallPolicy, runtimeState),
       excludesRawStoreRows: true,
       excludesOldDecisionSessionOptionText: true,
       excludesUiInferredBusinessState: true,
@@ -1144,13 +1145,14 @@ function callVisibilityState(
   fallbackMode: PromptEnhancementFallbackMode,
   action: PromptEnhancementComposerAction,
   llmCallPolicy: PromptEnhancementComposerBoundaryV1['llmCallPolicy'] = 'no_call',
+  runtimeState?: PromptEnhancementComposerRuntimeState,
 ): PromptEnhancementCostVisibilityMetadataV1 {
   const usesLlm = llmCallPolicy === 'optional_with_cost_visibility';
   const metadata = buildPromptEnhancementCostVisibilityMetadataV1(costCallIdForAction(action), {
     callVisibilityMode,
     plannedCallCount: usesLlm ? 1 : 0,
     usedCallCount: usesLlm ? 1 : 0,
-    fallbackReason: runtimeBlockReasonFor(fallbackMode) ?? 'not_applicable',
+    fallbackReason: runtimeBlockReasonFor(fallbackMode, runtimeState) ?? 'not_applicable',
     providerFailureState: providerFailureStateForFallback(fallbackMode, callVisibilityMode),
   });
   if (usesLlm || callVisibilityMode === 'provider_unavailable') return metadata;
@@ -1192,10 +1194,20 @@ function costCallIdForAction(action: PromptEnhancementComposerAction): PromptEnh
   return 'baseline_pe_composer';
 }
 
-function runtimeBlockReasonFor(fallbackMode: PromptEnhancementFallbackMode): PromptEnhancementRuntimeBlockReason | undefined {
+function runtimeBlockReasonFor(
+  fallbackMode: PromptEnhancementFallbackMode,
+  runtimeState?: PromptEnhancementComposerRuntimeState,
+): PromptEnhancementRuntimeBlockReason | undefined {
   if (fallbackMode === 'provider_api_unavailable') return 'provider_unavailable';
   if (fallbackMode === 'timeout_no_send') return 'timeout';
-  if (fallbackMode === 'deterministic_body') return 'validation_failed';
+  // Two very different failures both fall back to a deterministic body, and reporting them under one
+  // reason made them indistinguishable in the logs: a body whose drafts were REJECTED by
+  // `validatedStructuredComposerDrafts` looked identical to a composer that GAVE UP after exhausting
+  // its retries on malformed/inconsistent replies. `malformed_output` already exists in the contract
+  // for the second case; use it, so a reader can tell which half of the pipeline failed.
+  if (fallbackMode === 'deterministic_body') {
+    return runtimeState === 'invalid_output' ? 'malformed_output' : 'validation_failed';
+  }
   if (fallbackMode === 'original_prompt_only' || fallbackMode === 'no_popup') return 'not_applicable';
   return undefined;
 }
