@@ -81,6 +81,32 @@ export interface ChatPipelineDeps {
   composeSessionId?: (event: ChatHistoryEvent) => string;
   /** Optional logger override (tests). */
   logger?: { error: (msg: string, err: unknown) => void };
+  /**
+   * Optional: called right after `spawnAuto` succeeds, to decide whether THIS
+   * turn parked a pending Prompt Enhancement rather than a Decision Session
+   * advisory (VED-PE-10 / D-6 — see `pe-origin.ts`; decided from typed store
+   * evidence only, never from Stop's returned text). When it resolves `true`,
+   * a later non-null `spawnStop` result is routed to `injectPeResult` instead
+   * of `injectSelection`. Absent, or throwing, => every result is treated as
+   * DS-origin — today's exact behaviour is the fail-safe default.
+   */
+  checkPeOrigin?: (event: ChatHistoryEvent) => Promise<boolean>;
+  /**
+   * Called instead of `injectSelection` when `checkPeOrigin` reported this
+   * turn as PE-origin. If omitted, a PE-origin result still falls back to
+   * `injectSelection` — a partial wiring degrades to the pre-PE behaviour
+   * rather than silently dropping the result.
+   */
+  injectPeResult?: (resultText: string, event: ChatHistoryEvent) => Promise<void> | void;
+  /**
+   * Optional: called FIRST, before `spawnAuto`. Returns true when this
+   * event's prompt text is a recognised self-echo of a PE body the extension
+   * itself just injected (analysis F6) — the handler then returns
+   * immediately without running `auto`/`stop` at all. Absent, or throwing,
+   * => treated as "not an echo" (fail-safe; Decision Session behaviour is
+   * never affected by an echo-check failure).
+   */
+  isPeEcho?: (event: ChatHistoryEvent) => Promise<boolean> | boolean;
 }
 
 const defaultLogger = {
@@ -101,12 +127,35 @@ export function createChatEventHandler(
   const logger = deps.logger ?? defaultLogger;
 
   return async (event: ChatHistoryEvent): Promise<void> => {
+    // F6 self-echo guard: skip entirely if this prompt is our own PE body
+    // reappearing. Must run before spawnAuto — a real user prompt has not
+    // been submitted, so there is nothing for auto/stop to process.
+    if (deps.isPeEcho) {
+      try {
+        if (await deps.isPeEcho(event)) return;
+      } catch (err) {
+        logger.error('[nexpath] isPeEcho check failed:', err);
+        // fall through — fail-safe, treat as not-an-echo
+      }
+    }
     const sessionId = composeSessionId(event);
     try {
       await deps.spawnAuto(event.prompt, sessionId, event);
     } catch (err) {
       logger.error('[nexpath] spawnAuto failed:', err);
       return;
+    }
+    // Decide DS vs PE origin from typed store evidence while the row is still
+    // genuinely pending — see pe-origin.ts for why this must happen here and
+    // not after spawnStop returns.
+    let isPe = false;
+    if (deps.checkPeOrigin) {
+      try {
+        isPe = await deps.checkPeOrigin(event);
+      } catch (err) {
+        logger.error('[nexpath] checkPeOrigin failed:', err);
+        // fail-safe — fall back to DS routing on failure
+      }
     }
     // Arm the in-editor fallback BEFORE the popup. `stop` can block indefinitely
     // on macOS (osascript waiting on the Automation-permission dialog), so the
@@ -127,10 +176,18 @@ export function createChatEventHandler(
       return;
     }
     if (selection === null) return; // dismissed / no advisory / no TTY — fallback stands
+    const routeToPe = isPe && deps.injectPeResult !== undefined;
     try {
-      await deps.injectSelection(selection.selectedPrompt, event);
+      if (routeToPe) {
+        await deps.injectPeResult!(selection.selectedPrompt, event);
+      } else {
+        await deps.injectSelection(selection.selectedPrompt, event);
+      }
     } catch (err) {
-      logger.error('[nexpath] injectSelection failed:', err);
+      logger.error(
+        routeToPe ? '[nexpath] injectPeResult failed:' : '[nexpath] injectSelection failed:',
+        err,
+      );
     }
   };
 }
