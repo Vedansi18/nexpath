@@ -63,6 +63,11 @@ describe('routePeWebviewMessage — pe_deliver_current_body', () => {
     );
     expect(out?.staleOrMismatched).toBe(true);
   });
+
+  it('does not flag staleOrMismatched when the message omits bodyId/bodyRevision entirely (distinct from present-but-different)', () => {
+    const out = routePeWebviewMessage({ type: 'pe_deliver_current_body', bodyText: 'x' }, ctx);
+    expect(out?.staleOrMismatched).toBe(false);
+  });
 });
 
 describe('routePeWebviewMessage — pe_directional_action', () => {
