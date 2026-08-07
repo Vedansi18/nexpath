@@ -189,4 +189,197 @@ describe('createChatEventHandler', () => {
     });
     await expect(handler(makeEvent())).resolves.toBeUndefined();
   });
+
+  // ── P4: PE-origin routing + F6 self-echo guard ────────────────────────────
+
+  describe('PE-origin routing (VED-PE-10 / D-6)', () => {
+    let checkPeOrigin: ReturnType<typeof vi.fn>;
+    let injectPeResult: ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+      checkPeOrigin = vi.fn().mockResolvedValue(false);
+      injectPeResult = vi.fn().mockResolvedValue(undefined);
+    });
+
+    it('routes a PE-origin result to injectPeResult, never injectSelection', async () => {
+      checkPeOrigin.mockResolvedValueOnce(true);
+      spawnStop.mockResolvedValueOnce(fakeSelection);
+      const handler = createChatEventHandler({
+        spawnAuto, spawnStop, injectSelection, onAfterCapture,
+        checkPeOrigin, injectPeResult,
+        logger: { error: errorLog },
+      });
+      const event = makeEvent();
+      await handler(event);
+      expect(checkPeOrigin).toHaveBeenCalledWith(event);
+      expect(injectPeResult).toHaveBeenCalledWith('Refine the request', event);
+      expect(injectSelection).not.toHaveBeenCalled();
+      expect(errorLog).not.toHaveBeenCalled();
+    });
+
+    it('a DS-origin result (checkPeOrigin false) still routes to injectSelection, never injectPeResult', async () => {
+      checkPeOrigin.mockResolvedValueOnce(false);
+      spawnStop.mockResolvedValueOnce(fakeSelection);
+      const handler = createChatEventHandler({
+        spawnAuto, spawnStop, injectSelection, onAfterCapture,
+        checkPeOrigin, injectPeResult,
+        logger: { error: errorLog },
+      });
+      await handler(makeEvent());
+      expect(injectSelection).toHaveBeenCalledWith('Refine the request', makeEvent());
+      expect(injectPeResult).not.toHaveBeenCalled();
+    });
+
+    it('falls back to injectSelection when PE-origin but injectPeResult is not wired (partial-wiring safety net)', async () => {
+      checkPeOrigin.mockResolvedValueOnce(true);
+      spawnStop.mockResolvedValueOnce(fakeSelection);
+      const handler = createChatEventHandler({
+        spawnAuto, spawnStop, injectSelection, onAfterCapture,
+        checkPeOrigin, // injectPeResult omitted
+        logger: { error: errorLog },
+      });
+      await handler(makeEvent());
+      expect(injectSelection).toHaveBeenCalledWith('Refine the request', makeEvent());
+    });
+
+    it('treats a checkPeOrigin rejection as DS-origin (fail-safe) and logs it', async () => {
+      checkPeOrigin.mockRejectedValueOnce(new Error('store unavailable'));
+      spawnStop.mockResolvedValueOnce(fakeSelection);
+      const handler = createChatEventHandler({
+        spawnAuto, spawnStop, injectSelection, onAfterCapture,
+        checkPeOrigin, injectPeResult,
+        logger: { error: errorLog },
+      });
+      await handler(makeEvent());
+      expect(errorLog).toHaveBeenCalledWith('[nexpath] checkPeOrigin failed:', expect.any(Error));
+      expect(injectSelection).toHaveBeenCalledWith('Refine the request', makeEvent());
+      expect(injectPeResult).not.toHaveBeenCalled();
+    });
+
+    it('logs injectPeResult failures distinctly from injectSelection failures', async () => {
+      checkPeOrigin.mockResolvedValueOnce(true);
+      injectPeResult.mockRejectedValueOnce(new Error('inject blew up'));
+      spawnStop.mockResolvedValueOnce(fakeSelection);
+      const handler = createChatEventHandler({
+        spawnAuto, spawnStop, injectSelection, onAfterCapture,
+        checkPeOrigin, injectPeResult,
+        logger: { error: errorLog },
+      });
+      await expect(handler(makeEvent())).resolves.toBeUndefined();
+      expect(errorLog).toHaveBeenCalledWith('[nexpath] injectPeResult failed:', expect.any(Error));
+    });
+
+    it('never calls checkPeOrigin when spawnAuto rejects (no turn to classify)', async () => {
+      spawnAuto.mockRejectedValueOnce(new Error('auto blew up'));
+      const handler = createChatEventHandler({
+        spawnAuto, spawnStop, injectSelection, onAfterCapture,
+        checkPeOrigin, injectPeResult,
+        logger: { error: errorLog },
+      });
+      await handler(makeEvent());
+      expect(checkPeOrigin).not.toHaveBeenCalled();
+    });
+
+    it('calls neither injectSelection nor injectPeResult when there is no selection, even when checkPeOrigin is true', async () => {
+      checkPeOrigin.mockResolvedValueOnce(true);
+      spawnStop.mockResolvedValueOnce(null);
+      const handler = createChatEventHandler({
+        spawnAuto, spawnStop, injectSelection, onAfterCapture,
+        checkPeOrigin, injectPeResult,
+        logger: { error: errorLog },
+      });
+      await handler(makeEvent());
+      expect(injectSelection).not.toHaveBeenCalled();
+      expect(injectPeResult).not.toHaveBeenCalled();
+    });
+
+    it('runs checkPeOrigin right after spawnAuto, before onAfterCapture and spawnStop', async () => {
+      spawnStop.mockResolvedValueOnce(fakeSelection);
+      const handler = createChatEventHandler({
+        spawnAuto, spawnStop, injectSelection, onAfterCapture,
+        checkPeOrigin, injectPeResult,
+        logger: { error: errorLog },
+      });
+      await handler(makeEvent());
+      expect(spawnAuto.mock.invocationCallOrder[0]).toBeLessThan(
+        checkPeOrigin.mock.invocationCallOrder[0],
+      );
+      expect(checkPeOrigin.mock.invocationCallOrder[0]).toBeLessThan(
+        onAfterCapture.mock.invocationCallOrder[0],
+      );
+      expect(checkPeOrigin.mock.invocationCallOrder[0]).toBeLessThan(
+        spawnStop.mock.invocationCallOrder[0],
+      );
+    });
+  });
+
+  describe('F6 self-echo guard (isPeEcho)', () => {
+    let isPeEcho: ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+      isPeEcho = vi.fn().mockResolvedValue(false);
+    });
+
+    it('skips auto/stop/inject entirely when isPeEcho reports a self-echo', async () => {
+      isPeEcho.mockResolvedValueOnce(true);
+      const handler = createChatEventHandler({
+        spawnAuto, spawnStop, injectSelection, onAfterCapture, isPeEcho,
+        logger: { error: errorLog },
+      });
+      await handler(makeEvent());
+      expect(spawnAuto).not.toHaveBeenCalled();
+      expect(spawnStop).not.toHaveBeenCalled();
+      expect(onAfterCapture).not.toHaveBeenCalled();
+      expect(injectSelection).not.toHaveBeenCalled();
+      expect(errorLog).not.toHaveBeenCalled();
+    });
+
+    it('runs isPeEcho before spawnAuto when it reports false (checked first, but does not block)', async () => {
+      isPeEcho.mockResolvedValueOnce(false);
+      spawnStop.mockResolvedValueOnce(fakeSelection);
+      const handler = createChatEventHandler({
+        spawnAuto, spawnStop, injectSelection, onAfterCapture, isPeEcho,
+        logger: { error: errorLog },
+      });
+      await handler(makeEvent());
+      expect(isPeEcho.mock.invocationCallOrder[0]).toBeLessThan(
+        spawnAuto.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('proceeds normally when isPeEcho reports false', async () => {
+      isPeEcho.mockResolvedValueOnce(false);
+      spawnStop.mockResolvedValueOnce(fakeSelection);
+      const handler = createChatEventHandler({
+        spawnAuto, spawnStop, injectSelection, onAfterCapture, isPeEcho,
+        logger: { error: errorLog },
+      });
+      await handler(makeEvent());
+      expect(spawnAuto).toHaveBeenCalledOnce();
+      expect(injectSelection).toHaveBeenCalledWith('Refine the request', makeEvent());
+    });
+
+    it('treats an isPeEcho rejection as "not an echo" (fail-safe) and proceeds', async () => {
+      isPeEcho.mockRejectedValueOnce(new Error('record store blew up'));
+      spawnStop.mockResolvedValueOnce(fakeSelection);
+      const handler = createChatEventHandler({
+        spawnAuto, spawnStop, injectSelection, onAfterCapture, isPeEcho,
+        logger: { error: errorLog },
+      });
+      await handler(makeEvent());
+      expect(errorLog).toHaveBeenCalledWith('[nexpath] isPeEcho check failed:', expect.any(Error));
+      expect(spawnAuto).toHaveBeenCalledOnce();
+      expect(injectSelection).toHaveBeenCalledWith('Refine the request', makeEvent());
+    });
+
+    it('a synchronous (non-Promise) true return also short-circuits the handler', async () => {
+      isPeEcho.mockReturnValueOnce(true);
+      const handler = createChatEventHandler({
+        spawnAuto, spawnStop, injectSelection, onAfterCapture, isPeEcho,
+        logger: { error: errorLog },
+      });
+      await handler(makeEvent());
+      expect(spawnAuto).not.toHaveBeenCalled();
+    });
+  });
 });
