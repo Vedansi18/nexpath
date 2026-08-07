@@ -79,7 +79,7 @@ describe('TI-2: facade maps composer failure reasons onto the existing runtime s
     return preparePromptEnhancement(request(NLP_HEAVY_PROMPT));
   }
 
-  it('timeout -> fallback_no_llm / fallbackReason timeout / providerFailureState timeout / LOCKED no-generated-content disposition', async () => {
+  it('timeout -> fallback_no_llm / fallbackReason timeout / providerFailureState timeout / deterministic body + notice (owner ruling)', async () => {
     mockCall.result = { ok: false, reason: 'timeout' };
     const result = await prepared();
     // The result MUST pass the boundary validator — otherwise auto.ts would reduce it to
@@ -92,13 +92,12 @@ describe('TI-2: facade maps composer failure reasons onto the existing runtime s
     expect(result.callAndVisibilityMetadata.fallbackReason).toBe('timeout');
     expect(result.callAndVisibilityMetadata.providerFailureState).toBe('timeout');
     expect(result.callAndVisibilityMetadata.providerAvailabilityState).toBe('unavailable_by_provider_api');
-    // DISCOVERY (2026-08-07): reaching the 'timeout' runtime state activates the engine's
-    // pre-wired LOCKED failure disposition — original prompt only, NO generated content
-    // (compose-enhancement.ts early-return: sendPolicy 'original_only', sections []). This is the
-    // locked failure disposition, not new content behaviour.
-    expect(result.disposition).toBe('fallback_to_original');
-    expect(result.currentBody.text).toBe(NLP_HEAVY_PROMPT);
-    expect(result.currentBody.sections).toEqual([]);
+    // Owner ruling 2026-08-07: a provider failure renders the FULL deterministic body (the
+    // original-only shell was removed) — the failure stays visible via the notice + metadata.
+    expect(result.disposition).toBe('show_current_body');
+    expect(result.currentBody.sections.length).toBeGreaterThan(0);
+    expect(result.currentBody.text).not.toBe(NLP_HEAVY_PROMPT);
+    expect(result.currentBody.text).toContain(NLP_HEAVY_PROMPT.split('\n')[0]!); // original stays visible inside
     // The fallback diagnostic reaches the result as its public-safe CATEGORY (the reason code is
     // stripped by the rawReasonValuesExcluded contract — category is the assertable signal).
     expect(result.uiView.diagnostics.some((d) => d.category === 'fallback_or_no_popup')).toBe(true);
@@ -120,20 +119,41 @@ describe('TI-2: facade maps composer failure reasons onto the existing runtime s
     expect(frame0.split(PROMPT_ENHANCEMENT_PROVIDER_FAILURE_NOTICE_V1).length - 1).toBe(1);
   });
 
-  it('provider_error -> provider_unavailable mode / fallbackReason provider_unavailable / no generated content', async () => {
+  it('provider_error -> fallback_no_llm / fallbackReason provider_unavailable / deterministic body + notice (owner ruling)', async () => {
     mockCall.result = { ok: false, reason: 'provider_error' };
     const result = await prepared();
     // The result MUST pass the boundary validator — otherwise auto.ts would reduce it to
     // invalid_result and NO popup would open (the regression this assertion guards).
     expect(validatePromptEnhancementPrepareResultV1(result)).toEqual({ ok: true, reasonCodes: [] });
-    expect(result.callAndVisibilityMetadata.callVisibilityMode).toBe('provider_unavailable');
+    expect(result.callAndVisibilityMetadata.callVisibilityMode).toBe('fallback_no_llm');
     expect(result.callAndVisibilityMetadata.fallbackReason).toBe('provider_unavailable');
     expect(result.callAndVisibilityMetadata.providerFailureState).toBe('provider_api_unavailable');
-    expect(result.disposition).toBe('fallback_to_original');
-    expect(result.currentBody.sections).toEqual([]);
+    expect(result.disposition).toBe('show_current_body');
+    expect(result.currentBody.sections.length).toBeGreaterThan(0);
     expect(result.uiView.diagnostics.some((d) => d.category === 'fallback_or_no_popup')).toBe(true);
     const rendered = buildPromptEnhancementPopupRenderModelV1({ result, timestampMs: Date.now(), deliverySurface: result.delivery.deliveryChannel });
     expect(rendered.state === 'render_model_ready' && rendered.model.providerFailureNotice).toBe(PROMPT_ENHANCEMENT_PROVIDER_FAILURE_NOTICE_V1);
+  });
+
+  it('MPS: a failed SEQUENCE prompt still opens MPS (show_current_body) and its popup carries the notice (owner ruling)', async () => {
+    mockCall.result = { ok: false, reason: 'timeout' };
+    const { preparePromptEnhancement } = await import('./facade.js');
+    const { buildPromptEnhancementMpsFirstPopupV1 } = await import('./first-popup.js');
+    const { renderPromptEnhancementMpsFirstPopupFrameV1 } = await import('./cli-mps-popup.js');
+    const result = await preparePromptEnhancement(request('Fix the failing payment test and add a rate limiter to the login endpoint.'));
+    expect(result.disposition).toBe('show_current_body');
+    expect(result.uiView.handoffAndSequenceSummary).toBeDefined();
+    const built = buildPromptEnhancementMpsFirstPopupV1({
+      result,
+      handoffMetadata: result.uiView.handoffAndSequenceSummary!,
+      cancel: { state: 'available', disposition: 'blocked_no_send' },
+    });
+    expect(built.state).toBe('ready');
+    if (built.state !== 'ready') return;
+    expect(built.model.providerFailureNotice).toBe(PROMPT_ENHANCEMENT_PROVIDER_FAILURE_NOTICE_V1);
+    const frame = renderPromptEnhancementMpsFirstPopupFrameV1(built.model, { focusIndex: 0, colorize: true });
+    const ESC = String.fromCharCode(27);
+    expect(frame).toContain(`${ESC}[33m${PROMPT_ENHANCEMENT_PROVIDER_FAILURE_NOTICE_V1}`);
   });
 
   it('invalid_output -> fallback_no_llm with fallbackReason validation_failed; body renders the FULL deterministic sections', async () => {

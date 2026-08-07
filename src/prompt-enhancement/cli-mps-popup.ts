@@ -160,7 +160,12 @@ export function renderPromptEnhancementMpsFirstPopupFrameV1(
   // PE popup; rendered only when supplied (the UI never invents them).
   if (model.pinchLabel) lines.push(c ? `${c.bold}${publicText(model.pinchLabel.text)}${c.reset}` : publicText(model.pinchLabel.text));
   if (model.whyHelp) lines.push(c ? `${c.gray}${publicText(model.whyHelp.text)}${c.reset}` : publicText(model.whyHelp.text));
-  if (model.pinchLabel || model.whyHelp) lines.push('');
+  // Provider-failure notice (owner ruling 2026-08-07): the same persistent public-safe yellow
+  // line the PE popup shows — display only, absent on every non-failure run.
+  if (model.providerFailureNotice) {
+    lines.push(c ? `${c.yellow}${publicText(model.providerFailureNotice)}${c.reset}` : publicText(model.providerFailureNotice));
+  }
+  if (model.pinchLabel || model.whyHelp || model.providerFailureNotice) lines.push('');
 
   const editKeysHint = (): string =>
     c ? `      ${c.lightYellow}${PROMPT_ENHANCEMENT_MPS_CLI_EDIT_KEYS_HINT_V1}${c.reset}` : `      ${PROMPT_ENHANCEMENT_MPS_CLI_EDIT_KEYS_HINT_V1}`;

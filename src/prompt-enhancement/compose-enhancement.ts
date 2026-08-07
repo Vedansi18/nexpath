@@ -245,69 +245,12 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
     };
   }
 
-  if (deterministicFallback === 'provider_api_unavailable' || deterministicFallback === 'timeout_no_send') {
-    const text = input.originalPromptText;
-    const fallbackCallVisibilityMode: PromptEnhancementCallVisibilityMode = deterministicFallback === 'provider_api_unavailable'
-      ? 'provider_unavailable'
-      : 'fallback_no_llm';
-    return {
-      currentBody: {
-        currentBodyId,
-        bodyRevision,
-        composerRunId,
-        routeDecisionId: input.sectionPlanningResult.routeDecisionId,
-        promptReviewOrigin: input.sectionPlanningResult.promptReviewOrigin,
-        promptReviewProcessingPolicy: input.sectionPlanningResult.promptReviewProcessingPolicy,
-        sentPromptOrigin: 'user_authored_original_only',
-        nexpathGeneratedPromptRef: `${currentBodyId}:original:${bodyRevision}`,
-        renderedPromptBody: text,
-        originalPromptSectionId: 'not_applicable_original_only',
-        sourceAttribution: [],
-        llmCallPolicy,
-        composerMode: 'original_fallback',
-        languagePolicyApplied: 'technical_english_default',
-        languageValidationStatus: 'fallback_applied',
-        effectiveLanguageState: 'unknown_default',
-        languageSource: 'technical_english_default',
-        languageConfidence: 'unknown',
-        languagePolicy: 'technical_english_default',
-        instructionPrecedenceState: 'original_only_no_generated_sections',
-        originalAsSourceStatus: 'original_only_sendable',
-        composerClaims: [],
-        sourceFactIds: [],
-        localOriginalPromptIncluded: true,
-        text,
-        originalPromptText: input.originalPromptText,
-        originalPromptPreservation: 'fallback_original_only',
-        generatedOriginState: 'user_original',
-        generatedSafeStatus: 'original_only',
-        userDirtyState: 'clean',
-        sections: [],
-      },
-      composerBoundary: buildComposerBoundary(input, deterministicFallback, fallbackCallVisibilityMode, sectionPlans, {
-        composerRunId,
-        composerMode: 'original_fallback',
-        nexpathGeneratedPromptRef: `${currentBodyId}:original:${bodyRevision}`,
-        renderedPromptBody: text,
-        sentPromptOrigin: 'user_authored_original_only',
-        originalPromptSectionId: 'not_applicable_original_only',
-        sourceAttribution: [],
-        instructionPrecedenceState: 'original_only_no_generated_sections',
-        originalAsSourceStatus: 'original_only_sendable',
-        localOriginalPromptIncluded: true,
-        llmCallPolicy,
-        rawComposerOutput: 'rejected_or_unavailable',
-      }),
-      availableActions: buildActionEntries(currentBodyId, bodyRevision, 'disabled_not_applicable', fallbackCallVisibilityMode),
-      bodySectionAgreement: 'exact',
-      sourceGuidanceCoverage: 'fallback_no_generated_body',
-      fallbackMode: deterministicFallback,
-      sendPolicy: 'original_only',
-      actionInteractionState: 'fallback_only',
-      callVisibilityMode: fallbackCallVisibilityMode,
-      diagnostics: [{ category: 'fallback_or_no_popup', reasonCode: `no_generated_content:${effectiveRuntimeState}` }],
-    };
-  }
+  // Owner ruling 2026-08-07: on a provider failure (provider_api_unavailable / timeout_no_send)
+  // the popup shows the FULL deterministic body plus the persistent provider-failure notice —
+  // NOT an original-prompt-only shell. The original-only early-return that previously lived here
+  // (the strict no-generated-content reading of the locked failure disposition) was removed by
+  // that ruling; the failure stays fully visible via the notice + typed metadata
+  // (fallbackReason / providerFailureState) while the user keeps the grounded guidance.
 
   const canonicalConfirmationSectionId = requiresPromptEnhancementExecutionConfirmationForPrompt(input.originalPromptText)
     ? sectionPlans.find((sectionPlan) => (
@@ -1222,6 +1165,10 @@ function providerFailureStateForFallback(
   callVisibilityMode: PromptEnhancementCallVisibilityMode,
 ): PromptEnhancementCostVisibilityMetadataV1['providerFailureState'] {
   if (callVisibilityMode === 'provider_unavailable') return 'provider_api_unavailable';
+  // Owner ruling 2026-08-07: provider failures render the deterministic body under
+  // 'fallback_no_llm', so the failure state must key on the FALLBACK MODE (same output as the
+  // old 'provider_unavailable'-mode pairing kept above for compatibility).
+  if (fallbackMode === 'provider_api_unavailable') return 'provider_api_unavailable';
   if (fallbackMode === 'timeout_no_send') return 'timeout';
   return 'none';
 }
