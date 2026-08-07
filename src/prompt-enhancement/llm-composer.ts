@@ -8,11 +8,22 @@ import {
   PROMPT_ENHANCEMENT_COST_VALIDATION_RETRY_COUNT_V1,
 } from './cost-observability.js';
 import { isPromptEnhancementLanguageConsistentV1 } from './language-consistency.js';
+import {
+  isPromptEnhancementAuthorityConsistentV1,
+  isPromptEnhancementAuthoritySelfReportV1,
+} from './authority-consistency.js';
 
 const STRONGER_LANGUAGE_DIRECTIVE =
   '\n\nIMPORTANT: your previous reply drifted from the original language. Write EVERY section' +
   " strictly in the original prompt's language, slang, and script (do NOT switch to English), and set" +
   ' detectedLanguageSelfReport correctly.';
+
+const STRONGER_AUTHORITY_DIRECTIVE =
+  '\n\nIMPORTANT: your previous reply turned a plan/review request into instructions to carry the work' +
+  ' out. Rewrite EVERY section so it stays in the requested mode — describe what to check, what evidence' +
+  ' to gather, what a plan or checklist would contain, what to verify, and which risks need confirmation' +
+  ' first. Do not instruct anyone to deploy, release, delete, migrate, install, publish or force-push,' +
+  ' and set authorityModeSelfReport correctly.';
 
 /**
  * E4 — bounded LLM composer wording call.
@@ -126,6 +137,10 @@ const SYSTEM_PROMPT = [
   '  or to a standard language (Hinglish is NOT Hindi; Gujlish is NOT Gujarati). Preserve even slight slang.',
   '- Report the detected language of the original prompt in "detectedLanguageSelfReport" as a BCP-47-ish',
   '  code (e.g. "en", "hi", "hi-Latn" for Hinglish, "gu", "gu-Latn" for Gujlish).',
+  '- Report the authority mode of the wording YOU produced in "authorityModeSelfReport": use',
+  '  "plan_or_review" when your sections describe checking/planning/verifying, "execute_requested" when',
+  '  they instruct someone to carry the work out, "observe_or_literal" otherwise. Report what you',
+  '  actually wrote, not what you intended.',
   '',
   'Authority boundary (critical):',
   '- Keep every generated section in the SAME mode as the original request. If it asks to plan, review,',
@@ -140,7 +155,7 @@ const SYSTEM_PROMPT = [
   '- For each section, cite in sourceFactIds only the allowed source fact ids listed for THAT section.',
   '- Do not include internal ids, section kinds, or planning labels in bodyText.',
   '- Reply with STRICT JSON only, matching:',
-  '  {"detectedLanguageSelfReport":"...","sectionDrafts":[{"sectionId":"...","bodyText":"...","sourceFactIds":["..."]}],"composerClaims":["claim:<sourceFactId>"]}',
+  '  {"detectedLanguageSelfReport":"...","authorityModeSelfReport":"...","sectionDrafts":[{"sectionId":"...","bodyText":"...","sourceFactIds":["..."]}],"composerClaims":["claim:<sourceFactId>"]}',
   '- composerClaims must be the union of every sourceFactId you used, each prefixed with "claim:".',
 ].join('\n');
 
@@ -196,7 +211,16 @@ function parseStructuredComposerOutput(
     ? obj['detectedLanguageSelfReport']
     : undefined;
 
-  return { outputId: `${enhancementId}:composer-llm`, sectionDrafts, composerClaims, detectedLanguageSelfReport };
+  const rawAuthority = obj['authorityModeSelfReport'];
+  const authorityModeSelfReport = isPromptEnhancementAuthoritySelfReportV1(rawAuthority) ? rawAuthority : undefined;
+
+  return {
+    outputId: `${enhancementId}:composer-llm`,
+    sectionDrafts,
+    composerClaims,
+    detectedLanguageSelfReport,
+    authorityModeSelfReport,
+  };
 }
 
 export async function composeStructuredComposerOutputV1(
@@ -222,6 +246,7 @@ export async function composeStructuredComposerOutputV1(
   // NOT retried — fast deterministic fallback rather than repeated slow waits. On a
   // language mismatch the retry carries a stronger language directive (E5/5.3).
   let languageRetry = false;
+  let authorityRetry = false;
   for (let attempt = 0; attempt <= PROMPT_ENHANCEMENT_COST_VALIDATION_RETRY_COUNT_V1; attempt++) {
     let raw: string | null | undefined;
     try {
@@ -231,7 +256,12 @@ export async function composeStructuredComposerOutputV1(
           max_tokens: PROMPT_ENHANCEMENT_COST_OUTPUT_TOKEN_CAP_V1,
           messages: [
             { role: 'system', content: SYSTEM_PROMPT },
-            { role: 'user', content: languageRetry ? userPrompt + STRONGER_LANGUAGE_DIRECTIVE : userPrompt },
+            {
+              role: 'user',
+              content: userPrompt
+                + (languageRetry ? STRONGER_LANGUAGE_DIRECTIVE : '')
+                + (authorityRetry ? STRONGER_AUTHORITY_DIRECTIVE : ''),
+            },
           ],
           response_format: { type: 'json_object' },
         },
@@ -252,9 +282,17 @@ export async function composeStructuredComposerOutputV1(
       languageRetry = true;
       continue;
     }
+    if (!isPromptEnhancementAuthorityConsistentV1(input.originalPromptText, parsed)) {
+      // The model reports it turned a plan/review request into execution instructions. The safety
+      // validator would reject that body outright and the user would get their own prompt back with
+      // nothing added, so rewrite it while the composer is still running. This only ever costs a retry
+      // from the existing budget — it never lets a body through that the validator would refuse.
+      authorityRetry = true;
+      continue;
+    }
     return { ok: true, output: parsed };
   }
-  // Retries exhausted (malformed or persistent language mismatch) -> deterministic
-  // English fallback (never ship English generated sections for a non-English prompt).
+  // Retries exhausted (malformed, persistent language mismatch, or persistent authority drift) ->
+  // deterministic fallback rather than shipping wording the validator would reject anyway.
   return { ok: false, reason: 'invalid_output' };
 }

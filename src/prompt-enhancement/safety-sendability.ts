@@ -446,6 +446,18 @@ export function requiresPromptEnhancementExecutionConfirmationForPrompt(original
 }
 
 /**
+ * The authority mode of a piece of text, as the validator computes it.
+ *
+ * Exposed so the composer can tell — before it returns — whether the user's request was
+ * plan/review-shaped, and therefore whether the wording it just produced would be an escalation. The
+ * composer uses this to correct itself; it never relaxes a verdict, which stays entirely inside
+ * `validatePromptEnhancementSafety`.
+ */
+export function promptEnhancementAuthorityModeForTextV1(text: string): PromptEnhancementAuthorityMode {
+  return authorityModeFor(text);
+}
+
+/**
  * Validator-parity predicate for the COMPOSER (blocked-popup fix 2026-08-07). The composer's
  * prompt-based gate above cannot see sensitive-action risk phrasing that the GENERATED wording
  * introduces (LLM drafts are free text), but `validatePromptEnhancementSafety` scans the generated

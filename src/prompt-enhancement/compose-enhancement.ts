@@ -73,6 +73,11 @@ export interface PromptEnhancementStructuredComposerOutputV1 {
   // (BCP-47-ish, e.g. 'en' / 'hi' / 'hi-Latn' Hinglish / 'gu-Latn' Gujlish). Read by
   // the E5 language-consistency gate; optional so pre-E5 callers stay valid.
   detectedLanguageSelfReport?: string;
+  // The composer self-reports the authority mode of the wording it just produced, so drift from a
+  // plan/review request into execution instructions can be caught and rewritten while the composer is
+  // still running. Read ONLY by the authority-consistency gate to trigger a retry — it never relaxes
+  // the deterministic safety verdict. Optional so pre-existing callers stay valid.
+  authorityModeSelfReport?: 'plan_or_review' | 'execute_requested' | 'observe_or_literal';
 }
 
 export interface PromptEnhancementComposeResult {
