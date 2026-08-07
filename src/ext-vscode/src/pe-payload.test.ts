@@ -66,6 +66,12 @@ describe('parsePromptEnhancementExtensionPayloadV1', () => {
       raw[field] = 12345;
       expect(parsePromptEnhancementExtensionPayloadV1(JSON.stringify(raw))).toBeNull();
     });
+
+    it(`returns null when ${field} is an empty string (proves the separate length check, not just typeof)`, () => {
+      const raw = JSON.parse(rawResult());
+      raw[field] = '';
+      expect(parsePromptEnhancementExtensionPayloadV1(JSON.stringify(raw))).toBeNull();
+    });
   }
 
   it('returns null when uiView is missing', () => {
@@ -92,6 +98,22 @@ describe('parsePromptEnhancementExtensionPayloadV1', () => {
     expect(
       parsePromptEnhancementExtensionPayloadV1(
         rawResult({ uiView: { body: { text: 'x', bodyRevision: 1, sendPolicy: 'send_current' }, actions: [] } }),
+      ),
+    ).toBeNull();
+  });
+
+  it('returns null when currentBodyId is a non-string truthy value', () => {
+    expect(
+      parsePromptEnhancementExtensionPayloadV1(
+        rawResult({ uiView: { body: { text: 'x', currentBodyId: 42, bodyRevision: 1, sendPolicy: 'send_current' }, actions: [] } }),
+      ),
+    ).toBeNull();
+  });
+
+  it('returns null when currentBodyId is an empty string', () => {
+    expect(
+      parsePromptEnhancementExtensionPayloadV1(
+        rawResult({ uiView: { body: { text: 'x', currentBodyId: '', bodyRevision: 1, sendPolicy: 'send_current' }, actions: [] } }),
       ),
     ).toBeNull();
   });
