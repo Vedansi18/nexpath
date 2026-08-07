@@ -138,3 +138,49 @@ describe('renderPromptEnhancementHtml — ready state', () => {
     expect(nonceOf(a)).not.toBe(nonceOf(b));
   });
 });
+
+describe('renderPromptEnhancementHtml — embedded script source (mirrors html.test.ts locking its own script text)', () => {
+  // The script never runs in this test environment (no DOM/acquireVsCodeApi) —
+  // exactly like html.ts's own tests, this locks the LITERAL source text of
+  // the message contract P6 will consume. Without these, deleting the script
+  // or renaming a message type would pass every other test in this file.
+  it('posts the four typed message contracts P6 will route', () => {
+    const html = renderPromptEnhancementHtml(readyPayload, { cspSource: CSP_SRC, nonce: FIXED_NONCE });
+    expect(html).toContain("type: 'pe_deliver_current_body'");
+    expect(html).toContain("type: 'pe_directional_action'");
+    expect(html).toContain("type: 'pe_close'");
+    expect(html).toContain("type: 'pe_submit_additional_details'");
+  });
+
+  it('guards against clicking a disabled directional action', () => {
+    const html = renderPromptEnhancementHtml(readyPayload, { cspSource: CSP_SRC, nonce: FIXED_NONCE });
+    expect(html).toContain('if (btn.disabled) return;');
+  });
+
+  it('submits additional details on Enter without Shift, not on plain typing', () => {
+    const html = renderPromptEnhancementHtml(readyPayload, { cspSource: CSP_SRC, nonce: FIXED_NONCE });
+    expect(html).toContain("ev.key === 'Enter' && !ev.shiftKey");
+  });
+
+  it('guards the additional-details keydown handler behind detailsEl existing (no crash when the field is absent)', () => {
+    const html = renderPromptEnhancementHtml(
+      { ...readyPayload, additionalDetailsAvailable: false },
+      { cspSource: CSP_SRC, nonce: FIXED_NONCE },
+    );
+    expect(html).toContain('if (detailsEl)');
+    expect(html).not.toContain('id="pe-details"');
+  });
+
+  it('sends the canonical bodyId/bodyRevision from the textarea dataset, not free-floating variables', () => {
+    const html = renderPromptEnhancementHtml(readyPayload, { cspSource: CSP_SRC, nonce: FIXED_NONCE });
+    expect(html).toContain('bodyId: bodyEl.dataset.bodyId');
+    expect(html).toContain('bodyRevision: Number(bodyEl.dataset.bodyRevision)');
+  });
+
+  it('does not embed any script at all in non-ready states (no acquireVsCodeApi call)', () => {
+    for (const renderState of ['no_popup', 'loading', 'blocked', 'fallback'] as const) {
+      const html = renderPromptEnhancementHtml({ ...readyPayload, renderState }, { cspSource: CSP_SRC, nonce: FIXED_NONCE });
+      expect(html).not.toContain('acquireVsCodeApi');
+    }
+  });
+});
