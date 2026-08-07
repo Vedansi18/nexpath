@@ -1,4 +1,4 @@
-title: "Write a short title that reflects your feedback"
+# No `title:` key on purpose. See note 1 under "Things to know".
 
 labels:
   - feedback
