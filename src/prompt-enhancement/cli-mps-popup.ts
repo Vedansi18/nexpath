@@ -23,6 +23,10 @@ export const PROMPT_ENHANCEMENT_MPS_CLI_SEQUENCE_PLAN_LABEL_V1 = 'Sequence plan'
 export const PROMPT_ENHANCEMENT_MPS_CLI_ADDITIONAL_DETAILS_LABEL_V1 = 'Additional details' as const;
 /** Editing keys shown under a focused editable field (owner request), matching the PE popup. */
 const PROMPT_ENHANCEMENT_MPS_CLI_EDIT_KEYS_HINT_V1 = 'Ctrl+J new line · Ctrl+↑/↓ move line' as const;
+/** Details helpers (owner request 2026-08-07): the same wording the PE popup shows — Enter on the
+ * details row APPLIES the details into the enhanced sequence prompt above; it never sends. */
+const PROMPT_ENHANCEMENT_MPS_CLI_DETAILS_HINT_V1 = 'Enter applies these details · unapplied details are not sent' as const;
+const PROMPT_ENHANCEMENT_MPS_CLI_DETAILS_HELP_V1 = 'Add extra requirement' as const;
 
 /**
  * ANSI tones, matching the PE popup: cyan title + rail, green (focused) / gray (unfocused)
@@ -134,12 +138,17 @@ export function renderPromptEnhancementMpsFirstPopupFrameV1(
   if (focusIndex === 0) lines.push(editKeysHint()); // owner request: editing keys under the focused editable field
   lines.push('');
 
-  // Additional details — interactive row 1.
+  // Additional details — interactive row 1. PE-parity helpers (owner request 2026-08-07): the
+  // apply hint is always visible; moving onto the row adds the short help + editing keys.
   const detailsLabel = PROMPT_ENHANCEMENT_MPS_CLI_ADDITIONAL_DETAILS_LABEL_V1;
   lines.push(radioRow(1, detailsLabel));
   recordCaret('additional_details');
   for (const detailLine of publicText(model.additionalDetails.text).split('\n')) lines.push(`    ${detailLine}`);
-  if (focusIndex === 1) lines.push(editKeysHint());
+  lines.push(c ? `      ${c.gray}${PROMPT_ENHANCEMENT_MPS_CLI_DETAILS_HINT_V1}${c.reset}` : `      ${PROMPT_ENHANCEMENT_MPS_CLI_DETAILS_HINT_V1}`);
+  if (focusIndex === 1) {
+    lines.push(`      ${PROMPT_ENHANCEMENT_MPS_CLI_DETAILS_HELP_V1}`);
+    lines.push(editKeysHint());
+  }
   lines.push('');
 
   // Cancel — interactive row 2, last interactive action. Yellow (owner request): choosing it
@@ -248,11 +257,15 @@ export function renderPromptEnhancementMpsContinuationFrameV1(
   if (focusIndex === 0) lines.push(editKeysHint()); // owner request: editing keys under the focused editable field
   lines.push('');
 
-  // Additional details — interactive row 1.
+  // Additional details — interactive row 1. Same PE-parity helpers as the first popup.
   const detailsLabel = PROMPT_ENHANCEMENT_MPS_CLI_ADDITIONAL_DETAILS_LABEL_V1;
   lines.push(radioRow(1, detailsLabel));
   for (const detailLine of publicText(model.additionalDetails.text).split('\n')) lines.push(`    ${detailLine}`);
-  if (focusIndex === 1) lines.push(editKeysHint());
+  lines.push(c ? `      ${c.gray}${PROMPT_ENHANCEMENT_MPS_CLI_DETAILS_HINT_V1}${c.reset}` : `      ${PROMPT_ENHANCEMENT_MPS_CLI_DETAILS_HINT_V1}`);
+  if (focusIndex === 1) {
+    lines.push(`      ${PROMPT_ENHANCEMENT_MPS_CLI_DETAILS_HELP_V1}`);
+    lines.push(editKeysHint());
+  }
   lines.push('');
 
   // Custom interruption — interactive row 2: label, then dim helper. Neither cancel nor completion.

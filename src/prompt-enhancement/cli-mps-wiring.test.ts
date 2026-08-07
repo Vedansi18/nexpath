@@ -181,17 +181,46 @@ describe('MPS CLI wiring (owner ruling 2026-08-06: CLI complete, extension pendi
     expect(event!.feedbackCategory).toBe('not_relevant_enough');
   });
 
-  it('Additional details: focus the field, type, Enter sends body PLUS the typed details', async () => {
+  it('Additional details: Enter APPLIES the details into the enhanced sequence prompt (PE parity) — then Enter on the body sends the merged prompt', async () => {
     const result = await preparePromptEnhancement(request(MULTI_INTENT));
-    const outcome = await runPromptEnhancementCliMpsFirstPopupV1({
-      result,
-      interaction: scripted([KEY.down, 'u', 's', 'e', ' ', 'p', 'g', KEY.enter]),
-    });
+    // down -> details row; type; Enter -> APPLY (popup stays open, focus returns to the body);
+    // Enter again -> send the merged body.
+    const ui = scripted([KEY.down, 'u', 's', 'e', ' ', 'p', 'g', KEY.enter, KEY.enter]);
+    const outcome = await runPromptEnhancementCliMpsFirstPopupV1({ result, interaction: ui });
     expect(outcome.state).toBe('send');
     if (outcome.state === 'send') {
       expect(outcome.bodyText).toContain('Additional details to incorporate:\nuse pg');
       expect(outcome.bodyText).toContain('Fix the failing payment test');
     }
+    // The apply did NOT send — a further frame was painted after it (the merged-body view),
+    // and the details field is empty again on that frame (the text moved into the body).
+    const afterApply = ui.frames[ui.frames.length - 1]!;
+    expect(afterApply).toContain('Additional details to incorporate:');
+    expect(afterApply).toContain('Enter applies these details · unapplied details are not sent');
+  });
+
+  it('UNAPPLIED details are not sent: typing details and sending from the body row sends the body only (PE parity)', async () => {
+    const result = await preparePromptEnhancement(request(MULTI_INTENT));
+    const outcome = await runPromptEnhancementCliMpsFirstPopupV1({
+      result,
+      interaction: scripted([KEY.down, 'z', 'z', KEY.up, KEY.enter]),
+    });
+    expect(outcome.state).toBe('send');
+    if (outcome.state === 'send') {
+      expect(outcome.bodyText).not.toContain('zz');
+      expect(outcome.bodyText).toContain('Fix the failing payment test');
+    }
+  });
+
+  it('details helpers (PE parity, owner request 2026-08-07): apply-hint always visible; focusing the row adds the short help', async () => {
+    const result = await preparePromptEnhancement(request(MULTI_INTENT));
+    const ui = scripted([KEY.down, KEY.escape]);
+    await runPromptEnhancementCliMpsFirstPopupV1({ result, interaction: ui });
+    // Frame 0 (body focused): the apply hint is visible, the focused-only help is not.
+    expect(ui.frames[0]).toContain('Enter applies these details · unapplied details are not sent');
+    expect(ui.frames[0]).not.toContain('Add extra requirement');
+    // Frame 1 (details focused): the short help appears, like the PE popup.
+    expect(ui.frames[1]).toContain('Add extra requirement');
   });
 
   it('MPS first popup: Esc declines (caller falls through to the regular PE popup)', async () => {

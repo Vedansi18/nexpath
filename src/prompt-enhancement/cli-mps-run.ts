@@ -42,10 +42,13 @@ import type { PromptEnhancementPopupEventV1 } from './popup-session.js';
  * The pure renderer/model/intents were built long ago; THIS shell is the interactive host that was
  * deferred while MPS was gated. It follows the locked keyboard map exactly:
  *   ↑/↓          — move focus across the three interactive rows (body / Additional details / Cancel)
- *   plain Enter  — rows 0/1: emit the ONE typed current-body-plus-details request (send)
- *                  row 2:    the typed cancel-remaining-sequence intent, then the PEF feedback
- *                            popup (owner request 2026-08-06) — the flow ENDS there (cancelled);
- *                            the PE popup never opens after a cancel
+ *   plain Enter  — row 0: send the enhanced sequence BODY only (unapplied details are not sent)
+ *                  row 1: APPLY the typed details INTO the enhanced sequence prompt above and
+ *                         clear the field (owner request 2026-08-07 — same behaviour as the PE
+ *                         popup's Apply-details; details are never sent as a separate prompt)
+ *                  row 2: the typed cancel-remaining-sequence intent, then the PEF feedback
+ *                         popup (owner request 2026-08-06) — the flow ENDS there (cancelled);
+ *                         the PE popup never opens after a cancel
  *   Esc          — declined (falls through to the regular PE popup)
  *   typing       — edits the focused editable field via the shared multiline editor
  * and the same no-scroll discipline as the PE shell: both editable fields are WINDOWED to the
@@ -79,8 +82,8 @@ export type PromptEnhancementCliMpsOutcomeV1 =
 
 const INTERACTIVE_ROW_COUNT = 3;
 const DETAILS_DISPLAY_ROWS = 5;
-/** Non-body chrome lines in a frame (header, pinch/why, row labels, plan, footer, spacing). */
-const FRAME_CHROME_LINES = 20;
+/** Non-body chrome lines in a frame (header, pinch/why, row labels, details helpers, plan, footer, spacing). */
+const FRAME_CHROME_LINES = 23;
 
 export async function runPromptEnhancementCliMpsFirstPopupV1(input: {
   result: PromptEnhancementPrepareResultV1;
@@ -113,13 +116,14 @@ export async function runPromptEnhancementCliMpsFirstPopupV1(input: {
   ));
 
   let focusIndex = 0;
+  const editorIdentity = {
+    enhancementId: input.result.enhancementId,
+    currentBodyId: model.identity.currentBodyId,
+    bodyRevision: model.identity.bodyRevision,
+    validationDecisionId: input.result.validationDecisionId,
+  };
   let editor: PromptEnhancementMultilineEditorStateV1 = buildPromptEnhancementMultilineEditorStateV1({
-    identity: {
-      enhancementId: input.result.enhancementId,
-      currentBodyId: model.identity.currentBodyId,
-      bodyRevision: model.identity.bodyRevision,
-      validationDecisionId: input.result.validationDecisionId,
-    },
+    identity: editorIdentity,
     enhancedBodyText: model.body.text,
     additionalDetailsText: model.additionalDetails.text,
     fieldWidth: fieldWidth(),
@@ -219,22 +223,38 @@ export async function runPromptEnhancementCliMpsFirstPopupV1(input: {
           const feedback = await runCancelFeedback();
           return feedback ? { state: 'cancelled', feedback } : { state: 'cancelled' };
         }
+        if (focusIndex === 1) {
+          // APPLY details (owner request 2026-08-07, PE-popup parity): the typed details merge
+          // INTO the enhanced sequence prompt above and the field clears — details are never
+          // sent as a separate prompt. The rebuilt body opens scrolled to the appended details
+          // (cursor at the end) so the user SEES where they landed; focus returns to the body
+          // row, so the next Enter sends the merged prompt. Blank details apply nothing.
+          const details = editor.buffers.additional_details.text.trim();
+          if (details.length === 0) continue;
+          const mergedBody = `${editor.buffers.enhanced_body.text}\n\nAdditional details to incorporate:\n${details}`;
+          editor = buildPromptEnhancementMultilineEditorStateV1({
+            identity: editorIdentity,
+            enhancedBodyText: mergedBody,
+            additionalDetailsText: '',
+            fieldWidth: fieldWidth(),
+            viewportRows: bodyRows(),
+            focusedField: 'enhanced_body',
+          });
+          focusIndex = 0;
+          continue;
+        }
+        // Row 0 — send the enhanced sequence BODY only. Unapplied details are not sent
+        // (the details row's own hint says exactly that, matching the PE popup).
         const bodyText = editor.buffers.enhanced_body.text;
         if (bodyText.trim().length === 0) continue; // never send an empty body
         const intent = createPromptEnhancementMpsCurrentBodyIntentV1(model, {
           editedBodyText: bodyText,
-          additionalDetailsText: editor.buffers.additional_details.text,
+          additionalDetailsText: '',
         });
         if (intent.state !== 'intent_ready' || intent.intent.type !== 'send_current_body') {
           return { state: 'not_shown', reasonCodes: intent.state === 'intent_unavailable' ? intent.reasonCodes : ['intent_not_ready'] };
         }
-        const details = intent.intent.additionalDetailsText.trim();
-        return {
-          state: 'send',
-          bodyText: details.length > 0
-            ? `${intent.intent.editedBodyText}\n\nAdditional details to incorporate:\n${details}`
-            : intent.intent.editedBodyText,
-        };
+        return { state: 'send', bodyText: intent.intent.editedBodyText };
       }
       // Editor input for the focused editable field (typing, backspace, Ctrl+J newline, moves).
       const field = focusedField();
