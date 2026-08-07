@@ -314,7 +314,7 @@ describe('Phase 12 cost, provider, latency, and observability contracts', () => 
       regionalDataResidencyAssumption: PROMPT_ENHANCEMENT_COST_REGIONAL_DATA_RESIDENCY_ASSUMPTION_V1,
       inputTokenCap: 8000,
       outputTokenCap: 2000,
-      timeoutMs: 10_000,
+      timeoutMs: 45_000,
       retryCount: 3,
       cacheAssumption: 'no_cache_savings_no_addons',
       latencyImpact: 'wait_for_full_result_under_timeout',
