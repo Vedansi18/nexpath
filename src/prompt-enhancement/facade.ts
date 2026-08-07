@@ -190,12 +190,10 @@ async function prepare(
     });
   }
 
-  const composed = composePromptEnhancementBody({
+  const composeInput = {
     enhancementId,
     originalPromptText: request.sourcePrompt.text,
     sectionPlanningResult: planning,
-    composerRuntimeState: structuredComposerOutput ? 'accepted_structured_output' : undefined,
-    structuredComposerOutput,
     action: action === 'use_original' || action === 'feedback' || action === 'close' || action === 'use_current_body'
       ? undefined
       : action,
@@ -205,13 +203,51 @@ async function prepare(
     priorBodyId: actionRequest?.currentBodyBinding.currentBodyId,
     priorBodyRevision: actionRequest?.currentBodyBinding.bodyRevision,
     timestampMs: request.sourcePrompt.capturedAt,
+  };
+  let composed = composePromptEnhancementBody({
+    ...composeInput,
+    composerRuntimeState: structuredComposerOutput ? 'accepted_structured_output' : undefined,
+    structuredComposerOutput,
   });
-  const safety = validatePromptEnhancementSafety({
-    currentBody: composed.currentBody,
+  const validateComposed = (candidate: typeof composed) => validatePromptEnhancementSafety({
+    currentBody: candidate.currentBody,
     actionType: noPopup ? 'use_original' : undefined,
-    callVisibilityMode: composed.callVisibilityMode,
-    optionalCallAvailabilityState: composed.callVisibilityMode === 'deterministic' ? 'deterministic_only' : undefined,
+    callVisibilityMode: candidate.callVisibilityMode,
+    optionalCallAvailabilityState: candidate.callVisibilityMode === 'deterministic' ? 'deterministic_only' : undefined,
   });
+  let safety = validateComposed(composed);
+  // Blocked-popup fix part 2 (2026-08-07) — deterministic-fallback safety net. The composer's
+  // confirmation-parity guard removes the confirmation-absence block, but an accepted LLM draft
+  // can still hard-block the FINAL body through the other blocking families the draft filter
+  // does not fully cover (unresolved [X]/<x> placeholders, voice phrases, authority escalation,
+  // data-leak wording). A prepare-time block of an LLM-worded body must never reach the user as
+  // the empty all-unavailable popup when a proven-valid deterministic body exists: recompose with
+  // the drafts dropped — the established rejected-drafts semantics ('fallback_no_llm', the spent
+  // LLM call stays counted for E9) — and keep the blocked result ONLY if even the deterministic
+  // body blocks (then the content itself — e.g. user-typed details — is the cause, which is the
+  // genuine D2 case the blocked popup exists for).
+  if (
+    structuredComposerOutput !== undefined
+    && composed.callVisibilityMode === 'llm_wording'
+    && (safety.sendPolicy === 'no_send' || safety.generatedSafeStatus === 'invalid_non_sendable')
+  ) {
+    const recomposed = composePromptEnhancementBody({
+      ...composeInput,
+      composerRuntimeState: 'accepted_structured_output',
+      structuredComposerOutput: { ...structuredComposerOutput, sectionDrafts: [] },
+    });
+    const recomposedSafety = validateComposed(recomposed);
+    if (recomposedSafety.sendPolicy !== 'no_send' && recomposedSafety.generatedSafeStatus !== 'invalid_non_sendable') {
+      composed = {
+        ...recomposed,
+        diagnostics: [
+          ...recomposed.diagnostics,
+          { category: 'fallback_or_no_popup' as const, reasonCode: 'llm_final_body_blocked_deterministic_fallback' },
+        ],
+      };
+      safety = recomposedSafety;
+    }
+  }
   return buildResult(request, enhancementId, route, planning, composed, safety, noPopup);
 }
 

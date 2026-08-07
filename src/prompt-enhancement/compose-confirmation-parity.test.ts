@@ -31,7 +31,12 @@ const BENIGN_PROMPT = 'The invoice PDF export throws a null error when a client 
 // Draft wording of the kind the live LLM produced: risk pattern (production) + execution verbs
 // (run / modify / delete) that the original prompt does not contain.
 const RISKY_DRAFT = 'Run the invoice export for a client record that has no address, then modify the null-address handling and delete the stale production fixture so the regression test reproduces the failure.';
+// A draft the DRAFT filter accepts (it only rejects {{...}} placeholders) but the FINAL-body
+// validator hard-blocks via body_integrity:unresolved_placeholder (<...> shape) — the safety-net
+// family the confirmation guard does not cover.
+const PLACEHOLDER_DRAFT = 'Add a regression case that renders the invoice for <client id> and asserts the export completes.';
 
+const mockDraft = vi.hoisted(() => ({ text: '' }));
 vi.mock('./llm-composer.js', async (importOriginal) => {
   const original = await importOriginal<typeof import('./llm-composer.js')>();
   return {
@@ -42,10 +47,10 @@ vi.mock('./llm-composer.js', async (importOriginal) => {
       );
       if (plans.length === 0) return undefined;
       return {
-        outputId: 'llm-out-risky-parity-test',
+        outputId: 'llm-out-parity-test',
         sectionDrafts: plans.map((plan) => ({
           sectionId: plan.sectionId,
-          bodyText: RISKY_DRAFT,
+          bodyText: mockDraft.text,
           sourceFactIds: [plan.structuredContentPartRefs[0]!],
         })),
         composerClaims: [`claim:${plans[0]!.structuredContentPartRefs[0]!}`],
@@ -95,6 +100,7 @@ describe('composer/validator confirmation parity (blocked-popup fix 2026-08-07)'
   });
 
   it('an LLM draft that introduces risk+execution wording composes SENDABLE with the canonical confirmation appended (was blocked_no_send)', async () => {
+    mockDraft.text = RISKY_DRAFT;
     const { preparePromptEnhancement } = await import('./facade.js');
     const result = await preparePromptEnhancement(request(BENIGN_PROMPT));
     // The exact live failure chain must be structurally impossible now.
@@ -108,6 +114,23 @@ describe('composer/validator confirmation parity (blocked-popup fix 2026-08-07)'
     const confirmation = buildPromptEnhancementCanonicalConfirmation(BENIGN_PROMPT);
     expect(result.currentBody.text).toContain(confirmation);
     expect(result.currentBody.text.trimEnd().endsWith(confirmation)).toBe(true);
+  });
+
+  it('safety net: an LLM draft the draft filter accepts but the final-body validator blocks (unresolved <placeholder>) falls back to the DETERMINISTIC body — never blocked_no_send', async () => {
+    mockDraft.text = PLACEHOLDER_DRAFT;
+    const { preparePromptEnhancement } = await import('./facade.js');
+    const result = await preparePromptEnhancement(request(BENIGN_PROMPT));
+    // The empty all-unavailable popup is structurally impossible for an LLM-caused block:
+    // the deterministic body (proven valid) ships instead.
+    expect(result.disposition).toBe('show_current_body');
+    expect(result.uiView.body.sendPolicy).toBe('send_current');
+    expect(result.validationGraph.failures.filter((failure) => failure.blocking)).toEqual([]);
+    expect(result.currentBody.text).not.toContain('<client id>');
+    expect(result.currentBody.text).toContain('My original request (verbatim)');
+    // Honest E9 accounting: the LLM call was really made — the fallback keeps it counted
+    // (the established rejected-drafts semantics), it does not report a free deterministic run.
+    expect(result.callAndVisibilityMetadata.callVisibilityMode).toBe('fallback_no_llm');
+    expect(result.callAndVisibilityMetadata.usedCallCount).toBe(1);
   });
 
   it('the exported parity predicate mirrors the validator: true for generated risk+execution wording, false for benign guidance', () => {
