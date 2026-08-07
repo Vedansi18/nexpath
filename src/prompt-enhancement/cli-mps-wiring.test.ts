@@ -70,6 +70,23 @@ describe('MPS CLI wiring (owner ruling 2026-08-06: CLI complete, extension pendi
     expect(handoff!.applicability.receiverCanActivateRuntime).toBe(false);
   });
 
+  it('Sequence-plan summary carries REAL display data (fix 2026-08-07): remaining count + fixed-vocab role labels', async () => {
+    const result = await preparePromptEnhancement(request(MULTI_INTENT));
+    const summary = result.uiView.handoffAndSequenceSummary!.compactFirstPopupSequenceSummary!;
+    // "Fix the failing payment test AND add a rate limiter…" = 2 points -> 1 remaining after the first.
+    expect(summary.remainingTaskCount).toBe(1);
+    expect(summary.taskRoleLabels).toEqual(['fix', 'build']);
+    // Safety flags stay locked — count + fixed vocabulary only, never prompt text.
+    expect(summary.containsFuturePromptText).toBe(false);
+    expect(summary.rawPromptTextExcluded).toBe(true);
+    expect(summary.bodyBoundMetadataOnly).toBe(true);
+    // …and the popup FRAME shows it (end-to-end).
+    const ui = scripted([KEY.escape]);
+    await runPromptEnhancementCliMpsFirstPopupV1({ result, interaction: ui });
+    expect(ui.frames[0]).toContain('Remaining: 1');
+    expect(ui.frames[0]).toContain('Types: fix, build');
+  });
+
   it('a single-intent prompt emits NO sequence summary (no MPS popup)', async () => {
     const result = await preparePromptEnhancement(request(SINGLE_INTENT));
     expect(result.uiView.handoffAndSequenceSummary).toBeUndefined();

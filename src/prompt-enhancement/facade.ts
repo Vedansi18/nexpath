@@ -26,7 +26,7 @@ import { isPromptEnhancementNlpHeavyCaseV1 } from './composer-gate.js';
 import { decidePromptEnhancementRouteViaLlmV1, type PromptEnhancementLlmRouteDecisionV1 } from './llm-route-decision.js';
 import { isValidApiKey } from '../config/ApiKeyResolver.js';
 import { planPromptEnhancementSections } from './templates/section-plan.js';
-import { routePromptEnhancement, type PromptEnhancementCapabilityId, type PromptEnhancementRouteInput } from './routing-taxonomy.js';
+import { routePromptEnhancement, describePromptEnhancementSequencePlanV1, type PromptEnhancementCapabilityId, type PromptEnhancementRouteInput } from './routing-taxonomy.js';
 import { buildPromptEnhancementGuidanceFactsV1 } from './guidance-facts.js';
 import { resolvePromptEnhancementSourceConflictsV1 } from './conflict-resolution.js';
 import { applyPromptEnhancementSourceMixV1 } from './source-mix.js';
@@ -369,6 +369,13 @@ function buildResult(
   const compoundPromptState = route.contractDecision.compoundPromptState;
   const isSequenceCandidate = compoundPromptState === 'multi_intent_one_prompt'
     || (compoundPromptState === 'multi_point_same_intent' && route.contractDecision.userPointCoverageRefs.length >= 3);
+  // Sequence-plan summary fix (2026-08-07): feed the compact summary REAL display data — the
+  // builder's default is a hardcoded 0/empty, which is what the popup showed on every live run.
+  // Count + fixed-vocabulary role labels only (display-only and-aware split; the emission gate
+  // above is untouched, so WHICH prompts open MPS is unchanged).
+  const sequencePlan = isSequenceCandidate
+    ? describePromptEnhancementSequencePlanV1(request.sourcePrompt.text)
+    : undefined;
   let handoffAndSequenceSummary = !noPopup && disposition === 'show_current_body' && isSequenceCandidate
     ? buildPromptEnhancementHandoffMetadataV1({
         handoffDecisionId: `${enhancementId}:handoff`,
@@ -377,6 +384,12 @@ function buildResult(
         currentBody: safeCurrentBody,
         safetySummary: validationSummary,
         handoffKind: 'compact_sequence_summary_candidate',
+        summary: {
+          summaryId: `${enhancementId}:handoff:summary`,
+          publicSafeText: 'Additional task metadata is available after the current body.',
+          remainingTaskCount: Math.max(0, (sequencePlan?.pointCount ?? 1) - 1),
+          taskRoleLabels: sequencePlan?.roleLabels ?? [],
+        },
       })
     : undefined;
   // Self-guard: emit the summary ONLY if it passes the same handoff validation the boundary
