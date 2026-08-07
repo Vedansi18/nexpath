@@ -247,6 +247,16 @@ export interface PromptEnhancementMpsContinuationFrameStateV1 {
   focusIndex?: number;
   /** Apply the §3.4 ANSI tones; off (plain text) for tests and oracles. */
   colorize?: boolean;
+  /**
+   * Caret within the focused editable field (window-relative visual row/column). Same optional
+   * contract as the first-popup renderer — when supplied with `caretOut`, the renderer records the
+   * caret's 1-based SCREEN row/column so the raw-TTY shell can place the hardware cursor without
+   * re-deriving the layout. Absent by default, so every existing (non-interactive) caller is
+   * unaffected.
+   */
+  caret?: { field: PromptEnhancementEditorFieldV1; visualRow: number; visualColumn: number };
+  /** Mutable sink the renderer fills with the caret's 1-based screen position (see `caret`). */
+  caretOut?: { row: number; col: number };
 }
 
 /**
@@ -280,6 +290,15 @@ export function renderPromptEnhancementMpsContinuationFrameV1(
     return `${bullet} ${styled}${suffix}`;
   };
   const lines: string[] = [];
+  // Record the caret's real screen position as the field content is built (see caretOut) — the
+  // same contract as the first-popup renderer. Content is indented 4 spaces; with the 2-char rail
+  // added in the post-pass the text lands at screen column 7.
+  const recordCaret = (field: PromptEnhancementEditorFieldV1): void => {
+    if (frameState.caret?.field === field && frameState.caretOut) {
+      frameState.caretOut.row = lines.length + 1 + Math.max(0, frameState.caret.visualRow);
+      frameState.caretOut.col = 7 + Math.max(0, frameState.caret.visualColumn);
+    }
+  };
 
   // Branded header identical to the PE popup (owner request): "◆ NEXPATH CLI ·
   // <surface>", cyan+bold, then a dim rule the same width and a blank line. Only
@@ -305,6 +324,7 @@ export function renderPromptEnhancementMpsContinuationFrameV1(
   // the edit-keys hint as the first popup (owner request 2026-08-07).
   const heading = publicText(model.heading);
   lines.push(radioRow(0, heading));
+  recordCaret('enhanced_body');
   const bodyRender = renderMpsBodyLinesV1(publicText(model.body.text), c);
   for (const bodyLine of bodyRender.lines) lines.push(bodyLine);
   if (focusIndex === 0) lines.push(mpsEditKeysHintV1(c, bodyRender.hiddenBelow));
@@ -314,6 +334,7 @@ export function renderPromptEnhancementMpsContinuationFrameV1(
   // always visible, editing keys as the LAST line when focused; no "Add extra requirement" label.
   const detailsLabel = PROMPT_ENHANCEMENT_MPS_CLI_ADDITIONAL_DETAILS_LABEL_V1;
   lines.push(radioRow(1, detailsLabel));
+  recordCaret('additional_details');
   for (const detailLine of publicText(model.additionalDetails.text).split('\n')) lines.push(contentLine(detailLine));
   lines.push(c ? `      ${c.lightYellow}${PROMPT_ENHANCEMENT_MPS_CLI_DETAILS_HINT_V1}${c.reset}` : `      ${PROMPT_ENHANCEMENT_MPS_CLI_DETAILS_HINT_V1}`);
   if (focusIndex === 1) lines.push(editKeysHint());
