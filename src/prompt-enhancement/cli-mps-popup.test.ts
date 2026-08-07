@@ -186,13 +186,16 @@ describe('UI-6 MPS first-popup frame renderer (§3.3)', () => {
     expect(deRail(planLine).trimStart().startsWith('●')).toBe(false);
   });
 
-  it('renders the Cancel row yellow in colorized mode and records the caret screen position (owner request)', () => {
-    // Yellow Cancel: the caution tone is applied only to the Cancel label, never the body row.
+  it('renders the Cancel row light yellow in colorized mode and records the caret screen position (owner request)', () => {
+    // Light-yellow Cancel (owner request 2026-08-07): the bright caution tone is applied only to
+    // the Cancel label, never the body row; the normal yellow ([33m]) is reserved for the
+    // provider-failure notice.
     const colored = renderPromptEnhancementMpsFirstPopupFrameV1(model(), { focusIndex: 0, colorize: true });
     const cancelLine = colored.split('\n').find((line) => line.includes('Cancel (remaining'));
     const bodyLine = colored.split('\n').find((line) => line.includes('Use enhanced sequence prompt'));
-    expect(cancelLine).toContain(`${ESC}[33m`);
-    expect(bodyLine).not.toContain(`${ESC}[33m`);
+    expect(cancelLine).toContain(`${ESC}[93m`);
+    expect(cancelLine).not.toContain(`${ESC}[33m`);
+    expect(bodyLine).not.toContain(`${ESC}[93m`);
     // Caret contract (same as the PE renderer): caretOut records the 1-based screen row of the
     // body's first content line, at column 7 (2-char rail + 4-space indent + 1-based).
     const caretOut = { row: -1, col: -1 };
