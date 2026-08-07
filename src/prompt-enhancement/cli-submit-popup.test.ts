@@ -609,7 +609,7 @@ describe('UI-1 action-row model', () => {
     expect(framePinch).not.toContain('Shown because');
   });
 
-  it('shows a light-gray action hint under each editable heading (UI-8)', () => {
+  it('shows a light-yellow action hint under each editable heading (UI-8)', () => {
     const ESC = String.fromCharCode(27);
     const view: PromptEnhancementCliPopupViewV1 = { model: fakeRenderModel(), editedBodyText: 'BODY', additionalDetailsText: '' };
     const plain = renderPromptEnhancementPopupFrameV1(view, { focusIndex: 0, helpExpanded: false });
@@ -617,9 +617,10 @@ describe('UI-1 action-row model', () => {
     expect(plain).toContain('Enter applies these details · unapplied details are not sent');
     // The focused body's edit-keys + send hint share ONE line (owner request 2026-08-07).
     expect(plain).toContain('Ctrl+J new line · Ctrl+↑/↓ move line · Enter sends this prompt');
-    // In colour mode that combined hint line is gray.
+    // In colour mode that combined hint line is LIGHT YELLOW (owner request 2026-08-07 — a
+    // distinct, all-OS-visible shortcut colour).
     const colored = renderPromptEnhancementPopupFrameV1(view, { focusIndex: 0, helpExpanded: false, colorize: true });
-    expect(colored).toContain(`${ESC}[90mCtrl+J new line · Ctrl+↑/↓ move line · Enter sends this prompt`);
+    expect(colored).toContain(`${ESC}[93mCtrl+J new line · Ctrl+↑/↓ move line · Enter sends this prompt`);
   });
 
   it('applies the old-popup radio colours only when colorize is on (§8.1)', () => {

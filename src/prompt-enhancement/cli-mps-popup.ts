@@ -49,7 +49,7 @@ function renderMpsBodyLinesV1(
       hiddenBelow = true;
       line = rawLine.slice(0, -PROMPT_ENHANCEMENT_MPS_CLI_WHOLE_PROMPT_SUFFIX_V1.length);
     }
-    return c && isPromptEnhancementScrollMarkerLineV1(line) ? `    ${c.dim}${c.gray}${line}${c.reset}` : `    ${line}`;
+    return c && isPromptEnhancementScrollMarkerLineV1(line) ? `    ${c.gray}${line}${c.reset}` : `    ${line}`;
   });
   return { lines, hiddenBelow };
 }
@@ -57,7 +57,7 @@ function renderMpsBodyLinesV1(
 /** The body's edit-keys hint, optionally carrying the "whole prompt is included" reassurance. */
 function mpsEditKeysHintV1(c: typeof PROMPT_ENHANCEMENT_MPS_CLI_SGR_V1 | null, withWholePrompt: boolean): string {
   const text = PROMPT_ENHANCEMENT_MPS_CLI_EDIT_KEYS_HINT_V1 + (withWholePrompt ? PROMPT_ENHANCEMENT_MPS_CLI_WHOLE_PROMPT_SUFFIX_V1 : '');
-  return c ? `      ${c.gray}${text}${c.reset}` : `      ${text}`;
+  return c ? `      ${c.lightYellow}${text}${c.reset}` : `      ${text}`;
 }
 
 /**
@@ -72,6 +72,9 @@ const PROMPT_ENHANCEMENT_MPS_CLI_SGR_V1 = (() => {
     gray: `${e}[90m`,
     green: `${e}[32m`,
     yellow: `${e}[33m`,
+    // Shortcut/action hints — bright ("light") yellow, distinct + visible on every OS (owner
+    // request 2026-08-07). Distinct from the Cancel row's normal yellow ([33m]).
+    lightYellow: `${e}[93m`,
     dim: `${e}[2m`,
     bold: `${e}[1m`,
     reset: `${e}[0m`,
@@ -160,11 +163,11 @@ export function renderPromptEnhancementMpsFirstPopupFrameV1(
   if (model.pinchLabel || model.whyHelp) lines.push('');
 
   const editKeysHint = (): string =>
-    c ? `      ${c.gray}${PROMPT_ENHANCEMENT_MPS_CLI_EDIT_KEYS_HINT_V1}${c.reset}` : `      ${PROMPT_ENHANCEMENT_MPS_CLI_EDIT_KEYS_HINT_V1}`;
+    c ? `      ${c.lightYellow}${PROMPT_ENHANCEMENT_MPS_CLI_EDIT_KEYS_HINT_V1}${c.reset}` : `      ${PROMPT_ENHANCEMENT_MPS_CLI_EDIT_KEYS_HINT_V1}`;
   // A field content line: real prompt text renders plain; a scroll indicator ("↑/↓ N more lines
   // …") renders DIM like a hint (owner request 2026-08-07), matching the PE popup.
   const contentLine = (line: string): string =>
-    c && isPromptEnhancementScrollMarkerLineV1(line) ? `    ${c.dim}${c.gray}${line}${c.reset}` : `    ${line}`;
+    c && isPromptEnhancementScrollMarkerLineV1(line) ? `    ${c.gray}${line}${c.reset}` : `    ${line}`;
 
   // Enhanced sequence body — primary, interactive row 0. The "· the whole prompt is included"
   // reassurance rides on the edit-keys hint (owner request 2026-08-07), not the "↓ N more lines
@@ -184,7 +187,7 @@ export function renderPromptEnhancementMpsFirstPopupFrameV1(
   lines.push(radioRow(1, detailsLabel));
   recordCaret('additional_details');
   for (const detailLine of publicText(model.additionalDetails.text).split('\n')) lines.push(contentLine(detailLine));
-  lines.push(c ? `      ${c.gray}${PROMPT_ENHANCEMENT_MPS_CLI_DETAILS_HINT_V1}${c.reset}` : `      ${PROMPT_ENHANCEMENT_MPS_CLI_DETAILS_HINT_V1}`);
+  lines.push(c ? `      ${c.lightYellow}${PROMPT_ENHANCEMENT_MPS_CLI_DETAILS_HINT_V1}${c.reset}` : `      ${PROMPT_ENHANCEMENT_MPS_CLI_DETAILS_HINT_V1}`);
   if (focusIndex === 1) lines.push(editKeysHint());
   lines.push('');
 
@@ -285,9 +288,9 @@ export function renderPromptEnhancementMpsContinuationFrameV1(
   if (model.pinchLabel || model.whyHelp) lines.push('');
 
   const editKeysHint = (): string =>
-    c ? `      ${c.gray}${PROMPT_ENHANCEMENT_MPS_CLI_EDIT_KEYS_HINT_V1}${c.reset}` : `      ${PROMPT_ENHANCEMENT_MPS_CLI_EDIT_KEYS_HINT_V1}`;
+    c ? `      ${c.lightYellow}${PROMPT_ENHANCEMENT_MPS_CLI_EDIT_KEYS_HINT_V1}${c.reset}` : `      ${PROMPT_ENHANCEMENT_MPS_CLI_EDIT_KEYS_HINT_V1}`;
   const contentLine = (line: string): string =>
-    c && isPromptEnhancementScrollMarkerLineV1(line) ? `    ${c.dim}${c.gray}${line}${c.reset}` : `    ${line}`;
+    c && isPromptEnhancementScrollMarkerLineV1(line) ? `    ${c.gray}${line}${c.reset}` : `    ${line}`;
 
   // Enhanced next sequence body — primary, interactive row 0. Same "whole prompt is included" on
   // the edit-keys hint as the first popup (owner request 2026-08-07).
@@ -303,7 +306,7 @@ export function renderPromptEnhancementMpsContinuationFrameV1(
   const detailsLabel = PROMPT_ENHANCEMENT_MPS_CLI_ADDITIONAL_DETAILS_LABEL_V1;
   lines.push(radioRow(1, detailsLabel));
   for (const detailLine of publicText(model.additionalDetails.text).split('\n')) lines.push(contentLine(detailLine));
-  lines.push(c ? `      ${c.gray}${PROMPT_ENHANCEMENT_MPS_CLI_DETAILS_HINT_V1}${c.reset}` : `      ${PROMPT_ENHANCEMENT_MPS_CLI_DETAILS_HINT_V1}`);
+  lines.push(c ? `      ${c.lightYellow}${PROMPT_ENHANCEMENT_MPS_CLI_DETAILS_HINT_V1}${c.reset}` : `      ${PROMPT_ENHANCEMENT_MPS_CLI_DETAILS_HINT_V1}`);
   if (focusIndex === 1) lines.push(editKeysHint());
   lines.push('');
 

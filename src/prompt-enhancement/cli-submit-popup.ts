@@ -659,6 +659,10 @@ const PROMPT_ENHANCEMENT_CLI_SGR_V1 = (() => {
     cyan: `${e}[36m`,
     green: `${e}[32m`,
     gray: `${e}[90m`,
+    // Shortcut/action hints use bright ("light") yellow — a distinct, universally-supported
+    // 16-colour that stays readable on every terminal (owner request 2026-08-07: keep it
+    // properly visible on all OSes, unlike the faint attribute).
+    lightYellow: `${e}[93m`,
     dim: `${e}[2m`,
     bold: `${e}[1m`,
     reset: `${e}[0m`,
@@ -736,14 +740,14 @@ export function renderPromptEnhancementPopupFrameV1(
     // Light-gray action hint shown under an editable heading (§ UI-8 / owner request).
     // Content is indented 4 spaces; with the 2-char rail added in the post-pass the text lands at
     // screen column 7 (matching the caret column formula in recordCaret).
-    // Shortcut/action hints (Ctrl+J · Enter sends · Enter applies) — dim gray (the "light dim"
-    // tier). Owner request 2026-08-07: keep it dim, distinct from the darker scroll markers below.
-    const hint = (text: string) => (c ? `    ${c.gray}${text}${c.reset}` : `    ${text}`);
+    // Shortcut/action hints (Ctrl+J · Enter sends · Enter applies) — LIGHT YELLOW (owner request
+    // 2026-08-07): a distinct, clearly-visible colour on every OS.
+    const hint = (text: string) => (c ? `    ${c.lightYellow}${text}${c.reset}` : `    ${text}`);
     // A field content line: real prompt text renders plain; a scroll indicator ("↑/↓ N more
-    // lines …") renders in a DARKER dim (gray + faint) than the shortcut hints (owner request
-    // 2026-08-07) so the hierarchy reads prompt (bright) > shortcut (dim) > arrow marker (darkest).
+    // lines …") renders in plain gray — the "normal" dim (owner request 2026-08-07: the light
+    // yellow hints already provide the distinction, so the marker needs no extra darkening).
     const contentLine = (line: string) =>
-      c && isPromptEnhancementScrollMarkerLineV1(line) ? `    ${c.dim}${c.gray}${line}${c.reset}` : `    ${line}`;
+      c && isPromptEnhancementScrollMarkerLineV1(line) ? `    ${c.gray}${line}${c.reset}` : `    ${line}`;
     const editable = row.kind === 'editor_heading' || row.kind === 'additional_details';
     if (row.kind === 'editor_heading') {
       recordCaret('enhanced_body');
@@ -1134,8 +1138,8 @@ export function renderPromptEnhancementCliFeedbackFrameV1(
       const text = state.editor.buffers.additional_details.text;
       const shown = text ? publicText(text) : '(type your feedback)';
       for (const line of shown.split('\n')) lines.push(`      ${line}`);
-      // Owner request: editing keys under the editable Other field.
-      if (focused) lines.push(c ? `      ${c.gray}${PROMPT_ENHANCEMENT_CLI_EDIT_KEYS_HINT_V1}${c.reset}` : `      ${PROMPT_ENHANCEMENT_CLI_EDIT_KEYS_HINT_V1}`);
+      // Editing keys under the editable Other field — light yellow, same shortcut tier as PE/MPS.
+      if (focused) lines.push(c ? `      ${c.lightYellow}${PROMPT_ENHANCEMENT_CLI_EDIT_KEYS_HINT_V1}${c.reset}` : `      ${PROMPT_ENHANCEMENT_CLI_EDIT_KEYS_HINT_V1}`);
     }
   });
   lines.push('', c ? `${c.dim}${PROMPT_ENHANCEMENT_CLI_FEEDBACK_FOOTER_V1}${c.reset}` : PROMPT_ENHANCEMENT_CLI_FEEDBACK_FOOTER_V1);
