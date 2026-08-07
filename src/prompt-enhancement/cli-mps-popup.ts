@@ -1,6 +1,7 @@
 import type { PromptEnhancementMpsFirstPopupModelV1 } from './first-popup.js';
 import type { PromptEnhancementMpsContinuationPopupModelV1 } from './continuation-popup.js';
 import type { PromptEnhancementEditorFieldV1 } from './multiline-editor.js';
+import { isPromptEnhancementScrollMarkerLineV1 } from './cli-submit-popup.js';
 
 // ---------------------------------------------------------------------------
 // UI-6 — MPS first-popup host rendering (alignment plan §3.3).
@@ -28,7 +29,6 @@ const PROMPT_ENHANCEMENT_MPS_CLI_EDIT_KEYS_HINT_V1 = process.platform === 'darwi
 /** Details helpers (owner request 2026-08-07): the same wording the PE popup shows — Enter on the
  * details row APPLIES the details into the enhanced sequence prompt above; it never sends. */
 const PROMPT_ENHANCEMENT_MPS_CLI_DETAILS_HINT_V1 = 'Enter applies these details · unapplied details are not sent' as const;
-const PROMPT_ENHANCEMENT_MPS_CLI_DETAILS_HELP_V1 = 'Add extra requirement' as const;
 
 /**
  * ANSI tones, matching the PE popup: cyan title + rail, green (focused) / gray (unfocused)
@@ -131,26 +131,28 @@ export function renderPromptEnhancementMpsFirstPopupFrameV1(
 
   const editKeysHint = (): string =>
     c ? `      ${c.gray}${PROMPT_ENHANCEMENT_MPS_CLI_EDIT_KEYS_HINT_V1}${c.reset}` : `      ${PROMPT_ENHANCEMENT_MPS_CLI_EDIT_KEYS_HINT_V1}`;
+  // A field content line: real prompt text renders plain; a scroll indicator ("↑/↓ N more lines
+  // …") renders DIM like a hint (owner request 2026-08-07), matching the PE popup.
+  const contentLine = (line: string): string =>
+    c && isPromptEnhancementScrollMarkerLineV1(line) ? `    ${c.gray}${line}${c.reset}` : `    ${line}`;
 
   // Enhanced sequence body — primary, interactive row 0.
   const heading = publicText(model.heading);
   lines.push(radioRow(0, heading));
   recordCaret('enhanced_body');
-  for (const bodyLine of publicText(model.body.text).split('\n')) lines.push(`    ${bodyLine}`);
+  for (const bodyLine of publicText(model.body.text).split('\n')) lines.push(contentLine(bodyLine));
   if (focusIndex === 0) lines.push(editKeysHint()); // owner request: editing keys under the focused editable field
   lines.push('');
 
-  // Additional details — interactive row 1. PE-parity helpers (owner request 2026-08-07): the
-  // apply hint is always visible; moving onto the row adds the short help + editing keys.
+  // Additional details — interactive row 1. The apply hint is always visible; moving onto the row
+  // adds the editing keys as the LAST line. The "Add extra requirement" sub-label was removed
+  // (owner request 2026-08-07) so the body can show more lines — PE parity.
   const detailsLabel = PROMPT_ENHANCEMENT_MPS_CLI_ADDITIONAL_DETAILS_LABEL_V1;
   lines.push(radioRow(1, detailsLabel));
   recordCaret('additional_details');
-  for (const detailLine of publicText(model.additionalDetails.text).split('\n')) lines.push(`    ${detailLine}`);
+  for (const detailLine of publicText(model.additionalDetails.text).split('\n')) lines.push(contentLine(detailLine));
   lines.push(c ? `      ${c.gray}${PROMPT_ENHANCEMENT_MPS_CLI_DETAILS_HINT_V1}${c.reset}` : `      ${PROMPT_ENHANCEMENT_MPS_CLI_DETAILS_HINT_V1}`);
-  if (focusIndex === 1) {
-    lines.push(`      ${PROMPT_ENHANCEMENT_MPS_CLI_DETAILS_HELP_V1}`);
-    lines.push(editKeysHint());
-  }
+  if (focusIndex === 1) lines.push(editKeysHint());
   lines.push('');
 
   // Cancel — interactive row 2, last interactive action. Yellow (owner request): choosing it
@@ -251,23 +253,23 @@ export function renderPromptEnhancementMpsContinuationFrameV1(
 
   const editKeysHint = (): string =>
     c ? `      ${c.gray}${PROMPT_ENHANCEMENT_MPS_CLI_EDIT_KEYS_HINT_V1}${c.reset}` : `      ${PROMPT_ENHANCEMENT_MPS_CLI_EDIT_KEYS_HINT_V1}`;
+  const contentLine = (line: string): string =>
+    c && isPromptEnhancementScrollMarkerLineV1(line) ? `    ${c.gray}${line}${c.reset}` : `    ${line}`;
 
   // Enhanced next sequence body — primary, interactive row 0.
   const heading = publicText(model.heading);
   lines.push(radioRow(0, heading));
-  for (const bodyLine of publicText(model.body.text).split('\n')) lines.push(`    ${bodyLine}`);
+  for (const bodyLine of publicText(model.body.text).split('\n')) lines.push(contentLine(bodyLine));
   if (focusIndex === 0) lines.push(editKeysHint()); // owner request: editing keys under the focused editable field
   lines.push('');
 
-  // Additional details — interactive row 1. Same PE-parity helpers as the first popup.
+  // Additional details — interactive row 1. Same PE-parity helpers as the first popup: apply hint
+  // always visible, editing keys as the LAST line when focused; no "Add extra requirement" label.
   const detailsLabel = PROMPT_ENHANCEMENT_MPS_CLI_ADDITIONAL_DETAILS_LABEL_V1;
   lines.push(radioRow(1, detailsLabel));
-  for (const detailLine of publicText(model.additionalDetails.text).split('\n')) lines.push(`    ${detailLine}`);
+  for (const detailLine of publicText(model.additionalDetails.text).split('\n')) lines.push(contentLine(detailLine));
   lines.push(c ? `      ${c.gray}${PROMPT_ENHANCEMENT_MPS_CLI_DETAILS_HINT_V1}${c.reset}` : `      ${PROMPT_ENHANCEMENT_MPS_CLI_DETAILS_HINT_V1}`);
-  if (focusIndex === 1) {
-    lines.push(`      ${PROMPT_ENHANCEMENT_MPS_CLI_DETAILS_HELP_V1}`);
-    lines.push(editKeysHint());
-  }
+  if (focusIndex === 1) lines.push(editKeysHint());
   lines.push('');
 
   // Custom interruption — interactive row 2: label, then dim helper. Neither cancel nor completion.

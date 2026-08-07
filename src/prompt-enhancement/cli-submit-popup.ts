@@ -737,25 +737,34 @@ export function renderPromptEnhancementPopupFrameV1(
     // Content is indented 4 spaces; with the 2-char rail added in the post-pass the text lands at
     // screen column 7 (matching the caret column formula in recordCaret).
     const hint = (text: string) => (c ? `    ${c.gray}${text}${c.reset}` : `    ${text}`);
+    // A field content line: real prompt text renders plain; a scroll indicator ("↑/↓ N more
+    // lines …") renders DIM like a hint (owner request 2026-08-07), so it reads as a cue not body.
+    const contentLine = (line: string) =>
+      c && isPromptEnhancementScrollMarkerLineV1(line) ? `    ${c.gray}${line}${c.reset}` : `    ${line}`;
+    const editable = row.kind === 'editor_heading' || row.kind === 'additional_details';
     if (row.kind === 'editor_heading') {
       recordCaret('enhanced_body');
-      for (const bodyLine of publicText(view.editedBodyText).split('\n')) lines.push(`    ${bodyLine}`);
+      for (const bodyLine of publicText(view.editedBodyText).split('\n')) lines.push(contentLine(bodyLine));
       lines.push(hint(PROMPT_ENHANCEMENT_CLI_BODY_HINT_V1));
     } else if (row.kind === 'additional_details') {
       // UI-8: no "Apply" button — pressing Enter on this row applies the details.
       // An empty field renders blank (§8.5). Sending the body ignores unapplied details.
       recordCaret('additional_details');
       const details = view.additionalDetailsText ? publicText(view.additionalDetailsText) : '';
-      for (const detailLine of details.split('\n')) lines.push(`    ${detailLine}`);
+      for (const detailLine of details.split('\n')) lines.push(contentLine(detailLine));
       lines.push(hint(PROMPT_ENHANCEMENT_CLI_DETAILS_HINT_V1));
     }
 
-    if (focused && row.help) {
+    // The editable rows drop their sub-label help ("Edit current prompt" / "Add extra requirement")
+    // — owner request 2026-08-07: it was one wasted line each, so removing it lets the body show
+    // more lines and leaves the Ctrl+J edit-keys hint as the LAST line of the block. Non-editable
+    // rows (directionals) keep their focused help.
+    if (focused && row.help && !editable) {
       lines.push(`    ${publicText(frameState.helpExpanded ? row.help.full : row.help.short)}`);
     }
-    // Owner request: show the editing keys under the focused editable field (enhanced body /
-    // Additional details) so the user knows how to add lines and move between them.
-    if (focused && (row.kind === 'editor_heading' || row.kind === 'additional_details')) {
+    // Owner request: show the editing keys as the LAST line under the focused editable field
+    // (enhanced body / Additional details).
+    if (focused && editable) {
       lines.push(hint(PROMPT_ENHANCEMENT_CLI_EDIT_KEYS_HINT_V1));
     }
   });
@@ -799,6 +808,16 @@ export function windowPromptEnhancementFieldForDisplayV1(
   if (hiddenAbove > 0) shown[0] = `↑ ${hiddenAbove} more lines above`;
   if (hiddenBelow > 0) shown[shown.length - 1] = `↓ ${hiddenBelow} more lines below · the whole prompt is included`;
   return shown.join('\n');
+}
+
+/**
+ * True when a windowed field line is a scroll indicator ("↑ N more lines above" / "↓ N more lines
+ * below …") produced by windowPromptEnhancementFieldForDisplayV1 — NOT real prompt text. The PE,
+ * MPS, and PEF renderers dim these lines (owner request 2026-08-07) so they read as a hint, like
+ * the Ctrl+J line, not as part of the body.
+ */
+export function isPromptEnhancementScrollMarkerLineV1(line: string): boolean {
+  return /^↑ \d+ more lines above$/.test(line) || /^↓ \d+ more lines below\b/.test(line);
 }
 
 // ---------------------------------------------------------------------------

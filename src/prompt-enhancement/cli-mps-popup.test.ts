@@ -103,6 +103,21 @@ describe('UI-6 MPS first-popup frame renderer (§3.3)', () => {
     expect(frame.indexOf('Cancel (remaining')).toBeLessThan(frame.indexOf('Sequence plan'));
   });
 
+  it('dims the scroll indicators like a hint, not as body text (owner request 2026-08-07)', () => {
+    // A windowed body puts "↑ N more lines above" / "↓ N more lines below …" as content lines.
+    const withMarkers = model({
+      body: { text: '↑ 22 more lines above\nreal body line\n↓ 5 more lines below · the whole prompt is included', editable: true, originalPromptText: 'x', originalPromptPreservation: 'visible_verbatim' },
+    });
+    const colored = renderPromptEnhancementMpsFirstPopupFrameV1(withMarkers, { focusIndex: 0, colorize: true });
+    const gray = `${ESC}[90m`;
+    const aboveLine = colored.split('\n').find((l) => l.includes('22 more lines above'));
+    const belowLine = colored.split('\n').find((l) => l.includes('5 more lines below'));
+    const bodyLine = colored.split('\n').find((l) => l.includes('real body line'));
+    expect(aboveLine).toContain(gray); // scroll markers are dim…
+    expect(belowLine).toContain(gray);
+    expect(bodyLine).not.toContain(gray); // …real prompt text is not.
+  });
+
   it('renders a multi-line body as indented lines and an empty Additional details field', () => {
     const frame = renderPromptEnhancementMpsFirstPopupFrameV1(model({
       body: { text: 'line one\nline two', editable: true, originalPromptText: 'x', originalPromptPreservation: 'visible_verbatim' },

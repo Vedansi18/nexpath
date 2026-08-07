@@ -244,15 +244,16 @@ describe('MPS CLI wiring (owner ruling 2026-08-06: CLI complete, extension pendi
     }
   });
 
-  it('details helpers (PE parity, owner request 2026-08-07): apply-hint always visible; focusing the row adds the short help', async () => {
+  it('details helpers (PE parity, owner request 2026-08-07): apply-hint always visible; focus adds ONLY the edit-keys hint (no sub-label)', async () => {
     const result = await preparePromptEnhancement(request(MULTI_INTENT));
     const ui = scripted([KEY.down, KEY.escape]);
     await runPromptEnhancementCliMpsFirstPopupV1({ result, interaction: ui });
-    // Frame 0 (body focused): the apply hint is visible, the focused-only help is not.
+    // The apply hint is always visible; the removed 'Add extra requirement' sub-label never shows.
     expect(ui.frames[0]).toContain('Enter applies these details · unapplied details are not sent');
     expect(ui.frames[0]).not.toContain('Add extra requirement');
-    // Frame 1 (details focused): the short help appears, like the PE popup.
-    expect(ui.frames[1]).toContain('Add extra requirement');
+    expect(ui.frames[1]).not.toContain('Add extra requirement');
+    // Focusing the details row (frame 1) adds the editing-keys hint as the last line of the block.
+    expect(ui.frames[1]).toContain('Ctrl+J new line');
   });
 
   it('MPS first popup: Esc declines (caller falls through to the regular PE popup)', async () => {

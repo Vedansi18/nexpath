@@ -428,12 +428,20 @@ describe('UI-1 PE frame renderer', () => {
     expect(frame).toContain(PROMPT_ENHANCEMENT_CLI_FOOTER_V1);
   });
 
-  it('shows the focused row short help and the locked full help when Space-expanded', async () => {
+  it('the focused editable body drops its sub-label help and ends with the Ctrl+J hint (owner request 2026-08-07)', async () => {
     const model = await renderModel();
     const view: PromptEnhancementCliPopupViewV1 = { model, editedBodyText: 'CONTROLLED-BODY', additionalDetailsText: '' };
-    expect(renderPromptEnhancementPopupFrameV1(view, { focusIndex: 0, helpExpanded: false })).toContain('Edit current prompt');
-    expect(renderPromptEnhancementPopupFrameV1(view, { focusIndex: 0, helpExpanded: true }))
-      .toContain('Open this inline editor to change the enhanced body.');
+    const frame = renderPromptEnhancementPopupFrameV1(view, { focusIndex: 0, helpExpanded: false });
+    // The 'Edit current prompt' / full-help sub-label is gone so the body shows more lines…
+    expect(frame).not.toContain('Edit current prompt');
+    expect(frame).not.toContain('Open this inline editor to change the enhanced body.');
+    // …and the block is: body -> 'Enter sends this prompt' -> Ctrl+J (last).
+    const lines = frame.split('\n').map((l) => l.replace(/^│ ?/, ''));
+    const bodyIdx = lines.findIndex((l) => l.includes('CONTROLLED-BODY'));
+    const enterIdx = lines.findIndex((l) => l.includes('Enter sends this prompt'));
+    const ctrlIdx = lines.findIndex((l) => l.includes('Ctrl+J new line'));
+    expect(bodyIdx).toBeLessThan(enterIdx);
+    expect(enterIdx).toBeLessThan(ctrlIdx);
   });
 });
 
@@ -562,13 +570,14 @@ describe('UI-1 action-row model', () => {
     expect(visualRow).toBeLessThan(8);
   });
 
-  it('marks the focused editable row with a filled bullet and shows its help', () => {
+  it('marks the focused editable row with a filled bullet and the editing-keys hint (no sub-label help)', () => {
     const view: PromptEnhancementCliPopupViewV1 = { model: fakeRenderModel(), editedBodyText: 'BODY-LINE', additionalDetailsText: '' };
     const frame = renderPromptEnhancementPopupFrameV1(view, { focusIndex: 0, helpExpanded: false });
     expect(frame).toContain('● Use enhanced prompt');
     expect(frame).toContain('BODY-LINE');
-    expect(frame).toContain('Edit current prompt');
-    // Owner request: the editable body shows the editing-keys hint under its help.
+    // Owner request 2026-08-07: the 'Edit current prompt' sub-label is removed…
+    expect(frame).not.toContain('Edit current prompt');
+    // …and the editable body still shows the editing-keys hint (now the last line of its block).
     expect(frame).toContain('Ctrl+J new line');
     // Directional rows and Use original prompt carry no description (owner request).
     expect(renderPromptEnhancementPopupFrameV1(view, { focusIndex: 2, helpExpanded: true }))
