@@ -60,4 +60,11 @@ describe('createInjectedRecordStore', () => {
     store.record('/proj', 'text');
     expect(store.isRecentEcho('/proj', 'text')).toBe(true);
   });
+
+  it('defaults the window to exactly 60s when windowMs is omitted (every other test pins its own explicit windowMs, so nothing else proves this)', () => {
+    const store = createInjectedRecordStore();
+    store.record('/proj', 'the enhanced body', 1_000);
+    expect(store.isRecentEcho('/proj', 'the enhanced body', 1_000 + 60_000)).toBe(true);
+    expect(store.isRecentEcho('/proj', 'the enhanced body', 1_000 + 60_001)).toBe(false);
+  });
 });
