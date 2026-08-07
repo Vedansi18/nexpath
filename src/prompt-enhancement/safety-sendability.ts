@@ -445,6 +445,27 @@ export function requiresPromptEnhancementExecutionConfirmationForPrompt(original
   return classifyTextRiskKinds(originalPromptText).length > 0 && authorityModeFor(originalPromptText) === 'execute_requested';
 }
 
+/**
+ * Does the FINISHED body require the canonical confirmation line?
+ *
+ * `requiresPromptEnhancementExecutionConfirmationForPrompt` answers the same question from the user's
+ * prompt alone, which is what the composer used to decide whether to insert the line. But the check
+ * that later rejects the body reads the generated text too, and fires on
+ * `execute_generated_escalation` — generated wording says "do" where the prompt only said "plan". A
+ * body could therefore be judged against a safeguard that was never offered.
+ *
+ * This runs the validator's own classification (`classifySensitiveActions` over
+ * `generatedOnlyText`) so the composer can ask exactly the question the validator will ask, using the
+ * finished text rather than a prediction made before it existed.
+ */
+export function requiresPromptEnhancementConfirmationForFinishedBodyV1(
+  currentBody: Pick<PromptEnhancementCurrentBodyV1, 'sections' | 'originalPromptText'>,
+  fullBodyText: string,
+): boolean {
+  const generatedBodyText = generatedOnlyText(fullBodyText, currentBody.originalPromptText);
+  return classifySensitiveActions(currentBody, generatedBodyText).some((finding) => finding.requiresConfirmation);
+}
+
 export function buildPromptEnhancementCanonicalConfirmation(originalPromptText: string): string {
   return `Still, before you do this ${specificSensitiveActionTextForPrompt(originalPromptText)} you must ask me for go-ahead confirmation.`;
 }

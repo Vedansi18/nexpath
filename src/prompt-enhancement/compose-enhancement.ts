@@ -26,6 +26,7 @@ import { buildPromptEnhancementCostVisibilityMetadataV1 } from './cost-observabi
 import type { PromptEnhancementPrimaryIntent } from './routing-taxonomy.js';
 import {
   buildPromptEnhancementCanonicalConfirmation,
+  requiresPromptEnhancementConfirmationForFinishedBodyV1,
   requiresPromptEnhancementExecutionConfirmationForPrompt,
   validatePromptEnhancementSafety,
 } from './safety-sendability.js';
@@ -318,7 +319,8 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
         sectionPlan.safetyFlags.includes('sensitive_action_confirmation')
       ))?.sectionId
     : undefined;
-  const renderedSections = sectionPlans.map((sectionPlan) =>
+  const renderAllSections = (confirmationSectionId: string | undefined) =>
+    sectionPlans.map((sectionPlan) =>
       renderSection({
         sectionPlan,
         originalPromptText: input.originalPromptText,
@@ -326,14 +328,45 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
         additionalDetailsText: action === 'apply_details' ? input.additionalDetailsText : input.acceptedAdditionalDetailsText,
         sectionPlanningResult: input.sectionPlanningResult,
         llmDraftsBySectionId: validatedLlmDrafts.draftsBySectionId,
-        insertCanonicalConfirmation: sectionPlan.sectionId === canonicalConfirmationSectionId,
+        insertCanonicalConfirmation: sectionPlan.sectionId === confirmationSectionId,
       }),
-  );
-  const canonicalText = renderedSections.map((section) => section.text).join('\n\n');
-  const text = action === "apply_details" && typeof input.editedBodyText === "string"
+    );
+  let renderedSections = renderAllSections(canonicalConfirmationSectionId);
+  let canonicalText = renderedSections.map((section) => section.text).join('\n\n');
+  let text = action === "apply_details" && typeof input.editedBodyText === "string"
     ? applyEditedBodyWithAdditionalDetails(input.editedBodyText, input.additionalDetailsText)
     : canonicalText;
-  const sections = attachSpanRefs(sectionPlans, renderedSections, text);
+  let sections = attachSpanRefs(sectionPlans, renderedSections, text);
+
+  // The confirmation-insert decision above reads only the USER's prompt, but the check that later
+  // rejects the body reads the generated wording too and fires when generated text says "do" where the
+  // prompt only said "plan". A body could therefore be rejected for missing a safeguard it was never
+  // offered. Re-ask the validator's own question against the FINISHED body; if the line is now required
+  // and absent, insert it and re-render. This happens BEFORE validation runs, so nothing is marked safe
+  // after the fact — the body is corrected at source and then validated normally, once.
+  // The line is placed in the LAST generated section so no sensitive execution wording can follow it
+  // (trailing execution after the confirmation is itself treated as an override and would still fail).
+  if (canonicalConfirmationSectionId === undefined && text === canonicalText) {
+    const expectedConfirmation = buildPromptEnhancementCanonicalConfirmation(input.originalPromptText);
+    if (
+      !text.includes(expectedConfirmation) &&
+      requiresPromptEnhancementConfirmationForFinishedBodyV1(
+        { sections, originalPromptText: input.originalPromptText },
+        text,
+      )
+    ) {
+      const trailingSectionId = [...sectionPlans]
+        .reverse()
+        .find((sectionPlan) => sectionPlan.sectionKind !== 'original_request_or_goal')
+        ?.sectionId;
+      if (trailingSectionId !== undefined) {
+        renderedSections = renderAllSections(trailingSectionId);
+        canonicalText = renderedSections.map((section) => section.text).join('\n\n');
+        text = canonicalText;
+        sections = attachSpanRefs(sectionPlans, renderedSections, text);
+      }
+    }
+  }
   const generatedSafeStatus: PromptEnhancementValidationStatus = deterministicFallback === 'none' ? 'valid' : 'valid_with_fallback';
   const callVisibilityMode: PromptEnhancementCallVisibilityMode = usesLlmWording
     ? 'llm_wording'
