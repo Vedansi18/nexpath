@@ -435,13 +435,15 @@ describe('UI-1 PE frame renderer', () => {
     // The 'Edit current prompt' / full-help sub-label is gone so the body shows more lines…
     expect(frame).not.toContain('Edit current prompt');
     expect(frame).not.toContain('Open this inline editor to change the enhanced body.');
-    // …and the block order is: body -> Ctrl+J -> 'Enter sends this prompt' (LAST, owner request).
+    // …and the Ctrl+J edit-keys + 'Enter sends this prompt' share ONE line below the body
+    // (owner request 2026-08-07 — one fewer line so the body shows one more).
     const lines = frame.split('\n').map((l) => l.replace(/^│ ?/, ''));
     const bodyIdx = lines.findIndex((l) => l.includes('CONTROLLED-BODY'));
-    const ctrlIdx = lines.findIndex((l) => l.includes('Ctrl+J new line'));
-    const enterIdx = lines.findIndex((l) => l.includes('Enter sends this prompt'));
-    expect(bodyIdx).toBeLessThan(ctrlIdx);
-    expect(ctrlIdx).toBeLessThan(enterIdx);
+    const hintIdx = lines.findIndex((l) => l.includes('Ctrl+J new line') && l.includes('Enter sends this prompt'));
+    expect(hintIdx).toBeGreaterThan(bodyIdx);
+    // The two hints are NOT on separate lines.
+    expect(lines.filter((l) => l.includes('Enter sends this prompt'))).toHaveLength(1);
+    expect(lines.filter((l) => l.includes('Ctrl+J new line'))).toHaveLength(1);
   });
 });
 
@@ -613,9 +615,11 @@ describe('UI-1 action-row model', () => {
     const plain = renderPromptEnhancementPopupFrameV1(view, { focusIndex: 0, helpExpanded: false });
     expect(plain).toContain('Enter sends this prompt');
     expect(plain).toContain('Enter applies these details · unapplied details are not sent');
-    // In colour mode the hints are gray.
+    // The focused body's edit-keys + send hint share ONE line (owner request 2026-08-07).
+    expect(plain).toContain('Ctrl+J new line · Ctrl+↑/↓ move line · Enter sends this prompt');
+    // In colour mode that combined hint line is gray.
     const colored = renderPromptEnhancementPopupFrameV1(view, { focusIndex: 0, helpExpanded: false, colorize: true });
-    expect(colored).toContain(`${ESC}[90mEnter sends this prompt`);
+    expect(colored).toContain(`${ESC}[90mCtrl+J new line · Ctrl+↑/↓ move line · Enter sends this prompt`);
   });
 
   it('applies the old-popup radio colours only when colorize is on (§8.1)', () => {
