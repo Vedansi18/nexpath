@@ -97,6 +97,29 @@ describe('spawned-window MPS parity (fix 2026-08-06)', () => {
     expect(runPopup).toHaveBeenCalledTimes(1);
   });
 
+  it('MPS cancelled ends the flow with closed_no_send — the PE popup never opens (owner request)', async () => {
+    const paths = files();
+    const input = await sequenceInput();
+    writeFileSync(paths.inputFile, JSON.stringify(input), 'utf8');
+    const runPopup = vi.fn(async () => ({ state: 'selected_original' as const }));
+    const runMpsPopup = vi.fn(async () => ({
+      state: 'cancelled' as const,
+      feedback: { kind: 'suggested' as const, category: 'not_relevant_enough' as const },
+    }));
+    const recordFeedback = vi.fn();
+
+    const output = await runPromptEnhancementPopupHostCommandV1(
+      { ...paths, db: ':memory:' },
+      { openStore: async () => ({} as Store), closeStore: vi.fn(), runPopup, runMpsPopup, recordFeedback },
+    );
+
+    expect(output.result).toEqual({ state: 'closed_no_send' });
+    expect(runPopup).not.toHaveBeenCalled(); // cancel ends the flow — no PE popup after cancel
+    // The feedback collected by the MPS cancel flow is recorded through the PEF chain.
+    expect(recordFeedback).toHaveBeenCalledTimes(1);
+    expect(recordFeedback.mock.calls[0][2]).toMatchObject({ eventType: 'explicit_feedback', feedbackCategory: 'not_relevant_enough' });
+  });
+
   it('a non-sequence input never invokes the MPS popup (parity guard)', async () => {
     const paths = files();
     writeFileSync(paths.inputFile, JSON.stringify(await validInput()), 'utf8');

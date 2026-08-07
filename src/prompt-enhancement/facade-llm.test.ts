@@ -19,13 +19,13 @@ vi.mock('./llm-composer.js', () => ({
     const section = input.planning.sectionPlans.find(
       (plan) => plan.sectionKind !== 'original_request_or_goal' && plan.structuredContentPartRefs.length > 0,
     );
-    if (!section) return undefined;
+    if (!section) return { ok: false, reason: 'no_eligible_sections' };
     const factId = section.structuredContentPartRefs[0];
-    return {
+    return { ok: true, output: {
       outputId: 'test-llm-output',
       sectionDrafts: [{ sectionId: section.sectionId, bodyText: 'Tailored LLM wording for this section.', sourceFactIds: [factId] }],
       composerClaims: [`claim:${factId}`],
-    };
+    } };
   }),
 }));
 

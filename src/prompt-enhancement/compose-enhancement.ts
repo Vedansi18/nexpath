@@ -26,6 +26,7 @@ import { buildPromptEnhancementCostVisibilityMetadataV1 } from './cost-observabi
 import type { PromptEnhancementPrimaryIntent } from './routing-taxonomy.js';
 import {
   buildPromptEnhancementCanonicalConfirmation,
+  promptEnhancementGeneratedBodyRequiresConfirmationV1,
   requiresPromptEnhancementExecutionConfirmationForPrompt,
   validatePromptEnhancementSafety,
 } from './safety-sendability.js';
@@ -244,69 +245,12 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
     };
   }
 
-  if (deterministicFallback === 'provider_api_unavailable' || deterministicFallback === 'timeout_no_send') {
-    const text = input.originalPromptText;
-    const fallbackCallVisibilityMode: PromptEnhancementCallVisibilityMode = deterministicFallback === 'provider_api_unavailable'
-      ? 'provider_unavailable'
-      : 'fallback_no_llm';
-    return {
-      currentBody: {
-        currentBodyId,
-        bodyRevision,
-        composerRunId,
-        routeDecisionId: input.sectionPlanningResult.routeDecisionId,
-        promptReviewOrigin: input.sectionPlanningResult.promptReviewOrigin,
-        promptReviewProcessingPolicy: input.sectionPlanningResult.promptReviewProcessingPolicy,
-        sentPromptOrigin: 'user_authored_original_only',
-        nexpathGeneratedPromptRef: `${currentBodyId}:original:${bodyRevision}`,
-        renderedPromptBody: text,
-        originalPromptSectionId: 'not_applicable_original_only',
-        sourceAttribution: [],
-        llmCallPolicy,
-        composerMode: 'original_fallback',
-        languagePolicyApplied: 'technical_english_default',
-        languageValidationStatus: 'fallback_applied',
-        effectiveLanguageState: 'unknown_default',
-        languageSource: 'technical_english_default',
-        languageConfidence: 'unknown',
-        languagePolicy: 'technical_english_default',
-        instructionPrecedenceState: 'original_only_no_generated_sections',
-        originalAsSourceStatus: 'original_only_sendable',
-        composerClaims: [],
-        sourceFactIds: [],
-        localOriginalPromptIncluded: true,
-        text,
-        originalPromptText: input.originalPromptText,
-        originalPromptPreservation: 'fallback_original_only',
-        generatedOriginState: 'user_original',
-        generatedSafeStatus: 'original_only',
-        userDirtyState: 'clean',
-        sections: [],
-      },
-      composerBoundary: buildComposerBoundary(input, deterministicFallback, fallbackCallVisibilityMode, sectionPlans, {
-        composerRunId,
-        composerMode: 'original_fallback',
-        nexpathGeneratedPromptRef: `${currentBodyId}:original:${bodyRevision}`,
-        renderedPromptBody: text,
-        sentPromptOrigin: 'user_authored_original_only',
-        originalPromptSectionId: 'not_applicable_original_only',
-        sourceAttribution: [],
-        instructionPrecedenceState: 'original_only_no_generated_sections',
-        originalAsSourceStatus: 'original_only_sendable',
-        localOriginalPromptIncluded: true,
-        llmCallPolicy,
-        rawComposerOutput: 'rejected_or_unavailable',
-      }),
-      availableActions: buildActionEntries(currentBodyId, bodyRevision, 'disabled_not_applicable', fallbackCallVisibilityMode),
-      bodySectionAgreement: 'exact',
-      sourceGuidanceCoverage: 'fallback_no_generated_body',
-      fallbackMode: deterministicFallback,
-      sendPolicy: 'original_only',
-      actionInteractionState: 'fallback_only',
-      callVisibilityMode: fallbackCallVisibilityMode,
-      diagnostics: [{ category: 'fallback_or_no_popup', reasonCode: `no_generated_content:${effectiveRuntimeState}` }],
-    };
-  }
+  // Owner ruling 2026-08-07: on a provider failure (provider_api_unavailable / timeout_no_send)
+  // the popup shows the FULL deterministic body plus the persistent provider-failure notice —
+  // NOT an original-prompt-only shell. The original-only early-return that previously lived here
+  // (the strict no-generated-content reading of the locked failure disposition) was removed by
+  // that ruling; the failure stays fully visible via the notice + typed metadata
+  // (fallbackReason / providerFailureState) while the user keeps the grounded guidance.
 
   const canonicalConfirmationSectionId = requiresPromptEnhancementExecutionConfirmationForPrompt(input.originalPromptText)
     ? sectionPlans.find((sectionPlan) => (
@@ -318,7 +262,7 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
         sectionPlan.safetyFlags.includes('sensitive_action_confirmation')
       ))?.sectionId
     : undefined;
-  const renderedSections = sectionPlans.map((sectionPlan) =>
+  const renderSectionsWithConfirmation = (confirmationSectionId: string | undefined) => sectionPlans.map((sectionPlan) =>
       renderSection({
         sectionPlan,
         originalPromptText: input.originalPromptText,
@@ -326,14 +270,39 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
         additionalDetailsText: action === 'apply_details' ? input.additionalDetailsText : input.acceptedAdditionalDetailsText,
         sectionPlanningResult: input.sectionPlanningResult,
         llmDraftsBySectionId: validatedLlmDrafts.draftsBySectionId,
-        insertCanonicalConfirmation: sectionPlan.sectionId === canonicalConfirmationSectionId,
+        insertCanonicalConfirmation: sectionPlan.sectionId === confirmationSectionId,
       }),
   );
-  const canonicalText = renderedSections.map((section) => section.text).join('\n\n');
-  const text = action === "apply_details" && typeof input.editedBodyText === "string"
+  let renderedSections = renderSectionsWithConfirmation(canonicalConfirmationSectionId);
+  let canonicalText = renderedSections.map((section) => section.text).join('\n\n');
+  let text = action === "apply_details" && typeof input.editedBodyText === "string"
     ? applyEditedBodyWithAdditionalDetails(input.editedBodyText, input.additionalDetailsText)
     : canonicalText;
-  const sections = attachSpanRefs(sectionPlans, renderedSections, text);
+  let sections = attachSpanRefs(sectionPlans, renderedSections, text);
+  // Validator-parity confirmation guard (blocked-popup fix 2026-08-07): the prompt-based gate
+  // above cannot see risk phrasing the GENERATED wording introduces (an LLM draft is free text),
+  // but validatePromptEnhancementSafety scans the generated body and hard-blocks a body that
+  // needs the canonical confirmation and lacks it — the user then gets an empty all-unavailable
+  // popup. Mirror the validator on the assembled body; when it will demand the confirmation,
+  // re-render with the confirmation appended to the LAST generated section, so the body ENDS
+  // with it and the validator's "sensitive execution after the confirmation" (hidden/overridden)
+  // rule cannot trip either. The classifier ignores the canonical sentence itself, so this
+  // converges in one pass. Edited bodies keep their own edit-stage rules (text === canonicalText
+  // guard); prompts the prompt-based gate already covers are unaffected (confirmation present).
+  if (
+    canonicalConfirmationSectionId === undefined
+    && text === canonicalText
+    && promptEnhancementGeneratedBodyRequiresConfirmationV1({ sections, originalPromptText: input.originalPromptText }, text)
+  ) {
+    const lastGeneratedSectionId = [...sectionPlans].reverse()
+      .find((sectionPlan) => sectionPlan.sectionKind !== 'original_request_or_goal')?.sectionId;
+    if (lastGeneratedSectionId !== undefined) {
+      renderedSections = renderSectionsWithConfirmation(lastGeneratedSectionId);
+      canonicalText = renderedSections.map((section) => section.text).join('\n\n');
+      text = canonicalText;
+      sections = attachSpanRefs(sectionPlans, renderedSections, text);
+    }
+  }
   const generatedSafeStatus: PromptEnhancementValidationStatus = deterministicFallback === 'none' ? 'valid' : 'valid_with_fallback';
   const callVisibilityMode: PromptEnhancementCallVisibilityMode = usesLlmWording
     ? 'llm_wording'
@@ -1196,6 +1165,10 @@ function providerFailureStateForFallback(
   callVisibilityMode: PromptEnhancementCallVisibilityMode,
 ): PromptEnhancementCostVisibilityMetadataV1['providerFailureState'] {
   if (callVisibilityMode === 'provider_unavailable') return 'provider_api_unavailable';
+  // Owner ruling 2026-08-07: provider failures render the deterministic body under
+  // 'fallback_no_llm', so the failure state must key on the FALLBACK MODE (same output as the
+  // old 'provider_unavailable'-mode pairing kept above for compatibility).
+  if (fallbackMode === 'provider_api_unavailable') return 'provider_api_unavailable';
   if (fallbackMode === 'timeout_no_send') return 'timeout';
   return 'none';
 }

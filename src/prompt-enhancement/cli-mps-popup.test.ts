@@ -24,6 +24,11 @@ import {
 
 const ESC = String.fromCharCode(27);
 
+/** Strip the continuous left rail ("│ " / bare "│") a plain frame line carries (owner request: full-height rail). */
+function deRail(line: string | undefined): string {
+  return (line ?? '').replace(/^│ ?/, '');
+}
+
 function model(overrides: Partial<PromptEnhancementMpsFirstPopupModelV1> = {}): PromptEnhancementMpsFirstPopupModelV1 {
   return {
     surface: 'prompt_enhancement_mps_first_popup',
@@ -86,14 +91,50 @@ describe('UI-6 MPS first-popup frame renderer (§3.3)', () => {
     expect(frame).toContain('Remaining: 3');
     expect(frame).toContain('Types: implement, verify, document');
     expect(frame).toContain(PROMPT_ENHANCEMENT_MPS_CLI_FOOTER_V1);
-    // Title is the first line and the footer is the last line, verbatim.
+    // Title is the first line and the footer is the last line, behind the continuous left rail
+    // (owner request: the rail runs the FULL frame height, exactly like the PE popup).
     const frameLines = frame.split('\n');
-    expect(frameLines[0]).toBe('◆ NEXPATH CLI · Multi-prompt sequence');
-    expect(frameLines[frameLines.length - 1]).toBe('Enter send · Esc actions');
+    expect(frameLines[0]).toBe('│ ◆ NEXPATH CLI · Multi-prompt sequence');
+    expect(frameLines[frameLines.length - 1]).toBe('│ Enter send · Esc actions');
+    for (const line of frameLines) expect(line.startsWith('│')).toBe(true);
     // Body precedes Additional details precedes Cancel precedes Sequence plan.
     expect(frame.indexOf('Use enhanced sequence prompt')).toBeLessThan(frame.indexOf('Additional details'));
     expect(frame.indexOf('Additional details')).toBeLessThan(frame.indexOf('Cancel (remaining'));
     expect(frame.indexOf('Cancel (remaining')).toBeLessThan(frame.indexOf('Sequence plan'));
+  });
+
+  it('dims the scroll indicators like a hint, not as body text (owner request 2026-08-07)', () => {
+    // A windowed body puts "↑ N more lines above" / "↓ N more lines below …" as content lines.
+    const withMarkers = model({
+      body: { text: '↑ 22 more lines above\nreal body line\n↓ 5 more lines below · the whole prompt is included', editable: true, originalPromptText: 'x', originalPromptPreservation: 'visible_verbatim' },
+    });
+    const colored = renderPromptEnhancementMpsFirstPopupFrameV1(withMarkers, { focusIndex: 0, colorize: true });
+    const gray = `${ESC}[90m`;
+    const aboveLine = colored.split('\n').find((l) => l.includes('22 more lines above'));
+    const belowLine = colored.split('\n').find((l) => l.includes('5 more lines below'));
+    const bodyLine = colored.split('\n').find((l) => l.includes('real body line'));
+    expect(aboveLine).toContain(gray); // scroll markers are dim…
+    expect(belowLine).toContain(gray);
+    expect(bodyLine).not.toContain(gray); // …real prompt text is not.
+  });
+
+  it('moves "· the whole prompt is included" from the ↓ marker onto the edit-keys hint (owner request 2026-08-07)', () => {
+    const withMarker = model({
+      body: { text: 'real line\n↓ 16 more lines below · the whole prompt is included', editable: true, originalPromptText: 'x', originalPromptPreservation: 'visible_verbatim' },
+    });
+    const frame = renderPromptEnhancementMpsFirstPopupFrameV1(withMarker, { focusIndex: 0, colorize: false });
+    const markerLine = frame.split('\n').find((l) => l.includes('more lines below'));
+    const keysLine = frame.split('\n').find((l) => l.includes('Ctrl+J new line'));
+    // The marker is now just "↓ N more lines below" — the reassurance moved off it…
+    expect(markerLine).toContain('↓ 16 more lines below');
+    expect(markerLine).not.toContain('the whole prompt is included');
+    // …and onto the edit-keys hint line.
+    expect(keysLine).toContain('the whole prompt is included');
+    // When there is NO hidden content, the edit-keys hint carries no reassurance.
+    const noMarker = renderPromptEnhancementMpsFirstPopupFrameV1(model({
+      body: { text: 'short body', editable: true, originalPromptText: 'x', originalPromptPreservation: 'visible_verbatim' },
+    }), { focusIndex: 0, colorize: false });
+    expect(noMarker.split('\n').find((l) => l.includes('Ctrl+J new line'))).not.toContain('the whole prompt is included');
   });
 
   it('renders a multi-line body as indented lines and an empty Additional details field', () => {
@@ -117,9 +158,9 @@ describe('UI-6 MPS first-popup frame renderer (§3.3)', () => {
 
   it('clamps an out-of-range focusIndex to the interactive rows', () => {
     const high = renderPromptEnhancementMpsFirstPopupFrameV1(model(), { focusIndex: 99 });
-    expect(high.split('\n').find((line) => line.includes('Cancel (remaining'))?.trimStart().startsWith('●')).toBe(true);
+    expect(deRail(high.split('\n').find((line) => line.includes('Cancel (remaining'))).startsWith('●')).toBe(true);
     const low = renderPromptEnhancementMpsFirstPopupFrameV1(model(), { focusIndex: -5 });
-    expect(low.split('\n').find((line) => line.includes('Use enhanced sequence prompt'))?.trimStart().startsWith('●')).toBe(true);
+    expect(deRail(low.split('\n').find((line) => line.includes('Use enhanced sequence prompt'))).startsWith('●')).toBe(true);
   });
 
   it('never renders a forbidden surface (Use original, future text, queue, auto send/advance)', () => {
@@ -137,11 +178,32 @@ describe('UI-6 MPS first-popup frame renderer (§3.3)', () => {
     const onCancel = renderPromptEnhancementMpsFirstPopupFrameV1(model(), { focusIndex: 2 });
     const cancelLine = onCancel.split('\n').find((line) => line.includes('Cancel (remaining'));
     const bodyLine = onCancel.split('\n').find((line) => line.includes('Use enhanced sequence prompt'));
-    expect(cancelLine?.trimStart().startsWith('●')).toBe(true);
-    expect(bodyLine?.trimStart().startsWith('●')).toBe(false);
+    expect(deRail(cancelLine).startsWith('●')).toBe(true);
+    expect(deRail(bodyLine).startsWith('●')).toBe(false);
     // The non-interactive Sequence plan never gets the focus marker.
-    const planLine = onCancel.split('\n').find((line) => line.trim() === 'Sequence plan');
-    expect(planLine?.trimStart().startsWith('●')).toBe(false);
+    const planLine = onCancel.split('\n').find((line) => deRail(line).trim() === 'Sequence plan');
+    expect(planLine).toBeDefined();
+    expect(deRail(planLine).trimStart().startsWith('●')).toBe(false);
+  });
+
+  it('renders the Cancel row yellow in colorized mode and records the caret screen position (owner request)', () => {
+    // Yellow Cancel: the caution tone is applied only to the Cancel label, never the body row.
+    const colored = renderPromptEnhancementMpsFirstPopupFrameV1(model(), { focusIndex: 0, colorize: true });
+    const cancelLine = colored.split('\n').find((line) => line.includes('Cancel (remaining'));
+    const bodyLine = colored.split('\n').find((line) => line.includes('Use enhanced sequence prompt'));
+    expect(cancelLine).toContain(`${ESC}[33m`);
+    expect(bodyLine).not.toContain(`${ESC}[33m`);
+    // Caret contract (same as the PE renderer): caretOut records the 1-based screen row of the
+    // body's first content line, at column 7 (2-char rail + 4-space indent + 1-based).
+    const caretOut = { row: -1, col: -1 };
+    const frame = renderPromptEnhancementMpsFirstPopupFrameV1(model(), {
+      focusIndex: 0,
+      caret: { field: 'enhanced_body', visualRow: 0, visualColumn: 0 },
+      caretOut,
+    });
+    const bodyContentRow = frame.split('\n').findIndex((line) => line.includes('First sequence step')) + 1;
+    expect(caretOut.row).toBe(bodyContentRow);
+    expect(caretOut.col).toBe(7);
   });
 
   it('strips ANSI/control chars from model-supplied text (public-safe)', () => {
@@ -233,8 +295,9 @@ describe('UI-7 MPS continuation-popup frame renderer (§3.4)', () => {
     expect(frame).toContain('Cancel (remaining multi-prompt sequence)');
     expect(frame).toContain(PROMPT_ENHANCEMENT_MPS_CLI_FOOTER_V1);
     const frameLines = frame.split('\n');
-    expect(frameLines[0]).toBe('◆ NEXPATH CLI · Multi-prompt sequence');
-    expect(frameLines[frameLines.length - 1]).toBe('Enter send · Esc actions');
+    expect(frameLines[0]).toBe('│ ◆ NEXPATH CLI · Multi-prompt sequence');
+    expect(frameLines[frameLines.length - 1]).toBe('│ Enter send · Esc actions');
+    for (const line of frameLines) expect(line.startsWith('│')).toBe(true);
     // Body → Additional details → interruption → Cancel.
     expect(frame.indexOf('Use enhanced sequence prompt')).toBeLessThan(frame.indexOf('Additional details'));
     expect(frame.indexOf('Additional details')).toBeLessThan(frame.indexOf('I need to do something else first'));
@@ -261,10 +324,10 @@ describe('UI-7 MPS continuation-popup frame renderer (§3.4)', () => {
 
   it('marks only the focused interactive row across the 4 rows, clamping out-of-range focus', () => {
     const onInterruption = renderPromptEnhancementMpsContinuationFrameV1(continuationModel(), { focusIndex: 2 });
-    expect(onInterruption.split('\n').find((line) => line.includes('I need to do something else first'))?.trimStart().startsWith('●')).toBe(true);
-    expect(onInterruption.split('\n').find((line) => line.includes('Use enhanced sequence prompt'))?.trimStart().startsWith('●')).toBe(false);
+    expect(deRail(onInterruption.split('\n').find((line) => line.includes('I need to do something else first'))).startsWith('●')).toBe(true);
+    expect(deRail(onInterruption.split('\n').find((line) => line.includes('Use enhanced sequence prompt'))).startsWith('●')).toBe(false);
     const clamped = renderPromptEnhancementMpsContinuationFrameV1(continuationModel(), { focusIndex: 99 });
-    expect(clamped.split('\n').find((line) => line.includes('Cancel (remaining'))?.trimStart().startsWith('●')).toBe(true);
+    expect(deRail(clamped.split('\n').find((line) => line.includes('Cancel (remaining'))).startsWith('●')).toBe(true);
   });
 
   it('strips ANSI/control chars from model-supplied text (public-safe)', () => {
