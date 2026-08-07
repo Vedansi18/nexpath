@@ -103,6 +103,26 @@ describe('sequence intake on the explicit first send (fail-closed typed no-ops)'
       .toEqual({ state: 'no_sequence', reasonCode: 'no_remaining_items' });
   });
 
+  it('caps the item count at 30 — a very long sequence still records, clamped, never dropped (owner request 2026-08-08)', async () => {
+    const result = await preparedMultiIntent();
+    const summary = result.uiView.handoffAndSequenceSummary!.compactFirstPopupSequenceSummary!;
+    const huge: PromptEnhancementPrepareResultV1 = {
+      ...result,
+      uiView: {
+        ...result.uiView,
+        handoffAndSequenceSummary: {
+          ...result.uiView.handoffAndSequenceSummary!,
+          // 199 remaining → 200 total before the cap.
+          compactFirstPopupSequenceSummary: { ...summary, remainingTaskCount: 199 },
+        },
+      },
+    };
+    const intake = intakePromptEnhancementSequenceOnFirstSendV1({ result: huge, projectRoot: PROJECT, sessionId: 's1' });
+    expect(intake.state).toBe('sequence_recorded');
+    if (intake.state !== 'sequence_recorded') return;
+    expect(intake.runtime.itemCount).toBe(30);
+  });
+
   it('end-to-end with the store: intake → upsert → active row readable, foreign session scrubs', async () => {
     const result = await preparedMultiIntent();
     const intake = intakePromptEnhancementSequenceOnFirstSendV1({ result, projectRoot: PROJECT, sessionId: 's1' });

@@ -2,6 +2,7 @@ import type { PromptEnhancementPrepareResultV1 } from './contracts.js';
 import { validatePromptEnhancementHandoffMetadataV1 } from './handoff-metadata.js';
 import {
   createPromptEnhancementSequenceRuntimeStateV1,
+  PROMPT_ENHANCEMENT_SEQUENCE_MAX_ITEM_COUNT_V1,
   type PromptEnhancementSequenceRuntimeReasonCodeV1,
   type PromptEnhancementSequenceRuntimeStateV1,
 } from './sequence-runtime.js';
@@ -64,8 +65,10 @@ export function intakePromptEnhancementSequenceOnFirstSendV1(
     enhancementId: input.result.enhancementId,
     projectRoot:   input.projectRoot,
     sessionId:     input.sessionId,
-    // Counts only, never text: total = the sent first item + the remaining items.
-    itemCount:     summary.remainingTaskCount + 1,
+    // Counts only, never text: total = the sent first item + the remaining items, CAPPED at the
+    // locked max (owner request 2026-08-08). A prompt with more than the cap's worth of points
+    // still records a valid sequence clamped to the cap — it is never dropped for being too long.
+    itemCount:     Math.min(summary.remainingTaskCount + 1, PROMPT_ENHANCEMENT_SEQUENCE_MAX_ITEM_COUNT_V1),
   });
   if (!created.ok) return { state: 'no_sequence', reasonCode: created.reasonCode };
   return { state: 'sequence_recorded', runtime: created.state };
