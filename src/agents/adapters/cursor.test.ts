@@ -5,11 +5,18 @@ import { join } from 'node:path';
 import { cursorAdapter, cursorConfigDir } from './cursor.js';
 import type { InstallContext } from '../types.js';
 
+// Fixed at 'linux' (not process.platform) so these ctx-driven tests exercise
+// the same POSIX fixture shape (mkdirSync(join(tmp, '.config', 'Cursor')))
+// regardless of which OS actually runs the suite. Before ctx.platform existed,
+// detect()/chatHistoryPaths() always fell back to the real host platform, so
+// on a real Windows machine they built an APPDATA-shaped path that could never
+// match a fixture directory created at `<tmp>/.config/Cursor`.
 const makeCtx = (home: string): InstallContext => ({
   home,
   cwd: join(home, 'cwd'),
   yes: true,
   dbPath: ':memory:',
+  platform: 'linux',
 });
 
 describe('cursorConfigDir', () => {
@@ -24,13 +31,27 @@ describe('cursorConfigDir', () => {
   });
 
   it('returns the win32 path under APPDATA when provided', () => {
+    // All-backslash: this is what path.win32.join actually produces. The
+    // previous expected value ended in a forward slash before "Cursor" —
+    // correct only by accident, because the source used to build every case
+    // with the host's native join(), so this "win32" case was really being
+    // exercised in whatever separator the CI machine's OS used.
     expect(
       cursorConfigDir('C:\\Users\\u', 'win32', 'C:\\Users\\u\\AppData\\Roaming'),
-    ).toBe('C:\\Users\\u\\AppData\\Roaming/Cursor');
+    ).toBe('C:\\Users\\u\\AppData\\Roaming\\Cursor');
   });
 
   it('falls back to <home>/AppData/Roaming on win32 when APPDATA missing', () => {
     expect(cursorConfigDir('C:/U', 'win32')).toContain('Cursor');
+  });
+
+  it('ignores the real process.platform and honours the explicit argument on any host', () => {
+    // The whole point of the platform parameter: these three must agree with
+    // each other regardless of which OS is actually running this test.
+    expect(cursorConfigDir('/home/u', 'linux')).toBe('/home/u/.config/Cursor');
+    expect(cursorConfigDir('/Users/u', 'darwin')).toBe('/Users/u/Library/Application Support/Cursor');
+    expect(cursorConfigDir('C:\\Users\\u', 'win32', 'C:\\Users\\u\\AppData\\Roaming'))
+      .toBe('C:\\Users\\u\\AppData\\Roaming\\Cursor');
   });
 });
 

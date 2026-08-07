@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join, resolve, posix as posixPath, win32 as win32Path } from 'node:path';
 import { registerAdapter } from '../registry.js';
 import {
   getWindsurfHooksPath,
@@ -47,20 +47,26 @@ const VS_CODE_MARKETPLACE_URL = `https://marketplace.visualstudio.com/items?item
 /**
  * OS-specific Windsurf configuration directory. Used both as the primary
  * detection heuristic and as the base for the workspace-storage path.
+ *
+ * Uses `path.posix`/`path.win32` explicitly, keyed off `platform`, rather
+ * than `node:path`'s host-native `join` — which always builds with the
+ * RUNNING machine's separator regardless of what `platform` says. That made
+ * this function silently ignore its own `platform` parameter for every
+ * platform other than whichever one the process happened to run on.
  */
 export function windsurfConfigDir(
   home: string,
   platform: NodeJS.Platform = process.platform,
   appdata?: string,
 ): string {
-  switch (platform) {
-    case 'darwin':
-      return join(home, 'Library', 'Application Support', 'Windsurf');
-    case 'win32':
-      return join(appdata ?? process.env.APPDATA ?? join(home, 'AppData', 'Roaming'), 'Windsurf');
-    default:
-      return join(home, '.config', 'Windsurf');
+  if (platform === 'win32') {
+    const base = appdata ?? process.env.APPDATA ?? win32Path.join(home, 'AppData', 'Roaming');
+    return win32Path.join(base, 'Windsurf');
   }
+  if (platform === 'darwin') {
+    return posixPath.join(home, 'Library', 'Application Support', 'Windsurf');
+  }
+  return posixPath.join(home, '.config', 'Windsurf');
 }
 
 /**
@@ -80,14 +86,16 @@ export const windsurfAdapter: VSCodeExtensionAdapter = {
 
   detect(ctx: InstallContext): boolean {
     return (
-      existsSync(windsurfConfigDir(ctx.home)) ||
+      existsSync(windsurfConfigDir(ctx.home, ctx.platform, ctx.appdata)) ||
       existsSync(codeiumCascadeDir(ctx.home))
     );
   },
 
   chatHistoryPaths(ctx: InstallContext): string[] {
+    const platform = ctx.platform ?? process.platform;
+    const path = platform === 'win32' ? win32Path : posixPath;
     return [
-      join(windsurfConfigDir(ctx.home), 'User', 'workspaceStorage'),
+      path.join(windsurfConfigDir(ctx.home, ctx.platform, ctx.appdata), 'User', 'workspaceStorage'),
       codeiumCascadeDir(ctx.home),
     ];
   },
