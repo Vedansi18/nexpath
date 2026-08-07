@@ -736,11 +736,14 @@ export function renderPromptEnhancementPopupFrameV1(
     // Light-gray action hint shown under an editable heading (§ UI-8 / owner request).
     // Content is indented 4 spaces; with the 2-char rail added in the post-pass the text lands at
     // screen column 7 (matching the caret column formula in recordCaret).
+    // Shortcut/action hints (Ctrl+J · Enter sends · Enter applies) — dim gray (the "light dim"
+    // tier). Owner request 2026-08-07: keep it dim, distinct from the darker scroll markers below.
     const hint = (text: string) => (c ? `    ${c.gray}${text}${c.reset}` : `    ${text}`);
     // A field content line: real prompt text renders plain; a scroll indicator ("↑/↓ N more
-    // lines …") renders DIM like a hint (owner request 2026-08-07), so it reads as a cue not body.
+    // lines …") renders in a DARKER dim (gray + faint) than the shortcut hints (owner request
+    // 2026-08-07) so the hierarchy reads prompt (bright) > shortcut (dim) > arrow marker (darkest).
     const contentLine = (line: string) =>
-      c && isPromptEnhancementScrollMarkerLineV1(line) ? `    ${c.gray}${line}${c.reset}` : `    ${line}`;
+      c && isPromptEnhancementScrollMarkerLineV1(line) ? `    ${c.dim}${c.gray}${line}${c.reset}` : `    ${line}`;
     const editable = row.kind === 'editor_heading' || row.kind === 'additional_details';
     if (row.kind === 'editor_heading') {
       recordCaret('enhanced_body');

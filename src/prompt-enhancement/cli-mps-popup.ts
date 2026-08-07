@@ -49,7 +49,7 @@ function renderMpsBodyLinesV1(
       hiddenBelow = true;
       line = rawLine.slice(0, -PROMPT_ENHANCEMENT_MPS_CLI_WHOLE_PROMPT_SUFFIX_V1.length);
     }
-    return c && isPromptEnhancementScrollMarkerLineV1(line) ? `    ${c.gray}${line}${c.reset}` : `    ${line}`;
+    return c && isPromptEnhancementScrollMarkerLineV1(line) ? `    ${c.dim}${c.gray}${line}${c.reset}` : `    ${line}`;
   });
   return { lines, hiddenBelow };
 }
@@ -164,7 +164,7 @@ export function renderPromptEnhancementMpsFirstPopupFrameV1(
   // A field content line: real prompt text renders plain; a scroll indicator ("↑/↓ N more lines
   // …") renders DIM like a hint (owner request 2026-08-07), matching the PE popup.
   const contentLine = (line: string): string =>
-    c && isPromptEnhancementScrollMarkerLineV1(line) ? `    ${c.gray}${line}${c.reset}` : `    ${line}`;
+    c && isPromptEnhancementScrollMarkerLineV1(line) ? `    ${c.dim}${c.gray}${line}${c.reset}` : `    ${line}`;
 
   // Enhanced sequence body — primary, interactive row 0. The "· the whole prompt is included"
   // reassurance rides on the edit-keys hint (owner request 2026-08-07), not the "↓ N more lines
@@ -287,7 +287,7 @@ export function renderPromptEnhancementMpsContinuationFrameV1(
   const editKeysHint = (): string =>
     c ? `      ${c.gray}${PROMPT_ENHANCEMENT_MPS_CLI_EDIT_KEYS_HINT_V1}${c.reset}` : `      ${PROMPT_ENHANCEMENT_MPS_CLI_EDIT_KEYS_HINT_V1}`;
   const contentLine = (line: string): string =>
-    c && isPromptEnhancementScrollMarkerLineV1(line) ? `    ${c.gray}${line}${c.reset}` : `    ${line}`;
+    c && isPromptEnhancementScrollMarkerLineV1(line) ? `    ${c.dim}${c.gray}${line}${c.reset}` : `    ${line}`;
 
   // Enhanced next sequence body — primary, interactive row 0. Same "whole prompt is included" on
   // the edit-keys hint as the first popup (owner request 2026-08-07).
