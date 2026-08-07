@@ -1,41 +1,109 @@
+title: "[Launch Feedback]: "
+
 labels:
   - feedback
 
-title: "[Launch Feedback]: "
-
 body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time.
+
+        **Please finish the title above** so it says what your feedback covers, for example
+        `[Launch Feedback]: Windows install broke at npm link` or
+        `[Launch Feedback]: README did not tell me what this is for`.
+
+        Honest beats positive. If something broke or did not make sense, that is the most
+        useful thing you can tell us.
+
+  - type: dropdown
+    id: operating-system
+    attributes:
+      label: Operating System
+      description: Where did you try NexPath?
+      options:
+        - Ubuntu / Linux
+        - Mac
+        - Windows
+    validations:
+      required: true
+
   - type: dropdown
     id: stage
     attributes:
       label: How far did you get with NexPath?
-      description: Select the option that best matches your experience.
+      description: >-
+        Pick the furthest point you reached. There is no wrong answer here. Someone who
+        read the README and walked away tells us something we cannot learn from someone
+        who installed it successfully.
       options:
-        - Option 1
-        - Option 2
-        - Option 3
-        - Option 4
-        - Option 5
-    validations:
-      required: true
-
-  - type: checkboxes
-    id: interests
-    attributes:
-      label: Which areas are you interested in?
-      description: You can select more than one option.
-      options:
-        - label: Option 1
-        - label: Option 2
-        - label: Option 3
-        - label: Option 4
+        - I read the README and still could not tell what NexPath actually does
+        - I understood roughly what it does, but parts of the README confused me
+        - The README was clear to me, but I decided not to install it
+        - I tried to install it, but it broke or I could not finish the setup
+        - I installed it and used it with my coding agent
     validations:
       required: true
 
   - type: textarea
-    id: feedback
+    id: readme-confusion
     attributes:
-      label: Share your feedback
-      description: Tell us what stopped you from using NexPath, what you liked, what confused you, and what we should improve.
-      placeholder: Write your honest feedback here...
-    validations:
-      required: true
+      label: If parts of the README confused you, which parts?
+      description: >-
+        Name the section if you can. The README covers: what NexPath is, the architecture
+        diagram, why it exists, how the decision session works, features, the supported
+        agents table, Claude Code setup and installation, uninstalling, configuration and
+        privacy, troubleshooting. "The architecture diagram meant nothing to me" is a
+        complete and useful answer.
+      placeholder: The section that lost me was...
+
+  - type: textarea
+    id: install-error
+    attributes:
+      label: If the install broke, what exactly happened?
+      description: >-
+        The command you ran, the full error, and your `node --version`. NexPath needs Node
+        18 or later and is built from source, so most breaks land in `npm install`,
+        `npm run build`, or `npm link`. This is the field most likely to become a real
+        issue on the repo with your name on it.
+      render: shell
+
+  - type: dropdown
+    id: time-spent
+    attributes:
+      label: How much time did you spend with NexPath in total?
+      options:
+        - Under 15 minutes
+        - 15 to 60 minutes
+        - One full working session
+        - Several sessions across more than one day
+        - I never got it running
+
+  - type: checkboxes
+    id: experience
+    attributes:
+      label: What best describes your experience?
+      description: >-
+        Tick everything that applies. Tick the uncomfortable ones too, those are the ones
+        we act on. Skip this whole question if you did not install it.
+      options:
+        - label: I tried it on a throwaway or test project
+        - label: I tried it on a real project I actually work on
+        - label: I never saw an advisory pop up at all
+        - label: An advisory appeared at a moment where it was genuinely useful
+        - label: An advisory appeared at the wrong moment, or appeared too often
+        - label: The pre-filled prompts were good enough to send to my agent as they were
+        - label: The pre-filled prompts felt too generic to be worth sending
+        - label: After the first few, I started skipping the advisories without reading them
+        - label: Something happened that I was not expecting
+        - label: Something about actually using it confused me
+
+  - type: textarea
+    id: surprise-or-confusion
+    attributes:
+      label: If something surprised or confused you while using it, what was it?
+      description: >-
+        For a surprise: what did you expect to happen, and what happened instead. For
+        confusion: the moment you were not sure what NexPath wanted from you, or what it
+        had just done.
+      placeholder: I expected... but what actually happened was...
