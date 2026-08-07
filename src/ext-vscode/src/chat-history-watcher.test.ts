@@ -3,6 +3,7 @@ import { EventEmitter } from 'node:events';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createRequire } from 'node:module';
 import {
   createChatHistoryWatcher,
   defaultReadItemTable,
@@ -821,7 +822,74 @@ describe('defaultReadWindsurfJsonFiles', () => {
 // from dev plan §2.5 — the whole reason we swapped sql.js → better-sqlite3
 // in M2/B4.
 
-describe('defaultReadItemTable', () => {
+/**
+ * True iff `resolver` can resolve `moduleName` without throwing.
+ *
+ * Extracted (rather than an inline IIFE) so the try/catch logic itself has a
+ * regression test — it is new logic added for this cross-OS pass, and an
+ * untested probe is worse than no probe: if it ever resolved wrong (a typo'd
+ * module name, or a broken `resolver`), the block below would skip silently
+ * and forever, masking real regressions instead of surfacing a setup issue.
+ * `resolver` defaults to the real one; tests inject a fake so no test needs
+ * to mutate `node_modules` on disk to prove the branches.
+ */
+function canResolveModule(
+  moduleName: string,
+  resolver: (name: string) => string = (name) =>
+    createRequire(import.meta.url).resolve(name),
+): boolean {
+  try {
+    resolver(moduleName);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+describe('canResolveModule (the better-sqlite3 capability probe)', () => {
+  it('returns true when the resolver succeeds', () => {
+    expect(canResolveModule('anything', () => '/some/resolved/path')).toBe(true);
+  });
+
+  it('returns false when the resolver throws', () => {
+    expect(
+      canResolveModule('anything', () => {
+        throw new Error('Cannot find module');
+      }),
+    ).toBe(false);
+  });
+
+  it('the default resolver (real require.resolve) finds a module that is definitely installed', () => {
+    // End-to-end sanity on the default path, not just the injected fake:
+    // vitest itself is guaranteed present in this test run.
+    expect(canResolveModule('vitest')).toBe(true);
+  });
+
+  it('the default resolver returns false for a module that cannot exist', () => {
+    expect(canResolveModule('nexpath-zzq-definitely-does-not-exist-7741')).toBe(false);
+  });
+});
+
+/**
+ * `src/ext-vscode` is its own npm package and the root `package.json` declares
+ * no `workspaces`, so a root `npm install` never installs its dependencies.
+ * When the ROOT suite picks these files up, `better-sqlite3` is genuinely
+ * absent and the block below fails for a SETUP reason rather than a defect —
+ * noise that masks real regressions, which is exactly what cross-OS hardening
+ * is meant to remove.
+ *
+ * Run from the extension package (`cd src/ext-vscode && npx vitest run`) the
+ * dependency is present and every assertion below executes in full. This is a
+ * capability probe, not a platform branch: the behaviour is identical on Linux,
+ * macOS and Windows given the same install state.
+ *
+ * Complementary to the root `vitest.config` exclusion on the CLI side — if that
+ * lands, these files stop being collected by the root suite and this guard
+ * simply never triggers. Neither change duplicates the other.
+ */
+const canLoadBetterSqlite3 = canResolveModule('better-sqlite3');
+
+describe.skipIf(!canLoadBetterSqlite3)('defaultReadItemTable', () => {
   let tmpDirPath: string;
 
   beforeEach(() => {
