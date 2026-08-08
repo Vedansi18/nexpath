@@ -114,6 +114,20 @@ describe('routePeWebviewMessage — pe_directional_action', () => {
     const out = routePeWebviewMessage({ type: 'pe_directional_action', actionType: 'shorter', bodyId: 'body-1', bodyRevision: 99 }, ctx);
     expect(out?.staleOrMismatched).toBe(true);
   });
+
+  it('carries hasDirtyBodyEdit: true through when the message says so (P9 action-loop signal)', () => {
+    const out = routePeWebviewMessage(
+      { type: 'pe_directional_action', actionType: 'shorter', bodyId: 'body-1', bodyRevision: 3, hasDirtyBodyEdit: true },
+      ctx,
+    );
+    expect(out?.hasDirtyBodyEdit).toBe(true);
+  });
+
+  it('defaults hasDirtyBodyEdit to false when omitted or not exactly true (defensive === true check)', () => {
+    expect(routePeWebviewMessage({ type: 'pe_directional_action', actionType: 'shorter', bodyId: 'body-1', bodyRevision: 3 }, ctx)?.hasDirtyBodyEdit).toBe(false);
+    expect(routePeWebviewMessage({ type: 'pe_directional_action', actionType: 'shorter', bodyId: 'body-1', bodyRevision: 3, hasDirtyBodyEdit: 'true' }, ctx)?.hasDirtyBodyEdit).toBe(false);
+    expect(routePeWebviewMessage({ type: 'pe_directional_action', actionType: 'shorter', bodyId: 'body-1', bodyRevision: 3, hasDirtyBodyEdit: 1 }, ctx)?.hasDirtyBodyEdit).toBe(false);
+  });
 });
 
 describe('routePeWebviewMessage — pe_close', () => {
@@ -166,6 +180,27 @@ describe('routePeWebviewMessage — pe_submit_additional_details', () => {
       ctx,
     );
     expect(out?.staleOrMismatched).toBe(true);
+  });
+
+  it('carries editedBodyText from the message\'s bodyText field (P9: the current visible edited body)', () => {
+    const out = routePeWebviewMessage(
+      { type: 'pe_submit_additional_details', bodyId: 'body-1', bodyRevision: 3, additionalDetailsText: 'extra context', bodyText: 'the visible edited body' },
+      ctx,
+    );
+    expect(out?.editedBodyText).toBe('the visible edited body');
+  });
+
+  it('editedBodyText is undefined when bodyText is absent or not a string (defensive, does not reject the whole event)', () => {
+    expect(routePeWebviewMessage(
+      { type: 'pe_submit_additional_details', bodyId: 'body-1', bodyRevision: 3, additionalDetailsText: 'x' },
+      ctx,
+    )?.editedBodyText).toBeUndefined();
+    const wrongType = routePeWebviewMessage(
+      { type: 'pe_submit_additional_details', bodyId: 'body-1', bodyRevision: 3, additionalDetailsText: 'x', bodyText: 12345 },
+      ctx,
+    );
+    expect(wrongType?.editedBodyText).toBeUndefined();
+    expect(wrongType?.additionalDetailsText).toBe('x'); // the rest of the event still routes normally
   });
 });
 

@@ -410,6 +410,103 @@ describe('activate', () => {
     });
   });
 
+  describe('PE action request loop (P9)', () => {
+    function capturedOnMessage(): (raw: unknown) => void {
+      return mockPeProviderCtor.mock.calls[0]![1] as (raw: unknown) => void;
+    }
+    async function activateWithPublishedPayload(): Promise<void> {
+      mockShowOnboarding.mockResolvedValueOnce(undefined);
+      await activate(makeCtx() as never);
+      const provider = getPeViewProvider() as unknown as { publishPayload: (p: unknown) => void };
+      provider.publishPayload({ currentBodyId: 'body-1', bodyRevision: 3, currentBodyText: 'the published body' });
+    }
+
+    it.each([
+      ['pe_directional_action', { actionType: 'shorter' }, 'shorter'],
+      ['pe_directional_action', { actionType: 'more_thorough' }, 'more_thorough'],
+      ['pe_directional_action', { actionType: 'more_project_grounded' }, 'more_project_grounded'],
+    ] as const)('%s (actionType=%s): builds a typed action request logged as ok:true', async (type, extra, expectedActionType) => {
+      await activateWithPublishedPayload();
+      logSpy.mockClear();
+      capturedOnMessage()({ type, bodyId: 'body-1', bodyRevision: 3, ...extra });
+      const logs = logSpy.mock.calls.map((c) => String(c[0])).join('\n');
+      expect(logs).toContain('PE action request:');
+      expect(logs).toContain(`"actionType":"${expectedActionType}"`);
+      expect(logs).toContain('"ok":true');
+    });
+
+    it('a directional action with a dirty body edit carries dirtyDraftDisposition=discarded_for_canonical_action', async () => {
+      await activateWithPublishedPayload();
+      logSpy.mockClear();
+      capturedOnMessage()({ type: 'pe_directional_action', actionType: 'shorter', bodyId: 'body-1', bodyRevision: 3, hasDirtyBodyEdit: true });
+      const logs = logSpy.mock.calls.map((c) => String(c[0])).join('\n');
+      expect(logs).toContain('"dirtyDraftDisposition":"discarded_for_canonical_action"');
+    });
+
+    it('a directional action with a clean body carries dirtyDraftDisposition=not_applicable', async () => {
+      await activateWithPublishedPayload();
+      logSpy.mockClear();
+      capturedOnMessage()({ type: 'pe_directional_action', actionType: 'shorter', bodyId: 'body-1', bodyRevision: 3 });
+      const logs = logSpy.mock.calls.map((c) => String(c[0])).join('\n');
+      expect(logs).toContain('"dirtyDraftDisposition":"not_applicable"');
+    });
+
+    it('apply_details: builds a request (ok:true) when both edited body and details text are present', async () => {
+      await activateWithPublishedPayload();
+      logSpy.mockClear();
+      capturedOnMessage()({
+        type: 'pe_submit_additional_details',
+        bodyId: 'body-1',
+        bodyRevision: 3,
+        bodyText: 'the visible edited body',
+        additionalDetailsText: 'extra requirements',
+      });
+      const logs = logSpy.mock.calls.map((c) => String(c[0])).join('\n');
+      expect(logs).toContain('"actionType":"apply_details"');
+      expect(logs).toContain('"ok":true');
+    });
+
+    it('apply_details: rejects (ok:false) when the details text is blank', async () => {
+      await activateWithPublishedPayload();
+      logSpy.mockClear();
+      capturedOnMessage()({
+        type: 'pe_submit_additional_details',
+        bodyId: 'body-1',
+        bodyRevision: 3,
+        bodyText: 'the visible edited body',
+        additionalDetailsText: '   ',
+      });
+      const logs = logSpy.mock.calls.map((c) => String(c[0])).join('\n');
+      expect(logs).toContain('"ok":false');
+      expect(logs).toContain('apply_details_requires_additional_details_text');
+    });
+
+    it('never logs the raw edited body or details text — only actionType/dirtyDraftDisposition (raw-text leak test)', async () => {
+      await activateWithPublishedPayload();
+      logSpy.mockClear();
+      const BODY_MARKER = 'ZZQX_P9_BODY_LEAK_MARKER_71a2';
+      const DETAILS_MARKER = 'ZZQX_P9_DETAILS_LEAK_MARKER_93c4';
+      capturedOnMessage()({
+        type: 'pe_submit_additional_details',
+        bodyId: 'body-1',
+        bodyRevision: 3,
+        bodyText: BODY_MARKER,
+        additionalDetailsText: DETAILS_MARKER,
+      });
+      const allLogs = logSpy.mock.calls.map((c) => String(c[0])).join('\n');
+      expect(allLogs).not.toContain(BODY_MARKER);
+      expect(allLogs).not.toContain(DETAILS_MARKER);
+      expect(allLogs).toContain('"actionType":"apply_details"');
+    });
+
+    it('does not build an action request for non-action event types (e.g. pe_close)', async () => {
+      await activateWithPublishedPayload();
+      logSpy.mockClear();
+      capturedOnMessage()({ type: 'pe_close', actionId: 'a1' });
+      expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining('PE action request'));
+    });
+  });
+
   describe('PE send-intent gating (P7)', () => {
     function capturedOnMessage(): (raw: unknown) => void {
       return mockPeProviderCtor.mock.calls[0]![1] as (raw: unknown) => void;
