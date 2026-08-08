@@ -18,7 +18,7 @@ import type { PromptEnhancementPopupEventV1 } from '../../prompt-enhancement/pop
 import { emitPromptEnhancementCostObservabilityV1 } from '../../prompt-enhancement/cost-measurement.js';
 import { evaluatePromptEnhancementMpsIntakeDecisionV1 } from '../../prompt-enhancement/intake-decision.js';
 import { buildPromptEnhancementCliMpsIntakeEvidenceV1 } from '../../prompt-enhancement/cli-mps-intake-evidence.js';
-import { runPromptEnhancementCliMpsFirstPopupV1, buildPromptEnhancementMpsCancelFeedbackEventV1 } from '../../prompt-enhancement/cli-mps-run.js';
+import { runPromptEnhancementCliMpsFirstPopupV1 } from '../../prompt-enhancement/cli-mps-run.js';
 import { recordPromptEnhancementCliFeedbackV1 } from './auto.js';
 import { logger } from '../../logger.js';
 
@@ -149,22 +149,8 @@ export async function runPromptEnhancementPopupHostCommandV1(
             if (mps.state === 'send' && mps.bodyText.trim().length > 0) {
               popupResult = { state: 'selected_current', bodyText: mps.bodyText };
               mpsHandled = true;
-            } else if (mps.state === 'cancelled') {
-              // Cancel ends the flow (owner request 2026-08-06): the MPS shell already showed the
-              // PEF feedback popup — never open the PE popup after a cancel. Record any collected
-              // feedback (best-effort) and close with the safe no-send result.
-              if (mps.feedback) {
-                const feedbackEvent = buildPromptEnhancementMpsCancelFeedbackEventV1(input.result, mps.feedback, Date.now());
-                if (feedbackEvent) {
-                  try {
-                    await dependencies.recordFeedback(store!, input.request.projectRoot, feedbackEvent, input.request);
-                  } catch { /* feedback recording is best-effort — never blocks the cancel */ }
-                }
-              }
-              popupResult = { state: 'closed_no_send' };
-              mpsHandled = true;
             }
-            // declined (Esc) / not_shown -> fall through to the regular PE popup below.
+            // declined / not_shown -> fall through to the regular PE popup below.
           }
         }
         if (!mpsHandled) {
@@ -179,14 +165,6 @@ export async function runPromptEnhancementPopupHostCommandV1(
               input.request,
             ),
             costObservabilitySink: (result) => emitPromptEnhancementCostObservabilityV1(result, 'popup_action', logger),
-            // F3 (2026-08-07): failed actions stay silent in the popup — reason codes go to the
-            // log so a spawned-window failure (the live Windows report) is diagnosable post-hoc.
-            actionDiagnosticsSink: (event) => logger.debug('pe_action_failed', {
-              projectRoot: input.request.projectRoot,
-              actionType: event.actionType,
-              state: event.state,
-              reasonCodes: event.reasonCodes.slice(0, 8),
-            }),
           });
         }
       } finally {

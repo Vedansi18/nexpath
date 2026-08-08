@@ -17,12 +17,7 @@ export const PROMPT_ENHANCEMENT_COST_ADD_ON_ASSUMPTION_V1 = 'no_tool_container_s
 export const PROMPT_ENHANCEMENT_COST_REGIONAL_DATA_RESIDENCY_ASSUMPTION_V1 = 'no_regional_or_data_residency_uplift_selected';
 export const PROMPT_ENHANCEMENT_COST_INPUT_TOKEN_CAP_V1 = 8_000;
 export const PROMPT_ENHANCEMENT_COST_OUTPUT_TOKEN_CAP_V1 = 2_000;
-// Composer/route call budget. Raised from 10s (2026-08-07): the bounded composer asks for up to
-// PROMPT_ENHANCEMENT_COST_OUTPUT_TOKEN_CAP_V1 tokens as one JSON object covering every planned
-// section, which measures 9-14s for 6-8 sections — so a 10s cap cut the call off before it could
-// finish and the body always fell back to the deterministic render. 45s keeps headroom for a slow
-// provider while still fitting inside the host prompt-submit hook budget.
-export const PROMPT_ENHANCEMENT_COST_TIMEOUT_MS_V1 = 45_000;
+export const PROMPT_ENHANCEMENT_COST_TIMEOUT_MS_V1 = 10_000;
 export const PROMPT_ENHANCEMENT_COST_VALIDATION_RETRY_COUNT_V1 = 3;
 
 export const PROMPT_ENHANCEMENT_COST_MEASUREMENT_FIELDS_V1: readonly PromptEnhancementCostMeasurementFieldV1[] = [

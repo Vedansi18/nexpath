@@ -104,7 +104,6 @@ export function buildPromptEnhancementActionRequestV1(input: {
   additionalDetailsText?: string;
   timestampMs: number;
   sectionSpanEditEvents?: PromptEnhancementActionRequestV1['currentBodyBinding']['sectionSpanEditEvents'];
-  routeCarryover?: PromptEnhancementActionRequestV1['routeCarryover'];
 }): { state: 'request_ready'; request: PromptEnhancementActionRequestV1 } | { state: 'no_request'; reasonCodes: readonly string[] } {
   const { baseRequest, session, action } = input;
   const reasonCodes: string[] = [];
@@ -139,7 +138,6 @@ export function buildPromptEnhancementActionRequestV1(input: {
     ...baseRequest,
     userPreferenceContext,
     action,
-    ...(input.routeCarryover !== undefined ? { routeCarryover: input.routeCarryover } : {}),
     currentBodyBinding: {
       currentBodyId: session.currentBodyId,
       bodyRevision: session.bodyRevision,
@@ -163,7 +161,6 @@ export function beginPromptEnhancementActionV1(input: {
   additionalDetailsText?: string;
   timestampMs: number;
   sectionSpanEditEvents?: PromptEnhancementActionRequestV1['currentBodyBinding']['sectionSpanEditEvents'];
-  routeCarryover?: PromptEnhancementActionRequestV1['routeCarryover'];
 }): PromptEnhancementActionBeginResultV1 {
   if (input.adapterState.inFlight) {
     return {
@@ -205,7 +202,6 @@ export async function executePromptEnhancementActionV1(input: {
   additionalDetailsText?: string;
   timestampMs: number;
   sectionSpanEditEvents?: PromptEnhancementActionRequestV1['currentBodyBinding']['sectionSpanEditEvents'];
-  routeCarryover?: PromptEnhancementActionRequestV1['routeCarryover'];
   facade: PromptEnhancementActionFacadeV1;
 }): Promise<PromptEnhancementActionExecutionResultV1> {
   const started = beginPromptEnhancementActionV1(input);

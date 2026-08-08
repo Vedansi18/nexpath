@@ -1593,14 +1593,6 @@ export interface PromptEnhancementPrepareRequestV1 {
 export interface PromptEnhancementActionRequestV1
   extends Omit<PromptEnhancementPrepareRequestV1, 'sourcePrompt'> {
   action: PromptEnhancementActionEntryV1;
-  /**
-   * F1b (send-block fix 2026-08-07): the route decision the popup's result was PREPARED with
-   * (from result.routeDecision). An action re-prepare re-runs the deterministic router, which
-   * soft-skips prompts that originally routed only via the prepare-only E6 LLM rescue; carrying
-   * the prepared route lets the action re-route EXACTLY as its popup did — deterministic, no
-   * LLM call in-popup. Optional: callers without it keep the previous routing behaviour.
-   */
-  routeCarryover?: { familyId: string; primaryIntent: string };
   currentBodyBinding: {
     currentBodyId: string;
     bodyRevision: number;

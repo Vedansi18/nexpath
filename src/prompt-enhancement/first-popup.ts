@@ -7,7 +7,6 @@ import {
   type PromptEnhancementWhyHelpV1,
 } from './contracts.js';
 import { validatePromptEnhancementHandoffMetadataV1 } from './handoff-metadata.js';
-import { PROMPT_ENHANCEMENT_PROVIDER_FAILURE_NOTICE_V1 } from './popup-render-model.js';
 
 export const PROMPT_ENHANCEMENT_MPS_FIRST_POPUP_TITLE_V1 = 'Nexpath · Multi-prompt sequence' as const;
 export const PROMPT_ENHANCEMENT_MPS_FIRST_POPUP_HEADING_V1 = 'Use enhanced sequence prompt' as const;
@@ -54,10 +53,6 @@ export interface PromptEnhancementMpsFirstPopupModelV1 {
   // when supplied. The UI renders them like PE and never invents them.
   pinchLabel?: PromptEnhancementPinchLabelV1;
   whyHelp?: PromptEnhancementWhyHelpV1;
-  /** TI-2 UI half (owner ruling 2026-08-07): a provider failure now renders the deterministic
-   * body, so a failed sequence prompt CAN reach this popup — carry the same public-safe notice
-   * the PE popup shows (fixed sentence, display-only). */
-  providerFailureNotice?: typeof PROMPT_ENHANCEMENT_PROVIDER_FAILURE_NOTICE_V1;
   identity: PromptEnhancementMpsFirstPopupIdentityV1;
   body: {
     text: string;
@@ -196,10 +191,6 @@ export function buildPromptEnhancementMpsFirstPopupV1(
       layout: PROMPT_ENHANCEMENT_MPS_FIRST_POPUP_LAYOUT_V1,
       ...(input.result.uiView.pinchLabel ? { pinchLabel: input.result.uiView.pinchLabel } : {}),
       ...(input.result.uiView.whyHelp ? { whyHelp: input.result.uiView.whyHelp } : {}),
-      ...(input.result.callAndVisibilityMetadata.providerFailureState === 'timeout'
-        || input.result.callAndVisibilityMetadata.providerFailureState === 'provider_api_unavailable'
-        ? { providerFailureNotice: PROMPT_ENHANCEMENT_PROVIDER_FAILURE_NOTICE_V1 }
-        : {}),
       identity,
       body: {
         text: input.result.currentBody.text,

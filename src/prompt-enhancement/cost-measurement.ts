@@ -122,12 +122,6 @@ export function emitPromptEnhancementCostObservabilityV1(
       status: observability.measurement.status,
       plannedCallCount: observability.measurement.plannedCallCount,
       usedCallCount: observability.measurement.usedCallCount,
-      // TI-2 (2026-08-07): a provider failure used to be byte-identical to "never eligible" in
-      // this line. These two typed-enum fields (already on the metadata, never body text) make a
-      // timeout log as `fallback_no_llm / fallbackReason "timeout_no_send" / providerFailureState
-      // "timeout"` — distinguishable from "no key" and from "not eligible".
-      fallbackReason: result.callAndVisibilityMetadata.fallbackReason,
-      providerFailureState: result.callAndVisibilityMetadata.providerFailureState,
       rawFieldsExcluded: observability.measurement.rawPromptBodyExcluded,
       inventoryOk: observability.inventoryOk,
     });

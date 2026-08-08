@@ -20,7 +20,7 @@ vi.mock('./llm-route-decision.js', () => ({
 }));
 vi.mock('./llm-composer.js', async (orig) => ({
   ...(await orig<Record<string, unknown>>()),
-  composeStructuredComposerOutputV1: vi.fn(async () => ({ ok: false as const, reason: 'no_key' as const })),
+  composeStructuredComposerOutputV1: vi.fn(async () => undefined),
 }));
 
 const { preparePromptEnhancement } = await import('./facade.js');

@@ -6,12 +6,7 @@ import type { PromptEnhancementPrepareResultV1 } from './contracts.js';
 
 // The helper reads only enhancementId / requestId / callAndVisibilityMetadata from the
 // result, so a partial fixture with a REAL visibility packet is a faithful stand-in.
-function resultWith(
-  mode: PromptEnhancementCallVisibilityMode,
-  planned: number,
-  used: number,
-  failure?: { fallbackReason?: string; providerFailureState?: string },
-): PromptEnhancementPrepareResultV1 {
+function resultWith(mode: PromptEnhancementCallVisibilityMode, planned: number, used: number): PromptEnhancementPrepareResultV1 {
   return {
     enhancementId: 'pe:req-1',
     requestId: 'req-1',
@@ -19,8 +14,7 @@ function resultWith(
       callVisibilityMode: mode,
       plannedCallCount: planned,
       usedCallCount: used,
-      ...(failure ?? {}),
-    } as Parameters<typeof buildPromptEnhancementCostVisibilityMetadataV1>[1]),
+    }),
   } as unknown as PromptEnhancementPrepareResultV1;
 }
 
@@ -74,27 +68,6 @@ describe('emitPromptEnhancementCostObservabilityV1 (E9 — surface emission)', (
       .not.toThrow();
     expect(emitPromptEnhancementCostObservabilityV1(resultWith('llm_wording', 1, 1), 'popup_action', throwingSink))
       .toBeUndefined();
-  });
-
-  it('TI-2: surfaces fallbackReason + providerFailureState so a provider failure is distinguishable in the log', () => {
-    const sink = { debug: vi.fn(), warn: vi.fn() };
-    emitPromptEnhancementCostObservabilityV1(
-      resultWith('fallback_no_llm', 1, 1, { fallbackReason: 'timeout', providerFailureState: 'timeout' }),
-      'prepare',
-      sink,
-    );
-    expect(sink.debug).toHaveBeenCalledWith('prompt_enhancement_cost_measurement', expect.objectContaining({
-      callVisibilityMode: 'fallback_no_llm',
-      fallbackReason: 'timeout',
-      providerFailureState: 'timeout',
-    }));
-    // A never-eligible deterministic run stays clearly different.
-    const sink2 = { debug: vi.fn(), warn: vi.fn() };
-    emitPromptEnhancementCostObservabilityV1(resultWith('deterministic', 0, 0), 'prepare', sink2);
-    expect(sink2.debug).toHaveBeenCalledWith('prompt_enhancement_cost_measurement', expect.objectContaining({
-      callVisibilityMode: 'deterministic',
-      providerFailureState: 'none',
-    }));
   });
 
   it('labels the prepare surface distinctly', () => {

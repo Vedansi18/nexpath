@@ -18,12 +18,11 @@ import {
 import {
   composePromptEnhancementBody,
   type PromptEnhancementComposeResult,
-  type PromptEnhancementComposerRuntimeState,
   type PromptEnhancementStructuredComposerOutputV1,
 } from './compose-enhancement.js';
 import { composeStructuredComposerOutputV1 } from './llm-composer.js';
 import { isPromptEnhancementNlpHeavyCaseV1 } from './composer-gate.js';
-import { decidePromptEnhancementRouteViaLlmV1, type PromptEnhancementLlmRouteDecisionV1 } from './llm-route-decision.js';
+import { decidePromptEnhancementRouteViaLlmV1 } from './llm-route-decision.js';
 import { isValidApiKey } from '../config/ApiKeyResolver.js';
 import { planPromptEnhancementSections } from './templates/section-plan.js';
 import { routePromptEnhancement, type PromptEnhancementCapabilityId, type PromptEnhancementRouteInput } from './routing-taxonomy.js';
@@ -150,24 +149,6 @@ async function prepare(
     }
   }
 
-  // F1b (send-block fix 2026-08-07): an ACTION re-prepare re-routes with the SAME decision its
-  // popup was prepared with (carried from result.routeDecision). Without this, a prompt that
-  // routed only via the prepare-only E6 rescue above soft-skips again here and the action
-  // manufactures a no-popup-shaped result — the popup's own Enter/adjustments then fail (live
-  // Windows report). Deterministic re-application of an already-made decision; never an LLM call.
-  if (
-    actionRequest?.routeCarryover !== undefined &&
-    route.noPopup &&
-    route.reasonCodes.some((reason) => LLM_ROUTE_RESCUABLE_SKIP_REASONS.has(reason))
-  ) {
-    route = routePromptEnhancement(routeInput, {
-      familyId: actionRequest.routeCarryover.familyId,
-      primaryIntent: actionRequest.routeCarryover.primaryIntent,
-      capabilities: [],
-      ambiguityState: 'clear',
-    } as PromptEnhancementLlmRouteDecisionV1);
-  }
-
   // E2 guidance pipeline: source signals -> typed facts -> cross-lane conflict
   // resolution -> transform-rule-2 dual-lane source mix -> DR2-G1 gate. The mix's rendered
   // facts feed section planning; the gate can force skip_no_popup when there is no
@@ -176,14 +157,7 @@ async function prepare(
   const resolvedFacts = resolvePromptEnhancementSourceConflictsV1(guidanceFacts).facts;
   const sourceMix = applyPromptEnhancementSourceMixV1(resolvedFacts, request.userPreferenceContext.levelState);
   const guidanceGate = applyPromptEnhancementGuidanceGateV1(sourceMix);
-  // F1 (send-block fix 2026-08-07): an ACTION never re-decides popup existence. The popup the
-  // action came from already exists — its route/no-popup decision was made at PREPARE (possibly
-  // via the E6 LLM route-rescue above, which is gated to prepare only). Re-running the gate here
-  // could "un-route" an approved open popup and fail its own actions/send (live Windows report:
-  // Enter on an approved body -> malformed no-popup action result -> send blocked). The action
-  // recompose below still runs the FULL safety validation on the recomposed body — this bypass
-  // only stops an action from cancelling a popup that is already on screen.
-  const noPopup = actionRequest !== undefined ? false : (route.noPopup || !guidanceGate.show);
+  const noPopup = route.noPopup || !guidanceGate.show;
 
   const planning = planPromptEnhancementSections({
     routeResult: route,
@@ -204,40 +178,24 @@ async function prepare(
   // action-directive seam stays available for a future non-blocking use.
   const wantsLlmWording = action === undefined && isPromptEnhancementNlpHeavyCaseV1(route);
   let structuredComposerOutput: PromptEnhancementStructuredComposerOutputV1 | undefined;
-  // TI-2 (2026-08-07): the composer now reports WHY it failed, and the facade maps that onto the
-  // runtime states that already exist instead of collapsing everything to `undefined` — which made
-  // a real provider timeout byte-identical to "never eligible for an LLM call" in the UI, logs,
-  // and cost metadata. `no_key` / `no_eligible_sections` stay `undefined` (genuinely "not
-  // requested"); downstream, the failure states already produce `callVisibilityMode
-  // 'fallback_no_llm'` + a populated `providerFailureState` via `fallbackModeForRuntime`.
-  let composerRuntimeState: PromptEnhancementComposerRuntimeState | undefined;
   if (
     wantsLlmWording &&
     !noPopup &&
     isValidApiKey(process.env['OPENAI_API_KEY'] ?? '')
   ) {
-    const composerCall = await composeStructuredComposerOutputV1({
+    structuredComposerOutput = await composeStructuredComposerOutputV1({
       enhancementId,
       originalPromptText: request.sourcePrompt.text,
       planning,
     });
-    if (composerCall.ok) {
-      structuredComposerOutput = composerCall.output;
-      composerRuntimeState = 'accepted_structured_output';
-    } else if (composerCall.reason === 'timeout') {
-      composerRuntimeState = 'timeout';
-    } else if (composerCall.reason === 'provider_error') {
-      composerRuntimeState = 'provider_unavailable';
-    } else if (composerCall.reason === 'invalid_output') {
-      composerRuntimeState = 'invalid_output';
-    }
-    // 'no_key' / 'no_eligible_sections' -> undefined: the call was genuinely not made.
   }
 
-  const composeInput = {
+  const composed = composePromptEnhancementBody({
     enhancementId,
     originalPromptText: request.sourcePrompt.text,
     sectionPlanningResult: planning,
+    composerRuntimeState: structuredComposerOutput ? 'accepted_structured_output' : undefined,
+    structuredComposerOutput,
     action: action === 'use_original' || action === 'feedback' || action === 'close' || action === 'use_current_body'
       ? undefined
       : action,
@@ -247,56 +205,13 @@ async function prepare(
     priorBodyId: actionRequest?.currentBodyBinding.currentBodyId,
     priorBodyRevision: actionRequest?.currentBodyBinding.bodyRevision,
     timestampMs: request.sourcePrompt.capturedAt,
-  };
-  let composed = composePromptEnhancementBody({
-    ...composeInput,
-    composerRuntimeState,
-    structuredComposerOutput,
   });
-  const validateComposed = (candidate: typeof composed) => validatePromptEnhancementSafety({
-    currentBody: candidate.currentBody,
+  const safety = validatePromptEnhancementSafety({
+    currentBody: composed.currentBody,
     actionType: noPopup ? 'use_original' : undefined,
-    callVisibilityMode: candidate.callVisibilityMode,
-    // ONE source of truth (TI-2, 2026-08-07): the validation graph must carry the SAME
-    // optionalCallAvailabilityState the composed boundary metadata carries — the result validator
-    // enforces graph === metadata === boundary ('mismatched_call_visibility_state'). The composed
-    // metadata already derived it correctly for every mode, including the provider-failure states
-    // ('unavailable_by_provider_api'), so read it from there instead of re-deriving here.
-    optionalCallAvailabilityState: candidate.composerBoundary.inputContract.callVisibilityState.optionalCallAvailabilityState,
+    callVisibilityMode: composed.callVisibilityMode,
+    optionalCallAvailabilityState: composed.callVisibilityMode === 'deterministic' ? 'deterministic_only' : undefined,
   });
-  let safety = validateComposed(composed);
-  // Blocked-popup fix part 2 (2026-08-07) — deterministic-fallback safety net. The composer's
-  // confirmation-parity guard removes the confirmation-absence block, but an accepted LLM draft
-  // can still hard-block the FINAL body through the other blocking families the draft filter
-  // does not fully cover (unresolved [X]/<x> placeholders, voice phrases, authority escalation,
-  // data-leak wording). A prepare-time block of an LLM-worded body must never reach the user as
-  // the empty all-unavailable popup when a proven-valid deterministic body exists: recompose with
-  // the drafts dropped — the established rejected-drafts semantics ('fallback_no_llm', the spent
-  // LLM call stays counted for E9) — and keep the blocked result ONLY if even the deterministic
-  // body blocks (then the content itself — e.g. user-typed details — is the cause, which is the
-  // genuine D2 case the blocked popup exists for).
-  if (
-    structuredComposerOutput !== undefined
-    && composed.callVisibilityMode === 'llm_wording'
-    && (safety.sendPolicy === 'no_send' || safety.generatedSafeStatus === 'invalid_non_sendable')
-  ) {
-    const recomposed = composePromptEnhancementBody({
-      ...composeInput,
-      composerRuntimeState: 'accepted_structured_output',
-      structuredComposerOutput: { ...structuredComposerOutput, sectionDrafts: [] },
-    });
-    const recomposedSafety = validateComposed(recomposed);
-    if (recomposedSafety.sendPolicy !== 'no_send' && recomposedSafety.generatedSafeStatus !== 'invalid_non_sendable') {
-      composed = {
-        ...recomposed,
-        diagnostics: [
-          ...recomposed.diagnostics,
-          { category: 'fallback_or_no_popup' as const, reasonCode: 'llm_final_body_blocked_deterministic_fallback' },
-        ],
-      };
-      safety = recomposedSafety;
-    }
-  }
   return buildResult(request, enhancementId, route, planning, composed, safety, noPopup);
 }
 

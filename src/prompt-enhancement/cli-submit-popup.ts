@@ -109,9 +109,7 @@ export interface ClaudeUserPromptSubmitHookOutputV1 {
   };
 }
 
-// Owner ruling 2026-08-07: the popup shows NO action-failure line ("That adjustment could not be
-// applied…" removed). A failed action keeps the previous prompt on screen silently — the smooth
-// path — and the typed reason codes go to the host's diagnostics sink (logged, never rendered).
+const PUBLIC_ACTION_FAILURE = 'That adjustment could not be applied. The previous prompt is still available.';
 
 const PUBLIC_FEEDBACK_ACCEPTED = 'Feedback saved. Your prompt is unchanged.';
 const PUBLIC_FEEDBACK_REJECTED = 'Feedback was not saved. Your prompt is unchanged.';
@@ -195,12 +193,6 @@ export async function runPromptEnhancementCliSubmitPopupV1(input: {
   // E9: measured per E8 directional/apply-details action call (observability-only). The loop
   // stays free of the cost module — it hands the produced result to the caller's sink.
   costObservabilitySink?: (result: PromptEnhancementPrepareResultV1) => void;
-  /**
-   * F3 (owner ruling 2026-08-07): action failures render NOTHING in the popup (previous prompt
-   * kept silently); the typed reason codes go here so the host can log them — the only way a
-   * live failure stays diagnosable. Codes only, never body text.
-   */
-  actionDiagnosticsSink?: (event: { actionType: string; state: string; reasonCodes: readonly string[] }) => void;
   onFirstRender?: () => void;
 }): Promise<PromptEnhancementCliPopupResultV1> {
   let currentResult = input.result;
@@ -223,17 +215,6 @@ export async function runPromptEnhancementCliSubmitPopupV1(input: {
   // Refinement (directional-action) tracking so "Go back" can restore the main state.
   let inRefinement = false;
   let savedMain: { result: PromptEnhancementPrepareResultV1; body: string } | null = null;
-  // F1b: every engine action re-routes with the decision ITS result was prepared with, so a
-  // prompt that routed only via the prepare-only LLM rescue keeps its route across actions.
-  const routeCarryoverFor = (result: PromptEnhancementPrepareResultV1): { familyId: string; primaryIntent: string } => ({
-    familyId: result.routeDecision.familyId,
-    primaryIntent: result.routeDecision.primaryIntent,
-  });
-  // Silent-keep discipline (owner ruling 2026-08-07): a failed action changes NOTHING on screen;
-  // the reason codes are reported to the host's log sink only. Best-effort — never throws.
-  const reportActionFailure = (actionType: string, state: string, reasonCodes: readonly string[] = []): void => {
-    try { input.actionDiagnosticsSink?.({ actionType, state, reasonCodes }); } catch { /* diagnostics only */ }
-  };
 
   try {
     for (;;) {
@@ -261,29 +242,20 @@ export async function runPromptEnhancementCliSubmitPopupV1(input: {
       }
       if (command.type === 'edit_body') {
         if (model.body.editable && command.text.trim().length > 0) editedBodyText = command.text;
-        else reportActionFailure('edit_body', 'rejected_empty_or_uneditable');
+        else publicNotice = PUBLIC_ACTION_FAILURE;
         continue;
       }
       if (command.type === 'use_current') {
-        // F2 (owner ruling 2026-08-07 — smooth send): an UNEDITED body was already validated
-        // sendable when this popup rendered — Enter sends exactly that body directly, with no
-        // engine round-trip that could fail. An EDITED body keeps the full validation path
-        // below (the edit-stage safety rules stay authoritative for user changes).
-        if (editedBodyText === model.body.text) {
-          const direct = selectedCurrent(model, editedBodyText);
-          if (direct) return direct;
-        }
         const execution = await executePromptEnhancementActionV1({
           adapterState: buildPromptEnhancementActionAdapterStateV1(model.session),
           baseRequest: input.request,
           action: model.controls.currentBody,
           editedBodyText,
           timestampMs: Date.now(),
-          routeCarryover: routeCarryoverFor(currentResult),
           facade: applyPromptEnhancementAction,
         });
         if (execution.state !== 'accepted_result') {
-          reportActionFailure('use_current_body', execution.state, 'reasonCodes' in execution ? execution.reasonCodes : []);
+          publicNotice = PUBLIC_ACTION_FAILURE;
           continue;
         }
         const accepted = buildPromptEnhancementPopupRenderModelV1({
@@ -295,17 +267,13 @@ export async function runPromptEnhancementCliSubmitPopupV1(input: {
           const selected = selectedCurrent(accepted.model, accepted.model.body.text);
           if (selected) return selected;
         }
-        reportActionFailure(
-          'use_current_body',
-          'action_result_not_renderable',
-          accepted.state === 'render_model_ready' ? ['send_intent_not_ready'] : accepted.reasonCodes,
-        );
+        publicNotice = PUBLIC_ACTION_FAILURE;
         continue;
       }
       if (command.type === 'use_original') {
         const selected = selectedOriginal(model, currentResult);
         if (selected) return selected;
-        reportActionFailure('use_original', 'original_intent_not_ready');
+        publicNotice = PUBLIC_ACTION_FAILURE;
         continue;
       }
 
@@ -368,7 +336,7 @@ export async function runPromptEnhancementCliSubmitPopupV1(input: {
       const actionType = command.type === 'apply_details' ? 'apply_details' : command.type;
       const action = actionFor(model, actionType);
       if (!action || action.availability !== 'available') {
-        reportActionFailure(actionType, 'action_unavailable');
+        publicNotice = PUBLIC_ACTION_FAILURE;
         continue;
       }
       const details = command.type === 'apply_details' ? command.text : additionalDetailsText;
@@ -381,25 +349,10 @@ export async function runPromptEnhancementCliSubmitPopupV1(input: {
         editedBodyText,
         ...(details.length > 0 ? { additionalDetailsText: details } : {}),
         timestampMs: Date.now(),
-        routeCarryover: routeCarryoverFor(currentResult),
         facade: applyPromptEnhancementAction,
       });
       if (execution.state !== 'accepted_result') {
-        reportActionFailure(actionType, execution.state, 'reasonCodes' in execution ? execution.reasonCodes : []);
-        continue;
-      }
-
-      // Render the action result BEFORE committing any state: a non-renderable result keeps the
-      // previous popup exactly as it was (owner ruling 2026-08-07 — the popup used to CLOSE
-      // silently here, losing the user's approved prompt; now nothing on screen changes and the
-      // reason codes go to the diagnostics sink).
-      const renderedAction = buildPromptEnhancementPopupRenderModelV1({
-        result: execution.result,
-        timestampMs: Date.now(),
-        deliverySurface: execution.result.delivery.deliveryChannel,
-      });
-      if (renderedAction.state === 'no_popup') {
-        reportActionFailure(actionType, 'action_result_not_renderable', renderedAction.reasonCodes);
+        publicNotice = PUBLIC_ACTION_FAILURE;
         continue;
       }
 
@@ -417,8 +370,15 @@ export async function runPromptEnhancementCliSubmitPopupV1(input: {
       // Observability is best-effort: a telemetry failure must NEVER abort the popup (the outer
       // catch returns not_shown), so swallow any sink error — same discipline as feedbackSink.
       try { input.costObservabilitySink?.(execution.result); } catch { /* observability only */ }
-      rendered = renderedAction;
-      model = renderedAction.model;
+      rendered = buildPromptEnhancementPopupRenderModelV1({
+        result: currentResult,
+        timestampMs: Date.now(),
+        deliverySurface: currentResult.delivery.deliveryChannel,
+      });
+      if (rendered.state === 'no_popup') {
+        return { state: 'not_shown', reasonCodes: ['action_result_not_renderable', ...rendered.reasonCodes] };
+      }
+      model = rendered.model;
       editedBodyText = model.body.text;
       additionalDetailsText = '';
       // Show only a meaningful notice after a refinement — the generic "Prepared prompt-enhancement
@@ -482,10 +442,7 @@ export const PROMPT_ENHANCEMENT_CLI_FOOTER_V1 = '↑↓ move · Esc cancel' as c
 const PROMPT_ENHANCEMENT_CLI_BODY_HINT_V1 = 'Enter sends this prompt' as const;
 const PROMPT_ENHANCEMENT_CLI_DETAILS_HINT_V1 = 'Enter applies these details · unapplied details are not sent' as const;
 /** Editing keys shown under a focused editable field (owner request). */
-// macOS shows the Mac key names (owner request 2026-08-07); other platforms are untouched.
-const PROMPT_ENHANCEMENT_CLI_EDIT_KEYS_HINT_V1 = process.platform === 'darwin'
-  ? 'Cmd+J new line · Cmd+↑/↓ move line'
-  : 'Ctrl+J new line · Ctrl+↑/↓ move line';
+const PROMPT_ENHANCEMENT_CLI_EDIT_KEYS_HINT_V1 = 'Ctrl+J new line · Ctrl+↑/↓ move line' as const;
 
 /** Left indent applied to every wrapped line of editable content (body / details). */
 export const PROMPT_ENHANCEMENT_CLI_CONTENT_INDENT_V1 = 6 as const;
@@ -659,12 +616,6 @@ const PROMPT_ENHANCEMENT_CLI_SGR_V1 = (() => {
     cyan: `${e}[36m`,
     green: `${e}[32m`,
     gray: `${e}[90m`,
-    // Shortcut/action hints use bright ("light") yellow — a distinct, universally-supported
-    // 16-colour that stays readable on every terminal (owner request 2026-08-07: keep it
-    // properly visible on all OSes, unlike the faint attribute).
-    lightYellow: `${e}[93m`,
-    // Caution tone (normal yellow) — the provider-failure notice; matches the MPS Cancel row.
-    yellow: `${e}[33m`,
     dim: `${e}[2m`,
     bold: `${e}[1m`,
     reset: `${e}[0m`,
@@ -707,14 +658,6 @@ export function renderPromptEnhancementPopupFrameV1(
     const why = publicText(model.whyHelp.text);
     lines.push(c ? `${c.gray}${why}${c.reset}` : why);
   }
-  // TI-2 UI half (2026-08-07, locked disposition): on a REAL provider failure the user must be
-  // SHOWN it happened. One persistent public-safe line, yellow caution tone, every repaint —
-  // display only (no control/behaviour keys on it). Absent on every non-failure run, so normal
-  // frames stay byte-identical.
-  if (model.providerFailureNotice) {
-    const notice = publicText(model.providerFailureNotice);
-    lines.push(c ? `${c.yellow}${notice}${c.reset}` : notice);
-  }
   lines.push('');
 
   // Record the caret's real screen position as the field content is built (see caretOut).
@@ -750,40 +693,27 @@ export function renderPromptEnhancementPopupFrameV1(
     // Light-gray action hint shown under an editable heading (§ UI-8 / owner request).
     // Content is indented 4 spaces; with the 2-char rail added in the post-pass the text lands at
     // screen column 7 (matching the caret column formula in recordCaret).
-    // Shortcut/action hints (Ctrl+J · Enter sends · Enter applies) — LIGHT YELLOW (owner request
-    // 2026-08-07): a distinct, clearly-visible colour on every OS.
-    const hint = (text: string) => (c ? `    ${c.lightYellow}${text}${c.reset}` : `    ${text}`);
-    // A field content line: real prompt text renders plain; a scroll indicator ("↑/↓ N more
-    // lines …") renders in plain gray — the "normal" dim (owner request 2026-08-07: the light
-    // yellow hints already provide the distinction, so the marker needs no extra darkening).
-    const contentLine = (line: string) =>
-      c && isPromptEnhancementScrollMarkerLineV1(line) ? `    ${c.gray}${line}${c.reset}` : `    ${line}`;
-    const editable = row.kind === 'editor_heading' || row.kind === 'additional_details';
+    const hint = (text: string) => (c ? `    ${c.gray}${text}${c.reset}` : `    ${text}`);
     if (row.kind === 'editor_heading') {
       recordCaret('enhanced_body');
-      for (const bodyLine of publicText(view.editedBodyText).split('\n')) lines.push(contentLine(bodyLine));
-      // Body block (owner request 2026-08-07): the edit-keys and the send hint share ONE line when
-      // focused ("Ctrl+J … · Enter sends this prompt") so the body gains a line; when not focused,
-      // just the send hint shows.
-      lines.push(hint(focused
-        ? `${PROMPT_ENHANCEMENT_CLI_EDIT_KEYS_HINT_V1} · ${PROMPT_ENHANCEMENT_CLI_BODY_HINT_V1}`
-        : PROMPT_ENHANCEMENT_CLI_BODY_HINT_V1));
+      for (const bodyLine of publicText(view.editedBodyText).split('\n')) lines.push(`    ${bodyLine}`);
+      lines.push(hint(PROMPT_ENHANCEMENT_CLI_BODY_HINT_V1));
     } else if (row.kind === 'additional_details') {
       // UI-8: no "Apply" button — pressing Enter on this row applies the details.
       // An empty field renders blank (§8.5). Sending the body ignores unapplied details.
-      // Details block order stays as-is (owner: "additional details is fine"): content ->
-      // "Enter applies these details …" -> Ctrl+J edit-keys (when focused).
       recordCaret('additional_details');
       const details = view.additionalDetailsText ? publicText(view.additionalDetailsText) : '';
-      for (const detailLine of details.split('\n')) lines.push(contentLine(detailLine));
+      for (const detailLine of details.split('\n')) lines.push(`    ${detailLine}`);
       lines.push(hint(PROMPT_ENHANCEMENT_CLI_DETAILS_HINT_V1));
-      if (focused) lines.push(hint(PROMPT_ENHANCEMENT_CLI_EDIT_KEYS_HINT_V1));
     }
 
-    // Non-editable rows (directionals) keep their focused help; the editable rows dropped their
-    // sub-label help earlier (owner request 2026-08-07) so the body shows more lines.
-    if (focused && row.help && !editable) {
+    if (focused && row.help) {
       lines.push(`    ${publicText(frameState.helpExpanded ? row.help.full : row.help.short)}`);
+    }
+    // Owner request: show the editing keys under the focused editable field (enhanced body /
+    // Additional details) so the user knows how to add lines and move between them.
+    if (focused && (row.kind === 'editor_heading' || row.kind === 'additional_details')) {
+      lines.push(hint(PROMPT_ENHANCEMENT_CLI_EDIT_KEYS_HINT_V1));
     }
   });
 
@@ -826,16 +756,6 @@ export function windowPromptEnhancementFieldForDisplayV1(
   if (hiddenAbove > 0) shown[0] = `↑ ${hiddenAbove} more lines above`;
   if (hiddenBelow > 0) shown[shown.length - 1] = `↓ ${hiddenBelow} more lines below · the whole prompt is included`;
   return shown.join('\n');
-}
-
-/**
- * True when a windowed field line is a scroll indicator ("↑ N more lines above" / "↓ N more lines
- * below …") produced by windowPromptEnhancementFieldForDisplayV1 — NOT real prompt text. The PE,
- * MPS, and PEF renderers dim these lines (owner request 2026-08-07) so they read as a hint, like
- * the Ctrl+J line, not as part of the body.
- */
-export function isPromptEnhancementScrollMarkerLineV1(line: string): boolean {
-  return /^↑ \d+ more lines above$/.test(line) || /^↓ \d+ more lines below\b/.test(line);
 }
 
 // ---------------------------------------------------------------------------
@@ -974,40 +894,11 @@ export function reducePromptEnhancementCliInteractionV1(
         // Never send an empty/whitespace body; stay in the editor (BF-1).
         if (bodyBlank) return { state, commands: [] };
         return { state, commands: [...commitBody, { type: 'use_current' }] };
-      case 'additional_details': {
-        // A blank body or empty details draft cannot drive an apply (BF-1 / bug B).
+      case 'additional_details':
+        // A blank body or empty details draft cannot drive a recomposition (BF-1 / bug B).
         if (bodyBlank || detailsText.trim().length === 0) return { state, commands: [] };
-        // Owner request 2026-08-07 (MPS parity): Enter APPLIES the typed details INTO the
-        // enhanced body locally — merged verbatim under 'Additional details to incorporate:',
-        // the details field clears, and focus returns to the editor heading so the next Enter
-        // sends the merged prompt. Instant and deterministic — no engine recompose (the
-        // apply_details action seam stays available to other surfaces). The rebuilt body parks
-        // its cursor at the end, so the view scrolls to where the details landed.
-        // Repeated applies extend the ONE details block (live iMac report 2026-08-07: a second
-        // apply used to add a second 'Additional details to incorporate:' heading).
-        const detailsHeading = 'Additional details to incorporate:';
-        const mergedBody = bodyBuffer.text.includes(detailsHeading)
-          ? `${bodyBuffer.text}\n${detailsText.trim()}`
-          : `${bodyBuffer.text}\n\n${detailsHeading}\n${detailsText.trim()}`;
-        const editorRowIndex = rows.findIndex((row) => row.kind === 'editor_heading');
-        const mergedEditor = buildPromptEnhancementMultilineEditorStateV1({
-          identity: state.editor.identity,
-          enhancedBodyText: mergedBody,
-          additionalDetailsText: '',
-          fieldWidth: state.editor.fieldWidth,
-          viewportRows: state.editor.viewportRows,
-          focusedField: 'enhanced_body',
-        });
-        return {
-          state: {
-            ...state,
-            focusIndex: editorRowIndex >= 0 ? editorRowIndex : state.focusIndex,
-            helpExpanded: false,
-            editor: mergedEditor,
-          },
-          commands: [{ type: 'edit_body', text: mergedBody }],
-        };
-      }
+        // Commit a dirty body first so recomposition uses the edited body, not the original.
+        return { state, commands: [...commitBody, { type: 'apply_details', text: detailsText }] };
       case 'directional': {
         // A blank body cannot be refined; never run a directional on the stale body (bug B).
         if (bodyBlank) return { state, commands: [] };
@@ -1148,8 +1039,8 @@ export function renderPromptEnhancementCliFeedbackFrameV1(
       const text = state.editor.buffers.additional_details.text;
       const shown = text ? publicText(text) : '(type your feedback)';
       for (const line of shown.split('\n')) lines.push(`      ${line}`);
-      // Editing keys under the editable Other field — light yellow, same shortcut tier as PE/MPS.
-      if (focused) lines.push(c ? `      ${c.lightYellow}${PROMPT_ENHANCEMENT_CLI_EDIT_KEYS_HINT_V1}${c.reset}` : `      ${PROMPT_ENHANCEMENT_CLI_EDIT_KEYS_HINT_V1}`);
+      // Owner request: editing keys under the editable Other field.
+      if (focused) lines.push(c ? `      ${c.gray}${PROMPT_ENHANCEMENT_CLI_EDIT_KEYS_HINT_V1}${c.reset}` : `      ${PROMPT_ENHANCEMENT_CLI_EDIT_KEYS_HINT_V1}`);
     }
   });
   lines.push('', c ? `${c.dim}${PROMPT_ENHANCEMENT_CLI_FEEDBACK_FOOTER_V1}${c.reset}` : PROMPT_ENHANCEMENT_CLI_FEEDBACK_FOOTER_V1);
@@ -1279,6 +1170,7 @@ function createPromptEnhancementCliPopupInteractionV1(onFirstRender?: () => void
   const render = (view: PromptEnhancementCliPopupViewV1, current: PromptEnhancementCliInteractionStateV1): void => {
     lastView = view;
     const editorWidth = current.editor.fieldWidth;
+    const bodyRows = current.editor.viewportRows;
     const detailsRows = Math.min(current.editor.viewportRows, 5);
     // Which editable row (if any) has focus — computed first so we can sync that field's
     // scroll to its cursor BEFORE the field is windowed and the caret placed.
@@ -1288,35 +1180,22 @@ function createPromptEnhancementCliPopupInteractionV1(onFirstRender?: () => void
       focusedRow?.kind === 'editor_heading' ? 'enhanced_body'
         : focusedRow?.kind === 'additional_details' ? 'additional_details'
           : null;
-    // The details field's display is capped at 5 rows (< the body viewport), so sync it here to
-    // that cap when focused, or its caret could fall outside the shown lines. Details is windowed
-    // FIRST because it feeds the chrome measurement that sizes the body.
+    // The body's scroll is already kept consistent with its viewport by the editor reducer
+    // (keepCursorVisible on every edit/move, using the same viewportRows the display windows to),
+    // so it is rendered from its own scroll — this leaves the window at the TOP on open while the
+    // off-window end cursor is simply hidden by the caret guard below (never stranded). The details
+    // field's display is capped at 5 rows (< the reducer's viewportRows), so sync it here to that
+    // cap when focused, or its caret could fall outside the shown lines.
+    const bodyBuffer = current.editor.buffers.enhanced_body;
     const detailsBuffer = focusedField === 'additional_details'
       ? promptEnhancementKeepFieldCursorVisibleV1(current.editor.buffers.additional_details, editorWidth, detailsRows)
       : current.editor.buffers.additional_details;
+    // Display only the visible viewport of each editable field so the frame fits the terminal
+    // and redraws in place. The full text stays in current.editor for editing/apply/send.
+    const bodyDisplay = windowPromptEnhancementFieldForDisplayV1(bodyBuffer, editorWidth, bodyRows);
     const detailsDisplay = detailsBuffer.text
       ? windowPromptEnhancementFieldForDisplayV1(detailsBuffer, editorWidth, detailsRows)
       : '';
-    // Fill the window (owner request 2026-08-07 — the body was small with dead space below the
-    // footer): MEASURE the exact non-body chrome by rendering a 1-line-body probe with the same
-    // focus/refinement/details, then give the body every remaining row (rows-1 for the no-scroll
-    // cap). This adapts to the variable header (pinch + trust cues + why-help), the directional
-    // rows, and the current details block — no hardcoded chrome constant — so the frame always
-    // fills to the window bottom and never overflows/scrolls. The reducer's own viewportRows is
-    // resized to match, so cursor-keeping and the display agree.
-    const probeChrome = renderPromptEnhancementPopupFrameV1(
-      { model: view.model, editedBodyText: 'x', additionalDetailsText: detailsDisplay, publicNotice: view.publicNotice },
-      { focusIndex: current.focusIndex, helpExpanded: current.helpExpanded, refinement: view.refinement, colorize: false },
-    ).split('\n').length - 1;
-    const measuredBodyRows = Math.max(4, (output.rows ?? 24) - 1 - probeChrome);
-    if (current === state) {
-      state = { ...current, editor: resizePromptEnhancementMultilineEditorV1(current.editor, editorWidth, measuredBodyRows) };
-      current = state;
-    }
-    // Display only the visible viewport of each editable field so the frame fits the terminal
-    // and redraws in place. The full text stays in current.editor for editing/apply/send.
-    const bodyBuffer = current.editor.buffers.enhanced_body;
-    const bodyDisplay = windowPromptEnhancementFieldForDisplayV1(bodyBuffer, editorWidth, measuredBodyRows);
     // Caret row is window-relative, from the SAME synced buffer used for the display. If it
     // still falls outside the shown lines, leave the caret unset so the cursor is hidden rather
     // than placed on a wrong row.
