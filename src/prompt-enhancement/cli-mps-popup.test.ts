@@ -186,16 +186,17 @@ describe('UI-6 MPS first-popup frame renderer (§3.3)', () => {
     expect(deRail(planLine).trimStart().startsWith('●')).toBe(false);
   });
 
-  it('renders the Cancel row light yellow in colorized mode and records the caret screen position (owner request)', () => {
-    // Light-yellow Cancel (owner request 2026-08-07): the bright caution tone is applied only to
-    // the Cancel label, never the body row; the normal yellow ([33m]) is reserved for the
-    // provider-failure notice.
+  it('renders the Cancel row EXTRA-light (pale) yellow in colorized mode and records the caret screen position (owner request)', () => {
+    // Pale-yellow Cancel (owner request 2026-08-08): a touch softer than the bright hint yellow —
+    // 256-colour 38;5;229. Applied only to the Cancel label, never the body row; the bright hint
+    // yellow ([93m]) and the normal yellow ([33m], provider-failure notice) are unaffected.
     const colored = renderPromptEnhancementMpsFirstPopupFrameV1(model(), { focusIndex: 0, colorize: true });
     const cancelLine = colored.split('\n').find((line) => line.includes('Cancel (remaining'));
     const bodyLine = colored.split('\n').find((line) => line.includes('Use enhanced sequence prompt'));
-    expect(cancelLine).toContain(`${ESC}[93m`);
-    expect(cancelLine).not.toContain(`${ESC}[33m`);
-    expect(bodyLine).not.toContain(`${ESC}[93m`);
+    expect(cancelLine).toContain(`${ESC}[38;5;229m`);      // pale/extra-light yellow
+    expect(cancelLine).not.toContain(`${ESC}[93m`);        // not the bright hint yellow
+    expect(cancelLine).not.toContain(`${ESC}[33m`);        // not the normal (notice) yellow
+    expect(bodyLine).not.toContain(`${ESC}[38;5;229m`);
     // Caret contract (same as the PE renderer): caretOut records the 1-based screen row of the
     // body's first content line, at column 7 (2-char rail + 4-space indent + 1-based).
     const caretOut = { row: -1, col: -1 };

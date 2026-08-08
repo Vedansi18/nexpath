@@ -73,9 +73,12 @@ const PROMPT_ENHANCEMENT_MPS_CLI_SGR_V1 = (() => {
     green: `${e}[32m`,
     // Normal yellow — provider-failure notice only (caution line in the header).
     yellow: `${e}[33m`,
-    // Shortcut/action hints AND the Cancel row — bright ("light") yellow, distinct + visible on
-    // every OS (owner requests 2026-08-07).
+    // Shortcut/action hints — bright ("light") yellow, distinct + visible on every OS (owner 2026-08-07).
     lightYellow: `${e}[93m`,
+    // Cancel row — an EXTRA-light / pale yellow (256-colour), a touch softer than the bright hint
+    // yellow (owner request 2026-08-08). 256-colour renders on all modern terminals; a terminal
+    // that ignores it simply falls back to the default fg (never broken).
+    paleYellow: `${e}[38;5;229m`,
     dim: `${e}[2m`,
     bold: `${e}[1m`,
     reset: `${e}[0m`,
@@ -125,7 +128,7 @@ export function renderPromptEnhancementMpsFirstPopupFrameV1(
   // Radio row identical to the PE popup (owner request: MPS mirrors the PE popup): a green ●
   // (focused) / gray ○ (unfocused) bullet and a bold (focused) / dim (unfocused) label. The cyan
   // left rail is applied to EVERY line as one continuous border in the post-pass below (owner
-  // request: full-height rail, not per-row segments). Cancel renders LIGHT yellow — the same
+  // request: full-height rail, not per-row segments). Cancel renders EXTRA-light (pale) yellow — the same
   // bright tier as the shortcut hints (owner request 2026-08-07).
   const radioRow = (rowIndex: number, label: string, options: { suffix?: string; tone?: 'default' | 'cancel' } = {}): string => {
     const focused = rowIndex === focusIndex;
@@ -134,7 +137,7 @@ export function renderPromptEnhancementMpsFirstPopupFrameV1(
     if (!c) return `${glyph} ${label}${suffix}`;
     const bullet = focused ? `${c.green}${glyph}${c.reset}` : `${c.gray}${glyph}${c.reset}`;
     const styled = options.tone === 'cancel'
-      ? (focused ? `${c.bold}${c.lightYellow}${label}${c.reset}` : `${c.lightYellow}${label}${c.reset}`)
+      ? (focused ? `${c.bold}${c.paleYellow}${label}${c.reset}` : `${c.paleYellow}${label}${c.reset}`)
       : (focused ? `${c.bold}${label}${c.reset}` : `${c.dim}${label}${c.reset}`);
     return `${bullet} ${styled}${suffix}`;
   };
@@ -276,7 +279,7 @@ export function renderPromptEnhancementMpsContinuationFrameV1(
   // Radio row identical to the PE popup (owner request: MPS mirrors the PE popup): a green ●
   // (focused) / gray ○ (unfocused) bullet and a bold (focused) / dim (unfocused) label. The cyan
   // left rail is applied to EVERY line as one continuous border in the post-pass (owner request:
-  // full-height rail). Cancel renders LIGHT yellow (owner request 2026-08-07) — same tones as
+  // full-height rail). Cancel renders EXTRA-light (pale) yellow (owner request 2026-08-08) — same tones as
   // the first popup.
   const radioRow = (rowIndex: number, label: string, options: { suffix?: string; tone?: 'default' | 'cancel' } = {}): string => {
     const focused = rowIndex === focusIndex;
@@ -285,7 +288,7 @@ export function renderPromptEnhancementMpsContinuationFrameV1(
     if (!c) return `${glyph} ${label}${suffix}`;
     const bullet = focused ? `${c.green}${glyph}${c.reset}` : `${c.gray}${glyph}${c.reset}`;
     const styled = options.tone === 'cancel'
-      ? (focused ? `${c.bold}${c.lightYellow}${label}${c.reset}` : `${c.lightYellow}${label}${c.reset}`)
+      ? (focused ? `${c.bold}${c.paleYellow}${label}${c.reset}` : `${c.paleYellow}${label}${c.reset}`)
       : (focused ? `${c.bold}${label}${c.reset}` : `${c.dim}${label}${c.reset}`);
     return `${bullet} ${styled}${suffix}`;
   };
