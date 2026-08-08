@@ -152,6 +152,48 @@ Paste into Cursor's chat input and re-send — that's the manual workaround unti
 
 ---
 
+## Step 5b — Trigger the Prompt Enhancement (PE) round-trip (P12, VED-PE-14)
+
+PE is a separate webview from the Decision-Session (DS) panel above — this step verifies it
+specifically, since Steps 4-5 only exercise DS. PE uses the exact same `nexpath auto`/`nexpath stop`
+commands as DS; which one fires is decided after the fact from typed store evidence, not by a
+separate CLI path.
+
+**Prerequisite:** `nexpath config get advisory_frequency` must not be `off` (default `every_event` is
+fine).
+
+1. In the same Ask-mode chat (`Ctrl+L`), type a **sequence-shaped** prompt — one with list structure
+   (`and`/`then`/`also`, or several comma/semicolon-separated points) naming at least two of: a
+   fix/bug, a review/audit, a refactor/cleanup, a plan/spec, or a build/implement task. This is
+   detected by pure text matching, no LLM classifier or API key required, so it fires reliably:
+   > `Fix the login bug, then review the auth module, and also plan the refactor.`
+2. Press Enter, wait for Cursor's normal response to finish (same as Step 5).
+3. **Cursor:** a *second* Nexpath panel appears in the activity bar (distinct from the DS one above),
+   titled **"Nexpath · Prompt enhancement"**. It should show:
+   - One editable text area holding the enhanced prompt body (never a numbered option list — that's
+     the DS shape, not PE's).
+   - Three action buttons: **Shorter**, **More thorough**, **More project-grounded**.
+   - A **Use this prompt** button and a **Close** control.
+   If instead you see "No prompt enhancement is pending." / "Working on your prompt…" / "This prompt
+   can't be sent as enhanced right now." / "Showing a fallback version of this prompt.", note which
+   one and treat it as a fail for this step — those are the non-ready states, not the goal state.
+4. **Windsurf/Devin only:** there is no popup to click through — the extension polls the store and
+   inserts the enhanced body directly into Cascade's chat input. Check the developer console for:
+   ```
+   [nexpath] windsurf PE poller started for roots: <workspace path>
+   [nexpath] windsurf PE poller insert outcome: inserted
+   ```
+   If the outcome instead reads `insert_failed_no_clipboard_fallback`, this is expected-and-correct
+   behaviour per D-1 (there is deliberately no clipboard fallback for PE on Windsurf) — note it as a
+   capability gap for that Cascade version, not a bug.
+5. Click **Use this prompt** (Cursor) and confirm it inserts into the chat input the same way Step 5's
+   DS option-click does (clipboard fallback unless Step 6's command IDs are already verified).
+6. **Re-run Step 5's DS hazard prompt** (e.g. `explain why "rm -rf ~/Downloads/*" is dangerous`) once
+   more in the same session, and confirm the DS panel still fires normally — PE landing must not have
+   broken the pre-existing DS path.
+
+---
+
 ## Step 6 — Verify (or correct) the chat-input command IDs
 
 The `chat-input-injector.ts` file ships with a list of HEURISTIC GUESSES for Cursor / Windsurf chat-input commands. Until B5 verifies them, the injection always falls through to the clipboard. To find the real command IDs:
@@ -204,8 +246,14 @@ After completing steps 1-5, paste the following table back with your observed va
 | 5 (click option) | Click on an option triggers the clipboard fallback toast: <kbd>YES / NO</kbd> |
 | 6 (command IDs) | Discovered command IDs for direct chat-input injection: <kbd>list here</kbd> |
 | 6 (direct inject works) | After updating the candidate list, click writes directly to chat input: <kbd>YES / NO</kbd> |
+| 5b (PE panel appeared) | Second "Nexpath · Prompt enhancement" panel appeared with one editable body + 3 action buttons: <kbd>YES / NO</kbd> |
+| 5b (host, if Windsurf) | `windsurf PE poller started`/`insert outcome` log lines observed, outcome value: <kbd>paste here / N/A on Cursor</kbd> |
+| 5b (host detection) | Watcher log's `host=` value was `cursor` or `windsurf`, never `vscode-generic`: <kbd>YES / NO</kbd> |
+| 5b (DS still works) | Re-running Step 5's DS hazard prompt after PE fired still shows the DS panel normally: <kbd>YES / NO</kbd> |
 
-If any **NO** appears, log it as an issue with reproduction steps. **Step 6's direct-inject result is the final B5 gate** — when it's YES, M2 Branch 5 is done.
+If any **NO** appears, log it as an issue with reproduction steps. **Step 6's direct-inject result is
+the final B5 gate** — when it's YES, M2 Branch 5 is done. **Step 5b feeds P12's cross-OS PE evidence**
+— see `CROSS-OS-VERIFY.md`.
 
 ---
 
