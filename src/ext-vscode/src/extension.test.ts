@@ -21,6 +21,8 @@ const {
   mockReadPendingPromptEnhancement,
   mockIsPeOriginTurn,
   mockChatInputInject,
+  mockReadLatestAdvisoryMeta,
+  mockReadInjectedPrompt,
 } = vi.hoisted(() => ({
   mockShowOnboarding: vi.fn(),
   mockRegisterWebviewViewProvider: vi.fn(),
@@ -40,6 +42,8 @@ const {
   mockReadPendingPromptEnhancement: vi.fn(async () => null),
   mockIsPeOriginTurn: vi.fn(async () => false),
   mockChatInputInject: vi.fn(async () => false),
+  mockReadLatestAdvisoryMeta: vi.fn(async () => null),
+  mockReadInjectedPrompt: vi.fn(async () => null),
 }));
 
 vi.mock('vscode', () => ({
@@ -120,6 +124,10 @@ vi.mock('./pe-store-reader.js', () => ({
 vi.mock('./pe-origin.js', () => ({
   isPeOriginTurn: mockIsPeOriginTurn,
 }));
+vi.mock('./advisory-store-reader.js', () => ({
+  readLatestAdvisoryMeta: mockReadLatestAdvisoryMeta,
+  readInjectedPrompt: mockReadInjectedPrompt,
+}));
 vi.mock('./path-enumerator.js', () => ({
   enumerateStateVscdbPaths: mockEnumerateStateVscdbPaths,
   globalStorageStateVscdbPath: () => null,
@@ -196,6 +204,8 @@ describe('activate', () => {
     mockReadPendingPromptEnhancement.mockReset().mockResolvedValue(null);
     mockIsPeOriginTurn.mockReset().mockResolvedValue(false);
     mockChatInputInject.mockReset().mockResolvedValue(false);
+    mockReadLatestAdvisoryMeta.mockReset().mockResolvedValue(null);
+    mockReadInjectedPrompt.mockReset().mockResolvedValue(null);
     mockRegisterWebviewViewProvider.mockReturnValue({ dispose: vi.fn() });
     logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -473,18 +483,23 @@ describe('activate', () => {
       expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('PE visible-surface ACK: render_failure'));
     });
 
-    it('checkPeOrigin: never reads DS status="shown" — structural proof the mocked store reader has no such field to read', async () => {
+    it('checkPeOrigin: never reads DS status="shown" — direct spy proof, not coincidental', async () => {
       mockIsPeOriginTurn.mockResolvedValueOnce(true);
       mockReadPendingPromptEnhancement.mockResolvedValueOnce({
         id: 1, projectRoot: '/proj', sessionId: 's1', promptCount: 1,
         status: 'pending', createdAt: 0, requestJson: '{}', resultJson: validResultJson,
       });
       await activateWithWatcher();
+      mockReadLatestAdvisoryMeta.mockClear();
+      mockReadInjectedPrompt.mockClear();
       await pipelineDeps().checkPeOrigin!(makeEvent());
-      // readLatestAdvisoryMeta / stop_advisory_shown / decision_session_count
-      // are DS-only concepts from advisory-store-reader.js — never imported
-      // or called on this PE path (confirmed by the fact this test never
-      // mocks or invokes any of them, yet the flow completes normally).
+      // readLatestAdvisoryMeta / readInjectedPrompt are DS-only reads
+      // (advisory-store-reader.js's pending_advisories.status='shown' path).
+      // Both are mocked and spied on directly here — this asserts the PE
+      // wiring never calls either, rather than relying on the coincidence
+      // that advisory-fallback.js (their only other caller) is also mocked.
+      expect(mockReadLatestAdvisoryMeta).not.toHaveBeenCalled();
+      expect(mockReadInjectedPrompt).not.toHaveBeenCalled();
       expect(mockReadPendingPromptEnhancement).toHaveBeenCalledTimes(1);
     });
 
@@ -505,6 +520,17 @@ describe('activate', () => {
       expect(logSpy).toHaveBeenCalledWith(
         expect.stringContaining('PE insert outcome: insert_failed_no_clipboard_fallback'),
       );
+    });
+
+    it('injectPeResult: insertion succeeds but the best-effort origin-record read throws — resolves cleanly, no origin recorded', async () => {
+      mockChatInputInject.mockResolvedValueOnce(true);
+      mockReadPendingPromptEnhancement.mockRejectedValueOnce(new Error('sqlite busy'));
+      await activateWithWatcher();
+      await expect(pipelineDeps().injectPeResult!('the enhanced body', makeEvent())).resolves.toBeUndefined();
+      // The insert itself succeeded, but since the origin record failed
+      // best-effort, the next turn's isPeEcho must NOT report a typed echo —
+      // proving the failure is truly swallowed, not silently mis-recorded.
+      expect(pipelineDeps().isPeEcho!(makeEvent({ prompt: 'the enhanced body' }))).toBe(false);
     });
 
     it('isPeEcho: reports true for the exact text just delivered by injectPeResult (typed origin guard armed)', async () => {

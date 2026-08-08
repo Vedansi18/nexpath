@@ -129,4 +129,21 @@ describe('createInjectedRecordStore — resolveOriginGuardState (P8, typed-origi
       'next_submit_processed_as_delivery_echo',
     );
   });
+
+  it('a later record (with a new origin) replaces the previous one entirely, same as isRecentEcho', () => {
+    const store = createInjectedRecordStore(60_000);
+    store.record('/proj', 'first body', 1_000, { currentBodyId: 'body-1', bodyRevision: 1 });
+    store.record('/proj', 'second body', 2_000, { currentBodyId: 'body-2', bodyRevision: 5 });
+    expect(store.resolveOriginGuardState('/proj', 'first body', 2_100)).toBe('next_submit_mismatch_cleared');
+    expect(store.resolveOriginGuardState('/proj', 'second body', 2_100)).toBe(
+      'next_submit_processed_as_delivery_echo',
+    );
+  });
+
+  it('a later record WITHOUT an origin correctly clears a previously-armed typed guard', () => {
+    const store = createInjectedRecordStore(60_000);
+    store.record('/proj', 'first body', 1_000, origin);
+    store.record('/proj', 'second body', 2_000); // no origin — e.g. a DS injection overwrote it
+    expect(store.resolveOriginGuardState('/proj', 'second body', 2_100)).toBe('not_delivered');
+  });
 });

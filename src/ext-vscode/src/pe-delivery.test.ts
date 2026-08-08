@@ -33,6 +33,10 @@ describe('validatePeExtensionDeliveryPayload — valid payload', () => {
       reasonCodes: ['typed_extension_payload_valid', 'raw_transport_not_authority'],
     });
   });
+
+  it('tolerates an extra, unrecognised key — the validator checks for required/forbidden keys, not an exact key set', () => {
+    expect(validatePeExtensionDeliveryPayload({ ...validPayload, someFutureField: 'anything' }).ok).toBe(true);
+  });
 });
 
 describe('validatePeExtensionDeliveryPayload — structural rejection', () => {
@@ -161,22 +165,28 @@ describe('validatePeExtensionDeliveryPayload — required-field gaps (missing vs
 });
 
 describe('evaluatePeHostCapability — all 9 evidence states', () => {
-  const cases: Array<[PeHostCapabilityEvidenceState, ReturnType<typeof evaluatePeHostCapability>['deliveryChannel'], boolean]> = [
-    ['claude_cli_stop_bridge_supported', 'cli_stop_bridge', false],
-    ['extension_typed_payload_supported', 'extension_bridge', false],
-    ['host_unsupported', 'manual_fallback', true],
-    ['host_unknown', 'manual_fallback', true],
-    ['direct_insert_success_text_only', 'extension_bridge', false],
-    ['direct_insert_failure', 'manual_fallback', true],
-    ['foreground_unavailable', 'manual_fallback', true],
-    ['stale_capability_data', 'manual_fallback', true],
-    ['clipboard_manual_copy_source_precedent_only', 'manual_fallback', true],
+  const cases: Array<[
+    PeHostCapabilityEvidenceState,
+    ReturnType<typeof evaluatePeHostCapability>['deliveryChannel'],
+    boolean,
+    ReturnType<typeof evaluatePeHostCapability>['extensionPayloadState'],
+  ]> = [
+    ['claude_cli_stop_bridge_supported', 'cli_stop_bridge', false, 'not_applicable'],
+    ['extension_typed_payload_supported', 'extension_bridge', false, 'typed_payload_required'],
+    ['host_unsupported', 'manual_fallback', true, 'fallback_without_authority'],
+    ['host_unknown', 'manual_fallback', true, 'fallback_without_authority'],
+    ['direct_insert_success_text_only', 'extension_bridge', false, 'typed_payload_required'],
+    ['direct_insert_failure', 'manual_fallback', true, 'fallback_without_authority'],
+    ['foreground_unavailable', 'manual_fallback', true, 'fallback_without_authority'],
+    ['stale_capability_data', 'manual_fallback', true, 'fallback_without_authority'],
+    ['clipboard_manual_copy_source_precedent_only', 'manual_fallback', true, 'fallback_without_authority'],
   ];
 
-  it.each(cases)('%s -> deliveryChannel=%s, fallbackRequired=%s', (evidenceState, deliveryChannel, fallbackRequired) => {
+  it.each(cases)('%s -> deliveryChannel=%s, fallbackRequired=%s, extensionPayloadState=%s', (evidenceState, deliveryChannel, fallbackRequired, extensionPayloadState) => {
     const out = evaluatePeHostCapability(evidenceState);
     expect(out.deliveryChannel).toBe(deliveryChannel);
     expect(out.fallbackRequired).toBe(fallbackRequired);
+    expect(out.extensionPayloadState).toBe(extensionPayloadState);
     expect(out.evidenceState).toBe(evidenceState);
   });
 
