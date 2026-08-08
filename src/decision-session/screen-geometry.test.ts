@@ -14,9 +14,13 @@ import {
   POPUP_MAX_WIDTH_PX,
   POPUP_MIN_COLS,
   POPUP_SIZE_RATIO,
+  buildWindowsConsoleLauncherScriptV1,
+  buildWindowsConsolePositionScriptV1,
   computeDockedPopupGeometry,
   computePopupGeometry,
+  detectLinuxDisplayServerV1,
   detectScreenResolution,
+  wrapLinuxSpawnForWaylandX11V1,
   getEnvScreenOverride,
   getPopupDockSide,
   getPopupWidthRatio,
@@ -643,5 +647,44 @@ describe('screen-geometry — parseWorkAreaPowerShellOutput', () => {
     expect(parseWorkAreaPowerShellOutput('1920\n1040')).toBeNull();
     expect(parseWorkAreaPowerShellOutput('')).toBeNull();
     expect(parseWorkAreaPowerShellOutput('0\n0\n0\n1040')).toBeNull(); // zero width
+  });
+});
+
+describe('screen-geometry — shared spawn helpers (P5)', () => {
+  it('detectLinuxDisplayServerV1: XDG authoritative, then WAYLAND_DISPLAY/DISPLAY, else unknown', () => {
+    expect(detectLinuxDisplayServerV1({ XDG_SESSION_TYPE: 'wayland', DISPLAY: ':0' })).toBe('wayland');
+    expect(detectLinuxDisplayServerV1({ XDG_SESSION_TYPE: 'x11', WAYLAND_DISPLAY: 'wayland-0' })).toBe('x11');
+    expect(detectLinuxDisplayServerV1({ WAYLAND_DISPLAY: 'wayland-0' })).toBe('wayland');
+    expect(detectLinuxDisplayServerV1({ DISPLAY: ':0' })).toBe('x11');
+    expect(detectLinuxDisplayServerV1({})).toBe('unknown');
+  });
+
+  it('wrapLinuxSpawnForWaylandX11V1: wraps GTK terminals on Wayland (with geometry), else passthrough', () => {
+    const plan = { command: 'gnome-terminal', args: ['--geometry=115x54+768+0', '--', 'node', 's'] };
+    const wrapped = wrapLinuxSpawnForWaylandX11V1(plan, { displayServer: 'wayland', terminalCommand: 'gnome-terminal', hasGeometry: true });
+    expect(wrapped).toEqual({ command: 'env', args: ['GDK_BACKEND=x11', 'gnome-terminal', '--geometry=115x54+768+0', '--', 'node', 's'] });
+    // X11 → passthrough; non-GTK → passthrough; no geometry → passthrough.
+    expect(wrapLinuxSpawnForWaylandX11V1(plan, { displayServer: 'x11', terminalCommand: 'gnome-terminal', hasGeometry: true }).command).toBe('gnome-terminal');
+    expect(wrapLinuxSpawnForWaylandX11V1({ command: 'kitty', args: [] }, { displayServer: 'wayland', terminalCommand: 'kitty', hasGeometry: true }).command).toBe('kitty');
+    expect(wrapLinuxSpawnForWaylandX11V1(plan, { displayServer: 'wayland', terminalCommand: 'gnome-terminal', hasGeometry: false }).command).toBe('gnome-terminal');
+  });
+
+  it('buildWindowsConsolePositionScriptV1: GetConsoleWindow + MoveWindow(x,y,w,h) + fail-open guard', () => {
+    const ps = buildWindowsConsolePositionScriptV1({ widthPx: 1152, heightPx: 1080, xPx: 768, yPx: 0, cols: 115, rows: 54 });
+    expect(ps).toContain('$ErrorActionPreference = "SilentlyContinue"');
+    expect(ps).toContain('GetConsoleWindow');
+    expect(ps).toContain('MoveWindow([NexpathWin]::GetConsoleWindow(), 768, 0, 1152, 1080, $true)');
+  });
+
+  it('buildWindowsConsoleLauncherScriptV1: mode con + powershell -File before the command; no geometry = plain', () => {
+    const geom = { widthPx: 1152, heightPx: 1080, xPx: 768, yPx: 0, cols: 115, rows: 54 };
+    const docked = buildWindowsConsoleLauncherScriptV1({ commandLine: 'node "s.mjs"', geometry: geom, positionScriptPath: 'C:/p.ps1' });
+    expect(docked).toContain('mode con: cols=115 lines=54');
+    expect(docked).toContain('powershell -NoProfile -ExecutionPolicy Bypass -File "C:/p.ps1" 2>nul');
+    expect(docked.indexOf('mode con')).toBeLessThan(docked.indexOf('node "s.mjs"'));
+    // No geometry → plain launcher (no sizing/positioning).
+    const plain = buildWindowsConsoleLauncherScriptV1({ commandLine: 'node "s.mjs"' });
+    expect(plain).not.toContain('mode con');
+    expect(plain).not.toContain('powershell');
   });
 });

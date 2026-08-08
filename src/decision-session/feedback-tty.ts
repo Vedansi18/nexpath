@@ -25,7 +25,13 @@ import {
   detectLinuxTerminal,
   buildTerminalAppleScript,
 } from './TtySelectFn.js';
-import { detectScreenResolution, computeDockedPopupGeometry } from './screen-geometry.js';
+import {
+  detectScreenResolution,
+  computeDockedPopupGeometry,
+  detectLinuxDisplayServerV1,
+  buildWindowsConsolePositionScriptV1,
+  buildWindowsConsoleLauncherScriptV1,
+} from './screen-geometry.js';
 
 const WINDOW_TITLE = 'Nexpath — Feedback';
 
@@ -121,14 +127,33 @@ async function defaultPlanSpawn(scriptFile: string): Promise<SpawnPlan | null> {
     : null;
 
   if (plat === 'win32') {
-    return planWindowsPopupSpawn(geom, WINDOW_TITLE, scriptFile);
+    // Right-dock (P5): write a launcher .cmd (mode con size + MoveWindow .ps1) beside the script
+    // and run it, so the feedback window is sized+positioned. Fail-open — node always runs; if the
+    // write fails, fall back to the direct `node` spawn. Files are cleaned up by the caller's dir.
+    let launcherPath: string | undefined;
+    if (geom) {
+      try {
+        const positionPath = `${scriptFile}.position.ps1`;
+        launcherPath = `${scriptFile}.launch.cmd`;
+        writeFileSync(positionPath, buildWindowsConsolePositionScriptV1(geom), 'utf8');
+        writeFileSync(launcherPath, buildWindowsConsoleLauncherScriptV1({
+          commandLine: `node "${scriptFile}"`,
+          geometry: geom,
+          positionScriptPath: positionPath,
+        }), 'utf8');
+      } catch {
+        launcherPath = undefined;
+      }
+    }
+    return planWindowsPopupSpawn(geom, WINDOW_TITLE, scriptFile, launcherPath);
   }
   if (plat === 'darwin') {
     return { cmd: 'osascript', args: ['-e', buildTerminalAppleScript(`node ${scriptFile}`, geom)] };
   }
   if (plat === 'linux') {
     const terminal = detectLinuxTerminal();
-    if (terminal) return planLinuxPopupSpawn(terminal, geom, WINDOW_TITLE, scriptFile);
+    // Right-dock (P5): pass the display server so GTK terminals get GDK_BACKEND=x11 on Wayland.
+    if (terminal) return planLinuxPopupSpawn(terminal, geom, WINDOW_TITLE, scriptFile, detectLinuxDisplayServerV1());
   }
   return null;   // no window emulator → caller uses /dev/tty
 }

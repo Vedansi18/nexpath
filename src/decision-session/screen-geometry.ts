@@ -499,3 +499,95 @@ export async function detectWorkArea(): Promise<WorkArea> {
   if (screen) return { x: 0, y: 0, widthPx: screen.widthPx, heightPx: screen.heightPx };
   return { x: 0, y: 0, widthPx: FALLBACK_SCREEN_SIZE.widthPx, heightPx: FALLBACK_SCREEN_SIZE.heightPx };
 }
+
+// ── Shared spawn helpers (P5) — used by BOTH the PE host (cli) and the advisory ─
+// (decision-session) so the Windows positioning + Ubuntu Wayland handling live in
+// exactly one place. All pure; no I/O.
+
+/** Linux display server, for choosing how a spawned popup window is positioned. */
+export type PromptEnhancementDisplayServerV1 = 'x11' | 'wayland' | 'unknown';
+
+/**
+ * Detect the Linux display server from the environment. `XDG_SESSION_TYPE` is authoritative when
+ * present; otherwise infer from `WAYLAND_DISPLAY` / `DISPLAY`. Pure. Matters because GTK terminals
+ * default to NATIVE Wayland, where an X11 `--geometry` position offset is ignored — forcing
+ * `GDK_BACKEND=x11` routes them through XWayland (default on recent Ubuntu), where it positions.
+ */
+export function detectLinuxDisplayServerV1(
+  env: NodeJS.ProcessEnv = process.env,
+): PromptEnhancementDisplayServerV1 {
+  const sessionType = (env.XDG_SESSION_TYPE ?? '').trim().toLowerCase();
+  if (sessionType === 'wayland') return 'wayland';
+  if (sessionType === 'x11') return 'x11';
+  if (env.WAYLAND_DISPLAY) return 'wayland';
+  if (env.DISPLAY) return 'x11';
+  return 'unknown';
+}
+
+/** GTK terminal command names that default to native Wayland and need GDK_BACKEND=x11 to honour --geometry. */
+export const GTK_X11_GEOMETRY_TERMINALS_V1: readonly string[] = ['gnome-terminal', 'xfce4-terminal'];
+
+/**
+ * Wrap a Linux terminal spawn `{ command, args }` with `env GDK_BACKEND=x11 …` when the session is
+ * Wayland, the terminal is a GTK one that needs XWayland to position, and a geometry is actually
+ * being applied. On X11 / unknown, or for non-GTK terminals, or without geometry, the plan is
+ * returned unchanged. Pure. `env` execs into the terminal, so `--wait`/exit semantics are preserved.
+ */
+export function wrapLinuxSpawnForWaylandX11V1(
+  plan: { command: string; args: readonly string[] },
+  opts: { displayServer: PromptEnhancementDisplayServerV1; terminalCommand: string; hasGeometry: boolean },
+): { command: string; args: string[] } {
+  if (opts.hasGeometry && opts.displayServer === 'wayland' && GTK_X11_GEOMETRY_TERMINALS_V1.includes(opts.terminalCommand)) {
+    return { command: 'env', args: ['GDK_BACKEND=x11', plan.command, ...plan.args] };
+  }
+  return { command: plan.command, args: [...plan.args] };
+}
+
+/**
+ * The PowerShell script (written as a sibling .ps1, run via `-File`) that right-docks a popup's
+ * console window: GetConsoleWindow (kernel32) + MoveWindow (user32) move+size the CURRENT console
+ * to the docked pixel rect. Written as a separate file so there is NO batch/PowerShell/C# quoting
+ * to get wrong; `$ErrorActionPreference = SilentlyContinue` + the caller's `2>nul` make it fully
+ * fail-open. Pure.
+ */
+export function buildWindowsConsolePositionScriptV1(geometry: PopupGeometry): string {
+  return [
+    '$ErrorActionPreference = "SilentlyContinue"',
+    'Add-Type @"',
+    'using System;',
+    'using System.Runtime.InteropServices;',
+    'public class NexpathWin {',
+    '  [DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow();',
+    '  [DllImport("user32.dll")] public static extern bool MoveWindow(IntPtr hWnd, int X, int Y, int nWidth, int nHeight, bool bRepaint);',
+    '}',
+    '"@',
+    `[void][NexpathWin]::MoveWindow([NexpathWin]::GetConsoleWindow(), ${geometry.xPx}, ${geometry.yPx}, ${geometry.widthPx}, ${geometry.heightPx}, $true)`,
+    '',
+  ].join('\r\n');
+}
+
+/**
+ * Build a Windows `.cmd` launcher that (fail-open) sizes the console in CELLS via `mode con` then
+ * POSITIONS it via a sibling MoveWindow .ps1 (best-effort, `2>nul`), then runs `commandLine`. Both
+ * positioning steps run BEFORE the command, in the same console, so a caller's `cmd /c start /WAIT`
+ * + wait model is unchanged. Omitting `geometry` yields a launcher with no sizing/positioning
+ * (byte-identical to a plain command launcher). Pure. `commandLine` must be a fully-formed,
+ * already-quoted command (the caller owns its quoting).
+ */
+export function buildWindowsConsoleLauncherScriptV1(input: {
+  commandLine: string;
+  geometry?: PopupGeometry;
+  positionScriptPath?: string;
+}): string {
+  const quote = (p: string): string => `"${p.replace(/"/g, '')}"`;
+  const lines = ['@echo off'];
+  if (input.geometry) {
+    lines.push(`mode con: cols=${input.geometry.cols} lines=${input.geometry.rows}`);
+    if (input.positionScriptPath) {
+      lines.push(`powershell -NoProfile -ExecutionPolicy Bypass -File ${quote(input.positionScriptPath)} 2>nul`);
+    }
+  }
+  lines.push(input.commandLine);
+  lines.push('if errorlevel 1 pause', '');
+  return lines.join('\r\n');
+}

@@ -8,7 +8,14 @@ import type {
   PromptEnhancementPrepareResultV1,
 } from '../prompt-enhancement/contracts.js';
 import { validatePromptEnhancementCliPopupResultV1 } from '../prompt-enhancement/cli-submit-popup.js';
-import { computeDockedPopupGeometry, detectScreenResolution, type PopupGeometry } from '../decision-session/screen-geometry.js';
+import {
+  computeDockedPopupGeometry,
+  detectScreenResolution,
+  detectLinuxDisplayServerV1,
+  wrapLinuxSpawnForWaylandX11V1,
+  buildWindowsConsolePositionScriptV1,
+  type PopupGeometry,
+} from '../decision-session/screen-geometry.js';
 import type {
   PromptEnhancementPopupHostInputV1,
   PromptEnhancementPopupHostOutputV1,
@@ -43,19 +50,9 @@ export type PromptEnhancementLinuxDisplayServerV1 = 'x11' | 'wayland' | 'unknown
 export function detectPromptEnhancementLinuxDisplayServerV1(
   env: NodeJS.ProcessEnv = process.env,
 ): PromptEnhancementLinuxDisplayServerV1 {
-  const sessionType = (env.XDG_SESSION_TYPE ?? '').trim().toLowerCase();
-  if (sessionType === 'wayland') return 'wayland';
-  if (sessionType === 'x11') return 'x11';
-  if (env.WAYLAND_DISPLAY) return 'wayland';
-  if (env.DISPLAY) return 'x11';
-  return 'unknown';
+  // Delegates to the shared decision-session helper (P5) — one implementation for both layers.
+  return detectLinuxDisplayServerV1(env);
 }
-
-/** GTK terminals that default to native Wayland and need GDK_BACKEND=x11 (XWayland) to honour --geometry. */
-const PROMPT_ENHANCEMENT_GTK_X11_GEOMETRY_TERMINALS_V1: readonly PromptEnhancementLinuxTerminalCommandV1[] = [
-  'gnome-terminal',
-  'xfce4-terminal',
-];
 
 export type PromptEnhancementCliHostCapabilityV1 =
   | {
@@ -339,14 +336,11 @@ export function planPromptEnhancementLinuxTerminalLaunchV1(input: {
   // positions the window. XWayland ships by default on recent Ubuntu. On X11 / unknown sessions this
   // wrap is not applied (native geometry already works); non-GTK terminals are left untouched
   // (xterm is already XWayland; kitty/foot/alacritty are size-only under Wayland by design).
-  if (
-    input.geometry
-    && input.displayServer === 'wayland'
-    && PROMPT_ENHANCEMENT_GTK_X11_GEOMETRY_TERMINALS_V1.includes(input.terminalCommand)
-  ) {
-    return { command: 'env', args: ['GDK_BACKEND=x11', plan.command, ...plan.args] };
-  }
-  return plan;
+  return wrapLinuxSpawnForWaylandX11V1(plan, {
+    displayServer: input.displayServer ?? 'unknown',
+    terminalCommand: input.terminalCommand,
+    hasGeometry: Boolean(input.geometry),
+  });
 }
 
 /**
@@ -408,19 +402,8 @@ export function buildPromptEnhancementWindowsLauncherScriptV1(input: {
  * fully fail-open (a failure leaves the mode-con-sized window at its default position). Pure.
  */
 export function buildPromptEnhancementWindowsPositionScriptV1(geometry: PopupGeometry): string {
-  return [
-    '$ErrorActionPreference = "SilentlyContinue"',
-    'Add-Type @"',
-    'using System;',
-    'using System.Runtime.InteropServices;',
-    'public class NexpathWin {',
-    '  [DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow();',
-    '  [DllImport("user32.dll")] public static extern bool MoveWindow(IntPtr hWnd, int X, int Y, int nWidth, int nHeight, bool bRepaint);',
-    '}',
-    '"@',
-    `[void][NexpathWin]::MoveWindow([NexpathWin]::GetConsoleWindow(), ${geometry.xPx}, ${geometry.yPx}, ${geometry.widthPx}, ${geometry.heightPx}, $true)`,
-    '',
-  ].join('\r\n');
+  // Delegates to the shared decision-session helper (P5) — one MoveWindow implementation.
+  return buildWindowsConsolePositionScriptV1(geometry);
 }
 
 /**
