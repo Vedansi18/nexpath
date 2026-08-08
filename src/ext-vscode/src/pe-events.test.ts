@@ -181,6 +181,27 @@ describe('routePeWebviewMessage — pe_submit_additional_details', () => {
     );
     expect(out?.staleOrMismatched).toBe(true);
   });
+
+  it('carries editedBodyText from the message\'s bodyText field (P9: the current visible edited body)', () => {
+    const out = routePeWebviewMessage(
+      { type: 'pe_submit_additional_details', bodyId: 'body-1', bodyRevision: 3, additionalDetailsText: 'extra context', bodyText: 'the visible edited body' },
+      ctx,
+    );
+    expect(out?.editedBodyText).toBe('the visible edited body');
+  });
+
+  it('editedBodyText is undefined when bodyText is absent or not a string (defensive, does not reject the whole event)', () => {
+    expect(routePeWebviewMessage(
+      { type: 'pe_submit_additional_details', bodyId: 'body-1', bodyRevision: 3, additionalDetailsText: 'x' },
+      ctx,
+    )?.editedBodyText).toBeUndefined();
+    const wrongType = routePeWebviewMessage(
+      { type: 'pe_submit_additional_details', bodyId: 'body-1', bodyRevision: 3, additionalDetailsText: 'x', bodyText: 12345 },
+      ctx,
+    );
+    expect(wrongType?.editedBodyText).toBeUndefined();
+    expect(wrongType?.additionalDetailsText).toBe('x'); // the rest of the event still routes normally
+  });
 });
 
 describe('routePeWebviewMessage — uses the real clock when ctx.now is omitted', () => {

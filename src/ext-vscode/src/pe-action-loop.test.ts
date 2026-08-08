@@ -163,6 +163,30 @@ describe('buildPeActionRequest — apply_details, the only path carrying edited 
     expect(out.ok).toBe(false);
   });
 
+  it('rejects when editedBodyText is present but the wrong type (a number, not a string)', () => {
+    const out = buildPeActionRequest({
+      requestId: 'req-1',
+      actionType: 'apply_details',
+      loopState: freshState(),
+      hasDirtyBodyEdit: false,
+      editedBodyText: 12345 as unknown as string,
+      additionalDetailsText: 'extra requirements',
+    });
+    expect(out.ok).toBe(false);
+  });
+
+  it('rejects when additionalDetailsText is present but the wrong type (a number, not a string)', () => {
+    const out = buildPeActionRequest({
+      requestId: 'req-1',
+      actionType: 'apply_details',
+      loopState: freshState(),
+      hasDirtyBodyEdit: false,
+      editedBodyText: 'the visible edited body',
+      additionalDetailsText: 67890 as unknown as string,
+    });
+    expect(out.ok).toBe(false);
+  });
+
   it('directional actions never carry editedBodyText/additionalDetailsText even when supplied by the caller (structurally impossible to leak)', () => {
     const out = buildPeActionRequest({
       requestId: 'req-1',
@@ -233,6 +257,74 @@ describe('applyPeActionResponse — validated replacement only', () => {
     expect(applied.accepted).toBe(false);
     expect(applied.nextState.lastValidBody).toEqual(initialBody);
     expect(applied.nextState.lockState).toBe('idle'); // still unlocks, just doesn't accept the body
+  });
+
+  const validAcceptedFields = { currentBodyId: 'body-2', bodyRevision: 2, bodyText: 'the shortened body' };
+
+  it('rejects when currentBodyId is missing', () => {
+    const built = buildPeActionRequest({ requestId: 'req-1', actionType: 'shorter', loopState: freshState(), hasDirtyBodyEdit: false });
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+    const { currentBodyId: _omit, ...rest } = validAcceptedFields;
+    const applied = applyPeActionResponse(built.nextState, { requestId: 'req-1', outcome: 'accepted_result', ...rest });
+    expect(applied.accepted).toBe(false);
+    expect(applied.reasonCodes).toContain('malformed_accepted_result_rejected');
+    expect(applied.nextState.lastValidBody).toEqual(initialBody);
+  });
+
+  it('rejects when currentBodyId is present but an empty string', () => {
+    const built = buildPeActionRequest({ requestId: 'req-1', actionType: 'shorter', loopState: freshState(), hasDirtyBodyEdit: false });
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+    const applied = applyPeActionResponse(built.nextState, { requestId: 'req-1', outcome: 'accepted_result', ...validAcceptedFields, currentBodyId: '' });
+    expect(applied.accepted).toBe(false);
+    expect(applied.nextState.lastValidBody).toEqual(initialBody);
+  });
+
+  it('rejects when bodyRevision is missing', () => {
+    const built = buildPeActionRequest({ requestId: 'req-1', actionType: 'shorter', loopState: freshState(), hasDirtyBodyEdit: false });
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+    const { bodyRevision: _omit, ...rest } = validAcceptedFields;
+    const applied = applyPeActionResponse(built.nextState, { requestId: 'req-1', outcome: 'accepted_result', ...rest });
+    expect(applied.accepted).toBe(false);
+    expect(applied.nextState.lastValidBody).toEqual(initialBody);
+  });
+
+  it('rejects when bodyRevision is present but the wrong type (a string, not a number)', () => {
+    const built = buildPeActionRequest({ requestId: 'req-1', actionType: 'shorter', loopState: freshState(), hasDirtyBodyEdit: false });
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+    const applied = applyPeActionResponse(built.nextState, {
+      requestId: 'req-1',
+      outcome: 'accepted_result',
+      ...validAcceptedFields,
+      bodyRevision: '2' as unknown as number,
+    });
+    expect(applied.accepted).toBe(false);
+    expect(applied.nextState.lastValidBody).toEqual(initialBody);
+  });
+});
+
+describe('the full loop: multiple round trips use the latest canonical state, not the original', () => {
+  it('a second request built after an accepted response uses the NEW canonical currentBodyId/bodyRevision', () => {
+    const firstReq = buildPeActionRequest({ requestId: 'req-1', actionType: 'shorter', loopState: freshState(), hasDirtyBodyEdit: false });
+    expect(firstReq.ok).toBe(true);
+    if (!firstReq.ok) return;
+    expect(firstReq.request.currentBodyId).toBe('body-1');
+    expect(firstReq.request.bodyRevision).toBe(1);
+
+    const accepted = applyPeActionResponse(firstReq.nextState, {
+      requestId: 'req-1', outcome: 'accepted_result', currentBodyId: 'body-2', bodyRevision: 2, bodyText: 'the shortened body',
+    });
+    expect(accepted.accepted).toBe(true);
+
+    const secondReq = buildPeActionRequest({ requestId: 'req-2', actionType: 'more_thorough', loopState: accepted.nextState, hasDirtyBodyEdit: false });
+    expect(secondReq.ok).toBe(true);
+    if (!secondReq.ok) return;
+    // Must use body-2/rev-2 (the just-accepted body) — NOT the original body-1/rev-1.
+    expect(secondReq.request.currentBodyId).toBe('body-2');
+    expect(secondReq.request.bodyRevision).toBe(2);
   });
 });
 
