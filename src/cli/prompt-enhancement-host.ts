@@ -471,8 +471,17 @@ export function buildPromptEnhancementMacLauncherScriptV1(input: {
  */
 function buildPromptEnhancementMacAppleScriptV1(shellCommand: string, geom: PopupGeometry | null): string {
   const escaped = shellCommand.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  // Right-dock (mac fix 2026-08-08): position AFTER a short settle delay and set the bounds on the
+  // tab's window a second time, because setting bounds the instant `do script` returns is a race —
+  // the window often isn't ready yet, the `try` swallows the failure, and Terminal keeps its default
+  // (centred) window (live iMac report). A ~0.35s settle + a re-apply makes the right-dock stick.
   const sizeBlock = geom
-    ? `try
+    ? `delay 0.35
+    try
+        set bounds of (first window whose selected tab is theTab) to {${geom.xPx}, ${geom.yPx}, ${geom.xPx + geom.widthPx}, ${geom.yPx + geom.heightPx}}
+    end try
+    delay 0.15
+    try
         set bounds of (first window whose selected tab is theTab) to {${geom.xPx}, ${geom.yPx}, ${geom.xPx + geom.widthPx}, ${geom.yPx + geom.heightPx}}
     end try`
     : 'set number of rows of (first window whose selected tab is theTab) to 50';
