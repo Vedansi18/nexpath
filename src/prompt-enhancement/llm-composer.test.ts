@@ -214,3 +214,135 @@ describe('composeStructuredComposerOutputV1 (E4 / 4.1)', () => {
     expect(result.ok && result.output.sectionDrafts[0].sourceFactIds).toEqual(['fact-a']);
   });
 });
+
+/**
+ * The authority self-report used to be inert: the prompt asked the model to assess "the wording YOU
+ * produced", which anchors it to the request rather than the text, so it answered 'plan_or_review' in
+ * 8 of 8 live runs — even for wording that plainly instructed a deploy, and the retry it exists to
+ * trigger therefore never fired. The repair is prompt-side: classify the TEXT, and quote the most
+ * action-oriented sentence before classifying it. These tests pin the contract that repair depends
+ * on — the instructions actually reaching the model, and the evidence quote surviving the parse.
+ */
+describe('composer authority self-report — framing and evidence quote', () => {
+  async function capturedSystemPrompt(): Promise<string> {
+    let systemPrompt = '';
+    const capturing: PromptEnhancementComposerClientV1 = {
+      chat: { completions: { create: async (body) => {
+        systemPrompt = body.messages.find((m) => m.role === 'system')?.content ?? '';
+        return { choices: [{ message: { content: JSON.stringify({
+          detectedLanguageSelfReport: 'en',
+          authorityEvidence: '',
+          authorityModeSelfReport: 'plan_or_review',
+          sectionDrafts: [{ sectionId: 'sec-verify', bodyText: 'Check it.', sourceFactIds: ['fact-a'] }],
+          composerClaims: ['claim:fact-a'],
+        }) } }] };
+      } } },
+    };
+    await composeStructuredComposerOutputV1(input, capturing);
+    return systemPrompt;
+  }
+
+  it('asks the model to classify the produced TEXT, not what it intended to write', async () => {
+    const prompt = await capturedSystemPrompt();
+    expect(prompt).toContain('Re-read ONLY the section text you just produced');
+    expect(prompt).toContain('classify the TEXT as it now stands');
+    // The framing that made the report inert must be gone.
+    expect(prompt).not.toContain('Report what you');
+    expect(prompt).not.toContain('actually wrote, not what you intended');
+  });
+
+  it('requires the evidence quote BEFORE the verdict, and states the criterion explicitly', async () => {
+    const prompt = await capturedSystemPrompt();
+    expect(prompt).toContain('authorityEvidence');
+    expect(prompt.indexOf('authorityEvidence')).toBeLessThan(prompt.indexOf('Then classify THAT sentence'));
+    expect(prompt).toContain('irreversible or externally visible');
+    // 'execute_requested' must not read as a confession, or the model avoids it to look compliant.
+    expect(prompt).toContain('NOT an admission of error');
+  });
+
+  it('orders the JSON keys so the authority fields come AFTER sectionDrafts', async () => {
+    // Measured regression, not a style preference. With authorityEvidence placed before sectionDrafts
+    // in the schema, the model emits the quote before it has written a single section — so it quoted
+    // the ORIGINAL REQUEST or returned nothing (quote present in only 2 of 6 live runs). Moving the
+    // two authority keys after sectionDrafts took it to 6 of 6, every quote drawn from the produced
+    // text. The 'do this LAST' instruction alone does not survive; emission order decides.
+    const prompt = await capturedSystemPrompt();
+    const schemaLine = prompt.split('\n').find((line) => line.includes('"sectionDrafts"')) ?? '';
+    expect(schemaLine).not.toBe('');
+    expect(schemaLine.indexOf('"sectionDrafts"')).toBeLessThan(schemaLine.indexOf('"authorityEvidence"'));
+    expect(schemaLine.indexOf('"authorityEvidence"')).toBeLessThan(schemaLine.indexOf('"authorityModeSelfReport"'));
+    expect(prompt).toContain('The key order is not cosmetic');
+  });
+
+  it('tells the model that checking/verifying/listing is plan_or_review, not observe_or_literal', async () => {
+    // Also measured: without this, 'observe_or_literal' + an empty quote became an escape hatch (the
+    // model read "Check what is included…" as directing nothing), which would leave any later
+    // consumer of the self-report with no evidence to act on.
+    const prompt = await capturedSystemPrompt();
+    expect(prompt).toContain('Checking, verifying, listing, documenting, defining, planning and');
+    expect(prompt).toContain('If you quoted a sentence');
+  });
+
+  it('parses the evidence quote alongside the verdict', async () => {
+    const reply = JSON.stringify({
+      detectedLanguageSelfReport: 'en',
+      authorityEvidence: 'Deploy the package to production during the scheduled downtime.',
+      authorityModeSelfReport: 'execute_requested',
+      sectionDrafts: [{ sectionId: 'sec-verify', bodyText: 'Deploy the package to production during the scheduled downtime.', sourceFactIds: ['fact-a'] }],
+      composerClaims: ['claim:fact-a'],
+    });
+    const result = await composeStructuredComposerOutputV1(input, client(reply));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.output.authorityModeSelfReport).toBe('execute_requested');
+    expect(result.output.authorityEvidence).toBe('Deploy the package to production during the scheduled downtime.');
+  });
+
+  it('treats a blank, whitespace-only, or non-string quote as absent rather than as an empty finding', async () => {
+    for (const evidence of ['', '   ', 42, null]) {
+      const reply = JSON.stringify({
+        detectedLanguageSelfReport: 'en',
+        authorityEvidence: evidence,
+        authorityModeSelfReport: 'plan_or_review',
+        sectionDrafts: [{ sectionId: 'sec-verify', bodyText: 'List the checks to run.', sourceFactIds: ['fact-a'] }],
+        composerClaims: ['claim:fact-a'],
+      });
+      const result = await composeStructuredComposerOutputV1(input, client(reply));
+      expect(result.ok && result.output.authorityEvidence).toBeUndefined();
+    }
+  });
+
+  it('a reply omitting the quote entirely still parses (the field is optional, never drift)', async () => {
+    const reply = JSON.stringify({
+      detectedLanguageSelfReport: 'en',
+      authorityModeSelfReport: 'plan_or_review',
+      sectionDrafts: [{ sectionId: 'sec-verify', bodyText: 'List the checks to run.', sourceFactIds: ['fact-a'] }],
+      composerClaims: ['claim:fact-a'],
+    });
+    const result = await composeStructuredComposerOutputV1(input, client(reply));
+    expect(result.ok).toBe(true);
+    expect(result.ok && result.output.authorityEvidence).toBeUndefined();
+  });
+
+  it('the authority retry directive asks for a fresh quote of the REWRITTEN text', async () => {
+    // A plan/review request whose output reports execution -> the gate fires -> retry carries the
+    // stronger directive. Without the re-quote instruction the model would carry the stale quote over.
+    const planInput = { ...input, originalPromptText: 'Review the migration script and plan the rollout.' };
+    const escalating = JSON.stringify({
+      detectedLanguageSelfReport: 'en',
+      authorityEvidence: 'Deploy the package to production.',
+      authorityModeSelfReport: 'execute_requested',
+      sectionDrafts: [{ sectionId: 'sec-verify', bodyText: 'Deploy the package to production.', sourceFactIds: ['fact-a'] }],
+      composerClaims: ['claim:fact-a'],
+    });
+    let sawRequote = false;
+    const retrying: PromptEnhancementComposerClientV1 = {
+      chat: { completions: { create: async (body) => {
+        if (body.messages.some((m) => m.content.includes('re-quote the most action-oriented sentence'))) sawRequote = true;
+        return { choices: [{ message: { content: escalating } }] };
+      } } },
+    };
+    await composeStructuredComposerOutputV1(planInput, retrying);
+    expect(sawRequote).toBe(true);
+  });
+});

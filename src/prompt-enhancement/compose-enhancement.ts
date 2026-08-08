@@ -78,6 +78,13 @@ export interface PromptEnhancementStructuredComposerOutputV1 {
   // still running. Read ONLY by the authority-consistency gate to trigger a retry — it never relaxes
   // the deterministic safety verdict. Optional so pre-existing callers stay valid.
   authorityModeSelfReport?: 'plan_or_review' | 'execute_requested' | 'observe_or_literal';
+  // The single most action-oriented sentence the composer produced, quoted verbatim, which is the
+  // evidence its authorityModeSelfReport verdict was reached from. Asking for the quote BEFORE the
+  // verdict is what makes the verdict describe the produced text rather than the request that was
+  // made — without it the model answers from intent ("I was asked to plan, so this is planning") and
+  // reports 'plan_or_review' for wording that plainly instructs a deploy. Optional: a missing quote
+  // is not drift, exactly as a missing self-report is not drift.
+  authorityEvidence?: string;
 }
 
 export interface PromptEnhancementComposeResult {

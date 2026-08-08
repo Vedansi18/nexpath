@@ -23,7 +23,8 @@ const STRONGER_AUTHORITY_DIRECTIVE =
   ' out. Rewrite EVERY section so it stays in the requested mode — describe what to check, what evidence' +
   ' to gather, what a plan or checklist would contain, what to verify, and which risks need confirmation' +
   ' first. Do not instruct anyone to deploy, release, delete, migrate, install, publish or force-push,' +
-  ' and set authorityModeSelfReport correctly.';
+  ' then re-quote the most action-oriented sentence of the NEW text into authorityEvidence and' +
+  ' re-classify it in authorityModeSelfReport.';
 
 /**
  * E4 — bounded LLM composer wording call.
@@ -137,10 +138,23 @@ const SYSTEM_PROMPT = [
   '  or to a standard language (Hinglish is NOT Hindi; Gujlish is NOT Gujarati). Preserve even slight slang.',
   '- Report the detected language of the original prompt in "detectedLanguageSelfReport" as a BCP-47-ish',
   '  code (e.g. "en", "hi", "hi-Latn" for Hinglish, "gu", "gu-Latn" for Gujlish).',
-  '- Report the authority mode of the wording YOU produced in "authorityModeSelfReport": use',
-  '  "plan_or_review" when your sections describe checking/planning/verifying, "execute_requested" when',
-  '  they instruct someone to carry the work out, "observe_or_literal" otherwise. Report what you',
-  '  actually wrote, not what you intended.',
+  '',
+  'Authority classification (do this LAST, after every section is written):',
+  '- Re-read ONLY the section text you just produced. Ignore what the original request asked for and',
+  '  ignore what you meant to write — classify the TEXT as it now stands, as a stranger reading it would.',
+  '- First, copy into "authorityEvidence" the single most action-oriented sentence in that text, quoted',
+  '  verbatim. Your text is instructions, so there is almost always such a sentence — find it. Leave this',
+  '  empty ONLY if the text is pure description that tells nobody to do anything.',
+  '- Then classify THAT sentence in "authorityModeSelfReport", using this criterion: does it direct',
+  '  someone to perform an action that is irreversible or externally visible (shipping, releasing,',
+  '  deleting, overwriting, sending, or changing something other people or systems will see)?',
+  '  - yes -> "execute_requested"',
+  '  - no -> "plan_or_review". Checking, verifying, listing, documenting, defining, planning and',
+  '    preparing ARE actions, and they all belong here — they are simply reversible and internal.',
+  '  - "observe_or_literal" is for the rare text that directs nothing at all. If you quoted a sentence',
+  '    above, this is the WRONG answer; choose between the two options above instead.',
+  '- "execute_requested" is a truthful description of the words, NOT an admission of error. Report it',
+  '  whenever the quoted sentence meets the criterion, even if the request was to plan.',
   '',
   'Authority boundary (critical):',
   '- Keep every generated section in the SAME mode as the original request. If it asks to plan, review,',
@@ -154,8 +168,11 @@ const SYSTEM_PROMPT = [
   '- Use ONLY the provided sectionId values; never invent a section or output the original-request section.',
   '- For each section, cite in sourceFactIds only the allowed source fact ids listed for THAT section.',
   '- Do not include internal ids, section kinds, or planning labels in bodyText.',
-  '- Reply with STRICT JSON only, matching:',
-  '  {"detectedLanguageSelfReport":"...","authorityModeSelfReport":"...","sectionDrafts":[{"sectionId":"...","bodyText":"...","sourceFactIds":["..."]}],"composerClaims":["claim:<sourceFactId>"]}',
+  '- Reply with STRICT JSON only, with the keys in EXACTLY this order:',
+  '  {"detectedLanguageSelfReport":"...","sectionDrafts":[{"sectionId":"...","bodyText":"...","sourceFactIds":["..."]}],"composerClaims":["claim:<sourceFactId>"],"authorityEvidence":"...","authorityModeSelfReport":"..."}',
+  '- The key order is not cosmetic: authorityEvidence and authorityModeSelfReport come LAST, after',
+  '  sectionDrafts, because they describe text that must already be written. Quote from the bodyText',
+  '  values above them in the same reply — never from the original request.',
   '- composerClaims must be the union of every sourceFactId you used, each prefixed with "claim:".',
 ].join('\n');
 
@@ -214,12 +231,20 @@ function parseStructuredComposerOutput(
   const rawAuthority = obj['authorityModeSelfReport'];
   const authorityModeSelfReport = isPromptEnhancementAuthoritySelfReportV1(rawAuthority) ? rawAuthority : undefined;
 
+  // The evidence quote is carried for observability and for the authority gate; an absent or blank
+  // quote is left undefined rather than '' so "no action sentence" and "field omitted" read alike.
+  const rawEvidence = obj['authorityEvidence'];
+  const authorityEvidence = typeof rawEvidence === 'string' && rawEvidence.trim() !== ''
+    ? rawEvidence.trim()
+    : undefined;
+
   return {
     outputId: `${enhancementId}:composer-llm`,
     sectionDrafts,
     composerClaims,
     detectedLanguageSelfReport,
     authorityModeSelfReport,
+    authorityEvidence,
   };
 }
 
