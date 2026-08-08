@@ -25,7 +25,7 @@ import {
   detectLinuxTerminal,
   buildTerminalAppleScript,
 } from './TtySelectFn.js';
-import { detectScreenResolution, computePopupGeometry } from './screen-geometry.js';
+import { detectScreenResolution, computeDockedPopupGeometry } from './screen-geometry.js';
 
 const WINDOW_TITLE = 'Nexpath — Feedback';
 
@@ -113,8 +113,12 @@ export type SpawnPlan = { cmd: string; args: string[] };
 /** Build the platform spawn plan for the feedback popup window, or null for /dev/tty fallback. */
 async function defaultPlanSpawn(scriptFile: string): Promise<SpawnPlan | null> {
   const plat   = process.platform;
+  // Right-dock (owner request 2026-08-08): ~60% width × 100% height, flush right; fail-open
+  // (null → the emulator's default size, exactly as before).
   const screen = await detectScreenResolution();
-  const geom   = screen ? computePopupGeometry(screen) : null;
+  const geom   = screen
+    ? computeDockedPopupGeometry({ x: 0, y: 0, widthPx: screen.widthPx, heightPx: screen.heightPx })
+    : null;
 
   if (plat === 'win32') {
     return planWindowsPopupSpawn(geom, WINDOW_TITLE, scriptFile);

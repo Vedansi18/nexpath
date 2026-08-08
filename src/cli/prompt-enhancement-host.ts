@@ -8,7 +8,7 @@ import type {
   PromptEnhancementPrepareResultV1,
 } from '../prompt-enhancement/contracts.js';
 import { validatePromptEnhancementCliPopupResultV1 } from '../prompt-enhancement/cli-submit-popup.js';
-import { computePopupGeometry, detectScreenResolution, type PopupGeometry } from '../decision-session/screen-geometry.js';
+import { computeDockedPopupGeometry, detectScreenResolution, type PopupGeometry } from '../decision-session/screen-geometry.js';
 import type {
   PromptEnhancementPopupHostInputV1,
   PromptEnhancementPopupHostOutputV1,
@@ -233,7 +233,7 @@ export function planPromptEnhancementLinuxTerminalLaunchV1(input: {
   resultFile: string;
   readinessFile: string;
   dbPath: string;
-  /** ~70% × 70% centred popup window geometry; omitted → the terminal's default size. */
+  /** Right-docked popup window geometry (~60% width × 100% height); omitted → the terminal's default size. */
   geometry?: PopupGeometry;
 }): PromptEnhancementLinuxTerminalLaunchPlanV1 {
   const childArgs = [
@@ -246,9 +246,10 @@ export function planPromptEnhancementLinuxTerminalLaunchV1(input: {
     '--db', input.dbPath,
   ];
 
-  // Size the popup window to the supplied ~70%×70% geometry, using each
-  // emulator's native flag (char cells for X11-style; pixels for kitty/foot).
-  // Reused from the decision-session screen-geometry pattern.
+  // Size + position the popup window to the supplied right-docked geometry, using each
+  // emulator's native flag (char cells + `+x+y` offset for X11-style; pixels for kitty/foot,
+  // which are size-only — position is WM/compositor-controlled there). Reused from the
+  // decision-session screen-geometry pattern.
   const g = input.geometry;
   const cellGeom = g ? [`--geometry=${g.cols}x${g.rows}+${g.xPx}+${g.yPx}`] : [];
   const xtermGeom = g ? ['-geometry', `${g.cols}x${g.rows}+${g.xPx}+${g.yPx}`] : [];
@@ -487,8 +488,13 @@ function defaultLaunchDependencies(): PromptEnhancementCliPopupHostLaunchDepende
     cleanupTempDir,
     detectPopupGeometry: async () => {
       try {
+        // Right-dock geometry (owner request 2026-08-08): ~60% width × 100% height, flush right.
+        // Fail-open exactly as before — detection failure → undefined → the emulator's default size.
+        // Working-area (taskbar) refinement is wired in P3 (Windows); here origin is {0,0}.
         const screen = await detectScreenResolution();
-        return screen ? computePopupGeometry(screen) : undefined;
+        return screen
+          ? computeDockedPopupGeometry({ x: 0, y: 0, widthPx: screen.widthPx, heightPx: screen.heightPx })
+          : undefined;
       } catch {
         return undefined;
       }

@@ -14,6 +14,7 @@ import {
   type PromptEnhancementLinuxTerminalCommandV1,
 } from './prompt-enhancement-host.js';
 import type { PromptEnhancementPrepareRequestV1, PromptEnhancementPrepareResultV1 } from '../prompt-enhancement/contracts.js';
+import { computeDockedPopupGeometry } from '../decision-session/screen-geometry.js';
 
 function unavailableCommands() {
   return vi.fn((_command: PromptEnhancementLinuxTerminalCommandV1) => false);
@@ -279,6 +280,19 @@ describe('PE1.3 — Linux PE popup host launcher', () => {
     expect(withGeom.args).toContain('--geometry=134x37+288+162');
     // The geometry is a gnome-terminal option, so it precedes the -- separator.
     expect(withGeom.args.indexOf('--geometry=134x37+288+162')).toBeLessThan(withGeom.args.indexOf('--'));
+    // Right-dock (P2): a docked geometry renders flush-right (+x+0) before the -- separator.
+    const docked = computeDockedPopupGeometry({ x: 0, y: 0, widthPx: 1920, heightPx: 1080 });
+    const rightDock = planPromptEnhancementLinuxTerminalLaunchV1({
+      terminalCommand: 'gnome-terminal',
+      nodePath: '/usr/bin/node', cliEntryPath: '/x/cli.js',
+      inputFile: '/x/in', resultFile: '/x/out', readinessFile: '/x/ready', dbPath: '/x/db',
+      geometry: docked,
+    });
+    // 1920×1080 → 115 cols × 54 rows, x=768 (flush right), y=0 (top).
+    expect(rightDock.args).toContain(`--geometry=${docked.cols}x${docked.rows}+${docked.xPx}+${docked.yPx}`);
+    expect(rightDock.args).toContain('--geometry=115x54+768+0');
+    expect(rightDock.args.indexOf('--geometry=115x54+768+0')).toBeLessThan(rightDock.args.indexOf('--'));
+
     // Omitting geometry falls back to the terminal's default size (no --geometry).
     const plain = planPromptEnhancementLinuxTerminalLaunchV1({
       terminalCommand: 'gnome-terminal', nodePath: input.nodePath, cliEntryPath: input.cliEntryPath,
@@ -321,6 +335,15 @@ describe('PE1.3 — Linux PE popup host launcher', () => {
     expect(script).toContain('tell application "Terminal"');
     expect(script).toContain("sh '/tmp/pe/launch.sh'"); // launcher run via sh, quoted
     expect(script).toContain('do script');
+  });
+
+  it('right-docks the macOS Terminal.app window via AppleScript bounds (P2)', () => {
+    // 1920×1080 docked → 1152×1080 @(768,0). AppleScript bounds = {x, y, x+w, y+h}.
+    const docked = computeDockedPopupGeometry({ x: 0, y: 0, widthPx: 1920, heightPx: 1080 });
+    const plan = planPromptEnhancementMacTerminalLaunchV1({ launcherScriptPath: '/tmp/pe/launch.sh', geometry: docked });
+    const script = plan.args[1]!;
+    expect(script).toContain(`set bounds of (first window whose selected tab is theTab) to {${docked.xPx}, ${docked.yPx}, ${docked.xPx + docked.widthPx}, ${docked.yPx + docked.heightPx}}`);
+    expect(script).toContain('set bounds of (first window whose selected tab is theTab) to {768, 0, 1920, 1080}');
   });
 
   it('builds a macOS shell launcher with node by absolute path and every path single-quoted (spaces intact)', () => {

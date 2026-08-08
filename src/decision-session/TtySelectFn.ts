@@ -25,7 +25,7 @@ import { isWhyDescDeliveryEnabled } from './whydesc-delivery.js';
 import type { Store } from '../store/db.js';
 import { getConfig, setConfig } from '../store/config.js';
 import { ROLE_OPTIONS, buildRoleDescriptionLines, buildRoleMenuLines } from '../cli/shared/role-description.js';
-import { detectScreenResolution, computePopupGeometry, type PopupGeometry } from './screen-geometry.js';
+import { detectScreenResolution, computeDockedPopupGeometry, type PopupGeometry } from './screen-geometry.js';
 
 // ── New-window helpers: .mjs script builders ─────────────────────────────────
 
@@ -550,10 +550,13 @@ function buildWindowsNewWindowSelectFn(store?: Store, projectRoot?: string): Sel
       // Title arg appears in taskbar and Alt+Tab for discoverability
       // Compute geometry ONCE per select call. Both the MAIN popup and any
       // sub-menu spawn (root chooser triggered by Ctrl+T) share the same
-      // closure so the sub-menu inherits the same 70% sizing without an
-      // extra detection round-trip.
+      // closure so the sub-menu inherits the same right-docked sizing without
+      // an extra detection round-trip. Right-dock (owner request 2026-08-08):
+      // ~60% width × 100% height, flush right; fail-open (null → default size).
       const screen = await detectScreenResolution();
-      const geom   = screen ? computePopupGeometry(screen) : null;
+      const geom   = screen
+        ? computeDockedPopupGeometry({ x: 0, y: 0, widthPx: screen.widthPx, heightPx: screen.heightPx })
+        : null;
 
       // Shared spawn closure. Reused below by spawnRootChooserFlow so the
       // sub-menu spawn callback uses the same dispatch + geometry.
@@ -848,9 +851,12 @@ function buildLinuxNewWindowSelectFn(store?: Store, projectRoot?: string): Selec
 
       // Compute geometry ONCE per select call and share with the sub-menu
       // spawn callback so the Ctrl+T-triggered root chooser inherits the
-      // same 70% sizing without an extra detection round-trip.
+      // same right-docked sizing without an extra detection round-trip.
+      // Right-dock (owner request 2026-08-08): fail-open (null → default size).
       const screen = await detectScreenResolution();
-      const geom   = screen ? computePopupGeometry(screen) : null;
+      const geom   = screen
+        ? computeDockedPopupGeometry({ x: 0, y: 0, widthPx: screen.widthPx, heightPx: screen.heightPx })
+        : null;
 
       // Shared spawn closure — captures spec + geom. Used by the MAIN popup
       // below AND by the sub-menu spawn callback inside spawnRootChooserFlow.
@@ -983,10 +989,13 @@ function buildMacNewWindowSelectFn(store?: Store, projectRoot?: string): SelectF
 
       // Compute geometry ONCE per select call. Both the MAIN popup and the
       // sub-menu spawn callback (Ctrl+T → root chooser) share the same
-      // closure so the sub-menu inherits the same 70% sizing without an
-      // extra detection round-trip.
+      // closure so the sub-menu inherits the same right-docked sizing without
+      // an extra detection round-trip. Right-dock (owner request 2026-08-08):
+      // fail-open (null → default size).
       const screen = await detectScreenResolution();
-      const geom   = screen ? computePopupGeometry(screen) : null;
+      const geom   = screen
+        ? computeDockedPopupGeometry({ x: 0, y: 0, widthPx: screen.widthPx, heightPx: screen.heightPx })
+        : null;
 
       // Shared spawn closure. Reused below by spawnRootChooserFlow so the
       // sub-menu spawn callback uses the same bounds + geometry.
