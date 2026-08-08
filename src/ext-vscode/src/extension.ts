@@ -16,6 +16,7 @@ import { parsePromptEnhancementExtensionPayloadV1 } from './pe-payload.js';
 import { isPeOriginTurn } from './pe-origin.js';
 import { createInjectedRecordStore } from './injected-record.js';
 import { injectPeBody, resolvePeVisibleSurfaceAckState } from './pe-delivery.js';
+import { createPePoller, type PePoller } from './pe-poller.js';
 import { handleOptionSelection } from './webview/prompt-injection.js';
 import {
   detectHost,
@@ -64,6 +65,7 @@ let viewProvider: NexpathDecisionSessionViewProvider | undefined;
 let peViewProvider: NexpathPromptEnhancementViewProvider | undefined;
 let watcher: ChatHistoryWatcher | undefined;
 let advisoryPoller: AdvisoryPoller | undefined;
+let pePoller: PePoller | undefined;
 let logChannel: vscode.OutputChannel | undefined;
 /** PE-scoped typed-origin echo guard (P8). Fresh per activation, matching `watcher`. */
 let peInjectedRecordStore: ReturnType<typeof createInjectedRecordStore> | undefined;
@@ -408,6 +410,28 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       log(`[nexpath] windsurf inject-command present: ${present.join(', ') || 'NONE (will use clipboard fallback)'}`);
       log(`[nexpath] windsurf chat-related commands (${chatish.length}): ${chatish.slice(0, 50).join(', ')}`);
     }, () => { /* getCommands unavailable — ignore */ });
+
+    // P10 (analysis §4d): the extension is not in the Windsurf hook chain
+    // for PE either — same root cause as the DS bridge above. Keyed on the
+    // PE table only (readPendingPromptEnhancement, never advisory-store-reader.js).
+    // Delivery is the verified clipboard-free chatInputInject-style path
+    // (injectPeBody wrapping injectViaCascadeAction, D-1) — never the
+    // clipboard-touching windsurfInject/cursorInject, same reasoning P8
+    // already established. Also publishes to the PE webview so the same
+    // renderer shows what was delivered if the panel happens to be open.
+    pePoller = createPePoller({
+      projectRoots: roots,
+      readPendingPe: (root) => readPendingPromptEnhancement(root),
+      onDeliver: (text) => injectPeBody(text, (t) => injectViaCascadeAction(t, {
+        executeCommand: (id, ...args) => vscode.commands.executeCommand(id, ...args),
+        getCommands: (filter) => vscode.commands.getCommands(filter),
+      })),
+      onPublish: (payload) => { if (payload) peViewProvider?.publishPayload(payload); },
+      onOutcome: (outcome) => log(`[nexpath] windsurf PE poller insert outcome: ${outcome}`),
+    });
+    pePoller.start();
+    context.subscriptions.push({ dispose: () => pePoller?.stop() });
+    log(`[nexpath] windsurf PE poller started for roots: ${roots.join(' | ')}`);
   }
 
   const wsStorage = workspaceStorageDir({ host });
@@ -647,6 +671,8 @@ export function deactivate(): void {
   watcher = undefined;
   advisoryPoller?.stop();
   advisoryPoller = undefined;
+  pePoller?.stop();
+  pePoller = undefined;
   viewProvider = undefined;
   peViewProvider = undefined;
   peInjectedRecordStore = undefined;

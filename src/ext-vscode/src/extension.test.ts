@@ -23,6 +23,9 @@ const {
   mockChatInputInject,
   mockReadLatestAdvisoryMeta,
   mockReadInjectedPrompt,
+  mockCreatePePoller,
+  mockPePollerStart,
+  mockGetCommands,
 } = vi.hoisted(() => ({
   mockShowOnboarding: vi.fn(),
   mockRegisterWebviewViewProvider: vi.fn(),
@@ -44,6 +47,9 @@ const {
   mockChatInputInject: vi.fn(async () => false),
   mockReadLatestAdvisoryMeta: vi.fn(async () => null),
   mockReadInjectedPrompt: vi.fn(async () => null),
+  mockCreatePePoller: vi.fn(),
+  mockPePollerStart: vi.fn(),
+  mockGetCommands: vi.fn(async () => [] as string[]),
 }));
 
 vi.mock('vscode', () => ({
@@ -69,7 +75,7 @@ vi.mock('vscode', () => ({
   env: { appName: 'Visual Studio Code' },
   commands: {
     executeCommand: mockExecuteCommand,
-    getCommands: vi.fn().mockResolvedValue([]),
+    getCommands: mockGetCommands,
     registerCommand: vi.fn(() => ({ dispose: vi.fn() })),
   },
   StatusBarAlignment: { Left: 1, Right: 2 },
@@ -156,6 +162,12 @@ vi.mock('./advisory-poller.js', () => ({
     pollOnce: vi.fn(),
   })),
 }));
+vi.mock('./pe-poller.js', () => ({
+  createPePoller: (...args: unknown[]) => {
+    mockCreatePePoller(...args);
+    return { start: mockPePollerStart, stop: vi.fn(), pollOnce: vi.fn() };
+  },
+}));
 
 import { activate, deactivate, getViewProvider, getPeViewProvider } from './extension.js';
 
@@ -206,6 +218,9 @@ describe('activate', () => {
     mockChatInputInject.mockReset().mockResolvedValue(false);
     mockReadLatestAdvisoryMeta.mockReset().mockResolvedValue(null);
     mockReadInjectedPrompt.mockReset().mockResolvedValue(null);
+    mockCreatePePoller.mockReset();
+    mockPePollerStart.mockReset();
+    mockGetCommands.mockReset().mockResolvedValue([]);
     mockRegisterWebviewViewProvider.mockReturnValue({ dispose: vi.fn() });
     logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -286,6 +301,88 @@ describe('activate', () => {
       logSpy.mockClear();
       capturedOnMessage()({ type: 'bogus_type' });
       expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining('PE event'));
+    });
+  });
+
+  describe('PE Windsurf/Devin poller (P10)', () => {
+    function capturedDeps(): {
+      readPendingPe: (root: string) => Promise<unknown>;
+      onDeliver: (text: string) => Promise<string>;
+      onPublish?: (payload: unknown) => void;
+    } {
+      return mockCreatePePoller.mock.calls[0]![0] as never;
+    }
+
+    it('starts the PE poller (and the DS poller) on Windsurf', async () => {
+      mockShowOnboarding.mockResolvedValueOnce(undefined);
+      mockDetectHost.mockReturnValueOnce('windsurf');
+      await activate(makeCtx(true) as never);
+      expect(mockCreatePePoller).toHaveBeenCalledOnce();
+      expect(mockPePollerStart).toHaveBeenCalledOnce();
+    });
+
+    it('does not create the PE poller on cursor or plain vscode (Windsurf-only bridge)', async () => {
+      mockShowOnboarding.mockResolvedValueOnce(undefined);
+      mockDetectHost.mockReturnValueOnce('cursor');
+      await activate(makeCtx(true) as never);
+      expect(mockCreatePePoller).not.toHaveBeenCalled();
+    });
+
+    it('readPendingPe is wired to the real PE-table-only reader', async () => {
+      mockShowOnboarding.mockResolvedValueOnce(undefined);
+      mockDetectHost.mockReturnValueOnce('windsurf');
+      mockReadPendingPromptEnhancement.mockResolvedValueOnce({
+        id: 1, projectRoot: '/proj', sessionId: 's1', promptCount: 1,
+        status: 'pending', createdAt: 0, requestJson: '{}', resultJson: '{}',
+      });
+      await activate(makeCtx(true) as never);
+      const result = await capturedDeps().readPendingPe('/proj');
+      expect(mockReadPendingPromptEnhancement).toHaveBeenCalledWith('/proj');
+      expect(result).toEqual(expect.objectContaining({ projectRoot: '/proj' }));
+    });
+
+    it('onPublish forwards a non-null payload to the PE webview (same renderer as Cursor)', async () => {
+      mockShowOnboarding.mockResolvedValueOnce(undefined);
+      mockDetectHost.mockReturnValueOnce('windsurf');
+      await activate(makeCtx(true) as never);
+      const provider = getPeViewProvider() as unknown as { getCurrentPayload: () => unknown };
+      const payload = { currentBodyId: 'body-1', bodyRevision: 3 };
+      capturedDeps().onPublish?.(payload);
+      expect(provider.getCurrentPayload()).toEqual(payload);
+    });
+
+    it('onPublish never crashes when given a null payload (malformed row)', async () => {
+      mockShowOnboarding.mockResolvedValueOnce(undefined);
+      mockDetectHost.mockReturnValueOnce('windsurf');
+      await activate(makeCtx(true) as never);
+      expect(() => capturedDeps().onPublish?.(null)).not.toThrow();
+    });
+
+    it('onDeliver: succeeds via the clipboard-free Cascade command when it is registered', async () => {
+      mockShowOnboarding.mockResolvedValueOnce(undefined);
+      mockDetectHost.mockReturnValueOnce('windsurf');
+      mockGetCommands.mockResolvedValue(['windsurf.sendChatActionMessage']);
+      mockExecuteCommand.mockResolvedValue(undefined);
+      await activate(makeCtx(true) as never);
+      const outcome = await capturedDeps().onDeliver('the enhanced body');
+      expect(outcome).toBe('inserted');
+    });
+
+    it('onDeliver: fails (D-1, no clipboard fallback) when no Cascade command is registered', async () => {
+      mockShowOnboarding.mockResolvedValueOnce(undefined);
+      mockDetectHost.mockReturnValueOnce('windsurf');
+      mockGetCommands.mockResolvedValue([]); // no candidate command available
+      await activate(makeCtx(true) as never);
+      const outcome = await capturedDeps().onDeliver('the enhanced body');
+      expect(outcome).toBe('insert_failed_no_clipboard_fallback');
+    });
+
+    it('the poller deps carry no field that could read pending_advisories/lastInjectedPrompt (structural proof)', async () => {
+      mockShowOnboarding.mockResolvedValueOnce(undefined);
+      mockDetectHost.mockReturnValueOnce('windsurf');
+      await activate(makeCtx(true) as never);
+      const keys = Object.keys(mockCreatePePoller.mock.calls[0]![0] as object).sort();
+      expect(keys).toEqual(['onDeliver', 'onOutcome', 'onPublish', 'projectRoots', 'readPendingPe']);
     });
   });
 
