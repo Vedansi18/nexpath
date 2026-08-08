@@ -120,6 +120,45 @@ describe('E4 — facade LLM composer wiring', () => {
     expect(result.disposition).toBe('show_current_body');
   });
 
+  it('TI-3.3: a blocked LLM body silently replaced by the deterministic body reports the pre-substitution verdict', async () => {
+    process.env['OPENAI_API_KEY'] = `sk-${'x'.repeat(40)}`;
+    // Accepted draft (valid section + real source fact) whose FINAL wording hard-blocks on
+    // authority escalation ('rm -rf' against a non-execute prompt) — a family the draft filter lets
+    // through. The facade drops the drafts and recomposes the deterministic body (which passes),
+    // silently swapping the blocked body. Without the reporting fields this logs like a clean run.
+    vi.mocked(composeStructuredComposerOutputV1).mockImplementationOnce(async (input: { planning: { sectionPlans: readonly { sectionId: string; sectionKind: string; structuredContentPartRefs: readonly string[] }[] } }) => {
+      const section = input.planning.sectionPlans.find(
+        (plan) => plan.sectionKind !== 'original_request_or_goal' && plan.structuredContentPartRefs.length > 0,
+      );
+      if (!section) return { ok: false, reason: 'no_eligible_sections' };
+      const factId = section.structuredContentPartRefs[0];
+      return { ok: true, output: {
+        outputId: 'test-llm-blocked-output',
+        sectionDrafts: [{ sectionId: section.sectionId, bodyText: 'Run rm -rf on the build directory to reset it.', sourceFactIds: [factId] }],
+        composerClaims: [`claim:${factId}`],
+      } };
+    });
+
+    const result = await preparePromptEnhancement(request());
+    // The substitution fired and is now traceable.
+    expect(result.deterministicFallbackApplied).toBe(true);
+    expect(result.preSubstitutionAuthorityEscalationState).toBe('invalid_non_sendable');
+    // The blocked LLM wording never reaches the user; the disposition stays the normal happy path
+    // (byte-identical outcome — the reporting field is the ONLY difference from a clean run).
+    expect(result.currentBody.text).not.toContain('rm -rf');
+    expect(result.disposition).toBe('show_current_body');
+    // TI-3.2: the compose-layer reason codes the public diagnostics array genericizes away are
+    // captured for the log — the substitution marker + the deterministic-fallback cause.
+    expect(result.compositionFallbackReasonCodes).toContain('llm_final_body_blocked_deterministic_fallback');
+    expect(result.compositionFallbackReasonCodes?.some((code) => code.startsWith('deterministic_fallback:'))).toBe(true);
+
+    // A clean LLM run (default mock, no block) leaves the reporting fields unset — visibly distinct.
+    const clean = await preparePromptEnhancement(request());
+    expect(clean.deterministicFallbackApplied).toBeUndefined();
+    expect(clean.preSubstitutionAuthorityEscalationState).toBeUndefined();
+    expect(clean.compositionFallbackReasonCodes).toBeUndefined();
+  });
+
   it('safety still runs on the composed body regardless of the LLM path (validation summary present)', async () => {
     process.env['OPENAI_API_KEY'] = `sk-${'x'.repeat(40)}`;
     const result = await preparePromptEnhancement(request());

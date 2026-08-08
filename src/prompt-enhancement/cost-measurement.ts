@@ -128,6 +128,18 @@ export function emitPromptEnhancementCostObservabilityV1(
       // "timeout"` — distinguishable from "no key" and from "not eligible".
       fallbackReason: result.callAndVisibilityMetadata.fallbackReason,
       providerFailureState: result.callAndVisibilityMetadata.providerFailureState,
+      // TI-3.3 (2026-08-08): a blocked LLM body that was silently swapped for a deterministic one
+      // used to log byte-identical to a clean run (the emitted safetySummary describes the
+      // replacement). These two reporting-only fields make "body blocked & replaced" distinct:
+      // `deterministicFallbackApplied true` + `preSubstitutionAuthorityEscalationState` = the
+      // verdict the replaced body carried. `false`/undefined on every non-substituted run.
+      deterministicFallbackApplied: result.deterministicFallbackApplied ?? false,
+      preSubstitutionAuthorityEscalationState: result.preSubstitutionAuthorityEscalationState,
+      // TI-3.2 (2026-08-08): the compose-layer fallback reason codes the public diagnostics array
+      // genericizes away — names WHY the body was reduced (one of six draft-rejection causes +
+      // the substitution marker), not just that it was. Empty when no compose-layer fallback
+      // occurred. Typed reason codes only, never body text.
+      compositionFallbackReasonCodes: result.compositionFallbackReasonCodes ?? [],
       rawFieldsExcluded: observability.measurement.rawPromptBodyExcluded,
       inventoryOk: observability.inventoryOk,
     });
