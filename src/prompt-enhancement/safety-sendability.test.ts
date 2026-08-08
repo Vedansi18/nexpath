@@ -7,6 +7,7 @@ import {
   PROMPT_ENHANCEMENT_MAX_SENDABLE_BODY_CHARS,
   PROMPT_ENHANCEMENT_PHASE_VALIDATORS,
   PROMPT_ENHANCEMENT_VALIDATION_STAGES,
+  promptEnhancementAuthorityModeForTextV1,
   validatePromptEnhancementSafety,
 } from './safety-sendability.js';
 import {
@@ -1298,8 +1299,55 @@ describe('authority escalation is sentence-scoped, not whole-body keyword matchi
       expect(escalated('Rewrite history before the review.')).toBe(true);
     });
 
-    // The widening is bounded: it applies to the floor only, and only when the request was
-    // plan/review-shaped. A user who asked for the dangerous action still gets it.
+    /**
+     * The floor asks "did the user ask for the dangerous thing?", not "did the user ask to plan?".
+     *
+     * Requiring `plan_or_review` silently excluded `observe_or_literal`. "Walk me through how the
+     * refunds flow behaves today" is genuinely not a planning request — reclassifying it as one would
+     * mislabel ordinary questions — but answering it with `rm -rf` is exactly as unrequested as
+     * answering a planning request that way. The request mode was right; the CONDITION was wrong.
+     */
+    describe('the floor covers observe-type requests, not only planning ones', () => {
+      const OBSERVE_PROMPT = 'Walk me through how the refunds flow behaves today.';
+
+      it('confirms the premise: this request is observe-shaped, not plan-shaped', () => {
+        expect(promptEnhancementAuthorityModeForTextV1(OBSERVE_PROMPT)).toBe('observe_or_literal');
+      });
+
+      const escalatedFor = (originalPromptText: string, generatedLine: string) => {
+        const currentBody = composedBody({ originalPromptText, route: { promptText: originalPromptText } });
+        return validatePromptEnhancementSafety({
+          currentBody,
+          editedBodyText: `${currentBody.text}\n\nVerification Or Test Plan:\n- ${generatedLine}`,
+        }).failures.map((f) => f.failureCode).includes('authority_escalation:planning_to_execution');
+      };
+
+      it('fires on floor wording answering an observe-type request', () => {
+        expect(escalatedFor(OBSERVE_PROMPT, 'rm -rf the cache directory and re-run it.')).toBe(true);
+        expect(escalatedFor(OBSERVE_PROMPT, 'Use reset --hard to clear the working tree.')).toBe(true);
+      });
+
+      /**
+       * ⚠️ ACCEPTED FALSE POSITIVE, recorded as a test.
+       *
+       * An execution request the word list does not recognise ("nuke" is in no verb list) reads as
+       * observe_or_literal, so floor wording answering it now blocks even though the user asked for
+       * it. Accepted knowingly: every path still leaves the original prompt sendable — on a hard
+       * block the body text falls back to `originalPromptText` and `use_original`/`close` stay
+       * available — so the cost is the enhanced sections, never the ability to send.
+       */
+      it('ACCEPTED FALSE POSITIVE: an unrecognised execution request loses the exemption', () => {
+        expect(escalatedFor('Nuke the build dir.', 'rm -rf the build directory.')).toBe(true);
+      });
+
+      it('above the floor, observe-type requests are unchanged (still not escalations)', () => {
+        // Only the floor was widened; the strong-verb rule stays scoped to plan/review requests.
+        expect(escalatedFor(OBSERVE_PROMPT, 'Delete the stale rows from the orders database.')).toBe(false);
+      });
+    });
+
+    // The widening is bounded: it applies to the floor only, and an explicit execution request is
+    // still honoured. A user who asked for the dangerous action still gets it.
     it('does not fire when the user asked for the dangerous action themselves', () => {
       const doPrompt = 'Force-push the rebased branch and reset --hard to drop my local changes.';
       const currentBody = composedBody({ originalPromptText: doPrompt, route: { promptText: doPrompt } });

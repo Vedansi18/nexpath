@@ -648,23 +648,37 @@ function composerReportsEscalation(
 
 function generatedEscalatesAuthority(originalPromptText: string, generatedBodyText: string): boolean {
   const originalAuthority = authorityModeFor(originalPromptText);
-  if (originalAuthority !== 'plan_or_review') return false;
   const generatedRiskText = generatedBodyText.replace(buildPromptEnhancementCanonicalConfirmation(originalPromptText), '');
 
-  // The floor is consulted FIRST, and its own match is sufficient.
+  // ── The floor ────────────────────────────────────────────────────────────────────────────────
+  // Consulted FIRST, its own match is sufficient, and it asks "did the user ask for the dangerous
+  // thing?" rather than "did the user ask to plan?".
   //
-  // It used to sit below the execution-mode precondition on the next line, which is decided by
-  // `EXECUTION_VERB` — and `reset --hard` and `rewrite history` appear in the floor but in NO
-  // execution-verb list. On their own they therefore never reached the floor at all: 2 of its 6
-  // patterns were unreachable, and a body reading "Use reset --hard to clear the working tree" passed
-  // while "Run the cleanup, then use reset --hard" blocked. An unrelated word elsewhere in the body
-  // decided whether the safety net existed.
+  // Two separate defects were fixed here, both of which let floor wording through:
   //
-  // This is a deliberate WIDENING of a safety rule: strictly more wording escalates than before. That
-  // is the intended direction — the floor is wording with no benign reading, and a higher block rate
-  // is the accepted cost of it actually being a floor.
-  if (ALWAYS_ESCALATE_PATTERN.test(generatedRiskText)) return true;
+  // 1. It used to sit BELOW the execution-mode precondition further down, which is decided by
+  //    `EXECUTION_VERB` — and `reset --hard` and `rewrite history` are in the floor but in NO
+  //    execution-verb list, so standing alone they never reached the floor at all. "Use reset --hard
+  //    to clear the working tree" passed while "Run the cleanup, then use reset --hard" blocked: an
+  //    unrelated word elsewhere in the body decided whether the safety net existed.
+  //
+  // 2. It used to require the request to read as `plan_or_review`, which silently excluded
+  //    `observe_or_literal` — "Walk me through how the refunds flow behaves today" is not a planning
+  //    request, and answering it with `rm -rf` is exactly as unrequested. Widening the mode
+  //    classification instead would have mislabelled ordinary questions as planning; the request mode
+  //    is right, the CONDITION was wrong. Only an explicit execution request earns the exemption.
+  //
+  // Deliberate WIDENING of a safety rule, on the owner's ruling that a higher block rate is an
+  // accepted cost where safety is concerned. Bounded: it is the floor only — wording with no benign
+  // reading — and an explicit execution request is still honoured.
+  if (originalAuthority !== 'execute_requested' && ALWAYS_ESCALATE_PATTERN.test(generatedRiskText)) {
+    return true;
+  }
 
+  // ── Everything above the floor ───────────────────────────────────────────────────────────────
+  // Unchanged, and still scoped to plan/review requests: outside the floor, an escalation only means
+  // anything as "a plan/review request answered with execution wording".
+  if (originalAuthority !== 'plan_or_review') return false;
   if (authorityModeFor(generatedRiskText) !== 'execute_requested') return false;
   // Pure narrowing: both original conditions still hold above, and this can only turn a `true` into a
   // `false`. It can never make previously-safe wording escalate.
