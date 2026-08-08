@@ -153,9 +153,15 @@ describe('Phase 11 future sequence runtime gate', () => {
   it('transform-rule-11.1 blocks sequence identity and state creation in current v1', () => {
     const result = evaluate('create_sequence_state');
 
+    // Default (no evidence) is still fully blocked (fail-closed). D3 (2026-08-08): the always-on
+    // `current_v1_runtime_implementation_no_go` backstop is removed (the runtime now exists), so the
+    // missing codes are the evidence-derived gates only — all still present with no evidence supplied.
     expect(assertPromptEnhancementFutureSequenceRuntimeBlockedV1(result)).toBe(true);
     expect(result.reasonCodes).toContain('future_sequence_1_sequence_identity_state_no_go');
-    expect(result.missingGateCodes).toEqual(PROMPT_ENHANCEMENT_FUTURE_SEQUENCE_RUNTIME_REQUIRED_GATES_V1);
+    expect(result.missingGateCodes).toEqual(
+      PROMPT_ENHANCEMENT_FUTURE_SEQUENCE_RUNTIME_REQUIRED_GATES_V1.filter((c) => c !== 'current_v1_runtime_implementation_no_go'),
+    );
+    expect(result.missingGateCodes).not.toContain('current_v1_runtime_implementation_no_go');
     expect(result.sequenceIdentityState).toBe('not_created_v1');
     expect(result.terminalReopenState).toBe('rejected_v1');
   });
@@ -242,7 +248,11 @@ describe('Phase 11 future sequence runtime gate', () => {
     ]));
   });
 
-  it('transform-rule-11.5 rejects runtime acceptance even when caller claims all gates passed', () => {
+  it('D3 (2026-08-08): runtime acceptance is now ALLOWED when every evidence flag is present (evidence-gated)', () => {
+    // Previously this could never pass (the always-on backstop). D3 removes that backstop — the
+    // runtime implementation exists (P1–P4) — so with ALL evidence present the gate activates.
+    // Production stays fail-closed because the Stop-hook launcher supplies NO evidence (see the
+    // production-fail-closed test below).
     const result = evaluate('runtime_acceptance', {
       evidence: {
         lifecyclePolicyApproved: true,
@@ -259,10 +269,20 @@ describe('Phase 11 future sequence runtime gate', () => {
       },
     });
 
+    expect(result.allowed).toBe(true);
+    expect(result.status).toBe('allowed_future_sequence_runtime_v1');
+    expect(result.runtimeAcceptanceState).toBe('go_v1');
+    expect(result.missingGateCodes).toEqual([]);
+    expect(result.reasonCodes).toContain('future_sequence_runtime_allowed_v1');
+  });
+
+  it('production fail-closed: with NO evidence supplied (the Stop-hook launcher path) the gate stays blocked', () => {
+    // The production launcher (stop.ts) calls the gate WITHOUT an evidence field → all evidence
+    // gates are missing → blocked. This is what keeps the continuation runtime off in production.
+    const result = evaluate('continue_current_item');
     expect(result.allowed).toBe(false);
-    expect(result.runtimeAcceptanceState).toBe('no_go_v1');
-    expect(result.missingGateCodes).toEqual(['current_v1_runtime_implementation_no_go']);
-    expect(result.reasonCodes).toContain('future_sequence_5_runtime_acceptance_no_go');
+    expect(result.status).toBe('blocked_future_sequence_runtime_v1');
+    expect(result.missingGateCodes.length).toBeGreaterThan(0);
   });
 
   it('keeps decision-rule-6 owner registers and provider/API availability as required runtime gates', () => {
@@ -279,13 +299,15 @@ describe('Phase 11 future sequence runtime gate', () => {
       },
     });
 
+    // Partial evidence → still blocked; the MISSING evidence gates are reported. (The always-on
+    // `current_v1_runtime_implementation_no_go` backstop is removed by D3, so it is no longer here.)
     expect(result.allowed).toBe(false);
     expect(result.missingGateCodes).toEqual(expect.arrayContaining([
       'signed_owner_by_deliverable_register_pending',
       'pending_named_owner_register_rows_pending',
       'provider_api_availability_pending',
-      'current_v1_runtime_implementation_no_go',
     ]));
+    expect(result.missingGateCodes).not.toContain('current_v1_runtime_implementation_no_go');
   });
 
   it('rejects handoff metadata that claims accepted runtime consent or queue authority', () => {

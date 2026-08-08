@@ -663,7 +663,7 @@ const PROMPT_ENHANCEMENT_CLI_SGR_V1 = (() => {
     // 16-colour that stays readable on every terminal (owner request 2026-08-07: keep it
     // properly visible on all OSes, unlike the faint attribute).
     lightYellow: `${e}[93m`,
-    // Caution tone (normal yellow) — the provider-failure notice; matches the MPS Cancel row.
+    // Caution tone (normal yellow) — the provider-failure notice.
     yellow: `${e}[33m`,
     dim: `${e}[2m`,
     bold: `${e}[1m`,

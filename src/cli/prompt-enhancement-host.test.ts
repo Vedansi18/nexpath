@@ -6,6 +6,8 @@ import {
   PROMPT_ENHANCEMENT_LINUX_TERMINAL_COMMANDS_V1,
   buildPromptEnhancementMacLauncherScriptV1,
   buildPromptEnhancementWindowsLauncherScriptV1,
+  buildPromptEnhancementWindowsPositionScriptV1,
+  detectPromptEnhancementLinuxDisplayServerV1,
   planPromptEnhancementLinuxTerminalLaunchV1,
   planPromptEnhancementMacTerminalLaunchV1,
   planPromptEnhancementWindowsTerminalLaunchV1,
@@ -14,6 +16,7 @@ import {
   type PromptEnhancementLinuxTerminalCommandV1,
 } from './prompt-enhancement-host.js';
 import type { PromptEnhancementPrepareRequestV1, PromptEnhancementPrepareResultV1 } from '../prompt-enhancement/contracts.js';
+import { computeDockedPopupGeometry } from '../decision-session/screen-geometry.js';
 
 function unavailableCommands() {
   return vi.fn((_command: PromptEnhancementLinuxTerminalCommandV1) => false);
@@ -31,6 +34,41 @@ describe('PE1.1 — prompt enhancement CLI host capability resolver', () => {
 
     expect(result).toEqual({ state: 'available', method: 'direct_tty' });
     expect(commandExists).not.toHaveBeenCalled();
+  });
+
+  it('P4 opt-in force-dock: NEXPATH_POPUP_DOCK + GUI session prefers a spawned window over direct-TTY', () => {
+    const probeDirectTty = vi.fn(() => true); // direct-TTY IS available…
+    const result = resolvePromptEnhancementCliHostCapabilityV1({
+      platform: 'linux',
+      env: { DISPLAY: ':0', NEXPATH_POPUP_DOCK: 'right' },
+      probeDirectTty,
+      commandExists: (c) => c === 'gnome-terminal',
+      readCommandVersion: () => '3.52.0',
+    });
+    // …but force-dock chooses the spawnable terminal so the window can be right-docked.
+    expect(result).toEqual({ state: 'available', method: 'linux_terminal', terminalCommand: 'gnome-terminal' });
+  });
+
+  it('P4 force-dock is fail-open: with no spawnable terminal it falls back to direct-TTY (never loses the popup)', () => {
+    const result = resolvePromptEnhancementCliHostCapabilityV1({
+      platform: 'linux',
+      env: { DISPLAY: ':0', NEXPATH_POPUP_DOCK: 'right' },
+      probeDirectTty: () => true,
+      commandExists: unavailableCommands(),
+    });
+    expect(result).toEqual({ state: 'available', method: 'direct_tty' });
+  });
+
+  it('P4 default (NEXPATH_POPUP_DOCK unset) is UNCHANGED: direct-TTY still wins over spawning', () => {
+    const commandExists = vi.fn((c: PromptEnhancementLinuxTerminalCommandV1) => c === 'gnome-terminal');
+    const result = resolvePromptEnhancementCliHostCapabilityV1({
+      platform: 'linux',
+      env: { DISPLAY: ':0' }, // no force-dock
+      probeDirectTty: () => true,
+      commandExists,
+    });
+    expect(result).toEqual({ state: 'available', method: 'direct_tty' });
+    expect(commandExists).not.toHaveBeenCalled(); // direct-TTY short-circuits before probing terminals
   });
 
   it('fails closed on a genuinely unsupported platform without probing host resources', () => {
@@ -247,6 +285,20 @@ function child(exitCode: number | null = null, exitSignal: NodeJS.Signals | null
   return value;
 }
 
+describe('P4 — Linux display-server detection', () => {
+  it('XDG_SESSION_TYPE is authoritative (wayland / x11)', () => {
+    expect(detectPromptEnhancementLinuxDisplayServerV1({ XDG_SESSION_TYPE: 'wayland', DISPLAY: ':0' })).toBe('wayland');
+    expect(detectPromptEnhancementLinuxDisplayServerV1({ XDG_SESSION_TYPE: 'x11', WAYLAND_DISPLAY: 'wayland-0' })).toBe('x11');
+  });
+  it('falls back to WAYLAND_DISPLAY / DISPLAY when XDG_SESSION_TYPE is absent', () => {
+    expect(detectPromptEnhancementLinuxDisplayServerV1({ WAYLAND_DISPLAY: 'wayland-0' })).toBe('wayland');
+    expect(detectPromptEnhancementLinuxDisplayServerV1({ DISPLAY: ':0' })).toBe('x11');
+  });
+  it('returns unknown with no display env', () => {
+    expect(detectPromptEnhancementLinuxDisplayServerV1({})).toBe('unknown');
+  });
+});
+
 describe('PE1.3 — Linux PE popup host launcher', () => {
   it('builds terminal argv with only executable and private-file values', () => {
     const input = launchInput();
@@ -279,6 +331,56 @@ describe('PE1.3 — Linux PE popup host launcher', () => {
     expect(withGeom.args).toContain('--geometry=134x37+288+162');
     // The geometry is a gnome-terminal option, so it precedes the -- separator.
     expect(withGeom.args.indexOf('--geometry=134x37+288+162')).toBeLessThan(withGeom.args.indexOf('--'));
+    // Right-dock (P2): a docked geometry renders flush-right (+x+0) before the -- separator.
+    const docked = computeDockedPopupGeometry({ x: 0, y: 0, widthPx: 1920, heightPx: 1080 });
+    const rightDock = planPromptEnhancementLinuxTerminalLaunchV1({
+      terminalCommand: 'gnome-terminal',
+      nodePath: '/usr/bin/node', cliEntryPath: '/x/cli.js',
+      inputFile: '/x/in', resultFile: '/x/out', readinessFile: '/x/ready', dbPath: '/x/db',
+      geometry: docked,
+    });
+    // 1920×1080 → 115 cols × 54 rows, x=768 (flush right), y=0 (top).
+    expect(rightDock.args).toContain(`--geometry=${docked.cols}x${docked.rows}+${docked.xPx}+${docked.yPx}`);
+    expect(rightDock.args).toContain('--geometry=115x54+768+0');
+    expect(rightDock.args.indexOf('--geometry=115x54+768+0')).toBeLessThan(rightDock.args.indexOf('--'));
+
+    // P4 Wayland: a GTK terminal with a docked geometry on Wayland is wrapped with
+    // `env GDK_BACKEND=x11` so --geometry positions via XWayland (recent Ubuntu default).
+    const wayland = planPromptEnhancementLinuxTerminalLaunchV1({
+      terminalCommand: 'gnome-terminal',
+      nodePath: '/usr/bin/node', cliEntryPath: '/x/cli.js',
+      inputFile: '/x/in', resultFile: '/x/out', readinessFile: '/x/ready', dbPath: '/x/db',
+      geometry: docked, displayServer: 'wayland',
+    });
+    expect(wayland.command).toBe('env');
+    expect(wayland.args[0]).toBe('GDK_BACKEND=x11');
+    expect(wayland.args[1]).toBe('gnome-terminal');
+    expect(wayland.args).toContain('--geometry=115x54+768+0');
+    // On X11 the wrap is NOT applied (native geometry already positions).
+    const x11 = planPromptEnhancementLinuxTerminalLaunchV1({
+      terminalCommand: 'gnome-terminal',
+      nodePath: '/usr/bin/node', cliEntryPath: '/x/cli.js',
+      inputFile: '/x/in', resultFile: '/x/out', readinessFile: '/x/ready', dbPath: '/x/db',
+      geometry: docked, displayServer: 'x11',
+    });
+    expect(x11.command).toBe('gnome-terminal');
+    // A non-GTK terminal (kitty) on Wayland is NOT wrapped (size-only by design).
+    const kitty = planPromptEnhancementLinuxTerminalLaunchV1({
+      terminalCommand: 'kitty',
+      nodePath: '/usr/bin/node', cliEntryPath: '/x/cli.js',
+      inputFile: '/x/in', resultFile: '/x/out', readinessFile: '/x/ready', dbPath: '/x/db',
+      geometry: docked, displayServer: 'wayland',
+    });
+    expect(kitty.command).toBe('kitty');
+    // Wayland but NO geometry → no wrap (nothing to position).
+    const waylandNoGeom = planPromptEnhancementLinuxTerminalLaunchV1({
+      terminalCommand: 'gnome-terminal',
+      nodePath: '/usr/bin/node', cliEntryPath: '/x/cli.js',
+      inputFile: '/x/in', resultFile: '/x/out', readinessFile: '/x/ready', dbPath: '/x/db',
+      displayServer: 'wayland',
+    });
+    expect(waylandNoGeom.command).toBe('gnome-terminal');
+
     // Omitting geometry falls back to the terminal's default size (no --geometry).
     const plain = planPromptEnhancementLinuxTerminalLaunchV1({
       terminalCommand: 'gnome-terminal', nodePath: input.nodePath, cliEntryPath: input.cliEntryPath,
@@ -293,6 +395,11 @@ describe('PE1.3 — Linux PE popup host launcher', () => {
     // start runs a PROGRAM (`cmd /c <launch.cmd>`), never the .cmd directly — running the .cmd via
     // start's file-association fails with "The system cannot find the path specified." on Windows.
     expect(plan.args).toEqual(['/c', 'start', '/WAIT', 'Nexpath · Prompt enhancement', 'cmd', '/c', 'C:/Temp/pe/launch.cmd']);
+  });
+
+  it('P6 no-jump: minimized:true adds /MIN so the window never flashes at centre before docking', () => {
+    const plan = planPromptEnhancementWindowsTerminalLaunchV1({ launcherScriptPath: 'C:/Temp/pe/launch.cmd', minimized: true });
+    expect(plan.args).toEqual(['/c', 'start', '/MIN', '/WAIT', 'Nexpath · Prompt enhancement', 'cmd', '/c', 'C:/Temp/pe/launch.cmd']);
   });
 
   it('builds a Windows batch launcher with node by absolute path and every path quoted (spaces intact)', () => {
@@ -311,6 +418,40 @@ describe('PE1.3 — Linux PE popup host launcher', () => {
     expect(script).toContain('--db "C:/Users/Admin/.nexpath/prompt-store.db"');
     // On a real error the window stays open (shows the message) instead of flashing shut.
     expect(script).toContain('if errorlevel 1 pause');
+    // No geometry supplied → byte-identical to before: no sizing/positioning lines (regression guard).
+    expect(script).not.toContain('mode con');
+    expect(script).not.toContain('powershell');
+  });
+
+  it('right-docks the Windows console (P3): mode con sizes + MoveWindow .ps1 positions, before node, fail-open', () => {
+    const geometry = computeDockedPopupGeometry({ x: 0, y: 0, widthPx: 1920, heightPx: 1080 });
+    const script = buildPromptEnhancementWindowsLauncherScriptV1({
+      nodeExecPath: 'C:/nodejs/node.exe', cliEntryPath: 'C:/n/dist/cli/index.js',
+      inputFile: 'C:/T/in', resultFile: 'C:/T/out', readinessFile: 'C:/T/ready', dbPath: 'C:/T/db',
+      geometry, positionScriptPath: 'C:/T/position.ps1',
+    });
+    // Cell sizing via mode con (115 cols × 54 rows for FHD).
+    expect(script).toContain(`mode con: cols=${geometry.cols} lines=${geometry.rows}`);
+    expect(script).toContain('mode con: cols=115 lines=54');
+    // Positioning via the sibling .ps1, best-effort (2>nul, no errorlevel stop).
+    expect(script).toContain('powershell -NoProfile -ExecutionPolicy Bypass -File "C:/T/position.ps1" 2>nul');
+    // Sizing + positioning run BEFORE node, so the wait model (start /WAIT + polling) is unchanged.
+    const nodeIdx = script.indexOf('prompt-enhancement-popup-host');
+    expect(script.indexOf('mode con')).toBeLessThan(nodeIdx);
+    expect(script.indexOf('powershell')).toBeLessThan(nodeIdx);
+  });
+
+  it('builds a fail-open MoveWindow position .ps1 with the docked pixel rect (P3)', () => {
+    const geometry = computeDockedPopupGeometry({ x: 0, y: 0, widthPx: 1920, heightPx: 1080 });
+    const ps = buildPromptEnhancementWindowsPositionScriptV1(geometry);
+    expect(ps).toContain('$ErrorActionPreference = "SilentlyContinue"'); // fully fail-open
+    expect(ps).toContain('GetConsoleWindow');
+    // No-jump (P6): SetWindowPlacement restores from minimized straight to the docked normal rect.
+    expect(ps).toContain('SetWindowPlacement');
+    expect(ps).toContain('$wp.normLeft = 768; $wp.normTop = 0; $wp.normRight = 1920; $wp.normBottom = 1080');
+    expect(ps).toContain('MoveWindow($h, 768, 0, 1152, 1080, $true)');
+    // Safety net: always show normal so the window is never left minimized.
+    expect(ps).toContain('ShowWindow($h, 1)');
   });
 
   it('plans a macOS Terminal.app spawn via osascript that runs the shell launcher', () => {
@@ -321,6 +462,15 @@ describe('PE1.3 — Linux PE popup host launcher', () => {
     expect(script).toContain('tell application "Terminal"');
     expect(script).toContain("sh '/tmp/pe/launch.sh'"); // launcher run via sh, quoted
     expect(script).toContain('do script');
+  });
+
+  it('right-docks the macOS Terminal.app window via AppleScript bounds (P2)', () => {
+    // 1920×1080 docked → 1152×1080 @(768,0). AppleScript bounds = {x, y, x+w, y+h}.
+    const docked = computeDockedPopupGeometry({ x: 0, y: 0, widthPx: 1920, heightPx: 1080 });
+    const plan = planPromptEnhancementMacTerminalLaunchV1({ launcherScriptPath: '/tmp/pe/launch.sh', geometry: docked });
+    const script = plan.args[1]!;
+    expect(script).toContain(`set bounds of (first window whose selected tab is theTab) to {${docked.xPx}, ${docked.yPx}, ${docked.xPx + docked.widthPx}, ${docked.yPx + docked.heightPx}}`);
+    expect(script).toContain('set bounds of (first window whose selected tab is theTab) to {768, 0, 1920, 1080}');
   });
 
   it('builds a macOS shell launcher with node by absolute path and every path single-quoted (spaces intact)', () => {

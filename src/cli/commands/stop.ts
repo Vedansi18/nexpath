@@ -42,6 +42,10 @@ import { emitPromptEnhancementCostObservabilityV1 } from '../../prompt-enhanceme
 import { evaluatePromptEnhancementMpsIntakeDecisionV1 } from '../../prompt-enhancement/intake-decision.js';
 import { buildPromptEnhancementCliMpsIntakeEvidenceV1 } from '../../prompt-enhancement/cli-mps-intake-evidence.js';
 import { runPromptEnhancementCliMpsFirstPopupV1, buildPromptEnhancementMpsCancelFeedbackEventV1 } from '../../prompt-enhancement/cli-mps-run.js';
+import { intakePromptEnhancementSequenceOnFirstSendV1 } from '../../prompt-enhancement/sequence-intake.js';
+import { upsertPendingPromptSequence, getActivePendingPromptSequence } from '../../store/pending-sequences.js';
+import { evaluatePromptEnhancementFutureSequenceRuntimeGateV1 } from '../../prompt-enhancement/future-sequence-runtime-gate.js';
+import { PROMPT_ENHANCEMENT_CONTRACT_VERSION } from '../../prompt-enhancement/contracts.js';
 import type { GeneratedOptions } from '../../decision-session/OptionGenerator.js';
 import { resolveContentSource, selectionRegister } from '../../decision-session/selection-registry.js';
 import { autogenAwareLookup, pinchSignalTypeForFlag } from '../../decision-session/content-template-source.js';
@@ -233,6 +237,39 @@ export async function runStop(
       }
       // not_shown → no usable PE host this turn; the record stays PENDING (not marked shown) so a
       // later Stop with a working host can still show it. Fall through to the advisory path below.
+    }
+  }
+
+  // 1.45. MPS continuation launcher (2026-08-08) — priority feedback → PE → MPS → advisory.
+  //       When a prior first-send recorded an active sequence (P2), a later Stop is the decision
+  //       moment to OFFER the next item via the continuation popup. This launcher is deliberately
+  //       FAIL-CLOSED: the runtime gate (`future-sequence-runtime-gate.ts`) always returns
+  //       allowed:false in v1, AND the per-item next body is never generated
+  //       (`futurePromptTextPolicy:'not_generated_not_stored_not_rendered'` — Hiren's content
+  //       half, gated), so there is nothing to render. We therefore only look up the row and log
+  //       the gate outcome, then fall through to the ordinary flow. The interactive continuation
+  //       shell + intent delivery exist (P3/P4) and go live in P5 once the gate lifts and a
+  //       next-item body producer is available. No popup opens here today; behaviour is unchanged.
+  {
+    const activeSequence = getActivePendingPromptSequence(store, payload.cwd, mgr.current.sessionId);
+    if (activeSequence) {
+      const gate = evaluatePromptEnhancementFutureSequenceRuntimeGateV1({
+        schemaVersion: PROMPT_ENHANCEMENT_CONTRACT_VERSION,
+        operation: 'continue_current_item',
+        requestId: activeSequence.enhancementId,
+        projectRoot: payload.cwd,
+      });
+      logger.debug('stop_mps_continuation_gate', {
+        cwd: payload.cwd,
+        sequenceId: activeSequence.sequenceId,
+        currentItemIndex: activeSequence.currentItemIndex,
+        itemCount: activeSequence.itemCount,
+        allowed: gate.allowed,
+        // Fail-closed: allowed is always false in v1 (the gate hard-blocks runtime), so no
+        // continuation popup is opened. The first few missing-gate codes aid diagnosability.
+        reasonCodes: gate.missingGateCodes.slice(0, 4),
+      });
+      // No render, no advance, no mutation — the row is left as-is for the next Stop.
     }
   }
 
@@ -534,6 +571,28 @@ export function registerStopCommand(program: import('commander').Command): void 
               if (mps.state === 'send' && mps.bodyText.trim().length > 0) {
                 recordPromptEnhancementShownMemoryV1(store, payload.cwd, pending.request);
                 markPromptEnhancementUsedMemoryV1(store, payload.cwd, pending.request);
+                // Continuation bookkeeping (2026-08-08): the user EXPLICITLY sent the first
+                // sequence prompt — record the local pending-sequence row (ids/counts only,
+                // never prompt text). Fail-closed typed no-op on any invalid handoff; the row
+                // authorizes nothing by itself (the runtime gate stays the popup authority),
+                // and nothing reads it until the continuation launcher exists.
+                const sequenceIntake = intakePromptEnhancementSequenceOnFirstSendV1({
+                  result: pending.result,
+                  projectRoot: payload.cwd,
+                  // The pending PE row's session is the one that prepared this sequence — the
+                  // continuation row binds to it (a foreign-session row is scrubbed on read).
+                  sessionId: pending.sessionId,
+                });
+                if (sequenceIntake.state === 'sequence_recorded') {
+                  upsertPendingPromptSequence(store, sequenceIntake.runtime);
+                }
+                logger.debug('stop_mps_sequence_intake', {
+                  cwd: payload.cwd,
+                  state: sequenceIntake.state,
+                  ...(sequenceIntake.state === 'sequence_recorded'
+                    ? { itemCount: sequenceIntake.runtime.itemCount }
+                    : { reasonCode: sequenceIntake.reasonCode }),
+                });
                 return { kind: 'inject', text: mps.bodyText };
               }
               if (mps.state === 'cancelled') {

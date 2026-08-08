@@ -100,6 +100,28 @@ CREATE TABLE IF NOT EXISTS pending_prompt_enhancements (
 CREATE INDEX IF NOT EXISTS idx_pending_prompt_enhancements_project
   ON pending_prompt_enhancements (project_root, status, created_at);
 
+-- Active multi-prompt sequence bookkeeping for the Stop-hook continuation flow. One active
+-- sequence per project_root. Ids / counts / status ONLY — never prompt text (future prompt
+-- bodies are not generated, stored, or rendered by design). The runtime gate stays the
+-- authority for whether the continuation surface may run at all; this table is local
+-- user-decision bookkeeping, and a row is never proof of completion.
+CREATE TABLE IF NOT EXISTS pending_prompt_sequences (
+  id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_root       TEXT    NOT NULL,
+  session_id         TEXT    NOT NULL,
+  sequence_id        TEXT    NOT NULL,
+  enhancement_id     TEXT    NOT NULL,
+  item_count         INTEGER NOT NULL,
+  current_item_index INTEGER NOT NULL,
+  status             TEXT    NOT NULL,
+  last_action_id     TEXT,
+  created_at         INTEGER NOT NULL,
+  updated_at         INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_pending_prompt_sequences_project
+  ON pending_prompt_sequences (project_root, status, updated_at);
+
 CREATE TABLE IF NOT EXISTS feedback_signals (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
   project_root TEXT    NOT NULL,

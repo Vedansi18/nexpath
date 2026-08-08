@@ -1564,6 +1564,7 @@ function peTables(): readonly string[] {
     'prompt_enhancement_generated_origin',
     'prompt_enhancement_feedback',
     'prompt_enhancement_status',
+    'pending_prompt_sequences',
   ];
 }
 

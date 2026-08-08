@@ -71,9 +71,10 @@ const PROMPT_ENHANCEMENT_MPS_CLI_SGR_V1 = (() => {
     cyan: `${e}[36m`,
     gray: `${e}[90m`,
     green: `${e}[32m`,
+    // Normal yellow — provider-failure notice only (caution line in the header).
     yellow: `${e}[33m`,
-    // Shortcut/action hints — bright ("light") yellow, distinct + visible on every OS (owner
-    // request 2026-08-07). Distinct from the Cancel row's normal yellow ([33m]).
+    // Shortcut/action hints AND the Cancel row — bright ("light") yellow, distinct + visible on
+    // every OS (owner requests 2026-08-07).
     lightYellow: `${e}[93m`,
     dim: `${e}[2m`,
     bold: `${e}[1m`,
@@ -124,7 +125,8 @@ export function renderPromptEnhancementMpsFirstPopupFrameV1(
   // Radio row identical to the PE popup (owner request: MPS mirrors the PE popup): a green ●
   // (focused) / gray ○ (unfocused) bullet and a bold (focused) / dim (unfocused) label. The cyan
   // left rail is applied to EVERY line as one continuous border in the post-pass below (owner
-  // request: full-height rail, not per-row segments). Cancel renders yellow (owner request).
+  // request: full-height rail, not per-row segments). Cancel renders LIGHT yellow — the same
+  // bright tier as the shortcut hints (owner request 2026-08-07).
   const radioRow = (rowIndex: number, label: string, options: { suffix?: string; tone?: 'default' | 'cancel' } = {}): string => {
     const focused = rowIndex === focusIndex;
     const glyph = focused ? '●' : '○';
@@ -132,7 +134,7 @@ export function renderPromptEnhancementMpsFirstPopupFrameV1(
     if (!c) return `${glyph} ${label}${suffix}`;
     const bullet = focused ? `${c.green}${glyph}${c.reset}` : `${c.gray}${glyph}${c.reset}`;
     const styled = options.tone === 'cancel'
-      ? (focused ? `${c.bold}${c.yellow}${label}${c.reset}` : `${c.yellow}${label}${c.reset}`)
+      ? (focused ? `${c.bold}${c.lightYellow}${label}${c.reset}` : `${c.lightYellow}${label}${c.reset}`)
       : (focused ? `${c.bold}${label}${c.reset}` : `${c.dim}${label}${c.reset}`);
     return `${bullet} ${styled}${suffix}`;
   };
@@ -196,8 +198,9 @@ export function renderPromptEnhancementMpsFirstPopupFrameV1(
   if (focusIndex === 1) lines.push(editKeysHint());
   lines.push('');
 
-  // Cancel — interactive row 2, last interactive action. Yellow (owner request): choosing it
-  // opens the PEF feedback popup and ends the flow, so it reads as a caution action.
+  // Cancel — interactive row 2, last interactive action. Light yellow (owner request
+  // 2026-08-07): choosing it opens the PEF feedback popup and ends the flow, so it reads as a
+  // caution action, in the same bright tier as the shortcut hints.
   const cancelLabel = publicText(model.actions.cancelRemainingSequence.label);
   const cancelUnavailable = model.actions.cancelRemainingSequence.state === 'disabled' ? '  (unavailable)' : '';
   lines.push(radioRow(2, cancelLabel, { suffix: cancelUnavailable, tone: 'cancel' }));
@@ -244,6 +247,16 @@ export interface PromptEnhancementMpsContinuationFrameStateV1 {
   focusIndex?: number;
   /** Apply the §3.4 ANSI tones; off (plain text) for tests and oracles. */
   colorize?: boolean;
+  /**
+   * Caret within the focused editable field (window-relative visual row/column). Same optional
+   * contract as the first-popup renderer — when supplied with `caretOut`, the renderer records the
+   * caret's 1-based SCREEN row/column so the raw-TTY shell can place the hardware cursor without
+   * re-deriving the layout. Absent by default, so every existing (non-interactive) caller is
+   * unaffected.
+   */
+  caret?: { field: PromptEnhancementEditorFieldV1; visualRow: number; visualColumn: number };
+  /** Mutable sink the renderer fills with the caret's 1-based screen position (see `caret`). */
+  caretOut?: { row: number; col: number };
 }
 
 /**
@@ -263,7 +276,8 @@ export function renderPromptEnhancementMpsContinuationFrameV1(
   // Radio row identical to the PE popup (owner request: MPS mirrors the PE popup): a green ●
   // (focused) / gray ○ (unfocused) bullet and a bold (focused) / dim (unfocused) label. The cyan
   // left rail is applied to EVERY line as one continuous border in the post-pass (owner request:
-  // full-height rail). Cancel renders yellow (owner request) — same tones as the first popup.
+  // full-height rail). Cancel renders LIGHT yellow (owner request 2026-08-07) — same tones as
+  // the first popup.
   const radioRow = (rowIndex: number, label: string, options: { suffix?: string; tone?: 'default' | 'cancel' } = {}): string => {
     const focused = rowIndex === focusIndex;
     const glyph = focused ? '●' : '○';
@@ -271,11 +285,20 @@ export function renderPromptEnhancementMpsContinuationFrameV1(
     if (!c) return `${glyph} ${label}${suffix}`;
     const bullet = focused ? `${c.green}${glyph}${c.reset}` : `${c.gray}${glyph}${c.reset}`;
     const styled = options.tone === 'cancel'
-      ? (focused ? `${c.bold}${c.yellow}${label}${c.reset}` : `${c.yellow}${label}${c.reset}`)
+      ? (focused ? `${c.bold}${c.lightYellow}${label}${c.reset}` : `${c.lightYellow}${label}${c.reset}`)
       : (focused ? `${c.bold}${label}${c.reset}` : `${c.dim}${label}${c.reset}`);
     return `${bullet} ${styled}${suffix}`;
   };
   const lines: string[] = [];
+  // Record the caret's real screen position as the field content is built (see caretOut) — the
+  // same contract as the first-popup renderer. Content is indented 4 spaces; with the 2-char rail
+  // added in the post-pass the text lands at screen column 7.
+  const recordCaret = (field: PromptEnhancementEditorFieldV1): void => {
+    if (frameState.caret?.field === field && frameState.caretOut) {
+      frameState.caretOut.row = lines.length + 1 + Math.max(0, frameState.caret.visualRow);
+      frameState.caretOut.col = 7 + Math.max(0, frameState.caret.visualColumn);
+    }
+  };
 
   // Branded header identical to the PE popup (owner request): "◆ NEXPATH CLI ·
   // <surface>", cyan+bold, then a dim rule the same width and a blank line. Only
@@ -301,6 +324,7 @@ export function renderPromptEnhancementMpsContinuationFrameV1(
   // the edit-keys hint as the first popup (owner request 2026-08-07).
   const heading = publicText(model.heading);
   lines.push(radioRow(0, heading));
+  recordCaret('enhanced_body');
   const bodyRender = renderMpsBodyLinesV1(publicText(model.body.text), c);
   for (const bodyLine of bodyRender.lines) lines.push(bodyLine);
   if (focusIndex === 0) lines.push(mpsEditKeysHintV1(c, bodyRender.hiddenBelow));
@@ -310,6 +334,7 @@ export function renderPromptEnhancementMpsContinuationFrameV1(
   // always visible, editing keys as the LAST line when focused; no "Add extra requirement" label.
   const detailsLabel = PROMPT_ENHANCEMENT_MPS_CLI_ADDITIONAL_DETAILS_LABEL_V1;
   lines.push(radioRow(1, detailsLabel));
+  recordCaret('additional_details');
   for (const detailLine of publicText(model.additionalDetails.text).split('\n')) lines.push(contentLine(detailLine));
   lines.push(c ? `      ${c.lightYellow}${PROMPT_ENHANCEMENT_MPS_CLI_DETAILS_HINT_V1}${c.reset}` : `      ${PROMPT_ENHANCEMENT_MPS_CLI_DETAILS_HINT_V1}`);
   if (focusIndex === 1) lines.push(editKeysHint());
@@ -323,7 +348,8 @@ export function renderPromptEnhancementMpsContinuationFrameV1(
   }
   lines.push('');
 
-  // Cancel — interactive row 3. Yellow (owner request) — same caution tone as the first popup.
+  // Cancel — interactive row 3. Light yellow (owner request 2026-08-07) — same caution tone as
+  // the first popup.
   const cancelLabel = publicText(model.actions.cancelRemainingSequence.label);
   const cancelUnavailable = model.actions.cancelRemainingSequence.state === 'disabled' ? '  (unavailable)' : '';
   lines.push(radioRow(3, cancelLabel, { suffix: cancelUnavailable, tone: 'cancel' }));

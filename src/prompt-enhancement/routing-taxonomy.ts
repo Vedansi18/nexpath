@@ -1229,6 +1229,43 @@ export function isPromptEnhancementSequenceShapedTextV1(promptText: string): boo
     || (compoundState === 'multi_point_same_intent' && userPointCoverageRefsFor(promptText).length >= 3);
 }
 
+/** Fixed approved role vocabulary for the MPS Sequence-plan display (locked §3.3: "typed
+ * approved roles"). The SAME five keyword families `compoundPromptStateFor` detects — never raw
+ * prompt text. */
+const PROMPT_ENHANCEMENT_SEQUENCE_ROLE_FAMILIES_V1: readonly { label: string; keywords: readonly string[] }[] = [
+  { label: 'fix', keywords: ['fix', 'bug', 'error', 'failing'] },
+  { label: 'review', keywords: ['review', 'verify', 'audit'] },
+  { label: 'refactor', keywords: ['refactor', 'clean up', 'upgrade', 'migrate'] },
+  { label: 'plan', keywords: ['plan', 'break down', 'prd', 'spec'] },
+  { label: 'build', keywords: ['build', 'implement', 'add', 'extend'] },
+];
+
+/**
+ * DISPLAY-ONLY sequence-plan description for the MPS first popup's dim "Sequence plan" block
+ * (Sequence-plan summary fix 2026-08-07). Splits the prompt into points with an AND-AWARE split
+ * — the shape detector above counts "and" as list shape, but `userPointCoverageRefsFor` does
+ * not split on it, so an and-joined multi-intent prompt counted as ONE point and the popup
+ * always showed "Remaining: 0". This helper feeds ONLY the compact summary; the emission gate
+ * and `isPromptEnhancementSequenceShapedTextV1` keep using `userPointCoverageRefsFor`, so WHICH
+ * prompts open MPS is unchanged. Labels come exclusively from the fixed approved vocabulary
+ * (a point matching no family contributes count but no label — never raw text).
+ */
+export function describePromptEnhancementSequencePlanV1(
+  promptText: string,
+): { pointCount: number; roleLabels: readonly string[] } {
+  const points = promptText
+    .split(/\n|(?:\bthen\b)|(?:\balso\b)|(?:\band\b)|[,;]/i)
+    .map((point) => point.trim())
+    .filter(Boolean);
+  const roleLabels: string[] = [];
+  for (const point of points) {
+    const normalized = point.toLowerCase();
+    const family = PROMPT_ENHANCEMENT_SEQUENCE_ROLE_FAMILIES_V1.find((candidate) => hasAny(normalized, candidate.keywords));
+    if (family && !roleLabels.includes(family.label)) roleLabels.push(family.label);
+  }
+  return { pointCount: Math.max(1, points.length), roleLabels };
+}
+
 function routeCandidatesFor(
   selectedPreset: PromptEnhancementTaxonomyPreset,
   selectedCapabilityOverlays: readonly PromptEnhancementCapabilityId[],

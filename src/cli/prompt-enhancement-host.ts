@@ -8,7 +8,14 @@ import type {
   PromptEnhancementPrepareResultV1,
 } from '../prompt-enhancement/contracts.js';
 import { validatePromptEnhancementCliPopupResultV1 } from '../prompt-enhancement/cli-submit-popup.js';
-import { computePopupGeometry, detectScreenResolution, type PopupGeometry } from '../decision-session/screen-geometry.js';
+import {
+  computeDockedPopupGeometry,
+  detectScreenResolution,
+  detectLinuxDisplayServerV1,
+  wrapLinuxSpawnForWaylandX11V1,
+  buildWindowsConsolePositionScriptV1,
+  type PopupGeometry,
+} from '../decision-session/screen-geometry.js';
 import type {
   PromptEnhancementPopupHostInputV1,
   PromptEnhancementPopupHostOutputV1,
@@ -29,6 +36,23 @@ export const PROMPT_ENHANCEMENT_LINUX_TERMINAL_COMMANDS_V1 = [
 
 export type PromptEnhancementLinuxTerminalCommandV1 =
   (typeof PROMPT_ENHANCEMENT_LINUX_TERMINAL_COMMANDS_V1)[number];
+
+/** Linux display server, for choosing how the popup window is positioned. */
+export type PromptEnhancementLinuxDisplayServerV1 = 'x11' | 'wayland' | 'unknown';
+
+/**
+ * Detect the Linux display server from the environment (P4). `XDG_SESSION_TYPE` is authoritative
+ * when present; otherwise infer from `WAYLAND_DISPLAY` / `DISPLAY`. Pure — exported for testability.
+ * Matters because GTK terminals (gnome-terminal, xfce4-terminal) default to NATIVE Wayland, where
+ * the `--geometry` position offset is IGNORED; forcing GDK_BACKEND=x11 routes them through XWayland
+ * (shipped by default on recent Ubuntu), where `--geometry` positions correctly.
+ */
+export function detectPromptEnhancementLinuxDisplayServerV1(
+  env: NodeJS.ProcessEnv = process.env,
+): PromptEnhancementLinuxDisplayServerV1 {
+  // Delegates to the shared decision-session helper (P5) — one implementation for both layers.
+  return detectLinuxDisplayServerV1(env);
+}
 
 export type PromptEnhancementCliHostCapabilityV1 =
   | {
@@ -60,7 +84,7 @@ export type PromptEnhancementCliHostCapabilityV1 =
 
 export interface PromptEnhancementCliHostProbeDependenciesV1 {
   platform?: NodeJS.Platform;
-  env?: Pick<NodeJS.ProcessEnv, 'DISPLAY' | 'WAYLAND_DISPLAY'>;
+  env?: Pick<NodeJS.ProcessEnv, 'DISPLAY' | 'WAYLAND_DISPLAY' | 'NEXPATH_POPUP_DOCK'>;
   probeDirectTty?: () => boolean;
   commandExists?: (command: PromptEnhancementLinuxTerminalCommandV1) => boolean;
   readCommandVersion?: (command: PromptEnhancementLinuxTerminalCommandV1) => string | undefined;
@@ -181,16 +205,32 @@ export function resolvePromptEnhancementCliHostCapabilityV1(
   }
 
   // Linux: prefer the in-process /dev/tty when the hook has a controlling terminal, otherwise spawn a
-  // GUI terminal below (unchanged behaviour).
+  // GUI terminal below (unchanged behaviour). Opt-in force-dock (P4, owner request 2026-08-08): when
+  // NEXPATH_POPUP_DOCK is set AND a GUI session exists, prefer a spawned right-docked WINDOW over the
+  // in-terminal /dev/tty render — so Ubuntu users can get the Windows/macOS-style docked window on
+  // demand. The default (env unset) is UNCHANGED — direct-TTY still wins — honouring the locked
+  // "preserve Linux popup behaviour" rule. Fail-open: if force-dock finds no spawnable terminal, the
+  // in-process /dev/tty is still used as a last resort rather than losing the popup.
   const directTtyAvailable = dependencies.probeDirectTty ?? probeDirectTty;
-  try {
-    if (directTtyAvailable()) return { state: 'available', method: 'direct_tty' };
-  } catch {
-    // Continue to the Linux terminal-spawn fallback below.
+  const env = dependencies.env ?? process.env;
+  const tryDirectTty = (): PromptEnhancementCliHostCapabilityV1 | null => {
+    try {
+      if (directTtyAvailable()) return { state: 'available', method: 'direct_tty' };
+    } catch { /* fall through */ }
+    return null;
+  };
+  const forceDock = (env.NEXPATH_POPUP_DOCK ?? '').trim().length > 0;
+  const guiSession = Boolean(env.DISPLAY || env.WAYLAND_DISPLAY);
+
+  if (!forceDock) {
+    const dt = tryDirectTty();
+    if (dt) return dt;
   }
 
-  const env = dependencies.env ?? process.env;
-  if (!env.DISPLAY && !env.WAYLAND_DISPLAY) {
+  if (!guiSession) {
+    // No GUI session → only the in-process /dev/tty can render (even under force-dock).
+    const dt = tryDirectTty();
+    if (dt) return dt;
     return { state: 'unavailable', method: 'none', reasonCode: 'no_gui_session' };
   }
 
@@ -218,6 +258,11 @@ export function resolvePromptEnhancementCliHostCapabilityV1(
     return { state: 'available', method: 'linux_terminal', terminalCommand };
   }
 
+  // Force-dock reached here having skipped the direct-TTY check but found no spawnable terminal —
+  // fall back to the in-process /dev/tty rather than losing the popup (fail-open). For the
+  // non-force-dock path direct-TTY was already tried above, so this is a harmless no-op there.
+  const dt = tryDirectTty();
+  if (dt) return dt;
   return { state: 'unavailable', method: 'none', reasonCode: 'no_supported_terminal' };
 }
 
@@ -233,8 +278,10 @@ export function planPromptEnhancementLinuxTerminalLaunchV1(input: {
   resultFile: string;
   readinessFile: string;
   dbPath: string;
-  /** ~70% × 70% centred popup window geometry; omitted → the terminal's default size. */
+  /** Right-docked popup window geometry (~60% width × 100% height); omitted → the terminal's default size. */
   geometry?: PopupGeometry;
+  /** Display server (P4). On Wayland, GTK terminals are wrapped with GDK_BACKEND=x11 so --geometry positions via XWayland. */
+  displayServer?: PromptEnhancementLinuxDisplayServerV1;
 }): PromptEnhancementLinuxTerminalLaunchPlanV1 {
   const childArgs = [
     input.nodePath,
@@ -246,9 +293,10 @@ export function planPromptEnhancementLinuxTerminalLaunchV1(input: {
     '--db', input.dbPath,
   ];
 
-  // Size the popup window to the supplied ~70%×70% geometry, using each
-  // emulator's native flag (char cells for X11-style; pixels for kitty/foot).
-  // Reused from the decision-session screen-geometry pattern.
+  // Size + position the popup window to the supplied right-docked geometry, using each
+  // emulator's native flag (char cells + `+x+y` offset for X11-style; pixels for kitty/foot,
+  // which are size-only — position is WM/compositor-controlled there). Reused from the
+  // decision-session screen-geometry pattern.
   const g = input.geometry;
   const cellGeom = g ? [`--geometry=${g.cols}x${g.rows}+${g.xPx}+${g.yPx}`] : [];
   const xtermGeom = g ? ['-geometry', `${g.cols}x${g.rows}+${g.xPx}+${g.yPx}`] : [];
@@ -257,28 +305,42 @@ export function planPromptEnhancementLinuxTerminalLaunchV1(input: {
   const footGeom = g ? [`--window-size-pixels=${g.widthPx}x${g.heightPx}`] : [];
   const T = PROMPT_ENHANCEMENT_POPUP_WINDOW_TITLE_V1;
 
-  switch (input.terminalCommand) {
-    case 'xdg-terminal-exec':
-      return { command: input.terminalCommand, args: childArgs };
-    case 'gnome-terminal':
-      return { command: input.terminalCommand, args: ['--wait', `--title=${T}`, ...cellGeom, '--', ...childArgs] };
-    case 'konsole':
-      return { command: input.terminalCommand, args: ['-p', `tabtitle=${T}`, '-e', ...childArgs] };
-    case 'xfce4-terminal':
-      return { command: input.terminalCommand, args: ['--disable-server', `--title=${T}`, ...cellGeom, '-x', ...childArgs] };
-    case 'kitty':
-      return { command: input.terminalCommand, args: [...kittyGeom, '--title', T, ...childArgs] };
-    case 'alacritty':
-      return { command: input.terminalCommand, args: [...alacrittyGeom, '--title', T, '-e', ...childArgs] };
-    case 'wezterm':
-      return { command: input.terminalCommand, args: ['start', '--', ...childArgs] };
-    case 'foot':
-      return { command: input.terminalCommand, args: [...footGeom, `--title=${T}`, ...childArgs] };
-    case 'x-terminal-emulator':
-      return { command: input.terminalCommand, args: ['-e', ...childArgs] };
-    case 'xterm':
-      return { command: input.terminalCommand, args: [...xtermGeom, '-T', T, '-e', ...childArgs] };
-  }
+  const plan: PromptEnhancementLinuxTerminalLaunchPlanV1 = ((): PromptEnhancementLinuxTerminalLaunchPlanV1 => {
+    switch (input.terminalCommand) {
+      case 'xdg-terminal-exec':
+        return { command: input.terminalCommand, args: childArgs };
+      case 'gnome-terminal':
+        return { command: input.terminalCommand, args: ['--wait', `--title=${T}`, ...cellGeom, '--', ...childArgs] };
+      case 'konsole':
+        return { command: input.terminalCommand, args: ['-p', `tabtitle=${T}`, '-e', ...childArgs] };
+      case 'xfce4-terminal':
+        return { command: input.terminalCommand, args: ['--disable-server', `--title=${T}`, ...cellGeom, '-x', ...childArgs] };
+      case 'kitty':
+        return { command: input.terminalCommand, args: [...kittyGeom, '--title', T, ...childArgs] };
+      case 'alacritty':
+        return { command: input.terminalCommand, args: [...alacrittyGeom, '--title', T, '-e', ...childArgs] };
+      case 'wezterm':
+        return { command: input.terminalCommand, args: ['start', '--', ...childArgs] };
+      case 'foot':
+        return { command: input.terminalCommand, args: [...footGeom, `--title=${T}`, ...childArgs] };
+      case 'x-terminal-emulator':
+        return { command: input.terminalCommand, args: ['-e', ...childArgs] };
+      case 'xterm':
+        return { command: input.terminalCommand, args: [...xtermGeom, '-T', T, '-e', ...childArgs] };
+    }
+  })();
+
+  // Wayland positioning (P4): GTK terminals (gnome-terminal, xfce4-terminal) default to NATIVE
+  // Wayland, where the `--geometry` position offset is ignored. Only when we actually have a docked
+  // geometry to apply, run them through XWayland via `env GDK_BACKEND=x11 …` so `--geometry`
+  // positions the window. XWayland ships by default on recent Ubuntu. On X11 / unknown sessions this
+  // wrap is not applied (native geometry already works); non-GTK terminals are left untouched
+  // (xterm is already XWayland; kitty/foot/alacritty are size-only under Wayland by design).
+  return wrapLinuxSpawnForWaylandX11V1(plan, {
+    displayServer: input.displayServer ?? 'unknown',
+    terminalCommand: input.terminalCommand,
+    hasGeometry: Boolean(input.geometry),
+  });
 }
 
 /**
@@ -295,6 +357,10 @@ export function buildPromptEnhancementWindowsLauncherScriptV1(input: {
   resultFile: string;
   readinessFile: string;
   dbPath: string;
+  /** Right-dock geometry (P3). When present the launcher sizes the console (mode con) before node. */
+  geometry?: PopupGeometry;
+  /** Path to the sibling MoveWindow .ps1 (P3). When present, run it best-effort to position the window. */
+  positionScriptPath?: string;
 }): string {
   // Paths never legitimately contain a double-quote; strip any defensively so the quoting can't be
   // broken out of (the request body itself is passed as a file, never on this command line).
@@ -308,10 +374,36 @@ export function buildPromptEnhancementWindowsLauncherScriptV1(input: {
     '--readiness-file', quote(input.readinessFile),
     '--db', quote(input.dbPath),
   ].join(' ');
-  // `@echo off` for a clean window; CRLF line endings for a well-formed .cmd. On success the child
-  // exits 0 and the window closes; on any real error (non-zero exit) `pause` keeps the window open so
-  // the message is visible instead of the window flashing and vanishing (better UX + diagnosis).
-  return ['@echo off', command, 'if errorlevel 1 pause', ''].join('\r\n');
+  // `@echo off` for a clean window; CRLF line endings for a well-formed .cmd.
+  const lines = ['@echo off'];
+  // Right-dock (P3, fail-open): size the console in CELLS via `mode con` (reliable, no quoting),
+  // then POSITION it via the sibling MoveWindow .ps1 run best-effort (`2>nul`, no errorlevel stop —
+  // a missing/blocked PowerShell just leaves the sized-but-default-positioned window). Both run
+  // BEFORE node, in the same console, so the whole `cmd /c start /WAIT` + polling wait model is
+  // unchanged. Omitting geometry → today's behaviour exactly (no sizing/positioning).
+  if (input.geometry) {
+    lines.push(`mode con: cols=${input.geometry.cols} lines=${input.geometry.rows}`);
+    if (input.positionScriptPath) {
+      lines.push(`powershell -NoProfile -ExecutionPolicy Bypass -File ${quote(input.positionScriptPath)} 2>nul`);
+    }
+  }
+  lines.push(command);
+  // On a real error (non-zero exit) `pause` keeps the window open so the message is visible instead
+  // of the window flashing and vanishing (better UX + diagnosis).
+  lines.push('if errorlevel 1 pause', '');
+  return lines.join('\r\n');
+}
+
+/**
+ * The PowerShell script (written as a sibling .ps1, run via `-File`) that right-docks the popup's
+ * console window. Uses GetConsoleWindow (kernel32) + MoveWindow (user32) to move+size the CURRENT
+ * console to the docked pixel rect. Written as a separate file so there is NO batch↔PowerShell↔C#
+ * quoting to get wrong; `$ErrorActionPreference = SilentlyContinue` + the caller's `2>nul` make it
+ * fully fail-open (a failure leaves the mode-con-sized window at its default position). Pure.
+ */
+export function buildPromptEnhancementWindowsPositionScriptV1(geometry: PopupGeometry): string {
+  // Delegates to the shared decision-session helper (P5) — one MoveWindow implementation.
+  return buildWindowsConsolePositionScriptV1(geometry);
 }
 
 /**
@@ -328,13 +420,20 @@ export function buildPromptEnhancementWindowsLauncherScriptV1(input: {
  */
 export function planPromptEnhancementWindowsTerminalLaunchV1(input: {
   launcherScriptPath: string;
+  /**
+   * No-jump (P6): open the window MINIMIZED (`start /MIN`) so it never flashes at the default centre;
+   * the launcher's position .ps1 then restores it directly to the docked rect (SetWindowPlacement).
+   * Set only when a docked geometry + position script are present; omitted → today's normal spawn.
+   */
+  minimized?: boolean;
 }): PromptEnhancementLinuxTerminalLaunchPlanV1 {
+  const startFlags = input.minimized ? ['start', '/MIN', '/WAIT'] : ['start', '/WAIT'];
   return {
     // Resolve the command interpreter from the system (`%ComSpec%`) rather than assuming a fixed
     // `cmd.exe` on PATH — this works across non-standard Windows installs and locales. Falls back to
     // the on-PATH `cmd.exe` only if the env var is absent.
     command: process.env.ComSpec ?? 'cmd.exe',
-    args: ['/c', 'start', '/WAIT', PROMPT_ENHANCEMENT_POPUP_WINDOW_TITLE_V1, 'cmd', '/c', input.launcherScriptPath],
+    args: ['/c', ...startFlags, PROMPT_ENHANCEMENT_POPUP_WINDOW_TITLE_V1, 'cmd', '/c', input.launcherScriptPath],
   };
 }
 
@@ -487,8 +586,13 @@ function defaultLaunchDependencies(): PromptEnhancementCliPopupHostLaunchDepende
     cleanupTempDir,
     detectPopupGeometry: async () => {
       try {
+        // Right-dock geometry (owner request 2026-08-08): ~60% width × 100% height, flush right.
+        // Fail-open exactly as before — detection failure → undefined → the emulator's default size.
+        // Working-area (taskbar) refinement is wired in P3 (Windows); here origin is {0,0}.
         const screen = await detectScreenResolution();
-        return screen ? computePopupGeometry(screen) : undefined;
+        return screen
+          ? computeDockedPopupGeometry({ x: 0, y: 0, widthPx: screen.widthPx, heightPx: screen.heightPx })
+          : undefined;
       } catch {
         return undefined;
       }
@@ -536,6 +640,14 @@ export async function runPromptEnhancementCliPopupHostLaunchV1(input: {
       // Write the batch launcher into the temp dir (cleaned up in `finally`), then spawn a window
       // that runs it. All real paths are quoted inside the batch, so the spawn command stays clean.
       const launcherScriptPath = join(tempDir, 'launch.cmd');
+      // Right-dock (P3): when geometry is known, write a sibling MoveWindow .ps1 and have the
+      // launcher size (mode con) + position (that .ps1, best-effort) the window before node. When
+      // geometry is undefined (detection failed) the launcher is byte-identical to before.
+      let positionScriptPath: string | undefined;
+      if (geometry) {
+        positionScriptPath = join(tempDir, 'position.ps1');
+        writeFileSync(positionScriptPath, buildPromptEnhancementWindowsPositionScriptV1(geometry), 'utf8');
+      }
       const launcherScript = buildPromptEnhancementWindowsLauncherScriptV1({
         nodeExecPath: input.nodePath ?? process.execPath,
         cliEntryPath: input.cliEntryPath,
@@ -543,10 +655,14 @@ export async function runPromptEnhancementCliPopupHostLaunchV1(input: {
         resultFile,
         readinessFile,
         dbPath: input.dbPath,
+        geometry,
+        positionScriptPath,
       });
       writeFileSync(launcherScriptPath, launcherScript, 'utf8');
       if (process.env.NEXPATH_DEBUG) process.stderr.write(`[nexpath] launch.cmd (${launcherScriptPath}):\n${launcherScript}\n`);
-      plan = planPromptEnhancementWindowsTerminalLaunchV1({ launcherScriptPath });
+      // No-jump (P6): minimize on spawn only when we wrote a position script (geometry known), so
+      // the launcher restores it straight to the docked rect. Without geometry → normal spawn.
+      plan = planPromptEnhancementWindowsTerminalLaunchV1({ launcherScriptPath, minimized: Boolean(positionScriptPath) });
     } else if (input.capability.method === 'mac_terminal') {
       // Write the shell launcher (0o700) into the temp dir, then open a Terminal.app window that runs
       // it. All real paths are quoted inside the launcher, so the AppleScript stays clean.
@@ -566,6 +682,9 @@ export async function runPromptEnhancementCliPopupHostLaunchV1(input: {
         nodePath: input.nodePath ?? process.execPath,
         cliEntryPath: input.cliEntryPath,
         geometry,
+        // P4: detect X11 vs Wayland so GTK terminals get GDK_BACKEND=x11 (XWayland) on Wayland,
+        // where --geometry positioning is otherwise ignored (recent Ubuntu default).
+        displayServer: detectPromptEnhancementLinuxDisplayServerV1(),
         inputFile,
         resultFile,
         readinessFile,

@@ -35,6 +35,7 @@ import { runStop } from './stop.js';
 import type { StopPayload } from './stop.js';
 import { upsertPendingAdvisory, getPendingAdvisory } from '../../store/pending-advisories.js';
 import { upsertPendingPromptEnhancement, getPendingPromptEnhancement } from '../../store/pending-prompt-enhancements.js';
+import { upsertPendingPromptSequence, getActivePendingPromptSequence } from '../../store/pending-sequences.js';
 import { buildPromptEnhancementRequestForAuto } from './auto.js';
 import { preparePromptEnhancement } from '../../prompt-enhancement/facade.js';
 import type { PromptEnhancementStopLaunchFn } from './stop.js';
@@ -156,6 +157,25 @@ describe('runStop — deferred Prompt Enhancement popup (B-i)', () => {
     // No advisory seeded → falling through reaches the advisory lookup and finds nothing.
     const result = await runStop(makePayload(), store, undefined, undefined, undefined, notShown());
     expect(result).toEqual({ outcome: 'no_pending' });
+  });
+
+  // MPS continuation launcher (P3, fail-closed) — an active pending-sequence row must NOT open a
+  // popup, advance, or mutate while the runtime gate is closed. Proves the launcher is inert.
+  it('fail-closed continuation launcher: an active sequence row is read but never advanced/mutated/rendered', async () => {
+    const session = SessionStateManager.load(store, '/test/project');
+    session.setDetectedLanguage(store, undefined);
+    upsertPendingPromptSequence(store, {
+      sequenceId: 'seq-x', enhancementId: 'enh-x', projectRoot: '/test/project',
+      sessionId: session.current.sessionId, itemCount: 3, currentItemIndex: 1,
+      status: 'item_pending', lastActionId: 'prev',
+    });
+    // No pending PE, no advisory → the only thing present is the active sequence row.
+    const result = await runStop(makePayload(), store, undefined, undefined, undefined, notShown());
+    // No continuation popup opened / nothing injected — ordinary flow (no pending advisory).
+    expect(result).toEqual({ outcome: 'no_pending' });
+    // The row is left EXACTLY as-is: no advance, no status change, no scrub (fail-closed).
+    const after = getActivePendingPromptSequence(store, '/test/project', session.current.sessionId);
+    expect(after).toMatchObject({ currentItemIndex: 1, status: 'item_pending', lastActionId: 'prev' });
   });
 
   it('leaves the pending PE PENDING on not_shown so a later Stop can retry it (Bug 2 — no silent loss)', async () => {

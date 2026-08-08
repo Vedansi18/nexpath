@@ -15,9 +15,12 @@ vi.mock('node:child_process', () => ({
 // add extra spawnSync calls into the per-test mock-call timeline. Returning
 // null forces the planWindowsPopupSpawn passthrough branch (legacy spawn
 // shape) so the pre-Phase-2 test assertions keep working unchanged.
-vi.mock('./screen-geometry.js', () => ({
+vi.mock('./screen-geometry.js', async (importOriginal) => ({
+  // Keep the real pure helpers (computeDockedPopupGeometry, wrapLinuxSpawnForWaylandX11V1,
+  // position/launcher builders, detectLinuxDisplayServerV1); only stub the detection shell-out so
+  // tests stay deterministic and headless.
+  ...(await importOriginal<typeof import('./screen-geometry.js')>()),
   detectScreenResolution: vi.fn(() => Promise.resolve(null)),
-  computePopupGeometry:   vi.fn(() => null),
 }));
 
 // Deferred import so mocks are in place before module is evaluated
@@ -1885,6 +1888,17 @@ describe('planWindowsPopupSpawn — title and path passthrough', () => {
     expect(plan.args[plan.args.length - 2]).toBe('node');
     expect(plan.args[plan.args.length - 1]).toBe('C:/Users/me/AppData/Local/Temp/nexpath-sel-abc.mjs');
   });
+
+  it('P5/P6: with a launcher .cmd, runs it MINIMIZED via cmd /c (no-jump: restores straight to docked)', () => {
+    const plan = planWindowsPopupSpawn(geom, 'T', 'C:/tmp/s.mjs', 'C:/tmp/s.mjs.launch.cmd');
+    // /MIN so the window never flashes at centre; the launcher's .ps1 restores it to the docked rect.
+    expect(plan.args).toEqual(['/c', 'start', '/MIN', '/WAIT', 'T', 'cmd', '/c', 'C:/tmp/s.mjs.launch.cmd']);
+  });
+
+  it('P5: without a launcher (fail-open), stays the legacy direct-node spawn', () => {
+    const plan = planWindowsPopupSpawn(geom, 'T', 'C:/tmp/s.mjs');
+    expect(plan.args[plan.args.length - 2]).toBe('node');
+  });
 });
 
 // ── planLinuxPopupSpawn ──────────────────────────────────────────────────────
@@ -1950,6 +1964,29 @@ describe('planLinuxPopupSpawn — geometry args per emulator (cells-based)', () 
     const plan = planLinuxPopupSpawn(spec, sampleGeom, 'T', '/tmp/s.mjs');
     expect(plan.args.slice(0, 3)).toEqual(['--dimensions', '134', '37']);
     expect(plan.args.slice(3)).toEqual(['--title', 'T', '-e', 'node', '/tmp/s.mjs']);
+  });
+
+  it('P5: a GTK terminal on Wayland is wrapped with env GDK_BACKEND=x11 (positions via XWayland)', () => {
+    const spec = {
+      cmd:  'gnome-terminal',
+      args: (t: string, s: string) => ['--wait', `--title=${t}`, '--', 'node', s],
+      geometryArgs: (g: typeof sampleGeom) => [`--geometry=${g.cols}x${g.rows}+${g.xPx}+${g.yPx}`],
+    };
+    const plan = planLinuxPopupSpawn(spec, sampleGeom, 'T', '/tmp/s.mjs', 'wayland');
+    expect(plan.cmd).toBe('env');
+    expect(plan.args[0]).toBe('GDK_BACKEND=x11');
+    expect(plan.args[1]).toBe('gnome-terminal');
+    expect(plan.args).toContain('--geometry=134x37+288+162');
+  });
+
+  it('P5: X11 (default) is NOT wrapped — native geometry already positions', () => {
+    const spec = {
+      cmd:  'gnome-terminal',
+      args: (t: string, s: string) => ['--wait', `--title=${t}`, '--', 'node', s],
+      geometryArgs: (g: typeof sampleGeom) => [`--geometry=${g.cols}x${g.rows}+${g.xPx}+${g.yPx}`],
+    };
+    const plan = planLinuxPopupSpawn(spec, sampleGeom, 'T', '/tmp/s.mjs', 'x11');
+    expect(plan.cmd).toBe('gnome-terminal');
   });
 });
 
