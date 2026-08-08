@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { posix as posixPath, win32 as win32Path } from 'node:path';
 import { registerAdapter } from '../registry.js';
 import type {
   InstallContext,
@@ -44,22 +44,37 @@ const OPEN_VSX_URL = `https://open-vsx.org/extension/${MARKETPLACE_ID.replace(
 const VS_CODE_MARKETPLACE_URL = `https://marketplace.visualstudio.com/items?itemName=${MARKETPLACE_ID}`;
 
 /**
+ * Local, adapter-only platform override. Kept out of the shared
+ * `InstallContext` interface (`src/agents/types.ts`) on purpose — that file
+ * is outside this adapter's domain. A real `InstallContext` never carries
+ * these properties, so `ctx.platform`/`ctx.appdata` below simply read as
+ * `undefined` and fall back to `process.platform`/`process.env.APPDATA`.
+ */
+export type PlatformOverride = { platform?: NodeJS.Platform; appdata?: string };
+
+/**
  * OS-specific Cursor configuration directory. Existence of this directory
  * is the heuristic the adapter uses to decide whether Cursor is installed.
+ *
+ * Uses `path.posix`/`path.win32` explicitly, keyed off `platform`, rather
+ * than `node:path`'s host-native `join` — which always builds with the
+ * RUNNING machine's separator regardless of what `platform` says. That made
+ * this function silently ignore its own `platform` parameter for every
+ * platform other than whichever one the process happened to run on.
  */
 export function cursorConfigDir(
   home: string,
   platform: NodeJS.Platform = process.platform,
   appdata?: string,
 ): string {
-  switch (platform) {
-    case 'darwin':
-      return join(home, 'Library', 'Application Support', 'Cursor');
-    case 'win32':
-      return join(appdata ?? process.env.APPDATA ?? join(home, 'AppData', 'Roaming'), 'Cursor');
-    default:
-      return join(home, '.config', 'Cursor');
+  if (platform === 'win32') {
+    const base = appdata ?? process.env.APPDATA ?? win32Path.join(home, 'AppData', 'Roaming');
+    return win32Path.join(base, 'Cursor');
   }
+  if (platform === 'darwin') {
+    return posixPath.join(home, 'Library', 'Application Support', 'Cursor');
+  }
+  return posixPath.join(home, '.config', 'Cursor');
 }
 
 export const cursorAdapter: VSCodeExtensionAdapter = {
@@ -69,14 +84,18 @@ export const cursorAdapter: VSCodeExtensionAdapter = {
   marketplace: { openVsx: MARKETPLACE_ID, vsCode: MARKETPLACE_ID },
 
   detect(ctx: InstallContext): boolean {
-    return existsSync(cursorConfigDir(ctx.home));
+    const c = ctx as InstallContext & PlatformOverride;
+    return existsSync(cursorConfigDir(c.home, c.platform, c.appdata));
   },
 
   chatHistoryPaths(ctx: InstallContext): string[] {
     // Return the base workspaceStorage directory; per-workspace state.vscdb
     // enumeration happens at extension activation time (we can't enumerate
     // here because the user may open new workspaces after install runs).
-    return [join(cursorConfigDir(ctx.home), 'User', 'workspaceStorage')];
+    const c = ctx as InstallContext & PlatformOverride;
+    const platform = c.platform ?? process.platform;
+    const path = platform === 'win32' ? win32Path : posixPath;
+    return [path.join(cursorConfigDir(c.home, c.platform, c.appdata), 'User', 'workspaceStorage')];
   },
 
   /**
