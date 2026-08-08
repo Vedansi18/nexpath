@@ -222,6 +222,23 @@ export function parseMacOsascriptOutput(stdout: string): ScreenSize | null {
 }
 
 /**
+ * Parse `system_profiler SPDisplaysDataType` output into a ScreenSize. Prefers the
+ * "UI Looks like: W x H" line (the effective POINTS resolution — what macOS Terminal window bounds
+ * use), falling back to the first "Resolution: W x H". Returns null when neither is present. Used as
+ * the no-Automation-permission fallback for macOS screen detection. Exported for unit testability.
+ */
+export function parseMacSystemProfilerOutput(stdout: string): ScreenSize | null {
+  const ui = stdout.match(/UI Looks like:\s*(\d+)\s*x\s*(\d+)/i);
+  const res = stdout.match(/Resolution:\s*(\d+)\s*x\s*(\d+)/i);
+  const m = ui ?? res;
+  if (!m) return null;
+  const widthPx  = parsePositiveInt(m[1]);
+  const heightPx = parsePositiveInt(m[2]);
+  if (widthPx === null || heightPx === null) return null;
+  return { widthPx, heightPx };
+}
+
+/**
  * Parse `xdpyinfo` output (looks for the "dimensions: WxH pixels" line).
  * Returns null when the line is not present.
  *
@@ -298,6 +315,8 @@ function detectScreenWindows(): ScreenSize | null {
 }
 
 function detectScreenMac(): ScreenSize | null {
+  // Primary: Finder desktop bounds (points). Works only when the hook has macOS Automation
+  // permission for Finder — a Claude-spawned Stop hook usually does NOT, so this often fails.
   try {
     const script =
       'tell application "Finder" to set b to bounds of window of desktop\n' +
@@ -305,6 +324,18 @@ function detectScreenMac(): ScreenSize | null {
     const r = spawnSync('osascript', ['-e', script], { encoding: 'utf8', timeout: 5000 });
     if (r.status === 0 && r.stdout) {
       const parsed = parseMacOsascriptOutput(r.stdout);
+      if (parsed) return parsed;
+    }
+  } catch { /* fall through */ }
+
+  // Fallback (mac fix 2026-08-08): `system_profiler` reads the display WITHOUT any Automation
+  // permission, so the popup can still be sized/positioned when Finder scripting is blocked. Prefer
+  // the "UI Looks like: W x H" line (effective POINTS — what Terminal bounds use); fall back to
+  // "Resolution: W x H".
+  try {
+    const r = spawnSync('system_profiler', ['SPDisplaysDataType'], { encoding: 'utf8', timeout: 8000 });
+    if (r.status === 0 && r.stdout) {
+      const parsed = parseMacSystemProfilerOutput(r.stdout);
       if (parsed) return parsed;
     }
   } catch { /* fall through */ }
