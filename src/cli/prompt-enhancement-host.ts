@@ -30,6 +30,33 @@ export const PROMPT_ENHANCEMENT_LINUX_TERMINAL_COMMANDS_V1 = [
 export type PromptEnhancementLinuxTerminalCommandV1 =
   (typeof PROMPT_ENHANCEMENT_LINUX_TERMINAL_COMMANDS_V1)[number];
 
+/** Linux display server, for choosing how the popup window is positioned. */
+export type PromptEnhancementLinuxDisplayServerV1 = 'x11' | 'wayland' | 'unknown';
+
+/**
+ * Detect the Linux display server from the environment (P4). `XDG_SESSION_TYPE` is authoritative
+ * when present; otherwise infer from `WAYLAND_DISPLAY` / `DISPLAY`. Pure — exported for testability.
+ * Matters because GTK terminals (gnome-terminal, xfce4-terminal) default to NATIVE Wayland, where
+ * the `--geometry` position offset is IGNORED; forcing GDK_BACKEND=x11 routes them through XWayland
+ * (shipped by default on recent Ubuntu), where `--geometry` positions correctly.
+ */
+export function detectPromptEnhancementLinuxDisplayServerV1(
+  env: NodeJS.ProcessEnv = process.env,
+): PromptEnhancementLinuxDisplayServerV1 {
+  const sessionType = (env.XDG_SESSION_TYPE ?? '').trim().toLowerCase();
+  if (sessionType === 'wayland') return 'wayland';
+  if (sessionType === 'x11') return 'x11';
+  if (env.WAYLAND_DISPLAY) return 'wayland';
+  if (env.DISPLAY) return 'x11';
+  return 'unknown';
+}
+
+/** GTK terminals that default to native Wayland and need GDK_BACKEND=x11 (XWayland) to honour --geometry. */
+const PROMPT_ENHANCEMENT_GTK_X11_GEOMETRY_TERMINALS_V1: readonly PromptEnhancementLinuxTerminalCommandV1[] = [
+  'gnome-terminal',
+  'xfce4-terminal',
+];
+
 export type PromptEnhancementCliHostCapabilityV1 =
   | {
       state: 'available';
@@ -60,7 +87,7 @@ export type PromptEnhancementCliHostCapabilityV1 =
 
 export interface PromptEnhancementCliHostProbeDependenciesV1 {
   platform?: NodeJS.Platform;
-  env?: Pick<NodeJS.ProcessEnv, 'DISPLAY' | 'WAYLAND_DISPLAY'>;
+  env?: Pick<NodeJS.ProcessEnv, 'DISPLAY' | 'WAYLAND_DISPLAY' | 'NEXPATH_POPUP_DOCK'>;
   probeDirectTty?: () => boolean;
   commandExists?: (command: PromptEnhancementLinuxTerminalCommandV1) => boolean;
   readCommandVersion?: (command: PromptEnhancementLinuxTerminalCommandV1) => string | undefined;
@@ -181,16 +208,32 @@ export function resolvePromptEnhancementCliHostCapabilityV1(
   }
 
   // Linux: prefer the in-process /dev/tty when the hook has a controlling terminal, otherwise spawn a
-  // GUI terminal below (unchanged behaviour).
+  // GUI terminal below (unchanged behaviour). Opt-in force-dock (P4, owner request 2026-08-08): when
+  // NEXPATH_POPUP_DOCK is set AND a GUI session exists, prefer a spawned right-docked WINDOW over the
+  // in-terminal /dev/tty render — so Ubuntu users can get the Windows/macOS-style docked window on
+  // demand. The default (env unset) is UNCHANGED — direct-TTY still wins — honouring the locked
+  // "preserve Linux popup behaviour" rule. Fail-open: if force-dock finds no spawnable terminal, the
+  // in-process /dev/tty is still used as a last resort rather than losing the popup.
   const directTtyAvailable = dependencies.probeDirectTty ?? probeDirectTty;
-  try {
-    if (directTtyAvailable()) return { state: 'available', method: 'direct_tty' };
-  } catch {
-    // Continue to the Linux terminal-spawn fallback below.
+  const env = dependencies.env ?? process.env;
+  const tryDirectTty = (): PromptEnhancementCliHostCapabilityV1 | null => {
+    try {
+      if (directTtyAvailable()) return { state: 'available', method: 'direct_tty' };
+    } catch { /* fall through */ }
+    return null;
+  };
+  const forceDock = (env.NEXPATH_POPUP_DOCK ?? '').trim().length > 0;
+  const guiSession = Boolean(env.DISPLAY || env.WAYLAND_DISPLAY);
+
+  if (!forceDock) {
+    const dt = tryDirectTty();
+    if (dt) return dt;
   }
 
-  const env = dependencies.env ?? process.env;
-  if (!env.DISPLAY && !env.WAYLAND_DISPLAY) {
+  if (!guiSession) {
+    // No GUI session → only the in-process /dev/tty can render (even under force-dock).
+    const dt = tryDirectTty();
+    if (dt) return dt;
     return { state: 'unavailable', method: 'none', reasonCode: 'no_gui_session' };
   }
 
@@ -218,6 +261,11 @@ export function resolvePromptEnhancementCliHostCapabilityV1(
     return { state: 'available', method: 'linux_terminal', terminalCommand };
   }
 
+  // Force-dock reached here having skipped the direct-TTY check but found no spawnable terminal —
+  // fall back to the in-process /dev/tty rather than losing the popup (fail-open). For the
+  // non-force-dock path direct-TTY was already tried above, so this is a harmless no-op there.
+  const dt = tryDirectTty();
+  if (dt) return dt;
   return { state: 'unavailable', method: 'none', reasonCode: 'no_supported_terminal' };
 }
 
@@ -235,6 +283,8 @@ export function planPromptEnhancementLinuxTerminalLaunchV1(input: {
   dbPath: string;
   /** Right-docked popup window geometry (~60% width × 100% height); omitted → the terminal's default size. */
   geometry?: PopupGeometry;
+  /** Display server (P4). On Wayland, GTK terminals are wrapped with GDK_BACKEND=x11 so --geometry positions via XWayland. */
+  displayServer?: PromptEnhancementLinuxDisplayServerV1;
 }): PromptEnhancementLinuxTerminalLaunchPlanV1 {
   const childArgs = [
     input.nodePath,
@@ -258,28 +308,45 @@ export function planPromptEnhancementLinuxTerminalLaunchV1(input: {
   const footGeom = g ? [`--window-size-pixels=${g.widthPx}x${g.heightPx}`] : [];
   const T = PROMPT_ENHANCEMENT_POPUP_WINDOW_TITLE_V1;
 
-  switch (input.terminalCommand) {
-    case 'xdg-terminal-exec':
-      return { command: input.terminalCommand, args: childArgs };
-    case 'gnome-terminal':
-      return { command: input.terminalCommand, args: ['--wait', `--title=${T}`, ...cellGeom, '--', ...childArgs] };
-    case 'konsole':
-      return { command: input.terminalCommand, args: ['-p', `tabtitle=${T}`, '-e', ...childArgs] };
-    case 'xfce4-terminal':
-      return { command: input.terminalCommand, args: ['--disable-server', `--title=${T}`, ...cellGeom, '-x', ...childArgs] };
-    case 'kitty':
-      return { command: input.terminalCommand, args: [...kittyGeom, '--title', T, ...childArgs] };
-    case 'alacritty':
-      return { command: input.terminalCommand, args: [...alacrittyGeom, '--title', T, '-e', ...childArgs] };
-    case 'wezterm':
-      return { command: input.terminalCommand, args: ['start', '--', ...childArgs] };
-    case 'foot':
-      return { command: input.terminalCommand, args: [...footGeom, `--title=${T}`, ...childArgs] };
-    case 'x-terminal-emulator':
-      return { command: input.terminalCommand, args: ['-e', ...childArgs] };
-    case 'xterm':
-      return { command: input.terminalCommand, args: [...xtermGeom, '-T', T, '-e', ...childArgs] };
+  const plan: PromptEnhancementLinuxTerminalLaunchPlanV1 = ((): PromptEnhancementLinuxTerminalLaunchPlanV1 => {
+    switch (input.terminalCommand) {
+      case 'xdg-terminal-exec':
+        return { command: input.terminalCommand, args: childArgs };
+      case 'gnome-terminal':
+        return { command: input.terminalCommand, args: ['--wait', `--title=${T}`, ...cellGeom, '--', ...childArgs] };
+      case 'konsole':
+        return { command: input.terminalCommand, args: ['-p', `tabtitle=${T}`, '-e', ...childArgs] };
+      case 'xfce4-terminal':
+        return { command: input.terminalCommand, args: ['--disable-server', `--title=${T}`, ...cellGeom, '-x', ...childArgs] };
+      case 'kitty':
+        return { command: input.terminalCommand, args: [...kittyGeom, '--title', T, ...childArgs] };
+      case 'alacritty':
+        return { command: input.terminalCommand, args: [...alacrittyGeom, '--title', T, '-e', ...childArgs] };
+      case 'wezterm':
+        return { command: input.terminalCommand, args: ['start', '--', ...childArgs] };
+      case 'foot':
+        return { command: input.terminalCommand, args: [...footGeom, `--title=${T}`, ...childArgs] };
+      case 'x-terminal-emulator':
+        return { command: input.terminalCommand, args: ['-e', ...childArgs] };
+      case 'xterm':
+        return { command: input.terminalCommand, args: [...xtermGeom, '-T', T, '-e', ...childArgs] };
+    }
+  })();
+
+  // Wayland positioning (P4): GTK terminals (gnome-terminal, xfce4-terminal) default to NATIVE
+  // Wayland, where the `--geometry` position offset is ignored. Only when we actually have a docked
+  // geometry to apply, run them through XWayland via `env GDK_BACKEND=x11 …` so `--geometry`
+  // positions the window. XWayland ships by default on recent Ubuntu. On X11 / unknown sessions this
+  // wrap is not applied (native geometry already works); non-GTK terminals are left untouched
+  // (xterm is already XWayland; kitty/foot/alacritty are size-only under Wayland by design).
+  if (
+    input.geometry
+    && input.displayServer === 'wayland'
+    && PROMPT_ENHANCEMENT_GTK_X11_GEOMETRY_TERMINALS_V1.includes(input.terminalCommand)
+  ) {
+    return { command: 'env', args: ['GDK_BACKEND=x11', plan.command, ...plan.args] };
   }
+  return plan;
 }
 
 /**
@@ -623,6 +690,9 @@ export async function runPromptEnhancementCliPopupHostLaunchV1(input: {
         nodePath: input.nodePath ?? process.execPath,
         cliEntryPath: input.cliEntryPath,
         geometry,
+        // P4: detect X11 vs Wayland so GTK terminals get GDK_BACKEND=x11 (XWayland) on Wayland,
+        // where --geometry positioning is otherwise ignored (recent Ubuntu default).
+        displayServer: detectPromptEnhancementLinuxDisplayServerV1(),
         inputFile,
         resultFile,
         readinessFile,

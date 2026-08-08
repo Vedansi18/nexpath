@@ -7,6 +7,7 @@ import {
   buildPromptEnhancementMacLauncherScriptV1,
   buildPromptEnhancementWindowsLauncherScriptV1,
   buildPromptEnhancementWindowsPositionScriptV1,
+  detectPromptEnhancementLinuxDisplayServerV1,
   planPromptEnhancementLinuxTerminalLaunchV1,
   planPromptEnhancementMacTerminalLaunchV1,
   planPromptEnhancementWindowsTerminalLaunchV1,
@@ -33,6 +34,41 @@ describe('PE1.1 — prompt enhancement CLI host capability resolver', () => {
 
     expect(result).toEqual({ state: 'available', method: 'direct_tty' });
     expect(commandExists).not.toHaveBeenCalled();
+  });
+
+  it('P4 opt-in force-dock: NEXPATH_POPUP_DOCK + GUI session prefers a spawned window over direct-TTY', () => {
+    const probeDirectTty = vi.fn(() => true); // direct-TTY IS available…
+    const result = resolvePromptEnhancementCliHostCapabilityV1({
+      platform: 'linux',
+      env: { DISPLAY: ':0', NEXPATH_POPUP_DOCK: 'right' },
+      probeDirectTty,
+      commandExists: (c) => c === 'gnome-terminal',
+      readCommandVersion: () => '3.52.0',
+    });
+    // …but force-dock chooses the spawnable terminal so the window can be right-docked.
+    expect(result).toEqual({ state: 'available', method: 'linux_terminal', terminalCommand: 'gnome-terminal' });
+  });
+
+  it('P4 force-dock is fail-open: with no spawnable terminal it falls back to direct-TTY (never loses the popup)', () => {
+    const result = resolvePromptEnhancementCliHostCapabilityV1({
+      platform: 'linux',
+      env: { DISPLAY: ':0', NEXPATH_POPUP_DOCK: 'right' },
+      probeDirectTty: () => true,
+      commandExists: unavailableCommands(),
+    });
+    expect(result).toEqual({ state: 'available', method: 'direct_tty' });
+  });
+
+  it('P4 default (NEXPATH_POPUP_DOCK unset) is UNCHANGED: direct-TTY still wins over spawning', () => {
+    const commandExists = vi.fn((c: PromptEnhancementLinuxTerminalCommandV1) => c === 'gnome-terminal');
+    const result = resolvePromptEnhancementCliHostCapabilityV1({
+      platform: 'linux',
+      env: { DISPLAY: ':0' }, // no force-dock
+      probeDirectTty: () => true,
+      commandExists,
+    });
+    expect(result).toEqual({ state: 'available', method: 'direct_tty' });
+    expect(commandExists).not.toHaveBeenCalled(); // direct-TTY short-circuits before probing terminals
   });
 
   it('fails closed on a genuinely unsupported platform without probing host resources', () => {
@@ -249,6 +285,20 @@ function child(exitCode: number | null = null, exitSignal: NodeJS.Signals | null
   return value;
 }
 
+describe('P4 — Linux display-server detection', () => {
+  it('XDG_SESSION_TYPE is authoritative (wayland / x11)', () => {
+    expect(detectPromptEnhancementLinuxDisplayServerV1({ XDG_SESSION_TYPE: 'wayland', DISPLAY: ':0' })).toBe('wayland');
+    expect(detectPromptEnhancementLinuxDisplayServerV1({ XDG_SESSION_TYPE: 'x11', WAYLAND_DISPLAY: 'wayland-0' })).toBe('x11');
+  });
+  it('falls back to WAYLAND_DISPLAY / DISPLAY when XDG_SESSION_TYPE is absent', () => {
+    expect(detectPromptEnhancementLinuxDisplayServerV1({ WAYLAND_DISPLAY: 'wayland-0' })).toBe('wayland');
+    expect(detectPromptEnhancementLinuxDisplayServerV1({ DISPLAY: ':0' })).toBe('x11');
+  });
+  it('returns unknown with no display env', () => {
+    expect(detectPromptEnhancementLinuxDisplayServerV1({})).toBe('unknown');
+  });
+});
+
 describe('PE1.3 — Linux PE popup host launcher', () => {
   it('builds terminal argv with only executable and private-file values', () => {
     const input = launchInput();
@@ -293,6 +343,43 @@ describe('PE1.3 — Linux PE popup host launcher', () => {
     expect(rightDock.args).toContain(`--geometry=${docked.cols}x${docked.rows}+${docked.xPx}+${docked.yPx}`);
     expect(rightDock.args).toContain('--geometry=115x54+768+0');
     expect(rightDock.args.indexOf('--geometry=115x54+768+0')).toBeLessThan(rightDock.args.indexOf('--'));
+
+    // P4 Wayland: a GTK terminal with a docked geometry on Wayland is wrapped with
+    // `env GDK_BACKEND=x11` so --geometry positions via XWayland (recent Ubuntu default).
+    const wayland = planPromptEnhancementLinuxTerminalLaunchV1({
+      terminalCommand: 'gnome-terminal',
+      nodePath: '/usr/bin/node', cliEntryPath: '/x/cli.js',
+      inputFile: '/x/in', resultFile: '/x/out', readinessFile: '/x/ready', dbPath: '/x/db',
+      geometry: docked, displayServer: 'wayland',
+    });
+    expect(wayland.command).toBe('env');
+    expect(wayland.args[0]).toBe('GDK_BACKEND=x11');
+    expect(wayland.args[1]).toBe('gnome-terminal');
+    expect(wayland.args).toContain('--geometry=115x54+768+0');
+    // On X11 the wrap is NOT applied (native geometry already positions).
+    const x11 = planPromptEnhancementLinuxTerminalLaunchV1({
+      terminalCommand: 'gnome-terminal',
+      nodePath: '/usr/bin/node', cliEntryPath: '/x/cli.js',
+      inputFile: '/x/in', resultFile: '/x/out', readinessFile: '/x/ready', dbPath: '/x/db',
+      geometry: docked, displayServer: 'x11',
+    });
+    expect(x11.command).toBe('gnome-terminal');
+    // A non-GTK terminal (kitty) on Wayland is NOT wrapped (size-only by design).
+    const kitty = planPromptEnhancementLinuxTerminalLaunchV1({
+      terminalCommand: 'kitty',
+      nodePath: '/usr/bin/node', cliEntryPath: '/x/cli.js',
+      inputFile: '/x/in', resultFile: '/x/out', readinessFile: '/x/ready', dbPath: '/x/db',
+      geometry: docked, displayServer: 'wayland',
+    });
+    expect(kitty.command).toBe('kitty');
+    // Wayland but NO geometry → no wrap (nothing to position).
+    const waylandNoGeom = planPromptEnhancementLinuxTerminalLaunchV1({
+      terminalCommand: 'gnome-terminal',
+      nodePath: '/usr/bin/node', cliEntryPath: '/x/cli.js',
+      inputFile: '/x/in', resultFile: '/x/out', readinessFile: '/x/ready', dbPath: '/x/db',
+      displayServer: 'wayland',
+    });
+    expect(waylandNoGeom.command).toBe('gnome-terminal');
 
     // Omitting geometry falls back to the terminal's default size (no --geometry).
     const plain = planPromptEnhancementLinuxTerminalLaunchV1({
