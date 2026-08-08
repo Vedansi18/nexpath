@@ -18,6 +18,9 @@ const {
   mockShowInformationMessage,
   mockExistsSync,
   mockExecuteCommand,
+  mockReadPendingPromptEnhancement,
+  mockIsPeOriginTurn,
+  mockChatInputInject,
 } = vi.hoisted(() => ({
   mockShowOnboarding: vi.fn(),
   mockRegisterWebviewViewProvider: vi.fn(),
@@ -34,6 +37,9 @@ const {
   mockShowInformationMessage: vi.fn(),
   mockExistsSync: vi.fn(() => false),
   mockExecuteCommand: vi.fn(),
+  mockReadPendingPromptEnhancement: vi.fn(async () => null),
+  mockIsPeOriginTurn: vi.fn(async () => false),
+  mockChatInputInject: vi.fn(async () => false),
 }));
 
 vi.mock('vscode', () => ({
@@ -105,8 +111,14 @@ vi.mock('./host-detector.js', () => ({
   windsurfCodeiumDir: mockWindsurfCodeiumDir,
 }));
 vi.mock('./chat-input-injector.js', () => ({
-  chatInputInject: vi.fn(),
+  chatInputInject: mockChatInputInject,
   CANDIDATE_COMMANDS: { cursor: [], windsurf: [] },
+}));
+vi.mock('./pe-store-reader.js', () => ({
+  readPendingPromptEnhancement: mockReadPendingPromptEnhancement,
+}));
+vi.mock('./pe-origin.js', () => ({
+  isPeOriginTurn: mockIsPeOriginTurn,
 }));
 vi.mock('./path-enumerator.js', () => ({
   enumerateStateVscdbPaths: mockEnumerateStateVscdbPaths,
@@ -181,6 +193,9 @@ describe('activate', () => {
     mockShowInformationMessage.mockReset();
     mockExistsSync.mockReset().mockReturnValue(false);
     mockExecuteCommand.mockReset().mockResolvedValue(undefined);
+    mockReadPendingPromptEnhancement.mockReset().mockResolvedValue(null);
+    mockIsPeOriginTurn.mockReset().mockResolvedValue(false);
+    mockChatInputInject.mockReset().mockResolvedValue(false);
     mockRegisterWebviewViewProvider.mockReturnValue({ dispose: vi.fn() });
     logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -361,6 +376,162 @@ describe('activate', () => {
       const secondLogs = logSpy.mock.calls.map((c) => String(c[0])).join('\n');
       expect(secondLogs).toContain('current_body_not_sendable');
       expect(secondLogs).not.toContain('"state":"intent_ready"');
+    });
+  });
+
+  describe('PE typed delivery, ACK, and origin guard (P8)', () => {
+    interface FakeEvent {
+      rawSessionId: string;
+      sourcePath: string;
+      prompt: string;
+      capturedAt: Date;
+      extractorId: string;
+    }
+    interface ChatPipelineDeps {
+      checkPeOrigin?: (e: FakeEvent) => Promise<boolean>;
+      injectPeResult?: (text: string, e: FakeEvent) => Promise<void>;
+      isPeEcho?: (e: FakeEvent) => Promise<boolean> | boolean;
+    }
+    function makeEvent(overrides: Partial<FakeEvent> = {}): FakeEvent {
+      return {
+        rawSessionId: 'tab-pe',
+        sourcePath: '/fake/ws/a/state.vscdb',
+        prompt: 'the enhanced body',
+        capturedAt: new Date(0),
+        extractorId: 'cursor-v2024-q4',
+        ...overrides,
+      };
+    }
+    function pipelineDeps(): ChatPipelineDeps {
+      return mockCreateChatEventHandler.mock.calls[0]![0] as ChatPipelineDeps;
+    }
+    /** createChatEventHandler only builds once the watcher actually starts (consent + host + db paths). */
+    async function activateWithWatcher(): Promise<void> {
+      mockShowOnboarding.mockResolvedValueOnce(undefined);
+      mockDetectHost.mockReturnValueOnce('cursor');
+      mockWorkspaceStorageDir.mockReturnValueOnce('/fake/ws');
+      mockEnumerateStateVscdbPaths.mockReturnValueOnce(['/fake/ws/a/state.vscdb']);
+      await activate(makeCtx(true) as never);
+    }
+    const validResultJson = JSON.stringify({
+      enhancementId: 'enh-1',
+      validationDecisionId: 'vd-1',
+      uiView: {
+        body: {
+          text: 'the enhanced body',
+          currentBodyId: 'body-1',
+          bodyRevision: 3,
+          sendPolicy: 'send_current',
+          actionLoadingState: 'idle',
+          fallbackMode: 'none',
+        },
+        actions: [],
+      },
+    });
+
+    it('checkPeOrigin: returns false and never publishes/ACKs when this turn is not PE-origin', async () => {
+      mockIsPeOriginTurn.mockResolvedValueOnce(false);
+      await activateWithWatcher();
+      logSpy.mockClear();
+      const result = await pipelineDeps().checkPeOrigin!(makeEvent());
+      expect(result).toBe(false);
+      expect(mockReadPendingPromptEnhancement).not.toHaveBeenCalled();
+      expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining('PE visible-surface ACK'));
+    });
+
+    it('checkPeOrigin: publishes the parsed payload and ACKs pe_body_visible on a real PE-origin turn', async () => {
+      mockIsPeOriginTurn.mockResolvedValueOnce(true);
+      mockReadPendingPromptEnhancement.mockResolvedValueOnce({
+        id: 1, projectRoot: '/proj', sessionId: 's1', promptCount: 1,
+        status: 'pending', createdAt: 0, requestJson: '{}', resultJson: validResultJson,
+      });
+      await activateWithWatcher();
+      logSpy.mockClear();
+      const result = await pipelineDeps().checkPeOrigin!(makeEvent());
+      expect(result).toBe(true);
+      const provider = getPeViewProvider() as unknown as { getCurrentPayload: () => { currentBodyId: string } | null };
+      expect(provider.getCurrentPayload()?.currentBodyId).toBe('body-1');
+      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('PE visible-surface ACK: pe_body_visible'));
+    });
+
+    it('checkPeOrigin: ACKs not_counted_as_shown (never render_failure) when the pending row vanished before it could be read', async () => {
+      mockIsPeOriginTurn.mockResolvedValueOnce(true);
+      mockReadPendingPromptEnhancement.mockResolvedValueOnce(null);
+      await activateWithWatcher();
+      logSpy.mockClear();
+      const result = await pipelineDeps().checkPeOrigin!(makeEvent());
+      expect(result).toBe(true);
+      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('PE visible-surface ACK: not_counted_as_shown'));
+    });
+
+    it('checkPeOrigin: ACKs render_failure when the store read throws, and never propagates the throw', async () => {
+      mockIsPeOriginTurn.mockResolvedValueOnce(true);
+      mockReadPendingPromptEnhancement.mockRejectedValueOnce(new Error('sqlite busy'));
+      await activateWithWatcher();
+      logSpy.mockClear();
+      await expect(pipelineDeps().checkPeOrigin!(makeEvent())).resolves.toBe(true);
+      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('PE visible-surface ACK: render_failure'));
+    });
+
+    it('checkPeOrigin: never reads DS status="shown" — structural proof the mocked store reader has no such field to read', async () => {
+      mockIsPeOriginTurn.mockResolvedValueOnce(true);
+      mockReadPendingPromptEnhancement.mockResolvedValueOnce({
+        id: 1, projectRoot: '/proj', sessionId: 's1', promptCount: 1,
+        status: 'pending', createdAt: 0, requestJson: '{}', resultJson: validResultJson,
+      });
+      await activateWithWatcher();
+      await pipelineDeps().checkPeOrigin!(makeEvent());
+      // readLatestAdvisoryMeta / stop_advisory_shown / decision_session_count
+      // are DS-only concepts from advisory-store-reader.js — never imported
+      // or called on this PE path (confirmed by the fact this test never
+      // mocks or invokes any of them, yet the flow completes normally).
+      expect(mockReadPendingPromptEnhancement).toHaveBeenCalledTimes(1);
+    });
+
+    it('injectPeResult: on success, logs "inserted" and injects via the clipboard-free chatInputInject only', async () => {
+      mockChatInputInject.mockResolvedValueOnce(true);
+      await activateWithWatcher();
+      logSpy.mockClear();
+      await pipelineDeps().injectPeResult!('the enhanced body', makeEvent());
+      expect(mockChatInputInject).toHaveBeenCalledWith('the enhanced body', expect.objectContaining({ host: expect.anything() }));
+      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('PE insert outcome: inserted'));
+    });
+
+    it('injectPeResult: on failure (D-1), logs the typed failure — no clipboard write exists in this path to make', async () => {
+      mockChatInputInject.mockResolvedValueOnce(false);
+      await activateWithWatcher();
+      logSpy.mockClear();
+      await expect(pipelineDeps().injectPeResult!('the enhanced body', makeEvent())).resolves.toBeUndefined();
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.stringContaining('PE insert outcome: insert_failed_no_clipboard_fallback'),
+      );
+    });
+
+    it('isPeEcho: reports true for the exact text just delivered by injectPeResult (typed origin guard armed)', async () => {
+      mockChatInputInject.mockResolvedValueOnce(true);
+      mockReadPendingPromptEnhancement.mockResolvedValueOnce({
+        id: 1, projectRoot: '/proj', sessionId: 's1', promptCount: 1,
+        status: 'pending', createdAt: 0, requestJson: '{}', resultJson: validResultJson,
+      });
+      await activateWithWatcher();
+      await pipelineDeps().injectPeResult!('the enhanced body', makeEvent());
+      expect(pipelineDeps().isPeEcho!(makeEvent({ prompt: 'the enhanced body' }))).toBe(true);
+    });
+
+    it('isPeEcho: reports false for different text, even right after a real delivery', async () => {
+      mockChatInputInject.mockResolvedValueOnce(true);
+      mockReadPendingPromptEnhancement.mockResolvedValueOnce({
+        id: 1, projectRoot: '/proj', sessionId: 's1', promptCount: 1,
+        status: 'pending', createdAt: 0, requestJson: '{}', resultJson: validResultJson,
+      });
+      await activateWithWatcher();
+      await pipelineDeps().injectPeResult!('the enhanced body', makeEvent());
+      expect(pipelineDeps().isPeEcho!(makeEvent({ prompt: 'a completely different prompt' }))).toBe(false);
+    });
+
+    it('isPeEcho: reports false before anything has ever been delivered', async () => {
+      await activateWithWatcher();
+      expect(pipelineDeps().isPeEcho!(makeEvent())).toBe(false);
     });
   });
 

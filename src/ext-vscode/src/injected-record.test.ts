@@ -68,3 +68,65 @@ describe('createInjectedRecordStore', () => {
     expect(store.isRecentEcho('/proj', 'the enhanced body', 1_000 + 60_001)).toBe(false);
   });
 });
+
+describe('createInjectedRecordStore — resolveOriginGuardState (P8, typed-origin echo guard)', () => {
+  const origin = { currentBodyId: 'body-1', bodyRevision: 3 };
+
+  it('reports not_delivered before anything has been recorded', () => {
+    const store = createInjectedRecordStore(60_000);
+    expect(store.resolveOriginGuardState('/proj', 'hello')).toBe('not_delivered');
+  });
+
+  it('reports next_submit_processed_as_delivery_echo when text matches AND a typed origin was recorded', () => {
+    const store = createInjectedRecordStore(60_000);
+    store.record('/proj', 'the enhanced body', 1_000, origin);
+    expect(store.resolveOriginGuardState('/proj', 'the enhanced body', 1_500)).toBe(
+      'next_submit_processed_as_delivery_echo',
+    );
+  });
+
+  it('a text match ALONE never triggers the guard — a DS injection (no origin recorded) reports not_delivered even on exact text match', () => {
+    const store = createInjectedRecordStore(60_000);
+    store.record('/proj', 'the enhanced body', 1_000); // no origin passed — DS-style injection
+    expect(store.resolveOriginGuardState('/proj', 'the enhanced body', 1_500)).toBe('not_delivered');
+  });
+
+  it('a text match ALONE never triggers the guard — explicit null origin behaves the same as omitted', () => {
+    const store = createInjectedRecordStore(60_000);
+    store.record('/proj', 'the enhanced body', 1_000, null);
+    expect(store.resolveOriginGuardState('/proj', 'the enhanced body', 1_500)).toBe('not_delivered');
+  });
+
+  it('reports next_submit_mismatch_cleared when text differs, even with a typed origin recorded', () => {
+    const store = createInjectedRecordStore(60_000);
+    store.record('/proj', 'the enhanced body', 1_000, origin);
+    expect(store.resolveOriginGuardState('/proj', 'a different prompt', 1_500)).toBe(
+      'next_submit_mismatch_cleared',
+    );
+  });
+
+  it('reports next_submit_mismatch_cleared when the typed origin exists but the window expired', () => {
+    const store = createInjectedRecordStore(60_000);
+    store.record('/proj', 'the enhanced body', 1_000, origin);
+    expect(store.resolveOriginGuardState('/proj', 'the enhanced body', 1_000 + 60_001)).toBe(
+      'next_submit_mismatch_cleared',
+    );
+  });
+
+  it('is scoped per project — a typed origin recorded for one project never guards another', () => {
+    const store = createInjectedRecordStore(60_000);
+    store.record('/proj-a', 'the enhanced body', 1_000, origin);
+    expect(store.resolveOriginGuardState('/proj-b', 'the enhanced body', 1_500)).toBe('not_delivered');
+  });
+
+  it('is non-consuming, like isRecentEcho', () => {
+    const store = createInjectedRecordStore(60_000);
+    store.record('/proj', 'the enhanced body', 1_000, origin);
+    expect(store.resolveOriginGuardState('/proj', 'the enhanced body', 1_100)).toBe(
+      'next_submit_processed_as_delivery_echo',
+    );
+    expect(store.resolveOriginGuardState('/proj', 'the enhanced body', 1_200)).toBe(
+      'next_submit_processed_as_delivery_echo',
+    );
+  });
+});

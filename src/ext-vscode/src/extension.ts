@@ -11,6 +11,11 @@ import {
 } from './webview/pe-view-provider.js';
 import { routePeWebviewMessage, describePeEventSafely } from './pe-events.js';
 import { resolvePeSendIntent } from './pe-send-intent.js';
+import { readPendingPromptEnhancement } from './pe-store-reader.js';
+import { parsePromptEnhancementExtensionPayloadV1 } from './pe-payload.js';
+import { isPeOriginTurn } from './pe-origin.js';
+import { createInjectedRecordStore } from './injected-record.js';
+import { injectPeBody, resolvePeVisibleSurfaceAckState } from './pe-delivery.js';
 import { handleOptionSelection } from './webview/prompt-injection.js';
 import {
   detectHost,
@@ -60,6 +65,8 @@ let peViewProvider: NexpathPromptEnhancementViewProvider | undefined;
 let watcher: ChatHistoryWatcher | undefined;
 let advisoryPoller: AdvisoryPoller | undefined;
 let logChannel: vscode.OutputChannel | undefined;
+/** PE-scoped typed-origin echo guard (P8). Fresh per activation, matching `watcher`. */
+let peInjectedRecordStore: ReturnType<typeof createInjectedRecordStore> | undefined;
 
 /**
  * Dedicated VS Code OutputChannel for nexpath messages — visible to
@@ -513,6 +520,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // looks up /tmp/… → no match → `stop_no_pending` → the popup never opens.
   const cwdForEvent = (event: ChatHistoryEvent): string =>
     canonicalizeCwd(resolveWorkspaceFromDbPath(event.sourcePath) ?? workspaceCwd);
+  // P8 (VED-PE-10 completion): fresh per activation, matching `watcher`.
+  peInjectedRecordStore = createInjectedRecordStore();
   const handleChatEvent = createChatEventHandler({
     spawnAuto: (prompt, sid, event) =>
       spawnAuto(prompt, sid, { cwd: cwdForEvent(event) }),
@@ -529,6 +538,61 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     onAfterCapture: (event) =>
       advisoryFallback.armIfPending(cwdForEvent(event)),
     composeSessionId: (event) => `${cwdForEvent(event)}|${event.rawSessionId}`,
+    // P8 (VED-PE-10 completion): typed store evidence decides DS vs PE origin
+    // (pe-origin.ts, P4) — never Stop's returned text. When this turn IS
+    // PE-origin, also fetch+parse the pending row (pe-store-reader.ts/P3,
+    // pe-payload.ts/P5) and publish it to the PE webview for the first time —
+    // this is the store-to-webview data path P5's own status text flagged as
+    // "not yet wired... P6/P8's job". Emits a visible-surface ACK (VED-PE-12)
+    // from the REAL render outcome on both success and failure — never from
+    // DS `status='shown'` (that field is never read on this path at all).
+    checkPeOrigin: async (event) => {
+      const projectRoot = cwdForEvent(event);
+      const isPe = await isPeOriginTurn(projectRoot);
+      if (!isPe) return false;
+      let parsed: ReturnType<typeof parsePromptEnhancementExtensionPayloadV1> = null;
+      let renderThrew = false;
+      try {
+        const pending = await readPendingPromptEnhancement(projectRoot);
+        parsed = pending ? parsePromptEnhancementExtensionPayloadV1(pending.resultJson) : null;
+        if (parsed) peViewProvider?.publishPayload(parsed);
+      } catch {
+        renderThrew = true;
+      }
+      const ack = resolvePeVisibleSurfaceAckState({ renderState: parsed?.renderState ?? null, renderThrew });
+      log(`[nexpath] PE visible-surface ACK: ${ack}`);
+      return true;
+    },
+    // P8 (D-1): a PE result is injected via the clipboard-free chatInputInject
+    // ONLY — never DS's windsurfInject/cursorInject (both write the text to
+    // the clipboard internally as their own copy-then-paste-keystroke
+    // mechanism), and never handleOptionSelection's clipboard+toast fallback.
+    // On success, records the delivered body's typed identity (currentBodyId/
+    // bodyRevision) so the NEXT turn's isPeEcho can recognise a genuine typed
+    // echo, not just a text match — see injected-record.ts's
+    // resolveOriginGuardState. On failure, emits a typed failed outcome; no
+    // clipboard write exists anywhere in this path to make.
+    injectPeResult: async (resultText, event) => {
+      const projectRoot = cwdForEvent(event);
+      const outcome = await injectPeBody(resultText, (t) => chatInputInject(t, { host }));
+      log(`[nexpath] PE insert outcome: ${outcome}`);
+      if (outcome !== 'inserted') return;
+      try {
+        const pending = await readPendingPromptEnhancement(projectRoot);
+        const parsed = pending ? parsePromptEnhancementExtensionPayloadV1(pending.resultJson) : null;
+        if (parsed) {
+          peInjectedRecordStore?.record(projectRoot, resultText, undefined, {
+            currentBodyId: parsed.currentBodyId,
+            bodyRevision: parsed.bodyRevision,
+          });
+        }
+      } catch { /* best-effort — a missed origin record just means the next echo isn't caught */ }
+    },
+    // P8 (VED-PE-10 completion): typed-origin-corroborated, not text-similarity
+    // alone — see injected-record.ts's resolveOriginGuardState doc comment.
+    isPeEcho: (event) =>
+      peInjectedRecordStore?.resolveOriginGuardState(cwdForEvent(event), event.prompt) ===
+      'next_submit_processed_as_delivery_echo',
     // Wire IPC failures (e.g. nexpath binary not on PATH → ENOENT) into
     // the Nexpath OutputChannel so they surface to the user. Default logger
     // only writes to console.error which is invisible outside Developer
@@ -585,6 +649,7 @@ export function deactivate(): void {
   advisoryPoller = undefined;
   viewProvider = undefined;
   peViewProvider = undefined;
+  peInjectedRecordStore = undefined;
   logChannel = undefined;
 }
 
