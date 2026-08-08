@@ -101,9 +101,18 @@ export interface PromptEnhancementComposeResult {
   }[];
 }
 
+/**
+ * Why a composer reply was refused. The validator used to reject silently, so a body that lost the
+ * model's wording was indistinguishable from one that never had any — the same blindness that hid the
+ * provider-failure cause. Reporting the rule that fired makes the loss diagnosable.
+ */
+type PromptEnhancementComposerDraftRejectionReason =
+  NonNullable<PromptEnhancementComposerBoundaryV1['draftRejectionReason']>;
+
 interface ValidatedStructuredComposerDrafts {
   readonly draftsBySectionId: ReadonlyMap<string, string>;
   readonly composerClaims: readonly string[];
+  readonly rejectionReason?: PromptEnhancementComposerDraftRejectionReason;
 }
 
 const ADDITIONAL_DETAILS_WORD_CAP = 5000;
@@ -324,6 +333,7 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
     effectiveRuntimeState,
     sectionPlans,
     input.additionalDetailsText,
+    validatedLlmDrafts.rejectionReason,
   );
   const composerMode = composerModeForAction(action, usesLlmWording);
   const sourceFactIds = unique(sectionPlans.flatMap((sectionPlan) => sectionPlan.structuredContentPartRefs));
@@ -397,6 +407,7 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
       localOriginalPromptIncluded: true,
       llmCallPolicy,
       rawComposerOutput: structuredComposerRejected ? 'rejected_or_unavailable' : undefined,
+      draftRejectionReason: validatedLlmDrafts.rejectionReason,
       composerClaims,
     }, effectiveRuntimeState),
     availableActions: buildActionEntries(currentBodyId, bodyRevision, 'available', callVisibilityMode),
@@ -465,21 +476,27 @@ function validatedStructuredComposerDrafts(
   output: PromptEnhancementStructuredComposerOutputV1 | undefined,
   sectionPlans: readonly PromptEnhancementSectionPlanItemV1[],
 ): ValidatedStructuredComposerDrafts {
-  const rejected: ValidatedStructuredComposerDrafts = { draftsBySectionId: new Map(), composerClaims: [] };
-  if (!output || output.sectionDrafts.length === 0) return rejected;
+  const rejectedFor = (
+    rejectionReason: PromptEnhancementComposerDraftRejectionReason,
+  ): ValidatedStructuredComposerDrafts => ({ draftsBySectionId: new Map(), composerClaims: [], rejectionReason });
+  // No output at all is not a rejection — the composer never produced anything to refuse. But an output
+  // that arrives carrying zero drafts IS a refusal, and leaving it reasonless made it the one rejection
+  // path that could not be identified.
+  if (!output) return { draftsBySectionId: new Map(), composerClaims: [] };
+  if (output.sectionDrafts.length === 0) return rejectedFor('no_drafts_returned');
   const sectionIds = new Set(sectionPlans.map((sectionPlan) => sectionPlan.sectionId));
   const sourceIds = new Set(sectionPlans.flatMap((sectionPlan) => sectionPlan.sourceRefs.map((ref) => ref.sourceId)));
   const sourceRefIds = new Set(sectionPlans.flatMap((sectionPlan) => sectionPlan.sourceRefs.map((ref) => ref.sourceRefId)));
   const allowedSourceFactIds = new Set(sectionPlans.flatMap((sectionPlan) => sectionPlan.structuredContentPartRefs));
   const drafts = new Map<string, string>();
   for (const draft of output.sectionDrafts) {
-    if (!sectionIds.has(draft.sectionId)) return rejected;
+    if (!sectionIds.has(draft.sectionId)) return rejectedFor('unknown_section');
     const sectionPlan = sectionPlans.find((section) => section.sectionId === draft.sectionId);
-    if (!sectionPlan || sectionPlan.sectionKind === 'original_request_or_goal') return rejected;
+    if (!sectionPlan || sectionPlan.sectionKind === 'original_request_or_goal') return rejectedFor('original_section');
     const bodyText = normalizeWhitespace(draft.bodyText);
-    if (!bodyText || containsDisallowedComposerWording(bodyText, sourceIds, sourceRefIds)) return rejected;
-    if (draft.sourceFactIds.length === 0) return rejected;
-    if (draft.sourceFactIds.some((sourceFactId) => !sectionPlan.structuredContentPartRefs.includes(sourceFactId))) return rejected;
+    if (!bodyText || containsDisallowedComposerWording(bodyText, sourceIds, sourceRefIds)) return rejectedFor('empty_or_disallowed_wording');
+    if (draft.sourceFactIds.length === 0) return rejectedFor('no_source_fact_ids');
+    if (draft.sourceFactIds.some((sourceFactId) => !sectionPlan.structuredContentPartRefs.includes(sourceFactId))) return rejectedFor('source_fact_id_not_in_section');
     drafts.set(draft.sectionId, `- ${bodyText}`);
   }
   const composerClaims = output.composerClaims.map((claim) => claim.startsWith('claim:') ? claim.slice('claim:'.length) : '');
@@ -487,7 +504,7 @@ function validatedStructuredComposerDrafts(
     composerClaims.length === 0 ||
     composerClaims.some((sourceFactId) => !allowedSourceFactIds.has(sourceFactId))
   ) {
-    return rejected;
+    return rejectedFor('claims_empty_or_unallowed');
   }
   return {
     draftsBySectionId: drafts,
@@ -750,10 +767,17 @@ function compositionDiagnostics(
   runtimeState: PromptEnhancementComposerRuntimeState,
   sectionPlans: readonly PromptEnhancementSectionPlanItemV1[],
   additionalDetailsText?: string,
+  // Which draft-validation rule refused the composer's reply, when one did. Without it a lost body
+  // reports only `validation_failed`, which names the stage but not the cause — and there are six
+  // possible causes.
+  draftRejectionReason?: PromptEnhancementComposerDraftRejectionReason,
 ): PromptEnhancementComposeResult['diagnostics'] {
+  const fallbackReasonCode = draftRejectionReason
+    ? `deterministic_fallback:${runtimeState}:${draftRejectionReason}`
+    : `deterministic_fallback:${runtimeState}`;
   const diagnostics: PromptEnhancementComposeResult['diagnostics'][number][] = fallbackMode === 'none'
     ? [{ category: 'generated', reasonCode: 'deterministic_body_composed' }]
-    : [{ category: 'fallback_or_no_popup', reasonCode: `deterministic_fallback:${runtimeState}` }];
+    : [{ category: 'fallback_or_no_popup', reasonCode: fallbackReasonCode }];
 
   if (action === 'more_project_grounded' && !hasUsableProjectGroundingSource(sectionPlans)) {
     diagnostics.push({
@@ -968,6 +992,7 @@ function buildComposerBoundary(
     localOriginalPromptIncluded: boolean;
     llmCallPolicy?: PromptEnhancementComposerBoundaryV1['llmCallPolicy'];
     rawComposerOutput?: PromptEnhancementComposerBoundaryV1['rawComposerOutput'];
+    draftRejectionReason?: PromptEnhancementComposerBoundaryV1['draftRejectionReason'];
     composerClaims?: readonly string[];
   },
   runtimeState?: PromptEnhancementComposerRuntimeState,
@@ -1012,6 +1037,7 @@ function buildComposerBoundary(
     rawComposerOutput: artifactState?.rawComposerOutput ?? (llmCallPolicy === 'optional_with_cost_visibility'
       ? artifactState?.composerMode.includes('llm_structured_wording') ? 'llm_output_validated_into_artifact' : 'rejected_or_unavailable'
       : fallbackMode === 'previous_sendable_body' ? 'rejected_or_unavailable' : 'not_used_deterministic'),
+    draftRejectionReason: artifactState?.draftRejectionReason,
     validatedCanonicalPromptArtifact: 'current_body_v1',
     composerMode,
     budgetState: {

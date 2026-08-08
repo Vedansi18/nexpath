@@ -553,6 +553,20 @@ export interface PromptEnhancementComposerBoundaryV1 {
   sourceAttribution: readonly PromptEnhancementSourceAttributionV1[];
   llmCallPolicy: PromptEnhancementLlmCallPolicy;
   rawComposerOutput: 'not_used_deterministic' | 'llm_output_pending_validation' | 'llm_output_validated_into_artifact' | 'rejected_or_unavailable';
+  /**
+   * When `rawComposerOutput` is `rejected_or_unavailable`, WHICH draft-validation rule refused the
+   * reply. Six rules can reject, and reporting only "validation_failed" names the stage but not the
+   * cause — the model's wording is discarded and nothing says why. Optional: absent when nothing was
+   * rejected, and absent on older payloads.
+   */
+  draftRejectionReason?:
+    | 'no_drafts_returned'
+    | 'unknown_section'
+    | 'original_section'
+    | 'empty_or_disallowed_wording'
+    | 'no_source_fact_ids'
+    | 'source_fact_id_not_in_section'
+    | 'claims_empty_or_unallowed';
   validatedCanonicalPromptArtifact: 'current_body_v1';
   composerMode: PromptEnhancementComposerMode;
   budgetState: {
