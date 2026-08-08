@@ -296,6 +296,10 @@ export function buildPromptEnhancementWindowsLauncherScriptV1(input: {
   resultFile: string;
   readinessFile: string;
   dbPath: string;
+  /** Right-dock geometry (P3). When present the launcher sizes the console (mode con) before node. */
+  geometry?: PopupGeometry;
+  /** Path to the sibling MoveWindow .ps1 (P3). When present, run it best-effort to position the window. */
+  positionScriptPath?: string;
 }): string {
   // Paths never legitimately contain a double-quote; strip any defensively so the quoting can't be
   // broken out of (the request body itself is passed as a file, never on this command line).
@@ -309,10 +313,47 @@ export function buildPromptEnhancementWindowsLauncherScriptV1(input: {
     '--readiness-file', quote(input.readinessFile),
     '--db', quote(input.dbPath),
   ].join(' ');
-  // `@echo off` for a clean window; CRLF line endings for a well-formed .cmd. On success the child
-  // exits 0 and the window closes; on any real error (non-zero exit) `pause` keeps the window open so
-  // the message is visible instead of the window flashing and vanishing (better UX + diagnosis).
-  return ['@echo off', command, 'if errorlevel 1 pause', ''].join('\r\n');
+  // `@echo off` for a clean window; CRLF line endings for a well-formed .cmd.
+  const lines = ['@echo off'];
+  // Right-dock (P3, fail-open): size the console in CELLS via `mode con` (reliable, no quoting),
+  // then POSITION it via the sibling MoveWindow .ps1 run best-effort (`2>nul`, no errorlevel stop —
+  // a missing/blocked PowerShell just leaves the sized-but-default-positioned window). Both run
+  // BEFORE node, in the same console, so the whole `cmd /c start /WAIT` + polling wait model is
+  // unchanged. Omitting geometry → today's behaviour exactly (no sizing/positioning).
+  if (input.geometry) {
+    lines.push(`mode con: cols=${input.geometry.cols} lines=${input.geometry.rows}`);
+    if (input.positionScriptPath) {
+      lines.push(`powershell -NoProfile -ExecutionPolicy Bypass -File ${quote(input.positionScriptPath)} 2>nul`);
+    }
+  }
+  lines.push(command);
+  // On a real error (non-zero exit) `pause` keeps the window open so the message is visible instead
+  // of the window flashing and vanishing (better UX + diagnosis).
+  lines.push('if errorlevel 1 pause', '');
+  return lines.join('\r\n');
+}
+
+/**
+ * The PowerShell script (written as a sibling .ps1, run via `-File`) that right-docks the popup's
+ * console window. Uses GetConsoleWindow (kernel32) + MoveWindow (user32) to move+size the CURRENT
+ * console to the docked pixel rect. Written as a separate file so there is NO batch↔PowerShell↔C#
+ * quoting to get wrong; `$ErrorActionPreference = SilentlyContinue` + the caller's `2>nul` make it
+ * fully fail-open (a failure leaves the mode-con-sized window at its default position). Pure.
+ */
+export function buildPromptEnhancementWindowsPositionScriptV1(geometry: PopupGeometry): string {
+  return [
+    '$ErrorActionPreference = "SilentlyContinue"',
+    'Add-Type @"',
+    'using System;',
+    'using System.Runtime.InteropServices;',
+    'public class NexpathWin {',
+    '  [DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow();',
+    '  [DllImport("user32.dll")] public static extern bool MoveWindow(IntPtr hWnd, int X, int Y, int nWidth, int nHeight, bool bRepaint);',
+    '}',
+    '"@',
+    `[void][NexpathWin]::MoveWindow([NexpathWin]::GetConsoleWindow(), ${geometry.xPx}, ${geometry.yPx}, ${geometry.widthPx}, ${geometry.heightPx}, $true)`,
+    '',
+  ].join('\r\n');
 }
 
 /**
@@ -542,6 +583,14 @@ export async function runPromptEnhancementCliPopupHostLaunchV1(input: {
       // Write the batch launcher into the temp dir (cleaned up in `finally`), then spawn a window
       // that runs it. All real paths are quoted inside the batch, so the spawn command stays clean.
       const launcherScriptPath = join(tempDir, 'launch.cmd');
+      // Right-dock (P3): when geometry is known, write a sibling MoveWindow .ps1 and have the
+      // launcher size (mode con) + position (that .ps1, best-effort) the window before node. When
+      // geometry is undefined (detection failed) the launcher is byte-identical to before.
+      let positionScriptPath: string | undefined;
+      if (geometry) {
+        positionScriptPath = join(tempDir, 'position.ps1');
+        writeFileSync(positionScriptPath, buildPromptEnhancementWindowsPositionScriptV1(geometry), 'utf8');
+      }
       const launcherScript = buildPromptEnhancementWindowsLauncherScriptV1({
         nodeExecPath: input.nodePath ?? process.execPath,
         cliEntryPath: input.cliEntryPath,
@@ -549,6 +598,8 @@ export async function runPromptEnhancementCliPopupHostLaunchV1(input: {
         resultFile,
         readinessFile,
         dbPath: input.dbPath,
+        geometry,
+        positionScriptPath,
       });
       writeFileSync(launcherScriptPath, launcherScript, 'utf8');
       if (process.env.NEXPATH_DEBUG) process.stderr.write(`[nexpath] launch.cmd (${launcherScriptPath}):\n${launcherScript}\n`);

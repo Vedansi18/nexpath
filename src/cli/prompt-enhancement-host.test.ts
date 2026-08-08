@@ -6,6 +6,7 @@ import {
   PROMPT_ENHANCEMENT_LINUX_TERMINAL_COMMANDS_V1,
   buildPromptEnhancementMacLauncherScriptV1,
   buildPromptEnhancementWindowsLauncherScriptV1,
+  buildPromptEnhancementWindowsPositionScriptV1,
   planPromptEnhancementLinuxTerminalLaunchV1,
   planPromptEnhancementMacTerminalLaunchV1,
   planPromptEnhancementWindowsTerminalLaunchV1,
@@ -325,6 +326,38 @@ describe('PE1.3 — Linux PE popup host launcher', () => {
     expect(script).toContain('--db "C:/Users/Admin/.nexpath/prompt-store.db"');
     // On a real error the window stays open (shows the message) instead of flashing shut.
     expect(script).toContain('if errorlevel 1 pause');
+    // No geometry supplied → byte-identical to before: no sizing/positioning lines (regression guard).
+    expect(script).not.toContain('mode con');
+    expect(script).not.toContain('powershell');
+  });
+
+  it('right-docks the Windows console (P3): mode con sizes + MoveWindow .ps1 positions, before node, fail-open', () => {
+    const geometry = computeDockedPopupGeometry({ x: 0, y: 0, widthPx: 1920, heightPx: 1080 });
+    const script = buildPromptEnhancementWindowsLauncherScriptV1({
+      nodeExecPath: 'C:/nodejs/node.exe', cliEntryPath: 'C:/n/dist/cli/index.js',
+      inputFile: 'C:/T/in', resultFile: 'C:/T/out', readinessFile: 'C:/T/ready', dbPath: 'C:/T/db',
+      geometry, positionScriptPath: 'C:/T/position.ps1',
+    });
+    // Cell sizing via mode con (115 cols × 54 rows for FHD).
+    expect(script).toContain(`mode con: cols=${geometry.cols} lines=${geometry.rows}`);
+    expect(script).toContain('mode con: cols=115 lines=54');
+    // Positioning via the sibling .ps1, best-effort (2>nul, no errorlevel stop).
+    expect(script).toContain('powershell -NoProfile -ExecutionPolicy Bypass -File "C:/T/position.ps1" 2>nul');
+    // Sizing + positioning run BEFORE node, so the wait model (start /WAIT + polling) is unchanged.
+    const nodeIdx = script.indexOf('prompt-enhancement-popup-host');
+    expect(script.indexOf('mode con')).toBeLessThan(nodeIdx);
+    expect(script.indexOf('powershell')).toBeLessThan(nodeIdx);
+  });
+
+  it('builds a fail-open MoveWindow position .ps1 with the docked pixel rect (P3)', () => {
+    const geometry = computeDockedPopupGeometry({ x: 0, y: 0, widthPx: 1920, heightPx: 1080 });
+    const ps = buildPromptEnhancementWindowsPositionScriptV1(geometry);
+    expect(ps).toContain('$ErrorActionPreference = "SilentlyContinue"'); // fully fail-open
+    expect(ps).toContain('GetConsoleWindow');
+    expect(ps).toContain('MoveWindow');
+    // x=768, y=0, w=1152, h=1080 for FHD right-dock.
+    expect(ps).toContain(`MoveWindow([NexpathWin]::GetConsoleWindow(), ${geometry.xPx}, ${geometry.yPx}, ${geometry.widthPx}, ${geometry.heightPx}, $true)`);
+    expect(ps).toContain('MoveWindow([NexpathWin]::GetConsoleWindow(), 768, 0, 1152, 1080, $true)');
   });
 
   it('plans a macOS Terminal.app spawn via osascript that runs the shell launcher', () => {
