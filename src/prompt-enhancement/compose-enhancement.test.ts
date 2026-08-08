@@ -525,6 +525,119 @@ describe('prompt-enhancement composer and deterministic fallback', () => {
     });
   });
 
+  /**
+   * A per-draft fault costs its own section, not the whole reply.
+   *
+   * Five of the six refusal rules describe ONE draft, yet each used to discard every other draft with
+   * it — one unusable section replaced eight good ones with canned text. Measured live: a prompt
+   * mirroring the user's own "AI gateway" vocabulary produced 8 drafts of which 3 tripped the voice
+   * rule, and all 8 were thrown away.
+   *
+   * Mixed bodies are not a new output shape — the model routinely returns fewer drafts than there are
+   * planned sections, so they already ship and already render correctly.
+   */
+  describe('draft rejection is per-section, not per-output', () => {
+    const twoSections = () => {
+      const planned = planningResult();
+      const usable = planned.sectionPlans.filter((s) => s.sectionKind !== 'original_request_or_goal'
+        && s.structuredContentPartRefs.length > 0);
+      return { planned, good: usable[0], bad: usable[1] };
+    };
+
+    const composeDrafts = (drafts: readonly { sectionId: string; bodyText: string; sourceFactIds: readonly string[] }[], claims?: readonly string[]) => {
+      const { planned } = twoSections();
+      return composePromptEnhancementBody({
+        enhancementId: 'enh-per-section',
+        originalPromptText: 'Fix importCsv and verify the regression.',
+        sectionPlanningResult: planned,
+        composerRuntimeState: 'accepted_structured_output',
+        structuredComposerOutput: {
+          outputId: 'llm-output-per-section',
+          sectionDrafts: drafts,
+          composerClaims: claims ?? drafts.flatMap((d) => d.sourceFactIds.map((id) => `claim:${id}`)),
+        },
+      });
+    };
+
+    it('keeps the good sections when ONE draft is unusable', () => {
+      const { good, bad } = twoSections();
+      const result = composeDrafts([
+        { sectionId: good.sectionId, bodyText: 'Reproduce the importCsv failure with a fixture first.', sourceFactIds: [good.structuredContentPartRefs[0]] },
+        { sectionId: bad.sectionId, bodyText: 'You should have checked this already.', sourceFactIds: [bad.structuredContentPartRefs[0]] },
+      ]);
+
+      expect(result.composerBoundary.rawComposerOutput).not.toBe('rejected_or_unavailable');
+      expect(result.currentBody.text).toContain('Reproduce the importCsv failure with a fixture first.');
+      expect(result.currentBody.text).not.toContain('You should have checked this already.');
+    });
+
+    it('reports the partial drop instead of letting a section vanish silently', () => {
+      const { good, bad } = twoSections();
+      const result = composeDrafts([
+        { sectionId: good.sectionId, bodyText: 'Reproduce the importCsv failure with a fixture first.', sourceFactIds: [good.structuredContentPartRefs[0]] },
+        { sectionId: bad.sectionId, bodyText: 'You should have checked this already.', sourceFactIds: [bad.structuredContentPartRefs[0]] },
+      ]);
+      expect(result.diagnostics.map((d) => d.reasonCode))
+        .toContain('partial_draft_drop:1:empty_or_disallowed_wording');
+    });
+
+    it('still rejects the WHOLE reply when every draft is unusable', () => {
+      const { good, bad } = twoSections();
+      const result = composeDrafts([
+        { sectionId: good.sectionId, bodyText: 'You should have checked this already.', sourceFactIds: [good.structuredContentPartRefs[0]] },
+        { sectionId: bad.sectionId, bodyText: 'The developer should fix it.', sourceFactIds: [bad.structuredContentPartRefs[0]] },
+      ]);
+      expect(result.composerBoundary.rawComposerOutput).toBe('rejected_or_unavailable');
+      expect(result.composerBoundary.draftRejectionReason).toBe('empty_or_disallowed_wording');
+    });
+
+    it('a broken claims union still rejects the whole reply — it belongs to no single section', () => {
+      const { good } = twoSections();
+      const result = composeDrafts(
+        [{ sectionId: good.sectionId, bodyText: 'Reproduce the importCsv failure with a fixture.', sourceFactIds: [good.structuredContentPartRefs[0]] }],
+        ['claim:not-an-allowed-source-fact-id'],
+      );
+      expect(result.composerBoundary.rawComposerOutput).toBe('rejected_or_unavailable');
+      expect(result.composerBoundary.draftRejectionReason).toBe('claims_empty_or_unallowed');
+    });
+
+    it('an unknown section id costs only that draft', () => {
+      const { good } = twoSections();
+      const result = composeDrafts([
+        { sectionId: good.sectionId, bodyText: 'Reproduce the importCsv failure with a fixture.', sourceFactIds: [good.structuredContentPartRefs[0]] },
+        { sectionId: 'section-that-was-never-planned', bodyText: 'Anything at all.', sourceFactIds: [good.structuredContentPartRefs[0]] },
+      ]);
+      expect(result.composerBoundary.rawComposerOutput).not.toBe('rejected_or_unavailable');
+      expect(result.currentBody.text).toContain('Reproduce the importCsv failure with a fixture.');
+      expect(result.diagnostics.map((d) => d.reasonCode)).toContain('partial_draft_drop:1:unknown_section');
+    });
+
+    it('a mis-cited source fact id costs only that draft', () => {
+      const { good, bad } = twoSections();
+      const result = composeDrafts([
+        { sectionId: good.sectionId, bodyText: 'Reproduce the importCsv failure with a fixture.', sourceFactIds: [good.structuredContentPartRefs[0]] },
+        { sectionId: bad.sectionId, bodyText: 'Check the rollback path too.', sourceFactIds: ['fact-that-belongs-to-no-section'] },
+      ], [`claim:${good.structuredContentPartRefs[0]}`]);
+      expect(result.composerBoundary.rawComposerOutput).not.toBe('rejected_or_unavailable');
+      expect(result.currentBody.text).toContain('Reproduce the importCsv failure with a fixture.');
+      expect(result.currentBody.text).not.toContain('Check the rollback path too.');
+    });
+
+    it('no drafts at all is unchanged — an output-wide refusal', () => {
+      const result = composeDrafts([], ['claim:anything']);
+      expect(result.composerBoundary.rawComposerOutput).toBe('rejected_or_unavailable');
+      expect(result.composerBoundary.draftRejectionReason).toBe('no_drafts_returned');
+    });
+
+    it('a fully clean reply reports no partial drop', () => {
+      const { good } = twoSections();
+      const result = composeDrafts([
+        { sectionId: good.sectionId, bodyText: 'Reproduce the importCsv failure with a fixture.', sourceFactIds: [good.structuredContentPartRefs[0]] },
+      ]);
+      expect(result.diagnostics.map((d) => d.reasonCode).some((c) => c.startsWith('partial_draft_drop'))).toBe(false);
+    });
+  });
+
   it('rejects structured LLM wording that leaks private planning labels or user-referential scolding voice', () => {
     const planned = planningResult();
     const sourceGuidanceSection = planned.sectionPlans.find((section) => section.sectionKind === 'source_signal_guidance');

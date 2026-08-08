@@ -131,7 +131,16 @@ type PromptEnhancementComposerDraftRejectionReason =
 interface ValidatedStructuredComposerDrafts {
   readonly draftsBySectionId: ReadonlyMap<string, string>;
   readonly composerClaims: readonly string[];
+  /** Set only when the WHOLE reply was refused; the body then loses every section's wording. */
   readonly rejectionReason?: PromptEnhancementComposerDraftRejectionReason;
+  /**
+   * Set when individual drafts were dropped but the reply survived. Without this a partial drop is
+   * invisible — the body composes, `fallbackMode` stays `none`, and the diagnostic reports a clean
+   * `deterministic_body_composed` while sections have quietly gone missing. That is the same
+   * silent-loss shape the rejection reason was added to remove, so it is reported the same way.
+   */
+  readonly droppedDraftCount?: number;
+  readonly droppedDraftReason?: PromptEnhancementComposerDraftRejectionReason;
 }
 
 const ADDITIONAL_DETAILS_WORD_CAP = 5000;
@@ -353,6 +362,9 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
     sectionPlans,
     input.additionalDetailsText,
     validatedLlmDrafts.rejectionReason,
+    validatedLlmDrafts.droppedDraftCount
+      ? { count: validatedLlmDrafts.droppedDraftCount, reason: validatedLlmDrafts.droppedDraftReason }
+      : undefined,
   );
   const composerMode = composerModeForAction(action, usesLlmWording);
   const sourceFactIds = unique(sectionPlans.flatMap((sectionPlan) => sectionPlan.structuredContentPartRefs));
@@ -508,16 +520,42 @@ function validatedStructuredComposerDrafts(
   const sourceRefIds = new Set(sectionPlans.flatMap((sectionPlan) => sectionPlan.sourceRefs.map((ref) => ref.sourceRefId)));
   const allowedSourceFactIds = new Set(sectionPlans.flatMap((sectionPlan) => sectionPlan.structuredContentPartRefs));
   const drafts = new Map<string, string>();
+
+  // Per-draft faults cost their own section, not the whole reply.
+  //
+  // Five of the six refusal rules describe ONE draft, yet each discarded every other draft with it —
+  // so a single unusable section replaced eight good ones with canned text. Dropping just the
+  // offending draft leaves that section to render deterministically while the rest keep the model's
+  // wording. This is not a new output shape: the model routinely returns fewer drafts than there are
+  // planned sections, so mixed bodies already ship and already render correctly.
+  //
+  // Safety is unchanged. Every surviving draft passed exactly the checks it passes today; nothing
+  // weaker is admitted. The only difference is that a GOOD draft is no longer punished for a
+  // DIFFERENT draft being bad.
+  let droppedDraftCount = 0;
+  let droppedDraftReason: PromptEnhancementComposerDraftRejectionReason | undefined;
+  const dropDraft = (reason: PromptEnhancementComposerDraftRejectionReason): void => {
+    droppedDraftCount += 1;
+    droppedDraftReason ??= reason;
+  };
+
   for (const draft of output.sectionDrafts) {
-    if (!sectionIds.has(draft.sectionId)) return rejectedFor('unknown_section');
+    if (!sectionIds.has(draft.sectionId)) { dropDraft('unknown_section'); continue; }
     const sectionPlan = sectionPlans.find((section) => section.sectionId === draft.sectionId);
-    if (!sectionPlan || sectionPlan.sectionKind === 'original_request_or_goal') return rejectedFor('original_section');
+    if (!sectionPlan || sectionPlan.sectionKind === 'original_request_or_goal') { dropDraft('original_section'); continue; }
     const bodyText = normalizeWhitespace(draft.bodyText);
-    if (!bodyText || containsDisallowedComposerWording(bodyText, sourceIds, sourceRefIds)) return rejectedFor('empty_or_disallowed_wording');
-    if (draft.sourceFactIds.length === 0) return rejectedFor('no_source_fact_ids');
-    if (draft.sourceFactIds.some((sourceFactId) => !sectionPlan.structuredContentPartRefs.includes(sourceFactId))) return rejectedFor('source_fact_id_not_in_section');
+    if (!bodyText || containsDisallowedComposerWording(bodyText, sourceIds, sourceRefIds)) { dropDraft('empty_or_disallowed_wording'); continue; }
+    if (draft.sourceFactIds.length === 0) { dropDraft('no_source_fact_ids'); continue; }
+    if (draft.sourceFactIds.some((sourceFactId) => !sectionPlan.structuredContentPartRefs.includes(sourceFactId))) { dropDraft('source_fact_id_not_in_section'); continue; }
     drafts.set(draft.sectionId, `- ${bodyText}`);
   }
+
+  // Every draft dropped is the same outcome as an output-wide refusal, and must report as one rather
+  // than as an empty success.
+  if (drafts.size === 0) return rejectedFor(droppedDraftReason ?? 'no_drafts_returned');
+
+  // The claims union stays OUTPUT-WIDE: a broken union is a property of the whole reply and cannot be
+  // attributed to any one section, so there is no draft to drop.
   const composerClaims = output.composerClaims.map((claim) => claim.startsWith('claim:') ? claim.slice('claim:'.length) : '');
   if (
     composerClaims.length === 0 ||
@@ -528,6 +566,8 @@ function validatedStructuredComposerDrafts(
   return {
     draftsBySectionId: drafts,
     composerClaims: output.composerClaims,
+    droppedDraftCount: droppedDraftCount > 0 ? droppedDraftCount : undefined,
+    droppedDraftReason,
   };
 }
 
@@ -858,6 +898,10 @@ function compositionDiagnostics(
   // reports only `validation_failed`, which names the stage but not the cause — and there are six
   // possible causes.
   draftRejectionReason?: PromptEnhancementComposerDraftRejectionReason,
+  // Individual drafts dropped while the reply survived. Reported for the same reason as the
+  // rejection above: without it, sections disappear from the body while the diagnostic still reads
+  // as a clean composition.
+  droppedDrafts?: { count: number; reason?: PromptEnhancementComposerDraftRejectionReason },
 ): PromptEnhancementComposeResult['diagnostics'] {
   const fallbackReasonCode = draftRejectionReason
     ? `deterministic_fallback:${runtimeState}:${draftRejectionReason}`
@@ -865,6 +909,13 @@ function compositionDiagnostics(
   const diagnostics: PromptEnhancementComposeResult['diagnostics'][number][] = fallbackMode === 'none'
     ? [{ category: 'generated', reasonCode: 'deterministic_body_composed' }]
     : [{ category: 'fallback_or_no_popup', reasonCode: fallbackReasonCode }];
+
+  if (droppedDrafts && droppedDrafts.count > 0) {
+    diagnostics.push({
+      category: 'fallback_or_no_popup',
+      reasonCode: `partial_draft_drop:${droppedDrafts.count}:${droppedDrafts.reason ?? 'unreported'}`,
+    });
+  }
 
   if (action === 'more_project_grounded' && !hasUsableProjectGroundingSource(sectionPlans)) {
     diagnostics.push({
