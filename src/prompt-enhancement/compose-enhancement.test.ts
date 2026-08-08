@@ -294,7 +294,7 @@ describe('prompt-enhancement composer and deterministic fallback', () => {
       outputTokenCap: 2000,
       estimatedInputTokens: 0,
       estimatedOutputTokens: 0,
-      timeoutMs: 10_000,
+      timeoutMs: 45_000,
       productValueDiscussionIsRuntimeLimiter: false,
     });
   });
@@ -992,7 +992,7 @@ describe('prompt-enhancement composer and deterministic fallback', () => {
   );
 
   it.each(['timeout', 'provider_unavailable'] as const)(
-    'does not render generated prompt content for %s composer runtime state',
+    'renders the FULL deterministic body for %s composer runtime state (owner ruling 2026-08-07) with the failure carried in metadata',
     (composerRuntimeState) => {
       const result = composePromptEnhancementBody({
         enhancementId: `enh-phase12-no-generated-${composerRuntimeState}`,
@@ -1001,27 +1001,29 @@ describe('prompt-enhancement composer and deterministic fallback', () => {
         composerRuntimeState,
       });
 
-      expect(result.currentBody.text).toBe('Fix failing CI and show verification.');
-      expect(result.currentBody.sections).toEqual([]);
-      expect(result.currentBody.generatedOriginState).toBe('user_original');
-      expect(result.currentBody.generatedSafeStatus).toBe('original_only');
-      expect(result.sendPolicy).toBe('original_only');
+      // Owner ruling 2026-08-07: the original-prompt-only shell was removed — a provider failure
+      // keeps the grounded deterministic body (the popup shows the failure NOTICE instead), and
+      // the failure stays fully visible in the typed metadata below.
+      expect(result.currentBody.text).toContain('Fix failing CI and show verification.');
+      expect(result.currentBody.sections.length).toBeGreaterThan(0);
+      expect(result.currentBody.generatedOriginState).toBe('pe_generated_body');
+      expect(result.sendPolicy).toBe('send_current');
+      expect(result.callVisibilityMode).toBe('fallback_no_llm');
       expect(result.composerBoundary.inputContract.callVisibilityState.plannedCallCount).toBe(1);
       expect(result.composerBoundary.inputContract.callVisibilityState.usedCallCount).toBe(0);
       expect(result.composerBoundary.inputContract.callVisibilityState.productValueDiscussionIsRuntimeLimiter).toBe(false);
+      expect(result.composerBoundary.inputContract.callVisibilityState.providerAvailabilityState).toBe('unavailable_by_provider_api');
+      expect(result.composerBoundary.inputContract.callVisibilityState.optionalCallAvailabilityState).toBe('unavailable_by_provider_api');
       if (composerRuntimeState === 'timeout') {
         expect(result.fallbackMode).toBe('timeout_no_send');
         expect(result.composerBoundary.inputContract.callVisibilityState.fallbackReason).toBe('timeout');
         expect(result.composerBoundary.inputContract.callVisibilityState.providerFailureState).toBe('timeout');
-        expect(result.composerBoundary.inputContract.callVisibilityState.uiProviderApiLatencyStateLabel).toBe('timeout_no_generated_content');
       } else {
         expect(result.fallbackMode).toBe('provider_api_unavailable');
-        expect(result.callVisibilityMode).toBe('provider_unavailable');
-        expect(result.composerBoundary.inputContract.callVisibilityState.providerAvailabilityState).toBe('unavailable_by_provider_api');
-        expect(result.composerBoundary.inputContract.callVisibilityState.optionalCallAvailabilityState).toBe('unavailable_by_provider_api');
         expect(result.composerBoundary.inputContract.callVisibilityState.fallbackReason).toBe('provider_unavailable');
+        expect(result.composerBoundary.inputContract.callVisibilityState.providerFailureState).toBe('provider_api_unavailable');
       }
-      expect(result.diagnostics[0]?.reasonCode).toBe(`no_generated_content:${composerRuntimeState}`);
+      expect(result.diagnostics[0]?.reasonCode).toBe(`deterministic_fallback:${composerRuntimeState}`);
     },
   );
 

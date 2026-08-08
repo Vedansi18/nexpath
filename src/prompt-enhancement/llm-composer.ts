@@ -20,9 +20,13 @@ const STRONGER_LANGUAGE_DIRECTIVE =
  * Produces a {@link PromptEnhancementStructuredComposerOutputV1} for the E2-planned
  * sections via one gpt-4o-mini call, mirroring the existing Nexpath LLM pattern
  * (`stage-classifier.ts`): an injectable client (default `new OpenAI()`), the
- * shared cost caps, and — critically — **any** failure (no key, provider down,
- * timeout, unparseable/empty reply) returns `undefined` so `composePromptEnhancement
- * Body` renders deterministically. This function never throws to its caller.
+ * shared cost caps, and — critically — **any** failure resolves to a TYPED
+ * `{ ok: false, reason }` result (TI-2 fix 2026-08-07) so the facade can map the
+ * failure onto the runtime states that already exist, while `composePromptEnhancement
+ * Body` still renders deterministically. Previously every failure collapsed to
+ * `undefined`, making a provider timeout byte-identical to "never eligible for an
+ * LLM call" in the UI, logs, and cost metadata simultaneously. This function never
+ * throws to its caller.
  *
  * It only proposes wording. `composePromptEnhancementBody` independently validates
  * every draft (section id must be planned + non-original, no leaked ids/labels,
@@ -50,6 +54,35 @@ export type PromptEnhancementComposerDirectionalActionV1 =
   | 'more_thorough'
   | 'more_project_grounded'
   | 'apply_details';
+
+/**
+ * TI-2 (2026-08-07): why a composer call produced no usable output. `no_key` and
+ * `no_eligible_sections` mean the call was genuinely NOT MADE (the facade keeps them as
+ * "not requested"); the other three are real provider/output failures the facade maps onto
+ * the existing `PromptEnhancementComposerRuntimeState` failure states.
+ */
+export type PromptEnhancementComposerCallFailureReasonV1 =
+  | 'no_key'
+  | 'no_eligible_sections'
+  | 'provider_error'
+  | 'timeout'
+  | 'invalid_output';
+
+/** Discriminated composer-call result (TI-2): success carries the output; failure carries WHY. */
+export type PromptEnhancementComposerCallResultV1 =
+  | { ok: true; output: PromptEnhancementStructuredComposerOutputV1 }
+  | { ok: false; reason: PromptEnhancementComposerCallFailureReasonV1 };
+
+/**
+ * Classify a thrown provider error as timeout vs any-other provider failure. The OpenAI SDK
+ * raises `APIConnectionTimeoutError` ("Request timed out.") on the per-call `timeout` option;
+ * match by name first, message shape as fallback, so an injected non-SDK client behaves the same.
+ */
+function composerErrorReason(error: unknown): 'timeout' | 'provider_error' {
+  const name = (error as { name?: unknown } | null)?.name;
+  if (typeof name === 'string' && /timeout/i.test(name)) return 'timeout';
+  return /timed?\s?out/i.test(String(error)) ? 'timeout' : 'provider_error';
+}
 
 export interface PromptEnhancementComposerLlmInputV1 {
   enhancementId: string;
@@ -161,18 +194,18 @@ function parseStructuredComposerOutput(
 export async function composeStructuredComposerOutputV1(
   input: PromptEnhancementComposerLlmInputV1,
   client?: PromptEnhancementComposerClientV1,
-): Promise<PromptEnhancementStructuredComposerOutputV1 | undefined> {
+): Promise<PromptEnhancementComposerCallResultV1> {
   const sections = input.planning.sectionPlans.filter(
     (section) => section.sectionKind !== 'original_request_or_goal' && section.structuredContentPartRefs.length > 0,
   );
-  if (sections.length === 0) return undefined;
+  if (sections.length === 0) return { ok: false, reason: 'no_eligible_sections' };
 
   let openai: PromptEnhancementComposerClientV1;
   try {
     // With no injected client and no key, `new OpenAI()` throws -> deterministic fallback.
     openai = client ?? (new OpenAI() as unknown as PromptEnhancementComposerClientV1);
   } catch {
-    return undefined;
+    return { ok: false, reason: 'no_key' };
   }
 
   const userPrompt = buildUserPrompt(input.originalPromptText, sections) + actionWordingDirective(input.action, input.additionalDetailsText);
@@ -199,8 +232,10 @@ export async function composeStructuredComposerOutputV1(
         { timeout: PROMPT_ENHANCEMENT_COST_TIMEOUT_MS_V1, maxRetries: 0 },
       );
       raw = response.choices?.[0]?.message?.content;
-    } catch {
-      return undefined;
+    } catch (error) {
+      // Thrown provider error is NOT retried (fast deterministic fallback) — but it is now
+      // REPORTED: timeout vs any other provider failure (TI-2).
+      return { ok: false, reason: composerErrorReason(error) };
     }
     const parsed = raw ? parseStructuredComposerOutput(raw, input.enhancementId) : undefined;
     if (!parsed) continue; // malformed / empty -> retry
@@ -209,9 +244,9 @@ export async function composeStructuredComposerOutputV1(
       languageRetry = true;
       continue;
     }
-    return parsed;
+    return { ok: true, output: parsed };
   }
   // Retries exhausted (malformed or persistent language mismatch) -> deterministic
   // English fallback (never ship English generated sections for a non-English prompt).
-  return undefined;
+  return { ok: false, reason: 'invalid_output' };
 }

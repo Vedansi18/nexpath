@@ -445,6 +445,24 @@ export function requiresPromptEnhancementExecutionConfirmationForPrompt(original
   return classifyTextRiskKinds(originalPromptText).length > 0 && authorityModeFor(originalPromptText) === 'execute_requested';
 }
 
+/**
+ * Validator-parity predicate for the COMPOSER (blocked-popup fix 2026-08-07). The composer's
+ * prompt-based gate above cannot see sensitive-action risk phrasing that the GENERATED wording
+ * introduces (LLM drafts are free text), but `validatePromptEnhancementSafety` scans the generated
+ * body too and hard-blocks a body that needs the canonical confirmation and lacks it
+ * (`missing_or_weak_confirmation:canonical_confirmation_absent` → blocked_no_send → an empty,
+ * all-unavailable popup). This applies EXACTLY the validator's own rule — same classifier, same
+ * generated-only text derivation — so the composer can guarantee the confirmation is present
+ * whenever the validator will demand it.
+ */
+export function promptEnhancementGeneratedBodyRequiresConfirmationV1(
+  currentBody: Pick<PromptEnhancementCurrentBodyV1, 'sections' | 'originalPromptText'>,
+  bodyText: string,
+): boolean {
+  const generatedBodyText = generatedOnlyText(bodyText, currentBody.originalPromptText);
+  return classifySensitiveActions(currentBody, generatedBodyText).some((finding) => finding.requiresConfirmation);
+}
+
 export function buildPromptEnhancementCanonicalConfirmation(originalPromptText: string): string {
   return `Still, before you do this ${specificSensitiveActionTextForPrompt(originalPromptText)} you must ask me for go-ahead confirmation.`;
 }
