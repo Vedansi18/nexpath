@@ -578,8 +578,23 @@ const DISALLOWED_PHRASES: readonly string[] = [
   'this option',
 ];
 
+/**
+ * Word boundaries alone cut coverage as well as collateral, so ordinary inflection is allowed after
+ * the phrase and nothing else. Measured: a bare trailing `\b` silently stopped matching
+ *
+ *   "You shouldn't have skipped the fixture."   (`you should` + n't)
+ *   "That is bad practices in this repo."       (`bad practice` + s)
+ *   "Compare its outputs against the baseline." (`its output`  + s)
+ *
+ * — three voice-policy leaks traded for the three false positives it fixed, i.e. no net gain. The
+ * allowance is deliberately narrow: `m`, `rflow` and `al` are not inflections, so `the aim`,
+ * `the airflow` and `this optional` still pass. Both apostrophe forms are accepted because composed
+ * wording routinely carries the typographic one.
+ */
+const PHRASE_INFLECTION_SUFFIX = "(?:s|['’]s|n['’]t)?";
+
 const DISALLOWED_PHRASE_PATTERNS: readonly RegExp[] = DISALLOWED_PHRASES.map(
-  (phrase) => new RegExp(`\\b${phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i'),
+  (phrase) => new RegExp(`\\b${phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}${PHRASE_INFLECTION_SUFFIX}\\b`, 'i'),
 );
 
 /**
@@ -594,11 +609,22 @@ const DISALLOWED_PHRASE_PATTERNS: readonly RegExp[] = DISALLOWED_PHRASES.map(
  *
  * Requiring a following verb separates the two: "the AI should" blocks, "the AI gateway" does not.
  *
- * Known leak, accepted: a possessive third-person reference ("the AI's answer") passes, because no
- * verb follows. `its answer` and `its output` above still cover the common shape of that.
+ * The verb set is an explicit list rather than a general "looks like a verb" test, because the
+ * distinguishing word is a NOUN in the passing case ("the AI gateway", "the AI agents") and several
+ * candidate verbs are also plausible nouns — "the AI checks we run", "the AI calls we log". Listing
+ * only unambiguous ones keeps the false-positive cost down; a false positive here discards the whole
+ * composed body.
+ *
+ * ⚠️ TWO KNOWN LEAKS, both accepted and both pinned as tests:
+ *   1. a possessive reference — "the AI's answer" — no verb follows. `its answer` / `its output`
+ *      above still cover the common shape.
+ *   2. a present-tense verb outside the list — "the AI orchestrates the run". The list covers modals,
+ *      auxiliaries and the common agent verbs, which is the shape instruction-like wording takes;
+ *      exhaustive verb detection is not attainable with a word list, which is the same lesson the
+ *      authority rule taught.
  */
 const AGENT_THIRD_PERSON_PATTERN =
-  /\bthe ai\b(?=\s+(?:should|shall|will|would|can|could|may|might|must|needs?|has|have|had|is|are|was|were|does|do|did|to)\b)/i;
+  /\bthe ai\b(?=\s+(?:should|shall|will|would|can|could|may|might|must|ought|needs?|has|have|had|is|are|was|were|does|do|did|to|runs?|executes?|performs?|generates?|produces?|handles?|decides?|chooses?|assumes?|expects?|knows?|understands?)\b)/i;
 
 function containsDisallowedComposerWording(
   text: string,

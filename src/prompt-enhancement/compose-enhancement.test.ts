@@ -489,10 +489,32 @@ describe('prompt-enhancement composer and deterministic fallback', () => {
       expect(rejected('List the AI agent features we already support in the console.')).toBe(false);
     });
 
-    it('KNOWN LEAK, accepted: a possessive third-person reference passes', () => {
-      // No verb follows "the AI", so the pattern cannot see it. The common shape of the same problem
-      // is still covered by `its answer` / `its output` above.
+    it('still rejects inflected forms of the banned phrases', () => {
+      // Regression test for a defect in the boundary fix itself: a bare trailing \b silently stopped
+      // matching these three, trading three voice-policy leaks for the three false positives it
+      // fixed. The inflection allowance is narrow enough that the collateral above stays fixed.
+      expect(rejected("You shouldn't have skipped the fixture.")).toBe(true);
+      expect(rejected('That is bad practices in this repo.')).toBe(true);
+      expect(rejected('Compare its outputs against the baseline.')).toBe(true);
+      // ...while `m`, `rflow` and `al` are still not inflections.
+      expect(rejected('Check the aim of the retry helper.')).toBe(false);
+      expect(rejected('Keep this optional flag for now.')).toBe(false);
+      expect(rejected('Review the optionality matrix before the change.')).toBe(false);
+    });
+
+    it('rejects common agent verbs, not only modals', () => {
+      expect(rejected('The AI runs the tests every night.')).toBe(true);
+      expect(rejected('The AI generates the summary for each run.')).toBe(true);
+      expect(rejected('The AI ought to stop at the first failure.')).toBe(true);
+    });
+
+    it('KNOWN LEAKS, accepted: possessive, and a verb outside the list', () => {
+      // 1. No verb follows "the AI", so the pattern cannot see it. `its answer` / `its output` still
+      //    cover the common shape.
       expect(rejected("Record the AI's reasoning in the notes.")).toBe(false);
+      // 2. Exhaustive verb detection is not attainable with a word list — the same lesson the
+      //    authority rule taught. Recorded so it is not mistaken for a bug.
+      expect(rejected('The AI orchestrates the whole run.')).toBe(false);
     });
 
     it('internal identifier fragments are still matched as substrings, deliberately', () => {
