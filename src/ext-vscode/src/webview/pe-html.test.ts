@@ -157,6 +157,11 @@ describe('renderPromptEnhancementHtml — embedded script source (mirrors html.t
     expect(html).toContain('hasDirtyAdditionalDetails: !!(detailsEl && detailsEl.value.trim().length > 0)');
   });
 
+  it('computes hasDirtyBodyEdit live from the body textarea at directional-click time (P9 action-loop signal)', () => {
+    const html = renderPromptEnhancementHtml(readyPayload, { cspSource: CSP_SRC, nonce: FIXED_NONCE });
+    expect(html).toContain('hasDirtyBodyEdit: bodyEl.value !== bodyEl.defaultValue');
+  });
+
   it('guards against clicking a disabled directional action', () => {
     const html = renderPromptEnhancementHtml(readyPayload, { cspSource: CSP_SRC, nonce: FIXED_NONCE });
     expect(html).toContain('if (btn.disabled) return;');

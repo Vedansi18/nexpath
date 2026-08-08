@@ -16,6 +16,11 @@ import { parsePromptEnhancementExtensionPayloadV1 } from './pe-payload.js';
 import { isPeOriginTurn } from './pe-origin.js';
 import { createInjectedRecordStore } from './injected-record.js';
 import { injectPeBody, resolvePeVisibleSurfaceAckState } from './pe-delivery.js';
+import {
+  buildPeActionRequest,
+  createPeActionLoopState,
+  type PeActionRequestType,
+} from './pe-action-loop.js';
 import { handleOptionSelection } from './webview/prompt-injection.js';
 import {
   detectHost,
@@ -285,6 +290,42 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           hasDirtyAdditionalDetails: event.hasDirtyAdditionalDetails === true,
         });
         log(`[nexpath] PE send intent: ${JSON.stringify(intent)}`);
+      }
+      // P9 (VED-PE-6): build the typed action request for the 4 round-trip
+      // action types and log it (redacted — never the raw edited body/details
+      // text). No real response transport exists yet (R3, `G-R3` OPEN) — a
+      // FRESH loop state is seeded from the currently published payload on
+      // every call rather than persisted across calls, deliberately: since
+      // nothing can ever unlock a persisted `locked_action_loading` state
+      // without a real response, persisting it here would strand the loop
+      // permanently locked after the very first click. This proves the
+      // request-builder is reachable and exercised now, and gives whatever
+      // real transport eventually lands (R3) the exact typed request shape
+      // to send.
+      const actionRequestType: PeActionRequestType | null =
+        event.eventType === 'request_shorter' ? 'shorter'
+        : event.eventType === 'request_more_thorough' ? 'more_thorough'
+        : event.eventType === 'request_more_project_grounded' ? 'more_project_grounded'
+        : event.eventType === 'submit_additional_details' ? 'apply_details'
+        : null;
+      if (actionRequestType) {
+        const built = buildPeActionRequest({
+          requestId: `${current.currentBodyId}:${current.bodyRevision}:${event.timestampMs}`,
+          actionType: actionRequestType,
+          loopState: createPeActionLoopState({
+            currentBodyId: current.currentBodyId,
+            bodyRevision: current.bodyRevision,
+            bodyText: current.currentBodyText,
+          }),
+          hasDirtyBodyEdit: event.hasDirtyBodyEdit === true,
+          editedBodyText: actionRequestType === 'apply_details' ? event.editedBodyText : undefined,
+          additionalDetailsText: actionRequestType === 'apply_details' ? event.additionalDetailsText : undefined,
+        });
+        log(`[nexpath] PE action request: ${JSON.stringify(
+          built.ok
+            ? { ok: true, actionType: built.request.actionType, dirtyDraftDisposition: built.request.dirtyDraftDisposition }
+            : built,
+        )}`);
       }
     },
   );

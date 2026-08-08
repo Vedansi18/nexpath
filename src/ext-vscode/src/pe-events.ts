@@ -72,6 +72,16 @@ export interface PeEventV1 {
    * to observe the field's live dirtiness.
    */
   hasDirtyAdditionalDetails?: boolean;
+  /**
+   * Only meaningful on the 3 directional event types: true when the body
+   * textarea had unsaved manual edits at the moment the user clicked a
+   * directional action (P9, VED-PE-6's `dirtyDraftDisposition` requirement —
+   * the edit itself is never carried here, only its presence as a boolean;
+   * directional requests always use canonical ids, never dirty text).
+   * Computed client-side in `pe-html.ts`, same reasoning as
+   * `hasDirtyAdditionalDetails` above.
+   */
+  hasDirtyBodyEdit?: boolean;
   /** True when the message's own bodyId/bodyRevision disagree with the routing context's. Routed, not rejected — P7 gates delivery on this. */
   staleOrMismatched: boolean;
   timestampMs: number;
@@ -154,6 +164,7 @@ export function routePeWebviewMessage(
         actionId: isNonEmptyString(msg.actionId) ? msg.actionId : null,
         currentBodyId: ctx.currentBodyId,
         bodyRevision: ctx.bodyRevision,
+        hasDirtyBodyEdit: msg.hasDirtyBodyEdit === true,
         staleOrMismatched: staleAgainst(msg.bodyId, msg.bodyRevision),
         timestampMs,
       };
@@ -166,6 +177,11 @@ export function routePeWebviewMessage(
         currentBodyId: ctx.currentBodyId,
         bodyRevision: ctx.bodyRevision,
         additionalDetailsText: msg.additionalDetailsText,
+        // P9 (VED-PE-6): Apply carries the current visible edited body
+        // alongside the details — the only event type that does. Optional/
+        // defensive (never rejects the whole event over it) matching this
+        // module's established tolerance for malformed optional fields.
+        editedBodyText: typeof msg.bodyText === 'string' ? msg.bodyText : undefined,
         staleOrMismatched: staleAgainst(msg.bodyId, msg.bodyRevision),
         timestampMs,
       };

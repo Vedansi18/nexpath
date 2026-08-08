@@ -176,6 +176,12 @@ ${detailsHtml}
         actionType: btn.dataset.actionType,
         bodyId: bodyEl.dataset.bodyId,
         bodyRevision: Number(bodyEl.dataset.bodyRevision),
+        // P9 (VED-PE-6): unsaved manual edits must be discarded, not silently sent
+        // as if canonical, when a directional action fires — this is the only
+        // signal proving the textarea diverged from its last-rendered canonical
+        // text, computed live at click time (defaultValue reflects the
+        // server-rendered initial body; value is whatever the user has typed).
+        hasDirtyBodyEdit: bodyEl.value !== bodyEl.defaultValue,
       });
     });
   });
@@ -188,6 +194,10 @@ ${detailsHtml}
           bodyId: bodyEl.dataset.bodyId,
           bodyRevision: Number(bodyEl.dataset.bodyRevision),
           additionalDetailsText: detailsEl.value,
+          // P9 (VED-PE-6): Apply is the only path sending the current VISIBLE
+          // edited body alongside the details — the user may have edited the
+          // body before applying details, and that edit must not be lost.
+          bodyText: bodyEl.value,
         });
       }
     });
