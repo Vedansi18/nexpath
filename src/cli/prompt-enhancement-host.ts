@@ -420,13 +420,20 @@ export function buildPromptEnhancementWindowsPositionScriptV1(geometry: PopupGeo
  */
 export function planPromptEnhancementWindowsTerminalLaunchV1(input: {
   launcherScriptPath: string;
+  /**
+   * No-jump (P6): open the window MINIMIZED (`start /MIN`) so it never flashes at the default centre;
+   * the launcher's position .ps1 then restores it directly to the docked rect (SetWindowPlacement).
+   * Set only when a docked geometry + position script are present; omitted → today's normal spawn.
+   */
+  minimized?: boolean;
 }): PromptEnhancementLinuxTerminalLaunchPlanV1 {
+  const startFlags = input.minimized ? ['start', '/MIN', '/WAIT'] : ['start', '/WAIT'];
   return {
     // Resolve the command interpreter from the system (`%ComSpec%`) rather than assuming a fixed
     // `cmd.exe` on PATH — this works across non-standard Windows installs and locales. Falls back to
     // the on-PATH `cmd.exe` only if the env var is absent.
     command: process.env.ComSpec ?? 'cmd.exe',
-    args: ['/c', 'start', '/WAIT', PROMPT_ENHANCEMENT_POPUP_WINDOW_TITLE_V1, 'cmd', '/c', input.launcherScriptPath],
+    args: ['/c', ...startFlags, PROMPT_ENHANCEMENT_POPUP_WINDOW_TITLE_V1, 'cmd', '/c', input.launcherScriptPath],
   };
 }
 
@@ -653,7 +660,9 @@ export async function runPromptEnhancementCliPopupHostLaunchV1(input: {
       });
       writeFileSync(launcherScriptPath, launcherScript, 'utf8');
       if (process.env.NEXPATH_DEBUG) process.stderr.write(`[nexpath] launch.cmd (${launcherScriptPath}):\n${launcherScript}\n`);
-      plan = planPromptEnhancementWindowsTerminalLaunchV1({ launcherScriptPath });
+      // No-jump (P6): minimize on spawn only when we wrote a position script (geometry known), so
+      // the launcher restores it straight to the docked rect. Without geometry → normal spawn.
+      plan = planPromptEnhancementWindowsTerminalLaunchV1({ launcherScriptPath, minimized: Boolean(positionScriptPath) });
     } else if (input.capability.method === 'mac_terminal') {
       // Write the shell launcher (0o700) into the temp dir, then open a Terminal.app window that runs
       // it. All real paths are quoted inside the launcher, so the AppleScript stays clean.

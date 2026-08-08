@@ -551,6 +551,16 @@ export function wrapLinuxSpawnForWaylandX11V1(
  * fail-open. Pure.
  */
 export function buildWindowsConsolePositionScriptV1(geometry: PopupGeometry): string {
+  // No-jump (P6): the window is spawned MINIMIZED (`start /MIN`) so it never flashes at the default
+  // centre. SetWindowPlacement sets the NORMAL-position rect to the docked rect AND shows it normal,
+  // so it appears directly on the right (restoring from minimized straight to the docked position —
+  // no visible move). MoveWindow re-applies the rect for the already-normal case. A final
+  // ShowWindow(SW_SHOWNORMAL) is the safety net: if positioning fails but PowerShell ran, the window
+  // is still shown (worst case: visible at default, never stuck minimized). Fully fail-open
+  // ($ErrorActionPreference + the caller's 2>nul).
+  const { xPx, yPx, widthPx, heightPx } = geometry;
+  const right = xPx + widthPx;
+  const bottom = yPx + heightPx;
   return [
     '$ErrorActionPreference = "SilentlyContinue"',
     'Add-Type @"',
@@ -559,9 +569,25 @@ export function buildWindowsConsolePositionScriptV1(geometry: PopupGeometry): st
     'public class NexpathWin {',
     '  [DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow();',
     '  [DllImport("user32.dll")] public static extern bool MoveWindow(IntPtr hWnd, int X, int Y, int nWidth, int nHeight, bool bRepaint);',
+    '  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);',
+    '  [StructLayout(LayoutKind.Sequential)] public struct WP {',
+    '    public int length; public int flags; public int showCmd;',
+    '    public int minX; public int minY; public int maxX; public int maxY;',
+    '    public int normLeft; public int normTop; public int normRight; public int normBottom;',
+    '  }',
+    '  [DllImport("user32.dll")] public static extern bool GetWindowPlacement(IntPtr hWnd, ref WP wp);',
+    '  [DllImport("user32.dll")] public static extern bool SetWindowPlacement(IntPtr hWnd, ref WP wp);',
     '}',
     '"@',
-    `[void][NexpathWin]::MoveWindow([NexpathWin]::GetConsoleWindow(), ${geometry.xPx}, ${geometry.yPx}, ${geometry.widthPx}, ${geometry.heightPx}, $true)`,
+    '$h = [NexpathWin]::GetConsoleWindow()',
+    '$wp = New-Object NexpathWin+WP',
+    '$wp.length = [System.Runtime.InteropServices.Marshal]::SizeOf($wp)',
+    '[void][NexpathWin]::GetWindowPlacement($h, [ref]$wp)',
+    '$wp.showCmd = 1',   // SW_SHOWNORMAL — restore from minimized straight to the normal rect below
+    `$wp.normLeft = ${xPx}; $wp.normTop = ${yPx}; $wp.normRight = ${right}; $wp.normBottom = ${bottom}`,
+    '[void][NexpathWin]::SetWindowPlacement($h, [ref]$wp)',
+    `[void][NexpathWin]::MoveWindow($h, ${xPx}, ${yPx}, ${widthPx}, ${heightPx}, $true)`,
+    '[void][NexpathWin]::ShowWindow($h, 1)',   // SW_SHOWNORMAL safety net: never stay minimized
     '',
   ].join('\r\n');
 }

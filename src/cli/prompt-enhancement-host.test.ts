@@ -397,6 +397,11 @@ describe('PE1.3 — Linux PE popup host launcher', () => {
     expect(plan.args).toEqual(['/c', 'start', '/WAIT', 'Nexpath · Prompt enhancement', 'cmd', '/c', 'C:/Temp/pe/launch.cmd']);
   });
 
+  it('P6 no-jump: minimized:true adds /MIN so the window never flashes at centre before docking', () => {
+    const plan = planPromptEnhancementWindowsTerminalLaunchV1({ launcherScriptPath: 'C:/Temp/pe/launch.cmd', minimized: true });
+    expect(plan.args).toEqual(['/c', 'start', '/MIN', '/WAIT', 'Nexpath · Prompt enhancement', 'cmd', '/c', 'C:/Temp/pe/launch.cmd']);
+  });
+
   it('builds a Windows batch launcher with node by absolute path and every path quoted (spaces intact)', () => {
     const script = buildPromptEnhancementWindowsLauncherScriptV1({
       nodeExecPath: 'C:/Program Files/nodejs/node.exe',
@@ -441,10 +446,12 @@ describe('PE1.3 — Linux PE popup host launcher', () => {
     const ps = buildPromptEnhancementWindowsPositionScriptV1(geometry);
     expect(ps).toContain('$ErrorActionPreference = "SilentlyContinue"'); // fully fail-open
     expect(ps).toContain('GetConsoleWindow');
-    expect(ps).toContain('MoveWindow');
-    // x=768, y=0, w=1152, h=1080 for FHD right-dock.
-    expect(ps).toContain(`MoveWindow([NexpathWin]::GetConsoleWindow(), ${geometry.xPx}, ${geometry.yPx}, ${geometry.widthPx}, ${geometry.heightPx}, $true)`);
-    expect(ps).toContain('MoveWindow([NexpathWin]::GetConsoleWindow(), 768, 0, 1152, 1080, $true)');
+    // No-jump (P6): SetWindowPlacement restores from minimized straight to the docked normal rect.
+    expect(ps).toContain('SetWindowPlacement');
+    expect(ps).toContain('$wp.normLeft = 768; $wp.normTop = 0; $wp.normRight = 1920; $wp.normBottom = 1080');
+    expect(ps).toContain('MoveWindow($h, 768, 0, 1152, 1080, $true)');
+    // Safety net: always show normal so the window is never left minimized.
+    expect(ps).toContain('ShowWindow($h, 1)');
   });
 
   it('plans a macOS Terminal.app spawn via osascript that runs the shell launcher', () => {

@@ -711,7 +711,9 @@ export function planWindowsPopupSpawn(
   launcherScriptPath?: string,
 ): { cmd: string; args: string[] } {
   if (launcherScriptPath) {
-    return { cmd: 'cmd.exe', args: ['/c', 'start', '/WAIT', title, 'cmd', '/c', launcherScriptPath] };
+    // No-jump (P6): open MINIMIZED so the window never flashes at the default centre; the launcher's
+    // position .ps1 restores it straight to the docked rect (SetWindowPlacement).
+    return { cmd: 'cmd.exe', args: ['/c', 'start', '/MIN', '/WAIT', title, 'cmd', '/c', launcherScriptPath] };
   }
   return {
     cmd:  'cmd.exe',

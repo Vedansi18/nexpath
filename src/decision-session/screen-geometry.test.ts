@@ -669,11 +669,15 @@ describe('screen-geometry — shared spawn helpers (P5)', () => {
     expect(wrapLinuxSpawnForWaylandX11V1(plan, { displayServer: 'wayland', terminalCommand: 'gnome-terminal', hasGeometry: false }).command).toBe('gnome-terminal');
   });
 
-  it('buildWindowsConsolePositionScriptV1: GetConsoleWindow + MoveWindow(x,y,w,h) + fail-open guard', () => {
+  it('buildWindowsConsolePositionScriptV1 (P6 no-jump): SetWindowPlacement docked rect + MoveWindow + show-normal safety', () => {
     const ps = buildWindowsConsolePositionScriptV1({ widthPx: 1152, heightPx: 1080, xPx: 768, yPx: 0, cols: 115, rows: 54 });
-    expect(ps).toContain('$ErrorActionPreference = "SilentlyContinue"');
+    expect(ps).toContain('$ErrorActionPreference = "SilentlyContinue"'); // fail-open
     expect(ps).toContain('GetConsoleWindow');
-    expect(ps).toContain('MoveWindow([NexpathWin]::GetConsoleWindow(), 768, 0, 1152, 1080, $true)');
+    // No-jump: restore from minimized straight to the docked normal rect (no centre flash).
+    expect(ps).toContain('SetWindowPlacement');
+    expect(ps).toContain('$wp.normLeft = 768; $wp.normTop = 0; $wp.normRight = 1920; $wp.normBottom = 1080');
+    expect(ps).toContain('MoveWindow($h, 768, 0, 1152, 1080, $true)');
+    expect(ps).toContain('ShowWindow($h, 1)'); // safety net: never stay minimized
   });
 
   it('buildWindowsConsoleLauncherScriptV1: mode con + powershell -File before the command; no geometry = plain', () => {
