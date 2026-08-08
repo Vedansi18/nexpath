@@ -1264,26 +1264,50 @@ describe('authority escalation is sentence-scoped, not whole-body keyword matchi
     });
 
     /**
-     * 🔴 RECORDED DEFECT, NOT AN ACCEPTED TRADE — awaiting an explicit decision, so it is pinned here
-     * rather than left to be rediscovered.
+     * The floor applies unconditionally — regression test for a real defect.
      *
-     * `ALWAYS_ESCALATE_PATTERN` is documented as the floor that nothing below it can soften, but
-     * `generatedEscalatesAuthority` consults it only AFTER requiring the generated text to read as
-     * `execute_requested`, which is decided by `EXECUTION_VERB`. `reset --hard` and `rewrite history`
-     * are in the floor and in NO execution-verb list, so on their own they never reach the floor at
-     * all: 2 of its 6 patterns are unreachable in isolation.
+     * `ALWAYS_ESCALATE_PATTERN` is the wording with no benign reading, and it is documented as the
+     * floor nothing can soften. It was not: it was consulted only AFTER the generated text had to read
+     * as `execute_requested`, which `EXECUTION_VERB` decides — and `reset --hard` and `rewrite history`
+     * are in the floor but in NO execution-verb list. On their own they never reached the floor at
+     * all, so 2 of its 6 patterns were unreachable.
      *
-     * This predates the strong-verb narrowing above and is unrelated to it — the same two patterns
-     * failed to fire before it. The fix is to test the floor BEFORE the authority-mode gate, which is
-     * a widening of the safety rule and therefore not made silently as part of a narrowing change.
-     *
-     * These assertions record what the code does TODAY. They are the bug, not the contract.
+     * What made it hard to see: the precondition reads the WHOLE body, and generated bodies run to
+     * seven or eight sections, so some verb like "run" is almost always present somewhere and the
+     * floor did fire. An unrelated word elsewhere in the body decided whether the safety net existed.
      */
-    it('DEFECT (recorded): two floor patterns never fire when they stand alone', () => {
-      expect(escalated('Use reset --hard to clear the working tree.')).toBe(false);
-      expect(escalated('Rewrite history on the release branch.')).toBe(false);
-      // Same two patterns DO fire once any execution verb shares the body, which is what hid this.
+    it('fires on floor patterns that carry no execution verb of their own', () => {
+      expect(escalated('Use reset --hard to clear the working tree.')).toBe(true);
+      expect(escalated('Rewrite history on the release branch.')).toBe(true);
+    });
+
+    it('the same wording still fires when an execution verb IS present (unchanged)', () => {
+      // This passed before the fix too — it is what hid the defect. Kept so a regression that
+      // reintroduces the ordering cannot pass by satisfying only this case.
       expect(escalated('Run the cleanup, then use reset --hard on the working tree.')).toBe(true);
+    });
+
+    it('every floor pattern escalates with no other execution verb in the body', () => {
+      // Enumerated deliberately: the defect was that SOME floor patterns were unreachable, so testing
+      // a representative one would not have caught it.
+      expect(escalated('Then force-push the branch.')).toBe(true);
+      expect(escalated('rm -rf the build folder.')).toBe(true);
+      expect(escalated('drop table orders when finished.')).toBe(true);
+      expect(escalated('truncate the audit log.')).toBe(true);
+      expect(escalated('Use reset --hard on the working tree.')).toBe(true);
+      expect(escalated('Rewrite history before the review.')).toBe(true);
+    });
+
+    // The widening is bounded: it applies to the floor only, and only when the request was
+    // plan/review-shaped. A user who asked for the dangerous action still gets it.
+    it('does not fire when the user asked for the dangerous action themselves', () => {
+      const doPrompt = 'Force-push the rebased branch and reset --hard to drop my local changes.';
+      const currentBody = composedBody({ originalPromptText: doPrompt, route: { promptText: doPrompt } });
+      const result = validatePromptEnhancementSafety({
+        currentBody,
+        editedBodyText: `${currentBody.text}\n\nVerification Or Test Plan:\n- Use reset --hard to clear the working tree.`,
+      });
+      expect(result.failures.map((f) => f.failureCode)).not.toContain('authority_escalation:planning_to_execution');
     });
   });
 

@@ -620,9 +620,11 @@ const ESCALATION_VERB =
  * must be one of the strong ones above, and a risk term must appear in the SAME unit. The unit rule
  * separates "execute the tests" from "execute the rollback"; body-level risk matching cannot, because
  * risk patterns fire on the prompt's topic (`database`, `upgrade`) rather than on the action.
+ *
+ * The floor is NOT tested here — it is tested by the caller, before the caller's own execution-mode
+ * precondition, so that it genuinely applies unconditionally. See `generatedEscalatesAuthority`.
  */
 function generatedRiskEscalationPresent(generatedText: string): boolean {
-  if (ALWAYS_ESCALATE_PATTERN.test(generatedText)) return true;
   return authorityScopeUnits(generatedText).some((unit) =>
     ESCALATION_VERB.test(unit) && RISK_PATTERNS.some(([, pattern]) => pattern.test(unit)),
   );
@@ -648,6 +650,21 @@ function generatedEscalatesAuthority(originalPromptText: string, generatedBodyTe
   const originalAuthority = authorityModeFor(originalPromptText);
   if (originalAuthority !== 'plan_or_review') return false;
   const generatedRiskText = generatedBodyText.replace(buildPromptEnhancementCanonicalConfirmation(originalPromptText), '');
+
+  // The floor is consulted FIRST, and its own match is sufficient.
+  //
+  // It used to sit below the execution-mode precondition on the next line, which is decided by
+  // `EXECUTION_VERB` — and `reset --hard` and `rewrite history` appear in the floor but in NO
+  // execution-verb list. On their own they therefore never reached the floor at all: 2 of its 6
+  // patterns were unreachable, and a body reading "Use reset --hard to clear the working tree" passed
+  // while "Run the cleanup, then use reset --hard" blocked. An unrelated word elsewhere in the body
+  // decided whether the safety net existed.
+  //
+  // This is a deliberate WIDENING of a safety rule: strictly more wording escalates than before. That
+  // is the intended direction — the floor is wording with no benign reading, and a higher block rate
+  // is the accepted cost of it actually being a floor.
+  if (ALWAYS_ESCALATE_PATTERN.test(generatedRiskText)) return true;
+
   if (authorityModeFor(generatedRiskText) !== 'execute_requested') return false;
   // Pure narrowing: both original conditions still hold above, and this can only turn a `true` into a
   // `false`. It can never make previously-safe wording escalate.
