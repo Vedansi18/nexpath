@@ -222,6 +222,23 @@ export function parseMacOsascriptOutput(stdout: string): ScreenSize | null {
 }
 
 /**
+ * Parse `system_profiler SPDisplaysDataType` output into a ScreenSize. Prefers the
+ * "UI Looks like: W x H" line (the effective POINTS resolution — what macOS Terminal window bounds
+ * use), falling back to the first "Resolution: W x H". Returns null when neither is present. Used as
+ * the no-Automation-permission fallback for macOS screen detection. Exported for unit testability.
+ */
+export function parseMacSystemProfilerOutput(stdout: string): ScreenSize | null {
+  const ui = stdout.match(/UI Looks like:\s*(\d+)\s*x\s*(\d+)/i);
+  const res = stdout.match(/Resolution:\s*(\d+)\s*x\s*(\d+)/i);
+  const m = ui ?? res;
+  if (!m) return null;
+  const widthPx  = parsePositiveInt(m[1]);
+  const heightPx = parsePositiveInt(m[2]);
+  if (widthPx === null || heightPx === null) return null;
+  return { widthPx, heightPx };
+}
+
+/**
  * Parse `xdpyinfo` output (looks for the "dimensions: WxH pixels" line).
  * Returns null when the line is not present.
  *
@@ -297,7 +314,53 @@ function detectScreenWindows(): ScreenSize | null {
   return null;
 }
 
+/**
+ * Parse the JXA visible-frame output "x,y,width,height" (already converted to Terminal's TOP-LEFT
+ * point coordinates) into a WorkArea. x/y may legitimately be 0 (or y = menu-bar height). Returns
+ * null on malformed input. Exported for unit testability.
+ */
+export function parseMacVisibleFrameOutput(stdout: string): WorkArea | null {
+  const parts = stdout.trim().split(',').map((p) => p.trim());
+  if (parts.length < 4) return null;
+  const x = parseInt(parts[0], 10);
+  const y = parseInt(parts[1], 10);
+  const widthPx  = parsePositiveInt(parts[2]);
+  const heightPx = parsePositiveInt(parts[3]);
+  if (!Number.isFinite(x) || x < 0) return null;
+  if (!Number.isFinite(y) || y < 0) return null;
+  if (widthPx === null || heightPx === null) return null;
+  return { x, y, widthPx, heightPx };
+}
+
+/**
+ * Detect the macOS main-screen VISIBLE FRAME (usable area excluding the menu bar + Dock) as a
+ * dockable WorkArea, in Terminal's TOP-LEFT point coordinates. Uses AppKit's
+ * `NSScreen.mainScreen.visibleFrame` via JXA — this reads the CALLING process's own screen info, so
+ * it needs NO Automation permission (unlike Finder scripting). NSScreen uses a bottom-left origin, so
+ * the JXA converts the visible frame's top to top-left coords: `top = frame.h - (visible.y +
+ * visible.h)` (= the menu-bar gap). Returns null on any failure (caller falls back to full screen).
+ */
+export function detectMacVisibleFrame(): WorkArea | null {
+  try {
+    const jxa = [
+      'ObjC.import("AppKit");',
+      'var s = $.NSScreen.mainScreen;',
+      'var f = s.frame; var v = s.visibleFrame;',
+      'var topY = f.size.height - (v.origin.y + v.size.height);',
+      '[Math.round(v.origin.x), Math.round(topY), Math.round(v.size.width), Math.round(v.size.height)].join(",")',
+    ].join(' ');
+    const r = spawnSync('osascript', ['-l', 'JavaScript', '-e', jxa], { encoding: 'utf8', timeout: 5000 });
+    if (r.status === 0 && r.stdout) {
+      const parsed = parseMacVisibleFrameOutput(r.stdout);
+      if (parsed) return parsed;
+    }
+  } catch { /* fall through */ }
+  return null;
+}
+
 function detectScreenMac(): ScreenSize | null {
+  // Primary: Finder desktop bounds (points). Works only when the hook has macOS Automation
+  // permission for Finder — a Claude-spawned Stop hook usually does NOT, so this often fails.
   try {
     const script =
       'tell application "Finder" to set b to bounds of window of desktop\n' +
@@ -305,6 +368,18 @@ function detectScreenMac(): ScreenSize | null {
     const r = spawnSync('osascript', ['-e', script], { encoding: 'utf8', timeout: 5000 });
     if (r.status === 0 && r.stdout) {
       const parsed = parseMacOsascriptOutput(r.stdout);
+      if (parsed) return parsed;
+    }
+  } catch { /* fall through */ }
+
+  // Fallback (mac fix 2026-08-08): `system_profiler` reads the display WITHOUT any Automation
+  // permission, so the popup can still be sized/positioned when Finder scripting is blocked. Prefer
+  // the "UI Looks like: W x H" line (effective POINTS — what Terminal bounds use); fall back to
+  // "Resolution: W x H".
+  try {
+    const r = spawnSync('system_profiler', ['SPDisplaysDataType'], { encoding: 'utf8', timeout: 8000 });
+    if (r.status === 0 && r.stdout) {
+      const parsed = parseMacSystemProfilerOutput(r.stdout);
       if (parsed) return parsed;
     }
   } catch { /* fall through */ }

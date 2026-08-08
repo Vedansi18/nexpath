@@ -26,6 +26,8 @@ import {
   getPopupWidthRatio,
   parseDimensionsPattern,
   parseMacOsascriptOutput,
+  parseMacSystemProfilerOutput,
+  parseMacVisibleFrameOutput,
   parsePowerShellOutput,
   parseWmicOutput,
   parseWorkAreaPowerShellOutput,
@@ -176,6 +178,48 @@ describe('screen-geometry — parseMacOsascriptOutput (macOS primary path)', () 
 
   it('returns null on empty input', () => {
     expect(parseMacOsascriptOutput('')).toBeNull();
+  });
+});
+
+describe('screen-geometry — parseMacSystemProfilerOutput (macOS no-permission fallback)', () => {
+  it('prefers the "UI Looks like" points resolution over the raw Resolution (retina)', () => {
+    const retina = [
+      'Displays:',
+      '    iMac:',
+      '      Resolution: 5120 x 2880 Retina',
+      '      UI Looks like: 2560 x 1440 @ 60.00Hz',
+      '      Main Display: Yes',
+    ].join('\n');
+    expect(parseMacSystemProfilerOutput(retina)).toEqual({ widthPx: 2560, heightPx: 1440 });
+  });
+
+  it('falls back to Resolution when there is no "UI Looks like" line (non-retina)', () => {
+    const nonRetina = [
+      'Displays:',
+      '    Display:',
+      '      Resolution: 1920 x 1080',
+    ].join('\n');
+    expect(parseMacSystemProfilerOutput(nonRetina)).toEqual({ widthPx: 1920, heightPx: 1080 });
+  });
+
+  it('returns null when no display resolution is present', () => {
+    expect(parseMacSystemProfilerOutput('Displays:\n    No info')).toBeNull();
+    expect(parseMacSystemProfilerOutput('')).toBeNull();
+  });
+});
+
+describe('screen-geometry — parseMacVisibleFrameOutput (macOS visible frame, menu-bar/Dock aware)', () => {
+  it('parses "x,y,width,height" (top-left points) into a WorkArea', () => {
+    // e.g. 2560×1440 with a 25pt menu bar + a 70pt bottom Dock → visible {0,25,2560,1345}.
+    expect(parseMacVisibleFrameOutput('0,25,2560,1345')).toEqual({ x: 0, y: 25, widthPx: 2560, heightPx: 1345 });
+  });
+  it('accepts x=0 / y=0 and tolerates whitespace', () => {
+    expect(parseMacVisibleFrameOutput('  0 , 0 , 1920 , 1055 \n')).toEqual({ x: 0, y: 0, widthPx: 1920, heightPx: 1055 });
+  });
+  it('returns null on short / malformed / non-positive size', () => {
+    expect(parseMacVisibleFrameOutput('0,25,2560')).toBeNull();
+    expect(parseMacVisibleFrameOutput('')).toBeNull();
+    expect(parseMacVisibleFrameOutput('0,25,0,1345')).toBeNull(); // zero width
   });
 });
 

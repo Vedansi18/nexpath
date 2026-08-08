@@ -11,6 +11,7 @@ import { validatePromptEnhancementCliPopupResultV1 } from '../prompt-enhancement
 import {
   computeDockedPopupGeometry,
   detectScreenResolution,
+  detectMacVisibleFrame,
   detectLinuxDisplayServerV1,
   wrapLinuxSpawnForWaylandX11V1,
   buildWindowsConsolePositionScriptV1,
@@ -471,8 +472,17 @@ export function buildPromptEnhancementMacLauncherScriptV1(input: {
  */
 function buildPromptEnhancementMacAppleScriptV1(shellCommand: string, geom: PopupGeometry | null): string {
   const escaped = shellCommand.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  // Right-dock (mac fix 2026-08-08): position AFTER a short settle delay and set the bounds on the
+  // tab's window a second time, because setting bounds the instant `do script` returns is a race —
+  // the window often isn't ready yet, the `try` swallows the failure, and Terminal keeps its default
+  // (centred) window (live iMac report). A ~0.35s settle + a re-apply makes the right-dock stick.
   const sizeBlock = geom
-    ? `try
+    ? `delay 0.35
+    try
+        set bounds of (first window whose selected tab is theTab) to {${geom.xPx}, ${geom.yPx}, ${geom.xPx + geom.widthPx}, ${geom.yPx + geom.heightPx}}
+    end try
+    delay 0.15
+    try
         set bounds of (first window whose selected tab is theTab) to {${geom.xPx}, ${geom.yPx}, ${geom.xPx + geom.widthPx}, ${geom.yPx + geom.heightPx}}
     end try`
     : 'set number of rows of (first window whose selected tab is theTab) to 50';
@@ -588,7 +598,12 @@ function defaultLaunchDependencies(): PromptEnhancementCliPopupHostLaunchDepende
       try {
         // Right-dock geometry (owner request 2026-08-08): ~60% width × 100% height, flush right.
         // Fail-open exactly as before — detection failure → undefined → the emulator's default size.
-        // Working-area (taskbar) refinement is wired in P3 (Windows); here origin is {0,0}.
+        // macOS (fix 2026-08-08): prefer the VISIBLE FRAME (excludes menu bar + Dock) so the docked
+        // window sits below the menu bar and above the Dock; falls back to full screen.
+        if (process.platform === 'darwin') {
+          const visibleFrame = detectMacVisibleFrame();
+          if (visibleFrame) return computeDockedPopupGeometry(visibleFrame);
+        }
         const screen = await detectScreenResolution();
         return screen
           ? computeDockedPopupGeometry({ x: 0, y: 0, widthPx: screen.widthPx, heightPx: screen.heightPx })
