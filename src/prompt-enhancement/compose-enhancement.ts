@@ -531,6 +531,75 @@ function validatedStructuredComposerDrafts(
   };
 }
 
+/**
+ * Internal vocabulary that must never surface in composed wording, matched as a SUBSTRING on purpose.
+ *
+ * These are identifier fragments, not English, so a partial match is a real hit: `pinch` must still
+ * catch `pinchFallback`, `whydesc` must still catch `whyDescBase`. Word boundaries would let exactly
+ * the leaks these exist to stop straight through.
+ */
+const DISALLOWED_INTERNAL_TOKENS: readonly string[] = ['whydesc', 'descbase', 'pinch'];
+
+/**
+ * Voice-policy phrases, matched with WORD BOUNDARIES.
+ *
+ * These were substring-matched too, and that was wrong: they are ordinary English, short enough to sit
+ * inside unrelated words. Measured collateral, all of which discarded an entire composed body:
+ *
+ *   "The commit says the driver changed."     -> `it says`     (comm|it says)
+ *   "Keep this optional flag for now."        -> `this option` (this option|al)
+ *   "Count the units output by the job."      -> `its output`  (un|its output)
+ *
+ * Word boundaries keep every phrase doing its actual job while removing the collateral entirely.
+ */
+const DISALLOWED_PHRASES: readonly string[] = [
+  'the developer should',
+  'you seem',
+  'you should',
+  'you forgot',
+  'you already',
+  'you usually',
+  'you often',
+  'nexpath thinks',
+  'bad practice',
+  'you failed',
+  'show simpler options',
+  'ask the ai',
+  'have the ai',
+  'get the ai',
+  'instruct the ai',
+  'it says',
+  'it finds',
+  'its answer',
+  'its output',
+  'the prompt above',
+  'the action below',
+  'this action below',
+  'this option',
+];
+
+const DISALLOWED_PHRASE_PATTERNS: readonly RegExp[] = DISALLOWED_PHRASES.map(
+  (phrase) => new RegExp(`\\b${phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i'),
+);
+
+/**
+ * "the AI" as a third-person reference to the coding agent — the thing the voice policy actually
+ * forbids ("the AI should fix this", "the AI will need to run it").
+ *
+ * A bare `the ai` substring cannot express that rule. It matched `the aim`, `the air`, `the airflow`
+ * — and, worse, it matched the user's own product vocabulary. The composer is REQUIRED to mirror the
+ * user's register (the language-fidelity rule), so a prompt reading "compare our AI assistant against
+ * the AI gateway we already ship" produced sections saying "the AI gateway" and every one of them was
+ * discarded. The engine ordered the wording and then rejected it for obeying.
+ *
+ * Requiring a following verb separates the two: "the AI should" blocks, "the AI gateway" does not.
+ *
+ * Known leak, accepted: a possessive third-person reference ("the AI's answer") passes, because no
+ * verb follows. `its answer` and `its output` above still cover the common shape of that.
+ */
+const AGENT_THIRD_PERSON_PATTERN =
+  /\bthe ai\b(?=\s+(?:should|shall|will|would|can|could|may|might|must|needs?|has|have|had|is|are|was|were|does|do|did|to)\b)/i;
+
 function containsDisallowedComposerWording(
   text: string,
   sourceIds: ReadonlySet<string>,
@@ -540,36 +609,9 @@ function containsDisallowedComposerWording(
   if (/\{\{[^}]+\}\}|\{r4_open\}|\{r4_close\}|\{r5_inject:/i.test(text)) return true;
   if (/\bpe-(ar|cr|dr|em|wr|g)-?\d*(?:\.\d+)*\b/i.test(text)) return true;
   if (/\b(source-review|autoresearch|analysis file|dev plan file|planning label|research label)\b/i.test(text)) return true;
-  const disallowed = [
-    'whydesc',
-    'descbase',
-    'pinch',
-    'the developer should',
-    'you seem',
-    'you should',
-    'you forgot',
-    'you already',
-    'you usually',
-    'you often',
-    'nexpath thinks',
-    'bad practice',
-    'you failed',
-    'show simpler options',
-    'ask the ai',
-    'have the ai',
-    'get the ai',
-    'instruct the ai',
-    'the ai',
-    'it says',
-    'it finds',
-    'its answer',
-    'its output',
-    'the prompt above',
-    'the action below',
-    'this action below',
-    'this option',
-  ];
-  if (disallowed.some((phrase) => normalizedText.includes(phrase))) return true;
+  if (DISALLOWED_INTERNAL_TOKENS.some((token) => normalizedText.includes(token))) return true;
+  if (DISALLOWED_PHRASE_PATTERNS.some((pattern) => pattern.test(text))) return true;
+  if (AGENT_THIRD_PERSON_PATTERN.test(text)) return true;
   return [...sourceIds, ...sourceRefIds].some((sourceId) => sourceId && normalizedText.includes(sourceId.toLowerCase()));
 }
 
