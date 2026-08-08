@@ -131,7 +131,16 @@ type PromptEnhancementComposerDraftRejectionReason =
 interface ValidatedStructuredComposerDrafts {
   readonly draftsBySectionId: ReadonlyMap<string, string>;
   readonly composerClaims: readonly string[];
+  /** Set only when the WHOLE reply was refused; the body then loses every section's wording. */
   readonly rejectionReason?: PromptEnhancementComposerDraftRejectionReason;
+  /**
+   * Set when individual drafts were dropped but the reply survived. Without this a partial drop is
+   * invisible — the body composes, `fallbackMode` stays `none`, and the diagnostic reports a clean
+   * `deterministic_body_composed` while sections have quietly gone missing. That is the same
+   * silent-loss shape the rejection reason was added to remove, so it is reported the same way.
+   */
+  readonly droppedDraftCount?: number;
+  readonly droppedDraftReason?: PromptEnhancementComposerDraftRejectionReason;
 }
 
 const ADDITIONAL_DETAILS_WORD_CAP = 5000;
@@ -353,6 +362,9 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
     sectionPlans,
     input.additionalDetailsText,
     validatedLlmDrafts.rejectionReason,
+    validatedLlmDrafts.droppedDraftCount
+      ? { count: validatedLlmDrafts.droppedDraftCount, reason: validatedLlmDrafts.droppedDraftReason }
+      : undefined,
   );
   const composerMode = composerModeForAction(action, usesLlmWording);
   const sourceFactIds = unique(sectionPlans.flatMap((sectionPlan) => sectionPlan.structuredContentPartRefs));
@@ -508,16 +520,42 @@ function validatedStructuredComposerDrafts(
   const sourceRefIds = new Set(sectionPlans.flatMap((sectionPlan) => sectionPlan.sourceRefs.map((ref) => ref.sourceRefId)));
   const allowedSourceFactIds = new Set(sectionPlans.flatMap((sectionPlan) => sectionPlan.structuredContentPartRefs));
   const drafts = new Map<string, string>();
+
+  // Per-draft faults cost their own section, not the whole reply.
+  //
+  // Five of the six refusal rules describe ONE draft, yet each discarded every other draft with it —
+  // so a single unusable section replaced eight good ones with canned text. Dropping just the
+  // offending draft leaves that section to render deterministically while the rest keep the model's
+  // wording. This is not a new output shape: the model routinely returns fewer drafts than there are
+  // planned sections, so mixed bodies already ship and already render correctly.
+  //
+  // Safety is unchanged. Every surviving draft passed exactly the checks it passes today; nothing
+  // weaker is admitted. The only difference is that a GOOD draft is no longer punished for a
+  // DIFFERENT draft being bad.
+  let droppedDraftCount = 0;
+  let droppedDraftReason: PromptEnhancementComposerDraftRejectionReason | undefined;
+  const dropDraft = (reason: PromptEnhancementComposerDraftRejectionReason): void => {
+    droppedDraftCount += 1;
+    droppedDraftReason ??= reason;
+  };
+
   for (const draft of output.sectionDrafts) {
-    if (!sectionIds.has(draft.sectionId)) return rejectedFor('unknown_section');
+    if (!sectionIds.has(draft.sectionId)) { dropDraft('unknown_section'); continue; }
     const sectionPlan = sectionPlans.find((section) => section.sectionId === draft.sectionId);
-    if (!sectionPlan || sectionPlan.sectionKind === 'original_request_or_goal') return rejectedFor('original_section');
+    if (!sectionPlan || sectionPlan.sectionKind === 'original_request_or_goal') { dropDraft('original_section'); continue; }
     const bodyText = normalizeWhitespace(draft.bodyText);
-    if (!bodyText || containsDisallowedComposerWording(bodyText, sourceIds, sourceRefIds)) return rejectedFor('empty_or_disallowed_wording');
-    if (draft.sourceFactIds.length === 0) return rejectedFor('no_source_fact_ids');
-    if (draft.sourceFactIds.some((sourceFactId) => !sectionPlan.structuredContentPartRefs.includes(sourceFactId))) return rejectedFor('source_fact_id_not_in_section');
+    if (!bodyText || containsDisallowedComposerWording(bodyText, sourceIds, sourceRefIds)) { dropDraft('empty_or_disallowed_wording'); continue; }
+    if (draft.sourceFactIds.length === 0) { dropDraft('no_source_fact_ids'); continue; }
+    if (draft.sourceFactIds.some((sourceFactId) => !sectionPlan.structuredContentPartRefs.includes(sourceFactId))) { dropDraft('source_fact_id_not_in_section'); continue; }
     drafts.set(draft.sectionId, `- ${bodyText}`);
   }
+
+  // Every draft dropped is the same outcome as an output-wide refusal, and must report as one rather
+  // than as an empty success.
+  if (drafts.size === 0) return rejectedFor(droppedDraftReason ?? 'no_drafts_returned');
+
+  // The claims union stays OUTPUT-WIDE: a broken union is a property of the whole reply and cannot be
+  // attributed to any one section, so there is no draft to drop.
   const composerClaims = output.composerClaims.map((claim) => claim.startsWith('claim:') ? claim.slice('claim:'.length) : '');
   if (
     composerClaims.length === 0 ||
@@ -528,8 +566,105 @@ function validatedStructuredComposerDrafts(
   return {
     draftsBySectionId: drafts,
     composerClaims: output.composerClaims,
+    droppedDraftCount: droppedDraftCount > 0 ? droppedDraftCount : undefined,
+    droppedDraftReason,
   };
 }
+
+/**
+ * Internal vocabulary that must never surface in composed wording, matched as a SUBSTRING on purpose.
+ *
+ * These are identifier fragments, not English, so a partial match is a real hit: `pinch` must still
+ * catch `pinchFallback`, `whydesc` must still catch `whyDescBase`. Word boundaries would let exactly
+ * the leaks these exist to stop straight through.
+ */
+const DISALLOWED_INTERNAL_TOKENS: readonly string[] = ['whydesc', 'descbase', 'pinch'];
+
+/**
+ * Voice-policy phrases, matched with WORD BOUNDARIES.
+ *
+ * These were substring-matched too, and that was wrong: they are ordinary English, short enough to sit
+ * inside unrelated words. Measured collateral, all of which discarded an entire composed body:
+ *
+ *   "The commit says the driver changed."     -> `it says`     (comm|it says)
+ *   "Keep this optional flag for now."        -> `this option` (this option|al)
+ *   "Count the units output by the job."      -> `its output`  (un|its output)
+ *
+ * Word boundaries keep every phrase doing its actual job while removing the collateral entirely.
+ */
+const DISALLOWED_PHRASES: readonly string[] = [
+  'the developer should',
+  'you seem',
+  'you should',
+  'you forgot',
+  'you already',
+  'you usually',
+  'you often',
+  'nexpath thinks',
+  'bad practice',
+  'you failed',
+  'show simpler options',
+  'ask the ai',
+  'have the ai',
+  'get the ai',
+  'instruct the ai',
+  'it says',
+  'it finds',
+  'its answer',
+  'its output',
+  'the prompt above',
+  'the action below',
+  'this action below',
+  'this option',
+];
+
+/**
+ * Word boundaries alone cut coverage as well as collateral, so ordinary inflection is allowed after
+ * the phrase and nothing else. Measured: a bare trailing `\b` silently stopped matching
+ *
+ *   "You shouldn't have skipped the fixture."   (`you should` + n't)
+ *   "That is bad practices in this repo."       (`bad practice` + s)
+ *   "Compare its outputs against the baseline." (`its output`  + s)
+ *
+ * — three voice-policy leaks traded for the three false positives it fixed, i.e. no net gain. The
+ * allowance is deliberately narrow: `m`, `rflow` and `al` are not inflections, so `the aim`,
+ * `the airflow` and `this optional` still pass. Both apostrophe forms are accepted because composed
+ * wording routinely carries the typographic one.
+ */
+const PHRASE_INFLECTION_SUFFIX = "(?:s|['’]s|n['’]t)?";
+
+const DISALLOWED_PHRASE_PATTERNS: readonly RegExp[] = DISALLOWED_PHRASES.map(
+  (phrase) => new RegExp(`\\b${phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}${PHRASE_INFLECTION_SUFFIX}\\b`, 'i'),
+);
+
+/**
+ * "the AI" as a third-person reference to the coding agent — the thing the voice policy actually
+ * forbids ("the AI should fix this", "the AI will need to run it").
+ *
+ * A bare `the ai` substring cannot express that rule. It matched `the aim`, `the air`, `the airflow`
+ * — and, worse, it matched the user's own product vocabulary. The composer is REQUIRED to mirror the
+ * user's register (the language-fidelity rule), so a prompt reading "compare our AI assistant against
+ * the AI gateway we already ship" produced sections saying "the AI gateway" and every one of them was
+ * discarded. The engine ordered the wording and then rejected it for obeying.
+ *
+ * Requiring a following verb separates the two: "the AI should" blocks, "the AI gateway" does not.
+ *
+ * The verb set is an explicit list rather than a general "looks like a verb" test, because the
+ * distinguishing word is a NOUN in the passing case ("the AI gateway", "the AI agents") and several
+ * candidate verbs are also plausible nouns — "the AI checks we run", "the AI calls we log". Listing
+ * only unambiguous ones keeps the false-positive cost down; a false positive here discards the whole
+ * composed body.
+ *
+ * ⚠️ TWO KNOWN LEAKS, both accepted and both pinned as tests:
+ *   1. a possessive reference — "the AI's answer" — no verb follows. `its answer` / `its output`
+ *      above still cover the common shape.
+ *   2. a present-tense verb outside the list — "the AI orchestrates the run". The list covers modals,
+ *      auxiliaries and the common agent verbs, which is the shape instruction-like wording takes;
+ *      exhaustive verb detection is not attainable with a word list, which is the same lesson the
+ *      authority rule taught.
+ */
+const AGENT_THIRD_PERSON_PATTERN =
+  /\bthe ai\b(?=\s+(?:should|shall|will|would|can|could|may|might|must|ought|needs?|has|have|had|is|are|was|were|does|do|did|to|runs?|executes?|performs?|generates?|produces?|handles?|decides?|chooses?|assumes?|expects?|knows?|understands?)\b)/i;
 
 function containsDisallowedComposerWording(
   text: string,
@@ -540,36 +675,9 @@ function containsDisallowedComposerWording(
   if (/\{\{[^}]+\}\}|\{r4_open\}|\{r4_close\}|\{r5_inject:/i.test(text)) return true;
   if (/\bpe-(ar|cr|dr|em|wr|g)-?\d*(?:\.\d+)*\b/i.test(text)) return true;
   if (/\b(source-review|autoresearch|analysis file|dev plan file|planning label|research label)\b/i.test(text)) return true;
-  const disallowed = [
-    'whydesc',
-    'descbase',
-    'pinch',
-    'the developer should',
-    'you seem',
-    'you should',
-    'you forgot',
-    'you already',
-    'you usually',
-    'you often',
-    'nexpath thinks',
-    'bad practice',
-    'you failed',
-    'show simpler options',
-    'ask the ai',
-    'have the ai',
-    'get the ai',
-    'instruct the ai',
-    'the ai',
-    'it says',
-    'it finds',
-    'its answer',
-    'its output',
-    'the prompt above',
-    'the action below',
-    'this action below',
-    'this option',
-  ];
-  if (disallowed.some((phrase) => normalizedText.includes(phrase))) return true;
+  if (DISALLOWED_INTERNAL_TOKENS.some((token) => normalizedText.includes(token))) return true;
+  if (DISALLOWED_PHRASE_PATTERNS.some((pattern) => pattern.test(text))) return true;
+  if (AGENT_THIRD_PERSON_PATTERN.test(text)) return true;
   return [...sourceIds, ...sourceRefIds].some((sourceId) => sourceId && normalizedText.includes(sourceId.toLowerCase()));
 }
 
@@ -790,6 +898,10 @@ function compositionDiagnostics(
   // reports only `validation_failed`, which names the stage but not the cause — and there are six
   // possible causes.
   draftRejectionReason?: PromptEnhancementComposerDraftRejectionReason,
+  // Individual drafts dropped while the reply survived. Reported for the same reason as the
+  // rejection above: without it, sections disappear from the body while the diagnostic still reads
+  // as a clean composition.
+  droppedDrafts?: { count: number; reason?: PromptEnhancementComposerDraftRejectionReason },
 ): PromptEnhancementComposeResult['diagnostics'] {
   const fallbackReasonCode = draftRejectionReason
     ? `deterministic_fallback:${runtimeState}:${draftRejectionReason}`
@@ -797,6 +909,13 @@ function compositionDiagnostics(
   const diagnostics: PromptEnhancementComposeResult['diagnostics'][number][] = fallbackMode === 'none'
     ? [{ category: 'generated', reasonCode: 'deterministic_body_composed' }]
     : [{ category: 'fallback_or_no_popup', reasonCode: fallbackReasonCode }];
+
+  if (droppedDrafts && droppedDrafts.count > 0) {
+    diagnostics.push({
+      category: 'fallback_or_no_popup',
+      reasonCode: `partial_draft_drop:${droppedDrafts.count}:${droppedDrafts.reason ?? 'unreported'}`,
+    });
+  }
 
   if (action === 'more_project_grounded' && !hasUsableProjectGroundingSource(sectionPlans)) {
     diagnostics.push({

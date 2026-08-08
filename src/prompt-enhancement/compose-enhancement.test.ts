@@ -435,6 +435,209 @@ describe('prompt-enhancement composer and deterministic fallback', () => {
     expect(result.composerBoundary.rawComposerOutput).toBe('rejected_or_unavailable');
   });
 
+  /**
+   * Voice-policy matching is phrase-accurate, not substring-accurate.
+   *
+   * Every phrase used to be matched with `.includes()`, and several are short enough to sit inside
+   * unrelated words. Because one bad draft discards the WHOLE reply, a single such match cost the user
+   * every section. Measured live: a prompt reading "compare our AI assistant integration against the
+   * AI gateway we already ship" produced 8 valid drafts and all 8 were thrown away, because the
+   * composer is required to mirror the user's own vocabulary and therefore wrote "the AI gateway".
+   */
+  describe('voice policy matches phrases, not substrings', () => {
+    const composeWith = (bodyText: string) => {
+      const planned = planningResult();
+      const section = planned.sectionPlans.find((s) => s.sectionKind === 'source_signal_guidance');
+      const factId = section?.structuredContentPartRefs[0] ?? 'missing-source-fact';
+      return composePromptEnhancementBody({
+        enhancementId: 'enh-voice-substring',
+        originalPromptText: 'Fix importCsv and verify the regression.',
+        sectionPlanningResult: planned,
+        composerRuntimeState: 'accepted_structured_output',
+        structuredComposerOutput: {
+          outputId: 'llm-output-voice-substring',
+          sectionDrafts: [{ sectionId: section?.sectionId ?? 'missing', bodyText, sourceFactIds: [factId] }],
+          composerClaims: [`claim:${factId}`],
+        },
+      });
+    };
+    const rejected = (bodyText: string) => composeWith(bodyText).composerBoundary.rawComposerOutput === 'rejected_or_unavailable';
+
+    it('no longer rejects ordinary words that merely contain a banned phrase', () => {
+      expect(rejected('The commit says the driver changed, so capture that in the notes.')).toBe(false);
+      expect(rejected('Keep this optional flag for now and record why it stays.')).toBe(false);
+      expect(rejected('Count the units output by the job and compare against the baseline.')).toBe(false);
+      expect(rejected('Check the aim of the retry helper before changing it.')).toBe(false);
+      expect(rejected('Document the airflow DAG changes alongside the fix.')).toBe(false);
+    });
+
+    it('still rejects the phrases themselves', () => {
+      expect(rejected('Note what it says in the failing log line.')).toBe(true);
+      expect(rejected('Confirm this option is still needed before shipping.')).toBe(true);
+      expect(rejected('Verify its output matches the recorded fixture.')).toBe(true);
+      expect(rejected('You should have checked the fixture first.')).toBe(true);
+    });
+
+    it('rejects third-person references to the agent, but not the user own AI vocabulary', () => {
+      // The rule exists to stop the body talking ABOUT the agent. A following verb is what makes it
+      // a reference to the actor rather than to a thing the user is building.
+      expect(rejected('The AI should run the migration before the checks.')).toBe(true);
+      expect(rejected('The AI will need the fixture in place first.')).toBe(true);
+      expect(rejected('Ask the AI to re-run the failing suite.')).toBe(true);
+
+      expect(rejected('Compare the AI gateway against the AI assistant integration we ship.')).toBe(false);
+      expect(rejected('List the AI agent features we already support in the console.')).toBe(false);
+    });
+
+    it('still rejects inflected forms of the banned phrases', () => {
+      // Regression test for a defect in the boundary fix itself: a bare trailing \b silently stopped
+      // matching these three, trading three voice-policy leaks for the three false positives it
+      // fixed. The inflection allowance is narrow enough that the collateral above stays fixed.
+      expect(rejected("You shouldn't have skipped the fixture.")).toBe(true);
+      expect(rejected('That is bad practices in this repo.')).toBe(true);
+      expect(rejected('Compare its outputs against the baseline.')).toBe(true);
+      // ...while `m`, `rflow` and `al` are still not inflections.
+      expect(rejected('Check the aim of the retry helper.')).toBe(false);
+      expect(rejected('Keep this optional flag for now.')).toBe(false);
+      expect(rejected('Review the optionality matrix before the change.')).toBe(false);
+    });
+
+    it('rejects common agent verbs, not only modals', () => {
+      expect(rejected('The AI runs the tests every night.')).toBe(true);
+      expect(rejected('The AI generates the summary for each run.')).toBe(true);
+      expect(rejected('The AI ought to stop at the first failure.')).toBe(true);
+    });
+
+    it('KNOWN LEAKS, accepted: possessive, and a verb outside the list', () => {
+      // 1. No verb follows "the AI", so the pattern cannot see it. `its answer` / `its output` still
+      //    cover the common shape.
+      expect(rejected("Record the AI's reasoning in the notes.")).toBe(false);
+      // 2. Exhaustive verb detection is not attainable with a word list — the same lesson the
+      //    authority rule taught. Recorded so it is not mistaken for a bug.
+      expect(rejected('The AI orchestrates the whole run.')).toBe(false);
+    });
+
+    it('internal identifier fragments are still matched as substrings, deliberately', () => {
+      // These are identifier fragments, not English: a partial match is a real leak. Word boundaries
+      // here would let exactly what the rule exists to stop straight through.
+      expect(rejected('Check pinchFallback rendering before the release.')).toBe(true);
+      expect(rejected('Read whyDescBase to see where the copy comes from.')).toBe(true);
+    });
+  });
+
+  /**
+   * A per-draft fault costs its own section, not the whole reply.
+   *
+   * Five of the six refusal rules describe ONE draft, yet each used to discard every other draft with
+   * it — one unusable section replaced eight good ones with canned text. Measured live: a prompt
+   * mirroring the user's own "AI gateway" vocabulary produced 8 drafts of which 3 tripped the voice
+   * rule, and all 8 were thrown away.
+   *
+   * Mixed bodies are not a new output shape — the model routinely returns fewer drafts than there are
+   * planned sections, so they already ship and already render correctly.
+   */
+  describe('draft rejection is per-section, not per-output', () => {
+    const twoSections = () => {
+      const planned = planningResult();
+      const usable = planned.sectionPlans.filter((s) => s.sectionKind !== 'original_request_or_goal'
+        && s.structuredContentPartRefs.length > 0);
+      return { planned, good: usable[0], bad: usable[1] };
+    };
+
+    const composeDrafts = (drafts: readonly { sectionId: string; bodyText: string; sourceFactIds: readonly string[] }[], claims?: readonly string[]) => {
+      const { planned } = twoSections();
+      return composePromptEnhancementBody({
+        enhancementId: 'enh-per-section',
+        originalPromptText: 'Fix importCsv and verify the regression.',
+        sectionPlanningResult: planned,
+        composerRuntimeState: 'accepted_structured_output',
+        structuredComposerOutput: {
+          outputId: 'llm-output-per-section',
+          sectionDrafts: drafts,
+          composerClaims: claims ?? drafts.flatMap((d) => d.sourceFactIds.map((id) => `claim:${id}`)),
+        },
+      });
+    };
+
+    it('keeps the good sections when ONE draft is unusable', () => {
+      const { good, bad } = twoSections();
+      const result = composeDrafts([
+        { sectionId: good.sectionId, bodyText: 'Reproduce the importCsv failure with a fixture first.', sourceFactIds: [good.structuredContentPartRefs[0]] },
+        { sectionId: bad.sectionId, bodyText: 'You should have checked this already.', sourceFactIds: [bad.structuredContentPartRefs[0]] },
+      ]);
+
+      expect(result.composerBoundary.rawComposerOutput).not.toBe('rejected_or_unavailable');
+      expect(result.currentBody.text).toContain('Reproduce the importCsv failure with a fixture first.');
+      expect(result.currentBody.text).not.toContain('You should have checked this already.');
+    });
+
+    it('reports the partial drop instead of letting a section vanish silently', () => {
+      const { good, bad } = twoSections();
+      const result = composeDrafts([
+        { sectionId: good.sectionId, bodyText: 'Reproduce the importCsv failure with a fixture first.', sourceFactIds: [good.structuredContentPartRefs[0]] },
+        { sectionId: bad.sectionId, bodyText: 'You should have checked this already.', sourceFactIds: [bad.structuredContentPartRefs[0]] },
+      ]);
+      expect(result.diagnostics.map((d) => d.reasonCode))
+        .toContain('partial_draft_drop:1:empty_or_disallowed_wording');
+    });
+
+    it('still rejects the WHOLE reply when every draft is unusable', () => {
+      const { good, bad } = twoSections();
+      const result = composeDrafts([
+        { sectionId: good.sectionId, bodyText: 'You should have checked this already.', sourceFactIds: [good.structuredContentPartRefs[0]] },
+        { sectionId: bad.sectionId, bodyText: 'The developer should fix it.', sourceFactIds: [bad.structuredContentPartRefs[0]] },
+      ]);
+      expect(result.composerBoundary.rawComposerOutput).toBe('rejected_or_unavailable');
+      expect(result.composerBoundary.draftRejectionReason).toBe('empty_or_disallowed_wording');
+    });
+
+    it('a broken claims union still rejects the whole reply — it belongs to no single section', () => {
+      const { good } = twoSections();
+      const result = composeDrafts(
+        [{ sectionId: good.sectionId, bodyText: 'Reproduce the importCsv failure with a fixture.', sourceFactIds: [good.structuredContentPartRefs[0]] }],
+        ['claim:not-an-allowed-source-fact-id'],
+      );
+      expect(result.composerBoundary.rawComposerOutput).toBe('rejected_or_unavailable');
+      expect(result.composerBoundary.draftRejectionReason).toBe('claims_empty_or_unallowed');
+    });
+
+    it('an unknown section id costs only that draft', () => {
+      const { good } = twoSections();
+      const result = composeDrafts([
+        { sectionId: good.sectionId, bodyText: 'Reproduce the importCsv failure with a fixture.', sourceFactIds: [good.structuredContentPartRefs[0]] },
+        { sectionId: 'section-that-was-never-planned', bodyText: 'Anything at all.', sourceFactIds: [good.structuredContentPartRefs[0]] },
+      ]);
+      expect(result.composerBoundary.rawComposerOutput).not.toBe('rejected_or_unavailable');
+      expect(result.currentBody.text).toContain('Reproduce the importCsv failure with a fixture.');
+      expect(result.diagnostics.map((d) => d.reasonCode)).toContain('partial_draft_drop:1:unknown_section');
+    });
+
+    it('a mis-cited source fact id costs only that draft', () => {
+      const { good, bad } = twoSections();
+      const result = composeDrafts([
+        { sectionId: good.sectionId, bodyText: 'Reproduce the importCsv failure with a fixture.', sourceFactIds: [good.structuredContentPartRefs[0]] },
+        { sectionId: bad.sectionId, bodyText: 'Check the rollback path too.', sourceFactIds: ['fact-that-belongs-to-no-section'] },
+      ], [`claim:${good.structuredContentPartRefs[0]}`]);
+      expect(result.composerBoundary.rawComposerOutput).not.toBe('rejected_or_unavailable');
+      expect(result.currentBody.text).toContain('Reproduce the importCsv failure with a fixture.');
+      expect(result.currentBody.text).not.toContain('Check the rollback path too.');
+    });
+
+    it('no drafts at all is unchanged — an output-wide refusal', () => {
+      const result = composeDrafts([], ['claim:anything']);
+      expect(result.composerBoundary.rawComposerOutput).toBe('rejected_or_unavailable');
+      expect(result.composerBoundary.draftRejectionReason).toBe('no_drafts_returned');
+    });
+
+    it('a fully clean reply reports no partial drop', () => {
+      const { good } = twoSections();
+      const result = composeDrafts([
+        { sectionId: good.sectionId, bodyText: 'Reproduce the importCsv failure with a fixture.', sourceFactIds: [good.structuredContentPartRefs[0]] },
+      ]);
+      expect(result.diagnostics.map((d) => d.reasonCode).some((c) => c.startsWith('partial_draft_drop'))).toBe(false);
+    });
+  });
+
   it('rejects structured LLM wording that leaks private planning labels or user-referential scolding voice', () => {
     const planned = planningResult();
     const sourceGuidanceSection = planned.sectionPlans.find((section) => section.sectionKind === 'source_signal_guidance');
