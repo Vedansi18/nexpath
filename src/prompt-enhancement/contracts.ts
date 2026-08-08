@@ -1428,8 +1428,12 @@ export interface PromptEnhancementFutureSequenceRuntimeGateInputV1 {
 export interface PromptEnhancementFutureSequenceRuntimeGateResultV1 {
   schemaVersion: PromptEnhancementSchemaVersion;
   operation: PromptEnhancementFutureSequenceRuntimeOperationV1;
-  allowed: false;
-  status: 'blocked_future_sequence_runtime_v1';
+  // D3 (2026-08-08): the gate can now return `allowed: true` when ALL evidence is present. This type
+  // is MPS-only (consumed by the Stop-hook launcher + tests; the PE facade never uses it), so
+  // widening these decision fields does not touch PE/PEF. In production the gate still returns
+  // `allowed: false` because no caller supplies full evidence yet (that wiring is a later phase).
+  allowed: boolean;
+  status: 'blocked_future_sequence_runtime_v1' | 'allowed_future_sequence_runtime_v1';
   fallbackMode: 'current_or_original_fallback_no_runtime';
   sequenceIdentityState: 'not_created_v1';
   acceptedStartOrderState: 'not_created_v1';
@@ -1437,7 +1441,7 @@ export interface PromptEnhancementFutureSequenceRuntimeGateResultV1 {
   customPromptPathState: 'not_created_v1';
   cancelAbandonResumeState: 'not_created_v1';
   stopCompletionState: 'not_proof_v1';
-  runtimeAcceptanceState: 'no_go_v1';
+  runtimeAcceptanceState: 'no_go_v1' | 'go_v1';
   queueState: 'not_created_v1';
   autoSendState: 'prohibited_v1';
   pointerAdvancementState: 'prohibited_v1';

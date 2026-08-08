@@ -16,6 +16,7 @@ import {
   routePromptEnhancement,
   type PromptEnhancementRouteInput,
 } from './routing-taxonomy.js';
+import { describePromptEnhancementSequencePlanV1 } from './routing-taxonomy.js';
 
 function routeInput(overrides: Partial<PromptEnhancementRouteInput>): PromptEnhancementRouteInput {
   return {
@@ -1020,5 +1021,37 @@ describe('prompt-enhancement routing and taxonomy', () => {
     expect(result.contractDecision.routeEvidence).toContain('ds_delivery_gate:freq_once_per_session');
     expect(result.contractDecision.routeEvidence).toContain('source_only_hard_fact:hard_fact:source-only-no-popup-authority');
     expect(result.contractDecision.routeEvidence).toContain('sanitization_state:not_required');
+  });
+});
+
+describe('describePromptEnhancementSequencePlanV1 (Sequence-plan summary fix 2026-08-07 — display only)', () => {
+  it('and-aware split: the live multi-intent example counts 2 points with fix + build labels', () => {
+    const plan = describePromptEnhancementSequencePlanV1(
+      'Fix the failing payment test and add a rate limiter to the login endpoint.',
+    );
+    expect(plan.pointCount).toBe(2);
+    expect(plan.roleLabels).toEqual(['fix', 'build']);
+  });
+
+  it('a multi-point same-family list dedupes to ONE approved label', () => {
+    const plan = describePromptEnhancementSequencePlanV1(
+      'Build the whole recurring-billing flow: schema, cron job, email sender, and the dashboard widget - do it as one sequence.',
+    );
+    expect(plan.pointCount).toBeGreaterThanOrEqual(4);
+    expect(plan.roleLabels).toEqual(['build']); // deduped, fixed vocabulary only
+  });
+
+  it('a point matching no family contributes count but NO label (never raw text)', () => {
+    const plan = describePromptEnhancementSequencePlanV1('Fix the login bug, document the outcome');
+    expect(plan.pointCount).toBe(2);
+    expect(plan.roleLabels).toEqual(['fix']); // 'document the outcome' matches no family -> no label
+    for (const label of plan.roleLabels) {
+      expect(['fix', 'review', 'refactor', 'plan', 'build']).toContain(label);
+    }
+  });
+
+  it('single-task prompt: 1 point, remaining would be 0', () => {
+    const plan = describePromptEnhancementSequencePlanV1('Fix the failing payment test.');
+    expect(plan.pointCount).toBe(1);
   });
 });
