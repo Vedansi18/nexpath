@@ -72,6 +72,14 @@ let watcher: ChatHistoryWatcher | undefined;
 let advisoryPoller: AdvisoryPoller | undefined;
 let pePoller: PePoller | undefined;
 let logChannel: vscode.OutputChannel | undefined;
+// P11 cross-confirm fix (Late-ACK ordering gap): chat-history-watcher.ts fires
+// its onEvent callback without awaiting the previous handler (fire-and-forget),
+// so two checkPeOrigin calls for two different turns can be in flight at once.
+// Without this, a slower-resolving OLDER turn's read could publish AFTER an
+// already-published NEWER turn's read, silently replacing the visible body
+// with a stale one. Tracks the highest `createdAt` ever published — same
+// dedup idiom pe-poller.ts already uses, never trusts row `status`.
+let peLastPublishedCreatedAt = -Infinity;
 /** PE-scoped typed-origin echo guard (P8). Fresh per activation, matching `watcher`. */
 let peInjectedRecordStore: ReturnType<typeof createInjectedRecordStore> | undefined;
 
@@ -619,8 +627,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       let renderThrew = false;
       try {
         const pending = await readPendingPromptEnhancement(projectRoot);
-        parsed = pending ? parsePromptEnhancementExtensionPayloadV1(pending.resultJson) : null;
-        if (parsed) peViewProvider?.publishPayload(parsed);
+        if (pending) {
+          parsed = parsePromptEnhancementExtensionPayloadV1(pending.resultJson);
+          if (parsed) {
+            if (pending.createdAt >= peLastPublishedCreatedAt) {
+              peLastPublishedCreatedAt = pending.createdAt;
+              peViewProvider?.publishPayload(parsed);
+            } else {
+              log(`[nexpath] PE publish suppressed: a newer turn's payload is already visible (createdAt ${pending.createdAt} < ${peLastPublishedCreatedAt})`);
+            }
+          }
+        }
       } catch {
         renderThrew = true;
       }
@@ -717,6 +734,7 @@ export function deactivate(): void {
   viewProvider = undefined;
   peViewProvider = undefined;
   peInjectedRecordStore = undefined;
+  peLastPublishedCreatedAt = -Infinity;
   logChannel = undefined;
 }
 

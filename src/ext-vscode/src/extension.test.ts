@@ -721,6 +721,57 @@ describe('activate', () => {
       expect(mockReadPendingPromptEnhancement).toHaveBeenCalledTimes(1);
     });
 
+    it('checkPeOrigin: a slower-resolving OLDER turn never overwrites an already-published NEWER turn\'s payload (Late-ACK ordering gap, found + fixed on P11 cross-confirm)', async () => {
+      // chat-history-watcher.ts fires onEvent without awaiting the previous
+      // handler (fire-and-forget), so two checkPeOrigin calls for two
+      // different turns can genuinely be in flight at once. Without the
+      // createdAt guard, a slower-resolving OLDER read could publish AFTER an
+      // already-published NEWER one, silently replacing the visible body.
+      mockIsPeOriginTurn.mockResolvedValue(true);
+      let resolveOlder!: (v: unknown) => void;
+      const olderPromise = new Promise((resolve) => { resolveOlder = resolve; });
+      const newerResultJson = JSON.stringify({
+        enhancementId: 'enh-2', validationDecisionId: 'vd-2',
+        uiView: { body: { text: 'the newer body', currentBodyId: 'body-2', bodyRevision: 1, sendPolicy: 'send_current', actionLoadingState: 'idle', fallbackMode: 'none' }, actions: [] },
+      });
+      mockReadPendingPromptEnhancement
+        .mockImplementationOnce(() => olderPromise as never)
+        .mockImplementationOnce(async () => ({
+          id: 2, projectRoot: '/proj', sessionId: 's1', promptCount: 1,
+          status: 'pending', createdAt: 1000, requestJson: '{}', resultJson: newerResultJson,
+        }));
+      await activateWithWatcher();
+      const provider = getPeViewProvider() as unknown as { getCurrentPayload: () => { currentBodyId: string } | null };
+
+      const olderCall = pipelineDeps().checkPeOrigin!(makeEvent({ prompt: 'older turn prompt' }));
+      const newerCall = pipelineDeps().checkPeOrigin!(makeEvent({ prompt: 'newer turn prompt' }));
+      await newerCall;
+      expect(provider.getCurrentPayload()?.currentBodyId).toBe('body-2'); // newer turn correctly visible first
+
+      logSpy.mockClear();
+      resolveOlder({
+        id: 1, projectRoot: '/proj', sessionId: 's1', promptCount: 1,
+        status: 'pending', createdAt: 0, requestJson: '{}', resultJson: validResultJson,
+      });
+      await olderCall;
+      // Fixed: the older turn's late-resolving read is suppressed, not published.
+      expect(provider.getCurrentPayload()?.currentBodyId).toBe('body-2');
+      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('PE publish suppressed'));
+    });
+
+    it('checkPeOrigin: a row with the SAME createdAt as the last published one is still published (idempotent re-read, not treated as stale)', async () => {
+      mockIsPeOriginTurn.mockResolvedValue(true);
+      mockReadPendingPromptEnhancement.mockResolvedValue({
+        id: 1, projectRoot: '/proj', sessionId: 's1', promptCount: 1,
+        status: 'pending', createdAt: 500, requestJson: '{}', resultJson: validResultJson,
+      });
+      await activateWithWatcher();
+      const provider = getPeViewProvider() as unknown as { getCurrentPayload: () => { currentBodyId: string } | null };
+      await pipelineDeps().checkPeOrigin!(makeEvent());
+      await pipelineDeps().checkPeOrigin!(makeEvent());
+      expect(provider.getCurrentPayload()?.currentBodyId).toBe('body-1');
+    });
+
     it('injectPeResult: on success, logs "inserted" and injects via the clipboard-free chatInputInject only', async () => {
       mockChatInputInject.mockResolvedValueOnce(true);
       await activateWithWatcher();
