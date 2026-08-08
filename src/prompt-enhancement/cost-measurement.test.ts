@@ -11,6 +11,12 @@ function resultWith(
   planned: number,
   used: number,
   failure?: { fallbackReason?: string; providerFailureState?: string },
+  // TI-3.3 / TI-3.2: reporting-only fields the emitter reads straight off the result.
+  fallbackReport?: {
+    deterministicFallbackApplied?: boolean;
+    preSubstitutionAuthorityEscalationState?: string;
+    compositionFallbackReasonCodes?: readonly string[];
+  },
 ): PromptEnhancementPrepareResultV1 {
   return {
     enhancementId: 'pe:req-1',
@@ -21,6 +27,7 @@ function resultWith(
       usedCallCount: used,
       ...(failure ?? {}),
     } as Parameters<typeof buildPromptEnhancementCostVisibilityMetadataV1>[1]),
+    ...(fallbackReport ?? {}),
   } as unknown as PromptEnhancementPrepareResultV1;
 }
 
@@ -94,6 +101,53 @@ describe('emitPromptEnhancementCostObservabilityV1 (E9 — surface emission)', (
     expect(sink2.debug).toHaveBeenCalledWith('prompt_enhancement_cost_measurement', expect.objectContaining({
       callVisibilityMode: 'deterministic',
       providerFailureState: 'none',
+    }));
+  });
+
+  it('TI-3.3: a blocked-then-silently-replaced body logs distinctly from a clean run', () => {
+    // Blocked LLM body → deterministic substitution fired: the emitted safetySummary describes the
+    // replacement, so the ONLY trace of the block is these reporting fields.
+    const sink = { debug: vi.fn(), warn: vi.fn() };
+    emitPromptEnhancementCostObservabilityV1(
+      resultWith('llm_wording', 1, 1, undefined, {
+        deterministicFallbackApplied: true,
+        preSubstitutionAuthorityEscalationState: 'invalid_non_sendable',
+      }),
+      'prepare',
+      sink,
+    );
+    expect(sink.debug).toHaveBeenCalledWith('prompt_enhancement_cost_measurement', expect.objectContaining({
+      callVisibilityMode: 'llm_wording',
+      deterministicFallbackApplied: true,
+      preSubstitutionAuthorityEscalationState: 'invalid_non_sendable',
+    }));
+    // A clean llm_wording run (no substitution) stays visibly different: false + undefined verdict.
+    const sink2 = { debug: vi.fn(), warn: vi.fn() };
+    emitPromptEnhancementCostObservabilityV1(resultWith('llm_wording', 1, 1), 'prepare', sink2);
+    expect(sink2.debug).toHaveBeenCalledWith('prompt_enhancement_cost_measurement', expect.objectContaining({
+      deterministicFallbackApplied: false,
+      preSubstitutionAuthorityEscalationState: undefined,
+    }));
+  });
+
+  it('TI-3.2: surfaces the compose-layer fallback reason codes the public diagnostics genericize away', () => {
+    // The draft-rejection cause names WHICH of six rules refused the body — a debugger-free trace.
+    const sink = { debug: vi.fn(), warn: vi.fn() };
+    emitPromptEnhancementCostObservabilityV1(
+      resultWith('fallback_no_llm', 1, 1, undefined, {
+        compositionFallbackReasonCodes: ['deterministic_fallback:invalid_output:unresolved_placeholder'],
+      }),
+      'prepare',
+      sink,
+    );
+    expect(sink.debug).toHaveBeenCalledWith('prompt_enhancement_cost_measurement', expect.objectContaining({
+      compositionFallbackReasonCodes: ['deterministic_fallback:invalid_output:unresolved_placeholder'],
+    }));
+    // A clean run (no compose-layer fallback) logs an empty list — visibly different.
+    const sink2 = { debug: vi.fn(), warn: vi.fn() };
+    emitPromptEnhancementCostObservabilityV1(resultWith('llm_wording', 1, 1), 'prepare', sink2);
+    expect(sink2.debug).toHaveBeenCalledWith('prompt_enhancement_cost_measurement', expect.objectContaining({
+      compositionFallbackReasonCodes: [],
     }));
   });
 

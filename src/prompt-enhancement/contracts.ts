@@ -1674,6 +1674,26 @@ export interface PromptEnhancementPrepareResultV1 {
   delivery: PromptEnhancementDeliveryMetadataV1;
   ownership: PromptEnhancementOwnershipMetadataV1;
   diagnostics: readonly PromptEnhancementPublicDiagnosticV1[];
+  // TI-3.3 (2026-08-08) — observability-only. Set ONLY when the blocked-body deterministic
+  // substitution fired (facade recompose-drop): the emitted `safetySummary`/`currentBody` then
+  // describe the POST-substitution deterministic body, so without this a blocked-then-silently-
+  // replaced run is indistinguishable from a clean one. `preSubstitutionAuthorityEscalationState`
+  // is the safety verdict the LLM-worded body carried BEFORE it was replaced. Additive + optional
+  // → PE/PEF behaviour, disposition, and the emitted safetySummary stay byte-identical; a reader
+  // may ignore these fields entirely. They NEVER carry body text.
+  deterministicFallbackApplied?: boolean;
+  preSubstitutionAuthorityEscalationState?: PromptEnhancementValidationStatus;
+  // TI-3.2 (2026-08-08) — observability-only. The compose-layer fallback diagnostic reason CODES
+  // that the public `diagnostics` array genericizes away (`diagnosticsFor` drops `reasonCode`,
+  // `rawReasonValuesExcluded`): the draft-rejection / deterministic-fallback cause
+  // `deterministic_fallback:<runtimeState>:<draftRejectionReason>` (one of six causes, not just the
+  // stage) and the blocked-body substitution marker `llm_final_body_blocked_deterministic_fallback`.
+  // Typed reason CODES only (composer runtime state + rejection enum) — NEVER body text or raw user
+  // content, the same class as `callAndVisibilityMetadata.fallbackReason` already on this result.
+  // Present only when a compose-layer fallback occurred; additive + optional → PE/PEF behaviour and
+  // the emitted contract stay byte-identical. (There is no partial-draft-drop code: the recompose
+  // drops ALL drafts, never a subset — so no partial-drop reason exists to report.)
+  compositionFallbackReasonCodes?: readonly string[];
 }
 
 export type PromptEnhancementPrepareFacadeV1 = (

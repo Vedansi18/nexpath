@@ -13,6 +13,7 @@ import {
   type PromptEnhancementPublicTrustCueV1,
   type PromptEnhancementSectionFeedbackViewV1,
   type PromptEnhancementUiViewPayloadV1,
+  type PromptEnhancementValidationStatus,
   type PromptEnhancementWhyHelpV1,
 } from './contracts.js';
 import {
@@ -274,6 +275,11 @@ async function prepare(
       : undefined,
   });
   let safety = validateComposed(composed);
+  // TI-3.3 (2026-08-08) — observability-only capture of the deterministic substitution below. Set
+  // ONLY if the recompose-drop actually replaces a blocked LLM body; records the verdict that body
+  // carried BEFORE `safety` is reassigned (the emitted safetySummary describes the replacement).
+  let deterministicFallbackApplied = false;
+  let preSubstitutionAuthorityEscalationState: PromptEnhancementValidationStatus | undefined;
   // Blocked-popup fix part 2 (2026-08-07) — deterministic-fallback safety net. The composer's
   // confirmation-parity guard removes the confirmation-absence block, but an accepted LLM draft
   // can still hard-block the FINAL body through the other blocking families the draft filter
@@ -303,10 +309,16 @@ async function prepare(
           { category: 'fallback_or_no_popup' as const, reasonCode: 'llm_final_body_blocked_deterministic_fallback' },
         ],
       };
+      // Capture the pre-substitution verdict BEFORE `safety` is overwritten by the replacement's.
+      deterministicFallbackApplied = true;
+      preSubstitutionAuthorityEscalationState = safety.safetySummary.authorityEscalationState;
       safety = recomposedSafety;
     }
   }
-  return buildResult(request, enhancementId, route, planning, composed, safety, noPopup);
+  return buildResult(request, enhancementId, route, planning, composed, safety, noPopup, {
+    deterministicFallbackApplied,
+    preSubstitutionAuthorityEscalationState,
+  });
 }
 
 function buildResult(
@@ -319,6 +331,12 @@ function buildResult(
   // Effective no-popup = route.noPopup OR the DR2-G1 gate skip (no useful Source-A
   // survivor / weak evidence). Both collapse to the same not-applicable disposition.
   noPopup: boolean,
+  // TI-3.3 (2026-08-08) — observability-only. Present (applied === true) only when the blocked-body
+  // deterministic substitution fired; carries the pre-substitution verdict for the log/result trace.
+  fallbackReport?: {
+    deterministicFallbackApplied: boolean;
+    preSubstitutionAuthorityEscalationState: PromptEnhancementValidationStatus | undefined;
+  },
 ): PromptEnhancementPrepareResultV1 {
   const currentBody: PromptEnhancementCurrentBodyV1 = {
     ...composed.currentBody,
@@ -347,6 +365,17 @@ function buildResult(
     ? { ...composed.composerBoundary, renderedPromptBody: composed.currentBody.originalPromptText }
     : composed.composerBoundary;
   const diagnostics = diagnosticsFor(enhancementId, [...composed.diagnostics, ...safety.publicDiagnostics]);
+  // TI-3.2 (2026-08-08) — capture the compose-layer fallback reason CODES BEFORE diagnosticsFor
+  // genericizes them for the public array (which drops reasonCode). Reporting-only; typed codes only.
+  // Scoped to EXACTLY the two codes TI-3.2 names — the draft-rejection cause and the substitution
+  // marker — not every `fallback_or_no_popup` code (the no-popup / action-preserved codes are a
+  // different concern and out of this fix's scope).
+  const compositionFallbackReasonCodes = composed.diagnostics
+    .filter((diagnostic) =>
+      diagnostic.category === 'fallback_or_no_popup'
+      && (diagnostic.reasonCode.startsWith('deterministic_fallback:')
+        || diagnostic.reasonCode === 'llm_final_body_blocked_deterministic_fallback'))
+    .map((diagnostic) => diagnostic.reasonCode);
   const composerCallVisibility = composed.composerBoundary.inputContract.callVisibilityState;
   const callAndVisibilityMetadata = {
     ...composerCallVisibility,
@@ -461,6 +490,16 @@ function buildResult(
       excludesPrivatePlanningLeakage: true,
     },
     diagnostics,
+    // TI-3.3 (2026-08-08) — reporting-only; emitted ONLY when the deterministic substitution fired.
+    ...(fallbackReport?.deterministicFallbackApplied
+      ? {
+          deterministicFallbackApplied: true,
+          preSubstitutionAuthorityEscalationState: fallbackReport.preSubstitutionAuthorityEscalationState,
+        }
+      : {}),
+    // TI-3.2 (2026-08-08) — reporting-only; emitted ONLY when a compose-layer fallback produced a
+    // reason code (a clean deterministic body composes as 'generated', so this stays absent).
+    ...(compositionFallbackReasonCodes.length > 0 ? { compositionFallbackReasonCodes } : {}),
   };
 }
 
