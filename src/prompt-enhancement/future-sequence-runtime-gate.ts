@@ -57,8 +57,16 @@ export const PROMPT_ENHANCEMENT_FUTURE_SEQUENCE_RUNTIME_REQUIRED_GATES_V1 = REQU
 export function evaluatePromptEnhancementFutureSequenceRuntimeGateV1(
   input: PromptEnhancementFutureSequenceRuntimeGateInputV1,
 ): PromptEnhancementFutureSequenceRuntimeGateResultV1 {
+  const gateCodes = missingGateCodes(input.evidence);
+  // Activation authority (D3): the gate is EVIDENCE-gated — allowed only when every evidence flag is
+  // present. Fail-closed by construction: any missing evidence keeps it blocked, and the production
+  // Stop-hook launcher supplies NO evidence, so it stays blocked in production. (Event/handoff
+  // validity remain in reasonCodes as diagnostics; the launcher validates a real event + v1-safe
+  // handoff before it ever supplies evidence — Phase C.)
+  const allowed = gateCodes.length === 0;
+
   const reasonCodes = unique([
-    'future_sequence_runtime_gated_v1',
+    allowed ? 'future_sequence_runtime_allowed_v1' : 'future_sequence_runtime_gated_v1',
     OPERATION_REASON_CODES[input.operation],
     ...handoffReasonCodes(input),
     ...eventReasonCodes(input),
@@ -70,8 +78,8 @@ export function evaluatePromptEnhancementFutureSequenceRuntimeGateV1(
   return {
     schemaVersion: PROMPT_ENHANCEMENT_CONTRACT_VERSION,
     operation: input.operation,
-    allowed: false,
-    status: 'blocked_future_sequence_runtime_v1',
+    allowed,
+    status: allowed ? 'allowed_future_sequence_runtime_v1' : 'blocked_future_sequence_runtime_v1',
     fallbackMode: 'current_or_original_fallback_no_runtime',
     sequenceIdentityState: 'not_created_v1',
     acceptedStartOrderState: 'not_created_v1',
@@ -79,7 +87,7 @@ export function evaluatePromptEnhancementFutureSequenceRuntimeGateV1(
     customPromptPathState: 'not_created_v1',
     cancelAbandonResumeState: 'not_created_v1',
     stopCompletionState: 'not_proof_v1',
-    runtimeAcceptanceState: 'no_go_v1',
+    runtimeAcceptanceState: allowed ? 'go_v1' : 'no_go_v1',
     queueState: 'not_created_v1',
     autoSendState: 'prohibited_v1',
     pointerAdvancementState: 'prohibited_v1',
@@ -90,7 +98,7 @@ export function evaluatePromptEnhancementFutureSequenceRuntimeGateV1(
     handoffRuntimeAuthorityState: handoffRuntimeAuthorityState(input.handoffMetadata),
     legacyAuthoritySignalsRejected: true,
     stopOrResponseEventAuthorityState: 'non_proof_no_runtime',
-    missingGateCodes: missingGateCodes(input.evidence),
+    missingGateCodes: gateCodes,
     reasonCodes,
   };
 }
@@ -110,12 +118,15 @@ export function assertPromptEnhancementFutureSequenceRuntimeBlockedV1(
 function missingGateCodes(
   evidence: PromptEnhancementFutureSequenceRuntimeGateEvidenceV1 | undefined,
 ): readonly PromptEnhancementFutureSequenceRuntimeMissingGateCodeV1[] {
-  return unique([
-    ...EVIDENCE_TO_GATE_CODE
+  // D3 (2026-08-08): the always-appended `current_v1_runtime_implementation_no_go` backstop is
+  // removed — the runtime implementation now exists (P1–P4). The gate is now purely evidence-gated:
+  // it passes only when every evidence flag is present. In production no caller supplies full
+  // evidence, so this list is non-empty and the gate stays blocked (fail-closed).
+  return unique(
+    EVIDENCE_TO_GATE_CODE
       .filter(([field]) => evidence?.[field] !== true)
       .map(([, code]) => code),
-    'current_v1_runtime_implementation_no_go',
-  ]);
+  );
 }
 
 function handoffReasonCodes(input: PromptEnhancementFutureSequenceRuntimeGateInputV1): readonly string[] {
