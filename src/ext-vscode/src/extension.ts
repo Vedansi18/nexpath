@@ -1,5 +1,7 @@
 import * as vscode from 'vscode';
 import { existsSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { toSafeErrorRecord } from './diagnostics.js';
 import { CONSENT_KEY, showOnboardingIfNeeded } from './onboarding.js';
 import {
   NexpathDecisionSessionViewProvider,
@@ -95,6 +97,18 @@ let peInjectedRecordStore: ReturnType<typeof createInjectedRecordStore> | undefi
 function log(line: string): void {
   console.log(line);
   logChannel?.appendLine(`[${new Date().toISOString()}] ${line}`);
+}
+
+/**
+ * Short, non-reversible stand-in for an identifier that must not be logged raw.
+ *
+ * Session ids are host-generated and can appear in chat storage alongside the
+ * user's content, so they are correlatable but not ours to publish. Hashing
+ * keeps log lines joinable across the Output channel, the dev console and
+ * `~/.nexpath/nexpath.log` without writing the identifier itself.
+ */
+function fingerprint(value: string): string {
+  return createHash('sha256').update(value).digest('hex').slice(0, 12);
 }
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
@@ -399,8 +413,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   try {
     await showOnboardingIfNeeded(context);
   } catch (err) {
-    log(`[nexpath] onboarding failed: ${err instanceof Error ? err.stack ?? err.message : String(err)}`);
-    console.error('[nexpath] onboarding failed:', err);
+    // Was logging `err.stack` into ~/.nexpath/nexpath.log and the raw error to
+    // the dev console — both can carry payload through an attached `cause`.
+    const record = toSafeErrorRecord(err);
+    log(`[nexpath] onboarding failed: ${record.message}`);
+    console.error('[nexpath] onboarding failed:', record);
   }
 
   // 5. Watcher start-up — gated on consent + host being recognised. If the
@@ -682,9 +699,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // console.error continue to pass.
     logger: {
       error: (msg: string, err: unknown) => {
-        const detail = err instanceof Error ? err.message : String(err);
-        log(`${msg} ${detail}`);
-        console.error(msg, err);
+        // Never pass the raw Error: its stack, attached properties and nested
+        // `cause` chain can carry the delivered prompt body or the user's text.
+        const record = toSafeErrorRecord(err);
+        log(`${msg} ${record.message}`);
+        console.error(msg, record);
       },
     },
   });
@@ -697,14 +716,23 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // prompts). Low latency still comes from fs.watch when it does fire.
     pollMs: 2000,
     onEvent: (event) => {
-      log(`[nexpath] watcher event: prompt="${event.prompt.slice(0, 80)}" raw_session_id=${event.rawSessionId} extractor=${event.extractorId}`);
+      // The prompt text itself is never logged — this line used to write the
+      // first 80 chars of the user's prompt to the Output channel, the dev
+      // console and ~/.nexpath/nexpath.log. Only non-reversible identifiers and
+      // a length remain, which is enough to correlate an event across the three
+      // sinks without putting the prompt on disk.
+      log(
+        `[nexpath] watcher event: prompt_len=${event.prompt.length} ` +
+          `session=${fingerprint(event.rawSessionId)} extractor=${event.extractorId}`,
+      );
       // The watcher's onEvent is sync-fire-and-forget; the handler returns
       // a Promise we deliberately don't await.
       void handleChatEvent(event);
     },
     onError: (err) => {
-      log(`[nexpath] watcher error: ${err.message}`);
-      console.error('[nexpath] watcher error:', err);
+      const record = toSafeErrorRecord(err);
+      log(`[nexpath] watcher error: ${record.message}`);
+      console.error('[nexpath] watcher error:', record);
     },
     onSchemaUnknown: ({ path, observedSampleKeys }) => {
       log(`[nexpath] schema unknown for ${path}; sample keys: ${observedSampleKeys.slice(0, 3).join(', ')}`);

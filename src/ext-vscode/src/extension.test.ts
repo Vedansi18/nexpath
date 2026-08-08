@@ -922,7 +922,14 @@ describe('activate', () => {
     mockShowOnboarding.mockRejectedValueOnce(new Error('onboarding boom'));
     mockDetectHost.mockReturnValueOnce('cursor');
     await expect(activate(makeCtx(true) as never)).resolves.toBeUndefined();
+    // BUG-VEDANSI-AR9-G1 vector 4: the raw Error is no longer passed to
+    // console.error — a closed, serializable record is, so no stack or nested
+    // `cause` payload can reach the dev console or the log file.
     expect(errorSpy).toHaveBeenCalledWith(
+      '[nexpath] onboarding failed:',
+      expect.objectContaining({ name: 'Error', message: 'onboarding boom' }),
+    );
+    expect(errorSpy).not.toHaveBeenCalledWith(
       '[nexpath] onboarding failed:',
       expect.any(Error),
     );
@@ -1109,6 +1116,89 @@ describe('activate', () => {
     expect(trackedHandler).toHaveBeenCalledWith(event);
   });
 
+  // ── Watcher event logging: never the prompt text ─────────────────────────
+  // BUG-VEDANSI-AR9-G1 vector 1. This line used to write the first 80 chars of
+  // the user's prompt to the Output channel, the dev console AND
+  // ~/.nexpath/nexpath.log. The routing test above proves the event reaches the
+  // handler; these prove what the event does NOT put into a log sink.
+
+  function watcherEvent(overrides: Record<string, unknown> = {}) {
+    return {
+      prompt: 'ZZQX_PROMPT_MARKER_7741 refactor the auth module',
+      rawSessionId: 'ZZQX_SESSION_MARKER_7741',
+      capturedAt: new Date(0),
+      sourcePath: '/fake/ws/a/state.vscdb',
+      extractorId: 'cursor-v2025-q2',
+      ...overrides,
+    };
+  }
+
+  /** Everything the local `log()` helper wrote during this test. */
+  function loggedLines(): string {
+    return logSpy.mock.calls.map((c) => String(c[0])).join('\n');
+  }
+
+  it('watcher event logging never emits the prompt text', async () => {
+    const opts = await activateWithWatcher();
+    const event = watcherEvent();
+    opts.onEvent(event);
+
+    const written = loggedLines();
+    expect(written).toContain('watcher event:');
+    expect(written).not.toContain('ZZQX_PROMPT_MARKER_7741');
+    expect(written).not.toContain('refactor the auth module');
+  });
+
+  it('watcher event logging never emits the raw session id', async () => {
+    const opts = await activateWithWatcher();
+    opts.onEvent(watcherEvent());
+
+    expect(loggedLines()).not.toContain('ZZQX_SESSION_MARKER_7741');
+  });
+
+  it('watcher event logging keeps the correlatable fields', async () => {
+    const opts = await activateWithWatcher();
+    const event = watcherEvent();
+    opts.onEvent(event);
+
+    const written = loggedLines();
+    // Length, not content — enough to correlate without storing the prompt.
+    expect(written).toContain(`prompt_len=${event.prompt.length}`);
+    expect(written).toContain('extractor=cursor-v2025-q2');
+    // 12 lowercase hex characters, i.e. a truncated digest and not the id.
+    expect(written).toMatch(/session=[0-9a-f]{12}\b/);
+  });
+
+  it('the session fingerprint is stable for the same id and differs across ids', async () => {
+    const readFingerprint = (): string => {
+      const m = /session=([0-9a-f]{12})\b/.exec(loggedLines());
+      if (!m) throw new Error('no session fingerprint was logged');
+      return m[1]!;
+    };
+
+    const first = await activateWithWatcher();
+    first.onEvent(watcherEvent({ rawSessionId: 'session-A' }));
+    const a1 = readFingerprint();
+
+    logSpy.mockClear();
+    first.onEvent(watcherEvent({ rawSessionId: 'session-A' }));
+    const a2 = readFingerprint();
+
+    logSpy.mockClear();
+    first.onEvent(watcherEvent({ rawSessionId: 'session-B' }));
+    const b = readFingerprint();
+
+    expect(a1).toBe(a2);      // stable → log lines stay joinable
+    expect(a1).not.toBe(b);   // distinguishing → still useful as an identifier
+  });
+
+  it('an empty prompt still logs a zero length rather than nothing', async () => {
+    const opts = await activateWithWatcher();
+    opts.onEvent(watcherEvent({ prompt: '' }));
+
+    expect(loggedLines()).toContain('prompt_len=0');
+  });
+
   it('watcher onSchemaUnknown surfaces a visible info toast with path + observed keys', async () => {
     const opts = await activateWithWatcher();
     opts.onSchemaUnknown({
@@ -1124,9 +1214,14 @@ describe('activate', () => {
 
   it('watcher onError logs to console.error (does not crash the extension)', async () => {
     const opts = await activateWithWatcher();
+    // BUG-VEDANSI-AR9-G1 vector 4: a redacted record replaces the raw Error.
     const watcherErr = new Error('watch boom');
     expect(() => opts.onError(watcherErr)).not.toThrow();
-    expect(errorSpy).toHaveBeenCalledWith('[nexpath] watcher error:', watcherErr);
+    expect(errorSpy).toHaveBeenCalledWith(
+      '[nexpath] watcher error:',
+      expect.objectContaining({ name: 'Error', message: 'watch boom' }),
+    );
+    expect(errorSpy).not.toHaveBeenCalledWith('[nexpath] watcher error:', watcherErr);
   });
 
   // ── Pipeline logger wiring (spawn-error visibility follow-up) ─────────────
@@ -1157,10 +1252,17 @@ describe('activate', () => {
       code: 'ENOENT',
     });
     handlerDeps.logger!.error('[nexpath] spawnAuto failed:', enoent);
+    // BUG-VEDANSI-AR9-G1 vector 4: redacted record, not the raw Error. The
+    // errno code is kept — it is a fixed vocabulary and carries no payload.
     expect(errorSpy).toHaveBeenCalledWith(
       '[nexpath] spawnAuto failed:',
-      enoent,
+      expect.objectContaining({
+        name: 'Error',
+        message: 'spawn nexpath ENOENT',
+        code: 'ENOENT',
+      }),
     );
+    expect(errorSpy).not.toHaveBeenCalledWith('[nexpath] spawnAuto failed:', enoent);
     expect(logSpy).toHaveBeenCalledWith(
       expect.stringContaining('spawn nexpath ENOENT'),
     );

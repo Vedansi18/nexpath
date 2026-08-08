@@ -82,12 +82,115 @@ export class NexpathBinaryNotFoundError extends Error {
   }
 }
 
+/** How the JSON parser failed. Fixed classifications — never payload text. */
+export type MalformedPayloadParseErrorKind =
+  | 'unexpected_token'
+  | 'unexpected_end'
+  | 'unknown';
+
+/**
+ * Redacted description of an unparseable `nexpath stop` payload.
+ *
+ * The stop stdout is `{decision:'block', reason:<body>}`. On the prompt-
+ * enhancement path that `reason` IS the generated body; on the advisory path it
+ * is the user's selected prompt. Both are **delivery-only**: they may travel
+ * through this channel to be delivered, but must never be copied into a log,
+ * telemetry event, or error payload. So this records the *shape* of the failure
+ * and not one byte of the content.
+ */
+export interface MalformedPayloadShape {
+  /** Payload size in UTF-8 bytes (not characters). */
+  byteLength: number;
+  parseErrorKind: MalformedPayloadParseErrorKind;
+  /** Byte offset the parser reported, when it reported one. */
+  byteOffset?: number;
+}
+
+/**
+ * Classify a parse failure without retaining any payload content.
+ *
+ * The `SyntaxError` message itself is NOT safe to keep: V8 embeds an excerpt of
+ * the offending input in it (`Unexpected token 'o', "…" is not valid JSON`).
+ * Only the fixed prefix is matched, and only the numeric position is extracted.
+ */
+export function describeMalformedPayload(
+  rawStdout: string,
+  err: unknown,
+): MalformedPayloadShape {
+  const message = err instanceof Error ? err.message : '';
+
+  let parseErrorKind: MalformedPayloadParseErrorKind = 'unknown';
+  if (/^Unexpected end of/.test(message)) parseErrorKind = 'unexpected_end';
+  else if (/^(Unexpected token|Expected)/.test(message)) parseErrorKind = 'unexpected_token';
+
+  const positionMatch = /at position (\d+)/.exec(message);
+
+  return {
+    byteLength: Buffer.byteLength(rawStdout, 'utf8'),
+    parseErrorKind,
+    ...(positionMatch ? { byteOffset: Number(positionMatch[1]) } : {}),
+  };
+}
+
 export class NexpathMalformedPayloadError extends Error {
-  constructor(public rawStdout: string, public override cause?: Error) {
+  /**
+   * The redacted failure shape. This class deliberately does NOT keep the raw
+   * stdout or the underlying `SyntaxError` as `cause` — either would carry the
+   * delivered body into anything that logs or serializes this error.
+   */
+  readonly shape: MalformedPayloadShape;
+
+  constructor(shape: MalformedPayloadShape) {
+    const at = shape.byteOffset === undefined ? '' : ` at byte ${shape.byteOffset}`;
     super(
-      `nexpath stop output is not valid JSON. First 200 chars: ${rawStdout.slice(0, 200)}`,
+      `nexpath stop output is not valid JSON ` +
+        `(${shape.byteLength} bytes, ${shape.parseErrorKind}${at})`,
     );
     this.name = 'NexpathMalformedPayloadError';
+    this.shape = shape;
+  }
+}
+
+/**
+ * Redacted description of a child `nexpath` process that exited non-zero.
+ *
+ * The child's stderr is NOT safe to quote. `NEXPATH_DEBUG=1` routes verbose
+ * pipeline logging there, and Layer C writes prompt-related lines of its own
+ * (`stop.ts` "Prompt sent to …"). Embedding it put up to the 64 KB cap of that
+ * output into an Error message, which the extension then logged. Same rule as
+ * the malformed-payload path: record the shape, never the content.
+ */
+export interface ChildFailureShape {
+  /** Process exit code, or null when the child was killed by a signal. */
+  exitCode: number | null;
+  /** stderr size in UTF-8 bytes, capped as accumulated. Text never retained. */
+  stderrByteLength: number;
+}
+
+export function describeChildFailure(
+  exitCode: number | null,
+  stderr: string,
+): ChildFailureShape {
+  return { exitCode, stderrByteLength: Buffer.byteLength(stderr, 'utf8') };
+}
+
+/**
+ * A spawned `nexpath` command exited non-zero.
+ *
+ * Deliberately carries no stderr text — only the exit code and how many bytes
+ * were produced, which is enough to tell "failed silently" from "failed loudly"
+ * without publishing what was said.
+ */
+export class NexpathChildExitError extends Error {
+  readonly shape: ChildFailureShape;
+
+  constructor(command: 'auto' | 'stop', shape: ChildFailureShape) {
+    super(
+      `nexpath ${command} exited with code ${shape.exitCode} ` +
+        `(stderr ${shape.stderrByteLength} bytes, not captured)`,
+    );
+    this.name = 'NexpathChildExitError';
+    this.shape = shape;
   }
 }
 
@@ -201,11 +304,7 @@ export function spawnAuto(
         resolve();
         return;
       }
-      reject(
-        new Error(
-          `nexpath auto exited with code ${code}. stderr: ${stderr.trim()}`,
-        ),
-      );
+      reject(new NexpathChildExitError('auto', describeChildFailure(code, stderr)));
     });
 
     child.stdin?.end(
@@ -295,7 +394,10 @@ export function spawnStop(
             if (code === 0) { resolve(null); return; }
           } catch (err) {
             // Non-JSON on a CLEAN exit is a genuine contract violation.
-            if (code === 0) { reject(new NexpathMalformedPayloadError(trimmed, err as Error)); return; }
+            if (code === 0) {
+              reject(new NexpathMalformedPayloadError(describeMalformedPayload(trimmed, err)));
+              return;
+            }
             // Non-JSON on a NON-zero exit is a truncated payload from a crash —
             // fall through to store recovery below.
           }
@@ -316,9 +418,7 @@ export function spawnStop(
         }
 
         // 3. Genuine failure with nothing to recover.
-        reject(
-          new Error(`nexpath stop exited with code ${code}. stderr: ${stderr.trim()}`),
-        );
+        reject(new NexpathChildExitError('stop', describeChildFailure(code, stderr)));
       })();
     });
 
