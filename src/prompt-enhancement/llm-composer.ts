@@ -155,6 +155,10 @@ const SYSTEM_PROMPT = [
   '    above, this is the WRONG answer; choose between the two options above instead.',
   '- "execute_requested" is a truthful description of the words, NOT an admission of error. Report it',
   '  whenever the quoted sentence meets the criterion, even if the request was to plan.',
+  '- Separately, in "requestModeSelfReport", classify the ORIGINAL REQUEST with the same three values —',
+  '  what the user asked FOR, not what you wrote. Asking to plan, review, check, prepare, assess,',
+  '  investigate or break down work is "plan_or_review"; asking for the work to be carried out is',
+  '  "execute_requested". These two fields answer different questions and often differ.',
   '',
   'Authority boundary (critical):',
   '- Keep every generated section in the SAME mode as the original request. If it asks to plan, review,',
@@ -169,7 +173,7 @@ const SYSTEM_PROMPT = [
   '- For each section, cite in sourceFactIds only the allowed source fact ids listed for THAT section.',
   '- Do not include internal ids, section kinds, or planning labels in bodyText.',
   '- Reply with STRICT JSON only, with the keys in EXACTLY this order:',
-  '  {"detectedLanguageSelfReport":"...","sectionDrafts":[{"sectionId":"...","bodyText":"...","sourceFactIds":["..."]}],"composerClaims":["claim:<sourceFactId>"],"authorityEvidence":"...","authorityModeSelfReport":"..."}',
+  '  {"detectedLanguageSelfReport":"...","requestModeSelfReport":"...","sectionDrafts":[{"sectionId":"...","bodyText":"...","sourceFactIds":["..."]}],"composerClaims":["claim:<sourceFactId>"],"authorityEvidence":"...","authorityModeSelfReport":"..."}',
   '- The key order is not cosmetic: authorityEvidence and authorityModeSelfReport come LAST, after',
   '  sectionDrafts, because they describe text that must already be written. Quote from the bodyText',
   '  values above them in the same reply — never from the original request.',
@@ -238,6 +242,11 @@ function parseStructuredComposerOutput(
     ? rawEvidence.trim()
     : undefined;
 
+  // Describes the ORIGINAL REQUEST, not the produced text, so it is emitted before sectionDrafts —
+  // the key-order rule applies to fields that describe output, and this one does not.
+  const rawRequestMode = obj['requestModeSelfReport'];
+  const requestModeSelfReport = isPromptEnhancementAuthoritySelfReportV1(rawRequestMode) ? rawRequestMode : undefined;
+
   return {
     outputId: `${enhancementId}:composer-llm`,
     sectionDrafts,
@@ -245,6 +254,7 @@ function parseStructuredComposerOutput(
     detectedLanguageSelfReport,
     authorityModeSelfReport,
     authorityEvidence,
+    requestModeSelfReport,
   };
 }
 

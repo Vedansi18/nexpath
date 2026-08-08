@@ -30,6 +30,26 @@ export function isPromptEnhancementAuthoritySelfReportV1(
   return value === 'plan_or_review' || value === 'execute_requested' || value === 'observe_or_literal';
 }
 
+/**
+ * Was the original request plan/review-shaped, according to EITHER source?
+ *
+ * The word-list read of the original prompt used to decide this alone — and it is the same fragile
+ * mechanism that misfires on the generated body, only applied one layer up. When it misread the
+ * request, this gate skipped itself entirely and the drift was caught downstream by the deterministic
+ * body rule. That rule has since been narrowed to a floor, so the miss would now go uncaught.
+ *
+ * Accepting the model's own reading as an alternative source closes that: either can establish
+ * plan/review intent. This only ever makes the gate RUN more often, which can only cost a retry — it
+ * cannot clear a verdict, and it cannot stop the deterministic gate from running.
+ */
+export function promptEnhancementRequestIsPlanShapedV1(
+  originalPromptText: string,
+  output: PromptEnhancementStructuredComposerOutputV1,
+): boolean {
+  return promptEnhancementAuthorityModeForTextV1(originalPromptText) === 'plan_or_review'
+    || output.requestModeSelfReport === 'plan_or_review';
+}
+
 export function isPromptEnhancementAuthorityConsistentV1(
   originalPromptText: string,
   output: PromptEnhancementStructuredComposerOutputV1,
@@ -37,7 +57,6 @@ export function isPromptEnhancementAuthorityConsistentV1(
   // No self-report (older/injected clients) is not treated as drift — the deterministic gate still
   // runs, so a missing field must not cost the caller its retry budget.
   if (output.authorityModeSelfReport === undefined) return true;
-  const originalMode = promptEnhancementAuthorityModeForTextV1(originalPromptText);
-  if (originalMode !== 'plan_or_review') return true;
+  if (!promptEnhancementRequestIsPlanShapedV1(originalPromptText, output)) return true;
   return output.authorityModeSelfReport !== 'execute_requested';
 }

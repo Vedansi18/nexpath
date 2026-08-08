@@ -263,6 +263,15 @@ async function prepare(
     // metadata already derived it correctly for every mode, including the provider-failure states
     // ('unavailable_by_provider_api'), so read it from there instead of re-deriving here.
     optionalCallAvailabilityState: candidate.composerBoundary.inputContract.callVisibilityState.optionalCallAvailabilityState,
+    // Only meaningful while the candidate still carries the composer's wording. Once the drafts are
+    // dropped below, the body is the deterministic renderer's and the composer's verdict no longer
+    // describes it — passing it on would block a body the model never wrote.
+    composerAuthoritySelfReport: candidate.callVisibilityMode === 'llm_wording'
+      ? {
+        generatedMode: structuredComposerOutput?.authorityModeSelfReport,
+        requestMode: structuredComposerOutput?.requestModeSelfReport,
+      }
+      : undefined,
   });
   let safety = validateComposed(composed);
   // Blocked-popup fix part 2 (2026-08-07) — deterministic-fallback safety net. The composer's

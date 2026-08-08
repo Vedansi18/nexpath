@@ -1203,4 +1203,159 @@ describe('authority escalation is sentence-scoped, not whole-body keyword matchi
   it('KNOWN TRADE: verb and risk term in adjacent but separate sentences is no longer flagged', () => {
     expect(escalated('Execute the rollback script. The database will return to the prior schema.')).toBe(false);
   });
+
+  /**
+   * Only strong verbs raise an escalation.
+   *
+   * Sentence scoping on its own did not fix the false positives: 11 of the 18 execution verbs also
+   * appear in the risk patterns, so the word satisfied BOTH conditions by itself and the scoping
+   * changed nothing for them. `post` is the clearest case — it is a word boundary away from
+   * `post-migration`, so an ordinary planning phrase escalated while the same sentence written as
+   * "after the migration" passed.
+   */
+  describe('only strong verbs raise an escalation', () => {
+    it('does NOT flag "post-" as a prefix meaning "after"', () => {
+      expect(escalated('I will list specific tests or checks that need to be performed post-migration.')).toBe(false);
+      expect(escalated('Document the rollback steps and confirm them post-deployment.')).toBe(false);
+    });
+
+    // The control that made the defect undeniable: identical meaning, one word apart, opposite verdicts.
+    it('treats "post-migration" and "after the migration" the same way', () => {
+      const a = escalated('List the checks that need to be performed post-migration.');
+      const b = escalated('List the checks that need to be performed after the migration.');
+      expect(a).toBe(b);
+      expect(a).toBe(false);
+    });
+
+    it('does NOT flag weak verbs that planning prose cannot avoid', () => {
+      expect(escalated('Write down the acceptance criteria for the schema change.')).toBe(false);
+      expect(escalated('Apply the review checklist to the migration script.')).toBe(false);
+      // An explicit refusal to act was being read as an instruction to act — the clearest proof the
+      // rule was matching words rather than meaning.
+      expect(escalated('Modify nothing yet; list the database changes we would need.')).toBe(false);
+      expect(escalated('Notify the reviewer once the database plan is ready.')).toBe(false);
+    });
+
+    it('still flags every strong verb paired with a risk term', () => {
+      expect(escalated('Delete the stale rows from the orders database.')).toBe(true);
+      expect(escalated('Run the migration against the production database.')).toBe(true);
+      expect(escalated('Install the new dependency into the production image.')).toBe(true);
+      expect(escalated('Publish the release to production.')).toBe(true);
+    });
+
+    /**
+     * ⚠️ KNOWN, ACCEPTED COVERAGE LOSS — recorded as an executable test so it is never rediscovered
+     * by accident. These now rely on the always-escalate floor where it matches, and otherwise on the
+     * composer's authority self-report. This test asserting `false` is the deliberate record of the
+     * trade; it is NOT a bug to be "fixed" by widening the verb list again, which would restore every
+     * false positive above.
+     */
+    it('KNOWN LOSS: a weak verb with a risk noun no longer escalates deterministically', () => {
+      expect(escalated('Write the new schema.')).toBe(false);
+      expect(escalated('Apply the migration.')).toBe(false);
+    });
+
+    // The floor is unaffected by any of the narrowing above.
+    it('the always-escalate floor is untouched by the strong-verb narrowing', () => {
+      expect(escalated('Then force-push the branch.')).toBe(true);
+      expect(escalated('Run rm -rf on the folder.')).toBe(true);
+      expect(escalated('Drop table orders when finished.')).toBe(true);
+      expect(escalated('Truncate the orders table before the run.')).toBe(true);
+    });
+
+    /**
+     * 🔴 RECORDED DEFECT, NOT AN ACCEPTED TRADE — awaiting an explicit decision, so it is pinned here
+     * rather than left to be rediscovered.
+     *
+     * `ALWAYS_ESCALATE_PATTERN` is documented as the floor that nothing below it can soften, but
+     * `generatedEscalatesAuthority` consults it only AFTER requiring the generated text to read as
+     * `execute_requested`, which is decided by `EXECUTION_VERB`. `reset --hard` and `rewrite history`
+     * are in the floor and in NO execution-verb list, so on their own they never reach the floor at
+     * all: 2 of its 6 patterns are unreachable in isolation.
+     *
+     * This predates the strong-verb narrowing above and is unrelated to it — the same two patterns
+     * failed to fire before it. The fix is to test the floor BEFORE the authority-mode gate, which is
+     * a widening of the safety rule and therefore not made silently as part of a narrowing change.
+     *
+     * These assertions record what the code does TODAY. They are the bug, not the contract.
+     */
+    it('DEFECT (recorded): two floor patterns never fire when they stand alone', () => {
+      expect(escalated('Use reset --hard to clear the working tree.')).toBe(false);
+      expect(escalated('Rewrite history on the release branch.')).toBe(false);
+      // Same two patterns DO fire once any execution verb shares the body, which is what hid this.
+      expect(escalated('Run the cleanup, then use reset --hard on the working tree.')).toBe(true);
+    });
+  });
+
+  /**
+   * The composer's own verdict covers the middle band the floor cannot reach.
+   *
+   * Narrowing the deterministic rule to a floor leaves wording that escalates without using any
+   * listed verb — "Once approved, roll it out to production" is the measured example, and no verb
+   * list catches it. The composer classifies the text it just wrote, so its verdict is carried into
+   * final-body validation.
+   *
+   * The invariant under test is one-directional: the verdict may ACCUSE, never ACQUIT.
+   */
+  describe('the composer verdict is additive to the deterministic rule', () => {
+    const withReport = (generatedLine: string, report?: { generatedMode?: string; requestMode?: string }) => {
+      const currentBody = composedBody({ originalPromptText: planPrompt, route: { promptText: planPrompt } });
+      const result = validatePromptEnhancementSafety({
+        currentBody,
+        editedBodyText: `${currentBody.text}\n\nVerification Or Test Plan:\n- ${generatedLine}`,
+        composerAuthoritySelfReport: report as never,
+      });
+      return result.failures.map((f) => f.failureCode).includes('authority_escalation:planning_to_execution');
+    };
+
+    // The measured under-block from the verification pass: no listed verb anywhere in the sentence.
+    const MIDDLE_BAND = 'Once approved, roll it out to production and monitor error rates.';
+
+    it('confirms the premise: the deterministic rule misses the middle band entirely', () => {
+      expect(withReport(MIDDLE_BAND)).toBe(false);
+    });
+
+    it('ACCUSES: the verdict blocks wording the deterministic rule cannot see', () => {
+      expect(withReport(MIDDLE_BAND, { generatedMode: 'execute_requested' })).toBe(true);
+    });
+
+    it('NEVER ACQUITS: a plan_or_review verdict does not clear a deterministic block', () => {
+      const genuine = 'Delete the stale rows from the orders database.';
+      expect(withReport(genuine)).toBe(true);
+      expect(withReport(genuine, { generatedMode: 'plan_or_review' })).toBe(true);
+      expect(withReport(genuine, { generatedMode: 'observe_or_literal' })).toBe(true);
+    });
+
+    it('omitting the verdict leaves behaviour exactly as it was', () => {
+      expect(withReport(MIDDLE_BAND, undefined)).toBe(false);
+      expect(withReport(MIDDLE_BAND, {})).toBe(false);
+    });
+
+    it('does not fire when the user asked for execution in the first place', () => {
+      const doPrompt = 'Delete the stale rows and deploy the fix to production.';
+      const currentBody = composedBody({ originalPromptText: doPrompt, route: { promptText: doPrompt } });
+      const result = validatePromptEnhancementSafety({
+        currentBody,
+        editedBodyText: `${currentBody.text}\n\nVerification Or Test Plan:\n- ${MIDDLE_BAND}`,
+        composerAuthoritySelfReport: { generatedMode: 'execute_requested', requestMode: 'execute_requested' },
+      });
+      expect(result.failures.map((f) => f.failureCode)).not.toContain('authority_escalation:planning_to_execution');
+    });
+
+    it('fires on a plan-shaped request the word list misreads, via the model reading', () => {
+      // Same hole as the composer gate: no listed planning verb, so the word list says
+      // observe_or_literal and the check would otherwise skip itself.
+      const misread = 'Walk me through how the refunds flow behaves today.';
+      const currentBody = composedBody({ originalPromptText: misread, route: { promptText: misread } });
+      const validate = (report?: { generatedMode: string; requestMode?: string }) =>
+        validatePromptEnhancementSafety({
+          currentBody,
+          editedBodyText: `${currentBody.text}\n\nVerification Or Test Plan:\n- ${MIDDLE_BAND}`,
+          composerAuthoritySelfReport: report as never,
+        }).failures.map((f) => f.failureCode).includes('authority_escalation:planning_to_execution');
+
+      expect(validate({ generatedMode: 'execute_requested' })).toBe(false);
+      expect(validate({ generatedMode: 'execute_requested', requestMode: 'plan_or_review' })).toBe(true);
+    });
+  });
 });

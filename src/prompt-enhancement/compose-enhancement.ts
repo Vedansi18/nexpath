@@ -85,6 +85,18 @@ export interface PromptEnhancementStructuredComposerOutputV1 {
   // reports 'plan_or_review' for wording that plainly instructs a deploy. Optional: a missing quote
   // is not drift, exactly as a missing self-report is not drift.
   authorityEvidence?: string;
+  // The composer's reading of the ORIGINAL REQUEST's mode, which is a different question from
+  // authorityModeSelfReport (the mode of the text it produced).
+  //
+  // An escalation is only meaningful as "a plan/review request answered with execution wording", so
+  // both layers that judge it must first decide what the request was — and both decided it with the
+  // same word list, which is the mechanism that misfires. When that list misreads the request, the
+  // composer-side gate skips itself entirely. Carrying the model's own reading lets either source
+  // establish plan/review intent, so a word-list miss no longer disables the check.
+  //
+  // Widening only: this can cause the gate to run when it otherwise would not. It can never stop the
+  // gate from running, and it never clears a deterministic verdict.
+  requestModeSelfReport?: 'plan_or_review' | 'execute_requested' | 'observe_or_literal';
 }
 
 export interface PromptEnhancementComposeResult {

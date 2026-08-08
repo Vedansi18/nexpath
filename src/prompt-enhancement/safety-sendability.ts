@@ -52,6 +52,23 @@ export interface PromptEnhancementSafetyValidationInput {
   actionType?: PromptEnhancementActionType;
   callVisibilityMode?: PromptEnhancementCallVisibilityMode;
   optionalCallAvailabilityState?: PromptEnhancementValidationGraphV1['optionalCallAvailabilityState'];
+  /**
+   * The composer's own verdict on the wording it produced, and its reading of the request that
+   * produced it. Supplied only when the body being validated IS that composer output.
+   *
+   * The deterministic rule above is a floor: it catches wording with no benign reading, and it was
+   * narrowed to that role because a broad verb list rejected ordinary planning prose. Between the
+   * floor and plainly-safe wording lies a middle band that words alone cannot judge — "Once approved,
+   * roll it out to production" carries no listed verb at all. This verdict covers that band.
+   *
+   * STRICTLY ADDITIVE. It can only turn a pass into a block. A verdict of `plan_or_review` never
+   * exempts a body from the deterministic rule, and omitting the field entirely leaves behaviour
+   * exactly as it was. The model is trusted to accuse, never to acquit.
+   */
+  composerAuthoritySelfReport?: {
+    generatedMode?: PromptEnhancementAuthorityMode;
+    requestMode?: PromptEnhancementAuthorityMode;
+  };
 }
 
 export interface PromptEnhancementSafetyValidationResult {
@@ -220,7 +237,10 @@ export function validatePromptEnhancementSafety(
     }
   }
 
-  if (generatedEscalatesAuthority(input.currentBody.originalPromptText, generatedBodyText)) {
+  if (
+    generatedEscalatesAuthority(input.currentBody.originalPromptText, generatedBodyText)
+    || composerReportsEscalation(input.currentBody.originalPromptText, input.composerAuthoritySelfReport)
+  ) {
     failures.push(failure({
       failureCode: 'authority_escalation:planning_to_execution',
       stage: edited ? 'user_edit' : 'composer_output',
@@ -572,19 +592,56 @@ function authorityScopeUnits(text: string): readonly string[] {
 }
 
 /**
+ * The verbs strong enough to raise an escalation on their own, as a deliberate subset of
+ * `EXECUTION_VERB`.
+ *
+ * Sentence scoping alone did not fix the false positives, because `post`, `write`, `apply`, `modify`,
+ * `notify` and `increase` are ordinary planning vocabulary that no verification or acceptance section
+ * can avoid. Paired with any risk noun in the same sentence they escalated, so wording as plainly
+ * non-executing as "Modify nothing yet; list the database changes we would need" and "Write down the
+ * acceptance criteria for the schema change" was rejected — and `post` is worse still, since it is a
+ * word boundary away from `post-migration` and `post-deployment`.
+ *
+ * ⚠️ This is a KNOWN, ACCEPTED narrowing, not a tidy-up. Wording such as "Write the new schema" or
+ * "Apply the migration" no longer escalates by this rule; it is covered by `ALWAYS_ESCALATE_PATTERN`
+ * only where that floor matches, and otherwise by the composer's authority self-report. The loss is
+ * pinned by an explicit test so it can never be rediscovered by accident.
+ *
+ * `EXECUTION_VERB` itself is deliberately left untouched — it also drives authority-mode
+ * classification and the edited-body checks, where the broader reading is correct.
+ */
+const ESCALATION_VERB =
+  /\b(?:run|execute|deploy|delete|remove|migrate|install|force[-\s]?push|publish|rotate|truncate|drop|karo|kar\s+do|chalao|hatao|mitao)\b|(?:करो|कर\s*दो|चलाओ|हटाओ|मिटाओ|કરો|કરી\s*દો|ચલાવો|કાઢી\s*નાખો|મિટાવો)/i;
+
+/**
  * Does the generated wording actually escalate, rather than merely contain an execution verb?
  *
- * `EXECUTION_VERB` includes `run`, `execute`, `write`, `apply` and `modify` — verbs no verification or
- * test-plan section can avoid, and every template requires such a section. Matching them anywhere in
- * the body therefore rejected bodies for doing their job. Requiring a risk term in the SAME unit
+ * Two conditions, both narrowing and neither able to make previously-safe wording escalate: the verb
+ * must be one of the strong ones above, and a risk term must appear in the SAME unit. The unit rule
  * separates "execute the tests" from "execute the rollback"; body-level risk matching cannot, because
  * risk patterns fire on the prompt's topic (`database`, `upgrade`) rather than on the action.
  */
 function generatedRiskEscalationPresent(generatedText: string): boolean {
   if (ALWAYS_ESCALATE_PATTERN.test(generatedText)) return true;
   return authorityScopeUnits(generatedText).some((unit) =>
-    EXECUTION_VERB.test(unit) && RISK_PATTERNS.some(([, pattern]) => pattern.test(unit)),
+    ESCALATION_VERB.test(unit) && RISK_PATTERNS.some(([, pattern]) => pattern.test(unit)),
   );
+}
+
+/**
+ * Does the composer's own verdict amount to an escalation the deterministic floor would miss?
+ *
+ * Only ever returns `true` — it is OR-ed with the deterministic rule, so it can add a block and can
+ * never remove one. An escalation is "a plan/review request answered with execution wording", so the
+ * request must read as plan/review by EITHER the word list or the composer's own reading; relying on
+ * the word list alone would reproduce, one layer up, the exact misreading this check exists to cover.
+ */
+function composerReportsEscalation(
+  originalPromptText: string,
+  report: PromptEnhancementSafetyValidationInput['composerAuthoritySelfReport'],
+): boolean {
+  if (report?.generatedMode !== 'execute_requested') return false;
+  return authorityModeFor(originalPromptText) === 'plan_or_review' || report.requestMode === 'plan_or_review';
 }
 
 function generatedEscalatesAuthority(originalPromptText: string, generatedBodyText: string): boolean {
