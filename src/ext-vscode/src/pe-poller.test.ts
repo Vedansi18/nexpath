@@ -64,6 +64,14 @@ describe('createPePoller (Windsurf/Devin PE delivery)', () => {
     expect(onDeliver).not.toHaveBeenCalled();
   });
 
+  it('a row parked at exactly startedAt (same tick as start()) is not delivered — only STRICTLY-after rows count', async () => {
+    readPendingPe.mockResolvedValue(row({ createdAt: 4000 })); // == startedAt (t=4000 at start())
+    const p = make(); p.start(); // startedAt captured as 4000
+    t = 4001;
+    await p.pollOnce();
+    expect(onDeliver).not.toHaveBeenCalled();
+  });
+
   it('does not re-deliver the same row on a later poll (one-shot per createdAt)', async () => {
     readPendingPe.mockResolvedValue(row({ createdAt: 5000 }));
     const p = make(); p.start();
@@ -121,6 +129,26 @@ describe('createPePoller (Windsurf/Devin PE delivery)', () => {
     t = 6000; await p.pollOnce();
     expect(onDeliver).toHaveBeenCalledTimes(1);
     expect(onOutcome).toHaveBeenCalledWith('insert_failed_no_clipboard_fallback');
+  });
+
+  it('onDeliver rejecting propagates out of pollOnce (reads are guarded per-root; delivery itself is not — same as advisory-poller.ts\'s onArm)', async () => {
+    onDeliver.mockRejectedValue(new Error('command execution failed'));
+    readPendingPe.mockResolvedValue(row({ createdAt: 5000 }));
+    const p = make(); p.start(); t = 5001;
+    await expect(p.pollOnce()).rejects.toThrow('command execution failed');
+  });
+
+  it('a rejection from onDeliver still resets the in-flight guard and still marks the row handled, so the next poll proceeds normally', async () => {
+    onDeliver.mockRejectedValueOnce(new Error('boom'));
+    readPendingPe.mockResolvedValue(row({ createdAt: 5000 }));
+    const p = make(); p.start(); t = 5001;
+    await expect(p.pollOnce()).rejects.toThrow('boom');
+
+    onDeliver.mockResolvedValue('inserted');
+    readPendingPe.mockResolvedValue(row({ createdAt: 6000 }));
+    t = 6001;
+    await p.pollOnce();
+    expect(onDeliver).toHaveBeenCalledTimes(2);
   });
 
   it('readPendingPe throwing for a root is treated as no row there, never crashes', async () => {

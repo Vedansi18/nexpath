@@ -25,6 +25,7 @@ const {
   mockReadInjectedPrompt,
   mockCreatePePoller,
   mockPePollerStart,
+  mockPePollerStop,
   mockGetCommands,
 } = vi.hoisted(() => ({
   mockShowOnboarding: vi.fn(),
@@ -49,6 +50,7 @@ const {
   mockReadInjectedPrompt: vi.fn(async () => null),
   mockCreatePePoller: vi.fn(),
   mockPePollerStart: vi.fn(),
+  mockPePollerStop: vi.fn(),
   mockGetCommands: vi.fn(async () => [] as string[]),
 }));
 
@@ -165,7 +167,7 @@ vi.mock('./advisory-poller.js', () => ({
 vi.mock('./pe-poller.js', () => ({
   createPePoller: (...args: unknown[]) => {
     mockCreatePePoller(...args);
-    return { start: mockPePollerStart, stop: vi.fn(), pollOnce: vi.fn() };
+    return { start: mockPePollerStart, stop: mockPePollerStop, pollOnce: vi.fn() };
   },
 }));
 
@@ -220,6 +222,7 @@ describe('activate', () => {
     mockReadInjectedPrompt.mockReset().mockResolvedValue(null);
     mockCreatePePoller.mockReset();
     mockPePollerStart.mockReset();
+    mockPePollerStop.mockReset();
     mockGetCommands.mockReset().mockResolvedValue([]);
     mockRegisterWebviewViewProvider.mockReturnValue({ dispose: vi.fn() });
     logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -309,6 +312,7 @@ describe('activate', () => {
       readPendingPe: (root: string) => Promise<unknown>;
       onDeliver: (text: string) => Promise<string>;
       onPublish?: (payload: unknown) => void;
+      onOutcome?: (outcome: string) => void;
     } {
       return mockCreatePePoller.mock.calls[0]![0] as never;
     }
@@ -383,6 +387,26 @@ describe('activate', () => {
       await activate(makeCtx(true) as never);
       const keys = Object.keys(mockCreatePePoller.mock.calls[0]![0] as object).sort();
       expect(keys).toEqual(['onDeliver', 'onOutcome', 'onPublish', 'projectRoots', 'readPendingPe']);
+    });
+
+    it('onOutcome logs the windsurf-poller-specific message for a successful insert', async () => {
+      mockShowOnboarding.mockResolvedValueOnce(undefined);
+      mockDetectHost.mockReturnValueOnce('windsurf');
+      await activate(makeCtx(true) as never);
+      logSpy.mockClear();
+      capturedDeps().onOutcome?.('inserted');
+      expect(logSpy).toHaveBeenCalledWith('[nexpath] windsurf PE poller insert outcome: inserted');
+    });
+
+    it('onOutcome logs the windsurf-poller-specific message for a failed insert (D-1, no clipboard fallback)', async () => {
+      mockShowOnboarding.mockResolvedValueOnce(undefined);
+      mockDetectHost.mockReturnValueOnce('windsurf');
+      await activate(makeCtx(true) as never);
+      logSpy.mockClear();
+      capturedDeps().onOutcome?.('insert_failed_no_clipboard_fallback');
+      expect(logSpy).toHaveBeenCalledWith(
+        '[nexpath] windsurf PE poller insert outcome: insert_failed_no_clipboard_fallback',
+      );
     });
   });
 
@@ -1029,6 +1053,10 @@ describe('deactivate', () => {
     mockWatcherStart.mockReset();
     mockWatcherStop.mockReset();
     mockExistsSync.mockReset().mockReturnValue(false);
+    mockCreatePePoller.mockReset();
+    mockPePollerStart.mockReset();
+    mockPePollerStop.mockReset();
+    mockGetCommands.mockReset().mockResolvedValue([]);
     mockRegisterWebviewViewProvider.mockReturnValue({ dispose: vi.fn() });
     logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
   });
@@ -1063,5 +1091,14 @@ describe('deactivate', () => {
     expect(mockWatcherStart).toHaveBeenCalledOnce();
     deactivate();
     expect(mockWatcherStop).toHaveBeenCalled();
+  });
+
+  it('stops the PE poller on deactivate (P10, Windsurf only)', async () => {
+    mockShowOnboarding.mockResolvedValueOnce(undefined);
+    mockDetectHost.mockReturnValueOnce('windsurf');
+    await activate(makeCtx(true) as never);
+    expect(mockPePollerStart).toHaveBeenCalledOnce();
+    deactivate();
+    expect(mockPePollerStop).toHaveBeenCalledOnce();
   });
 });
