@@ -10,10 +10,11 @@ import { readInjectedPrompt } from './advisory-store-reader.js';
  * instead it spawns `nexpath auto` and `nexpath stop` as subprocesses and
  * communicates via stdin/stdout JSON envelopes.
  *
- * This module is a Branch 1 STUB — it defines the spawn + parse contract and
- * the error taxonomy. The actual chat-history watcher (Branch 2) and webview
- * payload renderer (Branch 3) call into this module; the Cursor / Windsurf
- * adapters (Branch 4) supply concrete binary-path resolution.
+ * Defines the spawn + parse contract and the error taxonomy. The chat-history
+ * watcher and webview payload renderer call into this module; the Cursor /
+ * Windsurf adapters supply concrete binary-path resolution. Fully built and
+ * hard-frozen (dev plan §2.1) — `ipc.test.ts` locks `spawnStop`'s contract
+ * including Windows crash recovery; any change here is a regression risk.
  *
  * Binary path resolution order (highest priority first):
  *   1. `opts.binaryPath` — explicit override (test fixtures, dev setups)

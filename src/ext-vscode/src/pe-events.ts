@@ -27,8 +27,8 @@
  * (`deliver_current_body`, the three directional actions,
  * `submit_additional_details`, `close_no_send`). `use_original`, `edit_body`,
  * `skip_or_reject`, and `explicit_feedback` have no button/control in the
- * rendered HTML at all yet — that is Bhavnesh's UI/wording to add
- * (VED-PE-2: "final labels/layout remain Bhavnesh-owned"), not something
+ * rendered HTML at all yet — that is the UI owner's wording to add
+ * (VED-PE-2: "final labels/layout remain UI-owned"), not something
  * this phase invents ahead of the product. {@link routePeWebviewMessage} can
  * therefore only ever produce 6 of the 10 event types until those controls
  * exist; the other 4 remain declared in {@link PeEventType} so the target

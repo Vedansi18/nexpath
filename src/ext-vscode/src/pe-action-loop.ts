@@ -2,15 +2,15 @@
  * PE action request/response loop (P9, VED-PE-6, DEP-B1.3A-VED-02/04).
  *
  * SCOPE, decided against the actual handoff text, not inferred from the dev
- * plan's own "Design" section: VED-PE-6 (the authoritative Vedansi-handoff
+ * plan's own "Design" section: VED-PE-6 (the authoritative extension-handoff
  * item this phase implements) describes required BEHAVIOUR — loading state,
  * previous-body survival, canonical ids, the dirty-draft-discarded +
  * locked-while-pending state pair, apply_details' distinctness, surfacing
  * timeout/fallback — with no mention of a specific transport. The dev plan's
  * own "Design" section additionally proposes a stdio JSON-line transport
  * (R3, `--interaction stdio`) for eventually wiring this to a real spawned
- * CLI process — that flag does not exist yet (`G-R3`, OPEN, Bhavnesh/Hiren's
- * side), so nothing can be tested against a real process today. This module
+ * CLI process — that flag does not exist yet (`G-R3`, OPEN, on the CLI-side
+ * owners), so nothing can be tested against a real process today. This module
  * is therefore the REQUEST/RESPONSE STATE MACHINE only — the part the
  * handoff actually specifies and the part genuinely testable in isolation,
  * with a fake/injected response standing in for whatever transport

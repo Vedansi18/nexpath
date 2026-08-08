@@ -1129,14 +1129,14 @@ describe('activate', () => {
     expect(errorSpy).toHaveBeenCalledWith('[nexpath] watcher error:', watcherErr);
   });
 
-  // ── Pipeline logger wiring (B1.4 follow-up — spawn errors in Output) ──────
+  // ── Pipeline logger wiring (spawn-error visibility follow-up) ─────────────
   // chat-pipeline.ts catches spawnAuto / spawnStop failures and forwards them
   // to its `logger.error`. extension.ts must wire a logger that writes to
   // BOTH console.error AND the Nexpath OutputChannel (via the local `log`
   // helper). Otherwise IPC errors only surface in Developer Tools Console,
-  // invisible to end users. Verified live during B1.4 (nexpath binary moved
-  // aside → spawnAuto ENOENT → silent before this fix, surfaces in Output
-  // after this fix).
+  // invisible to end users. Verified live (nexpath binary moved aside →
+  // spawnAuto ENOENT → silent before this fix, surfaces in Output after
+  // this fix).
 
   it('wires a logger into createChatEventHandler that writes spawn errors to the Output channel', async () => {
     mockShowOnboarding.mockResolvedValueOnce(undefined);
