@@ -719,6 +719,8 @@ describe('screen-geometry — shared spawn helpers (P5)', () => {
     // Windows Terminal: resolve the visible top-level window by our "Nexpath …" title (not the hidden
     // ConPTY pseudo-console); conhost fallback keeps GetConsoleWindow.
     expect(ps).toContain("MainWindowTitle -like 'Nexpath*'");
+    // Phase 2: pick the most-recently-started match so it resolves exactly this popup.
+    expect(ps).toContain('Sort-Object StartTime -Descending');
     expect(ps).toContain('GetConsoleWindow');
     // Dock position + size in one SetWindowPos call on the real window (SWP_SHOWWINDOW=0x0040).
     expect(ps).toContain('SetWindowPos($h, [IntPtr]::Zero, 768, 0, 1152, 1080, 0x0040)');

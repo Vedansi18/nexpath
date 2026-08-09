@@ -648,8 +648,10 @@ export function buildWindowsConsolePositionScriptV1(geometry: PopupGeometry): st
     '}',
     '"@',
     // Prefer the process whose MAIN window carries our "Nexpath …" title (the Windows Terminal window on
-    // Win11); fall back to the console window (classic conhost, where that IS the visible window).
-    "$proc = Get-Process | Where-Object { $_.MainWindowTitle -like 'Nexpath*' -and $_.MainWindowHandle -ne 0 } | Select-Object -First 1",
+    // Win11); pick the MOST-RECENTLY-STARTED match (Phase 2) so it resolves exactly THIS popup, not a
+    // stale/other Nexpath window. Fall back to the console window (classic conhost, where that IS the
+    // visible window). If StartTime is unavailable for a candidate, the sort is a harmless no-op.
+    "$proc = Get-Process | Where-Object { $_.MainWindowTitle -like 'Nexpath*' -and $_.MainWindowHandle -ne 0 } | Sort-Object StartTime -Descending | Select-Object -First 1",
     'if ($proc) { $h = $proc.MainWindowHandle } else { $h = [NexpathWin]::GetConsoleWindow() }',
     '[void][NexpathWin]::ShowWindow($h, 1)',   // SW_SHOWNORMAL: restore if minimized; harmless when normal
     // SetWindowPos: position + size + show + raise (HWND_TOP=IntPtr.Zero, SWP_SHOWWINDOW=0x0040) on the

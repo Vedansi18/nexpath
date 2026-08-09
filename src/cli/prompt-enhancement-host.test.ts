@@ -447,6 +447,8 @@ describe('PE1.3 — Linux PE popup host launcher', () => {
     expect(ps).toContain('$ErrorActionPreference = "SilentlyContinue"'); // fully fail-open
     // Windows Terminal: resolve the visible window by our "Nexpath …" title, not the hidden pseudo-console.
     expect(ps).toContain("MainWindowTitle -like 'Nexpath*'");
+    // Phase 2: resolve exactly this popup by picking the most-recently-started match.
+    expect(ps).toContain('Sort-Object StartTime -Descending');
     expect(ps).toContain('GetConsoleWindow'); // conhost fallback
     // Dock position + size in one SetWindowPos call on the real window.
     expect(ps).toContain('SetWindowPos($h, [IntPtr]::Zero, 768, 0, 1152, 1080, 0x0040)');
