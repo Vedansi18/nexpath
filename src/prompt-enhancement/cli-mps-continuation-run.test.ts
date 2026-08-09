@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   PROMPT_ENHANCEMENT_CONTRACT_VERSION,
   type PromptEnhancementFutureSequenceRuntimeEventV1,
@@ -124,6 +124,30 @@ describe('MPS continuation-popup CLI shell (§3.4)', () => {
     if (outcome.state !== 'send') return;
     expect(outcome.bodyText).toContain('Additional details to incorporate:');
     expect(outcome.bodyText).toContain('scope to payments');
+  });
+
+  it('NF apply-details capture (parity): a real Apply fires mps_apply_details once (kind + timestamp, no text); a blank Apply fires nothing', async () => {
+    const { result, handoffMetadata, event } = await fixture();
+    const sink = vi.fn();
+    // down -> details row; type; Enter -> APPLY (fires the sink); Enter -> send.
+    await runPromptEnhancementCliMpsContinuationPopupV1({
+      result, handoffMetadata, event,
+      interaction: scripted([KEY.down, ...'pg'.split(''), KEY.enter, KEY.enter]),
+      actionSignalSink: sink,
+    });
+    expect(sink).toHaveBeenCalledTimes(1);
+    expect(sink.mock.calls[0]![0]).toBe('mps_apply_details');
+    expect(typeof sink.mock.calls[0]![1]).toBe('number');
+    expect(sink.mock.calls[0]).toHaveLength(2);
+
+    // Blank apply (Enter on empty details) records nothing.
+    const blankSink = vi.fn();
+    await runPromptEnhancementCliMpsContinuationPopupV1({
+      result, handoffMetadata, event,
+      interaction: scripted([KEY.down, KEY.enter, KEY.escape]),
+      actionSignalSink: blankSink,
+    });
+    expect(blankSink).not.toHaveBeenCalled();
   });
 
   it('no-scroll: every painted frame fits the reported window height (stacking regression guard)', async () => {

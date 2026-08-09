@@ -29,6 +29,7 @@ import {
   type PromptEnhancementMultilineEditorStateV1,
 } from './multiline-editor.js';
 import type { PromptEnhancementCliMpsInteractionV1, PromptEnhancementCliMpsCancelFeedbackV1 } from './cli-mps-run.js';
+import type { PromptActionSignalKind } from '../store/feedback-signals.js';
 
 /**
  * MPS continuation-popup CLI shell (locked §3.4 layout).
@@ -67,6 +68,13 @@ export async function runPromptEnhancementCliMpsContinuationPopupV1(input: {
   handoffMetadata: PromptEnhancementMpsContinuationInputV1['handoffMetadata'];
   event: PromptEnhancementMpsContinuationInputV1['event'];
   interaction?: PromptEnhancementCliMpsInteractionV1 | null;
+  /**
+   * NF Plan B — content-free per-action sink (kind + timestamp only, never text). Fires
+   * `mps_apply_details` when the user applies additional details here, mirroring the first popup and
+   * the PE popup. Parity only until this runner is wired to a live caller (continuation runtime is
+   * gated); optional — unset = no capture.
+   */
+  actionSignalSink?: (kind: PromptActionSignalKind, occurredAt: number) => void;
 }): Promise<PromptEnhancementCliMpsContinuationOutcomeV1> {
   const built = buildPromptEnhancementMpsContinuationPopupV1({
     result: input.result,
@@ -210,6 +218,9 @@ export async function runPromptEnhancementCliMpsContinuationPopupV1(input: {
           // field; repeated applies extend the ONE block (no duplicate heading). Blank = no-op.
           const details = editor.buffers.additional_details.text.trim();
           if (details.length === 0) continue;
+          // NF Plan B — record the apply action (content-free kind + timestamp) at the moment it is
+          // issued; only a REAL apply fires (past the blank guard). Text is never carried.
+          input.actionSignalSink?.('mps_apply_details', Date.now());
           const detailsHeading = 'Additional details to incorporate:';
           const mergedBody = editor.buffers.enhanced_body.text.includes(detailsHeading)
             ? `${editor.buffers.enhanced_body.text}\n${details}`

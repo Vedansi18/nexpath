@@ -106,6 +106,13 @@ const FRAME_CHROME_LINES = 23;
 export async function runPromptEnhancementCliMpsFirstPopupV1(input: {
   result: PromptEnhancementPrepareResultV1;
   interaction?: PromptEnhancementCliMpsInteractionV1 | null;
+  /**
+   * NF Plan B — content-free per-action sink (kind + timestamp only, never text). Fired at the
+   * moment the user APPLIES additional details (`mps_apply_details`), mirroring the PE popup. The
+   * terminal outcome (send / cancel / decline) is captured separately by the caller via
+   * `promptEnhancementMpsActionSignalKindV1`. Optional — unset = no capture (unchanged behaviour).
+   */
+  actionSignalSink?: (kind: PromptActionSignalKind, occurredAt: number) => void;
 }): Promise<PromptEnhancementCliMpsOutcomeV1> {
   const handoffMetadata = input.result.uiView.handoffAndSequenceSummary;
   if (!handoffMetadata) return { state: 'not_shown', reasonCodes: ['no_handoff_sequence_summary'] };
@@ -263,6 +270,10 @@ export async function runPromptEnhancementCliMpsFirstPopupV1(input: {
           // row, so the next Enter sends the merged prompt. Blank details apply nothing.
           const details = editor.buffers.additional_details.text.trim();
           if (details.length === 0) continue;
+          // NF Plan B — record the apply action (content-free kind + timestamp) at the moment it is
+          // issued, mirroring the PE popup's `pe_apply_details`. Only a REAL apply fires (past the
+          // blank guard above); the merged body/details text is never carried.
+          input.actionSignalSink?.('mps_apply_details', Date.now());
           // Repeated applies extend the ONE details block (no duplicate headings — same rule as
           // the PE popup).
           const detailsHeading = 'Additional details to incorporate:';
