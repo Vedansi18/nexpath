@@ -367,13 +367,17 @@ function buildResult(
   const diagnostics = diagnosticsFor(enhancementId, [...composed.diagnostics, ...safety.publicDiagnostics]);
   // TI-3.2 (2026-08-08) — capture the compose-layer fallback reason CODES BEFORE diagnosticsFor
   // genericizes them for the public array (which drops reasonCode). Reporting-only; typed codes only.
-  // Scoped to EXACTLY the two codes TI-3.2 names — the draft-rejection cause and the substitution
-  // marker — not every `fallback_or_no_popup` code (the no-popup / action-preserved codes are a
-  // different concern and out of this fix's scope).
+  // TI-3.2 follow-up Phase 1 (2026-08-09): added `partial_draft_drop:` — a partial section drop
+  // composes as a clean `llm_wording` / valid body, so without capturing this reason a dropped section
+  // logged byte-identical to a perfect run (the exact TI-3 silent-loss shape). Scoped to the
+  // draft-rejection cause, the substitution marker, and now partial-drop; the remaining
+  // `fallback_or_no_popup` codes (action-preserved / no-sections) and the `source_coverage` grounding
+  // code are captured in Phases 2–3, not here.
   const compositionFallbackReasonCodes = composed.diagnostics
     .filter((diagnostic) =>
       diagnostic.category === 'fallback_or_no_popup'
       && (diagnostic.reasonCode.startsWith('deterministic_fallback:')
+        || diagnostic.reasonCode.startsWith('partial_draft_drop:')
         || diagnostic.reasonCode === 'llm_final_body_blocked_deterministic_fallback'))
     .map((diagnostic) => diagnostic.reasonCode);
   const composerCallVisibility = composed.composerBoundary.inputContract.callVisibilityState;

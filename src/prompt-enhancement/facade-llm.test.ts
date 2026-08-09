@@ -159,6 +159,43 @@ describe('E4 — facade LLM composer wiring', () => {
     expect(clean.compositionFallbackReasonCodes).toBeUndefined();
   });
 
+  it('TI-3.2 follow-up (Phase 1): a partial section drop is no longer silent — partial_draft_drop reaches the log', async () => {
+    process.env['OPENAI_API_KEY'] = `sk-${'x'.repeat(40)}`;
+    // The composer returns TWO drafts: one valid (survives) and one targeting a section that does not
+    // exist (dropped as `unknown_section`). The reply survives, so the body composes with LLM wording
+    // and callVisibilityMode stays `llm_wording` / valid — byte-identical to a perfect run EXCEPT that
+    // a section was silently dropped. The only trace is the partial_draft_drop reason code.
+    vi.mocked(composeStructuredComposerOutputV1).mockImplementationOnce(async (input: { planning: { sectionPlans: readonly { sectionId: string; sectionKind: string; structuredContentPartRefs: readonly string[] }[] } }) => {
+      const section = input.planning.sectionPlans.find(
+        (plan) => plan.sectionKind !== 'original_request_or_goal' && plan.structuredContentPartRefs.length > 0,
+      );
+      if (!section) return { ok: false, reason: 'no_eligible_sections' };
+      const factId = section.structuredContentPartRefs[0];
+      return { ok: true, output: {
+        outputId: 'test-llm-partial-drop-output',
+        sectionDrafts: [
+          { sectionId: section.sectionId, bodyText: 'Valid tailored wording for this section.', sourceFactIds: [factId] },
+          { sectionId: 'nexpath-nonexistent-section', bodyText: 'This draft targets a section that is not in the plan.', sourceFactIds: [factId] },
+        ],
+        composerClaims: [`claim:${factId}`],
+      } };
+    });
+
+    const result = await preparePromptEnhancement(request());
+    // The surviving draft rendered (partial, not full, drop) and the run LOOKS like a clean success...
+    expect(result.currentBody.text).toContain('Valid tailored wording');
+    expect(result.callAndVisibilityMetadata.callVisibilityMode).toBe('llm_wording');
+    expect(result.disposition).toBe('show_current_body');
+    // ...but the dropped section is now traceable in the log-bound reason codes.
+    expect(result.compositionFallbackReasonCodes?.some((code) => code.startsWith('partial_draft_drop:'))).toBe(true);
+    // This is a compose-layer drop, NOT a facade substitution — the TI-3.3 flag stays unset.
+    expect(result.deterministicFallbackApplied).toBeUndefined();
+
+    // A clean LLM run (default mock, all drafts valid) drops nothing and stays empty — visibly distinct.
+    const clean = await preparePromptEnhancement(request());
+    expect(clean.compositionFallbackReasonCodes).toBeUndefined();
+  });
+
   it('safety still runs on the composed body regardless of the LLM path (validation summary present)', async () => {
     process.env['OPENAI_API_KEY'] = `sk-${'x'.repeat(40)}`;
     const result = await preparePromptEnhancement(request());
