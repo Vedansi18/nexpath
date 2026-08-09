@@ -140,6 +140,10 @@ export function emitPromptEnhancementCostObservabilityV1(
       // the substitution marker), not just that it was. Empty when no compose-layer fallback
       // occurred. Typed reason codes only, never body text.
       compositionFallbackReasonCodes: result.compositionFallbackReasonCodes ?? [],
+      // TI-3 audit follow-up (2026-08-09): whether the user's additional-details input hit the
+      // 5,000-word cap and was truncated. A `generated` input-cap event (not a fallback), surfaced
+      // as its own flag so "was the input truncated?" is answerable from the log. Never body text.
+      additionalDetailsTruncated: result.additionalDetailsTruncated ?? false,
       rawFieldsExcluded: observability.measurement.rawPromptBodyExcluded,
       inventoryOk: observability.inventoryOk,
     });

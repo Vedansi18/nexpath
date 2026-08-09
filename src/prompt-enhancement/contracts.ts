@@ -1695,6 +1695,13 @@ export interface PromptEnhancementPrepareResultV1 {
   // `callAndVisibilityMetadata.fallbackReason` already on this result. Present only when a compose-layer
   // reduction occurred; additive + optional → PE/PEF behaviour and the emitted contract stay byte-identical.
   compositionFallbackReasonCodes?: readonly string[];
+  // TI-3 audit follow-up (2026-08-09) — observability-only. True when the user's additional-details
+  // input exceeded the 5,000-word cap and was truncated before recomposition (the engine already
+  // emits a dedicated user notice for this; the `reasonCode` is genericized away from the machine-
+  // readable log). This is a `generated` input-cap event, NOT a fallback/reduction — kept as its own
+  // flag rather than folded into `compositionFallbackReasonCodes`. Present only when truncation
+  // occurred; additive + optional → PE/PEF behaviour and the emitted contract stay byte-identical.
+  additionalDetailsTruncated?: boolean;
 }
 
 export type PromptEnhancementPrepareFacadeV1 = (

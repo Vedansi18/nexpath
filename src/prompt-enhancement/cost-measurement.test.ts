@@ -11,11 +11,12 @@ function resultWith(
   planned: number,
   used: number,
   failure?: { fallbackReason?: string; providerFailureState?: string },
-  // TI-3.3 / TI-3.2: reporting-only fields the emitter reads straight off the result.
+  // TI-3.3 / TI-3.2 / TI-3 audit: reporting-only fields the emitter reads straight off the result.
   fallbackReport?: {
     deterministicFallbackApplied?: boolean;
     preSubstitutionAuthorityEscalationState?: string;
     compositionFallbackReasonCodes?: readonly string[];
+    additionalDetailsTruncated?: boolean;
   },
 ): PromptEnhancementPrepareResultV1 {
   return {
@@ -148,6 +149,24 @@ describe('emitPromptEnhancementCostObservabilityV1 (E9 — surface emission)', (
     emitPromptEnhancementCostObservabilityV1(resultWith('llm_wording', 1, 1), 'prepare', sink2);
     expect(sink2.debug).toHaveBeenCalledWith('prompt_enhancement_cost_measurement', expect.objectContaining({
       compositionFallbackReasonCodes: [],
+    }));
+  });
+
+  it('TI-3 audit follow-up: surfaces additionalDetailsTruncated so an input-cap truncation is visible in the log', () => {
+    const sink = { debug: vi.fn(), warn: vi.fn() };
+    emitPromptEnhancementCostObservabilityV1(
+      resultWith('deterministic', 0, 0, undefined, { additionalDetailsTruncated: true }),
+      'popup_action',
+      sink,
+    );
+    expect(sink.debug).toHaveBeenCalledWith('prompt_enhancement_cost_measurement', expect.objectContaining({
+      additionalDetailsTruncated: true,
+    }));
+    // A run with no truncation logs false — visibly distinct.
+    const sink2 = { debug: vi.fn(), warn: vi.fn() };
+    emitPromptEnhancementCostObservabilityV1(resultWith('deterministic', 0, 0), 'popup_action', sink2);
+    expect(sink2.debug).toHaveBeenCalledWith('prompt_enhancement_cost_measurement', expect.objectContaining({
+      additionalDetailsTruncated: false,
     }));
   });
 

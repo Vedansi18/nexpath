@@ -223,6 +223,45 @@ describe('E4 — facade LLM composer wiring', () => {
     expect(result.compositionFallbackReasonCodes).toContain('project_grounding_source_unavailable');
   });
 
+  it('TI-3 audit follow-up: an apply_details action over the 5,000-word cap sets additionalDetailsTruncated', async () => {
+    process.env['OPENAI_API_KEY'] = `sk-${'x'.repeat(40)}`;
+    const base = await preparePromptEnhancement(request());
+    const applyDetails = base.availableActions.find((entry) => entry.actionType === 'apply_details');
+    expect(applyDetails).toBeDefined();
+
+    // > 5,000 words of additional details: the engine truncates and emits the input-cap notice; the
+    // reporting flag makes "was the input truncated?" answerable from the result + log.
+    const longDetails = Array.from({ length: 5001 }, () => 'detail').join(' ');
+    const actionRequest = {
+      ...request(),
+      action: applyDetails!,
+      currentBodyBinding: {
+        currentBodyId: base.currentBody.currentBodyId,
+        bodyRevision: base.currentBody.bodyRevision,
+        validationDecisionId: base.validationDecisionId,
+        editedBodyText: base.currentBody.text,
+        actionSubmittedAtMs: 2,
+        realUserInitiated: true,
+        sectionSpanEditEvents: [],
+      },
+      userPreferenceContext: {
+        ...request().userPreferenceContext,
+        additionalDetails: {
+          text: longDetails,
+          targetBodyId: base.currentBody.currentBodyId,
+          targetBodyRevision: base.currentBody.bodyRevision,
+        },
+      },
+    } as unknown as Parameters<typeof applyPromptEnhancementAction>[0];
+
+    const result = await applyPromptEnhancementAction(actionRequest);
+    expect(result.additionalDetailsTruncated).toBe(true);
+
+    // A normal run (no over-cap details) leaves the flag unset — visibly distinct.
+    const clean = await preparePromptEnhancement(request());
+    expect(clean.additionalDetailsTruncated).toBeUndefined();
+  });
+
   it('safety still runs on the composed body regardless of the LLM path (validation summary present)', async () => {
     process.env['OPENAI_API_KEY'] = `sk-${'x'.repeat(40)}`;
     const result = await preparePromptEnhancement(request());

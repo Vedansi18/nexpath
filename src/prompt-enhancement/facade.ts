@@ -381,6 +381,12 @@ function buildResult(
       || (diagnostic.category === 'source_coverage'
         && diagnostic.reasonCode === 'project_grounding_source_unavailable'))
     .map((diagnostic) => diagnostic.reasonCode);
+  // TI-3 audit follow-up (2026-08-09): the additional-details truncation is a `generated` input-cap
+  // event (not a fallback/reduction), so it is tracked as its own flag rather than mixed into the
+  // fallback reason codes above. Reporting-only.
+  const additionalDetailsTruncated = composed.diagnostics.some(
+    (diagnostic) => diagnostic.reasonCode === 'additional_details_truncated_public_notice',
+  );
   const composerCallVisibility = composed.composerBoundary.inputContract.callVisibilityState;
   const callAndVisibilityMetadata = {
     ...composerCallVisibility,
@@ -505,6 +511,8 @@ function buildResult(
     // TI-3.2 (2026-08-08) — reporting-only; emitted ONLY when a compose-layer fallback produced a
     // reason code (a clean deterministic body composes as 'generated', so this stays absent).
     ...(compositionFallbackReasonCodes.length > 0 ? { compositionFallbackReasonCodes } : {}),
+    // TI-3 audit follow-up (2026-08-09) — reporting-only; emitted ONLY when the input was truncated.
+    ...(additionalDetailsTruncated ? { additionalDetailsTruncated: true } : {}),
   };
 }
 
