@@ -147,7 +147,12 @@ export async function runPromptEnhancementPopupHostCommandV1(
           });
           if (mpsGate.renderPermission === 'mps_render_permitted') {
             markReadyOnce();
-            const mps = await dependencies.runMpsPopup({ result: input.result });
+            const mps = await dependencies.runMpsPopup({
+              result: input.result,
+              // NF Plan B — content-free capture of the in-popup APPLY action (mps_apply_details),
+              // mirroring the PE popup. The terminal outcome is captured just below.
+              actionSignalSink: (kind, occurredAt) => dependencies.recordActionSignal(store!, input.request.projectRoot, kind, occurredAt),
+            });
             logger.info('popup_host_mps_first_popup', { projectRoot: input.request.projectRoot, outcome: mps.state });
             // NF Plan B (B-3): content-free per-action capture of the MPS outcome (send/cancel/decline),
             // buffered locally, sent on the feedback-consent flush.

@@ -81,6 +81,28 @@ describe('spawned-window MPS parity (fix 2026-08-06)', () => {
     expect(runPopup).not.toHaveBeenCalled(); // MPS send resolves the popup turn; PE popup skipped
   });
 
+  it('NF apply-details capture: the MPS actionSignalSink is wired to recordActionSignal (mps_apply_details)', async () => {
+    const paths = files();
+    writeFileSync(paths.inputFile, JSON.stringify(await sequenceInput()), 'utf8');
+    const runPopup = vi.fn(async () => ({ state: 'selected_original' as const }));
+    // The runner invokes the sink when the user applies details in-popup, then sends.
+    const runMpsPopup = vi.fn(async (arg: { actionSignalSink?: (kind: string, ts: number) => void }) => {
+      arg.actionSignalSink?.('mps_apply_details', 1234);
+      return { state: 'send' as const, bodyText: 'ENHANCED FIRST PROMPT' };
+    });
+    const recordActionSignal = vi.fn();
+
+    await runPromptEnhancementPopupHostCommandV1(
+      { ...paths, db: ':memory:' },
+      { openStore: async () => ({} as Store), closeStore: vi.fn(), runPopup, runMpsPopup, recordActionSignal },
+    );
+
+    // The apply is recorded (mps_apply_details), AND the terminal outcome (mps_send) is recorded too.
+    const kinds = recordActionSignal.mock.calls.map((c) => c[2]);
+    expect(kinds).toContain('mps_apply_details');
+    expect(kinds).toContain('mps_send');
+  });
+
   it('MPS declined (Esc) falls through to the regular PE popup in the same window', async () => {
     const paths = files();
     writeFileSync(paths.inputFile, JSON.stringify(await sequenceInput()), 'utf8');
