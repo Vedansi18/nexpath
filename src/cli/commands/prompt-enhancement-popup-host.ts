@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { Command } from 'commander';
 import { closeStore, openStore, DEFAULT_DB_PATH, type Store } from '../../store/db.js';
+import { recordActionSignal } from '../../store/feedback-signals.js';
 import {
   validatePromptEnhancementPrepareRequestV1,
   validatePromptEnhancementPrepareResultV1,
@@ -179,6 +180,9 @@ export async function runPromptEnhancementPopupHostCommandV1(
               input.request,
             ),
             costObservabilitySink: (result) => emitPromptEnhancementCostObservabilityV1(result, 'popup_action', logger),
+            // NF Plan B (B-2): content-free per-action telemetry — buffered locally, sent on the
+            // feedback-consent flush. Store-backed sink (this child process owns the store).
+            actionSignalSink: (kind, occurredAt) => recordActionSignal(store!, input.request.projectRoot, kind, occurredAt),
             // F3 (2026-08-07): failed actions stay silent in the popup — reason codes go to the
             // log so a spawned-window failure (the live Windows report) is diagnosable post-hoc.
             actionDiagnosticsSink: (event) => logger.debug('pe_action_failed', {

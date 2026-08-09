@@ -9,7 +9,7 @@ import {
   type PendingPromptEnhancement,
 } from '../../store/pending-prompt-enhancements.js';
 import { isFeedbackEligible, markFeedbackShown } from '../../store/feedback-cadence.js';
-import { recordAdvisoryFired, recordOptionSelected } from '../../store/feedback-signals.js';
+import { recordAdvisoryFired, recordOptionSelected, recordActionSignal } from '../../store/feedback-signals.js';
 import { sendFeedback } from '../../telemetry/feedback-send.js';
 import { runFeedbackPopup, type FeedbackRenderFn, type FeedbackResult } from '../../decision-session/feedback-popup.js';
 import { createFeedbackRenderFn } from '../../decision-session/feedback-tty.js';
@@ -620,6 +620,9 @@ export function registerStopCommand(program: import('commander').Command): void 
             request: pending.request,
             result: pending.result,
             feedbackSink: (event) => recordPromptEnhancementCliFeedbackV1(store, payload.cwd, event, pending.request),
+            // NF Plan B (B-2): content-free per-action telemetry — buffered locally, sent on the
+            // feedback-consent flush (store-backed sink; in-process popup on the Stop hook).
+            actionSignalSink: (kind, occurredAt) => recordActionSignal(store, payload.cwd, kind, occurredAt),
             costObservabilitySink: (result) => emitPromptEnhancementCostObservabilityV1(result, 'popup_action', logger),
             // F3 (2026-08-07): the popup keeps a failed action silent on screen — the typed
             // reason codes land here so the log stays the diagnosable source of truth.

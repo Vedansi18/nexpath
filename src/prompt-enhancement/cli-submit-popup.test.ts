@@ -131,6 +131,34 @@ describe('Claude CLI UserPromptSubmit PE popup consumer', () => {
     expect(buildClaudeUserPromptSubmitHookOutputV1(result)).toBeUndefined();
   });
 
+  it('NF Plan B (B-2): records a content-free action signal (kind + ts) for each captured popup action', async () => {
+    const baseRequest = request();
+    const prepared = await preparePromptEnhancement(baseRequest);
+    const signals: Array<{ kind: string; ts: number }> = [];
+    await runPromptEnhancementCliSubmitPopupV1({
+      request: baseRequest,
+      result: prepared,
+      interaction: interaction([{ type: 'shorter' }, { type: 'go_back' }, { type: 'use_original' }]),
+      actionSignalSink: (kind, ts) => { signals.push({ kind, ts }); },
+    });
+    // One signal per action, in order, regardless of each action's downstream outcome.
+    expect(signals.map((s) => s.kind)).toEqual(['pe_shorter', 'pe_back', 'pe_use_original']);
+    expect(signals.every((s) => typeof s.ts === 'number' && s.ts > 0)).toBe(true);
+  });
+
+  it('NF Plan B (B-2): edit_body is NOT captured (edit noise); close IS captured', async () => {
+    const baseRequest = request();
+    const prepared = await preparePromptEnhancement(baseRequest);
+    const kinds: string[] = [];
+    await runPromptEnhancementCliSubmitPopupV1({
+      request: baseRequest,
+      result: prepared,
+      interaction: interaction([{ type: 'edit_body', text: `${prepared.uiView.body.text}\nx` }, { type: 'close' }]),
+      actionSignalSink: (kind) => { kinds.push(kind); },
+    });
+    expect(kinds).toEqual(['pe_close']);
+  });
+
   it("validates an edited body through the typed action facade before emitting context", async () => {
     const baseRequest = request();
     const prepared = await preparePromptEnhancement(baseRequest);
