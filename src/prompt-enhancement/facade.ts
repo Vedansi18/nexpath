@@ -369,11 +369,17 @@ function buildResult(
   // genericizes them for the public array (which drops reasonCode). Reporting-only; typed codes only.
   // TI-3.2 follow-up Phase 2 (2026-08-09): capture the WHOLE `fallback_or_no_popup` category, not a
   // hand-picked subset. This is the entire class of "the body was reduced/fell back" — the draft-
-  // rejection cause, the substitution marker, partial-drop (Phase 1), and now the previously-excluded
-  // action-preserved / no-sections codes. Any one of these, dropped from the log, means a reduction
-  // that read as a clean run. (The `source_coverage` grounding code is a different category — Phase 3.)
+  // rejection cause, the substitution marker, partial-drop (Phase 1), and the action-preserved /
+  // no-sections codes. Any one of these, dropped from the log, means a reduction that read as a clean run.
+  // TI-3.2 follow-up Phase 3 (2026-08-09): also capture the `source_coverage` grounding code
+  // `project_grounding_source_unavailable` — a `more_project_grounded` action that finds no grounding
+  // source degrades silently (diagnosticsFor genericizes it too). It is a distinct diagnostic category,
+  // so it needs its own clause; the category holds only this one reduction code.
   const compositionFallbackReasonCodes = composed.diagnostics
-    .filter((diagnostic) => diagnostic.category === 'fallback_or_no_popup')
+    .filter((diagnostic) =>
+      diagnostic.category === 'fallback_or_no_popup'
+      || (diagnostic.category === 'source_coverage'
+        && diagnostic.reasonCode === 'project_grounding_source_unavailable'))
     .map((diagnostic) => diagnostic.reasonCode);
   const composerCallVisibility = composed.composerBoundary.inputContract.callVisibilityState;
   const callAndVisibilityMetadata = {

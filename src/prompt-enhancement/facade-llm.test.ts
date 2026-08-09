@@ -196,6 +196,33 @@ describe('E4 — facade LLM composer wiring', () => {
     expect(clean.compositionFallbackReasonCodes).toBeUndefined();
   });
 
+  it('TI-3.2 follow-up (Phase 3): a more_project_grounded action with no grounding source captures project_grounding_source_unavailable', async () => {
+    process.env['OPENAI_API_KEY'] = `sk-${'x'.repeat(40)}`;
+    const base = await preparePromptEnhancement(request());
+    const grounded = base.availableActions.find((entry) => entry.actionType === 'more_project_grounded');
+    expect(grounded).toBeDefined();
+
+    const actionRequest = {
+      ...request(),
+      action: grounded!,
+      currentBodyBinding: {
+        currentBodyId: base.currentBody.currentBodyId,
+        bodyRevision: base.currentBody.bodyRevision,
+        validationDecisionId: base.validationDecisionId,
+        editedBodyText: base.currentBody.text,
+        actionSubmittedAtMs: 2,
+        realUserInitiated: true,
+        sectionSpanEditEvents: [],
+      },
+    } as unknown as Parameters<typeof applyPromptEnhancementAction>[0];
+
+    const result = await applyPromptEnhancementAction(actionRequest);
+    // The fixture's only source is source_a_user_prompt (no hard-fact / template / memory), so the
+    // grounding request cannot be honored — a silent degrade whose source_coverage diagnostic
+    // diagnosticsFor genericizes away. Phase 3 captures it so it reaches the log.
+    expect(result.compositionFallbackReasonCodes).toContain('project_grounding_source_unavailable');
+  });
+
   it('safety still runs on the composed body regardless of the LLM path (validation summary present)', async () => {
     process.env['OPENAI_API_KEY'] = `sk-${'x'.repeat(40)}`;
     const result = await preparePromptEnhancement(request());
