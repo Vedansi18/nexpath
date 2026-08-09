@@ -41,7 +41,7 @@ import {
 import { emitPromptEnhancementCostObservabilityV1 } from '../../prompt-enhancement/cost-measurement.js';
 import { evaluatePromptEnhancementMpsIntakeDecisionV1 } from '../../prompt-enhancement/intake-decision.js';
 import { buildPromptEnhancementCliMpsIntakeEvidenceV1 } from '../../prompt-enhancement/cli-mps-intake-evidence.js';
-import { runPromptEnhancementCliMpsFirstPopupV1, buildPromptEnhancementMpsCancelFeedbackEventV1 } from '../../prompt-enhancement/cli-mps-run.js';
+import { runPromptEnhancementCliMpsFirstPopupV1, buildPromptEnhancementMpsCancelFeedbackEventV1, promptEnhancementMpsActionSignalKindV1 } from '../../prompt-enhancement/cli-mps-run.js';
 import { intakePromptEnhancementSequenceOnFirstSendV1 } from '../../prompt-enhancement/sequence-intake.js';
 import { upsertPendingPromptSequence, getActivePendingPromptSequence } from '../../store/pending-sequences.js';
 import { evaluatePromptEnhancementFutureSequenceRuntimeGateV1 } from '../../prompt-enhancement/future-sequence-runtime-gate.js';
@@ -568,6 +568,10 @@ export function registerStopCommand(program: import('commander').Command): void 
             if (mpsGate.renderPermission === 'mps_render_permitted') {
               const mps = await runPromptEnhancementCliMpsFirstPopupV1({ result: pending.result });
               logger.info('stop_mps_first_popup', { cwd: payload.cwd, outcome: mps.state });
+              // NF Plan B (B-3): content-free per-action capture of the MPS outcome (send/cancel/decline),
+              // buffered locally, sent on the feedback-consent flush. Edits/not_shown map to undefined.
+              const mpsActionKind = promptEnhancementMpsActionSignalKindV1(mps.state);
+              if (mpsActionKind) recordActionSignal(store, payload.cwd, mpsActionKind);
               if (mps.state === 'send' && mps.bodyText.trim().length > 0) {
                 recordPromptEnhancementShownMemoryV1(store, payload.cwd, pending.request);
                 markPromptEnhancementUsedMemoryV1(store, payload.cwd, pending.request);

@@ -73,7 +73,7 @@ describe('spawned-window MPS parity (fix 2026-08-06)', () => {
 
     const output = await runPromptEnhancementPopupHostCommandV1(
       { ...paths, db: ':memory:' },
-      { openStore: async () => ({} as Store), closeStore: vi.fn(), runPopup, runMpsPopup },
+      { openStore: async () => ({} as Store), closeStore: vi.fn(), runPopup, runMpsPopup, recordActionSignal: vi.fn() },
     );
 
     expect(output.result).toEqual({ state: 'selected_current', bodyText: 'ENHANCED FIRST PROMPT' });
@@ -89,7 +89,7 @@ describe('spawned-window MPS parity (fix 2026-08-06)', () => {
 
     const output = await runPromptEnhancementPopupHostCommandV1(
       { ...paths, db: ':memory:' },
-      { openStore: async () => ({} as Store), closeStore: vi.fn(), runPopup, runMpsPopup },
+      { openStore: async () => ({} as Store), closeStore: vi.fn(), runPopup, runMpsPopup, recordActionSignal: vi.fn() },
     );
 
     expect(output.result).toEqual({ state: 'selected_original' });
@@ -110,7 +110,7 @@ describe('spawned-window MPS parity (fix 2026-08-06)', () => {
 
     const output = await runPromptEnhancementPopupHostCommandV1(
       { ...paths, db: ':memory:' },
-      { openStore: async () => ({} as Store), closeStore: vi.fn(), runPopup, runMpsPopup, recordFeedback },
+      { openStore: async () => ({} as Store), closeStore: vi.fn(), runPopup, runMpsPopup, recordFeedback, recordActionSignal: vi.fn() },
     );
 
     expect(output.result).toEqual({ state: 'closed_no_send' });
@@ -128,7 +128,7 @@ describe('spawned-window MPS parity (fix 2026-08-06)', () => {
 
     await runPromptEnhancementPopupHostCommandV1(
       { ...paths, db: ':memory:' },
-      { openStore: async () => ({} as Store), closeStore: vi.fn(), runPopup, runMpsPopup },
+      { openStore: async () => ({} as Store), closeStore: vi.fn(), runPopup, runMpsPopup, recordActionSignal: vi.fn() },
     );
 
     expect(runMpsPopup).not.toHaveBeenCalled();

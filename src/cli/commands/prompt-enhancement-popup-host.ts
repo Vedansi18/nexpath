@@ -19,7 +19,7 @@ import type { PromptEnhancementPopupEventV1 } from '../../prompt-enhancement/pop
 import { emitPromptEnhancementCostObservabilityV1 } from '../../prompt-enhancement/cost-measurement.js';
 import { evaluatePromptEnhancementMpsIntakeDecisionV1 } from '../../prompt-enhancement/intake-decision.js';
 import { buildPromptEnhancementCliMpsIntakeEvidenceV1 } from '../../prompt-enhancement/cli-mps-intake-evidence.js';
-import { runPromptEnhancementCliMpsFirstPopupV1, buildPromptEnhancementMpsCancelFeedbackEventV1 } from '../../prompt-enhancement/cli-mps-run.js';
+import { runPromptEnhancementCliMpsFirstPopupV1, buildPromptEnhancementMpsCancelFeedbackEventV1, promptEnhancementMpsActionSignalKindV1 } from '../../prompt-enhancement/cli-mps-run.js';
 import { recordPromptEnhancementCliFeedbackV1 } from './auto.js';
 import { logger } from '../../logger.js';
 
@@ -51,6 +51,7 @@ export interface PromptEnhancementPopupHostDependenciesV1 {
   runPopup: typeof runPromptEnhancementCliSubmitPopupV1;
   runMpsPopup: typeof runPromptEnhancementCliMpsFirstPopupV1;
   recordFeedback: typeof recordPromptEnhancementCliFeedbackV1;
+  recordActionSignal: typeof recordActionSignal;
   markReady: (path: string) => void;
 }
 
@@ -67,6 +68,7 @@ function defaultDependencies(): PromptEnhancementPopupHostDependenciesV1 {
     runPopup: runPromptEnhancementCliSubmitPopupV1,
     runMpsPopup: runPromptEnhancementCliMpsFirstPopupV1,
     recordFeedback: recordPromptEnhancementCliFeedbackV1,
+    recordActionSignal,
     markReady: writePromptEnhancementPopupHostReadyMarkerV1,
   };
 }
@@ -147,6 +149,10 @@ export async function runPromptEnhancementPopupHostCommandV1(
             markReadyOnce();
             const mps = await dependencies.runMpsPopup({ result: input.result });
             logger.info('popup_host_mps_first_popup', { projectRoot: input.request.projectRoot, outcome: mps.state });
+            // NF Plan B (B-3): content-free per-action capture of the MPS outcome (send/cancel/decline),
+            // buffered locally, sent on the feedback-consent flush.
+            const mpsActionKind = promptEnhancementMpsActionSignalKindV1(mps.state);
+            if (mpsActionKind) dependencies.recordActionSignal(store!, input.request.projectRoot, mpsActionKind);
             if (mps.state === 'send' && mps.bodyText.trim().length > 0) {
               popupResult = { state: 'selected_current', bodyText: mps.bodyText };
               mpsHandled = true;
@@ -182,7 +188,7 @@ export async function runPromptEnhancementPopupHostCommandV1(
             costObservabilitySink: (result) => emitPromptEnhancementCostObservabilityV1(result, 'popup_action', logger),
             // NF Plan B (B-2): content-free per-action telemetry — buffered locally, sent on the
             // feedback-consent flush. Store-backed sink (this child process owns the store).
-            actionSignalSink: (kind, occurredAt) => recordActionSignal(store!, input.request.projectRoot, kind, occurredAt),
+            actionSignalSink: (kind, occurredAt) => dependencies.recordActionSignal(store!, input.request.projectRoot, kind, occurredAt),
             // F3 (2026-08-07): failed actions stay silent in the popup — reason codes go to the
             // log so a spawned-window failure (the live Windows report) is diagnosable post-hoc.
             actionDiagnosticsSink: (event) => logger.debug('pe_action_failed', {

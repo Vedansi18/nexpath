@@ -9,7 +9,7 @@ import { preparePromptEnhancement } from './facade.js';
 import { getPromptStartStopSourceSnapshot } from './source-reality.js';
 import { evaluatePromptEnhancementMpsIntakeDecisionV1 } from './intake-decision.js';
 import { buildPromptEnhancementCliMpsIntakeEvidenceV1 } from './cli-mps-intake-evidence.js';
-import { runPromptEnhancementCliMpsFirstPopupV1, buildPromptEnhancementMpsCancelFeedbackEventV1 } from './cli-mps-run.js';
+import { runPromptEnhancementCliMpsFirstPopupV1, buildPromptEnhancementMpsCancelFeedbackEventV1, promptEnhancementMpsActionSignalKindV1 } from './cli-mps-run.js';
 import { isPromptEnhancementSequenceShapedTextV1 } from './routing-taxonomy.js';
 
 const MULTI_INTENT = 'Fix the failing payment test and add a rate limiter to the login endpoint.';
@@ -283,5 +283,13 @@ describe('MPS CLI wiring (owner ruling 2026-08-06: CLI complete, extension pendi
     const result = await preparePromptEnhancement(request(SINGLE_INTENT));
     const outcome = await runPromptEnhancementCliMpsFirstPopupV1({ result, interaction: scripted([]) });
     expect(outcome.state).toBe('not_shown');
+  });
+
+  it('NF Plan B (B-3): maps MPS outcome states to content-free action kinds; non-actions → undefined', () => {
+    expect(promptEnhancementMpsActionSignalKindV1('send')).toBe('mps_send');
+    expect(promptEnhancementMpsActionSignalKindV1('cancelled')).toBe('mps_cancel');
+    expect(promptEnhancementMpsActionSignalKindV1('declined')).toBe('mps_decline');
+    expect(promptEnhancementMpsActionSignalKindV1('interruption')).toBe('mps_interruption');
+    expect(promptEnhancementMpsActionSignalKindV1('not_shown')).toBeUndefined();
   });
 });
