@@ -1081,6 +1081,11 @@ describe('prompt-enhancement composer and deterministic fallback', () => {
     expect(result.actionInteractionState).toBe('timeout_kept_previous');
     expect(result.sendPolicy).toBe('send_current');
     expect(result.diagnostics[0]?.reasonCode).toBe('action_failed_previous_body_preserved:timeout');
+    // TI-3.2 follow-up (Phase 2): this reason is a `fallback_or_no_popup` diagnostic, so the widened
+    // facade capture filter (category-based) now carries it to the log. (This action-failed path is
+    // compose-layer only — the facade's actions are instant-deterministic — so its capture is
+    // guaranteed by category membership rather than a facade run.)
+    expect(result.diagnostics[0]?.category).toBe('fallback_or_no_popup');
   });
 
   it('binds successful directional action recomposition to the previous current body revision', () => {
