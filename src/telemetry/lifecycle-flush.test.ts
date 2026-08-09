@@ -183,7 +183,8 @@ describe('flushLifecycle', () => {
 });
 
 describe('flushIfTelemetryOn', () => {
-  it('flushes immediately when telemetry is on (default)', async () => {
+  it('flushes immediately when telemetry is on (explicitly enabled)', async () => {
+    setConfig(store, 'telemetry.enabled', 'true'); // off by default now (NF Plan A) — enable to test the on-path
     setInstalledAtIfMissing(store, 5000);
     recordAdvisoryFired(store, '/a', 100);
 

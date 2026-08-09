@@ -416,7 +416,7 @@ const defaultInstallPrompts: InstallPrompts = {
         '',
         'Get a key: https://platform.openai.com/api-keys',
       ].join('\n'),
-      'Step 1 of 3 — OpenAI API Key (required)',
+      'Step 1 of 2 — OpenAI API Key (required)',
     );
 
     if (ctx.hasEnvKey) {
@@ -527,7 +527,7 @@ export async function installAction(
   setInstalledAtIfMissing(store);
 
   let apiKeySource:  InstallSummary['apiKey']['source'] = 'skipped';
-  let telemetryEnabled = true;
+  let telemetryEnabled = false;
 
   try {
     // ── Step 1: API key ───────────────────────────────────────────────────────
@@ -562,30 +562,18 @@ export async function installAction(
       apiKeySource = 'skipped';
     }
 
-    // ── Step 2: Telemetry ─────────────────────────────────────────────────────
-    if (!opts.yes) {
-      const consent = await promptFn.telemetryConsent();
-      if (consent.kind === 'cancel') {
-        clackCancel('Setup aborted — no changes made');
-        closeStore(store);
-        return null;
-      }
-      telemetryEnabled = consent.kind === 'enable';
-      setConfig(store, 'telemetry.enabled',      String(telemetryEnabled));
-      setConfig(store, 'telemetry_sync_enabled', String(telemetryEnabled));
+    // ── Telemetry: OFF by default, NOT prompted at install (NF Plan A) ─────────
+    // Telemetry starts OFF and there is no install-time telemetry step. Consent to SEND is the explicit
+    // feedback-popup click, not an install toggle (the feedback send stays independent of this flag). Seed
+    // default-off on first install; preserve an existing choice on re-run (e.g. a user who enabled it
+    // later, or the VS Code two-pass setup — must not silently flip a prior choice). Same interactive and
+    // `--yes` behaviour now — no prompt either way.
+    if (!isConfigSet(store.db, 'telemetry.enabled')) {
+      setConfig(store, 'telemetry.enabled',      'false');
+      setConfig(store, 'telemetry_sync_enabled', 'false');
+      telemetryEnabled = false;
     } else {
-      // --yes (non-interactive): preserve an existing telemetry choice. A re-run
-      // — e.g. the VS Code extension's two-pass setup (`--for cli` interactive,
-      // then `--for vscode --yes`) — must NOT silently re-enable telemetry the
-      // user disabled in the first pass. Mirrors how advisory_frequency / role
-      // below only write a default when unset. On a first install (unset) it
-      // still defaults to enabled, preserving prior `--yes` behaviour.
-      if (!isConfigSet(store.db, 'telemetry.enabled')) {
-        setConfig(store, 'telemetry.enabled',      'true');
-        setConfig(store, 'telemetry_sync_enabled', 'true');
-      } else {
-        telemetryEnabled = getConfig(store.db, 'telemetry.enabled') === 'true';
-      }
+      telemetryEnabled = getConfig(store.db, 'telemetry.enabled') === 'true';
     }
   } finally {
     if (store.dbPath !== ':memory:' || telemetryEnabled !== true) {
@@ -593,7 +581,7 @@ export async function installAction(
     }
   }
 
-  // ── Step 3: Agent detection + registration ────────────────────────────────
+  // ── Step 2: Agent detection + registration ────────────────────────────────
   // When the VS Code extension drives setup it targets ONLY the IDE the user is
   // in (NEXPATH_ONLY_AGENT = cursor|windsurf). Additive: with the env unset this
   // is a no-op and the legacy multi-agent behaviour is byte-identical.
