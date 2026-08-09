@@ -1227,15 +1227,65 @@ describe('installAction', () => {
 // ── uninstallAction ───────────────────────────────────────────────────────────
 
 describe('uninstallAction', () => {
-  it('always prints prompt history retention message', async () => {
+  it('retains the store DB + prints the retention message when data deletion is declined', async () => {
     const { dir, cleanup } = tmpDir();
     const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
     try {
       const paths = resolveAgentPaths(dir, dir, dir);
-      await uninstallAction({ paths, execFn: () => {}, apiKeyConfirmFn: async () => false });
+      const dbPath = join(dir, 'prompt-store.db');
+      writeFileSync(dbPath, 'x'); // simulate an existing local store
+      await uninstallAction({ paths, execFn: () => {}, apiKeyConfirmFn: async () => false, storeDeleteConfirmFn: async () => false, dbPath });
       const output = spy.mock.calls.map((c) => c[0] as string).join('\n');
       expect(output).toContain('Prompt history retained');
       expect(output).toContain('nexpath store delete');
+      expect(existsSync(dbPath)).toBe(true); // declined → retained
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('NF: deletes the local store DB on uninstall when confirmed (default yes)', async () => {
+    const { dir, cleanup } = tmpDir();
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const paths = resolveAgentPaths(dir, dir, dir);
+      const dbPath = join(dir, 'prompt-store.db');
+      writeFileSync(dbPath, 'x'); // simulate an existing local store
+      await uninstallAction({ paths, execFn: () => {}, apiKeyConfirmFn: async () => false, storeDeleteConfirmFn: async () => true, dbPath });
+      expect(existsSync(dbPath)).toBe(false); // confirmed → deleted
+      const output = spy.mock.calls.map((c) => c[0] as string).join('\n');
+      expect(output).toContain('Local data deleted');
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('NF: --yes deletes the local store DB without prompting', async () => {
+    const { dir, cleanup } = tmpDir();
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const paths = resolveAgentPaths(dir, dir, dir);
+      const dbPath = join(dir, 'prompt-store.db');
+      writeFileSync(dbPath, 'x');
+      const neverCalled = vi.fn(async () => false);
+      await uninstallAction({ paths, execFn: () => {}, yes: true, apiKeyConfirmFn: async () => false, storeDeleteConfirmFn: neverCalled, dbPath });
+      expect(existsSync(dbPath)).toBe(false); // --yes → deleted
+      expect(neverCalled).not.toHaveBeenCalled(); // --yes short-circuits the prompt
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('NF: a missing store DB is a silent no-op on delete', async () => {
+    const { dir, cleanup } = tmpDir();
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const paths = resolveAgentPaths(dir, dir, dir);
+      const dbPath = join(dir, 'does-not-exist.db');
+      await uninstallAction({ paths, execFn: () => {}, apiKeyConfirmFn: async () => false, storeDeleteConfirmFn: async () => true, dbPath });
+      expect(existsSync(dbPath)).toBe(false);
+      const output = spy.mock.calls.map((c) => c[0] as string).join('\n');
+      expect(output).toContain('Local data deleted'); // no crash; reports deleted
     } finally {
       cleanup();
     }
@@ -1248,7 +1298,7 @@ describe('uninstallAction', () => {
       mkdirSync(join(dir, '.cursor'), { recursive: true });
       const paths = resolveAgentPaths(dir, dir, dir);
       writeMcpEntry(paths.cursor, buildStandardEntry(false));
-      await uninstallAction({ paths, execFn: () => {}, apiKeyConfirmFn: async () => false });
+      await uninstallAction({ paths, execFn: () => {}, apiKeyConfirmFn: async () => false, storeDeleteConfirmFn: async () => false });
       const servers = readJson(paths.cursor).mcpServers as Record<string, unknown>;
       expect(servers[MCP_SERVER_NAME]).toBeUndefined();
     } finally {
@@ -1263,7 +1313,7 @@ describe('uninstallAction', () => {
       mkdirSync(join(dir, '.config', 'opencode'), { recursive: true });
       const paths = resolveAgentPaths(dir, dir, dir);
       writeOpenCodeEntry(paths.openCodeGlobal, buildOpenCodeEntry(false));
-      await uninstallAction({ paths, execFn: () => {}, apiKeyConfirmFn: async () => false });
+      await uninstallAction({ paths, execFn: () => {}, apiKeyConfirmFn: async () => false, storeDeleteConfirmFn: async () => false });
       const mcp = readJson(paths.openCodeGlobal).mcp as Record<string, unknown>;
       expect(mcp[MCP_SERVER_NAME]).toBeUndefined();
     } finally {
@@ -1278,7 +1328,7 @@ describe('uninstallAction', () => {
       mkdirSync(join(dir, '.cursor'), { recursive: true });
       const paths = resolveAgentPaths(dir, dir, dir);
       // Don't write cursor config — so cursor has no nexpath entry
-      await uninstallAction({ paths, execFn: () => {}, apiKeyConfirmFn: async () => false });
+      await uninstallAction({ paths, execFn: () => {}, apiKeyConfirmFn: async () => false, storeDeleteConfirmFn: async () => false });
       const output = spy.mock.calls.map((c) => c[0] as string).join('\n');
       expect(output).toContain('not registered');
     } finally {
@@ -1296,6 +1346,7 @@ describe('uninstallAction', () => {
         paths,
         execFn: () => { throw new Error('claude not found'); },
         apiKeyConfirmFn: async () => false,
+        storeDeleteConfirmFn: async () => false,
       });
       const servers = readJson(paths.claudeJson).mcpServers as Record<string, unknown>;
       expect(servers[MCP_SERVER_NAME]).toBeUndefined();
@@ -1311,7 +1362,7 @@ describe('uninstallAction', () => {
       const paths = resolveAgentPaths(dir, dir, dir);
       // Pre-write the hook so uninstall has something to remove
       writeHookEntry(paths.claudeSettings, dir, 'linux');
-      await uninstallAction({ paths, execFn: () => {}, apiKeyConfirmFn: async () => false });
+      await uninstallAction({ paths, execFn: () => {}, apiKeyConfirmFn: async () => false, storeDeleteConfirmFn: async () => false });
       // File should no longer contain the nexpath hook group
       const data  = readJson(paths.claudeSettings) as Record<string, unknown>;
       const hooks = data.hooks as Record<string, unknown>;
@@ -1330,7 +1381,7 @@ describe('uninstallAction', () => {
     try {
       const paths = resolveAgentPaths(dir, dir, dir);
       // settings.json never written — hook was never registered
-      await uninstallAction({ paths, execFn: () => {}, apiKeyConfirmFn: async () => false });
+      await uninstallAction({ paths, execFn: () => {}, apiKeyConfirmFn: async () => false, storeDeleteConfirmFn: async () => false });
       const output = spy.mock.calls.map((c) => c[0] as string).join('\n');
       expect(output).toContain('hook not registered');
     } finally { cleanup(); }
@@ -1345,7 +1396,7 @@ describe('uninstallAction', () => {
       mkdirSync(join(dir, '.config', 'Cursor'), { recursive: true });
       vi.stubEnv('HOME', dir);
       const paths = resolveAgentPaths(dir, dir, dir);
-      await uninstallAction({ paths, execFn: () => {}, apiKeyConfirmFn: async () => false, dbPath: ':memory:' });
+      await uninstallAction({ paths, execFn: () => {}, apiKeyConfirmFn: async () => false, storeDeleteConfirmFn: async () => false, dbPath: ':memory:' });
       const output = spy.mock.calls.map((c) => c[0] as string).join('\n');
       expect(output).toContain('Cursor');
       expect(output).toContain('cursor --uninstall-extension');
@@ -1362,7 +1413,7 @@ describe('uninstallAction', () => {
       mkdirSync(join(dir, '.config', 'Windsurf'), { recursive: true });
       vi.stubEnv('HOME', dir);
       const paths = resolveAgentPaths(dir, dir, dir);
-      await uninstallAction({ paths, execFn: () => {}, apiKeyConfirmFn: async () => false, dbPath: ':memory:' });
+      await uninstallAction({ paths, execFn: () => {}, apiKeyConfirmFn: async () => false, storeDeleteConfirmFn: async () => false, dbPath: ':memory:' });
       const output = spy.mock.calls.map((c) => c[0] as string).join('\n');
       expect(output).toContain('Windsurf');
       expect(output).toContain('windsurf --uninstall-extension');
@@ -1384,7 +1435,7 @@ describe('uninstallAction', () => {
       mkdirSync(join(dir, '.config', 'Windsurf'), { recursive: true });
       vi.stubEnv('HOME', dir);
       const paths = resolveAgentPaths(dir, dir, dir);
-      await uninstallAction({ paths, execFn: () => {}, apiKeyConfirmFn: async () => false, dbPath: ':memory:' });
+      await uninstallAction({ paths, execFn: () => {}, apiKeyConfirmFn: async () => false, storeDeleteConfirmFn: async () => false, dbPath: ':memory:' });
       const output = spy.mock.calls.map((c) => c[0] as string).join('\n');
       expect(uninstallSpy).toHaveBeenCalledOnce();
       expect(output).toMatch(/failed:.*synthetic uninstall failure/);

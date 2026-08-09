@@ -1,5 +1,5 @@
 import { execSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { confirm, isCancel, select, password, note, intro, outro, cancel as clackCancel } from '@clack/prompts';
@@ -948,21 +948,33 @@ const defaultUninstallApiKeyConfirm: UninstallApiKeyConfirmFn = async () => {
   return !isCancel(answer) && answer === true;
 };
 
+export type UninstallStoreDeleteConfirmFn = () => Promise<boolean>;
+
+const defaultUninstallStoreDeleteConfirm: UninstallStoreDeleteConfirmFn = async () => {
+  const answer = await confirm({
+    message:      'Delete all local nexpath data (prompt history, config, buffered signals)?',
+    initialValue: true,
+  });
+  return !isCancel(answer) && answer === true;
+};
+
 export async function uninstallAction(
   {
     paths = resolveAgentPaths(),
     execFn,
     apiKeyConfirmFn = defaultUninstallApiKeyConfirm,
+    storeDeleteConfirmFn = defaultUninstallStoreDeleteConfirm,
     yes = false,
     projectRoot = process.cwd(),
     dbPath,
   }: {
-    paths?:           AgentPaths;
-    execFn?:          ExecFn;
-    apiKeyConfirmFn?: UninstallApiKeyConfirmFn;
-    yes?:             boolean;
-    projectRoot?:     string;
-    dbPath?:          string;
+    paths?:               AgentPaths;
+    execFn?:              ExecFn;
+    apiKeyConfirmFn?:     UninstallApiKeyConfirmFn;
+    storeDeleteConfirmFn?: UninstallStoreDeleteConfirmFn;
+    yes?:                 boolean;
+    projectRoot?:         string;
+    dbPath?:              string;
   } = {},
 ): Promise<void> {
   // Uninstall must clean up registration entries from agents that may have
@@ -1042,21 +1054,36 @@ export async function uninstallAction(
     }
   }
 
-  // ── Telemetry config cleanup ─────────────────────────────────────────────
-  try {
-    const store = await openStore(dbPath ?? DEFAULT_DB_PATH);
-    try {
-      setConfig(store, 'telemetry.enabled',      'false');
-      setConfig(store, 'telemetry_sync_enabled', 'false');
-      console.log('✓ Telemetry disabled in local config.');
-    } finally {
-      closeStore(store);
-    }
-  } catch {
-    // Best-effort — never crash uninstall over a config write failure.
-  }
-
+  // ── Local data cleanup (NF: delete on uninstall) ─────────────────────────
+  // Owner ruling 2026-08-09: uninstall should leave nothing behind — delete the store DB (prompt
+  // history, config, and the content-free feedback/action signals all live there). Confirmed
+  // (default yes) or forced by --yes; on decline we keep today's behaviour (retain + telemetry off).
+  const resolvedDbPath = dbPath ?? DEFAULT_DB_PATH;
+  const shouldDeleteData = yes || await storeDeleteConfirmFn();
   console.log('');
-  console.log('Prompt history retained at ~/.nexpath/prompt-store.db');
-  console.log('To delete it: nexpath store delete');
+  if (shouldDeleteData) {
+    try {
+      if (existsSync(resolvedDbPath)) unlinkSync(resolvedDbPath);
+      console.log('✓ Local data deleted (prompt history, config, and buffered signals).');
+    } catch (err) {
+      // Best-effort — never crash uninstall over a delete failure (e.g. a locked file).
+      console.log(`- Could not delete local data (${(err as Error).message}); remove ${resolvedDbPath} manually.`);
+    }
+  } else {
+    // Declined: retain the DB, but ensure telemetry stays off in the retained config.
+    try {
+      const store = await openStore(resolvedDbPath);
+      try {
+        setConfig(store, 'telemetry.enabled',      'false');
+        setConfig(store, 'telemetry_sync_enabled', 'false');
+        console.log('✓ Telemetry disabled in local config.');
+      } finally {
+        closeStore(store);
+      }
+    } catch {
+      // Best-effort — never crash uninstall over a config write failure.
+    }
+    console.log('Prompt history retained at ~/.nexpath/prompt-store.db');
+    console.log('To delete it later: nexpath store delete');
+  }
 }
