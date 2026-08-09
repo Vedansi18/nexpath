@@ -1,5 +1,6 @@
 import * as readline from 'node:readline';
 import type { PromptEnhancementPrepareResultV1 } from './contracts.js';
+import type { PromptActionSignalKind } from '../store/feedback-signals.js';
 import {
   buildPromptEnhancementMpsFirstPopupV1,
   createPromptEnhancementMpsCurrentBodyIntentV1,
@@ -79,6 +80,23 @@ export type PromptEnhancementCliMpsOutcomeV1 =
   | { state: 'declined' }
   | { state: 'cancelled'; feedback?: PromptEnhancementCliMpsCancelFeedbackV1 }
   | { state: 'not_shown'; reasonCodes: readonly string[] };
+
+/**
+ * NF Plan B (B-3): map an MPS popup outcome state to its content-free per-action signal kind. Covers the
+ * first-popup states (send / declined / cancelled) and the continuation-only `interruption` (for when
+ * that runner goes live). `not_shown` (and edits) are not actions → undefined.
+ */
+export function promptEnhancementMpsActionSignalKindV1(
+  state: string,
+): PromptActionSignalKind | undefined {
+  switch (state) {
+    case 'send':         return 'mps_send';
+    case 'cancelled':    return 'mps_cancel';
+    case 'declined':     return 'mps_decline';
+    case 'interruption': return 'mps_interruption';
+    default:             return undefined;
+  }
+}
 
 const INTERACTIVE_ROW_COUNT = 3;
 const DETAILS_DISPLAY_ROWS = 5;

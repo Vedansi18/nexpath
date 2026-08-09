@@ -4,6 +4,8 @@ import { setConfig } from '../store/config.js';
 import {
   recordAdvisoryFired,
   recordOptionSelected,
+  recordActionSignal,
+  readAllActionSignals,
   setInstalledAtIfMissing,
   isInstalledEventSent,
   markInstalledEventSent,
@@ -20,7 +22,7 @@ interface Sent { event: string; ts: number; timestamp: string }
 function recordingFetch(sent: Sent[], failOn: Array<[string, number]> = []): FetchLike {
   return async (_url, init) => {
     const env = JSON.parse(init.body) as PostHogSingleEnvelope;
-    const tsProp = (env.properties.advisory_fire_ts ?? env.properties.option_select_ts ?? env.properties.installed_at) as number;
+    const tsProp = (env.properties.advisory_fire_ts ?? env.properties.option_select_ts ?? env.properties.action_ts ?? env.properties.installed_at) as number;
     const fail = failOn.some(([e, t]) => e === env.event && t === tsProp);
     if (!fail) sent.push({ event: env.event, ts: tsProp, timestamp: env.timestamp });
     return { ok: !fail, status: fail ? 500 : 200, headers: { get: () => null } };
@@ -47,6 +49,28 @@ describe('flushLifecycle', () => {
     expect(installs[0]!.ts).toBe(5000);
     expect(installs[0]!.timestamp).toBe(new Date(5000).toISOString());
     expect(isInstalledEventSent(store)).toBe(true);
+  });
+
+  it('NF Plan B: flushes each buffered per-action signal as its own event (kind + ts) and prunes it', async () => {
+    recordActionSignal(store, '/a', 'pe_shorter', 100);
+    recordActionSignal(store, '/a', 'mps_send', 200);
+
+    await flushLifecycle(store, { fetch: recordingFetch(sent) });
+
+    const shorter = sent.filter((s) => s.event === 'pe_shorter');
+    const mpsSend = sent.filter((s) => s.event === 'mps_send');
+    expect(shorter).toHaveLength(1);
+    expect(shorter[0]!.ts).toBe(100);
+    expect(shorter[0]!.timestamp).toBe(new Date(100).toISOString());
+    expect(mpsSend).toHaveLength(1);
+    expect(readAllActionSignals(store)).toEqual([]); // sent + pruned
+  });
+
+  it('NF Plan B: a failed action send stays buffered (not pruned) for the next flush', async () => {
+    recordActionSignal(store, '/a', 'pe_shorter', 100);
+    await flushLifecycle(store, { fetch: recordingFetch(sent, [['pe_shorter', 100]]) });
+    expect(sent.filter((s) => s.event === 'pe_shorter')).toHaveLength(0); // send failed
+    expect(readAllActionSignals(store)).toEqual([{ kind: 'pe_shorter', occurredAt: 100 }]); // still buffered
   });
 
   it('does not re-send the install event once already sent', async () => {
@@ -183,7 +207,8 @@ describe('flushLifecycle', () => {
 });
 
 describe('flushIfTelemetryOn', () => {
-  it('flushes immediately when telemetry is on (default)', async () => {
+  it('flushes immediately when telemetry is on (explicitly enabled)', async () => {
+    setConfig(store, 'telemetry.enabled', 'true'); // off by default now (NF Plan A) — enable to test the on-path
     setInstalledAtIfMissing(store, 5000);
     recordAdvisoryFired(store, '/a', 100);
 

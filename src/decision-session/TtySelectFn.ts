@@ -711,9 +711,12 @@ export function planWindowsPopupSpawn(
   launcherScriptPath?: string,
 ): { cmd: string; args: string[] } {
   if (launcherScriptPath) {
-    // No-jump (P6): open MINIMIZED so the window never flashes at the default centre; the launcher's
-    // position .ps1 restores it straight to the docked rect (SetWindowPlacement).
-    return { cmd: 'cmd.exe', args: ['/c', 'start', '/MIN', '/WAIT', title, 'cmd', '/c', launcherScriptPath] };
+    // Windows visible-launch fix (2026-08-09): open VISIBLE, never minimized. The P6 no-jump /MIN left
+    // the window stuck in the taskbar whenever the best-effort restore did not fire (Win11 + Windows
+    // Terminal: GetConsoleWindow targets the hidden pseudo-console; or PowerShell blocked). The
+    // launcher's position .ps1 still docks the visible window best-effort — worst case a brief
+    // flash-then-dock, never an invisible popup.
+    return { cmd: 'cmd.exe', args: ['/c', 'start', '/WAIT', title, 'cmd', '/c', launcherScriptPath] };
   }
   return {
     cmd:  'cmd.exe',

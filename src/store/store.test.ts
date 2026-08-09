@@ -439,7 +439,7 @@ describe('store — config', () => {
     expect(getConfig(store.db, 'prompt_capture_enabled')).toBe('true');
     expect(getConfig(store.db, 'prompt_store_max_per_project')).toBe('500');
     expect(getConfig(store.db, 'prompt_store_max_db_mb')).toBe('100');
-    expect(getConfig(store.db, 'telemetry.enabled')).toBe('true');
+    expect(getConfig(store.db, 'telemetry.enabled')).toBe('false'); // off by default (NF Plan A)
   });
 
   it('getConfig returns undefined for unknown non-default keys', () => {
@@ -463,7 +463,7 @@ describe('store — config', () => {
     expect(all['prompt_capture_enabled']).toBe('false');       // overridden
     expect(all['prompt_store_max_per_project']).toBe('500');   // still default
     expect(all['prompt_store_max_db_mb']).toBe('100');         // still default
-    expect(all['telemetry.enabled']).toBe('true');             // still default
+    expect(all['telemetry.enabled']).toBe('false');            // still default (off, NF Plan A)
   });
 
   it('getAllConfig includes stored custom keys', () => {

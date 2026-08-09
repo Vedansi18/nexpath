@@ -44,6 +44,7 @@ describe('uninstallAction — API key cleanup (Plan #1 Phase 6)', () => {
       await uninstallAction({
         paths,
         execFn: () => {},
+        storeDeleteConfirmFn: async () => false,
         apiKeyConfirmFn: async () => true,
       });
       expect(resolver.removeApiKey).toHaveBeenCalledTimes(1);
@@ -60,6 +61,7 @@ describe('uninstallAction — API key cleanup (Plan #1 Phase 6)', () => {
       await uninstallAction({
         paths,
         execFn: () => {},
+        storeDeleteConfirmFn: async () => false,
         apiKeyConfirmFn: async () => false,
       });
       expect(resolver.removeApiKey).not.toHaveBeenCalled();
@@ -79,6 +81,7 @@ describe('uninstallAction — API key cleanup (Plan #1 Phase 6)', () => {
       await uninstallAction({
         paths,
         execFn: () => {},
+        storeDeleteConfirmFn: async () => false,
         apiKeyConfirmFn: confirmFn,
       });
       expect(confirmFn).not.toHaveBeenCalled();
@@ -97,6 +100,7 @@ describe('uninstallAction — API key cleanup (Plan #1 Phase 6)', () => {
       await uninstallAction({
         paths,
         execFn: () => {},
+        storeDeleteConfirmFn: async () => false,
         yes: true,
         apiKeyConfirmFn: confirmFn,
       });
@@ -115,6 +119,7 @@ describe('uninstallAction — API key cleanup (Plan #1 Phase 6)', () => {
       await uninstallAction({
         paths,
         execFn: () => {},
+        storeDeleteConfirmFn: async () => false,
         apiKeyConfirmFn: async () => true,
       });
       const lines = logSpy.mock.calls.map(c => c[0] as string);
@@ -135,6 +140,7 @@ describe('uninstallAction — API key cleanup (Plan #1 Phase 6)', () => {
       await uninstallAction({
         paths,
         execFn: () => {},
+        storeDeleteConfirmFn: async () => false,
         projectRoot: '/explicit/project',
         apiKeyConfirmFn: async () => true,
       });
@@ -152,6 +158,7 @@ describe('uninstallAction — API key cleanup (Plan #1 Phase 6)', () => {
       await expect(uninstallAction({
         paths,
         execFn: () => {},
+        storeDeleteConfirmFn: async () => false,
         apiKeyConfirmFn: async () => true,
       })).rejects.toThrow(/keychain unavailable/);
       expect(resolver.removeApiKey).toHaveBeenCalledTimes(1);
@@ -167,6 +174,7 @@ describe('uninstallAction — API key cleanup (Plan #1 Phase 6)', () => {
       await uninstallAction({
         paths,
         execFn: () => {},
+        storeDeleteConfirmFn: async () => false,
         yes: true,
       });
       expect(resolver.removeApiKey).not.toHaveBeenCalled();
@@ -183,6 +191,7 @@ describe('uninstallAction — API key cleanup (Plan #1 Phase 6)', () => {
       await uninstallAction({
         paths,
         execFn: () => {},
+        storeDeleteConfirmFn: async () => false,
         apiKeyConfirmFn: async () => true,
       });
       const lines = logSpy.mock.calls.map(c => c[0] as string);
@@ -203,6 +212,7 @@ describe('uninstallAction — API key cleanup (Plan #1 Phase 6)', () => {
       await uninstallAction({
         paths,
         execFn: () => {},
+        storeDeleteConfirmFn: async () => false,
       });
       const text = logSpy.mock.calls.map(c => c[0] as string).join('\n');
       expect(text).toContain('MCP registration removed from all agents');

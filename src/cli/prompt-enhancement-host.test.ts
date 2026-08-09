@@ -423,7 +423,7 @@ describe('PE1.3 — Linux PE popup host launcher', () => {
     expect(script).not.toContain('powershell');
   });
 
-  it('right-docks the Windows console (P3): mode con sizes + MoveWindow .ps1 positions, before node, fail-open', () => {
+  it('right-docks the Windows console (P3): mode con sizes + position .ps1 positions, before node, fail-open', () => {
     const geometry = computeDockedPopupGeometry({ x: 0, y: 0, widthPx: 1920, heightPx: 1080 });
     const script = buildPromptEnhancementWindowsLauncherScriptV1({
       nodeExecPath: 'C:/nodejs/node.exe', cliEntryPath: 'C:/n/dist/cli/index.js',
@@ -441,17 +441,17 @@ describe('PE1.3 — Linux PE popup host launcher', () => {
     expect(script.indexOf('powershell')).toBeLessThan(nodeIdx);
   });
 
-  it('builds a fail-open MoveWindow position .ps1 with the docked pixel rect (P3)', () => {
+  it('builds a fail-open position .ps1 that resolves the real top-level window by title and SetWindowPos docks it', () => {
     const geometry = computeDockedPopupGeometry({ x: 0, y: 0, widthPx: 1920, heightPx: 1080 });
     const ps = buildPromptEnhancementWindowsPositionScriptV1(geometry);
     expect(ps).toContain('$ErrorActionPreference = "SilentlyContinue"'); // fully fail-open
-    expect(ps).toContain('GetConsoleWindow');
-    // No-jump (P6): SetWindowPlacement restores from minimized straight to the docked normal rect.
-    expect(ps).toContain('SetWindowPlacement');
-    expect(ps).toContain('$wp.normLeft = 768; $wp.normTop = 0; $wp.normRight = 1920; $wp.normBottom = 1080');
-    expect(ps).toContain('MoveWindow($h, 768, 0, 1152, 1080, $true)');
-    // Safety net: always show normal so the window is never left minimized.
-    expect(ps).toContain('ShowWindow($h, 1)');
+    // Windows Terminal: resolve the visible window by our "Nexpath …" title, not the hidden pseudo-console.
+    expect(ps).toContain("MainWindowTitle -like 'Nexpath*'");
+    // Phase 2: resolve exactly this popup by picking the most-recently-started match.
+    expect(ps).toContain('Sort-Object StartTime -Descending');
+    expect(ps).toContain('GetConsoleWindow'); // conhost fallback
+    // Dock position + size in one SetWindowPos call on the real window.
+    expect(ps).toContain('SetWindowPos($h, [IntPtr]::Zero, 768, 0, 1152, 1080, 0x0040)');
   });
 
   it('plans a macOS Terminal.app spawn via osascript that runs the shell launcher', () => {

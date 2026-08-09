@@ -675,9 +675,12 @@ export async function runPromptEnhancementCliPopupHostLaunchV1(input: {
       });
       writeFileSync(launcherScriptPath, launcherScript, 'utf8');
       if (process.env.NEXPATH_DEBUG) process.stderr.write(`[nexpath] launch.cmd (${launcherScriptPath}):\n${launcherScript}\n`);
-      // No-jump (P6): minimize on spawn only when we wrote a position script (geometry known), so
-      // the launcher restores it straight to the docked rect. Without geometry → normal spawn.
-      plan = planPromptEnhancementWindowsTerminalLaunchV1({ launcherScriptPath, minimized: Boolean(positionScriptPath) });
+      // Windows visible-launch fix (2026-08-09): open the window VISIBLE, never minimized. The P6
+      // no-jump minimize left the popup stuck in the taskbar whenever the best-effort PowerShell
+      // restore did not take effect (Win11 + Windows Terminal: GetConsoleWindow targets the hidden
+      // pseudo-console, not the real window; or PowerShell blocked). The position .ps1 still docks the
+      // now-visible window best-effort — worst case is a brief flash-then-dock, never an invisible popup.
+      plan = planPromptEnhancementWindowsTerminalLaunchV1({ launcherScriptPath });
     } else if (input.capability.method === 'mac_terminal') {
       // Write the shell launcher (0o700) into the temp dir, then open a Terminal.app window that runs
       // it. All real paths are quoted inside the launcher, so the AppleScript stays clean.
