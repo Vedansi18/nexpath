@@ -60,8 +60,19 @@ export function buildStopHookCommand(home: string, platform = process.platform):
   return `node "${cliPath}" stop --db "${dbPath}"`;
 }
 
-/** Claude Code hook timeout is expressed in seconds in settings.json. */
-export const CLAUDE_HOOK_TIMEOUT_SECONDS = 60 as const;
+/**
+ * Claude Code hook timeout, in seconds, as written into settings.json.
+ *
+ * Raised 60 -> 90 (owner decision 2026-08-09). The UserPromptSubmit window can hold several
+ * classifier calls plus the PE composer, and rare-but-real cases were measuring close enough to
+ * 60s to risk the hook being cancelled mid-composition — which loses the enhancement silently.
+ *
+ * 90 is a deliberate value, not a ceiling found by trial: Claude Code documents 30s only as the
+ * DEFAULT for UserPromptSubmit (lowered from the 600s general default) and documents no maximum
+ * for the `timeout` field, so this is a chosen headroom rather than a limit being pushed against.
+ * The 60s cap that exists in Claude Code applies to SessionEnd's shared budget, a different event.
+ */
+export const CLAUDE_HOOK_TIMEOUT_SECONDS = 90 as const;
 
 /**
  * Build the UserPromptSubmit + Stop hook entry objects.
@@ -70,8 +81,8 @@ export const CLAUDE_HOOK_TIMEOUT_SECONDS = 60 as const;
  * marker — it survives path changes across reinstalls, unlike scanning the
  * command string.
  *
- * UserPromptSubmit gets an explicit 60-second timeout because Claude Code reduces
- * its default to 30s, and the PE preparation on this hook may call the LLM.
+ * UserPromptSubmit gets an explicit timeout because Claude Code reduces its default to 30s, and the
+ * PE preparation on this hook may call the LLM more than once.
  *
  * The Stop hook hosts the interactive PE popup (owner decision B-i). Owner decision
  * (2026-08-04): do NOT set a large "never times out" number here. Claude Code has no

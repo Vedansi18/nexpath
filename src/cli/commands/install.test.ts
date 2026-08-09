@@ -10,6 +10,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { openStore, closeStore } from '../../store/db.js';
+import { CLAUDE_HOOK_TIMEOUT_SECONDS } from '../../agents/adapters/claude-code.js';
 import { setConfig, isConfigSet, getConfig } from '../../store/config.js';
 
 import {
@@ -1532,12 +1533,14 @@ describe('buildHookEntry', () => {
     expect(hooks[0].type).toBe('command');
   });
 
-  it('sets UserPromptSubmit to 60s and leaves the PE-hosting Stop hook without an explicit timeout', () => {
+  it('sets an explicit UserPromptSubmit timeout and leaves the PE-hosting Stop hook without one', () => {
     const entry  = buildHookEntry('/home/user', 'linux');
     const groups = entry.UserPromptSubmit as Array<Record<string, unknown>>;
     const hooks  = groups[0].hooks as Array<Record<string, unknown>>;
-    // UserPromptSubmit prepares + persists the PE (may call the LLM) → explicit 60s headroom.
-    expect(hooks[0].timeout).toBe(60);
+    // UserPromptSubmit prepares + persists the PE (may call the LLM more than once) → explicit
+    // headroom. Asserted against the constant, never a literal: a copy here would silently drift
+    // from the value actually written into settings.json.
+    expect(hooks[0].timeout).toBe(CLAUDE_HOOK_TIMEOUT_SECONDS);
     // Owner decision A (2026-08-04): the Stop hook (PE popup) has NO explicit timeout — it
     // inherits Claude Code's default Stop budget, avoiding an arbitrary "never times out" number.
     const stopGroups = entry.Stop as Array<Record<string, unknown>>;
