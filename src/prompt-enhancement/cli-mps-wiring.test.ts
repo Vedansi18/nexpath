@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   PROMPT_ENHANCEMENT_CONTRACT_VERSION,
   type PromptEnhancementPrepareRequestV1,
@@ -291,5 +291,58 @@ describe('MPS CLI wiring (owner ruling 2026-08-06: CLI complete, extension pendi
     expect(promptEnhancementMpsActionSignalKindV1('declined')).toBe('mps_decline');
     expect(promptEnhancementMpsActionSignalKindV1('interruption')).toBe('mps_interruption');
     expect(promptEnhancementMpsActionSignalKindV1('not_shown')).toBeUndefined();
+  });
+
+  it('NF apply-details capture: a real Apply fires mps_apply_details once (content-free kind + timestamp, no text)', async () => {
+    const result = await preparePromptEnhancement(request(MULTI_INTENT));
+    const sink = vi.fn();
+    // down -> details row; type; Enter -> APPLY (fires the sink); Enter -> send.
+    await runPromptEnhancementCliMpsFirstPopupV1({
+      result,
+      interaction: scripted([KEY.down, 'p', 'g', KEY.enter, KEY.enter]),
+      actionSignalSink: sink,
+    });
+    expect(sink).toHaveBeenCalledTimes(1);
+    const [kind, occurredAt] = sink.mock.calls[0]!;
+    expect(kind).toBe('mps_apply_details');
+    expect(typeof occurredAt).toBe('number');
+    // Content-free: the sink carries only the kind + timestamp — never the details/body text.
+    expect(sink.mock.calls[0]).toHaveLength(2);
+  });
+
+  it('NF apply-details capture: two Applies fire twice', async () => {
+    const result = await preparePromptEnhancement(request(MULTI_INTENT));
+    const sink = vi.fn();
+    await runPromptEnhancementCliMpsFirstPopupV1({
+      result,
+      interaction: scripted([KEY.down, 'a', KEY.enter, KEY.down, 'b', KEY.enter, KEY.enter]),
+      actionSignalSink: sink,
+    });
+    expect(sink).toHaveBeenCalledTimes(2);
+    expect(sink.mock.calls.every(([k]) => k === 'mps_apply_details')).toBe(true);
+  });
+
+  it('NF apply-details capture: a BLANK Apply (Enter on empty details) fires nothing', async () => {
+    const result = await preparePromptEnhancement(request(MULTI_INTENT));
+    const sink = vi.fn();
+    // down -> details row; Enter with no text -> blank apply (no-op); Esc -> declined.
+    await runPromptEnhancementCliMpsFirstPopupV1({
+      result,
+      interaction: scripted([KEY.down, KEY.enter, KEY.escape]),
+      actionSignalSink: sink,
+    });
+    expect(sink).not.toHaveBeenCalled();
+  });
+
+  it('NF apply-details capture: a send with no Apply fires nothing via the sink (the outcome is captured by the caller)', async () => {
+    const result = await preparePromptEnhancement(request(MULTI_INTENT));
+    const sink = vi.fn();
+    const outcome = await runPromptEnhancementCliMpsFirstPopupV1({
+      result,
+      interaction: scripted([KEY.enter]),
+      actionSignalSink: sink,
+    });
+    expect(outcome.state).toBe('send');
+    expect(sink).not.toHaveBeenCalled();
   });
 });

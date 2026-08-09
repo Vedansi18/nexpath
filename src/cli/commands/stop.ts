@@ -566,7 +566,12 @@ export function registerStopCommand(program: import('commander').Command): void 
               reasonCodes: mpsGate.reasonCodes.slice(0, 6),
             });
             if (mpsGate.renderPermission === 'mps_render_permitted') {
-              const mps = await runPromptEnhancementCliMpsFirstPopupV1({ result: pending.result });
+              const mps = await runPromptEnhancementCliMpsFirstPopupV1({
+                result: pending.result,
+                // NF Plan B — content-free capture of the in-popup APPLY action (mps_apply_details),
+                // mirroring the PE popup. The terminal outcome is captured just below.
+                actionSignalSink: (kind, occurredAt) => recordActionSignal(store, payload.cwd, kind, occurredAt),
+              });
               logger.info('stop_mps_first_popup', { cwd: payload.cwd, outcome: mps.state });
               // NF Plan B (B-3): content-free per-action capture of the MPS outcome (send/cancel/decline),
               // buffered locally, sent on the feedback-consent flush. Edits/not_shown map to undefined.

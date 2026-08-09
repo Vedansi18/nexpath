@@ -22,7 +22,7 @@ export const SIGNAL_OPTION_SELECTED = 'option_selected';
 export const ACTION_SIGNAL_KINDS = [
   'pe_use_current', 'pe_use_original', 'pe_shorter', 'pe_more_thorough',
   'pe_more_project_grounded', 'pe_apply_details', 'pe_back', 'pe_close',
-  'mps_send', 'mps_cancel', 'mps_decline', 'mps_interruption',
+  'mps_send', 'mps_cancel', 'mps_decline', 'mps_interruption', 'mps_apply_details',
 ] as const;
 export type PromptActionSignalKind = typeof ACTION_SIGNAL_KINDS[number];
 
