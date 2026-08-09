@@ -41,6 +41,7 @@ import {
 } from '../../prompt-enhancement/delivery.js';
 import { insertSkippedSession } from '../../store/skipped-sessions.js';
 import { recordActivity } from '../../store/feedback-cadence.js';
+import { recordActionSignal } from '../../store/feedback-signals.js';
 import { writeTelemetry } from '../../telemetry/index.js';
 import { triggerOpportunisticSync } from '../../telemetry/OpportunisticSync.js';
 import { resolveFrequencyConfig, type AdvisoryFrequencyLevel } from '../../config/GlobalConfig.js';
@@ -650,6 +651,9 @@ export function createPromptEnhancementCliHostConsumerV1(
         request,
         result: preparation.result,
         feedbackSink: (event) => recordPromptEnhancementCliFeedbackV1(dependencies.store, request.projectRoot, event, request),
+        // NF Plan B (B-2): content-free per-action telemetry — buffered locally, sent on the
+        // feedback-consent flush (store-backed sink; in-process direct popup).
+        actionSignalSink: (kind, occurredAt) => recordActionSignal(dependencies.store, request.projectRoot, kind, occurredAt),
         costObservabilitySink: (result) => emitPromptEnhancementCostObservabilityV1(result, 'popup_action', logger),
       });
     } else {

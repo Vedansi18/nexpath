@@ -367,15 +367,26 @@ function buildResult(
   const diagnostics = diagnosticsFor(enhancementId, [...composed.diagnostics, ...safety.publicDiagnostics]);
   // TI-3.2 (2026-08-08) — capture the compose-layer fallback reason CODES BEFORE diagnosticsFor
   // genericizes them for the public array (which drops reasonCode). Reporting-only; typed codes only.
-  // Scoped to EXACTLY the two codes TI-3.2 names — the draft-rejection cause and the substitution
-  // marker — not every `fallback_or_no_popup` code (the no-popup / action-preserved codes are a
-  // different concern and out of this fix's scope).
+  // TI-3.2 follow-up Phase 2 (2026-08-09): capture the WHOLE `fallback_or_no_popup` category, not a
+  // hand-picked subset. This is the entire class of "the body was reduced/fell back" — the draft-
+  // rejection cause, the substitution marker, partial-drop (Phase 1), and the action-preserved /
+  // no-sections codes. Any one of these, dropped from the log, means a reduction that read as a clean run.
+  // TI-3.2 follow-up Phase 3 (2026-08-09): also capture the `source_coverage` grounding code
+  // `project_grounding_source_unavailable` — a `more_project_grounded` action that finds no grounding
+  // source degrades silently (diagnosticsFor genericizes it too). It is a distinct diagnostic category,
+  // so it needs its own clause; the category holds only this one reduction code.
   const compositionFallbackReasonCodes = composed.diagnostics
     .filter((diagnostic) =>
       diagnostic.category === 'fallback_or_no_popup'
-      && (diagnostic.reasonCode.startsWith('deterministic_fallback:')
-        || diagnostic.reasonCode === 'llm_final_body_blocked_deterministic_fallback'))
+      || (diagnostic.category === 'source_coverage'
+        && diagnostic.reasonCode === 'project_grounding_source_unavailable'))
     .map((diagnostic) => diagnostic.reasonCode);
+  // TI-3 audit follow-up (2026-08-09): the additional-details truncation is a `generated` input-cap
+  // event (not a fallback/reduction), so it is tracked as its own flag rather than mixed into the
+  // fallback reason codes above. Reporting-only.
+  const additionalDetailsTruncated = composed.diagnostics.some(
+    (diagnostic) => diagnostic.reasonCode === 'additional_details_truncated_public_notice',
+  );
   const composerCallVisibility = composed.composerBoundary.inputContract.callVisibilityState;
   const callAndVisibilityMetadata = {
     ...composerCallVisibility,
@@ -500,6 +511,8 @@ function buildResult(
     // TI-3.2 (2026-08-08) — reporting-only; emitted ONLY when a compose-layer fallback produced a
     // reason code (a clean deterministic body composes as 'generated', so this stays absent).
     ...(compositionFallbackReasonCodes.length > 0 ? { compositionFallbackReasonCodes } : {}),
+    // TI-3 audit follow-up (2026-08-09) — reporting-only; emitted ONLY when the input was truncated.
+    ...(additionalDetailsTruncated ? { additionalDetailsTruncated: true } : {}),
   };
 }
 

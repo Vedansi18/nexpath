@@ -17,11 +17,12 @@ import {
   isInstalledEventSent,
   markInstalledEventSent,
   readAllSignals,
+  readAllActionSignals,
   pruneSignalAt,
   SIGNAL_ADVISORY_FIRED,
   SIGNAL_OPTION_SELECTED,
 } from '../store/feedback-signals.js';
-import { sendInstalled, sendAdvisoryFired, sendOptionSelected, type SendLifecycleOptions } from './lifecycle-send.js';
+import { sendInstalled, sendAdvisoryFired, sendOptionSelected, sendActionEvent, type SendLifecycleOptions } from './lifecycle-send.js';
 import { isTelemetryEnabled } from './telemetry-enabled.js';
 
 export async function flushLifecycle(
@@ -48,6 +49,14 @@ export async function flushLifecycle(
   for (const ts of optionSelectTs) {
     if (await sendOptionSelected(store, ts, opts)) {
       pruneSignalAt(store, SIGNAL_OPTION_SELECTED, ts);
+    }
+  }
+
+  // NF Plan B — buffered per-action signals (pe_*/mps_*): one event each, oldest first, the event name
+  // being the action kind. Prune a signal only when its own send succeeds.
+  for (const { kind, occurredAt } of readAllActionSignals(store)) {
+    if (await sendActionEvent(store, kind, occurredAt, opts)) {
+      pruneSignalAt(store, kind, occurredAt);
     }
   }
 }

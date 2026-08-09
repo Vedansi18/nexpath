@@ -8,8 +8,8 @@ beforeEach(async () => { store = await openStore(':memory:'); });
 afterEach(() => closeStore(store));
 
 describe('isTelemetryEnabled', () => {
-  it('defaults to true when unset', () => {
-    expect(isTelemetryEnabled(store)).toBe(true);
+  it('defaults to false when unset (NF Plan A — telemetry off by default)', () => {
+    expect(isTelemetryEnabled(store)).toBe(false);
   });
 
   it('is false only when explicitly set to "false"', () => {

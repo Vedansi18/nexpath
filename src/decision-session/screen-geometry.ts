@@ -626,16 +626,16 @@ export function wrapLinuxSpawnForWaylandX11V1(
  * fail-open. Pure.
  */
 export function buildWindowsConsolePositionScriptV1(geometry: PopupGeometry): string {
-  // No-jump (P6): the window is spawned MINIMIZED (`start /MIN`) so it never flashes at the default
-  // centre. SetWindowPlacement sets the NORMAL-position rect to the docked rect AND shows it normal,
-  // so it appears directly on the right (restoring from minimized straight to the docked position —
-  // no visible move). MoveWindow re-applies the rect for the already-normal case. A final
-  // ShowWindow(SW_SHOWNORMAL) is the safety net: if positioning fails but PowerShell ran, the window
-  // is still shown (worst case: visible at default, never stuck minimized). Fully fail-open
-  // ($ErrorActionPreference + the caller's 2>nul).
+  // Windows-Terminal-aware docking (2026-08-09): on Windows 11 with Windows Terminal the popup runs in a
+  // hidden ConPTY pseudo-console, so GetConsoleWindow() is NOT the visible window — MoveWindow/mode-con
+  // targeted the wrong window and the popup came up un-docked / wrong size (header scrolled off). Resolve
+  // the REAL top-level window by our distinctive "Nexpath …" title (every popup title starts with
+  // "Nexpath") via Get-Process → MainWindowHandle, and fall back to the console window for the classic
+  // conhost case. Then SetWindowPos applies the docked position AND size in ONE call (60% wide, flush
+  // right, full height) and raises it — working on Windows Terminal and conhost alike. Best-effort +
+  // fully fail-open ($ErrorActionPreference + the caller's 2>nul): if no window resolves, the popup stays
+  // visible at its default position — never invisible.
   const { xPx, yPx, widthPx, heightPx } = geometry;
-  const right = xPx + widthPx;
-  const bottom = yPx + heightPx;
   return [
     '$ErrorActionPreference = "SilentlyContinue"',
     'Add-Type @"',
@@ -643,26 +643,20 @@ export function buildWindowsConsolePositionScriptV1(geometry: PopupGeometry): st
     'using System.Runtime.InteropServices;',
     'public class NexpathWin {',
     '  [DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow();',
-    '  [DllImport("user32.dll")] public static extern bool MoveWindow(IntPtr hWnd, int X, int Y, int nWidth, int nHeight, bool bRepaint);',
     '  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);',
-    '  [StructLayout(LayoutKind.Sequential)] public struct WP {',
-    '    public int length; public int flags; public int showCmd;',
-    '    public int minX; public int minY; public int maxX; public int maxY;',
-    '    public int normLeft; public int normTop; public int normRight; public int normBottom;',
-    '  }',
-    '  [DllImport("user32.dll")] public static extern bool GetWindowPlacement(IntPtr hWnd, ref WP wp);',
-    '  [DllImport("user32.dll")] public static extern bool SetWindowPlacement(IntPtr hWnd, ref WP wp);',
+    '  [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);',
     '}',
     '"@',
-    '$h = [NexpathWin]::GetConsoleWindow()',
-    '$wp = New-Object NexpathWin+WP',
-    '$wp.length = [System.Runtime.InteropServices.Marshal]::SizeOf($wp)',
-    '[void][NexpathWin]::GetWindowPlacement($h, [ref]$wp)',
-    '$wp.showCmd = 1',   // SW_SHOWNORMAL — restore from minimized straight to the normal rect below
-    `$wp.normLeft = ${xPx}; $wp.normTop = ${yPx}; $wp.normRight = ${right}; $wp.normBottom = ${bottom}`,
-    '[void][NexpathWin]::SetWindowPlacement($h, [ref]$wp)',
-    `[void][NexpathWin]::MoveWindow($h, ${xPx}, ${yPx}, ${widthPx}, ${heightPx}, $true)`,
-    '[void][NexpathWin]::ShowWindow($h, 1)',   // SW_SHOWNORMAL safety net: never stay minimized
+    // Prefer the process whose MAIN window carries our "Nexpath …" title (the Windows Terminal window on
+    // Win11); pick the MOST-RECENTLY-STARTED match (Phase 2) so it resolves exactly THIS popup, not a
+    // stale/other Nexpath window. Fall back to the console window (classic conhost, where that IS the
+    // visible window). If StartTime is unavailable for a candidate, the sort is a harmless no-op.
+    "$proc = Get-Process | Where-Object { $_.MainWindowTitle -like 'Nexpath*' -and $_.MainWindowHandle -ne 0 } | Sort-Object StartTime -Descending | Select-Object -First 1",
+    'if ($proc) { $h = $proc.MainWindowHandle } else { $h = [NexpathWin]::GetConsoleWindow() }',
+    '[void][NexpathWin]::ShowWindow($h, 1)',   // SW_SHOWNORMAL: restore if minimized; harmless when normal
+    // SetWindowPos: position + size + show + raise (HWND_TOP=IntPtr.Zero, SWP_SHOWWINDOW=0x0040) on the
+    // real window — one call docks it on both Windows Terminal and conhost.
+    `[void][NexpathWin]::SetWindowPos($h, [IntPtr]::Zero, ${xPx}, ${yPx}, ${widthPx}, ${heightPx}, 0x0040)`,
     '',
   ].join('\r\n');
 }

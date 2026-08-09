@@ -148,6 +148,23 @@ describe('PE executable facade', () => {
     expect(result.routingAndFeedbackDecision.state).toBe('suppress');
   });
 
+  it('TI-3.2 follow-up (Phase 2): a no-sections / no-popup run captures no_popup_or_no_sections_original_only', async () => {
+    // A generated-origin echo routes with route.noPopup === true, which yields ZERO section plans, so
+    // composePromptEnhancementBody takes the original-only branch and emits
+    // `no_popup_or_no_sections_original_only` — a fallback_or_no_popup diagnostic that diagnosticsFor
+    // genericizes away. Phase 2 widened the capture filter to the whole category, so this
+    // previously-excluded compose-layer reason now reaches the log-bound field.
+    const result = await preparePromptEnhancement(request({
+      sourcePrompt: {
+        ...request().sourcePrompt,
+        origin: 'pe_generated_echo',
+        generatedOriginPolicy: 'exclude_from_ordinary_learning',
+      },
+    }));
+    expect(result.disposition).toBe('no_popup_not_applicable');
+    expect(result.compositionFallbackReasonCodes).toContain('no_popup_or_no_sections_original_only');
+  });
+
   it('UI-9: recomputes the header why-help when an edit introduces a sensitive action (not stale)', async () => {
     const base = await preparePromptEnhancement(request({ requestId: 'facade-whyhelp-1' }));
     expect(base.disposition).toBe('show_current_body');

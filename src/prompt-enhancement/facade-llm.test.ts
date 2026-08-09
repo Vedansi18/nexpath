@@ -159,6 +159,109 @@ describe('E4 — facade LLM composer wiring', () => {
     expect(clean.compositionFallbackReasonCodes).toBeUndefined();
   });
 
+  it('TI-3.2 follow-up (Phase 1): a partial section drop is no longer silent — partial_draft_drop reaches the log', async () => {
+    process.env['OPENAI_API_KEY'] = `sk-${'x'.repeat(40)}`;
+    // The composer returns TWO drafts: one valid (survives) and one targeting a section that does not
+    // exist (dropped as `unknown_section`). The reply survives, so the body composes with LLM wording
+    // and callVisibilityMode stays `llm_wording` / valid — byte-identical to a perfect run EXCEPT that
+    // a section was silently dropped. The only trace is the partial_draft_drop reason code.
+    vi.mocked(composeStructuredComposerOutputV1).mockImplementationOnce(async (input: { planning: { sectionPlans: readonly { sectionId: string; sectionKind: string; structuredContentPartRefs: readonly string[] }[] } }) => {
+      const section = input.planning.sectionPlans.find(
+        (plan) => plan.sectionKind !== 'original_request_or_goal' && plan.structuredContentPartRefs.length > 0,
+      );
+      if (!section) return { ok: false, reason: 'no_eligible_sections' };
+      const factId = section.structuredContentPartRefs[0];
+      return { ok: true, output: {
+        outputId: 'test-llm-partial-drop-output',
+        sectionDrafts: [
+          { sectionId: section.sectionId, bodyText: 'Valid tailored wording for this section.', sourceFactIds: [factId] },
+          { sectionId: 'nexpath-nonexistent-section', bodyText: 'This draft targets a section that is not in the plan.', sourceFactIds: [factId] },
+        ],
+        composerClaims: [`claim:${factId}`],
+      } };
+    });
+
+    const result = await preparePromptEnhancement(request());
+    // The surviving draft rendered (partial, not full, drop) and the run LOOKS like a clean success...
+    expect(result.currentBody.text).toContain('Valid tailored wording');
+    expect(result.callAndVisibilityMetadata.callVisibilityMode).toBe('llm_wording');
+    expect(result.disposition).toBe('show_current_body');
+    // ...but the dropped section is now traceable in the log-bound reason codes.
+    expect(result.compositionFallbackReasonCodes?.some((code) => code.startsWith('partial_draft_drop:'))).toBe(true);
+    // This is a compose-layer drop, NOT a facade substitution — the TI-3.3 flag stays unset.
+    expect(result.deterministicFallbackApplied).toBeUndefined();
+
+    // A clean LLM run (default mock, all drafts valid) drops nothing and stays empty — visibly distinct.
+    const clean = await preparePromptEnhancement(request());
+    expect(clean.compositionFallbackReasonCodes).toBeUndefined();
+  });
+
+  it('TI-3.2 follow-up (Phase 3): a more_project_grounded action with no grounding source captures project_grounding_source_unavailable', async () => {
+    process.env['OPENAI_API_KEY'] = `sk-${'x'.repeat(40)}`;
+    const base = await preparePromptEnhancement(request());
+    const grounded = base.availableActions.find((entry) => entry.actionType === 'more_project_grounded');
+    expect(grounded).toBeDefined();
+
+    const actionRequest = {
+      ...request(),
+      action: grounded!,
+      currentBodyBinding: {
+        currentBodyId: base.currentBody.currentBodyId,
+        bodyRevision: base.currentBody.bodyRevision,
+        validationDecisionId: base.validationDecisionId,
+        editedBodyText: base.currentBody.text,
+        actionSubmittedAtMs: 2,
+        realUserInitiated: true,
+        sectionSpanEditEvents: [],
+      },
+    } as unknown as Parameters<typeof applyPromptEnhancementAction>[0];
+
+    const result = await applyPromptEnhancementAction(actionRequest);
+    // The fixture's only source is source_a_user_prompt (no hard-fact / template / memory), so the
+    // grounding request cannot be honored — a silent degrade whose source_coverage diagnostic
+    // diagnosticsFor genericizes away. Phase 3 captures it so it reaches the log.
+    expect(result.compositionFallbackReasonCodes).toContain('project_grounding_source_unavailable');
+  });
+
+  it('TI-3 audit follow-up: an apply_details action over the 5,000-word cap sets additionalDetailsTruncated', async () => {
+    process.env['OPENAI_API_KEY'] = `sk-${'x'.repeat(40)}`;
+    const base = await preparePromptEnhancement(request());
+    const applyDetails = base.availableActions.find((entry) => entry.actionType === 'apply_details');
+    expect(applyDetails).toBeDefined();
+
+    // > 5,000 words of additional details: the engine truncates and emits the input-cap notice; the
+    // reporting flag makes "was the input truncated?" answerable from the result + log.
+    const longDetails = Array.from({ length: 5001 }, () => 'detail').join(' ');
+    const actionRequest = {
+      ...request(),
+      action: applyDetails!,
+      currentBodyBinding: {
+        currentBodyId: base.currentBody.currentBodyId,
+        bodyRevision: base.currentBody.bodyRevision,
+        validationDecisionId: base.validationDecisionId,
+        editedBodyText: base.currentBody.text,
+        actionSubmittedAtMs: 2,
+        realUserInitiated: true,
+        sectionSpanEditEvents: [],
+      },
+      userPreferenceContext: {
+        ...request().userPreferenceContext,
+        additionalDetails: {
+          text: longDetails,
+          targetBodyId: base.currentBody.currentBodyId,
+          targetBodyRevision: base.currentBody.bodyRevision,
+        },
+      },
+    } as unknown as Parameters<typeof applyPromptEnhancementAction>[0];
+
+    const result = await applyPromptEnhancementAction(actionRequest);
+    expect(result.additionalDetailsTruncated).toBe(true);
+
+    // A normal run (no over-cap details) leaves the flag unset — visibly distinct.
+    const clean = await preparePromptEnhancement(request());
+    expect(clean.additionalDetailsTruncated).toBeUndefined();
+  });
+
   it('safety still runs on the composed body regardless of the LLM path (validation summary present)', async () => {
     process.env['OPENAI_API_KEY'] = `sk-${'x'.repeat(40)}`;
     const result = await preparePromptEnhancement(request());

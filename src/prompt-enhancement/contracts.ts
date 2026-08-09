@@ -1683,17 +1683,25 @@ export interface PromptEnhancementPrepareResultV1 {
   // may ignore these fields entirely. They NEVER carry body text.
   deterministicFallbackApplied?: boolean;
   preSubstitutionAuthorityEscalationState?: PromptEnhancementValidationStatus;
-  // TI-3.2 (2026-08-08) — observability-only. The compose-layer fallback diagnostic reason CODES
-  // that the public `diagnostics` array genericizes away (`diagnosticsFor` drops `reasonCode`,
-  // `rawReasonValuesExcluded`): the draft-rejection / deterministic-fallback cause
-  // `deterministic_fallback:<runtimeState>:<draftRejectionReason>` (one of six causes, not just the
-  // stage) and the blocked-body substitution marker `llm_final_body_blocked_deterministic_fallback`.
-  // Typed reason CODES only (composer runtime state + rejection enum) — NEVER body text or raw user
-  // content, the same class as `callAndVisibilityMetadata.fallbackReason` already on this result.
-  // Present only when a compose-layer fallback occurred; additive + optional → PE/PEF behaviour and
-  // the emitted contract stay byte-identical. (There is no partial-draft-drop code: the recompose
-  // drops ALL drafts, never a subset — so no partial-drop reason exists to report.)
+  // TI-3.2 (2026-08-08, completed through the 2026-08-09 follow-up) — observability-only. ALL
+  // compose-layer reduction reason CODES that the public `diagnostics` array genericizes away
+  // (`diagnosticsFor` drops `reasonCode`, `rawReasonValuesExcluded`): every `fallback_or_no_popup`
+  // code — the draft-rejection / deterministic-fallback cause
+  // `deterministic_fallback:<runtimeState>:<draftRejectionReason>`, the blocked-body substitution
+  // marker `llm_final_body_blocked_deterministic_fallback`, `partial_draft_drop:<count>:<reason>`,
+  // `action_failed_previous_body_preserved:<state>`, `no_popup_or_no_sections_original_only` — plus the
+  // `source_coverage` code `project_grounding_source_unavailable`. Typed reason CODES only (composer
+  // runtime state + rejection enum) — NEVER body text or raw user content, the same class as
+  // `callAndVisibilityMetadata.fallbackReason` already on this result. Present only when a compose-layer
+  // reduction occurred; additive + optional → PE/PEF behaviour and the emitted contract stay byte-identical.
   compositionFallbackReasonCodes?: readonly string[];
+  // TI-3 audit follow-up (2026-08-09) — observability-only. True when the user's additional-details
+  // input exceeded the 5,000-word cap and was truncated before recomposition (the engine already
+  // emits a dedicated user notice for this; the `reasonCode` is genericized away from the machine-
+  // readable log). This is a `generated` input-cap event, NOT a fallback/reduction — kept as its own
+  // flag rather than folded into `compositionFallbackReasonCodes`. Present only when truncation
+  // occurred; additive + optional → PE/PEF behaviour and the emitted contract stay byte-identical.
+  additionalDetailsTruncated?: boolean;
 }
 
 export type PromptEnhancementPrepareFacadeV1 = (

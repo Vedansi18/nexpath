@@ -42,6 +42,7 @@ import {
   type PromptEnhancementEditorFieldV1,
   type PromptEnhancementMultilineEditorStateV1,
 } from './multiline-editor.js';
+import type { PromptActionSignalKind } from '../store/feedback-signals.js';
 
 export type PromptEnhancementCliPopupCommandV1 =
   | { type: 'use_current' }
@@ -55,6 +56,21 @@ export type PromptEnhancementCliPopupCommandV1 =
   | { type: 'feedback_other'; text: string }
   | { type: 'go_back' }
   | { type: 'close' };
+
+/**
+ * NF Plan B (B-2): content-free action telemetry — maps a popup command to its per-action signal kind.
+ * `edit_body` and `feedback_*` are intentionally excluded (edit noise / a separate feedback path).
+ */
+const PE_ACTION_SIGNAL_KIND_BY_COMMAND: Partial<Record<PromptEnhancementCliPopupCommandV1['type'], PromptActionSignalKind>> = {
+  use_current:           'pe_use_current',
+  use_original:          'pe_use_original',
+  shorter:               'pe_shorter',
+  more_thorough:         'pe_more_thorough',
+  more_project_grounded: 'pe_more_project_grounded',
+  apply_details:         'pe_apply_details',
+  go_back:               'pe_back',
+  close:                 'pe_close',
+};
 
 export type PromptEnhancementCliFeedbackSinkV1 = (event: PromptEnhancementPopupEventV1) => PromptEnhancementFeedbackAcknowledgementV1 | Promise<PromptEnhancementFeedbackAcknowledgementV1>;
 
@@ -201,6 +217,13 @@ export async function runPromptEnhancementCliSubmitPopupV1(input: {
    * live failure stays diagnosable. Codes only, never body text.
    */
   actionDiagnosticsSink?: (event: { actionType: string; state: string; reasonCodes: readonly string[] }) => void;
+  /**
+   * NF Plan B (B-2): content-free per-action telemetry. Called with the action kind + timestamp the moment
+   * the user issues a captured popup action (shorter / more_thorough / more_project_grounded / apply_details
+   * / use_current / use_original / go_back / close). Never carries body/option text. Observation-only —
+   * does not affect the popup flow.
+   */
+  actionSignalSink?: (kind: PromptActionSignalKind, occurredAt: number) => void;
   onFirstRender?: () => void;
 }): Promise<PromptEnhancementCliPopupResultV1> {
   let currentResult = input.result;
@@ -239,6 +262,12 @@ export async function runPromptEnhancementCliSubmitPopupV1(input: {
     for (;;) {
       const command = await interaction.next({ model, editedBodyText, additionalDetailsText, publicNotice, refinement: inRefinement });
       publicNotice = undefined;
+
+      // NF Plan B (B-2): record the user's action (content-free kind + timestamp) at the moment it is
+      // issued — one event per mapped action, regardless of outcome. Observation-only; the send happens
+      // later on the feedback-consent flush.
+      const actionSignalKind = PE_ACTION_SIGNAL_KIND_BY_COMMAND[command.type];
+      if (actionSignalKind) input.actionSignalSink?.(actionSignalKind, Date.now());
 
       if (command.type === 'close') return { state: 'closed_no_send' };
       if (command.type === 'go_back') {

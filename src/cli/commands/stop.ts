@@ -9,7 +9,7 @@ import {
   type PendingPromptEnhancement,
 } from '../../store/pending-prompt-enhancements.js';
 import { isFeedbackEligible, markFeedbackShown } from '../../store/feedback-cadence.js';
-import { recordAdvisoryFired, recordOptionSelected } from '../../store/feedback-signals.js';
+import { recordAdvisoryFired, recordOptionSelected, recordActionSignal } from '../../store/feedback-signals.js';
 import { sendFeedback } from '../../telemetry/feedback-send.js';
 import { runFeedbackPopup, type FeedbackRenderFn, type FeedbackResult } from '../../decision-session/feedback-popup.js';
 import { createFeedbackRenderFn } from '../../decision-session/feedback-tty.js';
@@ -41,7 +41,7 @@ import {
 import { emitPromptEnhancementCostObservabilityV1 } from '../../prompt-enhancement/cost-measurement.js';
 import { evaluatePromptEnhancementMpsIntakeDecisionV1 } from '../../prompt-enhancement/intake-decision.js';
 import { buildPromptEnhancementCliMpsIntakeEvidenceV1 } from '../../prompt-enhancement/cli-mps-intake-evidence.js';
-import { runPromptEnhancementCliMpsFirstPopupV1, buildPromptEnhancementMpsCancelFeedbackEventV1 } from '../../prompt-enhancement/cli-mps-run.js';
+import { runPromptEnhancementCliMpsFirstPopupV1, buildPromptEnhancementMpsCancelFeedbackEventV1, promptEnhancementMpsActionSignalKindV1 } from '../../prompt-enhancement/cli-mps-run.js';
 import { intakePromptEnhancementSequenceOnFirstSendV1 } from '../../prompt-enhancement/sequence-intake.js';
 import { upsertPendingPromptSequence, getActivePendingPromptSequence } from '../../store/pending-sequences.js';
 import { evaluatePromptEnhancementFutureSequenceRuntimeGateV1 } from '../../prompt-enhancement/future-sequence-runtime-gate.js';
@@ -568,6 +568,10 @@ export function registerStopCommand(program: import('commander').Command): void 
             if (mpsGate.renderPermission === 'mps_render_permitted') {
               const mps = await runPromptEnhancementCliMpsFirstPopupV1({ result: pending.result });
               logger.info('stop_mps_first_popup', { cwd: payload.cwd, outcome: mps.state });
+              // NF Plan B (B-3): content-free per-action capture of the MPS outcome (send/cancel/decline),
+              // buffered locally, sent on the feedback-consent flush. Edits/not_shown map to undefined.
+              const mpsActionKind = promptEnhancementMpsActionSignalKindV1(mps.state);
+              if (mpsActionKind) recordActionSignal(store, payload.cwd, mpsActionKind);
               if (mps.state === 'send' && mps.bodyText.trim().length > 0) {
                 recordPromptEnhancementShownMemoryV1(store, payload.cwd, pending.request);
                 markPromptEnhancementUsedMemoryV1(store, payload.cwd, pending.request);
@@ -620,6 +624,9 @@ export function registerStopCommand(program: import('commander').Command): void 
             request: pending.request,
             result: pending.result,
             feedbackSink: (event) => recordPromptEnhancementCliFeedbackV1(store, payload.cwd, event, pending.request),
+            // NF Plan B (B-2): content-free per-action telemetry — buffered locally, sent on the
+            // feedback-consent flush (store-backed sink; in-process popup on the Stop hook).
+            actionSignalSink: (kind, occurredAt) => recordActionSignal(store, payload.cwd, kind, occurredAt),
             costObservabilitySink: (result) => emitPromptEnhancementCostObservabilityV1(result, 'popup_action', logger),
             // F3 (2026-08-07): the popup keeps a failed action silent on screen — the typed
             // reason codes land here so the log stays the diagnosable source of truth.
