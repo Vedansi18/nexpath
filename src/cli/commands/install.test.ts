@@ -745,7 +745,6 @@ describe('installAction', () => {
         confirmFn: async () => false,
         promptFn: {
           apiKeyPrompt:     async () => ({ kind: 'skip' }),
-          telemetryConsent: async () => ({ kind: 'disable' }),
         },
         skipClipboardCheck: true,
       });
@@ -1181,7 +1180,6 @@ describe('installAction', () => {
         paths, isWin: false, execFn: () => {},
         promptFn: {
           apiKeyPrompt:     apiKeyPromptSpy,
-          telemetryConsent: async () => ({ kind: 'disable' }),
         },
         skipClipboardCheck: true,
       });
@@ -1215,7 +1213,6 @@ describe('installAction', () => {
         paths, isWin: false, execFn: () => {},
         promptFn: {
           apiKeyPrompt:     async () => ({ kind: 'skip' }),
-          telemetryConsent: async () => ({ kind: 'disable' }),
         },
         skipClipboardCheck: true,
       });
@@ -2106,7 +2103,6 @@ describe('installAction — frequency and role prompts', () => {
           confirmFn: async () => true,
           promptFn: {
             apiKeyPrompt:     async () => ({ kind: 'skip' }),
-            telemetryConsent: async () => ({ kind: 'disable' }),
           },
           freqPromptFn,
           rolePromptFn,
@@ -2148,7 +2144,6 @@ describe('installAction — frequency and role prompts', () => {
           confirmFn: async () => true,
           promptFn: {
             apiKeyPrompt:     async () => ({ kind: 'skip' }),
-            telemetryConsent: async () => ({ kind: 'disable' }),
           },
           freqPromptFn,
           rolePromptFn,
@@ -2191,7 +2186,6 @@ describe('installAction — frequency and role prompts', () => {
           confirmFn: async () => true,
           promptFn: {
             apiKeyPrompt:     async () => ({ kind: 'skip' }),
-            telemetryConsent: async () => ({ kind: 'disable' }),
           },
           freqPromptFn,
           rolePromptFn,
@@ -2232,7 +2226,6 @@ describe('installAction — frequency and role prompts', () => {
           confirmFn: async () => true,
           promptFn: {
             apiKeyPrompt:     async () => ({ kind: 'skip' }),
-            telemetryConsent: async () => ({ kind: 'disable' }),
           },
           freqPromptFn,
           rolePromptFn,
@@ -2273,7 +2266,6 @@ describe('installAction — frequency and role prompts', () => {
           confirmFn: async () => true,
           promptFn: {
             apiKeyPrompt:     async () => ({ kind: 'skip' }),
-            telemetryConsent: async () => ({ kind: 'disable' }),
           },
           freqPromptFn,
           rolePromptFn,

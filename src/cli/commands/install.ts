@@ -387,14 +387,8 @@ export type ApiKeyPromptResult =
   | { kind: 'skip' }
   | { kind: 'cancel' };
 
-export type TelemetryConsentResult =
-  | { kind: 'enable' }
-  | { kind: 'disable' }
-  | { kind: 'cancel' };
-
 export interface InstallPrompts {
-  apiKeyPrompt:     (ctx: ApiKeyPromptContext) => Promise<ApiKeyPromptResult>;
-  telemetryConsent: () => Promise<TelemetryConsentResult>;
+  apiKeyPrompt: (ctx: ApiKeyPromptContext) => Promise<ApiKeyPromptResult>;
 }
 
 export function getKeychainName(platform: NodeJS.Platform = process.platform): string {
@@ -442,33 +436,6 @@ const defaultInstallPrompts: InstallPrompts = {
     if (input === '' && ctx.hasStoredKey) return { kind: 'keep_existing' };
     if (input === '') return { kind: 'skip' };
     return { kind: 'new_key', value: String(input) };
-  },
-  telemetryConsent: async () => {
-    note(
-      [
-        'We highly recommend you provide us logs so we can',
-        'get better information to improve nexpath as much',
-        'as possible.',
-        '',
-        "What's collected:  anonymous usage events (command",
-        '                   names, timings, error types)',
-        "What's NOT sent:   your code, prompts, API key,",
-        '                   file paths, personal information',
-        '',
-        'If you select:',
-        'Yes  → events captured locally AND auto-synced to our server',
-        'No   → no capture, no sync — full stop',
-        '',
-        'Change anytime: `nexpath config set telemetry.enabled true|false`',
-      ].join('\n'),
-      'Step 2 of 3 — Telemetry',
-    );
-    const answer = await confirm({
-      message:      'Enable telemetry?',
-      initialValue: true,
-    });
-    if (isCancel(answer)) return { kind: 'cancel' };
-    return answer === true ? { kind: 'enable' } : { kind: 'disable' };
   },
 };
 

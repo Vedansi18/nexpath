@@ -50,7 +50,6 @@ afterEach(() => {
 function makePrompts(overrides: Partial<InstallPrompts> = {}): InstallPrompts {
   return {
     apiKeyPrompt:     async () => ({ kind: 'skip' }),
-    telemetryConsent: async () => ({ kind: 'enable' }),
     ...overrides,
   };
 }
@@ -248,7 +247,6 @@ describe('install 3-step — Summary returned', () => {
         confirmFn: async () => true,
         promptFn: makePrompts({
           apiKeyPrompt: async () => ({ kind: 'skip' }),
-          telemetryConsent: async () => ({ kind: 'enable' }),
         }),
       });
       expect(summary).not.toBeNull();
@@ -364,7 +362,7 @@ describe('install 3-step — apiKeyPrompt context detection', () => {
         paths, isWin: false, execFn: () => {}, skipClipboardCheck: true,
         freqPromptFn: noopFreqPrompt, rolePromptFn: noopRolePrompt,
         confirmFn: async () => true,
-        promptFn: { apiKeyPrompt, telemetryConsent: async () => ({ kind: 'enable' }) },
+        promptFn: { apiKeyPrompt },
       });
       const ctx = apiKeyPrompt.mock.calls[0][0];
       expect(ctx.hasEnvKey).toBe(true);
@@ -382,7 +380,7 @@ describe('install 3-step — apiKeyPrompt context detection', () => {
         paths, isWin: false, execFn: () => {}, skipClipboardCheck: true,
         freqPromptFn: noopFreqPrompt, rolePromptFn: noopRolePrompt,
         confirmFn: async () => true,
-        promptFn: { apiKeyPrompt, telemetryConsent: async () => ({ kind: 'enable' }) },
+        promptFn: { apiKeyPrompt },
       });
       const ctx = apiKeyPrompt.mock.calls[0][0];
       expect(ctx.hasEnvKey).toBe(false);
@@ -400,7 +398,7 @@ describe('install 3-step — apiKeyPrompt context detection', () => {
         paths, isWin: false, execFn: () => {}, skipClipboardCheck: true,
         freqPromptFn: noopFreqPrompt, rolePromptFn: noopRolePrompt,
         confirmFn: async () => true,
-        promptFn: { apiKeyPrompt, telemetryConsent: async () => ({ kind: 'enable' }) },
+        promptFn: { apiKeyPrompt },
       });
       const ctx = apiKeyPrompt.mock.calls[0][0];
       expect(ctx.hasStoredKey).toBe(true);
@@ -419,7 +417,7 @@ describe('install 3-step — apiKeyPrompt context detection', () => {
         freqPromptFn: noopFreqPrompt, rolePromptFn: noopRolePrompt,
         platformForKeychain: 'win32',
         confirmFn: async () => true,
-        promptFn: { apiKeyPrompt, telemetryConsent: async () => ({ kind: 'enable' }) },
+        promptFn: { apiKeyPrompt },
       });
       const ctx = apiKeyPrompt.mock.calls[0][0];
       expect(ctx.keychainName).toBe('Credential Manager');
@@ -434,7 +432,6 @@ describe('install 3-step — cancellation aborts subsequent steps', () => {
     const { dir, cleanup } = tmpDirAgents();
     vi.spyOn(console, 'log').mockImplementation(() => {});
     const dbPath = join(dir, 'cancel-step1.db');
-    const telemetrySpy = vi.fn<InstallPrompts['telemetryConsent']>();
     try {
       const paths = resolveAgentPaths(dir, dir, dir);
       const summary = await installAction({}, {
@@ -442,12 +439,10 @@ describe('install 3-step — cancellation aborts subsequent steps', () => {
         freqPromptFn: noopFreqPrompt, rolePromptFn: noopRolePrompt,
         dbPath,
         promptFn: {
-          apiKeyPrompt:     async () => ({ kind: 'cancel' }),
-          telemetryConsent: telemetrySpy,
+          apiKeyPrompt: async () => ({ kind: 'cancel' }),
         },
       });
       expect(summary).toBeNull();
-      expect(telemetrySpy).not.toHaveBeenCalled();
       const store = await openStore(dbPath);
       expect(isConfigSet(store.db, 'telemetry.enabled')).toBe(false);
       expect(isConfigSet(store.db, 'telemetry_sync_enabled')).toBe(false);
