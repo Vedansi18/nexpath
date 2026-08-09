@@ -626,13 +626,13 @@ export function wrapLinuxSpawnForWaylandX11V1(
  * fail-open. Pure.
  */
 export function buildWindowsConsolePositionScriptV1(geometry: PopupGeometry): string {
-  // No-jump (P6): the window is spawned MINIMIZED (`start /MIN`) so it never flashes at the default
-  // centre. SetWindowPlacement sets the NORMAL-position rect to the docked rect AND shows it normal,
-  // so it appears directly on the right (restoring from minimized straight to the docked position —
-  // no visible move). MoveWindow re-applies the rect for the already-normal case. A final
-  // ShowWindow(SW_SHOWNORMAL) is the safety net: if positioning fails but PowerShell ran, the window
-  // is still shown (worst case: visible at default, never stuck minimized). Fully fail-open
-  // ($ErrorActionPreference + the caller's 2>nul).
+  // Windows visible-launch fix (2026-08-09): the window is now spawned VISIBLE (no `start /MIN`) — the
+  // earlier P6 no-jump minimize could leave it stuck in the taskbar when this best-effort restore did
+  // not take effect. This script DOCKS the already-visible window: SetWindowPlacement pins the
+  // NORMAL-position rect to the docked rect and MoveWindow applies it; showCmd=1 / ShowWindow(SW_SHOWNORMAL)
+  // keep it normal (a harmless re-assert for an already-visible window, and a safety net should it ever
+  // arrive minimized). Best-effort + fully fail-open ($ErrorActionPreference + the caller's 2>nul): if
+  // positioning fails the window stays visible at its default position — never invisible.
   const { xPx, yPx, widthPx, heightPx } = geometry;
   const right = xPx + widthPx;
   const bottom = yPx + heightPx;

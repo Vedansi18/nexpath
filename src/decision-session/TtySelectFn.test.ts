@@ -1889,10 +1889,10 @@ describe('planWindowsPopupSpawn — title and path passthrough', () => {
     expect(plan.args[plan.args.length - 1]).toBe('C:/Users/me/AppData/Local/Temp/nexpath-sel-abc.mjs');
   });
 
-  it('P5/P6: with a launcher .cmd, runs it MINIMIZED via cmd /c (no-jump: restores straight to docked)', () => {
+  it('with a launcher .cmd, runs it VISIBLE via cmd /c (visible-launch fix: never stuck minimized in the taskbar)', () => {
     const plan = planWindowsPopupSpawn(geom, 'T', 'C:/tmp/s.mjs', 'C:/tmp/s.mjs.launch.cmd');
-    // /MIN so the window never flashes at centre; the launcher's .ps1 restores it to the docked rect.
-    expect(plan.args).toEqual(['/c', 'start', '/MIN', '/WAIT', 'T', 'cmd', '/c', 'C:/tmp/s.mjs.launch.cmd']);
+    // Visible-launch fix (2026-08-09): no /MIN — the launcher's .ps1 docks the visible window best-effort.
+    expect(plan.args).toEqual(['/c', 'start', '/WAIT', 'T', 'cmd', '/c', 'C:/tmp/s.mjs.launch.cmd']);
   });
 
   it('P5: without a launcher (fail-open), stays the legacy direct-node spawn', () => {
