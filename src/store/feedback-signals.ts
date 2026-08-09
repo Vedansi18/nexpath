@@ -14,6 +14,18 @@ import { getConfig, setConfig } from './config.js';
 export const SIGNAL_ADVISORY_FIRED  = 'advisory_fired';
 export const SIGNAL_OPTION_SELECTED = 'option_selected';
 
+/**
+ * NF Plan B — content-free per-action signal kinds captured in the SAME feedback_signals table
+ * (project_root, kind, occurred_at). The kind is a fixed UI-action enum; NO prompt/option text or index
+ * is ever stored. Buffered locally always; flushed to PostHog only on the feedback-consent click.
+ */
+export const ACTION_SIGNAL_KINDS = [
+  'pe_use_current', 'pe_use_original', 'pe_shorter', 'pe_more_thorough',
+  'pe_more_project_grounded', 'pe_apply_details', 'pe_back', 'pe_close',
+  'mps_send', 'mps_cancel', 'mps_decline', 'mps_interruption',
+] as const;
+export type PromptActionSignalKind = typeof ACTION_SIGNAL_KINDS[number];
+
 const INSTALLED_AT_KEY = 'installed_at';
 const INSTALLED_EVENT_SENT_KEY = 'installed_event_sent';
 
@@ -78,6 +90,33 @@ export function recordOptionSelected(
   occurredAt: number = Date.now(),
 ): void {
   recordSignal(store, projectRoot, SIGNAL_OPTION_SELECTED, occurredAt);
+}
+
+/**
+ * NF Plan B — record a content-free per-action signal (kind + timestamp only) in the shared
+ * feedback_signals table. Writes are unconditional (storing locally is not sending).
+ */
+export function recordActionSignal(
+  store: Store,
+  projectRoot: string,
+  kind: PromptActionSignalKind,
+  occurredAt: number = Date.now(),
+): void {
+  recordSignal(store, projectRoot, kind, occurredAt);
+}
+
+/** Read all buffered per-action signals across every project (kind + timestamp), oldest first. */
+export function readAllActionSignals(store: Store): { kind: string; occurredAt: number }[] {
+  const actionKinds = new Set<string>(ACTION_SIGNAL_KINDS);
+  const result = store.db.exec(
+    'SELECT kind, occurred_at FROM feedback_signals ORDER BY occurred_at ASC',
+  );
+  const out: { kind: string; occurredAt: number }[] = [];
+  for (const row of result[0]?.values ?? []) {
+    const kind = row[0] as string;
+    if (actionKinds.has(kind)) out.push({ kind, occurredAt: row[1] as number });
+  }
+  return out;
 }
 
 /** Read all recorded signals for a project, split by kind, oldest first. */
