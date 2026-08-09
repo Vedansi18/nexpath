@@ -713,15 +713,15 @@ describe('screen-geometry — shared spawn helpers (P5)', () => {
     expect(wrapLinuxSpawnForWaylandX11V1(plan, { displayServer: 'wayland', terminalCommand: 'gnome-terminal', hasGeometry: false }).command).toBe('gnome-terminal');
   });
 
-  it('buildWindowsConsolePositionScriptV1 (P6 no-jump): SetWindowPlacement docked rect + MoveWindow + show-normal safety', () => {
+  it('buildWindowsConsolePositionScriptV1: resolves the real top-level window by title and SetWindowPos docks it', () => {
     const ps = buildWindowsConsolePositionScriptV1({ widthPx: 1152, heightPx: 1080, xPx: 768, yPx: 0, cols: 115, rows: 54 });
     expect(ps).toContain('$ErrorActionPreference = "SilentlyContinue"'); // fail-open
+    // Windows Terminal: resolve the visible top-level window by our "Nexpath …" title (not the hidden
+    // ConPTY pseudo-console); conhost fallback keeps GetConsoleWindow.
+    expect(ps).toContain("MainWindowTitle -like 'Nexpath*'");
     expect(ps).toContain('GetConsoleWindow');
-    // No-jump: restore from minimized straight to the docked normal rect (no centre flash).
-    expect(ps).toContain('SetWindowPlacement');
-    expect(ps).toContain('$wp.normLeft = 768; $wp.normTop = 0; $wp.normRight = 1920; $wp.normBottom = 1080');
-    expect(ps).toContain('MoveWindow($h, 768, 0, 1152, 1080, $true)');
-    expect(ps).toContain('ShowWindow($h, 1)'); // safety net: never stay minimized
+    // Dock position + size in one SetWindowPos call on the real window (SWP_SHOWWINDOW=0x0040).
+    expect(ps).toContain('SetWindowPos($h, [IntPtr]::Zero, 768, 0, 1152, 1080, 0x0040)');
   });
 
   it('buildWindowsConsoleLauncherScriptV1: mode con + powershell -File before the command; no geometry = plain', () => {
