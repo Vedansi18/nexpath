@@ -95,42 +95,50 @@ describe('H1b mechanism truth — Cursor', () => {
   });
 });
 
-describe('H1b mechanism truth — Cursor chat-focus command ORDER', () => {
-  // The reorder shipped in H1b is a real behaviour change: `cursorInject` runs the
-  // FIRST REGISTERED command, and H1 proved submit-after-inject only succeeds when
-  // the composer was genuinely focused first. Before this test the order was
-  // completely uncovered — nothing would have failed if someone reshuffled it.
-  // Mirrors P2's precedent (`popup-foreground.test.ts` "attempts the titles in a
-  // stable order..."), which exists for exactly this short-circuit-order class of bug.
-  it('puts the live-VERIFIED composer focus first, and the two absent ids last', async () => {
+describe('BACKWARD COMPATIBILITY — Cursor chat-focus order must NOT change', () => {
+  // This list is consumed by `cursorInject` on the EXISTING, SHIPPING, UN-GATED
+  // advisory path (`injectIntoChat`). The hook milestone's rule (dev plan §2.1) is
+  // that every behavioural change sits behind the NEXPATH_*_PROMPTSUBMIT_ADVISORY
+  // switch, default off — and that switch does not exist yet (H2 builds it).
+  //
+  // H1b briefly reordered this to put `composer.focusComposer` first on live
+  // evidence. THAT WAS REVERTED: the reorder only benefits the NEW submit-time
+  // flow (which does not exist yet), while shipping it un-gated would change
+  // today's behaviour for any build where `aichat.focusChat` IS registered.
+  //
+  // These tests therefore guard the OLD ORDER, not the "better" one. H6 applies
+  // the evidence-backed order behind the switch.
+  it('preserves the original pre-hook-milestone order exactly', async () => {
     const { CURSOR_CHAT_FOCUS_COMMANDS_V1 } = await import('./extension.js');
     expect(CURSOR_CHAT_FOCUS_COMMANDS_V1).toEqual([
-      'composer.focusComposer',
-      'workbench.action.focusAuxiliaryBar',
       'aichat.focusChat',
+      'composer.focusComposer',
       'aichat.gotochat',
+      'workbench.action.focusAuxiliaryBar',
     ]);
   });
 
-  it('composer.focusComposer is strictly before the generic sidebar focus', async () => {
-    // The precise composer focus must win over the generic auxiliary-bar focus when
-    // both are registered — the generic one merely happened to work in the H1 spike.
+  it('does not promote composer.focusComposer ahead of aichat.focusChat on the un-gated path', async () => {
+    // Fails if someone re-applies the H1b reorder without gating it behind the
+    // backward-compatibility switch. The knowledge is not lost — it is recorded in
+    // the constant's doc comment and in the dev plan's H1b results table, to be
+    // applied by H6 behind the switch.
     const { CURSOR_CHAT_FOCUS_COMMANDS_V1 } = await import('./extension.js');
-    const precise = CURSOR_CHAT_FOCUS_COMMANDS_V1.indexOf('composer.focusComposer');
-    const generic = CURSOR_CHAT_FOCUS_COMMANDS_V1.indexOf('workbench.action.focusAuxiliaryBar');
-    expect(precise).toBeGreaterThanOrEqual(0);
-    expect(precise).toBeLessThan(generic);
+    expect(CURSOR_CHAT_FOCUS_COMMANDS_V1.indexOf('aichat.focusChat'))
+      .toBeLessThan(CURSOR_CHAT_FOCUS_COMMANDS_V1.indexOf('composer.focusComposer'));
   });
 
-  it('the two ids absent from Cursor 3.4.20 never precede a verified one', async () => {
+  it('still contains every id the old flow relied on — nothing dropped', async () => {
     const { CURSOR_CHAT_FOCUS_COMMANDS_V1 } = await import('./extension.js');
-    const lastVerified = Math.max(
-      CURSOR_CHAT_FOCUS_COMMANDS_V1.indexOf('composer.focusComposer'),
-      CURSOR_CHAT_FOCUS_COMMANDS_V1.indexOf('workbench.action.focusAuxiliaryBar'),
-    );
-    for (const absent of ['aichat.focusChat', 'aichat.gotochat']) {
-      expect(CURSOR_CHAT_FOCUS_COMMANDS_V1.indexOf(absent)).toBeGreaterThan(lastVerified);
+    for (const id of [
+      'aichat.focusChat',
+      'composer.focusComposer',
+      'aichat.gotochat',
+      'workbench.action.focusAuxiliaryBar',
+    ]) {
+      expect(CURSOR_CHAT_FOCUS_COMMANDS_V1).toContain(id);
     }
+    expect(CURSOR_CHAT_FOCUS_COMMANDS_V1).toHaveLength(4);
   });
 });
 

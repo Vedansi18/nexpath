@@ -87,25 +87,37 @@ let logChannel: vscode.OutputChannel | undefined;
  * functional, not cosmetic — H1 established that submit-after-inject only
  * succeeds when the composer was genuinely focused first.
  *
- * Order set 2026-08-10 (H1b) from live evidence against Cursor 3.4.20:
- *   1. `composer.focusComposer`            — bundle x4, VERIFIED working live;
- *                                            focuses the composer itself.
- *   2. `workbench.action.focusAuxiliaryBar` — VS Code built-in; works, but
- *                                            focuses the sidebar generically.
- *   3. `aichat.focusChat`                  — ZERO bundle occurrences on 3.4.20.
- *   4. `aichat.gotochat`                   — ZERO bundle occurrences on 3.4.20.
- * The last two are kept only as inert forward/back-compat probes for other
- * builds; the registered-check skips them at runtime.
+ * **ORDER IS DELIBERATELY UNCHANGED — backward compatibility (2026-08-10).**
+ * H1b briefly reordered this list to put `composer.focusComposer` first, on live
+ * evidence that it is the precise composer focus (bundle x4, VERIFIED working)
+ * while `aichat.focusChat`/`aichat.gotochat` have ZERO occurrences on Cursor
+ * 3.4.20. **That reorder was reverted**, because this constant is consumed by
+ * `cursorInject` on the EXISTING, SHIPPING, UN-GATED advisory path
+ * (`injectIntoChat`) — not by anything new. The hook milestone's own rule (dev
+ * plan §2.1) is that *every* behavioural change sits behind the
+ * `NEXPATH_*_PROMPTSUBMIT_ADVISORY` switch, default off; that switch does not
+ * exist yet (H2 builds it), so there was nothing to gate the change behind.
+ *
+ * Why reverting costs nothing: the reorder's benefit only applies to the NEW
+ * submit-time flow, which does not exist yet. On Cursor 3.4.20 both orders
+ * resolve to the same effective command anyway, because the loop skips
+ * unregistered ids — but on a build where `aichat.focusChat` IS registered the
+ * two orders genuinely differ, so shipping it un-gated would have been a real,
+ * unrequested change to today's behaviour for those users.
+ *
+ * **H6 must apply the evidence-backed order (`composer.focusComposer` first)
+ * behind the switch**, so the new flow gets the better focus while the old flow
+ * stays byte-identical. See the H1b results table in the dev plan.
  *
  * Exported ONLY so the order can be pinned by a test (additive testability, the
  * same approach P2 used for the Windsurf hook's untestable popup-raise gate).
  * Nothing outside tests should import this.
  */
 export const CURSOR_CHAT_FOCUS_COMMANDS_V1: readonly string[] = [
-  'composer.focusComposer',
-  'workbench.action.focusAuxiliaryBar',
   'aichat.focusChat',
+  'composer.focusComposer',
   'aichat.gotochat',
+  'workbench.action.focusAuxiliaryBar',
 ];
 
 let peLastPublishedCreatedAt = -Infinity;
