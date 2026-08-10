@@ -106,8 +106,8 @@ nexpath --version
 ```
 
 Setup notes:
-- You'll choose how often advisories appear (advisory frequency) and what kind of work you do (project role).
-- Both can be changed later — when an advisory popup appears, press Ctrl+T (Cmd+T on macOS) to change them.
+- During install you pick your project role (what kind of work you do) so Nexpath tailors its guidance to how you build.
+- Nexpath's core is Prompt Enhancement (PE), with Multi-Prompt Sequence (MPS) and Prompt Enhancement Feedback (PEF) — these work automatically as you code.
 
 ### Uninstalling
 

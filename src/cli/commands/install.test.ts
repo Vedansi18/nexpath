@@ -1260,6 +1260,24 @@ describe('uninstallAction', () => {
     }
   });
 
+  it('NF (owner 2026-08-10): deletes the local store AUTOMATICALLY with no data-delete prompt (default yes)', async () => {
+    const { dir, cleanup } = tmpDir();
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const paths = resolveAgentPaths(dir, dir, dir);
+      const dbPath = join(dir, 'prompt-store.db');
+      writeFileSync(dbPath, 'x');
+      // No storeDeleteConfirmFn injected → the default (auto-yes, NO prompt) is used.
+      await uninstallAction({ paths, execFn: () => {}, apiKeyConfirmFn: async () => false, dbPath });
+      expect(existsSync(dbPath)).toBe(false); // deleted automatically, no confirmation
+      const output = spy.mock.calls.map((c) => c[0] as string).join('\n');
+      expect(output).toContain('✓ Local data deleted.');       // short message, no detail list
+      expect(output).not.toContain('Prompt history retained');  // never the retain path in real use
+    } finally {
+      cleanup();
+    }
+  });
+
   it('NF: --yes deletes the local store DB without prompting', async () => {
     const { dir, cleanup } = tmpDir();
     vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -2135,7 +2153,7 @@ describe('installAction — frequency and role prompts', () => {
     }
   });
 
-  it('interactive path passes the current frequency to the prompt and writes the selection', async () => {
+  it('hides ONLY the frequency picker (seeds Medium) — the role picker still shows (owner 2026-08-10)', async () => {
     const { dir, cleanup: cleanupDir } = tmpDir();
     markClaudeInstalled(dir);
     const { path: dbPath, cleanup: cleanupDb } = tempDbFile();
@@ -2162,9 +2180,11 @@ describe('installAction — frequency and role prompts', () => {
         },
       );
 
-      expect(freqPromptFn).toHaveBeenCalledWith('every_event');
+      expect(freqPromptFn).not.toHaveBeenCalled();          // frequency picker hidden
+      expect(rolePromptFn).toHaveBeenCalledWith('founder');  // role picker STILL shown (default founder)
       const store = await openStore(dbPath);
-      expect(getConfig(store.db, 'advisory_frequency')).toBe('optimum');
+      expect(getConfig(store.db, 'advisory_frequency')).toBe('every_event'); // Medium default seeded
+      expect(getConfig(store.db, 'role')).toBe('founder');                    // written by the role picker
       closeStore(store);
     } finally {
       cleanupDir();
