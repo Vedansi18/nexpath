@@ -643,23 +643,28 @@ export async function installAction(
       }
     }
 
-    // ── Frequency + role prompts ───────────────────────────────────────────────
-    // Reuse the already-open `store` — opening a second store on the same dbPath
-    // would deadlock on the exclusive file lock and clobber these writes when the
-    // first store is closed afterwards.
+    // ── Advisory frequency (picker hidden) + role prompt ────────────────────────
+    // Owner ruling 2026-08-10: ONLY the advisory-frequency picker is hidden at install (support to be
+    // re-added later) — seed its default silently (Medium / every_event) when unset. Its interactive
+    // block is kept COMMENTED OUT (not removed): un-comment it (and drop the default-seed line) to
+    // restore the picker. The freqPromptFn param + defaultFreqPrompt are retained for that. The ROLE
+    // picker stays interactive (restored 2026-08-10). Both settings stay changeable via
+    // `nexpath config set advisory_frequency|role …`.
+    // (Reuse the already-open `store`; a second open on the same dbPath would deadlock the file lock.)
     const currentFreq = readInstallFreq(store.db);
-    if (opts.yes) {
-      if (!isConfigSet(store.db, 'advisory_frequency')) {
-        setAdvisoryFrequency(store, 'advisory_frequency', currentFreq);
-      }
-    } else {
-      const picked = await freqPromptFn(currentFreq);
-      if (!isCancel(picked) && typeof picked === 'string') {
-        setAdvisoryFrequency(store, 'advisory_frequency', picked);
-        console.log(`✓ advisory_frequency = ${picked}`);
-      }
+    if (!isConfigSet(store.db, 'advisory_frequency')) {
+      setAdvisoryFrequency(store, 'advisory_frequency', currentFreq);
     }
+    // HIDDEN picker (owner 2026-08-10) — un-comment to restore the interactive frequency selection:
+    // if (!opts.yes) {
+    //   const picked = await freqPromptFn(currentFreq);
+    //   if (!isCancel(picked) && typeof picked === 'string') {
+    //     setAdvisoryFrequency(store, 'advisory_frequency', picked);
+    //     console.log(`✓ advisory_frequency = ${picked}`);
+    //   }
+    // }
 
+    // Role picker stays interactive at install (owner 2026-08-10: only the frequency picker is hidden).
     const currentRole = readInstallRole(store.db);
     if (opts.yes) {
       if (!isConfigSet(store.db, 'role')) {
@@ -950,13 +955,9 @@ const defaultUninstallApiKeyConfirm: UninstallApiKeyConfirmFn = async () => {
 
 export type UninstallStoreDeleteConfirmFn = () => Promise<boolean>;
 
-const defaultUninstallStoreDeleteConfirm: UninstallStoreDeleteConfirmFn = async () => {
-  const answer = await confirm({
-    message:      'Delete all local nexpath data (prompt history, config, buffered signals)?',
-    initialValue: true,
-  });
-  return !isCancel(answer) && answer === true;
-};
+// Owner ruling 2026-08-10: deleting local data on uninstall no longer prompts the user — it is
+// automatic (default yes). The injectable seam is kept only so tests can exercise a decline.
+const defaultUninstallStoreDeleteConfirm: UninstallStoreDeleteConfirmFn = async () => true;
 
 export async function uninstallAction(
   {
@@ -1055,22 +1056,22 @@ export async function uninstallAction(
   }
 
   // ── Local data cleanup (NF: delete on uninstall) ─────────────────────────
-  // Owner ruling 2026-08-09: uninstall should leave nothing behind — delete the store DB (prompt
-  // history, config, and the content-free feedback/action signals all live there). Confirmed
-  // (default yes) or forced by --yes; on decline we keep today's behaviour (retain + telemetry off).
+  // Owner ruling 2026-08-10: the local store (prompt history, config, and the content-free
+  // feedback/action signals all live there) is deleted AUTOMATICALLY — no user prompt (default yes).
+  // A programmatic decline (test seam) keeps the retain + telemetry-off behaviour. Best-effort:
+  // a delete failure never crashes uninstall (e.g. a locked file).
   const resolvedDbPath = dbPath ?? DEFAULT_DB_PATH;
   const shouldDeleteData = yes || await storeDeleteConfirmFn();
   console.log('');
   if (shouldDeleteData) {
     try {
       if (existsSync(resolvedDbPath)) unlinkSync(resolvedDbPath);
-      console.log('✓ Local data deleted (prompt history, config, and buffered signals).');
+      console.log('✓ Local data deleted.');
     } catch (err) {
-      // Best-effort — never crash uninstall over a delete failure (e.g. a locked file).
       console.log(`- Could not delete local data (${(err as Error).message}); remove ${resolvedDbPath} manually.`);
     }
   } else {
-    // Declined: retain the DB, but ensure telemetry stays off in the retained config.
+    // Declined (programmatic only): retain the DB, but ensure telemetry stays off in the config.
     try {
       const store = await openStore(resolvedDbPath);
       try {
