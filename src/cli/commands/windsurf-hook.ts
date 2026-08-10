@@ -27,6 +27,11 @@ import type { Command } from 'commander';
 import type { ChildProcess } from 'node:child_process';
 import { runWindsurfHook, type RunResult } from '../../windsurf-hook/handler.js';
 import { decideSubmitPrompt, type DeciderOptionSet, type DeciderSelection } from './submit-prompt-decider.js';
+import {
+  createDeterministicSubmitOptionSource,
+  type SubmitOptionSource,
+} from './submit-option-source.js';
+import { openStore, closeStore } from '../../store/db.js';
 import { writeSubmitDecision } from './submit-decision-store.js';
 import { bringPopupToFront } from '../../windsurf-hook/foreground.js';
 
@@ -119,19 +124,23 @@ export type WindsurfPromptSubmitDecision = 'allow' | 'block';
 /**
  * Build the default `pre_user_prompt` decider (H3 Gap 2b).
  *
- * **Ports, not imports.** `composeOptions` and `renderPopup` are the seams onto
- * Hiren's `composeDeterministicOptions` and Bhavnesh's `createTtySelectFn`. Those
- * files are CONSUME-ONLY (dev plan §1.3) and are deliberately **not imported
- * here** — the adapters are supplied by whoever wires them, which keeps the
- * ownership boundary provable in the import graph.
+ * **Ports, with a real default.** `composeOptions`/`renderPopup` remain injectable
+ * seams, but they now default to `createDeterministicSubmitOptionSource` — so the
+ * switched-on path produces real options instead of being inert. Passing
+ * `ports.composeOptions` overrides that and skips opening a Store entirely.
  *
- * **Until an option source is supplied this returns `'allow'` for every prompt**,
- * so enabling the switch changes nothing observable. That is the correct
- * behaviour-neutral default: blocking a prompt with no replacement to inject would
- * cancel the user's turn and strand them — strictly worse than today.
+ * **Ownership is still intact.** Hiren's `composeDeterministicOptions` and
+ * Bhavnesh's `createTtySelectFn` are CONSUME-ONLY (dev plan §1.3) and are reached
+ * only through `submit-option-source.ts`, the adapter. Neither is imported here,
+ * and `submit-prompt-decider.ts` still has zero imports of any kind.
  *
- * Persistence IS wired: when an option source and a selection do exist, the
- * decision is written atomically to the file the extension's poller consumes.
+ * **The Store is opened per invocation and always closed** (`finally`). This runs
+ * in a short-lived hook subprocess alongside the `auto` child of the same turn, so
+ * a leaked handle would hold the SQLite lock against it.
+ *
+ * Every failure — store open, option source, popup — falls through to `'allow'`
+ * (fail-open, amendment A3): the original prompt is released unmodified rather
+ * than cancelled with nothing to replace it.
  */
 export function buildDefaultPromptSubmitDecider(
   opts: { project?: string },
@@ -139,25 +148,55 @@ export function buildDefaultPromptSubmitDecider(
     composeOptions?: (promptText: string) => DeciderOptionSet | null;
     renderPopup?: (promptText: string, options: DeciderOptionSet) => Promise<DeciderSelection>;
     now?: () => number;
+    openStore?: (db?: string) => Promise<unknown>;
+    closeStore?: (store: unknown) => Promise<void> | void;
   } = {},
 ): (event: string, o: { project?: string }) => Promise<WindsurfPromptSubmitDecision> {
-  const composeOptions = ports.composeOptions ?? ((): DeciderOptionSet | null => null);
-  const renderPopup = ports.renderPopup ?? (async (): Promise<DeciderSelection> => null);
   const now = ports.now ?? (() => Date.now());
+  const openStoreFn = ports.openStore ?? openStore;
+  const closeStoreFn = ports.closeStore ?? closeStore;
 
-  return async (_event, o) => decideSubmitPrompt(promptTextForHook(), {
-    composeOptions,
-    renderPopup,
-    persistDecision: async (replacementText) => {
-      await writeSubmitDecision({
-        projectRoot: o.project ?? opts.project ?? process.cwd(),
-        decisionId: `sd-${now()}-${Math.floor(now() % 100000)}`,
-        replacementText,
-        createdAt: now(),
-        host: 'windsurf',
+  return async (_event, o) => {
+    const projectRoot = o.project ?? opts.project ?? process.cwd();
+
+    // The option source needs a Store. Opened per invocation and ALWAYS closed —
+    // this runs inside a short-lived hook subprocess, so a leaked handle would
+    // hold the SQLite lock against the `auto` child running in the same turn.
+    let store: unknown = null;
+    let source: SubmitOptionSource | null = null;
+    if (!ports.composeOptions) {
+      try {
+        store = await openStoreFn(undefined as never);
+        source = createDeterministicSubmitOptionSource({ store, projectRoot });
+      } catch {
+        // Fail-open (A3): no store ⇒ no options ⇒ the prompt is released.
+        store = null;
+        source = null;
+      }
+    }
+
+    try {
+      return await decideSubmitPrompt(promptTextForHook(), {
+        composeOptions: ports.composeOptions
+          ?? source?.composeOptions
+          ?? ((): DeciderOptionSet | null => null),
+        renderPopup: ports.renderPopup
+          ?? source?.renderPopup
+          ?? (async (): Promise<DeciderSelection> => null),
+        persistDecision: async (replacementText) => {
+          await writeSubmitDecision({
+            projectRoot,
+            decisionId: `sd-${now()}-${Math.floor(now() % 100000)}`,
+            replacementText,
+            createdAt: now(),
+            host: 'windsurf',
+          });
+        },
       });
-    },
-  });
+    } finally {
+      if (store) { try { await closeStoreFn(store as never); } catch { /* fail-open */ } }
+    }
+  };
 }
 
 /**
