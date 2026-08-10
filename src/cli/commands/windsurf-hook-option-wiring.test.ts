@@ -113,3 +113,34 @@ describe('⚠ STILL INERT — prompt text is not plumbed from stdin yet', () => 
     await expect(decide('pre_user_prompt', {})).resolves.toBe('allow');
   });
 });
+
+describe('⭐ BACKWARD COMPAT — switch OFF must be indistinguishable from before H3', () => {
+  // The owner's standing requirement. H3 added a Store handle and a new module
+  // import to this file; both must be unreachable when the switch is unset.
+  it('constructing the decider opens no Store — the open is deferred into the gated call', async () => {
+    // windsurfHookAction constructs this UNCONDITIONALLY (outside the switch
+    // gate), so construction itself must be inert. If openStore ever moved out of
+    // the returned closure, every hook invocation would take the SQLite lock —
+    // including with the feature switched off.
+    const openStore = vi.fn(async () => ({ db: {} }));
+    buildDefaultPromptSubmitDecider({ project: '/proj' }, { openStore, closeStore: () => {} });
+    expect(openStore).not.toHaveBeenCalled();
+  });
+
+  it('the switch reader defaults OFF and is exact-equality', async () => {
+    const { isWindsurfPromptSubmitAdvisoryEnabled: on } = await import('./windsurf-hook.js');
+    expect(on({})).toBe(false);            // unset
+    expect(on({ NEXPATH_WINDSURF_PROMPTSUBMIT_ADVISORY: '0' })).toBe(false);
+    expect(on({ NEXPATH_WINDSURF_PROMPTSUBMIT_ADVISORY: 'true' })).toBe(false);
+    expect(on({ NEXPATH_WINDSURF_PROMPTSUBMIT_ADVISORY: '1' })).toBe(true);
+  });
+
+  it('importing windsurf-hook takes no lock and creates no files', async () => {
+    // store/db.js is now imported at module load. It must stay side-effect-free
+    // (constants + a lazily-initialised `_SQL`), or merely loading the hook would
+    // touch the DB on every Windsurf event.
+    const before = existsSync(join(tmpdir(), 'nexpath-import-probe'));
+    await import('./windsurf-hook.js');
+    expect(before).toBe(existsSync(join(tmpdir(), 'nexpath-import-probe')));
+  });
+});

@@ -242,10 +242,15 @@ export async function runWindsurfHookAction(
   const waitForChild = deps.waitForChild ?? awaitChild;
   const exit = deps.exit ?? ((code: number) => process.exit(code));
   const env = deps.env ?? process.env;
-  // Default decider (H3 Gap 2b). Still resolves `'allow'` unless an option source
-  // is supplied — see `buildDefaultPromptSubmitDecider`. That keeps the switched-on
-  // path behaviour-neutral until the classification/option adapters are connected,
-  // rather than blocking prompts with nothing to replace them.
+  // Default decider (H3). Constructed unconditionally, but this only BUILDS a
+  // closure — `openStore` lives inside it and runs solely on the gated call below
+  // (`isWindsurfPromptSubmitAdvisoryEnabled`). So with the switch off no Store is
+  // opened, no lock is taken, and nothing here is reachable: the backward-compat
+  // guarantee is enforced by control flow, not by comment.
+  //
+  // The default decider now DOES have a real option source, but still resolves
+  // `'allow'` for every prompt because `promptTextForHook()` is a stub (see it
+  // below) — pinned by `windsurf-hook-option-wiring.test.ts`.
   const decidePromptSubmit = deps.decidePromptSubmit ?? buildDefaultPromptSubmitDecider(opts);
 
   try {
