@@ -28,10 +28,41 @@ import { parseCursorHookPayload, type CursorHookPayload } from '../../cursor-hoo
 import { defaultReadStdin } from './windsurf-hook.js';
 import { createHoldBudget, type HoldBudget } from './submit-hold-budget.js';
 
-/** What we write to stdout. `continue:false` is what actually blocks Cursor. */
+/**
+ * Backward-compatibility switch for the Cursor submit-time advisory (H6).
+ *
+ * Mirrors `NEXPATH_WINDSURF_PROMPTSUBMIT_ADVISORY` exactly, including the
+ * exact-equality `=== '1'` read: internal, never persisted, never surfaced by
+ * `nexpath status` or `nexpath config`. Unset / `'0'` / `'true'` all fall through
+ * to today's behaviour.
+ *
+ * Duplicated rather than shared with the Windsurf constant on purpose: the two
+ * platforms must be switchable INDEPENDENTLY, so one env var could not serve
+ * both. A test pins the exact name.
+ */
+export const CURSOR_PROMPTSUBMIT_ADVISORY_ENV = 'NEXPATH_CURSOR_PROMPTSUBMIT_ADVISORY';
+
+/** True only when the switch is explicitly `'1'`. Default OFF — never `!== '0'`. */
+export function isCursorPromptSubmitAdvisoryEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env[CURSOR_PROMPTSUBMIT_ADVISORY_ENV] === '1';
+}
+
+/**
+ * What we write to stdout. `continue:false` is what actually blocks Cursor.
+ *
+ * `user_message` is a **Cursor-only capability**: it is rendered inside the
+ * "Submission blocked by hook" card (measured — analysis §4.1). Windsurf has no
+ * equivalent; its block wording is a fixed vendor string we cannot influence.
+ * So on Cursor we can explain WHY the prompt was held, and we should.
+ */
 export interface CursorHookResponse {
   continue: boolean;
+  user_message?: string;
 }
+
+/** Shown in Cursor's block card when we hold a prompt for refinement. */
+export const CURSOR_BLOCK_USER_MESSAGE =
+  'nexpath: this prompt was held so you could refine it. Your refined version is being sent instead.';
 
 /** The response that lets the prompt through unchanged — the fail-open default. */
 export const CURSOR_CONTINUE: CursorHookResponse = { continue: true };
@@ -40,6 +71,10 @@ export interface CursorHookActionDeps {
   readStdin?: () => Promise<string>;
   /** Decides whether to block. Defaults to "never" so H5 alone is inert. */
   decide?: (payload: CursorHookPayload) => Promise<'allow' | 'block'>;
+  /** Overrides the block card text; defaults to CURSOR_BLOCK_USER_MESSAGE. */
+  blockMessage?: string;
+  /** Env for the switch read. Injected for tests. */
+  env?: NodeJS.ProcessEnv;
   write?: (text: string) => void;
   exit?: (code: number) => void;
   /** Bound on the stdin read; a hang here would hold the user's prompt. */
@@ -96,7 +131,9 @@ export async function runCursorHookAction(
     const payload = parseCursorHookPayload(raw);
 
     let decision: 'allow' | 'block' = 'allow';
-    if (deps.decide) {
+    // Gated exactly like Windsurf's: with the switch off the decider is never
+    // consulted, so the path is unreachable and behaviour is unchanged.
+    if (deps.decide && isCursorPromptSubmitAdvisoryEnabled(deps.env ?? process.env)) {
       // Draws from what the stdin read left. A timeout is never a decision: it
       // continues, so the original prompt is released (A3).
       const decided = await hold.run(() => deps.decide!(payload));
@@ -104,7 +141,14 @@ export async function runCursorHookAction(
     }
 
     // `continue:false` is the ONLY thing that blocks Cursor — not the exit code.
-    write(JSON.stringify({ continue: decision !== 'block' }));
+    // On a block we also send `user_message`, the text channel Cursor renders in
+    // its card. Omitting it would leave the user staring at a bare "blocked by
+    // hook" with no explanation of what happened to their prompt.
+    write(JSON.stringify(
+      decision === 'block'
+        ? { continue: false, user_message: deps.blockMessage ?? CURSOR_BLOCK_USER_MESSAGE }
+        : CURSOR_CONTINUE,
+    ));
   } catch {
     // Never break the host: emit a continue and fall through to exit 0.
     try { write(JSON.stringify(CURSOR_CONTINUE)); } catch { /* stdout gone */ }

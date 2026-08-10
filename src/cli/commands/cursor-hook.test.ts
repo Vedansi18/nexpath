@@ -6,7 +6,10 @@
  * Windsurf exit-2 convention here would silently fail to block.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { runCursorHookAction, CURSOR_CONTINUE } from './cursor-hook.js';
+import {
+  runCursorHookAction, CURSOR_CONTINUE, CURSOR_BLOCK_USER_MESSAGE,
+  CURSOR_PROMPTSUBMIT_ADVISORY_ENV, isCursorPromptSubmitAdvisoryEnabled,
+} from './cursor-hook.js';
 import { createHoldBudget } from './submit-hold-budget.js';
 
 const PAYLOAD = JSON.stringify({
@@ -22,6 +25,9 @@ function harness(over: Record<string, unknown> = {}) {
   return {
     writes, exits,
     deps: {
+      // H6: the decider is switch-gated. These tests are about the decision
+      // path, so the switch is ON unless a test overrides it.
+      env: { [CURSOR_PROMPTSUBMIT_ADVISORY_ENV]: '1' },
       readStdin: async () => PAYLOAD,
       write: (t: string) => { writes.push(t); },
       exit: (c: number) => { exits.push(c); },
@@ -40,7 +46,7 @@ describe('⭐ Cursor blocks via stdout JSON, never the exit code', () => {
   it('emits continue:false to block', async () => {
     const h = harness({ decide: async () => 'block' as const });
     await runCursorHookAction('beforeSubmitPrompt', h.deps as never);
-    expect(JSON.parse(h.writes[0])).toEqual({ continue: false });
+    expect(JSON.parse(h.writes[0])).toMatchObject({ continue: false });
   });
 
   it('emits continue:true to allow', async () => {
@@ -175,5 +181,72 @@ describe('⭐ R2 — self-enforced hold: Cursor orphans timed-out hooks, so it w
     // Budget exhausted by stdin ⇒ the decision segment never runs ⇒ continue.
     expect(JSON.parse(h.writes[0])).toEqual({ continue: true });
     expect(h.exits).toEqual([0]);
+  });
+});
+
+describe('⭐ H6 — the Cursor switch is independent and defaults OFF', () => {
+  it('pins the env var name', () => {
+    // Duplicated from the Windsurf constant on purpose: the two platforms must be
+    // switchable INDEPENDENTLY, so one shared var could not serve both.
+    expect(CURSOR_PROMPTSUBMIT_ADVISORY_ENV).toBe('NEXPATH_CURSOR_PROMPTSUBMIT_ADVISORY');
+  });
+
+  it('is exact-equality: only "1" enables it', () => {
+    expect(isCursorPromptSubmitAdvisoryEnabled({})).toBe(false);
+    for (const v of ['0', 'true', 'yes', '']) {
+      expect(isCursorPromptSubmitAdvisoryEnabled({ [CURSOR_PROMPTSUBMIT_ADVISORY_ENV]: v })).toBe(false);
+    }
+    expect(isCursorPromptSubmitAdvisoryEnabled({ [CURSOR_PROMPTSUBMIT_ADVISORY_ENV]: '1' })).toBe(true);
+  });
+
+  it('does NOT enable on the Windsurf switch — the two are independent', () => {
+    expect(isCursorPromptSubmitAdvisoryEnabled({
+      NEXPATH_WINDSURF_PROMPTSUBMIT_ADVISORY: '1',
+    })).toBe(false);
+  });
+
+  it('⭐ switch OFF: the decider is never consulted, even if supplied', async () => {
+    // Backward compat: with the switch unset the path is unreachable.
+    const decide = vi.fn().mockResolvedValue('block' as const);
+    const h = harness({ env: {}, decide });
+    await runCursorHookAction('beforeSubmitPrompt', h.deps as never);
+    expect(decide).not.toHaveBeenCalled();
+    expect(JSON.parse(h.writes[0])).toEqual(CURSOR_CONTINUE);
+  });
+});
+
+describe('⭐ H6 — user_message is the Cursor-only text channel', () => {
+  it('a block carries an explanation', async () => {
+    // Measured: user_message is rendered inside Cursor's block card. Windsurf has
+    // no equivalent - its wording is a fixed vendor string. Omitting it would
+    // leave the user staring at a bare "blocked by hook".
+    const h = harness({ decide: async () => 'block' as const });
+    await runCursorHookAction('beforeSubmitPrompt', h.deps as never);
+    const res = JSON.parse(h.writes[0]);
+    expect(res.continue).toBe(false);
+    expect(res.user_message).toBe(CURSOR_BLOCK_USER_MESSAGE);
+  });
+
+  it('an ALLOW never carries user_message — nothing to explain', async () => {
+    // MUTATION GUARD: attaching it unconditionally would render a "blocked" card
+    // message on a turn that was not blocked.
+    const h = harness({ decide: async () => 'allow' as const });
+    await runCursorHookAction('beforeSubmitPrompt', h.deps as never);
+    expect(JSON.parse(h.writes[0])).toEqual({ continue: true });
+  });
+
+  it('the message never contains the user prompt', async () => {
+    // It is rendered in the host UI; echoing prompt text there would surface
+    // content the user may not expect to see repeated.
+    expect(CURSOR_BLOCK_USER_MESSAGE).not.toContain('hello');
+    const h = harness({ decide: async () => 'block' as const });
+    await runCursorHookAction('beforeSubmitPrompt', h.deps as never);
+    expect(h.writes[0]).not.toContain('hello');
+  });
+
+  it('a caller may override the message', async () => {
+    const h = harness({ decide: async () => 'block' as const, blockMessage: 'custom text' });
+    await runCursorHookAction('beforeSubmitPrompt', h.deps as never);
+    expect(JSON.parse(h.writes[0]).user_message).toBe('custom text');
   });
 });
