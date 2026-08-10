@@ -95,6 +95,45 @@ describe('H1b mechanism truth — Cursor', () => {
   });
 });
 
+describe('H1b mechanism truth — Cursor chat-focus command ORDER', () => {
+  // The reorder shipped in H1b is a real behaviour change: `cursorInject` runs the
+  // FIRST REGISTERED command, and H1 proved submit-after-inject only succeeds when
+  // the composer was genuinely focused first. Before this test the order was
+  // completely uncovered — nothing would have failed if someone reshuffled it.
+  // Mirrors P2's precedent (`popup-foreground.test.ts` "attempts the titles in a
+  // stable order..."), which exists for exactly this short-circuit-order class of bug.
+  it('puts the live-VERIFIED composer focus first, and the two absent ids last', async () => {
+    const { CURSOR_CHAT_FOCUS_COMMANDS_V1 } = await import('./extension.js');
+    expect(CURSOR_CHAT_FOCUS_COMMANDS_V1).toEqual([
+      'composer.focusComposer',
+      'workbench.action.focusAuxiliaryBar',
+      'aichat.focusChat',
+      'aichat.gotochat',
+    ]);
+  });
+
+  it('composer.focusComposer is strictly before the generic sidebar focus', async () => {
+    // The precise composer focus must win over the generic auxiliary-bar focus when
+    // both are registered — the generic one merely happened to work in the H1 spike.
+    const { CURSOR_CHAT_FOCUS_COMMANDS_V1 } = await import('./extension.js');
+    const precise = CURSOR_CHAT_FOCUS_COMMANDS_V1.indexOf('composer.focusComposer');
+    const generic = CURSOR_CHAT_FOCUS_COMMANDS_V1.indexOf('workbench.action.focusAuxiliaryBar');
+    expect(precise).toBeGreaterThanOrEqual(0);
+    expect(precise).toBeLessThan(generic);
+  });
+
+  it('the two ids absent from Cursor 3.4.20 never precede a verified one', async () => {
+    const { CURSOR_CHAT_FOCUS_COMMANDS_V1 } = await import('./extension.js');
+    const lastVerified = Math.max(
+      CURSOR_CHAT_FOCUS_COMMANDS_V1.indexOf('composer.focusComposer'),
+      CURSOR_CHAT_FOCUS_COMMANDS_V1.indexOf('workbench.action.focusAuxiliaryBar'),
+    );
+    for (const absent of ['aichat.focusChat', 'aichat.gotochat']) {
+      expect(CURSOR_CHAT_FOCUS_COMMANDS_V1.indexOf(absent)).toBeGreaterThan(lastVerified);
+    }
+  });
+});
+
 describe('H1b mechanism truth — vscode-generic host', () => {
   it('never attempts injection on a plain VS Code host', async () => {
     const exec = vi.fn();

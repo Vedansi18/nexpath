@@ -81,6 +81,33 @@ let logChannel: vscode.OutputChannel | undefined;
 // already-published NEWER turn's read, silently replacing the visible body
 // with a stale one. Tracks the highest `createdAt` ever published — same
 // dedup idiom pe-poller.ts already uses, never trusts row `status`.
+/**
+ * Cursor chat-focus commands, in the order they are attempted. **The first
+ * REGISTERED command wins** (see the loop in `cursorInject`), so this order is
+ * functional, not cosmetic — H1 established that submit-after-inject only
+ * succeeds when the composer was genuinely focused first.
+ *
+ * Order set 2026-08-10 (H1b) from live evidence against Cursor 3.4.20:
+ *   1. `composer.focusComposer`            — bundle x4, VERIFIED working live;
+ *                                            focuses the composer itself.
+ *   2. `workbench.action.focusAuxiliaryBar` — VS Code built-in; works, but
+ *                                            focuses the sidebar generically.
+ *   3. `aichat.focusChat`                  — ZERO bundle occurrences on 3.4.20.
+ *   4. `aichat.gotochat`                   — ZERO bundle occurrences on 3.4.20.
+ * The last two are kept only as inert forward/back-compat probes for other
+ * builds; the registered-check skips them at runtime.
+ *
+ * Exported ONLY so the order can be pinned by a test (additive testability, the
+ * same approach P2 used for the Windsurf hook's untestable popup-raise gate).
+ * Nothing outside tests should import this.
+ */
+export const CURSOR_CHAT_FOCUS_COMMANDS_V1: readonly string[] = [
+  'composer.focusComposer',
+  'workbench.action.focusAuxiliaryBar',
+  'aichat.focusChat',
+  'aichat.gotochat',
+];
+
 let peLastPublishedCreatedAt = -Infinity;
 /** PE-scoped typed-origin echo guard (P8). Fresh per activation, matching `watcher`. */
 let peInjectedRecordStore: ReturnType<typeof createInjectedRecordStore> | undefined;
@@ -216,12 +243,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   //                                        back-compat probes for other builds, and
   //                                        skipped at runtime by the registered-check
   //                                        below. See chat-input-injector-mechanism-truth.test.ts.
-  const CURSOR_CHAT_FOCUS_COMMANDS = [
-    'composer.focusComposer',
-    'workbench.action.focusAuxiliaryBar',
-    'aichat.focusChat',
-    'aichat.gotochat',
-  ];
+  const CURSOR_CHAT_FOCUS_COMMANDS = CURSOR_CHAT_FOCUS_COMMANDS_V1;
   const cursorInject = async (text: string): Promise<boolean> => {
     await vscode.env.clipboard.writeText(text);
     raiseAppWindow('cursor');
