@@ -643,35 +643,40 @@ export async function installAction(
       }
     }
 
-    // ── Frequency + role prompts ───────────────────────────────────────────────
-    // Reuse the already-open `store` — opening a second store on the same dbPath
-    // would deadlock on the exclusive file lock and clobber these writes when the
-    // first store is closed afterwards.
+    // ── Frequency + role defaults ──────────────────────────────────────────────
+    // Owner ruling 2026-08-10: the advisory-frequency and role pickers are HIDDEN at install for now
+    // (support to be re-added later). Seed the defaults silently — Medium (every_event) + founder —
+    // only when unset, so a prior install's choice is preserved. The interactive pickers below are
+    // kept, COMMENTED OUT (not removed): to restore the selection UI, un-comment each block (and drop
+    // its default-seed line above it). The freqPromptFn / rolePromptFn params + defaultFreqPrompt /
+    // defaultRolePrompt are deliberately retained for that re-enable. Both settings stay changeable
+    // any time via `nexpath config set advisory_frequency|role …`.
+    // (Reuse the already-open `store`; a second open on the same dbPath would deadlock the file lock.)
     const currentFreq = readInstallFreq(store.db);
-    if (opts.yes) {
-      if (!isConfigSet(store.db, 'advisory_frequency')) {
-        setAdvisoryFrequency(store, 'advisory_frequency', currentFreq);
-      }
-    } else {
-      const picked = await freqPromptFn(currentFreq);
-      if (!isCancel(picked) && typeof picked === 'string') {
-        setAdvisoryFrequency(store, 'advisory_frequency', picked);
-        console.log(`✓ advisory_frequency = ${picked}`);
-      }
+    if (!isConfigSet(store.db, 'advisory_frequency')) {
+      setAdvisoryFrequency(store, 'advisory_frequency', currentFreq);
     }
+    // HIDDEN picker (owner 2026-08-10) — un-comment to restore the interactive frequency selection:
+    // if (!opts.yes) {
+    //   const picked = await freqPromptFn(currentFreq);
+    //   if (!isCancel(picked) && typeof picked === 'string') {
+    //     setAdvisoryFrequency(store, 'advisory_frequency', picked);
+    //     console.log(`✓ advisory_frequency = ${picked}`);
+    //   }
+    // }
 
     const currentRole = readInstallRole(store.db);
-    if (opts.yes) {
-      if (!isConfigSet(store.db, 'role')) {
-        setRole(store, 'role', currentRole);
-      }
-    } else {
-      const picked = await rolePromptFn(currentRole);
-      if (!isCancel(picked) && typeof picked === 'string') {
-        setRole(store, 'role', picked);
-        console.log(`✓ role = ${picked}`);
-      }
+    if (!isConfigSet(store.db, 'role')) {
+      setRole(store, 'role', currentRole);
     }
+    // HIDDEN picker (owner 2026-08-10) — un-comment to restore the interactive role selection:
+    // if (!opts.yes) {
+    //   const picked = await rolePromptFn(currentRole);
+    //   if (!isCancel(picked) && typeof picked === 'string') {
+    //     setRole(store, 'role', picked);
+    //     console.log(`✓ role = ${picked}`);
+    //   }
+    // }
   }
 
   // ── Registry-driven adapter installs (M2+) ────────────────────────────────────
