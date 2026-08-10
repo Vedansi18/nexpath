@@ -187,3 +187,55 @@ describe('⭐ consumeHandledTurn — H3 acceptance: no pending row survives a ha
     expect(() => s.consumeHandledTurn()).not.toThrow();
   });
 });
+
+describe('gate branches — each must allow, not throw', () => {
+  it('allows when the flag maps to no signal type', () => {
+    expect(make({ signalTypeFn: (() => undefined) as never }).composeOptions('p')).toBeNull();
+  });
+
+  it('allows when the signal is not content-template (the engine/LLM path A1 excludes)', () => {
+    // Reaching composeDeterministicOptions with an engine-source signal would ask
+    // the deterministic generator for records it has none of.
+    const composeFn = vi.fn();
+    expect(make({
+      contentSourceFn: (() => 'engine') as never,
+      composeFn: composeFn as never,
+    }).composeOptions('p')).toBeNull();
+    expect(composeFn).not.toHaveBeenCalled();
+  });
+});
+
+describe('experiment pin — must never break the submit path', () => {
+  it('falls back to no pinning when activePinFor throws (malformed config)', () => {
+    // The pin lookup reads user config; a malformed file must degrade to the
+    // unpinned lookup, not fail the whole popup.
+    const composeFn = vi.fn().mockReturnValue(GENERATED);
+    const s = createDeterministicSubmitOptionSource({
+      store: { throwOnPin: true }, projectRoot: '/proj',
+      getRow: vi.fn().mockReturnValue(ROW) as never,
+      getLevel: vi.fn().mockReturnValue({ currentLevel: 2 }) as never,
+      composeFn: composeFn as never,
+      signalTypeFn: (() => 'TASK_REVIEW') as never,
+      contentSourceFn: (() => 'content-template') as never,
+      lookupFn: (() => (() => undefined)) as never,
+    });
+    expect(s.composeOptions('p')).toEqual(GENERATED);
+    expect(composeFn).toHaveBeenCalled();
+  });
+});
+
+describe('popup — non-TTY host', () => {
+  it('allows when the selector factory returns null (no interactive terminal)', async () => {
+    // createTtySelectFn returns null off a TTY. Invoking it unguarded crashed the
+    // hook on exactly the headless path it runs in.
+    const s = make({ selectFnFactory: (() => null) as never });
+    s.composeOptions('p');
+    await expect(s.renderPopup('p', GENERATED)).resolves.toBeNull();
+  });
+
+  it('allows when the level list is empty at popup time', async () => {
+    const s = make({ getLevel: (() => ({ currentLevel: 1 })) as never });
+    s.composeOptions('p');
+    await expect(s.renderPopup('p', { l1: [], l2: ['b'], l3: [] })).resolves.toBeNull();
+  });
+});
