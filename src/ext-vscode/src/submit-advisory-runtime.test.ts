@@ -7,6 +7,8 @@
  * safe if divergence is detectable, so the env-var NAME is pinned here.
  */
 import { describe, it, expect, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   defaultIsProcessAlive,
   isWindsurfSubmitAdvisoryEnabled,
@@ -209,5 +211,41 @@ describe('defaultIsProcessAlive — cross-OS liveness probe', () => {
   it('reports an unused pid as dead', () => {
     // Max pid on Linux is well below this; kill(pid, 0) yields ESRCH.
     expect(defaultIsProcessAlive(0x7ffffffe)).toBe(false);
+  });
+});
+
+describe('⭐ BACKWARD COMPAT — switch OFF must construct nothing (structural pin)', () => {
+  // extension.ts imports `vscode` so it cannot be unit-tested; the guarantee is
+  // otherwise enforced only by reading, which is exactly how it would rot. Same
+  // technique as the no-OpenAI import pin on the CLI side.
+  const src = readFileSync(join(__dirname, 'extension.ts'), 'utf8');
+  const lines = src.split('\n');
+  const lineOf = (needle: string) => lines.findIndex((l) => l.includes(needle));
+  const indentOf = (i: number) => lines[i].length - lines[i].trimStart().length;
+
+  const gate = lines.findIndex((l) => l.includes('isWindsurfSubmitAdvisoryEnabled(') && l.includes('if ('));
+
+  it('has exactly one switch-gate call site', () => {
+    // Two gates would mean two policies; a future edit could relax one of them.
+    const gates = lines.filter((l) => l.includes('isWindsurfSubmitAdvisoryEnabled(') && l.includes('if ('));
+    expect(gates).toHaveLength(1);
+    expect(gate).toBeGreaterThan(-1);
+  });
+
+  for (const sym of ['createSubmitHookPoller(', 'readPendingSubmitDecision(']) {
+    it(`constructs ${sym} only AFTER the gate and nested inside it`, () => {
+      const at = lineOf(sym === 'createSubmitHookPoller(' ? 'submitPoller = createSubmitHookPoller(' : sym);
+      expect(at).toBeGreaterThan(gate);
+      // Deeper indentation than the `if` ⇒ inside its block. If it were hoisted
+      // out, the switch-off path would open a Store / start a poller / probe a
+      // pid on every activation — the regression this pin exists to catch.
+      expect(indentOf(at)).toBeGreaterThan(indentOf(gate));
+    });
+  }
+
+  it('the gate reads process.env directly — never a persisted config key', () => {
+    // The hook doc's stated reason for the switch: internal, never surfaced by
+    // `nexpath status`/`config`, never settable by an end user.
+    expect(lines[gate]).toContain('process.env');
   });
 });
