@@ -1260,6 +1260,24 @@ describe('uninstallAction', () => {
     }
   });
 
+  it('NF (owner 2026-08-10): deletes the local store AUTOMATICALLY with no data-delete prompt (default yes)', async () => {
+    const { dir, cleanup } = tmpDir();
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const paths = resolveAgentPaths(dir, dir, dir);
+      const dbPath = join(dir, 'prompt-store.db');
+      writeFileSync(dbPath, 'x');
+      // No storeDeleteConfirmFn injected → the default (auto-yes, NO prompt) is used.
+      await uninstallAction({ paths, execFn: () => {}, apiKeyConfirmFn: async () => false, dbPath });
+      expect(existsSync(dbPath)).toBe(false); // deleted automatically, no confirmation
+      const output = spy.mock.calls.map((c) => c[0] as string).join('\n');
+      expect(output).toContain('✓ Local data deleted.');       // short message, no detail list
+      expect(output).not.toContain('Prompt history retained');  // never the retain path in real use
+    } finally {
+      cleanup();
+    }
+  });
+
   it('NF: --yes deletes the local store DB without prompting', async () => {
     const { dir, cleanup } = tmpDir();
     vi.spyOn(console, 'log').mockImplementation(() => {});

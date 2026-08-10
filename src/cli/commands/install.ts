@@ -950,13 +950,9 @@ const defaultUninstallApiKeyConfirm: UninstallApiKeyConfirmFn = async () => {
 
 export type UninstallStoreDeleteConfirmFn = () => Promise<boolean>;
 
-const defaultUninstallStoreDeleteConfirm: UninstallStoreDeleteConfirmFn = async () => {
-  const answer = await confirm({
-    message:      'Delete all local nexpath data (prompt history, config, buffered signals)?',
-    initialValue: true,
-  });
-  return !isCancel(answer) && answer === true;
-};
+// Owner ruling 2026-08-10: deleting local data on uninstall no longer prompts the user — it is
+// automatic (default yes). The injectable seam is kept only so tests can exercise a decline.
+const defaultUninstallStoreDeleteConfirm: UninstallStoreDeleteConfirmFn = async () => true;
 
 export async function uninstallAction(
   {
@@ -1055,22 +1051,22 @@ export async function uninstallAction(
   }
 
   // ── Local data cleanup (NF: delete on uninstall) ─────────────────────────
-  // Owner ruling 2026-08-09: uninstall should leave nothing behind — delete the store DB (prompt
-  // history, config, and the content-free feedback/action signals all live there). Confirmed
-  // (default yes) or forced by --yes; on decline we keep today's behaviour (retain + telemetry off).
+  // Owner ruling 2026-08-10: the local store (prompt history, config, and the content-free
+  // feedback/action signals all live there) is deleted AUTOMATICALLY — no user prompt (default yes).
+  // A programmatic decline (test seam) keeps the retain + telemetry-off behaviour. Best-effort:
+  // a delete failure never crashes uninstall (e.g. a locked file).
   const resolvedDbPath = dbPath ?? DEFAULT_DB_PATH;
   const shouldDeleteData = yes || await storeDeleteConfirmFn();
   console.log('');
   if (shouldDeleteData) {
     try {
       if (existsSync(resolvedDbPath)) unlinkSync(resolvedDbPath);
-      console.log('✓ Local data deleted (prompt history, config, and buffered signals).');
+      console.log('✓ Local data deleted.');
     } catch (err) {
-      // Best-effort — never crash uninstall over a delete failure (e.g. a locked file).
       console.log(`- Could not delete local data (${(err as Error).message}); remove ${resolvedDbPath} manually.`);
     }
   } else {
-    // Declined: retain the DB, but ensure telemetry stays off in the retained config.
+    // Declined (programmatic only): retain the DB, but ensure telemetry stays off in the config.
     try {
       const store = await openStore(resolvedDbPath);
       try {
