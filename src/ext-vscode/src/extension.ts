@@ -19,6 +19,9 @@ import { isPeOriginTurn } from './pe-origin.js';
 import { createInjectedRecordStore } from './injected-record.js';
 import { injectPeBody, resolvePeVisibleSurfaceAckState } from './pe-delivery.js';
 import { createPePoller, type PePoller } from './pe-poller.js';
+import { createSubmitHookPoller, type SubmitHookPoller } from './submit-hook-poller.js';
+import { createSubmitClipboardDelivery, submitKeystroke } from './submit-clipboard-delivery.js';
+import { isWindsurfSubmitAdvisoryEnabled, readPendingSubmitDecision } from './submit-advisory-runtime.js';
 import {
   buildPeActionRequest,
   createPeActionLoopState,
@@ -120,6 +123,7 @@ export const CURSOR_CHAT_FOCUS_COMMANDS_V1: readonly string[] = [
   'workbench.action.focusAuxiliaryBar',
 ];
 
+let submitPoller: SubmitHookPoller | undefined;
 let peLastPublishedCreatedAt = -Infinity;
 /** PE-scoped typed-origin echo guard (P8). Fresh per activation, matching `watcher`. */
 let peInjectedRecordStore: ReturnType<typeof createInjectedRecordStore> | undefined;
@@ -544,6 +548,46 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     pePoller.start();
     context.subscriptions.push({ dispose: () => pePoller?.stop() });
     log(`[nexpath] windsurf PE poller started for roots: ${roots.join(' | ')}`);
+
+    // ── Submit-time advisory delivery (hook milestone H3) ────────────────────
+    // OFF BY DEFAULT. Everything below runs only when
+    // NEXPATH_WINDSURF_PROMPTSUBMIT_ADVISORY === '1'. With the switch unset — the
+    // shipped default — this block is skipped entirely and the two pollers above
+    // behave exactly as they always have. That is `R12`: the old flow must stay
+    // byte-identical, and the guard is the FIRST thing evaluated, before anything
+    // is constructed.
+    //
+    // Why a second poller rather than extending the PE one: they read different
+    // tables and have different staleness rules, and extending a shipping poller
+    // would put new behaviour on the old path. This is additive by construction.
+    if (isWindsurfSubmitAdvisoryEnabled(process.env)) {
+      const delivery = createSubmitClipboardDelivery({
+        // `vscode.env.clipboard` is the same API `cursorInject` already uses.
+        writeClipboard: (text) => Promise.resolve(vscode.env.clipboard.writeText(text)),
+        // Reuse the shipped raiser — Linux/X11 only by design; on other OSes it
+        // returns false and the paste still proceeds (see the module's notes).
+        focus: async () => raiseAppWindow('windsurf'),
+        pasteKeystroke: () => pasteKeystroke(),
+        submitKeystroke: () => submitKeystroke(),
+        log: (m) => log(m),
+      });
+
+      submitPoller = createSubmitHookPoller({
+        projectRoots: roots,
+        readPendingDecision: (root) => readPendingSubmitDecision(root),
+        onInject: (text) => delivery.inject(text),
+        onSubmit: () => delivery.submit(),
+        // Timing goes to the Output channel only — H3's measured-latency
+        // requirement. Never carries the replacement text.
+        onTiming: (t) => log(
+          `[nexpath] submit handoff: ${t.stage} +${t.sinceDecisionMs}ms (${t.decisionId})`,
+        ),
+        onOutcome: (outcome) => log(`[nexpath] submit delivery outcome: ${outcome}`),
+      });
+      submitPoller.start();
+      context.subscriptions.push({ dispose: () => submitPoller?.stop() });
+      log('[nexpath] submit-time advisory ENABLED (NEXPATH_WINDSURF_PROMPTSUBMIT_ADVISORY=1)');
+    }
   }
 
   const wsStorage = workspaceStorageDir({ host });
