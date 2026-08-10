@@ -26,6 +26,8 @@
 import type { Command } from 'commander';
 import type { ChildProcess } from 'node:child_process';
 import { runWindsurfHook, type RunResult } from '../../windsurf-hook/handler.js';
+import { decideSubmitPrompt, type DeciderOptionSet, type DeciderSelection } from './submit-prompt-decider.js';
+import { writeSubmitDecision } from './submit-decision-store.js';
 import { bringPopupToFront } from '../../windsurf-hook/foreground.js';
 
 /**
@@ -113,6 +115,61 @@ export function isWindsurfPromptSubmitAdvisoryEnabled(env: NodeJS.ProcessEnv = p
  */
 export type WindsurfPromptSubmitDecision = 'allow' | 'block';
 
+
+/**
+ * Build the default `pre_user_prompt` decider (H3 Gap 2b).
+ *
+ * **Ports, not imports.** `composeOptions` and `renderPopup` are the seams onto
+ * Hiren's `composeDeterministicOptions` and Bhavnesh's `createTtySelectFn`. Those
+ * files are CONSUME-ONLY (dev plan §1.3) and are deliberately **not imported
+ * here** — the adapters are supplied by whoever wires them, which keeps the
+ * ownership boundary provable in the import graph.
+ *
+ * **Until an option source is supplied this returns `'allow'` for every prompt**,
+ * so enabling the switch changes nothing observable. That is the correct
+ * behaviour-neutral default: blocking a prompt with no replacement to inject would
+ * cancel the user's turn and strand them — strictly worse than today.
+ *
+ * Persistence IS wired: when an option source and a selection do exist, the
+ * decision is written atomically to the file the extension's poller consumes.
+ */
+export function buildDefaultPromptSubmitDecider(
+  opts: { project?: string },
+  ports: {
+    composeOptions?: (promptText: string) => DeciderOptionSet | null;
+    renderPopup?: (promptText: string, options: DeciderOptionSet) => Promise<DeciderSelection>;
+    now?: () => number;
+  } = {},
+): (event: string, o: { project?: string }) => Promise<WindsurfPromptSubmitDecision> {
+  const composeOptions = ports.composeOptions ?? ((): DeciderOptionSet | null => null);
+  const renderPopup = ports.renderPopup ?? (async (): Promise<DeciderSelection> => null);
+  const now = ports.now ?? (() => Date.now());
+
+  return async (_event, o) => decideSubmitPrompt(promptTextForHook(), {
+    composeOptions,
+    renderPopup,
+    persistDecision: async (replacementText) => {
+      await writeSubmitDecision({
+        projectRoot: o.project ?? opts.project ?? process.cwd(),
+        decisionId: `sd-${now()}-${Math.floor(now() % 100000)}`,
+        replacementText,
+        createdAt: now(),
+        host: 'windsurf',
+      });
+    },
+  });
+}
+
+/**
+ * The prompt text the hook received. Windsurf delivers it on stdin, which
+ * `handleWindsurfHookCli` already consumes, so it is not re-read here — the
+ * option source is what needs it, and that adapter is supplied by the wiring
+ * site. Returns an empty string until then, which the decider treats as `'allow'`.
+ */
+function promptTextForHook(): string {
+  return '';
+}
+
 export interface WindsurfHookActionDeps {
   handle?: (event: string, opts: { project?: string }) => Promise<RunResult>;
   raisePopup?: () => void;
@@ -146,7 +203,11 @@ export async function runWindsurfHookAction(
   const waitForChild = deps.waitForChild ?? awaitChild;
   const exit = deps.exit ?? ((code: number) => process.exit(code));
   const env = deps.env ?? process.env;
-  const decidePromptSubmit = deps.decidePromptSubmit ?? (async (): Promise<WindsurfPromptSubmitDecision> => 'allow');
+  // Default decider (H3 Gap 2b). Still resolves `'allow'` unless an option source
+  // is supplied — see `buildDefaultPromptSubmitDecider`. That keeps the switched-on
+  // path behaviour-neutral until the classification/option adapters are connected,
+  // rather than blocking prompts with nothing to replace them.
+  const decidePromptSubmit = deps.decidePromptSubmit ?? buildDefaultPromptSubmitDecider(opts);
 
   try {
     // ── Prompt-submit-time advisory (hook milestone H2) ────────────────────
