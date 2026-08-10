@@ -250,6 +250,10 @@ export async function runWindsurfHookAction(
   // Holds the stdin buffer when the gated path consumed it, so `handle` can replay
   // it instead of reading an already-drained pipe. Null ⇒ nothing was read.
   let preReadRaw: string | null = null;
+  // Set by the gated pre_user_prompt path; the decision runs after `auto` has
+  // classified THIS turn (option A). Never set when the switch is off.
+  let decideAfterAuto = false;
+  let pendingPromptText = '';
   // Default decider (H3). Constructed unconditionally, but this only BUILDS a
   // closure — `openStore` lives inside it and runs solely on the gated call below
   // (`isWindsurfPromptSubmitAdvisoryEnabled`). So with the switch off no Store is
@@ -296,17 +300,15 @@ export async function runWindsurfHookAction(
           if (typeof t.unref === 'function') t.unref();
         }),
       ]);
-      let decision: WindsurfPromptSubmitDecision = 'allow';
-      try {
-        const promptText = parsePayload(preReadRaw)?.tool_info?.user_prompt ?? '';
-        decision = await decidePromptSubmit(event, opts, promptText);
-      } catch {
-        decision = 'allow'; // fail-open: never strand the user's prompt
-      }
-      if (decision === 'block') {
-        exit(2);
-        return;
-      }
+      // ── ORDERING (owner ruling: option A) ────────────────────────────────
+      // The decision is DEFERRED to after `handle` + the child await below.
+      // The option source reads the `pending_advisory` row that `nexpath auto`
+      // writes, and `auto` is spawned by `handle`. Deciding here would read the
+      // PREVIOUS turn's classification and advise on the wrong prompt.
+      // Cost, accepted deliberately: `auto`'s runtime (including its LLM
+      // classification) now sits inside the blocking window.
+      pendingPromptText = parsePayload(preReadRaw)?.tool_info?.user_prompt ?? '';
+      decideAfterAuto = true;
     }
 
     // Name this surface for Layer C's popup "Send to …" label. The spawned
@@ -330,6 +332,23 @@ export async function runWindsurfHookAction(
     // Await the Layer-C child so the prompt is fully written + auto has
     // persisted the advisory (and stop has rendered the popup) before we exit.
     await waitForChild(result.child);
+
+    // ── Deferred submit decision (option A) ────────────────────────────────
+    // `auto` has now persisted this turn's classification, so the option source
+    // reads the CURRENT signal. Fail-open (A3) is unchanged: only an explicit
+    // 'block' exits 2; a throw or any other value falls through to exit 0.
+    if (decideAfterAuto) {
+      let decision: WindsurfPromptSubmitDecision = 'allow';
+      try {
+        decision = await decidePromptSubmit(event, opts, pendingPromptText);
+      } catch {
+        decision = 'allow'; // never strand the user's prompt
+      }
+      if (decision === 'block') {
+        exit(2);
+        return;
+      }
+    }
   } catch {
     // Never break Cascade — swallow any error and exit cleanly.
   }

@@ -246,3 +246,51 @@ describe('⭐ the gated stdin read is BOUNDED — a hang must not hold the promp
     expect(exited).not.toBe(2);
   });
 });
+
+describe('⭐ option A — the decision runs AFTER auto has classified this turn', () => {
+  async function trace(decision: 'allow' | 'block') {
+    const { runWindsurfHookAction } = await import('./windsurf-hook.js');
+    const order: string[] = [];
+    let exited: number | null = null;
+    await runWindsurfHookAction('pre_user_prompt', { project: '/proj' }, {
+      env: { NEXPATH_WINDSURF_PROMPTSUBMIT_ADVISORY: '1' },
+      readStdin: async () => JSON.stringify({ tool_info: { user_prompt: 'hi' } }),
+      handle: async () => { order.push('handle'); return { action: 'auto', child: null } as never; },
+      waitForChild: async () => { order.push('awaitChild'); },
+      decidePromptSubmit: async () => { order.push('decide'); return decision; },
+      exit: (c: number) => { exited = c; },
+      raisePopup: () => {},
+    } as never);
+    return { order, exited };
+  }
+
+  it('orders handle → awaitChild → decide', async () => {
+    // MUTATION GUARD: if the decision moved back above `handle`, the option
+    // source would read the PREVIOUS turn's pending_advisory row and advise on
+    // the wrong prompt. That bug is invisible in a single-prompt test, so the
+    // ordering itself is pinned.
+    const { order } = await trace('allow');
+    expect(order).toEqual(['handle', 'awaitChild', 'decide']);
+  });
+
+  it('still exits 2 on block, after auto has run', async () => {
+    const { order, exited } = await trace('block');
+    expect(order).toEqual(['handle', 'awaitChild', 'decide']);
+    expect(exited).toBe(2);
+  });
+
+  it('switch OFF: never decides at all', async () => {
+    const { runWindsurfHookAction } = await import('./windsurf-hook.js');
+    let decided = false;
+    await runWindsurfHookAction('pre_user_prompt', { project: '/proj' }, {
+      env: {},
+      readStdin: async () => '{}',
+      handle: async () => ({ action: 'ignored' } as never),
+      waitForChild: async () => {},
+      decidePromptSubmit: async () => { decided = true; return 'allow' as const; },
+      exit: () => {},
+      raisePopup: () => {},
+    } as never);
+    expect(decided).toBe(false);
+  });
+});

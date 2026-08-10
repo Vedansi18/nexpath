@@ -123,10 +123,21 @@ describe('H2 — switch ON: only an explicit block exits 2', () => {
     expect(h.exit).toHaveBeenCalledWith(2);
   });
 
-  it('does NOT run the normal handler when it blocks — the prompt is cancelled', async () => {
+  it('DOES run the normal handler before blocking — option A ordering (H3)', async () => {
+    // SEMANTIC CHANGE, deliberate. H2 asserted the opposite: blocking skipped the
+    // handler entirely. Under the owner's option-A ruling the handler must run
+    // FIRST, because it spawns `nexpath auto`, and `auto` writes the
+    // pending_advisory row the option source classifies from. Deciding before it
+    // would advise on the PREVIOUS turn's prompt.
+    //
+    // ⚠ KNOWN CONSEQUENCE: `auto` therefore runs for a prompt that is then
+    // cancelled, so its advisory row + promptCount are written for a turn Cascade
+    // never saw. The injected replacement fires a fresh pre_user_prompt, running
+    // `auto` a second time — a promptCount double-count. Tracked for H4.
     const h = harness({ decidePromptSubmit: vi.fn().mockResolvedValue('block'), env: { ...ON } });
     await runWindsurfHookAction('pre_user_prompt', {}, h.deps);
-    expect(h.handle).not.toHaveBeenCalled();
+    expect(h.handle).toHaveBeenCalled();
+    expect(h.exit).toHaveBeenCalledWith(2);
   });
 
   it('exits 0 when the decider returns "allow"', async () => {
