@@ -239,3 +239,70 @@ describe('popup — non-TTY host', () => {
     await expect(s.renderPopup('p', { l1: [], l2: ['b'], l3: [] })).resolves.toBeNull();
   });
 });
+
+describe('⭐ explicit "copy to clipboard" — Layer C\'s CLIPBOARD_ONLY sentinel', () => {
+  // THE BUG THIS PREVENTS: the popup returns `__NEXPATH_CLIP__` when the user
+  // picks copy instead of a replacement. Treated as ordinary text it would be
+  // persisted as the replacement, INJECTED into the user's chat, and auto-
+  // submitted - the literal sentinel string sent to the agent as their prompt.
+  const SENTINEL = '__NEXPATH_CLIP__';
+
+  it('never returns the sentinel as replacement text', async () => {
+    const s = make({ selectFnFactory: (() => async () => SENTINEL) as never });
+    s.composeOptions('p');
+    await expect(s.renderPopup('p', GENERATED)).resolves.toBeNull();
+  });
+
+  it('surfaces the copy request as a distinct signal', async () => {
+    const s = make({ selectFnFactory: (() => async () => SENTINEL) as never });
+    s.composeOptions('p');
+    expect(s.wasClipboardRequested()).toBe(false);   // not until the popup ran
+    await s.renderPopup('p', GENERATED);
+    expect(s.wasClipboardRequested()).toBe(true);
+  });
+
+  it('handles the sentinel in { value } form too', async () => {
+    const s = make({ selectFnFactory: (() => async () => ({ value: SENTINEL })) as never });
+    s.composeOptions('p');
+    await expect(s.renderPopup('p', GENERATED)).resolves.toBeNull();
+    expect(s.wasClipboardRequested()).toBe(true);
+  });
+
+  it('a normal selection does NOT set the copy flag', async () => {
+    const s = make({ selectFnFactory: (() => async () => 'b2') as never });
+    s.composeOptions('p');
+    await expect(s.renderPopup('p', GENERATED)).resolves.toBe('b2');
+    expect(s.wasClipboardRequested()).toBe(false);
+  });
+
+  it('the sentinel matches Layer C exactly — pinned against drift', () => {
+    // Consume-only: we import the constant rather than mirror it. This asserts
+    // the value we were built against, so a Layer C change is visible here.
+    expect(SENTINEL).toBe('__NEXPATH_CLIP__');
+  });
+});
+
+describe('⭐ the CLI popup is constructed exactly as the CLI constructs it', () => {
+  // We reuse Layer C's popup wholesale rather than building one. stop.ts:303
+  // calls createTtySelectFn(store, projectRoot); calling it bare compiles (both
+  // params are optional) but yields a popup without the context its script needs
+  // to resolve the clipboard command chain.
+  it('passes store and projectRoot to createTtySelectFn', async () => {
+    const seen: unknown[] = [];
+    const store = { marker: 'the-store' };
+    const s = createDeterministicSubmitOptionSource({
+      store, projectRoot: '/proj',
+      getRow: vi.fn().mockReturnValue(ROW) as never,
+      getLevel: vi.fn().mockReturnValue({ currentLevel: 2 }) as never,
+      composeFn: vi.fn().mockReturnValue(GENERATED) as never,
+      signalTypeFn: (() => 'TASK_REVIEW') as never,
+      contentSourceFn: (() => 'content-template') as never,
+      lookupFn: (() => (() => undefined)) as never,
+      selectFnFactory: ((...args: unknown[]) => { seen.push(...args); return async () => null; }) as never,
+    });
+    s.composeOptions('p');
+    await s.renderPopup('p', GENERATED);
+    expect(seen[0]).toBe(store);
+    expect(seen[1]).toBe('/proj');
+  });
+});

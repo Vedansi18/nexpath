@@ -57,6 +57,9 @@ import {
   type ActivePin,
 } from '../../decision-session/experiment-config.js';
 import { createTtySelectFn } from '../../decision-session/TtySelectFn.js';
+// CONSUME-ONLY. Imported rather than mirrored: a copied literal could drift from
+// Layer C's sentinel and we would silently start injecting it as prompt text.
+import { CLIPBOARD_ONLY } from '../../decision-session/DecisionSession.js';
 import type { MaturityLevel } from '../../decision-session/content-template-schema.js';
 import type { DeciderOptionSet, DeciderSelection } from './submit-prompt-decider.js';
 
@@ -106,6 +109,12 @@ export interface SubmitOptionSource {
    * exactly what makes `stop` see nothing. No-op when no row was read.
    */
   consumeHandledTurn: () => void;
+  /**
+   * True when the user explicitly picked Layer C's "copy to clipboard" option
+   * (`CLIPBOARD_ONLY`) rather than a replacement. The caller must NOT treat that
+   * as prompt text — see `renderPopup`.
+   */
+  wasClipboardRequested: () => boolean;
 }
 
 /** Pick the list matching the resolved maturity level. */
@@ -139,6 +148,8 @@ export function createDeterministicSubmitOptionSource(
   let resolvedLevel: MaturityLevel = 2;
   // Row id read this turn, so a blocked turn can consume it. Null ⇒ nothing read.
   let lastRowId: number | null = null;
+  // True when the user explicitly chose "copy to clipboard" in the popup.
+  let clipboardRequested = false;
 
   const composeOptions = (_promptText: string): DeciderOptionSet | null => {
     try {
@@ -206,7 +217,12 @@ export function createDeterministicSubmitOptionSource(
       if (choices.length === 0) return null;
 
       // Bhavnesh's TTY selector — consume-only.
-      const selectFn = selectFnFactory();
+      // Same arguments the CLI flow passes (`stop.ts:303`). We reuse Layer C's
+      // popup wholesale, so it must be constructed the same way — the store and
+      // project root are what let the popup script resolve its clipboard command
+      // chain and context. Calling it bare compiles (both params are optional)
+      // but builds a popup missing that context.
+      const selectFn = selectFnFactory(deps.store as never, deps.projectRoot);
       // Null on a non-TTY host (no interactive terminal) — release the prompt.
       if (!selectFn) { log('submit_option_source: no TTY selector — allowing'); return null; }
       const picked: unknown = await selectFn({
@@ -216,8 +232,16 @@ export function createDeterministicSubmitOptionSource(
 
       // The selector's shape varies by build; accept a bare string or `{ value }`,
       // and treat anything else as a dismissal rather than guessing.
+      // ── EXPLICIT "copy to clipboard" (Layer C's sentinel) ────────────────
+      // The popup returns `__NEXPATH_CLIP__` when the user chooses copy rather
+      // than a replacement. Treating it as ordinary text would INJECT THE LITERAL
+      // SENTINEL into the user's chat and auto-submit it. It is surfaced to the
+      // caller as a distinct signal instead.
+      if (picked === CLIPBOARD_ONLY) { clipboardRequested = true; return null; }
       if (typeof picked === 'string') return picked || null;
-      if (picked && typeof picked === 'object' && typeof (picked as { value?: unknown }).value === 'string') {
+      const pv = (picked as { value?: unknown } | null)?.value;
+      if (pv === CLIPBOARD_ONLY) { clipboardRequested = true; return null; }
+      if (picked && typeof picked === 'object' && typeof pv === 'string') {
         return ((picked as { value: string }).value) || null;
       }
       return null;
@@ -239,5 +263,5 @@ export function createDeterministicSubmitOptionSource(
     }
   };
 
-  return { composeOptions, renderPopup, consumeHandledTurn };
+  return { composeOptions, renderPopup, consumeHandledTurn, wasClipboardRequested: () => clipboardRequested };
 }

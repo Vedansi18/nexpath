@@ -586,6 +586,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         onInject: async (text) => {
           const res = await deliverSubmitReplacement(text, {
             injectDirect: (t) => chatInputInject(t, { host }),
+            // `verifyLanded` is DELIBERATELY NOT SUPPLIED (owner: option B).
+            // `chatInputInject` returns true as soon as the host command does not
+            // throw, so "accepted" is not "landed" — but no VS Code API exposes a
+            // vendor chat composer's text, so a real content check is not
+            // implementable from here. Whether ANY observable signal exists is an
+            // empirical question for H3's live E2E, alongside the getCommands(true)
+            // sweep. Wiring a check that cannot actually check would be worse than
+            // leaving the seam open and documented.
             fallbackClipboard: (t) => delivery.inject(t),
             notify: (m) => void vscode.window.showWarningMessage(m),
             log: (m) => log(m),
