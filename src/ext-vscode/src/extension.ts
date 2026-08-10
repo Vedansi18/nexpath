@@ -204,11 +204,23 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // input → simulate the paste shortcut. Only focus commands that ACTUALLY exist
   // are run (so nothing ever opens a new chat); workbench.action.focusAuxiliaryBar
   // is a built-in present on every Cursor and focuses the chat (right side bar).
+  // Order matters: the first REGISTERED command wins, and H1's spike proved that
+  // submit-after-inject only succeeds when the composer was genuinely focused
+  // first. Reordered 2026-08-10 (H1b) from live evidence against Cursor 3.4.20:
+  //   composer.focusComposer            — present in the bundle (x4) and VERIFIED
+  //                                        working live; focuses the composer itself.
+  //   workbench.action.focusAuxiliaryBar — VS Code built-in; focuses the sidebar
+  //                                        generically. Works, but less precise.
+  //   aichat.focusChat / aichat.gotochat — ZERO occurrences in Cursor's shipped
+  //                                        bundle; kept only as harmless forward/
+  //                                        back-compat probes for other builds, and
+  //                                        skipped at runtime by the registered-check
+  //                                        below. See chat-input-injector-mechanism-truth.test.ts.
   const CURSOR_CHAT_FOCUS_COMMANDS = [
-    'aichat.focusChat',
     'composer.focusComposer',
-    'aichat.gotochat',
     'workbench.action.focusAuxiliaryBar',
+    'aichat.focusChat',
+    'aichat.gotochat',
   ];
   const cursorInject = async (text: string): Promise<boolean> => {
     await vscode.env.clipboard.writeText(text);
