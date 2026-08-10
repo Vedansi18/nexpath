@@ -193,6 +193,7 @@ export function buildDefaultPromptSubmitDecider(
           await writeSubmitDecision({
             projectRoot,
             blockIssuedAt,
+            hookPid: process.pid,
             decisionId: `sd-${now()}-${Math.floor(now() % 100000)}`,
             replacementText,
             createdAt: now(),

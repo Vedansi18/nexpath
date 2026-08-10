@@ -53,6 +53,21 @@ export interface WriteSubmitDecisionInput {
    * classification and is the largest term in the budget.
    */
   blockIssuedAt: number;
+  /**
+   * PID of the hook process that issued the block.
+   *
+   * ── WHY (the block/injection race) ──────────────────────────────────────
+   * This record is persisted BEFORE `exit(2)`. Windsurf only cancels the prompt
+   * when the hook process actually exits, so between persistence and exit there
+   * is a window in which the original prompt is still live. If the extension
+   * injected during that window the user would get TWO prompts: the original
+   * (never cancelled) and the replacement.
+   *
+   * Process liveness is the reliable cross-process signal — "hook alive" ⇒ "exit
+   * code not yet delivered" ⇒ "not safe to inject". The reader defers while this
+   * pid is alive rather than assuming the poll interval outruns the gap.
+   */
+  hookPid: number;
 }
 
 export interface SubmitDecisionStoreDeps {
@@ -85,6 +100,11 @@ export async function writeSubmitDecision(
   if (typeof input.blockIssuedAt !== 'number' || !Number.isFinite(input.blockIssuedAt)) {
     throw new Error('submit decision: blockIssuedAt must be a finite number');
   }
+  if (typeof input.hookPid !== 'number' || !Number.isInteger(input.hookPid) || input.hookPid <= 0) {
+    // Same JSON.stringify-drops-undefined trap as blockIssuedAt: a missing pid
+    // would make the reader unable to tell whether the hook had exited.
+    throw new Error('submit decision: hookPid must be a positive integer');
+  }
 
   const finalPath = submitDecisionPath(input.projectRoot);
   const tmpPath = `${finalPath}.tmp`;
@@ -99,6 +119,7 @@ export async function writeSubmitDecision(
     createdAt: input.createdAt,
     host: input.host,
     blockIssuedAt: input.blockIssuedAt,
+    hookPid: input.hookPid,
   };
 
   await mkdirFn(dirname(finalPath));

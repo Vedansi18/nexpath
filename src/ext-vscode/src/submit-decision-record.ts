@@ -38,6 +38,8 @@ export interface SubmitDecisionRecordV1 {
   createdAt: number;
   /** When the hook decided to block (stage 1 of the mandated five). */
   blockIssuedAt: number;
+  /** PID of the hook that issued the block; used to defer until it has exited. */
+  hookPid: number;
   /** Which host produced it — so a Cursor record can never be delivered to Windsurf. */
   host: 'windsurf' | 'cursor';
 }
@@ -62,6 +64,7 @@ export function parseSubmitDecisionRecordV1(raw: unknown): SubmitDecisionRecordV
   if (!isNonEmptyString(r.replacementText)) return null;
   if (typeof r.createdAt !== 'number' || !Number.isFinite(r.createdAt)) return null;
   if (typeof r.blockIssuedAt !== 'number' || !Number.isFinite(r.blockIssuedAt)) return null;
+  if (typeof r.hookPid !== 'number' || !Number.isInteger(r.hookPid) || r.hookPid <= 0) return null;
   if (r.host !== 'windsurf' && r.host !== 'cursor') return null;
 
   return {
@@ -70,6 +73,7 @@ export function parseSubmitDecisionRecordV1(raw: unknown): SubmitDecisionRecordV
     replacementText: r.replacementText,
     createdAt: r.createdAt,
     blockIssuedAt: r.blockIssuedAt,
+    hookPid: r.hookPid,
     host: r.host,
   };
 }
@@ -90,6 +94,7 @@ export function buildSubmitDecisionRecordV1(input: {
   createdAt: number;
   host: 'windsurf' | 'cursor';
   blockIssuedAt: number;
+  hookPid: number;
 }): SubmitDecisionRecordV1 {
   return { schemaVersion: SUBMIT_DECISION_SCHEMA_V1, ...input };
 }

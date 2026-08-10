@@ -36,6 +36,7 @@ const INPUT = {
   createdAt: 1_700_000_000_000,
   host: 'windsurf' as const,
   blockIssuedAt: 1_699_999_999_000,
+  hookPid: 4242,
 };
 
 describe('cross-package contract — must match the extension side exactly', () => {
@@ -55,12 +56,23 @@ describe('cross-package contract — must match the extension side exactly', () 
     // The extension's parseSubmitDecisionRecordV1 rejects a record missing any of
     // these, and drops unknown extras — so the sets must agree.
     expect(Object.keys(parsed).sort()).toEqual(
-      ['blockIssuedAt', 'createdAt', 'decisionId', 'host', 'replacementText', 'schemaVersion'].sort(),
+      ['blockIssuedAt', 'createdAt', 'decisionId', 'hookPid', 'host', 'replacementText', 'schemaVersion'].sort(),
     );
     expect(parsed.schemaVersion).toBe(1);
     expect(parsed.host).toBe('windsurf');
     expect(parsed.replacementText).toBe('the picked option');
     expect(parsed.blockIssuedAt).toBe(1_699_999_999_000);
+    expect(parsed.hookPid).toBe(4242);
+  });
+
+  it('refuses to write without hookPid — the reader could not tell if the hook exited', async () => {
+    // The reader defers injection while the hook is alive, to close the
+    // block/injection race. With no pid it cannot make that call at all.
+    const h = harness();
+    const bad = { ...INPUT } as Record<string, unknown>;
+    delete bad.hookPid;
+    await expect(writeSubmitDecision(bad as never, h.deps)).rejects.toThrow(/hookPid/);
+    expect(h.writes).toHaveLength(0);
   });
 
   it('refuses to write when blockIssuedAt is missing — JSON.stringify would drop it', async () => {

@@ -52,6 +52,8 @@ export interface SubmitDecisionReaderDeps {
   read?: (path: string) => Promise<string>;
   /** Injected for tests; defaults to the real fs unlink. */
   remove?: (path: string) => Promise<void>;
+  /** Injected for tests; defaults to a real `kill(pid, 0)` liveness probe. */
+  isProcessAlive?: (pid: number) => boolean;
 }
 
 /**
@@ -67,6 +69,22 @@ export interface SubmitDecisionReaderDeps {
  * poller's guards still prevent a duplicate delivery within this process. Failing
  * the read because cleanup failed would lose a valid decision for no benefit.
  */
+/**
+ * Is a pid still running? Cross-OS: `kill(pid, 0)` sends no signal and is
+ * supported on Linux, macOS and Windows. `EPERM` means the process EXISTS but is
+ * not ours, so it counts as alive; only `ESRCH` (no such process) means gone.
+ * Any unexpected error is treated as ALIVE, which defers rather than risking the
+ * double-prompt — the conservative direction.
+ */
+export function defaultIsProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException)?.code !== 'ESRCH';
+  }
+}
+
 export async function readPendingSubmitDecision(
   projectRoot: string,
   deps: SubmitDecisionReaderDeps = {},
@@ -74,6 +92,7 @@ export async function readPendingSubmitDecision(
   const path = submitDecisionPath(projectRoot);
   const read = deps.read ?? ((p: string) => readFile(p, 'utf8'));
   const remove = deps.remove ?? ((p: string) => unlink(p));
+  const isAlive = deps.isProcessAlive ?? defaultIsProcessAlive;
 
   let text: string;
   try {
@@ -89,6 +108,18 @@ export async function readPendingSubmitDecision(
   // reader would mean a wiring mistake; delivering it would inject into the wrong
   // host, so it is dropped rather than trusted.
   if (record.host !== 'windsurf') return null;
+
+  // ── BLOCK/INJECTION RACE GUARD ────────────────────────────────────────────
+  // The hook persists this record BEFORE `exit(2)`, and Windsurf only cancels
+  // the prompt once the process actually exits. Injecting inside that window
+  // would submit the replacement while the ORIGINAL prompt is still live — two
+  // prompts for one submission.
+  //
+  // Process liveness is the signal: hook alive ⇒ exit code not yet delivered.
+  // The check sits BEFORE `remove` deliberately — this reader is one-shot, so
+  // consuming and then deferring would destroy the decision permanently. A
+  // deferred record stays on disk and is retried on the next poll.
+  if (isAlive(record.hookPid)) return null;
 
   try {
     await remove(path);

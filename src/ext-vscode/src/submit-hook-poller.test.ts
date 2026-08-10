@@ -16,7 +16,7 @@ import {
 } from './submit-hook-poller.js';
 
 function decision(over: Partial<PendingSubmitDecision> = {}): PendingSubmitDecision {
-  return { replacementText: 'replacement', createdAt: 1_000, blockIssuedAt: 900, decisionId: 'd1', ...over };
+  return { replacementText: 'replacement', createdAt: 1_000, blockIssuedAt: 900, hookPid: 4242, decisionId: 'd1', ...over };
 }
 
 /** Clock we advance by hand so latency assertions are exact, not timing-dependent. */

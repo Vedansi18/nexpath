@@ -22,13 +22,14 @@ const valid = {
   replacementText: 'the picked option',
   createdAt: 1_700_000_000_000,
   blockIssuedAt: 1_699_999_999_000,
+  hookPid: 4242,
   host: 'windsurf' as const,
 };
 
 describe('accepts a well-formed record', () => {
   it('round-trips build → parse unchanged', () => {
     const built = buildSubmitDecisionRecordV1({
-      decisionId: 'd-9', replacementText: 'x', createdAt: 5, host: 'cursor', blockIssuedAt: 4,
+      decisionId: 'd-9', replacementText: 'x', createdAt: 5, host: 'cursor', blockIssuedAt: 4, hookPid: 7,
     });
     expect(parseSubmitDecisionRecordV1(built)).toEqual(built);
     expect(built.schemaVersion).toBe(SUBMIT_DECISION_SCHEMA_V1);
