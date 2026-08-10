@@ -8,8 +8,12 @@
  * because that is what Windsurf actually acts on.
  */
 import { describe, it, expect, vi } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { runWindsurfHookAction } from './windsurf-hook.js';
 import { createHoldBudget } from './submit-hold-budget.js';
+import { buildDefaultPromptSubmitDecider } from './windsurf-hook.js';
 
 const ON = { NEXPATH_WINDSURF_PROMPTSUBMIT_ADVISORY: '1' };
 const PAYLOAD = JSON.stringify({ tool_info: { user_prompt: 'hi' } });
@@ -33,9 +37,9 @@ function fakeBudget(totalMs = 60_000) {
   };
 }
 
-async function run(over: Record<string, unknown> = {}) {
+async function run(over: Record<string, unknown> = {}, project = '/proj') {
   const exits: number[] = [];
-  await runWindsurfHookAction('pre_user_prompt', { project: '/proj' }, {
+  await runWindsurfHookAction('pre_user_prompt', { project }, {
     env: { ...ON },
     readStdin: async () => PAYLOAD,
     handle: async () => ({ action: 'auto', child: null } as never),
@@ -55,14 +59,67 @@ describe('H4 — every named failure mode releases the prompt unmodified (A3)', 
     expect(exits).toContain(0);
   });
 
-  it('no options composed (generator returned null) ⇒ exit 0', async () => {
-    const exits = await run({ decidePromptSubmit: async () => 'allow' as const });
-    expect(exits).not.toContain(2);
+  it('composeDeterministicOptions returned null ⇒ exit 0', async () => {
+    // Routed through the REAL decider so the generator-returned-null guard is
+    // actually executed. Uses a WRITABLE root deliberately: with an unwritable
+    // one the persist would fail and the test would pass for the wrong reason —
+    // which is exactly how the first version of this test survived mutation.
+    const root = mkdtempSync(join(tmpdir(), 'nexpath-h4-'));
+    try {
+      const decide = buildDefaultPromptSubmitDecider({ project: root }, {
+        optionSource: {
+          composeOptions: () => null,                       // <- the mode under test
+          renderPopup: async () => 'would-block-if-reached',
+          consumeHandledTurn: () => {},
+        } as never,
+      });
+      const exits = await run({ decidePromptSubmit: decide as never }, root);
+      // MUTATION GUARD: drop the `!options` guard in the decider and this exits 2.
+      expect(exits).not.toContain(2);
+      expect(exits).toContain(0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('popup fails to render ⇒ exit 0', async () => {
-    const exits = await run({ decidePromptSubmit: async () => { throw new Error('tty gone'); } });
-    expect(exits).not.toContain(2);
+    // Distinct from the classification error above: options ARE composed and the
+    // failure happens inside renderPopup. Writable root for the same reason as
+    // the test above — with an unwritable one the persist failure would mask the
+    // guard and the mutation would survive.
+    const root = mkdtempSync(join(tmpdir(), 'nexpath-h4-'));
+    try {
+      const decide = buildDefaultPromptSubmitDecider({ project: root }, {
+        optionSource: {
+          composeOptions: () => ({ l1: [], l2: ['opt'], l3: [] }),
+          renderPopup: async () => { throw new Error('tty gone'); },   // <- the mode
+          consumeHandledTurn: () => {},
+        } as never,
+      });
+      const exits = await run({ decidePromptSubmit: decide as never }, root);
+      // MUTATION GUARD: turn the decider's popup catch into a block and this exits 2.
+      expect(exits).not.toContain(2);
+      expect(exits).toContain(0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('popup returns no selection (user dismissed) ⇒ exit 0', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'nexpath-h4-'));
+    try {
+      const decide = buildDefaultPromptSubmitDecider({ project: root }, {
+        optionSource: {
+          composeOptions: () => ({ l1: [], l2: ['opt'], l3: [] }),
+          renderPopup: async () => null,
+          consumeHandledTurn: () => {},
+        } as never,
+      });
+      const exits = await run({ decidePromptSubmit: decide as never }, root);
+      expect(exits).not.toContain(2);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('⭐ NO DECISION before the hold expires ⇒ exit 0, prompt released', async () => {
