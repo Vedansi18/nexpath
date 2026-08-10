@@ -7,6 +7,7 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import { runCursorHookAction, CURSOR_CONTINUE } from './cursor-hook.js';
+import { createHoldBudget } from './submit-hold-budget.js';
 
 const PAYLOAD = JSON.stringify({
   prompt: 'hello',
@@ -112,5 +113,67 @@ describe('the decider receives a parsed, PII-free payload', () => {
     const h = harness({ decide: async (p: never) => { seen = p; return 'allow' as const; } });
     await runCursorHookAction('beforeSubmitPrompt', h.deps as never);
     expect(JSON.stringify(seen)).not.toContain('someone@example.com');
+  });
+});
+
+describe('⭐ R2 — self-enforced hold: Cursor orphans timed-out hooks, so it will never reap us', () => {
+  // Measured: at 60.002s Cursor stopped waiting but the hook process kept
+  // running past 90s. A host-enforced bound is therefore no bound at all - the
+  // process must terminate itself or it survives as an orphan.
+  function fakeBudget(totalMs = 60_000) {
+    let t = 0;
+    const timers: Array<{ at: number; fn: () => void }> = [];
+    const budget = createHoldBudget({
+      totalMs,
+      now: () => t,
+      setTimeoutFn: (fn, ms) => { const e = { at: t + ms, fn }; timers.push(e); return e; },
+      clearTimeoutFn: (h) => { const i = timers.indexOf(h as never); if (i >= 0) timers.splice(i, 1); },
+    });
+    return {
+      budget,
+      advance(ms: number) {
+        t += ms;
+        for (const e of [...timers]) if (e.at <= t) { timers.splice(timers.indexOf(e), 1); e.fn(); }
+      },
+    };
+  }
+
+  it('a decider that never answers still exits 0 and continues', async () => {
+    // Without the budget this hook would run forever, orphaned by Cursor, while
+    // the user's prompt sits blocked.
+    const f = fakeBudget();
+    const h = harness({
+      holdBudget: f.budget,
+      decide: () => new Promise(() => { f.advance(60_000); }),   // never settles
+    });
+    await runCursorHookAction('beforeSubmitPrompt', h.deps as never);
+    expect(h.exits).toEqual([0]);
+    expect(JSON.parse(h.writes[0])).toEqual({ continue: true });
+  });
+
+  it('an expired budget never blocks, even if the decider later says block', async () => {
+    // MUTATION GUARD: treating a timed-out run as a real decision would emit
+    // continue:false with no replacement, cancelling the turn for nothing.
+    const f = fakeBudget();
+    const h = harness({
+      holdBudget: f.budget,
+      decide: () => new Promise((r) => { f.advance(60_000); setTimeout(() => r('block'), 0); }),
+    });
+    await runCursorHookAction('beforeSubmitPrompt', h.deps as never);
+    expect(JSON.parse(h.writes[0])).toEqual({ continue: true });
+  });
+
+  it('the budget is SHARED — a slow stdin read leaves less for the decision', async () => {
+    // Per-segment timeouts would sum and could exceed the cap.
+    const f = fakeBudget(60_000);
+    const h = harness({
+      holdBudget: f.budget,
+      readStdin: async () => { f.advance(60_000); return PAYLOAD; },
+      decide: async () => 'block' as const,
+    });
+    await runCursorHookAction('beforeSubmitPrompt', h.deps as never);
+    // Budget exhausted by stdin ⇒ the decision segment never runs ⇒ continue.
+    expect(JSON.parse(h.writes[0])).toEqual({ continue: true });
+    expect(h.exits).toEqual([0]);
   });
 });

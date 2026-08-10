@@ -26,6 +26,7 @@
 import type { Command } from 'commander';
 import { parseCursorHookPayload, type CursorHookPayload } from '../../cursor-hook/payload.js';
 import { defaultReadStdin } from './windsurf-hook.js';
+import { createHoldBudget, type HoldBudget } from './submit-hold-budget.js';
 
 /** What we write to stdout. `continue:false` is what actually blocks Cursor. */
 export interface CursorHookResponse {
@@ -43,6 +44,15 @@ export interface CursorHookActionDeps {
   exit?: (code: number) => void;
   /** Bound on the stdin read; a hang here would hold the user's prompt. */
   stdinTimeoutMs?: number;
+  /**
+   * H4's shared hold budget, applied to the Cursor path (inherited acceptance).
+   *
+   * `R2`: Cursor **orphans** timed-out hooks — it stops waiting but does NOT kill
+   * the process, measured still running past 90 s. So the host will never reap
+   * us and the bound must be **self-enforced**, exactly as on Windsurf. Every
+   * segment draws from ONE budget; per-segment timeouts would sum.
+   */
+  holdBudget?: HoldBudget;
 }
 
 /**
@@ -69,25 +79,28 @@ export async function runCursorHookAction(
       return;
     }
 
+    // ── Self-enforced hold (R2): Cursor will never reap us ────────────────
+    const hold = deps.holdBudget ?? createHoldBudget();
+
     // BOUNDED: `defaultReadStdin` resolves only on stdin 'end'. An unbounded
     // await would hang the hook while holding the user's prompt (A3).
-    const raw = await Promise.race([
+    const stdinRes = await hold.run(() => Promise.race([
       readStdin(),
       new Promise<string>((r) => {
         const t = setTimeout(() => r(''), stdinTimeoutMs);
         if (typeof t.unref === 'function') t.unref();
       }),
-    ]);
+    ]));
+    const raw = stdinRes.value ?? '';
 
     const payload = parseCursorHookPayload(raw);
 
     let decision: 'allow' | 'block' = 'allow';
     if (deps.decide) {
-      try {
-        decision = await deps.decide(payload);
-      } catch {
-        decision = 'allow'; // fail-open: never strand the user's prompt
-      }
+      // Draws from what the stdin read left. A timeout is never a decision: it
+      // continues, so the original prompt is released (A3).
+      const decided = await hold.run(() => deps.decide!(payload));
+      if (!decided.timedOut && decided.value === 'block') decision = 'block';
     }
 
     // `continue:false` is the ONLY thing that blocks Cursor — not the exit code.
