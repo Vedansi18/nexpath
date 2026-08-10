@@ -45,6 +45,49 @@ describe('H2 — switch read semantics (default OFF)', () => {
   });
 });
 
+describe('H2 — the PRODUCTION default read (no injected env)', () => {
+  // Every other test injects `env` explicitly, which leaves the real production
+  // path — the `= process.env` default parameter and the `deps.env ?? process.env`
+  // fallback — completely uncovered. That is exactly the shape of bug this
+  // milestone already had to verify empirically: a switch that works in tests but
+  // is silently dead in production. These two tests pin the real read.
+  const KEY = WINDSURF_PROMPTSUBMIT_ADVISORY_ENV;
+
+  it('isWindsurfPromptSubmitAdvisoryEnabled() with no argument reads the real process.env', () => {
+    const had = Object.prototype.hasOwnProperty.call(process.env, KEY);
+    const prev = process.env[KEY];
+    try {
+      delete process.env[KEY];
+      expect(isWindsurfPromptSubmitAdvisoryEnabled()).toBe(false);
+      process.env[KEY] = '1';
+      expect(isWindsurfPromptSubmitAdvisoryEnabled()).toBe(true);
+      process.env[KEY] = '0';
+      expect(isWindsurfPromptSubmitAdvisoryEnabled()).toBe(false);
+    } finally {
+      if (had) process.env[KEY] = prev as string;
+      else delete process.env[KEY];
+    }
+  });
+
+  it('runWindsurfHookAction falls back to process.env when deps.env is omitted', async () => {
+    const had = Object.prototype.hasOwnProperty.call(process.env, KEY);
+    const prev = process.env[KEY];
+    try {
+      process.env[KEY] = '1';
+      const decide = vi.fn().mockResolvedValue('block');
+      // NOTE: no `env` key in deps — this is the production wiring.
+      const h = harness({ decidePromptSubmit: decide });
+      delete (h.deps as Record<string, unknown>).env;
+      await runWindsurfHookAction('pre_user_prompt', {}, h.deps);
+      expect(decide).toHaveBeenCalled();
+      expect(h.exit).toHaveBeenCalledWith(2);
+    } finally {
+      if (had) process.env[KEY] = prev as string;
+      else delete process.env[KEY];
+    }
+  });
+});
+
 describe('H2 — BACKWARD COMPATIBILITY: switch off ⇒ byte-identical behaviour', () => {
   it('never consults the decider when the switch is unset', async () => {
     const decide = vi.fn();
