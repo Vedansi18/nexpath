@@ -2153,7 +2153,7 @@ describe('installAction — frequency and role prompts', () => {
     }
   });
 
-  it('does NOT show the frequency/role pickers — seeds Medium (every_event) + founder silently (owner 2026-08-10)', async () => {
+  it('hides ONLY the frequency picker (seeds Medium) — the role picker still shows (owner 2026-08-10)', async () => {
     const { dir, cleanup: cleanupDir } = tmpDir();
     markClaudeInstalled(dir);
     const { path: dbPath, cleanup: cleanupDb } = tempDbFile();
@@ -2180,11 +2180,11 @@ describe('installAction — frequency and role prompts', () => {
         },
       );
 
-      expect(freqPromptFn).not.toHaveBeenCalled();  // frequency picker hidden
-      expect(rolePromptFn).not.toHaveBeenCalled();  // role picker hidden
+      expect(freqPromptFn).not.toHaveBeenCalled();          // frequency picker hidden
+      expect(rolePromptFn).toHaveBeenCalledWith('founder');  // role picker STILL shown (default founder)
       const store = await openStore(dbPath);
       expect(getConfig(store.db, 'advisory_frequency')).toBe('every_event'); // Medium default seeded
-      expect(getConfig(store.db, 'role')).toBe('founder');                    // founder default seeded
+      expect(getConfig(store.db, 'role')).toBe('founder');                    // written by the role picker
       closeStore(store);
     } finally {
       cleanupDir();
@@ -2192,7 +2192,7 @@ describe('installAction — frequency and role prompts', () => {
     }
   });
 
-  it('does NOT show the role picker — preserves an existing role value (owner 2026-08-10)', async () => {
+  it('interactive path passes the current role to the prompt and writes the selection', async () => {
     const { dir, cleanup: cleanupDir } = tmpDir();
     markClaudeInstalled(dir);
     const { path: dbPath, cleanup: cleanupDb } = tempDbFile();
@@ -2223,10 +2223,10 @@ describe('installAction — frequency and role prompts', () => {
         },
       );
 
-      // Picker is hidden: the existing role is preserved, and the prompt is never called.
-      expect(rolePromptFn).not.toHaveBeenCalled();
+      // initialValue is the current configured role
+      expect(rolePromptFn).toHaveBeenCalledWith('pm');
       const store = await openStore(dbPath);
-      expect(getConfig(store.db, 'role')).toBe('pm');
+      expect(getConfig(store.db, 'role')).toBe('vibe_coder');
       closeStore(store);
     } finally {
       cleanupDir();
@@ -2314,7 +2314,7 @@ describe('installAction — frequency and role prompts', () => {
     }
   });
 
-  it('does NOT show the role picker for a legacy "clear" stored value (picker hidden 2026-08-10)', async () => {
+  it('interactive path passes the founder default to the role prompt for legacy "clear" stored value', async () => {
     const { dir, cleanup: cleanupDir } = tmpDir();
     markClaudeInstalled(dir);
     const { path: dbPath, cleanup: cleanupDb } = tempDbFile();
@@ -2345,7 +2345,7 @@ describe('installAction — frequency and role prompts', () => {
         },
       );
 
-      expect(rolePromptFn).not.toHaveBeenCalled(); // role picker hidden even for a legacy "clear" value
+      expect(rolePromptFn).toHaveBeenCalledWith('founder');
     } finally {
       cleanupDir();
       cleanupDb();
