@@ -301,3 +301,25 @@ describe('⭐ H5 — the submit hook is actually WIRED into install/uninstall', 
     }
   });
 });
+
+describe('H5 — the hook is NOT written when Cursor is absent', () => {
+  it('install writes nothing when undetected', async () => {
+    // Writing a hook for an editor the user does not have would leave a config
+    // pointing at a CLI Cursor will never invoke.
+    const home = mkdtempSync(join(tmpdir(), 'nexpath-cur-none-'));
+    try {
+      const res = await cursorAdapter.install({ home, cwd: home, dryRun: false, platform: 'linux' } as never);
+      expect(res.status).toBe('skipped');
+      expect(existsSync(join(home, '.cursor', 'hooks.json'))).toBe(false);
+    } finally { rmSync(home, { recursive: true, force: true }); }
+  });
+
+  it('uninstall is a no-op when undetected', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'nexpath-cur-none-'));
+    try {
+      await expect(
+        cursorAdapter.uninstall({ home, cwd: home, dryRun: false, platform: 'linux' } as never),
+      ).resolves.toBeUndefined();
+    } finally { rmSync(home, { recursive: true, force: true }); }
+  });
+});

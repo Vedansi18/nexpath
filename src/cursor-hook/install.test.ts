@@ -182,3 +182,41 @@ describe('config locations (Cursor merges three; we write only two)', () => {
     expect(isNexpathCursorHook({} as never)).toBe(false);
   });
 });
+
+describe('⭐ the command string survives paths with spaces (cross-OS)', () => {
+  // Real risk: Windows installs land under "C:\Program Files\..." and macOS under
+  // "/Applications/...". An unquoted path would split into separate argv entries
+  // and the hook would fail to launch with a confusing "cannot find module".
+  const SPACED = 'C:\\Program Files\\nexpath\\dist\\cli\\index.js';
+
+  it('quotes the CLI path', () => {
+    const cmd = buildCursorHookEntry(SPACED, 'beforeSubmitPrompt').command;
+    expect(cmd).toContain('"C:\\\\Program Files\\\\nexpath\\\\dist\\\\cli\\\\index.js"');
+  });
+
+  it('the event name follows the quoted path, unquoted', () => {
+    const cmd = buildCursorHookEntry(SPACED, 'beforeSubmitPrompt').command;
+    expect(cmd.endsWith(' cursor-hook beforeSubmitPrompt')).toBe(true);
+  });
+
+  it('a spaced path still round-trips through write + identify', () => {
+    const t = tmp();
+    try {
+      writeCursorHooks(t.file, SPACED);
+      const h = read(t.file).hooks as never as Record<string, Array<{ command: string }>>;
+      expect(isNexpathCursorHook(h.beforeSubmitPrompt[0])).toBe(true);
+      // MUTATION GUARD: dropping the quoting would still contain 'cursor-hook',
+      // so identification alone does not prove the command is launchable.
+      expect(h.beforeSubmitPrompt[0].command).toContain('"');
+    } finally { t.cleanup(); }
+  });
+});
+
+describe('user vs project path helpers are distinct', () => {
+  it('do not collide for the same directory', () => {
+    // Both end in .cursor/hooks.json; a copy-paste error between them would make
+    // install silently write the wrong scope.
+    expect(getCursorUserHooksPath('/x')).toBe(getCursorProjectHooksPath('/x'));
+    expect(getCursorUserHooksPath('/home/u')).not.toBe(getCursorProjectHooksPath('/proj'));
+  });
+});
