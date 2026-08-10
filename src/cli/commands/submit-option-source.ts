@@ -1,0 +1,215 @@
+/**
+ * Deterministic option source for the submit-time popup (hook milestone H3).
+ *
+ * This is the adapter that supplies the decider's `composeOptions` / `renderPopup`
+ * ports. It is the LAST missing input: with it absent the decider resolves
+ * `'allow'` for every prompt and the switch is inert.
+ *
+ * ── WHY THIS FILE EXISTS SEPARATELY FROM THE DECIDER ─────────────────────────
+ * `submit-prompt-decider.ts` has **zero imports of any kind**, so the ownership
+ * boundary is provable in the import graph rather than by reviewer discipline.
+ * Hiren's `composeDeterministicOptions` and Bhavnesh's `createTtySelectFn` are
+ * therefore consumed **here, at the wiring site**, and handed to the decider as
+ * injected ports. Both are consume-only — neither file is modified.
+ *
+ * ── ⭐ REUSES `auto`'s CLASSIFICATION — NEVER RE-CLASSIFIES (owner ruling) ────
+ * `composeDeterministicOptions()` is LLM-free, but it needs a `lookup`, and a
+ * lookup needs a classified signal. Classification IS LLM-based
+ * (`stage-classifier.ts` imports OpenAI). Re-running it here would put a network
+ * round-trip on the submit path — exactly what amendment `A1` (deterministic-only)
+ * exists to prevent, and it would compound Cursor's 60 s hook-timeout risk.
+ *
+ * It is not needed. `pre_user_prompt` already runs `nexpath auto`, which classifies
+ * and persists the result (`upsertPendingAdvisory`). This reads that row and
+ * rebuilds the lookup **synchronously from the store**:
+ *
+ *   persisted row (flagType, stage)          ← auto already paid for this
+ *     → pinchSignalTypeForFlag(flagType, stage)
+ *     → autogenAwareLookup(store, cwd, signalType)      [store read, no network]
+ *     → composeDeterministicOptions({ lookup, level, register, role })
+ *
+ * Mirrors `stop.ts`'s deterministic branch (lines ~332–345).
+ *
+ * ── 🚫 NO OpenAI CLIENT ON THIS PATH, EVER ───────────────────────────────────
+ * `stop.ts` reaches OpenAI only at lines 351–352 (`buildEngineGrounding` /
+ * `generateFromEngine`) — the ENGINE path, which `A1` excludes. This file
+ * deliberately imports neither, and a test pins that absence: silently acquiring a
+ * client is precisely how the submit path would regress into a network round-trip
+ * while every other test still passed.
+ *
+ * ── FAIL-OPEN ────────────────────────────────────────────────────────────────
+ * Every failure returns `null`, which the decider treats as `'allow'` — the
+ * original prompt is released unmodified. Per amendment `A3`, a failure while
+ * HOLDING the user's prompt is strictly worse than today's "no advisory appears".
+ */
+import { getPendingAdvisory } from '../../store/pending-advisories.js';
+import { getUserDepthLevel } from '../../store/user-depth-level.js';
+import { selectionRegister, resolveContentSource } from '../../decision-session/selection-registry.js';
+import {
+  autogenAwareLookup,
+  pinchSignalTypeForFlag,
+} from '../../decision-session/content-template-source.js';
+import { composeDeterministicOptions } from '../../decision-session/engine-option-generator.js';
+import {
+  activePinFor,
+  applyPinToLookup,
+  applyPinToLevel,
+  type ActivePin,
+} from '../../decision-session/experiment-config.js';
+import { createTtySelectFn } from '../../decision-session/TtySelectFn.js';
+import type { MaturityLevel } from '../../decision-session/content-template-schema.js';
+import type { DeciderOptionSet, DeciderSelection } from './submit-prompt-decider.js';
+
+/**
+ * Structurally identical to the decider's `DeciderOptionSet` and to the `l1/l2/l3`
+ * of Hiren's `GeneratedOptions` — deliberately, so the set passes through without
+ * the decider ever importing `decision-session`.
+ */
+export interface SubmitOptionSourceDeps {
+  /** Opaque here — only forwarded to store/lookup helpers. */
+  store: unknown;
+  projectRoot: string;
+  sessionId?: string;
+  /** From the session profile; both optional, both local reads. */
+  role?: string;
+  nature?: string;
+
+  // ── Seams. Defaults are the REAL implementations, never no-ops. ────────────
+  // (A prior bug in this milestone shipped `() => false` defaults, so the
+  // production path silently did nothing while every test passed.)
+  getRow?: typeof getPendingAdvisory;
+  getLevel?: typeof getUserDepthLevel;
+  composeFn?: typeof composeDeterministicOptions;
+  selectFnFactory?: typeof createTtySelectFn;
+  /** Seams for the classification→lookup chain, so this is unit-testable
+   *  without a real Store. Defaults are the real implementations. */
+  signalTypeFn?: typeof pinchSignalTypeForFlag;
+  contentSourceFn?: typeof resolveContentSource;
+  lookupFn?: typeof autogenAwareLookup;
+  log?: (message: string) => void;
+}
+
+export interface SubmitOptionSource {
+  composeOptions: (promptText: string) => DeciderOptionSet | null;
+  renderPopup: (promptText: string, options: DeciderOptionSet) => Promise<DeciderSelection>;
+}
+
+/** Pick the list matching the resolved maturity level. */
+function listForLevel(set: DeciderOptionSet, level: MaturityLevel): string[] {
+  if (level === 1) return set.l1;
+  if (level === 3) return set.l3;
+  return set.l2;
+}
+
+/**
+ * Build the deterministic option source.
+ *
+ * `composeOptions` and `renderPopup` come from ONE factory so the resolved
+ * maturity level is shared between them via closure. The alternative — widening
+ * the decider's port signature to carry the level — would couple the decider to
+ * this adapter's internals for no behavioural gain.
+ */
+export function createDeterministicSubmitOptionSource(
+  deps: SubmitOptionSourceDeps,
+): SubmitOptionSource {
+  const getRow = deps.getRow ?? getPendingAdvisory;
+  const getLevel = deps.getLevel ?? getUserDepthLevel;
+  const composeFn = deps.composeFn ?? composeDeterministicOptions;
+  const selectFnFactory = deps.selectFnFactory ?? createTtySelectFn;
+  const signalTypeFn = deps.signalTypeFn ?? pinchSignalTypeForFlag;
+  const contentSourceFn = deps.contentSourceFn ?? resolveContentSource;
+  const lookupFn = deps.lookupFn ?? autogenAwareLookup;
+  const log = deps.log ?? (() => {});
+
+  // Set by composeOptions, read by renderPopup within the same turn.
+  let resolvedLevel: MaturityLevel = 2;
+
+  const composeOptions = (_promptText: string): DeciderOptionSet | null => {
+    try {
+      // 1. Reuse auto's classification. No row ⇒ nothing was classified for this
+      //    turn ⇒ no popup. (Gap 5's "no pending_advisory row" case lands here.)
+      const row = getRow(deps.store as never, deps.projectRoot, deps.sessionId);
+      if (!row) {
+        log('submit_option_source: no pending_advisory row — allowing');
+        return null;
+      }
+
+      // 2. Classified signal → signal type. Local map lookup, no LLM.
+      const signalType = signalTypeFn(row.flagType, row.stage);
+      if (!signalType) {
+        log('submit_option_source: flag has no signal type — allowing');
+        return null;
+      }
+
+      // 3. Only the content-template source has deterministic records; the engine
+      //    source is the LLM path that `A1` excludes.
+      if (contentSourceFn(signalType) !== 'content-template') {
+        log('submit_option_source: signal is not content-template — allowing');
+        return null;
+      }
+
+      // 4. Experiment pin. Fail-open: malformed config ⇒ no pinning.
+      let activePin: ActivePin | null = null;
+      try { activePin = activePinFor(deps.store as never, signalType); } catch { activePin = null; }
+
+      const baseLookup = lookupFn(deps.store as never, deps.projectRoot, signalType);
+      const lookup = activePin ? applyPinToLookup(baseLookup, activePin.pin) : baseLookup;
+
+      const baseLevel = (getLevel(deps.store as never, deps.projectRoot)?.currentLevel ?? 2) as MaturityLevel;
+      resolvedLevel = activePin ? applyPinToLevel(baseLevel, activePin.pin) : baseLevel;
+
+      const register = selectionRegister(deps.nature as never);
+
+      // 5. Hiren's generator — synchronous, LLM-free, consume-only.
+      const generated = composeFn({ lookup, level: resolvedLevel, register, role: deps.role });
+      if (!generated) {
+        log('submit_option_source: generator returned nothing — allowing');
+        return null;
+      }
+
+      const set: DeciderOptionSet = { l1: generated.l1, l2: generated.l2, l3: generated.l3 };
+      if (listForLevel(set, resolvedLevel).length === 0) {
+        log('submit_option_source: no options at the resolved level — allowing');
+        return null;
+      }
+      return set;
+    } catch (err) {
+      // Fail-open (A3): never let an option-source fault hold the user's prompt.
+      log(`submit_option_source: failed, allowing — ${(err as Error)?.message ?? 'unknown'}`);
+      return null;
+    }
+  };
+
+  const renderPopup = async (
+    _promptText: string,
+    options: DeciderOptionSet,
+  ): Promise<DeciderSelection> => {
+    try {
+      const choices = listForLevel(options, resolvedLevel);
+      if (choices.length === 0) return null;
+
+      // Bhavnesh's TTY selector — consume-only.
+      const selectFn = selectFnFactory();
+      // Null on a non-TTY host (no interactive terminal) — release the prompt.
+      if (!selectFn) { log('submit_option_source: no TTY selector — allowing'); return null; }
+      const picked: unknown = await selectFn({
+        message: 'Refine this prompt before sending?',
+        options: choices.map((text) => ({ value: text, label: text })),
+      } as never);
+
+      // The selector's shape varies by build; accept a bare string or `{ value }`,
+      // and treat anything else as a dismissal rather than guessing.
+      if (typeof picked === 'string') return picked || null;
+      if (picked && typeof picked === 'object' && typeof (picked as { value?: unknown }).value === 'string') {
+        return ((picked as { value: string }).value) || null;
+      }
+      return null;
+    } catch (err) {
+      // Fail-open (A3): a popup fault releases the prompt unmodified.
+      log(`submit_option_source: popup failed, allowing — ${(err as Error)?.message ?? 'unknown'}`);
+      return null;
+    }
+  };
+
+  return { composeOptions, renderPopup };
+}
