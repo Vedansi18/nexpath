@@ -1,3 +1,5 @@
+import { spawnSync } from 'node:child_process';
+
 /**
  * Clipboard-fallback delivery for the submit-time advisory (hook milestone H3, Q3).
  *
@@ -36,6 +38,7 @@
  * `TtySelectFn.ts` are consumed elsewhere in H3 but never edited.
  */
 
+
 /** Injected OS-automation seams. Defaults are supplied by the caller (extension.ts). */
 export interface SubmitClipboardDeliveryDeps {
   /** Write the replacement text to the system clipboard. */
@@ -56,6 +59,7 @@ export interface SubmitClipboardDelivery {
   /** Send the submit key. Resolves `false` on any failure — never throws. */
   submit: () => Promise<boolean>;
 }
+
 
 /**
  * Build the delivery pair the submit-time poller consumes.
@@ -117,6 +121,7 @@ export function createSubmitClipboardDelivery(
   };
 }
 
+
 /** Platform + tool seams for the submit keystroke, mirroring `AutoPasteDeps`. */
 export interface SubmitKeystrokeDeps {
   platform?: NodeJS.Platform;
@@ -124,6 +129,7 @@ export interface SubmitKeystrokeDeps {
   hasCommand?: (cmd: string) => boolean;
   run?: (cmd: string, args: string[]) => boolean;
 }
+
 
 /**
  * Send the submit key (Enter) to the focused input, per OS.
@@ -137,11 +143,34 @@ export interface SubmitKeystrokeDeps {
  * `DISPLAY`/`WAYLAND_DISPLAY` there is nothing to type into, so this returns
  * `false` immediately rather than shelling out pointlessly.
  */
+function defaultHasCommand(cmd: string): boolean {
+  try {
+    return spawnSync('which', [cmd], { stdio: 'ignore', timeout: 2000 }).status === 0;
+  } catch {
+    return false;
+  }
+}
+
+function defaultRun(cmd: string, args: string[]): boolean {
+  try {
+    return spawnSync(cmd, args, { stdio: 'ignore', timeout: 3000 }).status === 0;
+  } catch {
+    return false;
+  }
+}
+
 export function submitKeystroke(deps: SubmitKeystrokeDeps = {}): boolean {
   const platform = deps.platform ?? process.platform;
   const env = deps.env ?? process.env;
-  const has = deps.hasCommand ?? (() => false);
-  const run = deps.run ?? (() => false);
+  // CORRECTED 2026-08-10 — these previously defaulted to `() => false`, which made
+  // `submitKeystroke()` a guaranteed no-op in production: called with no deps (the
+  // real wiring), it could never detect a tool or run one, so the submit key would
+  // NEVER be sent while every unit test still passed. Exactly the "works in tests,
+  // silently dead in production" class this milestone already had to disprove for
+  // the env-var passthrough in H2. Defaults now spawn for real, matching the
+  // shipped `pasteKeystroke` (`windsurf-autopaste.ts:63-64,83-84`) verbatim.
+  const has = deps.hasCommand ?? defaultHasCommand;
+  const run = deps.run ?? defaultRun;
 
   try {
     if (platform === 'darwin') {

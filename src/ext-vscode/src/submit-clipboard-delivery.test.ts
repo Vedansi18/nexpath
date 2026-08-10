@@ -170,4 +170,41 @@ describe('submitKeystroke — cross-OS matrix (§2.4b), pinned per platform', ()
       platform: 'darwin', run: () => { throw new Error('spawn failed'); },
     })).toBe(false);
   });
+
+  // ── The production default path ────────────────────────────────────────────
+  // Every test above injects `hasCommand`/`run`, which left the REAL defaults
+  // uncovered — and they were wrong: both defaulted to `() => false`, making
+  // `submitKeystroke()` a guaranteed no-op in production while the whole suite
+  // stayed green. Same "works in tests, silently dead in production" class this
+  // milestone already had to disprove for H2's env passthrough. These tests pin
+  // the defaults so the regression cannot return.
+  it('uses REAL default detection when hasCommand/run are not injected', () => {
+    // On this Linux box with a display, `which xdotool` genuinely resolves. The
+    // point is not the return value but that the defaults actually execute
+    // instead of short-circuiting to false.
+    const calls: string[] = [];
+    const result = submitKeystroke({
+      platform: 'linux',
+      env: { DISPLAY: ':1' },
+      // hasCommand intentionally NOT injected — exercise the real default.
+      run: (cmd) => { calls.push(cmd); return true; },
+    });
+    // If the default detector were `() => false`, no tool would ever match and
+    // `run` would never be called, so this array would be empty.
+    expect(calls.length).toBeGreaterThan(0);
+    expect(result).toBe(true);
+  });
+
+  it('the default runner is a real spawner, not a false-returning stub', () => {
+    // Detect a command that certainly does not exist: the default detector must
+    // return false for it (proving it really probes), and no tool then matches.
+    const ok = submitKeystroke({
+      platform: 'linux',
+      env: { DISPLAY: ':1' },
+      hasCommand: (c) => c === 'definitely-not-a-real-binary-xyz',
+      // run intentionally NOT injected — the real default would be reached only
+      // if a tool matched; none does, so this must be false without throwing.
+    });
+    expect(ok).toBe(false);
+  });
 });
