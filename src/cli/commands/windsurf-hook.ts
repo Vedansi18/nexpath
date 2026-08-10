@@ -187,8 +187,12 @@ export function buildDefaultPromptSubmitDecider(
           ?? source?.renderPopup
           ?? (async (): Promise<DeciderSelection> => null),
         persistDecision: async (replacementText) => {
+          // Stamped here: the decision to block is made the instant the user
+          // picks an option, immediately before persistence.
+          const blockIssuedAt = now();
           await writeSubmitDecision({
             projectRoot,
+            blockIssuedAt,
             decisionId: `sd-${now()}-${Math.floor(now() % 100000)}`,
             replacementText,
             createdAt: now(),

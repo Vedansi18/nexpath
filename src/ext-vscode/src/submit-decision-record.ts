@@ -36,6 +36,8 @@ export interface SubmitDecisionRecordV1 {
   replacementText: string;
   /** Epoch ms when the hook persisted this. Drives the poller's stale-turn guard. */
   createdAt: number;
+  /** When the hook decided to block (stage 1 of the mandated five). */
+  blockIssuedAt: number;
   /** Which host produced it — so a Cursor record can never be delivered to Windsurf. */
   host: 'windsurf' | 'cursor';
 }
@@ -59,6 +61,7 @@ export function parseSubmitDecisionRecordV1(raw: unknown): SubmitDecisionRecordV
   // composer and silently lose the turn, which is worse than doing nothing.
   if (!isNonEmptyString(r.replacementText)) return null;
   if (typeof r.createdAt !== 'number' || !Number.isFinite(r.createdAt)) return null;
+  if (typeof r.blockIssuedAt !== 'number' || !Number.isFinite(r.blockIssuedAt)) return null;
   if (r.host !== 'windsurf' && r.host !== 'cursor') return null;
 
   return {
@@ -66,6 +69,7 @@ export function parseSubmitDecisionRecordV1(raw: unknown): SubmitDecisionRecordV
     decisionId: r.decisionId,
     replacementText: r.replacementText,
     createdAt: r.createdAt,
+    blockIssuedAt: r.blockIssuedAt,
     host: r.host,
   };
 }
@@ -85,6 +89,7 @@ export function buildSubmitDecisionRecordV1(input: {
   replacementText: string;
   createdAt: number;
   host: 'windsurf' | 'cursor';
+  blockIssuedAt: number;
 }): SubmitDecisionRecordV1 {
   return { schemaVersion: SUBMIT_DECISION_SCHEMA_V1, ...input };
 }

@@ -21,13 +21,14 @@ const valid = {
   decisionId: 'd-1',
   replacementText: 'the picked option',
   createdAt: 1_700_000_000_000,
+  blockIssuedAt: 1_699_999_999_000,
   host: 'windsurf' as const,
 };
 
 describe('accepts a well-formed record', () => {
   it('round-trips build → parse unchanged', () => {
     const built = buildSubmitDecisionRecordV1({
-      decisionId: 'd-9', replacementText: 'x', createdAt: 5, host: 'cursor',
+      decisionId: 'd-9', replacementText: 'x', createdAt: 5, host: 'cursor', blockIssuedAt: 4,
     });
     expect(parseSubmitDecisionRecordV1(built)).toEqual(built);
     expect(built.schemaVersion).toBe(SUBMIT_DECISION_SCHEMA_V1);
@@ -75,6 +76,11 @@ describe('rejects anything malformed — every failure means "nothing pending"',
     ['empty decisionId', { ...valid, decisionId: '' }],
     ['non-string decisionId', { ...valid, decisionId: null }],
     ['non-numeric createdAt', { ...valid, createdAt: 'soon' }],
+    // Stage 1 of the mandated five. A record without it cannot be timed, and
+    // JSON.stringify silently drops an undefined field on the writer side.
+    ['missing blockIssuedAt', (() => { const v = { ...valid } as Record<string, unknown>; delete v.blockIssuedAt; return v; })()],
+    ['non-numeric blockIssuedAt', { ...valid, blockIssuedAt: 'soon' }],
+    ['NaN blockIssuedAt', { ...valid, blockIssuedAt: Number.NaN }],
     ['NaN createdAt', { ...valid, createdAt: Number.NaN }],
     ['Infinity createdAt', { ...valid, createdAt: Number.POSITIVE_INFINITY }],
     ['unknown host', { ...valid, host: 'vscode-generic' }],

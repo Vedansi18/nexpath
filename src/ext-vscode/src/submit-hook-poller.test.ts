@@ -16,7 +16,7 @@ import {
 } from './submit-hook-poller.js';
 
 function decision(over: Partial<PendingSubmitDecision> = {}): PendingSubmitDecision {
-  return { replacementText: 'replacement', createdAt: 1_000, decisionId: 'd1', ...over };
+  return { replacementText: 'replacement', createdAt: 1_000, blockIssuedAt: 900, decisionId: 'd1', ...over };
 }
 
 /** Clock we advance by hand so latency assertions are exact, not timing-dependent. */
@@ -111,18 +111,39 @@ describe('H3 Q1 — the stale-turn guard (the pe-poller idiom)', () => {
 });
 
 describe('H3 Q2 — measured handoff latency (the number the evidence packet needs)', () => {
-  it('records all four stages with latency measured from decision_persisted', async () => {
-    const h = harness({ readPendingDecision: vi.fn().mockResolvedValue(decision({ createdAt: 1_000 })) });
+  it('records all FIVE mandated stages, timed from block_issued and from persistence', async () => {
+    // The dev plan mandates five: block issued -> decision persisted -> extension
+    // observed -> inject dispatched -> submit dispatched. This suite previously
+    // asserted only four; `block_issued` was absent from the source entirely, so
+    // the recorded latency omitted the hook's own decision time — which under
+    // option-A ordering contains auto's LLM classification, the largest term.
+    const h = harness({
+      readPendingDecision: vi.fn().mockResolvedValue(decision({ createdAt: 1_000, blockIssuedAt: 900 })),
+    });
     const p = createSubmitHookPoller(h.deps);
-    p.start(); h.clock.advance(600); // now 1100 ⇒ 100ms after the hook persisted
+    p.start(); h.clock.advance(600); // now 1100 ⇒ 100ms after persist, 200ms after block
     await p.pollOnce();
     expect(h.timings.map((t) => t.stage)).toEqual([
-      'decision_persisted', 'extension_observed', 'inject_dispatched', 'submit_dispatched',
+      'block_issued', 'decision_persisted', 'extension_observed', 'inject_dispatched', 'submit_dispatched',
     ]);
     for (const t of h.timings) {
       expect(t.decisionId).toBe('d1');
-      expect(t.sinceDecisionMs).toBe(100); // exact, because the clock is injected
+      expect(t.sinceDecisionMs).toBe(100);      // exact — the clock is injected
+      expect(t.sinceBlockIssuedMs).toBe(200);   // includes the hook's decision time
     }
+  });
+
+  it('sinceBlockIssuedMs exceeds sinceDecisionMs — the two are not the same number', async () => {
+    // MUTATION GUARD: wiring sinceBlockIssuedMs to createdAt would make the new
+    // field a duplicate and silently drop the hook's decision time again.
+    const h = harness({
+      readPendingDecision: vi.fn().mockResolvedValue(decision({ createdAt: 1_000, blockIssuedAt: 400 })),
+    });
+    const p = createSubmitHookPoller(h.deps);
+    p.start(); h.clock.advance(600);
+    await p.pollOnce();
+    expect(h.timings[0].sinceBlockIssuedMs).toBe(700);
+    expect(h.timings[0].sinceDecisionMs).toBe(100);
   });
 
   it('latency grows with real elapsed time — proving it measures rather than reports a constant', async () => {

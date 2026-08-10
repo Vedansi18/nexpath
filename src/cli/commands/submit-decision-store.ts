@@ -43,6 +43,16 @@ export interface WriteSubmitDecisionInput {
   replacementText: string;
   createdAt: number;
   host: 'windsurf' | 'cursor';
+  /**
+   * When the hook DECIDED to block, captured before persisting.
+   *
+   * The dev plan mandates five timestamps
+   * (`block issued → decision persisted → extension observed → inject dispatched
+   * → submit dispatched`). Without this the measured handoff excludes the hook's
+   * own decision time — which, under option-A ordering, contains `auto`'s LLM
+   * classification and is the largest term in the budget.
+   */
+  blockIssuedAt: number;
 }
 
 export interface SubmitDecisionStoreDeps {
@@ -69,6 +79,13 @@ export async function writeSubmitDecision(
     throw new Error('submit decision: refusing to persist an empty replacement');
   }
 
+  // JSON.stringify DROPS undefined, so an unset timestamp would produce a record
+  // silently missing the field — which the extension validator rejects, losing a
+  // real decision. Fail here instead: the decider treats a throw as 'allow'.
+  if (typeof input.blockIssuedAt !== 'number' || !Number.isFinite(input.blockIssuedAt)) {
+    throw new Error('submit decision: blockIssuedAt must be a finite number');
+  }
+
   const finalPath = submitDecisionPath(input.projectRoot);
   const tmpPath = `${finalPath}.tmp`;
   const mkdirFn = deps.mkdirFn ?? (async (d: string) => { await mkdir(d, { recursive: true }); });
@@ -81,6 +98,7 @@ export async function writeSubmitDecision(
     replacementText: input.replacementText,
     createdAt: input.createdAt,
     host: input.host,
+    blockIssuedAt: input.blockIssuedAt,
   };
 
   await mkdirFn(dirname(finalPath));

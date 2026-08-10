@@ -19,6 +19,7 @@ const RECORD = {
   decisionId: 'd-1',
   replacementText: 'the picked option',
   createdAt: 1_700_000_000_000,
+  blockIssuedAt: 1_699_999_999_000,
   host: 'windsurf',
 };
 

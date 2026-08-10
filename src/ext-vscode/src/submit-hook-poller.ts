@@ -42,12 +42,18 @@ export interface PendingSubmitDecision {
    * `start()` are ignored — see the stale-turn guard above.
    */
   createdAt: number;
+  /**
+   * When the hook DECIDED to block, before it persisted. Stage 1 of the five the
+   * dev plan mandates; `createdAt` alone omits the hook's own decision time.
+   */
+  blockIssuedAt: number;
   /** Opaque id used only for correlating timing records; never rendered. */
   decisionId: string;
 }
 
 /** Stages of the cross-process handoff, timestamped so latency is measurable (H1 Q2). */
 export type SubmitHandoffStage =
+  | 'block_issued'
   | 'decision_persisted'
   | 'extension_observed'
   | 'inject_dispatched'
@@ -63,6 +69,12 @@ export interface SubmitHandoffTiming {
   stage: SubmitHandoffStage;
   at: number;
   sinceDecisionMs: number;
+  /**
+   * Elapsed since the hook ISSUED the block — the number the evidence packet
+   * needs. `sinceDecisionMs` starts at persistence and so omits the hook's own
+   * decision time, which under option-A ordering contains auto's LLM call.
+   */
+  sinceBlockIssuedMs: number;
 }
 
 /** What happened to a delivery attempt. Mirrors `pe-poller.ts`'s outcome vocabulary. */
@@ -114,7 +126,11 @@ export function createSubmitHookPoller(deps: SubmitHookPollerDeps): SubmitHookPo
 
   const record = (d: PendingSubmitDecision, stage: SubmitHandoffStage): void => {
     const at = now();
-    deps.onTiming?.({ decisionId: d.decisionId, stage, at, sinceDecisionMs: at - d.createdAt });
+    deps.onTiming?.({
+      decisionId: d.decisionId, stage, at,
+      sinceDecisionMs: at - d.createdAt,
+      sinceBlockIssuedMs: at - d.blockIssuedAt,
+    });
   };
 
   async function pollOnce(): Promise<void> {
@@ -139,6 +155,7 @@ export function createSubmitHookPoller(deps: SubmitHookPollerDeps): SubmitHookPo
         }
 
         seen.add(decision.decisionId);
+        record(decision, 'block_issued');
         record(decision, 'decision_persisted');
         record(decision, 'extension_observed');
 

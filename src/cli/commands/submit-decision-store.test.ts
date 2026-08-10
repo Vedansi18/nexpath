@@ -35,6 +35,7 @@ const INPUT = {
   replacementText: 'the picked option',
   createdAt: 1_700_000_000_000,
   host: 'windsurf' as const,
+  blockIssuedAt: 1_699_999_999_000,
 };
 
 describe('cross-package contract — must match the extension side exactly', () => {
@@ -54,11 +55,23 @@ describe('cross-package contract — must match the extension side exactly', () 
     // The extension's parseSubmitDecisionRecordV1 rejects a record missing any of
     // these, and drops unknown extras — so the sets must agree.
     expect(Object.keys(parsed).sort()).toEqual(
-      ['createdAt', 'decisionId', 'host', 'replacementText', 'schemaVersion'].sort(),
+      ['blockIssuedAt', 'createdAt', 'decisionId', 'host', 'replacementText', 'schemaVersion'].sort(),
     );
     expect(parsed.schemaVersion).toBe(1);
     expect(parsed.host).toBe('windsurf');
     expect(parsed.replacementText).toBe('the picked option');
+    expect(parsed.blockIssuedAt).toBe(1_699_999_999_000);
+  });
+
+  it('refuses to write when blockIssuedAt is missing — JSON.stringify would drop it', async () => {
+    // The field would simply vanish from the record, the extension validator
+    // would reject it, and a real decision would be silently lost. This is why
+    // the field-set pin above did NOT catch the omission on its own.
+    const h = harness();
+    const bad = { ...INPUT } as Record<string, unknown>;
+    delete bad.blockIssuedAt;
+    await expect(writeSubmitDecision(bad as never, h.deps)).rejects.toThrow(/blockIssuedAt/);
+    expect(h.writes).toHaveLength(0);
   });
 });
 
