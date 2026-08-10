@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { cursorAdapter, cursorConfigDir, type PlatformOverride } from './cursor.js';
@@ -224,5 +224,80 @@ describe('cursorAdapter registry registration', () => {
     await import('../index.js');
     const { getAdapter } = await import('../registry.js');
     expect(getAdapter('cursor')).toBe(cursorAdapter);
+  });
+});
+
+describe('⭐ H5 — the submit hook is actually WIRED into install/uninstall', () => {
+  // The gap this closes: writeCursorHooks existed with 17 passing tests but was
+  // never called, so `nexpath install` would never create .cursor/hooks.json and
+  // the hook could never fire. Correct and tested in isolation, dead in
+  // production - the same class of defect as the clipboard-as-primary bug in H4.
+  const realArgv1 = process.argv[1];
+
+  // Mirrors the fixture the existing detect tests use: detect() checks the
+  // PLATFORM config dir (~/.config/Cursor on posix), not ~/.cursor.
+  function ctxIn(home: string) {
+    return { home, cwd: home, dryRun: false, platform: 'linux' } as never;
+  }
+
+  it('install writes the hook to the USER-level path', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'nexpath-cur-adapter-'));
+    try {
+      mkdirSync(join(home, '.config', 'Cursor'), { recursive: true }); // detect() fixture
+      process.argv[1] = '/opt/nexpath/dist/cli/index.js';
+      await cursorAdapter.install(ctxIn(home));
+      const file = join(home, '.cursor', 'hooks.json');
+      expect(existsSync(file)).toBe(true);
+      const hooks = JSON.parse(readFileSync(file, 'utf8')).hooks as Record<string, Array<{ command: string }>>;
+      expect(hooks.beforeSubmitPrompt[0].command).toContain('cursor-hook');
+    } finally {
+      process.argv[1] = realArgv1;
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('install is idempotent — running twice does not duplicate', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'nexpath-cur-adapter-'));
+    try {
+      mkdirSync(join(home, '.config', 'Cursor'), { recursive: true });
+      process.argv[1] = '/opt/nexpath/dist/cli/index.js';
+      await cursorAdapter.install(ctxIn(home));
+      await cursorAdapter.install(ctxIn(home));
+      const hooks = JSON.parse(readFileSync(join(home, '.cursor', 'hooks.json'), 'utf8')).hooks as Record<string, unknown[]>;
+      expect(hooks.beforeSubmitPrompt).toHaveLength(1);
+    } finally {
+      process.argv[1] = realArgv1;
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('uninstall removes it again — symmetric', async () => {
+    // Leaving the hook behind would keep invoking a CLI the user just removed.
+    const home = mkdtempSync(join(tmpdir(), 'nexpath-cur-adapter-'));
+    try {
+      mkdirSync(join(home, '.config', 'Cursor'), { recursive: true });
+      process.argv[1] = '/opt/nexpath/dist/cli/index.js';
+      await cursorAdapter.install(ctxIn(home));
+      await cursorAdapter.uninstall(ctxIn(home));
+      const hooks = JSON.parse(readFileSync(join(home, '.cursor', 'hooks.json'), 'utf8')).hooks as Record<string, unknown>;
+      expect(hooks.beforeSubmitPrompt).toBeUndefined();
+    } finally {
+      process.argv[1] = realArgv1;
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('writes ONLY the user-level path — never the enterprise one', async () => {
+    // /etc/cursor/hooks.json needs root and is not ours to touch.
+    const home = mkdtempSync(join(tmpdir(), 'nexpath-cur-adapter-'));
+    try {
+      mkdirSync(join(home, '.config', 'Cursor'), { recursive: true });
+      process.argv[1] = '/opt/nexpath/dist/cli/index.js';
+      await cursorAdapter.install(ctxIn(home));
+      expect(existsSync(join(home, 'etc', 'cursor', 'hooks.json'))).toBe(false);
+    } finally {
+      process.argv[1] = realArgv1;
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 });

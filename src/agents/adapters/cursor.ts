@@ -1,6 +1,12 @@
 import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { posix as posixPath, win32 as win32Path } from 'node:path';
 import { registerAdapter } from '../registry.js';
+import {
+  getCursorUserHooksPath,
+  writeCursorHooks,
+  removeCursorHooks,
+} from '../../cursor-hook/install.js';
 import type {
   InstallContext,
   InstallResult,
@@ -151,6 +157,20 @@ export const cursorAdapter: VSCodeExtensionAdapter = {
       console.log(`-  ${'Cursor'.padEnd(12)} — not detected; skipping`);
       return { status: 'skipped', notes: 'Cursor not installed on this machine' };
     }
+    // Capture: write the submit-time hook (`beforeSubmitPrompt` → nexpath
+    // cursor-hook), mirroring the Windsurf adapter. Without this the writer built
+    // in H5 is never called and the hook never fires — the component would be
+    // correct and tested in isolation while doing nothing in production.
+    //
+    // USER-LEVEL ONLY. Cursor merges project / user / enterprise configs; the
+    // enterprise path (`/etc/cursor/hooks.json`) needs root and is not ours to
+    // touch, and a project-level write would silently scope the hook to whichever
+    // directory `nexpath install` happened to run in.
+    const cliPath = resolve(process.argv[1]);
+    const hooksPath = getCursorUserHooksPath(ctx.home);
+    writeCursorHooks(hooksPath, cliPath);
+    console.log(`✓ ${'Cursor'.padEnd(12)} — submit hook written to ${hooksPath}`);
+
     if (process.env.NEXPATH_EXT_SETUP) {
       // Setup launched BY the Nexpath extension → it's already installed, so the
       // marketplace deep-links are redundant noise.
@@ -172,6 +192,12 @@ export const cursorAdapter: VSCodeExtensionAdapter = {
     if (!this.detect(ctx)) {
       console.log(`-  ${'Cursor'.padEnd(12)} — not detected; skipping`);
       return;
+    }
+    // Symmetric with install: leaving our hook behind would keep invoking a CLI
+    // the user has just removed.
+    const hooksPath = getCursorUserHooksPath(ctx.home);
+    if (removeCursorHooks(hooksPath)) {
+      console.log(`-  ${'Cursor'.padEnd(12)} — submit hook removed from ${hooksPath}`);
     }
     console.log(`-  ${'Cursor'.padEnd(12)} — uninstall the Nexpath extension from the Cursor Extensions panel`);
     console.log(`    Or via CLI:          cursor --uninstall-extension ${MARKETPLACE_ID}`);
