@@ -148,6 +148,9 @@ export function buildDefaultPromptSubmitDecider(
     composeOptions?: (promptText: string) => DeciderOptionSet | null;
     renderPopup?: (promptText: string, options: DeciderOptionSet) => Promise<DeciderSelection>;
     now?: () => number;
+    /** Pre-built option source. Bypasses store opening; lets the block-only
+     *  consume rule be observed directly in tests. */
+    optionSource?: SubmitOptionSource;
     openStore?: (db?: string) => Promise<unknown>;
     closeStore?: (store: unknown) => Promise<void> | void;
   } = {},
@@ -163,8 +166,8 @@ export function buildDefaultPromptSubmitDecider(
     // this runs inside a short-lived hook subprocess, so a leaked handle would
     // hold the SQLite lock against the `auto` child running in the same turn.
     let store: unknown = null;
-    let source: SubmitOptionSource | null = null;
-    if (!ports.composeOptions) {
+    let source: SubmitOptionSource | null = ports.optionSource ?? null;
+    if (!ports.composeOptions && !source) {
       try {
         store = await openStoreFn(undefined as never);
         source = createDeterministicSubmitOptionSource({ store, projectRoot });
@@ -176,7 +179,7 @@ export function buildDefaultPromptSubmitDecider(
     }
 
     try {
-      return await decideSubmitPrompt(promptText ?? promptTextForHook(), {
+      const decision = await decideSubmitPrompt(promptText ?? promptTextForHook(), {
         composeOptions: ports.composeOptions
           ?? source?.composeOptions
           ?? ((): DeciderOptionSet | null => null),
@@ -193,6 +196,14 @@ export function buildDefaultPromptSubmitDecider(
           });
         },
       });
+
+      // H3 acceptance: no pending advisory may survive a turn this path fully
+      // handled, or `post_cascade_response` shows the OLD popup as well and the
+      // user gets two. Option-A ordering means `auto` already wrote the row, so
+      // it is consumed here. Only on 'block' — an allowed prompt is an ordinary
+      // turn and must keep today's behaviour exactly.
+      if (decision === 'block') source?.consumeHandledTurn();
+      return decision;
     } finally {
       if (store) { try { await closeStoreFn(store as never); } catch { /* fail-open */ } }
     }

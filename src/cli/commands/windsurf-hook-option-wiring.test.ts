@@ -294,3 +294,42 @@ describe('⭐ option A — the decision runs AFTER auto has classified this turn
     expect(decided).toBe(false);
   });
 });
+
+describe('⭐ the row is consumed ONLY on block', () => {
+  function sourceSpy(pick: string | null) {
+    const calls = { consumed: 0 };
+    return {
+      calls,
+      source: {
+        composeOptions: () => ({ l1: [], l2: ['pick me'], l3: [] }),
+        renderPopup: async () => pick,
+        consumeHandledTurn: () => { calls.consumed += 1; },
+      },
+    };
+  }
+
+  it('consumes on block — otherwise stop.ts shows the OLD popup too', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'nexpath-h3c-'));
+    try {
+      const spy = sourceSpy('pick me');
+      const decide = buildDefaultPromptSubmitDecider({ project: root }, {
+        optionSource: spy.source as never,
+      });
+      await expect(decide('pre_user_prompt', { project: root }, 'hi')).resolves.toBe('block');
+      expect(spy.calls.consumed).toBe(1);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('does NOT consume on allow — an ordinary turn keeps today\'s advisory', async () => {
+    // MUTATION GUARD: consuming unconditionally would silently suppress the
+    // shipped post-response advisory for every allowed prompt.
+    const spy = sourceSpy(null);   // user dismissed ⇒ allow
+    const decide = buildDefaultPromptSubmitDecider({ project: '/proj' }, {
+      optionSource: spy.source as never,
+    });
+    await expect(decide('pre_user_prompt', {}, 'hi')).resolves.toBe('allow');
+    expect(spy.calls.consumed).toBe(0);
+  });
+});

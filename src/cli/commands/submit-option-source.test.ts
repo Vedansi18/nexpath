@@ -156,3 +156,34 @@ describe('popup', () => {
     await expect(s.renderPopup('p', GENERATED)).resolves.toBeNull();
   });
 });
+
+describe('⭐ consumeHandledTurn — H3 acceptance: no pending row survives a handled turn', () => {
+  // Without this the user gets TWO popups: the new submit-time one AND the old
+  // post-response one, because stop.ts:261 finds the row auto wrote. Option-A
+  // ordering makes auto run first, so the row must be consumed rather than
+  // never written (which is what the plan's wording assumed).
+  it('marks the row shown so stop hits its no_pending branch', () => {
+    const markShownFn = vi.fn();
+    const s = make({ getRow: (() => ({ ...ROW, id: 77 })) as never, markShownFn: markShownFn as never });
+    s.composeOptions('p');
+    s.consumeHandledTurn();
+    expect(markShownFn).toHaveBeenCalledWith({}, 77);
+  });
+
+  it('is a no-op when no row was read — never touches an unrelated turn', () => {
+    const markShownFn = vi.fn();
+    const s = make({ getRow: (() => null) as never, markShownFn: markShownFn as never });
+    s.composeOptions('p');
+    s.consumeHandledTurn();
+    expect(markShownFn).not.toHaveBeenCalled();
+  });
+
+  it('swallows a consume failure — the prompt is already blocked and persisted', () => {
+    const s = make({
+      getRow: (() => ({ ...ROW, id: 5 })) as never,
+      markShownFn: (() => { throw new Error('db gone'); }) as never,
+    });
+    s.composeOptions('p');
+    expect(() => s.consumeHandledTurn()).not.toThrow();
+  });
+});

@@ -42,7 +42,7 @@
  * original prompt is released unmodified. Per amendment `A3`, a failure while
  * HOLDING the user's prompt is strictly worse than today's "no advisory appears".
  */
-import { getPendingAdvisory } from '../../store/pending-advisories.js';
+import { getPendingAdvisory, markAdvisoryShown } from '../../store/pending-advisories.js';
 import { getUserDepthLevel } from '../../store/user-depth-level.js';
 import { selectionRegister, resolveContentSource } from '../../decision-session/selection-registry.js';
 import {
@@ -86,12 +86,26 @@ export interface SubmitOptionSourceDeps {
   signalTypeFn?: typeof pinchSignalTypeForFlag;
   contentSourceFn?: typeof resolveContentSource;
   lookupFn?: typeof autogenAwareLookup;
+  markShownFn?: typeof markAdvisoryShown;
   log?: (message: string) => void;
 }
 
 export interface SubmitOptionSource {
   composeOptions: (promptText: string) => DeciderOptionSet | null;
   renderPopup: (promptText: string, options: DeciderOptionSet) => Promise<DeciderSelection>;
+  /**
+   * Call ONLY when this path fully handled the turn (decision === 'block').
+   *
+   * H3's acceptance requires that no pending advisory survives such a turn, so
+   * `post_cascade_response` hits its existing `no_pending` branch unchanged.
+   * Option-A ordering means `auto` has already written the row, so it is consumed
+   * here instead of never being written. Without this the user would get BOTH the
+   * submit-time popup and the old post-response popup.
+   *
+   * `getPendingAdvisory` filters `status = 'pending'`, so marking it shown is
+   * exactly what makes `stop` see nothing. No-op when no row was read.
+   */
+  consumeHandledTurn: () => void;
 }
 
 /** Pick the list matching the resolved maturity level. */
@@ -123,12 +137,15 @@ export function createDeterministicSubmitOptionSource(
 
   // Set by composeOptions, read by renderPopup within the same turn.
   let resolvedLevel: MaturityLevel = 2;
+  // Row id read this turn, so a blocked turn can consume it. Null ⇒ nothing read.
+  let lastRowId: number | null = null;
 
   const composeOptions = (_promptText: string): DeciderOptionSet | null => {
     try {
       // 1. Reuse auto's classification. No row ⇒ nothing was classified for this
       //    turn ⇒ no popup. (Gap 5's "no pending_advisory row" case lands here.)
       const row = getRow(deps.store as never, deps.projectRoot, deps.sessionId);
+      lastRowId = row ? row.id : null;
       if (!row) {
         log('submit_option_source: no pending_advisory row — allowing');
         return null;
@@ -211,5 +228,16 @@ export function createDeterministicSubmitOptionSource(
     }
   };
 
-  return { composeOptions, renderPopup };
+  const consumeHandledTurn = (): void => {
+    if (lastRowId === null) return;
+    try {
+      (deps.markShownFn ?? markAdvisoryShown)(deps.store as never, lastRowId);
+    } catch (err) {
+      // Non-fatal: the prompt is already blocked and the replacement persisted.
+      // Worst case the old post-response popup also appears — annoying, not lost work.
+      log(`submit_option_source: could not consume row — ${(err as Error)?.message ?? 'unknown'}`);
+    }
+  };
+
+  return { composeOptions, renderPopup, consumeHandledTurn };
 }
