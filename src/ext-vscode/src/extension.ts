@@ -22,6 +22,7 @@ import { createPePoller, type PePoller } from './pe-poller.js';
 import { createSubmitHookPoller, type SubmitHookPoller } from './submit-hook-poller.js';
 import { createSubmitClipboardDelivery, submitKeystroke } from './submit-clipboard-delivery.js';
 import { isWindsurfSubmitAdvisoryEnabled, readPendingSubmitDecision } from './submit-advisory-runtime.js';
+import { deliverSubmitReplacement } from './submit-delivery-strategy.js';
 import {
   buildPeActionRequest,
   createPeActionLoopState,
@@ -572,11 +573,30 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         log: (m) => log(m),
       });
 
+      // Set by onInject; gates auto-submit to the injected path only.
+      let lastDeliveryLanded = false;
       submitPoller = createSubmitHookPoller({
         projectRoots: roots,
         readPendingDecision: (root) => readPendingSubmitDecision(root),
-        onInject: (text) => delivery.inject(text),
-        onSubmit: () => delivery.submit(),
+        // PRIMARY: direct command-based injection into the agent's chat — the
+        // same mechanism the old flow uses. The clipboard is reached ONLY if this
+        // fails. Previously this line called `delivery.inject` directly, which
+        // meant `chatInputInject` was never invoked on the submit path and the
+        // fallback had silently become the only path.
+        onInject: async (text) => {
+          const res = await deliverSubmitReplacement(text, {
+            injectDirect: (t) => chatInputInject(t, { host }),
+            fallbackClipboard: (t) => delivery.inject(t),
+            notify: (m) => void vscode.window.showWarningMessage(m),
+            log: (m) => log(m),
+          });
+          lastDeliveryLanded = res.landed;
+          return res.outcome !== 'failed';
+        },
+        // Auto-submit ONLY after a real injection. After a clipboard fallback the
+        // user has not pasted yet, so pressing Enter would submit an empty or
+        // stale composer.
+        onSubmit: async () => (lastDeliveryLanded ? delivery.submit() : false),
         // Timing goes to the Output channel only — H3's measured-latency
         // requirement. Never carries the replacement text.
         onTiming: (t) => log(

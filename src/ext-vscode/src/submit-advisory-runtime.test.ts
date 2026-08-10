@@ -249,3 +249,29 @@ describe('⭐ BACKWARD COMPAT — switch OFF must construct nothing (structural 
     expect(lines[gate]).toContain('process.env');
   });
 });
+
+describe('⭐ direct injection must be wired as PRIMARY on the submit path', () => {
+  // The shipped wiring sent onInject straight to the clipboard delivery, so
+  // chatInputInject was never called on the submit path and the fallback had
+  // become the only path. extension.ts needs `vscode`, so this is pinned
+  // structurally rather than by unit test.
+  const src = readFileSync(join(__dirname, 'extension.ts'), 'utf8');
+
+  it('injectDirect uses chatInputInject, not the clipboard delivery', () => {
+    const m = src.match(/injectDirect:\s*\(([^)]*)\)\s*=>\s*([^\n,]+)/);
+    expect(m).not.toBeNull();
+    expect(m?.[2]).toContain('chatInputInject');
+    expect(m?.[2]).not.toContain('delivery.inject');
+  });
+
+  it('the clipboard remains wired only as the fallback', () => {
+    const m = src.match(/fallbackClipboard:\s*\(([^)]*)\)\s*=>\s*([^\n,]+)/);
+    expect(m?.[2]).toContain('delivery.inject');
+  });
+
+  it('auto-submit is gated on the injection having landed', () => {
+    // Pressing Enter after a clipboard fallback would submit a composer the user
+    // has not pasted into yet.
+    expect(src).toMatch(/onSubmit:.*lastDeliveryLanded/s);
+  });
+});
