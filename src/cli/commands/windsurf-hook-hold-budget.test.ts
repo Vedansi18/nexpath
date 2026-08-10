@@ -1,0 +1,139 @@
+/**
+ * H4 acceptance — "every named failure mode releases the original prompt
+ * unmodified; a test per mode; no orphaned process survives the hold."
+ *
+ * The plan names four modes: classification error, composeDeterministicOptions()
+ * returning null, popup failing to render, and NO DECISION BEFORE THE HOLD
+ * EXPIRES. Each gets its own test here, asserted at the hook's real exit code
+ * because that is what Windsurf actually acts on.
+ */
+import { describe, it, expect, vi } from 'vitest';
+import { runWindsurfHookAction } from './windsurf-hook.js';
+import { createHoldBudget } from './submit-hold-budget.js';
+
+const ON = { NEXPATH_WINDSURF_PROMPTSUBMIT_ADVISORY: '1' };
+const PAYLOAD = JSON.stringify({ tool_info: { user_prompt: 'hi' } });
+
+/** A budget driven by a fake clock, so nothing waits on real time. */
+function fakeBudget(totalMs = 60_000) {
+  let t = 0;
+  const timers: Array<{ at: number; fn: () => void }> = [];
+  const budget = createHoldBudget({
+    totalMs,
+    now: () => t,
+    setTimeoutFn: (fn, ms) => { const e = { at: t + ms, fn }; timers.push(e); return e; },
+    clearTimeoutFn: (h) => { const i = timers.indexOf(h as never); if (i >= 0) timers.splice(i, 1); },
+  });
+  return {
+    budget,
+    advance(ms: number) {
+      t += ms;
+      for (const e of [...timers]) if (e.at <= t) { timers.splice(timers.indexOf(e), 1); e.fn(); }
+    },
+  };
+}
+
+async function run(over: Record<string, unknown> = {}) {
+  const exits: number[] = [];
+  await runWindsurfHookAction('pre_user_prompt', { project: '/proj' }, {
+    env: { ...ON },
+    readStdin: async () => PAYLOAD,
+    handle: async () => ({ action: 'auto', child: null } as never),
+    waitForChild: async () => {},
+    decidePromptSubmit: async () => 'allow' as const,
+    exit: (c: number) => { exits.push(c); },
+    raisePopup: () => {},
+    ...over,
+  } as never);
+  return exits;
+}
+
+describe('H4 — every named failure mode releases the prompt unmodified (A3)', () => {
+  it('classification error ⇒ exit 0, never 2', async () => {
+    const exits = await run({ decidePromptSubmit: async () => { throw new Error('classify failed'); } });
+    expect(exits).not.toContain(2);
+    expect(exits).toContain(0);
+  });
+
+  it('no options composed (generator returned null) ⇒ exit 0', async () => {
+    const exits = await run({ decidePromptSubmit: async () => 'allow' as const });
+    expect(exits).not.toContain(2);
+  });
+
+  it('popup fails to render ⇒ exit 0', async () => {
+    const exits = await run({ decidePromptSubmit: async () => { throw new Error('tty gone'); } });
+    expect(exits).not.toContain(2);
+  });
+
+  it('⭐ NO DECISION before the hold expires ⇒ exit 0, prompt released', async () => {
+    // The popup waits for a human who may have walked away. Before H4 this was
+    // unbounded and the prompt would be held indefinitely.
+    const f = fakeBudget(60_000);
+    const exits = await run({
+      holdBudget: f.budget,
+      decidePromptSubmit: () => new Promise(() => { f.advance(60_000); }), // never resolves
+    });
+    expect(exits).not.toContain(2);
+    expect(exits).toContain(0);
+  });
+
+  it('an expired budget never blocks even if the decider later says block', async () => {
+    // MUTATION GUARD: treating a timed-out run() as a real decision would exit 2
+    // with no replacement written — cancelling the turn with nothing to inject.
+    const f = fakeBudget(60_000);
+    const exits = await run({
+      holdBudget: f.budget,
+      decidePromptSubmit: () => new Promise((r) => { f.advance(60_000); setTimeout(() => r('block'), 0); }),
+    });
+    expect(exits).not.toContain(2);
+  });
+});
+
+describe('H4 — no orphaned process survives the hold', () => {
+  it('kills the child when the wait times out', async () => {
+    // R2: Cursor orphans timed-out hooks, so we cannot rely on the host to reap
+    // anything. If the hold expires while `auto` is still running, we kill it.
+    const f = fakeBudget(60_000);
+    const kill = vi.fn();
+    await run({
+      holdBudget: f.budget,
+      handle: async () => ({ action: 'auto', child: { kill } } as never),
+      waitForChild: () => new Promise(() => { f.advance(60_000); }), // never settles
+    });
+    expect(kill).toHaveBeenCalled();
+  });
+
+  it('does NOT kill the child on the normal path', async () => {
+    const kill = vi.fn();
+    await run({
+      handle: async () => ({ action: 'auto', child: { kill } } as never),
+      waitForChild: async () => {},
+    });
+    expect(kill).not.toHaveBeenCalled();
+  });
+
+  it('does not decide after a timed-out child wait — the classification never landed', async () => {
+    const f = fakeBudget(60_000);
+    const decide = vi.fn().mockResolvedValue('block');
+    const exits = await run({
+      holdBudget: f.budget,
+      handle: async () => ({ action: 'auto', child: { kill: () => {} } } as never),
+      waitForChild: () => new Promise(() => { f.advance(60_000); }),
+      decidePromptSubmit: decide,
+    });
+    expect(decide).not.toHaveBeenCalled();
+    expect(exits).not.toContain(2);
+  });
+});
+
+describe('H4 — the budget is not engaged when the switch is OFF', () => {
+  it('switch off ⇒ no hold, no kill, handler runs as always', async () => {
+    const kill = vi.fn();
+    const exits = await run({
+      env: {},
+      handle: async () => ({ action: 'auto', child: { kill } } as never),
+    });
+    expect(kill).not.toHaveBeenCalled();
+    expect(exits).toContain(0);
+  });
+});

@@ -33,6 +33,7 @@ import {
 } from './submit-option-source.js';
 import { openStore, closeStore } from '../../store/db.js';
 import { writeSubmitDecision } from './submit-decision-store.js';
+import { createHoldBudget, type HoldBudget } from './submit-hold-budget.js';
 import { bringPopupToFront } from '../../windsurf-hook/foreground.js';
 
 /**
@@ -230,6 +231,8 @@ export interface WindsurfHookActionDeps {
   readStdin?: () => Promise<string>;
   /** Bound on the gated stdin read. A hang here would hold the user's prompt. */
   stdinTimeoutMs?: number;
+  /** H4: injectable hold budget. Defaults to the plan's 60-90s self-enforced cap. */
+  holdBudget?: HoldBudget;
   raisePopup?: () => void;
   waitForChild?: (child: ChildProcess | null | undefined) => Promise<void>;
   exit?: (code: number) => void;
@@ -268,6 +271,7 @@ export async function runWindsurfHookAction(
   let preReadRaw: string | null = null;
   // Set by the gated pre_user_prompt path; the decision runs after `auto` has
   // classified THIS turn (option A). Never set when the switch is off.
+  let hold: HoldBudget | null = null;
   let decideAfterAuto = false;
   let pendingPromptText = '';
   // Default decider (H3). Constructed unconditionally, but this only BUILDS a
@@ -309,13 +313,21 @@ export async function runWindsurfHookAction(
       // if the caller never closes the pipe, an unbounded await would hang the
       // hook WHILE HOLDING THE USER'S PROMPT — strictly worse than no advisory.
       // On timeout we fall through with '' , which the decider treats as 'allow'.
-      preReadRaw = await Promise.race([
+      // ── H4: ONE budget for the whole hold ────────────────────────────────
+      // Started here, drawn down by every segment below. Per-segment timeouts
+      // would SUM (2s + 600s + an unbounded popup), which is not a 60-90s cap by
+      // any reading. Self-enforced: R2 says Cursor orphans timed-out hooks, so a
+      // host-enforced bound is no bound at all.
+      hold = deps.holdBudget ?? createHoldBudget();
+
+      const stdinRes = await hold.run(() => Promise.race([
         readStdin(),
         new Promise<string>((r) => {
           const t = setTimeout(() => r(''), stdinTimeoutMs);
           if (typeof t.unref === 'function') t.unref();
         }),
-      ]);
+      ]));
+      preReadRaw = stdinRes.value ?? '';
       // ── ORDERING (owner ruling: option A) ────────────────────────────────
       // The decision is DEFERRED to after `handle` + the child await below.
       // The option source reads the `pending_advisory` row that `nexpath auto`
@@ -347,7 +359,29 @@ export async function runWindsurfHookAction(
     }
     // Await the Layer-C child so the prompt is fully written + auto has
     // persisted the advisory (and stop has rendered the popup) before we exit.
-    await waitForChild(result.child);
+    // The child await is the biggest term in the hold: option-A ordering means
+    // `auto` (including its LLM classification) runs inside it. Drawn from the
+    // shared budget rather than awaitChild's own 600s default.
+    if (hold) {
+      const waited = await hold.run(() => waitForChild(result.child));
+      if (waited.timedOut) {
+        // Fail-open (A3): release the prompt unmodified. Do NOT decide - the
+        // classification this turn depends on never landed.
+        //
+        // DEFENCE-IN-DEPTH, not the load-bearing guard: `hold.run()` reports
+        // `timedOut` only when the budget is exhausted, and an exhausted budget
+        // refuses to START the next segment, so the decision below cannot run
+        // either way. Verified by mutation: removing this line kills no test.
+        // Kept because it states the intent locally instead of relying on a
+        // property of another module.
+        decideAfterAuto = false;
+        // No orphan may survive the hold (plan acceptance). The child is
+        // detached from our lifetime explicitly rather than left running.
+        try { result.child?.kill(); } catch { /* already gone */ }
+      }
+    } else {
+      await waitForChild(result.child);
+    }
 
     // ── Deferred submit decision (option A) ────────────────────────────────
     // `auto` has now persisted this turn's classification, so the option source
@@ -355,11 +389,16 @@ export async function runWindsurfHookAction(
     // 'block' exits 2; a throw or any other value falls through to exit 0.
     if (decideAfterAuto) {
       let decision: WindsurfPromptSubmitDecision = 'allow';
-      try {
-        decision = await decidePromptSubmit(event, opts, pendingPromptText);
-      } catch {
-        decision = 'allow'; // never strand the user's prompt
-      }
+      // The popup waits for a HUMAN, so this segment is inherently unbounded and
+      // is the plan's "no decision before the hold expires" failure mode. It gets
+      // only what the earlier segments left.
+      const decided = hold
+        ? await hold.run(() => decidePromptSubmit(event, opts, pendingPromptText))
+        : { timedOut: false, value: await decidePromptSubmit(event, opts, pendingPromptText).catch(() => 'allow' as const) };
+      // `!decided.timedOut` is likewise redundant today (a timed-out run yields
+      // no value, so `value === 'block'` is already false) and equally kept as an
+      // explicit statement of the rule: a timeout is never a decision.
+      if (!decided.timedOut && decided.value === 'block') decision = 'block';
       if (decision === 'block') {
         exit(2);
         return;
