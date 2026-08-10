@@ -59,6 +59,18 @@ export interface SubmitDeliveryResult {
   landed: boolean;
 }
 
+/**
+ * Shown when BOTH delivery paths failed.
+ *
+ * The hook has already exited 2, so the original prompt is gone. Staying silent
+ * here would make the user's turn vanish with no explanation at all — the single
+ * worst outcome this milestone can produce, and worse than the clipboard case
+ * because there is nothing for them to paste either.
+ */
+export const DELIVERY_FAILED_NOTICE =
+  'nexpath: your prompt was cancelled for refinement but the refined text could not be '
+  + 'delivered. Nothing was sent — please re-enter your prompt.';
+
 /** Message shown when, and only when, the clipboard fallback was used. */
 export const CLIPBOARD_FALLBACK_NOTICE =
   'nexpath: your refined prompt could not be inserted automatically. '
@@ -131,5 +143,8 @@ export async function deliverSubmitReplacement(
     return { outcome: 'clipboard_fallback', landed: false };
   }
 
+  // Both paths failed and the original is already cancelled: tell the user
+  // rather than let the turn disappear without a trace.
+  deps.notify?.(DELIVERY_FAILED_NOTICE);
   return { outcome: 'failed', landed: false };
 }

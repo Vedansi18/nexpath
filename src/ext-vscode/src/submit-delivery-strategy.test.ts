@@ -10,6 +10,7 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   deliverSubmitReplacement,
   CLIPBOARD_FALLBACK_NOTICE,
+  DELIVERY_FAILED_NOTICE,
 } from './submit-delivery-strategy.js';
 
 function deps(over: Record<string, unknown> = {}) {
@@ -100,7 +101,16 @@ describe('fallback is reached ONLY after direct injection failed', () => {
     });
     const r = await deliverSubmitReplacement('refined', d);
     expect(r).toEqual({ outcome: 'failed', landed: false });
-    expect((d as never as { notify: ReturnType<typeof vi.fn> }).notify).not.toHaveBeenCalled();
+    // MUST still notify: exit(2) already cancelled the original, so silence here
+    // makes the user's turn vanish with no explanation and nothing to paste.
+    expect((d as never as { notify: ReturnType<typeof vi.fn> }).notify)
+      .toHaveBeenCalledWith(DELIVERY_FAILED_NOTICE);
+  });
+
+  it('the two notices are distinct — they tell the user different things to do', () => {
+    // "paste it" vs "re-enter it" are opposite instructions; reusing one message
+    // would send the user looking for a clipboard entry that does not exist.
+    expect(DELIVERY_FAILED_NOTICE).not.toBe(CLIPBOARD_FALLBACK_NOTICE);
   });
 
   it('refuses an empty replacement rather than clearing the composer', async () => {
@@ -119,5 +129,49 @@ describe('landed drives auto-submit eligibility', () => {
     expect((await deliverSubmitReplacement('x', deps({
       injectDirect: vi.fn().mockResolvedValue(false),
     }))).landed).toBe(false);
+  });
+});
+
+describe('notification discipline — only when a turn is actually at risk', () => {
+  it('does NOT notify on an empty replacement — no turn was cancelled', async () => {
+    // An empty replacement is refused before persistence, so exit(2) never ran
+    // and the user's prompt was never taken. Warning here would be noise about a
+    // turn that is still perfectly intact.
+    const d = deps();
+    await deliverSubmitReplacement('', d);
+    expect((d as never as { notify: ReturnType<typeof vi.fn> }).notify).not.toHaveBeenCalled();
+  });
+
+  it('notifies exactly once per delivery, never both notices', async () => {
+    // Two warnings with opposite instructions ("paste it" / "re-enter it") would
+    // be worse than one wrong one.
+    const d = deps({ injectDirect: vi.fn().mockResolvedValue(false) });
+    await deliverSubmitReplacement('refined', d);
+    const notify = d as never as { notify: ReturnType<typeof vi.fn> };
+    expect(notify.notify).toHaveBeenCalledTimes(1);
+    expect(notify.notify).toHaveBeenCalledWith(CLIPBOARD_FALLBACK_NOTICE);
+  });
+});
+
+describe('verification is only consulted when injection reported success', () => {
+  it('skips verifyLanded when injectDirect returned false', async () => {
+    // Verifying an injection that never happened wastes a host round-trip on the
+    // latency-sensitive submit path, and could mistake pre-existing composer
+    // text for a successful inject.
+    const verifyLanded = vi.fn();
+    await deliverSubmitReplacement('refined', deps({
+      injectDirect: vi.fn().mockResolvedValue(false),
+      verifyLanded,
+    }));
+    expect(verifyLanded).not.toHaveBeenCalled();
+  });
+
+  it('skips verifyLanded when injectDirect threw', async () => {
+    const verifyLanded = vi.fn();
+    await deliverSubmitReplacement('refined', deps({
+      injectDirect: vi.fn().mockRejectedValue(new Error('boom')),
+      verifyLanded,
+    }));
+    expect(verifyLanded).not.toHaveBeenCalled();
   });
 });
