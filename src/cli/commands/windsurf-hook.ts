@@ -7,7 +7,21 @@
  * post_cascade_response }. `--project <dir>` overrides the project root (defaults
  * to process.cwd(), which Windsurf sets to the active workspace folder).
  *
- * Always exits 0 — a hook must never block or break Cascade.
+ * **Exits 0 in every shipped configuration — a hook must never block or break
+ * Cascade.** Amended 2026-08-10 (hook milestone H2): there is now exactly ONE
+ * path that exits non-zero, and it is off by default.
+ *
+ * When `NEXPATH_WINDSURF_PROMPTSUBMIT_ADVISORY=1` (internal switch, never
+ * persisted, never user-facing) **and** the prompt-submit decider explicitly
+ * returns `'block'`, a `pre_user_prompt` exits **2** — Windsurf's documented
+ * signal to cancel the prompt before Cascade sees it. This is the deliberate
+ * inversion of the original always-exit-0 contract that the prompt-submit-time
+ * advisory requires; it is stated here rather than left to contradict the code.
+ *
+ * Everything else still exits 0, including every failure path: a thrown decider,
+ * an unexpected value, or any error at all falls through to exit 0 (fail-open,
+ * amendment A3). With the switch unset — the default — the gated block is skipped
+ * entirely and behaviour is byte-identical to before.
  */
 import type { Command } from 'commander';
 import type { ChildProcess } from 'node:child_process';
@@ -72,12 +86,45 @@ export async function handleWindsurfHookCli(
   return run(event, raw, { cwd });
 }
 
+/**
+ * Backward-compatibility switch for the prompt-submit-time advisory flow
+ * (hook milestone, H2). **Internal and non-user-facing by design**: read straight
+ * from `process.env`, never persisted, never surfaced by `nexpath status` or
+ * `nexpath config`. A `nexpath config set` key was explicitly rejected for this —
+ * it would appear in the public config dump and be settable by any user, failing
+ * the "invisible to end users" requirement.
+ *
+ * Matches the existing `NEXPATH_*` convention (`NEXPATH_DEBUG`, `NEXPATH_SIM`,
+ * `NEXPATH_LOG_LEVEL`) including the exact-equality `=== '1'` read: unset, `'0'`,
+ * `'true'`, or anything else all fall through to **today's exact behaviour**.
+ */
+export const WINDSURF_PROMPTSUBMIT_ADVISORY_ENV = 'NEXPATH_WINDSURF_PROMPTSUBMIT_ADVISORY';
+
+/** True only when the switch is explicitly `'1'`. Default OFF — never `!== '0'`. */
+export function isWindsurfPromptSubmitAdvisoryEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env[WINDSURF_PROMPTSUBMIT_ADVISORY_ENV] === '1';
+}
+
+/**
+ * What the gated `pre_user_prompt` path decided. Kept deliberately small: H2 only
+ * builds the switch and the exit-2 wiring; H3 supplies the real decision (popup →
+ * user picks → block). Until then the default decider always returns
+ * `'allow'`, so switching the env var on changes nothing observable on its own.
+ */
+export type WindsurfPromptSubmitDecision = 'allow' | 'block';
+
 export interface WindsurfHookActionDeps {
   handle?: (event: string, opts: { project?: string }) => Promise<RunResult>;
   raisePopup?: () => void;
   waitForChild?: (child: ChildProcess | null | undefined) => Promise<void>;
   exit?: (code: number) => void;
   env?: NodeJS.ProcessEnv;
+  /**
+   * Decides whether a `pre_user_prompt` should be blocked. Only consulted when the
+   * switch is on. Defaults to `'allow'` so H2 alone is behaviour-neutral; H3
+   * replaces it with the real popup-backed decision.
+   */
+  decidePromptSubmit?: (event: string, opts: { project?: string }) => Promise<WindsurfPromptSubmitDecision>;
 }
 
 /**
@@ -99,8 +146,38 @@ export async function runWindsurfHookAction(
   const waitForChild = deps.waitForChild ?? awaitChild;
   const exit = deps.exit ?? ((code: number) => process.exit(code));
   const env = deps.env ?? process.env;
+  const decidePromptSubmit = deps.decidePromptSubmit ?? (async (): Promise<WindsurfPromptSubmitDecision> => 'allow');
 
   try {
+    // ── Prompt-submit-time advisory (hook milestone H2) ────────────────────
+    // Gated behind NEXPATH_WINDSURF_PROMPTSUBMIT_ADVISORY=1, default OFF. When
+    // off, this block is skipped entirely and everything below is byte-identical
+    // to the shipped behaviour — that is the milestone's core guarantee.
+    //
+    // Windsurf's `pre_user_prompt` contract is exit-code only: exit 2 blocks the
+    // prompt before Cascade ever sees it (empirically confirmed — Cascade renders
+    // "1 hook(s) blocked this action" and produces no response). Any other exit
+    // code lets it through.
+    //
+    // FAIL-OPEN (amendment A3) is mandatory here: today a failure means no
+    // advisory appears and the user loses nothing, but under this flow a failure
+    // while the prompt is held would mean the prompt never sends — strictly
+    // worse. So only an explicit 'block' decision exits 2; a thrown decider, an
+    // unknown value, or anything unexpected falls through to the normal exit-0
+    // path below.
+    if (event === 'pre_user_prompt' && isWindsurfPromptSubmitAdvisoryEnabled(env)) {
+      let decision: WindsurfPromptSubmitDecision = 'allow';
+      try {
+        decision = await decidePromptSubmit(event, opts);
+      } catch {
+        decision = 'allow'; // fail-open: never strand the user's prompt
+      }
+      if (decision === 'block') {
+        exit(2);
+        return;
+      }
+    }
+
     // Name this surface for Layer C's popup "Send to …" label. The spawned
     // `nexpath stop` child inherits process.env (see windsurf-hook/spawn.ts
     // baseOpts), so setting it here makes the Windsurf popup say "Windsurf".
