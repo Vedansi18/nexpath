@@ -25,7 +25,7 @@
  */
 import type { Command } from 'commander';
 import type { ChildProcess } from 'node:child_process';
-import { runWindsurfHook, type RunResult } from '../../windsurf-hook/handler.js';
+import { runWindsurfHook, parsePayload, type RunResult } from '../../windsurf-hook/handler.js';
 import { decideSubmitPrompt, type DeciderOptionSet, type DeciderSelection } from './submit-prompt-decider.js';
 import {
   createDeterministicSubmitOptionSource,
@@ -151,12 +151,12 @@ export function buildDefaultPromptSubmitDecider(
     openStore?: (db?: string) => Promise<unknown>;
     closeStore?: (store: unknown) => Promise<void> | void;
   } = {},
-): (event: string, o: { project?: string }) => Promise<WindsurfPromptSubmitDecision> {
+): (event: string, o: { project?: string }, promptText?: string) => Promise<WindsurfPromptSubmitDecision> {
   const now = ports.now ?? (() => Date.now());
   const openStoreFn = ports.openStore ?? openStore;
   const closeStoreFn = ports.closeStore ?? closeStore;
 
-  return async (_event, o) => {
+  return async (_event, o, promptText) => {
     const projectRoot = o.project ?? opts.project ?? process.cwd();
 
     // The option source needs a Store. Opened per invocation and ALWAYS closed —
@@ -176,7 +176,7 @@ export function buildDefaultPromptSubmitDecider(
     }
 
     try {
-      return await decideSubmitPrompt(promptTextForHook(), {
+      return await decideSubmitPrompt(promptText ?? promptTextForHook(), {
         composeOptions: ports.composeOptions
           ?? source?.composeOptions
           ?? ((): DeciderOptionSet | null => null),
@@ -210,7 +210,10 @@ function promptTextForHook(): string {
 }
 
 export interface WindsurfHookActionDeps {
-  handle?: (event: string, opts: { project?: string }) => Promise<RunResult>;
+  handle?: (event: string, opts: { project?: string }, deps?: WindsurfHookCliDeps) => Promise<RunResult>;
+  readStdin?: () => Promise<string>;
+  /** Bound on the gated stdin read. A hang here would hold the user's prompt. */
+  stdinTimeoutMs?: number;
   raisePopup?: () => void;
   waitForChild?: (child: ChildProcess | null | undefined) => Promise<void>;
   exit?: (code: number) => void;
@@ -220,7 +223,7 @@ export interface WindsurfHookActionDeps {
    * switch is on. Defaults to `'allow'` so H2 alone is behaviour-neutral; H3
    * replaces it with the real popup-backed decision.
    */
-  decidePromptSubmit?: (event: string, opts: { project?: string }) => Promise<WindsurfPromptSubmitDecision>;
+  decidePromptSubmit?: (event: string, opts: { project?: string }, promptText: string) => Promise<WindsurfPromptSubmitDecision>;
 }
 
 /**
@@ -242,6 +245,11 @@ export async function runWindsurfHookAction(
   const waitForChild = deps.waitForChild ?? awaitChild;
   const exit = deps.exit ?? ((code: number) => process.exit(code));
   const env = deps.env ?? process.env;
+  const readStdin = deps.readStdin ?? defaultReadStdin;
+  const stdinTimeoutMs = deps.stdinTimeoutMs ?? 2_000;
+  // Holds the stdin buffer when the gated path consumed it, so `handle` can replay
+  // it instead of reading an already-drained pipe. Null ⇒ nothing was read.
+  let preReadRaw: string | null = null;
   // Default decider (H3). Constructed unconditionally, but this only BUILDS a
   // closure — `openStore` lives inside it and runs solely on the gated call below
   // (`isWindsurfPromptSubmitAdvisoryEnabled`). So with the switch off no Store is
@@ -271,9 +279,27 @@ export async function runWindsurfHookAction(
     // unknown value, or anything unexpected falls through to the normal exit-0
     // path below.
     if (event === 'pre_user_prompt' && isWindsurfPromptSubmitAdvisoryEnabled(env)) {
+      // ── stdin is single-read, so it is consumed HERE and handed onward ────
+      // `handleWindsurfHookCli` normally reads stdin itself. The decider needs the
+      // same bytes (it must see the user's prompt text), and a pipe cannot be read
+      // twice — so with the switch ON we read once here and replay the buffer into
+      // `handle` below via `readStdin`. With the switch OFF we never read, and
+      // `handle` consumes stdin exactly as it always has.
+      // BOUNDED (amendment A3). `defaultReadStdin` resolves only on stdin 'end';
+      // if the caller never closes the pipe, an unbounded await would hang the
+      // hook WHILE HOLDING THE USER'S PROMPT — strictly worse than no advisory.
+      // On timeout we fall through with '' , which the decider treats as 'allow'.
+      preReadRaw = await Promise.race([
+        readStdin(),
+        new Promise<string>((r) => {
+          const t = setTimeout(() => r(''), stdinTimeoutMs);
+          if (typeof t.unref === 'function') t.unref();
+        }),
+      ]);
       let decision: WindsurfPromptSubmitDecision = 'allow';
       try {
-        decision = await decidePromptSubmit(event, opts);
+        const promptText = parsePayload(preReadRaw)?.tool_info?.user_prompt ?? '';
+        decision = await decidePromptSubmit(event, opts, promptText);
       } catch {
         decision = 'allow'; // fail-open: never strand the user's prompt
       }
@@ -287,7 +313,12 @@ export async function runWindsurfHookAction(
     // `nexpath stop` child inherits process.env (see windsurf-hook/spawn.ts
     // baseOpts), so setting it here makes the Windsurf popup say "Windsurf".
     env.NEXPATH_AGENT = 'windsurf';
-    const result = await handle(event, opts);
+    // Call shape is IDENTICAL to before when nothing was pre-read, so the
+    // switch-off path passes exactly two arguments as it always has. Only the
+    // gated path adds the replay dep.
+    const result = preReadRaw === null
+      ? await handle(event, opts)
+      : await handle(event, opts, { readStdin: async () => preReadRaw as string });
     // The stop event opens Layer C's popup window (advisory, feedback, or
     // prompt-enhancement). On Linux, GNOME opens it behind Windsurf — raise it
     // to the front. The extension's popup-foreground never runs here (Windsurf

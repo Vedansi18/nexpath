@@ -7,7 +7,7 @@
  * prompt instead of releasing it (amendment A3).
  */
 import { describe, it, expect, vi } from 'vitest';
-import { mkdtempSync, existsSync, rmSync } from 'node:fs';
+import { mkdtempSync, existsSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildDefaultPromptSubmitDecider } from './windsurf-hook.js';
@@ -76,17 +76,8 @@ describe('fail-open (A3) — never hold the prompt', () => {
   });
 });
 
-describe('⚠ STILL INERT — prompt text is not plumbed from stdin yet', () => {
-  it('allows even with options AND a selection, because promptTextForHook() is a stub', async () => {
-    // NOT the desired end state. `promptTextForHook()` (windsurf-hook.ts) returns
-    // '' because stdin is consumed by `handleWindsurfHookCli`, and the decider
-    // treats empty prompt text as 'allow'. So wiring the option source is NOT
-    // sufficient to make the feature live — the stdin plumbing is the last step.
-    //
-    // This pin exists so that step cannot land unnoticed: once the real prompt
-    // text reaches the decider, this test FAILS and must be flipped to expect
-    // 'block' plus the persisted record (assertions kept below, commented, so the
-    // intended end state is unambiguous).
+describe('block path — end to end with the real prompt text', () => {
+  it('blocks AND writes the replacement the extension will inject', async () => {
     const root = mkdtempSync(join(tmpdir(), 'nexpath-h3-'));
     try {
       const decide = buildDefaultPromptSubmitDecider({ project: root }, {
@@ -94,15 +85,26 @@ describe('⚠ STILL INERT — prompt text is not plumbed from stdin yet', () => 
         renderPopup: async () => 'pick me',
         now: () => 1_700_000_000_000,
       });
-      await expect(decide('pre_user_prompt', { project: root })).resolves.toBe('allow');
+      // The third arg is the real user prompt, plumbed from stdin by the action.
+      await expect(decide('pre_user_prompt', { project: root }, 'my original prompt'))
+        .resolves.toBe('block');
 
-      // INTENDED END STATE once stdin is plumbed:
-      //   resolves.toBe('block')
-      //   rec.replacementText === 'pick me' && rec.host === 'windsurf'
-      expect(existsSync(join(root, '.nexpath', 'submit-decision.json'))).toBe(false);
+      // Blocking without a readable record would cancel the turn with nothing to
+      // inject — the one outcome worse than today.
+      const rec = JSON.parse(readFileSync(join(root, '.nexpath', 'submit-decision.json'), 'utf8'));
+      expect(rec.replacementText).toBe('pick me');
+      expect(rec.host).toBe('windsurf');
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  it('still allows when no prompt text is supplied — the stub guard remains', async () => {
+    const decide = buildDefaultPromptSubmitDecider({ project: '/proj' }, {
+      composeOptions: () => ({ l1: [], l2: ['pick me'], l3: [] }),
+      renderPopup: async () => 'pick me',
+    });
+    await expect(decide('pre_user_prompt', {})).resolves.toBe('allow');
   });
 
   it('allows when persistence fails — never block with nothing written', async () => {
@@ -142,5 +144,105 @@ describe('⭐ BACKWARD COMPAT — switch OFF must be indistinguishable from befo
     const before = existsSync(join(tmpdir(), 'nexpath-import-probe'));
     await import('./windsurf-hook.js');
     expect(before).toBe(existsSync(join(tmpdir(), 'nexpath-import-probe')));
+  });
+});
+
+describe('⭐ stdin is single-read — the buffer must reach BOTH consumers', () => {
+  const PAYLOAD = JSON.stringify({
+    agent_action_name: 'pre_user_prompt',
+    tool_info: { user_prompt: 'what is 2 + 2.' },
+  });
+
+  async function runAction(env: NodeJS.ProcessEnv, decide?: unknown) {
+    const { runWindsurfHookAction: windsurfHookAction } = await import('./windsurf-hook.js');
+    let stdinReads = 0;
+    let handleGotRaw: string | null = null;
+    let seenPrompt: string | undefined;
+    await windsurfHookAction('pre_user_prompt', { project: '/proj' }, {
+      env,
+      readStdin: async () => { stdinReads += 1; return PAYLOAD; },
+      handle: async (_e, _o, d) => {
+        handleGotRaw = d?.readStdin ? await d.readStdin() : null;
+        return { action: 'ignored', reason: 'test' } as never;
+      },
+      decidePromptSubmit: (decide as never) ?? (async (_e: string, _o: unknown, p: string) => {
+        seenPrompt = p; return 'allow' as const;
+      }),
+      exit: () => {},
+      waitForChild: async () => {},
+      raisePopup: () => {},
+    } as never);
+    return { stdinReads, handleGotRaw, seenPrompt };
+  }
+
+  it('switch ON: reads stdin exactly once and replays it into handle', async () => {
+    // A pipe cannot be read twice. If the action consumed stdin and did NOT replay
+    // it, handle would see an empty payload and `nexpath auto` would never run —
+    // silently breaking the classification the popup depends on.
+    const r = await runAction({ NEXPATH_WINDSURF_PROMPTSUBMIT_ADVISORY: '1' });
+    expect(r.stdinReads).toBe(1);
+    expect(r.handleGotRaw).toBe(PAYLOAD);
+  });
+
+  it('switch ON: the decider receives the real user prompt, not a stub', async () => {
+    const r = await runAction({ NEXPATH_WINDSURF_PROMPTSUBMIT_ADVISORY: '1' });
+    expect(r.seenPrompt).toBe('what is 2 + 2.');
+  });
+
+  it('switch OFF: the action never touches stdin — handle reads it as it always has', async () => {
+    // Backward compat: with the switch unset the action must not consume stdin,
+    // or it would change the shipped read path for every Windsurf event.
+    const r = await runAction({});
+    expect(r.stdinReads).toBe(0);
+    expect(r.handleGotRaw).toBeNull();
+  });
+
+  it('switch ON with malformed stdin: allows, and still replays the bytes', async () => {
+    const { runWindsurfHookAction: windsurfHookAction } = await import('./windsurf-hook.js');
+    let handleCalled = false;
+    let exited: number | null = null;
+    await windsurfHookAction('pre_user_prompt', { project: '/proj' }, {
+      env: { NEXPATH_WINDSURF_PROMPTSUBMIT_ADVISORY: '1' },
+      readStdin: async () => 'not json{{',
+      // Injected so the test stays hermetic (the default decider would open a
+      // real Store). The prompt it receives is what parsePayload salvaged.
+      decidePromptSubmit: async (_e: string, _o: unknown, p: string) => {
+        expect(p).toBe('');   // malformed payload ⇒ empty prompt, never a throw
+        return 'allow' as const;
+      },
+      handle: async () => { handleCalled = true; return { action: 'ignored' } as never; },
+      exit: (c: number) => { exited = c; },
+      waitForChild: async () => {},
+      raisePopup: () => {},
+    } as never);
+    // The normal path still ends in exit(0); what must NOT happen is exit(2).
+    expect(exited).not.toBe(2);
+    expect(handleCalled).toBe(true);
+  });
+});
+
+describe('⭐ the gated stdin read is BOUNDED — a hang must not hold the prompt (A3)', () => {
+  it('falls through to allow when stdin never closes', async () => {
+    // defaultReadStdin resolves only on 'end'. If Windsurf ever invokes the hook
+    // without closing the pipe, an unbounded await would hang the process while
+    // the user's prompt is held — the worst outcome in this milestone. Found
+    // because the H2 switch tests began timing out at 5000ms.
+    const { runWindsurfHookAction } = await import('./windsurf-hook.js');
+    let exited: number | null = null;
+    let seenPrompt: string | undefined;
+    await runWindsurfHookAction('pre_user_prompt', { project: '/proj' }, {
+      env: { NEXPATH_WINDSURF_PROMPTSUBMIT_ADVISORY: '1' },
+      readStdin: () => new Promise<string>(() => {}),   // never resolves
+      stdinTimeoutMs: 10,
+      decidePromptSubmit: async (_e: string, _o: unknown, p: string) => {
+        seenPrompt = p; return 'allow' as const;
+      },
+      handle: async () => ({ action: 'ignored' } as never),
+      exit: (c: number) => { exited = c; },
+      waitForChild: async () => {},
+      raisePopup: () => {},
+    } as never);
+    expect(seenPrompt).toBe('');    // timed out ⇒ empty ⇒ decider allows
+    expect(exited).not.toBe(2);
   });
 });
