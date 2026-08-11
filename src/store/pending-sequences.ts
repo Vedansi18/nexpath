@@ -70,7 +70,11 @@ export function upsertPendingPromptSequence(
   payload: PromptEnhancementSequencePayloadV1,
 ): boolean {
   if (!validatePromptEnhancementSequenceRuntimeStateV1(state).ok) return false;
-  if (!validatePromptEnhancementSequencePayloadV1(payload).ok) return false;
+  // Validated against the state, not alone: the list length and the row's item count are one
+  // quantity stored twice, and only the pair can catch them disagreeing.
+  if (!validatePromptEnhancementSequencePayloadV1(payload, { itemCount: state.itemCount }).ok) {
+    return false;
+  }
   const now = Date.now();
   store.db.run('DELETE FROM pending_prompt_sequences WHERE project_root = ?', [state.projectRoot]);
   store.db.run(
@@ -168,7 +172,7 @@ export function getActivePendingPromptSequence(
     || !ACTIVE_STATUSES.includes(row.status)
     || items === null
     || promptDirectives === null
-    || !validatePromptEnhancementSequencePayloadV1(payload).ok;
+    || !validatePromptEnhancementSequencePayloadV1(payload, { itemCount: row.itemCount }).ok;
   if (staleSession || invalid) {
     store.db.run('DELETE FROM pending_prompt_sequences WHERE id = ?', [row.id]);
     saveStore(store);

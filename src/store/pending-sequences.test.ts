@@ -20,6 +20,18 @@ import {
 const PROJECT = '/tmp/pending-seq-proj';
 const ORIGINAL_LENGTH = 120;
 
+function plannedItems(count: number): PromptEnhancementSequencePayloadV1['items'] {
+  const base = {
+    sourcePointRanges: [], roleLabel: null, complexity: 'not_complex',
+    complexityReason: null, actionRiskKind: null, authorityMode: 'plan_or_review',
+    requiresConfirmationFloor: false, decompositionGroupId: 'g1',
+  } as const;
+  return Array.from({ length: count }, (_, index) => (index === 0
+    ? { ...base, itemKind: 'first_task', originalSliceRef: { start: 0, end: ORIGINAL_LENGTH }, dependencyOrder: 0, generatedWording: null, itemValidationGraph: null }
+    : { ...base, itemKind: 'task', originalSliceRef: { start: 1, end: 20 }, dependencyOrder: index, generatedWording: 'w', itemValidationGraph: {} }
+  )) as unknown as PromptEnhancementSequencePayloadV1['items'];
+}
+
 function payload(
   overrides: Partial<PromptEnhancementSequencePayloadV1> = {},
 ): PromptEnhancementSequencePayloadV1 {
@@ -169,5 +181,29 @@ describe('pending-sequences store', () => {
     upsertPendingPromptSequence(store, createdState(), payload());
     store.db.run("UPDATE pending_prompt_sequences SET suggested_next_prompt_policy = 'invented'");
     expect(getActivePendingPromptSequence(store, PROJECT, 'sess-1')).toBeNull();
+  });
+  it('refuses a payload whose list length disagrees with the row item count', () => {
+    // The list and the count are one quantity stored twice; only the pair catches a mismatch,
+    // which is why the payload is validated against the state rather than alone.
+    const threeItems = payload({ items: plannedItems(3), suggestedNextPromptPolicy: 'rendered_after_explicit_acceptance' });
+    expect(upsertPendingPromptSequence(store, createdState({ itemCount: 4 }), threeItems)).toBe(false);
+    expect(getActivePendingPromptSequence(store, PROJECT)).toBeNull();
+    expect(upsertPendingPromptSequence(store, createdState({ itemCount: 3 }), threeItems)).toBe(true);
+  });
+
+  it('scrubs a stored row whose item count is edited away from its list', () => {
+    const threeItems = payload({ items: plannedItems(3), suggestedNextPromptPolicy: 'rendered_after_explicit_acceptance' });
+    expect(upsertPendingPromptSequence(store, createdState({ itemCount: 3 }), threeItems)).toBe(true);
+    store.db.run('UPDATE pending_prompt_sequences SET item_count = 7');
+    expect(getActivePendingPromptSequence(store, PROJECT, 'sess-1')).toBeNull();
+  });
+
+  it('keeps a terminal stub readable — it is exempt from the item bounds', () => {
+    // A non-accepted row records an offer that never activated; the bounds would scrub it as it
+    // was written.
+    const stub = payload({ offerDisposition: 'not_engaged', originalLength: 0 });
+    expect(upsertPendingPromptSequence(store, createdState(), stub)).toBe(true);
+    expect(getActivePendingPromptSequence(store, PROJECT, 'sess-1')?.payload.offerDisposition)
+      .toBe('not_engaged');
   });
 });

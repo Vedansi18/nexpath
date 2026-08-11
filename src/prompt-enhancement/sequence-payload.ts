@@ -1,9 +1,14 @@
 import type { PromptEnhancementValidationGraphV1 } from './contracts.js';
-import type {
-  PromptEnhancementAuthorityMode,
-  PromptEnhancementSensitiveActionRiskKind,
+import {
+  PROMPT_ENHANCEMENT_AUTHORITY_MODES,
+  PROMPT_ENHANCEMENT_SENSITIVE_ACTION_RISK_KINDS,
+  type PromptEnhancementAuthorityMode,
+  type PromptEnhancementSensitiveActionRiskKind,
 } from './safety-sendability.js';
-import { PROMPT_ENHANCEMENT_SEQUENCE_MAX_ITEM_COUNT_V1 } from './sequence-runtime.js';
+import {
+  PROMPT_ENHANCEMENT_SEQUENCE_MAX_ITEM_COUNT_V1,
+  PROMPT_ENHANCEMENT_SEQUENCE_MIN_ITEM_COUNT_V1,
+} from './sequence-runtime.js';
 
 /**
  * Durable payload for a multi-prompt sequence: the ordered item list plus the four
@@ -103,8 +108,12 @@ export interface PromptEnhancementSequenceItemV1 {
   /** Written once by the batch and never rewritten. Null on `first_task`, which is never re-offered. */
   generatedWording:  string | null;
   actionRiskKind:    PromptEnhancementSensitiveActionRiskKind | null;
-  /** Carried from the slice so composition cannot escalate plan into execute. */
-  authorityMode:     PromptEnhancementAuthorityMode;
+  /**
+   * Carried from the slice so composition cannot escalate plan into execute. Null on the kinds
+   * that carry no slice — a confirmation has no authority of its own to exceed.
+   */
+  authorityMode:     PromptEnhancementAuthorityMode | null;
+  /** False on the kinds that carry no slice, for the same reason. */
   requiresConfirmationFloor: boolean;
   /** One planning-group id per item, so a payload can rebuild the real grouping. */
   decompositionGroupId: string | null;
@@ -126,6 +135,12 @@ export type PromptEnhancementSequencePayloadReasonCodeV1 =
   | 'payload_not_object'
   | 'items_not_array'
   | 'item_count_over_max'
+  | 'item_count_below_min'
+  | 'item_count_disagrees_with_row'
+  | 'stub_row_must_carry_no_items'
+  | 'original_length_zero_with_items'
+  | 'next_prompt_policy_disagrees_with_items'
+  | 'confirmations_do_not_match_complexity'
   | 'original_length_invalid'
   | 'prompt_directives_invalid'
   | 'next_prompt_policy_invalid'
@@ -153,6 +168,16 @@ export type PromptEnhancementSequencePayloadReasonCodeV1 =
 export type PromptEnhancementSequencePayloadValidationV1 =
   | { ok: true }
   | { ok: false; reasonCode: PromptEnhancementSequencePayloadReasonCodeV1; itemIndex?: number };
+
+/**
+ * The row context a payload is validated against. `itemCount` is a separate column read by the
+ * state machine while the list is read by the packager, so the two are one quantity stored
+ * twice: too small and the machine completes while entries remain, too large and it offers past
+ * the end of the list. It is a required argument so the check cannot be skipped by omission.
+ */
+export interface PromptEnhancementSequencePayloadContextV1 {
+  itemCount: number;
+}
 
 /**
  * A sequence that has been recorded but not yet planned. Intake writes this on first send;
@@ -207,6 +232,7 @@ const fail = (
  */
 export function validatePromptEnhancementSequencePayloadV1(
   payload: unknown,
+  context: PromptEnhancementSequencePayloadContextV1,
 ): PromptEnhancementSequencePayloadValidationV1 {
   if (typeof payload !== 'object' || payload === null) return fail('payload_not_object');
   const p = payload as Record<string, unknown>;
@@ -231,9 +257,30 @@ export function validatePromptEnhancementSequencePayloadV1(
     return fail('offer_disposition_invalid');
   }
 
-  // An unplanned sequence is a valid stored state: intake records the row on send, and the
-  // planner fills the list later. The per-item rules below apply only once items exist.
+  // A row whose disposition is not `accepted` is a terminal record of an offer that never
+  // activated. It is never served, so there is nothing to validate bounds against — and without
+  // this exemption the scrub would delete the record in the same breath it was written.
+  if (p['offerDisposition'] !== 'accepted') {
+    return items.length === 0 ? { ok: true } : fail('stub_row_must_carry_no_items');
+  }
+
+  // PRE-PLANNER WINDOW. Intake records the row on send and the planner fills the list; until the
+  // planner exists nothing produces items, so an accepted row is written with an empty list. This
+  // is a build-order state, not a modelled one — when the planner lands, an accepted row always
+  // carries its items and this branch stops being reachable.
   if (items.length === 0) return { ok: true };
+
+  // From here the row claims to be a servable sequence, and every bound applies.
+  if (items.length < PROMPT_ENHANCEMENT_SEQUENCE_MIN_ITEM_COUNT_V1) return fail('item_count_below_min');
+  if (items.length !== context.itemCount) return fail('item_count_disagrees_with_row');
+  // An offset rule that compares against an unchecked bound runs and proves nothing: a bound
+  // larger than the real prompt lets out-of-range offsets pass and resolve to text that does not
+  // exist.
+  if (originalLength === 0) return fail('original_length_zero_with_items');
+  // The policy value must describe the state the row is actually in.
+  if (p['suggestedNextPromptPolicy'] === 'not_generated') {
+    return fail('next_prompt_policy_disagrees_with_items');
+  }
 
   let firstTaskCount = 0;
   let wrapUpCount = 0;
@@ -323,11 +370,27 @@ export function validatePromptEnhancementSequencePayloadV1(
     }
 
     const riskKind = item['actionRiskKind'];
-    if (riskKind !== null && typeof riskKind !== 'string') return fail('action_risk_kind_invalid', index);
-    if (typeof item['authorityMode'] !== 'string') return fail('authority_mode_invalid', index);
-    if (typeof item['requiresConfirmationFloor'] !== 'boolean') {
-      return fail('requires_confirmation_floor_invalid', index);
+    if (riskKind !== null
+      && !PROMPT_ENHANCEMENT_SENSITIVE_ACTION_RISK_KINDS
+        .includes(riskKind as PromptEnhancementSensitiveActionRiskKind)) {
+      return fail('action_risk_kind_invalid', index);
     }
+
+    // Authority is carried FROM the slice, so an item with a slice must have one and an item
+    // without a slice must not: a confirmation has no authority of its own to exceed.
+    const authorityMode = item['authorityMode'];
+    if (isTaskKind) {
+      if (!PROMPT_ENHANCEMENT_AUTHORITY_MODES
+        .includes(authorityMode as PromptEnhancementAuthorityMode)) {
+        return fail('authority_mode_invalid', index);
+      }
+    } else if (authorityMode !== null) {
+      return fail('authority_mode_invalid', index);
+    }
+
+    const floor = item['requiresConfirmationFloor'];
+    if (typeof floor !== 'boolean') return fail('requires_confirmation_floor_invalid', index);
+    if (!isTaskKind && floor) return fail('requires_confirmation_floor_invalid', index);
 
     const groupId = item['decompositionGroupId'];
     if (isTaskKind) {
@@ -355,5 +418,51 @@ export function validatePromptEnhancementSequencePayloadV1(
     return fail('wrap_up_presence_does_not_match_count');
   }
 
+  return confirmationsMatchComplexity(items as readonly Record<string, unknown>[]);
+}
+
+const CONFIRMATION_KINDS: readonly PromptEnhancementSequenceItemKindV1[] = [
+  'double_confirmation',
+  'cross_confirmation',
+  'binary_confirmation',
+];
+
+/**
+ * The confirmations following each task must be exactly what the task's complexity verdict
+ * yields, and in the locked order — where a task earns two, the double or cross precedes the
+ * binary, so the decision is not asked for before the check that informs it.
+ *
+ * This is a lookup from the verdict rather than a second judgement, which is why no separate
+ * applicability field is stored. The list is that second place, so it is checked against the
+ * verdict instead. Without this the verdict is decorative: an item could record `not_complex`
+ * and carry three confirmations, and nothing would compare them.
+ *
+ * It VALIDATES and scrubs; it never repairs. Choosing which confirmation an item should have is
+ * inferring applicability, which the runtime may not do.
+ */
+function confirmationsMatchComplexity(
+  items: readonly Record<string, unknown>[],
+): PromptEnhancementSequencePayloadValidationV1 {
+  for (let index = 0; index < items.length; index += 1) {
+    const kind = items[index]['itemKind'];
+    if (kind !== 'first_task' && kind !== 'task') continue;
+
+    const run: unknown[] = [];
+    for (let j = index + 1; j < items.length; j += 1) {
+      const next = items[j]['itemKind'] as PromptEnhancementSequenceItemKindV1;
+      if (!CONFIRMATION_KINDS.includes(next)) break;
+      run.push(next);
+    }
+
+    const complexity = items[index]['complexity'];
+    const matches = complexity === 'not_complex'
+      ? run.length === 0
+      : complexity === 'complex'
+        ? run.length === 1 && run[0] === 'binary_confirmation'
+        : run.length === 2
+          && (run[0] === 'double_confirmation' || run[0] === 'cross_confirmation')
+          && run[1] === 'binary_confirmation';
+    if (!matches) return fail('confirmations_do_not_match_complexity', index);
+  }
   return { ok: true };
 }

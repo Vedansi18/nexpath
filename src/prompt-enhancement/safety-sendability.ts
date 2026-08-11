@@ -18,23 +18,31 @@ export const PROMPT_ENHANCEMENT_CANONICAL_CONFIRMATION =
   'Still, before you do this <specific sensitive action> you must ask me for go-ahead confirmation.';
 export const PROMPT_ENHANCEMENT_MAX_SENDABLE_BODY_CHARS = 128_000;
 
+// Declared as values so membership can be checked at runtime by consumers that read a stored
+// risk kind back; the types below are derived from them so the two cannot drift apart.
+export const PROMPT_ENHANCEMENT_SENSITIVE_ACTION_RISK_KINDS = [
+  'destructive_filesystem_or_codebase',
+  'destructive_data_or_schema',
+  'dependency_or_toolchain_change',
+  'secret_env_or_credential',
+  'production_release_or_external_effect',
+  'git_history_rewrite',
+  'security_auth_permission',
+  'cost_or_resource',
+  'wide_scope_or_boundary_expansion',
+  'agent_mode_or_permission_boundary',
+] as const;
 export type PromptEnhancementSensitiveActionRiskKind =
-  | 'destructive_filesystem_or_codebase'
-  | 'destructive_data_or_schema'
-  | 'dependency_or_toolchain_change'
-  | 'secret_env_or_credential'
-  | 'production_release_or_external_effect'
-  | 'git_history_rewrite'
-  | 'security_auth_permission'
-  | 'cost_or_resource'
-  | 'wide_scope_or_boundary_expansion'
-  | 'agent_mode_or_permission_boundary';
+  typeof PROMPT_ENHANCEMENT_SENSITIVE_ACTION_RISK_KINDS[number];
 
+export const PROMPT_ENHANCEMENT_AUTHORITY_MODES = [
+  'observe_or_literal',
+  'plan_or_review',
+  'execute_requested',
+  'execute_generated_escalation',
+] as const;
 export type PromptEnhancementAuthorityMode =
-  | 'observe_or_literal'
-  | 'plan_or_review'
-  | 'execute_requested'
-  | 'execute_generated_escalation';
+  typeof PROMPT_ENHANCEMENT_AUTHORITY_MODES[number];
 
 export interface PromptEnhancementSensitiveActionFinding {
   riskKind: PromptEnhancementSensitiveActionRiskKind;
