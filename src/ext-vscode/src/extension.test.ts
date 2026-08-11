@@ -27,6 +27,9 @@ const {
   mockPePollerStart,
   mockPePollerStop,
   mockGetCommands,
+  mockPePopupHostProbe,
+  mockReadLatestPeMeta,
+  mockCreateAdvisoryPoller,
 } = vi.hoisted(() => ({
   mockShowOnboarding: vi.fn(),
   mockRegisterWebviewViewProvider: vi.fn(),
@@ -52,6 +55,11 @@ const {
   mockPePollerStart: vi.fn(),
   mockPePollerStop: vi.fn(),
   mockGetCommands: vi.fn(async () => [] as string[]),
+  // Default false = the headless premise: P10's poller stays live. Tests for
+  // the popup-first gate flip this to true explicitly.
+  mockPePopupHostProbe: vi.fn(() => false),
+  mockReadLatestPeMeta: vi.fn(async () => null),
+  mockCreateAdvisoryPoller: vi.fn(),
 }));
 
 vi.mock('vscode', () => ({
@@ -128,6 +136,10 @@ vi.mock('./chat-input-injector.js', () => ({
 }));
 vi.mock('./pe-store-reader.js', () => ({
   readPendingPromptEnhancement: mockReadPendingPromptEnhancement,
+  readLatestPromptEnhancementMeta: mockReadLatestPeMeta,
+}));
+vi.mock('./pe-popup-host-probe.js', () => ({
+  isPePopupHostLikelyAvailable: mockPePopupHostProbe,
 }));
 vi.mock('./pe-origin.js', () => ({
   isPeOriginTurn: mockIsPeOriginTurn,
@@ -158,11 +170,10 @@ vi.mock('./advisory-fallback.js', () => ({
   })),
 }));
 vi.mock('./advisory-poller.js', () => ({
-  createAdvisoryPoller: vi.fn(() => ({
-    start: vi.fn(),
-    stop: vi.fn(),
-    pollOnce: vi.fn(),
-  })),
+  createAdvisoryPoller: (...args: unknown[]) => {
+    mockCreateAdvisoryPoller(...args);
+    return { start: vi.fn(), stop: vi.fn(), pollOnce: vi.fn() };
+  },
 }));
 vi.mock('./pe-poller.js', () => ({
   createPePoller: (...args: unknown[]) => {
@@ -216,6 +227,9 @@ describe('activate', () => {
     mockExistsSync.mockReset().mockReturnValue(false);
     mockExecuteCommand.mockReset().mockResolvedValue(undefined);
     mockReadPendingPromptEnhancement.mockReset().mockResolvedValue(null);
+    mockPePopupHostProbe.mockReset().mockReturnValue(false);
+    mockReadLatestPeMeta.mockReset().mockResolvedValue(null);
+    mockCreateAdvisoryPoller.mockReset();
     mockIsPeOriginTurn.mockReset().mockResolvedValue(false);
     mockChatInputInject.mockReset().mockResolvedValue(false);
     mockReadLatestAdvisoryMeta.mockReset().mockResolvedValue(null);
@@ -332,9 +346,10 @@ describe('activate', () => {
       expect(mockCreatePePoller).not.toHaveBeenCalled();
     });
 
-    it('readPendingPe is wired to the real PE-table-only reader', async () => {
+    it('readPendingPe is wired to the real PE-table-only reader (no popup host — P10 premise holds)', async () => {
       mockShowOnboarding.mockResolvedValueOnce(undefined);
       mockDetectHost.mockReturnValueOnce('windsurf');
+      mockPePopupHostProbe.mockReturnValue(false);
       mockReadPendingPromptEnhancement.mockResolvedValueOnce({
         id: 1, projectRoot: '/proj', sessionId: 's1', promptCount: 1,
         status: 'pending', createdAt: 0, requestJson: '{}', resultJson: '{}',
@@ -343,6 +358,32 @@ describe('activate', () => {
       const result = await capturedDeps().readPendingPe('/proj');
       expect(mockReadPendingPromptEnhancement).toHaveBeenCalledWith('/proj');
       expect(result).toEqual(expect.objectContaining({ projectRoot: '/proj' }));
+    });
+
+    it('⭐ popup host available → readPendingPe yields null and the real reader is NEVER consulted (popup-first, owner ruling 2026-08-11)', async () => {
+      mockShowOnboarding.mockResolvedValueOnce(undefined);
+      mockDetectHost.mockReturnValueOnce('windsurf');
+      mockPePopupHostProbe.mockReturnValue(true);
+      mockReadPendingPromptEnhancement.mockResolvedValue({
+        id: 1, projectRoot: '/proj', sessionId: 's1', promptCount: 1,
+        status: 'pending', createdAt: 0, requestJson: '{}', resultJson: '{}',
+      });
+      await activate(makeCtx(true) as never);
+      const result = await capturedDeps().readPendingPe('/proj');
+      expect(result).toBeNull();
+      expect(mockReadPendingPromptEnhancement).not.toHaveBeenCalled();
+    });
+
+    it('the advisory poller gets the PE-event bridge dep, wired through to the any-status meta reader', async () => {
+      mockShowOnboarding.mockResolvedValueOnce(undefined);
+      mockDetectHost.mockReturnValueOnce('windsurf');
+      await activate(makeCtx(true) as never);
+      const deps = mockCreateAdvisoryPoller.mock.calls[0]?.[0] as {
+        readPeEventMeta?: (root: string) => Promise<unknown>;
+      };
+      expect(deps.readPeEventMeta).toBeTypeOf('function');
+      await deps.readPeEventMeta!('/proj');
+      expect(mockReadLatestPeMeta).toHaveBeenCalledWith('/proj');
     });
 
     it('onPublish forwards a non-null payload to the PE webview (same renderer as Cursor)', async () => {

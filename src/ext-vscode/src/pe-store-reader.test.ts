@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import { createRequire } from 'node:module';
 import {
   readPendingPromptEnhancement,
+  readLatestPromptEnhancementMeta,
+  defaultReadLatestPromptEnhancementMetaRow,
   type ReadPendingPromptEnhancementRowFn,
 } from './pe-store-reader.js';
 
@@ -273,5 +275,55 @@ describe.skipIf(!canLoadBetterSqlite3)('readPendingPromptEnhancement — real st
   it('returns null when the store file does not exist', async () => {
     const missingPath = join(tmpDirPath, 'never-existed.db');
     expect(await readPendingPromptEnhancement('/proj', { dbPath: missingPath })).toBeNull();
+  });
+});
+
+describe('readLatestPromptEnhancementMeta (any-status bridge signal)', () => {
+  const metaRow = { project_root: '/proj', status: 'shown', created_at: 1700000000000 };
+
+  it('normalises a SHOWN row — the whole point: the bridge needs post-popup rows', async () => {
+    const readRow: ReadPendingPromptEnhancementRowFn = vi.fn().mockResolvedValue(metaRow);
+    const out = await readLatestPromptEnhancementMeta('/proj', { readRow, dbPath: '/db' });
+    expect(out).toEqual({ projectRoot: '/proj', createdAt: 1700000000000, status: 'shown' });
+  });
+
+  it('normalises a pending row too', async () => {
+    const readRow: ReadPendingPromptEnhancementRowFn = vi
+      .fn()
+      .mockResolvedValue({ ...metaRow, status: 'pending' });
+    const out = await readLatestPromptEnhancementMeta('/proj', { readRow, dbPath: '/db' });
+    expect(out?.status).toBe('pending');
+  });
+
+  it('coerces a string created_at; garbage becomes 0 (stale, never fresh)', async () => {
+    const asString: ReadPendingPromptEnhancementRowFn = vi
+      .fn()
+      .mockResolvedValue({ ...metaRow, created_at: '1700000000001' });
+    expect((await readLatestPromptEnhancementMeta('/proj', { readRow: asString, dbPath: '/db' }))?.createdAt)
+      .toBe(1700000000001);
+    const garbage: ReadPendingPromptEnhancementRowFn = vi
+      .fn()
+      .mockResolvedValue({ ...metaRow, created_at: 'not-a-number' });
+    expect((await readLatestPromptEnhancementMeta('/proj', { readRow: garbage, dbPath: '/db' }))?.createdAt)
+      .toBe(0);
+  });
+
+  it('returns null on no row and on a throwing reader', async () => {
+    const noRow: ReadPendingPromptEnhancementRowFn = vi.fn().mockResolvedValue(null);
+    expect(await readLatestPromptEnhancementMeta('/proj', { readRow: noRow, dbPath: '/db' })).toBeNull();
+    const boom: ReadPendingPromptEnhancementRowFn = vi.fn().mockRejectedValue(new Error('boom'));
+    expect(await readLatestPromptEnhancementMeta('/proj', { readRow: boom, dbPath: '/db' })).toBeNull();
+  });
+
+  it('⭐ default SQL reads ANY status — no pending filter (a filtered read goes blind at selection time)', () => {
+    const sql = defaultReadLatestPromptEnhancementMetaRow.toString();
+    expect(sql).toContain('pending_prompt_enhancements');
+    expect(sql).not.toContain("status = 'pending'");
+  });
+
+  it('default SQL still scopes by project_root and orders newest-first', () => {
+    const sql = defaultReadLatestPromptEnhancementMetaRow.toString();
+    expect(sql).toContain('project_root = ?');
+    expect(sql).toContain('ORDER BY created_at DESC');
   });
 });

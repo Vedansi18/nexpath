@@ -37,6 +37,21 @@ export interface AdvisoryPollerDeps {
    * this to `readLatestAdvisoryMeta`, NOT `readLatestAdvisory`.
    */
   readAdvisory: (projectRoot: string) => Promise<AdvisoryStatus | null>;
+  /**
+   * OPTIONAL (owner ruling 2026-08-11 — Windsurf must behave like the CLI,
+   * popup-first): newest PE row's metadata, ANY status (wire to
+   * `readLatestPromptEnhancementMeta`). A PE-ONLY turn stores no advisory row,
+   * so without this the freshness gate below never opens and a "Use enhanced"
+   * popup selection (persisted to the same `lastInjectedPrompt`, `stop.ts`) is
+   * never bridged into Cascade. This dep widens the SELECTION-BRIDGE gate only:
+   * a fresh PE row lets step 1 run. It NEVER feeds step 2 — fallback arming
+   * stays keyed on advisory rows alone, because the in-editor fallback renders
+   * advisory options and a PE popup dismissal must not surface it (a PE turn
+   * leaves the same-turn advisory `pending` and queued for the NEXT Stop —
+   * arming it early would double-surface it). Absent ⇒ decisions are
+   * byte-identical to the shipped poller.
+   */
+  readPeEventMeta?: (projectRoot: string) => Promise<{ createdAt: number } | null>;
   /** Read the popup's persisted selection (`session_states.lastInjectedPrompt`). */
   readInjected: (projectRoot: string) => Promise<string | null>;
   /** Inject the popup's selected prompt into Cascade (and clear the fallback). */
@@ -92,27 +107,49 @@ export function createAdvisoryPoller(deps: AdvisoryPollerDeps): AdvisoryPoller {
           best = { root, advisory };
         }
       }
-      if (!best || best.advisory.createdAt <= startedAt) return; // nothing parked since start
+      const freshAdvisory = best !== null && best.advisory.createdAt > startedAt;
+
+      // PE-only turns (no advisory row) still have a popup whose "Use enhanced"
+      // selection must bridge — a fresh PE row opens the gate for step 1 ONLY.
+      // Consulted just when no fresh advisory exists: when one does, the flow
+      // below is exactly the shipped flow, PE rows unread.
+      let peEventRoot: string | null = null;
+      if (!freshAdvisory && deps.readPeEventMeta) {
+        let bestPe: { root: string; createdAt: number } | null = null;
+        for (const root of deps.projectRoots) {
+          let pe: { createdAt: number } | null;
+          try { pe = await deps.readPeEventMeta(root); } catch { pe = null; }
+          if (pe && (!bestPe || pe.createdAt > bestPe.createdAt)) {
+            bestPe = { root, createdAt: pe.createdAt };
+          }
+        }
+        if (bestPe && bestPe.createdAt > startedAt) peEventRoot = bestPe.root;
+      }
+
+      if (!freshAdvisory && peEventRoot === null) return; // nothing parked since start
 
       let injected: string | null = null;
-      try { injected = await deps.readInjected(best.root); } catch { injected = null; }
+      const bridgeRoot = freshAdvisory ? best!.root : (peEventRoot as string);
+      try { injected = await deps.readInjected(bridgeRoot); } catch { injected = null; }
 
       // 1. Popup selection → inject into Cascade (once), clear fallback.
       if (injected && injected !== lastInjectedValue) {
         lastInjectedValue = injected;
         await deps.onSelection(injected);
-        handledAt = Math.max(handledAt, best.advisory.createdAt);
+        if (freshAdvisory) handledAt = Math.max(handledAt, best!.advisory.createdAt);
       } else if (!injected) {
         lastInjectedValue = null; // auto cleared it → allow the next selection
       }
 
       // 2. Fallback only when the popup ran (`shown`) but yielded no selection.
-      const at = best.advisory.createdAt;
+      //    Advisory rows ONLY — a PE event never arms the in-editor fallback.
+      if (!freshAdvisory) return;
+      const at = best!.advisory.createdAt;
       if (at <= armedAt || at <= handledAt) return; // already armed / handled by popup
-      if (best.advisory.status !== 'shown') return; // popup hasn't run yet → wait
+      if (best!.advisory.status !== 'shown') return; // popup hasn't run yet → wait
       if (shownAt !== at) { shownAt = at; shownFirstSeen = now(); }
       if (!injected && now() - shownFirstSeen >= graceMs) {
-        await deps.onArm(best.root);
+        await deps.onArm(best!.root);
         armedAt = at;
       }
     } finally {

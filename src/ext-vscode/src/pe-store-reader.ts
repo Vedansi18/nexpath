@@ -72,11 +72,88 @@ export const defaultReadPendingPromptEnhancementRow: ReadPendingPromptEnhancemen
     projectRoot,
   );
 
+/**
+ * Latest `pending_prompt_enhancements` row REGARDLESS of status.
+ *
+ * Why any-status when `defaultReadPendingPromptEnhancementRow` filters to
+ * `'pending'`: this reader exists for the advisory-poller's SELECTION BRIDGE
+ * (owner ruling 2026-08-11 — Windsurf must behave like the CLI, popup-first).
+ * On a PE-only turn (no advisory row) the bridge needs "a PE event happened
+ * this turn" as its freshness signal — and by the time the user picks "Use
+ * enhanced" in the popup, `stop` has ALREADY marked the row `'shown'` (it does
+ * so when the popup displays, before the user decides). A pending-only read
+ * would go blind at exactly the moment the selection lands in
+ * `session_states.lastInjectedPrompt`.
+ */
+export const defaultReadLatestPromptEnhancementMetaRow: ReadPendingPromptEnhancementRowFn = (
+  dbPath,
+  projectRoot,
+) =>
+  stagedGetRow(
+    dbPath,
+    `SELECT project_root, status, created_at
+       FROM pending_prompt_enhancements
+      WHERE project_root = ?
+      ORDER BY created_at DESC
+      LIMIT 1`,
+    projectRoot,
+  );
+
+/**
+ * Detection-only metadata of the newest PE row (any status). Structurally
+ * identical to `advisory-store-reader.ts`'s `AdvisoryStatus` on purpose — the
+ * advisory-poller consumes both shapes the same way.
+ */
+export interface PromptEnhancementMeta {
+  projectRoot: string;
+  /** unix ms — when `nexpath auto` prepared this PE. */
+  createdAt: number;
+  /** 'pending' | 'shown' — plain string, same defensive choice as the row reader. */
+  status: string;
+}
+
 export interface PeStoreReaderDeps {
   /** Override the store path (defaults to `~/.nexpath/prompt-store.db`). */
   dbPath?:  string;
   /** Override the raw-row reader (tests). */
   readRow?: ReadPendingPromptEnhancementRowFn;
+}
+
+/**
+ * Read the newest PE row's metadata (any status) for `projectRoot` — the
+ * advisory-poller's PE-event freshness signal (see
+ * `defaultReadLatestPromptEnhancementMetaRow` for why any-status). Returns
+ * `null` when the store/row is absent or the row is unusable. Never throws.
+ * Read-only staged copy; `pending_prompt_enhancements` only.
+ */
+export async function readLatestPromptEnhancementMeta(
+  projectRoot: string,
+  deps: PeStoreReaderDeps = {},
+): Promise<PromptEnhancementMeta | null> {
+  const dbPath  = deps.dbPath ?? defaultStorePath();
+  const readRow = deps.readRow ?? defaultReadLatestPromptEnhancementMetaRow;
+
+  let row: Record<string, unknown> | null;
+  try {
+    row = await readRow(dbPath, projectRoot);
+  } catch {
+    return null;
+  }
+  if (!row) return null;
+
+  const createdAtRaw = row.created_at;
+  const createdAt =
+    typeof createdAtRaw === 'number'
+      ? createdAtRaw
+      : Number.isFinite(Number(createdAtRaw))
+        ? Number(createdAtRaw)
+        : 0;
+
+  return {
+    projectRoot: typeof row.project_root === 'string' ? row.project_root : projectRoot,
+    createdAt,
+    status: typeof row.status === 'string' ? row.status : '',
+  };
 }
 
 /**

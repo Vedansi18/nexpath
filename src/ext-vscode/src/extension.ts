@@ -13,7 +13,8 @@ import {
 } from './webview/pe-view-provider.js';
 import { routePeWebviewMessage, describePeEventSafely } from './pe-events.js';
 import { resolvePeSendIntent } from './pe-send-intent.js';
-import { readPendingPromptEnhancement } from './pe-store-reader.js';
+import { readPendingPromptEnhancement, readLatestPromptEnhancementMeta } from './pe-store-reader.js';
+import { isPePopupHostLikelyAvailable } from './pe-popup-host-probe.js';
 import { parsePromptEnhancementExtensionPayloadV1 } from './pe-payload.js';
 import { isPeOriginTurn } from './pe-origin.js';
 import { createInjectedRecordStore } from './injected-record.js';
@@ -446,6 +447,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   if (host === 'windsurf') {
     const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
     const roots = Array.from(new Set([canonicalizeCwd(ws), ws]));
+    // Owner ruling 2026-08-11: Windsurf must behave like the CLI — popup-first.
+    // Probed ONCE at activation (each probe spawns `which` per terminal); the
+    // popup host's availability doesn't change mid-session in practice.
+    const pePopupHostAvailable = isPePopupHostLikelyAvailable();
+    log(
+      pePopupHostAvailable
+        ? '[nexpath] windsurf PE surface: popup host available — popup-first (CLI-identical); PE poller inert, "Use enhanced" bridges via the advisory poller'
+        : '[nexpath] windsurf PE surface: no popup host — PE poller direct-insert active (P10 fallback)',
+    );
     advisoryPoller = createAdvisoryPoller({
       projectRoots: roots,
       // Option-independent detection: the popup bridge must fire even though the
@@ -453,6 +463,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       // in-editor fallback (advisory-fallback.ts) keeps its own options-aware
       // readLatestAdvisory for DISPLAY — unchanged.
       readAdvisory: (root) => readLatestAdvisoryMeta(root),
+      // PE-only turns store no advisory row; this lets the "Use enhanced"
+      // selection bridge fire on them (selection gate only — never arms the
+      // fallback; see AdvisoryPollerDeps.readPeEventMeta).
+      readPeEventMeta: (root) => readLatestPromptEnhancementMeta(root),
       readInjected: (root) => readInjectedPrompt(root),
       // Popup selection → inject into Cascade + clear the fallback.
       onSelection: async (prompt) => {
@@ -485,9 +499,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // clipboard-touching windsurfInject/cursorInject, same reasoning P8
     // already established. Also publishes to the PE webview so the same
     // renderer shows what was delivered if the panel happens to be open.
+    //
+    // GATED on the popup-host probe (owner ruling 2026-08-11): P10's premise
+    // was "no popup possible on Windsurf" — live E2E disproved it (stop's
+    // spawned-terminal PE popup opened fine). When a popup CAN open it is the
+    // sole decision surface (CLI-identical, no pre-insert); this poller
+    // delivers only where P10's premise actually holds (headless/no-terminal
+    // hosts, where the pending row would otherwise rot unseen).
     pePoller = createPePoller({
       projectRoots: roots,
-      readPendingPe: (root) => readPendingPromptEnhancement(root),
+      readPendingPe: (root) =>
+        pePopupHostAvailable ? Promise.resolve(null) : readPendingPromptEnhancement(root),
       onDeliver: (text) => injectPeBody(text, (t) => injectViaCascadeAction(t, {
         executeCommand: (id, ...args) => vscode.commands.executeCommand(id, ...args),
         getCommands: (filter) => vscode.commands.getCommands(filter),

@@ -27,6 +27,8 @@
  * ruling a command OUT, but NOT for ruling one IN (`composer.submit` proved that).
  */
 import { describe, it, expect, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 // `chat-input-injector.ts` imports `vscode` for its default deps; the module does
 // not exist outside the extension host, so it is mocked exactly as the sibling
@@ -108,9 +110,24 @@ describe('BACKWARD COMPATIBILITY — Cursor chat-focus order must NOT change', (
   //
   // These tests therefore guard the OLD ORDER, not the "better" one. H6 applies
   // the evidence-backed order behind the switch.
-  it('preserves the original pre-hook-milestone order exactly', async () => {
-    const { CURSOR_CHAT_FOCUS_COMMANDS_V1 } = await import('./extension.js');
-    expect(CURSOR_CHAT_FOCUS_COMMANDS_V1).toEqual([
+  //
+  // BRANCH ADAPTATION 2026-08-11: on the hook-milestone branches this list is
+  // H6's exported `CURSOR_CHAT_FOCUS_COMMANDS_V1` and these tests import it.
+  // THIS branch (PE wiring milestone) deliberately contains no hook-milestone
+  // changes, so the list is still `activate`'s local `CURSOR_CHAT_FOCUS_COMMANDS`
+  // (`extension.ts`) with no export to import — the backported import-based
+  // tests could never pass here (found red 2026-08-11, backport `61c121a`).
+  // Same pin, this branch's way: extract the array literal from source text.
+  // At merge time the hook branch's import-based version supersedes this one.
+  const readFocusList = (): string[] => {
+    const src = readFileSync(join(__dirname, 'extension.ts'), 'utf8');
+    const m = src.match(/const CURSOR_CHAT_FOCUS_COMMANDS = \[([\s\S]*?)\]/);
+    if (!m) return [];
+    return [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1]);
+  };
+
+  it('preserves the original pre-hook-milestone order exactly', () => {
+    expect(readFocusList()).toEqual([
       'aichat.focusChat',
       'composer.focusComposer',
       'aichat.gotochat',
@@ -118,27 +135,27 @@ describe('BACKWARD COMPATIBILITY — Cursor chat-focus order must NOT change', (
     ]);
   });
 
-  it('does not promote composer.focusComposer ahead of aichat.focusChat on the un-gated path', async () => {
+  it('does not promote composer.focusComposer ahead of aichat.focusChat on the un-gated path', () => {
     // Fails if someone re-applies the H1b reorder without gating it behind the
     // backward-compatibility switch. The knowledge is not lost — it is recorded in
     // the constant's doc comment and in the dev plan's H1b results table, to be
     // applied by H6 behind the switch.
-    const { CURSOR_CHAT_FOCUS_COMMANDS_V1 } = await import('./extension.js');
-    expect(CURSOR_CHAT_FOCUS_COMMANDS_V1.indexOf('aichat.focusChat'))
-      .toBeLessThan(CURSOR_CHAT_FOCUS_COMMANDS_V1.indexOf('composer.focusComposer'));
+    const list = readFocusList();
+    expect(list.indexOf('aichat.focusChat')).toBeGreaterThanOrEqual(0);
+    expect(list.indexOf('aichat.focusChat')).toBeLessThan(list.indexOf('composer.focusComposer'));
   });
 
-  it('still contains every id the old flow relied on — nothing dropped', async () => {
-    const { CURSOR_CHAT_FOCUS_COMMANDS_V1 } = await import('./extension.js');
+  it('still contains every id the old flow relied on — nothing dropped', () => {
+    const list = readFocusList();
     for (const id of [
       'aichat.focusChat',
       'composer.focusComposer',
       'aichat.gotochat',
       'workbench.action.focusAuxiliaryBar',
     ]) {
-      expect(CURSOR_CHAT_FOCUS_COMMANDS_V1).toContain(id);
+      expect(list).toContain(id);
     }
-    expect(CURSOR_CHAT_FOCUS_COMMANDS_V1).toHaveLength(4);
+    expect(list).toHaveLength(4);
   });
 });
 
