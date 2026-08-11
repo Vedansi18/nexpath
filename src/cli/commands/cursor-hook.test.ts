@@ -5,7 +5,10 @@
  * It reads a JSON response on stdout and blocks on `continue:false`. Writing the
  * Windsurf exit-2 convention here would silently fail to block.
  */
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterAll } from 'vitest';
+import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   runCursorHookAction, CURSOR_CONTINUE, CURSOR_BLOCK_USER_MESSAGE,
   CURSOR_PROMPTSUBMIT_ADVISORY_ENV, isCursorPromptSubmitAdvisoryEnabled,
@@ -248,5 +251,89 @@ describe('⭐ H6 — user_message is the Cursor-only text channel', () => {
     const h = harness({ decide: async () => 'block' as const, blockMessage: 'custom text' });
     await runCursorHookAction('beforeSubmitPrompt', h.deps as never);
     expect(JSON.parse(h.writes[0]).user_message).toBe('custom text');
+  });
+});
+
+describe('⭐ the DEFAULT decider (production path) — every other test injects one', () => {
+  // The default is what actually runs in production: no test above exercises it,
+  // which is precisely how submitKeystroke shipped as a no-op and writeCursorHooks
+  // shipped unwired. This drives the REAL buildDefaultPromptSubmitDecider.
+  const realRoot = mkdtempSync(join(tmpdir(), 'nexpath-h6-default-'));
+
+  function bare(over: Record<string, unknown> = {}) {
+    const writes: string[] = [];
+    const exits: number[] = [];
+    return {
+      writes, exits,
+      deps: {
+        env: { [CURSOR_PROMPTSUBMIT_ADVISORY_ENV]: '1' },
+        readStdin: async () => JSON.stringify({
+          prompt: 'hello',
+          workspace_roots: [realRoot],
+        }),
+        write: (t: string) => { writes.push(t); },
+        exit: (c: number) => { exits.push(c); },
+        ...over,
+      },
+    };
+  }
+
+  it('does not throw, hang, or block when no decider is injected', async () => {
+    // With no classification present the decider must resolve 'allow', so the
+    // user's prompt is released. A throw here would surface as a broken hook.
+    const h = bare();
+    await runCursorHookAction('beforeSubmitPrompt', h.deps as never);
+    expect(h.exits).toEqual([0]);
+    expect(JSON.parse(h.writes[0])).toEqual({ continue: true });
+  });
+
+  it('writes no decision file when it allows', async () => {
+    // A decision file written on an allow would be picked up by the poller and
+    // injected into a turn that was never blocked.
+    const h = bare();
+    await runCursorHookAction('beforeSubmitPrompt', h.deps as never);
+    expect(existsSync(join(realRoot, '.nexpath', 'submit-decision.json'))).toBe(false);
+  });
+
+  it('still allows when the payload carries no project root', async () => {
+    // workspace_roots absent ⇒ projectRoot undefined ⇒ the decider must degrade
+    // to allow rather than throw on an undefined path.
+    const h = bare({ readStdin: async () => JSON.stringify({ prompt: 'hello' }) });
+    await runCursorHookAction('beforeSubmitPrompt', h.deps as never);
+    expect(h.exits).toEqual([0]);
+    expect(JSON.parse(h.writes[0])).toEqual({ continue: true });
+  });
+
+  it('switch OFF: the default decider is not even constructed', async () => {
+    const h = bare({ env: {} });
+    await runCursorHookAction('beforeSubmitPrompt', h.deps as never);
+    expect(JSON.parse(h.writes[0])).toEqual(CURSOR_CONTINUE);
+  });
+
+  afterAll(() => rmSync(realRoot, { recursive: true, force: true }));
+});
+
+describe('⭐ the default decider is the REAL one, pinned structurally', () => {
+  // The behavioural tests above cannot distinguish the real decider from a stub:
+  // with no classification present BOTH return 'allow'. Mutation confirmed this -
+  // replacing the default with `async () => 'allow'` kept all 26 green. So the
+  // wiring is pinned against the source, the same technique used for the
+  // no-OpenAI and switch-gate guards.
+  const src = readFileSync(join(__dirname, 'cursor-hook.ts'), 'utf8');
+
+  it('reuses H3\'s decider rather than a local stub', () => {
+    expect(src).toMatch(/deps\.decide\s*\?\?[\s\S]{0,300}?buildDefaultPromptSubmitDecider/);
+  });
+
+  it('passes host: \'cursor\' so the record is tagged for the right editor', () => {
+    // A windsurf-tagged record would be dropped by the Cursor reader and the
+    // prompt would be cancelled with nothing ever injected.
+    expect(src).toMatch(/buildDefaultPromptSubmitDecider\([\s\S]{0,200}?host:\s*'cursor'/);
+  });
+
+  it('does not hardcode an allow-only default', () => {
+    // MUTATION GUARD: this is exactly the mutant that survived the behavioural
+    // tests - a default that always allows, leaving the Cursor path inert.
+    expect(src).not.toMatch(/deps\.decide\s*\?\?\s*\(async\s*\(\)\s*=>\s*'allow'/);
   });
 });
