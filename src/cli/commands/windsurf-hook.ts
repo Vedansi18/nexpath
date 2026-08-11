@@ -33,6 +33,9 @@ import {
 } from './submit-option-source.js';
 import { openStore, closeStore } from '../../store/db.js';
 import { writeSubmitDecision } from './submit-decision-store.js';
+// CONSUME-ONLY. `SessionStateManager` is not Vedansi-owned (`hi0001234d` 15 /
+// `harshil480` 15) — it is called here, never modified.
+import { SessionStateManager } from '../../classifier/SessionStateManager.js';
 import { bringPopupToFront } from '../../windsurf-hook/foreground.js';
 
 /**
@@ -190,6 +193,27 @@ export function buildDefaultPromptSubmitDecider(
           // Stamped here: the decision to block is made the instant the user
           // picks an option, immediately before persistence.
           const blockIssuedAt = now();
+
+          // ── VED-PE-10: the injected body must NOT re-enter as a new prompt ──
+          // A generated body re-entering `UserPromptSubmit` must not trigger fresh
+          // classification, cadence, language updates, memory learning, or another
+          // popup. Our replacement is exactly that: the extension injects it and
+          // auto-submits, firing a fresh `pre_user_prompt`.
+          //
+          // The guard already ships — `auto.ts:706` reads `lastInjectedPrompt`,
+          // clears it, and returns `no_action` on an echo match, before
+          // `recordActivity` (`:722`). This feeds it rather than adding a second
+          // guard, and closes the promptCount double-count by the same gate.
+          if (store) {
+            try {
+              const mgr = SessionStateManager.load(store as never, projectRoot);
+              mgr.setInjectedPrompt(store as never, replacementText);
+            } catch {
+              // Non-fatal: worst case the replacement is re-classified, which is
+              // today's behaviour — never a reason to strand the user's prompt.
+            }
+          }
+
           await writeSubmitDecision({
             projectRoot,
             blockIssuedAt,
