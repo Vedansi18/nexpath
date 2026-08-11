@@ -1229,16 +1229,43 @@ export function isPromptEnhancementSequenceShapedTextV1(promptText: string): boo
     || (compoundState === 'multi_point_same_intent' && userPointCoverageRefsFor(promptText).length >= 3);
 }
 
-/** Fixed approved role vocabulary for the MPS Sequence-plan display (locked §3.3: "typed
- * approved roles"). The SAME five keyword families `compoundPromptStateFor` detects — never raw
- * prompt text. */
-const PROMPT_ENHANCEMENT_SEQUENCE_ROLE_FAMILIES_V1: readonly { label: string; keywords: readonly string[] }[] = [
+/**
+ * The fixed approved role vocabulary for multi-prompt sequences — the single definition.
+ *
+ * The closure is structural today: the producer below can only emit a label from the families
+ * table, so user text cannot reach it. When a model produces these labels instead, the closure
+ * becomes instructed and this list is what a validator checks against — so a stored item's label
+ * and a rendered summary's label must be checked against THIS list, never a copy of it. An
+ * invented label would put raw prompt text into a payload that declares it excluded.
+ */
+export const PROMPT_ENHANCEMENT_SEQUENCE_ROLE_LABELS_V1 = [
+  'fix',
+  'review',
+  'refactor',
+  'plan',
+  'build',
+] as const;
+export type PromptEnhancementSequenceRoleLabelV1 =
+  typeof PROMPT_ENHANCEMENT_SEQUENCE_ROLE_LABELS_V1[number];
+
+/** The SAME five keyword families `compoundPromptStateFor` detects — never raw prompt text. The
+ * label type ties each family to the vocabulary above, so a family cannot introduce a sixth. */
+const PROMPT_ENHANCEMENT_SEQUENCE_ROLE_FAMILIES_V1:
+  readonly { label: PromptEnhancementSequenceRoleLabelV1; keywords: readonly string[] }[] = [
   { label: 'fix', keywords: ['fix', 'bug', 'error', 'failing'] },
   { label: 'review', keywords: ['review', 'verify', 'audit'] },
   { label: 'refactor', keywords: ['refactor', 'clean up', 'upgrade', 'migrate'] },
   { label: 'plan', keywords: ['plan', 'break down', 'prd', 'spec'] },
   { label: 'build', keywords: ['build', 'implement', 'add', 'extend'] },
 ];
+
+/**
+ * The labels the producer can actually emit, derived from the families table. Exported so the
+ * vocabulary a validator enforces can be proven equal to the one the producer uses — the type tie
+ * above catches a sixth label being added, and this catches a family being dropped.
+ */
+export const PROMPT_ENHANCEMENT_SEQUENCE_ROLE_FAMILY_LABELS_V1: readonly PromptEnhancementSequenceRoleLabelV1[] =
+  PROMPT_ENHANCEMENT_SEQUENCE_ROLE_FAMILIES_V1.map((family) => family.label);
 
 /**
  * DISPLAY-ONLY sequence-plan description for the MPS first popup's dim "Sequence plan" block

@@ -7,6 +7,10 @@ import {
   type PromptEnhancementSequencePayloadV1,
 } from './sequence-payload.js';
 import type { PromptEnhancementValidationGraphV1 } from './contracts.js';
+import {
+  PROMPT_ENHANCEMENT_SEQUENCE_ROLE_FAMILY_LABELS_V1,
+  PROMPT_ENHANCEMENT_SEQUENCE_ROLE_LABELS_V1,
+} from './routing-taxonomy.js';
 
 const LEN = 100;
 
@@ -282,6 +286,18 @@ describe('sequence payload — per-kind field presence', () => {
       .toBe('item_validation_graph_presence_invalid');
     expect(reason(payload([firstTask({ itemValidationGraph: GRAPH }), task(1)])))
       .toBe('item_validation_graph_presence_invalid');
+  });
+
+  it('validates role labels against the vocabulary the producer emits, not a copy of it', () => {
+    // The closure is structural while the producer picks from a fixed families table; once a
+    // model produces the labels it is this list that enforces it. If the two were separate
+    // copies the check would enforce a closure nobody relies on.
+    expect([...PROMPT_ENHANCEMENT_SEQUENCE_ROLE_LABELS_V1].sort())
+      .toEqual([...PROMPT_ENHANCEMENT_SEQUENCE_ROLE_FAMILY_LABELS_V1].sort());
+    // Every label the producer can emit is accepted on a stored item.
+    for (const label of PROMPT_ENHANCEMENT_SEQUENCE_ROLE_FAMILY_LABELS_V1) {
+      expect(reason(payload([firstTask(), task(1, { roleLabel: label })]))).toBeUndefined();
+    }
   });
 
   it('requires a decomposition group id on task kinds and a closed role label', () => {

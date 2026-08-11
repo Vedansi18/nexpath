@@ -9,6 +9,10 @@ import {
   PROMPT_ENHANCEMENT_SEQUENCE_MAX_ITEM_COUNT_V1,
   PROMPT_ENHANCEMENT_SEQUENCE_MIN_ITEM_COUNT_V1,
 } from './sequence-runtime.js';
+import {
+  PROMPT_ENHANCEMENT_SEQUENCE_ROLE_LABELS_V1,
+  type PromptEnhancementSequenceRoleLabelV1,
+} from './routing-taxonomy.js';
 
 /**
  * Durable payload for a multi-prompt sequence: the ordered item list plus the four
@@ -38,15 +42,16 @@ export type PromptEnhancementSequenceItemKindV1 =
 /** Kinds that carry a slice of the user's original prompt. The other four carry none. */
 export const PROMPT_ENHANCEMENT_SEQUENCE_TASK_KINDS_V1 = ['first_task', 'task'] as const;
 
-export const PROMPT_ENHANCEMENT_SEQUENCE_ROLE_LABELS_V1 = [
-  'fix',
-  'review',
-  'refactor',
-  'plan',
-  'build',
-] as const;
-export type PromptEnhancementSequenceRoleLabelV1 =
-  typeof PROMPT_ENHANCEMENT_SEQUENCE_ROLE_LABELS_V1[number];
+/**
+ * The role vocabulary is NOT redeclared here. It has one definition, beside the producer that
+ * emits it, so the set a stored item is validated against is the same set the producer can
+ * produce — a second copy would let the two drift and the check would enforce a closure that is
+ * not the one being relied on.
+ */
+export {
+  PROMPT_ENHANCEMENT_SEQUENCE_ROLE_LABELS_V1,
+  type PromptEnhancementSequenceRoleLabelV1,
+} from './routing-taxonomy.js';
 
 export const PROMPT_ENHANCEMENT_SEQUENCE_COMPLEXITIES_V1 = [
   'not_complex',
