@@ -13,14 +13,24 @@
  * **Why this is simpler than the DS poller, not just a copy of it:** the DS
  * poller has two jobs because a DS advisory has an interactive popup to
  * bridge a SELECTION back from (`readInjected`/`session_states.lastInjectedPrompt`)
- * and a fallback to arm when that popup produced nothing. A pending PE has
- * no such popup on Windsurf at all — `cli-submit-popup.ts`'s raw-TTY
- * interaction cannot run without a real console, and Windsurf's
- * Cascade-hook invocation context doesn't provide one. So there is nothing
- * to bridge a selection FROM. This poller's only job is: notice a pending
- * PE, and directly insert its current body into Cascade — the acceptance
- * criterion's own wording, "delivery via the verified `injectViaCascadeAction`
- * direct Cascade insert."
+ * and a fallback to arm when that popup produced nothing. This poller's only
+ * job is: notice a pending PE, and directly insert its current body into
+ * Cascade — the acceptance criterion's own wording, "delivery via the
+ * verified `injectViaCascadeAction` direct Cascade insert."
+ *
+ * **CORRECTED 2026-08-11 — this header used to claim "a pending PE has no
+ * popup on Windsurf at all" (raw-TTY reasoning). The live E2E disproved
+ * that:** `stop`'s PE host does not need the hook's own TTY — it SPAWNS a
+ * terminal window (`prompt-enhancement-host.ts`), and that popup opened fine
+ * on GUI Linux. The result was this poller pre-inserting the body into
+ * Cascade seconds BEFORE the popup appeared — behaviour neither the CLI nor
+ * Cursor has. Owner ruling 2026-08-11: popup-first everywhere, so this
+ * poller is now GATED at the wiring site (`extension.ts`, via
+ * `pe-popup-host-probe.ts`): its `readPendingPe` returns `null` whenever a
+ * popup host is possible, and the popup's "Use enhanced" selection bridges
+ * through the advisory poller's `readPeEventMeta` gate instead. This module
+ * itself is unchanged and still delivers wherever the popup genuinely cannot
+ * open (headless/no-terminal hosts — the premise P10 was actually about).
  *
  * **Keyed on the PE table only — never `pending_advisories`, never
  * `lastInjectedPrompt`.** `PePollerDeps` has no field that could read

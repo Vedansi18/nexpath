@@ -120,3 +120,102 @@ describe('createAdvisoryPoller (windsurf delivery)', () => {
     expect(clearIntervalFn).toHaveBeenCalledWith(42);
   });
 });
+
+/**
+ * readPeEventMeta — the PE-only-turn selection bridge (owner ruling 2026-08-11,
+ * popup-first on Windsurf). A PE-only turn stores NO advisory row, so without
+ * this dep the freshness gate never opens and "Use enhanced" never bridges.
+ * The dep must widen step 1 ONLY — a PE event must never arm the fallback.
+ */
+describe('createAdvisoryPoller — PE-event selection bridge', () => {
+  let onSelection: ReturnType<typeof vi.fn>;
+  let onArm: ReturnType<typeof vi.fn>;
+  let readAdvisory: ReturnType<typeof vi.fn>;
+  let readInjected: ReturnType<typeof vi.fn>;
+  let readPeEventMeta: ReturnType<typeof vi.fn>;
+  let t: number;
+  const make = (over = {}) => createAdvisoryPoller({
+    projectRoots: ['/proj'], readAdvisory, readInjected, onSelection, onArm,
+    readPeEventMeta,
+    graceMs: 6000, now: () => t, setIntervalFn: () => 1, clearIntervalFn: () => {}, ...over,
+  });
+
+  beforeEach(() => {
+    onSelection = vi.fn(); onArm = vi.fn();
+    readAdvisory = vi.fn().mockResolvedValue(null);
+    readInjected = vi.fn().mockResolvedValue(null);
+    readPeEventMeta = vi.fn().mockResolvedValue(null);
+    t = 4000;
+  });
+
+  it('⭐ PE-only turn: fresh PE row opens the gate and the selection bridges', async () => {
+    readPeEventMeta.mockResolvedValue({ createdAt: 5000 });
+    readInjected.mockResolvedValue('Enhanced body from Use enhanced');
+    const p = make(); p.start(); t = 7000;
+    await p.pollOnce();
+    expect(onSelection).toHaveBeenCalledWith('Enhanced body from Use enhanced');
+    expect(onArm).not.toHaveBeenCalled();
+  });
+
+  it('⭐ a PE event NEVER arms the fallback — even shown-shaped, far past grace', async () => {
+    readPeEventMeta.mockResolvedValue({ createdAt: 5000, status: 'shown' });
+    readInjected.mockResolvedValue(null);
+    const p = make(); p.start(); t = 100000;
+    await p.pollOnce();
+    await p.pollOnce();
+    expect(onArm).not.toHaveBeenCalled();
+  });
+
+  it('a stale PE row (from before start) does not open the gate', async () => {
+    readPeEventMeta.mockResolvedValue({ createdAt: 3000 });
+    readInjected.mockResolvedValue('stale leftover');
+    const p = make(); p.start(); t = 7000;
+    await p.pollOnce();
+    expect(onSelection).not.toHaveBeenCalled();
+    expect(readInjected).not.toHaveBeenCalled();
+  });
+
+  it('⭐ with a fresh advisory present, PE meta is not consulted (shipped flow untouched)', async () => {
+    readAdvisory.mockResolvedValue(advisory({ status: 'shown', createdAt: 5000 }));
+    readInjected.mockResolvedValue('DS selection');
+    const p = make(); p.start(); t = 7000;
+    await p.pollOnce();
+    expect(onSelection).toHaveBeenCalledWith('DS selection');
+    expect(readPeEventMeta).not.toHaveBeenCalled();
+  });
+
+  it('the same bridged value is not re-injected on the next poll (dedup holds on the PE path)', async () => {
+    readPeEventMeta.mockResolvedValue({ createdAt: 5000 });
+    readInjected.mockResolvedValue('Enhanced body');
+    const p = make(); p.start(); t = 7000;
+    await p.pollOnce();
+    await p.pollOnce();
+    expect(onSelection).toHaveBeenCalledTimes(1);
+  });
+
+  it('a throwing readPeEventMeta is treated as no event — no crash, nothing bridged', async () => {
+    readPeEventMeta.mockRejectedValue(new Error('db locked'));
+    readInjected.mockResolvedValue('x');
+    const p = make(); p.start(); t = 7000;
+    await expect(p.pollOnce()).resolves.toBeUndefined();
+    expect(onSelection).not.toHaveBeenCalled();
+  });
+
+  it('multi-root: the newest PE event wins and its root is used for the injected read', async () => {
+    readPeEventMeta.mockImplementation(async (root: string) =>
+      root === '/b' ? { createdAt: 7000 } : { createdAt: 6000 });
+    readInjected.mockResolvedValue('Enhanced from /b');
+    const p = make({ projectRoots: ['/a', '/b'] }); p.start(); t = 8000;
+    await p.pollOnce();
+    expect(readInjected).toHaveBeenCalledWith('/b');
+    expect(onSelection).toHaveBeenCalledWith('Enhanced from /b');
+  });
+
+  it('absent dep (shipped wiring): a PE-only turn stays un-bridged exactly as before', async () => {
+    readInjected.mockResolvedValue('would-be selection');
+    const p = make({ readPeEventMeta: undefined }); p.start(); t = 7000;
+    await p.pollOnce();
+    expect(onSelection).not.toHaveBeenCalled();
+    expect(readInjected).not.toHaveBeenCalled();
+  });
+});
