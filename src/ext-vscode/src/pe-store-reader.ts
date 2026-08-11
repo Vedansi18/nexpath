@@ -22,6 +22,11 @@ import { defaultStorePath, stagedGetRow } from './advisory-store-reader.js';
  * Every failure path returns `null` rather than throwing — a read-only
  * fallback must never break the host. Queries `pending_prompt_enhancements` by
  * `project_root` only, per the phase spec; never reads `pending_advisories`.
+ *
+ * TRACEABILITY: VED-PE-5 (PE fallback is not the Decision-Session path). Verified
+ * by `pe-traceability.test.ts`, which greps this file with comments STRIPPED —
+ * a naive grep matches these very sentences and would pass while the code did
+ * the opposite.
  */
 
 /** A pending Prompt Enhancement row, normalised from `pending_prompt_enhancements`. */

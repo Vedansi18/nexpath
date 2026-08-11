@@ -158,6 +158,10 @@ export interface PeApplyActionResponseResult {
  * doesn't match the current in-flight request — stale (superseded by a
  * newer request) or a duplicate of an already-settled one — is ignored
  * entirely: `lastValidBody` and `lockState` are left exactly as they were,
+ * TRACEABILITY: DEP-B1.3A-VED-04 (stale never replaces). Recorded as
+ * "unconfirmed, needs verification" in the H8 audit; verified 2026-08-11 —
+ * implemented here and pinned by `pe-action-loop.test.ts`.
+ *
  * satisfying "a stale/superseded result is ignored and never overwrites a
  * newer body." Any non-`accepted_result` outcome (including a
  * structurally-malformed "acceptance") unlocks the loop but leaves
