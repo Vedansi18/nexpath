@@ -75,6 +75,10 @@ export function upsertPendingPromptSequence(
   if (!validatePromptEnhancementSequencePayloadV1(payload, { itemCount: state.itemCount }).ok) {
     return false;
   }
+  // The rewrite check runs BEFORE the delete: this is the only point at which a stored value can
+  // be replaced, so refusing here is what makes "written once, never rewritten" true.
+  const prior = storedFrozenFields(store, state.projectRoot);
+  if (prior && !frozenFieldsRespected(prior, payload)) return false;
   const now = Date.now();
   store.db.run('DELETE FROM pending_prompt_sequences WHERE project_root = ?', [state.projectRoot]);
   store.db.run(
@@ -103,6 +107,79 @@ export function upsertPendingPromptSequence(
     ],
   );
   saveStore(store);
+  return true;
+}
+
+/**
+ * Serialize with a stable key order so two structurally equal values compare equal. Used only to
+ * decide whether a frozen field CHANGED — rewriting an item with the identical value is legal, so
+ * a key-order difference must not read as a change.
+ */
+function canonical(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null';
+  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
+  const entries = Object.entries(value as Record<string, unknown>)
+    .filter(([, v]) => v !== undefined)
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${canonical(v)}`).join(',')}}`;
+}
+
+/**
+ * Read the stored payload for a project WITHOUT the active-status filter and without scrubbing.
+ * The frozen-field check must see every row, including a terminal one, and must not delete
+ * anything on its way to a decision.
+ */
+function storedFrozenFields(
+  store: Store,
+  projectRoot: string,
+): { items: readonly Record<string, unknown>[]; offerDisposition: string } | null {
+  const result = store.db.exec(
+    `SELECT items_json, offer_disposition FROM pending_prompt_sequences
+     WHERE project_root = ? ORDER BY updated_at DESC LIMIT 1`,
+    [projectRoot],
+  );
+  const raw = result[0]?.values[0];
+  if (!raw) return null;
+  const items = parseJsonArray(raw[0]);
+  return {
+    items: (items ?? []) as readonly Record<string, unknown>[],
+    offerDisposition: raw[1] as string,
+  };
+}
+
+const FROZEN_ITEM_FIELDS = ['generatedWording', 'itemValidationGraph'] as const;
+
+/**
+ * The write-time half of the immutability rule, which cannot be a read-time check: a validator
+ * handed one row cannot tell a first write from a rewrite, so this is the only place it can live.
+ *
+ * `null -> value` is the one legal transition on an item's wording and on its validation verdict.
+ * `value -> a different value` is refused, and the whole write is refused with it — an item that
+ * comes back must come back identical, and a verdict must not change on unchanged text.
+ *
+ * The disposition is write-once for the same reason: it records what the user did with the OFFER.
+ * A later cancel changes the sequence's status, not that decision, so a write that disagrees with
+ * the stored value is refused rather than merged.
+ *
+ * Items are matched by position, which is the same correspondence the rest of the row uses. There
+ * is deliberately no rule here for an item that disappears from a shorter list: the row exists
+ * only after activation, and the plan is frozen at activation, so that transition is not one this
+ * writer is specified to see.
+ */
+function frozenFieldsRespected(
+  prior: { items: readonly Record<string, unknown>[]; offerDisposition: string },
+  next: PromptEnhancementSequencePayloadV1,
+): boolean {
+  if (prior.offerDisposition !== next.offerDisposition) return false;
+  const shared = Math.min(prior.items.length, next.items.length);
+  for (let index = 0; index < shared; index += 1) {
+    const before = prior.items[index];
+    const after = next.items[index] as unknown as Record<string, unknown>;
+    for (const field of FROZEN_ITEM_FIELDS) {
+      const written = before?.[field] !== null && before?.[field] !== undefined;
+      if (written && canonical(before[field]) !== canonical(after?.[field])) return false;
+    }
+  }
   return true;
 }
 

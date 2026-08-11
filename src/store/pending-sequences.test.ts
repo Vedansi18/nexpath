@@ -32,6 +32,16 @@ function plannedItems(count: number): PromptEnhancementSequencePayloadV1['items'
   )) as unknown as PromptEnhancementSequencePayloadV1['items'];
 }
 
+function withItemField(
+  items: PromptEnhancementSequencePayloadV1['items'],
+  index: number,
+  field: string,
+  value: unknown,
+): PromptEnhancementSequencePayloadV1['items'] {
+  return items.map((item, i) => (i === index ? { ...item, [field]: value } : item)) as
+    PromptEnhancementSequencePayloadV1['items'];
+}
+
 function payload(
   overrides: Partial<PromptEnhancementSequencePayloadV1> = {},
 ): PromptEnhancementSequencePayloadV1 {
@@ -198,12 +208,75 @@ describe('pending-sequences store', () => {
     expect(getActivePendingPromptSequence(store, PROJECT, 'sess-1')).toBeNull();
   });
 
-  it('keeps a terminal stub readable — it is exempt from the item bounds', () => {
-    // A non-accepted row records an offer that never activated; the bounds would scrub it as it
-    // was written.
+  it('accepts a non-accepted payload — it is exempt from the item bounds', () => {
+    // A row recording an offer that never activated carries no items; without the exemption the
+    // bounds would refuse it, and on read the scrub would delete it as it was written.
     const stub = payload({ offerDisposition: 'not_engaged', originalLength: 0 });
     expect(upsertPendingPromptSequence(store, createdState(), stub)).toBe(true);
+  });
+
+  it('never selects a terminal row, so its scrub-on-read cannot reach one', () => {
+    // The active filter is what keeps a terminal record out of the read path entirely — it is not
+    // hidden by validation, it is never selected, so it is also never scrubbed.
+    expect(upsertPendingPromptSequence(store, createdState(), payload())).toBe(true);
+    store.db.run("UPDATE pending_prompt_sequences SET status = 'cancelled', offer_disposition = 'not_engaged'");
+    expect(getActivePendingPromptSequence(store, PROJECT, 'sess-1')).toBeNull();
+    const all = store.db.exec('SELECT COUNT(*) FROM pending_prompt_sequences');
+    expect(all[0].values[0][0]).toBe(1);
+  });
+
+  it('refuses a second write that changes stored wording or a stored verdict', () => {
+    // null -> value is the one legal transition; an item that comes back must come back
+    // identical, and a verdict must not change on unchanged text.
+    const first = payload({ items: plannedItems(3), suggestedNextPromptPolicy: 'rendered_after_explicit_acceptance' });
+    expect(upsertPendingPromptSequence(store, createdState({ itemCount: 3 }), first)).toBe(true);
+
+    const rewritten = payload({
+      items: withItemField(plannedItems(3), 1, 'generatedWording', 'something else'),
+      suggestedNextPromptPolicy: 'rendered_after_explicit_acceptance',
+    });
+    expect(upsertPendingPromptSequence(store, createdState({ itemCount: 3 }), rewritten)).toBe(false);
+
+    const reverdicted = payload({
+      items: withItemField(plannedItems(3), 2, 'itemValidationGraph', { changed: true }),
+      suggestedNextPromptPolicy: 'rendered_after_explicit_acceptance',
+    });
+    expect(upsertPendingPromptSequence(store, createdState({ itemCount: 3 }), reverdicted)).toBe(false);
+
+    // The stored row is untouched by either refusal.
+    expect(getActivePendingPromptSequence(store, PROJECT, 'sess-1')?.payload.items).toEqual(first.items);
+  });
+
+  it('allows an identical rewrite — freezing a value is not freezing the row', () => {
+    const planned = payload({ items: plannedItems(3), suggestedNextPromptPolicy: 'rendered_after_explicit_acceptance' });
+    expect(upsertPendingPromptSequence(store, createdState({ itemCount: 3 }), planned)).toBe(true);
+    // Rebuilt from scratch rather than reused, so a key-order difference would show up here — it
+    // must not read as a change, or a legal repeat write would be refused.
+    expect(upsertPendingPromptSequence(store, createdState({ itemCount: 3 }), payload({
+      items: plannedItems(3), suggestedNextPromptPolicy: 'rendered_after_explicit_acceptance',
+    }))).toBe(true);
+    expect(getActivePendingPromptSequence(store, PROJECT, 'sess-1')?.payload.items).toEqual(planned.items);
+  });
+
+  it('reports the first frozen field it finds, whichever item carries it', () => {
+    // null -> value is the legal transition, but on a valid stored row it is unreachable: every
+    // item except the first is already required to carry both a wording and a verdict. So on a
+    // servable row the rule reduces to identical-or-refused, which is what is exercised here.
+    const first = payload({ items: plannedItems(3), suggestedNextPromptPolicy: 'rendered_after_explicit_acceptance' });
+    expect(upsertPendingPromptSequence(store, createdState({ itemCount: 3 }), first)).toBe(true);
+    // The change is on the LAST item, so the scan cannot pass by stopping at the first one.
+    expect(upsertPendingPromptSequence(store, createdState({ itemCount: 3 }), payload({
+      items: withItemField(plannedItems(3), 2, 'generatedWording', 'late change'),
+      suggestedNextPromptPolicy: 'rendered_after_explicit_acceptance',
+    }))).toBe(false);
+  });
+
+  it('refuses a second write that changes what the user did with the offer', () => {
+    // A mid-sequence cancel changes the sequence's status, not the record of the offer.
+    expect(upsertPendingPromptSequence(store, createdState(), payload())).toBe(true);
+    expect(upsertPendingPromptSequence(store, createdState(), payload({ offerDisposition: 'rejected' })))
+      .toBe(false);
     expect(getActivePendingPromptSequence(store, PROJECT, 'sess-1')?.payload.offerDisposition)
-      .toBe('not_engaged');
+      .toBe('accepted');
   });
 });
