@@ -18,7 +18,7 @@ import { isPePopupHostLikelyAvailable } from './pe-popup-host-probe.js';
 import { parsePromptEnhancementExtensionPayloadV1 } from './pe-payload.js';
 import { isPeOriginTurn } from './pe-origin.js';
 import { createInjectedRecordStore } from './injected-record.js';
-import { injectPeBody, resolvePeVisibleSurfaceAckState } from './pe-delivery.js';
+import { injectPeBody, injectPeBodyWithFallback, resolvePeVisibleSurfaceAckState } from './pe-delivery.js';
 import { createPePoller, type PePoller } from './pe-poller.js';
 import {
   buildPeActionRequest,
@@ -685,19 +685,37 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       return true;
     },
     // P8 (D-1): a PE result is injected via the clipboard-free chatInputInject
-    // ONLY — never DS's windsurfInject/cursorInject (both write the text to
-    // the clipboard internally as their own copy-then-paste-keystroke
-    // mechanism), and never handleOptionSelection's clipboard+toast fallback.
-    // On success, records the delivered body's typed identity (currentBodyId/
+    // FIRST — the primary path never touches the clipboard.
+    //
+    // CORRECTED 2026-08-11 (FIX-2, owner-approved) — this comment used to say
+    // "never DS's cursorInject" with no fallback at all. Live Cursor E2E hit
+    // the case that leaves: a build with NO registered chat-insert command
+    // (`cursor inject-command present: NONE`), where the typed path can only
+    // fail and the enhanced body was LOST (`insert_failed_no_clipboard_fallback`,
+    // 2026-08-11 12:17:14). G-A5's own ruling allows clipboard exactly here —
+    // "only ... when inject back ... is fail" — so on a failed typed insert on
+    // Cursor we now fall back to the SHIPPED DS ladder (cursorInject: clipboard
+    // → raise → focus loop → paste into the EXISTING chat), and if even that
+    // fails the ladder's first step already copied the text, so we toast. Other
+    // hosts keep the typed-only behaviour (no pasteFallback wired).
+    //
+    // On delivery, records the delivered body's typed identity (currentBodyId/
     // bodyRevision) so the NEXT turn's isPeEcho can recognise a genuine typed
     // echo, not just a text match — see injected-record.ts's
-    // resolveOriginGuardState. On failure, emits a typed failed outcome; no
-    // clipboard write exists anywhere in this path to make.
+    // resolveOriginGuardState.
     injectPeResult: async (resultText, event) => {
       const projectRoot = cwdForEvent(event);
-      const outcome = await injectPeBody(resultText, (t) => chatInputInject(t, { host }));
-      log(`[nexpath] PE insert outcome: ${outcome}`);
-      if (outcome !== 'inserted') return;
+      const result = await injectPeBodyWithFallback(resultText, (t) => chatInputInject(t, { host }), {
+        pasteFallback: host === 'cursor' ? cursorInject : undefined,
+        onClipboardOnly: () => {
+          void vscode.window.showInformationMessage(
+            'Nexpath: enhanced prompt copied — press Ctrl+V in the chat input to paste it.',
+          );
+        },
+        log,
+      });
+      log(`[nexpath] PE insert outcome: ${result.outcome} (stage=${result.stage} delivered=${result.delivered})`);
+      if (!result.delivered) return;
       try {
         const pending = await readPendingPromptEnhancement(projectRoot);
         const parsed = pending ? parsePromptEnhancementExtensionPayloadV1(pending.resultJson) : null;

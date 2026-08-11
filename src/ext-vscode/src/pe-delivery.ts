@@ -261,3 +261,74 @@ export async function injectPeBody(
     return 'insert_failed_no_clipboard_fallback';
   }
 }
+
+/** Which transport actually carried (or last attempted) the PE body. */
+export type PeDeliveryStage = 'typed' | 'cursor_paste_fallback' | 'clipboard_only';
+
+export interface PeFallbackDeliveryResult {
+  /** The TYPED path's outcome, unchanged — never rewritten by a fallback success. */
+  outcome: PeInsertOutcome;
+  stage: PeDeliveryStage;
+  /** True only when the body verifiably landed in the chat input. */
+  delivered: boolean;
+}
+
+/**
+ * FIX-2 (2026-08-11, owner-approved): PE delivery with the G-A5 failed-inject
+ * fallback.
+ *
+ * P8's D-1 rule made `injectPeBody` clipboard-free — correct as the PRIMARY
+ * path. The live Cursor E2E then hit the case D-1 left with no transport at
+ * all: a build registering NO direct chat-insert command (activation log
+ * `cursor inject-command present: NONE`), where the typed path can only fail
+ * and the enhanced body was lost. The owner's G-A5 ruling already covers this
+ * exact case: clipboard is allowed "only ... when inject back ... is fail".
+ *
+ * Ladder: typed clipboard-free insert → (fail) → the SHIPPED DS paste ladder
+ * (`cursorInject`: clipboard → raise → focus loop → paste into the EXISTING
+ * chat) → (fail) → the text is already on the clipboard from that ladder's own
+ * first step, so tell the user to paste (`onClipboardOnly`).
+ *
+ * Contract notes:
+ * - `pasteFallback` absent ⇒ byte-identical to the pre-FIX-2 behaviour (typed
+ *   only). Wire it ONLY where G-A5's branch applies (host === 'cursor').
+ * - `onClipboardOnly` fires ONLY when `pasteFallback` returned false normally —
+ *   `cursorInject` awaits its clipboard write FIRST, so a normal false return
+ *   guarantees the text is on the clipboard. A THROWN fallback makes no such
+ *   guarantee, so it must never claim "copied" (logged instead, no toast).
+ * - `outcome` always reports the typed path truthfully; callers needing "did
+ *   it land" use `delivered`.
+ */
+export async function injectPeBodyWithFallback(
+  text: string,
+  typedInjectFn: (text: string) => Promise<boolean>,
+  deps: {
+    pasteFallback?: (text: string) => Promise<boolean>;
+    onClipboardOnly?: () => void;
+    log?: (line: string) => void;
+  } = {},
+): Promise<PeFallbackDeliveryResult> {
+  const outcome = await injectPeBody(text, typedInjectFn);
+  if (outcome === 'inserted') {
+    return { outcome, stage: 'typed', delivered: true };
+  }
+  if (!deps.pasteFallback) {
+    return { outcome, stage: 'typed', delivered: false };
+  }
+  let pasted = false;
+  let fallbackThrew = false;
+  try {
+    pasted = await deps.pasteFallback(text);
+  } catch {
+    fallbackThrew = true;
+  }
+  if (pasted) {
+    return { outcome, stage: 'cursor_paste_fallback', delivered: true };
+  }
+  if (fallbackThrew) {
+    deps.log?.('[nexpath] PE paste fallback threw — clipboard state unknown, no copied-toast shown');
+    return { outcome, stage: 'typed', delivered: false };
+  }
+  deps.onClipboardOnly?.();
+  return { outcome, stage: 'clipboard_only', delivered: false };
+}

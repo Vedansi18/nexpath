@@ -1,9 +1,12 @@
 import { describe, it, expect, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   validatePeExtensionDeliveryPayload,
   evaluatePeHostCapability,
   resolvePeVisibleSurfaceAckState,
   injectPeBody,
+  injectPeBodyWithFallback,
   type PeHostCapabilityEvidenceState,
 } from './pe-delivery.js';
 
@@ -256,5 +259,96 @@ describe('injectPeBody — D-1: insert failure never falls back to clipboard', (
 
   it('the function signature has no clipboard-writer parameter at all — structural proof, not just behavioural', () => {
     expect(injectPeBody.length).toBe(2); // (text, injectFn) only
+  });
+});
+
+/**
+ * FIX-2 (2026-08-11) — the G-A5 failed-inject fallback ladder.
+ * typed → cursorInject paste → clipboard toast. The toast may ONLY fire when
+ * the fallback returned false normally (its clipboard write already ran); a
+ * thrown fallback guarantees nothing and must never claim "copied".
+ */
+describe('injectPeBodyWithFallback (FIX-2)', () => {
+  it('typed success: delivered via typed, fallback never consulted', async () => {
+    const pasteFallback = vi.fn();
+    const onClipboardOnly = vi.fn();
+    const r = await injectPeBodyWithFallback('body', async () => true, { pasteFallback, onClipboardOnly });
+    expect(r).toEqual({ outcome: 'inserted', stage: 'typed', delivered: true });
+    expect(pasteFallback).not.toHaveBeenCalled();
+    expect(onClipboardOnly).not.toHaveBeenCalled();
+  });
+
+  it('typed fail + NO fallback wired: byte-identical to pre-FIX-2 (typed-only hosts)', async () => {
+    const onClipboardOnly = vi.fn();
+    const r = await injectPeBodyWithFallback('body', async () => false, { onClipboardOnly });
+    expect(r).toEqual({ outcome: 'insert_failed_no_clipboard_fallback', stage: 'typed', delivered: false });
+    expect(onClipboardOnly).not.toHaveBeenCalled();
+  });
+
+  it('⭐ typed fail + paste succeeds: delivered via cursor_paste_fallback, no toast, typed outcome not rewritten', async () => {
+    const pasteFallback = vi.fn(async () => true);
+    const onClipboardOnly = vi.fn();
+    const r = await injectPeBodyWithFallback('body', async () => false, { pasteFallback, onClipboardOnly });
+    expect(r).toEqual({
+      outcome: 'insert_failed_no_clipboard_fallback',
+      stage: 'cursor_paste_fallback',
+      delivered: true,
+    });
+    expect(pasteFallback).toHaveBeenCalledWith('body');
+    expect(onClipboardOnly).not.toHaveBeenCalled();
+  });
+
+  it('⭐ typed fail + paste fails normally: clipboard_only + exactly one toast (the ladder already copied)', async () => {
+    const onClipboardOnly = vi.fn();
+    const r = await injectPeBodyWithFallback('body', async () => false, {
+      pasteFallback: async () => false,
+      onClipboardOnly,
+    });
+    expect(r.stage).toBe('clipboard_only');
+    expect(r.delivered).toBe(false);
+    expect(onClipboardOnly).toHaveBeenCalledTimes(1);
+  });
+
+  it('⭐ thrown fallback: no toast (clipboard state unknown — never claim copied), logged, no crash', async () => {
+    const onClipboardOnly = vi.fn();
+    const log = vi.fn();
+    const r = await injectPeBodyWithFallback('body', async () => false, {
+      pasteFallback: async () => { throw new Error('xdotool exploded'); },
+      onClipboardOnly,
+      log,
+    });
+    expect(r).toEqual({ outcome: 'insert_failed_no_clipboard_fallback', stage: 'typed', delivered: false });
+    expect(onClipboardOnly).not.toHaveBeenCalled();
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('clipboard state unknown'));
+  });
+
+  it('typed inject throwing counts as a typed failure and the ladder still runs', async () => {
+    const r = await injectPeBodyWithFallback('body', async () => { throw new Error('boom'); }, {
+      pasteFallback: async () => true,
+    });
+    expect(r.stage).toBe('cursor_paste_fallback');
+    expect(r.delivered).toBe(true);
+  });
+});
+
+describe('FIX-2 STRUCTURAL PINS — extension.ts wiring (comments stripped)', () => {
+  const codeOnly = (src: string) =>
+    src.split('\n').filter((l) => {
+      const t = l.trimStart();
+      return !t.startsWith('*') && !t.startsWith('//') && !t.startsWith('/*');
+    }).join('\n');
+  const flat = codeOnly(readFileSync(join(__dirname, 'extension.ts'), 'utf8'))
+    .replace(/\s+/g, ' ');
+
+  it('injectPeResult delivers through the fallback helper, not bare injectPeBody', () => {
+    expect(flat).toContain('await injectPeBodyWithFallback(resultText,');
+  });
+
+  it('the paste fallback is the shipped cursorInject, gated to host cursor only', () => {
+    expect(flat).toContain("pasteFallback: host === 'cursor' ? cursorInject : undefined");
+  });
+
+  it('the origin record gates on delivered — a fallback delivery records the echo identity too', () => {
+    expect(flat).toContain('if (!result.delivered) return;');
   });
 });
