@@ -103,6 +103,42 @@ export function isCursorSubmitAdvisoryEnabled(env: NodeJS.ProcessEnv = process.e
   return env[CURSOR_SUBMIT_ADVISORY_ENV] === '1';
 }
 
+/**
+ * Non-consuming PEEK at the pending submit decision (H8, `G-ARBITRATION`
+ * Finding 1).
+ *
+ * ── WHY THIS EXISTS ──────────────────────────────────────────────────────────
+ * The hook's VED-PE-10 guard writes the replacement into
+ * `session_states.lastInjectedPrompt` so `auto` skips the injected turn. On
+ * Windsurf that SAME field is also the DS advisory-poller's delivery-bridge
+ * signal (`advisory-poller.ts` — "bridge the popup selection"), so the DS
+ * poller would inject the replacement a SECOND time alongside the submit
+ * poller's own delivery. The DS poller's guard needs to ask "is this text a
+ * submit-flow replacement?" — and it may ask BEFORE the submit poller has
+ * consumed the decision (tick order is non-deterministic), so the answer must
+ * not consume the record. No `remove`, no `hookPid` liveness gate (we are not
+ * delivering — just identifying), no side effects at all.
+ */
+export async function peekPendingSubmitDecision(
+  projectRoot: string,
+  deps: SubmitDecisionReaderDeps = {},
+): Promise<SubmitDecisionRecordV1 | null> {
+  const path = submitDecisionPath(projectRoot);
+  const read = deps.read ?? ((p: string) => readFile(p, 'utf8'));
+  const expectedHost = deps.expectedHost ?? 'windsurf';
+
+  let text: string;
+  try {
+    text = await read(path);
+  } catch {
+    return null; // absent is the common case, not an error
+  }
+  const record = parseSubmitDecisionJsonV1(text);
+  if (!record) return null;
+  if (record.host !== expectedHost) return null;
+  return record;
+}
+
 export async function readPendingSubmitDecision(
   projectRoot: string,
   deps: SubmitDecisionReaderDeps = {},

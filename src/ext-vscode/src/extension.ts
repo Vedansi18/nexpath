@@ -25,7 +25,9 @@ import {
   isWindsurfSubmitAdvisoryEnabled,
   isCursorSubmitAdvisoryEnabled,
   readPendingSubmitDecision,
+  peekPendingSubmitDecision,
 } from './submit-advisory-runtime.js';
+import { isSubmitFlowReplacement } from './submit-replacement-guard.js';
 import { deliverSubmitReplacement } from './submit-delivery-strategy.js';
 import { createSubmitAdvisoryForHost } from './submit-advisory-wiring.js';
 import {
@@ -563,6 +565,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   if (host === 'windsurf') {
     const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
     const roots = Array.from(new Set([canonicalizeCwd(ws), ws]));
+    // H8 / G-ARBITRATION Finding 1 (Windsurf double-injection). Constructed ONLY
+    // when the submit switch is on — null otherwise, so the shipped DS bridge
+    // below is byte-identical in behaviour with the switch off (R12). Reuses the
+    // injected-record store (same non-consuming window-based echo idiom P8 uses).
+    const submitDeliveredStore = isWindsurfSubmitAdvisoryEnabled(process.env)
+      ? createInjectedRecordStore()
+      : null;
+
     advisoryPoller = createAdvisoryPoller({
       projectRoots: roots,
       // Option-independent detection: the popup bridge must fire even though the
@@ -573,6 +583,24 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       readInjected: (root) => readInjectedPrompt(root),
       // Popup selection → inject into Cascade + clear the fallback.
       onSelection: async (prompt) => {
+        // H8 Finding 1: with the submit switch on, `lastInjectedPrompt` also
+        // carries the submit flow's replacement (the VED-PE-10 echo-guard write).
+        // The submit poller delivers that one itself — bridging it here too
+        // would inject it TWICE. A genuine popup selection matches neither
+        // check and flows through unchanged; switch off ⇒ store is null and
+        // this branch does not exist.
+        if (submitDeliveredStore) {
+          const isReplacement = await isSubmitFlowReplacement(prompt, {
+            roots,
+            isRecentSubmitDelivery: (root, text) => submitDeliveredStore.isRecentEcho(root, text),
+            peekPendingDecision: (root) => peekPendingSubmitDecision(root, { expectedHost: 'windsurf' }),
+          });
+          if (isReplacement) {
+            advisoryFallback.clear();
+            log('[nexpath] windsurf: skipped DS bridge for a submit-flow replacement (delivered by the submit poller)');
+            return;
+          }
+        }
         advisoryFallback.clear();
         log('[nexpath] windsurf: bridging popup selection → Cascade via sendChatActionMessage(addCascadeInput)');
         await injectIntoChat(prompt);
@@ -668,6 +696,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             log: (m) => log(m),
           });
           lastDeliveryLanded = res.landed;
+          // H8 Finding 1: remember what the submit flow delivered so the DS
+          // bridge can recognise it even after the decision file is consumed
+          // (tick order between the two pollers is non-deterministic).
+          if (res.outcome !== 'failed' && submitDeliveredStore) {
+            for (const root of roots) submitDeliveredStore.record(root, text);
+          }
           return res.outcome !== 'failed';
         },
         // Auto-submit ONLY after a real injection. After a clipboard fallback the

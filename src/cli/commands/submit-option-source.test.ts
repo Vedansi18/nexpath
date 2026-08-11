@@ -306,3 +306,59 @@ describe('⭐ the CLI popup is constructed exactly as the CLI constructs it', ()
     expect(seen[1]).toBe('/proj');
   });
 });
+
+describe('⭐ H8 Finding 2 — the pending PE row must not survive a blocked turn', () => {
+  // auto (run inside the hold, option-A) may also have stored a
+  // pending_prompt_enhancements row for the prompt the user just cancelled.
+  // Left pending, the Windsurf pePoller inserts its body into Cascade and the
+  // next Stop pops the PE popup for a prompt that no longer exists.
+  it('consumes the pending PE row alongside the advisory row', () => {
+    const markPeShownFn = vi.fn();
+    const s = make({
+      getRow: (() => ({ ...ROW, id: 7 })) as never,
+      markShownFn: vi.fn() as never,
+      getPeRowFn: (() => ({ id: 42 })) as never,
+      markPeShownFn: markPeShownFn as never,
+    });
+    s.composeOptions('p');
+    s.consumeHandledTurn();
+    expect(markPeShownFn).toHaveBeenCalledWith({}, 42);
+  });
+
+  it('no pending PE row ⇒ nothing to consume, no throw', () => {
+    const markPeShownFn = vi.fn();
+    const s = make({
+      getRow: (() => ({ ...ROW, id: 7 })) as never,
+      markShownFn: vi.fn() as never,
+      getPeRowFn: (() => null) as never,
+      markPeShownFn: markPeShownFn as never,
+    });
+    s.composeOptions('p');
+    expect(() => s.consumeHandledTurn()).not.toThrow();
+    expect(markPeShownFn).not.toHaveBeenCalled();
+  });
+
+  it('a PE-consume failure never breaks the block — the replacement is already persisted', () => {
+    const s = make({
+      getRow: (() => ({ ...ROW, id: 7 })) as never,
+      markShownFn: vi.fn() as never,
+      getPeRowFn: (() => { throw new Error('db gone'); }) as never,
+    });
+    s.composeOptions('p');
+    expect(() => s.consumeHandledTurn()).not.toThrow();
+  });
+
+  it('the PE row is consumed even when NO advisory row was read', () => {
+    // A sequence-shaped prompt can store a PE row on a no-action exit with no
+    // advisory row at all — the PE consume must not be gated on lastRowId.
+    const markPeShownFn = vi.fn();
+    const s = make({
+      getRow: (() => null) as never,
+      getPeRowFn: (() => ({ id: 9 })) as never,
+      markPeShownFn: markPeShownFn as never,
+    });
+    s.composeOptions('p');
+    s.consumeHandledTurn();
+    expect(markPeShownFn).toHaveBeenCalledWith({}, 9);
+  });
+});

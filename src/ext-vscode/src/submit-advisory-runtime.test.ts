@@ -13,6 +13,7 @@ import {
   defaultIsProcessAlive,
   isWindsurfSubmitAdvisoryEnabled,
   readPendingSubmitDecision,
+  peekPendingSubmitDecision,
   submitDecisionPath,
   WINDSURF_SUBMIT_ADVISORY_ENV,
 } from './submit-advisory-runtime.js';
@@ -342,5 +343,78 @@ describe('⭐ H6 — records are delivered only to the host they were written fo
     expect((await readPendingSubmitDecision('/proj', deps(undefined, 'windsurf') as never))?.decisionId)
       .toBe('sd-1');
     expect(await readPendingSubmitDecision('/proj', deps(undefined, 'cursor') as never)).toBeNull();
+  });
+});
+
+describe('⭐ peekPendingSubmitDecision — non-consuming, no liveness gate', () => {
+  const REC = JSON.stringify({
+    schemaVersion: 1, decisionId: 'sd-1', replacementText: 'replacement',
+    createdAt: 1_700_000_000_000, host: 'windsurf',
+    blockIssuedAt: 1_699_999_999_000, hookPid: 4242,
+  });
+
+  it('returns the record WITHOUT deleting it', async () => {
+    // The whole point: the DS-bridge guard may ask before the submit poller has
+    // consumed the decision; consuming here would destroy the delivery.
+    const removed: string[] = [];
+    const r = await peekPendingSubmitDecision('/proj', {
+      read: async () => REC,
+      remove: async (p: string) => { removed.push(p); },
+    } as never);
+    expect(r?.replacementText).toBe('replacement');
+    expect(removed).toHaveLength(0);
+  });
+
+  it('does NOT gate on hookPid liveness — identifying, not delivering', async () => {
+    // The reader defers delivery while the hook is alive; the peek must answer
+    // even then, because the DS poller can tick inside that window.
+    const r = await peekPendingSubmitDecision('/proj', {
+      read: async () => REC,
+      isProcessAlive: () => true,   // hook still alive — reader would defer
+    } as never);
+    expect(r?.decisionId).toBe('sd-1');
+  });
+
+  it('still drops a record for the wrong host', async () => {
+    const cursorRec = JSON.stringify({ ...JSON.parse(REC), host: 'cursor' });
+    await expect(peekPendingSubmitDecision('/proj', {
+      read: async () => cursorRec,
+    } as never)).resolves.toBeNull();
+  });
+
+  it('absent file ⇒ null, never a throw', async () => {
+    await expect(peekPendingSubmitDecision('/proj', {
+      read: async () => { throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' }); },
+    } as never)).resolves.toBeNull();
+  });
+});
+
+describe('⭐ H8 Finding 1 — the DS-bridge guard is actually WIRED (structural)', () => {
+  // extension.ts imports `vscode`, so the wiring is pinned against source, the
+  // same technique as the other pins in this file.
+  const extSrc = readFileSync(join(__dirname, 'extension.ts'), 'utf8');
+
+  it('the delivered-record store exists ONLY behind the submit switch', () => {
+    // Constructed unconditionally, the shipped DS bridge would consult a guard
+    // on every activation — new behaviour on the old path (R12).
+    expect(extSrc).toMatch(/submitDeliveredStore = isWindsurfSubmitAdvisoryEnabled\(process\.env\)\s*\?\s*createInjectedRecordStore\(\)\s*:\s*null/);
+  });
+
+  it('onSelection consults the guard before bridging', () => {
+    const sel = extSrc.slice(extSrc.indexOf('onSelection: async (prompt)'));
+    const guardAt = sel.indexOf('isSubmitFlowReplacement(');
+    const injectAt = sel.indexOf('injectIntoChat(prompt)');
+    expect(guardAt).toBeGreaterThan(-1);
+    expect(injectAt).toBeGreaterThan(-1);
+    expect(guardAt).toBeLessThan(injectAt);
+  });
+
+  it('the guard is null-gated so the switch-off bridge is byte-identical in behaviour', () => {
+    expect(extSrc).toMatch(/if \(submitDeliveredStore\) \{[\s\S]{0,400}?isSubmitFlowReplacement/);
+  });
+
+  it('the submit poller records successful deliveries for the guard', () => {
+    const inj = extSrc.slice(extSrc.indexOf("onInject: async (text)"));
+    expect(inj.slice(0, 2200)).toMatch(/submitDeliveredStore\.record\(root, text\)/);
   });
 });

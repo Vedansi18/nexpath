@@ -43,6 +43,11 @@
  * HOLDING the user's prompt is strictly worse than today's "no advisory appears".
  */
 import { getPendingAdvisory, markAdvisoryShown } from '../../store/pending-advisories.js';
+// CONSUME-ONLY (bhavnesh75-owned): called exactly as stop.ts already calls them.
+import {
+  getPendingPromptEnhancement,
+  markPromptEnhancementShown,
+} from '../../store/pending-prompt-enhancements.js';
 import { getUserDepthLevel } from '../../store/user-depth-level.js';
 import { selectionRegister, resolveContentSource } from '../../decision-session/selection-registry.js';
 import {
@@ -90,6 +95,9 @@ export interface SubmitOptionSourceDeps {
   contentSourceFn?: typeof resolveContentSource;
   lookupFn?: typeof autogenAwareLookup;
   markShownFn?: typeof markAdvisoryShown;
+  /** Seams for the pending-PE consume (H8, G-ARBITRATION Finding 2). */
+  getPeRowFn?: typeof getPendingPromptEnhancement;
+  markPeShownFn?: typeof markPromptEnhancementShown;
   log?: (message: string) => void;
 }
 
@@ -253,13 +261,39 @@ export function createDeterministicSubmitOptionSource(
   };
 
   const consumeHandledTurn = (): void => {
-    if (lastRowId === null) return;
+    if (lastRowId !== null) {
+      try {
+        (deps.markShownFn ?? markAdvisoryShown)(deps.store as never, lastRowId);
+      } catch (err) {
+        // Non-fatal: the prompt is already blocked and the replacement persisted.
+        // Worst case the old post-response popup also appears — annoying, not lost work.
+        log(`submit_option_source: could not consume row — ${(err as Error)?.message ?? 'unknown'}`);
+      }
+    }
+
+    // ── H8 / G-ARBITRATION Finding 2: the pending PE row must not survive ────
+    // `auto` (run inside the hold, option-A) may ALSO have stored a
+    // `pending_prompt_enhancements` row for the prompt the user just cancelled
+    // and replaced. Left pending, that row fires later surfaces for a prompt
+    // that no longer exists: the Windsurf pePoller inserts its body into
+    // Cascade, and the next Stop's peLaunch pops the PE popup for it.
+    //
+    // Same principle as the advisory consume above — H3's acceptance rule ("no
+    // pending artifact survives a turn this path fully handled") extended to
+    // the PE table. Called only on 'block' by the wiring site, so an allowed
+    // prompt keeps today's PE behaviour exactly. CONSUME-ONLY: both functions
+    // are bhavnesh75-owned store exports, called precisely as stop.ts calls
+    // them — no Layer C file is modified.
     try {
-      (deps.markShownFn ?? markAdvisoryShown)(deps.store as never, lastRowId);
+      const getPeRow = deps.getPeRowFn ?? getPendingPromptEnhancement;
+      const markPeShown = deps.markPeShownFn ?? markPromptEnhancementShown;
+      const peRow = getPeRow(deps.store as never, deps.projectRoot);
+      if (peRow) markPeShown(deps.store as never, peRow.id);
     } catch (err) {
-      // Non-fatal: the prompt is already blocked and the replacement persisted.
-      // Worst case the old post-response popup also appears — annoying, not lost work.
-      log(`submit_option_source: could not consume row — ${(err as Error)?.message ?? 'unknown'}`);
+      // Non-fatal for the same reason as above; the residual (pePoller may act
+      // during the hold, BEFORE this consume runs) is a recorded G-ARBITRATION
+      // question, not something this call site can close.
+      log(`submit_option_source: could not consume PE row — ${(err as Error)?.message ?? 'unknown'}`);
     }
   };
 
