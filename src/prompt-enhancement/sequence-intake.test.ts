@@ -129,11 +129,20 @@ describe('sequence intake on the explicit first send (fail-closed typed no-ops)'
     expect(intake.state).toBe('sequence_recorded');
     if (intake.state !== 'sequence_recorded') return;
     const store = await openStore(':memory:');
-    expect(upsertPendingPromptSequence(store, intake.runtime)).toBe(true);
+    expect(upsertPendingPromptSequence(store, intake.runtime, intake.payload)).toBe(true);
     expect(getActivePendingPromptSequence(store, PROJECT, 's1')).toMatchObject({
       sequenceId: intake.runtime.sequenceId,
       itemCount: 2,
       status: 'awaiting_response',
+      // The payload round-trips: no planner yet, so an empty list at the default policy, with
+      // the length the future offsets will index into already known.
+      payload: {
+        items: [],
+        promptDirectives: [],
+        suggestedNextPromptPolicy: 'not_generated',
+        originalLength: result.currentBody.originalPromptText.length,
+        offerDisposition: 'accepted',
+      },
     });
   });
 });

@@ -5,13 +5,19 @@ import {
   type PromptEnhancementSequenceRuntimeStateV1,
   type PromptEnhancementSequenceRuntimeStatusV1,
 } from '../prompt-enhancement/sequence-runtime.js';
+import {
+  validatePromptEnhancementSequencePayloadV1,
+  type PromptEnhancementSequenceOffsetRangeV1,
+  type PromptEnhancementSequencePayloadV1,
+} from '../prompt-enhancement/sequence-payload.js';
 
 /**
  * Pending multi-prompt sequence — local bookkeeping for the Stop-hook continuation flow.
  *
  * Mirrors `pending-prompt-enhancements.ts`: one active row per project_root, fail-closed
- * validation on read. Unlike the pending-PE row this stores NO payload JSON — ids, counts,
- * and status only (future prompt bodies are not generated, stored, or rendered by design).
+ * validation on read. The row carries ids, counts and status in columns and the planned item
+ * list in additive payload columns; a payload that fails structural validation is scrubbed on
+ * read exactly like an invalid state, so a corrupt list can never reach a popup.
  * A row here never authorizes the continuation surface by itself: the runtime gate stays
  * the authority, and a row is never proof of completion.
  */
@@ -27,6 +33,7 @@ export interface PendingPromptSequence {
   lastActionId:     string | null;
   createdAt:        number;
   updatedAt:        number;
+  payload:          PromptEnhancementSequencePayloadV1;
 }
 
 const ACTIVE_STATUSES: readonly PromptEnhancementSequenceRuntimeStatusV1[] = [
@@ -48,22 +55,31 @@ function runtimeStateOf(row: PendingPromptSequence): PromptEnhancementSequenceRu
 }
 
 /**
- * Replace any existing sequence rows for the project with the given state. Only one
- * sequence per project_root is kept at a time (single-row-per-project rule, matching the
- * pending-PE store). An invalid state is refused — nothing is written.
+ * Replace any existing sequence rows for the project with the given state and payload. Only
+ * one sequence per project_root is kept at a time (single-row-per-project rule, matching the
+ * pending-PE store). An invalid state or payload is refused — nothing is written.
+ *
+ * The payload is a required second argument rather than something this function reads and
+ * preserves behind the caller's back. This is a DELETE-and-INSERT writer: it either receives
+ * the payload or destroys it, and a caller holding a state with no payload should fail to
+ * compile rather than silently wipe the columns on the first write.
  */
 export function upsertPendingPromptSequence(
   store: Store,
   state: PromptEnhancementSequenceRuntimeStateV1,
+  payload: PromptEnhancementSequencePayloadV1,
 ): boolean {
   if (!validatePromptEnhancementSequenceRuntimeStateV1(state).ok) return false;
+  if (!validatePromptEnhancementSequencePayloadV1(payload).ok) return false;
   const now = Date.now();
   store.db.run('DELETE FROM pending_prompt_sequences WHERE project_root = ?', [state.projectRoot]);
   store.db.run(
     `INSERT INTO pending_prompt_sequences
        (project_root, session_id, sequence_id, enhancement_id, item_count, current_item_index,
-        status, last_action_id, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        status, last_action_id, created_at, updated_at,
+        items_json, prompt_directives_json, suggested_next_prompt_policy, original_length,
+        offer_disposition)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       state.projectRoot,
       state.sessionId,
@@ -75,10 +91,26 @@ export function upsertPendingPromptSequence(
       state.lastActionId,
       now,
       now,
+      JSON.stringify(payload.items),
+      JSON.stringify(payload.promptDirectives),
+      payload.suggestedNextPromptPolicy,
+      payload.originalLength,
+      payload.offerDisposition,
     ],
   );
   saveStore(store);
   return true;
+}
+
+/** Parse a JSON column fail-closed: a malformed or non-array value reads as absent. */
+function parseJsonArray(raw: unknown): unknown[] | null {
+  if (typeof raw !== 'string') return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -95,7 +127,9 @@ export function getActivePendingPromptSequence(
 ): PendingPromptSequence | null {
   const result = store.db.exec(
     `SELECT id, project_root, session_id, sequence_id, enhancement_id, item_count,
-            current_item_index, status, last_action_id, created_at, updated_at
+            current_item_index, status, last_action_id, created_at, updated_at,
+            items_json, prompt_directives_json, suggested_next_prompt_policy, original_length,
+            offer_disposition
      FROM pending_prompt_sequences
      WHERE project_root = ? AND status IN ('item_pending', 'awaiting_response')
      ORDER BY updated_at DESC
@@ -104,6 +138,15 @@ export function getActivePendingPromptSequence(
   );
   const raw = result[0]?.values[0];
   if (!raw) return null;
+  const items = parseJsonArray(raw[11]);
+  const promptDirectives = parseJsonArray(raw[12]);
+  const payload = {
+    items:                     (items ?? []) as PendingPromptSequence['payload']['items'],
+    promptDirectives:          (promptDirectives ?? []) as readonly PromptEnhancementSequenceOffsetRangeV1[],
+    suggestedNextPromptPolicy: raw[13] as PromptEnhancementSequencePayloadV1['suggestedNextPromptPolicy'],
+    originalLength:            raw[14] as number,
+    offerDisposition:          raw[15] as PromptEnhancementSequencePayloadV1['offerDisposition'],
+  };
   const row: PendingPromptSequence = {
     id:               raw[0] as number,
     projectRoot:      raw[1] as string,
@@ -116,10 +159,16 @@ export function getActivePendingPromptSequence(
     lastActionId:     (raw[8] as string | null) ?? null,
     createdAt:        raw[9] as number,
     updatedAt:        raw[10] as number,
+    payload,
   };
   const staleSession = sessionId !== undefined && row.sessionId !== sessionId;
+  // A malformed JSON column is not an empty list: reading it as one would serve a sequence
+  // whose items were silently lost. It is a corrupt row and scrubs like any other.
   const invalid = !validatePromptEnhancementSequenceRuntimeStateV1(runtimeStateOf(row)).ok
-    || !ACTIVE_STATUSES.includes(row.status);
+    || !ACTIVE_STATUSES.includes(row.status)
+    || items === null
+    || promptDirectives === null
+    || !validatePromptEnhancementSequencePayloadV1(payload).ok;
   if (staleSession || invalid) {
     store.db.run('DELETE FROM pending_prompt_sequences WHERE id = ?', [row.id]);
     saveStore(store);

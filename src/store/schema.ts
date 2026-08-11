@@ -101,10 +101,15 @@ CREATE INDEX IF NOT EXISTS idx_pending_prompt_enhancements_project
   ON pending_prompt_enhancements (project_root, status, created_at);
 
 -- Active multi-prompt sequence bookkeeping for the Stop-hook continuation flow. One active
--- sequence per project_root. Ids / counts / status ONLY — never prompt text (future prompt
--- bodies are not generated, stored, or rendered by design). The runtime gate stays the
--- authority for whether the continuation surface may run at all; this table is local
--- user-decision bookkeeping, and a row is never proof of completion.
+-- sequence per project_root. Ids, counts and status live in columns; the planned item list
+-- and the sequence-wide fields that travel with it live in the additive payload columns
+-- (items_json, prompt_directives_json, suggested_next_prompt_policy, original_length,
+-- offer_disposition). Item text is stored as OFFSETS into the original prompt plus the
+-- wording written once for each item — the original prompt itself is already stored in full
+-- in the prompts table, so this introduces no new class of data and no separate retention
+-- policy.
+-- The runtime gate stays the authority for whether the continuation surface may run at all;
+-- a row is never proof of completion.
 CREATE TABLE IF NOT EXISTS pending_prompt_sequences (
   id                 INTEGER PRIMARY KEY AUTOINCREMENT,
   project_root       TEXT    NOT NULL,
@@ -322,6 +327,15 @@ export function applyIncrementalMigrations(db: Database): void {
   addIfMissing('prompt_enhancement_generated_origin', 'action_ids_json', "TEXT NOT NULL DEFAULT '[]'");
   addIfMissing('prompt_enhancement_generated_origin', 'fallback_state', "TEXT NOT NULL DEFAULT 'unknown_not_applicable'");
   addIfMissing('prompt_enhancement_generated_origin', 'privacy_storage_policy', "TEXT NOT NULL DEFAULT 'raw_text_excluded_by_default'");
+
+  // sub-11 multi-prompt sequence payload. Column-additive so in-flight rows survive the
+  // migration; `offer_disposition` back-fills to 'accepted' because a pre-migration row
+  // exists at all, which means its sequence was sent.
+  addIfMissing('pending_prompt_sequences', 'items_json',                   "TEXT NOT NULL DEFAULT '[]'");
+  addIfMissing('pending_prompt_sequences', 'prompt_directives_json',       "TEXT NOT NULL DEFAULT '[]'");
+  addIfMissing('pending_prompt_sequences', 'suggested_next_prompt_policy', "TEXT NOT NULL DEFAULT 'not_generated'");
+  addIfMissing('pending_prompt_sequences', 'original_length',              'INTEGER NOT NULL DEFAULT 0');
+  addIfMissing('pending_prompt_sequences', 'offer_disposition',            "TEXT NOT NULL DEFAULT 'accepted'");
 }
 
 /**
@@ -364,4 +378,13 @@ export function runMigrations(db: Database): void {
   addIfMissing('prompt_enhancement_generated_origin', 'action_ids_json', "TEXT NOT NULL DEFAULT '[]'");
   addIfMissing('prompt_enhancement_generated_origin', 'fallback_state', "TEXT NOT NULL DEFAULT 'unknown_not_applicable'");
   addIfMissing('prompt_enhancement_generated_origin', 'privacy_storage_policy', "TEXT NOT NULL DEFAULT 'raw_text_excluded_by_default'");
+
+  // sub-11 multi-prompt sequence payload. Column-additive so in-flight rows survive the
+  // migration; `offer_disposition` back-fills to 'accepted' because a pre-migration row
+  // exists at all, which means its sequence was sent.
+  addIfMissing('pending_prompt_sequences', 'items_json',                   "TEXT NOT NULL DEFAULT '[]'");
+  addIfMissing('pending_prompt_sequences', 'prompt_directives_json',       "TEXT NOT NULL DEFAULT '[]'");
+  addIfMissing('pending_prompt_sequences', 'suggested_next_prompt_policy', "TEXT NOT NULL DEFAULT 'not_generated'");
+  addIfMissing('pending_prompt_sequences', 'original_length',              'INTEGER NOT NULL DEFAULT 0');
+  addIfMissing('pending_prompt_sequences', 'offer_disposition',            "TEXT NOT NULL DEFAULT 'accepted'");
 }

@@ -12,8 +12,19 @@ import {
   createPromptEnhancementSequenceRuntimeStateV1,
   type PromptEnhancementSequenceRuntimeStateV1,
 } from '../prompt-enhancement/sequence-runtime.js';
+import {
+  emptyPromptEnhancementSequencePayloadV1,
+  type PromptEnhancementSequencePayloadV1,
+} from '../prompt-enhancement/sequence-payload.js';
 
 const PROJECT = '/tmp/pending-seq-proj';
+const ORIGINAL_LENGTH = 120;
+
+function payload(
+  overrides: Partial<PromptEnhancementSequencePayloadV1> = {},
+): PromptEnhancementSequencePayloadV1 {
+  return { ...emptyPromptEnhancementSequencePayloadV1(ORIGINAL_LENGTH), ...overrides };
+}
 const OTHER_PROJECT = '/tmp/pending-seq-other';
 
 function createdState(
@@ -34,9 +45,9 @@ describe('pending-sequences store', () => {
   });
 
   it('upserts one row per project and reads it back typed', () => {
-    expect(upsertPendingPromptSequence(store, createdState())).toBe(true);
+    expect(upsertPendingPromptSequence(store, createdState(), payload())).toBe(true);
     // Second upsert replaces — never accumulates.
-    expect(upsertPendingPromptSequence(store, createdState({ sequenceId: 'seq-2' }))).toBe(true);
+    expect(upsertPendingPromptSequence(store, createdState({ sequenceId: 'seq-2' }), payload())).toBe(true);
     const row = getActivePendingPromptSequence(store, PROJECT, 'sess-1');
     expect(row).toMatchObject({
       projectRoot: PROJECT,
@@ -53,12 +64,12 @@ describe('pending-sequences store', () => {
   });
 
   it('refuses to write an invalid state (fail-closed, nothing stored)', () => {
-    expect(upsertPendingPromptSequence(store, createdState({ itemCount: 1 }))).toBe(false);
+    expect(upsertPendingPromptSequence(store, createdState({ itemCount: 1 }), payload())).toBe(false);
     expect(getActivePendingPromptSequence(store, PROJECT)).toBeNull();
   });
 
   it('scrubs a row from another session and returns null (no cross-session resurrection)', () => {
-    upsertPendingPromptSequence(store, createdState());
+    upsertPendingPromptSequence(store, createdState(), payload());
     expect(getActivePendingPromptSequence(store, PROJECT, 'sess-OTHER')).toBeNull();
     // The stale row was deleted, not just hidden.
     const all = store.db.exec('SELECT COUNT(*) FROM pending_prompt_sequences');
@@ -66,7 +77,7 @@ describe('pending-sequences store', () => {
   });
 
   it('scrubs a corrupt row fail-closed', () => {
-    upsertPendingPromptSequence(store, createdState());
+    upsertPendingPromptSequence(store, createdState(), payload());
     store.db.run("UPDATE pending_prompt_sequences SET status = 'weird'");
     // Corrupt status is not in the active filter → absent without scrub…
     expect(getActivePendingPromptSequence(store, PROJECT, 'sess-1')).toBeNull();
@@ -78,7 +89,7 @@ describe('pending-sequences store', () => {
   });
 
   it('persists machine transitions and hides terminal rows from the active read', () => {
-    upsertPendingPromptSequence(store, createdState());
+    upsertPendingPromptSequence(store, createdState(), payload());
     const row = getActivePendingPromptSequence(store, PROJECT, 'sess-1');
     expect(row).not.toBeNull();
 
@@ -106,7 +117,7 @@ describe('pending-sequences store', () => {
   });
 
   it('isolates projects: another project cannot see or delete this sequence', () => {
-    upsertPendingPromptSequence(store, createdState());
+    upsertPendingPromptSequence(store, createdState(), payload());
     expect(getActivePendingPromptSequence(store, OTHER_PROJECT)).toBeNull();
     expect(deletePendingPromptSequencesForProject(store, OTHER_PROJECT)).toBe(0);
     expect(getActivePendingPromptSequence(store, PROJECT, 'sess-1')).not.toBeNull();
@@ -115,9 +126,48 @@ describe('pending-sequences store', () => {
   });
 
   it('is cleared by the existing store-delete cleanup (project scope)', () => {
-    upsertPendingPromptSequence(store, createdState());
+    upsertPendingPromptSequence(store, createdState(), payload());
     const deleted = deletePromptEnhancementProjectRows(store, PROJECT);
     expect(deleted).toBeGreaterThanOrEqual(1);
+    expect(getActivePendingPromptSequence(store, PROJECT, 'sess-1')).toBeNull();
+  });
+  it('round-trips the payload columns and keeps them across a state transition', () => {
+    const planned = payload({
+      suggestedNextPromptPolicy: 'rendered_after_explicit_acceptance',
+      promptDirectives: [{ start: 0, end: 12 }],
+      offerDisposition: 'accepted',
+    });
+    expect(upsertPendingPromptSequence(store, createdState(), planned)).toBe(true);
+    expect(getActivePendingPromptSequence(store, PROJECT, 'sess-1')?.payload).toEqual(planned);
+
+    // The transition writer touches status/index/action only, so the payload survives it —
+    // this is the loss path the destructive upsert closes, checked from the other side.
+    const row = getActivePendingPromptSequence(store, PROJECT, 'sess-1');
+    const offered = applyPromptEnhancementSequenceRuntimeActionV1(createdState(), { type: 'advance_to_next_item', actionId: 'a1' });
+    expect(offered.ok).toBe(true);
+    if (!offered.ok) return;
+    expect(updatePendingPromptSequenceState(store, row!.id, offered.state)).toBe(true);
+    expect(getActivePendingPromptSequence(store, PROJECT, 'sess-1')?.payload).toEqual(planned);
+  });
+
+  it('refuses to write an invalid payload (fail-closed, nothing stored)', () => {
+    expect(upsertPendingPromptSequence(store, createdState(), payload({ originalLength: -5 }))).toBe(false);
+    expect(getActivePendingPromptSequence(store, PROJECT)).toBeNull();
+  });
+
+  it('scrubs a row whose payload JSON is malformed rather than reading it as empty', () => {
+    // Reading a corrupt column as an empty list would serve a sequence whose items were
+    // silently lost — the row is corrupt and scrubs like any other.
+    upsertPendingPromptSequence(store, createdState(), payload());
+    store.db.run("UPDATE pending_prompt_sequences SET items_json = '{not json'");
+    expect(getActivePendingPromptSequence(store, PROJECT, 'sess-1')).toBeNull();
+    const all = store.db.exec('SELECT COUNT(*) FROM pending_prompt_sequences');
+    expect(all[0].values[0][0]).toBe(0);
+  });
+
+  it('scrubs a row whose stored payload violates a structural rule', () => {
+    upsertPendingPromptSequence(store, createdState(), payload());
+    store.db.run("UPDATE pending_prompt_sequences SET suggested_next_prompt_policy = 'invented'");
     expect(getActivePendingPromptSequence(store, PROJECT, 'sess-1')).toBeNull();
   });
 });

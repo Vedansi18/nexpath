@@ -6,6 +6,10 @@ import {
   type PromptEnhancementSequenceRuntimeReasonCodeV1,
   type PromptEnhancementSequenceRuntimeStateV1,
 } from './sequence-runtime.js';
+import {
+  emptyPromptEnhancementSequencePayloadV1,
+  type PromptEnhancementSequencePayloadV1,
+} from './sequence-payload.js';
 
 /**
  * First-send sequence intake for the continuation flow: consume the typed handoff/sequence
@@ -27,7 +31,14 @@ export type PromptEnhancementSequenceIntakeReasonCodeV1 =
   | PromptEnhancementSequenceRuntimeReasonCodeV1;
 
 export type PromptEnhancementSequenceIntakeResultV1 =
-  | { state: 'sequence_recorded'; runtime: PromptEnhancementSequenceRuntimeStateV1 }
+  | {
+      state: 'sequence_recorded';
+      runtime: PromptEnhancementSequenceRuntimeStateV1;
+      // The durable payload travels with the state from the moment it first exists. Intake is
+      // the first persist, so a return shape that carried only the state would leave the caller
+      // with nothing to write into the payload columns.
+      payload: PromptEnhancementSequencePayloadV1;
+    }
   | { state: 'no_sequence'; reasonCode: PromptEnhancementSequenceIntakeReasonCodeV1 };
 
 export interface PromptEnhancementSequenceIntakeInputV1 {
@@ -71,5 +82,14 @@ export function intakePromptEnhancementSequenceOnFirstSendV1(
     itemCount:     Math.min(summary.remainingTaskCount + 1, PROMPT_ENHANCEMENT_SEQUENCE_MAX_ITEM_COUNT_V1),
   });
   if (!created.ok) return { state: 'no_sequence', reasonCode: created.reasonCode };
-  return { state: 'sequence_recorded', runtime: created.state };
+  // No planner exists yet, so the item list is empty and the policy stays at its default. What
+  // is known now is the length the future offsets index into, and that the offer was accepted —
+  // a row is only created here because the user explicitly sent.
+  return {
+    state:   'sequence_recorded',
+    runtime: created.state,
+    payload: emptyPromptEnhancementSequencePayloadV1(
+      input.result.currentBody.originalPromptText.length,
+    ),
+  };
 }

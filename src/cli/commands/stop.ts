@@ -593,7 +593,7 @@ export function registerStopCommand(program: import('commander').Command): void 
                   sessionId: pending.sessionId,
                 });
                 if (sequenceIntake.state === 'sequence_recorded') {
-                  upsertPendingPromptSequence(store, sequenceIntake.runtime);
+                  upsertPendingPromptSequence(store, sequenceIntake.runtime, sequenceIntake.payload);
                 }
                 logger.debug('stop_mps_sequence_intake', {
                   cwd: payload.cwd,

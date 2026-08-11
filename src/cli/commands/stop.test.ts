@@ -36,6 +36,7 @@ import type { StopPayload } from './stop.js';
 import { upsertPendingAdvisory, getPendingAdvisory } from '../../store/pending-advisories.js';
 import { upsertPendingPromptEnhancement, getPendingPromptEnhancement } from '../../store/pending-prompt-enhancements.js';
 import { upsertPendingPromptSequence, getActivePendingPromptSequence } from '../../store/pending-sequences.js';
+import { emptyPromptEnhancementSequencePayloadV1 } from '../../prompt-enhancement/sequence-payload.js';
 import { buildPromptEnhancementRequestForAuto } from './auto.js';
 import { preparePromptEnhancement } from '../../prompt-enhancement/facade.js';
 import type { PromptEnhancementStopLaunchFn } from './stop.js';
@@ -168,7 +169,7 @@ describe('runStop — deferred Prompt Enhancement popup (B-i)', () => {
       sequenceId: 'seq-x', enhancementId: 'enh-x', projectRoot: '/test/project',
       sessionId: session.current.sessionId, itemCount: 3, currentItemIndex: 1,
       status: 'item_pending', lastActionId: 'prev',
-    });
+    }, emptyPromptEnhancementSequencePayloadV1(64));
     // No pending PE, no advisory → the only thing present is the active sequence row.
     const result = await runStop(makePayload(), store, undefined, undefined, undefined, notShown());
     // No continuation popup opened / nothing injected — ordinary flow (no pending advisory).
