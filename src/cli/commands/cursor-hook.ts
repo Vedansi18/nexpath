@@ -27,6 +27,7 @@ import type { Command } from 'commander';
 import { parseCursorHookPayload, type CursorHookPayload } from '../../cursor-hook/payload.js';
 import { defaultReadStdin } from './windsurf-hook.js';
 import { createHoldBudget, type HoldBudget } from './submit-hold-budget.js';
+import { buildDefaultPromptSubmitDecider } from './windsurf-hook.js';
 
 /**
  * Backward-compatibility switch for the Cursor submit-time advisory (H6).
@@ -133,10 +134,22 @@ export async function runCursorHookAction(
     let decision: 'allow' | 'block' = 'allow';
     // Gated exactly like Windsurf's: with the switch off the decider is never
     // consulted, so the path is unreachable and behaviour is unchanged.
-    if (deps.decide && isCursorPromptSubmitAdvisoryEnabled(deps.env ?? process.env)) {
+    //
+    // The DEFAULT decider is H3's, with `host: 'cursor'` — the block/persist/
+    // consume logic is identical across platforms and only the record's host tag
+    // differs, so this reuses it rather than growing a parallel implementation.
+    // Without this default the Cursor path was inert even with the switch on.
+    const decide = deps.decide ?? (async (pl: CursorHookPayload) => {
+      const d = buildDefaultPromptSubmitDecider(
+        { project: pl.projectRoot },
+        { host: 'cursor' },
+      );
+      return d('beforeSubmitPrompt', { project: pl.projectRoot }, pl.promptText ?? '');
+    });
+    if (isCursorPromptSubmitAdvisoryEnabled(deps.env ?? process.env)) {
       // Draws from what the stdin read left. A timeout is never a decision: it
       // continues, so the original prompt is released (A3).
-      const decided = await hold.run(() => deps.decide!(payload));
+      const decided = await hold.run(() => decide(payload));
       if (!decided.timedOut && decided.value === 'block') decision = 'block';
     }
 

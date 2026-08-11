@@ -21,8 +21,13 @@ import { injectPeBody, resolvePeVisibleSurfaceAckState } from './pe-delivery.js'
 import { createPePoller, type PePoller } from './pe-poller.js';
 import { createSubmitHookPoller, type SubmitHookPoller } from './submit-hook-poller.js';
 import { createSubmitClipboardDelivery, submitKeystroke } from './submit-clipboard-delivery.js';
-import { isWindsurfSubmitAdvisoryEnabled, readPendingSubmitDecision } from './submit-advisory-runtime.js';
+import {
+  isWindsurfSubmitAdvisoryEnabled,
+  isCursorSubmitAdvisoryEnabled,
+  readPendingSubmitDecision,
+} from './submit-advisory-runtime.js';
 import { deliverSubmitReplacement } from './submit-delivery-strategy.js';
+import { createSubmitAdvisoryForHost } from './submit-advisory-wiring.js';
 import {
   buildPeActionRequest,
   createPeActionLoopState,
@@ -153,6 +158,55 @@ function log(line: string): void {
  */
 function fingerprint(value: string): string {
   return createHash('sha256').update(value).digest('hex').slice(0, 12);
+}
+
+
+/**
+ * Build the submit-time advisory poller for one host (H6).
+ *
+ * Everything host-specific is resolved here and nowhere else: which records to
+ * accept (cross-host delivery would inject into the wrong editor), which window
+ * to raise for the clipboard fallback, and which host id `chatInputInject`
+ * targets. Returns `null` when the switch is off, having built nothing at all —
+ * unreachable by control flow, not merely inert (`R12`).
+ *
+ * Used by the Cursor branch. The Windsurf branch keeps its original inline
+ * construction deliberately: rewriting a shipping path to share this helper
+ * would be a refactor of working code without the live E2E to catch a
+ * regression. When the E2E lands, Windsurf can adopt this and the duplication
+ * goes away.
+ */
+function buildSubmitAdvisory(
+  host: 'windsurf' | 'cursor',
+  enabled: boolean,
+  roots: string[],
+  log: (m: string) => void,
+): SubmitHookPoller | null {
+  if (!enabled) return null;
+  const delivery = createSubmitClipboardDelivery({
+    writeClipboard: (text) => Promise.resolve(vscode.env.clipboard.writeText(text)),
+    // Reuse the shipped raiser — Linux/X11 only by design; elsewhere it returns
+    // false and the paste still proceeds.
+    focus: async () => raiseAppWindow(host),
+    pasteKeystroke: () => pasteKeystroke(),
+    submitKeystroke: () => submitKeystroke(),
+    log,
+  });
+  return createSubmitAdvisoryForHost({
+    host,
+    enabled,
+    projectRoots: roots,
+    createPoller: (o) => createSubmitHookPoller(o as never),
+    readPendingDecision: (root, expectedHost) => readPendingSubmitDecision(root, { expectedHost }),
+    // PRIMARY: direct command-based injection — the mechanism the old flow uses.
+    injectDirect: (t) => chatInputInject(t, { host }),
+    fallbackClipboard: (t) => delivery.inject(t),
+    submit: () => delivery.submit(),
+    notify: (m) => void vscode.window.showWarningMessage(m),
+    log,
+    deliver: (text, d) => deliverSubmitReplacement(text, d as never) as never,
+    onTiming: (t) => log(`[nexpath] submit handoff: ${JSON.stringify(t)}`),
+  });
 }
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
@@ -577,7 +631,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       let lastDeliveryLanded = false;
       submitPoller = createSubmitHookPoller({
         projectRoots: roots,
-        readPendingDecision: (root) => readPendingSubmitDecision(root),
+        // This poller lives inside the `host === 'windsurf'` branch, so the
+        // expected host is windsurf by construction. H6's Cursor equivalent
+        // needs its own construction site — see the note at the branch head.
+        readPendingDecision: (root) => readPendingSubmitDecision(root, { expectedHost: 'windsurf' }),
         // PRIMARY: direct command-based injection into the agent's chat — the
         // same mechanism the old flow uses. The clipboard is reached ONLY if this
         // fails. Previously this line called `delivery.inject` directly, which
@@ -617,6 +674,35 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       log('[nexpath] submit-time advisory ENABLED (NEXPATH_WINDSURF_PROMPTSUBMIT_ADVISORY=1)');
     }
   }
+
+  // ── H6: Cursor submit-time advisory ────────────────────────────────────────
+  // A SEPARATE block from the Windsurf one above, placed after it so the
+  // shipping path is not edited at all (`R12`). `roots` is derived identically;
+  // it stays scoped inside each host block rather than being hoisted, again to
+  // leave the Windsurf branch untouched.
+  //
+  // Before this, the submit poller only ever existed inside the windsurf branch,
+  // so a `cursor` decision written by the hook was read by nobody.
+  //
+  // The `state.vscdb` DB-watcher is NOT replaced: per the dev plan it is a
+  // separate mechanism and keeps classifying exactly as it does today. This
+  // poller only reads the submit-decision file the hook writes.
+  if (host === 'cursor') {
+    const cws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
+    const croots = Array.from(new Set([canonicalizeCwd(cws), cws]));
+    submitPoller = buildSubmitAdvisory(
+      'cursor',
+      isCursorSubmitAdvisoryEnabled(process.env),
+      croots,
+      log,
+    ) ?? undefined;
+    if (submitPoller) {
+      submitPoller.start();
+      context.subscriptions.push({ dispose: () => submitPoller?.stop() });
+      log('[nexpath] submit-time advisory ENABLED (NEXPATH_CURSOR_PROMPTSUBMIT_ADVISORY=1)');
+    }
+  }
+
 
   const wsStorage = workspaceStorageDir({ host });
   const allDbPaths = enumerateStateVscdbPaths(wsStorage);

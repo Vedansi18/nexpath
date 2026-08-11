@@ -87,6 +87,22 @@ export function defaultIsProcessAlive(pid: number): boolean {
   }
 }
 
+/**
+ * Cursor's switch — the extension-side mirror of the CLI's
+ * `NEXPATH_CURSOR_PROMPTSUBMIT_ADVISORY`.
+ *
+ * Duplicated from the CLI for the same reason as the Windsurf one: `src/cli` and
+ * `src/ext-vscode` are separate packages that cannot import each other. Pinned by
+ * test so the two halves cannot silently diverge. Independent of Windsurf's
+ * switch — the platforms must be enablable separately.
+ */
+export const CURSOR_SUBMIT_ADVISORY_ENV = 'NEXPATH_CURSOR_PROMPTSUBMIT_ADVISORY';
+
+/** True only when explicitly `'1'`. Default OFF — never `!== '0'`. */
+export function isCursorSubmitAdvisoryEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env[CURSOR_SUBMIT_ADVISORY_ENV] === '1';
+}
+
 export async function readPendingSubmitDecision(
   projectRoot: string,
   deps: SubmitDecisionReaderDeps = {},

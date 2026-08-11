@@ -232,16 +232,28 @@ describe('⭐ BACKWARD COMPAT — switch OFF must construct nothing (structural 
     expect(gate).toBeGreaterThan(-1);
   });
 
-  for (const sym of ['createSubmitHookPoller(', 'readPendingSubmitDecision(']) {
-    it(`constructs ${sym} only AFTER the gate and nested inside it`, () => {
-      const at = lineOf(sym === 'createSubmitHookPoller(' ? 'submitPoller = createSubmitHookPoller(' : sym);
-      expect(at).toBeGreaterThan(gate);
-      // Deeper indentation than the `if` ⇒ inside its block. If it were hoisted
-      // out, the switch-off path would open a Store / start a poller / probe a
-      // pid on every activation — the regression this pin exists to catch.
-      expect(indentOf(at)).toBeGreaterThan(indentOf(gate));
-    });
-  }
+  it('the Windsurf poller is still constructed only inside the gate', () => {
+    const at = lineOf('submitPoller = createSubmitHookPoller(');
+    expect(at).toBeGreaterThan(gate);
+    expect(indentOf(at)).toBeGreaterThan(indentOf(gate));
+  });
+
+  it('⭐ the shared builder refuses to construct when disabled', () => {
+    // H6 moved part of the guard into `buildSubmitAdvisory`, so "nested deeper
+    // than the gate" no longer describes it. The real guard is this early
+    // return: without it, a switched-off host would build a clipboard object and
+    // a poller on every activation. Its behaviour is mutation-proven in
+    // submit-advisory-wiring.test.ts; this pins that the early return exists.
+    const body = src.slice(src.indexOf('function buildSubmitAdvisory('));
+    expect(body.slice(0, 1200)).toMatch(/if \(!enabled\) return null;/);
+  });
+
+  it('⭐ each host passes its OWN switch reader — never the other\'s', () => {
+    // Passing the Windsurf switch on the Cursor branch would tie two platforms
+    // that must be enablable independently.
+    expect(src).toMatch(/buildSubmitAdvisory\(\s*'cursor',\s*isCursorSubmitAdvisoryEnabled/);
+    expect(src).not.toMatch(/buildSubmitAdvisory\(\s*'cursor',\s*isWindsurfSubmitAdvisoryEnabled/);
+  });
 
   it('the gate reads process.env directly — never a persisted config key', () => {
     // The hook doc's stated reason for the switch: internal, never surfaced by
