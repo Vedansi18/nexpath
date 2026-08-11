@@ -255,6 +255,22 @@ describe('⭐ BACKWARD COMPAT — switch OFF must construct nothing (structural 
     expect(src).not.toMatch(/buildSubmitAdvisory\(\s*'cursor',\s*isWindsurfSubmitAdvisoryEnabled/);
   });
 
+  it('⭐ Cursor injects via cursorInject, NOT chatInputInject', () => {
+    // cursorInject does clipboard -> raise -> FOCUS loop -> settle -> paste.
+    // H1 proved the focus step is load-bearing: Enter only submits after focus.
+    // chatInputInject skips all of it, so wiring that here would fail on real
+    // Cursor for the exact reason already recorded in this milestone (a wrong
+    // Cursor verdict that had to be withdrawn).
+    expect(src).toMatch(/buildSubmitAdvisory\(\s*'cursor',[\s\S]{0,200}?cursorInject,?\s*\)/);
+  });
+
+  it('⭐ the shipping per-host injector shape is preserved', () => {
+    // The old flow (injectIntoChat) picks windsurfInject / cursorInject /
+    // chatInputInject per host and lets each own its internal strategy. The
+    // submit path mirrors that rather than imposing one injector on both.
+    expect(src).toMatch(/injectFn:[\s\S]{0,160}?cursorInject/);
+  });
+
   it('the gate reads process.env directly — never a persisted config key', () => {
     // The hook doc's stated reason for the switch: internal, never surfaced by
     // `nexpath status`/`config`, never settable by an end user.
@@ -269,11 +285,16 @@ describe('⭐ direct injection must be wired as PRIMARY on the submit path', () 
   // structurally rather than by unit test.
   const src = readFileSync(join(__dirname, 'extension.ts'), 'utf8');
 
-  it('injectDirect uses chatInputInject, not the clipboard delivery', () => {
-    const m = src.match(/injectDirect:\s*\(([^)]*)\)\s*=>\s*([^\n,]+)/);
-    expect(m).not.toBeNull();
-    expect(m?.[2]).toContain('chatInputInject');
-    expect(m?.[2]).not.toContain('delivery.inject');
+  it('injectDirect is a real injector, never the clipboard delivery', () => {
+    // Written in H4 when injectDirect was hardcoded to chatInputInject. H6 made
+    // it per-host (Windsurf: chatInputInject, Cursor: cursorInject), so the pin
+    // now guards the PRINCIPLE rather than one function name: whatever is passed
+    // as the primary must not be the clipboard path. The original defect was
+    // exactly that - onInject went straight to delivery.inject, so the fallback
+    // had silently become the only path.
+    const m = src.match(/injectDirect:\s*([^\n,]+)/g) ?? [];
+    expect(m.length).toBeGreaterThan(0);
+    for (const line of m) expect(line).not.toContain('delivery.inject');
   });
 
   it('the clipboard remains wired only as the fallback', () => {

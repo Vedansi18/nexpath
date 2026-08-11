@@ -181,6 +181,18 @@ function buildSubmitAdvisory(
   enabled: boolean,
   roots: string[],
   log: (m: string) => void,
+  /**
+   * The host's OWN injector — mirrors the shipping flow's `injectFn` shape
+   * (`injectIntoChat`, `:346`), which picks `windsurfInject` / `cursorInject` /
+   * `chatInputInject` per host and lets each own its internal strategy.
+   *
+   * This matters for Cursor: `cursorInject` does clipboard → raise → focus loop
+   * → settle → paste. H1 proved the FOCUS step is load-bearing (Enter only
+   * submits after focus). `chatInputInject` skips all of it, so wiring that here
+   * would have failed on real Cursor for the exact reason already recorded in
+   * this milestone.
+   */
+  injectDirect: (text: string) => Promise<boolean>,
 ): SubmitHookPoller | null {
   if (!enabled) return null;
   const delivery = createSubmitClipboardDelivery({
@@ -198,8 +210,8 @@ function buildSubmitAdvisory(
     projectRoots: roots,
     createPoller: (o) => createSubmitHookPoller(o as never),
     readPendingDecision: (root, expectedHost) => readPendingSubmitDecision(root, { expectedHost }),
-    // PRIMARY: direct command-based injection — the mechanism the old flow uses.
-    injectDirect: (t) => chatInputInject(t, { host }),
+    // PRIMARY: the host's own injector, exactly as the shipping flow selects it.
+    injectDirect,
     fallbackClipboard: (t) => delivery.inject(t),
     submit: () => delivery.submit(),
     notify: (m) => void vscode.window.showWarningMessage(m),
@@ -690,11 +702,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   if (host === 'cursor') {
     const cws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
     const croots = Array.from(new Set([canonicalizeCwd(cws), cws]));
+    // `cursorInject` — NOT `chatInputInject`. It already performs clipboard →
+    // raise → focus → paste internally, so the outer clipboard fallback fires
+    // only if it returns false, rather than duplicating work it already did.
     submitPoller = buildSubmitAdvisory(
       'cursor',
       isCursorSubmitAdvisoryEnabled(process.env),
       croots,
       log,
+      cursorInject,
     ) ?? undefined;
     if (submitPoller) {
       submitPoller.start();
