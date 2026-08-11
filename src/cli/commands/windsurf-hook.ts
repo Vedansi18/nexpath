@@ -152,6 +152,13 @@ export function buildDefaultPromptSubmitDecider(
     /** Pre-built option source. Bypasses store opening; lets the block-only
      *  consume rule be observed directly in tests. */
     optionSource?: SubmitOptionSource;
+    /**
+     * Which host the decision is for. Defaults to `'windsurf'` so every existing
+     * caller is unchanged. H6 passes `'cursor'` to reuse this decider rather than
+     * growing a parallel implementation — the block/persist/consume logic is
+     * identical; only the record's host tag differs.
+     */
+    host?: 'windsurf' | 'cursor';
     openStore?: (db?: string) => Promise<unknown>;
     closeStore?: (store: unknown) => Promise<void> | void;
   } = {},
@@ -198,7 +205,7 @@ export function buildDefaultPromptSubmitDecider(
             decisionId: `sd-${now()}-${Math.floor(now() % 100000)}`,
             replacementText,
             createdAt: now(),
-            host: 'windsurf',
+            host: ports.host ?? 'windsurf',
           });
         },
       });

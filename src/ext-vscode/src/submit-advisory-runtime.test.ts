@@ -275,3 +275,39 @@ describe('⭐ direct injection must be wired as PRIMARY on the submit path', () 
     expect(src).toMatch(/onSubmit:.*lastDeliveryLanded/s);
   });
 });
+
+describe('⭐ H6 — records are delivered only to the host they were written for', () => {
+  const rec = (host: string) => JSON.stringify({
+    schemaVersion: 1, decisionId: 'sd-1', replacementText: 'replacement',
+    createdAt: 1_700_000_000_000, host,
+    blockIssuedAt: 1_699_999_999_000, hookPid: 4242,
+  });
+  const deps = (expectedHost?: 'windsurf' | 'cursor', host = 'windsurf') => ({
+    read: async () => rec(host),
+    remove: async () => {},
+    isProcessAlive: () => false,
+    ...(expectedHost ? { expectedHost } : {}),
+  });
+
+  it('a cursor record IS delivered when running on Cursor', async () => {
+    // Before H6 the reader dropped every cursor record unconditionally, so the
+    // Cursor path could never have delivered - a silent dead end.
+    const r = await readPendingSubmitDecision('/proj', deps('cursor', 'cursor') as never);
+    expect(r?.replacementText).toBe('replacement');
+  });
+
+  it('a cursor record is DROPPED when running on Windsurf', async () => {
+    // Cross-host delivery would inject into the wrong editor.
+    expect(await readPendingSubmitDecision('/proj', deps('windsurf', 'cursor') as never)).toBeNull();
+  });
+
+  it('a windsurf record is DROPPED when running on Cursor', async () => {
+    expect(await readPendingSubmitDecision('/proj', deps('cursor', 'windsurf') as never)).toBeNull();
+  });
+
+  it('defaults to windsurf when no host is given — H3 behaviour unchanged', async () => {
+    expect((await readPendingSubmitDecision('/proj', deps(undefined, 'windsurf') as never))?.decisionId)
+      .toBe('sd-1');
+    expect(await readPendingSubmitDecision('/proj', deps(undefined, 'cursor') as never)).toBeNull();
+  });
+});

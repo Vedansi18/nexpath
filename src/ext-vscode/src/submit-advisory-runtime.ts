@@ -54,6 +54,8 @@ export interface SubmitDecisionReaderDeps {
   remove?: (path: string) => Promise<void>;
   /** Injected for tests; defaults to a real `kill(pid, 0)` liveness probe. */
   isProcessAlive?: (pid: number) => boolean;
+  /** Which host's records to accept. Defaults to `'windsurf'` (H3 behaviour). */
+  expectedHost?: 'windsurf' | 'cursor';
 }
 
 /**
@@ -93,6 +95,7 @@ export async function readPendingSubmitDecision(
   const read = deps.read ?? ((p: string) => readFile(p, 'utf8'));
   const remove = deps.remove ?? ((p: string) => unlink(p));
   const isAlive = deps.isProcessAlive ?? defaultIsProcessAlive;
+  const expectedHost = deps.expectedHost ?? 'windsurf';
 
   let text: string;
   try {
@@ -107,7 +110,11 @@ export async function readPendingSubmitDecision(
   // Only Windsurf decisions may be delivered here. A Cursor record reaching this
   // reader would mean a wiring mistake; delivering it would inject into the wrong
   // host, so it is dropped rather than trusted.
-  if (record.host !== 'windsurf') return null;
+  // Deliver only a record written FOR THIS HOST. Cross-host delivery would
+  // inject into the wrong editor, so a mismatch is dropped rather than trusted.
+  // H6: the expected host is now a parameter — before, `cursor` records were
+  // dropped unconditionally, so the Cursor path could never have delivered.
+  if (record.host !== expectedHost) return null;
 
   // ── BLOCK/INJECTION RACE GUARD ────────────────────────────────────────────
   // The hook persists this record BEFORE `exit(2)`, and Windsurf only cancels
