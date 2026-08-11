@@ -34,6 +34,9 @@ import {
 import { openStore, closeStore } from '../../store/db.js';
 import { writeSubmitDecision } from './submit-decision-store.js';
 import { createHoldBudget, type HoldBudget } from './submit-hold-budget.js';
+// CONSUME-ONLY. `SessionStateManager` is not Vedansi-owned (`hi0001234d` 15 /
+// `harshil480` 15) — it is called here, never modified.
+import { SessionStateManager } from '../../classifier/SessionStateManager.js';
 import { bringPopupToFront } from '../../windsurf-hook/foreground.js';
 
 /**
@@ -198,6 +201,37 @@ export function buildDefaultPromptSubmitDecider(
           // Stamped here: the decision to block is made the instant the user
           // picks an option, immediately before persistence.
           const blockIssuedAt = now();
+
+          // ── VED-PE-10: the injected body must NOT re-enter as a new prompt ──
+          // The handoff is explicit: a generated body re-entering `UserPromptSubmit`
+          // "must not silently trigger fresh classification, profile cadence,
+          // product-feedback cadence, detected-language updates, memory learning,
+          // or another PE/DS popup as if they were new user-authored prompts."
+          //
+          // Our replacement IS such a body: the extension injects it and
+          // auto-submits, which fires a fresh `pre_user_prompt`.
+          //
+          // The guard for exactly this already ships — `auto.ts:706` reads
+          // `lastInjectedPrompt`, clears it, and returns `no_action` on an echo
+          // match, skipping classification AND `recordActivity` (`:722`, "so
+          // synthetic prompts do not count"). So this REUSES shipped machinery
+          // rather than inventing a second guard — and it resolves the H4
+          // promptCount double-count by the same stroke, because the counter sits
+          // behind the same gate.
+          //
+          // Recorded BEFORE the decision file is written: if persistence fails we
+          // return 'allow' and never block, and `auto` clears the field on the next
+          // turn regardless, so a stale value cannot suppress a genuine prompt.
+          if (store) {
+            try {
+              const mgr = SessionStateManager.load(store as never, projectRoot);
+              mgr.setInjectedPrompt(store as never, replacementText);
+            } catch {
+              // Non-fatal: worst case the replacement is re-classified, which is
+              // today's behaviour — never a reason to strand the user's prompt.
+            }
+          }
+
           await writeSubmitDecision({
             projectRoot,
             blockIssuedAt,
