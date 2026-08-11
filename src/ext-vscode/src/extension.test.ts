@@ -30,6 +30,7 @@ const {
   mockPePopupHostProbe,
   mockReadLatestPeMeta,
   mockCreateAdvisoryPoller,
+  mockOnDidChangeWorkspaceFolders,
 } = vi.hoisted(() => ({
   mockShowOnboarding: vi.fn(),
   mockRegisterWebviewViewProvider: vi.fn(),
@@ -60,6 +61,7 @@ const {
   mockPePopupHostProbe: vi.fn(() => false),
   mockReadLatestPeMeta: vi.fn(async () => null),
   mockCreateAdvisoryPoller: vi.fn(),
+  mockOnDidChangeWorkspaceFolders: vi.fn(() => ({ dispose: vi.fn() })),
 }));
 
 vi.mock('vscode', () => ({
@@ -81,6 +83,7 @@ vi.mock('vscode', () => ({
   },
   workspace: {
     workspaceFolders: undefined,
+    onDidChangeWorkspaceFolders: mockOnDidChangeWorkspaceFolders,
   },
   env: { appName: 'Visual Studio Code' },
   commands: {
@@ -183,6 +186,7 @@ vi.mock('./pe-poller.js', () => ({
 }));
 
 import { activate, deactivate, getViewProvider, getPeViewProvider } from './extension.js';
+import * as vscodeApi from 'vscode';
 
 interface FakeContext {
   extensionUri: { __uri: true };
@@ -230,6 +234,8 @@ describe('activate', () => {
     mockPePopupHostProbe.mockReset().mockReturnValue(false);
     mockReadLatestPeMeta.mockReset().mockResolvedValue(null);
     mockCreateAdvisoryPoller.mockReset();
+    mockOnDidChangeWorkspaceFolders.mockReset().mockReturnValue({ dispose: vi.fn() });
+    (vscodeApi.workspace as { workspaceFolders?: unknown }).workspaceFolders = undefined;
     mockIsPeOriginTurn.mockReset().mockResolvedValue(false);
     mockChatInputInject.mockReset().mockResolvedValue(false);
     mockReadLatestAdvisoryMeta.mockReset().mockResolvedValue(null);
@@ -1322,6 +1328,57 @@ describe('activate', () => {
     expect(logSpy).toHaveBeenCalledWith(
       expect.stringContaining('plain string err'),
     );
+  });
+
+  // FIX-3 (2026-08-11) — a workspace folder appearing after a folder-less
+  // activation must re-enumerate the dbs (so the R4.3 filter engages and a
+  // newly-created workspace db joins the watch set) and restart the watcher.
+  describe('FIX-3 — re-enumeration when a workspace folder appears', () => {
+    it('re-enumerates and restarts the watcher when a folder becomes available', async () => {
+      mockShowOnboarding.mockResolvedValueOnce(undefined);
+      mockDetectHost.mockReturnValueOnce('cursor');
+      mockEnumerateStateVscdbPaths.mockReturnValue(['/ws/a/state.vscdb', '/ws/b/state.vscdb']);
+      await activate(makeCtx(true) as never);
+      expect(mockCreateChatHistoryWatcher).toHaveBeenCalledTimes(1);
+      expect(mockOnDidChangeWorkspaceFolders).toHaveBeenCalledTimes(1);
+      const onChange = mockOnDidChangeWorkspaceFolders.mock.calls[0][0] as () => void;
+
+      const stopsBefore = mockWatcherStop.mock.calls.length;
+      (vscodeApi.workspace as { workspaceFolders?: unknown }).workspaceFolders = [
+        { uri: { fsPath: '/proj' } },
+      ];
+      onChange();
+      expect(mockWatcherStop.mock.calls.length).toBe(stopsBefore + 1);
+      expect(mockCreateChatHistoryWatcher).toHaveBeenCalledTimes(2);
+      expect(mockWatcherStart).toHaveBeenCalledTimes(2);
+    });
+
+    it('folder change with NO folder (removal) keeps the current watcher untouched', async () => {
+      mockShowOnboarding.mockResolvedValueOnce(undefined);
+      mockDetectHost.mockReturnValueOnce('cursor');
+      mockEnumerateStateVscdbPaths.mockReturnValue(['/ws/a/state.vscdb']);
+      await activate(makeCtx(true) as never);
+      const onChange = mockOnDidChangeWorkspaceFolders.mock.calls[0][0] as () => void;
+      const stopsBefore = mockWatcherStop.mock.calls.length;
+      onChange(); // workspaceFolders is undefined
+      expect(mockWatcherStop.mock.calls.length).toBe(stopsBefore);
+      expect(mockCreateChatHistoryWatcher).toHaveBeenCalledTimes(1);
+    });
+
+    it('re-enumeration yielding zero targets leaves the running watcher in place', async () => {
+      mockShowOnboarding.mockResolvedValueOnce(undefined);
+      mockDetectHost.mockReturnValueOnce('cursor');
+      mockEnumerateStateVscdbPaths.mockReturnValueOnce(['/ws/a/state.vscdb']).mockReturnValue([]);
+      await activate(makeCtx(true) as never);
+      const onChange = mockOnDidChangeWorkspaceFolders.mock.calls[0][0] as () => void;
+      const stopsBefore = mockWatcherStop.mock.calls.length;
+      (vscodeApi.workspace as { workspaceFolders?: unknown }).workspaceFolders = [
+        { uri: { fsPath: '/proj' } },
+      ];
+      onChange();
+      expect(mockWatcherStop.mock.calls.length).toBe(stopsBefore);
+      expect(mockCreateChatHistoryWatcher).toHaveBeenCalledTimes(1);
+    });
   });
 });
 

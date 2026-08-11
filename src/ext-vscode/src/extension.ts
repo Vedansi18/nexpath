@@ -522,6 +522,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     log(`[nexpath] windsurf PE poller started for roots: ${roots.join(' | ')}`);
   }
 
+  // FIX-3 (2026-08-11): enumeration + filtering extracted into a function so it
+  // can re-run when a workspace folder appears AFTER activation. Live failure
+  // this addresses: activation on a welcome/empty window enumerated 27-28 dbs
+  // with ownWorkspaceCwd null — the R4.3 filter could not engage, so the
+  // watcher copy-polled every workspace db on the machine, and a db created
+  // for a workspace opened later was never picked up.
+  const buildWatchTargets = (): {
+    targets: WatchTarget[];
+    dbCount: number;
+    cascadeNote: string;
+  } | null => {
   const wsStorage = workspaceStorageDir({ host });
   const allDbPaths = enumerateStateVscdbPaths(wsStorage);
 
@@ -593,7 +604,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       `[nexpath] no workspace state.vscdb, no global state.vscdb, and no codeium dir found — watcher not started. ` +
         'Open at least one workspace in the host and reload the extension to retry.',
     );
-    return;
+    return null;
   }
 
   const targets: WatchTarget[] = dbPaths.map((path) => ({
@@ -606,6 +617,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   if (codeiumExists) {
     targets.push({ path: codeiumDir!, kind: 'windsurf-dir' });
   }
+  return {
+    targets,
+    dbCount: dbPaths.length,
+    cascadeNote: codeiumExists ? ' + 1 windsurf-dir' : '',
+  };
+  };
+
+  const built = buildWatchTargets();
+  if (built === null) return;
 
   // 6. Build the pipeline handler (auto → stop → publish) with real
   //    dependencies (ipc.spawnAuto / ipc.spawnStop / viewProvider.publishPayload).
@@ -748,8 +768,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     },
   });
 
+  const startWatcher = (b: { targets: WatchTarget[]; dbCount: number; cascadeNote: string }): void => {
   watcher = createChatHistoryWatcher({
-    targets,
+    targets: b.targets,
     // Polling backstop: fs.watch alone is unreliable on Windows for the SQLite
     // WAL recreate pattern (fires once then goes silent → only the first prompts
     // captured). Re-read every 2s; dedup makes it safe (no re-emit of seen
@@ -785,9 +806,30 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   watcher.start();
   context.subscriptions.push({ dispose: () => watcher?.stop() });
-  const cascadeNote = codeiumExists ? ' + 1 windsurf-dir' : '';
   log(
-    `[nexpath] watcher started on ${dbPaths.length} state.vscdb file(s)${cascadeNote} for host=${host}`,
+    `[nexpath] watcher started on ${b.dbCount} state.vscdb file(s)${b.cascadeNote} for host=${host}`,
+  );
+  };
+  startWatcher(built);
+
+  // FIX-3 (2026-08-11): when a folder becomes available in a window that
+  // activated folder-less (welcome screen — the live case), re-enumerate so the
+  // R4.3 own-workspace filter engages and any db created for the new workspace
+  // joins the watch set. Folder REMOVAL keeps the current set (capture keeps
+  // working; next folder-open re-filters). The chat handler is deliberately NOT
+  // recreated — per-session pipeline state survives the re-enumeration, and its
+  // per-event cwd resolution already attributes events correctly.
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeWorkspaceFolders(() => {
+      const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? null;
+      if (cwd === null) return;
+      log(`[nexpath] workspace folder now available (${cwd}) — re-enumerating dbs with the own-workspace filter`);
+      const rebuilt = buildWatchTargets();
+      if (rebuilt === null) return;
+      watcher?.stop();
+      watcher = undefined;
+      startWatcher(rebuilt);
+    }),
   );
 }
 
