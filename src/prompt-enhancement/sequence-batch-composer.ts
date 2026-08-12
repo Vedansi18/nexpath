@@ -59,6 +59,16 @@ import type { PromptEnhancementSequenceFailureDispositionV1 } from './sequence-p
 /** What one item needs before it can be worded, resolved from the plan and the local original. */
 export interface PromptEnhancementSequenceBatchItemV1 {
   dependencyOrder: number;
+  /**
+   * This item's identity, as the rest of the system spells it.
+   *
+   * Carried, never derived here. It is the only handle a stored failure has back to the item it
+   * belongs to, and every other site — the continuation event, the popup identity, the delivery
+   * record, the packager — receives it from the runtime rather than composing one. A second format
+   * minted here would name the same item in a way nothing else produces or looks up, so the one
+   * place a per-item verdict could be traced would be the one place it could not.
+   */
+  sequenceItemId: string;
   itemKind: PromptEnhancementSequenceItemKindV1;
   /**
    * The user's own words for this item, resolved from its offsets against the LOCAL original.
@@ -117,8 +127,6 @@ export interface PromptEnhancementSequenceBatchInputV1 {
   /** How this run reached the provider, recorded on every item's verdict. */
   providerRuntimeState: PromptEnhancementCallVisibilityMode;
   optionalCallAvailabilityState: PromptEnhancementValidationGraphV1['optionalCallAvailabilityState'];
-  /** Identifies the sequence a failure belongs to, so a verdict names its own item. */
-  sequenceId: string;
   /** When the work this call is part of must be finished, as epoch milliseconds. */
   deadlineAtMs?: number;
   /** How the deadline is read. Present so the check is testable without waiting. */
@@ -384,7 +392,7 @@ function checkBatchOutput(
     const validationGraph = buildPromptEnhancementSequenceItemValidationGraphV1({
       sliceText: item.sliceText,
       generatedWording: text,
-      sequenceItemId: `${input.sequenceId}:item-${item.dependencyOrder}`,
+      sequenceItemId: item.sequenceItemId,
       safetyState: composedItemSafetyInput(
         input.baseSafetySummary,
         item.requiresConfirmationFloor,
@@ -421,6 +429,15 @@ export function promptEnhancementSequenceSliceTextV1(
 export function buildPromptEnhancementSequenceBatchItemsV1(
   items: readonly PromptEnhancementSequenceItemV1[],
   localOriginalText: string,
+  /**
+   * How the caller names item N — the same id it will hand the packager for that item.
+   *
+   * A function rather than a lookup table, so there is no absent-entry case to invent a fallback
+   * for: an empty or made-up id would satisfy every type here and produce a verdict pointing at
+   * nothing. The stored item carries no id of its own, and at composition time no row exists to
+   * read one from, so the caller is the only thing that can answer.
+   */
+  sequenceItemIdFor: (dependencyOrder: number) => string,
 ): readonly PromptEnhancementSequenceBatchItemV1[] {
   /**
    * The covered slices, with any span already inside another one dropped.
@@ -444,6 +461,7 @@ export function buildPromptEnhancementSequenceBatchItemsV1(
     if (item.dependencyOrder === 0) continue;
     batch.push({
       dependencyOrder: item.dependencyOrder,
+      sequenceItemId: sequenceItemIdFor(item.dependencyOrder),
       itemKind: item.itemKind,
       sliceText,
       roleLabel: item.roleLabel,

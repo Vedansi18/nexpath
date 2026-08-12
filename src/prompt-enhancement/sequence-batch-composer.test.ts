@@ -37,12 +37,16 @@ const passFailWording = (question: string): string =>
   + ' are clear and sure at ground level. Do not make any assumptions — confirm at ground level by'
   + ' reading the actual source.';
 
+/** How the caller names item N. The composer carries it; it never derives one. */
+const itemIdFor = (order: number): string => `seq-1:item-${order}`;
+
 const task = (
   order: number,
   sliceText: string | null,
   overrides: Partial<PromptEnhancementSequenceBatchItemV1> = {},
 ): PromptEnhancementSequenceBatchItemV1 => ({
   dependencyOrder: order,
+  sequenceItemId: itemIdFor(order),
   itemKind: 'task',
   sliceText,
   roleLabel: 'fix',
@@ -78,7 +82,6 @@ const input = (
   baseSafetySummary: BASE_SAFETY,
   providerRuntimeState: 'deterministic',
   optionalCallAvailabilityState: 'deterministic_only',
-  sequenceId: 'seq-1',
   ...overrides,
 });
 
@@ -202,7 +205,7 @@ describe('sequence batch — the user\'s own words', () => {
       stored(0, 'first_task', { start: 0, end: ORIGINAL.length }),
       stored(1, 'task', { start: 0, end: SLICE_ONE.length }),
       stored(2, 'wrap_up', null),
-    ], ORIGINAL);
+    ], ORIGINAL, itemIdFor);
 
     // Item 0 is context, not an item to write.
     expect(built.map((item) => item.dependencyOrder)).toEqual([1, 2]);
@@ -211,6 +214,30 @@ describe('sequence batch — the user\'s own words', () => {
     // recap for both would put the same words in front of the user twice, in the one item whose
     // purpose is that they read it — and dropping the contained span loses no character.
     expect(built[1]?.coveredSliceTexts).toEqual([ORIGINAL]);
+  });
+
+  it('carries the caller\'s id for each item, and never mints one', () => {
+    // This is the only handle a per-item verdict has back to its item, and every other site in the
+    // system — the continuation event, the popup identity, the delivery record, the packager —
+    // receives that id from the runtime. A format invented here would name the same item in a way
+    // nothing else produces or looks up.
+    const stored = (order: number, kind: PromptEnhancementSequenceItemV1['itemKind']): PromptEnhancementSequenceItemV1 => ({
+      itemKind: kind, originalSliceRef: null, sourcePointRanges: [], roleLabel: null,
+      dependencyOrder: order, complexity: kind === 'wrap_up' ? null : 'not_complex',
+      complexityReason: null, generatedWording: null, actionRiskKinds: [],
+      authorityMode: kind === 'wrap_up' ? null : 'plan_or_review', requiresConfirmationFloor: false,
+      decompositionGroupId: 'g1', itemValidationGraph: null, itemSafetyClauseRef: null,
+    });
+    // Deliberately a shape no derivation here would produce, so a re-derived id cannot pass.
+    const opaque = (order: number): string => `9f3c-${order * 7 + 11}-opaque`;
+    const built = buildPromptEnhancementSequenceBatchItemsV1(
+      [stored(0, 'first_task'), stored(1, 'task'), stored(2, 'task')],
+      ORIGINAL,
+      opaque,
+    );
+    expect(built.map((entry) => entry.sequenceItemId)).toEqual([opaque(1), opaque(2)]);
+    // And each item got its own, not the one beside it.
+    expect(built[0]?.sequenceItemId).not.toBe(built[1]?.sequenceItemId);
   });
 
   it('keeps two slices that cover different spans', () => {
@@ -226,7 +253,7 @@ describe('sequence batch — the user\'s own words', () => {
       stored(0, { start: 0, end: SLICE_ONE.length }, 'first_task'),
       stored(1, { start: ORIGINAL.indexOf(SLICE_TWO), end: ORIGINAL.indexOf(SLICE_TWO) + SLICE_TWO.length }, 'task'),
       stored(2, null, 'wrap_up'),
-    ], ORIGINAL);
+    ], ORIGINAL, itemIdFor);
     expect(built.at(-1)?.coveredSliceTexts).toEqual([SLICE_ONE, SLICE_TWO]);
   });
 
