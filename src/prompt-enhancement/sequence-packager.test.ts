@@ -100,6 +100,23 @@ const ACCEPTED = {
       bodyFingerprintRef: 'body-0:fingerprint',
     },
   },
+  uiView: {
+    body: {
+      text: 'The first prompt, already sent.',
+      currentBodyId: 'body-0',
+      bodyRevision: 0,
+      generatedOriginState: 'user_original',
+      dirtyState: 'dirty_user_edited',
+    },
+    actions: [
+      { actionType: 'use_current_body', currentBodyId: 'body-0', bodyRevision: 0 },
+      { actionType: 'shorter', currentBodyId: 'body-0', bodyRevision: 0 },
+      { actionType: 'apply_details', currentBodyId: 'body-0', bodyRevision: 0 },
+      { actionType: 'close', currentBodyId: 'body-0', bodyRevision: 0 },
+    ],
+    actionInputContract: { currentBodyId: 'body-0', bodyRevision: 0, actionId: 'act-0' },
+    handoffAndSequenceSummary: { currentBodyId: 'body-0' },
+  },
   routeDecision: { routeId: 'route-1' },
   bodyPlan: { planId: 'plan-1' },
   validationGraph: { safetyState: { fromTheFirstBody: true } },
@@ -597,5 +614,41 @@ describe('sequence packager — nothing of the previous body survives', () => {
       .toBeUndefined();
     // And the source uses go empty rather than listing what a different body consumed.
     expect(result.packaged.result.generatedOrigin.sourceUseIds).toEqual([]);
+  });
+});
+
+describe('sequence packager — the view a UI actually renders from', () => {
+  it('shows this item, not the prompt already sent', () => {
+    // A fifth copy of the body text, and the one a renderer is meant to trust. The continuation
+    // popup escapes it only by taking its text from the body instead.
+    const result = packagePromptEnhancementSequenceContinuationV1(input());
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const { uiView, currentBody } = result.packaged.result;
+    expect(uiView.body.text).toBe(currentBody.renderedPromptBody);
+    expect(uiView.body.currentBodyId).toBe('body-1');
+    expect(uiView.body.bodyRevision).toBe(1);
+    expect(uiView.body.generatedOriginState).toBe('pe_generated_body');
+    expect(uiView.body.dirtyState).toBe('clean');
+  });
+
+  it('offers the continuation actions here too, not the first popup ones', () => {
+    // I filtered one list and left its twin, in the copy that would actually reach a user.
+    const result = packagePromptEnhancementSequenceContinuationV1(input());
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const { uiView, availableActions } = result.packaged.result;
+    expect(uiView.actions.map((action) => action.actionType)).toEqual(['use_current_body', 'close']);
+    expect(uiView.actions).toEqual(availableActions);
+    expect(uiView.actionInputContract.currentBodyId).toBe('body-1');
+  });
+
+  it('carries one handoff metadata in all three places it appears', () => {
+    const result = packagePromptEnhancementSequenceContinuationV1(input());
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const { handoffMetadata } = result.packaged;
+    expect(result.packaged.result.handoffMetadata).toBe(handoffMetadata);
+    expect(result.packaged.result.uiView.handoffAndSequenceSummary).toBe(handoffMetadata);
   });
 });

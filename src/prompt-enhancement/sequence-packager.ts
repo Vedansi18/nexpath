@@ -205,6 +205,17 @@ export function packagePromptEnhancementSequenceContinuationV1(
     return { ok: false, refusal: 'item_safety_verdict_missing' };
   }
 
+  // The action list appears twice — once as the result's own and once inside the view a UI renders
+  // from — and each entry carries the body it was built for. Filtered and re-pointed once, used in
+  // both places, because filtering one and leaving the other is what happened the first time.
+  const continuationActions = input.acceptedResult.availableActions
+    .filter((action) => CONTINUATION_ACTION_TYPES_V1.includes(action.actionType))
+    .map((action) => ({
+      ...action,
+      currentBodyId: input.currentBodyId,
+      bodyRevision: input.bodyRevision,
+    }));
+
   const result: PromptEnhancementPrepareResultV1 = {
     ...input.acceptedResult,
     // A continuation popup exists to show the current body. The accepted result's disposition was a
@@ -254,13 +265,7 @@ export function packagePromptEnhancementSequenceContinuationV1(
       renderedPromptBody: item.generatedWording,
     },
     // Only what this surface offers, re-pointed at the body the entries now belong to.
-    availableActions: input.acceptedResult.availableActions
-      .filter((action) => CONTINUATION_ACTION_TYPES_V1.includes(action.actionType))
-      .map((action) => ({
-        ...action,
-        currentBodyId: input.currentBodyId,
-        bodyRevision: input.bodyRevision,
-      })),
+    availableActions: continuationActions,
     // The verdict the item carries, passed through. Not recomputed at the Stop either: re-running a
     // check on frozen text can only agree with itself or contradict itself, and a contradiction has
     // no defined handling.
@@ -282,6 +287,28 @@ export function packagePromptEnhancementSequenceContinuationV1(
         // guard cannot recognise our own text from; absent only means it cannot answer.
         bodyFingerprintRef: input.itemBodyFingerprintRef,
       },
+    },
+    // The payload a UI renders FROM, and it keeps its own copy of the body, the actions and the
+    // handoff. Carried whole it is the first prompt's text and the first popup's eight actions —
+    // the same two defects as the fields above, in the copy that would actually reach a user.
+    uiView: {
+      ...input.acceptedResult.uiView,
+      body: {
+        ...input.acceptedResult.uiView.body,
+        text: item.generatedWording,
+        currentBodyId: input.currentBodyId,
+        bodyRevision: input.bodyRevision,
+        generatedOriginState: 'pe_generated_body',
+        dirtyState: 'clean',
+      },
+      actions: continuationActions,
+      actionInputContract: {
+        ...input.acceptedResult.uiView.actionInputContract,
+        currentBodyId: input.currentBodyId,
+        bodyRevision: input.bodyRevision,
+      },
+      // Assigned below with the other two copies, once the metadata exists.
+      handoffAndSequenceSummary: undefined,
     },
     validationGraph: item.itemValidationGraph,
     safetySummary: input.itemSafetySummary,
@@ -341,9 +368,13 @@ export function packagePromptEnhancementSequenceContinuationV1(
   return {
     ok: true,
     packaged: {
-      // One value in both places. Two objects that have to be kept in step is how the previous
-      // body's metadata survived beside the current one's.
-      result: { ...result, handoffMetadata },
+      // One value in all THREE places. Two objects kept in step is how the previous body's metadata
+      // survived beside the current one's; three is the same failure with more room.
+      result: {
+        ...result,
+        handoffMetadata,
+        uiView: { ...result.uiView, handoffAndSequenceSummary: handoffMetadata },
+      },
       handoffMetadata,
       event,
       progress: {
