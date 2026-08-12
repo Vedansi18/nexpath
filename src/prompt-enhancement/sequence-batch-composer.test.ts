@@ -16,7 +16,11 @@ import {
   buildPromptEnhancementSequenceBatchSystemPromptV1,
 } from './sequence-batch-composer-prompt.js';
 import { PROMPT_ENHANCEMENT_COST_VALIDATION_RETRY_COUNT_V1 } from './cost-observability.js';
-import type { PromptEnhancementSequenceItemV1 } from './sequence-payload.js';
+import {
+  validatePromptEnhancementSequenceItemListV1,
+  type PromptEnhancementSequenceItemV1,
+} from './sequence-payload.js';
+import { packagePromptEnhancementSequenceContinuationV1 } from './sequence-packager.js';
 import type { PromptEnhancementSequencePlannerClientV1 } from './sequence-planner.js';
 import type { PromptEnhancementSafetySummaryV1 } from './contracts.js';
 
@@ -725,5 +729,180 @@ describe('sequence batch — the prompt carries what the checks look for', () =>
     expect(prompt).toContain('reference for register and rigour, not as a checklist to reproduce');
     // The freedom is about the angle only.
     expect(prompt).toContain('cross_confirmation without exception');
+  });
+});
+
+describe('sequence batch — the seam: composed, stored, packaged', () => {
+  // Every suite on the consuming side builds its items by hand. This one builds them from what the
+  // composer actually emits, because the two sides were each written from the plan rather than from
+  // each other — and that is the arrangement where both stay green while the join is broken.
+
+  /**
+   * The result the sequence was offered from. Only the fields the packager reads or swaps are real;
+   * the rest is carried through untouched and is not what this test is about.
+   */
+  const ACCEPTED_FOR_SEAM = {
+    requestId: 'req-A',
+    projectRoot: '/project',
+    enhancementId: 'enh-A',
+    currentBody: {
+      currentBodyId: 'body-0', bodyRevision: 0,
+      renderedPromptBody: 'The first prompt, already sent.',
+      text: 'The first prompt, already sent.',
+      originalPromptText: ORIGINAL,
+    },
+    disposition: 'fallback_to_original',
+    composerBoundary: {},
+    safetySummary: {},
+    handoffMetadata: {
+      handoffDecisionId: 'enh-A:handoff',
+      handoffKind: 'first_prompt_handoff_candidate',
+      compactFirstPopupSequenceSummary: {
+        summaryId: 'body-0:summary', currentBodyId: 'body-0', bodyRevision: 0,
+        publicSafeText: 'planned as 3 prompts',
+      },
+      scope: { requestId: 'req-A', projectRoot: '/project' },
+    },
+    availableActions: [
+      { actionType: 'use_current_body', label: 'Use this prompt', currentBodyId: 'body-0', bodyRevision: 0 },
+      { actionType: 'close', label: 'Close', currentBodyId: 'body-0', bodyRevision: 0 },
+    ],
+    generatedOrigin: { generatedOriginId: 'origin-0', bodyId: 'body-0', bodyRevision: 0, sourceUseIds: [], echoRecursionGuard: {} },
+    uiView: { body: {}, actions: [], actionInputContract: {}, handoffAndSequenceSummary: {} },
+  } as unknown as Parameters<typeof packagePromptEnhancementSequenceContinuationV1>[0]['acceptedResult'];
+
+  const FLOOR = 'Tell me the revert path and ask me for go-ahead before you start.';
+  const TASK_WORDING = `${SLICE_TWO}\n\nAdd it at the edge, and keep the change small.\n\n${FLOOR}`;
+  const CONF_WORDING = 'Did you check the limiter against the real handler rather than the test'
+    + ' double? Reply YES or NO only. Give the answer on its own line, with nothing after it.'
+    + ` ${BAR} Do not make any assumptions; confirm at ground level by reading the actual source.`;
+
+  /** Items 1 and 2 as the composer is given them: a floor-carrying task, then its binary. */
+  const batchItems: readonly PromptEnhancementSequenceBatchItemV1[] = [
+    task(1, SLICE_TWO, {
+      sequenceItemId: 'seq-A:1',
+      complexity: 'complex',
+      complexityReason: 'the limiter may never fire',
+      requiresConfirmationFloor: true,
+    }),
+    task(2, null, {
+      sequenceItemId: 'seq-A:2',
+      itemKind: 'binary_confirmation',
+      complexity: null,
+      complexityReason: 'the limiter may never fire',
+      authorityMode: null,
+    }),
+  ];
+
+  const runBatch = () => runPromptEnhancementSequenceBatchV1(
+    input(batchItems),
+    clientReturning(replyWith([
+      { dependencyOrder: 1, wording: TASK_WORDING, safetyClause: FLOOR },
+      { dependencyOrder: 2, wording: CONF_WORDING },
+    ])).client,
+  );
+
+  /** The stored list, with every composed field taken from the composer and none written here. */
+  const storedFrom = (
+    composed: ReadonlyMap<number, { wording: string; validationGraph: unknown; safetyClauseRef: unknown }>,
+  ): readonly PromptEnhancementSequenceItemV1[] => [
+    {
+      itemKind: 'first_task',
+      originalSliceRef: { start: 0, end: ORIGINAL.length },
+      sourcePointRanges: [], roleLabel: 'fix', dependencyOrder: 0,
+      complexity: 'not_complex', complexityReason: null,
+      generatedWording: null, actionRiskKinds: [], authorityMode: 'plan_or_review',
+      requiresConfirmationFloor: false, decompositionGroupId: 'g1',
+      itemValidationGraph: null, itemSafetyClauseRef: null,
+    },
+    {
+      itemKind: 'task',
+      originalSliceRef: {
+        start: ORIGINAL.indexOf(SLICE_TWO),
+        end: ORIGINAL.indexOf(SLICE_TWO) + SLICE_TWO.length,
+      },
+      sourcePointRanges: [], roleLabel: 'fix', dependencyOrder: 1,
+      complexity: 'complex', complexityReason: 'the limiter may never fire',
+      actionRiskKinds: [], authorityMode: 'plan_or_review',
+      requiresConfirmationFloor: true, decompositionGroupId: 'g1',
+      // From the composer. Not one of these three is written by this test.
+      generatedWording: composed.get(1)?.wording as string,
+      itemValidationGraph: composed.get(1)?.validationGraph as never,
+      itemSafetyClauseRef: composed.get(1)?.safetyClauseRef as never,
+    },
+    {
+      itemKind: 'binary_confirmation',
+      originalSliceRef: null, sourcePointRanges: [], roleLabel: null, dependencyOrder: 2,
+      complexity: null, complexityReason: 'the limiter may never fire',
+      actionRiskKinds: [], authorityMode: null,
+      requiresConfirmationFloor: false, decompositionGroupId: null,
+      generatedWording: composed.get(2)?.wording as string,
+      itemValidationGraph: composed.get(2)?.validationGraph as never,
+      itemSafetyClauseRef: composed.get(2)?.safetyClauseRef as never,
+    },
+  ];
+
+  it('produces a list the STORED read invariants accept', async () => {
+    // The two rules this phase added — a verdict on every item past the first, and a floor position
+    // wherever a floor was required — are enforced on the far side of storage, and were written
+    // from the plan rather than from what the composer emits.
+    const result = await runBatch();
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const validation = validatePromptEnhancementSequenceItemListV1(
+      storedFrom(result.composed),
+      { originalLength: ORIGINAL.length, stage: 'stored' },
+    );
+    expect(validation).toEqual({ ok: true });
+  });
+
+  it('is refused at the plan stage, which is the same list read under the other rule', async () => {
+    // The inversion is the point: composed fields are exactly what a plan must NOT carry, so a list
+    // that passes above must fail here. Passing both would mean neither rule was doing anything.
+    const result = await runBatch();
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const validation = validatePromptEnhancementSequenceItemListV1(
+      storedFrom(result.composed),
+      { originalLength: ORIGINAL.length, stage: 'plan' },
+    );
+    expect(validation.ok).toBe(false);
+  });
+
+  it('serves item 1, and the composer\'s offsets resolve in the body the packager hands out', async () => {
+    // The one assertion that ties the three together: offsets computed by the composer, carried
+    // through the storage shape, resolved against the text the packager actually serves. Every
+    // module in that chain is green on its own fixtures today.
+    const result = await runBatch();
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const items = storedFrom(result.composed);
+
+    const packaged = packagePromptEnhancementSequenceContinuationV1({
+      acceptedResult: ACCEPTED_FOR_SEAM,
+      items,
+      currentItemIndex: 1,
+      itemCount: items.length,
+      sequenceId: 'seq-A',
+      sequenceItemId: 'seq-A:1',
+      currentItemRevision: 0,
+      bodyRevision: 1,
+      currentBodyId: 'body-1',
+      nexpathGeneratedPromptRef: 'ref-1',
+      validationDecisionId: 'decision-1',
+      composerRunId: 'run-batch',
+      handoffDecisionId: 'handoff-1',
+    });
+
+    expect(packaged.ok).toBe(true);
+    if (!packaged.ok) return;
+    const body = packaged.packaged.result.currentBody.text;
+    const ref = packaged.packaged.safetyClauseRef;
+    expect(ref).not.toBeNull();
+    // The floor the composer reported, found again at the position it recorded, in the text the
+    // user will actually be shown.
+    expect(body.slice(ref?.start ?? 0, ref?.end ?? 0)).toBe(FLOOR);
+    // And the verdict the packager reports is the one the composer wrote, not a rebuilt one.
+    expect(packaged.packaged.result.validationGraph).toBe(result.composed.get(1)?.validationGraph);
   });
 });
