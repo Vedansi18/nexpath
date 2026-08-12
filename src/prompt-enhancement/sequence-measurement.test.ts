@@ -4,6 +4,7 @@ import {
   PROMPT_ENHANCEMENT_SEQUENCE_PATH_SHAPES_V1,
   PROMPT_ENHANCEMENT_STOP_INHERITED_TIMEOUT_MS_V1,
   PROMPT_ENHANCEMENT_USER_PROMPT_SUBMIT_TIMEOUT_MS_V1,
+  buildPromptEnhancementSequenceMeasurementEvidenceV1,
   buildPromptEnhancementSequenceOccupancyReportV1,
   buildPromptEnhancementSequencePathOccupancyV1,
   type PromptEnhancementOccupantReadingV1,
@@ -189,5 +190,76 @@ describe('the cost record can now express a measured value', () => {
     expect(typeof metadata.timeoutMs).toBe('number');
     // And the sentinel is a named export, so a row that has not been measured has something to say.
     expect(PROMPT_ENHANCEMENT_MEASUREMENT_PENDING_V1).toBe('blocked_pending_source_value');
+  });
+});
+
+describe('the readings go through the shipping packet, not around it', () => {
+  const evidence = (readings: readonly PromptEnhancementOccupantReadingV1[]) =>
+    buildPromptEnhancementSequenceMeasurementEvidenceV1({
+      evidenceId: 'measure-1', enhancementId: 'enh-1', requestId: 'req-1', readings,
+    });
+
+  it('counts STARTS, so discarded work is visible as work', () => {
+    // The whole reason the packet is the vehicle. A repair loop that spends its bound and returns
+    // nothing has started four paid calls and delivered none — a reading carrying only the duration
+    // reports that as one slow call, which is a different problem with a different remedy.
+    const packet = evidence([
+      { occupant: 'sequence_planning_call', latencyMs: 126_045, startedCallCount: 4, deliveredCallCount: 0 },
+    ]);
+    expect(packet.aggregate.plannedCallCount).toBe(4);
+    expect(packet.aggregate.usedCallCount).toBe(0);
+    expect(packet.aggregate.latencyMsTotal).toBe(126_045);
+  });
+
+  it('takes the aggregate from the shipping builder rather than computing a second one', () => {
+    // Two aggregations over one set of readings are two numbers free to disagree, and the one in
+    // this file would be the one nobody else checks.
+    const packet = evidence([
+      { occupant: 'sequence_planning_call', latencyMs: 20_346, startedCallCount: 1, deliveredCallCount: 0 },
+      { occupant: 'first_item_composition', latencyMs: 12_837 },
+      { occupant: 'awaited_batch_call', latencyMs: 35_244, estimatedOutputTokens: 388 },
+    ]);
+    expect(packet.evidenceKind).toBe('prompt_start_popup_delivery_cost_latency_v1');
+    expect(packet.aggregate.plannedCallCount).toBe(3);
+    // One of the three delivered nothing, and the aggregate says so.
+    expect(packet.aggregate.usedCallCount).toBe(2);
+    expect(packet.aggregate.latencyMsTotal).toBe(68_427);
+  });
+
+  it('leaves an occupant with no cost row OUT rather than filing it under another call', () => {
+    // Mis-attribution is worse than omission here: the count would look right and be about the
+    // wrong call.
+    const packet = evidence([
+      { occupant: 'packager_read', latencyMs: 3 },
+      { occupant: 'awaited_batch_call', latencyMs: 35_244 },
+    ]);
+    expect(packet.measurementRecords).toHaveLength(1);
+    expect(packet.measurementRecords[0]?.callId).toBe('sequence_item_wording');
+  });
+
+  it('carries the vehicle\'s own six privacy exclusions', () => {
+    // The content ban enforced by the packet rather than by an assertion of mine.
+    const packet = evidence([{ occupant: 'awaited_batch_call', latencyMs: 1 }]);
+    expect(packet.privacyExclusions).toEqual({
+      rawPromptBodyExcluded: true,
+      rawGeneratedBodyExcluded: true,
+      rawSourceExcerptExcluded: true,
+      rawFeedbackTextExcluded: true,
+      rawErrorExcluded: true,
+      localWriteAlreadySafe: true,
+    });
+    expect(packet.costVisibilityCanWeakenBehavior).toBe(false);
+  });
+
+  it('gives the planner call a row of its own, classified like its siblings', () => {
+    // Registered so the reading has somewhere to go — and gated exactly as the other two sequence
+    // rows are, because the runtime is still fail-closed and a row saying otherwise would have the
+    // source claim v1-live.
+    const rows = getPromptEnhancementAcceptedCostCallInventoryV1();
+    const planning = rows.find((entry) => entry.callId === 'sequence_planning');
+    const wording = rows.find((entry) => entry.callId === 'sequence_item_wording');
+    expect(planning).toBeDefined();
+    expect(planning?.requirementState).toBe(wording?.requirementState);
+    expect(planning?.productState).toBe(wording?.productState);
   });
 });

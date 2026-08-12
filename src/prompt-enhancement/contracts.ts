@@ -1518,6 +1518,7 @@ export type PromptEnhancementCostCallIdV1 =
   | 'custom_feedback_classification'
   | 'later_popup_feedback_decision'
   | 'optional_safety_review'
+  | 'sequence_planning'
   | 'sequence_summary_wording'
   | 'sequence_item_wording'
   | 'future_regenerate_flow'

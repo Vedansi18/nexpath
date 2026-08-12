@@ -1,7 +1,12 @@
 import {
   PROMPT_ENHANCEMENT_COST_MODEL_V1,
   PROMPT_ENHANCEMENT_COST_TIMEOUT_MS_V1,
+  buildPromptEnhancementCostRuntimeFlowEvidenceV1,
+  buildPromptEnhancementCostVisibilityMetadataV1,
+  type PromptEnhancementCostMeasurementInputV1,
+  type PromptEnhancementCostRuntimeFlowEvidencePacketV1,
 } from './cost-observability.js';
+import type { PromptEnhancementCostCallIdV1 } from './contracts.js';
 import { CLAUDE_HOOK_TIMEOUT_SECONDS } from '../agents/adapters/claude-code.js';
 
 /**
@@ -96,13 +101,38 @@ export const PROMPT_ENHANCEMENT_SEQUENCE_PATH_SHAPES_V1: readonly PromptEnhancem
   },
 ];
 
-/** One measured occupant, as durations and token counts. Never what it produced. */
+/** One measured occupant, as durations and counts. Never what it produced. */
 export interface PromptEnhancementOccupantReadingV1 {
   occupant: string;
   latencyMs: number;
   estimatedInputTokens?: number;
   estimatedOutputTokens?: number;
+  /**
+   * How many calls this occupant STARTED, which is where the cost is.
+   *
+   * 🔴 Not how many produced something usable. A repair loop that runs its bound and yields nothing
+   * has started four paid calls and delivered none, and a reading that carried only the duration
+   * would report that as one slow call — a different problem with a different remedy.
+   *
+   * Defaults to one started and one delivered, which is the ordinary single-call case.
+   */
+  startedCallCount?: number;
+  /** How many of those produced a usable result. Zero is the discarded-work case, and it is real. */
+  deliveredCallCount?: number;
 }
+
+/**
+ * Which cost row each occupant's calls belong to.
+ *
+ * ⛔ An occupant with no row is not silently attributed to another one. Mis-attribution would put a
+ * planner's wasted starts under the wording call's name, which is worse than leaving them out —
+ * the count would look right and be about the wrong thing.
+ */
+const OCCUPANT_CALL_IDS_V1: Readonly<Record<string, PromptEnhancementCostCallIdV1>> = {
+  sequence_planning_call: 'sequence_planning',
+  first_item_composition: 'baseline_pe_composer',
+  awaited_batch_call: 'sequence_item_wording',
+};
 
 export interface PromptEnhancementSequencePathOccupancyV1 {
   path: PromptEnhancementSequenceMeasuredPathV1;
@@ -199,4 +229,57 @@ export function buildPromptEnhancementSequenceOccupancyReportV1(
   return PROMPT_ENHANCEMENT_SEQUENCE_PATH_SHAPES_V1.map(
     (shape) => buildPromptEnhancementSequencePathOccupancyV1(shape, readings, perCallTimeoutMs),
   );
+}
+
+/**
+ * The readings, as the cost-and-latency evidence packet the milestone already ships.
+ *
+ * ⛔ This does NOT compute the aggregate. `plannedCallCount`, `usedCallCount` and `latencyMsTotal`
+ * come from the shipping builder, which is the point: a second aggregation written here would be a
+ * measurement mechanism invented beside one that exists, free to disagree with it.
+ *
+ * 🔴 What the packet gives that the occupancy report cannot: the STARTS. A planner that spends its
+ * repair bound and returns no plan reports `plannedCallCount: 4, usedCallCount: 0` here, where the
+ * occupancy report can only say how long it took. Those are different findings.
+ *
+ * An occupant with no cost row is left out rather than attributed to another call — see
+ * `OCCUPANT_CALL_IDS_V1`.
+ */
+export function buildPromptEnhancementSequenceMeasurementEvidenceV1(input: {
+  evidenceId: string;
+  enhancementId: string;
+  requestId: string;
+  readings: readonly PromptEnhancementOccupantReadingV1[];
+}): PromptEnhancementCostRuntimeFlowEvidencePacketV1 {
+  const measurementInputs: PromptEnhancementCostMeasurementInputV1[] = [];
+  for (const reading of input.readings) {
+    const callId = OCCUPANT_CALL_IDS_V1[reading.occupant];
+    if (callId === undefined) continue;
+    const started = reading.startedCallCount ?? 1;
+    const delivered = reading.deliveredCallCount ?? 1;
+    measurementInputs.push({
+      callId,
+      plannedCallCount: started,
+      usedCallCount: delivered,
+      latencyMs: reading.latencyMs,
+      estimatedInputTokens: reading.estimatedInputTokens,
+      estimatedOutputTokens: reading.estimatedOutputTokens,
+      // A run that started calls and delivered nothing is a fallback, not a success with a zero in
+      // it. The status is what makes the discarded work legible in the aggregate.
+      status: delivered === 0 ? 'fallback' : 'used',
+    });
+  }
+  return buildPromptEnhancementCostRuntimeFlowEvidenceV1({
+    evidenceId: input.evidenceId,
+    enhancementId: input.enhancementId,
+    requestId: input.requestId,
+    callVisibilityMetadata: buildPromptEnhancementCostVisibilityMetadataV1('sequence_planning', {
+      callVisibilityMode: 'llm_wording',
+      plannedCallCount: measurementInputs.reduce((n, m) => n + m.plannedCallCount, 0),
+      usedCallCount: measurementInputs.reduce((n, m) => n + m.usedCallCount, 0),
+    }),
+    measurementInputs,
+    observedSurfaces: ['prompt_start_prepare', 'enhancement_popup'],
+    telemetrySyncState: 'off_buffered_locally',
+  });
 }

@@ -546,6 +546,24 @@ const CALL_ROWS: readonly PromptEnhancementAcceptedCostCallInventoryRowV1[] = [
     reasonCodes: ['optional_safety_review_llm_backed_when_triggered'],
   }),
   row({
+    // The planner call, registered so its measurement has somewhere to go. The two rows below cover
+    // the wording calls and neither covers this one, so the reading with the most to say — a repair
+    // loop that spends several starts and delivers no plan — had no row to be counted in.
+    //
+    // 🔴 Classified exactly as its siblings are. The gate is shut, and a row claiming otherwise
+    // would have the source say v1-live while the runtime is still fail-closed.
+    callId: 'sequence_planning',
+    trigger: 'sequence_metadata',
+    userVisibleTrigger: 'sequence_metadata_candidate',
+    hiddenRuntimeTrigger: 'future metadata-only sequence planning candidate after sequence gates close',
+    requirementState: 'future_only_not_v1',
+    productState: 'future_runtime_gated_not_cost_gated',
+    calls: [54, 243, 972, 972],
+    separateLlmCallInV1: true,
+    skipCondition: 'future sequence runtime gated; one planning call per offered sequence',
+    reasonCodes: ['sequence_planning_cost_visible_future_runtime_gated'],
+  }),
+  row({
     callId: 'sequence_summary_wording',
     trigger: 'sequence_metadata',
     userVisibleTrigger: 'sequence_metadata_candidate',
@@ -1349,6 +1367,7 @@ const REQUIRED_CALL_IDS: readonly PromptEnhancementCostCallIdV1[] = [
   'custom_feedback_classification',
   'later_popup_feedback_decision',
   'optional_safety_review',
+  'sequence_planning',
   'sequence_summary_wording',
   'sequence_item_wording',
   'future_regenerate_flow',

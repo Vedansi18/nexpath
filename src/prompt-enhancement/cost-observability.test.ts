@@ -36,6 +36,7 @@ const requiredCallIds: readonly PromptEnhancementCostCallIdV1[] = [
   'custom_feedback_classification',
   'later_popup_feedback_decision',
   'optional_safety_review',
+  'sequence_planning',
   'sequence_summary_wording',
   'sequence_item_wording',
   'future_regenerate_flow',
@@ -91,11 +92,16 @@ describe('Phase 12 cost, provider, latency, and observability contracts', () => 
     }
   });
 
-  it('marks sequence wording rows as future-runtime gated without treating cost as the gate', () => {
+  it('marks sequence rows as future-runtime gated without treating cost as the gate', () => {
     const inventory = getPromptEnhancementAcceptedCostCallInventoryV1();
     const sequenceRows = inventory.filter((row) => row.callId.startsWith('sequence_'));
 
-    expect(sequenceRows).toHaveLength(2);
+    // Three: the planner, the summary wording and the per-item wording. The planner joined so its
+    // measurement had a row to be counted in, and it carries the same gated classification — a row
+    // saying otherwise would have the source claim v1-live while the runtime is fail-closed.
+    expect(sequenceRows).toHaveLength(3);
+    expect(sequenceRows.map((row) => row.callId)).toContain('sequence_planning');
+    expect(sequenceRows.every((row) => row.requirementState === 'future_only_not_v1')).toBe(true);
     expect(sequenceRows.every((row) => row.productState === 'future_runtime_gated_not_cost_gated')).toBe(true);
     expect(sequenceRows.every((row) => row.costVisibilityCanDisableCall === false)).toBe(true);
   });
