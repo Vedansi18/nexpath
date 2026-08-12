@@ -236,6 +236,10 @@ export function packagePromptEnhancementSequenceContinuationV1(
       composerRunId: input.composerRunId,
       sentPromptOrigin: 'sequence_handoff_owned_body',
       nexpathGeneratedPromptRef: input.nexpathGeneratedPromptRef,
+      // The THIRD copy of the same string, after the body's two. The popup reads the body, so this
+      // one is invisible and wrong: the record of what the composer produced would describe a
+      // different prompt from the one produced, under a run id pointing at the batch.
+      renderedPromptBody: item.generatedWording,
     },
     // Only what this surface offers, re-pointed at the body the entries now belong to.
     availableActions: input.acceptedResult.availableActions

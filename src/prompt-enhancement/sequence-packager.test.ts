@@ -64,6 +64,7 @@ const ACCEPTED = {
     composerRunId: 'run-0',
     sentPromptOrigin: 'user_authored_original_only',
     nexpathGeneratedPromptRef: 'ref-0',
+    renderedPromptBody: 'The first prompt, already sent.',
   },
   safetySummary: { sensitiveActionState: 'confirmation_required' },
   handoffMetadata: {
@@ -480,17 +481,20 @@ describe('sequence packager — the handoff metadata is about THIS body too', ()
     expect(result.packaged.progress).toEqual({ done: 1, total: 4 });
   });
 
-  it('sets both of the body\'s text fields, which are required to be equal', () => {
-    // The body carries its text twice. Setting one leaves a result whose rendered body is item N
-    // and whose text is still the first prompt — the packager serving the wrong prompt while every
-    // field it was asked about looked right.
+  it('sets all THREE copies of the body text, which sit in two objects', () => {
+    // The body carries its text twice and the composer boundary keeps a third. The first two are
+    // required to be equal, so missing one served the wrong prompt outright; the third is invisible
+    // to the popup and wrong quietly — the record of what the composer produced describing a
+    // different prompt, under a run id pointing at the batch.
     const result = packagePromptEnhancementSequenceContinuationV1(input());
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    const { renderedPromptBody, text } = result.packaged.result.currentBody;
-    expect(renderedPromptBody).toBe('The wording of item 1.');
-    expect(text).toBe(renderedPromptBody);
+    const { currentBody, composerBoundary } = result.packaged.result;
+    expect(currentBody.renderedPromptBody).toBe('The wording of item 1.');
+    expect(currentBody.text).toBe(currentBody.renderedPromptBody);
+    expect(composerBoundary.renderedPromptBody).toBe(currentBody.renderedPromptBody);
   });
+
 });
 
 describe('sequence packager — the origin bit lives in four places', () => {
