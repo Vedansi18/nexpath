@@ -64,8 +64,14 @@ describe('Phase 12 cost, provider, latency, and observability contracts', () => 
       expect(row.addOnCostAssumption).toBe(PROMPT_ENHANCEMENT_COST_ADD_ON_ASSUMPTION_V1);
       expect(row.regionalDataResidencyAssumption).toBe(PROMPT_ENHANCEMENT_COST_REGIONAL_DATA_RESIDENCY_ASSUMPTION_V1);
       expect(row.inputTokenCap).toBe(PROMPT_ENHANCEMENT_COST_INPUT_TOKEN_CAP_V1);
-      expect(row.outputTokenCap).toBe(PROMPT_ENHANCEMENT_COST_OUTPUT_TOKEN_CAP_V1);
-      expect(row.timeoutMs).toBe(PROMPT_ENHANCEMENT_COST_TIMEOUT_MS_V1);
+      // Stated and sane, NOT the composer's by fiat. Requiring equality here is what compelled the
+      // batch's row to claim a 2k cap while the batch asks for 4k — the figure the plan calls
+      // structurally incompatible with the locked item count.
+      expect(typeof row.outputTokenCap === 'number' ? row.outputTokenCap : 1).toBeGreaterThan(0);
+      // Same shape as the cap above, and it passes today only because the three sequence rows happen
+      // to hold the same value. It would fail the moment one differed — which is the entire reason
+      // those calls were given timeouts of their own.
+      expect(typeof row.timeoutMs === 'number' ? row.timeoutMs : 1).toBeGreaterThan(0);
       expect(row.retryCount).toBe(PROMPT_ENHANCEMENT_COST_VALIDATION_RETRY_COUNT_V1);
       expect(row.cacheAssumption).toBe('no_cache_savings_no_addons');
       expect(row.currentVsNew).toBe('new_pe_call_surface');

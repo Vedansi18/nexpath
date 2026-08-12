@@ -14,7 +14,12 @@ import {
   PROMPT_ENHANCEMENT_COST_TIMEOUT_MS_V1,
   PROMPT_ENHANCEMENT_MEASUREMENT_PENDING_V1,
   buildPromptEnhancementCostVisibilityMetadataV1,
+  PROMPT_ENHANCEMENT_COST_OUTPUT_TOKEN_CAP_V1,
+  PROMPT_ENHANCEMENT_SEQUENCE_BATCH_OUTPUT_TOKEN_CAP_V1,
+  PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_OUTPUT_TOKEN_CAP_V1,
+  PROMPT_ENHANCEMENT_SEQUENCE_SUMMARY_OUTPUT_TOKEN_CAP_V1,
   getPromptEnhancementAcceptedCostCallInventoryV1,
+  validatePromptEnhancementCostInventoryV1,
 } from './cost-observability.js';
 import {
   PROMPT_ENHANCEMENT_SEQUENCE_BATCH_TIMEOUT_MS_V1,
@@ -432,5 +437,53 @@ describe('the recorded readings, run back through the instrument', () => {
       expect(['measured', 'not_measured_path_not_runnable', 'not_measured_no_reading_supplied'])
         .toContain(entry.readingState);
     }
+  });
+});
+
+describe('an inventory row may state its own budget', () => {
+  const rows = getPromptEnhancementAcceptedCostCallInventoryV1();
+  const swap = (callId: string, patch: Record<string, unknown>) =>
+    rows.map((row) => (row.callId === callId ? { ...row, ...patch } : row));
+
+  it('accepts the not-yet-measured sentinel, which is what it was widened for', () => {
+    // The widening produced a type that compiled and an inventory that failed validation: the check
+    // demanded equality with the composer's constant, so the sentinel could never be used.
+    expect(validatePromptEnhancementCostInventoryV1(
+      swap('sequence_summary_wording', { timeoutMs: PROMPT_ENHANCEMENT_MEASUREMENT_PENDING_V1 }),
+    )).toEqual({ ok: true, reasonCodes: [] });
+  });
+
+  it('accepts a timeout that differs from the global, which is the point of naming them', () => {
+    // The three sequence calls passed only because all three happened to hold 45,000. The moment one
+    // differed — the entire purpose of giving them their own constants — the inventory rejected it.
+    expect(validatePromptEnhancementCostInventoryV1(
+      swap('sequence_item_wording', { timeoutMs: 61_000 }),
+    ).ok).toBe(true);
+  });
+
+  it('still refuses a budget that is not a budget', () => {
+    // Loosened to permit a different value, not to permit any value. Zero and negatives are the
+    // states worth refusing, and they are still refused.
+    for (const bad of [0, -1, 1.5]) {
+      const result = validatePromptEnhancementCostInventoryV1(swap('sequence_item_wording', { timeoutMs: bad }));
+      expect(result.ok).toBe(false);
+      expect(result.reasonCodes).toContain('timeout_missing_or_invalid:sequence_item_wording');
+    }
+  });
+
+  it('makes each sequence row claim the cap its code path actually uses', () => {
+    // The batch's row claimed the composer's 2k while the batch asks for 4k — the very figure the
+    // plan calls structurally incompatible with the locked item count, and for which a truncated
+    // reply is invalid rather than shorter.
+    const byId = new Map(rows.map((row) => [row.callId, row]));
+    expect(byId.get('sequence_planning')?.outputTokenCap).toBe(PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_OUTPUT_TOKEN_CAP_V1);
+    expect(byId.get('sequence_item_wording')?.outputTokenCap).toBe(PROMPT_ENHANCEMENT_SEQUENCE_BATCH_OUTPUT_TOKEN_CAP_V1);
+    expect(byId.get('sequence_summary_wording')?.outputTokenCap).toBe(PROMPT_ENHANCEMENT_SEQUENCE_SUMMARY_OUTPUT_TOKEN_CAP_V1);
+    // And a call with no cap of its own still reports the composer's, which is true of it.
+    expect(byId.get('baseline_pe_composer')?.outputTokenCap).toBe(PROMPT_ENHANCEMENT_COST_OUTPUT_TOKEN_CAP_V1);
+  });
+
+  it('leaves the shipping inventory valid', () => {
+    expect(validatePromptEnhancementCostInventoryV1(rows)).toEqual({ ok: true, reasonCodes: [] });
   });
 });

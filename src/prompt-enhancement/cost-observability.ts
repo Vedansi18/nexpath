@@ -587,6 +587,7 @@ const CALL_ROWS: readonly PromptEnhancementAcceptedCostCallInventoryRowV1[] = [
     // would have the source say v1-live while the runtime is still fail-closed.
     callId: 'sequence_planning',
     timeoutMs: PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_TIMEOUT_MS_V1,
+    outputTokenCap: PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_OUTPUT_TOKEN_CAP_V1,
     trigger: 'sequence_metadata',
     userVisibleTrigger: 'sequence_metadata_candidate',
     hiddenRuntimeTrigger: 'future metadata-only sequence planning candidate after sequence gates close',
@@ -600,6 +601,7 @@ const CALL_ROWS: readonly PromptEnhancementAcceptedCostCallInventoryRowV1[] = [
   row({
     callId: 'sequence_summary_wording',
     timeoutMs: PROMPT_ENHANCEMENT_SEQUENCE_SUMMARY_TIMEOUT_MS_V1,
+    outputTokenCap: PROMPT_ENHANCEMENT_SEQUENCE_SUMMARY_OUTPUT_TOKEN_CAP_V1,
     trigger: 'sequence_metadata',
     userVisibleTrigger: 'sequence_metadata_candidate',
     hiddenRuntimeTrigger: 'future metadata-only sequence summary wording candidate after sequence gates close',
@@ -613,6 +615,7 @@ const CALL_ROWS: readonly PromptEnhancementAcceptedCostCallInventoryRowV1[] = [
   row({
     callId: 'sequence_item_wording',
     timeoutMs: PROMPT_ENHANCEMENT_SEQUENCE_BATCH_TIMEOUT_MS_V1,
+    outputTokenCap: PROMPT_ENHANCEMENT_SEQUENCE_BATCH_OUTPUT_TOKEN_CAP_V1,
     trigger: 'sequence_metadata',
     userVisibleTrigger: 'sequence_metadata_candidate',
     hiddenRuntimeTrigger: 'future metadata-only per-item sequence wording candidate after runtime gates close',
@@ -850,6 +853,19 @@ function measuredOrAbsent(value: number | typeof PROMPT_ENHANCEMENT_MEASUREMENT_
   return value === PROMPT_ENHANCEMENT_MEASUREMENT_PENDING_V1 ? undefined : value;
 }
 
+/**
+ * A per-call budget that has been decided: a positive number, or the explicit not-yet sentinel.
+ *
+ * ⛔ Zero, a negative, or a non-integer is not a budget — those are the states worth refusing. What
+ * is NOT refused is a value that differs from the composer's, which is the whole reason these two
+ * fields were widened: the planner and the batch are sized against the locked item count, not
+ * against the composer's section count.
+ */
+function statedCallBudget(value: number | typeof PROMPT_ENHANCEMENT_MEASUREMENT_PENDING_V1): boolean {
+  if (value === PROMPT_ENHANCEMENT_MEASUREMENT_PENDING_V1) return true;
+  return Number.isInteger(value) && value > 0;
+}
+
 export function buildPromptEnhancementCostVisibilityMetadataV1(
   callId: PromptEnhancementCostCallIdV1,
   input: {
@@ -1061,8 +1077,13 @@ export function validatePromptEnhancementCostInventoryV1(
       reasonCodes.push(`regional_data_residency_assumption_missing:${inventoryRow.callId}`);
     }
     if (inventoryRow.inputTokenCap !== PROMPT_ENHANCEMENT_COST_INPUT_TOKEN_CAP_V1) reasonCodes.push(`input_cap_mismatch:${inventoryRow.callId}`);
-    if (inventoryRow.outputTokenCap !== PROMPT_ENHANCEMENT_COST_OUTPUT_TOKEN_CAP_V1) reasonCodes.push(`output_cap_mismatch:${inventoryRow.callId}`);
-    if (inventoryRow.timeoutMs !== PROMPT_ENHANCEMENT_COST_TIMEOUT_MS_V1) reasonCodes.push(`timeout_mismatch:${inventoryRow.callId}`);
+    // Stated and sane, NOT equal to the composer's. Requiring equality made the widened type
+    // unusable — a row carrying the not-yet-measured sentinel was rejected — and it compelled every
+    // row to claim the composer's 2k cap, including the batch, whose own cap is several times that
+    // and for which a truncated reply is invalid rather than shorter. A row that genuinely inherits
+    // still passes, because it holds the global's value.
+    if (!statedCallBudget(inventoryRow.outputTokenCap)) reasonCodes.push(`output_cap_missing_or_invalid:${inventoryRow.callId}`);
+    if (!statedCallBudget(inventoryRow.timeoutMs)) reasonCodes.push(`timeout_missing_or_invalid:${inventoryRow.callId}`);
     if (inventoryRow.retryCount !== PROMPT_ENHANCEMENT_COST_VALIDATION_RETRY_COUNT_V1) reasonCodes.push(`retry_mismatch:${inventoryRow.callId}`);
     if (inventoryRow.cacheAssumption !== 'no_cache_savings_no_addons') reasonCodes.push(`cache_assumption_missing:${inventoryRow.callId}`);
     if (inventoryRow.latencyImpact !== 'wait_for_full_result_under_timeout') reasonCodes.push(`latency_impact_missing:${inventoryRow.callId}`);
@@ -1187,6 +1208,14 @@ function row(input: {
    * one is actually measured against rather than assuming they all share one.
    */
   timeoutMs?: number;
+  /**
+   * This call's own output budget, when it is not the composer's.
+   *
+   * 🔴 The batch's is several times the composer's, because it writes every remaining prompt in one
+   * reply — and a row claiming 2k for it understates the one call where the cap decides whether a
+   * long sequence is possible at all.
+   */
+  outputTokenCap?: number;
 }): PromptEnhancementAcceptedCostCallInventoryRowV1 {
   return {
     callId: input.callId,
@@ -1208,7 +1237,7 @@ function row(input: {
     addOnCostAssumption: PROMPT_ENHANCEMENT_COST_ADD_ON_ASSUMPTION_V1,
     regionalDataResidencyAssumption: PROMPT_ENHANCEMENT_COST_REGIONAL_DATA_RESIDENCY_ASSUMPTION_V1,
     inputTokenCap: PROMPT_ENHANCEMENT_COST_INPUT_TOKEN_CAP_V1,
-    outputTokenCap: PROMPT_ENHANCEMENT_COST_OUTPUT_TOKEN_CAP_V1,
+    outputTokenCap: input.outputTokenCap ?? PROMPT_ENHANCEMENT_COST_OUTPUT_TOKEN_CAP_V1,
     timeoutMs: input.timeoutMs ?? PROMPT_ENHANCEMENT_COST_TIMEOUT_MS_V1,
     retryCount: PROMPT_ENHANCEMENT_COST_VALIDATION_RETRY_COUNT_V1,
     cacheAssumption: 'no_cache_savings_no_addons',
