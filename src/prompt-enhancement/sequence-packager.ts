@@ -3,6 +3,7 @@ import type {
   PromptEnhancementFutureSequenceRuntimeEventV1,
   PromptEnhancementHandoffMetadataV1,
   PromptEnhancementPrepareResultV1,
+  PromptEnhancementSafetySummaryV1,
 } from './contracts.js';
 import type { PromptEnhancementSequenceItemV1 } from './sequence-payload.js';
 
@@ -74,6 +75,20 @@ export interface PromptEnhancementSequencePackagerInputV1 {
    * The run that produced THIS text — the batch, not the composer run that wrote the first prompt.
    */
   composerRunId: string;
+  /**
+   * The safety verdict for THIS item, as the three fields a result carries it in.
+   *
+   * All three or none. The graph alone, set beside the first body's summaries, produces a result
+   * whose graph describes one body and whose summaries describe another — and a safety claim nobody
+   * made about this body is the outcome the fabrication rule exists to prevent, arrived at by
+   * mixing rather than by inventing.
+   *
+   * They travel WITH the item for the same reason the verdict does: the packager reports the
+   * verdict and never computes it. Where they are stored is the per-item check's contract to
+   * settle, not this component's.
+   */
+  itemSafetySummary: PromptEnhancementSafetySummaryV1;
+  itemValidationSummary: PromptEnhancementSafetySummaryV1;
 }
 
 /**
@@ -208,6 +223,11 @@ export function packagePromptEnhancementSequenceContinuationV1(
     // check on frozen text can only agree with itself or contradict itself, and a contradiction has
     // no defined handling.
     validationGraph: item.itemValidationGraph,
+    safetySummary: input.itemSafetySummary,
+    validationSummary: input.itemValidationSummary,
+    // Assigned below, once it exists. The result carries its own copy of the metadata and two
+    // copies pointing at different bodies is the failure this whole pass keeps finding.
+    handoffMetadata: undefined,
   };
 
   const handoffMetadata: PromptEnhancementHandoffMetadataV1 = {
@@ -218,8 +238,9 @@ export function packagePromptEnhancementSequenceContinuationV1(
     bodyRevision: input.bodyRevision,
     // True because the two lines above just made it true, for this revision.
     currentBodyValidityState: 'valid_for_current_body_revision',
-    // A carry, not a computation: the packager reports the safety state and never decides it.
-    riskConfirmationState: input.acceptedResult.safetySummary.sensitiveActionState,
+    // From THIS item's verdict, not the first body's. A carry either way — the packager reports the
+    // safety state and never decides it — but reporting the wrong body's is still reporting wrong.
+    riskConfirmationState: input.itemSafetySummary.sensitiveActionState,
   };
 
   const event: PromptEnhancementFutureSequenceRuntimeEventV1 = {
@@ -243,7 +264,9 @@ export function packagePromptEnhancementSequenceContinuationV1(
   return {
     ok: true,
     packaged: {
-      result,
+      // One value in both places. Two objects that have to be kept in step is how the previous
+      // body's metadata survived beside the current one's.
+      result: { ...result, handoffMetadata },
       handoffMetadata,
       event,
       progress: {

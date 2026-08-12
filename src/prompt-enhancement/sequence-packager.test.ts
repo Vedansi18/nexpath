@@ -8,8 +8,12 @@ import { promptEnhancementSequenceBatchExitActionV1 } from './sequence-batch-com
 import type { PromptEnhancementSequenceItemV1 } from './sequence-payload.js';
 import type {
   PromptEnhancementPrepareResultV1,
+  PromptEnhancementSafetySummaryV1,
   PromptEnhancementValidationGraphV1,
 } from './contracts.js';
+
+/** The item's own safety verdict, deliberately different from the first body's. */
+const ITEM_SAFETY = { sensitiveActionState: 'none_detected' } as unknown as PromptEnhancementSafetySummaryV1;
 
 /** The verdict the item carries. Its shape is the validator's business; the packager only reports. */
 const GRAPH = { safetyState: {} } as unknown as PromptEnhancementValidationGraphV1;
@@ -94,6 +98,8 @@ const input = (
   nexpathGeneratedPromptRef: 'ref-1',
   validationDecisionId: 'decision-for-item-1',
   composerRunId: 'run-batch',
+  itemSafetySummary: ITEM_SAFETY,
+  itemValidationSummary: ITEM_SAFETY,
   ...overrides,
 });
 
@@ -302,8 +308,9 @@ describe('sequence packager — the handoff metadata it must produce', () => {
     expect(ACCEPTED.handoffMetadata?.currentBodyId).not.toBe(packaged.currentBody.currentBodyId);
     // Valid because those two lines just made it so, for this revision.
     expect(handoffMetadata.currentBodyValidityState).toBe('valid_for_current_body_revision');
-    // A carry, not a computation: the risk state comes from the safety summary it accompanies.
-    expect(handoffMetadata.riskConfirmationState).toBe('confirmation_required');
+    // A carry, not a computation — and from the item's own summary, since the metadata describes
+    // the item's body. The first body's verdict is a different body's answer.
+    expect(handoffMetadata.riskConfirmationState).toBe('none_detected');
   });
 
   it('refuses a sequence it cannot continue rather than emitting metadata the popup rejects', () => {
@@ -364,5 +371,34 @@ describe('sequence packager — the actions a continuation actually has', () => 
       expect(action.currentBodyId).toBe('body-1');
       expect(action.bodyRevision).toBe(1);
     }
+  });
+});
+
+describe('sequence packager — one verdict, one metadata', () => {
+  it('reports the item safety verdict in all three fields, never a mix', () => {
+    // The graph alone, set beside the first body summaries, gives a result whose graph describes
+    // one body and whose summaries describe another - a safety claim nobody made about this body,
+    // arrived at by mixing rather than by inventing.
+    const result = packagePromptEnhancementSequenceContinuationV1(input());
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const packaged = result.packaged.result;
+    expect(packaged.validationGraph).toBe(GRAPH);
+    expect(packaged.safetySummary).toBe(ITEM_SAFETY);
+    expect(packaged.validationSummary).toBe(ITEM_SAFETY);
+    expect(packaged.safetySummary).not.toBe(ACCEPTED.safetySummary);
+    // And the handoff risk state comes from the item verdict, not the first body one.
+    expect(result.packaged.handoffMetadata.riskConfirmationState).toBe('none_detected');
+    expect(ACCEPTED.safetySummary.sensitiveActionState).toBe('confirmation_required');
+  });
+
+  it('puts the same metadata object on the result as it returns beside it', () => {
+    // Two copies pointing at different bodies is the failure this pass kept finding: the popup
+    // validates the separate one and passes, while anything reading the result gets the old one.
+    const result = packagePromptEnhancementSequenceContinuationV1(input());
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.packaged.result.handoffMetadata).toBe(result.packaged.handoffMetadata);
+    expect(result.packaged.result.handoffMetadata?.currentBodyId).toBe('body-1');
   });
 });
