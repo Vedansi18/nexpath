@@ -25,11 +25,14 @@ const PATTERNS: [RegExp, string][] = [
  * editors and JSON far less predictably than ASCII does. A visibly long marker is the point — it
  * shows how much was taken out.
  *
- * Every marker here is shorter than its shortest possible match, so padding only ever grows it.
- * If that ever stopped being true the marker is returned unpadded, because mangling the marker to
- * hit a length would be worse than the length being wrong.
+ * Every marker in THIS module is shorter than its shortest possible match, so padding always
+ * applies here. Other layers reuse this helper and some of their markers are longer than the
+ * shortest thing they match — an email can be six characters and its marker is sixteen. There the
+ * marker is returned unpadded and the text grows, because mangling the marker to hit a length
+ * would be worse than the length being wrong. Only a layer whose markers all fit can promise the
+ * property outright.
  */
-function lengthPreservingMarker(marker: string, matchLength: number): string {
+export function lengthPreservingMarker(marker: string, matchLength: number): string {
   if (marker.length >= matchLength) return marker;
   const padding = '.'.repeat(matchLength - marker.length);
   return marker.endsWith(']') ? `${marker.slice(0, -1)}${padding}]` : `${marker}${padding}`;
