@@ -70,7 +70,7 @@ const ACCEPTED = {
   handoffMetadata: {
     handoffDecisionId: 'enh-1:handoff',
     compactFirstPopupSequenceSummary: {
-      summaryId: 'summary-0', currentBodyId: 'body-0', bodyRevision: 0,
+      summaryId: 'body-0:summary', currentBodyId: 'body-0', bodyRevision: 0,
       publicSafeText: 'planned as 4 prompts',
     },
     handoffKind: 'first_prompt_handoff_candidate',
@@ -93,7 +93,12 @@ const ACCEPTED = {
     generatedOriginState: 'user_original',
     bodyId: 'body-0',
     bodyRevision: 0,
-    echoRecursionGuard: { sourcePromptEchoState: 'not_echo', lastInjectedPromptIsAuthority: false },
+    sourceUseIds: ['body-0:use'],
+    echoRecursionGuard: {
+      sourcePromptEchoState: 'not_echo',
+      lastInjectedPromptIsAuthority: false,
+      bodyFingerprintRef: 'body-0:fingerprint',
+    },
   },
   routeDecision: { routeId: 'route-1' },
   bodyPlan: { planId: 'plan-1' },
@@ -119,6 +124,9 @@ const input = (
   itemValidationSummary: ITEM_SAFETY,
   handoffDecisionId: 'handoff-for-item-1',
   itemGeneratedSafeStatus: 'passed',
+  itemBodyFingerprintRef: 'body-1:fingerprint',
+  itemSourceUseIds: ['body-1:use'],
+  compactSummaryId: 'body-1:summary',
   ...overrides,
 });
 
@@ -518,5 +526,76 @@ describe('sequence packager — the origin bit lives in four places', () => {
     // And the status this body was cleared under, not the one the first prompt was.
     expect(ACCEPTED.currentBody.generatedSafeStatus).toBe('blocked');
     expect(currentBody.generatedSafeStatus).toBe('passed');
+  });
+});
+
+/**
+ * The carries, in code rather than in commit messages.
+ *
+ * Each of these legitimately still describes the first body, and each is here because the value it
+ * SHOULD hold is not computable at a Stop: the batch produces prose rather than sections, and the
+ * lineage refs describe the sequence rather than any one item. Anything not on this list that still
+ * carries the previous body's marks is a defect.
+ */
+const NAMED_CARRIES = [
+  'result.currentBody.sections',
+  'result.currentBody.sourceAttribution',
+  'result.currentBody.originalPromptSectionId',
+  'result.composerBoundary.sourceAttribution',
+  'result.composerBoundary.originalPromptSectionId',
+  'result.diagnostics',
+  'result.handoffMetadata.itemLineageRefs',
+  'result.handoffMetadata.taskSlices',
+  'handoffMetadata.itemLineageRefs',
+  'handoffMetadata.taskSlices',
+  // The record's own key. What identifies WHICH body it is about is re-pointed.
+  'result.generatedOrigin.generatedOriginId',
+];
+
+function survivorsOfTheFirstBody(value: unknown, path: string, hits: string[]): void {
+  if (typeof value === 'string') {
+    if (/body-0|ref-0|run-0|first-body/.test(value)
+      && !NAMED_CARRIES.some((carry) => path.startsWith(carry))) {
+      hits.push(`${path} = ${value}`);
+    }
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((entry, index) => survivorsOfTheFirstBody(entry, `${path}[${index}]`, hits));
+    return;
+  }
+  if (value !== null && typeof value === 'object') {
+    for (const [key, entry] of Object.entries(value)) {
+      survivorsOfTheFirstBody(entry, `${path}.${key}`, hits);
+    }
+  }
+}
+
+describe('sequence packager — nothing of the previous body survives', () => {
+  it('finds no first-body marks anywhere outside the named carries', () => {
+    // Ten passes of reading found ten carried fields, one at a time. This walks the whole packaged
+    // output instead, so the eleventh is caught by running rather than by noticing - including one
+    // added to the contract later, which no amount of reading this file would surface.
+    const result = packagePromptEnhancementSequenceContinuationV1(input());
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const hits: string[] = [];
+    survivorsOfTheFirstBody(result.packaged, '', hits);
+    expect(hits).toEqual([]);
+  });
+
+  it('clears the echo fingerprint rather than inheriting one of another body', () => {
+    // The guard exists to recognise Nexpath's own text. A fingerprint of a different body is the
+    // one state it cannot do that from; absent only means it cannot answer.
+    const result = packagePromptEnhancementSequenceContinuationV1(input({
+      itemBodyFingerprintRef: undefined,
+      itemSourceUseIds: undefined,
+    }));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.packaged.result.generatedOrigin.echoRecursionGuard.bodyFingerprintRef)
+      .toBeUndefined();
+    // And the source uses go empty rather than listing what a different body consumed.
+    expect(result.packaged.result.generatedOrigin.sourceUseIds).toEqual([]);
   });
 });

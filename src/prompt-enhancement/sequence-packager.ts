@@ -93,6 +93,18 @@ export interface PromptEnhancementSequencePackagerInputV1 {
   /** The validation status this body was cleared under, arriving with the rest of its verdict. */
   itemGeneratedSafeStatus: PromptEnhancementValidationStatus;
   /**
+   * A fingerprint of THIS body, and the sources that went into it.
+   *
+   * Optional, and absent is the honest answer when the caller has none — the fingerprint is cleared
+   * rather than left pointing at another body. The echo guard exists to recognise Nexpath's own
+   * text, and a fingerprint of a different body is the one state it cannot do that from; a missing
+   * one only means it cannot answer, which is what it would be saying.
+   */
+  itemBodyFingerprintRef?: string;
+  itemSourceUseIds?: readonly string[];
+  /** The summary record for THIS body, like the handoff decision it sits beside. */
+  compactSummaryId?: string;
+  /**
    * The handoff decision for THIS body.
    *
    * One decision is made once, about the body the sequence was offered from. Carried onto every
@@ -260,9 +272,15 @@ export function packagePromptEnhancementSequenceContinuationV1(
       bodyId: input.currentBodyId,
       bodyRevision: input.bodyRevision,
       generatedOriginState: 'pe_generated_body',
+      // The sources that went into THIS body. The previous body's list sits under a body id that
+      // has been re-pointed, which reads as a record of what this item used.
+      sourceUseIds: input.itemSourceUseIds ?? [],
       echoRecursionGuard: {
         ...input.acceptedResult.generatedOrigin.echoRecursionGuard,
         sourcePromptEchoState: 'pe_generated_echo',
+        // Cleared rather than inherited. A fingerprint of a different body is the one state this
+        // guard cannot recognise our own text from; absent only means it cannot answer.
+        bodyFingerprintRef: input.itemBodyFingerprintRef,
       },
     },
     validationGraph: item.itemValidationGraph,
@@ -294,6 +312,9 @@ export function packagePromptEnhancementSequenceContinuationV1(
       ? undefined
       : {
         ...accepted.compactFirstPopupSequenceSummary,
+        // Its own id names this summary record, one level below the handoff decision it sits under.
+        summaryId: input.compactSummaryId
+          ?? accepted.compactFirstPopupSequenceSummary.summaryId,
         currentBodyId: input.currentBodyId,
         bodyRevision: input.bodyRevision,
       },
