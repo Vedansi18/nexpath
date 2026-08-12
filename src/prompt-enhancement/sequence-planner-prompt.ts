@@ -123,6 +123,12 @@ Three spans must never be CUT:
      code that must match it, an API contract and its client update, a security fix and the config
      rotation it needs, a release and its rollback. Splitting these ships half a change.
 
+     And it stays together when the USER said it must. The property is whether they said this work
+     must not be separated, however they phrased it. "Same PR", "one change", "all together",
+     "don't leave this half done" are how it commonly looks — they are NOT what to match against.
+     Work that is not coupled on its own becomes coupled the moment they say so, and splitting it
+     then is the same broken intermediate state with their instruction on the record.
+
   2. CONDITIONAL ALTERNATIVES — a conditional and ALL of its branches are ONE item, with the
      condition preserved word for word inside it. "If the tests pass deploy, otherwise fix them" is
      one item; split, it becomes two instructions that will both be followed.

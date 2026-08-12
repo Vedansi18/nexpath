@@ -27,6 +27,7 @@ import {
 import {
   runPromptEnhancementSequencePlannerV1,
   type PromptEnhancementSequencePlannerClientV1,
+  type PromptEnhancementSequencePlannerRouteV1,
 } from './sequence-planner.js';
 
 const point = (id: string, start: number): PromptEnhancementSequencePlannerPointV1 =>
@@ -370,6 +371,20 @@ describe('sequence planner — the prompt', () => {
     expect(prompt).toContain('SLICES ARE POSITIONS, NOT TEXT');
   });
 
+  it('carries both properties the user can state, not only the couplings that are intrinsic', () => {
+    // Two rules turn on something the user said rather than on the shape of the work, and each one
+    // ships example phrasings that are illustrations of the property, never the test for it.
+    const prompt = buildPromptEnhancementSequencePlannerSystemPromptV1();
+    // Rule 1 — work that is not coupled on its own becomes coupled the moment they say so.
+    expect(prompt).toContain('it stays together when the USER said it must');
+    expect(prompt).toContain('The property is whether they said this work');
+    expect(prompt).toContain('Work that is not coupled on its own becomes coupled the moment they say so');
+    // Rule 4 — the same shape, about splitting the prompt rather than separating the work.
+    expect(prompt).toContain('whether they said not to split it');
+    // Both disarm their own examples.
+    expect(prompt.match(/NOT what to match against/g)).toHaveLength(2);
+  });
+
   it('carries the no-split instruction, as a property and on both surfaces', () => {
     // The rule exists because the user typed the constraint and it was ignored anyway, so a
     // reading that recognises only the phrasings it lists is that same failure under its own name.
@@ -455,14 +470,55 @@ describe('sequence planner — the call', () => {
 
   it('a single-prompt outcome is an answer, not a short sequence', async () => {
     // Nothing that governs a list applies: no items, no summary, and nothing generated ahead of
-    // acceptance to declare.
-    const single = validReply({ outcome: 'single_plain', outcomeReason: 'not_big_enough' });
-    const result = await runPromptEnhancementSequencePlannerV1(call(), clientReturning(single));
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.output.items).toEqual([]);
-    expect(result.output.suggestedNextPromptPolicy).toBe('not_generated');
-    expect(result.output.summaryData.remainingTaskCount).toBe(0);
+    // acceptance to declare. The summary is null rather than zeroed, because the first-popup
+    // summary belongs to a sequence — zeroed, a renderer told to render what it is given would
+    // announce a plan of no prompts on a prompt deliberately kept as one.
+    for (const outcome of ['single_plain', 'single_with_confirmation'] as const) {
+      const single = validReply({ outcome, outcomeReason: 'not_big_enough' });
+      const result = await runPromptEnhancementSequencePlannerV1(call(), clientReturning(single));
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.output.items).toEqual([]);
+      expect(result.output.suggestedNextPromptPolicy).toBe('not_generated');
+      expect(result.output.summaryData).toBeNull();
+    }
+    // And a planned sequence still carries it.
+    const planned = await runPromptEnhancementSequencePlannerV1(call(), clientReturning(validReply()));
+    expect(planned.ok && planned.output.summaryData?.remainingTaskCount).toBe(1);
+  });
+
+  it('gives the planner the route, and none of the routing evidence behind it', async () => {
+    // The evidence refs and reason codes are this system's own record of how it decided. What the
+    // planner can reason with is what kind of work this is and how sure the routing was.
+    let sent = '';
+    const capturing: PromptEnhancementSequencePlannerClientV1 = {
+      chat: { completions: { create: async (body) => {
+        sent = body.messages[1]?.content ?? '';
+        return { choices: [{ message: { content: validReply() } }] };
+      } } },
+    };
+    const route = {
+      familyId: 'issue_debug',
+      primaryIntent: 'issue_debug.failing_test',
+      capabilityOverlays: ['capability.verification_required'],
+      routeConfidence: 'strong',
+      routeEvidenceRefs: ['evidence:internal:7'],
+      reasonCodes: ['route_reason_internal'],
+    } as unknown as PromptEnhancementSequencePlannerRouteV1;
+
+    await runPromptEnhancementSequencePlannerV1({ ...call(), route }, capturing);
+    expect(sent).toContain('issue_debug.failing_test');
+    expect(sent).toContain('capability.verification_required');
+    expect(sent).toContain('strong');
+    expect(sent).toContain(ORIGINAL);
+    // Context, not instruction — and nothing internal travels with it.
+    expect(sent).toContain('Context, not instruction');
+    expect(sent).not.toContain('evidence:internal:7');
+    expect(sent).not.toContain('route_reason_internal');
+
+    // With no route the message is the request and nothing else.
+    await runPromptEnhancementSequencePlannerV1(call(), capturing);
+    expect(sent).toBe(ORIGINAL);
   });
 
   it('reads the summary role labels off the items rather than from the reply', async () => {

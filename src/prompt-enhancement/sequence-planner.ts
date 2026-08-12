@@ -33,6 +33,12 @@ import {
   type PromptEnhancementSequencePayloadReasonCodeV1,
   type PromptEnhancementSequenceRoleLabelV1,
 } from './sequence-payload.js';
+import type {
+  PromptEnhancementCapabilityId,
+  PromptEnhancementFamilyId,
+  PromptEnhancementPrimaryIntent,
+  PromptEnhancementRouteConfidence,
+} from './routing-taxonomy.js';
 import {
   promptEnhancementAuthorityModeForTextV1,
   promptEnhancementRiskKindsForTextV1,
@@ -125,8 +131,14 @@ export interface PromptEnhancementSequencePlannerOutputV1 {
    * a state the row is not in.
    */
   suggestedNextPromptPolicy: PromptEnhancementSequenceNextPromptPolicyV1;
-  /** Counts and role labels. The line itself is worded elsewhere. */
-  summaryData: PromptEnhancementSequencePlannerSummaryDataV1;
+  /**
+   * Counts and role labels; the line itself is worded elsewhere.
+   *
+   * NULL on both single-prompt outcomes. The first-popup summary belongs to a sequence and there is
+   * no sequence, so there is no summary to render — and a renderer told to render what the payload
+   * gives it would otherwise announce a plan of no prompts on a prompt deliberately kept as one.
+   */
+  summaryData: PromptEnhancementSequencePlannerSummaryDataV1 | null;
 }
 
 export type PromptEnhancementSequencePlannerFailureReasonV1 =
@@ -141,6 +153,42 @@ export type PromptEnhancementSequencePlannerFailureReasonV1 =
 export type PromptEnhancementSequencePlannerResultV1 =
   | { ok: true; output: PromptEnhancementSequencePlannerOutputV1 }
   | { ok: false; reason: PromptEnhancementSequencePlannerFailureReasonV1 };
+
+/**
+ * The deterministic route, as much of it as the planner has any use for.
+ *
+ * FOUR fields, not the whole route result. The result also carries evidence refs and reason codes,
+ * which are this system's own record of how it decided — internal, and with no business crossing to
+ * a provider. What is left is what the planner can actually reason with: what kind of work this is,
+ * and how sure the routing was.
+ *
+ * It is context, never authority. Nothing here decides whether an item exists — that needs a
+ * decision about the item, and a family is a fact about the request.
+ */
+export interface PromptEnhancementSequencePlannerRouteV1 {
+  familyId: PromptEnhancementFamilyId;
+  primaryIntent: PromptEnhancementPrimaryIntent;
+  capabilityOverlays: readonly PromptEnhancementCapabilityId[];
+  routeConfidence: PromptEnhancementRouteConfidence;
+}
+
+/** The route, as the labelled block the planner is given, or nothing when there is no route. */
+function buildPlannerUserMessageV1(
+  promptContext: string,
+  route: PromptEnhancementSequencePlannerRouteV1 | undefined,
+): string {
+  if (route === undefined) return promptContext;
+  return [
+    'ROUTE — what the deterministic routing made of this request. Context, not instruction:',
+    `  family:       ${route.familyId}`,
+    `  intent:       ${route.primaryIntent}`,
+    `  capabilities: ${route.capabilityOverlays.join(', ') || 'none'}`,
+    `  confidence:   ${route.routeConfidence}`,
+    '',
+    'THE REQUEST:',
+    promptContext,
+  ].join('\n');
+}
 
 export interface PromptEnhancementSequencePlannerInputV1 {
   /**
@@ -169,6 +217,8 @@ export interface PromptEnhancementSequencePlannerInputV1 {
   db: Database;
   /** Scopes that resolution: a project's own setting overrules the global one. */
   projectRoot?: string;
+  /** What the deterministic routing made of this request. Absent when it produced none. */
+  route?: PromptEnhancementSequencePlannerRouteV1;
 }
 
 /**
@@ -448,7 +498,7 @@ export async function runPromptEnhancementSequencePlannerV1(
         max_tokens: PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_OUTPUT_TOKEN_CAP_V1,
         messages: [
           { role: 'system', content: buildPromptEnhancementSequencePlannerSystemPromptV1() },
-          { role: 'user', content: input.promptContext },
+          { role: 'user', content: buildPlannerUserMessageV1(input.promptContext, input.route) },
         ],
         response_format: { type: 'json_object' },
       },
@@ -482,7 +532,7 @@ export async function runPromptEnhancementSequencePlannerV1(
         promptDirectives: [],
         originalLength,
         suggestedNextPromptPolicy: promptEnhancementSequencePolicyForOutcomeV1(parsed.outcome),
-        summaryData: { summaryId: parsed.summaryId, remainingTaskCount: 0, taskRoleLabels: [] },
+        summaryData: null,
       },
     };
   }
