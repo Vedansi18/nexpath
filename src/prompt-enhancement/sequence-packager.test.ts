@@ -294,6 +294,42 @@ describe('sequence packager — the progress the contract never carried', () => 
   });
 });
 
+describe('sequence packager — the floor position travels with the body', () => {
+  const REF = { start: 4, end: 11 };
+
+  it('emits the served item\'s position, not another item\'s', () => {
+    // The check that reads it resolves it against the body this call served. Left for the caller to
+    // fetch, it would be fetched by an index that is 0-based with item 0 excluded — the one offset
+    // this function exists to apply — and one off resolves a plausible span over unrelated text.
+    const items = [
+      item(0),
+      item(1, { requiresConfirmationFloor: true, itemSafetyClauseRef: REF }),
+      item(2),
+      item(3),
+    ];
+    const served = packagePromptEnhancementSequenceContinuationV1(input({ items, currentItemIndex: 1 }));
+    expect(served.ok).toBe(true);
+    if (!served.ok) return;
+    expect(served.packaged.safetyClauseRef).toEqual(REF);
+    // And the neighbour, packaged from the same list, carries its own answer rather than that one.
+    const other = packagePromptEnhancementSequenceContinuationV1(input({ items, currentItemIndex: 2 }));
+    expect(other.ok && other.packaged.safetyClauseRef).toBeNull();
+  });
+
+  it('resolves against the body it is emitted with', () => {
+    // The two come off the same item, so this holds by construction — which is the point of
+    // emitting them together rather than leaving them to be matched up later.
+    const items = [item(0), item(1, { requiresConfirmationFloor: true, itemSafetyClauseRef: REF }), item(2), item(3)];
+    const result = packagePromptEnhancementSequenceContinuationV1(input({ items, currentItemIndex: 1 }));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const ref = result.packaged.safetyClauseRef;
+    expect(ref).not.toBeNull();
+    expect(result.packaged.result.currentBody.text.slice(ref?.start ?? 0, ref?.end ?? 0))
+      .toBe('wording');
+  });
+});
+
 describe('sequence packager — the event it emits', () => {
   it('agrees with the body it is shown beside, and scopes to the same request', () => {
     const result = packagePromptEnhancementSequenceContinuationV1(input());

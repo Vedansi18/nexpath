@@ -37,29 +37,37 @@ reproduces the user's wording inside a confirmation is rejected, and asking abou
 without quoting it is always possible.`;
 
 /**
- * The two clauses a confirmation is malformed without, as the exact sentences to reproduce.
+ * The three sentences a confirmation carries beside its question, dictated rather than described.
  *
- * Dictated rather than described, and this is the fix for a recurring failure rather than a style
- * choice. Described in prose, the composer paraphrases — correctly, in good English — and a check
- * looking for the phrase rejects the paraphrase. Then the item is repaired three times and the
- * sequence is lost, for output that was right.
+ * Dictated because prose invites a paraphrase: describe the certainty bar and the composer writes a
+ * good one in its own words, which is fine until something tries to recognise it.
  *
- * So the prompt gives the sentence and the check looks for the same anchor inside it. The two are
- * the same constant, which is what stops the instruction and the rule drifting apart.
+ * 🔴 ONLY ONE OF THE THREE CARRIES AN ANCHOR, and the asymmetry is the rule rather than an
+ * oversight. The certainty bar and the anti-assumption instruction are requirements on MEANING, so
+ * nothing downstream may look for them: an anchor cannot tell "Answer only if you are certain at
+ * the ground level" — the bar, correctly written — from a confirmation that has no bar at all, and
+ * rejecting the first costs three repairs and then the whole sequence. Their presence is the
+ * composer's own to confirm, and the prompt's read-back step is where that happens.
+ *
+ * ⛔ So do not add an anchor to either of them, however natural the symmetry looks. The two that
+ * used to be here were read by a check that was removed for exactly this reason.
  */
 export const PROMPT_ENHANCEMENT_SEQUENCE_CONFIRMATION_CLAUSES_V1 = {
+  /** Instructed only. No anchor — see above. */
   certaintyBar: {
     sentence: 'Answer only if you are clear and sure at ground level.',
-    anchor: 'clear and sure at ground level',
   },
+  /** Instructed only. No anchor — see above. */
   antiAssumption: {
     sentence: 'Do not make any assumptions; confirm at ground level by reading the actual source.',
-    anchor: 'confirm at ground level by reading the actual source',
   },
   /**
    * The demand that the answer stand alone, which is a clause in the QUESTION and not a fact about
    * the reply. Nexpath never reads agent replies, so the reply's shape is not checkable and was
    * never meant to be — what is checkable is whether the question asked for it.
+   *
+   * ✅ This one IS anchored, and it is the one place the difference is visible: the demand is a
+   * fixed instruction rather than a shade of meaning, so looking for it is verification.
    */
   answerAlone: {
     sentence: 'Give the answer on its own line, with nothing after it.',

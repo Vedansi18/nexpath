@@ -292,6 +292,21 @@ describe('sequence batch — confirmations', () => {
     expect(systemPrompt).toContain('all three mandatory parts');
   });
 
+  it('gives the two meaning-level clauses no anchor to be checked against', () => {
+    // A guard on the shape, because the removed check is easy to re-add: two anchors sitting beside
+    // a clause constant read as something meant to be looked for. Both sentences are still dictated
+    // — the prompt reproduces them — and only the answer-alone demand, which is a fixed instruction
+    // rather than a shade of meaning, carries one.
+    const clauses: Record<string, Record<string, unknown>> = PROMPT_ENHANCEMENT_SEQUENCE_CONFIRMATION_CLAUSES_V1;
+    expect(clauses['certaintyBar']?.['anchor']).toBeUndefined();
+    expect(clauses['antiAssumption']?.['anchor']).toBeUndefined();
+    expect(clauses['answerAlone']?.['anchor']).toBe('on its own line');
+
+    const systemPrompt = buildPromptEnhancementSequenceBatchSystemPromptV1();
+    expect(systemPrompt).toContain(PROMPT_ENHANCEMENT_SEQUENCE_CONFIRMATION_CLAUSES_V1.certaintyBar.sentence);
+    expect(systemPrompt).toContain(PROMPT_ENHANCEMENT_SEQUENCE_CONFIRMATION_CLAUSES_V1.antiAssumption.sentence);
+  });
+
   it('accepts the clauses however they are spelt or wrapped', async () => {
     // "ground-level" and "ground level" are one phrase spelt two ways, and a clause that wrapped
     // across a line has a newline where the sentence had a space. Neither is a different clause,
@@ -632,14 +647,17 @@ describe('sequence batch — what a failed batch leaves the user with', () => {
 describe('sequence batch — the prompt carries what the checks look for', () => {
   const prompt = buildPromptEnhancementSequenceBatchSystemPromptV1();
 
-  it('dictates both mandatory clauses in the exact words the check wants', () => {
+  it('dictates all three mandatory sentences, in the words the constant holds', () => {
     // The constants exist so the instruction and the rule cannot drift. Nothing pinned that the
-    // prompt actually carries them: drop the interpolation and every confirmation is rejected on
-    // every prompt, three repairs each, while the suite stays green.
+    // prompt actually carries them: drop the interpolation and the composer is left describing two
+    // of them from memory, while the suite stays green.
     for (const clause of Object.values(PROMPT_ENHANCEMENT_SEQUENCE_CONFIRMATION_CLAUSES_V1)) {
       expect(prompt).toContain(clause.sentence);
-      expect(prompt).toContain(clause.anchor);
     }
+    // The one anchor still read lives inside its own dictated sentence, which is what keeps the
+    // instruction and the check from drifting apart.
+    const { sentence, anchor } = PROMPT_ENHANCEMENT_SEQUENCE_CONFIRMATION_CLAUSES_V1.answerAlone;
+    expect(sentence).toContain(anchor);
     expect(prompt).toContain('Reproduce 2 and 3 in those words');
   });
 

@@ -6,7 +6,10 @@ import type {
   PromptEnhancementPrepareResultV1,
   PromptEnhancementSafetySummaryV1,
 } from './contracts.js';
-import type { PromptEnhancementSequenceItemV1 } from './sequence-payload.js';
+import type {
+  PromptEnhancementSequenceItemV1,
+  PromptEnhancementSequenceOffsetRangeV1,
+} from './sequence-payload.js';
 
 /**
  * The Stop-time packager.
@@ -143,6 +146,17 @@ export interface PromptEnhancementSequencePackagedContinuationV1 {
   handoffMetadata: PromptEnhancementHandoffMetadataV1;
   event: PromptEnhancementFutureSequenceRuntimeEventV1;
   progress: PromptEnhancementSequenceProgressV1;
+  /**
+   * Where the safety floor sits inside the body being served. Null when this item carried none.
+   *
+   * Emitted BESIDE the body rather than left for the caller to fetch, and the two come off the same
+   * item for the same reason the body and its verdict do. The alternative is a caller indexing the
+   * stored list itself — on an index that is 0-based with item 0 excluded, which is precisely the
+   * offset this function exists to apply. Get it wrong by one and the range resolves against a body
+   * it does not index: a plausible span over unrelated text, and the edit check then guards that
+   * instead of the safeguard. Nothing about the result would look wrong.
+   */
+  safetyClauseRef: PromptEnhancementSequenceOffsetRangeV1 | null;
 }
 
 export type PromptEnhancementSequencePackagerResultV1 =
@@ -374,6 +388,9 @@ export function packagePromptEnhancementSequenceContinuationV1(
         done: input.currentItemIndex,
         total: input.itemCount,
       },
+      // Off the same item the body came from, so the offsets and the text they index can never be
+      // two different items'.
+      safetyClauseRef: item.itemSafetyClauseRef,
     },
   };
 }
