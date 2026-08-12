@@ -118,10 +118,20 @@ async function packagedPopup(currentItemIndex: number) {
     itemValidationSummary: accepted.validationSummary,
     handoffDecisionId: `${accepted.enhancementId}:handoff:item-${currentItemIndex}`,
     itemGeneratedSafeStatus: accepted.currentBody.generatedSafeStatus,
+    // Supplied as a caller would. Omitted, the summary's own id named the first popup's record —
+    // the field added for exactly this, never exercised on the path that matters.
+    compactSummaryId: `${accepted.enhancementId}:summary:item-${currentItemIndex}`,
+    itemBodyFingerprintRef: `${accepted.enhancementId}:fingerprint:item-${currentItemIndex}`,
+    itemSourceUseIds: [`${accepted.enhancementId}:use:item-${currentItemIndex}`],
   });
   if (!packaged.ok) throw new Error(`packager refused: ${packaged.refusal}`);
 
   return {
+    accepted,
+    // The metadata the packager was actually given. Read off a second prepare call instead, the
+    // marks come from a different result — and the facade result has no handoff of its own, so
+    // reading it there yields undefined and the marks silently vanish.
+    acceptedHandoff: handoff,
     packaged: packaged.packaged,
     built: buildPromptEnhancementMpsContinuationPopupV1({
       result: packaged.packaged.result,
@@ -269,16 +279,28 @@ describe('sequence packager — nothing of the previous body survives, on the re
     // The version of this test that ran on a hand-built fixture could only find fields someone had
     // already thought to put in the fixture — and the ui view, where the last two defects lived,
     // was not in it. This one walks a result the facade actually produced.
-    const accepted = await preparePromptEnhancement(request());
+    const { accepted, acceptedHandoff, packaged } = await packagedPopup(2);
+    // Every id the packager is responsible for re-pointing, not the five that came to mind. Three
+    // of these name fields that took a pass each to find, and the sweep was not watching any of
+    // them — the instrument built for this class had the class outside its field of view.
+    //
+    // NOT the source-use ids. Those hold a SOURCE ref, and a source is the same source for every
+    // item in the sequence: marking it flags the section plans, the composer's input contract and
+    // the handoff's source lineage, all of which reference it correctly. A mark has to name
+    // something that belongs to one body.
     const marks = [
       accepted.currentBody.currentBodyId,
       accepted.currentBody.renderedPromptBody,
       accepted.currentBody.composerRunId,
       accepted.currentBody.nexpathGeneratedPromptRef,
       accepted.validationDecisionId,
-    ].filter((mark) => typeof mark === 'string' && mark.length > 0);
+      accepted.generatedOrigin.echoRecursionGuard.bodyFingerprintRef,
+      acceptedHandoff.handoffDecisionId,
+      acceptedHandoff.compactFirstPopupSequenceSummary?.summaryId,
+    ].filter((mark): mark is string => typeof mark === 'string' && mark.length > 0);
+    // A mark list that quietly went empty would make this test agree with anything.
+    expect(marks.length).toBeGreaterThanOrEqual(7);
 
-    const { packaged } = await packagedPopup(2);
     const hits: string[] = [];
     survivorsOfTheFirstBody(packaged, '', marks, hits);
     expect(hits).toEqual([]);

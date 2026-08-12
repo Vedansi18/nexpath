@@ -339,9 +339,11 @@ export function packagePromptEnhancementSequenceContinuationV1(
       ? undefined
       : {
         ...accepted.compactFirstPopupSequenceSummary,
-        // Its own id names this summary record, one level below the handoff decision it sits under.
-        summaryId: input.compactSummaryId
-          ?? accepted.compactFirstPopupSequenceSummary.summaryId,
+        // Its own id names this summary record, one level below the handoff decision it sits
+        // under. Cleared rather than inherited when the caller has none: an id that names another
+        // body's record is the one thing an id must not do, and unlike the fingerprint there is no
+        // reading of the previous value that is merely uninformative.
+        summaryId: input.compactSummaryId ?? '',
         currentBodyId: input.currentBodyId,
         bodyRevision: input.bodyRevision,
       },
