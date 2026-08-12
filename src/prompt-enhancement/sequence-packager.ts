@@ -1,4 +1,5 @@
 import type {
+  PromptEnhancementActionType,
   PromptEnhancementFutureSequenceRuntimeEventV1,
   PromptEnhancementHandoffMetadataV1,
   PromptEnhancementPrepareResultV1,
@@ -74,6 +75,22 @@ export interface PromptEnhancementSequencePackagerInputV1 {
    */
   composerRunId: string;
 }
+
+/**
+ * What a continuation surface actually offers.
+ *
+ * The first popup's list cannot be carried across. Two of its entries — `shorter` and
+ * `apply_details` — are full re-plans, and a continuation is past activation, where an item is
+ * never regenerated at all: the result would be advertising, on a frozen sequence, the two actions
+ * whose whole effect is to unfreeze it. Each entry also carries the body id and revision it belongs
+ * to, so a carried entry points at the previous body as well.
+ *
+ * Absent rather than present-and-disabled. A disabled `Shorter` still says the sequence has one.
+ */
+const CONTINUATION_ACTION_TYPES_V1: readonly PromptEnhancementActionType[] = [
+  'use_current_body',
+  'close',
+];
 
 /** The two kinds a continuation popup accepts. Anything else is refused at the popup boundary. */
 const CONTINUATION_HANDOFF_KINDS_V1: readonly PromptEnhancementHandoffMetadataV1['handoffKind'][] = [
@@ -179,6 +196,14 @@ export function packagePromptEnhancementSequenceContinuationV1(
       sentPromptOrigin: 'sequence_handoff_owned_body',
       nexpathGeneratedPromptRef: input.nexpathGeneratedPromptRef,
     },
+    // Only what this surface offers, re-pointed at the body the entries now belong to.
+    availableActions: input.acceptedResult.availableActions
+      .filter((action) => CONTINUATION_ACTION_TYPES_V1.includes(action.actionType))
+      .map((action) => ({
+        ...action,
+        currentBodyId: input.currentBodyId,
+        bodyRevision: input.bodyRevision,
+      })),
     // The verdict the item carries, passed through. Not recomputed at the Stop either: re-running a
     // check on frozen text can only agree with itself or contradict itself, and a contradiction has
     // no defined handling.

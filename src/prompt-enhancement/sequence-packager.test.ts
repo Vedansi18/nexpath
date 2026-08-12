@@ -66,6 +66,14 @@ const ACCEPTED = {
     riskConfirmationState: 'none_detected',
     scope: { requestId: 'req-1', projectRoot: '/project' },
   },
+  availableActions: [
+    { actionType: 'use_current_body', label: 'Use this prompt', currentBodyId: 'body-0', bodyRevision: 0 },
+    { actionType: 'shorter', label: 'Shorter', currentBodyId: 'body-0', bodyRevision: 0 },
+    { actionType: 'apply_details', label: 'Apply details', currentBodyId: 'body-0', bodyRevision: 0 },
+    { actionType: 'more_thorough', label: 'More thorough', currentBodyId: 'body-0', bodyRevision: 0 },
+    { actionType: 'use_original', label: 'Use original', currentBodyId: 'body-0', bodyRevision: 0 },
+    { actionType: 'close', label: 'Close', currentBodyId: 'body-0', bodyRevision: 0 },
+  ],
   routeDecision: { routeId: 'route-1' },
   bodyPlan: { planId: 'plan-1' },
   validationGraph: { safetyState: { fromTheFirstBody: true } },
@@ -328,6 +336,33 @@ describe('sequence batch — what happens to it when the popup is left', () => {
     expect(promptEnhancementSequenceBatchExitActionV1('user_sends')).toBe('await_batch_before_exit');
     for (const exit of ['popup_closed', 'escape', 'use_original'] as const) {
       expect(promptEnhancementSequenceBatchExitActionV1(exit)).toBe('discard_batch');
+    }
+  });
+});
+
+describe('sequence packager — the actions a continuation actually has', () => {
+  it('drops the re-plan actions rather than carrying the first popup list', () => {
+    // Two of them are full re-plans, and a continuation is past activation where an item is never
+    // regenerated. Carried, the result advertises on a frozen sequence the two actions whose whole
+    // effect is to unfreeze it.
+    expect(ACCEPTED.availableActions.map((a) => a.actionType))
+      .toContain('shorter');
+    const result = packagePromptEnhancementSequenceContinuationV1(input());
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.packaged.result.availableActions.map((action) => action.actionType))
+      .toEqual(['use_current_body', 'close']);
+  });
+
+  it('re-points the entries it keeps at the body they now belong to', () => {
+    // Each entry carries the body id and revision it was built for, so a carried entry points at
+    // the previous body even when its type is still offered.
+    const result = packagePromptEnhancementSequenceContinuationV1(input());
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    for (const action of result.packaged.result.availableActions) {
+      expect(action.currentBodyId).toBe('body-1');
+      expect(action.bodyRevision).toBe(1);
     }
   });
 });
