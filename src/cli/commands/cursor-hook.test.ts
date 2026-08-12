@@ -411,3 +411,28 @@ describe('option-A ordering — auto is spawned+awaited before the decision', ()
     expect(h.writes[0]).toContain('"continue":true'); // fail-open — prompt released
   });
 })
+
+/**
+ * FOREGROUNDING (2026-08-12 live root cause) — the submit popup opens BEHIND
+ * Cursor under GNOME focus-stealing prevention; without raising it the user
+ * never sees it, never selects, the hold times out → fail-open → NO BLOCK.
+ * So the raiser must fire on the gated path, before the (blocking) decision.
+ */
+describe('foreground raise — submit popup must be brought to front', () => {
+  it('⭐ switch ON: raisePopup fires BEFORE the decision (so the user sees the popup)', async () => {
+    const order: string[] = [];
+    const raisePopup = vi.fn(() => { order.push('raise'); });
+    const decide = vi.fn(async () => { order.push('decide'); return 'block' as const; });
+    const h = harness({ raisePopup, decide });
+    await runCursorHookAction('beforeSubmitPrompt', h.deps as never);
+    expect(raisePopup).toHaveBeenCalledTimes(1);
+    expect(order).toEqual(['raise', 'decide']); // raise strictly before the blocking decision
+  });
+
+  it('switch OFF: raisePopup is NOT called (no popup on the old path)', async () => {
+    const raisePopup = vi.fn();
+    const h = harness({ env: {}, raisePopup, decide: vi.fn(async () => 'block' as const) });
+    await runCursorHookAction('beforeSubmitPrompt', h.deps as never);
+    expect(raisePopup).not.toHaveBeenCalled();
+  });
+})

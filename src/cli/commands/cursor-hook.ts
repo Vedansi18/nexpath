@@ -31,6 +31,7 @@ import { createHoldBudget, type HoldBudget } from './submit-hold-budget.js';
 import { buildDefaultPromptSubmitDecider } from './windsurf-hook.js';
 import { spawnAuto } from '../../windsurf-hook/spawn.js';
 import { isSubmitAdvisoryEnabledForHost } from './submit-flow-config.js';
+import { bringPopupToFront } from '../../windsurf-hook/foreground.js';
 
 /**
  * Backward-compatibility switch for the Cursor submit-time advisory (H6).
@@ -101,6 +102,16 @@ export interface CursorHookActionDeps {
   spawnAutoFn?: typeof spawnAuto;
   /** Await the spawned `auto` child (bounded by the hold). Injected for tests. */
   waitForChild?: (child: ChildProcess | null | undefined) => Promise<void>;
+  /**
+   * Raise the submit popup to the foreground (fire-and-forget). Injected for
+   * tests; defaults to `bringPopupToFront`. CRITICAL, not cosmetic: the popup
+   * (TtySelectFn's spawned terminal) opens BEHIND Cursor under GNOME
+   * focus-stealing prevention, so the user never sees it, never selects, and the
+   * hold times out → fail-open → the prompt is NOT blocked. Live root cause,
+   * 2026-08-12. Windsurf raised its post-response popup this way; the submit
+   * popup on BOTH hosts needs it too.
+   */
+  raisePopup?: () => void;
   /**
    * Read the submit-flow flag file (the config-backed switch). Injected for
    * tests so they never touch the real `~/.nexpath/submit-flow.json`; defaults
@@ -191,6 +202,12 @@ export async function runCursorHookAction(
           try { child?.kill(); } catch { /* already gone */ }
         }
       }
+      // Raise the popup to the foreground BEFORE the blocking decision. The
+      // popup spawn inside `decide` is synchronous (spawnSync); this fire-and-
+      // forget poller raises 'Nexpath — Action Required' the moment it appears,
+      // so the user actually sees it and can select — without which the hold
+      // times out and the prompt is never blocked (live root cause 2026-08-12).
+      (deps.raisePopup ?? bringPopupToFront)();
       // Draws from what the stdin read + auto classification left. A timeout is
       // never a decision: it continues, so the original prompt is released (A3).
       const decided = await hold.run(() => decide(payload));

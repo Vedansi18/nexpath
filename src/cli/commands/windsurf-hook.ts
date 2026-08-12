@@ -536,6 +536,12 @@ export async function runWindsurfHookAction(
     // 'block' exits 2; a throw or any other value falls through to exit 0.
     if (decideAfterAuto) {
       let decision: WindsurfPromptSubmitDecision = 'allow';
+      // Raise the submit popup to the foreground (fire-and-forget) BEFORE the
+      // blocking decision — the submit popup opens behind Windsurf under GNOME
+      // focus-stealing prevention just like the post-response one, so without
+      // this the user may not see it and the hold times out to fail-open. Same
+      // raiser used for the post_cascade_response popup above.
+      raisePopup();
       // The popup waits for a HUMAN, so this segment is inherently unbounded and
       // is the plan's "no decision before the hold expires" failure mode. It gets
       // only what the earlier segments left.
