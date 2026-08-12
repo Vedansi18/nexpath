@@ -13,7 +13,10 @@ import type {
 } from './contracts.js';
 
 /** The item's own safety verdict, deliberately different from the first body's. */
-const ITEM_SAFETY = { sensitiveActionState: 'none_detected' } as unknown as PromptEnhancementSafetySummaryV1;
+const ITEM_SAFETY = {
+  sensitiveActionState: 'none_detected',
+  validationStatus: 'valid',
+} as unknown as PromptEnhancementSafetySummaryV1;
 
 /** The verdict the item carries. Its shape is the validator's business; the packager only reports. */
 const GRAPH = {
@@ -59,7 +62,7 @@ const ACCEPTED = {
     originalPromptText: 'the original',
     generatedOriginState: 'user_original',
     userDirtyState: 'dirty_user_edited',
-    generatedSafeStatus: 'blocked',
+    generatedSafeStatus: 'invalid_non_sendable',
   },
   disposition: 'fallback_to_original',
   validationDecisionId: 'decision-for-the-first-body',
@@ -141,7 +144,6 @@ const input = (
   validationDecisionId: 'decision-for-item-1',
   composerRunId: 'run-batch',
   handoffDecisionId: 'handoff-for-item-1',
-  itemGeneratedSafeStatus: 'passed',
   itemBodyFingerprintRef: 'body-1:fingerprint',
   itemSourceUseIds: ['body-1:use'],
   compactSummaryId: 'body-1:summary',
@@ -578,8 +580,11 @@ describe('sequence packager — the origin bit lives in four places', () => {
     expect(currentBody.userDirtyState).toBe('clean');
 
     // And the status this body was cleared under, not the one the first prompt was.
-    expect(ACCEPTED.currentBody.generatedSafeStatus).toBe('blocked');
-    expect(currentBody.generatedSafeStatus).toBe('passed');
+    // Read out of THIS item's verdict rather than supplied beside it, so a body cannot be served
+    // under a status that belongs to some other run.
+    expect(ACCEPTED.currentBody.generatedSafeStatus).toBe('invalid_non_sendable');
+    expect(currentBody.generatedSafeStatus).toBe('valid');
+    expect(currentBody.generatedSafeStatus).toBe(GRAPH.safetyState.validationStatus);
   });
 });
 

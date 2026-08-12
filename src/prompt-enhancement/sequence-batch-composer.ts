@@ -21,7 +21,10 @@ import type {
   PromptEnhancementSafetySummaryV1,
   PromptEnhancementValidationGraphV1,
 } from './contracts.js';
-import { buildPromptEnhancementSequenceItemValidationGraphV1 } from './sequence-enforcement.js';
+import {
+  buildPromptEnhancementSequenceItemValidationGraphV1,
+  type PromptEnhancementSequenceItemSafetyInputV1,
+} from './sequence-enforcement.js';
 import {
   isPromptEnhancementSequenceOffsetRangeV1,
   promptEnhancementSequenceTextHasClauseV1,
@@ -103,9 +106,12 @@ export interface PromptEnhancementSequenceBatchInputV1 {
    *
    * Two of its fields describe the SEQUENCE rather than any one prompt — its source honesty and its
    * privacy state — and P2 changes neither: it adds no sources, and the redaction boundary is
-   * settled before it runs. Those are carried. The fields that ARE per-item — the validation
-   * status, the authority escalation state, and whether a required floor is present — are decided
-   * per item below and overwrite what is carried.
+   * settled before it runs. Those are carried through.
+   *
+   * Whether a required floor is present is decided per item here. ⛔ The validation status and the
+   * authority escalation state are DROPPED rather than carried: they are the authority check's
+   * answer, and it has not run yet at that point. The graph builder writes them from its own
+   * findings.
    */
   baseSafetySummary: PromptEnhancementSafetySummaryV1;
   /** How this run reached the provider, recorded on every item's verdict. */
@@ -192,22 +198,24 @@ function isConfirmation(kind: PromptEnhancementSequenceItemKindV1): boolean {
 }
 
 /**
- * The item's own safety posture, decided from what this call actually established.
+ * The part of the item's safety posture THIS function is in a position to know.
  *
- * Three fields are this item's and are set here; two describe the sequence and are carried from the
- * accepted result unchanged. Nothing is asserted that was not checked: a floor is reported present
- * only when its sentence was found in the wording, and the authority state is the check's own answer
- * rather than an assumption that composition behaved.
+ * One field is decided here and two are carried. ⛔ The validation status and the authority
+ * escalation state are deliberately absent: they are the authority check's answer, and this runs
+ * before it. Asserting them here would put a summary saying `valid` inside a graph whose failures
+ * say otherwise — and the type will not let it, which is the point of the type.
+ *
+ * Nothing is claimed that was not established: a floor is reported present only when its sentence
+ * was found in the wording this call is validating.
  */
-function composedItemSafetySummary(
+function composedItemSafetyInput(
   base: PromptEnhancementSafetySummaryV1,
   requiresFloor: boolean,
   floorPresent: boolean,
-): PromptEnhancementSafetySummaryV1 {
+): PromptEnhancementSequenceItemSafetyInputV1 {
+  const { validationStatus: _status, authorityEscalationState: _escalation, ...carried } = base;
   return {
-    ...base,
-    validationStatus: 'valid',
-    authorityEscalationState: 'valid',
+    ...carried,
     sensitiveActionState: requiresFloor
       ? (floorPresent ? 'confirmation_required_present' : 'confirmation_required_missing')
       : 'none',
@@ -377,7 +385,7 @@ function checkBatchOutput(
       sliceText: item.sliceText,
       generatedWording: text,
       sequenceItemId: `${input.sequenceId}:item-${item.dependencyOrder}`,
-      safetyState: composedItemSafetySummary(
+      safetyState: composedItemSafetyInput(
         input.baseSafetySummary,
         item.requiresConfirmationFloor,
         safetyClauseRef !== null,

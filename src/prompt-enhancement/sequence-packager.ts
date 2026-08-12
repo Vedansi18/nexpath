@@ -79,8 +79,6 @@ export interface PromptEnhancementSequencePackagerInputV1 {
    * The run that produced THIS text — the batch, not the composer run that wrote the first prompt.
    */
   composerRunId: string;
-  /** The validation status this body was cleared under, arriving with the rest of its verdict. */
-  itemGeneratedSafeStatus: PromptEnhancementValidationStatus;
   /**
    * A fingerprint of THIS body, and the sources that went into it.
    *
@@ -248,8 +246,10 @@ export function packagePromptEnhancementSequenceContinuationV1(
       // DID edit, it says they edited a prompt they have not seen, on the field the never-interfere
       // ruling turns on.
       userDirtyState: 'clean',
-      // Arrives with the rest of the item's verdict, for the same reason the summaries do.
-      generatedSafeStatus: input.itemGeneratedSafeStatus,
+      // Read OUT of the verdict, not supplied beside it — the same correction the two summaries
+      // got, one field later. Taken as its own input it was a second place the same fact lived,
+      // free to disagree with the graph handed in alongside it while both looked filled in.
+      generatedSafeStatus: item.itemValidationGraph.safetyState.validationStatus,
     },
     // The composer boundary carries its OWN copy of the origin, and one updated while the other is
     // not is worse than neither: whichever a reader consults then decides whether a continuation

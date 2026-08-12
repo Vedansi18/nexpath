@@ -399,6 +399,18 @@ describe('sequence batch — the verdict each item leaves with', () => {
     expect(item?.validationGraph.canAutoAdvanceSequencePointer).toBe(false);
   });
 
+  it('never emits a verdict whose summary disagrees with its own failures', async () => {
+    // The composer no longer states the two fields at all — the type will not take them — so the
+    // only value they can hold is the one the check produced. Before this, they were set to `valid`
+    // above the call that discovered the escalation.
+    const result = await runOne({}, { wording: `Do this: ${SLICE_TWO}` });
+    expect(result.ok).toBe(true);
+    const graph = result.ok ? result.composed.get(1)?.validationGraph : undefined;
+    expect(graph?.failures).toEqual([]);
+    expect(graph?.safetyState.validationStatus).toBe('valid');
+    expect(graph?.safetyState.authorityEscalationState).toBe('valid');
+  });
+
   it('carries the sequence posture and decides the per-item fields itself', async () => {
     const result = await runOne({}, { wording: `Do this: ${SLICE_TWO}` });
     const state = result.ok ? result.composed.get(1)?.validationGraph.safetyState : undefined;

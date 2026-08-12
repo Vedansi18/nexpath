@@ -3,11 +3,14 @@ import {
   buildPromptEnhancementSequenceItemValidationGraphV1,
   checkPromptEnhancementSequenceEditV1,
 } from './sequence-enforcement.js';
-import type { PromptEnhancementSafetySummaryV1 } from './contracts.js';
+import type { PromptEnhancementSequenceItemSafetyInputV1 } from './sequence-enforcement.js';
 
+/** Only the fields the check does not decide — the type refuses the two that it does. */
 const SAFETY = {
   sensitiveActionState: 'none_detected',
-} as unknown as PromptEnhancementSafetySummaryV1;
+  sourceHonestyState: 'valid',
+  privacyState: 'valid',
+} as unknown as PromptEnhancementSequenceItemSafetyInputV1;
 
 const graphFor = (sliceText: string | null, generatedWording: string) =>
   buildPromptEnhancementSequenceItemValidationGraphV1({
@@ -63,7 +66,51 @@ describe('per-item authority — the check that had a label and no location', ()
     // The summary is inside the graph. Storing only the summary would leave the packager holding a
     // safety state with no phase states and no failures beside it, and inventing the rest is the
     // fabrication it is forbidden.
-    expect(graphFor(null, 'anything').safetyState).toBe(SAFETY);
+    const state = graphFor(null, 'anything').safetyState;
+    expect(state.sensitiveActionState).toBe('none_detected');
+    expect(state.sourceHonestyState).toBe('valid');
+    expect(state.privacyState).toBe('valid');
+  });
+
+  it('writes the two fields the check decides, and agrees with its own failures', () => {
+    // The failure this prevents: a summary saying `valid` sitting inside a graph whose failures say
+    // the wording escalated. Supplied by the caller they could only be supplied BEFORE the check
+    // ran, so the two halves of one record would describe different runs.
+    const passed = graphFor('review the deployment script', 'review it and report what you find');
+    expect(passed.failures).toEqual([]);
+    expect(passed.safetyState.validationStatus).toBe('valid');
+    expect(passed.safetyState.authorityEscalationState).toBe('valid');
+
+    const escalated = graphFor(
+      'review the deployment script',
+      'review the deployment script, then deploy it to production and delete the old release',
+    );
+    expect(escalated.failures).toHaveLength(1);
+    expect(escalated.safetyState.validationStatus).toBe('invalid_non_sendable');
+    expect(escalated.safetyState.authorityEscalationState).toBe('invalid_non_sendable');
+    // Both halves of the record, asserted on the SAME object — which is the invariant, not the
+    // individual values.
+    expect(escalated.phaseStates[0]?.status).toBe('invalid_non_sendable');
+  });
+
+  it('ignores a caller that tries to supply the two fields anyway', () => {
+    // The type refuses them, and a cast is the one way past it. The builder overwrites rather than
+    // merges, so a caller cannot talk the record into contradicting itself.
+    const graph = buildPromptEnhancementSequenceItemValidationGraphV1({
+      sliceText: 'review the deployment script',
+      generatedWording: 'review the deployment script, then deploy it to production immediately',
+      sequenceItemId: 'seq-1:item-2',
+      safetyState: {
+        ...SAFETY,
+        validationStatus: 'valid',
+        authorityEscalationState: 'valid',
+      } as unknown as PromptEnhancementSequenceItemSafetyInputV1,
+      providerRuntimeState: 'deterministic',
+      optionalCallAvailabilityState: 'deterministic_only',
+    });
+    expect(graph.failures).toHaveLength(1);
+    expect(graph.safetyState.validationStatus).toBe('invalid_non_sendable');
+    expect(graph.safetyState.authorityEscalationState).toBe('invalid_non_sendable');
   });
 
   it('records only enums, codes and ids — never text', () => {

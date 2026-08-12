@@ -29,6 +29,18 @@ import {
  * graph would have to be assembled by hand, which is the fabrication the packager is forbidden.
  */
 
+/**
+ * The safety fields the AUTHORITY CHECK does not decide, and only those.
+ *
+ * The two it does decide are absent by construction rather than by convention. Supplied, they would
+ * have to be supplied before the check ran — which is the only order available to a caller — so the
+ * graph would carry a summary asserting a verdict the failures beside it might contradict. §5.3's
+ * whole correction is that a result's graph and its summary can never describe different runs, and
+ * a caller cannot honour that for a question it has not asked yet.
+ */
+export type PromptEnhancementSequenceItemSafetyInputV1 =
+  Omit<PromptEnhancementSafetySummaryV1, 'validationStatus' | 'authorityEscalationState'>;
+
 /** What one item's wording is checked against, and the identity the failures point at. */
 export interface PromptEnhancementSequenceItemCheckInputV1 {
   /** The item's own slice, whose authority the wording may not exceed. Null on kinds with none. */
@@ -37,8 +49,14 @@ export interface PromptEnhancementSequenceItemCheckInputV1 {
   generatedWording: string;
   /** So a failure names the item it belongs to rather than the sequence. */
   sequenceItemId: string;
-  /** Carried onto the graph unchanged: it describes how the body was produced, not whether it passed. */
-  safetyState: PromptEnhancementSafetySummaryV1;
+  /**
+   * The posture the check does not decide — how the body was produced, not whether it passed.
+   *
+   * The sequence's source and privacy states are carried; whether a required floor is present is
+   * the composer's finding and arrives here already made. ⛔ The validation status and the authority
+   * escalation state are NOT among them: this function answers those.
+   */
+  safetyState: PromptEnhancementSequenceItemSafetyInputV1;
   providerRuntimeState: PromptEnhancementCallVisibilityMode;
   optionalCallAvailabilityState: PromptEnhancementValidationGraphV1['optionalCallAvailabilityState'];
 }
@@ -83,6 +101,11 @@ export function buildPromptEnhancementSequenceItemValidationGraphV1(
   }
 
   const hasBlockingFailure = failures.some((failure) => failure.blocking);
+  // Written from the failures this function just produced, never taken from the caller. The two
+  // fields ARE the check's answer, so a summary that carried them in would be stating the verdict
+  // before the question was asked — and the graph would then hold a summary saying `valid` beside
+  // a blocking authority failure, which is the self-contradicting record §5.3 exists to rule out.
+  const status = hasBlockingFailure ? 'invalid_non_sendable' : 'valid';
   return {
     graphVersion: 1,
     graphOwner: 'content_semantics',
@@ -96,7 +119,11 @@ export function buildPromptEnhancementSequenceItemValidationGraphV1(
       }),
     ],
     failures,
-    safetyState: input.safetyState,
+    safetyState: {
+      ...input.safetyState,
+      validationStatus: status,
+      authorityEscalationState: status,
+    },
     providerRuntimeState: input.providerRuntimeState,
     optionalCallAvailabilityState: input.optionalCallAvailabilityState,
     // Neither may be flipped to make a sequence check fit. Nexpath does not read agent replies, and
