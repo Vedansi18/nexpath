@@ -270,6 +270,30 @@ export function promptEnhancementSequenceTextHasTokenV1(text: string, token: str
 }
 
 /**
+ * The role labels a sequence reports: the distinct labels its items carry, in first-appearance order.
+ *
+ * ONE function, because the labels appear in two places and must be the same set in both. The
+ * closure used to be structural — the old producer could only pick from a fixed table, so user text
+ * could not reach it — and a model producing them removes that guarantee at the moment the producer
+ * changes. The shipped type is `readonly string[]` and never protected anything.
+ *
+ * Deriving both the summary's list and the handoff's from the items means one closed check covers
+ * both, since the summary can only contain values the items already carry. The alternative is a
+ * second generation of the same thing, which is free to disagree with the list it describes.
+ *
+ * Order is first-appearance so the same plan reports the same labels twice.
+ */
+export function promptEnhancementSequenceTaskRoleLabelsV1(
+  items: readonly { roleLabel: PromptEnhancementSequenceRoleLabelV1 | null }[],
+): readonly PromptEnhancementSequenceRoleLabelV1[] {
+  const labels: PromptEnhancementSequenceRoleLabelV1[] = [];
+  for (const item of items) {
+    if (item.roleLabel !== null && !labels.includes(item.roleLabel)) labels.push(item.roleLabel);
+  }
+  return labels;
+}
+
+/**
  * Does `text` contain `clause`, allowing for the ways the same words get written?
  *
  * Case, hyphenation and line wrapping only. "ground-level" and "ground level" are one phrase spelt

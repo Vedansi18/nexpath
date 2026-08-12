@@ -31,6 +31,7 @@ import {
 } from './sequence-planner-output.js';
 import {
   isPromptEnhancementSequenceOffsetRangeV1,
+  promptEnhancementSequenceTaskRoleLabelsV1,
   validatePromptEnhancementSequenceItemListV1,
   type PromptEnhancementSequenceItemV1,
   type PromptEnhancementSequenceNextPromptPolicyV1,
@@ -468,22 +469,6 @@ function parsePlannerReply(raw: string): ParsedPlannerReplyV1 | null {
 }
 
 /**
- * The role labels the summary reports: the distinct labels the items carry, in the order they first
- * appear.
- *
- * Order is stable rather than incidental so the same plan produces the same summary data twice.
- */
-function taskRoleLabelsFor(
-  items: readonly PromptEnhancementSequenceItemV1[],
-): readonly PromptEnhancementSequenceRoleLabelV1[] {
-  const labels: PromptEnhancementSequenceRoleLabelV1[] = [];
-  for (const item of items) {
-    if (item.roleLabel !== null && !labels.includes(item.roleLabel)) labels.push(item.roleLabel);
-  }
-  return labels;
-}
-
-/**
  * Read the three safety fields off the item's own slice.
  *
  * Not from the reply, and not by a second classifier: the ruling that created these fields was
@@ -662,7 +647,7 @@ async function attemptPlan(
       summaryData: {
         summaryId: parsed.summaryId,
         remainingTaskCount: parsed.remainingTaskCount,
-        taskRoleLabels: taskRoleLabelsFor(items),
+        taskRoleLabels: promptEnhancementSequenceTaskRoleLabelsV1(items),
       },
     },
   };
