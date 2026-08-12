@@ -271,6 +271,23 @@ describe('pending-sequences store', () => {
     }))).toBe(false);
   });
 
+  it('still reads back a row written before the payload columns existed', () => {
+    // The migration's whole point is that an in-flight sequence is not silently ended. Proving the
+    // columns arrive is not enough — a back-filled row must survive the read, and the defaults it
+    // gets are exactly the pre-planner shape the validator has to accept.
+    expect(upsertPendingPromptSequence(store, createdState(), payload())).toBe(true);
+    store.db.run(
+      `UPDATE pending_prompt_sequences
+       SET items_json = '[]', prompt_directives_json = '[]',
+           suggested_next_prompt_policy = 'not_generated', original_length = 0,
+           offer_disposition = 'accepted'`,
+    );
+    expect(getActivePendingPromptSequence(store, PROJECT, 'sess-1')).toMatchObject({
+      itemCount: 3,
+      payload: { items: [], originalLength: 0, suggestedNextPromptPolicy: 'not_generated' },
+    });
+  });
+
   it('does not freeze a LATER sequence against an earlier one in the same project', () => {
     // A terminal row is never removed by the read path, so the previous sequence is still stored
     // when the next one is written. Comparing across the two would freeze one sequence's plan onto
