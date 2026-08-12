@@ -12,6 +12,7 @@ import {
 } from './sequence-batch-composer.js';
 import {
   PROMPT_ENHANCEMENT_SEQUENCE_BATCH_SECTIONS_V1,
+  PROMPT_ENHANCEMENT_SEQUENCE_CONFIRMATION_CLAUSES_V1,
   buildPromptEnhancementSequenceBatchSystemPromptV1,
 } from './sequence-batch-composer-prompt.js';
 import { PROMPT_ENHANCEMENT_COST_VALIDATION_RETRY_COUNT_V1 } from './cost-observability.js';
@@ -446,7 +447,7 @@ describe('sequence batch — the prompt', () => {
     // The weight rule, and the summary ban that goes with it.
     expect(prompt).toContain('section of guidance — or NONE');
     expect(prompt).toContain('NEVER SUMMARISE THE ORIGINAL REQUEST');
-    // Both classes, always, and why one is worse than neither.
+    // Both classes for the two kinds that take them, and why one is worse than neither.
     expect(prompt).toContain('CLASS A');
     expect(prompt).toContain('CLASS B');
     expect(prompt).toContain('One without the other is worse than neither');
@@ -501,5 +502,30 @@ describe('sequence batch — what a failed batch leaves the user with', () => {
     ] as const) {
       expect(promptEnhancementSequenceBatchDispositionV1(invalid)).toBe('no_sequence_single_prompt');
     }
+  });
+});
+
+describe('sequence batch — the prompt carries what the checks look for', () => {
+  const prompt = buildPromptEnhancementSequenceBatchSystemPromptV1();
+
+  it('dictates both mandatory clauses in the exact words the check wants', () => {
+    // The constants exist so the instruction and the rule cannot drift. Nothing pinned that the
+    // prompt actually carries them: drop the interpolation and every confirmation is rejected on
+    // every prompt, three repairs each, while the suite stays green.
+    for (const clause of Object.values(PROMPT_ENHANCEMENT_SEQUENCE_CONFIRMATION_CLAUSES_V1)) {
+      expect(prompt).toContain(clause.sentence);
+      expect(prompt).toContain(clause.anchor);
+    }
+    expect(prompt).toContain('Reproduce 2 and 3 in those words');
+  });
+
+  it('holds both classes to the two kinds that take them, and frees the cross', () => {
+    // A cross exists to come at the work from another angle. Handed the same two questions as the
+    // double it follows, it stops being a different angle and becomes a second double.
+    expect(prompt).toContain('A binary_confirmation and a double_confirmation cover BOTH of them');
+    expect(prompt).toContain('it decides its own wording');
+    expect(prompt).toContain('reference for register and rigour, not as a checklist to reproduce');
+    // The freedom is about the angle only.
+    expect(prompt).toContain('cross_confirmation without exception');
   });
 });

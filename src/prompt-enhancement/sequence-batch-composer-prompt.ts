@@ -70,7 +70,7 @@ The third is not optional and not a flourish. Without it an agent answers from i
 turn: it reports what it already said instead of going and checking, and a confirmation answered
 that way confirms nothing. A confirmation missing it does not ship.
 
-EVERY confirmation covers BOTH of these, always. There is no choosing between them:
+There are two things a confirmation can interrogate:
 
   CLASS A — was the work actually done to depth, or only superficially?
   CLASS B — is it checked against real source, or assumed?
@@ -78,6 +78,17 @@ EVERY confirmation covers BOTH of these, always. There is no choosing between th
 One without the other is worse than neither, because they fail independently. Class A alone passes
 thorough, complete work built against a schema that does not match reality. Class B alone passes
 work genuinely verified against real source and then implemented for the happy path only.
+
+A binary_confirmation and a double_confirmation cover BOTH of them, always. There is no choosing
+between them and no lighter version of either.
+
+A cross_confirmation is different, and deliberately so. It exists to come at the work from ANOTHER
+ANGLE than the check before it, so it decides its own wording — use class A and class B as the
+reference for register and rigour, not as a checklist to reproduce. Handed the same two questions
+as the double it follows, it stops being a different angle and becomes a second double.
+
+That freedom is about the ANGLE and nothing else. The three mandatory parts above apply to a
+cross_confirmation without exception, in the same words.
 
 THE FORMAT FOLLOWS THE ITEM KIND. You do not choose it and you never mix two in one item:
 
