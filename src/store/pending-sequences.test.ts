@@ -482,6 +482,28 @@ describe('pending-sequences store', () => {
     });
   });
 
+  it('refuses to record a decline against a sequence that was already sent', () => {
+    // Write-once runs in both directions on the same id. A sequence with a real row was accepted,
+    // and a later popup-close handler must not rewrite that into a decline.
+    expect(upsertPendingPromptSequence(store, createdState({ sequenceId: 'seq-1' }), payload())).toBe(true);
+    expect(recordPromptEnhancementSequenceOfferDeclined(store, {
+      projectRoot: PROJECT, sessionId: 'sess-1', sequenceId: 'seq-1', enhancementId: 'enh-1',
+      disposition: 'rejected',
+    })).toBe(false);
+    expect(getPromptEnhancementSequenceOfferDisposition(store, PROJECT, 'seq-1')).toBe('accepted');
+    expect(getActivePendingPromptSequence(store, PROJECT, 'sess-1')).toMatchObject({ sequenceId: 'seq-1' });
+  });
+
+  it('refuses to accept a sequence whose offer was already recorded as declined', () => {
+    // The other direction of the same rule, on the writer that carries the payload.
+    expect(recordPromptEnhancementSequenceOfferDeclined(store, {
+      projectRoot: PROJECT, sessionId: 'sess-1', sequenceId: 'seq-1', enhancementId: 'enh-1',
+      disposition: 'not_engaged',
+    })).toBe(true);
+    expect(upsertPendingPromptSequence(store, createdState({ sequenceId: 'seq-1' }), payload())).toBe(false);
+    expect(getPromptEnhancementSequenceOfferDisposition(store, PROJECT, 'seq-1')).toBe('not_engaged');
+  });
+
   it('reads null for an offer that has no row at all', () => {
     // The absence is the record: no modelled popup outcome was reached. It is not abandonment.
     expect(getPromptEnhancementSequenceOfferDisposition(store, PROJECT, 'never-written')).toBeNull();
