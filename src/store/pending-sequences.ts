@@ -83,7 +83,16 @@ export function upsertPendingPromptSequence(
   const prior = storedFrozenFields(store, state.projectRoot, state.sequenceId);
   if (prior && !frozenFieldsRespected(prior, payload)) return false;
   const now = Date.now();
-  store.db.run('DELETE FROM pending_prompt_sequences WHERE project_root = ?', [state.projectRoot]);
+  // The delete keeps ONE ACTIVE SEQUENCE per project, and that is all it is for. It spares rows
+  // recording an offer that was not taken: those are terminal, carry no items, directives or text,
+  // and are invisible to every active-path read, so they cannot collide with the invariant. Without
+  // the exemption the next offer erases the previous one's record — the decision would be written
+  // correctly and destroyed immediately, and it is the one thing that cannot be recovered later.
+  // Rows written before the column existed back-fill to 'accepted', so they are still replaced.
+  store.db.run(
+    "DELETE FROM pending_prompt_sequences WHERE project_root = ? AND offer_disposition = 'accepted'",
+    [state.projectRoot],
+  );
   store.db.run(
     `INSERT INTO pending_prompt_sequences
        (project_root, session_id, sequence_id, enhancement_id, item_count, current_item_index,

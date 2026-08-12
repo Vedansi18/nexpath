@@ -393,6 +393,40 @@ describe('pending-sequences store', () => {
     expect(getPromptEnhancementSequenceOfferDisposition(store, PROJECT, 'declined-one')).toBe('not_engaged');
   });
 
+  it('survives the next offer — the record is not erased by the sequence after it', () => {
+    // Every write used to delete all rows for the project, so a disposition lived only until the
+    // next offer. The record cannot be reconstructed later, so losing it loses it for good.
+    expect(recordPromptEnhancementSequenceOfferDeclined(store, {
+      projectRoot: PROJECT, sessionId: 'sess-1', sequenceId: 'declined', enhancementId: 'enh-1',
+      disposition: 'rejected',
+    })).toBe(true);
+    expect(upsertPendingPromptSequence(store, createdState({ sequenceId: 'next-one' }), payload())).toBe(true);
+    expect(getPromptEnhancementSequenceOfferDisposition(store, PROJECT, 'declined')).toBe('rejected');
+    expect(getActivePendingPromptSequence(store, PROJECT, 'sess-1')).toMatchObject({ sequenceId: 'next-one' });
+  });
+
+  it('still replaces the previous ACCEPTED row — one active sequence per project is unchanged', () => {
+    expect(upsertPendingPromptSequence(store, createdState({ sequenceId: 'first' }), payload())).toBe(true);
+    expect(upsertPendingPromptSequence(store, createdState({ sequenceId: 'second' }), payload())).toBe(true);
+    const rows = store.db.exec("SELECT COUNT(*) FROM pending_prompt_sequences WHERE offer_disposition = 'accepted'");
+    expect(rows[0].values[0][0]).toBe(1);
+    expect(getActivePendingPromptSequence(store, PROJECT, 'sess-1')).toMatchObject({ sequenceId: 'second' });
+  });
+
+  it('keeps several declined offers side by side with one live sequence', () => {
+    for (const id of ['a', 'b', 'c']) {
+      expect(recordPromptEnhancementSequenceOfferDeclined(store, {
+        projectRoot: PROJECT, sessionId: 'sess-1', sequenceId: id, enhancementId: 'enh-' + id,
+        disposition: id === 'b' ? 'rejected' : 'not_engaged',
+      })).toBe(true);
+    }
+    expect(upsertPendingPromptSequence(store, createdState({ sequenceId: 'live' }), payload())).toBe(true);
+    expect(getPromptEnhancementSequenceOfferDisposition(store, PROJECT, 'a')).toBe('not_engaged');
+    expect(getPromptEnhancementSequenceOfferDisposition(store, PROJECT, 'b')).toBe('rejected');
+    expect(getPromptEnhancementSequenceOfferDisposition(store, PROJECT, 'c')).toBe('not_engaged');
+    expect(getActivePendingPromptSequence(store, PROJECT, 'sess-1')).toMatchObject({ sequenceId: 'live' });
+  });
+
   it('reads null for an offer that has no row at all', () => {
     // The absence is the record: no modelled popup outcome was reached. It is not abandonment.
     expect(getPromptEnhancementSequenceOfferDisposition(store, PROJECT, 'never-written')).toBeNull();
