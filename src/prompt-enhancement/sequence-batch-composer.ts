@@ -268,6 +268,19 @@ export function buildPromptEnhancementSequenceBatchItemsV1(
   items: readonly PromptEnhancementSequenceItemV1[],
   localOriginalText: string,
 ): readonly PromptEnhancementSequenceBatchItemV1[] {
+  /**
+   * The covered slices, with any span already inside another one dropped.
+   *
+   * The first item's slice IS the whole original by definition, so an unfiltered list asks the
+   * recap to reproduce the whole request and then each piece of it again — the same words two and
+   * three times over, in the one item whose purpose is that the user reads it. Dropping a span
+   * contained in another loses nothing: every character is still there, once.
+   */
+  const coveringSlices = (slices: readonly string[]): readonly string[] =>
+    slices.filter((slice, index) =>
+      !slices.some((other, otherIndex) =>
+        otherIndex !== index && other.includes(slice) && (other.length > slice.length || otherIndex < index)));
+
   const taskSlices: string[] = [];
   const batch: PromptEnhancementSequenceBatchItemV1[] = [];
   for (const item of items) {
@@ -285,7 +298,7 @@ export function buildPromptEnhancementSequenceBatchItemsV1(
       authorityMode: item.authorityMode,
       requiresConfirmationFloor: item.requiresConfirmationFloor,
       // Every task slice up to this point, which for a recap at the end is all of them.
-      coveredSliceTexts: item.itemKind === 'wrap_up' ? [...taskSlices] : [],
+      coveredSliceTexts: item.itemKind === 'wrap_up' ? coveringSlices(taskSlices) : [],
     });
   }
   return batch;

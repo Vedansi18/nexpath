@@ -41,6 +41,12 @@ export const PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_OUTPUT_TOKEN_HARD_CAP_V1 = 4_00
  * PROVISIONAL. A truncated batch is invalid rather than degraded, so these decide when a long
  * sequence is possible at all — and they are derived, not measured. The measurement is owed.
  */
+/**
+ * The summary line's output budget. One sentence — a cap that would fit a paragraph is an
+ * invitation to write one, and what this line must not become is a preview of the work.
+ */
+export const PROMPT_ENHANCEMENT_SEQUENCE_SUMMARY_OUTPUT_TOKEN_CAP_V1 = 200;
+
 export const PROMPT_ENHANCEMENT_SEQUENCE_BATCH_OUTPUT_TOKEN_CAP_V1 = 4_000;
 export const PROMPT_ENHANCEMENT_SEQUENCE_BATCH_OUTPUT_TOKEN_HARD_CAP_V1 = 12_000;
 // Composer/route call budget. Raised from 10s (2026-08-07): the bounded composer asks for up to

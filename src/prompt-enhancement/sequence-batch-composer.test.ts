@@ -184,8 +184,27 @@ describe('sequence batch — the user\'s own words', () => {
     // Item 0 is context, not an item to write.
     expect(built.map((item) => item.dependencyOrder)).toEqual([1, 2]);
     expect(built[0]?.sliceText).toBe(SLICE_ONE);
-    // The recap covers the whole original and the task slice — every task span before it.
-    expect(built[1]?.coveredSliceTexts).toEqual([ORIGINAL, SLICE_ONE]);
+    // The first item's slice IS the whole original, so the task slice sits inside it. Asking the
+    // recap for both would put the same words in front of the user twice, in the one item whose
+    // purpose is that they read it — and dropping the contained span loses no character.
+    expect(built[1]?.coveredSliceTexts).toEqual([ORIGINAL]);
+  });
+
+  it('keeps two slices that cover different spans', () => {
+    // De-duplication drops what is contained, never what is merely adjacent.
+    const stored = (order: number, ref: { start: number; end: number } | null, kind: PromptEnhancementSequenceItemV1['itemKind']): PromptEnhancementSequenceItemV1 => ({
+      itemKind: kind, originalSliceRef: ref, sourcePointRanges: [], roleLabel: null,
+      dependencyOrder: order, complexity: kind === 'wrap_up' ? null : 'not_complex',
+      complexityReason: null, generatedWording: null, actionRiskKinds: [],
+      authorityMode: kind === 'wrap_up' ? null : 'plan_or_review', requiresConfirmationFloor: false,
+      decompositionGroupId: 'g1', itemValidationGraph: null,
+    });
+    const built = buildPromptEnhancementSequenceBatchItemsV1([
+      stored(0, { start: 0, end: SLICE_ONE.length }, 'first_task'),
+      stored(1, { start: ORIGINAL.indexOf(SLICE_TWO), end: ORIGINAL.indexOf(SLICE_TWO) + SLICE_TWO.length }, 'task'),
+      stored(2, null, 'wrap_up'),
+    ], ORIGINAL);
+    expect(built.at(-1)?.coveredSliceTexts).toEqual([SLICE_ONE, SLICE_TWO]);
   });
 
   it('resolves a slice and refuses to invent one from a bad range', () => {
