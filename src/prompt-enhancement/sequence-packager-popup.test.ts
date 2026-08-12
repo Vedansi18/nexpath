@@ -192,3 +192,95 @@ describe('sequence packager — checked by the thing that checks it', () => {
     expect(b.built.model).toEqual(a.built.model);
   });
 });
+
+/**
+ * The carries, in code rather than in commit messages.
+ *
+ * Each legitimately still describes the first body, because the value it SHOULD hold is not
+ * computable at a Stop: the batch produces prose rather than sections, and the lineage refs describe
+ * the sequence rather than any one item. Anything NOT on this list still holding one of the first
+ * body's values is a defect.
+ */
+const NAMED_CARRIES = [
+  '.result.currentBody.sections',
+  '.result.currentBody.sourceAttribution',
+  '.result.currentBody.originalPromptSectionId',
+  '.result.composerBoundary.sourceAttribution',
+  '.result.composerBoundary.originalPromptSectionId',
+  '.result.diagnostics',
+  '.result.uiView.sectionsForFeedback',
+  '.result.uiView.publicTrustCues',
+  '.result.uiView.diagnostics',
+  '.result.handoffMetadata.itemLineageRefs',
+  '.result.handoffMetadata.decompositionGroups',
+  '.result.handoffMetadata.taskSlices',
+  '.result.handoffMetadata.applicability',
+  '.result.handoffMetadata.pointInventory',
+  '.result.handoffMetadata.confirmationTargets',
+  '.result.uiView.handoffAndSequenceSummary.itemLineageRefs',
+  '.result.uiView.handoffAndSequenceSummary.decompositionGroups',
+  '.result.uiView.handoffAndSequenceSummary.taskSlices',
+  '.result.uiView.handoffAndSequenceSummary.applicability',
+  '.result.uiView.handoffAndSequenceSummary.pointInventory',
+  '.result.uiView.handoffAndSequenceSummary.confirmationTargets',
+  '.handoffMetadata.itemLineageRefs',
+  '.handoffMetadata.decompositionGroups',
+  '.handoffMetadata.taskSlices',
+  '.handoffMetadata.applicability',
+  '.handoffMetadata.pointInventory',
+  '.handoffMetadata.confirmationTargets',
+  // The record's own key. What identifies WHICH body it is about is re-pointed.
+  '.result.generatedOrigin.generatedOriginId',
+];
+
+/**
+ * Walk the packaged output and report anything holding one of the first body's values.
+ *
+ * EXACT equality, never containment. The continuation's ids are derived from the accepted ones —
+ * `<accepted body id>:item-2` — so a prefix match reports every correctly re-pointed field as a
+ * survivor and the signal drowns. Under exact equality a derived id does not match its parent, and
+ * a value that was genuinely carried does.
+ */
+function survivorsOfTheFirstBody(
+  value: unknown,
+  path: string,
+  marks: readonly string[],
+  hits: string[],
+): void {
+  if (typeof value === 'string') {
+    if (marks.includes(value) && !NAMED_CARRIES.some((carry) => path.startsWith(carry))) {
+      hits.push(`${path} = ${value.slice(0, 60)}`);
+    }
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((entry, index) => survivorsOfTheFirstBody(entry, `${path}[${index}]`, marks, hits));
+    return;
+  }
+  if (value !== null && typeof value === 'object') {
+    for (const [key, entry] of Object.entries(value)) {
+      survivorsOfTheFirstBody(entry, `${path}.${key}`, marks, hits);
+    }
+  }
+}
+
+describe('sequence packager — nothing of the previous body survives, on the real result', () => {
+  it('finds no first-body values anywhere outside the named carries', async () => {
+    // The version of this test that ran on a hand-built fixture could only find fields someone had
+    // already thought to put in the fixture — and the ui view, where the last two defects lived,
+    // was not in it. This one walks a result the facade actually produced.
+    const accepted = await preparePromptEnhancement(request());
+    const marks = [
+      accepted.currentBody.currentBodyId,
+      accepted.currentBody.renderedPromptBody,
+      accepted.currentBody.composerRunId,
+      accepted.currentBody.nexpathGeneratedPromptRef,
+      accepted.validationDecisionId,
+    ].filter((mark) => typeof mark === 'string' && mark.length > 0);
+
+    const { packaged } = await packagedPopup(2);
+    const hits: string[] = [];
+    survivorsOfTheFirstBody(packaged, '', marks, hits);
+    expect(hits).toEqual([]);
+  });
+});
