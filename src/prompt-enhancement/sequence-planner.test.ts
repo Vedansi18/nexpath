@@ -537,6 +537,31 @@ describe('sequence planner — the call', () => {
     expect(result.output.items[1]?.actionRiskKinds).toContain('secret_env_or_credential');
   });
 
+  it('never puts the local original on the wire, in any message', async () => {
+    // The redacted context is what the provider may see; the unredacted original exists only to cut
+    // slices from locally. Nothing else asserts this, and the way it breaks is someone adding the
+    // original to the message to "help the model with the offsets" — which is the one thing this
+    // separation is for.
+    const original = 'Rotate the leaked API key sk-live-9f2b now.';
+    const context = 'Rotate the leaked API key [redact....] now.';
+    let sent: string[] = [];
+    const capturing: PromptEnhancementSequencePlannerClientV1 = {
+      chat: { completions: { create: async (body) => {
+        sent = body.messages.map((message) => message.content);
+        return { choices: [{ message: { content: validReply() } }] };
+      } } },
+    };
+
+    await runPromptEnhancementSequencePlannerV1(
+      { ...call(), promptContext: context, localOriginalText: original },
+      capturing,
+    );
+    expect(sent.join('\n')).not.toContain('sk-live-9f2b');
+    expect(sent.join('\n')).not.toContain(original);
+    // The redacted form is what was sent, so this is a redaction that held, not an empty message.
+    expect(sent.join('\n')).toContain(context);
+  });
+
   it('gives the planner the route, and none of the routing evidence behind it', async () => {
     // The evidence refs and reason codes are this system's own record of how it decided. What the
     // planner can reason with is what kind of work this is and how sure the routing was.
