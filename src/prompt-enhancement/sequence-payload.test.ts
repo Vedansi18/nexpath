@@ -84,11 +84,19 @@ function payload(
   };
 }
 
-/** Validates against the list's own length unless a disagreeing row count is being tested. */
-const reason = (p: unknown, itemCount?: number): string | undefined => {
+/**
+ * Validates against the list's own length unless a disagreeing row count is being tested, and
+ * against a live status unless a terminal one is. Both are real row values — passing neither would
+ * exercise a state no row can be in.
+ */
+const reason = (
+  p: unknown,
+  itemCount?: number,
+  status: 'item_pending' | 'awaiting_response' | 'completed' | 'cancelled' | 'abandoned' = 'item_pending',
+): string | undefined => {
   const items = (p as { items?: unknown[] })?.items;
   const count = itemCount ?? (Array.isArray(items) ? items.length : 0);
-  const result = validatePromptEnhancementSequencePayloadV1(p, { itemCount: count });
+  const result = validatePromptEnhancementSequencePayloadV1(p, { itemCount: count, status });
   return result.ok ? undefined : result.reasonCode;
 };
 
@@ -153,13 +161,31 @@ describe('sequence payload — the terminal stub', () => {
         items: [], promptDirectives: [], suggestedNextPromptPolicy: 'not_generated',
         originalLength: 0, offerDisposition: disposition,
       };
-      expect(validatePromptEnhancementSequencePayloadV1(stub, { itemCount: 0 }).ok).toBe(true);
+      expect(validatePromptEnhancementSequencePayloadV1(stub, { itemCount: 0, status: 'cancelled' }).ok)
+        .toBe(true);
     }
   });
 
   it('refuses a stub that carries items', () => {
-    expect(reason(payload([firstTask(), task(1)], { offerDisposition: 'rejected' })))
+    expect(reason(payload([firstTask(), task(1)], { offerDisposition: 'rejected' }), undefined, 'cancelled'))
       .toBe('stub_row_must_carry_no_items');
+  });
+
+  it('requires a declined offer to be terminal, in both live statuses', () => {
+    // The exemption from the bounds and the reachability of the row are one decision: exempt AND
+    // active would be a live sequence with nothing to serve, and it would never be replaced.
+    const stub = payload([], { offerDisposition: 'not_engaged' });
+    for (const status of ['item_pending', 'awaiting_response'] as const) {
+      expect(reason(stub, 0, status)).toBe('declined_offer_must_be_terminal');
+    }
+    for (const status of ['completed', 'cancelled', 'abandoned'] as const) {
+      expect(reason(stub, 0, status)).toBeUndefined();
+    }
+  });
+
+  it('does not require an ACCEPTED row to be live — a finished sequence is terminal', () => {
+    // One-directional on purpose: declined implies terminal, terminal does not imply declined.
+    expect(reason(payload([firstTask(), task(1)]), 2, 'completed')).toBeUndefined();
   });
 });
 

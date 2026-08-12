@@ -210,11 +210,35 @@ describe('pending-sequences store', () => {
     expect(getActivePendingPromptSequence(store, PROJECT, 'sess-1')).toBeNull();
   });
 
-  it('accepts a non-accepted payload — it is exempt from the item bounds', () => {
+  it('exempts a non-accepted payload from the item bounds — but only on a TERMINAL row', () => {
     // A row recording an offer that never activated carries no items; without the exemption the
-    // bounds would refuse it, and on read the scrub would delete it as it was written.
+    // bounds would refuse it. The exemption is paired with the status, or the row would be exempt
+    // from the bounds AND still reachable by the active read: a live sequence with nothing to serve.
     const stub = payload({ offerDisposition: 'not_engaged', originalLength: 0 });
-    expect(upsertPendingPromptSequence(store, createdState(), stub)).toBe(true);
+    expect(upsertPendingPromptSequence(store, createdState({ status: 'cancelled' }), stub)).toBe(true);
+  });
+
+  it('refuses a declined disposition on a row that is still active', () => {
+    // Every individual check passes this: the count is valid, the bounds are exempted, and the
+    // status is in the active filter. Only the pairing catches it — and since the writer now spares
+    // non-accepted rows from replacement, such a row would never be cleaned up.
+    const stub = payload({ offerDisposition: 'rejected', originalLength: 0 });
+    expect(upsertPendingPromptSequence(store, createdState({ status: 'item_pending' }), stub)).toBe(false);
+    expect(upsertPendingPromptSequence(store, createdState({ status: 'awaiting_response' }), stub)).toBe(false);
+    expect(getActivePendingPromptSequence(store, PROJECT, 'sess-1')).toBeNull();
+  });
+
+  it('scrubs a stored row that was made active while declaring a declined offer', () => {
+    // The read only ever sees active rows, so a non-accepted one there is corrupt by construction.
+    expect(upsertPendingPromptSequence(store, createdState(), payload())).toBe(true);
+    store.db.run("UPDATE pending_prompt_sequences SET offer_disposition = 'rejected'");
+    expect(getActivePendingPromptSequence(store, PROJECT, 'sess-1')).toBeNull();
+  });
+
+  it('still accepts a COMPLETED sequence, which is terminal and accepted', () => {
+    // The rule is one-directional: a declined offer must be terminal, but a terminal row is not
+    // required to be declined — a finished sequence is exactly that.
+    expect(upsertPendingPromptSequence(store, createdState({ status: 'completed' }), payload())).toBe(true);
   });
 
   it('never selects a terminal row, so its scrub-on-read cannot reach one', () => {
@@ -295,7 +319,7 @@ describe('pending-sequences store', () => {
     // when the next one is written. Comparing across the two would freeze one sequence's plan onto
     // a different sequence — and a single declined offer would refuse every later sequence here.
     const declined = payload({ offerDisposition: 'not_engaged', originalLength: 0 });
-    expect(upsertPendingPromptSequence(store, createdState({ sequenceId: 'seq-1' }), declined)).toBe(true);
+    expect(upsertPendingPromptSequence(store, createdState({ sequenceId: 'seq-1', status: 'cancelled' }), declined)).toBe(true);
     expect(upsertPendingPromptSequence(store, createdState({ sequenceId: 'seq-2' }), payload())).toBe(true);
     expect(getActivePendingPromptSequence(store, PROJECT, 'sess-1')).toMatchObject({
       sequenceId: 'seq-2',

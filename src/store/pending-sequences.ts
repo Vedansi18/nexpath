@@ -73,7 +73,7 @@ export function upsertPendingPromptSequence(
   if (!validatePromptEnhancementSequenceRuntimeStateV1(state).ok) return false;
   // Validated against the state, not alone: the list length and the row's item count are one
   // quantity stored twice, and only the pair can catch them disagreeing.
-  if (!validatePromptEnhancementSequencePayloadV1(payload, { itemCount: state.itemCount }).ok) {
+  if (!validatePromptEnhancementSequencePayloadV1(payload, { itemCount: state.itemCount, status: state.status }).ok) {
     return false;
   }
   // The rewrite check runs BEFORE the delete: this is the only point at which a stored value can
@@ -357,7 +357,7 @@ export function getActivePendingPromptSequence(
     || !ACTIVE_STATUSES.includes(row.status)
     || items === null
     || promptDirectives === null
-    || !validatePromptEnhancementSequencePayloadV1(payload, { itemCount: row.itemCount }).ok;
+    || !validatePromptEnhancementSequencePayloadV1(payload, { itemCount: row.itemCount, status: row.status }).ok;
   if (staleSession || invalid) {
     store.db.run('DELETE FROM pending_prompt_sequences WHERE id = ?', [row.id]);
     saveStore(store);

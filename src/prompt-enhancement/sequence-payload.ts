@@ -8,6 +8,7 @@ import {
 import {
   PROMPT_ENHANCEMENT_SEQUENCE_MAX_ITEM_COUNT_V1,
   PROMPT_ENHANCEMENT_SEQUENCE_MIN_ITEM_COUNT_V1,
+  type PromptEnhancementSequenceRuntimeStatusV1,
 } from './sequence-runtime.js';
 import {
   PROMPT_ENHANCEMENT_SEQUENCE_ROLE_LABELS_V1,
@@ -143,6 +144,7 @@ export type PromptEnhancementSequencePayloadReasonCodeV1 =
   | 'item_count_below_min'
   | 'item_count_disagrees_with_row'
   | 'stub_row_must_carry_no_items'
+  | 'declined_offer_must_be_terminal'
   | 'original_length_zero_with_items'
   | 'next_prompt_policy_disagrees_with_items'
   | 'confirmations_do_not_match_complexity'
@@ -182,7 +184,19 @@ export type PromptEnhancementSequencePayloadValidationV1 =
  */
 export interface PromptEnhancementSequencePayloadContextV1 {
   itemCount: number;
+  /**
+   * The row's status. A row recording an offer that was not taken must be terminal — otherwise it
+   * is served as a live sequence with nothing to serve, and since the writer now spares such rows
+   * from replacement it would stay that way.
+   */
+  status: PromptEnhancementSequenceRuntimeStatusV1;
 }
+
+/** The two statuses a live sequence can hold; everything else is terminal. */
+const ACTIVE_STATUSES_V1: readonly PromptEnhancementSequenceRuntimeStatusV1[] = [
+  'item_pending',
+  'awaiting_response',
+];
 
 /**
  * A sequence that has been recorded but not yet planned. Intake writes this on first send;
@@ -265,7 +279,13 @@ export function validatePromptEnhancementSequencePayloadV1(
   // A row whose disposition is not `accepted` is a terminal record of an offer that never
   // activated. It is never served, so there is nothing to validate bounds against — and without
   // this exemption the scrub would delete the record in the same breath it was written.
+  //
+  // The exemption is paired with a requirement, because on its own it would let a row be exempt
+  // from the bounds AND still be reachable by the active read: a live sequence with no items to
+  // serve. The status is what keeps such a record out of the way, so it is checked here rather
+  // than trusted to whichever writer produced the row.
   if (p['offerDisposition'] !== 'accepted') {
+    if (ACTIVE_STATUSES_V1.includes(context.status)) return fail('declined_offer_must_be_terminal');
     return items.length === 0 ? { ok: true } : fail('stub_row_must_carry_no_items');
   }
 
