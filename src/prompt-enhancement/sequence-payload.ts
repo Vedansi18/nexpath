@@ -270,6 +270,23 @@ export function promptEnhancementSequenceTextHasTokenV1(text: string, token: str
 }
 
 /**
+ * Does `text` contain `clause`, allowing for the ways the same words get written?
+ *
+ * Case, hyphenation and line wrapping only. "ground-level" and "ground level" are one phrase spelt
+ * two ways, and a clause that wrapped across a line has a newline where the sentence had a space —
+ * neither is a different clause, and rejecting a confirmation for a hyphen costs the whole sequence.
+ *
+ * Nothing beyond that. This does not accept a paraphrase, because the prompt dictates these clauses
+ * as exact sentences: the question here is whether an instruction was followed, not whether two
+ * pieces of English mean the same thing.
+ */
+export function promptEnhancementSequenceTextHasClauseV1(text: string, clause: string): boolean {
+  const flatten = (value: string): string =>
+    value.toLowerCase().replace(/[-‐-―]/g, ' ').replace(/\s+/g, ' ').trim();
+  return flatten(text).includes(flatten(clause));
+}
+
+/**
  * Does `text` REPRODUCE `span` — the user's own wording appearing inside generated output?
  *
  * A single word is not reproduction. A slice is the user's wording for one piece of work and is

@@ -30,15 +30,41 @@ in your prompt EXACTLY as given — not tidied, not re-punctuated, not shortened
 Everything else in the prompt is your writing. The two are not mixed: you do not paraphrase inside
 the slice and you do not quote the user for the parts that are yours.`;
 
+/**
+ * The two clauses a confirmation is malformed without, as the exact sentences to reproduce.
+ *
+ * Dictated rather than described, and this is the fix for a recurring failure rather than a style
+ * choice. Described in prose, the composer paraphrases — correctly, in good English — and a check
+ * looking for the phrase rejects the paraphrase. Then the item is repaired three times and the
+ * sequence is lost, for output that was right.
+ *
+ * So the prompt gives the sentence and the check looks for the same anchor inside it. The two are
+ * the same constant, which is what stops the instruction and the rule drifting apart.
+ */
+export const PROMPT_ENHANCEMENT_SEQUENCE_CONFIRMATION_CLAUSES_V1 = {
+  certaintyBar: {
+    sentence: 'Answer only if you are clear and sure at ground level.',
+    anchor: 'clear and sure at ground level',
+  },
+  antiAssumption: {
+    sentence: 'Do not make any assumptions; confirm at ground level by reading the actual source.',
+    anchor: 'confirm at ground level by reading the actual source',
+  },
+} as const;
+
 /** 3 — the three parts, both classes, the format, and the enforcement rules that travel with it. */
 const SECTION_3_CONFIRMATION = `SECTION 3 — WHAT A CONFIRMATION PROMPT MUST CONTAIN
 
 Every confirmation carries THREE things besides the question:
 
   1. THE FORMAT — "Reply YES or NO only" or "Reply PASS or FAIL only".
-  2. THE CERTAINTY BAR — answer only if clear and sure at ground level.
-  3. THE ANTI-ASSUMPTION INSTRUCTION — "do not make any assumptions; confirm at ground level by
-     reading the actual source."
+  2. THE CERTAINTY BAR — this sentence, as written:
+       "${PROMPT_ENHANCEMENT_SEQUENCE_CONFIRMATION_CLAUSES_V1.certaintyBar.sentence}"
+  3. THE ANTI-ASSUMPTION INSTRUCTION — this sentence, as written:
+       "${PROMPT_ENHANCEMENT_SEQUENCE_CONFIRMATION_CLAUSES_V1.antiAssumption.sentence}"
+
+Reproduce 2 and 3 in those words. They are not summarised, reworded or merged, however natural a
+rewrite would read — an item is rejected for missing them, and a paraphrase reads as missing.
 
 The third is not optional and not a flourish. Without it an agent answers from its own previous
 turn: it reports what it already said instead of going and checking, and a confirmation answered

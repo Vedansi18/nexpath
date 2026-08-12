@@ -19,6 +19,8 @@ import type { PromptEnhancementSequenceItemV1 } from './sequence-payload.js';
 import type { PromptEnhancementSequencePlannerClientV1 } from './sequence-planner.js';
 
 const ORIGINAL = 'Fix the failing payment test, then add a rate limiter to the login endpoint.';
+/** The certainty bar, as the prompt dictates it. */
+const BAR = 'Answer only if you are clear and sure at ground level.';
 const SLICE_ONE = 'Fix the failing payment test';
 const SLICE_TWO = 'add a rate limiter to the login endpoint';
 
@@ -238,10 +240,29 @@ describe('sequence batch — confirmations', () => {
       .toBe(true);
   });
 
-  it('refuses one missing the ground-level clause', async () => {
-    // Without it an agent answers from its own previous turn, and the confirmation confirms nothing.
-    expect(await withConfirmation('Does the limiter reject the 61st request?\n\nReply YES or NO only.'))
+  it('refuses one missing either of the two mandatory clauses', async () => {
+    // All three parts, not two. Both clauses end in "at ground level", so a single check over that
+    // phrase could not tell them apart and a confirmation carrying only the second one passed.
+    const noBar = 'Does the limiter reject the 61st request?\n\nReply YES or NO only. Do not make'
+      + ' any assumptions; confirm at ground level by reading the actual source.';
+    expect(await withConfirmation(noBar))
+      .toEqual({ ok: false, reason: 'confirmation_missing_certainty_bar' });
+
+    // Without the anti-assumption clause an agent answers from its own previous turn, and the
+    // confirmation confirms nothing.
+    const noClause = `Does the limiter reject the 61st request?\n\nReply YES or NO only. ${BAR}`;
+    expect(await withConfirmation(noClause))
       .toEqual({ ok: false, reason: 'confirmation_missing_ground_level_clause' });
+  });
+
+  it('accepts the clauses however they are spelt or wrapped', async () => {
+    // "ground-level" and "ground level" are one phrase spelt two ways, and a clause that wrapped
+    // across a line has a newline where the sentence had a space. Neither is a different clause,
+    // and rejecting either costs the whole sequence.
+    const hyphenated = 'Does the limiter reject the 61st request?\n\nReply YES or NO only. Answer'
+      + ' only if you are clear and sure at\nground-level. Do not make any assumptions; confirm at'
+      + ' ground-level by reading the actual source.';
+    expect((await withConfirmation(hyphenated)).ok).toBe(true);
   });
 
   it('refuses the wrong format for the kind, and two formats in one item', async () => {
@@ -260,7 +281,7 @@ describe('sequence batch — confirmations', () => {
     // was rejected for carrying the clause it is malformed without — and the cost was not one item
     // but three repairs and then no sequence at all.
     const shouted = 'Did the migration copy every row?\n\nReply PASS or FAIL only, on its own line.'
-      + ' DO NOT make any assumptions; confirm at ground level by reading the actual source.';
+      + ` ${BAR} DO NOT make any assumptions; confirm at ground level by reading the actual source.`;
     expect((await withConfirmation(shouted, 'double_confirmation')).ok).toBe(true);
   });
 
@@ -269,7 +290,7 @@ describe('sequence batch — confirmations', () => {
     // cannot avoid the word. Under plain containment this was rejected, repaired three times, and
     // the sequence lost — for the only sentence the rule leaves available.
     const conf = 'Did the deploy finish without a rollback?\n\nReply YES or NO only, on its own'
-      + ' line. Do not make any assumptions; confirm at ground level by reading the actual source.';
+      + ` line. ${BAR} Do not make any assumptions; confirm at ground level by reading the actual source.`;
     const result = await runPromptEnhancementSequenceBatchV1(
       input([
         task(1, 'deploy', { authorityMode: 'execute_requested' }),

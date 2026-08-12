@@ -12,12 +12,16 @@ export {
   PROMPT_ENHANCEMENT_SEQUENCE_BATCH_OUTPUT_TOKEN_CAP_V1,
   PROMPT_ENHANCEMENT_SEQUENCE_BATCH_OUTPUT_TOKEN_HARD_CAP_V1,
 } from './cost-observability.js';
-import { buildPromptEnhancementSequenceBatchSystemPromptV1 } from './sequence-batch-composer-prompt.js';
+import {
+  PROMPT_ENHANCEMENT_SEQUENCE_CONFIRMATION_CLAUSES_V1,
+  buildPromptEnhancementSequenceBatchSystemPromptV1,
+} from './sequence-batch-composer-prompt.js';
 import {
   promptEnhancementGeneratedEscalatesAuthorityV1,
 } from './safety-sendability.js';
 import {
   isPromptEnhancementSequenceOffsetRangeV1,
+  promptEnhancementSequenceTextHasClauseV1,
   promptEnhancementSequenceTextHasTokenV1,
   promptEnhancementSequenceTextReproducesV1,
   type PromptEnhancementSequenceItemKindV1,
@@ -110,6 +114,7 @@ export type PromptEnhancementSequenceBatchFailureReasonV1 =
   | 'covered_slice_missing_from_recap'
   | 'confirmation_carries_original_text'
   | 'confirmation_format_wrong_for_kind'
+  | 'confirmation_missing_certainty_bar'
   | 'confirmation_missing_ground_level_clause'
   | 'confirmation_reproduces_directive_text'
   | 'wording_exceeds_item_authority';
@@ -134,16 +139,6 @@ const FORMAT_TOKENS_V1: Readonly<Record<string, readonly [string, string]>> = {
   cross_confirmation: ['PASS', 'FAIL'],
   binary_confirmation: ['YES', 'NO'],
 };
-
-/**
- * The clause a confirmation is malformed without.
- *
- * Checking for it is not the text matching this feature bars elsewhere. That prohibition is about
- * deriving a JUDGEMENT from words — whether work is risky, whether a request is complex. This
- * checks that a clause we dictated verbatim is present in output we asked for, which is the same
- * kind of check as "is this value one of the six kinds".
- */
-const GROUND_LEVEL_CLAUSE_V1 = 'ground level';
 
 function isConfirmation(kind: PromptEnhancementSequenceItemKindV1): boolean {
   return CONFIRMATION_KINDS.includes(kind);
@@ -237,7 +232,27 @@ function checkBatchOutput(
           dependencyOrder: item.dependencyOrder,
         };
       }
-      if (!text.toLowerCase().includes(GROUND_LEVEL_CLAUSE_V1)) {
+      // All THREE mandatory parts, not two. The certainty bar and the anti-assumption instruction
+      // both end in "at ground level", so one check over that phrase cannot tell them apart and a
+      // confirmation with only the second passed. They are dictated as exact sentences in the
+      // prompt, so each is looked for by its own distinctive anchor.
+      //
+      // Checking a clause we wrote is not the text matching barred elsewhere: that prohibition is
+      // about deriving a JUDGEMENT from words. This asks whether an instruction was followed.
+      if (!promptEnhancementSequenceTextHasClauseV1(
+        text,
+        PROMPT_ENHANCEMENT_SEQUENCE_CONFIRMATION_CLAUSES_V1.certaintyBar.anchor,
+      )) {
+        return {
+          ok: false,
+          reason: 'confirmation_missing_certainty_bar',
+          dependencyOrder: item.dependencyOrder,
+        };
+      }
+      if (!promptEnhancementSequenceTextHasClauseV1(
+        text,
+        PROMPT_ENHANCEMENT_SEQUENCE_CONFIRMATION_CLAUSES_V1.antiAssumption.anchor,
+      )) {
         return {
           ok: false,
           reason: 'confirmation_missing_ground_level_clause',
@@ -504,6 +519,7 @@ export function promptEnhancementSequenceBatchDispositionV1(
     case 'covered_slice_missing_from_recap':
     case 'confirmation_carries_original_text':
     case 'confirmation_format_wrong_for_kind':
+    case 'confirmation_missing_certainty_bar':
     case 'confirmation_missing_ground_level_clause':
     case 'confirmation_reproduces_directive_text':
     case 'wording_exceeds_item_authority':
