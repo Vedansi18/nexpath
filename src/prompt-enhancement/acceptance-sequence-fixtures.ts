@@ -1,5 +1,6 @@
 import { promptEnhancementAcceptanceFixtureV1 } from './acceptance-fixture-shape.js';
 import { PROMPT_ENHANCEMENT_SEQUENCE_MAX_ITEM_COUNT_V1 } from './sequence-runtime.js';
+import { PROMPT_ENHANCEMENT_SEQUENCE_ENABLED_KEY } from '../config/prompt-enhancement-keys.js';
 import type { PromptEnhancementAcceptanceFixtureV1 } from './acceptance-matrix.js';
 
 /**
@@ -276,6 +277,10 @@ export function buildPromptEnhancementSequenceAcceptanceFixturesV1(): readonly P
       expectedCapability: 'exact_token_set_per_kind',
       mandatorySlotsOrSafeguards: [
         'token_set_is_a_total_function_of_the_item_kind',
+        // The mapping is what this fixture asserts, so it is written out rather than referred to.
+        'binary_confirmation_carries_yes_and_no',
+        'double_confirmation_carries_pass_and_fail',
+        'cross_confirmation_carries_pass_and_fail',
         'no_two_formats_in_one_item',
         // The demand is a clause in the QUESTION and never a fact about the reply — agent replies
         // are not read. It exists so the USER can find the answer at a glance, which is also why
@@ -562,7 +567,7 @@ export function buildPromptEnhancementSequenceAcceptanceFixturesV1(): readonly P
         // Marked as the user's own words, a continuation re-enters the planner and plans a sequence
         // out of Nexpath's own writing — a loop whose every iteration looks like a legitimate
         // multi-intent request.
-        'sequence_owned_body_does_not_re_enter_the_planner',
+        'sequence_owned_body_does_not_re_enter_planning_at_user_prompt_submit',
         'origin_marking_present_on_every_continuation_body',
       ],
       sourceReasonMetadata: ['sentPromptOrigin', 'generatedOriginState', 'nexpathGeneratedPromptRef'],
@@ -570,7 +575,9 @@ export function buildPromptEnhancementSequenceAcceptanceFixturesV1(): readonly P
       registryLinkedFixtureIds: [],
       expectedObservableOutcome: [
         'continuation_body_reports_sequence_owned_origin',
-        'no_second_sequence_planned_from_a_continuation_body',
+        // Named because it is the boundary to exercise: the body comes back through prompt submit
+        // like any other, and the origin marking is the only thing that distinguishes it there.
+        'no_second_sequence_planned_when_the_body_reaches_user_prompt_submit',
       ],
       hardFailFocus: [
         'continuation_body_marked_user_authored',
@@ -622,7 +629,10 @@ export function buildPromptEnhancementSequenceAcceptanceFixturesV1(): readonly P
         // instinct is to explain the silence, and the presentation contract forbids the setting's
         // name appearing in a rendered model at all. No popup, no "sequences are disabled" line,
         // no key, no value.
-        'nothing_rendered_names_the_setting',
+        // Interpolated from the shipping constant, not retyped. The oracle is ABOUT this string,
+        // and the presentation contract already carries the same literal in its forbidden-value
+        // list — the ban is on the rendered model, never on the register that specifies the ban.
+        `nothing_rendered_contains_${PROMPT_ENHANCEMENT_SEQUENCE_ENABLED_KEY}`,
         'no_explanation_of_the_silence_is_shown',
       ],
       sourceReasonMetadata: ['sequence_enabled', 'validated_effective_config_state', 'source_scope'],
@@ -684,9 +694,11 @@ export function buildPromptEnhancementSequenceAcceptanceFixturesV1(): readonly P
         'popup_opening_does_not_activate',
         'timeout_does_not_activate',
         'render_does_not_activate',
-        'advance_request_does_not_activate',
+        // The only item in this list that is an invocable action rather than an event, which is
+        // why it is named: the other three cannot be called on purpose and this one can.
+        'advance_to_next_item_action_does_not_activate',
       ],
-      sourceReasonMetadata: ['sequence_status', 'offer_disposition'],
+      sourceReasonMetadata: ['sequence_status', 'offer_disposition', 'advance_to_next_item'],
       evidenceSourceKinds: ['pe_specific_fixture', 'pe_contract_validation'],
       registryLinkedFixtureIds: [],
       expectedObservableOutcome: [

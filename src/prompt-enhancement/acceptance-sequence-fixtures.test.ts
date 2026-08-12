@@ -8,6 +8,7 @@ import {
 import { PROMPT_ENHANCEMENT_SEQUENCE_MAX_ITEM_COUNT_V1 } from './sequence-runtime.js';
 import { evaluatePromptEnhancementFutureSequenceRuntimeGateV1 } from './future-sequence-runtime-gate.js';
 import { PROMPT_ENHANCEMENT_CONTRACT_VERSION } from './contracts.js';
+import { PROMPT_ENHANCEMENT_SEQUENCE_ENABLED_KEY } from '../config/prompt-enhancement-keys.js';
 
 const sequenceFixtures = buildPromptEnhancementSequenceAcceptanceFixturesV1();
 
@@ -206,7 +207,11 @@ describe('sequence acceptance register — the oracles most likely to be written
     // The instinct is to tell the user why nothing happened, and the presentation contract forbids
     // the setting's name appearing in a rendered model at all.
     const entry = byId('acceptance-sequence-config-gate-off-is-silent');
-    expect(entry?.mandatorySlotsOrSafeguards).toContain('nothing_rendered_names_the_setting');
+    // The oracle names the key it is about. The presentation contract already carries the same
+    // literal in its forbidden-value list, so naming it in the register that specifies the ban is
+    // the established shape, not a leak of it.
+    expect(entry?.mandatorySlotsOrSafeguards)
+      .toContain(`nothing_rendered_contains_${PROMPT_ENHANCEMENT_SEQUENCE_ENABLED_KEY}`);
     expect(entry?.expectedObservableOutcome).toContain('rendered_model_contains_no_configuration_key');
     expect(entry?.hardFailFocus).toContain('disabled_state_explained_in_the_interface');
   });
@@ -271,6 +276,46 @@ describe('sequence acceptance register — the oracles most likely to be written
     const entry = byId('acceptance-sequence-old-decision-session-not-authority');
     expect(entry?.sourceReasonMetadata).toContain('legacy_decision_session_config_is_authority_false');
     expect(JSON.stringify(entry)).not.toContain('old_decision_session_config_is_authority');
+  });
+
+  it('names every identifier its oracles are written against', () => {
+    // The sweep, as a test. Three passes each found the same defect one instance at a time — an
+    // oracle describing a value the plan names instead of naming it — because each pass looked for
+    // the KIND of thing the last one missed. This asserts the whole set at once, so the next
+    // omission fails here rather than on a fourth reading.
+    //
+    // Each entry is a value that exists in shipping source and that a fixture author has to assert
+    // against. Describing one instead of naming it sends them to find it, and the assertion they
+    // then write comes from whatever the implementation says that day.
+    const register = JSON.stringify(sequenceFixtures);
+    const REQUIRED: readonly string[] = [
+      // Gate reason codes.
+      'runtime_event_project_scope_mismatch',
+      'old_ds_config_rejected_as_pe_runtime_authority',
+      // Declared, literal-typed states on the gate result.
+      'non_proof_no_runtime',
+      'ids_counts_status_only_no_raw_content',
+      // The field name as SOURCE spells it, not as the plan cites it.
+      'legacy_decision_session_config_is_authority_false',
+      // The runtime action that is invocable, unlike the events beside it in its rule.
+      'advance_to_next_item',
+      // The boundary a sequence-owned body would re-enter planning at.
+      'user_prompt_submit',
+      // The item kinds whose token mapping one oracle exists to assert.
+      'binary_confirmation',
+      'double_confirmation',
+      'cross_confirmation',
+      // The configuration key one oracle is entirely about.
+      PROMPT_ENHANCEMENT_SEQUENCE_ENABLED_KEY,
+      // The structural cap, which the oracle carries rather than gestures at.
+      String(PROMPT_ENHANCEMENT_SEQUENCE_MAX_ITEM_COUNT_V1),
+      // The stored field a duplicate-action refusal turns on.
+      'lastActionId',
+      // The field whose absence is Ruling C.
+      'originalSliceRef',
+    ];
+    const missing = REQUIRED.filter((token) => !register.includes(token));
+    expect(missing).toEqual([]);
   });
 
   it('does not claim the host-unavailable case, which is another lane', () => {
