@@ -76,20 +76,6 @@ export interface PromptEnhancementSequencePackagerInputV1 {
    * The run that produced THIS text — the batch, not the composer run that wrote the first prompt.
    */
   composerRunId: string;
-  /**
-   * The safety verdict for THIS item, as the three fields a result carries it in.
-   *
-   * All three or none. The graph alone, set beside the first body's summaries, produces a result
-   * whose graph describes one body and whose summaries describe another — and a safety claim nobody
-   * made about this body is the outcome the fabrication rule exists to prevent, arrived at by
-   * mixing rather than by inventing.
-   *
-   * They travel WITH the item for the same reason the verdict does: the packager reports the
-   * verdict and never computes it. Where they are stored is the per-item check's contract to
-   * settle, not this component's.
-   */
-  itemSafetySummary: PromptEnhancementSafetySummaryV1;
-  itemValidationSummary: PromptEnhancementSafetySummaryV1;
   /** The validation status this body was cleared under, arriving with the rest of its verdict. */
   itemGeneratedSafeStatus: PromptEnhancementValidationStatus;
   /**
@@ -310,9 +296,12 @@ export function packagePromptEnhancementSequenceContinuationV1(
       // Assigned below with the other two copies, once the metadata exists.
       handoffAndSequenceSummary: undefined,
     },
+    // ONE value, not three independently assembled. The graph CONTAINS the summary — the two
+    // summary fields are that member, read out of the record rather than supplied beside it, so
+    // there is no arrangement in which a result's graph and its summaries describe different runs.
     validationGraph: item.itemValidationGraph,
-    safetySummary: input.itemSafetySummary,
-    validationSummary: input.itemValidationSummary,
+    safetySummary: item.itemValidationGraph.safetyState,
+    validationSummary: item.itemValidationGraph.safetyState,
     // Assigned below, once it exists. The result carries its own copy of the metadata and two
     // copies pointing at different bodies is the failure this whole pass keeps finding.
     handoffMetadata: undefined,
@@ -327,10 +316,9 @@ export function packagePromptEnhancementSequenceContinuationV1(
     bodyRevision: input.bodyRevision,
     // True because the two lines above just made it true, for this revision.
     currentBodyValidityState: 'valid_for_current_body_revision',
-    // From THIS item's verdict, and specifically from the VALIDATION summary: that is the field the
-    // completeness check compares this against, and the two summaries are separate fields that can
-    // hold different states.
-    riskConfirmationState: input.itemValidationSummary.sensitiveActionState,
+    // The same member the two summary fields come from, so the completeness check that compares
+    // this against the validation summary is comparing a value with itself.
+    riskConfirmationState: item.itemValidationGraph.safetyState.sensitiveActionState,
     // Named for the first popup and REQUIRED by the contract for exactly the two kinds a
     // continuation carries — dropping it fails the metadata outright. So it stays, re-pointed at
     // this body like everything else, and what keeps the numbers straight is that the progress

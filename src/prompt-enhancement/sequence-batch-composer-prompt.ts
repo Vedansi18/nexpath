@@ -56,6 +56,15 @@ export const PROMPT_ENHANCEMENT_SEQUENCE_CONFIRMATION_CLAUSES_V1 = {
     sentence: 'Do not make any assumptions; confirm at ground level by reading the actual source.',
     anchor: 'confirm at ground level by reading the actual source',
   },
+  /**
+   * The demand that the answer stand alone, which is a clause in the QUESTION and not a fact about
+   * the reply. Nexpath never reads agent replies, so the reply's shape is not checkable and was
+   * never meant to be — what is checkable is whether the question asked for it.
+   */
+  answerAlone: {
+    sentence: 'Give the answer on its own line, with nothing after it.',
+    anchor: 'on its own line',
+  },
 } as const;
 
 /** 3 — the three parts, both classes, the format, and the enforcement rules that travel with it. */
@@ -67,7 +76,9 @@ past before the question, and the answer is worth exactly as much as the attenti
 
 Every confirmation carries THREE things besides the question:
 
-  1. THE FORMAT — "Reply YES or NO only" or "Reply PASS or FAIL only".
+  1. THE FORMAT — "Reply YES or NO only" or "Reply PASS or FAIL only", followed by this sentence,
+     as written:
+       "${PROMPT_ENHANCEMENT_SEQUENCE_CONFIRMATION_CLAUSES_V1.answerAlone.sentence}"
   2. THE CERTAINTY BAR — this sentence, as written:
        "${PROMPT_ENHANCEMENT_SEQUENCE_CONFIRMATION_CLAUSES_V1.certaintyBar.sentence}"
   3. THE ANTI-ASSUMPTION INSTRUCTION — this sentence, as written:

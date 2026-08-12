@@ -260,10 +260,22 @@ describe('sequence batch — confirmations', () => {
     // "ground-level" and "ground level" are one phrase spelt two ways, and a clause that wrapped
     // across a line has a newline where the sentence had a space. Neither is a different clause,
     // and rejecting either costs the whole sequence.
-    const hyphenated = 'Does the limiter reject the 61st request?\n\nReply YES or NO only. Answer'
+    const hyphenated = 'Does the limiter reject the 61st request?\n\nReply YES or NO only. Give the'
+      + ' answer on its own\nline, with nothing after it. Answer'
       + ' only if you are clear and sure at\nground-level. Do not make any assumptions; confirm at'
       + ' ground-level by reading the actual source.';
     expect((await withConfirmation(hyphenated)).ok).toBe(true);
+  });
+
+  it('refuses a confirmation that never demands the answer stand alone', async () => {
+    // The DEMAND, in the question — never the reply's shape, which Nexpath does not read. Without
+    // it the agent writes "Yes, because…" and three paragraphs of reasoning, and the answer the
+    // user has to find at a glance is buried in the middle of them.
+    const noDemand = 'Does the limiter reject the 61st request?\n\nReply YES or NO only. Answer only'
+      + ' if you are clear and sure at ground level. Do not make any assumptions; confirm at ground'
+      + ' level by reading the actual source.';
+    expect(await withConfirmation(noDemand))
+      .toEqual({ ok: false, reason: 'confirmation_missing_answer_alone_demand' });
   });
 
   it('refuses the wrong format for the kind, and two formats in one item', async () => {

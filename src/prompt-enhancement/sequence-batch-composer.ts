@@ -115,6 +115,7 @@ export type PromptEnhancementSequenceBatchFailureReasonV1 =
   | 'confirmation_carries_original_text'
   | 'confirmation_format_wrong_for_kind'
   | 'confirmation_missing_certainty_bar'
+  | 'confirmation_missing_answer_alone_demand'
   | 'confirmation_missing_ground_level_clause'
   | 'confirmation_reproduces_directive_text'
   | 'wording_exceeds_item_authority';
@@ -256,6 +257,21 @@ function checkBatchOutput(
         return {
           ok: false,
           reason: 'confirmation_missing_ground_level_clause',
+          dependencyOrder: item.dependencyOrder,
+        };
+      }
+      // The DEMAND that the answer stand alone — a clause in the QUESTION, never a fact about the
+      // reply. Nexpath does not read agent replies, so the reply's shape is not checkable here and
+      // was never meant to be; what is checkable is whether the question asked for it. Models write
+      // "Yes, because…" unless asked otherwise, and the point of asking is that the USER can read
+      // the answer at a glance — not that a parser can.
+      if (!promptEnhancementSequenceTextHasClauseV1(
+        text,
+        PROMPT_ENHANCEMENT_SEQUENCE_CONFIRMATION_CLAUSES_V1.answerAlone.anchor,
+      )) {
+        return {
+          ok: false,
+          reason: 'confirmation_missing_answer_alone_demand',
           dependencyOrder: item.dependencyOrder,
         };
       }
@@ -520,6 +536,7 @@ export function promptEnhancementSequenceBatchDispositionV1(
     case 'confirmation_carries_original_text':
     case 'confirmation_format_wrong_for_kind':
     case 'confirmation_missing_certainty_bar':
+    case 'confirmation_missing_answer_alone_demand':
     case 'confirmation_missing_ground_level_clause':
     case 'confirmation_reproduces_directive_text':
     case 'wording_exceeds_item_authority':

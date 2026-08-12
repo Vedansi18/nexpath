@@ -16,7 +16,9 @@ import type {
 const ITEM_SAFETY = { sensitiveActionState: 'none_detected' } as unknown as PromptEnhancementSafetySummaryV1;
 
 /** The verdict the item carries. Its shape is the validator's business; the packager only reports. */
-const GRAPH = { safetyState: {} } as unknown as PromptEnhancementValidationGraphV1;
+const GRAPH = {
+  safetyState: ITEM_SAFETY,
+} as unknown as PromptEnhancementValidationGraphV1;
 
 const item = (
   order: number,
@@ -137,8 +139,6 @@ const input = (
   nexpathGeneratedPromptRef: 'ref-1',
   validationDecisionId: 'decision-for-item-1',
   composerRunId: 'run-batch',
-  itemSafetySummary: ITEM_SAFETY,
-  itemValidationSummary: ITEM_SAFETY,
   handoffDecisionId: 'handoff-for-item-1',
   itemGeneratedSafeStatus: 'passed',
   itemBodyFingerprintRef: 'body-1:fingerprint',

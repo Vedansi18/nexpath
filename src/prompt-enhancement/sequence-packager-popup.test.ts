@@ -114,8 +114,6 @@ async function packagedPopup(currentItemIndex: number) {
     nexpathGeneratedPromptRef: `${accepted.currentBody.nexpathGeneratedPromptRef}:item-${currentItemIndex}`,
     validationDecisionId: `${accepted.validationDecisionId}:item-${currentItemIndex}`,
     composerRunId: `${accepted.currentBody.composerRunId}:batch`,
-    itemSafetySummary: accepted.safetySummary,
-    itemValidationSummary: accepted.validationSummary,
     handoffDecisionId: `${accepted.enhancementId}:handoff:item-${currentItemIndex}`,
     itemGeneratedSafeStatus: accepted.currentBody.generatedSafeStatus,
     // Supplied as a caller would. Omitted, the summary's own id named the first popup's record —
