@@ -150,6 +150,7 @@ export type PromptEnhancementSequencePlannerFailureReasonV1 =
   | 'timeout'
   | 'invalid_output'
   | 'context_does_not_index_original'
+  | 'planner_deadline_exceeded'
   | PromptEnhancementSequencePlannerRefusalV1
   | PromptEnhancementSequencePlannerCheckCodeV1
   | PromptEnhancementSequencePayloadReasonCodeV1;
@@ -252,6 +253,37 @@ export interface PromptEnhancementSequencePlannerInputV1 {
   projectRoot?: string;
   /** What the deterministic routing made of this request. Absent when it produced none. */
   route?: PromptEnhancementSequencePlannerRouteV1;
+  /**
+   * When the work this call is part of has to be finished, as epoch milliseconds.
+   *
+   * The repair bound counts attempts, not seconds, and four sequential calls at this call's own
+   * timeout are longer than the hook that carries them is allowed to live. Past that point the
+   * process is killed mid-loop: no typed refusal, no disposition, no popup — everything built to
+   * make each failure answerable is skipped, because there is nothing left to answer with.
+   *
+   * So the deadline is a ceiling on wall-clock and never on repairs; the bound of three is
+   * unchanged and is still a maximum rather than a quota to spend. Absent means no ceiling, which
+   * is the behaviour without it.
+   *
+   * The value is the CALLER'S, because the caller is what knows which hook this is running on, and
+   * this call's own timeout is deliberately not pinned to a guessed number.
+   */
+  deadlineAtMs?: number;
+  /** How the deadline is read. Present so the check is testable without waiting for real time. */
+  nowMs?: () => number;
+}
+
+/**
+ * Is there room to start another call before the deadline?
+ *
+ * Measured against this call's full timeout rather than its expected duration: a call that starts
+ * with less time left than it is allowed to take is one that can be killed halfway, and a killed
+ * call returns nothing at all.
+ */
+function hasRoomForAnotherCall(input: PromptEnhancementSequencePlannerInputV1): boolean {
+  if (input.deadlineAtMs === undefined) return true;
+  const now = (input.nowMs ?? Date.now)();
+  return now + PROMPT_ENHANCEMENT_COST_TIMEOUT_MS_V1 <= input.deadlineAtMs;
 }
 
 /**
@@ -663,15 +695,20 @@ export async function runPromptEnhancementSequencePlannerV1(
     return { ok: false, reason: 'no_key' };
   }
 
+  // Nothing has run yet, so there is no better answer to give than the reason there was no room.
+  if (!hasRoomForAnotherCall(input)) return { ok: false, reason: 'planner_deadline_exceeded' };
+
   let repairInstruction: string | undefined;
   for (let repair = 0; ; repair += 1) {
     const attempt = await attemptPlan(openai, input, repairInstruction);
     if (attempt.ok) return attempt;
     // Nothing came back to correct, so there is nothing a repair could say.
     if (isProviderFailure(attempt.reason)) return { ok: false, reason: attempt.reason };
-    // Out of repairs. After this it is not a retry problem: no sequence is offered and the prompt
-    // goes on as an ordinary single-prompt enhancement, which is unaffected by any of this.
-    if (repair >= PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_MAX_REPAIRS_V1) {
+    // Out of repairs, or out of time for another. Both end the same way and both return what was
+    // actually wrong with the plan rather than the reason for stopping — the defect is the useful
+    // half, and either way no sequence is offered and the single-prompt path is unaffected.
+    if (repair >= PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_MAX_REPAIRS_V1
+      || !hasRoomForAnotherCall(input)) {
       return { ok: false, reason: attempt.reason };
     }
     repairInstruction = buildPromptEnhancementSequencePlannerRepairInstructionV1(

@@ -935,6 +935,61 @@ describe('sequence planner — repair, and its bound', () => {
     expect(sent[1]?.[2]).toContain('invalid_output');
   });
 
+  it('stops repairing when there is no time for another call, without changing the bound', async () => {
+    // Four sequential calls at this call's own timeout outlive the hook that carries them, and a
+    // hook killed mid-loop returns nothing at all — no refusal, no disposition, no popup. So the
+    // ceiling is on wall-clock; three repairs is still the maximum and still not a quota.
+    const PER_CALL = 45_000;
+    let now = 1_000_000;
+    const slow = (replies: readonly string[]) => {
+      const sent: string[][] = [];
+      const client: PromptEnhancementSequencePlannerClientV1 = {
+        chat: { completions: { create: async (body) => {
+          sent.push(body.messages.map((message) => message.content));
+          now += PER_CALL;
+          const reply = replies[sent.length - 1] ?? replies[replies.length - 1] ?? '';
+          return { choices: [{ message: { content: reply } }] };
+        } } },
+      };
+      return { client, sent };
+    };
+
+    // Room for two calls, not four: the attempt and exactly one repair.
+    const { client, sent } = slow([badRole]);
+    const started = now;
+    expect(await runPromptEnhancementSequencePlannerV1(
+      { ...call(), deadlineAtMs: started + (PER_CALL * 2) + 1, nowMs: () => now },
+      client,
+    )).toEqual({ ok: false, reason: 'role_label_invalid' });
+    expect(sent).toHaveLength(2);
+  });
+
+  it('does not start a call it knows cannot finish', async () => {
+    let calls = 0;
+    const counting: PromptEnhancementSequencePlannerClientV1 = {
+      chat: { completions: { create: async () => {
+        calls += 1;
+        return { choices: [{ message: { content: validReply() } }] };
+      } } },
+    };
+    const now = 1_000_000;
+    expect(await runPromptEnhancementSequencePlannerV1(
+      { ...call(), deadlineAtMs: now + 1, nowMs: () => now },
+      counting,
+    )).toEqual({ ok: false, reason: 'planner_deadline_exceeded' });
+    expect(calls).toBe(0);
+    // The user asked for a prompt and still gets one; the deadline is ours, not theirs.
+    expect(promptEnhancementSequencePlannerDispositionV1('planner_deadline_exceeded'))
+      .toBe('no_sequence_single_prompt');
+  });
+
+  it('has no ceiling when the caller sets none', async () => {
+    // Absent means absent — the behaviour without a deadline is unchanged.
+    const { client, sent } = clientSequence([badRole]);
+    await runPromptEnhancementSequencePlannerV1(call(), client);
+    expect(sent).toHaveLength(PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_MAX_REPAIRS_V1 + 1);
+  });
+
   it('tells the planner to check its own plan before returning it', () => {
     // The error is one no check outside the model can find: whether an item assumes a state an
     // earlier item produced is a question about meaning.

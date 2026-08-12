@@ -52,6 +52,9 @@ export function promptEnhancementSequencePlannerDispositionV1(
     // and nothing is wrong with the prompt — the caller handed the planner a text it cannot index,
     // and an error popup would blame the user for it.
     case 'context_does_not_index_original':
+    // Nor did anything fail when there was no time to start: the user asked for a prompt and gets
+    // one, without a sequence and without being told about a deadline that is ours, not theirs.
+    case 'planner_deadline_exceeded':
       return 'no_sequence_single_prompt';
 
     // Everything else is a plan that arrived and did not hold up, including after its repairs were
