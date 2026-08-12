@@ -7,6 +7,10 @@ import {
 } from './sequence-planner-failure.js';
 import { describePromptEnhancementSequencePlanV1 } from './routing-taxonomy.js';
 import {
+  PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_OUTPUT_TOKEN_CAP_V1,
+  PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_OUTPUT_TOKEN_HARD_CAP_V1,
+} from './cost-observability.js';
+import {
   promptEnhancementSequencePlannerMayRunForProjectV1,
   promptEnhancementSequencePlannerMayRunV1,
   promptEnhancementSequencePolicyForOutcomeV1,
@@ -988,6 +992,30 @@ describe('sequence planner — repair, and its bound', () => {
     const { client, sent } = clientSequence([badRole]);
     await runPromptEnhancementSequencePlannerV1(call(), client);
     expect(sent).toHaveLength(PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_MAX_REPAIRS_V1 + 1);
+  });
+
+  it('repairs at the hard cap, so a plan that did not fit has room to', async () => {
+    // One reason a plan comes back unusable is that it did not fit: a long sequence is a reason per
+    // item plus a reason per confirmation, and the hard cap is sized against the locked 30-item
+    // maximum. Repairing at the same budget truncates in the same place three more times.
+    const caps: number[] = [];
+    // A reply cut off mid-JSON is what the normal cap produces on a plan too large for it.
+    const truncated = validReply().slice(0, 120);
+    const client: PromptEnhancementSequencePlannerClientV1 = {
+      chat: { completions: { create: async (body) => {
+        caps.push(body.max_tokens);
+        return { choices: [{ message: { content: caps.length === 1 ? truncated : validReply() } }] };
+      } } },
+    };
+
+    expect((await runPromptEnhancementSequencePlannerV1(call(), client)).ok).toBe(true);
+    expect(caps).toEqual([
+      PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_OUTPUT_TOKEN_CAP_V1,
+      PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_OUTPUT_TOKEN_HARD_CAP_V1,
+    ]);
+    // A ceiling, not a spend — which is why every repair may ask for it and none is detected for.
+    expect(PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_OUTPUT_TOKEN_HARD_CAP_V1)
+      .toBeGreaterThan(PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_OUTPUT_TOKEN_CAP_V1);
   });
 
   it('tells the planner to check its own plan before returning it', () => {

@@ -4,6 +4,7 @@ import {
   PROMPT_ENHANCEMENT_COST_MODEL_V1,
   PROMPT_ENHANCEMENT_COST_TIMEOUT_MS_V1,
   PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_OUTPUT_TOKEN_CAP_V1,
+  PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_OUTPUT_TOKEN_HARD_CAP_V1,
 } from './cost-observability.js';
 import {
   buildPromptEnhancementSequencePlannerRepairInstructionV1,
@@ -543,7 +544,20 @@ async function attemptPlan(
         model: PROMPT_ENHANCEMENT_COST_MODEL_V1,
         // The planner's own budget: the reasons per item are what cost the tokens and they are
         // exactly what must not be dropped to fit.
-        max_tokens: PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_OUTPUT_TOKEN_CAP_V1,
+        //
+        // A repair asks at the HARD cap, which is sized against the locked 30-item maximum. One
+        // reason a plan comes back unusable is that it did not fit — a long sequence is a reason
+        // per item plus a reason per confirmation, and that is the prose in an output otherwise
+        // made of enums and integers. Repairing such a plan at the same budget truncates it in the
+        // same place three more times, on the request that most needed a sequence.
+        //
+        // No truncation detection, because there is nothing to detect for: max_tokens is a ceiling
+        // and not a spend, so a repair of a small plan is still billed as a small plan. What the
+        // hard cap buys is that "cannot fit even at the hard cap" becomes a state reachable at all,
+        // which is what the fail-closed outcome is defined against.
+        max_tokens: repairInstruction === undefined
+          ? PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_OUTPUT_TOKEN_CAP_V1
+          : PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_OUTPUT_TOKEN_HARD_CAP_V1,
         messages: [
           { role: 'system', content: buildPromptEnhancementSequencePlannerSystemPromptV1() },
           { role: 'user', content: buildPlannerUserMessageV1(input.promptContext, input.route) },
