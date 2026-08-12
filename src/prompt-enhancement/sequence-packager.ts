@@ -204,7 +204,12 @@ export function packagePromptEnhancementSequenceContinuationV1(
       composerRunId: input.composerRunId,
       // The stored wording, unchanged. This is the only field the item list supplies directly, and
       // reading it is the entirety of what "packaging" means.
+      //
+      // BOTH fields. The body carries its text twice and they are required to be equal, so setting
+      // one leaves a result whose rendered body is item N and whose text is still the first prompt
+      // — the packager serving the wrong prompt while every field it was asked about looked right.
       renderedPromptBody: item.generatedWording,
+      text: item.generatedWording,
       // Not bookkeeping: this is the one bit that says Nexpath wrote this body. Marked as the
       // user's, a continuation re-enters the planner and plans a sequence out of our own writing.
       sentPromptOrigin: 'sequence_handoff_owned_body',
@@ -260,13 +265,21 @@ export function packagePromptEnhancementSequenceContinuationV1(
     bodyRevision: input.bodyRevision,
     // True because the two lines above just made it true, for this revision.
     currentBodyValidityState: 'valid_for_current_body_revision',
-    // From THIS item's verdict, not the first body's. A carry either way — the packager reports the
-    // safety state and never decides it — but reporting the wrong body's is still reporting wrong.
-    riskConfirmationState: input.itemSafetySummary.sensitiveActionState,
-    // Named for the surface it belongs to, and only the first popup reads it. On a continuation it
-    // would state a prompt COUNT beside a progress line stating a different pair of numbers — and
-    // the count is the one figure the whole summary contract exists to keep straight.
-    compactFirstPopupSequenceSummary: undefined,
+    // From THIS item's verdict, and specifically from the VALIDATION summary: that is the field the
+    // completeness check compares this against, and the two summaries are separate fields that can
+    // hold different states.
+    riskConfirmationState: input.itemValidationSummary.sensitiveActionState,
+    // Named for the first popup and REQUIRED by the contract for exactly the two kinds a
+    // continuation carries — dropping it fails the metadata outright. So it stays, re-pointed at
+    // this body like everything else, and what keeps the numbers straight is that the progress
+    // pair is a separate carrier: this one is bound metadata, not what that surface renders.
+    compactFirstPopupSequenceSummary: accepted.compactFirstPopupSequenceSummary === undefined
+      ? undefined
+      : {
+        ...accepted.compactFirstPopupSequenceSummary,
+        currentBodyId: input.currentBodyId,
+        bodyRevision: input.bodyRevision,
+      },
   };
 
   const event: PromptEnhancementFutureSequenceRuntimeEventV1 = {

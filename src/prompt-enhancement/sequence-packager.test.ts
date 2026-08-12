@@ -50,6 +50,7 @@ const ACCEPTED = {
     currentBodyId: 'body-0',
     bodyRevision: 0,
     renderedPromptBody: 'The first prompt, already sent.',
+    text: 'The first prompt, already sent.',
     sentPromptOrigin: 'user_authored_original_only',
     nexpathGeneratedPromptRef: 'ref-0',
     originalPromptText: 'the original',
@@ -64,7 +65,10 @@ const ACCEPTED = {
   safetySummary: { sensitiveActionState: 'confirmation_required' },
   handoffMetadata: {
     handoffDecisionId: 'enh-1:handoff',
-    compactFirstPopupSequenceSummary: { totalPromptCount: 4, publicSafeText: 'planned as 4 prompts' },
+    compactFirstPopupSequenceSummary: {
+      summaryId: 'summary-0', currentBodyId: 'body-0', bodyRevision: 0,
+      publicSafeText: 'planned as 4 prompts',
+    },
     handoffKind: 'first_prompt_handoff_candidate',
     currentBodyId: 'body-0',
     bodyRevision: 0,
@@ -456,15 +460,31 @@ describe('sequence packager — the handoff metadata is about THIS body too', ()
     expect(ACCEPTED.handoffMetadata?.handoffDecisionId).toBe('enh-1:handoff');
   });
 
-  it('drops the first-popup summary, which that surface does not have', () => {
-    // Named for the surface it belongs to, and only the first popup reads it. On a continuation it
-    // states a prompt count beside a progress line stating a different pair of numbers.
+  it('re-points the compact summary rather than dropping it', () => {
+    // I dropped it once, on the strength of its name and the fact that only the first popup reads
+    // it. The contract requires it for exactly the two handoff kinds a continuation carries, so
+    // dropping it failed the metadata outright — and the end-to-end popup test is what said so.
+    // It is bound metadata; what that surface renders is the progress pair, which is separate.
     const result = packagePromptEnhancementSequenceContinuationV1(input());
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(ACCEPTED.handoffMetadata?.compactFirstPopupSequenceSummary).toBeDefined();
-    expect(result.packaged.handoffMetadata.compactFirstPopupSequenceSummary).toBeUndefined();
-    // What that surface does have is the progress pair.
+    const summary = result.packaged.handoffMetadata.compactFirstPopupSequenceSummary;
+    expect(summary?.currentBodyId).toBe('body-1');
+    expect(summary?.bodyRevision).toBe(1);
+    expect(ACCEPTED.handoffMetadata?.compactFirstPopupSequenceSummary?.currentBodyId).toBe('body-0');
+    // What that surface actually shows is the progress pair.
     expect(result.packaged.progress).toEqual({ done: 1, total: 4 });
+  });
+
+  it('sets both of the body\'s text fields, which are required to be equal', () => {
+    // The body carries its text twice. Setting one leaves a result whose rendered body is item N
+    // and whose text is still the first prompt — the packager serving the wrong prompt while every
+    // field it was asked about looked right.
+    const result = packagePromptEnhancementSequenceContinuationV1(input());
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const { renderedPromptBody, text } = result.packaged.result.currentBody;
+    expect(renderedPromptBody).toBe('The wording of item 1.');
+    expect(text).toBe(renderedPromptBody);
   });
 });
