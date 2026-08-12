@@ -24,11 +24,17 @@ as the user wrote it and everything around it is yours.`;
 /** 2 — the slice is the user's, character for character. */
 const SECTION_2_VERBATIM = `SECTION 2 — THE USER'S OWN WORDS
 
-Each item comes with a slice: the exact characters the user typed for that piece of work. It appears
-in your prompt EXACTLY as given — not tidied, not re-punctuated, not shortened, not expanded.
+A task item comes with a slice: the exact characters the user typed for that piece of work. It
+appears in that prompt EXACTLY as given — not tidied, not re-punctuated, not shortened, not
+expanded. The final recap carries the slices it covers the same way.
 
-Everything else in the prompt is your writing. The two are not mixed: you do not paraphrase inside
-the slice and you do not quote the user for the parts that are yours.`;
+Everything else in those prompts is your writing. The two are not mixed: you do not paraphrase
+inside the slice and you do not quote the user for the parts that are yours.
+
+A CONFIRMATION CARRIES NONE OF THE USER'S WORDS. Not its own slice — it has none — and not any
+other item's. Write the question in your own words. This is not a preference: an item that
+reproduces the user's wording inside a confirmation is rejected, and asking about the same work
+without quoting it is always possible.`;
 
 /**
  * The two clauses a confirmation is malformed without, as the exact sentences to reproduce.
@@ -54,6 +60,10 @@ export const PROMPT_ENHANCEMENT_SEQUENCE_CONFIRMATION_CLAUSES_V1 = {
 
 /** 3 — the three parts, both classes, the format, and the enforcement rules that travel with it. */
 const SECTION_3_CONFIRMATION = `SECTION 3 — WHAT A CONFIRMATION PROMPT MUST CONTAIN
+
+A confirmation is the question and the three parts below, and nothing else. No section of guidance,
+no rewrite, no slice of the user's words. Everything added to it is something the reader has to get
+past before the question, and the answer is worth exactly as much as the attention the question got.
 
 Every confirmation carries THREE things besides the question:
 

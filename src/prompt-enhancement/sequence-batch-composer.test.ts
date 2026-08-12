@@ -519,6 +519,23 @@ describe('sequence batch — the prompt carries what the checks look for', () =>
     expect(prompt).toContain('Reproduce 2 and 3 in those words');
   });
 
+  it('tells the composer the rules the checks enforce, so it is not caught by them', () => {
+    // A check with no matching instruction is one the composer hits by accident: three repairs and
+    // the sequence lost, for output that followed the only instruction it had.
+    //
+    // Ruling C — a confirmation carries none of the user's words. The verbatim section said the
+    // opposite by implication, since a confirmation arrives in the same list as the task items.
+    expect(prompt).toContain('A CONFIRMATION CARRIES NONE OF THE USER');
+    expect(prompt).toContain('asking about the same work');
+    // And a confirmation carries no section either. Padding a question is the dilution the whole
+    // confirmation layer is built against.
+    expect(prompt).toContain('No section of guidance,');
+    expect(prompt).toContain('no rewrite, no slice of the user');
+    // The verbatim rule still says which items DO carry the user's words.
+    expect(prompt).toContain('A task item comes with a slice');
+    expect(prompt).toContain('The final recap carries the slices it covers the same way');
+  });
+
   it('holds both classes to the two kinds that take them, and frees the cross', () => {
     // A cross exists to come at the work from another angle. Handed the same two questions as the
     // double it follows, it stops being a different angle and becomes a second double.
