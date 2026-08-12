@@ -8,6 +8,7 @@ import {
 import {
   validatePromptEnhancementSequencePayloadV1,
   type PromptEnhancementSequenceOffsetRangeV1,
+  type PromptEnhancementSequenceOfferDispositionV1,
   type PromptEnhancementSequencePayloadV1,
 } from '../prompt-enhancement/sequence-payload.js';
 
@@ -110,6 +111,94 @@ export function upsertPendingPromptSequence(
   );
   saveStore(store);
   return true;
+}
+
+/**
+ * What the user did with an offer they did NOT take. `accepted` is deliberately absent: that case
+ * is a real sequence and is written by intake on send, with its items.
+ */
+export type PromptEnhancementSequenceDeclinedDispositionV1 =
+  Exclude<PromptEnhancementSequenceOfferDispositionV1, 'accepted'>;
+
+/**
+ * Record that a sequence was offered and not taken.
+ *
+ * The row is a terminal stub: the sequence id and the disposition, and nothing else. No items, no
+ * directives, no original text — so it introduces no class of data that was not already stored, and
+ * a value describing a decision is not prompt content.
+ *
+ * This exists because the ordinary writer cannot express it. That one validates the runtime state
+ * first, and a valid state carries at least two items; a stub has none, so the write would be
+ * refused and return false. Rather than loosen a bound that protects real sequences, the stub gets
+ * its own writer and the bound stays where it is.
+ *
+ * Terminal status keeps the stub off the active path — the active read filters on the two live
+ * statuses, so a stub is never selected and therefore never reaches that read's scrub. `cancelled`
+ * rather than `abandoned`, and the difference is a rule rather than a preference: abandonment must
+ * never be inferred from a closed popup, and a declined offer IS a closed popup. The distinction
+ * lives in the disposition; the status only keeps the row out of the way.
+ *
+ * Existing rows for OTHER sequences are left alone. A stub is not an active sequence, so it does
+ * not displace one — a declined offer while another sequence is still running must not end it.
+ */
+export function recordPromptEnhancementSequenceOfferDeclined(
+  store: Store,
+  params: {
+    projectRoot:   string;
+    sessionId:     string;
+    sequenceId:    string;
+    enhancementId: string;
+    disposition:   PromptEnhancementSequenceDeclinedDispositionV1;
+  },
+): boolean {
+  if (params.disposition !== 'rejected' && params.disposition !== 'not_engaged') return false;
+  for (const value of [params.projectRoot, params.sessionId, params.sequenceId, params.enhancementId]) {
+    if (typeof value !== 'string' || value.trim().length === 0) return false;
+  }
+
+  // Written once, at the moment the popup closed. A second write that disagrees is refused rather
+  // than merged: it records what the user did with the OFFER, and nothing later changes that.
+  const prior = storedFrozenFields(store, params.projectRoot, params.sequenceId);
+  if (prior) return prior.offerDisposition === params.disposition;
+
+  const now = Date.now();
+  store.db.run(
+    `INSERT INTO pending_prompt_sequences
+       (project_root, session_id, sequence_id, enhancement_id, item_count, current_item_index,
+        status, last_action_id, created_at, updated_at,
+        items_json, prompt_directives_json, suggested_next_prompt_policy, original_length,
+        offer_disposition)
+     VALUES (?, ?, ?, ?, 0, 0, 'cancelled', NULL, ?, ?, '[]', '[]', 'not_generated', 0, ?)`,
+    [
+      params.projectRoot,
+      params.sessionId,
+      params.sequenceId,
+      params.enhancementId,
+      now,
+      now,
+      params.disposition,
+    ],
+  );
+  saveStore(store);
+  return true;
+}
+
+/**
+ * Read what the user did with a sequence offer, or null when no row was written.
+ *
+ * A sequence offer with no row was never resolved through any modelled popup outcome. The likeliest
+ * cause is that the popup process died; an unmodelled event is also possible. This is NOT inferred
+ * abandonment and must not be counted as one — the three written values are total over every state
+ * the popup can return, so an offer with no row is unambiguous about having no answer, and says
+ * nothing about the user having walked away.
+ */
+export function getPromptEnhancementSequenceOfferDisposition(
+  store: Store,
+  projectRoot: string,
+  sequenceId: string,
+): PromptEnhancementSequenceOfferDispositionV1 | null {
+  const stored = storedFrozenFields(store, projectRoot, sequenceId);
+  return stored ? (stored.offerDisposition as PromptEnhancementSequenceOfferDispositionV1) : null;
 }
 
 /**

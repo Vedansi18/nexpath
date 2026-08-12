@@ -5,6 +5,8 @@ import {
   getActivePendingPromptSequence,
   updatePendingPromptSequenceState,
   deletePendingPromptSequencesForProject,
+  recordPromptEnhancementSequenceOfferDeclined,
+  getPromptEnhancementSequenceOfferDisposition,
 } from './pending-sequences.js';
 import { deletePromptEnhancementProjectRows } from './prompt-enhancement.js';
 import {
@@ -320,5 +322,79 @@ describe('pending-sequences store', () => {
       .toBe(false);
     expect(getActivePendingPromptSequence(store, PROJECT, 'sess-1')?.payload.offerDisposition)
       .toBe('accepted');
+  });
+  it('writes a declined offer as a terminal stub with nothing but the id and the decision', () => {
+    expect(recordPromptEnhancementSequenceOfferDeclined(store, {
+      projectRoot: PROJECT, sessionId: 'sess-1', sequenceId: 'seq-1', enhancementId: 'enh-1',
+      disposition: 'not_engaged',
+    })).toBe(true);
+    const row = store.db.exec(
+      `SELECT item_count, current_item_index, status, last_action_id, items_json,
+              prompt_directives_json, suggested_next_prompt_policy, original_length, offer_disposition
+       FROM pending_prompt_sequences`,
+    )[0].values[0];
+    expect(row).toEqual([0, 0, 'cancelled', null, '[]', '[]', 'not_generated', 0, 'not_engaged']);
+  });
+
+  it('uses cancelled, never abandoned — a closed popup is not inferred abandonment', () => {
+    recordPromptEnhancementSequenceOfferDeclined(store, {
+      projectRoot: PROJECT, sessionId: 'sess-1', sequenceId: 'seq-1', enhancementId: 'enh-1',
+      disposition: 'rejected',
+    });
+    const status = store.db.exec('SELECT status FROM pending_prompt_sequences')[0].values[0][0];
+    expect(status).toBe('cancelled');
+    expect(status).not.toBe('abandoned');
+  });
+
+  it('refuses anything outside the two declined values, and blank identifiers', () => {
+    // `accepted` is not a stub: that case is a real sequence written by intake with its items.
+    expect(recordPromptEnhancementSequenceOfferDeclined(store, {
+      projectRoot: PROJECT, sessionId: 'sess-1', sequenceId: 'seq-1', enhancementId: 'enh-1',
+      disposition: 'accepted' as never,
+    })).toBe(false);
+    expect(recordPromptEnhancementSequenceOfferDeclined(store, {
+      projectRoot: PROJECT, sessionId: '  ', sequenceId: 'seq-1', enhancementId: 'enh-1',
+      disposition: 'rejected',
+    })).toBe(false);
+    expect(store.db.exec('SELECT COUNT(*) FROM pending_prompt_sequences')[0].values[0][0]).toBe(0);
+  });
+
+  it('keeps the stub off the active path, so the scrub can never reach it', () => {
+    // The bounds a servable row must satisfy would refuse an empty stub, and the read would delete
+    // it as corrupt. Terminal status is what keeps it out of that read entirely.
+    recordPromptEnhancementSequenceOfferDeclined(store, {
+      projectRoot: PROJECT, sessionId: 'sess-1', sequenceId: 'seq-1', enhancementId: 'enh-1',
+      disposition: 'rejected',
+    });
+    expect(getActivePendingPromptSequence(store, PROJECT, 'sess-1')).toBeNull();
+    expect(store.db.exec('SELECT COUNT(*) FROM pending_prompt_sequences')[0].values[0][0]).toBe(1);
+  });
+
+  it('is written once — a disagreeing second write is refused, an identical one is a no-op', () => {
+    const args = {
+      projectRoot: PROJECT, sessionId: 'sess-1', sequenceId: 'seq-1', enhancementId: 'enh-1',
+    } as const;
+    expect(recordPromptEnhancementSequenceOfferDeclined(store, { ...args, disposition: 'rejected' })).toBe(true);
+    expect(recordPromptEnhancementSequenceOfferDeclined(store, { ...args, disposition: 'not_engaged' })).toBe(false);
+    expect(recordPromptEnhancementSequenceOfferDeclined(store, { ...args, disposition: 'rejected' })).toBe(true);
+    expect(store.db.exec('SELECT COUNT(*) FROM pending_prompt_sequences')[0].values[0][0]).toBe(1);
+    expect(getPromptEnhancementSequenceOfferDisposition(store, PROJECT, 'seq-1')).toBe('rejected');
+  });
+
+  it('does not end a running sequence when a different offer is declined', () => {
+    // The ordinary writer replaces every row for the project. A stub must not, or declining one
+    // offer would silently end an unrelated sequence that is still in flight.
+    expect(upsertPendingPromptSequence(store, createdState({ sequenceId: 'live' }), payload())).toBe(true);
+    expect(recordPromptEnhancementSequenceOfferDeclined(store, {
+      projectRoot: PROJECT, sessionId: 'sess-1', sequenceId: 'declined-one', enhancementId: 'enh-2',
+      disposition: 'not_engaged',
+    })).toBe(true);
+    expect(getActivePendingPromptSequence(store, PROJECT, 'sess-1')).toMatchObject({ sequenceId: 'live' });
+    expect(getPromptEnhancementSequenceOfferDisposition(store, PROJECT, 'declined-one')).toBe('not_engaged');
+  });
+
+  it('reads null for an offer that has no row at all', () => {
+    // The absence is the record: no modelled popup outcome was reached. It is not abandonment.
+    expect(getPromptEnhancementSequenceOfferDisposition(store, PROJECT, 'never-written')).toBeNull();
   });
 });
