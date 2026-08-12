@@ -263,6 +263,25 @@ describe('sequence batch — confirmations', () => {
     expect((await withConfirmation(shouted, 'double_confirmation')).ok).toBe(true);
   });
 
+  it('lets a confirmation name its subject when the slice is a single word', async () => {
+    // "Fix the login bug, then deploy" gives a slice of "deploy", and a question about that work
+    // cannot avoid the word. Under plain containment this was rejected, repaired three times, and
+    // the sequence lost — for the only sentence the rule leaves available.
+    const conf = 'Did the deploy finish without a rollback?\n\nReply YES or NO only, on its own'
+      + ' line. Do not make any assumptions; confirm at ground level by reading the actual source.';
+    const result = await runPromptEnhancementSequenceBatchV1(
+      input([
+        task(1, 'deploy', { authorityMode: 'execute_requested' }),
+        task(2, null, { itemKind: 'binary_confirmation', complexity: null, complexityReason: 'why', authorityMode: null }),
+      ], { localOriginalText: 'Fix the login bug, then deploy' }),
+      clientReturning(replyWith([
+        { dependencyOrder: 1, wording: 'deploy — push the built artefact to production.' },
+        { dependencyOrder: 2, wording: conf },
+      ])).client,
+    );
+    expect(result.ok).toBe(true);
+  });
+
   it('refuses one carrying the user\'s original wording', async () => {
     // Strictly none — and any task's slice, not only its own, which it does not have.
     expect(await withConfirmation(binaryWording(`Did you ${SLICE_TWO}?`)))

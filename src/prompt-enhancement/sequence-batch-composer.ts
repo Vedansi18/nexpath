@@ -19,6 +19,7 @@ import {
 import {
   isPromptEnhancementSequenceOffsetRangeV1,
   promptEnhancementSequenceTextHasTokenV1,
+  promptEnhancementSequenceTextReproducesV1,
   type PromptEnhancementSequenceItemKindV1,
   type PromptEnhancementSequenceItemV1,
   type PromptEnhancementSequenceOffsetRangeV1,
@@ -197,8 +198,13 @@ function checkBatchOutput(
     if (isConfirmation(item.itemKind)) {
       // A confirmation carries no original wording at all. Strictly — so any task's slice appearing
       // in one is the failure, not only its own, which it does not have.
+      //
+      // Reproduction, not containment. A slice is often a single word, and a question about that
+      // work cannot avoid naming it: rejecting "did the deploy finish" because the slice was
+      // "deploy" refuses the only sentence the rule leaves available.
       for (const other of input.items) {
-        if (other.sliceText !== null && other.sliceText.length > 0 && text.includes(other.sliceText)) {
+        if (other.sliceText !== null
+          && promptEnhancementSequenceTextReproducesV1(text, other.sliceText)) {
           return {
             ok: false,
             reason: 'confirmation_carries_original_text',
@@ -208,7 +214,7 @@ function checkBatchOutput(
       }
       // On a confirmation a directive constrains what may be asked; it is never reproduced as text.
       for (const directive of input.promptDirectives) {
-        if (directive.length > 0 && text.includes(directive)) {
+        if (promptEnhancementSequenceTextReproducesV1(text, directive)) {
           return {
             ok: false,
             reason: 'confirmation_reproduces_directive_text',

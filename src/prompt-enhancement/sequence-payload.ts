@@ -269,6 +269,25 @@ export function promptEnhancementSequenceTextHasTokenV1(text: string, token: str
   return new RegExp(`\\b${escaped}\\b`).test(text);
 }
 
+/**
+ * Does `text` REPRODUCE `span` — the user's own wording appearing inside generated output?
+ *
+ * A single word is not reproduction. A slice is the user's wording for one piece of work and is
+ * often one word — "Fix the login bug, then deploy" gives a slice of `deploy` — and a question
+ * about that work can barely be written without naming it. A rule against carrying the user's
+ * wording that rejects a sentence for using its subject is refusing the only sentence that
+ * satisfies it.
+ *
+ * A phrase is different: two of the user's words, in the user's order, did not arrive by
+ * coincidence. That is the distinction the rule itself rests on, which is why the line is drawn
+ * between a word and a phrase rather than at some number of characters.
+ */
+export function promptEnhancementSequenceTextReproducesV1(text: string, span: string): boolean {
+  const trimmed = span.trim();
+  if (trimmed.length === 0 || !/\s/.test(trimmed)) return false;
+  return text.includes(trimmed);
+}
+
 const fail = (
   reasonCode: PromptEnhancementSequencePayloadReasonCodeV1,
   itemIndex?: number,
