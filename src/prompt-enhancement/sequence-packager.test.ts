@@ -51,6 +51,12 @@ const ACCEPTED = {
     originalPromptText: 'the original',
   },
   disposition: 'fallback_to_original',
+  validationDecisionId: 'decision-for-the-first-body',
+  composerBoundary: {
+    composerRunId: 'run-0',
+    sentPromptOrigin: 'user_authored_original_only',
+    nexpathGeneratedPromptRef: 'ref-0',
+  },
   safetySummary: { sensitiveActionState: 'confirmation_required' },
   handoffMetadata: {
     handoffKind: 'first_prompt_handoff_candidate',
@@ -78,6 +84,8 @@ const input = (
   bodyRevision: 1,
   currentBodyId: 'body-1',
   nexpathGeneratedPromptRef: 'ref-1',
+  validationDecisionId: 'decision-for-item-1',
+  composerRunId: 'run-batch',
   ...overrides,
 });
 
@@ -141,6 +149,32 @@ describe('sequence packager — what it must never invent', () => {
     const blank = [item(0), item(1, { generatedWording: '   ' }), item(2), item(3)];
     expect(packagePromptEnhancementSequenceContinuationV1(input({ items: blank })))
       .toEqual({ ok: false, refusal: 'item_wording_missing' });
+  });
+
+  it('moves the identity that names THIS body with the body', () => {
+    // The decision id is bound to the body id and the revision as a triple. Swapping two and
+    // keeping the third leaves the result naming a decision the first prompt was cleared under.
+    const result = packagePromptEnhancementSequenceContinuationV1(input());
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.packaged.result.validationDecisionId).toBe('decision-for-item-1');
+    expect(result.packaged.result.validationDecisionId).not.toBe(ACCEPTED.validationDecisionId);
+    // The batch produced this text; the accepted result's run wrote the first prompt.
+    expect(result.packaged.result.currentBody.composerRunId).toBe('run-batch');
+    expect(result.packaged.result.composerBoundary.composerRunId).toBe('run-batch');
+  });
+
+  it('keeps the two copies of the origin saying the same thing', () => {
+    // It exists on the body and on the composer boundary. One updated and the other not is worse
+    // than neither: whichever a reader consults decides whether a continuation re-enters the
+    // planner, and nothing says which wins.
+    const result = packagePromptEnhancementSequenceContinuationV1(input());
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const { currentBody, composerBoundary } = result.packaged.result;
+    expect(composerBoundary.sentPromptOrigin).toBe(currentBody.sentPromptOrigin);
+    expect(composerBoundary.sentPromptOrigin).toBe('sequence_handoff_owned_body');
+    expect(composerBoundary.nexpathGeneratedPromptRef).toBe(currentBody.nexpathGeneratedPromptRef);
   });
 
   it('marks the body as sequence-owned, never as the user\'s', () => {

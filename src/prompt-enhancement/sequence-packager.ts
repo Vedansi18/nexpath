@@ -61,6 +61,18 @@ export interface PromptEnhancementSequencePackagerInputV1 {
   bodyRevision: number;
   currentBodyId: string;
   nexpathGeneratedPromptRef: string;
+  /**
+   * The safety decision identity for THIS body revision.
+   *
+   * It is bound to the body id and the revision as a triple, so inheriting it while swapping the
+   * other two leaves the result naming a decision that belongs to the first prompt. It arrives with
+   * the body for the same reason the verdict does: the packager reports both and produces neither.
+   */
+  validationDecisionId: string;
+  /**
+   * The run that produced THIS text — the batch, not the composer run that wrote the first prompt.
+   */
+  composerRunId: string;
 }
 
 /** The two kinds a continuation popup accepts. Anything else is refused at the popup boundary. */
@@ -143,15 +155,27 @@ export function packagePromptEnhancementSequenceContinuationV1(
     // A continuation popup exists to show the current body. The accepted result's disposition was a
     // decision about a different body, and left as it was every continuation is refused.
     disposition: 'show_current_body',
+    // Names the decision for the revision below, not the one the first prompt was cleared under.
+    validationDecisionId: input.validationDecisionId,
     currentBody: {
       ...input.acceptedResult.currentBody,
       currentBodyId: input.currentBodyId,
       bodyRevision: input.bodyRevision,
+      composerRunId: input.composerRunId,
       // The stored wording, unchanged. This is the only field the item list supplies directly, and
       // reading it is the entirety of what "packaging" means.
       renderedPromptBody: item.generatedWording,
       // Not bookkeeping: this is the one bit that says Nexpath wrote this body. Marked as the
       // user's, a continuation re-enters the planner and plans a sequence out of our own writing.
+      sentPromptOrigin: 'sequence_handoff_owned_body',
+      nexpathGeneratedPromptRef: input.nexpathGeneratedPromptRef,
+    },
+    // The composer boundary carries its OWN copy of the origin, and one updated while the other is
+    // not is worse than neither: whichever a reader consults then decides whether a continuation
+    // re-enters the planner, and nothing says which wins. They move together.
+    composerBoundary: {
+      ...input.acceptedResult.composerBoundary,
+      composerRunId: input.composerRunId,
       sentPromptOrigin: 'sequence_handoff_owned_body',
       nexpathGeneratedPromptRef: input.nexpathGeneratedPromptRef,
     },
