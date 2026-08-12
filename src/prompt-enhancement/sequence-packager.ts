@@ -222,6 +222,19 @@ export function packagePromptEnhancementSequenceContinuationV1(
     // The verdict the item carries, passed through. Not recomputed at the Stop either: re-running a
     // check on frozen text can only agree with itself or contradict itself, and a contradiction has
     // no defined handling.
+    // The third entry in the same origin row as the two fields above, and the one that carries the
+    // echo guard. A continuation body Nexpath wrote, still described as the first prompt's origin,
+    // is the same bit read from a different place and answered differently.
+    generatedOrigin: {
+      ...input.acceptedResult.generatedOrigin,
+      bodyId: input.currentBodyId,
+      bodyRevision: input.bodyRevision,
+      generatedOriginState: 'pe_generated_body',
+      echoRecursionGuard: {
+        ...input.acceptedResult.generatedOrigin.echoRecursionGuard,
+        sourcePromptEchoState: 'pe_generated_echo',
+      },
+    },
     validationGraph: item.itemValidationGraph,
     safetySummary: input.itemSafetySummary,
     validationSummary: input.itemValidationSummary,

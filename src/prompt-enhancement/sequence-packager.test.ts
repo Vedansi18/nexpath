@@ -78,6 +78,13 @@ const ACCEPTED = {
     { actionType: 'use_original', label: 'Use original', currentBodyId: 'body-0', bodyRevision: 0 },
     { actionType: 'close', label: 'Close', currentBodyId: 'body-0', bodyRevision: 0 },
   ],
+  generatedOrigin: {
+    generatedOriginId: 'origin-0',
+    generatedOriginState: 'user_original',
+    bodyId: 'body-0',
+    bodyRevision: 0,
+    echoRecursionGuard: { sourcePromptEchoState: 'not_echo', lastInjectedPromptIsAuthority: false },
+  },
   routeDecision: { routeId: 'route-1' },
   bodyPlan: { planId: 'plan-1' },
   validationGraph: { safetyState: { fromTheFirstBody: true } },
@@ -400,5 +407,36 @@ describe('sequence packager — one verdict, one metadata', () => {
     if (!result.ok) return;
     expect(result.packaged.result.handoffMetadata).toBe(result.packaged.handoffMetadata);
     expect(result.packaged.result.handoffMetadata?.currentBodyId).toBe('body-1');
+  });
+});
+
+describe('sequence packager — the origin row has three entries', () => {
+  it('re-points the generated-origin metadata with the body and the echo guard', () => {
+    // The two string fields on the body and the boundary were done first; this is the third entry
+    // in the same row, and the one carrying the echo guard - a body Nexpath wrote, still described
+    // as the first prompt origin, is the same bit read from a different place and answered
+    // differently.
+    const result = packagePromptEnhancementSequenceContinuationV1(input());
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const { generatedOrigin, currentBody } = result.packaged.result;
+    expect(generatedOrigin.bodyId).toBe(currentBody.currentBodyId);
+    expect(generatedOrigin.bodyRevision).toBe(currentBody.bodyRevision);
+    expect(generatedOrigin.generatedOriginState).toBe('pe_generated_body');
+    expect(generatedOrigin.echoRecursionGuard.sourcePromptEchoState).toBe('pe_generated_echo');
+    // The accepted result said the opposite of all four, which is what makes this test mean something.
+    expect(ACCEPTED.generatedOrigin.generatedOriginState).toBe('user_original');
+    expect(ACCEPTED.generatedOrigin.echoRecursionGuard.sourcePromptEchoState).toBe('not_echo');
+  });
+
+  it('agrees with the other two entries in that row', () => {
+    const result = packagePromptEnhancementSequenceContinuationV1(input());
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const { generatedOrigin, currentBody, composerBoundary } = result.packaged.result;
+    // Three places, one answer: this body was written by Nexpath, as part of a sequence.
+    expect(currentBody.sentPromptOrigin).toBe('sequence_handoff_owned_body');
+    expect(composerBoundary.sentPromptOrigin).toBe('sequence_handoff_owned_body');
+    expect(generatedOrigin.generatedOriginState).toBe('pe_generated_body');
   });
 });
