@@ -230,6 +230,28 @@ Priority is the user's own marking, however they phrased it — the property is 
 the work as mandatory or as droppable, not whether they used any particular word for it.`;
 
 /**
+ * 6 — the planner checks its own plan before returning it.
+ *
+ * Its own section because it is a rule about the plan's content, not about the form of the reply,
+ * and the error it names is one no check outside the model can find: whether an item assumes a
+ * state an earlier item produced is a question about meaning, and looking for the phrasing instead
+ * would be the text matching this whole layer is built to avoid.
+ */
+const SECTION_6_SELF_CHECK = `SECTION 6 — CHECK YOUR OWN PLAN BEFORE YOU RETURN IT
+
+Read the list back in order, the way the user will receive it: one prompt at a time, each arriving
+after the ones before it have been carried out.
+
+What you are looking for is an item that assumes a state no earlier item produced. "Now that the
+schema migration is done, update the queries" is correct when an earlier item migrated the schema.
+It is a serious error when none did — the prompt asserts something that never happened, to an agent
+with no way to know it never happened.
+
+Back-references are not the problem. A back-reference to something no earlier item established is.
+
+Fix what you find and return the corrected plan. Do not return a plan you already know is wrong.`;
+
+/**
  * What the reply must contain.
  *
  * The three safety fields are absent on purpose: they are derived from the slice by the machinery
@@ -284,7 +306,36 @@ export const PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_SECTIONS_V1: readonly string[] 
   SECTION_3_SLICING,
   SECTION_4_CONFIRMATION,
   SECTION_5_BOUNDS,
+  SECTION_6_SELF_CHECK,
 ];
+
+/**
+ * What a rejected plan is told, so the next attempt corrects rather than starts again.
+ *
+ * It names the one item that failed and asks for the rest back unchanged. Repair is model-level —
+ * there is no partial-response protocol here and there should not be one; a returned plan is a
+ * whole plan, and asking for the whole plan with one item corrected is what "only the failed item
+ * is regenerated" means when the thing doing the regenerating is a model.
+ *
+ * This happens before the user has accepted anything. Once a sequence is active an item is never
+ * regenerated at all — the two rules only look alike because both mention regenerating.
+ */
+export function buildPromptEnhancementSequencePlannerRepairInstructionV1(
+  reason: string,
+  itemIndex: number | undefined,
+): string {
+  const where = itemIndex === undefined
+    ? 'The plan as a whole was rejected.'
+    : `Item ${itemIndex} was rejected.`;
+  return [
+    'YOUR PREVIOUS PLAN WAS NOT ACCEPTED.',
+    '',
+    `${where} The check that rejected it: ${reason}.`,
+    '',
+    'Return the whole plan again with that corrected, and every other item exactly as you had it.',
+    'Items are numbered from 0, and item 0 is the first_task.',
+  ].join('\n');
+}
 
 /** The output shape is appended after the five, so the rules are read before the form. */
 export const PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_OUTPUT_SECTION_V1 = SECTION_OUTPUT;

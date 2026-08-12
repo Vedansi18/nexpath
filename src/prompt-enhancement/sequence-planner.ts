@@ -5,7 +5,10 @@ import {
   PROMPT_ENHANCEMENT_COST_TIMEOUT_MS_V1,
   PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_OUTPUT_TOKEN_CAP_V1,
 } from './cost-observability.js';
-import { buildPromptEnhancementSequencePlannerSystemPromptV1 } from './sequence-planner-prompt.js';
+import {
+  buildPromptEnhancementSequencePlannerRepairInstructionV1,
+  buildPromptEnhancementSequencePlannerSystemPromptV1,
+} from './sequence-planner-prompt.js';
 import {
   promptEnhancementSequencePlannerMayRunForProjectV1,
   promptEnhancementSequencePolicyForOutcomeV1,
@@ -154,6 +157,31 @@ export type PromptEnhancementSequencePlannerFailureReasonV1 =
 export type PromptEnhancementSequencePlannerResultV1 =
   | { ok: true; output: PromptEnhancementSequencePlannerOutputV1 }
   | { ok: false; reason: PromptEnhancementSequencePlannerFailureReasonV1 };
+
+/**
+ * One attempt's result. The failing item's index rides along INTERNALLY so the repair can name it;
+ * it is not on the public result, where nothing needs it and it would only invite a caller to try
+ * fixing the item itself.
+ */
+type PlannerAttemptV1 =
+  | { ok: true; output: PromptEnhancementSequencePlannerOutputV1 }
+  | { ok: false; reason: PromptEnhancementSequencePlannerFailureReasonV1; itemIndex?: number };
+
+/**
+ * How many times a plan that came back wrong may be sent back for repair.
+ *
+ * Repairs only. A provider that failed or timed out is not retried here at all — that is a
+ * different failure with a different answer, and retrying it would stack its whole wait again in
+ * front of a user who is already waiting. Even bounded to repairs this is the slowest path the
+ * feature has, which is worth knowing when the planner's timeout is finally measured rather than
+ * guessed.
+ */
+export const PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_MAX_REPAIRS_V1 = 3;
+
+/** The failures that are the call's, not the plan's. Never repaired: there is nothing to repair. */
+function isProviderFailure(reason: PromptEnhancementSequencePlannerFailureReasonV1): boolean {
+  return reason === 'provider_error' || reason === 'timeout' || reason === 'no_key';
+}
 
 /**
  * The deterministic route, as much of it as the planner has any use for.
@@ -466,48 +494,16 @@ function sliceTextFor(
 }
 
 /**
- * Run the planner.
+ * One planning attempt: ask, parse, and check.
  *
- * One call per candidate prompt. A thrown provider error is NOT retried here — a slow retry in
- * front of a waiting user buys less than a fast, typed refusal, and the repair loop for a reply
- * that arrives but does not hold together is specified separately from this call.
+ * `repairInstruction` is what a previous attempt's rejection said, sent as a further message. On the
+ * first attempt there is none.
  */
-export async function runPromptEnhancementSequencePlannerV1(
+async function attemptPlan(
+  openai: PromptEnhancementSequencePlannerClientV1,
   input: PromptEnhancementSequencePlannerInputV1,
-  client?: PromptEnhancementSequencePlannerClientV1,
-): Promise<PromptEnhancementSequencePlannerResultV1> {
-  // Before anything is spent. Every one of these is a refusal, and the config gate in particular is
-  // silent by contract — an off gate produces no plan and no explanation of why.
-  const entry = promptEnhancementSequencePlannerMayRunForProjectV1(
-    input.db,
-    input.projectRoot,
-    input.entry,
-  );
-  if (!entry.mayRun) return { ok: false, reason: entry.refusal };
-
-  // The positions that come back index the LOCAL original, and they are chosen by reading the
-  // context. So the context has to be a text those positions mean the same thing in, and the
-  // redaction that stands between the two preserves length precisely so that it is: a marker is
-  // padded to the width of what it replaced, character for character.
-  //
-  // Equal length is the necessary condition, not a proof of alignment — two different texts can be
-  // the same length. What it does catch is the case that actually breaks this: a context assembled
-  // from excerpts and refs rather than redacted in place. There, position 20 of what was read is
-  // not position 20 of the original, every returned offset lands in range, and the item carries a
-  // verbatim slice of words nobody chose. Refusing here costs a call; not refusing costs the one
-  // guarantee the offsets exist to give.
-  if (input.promptContext.length !== input.localOriginalText.length) {
-    return { ok: false, reason: 'context_does_not_index_original' };
-  }
-
-  let openai: PromptEnhancementSequencePlannerClientV1;
-  try {
-    // With no injected client and no key this throws, which is a call that never happened.
-    openai = client ?? (new OpenAI() as unknown as PromptEnhancementSequencePlannerClientV1);
-  } catch {
-    return { ok: false, reason: 'no_key' };
-  }
-
+  repairInstruction: string | undefined,
+): Promise<PlannerAttemptV1> {
   let raw: string | null | undefined;
   try {
     const response = await openai.chat.completions.create(
@@ -519,6 +515,11 @@ export async function runPromptEnhancementSequencePlannerV1(
         messages: [
           { role: 'system', content: buildPromptEnhancementSequencePlannerSystemPromptV1() },
           { role: 'user', content: buildPlannerUserMessageV1(input.promptContext, input.route) },
+          // The request stays first and unchanged across repairs: what failed is a correction to
+          // apply to the plan, never a change to what was asked for.
+          ...(repairInstruction === undefined
+            ? []
+            : [{ role: 'user' as const, content: repairInstruction }]),
         ],
         response_format: { type: 'json_object' },
       },
@@ -587,7 +588,9 @@ export async function runPromptEnhancementSequencePlannerV1(
     originalLength,
     stage: 'plan',
   });
-  if (!structure.ok) return { ok: false, reason: structure.reasonCode };
+  if (!structure.ok) {
+    return { ok: false, reason: structure.reasonCode, itemIndex: structure.itemIndex };
+  }
   if (parsed.promptDirectives.some(
     (range) => !isPromptEnhancementSequenceOffsetRangeV1(range, originalLength),
   )) {
@@ -612,4 +615,68 @@ export async function runPromptEnhancementSequencePlannerV1(
       },
     },
   };
+}
+
+/**
+ * Run the planner.
+ *
+ * One call, then up to three repairs of a plan that came back wrong. A provider failure is not
+ * among the things repaired: nothing arrived to correct, and asking again would stack the whole
+ * wait a second time in front of a user who is already waiting for it.
+ *
+ * Repair happens BEFORE the user accepts anything. Once a sequence is active an item is never
+ * regenerated — the two rules read as contradictory only if the moment each applies to is dropped.
+ */
+export async function runPromptEnhancementSequencePlannerV1(
+  input: PromptEnhancementSequencePlannerInputV1,
+  client?: PromptEnhancementSequencePlannerClientV1,
+): Promise<PromptEnhancementSequencePlannerResultV1> {
+  // Before anything is spent. Every one of these is a refusal, and the config gate in particular is
+  // silent by contract — an off gate produces no plan and no explanation of why.
+  const entry = promptEnhancementSequencePlannerMayRunForProjectV1(
+    input.db,
+    input.projectRoot,
+    input.entry,
+  );
+  if (!entry.mayRun) return { ok: false, reason: entry.refusal };
+
+  // The positions that come back index the LOCAL original, and they are chosen by reading the
+  // context. So the context has to be a text those positions mean the same thing in, and the
+  // redaction that stands between the two preserves length precisely so that it is: a marker is
+  // padded to the width of what it replaced, character for character.
+  //
+  // Equal length is the necessary condition, not a proof of alignment — two different texts can be
+  // the same length. What it does catch is the case that actually breaks this: a context assembled
+  // from excerpts and refs rather than redacted in place. There, position 20 of what was read is
+  // not position 20 of the original, every returned offset lands in range, and the item carries a
+  // verbatim slice of words nobody chose. Refusing here costs a call; not refusing costs the one
+  // guarantee the offsets exist to give.
+  if (input.promptContext.length !== input.localOriginalText.length) {
+    return { ok: false, reason: 'context_does_not_index_original' };
+  }
+
+  let openai: PromptEnhancementSequencePlannerClientV1;
+  try {
+    // With no injected client and no key this throws, which is a call that never happened.
+    openai = client ?? (new OpenAI() as unknown as PromptEnhancementSequencePlannerClientV1);
+  } catch {
+    return { ok: false, reason: 'no_key' };
+  }
+
+  let repairInstruction: string | undefined;
+  for (let repair = 0; ; repair += 1) {
+    const attempt = await attemptPlan(openai, input, repairInstruction);
+    if (attempt.ok) return attempt;
+    // Nothing came back to correct, so there is nothing a repair could say.
+    if (isProviderFailure(attempt.reason)) return { ok: false, reason: attempt.reason };
+    // Out of repairs. After this it is not a retry problem: no sequence is offered and the prompt
+    // goes on as an ordinary single-prompt enhancement, which is unaffected by any of this.
+    if (repair >= PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_MAX_REPAIRS_V1) {
+      return { ok: false, reason: attempt.reason };
+    }
+    repairInstruction = buildPromptEnhancementSequencePlannerRepairInstructionV1(
+      attempt.reason,
+      attempt.itemIndex,
+    );
+  }
 }

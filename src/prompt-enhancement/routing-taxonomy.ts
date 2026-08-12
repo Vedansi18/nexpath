@@ -1211,10 +1211,18 @@ function compoundPromptStateFor(promptText: string): PromptEnhancementRouteDecis
 /**
  * PROVISIONAL SUBSTITUTE for semantic decomposition, and it should be read as one.
  *
- * It splits on punctuation, so its refs are POSITIONAL — a ref means "the Nth fragment", not "the
- * Nth thing the user asked for". Two clauses describing one unit of work count as two; one clause
- * carrying two units counts as one. Anything reading these refs as a count of what was asked for
- * will be wrong in both directions, and nothing in the output says which.
+ * The real question is which parts of a request are separate pieces of work, by meaning. What this
+ * does is split on punctuation and count the fragments, so its refs are POSITIONAL — a ref means
+ * "the Nth fragment", not "the Nth thing the user asked for".
+ *
+ * Concretely: "fix the login bug, check the session timeout, check the cookie flags" is ONE piece of
+ * work — one investigation with three things to look at — and this reports THREE. It is wrong in the
+ * other direction too, when one clause carries two unrelated tasks, and nothing in the output says
+ * which case you have.
+ *
+ * DO NOT IMPROVE THE REGEX. A better regex is still a regex, and the distinction it would need to
+ * make is not reachable by matching text at all — a longer pattern would move which prompts are
+ * wrong without reducing how many.
  */
 function userPointCoverageRefsFor(promptText: string): readonly string[] {
   const points = promptText
@@ -1276,21 +1284,24 @@ export const PROMPT_ENHANCEMENT_SEQUENCE_ROLE_FAMILY_LABELS_V1: readonly PromptE
   PROMPT_ENHANCEMENT_SEQUENCE_ROLE_FAMILIES_V1.map((family) => family.label);
 
 /**
- * DISPLAY-ONLY sequence-plan description for the MPS first popup's dim "Sequence plan" block
- * (Sequence-plan summary fix 2026-08-07). Splits the prompt into points with an AND-AWARE split
- * — the shape detector above counts "and" as list shape, but `userPointCoverageRefsFor` does
- * not split on it, so an and-joined multi-intent prompt counted as ONE point and the popup
- * always showed "Remaining: 0". This helper feeds ONLY the compact summary; the emission gate
- * and `isPromptEnhancementSequenceShapedTextV1` keep using `userPointCoverageRefsFor`, so WHICH
- * prompts open MPS is unchanged. Labels come exclusively from the fixed approved vocabulary
- * (a point matching no family contributes count but no label — never raw text).
- */
-/**
  * PROVISIONAL SUBSTITUTE for semantic decomposition. It counts CLAUSES, not units of work.
  *
- * The split is punctuation-driven, so a request whose clauses do not line up with its actual tasks
- * is counted wrongly and the count still looks authoritative. Treat the number it produces as a
- * shape hint about the text, never as how many pieces of work the request contains.
+ * What the number should mean is how many separate pieces of work a request contains, decided by
+ * meaning. What it actually is: the prompt split on punctuation and conjunctions, and the fragments
+ * counted. The two agree often enough that the number looks authoritative, which is the danger.
+ *
+ * Concretely: "fix the login bug, check the session timeout, check the cookie flags" is ONE piece of
+ * work and this reports THREE. A single clause carrying two unrelated tasks reports ONE. Treat the
+ * result as a shape hint about the text, never as how much work was asked for.
+ *
+ * DO NOT IMPROVE THE REGEX. A better regex is still a regex, and no amount of pattern work reaches
+ * a judgement about meaning — it only moves which prompts are counted wrongly.
+ *
+ * Display and count only. It splits on "and" where the eligibility predicate above does not, so the
+ * two disagree by design: this feeds the compact summary, that decides which prompts are treated as
+ * sequence-shaped, and changing one does not change the other. Labels come exclusively from the
+ * fixed approved vocabulary — a point matching no family contributes to the count and no label, so
+ * raw prompt text can never leave here.
  */
 export function describePromptEnhancementSequencePlanV1(
   promptText: string,

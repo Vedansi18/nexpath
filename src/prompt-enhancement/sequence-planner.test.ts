@@ -1,5 +1,11 @@
 import { beforeAll, describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import type { Database } from 'sql.js';
+import {
+  promptEnhancementSequencePlannerDispositionV1,
+  promptEnhancementSequenceSplitterCountV1,
+} from './sequence-planner-failure.js';
+import { describePromptEnhancementSequencePlanV1 } from './routing-taxonomy.js';
 import {
   promptEnhancementSequencePlannerMayRunForProjectV1,
   promptEnhancementSequencePlannerMayRunV1,
@@ -25,6 +31,7 @@ import {
   buildPromptEnhancementSequencePlannerSystemPromptV1,
 } from './sequence-planner-prompt.js';
 import {
+  PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_MAX_REPAIRS_V1,
   runPromptEnhancementSequencePlannerV1,
   type PromptEnhancementSequencePlannerClientV1,
   type PromptEnhancementSequencePlannerRouteV1,
@@ -297,8 +304,8 @@ describe('sequence planner — offsets', () => {
 });
 
 describe('sequence planner — the prompt', () => {
-  it('carries the five mandatory sections and the bounds, each as its own section', () => {
-    expect(PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_SECTIONS_V1).toHaveLength(6);
+  it('carries the five mandatory sections, the bounds and the self-check, each its own section', () => {
+    expect(PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_SECTIONS_V1).toHaveLength(7);
     const prompt = buildPromptEnhancementSequencePlannerSystemPromptV1();
     for (const heading of [
       'SECTION 0 — THE STANDING PREFERENCE',
@@ -307,6 +314,7 @@ describe('sequence planner — the prompt', () => {
       'SECTION 3 — SLICING CONSTRAINTS',
       'SECTION 4 — CONFIRMATION APPLICABILITY',
       'SECTION 5 — BOUNDS',
+      'SECTION 6 — CHECK YOUR OWN PLAN',
     ]) {
       expect(prompt).toContain(heading);
     }
@@ -855,5 +863,163 @@ describe('sequence planner — the safety fields are derived, not asked for', ()
       sourcePointRanges: [], roleLabel: null, dependencyOrder: 1, complexity: 'not_complex',
       complexityReason: null, decompositionGroupId: 'g2',
     })).toEqual({ ok: false, reason: 'offset_range_out_of_bounds' });
+  });
+});
+
+describe('sequence planner — repair, and its bound', () => {
+  /** A client that answers with each reply in turn, so a repair loop can be watched. */
+  const clientSequence = (replies: readonly string[]) => {
+    const sent: string[][] = [];
+    const client: PromptEnhancementSequencePlannerClientV1 = {
+      chat: { completions: { create: async (body) => {
+        sent.push(body.messages.map((message) => message.content));
+        const reply = replies[sent.length - 1] ?? replies[replies.length - 1] ?? '';
+        return { choices: [{ message: { content: reply } }] };
+      } } },
+    };
+    return { client, sent };
+  };
+
+  const badRole = validReply({
+    items: [
+      { itemKind: 'first_task', originalSliceRef: { start: 0, end: ORIGINAL.length },
+        sourcePointRanges: [], roleLabel: 'fix', dependencyOrder: 0, complexity: 'not_complex',
+        complexityReason: null, decompositionGroupId: 'g1' },
+      { itemKind: 'task', originalSliceRef: { start: 10, end: 30 }, sourcePointRanges: [],
+        roleLabel: 'make checkout faster', dependencyOrder: 1, complexity: 'not_complex',
+        complexityReason: null, decompositionGroupId: 'g2' },
+    ],
+  });
+
+  it('sends a rejected plan back once, naming the item and what failed', async () => {
+    const { client, sent } = clientSequence([badRole, validReply()]);
+    const result = await runPromptEnhancementSequencePlannerV1(call(), client);
+    expect(result.ok).toBe(true);
+    expect(sent).toHaveLength(2);
+    // The first attempt carries no repair; the second carries the rejection and the item.
+    expect(sent[0]).toHaveLength(2);
+    expect(sent[1]).toHaveLength(3);
+    expect(sent[1]?.[2]).toContain('role_label_invalid');
+    expect(sent[1]?.[2]).toContain('Item 1 was rejected');
+    // The request itself is unchanged across the repair: what failed is a correction to the plan.
+    expect(sent[1]?.[1]).toBe(sent[0]?.[1]);
+  });
+
+  it('stops after three repairs and leaves the single-prompt path alone', async () => {
+    const { client, sent } = clientSequence([badRole]);
+    expect(await runPromptEnhancementSequencePlannerV1(call(), client))
+      .toEqual({ ok: false, reason: 'role_label_invalid' });
+    // One attempt plus its three repairs. After that it is not a retry problem.
+    expect(sent).toHaveLength(PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_MAX_REPAIRS_V1 + 1);
+    expect(promptEnhancementSequencePlannerDispositionV1('role_label_invalid'))
+      .toBe('no_sequence_single_prompt');
+  });
+
+  it('never repairs a provider failure — nothing came back to correct', async () => {
+    let calls = 0;
+    const throwing: PromptEnhancementSequencePlannerClientV1 = {
+      chat: { completions: { create: async () => {
+        calls += 1;
+        throw Object.assign(new Error('Request timed out.'), { name: 'APIConnectionTimeoutError' });
+      } } },
+    };
+    expect(await runPromptEnhancementSequencePlannerV1(call(), throwing))
+      .toEqual({ ok: false, reason: 'timeout' });
+    expect(calls).toBe(1);
+  });
+
+  it('repairs a reply that did not parse, which has no item to name', async () => {
+    const { client, sent } = clientSequence(['not json', validReply()]);
+    expect((await runPromptEnhancementSequencePlannerV1(call(), client)).ok).toBe(true);
+    expect(sent[1]?.[2]).toContain('The plan as a whole was rejected');
+    expect(sent[1]?.[2]).toContain('invalid_output');
+  });
+
+  it('tells the planner to check its own plan before returning it', () => {
+    // The error is one no check outside the model can find: whether an item assumes a state an
+    // earlier item produced is a question about meaning.
+    const prompt = buildPromptEnhancementSequencePlannerSystemPromptV1();
+    expect(prompt).toContain('SECTION 6 — CHECK YOUR OWN PLAN BEFORE YOU RETURN IT');
+    expect(prompt).toContain('an item that assumes a state no earlier item produced');
+    // Not "no back-references" — that would forbid the normal case.
+    expect(prompt).toContain('Back-references are not the problem');
+  });
+});
+
+describe('sequence planner — what happens when there is no plan', () => {
+  it('keeps the three dispositions apart', () => {
+    // An off gate must look exactly like a prompt that did not need a sequence.
+    for (const silent of [
+      'sequence_disabled_by_config', 'prompt_not_user_authored', 'prompt_origin_unknown',
+      'body_is_sequence_owned', 'body_is_feature_generated', 'no_absence_signal_section',
+    ] as const) {
+      expect(promptEnhancementSequencePlannerDispositionV1(silent)).toBe('silent_no_sequence');
+    }
+    // A call that could not be made is something the waiting user is owed.
+    for (const failed of ['no_key', 'provider_error', 'timeout'] as const) {
+      expect(promptEnhancementSequencePlannerDispositionV1(failed))
+        .toBe('error_popup_no_generated_content');
+    }
+    // A plan that did not hold up costs the sequence and nothing else.
+    for (const invalid of [
+      'invalid_output', 'item_count_over_max', 'confirmations_do_not_match_complexity',
+      'context_does_not_index_original',
+    ] as const) {
+      expect(promptEnhancementSequencePlannerDispositionV1(invalid)).toBe('no_sequence_single_prompt');
+    }
+  });
+
+  it('lets the splitter produce a count and gives it nowhere to put wording', () => {
+    const fallback = promptEnhancementSequenceSplitterCountV1(
+      'fix the login bug, check the session timeout, check the cookie flags',
+    );
+    expect(fallback.pointCount).toBeGreaterThan(0);
+    expect(fallback.isProvisionalSubstituteCount).toBe(true);
+    // The boundary is structural: there is no text field to fill, so nothing here can produce
+    // per-item wording because someone decided it would be helpful.
+    expect(Object.keys(fallback).sort()).toEqual(['isProvisionalSubstituteCount', 'pointCount']);
+  });
+
+  it('takes its count from the shipping splitter rather than splitting again', () => {
+    const text = 'fix the login bug, check the session timeout, check the cookie flags';
+    expect(promptEnhancementSequenceSplitterCountV1(text).pointCount)
+      .toBe(describePromptEnhancementSequencePlanV1(text).pointCount);
+  });
+});
+
+describe('the provisional splitter labels say what they are wrong about', () => {
+  const source = readFileSync(new URL('./routing-taxonomy.ts', import.meta.url), 'utf8');
+  /** The doc comment immediately above a function — the label itself, not the file around it. */
+  const labelAbove = (declaration: string): string => {
+    const at = source.indexOf(declaration);
+    expect(at).toBeGreaterThan(-1);
+    const opened = source.lastIndexOf('/**', at);
+    return source.slice(opened, source.indexOf('*/', opened));
+  };
+
+  it('names itself a substitute, gives the concrete failure, and forbids the tempting fix', () => {
+    // The canonical case: one investigation with three things to look at, counted as three.
+    expect(source.match(/PROVISIONAL SUBSTITUTE/g)).toHaveLength(2);
+    expect(source.match(/DO NOT IMPROVE THE REGEX/g)).toHaveLength(2);
+    expect(source.match(/fix the login bug, check the session timeout, check the cookie flags/g))
+      .toHaveLength(2);
+    // And what a positional ref actually means.
+    expect(source).toContain('"the Nth fragment", not "the Nth thing the user asked for"');
+  });
+
+  it('describes behaviour only, because this file is public', () => {
+    // A label naming internal work tells the next reader about our planning rather than about the
+    // code in front of them, and it is the code they have to decide whether to trust.
+    for (const label of [
+      labelAbove('function userPointCoverageRefsFor'),
+      labelAbove('export function describePromptEnhancementSequencePlanV1'),
+    ]) {
+      for (const internal of ['MPS', 'dev plan', 'milestone', 'Sequence-plan summary fix', '§']) {
+        expect(label).not.toContain(internal);
+      }
+      // And each says plainly that it is a stand-in, in its first line rather than after the
+      // mechanics — a caveat that arrives late reads as a footnote to something already believed.
+      expect(label.indexOf('PROVISIONAL SUBSTITUTE')).toBeLessThan(10);
+    }
   });
 });
