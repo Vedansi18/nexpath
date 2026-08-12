@@ -1,4 +1,5 @@
 import OpenAI from 'openai';
+import type { Database } from 'sql.js';
 import {
   PROMPT_ENHANCEMENT_COST_MODEL_V1,
   PROMPT_ENHANCEMENT_COST_TIMEOUT_MS_V1,
@@ -6,9 +7,9 @@ import {
 } from './cost-observability.js';
 import { buildPromptEnhancementSequencePlannerSystemPromptV1 } from './sequence-planner-prompt.js';
 import {
-  promptEnhancementSequencePlannerMayRunV1,
+  promptEnhancementSequencePlannerMayRunForProjectV1,
   promptEnhancementSequencePolicyForOutcomeV1,
-  type PromptEnhancementSequencePlannerEntryInputV1,
+  type PromptEnhancementSequencePlannerEntryRequestV1,
   type PromptEnhancementSequencePlannerRefusalV1,
 } from './sequence-planner-entry.js';
 import {
@@ -158,8 +159,15 @@ export interface PromptEnhancementSequencePlannerInputV1 {
   /**
    * Whether this prompt may be planned at all. Required rather than optional: every condition on it
    * is a refusal, and an entry check that can be omitted is one that will be.
+   *
+   * The config gate is not on it. That value has one legitimate source and the planner reads it
+   * from there itself.
    */
-  entry: PromptEnhancementSequencePlannerEntryInputV1;
+  entry: PromptEnhancementSequencePlannerEntryRequestV1;
+  /** Where the config gate is resolved from. */
+  db: Database;
+  /** Scopes that resolution: a project's own setting overrules the global one. */
+  projectRoot?: string;
 }
 
 /**
@@ -358,7 +366,11 @@ export async function runPromptEnhancementSequencePlannerV1(
 ): Promise<PromptEnhancementSequencePlannerResultV1> {
   // Before anything is spent. Every one of these is a refusal, and the config gate in particular is
   // silent by contract — an off gate produces no plan and no explanation of why.
-  const entry = promptEnhancementSequencePlannerMayRunV1(input.entry);
+  const entry = promptEnhancementSequencePlannerMayRunForProjectV1(
+    input.db,
+    input.projectRoot,
+    input.entry,
+  );
   if (!entry.mayRun) return { ok: false, reason: entry.refusal };
 
   let openai: PromptEnhancementSequencePlannerClientV1;
@@ -420,7 +432,11 @@ export async function runPromptEnhancementSequencePlannerV1(
 
   // The working state is checked here and travels no further: it is not on the output, so whoever
   // consumes the plan gets items and not the inventory they were derived from.
-  const grouping = checkPromptEnhancementSequencePlannerGroupingV1(parsed.points, parsed.groups);
+  const grouping = checkPromptEnhancementSequencePlannerGroupingV1(
+    parsed.points,
+    parsed.groups,
+    parsed.items.map((item) => item.decompositionGroupId),
+  );
   if (!grouping.ok) return { ok: false, reason: grouping.code };
 
   const bounds = checkPromptEnhancementSequencePlannerBoundsV1({

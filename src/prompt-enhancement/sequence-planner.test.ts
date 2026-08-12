@@ -1,15 +1,24 @@
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
+import type { Database } from 'sql.js';
 import {
+  promptEnhancementSequencePlannerMayRunForProjectV1,
   promptEnhancementSequencePlannerMayRunV1,
   promptEnhancementSequencePolicyForOutcomeV1,
 } from './sequence-planner-entry.js';
 import {
+  PROMPT_ENHANCEMENT_SEQUENCE_POINT_KINDS_V1,
   checkPromptEnhancementSequencePlannerBoundsV1,
   checkPromptEnhancementSequencePlannerGroupingV1,
   checkPromptEnhancementSequencePlannerOutcomeV1,
   type PromptEnhancementSequencePlannerGroupV1,
   type PromptEnhancementSequencePlannerPointV1,
 } from './sequence-planner-output.js';
+import { openStore, type Store } from '../store/db.js';
+import {
+  promptEnhancementSequenceProjectKey,
+  setPromptEnhancementSequenceEnabled,
+  PROMPT_ENHANCEMENT_SEQUENCE_ENABLED_KEY,
+} from '../config/PromptEnhancementConfig.js';
 import { isPromptEnhancementSequenceOffsetRangeV1 } from './sequence-payload.js';
 import {
   PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_SECTIONS_V1,
@@ -21,7 +30,7 @@ import {
 } from './sequence-planner.js';
 
 const point = (id: string, start: number): PromptEnhancementSequencePlannerPointV1 =>
-  ({ pointId: id, startOffset: start, endOffset: start + 5, requiredKind: 'work' });
+  ({ pointId: id, startOffset: start, endOffset: start + 5, requiredKind: 'deliverable' });
 const group = (
   id: string,
   pointIds: string[],
@@ -37,9 +46,20 @@ const clientThrowing = (error: unknown): PromptEnhancementSequencePlannerClientV
 
 const ORIGINAL = 'fix the failing test and add a rate limiter';
 
-/** A prompt the planner is allowed to plan: the user wrote it, the gate is on, a popup is coming. */
-const ENTRY = { promptOrigin: 'user', sequenceEnabled: 'on', guidanceGateShow: true } as const;
-const input = { promptContext: ORIGINAL, localOriginalText: ORIGINAL, entry: ENTRY };
+/** A prompt the planner is allowed to plan: the user wrote it, and a popup is coming. */
+const ENTRY = { promptOrigin: 'user', guidanceGateShow: true } as const;
+
+/** The gate is not a value a caller supplies, so the call needs a store to resolve it from. */
+let store: Store;
+let db: Database;
+beforeAll(async () => {
+  store = await openStore(':memory:');
+  db = store.db;
+  setPromptEnhancementSequenceEnabled(store, PROMPT_ENHANCEMENT_SEQUENCE_ENABLED_KEY, 'on');
+});
+const call = (
+  overrides: Partial<{ entry: typeof ENTRY; projectRoot: string }> = {},
+) => ({ promptContext: ORIGINAL, localOriginalText: ORIGINAL, entry: ENTRY, db, ...overrides });
 
 const validReply = (overrides: Record<string, unknown> = {}): string => JSON.stringify({
   outcome: 'sequence',
@@ -103,6 +123,25 @@ describe('sequence planner — entry conditions', () => {
     expect(promptEnhancementSequencePlannerMayRunV1({
       promptOrigin: 'user', sequenceEnabled: 'on', guidanceGateShow: true, sentPromptOrigin: 'user_authored_original_only',
     })).toEqual({ mayRun: true });
+  });
+
+  it('reads the gate through the resolver, so a project overrules the global value', () => {
+    // The one-line query a caller would write instead loses exactly this, and loses it silently.
+    setPromptEnhancementSequenceEnabled(store, promptEnhancementSequenceProjectKey('/off-here'), 'off');
+    expect(promptEnhancementSequencePlannerMayRunForProjectV1(db, '/off-here', ENTRY))
+      .toEqual({ mayRun: false, refusal: 'sequence_disabled_by_config' });
+    // Another project is unaffected by its neighbour's setting.
+    expect(promptEnhancementSequencePlannerMayRunForProjectV1(db, '/elsewhere', ENTRY))
+      .toEqual({ mayRun: true });
+  });
+
+  it('treats a config value outside the two as OFF, not as absent', () => {
+    // Absent falls to the global value; a typo must not turn a gate on that may never be named in
+    // anything rendered, because nothing would then be able to say it had been.
+    db.run('INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)',
+      [promptEnhancementSequenceProjectKey('/typo'), 'ON!']);
+    expect(promptEnhancementSequencePlannerMayRunForProjectV1(db, '/typo', ENTRY))
+      .toEqual({ mayRun: false, refusal: 'sequence_disabled_by_config' });
   });
 
   it('only a planned sequence moves off the default policy', () => {
@@ -170,6 +209,36 @@ describe('sequence planner — the grouping checks', () => {
       [point('p1', 0), point('p2', 5), point('p3', 10)],
       [group('g1', ['p1', 'p9'])],
     )).toEqual({ ok: false, code: 'group_references_unknown_point' });
+  });
+
+  it('catches an item naming a group that does not exist', () => {
+    // The array dies with the call, so the id each item keeps is the only trace of the grouping
+    // left. An id naming nothing cannot be caught later — there is nothing to compare it against.
+    expect(checkPromptEnhancementSequencePlannerGroupingV1(
+      [point('p1', 0), point('p2', 10), point('p3', 20)],
+      [group('g1', ['p1', 'p2']), group('g2', ['p3'])],
+      ['g1', 'g99'],
+    )).toEqual({ ok: false, code: 'item_references_unknown_group' });
+  });
+
+  it('accepts a group that became no item — that group stayed in the body', () => {
+    // Requiring every group to be referenced would forbid the mechanism by which a request with
+    // many small bullets becomes two prompts rather than ten.
+    expect(checkPromptEnhancementSequencePlannerGroupingV1(
+      [point('p1', 0), point('p2', 10), point('p3', 20)],
+      [group('g1', ['p1', 'p2']), group('g2', ['p3'])],
+      ['g1', null],
+    ).ok).toBe(true);
+  });
+
+  it('catches a point whose kind is outside the six', () => {
+    // The kinds are defined rather than judged, so a seventh value means the inventory did not use
+    // the definition — and the five that are not deliverables are the ones it exists to find.
+    expect(checkPromptEnhancementSequencePlannerGroupingV1(
+      [{ pointId: 'p1', startOffset: 0, endOffset: 5, requiredKind: 'work' as never },
+        point('p2', 10), point('p3', 20)],
+      [group('g1', ['p1', 'p2']), group('g2', ['p3'])],
+    )).toEqual({ ok: false, code: 'point_required_kind_invalid' });
   });
 
   it('catches a duplicated point id in the inventory itself', () => {
@@ -257,6 +326,16 @@ describe('sequence planner — the prompt', () => {
     expect(prompt).toContain('"This sequence needs confirmation" is never a valid conclusion');
   });
 
+  it('defines what a point is, naming every kind the code will accept', () => {
+    // The five that are not deliverables are the reason the inventory stage exists: asked what the
+    // user asked for, a constraint reads as colour on a deliverable rather than a point of its own.
+    const prompt = buildPromptEnhancementSequencePlannerSystemPromptV1();
+    expect(prompt).toContain('WHAT COUNTS AS A POINT is defined, not left to judgement');
+    for (const kind of PROMPT_ENHANCEMENT_SEQUENCE_POINT_KINDS_V1) expect(prompt).toContain(kind);
+    // And the field that records it is tied back to that list rather than left to invention.
+    expect(prompt).toContain('requiredKind is one of the six kinds in SECTION 1');
+  });
+
   it('says a point may only be held back when a sequence is actually planned', () => {
     // Otherwise the point is parked in an item that never exists, and it satisfied a landing place
     // on the way out.
@@ -298,7 +377,7 @@ describe('sequence planner — the prompt', () => {
 describe('sequence planner — the call', () => {
 
   it('returns the plan when the reply holds together', async () => {
-    const result = await runPromptEnhancementSequencePlannerV1(input, clientReturning(validReply()));
+    const result = await runPromptEnhancementSequencePlannerV1(call(), clientReturning(validReply()));
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.output.outcome).toBe('sequence');
@@ -322,14 +401,18 @@ describe('sequence planner — the call', () => {
         return { choices: [{ message: { content: validReply() } }] };
       } } },
     };
+    // The gate is refused through the store, since that is the only place its value comes from.
+    setPromptEnhancementSequenceEnabled(store, promptEnhancementSequenceProjectKey('/gate-off'), 'off');
+    expect(await runPromptEnhancementSequencePlannerV1(call({ projectRoot: '/gate-off' }), counting))
+      .toEqual({ ok: false, reason: 'sequence_disabled_by_config' });
+
     const refusals = [
-      [{ ...ENTRY, sequenceEnabled: 'off' as const }, 'sequence_disabled_by_config'],
       [{ ...ENTRY, promptOrigin: 'unknown' as const }, 'prompt_origin_unknown'],
       [{ ...ENTRY, guidanceGateShow: false }, 'no_absence_signal_section'],
       [{ ...ENTRY, sentPromptOrigin: 'sequence_handoff_owned_body' as const }, 'body_is_sequence_owned'],
     ] as const;
     for (const [entry, reason] of refusals) {
-      expect(await runPromptEnhancementSequencePlannerV1({ ...input, entry }, counting))
+      expect(await runPromptEnhancementSequencePlannerV1(call({ entry }), counting))
         .toEqual({ ok: false, reason });
     }
     expect(calls).toBe(0);
@@ -339,7 +422,7 @@ describe('sequence planner — the call', () => {
     // Nothing that governs a list applies: no items, no summary, and nothing generated ahead of
     // acceptance to declare.
     const single = validReply({ outcome: 'single_plain', outcomeReason: 'not_big_enough' });
-    const result = await runPromptEnhancementSequencePlannerV1(input, clientReturning(single));
+    const result = await runPromptEnhancementSequencePlannerV1(call(), clientReturning(single));
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.output.items).toEqual([]);
@@ -350,7 +433,7 @@ describe('sequence planner — the call', () => {
   it('reads the summary role labels off the items rather than from the reply', async () => {
     // The reply's own list is a second answer to a question the items have already answered.
     const claimed = validReply({ summaryData: { summaryId: 's1', remainingTaskCount: 1, taskRoleLabels: ['plan', 'build'] } });
-    const result = await runPromptEnhancementSequencePlannerV1(input, clientReturning(claimed));
+    const result = await runPromptEnhancementSequencePlannerV1(call(), clientReturning(claimed));
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.output.summaryData.taskRoleLabels).toEqual(['fix']);
@@ -359,19 +442,19 @@ describe('sequence planner — the call', () => {
   it('reports a call that never happened separately from one that failed', async () => {
     // A thrown provider error is not retried: a fast typed refusal beats a slow retry in front of
     // a waiting user.
-    expect(await runPromptEnhancementSequencePlannerV1(input, clientThrowing(new Error('nope'))))
+    expect(await runPromptEnhancementSequencePlannerV1(call(), clientThrowing(new Error('nope'))))
       .toEqual({ ok: false, reason: 'provider_error' });
     const timeout = Object.assign(new Error('Request timed out.'), { name: 'APIConnectionTimeoutError' });
-    expect(await runPromptEnhancementSequencePlannerV1(input, clientThrowing(timeout)))
+    expect(await runPromptEnhancementSequencePlannerV1(call(), clientThrowing(timeout)))
       .toEqual({ ok: false, reason: 'timeout' });
   });
 
   it('refuses an empty or unparseable reply', async () => {
-    expect(await runPromptEnhancementSequencePlannerV1(input, clientReturning(null)))
+    expect(await runPromptEnhancementSequencePlannerV1(call(), clientReturning(null)))
       .toEqual({ ok: false, reason: 'invalid_output' });
-    expect(await runPromptEnhancementSequencePlannerV1(input, clientReturning('not json')))
+    expect(await runPromptEnhancementSequencePlannerV1(call(), clientReturning('not json')))
       .toEqual({ ok: false, reason: 'invalid_output' });
-    expect(await runPromptEnhancementSequencePlannerV1(input, clientReturning('{"outcome":"sequence"}')))
+    expect(await runPromptEnhancementSequencePlannerV1(call(), clientReturning('{"outcome":"sequence"}')))
       .toEqual({ ok: false, reason: 'invalid_output' });
   });
 
@@ -385,7 +468,7 @@ describe('sequence planner — the call', () => {
         decompositionGroupId: 'g1',
       }],
     });
-    expect(await runPromptEnhancementSequencePlannerV1(input, clientReturning(withText)))
+    expect(await runPromptEnhancementSequencePlannerV1(call(), clientReturning(withText)))
       .toEqual({ ok: false, reason: 'invalid_output' });
   });
 
@@ -394,11 +477,11 @@ describe('sequence planner — the call', () => {
       points: [point('p1', 0), point('p2', 10)],
       groups: [group('g1', ['p1']), group('g2', ['p2'])],
     });
-    expect(await runPromptEnhancementSequencePlannerV1(input, clientReturning(ungrouped)))
+    expect(await runPromptEnhancementSequencePlannerV1(call(), clientReturning(ungrouped)))
       .toEqual({ ok: false, reason: 'grouping_stage_did_nothing' });
 
     const explained = validReply({ outcomeReason: 'not_big_enough' });
-    expect(await runPromptEnhancementSequencePlannerV1(input, clientReturning(explained)))
+    expect(await runPromptEnhancementSequencePlannerV1(call(), clientReturning(explained)))
       .toEqual({ ok: false, reason: 'outcome_reason_disagrees_with_outcome' });
   });
 });
@@ -417,7 +500,7 @@ describe('sequence planner — the list is checked against the rules it will be 
   const withItems = (...items: unknown[]) => validReply({
     items, summaryData: { summaryId: 's1', remainingTaskCount: items.length - 1 },
   });
-  const run = (reply: string) => runPromptEnhancementSequencePlannerV1(input, clientReturning(reply));
+  const run = (reply: string) => runPromptEnhancementSequencePlannerV1(call(), clientReturning(reply));
 
   it('rejects a role label the model invented', async () => {
     // The vocabulary is closed because these labels travel into a payload that declares it carries
@@ -529,7 +612,7 @@ describe('sequence planner — the safety fields are derived, not asked for', ()
     summaryData: { summaryId: 's1', remainingTaskCount: 1 },
   });
   const run = (item: Record<string, unknown>, firstComplexity?: string) => runPromptEnhancementSequencePlannerV1(
-    { promptContext: ROTATION, localOriginalText: ROTATION, entry: ENTRY },
+    { ...call(), promptContext: ROTATION, localOriginalText: ROTATION },
     clientReturning(reply(item, firstComplexity)),
   );
 

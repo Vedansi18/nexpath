@@ -26,12 +26,31 @@ export type PromptEnhancementSequencePlannerOutcomeReasonV1 =
   | 'unsafe'
   | 'not_big_enough';
 
+/**
+ * What counts as a point, and it is defined rather than left to judgement.
+ *
+ * The list exists because "what did the user ask for" reads as a list of deliverables, and the
+ * inventory's whole purpose is that the other five are findable too — a constraint buried mid
+ * prompt has nothing to be checked against unless it was recorded as a point in its own right, and
+ * once it is missing no later check can tell whether it was covered or lost.
+ */
+export const PROMPT_ENHANCEMENT_SEQUENCE_POINT_KINDS_V1 = [
+  'deliverable',
+  'constraint',
+  'non_goal',
+  'order_or_dependency',
+  'verification_expectation',
+  'confirmation_requirement',
+] as const;
+export type PromptEnhancementSequencePointKindV1 =
+  typeof PROMPT_ENHANCEMENT_SEQUENCE_POINT_KINDS_V1[number];
+
 /** A point the planner found in the request, addressed by offsets into the original. */
 export interface PromptEnhancementSequencePlannerPointV1 {
   pointId: string;
   startOffset: number;
   endOffset: number;
-  requiredKind: string;
+  requiredKind: PromptEnhancementSequencePointKindV1;
 }
 
 /** A grouping decision. The array is emitted so it can be checked, and is then discarded. */
@@ -58,10 +77,12 @@ export type PromptEnhancementSequencePlannerCheckCodeV1 =
   | 'points_not_array'
   | 'groups_not_array'
   | 'point_id_duplicated'
+  | 'point_required_kind_invalid'
   | 'point_in_no_group'
   | 'point_in_more_than_one_group'
   | 'group_empty'
   | 'group_references_unknown_point'
+  | 'item_references_unknown_group'
   | 'grouping_stage_did_nothing'
   | 'item_count_below_min'
   | 'item_count_over_max'
@@ -97,7 +118,7 @@ export function checkPromptEnhancementSequencePlannerOutcomeV1(
 
 /**
  * Every point lands in exactly one group, every group is non-empty and references points that
- * exist, and the grouping stage actually did something.
+ * exist, every item names a group that exists, and the grouping stage actually did something.
  *
  * That last one is the check that earns the group array. One slice per bullet — the failure the
  * grouping stage exists to prevent — shows up as exactly this equality, and without the array a
@@ -106,6 +127,7 @@ export function checkPromptEnhancementSequencePlannerOutcomeV1(
 export function checkPromptEnhancementSequencePlannerGroupingV1(
   points: readonly PromptEnhancementSequencePlannerPointV1[],
   groups: readonly PromptEnhancementSequencePlannerGroupV1[],
+  itemGroupIds: readonly (string | null)[] = [],
 ): PromptEnhancementSequencePlannerCheckResultV1 {
   if (!Array.isArray(points)) return fail('points_not_array');
   if (!Array.isArray(groups)) return fail('groups_not_array');
@@ -113,6 +135,10 @@ export function checkPromptEnhancementSequencePlannerGroupingV1(
   const pointIds = new Set<string>();
   for (const point of points) {
     if (pointIds.has(point.pointId)) return fail('point_id_duplicated');
+    if (!(PROMPT_ENHANCEMENT_SEQUENCE_POINT_KINDS_V1 as readonly string[])
+      .includes(point.requiredKind)) {
+      return fail('point_required_kind_invalid');
+    }
     pointIds.add(point.pointId);
   }
 
@@ -128,6 +154,19 @@ export function checkPromptEnhancementSequencePlannerGroupingV1(
   }
   for (const pointId of pointIds) {
     if (!placement.has(pointId)) return fail('point_in_no_group');
+  }
+
+  // Each item keeps one group id, and it is the only trace of the grouping that survives the call:
+  // the array itself is working state. So an id naming no emitted group cannot be caught later —
+  // by then there is nothing left to compare it against, and a payload that was meant to be able
+  // to rebuild the grouping the planner decided rebuilds nothing.
+  //
+  // Only this direction. A group that becomes no item is the ordinary case of a group that stayed
+  // in the current body, which is how a request with many small bullets becomes two prompts rather
+  // than ten — requiring every group to be referenced would forbid it.
+  const groupIds = new Set(groups.map((group) => group.groupId));
+  for (const groupId of itemGroupIds) {
+    if (groupId !== null && !groupIds.has(groupId)) return fail('item_references_unknown_group');
   }
 
   // One group per point means the grouping stage ran and changed nothing.

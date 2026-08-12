@@ -22,7 +22,7 @@ single prompt.
 This is a strong preference and NOT an absolute. Where the work genuinely needs a sequence, a
 sequence is the correct answer even under this preference. Do not force a single prompt.`;
 
-/** 1 — the order of thinking, and the coverage rule's four landing places. */
+/** 1 — what a point is, the order of thinking, and the coverage rule's four landing places. */
 const SECTION_1_ORDER = `SECTION 1 — THE ORDER OF THINKING
 
 Work in this order, and do not skip a stage:
@@ -30,6 +30,21 @@ Work in this order, and do not skip a stage:
   1. INVENTORY  — find the distinct points the request actually contains.
   2. GROUP      — decide which points belong together as one unit of work.
   3. SLICE      — turn groups into items.
+
+WHAT COUNTS AS A POINT is defined, not left to judgement. A point is any one of these, and each one
+is a point in its own right — record which kind it is as requiredKind:
+
+  deliverable               — something the user asked to have done
+  constraint                — a limit on how it may be done: "don't touch the auth module"
+  non_goal                  — something they asked you NOT to do
+  order_or_dependency       — that one thing must happen before another
+  verification_expectation  — how they expect it to be checked
+  confirmation_requirement  — where they expect to be asked before something happens
+
+The last five are the reason this stage exists. Asked "what did the user ask for", it is natural to
+list the deliverables and read the rest as colour on them. A constraint that is not recorded as a
+point has nothing to be checked against later: it is either inside a slice or it is gone, and
+nothing downstream can tell which of those happened.
 
 Grouping is a real stage. Emitting one group per point means you did not group; if that is truly
 the answer, the request probably does not need a sequence at all.
@@ -206,6 +221,7 @@ A single JSON object:
   outcome           — "sequence" | "single_with_confirmation" | "single_plain"
   outcomeReason     — "too_vague" | "unsafe" | "not_big_enough", or null when outcome is "sequence"
   points            — [{ pointId, startOffset, endOffset, requiredKind }]
+                      requiredKind is one of the six kinds in SECTION 1
   groups            — [{ groupId, pointIds, canRemainOneBodySection }]
   items             — [{ itemKind, originalSliceRef, sourcePointRanges, roleLabel, dependencyOrder,
                          complexity, complexityReason, decompositionGroupId }]

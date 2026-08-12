@@ -1,3 +1,8 @@
+import type { Database } from 'sql.js';
+import {
+  resolvePromptEnhancementSequenceConfig,
+  type PromptEnhancementSequenceEnabled,
+} from '../config/PromptEnhancementConfig.js';
 import type { PromptEnhancementSentPromptOrigin } from './contracts.js';
 import type { PromptEnhancementSequenceNextPromptPolicyV1 } from './sequence-payload.js';
 
@@ -27,6 +32,13 @@ export type PromptEnhancementSequencePlannerEntryV1 =
   | { mayRun: true }
   | { mayRun: false; refusal: PromptEnhancementSequencePlannerRefusalV1 };
 
+/**
+ * What a caller supplies. The config gate is NOT on it: the gate is resolved by the planner from
+ * the store, so a caller cannot hand it a value it read some other way.
+ */
+export type PromptEnhancementSequencePlannerEntryRequestV1 =
+  Omit<PromptEnhancementSequencePlannerEntryInputV1, 'sequenceEnabled'>;
+
 export interface PromptEnhancementSequencePlannerEntryInputV1 {
   /** The request's own origin for this prompt. */
   promptOrigin: 'user' | 'pe_generated_echo' | 'unknown';
@@ -36,11 +48,15 @@ export interface PromptEnhancementSequencePlannerEntryInputV1 {
    */
   sentPromptOrigin?: PromptEnhancementSentPromptOrigin;
   /**
-   * The effective value of the sequence config key for this project, resolved through the config
-   * resolver rather than read from a config row — the resolver is what applies project-over-global
-   * precedence and turns an invalid value into `off` instead of into the default.
+   * The effective value of the sequence config key for this project.
+   *
+   * It comes from the config resolver and from nowhere else, which is why it is not a field the
+   * caller fills in: the resolver applies project-over-global precedence and turns an invalid value
+   * into `off` rather than into the default, and both failures it prevents are silent ones — a
+   * project's `off` overruled by a global `on`, and a typo enabling a gate whose name may never be
+   * rendered, so nothing can say it happened.
    */
-  sequenceEnabled: 'on' | 'off';
+  sequenceEnabled: PromptEnhancementSequenceEnabled;
   /**
    * Whether the guidance gate decided a popup will be shown at all.
    *
@@ -63,6 +79,25 @@ const FEATURE_GENERATED_BODIES: readonly PromptEnhancementSentPromptOrigin[] = [
   'pe_deterministic_fallback_body',
   'previous_sendable_body',
 ];
+
+/**
+ * The entry decision for a real project, with the config gate read the only way it may be read.
+ *
+ * The resolver is called here rather than by whoever calls the planner, because a caller holding a
+ * database and needing a yes/no will write the one-line query — and the one-line query is the
+ * version that loses project-over-global precedence and treats an invalid value as absent.
+ */
+export function promptEnhancementSequencePlannerMayRunForProjectV1(
+  db: Database,
+  projectRoot: string | undefined,
+  request: PromptEnhancementSequencePlannerEntryRequestV1,
+): PromptEnhancementSequencePlannerEntryV1 {
+  const config = resolvePromptEnhancementSequenceConfig(db, projectRoot);
+  return promptEnhancementSequencePlannerMayRunV1({
+    ...request,
+    sequenceEnabled: config.sequenceEnabled,
+  });
+}
 
 /**
  * May the planner run on this prompt?
