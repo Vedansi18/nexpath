@@ -7,10 +7,10 @@ import {
   checkPromptEnhancementSequencePlannerBoundsV1,
   checkPromptEnhancementSequencePlannerGroupingV1,
   checkPromptEnhancementSequencePlannerOutcomeV1,
-  isPromptEnhancementSequencePlannerRangeV1,
   type PromptEnhancementSequencePlannerGroupV1,
   type PromptEnhancementSequencePlannerPointV1,
 } from './sequence-planner-output.js';
+import { isPromptEnhancementSequenceOffsetRangeV1 } from './sequence-payload.js';
 import {
   PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_SECTIONS_V1,
   buildPromptEnhancementSequencePlannerSystemPromptV1,
@@ -35,6 +35,12 @@ const clientThrowing = (error: unknown): PromptEnhancementSequencePlannerClientV
   chat: { completions: { create: async () => { throw error; } } },
 });
 
+const ORIGINAL = 'fix the failing test and add a rate limiter';
+
+/** A prompt the planner is allowed to plan: the user wrote it, the gate is on, a popup is coming. */
+const ENTRY = { promptOrigin: 'user', sequenceEnabled: 'on', guidanceGateShow: true } as const;
+const input = { promptContext: ORIGINAL, localOriginalText: ORIGINAL, entry: ENTRY };
+
 const validReply = (overrides: Record<string, unknown> = {}): string => JSON.stringify({
   outcome: 'sequence',
   outcomeReason: null,
@@ -42,9 +48,10 @@ const validReply = (overrides: Record<string, unknown> = {}): string => JSON.str
   groups: [group('g1', ['p1', 'p2']), group('g2', ['p3'])],
   items: [
     {
-      itemKind: 'first_task', originalSliceRef: { start: 0, end: 42 }, sourcePointRanges: [],
-      roleLabel: 'fix', dependencyOrder: 0, complexity: 'not_complex', complexityReason: null,
-      decompositionGroupId: 'g1',
+      // The first prompt is the request itself, so its slice is the whole original.
+      itemKind: 'first_task', originalSliceRef: { start: 0, end: ORIGINAL.length },
+      sourcePointRanges: [], roleLabel: 'fix', dependencyOrder: 0, complexity: 'not_complex',
+      complexityReason: null, decompositionGroupId: 'g1',
     },
     {
       itemKind: 'task', originalSliceRef: { start: 10, end: 30 }, sourcePointRanges: [],
@@ -53,33 +60,33 @@ const validReply = (overrides: Record<string, unknown> = {}): string => JSON.str
     },
   ],
   promptDirectives: [],
-  summaryData: { summaryId: 's1', remainingTaskCount: 1, taskRoleLabels: ['fix'] },
+  summaryData: { summaryId: 's1', remainingTaskCount: 1 },
   ...overrides,
 });
 
 describe('sequence planner — entry conditions', () => {
   it('runs on a user-authored prompt with the gate on', () => {
-    expect(promptEnhancementSequencePlannerMayRunV1({ promptOrigin: 'user', sequenceEnabled: 'on' }))
+    expect(promptEnhancementSequencePlannerMayRunV1({ promptOrigin: 'user', sequenceEnabled: 'on', guidanceGateShow: true }))
       .toEqual({ mayRun: true });
   });
 
   it('refuses when the gate is off, whatever the origin', () => {
     // Silent by contract: the key is a forbidden render value, so an off gate looks exactly like a
     // prompt that did not need a sequence.
-    expect(promptEnhancementSequencePlannerMayRunV1({ promptOrigin: 'user', sequenceEnabled: 'off' }))
+    expect(promptEnhancementSequencePlannerMayRunV1({ promptOrigin: 'user', sequenceEnabled: 'off', guidanceGateShow: true }))
       .toEqual({ mayRun: false, refusal: 'sequence_disabled_by_config' });
   });
 
   it('refuses an unknown origin rather than defaulting to allow', () => {
-    expect(promptEnhancementSequencePlannerMayRunV1({ promptOrigin: 'unknown', sequenceEnabled: 'on' }))
+    expect(promptEnhancementSequencePlannerMayRunV1({ promptOrigin: 'unknown', sequenceEnabled: 'on', guidanceGateShow: true }))
       .toEqual({ mayRun: false, refusal: 'prompt_origin_unknown' });
-    expect(promptEnhancementSequencePlannerMayRunV1({ promptOrigin: 'pe_generated_echo', sequenceEnabled: 'on' }))
+    expect(promptEnhancementSequencePlannerMayRunV1({ promptOrigin: 'pe_generated_echo', sequenceEnabled: 'on', guidanceGateShow: true }))
       .toEqual({ mayRun: false, refusal: 'prompt_not_user_authored' });
   });
 
   it('refuses a body the sequence itself produced — this is the loop, not a skipped call', () => {
     expect(promptEnhancementSequencePlannerMayRunV1({
-      promptOrigin: 'user', sequenceEnabled: 'on', sentPromptOrigin: 'sequence_handoff_owned_body',
+      promptOrigin: 'user', sequenceEnabled: 'on', guidanceGateShow: true, sentPromptOrigin: 'sequence_handoff_owned_body',
     })).toEqual({ mayRun: false, refusal: 'body_is_sequence_owned' });
   });
 
@@ -89,12 +96,12 @@ describe('sequence planner — entry conditions', () => {
       'pe_deterministic_fallback_body', 'previous_sendable_body',
     ] as const) {
       expect(promptEnhancementSequencePlannerMayRunV1({
-        promptOrigin: 'user', sequenceEnabled: 'on', sentPromptOrigin: origin,
+        promptOrigin: 'user', sequenceEnabled: 'on', guidanceGateShow: true, sentPromptOrigin: origin,
       })).toEqual({ mayRun: false, refusal: 'body_is_feature_generated' });
     }
     // A body the user wrote themselves is not a refusal.
     expect(promptEnhancementSequencePlannerMayRunV1({
-      promptOrigin: 'user', sequenceEnabled: 'on', sentPromptOrigin: 'user_authored_original_only',
+      promptOrigin: 'user', sequenceEnabled: 'on', guidanceGateShow: true, sentPromptOrigin: 'user_authored_original_only',
     })).toEqual({ mayRun: true });
   });
 
@@ -176,19 +183,19 @@ describe('sequence planner — the grouping checks', () => {
 describe('sequence planner — the bounds', () => {
   it('accepts a list inside the bounds whose summary count agrees with it', () => {
     expect(checkPromptEnhancementSequencePlannerBoundsV1({
-      itemCount: 5, emitsWrapUp: false, summaryRemainingTaskCount: 4,
+      itemCount: 5, summaryRemainingTaskCount: 4,
     }).ok).toBe(true);
   });
 
   it('rejects a one-item list — that is no sequence, not a short one', () => {
     expect(checkPromptEnhancementSequencePlannerBoundsV1({
-      itemCount: 1, emitsWrapUp: false, summaryRemainingTaskCount: 0,
+      itemCount: 1, summaryRemainingTaskCount: 0,
     })).toEqual({ ok: false, code: 'item_count_below_min' });
   });
 
   it('rejects a list past the maximum', () => {
     expect(checkPromptEnhancementSequencePlannerBoundsV1({
-      itemCount: 31, emitsWrapUp: false, summaryRemainingTaskCount: 30,
+      itemCount: 31, summaryRemainingTaskCount: 30,
     })).toEqual({ ok: false, code: 'item_count_over_max' });
   });
 
@@ -196,23 +203,23 @@ describe('sequence planner — the bounds', () => {
     // The summary's own figure is items after the first; stored disagreeing is how a popup reports
     // a different number of prompts than the plan holds.
     expect(checkPromptEnhancementSequencePlannerBoundsV1({
-      itemCount: 5, emitsWrapUp: false, summaryRemainingTaskCount: 5,
+      itemCount: 5, summaryRemainingTaskCount: 5,
     })).toEqual({ ok: false, code: 'summary_remaining_count_disagrees_with_items' });
   });
 });
 
 describe('sequence planner — offsets', () => {
   it('accepts a range inside the original and rejects inverted, empty and out-of-range', () => {
-    expect(isPromptEnhancementSequencePlannerRangeV1({ start: 0, end: 10 }, 50)).toBe(true);
-    expect(isPromptEnhancementSequencePlannerRangeV1({ start: 10, end: 10 }, 50)).toBe(false);
-    expect(isPromptEnhancementSequencePlannerRangeV1({ start: 20, end: 5 }, 50)).toBe(false);
-    expect(isPromptEnhancementSequencePlannerRangeV1({ start: 0, end: 51 }, 50)).toBe(false);
+    expect(isPromptEnhancementSequenceOffsetRangeV1({ start: 0, end: 10 }, 50)).toBe(true);
+    expect(isPromptEnhancementSequenceOffsetRangeV1({ start: 10, end: 10 }, 50)).toBe(false);
+    expect(isPromptEnhancementSequenceOffsetRangeV1({ start: 20, end: 5 }, 50)).toBe(false);
+    expect(isPromptEnhancementSequenceOffsetRangeV1({ start: 0, end: 51 }, 50)).toBe(false);
   });
 });
 
 describe('sequence planner — the prompt', () => {
-  it('carries all five mandatory sections, each as its own section', () => {
-    expect(PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_SECTIONS_V1).toHaveLength(5);
+  it('carries the five mandatory sections and the bounds, each as its own section', () => {
+    expect(PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_SECTIONS_V1).toHaveLength(6);
     const prompt = buildPromptEnhancementSequencePlannerSystemPromptV1();
     for (const heading of [
       'SECTION 0 — THE STANDING PREFERENCE',
@@ -220,9 +227,41 @@ describe('sequence planner — the prompt', () => {
       'SECTION 2 — COMPLEXITY',
       'SECTION 3 — SLICING CONSTRAINTS',
       'SECTION 4 — CONFIRMATION APPLICABILITY',
+      'SECTION 5 — BOUNDS',
     ]) {
       expect(prompt).toContain(heading);
     }
+  });
+
+  it('states the caps and the overflow order, which the plan is rejected whole for breaking', () => {
+    const prompt = buildPromptEnhancementSequencePlannerSystemPromptV1();
+    expect(prompt).toContain('AT LEAST 2 and AT MOST 30');
+    // A one-item list is not a short sequence.
+    expect(prompt).toContain('it means no\nsequence');
+    expect(prompt).toContain('IF AND ONLY IF there are more than 3 other prompts');
+    // Merge, then shed back into the body, then no sequence — and never the mandatory work.
+    expect(prompt).toContain('MERGE until it fits');
+    expect(prompt).toContain('FALLS BACK INTO THE CURRENT BODY');
+    expect(prompt).toContain('NEVER shed work the user marked as');
+    // The priority words are the user's own, not a list to match against.
+    expect(prompt).toContain('not whether they used any particular word for it');
+  });
+
+  it('carries the two rules a plan can break while every field is filled in', () => {
+    const prompt = buildPromptEnhancementSequencePlannerSystemPromptV1();
+    // An item exists on a decision about that item — not on a count, and not on habit.
+    expect(prompt).toContain('AN ITEM EXISTS ONLY ON A DECISION ABOUT THAT ITEM');
+    expect(prompt).toContain('Attaching a verification item to every task as a matter of course');
+    // And the applicability decision is taken per item, never once for the sequence.
+    expect(prompt).toContain('THE DECISION IS TAKEN PER ITEM');
+    expect(prompt).toContain('"This sequence needs confirmation" is never a valid conclusion');
+  });
+
+  it('says a point may only be held back when a sequence is actually planned', () => {
+    // Otherwise the point is parked in an item that never exists, and it satisfied a landing place
+    // on the way out.
+    expect(buildPromptEnhancementSequencePlannerSystemPromptV1())
+      .toContain('ONLY AVAILABLE WHEN YOU ARE ACTUALLY PLANNING A SEQUENCE');
   });
 
   it('carries the rules that are most easily lost when a prompt is edited down', () => {
@@ -246,11 +285,17 @@ describe('sequence planner — the prompt', () => {
   it('tells the model it does not word the prompts', () => {
     expect(buildPromptEnhancementSequencePlannerSystemPromptV1()).toContain('You do NOT write the prompts');
   });
+
+  it('does not ask for the fields that are read off what it returns', () => {
+    // Asking for these is asking for a second answer to a question the plan has already answered,
+    // and a second answer is free to disagree with the first.
+    expect(buildPromptEnhancementSequencePlannerSystemPromptV1()).toContain(
+      'DO NOT return actionRiskKind, authorityMode, requiresConfirmationFloor, taskRoleLabels or any',
+    );
+  });
 });
 
 describe('sequence planner — the call', () => {
-  const ORIGINAL = 'fix the failing test and add a rate limiter';
-  const input = { promptContext: ORIGINAL, localOriginalText: ORIGINAL };
 
   it('returns the plan when the reply holds together', async () => {
     const result = await runPromptEnhancementSequencePlannerV1(input, clientReturning(validReply()));
@@ -260,6 +305,55 @@ describe('sequence planner — the call', () => {
     expect(result.output.items).toHaveLength(2);
     // The bound comes from the local original, not from the model.
     expect(result.output.originalLength).toBe(ORIGINAL.length);
+    // Text exists ahead of acceptance, and the row has to say so.
+    expect(result.output.suggestedNextPromptPolicy).toBe('generated_not_rendered_pending_acceptance');
+    // The working state was checked and did not survive the call.
+    expect(result.output).not.toHaveProperty('points');
+    expect(result.output).not.toHaveProperty('groups');
+  });
+
+  it('refuses before spending anything when the prompt may not be planned', async () => {
+    // Every entry condition is a refusal, and the config gate is silent by contract — so the point
+    // is not only the reason returned but that no call was made to produce it.
+    let calls = 0;
+    const counting: PromptEnhancementSequencePlannerClientV1 = {
+      chat: { completions: { create: async () => {
+        calls += 1;
+        return { choices: [{ message: { content: validReply() } }] };
+      } } },
+    };
+    const refusals = [
+      [{ ...ENTRY, sequenceEnabled: 'off' as const }, 'sequence_disabled_by_config'],
+      [{ ...ENTRY, promptOrigin: 'unknown' as const }, 'prompt_origin_unknown'],
+      [{ ...ENTRY, guidanceGateShow: false }, 'no_absence_signal_section'],
+      [{ ...ENTRY, sentPromptOrigin: 'sequence_handoff_owned_body' as const }, 'body_is_sequence_owned'],
+    ] as const;
+    for (const [entry, reason] of refusals) {
+      expect(await runPromptEnhancementSequencePlannerV1({ ...input, entry }, counting))
+        .toEqual({ ok: false, reason });
+    }
+    expect(calls).toBe(0);
+  });
+
+  it('a single-prompt outcome is an answer, not a short sequence', async () => {
+    // Nothing that governs a list applies: no items, no summary, and nothing generated ahead of
+    // acceptance to declare.
+    const single = validReply({ outcome: 'single_plain', outcomeReason: 'not_big_enough' });
+    const result = await runPromptEnhancementSequencePlannerV1(input, clientReturning(single));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.output.items).toEqual([]);
+    expect(result.output.suggestedNextPromptPolicy).toBe('not_generated');
+    expect(result.output.summaryData.remainingTaskCount).toBe(0);
+  });
+
+  it('reads the summary role labels off the items rather than from the reply', async () => {
+    // The reply's own list is a second answer to a question the items have already answered.
+    const claimed = validReply({ summaryData: { summaryId: 's1', remainingTaskCount: 1, taskRoleLabels: ['plan', 'build'] } });
+    const result = await runPromptEnhancementSequencePlannerV1(input, clientReturning(claimed));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.output.summaryData.taskRoleLabels).toEqual(['fix']);
   });
 
   it('reports a call that never happened separately from one that failed', async () => {
@@ -309,31 +403,141 @@ describe('sequence planner — the call', () => {
   });
 });
 
+describe('sequence planner — the list is checked against the rules it will be stored under', () => {
+  const taskItem = (overrides: Record<string, unknown> = {}) => ({
+    itemKind: 'task', originalSliceRef: { start: 10, end: 30 }, sourcePointRanges: [],
+    roleLabel: null, dependencyOrder: 1, complexity: 'not_complex', complexityReason: null,
+    decompositionGroupId: 'g2', ...overrides,
+  });
+  const firstTask = {
+    itemKind: 'first_task', originalSliceRef: { start: 0, end: ORIGINAL.length },
+    sourcePointRanges: [], roleLabel: 'fix', dependencyOrder: 0, complexity: 'not_complex',
+    complexityReason: null, decompositionGroupId: 'g1',
+  };
+  const withItems = (...items: unknown[]) => validReply({
+    items, summaryData: { summaryId: 's1', remainingTaskCount: items.length - 1 },
+  });
+  const run = (reply: string) => runPromptEnhancementSequencePlannerV1(input, clientReturning(reply));
+
+  it('rejects a role label the model invented', async () => {
+    // The vocabulary is closed because these labels travel into a payload that declares it carries
+    // none of the user's own wording, and a model asked for a "role" will readily return theirs.
+    expect(await run(withItems(firstTask, taskItem({ roleLabel: 'make checkout faster' }))))
+      .toEqual({ ok: false, reason: 'role_label_invalid' });
+  });
+
+  it('rejects a kind, a verdict and a position outside what the store accepts', async () => {
+    expect(await run(withItems(firstTask, taskItem({ itemKind: 'sanity_check' }))))
+      .toEqual({ ok: false, reason: 'item_kind_invalid' });
+    expect(await run(withItems(firstTask, taskItem({ complexity: 'quite_complex' }))))
+      .toEqual({ ok: false, reason: 'complexity_presence_invalid' });
+    // A displaced entry serves the wrong item for the rest of the sequence.
+    expect(await run(withItems(firstTask, taskItem({ dependencyOrder: 4 }))))
+      .toEqual({ ok: false, reason: 'dependency_order_not_index' });
+  });
+
+  it('rejects an offset that does not address the original, rather than slicing something else', async () => {
+    expect(await run(withItems(firstTask, taskItem({ originalSliceRef: { start: 0, end: ORIGINAL.length + 500 } }))))
+      .toEqual({ ok: false, reason: 'offset_range_out_of_bounds' });
+    // The first prompt is the request itself, not a slice of it.
+    expect(await run(withItems({ ...firstTask, originalSliceRef: { start: 0, end: 4 } }, taskItem())))
+      .toEqual({ ok: false, reason: 'first_task_slice_not_whole_original' });
+    // And the whole-prompt directives index the same original.
+    expect(await run(validReply({ promptDirectives: [{ start: 0, end: ORIGINAL.length + 1 }] })))
+      .toEqual({ ok: false, reason: 'prompt_directives_invalid' });
+  });
+
+  it('rejects confirmations that are not what the verdict earns, in the order it earns them', async () => {
+    const binary = (reason: string) => ({
+      itemKind: 'binary_confirmation', originalSliceRef: null, sourcePointRanges: [],
+      roleLabel: null, dependencyOrder: 2, complexity: null, complexityReason: reason,
+      decompositionGroupId: null,
+    });
+    const double = { ...binary('the migration claims rows were copied'), itemKind: 'double_confirmation' };
+
+    // A verdict of not_complex earns none.
+    expect(await run(withItems(firstTask, taskItem(), binary('why'))))
+      .toEqual({ ok: false, reason: 'confirmations_do_not_match_complexity' });
+    // Complex earns exactly one binary.
+    expect((await run(withItems(
+      firstTask, taskItem({ complexity: 'complex', complexityReason: 'the limiter may never fire' }), binary('confirm the limiter fires'),
+    ))).ok).toBe(true);
+    // Highly complex earns the check first and the decision after it — reversed, the user is asked
+    // to decide before the check that informs the decision has run. Five items, because a task
+    // earning two confirmations puts enough behind the end of the list to earn a closing recap.
+    const wrapUp = {
+      itemKind: 'wrap_up', originalSliceRef: null, sourcePointRanges: [], roleLabel: null,
+      dependencyOrder: 4, complexity: null, complexityReason: null, decompositionGroupId: null,
+    };
+    const highly = taskItem({
+      complexity: 'highly_complex', complexityReason: 'the migration cannot be seen from here',
+    });
+    expect(await run(withItems(
+      firstTask, highly, binary('shall I proceed'), { ...double, dependencyOrder: 3 }, wrapUp,
+    ))).toEqual({ ok: false, reason: 'confirmations_do_not_match_complexity' });
+    // In the locked order it holds.
+    expect((await run(withItems(
+      firstTask, highly, { ...double, dependencyOrder: 2 },
+      { ...binary('shall I proceed'), dependencyOrder: 3 }, wrapUp,
+    ))).ok).toBe(true);
+  });
+
+  it('rejects a closing recap that is not earned, and one that is not last', async () => {
+    const wrapUp = (order: number) => ({
+      itemKind: 'wrap_up', originalSliceRef: null, sourcePointRanges: [], roleLabel: null,
+      dependencyOrder: order, complexity: null, complexityReason: null, decompositionGroupId: null,
+    });
+    // A recap exists if and only if there is enough behind it to recap.
+    expect(await run(withItems(firstTask, taskItem(), wrapUp(2))))
+      .toEqual({ ok: false, reason: 'wrap_up_presence_does_not_match_count' });
+    expect(await run(withItems(
+      firstTask, wrapUp(1), taskItem({ dependencyOrder: 2 }),
+      taskItem({ dependencyOrder: 3 }), taskItem({ dependencyOrder: 4 }),
+    ))).toEqual({ ok: false, reason: 'wrap_up_not_last_or_duplicated' });
+  });
+
+  it('rejects a list outside the bounds, and a summary that disagrees with it', async () => {
+    expect(await run(withItems(firstTask))).toEqual({ ok: false, reason: 'item_count_below_min' });
+    const many = [firstTask, ...Array.from({ length: 30 }, (_, i) => taskItem({ dependencyOrder: i + 1 }))];
+    expect(await run(withItems(...many))).toEqual({ ok: false, reason: 'item_count_over_max' });
+    // Rendered as the total, a summary short by one reports a prompt fewer than the plan holds.
+    expect(await run(validReply({ summaryData: { summaryId: 's1', remainingTaskCount: 2 } })))
+      .toEqual({ ok: false, reason: 'summary_remaining_count_disagrees_with_items' });
+  });
+
+  it('refuses a reply that words an item, rather than stripping the wording out', async () => {
+    // Dropping it would let a plan that broke the rule look exactly like one that kept it.
+    expect(await run(withItems(firstTask, taskItem({ generatedWording: 'Now add the rate limiter.' }))))
+      .toEqual({ ok: false, reason: 'generated_wording_presence_invalid' });
+  });
+});
+
 describe('sequence planner — the safety fields are derived, not asked for', () => {
-  const ORIGINAL = 'Rotate the leaked API key and redeploy production so the new key is live.';
-  const reply = (item: Record<string, unknown>): string => JSON.stringify({
+  const ROTATION = 'Rotate the leaked API key and redeploy production so the new key is live.';
+  const reply = (item: Record<string, unknown>, firstComplexity = 'not_complex'): string => JSON.stringify({
     outcome: 'sequence', outcomeReason: null,
     points: [point('p1', 0), point('p2', 10), point('p3', 20)],
     groups: [group('g1', ['p1', 'p2']), group('g2', ['p3'])],
     items: [
-      { itemKind: 'first_task', originalSliceRef: { start: 0, end: ORIGINAL.length },
-        sourcePointRanges: [], roleLabel: null, dependencyOrder: 0, complexity: 'not_complex',
-        complexityReason: null, decompositionGroupId: 'g1' },
+      { itemKind: 'first_task', originalSliceRef: { start: 0, end: ROTATION.length },
+        sourcePointRanges: [], roleLabel: null, dependencyOrder: 0, complexity: firstComplexity,
+        complexityReason: firstComplexity === 'not_complex' ? null : 'the rotation is not visible from here',
+        decompositionGroupId: 'g1' },
       item,
     ],
     promptDirectives: [],
-    summaryData: { summaryId: 's1', remainingTaskCount: 1, taskRoleLabels: [] },
+    summaryData: { summaryId: 's1', remainingTaskCount: 1 },
   });
-  const run = (item: Record<string, unknown>) => runPromptEnhancementSequencePlannerV1(
-    { promptContext: ORIGINAL, localOriginalText: ORIGINAL },
-    clientReturning(reply(item)),
+  const run = (item: Record<string, unknown>, firstComplexity?: string) => runPromptEnhancementSequencePlannerV1(
+    { promptContext: ROTATION, localOriginalText: ROTATION, entry: ENTRY },
+    clientReturning(reply(item, firstComplexity)),
   );
 
   it('records EVERY risk family the slice reads as, not one of them', async () => {
     // This item cannot be split — rotating the key without redeploying leaves the old one live —
     // so it genuinely carries both, and the sentence the user sees names both.
     const result = await run({
-      itemKind: 'task', originalSliceRef: { start: 0, end: ORIGINAL.length }, sourcePointRanges: [],
+      itemKind: 'task', originalSliceRef: { start: 0, end: ROTATION.length }, sourcePointRanges: [],
       roleLabel: null, dependencyOrder: 1, complexity: 'not_complex', complexityReason: null,
       decompositionGroupId: 'g2',
     });
@@ -349,7 +553,7 @@ describe('sequence planner — the safety fields are derived, not asked for', ()
     // Whatever arrives is discarded. Believing it would be a second classifier disagreeing with
     // the one the user is actually shown.
     const result = await run({
-      itemKind: 'task', originalSliceRef: { start: 0, end: ORIGINAL.length }, sourcePointRanges: [],
+      itemKind: 'task', originalSliceRef: { start: 0, end: ROTATION.length }, sourcePointRanges: [],
       roleLabel: null, dependencyOrder: 1, complexity: 'not_complex', complexityReason: null,
       decompositionGroupId: 'g2',
       actionRiskKinds: ['cost_or_resource'], authorityMode: 'observe_or_literal',
@@ -363,11 +567,12 @@ describe('sequence planner — the safety fields are derived, not asked for', ()
   });
 
   it('gives a kind that carries no slice no authority and no floor', async () => {
+    // The confirmation the first task's verdict earns, so the list is the one that verdict yields.
     const result = await run({
       itemKind: 'binary_confirmation', originalSliceRef: null, sourcePointRanges: [],
       roleLabel: null, dependencyOrder: 1, complexity: null,
       complexityReason: 'the rotation changes a live credential', decompositionGroupId: null,
-    });
+    }, 'complex');
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.output.items[1]).toMatchObject({
@@ -375,17 +580,15 @@ describe('sequence planner — the safety fields are derived, not asked for', ()
     });
   });
 
-  it('treats an offset that does not address the original as no slice at all', async () => {
-    // Fail-closed rather than throwing or slicing something arbitrary.
-    const result = await run({
-      itemKind: 'task', originalSliceRef: { start: 0, end: ORIGINAL.length + 500 },
+  it('will not accept a plan whose offsets do not address the original', async () => {
+    // The derivation is fail-closed on such a ref — no slice, so no authority and no floor — and
+    // the list check is what makes that state unreachable rather than merely safe: a task item
+    // whose positions point outside the prompt has no verbatim text to serve, and serving it later
+    // is what the offsets exist to prevent.
+    expect(await run({
+      itemKind: 'task', originalSliceRef: { start: 0, end: ROTATION.length + 500 },
       sourcePointRanges: [], roleLabel: null, dependencyOrder: 1, complexity: 'not_complex',
       complexityReason: null, decompositionGroupId: 'g2',
-    });
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.output.items[1]).toMatchObject({
-      actionRiskKinds: [], authorityMode: null, requiresConfirmationFloor: false,
-    });
+    })).toEqual({ ok: false, reason: 'offset_range_out_of_bounds' });
   });
 });

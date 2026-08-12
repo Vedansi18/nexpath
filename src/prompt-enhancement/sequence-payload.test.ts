@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   emptyPromptEnhancementSequencePayloadV1,
+  validatePromptEnhancementSequenceItemListV1,
   validatePromptEnhancementSequencePayloadV1,
   type PromptEnhancementSequenceItemKindV1,
   type PromptEnhancementSequenceItemV1,
@@ -367,5 +368,44 @@ describe('sequence payload — the safety fields', () => {
       .toBe('requires_confirmation_floor_invalid');
     expect(reason(payload([firstTask(), task(1, { requiresConfirmationFloor: 'yes' as never })])))
       .toBe('requires_confirmation_floor_invalid');
+  });
+});
+
+describe('sequence payload — the two stages a list is checked at', () => {
+  const planned = (
+    overrides: Partial<PromptEnhancementSequenceItemV1> = {},
+  ): readonly unknown[] => [
+    firstTask({ generatedWording: null, itemValidationGraph: null }),
+    task(1, { generatedWording: null, itemValidationGraph: null, ...overrides }),
+  ];
+  const atPlan = (items: readonly unknown[]) =>
+    validatePromptEnhancementSequenceItemListV1(items, { originalLength: LEN, stage: 'plan' });
+
+  it('accepts at plan time the list that has no wording yet, and rejects it as stored', () => {
+    // The same list, and both answers are right: the planner has not worded it, and a stored item
+    // with no wording is a body the packager cannot serve.
+    expect(atPlan(planned()).ok).toBe(true);
+    expect(validatePromptEnhancementSequenceItemListV1(planned(), { originalLength: LEN, stage: 'stored' }))
+      .toEqual({ ok: false, reasonCode: 'generated_wording_presence_invalid', itemIndex: 1 });
+  });
+
+  it('rejects wording and a verdict at plan time, on every kind', () => {
+    // Wording at plan time is a prompt written by the step that was told not to write one, and a
+    // verdict at plan time reports on text that does not exist yet.
+    expect(atPlan(planned({ generatedWording: 'Now do the other half.' })))
+      .toEqual({ ok: false, reasonCode: 'generated_wording_presence_invalid', itemIndex: 1 });
+    expect(atPlan(planned({ itemValidationGraph: GRAPH })))
+      .toEqual({ ok: false, reasonCode: 'item_validation_graph_presence_invalid', itemIndex: 1 });
+  });
+
+  it('applies every other rule identically at both stages', () => {
+    // The checks that stop a bad plan being built are the checks that stop a bad row being served;
+    // a rule that only bit once stored would bite after the user had been offered the sequence.
+    expect(atPlan(planned({ roleLabel: 'ship it' as never })))
+      .toEqual({ ok: false, reasonCode: 'role_label_invalid', itemIndex: 1 });
+    expect(atPlan(planned({ dependencyOrder: 7 })))
+      .toEqual({ ok: false, reasonCode: 'dependency_order_not_index', itemIndex: 1 });
+    expect(atPlan(planned({ originalSliceRef: { start: 10, end: LEN + 1 } })))
+      .toEqual({ ok: false, reasonCode: 'offset_range_out_of_bounds', itemIndex: 1 });
   });
 });

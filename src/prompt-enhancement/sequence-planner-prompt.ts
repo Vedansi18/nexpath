@@ -42,7 +42,12 @@ COVERAGE: every point you found must land in exactly one of four places —
 
 (d) is a legal answer. Silently dropping a point is not. A group may also stay in the current body
 instead of becoming an item of its own — that is how a request with many small bullets becomes two
-prompts rather than ten.`;
+prompts rather than ten.
+
+AND (b) IS ONLY AVAILABLE WHEN YOU ARE ACTUALLY PLANNING A SEQUENCE. If the answer is one prompt,
+there are no later items to hold anything back for, so every required point must be in the current
+body. A point parked in "item 4" of a sequence that is never offered is gone from the only prompt
+the user ever sends, and it will have satisfied a landing place on the way out.`;
 
 /** 2 — complexity: definition, signals, non-signals, triggers, and why the layer is strict. */
 const SECTION_2_COMPLEXITY = `SECTION 2 — COMPLEXITY
@@ -80,8 +85,16 @@ answer is not-complex and no confirmation is emitted. Do not raise the verdict t
 WHY THIS IS STRICT: every unnecessary confirmation reduces the chance that a necessary one is read.
 Confirmations have to stay rare enough to still be read.`;
 
-/** 3 — the five slicing locks, each with the failure it prevents. */
+/** 3 — rule 0 on whether an item exists at all, then the five slicing locks with their failures. */
 const SECTION_3_SLICING = `SECTION 3 — SLICING CONSTRAINTS
+
+RULE 0 — AN ITEM EXISTS ONLY ON A DECISION ABOUT THAT ITEM.
+
+Never produce an item because of a count, because the request was long, or because checks are good
+practice. Every item — work, verification, confirmation, closing recap — must trace to a decision
+about that particular item: what it covers, why it is separate from its neighbours, and what it is
+for. Attaching a verification item to every task as a matter of course is the failure this names,
+and it is not made acceptable by the tasks deserving verification individually.
 
 Three spans must never be CUT:
 
@@ -126,6 +139,13 @@ The confirmations that follow a task are decided by that task's complexity verdi
 Give a REASON for each confirmation that justifies its TYPE, not merely that the work was risky.
 A highly-complex task emitting two confirmations must say why each one is there.
 
+THE DECISION IS TAKEN PER ITEM. "This sequence needs confirmation" is never a valid conclusion.
+Record an applicability decision and a reason for each item, or emit none for that item. A sequence
+normally carries confirmations on some items and none on others; the same treatment spread evenly
+across every item is the sign the decision was taken at the sequence level and then fanned out —
+which produces exactly the volume this section exists to prevent, while every reason field is
+filled in.
+
 THE READINESS DISCIPLINE — a hard stop:
 
   A readiness ask is NEVER emitted. "Is it safe to deploy now?" invites a weighing of consequences,
@@ -140,6 +160,37 @@ THE READINESS DISCIPLINE — a hard stop:
     4. if you cannot do that, emit nothing.
 
 Never emit a scheduling question. Never ask whether something is ready.`;
+
+/**
+ * 5 — the bounds, and what to do when the work does not fit.
+ *
+ * Its own section because the caps are rules the planner is held to and cannot obey unstated: a
+ * list is rejected whole for breaking them, so a plan that has never been told the limits fails
+ * after the work of building it rather than instead of it. The overflow order travels with them
+ * because "it does not fit" without an order is an invitation to drop whatever is at the end.
+ */
+const SECTION_5_BOUNDS = `SECTION 5 — BOUNDS, AND WHAT TO DO WHEN THE WORK DOES NOT FIT
+
+A sequence is AT LEAST 2 and AT MOST 30 items, counting everything in the list — tasks,
+confirmations and the closing recap alike. A one-item list is not a short sequence; it means no
+sequence, and the answer is one of the single-prompt outcomes.
+
+THE CLOSING RECAP is emitted IF AND ONLY IF there are more than 3 other prompts. It is always last,
+there is never more than one, and it occupies one of the 30 like anything else.
+
+WHEN THE WORK DOES NOT FIT, in this order:
+
+  1. MERGE until it fits. Nothing leaves.
+  2. SHED BY PRIORITY. Shed work FALLS BACK INTO THE CURRENT BODY — it is never dropped. Your own
+     additions go first, then work the user marked as droppable. NEVER shed work the user marked as
+     mandatory.
+  3. NO SEQUENCE. Only when mandatory work exceeds the cap and cannot be carried in the body.
+
+A safety obligation that will not fit is never shed and never deferred into a later item. It stays
+in the body, or the body is not sendable.
+
+Priority is the user's own marking, however they phrased it — the property is whether they marked
+the work as mandatory or as droppable, not whether they used any particular word for it.`;
 
 /**
  * What the reply must contain.
@@ -159,27 +210,42 @@ A single JSON object:
   items             — [{ itemKind, originalSliceRef, sourcePointRanges, roleLabel, dependencyOrder,
                          complexity, complexityReason, decompositionGroupId }]
   promptDirectives  — [{ start, end }]  whole-prompt instructions, as positions
-  summaryData       — { summaryId, remainingTaskCount, taskRoleLabels }
+  summaryData       — { summaryId, remainingTaskCount }
 
   itemKind          — "first_task" | "task" | "double_confirmation" | "cross_confirmation"
                       | "binary_confirmation" | "wrap_up"
-  originalSliceRef  — { start, end } on task kinds; null on confirmations and on the closing recap
+                      exactly one "first_task", and it is item 0
+  originalSliceRef  — { start, end } on task kinds; null on confirmations and on the closing recap.
+                      On "first_task" it is the WHOLE original — start 0, end its full length —
+                      because the first prompt is the request itself, not a slice of it
+  complexityReason  — on a task, how it could be silently wrong; on a confirmation, why THAT
+                      confirmation applies
   roleLabel         — one of "fix" "review" "refactor" "plan" "build", or null. Never invent one:
-                      a point matching none of them contributes no label.
+                      a point matching none of them contributes no label
   dependencyOrder   — the item's own index in the list
   complexity        — task kinds only; null on confirmations and the closing recap
   summaryData.remainingTaskCount — items AFTER the first
 
-DO NOT return actionRiskKind, authorityMode, requiresConfirmationFloor or any wording. The safety
-fields are derived from the slice you point at, and the wording is written by a later step.`;
+Every position must address the original: 0 <= start < end <= its length.
 
-/** The order is fixed: the preference frames the decision the rest of the sections carry out. */
+DO NOT return actionRiskKind, authorityMode, requiresConfirmationFloor, taskRoleLabels or any
+wording. The safety fields are derived from the slice you point at, the role labels are read off the
+items you emit, and the wording is written by a later step.`;
+
+/**
+ * The order is fixed: the preference frames the decision the rest of the sections carry out.
+ *
+ * FIVE of these are mandatory by specification — 0 through 4. The bounds section is the sixth and
+ * was added by the build, because the list is rejected whole for exceeding a cap the planner was
+ * never told.
+ */
 export const PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_SECTIONS_V1: readonly string[] = [
   SECTION_0_PREFERENCE,
   SECTION_1_ORDER,
   SECTION_2_COMPLEXITY,
   SECTION_3_SLICING,
   SECTION_4_CONFIRMATION,
+  SECTION_5_BOUNDS,
 ];
 
 /** The output shape is appended after the five, so the rules are read before the form. */

@@ -20,7 +20,8 @@ export type PromptEnhancementSequencePlannerRefusalV1 =
   | 'prompt_origin_unknown'
   | 'body_is_sequence_owned'
   | 'body_is_feature_generated'
-  | 'sequence_disabled_by_config';
+  | 'sequence_disabled_by_config'
+  | 'no_absence_signal_section';
 
 export type PromptEnhancementSequencePlannerEntryV1 =
   | { mayRun: true }
@@ -40,6 +41,18 @@ export interface PromptEnhancementSequencePlannerEntryInputV1 {
    * precedence and turns an invalid value into `off` instead of into the default.
    */
   sequenceEnabled: 'on' | 'off';
+  /**
+   * Whether the guidance gate decided a popup will be shown at all.
+   *
+   * This is the gate's OWN answer, passed in. The planner must not work out its own version of it:
+   * a second predicate would drift from the shipping one, which is the same failure the safety
+   * fields avoid by being read off the machinery that already ships rather than asked for.
+   *
+   * It is an entry condition rather than an after-the-fact check because a sequence planned onto a
+   * popup that never appears is a whole planner call thrown away — the most expensive item in this
+   * feature's cost table, spent on nothing.
+   */
+  guidanceGateShow: boolean;
 }
 
 /** Bodies this feature produced. A sequence-owned one is called out separately because it is the
@@ -72,6 +85,9 @@ export function promptEnhancementSequencePlannerMayRunV1(
   if (input.sentPromptOrigin !== undefined && FEATURE_GENERATED_BODIES.includes(input.sentPromptOrigin)) {
     return { mayRun: false, refusal: 'body_is_feature_generated' };
   }
+  // No popup, no sequence. The sequence is offered on the first popup and nowhere else, so a gate
+  // that has already decided against showing one leaves nothing for a plan to be offered on.
+  if (!input.guidanceGateShow) return { mayRun: false, refusal: 'no_absence_signal_section' };
   return { mayRun: true };
 }
 

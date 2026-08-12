@@ -2,7 +2,6 @@ import {
   PROMPT_ENHANCEMENT_SEQUENCE_MAX_ITEM_COUNT_V1,
   PROMPT_ENHANCEMENT_SEQUENCE_MIN_ITEM_COUNT_V1,
 } from './sequence-runtime.js';
-import type { PromptEnhancementSequenceOffsetRangeV1 } from './sequence-payload.js';
 
 /**
  * The planner's structured output, and the checks that can honestly be run over it.
@@ -66,7 +65,6 @@ export type PromptEnhancementSequencePlannerCheckCodeV1 =
   | 'grouping_stage_did_nothing'
   | 'item_count_below_min'
   | 'item_count_over_max'
-  | 'wrap_up_reservation_exceeded'
   | 'summary_remaining_count_disagrees_with_items';
 
 export type PromptEnhancementSequencePlannerCheckResultV1 =
@@ -140,34 +138,22 @@ export function checkPromptEnhancementSequencePlannerGroupingV1(
 /**
  * The bounds a planned list has to satisfy before anything downstream sees it.
  *
- * The reservation is the part that is easy to miss: when a closing recap will be emitted, the other
- * items are capped one lower so the recap fits inside the locked maximum rather than pushing the
- * list past it.
+ * The recap's reservation needs no term of its own: it is emitted as one of the items, so capping
+ * "the others" one lower is the same statement as capping the whole list at the maximum. A separate
+ * check for it read as a second enforcement and could never fire — the count it tested had already
+ * failed the line above. What the recap actually costs is enforced where it is decidable: it exists
+ * if and only if there is enough behind it to recap, which is a rule about the list, not a bound.
  */
 export function checkPromptEnhancementSequencePlannerBoundsV1(input: {
   itemCount: number;
-  emitsWrapUp: boolean;
   summaryRemainingTaskCount: number;
 }): PromptEnhancementSequencePlannerCheckResultV1 {
   if (input.itemCount < PROMPT_ENHANCEMENT_SEQUENCE_MIN_ITEM_COUNT_V1) return fail('item_count_below_min');
   if (input.itemCount > PROMPT_ENHANCEMENT_SEQUENCE_MAX_ITEM_COUNT_V1) return fail('item_count_over_max');
-  if (input.emitsWrapUp
-    && input.itemCount - 1 > PROMPT_ENHANCEMENT_SEQUENCE_MAX_ITEM_COUNT_V1 - 1) {
-    return fail('wrap_up_reservation_exceeded');
-  }
   // The summary's own count is items after the first. Stored disagreeing with the list is how a
   // popup ends up reporting a different number of prompts than the plan holds.
   if (input.summaryRemainingTaskCount !== input.itemCount - 1) {
     return fail('summary_remaining_count_disagrees_with_items');
   }
   return { ok: true };
-}
-
-/** Does an offset range address a real span of the original? */
-export function isPromptEnhancementSequencePlannerRangeV1(
-  range: PromptEnhancementSequenceOffsetRangeV1,
-  originalLength: number,
-): boolean {
-  return Number.isSafeInteger(range.start) && Number.isSafeInteger(range.end)
-    && range.start >= 0 && range.start < range.end && range.end <= originalLength;
 }

@@ -6,6 +6,13 @@ import {
 } from './cost-observability.js';
 import { buildPromptEnhancementSequencePlannerSystemPromptV1 } from './sequence-planner-prompt.js';
 import {
+  promptEnhancementSequencePlannerMayRunV1,
+  promptEnhancementSequencePolicyForOutcomeV1,
+  type PromptEnhancementSequencePlannerEntryInputV1,
+  type PromptEnhancementSequencePlannerRefusalV1,
+} from './sequence-planner-entry.js';
+import {
+  checkPromptEnhancementSequencePlannerBoundsV1,
   checkPromptEnhancementSequencePlannerGroupingV1,
   checkPromptEnhancementSequencePlannerOutcomeV1,
   type PromptEnhancementSequencePlannerCheckCodeV1,
@@ -15,7 +22,15 @@ import {
   type PromptEnhancementSequencePlannerPointV1,
   type PromptEnhancementSequencePlannerSummaryDataV1,
 } from './sequence-planner-output.js';
-import type { PromptEnhancementSequenceOffsetRangeV1 } from './sequence-payload.js';
+import {
+  isPromptEnhancementSequenceOffsetRangeV1,
+  validatePromptEnhancementSequenceItemListV1,
+  type PromptEnhancementSequenceItemV1,
+  type PromptEnhancementSequenceNextPromptPolicyV1,
+  type PromptEnhancementSequenceOffsetRangeV1,
+  type PromptEnhancementSequencePayloadReasonCodeV1,
+  type PromptEnhancementSequenceRoleLabelV1,
+} from './sequence-payload.js';
 import {
   promptEnhancementAuthorityModeForTextV1,
   promptEnhancementRiskKindsForTextV1,
@@ -56,8 +71,15 @@ export interface PromptEnhancementSequencePlannerClientV1 {
   };
 }
 
-/** An item as the planner emits it: parts and positions, no wording. */
-export interface PromptEnhancementSequencePlannerItemV1 {
+/**
+ * An item on its way to being one, before anything has been checked.
+ *
+ * The fields are loosely typed on purpose: a kind, a role or a verdict arriving as some other
+ * string is the ordinary case this call exists to catch, and typing it as the real value up front
+ * would only be asserting what has not been established. The draft becomes the real shape by
+ * passing the item-list check, which is what earns the narrowing.
+ */
+interface PlannedItemDraftV1 {
   itemKind: string;
   originalSliceRef: PromptEnhancementSequenceOffsetRangeV1 | null;
   sourcePointRanges: readonly PromptEnhancementSequenceOffsetRangeV1[];
@@ -65,6 +87,8 @@ export interface PromptEnhancementSequencePlannerItemV1 {
   dependencyOrder: number;
   complexity: string | null;
   complexityReason: string | null;
+  /** Never written here. Carried so a reply that words an item is refused, not silently stripped. */
+  generatedWording: string | null;
   /**
    * The three safety fields are DERIVED from the item's own slice, never asked of the model. The
    * ruling that created them was chosen on "no new classifier"; asking would be exactly that, and
@@ -74,18 +98,31 @@ export interface PromptEnhancementSequencePlannerItemV1 {
   authorityMode: PromptEnhancementAuthorityMode | null;
   requiresConfirmationFloor: boolean;
   decompositionGroupId: string | null;
+  /** The verdict is produced when the wording is, and there is none yet. */
+  itemValidationGraph: null;
 }
 
+/**
+ * What the planner returns.
+ *
+ * The point inventory and the grouping are NOT here. Both are working state: they exist so the
+ * slicing has something to be checked against, they are checked on the way through, and they die
+ * with the call. What survives of the grouping is one id per item — enough to rebuild the grouping
+ * the planner actually decided, which a served item alone cannot do.
+ */
 export interface PromptEnhancementSequencePlannerOutputV1 {
   outcome: PromptEnhancementSequencePlannerOutcomeV1;
   outcomeReason: PromptEnhancementSequencePlannerOutcomeReasonV1 | null;
-  /** Working state: checked, then discarded. */
-  points: readonly PromptEnhancementSequencePlannerPointV1[];
-  groups: readonly PromptEnhancementSequencePlannerGroupV1[];
-  items: readonly PromptEnhancementSequencePlannerItemV1[];
+  items: readonly PromptEnhancementSequenceItemV1[];
   /** Whole-prompt instructions, as offsets — one copy per sequence, applied to every item. */
   promptDirectives: readonly PromptEnhancementSequenceOffsetRangeV1[];
   originalLength: number;
+  /**
+   * Whether text exists ahead of the user accepting anything. Only a planned sequence has any, so
+   * only a sequence moves off the default — declaring otherwise on a list with no items would claim
+   * a state the row is not in.
+   */
+  suggestedNextPromptPolicy: PromptEnhancementSequenceNextPromptPolicyV1;
   /** Counts and role labels. The line itself is worded elsewhere. */
   summaryData: PromptEnhancementSequencePlannerSummaryDataV1;
 }
@@ -95,7 +132,9 @@ export type PromptEnhancementSequencePlannerFailureReasonV1 =
   | 'provider_error'
   | 'timeout'
   | 'invalid_output'
-  | PromptEnhancementSequencePlannerCheckCodeV1;
+  | PromptEnhancementSequencePlannerRefusalV1
+  | PromptEnhancementSequencePlannerCheckCodeV1
+  | PromptEnhancementSequencePayloadReasonCodeV1;
 
 export type PromptEnhancementSequencePlannerResultV1 =
   | { ok: true; output: PromptEnhancementSequencePlannerOutputV1 }
@@ -116,6 +155,11 @@ export interface PromptEnhancementSequencePlannerInputV1 {
    * the user's own words appear exactly.
    */
   localOriginalText: string;
+  /**
+   * Whether this prompt may be planned at all. Required rather than optional: every condition on it
+   * is a refusal, and an entry check that can be omitted is one that will be.
+   */
+  entry: PromptEnhancementSequencePlannerEntryInputV1;
 }
 
 /**
@@ -148,8 +192,25 @@ function asRange(value: unknown): PromptEnhancementSequenceOffsetRangeV1 | null 
   return { start: range['start'], end: range['end'] };
 }
 
+/**
+ * A reply as it arrives: shape-parsed only.
+ *
+ * Held separately from the output because the working state is on it and is not on the output, and
+ * because its items are drafts — everything about their meaning is still unchecked at this point.
+ */
+interface ParsedPlannerReplyV1 {
+  outcome: PromptEnhancementSequencePlannerOutcomeV1;
+  outcomeReason: PromptEnhancementSequencePlannerOutcomeReasonV1 | null;
+  points: readonly PromptEnhancementSequencePlannerPointV1[];
+  groups: readonly PromptEnhancementSequencePlannerGroupV1[];
+  items: readonly PlannedItemDraftV1[];
+  promptDirectives: readonly PromptEnhancementSequenceOffsetRangeV1[];
+  summaryId: string;
+  remainingTaskCount: number;
+}
+
 /** Shape-parse a reply. Meaning is checked by the callers of the check helpers, not here. */
-function parsePlannerReply(raw: string): PromptEnhancementSequencePlannerOutputV1 | null {
+function parsePlannerReply(raw: string): ParsedPlannerReplyV1 | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
@@ -165,7 +226,7 @@ function parsePlannerReply(raw: string): PromptEnhancementSequencePlannerOutputV
     return null;
   }
 
-  const items: PromptEnhancementSequencePlannerItemV1[] = [];
+  const items: PlannedItemDraftV1[] = [];
   for (const entry of reply['items'] as unknown[]) {
     if (typeof entry !== 'object' || entry === null) return null;
     const item = entry as Record<string, unknown>;
@@ -182,6 +243,10 @@ function parsePlannerReply(raw: string): PromptEnhancementSequencePlannerOutputV
       dependencyOrder: item['dependencyOrder'],
       complexity: typeof item['complexity'] === 'string' ? item['complexity'] : null,
       complexityReason: typeof item['complexityReason'] === 'string' ? item['complexityReason'] : null,
+      // Carried through as it arrived, so wording the planner was told not to write is REFUSED
+      // rather than dropped here: dropping it would let a plan that broke the rule look like one
+      // that kept it.
+      generatedWording: typeof item['generatedWording'] === 'string' ? item['generatedWording'] : null,
       // Placeholders: whatever the reply says about safety is discarded and re-derived below.
       actionRiskKinds: [],
       authorityMode: null,
@@ -189,15 +254,18 @@ function parsePlannerReply(raw: string): PromptEnhancementSequencePlannerOutputV
       decompositionGroupId: typeof item['decompositionGroupId'] === 'string'
         ? item['decompositionGroupId']
         : null,
+      itemValidationGraph: null,
     });
   }
 
+  // No `taskRoleLabels` here. They are the set of the labels the items already carry, so they are
+  // read off the list rather than asked for — asked for, they are a second answer to a question the
+  // list has already answered, and free to disagree with it.
   const summary = reply['summaryData'];
   if (typeof summary !== 'object' || summary === null) return null;
   const summaryData = summary as Record<string, unknown>;
   if (typeof summaryData['summaryId'] !== 'string'
-    || typeof summaryData['remainingTaskCount'] !== 'number'
-    || !Array.isArray(summaryData['taskRoleLabels'])) {
+    || typeof summaryData['remainingTaskCount'] !== 'number') {
     return null;
   }
 
@@ -208,15 +276,25 @@ function parsePlannerReply(raw: string): PromptEnhancementSequencePlannerOutputV
     groups: reply['groups'] as readonly PromptEnhancementSequencePlannerGroupV1[],
     items,
     promptDirectives,
-    originalLength: 0,
-    summaryData: {
-      summaryId: summaryData['summaryId'],
-      remainingTaskCount: summaryData['remainingTaskCount'],
-      taskRoleLabels: (summaryData['taskRoleLabels'] as unknown[]).filter(
-        (label): label is string => typeof label === 'string',
-      ),
-    },
+    summaryId: summaryData['summaryId'],
+    remainingTaskCount: summaryData['remainingTaskCount'],
   };
+}
+
+/**
+ * The role labels the summary reports: the distinct labels the items carry, in the order they first
+ * appear.
+ *
+ * Order is stable rather than incidental so the same plan produces the same summary data twice.
+ */
+function taskRoleLabelsFor(
+  items: readonly PromptEnhancementSequenceItemV1[],
+): readonly PromptEnhancementSequenceRoleLabelV1[] {
+  const labels: PromptEnhancementSequenceRoleLabelV1[] = [];
+  for (const item of items) {
+    if (item.roleLabel !== null && !labels.includes(item.roleLabel)) labels.push(item.roleLabel);
+  }
+  return labels;
 }
 
 /**
@@ -252,14 +330,18 @@ function deriveItemSafetyFields(sliceText: string | null): {
   };
 }
 
-/** Cut the slice this item points at, or null when it points at none. */
+/**
+ * Cut the slice this item points at, or null when it points at none.
+ *
+ * An offset that does not address the original also yields null. The item-list check rejects such a
+ * plan a moment later, so this is the answer for the moment in between — and it is the fail-closed
+ * one rather than a slice of whatever happened to be at those positions.
+ */
 function sliceTextFor(
   ref: PromptEnhancementSequenceOffsetRangeV1 | null,
   localOriginalText: string,
 ): string | null {
-  if (ref === null) return null;
-  if (!Number.isSafeInteger(ref.start) || !Number.isSafeInteger(ref.end)) return null;
-  if (ref.start < 0 || ref.start >= ref.end || ref.end > localOriginalText.length) return null;
+  if (!isPromptEnhancementSequenceOffsetRangeV1(ref, localOriginalText.length)) return null;
   return localOriginalText.slice(ref.start, ref.end);
 }
 
@@ -274,6 +356,11 @@ export async function runPromptEnhancementSequencePlannerV1(
   input: PromptEnhancementSequencePlannerInputV1,
   client?: PromptEnhancementSequencePlannerClientV1,
 ): Promise<PromptEnhancementSequencePlannerResultV1> {
+  // Before anything is spent. Every one of these is a refusal, and the config gate in particular is
+  // silent by contract — an off gate produces no plan and no explanation of why.
+  const entry = promptEnhancementSequencePlannerMayRunV1(input.entry);
+  if (!entry.mayRun) return { ok: false, reason: entry.refusal };
+
   let openai: PromptEnhancementSequencePlannerClientV1;
   try {
     // With no injected client and no key this throws, which is a call that never happened.
@@ -311,21 +398,75 @@ export async function runPromptEnhancementSequencePlannerV1(
   const outcome = checkPromptEnhancementSequencePlannerOutcomeV1(parsed.outcome, parsed.outcomeReason);
   if (!outcome.ok) return { ok: false, reason: outcome.code };
 
-  // The working state is checked here and travels no further: whoever consumes the plan gets items,
-  // not the inventory they were derived from.
+  const originalLength = input.localOriginalText.length;
+
+  // Two of the three outcomes are decisions NOT to make a sequence, and they are ordinary answers
+  // rather than failures. Nothing below applies to them: there is no list to bound, no grouping
+  // that has to have done anything, and no summary, since a popup with no sequence shows none.
+  if (parsed.outcome !== 'sequence') {
+    return {
+      ok: true,
+      output: {
+        outcome: parsed.outcome,
+        outcomeReason: parsed.outcomeReason,
+        items: [],
+        promptDirectives: [],
+        originalLength,
+        suggestedNextPromptPolicy: promptEnhancementSequencePolicyForOutcomeV1(parsed.outcome),
+        summaryData: { summaryId: parsed.summaryId, remainingTaskCount: 0, taskRoleLabels: [] },
+      },
+    };
+  }
+
+  // The working state is checked here and travels no further: it is not on the output, so whoever
+  // consumes the plan gets items and not the inventory they were derived from.
   const grouping = checkPromptEnhancementSequencePlannerGroupingV1(parsed.points, parsed.groups);
   if (!grouping.ok) return { ok: false, reason: grouping.code };
 
-  // Safety is read off the slices, after the shape is known to hold. An offset that does not
-  // address the original yields no slice, and therefore no authority and no floor — the same
-  // fail-closed answer as an item that carries no slice at all.
-  const items = parsed.items.map((item) => ({
+  const bounds = checkPromptEnhancementSequencePlannerBoundsV1({
+    itemCount: parsed.items.length,
+    summaryRemainingTaskCount: parsed.remainingTaskCount,
+  });
+  if (!bounds.ok) return { ok: false, reason: bounds.code };
+
+  // Safety is read off the slices before the list is checked, because the list check reads those
+  // fields: an item's authority has to be on it by the time the rule that an item with a slice
+  // carries one is applied to it.
+  const drafts = parsed.items.map((item) => ({
     ...item,
     ...deriveItemSafetyFields(sliceTextFor(item.originalSliceRef, input.localOriginalText)),
   }));
 
+  // Every rule about the list itself — the six kinds, the closed role vocabulary, position, the
+  // offsets, the recap, and the confirmations each verdict earns. It is the same check the store
+  // applies, at the stage before wording exists, so a plan cannot pass here and fail there.
+  const structure = validatePromptEnhancementSequenceItemListV1(drafts, {
+    originalLength,
+    stage: 'plan',
+  });
+  if (!structure.ok) return { ok: false, reason: structure.reasonCode };
+  if (parsed.promptDirectives.some(
+    (range) => !isPromptEnhancementSequenceOffsetRangeV1(range, originalLength),
+  )) {
+    return { ok: false, reason: 'prompt_directives_invalid' };
+  }
+
+  // The check above established every field, which is what the narrowing rests on.
+  const items = drafts as unknown as readonly PromptEnhancementSequenceItemV1[];
   return {
     ok: true,
-    output: { ...parsed, items, originalLength: input.localOriginalText.length },
+    output: {
+      outcome: parsed.outcome,
+      outcomeReason: parsed.outcomeReason,
+      items,
+      promptDirectives: parsed.promptDirectives,
+      originalLength,
+      suggestedNextPromptPolicy: promptEnhancementSequencePolicyForOutcomeV1(parsed.outcome),
+      summaryData: {
+        summaryId: parsed.summaryId,
+        remainingTaskCount: parsed.remainingTaskCount,
+        taskRoleLabels: taskRoleLabelsFor(items),
+      },
+    },
   };
 }

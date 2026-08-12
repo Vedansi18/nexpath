@@ -227,7 +227,15 @@ function isSafeIndex(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 }
 
-function rangeWithinBounds(
+/**
+ * Does a value address a real span of the original?
+ *
+ * Exported because the planner has to ask the same question of the offsets it just received, and
+ * one definition is what makes "the planner selected a boundary" and "the store accepts that
+ * boundary" the same statement. A second copy would let a plan pass a rule the row it becomes
+ * cannot pass.
+ */
+export function isPromptEnhancementSequenceOffsetRangeV1(
   value: unknown,
   originalLength: number,
 ): value is PromptEnhancementSequenceOffsetRangeV1 {
@@ -273,7 +281,7 @@ export function validatePromptEnhancementSequencePayloadV1(
   const originalLength = p['originalLength'];
 
   if (!Array.isArray(p['promptDirectives'])
-    || (p['promptDirectives'] as unknown[]).some((r) => !rangeWithinBounds(r, originalLength))) {
+    || (p['promptDirectives'] as unknown[]).some((r) => !isPromptEnhancementSequenceOffsetRangeV1(r, originalLength))) {
     return fail('prompt_directives_invalid');
   }
   if (!PROMPT_ENHANCEMENT_SEQUENCE_NEXT_PROMPT_POLICIES_V1
@@ -316,6 +324,35 @@ export function validatePromptEnhancementSequencePayloadV1(
     return fail('next_prompt_policy_disagrees_with_items');
   }
 
+  return validatePromptEnhancementSequenceItemListV1(items, { originalLength, stage: 'stored' });
+}
+
+/**
+ * When a list is being checked, and it is the difference between two real states rather than a
+ * strictness dial.
+ *
+ * `plan` is a list the planner has just produced: every item has its kind, its positions, its
+ * verdict and its safety fields, and NONE of them has wording, because the planner does not word.
+ * `stored` is the same list after the batch wrote that wording and the validator recorded its
+ * verdict. Every other rule is identical, and deliberately so — the checks that stop a bad plan
+ * from being built are the checks that stop a bad row from being served, and a plan that could
+ * only fail once it was stored would fail after the user had already been offered it.
+ */
+export type PromptEnhancementSequenceItemListStageV1 = 'plan' | 'stored';
+
+/**
+ * The item list's own rules, shared by both stages.
+ *
+ * It lives here, beside the shape and the closed vocabularies, so the planner cannot enforce a
+ * different closure from the one the store enforces. A second copy for plan time would be free to
+ * drift, and the drift would surface as a plan that validates and a row that does not — with the
+ * user already looking at the popup.
+ */
+export function validatePromptEnhancementSequenceItemListV1(
+  items: readonly unknown[],
+  input: { originalLength: number; stage: PromptEnhancementSequenceItemListStageV1 },
+): PromptEnhancementSequencePayloadValidationV1 {
+  const { originalLength, stage } = input;
   let firstTaskCount = 0;
   let wrapUpCount = 0;
 
@@ -344,7 +381,7 @@ export function validatePromptEnhancementSequencePayloadV1(
 
     const sliceRef = item['originalSliceRef'];
     if (isTaskKind) {
-      if (!rangeWithinBounds(sliceRef, originalLength)) {
+      if (!isPromptEnhancementSequenceOffsetRangeV1(sliceRef, originalLength)) {
         return sliceRef === null
           ? fail('original_slice_ref_presence_invalid', index)
           : fail('offset_range_out_of_bounds', index);
@@ -361,7 +398,7 @@ export function validatePromptEnhancementSequencePayloadV1(
     }
 
     if (!Array.isArray(item['sourcePointRanges'])
-      || (item['sourcePointRanges'] as unknown[]).some((r) => !rangeWithinBounds(r, originalLength))) {
+      || (item['sourcePointRanges'] as unknown[]).some((r) => !isPromptEnhancementSequenceOffsetRangeV1(r, originalLength))) {
       return fail('source_point_ranges_invalid', index);
     }
 
@@ -396,8 +433,17 @@ export function validatePromptEnhancementSequencePayloadV1(
 
     // A stored item with no wording is a body the packager cannot serve; `first_task` is the
     // one exception because it was sent at intake and is never offered again.
+    //
+    // At plan time the rule inverts and applies to every kind: the planner emits no wording at
+    // all, so wording arriving here means the model wrote a prompt it was told not to write. That
+    // is rejected rather than quietly stripped — text with no source to check it against is
+    // exactly what the offsets exist to keep out of the user's prompts.
     const wording = item['generatedWording'];
-    if (kind === 'first_task') {
+    if (stage === 'plan') {
+      if (wording !== null && wording !== undefined) {
+        return fail('generated_wording_presence_invalid', index);
+      }
+    } else if (kind === 'first_task') {
       if (wording !== null) return fail('generated_wording_presence_invalid', index);
     } else if (!isNonEmptyString(wording)) {
       return fail('generated_wording_presence_invalid', index);
@@ -435,9 +481,14 @@ export function validatePromptEnhancementSequencePayloadV1(
     }
 
     // Same rule and same reason as the wording: an item with a body and no verdict is a body
-    // nobody validated.
+    // nobody validated. And the same inversion at plan time — the verdict is produced when the
+    // wording is, so a plan carrying one is reporting on text that does not exist yet.
     const graph = item['itemValidationGraph'];
-    if (kind === 'first_task') {
+    if (stage === 'plan') {
+      if (graph !== null && graph !== undefined) {
+        return fail('item_validation_graph_presence_invalid', index);
+      }
+    } else if (kind === 'first_task') {
       if (graph !== null) return fail('item_validation_graph_presence_invalid', index);
     } else if (typeof graph !== 'object' || graph === null) {
       return fail('item_validation_graph_presence_invalid', index);
