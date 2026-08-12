@@ -27,6 +27,22 @@ export const PROMPT_ENHANCEMENT_COST_OUTPUT_TOKEN_CAP_V1 = 2_000;
  */
 export const PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_OUTPUT_TOKEN_CAP_V1 = 1_500;
 export const PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_OUTPUT_TOKEN_HARD_CAP_V1 = 4_000;
+
+/**
+ * The batch composer's output budget: every remaining prompt's wording in ONE reply.
+ *
+ * Not the per-item figures — those price a call per item, and the batch is one call over the whole
+ * list, so they do not transfer. Derived from the locked bounds rather than borrowed: a later item
+ * is deliberately light (its slice, a rewrite, and one section or none), which lands around 300
+ * tokens, and the maximum list is 30 items of which the batch writes 29. The hard cap covers that
+ * worst case with room for the closing recap, which carries every task's slice verbatim; the normal
+ * cap covers the ordinary sequence of a handful of items.
+ *
+ * PROVISIONAL. A truncated batch is invalid rather than degraded, so these decide when a long
+ * sequence is possible at all — and they are derived, not measured. The measurement is owed.
+ */
+export const PROMPT_ENHANCEMENT_SEQUENCE_BATCH_OUTPUT_TOKEN_CAP_V1 = 4_000;
+export const PROMPT_ENHANCEMENT_SEQUENCE_BATCH_OUTPUT_TOKEN_HARD_CAP_V1 = 12_000;
 // Composer/route call budget. Raised from 10s (2026-08-07): the bounded composer asks for up to
 // PROMPT_ENHANCEMENT_COST_OUTPUT_TOKEN_CAP_V1 tokens as one JSON object covering every planned
 // section, which measures 9-14s for 6-8 sections — so a 10s cap cut the call off before it could
