@@ -128,7 +128,14 @@ describe('Phase 13 eval-rule-3 test and acceptance matrix', () => {
 
   it('records explicit source-reality, route-record, composer, store, host, and public-launch acceptance focuses', () => {
     const packet = buildPromptEnhancementAcceptancePacketV1();
-    const byFamily = new Map(packet.fixtures.map((fixture) => [fixture.family, fixture]));
+    // Keyed by the FIRST fixture of each family, which is the single-prompt case these
+    // assertions were written against. A plain family map silently returns the LAST one, so
+    // once a second fixture joined a family it started asserting against a different case
+    // than the one named in the test.
+    const byFamily = new Map<string, typeof packet.fixtures[number]>();
+    for (const entry of packet.fixtures) {
+      if (!byFamily.has(entry.family)) byFamily.set(entry.family, entry);
+    }
 
     expect(byFamily.get('source')?.mandatorySlotsOrSafeguards).toEqual(expect.arrayContaining([
       'ContentTemplateEngine.run',
@@ -214,7 +221,14 @@ describe('Phase 13 eval-rule-3 test and acceptance matrix', () => {
 
   it('records required safety, UI, store, delivery, generated-origin, and cost hard-fail focuses', () => {
     const packet = buildPromptEnhancementAcceptancePacketV1();
-    const byFamily = new Map(packet.fixtures.map((fixture) => [fixture.family, fixture]));
+    // Keyed by the FIRST fixture of each family, which is the single-prompt case these
+    // assertions were written against. A plain family map silently returns the LAST one, so
+    // once a second fixture joined a family it started asserting against a different case
+    // than the one named in the test.
+    const byFamily = new Map<string, typeof packet.fixtures[number]>();
+    for (const entry of packet.fixtures) {
+      if (!byFamily.has(entry.family)) byFamily.set(entry.family, entry);
+    }
 
     expect(byFamily.get('safety_privacy')?.mandatorySlotsOrSafeguards).toContain(PROMPT_ENHANCEMENT_CANONICAL_CONFIRMATION);
     expect(byFamily.get('safety_privacy')?.hardFailFocus).toEqual(expect.arrayContaining([
