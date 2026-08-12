@@ -12,6 +12,7 @@
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import { setSubmitFlowFlag } from '../cli/commands/submit-flow-config.js';
 
 /** Every Cascade event nexpath has ever owned — iterated on cleanup/removal. */
 export const WINDSURF_HOOK_EVENTS = ['pre_user_prompt', 'post_cascade_response'] as const;
@@ -150,6 +151,10 @@ export function writeWindsurfHooks(filePath: string, cliPath: string): void {
   }
   data.hooks = hooks;
   writeJson(filePath, data);
+  // Owner ruling 2026-08-12: ship the new submit-flow ON via the config-backed
+  // flag (`~/.nexpath/submit-flow.json`), read by both the hook and the extension.
+  // Flip the flag (or set the env var to '0') to revert. Best-effort.
+  try { setSubmitFlowFlag('windsurf', true); } catch { /* best-effort */ }
 }
 
 /**

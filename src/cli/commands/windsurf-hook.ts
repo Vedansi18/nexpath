@@ -34,6 +34,7 @@ import {
 import { openStore, closeStore } from '../../store/db.js';
 import { log } from '../../logger.js';
 import { getPendingAdvisory, markAdvisoryShown } from '../../store/pending-advisories.js';
+import { isSubmitAdvisoryEnabledForHost } from './submit-flow-config.js';
 import { writeSubmitDecision } from './submit-decision-store.js';
 import { createHoldBudget, type HoldBudget } from './submit-hold-budget.js';
 // CONSUME-ONLY. `SessionStateManager` is not Vedansi-owned (`hi0001234d` 15 /
@@ -274,6 +275,12 @@ export interface WindsurfHookActionDeps {
   readStdin?: () => Promise<string>;
   /** Bound on the gated stdin read. A hang here would hold the user's prompt. */
   stdinTimeoutMs?: number;
+  /**
+   * Read the submit-flow flag file (the config-backed switch). Injected for
+   * tests so they never touch the real `~/.nexpath/submit-flow.json`; defaults
+   * to the real reader. The gates resolve env-var-override → flag file.
+   */
+  readFlagFile?: (path: string) => string | null;
   /** H4: injectable hold budget. Defaults to the plan's 60-90s self-enforced cap. */
   holdBudget?: HoldBudget;
   raisePopup?: () => void;
@@ -412,7 +419,7 @@ export async function runWindsurfHookAction(
     // worse. So only an explicit 'block' decision exits 2; a thrown decider, an
     // unknown value, or anything unexpected falls through to the normal exit-0
     // path below.
-    if (event === 'pre_user_prompt' && isWindsurfPromptSubmitAdvisoryEnabled(env)) {
+    if (event === 'pre_user_prompt' && isSubmitAdvisoryEnabledForHost('windsurf', { env, readFlagFile: deps.readFlagFile })) {
       // ── stdin is single-read, so it is consumed HERE and handed onward ────
       // `handleWindsurfHookCli` normally reads stdin itself. The decider needs the
       // same bytes (it must see the user's prompt text), and a pipe cannot be read
@@ -456,7 +463,7 @@ export async function runWindsurfHookAction(
     // pipe only. Session-scoped: only THIS trajectory's pending advisories are
     // consumed, so concurrent sessions keep their own state. With the switch
     // off this block is skipped entirely (byte-identical shipped behaviour).
-    if (event === 'post_cascade_response' && isWindsurfPromptSubmitAdvisoryEnabled(env)) {
+    if (event === 'post_cascade_response' && isSubmitAdvisoryEnabledForHost('windsurf', { env, readFlagFile: deps.readFlagFile })) {
       const postBound = deps.postStdinTimeoutMs ?? 15_000;
       const raw = await Promise.race([
         readStdin(),

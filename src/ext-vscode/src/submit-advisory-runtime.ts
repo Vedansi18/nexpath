@@ -28,7 +28,9 @@
  * is the fail-open outcome (`A3`): the user simply keeps whatever the hook left.
  */
 import { readFile, unlink } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { homedir } from 'node:os';
 import {
   parseSubmitDecisionJsonV1,
   type SubmitDecisionRecordV1,
@@ -37,9 +39,37 @@ import {
 /** Must stay byte-identical to the CLI's constant — pinned by test. */
 export const WINDSURF_SUBMIT_ADVISORY_ENV = 'NEXPATH_WINDSURF_PROMPTSUBMIT_ADVISORY';
 
-/** True only for the exact string `'1'`. Default OFF — never a loose truthy read. */
+/**
+ * The config-backed submit-flow flag (owner ruling 2026-08-12) — the shipped,
+ * developer-controlled switch. MIRROR of the CLI's `submit-flow-config.ts`:
+ * `~/.nexpath/submit-flow.json` = `{ "cursor": bool, "windsurf": bool }`. Env var
+ * (below) overrides it. Cannot import the CLI resolver (separate package,
+ * G-ROOTDIR), so the filename + shape are duplicated and pinned by a contract
+ * test. Kept out of the nexpath config table on purpose so it never appears in
+ * `nexpath status`/`config` — invisible to end users by construction.
+ */
+export const SUBMIT_FLOW_FLAG_FILENAME = 'submit-flow.json';
+
+function readSubmitFlowFlag(host: 'cursor' | 'windsurf'): boolean {
+  try {
+    const raw = readFileSync(join(homedir(), '.nexpath', SUBMIT_FLOW_FLAG_FILENAME), 'utf8');
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    return parsed[host] === true;
+  } catch {
+    return false; // absent / unreadable / garbage ⇒ old flow (safe default)
+  }
+}
+
+/**
+ * Windsurf submit-flow ON? Env var (`'1'`/`'0'`) is the developer override and
+ * wins; otherwise the shipped `~/.nexpath/submit-flow.json` flag decides;
+ * otherwise OFF (old flow byte-identical). Mirrors the CLI resolver.
+ */
 export function isWindsurfSubmitAdvisoryEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env[WINDSURF_SUBMIT_ADVISORY_ENV] === '1';
+  const v = env[WINDSURF_SUBMIT_ADVISORY_ENV];
+  if (v === '1') return true;
+  if (v === '0') return false;
+  return readSubmitFlowFlag('windsurf');
 }
 
 /** Where the hook parks a decision for a given project root. */
@@ -98,9 +128,15 @@ export function defaultIsProcessAlive(pid: number): boolean {
  */
 export const CURSOR_SUBMIT_ADVISORY_ENV = 'NEXPATH_CURSOR_PROMPTSUBMIT_ADVISORY';
 
-/** True only when explicitly `'1'`. Default OFF — never `!== '0'`. */
+/**
+ * Cursor submit-flow ON? Same resolution as Windsurf: env override (`'1'`/`'0'`)
+ * wins, else the shipped `~/.nexpath/submit-flow.json` flag, else OFF.
+ */
 export function isCursorSubmitAdvisoryEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env[CURSOR_SUBMIT_ADVISORY_ENV] === '1';
+  const v = env[CURSOR_SUBMIT_ADVISORY_ENV];
+  if (v === '1') return true;
+  if (v === '0') return false;
+  return readSubmitFlowFlag('cursor');
 }
 
 /**

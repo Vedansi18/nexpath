@@ -31,6 +31,9 @@ function harness(over: Record<string, unknown> = {}) {
       // H6: the decider is switch-gated. These tests are about the decision
       // path, so the switch is ON unless a test overrides it.
       env: { [CURSOR_PROMPTSUBMIT_ADVISORY_ENV]: '1' },
+      // Hermetic: never touch the real ~/.nexpath/submit-flow.json in tests.
+      // The env override above drives the gate; flag-file tests inject their own.
+      readFlagFile: () => null,
       readStdin: async () => PAYLOAD,
       write: (t: string) => { writes.push(t); },
       exit: (c: number) => { exits.push(c); },

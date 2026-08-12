@@ -30,6 +30,7 @@ import { defaultReadStdin, awaitChild } from './windsurf-hook.js';
 import { createHoldBudget, type HoldBudget } from './submit-hold-budget.js';
 import { buildDefaultPromptSubmitDecider } from './windsurf-hook.js';
 import { spawnAuto } from '../../windsurf-hook/spawn.js';
+import { isSubmitAdvisoryEnabledForHost } from './submit-flow-config.js';
 
 /**
  * Backward-compatibility switch for the Cursor submit-time advisory (H6).
@@ -100,6 +101,13 @@ export interface CursorHookActionDeps {
   spawnAutoFn?: typeof spawnAuto;
   /** Await the spawned `auto` child (bounded by the hold). Injected for tests. */
   waitForChild?: (child: ChildProcess | null | undefined) => Promise<void>;
+  /**
+   * Read the submit-flow flag file (the config-backed switch). Injected for
+   * tests so they never touch the real `~/.nexpath/submit-flow.json`; defaults
+   * to the real reader in production. Tests default this to `() => null`
+   * (flag absent) so only the env var drives the gate unless a test opts in.
+   */
+  readFlagFile?: (path: string) => string | null;
 }
 
 /**
@@ -157,7 +165,10 @@ export async function runCursorHookAction(
       );
       return d('beforeSubmitPrompt', { project: pl.projectRoot }, pl.promptText ?? '');
     });
-    if (isCursorPromptSubmitAdvisoryEnabled(deps.env ?? process.env)) {
+    // Config-backed switch (owner ruling 2026-08-12): env var override, else the
+    // shipped `~/.nexpath/submit-flow.json` flag. The env-only helper is kept for
+    // its exact-equality pin; the GATE resolves through the flag-aware resolver.
+    if (isSubmitAdvisoryEnabledForHost('cursor', { env: deps.env, readFlagFile: deps.readFlagFile })) {
       // ── OPTION-A ORDERING (2026-08-12) — classify THIS prompt FIRST ────────
       // Cursor's `beforeSubmitPrompt` fires BEFORE the prompt reaches
       // `state.vscdb`, so the extension's DB-watcher has not classified it yet.

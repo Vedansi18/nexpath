@@ -16,6 +16,7 @@ import {
   peekPendingSubmitDecision,
   submitDecisionPath,
   WINDSURF_SUBMIT_ADVISORY_ENV,
+  SUBMIT_FLOW_FLAG_FILENAME,
 } from './submit-advisory-runtime.js';
 
 const RECORD = {
@@ -32,6 +33,10 @@ describe('the switch — must stay identical to the CLI half', () => {
   it('pins the env-var name so the duplicated constant cannot silently diverge', () => {
     // If someone renames one side, this fails and forces the other to follow.
     expect(WINDSURF_SUBMIT_ADVISORY_ENV).toBe('NEXPATH_WINDSURF_PROMPTSUBMIT_ADVISORY');
+    // Cross-package contract: the config-backed flag filename must equal the
+    // CLI's submit-flow-config.ts SUBMIT_FLOW_FLAG_FILENAME. Divergence would
+    // make the two halves read different files and silently disagree.
+    expect(SUBMIT_FLOW_FLAG_FILENAME).toBe('submit-flow.json');
   });
 
   it('is enabled ONLY for the exact string "1"', () => {

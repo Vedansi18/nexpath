@@ -35,6 +35,7 @@
  */
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { setSubmitFlowFlag } from '../cli/commands/submit-flow-config.js';
 
 /**
  * Hook timeout in SECONDS. **The unit is in the name deliberately (`R4`).**
@@ -146,6 +147,11 @@ export function writeCursorHooks(filePath: string, cliPath: string): void {
   }
   data.hooks = hooks;
   writeJson(filePath, data);
+  // Owner ruling 2026-08-12: ship the new submit-flow ON via the config-backed
+  // flag (`~/.nexpath/submit-flow.json`), read by both the hook and the
+  // extension. Registering the Cursor hook enables Cursor's new flow; flip the
+  // flag (or set the env var to '0') to revert. Best-effort; never breaks install.
+  try { setSubmitFlowFlag('cursor', true); } catch { /* best-effort */ }
 }
 
 /**
