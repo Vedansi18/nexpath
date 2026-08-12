@@ -487,6 +487,56 @@ describe('sequence planner — the call', () => {
     expect(planned.ok && planned.output.summaryData?.remainingTaskCount).toBe(1);
   });
 
+  it('refuses a context the returned positions would not index, before spending a call', async () => {
+    let calls = 0;
+    const counting: PromptEnhancementSequencePlannerClientV1 = {
+      chat: { completions: { create: async () => {
+        calls += 1;
+        return { choices: [{ message: { content: validReply() } }] };
+      } } },
+    };
+    // An assembled context — excerpts and refs rather than the original redacted in place. Every
+    // offset it produces lands in range and addresses different words.
+    expect(await runPromptEnhancementSequencePlannerV1(
+      { ...call(), promptContext: 'points: fix a test; add a limiter' },
+      counting,
+    )).toEqual({ ok: false, reason: 'context_does_not_index_original' });
+    expect(calls).toBe(0);
+  });
+
+  it('slices the LOCAL original, so a redaction marker never reaches an item', async () => {
+    // The context is the original with the credential redacted in place, padded to the same width,
+    // which is what lets one text's positions address the other. The slice is still cut locally:
+    // read off the context, this item would carry "[redact....]" and read as no risk at all.
+    const original = 'Rotate the leaked API key sk-live-9f2b now.';
+    const context = 'Rotate the leaked API key [redact....] now.';
+    expect(context.length).toBe(original.length);
+
+    const reply = JSON.stringify({
+      outcome: 'sequence', outcomeReason: null,
+      points: [point('p1', 0), point('p2', 10), point('p3', 20)],
+      groups: [group('g1', ['p1', 'p2']), group('g2', ['p3'])],
+      items: [
+        { itemKind: 'first_task', originalSliceRef: { start: 0, end: original.length },
+          sourcePointRanges: [], roleLabel: null, dependencyOrder: 0, complexity: 'not_complex',
+          complexityReason: null, decompositionGroupId: 'g1' },
+        { itemKind: 'task', originalSliceRef: { start: 0, end: original.length },
+          sourcePointRanges: [], roleLabel: null, dependencyOrder: 1, complexity: 'not_complex',
+          complexityReason: null, decompositionGroupId: 'g2' },
+      ],
+      promptDirectives: [],
+      summaryData: { summaryId: 's1', remainingTaskCount: 1 },
+    });
+
+    const result = await runPromptEnhancementSequencePlannerV1(
+      { ...call(), promptContext: context, localOriginalText: original },
+      clientReturning(reply),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.output.items[1]?.actionRiskKinds).toContain('secret_env_or_credential');
+  });
+
   it('gives the planner the route, and none of the routing evidence behind it', async () => {
     // The evidence refs and reason codes are this system's own record of how it decided. What the
     // planner can reason with is what kind of work this is and how sure the routing was.

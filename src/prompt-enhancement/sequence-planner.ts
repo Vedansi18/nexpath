@@ -146,6 +146,7 @@ export type PromptEnhancementSequencePlannerFailureReasonV1 =
   | 'provider_error'
   | 'timeout'
   | 'invalid_output'
+  | 'context_does_not_index_original'
   | PromptEnhancementSequencePlannerRefusalV1
   | PromptEnhancementSequencePlannerCheckCodeV1
   | PromptEnhancementSequencePayloadReasonCodeV1;
@@ -192,8 +193,12 @@ function buildPlannerUserMessageV1(
 
 export interface PromptEnhancementSequencePlannerInputV1 {
   /**
-   * What the planner is allowed to SEE. Bounded and redaction-safe by the time it arrives; this is
-   * the only value that reaches the provider.
+   * What the planner is allowed to SEE, and the only value that reaches the provider.
+   *
+   * It must be a text the returned positions index — the original with its sensitive spans redacted
+   * in place, which is length-preserving and therefore addresses the same characters. A context
+   * assembled some other way is refused rather than read, because offsets chosen against one text
+   * and resolved against another land in range and mean something else.
    */
   promptContext: string;
   /**
@@ -479,6 +484,21 @@ export async function runPromptEnhancementSequencePlannerV1(
     input.entry,
   );
   if (!entry.mayRun) return { ok: false, reason: entry.refusal };
+
+  // The positions that come back index the LOCAL original, and they are chosen by reading the
+  // context. So the context has to be a text those positions mean the same thing in, and the
+  // redaction that stands between the two preserves length precisely so that it is: a marker is
+  // padded to the width of what it replaced, character for character.
+  //
+  // Equal length is the necessary condition, not a proof of alignment — two different texts can be
+  // the same length. What it does catch is the case that actually breaks this: a context assembled
+  // from excerpts and refs rather than redacted in place. There, position 20 of what was read is
+  // not position 20 of the original, every returned offset lands in range, and the item carries a
+  // verbatim slice of words nobody chose. Refusing here costs a call; not refusing costs the one
+  // guarantee the offsets exist to give.
+  if (input.promptContext.length !== input.localOriginalText.length) {
+    return { ok: false, reason: 'context_does_not_index_original' };
+  }
 
   let openai: PromptEnhancementSequencePlannerClientV1;
   try {
