@@ -24,10 +24,12 @@
  * never logged; only `describeCursorPayloadSafely` output is loggable.
  */
 import type { Command } from 'commander';
+import type { ChildProcess } from 'node:child_process';
 import { parseCursorHookPayload, type CursorHookPayload } from '../../cursor-hook/payload.js';
-import { defaultReadStdin } from './windsurf-hook.js';
+import { defaultReadStdin, awaitChild } from './windsurf-hook.js';
 import { createHoldBudget, type HoldBudget } from './submit-hold-budget.js';
 import { buildDefaultPromptSubmitDecider } from './windsurf-hook.js';
+import { spawnAuto } from '../../windsurf-hook/spawn.js';
 
 /**
  * Backward-compatibility switch for the Cursor submit-time advisory (H6).
@@ -89,6 +91,15 @@ export interface CursorHookActionDeps {
    * segment draws from ONE budget; per-segment timeouts would sum.
    */
   holdBudget?: HoldBudget;
+  /**
+   * OPTION-A ORDERING (2026-08-12): spawn `nexpath auto` to classify THIS
+   * prompt before deciding. Injected for tests; defaults to the shared
+   * `spawnAuto`. See the block below for why Cursor needs this and Windsurf's
+   * own hook already had it.
+   */
+  spawnAutoFn?: typeof spawnAuto;
+  /** Await the spawned `auto` child (bounded by the hold). Injected for tests. */
+  waitForChild?: (child: ChildProcess | null | undefined) => Promise<void>;
 }
 
 /**
@@ -147,8 +158,30 @@ export async function runCursorHookAction(
       return d('beforeSubmitPrompt', { project: pl.projectRoot }, pl.promptText ?? '');
     });
     if (isCursorPromptSubmitAdvisoryEnabled(deps.env ?? process.env)) {
-      // Draws from what the stdin read left. A timeout is never a decision: it
-      // continues, so the original prompt is released (A3).
+      // ── OPTION-A ORDERING (2026-08-12) — classify THIS prompt FIRST ────────
+      // Cursor's `beforeSubmitPrompt` fires BEFORE the prompt reaches
+      // `state.vscdb`, so the extension's DB-watcher has not classified it yet.
+      // Without this, the decider's option source reads a STALE advisory (the
+      // previous turn's) or none, and never blocks the current prompt — the
+      // exact gap found live 2026-08-12. So the hook drives `auto` itself and
+      // awaits it, EXACTLY as `windsurf-hook.ts` does (its handler spawns auto
+      // before the deferred decision). The `auto` runtime — including its LLM
+      // classification — sits inside the self-enforced hold; `R2`/A3 hold
+      // discipline bounds it and fail-open releases the prompt on exhaustion.
+      const spawnAutoFn = deps.spawnAutoFn ?? spawnAuto;
+      const waitForChild = deps.waitForChild ?? awaitChild;
+      const promptText = payload?.promptText ?? '';
+      if (promptText.trim() !== '') {
+        const child = spawnAutoFn(promptText, { cwd: payload?.projectRoot ?? process.cwd() });
+        const waited = await hold.run(() => waitForChild(child));
+        if (waited.timedOut) {
+          // Hold exhausted before auto finished: do NOT decide (the signal never
+          // landed) and never leave an orphan (R2 — Cursor won't reap it).
+          try { child?.kill(); } catch { /* already gone */ }
+        }
+      }
+      // Draws from what the stdin read + auto classification left. A timeout is
+      // never a decision: it continues, so the original prompt is released (A3).
       const decided = await hold.run(() => decide(payload));
       if (!decided.timedOut && decided.value === 'block') decision = 'block';
     }

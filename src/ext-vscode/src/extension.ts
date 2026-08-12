@@ -908,6 +908,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     canonicalizeCwd(resolveWorkspaceFromDbPath(event.sourcePath) ?? workspaceCwd);
   // P8 (VED-PE-10 completion): fresh per activation, matching `watcher`.
   peInjectedRecordStore = createInjectedRecordStore();
+  // OWNER RULING 2026-08-12: is a submit-time advisory switch ON for THIS host?
+  // When true, the submit-time hook owns the advisory surface and the old
+  // in-editor fallback must not arm (see onAfterCapture). Read once here so the
+  // switch-off path stays byte-identical.
+  const submitAdvisorySurfaceActive =
+    (host === 'cursor' && isCursorSubmitAdvisoryEnabled(process.env)) ||
+    (host === 'windsurf' && isWindsurfSubmitAdvisoryEnabled(process.env));
   const handleChatEvent = createChatEventHandler({
     spawnAuto: (prompt, sid, event) =>
       spawnAuto(prompt, sid, { cwd: cwdForEvent(event) }),
@@ -921,8 +928,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // After capture, before the popup: arm the in-editor fallback if `auto`
     // parked an advisory, so it's available even if the popup blocks (macOS
     // Automation dialog) or can't open.
-    onAfterCapture: (event) =>
-      advisoryFallback.armIfPending(cwdForEvent(event)),
+    //
+    // OWNER RULING 2026-08-12 (Cursor half): with the submit switch ON, the
+    // submit-time hook OWNS the advisory surface — the old in-editor fallback
+    // must NOT arm, or the user would get both. Cursor has no post-response
+    // hook to consume the row (unlike Windsurf's suppression leg), so the
+    // enforcement point is here, where the DB-watcher would otherwise arm it.
+    // Switch OFF ⇒ arms exactly as before (byte-identical old behaviour).
+    onAfterCapture: (event) => {
+      if (submitAdvisorySurfaceActive) return;
+      advisoryFallback.armIfPending(cwdForEvent(event));
+    },
     composeSessionId: (event) => `${cwdForEvent(event)}|${event.rawSessionId}`,
     // P8 (VED-PE-10 completion): typed store evidence decides DS vs PE origin
     // (pe-origin.ts, P4) — never Stop's returned text. When this turn IS

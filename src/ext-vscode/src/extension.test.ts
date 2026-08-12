@@ -31,6 +31,7 @@ const {
   mockReadLatestPeMeta,
   mockCreateAdvisoryPoller,
   mockOnDidChangeWorkspaceFolders,
+  mockArmIfPending,
 } = vi.hoisted(() => ({
   mockShowOnboarding: vi.fn(),
   mockRegisterWebviewViewProvider: vi.fn(),
@@ -62,6 +63,7 @@ const {
   mockReadLatestPeMeta: vi.fn(async () => null),
   mockCreateAdvisoryPoller: vi.fn(),
   mockOnDidChangeWorkspaceFolders: vi.fn(() => ({ dispose: vi.fn() })),
+  mockArmIfPending: vi.fn(),
 }));
 
 vi.mock('vscode', () => ({
@@ -167,7 +169,7 @@ vi.mock('./ipc.js', () => ({
 }));
 vi.mock('./advisory-fallback.js', () => ({
   createAdvisoryFallback: vi.fn(() => ({
-    armIfPending: vi.fn(),
+    armIfPending: mockArmIfPending,
     clear: vi.fn(),
     showAdvisory: vi.fn(),
   })),
@@ -235,6 +237,7 @@ describe('activate', () => {
     mockReadLatestPeMeta.mockReset().mockResolvedValue(null);
     mockCreateAdvisoryPoller.mockReset();
     mockOnDidChangeWorkspaceFolders.mockReset().mockReturnValue({ dispose: vi.fn() });
+    mockArmIfPending.mockReset();
     (vscodeApi.workspace as { workspaceFolders?: unknown }).workspaceFolders = undefined;
     mockIsPeOriginTurn.mockReset().mockResolvedValue(false);
     mockChatInputInject.mockReset().mockResolvedValue(false);
@@ -1380,6 +1383,36 @@ describe('activate', () => {
       expect(mockCreateChatHistoryWatcher).toHaveBeenCalledTimes(1);
     });
   });
+describe('OWNER RULING 2026-08-12 — old advisory surface suppressed under the submit switch', () => {
+  const CURSOR_SWITCH = 'NEXPATH_CURSOR_PROMPTSUBMIT_ADVISORY';
+  const onAfterCapture = () => {
+    const deps = mockCreateChatEventHandler.mock.calls[0]![0] as { onAfterCapture: (e: unknown) => void };
+    return deps.onAfterCapture;
+  };
+  const evt = { sourcePath: '/proj/state.vscdb', rawSessionId: 's' };
+
+  afterEach(() => { delete process.env[CURSOR_SWITCH]; });
+
+  it('⭐ Cursor + switch ON: onAfterCapture does NOT arm the old in-editor fallback', async () => {
+    process.env[CURSOR_SWITCH] = '1';
+    mockShowOnboarding.mockResolvedValueOnce(undefined);
+    mockDetectHost.mockReturnValueOnce('cursor');
+    mockEnumerateStateVscdbPaths.mockReturnValue(['/proj/state.vscdb']);
+    await activate(makeCtx(true) as never);
+    onAfterCapture()(evt);
+    expect(mockArmIfPending).not.toHaveBeenCalled();
+  });
+
+  it('⭐ Cursor + switch OFF: onAfterCapture arms exactly as before (byte-identical old flow)', async () => {
+    delete process.env[CURSOR_SWITCH];
+    mockShowOnboarding.mockResolvedValueOnce(undefined);
+    mockDetectHost.mockReturnValueOnce('cursor');
+    mockEnumerateStateVscdbPaths.mockReturnValue(['/proj/state.vscdb']);
+    await activate(makeCtx(true) as never);
+    onAfterCapture()(evt);
+    expect(mockArmIfPending).toHaveBeenCalled();
+  });
+});
 });
 
 describe('deactivate', () => {

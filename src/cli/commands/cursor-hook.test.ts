@@ -337,3 +337,74 @@ describe('⭐ the default decider is the REAL one, pinned structurally', () => {
     expect(src).not.toMatch(/deps\.decide\s*\?\?\s*\(async\s*\(\)\s*=>\s*'allow'/);
   });
 });
+
+/**
+ * OPTION-A ORDERING (2026-08-12) — the Cursor hook must classify THIS prompt
+ * (spawn `auto` + await) BEFORE deciding, because `beforeSubmitPrompt` fires
+ * before the prompt reaches state.vscdb, so the extension's DB-watcher hasn't
+ * classified it. Without this, the decider reads a stale/absent advisory and
+ * never blocks the current turn (the gap found live 2026-08-12).
+ */
+describe('option-A ordering — auto is spawned+awaited before the decision', () => {
+  it('⭐ spawns auto with THIS prompt, awaits it, THEN decides (correct order)', async () => {
+    const order: string[] = [];
+    const fakeChild = { kill: vi.fn() } as unknown as import('node:child_process').ChildProcess;
+    const spawnAutoFn = vi.fn((prompt: string) => { order.push(`spawnAuto:${prompt}`); return fakeChild; });
+    const waitForChild = vi.fn(async () => { order.push('await'); });
+    const decide = vi.fn(async () => { order.push('decide'); return 'block' as const; });
+    const h = harness({ spawnAutoFn, waitForChild, decide });
+    await runCursorHookAction('beforeSubmitPrompt', h.deps as never);
+    expect(spawnAutoFn).toHaveBeenCalledWith('hello', expect.objectContaining({ cwd: '/proj' }));
+    expect(order).toEqual(['spawnAuto:hello', 'await', 'decide']);
+    expect(h.writes[0]).toContain('"continue":false');
+  });
+
+  it('switch OFF: auto is NOT spawned and nothing decides (byte-identical old path)', async () => {
+    const spawnAutoFn = vi.fn();
+    const decide = vi.fn(async () => 'block' as const);
+    const h = harness({ env: {}, spawnAutoFn, decide });
+    await runCursorHookAction('beforeSubmitPrompt', h.deps as never);
+    expect(spawnAutoFn).not.toHaveBeenCalled();
+    expect(decide).not.toHaveBeenCalled();
+    expect(h.writes[0]).toBe(JSON.stringify(CURSOR_CONTINUE));
+  });
+
+  it('empty prompt: auto is not spawned, still decides (fail-open, no crash)', async () => {
+    const spawnAutoFn = vi.fn();
+    const h = harness({
+      readStdin: async () => JSON.stringify({ prompt: '   ', workspace_roots: ['/proj'] }),
+      spawnAutoFn,
+      decide: async () => 'allow' as const,
+    });
+    await runCursorHookAction('beforeSubmitPrompt', h.deps as never);
+    expect(spawnAutoFn).not.toHaveBeenCalled();
+    expect(h.exits).toContain(0);
+  });
+
+  it('⭐ hold times out during the auto await: child is KILLED (no orphan, R2) and prompt released', async () => {
+    const killed = vi.fn();
+    const fakeChild = { kill: killed } as unknown as import('node:child_process').ChildProcess;
+    // Fake budget: the stdin read succeeds; the auto-await times out; the
+    // decision therefore also times out (exhausted budget refuses to start).
+    let call = 0;
+    const fakeHold = {
+      remaining: () => 0,
+      expired: () => call > 1,
+      run: async <T>(work: () => Promise<T>) => {
+        call += 1;
+        if (call === 1) return { timedOut: false as const, value: await work() }; // stdin read
+        if (call === 2) return { timedOut: true as const };                        // auto await → timeout
+        return { timedOut: true as const };                                        // decision refused
+      },
+    };
+    const h = harness({
+      spawnAutoFn: () => fakeChild,
+      waitForChild: async () => { /* would block */ },
+      holdBudget: fakeHold as never,
+      decide: async () => 'block' as const,
+    });
+    await runCursorHookAction('beforeSubmitPrompt', h.deps as never);
+    expect(killed).toHaveBeenCalled();               // no orphan (R2)
+    expect(h.writes[0]).toContain('"continue":true'); // fail-open — prompt released
+  });
+})
