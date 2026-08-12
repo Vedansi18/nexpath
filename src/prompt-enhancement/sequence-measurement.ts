@@ -6,7 +6,11 @@ import {
   type PromptEnhancementCostMeasurementInputV1,
   type PromptEnhancementCostRuntimeFlowEvidencePacketV1,
 } from './cost-observability.js';
-import type { PromptEnhancementCostCallIdV1 } from './contracts.js';
+import type {
+  PromptEnhancementCostCallIdV1,
+  PromptEnhancementProviderFailureStateV1,
+  PromptEnhancementRuntimeBlockReason,
+} from './contracts.js';
 import { CLAUDE_HOOK_TIMEOUT_SECONDS } from '../agents/adapters/claude-code.js';
 
 /**
@@ -119,7 +123,51 @@ export interface PromptEnhancementOccupantReadingV1 {
   startedCallCount?: number;
   /** How many of those produced a usable result. Zero is the discarded-work case, and it is real. */
   deliveredCallCount?: number;
+  /**
+   * WHAT happened, because the aggregate counts two different fields and a status alone sets neither.
+   *
+   * 🔴 The defect this closes: a discarded call was recorded with `status: 'fallback'` while the
+   * packet's own `fallbackCount` stayed at zero — the aggregate counts by `fallbackReason`, not by
+   * status, so setting one of the two left the record and the summary beside it disagreeing about
+   * the same call. Reported across runs, the sequence path would look like it never falls back.
+   *
+   * Defaults to delivered, which is the ordinary case.
+   */
+  outcome?: PromptEnhancementOccupantOutcomeV1;
 }
+
+/**
+ * What became of an occupant's calls.
+ *
+ * ⛔ Not a free-text note. Each value maps to BOTH fields the shipping aggregate reads, so a
+ * reading cannot describe an outcome the counters then fail to count.
+ */
+export type PromptEnhancementOccupantOutcomeV1 =
+  | 'delivered'
+  | 'discarded_after_repairs'
+  | 'provider_timeout'
+  | 'provider_unavailable';
+
+/**
+ * One outcome, expressed in every field the aggregate consults.
+ *
+ * The three are set together on purpose. `fallbackCount` counts by `fallbackReason`, `timeoutCount`
+ * counts by `providerFailureState` OR `status`, and `providerUnavailableCount` by the availability
+ * state derived from `providerFailureState` — so an outcome stated in one field and defaulted in the
+ * others is an outcome the packet half-reports.
+ */
+const OUTCOME_FIELDS_V1: Readonly<Record<PromptEnhancementOccupantOutcomeV1, {
+  status: PromptEnhancementCostMeasurementInputV1['status'];
+  fallbackReason: PromptEnhancementRuntimeBlockReason;
+  providerFailureState: PromptEnhancementProviderFailureStateV1;
+}>> = {
+  delivered: { status: 'used', fallbackReason: 'not_applicable', providerFailureState: 'none' },
+  // The repair budget spent and nothing usable produced. The calls were made and paid for, which is
+  // why this is a fallback with a reason rather than a quiet zero.
+  discarded_after_repairs: { status: 'fallback', fallbackReason: 'validation_failed', providerFailureState: 'none' },
+  provider_timeout: { status: 'timeout', fallbackReason: 'timeout', providerFailureState: 'timeout' },
+  provider_unavailable: { status: 'provider_unavailable', fallbackReason: 'provider_unavailable', providerFailureState: 'provider_api_unavailable' },
+};
 
 /**
  * Which cost row each occupant's calls belong to.
@@ -257,6 +305,10 @@ export function buildPromptEnhancementSequenceMeasurementEvidenceV1(input: {
     if (callId === undefined) continue;
     const started = reading.startedCallCount ?? 1;
     const delivered = reading.deliveredCallCount ?? 1;
+    // Stated, or inferred from the counts when it was not. A run that started calls and delivered
+    // nothing is discarded work, never a success with a zero in it.
+    const outcome = reading.outcome ?? (delivered === 0 ? 'discarded_after_repairs' : 'delivered');
+    const fields = OUTCOME_FIELDS_V1[outcome];
     measurementInputs.push({
       callId,
       plannedCallCount: started,
@@ -264,9 +316,7 @@ export function buildPromptEnhancementSequenceMeasurementEvidenceV1(input: {
       latencyMs: reading.latencyMs,
       estimatedInputTokens: reading.estimatedInputTokens,
       estimatedOutputTokens: reading.estimatedOutputTokens,
-      // A run that started calls and delivered nothing is a fallback, not a success with a zero in
-      // it. The status is what makes the discarded work legible in the aggregate.
-      status: delivered === 0 ? 'fallback' : 'used',
+      ...fields,
     });
   }
   return buildPromptEnhancementCostRuntimeFlowEvidenceV1({

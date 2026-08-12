@@ -327,3 +327,55 @@ describe('the sequence calls own their timeouts', () => {
     expect(byId.get('baseline_pe_composer')?.timeoutMs).toBe(PROMPT_ENHANCEMENT_COST_TIMEOUT_MS_V1);
   });
 });
+
+describe('the aggregate agrees with the record beside it', () => {
+  const evidence = (readings: readonly PromptEnhancementOccupantReadingV1[]) =>
+    buildPromptEnhancementSequenceMeasurementEvidenceV1({
+      evidenceId: 'measure-1', enhancementId: 'enh-1', requestId: 'req-1', readings,
+    });
+
+  it('counts a discarded call as a fallback, not only as a status on the record', () => {
+    // The defect: the record said `fallback` while the aggregate's own fallbackCount stayed at zero,
+    // because the aggregate counts by fallbackReason and only the status had been set. Reported
+    // across runs, the sequence path would have looked like it never falls back — while the most
+    // expensive thing the measurement found was exactly a call path that falls back.
+    const packet = evidence([
+      { occupant: 'sequence_planning_call', latencyMs: 114_458, startedCallCount: 4, deliveredCallCount: 0 },
+    ]);
+    expect(packet.measurementRecords[0]?.status).toBe('fallback');
+    expect(packet.aggregate.plannedCallCount).toBe(4);
+    expect(packet.aggregate.usedCallCount).toBe(0);
+    // The pair asserted on the SAME packet, which is the invariant rather than either number.
+    expect(packet.aggregate.fallbackCount).toBe(1);
+  });
+
+  it('counts a timeout, so a reading taken because a call timed out can say so', () => {
+    const packet = evidence([
+      { occupant: 'awaited_batch_call', latencyMs: 45_000, outcome: 'provider_timeout', deliveredCallCount: 0 },
+    ]);
+    expect(packet.aggregate.timeoutCount).toBe(1);
+    expect(packet.aggregate.fallbackCount).toBe(1);
+    expect(packet.measurementRecords[0]?.providerFailureState).toBe('timeout');
+  });
+
+  it('counts an unavailable provider in the counter named for it', () => {
+    const packet = evidence([
+      { occupant: 'first_item_composition', latencyMs: 120, outcome: 'provider_unavailable', deliveredCallCount: 0 },
+    ]);
+    expect(packet.aggregate.providerUnavailableCount).toBe(1);
+    // And the used count is forced to zero by the sanitizer, whatever the reading claimed.
+    expect(packet.aggregate.usedCallCount).toBe(0);
+  });
+
+  it('leaves a delivered call out of every failure counter', () => {
+    // The other direction, because a mapping that marked everything as a fallback would pass the
+    // first test and be just as wrong.
+    const packet = evidence([
+      { occupant: 'awaited_batch_call', latencyMs: 35_244, startedCallCount: 1, deliveredCallCount: 1 },
+    ]);
+    expect(packet.aggregate.usedCallCount).toBe(1);
+    expect(packet.aggregate.fallbackCount).toBe(0);
+    expect(packet.aggregate.timeoutCount).toBe(0);
+    expect(packet.aggregate.providerUnavailableCount).toBe(0);
+  });
+});
