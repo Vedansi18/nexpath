@@ -16,7 +16,17 @@ import {
   buildPromptEnhancementCostVisibilityMetadataV1,
   getPromptEnhancementAcceptedCostCallInventoryV1,
 } from './cost-observability.js';
+import {
+  PROMPT_ENHANCEMENT_SEQUENCE_BATCH_TIMEOUT_MS_V1,
+  PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_TIMEOUT_MS_V1,
+  PROMPT_ENHANCEMENT_SEQUENCE_SUMMARY_TIMEOUT_MS_V1,
+} from './cost-observability.js';
 import { CLAUDE_HOOK_TIMEOUT_SECONDS } from '../agents/adapters/claude-code.js';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const shapeFor = (path: string) =>
   PROMPT_ENHANCEMENT_SEQUENCE_PATH_SHAPES_V1.find((entry) => entry.path === path)!;
@@ -261,5 +271,59 @@ describe('the readings go through the shipping packet, not around it', () => {
     expect(planning).toBeDefined();
     expect(planning?.requirementState).toBe(wording?.requirementState);
     expect(planning?.productState).toBe(wording?.productState);
+  });
+});
+
+describe('the sequence calls own their timeouts', () => {
+  const SEQUENCE_MODULES = [
+    'sequence-planner.ts',
+    'sequence-batch-composer.ts',
+    'sequence-summary-wording.ts',
+  ] as const;
+
+  it('does not let any of the three reach for the composer\'s constant', () => {
+    // The guard on the whole point. The caps beside these were given their own names for exactly
+    // this reason, and the timeout was the one left inherited — so retuning the composer's value
+    // would have moved the planner's and the batch's with it, silently, from another file.
+    for (const moduleName of SEQUENCE_MODULES) {
+      const source = readFileSync(join(__dirname, moduleName), 'utf8');
+      expect(source).not.toContain('PROMPT_ENHANCEMENT_COST_TIMEOUT_MS_V1');
+    }
+  });
+
+  it('gives each of the three its own named constant', () => {
+    const expected: Readonly<Record<string, string>> = {
+      'sequence-planner.ts': 'PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_TIMEOUT_MS_V1',
+      'sequence-batch-composer.ts': 'PROMPT_ENHANCEMENT_SEQUENCE_BATCH_TIMEOUT_MS_V1',
+      'sequence-summary-wording.ts': 'PROMPT_ENHANCEMENT_SEQUENCE_SUMMARY_TIMEOUT_MS_V1',
+    };
+    for (const moduleName of SEQUENCE_MODULES) {
+      const source = readFileSync(join(__dirname, moduleName), 'utf8');
+      expect(source).toContain(expected[moduleName]);
+    }
+  });
+
+  it('lets the three move apart, which is what naming them buys', () => {
+    // They hold the same value today because the measurement says it fits. Nothing makes them equal,
+    // and a change to one is now a change to one.
+    expect(PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_TIMEOUT_MS_V1).toBe(45_000);
+    expect(PROMPT_ENHANCEMENT_SEQUENCE_BATCH_TIMEOUT_MS_V1).toBe(45_000);
+    expect(PROMPT_ENHANCEMENT_SEQUENCE_SUMMARY_TIMEOUT_MS_V1).toBe(45_000);
+    // And the measured worst cases sit under them: 20.3 s for one planner attempt, 35.2 s for the
+    // batch at 29 items.
+    expect(20_346).toBeLessThan(PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_TIMEOUT_MS_V1);
+    expect(35_244).toBeLessThan(PROMPT_ENHANCEMENT_SEQUENCE_BATCH_TIMEOUT_MS_V1);
+  });
+
+  it('carries each call\'s own timeout into its inventory row', () => {
+    // The field the widening made able to hold something other than the global. A row that could
+    // only report 45 s could not have shown these apart even once they were.
+    const rows = getPromptEnhancementAcceptedCostCallInventoryV1();
+    const byId = new Map(rows.map((row) => [row.callId, row]));
+    expect(byId.get('sequence_planning')?.timeoutMs).toBe(PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_TIMEOUT_MS_V1);
+    expect(byId.get('sequence_item_wording')?.timeoutMs).toBe(PROMPT_ENHANCEMENT_SEQUENCE_BATCH_TIMEOUT_MS_V1);
+    expect(byId.get('sequence_summary_wording')?.timeoutMs).toBe(PROMPT_ENHANCEMENT_SEQUENCE_SUMMARY_TIMEOUT_MS_V1);
+    // A call with no timeout of its own still reports the global, which is true of it.
+    expect(byId.get('baseline_pe_composer')?.timeoutMs).toBe(PROMPT_ENHANCEMENT_COST_TIMEOUT_MS_V1);
   });
 });

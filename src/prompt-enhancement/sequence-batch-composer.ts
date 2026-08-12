@@ -1,7 +1,7 @@
 import OpenAI from 'openai';
 import {
   PROMPT_ENHANCEMENT_COST_MODEL_V1,
-  PROMPT_ENHANCEMENT_COST_TIMEOUT_MS_V1,
+  PROMPT_ENHANCEMENT_SEQUENCE_BATCH_TIMEOUT_MS_V1,
   PROMPT_ENHANCEMENT_COST_VALIDATION_RETRY_COUNT_V1,
   PROMPT_ENHANCEMENT_SEQUENCE_BATCH_OUTPUT_TOKEN_CAP_V1,
   PROMPT_ENHANCEMENT_SEQUENCE_BATCH_OUTPUT_TOKEN_HARD_CAP_V1,
@@ -546,7 +546,7 @@ function isProviderFailure(reason: PromptEnhancementSequenceBatchFailureReasonV1
 
 function hasRoomForAnotherCall(input: PromptEnhancementSequenceBatchInputV1): boolean {
   if (input.deadlineAtMs === undefined) return true;
-  return (input.nowMs ?? Date.now)() + PROMPT_ENHANCEMENT_COST_TIMEOUT_MS_V1 <= input.deadlineAtMs;
+  return (input.nowMs ?? Date.now)() + PROMPT_ENHANCEMENT_SEQUENCE_BATCH_TIMEOUT_MS_V1 <= input.deadlineAtMs;
 }
 
 /** What a rejected batch is told, so the next attempt corrects one item rather than starting over. */
@@ -587,7 +587,7 @@ async function attemptBatch(
         ],
         response_format: { type: 'json_object' },
       },
-      { timeout: PROMPT_ENHANCEMENT_COST_TIMEOUT_MS_V1, maxRetries: 0 },
+      { timeout: PROMPT_ENHANCEMENT_SEQUENCE_BATCH_TIMEOUT_MS_V1, maxRetries: 0 },
     );
     raw = response.choices?.[0]?.message?.content;
   } catch (error) {

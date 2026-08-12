@@ -1,7 +1,7 @@
 import OpenAI from 'openai';
 import {
   PROMPT_ENHANCEMENT_COST_MODEL_V1,
-  PROMPT_ENHANCEMENT_COST_TIMEOUT_MS_V1,
+  PROMPT_ENHANCEMENT_SEQUENCE_SUMMARY_TIMEOUT_MS_V1,
   PROMPT_ENHANCEMENT_SEQUENCE_SUMMARY_OUTPUT_TOKEN_CAP_V1,
 } from './cost-observability.js';
 import {
@@ -184,7 +184,7 @@ function summaryErrorReason(error: unknown): 'timeout' | 'provider_error' {
 
 function hasRoomForAnotherCall(input: PromptEnhancementSequenceSummaryInputV1): boolean {
   if (input.deadlineAtMs === undefined) return true;
-  return (input.nowMs ?? Date.now)() + PROMPT_ENHANCEMENT_COST_TIMEOUT_MS_V1 <= input.deadlineAtMs;
+  return (input.nowMs ?? Date.now)() + PROMPT_ENHANCEMENT_SEQUENCE_SUMMARY_TIMEOUT_MS_V1 <= input.deadlineAtMs;
 }
 
 async function attemptSummary(
@@ -205,7 +205,7 @@ async function attemptSummary(
         ],
         response_format: { type: 'json_object' },
       },
-      { timeout: PROMPT_ENHANCEMENT_COST_TIMEOUT_MS_V1, maxRetries: 0 },
+      { timeout: PROMPT_ENHANCEMENT_SEQUENCE_SUMMARY_TIMEOUT_MS_V1, maxRetries: 0 },
     );
     raw = response.choices?.[0]?.message?.content;
   } catch (error) {

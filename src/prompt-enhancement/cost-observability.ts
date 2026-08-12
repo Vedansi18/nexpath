@@ -66,6 +66,39 @@ export const PROMPT_ENHANCEMENT_MEASUREMENT_PENDING_V1 = 'blocked_pending_source
 export const PROMPT_ENHANCEMENT_COST_TIMEOUT_MS_V1 = 45_000;
 export const PROMPT_ENHANCEMENT_COST_VALIDATION_RETRY_COUNT_V1 = 3;
 
+/**
+ * The sequence calls' own timeouts — named, so they are not the composer's by accident.
+ *
+ * 🔴 The caps beside them were given their own names for exactly this reason: the composer's figures
+ * were sized for the composer, and a borrowed timeout is the same mistake as a borrowed cap. These
+ * three inherited the global value silently until it was measured, which meant retuning the
+ * composer's number would have moved the planner's and the batch's with it, and nothing at either
+ * call site would have said so.
+ *
+ * ⚠️ They all currently hold the SAME value as the global. That is the point rather than a
+ * shortcut: the measurement says the value fits, so naming it is the whole change — and the three
+ * can now move apart without anyone having to notice they were ever joined.
+ */
+
+/** Measured 2026-08-13: 20.3 s for one attempt at a worst case of 29 separable intents. */
+export const PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_TIMEOUT_MS_V1 = 45_000;
+
+/**
+ * Measured 2026-08-13: 35.2 s for ONE batch over 29 items.
+ *
+ * ⚠️ The thin one — 78 % of this value. Left where it is deliberately: a longer per-call timeout
+ * makes the worst-case PATH longer, and the send path already measures 82.8 s against a 90 s
+ * registered hook. Trading a rare timeout for a more common hook overrun is the worse trade, and
+ * the hook is the tighter constraint.
+ */
+export const PROMPT_ENHANCEMENT_SEQUENCE_BATCH_TIMEOUT_MS_V1 = 45_000;
+
+/**
+ * ⏳ NOT measured. It takes the global's value EXPLICITLY rather than by inheritance, so the one
+ * unmeasured member of the three is visible as unmeasured instead of looking like the other two.
+ */
+export const PROMPT_ENHANCEMENT_SEQUENCE_SUMMARY_TIMEOUT_MS_V1 = 45_000;
+
 export const PROMPT_ENHANCEMENT_COST_MEASUREMENT_FIELDS_V1: readonly PromptEnhancementCostMeasurementFieldV1[] = [
   'call_id',
   'owner',
@@ -553,6 +586,7 @@ const CALL_ROWS: readonly PromptEnhancementAcceptedCostCallInventoryRowV1[] = [
     // 🔴 Classified exactly as its siblings are. The gate is shut, and a row claiming otherwise
     // would have the source say v1-live while the runtime is still fail-closed.
     callId: 'sequence_planning',
+    timeoutMs: PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_TIMEOUT_MS_V1,
     trigger: 'sequence_metadata',
     userVisibleTrigger: 'sequence_metadata_candidate',
     hiddenRuntimeTrigger: 'future metadata-only sequence planning candidate after sequence gates close',
@@ -565,6 +599,7 @@ const CALL_ROWS: readonly PromptEnhancementAcceptedCostCallInventoryRowV1[] = [
   }),
   row({
     callId: 'sequence_summary_wording',
+    timeoutMs: PROMPT_ENHANCEMENT_SEQUENCE_SUMMARY_TIMEOUT_MS_V1,
     trigger: 'sequence_metadata',
     userVisibleTrigger: 'sequence_metadata_candidate',
     hiddenRuntimeTrigger: 'future metadata-only sequence summary wording candidate after sequence gates close',
@@ -577,6 +612,7 @@ const CALL_ROWS: readonly PromptEnhancementAcceptedCostCallInventoryRowV1[] = [
   }),
   row({
     callId: 'sequence_item_wording',
+    timeoutMs: PROMPT_ENHANCEMENT_SEQUENCE_BATCH_TIMEOUT_MS_V1,
     trigger: 'sequence_metadata',
     userVisibleTrigger: 'sequence_metadata_candidate',
     hiddenRuntimeTrigger: 'future metadata-only per-item sequence wording candidate after runtime gates close',
@@ -1143,6 +1179,14 @@ function row(input: {
   separateLlmCallInV1: boolean;
   skipCondition: string;
   reasonCodes: readonly string[];
+  /**
+   * This call's own timeout, when it has one.
+   *
+   * Absent means the row genuinely runs under the global value — which is true of most of them.
+   * The three sequence calls name theirs, so a reader of the inventory can see which figure each
+   * one is actually measured against rather than assuming they all share one.
+   */
+  timeoutMs?: number;
 }): PromptEnhancementAcceptedCostCallInventoryRowV1 {
   return {
     callId: input.callId,
@@ -1165,7 +1209,7 @@ function row(input: {
     regionalDataResidencyAssumption: PROMPT_ENHANCEMENT_COST_REGIONAL_DATA_RESIDENCY_ASSUMPTION_V1,
     inputTokenCap: PROMPT_ENHANCEMENT_COST_INPUT_TOKEN_CAP_V1,
     outputTokenCap: PROMPT_ENHANCEMENT_COST_OUTPUT_TOKEN_CAP_V1,
-    timeoutMs: PROMPT_ENHANCEMENT_COST_TIMEOUT_MS_V1,
+    timeoutMs: input.timeoutMs ?? PROMPT_ENHANCEMENT_COST_TIMEOUT_MS_V1,
     retryCount: PROMPT_ENHANCEMENT_COST_VALIDATION_RETRY_COUNT_V1,
     cacheAssumption: 'no_cache_savings_no_addons',
     fallbackReasons: FALLBACK_REASONS,

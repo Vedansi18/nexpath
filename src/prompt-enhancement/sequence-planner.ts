@@ -2,7 +2,7 @@ import OpenAI from 'openai';
 import type { Database } from 'sql.js';
 import {
   PROMPT_ENHANCEMENT_COST_MODEL_V1,
-  PROMPT_ENHANCEMENT_COST_TIMEOUT_MS_V1,
+  PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_TIMEOUT_MS_V1,
   PROMPT_ENHANCEMENT_COST_VALIDATION_RETRY_COUNT_V1,
   PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_OUTPUT_TOKEN_CAP_V1,
   PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_OUTPUT_TOKEN_HARD_CAP_V1,
@@ -290,7 +290,7 @@ export interface PromptEnhancementSequencePlannerInputV1 {
 function hasRoomForAnotherCall(input: PromptEnhancementSequencePlannerInputV1): boolean {
   if (input.deadlineAtMs === undefined) return true;
   const now = (input.nowMs ?? Date.now)();
-  return now + PROMPT_ENHANCEMENT_COST_TIMEOUT_MS_V1 <= input.deadlineAtMs;
+  return now + PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_TIMEOUT_MS_V1 <= input.deadlineAtMs;
 }
 
 /**
@@ -560,7 +560,7 @@ async function attemptPlan(
         response_format: { type: 'json_object' },
       },
       // maxRetries: 0 — the SDK's own retries would multiply any wait in front of the user.
-      { timeout: PROMPT_ENHANCEMENT_COST_TIMEOUT_MS_V1, maxRetries: 0 },
+      { timeout: PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_TIMEOUT_MS_V1, maxRetries: 0 },
     );
     raw = response.choices?.[0]?.message?.content;
   } catch (error) {
