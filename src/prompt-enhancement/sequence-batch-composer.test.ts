@@ -3,6 +3,7 @@ import {
   PROMPT_ENHANCEMENT_SEQUENCE_BATCH_OUTPUT_TOKEN_CAP_V1,
   PROMPT_ENHANCEMENT_SEQUENCE_BATCH_OUTPUT_TOKEN_HARD_CAP_V1,
   buildPromptEnhancementSequenceBatchItemsV1,
+  promptEnhancementSequenceBatchDispositionV1,
   promptEnhancementSequenceBatchIsCurrentV1,
   promptEnhancementSequenceSliceTextV1,
   runPromptEnhancementSequenceBatchV1,
@@ -458,5 +459,26 @@ describe('sequence batch — the prompt', () => {
   it('tells the composer not to renumber, reorder, add or drop an item', () => {
     expect(prompt).toContain('renumber, do not reorder, do not add an item, and do not leave one out');
     expect(prompt).toContain('it is already written and is not yours to write');
+  });
+});
+
+describe('sequence batch — what a failed batch leaves the user with', () => {
+  it('tells a fault apart from a plan that did not hold up', () => {
+    // A call that could not be made is something the waiting user should be told about. A reply
+    // that arrived and did not hold up costs the sequence and nothing else — the single-prompt
+    // path is untouched and they still get their prompt.
+    for (const fault of ['no_key', 'provider_error', 'timeout'] as const) {
+      expect(promptEnhancementSequenceBatchDispositionV1(fault))
+        .toBe('error_popup_no_generated_content');
+    }
+    for (const invalid of [
+      'invalid_output', 'batch_deadline_exceeded', 'item_missing_wording', 'item_not_in_plan',
+      'first_item_must_not_be_worded', 'slice_missing_from_wording',
+      'covered_slice_missing_from_recap', 'confirmation_carries_original_text',
+      'confirmation_format_wrong_for_kind', 'confirmation_missing_ground_level_clause',
+      'confirmation_reproduces_directive_text', 'wording_exceeds_item_authority',
+    ] as const) {
+      expect(promptEnhancementSequenceBatchDispositionV1(invalid)).toBe('no_sequence_single_prompt');
+    }
   });
 });

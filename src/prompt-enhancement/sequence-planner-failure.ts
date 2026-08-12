@@ -15,7 +15,11 @@ import type { PromptEnhancementSequencePlannerFailureReasonV1 } from './sequence
  * fault, or an error popup for a feature they have switched off.
  */
 
-export type PromptEnhancementSequencePlannerDispositionV1 =
+/**
+ * What a failed sequence call leaves the user with. One vocabulary for every call in the feature,
+ * because the answer is about the user and not about which call it was.
+ */
+export type PromptEnhancementSequenceFailureDispositionV1 =
   /** Nothing rendered, nothing explained. The refusal itself must not be surfaced. */
   | 'silent_no_sequence'
   /** A public-safe error popup, and no generated content of any kind. */
@@ -30,7 +34,7 @@ export type PromptEnhancementSequencePlannerDispositionV1 =
  */
 export function promptEnhancementSequencePlannerDispositionV1(
   reason: PromptEnhancementSequencePlannerFailureReasonV1,
-): PromptEnhancementSequencePlannerDispositionV1 {
+): PromptEnhancementSequenceFailureDispositionV1 {
   switch (reason) {
     // Entry conditions. Every one of them is silent, and the config gate is why: its key and value
     // are forbidden render values, so explaining the silence is not available even in principle.

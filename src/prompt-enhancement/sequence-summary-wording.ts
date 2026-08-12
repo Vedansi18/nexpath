@@ -2,7 +2,6 @@ import OpenAI from 'openai';
 import {
   PROMPT_ENHANCEMENT_COST_MODEL_V1,
   PROMPT_ENHANCEMENT_COST_TIMEOUT_MS_V1,
-  PROMPT_ENHANCEMENT_COST_VALIDATION_RETRY_COUNT_V1,
   PROMPT_ENHANCEMENT_SEQUENCE_SUMMARY_OUTPUT_TOKEN_CAP_V1,
 } from './cost-observability.js';
 import {
@@ -66,9 +65,23 @@ export type PromptEnhancementSequenceSummaryFailureReasonV1 =
   | 'summary_omits_total'
   | 'summary_carries_original_text';
 
+/**
+ * The result, and the failure arm carries a line too.
+ *
+ * A failed sentence does NOT cost the sequence — owner ruling. The counts are the part the user
+ * actually needs and they never depended on this call, so they stay; what is lost is the worded
+ * half, and that is said in the text rather than hidden, so a failure here can be seen while it
+ * waits its turn to be fixed.
+ */
 export type PromptEnhancementSequenceSummaryResultV1 =
   | { ok: true; planGenerationId: string; publicSafeText: string }
-  | { ok: false; reason: PromptEnhancementSequenceSummaryFailureReasonV1 };
+  | {
+    ok: false;
+    planGenerationId: string;
+    reason: PromptEnhancementSequenceSummaryFailureReasonV1;
+    /** Renderable: the counts, and a plain statement that the wording did not come back. */
+    publicSafeText: string;
+  };
 
 type SummaryAttemptV1 =
   | { ok: true; publicSafeText: string }
@@ -169,10 +182,6 @@ function summaryErrorReason(error: unknown): 'timeout' | 'provider_error' {
   return /timed?\s?out/i.test(String(error)) ? 'timeout' : 'provider_error';
 }
 
-function isProviderFailure(reason: PromptEnhancementSequenceSummaryFailureReasonV1): boolean {
-  return reason === 'provider_error' || reason === 'timeout' || reason === 'no_key';
-}
-
 function hasRoomForAnotherCall(input: PromptEnhancementSequenceSummaryInputV1): boolean {
   if (input.deadlineAtMs === undefined) return true;
   return (input.nowMs ?? Date.now)() + PROMPT_ENHANCEMENT_COST_TIMEOUT_MS_V1 <= input.deadlineAtMs;
@@ -181,7 +190,6 @@ function hasRoomForAnotherCall(input: PromptEnhancementSequenceSummaryInputV1): 
 async function attemptSummary(
   openai: PromptEnhancementSequencePlannerClientV1,
   input: PromptEnhancementSequenceSummaryInputV1,
-  repairInstruction: string | undefined,
 ): Promise<SummaryAttemptV1> {
   let raw: string | null | undefined;
   try {
@@ -194,9 +202,6 @@ async function attemptSummary(
         messages: [
           { role: 'system', content: SYSTEM_PROMPT_V1 },
           { role: 'user', content: buildSummaryUserMessageV1(input.facts) },
-          ...(repairInstruction === undefined
-            ? []
-            : [{ role: 'user' as const, content: repairInstruction }]),
         ],
         response_format: { type: 'json_object' },
       },
@@ -221,47 +226,56 @@ async function attemptSummary(
 }
 
 /**
+ * The line shown when the call did not produce one.
+ *
+ * Built from the counts the caller already had, so nothing here is generated wording in the sense
+ * that is forbidden — and it is deliberately not an attempt at the real sentence. It names the
+ * failure so it can be SEEN, rather than passing as a summary that happens to read oddly.
+ */
+export function promptEnhancementSequenceSummaryFallbackTextV1(
+  facts: PromptEnhancementSequenceSummaryFactsV1,
+  reason: PromptEnhancementSequenceSummaryFailureReasonV1,
+): string {
+  return `This task is planned as ${facts.totalPromptCount} prompts`
+    + ` (${facts.taskCount} sub-task, ${facts.confirmationCount} confirmation/check,`
+    + ` ${facts.wrapUpCount} wrap-up).`
+    + ` [summary generation failed: ${reason}]`;
+}
+
+/**
  * Write the sentence.
  *
- * Same shape as the other two calls: one attempt, then bounded repair of a sentence that came back
- * wrong, no repair of a provider failure, and no call started that cannot finish before the
- * deadline the caller set.
+ * ONE attempt. Unlike the planner and the batch this call does not retry — owner ruling — and what
+ * lets it afford that is that its failure costs only the worded half: the counts survive, the
+ * sequence is still offered, and the line says what happened. Spending further calls on a sentence
+ * when the plan and the prompts are already in hand is not where the budget belongs.
  */
 export async function runPromptEnhancementSequenceSummaryWordingV1(
   input: PromptEnhancementSequenceSummaryInputV1,
   client?: PromptEnhancementSequencePlannerClientV1,
 ): Promise<PromptEnhancementSequenceSummaryResultV1> {
+  const failed = (
+    reason: PromptEnhancementSequenceSummaryFailureReasonV1,
+  ): PromptEnhancementSequenceSummaryResultV1 => ({
+    ok: false,
+    planGenerationId: input.planGenerationId,
+    reason,
+    publicSafeText: promptEnhancementSequenceSummaryFallbackTextV1(input.facts, reason),
+  });
+
   let openai: PromptEnhancementSequencePlannerClientV1;
   try {
     openai = client ?? (new OpenAI() as unknown as PromptEnhancementSequencePlannerClientV1);
   } catch {
-    return { ok: false, reason: 'no_key' };
+    return failed('no_key');
   }
 
-  if (!hasRoomForAnotherCall(input)) return { ok: false, reason: 'summary_deadline_exceeded' };
+  if (!hasRoomForAnotherCall(input)) return failed('summary_deadline_exceeded');
 
-  let repairInstruction: string | undefined;
-  for (let repair = 0; ; repair += 1) {
-    const attempt = await attemptSummary(openai, input, repairInstruction);
-    if (attempt.ok) {
-      return {
-        ok: true,
-        planGenerationId: input.planGenerationId,
-        publicSafeText: attempt.publicSafeText,
-      };
-    }
-    if (isProviderFailure(attempt.reason)) return { ok: false, reason: attempt.reason };
-    if (repair >= PROMPT_ENHANCEMENT_COST_VALIDATION_RETRY_COUNT_V1 || !hasRoomForAnotherCall(input)) {
-      return { ok: false, reason: attempt.reason };
-    }
-    repairInstruction = [
-      'YOUR PREVIOUS SENTENCE WAS NOT ACCEPTED.',
-      '',
-      `The check that rejected it: ${attempt.reason}.`,
-      '',
-      `Write it again. The total is ${input.facts.totalPromptCount} and it must appear in the sentence.`,
-    ].join('\n');
-  }
+  const attempt = await attemptSummary(openai, input);
+  return attempt.ok
+    ? { ok: true, planGenerationId: input.planGenerationId, publicSafeText: attempt.publicSafeText }
+    : failed(attempt.reason);
 }
 
 /**
@@ -275,7 +289,7 @@ export function promptEnhancementSequenceSummaryIsCurrentV1(
   result: PromptEnhancementSequenceSummaryResultV1,
   currentPlanGenerationId: string,
 ): boolean {
-  return result.ok && result.planGenerationId === currentPlanGenerationId;
+  return result.planGenerationId === currentPlanGenerationId;
 }
 
 export { PROMPT_ENHANCEMENT_SEQUENCE_SUMMARY_OUTPUT_TOKEN_CAP_V1 } from './cost-observability.js';

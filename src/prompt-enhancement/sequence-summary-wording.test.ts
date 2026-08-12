@@ -5,7 +5,6 @@ import {
   runPromptEnhancementSequenceSummaryWordingV1,
   type PromptEnhancementSequenceSummaryInputV1,
 } from './sequence-summary-wording.js';
-import { PROMPT_ENHANCEMENT_COST_VALIDATION_RETRY_COUNT_V1 } from './cost-observability.js';
 import type { PromptEnhancementSequenceItemV1 } from './sequence-payload.js';
 import type { PromptEnhancementSequencePlannerClientV1 } from './sequence-planner.js';
 
@@ -111,46 +110,51 @@ describe('sequence summary wording — the call', () => {
     expect(system).toContain('DO NOT list the upcoming prompts individually');
     expect(system).toContain('you must not guess at it');
   });
+});
 
-  it('refuses a sentence whose number is not the plan\'s', async () => {
-    // The one failure this line cannot survive: its whole job is to be trusted.
-    const wrong = reply('This task is planned as 6 prompts: 3 sub-task prompts and some checks.');
-    const { client } = clientReturning(wrong);
-    expect(await runPromptEnhancementSequenceSummaryWordingV1(input(), client))
-      .toEqual({ ok: false, reason: 'summary_omits_total' });
+describe('sequence summary wording — a failed line costs the wording and nothing else', () => {
+  const failing = async (replyText: string) =>
+    runPromptEnhancementSequenceSummaryWordingV1(input(), clientReturning(reply(replyText)).client);
+
+  it('keeps the counts and names the failure, rather than losing the sequence', async () => {
+    // The counts never depended on the call, so they stay; what is lost is the worded half, and it
+    // is stated rather than hidden so the failure can be seen while it waits to be fixed.
+    const result = await failing('This task is planned as several prompts.');
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe('summary_omits_total');
+    expect(result.publicSafeText).toContain('planned as 7 prompts');
+    expect(result.publicSafeText).toContain('3 sub-task');
+    expect(result.publicSafeText).toContain('summary generation failed: summary_omits_total');
+    // Still attributable to its plan, because the counts in it are just as wrong for a later one.
+    expect(promptEnhancementSequenceSummaryIsCurrentV1(result, 'plan-1')).toBe(true);
+    expect(promptEnhancementSequenceSummaryIsCurrentV1(result, 'plan-2')).toBe(false);
   });
 
-  it('refuses a wrong number that merely contains the right digit', async () => {
-    // "17" contains "7". Under plain containment the one check on the one line whose job is to be
-    // trusted passed a sentence stating a different number of prompts than the plan holds.
-    const { client } = clientReturning(reply('This task is planned as 17 prompts.'));
-    expect(await runPromptEnhancementSequenceSummaryWordingV1(input(), client))
-      .toEqual({ ok: false, reason: 'summary_omits_total' });
+  it('makes exactly ONE call and never a second', async () => {
+    // This call does not retry. Spending more calls on a sentence when the plan and the prompts are
+    // already in hand is not where the budget belongs.
+    const { client, bodies } = clientReturning(reply('This task is planned as several prompts.'));
+    await runPromptEnhancementSequenceSummaryWordingV1(input(), client);
+    expect(bodies).toHaveLength(1);
   });
 
-  it('refuses a sentence carrying the user\'s own words', async () => {
-    const leaked = reply(`This task is planned as 7 prompts. ${ORIGINAL}`);
-    const { client } = clientReturning(leaked);
-    expect(await runPromptEnhancementSequenceSummaryWordingV1(input(), client))
-      .toEqual({ ok: false, reason: 'summary_carries_original_text' });
+  it('catches a wrong number that merely contains the right digit', async () => {
+    // "17" contains "7", so containment would pass a sentence stating a different number.
+    const result = await failing('This task is planned as 17 prompts.');
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe('summary_omits_total');
   });
 
-  it('repairs a rejected sentence, restating the total it must carry', async () => {
-    const wrong = reply('This task is planned as several prompts.');
-    const { client, bodies } = clientReturning(wrong, reply(GOOD));
-    expect((await runPromptEnhancementSequenceSummaryWordingV1(input(), client)).ok).toBe(true);
-    expect(bodies).toHaveLength(2);
-    expect(bodies[1]?.[2]).toContain('summary_omits_total');
-    expect(bodies[1]?.[2]).toContain('The total is 7');
+  it('catches a sentence carrying the user own words', async () => {
+    const result = await failing(`This task is planned as 7 prompts. ${ORIGINAL}`);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe('summary_carries_original_text');
   });
 
-  it('stops after three repairs, and never repairs a provider failure', async () => {
-    const wrong = reply('This task is planned as several prompts.');
-    const { client, bodies } = clientReturning(wrong);
-    expect(await runPromptEnhancementSequenceSummaryWordingV1(input(), client))
-      .toEqual({ ok: false, reason: 'summary_omits_total' });
-    expect(bodies).toHaveLength(PROMPT_ENHANCEMENT_COST_VALIDATION_RETRY_COUNT_V1 + 1);
-
+  it('does the same for a provider failure and for no room before the deadline', async () => {
     let calls = 0;
     const throwing: PromptEnhancementSequencePlannerClientV1 = {
       chat: { completions: { create: async () => {
@@ -158,38 +162,32 @@ describe('sequence summary wording — the call', () => {
         throw Object.assign(new Error('t'), { name: 'APIConnectionTimeoutError' });
       } } },
     };
-    expect(await runPromptEnhancementSequenceSummaryWordingV1(input(), throwing))
-      .toEqual({ ok: false, reason: 'timeout' });
+    const thrown = await runPromptEnhancementSequenceSummaryWordingV1(input(), throwing);
+    expect(thrown.ok).toBe(false);
+    if (thrown.ok) return;
+    expect(thrown.reason).toBe('timeout');
+    expect(thrown.publicSafeText).toContain('planned as 7 prompts');
     expect(calls).toBe(1);
-  });
 
-  it('will not start a call it knows cannot finish', async () => {
-    let calls = 0;
-    const counting: PromptEnhancementSequencePlannerClientV1 = {
-      chat: { completions: { create: async () => {
-        calls += 1;
-        return { choices: [{ message: { content: reply(GOOD) } }] };
-      } } },
-    };
     const now = 1_000_000;
-    expect(await runPromptEnhancementSequenceSummaryWordingV1(
+    const late = await runPromptEnhancementSequenceSummaryWordingV1(
       input({ deadlineAtMs: now + 1, nowMs: () => now }),
-      counting,
-    )).toEqual({ ok: false, reason: 'summary_deadline_exceeded' });
-    expect(calls).toBe(0);
+      clientReturning(reply(GOOD)).client,
+    );
+    expect(late.ok).toBe(false);
+    if (late.ok) return;
+    expect(late.reason).toBe('summary_deadline_exceeded');
+    expect(late.publicSafeText).toContain('planned as 7 prompts');
   });
 
   it('belongs to the plan it was written for, and not to the one that replaced it', async () => {
-    // A re-plan changes both things the sentence states. Shown against the new plan it is a wrong
-    // count on the one line whose job is to prevent surprise.
     const { client } = clientReturning(reply(GOOD));
     const result = await runPromptEnhancementSequenceSummaryWordingV1(
       input({ planGenerationId: 'plan-before-shorter' }),
       client,
     );
+    expect(result.ok).toBe(true);
     expect(promptEnhancementSequenceSummaryIsCurrentV1(result, 'plan-before-shorter')).toBe(true);
     expect(promptEnhancementSequenceSummaryIsCurrentV1(result, 'plan-after-shorter')).toBe(false);
-    expect(promptEnhancementSequenceSummaryIsCurrentV1({ ok: false, reason: 'invalid_output' }, 'plan-1'))
-      .toBe(false);
   });
 });

@@ -25,6 +25,7 @@ import {
   type PromptEnhancementSequenceOffsetRangeV1,
 } from './sequence-payload.js';
 import type { PromptEnhancementSequencePlannerClientV1 } from './sequence-planner.js';
+import type { PromptEnhancementSequenceFailureDispositionV1 } from './sequence-planner-failure.js';
 
 /**
  * The up-front batch composer.
@@ -471,6 +472,42 @@ export async function runPromptEnhancementSequenceBatchV1(
       attempt.reason,
       attempt.dependencyOrder,
     );
+  }
+}
+
+/**
+ * What a failed batch leaves the user with.
+ *
+ * Two answers, and the difference is whether anything actually went wrong. A call that could not be
+ * made or did not come back is a fault the waiting user should be told about. A reply that arrived
+ * and did not hold up — including after its repairs were spent — costs the sequence and nothing
+ * else: the ordinary single-prompt path is untouched and the user still gets their prompt.
+ *
+ * Enumerated with no default arm, so a reason added later stops compiling here rather than falling
+ * into whichever branch happens to be last.
+ */
+export function promptEnhancementSequenceBatchDispositionV1(
+  reason: PromptEnhancementSequenceBatchFailureReasonV1,
+): PromptEnhancementSequenceFailureDispositionV1 {
+  switch (reason) {
+    case 'no_key':
+    case 'provider_error':
+    case 'timeout':
+      return 'error_popup_no_generated_content';
+
+    case 'invalid_output':
+    case 'batch_deadline_exceeded':
+    case 'item_missing_wording':
+    case 'item_not_in_plan':
+    case 'first_item_must_not_be_worded':
+    case 'slice_missing_from_wording':
+    case 'covered_slice_missing_from_recap':
+    case 'confirmation_carries_original_text':
+    case 'confirmation_format_wrong_for_kind':
+    case 'confirmation_missing_ground_level_clause':
+    case 'confirmation_reproduces_directive_text':
+    case 'wording_exceeds_item_authority':
+      return 'no_sequence_single_prompt';
   }
 }
 
