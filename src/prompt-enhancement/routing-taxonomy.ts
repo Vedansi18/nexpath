@@ -1208,6 +1208,14 @@ function compoundPromptStateFor(promptText: string): PromptEnhancementRouteDecis
   return 'single_intent';
 }
 
+/**
+ * PROVISIONAL SUBSTITUTE for semantic decomposition, and it should be read as one.
+ *
+ * It splits on punctuation, so its refs are POSITIONAL — a ref means "the Nth fragment", not "the
+ * Nth thing the user asked for". Two clauses describing one unit of work count as two; one clause
+ * carrying two units counts as one. Anything reading these refs as a count of what was asked for
+ * will be wrong in both directions, and nothing in the output says which.
+ */
 function userPointCoverageRefsFor(promptText: string): readonly string[] {
   const points = promptText
     .split(/\n|(?:\bthen\b)|(?:\balso\b)|[,;]/i)
@@ -1276,6 +1284,13 @@ export const PROMPT_ENHANCEMENT_SEQUENCE_ROLE_FAMILY_LABELS_V1: readonly PromptE
  * and `isPromptEnhancementSequenceShapedTextV1` keep using `userPointCoverageRefsFor`, so WHICH
  * prompts open MPS is unchanged. Labels come exclusively from the fixed approved vocabulary
  * (a point matching no family contributes count but no label — never raw text).
+ */
+/**
+ * PROVISIONAL SUBSTITUTE for semantic decomposition. It counts CLAUSES, not units of work.
+ *
+ * The split is punctuation-driven, so a request whose clauses do not line up with its actual tasks
+ * is counted wrongly and the count still looks authoritative. Treat the number it produces as a
+ * shape hint about the text, never as how many pieces of work the request contains.
  */
 export function describePromptEnhancementSequencePlanV1(
   promptText: string,

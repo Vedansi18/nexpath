@@ -17,6 +17,16 @@ export const PROMPT_ENHANCEMENT_COST_ADD_ON_ASSUMPTION_V1 = 'no_tool_container_s
 export const PROMPT_ENHANCEMENT_COST_REGIONAL_DATA_RESIDENCY_ASSUMPTION_V1 = 'no_regional_or_data_residency_uplift_selected';
 export const PROMPT_ENHANCEMENT_COST_INPUT_TOKEN_CAP_V1 = 8_000;
 export const PROMPT_ENHANCEMENT_COST_OUTPUT_TOKEN_CAP_V1 = 2_000;
+/**
+ * The sequence planner's own output budget. Deliberately NOT the composer cap above: the planner
+ * emits a reason per item and per confirmation, and those reasons are the tokens — dropping them to
+ * fit is what turns a plan into an unexplained list. Sized against the locked 30-item maximum.
+ *
+ * A truncated plan is invalid rather than degraded, so the hard cap exists to make a long plan
+ * finish rather than to let a long one arrive half-written.
+ */
+export const PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_OUTPUT_TOKEN_CAP_V1 = 1_500;
+export const PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_OUTPUT_TOKEN_HARD_CAP_V1 = 4_000;
 // Composer/route call budget. Raised from 10s (2026-08-07): the bounded composer asks for up to
 // PROMPT_ENHANCEMENT_COST_OUTPUT_TOKEN_CAP_V1 tokens as one JSON object covering every planned
 // section, which measures 9-14s for 6-8 sections — so a 10s cap cut the call off before it could
