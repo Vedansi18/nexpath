@@ -159,4 +159,35 @@ describe('sequence packager — checked by the thing that checks it', () => {
     const { packaged } = await packagedPopup(2);
     expect(packaged.progress).toEqual({ done: 2, total: 4 });
   });
+
+  it('serves the same item unchanged when it comes back, at the surface the user sees', async () => {
+    // The custom-prompt path holds the item: the user types directly in the agent, and the same
+    // prompt returns after their own prompt and a response reach a later Stop. Two carried fixtures
+    // pin this and they are not duplicates - that it returns, and that it returns unchanged.
+    //
+    // Asserted on the whole MODEL rather than the body text. A re-serve would drift in the identity
+    // block or the actions long before it drifted in the wording, and the wording is the half that
+    // was already provably stable.
+    const first = await packagedPopup(2);
+    const second = await packagedPopup(2);
+    if (first.built.state !== 'ready' || second.built.state !== 'ready') {
+      throw new Error('fixture did not render');
+    }
+    expect(second.built.model.body.text).toBe('Stored wording for item 2.');
+    expect(second.built.model).toEqual(first.built.model);
+  });
+
+  it('re-serves on a replayed event, because that is harmless when the text cannot change', async () => {
+    // The packager grows no dedupe layer. A duplicate event makes it re-read and re-package, which
+    // the user cannot tell from the first time; what must not happen twice is the pointer
+    // advancing, and that is guarded one layer down where the transition is visible.
+    const served = await Promise.all([packagedPopup(3), packagedPopup(3)]);
+    for (const { built } of served) {
+      if (built.state !== 'ready') throw new Error(`popup refused: ${built.reasonCodes.join(', ')}`);
+    }
+    const [a, b] = served;
+    expect(a?.built.state === 'ready' && b?.built.state === 'ready').toBe(true);
+    if (a?.built.state !== 'ready' || b?.built.state !== 'ready') return;
+    expect(b.built.model).toEqual(a.built.model);
+  });
 });
