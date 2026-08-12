@@ -503,6 +503,41 @@ export function promptEnhancementGeneratedBodyRequiresConfirmationV1(
   return classifySensitiveActions(currentBody, generatedBodyText).some((finding) => finding.requiresConfirmation);
 }
 
+/**
+ * Does the generated wording claim more authority than the request granted?
+ *
+ * The safety validator runs this over a single prompt's finished body. A multi-prompt sequence is a
+ * list of generated bodies, one per item, and none of them passes through that path — so without a
+ * per-item check a composer can turn a plan-or-review slice into execute-requested wording and
+ * nothing in the system notices.
+ *
+ * Exported rather than reimplemented on purpose. This is the copy that was hardened after the
+ * escalation defects, including the floor being consulted first so that a dangerous instruction the
+ * user never asked for is caught even when no execution verb appears elsewhere in the body. A second
+ * implementation would start from the version those fixes were made against.
+ */
+export function promptEnhancementGeneratedEscalatesAuthorityV1(
+  originalPromptText: string,
+  generatedBodyText: string,
+): boolean {
+  return generatedEscalatesAuthority(originalPromptText, generatedBodyText);
+}
+
+/**
+ * The sensitive-action risk families a piece of text reads as, or an empty list.
+ *
+ * Sibling of `promptEnhancementAuthorityModeForTextV1`: the same question asked of a slice rather
+ * than a whole prompt, so a sequence item can carry the risk family its own words imply instead of
+ * inheriting one from the request it came from. Literal blocks are stripped before matching, which
+ * is why quoted example commands do not register as risks — a behaviour a fresh implementation
+ * would be unlikely to reproduce.
+ */
+export function promptEnhancementRiskKindsForTextV1(
+  text: string,
+): readonly PromptEnhancementSensitiveActionRiskKind[] {
+  return classifyTextRiskKinds(text);
+}
+
 export function buildPromptEnhancementCanonicalConfirmation(originalPromptText: string): string {
   return `Still, before you do this ${specificSensitiveActionTextForPrompt(originalPromptText)} you must ask me for go-ahead confirmation.`;
 }

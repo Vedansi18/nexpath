@@ -8,6 +8,8 @@ import {
   PROMPT_ENHANCEMENT_PHASE_VALIDATORS,
   PROMPT_ENHANCEMENT_VALIDATION_STAGES,
   promptEnhancementAuthorityModeForTextV1,
+  promptEnhancementGeneratedEscalatesAuthorityV1,
+  promptEnhancementRiskKindsForTextV1,
   validatePromptEnhancementSafety,
 } from './safety-sendability.js';
 import {
@@ -1429,5 +1431,56 @@ describe('authority escalation is sentence-scoped, not whole-body keyword matchi
       expect(validate({ generatedMode: 'execute_requested' })).toBe(false);
       expect(validate({ generatedMode: 'execute_requested', requestMode: 'plan_or_review' })).toBe(true);
     });
+  });
+});
+
+// ── per-item safety helpers, reachable from outside this module ───────────────────────────────
+
+describe('per-item safety helpers', () => {
+  // The safety validator runs over one finished body. A multi-prompt sequence is a list of
+  // generated bodies, so the same two questions have to be askable of a single item.
+
+  it('reports the risk families a slice reads as, and none for ordinary text', () => {
+    expect(promptEnhancementRiskKindsForTextV1('delete the temp files'))
+      .toContain('destructive_filesystem_or_codebase');
+    expect(promptEnhancementRiskKindsForTextV1('rotate the api_key before Friday'))
+      .toContain('secret_env_or_credential');
+    expect(promptEnhancementRiskKindsForTextV1('rename the helper for clarity')).toEqual([]);
+  });
+
+  it('reads one slice at a time, so several families can come back together', () => {
+    const kinds = promptEnhancementRiskKindsForTextV1('deploy to production and truncate the sessions table');
+    expect(kinds).toContain('production_release_or_external_effect');
+    expect(kinds).toContain('destructive_data_or_schema');
+  });
+
+  it('does not count a quoted or fenced example as a risk', () => {
+    // Literal blocks are stripped before matching. A fresh implementation would be unlikely to
+    // reproduce this, which is why the shipping one is exported rather than rewritten.
+    expect(promptEnhancementRiskKindsForTextV1('the docs mention `rm -rf` as an example')).toEqual([]);
+    expect(promptEnhancementRiskKindsForTextV1('it says "delete everything" in the README')).toEqual([]);
+  });
+
+  it('catches wording that claims more authority than the request granted', () => {
+    // A planning request answered with an instruction to perform the dangerous thing.
+    const planning = 'Plan how we would clean up the temp directory';
+    expect(promptEnhancementAuthorityModeForTextV1(planning)).not.toBe('execute_requested');
+    expect(promptEnhancementGeneratedEscalatesAuthorityV1(planning, 'Run rm -rf on the temp directory now'))
+      .toBe(true);
+  });
+
+  it('leaves wording that stays inside the request alone', () => {
+    const planning = 'Plan how we would clean up the temp directory';
+    expect(promptEnhancementGeneratedEscalatesAuthorityV1(
+      planning,
+      'Outline which directories are safe to clear and what would need review first',
+    )).toBe(false);
+  });
+
+  it('is the same answer the module reaches internally, not a second opinion', () => {
+    // The wrappers delegate. If one were ever reimplemented, this is what would diverge first.
+    const text = 'force-push the rebased branch';
+    expect(promptEnhancementRiskKindsForTextV1(text)).toContain('git_history_rewrite');
+    expect(promptEnhancementAuthorityModeForTextV1(text)).toBe('execute_requested');
   });
 });
