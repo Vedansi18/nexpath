@@ -1,5 +1,6 @@
 import type {
   PromptEnhancementFutureSequenceRuntimeEventV1,
+  PromptEnhancementHandoffMetadataV1,
   PromptEnhancementPrepareResultV1,
 } from './contracts.js';
 import type { PromptEnhancementSequenceItemV1 } from './sequence-payload.js';
@@ -62,7 +63,15 @@ export interface PromptEnhancementSequencePackagerInputV1 {
   nexpathGeneratedPromptRef: string;
 }
 
+/** The two kinds a continuation popup accepts. Anything else is refused at the popup boundary. */
+const CONTINUATION_HANDOFF_KINDS_V1: readonly PromptEnhancementHandoffMetadataV1['handoffKind'][] = [
+  'first_prompt_handoff_candidate',
+  'compact_sequence_summary_candidate',
+];
+
 export type PromptEnhancementSequencePackagerRefusalV1 =
+  | 'accepted_result_has_no_handoff_metadata'
+  | 'handoff_kind_not_continuable'
   | 'index_is_the_first_item'
   | 'index_out_of_range'
   | 'item_count_disagrees_with_items'
@@ -71,6 +80,14 @@ export type PromptEnhancementSequencePackagerRefusalV1 =
 
 export interface PromptEnhancementSequencePackagedContinuationV1 {
   result: PromptEnhancementPrepareResultV1;
+  /**
+   * Re-pointed at the body it accompanies, not carried across unchanged.
+   *
+   * It is validated AGAINST the current body — the id and the revision are compared — and the
+   * packager swaps both. The accepted sequence's own metadata therefore mismatches by construction,
+   * which is why "carry it through" is not available however much it looks like the cheap option.
+   */
+  handoffMetadata: PromptEnhancementHandoffMetadataV1;
   event: PromptEnhancementFutureSequenceRuntimeEventV1;
   progress: PromptEnhancementSequenceProgressV1;
 }
@@ -101,6 +118,16 @@ export function packagePromptEnhancementSequenceContinuationV1(
     return { ok: false, refusal: 'index_out_of_range' };
   }
 
+  const accepted = input.acceptedResult.handoffMetadata;
+  // An accepted sequence was offered through this metadata, so its absence is not a shape the
+  // packager can fill in — there is no structure to re-point.
+  if (accepted === undefined) {
+    return { ok: false, refusal: 'accepted_result_has_no_handoff_metadata' };
+  }
+  if (!CONTINUATION_HANDOFF_KINDS_V1.includes(accepted.handoffKind)) {
+    return { ok: false, refusal: 'handoff_kind_not_continuable' };
+  }
+
   const item = input.items[input.currentItemIndex] as PromptEnhancementSequenceItemV1;
   if (item.generatedWording === null || item.generatedWording.trim().length === 0) {
     return { ok: false, refusal: 'item_wording_missing' };
@@ -113,6 +140,9 @@ export function packagePromptEnhancementSequenceContinuationV1(
 
   const result: PromptEnhancementPrepareResultV1 = {
     ...input.acceptedResult,
+    // A continuation popup exists to show the current body. The accepted result's disposition was a
+    // decision about a different body, and left as it was every continuation is refused.
+    disposition: 'show_current_body',
     currentBody: {
       ...input.acceptedResult.currentBody,
       currentBodyId: input.currentBodyId,
@@ -129,6 +159,18 @@ export function packagePromptEnhancementSequenceContinuationV1(
     // check on frozen text can only agree with itself or contradict itself, and a contradiction has
     // no defined handling.
     validationGraph: item.itemValidationGraph,
+  };
+
+  const handoffMetadata: PromptEnhancementHandoffMetadataV1 = {
+    ...accepted,
+    // The two fields it is validated against, taken from the body just built rather than the one it
+    // was written for.
+    currentBodyId: input.currentBodyId,
+    bodyRevision: input.bodyRevision,
+    // True because the two lines above just made it true, for this revision.
+    currentBodyValidityState: 'valid_for_current_body_revision',
+    // A carry, not a computation: the packager reports the safety state and never decides it.
+    riskConfirmationState: input.acceptedResult.safetySummary.sensitiveActionState,
   };
 
   const event: PromptEnhancementFutureSequenceRuntimeEventV1 = {
@@ -153,6 +195,7 @@ export function packagePromptEnhancementSequenceContinuationV1(
     ok: true,
     packaged: {
       result,
+      handoffMetadata,
       event,
       progress: {
         // Never the summary's remaining count. That figure is fixed at items.length - 1 on the

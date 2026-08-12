@@ -4,6 +4,7 @@ import {
   type PromptEnhancementSequencePackagerInputV1,
 } from './sequence-packager.js';
 import { promptEnhancementSequenceTaskRoleLabelsV1 } from './sequence-payload.js';
+import { promptEnhancementSequenceBatchExitActionV1 } from './sequence-batch-composer.js';
 import type { PromptEnhancementSequenceItemV1 } from './sequence-payload.js';
 import type {
   PromptEnhancementPrepareResultV1,
@@ -48,6 +49,16 @@ const ACCEPTED = {
     sentPromptOrigin: 'user_authored_original_only',
     nexpathGeneratedPromptRef: 'ref-0',
     originalPromptText: 'the original',
+  },
+  disposition: 'fallback_to_original',
+  safetySummary: { sensitiveActionState: 'confirmation_required' },
+  handoffMetadata: {
+    handoffKind: 'first_prompt_handoff_candidate',
+    currentBodyId: 'body-0',
+    bodyRevision: 0,
+    currentBodyValidityState: 'invalid_due_body_revision',
+    riskConfirmationState: 'none_detected',
+    scope: { requestId: 'req-1', projectRoot: '/project' },
   },
   routeDecision: { routeId: 'route-1' },
   bodyPlan: { planId: 'plan-1' },
@@ -231,5 +242,58 @@ describe('sequence role labels — one derivation, two readers', () => {
       { roleLabel: 'fix' },
     ])).toEqual(['fix', 'review']);
     expect(promptEnhancementSequenceTaskRoleLabelsV1([{ roleLabel: null }])).toEqual([]);
+  });
+});
+
+describe('sequence packager — the handoff metadata it must produce', () => {
+  it('re-points the two fields it is validated against', async () => {
+    // It is checked AGAINST the current body — id and revision compared — and the packager swaps
+    // both. Carrying the accepted sequence's own metadata across therefore mismatches by
+    // construction, however much it looks like the cheap option.
+    const result = packagePromptEnhancementSequenceContinuationV1(input());
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const { handoffMetadata, result: packaged } = result.packaged;
+    expect(handoffMetadata.currentBodyId).toBe(packaged.currentBody.currentBodyId);
+    expect(handoffMetadata.bodyRevision).toBe(packaged.currentBody.bodyRevision);
+    // The accepted one would not have matched, which is the whole reason this exists.
+    expect(ACCEPTED.handoffMetadata?.currentBodyId).not.toBe(packaged.currentBody.currentBodyId);
+    // Valid because those two lines just made it so, for this revision.
+    expect(handoffMetadata.currentBodyValidityState).toBe('valid_for_current_body_revision');
+    // A carry, not a computation: the risk state comes from the safety summary it accompanies.
+    expect(handoffMetadata.riskConfirmationState).toBe('confirmation_required');
+  });
+
+  it('refuses a sequence it cannot continue rather than emitting metadata the popup rejects', () => {
+    const noMetadata = { ...ACCEPTED, handoffMetadata: undefined } as PromptEnhancementPrepareResultV1;
+    expect(packagePromptEnhancementSequenceContinuationV1(input({ acceptedResult: noMetadata })))
+      .toEqual({ ok: false, refusal: 'accepted_result_has_no_handoff_metadata' });
+
+    const wrongKind = {
+      ...ACCEPTED,
+      handoffMetadata: { ...ACCEPTED.handoffMetadata, handoffKind: 'metadata_only' },
+    } as unknown as PromptEnhancementPrepareResultV1;
+    expect(packagePromptEnhancementSequenceContinuationV1(input({ acceptedResult: wrongKind })))
+      .toEqual({ ok: false, refusal: 'handoff_kind_not_continuable' });
+  });
+
+  it('says the result is showing the current body', () => {
+    // The accepted result's disposition was a decision about a different body; left as it was,
+    // every continuation is refused at the popup boundary.
+    const result = packagePromptEnhancementSequenceContinuationV1(input());
+    expect(ACCEPTED.disposition).not.toBe('show_current_body');
+    expect(result.ok && result.packaged.result.disposition).toBe('show_current_body');
+  });
+});
+
+describe('sequence batch — what happens to it when the popup is left', () => {
+  it('awaits on send and discards on every way out', () => {
+    // On send the wording is about to be persisted and the exit path force-exits after the write,
+    // so an un-awaited batch is killed silently. On a close nothing is stored but the disposition
+    // stub, and awaiting anyway turns Escape at second three into a twenty-second hang.
+    expect(promptEnhancementSequenceBatchExitActionV1('user_sends')).toBe('await_batch_before_exit');
+    for (const exit of ['popup_closed', 'escape', 'use_original'] as const) {
+      expect(promptEnhancementSequenceBatchExitActionV1(exit)).toBe('discard_batch');
+    }
   });
 });

@@ -527,6 +527,48 @@ export function promptEnhancementSequenceBatchDispositionV1(
   }
 }
 
+/** How the popup that the batch is running behind was left. */
+export type PromptEnhancementSequenceBatchExitV1 =
+  | 'user_sends'
+  | 'popup_closed'
+  | 'escape'
+  | 'use_original';
+
+export type PromptEnhancementSequenceBatchExitActionV1 =
+  /** Hold the hook open until the batch returns. Anything not awaited is killed at the force-exit. */
+  | 'await_batch_before_exit'
+  /** Let it go. Nothing will be stored, so there is no result to protect. */
+  | 'discard_batch';
+
+/**
+ * What to do with a running batch when the popup is left.
+ *
+ * Both halves are load-bearing and each is the wrong answer for the other's case.
+ *
+ * On SEND the wording is about to be persisted, and the exit path force-exits the process after the
+ * write — so a batch that is not awaited is killed silently and the sequence is stored with items
+ * that have no text. The surrounding code on that very path already does the wrong thing by habit:
+ * a fire-and-forget call sits immediately above the exit.
+ *
+ * On a close the plan and the wording are both dropped and only a disposition stub is written, so
+ * there is nothing to wait for. Awaiting anyway turns pressing Escape at second three into a
+ * twenty-second hang on a cancel — the user's clearest possible statement that they want out.
+ *
+ * Enumerated with no default arm, so a new exit has to be decided rather than inherited.
+ */
+export function promptEnhancementSequenceBatchExitActionV1(
+  exit: PromptEnhancementSequenceBatchExitV1,
+): PromptEnhancementSequenceBatchExitActionV1 {
+  switch (exit) {
+    case 'user_sends':
+      return 'await_batch_before_exit';
+    case 'popup_closed':
+    case 'escape':
+    case 'use_original':
+      return 'discard_batch';
+  }
+}
+
 /**
  * May this batch result be applied to the plan in hand?
  *
