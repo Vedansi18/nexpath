@@ -1,5 +1,6 @@
 import type {
   PromptEnhancementActionType,
+  PromptEnhancementValidationStatus,
   PromptEnhancementFutureSequenceRuntimeEventV1,
   PromptEnhancementHandoffMetadataV1,
   PromptEnhancementPrepareResultV1,
@@ -89,6 +90,8 @@ export interface PromptEnhancementSequencePackagerInputV1 {
    */
   itemSafetySummary: PromptEnhancementSafetySummaryV1;
   itemValidationSummary: PromptEnhancementSafetySummaryV1;
+  /** The validation status this body was cleared under, arriving with the rest of its verdict. */
+  itemGeneratedSafeStatus: PromptEnhancementValidationStatus;
   /**
    * The handoff decision for THIS body.
    *
@@ -214,6 +217,16 @@ export function packagePromptEnhancementSequenceContinuationV1(
       // user's, a continuation re-enters the planner and plans a sequence out of our own writing.
       sentPromptOrigin: 'sequence_handoff_owned_body',
       nexpathGeneratedPromptRef: input.nexpathGeneratedPromptRef,
+      // The FOURTH copy of the same bit. Three of them said Nexpath wrote this and this one still
+      // said the first prompt did; nothing type-checks the difference, because each is only
+      // required to be a string.
+      generatedOriginState: 'pe_generated_body',
+      // Nobody has touched this body — it has not been shown yet. Inherited from a body the user
+      // DID edit, it says they edited a prompt they have not seen, on the field the never-interfere
+      // ruling turns on.
+      userDirtyState: 'clean',
+      // Arrives with the rest of the item's verdict, for the same reason the summaries do.
+      generatedSafeStatus: input.itemGeneratedSafeStatus,
     },
     // The composer boundary carries its OWN copy of the origin, and one updated while the other is
     // not is worse than neither: whichever a reader consults then decides whether a continuation

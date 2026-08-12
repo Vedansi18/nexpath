@@ -117,6 +117,7 @@ async function packagedPopup(currentItemIndex: number) {
     itemSafetySummary: accepted.safetySummary,
     itemValidationSummary: accepted.validationSummary,
     handoffDecisionId: `${accepted.enhancementId}:handoff:item-${currentItemIndex}`,
+    itemGeneratedSafeStatus: accepted.currentBody.generatedSafeStatus,
   });
   if (!packaged.ok) throw new Error(`packager refused: ${packaged.refusal}`);
 

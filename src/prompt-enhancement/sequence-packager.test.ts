@@ -54,6 +54,9 @@ const ACCEPTED = {
     sentPromptOrigin: 'user_authored_original_only',
     nexpathGeneratedPromptRef: 'ref-0',
     originalPromptText: 'the original',
+    generatedOriginState: 'user_original',
+    userDirtyState: 'dirty_user_edited',
+    generatedSafeStatus: 'blocked',
   },
   disposition: 'fallback_to_original',
   validationDecisionId: 'decision-for-the-first-body',
@@ -114,6 +117,7 @@ const input = (
   itemSafetySummary: ITEM_SAFETY,
   itemValidationSummary: ITEM_SAFETY,
   handoffDecisionId: 'handoff-for-item-1',
+  itemGeneratedSafeStatus: 'passed',
   ...overrides,
 });
 
@@ -486,5 +490,29 @@ describe('sequence packager — the handoff metadata is about THIS body too', ()
     const { renderedPromptBody, text } = result.packaged.result.currentBody;
     expect(renderedPromptBody).toBe('The wording of item 1.');
     expect(text).toBe(renderedPromptBody);
+  });
+});
+
+describe('sequence packager — the origin bit lives in four places', () => {
+  it('says the same thing in all four, and does not inherit the other two beside it', () => {
+    // Nothing type-checks the difference: the completeness check asks only that each is a string,
+    // so three states describing the wrong body pass every check the popup runs.
+    const result = packagePromptEnhancementSequenceContinuationV1(input());
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const { currentBody, composerBoundary, generatedOrigin } = result.packaged.result;
+    expect(currentBody.sentPromptOrigin).toBe('sequence_handoff_owned_body');
+    expect(composerBoundary.sentPromptOrigin).toBe('sequence_handoff_owned_body');
+    expect(generatedOrigin.generatedOriginState).toBe('pe_generated_body');
+    expect(currentBody.generatedOriginState).toBe('pe_generated_body');
+
+    // Nobody has touched this body: it has not been shown yet. Inherited, it claims the user
+    // edited a prompt they have not seen - on the field the never-interfere ruling turns on.
+    expect(ACCEPTED.currentBody.userDirtyState).toBe('dirty_user_edited');
+    expect(currentBody.userDirtyState).toBe('clean');
+
+    // And the status this body was cleared under, not the one the first prompt was.
+    expect(ACCEPTED.currentBody.generatedSafeStatus).toBe('blocked');
+    expect(currentBody.generatedSafeStatus).toBe('passed');
   });
 });
