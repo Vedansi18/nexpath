@@ -1,4 +1,5 @@
 import { promptEnhancementAcceptanceFixtureV1 } from './acceptance-fixture-shape.js';
+import { PROMPT_ENHANCEMENT_SEQUENCE_MAX_ITEM_COUNT_V1 } from './sequence-runtime.js';
 import type { PromptEnhancementAcceptanceFixtureV1 } from './acceptance-matrix.js';
 
 /**
@@ -14,9 +15,14 @@ import type { PromptEnhancementAcceptanceFixtureV1 } from './acceptance-matrix.j
  * sequence fixtures are placed" is not a statement about whether anything works, and the structure
  * is built so it cannot be read as one.
  *
- * ⛔ AND NOT ONE ASSERTS A NUMBER. A fixture claiming a duration or a size is unshippable until an
- * oracle sign-off exists that does not exist yet, so the measurable properties here are stated as
- * completeness and presence rather than as thresholds.
+ * ⛔ AND NOT ONE ASSERTS A MEASURED THRESHOLD. A fixture claiming a duration, a latency or an output
+ * size is unshippable until an oracle sign-off exists that does not, so the measurable properties
+ * here are stated as completeness and presence instead.
+ *
+ * ⚠️ That is not the same as carrying no number. The locked item cap is a structural constant the
+ * payload validator already enforces, and the one oracle that turns on it states it — interpolated
+ * from the shipping constant, so the register cannot drift from the rule. The line is whether a
+ * number is something we measured or something the spec fixed.
  *
  * A note on where they can run. Roughly a third of these need a live continuation Stop or the
  * popup surface — the delivery-host four, the interface three, and the store-lock one — and that
@@ -149,12 +155,16 @@ export function buildPromptEnhancementSequenceAcceptanceFixturesV1(): readonly P
       expectedIntent: 'maximum_sequence_size',
       expectedCapability: 'complete_batch_at_the_cap',
       mandatorySlotsOrSafeguards: [
-        'item_count_at_the_locked_maximum',
-        'maximum_minus_one_when_a_closing_recap_is_present',
+        // The cap is INTERPOLATED from the shipping constant, never written as a literal. A literal
+        // would be a second copy of a number the payload validator already enforces, and a register
+        // is the wrong place to keep one — but leaving the number out entirely was worse: it left
+        // the one oracle with two values that differ by one telling its reader to go and find them.
+        `item_count_is_${PROMPT_ENHANCEMENT_SEQUENCE_MAX_ITEM_COUNT_V1}_at_the_locked_maximum`,
+        `item_count_is_${PROMPT_ENHANCEMENT_SEQUENCE_MAX_ITEM_COUNT_V1 - 1}_when_a_closing_recap_is_present`,
         // The batch that writes the largest sequence is the largest thing this feature produces.
         // A reply that ran out of room is a BROKEN sequence, not a shorter one: an item whose
         // wording was cut mid-sentence satisfies every stored invariant while being unusable.
-        'batch_output_complete_not_truncated',
+        `batch_output_complete_for_a_${PROMPT_ENHANCEMENT_SEQUENCE_MAX_ITEM_COUNT_V1}_item_sequence`,
         'truncated_batch_is_invalid_not_degraded',
       ],
       sourceReasonMetadata: ['item_count', 'wrap_up_presence', 'batch_output_cap'],

@@ -5,6 +5,7 @@ import {
   buildPromptEnhancementAcceptancePacketV1,
   validatePromptEnhancementAcceptancePacketV1,
 } from './acceptance-matrix.js';
+import { PROMPT_ENHANCEMENT_SEQUENCE_MAX_ITEM_COUNT_V1 } from './sequence-runtime.js';
 
 const sequenceFixtures = buildPromptEnhancementSequenceAcceptanceFixturesV1();
 
@@ -86,11 +87,13 @@ describe('sequence acceptance register — what it refuses to claim', () => {
     expect(packet.ownerSignoffState).toBe('required_before_readiness_claim');
   });
 
-  it('never states a number', () => {
-    // A fixture asserting a duration or a size needs an oracle sign-off that does not exist, so it
-    // would be unshippable the day it was written. The measurable cases here assert completeness
-    // and presence instead.
-    const NUMERIC = /\b\d+\s*(ms|s|sec|seconds|kb|mb|tokens|chars|characters)\b|\bunder\s+\d|\bat least \d|\bmax(imum)?\s+\d/i;
+  it('never states a MEASURED threshold', () => {
+    // The prohibition is about measurements: a fixture asserting a duration, a latency or an output
+    // size needs an oracle sign-off that does not exist, so it would be unshippable the day it was
+    // written. It is NOT about numbers as such — a constant the spec fixed and the validator
+    // already enforces is a different thing, and reading the rule the broad way is what left the
+    // item-cap oracle telling its reader to go and find the two values it turns on.
+    const MEASURED = /\b\d+\s*(ms|s|sec|secs|seconds|minutes?|kb|mb|bytes?|tokens?)\b|\bunder\s+\d|\bwithin\s+\d|\bfaster than\s+\d|\bno more than\s+\d/i;
     for (const entry of sequenceFixtures) {
       const text = [
         ...entry.mandatorySlotsOrSafeguards,
@@ -98,8 +101,24 @@ describe('sequence acceptance register — what it refuses to claim', () => {
         ...entry.hardFailFocus,
         entry.inputPrompt,
       ].join(' | ');
-      expect(text).not.toMatch(NUMERIC);
+      expect(text).not.toMatch(MEASURED);
     }
+  });
+
+  it('states the item cap from the shipping constant, not from a copy of it', () => {
+    // The oracle carries both values — the cap, and the cap minus one when a closing recap is
+    // present — because they differ by one and a reader who has to look them up is the reader who
+    // writes the fixture against whatever the code says today.
+    const entry = byId('acceptance-sequence-max-item-count-complete-batch');
+    const cap = PROMPT_ENHANCEMENT_SEQUENCE_MAX_ITEM_COUNT_V1;
+    expect(entry?.mandatorySlotsOrSafeguards).toEqual(expect.arrayContaining([
+      `item_count_is_${cap}_at_the_locked_maximum`,
+      `item_count_is_${cap - 1}_when_a_closing_recap_is_present`,
+      `batch_output_complete_for_a_${cap}_item_sequence`,
+    ]));
+    // Interpolated, so moving the cap moves the oracle with it. A literal here would be a second
+    // copy of a number the payload validator already enforces.
+    expect(entry?.mandatorySlotsOrSafeguards.join(' ')).toContain(String(cap));
   });
 
   it('does not require the sequence runtime to be declared live', () => {
