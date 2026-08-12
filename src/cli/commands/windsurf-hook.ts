@@ -32,6 +32,7 @@ import {
   type SubmitOptionSource,
 } from './submit-option-source.js';
 import { openStore, closeStore } from '../../store/db.js';
+import { getPendingAdvisory, markAdvisoryShown } from '../../store/pending-advisories.js';
 import { writeSubmitDecision } from './submit-decision-store.js';
 import { createHoldBudget, type HoldBudget } from './submit-hold-budget.js';
 // CONSUME-ONLY. `SessionStateManager` is not Vedansi-owned (`hi0001234d` 15 /
@@ -284,6 +285,65 @@ export interface WindsurfHookActionDeps {
    * replaces it with the real popup-backed decision.
    */
   decidePromptSubmit?: (event: string, opts: { project?: string }, promptText: string) => Promise<WindsurfPromptSubmitDecision>;
+  /** OWNER RULING 2026-08-12: consume the session's pending advisories before `stop` runs (switch on only). */
+  suppressOldAdvisorySurface?: (projectRoot: string, sessionId: string) => Promise<number>;
+}
+
+/**
+ * OWNER RULING 2026-08-12 (G-ARBITRATION, popup-precedence half): with the
+ * submit switch ON, the OLD advisory surface must never fire — the submit-time
+ * popup IS the advisory surface on this host. With the switch OFF the old flow
+ * runs untouched, and the CLI is out of scope for this milestone entirely.
+ *
+ * `stop` (Layer C, frozen) pops whatever `pending_advisories` row it finds, so
+ * the enforcement point is the one process we own that runs BEFORE it: this
+ * hook's `post_cascade_response` leg. It consumes the session's pending rows
+ * with the same consume-only store calls `consumeHandledTurn` already uses —
+ * `stop`'s ladder then finds no advisory and moves on to feedback/PE, which
+ * this ruling deliberately leaves untouched.
+ *
+ * Recorded cost (team-lead note in the gate register): signals the submit flow
+ * cannot render deterministically (A1 excludes the LLM path at submit) are
+ * DROPPED under the switch, not deferred to a post-response popup.
+ *
+ * Fail-open: any error leaves rows in place — worst case is today's popup,
+ * never a lost prompt. Sweep is capped; each mark exposes the next pending row.
+ */
+export async function suppressOldAdvisorySurfaceForSession(
+  projectRoot: string,
+  sessionId: string,
+  ports: {
+    openStore?: (db?: string) => Promise<unknown>;
+    closeStore?: (store: unknown) => Promise<void> | void;
+    getRow?: typeof getPendingAdvisory;
+    markShown?: typeof markAdvisoryShown;
+    log?: (line: string) => void;
+  } = {},
+): Promise<number> {
+  const openStoreFn = ports.openStore ?? openStore;
+  const closeStoreFn = ports.closeStore ?? closeStore;
+  const getRow = ports.getRow ?? getPendingAdvisory;
+  const markShown = ports.markShown ?? markAdvisoryShown;
+  const log = ports.log ?? (() => {});
+  let store: unknown = null;
+  let consumed = 0;
+  try {
+    store = await openStoreFn(undefined as never);
+    for (let i = 0; i < 8; i++) {
+      const row = getRow(store as never, projectRoot, sessionId);
+      if (!row) break;
+      markShown(store as never, row.id);
+      consumed++;
+    }
+    if (consumed > 0) {
+      log(`windsurf-hook: old advisory surface suppressed for this session (${consumed} row(s), submit switch on)`);
+    }
+  } catch (err) {
+    log(`windsurf-hook: advisory suppression failed open — ${(err as Error)?.message ?? 'unknown'}`);
+  } finally {
+    if (store) { try { await closeStoreFn(store as never); } catch { /* fail-open */ } }
+  }
+  return consumed;
 }
 
 /**
@@ -378,6 +438,31 @@ export async function runWindsurfHookAction(
       // classification) now sits inside the blocking window.
       pendingPromptText = parsePayload(preReadRaw)?.tool_info?.user_prompt ?? '';
       decideAfterAuto = true;
+    }
+
+    // ── OWNER RULING 2026-08-12: switch ON ⇒ the old advisory surface is OFF ──
+    // Same single-read constraint as the pre leg: stdin is consumed here and
+    // replayed into `handle` below. No hold budget — nothing is being held on
+    // the post-response leg; the bounded read protects against a never-closing
+    // pipe only. Session-scoped: only THIS trajectory's pending advisories are
+    // consumed, so concurrent sessions keep their own state. With the switch
+    // off this block is skipped entirely (byte-identical shipped behaviour).
+    if (event === 'post_cascade_response' && isWindsurfPromptSubmitAdvisoryEnabled(env)) {
+      const raw = await Promise.race([
+        readStdin(),
+        new Promise<string>((r) => {
+          const t = setTimeout(() => r(''), stdinTimeoutMs);
+          if (typeof t.unref === 'function') t.unref();
+        }),
+      ]);
+      preReadRaw = raw ?? '';
+      const sessionId = parsePayload(preReadRaw)?.trajectory_id ?? '';
+      if (sessionId) {
+        const suppress = deps.suppressOldAdvisorySurface ?? suppressOldAdvisorySurfaceForSession;
+        try {
+          await suppress(opts.project ?? process.cwd(), sessionId);
+        } catch { /* fail-open — worst case is today's popup */ }
+      }
     }
 
     // Name this surface for Layer C's popup "Send to …" label. The spawned

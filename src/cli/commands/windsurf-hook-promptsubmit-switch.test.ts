@@ -196,3 +196,131 @@ describe('H2 — FAIL-OPEN (amendment A3): a failure must never strand the promp
     expect(h.exit).toHaveBeenCalledWith(0);
   });
 });
+
+/**
+ * OWNER RULING 2026-08-12 — switch ON ⇒ the OLD advisory surface is OFF.
+ * The post_cascade_response leg consumes the session's pending advisories
+ * BEFORE `handle` spawns `stop`, so stop's ladder finds none. Switch OFF ⇒
+ * byte-identical shipped behaviour (no stdin pre-read, no store touch).
+ */
+describe('post_cascade_response — old-advisory suppression under the switch', () => {
+  const PAYLOAD = JSON.stringify({
+    agent_action_name: 'post_cascade_response',
+    trajectory_id: 'traj-suppress-1',
+    tool_info: { response: 'done' },
+  });
+
+  it('⭐ switch ON: consumes the session advisories BEFORE handle runs, session-scoped', async () => {
+    const order: string[] = [];
+    const suppress = vi.fn(async (root: string, session: string) => {
+      order.push(`suppress:${session}`);
+      expect(root).toBe('/proj');
+      return 2;
+    });
+    const h = harness({
+      env: { [WINDSURF_PROMPTSUBMIT_ADVISORY_ENV]: '1' },
+      readStdin: async () => PAYLOAD,
+      suppressOldAdvisorySurface: suppress,
+    });
+    (h.handle as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      order.push('handle');
+      return { child: null };
+    });
+    await runWindsurfHookAction('post_cascade_response', { project: '/proj' }, h.deps as never);
+    expect(suppress).toHaveBeenCalledWith('/proj', 'traj-suppress-1');
+    expect(order).toEqual(['suppress:traj-suppress-1', 'handle']);
+    expect(h.exit).toHaveBeenCalledWith(0);
+  });
+
+  it('switch ON but no trajectory in the payload: nothing consumed, handle still runs', async () => {
+    const suppress = vi.fn(async () => 0);
+    const h = harness({
+      env: { [WINDSURF_PROMPTSUBMIT_ADVISORY_ENV]: '1' },
+      readStdin: async () => '{"tool_info":{}}',
+      suppressOldAdvisorySurface: suppress,
+    });
+    await runWindsurfHookAction('post_cascade_response', { project: '/proj' }, h.deps as never);
+    expect(suppress).not.toHaveBeenCalled();
+    expect(h.handle).toHaveBeenCalled();
+  });
+
+  it('⭐ switch OFF: no pre-read, no suppression — handle reads stdin itself (shipped shape)', async () => {
+    const suppress = vi.fn(async () => 0);
+    const readStdin = vi.fn(async () => PAYLOAD);
+    const h = harness({
+      env: {},
+      readStdin,
+      suppressOldAdvisorySurface: suppress,
+    });
+    await runWindsurfHookAction('post_cascade_response', { project: '/proj' }, h.deps as never);
+    expect(suppress).not.toHaveBeenCalled();
+    expect(readStdin).not.toHaveBeenCalled(); // the wrapper must not consume stdin when off
+    const handleArgs = (h.handle as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(handleArgs[2]).toBeUndefined(); // no replay dep passed — call shape identical to shipped
+  });
+
+  it('a throwing suppressor fails open: handle still runs, exit 0', async () => {
+    const h = harness({
+      env: { [WINDSURF_PROMPTSUBMIT_ADVISORY_ENV]: '1' },
+      readStdin: async () => PAYLOAD,
+      suppressOldAdvisorySurface: vi.fn(async () => { throw new Error('db locked'); }),
+    });
+    await runWindsurfHookAction('post_cascade_response', { project: '/proj' }, h.deps as never);
+    expect(h.handle).toHaveBeenCalled();
+    expect(h.exit).toHaveBeenCalledWith(0);
+  });
+
+  it('pre_user_prompt is untouched by the suppression block (its own gated path only)', async () => {
+    const suppress = vi.fn(async () => 0);
+    const h = harness({
+      env: { [WINDSURF_PROMPTSUBMIT_ADVISORY_ENV]: '1' },
+      readStdin: async () => JSON.stringify({ trajectory_id: 't', tool_info: { user_prompt: 'x' } }),
+      suppressOldAdvisorySurface: suppress,
+      decidePromptSubmit: vi.fn(async () => 'allow'),
+    });
+    await runWindsurfHookAction('pre_user_prompt', { project: '/proj' }, h.deps as never);
+    expect(suppress).not.toHaveBeenCalled();
+  });
+});
+
+describe('suppressOldAdvisorySurfaceForSession (the sweep itself)', () => {
+  it('sweeps pending rows for the session until none remain, marks each shown', async () => {
+    const rows = [{ id: 11 }, { id: 12 }, { id: 13 }];
+    const getRow = vi.fn(() => rows.shift() ?? null);
+    const markShown = vi.fn();
+    const closeStore = vi.fn();
+    const { suppressOldAdvisorySurfaceForSession } = await import('./windsurf-hook.js');
+    const n = await suppressOldAdvisorySurfaceForSession('/proj', 'sess', {
+      openStore: async () => ({}),
+      closeStore,
+      getRow: getRow as never,
+      markShown: markShown as never,
+    });
+    expect(n).toBe(3);
+    expect(markShown).toHaveBeenCalledTimes(3);
+    expect(markShown).toHaveBeenNthCalledWith(1, expect.anything(), 11);
+    expect(closeStore).toHaveBeenCalled(); // store never leaked
+  });
+
+  it('caps the sweep so a pathological store cannot spin forever', async () => {
+    const getRow = vi.fn(() => ({ id: 1 })); // never runs out
+    const markShown = vi.fn();
+    const { suppressOldAdvisorySurfaceForSession } = await import('./windsurf-hook.js');
+    const n = await suppressOldAdvisorySurfaceForSession('/proj', 'sess', {
+      openStore: async () => ({}),
+      closeStore: () => {},
+      getRow: getRow as never,
+      markShown: markShown as never,
+    });
+    expect(n).toBe(8);
+  });
+
+  it('store open failure returns 0 and never throws (fail-open)', async () => {
+    const { suppressOldAdvisorySurfaceForSession } = await import('./windsurf-hook.js');
+    const n = await suppressOldAdvisorySurfaceForSession('/proj', 'sess', {
+      openStore: async () => { throw new Error('no db'); },
+      closeStore: () => {},
+    });
+    expect(n).toBe(0);
+  });
+});
