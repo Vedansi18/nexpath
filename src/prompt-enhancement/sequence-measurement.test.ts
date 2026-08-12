@@ -379,3 +379,58 @@ describe('the aggregate agrees with the record beside it', () => {
     expect(packet.aggregate.providerUnavailableCount).toBe(0);
   });
 });
+
+describe('the recorded readings, run back through the instrument', () => {
+  /**
+   * The worst case as recorded: the planner spending all four starts. Kept here because the two
+   * tables in the plan were landed from DIFFERENT runs of the same case — the occupancy from the
+   * cheaper one, the call starts from this one — and a reader combining them got a third number.
+   */
+  const WORST_CASE: readonly PromptEnhancementOccupantReadingV1[] = [
+    { occupant: 'sequence_planning_call', latencyMs: 114_458, startedCallCount: 4, deliveredCallCount: 0 },
+    { occupant: 'first_item_composition', latencyMs: 12_837, estimatedOutputTokens: 459 },
+    { occupant: 'awaited_batch_call', latencyMs: 35_244, estimatedOutputTokens: 388 },
+  ];
+
+  it('puts BOTH hook paths past the registered timeout at the worst case', () => {
+    // The finding the weaker headline hid. A budget is sized against the worse run, and at that run
+    // the send path does not fit its hook — it is not near the limit, it is past it.
+    const report = buildPromptEnhancementSequenceOccupancyReportV1(WORST_CASE);
+    const first = report.find((entry) => entry.path === 'first_popup');
+    const send = report.find((entry) => entry.path === 'send');
+
+    expect(first?.totalOccupancyMs).toBe(127_295);
+    expect(send?.totalOccupancyMs).toBe(162_539);
+    expect(first?.fractionOfTimeoutConsumed).toBeCloseTo(1.414, 3);
+    expect(send?.fractionOfTimeoutConsumed).toBeCloseTo(1.806, 3);
+    // Both margins negative, which is the whole of it.
+    expect(first?.marginMs).toBeLessThan(0);
+    expect(send?.marginMs).toBeLessThan(0);
+  });
+
+  it('agrees with the packet on the same readings, so the two records cannot drift', () => {
+    // The occupancy report and the evidence packet consume one set of readings. Landed from
+    // different runs, they told different stories about the same worst case.
+    const report = buildPromptEnhancementSequenceOccupancyReportV1(WORST_CASE);
+    const packet = buildPromptEnhancementSequenceMeasurementEvidenceV1({
+      evidenceId: 'e', enhancementId: 'h', requestId: 'r', readings: WORST_CASE,
+    });
+    const send = report.find((entry) => entry.path === 'send');
+    expect(packet.aggregate.latencyMsTotal).toBe(send?.totalOccupancyMs);
+    // And the discarded planner run is counted, not merely timed.
+    expect(packet.aggregate.plannedCallCount).toBe(6);
+    expect(packet.aggregate.usedCallCount).toBe(2);
+    expect(packet.aggregate.fallbackCount).toBe(1);
+  });
+
+  it('still offers no verdict on a reading that is past the limit', () => {
+    // Over budget is a stronger reading, and it is still not a decision. Scheduling the deferred
+    // migration is the owner's call whether the fraction is 0.92 or 1.81.
+    const report = buildPromptEnhancementSequenceOccupancyReportV1(WORST_CASE);
+    expect(JSON.stringify(report)).not.toMatch(/exceed|over_budget|breach|fail|violat/i);
+    for (const entry of report) {
+      expect(['measured', 'not_measured_path_not_runnable', 'not_measured_no_reading_supplied'])
+        .toContain(entry.readingState);
+    }
+  });
+});
