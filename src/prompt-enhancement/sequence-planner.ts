@@ -3,6 +3,7 @@ import type { Database } from 'sql.js';
 import {
   PROMPT_ENHANCEMENT_COST_MODEL_V1,
   PROMPT_ENHANCEMENT_COST_TIMEOUT_MS_V1,
+  PROMPT_ENHANCEMENT_COST_VALIDATION_RETRY_COUNT_V1,
   PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_OUTPUT_TOKEN_CAP_V1,
   PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_OUTPUT_TOKEN_HARD_CAP_V1,
 } from './cost-observability.js';
@@ -172,13 +173,17 @@ type PlannerAttemptV1 =
 /**
  * How many times a plan that came back wrong may be sent back for repair.
  *
+ * The SHIPPING constant, not a second one holding the same number: one rule covers malformed output
+ * and safety-validation failure across this feature, the composer already implements it from here,
+ * and the cost worksheet checks each call's recorded retry count against this name. A local copy
+ * would agree with it right up until the locked number moved, and then the worksheet would be
+ * checking the planner against a value the planner no longer uses.
+ *
  * Repairs only. A provider that failed or timed out is not retried here at all — that is a
  * different failure with a different answer, and retrying it would stack its whole wait again in
- * front of a user who is already waiting. Even bounded to repairs this is the slowest path the
- * feature has, which is worth knowing when the planner's timeout is finally measured rather than
- * guessed.
+ * front of a user who is already waiting.
  */
-export const PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_MAX_REPAIRS_V1 = 3;
+export { PROMPT_ENHANCEMENT_COST_VALIDATION_RETRY_COUNT_V1 } from './cost-observability.js';
 
 /** The failures that are the call's, not the plan's. Never repaired: there is nothing to repair. */
 function isProviderFailure(reason: PromptEnhancementSequencePlannerFailureReasonV1): boolean {
@@ -721,7 +726,7 @@ export async function runPromptEnhancementSequencePlannerV1(
     // Out of repairs, or out of time for another. Both end the same way and both return what was
     // actually wrong with the plan rather than the reason for stopping — the defect is the useful
     // half, and either way no sequence is offered and the single-prompt path is unaffected.
-    if (repair >= PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_MAX_REPAIRS_V1
+    if (repair >= PROMPT_ENHANCEMENT_COST_VALIDATION_RETRY_COUNT_V1
       || !hasRoomForAnotherCall(input)) {
       return { ok: false, reason: attempt.reason };
     }

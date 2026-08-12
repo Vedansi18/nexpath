@@ -7,6 +7,7 @@ import {
 } from './sequence-planner-failure.js';
 import { describePromptEnhancementSequencePlanV1 } from './routing-taxonomy.js';
 import {
+  PROMPT_ENHANCEMENT_COST_VALIDATION_RETRY_COUNT_V1,
   PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_OUTPUT_TOKEN_CAP_V1,
   PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_OUTPUT_TOKEN_HARD_CAP_V1,
 } from './cost-observability.js';
@@ -35,7 +36,6 @@ import {
   buildPromptEnhancementSequencePlannerSystemPromptV1,
 } from './sequence-planner-prompt.js';
 import {
-  PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_MAX_REPAIRS_V1,
   runPromptEnhancementSequencePlannerV1,
   type PromptEnhancementSequencePlannerClientV1,
   type PromptEnhancementSequencePlannerRouteV1,
@@ -914,7 +914,7 @@ describe('sequence planner — repair, and its bound', () => {
     expect(await runPromptEnhancementSequencePlannerV1(call(), client))
       .toEqual({ ok: false, reason: 'role_label_invalid' });
     // One attempt plus its three repairs. After that it is not a retry problem.
-    expect(sent).toHaveLength(PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_MAX_REPAIRS_V1 + 1);
+    expect(sent).toHaveLength(PROMPT_ENHANCEMENT_COST_VALIDATION_RETRY_COUNT_V1 + 1);
     expect(promptEnhancementSequencePlannerDispositionV1('role_label_invalid'))
       .toBe('no_sequence_single_prompt');
   });
@@ -991,7 +991,7 @@ describe('sequence planner — repair, and its bound', () => {
     // Absent means absent — the behaviour without a deadline is unchanged.
     const { client, sent } = clientSequence([badRole]);
     await runPromptEnhancementSequencePlannerV1(call(), client);
-    expect(sent).toHaveLength(PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_MAX_REPAIRS_V1 + 1);
+    expect(sent).toHaveLength(PROMPT_ENHANCEMENT_COST_VALIDATION_RETRY_COUNT_V1 + 1);
   });
 
   it('repairs at the hard cap, so a plan that did not fit has room to', async () => {
