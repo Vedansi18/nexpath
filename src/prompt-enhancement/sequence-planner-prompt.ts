@@ -100,7 +100,13 @@ answer is not-complex and no confirmation is emitted. Do not raise the verdict t
 WHY THIS IS STRICT: every unnecessary confirmation reduces the chance that a necessary one is read.
 Confirmations have to stay rare enough to still be read.`;
 
-/** 3 — rule 0 on whether an item exists at all, then the five slicing locks with their failures. */
+/**
+ * 3 — rule 0 on whether an item exists at all, then the five slicing locks with their failures.
+ *
+ * Each lock carries the failure it prevents, and rules 4 and 5 need theirs most: they are the two
+ * that act on whether an item exists rather than on where a boundary falls, so a reader who has
+ * only the rule has nothing to weigh a borderline case against.
+ */
 const SECTION_3_SLICING = `SECTION 3 — SLICING CONSTRAINTS
 
 RULE 0 — AN ITEM EXISTS ONLY ON A DECISION ABOUT THAT ITEM.
@@ -123,15 +129,25 @@ Three spans must never be CUT:
 
   3. WHOLE-PROMPT DIRECTIVES — instructions that shape the OUTPUT rather than name work are not
      sliced at all. They apply to every item. "Refactor as you go", "keep the answers short",
-     "explain your reasoning" are directives, not tasks.
+     "explain your reasoning" are directives, not tasks. Left inside one slice, "show findings
+     first, no code" binds that item alone, and the user gets code back for two of three tasks
+     after saying no code.
 
 Two rules that act on candidacy rather than on boundaries:
 
-  4. SUPPRESSION — an instruction that suppresses the work suppresses the whole sequence. Work that
-     is suppressed is BLOCKED, never quietly deferred to a later item.
+  4. NO-SPLIT INSTRUCTION — if the user said this must stay one prompt, there is no sequence. The
+     property is whether they said not to split it, however they phrased it. "Keep this as one
+     prompt", "handle it in one go", "single prompt only", "no follow-up prompts" are how it
+     commonly looks — they are NOT what to match against, and a great many users will say it some
+     other way. It counts wherever they wrote it: in the request itself, or in any additional
+     details they added. This rule exists because the user typed the constraint and it was ignored
+     anyway, so a reading that only recognises the four phrasings above is that same failure
+     wearing this rule's name. And the work does not become future items instead — with no sequence
+     there are none. It stays in the one prompt, or that prompt is not sendable.
 
   5. NOT ELIGIBLE — a point that needs the user to answer something is not sequence-eligible. It
-     does not become an item.
+     stays in the current body and does not become an item. Forced into the nearest kind it becomes
+     a task, and the agent is handed "go do this" for something nobody was able to specify.
 
 EVERY ITEM MUST STAND ON ITS OWN. Any item can be the last one actually sent — the user cancels,
 gets distracted, or the work goes sideways at item four. An item that only makes sense because a

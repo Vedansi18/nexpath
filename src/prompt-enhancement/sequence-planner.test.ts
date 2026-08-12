@@ -241,6 +241,15 @@ describe('sequence planner — the grouping checks', () => {
     )).toEqual({ ok: false, code: 'point_required_kind_invalid' });
   });
 
+  it('returns a typed failure on an entry that is not an object, rather than throwing', () => {
+    // A dropped entry arriving as null is an ordinary way for a partial generation to come back,
+    // and reading a field off it would throw past every typed refusal a caller is written against.
+    expect(checkPromptEnhancementSequencePlannerGroupingV1([null as never], []))
+      .toEqual({ ok: false, code: 'point_not_object' });
+    expect(checkPromptEnhancementSequencePlannerGroupingV1([point('p1', 0)], [null as never]))
+      .toEqual({ ok: false, code: 'group_not_object' });
+  });
+
   it('catches a duplicated point id in the inventory itself', () => {
     expect(checkPromptEnhancementSequencePlannerGroupingV1(
       [point('p1', 0), point('p1', 10)],
@@ -361,6 +370,32 @@ describe('sequence planner — the prompt', () => {
     expect(prompt).toContain('SLICES ARE POSITIONS, NOT TEXT');
   });
 
+  it('carries the no-split instruction, as a property and on both surfaces', () => {
+    // The rule exists because the user typed the constraint and it was ignored anyway, so a
+    // reading that recognises only the phrasings it lists is that same failure under its own name.
+    const prompt = buildPromptEnhancementSequencePlannerSystemPromptV1();
+    expect(prompt).toContain('NO-SPLIT INSTRUCTION');
+    expect(prompt).toContain('if the user said this must stay one prompt, there is no sequence');
+    expect(prompt).toContain('NOT what to match against');
+    // Wherever they wrote it: the request itself, or the details they added afterwards.
+    expect(prompt).toContain('in the request itself, or in any additional');
+    // And with no sequence there are no future items to park the work in.
+    expect(prompt).toContain('the work does not become future items instead');
+  });
+
+  it('gives all five slicing locks the failure each one prevents', () => {
+    const prompt = buildPromptEnhancementSequencePlannerSystemPromptV1();
+    for (const failure of [
+      'Splitting these ships half a change',              // 1 — atomic coupling
+      'it becomes two instructions that will both be followed', // 2 — conditional
+      'the user gets code back for two of three tasks',   // 3 — whole-prompt directives
+      'the user typed the constraint and it was ignored', // 4 — no-split
+      'the agent is handed "go do this" for something nobody was able to specify', // 5 — not eligible
+    ]) {
+      expect(prompt).toContain(failure);
+    }
+  });
+
   it('tells the model it does not word the prompts', () => {
     expect(buildPromptEnhancementSequencePlannerSystemPromptV1()).toContain('You do NOT write the prompts');
   });
@@ -456,6 +491,22 @@ describe('sequence planner — the call', () => {
       .toEqual({ ok: false, reason: 'invalid_output' });
     expect(await runPromptEnhancementSequencePlannerV1(call(), clientReturning('{"outcome":"sequence"}')))
       .toEqual({ ok: false, reason: 'invalid_output' });
+  });
+
+  it('refuses a malformed inventory or grouping instead of throwing on it', async () => {
+    // json_object mode guarantees the reply is JSON. It guarantees nothing about the shape, and
+    // this call promises its failures are typed.
+    const malformed = [
+      validReply({ points: [null, point('p2', 10), point('p3', 20)] }),
+      validReply({ points: [{ pointId: 'p1', startOffset: 0 }, point('p2', 10), point('p3', 20)] }),
+      validReply({ groups: [null, group('g2', ['p3'])] }),
+      // A group that stays in the body is a decision; its absence is not a default.
+      validReply({ groups: [{ groupId: 'g1', pointIds: ['p1', 'p2'] }, group('g2', ['p3'])] }),
+    ];
+    for (const reply of malformed) {
+      await expect(runPromptEnhancementSequencePlannerV1(call(), clientReturning(reply)))
+        .resolves.toEqual({ ok: false, reason: 'invalid_output' });
+    }
   });
 
   it('refuses a reply that returns slice TEXT instead of positions', async () => {

@@ -22,6 +22,7 @@ import {
   type PromptEnhancementSequencePlannerOutcomeV1,
   type PromptEnhancementSequencePlannerPointV1,
   type PromptEnhancementSequencePlannerSummaryDataV1,
+  type PromptEnhancementSequencePointKindV1,
 } from './sequence-planner-output.js';
 import {
   isPromptEnhancementSequenceOffsetRangeV1,
@@ -192,6 +193,62 @@ function asRangeList(value: unknown): readonly PromptEnhancementSequenceOffsetRa
   return ranges;
 }
 
+/**
+ * The point inventory, shape-only.
+ *
+ * Checked entry by entry rather than cast, for the same reason the items are: `json_object` mode
+ * guarantees the reply is JSON, never that it holds the shape asked for, and a `null` where an
+ * entry was dropped is an ordinary way for a partial generation to come back. Cast instead, it
+ * reaches a check that reads a field off it and throws — past every typed refusal a caller is
+ * written against.
+ */
+function asPointList(value: unknown): readonly PromptEnhancementSequencePlannerPointV1[] | null {
+  if (!Array.isArray(value)) return null;
+  const points: PromptEnhancementSequencePlannerPointV1[] = [];
+  for (const entry of value) {
+    if (typeof entry !== 'object' || entry === null) return null;
+    const point = entry as Record<string, unknown>;
+    if (typeof point['pointId'] !== 'string'
+      || typeof point['startOffset'] !== 'number'
+      || typeof point['endOffset'] !== 'number'
+      // Shape only: that the kind is one of the six is meaning, and is checked with the rest of it.
+      || typeof point['requiredKind'] !== 'string') {
+      return null;
+    }
+    points.push({
+      pointId: point['pointId'],
+      startOffset: point['startOffset'],
+      endOffset: point['endOffset'],
+      requiredKind: point['requiredKind'] as PromptEnhancementSequencePointKindV1,
+    });
+  }
+  return points;
+}
+
+/** The grouping, shape-only. Same reasoning as the inventory above. */
+function asGroupList(value: unknown): readonly PromptEnhancementSequencePlannerGroupV1[] | null {
+  if (!Array.isArray(value)) return null;
+  const groups: PromptEnhancementSequencePlannerGroupV1[] = [];
+  for (const entry of value) {
+    if (typeof entry !== 'object' || entry === null) return null;
+    const group = entry as Record<string, unknown>;
+    if (typeof group['groupId'] !== 'string'
+      || !Array.isArray(group['pointIds'])
+      || (group['pointIds'] as unknown[]).some((id) => typeof id !== 'string')
+      // Required rather than defaulted: a group that stays in the body is a decision, and reading
+      // its absence as "becomes an item" would take that decision on the planner's behalf.
+      || typeof group['canRemainOneBodySection'] !== 'boolean') {
+      return null;
+    }
+    groups.push({
+      groupId: group['groupId'],
+      pointIds: group['pointIds'] as readonly string[],
+      canRemainOneBodySection: group['canRemainOneBodySection'],
+    });
+  }
+  return groups;
+}
+
 function asRange(value: unknown): PromptEnhancementSequenceOffsetRangeV1 | null | 'invalid' {
   if (value === null || value === undefined) return null;
   if (typeof value !== 'object') return 'invalid';
@@ -230,9 +287,9 @@ function parsePlannerReply(raw: string): ParsedPlannerReplyV1 | null {
 
   const promptDirectives = asRangeList(reply['promptDirectives'] ?? []);
   if (promptDirectives === null) return null;
-  if (!Array.isArray(reply['points']) || !Array.isArray(reply['groups']) || !Array.isArray(reply['items'])) {
-    return null;
-  }
+  const points = asPointList(reply['points']);
+  const groups = asGroupList(reply['groups']);
+  if (points === null || groups === null || !Array.isArray(reply['items'])) return null;
 
   const items: PlannedItemDraftV1[] = [];
   for (const entry of reply['items'] as unknown[]) {
@@ -280,8 +337,8 @@ function parsePlannerReply(raw: string): ParsedPlannerReplyV1 | null {
   return {
     outcome: reply['outcome'] as PromptEnhancementSequencePlannerOutcomeV1,
     outcomeReason: (reply['outcomeReason'] ?? null) as PromptEnhancementSequencePlannerOutcomeReasonV1 | null,
-    points: reply['points'] as readonly PromptEnhancementSequencePlannerPointV1[],
-    groups: reply['groups'] as readonly PromptEnhancementSequencePlannerGroupV1[],
+    points,
+    groups,
     items,
     promptDirectives,
     summaryId: summaryData['summaryId'],

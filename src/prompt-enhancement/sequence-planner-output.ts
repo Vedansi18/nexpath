@@ -76,6 +76,8 @@ export type PromptEnhancementSequencePlannerCheckCodeV1 =
   | 'outcome_reason_disagrees_with_outcome'
   | 'points_not_array'
   | 'groups_not_array'
+  | 'point_not_object'
+  | 'group_not_object'
   | 'point_id_duplicated'
   | 'point_required_kind_invalid'
   | 'point_in_no_group'
@@ -134,6 +136,9 @@ export function checkPromptEnhancementSequencePlannerGroupingV1(
 
   const pointIds = new Set<string>();
   for (const point of points) {
+    // An entry that is not an object at all. Reading a field off it would throw, and this function
+    // is reached from a reply, where a dropped entry arriving as `null` is ordinary.
+    if (typeof point !== 'object' || point === null) return fail('point_not_object');
     if (pointIds.has(point.pointId)) return fail('point_id_duplicated');
     if (!(PROMPT_ENHANCEMENT_SEQUENCE_POINT_KINDS_V1 as readonly string[])
       .includes(point.requiredKind)) {
@@ -144,6 +149,7 @@ export function checkPromptEnhancementSequencePlannerGroupingV1(
 
   const placement = new Map<string, number>();
   for (const group of groups) {
+    if (typeof group !== 'object' || group === null) return fail('group_not_object');
     if (!Array.isArray(group.pointIds) || group.pointIds.length === 0) return fail('group_empty');
     for (const pointId of group.pointIds) {
       if (!pointIds.has(pointId)) return fail('group_references_unknown_point');
