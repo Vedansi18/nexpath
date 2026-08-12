@@ -240,6 +240,10 @@ describe('r5-injection — F2 password masking (dev-plan §10.6 F2 token list)',
       'mail someone.long.address@example-company.com now',
       'ssh into /home/user/.ssh/id_rsa_production_key today',
       'ping 192.168.100.200 first',
+      // Several kinds in one string: the patterns run in sequence, so a padded marker must not be
+      // re-consumed by a later pattern. Every marker opens with a bracket, which none of the value
+      // character classes accept.
+      'api_key: "aVeryLongSecretValue12345" mail someone.long@example-company.com ping 192.168.100.200',
     ]) {
       expect(maskSecretsInText(text)).toHaveLength(text.length);
     }
