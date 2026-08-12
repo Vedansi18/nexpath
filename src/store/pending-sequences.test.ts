@@ -271,6 +271,31 @@ describe('pending-sequences store', () => {
     }))).toBe(false);
   });
 
+  it('does not freeze a LATER sequence against an earlier one in the same project', () => {
+    // A terminal row is never removed by the read path, so the previous sequence is still stored
+    // when the next one is written. Comparing across the two would freeze one sequence's plan onto
+    // a different sequence — and a single declined offer would refuse every later sequence here.
+    const declined = payload({ offerDisposition: 'not_engaged', originalLength: 0 });
+    expect(upsertPendingPromptSequence(store, createdState({ sequenceId: 'seq-1' }), declined)).toBe(true);
+    expect(upsertPendingPromptSequence(store, createdState({ sequenceId: 'seq-2' }), payload())).toBe(true);
+    expect(getActivePendingPromptSequence(store, PROJECT, 'sess-1')).toMatchObject({
+      sequenceId: 'seq-2',
+      payload: { offerDisposition: 'accepted' },
+    });
+  });
+
+  it('does not freeze a later sequence against an earlier one that carried different wording', () => {
+    const planned = payload({ items: plannedItems(3), suggestedNextPromptPolicy: 'rendered_after_explicit_acceptance' });
+    expect(upsertPendingPromptSequence(store, createdState({ sequenceId: 'seq-1', itemCount: 3 }), planned)).toBe(true);
+    const different = payload({
+      items: withItemField(plannedItems(3), 1, 'generatedWording', 'a different plan entirely'),
+      suggestedNextPromptPolicy: 'rendered_after_explicit_acceptance',
+    });
+    // Different sequence id — this is a new plan, not a rewrite of the old one.
+    expect(upsertPendingPromptSequence(store, createdState({ sequenceId: 'seq-2', itemCount: 3 }), different)).toBe(true);
+    expect(getActivePendingPromptSequence(store, PROJECT, 'sess-1')?.payload.items).toEqual(different.items);
+  });
+
   it('refuses a second write that changes what the user did with the offer', () => {
     // A mid-sequence cancel changes the sequence's status, not the record of the offer.
     expect(upsertPendingPromptSequence(store, createdState(), payload())).toBe(true);

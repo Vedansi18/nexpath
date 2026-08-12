@@ -76,8 +76,10 @@ export function upsertPendingPromptSequence(
     return false;
   }
   // The rewrite check runs BEFORE the delete: this is the only point at which a stored value can
-  // be replaced, so refusing here is what makes "written once, never rewritten" true.
-  const prior = storedFrozenFields(store, state.projectRoot);
+  // be replaced, so refusing here is what makes "written once, never rewritten" true. It looks up
+  // THIS sequence only — a different sequence is a different offer, with its own items and its own
+  // record of what the user did with it.
+  const prior = storedFrozenFields(store, state.projectRoot, state.sequenceId);
   if (prior && !frozenFieldsRespected(prior, payload)) return false;
   const now = Date.now();
   store.db.run('DELETE FROM pending_prompt_sequences WHERE project_root = ?', [state.projectRoot]);
@@ -125,18 +127,25 @@ function canonical(value: unknown): string {
 }
 
 /**
- * Read the stored payload for a project WITHOUT the active-status filter and without scrubbing.
- * The frozen-field check must see every row, including a terminal one, and must not delete
- * anything on its way to a decision.
+ * Read the stored payload for THIS sequence, without the active-status filter and without
+ * scrubbing. The frozen-field check must see a terminal row — a completed sequence's items and a
+ * declined offer's record are both still frozen — and must not delete anything on its way to a
+ * decision.
+ *
+ * Scoped by sequence id, not by project. A terminal row is never removed by the read path, so the
+ * previous sequence's row is still present when the next one is written; comparing across the two
+ * would freeze one sequence's plan onto a different sequence, and a single declined offer would
+ * refuse every later sequence in that project.
  */
 function storedFrozenFields(
   store: Store,
   projectRoot: string,
+  sequenceId: string,
 ): { items: readonly Record<string, unknown>[]; offerDisposition: string } | null {
   const result = store.db.exec(
     `SELECT items_json, offer_disposition FROM pending_prompt_sequences
-     WHERE project_root = ? ORDER BY updated_at DESC LIMIT 1`,
-    [projectRoot],
+     WHERE project_root = ? AND sequence_id = ? ORDER BY updated_at DESC LIMIT 1`,
+    [projectRoot, sequenceId],
   );
   const raw = result[0]?.values[0];
   if (!raw) return null;
@@ -159,7 +168,8 @@ const FROZEN_ITEM_FIELDS = ['generatedWording', 'itemValidationGraph'] as const;
  *
  * The disposition is write-once for the same reason: it records what the user did with the OFFER.
  * A later cancel changes the sequence's status, not that decision, so a write that disagrees with
- * the stored value is refused rather than merged.
+ * the stored value is refused rather than merged. One offer, one record — a later sequence in the
+ * same project is a different offer and is not constrained by this one.
  *
  * Items are matched by position, which is the same correspondence the rest of the row uses. There
  * is deliberately no rule here for an item that disappears from a shorter list: the row exists
