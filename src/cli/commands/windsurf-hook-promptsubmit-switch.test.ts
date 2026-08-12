@@ -153,9 +153,16 @@ describe('H2 — switch ON: only an explicit block exits 2', () => {
     expect(h.exit).toHaveBeenCalledWith(0);
   });
 
-  it('never gates post_cascade_response — the switch is prompt-submit only', async () => {
+  it('post_cascade_response never consults the DECIDER and always exits 0 (updated 2026-08-12: the owner-ruled suppression read now runs on this leg, but blocking stays prompt-submit only)', async () => {
     const decide = vi.fn().mockResolvedValue('block');
-    const h = harness({ decidePromptSubmit: decide, env: { ...ON } });
+    const h = harness({
+      decidePromptSubmit: decide,
+      env: { ...ON },
+      // The suppression leg reads stdin; without this the default reader waits
+      // on the test runner's real stdin until the post bound.
+      readStdin: async () => '{"trajectory_id":"t-post"}',
+      suppressOldAdvisorySurface: vi.fn(async () => 0),
+    });
     await runWindsurfHookAction('post_cascade_response', {}, h.deps);
     expect(decide).not.toHaveBeenCalled();
     expect(h.exit).toHaveBeenCalledWith(0);
@@ -322,5 +329,37 @@ describe('suppressOldAdvisorySurfaceForSession (the sweep itself)', () => {
       closeStore: () => {},
     });
     expect(n).toBe(0);
+  });
+});
+
+describe('post-leg stdin bound (live-proven race, 2026-08-12)', () => {
+  const PAYLOAD = JSON.stringify({ trajectory_id: 'traj-slow', tool_info: { response: 'big' } });
+
+  it('⭐ slow stdin within the POST bound still suppresses (the pre-leg 2s bound must not apply)', async () => {
+    const suppress = vi.fn(async () => 1);
+    const slowStdin = () => new Promise<string>((r) => setTimeout(() => r(PAYLOAD), 120));
+    const h = harness({
+      env: { [WINDSURF_PROMPTSUBMIT_ADVISORY_ENV]: '1' },
+      readStdin: slowStdin,
+      stdinTimeoutMs: 50,          // pre-leg bound — tighter than the stdin delay
+      postStdinTimeoutMs: 5_000,   // post-leg bound — generous
+      suppressOldAdvisorySurface: suppress,
+    });
+    await runWindsurfHookAction('post_cascade_response', { project: '/proj' }, h.deps as never);
+    expect(suppress).toHaveBeenCalledWith('/proj', 'traj-slow');
+  });
+
+  it('stdin slower than even the post bound: suppression skipped, hook still completes fail-open', async () => {
+    const suppress = vi.fn(async () => 0);
+    const verySlow = () => new Promise<string>((r) => setTimeout(() => r(PAYLOAD), 500));
+    const h = harness({
+      env: { [WINDSURF_PROMPTSUBMIT_ADVISORY_ENV]: '1' },
+      readStdin: verySlow,
+      postStdinTimeoutMs: 50,
+      suppressOldAdvisorySurface: suppress,
+    });
+    await runWindsurfHookAction('post_cascade_response', { project: '/proj' }, h.deps as never);
+    expect(suppress).not.toHaveBeenCalled();
+    expect(h.exit).toHaveBeenCalledWith(0);
   });
 });

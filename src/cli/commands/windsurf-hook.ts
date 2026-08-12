@@ -32,6 +32,7 @@ import {
   type SubmitOptionSource,
 } from './submit-option-source.js';
 import { openStore, closeStore } from '../../store/db.js';
+import { log } from '../../logger.js';
 import { getPendingAdvisory, markAdvisoryShown } from '../../store/pending-advisories.js';
 import { writeSubmitDecision } from './submit-decision-store.js';
 import { createHoldBudget, type HoldBudget } from './submit-hold-budget.js';
@@ -287,6 +288,14 @@ export interface WindsurfHookActionDeps {
   decidePromptSubmit?: (event: string, opts: { project?: string }, promptText: string) => Promise<WindsurfPromptSubmitDecision>;
   /** OWNER RULING 2026-08-12: consume the session's pending advisories before `stop` runs (switch on only). */
   suppressOldAdvisorySurface?: (projectRoot: string, sessionId: string) => Promise<number>;
+  /**
+   * Bound on the POST-leg stdin read. Separate from `stdinTimeoutMs` (the PRE
+   * leg, which holds the user's prompt and must stay tight): nothing is held on
+   * the post-response leg, and the payload carries the full response text, which
+   * LIVE-provenly (2026-08-12) can arrive slower than 2 s — the suppression was
+   * silently skipped. Generous by design; bounded only against a never-closing pipe.
+   */
+  postStdinTimeoutMs?: number;
 }
 
 /**
@@ -324,7 +333,7 @@ export async function suppressOldAdvisorySurfaceForSession(
   const closeStoreFn = ports.closeStore ?? closeStore;
   const getRow = ports.getRow ?? getPendingAdvisory;
   const markShown = ports.markShown ?? markAdvisoryShown;
-  const log = ports.log ?? (() => {});
+  const logLine = ports.log ?? ((line: string) => log('info', 'windsurf_hook_advisory_suppression', { line }));
   let store: unknown = null;
   let consumed = 0;
   try {
@@ -336,10 +345,10 @@ export async function suppressOldAdvisorySurfaceForSession(
       consumed++;
     }
     if (consumed > 0) {
-      log(`windsurf-hook: old advisory surface suppressed for this session (${consumed} row(s), submit switch on)`);
+      logLine(`windsurf-hook: old advisory surface suppressed for this session (${consumed} row(s), submit switch on)`);
     }
   } catch (err) {
-    log(`windsurf-hook: advisory suppression failed open — ${(err as Error)?.message ?? 'unknown'}`);
+    logLine(`windsurf-hook: advisory suppression failed open — ${(err as Error)?.message ?? 'unknown'}`);
   } finally {
     if (store) { try { await closeStoreFn(store as never); } catch { /* fail-open */ } }
   }
@@ -448,10 +457,11 @@ export async function runWindsurfHookAction(
     // consumed, so concurrent sessions keep their own state. With the switch
     // off this block is skipped entirely (byte-identical shipped behaviour).
     if (event === 'post_cascade_response' && isWindsurfPromptSubmitAdvisoryEnabled(env)) {
+      const postBound = deps.postStdinTimeoutMs ?? 15_000;
       const raw = await Promise.race([
         readStdin(),
         new Promise<string>((r) => {
-          const t = setTimeout(() => r(''), stdinTimeoutMs);
+          const t = setTimeout(() => r(''), postBound);
           if (typeof t.unref === 'function') t.unref();
         }),
       ]);
@@ -461,7 +471,11 @@ export async function runWindsurfHookAction(
         const suppress = deps.suppressOldAdvisorySurface ?? suppressOldAdvisorySurfaceForSession;
         try {
           await suppress(opts.project ?? process.cwd(), sessionId);
-        } catch { /* fail-open — worst case is today's popup */ }
+        } catch { /* fail-open — worst case is today's popup; the sweep logs its own failures */ }
+      } else {
+        // Leaves a trace for live debugging: an empty session here means the
+        // payload was missing/late — the exact silent-skip found 2026-08-12.
+        log('warn', 'windsurf_hook_suppression_skipped', { reason: preReadRaw === '' ? 'stdin_timeout_or_empty' : 'no_trajectory_id' });
       }
     }
 
