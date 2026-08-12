@@ -844,7 +844,7 @@ describe('runAuto — prompt persistence', () => {
       store,
     );
     const rows = getRecentPrompts(store, '/test/project', 10);
-    expect(rows[0].text).toContain('sk-[REDACTED]');
+    expect(rows[0].text).toContain('sk-[REDACTED');
     expect(rows[0].text).not.toContain('sk-abc123');
   });
 

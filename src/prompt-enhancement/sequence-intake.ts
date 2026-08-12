@@ -85,6 +85,11 @@ export function intakePromptEnhancementSequenceOnFirstSendV1(
   // No planner exists yet, so the item list is empty and the policy stays at its default. What
   // is known now is the length the future offsets index into, and that the offer was accepted —
   // a row is only created here because the user explicitly sent.
+  //
+  // The bound is taken from the body's original text, which is the prompt AS RECEIVED — the string
+  // slices are cut from, so the one the offsets index. The copy kept in the prompts table is
+  // redacted, but redaction is length-preserving by design (see `store/redact.ts`), so the two
+  // agree character for character and a stored range selects the same words in either.
   return {
     state:   'sequence_recorded',
     runtime: created.state,
