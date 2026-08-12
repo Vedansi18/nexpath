@@ -121,6 +121,20 @@ export interface ChatPipelineDeps {
    * never affected by an echo-check failure).
    */
   isPeEcho?: (event: ChatHistoryEvent) => Promise<boolean> | boolean;
+  /**
+   * OWNER RULING 2026-08-12 (Cursor half of G-ARBITRATION): with the submit-time
+   * advisory switch ON, the OLD Decision-Session advisory surface must not fire —
+   * the submit-time hook owns it now. On Cursor there is no post-response hook to
+   * consume the row (unlike Windsurf's suppression leg), so the DB-watcher's
+   * `stop` is the old advisory's ONLY driver, and this is the enforcement point.
+   *
+   * **Surgical, NOT a blanket kill:** it suppresses ONLY the DS-advisory path —
+   * a turn that `checkPeOrigin` reports as a Prompt Enhancement STILL runs
+   * `spawnStop` + `injectPeResult`, so **PE keeps working** ("all popups working
+   * in the new flow"). Only a non-PE (DS-advisory) turn is skipped. Absent/false
+   * ⇒ byte-identical old behaviour (both surfaces fire as today).
+   */
+  suppressDsAdvisory?: boolean;
 }
 
 // Redacts before logging: this pipeline catches spawnAuto/spawnStop failures,
@@ -175,6 +189,12 @@ export function createChatEventHandler(
         // fail-safe — fall back to DS routing on failure
       }
     }
+    // OWNER RULING 2026-08-12: switch ON ⇒ the OLD DS-advisory surface is OFF, but
+    // PE is preserved. A non-PE (DS-advisory) turn stops here — no fallback arm,
+    // no `stop`, no old popup; the submit-time hook already owned this turn's
+    // advisory. A PE turn (isPe) falls through and runs `stop` + `injectPeResult`
+    // exactly as before. Switch OFF ⇒ this is skipped entirely (old behaviour).
+    if (deps.suppressDsAdvisory && !isPe) return;
     // Arm the in-editor fallback BEFORE the popup. `stop` can block indefinitely
     // on macOS (osascript waiting on the Automation-permission dialog), so the
     // fallback must not depend on `stop` returning.

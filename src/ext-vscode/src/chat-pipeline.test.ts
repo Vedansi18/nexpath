@@ -425,4 +425,47 @@ describe('createChatEventHandler', () => {
       consoleError.mockRestore();
     }
   });
+
+  describe('OWNER RULING 2026-08-12 — suppressDsAdvisory (old DS advisory off, PE preserved)', () => {
+    it('⭐ switch ON + non-PE turn: skips stop entirely (no old advisory popup, no fallback arm)', async () => {
+      const checkPeOrigin = vi.fn().mockResolvedValue(false);
+      const handler = createChatEventHandler({
+        spawnAuto, spawnStop, injectSelection, onAfterCapture,
+        checkPeOrigin, suppressDsAdvisory: true, logger: { error: errorLog },
+      });
+      await handler(makeEvent());
+      expect(spawnAuto).toHaveBeenCalled();       // capture/classify still runs
+      expect(checkPeOrigin).toHaveBeenCalled();   // origin still decided
+      expect(onAfterCapture).not.toHaveBeenCalled(); // no fallback arm
+      expect(spawnStop).not.toHaveBeenCalled();   // no old advisory surface
+      expect(injectSelection).not.toHaveBeenCalled();
+    });
+
+    it('⭐ switch ON + PE turn: PE is PRESERVED — stop runs and injectPeResult delivers', async () => {
+      const checkPeOrigin = vi.fn().mockResolvedValue(true);
+      const injectPeResult = vi.fn().mockResolvedValue(undefined);
+      spawnStop.mockResolvedValueOnce(fakeSelection);
+      const handler = createChatEventHandler({
+        spawnAuto, spawnStop, injectSelection, onAfterCapture,
+        checkPeOrigin, injectPeResult, suppressDsAdvisory: true, logger: { error: errorLog },
+      });
+      await handler(makeEvent());
+      expect(spawnStop).toHaveBeenCalled();        // PE popup still shown
+      expect(injectPeResult).toHaveBeenCalled();   // PE delivered
+      expect(injectSelection).not.toHaveBeenCalled();
+    });
+
+    it('switch OFF: a non-PE turn runs stop as before (byte-identical old flow)', async () => {
+      const checkPeOrigin = vi.fn().mockResolvedValue(false);
+      spawnStop.mockResolvedValueOnce(fakeSelection);
+      const handler = createChatEventHandler({
+        spawnAuto, spawnStop, injectSelection, onAfterCapture,
+        checkPeOrigin, suppressDsAdvisory: false, logger: { error: errorLog },
+      });
+      await handler(makeEvent());
+      expect(spawnStop).toHaveBeenCalled();
+      expect(injectSelection).toHaveBeenCalled();
+    });
+  });
+
 });

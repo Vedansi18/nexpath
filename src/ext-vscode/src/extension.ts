@@ -916,6 +916,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     (host === 'cursor' && isCursorSubmitAdvisoryEnabled(process.env)) ||
     (host === 'windsurf' && isWindsurfSubmitAdvisoryEnabled(process.env));
   const handleChatEvent = createChatEventHandler({
+    // OWNER RULING 2026-08-12: switch ON ⇒ old DS-advisory surface OFF, PE kept.
+    // The handler skips the stop/advisory path for NON-PE turns only.
+    suppressDsAdvisory: submitAdvisorySurfaceActive,
     spawnAuto: (prompt, sid, event) =>
       spawnAuto(prompt, sid, { cwd: cwdForEvent(event) }),
     spawnStop: (sid, event) => spawnStop(sid, { cwd: cwdForEvent(event) }),
