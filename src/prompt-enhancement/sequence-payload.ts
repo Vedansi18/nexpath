@@ -113,7 +113,16 @@ export interface PromptEnhancementSequenceItemV1 {
   complexityReason:  string | null;
   /** Written once by the batch and never rewritten. Null on `first_task`, which is never re-offered. */
   generatedWording:  string | null;
-  actionRiskKind:    PromptEnhancementSensitiveActionRiskKind | null;
+  /**
+   * EVERY risk family the item's own slice reads as, empty when it reads as none.
+   *
+   * A set rather than one value because an item that cannot be split can carry several: rotating a
+   * leaked credential and redeploying so the new one is live is one item by the atomic-coupling
+   * rule, and it is both a credential change and a production release. The confirmation sentence
+   * the user sees already names both, so a single-value record would disagree with what they were
+   * shown — and would do it silently, because one family on one item looks complete.
+   */
+  actionRiskKinds:   readonly PromptEnhancementSensitiveActionRiskKind[];
   /**
    * Carried from the slice so composition cannot escalate plan into execute. Null on the kinds
    * that carry no slice — a confirmation has no authority of its own to exceed.
@@ -166,7 +175,7 @@ export type PromptEnhancementSequencePayloadReasonCodeV1 =
   | 'complexity_presence_invalid'
   | 'complexity_reason_invalid'
   | 'generated_wording_presence_invalid'
-  | 'action_risk_kind_invalid'
+  | 'action_risk_kinds_invalid'
   | 'authority_mode_invalid'
   | 'requires_confirmation_floor_invalid'
   | 'decomposition_group_id_invalid'
@@ -394,11 +403,12 @@ export function validatePromptEnhancementSequencePayloadV1(
       return fail('generated_wording_presence_invalid', index);
     }
 
-    const riskKind = item['actionRiskKind'];
-    if (riskKind !== null
-      && !PROMPT_ENHANCEMENT_SENSITIVE_ACTION_RISK_KINDS
-        .includes(riskKind as PromptEnhancementSensitiveActionRiskKind)) {
-      return fail('action_risk_kind_invalid', index);
+    const riskKinds = item['actionRiskKinds'];
+    if (!Array.isArray(riskKinds)
+      || riskKinds.some((kind) => !PROMPT_ENHANCEMENT_SENSITIVE_ACTION_RISK_KINDS
+        .includes(kind as PromptEnhancementSensitiveActionRiskKind))
+      || new Set(riskKinds).size !== riskKinds.length) {
+      return fail('action_risk_kinds_invalid', index);
     }
 
     // Authority is carried FROM the slice, so an item with a slice must have one and an item

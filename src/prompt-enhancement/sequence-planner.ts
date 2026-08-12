@@ -16,6 +16,12 @@ import {
   type PromptEnhancementSequencePlannerSummaryDataV1,
 } from './sequence-planner-output.js';
 import type { PromptEnhancementSequenceOffsetRangeV1 } from './sequence-payload.js';
+import {
+  promptEnhancementAuthorityModeForTextV1,
+  promptEnhancementRiskKindsForTextV1,
+  type PromptEnhancementAuthorityMode,
+  type PromptEnhancementSensitiveActionRiskKind,
+} from './safety-sendability.js';
 
 /**
  * The sequence planner call.
@@ -59,8 +65,13 @@ export interface PromptEnhancementSequencePlannerItemV1 {
   dependencyOrder: number;
   complexity: string | null;
   complexityReason: string | null;
-  actionRiskKind: string | null;
-  authorityMode: string | null;
+  /**
+   * The three safety fields are DERIVED from the item's own slice, never asked of the model. The
+   * ruling that created them was chosen on "no new classifier"; asking would be exactly that, and
+   * would be a second opinion on a question the shipping machinery already answers.
+   */
+  actionRiskKinds: readonly PromptEnhancementSensitiveActionRiskKind[];
+  authorityMode: PromptEnhancementAuthorityMode | null;
   requiresConfirmationFloor: boolean;
   decompositionGroupId: string | null;
 }
@@ -92,13 +103,19 @@ export type PromptEnhancementSequencePlannerResultV1 =
 
 export interface PromptEnhancementSequencePlannerInputV1 {
   /**
-   * What the planner is allowed to see. Bounded and redaction-safe by the time it arrives — the
-   * planner returns positions into the LOCAL original, and the slice is cut from that locally, so
-   * a redaction marker can never travel into wording shown under a verbatim guarantee.
+   * What the planner is allowed to SEE. Bounded and redaction-safe by the time it arrives; this is
+   * the only value that reaches the provider.
    */
   promptContext: string;
-  /** Length of the local original the offsets address. */
-  originalLength: number;
+  /**
+   * The LOCAL original the returned positions address, and the text slices are cut from.
+   *
+   * NEVER sent. It exists here because the returned offsets are meaningless without the string
+   * they index, and because the safety fields are read off the slice rather than off the reply —
+   * which is also why a redaction marker can never travel into wording shown under a promise that
+   * the user's own words appear exactly.
+   */
+  localOriginalText: string;
 }
 
 /**
@@ -165,9 +182,10 @@ function parsePlannerReply(raw: string): PromptEnhancementSequencePlannerOutputV
       dependencyOrder: item['dependencyOrder'],
       complexity: typeof item['complexity'] === 'string' ? item['complexity'] : null,
       complexityReason: typeof item['complexityReason'] === 'string' ? item['complexityReason'] : null,
-      actionRiskKind: typeof item['actionRiskKind'] === 'string' ? item['actionRiskKind'] : null,
-      authorityMode: typeof item['authorityMode'] === 'string' ? item['authorityMode'] : null,
-      requiresConfirmationFloor: item['requiresConfirmationFloor'] === true,
+      // Placeholders: whatever the reply says about safety is discarded and re-derived below.
+      actionRiskKinds: [],
+      authorityMode: null,
+      requiresConfirmationFloor: false,
       decompositionGroupId: typeof item['decompositionGroupId'] === 'string'
         ? item['decompositionGroupId']
         : null,
@@ -199,6 +217,50 @@ function parsePlannerReply(raw: string): PromptEnhancementSequencePlannerOutputV
       ),
     },
   };
+}
+
+/**
+ * Read the three safety fields off the item's own slice.
+ *
+ * Not from the reply, and not by a second classifier: the ruling that created these fields was
+ * taken on the basis that they come from machinery that already ships, so asking the model would
+ * be the new classifier that ruling avoided — and a second opinion that can disagree with the one
+ * the user is actually shown.
+ *
+ * The risk families are a SET, matching what the classifier produces and what the confirmation
+ * sentence already names. An item that cannot be split can genuinely carry several, and a single
+ * value would drop the rest without recording that it had.
+ *
+ * The floor carries the RISKY half only. Whether the work is also irreversible is judged later,
+ * from the item's content, by whatever writes its wording — never from a table over these families,
+ * which would be a keyword list wearing an enum.
+ */
+function deriveItemSafetyFields(sliceText: string | null): {
+  actionRiskKinds: readonly PromptEnhancementSensitiveActionRiskKind[];
+  authorityMode: PromptEnhancementAuthorityMode | null;
+  requiresConfirmationFloor: boolean;
+} {
+  // The kinds that carry no slice carry no authority of their own to exceed, and no floor.
+  if (sliceText === null) {
+    return { actionRiskKinds: [], authorityMode: null, requiresConfirmationFloor: false };
+  }
+  const actionRiskKinds = promptEnhancementRiskKindsForTextV1(sliceText);
+  return {
+    actionRiskKinds,
+    authorityMode: promptEnhancementAuthorityModeForTextV1(sliceText),
+    requiresConfirmationFloor: actionRiskKinds.length > 0,
+  };
+}
+
+/** Cut the slice this item points at, or null when it points at none. */
+function sliceTextFor(
+  ref: PromptEnhancementSequenceOffsetRangeV1 | null,
+  localOriginalText: string,
+): string | null {
+  if (ref === null) return null;
+  if (!Number.isSafeInteger(ref.start) || !Number.isSafeInteger(ref.end)) return null;
+  if (ref.start < 0 || ref.start >= ref.end || ref.end > localOriginalText.length) return null;
+  return localOriginalText.slice(ref.start, ref.end);
 }
 
 /**
@@ -254,5 +316,16 @@ export async function runPromptEnhancementSequencePlannerV1(
   const grouping = checkPromptEnhancementSequencePlannerGroupingV1(parsed.points, parsed.groups);
   if (!grouping.ok) return { ok: false, reason: grouping.code };
 
-  return { ok: true, output: { ...parsed, originalLength: input.originalLength } };
+  // Safety is read off the slices, after the shape is known to hold. An offset that does not
+  // address the original yields no slice, and therefore no authority and no floor — the same
+  // fail-closed answer as an item that carries no slice at all.
+  const items = parsed.items.map((item) => ({
+    ...item,
+    ...deriveItemSafetyFields(sliceTextFor(item.originalSliceRef, input.localOriginalText)),
+  }));
+
+  return {
+    ok: true,
+    output: { ...parsed, items, originalLength: input.localOriginalText.length },
+  };
 }

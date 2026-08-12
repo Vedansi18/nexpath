@@ -31,7 +31,7 @@ function task(
     complexity:                'not_complex',
     complexityReason:          null,
     generatedWording:          'Do that part.',
-    actionRiskKind:            null,
+    actionRiskKinds:           [],
     authorityMode:             'plan_or_review',
     requiresConfirmationFloor: false,
     decompositionGroupId:      'g1',
@@ -341,14 +341,25 @@ describe('sequence payload — the safety fields', () => {
       .toBe('authority_mode_invalid');
   });
 
-  it('rejects an authority mode or risk kind outside its closed set', () => {
+  it('rejects an authority mode or risk family outside its closed set', () => {
     expect(reason(payload([firstTask(), task(1, { authorityMode: 'do_whatever' as never })])))
       .toBe('authority_mode_invalid');
-    expect(reason(payload([firstTask(), task(1, { actionRiskKind: 'mildly_spicy' as never })])))
-      .toBe('action_risk_kind_invalid');
-    expect(reason(payload([
-      firstTask(), task(1, { actionRiskKind: 'git_history_rewrite', authorityMode: 'execute_requested' }),
-    ]))).toBeUndefined();
+    expect(reason(payload([firstTask(), task(1, { actionRiskKinds: ['mildly_spicy'] as never })])))
+      .toBe('action_risk_kinds_invalid');
+    expect(reason(payload([firstTask(), task(1, { actionRiskKinds: 'git_history_rewrite' as never })])))
+      .toBe('action_risk_kinds_invalid');
+  });
+
+  it('accepts SEVERAL risk families on one item, and rejects a repeated one', () => {
+    // An item that cannot be split can carry more than one — a credential rotation that must be
+    // redeployed to take effect is both. A single value would drop the rest silently.
+    expect(reason(payload([firstTask(), task(1, {
+      actionRiskKinds: ['secret_env_or_credential', 'production_release_or_external_effect'],
+      authorityMode: 'execute_requested',
+    })]))).toBeUndefined();
+    expect(reason(payload([firstTask(), task(1, {
+      actionRiskKinds: ['cost_or_resource', 'cost_or_resource'],
+    })]))).toBe('action_risk_kinds_invalid');
   });
 
   it('forbids a confirmation floor on a kind that carries no slice', () => {

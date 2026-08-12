@@ -25,7 +25,7 @@ const ORIGINAL_LENGTH = 120;
 function plannedItems(count: number): PromptEnhancementSequencePayloadV1['items'] {
   const base = {
     sourcePointRanges: [], roleLabel: null, complexity: 'not_complex',
-    complexityReason: null, actionRiskKind: null, authorityMode: 'plan_or_review',
+    complexityReason: null, actionRiskKinds: [], authorityMode: 'plan_or_review',
     requiresConfirmationFloor: false, decompositionGroupId: 'g1',
   } as const;
   return Array.from({ length: count }, (_, index) => (index === 0

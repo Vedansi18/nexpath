@@ -42,15 +42,13 @@ const validReply = (overrides: Record<string, unknown> = {}): string => JSON.str
   groups: [group('g1', ['p1', 'p2']), group('g2', ['p3'])],
   items: [
     {
-      itemKind: 'first_task', originalSliceRef: { start: 0, end: 40 }, sourcePointRanges: [],
+      itemKind: 'first_task', originalSliceRef: { start: 0, end: 42 }, sourcePointRanges: [],
       roleLabel: 'fix', dependencyOrder: 0, complexity: 'not_complex', complexityReason: null,
-      actionRiskKind: null, authorityMode: 'plan_or_review', requiresConfirmationFloor: false,
       decompositionGroupId: 'g1',
     },
     {
       itemKind: 'task', originalSliceRef: { start: 10, end: 30 }, sourcePointRanges: [],
       roleLabel: null, dependencyOrder: 1, complexity: 'not_complex', complexityReason: null,
-      actionRiskKind: null, authorityMode: 'plan_or_review', requiresConfirmationFloor: false,
       decompositionGroupId: 'g2',
     },
   ],
@@ -251,7 +249,8 @@ describe('sequence planner — the prompt', () => {
 });
 
 describe('sequence planner — the call', () => {
-  const input = { promptContext: 'fix the failing test and add a rate limiter', originalLength: 43 };
+  const ORIGINAL = 'fix the failing test and add a rate limiter';
+  const input = { promptContext: ORIGINAL, localOriginalText: ORIGINAL };
 
   it('returns the plan when the reply holds together', async () => {
     const result = await runPromptEnhancementSequencePlannerV1(input, clientReturning(validReply()));
@@ -259,8 +258,8 @@ describe('sequence planner — the call', () => {
     if (!result.ok) return;
     expect(result.output.outcome).toBe('sequence');
     expect(result.output.items).toHaveLength(2);
-    // The bound comes from the caller, not from the model — it is the length the offsets address.
-    expect(result.output.originalLength).toBe(43);
+    // The bound comes from the local original, not from the model.
+    expect(result.output.originalLength).toBe(ORIGINAL.length);
   });
 
   it('reports a call that never happened separately from one that failed', async () => {
@@ -289,7 +288,6 @@ describe('sequence planner — the call', () => {
       items: [{
         itemKind: 'first_task', originalSliceRef: 'fix the failing test', sourcePointRanges: [],
         roleLabel: null, dependencyOrder: 0, complexity: 'not_complex', complexityReason: null,
-        actionRiskKind: null, authorityMode: 'plan_or_review', requiresConfirmationFloor: false,
         decompositionGroupId: 'g1',
       }],
     });
@@ -308,5 +306,86 @@ describe('sequence planner — the call', () => {
     const explained = validReply({ outcomeReason: 'not_big_enough' });
     expect(await runPromptEnhancementSequencePlannerV1(input, clientReturning(explained)))
       .toEqual({ ok: false, reason: 'outcome_reason_disagrees_with_outcome' });
+  });
+});
+
+describe('sequence planner — the safety fields are derived, not asked for', () => {
+  const ORIGINAL = 'Rotate the leaked API key and redeploy production so the new key is live.';
+  const reply = (item: Record<string, unknown>): string => JSON.stringify({
+    outcome: 'sequence', outcomeReason: null,
+    points: [point('p1', 0), point('p2', 10), point('p3', 20)],
+    groups: [group('g1', ['p1', 'p2']), group('g2', ['p3'])],
+    items: [
+      { itemKind: 'first_task', originalSliceRef: { start: 0, end: ORIGINAL.length },
+        sourcePointRanges: [], roleLabel: null, dependencyOrder: 0, complexity: 'not_complex',
+        complexityReason: null, decompositionGroupId: 'g1' },
+      item,
+    ],
+    promptDirectives: [],
+    summaryData: { summaryId: 's1', remainingTaskCount: 1, taskRoleLabels: [] },
+  });
+  const run = (item: Record<string, unknown>) => runPromptEnhancementSequencePlannerV1(
+    { promptContext: ORIGINAL, localOriginalText: ORIGINAL },
+    clientReturning(reply(item)),
+  );
+
+  it('records EVERY risk family the slice reads as, not one of them', async () => {
+    // This item cannot be split — rotating the key without redeploying leaves the old one live —
+    // so it genuinely carries both, and the sentence the user sees names both.
+    const result = await run({
+      itemKind: 'task', originalSliceRef: { start: 0, end: ORIGINAL.length }, sourcePointRanges: [],
+      roleLabel: null, dependencyOrder: 1, complexity: 'not_complex', complexityReason: null,
+      decompositionGroupId: 'g2',
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.output.items[1]?.actionRiskKinds)
+      .toEqual(['secret_env_or_credential', 'production_release_or_external_effect']);
+    expect(result.output.items[1]?.requiresConfirmationFloor).toBe(true);
+    expect(result.output.items[1]?.authorityMode).toBe('execute_requested');
+  });
+
+  it('ignores safety fields the reply tries to supply', async () => {
+    // Whatever arrives is discarded. Believing it would be a second classifier disagreeing with
+    // the one the user is actually shown.
+    const result = await run({
+      itemKind: 'task', originalSliceRef: { start: 0, end: ORIGINAL.length }, sourcePointRanges: [],
+      roleLabel: null, dependencyOrder: 1, complexity: 'not_complex', complexityReason: null,
+      decompositionGroupId: 'g2',
+      actionRiskKinds: ['cost_or_resource'], authorityMode: 'observe_or_literal',
+      requiresConfirmationFloor: false,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.output.items[1]?.actionRiskKinds).not.toContain('cost_or_resource');
+    expect(result.output.items[1]?.authorityMode).toBe('execute_requested');
+    expect(result.output.items[1]?.requiresConfirmationFloor).toBe(true);
+  });
+
+  it('gives a kind that carries no slice no authority and no floor', async () => {
+    const result = await run({
+      itemKind: 'binary_confirmation', originalSliceRef: null, sourcePointRanges: [],
+      roleLabel: null, dependencyOrder: 1, complexity: null,
+      complexityReason: 'the rotation changes a live credential', decompositionGroupId: null,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.output.items[1]).toMatchObject({
+      actionRiskKinds: [], authorityMode: null, requiresConfirmationFloor: false,
+    });
+  });
+
+  it('treats an offset that does not address the original as no slice at all', async () => {
+    // Fail-closed rather than throwing or slicing something arbitrary.
+    const result = await run({
+      itemKind: 'task', originalSliceRef: { start: 0, end: ORIGINAL.length + 500 },
+      sourcePointRanges: [], roleLabel: null, dependencyOrder: 1, complexity: 'not_complex',
+      complexityReason: null, decompositionGroupId: 'g2',
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.output.items[1]).toMatchObject({
+      actionRiskKinds: [], authorityMode: null, requiresConfirmationFloor: false,
+    });
   });
 });

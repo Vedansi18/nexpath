@@ -141,6 +141,38 @@ THE READINESS DISCIPLINE — a hard stop:
 
 Never emit a scheduling question. Never ask whether something is ready.`;
 
+/**
+ * What the reply must contain.
+ *
+ * The three safety fields are absent on purpose: they are derived from the slice by the machinery
+ * that already ships, so asking for them here would be a second classifier answering the same
+ * question — the thing the ruling that created those fields was chosen to avoid.
+ */
+const SECTION_OUTPUT = `WHAT TO RETURN
+
+A single JSON object:
+
+  outcome           — "sequence" | "single_with_confirmation" | "single_plain"
+  outcomeReason     — "too_vague" | "unsafe" | "not_big_enough", or null when outcome is "sequence"
+  points            — [{ pointId, startOffset, endOffset, requiredKind }]
+  groups            — [{ groupId, pointIds, canRemainOneBodySection }]
+  items             — [{ itemKind, originalSliceRef, sourcePointRanges, roleLabel, dependencyOrder,
+                         complexity, complexityReason, decompositionGroupId }]
+  promptDirectives  — [{ start, end }]  whole-prompt instructions, as positions
+  summaryData       — { summaryId, remainingTaskCount, taskRoleLabels }
+
+  itemKind          — "first_task" | "task" | "double_confirmation" | "cross_confirmation"
+                      | "binary_confirmation" | "wrap_up"
+  originalSliceRef  — { start, end } on task kinds; null on confirmations and on the closing recap
+  roleLabel         — one of "fix" "review" "refactor" "plan" "build", or null. Never invent one:
+                      a point matching none of them contributes no label.
+  dependencyOrder   — the item's own index in the list
+  complexity        — task kinds only; null on confirmations and the closing recap
+  summaryData.remainingTaskCount — items AFTER the first
+
+DO NOT return actionRiskKind, authorityMode, requiresConfirmationFloor or any wording. The safety
+fields are derived from the slice you point at, and the wording is written by a later step.`;
+
 /** The order is fixed: the preference frames the decision the rest of the sections carry out. */
 export const PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_SECTIONS_V1: readonly string[] = [
   SECTION_0_PREFERENCE,
@@ -149,6 +181,9 @@ export const PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_SECTIONS_V1: readonly string[] 
   SECTION_3_SLICING,
   SECTION_4_CONFIRMATION,
 ];
+
+/** The output shape is appended after the five, so the rules are read before the form. */
+export const PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_OUTPUT_SECTION_V1 = SECTION_OUTPUT;
 
 /**
  * The planner's system prompt.
@@ -162,6 +197,8 @@ export function buildPromptEnhancementSequencePlannerSystemPromptV1(): string {
     + ' is. You do NOT write the prompts. Another step words them from what you record.',
     '',
     ...PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_SECTIONS_V1.flatMap((section) => [section, '']),
+    SECTION_OUTPUT,
+    '',
     'Reply with a single JSON object and nothing else.',
   ].join('\n');
 }
