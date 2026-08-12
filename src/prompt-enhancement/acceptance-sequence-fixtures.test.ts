@@ -6,6 +6,8 @@ import {
   validatePromptEnhancementAcceptancePacketV1,
 } from './acceptance-matrix.js';
 import { PROMPT_ENHANCEMENT_SEQUENCE_MAX_ITEM_COUNT_V1 } from './sequence-runtime.js';
+import { evaluatePromptEnhancementFutureSequenceRuntimeGateV1 } from './future-sequence-runtime-gate.js';
+import { PROMPT_ENHANCEMENT_CONTRACT_VERSION } from './contracts.js';
 
 const sequenceFixtures = buildPromptEnhancementSequenceAcceptanceFixturesV1();
 
@@ -230,6 +232,45 @@ describe('sequence acceptance register — the oracles most likely to be written
     const entry = byId('acceptance-sequence-provider-failure-no-generated-content');
     expect(entry?.mandatorySlotsOrSafeguards).toContain('not_the_validation_retry_path');
     expect(entry?.hardFailFocus).toContain('generated_content_after_provider_failure');
+  });
+
+  it('names the gate\'s own reason codes, and they are codes the gate really emits', () => {
+    // Driven rather than grepped. A test that searched the gate's source for the string would pass
+    // on a comment; this one makes the gate produce the code and then checks the register spells it
+    // the same way, so a rename in either place fails here.
+    const gate = evaluatePromptEnhancementFutureSequenceRuntimeGateV1({
+      schemaVersion: PROMPT_ENHANCEMENT_CONTRACT_VERSION,
+      operation: 'continue_current_item',
+      requestId: 'req-1',
+      projectRoot: '/project-a',
+      event: { projectScope: '/project-b' },
+    } as unknown as Parameters<typeof evaluatePromptEnhancementFutureSequenceRuntimeGateV1>[0]);
+    expect(gate.reasonCodes).toContain('runtime_event_project_scope_mismatch');
+
+    const crossProject = byId('acceptance-sequence-handoff-validity-cross-project');
+    expect(crossProject?.expectedObservableOutcome)
+      .toContain('gate_reason_code_runtime_event_project_scope_mismatch');
+
+    const legacy = byId('acceptance-sequence-old-decision-session-not-authority');
+    expect(legacy?.expectedObservableOutcome)
+      .toContain('gate_reason_code_old_ds_config_rejected_as_pe_runtime_authority');
+  });
+
+  it('names the two declared states the gate result is typed to, exactly', () => {
+    // Both are literal-typed fields on the gate's result — they can hold no other value, which is
+    // what makes them assertable. Described instead of named, the oracle sends its reader looking.
+    expect(byId('acceptance-sequence-stop-is-not-completion-proof')?.sourceReasonMetadata)
+      .toContain('stop_or_response_event_authority_state_is_non_proof_no_runtime');
+    expect(byId('acceptance-sequence-privacy-telemetry-negative')?.sourceReasonMetadata)
+      .toContain('persistence_policy_state_is_ids_counts_status_only_no_raw_content');
+  });
+
+  it('spells the legacy-authority field the way source spells it', () => {
+    // Source has `legacyDecisionSessionConfigIsAuthority`. A fixture asserted against a field that
+    // does not exist under the name it was written with is a fixture nobody can run.
+    const entry = byId('acceptance-sequence-old-decision-session-not-authority');
+    expect(entry?.sourceReasonMetadata).toContain('legacy_decision_session_config_is_authority_false');
+    expect(JSON.stringify(entry)).not.toContain('old_decision_session_config_is_authority');
   });
 
   it('does not claim the host-unavailable case, which is another lane', () => {

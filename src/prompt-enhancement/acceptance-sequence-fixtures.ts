@@ -658,7 +658,11 @@ export function buildPromptEnhancementSequenceAcceptanceFixturesV1(): readonly P
       evidenceSourceKinds: ['pe_specific_fixture', 'pe_contract_validation'],
       registryLinkedFixtureIds: [],
       expectedObservableOutcome: [
-        'scope_mismatch_reason_code_and_no_popup',
+        // The gate already emits this exact code for a foreign project, so the oracle names it
+        // rather than describing it. An author who has to go and find which code it is is the
+        // author who writes the assertion from whatever the implementation says today.
+        'gate_reason_code_runtime_event_project_scope_mismatch',
+        'no_popup_for_a_foreign_project_handoff',
         'tampered_handoff_reason_code_and_no_popup',
       ],
       hardFailFocus: [
@@ -737,7 +741,13 @@ export function buildPromptEnhancementSequenceAcceptanceFixturesV1(): readonly P
         'pointer_does_not_advance_on_timing',
         'no_response_quality_is_evaluated',
       ],
-      sourceReasonMetadata: ['stopEventState', 'currentItemIndex'],
+      sourceReasonMetadata: [
+        'stopEventState',
+        'currentItemIndex',
+        // A literal-typed field on the gate's own result: it can hold no other value, and that is
+        // the point — the declaration is what the fixture asserts against.
+        'stop_or_response_event_authority_state_is_non_proof_no_runtime',
+      ],
       evidenceSourceKinds: ['pe_specific_fixture', 'pe_contract_validation'],
       registryLinkedFixtureIds: [],
       expectedObservableOutcome: [
@@ -772,7 +782,12 @@ export function buildPromptEnhancementSequenceAcceptanceFixturesV1(): readonly P
         'no_feedback_text_emitted',
         'no_agent_reply_persisted_or_emitted',
       ],
-      sourceReasonMetadata: ['sequenceId', 'item_count', 'sequence_status'],
+      sourceReasonMetadata: [
+        'sequenceId',
+        'item_count',
+        'sequence_status',
+        'persistence_policy_state_is_ids_counts_status_only_no_raw_content',
+      ],
       evidenceSourceKinds: ['pe_specific_fixture', 'pe_contract_validation'],
       registryLinkedFixtureIds: [],
       expectedObservableOutcome: [
@@ -799,10 +814,19 @@ export function buildPromptEnhancementSequenceAcceptanceFixturesV1(): readonly P
         'a_replayed_legacy_session_does_not_resume_a_sequence',
         'a_skipped_legacy_session_does_not_start_or_alter_one',
       ],
-      sourceReasonMetadata: ['sequenceId', 'sequence_status'],
+      sourceReasonMetadata: [
+        'sequenceId',
+        'sequence_status',
+        // ⚠️ The declared field is spelt `legacy…` in source. The plan cites it as
+        // `oldDecisionSessionConfigIsAuthority`, which exists nowhere — the register carries the
+        // name that ships, because a fixture asserted against a field that does not exist is a
+        // fixture nobody can run.
+        'legacy_decision_session_config_is_authority_false',
+      ],
       evidenceSourceKinds: ['pe_specific_fixture', 'pe_contract_validation', 'old_decision_session_precedent_only'],
       registryLinkedFixtureIds: [],
       expectedObservableOutcome: [
+        'gate_reason_code_old_ds_config_rejected_as_pe_runtime_authority',
         'sequence_state_unchanged_by_any_legacy_session_activity',
       ],
       hardFailFocus: [
