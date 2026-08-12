@@ -89,6 +89,14 @@ export interface PromptEnhancementSequencePackagerInputV1 {
    */
   itemSafetySummary: PromptEnhancementSafetySummaryV1;
   itemValidationSummary: PromptEnhancementSafetySummaryV1;
+  /**
+   * The handoff decision for THIS body.
+   *
+   * One decision is made once, about the body the sequence was offered from. Carried onto every
+   * continuation it becomes the source ref recorded as this item's evidence — a trail of four
+   * references to one decision that was made about none of them.
+   */
+  handoffDecisionId: string;
 }
 
 /**
@@ -245,6 +253,7 @@ export function packagePromptEnhancementSequenceContinuationV1(
 
   const handoffMetadata: PromptEnhancementHandoffMetadataV1 = {
     ...accepted,
+    handoffDecisionId: input.handoffDecisionId,
     // The two fields it is validated against, taken from the body just built rather than the one it
     // was written for.
     currentBodyId: input.currentBodyId,
@@ -254,6 +263,10 @@ export function packagePromptEnhancementSequenceContinuationV1(
     // From THIS item's verdict, not the first body's. A carry either way — the packager reports the
     // safety state and never decides it — but reporting the wrong body's is still reporting wrong.
     riskConfirmationState: input.itemSafetySummary.sensitiveActionState,
+    // Named for the surface it belongs to, and only the first popup reads it. On a continuation it
+    // would state a prompt COUNT beside a progress line stating a different pair of numbers — and
+    // the count is the one figure the whole summary contract exists to keep straight.
+    compactFirstPopupSequenceSummary: undefined,
   };
 
   const event: PromptEnhancementFutureSequenceRuntimeEventV1 = {

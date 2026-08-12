@@ -63,6 +63,8 @@ const ACCEPTED = {
   },
   safetySummary: { sensitiveActionState: 'confirmation_required' },
   handoffMetadata: {
+    handoffDecisionId: 'enh-1:handoff',
+    compactFirstPopupSequenceSummary: { totalPromptCount: 4, publicSafeText: 'planned as 4 prompts' },
     handoffKind: 'first_prompt_handoff_candidate',
     currentBodyId: 'body-0',
     bodyRevision: 0,
@@ -107,6 +109,7 @@ const input = (
   composerRunId: 'run-batch',
   itemSafetySummary: ITEM_SAFETY,
   itemValidationSummary: ITEM_SAFETY,
+  handoffDecisionId: 'handoff-for-item-1',
   ...overrides,
 });
 
@@ -438,5 +441,30 @@ describe('sequence packager — the origin row has three entries', () => {
     expect(currentBody.sentPromptOrigin).toBe('sequence_handoff_owned_body');
     expect(composerBoundary.sentPromptOrigin).toBe('sequence_handoff_owned_body');
     expect(generatedOrigin.generatedOriginState).toBe('pe_generated_body');
+  });
+});
+
+describe('sequence packager — the handoff metadata is about THIS body too', () => {
+  it('takes the handoff decision for this body rather than the first popup one', () => {
+    // One decision is made once, about the body the sequence was offered from. Carried onto every
+    // continuation it becomes this item evidence: four references to a decision made about none of
+    // them.
+    const result = packagePromptEnhancementSequenceContinuationV1(input());
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.packaged.handoffMetadata.handoffDecisionId).toBe('handoff-for-item-1');
+    expect(ACCEPTED.handoffMetadata?.handoffDecisionId).toBe('enh-1:handoff');
+  });
+
+  it('drops the first-popup summary, which that surface does not have', () => {
+    // Named for the surface it belongs to, and only the first popup reads it. On a continuation it
+    // states a prompt count beside a progress line stating a different pair of numbers.
+    const result = packagePromptEnhancementSequenceContinuationV1(input());
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(ACCEPTED.handoffMetadata?.compactFirstPopupSequenceSummary).toBeDefined();
+    expect(result.packaged.handoffMetadata.compactFirstPopupSequenceSummary).toBeUndefined();
+    // What that surface does have is the progress pair.
+    expect(result.packaged.progress).toEqual({ done: 1, total: 4 });
   });
 });
