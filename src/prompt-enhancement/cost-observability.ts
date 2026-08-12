@@ -54,6 +54,15 @@ export const PROMPT_ENHANCEMENT_SEQUENCE_BATCH_OUTPUT_TOKEN_HARD_CAP_V1 = 12_000
 // section, which measures 9-14s for 6-8 sections — so a 10s cap cut the call off before it could
 // finish and the body always fell back to the deterministic render. 45s keeps headroom for a slow
 // provider while still fitting inside the host prompt-submit hook budget.
+/**
+ * The sentinel for a value this codebase has not measured yet.
+ *
+ * Named rather than left absent, because a refusal is findable and an absence is not: a reader
+ * searching for what is unpinned finds the rows carrying this, where a missing field or a zero
+ * would read as an answer.
+ */
+export const PROMPT_ENHANCEMENT_MEASUREMENT_PENDING_V1 = 'blocked_pending_source_value' as const;
+
 export const PROMPT_ENHANCEMENT_COST_TIMEOUT_MS_V1 = 45_000;
 export const PROMPT_ENHANCEMENT_COST_VALIDATION_RETRY_COUNT_V1 = 3;
 
@@ -137,8 +146,29 @@ export interface PromptEnhancementAcceptedCostCallInventoryRowV1 {
   addOnCostAssumption: typeof PROMPT_ENHANCEMENT_COST_ADD_ON_ASSUMPTION_V1;
   regionalDataResidencyAssumption: typeof PROMPT_ENHANCEMENT_COST_REGIONAL_DATA_RESIDENCY_ASSUMPTION_V1;
   inputTokenCap: typeof PROMPT_ENHANCEMENT_COST_INPUT_TOKEN_CAP_V1;
-  outputTokenCap: typeof PROMPT_ENHANCEMENT_COST_OUTPUT_TOKEN_CAP_V1;
-  timeoutMs: typeof PROMPT_ENHANCEMENT_COST_TIMEOUT_MS_V1;
+  /**
+   * The call's own output budget, and NOT the composer's by construction.
+   *
+   * 🔴 Was typed as the composer constant, which meant a row could report only 2,000 tokens — and
+   * two calls in this inventory are sized against a different thing entirely. A batch that writes a
+   * whole sequence in one reply needs several times that, and a truncated batch is invalid rather
+   * than shorter, so a row unable to state its real cap understates the one call where the cap
+   * decides whether anything ships at all.
+   */
+  outputTokenCap: number | typeof PROMPT_ENHANCEMENT_MEASUREMENT_PENDING_V1;
+  /**
+   * The timeout this call actually runs under.
+   *
+   * 🔴 Same defect, and the sharper one. Typed as the single global constant, a row could report
+   * only 45 s — which is the composer's measured value, sized for a different call shape — so the
+   * record could not express a measured timeout for the calls this milestone exists to measure. A
+   * borrowed timeout is the same mistake as a borrowed cap, and a type that can hold nothing else
+   * makes the borrowing invisible.
+   *
+   * The sibling inventory in this file already solved it: a real number, or an explicit not-yet
+   * sentinel. This follows that shape rather than inventing a third.
+   */
+  timeoutMs: number | typeof PROMPT_ENHANCEMENT_MEASUREMENT_PENDING_V1;
   retryCount: typeof PROMPT_ENHANCEMENT_COST_VALIDATION_RETRY_COUNT_V1;
   cacheAssumption: 'no_cache_savings_no_addons';
   fallbackReasons: readonly PromptEnhancementRuntimeBlockReason[];
@@ -200,7 +230,8 @@ export interface PromptEnhancementCostMeasurementRecordV1 {
   latencyMs?: number;
   estimatedInputTokens?: number;
   estimatedOutputTokens?: number;
-  timeoutMs: typeof PROMPT_ENHANCEMENT_COST_TIMEOUT_MS_V1;
+  /** Carried from the inventory row, so a measured value reaches the record instead of the constant. */
+  timeoutMs: number | typeof PROMPT_ENHANCEMENT_MEASUREMENT_PENDING_V1;
   retryCount: typeof PROMPT_ENHANCEMENT_COST_VALIDATION_RETRY_COUNT_V1;
   status: PromptEnhancementCostMeasurementInputV1['status'];
   fallbackReason: PromptEnhancementRuntimeBlockReason;
@@ -752,6 +783,19 @@ export function getPromptEnhancementAcceptedCostCallRowV1(
   return rowMatch;
 }
 
+/**
+ * A measured value for the visibility metadata, or nothing at all.
+ *
+ * ⛔ Deliberately NOT a fallback to the global constant. The metadata's completeness check requires
+ * a number on any provider-using call, so an unmeasured timeout leaves that call reporting
+ * INCOMPLETE — which is the truthful outcome and the whole point of the sentinel. Substituting 45 s
+ * here would make an unmeasured call look fully specified, which is the failure the widening was
+ * done to prevent.
+ */
+function measuredOrAbsent(value: number | typeof PROMPT_ENHANCEMENT_MEASUREMENT_PENDING_V1): number | undefined {
+  return value === PROMPT_ENHANCEMENT_MEASUREMENT_PENDING_V1 ? undefined : value;
+}
+
 export function buildPromptEnhancementCostVisibilityMetadataV1(
   callId: PromptEnhancementCostCallIdV1,
   input: {
@@ -792,15 +836,15 @@ export function buildPromptEnhancementCostVisibilityMetadataV1(
     addOnCostAssumption: inventoryRow.addOnCostAssumption,
     regionalDataResidencyAssumption: inventoryRow.regionalDataResidencyAssumption,
     inputTokenCap: inventoryRow.inputTokenCap,
-    outputTokenCap: inventoryRow.outputTokenCap,
+    outputTokenCap: measuredOrAbsent(inventoryRow.outputTokenCap),
     estimatedInputTokens: input.estimatedInputTokens ?? 0,
     estimatedOutputTokens: input.estimatedOutputTokens ?? 0,
     plannedCallCount: input.plannedCallCount,
     usedCallCount: providerUnavailable ? 0 : input.usedCallCount,
     providerAvailabilityState: providerUnavailable ? 'unavailable_by_provider_api' : 'available',
-    timeoutMs: inventoryRow.timeoutMs,
+    timeoutMs: measuredOrAbsent(inventoryRow.timeoutMs),
     retryCount: inventoryRow.retryCount,
-    latencyTargetMs: inventoryRow.timeoutMs,
+    latencyTargetMs: measuredOrAbsent(inventoryRow.timeoutMs),
     cacheAssumption: inventoryRow.cacheAssumption,
     latencyImpact: inventoryRow.latencyImpact,
     uiProviderApiLatencyStateLabel: providerUnavailable
