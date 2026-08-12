@@ -18,6 +18,7 @@ import {
 } from './safety-sendability.js';
 import {
   isPromptEnhancementSequenceOffsetRangeV1,
+  promptEnhancementSequenceTextHasTokenV1,
   type PromptEnhancementSequenceItemKindV1,
   type PromptEnhancementSequenceItemV1,
   type PromptEnhancementSequenceOffsetRangeV1,
@@ -217,10 +218,12 @@ function checkBatchOutput(
       }
       const tokens = FORMAT_TOKENS_V1[item.itemKind];
       const otherTokens = tokens?.[0] === 'YES' ? ['PASS', 'FAIL'] : ['YES', 'NO'];
+      // Whole tokens, never substrings: "DO NOT make any assumptions" contains NO, and rejecting a
+      // confirmation for carrying the clause it is malformed without is the wrong failure twice.
       if (tokens === undefined
-        || !tokens.every((token) => text.includes(token))
+        || !tokens.every((token) => promptEnhancementSequenceTextHasTokenV1(text, token))
         // Mixing two formats in one item leaves the agent choosing which to answer in.
-        || otherTokens.some((token) => text.includes(token))) {
+        || otherTokens.some((token) => promptEnhancementSequenceTextHasTokenV1(text, token))) {
         return {
           ok: false,
           reason: 'confirmation_format_wrong_for_kind',

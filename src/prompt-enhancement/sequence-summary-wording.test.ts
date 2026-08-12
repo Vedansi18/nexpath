@@ -120,6 +120,14 @@ describe('sequence summary wording — the call', () => {
       .toEqual({ ok: false, reason: 'summary_omits_total' });
   });
 
+  it('refuses a wrong number that merely contains the right digit', async () => {
+    // "17" contains "7". Under plain containment the one check on the one line whose job is to be
+    // trusted passed a sentence stating a different number of prompts than the plan holds.
+    const { client } = clientReturning(reply('This task is planned as 17 prompts.'));
+    expect(await runPromptEnhancementSequenceSummaryWordingV1(input(), client))
+      .toEqual({ ok: false, reason: 'summary_omits_total' });
+  });
+
   it('refuses a sentence carrying the user\'s own words', async () => {
     const leaked = reply(`This task is planned as 7 prompts. ${ORIGINAL}`);
     const { client } = clientReturning(leaked);

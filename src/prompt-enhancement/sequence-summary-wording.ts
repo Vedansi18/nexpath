@@ -5,9 +5,10 @@ import {
   PROMPT_ENHANCEMENT_COST_VALIDATION_RETRY_COUNT_V1,
   PROMPT_ENHANCEMENT_SEQUENCE_SUMMARY_OUTPUT_TOKEN_CAP_V1,
 } from './cost-observability.js';
-import type {
-  PromptEnhancementSequenceItemV1,
-  PromptEnhancementSequenceRoleLabelV1,
+import {
+  promptEnhancementSequenceTextHasTokenV1,
+  type PromptEnhancementSequenceItemV1,
+  type PromptEnhancementSequenceRoleLabelV1,
 } from './sequence-payload.js';
 import type { PromptEnhancementSequencePlannerClientV1 } from './sequence-planner.js';
 
@@ -147,7 +148,12 @@ function checkSummary(
   input: PromptEnhancementSequenceSummaryInputV1,
   publicSafeText: string,
 ): SummaryAttemptV1 {
-  if (!publicSafeText.includes(String(input.facts.totalPromptCount))) {
+  // The number standing on its own. "17" contains "7", so containment would pass a sentence
+  // stating a different number of prompts than the plan holds — the one thing this check is for.
+  if (!promptEnhancementSequenceTextHasTokenV1(
+    publicSafeText,
+    String(input.facts.totalPromptCount),
+  )) {
     return { ok: false, reason: 'summary_omits_total' };
   }
   const original = input.localOriginalText.trim();

@@ -251,6 +251,24 @@ function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
 }
 
+/**
+ * Does `text` contain `token` standing on its own?
+ *
+ * Exported because two different checks over generated text need it and both got it wrong the same
+ * way: plain containment is a different question, and it fails in both directions.
+ *
+ * Too strict — "DO NOT make any assumptions" contains "NO", so a correctly formed PASS/FAIL
+ * confirmation reads as one that mixed in the other format, and is rejected for carrying the very
+ * clause it is malformed without.
+ *
+ * Too loose — "17" contains "7", so a summary sentence stating a different number of prompts than
+ * the plan holds passes a check on the right number, which is the one thing that check exists for.
+ */
+export function promptEnhancementSequenceTextHasTokenV1(text: string, token: string): boolean {
+  const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`\\b${escaped}\\b`).test(text);
+}
+
 const fail = (
   reasonCode: PromptEnhancementSequencePayloadReasonCodeV1,
   itemIndex?: number,

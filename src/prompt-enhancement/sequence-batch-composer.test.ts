@@ -254,6 +254,15 @@ describe('sequence batch — confirmations', () => {
       .toEqual({ ok: false, reason: 'confirmation_format_wrong_for_kind' });
   });
 
+  it('accepts the anti-assumption clause in capitals, which contains the other format token', async () => {
+    // "DO NOT" contains NO. Under plain containment this correctly formed PASS/FAIL confirmation
+    // was rejected for carrying the clause it is malformed without — and the cost was not one item
+    // but three repairs and then no sequence at all.
+    const shouted = 'Did the migration copy every row?\n\nReply PASS or FAIL only, on its own line.'
+      + ' DO NOT make any assumptions; confirm at ground level by reading the actual source.';
+    expect((await withConfirmation(shouted, 'double_confirmation')).ok).toBe(true);
+  });
+
   it('refuses one carrying the user\'s original wording', async () => {
     // Strictly none — and any task's slice, not only its own, which it does not have.
     expect(await withConfirmation(binaryWording(`Did you ${SLICE_TWO}?`)))
