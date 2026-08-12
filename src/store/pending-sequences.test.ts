@@ -451,6 +451,37 @@ describe('pending-sequences store', () => {
     expect(getActivePendingPromptSequence(store, PROJECT, 'sess-1')).toMatchObject({ sequenceId: 'live' });
   });
 
+  it('refuses to transition a record of an offer that was never taken', () => {
+    // The writer takes a raw id and only touches status, so without the guard one wrong id turns
+    // the record into a live sequence — which the read then refuses to serve AND scrubs, losing the
+    // one thing that cannot be reconstructed afterwards.
+    expect(recordPromptEnhancementSequenceOfferDeclined(store, {
+      projectRoot: PROJECT, sessionId: 'sess-1', sequenceId: 'seq-1', enhancementId: 'enh-1',
+      disposition: 'rejected',
+    })).toBe(true);
+    const id = store.db.exec('SELECT id FROM pending_prompt_sequences')[0].values[0][0] as number;
+    expect(updatePendingPromptSequenceState(store, id, createdState({ status: 'item_pending' }))).toBe(false);
+
+    // The record is intact and still terminal.
+    expect(getPromptEnhancementSequenceOfferDisposition(store, PROJECT, 'seq-1')).toBe('rejected');
+    expect(store.db.exec('SELECT status FROM pending_prompt_sequences')[0].values[0][0]).toBe('cancelled');
+    // And nothing became visible to the active read on the way.
+    expect(getActivePendingPromptSequence(store, PROJECT, 'sess-1')).toBeNull();
+  });
+
+  it('still transitions an ordinary accepted sequence', () => {
+    // The guard must not narrow the real path it sits on.
+    expect(upsertPendingPromptSequence(store, createdState(), payload())).toBe(true);
+    const row = getActivePendingPromptSequence(store, PROJECT, 'sess-1');
+    const offered = applyPromptEnhancementSequenceRuntimeActionV1(createdState(), { type: 'advance_to_next_item', actionId: 'a1' });
+    expect(offered.ok).toBe(true);
+    if (!offered.ok) return;
+    expect(updatePendingPromptSequenceState(store, row!.id, offered.state)).toBe(true);
+    expect(getActivePendingPromptSequence(store, PROJECT, 'sess-1')).toMatchObject({
+      currentItemIndex: 1, status: 'item_pending', lastActionId: 'a1',
+    });
+  });
+
   it('reads null for an offer that has no row at all', () => {
     // The absence is the record: no modelled popup outcome was reached. It is not abandonment.
     expect(getPromptEnhancementSequenceOfferDisposition(store, PROJECT, 'never-written')).toBeNull();

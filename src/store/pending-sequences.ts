@@ -377,10 +377,16 @@ export function updatePendingPromptSequenceState(
   state: PromptEnhancementSequenceRuntimeStateV1,
 ): boolean {
   if (!validatePromptEnhancementSequenceRuntimeStateV1(state).ok) return false;
+  // Only a real sequence transitions. A row recording an offer that was never taken is terminal by
+  // construction and nothing advances it — but this writer takes a raw id and only ever touches
+  // status, so without the guard one wrong id turns that record into a live sequence. The read then
+  // refuses to serve it, correctly, and scrubs it on the way — destroying the one thing that cannot
+  // be reconstructed afterwards. The clause is in the WHERE so a mismatch reports as a failed
+  // transition rather than a silent no-op, exactly like a vanished row.
   store.db.run(
     `UPDATE pending_prompt_sequences
      SET status = ?, current_item_index = ?, last_action_id = ?, updated_at = ?
-     WHERE id = ?`,
+     WHERE id = ? AND offer_disposition = 'accepted'`,
     [state.status, state.currentItemIndex, state.lastActionId, Date.now(), id],
   );
   // A vanished row (scrubbed between read and write) must surface as a failed transition,
