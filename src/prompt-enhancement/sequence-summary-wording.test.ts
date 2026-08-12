@@ -28,6 +28,7 @@ const item = (
   requiresConfirmationFloor: false,
   decompositionGroupId: null,
   itemValidationGraph: null,
+  itemSafetyClauseRef: null,
 });
 
 const input = (

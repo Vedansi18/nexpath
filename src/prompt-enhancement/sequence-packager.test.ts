@@ -37,6 +37,7 @@ const item = (
   requiresConfirmationFloor: false,
   decompositionGroupId: 'g1',
   itemValidationGraph: order === 0 ? null : GRAPH,
+  itemSafetyClauseRef: null,
   ...overrides,
 });
 

@@ -254,15 +254,21 @@ function storedFrozenFields(
   };
 }
 
-const FROZEN_ITEM_FIELDS = ['generatedWording', 'itemValidationGraph'] as const;
+const FROZEN_ITEM_FIELDS = ['generatedWording', 'itemValidationGraph', 'itemSafetyClauseRef'] as const;
 
 /**
  * The write-time half of the immutability rule, which cannot be a read-time check: a validator
  * handed one row cannot tell a first write from a rewrite, so this is the only place it can live.
  *
- * `null -> value` is the one legal transition on an item's wording and on its validation verdict.
- * `value -> a different value` is refused, and the whole write is refused with it — an item that
- * comes back must come back identical, and a verdict must not change on unchanged text.
+ * `null -> value` is the one legal transition on an item's wording, on its validation verdict, and
+ * on the position of the safety floor inside that wording. `value -> a different value` is refused,
+ * and the whole write is refused with it — an item that comes back must come back identical, and a
+ * verdict must not change on unchanged text.
+ *
+ * The floor's position is frozen for a sharper reason than the other two: it is an offset into text
+ * that is itself frozen, so a move can only mean it now points at a different sentence. The check
+ * that reads it would then report on whatever happens to sit at the new range and report it as the
+ * safeguard.
  *
  * The disposition is write-once for the same reason: it records what the user did with the OFFER.
  * A later cancel changes the sequence's status, not that decision, so a write that disagrees with

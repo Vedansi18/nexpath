@@ -10,6 +10,10 @@ import {
   validatePromptEnhancementSequencePhase,
   validatePromptEnhancementUserEditPhase,
 } from './safety-sendability.js';
+import {
+  isPromptEnhancementSequenceOffsetRangeV1,
+  type PromptEnhancementSequenceOffsetRangeV1,
+} from './sequence-payload.js';
 
 /**
  * The two enforcement times that had a label and no location.
@@ -115,16 +119,24 @@ export type PromptEnhancementSequenceEditValidityV1 =
   PromptEnhancementHandoffMetadataV1['currentBodyValidityState'];
 
 export interface PromptEnhancementSequenceEditCheckInputV1 {
+  /**
+   * The body the packager served — item N's stored wording, before the user touched it.
+   *
+   * The floor's position indexes THIS text, so the two arrive together or neither is usable.
+   */
+  servedBodyText: string;
   /** The body as the user is about to send it, edits and all. */
   sentBodyText: string;
   /**
-   * The safety sentences this item was composed with — the confirmation floor, a sensitive-action
-   * marker. Empty when the item carried none, which is most items.
+   * Where the safety floor sits inside the served body, as stored with the wording. Null on every
+   * item that needed none, which is most items.
    *
-   * Supplied rather than re-derived. Deriving them from the sent body is circular: the question is
-   * whether something that WAS there still is.
+   * A recorded position rather than a rule for recognising safety sentences. The floor is written
+   * by the composer in its own words, so there is no fixed sentence to look for, and deciding which
+   * sentence "looks like" a safeguard is the inference the standing constraint bars — it would fail
+   * in both directions, protecting an ordinary sentence and missing a real floor.
    */
-  requiredSafetyClauses: readonly string[];
+  safetyClauseRef: PromptEnhancementSequenceOffsetRangeV1 | null;
   sequenceItemId: string;
 }
 
@@ -148,11 +160,18 @@ export interface PromptEnhancementSequenceEditCheckResultV1 {
 export function checkPromptEnhancementSequenceEditV1(
   input: PromptEnhancementSequenceEditCheckInputV1,
 ): PromptEnhancementSequenceEditCheckResultV1 {
-  const removed = input.requiredSafetyClauses.filter(
-    (clause) => clause.trim().length > 0 && !input.sentBodyText.includes(clause),
-  );
+  // Resolved against the served body, never against the sent one. Reading the range out of the
+  // edited text would move it under every edit above the floor and report on whatever landed at
+  // those offsets — which is how a check like this comes to guard the wrong sentence silently.
+  const clause = input.safetyClauseRef !== null
+    && isPromptEnhancementSequenceOffsetRangeV1(input.safetyClauseRef, input.servedBodyText.length)
+    ? input.servedBodyText.slice(input.safetyClauseRef.start, input.safetyClauseRef.end)
+    : null;
+  const removed = clause !== null
+    && clause.trim().length > 0
+    && !input.sentBodyText.includes(clause);
 
-  const failures: PromptEnhancementValidationFailureV1[] = removed.length === 0 ? [] : [{
+  const failures: PromptEnhancementValidationFailureV1[] = !removed ? [] : [{
     failureCode: 'sequence_item_safety_clause_removed_by_edit',
     stage: 'user_edit',
     severity: 'blocking',
@@ -168,9 +187,9 @@ export function checkPromptEnhancementSequenceEditV1(
   return {
     // An ordinary edit does not move this. The edit re-runs nothing and invalidates nothing, and a
     // state that flipped on any edit would be reporting interference that is not happening.
-    validityState: removed.length === 0
-      ? 'valid_for_current_body_revision'
-      : 'invalid_due_user_edit_or_safety_removal',
+    validityState: removed
+      ? 'invalid_due_user_edit_or_safety_removal'
+      : 'valid_for_current_body_revision',
     failures,
     phaseState: validatePromptEnhancementUserEditPhase({
       failures,

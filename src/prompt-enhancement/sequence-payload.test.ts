@@ -37,6 +37,7 @@ function task(
     requiresConfirmationFloor: false,
     decompositionGroupId:      'g1',
     itemValidationGraph:       GRAPH,
+    itemSafetyClauseRef:       null,
     ...overrides,
   };
 }
@@ -49,6 +50,7 @@ function firstTask(
     originalSliceRef:    { start: 0, end: LEN },
     generatedWording:    null,
     itemValidationGraph: null,
+    itemSafetyClauseRef: null,
     ...overrides,
   });
 }

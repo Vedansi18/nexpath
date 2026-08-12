@@ -77,19 +77,24 @@ describe('per-item authority — the check that had a label and no location', ()
 });
 
 describe('the edit check — one question, and the narrowness is the rule', () => {
-  const FLOOR = 'Before you do this, ask me for go-ahead confirmation.';
-  const check = (sentBodyText: string, clauses: readonly string[] = [FLOOR]) =>
-    checkPromptEnhancementSequenceEditV1({
-      sentBodyText,
-      requiredSafetyClauses: clauses,
-      sequenceItemId: 'seq-1:item-2',
-    });
+  const FLOOR = 'Tell me the revert path and ask me for go-ahead before you start.';
+  const SERVED = `Rotate the Stripe webhook secret.\n\n${FLOOR}`;
+  const REF = { start: SERVED.indexOf(FLOOR), end: SERVED.indexOf(FLOOR) + FLOOR.length };
+
+  const check = (
+    sentBodyText: string,
+    safetyClauseRef: { start: number; end: number } | null = REF,
+  ) => checkPromptEnhancementSequenceEditV1({
+    servedBodyText: SERVED,
+    sentBodyText,
+    safetyClauseRef,
+    sequenceItemId: 'seq-1:item-2',
+  });
 
   it('leaves an ordinary edit completely alone', () => {
     // Never interfere. An edit that keeps the safeguard returns the same state an unedited body
     // has — a state that moved on any edit would be reporting interference that is not happening.
-    const edited = `Rewrite this how I like it, my own words entirely. ${FLOOR}`;
-    const result = check(edited);
+    const result = check(`Rewrite this how I like it, my own words entirely.\n\n${FLOOR}`);
     expect(result.validityState).toBe('valid_for_current_body_revision');
     expect(result.failures).toEqual([]);
   });
@@ -97,7 +102,7 @@ describe('the edit check — one question, and the narrowness is the rule', () =
   it('names the removal of a safety clause, and names it specifically', () => {
     // A generic boolean is not enough: a reader has to tell a body-revision change from a safety
     // removal, and one bit cannot say which.
-    const result = check('Rewrite this how I like it, and no go-ahead nonsense.');
+    const result = check('Rotate the Stripe webhook secret, and no go-ahead nonsense.');
     expect(result.validityState).toBe('invalid_due_user_edit_or_safety_removal');
     expect(result.failures).toHaveLength(1);
     expect(result.failures[0]?.failureCode).toBe('sequence_item_safety_clause_removed_by_edit');
@@ -106,15 +111,31 @@ describe('the edit check — one question, and the narrowness is the rule', () =
     expect(result.phaseState.status).toBe('invalid_non_sendable');
   });
 
+  it('reads the clause out of the SERVED body, never the sent one', () => {
+    // The sent body is what the range would move under. Resolving it there would slide the offsets
+    // across every edit made above the floor and report on whatever text landed at them — which is
+    // how a check like this comes to guard the wrong sentence without anyone noticing.
+    const padded = `A long paragraph the user typed in front of everything else.\n\n${SERVED}`;
+    expect(check(padded).validityState).toBe('valid_for_current_body_revision');
+  });
+
   it('says nothing about an item that carried no safety clause', () => {
     // Most items carry none, and for those the question does not arise.
-    expect(check('anything at all', []).validityState).toBe('valid_for_current_body_revision');
+    expect(check('anything at all', null).validityState).toBe('valid_for_current_body_revision');
+  });
+
+  it('treats a position that does not fit the served body as no position at all', () => {
+    // Fail-closed the other way would block every send on a corrupt row. The row is written under
+    // a read invariant that makes this unreachable; if it is reached, the safe reading is that the
+    // engine cannot answer, not that the user removed something.
+    expect(check(SERVED, { start: 5, end: 9000 }).validityState)
+      .toBe('valid_for_current_body_revision');
   });
 
   it('does not judge the edit itself', () => {
     // Not quality, not completeness, not whether the edit was wise. Widened even slightly, every
     // edit becomes a negotiation with the engine.
-    const wordSalad = `asdf ghjk ${FLOOR}`;
+    const wordSalad = `asdf ghjk\n\n${FLOOR}`;
     expect(check(wordSalad).validityState).toBe('valid_for_current_body_revision');
     expect(check(wordSalad).failures).toEqual([]);
   });

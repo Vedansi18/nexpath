@@ -18,6 +18,7 @@ import {
 import { PROMPT_ENHANCEMENT_COST_VALIDATION_RETRY_COUNT_V1 } from './cost-observability.js';
 import type { PromptEnhancementSequenceItemV1 } from './sequence-payload.js';
 import type { PromptEnhancementSequencePlannerClientV1 } from './sequence-planner.js';
+import type { PromptEnhancementSafetySummaryV1 } from './contracts.js';
 
 const ORIGINAL = 'Fix the failing payment test, then add a rate limiter to the login endpoint.';
 /** The certainty bar, as the prompt dictates it. */
@@ -53,6 +54,18 @@ const task = (
   ...overrides,
 });
 
+/** The sequence's own posture. Two of its fields are carried onto every item's verdict. */
+const BASE_SAFETY = {
+  validationStatus: 'valid',
+  sendPolicy: 'send_current',
+  sensitiveActionState: 'none',
+  sourceHonestyState: 'valid',
+  privacyState: 'valid',
+  authorityEscalationState: 'valid',
+  noForegroundSafer: true,
+  noAutomaticSend: true,
+} as const satisfies PromptEnhancementSafetySummaryV1;
+
 const input = (
   items: readonly PromptEnhancementSequenceBatchItemV1[],
   overrides: Partial<PromptEnhancementSequenceBatchInputV1> = {},
@@ -62,11 +75,16 @@ const input = (
   firstBodyText: 'The first prompt, already written.',
   promptDirectives: [],
   localOriginalText: ORIGINAL,
+  baseSafetySummary: BASE_SAFETY,
+  providerRuntimeState: 'deterministic',
+  optionalCallAvailabilityState: 'deterministic_only',
+  sequenceId: 'seq-1',
   ...overrides,
 });
 
-const replyWith = (entries: readonly { dependencyOrder: number; wording: string }[]): string =>
-  JSON.stringify({ items: entries });
+const replyWith = (
+  entries: readonly { dependencyOrder: number; wording: string; safetyClause?: string }[],
+): string => JSON.stringify({ items: entries });
 
 const clientReturning = (...replies: readonly string[]) => {
   const bodies: { messages: string[]; maxTokens: number }[] = [];
@@ -178,6 +196,7 @@ describe('sequence batch — the user\'s own words', () => {
       requiresConfirmationFloor: false,
       decompositionGroupId: 'g1',
       itemValidationGraph: null,
+      itemSafetyClauseRef: null,
     });
     const built = buildPromptEnhancementSequenceBatchItemsV1([
       stored(0, 'first_task', { start: 0, end: ORIGINAL.length }),
@@ -201,7 +220,7 @@ describe('sequence batch — the user\'s own words', () => {
       dependencyOrder: order, complexity: kind === 'wrap_up' ? null : 'not_complex',
       complexityReason: null, generatedWording: null, actionRiskKinds: [],
       authorityMode: kind === 'wrap_up' ? null : 'plan_or_review', requiresConfirmationFloor: false,
-      decompositionGroupId: 'g1', itemValidationGraph: null,
+      decompositionGroupId: 'g1', itemValidationGraph: null, itemSafetyClauseRef: null,
     });
     const built = buildPromptEnhancementSequenceBatchItemsV1([
       stored(0, { start: 0, end: SLICE_ONE.length }, 'first_task'),
@@ -241,19 +260,36 @@ describe('sequence batch — confirmations', () => {
       .toBe(true);
   });
 
-  it('refuses one missing either of the two mandatory clauses', async () => {
-    // All three parts, not two. Both clauses end in "at ground level", so a single check over that
-    // phrase could not tell them apart and a confirmation carrying only the second one passed.
-    const noBar = 'Does the limiter reject the 61st request?\n\nReply YES or NO only. Do not make'
-      + ' any assumptions; confirm at ground level by reading the actual source.';
-    expect(await withConfirmation(noBar))
-      .toEqual({ ok: false, reason: 'confirmation_missing_certainty_bar' });
+  it('leaves the certainty bar and the anti-assumption clause to the composer itself', async () => {
+    // Both are requirements on MEANING, not fixed strings — a certainty bar can be worded many
+    // ways. A check here that looks for the sentence we dictated rejects a correct paraphrase, and
+    // the item is then repaired until the bound runs out and the whole sequence is lost. So the
+    // prompt asks the composer to check its own work, and this function does not second-guess it.
+    const paraphrased = 'Does the limiter reject the 61st request? Reply YES or NO only. Give the'
+      + ' answer on its own line, with nothing after it. Answer only if you are certain at the'
+      + ' ground level. Do not assume — go and read the actual source before you confirm.';
+    expect((await withConfirmation(paraphrased)).ok).toBe(true);
 
-    // Without the anti-assumption clause an agent answers from its own previous turn, and the
-    // confirmation confirms nothing.
-    const noClause = `Does the limiter reject the 61st request?\n\nReply YES or NO only. ${BAR}`;
-    expect(await withConfirmation(noClause))
-      .toEqual({ ok: false, reason: 'confirmation_missing_ground_level_clause' });
+    // And the same for one genuinely missing the clause. Letting it through is the cost of not
+    // rejecting the paraphrase above, and it is the trade the plan makes deliberately.
+    const noClause = 'Does the limiter reject the 61st request? Reply YES or NO only. Give the'
+      + ' answer on its own line, with nothing after it. Answer only if you are clear and sure at'
+      + ' ground level.';
+    expect((await withConfirmation(noClause)).ok).toBe(true);
+  });
+
+  it('asks the composer, in the prompt, to check the three parts before replying', async () => {
+    // The check moved rather than disappeared. If the instruction is not in the prompt, nothing
+    // anywhere is asking the question and the parts are simply unenforced.
+    const { client, bodies } = clientReturning(replyWith([
+      { dependencyOrder: 1, wording: binaryWording('Does it reject?') },
+    ]));
+    await runPromptEnhancementSequenceBatchV1(
+      input([{ ...task(1, null), itemKind: 'binary_confirmation' }]), client,
+    );
+    const systemPrompt = bodies[0]?.messages[0] ?? '';
+    expect(systemPrompt).toContain('CHECK YOUR OWN WORK BEFORE YOU RETURN IT');
+    expect(systemPrompt).toContain('all three mandatory parts');
   });
 
   it('accepts the clauses however they are spelt or wrapped', async () => {
@@ -321,6 +357,80 @@ describe('sequence batch — confirmations', () => {
     // Strictly none — and any task's slice, not only its own, which it does not have.
     expect(await withConfirmation(binaryWording(`Did you ${SLICE_TWO}?`)))
       .toEqual({ ok: false, reason: 'confirmation_carries_original_text' });
+  });
+});
+
+describe('sequence batch — the verdict each item leaves with', () => {
+  const FLOOR = 'Tell me the revert path and ask me for go-ahead before you start.';
+
+  const runOne = async (
+    overrides: Partial<PromptEnhancementSequenceBatchItemV1>,
+    entry: { wording: string; safetyClause?: string },
+  ) => runPromptEnhancementSequenceBatchV1(
+    input([task(1, SLICE_TWO, overrides)]),
+    clientReturning(replyWith([{ dependencyOrder: 1, ...entry }])).client,
+  );
+
+  it('produces one, so the packager has something to report', async () => {
+    // Without this the field is null on every stored item and the packager refuses every
+    // continuation — the sequence is offered, accepted, and then stops after the first prompt.
+    const result = await runOne({}, { wording: `Do this: ${SLICE_TWO}` });
+    expect(result.ok).toBe(true);
+    const item = result.ok ? result.composed.get(1) : undefined;
+    expect(item?.validationGraph.phaseStates[0]?.stage).toBe('sequence');
+    expect(item?.validationGraph.failures).toEqual([]);
+    // The invariants ride along and are not flipped to make a sequence check fit.
+    expect(item?.validationGraph.evaluatesAgentResponseQuality).toBe(false);
+    expect(item?.validationGraph.canAutoAdvanceSequencePointer).toBe(false);
+  });
+
+  it('carries the sequence posture and decides the per-item fields itself', async () => {
+    const result = await runOne({}, { wording: `Do this: ${SLICE_TWO}` });
+    const state = result.ok ? result.composed.get(1)?.validationGraph.safetyState : undefined;
+    // Carried: the sequence's source and privacy posture, which composition does not change.
+    expect(state?.sourceHonestyState).toBe('valid');
+    expect(state?.privacyState).toBe('valid');
+    // Decided here: an item that needed no floor reports none, rather than inheriting one.
+    expect(state?.sensitiveActionState).toBe('none');
+  });
+
+  it('records the floor\'s position, and it resolves to the sentence the composer wrote', async () => {
+    // The whole point of storing it: the floor is written in the composer's own words, so the only
+    // way to check later that the user did not delete it is to know where it was.
+    const wording = `Rotate the key.\n\n${SLICE_TWO}\n\n${FLOOR}`;
+    const result = await runOne({ requiresConfirmationFloor: true }, { wording, safetyClause: FLOOR });
+    expect(result.ok).toBe(true);
+    const item = result.ok ? result.composed.get(1) : undefined;
+    const ref = item?.safetyClauseRef;
+    expect(ref).not.toBeNull();
+    expect(wording.slice(ref?.start ?? 0, ref?.end ?? 0)).toBe(FLOOR);
+    expect(item?.validationGraph.safetyState.sensitiveActionState).toBe('confirmation_required_present');
+  });
+
+  it('refuses an item that needed a floor and returned none', async () => {
+    expect(await runOne({ requiresConfirmationFloor: true }, { wording: `Do this: ${SLICE_TWO}` }))
+      .toEqual({ ok: false, reason: 'safety_clause_missing' });
+  });
+
+  it('refuses a clause that is not actually in the wording', async () => {
+    // A clause reported but absent gives a position that points at other text, and the edit check
+    // would then guard whatever happens to sit there.
+    expect(await runOne(
+      { requiresConfirmationFloor: true },
+      { wording: `Do this: ${SLICE_TWO}`, safetyClause: FLOOR },
+    )).toEqual({ ok: false, reason: 'safety_clause_not_found_in_wording' });
+  });
+
+  it('refuses a clause on an item that needed no floor', async () => {
+    // Marking the wrong item is worse than marking none: the real floor then goes unwatched while
+    // an ordinary sentence elsewhere is guarded.
+    expect(await runOne({}, { wording: `Do this: ${SLICE_TWO}\n\n${FLOOR}`, safetyClause: FLOOR }))
+      .toEqual({ ok: false, reason: 'safety_clause_present_without_floor' });
+  });
+
+  it('leaves no floor position on an item that needed none', async () => {
+    const result = await runOne({}, { wording: `Do this: ${SLICE_TWO}` });
+    expect(result.ok ? result.composed.get(1)?.safetyClauseRef : 'missing').toBeNull();
   });
 });
 
@@ -509,7 +619,9 @@ describe('sequence batch — what a failed batch leaves the user with', () => {
       'invalid_output', 'batch_deadline_exceeded', 'item_missing_wording', 'item_not_in_plan',
       'first_item_must_not_be_worded', 'slice_missing_from_wording',
       'covered_slice_missing_from_recap', 'confirmation_carries_original_text',
-      'confirmation_format_wrong_for_kind', 'confirmation_missing_ground_level_clause',
+      'confirmation_format_wrong_for_kind', 'confirmation_missing_answer_alone_demand',
+      'safety_clause_missing', 'safety_clause_not_found_in_wording',
+      'safety_clause_present_without_floor',
       'confirmation_reproduces_directive_text', 'wording_exceeds_item_authority',
     ] as const) {
       expect(promptEnhancementSequenceBatchDispositionV1(invalid)).toBe('no_sequence_single_prompt');

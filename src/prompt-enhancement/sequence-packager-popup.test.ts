@@ -78,6 +78,7 @@ const storedItems = (): readonly PromptEnhancementSequenceItemV1[] =>
     // Filled in per run from the real result: a per-item verdict is a real graph, and an empty
     // object here would fail the popup for the fixture's reason rather than the packager's.
     itemValidationGraph: null,
+    itemSafetyClauseRef: null,
   })) as readonly PromptEnhancementSequenceItemV1[];
 
 async function packagedPopup(currentItemIndex: number) {

@@ -16,9 +16,12 @@ import {
   PROMPT_ENHANCEMENT_SEQUENCE_CONFIRMATION_CLAUSES_V1,
   buildPromptEnhancementSequenceBatchSystemPromptV1,
 } from './sequence-batch-composer-prompt.js';
-import {
-  promptEnhancementGeneratedEscalatesAuthorityV1,
-} from './safety-sendability.js';
+import type {
+  PromptEnhancementCallVisibilityMode,
+  PromptEnhancementSafetySummaryV1,
+  PromptEnhancementValidationGraphV1,
+} from './contracts.js';
+import { buildPromptEnhancementSequenceItemValidationGraphV1 } from './sequence-enforcement.js';
 import {
   isPromptEnhancementSequenceOffsetRangeV1,
   promptEnhancementSequenceTextHasClauseV1,
@@ -95,6 +98,21 @@ export interface PromptEnhancementSequenceBatchInputV1 {
   promptDirectives: readonly string[];
   /** The request as the user typed it, for the authority check to compare wording against. */
   localOriginalText: string;
+  /**
+   * The accepted sequence's own safety summary, as the posture each item's verdict starts from.
+   *
+   * Two of its fields describe the SEQUENCE rather than any one prompt — its source honesty and its
+   * privacy state — and P2 changes neither: it adds no sources, and the redaction boundary is
+   * settled before it runs. Those are carried. The fields that ARE per-item — the validation
+   * status, the authority escalation state, and whether a required floor is present — are decided
+   * per item below and overwrite what is carried.
+   */
+  baseSafetySummary: PromptEnhancementSafetySummaryV1;
+  /** How this run reached the provider, recorded on every item's verdict. */
+  providerRuntimeState: PromptEnhancementCallVisibilityMode;
+  optionalCallAvailabilityState: PromptEnhancementValidationGraphV1['optionalCallAvailabilityState'];
+  /** Identifies the sequence a failure belongs to, so a verdict names its own item. */
+  sequenceId: string;
   /** When the work this call is part of must be finished, as epoch milliseconds. */
   deadlineAtMs?: number;
   /** How the deadline is read. Present so the check is testable without waiting. */
@@ -114,18 +132,46 @@ export type PromptEnhancementSequenceBatchFailureReasonV1 =
   | 'covered_slice_missing_from_recap'
   | 'confirmation_carries_original_text'
   | 'confirmation_format_wrong_for_kind'
-  | 'confirmation_missing_certainty_bar'
   | 'confirmation_missing_answer_alone_demand'
-  | 'confirmation_missing_ground_level_clause'
   | 'confirmation_reproduces_directive_text'
+  | 'safety_clause_missing'
+  | 'safety_clause_not_found_in_wording'
+  | 'safety_clause_present_without_floor'
   | 'wording_exceeds_item_authority';
 
+/**
+ * What one composed item carries out of the batch, beside its text.
+ *
+ * The verdict is produced HERE, with the wording, and stored beside it — never re-derived at each
+ * continuation. A second run over frozen text can only agree with itself or contradict itself, and
+ * the contradiction arrives with the user already holding a body the engine accepted.
+ */
+export interface PromptEnhancementSequenceComposedItemV1 {
+  wording: string;
+  /** The per-item validation verdict the packager reports and is forbidden to invent. */
+  validationGraph: PromptEnhancementValidationGraphV1;
+  /** Where the floor sits inside `wording`. Null on every item that needed none. */
+  safetyClauseRef: PromptEnhancementSequenceOffsetRangeV1 | null;
+}
+
 export type PromptEnhancementSequenceBatchResultV1 =
-  | { ok: true; planGenerationId: string; wording: ReadonlyMap<number, string> }
+  | {
+    ok: true;
+    planGenerationId: string;
+    wording: ReadonlyMap<number, string>;
+    /** Keyed by `dependencyOrder`, one entry per item the batch was asked to write. */
+    composed: ReadonlyMap<number, PromptEnhancementSequenceComposedItemV1>;
+  }
   | { ok: false; reason: PromptEnhancementSequenceBatchFailureReasonV1 };
 
+/** One item as the model returned it, before anything has been checked. */
+interface BatchReplyEntryV1 {
+  wording: string;
+  safetyClause: string | null;
+}
+
 type BatchAttemptV1 =
-  | { ok: true; wording: ReadonlyMap<number, string> }
+  | { ok: true; composed: ReadonlyMap<number, PromptEnhancementSequenceComposedItemV1> }
   | { ok: false; reason: PromptEnhancementSequenceBatchFailureReasonV1; dependencyOrder?: number };
 
 const CONFIRMATION_KINDS: readonly PromptEnhancementSequenceItemKindV1[] = [
@@ -146,20 +192,51 @@ function isConfirmation(kind: PromptEnhancementSequenceItemKindV1): boolean {
 }
 
 /**
+ * The item's own safety posture, decided from what this call actually established.
+ *
+ * Three fields are this item's and are set here; two describe the sequence and are carried from the
+ * accepted result unchanged. Nothing is asserted that was not checked: a floor is reported present
+ * only when its sentence was found in the wording, and the authority state is the check's own answer
+ * rather than an assumption that composition behaved.
+ */
+function composedItemSafetySummary(
+  base: PromptEnhancementSafetySummaryV1,
+  requiresFloor: boolean,
+  floorPresent: boolean,
+): PromptEnhancementSafetySummaryV1 {
+  return {
+    ...base,
+    validationStatus: 'valid',
+    authorityEscalationState: 'valid',
+    sensitiveActionState: requiresFloor
+      ? (floorPresent ? 'confirmation_required_present' : 'confirmation_required_missing')
+      : 'none',
+    noForegroundSafer: true,
+    noAutomaticSend: true,
+  };
+}
+
+/**
  * Every rule about the batch's output that can be decided by looking rather than judging.
  *
  * What is NOT here, and deliberately: whether a later item is light enough, whether a question is
  * phrased negatively, whether it asks two things at once, whether the tone is firm rather than
- * rude. Those are judgements, they are instructed in the prompt, and a deterministic approximation
- * of them would be worse than none.
+ * rude, and whether a confirmation's certainty bar and anti-assumption instruction are present.
+ * Those are judgements or requirements on meaning, they are instructed in the prompt, and a
+ * deterministic approximation of them would be worse than none — it would reject correct wording
+ * that happens to be phrased differently, and spend the repair bound doing it.
+ *
+ * On success every item leaves here with its wording, its verdict, and the position of its floor.
+ * The verdict is written once, with the text it describes; nothing downstream produces one.
  */
 function checkBatchOutput(
   input: PromptEnhancementSequenceBatchInputV1,
-  wording: ReadonlyMap<number, string>,
+  reply: ReadonlyMap<number, BatchReplyEntryV1>,
 ): BatchAttemptV1 {
   const planned = new Map(input.items.map((item) => [item.dependencyOrder, item]));
+  const composed = new Map<number, PromptEnhancementSequenceComposedItemV1>();
 
-  for (const order of wording.keys()) {
+  for (const order of reply.keys()) {
     // Item 0 is already written and is not the batch's to write. Wording for it is a second first
     // body, composed after the popup already had one.
     if (order === 0) return { ok: false, reason: 'first_item_must_not_be_worded', dependencyOrder: 0 };
@@ -167,7 +244,8 @@ function checkBatchOutput(
   }
 
   for (const item of input.items) {
-    const text = wording.get(item.dependencyOrder);
+    const entry = reply.get(item.dependencyOrder);
+    const text = entry?.wording;
     if (text === undefined || text.trim().length === 0) {
       return { ok: false, reason: 'item_missing_wording', dependencyOrder: item.dependencyOrder };
     }
@@ -233,38 +311,16 @@ function checkBatchOutput(
           dependencyOrder: item.dependencyOrder,
         };
       }
-      // All THREE mandatory parts, not two. The certainty bar and the anti-assumption instruction
-      // both end in "at ground level", so one check over that phrase cannot tell them apart and a
-      // confirmation with only the second passed. They are dictated as exact sentences in the
-      // prompt, so each is looked for by its own distinctive anchor.
+      // ⛔ The certainty bar and the anti-assumption instruction are NOT checked here, and their
+      // absence from this function is the rule rather than an omission. Both are requirements on
+      // MEANING — a certainty bar can be worded many ways — so a check that looks for the sentence
+      // we happened to dictate rejects a correct paraphrase, and the item is then repaired until
+      // the bound runs out and the whole sequence falls back to a single prompt. For output that
+      // was right. Their presence is the composer's own to confirm, and the prompt asks it to.
       //
-      // Checking a clause we wrote is not the text matching barred elsewhere: that prohibition is
-      // about deriving a JUDGEMENT from words. This asks whether an instruction was followed.
-      if (!promptEnhancementSequenceTextHasClauseV1(
-        text,
-        PROMPT_ENHANCEMENT_SEQUENCE_CONFIRMATION_CLAUSES_V1.certaintyBar.anchor,
-      )) {
-        return {
-          ok: false,
-          reason: 'confirmation_missing_certainty_bar',
-          dependencyOrder: item.dependencyOrder,
-        };
-      }
-      if (!promptEnhancementSequenceTextHasClauseV1(
-        text,
-        PROMPT_ENHANCEMENT_SEQUENCE_CONFIRMATION_CLAUSES_V1.antiAssumption.anchor,
-      )) {
-        return {
-          ok: false,
-          reason: 'confirmation_missing_ground_level_clause',
-          dependencyOrder: item.dependencyOrder,
-        };
-      }
-      // The DEMAND that the answer stand alone — a clause in the QUESTION, never a fact about the
-      // reply. Nexpath does not read agent replies, so the reply's shape is not checkable here and
-      // was never meant to be; what is checkable is whether the question asked for it. Models write
-      // "Yes, because…" unless asked otherwise, and the point of asking is that the USER can read
-      // the answer at a glance — not that a parser can.
+      // What survives here is the part that is not a matter of wording: the answer-alone DEMAND is
+      // a clause in the QUESTION, never a fact about the reply — Nexpath does not read agent
+      // replies — and the token set is fixed by the item's kind with exactly two possibilities.
       if (!promptEnhancementSequenceTextHasClauseV1(
         text,
         PROMPT_ENHANCEMENT_SEQUENCE_CONFIRMATION_CLAUSES_V1.answerAlone.anchor,
@@ -277,17 +333,66 @@ function checkBatchOutput(
       }
     }
 
+    // The floor's position, found rather than computed by the model: it returns the sentence it
+    // wrote and we locate that exact run of characters. Asking a model for offsets into its own
+    // output asks it to count, which it cannot reliably do; asking it to repeat a sentence it just
+    // wrote is the thing models are good at, and an exact search over the answer is decidable.
+    //
+    // Not searched for by meaning. Nothing here decides what a safety sentence looks like — the
+    // composer says which one it is, and this only asks whether that claim holds against the text.
+    let safetyClauseRef: PromptEnhancementSequenceOffsetRangeV1 | null = null;
+    if (item.requiresConfirmationFloor) {
+      const clause = entry?.safetyClause ?? null;
+      if (clause === null || clause.trim().length === 0) {
+        return { ok: false, reason: 'safety_clause_missing', dependencyOrder: item.dependencyOrder };
+      }
+      const start = text.indexOf(clause);
+      if (start < 0) {
+        return {
+          ok: false,
+          reason: 'safety_clause_not_found_in_wording',
+          dependencyOrder: item.dependencyOrder,
+        };
+      }
+      safetyClauseRef = { start, end: start + clause.length };
+    } else if (entry?.safetyClause != null && entry.safetyClause.trim().length > 0) {
+      // A clause on an item that needed no floor means the composer marked the wrong item, and a
+      // position recorded against the wrong item is worse than none: the edit check would then
+      // guard a sentence on an item that never needed guarding while the real one goes unwatched.
+      return {
+        ok: false,
+        reason: 'safety_clause_present_without_floor',
+        dependencyOrder: item.dependencyOrder,
+      };
+    }
+
     // The per-item authority check, from the machinery that already ships rather than a second copy
     // of it. The single-prompt validator never sees this wording: a sequence item is a generated
     // body, and without this check a plan-or-review slice could be worded as an instruction to
     // carry the work out with nothing in the system noticing.
-    if (item.sliceText !== null
-      && promptEnhancementGeneratedEscalatesAuthorityV1(item.sliceText, text)) {
+    //
+    // Asked ONCE, through the builder that also produces the stored verdict. Asking it here and
+    // again there would be two sites answering one question, free to diverge while both look right.
+    const validationGraph = buildPromptEnhancementSequenceItemValidationGraphV1({
+      sliceText: item.sliceText,
+      generatedWording: text,
+      sequenceItemId: `${input.sequenceId}:item-${item.dependencyOrder}`,
+      safetyState: composedItemSafetySummary(
+        input.baseSafetySummary,
+        item.requiresConfirmationFloor,
+        safetyClauseRef !== null,
+      ),
+      providerRuntimeState: input.providerRuntimeState,
+      optionalCallAvailabilityState: input.optionalCallAvailabilityState,
+    });
+    if (validationGraph.failures.length > 0) {
       return { ok: false, reason: 'wording_exceeds_item_authority', dependencyOrder: item.dependencyOrder };
     }
+
+    composed.set(item.dependencyOrder, { wording: text, validationGraph, safetyClauseRef });
   }
 
-  return { ok: true, wording };
+  return { ok: true, composed };
 }
 
 /** Resolve an item's slice from the local original. Resolving only — never recomputing a boundary. */
@@ -375,7 +480,7 @@ function buildBatchUserMessageV1(input: PromptEnhancementSequenceBatchInputV1): 
   return lines.join('\n');
 }
 
-function parseBatchReply(raw: string): ReadonlyMap<number, string> | null {
+function parseBatchReply(raw: string): ReadonlyMap<number, BatchReplyEntryV1> | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
@@ -385,14 +490,22 @@ function parseBatchReply(raw: string): ReadonlyMap<number, string> | null {
   if (typeof parsed !== 'object' || parsed === null) return null;
   const items = (parsed as Record<string, unknown>)['items'];
   if (!Array.isArray(items)) return null;
-  const wording = new Map<number, string>();
+  const entries = new Map<number, BatchReplyEntryV1>();
   for (const entry of items) {
     if (typeof entry !== 'object' || entry === null) return null;
     const item = entry as Record<string, unknown>;
     if (typeof item['dependencyOrder'] !== 'number' || typeof item['wording'] !== 'string') return null;
-    wording.set(item['dependencyOrder'], item['wording']);
+    // Absent is the ordinary case — most items need no floor. A present-but-not-a-string value is
+    // malformed output rather than an absent clause, and reading it as absent would turn a broken
+    // reply into a silently floorless item.
+    const clause = item['safetyClause'];
+    if (clause !== undefined && clause !== null && typeof clause !== 'string') return null;
+    entries.set(item['dependencyOrder'], {
+      wording: item['wording'],
+      safetyClause: typeof clause === 'string' ? clause : null,
+    });
   }
-  return wording;
+  return entries;
 }
 
 function batchErrorReason(error: unknown): 'timeout' | 'provider_error' {
@@ -456,11 +569,11 @@ async function attemptBatch(
   }
 
   if (typeof raw !== 'string' || raw.trim().length === 0) return { ok: false, reason: 'invalid_output' };
-  const wording = parseBatchReply(raw);
+  const reply = parseBatchReply(raw);
   // A batch cut off mid-JSON is invalid rather than degraded: an item whose wording ran out of
   // tokens is a broken sequence, not a shorter one.
-  if (wording === null) return { ok: false, reason: 'invalid_output' };
-  return checkBatchOutput(input, wording);
+  if (reply === null) return { ok: false, reason: 'invalid_output' };
+  return checkBatchOutput(input, reply);
 }
 
 /**
@@ -494,7 +607,16 @@ export async function runPromptEnhancementSequenceBatchV1(
       // fit, and every remaining prompt in one reply is the largest thing this feature produces.
       repair === 0 ? maxTokens : PROMPT_ENHANCEMENT_SEQUENCE_BATCH_OUTPUT_TOKEN_HARD_CAP_V1,
     );
-    if (attempt.ok) return { ok: true, planGenerationId: input.planGenerationId, wording: attempt.wording };
+    if (attempt.ok) {
+      return {
+        ok: true,
+        planGenerationId: input.planGenerationId,
+        // The text on its own, for callers that only ever wanted that; the verdicts and floor
+        // positions travel beside it rather than instead of it.
+        wording: new Map([...attempt.composed].map(([order, item]) => [order, item.wording])),
+        composed: attempt.composed,
+      };
+    }
     if (isProviderFailure(attempt.reason)) return { ok: false, reason: attempt.reason };
     if (repair >= PROMPT_ENHANCEMENT_COST_VALIDATION_RETRY_COUNT_V1 || !hasRoomForAnotherCall(input)) {
       return { ok: false, reason: attempt.reason };
@@ -535,10 +657,11 @@ export function promptEnhancementSequenceBatchDispositionV1(
     case 'covered_slice_missing_from_recap':
     case 'confirmation_carries_original_text':
     case 'confirmation_format_wrong_for_kind':
-    case 'confirmation_missing_certainty_bar':
     case 'confirmation_missing_answer_alone_demand':
-    case 'confirmation_missing_ground_level_clause':
     case 'confirmation_reproduces_directive_text':
+    case 'safety_clause_missing':
+    case 'safety_clause_not_found_in_wording':
+    case 'safety_clause_present_without_floor':
     case 'wording_exceeds_item_authority':
       return 'no_sequence_single_prompt';
   }

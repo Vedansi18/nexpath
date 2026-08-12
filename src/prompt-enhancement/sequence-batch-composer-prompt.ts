@@ -167,7 +167,13 @@ path, a backup, or a dry run first, before anything is started.
 
 Judge "hard to undo" from what the item actually does, in general terms: irreversible, or expensive
 to reverse. Not from a list of dangerous-sounding verbs. Most work is trivially reversible — adding
-a button, fixing spacing, writing a test — and none of this applies to it.`;
+a button, fixing spacing, writing a test — and none of this applies to it.
+
+WHERE YOU WRITE A FLOOR, RETURN IT SEPARATELY TOO. Copy the floor sentence — the whole of it,
+character for character as it appears in the prompt you wrote — into that item's "safetyClause"
+field. One continuous run of the prompt text, not a summary of it and not a re-typing of what you
+meant. It is used to find that sentence again later, so a copy that does not appear in the wording
+exactly as given is the same as not returning one.`;
 
 /** 6 — directives, and the ruling that they land differently on a confirmation. */
 const SECTION_6_DIRECTIVES = `SECTION 6 — THE USER'S WHOLE-PROMPT INSTRUCTIONS
@@ -248,15 +254,29 @@ for exactly that reason, and the agent reads "if there were" and answers accordi
 
 /** What the reply must look like. Indexes, not order — a batch that renumbers is a batch that
  *  silently reassigns work to the wrong prompt. */
-const SECTION_OUTPUT = `WHAT TO RETURN
+const SECTION_OUTPUT = `CHECK YOUR OWN WORK BEFORE YOU RETURN IT
+
+Read back every confirmation you wrote and confirm it carries all three mandatory parts — the format
+constraint with the answer-alone sentence, the certainty bar, and the anti-assumption instruction —
+in the words SECTION 3 gives them. Where one is missing, weakened, merged into another sentence, or
+rewritten however well, put it back as written before you reply.
+
+This is your check and nobody else's. Nothing downstream reads these sentences to decide whether you
+followed the instruction, so a confirmation that leaves one out ships exactly as you wrote it, and
+the agent answering it will answer from its own last turn instead of going to look.
+
+WHAT TO RETURN
 
 A single JSON object:
 
-  { "items": [ { "dependencyOrder": <number>, "wording": "<the prompt text>" }, ... ] }
+  { "items": [ { "dependencyOrder": <number>, "wording": "<the prompt text>",
+                 "safetyClause": "<the floor sentence, when this item has one>" }, ... ] }
 
 One entry for every item you were given, addressed by the dependencyOrder it arrived with. Do not
 renumber, do not reorder, do not add an item, and do not leave one out. Item 0 is the first prompt;
 it is already written and is not yours to write, so it must not appear in your reply.
+
+"safetyClause" appears only on the items you wrote a floor into, and is left out everywhere else.
 
 Reply with a single JSON object and nothing else.`;
 

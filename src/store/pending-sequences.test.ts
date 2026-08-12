@@ -29,8 +29,8 @@ function plannedItems(count: number): PromptEnhancementSequencePayloadV1['items'
     requiresConfirmationFloor: false, decompositionGroupId: 'g1',
   } as const;
   return Array.from({ length: count }, (_, index) => (index === 0
-    ? { ...base, itemKind: 'first_task', originalSliceRef: { start: 0, end: ORIGINAL_LENGTH }, dependencyOrder: 0, generatedWording: null, itemValidationGraph: null }
-    : { ...base, itemKind: 'task', originalSliceRef: { start: 1, end: 20 }, dependencyOrder: index, generatedWording: 'w', itemValidationGraph: {} }
+    ? { ...base, itemKind: 'first_task', originalSliceRef: { start: 0, end: ORIGINAL_LENGTH }, dependencyOrder: 0, generatedWording: null, itemValidationGraph: null, itemSafetyClauseRef: null }
+    : { ...base, itemKind: 'task', originalSliceRef: { start: 1, end: 20 }, dependencyOrder: index, generatedWording: 'w', itemValidationGraph: {}, itemSafetyClauseRef: null }
   )) as unknown as PromptEnhancementSequencePayloadV1['items'];
 }
 

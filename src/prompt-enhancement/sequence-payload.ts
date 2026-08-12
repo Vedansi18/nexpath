@@ -134,6 +134,24 @@ export interface PromptEnhancementSequenceItemV1 {
   decompositionGroupId: string | null;
   /** The per-item validation verdict, including its safety state. Reported, never fabricated. */
   itemValidationGraph:  PromptEnhancementValidationGraphV1 | null;
+  /**
+   * Where the safety floor sits INSIDE this item's own wording. Null on every item that needed none.
+   *
+   * 🔴 The one offset field on this item that does NOT address the original prompt. Every other
+   * range here indexes the local original; this one indexes `generatedWording`, because that is the
+   * text it describes and the text the packager serves. Reading it against the original would
+   * resolve to unrelated characters that happen to be in range.
+   *
+   * It exists because the floor is written by the composer in its own words, so there is no fixed
+   * sentence to look for later. Without a recorded position, "did the user delete the safeguard
+   * before sending?" can only be answered by guessing which sentence was the safeguard — which is
+   * the inference the standing constraint bars.
+   *
+   * Offsets rather than a copy of the sentence: the sentence is already stored, inside the wording.
+   * A second copy is a second thing that can disagree with the first, and it would put composed
+   * safety text in two places at once.
+   */
+  itemSafetyClauseRef:  PromptEnhancementSequenceOffsetRangeV1 | null;
 }
 
 export interface PromptEnhancementSequencePayloadV1 {
@@ -179,7 +197,8 @@ export type PromptEnhancementSequencePayloadReasonCodeV1 =
   | 'authority_mode_invalid'
   | 'requires_confirmation_floor_invalid'
   | 'decomposition_group_id_invalid'
-  | 'item_validation_graph_presence_invalid';
+  | 'item_validation_graph_presence_invalid'
+  | 'item_safety_clause_ref_invalid';
 
 export type PromptEnhancementSequencePayloadValidationV1 =
   | { ok: true }
@@ -570,6 +589,24 @@ export function validatePromptEnhancementSequenceItemListV1(
       if (graph !== null) return fail('item_validation_graph_presence_invalid', index);
     } else if (typeof graph !== 'object' || graph === null) {
       return fail('item_validation_graph_presence_invalid', index);
+    }
+
+    // The floor's position, checked against the wording it indexes rather than against the original
+    // every other range here indexes. An item that was marked as needing a floor and carries no
+    // position for one is an item whose safeguard cannot be shown to have survived an edit — which
+    // is the same as not having one, arriving as a valid-looking row.
+    const clauseRef = item['itemSafetyClauseRef'];
+    const wordingText = typeof wording === 'string' ? wording : '';
+    if (stage === 'plan' || kind === 'first_task') {
+      if (clauseRef !== null && clauseRef !== undefined) {
+        return fail('item_safety_clause_ref_invalid', index);
+      }
+    } else if (floor) {
+      if (!isPromptEnhancementSequenceOffsetRangeV1(clauseRef, wordingText.length)) {
+        return fail('item_safety_clause_ref_invalid', index);
+      }
+    } else if (clauseRef !== null) {
+      return fail('item_safety_clause_ref_invalid', index);
     }
   }
 
