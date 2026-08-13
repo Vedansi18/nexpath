@@ -68,10 +68,17 @@ export type PromptEnhancementComposerDirectionalActionV1 =
   | 'apply_details';
 
 /**
- * TI-2 (2026-08-07): why a composer call produced no usable output. `no_key` and
- * `no_eligible_sections` mean the call was genuinely NOT MADE (the facade keeps them as
- * "not requested"); the other three are real provider/output failures the facade maps onto
- * the existing `PromptEnhancementComposerRuntimeState` failure states.
+ * TI-2 (2026-08-07): why a composer call produced no usable output.
+ *
+ * `no_key` is the only one the facade still keeps as "genuinely not requested" — without a key the
+ * deterministic renderer is the supported answer, not a failure. Every other reason is mapped onto
+ * an existing `PromptEnhancementComposerRuntimeState`, so it reaches the result as a stated
+ * fallback rather than as silence.
+ *
+ * `no_eligible_sections` used to sit beside `no_key`. That held only while the composer was gated
+ * off: now that it runs for every shown popup with a key, a plan with nothing to word means the
+ * popup was judged worth showing and the pipeline produced no guidance, which cannot both be
+ * right. It is a failure and is reported as one.
  */
 export type PromptEnhancementComposerCallFailureReasonV1 =
   | 'no_key'

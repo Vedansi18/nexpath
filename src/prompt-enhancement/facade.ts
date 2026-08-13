@@ -213,9 +213,12 @@ async function prepare(
   // TI-2 (2026-08-07): the composer now reports WHY it failed, and the facade maps that onto the
   // runtime states that already exist instead of collapsing everything to `undefined` — which made
   // a real provider timeout byte-identical to "never eligible for an LLM call" in the UI, logs,
-  // and cost metadata. `no_key` / `no_eligible_sections` stay `undefined` (genuinely "not
-  // requested"); downstream, the failure states already produce `callVisibilityMode
+  // and cost metadata. Downstream, the failure states already produce `callVisibilityMode
   // 'fallback_no_llm'` + a populated `providerFailureState` via `fallbackModeForRuntime`.
+  //
+  // `no_key` is the only reason left as `undefined`. It used to share that with
+  // `no_eligible_sections`, which was right while the composer was gated off — but now that it
+  // runs for every shown popup with a key, an empty plan is a failure, not a non-request.
   let composerRuntimeState: PromptEnhancementComposerRuntimeState | undefined;
   if (
     wantsLlmWording &&
