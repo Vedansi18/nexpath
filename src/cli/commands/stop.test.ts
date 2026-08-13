@@ -31,11 +31,12 @@ vi.mock('../../decision-session/engine-option-generator.js', () => ({
 
 import { openStore } from '../../store/db.js';
 import type { Store } from '../../store/db.js';
-import { runStop, promptEnhancementMpsOfferDispositionFromPopupV1, recordPromptEnhancementMpsSequenceOfferDispositionV1 } from './stop.js';
+import { runStop, promptEnhancementMpsOfferDispositionFromPopupV1, recordPromptEnhancementMpsSequenceOfferDispositionV1, persistPromptEnhancementSequenceContinuationCancelV1 } from './stop.js';
 import type { StopPayload } from './stop.js';
 import { upsertPendingAdvisory, getPendingAdvisory } from '../../store/pending-advisories.js';
 import { upsertPendingPromptEnhancement, getPendingPromptEnhancement, type PendingPromptEnhancement } from '../../store/pending-prompt-enhancements.js';
-import { upsertPendingPromptSequence, getActivePendingPromptSequence, getPromptEnhancementSequenceOfferDisposition } from '../../store/pending-sequences.js';
+import { upsertPendingPromptSequence, getActivePendingPromptSequence, getPromptEnhancementSequenceOfferDisposition, recordPromptEnhancementSequenceOfferDeclined } from '../../store/pending-sequences.js';
+import { applyPromptEnhancementSequenceRuntimeActionV1 } from '../../prompt-enhancement/sequence-runtime.js';
 import type { PromptEnhancementCliPopupResultV1 } from '../../prompt-enhancement/cli-submit-popup.js';
 import { emptyPromptEnhancementSequencePayloadV1 } from '../../prompt-enhancement/sequence-payload.js';
 import { buildPromptEnhancementRequestForAuto } from './auto.js';
@@ -588,5 +589,62 @@ describe('recordPromptEnhancementMpsSequenceOfferDispositionV1 — 12.1 wiring (
     recordPromptEnhancementMpsSequenceOfferDispositionV1(store, compound(), popup('selected_original'), PROJ);
     expect(getPromptEnhancementSequenceOfferDisposition(store, PROJ, 'seq-1')).toBe('rejected');
     expect(rows()).toBe(1);
+  });
+});
+
+describe('persistPromptEnhancementSequenceContinuationCancelV1 — 6.5 §5b destructive-trap guard', () => {
+  const PROJ = '/test/project';
+  let store: Store;
+  beforeEach(async () => { store = await openStore(':memory:'); });
+  afterEach(() => { store.db.close(); });
+
+  const projRows = () => (store.db.exec(`SELECT COUNT(*) FROM pending_prompt_sequences WHERE project_root = '${PROJ}'`)[0]?.values[0][0] ?? 0) as number;
+  const col = (sequenceId: string, column: string) =>
+    (store.db.exec(`SELECT ${column} FROM pending_prompt_sequences WHERE sequence_id = '${sequenceId}'`)[0]?.values[0]?.[0] ?? null);
+
+  const acceptedActive = () => ({
+    sequenceId: 'seq-x', enhancementId: 'enh-x', projectRoot: PROJ, sessionId: 'sess-1',
+    itemCount: 3, currentItemIndex: 1, status: 'item_pending' as const, lastActionId: 'prev',
+  });
+
+  // A valid terminal cancelled state (the mapper's cancel_sequence output the launcher would pass in).
+  const cancelledState = () => {
+    const applied = applyPromptEnhancementSequenceRuntimeActionV1(acceptedActive(), { type: 'cancel_sequence', actionId: 'c1' });
+    if (!applied.ok) throw new Error('cancel_sequence invalid in fixture');
+    return applied.state;
+  };
+
+  it('cancel moves the ONE accepted row to terminal cancelled via the writer — a declined stub SURVIVES (no project-wide delete)', () => {
+    upsertPendingPromptSequence(store, acceptedActive(), emptyPromptEnhancementSequencePayloadV1(64));
+    // A coexisting MPS-4 declined-offer stub for the SAME project — a project-wide delete would wipe it too.
+    recordPromptEnhancementSequenceOfferDeclined(store, { projectRoot: PROJ, sessionId: 'sess-1', sequenceId: 'seq-declined', enhancementId: 'enh-d', disposition: 'not_engaged' });
+    expect(projRows()).toBe(2);
+
+    const active = getActivePendingPromptSequence(store, PROJ, 'sess-1');
+    expect(active).not.toBeNull();
+    expect(persistPromptEnhancementSequenceContinuationCancelV1(store, active!.id, cancelledState())).toEqual({ outcome: 'cancelled' });
+
+    // The accepted row is UPDATED to cancelled (still present), not deleted…
+    expect(col('seq-x', 'status')).toBe('cancelled');
+    // …and §6a holds — offer_disposition is untouched.
+    expect(col('seq-x', 'offer_disposition')).toBe('accepted');
+    // ⛔ The project-wide delete was NOT used: BOTH rows survive (it would have wiped every row for PROJ).
+    expect(projRows()).toBe(2);
+    expect(col('seq-declined', 'offer_disposition')).toBe('not_engaged');
+  });
+
+  it('writer false when the row is GONE → fall_through (ordinary flow, never throws)', () => {
+    expect(() => persistPromptEnhancementSequenceContinuationCancelV1(store, 999999, cancelledState())).not.toThrow();
+    expect(persistPromptEnhancementSequenceContinuationCancelV1(store, 999999, cancelledState())).toEqual({ outcome: 'fall_through' });
+  });
+
+  it('writer false when the row is NOT accepted (a declined stub) → fall_through — a stub is never resurrected into a cancel', () => {
+    recordPromptEnhancementSequenceOfferDeclined(store, { projectRoot: PROJ, sessionId: 'sess-1', sequenceId: 'seq-declined', enhancementId: 'enh-d', disposition: 'rejected' });
+    const stubId = col('seq-declined', 'id') as number | null;
+    expect(stubId).not.toBeNull();
+    expect(persistPromptEnhancementSequenceContinuationCancelV1(store, stubId!, cancelledState())).toEqual({ outcome: 'fall_through' });
+    // The stub is left exactly as it was — offer_disposition unchanged, row still present.
+    expect(col('seq-declined', 'offer_disposition')).toBe('rejected');
+    expect(projRows()).toBe(1);
   });
 });

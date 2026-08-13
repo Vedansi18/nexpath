@@ -40,7 +40,8 @@ import { evaluatePromptEnhancementMpsIntakeDecisionV1 } from '../../prompt-enhan
 import { buildPromptEnhancementCliMpsIntakeEvidenceV1 } from '../../prompt-enhancement/cli-mps-intake-evidence.js';
 import { runPromptEnhancementCliMpsFirstPopupV1, buildPromptEnhancementMpsCancelFeedbackEventV1, promptEnhancementMpsActionSignalKindV1 } from '../../prompt-enhancement/cli-mps-run.js';
 import { intakePromptEnhancementSequenceOnFirstSendV1 } from '../../prompt-enhancement/sequence-intake.js';
-import { upsertPendingPromptSequence, getActivePendingPromptSequence, recordPromptEnhancementSequenceOfferDeclined, type PromptEnhancementSequenceDeclinedDispositionV1 } from '../../store/pending-sequences.js';
+import { upsertPendingPromptSequence, getActivePendingPromptSequence, recordPromptEnhancementSequenceOfferDeclined, updatePendingPromptSequenceState, type PromptEnhancementSequenceDeclinedDispositionV1 } from '../../store/pending-sequences.js';
+import type { PromptEnhancementSequenceRuntimeStateV1 } from '../../prompt-enhancement/sequence-runtime.js';
 import { evaluatePromptEnhancementFutureSequenceRuntimeGateV1 } from '../../prompt-enhancement/future-sequence-runtime-gate.js';
 import { PROMPT_ENHANCEMENT_CONTRACT_VERSION, type PromptEnhancementFutureSequenceRuntimeEventV1 } from '../../prompt-enhancement/contracts.js';
 import { resolveOpenAIKey, getKeySource } from '../../config/ApiKeyResolver.js';
@@ -150,6 +151,38 @@ export function recordPromptEnhancementMpsSequenceOfferDispositionV1(
   });
   logger.debug('stop_mps_offer_disposition', { cwd: projectRoot, disposition, written });
   return disposition;
+}
+
+/**
+ * The result of persisting a continuation cancel: the row moved to terminal cancelled (the launcher
+ * then opens the PEF feedback popup), or the writer refused and the launcher runs the ordinary flow.
+ */
+export type PromptEnhancementSequenceContinuationCancelPersistV1 =
+  | { outcome: 'cancelled' }
+  | { outcome: 'fall_through' };
+
+/**
+ * MPS-2 (6.5) — §5b destructive trap. Persist a sequence-scoped continuation CANCEL by moving the ONE
+ * active-read row (identified by the id the active read gave the launcher) to its terminal state via the
+ * transition writer.
+ *
+ * ⛔ NEVER `deletePendingPromptSequencesForProject`: that wipes EVERY row for the project — including the
+ *    MPS-4 declined-offer stubs, which are unrecoverable — and belongs only to `nexpath store delete
+ *    --project`. A cancel is one row's status change, not a project scrub.
+ * ✅ `updatePendingPromptSequenceState` touches only status / index / action (offer_disposition is left
+ *    exactly as written — MPS-4 §6a), and its `WHERE id = ? AND offer_disposition = 'accepted'` clause makes
+ *    it return `false` (never throw) when the row is gone or was never an accepted sequence (e.g. a declined
+ *    stub). On `false` the launcher falls through to the ordinary flow rather than treating a vanished /
+ *    non-accepted row as a cancel. No production caller yet — the continuation runtime is P5-gated.
+ */
+export function persistPromptEnhancementSequenceContinuationCancelV1(
+  store: Store,
+  id: number,
+  nextState: PromptEnhancementSequenceRuntimeStateV1,
+): PromptEnhancementSequenceContinuationCancelPersistV1 {
+  return updatePendingPromptSequenceState(store, id, nextState)
+    ? { outcome: 'cancelled' }
+    : { outcome: 'fall_through' };
 }
 
 /**
