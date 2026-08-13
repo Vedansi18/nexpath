@@ -23,7 +23,6 @@ import {
   type PromptEnhancementStructuredComposerOutputV1,
 } from './compose-enhancement.js';
 import { composeStructuredComposerOutputV1 } from './llm-composer.js';
-import { isPromptEnhancementNlpHeavyCaseV1 } from './composer-gate.js';
 import { decidePromptEnhancementRouteViaLlmV1, type PromptEnhancementLlmRouteDecisionV1 } from './llm-route-decision.js';
 import { isValidApiKey } from '../config/ApiKeyResolver.js';
 import { planPromptEnhancementSections } from './templates/section-plan.js';
@@ -192,10 +191,16 @@ async function prepare(
     guidanceFacts: sourceMix.renderedFacts,
   });
 
-  // E4: bounded LLM composer wording for a shown, NLP-heavy popup on the baseline
-  // compose (no action). Gated on a valid key so the whole test suite (no key) and
-  // any obvious/clear prompt render deterministically. Any failure -> undefined ->
+  // E4: bounded LLM composer wording for a shown popup on the baseline compose (no
+  // action). Runs for every shown popup that has a valid key, so the whole test suite
+  // (no key) renders deterministically. Any failure -> undefined ->
   // composePromptEnhancementBody validates + falls back deterministically.
+  // The route's ambiguity no longer decides this. It used to, and the effect was that
+  // roughly four popups in five rendered every guidance section from a fixed string:
+  // the section SET varied by intent while the section TEXT did not vary at all. The
+  // upstream guidance gate has already decided the popup is worth showing and never
+  // fabricates a filler one, so a second gate deciding the body is not worth writing
+  // contradicted it.
   // E8: a directional action (Shorter / More-thorough / More-project-grounded /
   // Owner decision (2026-08-06): the interactive popup actions (Shorter / More-thorough /
   // More-project-grounded / Apply-details) must stay INSTANT — deterministic recompose only,
@@ -203,7 +208,7 @@ async function prepare(
   // wording call runs ONLY on the initial prepare (action === undefined, in the background
   // before the popup shows), never inside the popup interaction. The composer's
   // action-directive seam stays available for a future non-blocking use.
-  const wantsLlmWording = action === undefined && isPromptEnhancementNlpHeavyCaseV1(route);
+  const wantsLlmWording = action === undefined;
   let structuredComposerOutput: PromptEnhancementStructuredComposerOutputV1 | undefined;
   // TI-2 (2026-08-07): the composer now reports WHY it failed, and the facade maps that onto the
   // runtime states that already exist instead of collapsing everything to `undefined` — which made
