@@ -216,6 +216,14 @@ export function buildDefaultPromptSubmitDecider(
       // Fail-open (A3): no store ⇒ no options ⇒ the prompt is released.
     }
 
+    // NOTE (RC6, 2026-08-13): a no-row lookup retry was considered here and
+    // deliberately REJECTED — it taxed every quiet (no-advisory) submit ~1.4 s,
+    // and in the measured failure the clobbering writer (PE's `stop`) holds its
+    // in-memory copy for minutes, so a short retry cannot recover. The actual
+    // fix is upstream: `suppressWatcherAuto` removes the duplicate classifier,
+    // so the hook's own `auto` flush is the last word before this open. On PE
+    // turns the PE surface owns the moment (G-ARBITRATION), so a residual DS
+    // miss there is acceptable by design.
     try {
       const decision = await decideSubmitPrompt(promptText ?? promptTextForHook(), {
         composeOptions: ports.composeOptions

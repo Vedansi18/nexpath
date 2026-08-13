@@ -919,6 +919,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // OWNER RULING 2026-08-12: switch ON ⇒ old DS-advisory surface OFF, PE kept.
     // The handler skips the stop/advisory path for NON-PE turns only.
     suppressDsAdvisory: submitAdvisorySurfaceActive,
+    // RC6 (2026-08-13): switch ON ⇒ the hook already ran `auto` for this prompt
+    // inside its hold; the watcher's duplicate auto raced it on the sql.js
+    // store (last-writer-wins) and made the submit popup nondeterministic.
+    suppressWatcherAuto: submitAdvisorySurfaceActive,
     spawnAuto: (prompt, sid, event) =>
       spawnAuto(prompt, sid, { cwd: cwdForEvent(event) }),
     spawnStop: (sid, event) => spawnStop(sid, { cwd: cwdForEvent(event) }),

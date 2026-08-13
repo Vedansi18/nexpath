@@ -135,6 +135,28 @@ export interface ChatPipelineDeps {
    * ⇒ byte-identical old behaviour (both surfaces fire as today).
    */
   suppressDsAdvisory?: boolean;
+  /**
+   * RC6 (live root cause, 2026-08-13): with the submit switch ON, the hook
+   * ALREADY runs `nexpath auto` for this very prompt inside its hold (option-A
+   * ordering) — the watcher's own `spawnAuto` here is a SECOND, concurrent
+   * classification of the same prompt. The store is sql.js (in-memory,
+   * whole-file write-back, lock waited max 8 s then bypassed), so two autos +
+   * PE's `stop` racing produced last-writer-wins clobbering: the decider's
+   * lookup found "no pending_advisory row" while the row demonstrably existed
+   * seconds before — measured live, timestamps matching LOCK_WAIT_MS exactly.
+   *
+   * With this flag ON the watcher SKIPS its duplicate `spawnAuto`. Everything
+   * downstream is unchanged and reads the rows the HOOK's auto wrote (same
+   * command, same store, same project): `checkPeOrigin` still classifies the
+   * turn, PE turns still run `spawnStop` + `injectPeResult`. An injected
+   * replacement then has NO auto at all (the hook echo-skips its own) — which
+   * is precisely VED-PE-10's requirement; Layer C clears the stale guard on
+   * the next genuine turn regardless.
+   *
+   * Interim implementation of the G-ARBITRATION injector-contention half,
+   * pending team-lead ratification. Absent/false ⇒ byte-identical old flow.
+   */
+  suppressWatcherAuto?: boolean;
 }
 
 // Redacts before logging: this pipeline catches spawnAuto/spawnStop failures,
@@ -171,11 +193,17 @@ export function createChatEventHandler(
       }
     }
     const sessionId = composeSessionId(event);
-    try {
-      await deps.spawnAuto(event.prompt, sessionId, event);
-    } catch (err) {
-      logger.error('[nexpath] spawnAuto failed:', err);
-      return;
+    // RC6: under the submit switch the hook already ran `auto` for this prompt
+    // inside its hold — a second concurrent auto here corrupted the sql.js
+    // store (last-writer-wins) and made the submit popup nondeterministic.
+    // Skip the duplicate; downstream reads the hook-auto's rows unchanged.
+    if (!deps.suppressWatcherAuto) {
+      try {
+        await deps.spawnAuto(event.prompt, sessionId, event);
+      } catch (err) {
+        logger.error('[nexpath] spawnAuto failed:', err);
+        return;
+      }
     }
     // Decide DS vs PE origin from typed store evidence while the row is still
     // genuinely pending — see pe-origin.ts for why this must happen here and

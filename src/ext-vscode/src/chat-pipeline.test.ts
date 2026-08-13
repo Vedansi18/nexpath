@@ -469,3 +469,63 @@ describe('createChatEventHandler', () => {
   });
 
 });
+
+/**
+ * RC6 (live root cause, 2026-08-13): under the submit switch the hook already
+ * runs `auto` for the prompt inside its hold; the watcher's duplicate auto
+ * raced it on the sql.js store (whole-file write-back, last-writer-wins) and
+ * transiently clobbered the pending row — the submit popup then
+ * nondeterministically failed to appear on real turns. With
+ * `suppressWatcherAuto` the watcher skips ONLY its duplicate spawnAuto;
+ * everything downstream (PE origin check, PE stop path, injection) reads the
+ * hook-auto's rows unchanged.
+ */
+describe('RC6 — suppressWatcherAuto skips the duplicate classification', () => {
+  const evt = { prompt: 'p', rawSessionId: 's', sourcePath: '/proj/state.vscdb' } as never;
+
+  it('⭐ switch ON: spawnAuto is never called; PE turns still run stop + injectPeResult', async () => {
+    const spawnAuto = vi.fn();
+    const spawnStop = vi.fn(async () => ({ selectedPrompt: 'pe body' }));
+    const injectPeResult = vi.fn();
+    const handler = createChatEventHandler({
+      suppressWatcherAuto: true,
+      suppressDsAdvisory: true,
+      spawnAuto,
+      spawnStop,
+      injectSelection: vi.fn(),
+      injectPeResult,
+      checkPeOrigin: async () => true,   // PE turn — must keep working
+    } as never);
+    await handler(evt);
+    expect(spawnAuto).not.toHaveBeenCalled();          // the duplicate is gone
+    expect(spawnStop).toHaveBeenCalledTimes(1);        // PE path intact
+    expect(injectPeResult).toHaveBeenCalledWith('pe body', evt);
+  });
+
+  it('switch ON + non-PE turn: nothing runs (suppressed advisory, no duplicate auto)', async () => {
+    const spawnAuto = vi.fn();
+    const spawnStop = vi.fn();
+    const handler = createChatEventHandler({
+      suppressWatcherAuto: true,
+      suppressDsAdvisory: true,
+      spawnAuto,
+      spawnStop,
+      injectSelection: vi.fn(),
+      checkPeOrigin: async () => false,
+    } as never);
+    await handler(evt);
+    expect(spawnAuto).not.toHaveBeenCalled();
+    expect(spawnStop).not.toHaveBeenCalled();
+  });
+
+  it('⭐ switch OFF (absent): byte-identical old flow — spawnAuto runs first', async () => {
+    const order: string[] = [];
+    const handler = createChatEventHandler({
+      spawnAuto: async () => { order.push('auto'); },
+      spawnStop: async () => { order.push('stop'); return null; },
+      injectSelection: vi.fn(),
+    } as never);
+    await handler(evt);
+    expect(order).toEqual(['auto', 'stop']);
+  });
+});
