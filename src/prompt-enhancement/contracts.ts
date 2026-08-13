@@ -1795,6 +1795,14 @@ export function validatePromptEnhancementPrepareRequestV1(
   if (!isCompleteSourceSignals(obj?.['sourceSignals'])) reasonCodes.push('missing_source_signals');
   if (!isCompleteCallVisibility(obj?.['callVisibilityState'])) reasonCodes.push('missing_call_visibility_state');
   if (!asRecord(obj?.['privacyAndStoragePolicy'])) reasonCodes.push('missing_privacy_storage_policy');
+  // Optional, but not unchecked. Downstream this is compared against the clock, and every
+  // comparison against a non-finite value is false — so a malformed deadline would silently
+  // decline every composer attempt rather than raising anything. The composer treats a bad value
+  // as no ceiling so that cannot happen; this is what names it.
+  const deadlineAtMs = obj?.['deadlineAtMs'];
+  if (deadlineAtMs !== undefined && (typeof deadlineAtMs !== 'number' || !Number.isFinite(deadlineAtMs))) {
+    reasonCodes.push('invalid_deadline_at_ms');
+  }
   return { ok: reasonCodes.length === 0, reasonCodes };
 }
 

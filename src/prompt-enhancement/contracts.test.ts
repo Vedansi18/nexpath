@@ -918,6 +918,21 @@ describe('Phase 2 contract-first core', () => {
     });
   });
 
+  it('accepts an absent or well-formed deadline, and names a malformed one', () => {
+    // Optional, but not unchecked. Downstream this is compared against the clock and every
+    // comparison against a non-finite value is false, so a malformed deadline would silently
+    // decline every composer attempt. The composer treats a bad value as no ceiling; this is the
+    // thing that says the value was bad.
+    expect(validatePromptEnhancementPrepareRequestV1(validRequest()).ok).toBe(true);
+    expect(validatePromptEnhancementPrepareRequestV1({ ...validRequest(), deadlineAtMs: 1_700_000_000_000 }).ok).toBe(true);
+
+    for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, 'soon', null]) {
+      const validation = validatePromptEnhancementPrepareRequestV1({ ...validRequest(), deadlineAtMs: bad });
+      expect(validation.ok).toBe(false);
+      expect(validation.reasonCodes).toContain('invalid_deadline_at_ms');
+    }
+  });
+
   it('accepts one current editable body with sections, actions, safety, origin, delivery, cost, and owner metadata', () => {
     const result = validResult();
 

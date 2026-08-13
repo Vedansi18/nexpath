@@ -490,6 +490,38 @@ describe('the caller-supplied wall-clock ceiling', () => {
     expect(prompts).toHaveLength(0);
   });
 
+  it('treats a non-finite deadline as no ceiling rather than declining every attempt', async () => {
+    // Fails CLOSED without the guard: every comparison against NaN is false, so the composer would
+    // refuse on every popup and report a deadline exhaustion — a silent total outage that reads
+    // like a provider fault. No ceiling is the honest fallback; the request validator names the bad
+    // value separately.
+    const full = reply([draft('sec-verify', 'fact-a'), draft('sec-risk', 'fact-b')]);
+    const { client: scripted, prompts } = scriptedClient([full]);
+
+    const result = await composeStructuredComposerOutputV1(
+      { ...twoSectionInput, deadlineAtMs: Number.NaN, nowMs: () => 10_000 },
+      scripted,
+    );
+
+    expect(result.ok).toBe(true);
+    expect(prompts).toHaveLength(1);
+  });
+
+  it('still refuses on a deadline that has genuinely passed', async () => {
+    const full = reply([draft('sec-verify', 'fact-a'), draft('sec-risk', 'fact-b')]);
+    const { client: scripted, prompts } = scriptedClient([full]);
+
+    const result = await composeStructuredComposerOutputV1(
+      { ...twoSectionInput, deadlineAtMs: 1, nowMs: () => 10_000 },
+      scripted,
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe('deadline_exceeded');
+    expect(prompts).toHaveLength(0);
+  });
+
   it('stops BETWEEN attempts, never mid-call, when the budget runs out during the loop', async () => {
     const short = reply([draft('sec-verify', 'fact-a')]);
     const { client: scripted, prompts } = scriptedClient([short]);

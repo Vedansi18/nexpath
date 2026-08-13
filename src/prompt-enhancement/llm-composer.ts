@@ -138,8 +138,14 @@ export interface PromptEnhancementComposerLlmInputV1 {
  * the retry bound — it declines to begin one that cannot finish.
  */
 function hasRoomForAnotherCall(input: PromptEnhancementComposerLlmInputV1): boolean {
-  if (input.deadlineAtMs === undefined) return true;
+  // A non-finite deadline is a caller bug, and the arithmetic below fails CLOSED on one: every
+  // comparison against NaN is false, so the composer would decline every attempt on every popup
+  // and report it as a deadline exhaustion — a total, silent outage that reads like a provider
+  // fault. Treat it as no ceiling instead, which is the behaviour without the field, and let the
+  // request validator be the thing that names the bad value.
+  if (input.deadlineAtMs === undefined || !Number.isFinite(input.deadlineAtMs)) return true;
   const now = (input.nowMs ?? Date.now)();
+  if (!Number.isFinite(now)) return true;
   return now + PROMPT_ENHANCEMENT_COST_TIMEOUT_MS_V1 <= input.deadlineAtMs;
 }
 
