@@ -8,6 +8,9 @@
 import { describe, expect, it } from 'vitest';
 import { deliverSequenceContinuationOutcomeV1 } from './sequence-continuation-delivery.js';
 import type { PromptEnhancementSequenceRuntimeStateV1 } from './sequence-runtime.js';
+import { promptEnhancementMpsOfferDispositionFromPopupV1 } from '../cli/commands/stop.js';
+
+type PopupResult = Parameters<typeof promptEnhancementMpsOfferDispositionFromPopupV1>[0];
 
 function state(
   overrides: Partial<PromptEnhancementSequenceRuntimeStateV1> = {},
@@ -41,5 +44,14 @@ describe('acceptance executor (batch 8) — delivery-mapper fixtures', () => {
       expect(declined.nextState.status).toBe('cancelled');
       expect(declined.nextState.sequenceId).toBe('seq-1');
     }
+  });
+
+  it('test:acceptance-sequence-use-original-does-not-activate', () => {
+    // use_original_is_not_activation + no_sequence_activated: choosing the original records a DECLINE
+    // (rejected), never an activation — its disposition is a decline stub, not a live sequence.
+    expect(promptEnhancementMpsOfferDispositionFromPopupV1({ state: 'selected_original' } as PopupResult)).toBe('rejected');
+    // Accepting takes the send path — it is NOT recorded here as a decline, and closing is not-engaged.
+    expect(promptEnhancementMpsOfferDispositionFromPopupV1({ state: 'selected_current' } as PopupResult)).toBeUndefined();
+    expect(promptEnhancementMpsOfferDispositionFromPopupV1({ state: 'closed_no_send' } as PopupResult)).toBe('not_engaged');
   });
 });

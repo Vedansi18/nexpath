@@ -12,6 +12,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { openStore, closeStore, withReleasedStoreLockV1 } from '../store/db.js';
 import { getConfig, setConfig } from '../store/config.js';
+import { recordPromptEnhancementSequenceOfferDeclined } from '../store/pending-sequences.js';
 
 const paths: string[] = [];
 function tmpDb(): string {
@@ -52,5 +53,22 @@ describe('acceptance executor (batch 6) — store-invariant fixtures', () => {
     expect(getConfig(c.db, 'k')).toBe('b-value');
     expect(getConfig(c.db, 'k2')).toBe('a2');
     closeStore(c);
+  });
+
+  it('test:acceptance-sequence-persist-before-block-and-exit', async () => {
+    const s = await openStore(tmpDb());
+    const params = {
+      projectRoot: '/tmp/p', sessionId: 's1', sequenceId: 'seq-1', enhancementId: 'enh-1', disposition: 'rejected' as const,
+    };
+
+    // state_persisted_before_forced_exit + no_fire_and_forget_write: the write is SYNCHRONOUS and
+    // CHECKED — it returns a boolean rather than being fired and forgotten on the exit path.
+    expect(recordPromptEnhancementSequenceOfferDeclined(s, params)).toBe(true);
+
+    // state_readable_after_the_exit_reflects_the_decision: the persisted decision is read back — a
+    // second identical write is confirmed from the store, and a disagreeing one is refused.
+    expect(recordPromptEnhancementSequenceOfferDeclined(s, params)).toBe(true);
+    expect(recordPromptEnhancementSequenceOfferDeclined(s, { ...params, disposition: 'not_engaged' })).toBe(false);
+    closeStore(s);
   });
 });
