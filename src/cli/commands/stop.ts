@@ -97,7 +97,11 @@ export type StopOutcome =
   | { outcome: 'clipboard_only' }
   | { outcome: 'feedback_shown' }
   | { outcome: 'prompt_enhancement_shown' }
-  | { outcome: 'skipped' };
+  | { outcome: 'skipped' }
+  // MPS-6: a sequence's own continuation Stop was exempted from the loop guard and routed to the
+  // continuation launcher, which is fail-closed in v1 (gate blocked) — nothing rendered, the row is
+  // left as-is. Distinct from `loop_guard` so a gate-blocked continuation is legible in logs/tests.
+  | { outcome: 'mps_continuation_gated' };
 
 /**
  * Outcome of showing the deferred PE popup on the Stop hook (owner decision B-i).
@@ -140,8 +144,48 @@ export async function runStop(
   feedbackDeps?: FeedbackDeps,
   peLaunch?:     PromptEnhancementStopLaunchFn,
 ): Promise<StopOutcome> {
-  // 1. Loop guard — Claude is continuing because of a previous Stop block; let it land
+  // Load session state up front — BEFORE the loop guard — so the MPS-6 exemption below can look up an
+  // active session-scoped sequence, and so the PE popup + advisory lookups further down stay
+  // session-scoped (a record queued in one session must not surface in an unrelated later one).
+  const mgr = SessionStateManager.load(store, payload.cwd);
+
+  // 1. Loop guard — Claude is continuing because of a previous Stop block; let it land.
+  //    MPS-6 (2026-08-13): a sequence delivers each item by BLOCKING the Stop, which is exactly what
+  //    sets `stop_hook_active` on the NEXT event — so a blanket return here would swallow the sequence's
+  //    OWN continuation. When the evidence (an active session-scoped sequence — the runtime row, never
+  //    inferred from timing) exists, route ONLY to the continuation launcher below: the advisory, the
+  //    standalone feedback popup, and the pending-PE popup all stay closed on this event, and no other
+  //    normal Stop side effect runs. Absence FAILS CLOSED — no active sequence → the loop guard behaves
+  //    exactly as today. This is a routing decision, not a kill switch: feedback / language detection /
+  //    lifecycle telemetry are untouched on non-sequence Stops.
   if (payload.stop_hook_active) {
+    const activeSequence = getActivePendingPromptSequence(store, payload.cwd, mgr.current.sessionId);
+    if (activeSequence) {
+      // MPS continuation launcher (moved here by MPS-6 — the continuation Stop is the stop_hook_active
+      // event). FAIL-CLOSED in v1: the runtime gate always returns allowed:false and the per-item body
+      // is not generated yet, so nothing renders — we look up the gate, log its outcome, and leave the
+      // row as-is. When the gate lifts (P5 / MPS-11 sub-phase 1b) the interactive continuation shell
+      // renders here instead. No advisory, feedback, or PE popup is reached on this event.
+      const gate = evaluatePromptEnhancementFutureSequenceRuntimeGateV1({
+        schemaVersion: PROMPT_ENHANCEMENT_CONTRACT_VERSION,
+        operation: 'continue_current_item',
+        requestId: activeSequence.enhancementId,
+        projectRoot: payload.cwd,
+      });
+      logger.debug('stop_mps_continuation_gate', {
+        cwd: payload.cwd,
+        sequenceId: activeSequence.sequenceId,
+        currentItemIndex: activeSequence.currentItemIndex,
+        itemCount: activeSequence.itemCount,
+        allowed: gate.allowed,
+        // Full missing-gate list + count (no silent slice) so a debugger can tell how many gates are
+        // missing, not just the first few.
+        missingGateCodeCount: gate.missingGateCodes.length,
+        missingGateCodes: gate.missingGateCodes,
+      });
+      // No render, no advance, no mutation — the row is left as-is for the next Stop (fail-closed v1).
+      return { outcome: 'mps_continuation_gated' };
+    }
     logger.debug('stop_loop_guard', { cwd: payload.cwd });
     return { outcome: 'loop_guard' };
   }
@@ -184,11 +228,6 @@ export async function runStop(
   //      direct TTY, spawns a GUI terminal; a fully headless session has no host and falls through.
   //      Store-lock handling lives in the launcher: the in-process popup holds the lock (matching
   //      the advisory), while the spawned path releases it so the child process can reach the DB.
-  // Load session state up front so the PE popup and the advisory lookup below both scope their
-  // pending records to THIS session (a PE queued in one session must not surface in a later,
-  // unrelated one — matching getPendingAdvisory's scoping).
-  const mgr = SessionStateManager.load(store, payload.cwd);
-
   if (peLaunch) {
     const pendingPe = getPendingPromptEnhancement(store, payload.cwd, mgr.current.sessionId);
     if (pendingPe) {
@@ -240,41 +279,8 @@ export async function runStop(
     }
   }
 
-  // 1.45. MPS continuation launcher (2026-08-08) — priority feedback → PE → MPS → advisory.
-  //       When a prior first-send recorded an active sequence (P2), a later Stop is the decision
-  //       moment to OFFER the next item via the continuation popup. This launcher is deliberately
-  //       FAIL-CLOSED: the runtime gate (`future-sequence-runtime-gate.ts`) always returns
-  //       allowed:false in v1, AND the per-item next body is never generated
-  //       (`futurePromptTextPolicy:'not_generated_not_stored_not_rendered'` — Hiren's content
-  //       half, gated), so there is nothing to render. We therefore only look up the row and log
-  //       the gate outcome, then fall through to the ordinary flow. The interactive continuation
-  //       shell + intent delivery exist (P3/P4) and go live in P5 once the gate lifts and a
-  //       next-item body producer is available. No popup opens here today; behaviour is unchanged.
-  {
-    const activeSequence = getActivePendingPromptSequence(store, payload.cwd, mgr.current.sessionId);
-    if (activeSequence) {
-      const gate = evaluatePromptEnhancementFutureSequenceRuntimeGateV1({
-        schemaVersion: PROMPT_ENHANCEMENT_CONTRACT_VERSION,
-        operation: 'continue_current_item',
-        requestId: activeSequence.enhancementId,
-        projectRoot: payload.cwd,
-      });
-      logger.debug('stop_mps_continuation_gate', {
-        cwd: payload.cwd,
-        sequenceId: activeSequence.sequenceId,
-        currentItemIndex: activeSequence.currentItemIndex,
-        itemCount: activeSequence.itemCount,
-        allowed: gate.allowed,
-        // Fail-closed: allowed is always false in v1 (the gate hard-blocks runtime), so no
-        // continuation popup is opened. Emit the FULL missing-gate list + its count so a debugger can
-        // tell how many gates are missing (not just the first few) — the earlier `slice(0, 4)` under a
-        // field named `reasonCodes` silently truncated the list and read like a complete report.
-        missingGateCodeCount: gate.missingGateCodes.length,
-        missingGateCodes: gate.missingGateCodes,
-      });
-      // No render, no advance, no mutation — the row is left as-is for the next Stop.
-    }
-  }
+  // (1.45. MPS continuation launcher moved to the loop-guard exemption at the top of runStop — MPS-6,
+  //  2026-08-13. The continuation Stop is the `stop_hook_active` event, so the launcher must run there.)
 
   // 1.5. Language detection — runs post-response, invisible latency
   //      Only fires when >= LANG_DETECT_INTERVAL prompts have been captured for this project.
@@ -290,8 +296,8 @@ export async function runStop(
   // 1.7. Read decision_session_count for help-line gating in the decision session UI
   const decisionSessionCount = getProject(store, payload.cwd)?.decisionSessionCount ?? 0;
 
-  // 2. Session state (`mgr`) was loaded up front (before the PE popup) so both the PE and advisory
-  //    lookups are session-scoped; it is reused here for the advisory path below.
+  // 2. Session state (`mgr`) was loaded up front (before the loop guard) so the MPS-6 sequence check,
+  //    the PE popup, and the advisory lookup are all session-scoped; it is reused here.
 
   // 3. Check for a pending advisory stored by the auto hook
   logger.debug('stop_pending_lookup', {

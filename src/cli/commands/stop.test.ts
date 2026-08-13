@@ -163,6 +163,8 @@ describe('runStop — deferred Prompt Enhancement popup (B-i)', () => {
 
   // MPS continuation launcher (P3, fail-closed) — an active pending-sequence row must NOT open a
   // popup, advance, or mutate while the runtime gate is closed. Proves the launcher is inert.
+  // MPS-6: the continuation Stop is the `stop_hook_active` event (a sequence delivers each item by
+  // blocking the Stop). It is EXEMPTED from the loop guard and routed to the fail-closed launcher.
   it('fail-closed continuation launcher: an active sequence row is read but never advanced/mutated/rendered', async () => {
     const session = SessionStateManager.load(store, '/test/project');
     session.setDetectedLanguage(store, undefined);
@@ -171,10 +173,10 @@ describe('runStop — deferred Prompt Enhancement popup (B-i)', () => {
       sessionId: session.current.sessionId, itemCount: 3, currentItemIndex: 1,
       status: 'item_pending', lastActionId: 'prev',
     }, emptyPromptEnhancementSequencePayloadV1(64));
-    // No pending PE, no advisory → the only thing present is the active sequence row.
-    const result = await runStop(makePayload(), store, undefined, undefined, undefined, notShown());
-    // No continuation popup opened / nothing injected — ordinary flow (no pending advisory).
-    expect(result).toEqual({ outcome: 'no_pending' });
+    // The active sequence caused this Stop (stop_hook_active) → exempted from the loop guard, routed to
+    // the launcher, which is fail-closed in v1.
+    const result = await runStop(makePayload({ stop_hook_active: true }), store, undefined, undefined, undefined, notShown());
+    expect(result).toEqual({ outcome: 'mps_continuation_gated' });
     // The row is left EXACTLY as-is: no advance, no status change, no scrub (fail-closed).
     const after = getActivePendingPromptSequence(store, '/test/project', session.current.sessionId);
     expect(after).toMatchObject({ currentItemIndex: 1, status: 'item_pending', lastActionId: 'prev' });
@@ -192,7 +194,8 @@ describe('runStop — deferred Prompt Enhancement popup (B-i)', () => {
     }, emptyPromptEnhancementSequencePayloadV1(64));
     const debugSpy = vi.spyOn(logger, 'debug').mockImplementation(() => {});
     try {
-      await runStop(makePayload(), store, undefined, undefined, undefined, notShown());
+      // The continuation Stop is the stop_hook_active event (MPS-6).
+      await runStop(makePayload({ stop_hook_active: true }), store, undefined, undefined, undefined, notShown());
       const call = debugSpy.mock.calls.find(([message]) => message === 'stop_mps_continuation_gate');
       expect(call).toBeDefined();
       const logged = call![1] as { missingGateCodeCount: number; missingGateCodes: readonly string[] };
@@ -205,6 +208,27 @@ describe('runStop — deferred Prompt Enhancement popup (B-i)', () => {
     } finally {
       debugSpy.mockRestore();
     }
+  });
+
+  // MPS-6: on a sequence-continuation Stop, ONLY the launcher runs — the pending-PE popup, the advisory,
+  // and the standalone feedback popup all stay closed on that event (and nothing is consumed).
+  it('sequence-continuation Stop suppresses the PE popup and the advisory (routes only to the launcher)', async () => {
+    const session = SessionStateManager.load(store, '/test/project');
+    session.setDetectedLanguage(store, undefined);
+    upsertPendingPromptSequence(store, {
+      sequenceId: 'seq-supp', enhancementId: 'enh-supp', projectRoot: '/test/project',
+      sessionId: session.current.sessionId, itemCount: 3, currentItemIndex: 1,
+      status: 'item_pending', lastActionId: 'prev',
+    }, emptyPromptEnhancementSequencePayloadV1(64));
+    // A pending PE AND a pending advisory both exist — neither may open on the continuation event.
+    await insertPendingPe(store);
+    insertAdvisory(store);
+    const peLaunch = notShown(); // spy — must NOT be called on a sequence-continuation Stop
+    const result = await runStop(makePayload({ stop_hook_active: true }), store, undefined, undefined, undefined, peLaunch);
+    expect(result).toEqual({ outcome: 'mps_continuation_gated' });
+    expect(peLaunch).not.toHaveBeenCalled();                                      // PE popup suppressed
+    expect(getPendingPromptEnhancement(store, '/test/project')).not.toBeNull();   // PE not consumed
+    expect(getPendingAdvisory(store, '/test/project')).not.toBeNull();            // advisory not consumed
   });
 
   it('leaves the pending PE PENDING on not_shown so a later Stop can retry it (Bug 2 — no silent loss)', async () => {
@@ -264,12 +288,13 @@ describe('runStop — loop guard', () => {
     expect(result.outcome).toBe('loop_guard');
   });
 
-  it('does not check DB when stop_hook_active is true', async () => {
-    // Even if there is a pending advisory, loop guard fires first
+  it('stop_hook_active with no active sequence still loop-guards and leaves the advisory (MPS-6: the DB is read only for the sequence check)', async () => {
+    // MPS-6 reads the DB on a stop_hook_active event to look up an active sequence (the exemption
+    // evidence). With no sequence, the loop guard still fires and no other side effect runs — the
+    // pending advisory is neither opened nor consumed.
     insertAdvisory(store);
     const result = await runStop(makePayload({ stop_hook_active: true }), store);
     expect(result.outcome).toBe('loop_guard');
-    // Advisory should still be pending (not consumed)
     const advisory = getPendingAdvisory(store, '/test/project');
     expect(advisory).not.toBeNull();
   });
