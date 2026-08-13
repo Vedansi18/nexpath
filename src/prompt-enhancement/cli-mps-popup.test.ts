@@ -257,7 +257,7 @@ function continuationModel(overrides: Partial<PromptEnhancementMpsContinuationPo
     title: PROMPT_ENHANCEMENT_MPS_CONTINUATION_POPUP_TITLE_V1,
     heading: PROMPT_ENHANCEMENT_MPS_CONTINUATION_POPUP_HEADING_V1,
     layout: PROMPT_ENHANCEMENT_MPS_CONTINUATION_LAYOUT_V1,
-    identity: { requestId: 'req-1', projectRoot: '/tmp/project', sequenceId: 'seq-1', sequenceItemId: 'item-2', currentItemRevision: 2, bodyRevision: 1, detailsRevision: 1 },
+    identity: { requestId: 'req-1', sequenceId: 'seq-1', sequenceItemId: 'item-2', currentItemRevision: 2, bodyRevision: 1, detailsRevision: 1 },
     body: { text: 'Next sequence step: apply the fix and run the focused checkout test.', editable: true, originalPromptText: 'Run the checkout fix sequence.' },
     additionalDetails: { visible: true, text: 'Keep scope to the payments module.', revision: 1 },
     actions: {

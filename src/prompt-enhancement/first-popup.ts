@@ -37,8 +37,9 @@ export interface PromptEnhancementMpsFirstPopupInputV1 {
 }
 
 export interface PromptEnhancementMpsFirstPopupIdentityV1 {
+  // MPS-10 (9.1): no `projectRoot` — an absolute path must never appear in the serialized model. The
+  // request id already binds scope (it embeds the per-project session id), so it is the only key needed.
   requestId: string;
-  projectRoot: string;
   handoffDecisionId: string;
   currentBodyId: string;
   bodyRevision: number;
@@ -180,7 +181,6 @@ export function buildPromptEnhancementMpsFirstPopupV1(
   }
   const identity: PromptEnhancementMpsFirstPopupIdentityV1 = {
     requestId: input.result.requestId,
-    projectRoot: input.result.projectRoot,
     handoffDecisionId: input.handoffMetadata.handoffDecisionId,
     currentBodyId: input.result.currentBody.currentBodyId,
     bodyRevision: input.result.currentBody.bodyRevision,

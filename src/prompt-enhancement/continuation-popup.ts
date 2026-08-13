@@ -39,8 +39,9 @@ export interface PromptEnhancementMpsContinuationInputV1 {
 }
 
 export interface PromptEnhancementMpsContinuationIdentityV1 {
+  // MPS-10 (9.1): no `projectRoot` — an absolute path must never appear in the serialized model. The
+  // request id already binds scope (it embeds the per-project session id), so it is the only key needed.
   requestId: string;
-  projectRoot: string;
   sequenceId: string;
   sequenceItemId: string;
   currentItemRevision: number;
@@ -206,7 +207,6 @@ export function buildPromptEnhancementMpsContinuationPopupV1(
   const safeCurrentItemRevision = currentItemRevision as number;
   const identity: PromptEnhancementMpsContinuationIdentityV1 = {
     requestId: input.result.requestId,
-    projectRoot: input.result.projectRoot,
     sequenceId: event.sequenceId,
     sequenceItemId: event.sequenceItemId,
     currentItemRevision: safeCurrentItemRevision,
