@@ -1185,9 +1185,7 @@ export interface PromptEnhancementHandoffApplicabilityV1 {
   userOrderPreferenceState: 'not_specified' | 'source_backed_metadata_only';
   parallelExecutionPolicy: 'not_supported_v1';
   confidence: 'high' | 'medium' | 'low' | 'none';
-  // D2 un-lock (owner-delegated, additive): production still emits `false` (fail-closed); `true` is
-  // representable so an activated handoff can carry it once the evidence gate allows the runtime.
-  receiverCanActivateRuntime: boolean;
+  receiverCanActivateRuntime: false;
   reasonCodes: readonly string[];
 }
 
@@ -1273,12 +1271,8 @@ export interface PromptEnhancementHandoffMetadataV1 {
     | 'compact_sequence_summary_candidate'
     | 'first_prompt_handoff_candidate'
     | 'blocked_or_deferred_sequence';
-  // D2 un-lock (owner-delegated, additive; PE-untouched — this is NOT the PromptEnhancementBodyPlanV1
-  // policy at the top of this file). Production still emits the blocked value (fail-closed); the
-  // activated value is representable so the runtime can produce an approved per-item body once the
-  // evidence gate allows it. The validators are widened in step with the runtime, not here.
-  sequenceActivationPolicy: 'blocked_pending_sequence_runtime_and_cost_gates' | 'activated_runtime_v1';
-  futurePromptTextPolicy: 'not_generated_not_stored_not_rendered' | 'approved_per_item_body_v1';
+  sequenceActivationPolicy: 'blocked_pending_sequence_runtime_and_cost_gates';
+  futurePromptTextPolicy: 'not_generated_not_stored_not_rendered';
   suggestedNextPromptPolicy: 'not_applicable' | 'not_generated' | 'metadata_refs_only';
   suggestedNextPromptRefs: readonly [];
   currentBodyValidityState:
