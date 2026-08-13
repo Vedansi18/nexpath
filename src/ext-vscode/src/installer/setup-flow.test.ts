@@ -207,3 +207,44 @@ describe('buildSetupCommand', () => {
     expect(cmd).toBe('node "/r/runner.cjs" "/s/staged" "/s/.sentinel" "/s/staged/dist/cli/index.js"');
   });
 });
+
+/**
+ * 2026-08-13 (owner's clean-install test, live root cause): `state.done` lives
+ * in globalState and SURVIVES a wipe of `~/.nexpath` + hooks.json — the flow
+ * declared "already complete", the runner (which rewrites the hook registration
+ * and the switch flag) never re-ran, and the submit hook silently never fired
+ * again. "Already done" must also mean "still registered on disk".
+ */
+describe('⭐ verifyHookRegistration — a wiped machine must self-heal', () => {
+  const doneState = { done: true, version: '0.1.3' };
+
+  it('done + current + CLI verified BUT registration missing ⇒ the runner re-runs', async () => {
+    const { deps, calls, state } = makeDeps({
+      stageCli: () => CURRENT,
+      verifyHookRegistration: () => false,   // hooks.json / flag wiped
+    });
+    state.value = { ...doneState };
+    const outcome = await runSetupFlow(deps);
+    expect(calls.runInTerminal).toHaveBeenCalledTimes(1);  // self-heal, not skip
+    expect(outcome).toBe('done');
+  });
+
+  it('done + current + registered ⇒ still skips (no setup churn)', async () => {
+    const { deps, calls, state } = makeDeps({
+      stageCli: () => CURRENT,
+      verifyHookRegistration: () => true,
+    });
+    state.value = { ...doneState };
+    const outcome = await runSetupFlow(deps);
+    expect(outcome).toBe('already-done');
+    expect(calls.runInTerminal).not.toHaveBeenCalled();
+  });
+
+  it('dep absent ⇒ pre-fix behaviour (treated as registered)', async () => {
+    const { deps, calls, state } = makeDeps({ stageCli: () => CURRENT });
+    state.value = { ...doneState };
+    const outcome = await runSetupFlow(deps);
+    expect(outcome).toBe('already-done');
+    expect(calls.runInTerminal).not.toHaveBeenCalled();
+  });
+});

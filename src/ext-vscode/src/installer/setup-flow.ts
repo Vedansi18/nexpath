@@ -50,6 +50,22 @@ export interface SetupFlowDeps {
    * refuse pointing IPC at, or trusting the `done` flag over, a dep-less copy.
    */
   verifyStagedCli: (cliEntry: string) => boolean;
+  /**
+   * True only if THIS editor's hook registration is actually present on disk
+   * (hooks.json carries our entry; the submit-flow flag file exists).
+   *
+   * LIVE ROOT CAUSE, 2026-08-13 (owner's clean-install test): `state.done`
+   * lives in VS Code globalState, which survives a wipe of `~/.nexpath` and
+   * `~/.cursor/hooks.json` — so the flow declared "already complete", the
+   * runner (which runs `install --for vscode` and rewrites both files) never
+   * re-ran, the submit hook never fired, and the machine could NEVER
+   * self-heal. "Already done" must mean "done AND still registered", not
+   * "done once, sometime, on some state that may since have been deleted".
+   *
+   * Optional so non-editor callers/tests are unaffected; absent ⇒ treated as
+   * registered (the pre-fix behaviour).
+   */
+  verifyHookRegistration?: () => boolean;
   getState: () => SetupState;
   setState: (s: SetupState) => Promise<void>;
   log?: (line: string) => void;
@@ -104,14 +120,24 @@ export async function runSetupFlow(
   // up" also requires the staged CLI to verify (deps installed). With a working
   // global CLI, "ready" is satisfied by the global, not the staged copy.
   const cliReady = opts.preferExistingCli || deps.verifyStagedCli(staged.cliEntry);
+  // 2026-08-13: "done" must also mean STILL REGISTERED. globalState survives a
+  // wipe of ~/.nexpath + hooks.json; without this check a wiped machine skips
+  // the runner forever and the submit hook silently never fires again.
+  const hookRegistered = deps.verifyHookRegistration?.() ?? true;
   const upToDate =
     state.done &&
     state.version === staged.version &&
     staged.status === 'already-current' &&
-    cliReady;
+    cliReady &&
+    hookRegistered;
   if (upToDate && !opts.force) {
     deps.log?.(`[nexpath] setup already complete + verified for CLI ${staged.version}`);
     return 'already-done';
+  }
+  if (!hookRegistered) {
+    deps.log?.(
+      '[nexpath] setup state says done but the hook registration is missing on disk — re-running setup',
+    );
   }
 
   const runnerPath = join(deps.nexpathHome, SETUP_RUNNER_FILENAME);
