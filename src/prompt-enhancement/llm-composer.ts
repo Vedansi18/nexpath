@@ -78,7 +78,15 @@ export type PromptEnhancementComposerCallFailureReasonV1 =
   | 'no_eligible_sections'
   | 'provider_error'
   | 'timeout'
-  | 'invalid_output';
+  | 'invalid_output'
+  /**
+   * The caller declared when its work has to be finished and there is no room left to START a
+   * whole further attempt. Distinct from `timeout`, which is one call exceeding its own limit:
+   * this is the surrounding budget running out between attempts. Kept separate so logs and cost
+   * records can tell them apart; the facade maps both onto the same runtime state, because to a
+   * user they are the same event.
+   */
+  | 'deadline_exceeded';
 
 /** Discriminated composer-call result (TI-2): success carries the output; failure carries WHY. */
 export type PromptEnhancementComposerCallResultV1 =
@@ -104,6 +112,46 @@ export interface PromptEnhancementComposerLlmInputV1 {
   // section set / canonical state is chosen by composePromptEnhancementBody.
   action?: PromptEnhancementComposerDirectionalActionV1;
   additionalDetailsText?: string;
+  /**
+   * When the work this call is part of has to be finished, as epoch milliseconds.
+   *
+   * The repair bound counts attempts, not seconds, and four sequential calls at this call's own
+   * timeout are longer than the hook that carries them is allowed to live. Past that point the
+   * process is killed mid-loop: no typed refusal, no disposition, no popup — everything built to
+   * make each failure answerable is skipped, because there is nothing left to answer with.
+   *
+   * So the deadline is a ceiling on wall-clock and never on repairs; the retry bound is unchanged
+   * and is still a maximum rather than a quota to spend. Absent means no ceiling, which is the
+   * behaviour without it.
+   *
+   * The value is the CALLER'S, because the caller is what knows which hook this is running on.
+   */
+  deadlineAtMs?: number;
+  /** How the deadline is read. Present so the check is testable without waiting for real time. */
+  nowMs?: () => number;
+}
+
+/**
+ * Is there room to start another call before the deadline?
+ *
+ * Asks whether a WHOLE further attempt fits. It never truncates a call in flight and never reduces
+ * the retry bound — it declines to begin one that cannot finish.
+ */
+function hasRoomForAnotherCall(input: PromptEnhancementComposerLlmInputV1): boolean {
+  if (input.deadlineAtMs === undefined) return true;
+  const now = (input.nowMs ?? Date.now)();
+  return now + PROMPT_ENHANCEMENT_COST_TIMEOUT_MS_V1 <= input.deadlineAtMs;
+}
+
+/**
+ * The retry directive for a short draft set. Naming the missing ids is the point: a bare "you
+ * missed some" leaves the model to guess which, and the guess is what produced the short set.
+ */
+function coverageDirective(missingSectionIds: readonly string[]): string {
+  if (missingSectionIds.length === 0) return '';
+  return `\n\nYour previous reply did not include a draft for every section. Return a draft for EVERY`
+    + ` sectionId listed above, including these that were missing:`
+    + ` ${missingSectionIds.join(', ')}. Do not invent sections and do not omit any.`;
 }
 
 // E8: per-action wording directive (the section selection + canonical-state transitions
@@ -282,7 +330,13 @@ export async function composeStructuredComposerOutputV1(
   // language mismatch the retry carries a stronger language directive (E5/5.3).
   let languageRetry = false;
   let authorityRetry = false;
+  let missingSectionIds: readonly string[] = [];
+  const plannedSectionIds = sections.map((section) => section.sectionId);
   for (let attempt = 0; attempt <= PROMPT_ENHANCEMENT_COST_VALIDATION_RETRY_COUNT_V1; attempt++) {
+    // Before starting an attempt, never inside the catch: a thrown provider error already exits at
+    // once, so guarding the throw path would cover the one failure that cannot loop and miss the
+    // one that can.
+    if (!hasRoomForAnotherCall(input)) return { ok: false, reason: 'deadline_exceeded' };
     let raw: string | null | undefined;
     try {
       const response = await openai.chat.completions.create(
@@ -295,7 +349,8 @@ export async function composeStructuredComposerOutputV1(
               role: 'user',
               content: userPrompt
                 + (languageRetry ? STRONGER_LANGUAGE_DIRECTIVE : '')
-                + (authorityRetry ? STRONGER_AUTHORITY_DIRECTIVE : ''),
+                + (authorityRetry ? STRONGER_AUTHORITY_DIRECTIVE : '')
+                + coverageDirective(missingSectionIds),
             },
           ],
           response_format: { type: 'json_object' },
@@ -325,9 +380,17 @@ export async function composeStructuredComposerOutputV1(
       authorityRetry = true;
       continue;
     }
+    // Coverage, last of the checks because it is about completeness rather than correctness: a set
+    // that is short but well-formed still parses, still reads as the right language, and still
+    // reports the right authority. Nothing else looks at it, so before this a half-body returned
+    // `ok: true` and the missing sections rendered from constants with nothing saying why.
+    const draftedSectionIds = new Set(parsed.sectionDrafts.map((draft) => draft.sectionId));
+    missingSectionIds = plannedSectionIds.filter((sectionId) => !draftedSectionIds.has(sectionId));
+    if (missingSectionIds.length > 0) continue; // spends the existing bound; no new budget
     return { ok: true, output: parsed };
   }
-  // Retries exhausted (malformed, persistent language mismatch, or persistent authority drift) ->
-  // deterministic fallback rather than shipping wording the validator would reject anyway.
+  // Retries exhausted (malformed, persistent language mismatch, persistent authority drift, or a
+  // draft set that stayed short) -> deterministic fallback rather than shipping wording the
+  // validator would reject anyway, or half a body with nothing saying which half is missing.
   return { ok: false, reason: 'invalid_output' };
 }

@@ -236,8 +236,22 @@ async function prepare(
       composerRuntimeState = 'provider_unavailable';
     } else if (composerCall.reason === 'invalid_output') {
       composerRuntimeState = 'invalid_output';
+    } else if (composerCall.reason === 'deadline_exceeded') {
+      // The surrounding budget ran out between attempts rather than one call exceeding its own
+      // limit. The composer keeps the two apart for logs and cost records; to the user they are
+      // the same event, so they share a runtime state rather than earning a new one.
+      composerRuntimeState = 'timeout';
+    } else if (composerCall.reason === 'no_eligible_sections') {
+      // A key was present, a popup was judged worth showing, and planning produced nothing to
+      // word. Those cannot both be right, and the result is the thinnest body there is: the
+      // user's own prompt and no guidance at all. It used to be filed as "genuinely not
+      // requested", which is true only while the composer is gated off — now that it runs for
+      // every shown popup with a key, silence here would be the worst output wearing the label of
+      // a normal one. Naming the condition is this milestone's job; why planning returned zero is
+      // a routing question and is not chased here.
+      composerRuntimeState = 'validation_failed';
     }
-    // 'no_key' / 'no_eligible_sections' -> undefined: the call was genuinely not made.
+    // 'no_key' -> undefined: the call was genuinely not made, and that is a supported state.
   }
 
   const composeInput = {

@@ -1372,7 +1372,18 @@ function runtimeBlockReasonFor(
   if (fallbackMode === 'deterministic_body') {
     return runtimeState === 'invalid_output' ? 'malformed_output' : 'validation_failed';
   }
-  if (fallbackMode === 'original_prompt_only' || fallbackMode === 'no_popup') return 'not_applicable';
+  if (fallbackMode === 'original_prompt_only' || fallbackMode === 'no_popup') {
+    // An empty section plan renders the user's own prompt and nothing else — the thinnest body
+    // there is. That is unremarkable when no call was requested, and it is a failure when one was:
+    // a key was present, the popup was judged worth showing, and the pipeline still produced no
+    // guidance. Reporting both as 'not_applicable' made the second indistinguishable from the
+    // first, so the state is carried through when there is one.
+    if (runtimeState === 'validation_failed') return 'validation_failed';
+    if (runtimeState === 'invalid_output') return 'malformed_output';
+    if (runtimeState === 'timeout') return 'timeout';
+    if (runtimeState === 'provider_unavailable') return 'provider_unavailable';
+    return 'not_applicable';
+  }
   return undefined;
 }
 
