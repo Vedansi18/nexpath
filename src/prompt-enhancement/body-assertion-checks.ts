@@ -91,3 +91,43 @@ export function findPromptEnhancementDuplicateGuidanceV1(
   }
   return duplicates;
 }
+
+/** One prompt's outcome, as the live script observes it. */
+export interface PromptEnhancementBodyAssertionResultV1 {
+  prompt: string;
+  bodyText: string;
+  /** Did the model actually word this body, or did the deterministic renderer answer? */
+  composed: boolean;
+}
+
+/**
+ * Every failure across the run.
+ *
+ * The `composed` check is not redundant with the fall-through count, and assuming it was would be
+ * the hole this function closes. A body the deterministic renderer produced is boilerplate whether
+ * or not it happens to contain the fall-through sentence: the twelve mapped section kinds emit
+ * fixed strings that are NOT that sentence, so a plan made only of mapped kinds renders entirely
+ * from constants and counts zero. Distinctness does not catch it either — different prompts draw
+ * different section SETS, so their guidance still differs.
+ *
+ * So a fully deterministic, fully generic body can pass both content checks. Only asking whether
+ * the model ran catches it, and that is what this asserts first.
+ */
+export function collectPromptEnhancementBodyAssertionFailuresV1(
+  results: readonly PromptEnhancementBodyAssertionResultV1[],
+): readonly string[] {
+  const failures: string[] = [];
+  for (const { prompt, bodyText, composed } of results) {
+    if (!composed) {
+      failures.push(`not composed by the model (deterministic fallback): "${prompt}"`);
+    }
+    const fallThrough = countPromptEnhancementFallThroughSentencesV1(bodyText);
+    if (fallThrough > 0) {
+      failures.push(`fall-through sentence x${fallThrough} in: "${prompt}"`);
+    }
+  }
+  for (const { prompt, matches } of findPromptEnhancementDuplicateGuidanceV1(results)) {
+    failures.push(`identical guidance for two prompts: "${prompt}" and "${matches}"`);
+  }
+  return failures;
+}

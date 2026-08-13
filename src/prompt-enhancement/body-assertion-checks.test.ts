@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   PROMPT_ENHANCEMENT_FALLTHROUGH_LONG_V1,
+  collectPromptEnhancementBodyAssertionFailuresV1,
   countPromptEnhancementFallThroughSentencesV1,
   findPromptEnhancementDuplicateGuidanceV1,
   isPromptEnhancementBodyAssertionCheckerCurrentV1,
@@ -103,5 +104,49 @@ describe('body assertion — the mechanical checks', () => {
 
   it('reports itself stale when the renderer no longer carries the sentence', () => {
     expect(isPromptEnhancementBodyAssertionCheckerCurrentV1('nothing relevant here')).toBe(false);
+  });
+});
+
+describe('body assertion — the run-level collector', () => {
+  it('passes a run where every body was composed and none repeats', () => {
+    expect(collectPromptEnhancementBodyAssertionFailuresV1([
+      { prompt: 'a', bodyText: COMPOSED_BODY, composed: true },
+      { prompt: 'b', bodyText: 'My original request (verbatim):\nb\n\nHeading:\n- Different guidance.', composed: true },
+    ])).toEqual([]);
+  });
+
+  // The hole this collector exists to close. A body the deterministic renderer produced from the
+  // MAPPED section kinds carries no fall-through sentence — those twelve emit their own fixed
+  // strings, which are different text — and two such bodies differ from each other because their
+  // section SETS differ. So both content checks pass on wall-to-wall boilerplate. Only "did the
+  // model run" catches it.
+  it('fails a deterministic body that carries no fall-through sentence at all', () => {
+    const allMappedConstants = [
+      'My original request (verbatim):',
+      'Fix the thing.',
+      '',
+      'Verification Or Test Plan:',
+      '- Include the verification command, focused scenario, or regression check that should prove the change.',
+      '',
+      'Risk Safety Or Confirmation:',
+      '- Name risky or irreversible actions, ask for required confirmation, and include rollback or recovery checks.',
+    ].join('\n');
+
+    expect(countPromptEnhancementFallThroughSentencesV1(allMappedConstants)).toBe(0);
+
+    const failures = collectPromptEnhancementBodyAssertionFailuresV1([
+      { prompt: 'Fix the thing.', bodyText: allMappedConstants, composed: false },
+    ]);
+    expect(failures).toHaveLength(1);
+    expect(failures[0]).toContain('not composed by the model');
+  });
+
+  it('reports the fall-through count and the duplicate together when both occur', () => {
+    const failures = collectPromptEnhancementBodyAssertionFailuresV1([
+      { prompt: 'a', bodyText: FALLTHROUGH_BODY, composed: true },
+      { prompt: 'b', bodyText: FALLTHROUGH_BODY, composed: true },
+    ]);
+    expect(failures.filter((f) => f.includes('fall-through'))).toHaveLength(2);
+    expect(failures.filter((f) => f.includes('identical guidance'))).toHaveLength(1);
   });
 });

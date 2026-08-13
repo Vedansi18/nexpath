@@ -8,13 +8,18 @@
  * so this is a script and not a test: it costs money, it needs a key, and it is recorded by hand
  * rather than gating CI.
  *
- * Two mechanical checks, both oracle-free — neither scores quality, because there is no agreed
+ * Three mechanical checks, all oracle-free — none scores quality, because there is no agreed
  * scorer and a made-up threshold would be worse than no threshold:
  *
- *   1. NO FALL-THROUGH SENTENCE. A guidance section with no entry in the content map renders one
+ *   1. THE MODEL RAN. A body the deterministic renderer produced is boilerplate whether or not it
+ *      trips the checks below, so this is asked first. It is not implied by them: the twelve mapped
+ *      section kinds emit their own fixed strings, which are NOT the fall-through sentence, so a
+ *      plan made only of mapped kinds renders entirely from constants and counts zero — and two
+ *      such bodies still differ from each other because their section SETS differ.
+ *   2. NO FALL-THROUGH SENTENCE. A guidance section with no entry in the content map renders one
  *      fixed sentence with its own heading pasted in. Any occurrence means the model did not word
  *      that section.
- *   2. CROSS-PROMPT DISTINCTNESS. No two prompts may produce the same guidance text. This is the
+ *   3. CROSS-PROMPT DISTINCTNESS. No two prompts may produce the same guidance text. This is the
  *      defect stated directly: a body whose section SET varies by intent while its section TEXT
  *      never varies at all is generic no matter how it reads in isolation.
  *
@@ -35,8 +40,8 @@ import { buildPromptEnhancementCostVisibilityMetadataV1 } from '../src/prompt-en
 import { getPromptStartStopSourceSnapshot } from '../src/prompt-enhancement/source-reality.js';
 import { isValidApiKey } from '../src/config/ApiKeyResolver.js';
 import {
+  collectPromptEnhancementBodyAssertionFailuresV1,
   countPromptEnhancementFallThroughSentencesV1,
-  findPromptEnhancementDuplicateGuidanceV1,
   isPromptEnhancementBodyAssertionCheckerCurrentV1,
 } from '../src/prompt-enhancement/body-assertion-checks.js';
 
@@ -150,8 +155,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const failures: string[] = [];
-  const collected: { prompt: string; bodyText: string }[] = [];
+  const collected: { prompt: string; bodyText: string; composed: boolean }[] = [];
 
   for (const { shape, text } of PROMPTS) {
     const base = baseRequest();
@@ -169,13 +173,10 @@ async function main(): Promise<void> {
     process.stdout.write(`disposition=${result.disposition} mode=${mode} model=${result.modelVersion} ${elapsedMs}ms fallThrough=${fallThrough}\n`);
     process.stdout.write(`${'-'.repeat(78)}\n${bodyText}\n`);
 
-    if (fallThrough > 0) failures.push(`fall-through sentence x${fallThrough} in: "${text}"`);
-    collected.push({ prompt: text, bodyText });
+    collected.push({ prompt: text, bodyText, composed: mode === 'llm_wording' });
   }
 
-  for (const { prompt, matches } of findPromptEnhancementDuplicateGuidanceV1(collected)) {
-    failures.push(`identical guidance for two prompts: "${prompt}" and "${matches}"`);
-  }
+  const failures = collectPromptEnhancementBodyAssertionFailuresV1(collected);
 
   process.stdout.write(`\n${'='.repeat(78)}\n`);
   if (failures.length > 0) {
@@ -184,9 +185,10 @@ async function main(): Promise<void> {
     process.exit(1);
   }
   process.stdout.write(
-    `PE body assertion: OK — ${PROMPTS.length} prompts, both shapes, zero fall-through sentences,\n`
-    + 'no two prompts sharing guidance text. The bodies above still need a human read: mechanical\n'
-    + 'checks prove the model wrote them, not that what it wrote is good advice.\n',
+    `PE body assertion: OK — ${PROMPTS.length} prompts, both shapes. Every body composed by the\n`
+    + 'model, zero fall-through sentences, no two prompts sharing guidance text.\n'
+    + 'The bodies above still need a human read: these checks prove the model wrote them, not that\n'
+    + 'what it wrote is good advice.\n',
   );
 }
 
