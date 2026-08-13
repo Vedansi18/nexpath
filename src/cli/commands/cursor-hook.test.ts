@@ -331,14 +331,17 @@ describe('⭐ the default decider is the REAL one, pinned structurally', () => {
   // no-OpenAI and switch-gate guards.
   const src = readFileSync(join(__dirname, 'cursor-hook.ts'), 'utf8');
 
-  it('reuses H3\'s decider rather than a local stub', () => {
-    expect(src).toMatch(/deps\.decide\s*\?\?[\s\S]{0,300}?buildDefaultPromptSubmitDecider/);
+  it('H9: the default is the stop-driven decider (ALL popups at submit time)', () => {
+    // Owner ruling 2026-08-13: the full Layer-C popup surface — MPS sequence,
+    // PE popup, advisory popup — fires at submit. `stop` IS that surface; the
+    // default decide must run it, not the advisory-only H3 decider.
+    expect(src).toMatch(/deps\.decide\s*\?\?[\s\S]{0,400}?buildStopDrivenPromptSubmitDecider/);
   });
 
   it('passes host: \'cursor\' so the record is tagged for the right editor', () => {
     // A windsurf-tagged record would be dropped by the Cursor reader and the
     // prompt would be cancelled with nothing ever injected.
-    expect(src).toMatch(/buildDefaultPromptSubmitDecider\([\s\S]{0,200}?host:\s*'cursor'/);
+    expect(src).toMatch(/buildStopDrivenPromptSubmitDecider\([\s\S]{0,200}?host:\s*'cursor'/);
   });
 
   it('does not hardcode an allow-only default', () => {

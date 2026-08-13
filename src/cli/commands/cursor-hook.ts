@@ -28,7 +28,7 @@ import type { ChildProcess } from 'node:child_process';
 import { parseCursorHookPayload, type CursorHookPayload } from '../../cursor-hook/payload.js';
 import { defaultReadStdin, awaitChild, isReplacementEcho } from './windsurf-hook.js';
 import { createHoldBudget, type HoldBudget } from './submit-hold-budget.js';
-import { buildDefaultPromptSubmitDecider } from './windsurf-hook.js';
+import { buildStopDrivenPromptSubmitDecider } from './submit-stop-decider.js';
 import { spawnAuto } from '../../windsurf-hook/spawn.js';
 import { isSubmitAdvisoryEnabledForHost } from './submit-flow-config.js';
 import { bringPopupToFront } from '../../windsurf-hook/foreground.js';
@@ -294,14 +294,19 @@ export async function runCursorHookAction(
     // Gated exactly like Windsurf's: with the switch off the decider is never
     // consulted, so the path is unreachable and behaviour is unchanged.
     //
-    // The DEFAULT decider is H3's, with `host: 'cursor'` — the block/persist/
-    // consume logic is identical across platforms and only the record's host tag
-    // differs, so this reuses it rather than growing a parallel implementation.
-    // Without this default the Cursor path was inert even with the switch on.
+    // H9 (owner ruling 2026-08-13): the DEFAULT decider now runs Layer C's
+    // `nexpath stop` inside the hold — the COMPLETE popup surface of the old
+    // flow (MPS sequence popup → PE popup → advisory popup), relocated to
+    // submit time. A stop selection blocks the original and the extension
+    // injects the selected text; anything else releases the prompt unchanged.
+    // The H3 advisory-only decider remains exported for injected wirings.
+    // The stop child a running default decide spawned — killed on hold
+    // exhaustion so no popup process outlives the hook (R2).
+    const stopChildRef: { current: ChildProcess | null } = { current: null };
     const decide = deps.decide ?? (async (pl: CursorHookPayload) => {
-      const d = buildDefaultPromptSubmitDecider(
+      const d = buildStopDrivenPromptSubmitDecider(
         { project: pl.projectRoot },
-        { host: 'cursor' },
+        { host: 'cursor', onChild: (c) => { stopChildRef.current = c; } },
       );
       return d('beforeSubmitPrompt', { project: pl.projectRoot }, pl.promptText ?? '');
     });
@@ -378,6 +383,12 @@ export async function runCursorHookAction(
       // Draws from what the stdin read + auto classification left. A timeout is
       // never a decision: it continues, so the original prompt is released (A3).
       const decided = await hold.run(() => decide(payload));
+      if (decided.timedOut) {
+        // Hold exhausted while the popup waited: fail open AND reap the stop
+        // child — Cursor never reaps timed-out hooks (R2), and stop's popups
+        // wait on the user with no bound of their own.
+        try { stopChildRef.current?.kill(); } catch { /* already gone */ }
+      }
       if (!decided.timedOut && decided.value === 'block') decision = 'block';
       logEvent('info', 'cursor_hook_decision', {
         decision,

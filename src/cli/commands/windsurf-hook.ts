@@ -36,6 +36,7 @@ import { log } from '../../logger.js';
 import { getPendingAdvisory, markAdvisoryShown } from '../../store/pending-advisories.js';
 import { isSubmitAdvisoryEnabledForHost } from './submit-flow-config.js';
 import { writeSubmitDecision } from './submit-decision-store.js';
+import { buildStopDrivenPromptSubmitDecider } from './submit-stop-decider.js';
 import { createHoldBudget, type HoldBudget } from './submit-hold-budget.js';
 // CONSUME-ONLY. `SessionStateManager` is not Vedansi-owned (`hi0001234d` 15 /
 // `harshil480` 15) — it is called here, never modified.
@@ -485,7 +486,17 @@ export async function runWindsurfHookAction(
   // The default decider now DOES have a real option source, but still resolves
   // `'allow'` for every prompt because `promptTextForHook()` is a stub (see it
   // below) — pinned by `windsurf-hook-option-wiring.test.ts`.
-  const decidePromptSubmit = deps.decidePromptSubmit ?? buildDefaultPromptSubmitDecider(opts);
+  // H9 (owner ruling 2026-08-13): the DEFAULT submit decision now runs Layer
+  // C's `nexpath stop` inside the hold — the complete old popup surface (MPS
+  // sequence → PE popup → advisory popup) at submit time; a selection blocks
+  // and the extension injects it. The H3 advisory-only decider stays exported
+  // for injected wirings and its own tests.
+  const stopChildRef: { current: ChildProcess | null } = { current: null };
+  const decidePromptSubmit = deps.decidePromptSubmit
+    ?? buildStopDrivenPromptSubmitDecider(opts, {
+      host: 'windsurf',
+      onChild: (c) => { stopChildRef.current = c; },
+    });
 
   try {
     // ── Prompt-submit-time advisory (hook milestone H2) ────────────────────
@@ -647,6 +658,11 @@ export async function runWindsurfHookAction(
       const decided = hold
         ? await hold.run(() => decidePromptSubmit(event, opts, pendingPromptText))
         : { timedOut: false, value: await decidePromptSubmit(event, opts, pendingPromptText).catch(() => 'allow' as const) };
+      if (decided.timedOut) {
+        // Hold exhausted while stop's popup waited — reap it so no popup
+        // process outlives the hook (mirrors the auto orphan-kill above).
+        try { stopChildRef.current?.kill(); } catch { /* already gone */ }
+      }
       // `!decided.timedOut` is likewise redundant today (a timed-out run yields
       // no value, so `value === 'block'` is already false) and equally kept as an
       // explicit statement of the rule: a timeout is never a decision.
