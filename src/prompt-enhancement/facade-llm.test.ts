@@ -4,7 +4,9 @@ import {
   type PromptEnhancementPrepareRequestV1,
   type PromptEnhancementSourceRefV1,
 } from './contracts.js';
+import { isPromptEnhancementNlpHeavyCaseV1 } from './composer-gate.js';
 import { buildPromptEnhancementCostVisibilityMetadataV1 } from './cost-observability.js';
+import { routePromptEnhancement } from './routing-taxonomy.js';
 import { getPromptStartStopSourceSnapshot } from './source-reality.js';
 
 // No composer-gate mock: the baseline compose no longer consults the route's
@@ -87,13 +89,26 @@ describe('E4 — facade LLM composer wiring', () => {
     // routes "clear", which used to close the composer gate and hand the user a body whose
     // every guidance section was a fixed string. It must now reach the composer like any
     // other shown popup.
+    const PLAIN_TEXT = 'Add a nullable phone_number column to the users table.';
+
+    // Premise guard. The test is only the regression case while this prompt reads as NOT
+    // NLP-heavy — that is what used to shut the gate. If the routing heuristics ever change
+    // enough that this text reads ambiguous, this fails loudly and a new prompt is needed,
+    // rather than the test quietly passing while testing nothing.
+    const snapshot = getPromptStartStopSourceSnapshot();
+    const plainRoute = routePromptEnhancement({
+      promptText: PLAIN_TEXT, promptOrigin: 'user', reviewMoment: 'UserPromptSubmit_preparation',
+      sourceSnapshot: undefined, sourceFactRefs: ['src-a-1'],
+      classifierState: 'fire_recommended', degradedNoActionState: 'none',
+      generatedOriginState: 'ordinary_user_prompt', oldDecisionSessionPayloadPresent: false,
+      promptStartBoundary: snapshot.hookBoundary, deliveryBoundary: snapshot.deliveryBoundary,
+    } as never);
+    expect(isPromptEnhancementNlpHeavyCaseV1(plainRoute)).toBe(false);
+
     process.env['OPENAI_API_KEY'] = `sk-${'x'.repeat(40)}`;
     const plain = {
       ...request(),
-      sourcePrompt: {
-        ...request().sourcePrompt,
-        text: 'Add a nullable phone_number column to the users table.',
-      },
+      sourcePrompt: { ...request().sourcePrompt, text: PLAIN_TEXT },
     } as PromptEnhancementPrepareRequestV1;
 
     const result = await preparePromptEnhancement(plain);
@@ -120,6 +135,9 @@ describe('E4 — facade LLM composer wiring', () => {
     } as PromptEnhancementPrepareRequestV1;
 
     const result = await preparePromptEnhancement(noPopupRequest);
+    // Assert the popup really was suppressed, not merely that no call happened — otherwise
+    // this passes for any reason that skips the composer and stops being a no-popup test.
+    expect(result.disposition).toBe('no_popup_not_applicable');
     expect(composeStructuredComposerOutputV1).not.toHaveBeenCalled();
     expect(result.callAndVisibilityMetadata.callVisibilityMode).not.toBe('llm_wording');
   });
