@@ -13,6 +13,7 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   createSubmitClipboardDelivery,
   submitKeystroke,
+  focusedWindowIsNexpathPopup,
   type SubmitClipboardDeliveryDeps,
 } from './submit-clipboard-delivery.js';
 
@@ -113,7 +114,7 @@ describe('submit — a genuinely separate step', () => {
 describe('submitKeystroke — cross-OS matrix (§2.4b), pinned per platform', () => {
   it('macOS uses osascript key code 36 (Return)', () => {
     const run = vi.fn().mockReturnValue(true);
-    expect(submitKeystroke({ platform: 'darwin', run })).toBe(true);
+    expect(submitKeystroke({ isPopupFocused: () => false, platform: 'darwin', run })).toBe(true);
     expect(run).toHaveBeenCalledWith('osascript', [
       '-e', 'tell application "System Events" to key code 36',
     ]);
@@ -121,15 +122,14 @@ describe('submitKeystroke — cross-OS matrix (§2.4b), pinned per platform', ()
 
   it('Windows uses PowerShell SendKeys {ENTER}', () => {
     const run = vi.fn().mockReturnValue(true);
-    expect(submitKeystroke({ platform: 'win32', run })).toBe(true);
+    expect(submitKeystroke({ isPopupFocused: () => false, platform: 'win32', run })).toBe(true);
     expect(run.mock.calls[0][0]).toBe('powershell');
     expect(String(run.mock.calls[0][1])).toContain('{ENTER}');
   });
 
   it('Linux/X11 prefers xdotool', () => {
     const run = vi.fn().mockReturnValue(true);
-    const ok = submitKeystroke({
-      platform: 'linux', env: { DISPLAY: ':1' }, hasCommand: (c) => c === 'xdotool', run,
+    const ok = submitKeystroke({ isPopupFocused: () => false, platform: 'linux', env: { DISPLAY: ':1' }, hasCommand: (c) => c === 'xdotool', run,
     });
     expect(ok).toBe(true);
     expect(run).toHaveBeenCalledWith('xdotool', ['key', '--clearmodifiers', 'Return']);
@@ -137,8 +137,7 @@ describe('submitKeystroke — cross-OS matrix (§2.4b), pinned per platform', ()
 
   it('Linux/Wayland falls back to wtype when xdotool is absent', () => {
     const run = vi.fn().mockReturnValue(true);
-    submitKeystroke({
-      platform: 'linux', env: { WAYLAND_DISPLAY: 'wayland-0' },
+    submitKeystroke({ isPopupFocused: () => false, platform: 'linux', env: { WAYLAND_DISPLAY: 'wayland-0' },
       hasCommand: (c) => c === 'wtype', run,
     });
     expect(run).toHaveBeenCalledWith('wtype', ['-k', 'Return']);
@@ -146,8 +145,7 @@ describe('submitKeystroke — cross-OS matrix (§2.4b), pinned per platform', ()
 
   it('Linux falls back to ydotool as the last option', () => {
     const run = vi.fn().mockReturnValue(true);
-    submitKeystroke({
-      platform: 'linux', env: { DISPLAY: ':1' },
+    submitKeystroke({ isPopupFocused: () => false, platform: 'linux', env: { DISPLAY: ':1' },
       hasCommand: (c) => c === 'ydotool', run,
     });
     expect(run.mock.calls[0][0]).toBe('ydotool');
@@ -155,19 +153,17 @@ describe('submitKeystroke — cross-OS matrix (§2.4b), pinned per platform', ()
 
   it('returns false on Linux with NO display — nothing to type into', () => {
     const run = vi.fn();
-    expect(submitKeystroke({ platform: 'linux', env: {}, hasCommand: () => true, run })).toBe(false);
+    expect(submitKeystroke({ isPopupFocused: () => false, platform: 'linux', env: {}, hasCommand: () => true, run })).toBe(false);
     expect(run).not.toHaveBeenCalled();
   });
 
   it('returns false on Linux when no keystroke tool is installed', () => {
-    expect(submitKeystroke({
-      platform: 'linux', env: { DISPLAY: ':1' }, hasCommand: () => false, run: vi.fn(),
+    expect(submitKeystroke({ isPopupFocused: () => false, platform: 'linux', env: { DISPLAY: ':1' }, hasCommand: () => false, run: vi.fn(),
     })).toBe(false);
   });
 
   it('never throws when the runner throws', () => {
-    expect(submitKeystroke({
-      platform: 'darwin', run: () => { throw new Error('spawn failed'); },
+    expect(submitKeystroke({ isPopupFocused: () => false, platform: 'darwin', run: () => { throw new Error('spawn failed'); },
     })).toBe(false);
   });
 
@@ -183,8 +179,7 @@ describe('submitKeystroke — cross-OS matrix (§2.4b), pinned per platform', ()
     // point is not the return value but that the defaults actually execute
     // instead of short-circuiting to false.
     const calls: string[] = [];
-    const result = submitKeystroke({
-      platform: 'linux',
+    const result = submitKeystroke({ isPopupFocused: () => false, platform: 'linux',
       env: { DISPLAY: ':1' },
       // hasCommand intentionally NOT injected — exercise the real default.
       run: (cmd) => { calls.push(cmd); return true; },
@@ -198,13 +193,64 @@ describe('submitKeystroke — cross-OS matrix (§2.4b), pinned per platform', ()
   it('the default runner is a real spawner, not a false-returning stub', () => {
     // Detect a command that certainly does not exist: the default detector must
     // return false for it (proving it really probes), and no tool then matches.
-    const ok = submitKeystroke({
-      platform: 'linux',
+    const ok = submitKeystroke({ isPopupFocused: () => false, platform: 'linux',
       env: { DISPLAY: ':1' },
       hasCommand: (c) => c === 'definitely-not-a-real-binary-xyz',
       // run intentionally NOT injected — the real default would be reached only
       // if a tool matched; none does, so this must be false without throwing.
     });
     expect(ok).toBe(false);
+  });
+});
+
+/**
+ * ⚠ RC10 — phantom-Enter guard (live root cause, captured in hex 2026-08-13):
+ * two synthetic \r bytes landed in a foregrounded Nexpath popup ~one poller
+ * tick after it opened, auto-"selecting" it. The submit Enter must never fire
+ * while one of our own popups holds focus.
+ */
+describe('⭐ RC10 — submit Enter never fires into a Nexpath popup', () => {
+  it('refuses to send when a popup is focused (no tool is even invoked)', () => {
+    const run = vi.fn(() => true);
+    const ok = submitKeystroke({
+      isPopupFocused: () => true,
+      platform: 'linux',
+      env: { DISPLAY: ':1' },
+      hasCommand: () => true,
+      run,
+    });
+    expect(ok).toBe(false);
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it('sends normally when the editor is focused', () => {
+    const run = vi.fn(() => true);
+    const ok = submitKeystroke({
+      isPopupFocused: () => false,
+      platform: 'linux',
+      env: { DISPLAY: ':1' },
+      hasCommand: (c: string) => c === 'xdotool',
+      run,
+    });
+    expect(ok).toBe(true);
+    expect(run).toHaveBeenCalledWith('xdotool', ['key', '--clearmodifiers', 'Return']);
+  });
+
+  it('focusedWindowIsNexpathPopup matches our titles and only ours', () => {
+    const probe = (title: string | null) => focusedWindowIsNexpathPopup({
+      platform: 'linux', env: { DISPLAY: ':1' },
+      hasCommand: () => true, runCapture: () => title,
+    });
+    expect(probe('Nexpath — Action Required')).toBe(true);
+    expect(probe('emptyops Nexpath · Prompt enhancement')).toBe(true);
+    expect(probe('Nexpath — Feedback')).toBe(true);
+    expect(probe('nexpath - Windsurf')).toBe(false);   // the EDITOR, not a popup
+    expect(probe('some terminal')).toBe(false);
+    expect(probe(null)).toBe(false);                    // unreadable ⇒ safe
+  });
+
+  it('non-Linux platforms skip the check entirely (no popups foregrounded there)', () => {
+    expect(focusedWindowIsNexpathPopup({ platform: 'darwin' })).toBe(false);
+    expect(focusedWindowIsNexpathPopup({ platform: 'win32' })).toBe(false);
   });
 });

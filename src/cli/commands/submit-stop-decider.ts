@@ -39,6 +39,14 @@ import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
 import { resolve } from 'node:path';
 import { writeSubmitDecision } from './submit-decision-store.js';
 import { log } from '../../logger.js';
+// CONSUME-ONLY store calls (bhavnesh75-owned exports), used exactly as stop.ts
+// uses them — no Layer C file is modified.
+import { openStore, closeStore } from '../../store/db.js';
+import { getPendingAdvisory, markAdvisoryShown } from '../../store/pending-advisories.js';
+import {
+  getPendingPromptEnhancement,
+  markPromptEnhancementShown,
+} from '../../store/pending-prompt-enhancements.js';
 
 /** What `stop` prints on a selection — Layer C's Claude-Code block contract. */
 export interface StopBlockLine {
@@ -95,6 +103,9 @@ export interface StopDrivenDeciderPorts {
    * their own, and Cursor never reaps timed-out hooks (R2).
    */
   onChild?: (child: ChildProcess | null) => void;
+  /** RC10 sweep seams — injected for tests; default to the real store. */
+  openStoreFn?: (db?: string) => Promise<unknown>;
+  closeStoreFn?: (store: unknown) => Promise<void> | void;
 }
 
 /**
@@ -170,6 +181,32 @@ export function buildStopDrivenPromptSubmitDecider(
         createdAt: now(),
         host: ports.host,
       });
+      // ── H3's acceptance rule, extended to the stop-driven path (RC10 flash #2)
+      // `stop` consumes only the row its popup HANDLED (PE-first: a PE turn
+      // leaves the DS advisory row pending — old-flow semantics where it would
+      // simply show next turn). Under submit-time that leftover re-fires a
+      // popup on the NEXT leg for a turn the user already handled — measured
+      // live as the second flash. A fully-handled (blocked) turn must leave NO
+      // pending rows. Consume-only store calls; every failure is non-fatal
+      // (the block already succeeded; worst case is today's extra popup).
+      try {
+        const sweepStore = await (ports.openStoreFn ?? openStore)(undefined as never);
+        try {
+          for (let i = 0; i < 8; i++) { // bounded — one turn parks at most a couple
+            const row = getPendingAdvisory(sweepStore as never, projectRoot);
+            if (!row) break;
+            markAdvisoryShown(sweepStore as never, row.id);
+          }
+          const pe = getPendingPromptEnhancement(sweepStore as never, projectRoot);
+          if (pe) markPromptEnhancementShown(sweepStore as never, pe.id);
+        } finally {
+          try { await (ports.closeStoreFn ?? closeStore)(sweepStore as never); } catch { /* fail-open */ }
+        }
+      } catch (err) {
+        logEvent('warn', 'submit_stop_decider_sweep_failed', {
+          message: (err as Error)?.message ?? 'unknown',
+        });
+      }
       return 'block';
     } catch (err) {
       logEvent('warn', 'submit_stop_decider_failed', {

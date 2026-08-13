@@ -128,6 +128,8 @@ export interface SubmitKeystrokeDeps {
   env?: NodeJS.ProcessEnv;
   hasCommand?: (cmd: string) => boolean;
   run?: (cmd: string, args: string[]) => boolean;
+  /** RC10 phantom-Enter guard; injectable for tests. Defaults to the real check. */
+  isPopupFocused?: (deps?: { platform?: NodeJS.Platform; env?: NodeJS.ProcessEnv }) => boolean;
 }
 
 
@@ -159,9 +161,75 @@ function defaultRun(cmd: string, args: string[]): boolean {
   }
 }
 
+/**
+ * Nexpath's own popup window titles. A synthetic keystroke must NEVER fire
+ * while one of these is focused — see the guard below.
+ */
+export const NEXPATH_POPUP_TITLE_MARKERS = [
+  'Nexpath — Action Required',
+  'Nexpath · Prompt enhancement',
+  'Nexpath — Feedback',
+  'NEXPATH CLI',
+] as const;
+
+/**
+ * ⚠ PHANTOM-ENTER GUARD (live root cause RC10, 2026-08-13 — captured in hex).
+ *
+ * The submit popup is deliberately raised to the foreground so the user can
+ * see it. Synthetic keystrokes go to the FOCUSED window. When a delivery's
+ * Enter fires while a popup holds focus, the Enter lands IN THE POPUP —
+ * measured live: two bare `\r` bytes hit the popup's TTY ~1.9 s after it
+ * opened (one poller tick), auto-"selecting" the first option and closing it.
+ * The user experiences a popup that flashes open and closes by itself, and a
+ * prompt that gets replaced without their choice — the worst possible UX.
+ *
+ * So: before ANY synthetic key, check the active window's title; if it is one
+ * of our own popups, DO NOT send — return false (treated as not-submitted; the
+ * user presses Enter in the editor themselves). Linux/X11 only, where the bug
+ * bites and where the popups exist; other platforms return "safe" (no check
+ * possible, no popup foregrounding there either). Fail-safe: an unreadable
+ * active title reports safe, preserving pre-guard behaviour.
+ */
+export function focusedWindowIsNexpathPopup(deps: {
+  platform?: NodeJS.Platform;
+  env?: NodeJS.ProcessEnv;
+  hasCommand?: (cmd: string) => boolean;
+  runCapture?: (cmd: string, args: string[]) => string | null;
+} = {}): boolean {
+  const platform = deps.platform ?? process.platform;
+  const env = deps.env ?? process.env;
+  if (platform !== 'linux') return false;
+  if (!env.DISPLAY && !env.WAYLAND_DISPLAY) return false;
+  const has = deps.hasCommand ?? defaultHasCommand;
+  const runCapture = deps.runCapture ?? defaultRunCapture;
+  try {
+    if (!has('xdotool')) return false;
+    const title = runCapture('xdotool', ['getactivewindow', 'getwindowname']);
+    if (!title) return false;
+    return NEXPATH_POPUP_TITLE_MARKERS.some((m) => title.includes(m));
+  } catch {
+    return false;
+  }
+}
+
+/** Capture a command's stdout (trimmed), or null on any failure. */
+function defaultRunCapture(cmd: string, args: string[]): string | null {
+  try {
+    const r = spawnSync(cmd, args, { encoding: 'utf8', timeout: 1500 });
+    if (r.status !== 0) return null;
+    return (r.stdout ?? '').trim() || null;
+  } catch {
+    return null;
+  }
+}
+
 export function submitKeystroke(deps: SubmitKeystrokeDeps = {}): boolean {
   const platform = deps.platform ?? process.platform;
   const env = deps.env ?? process.env;
+  // RC10: never let the submit Enter land in one of our own popups.
+  if ((deps.isPopupFocused ?? focusedWindowIsNexpathPopup)({ platform, env })) {
+    return false;
+  }
   // CORRECTED 2026-08-10 — these previously defaulted to `() => false`, which made
   // `submitKeystroke()` a guaranteed no-op in production: called with no deps (the
   // real wiring), it could never detect a tool or run one, so the submit key would

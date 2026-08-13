@@ -75,19 +75,29 @@ function defaultHasCommand(cmd: string): boolean {
   }
 }
 
-/** Try once to raise the window with `title`. Returns true when activation reports success. */
+/**
+ * Try once to raise the window with `title` — WITHOUT taking keyboard focus.
+ *
+ * ⚠ RC10 (2026-08-13, mirrored from `windsurf-hook/foreground.ts` — the two
+ * raisers are intentionally duplicated across packages): activating the popup
+ * stole keyboard focus mid-typing, so the user's in-flight keystrokes landed
+ * in the popup and silently selected/dismissed it — measured on the popup's
+ * TTY as `Down Up Space Down Enter` with no synthetic key tool running.
+ * Raise ABOVE (`add,above` / `windowraise`); never focus. The user interacts
+ * with the popup only when they deliberately click into it.
+ */
 function defaultActivate(tool: 'wmctrl' | 'xdotool', title: string): boolean {
   try {
     if (tool === 'wmctrl') {
-      // `-a` matches a window by title substring and activates it.
-      return spawnSync('wmctrl', ['-a', title], { stdio: 'ignore', timeout: 2000 }).status === 0;
+      // `-r <title> -b add,above` marks it always-on-top without focusing it.
+      return spawnSync('wmctrl', ['-r', title, '-b', 'add,above'], { stdio: 'ignore', timeout: 2000 }).status === 0;
     }
     const found = spawnSync('xdotool', ['search', '--name', title], {
       encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 2000,
     });
     const id = (found.stdout ?? '').trim().split('\n').filter(Boolean)[0];
     if (!id) return false;
-    return spawnSync('xdotool', ['windowactivate', id], { stdio: 'ignore', timeout: 2000 }).status === 0;
+    return spawnSync('xdotool', ['windowraise', id], { stdio: 'ignore', timeout: 2000 }).status === 0;
   } catch {
     return false;
   }

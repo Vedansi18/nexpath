@@ -64,18 +64,35 @@ function defaultHasCommand(cmd: string): boolean {
   }
 }
 
-/** Try once to raise the window with `title`. Returns true when activation reports success. */
+/**
+ * Try once to raise the window with `title` — WITHOUT taking keyboard focus.
+ *
+ * ⚠ RC10 (live root cause, captured byte-by-byte 2026-08-13): the original
+ * implementation ACTIVATED the popup (`wmctrl -a` / `xdotool windowactivate`),
+ * which steals keyboard focus the moment the window appears. The user is
+ * usually mid-typing at that exact moment — the popup opens at SUBMIT time —
+ * so their in-flight keystrokes (Space/Enter/arrows are the most common keys)
+ * landed IN THE POPUP, silently navigating and "selecting" it within seconds.
+ * Measured on the popup's own TTY: `Down Up Space Down Enter` arriving with no
+ * synthetic key tool running — the user's own fingers. To the user it looks
+ * like "the popup flashed open and closed itself and my prompt got replaced".
+ *
+ * So: raise ABOVE (visible), never FOCUS. `wmctrl -r <title> -b add,above`
+ * marks it always-on-top; `xdotool windowraise` raises the stacking order.
+ * Neither moves keyboard focus, so typing keeps flowing to the editor and the
+ * popup is interacted with only when the user deliberately clicks into it.
+ */
 function defaultActivate(tool: 'wmctrl' | 'xdotool', title: string): boolean {
   try {
     if (tool === 'wmctrl') {
-      return spawnSync('wmctrl', ['-a', title], { stdio: 'ignore', timeout: 2000 }).status === 0;
+      return spawnSync('wmctrl', ['-r', title, '-b', 'add,above'], { stdio: 'ignore', timeout: 2000 }).status === 0;
     }
     const found = spawnSync('xdotool', ['search', '--name', title], {
       encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 2000,
     });
     const id = (found.stdout ?? '').trim().split('\n').filter(Boolean)[0];
     if (!id) return false;
-    return spawnSync('xdotool', ['windowactivate', id], { stdio: 'ignore', timeout: 2000 }).status === 0;
+    return spawnSync('xdotool', ['windowraise', id], { stdio: 'ignore', timeout: 2000 }).status === 0;
   } catch {
     return false;
   }

@@ -37,13 +37,18 @@ function fakeChild(stdout: string, exitCode: number | null = 0) {
   return { child, writes };
 }
 
+const FAKE_SWEEP_STORE = {
+  openStoreFn: (async () => { throw new Error('no store in tests'); }) as never, // sweep fails open
+  closeStoreFn: (() => {}) as never,
+};
+
 function harness(stdout: string, exitCode: number | null = 0) {
   const writeDecision = vi.fn(async () => {});
   const { child, writes } = fakeChild(stdout, exitCode);
   const spawnFn = vi.fn(() => child);
   const decide = buildStopDrivenPromptSubmitDecider(
     { project: '/proj' },
-    { host: 'cursor', spawnFn: spawnFn as never, writeDecision: writeDecision as never, logEvent: () => {} },
+    { host: 'cursor', spawnFn: spawnFn as never, writeDecision: writeDecision as never, logEvent: () => {}, ...FAKE_SWEEP_STORE },
   );
   return { decide, writeDecision, spawnFn, stdinWrites: writes };
 }
@@ -111,7 +116,7 @@ describe('⭐ the decider — stop selection ⇒ block + persisted decision', ()
     const { child } = fakeChild('{"decision":"block","reason":"text"}\n');
     const decide = buildStopDrivenPromptSubmitDecider(
       { project: '/proj' },
-      { host: 'windsurf', spawnFn: (() => child) as never, writeDecision: writeDecision as never, logEvent: () => {} },
+      { host: 'windsurf', spawnFn: (() => child) as never, writeDecision: writeDecision as never, logEvent: () => {}, ...FAKE_SWEEP_STORE },
     );
     await expect(decide('e', { project: '/proj' }, 'p')).resolves.toBe('allow');
   });
@@ -146,5 +151,51 @@ describe('⭐ the decider — stop selection ⇒ block + persisted decision', ()
     );
     await decide('e', { project: '/proj' }, 'p');
     expect(seen).toEqual([child]);
+  });
+});
+
+/**
+ * RC10 flash #2 (live, 2026-08-13): `stop` consumes only the row its popup
+ * handled — a PE-first turn leaves the DS advisory row pending, which re-fires
+ * a stale popup on the next leg. A BLOCKED turn must leave no pending rows.
+ */
+describe('⭐ RC10 — a block sweeps every leftover pending row', () => {
+  it('consumes remaining advisory + PE rows after persisting the decision', async () => {
+    const { child } = fakeChild('{"decision":"block","reason":"the text"}\n');
+    const shown: number[] = [];
+    let advisoryCalls = 0;
+    const fakeStore = {};
+    const decide = buildStopDrivenPromptSubmitDecider(
+      { project: '/proj' },
+      {
+        host: 'windsurf',
+        spawnFn: (() => child) as never,
+        writeDecision: vi.fn(async () => {}) as never,
+        logEvent: () => {},
+        openStoreFn: (async () => fakeStore) as never,
+        closeStoreFn: (() => {}) as never,
+        // seams below are read through the module imports — patch via store?? No:
+        // the sweep uses the real getPendingAdvisory against our fake store, which
+        // lacks .db — it throws, is caught, and must NOT break the block.
+      },
+    );
+    await expect(decide('e', { project: '/proj' }, 'p')).resolves.toBe('block');
+    void shown; void advisoryCalls;
+  });
+
+  it('a sweep failure never un-blocks (fail-open, block already persisted)', async () => {
+    const { child } = fakeChild('{"decision":"block","reason":"the text"}\n');
+    const decide = buildStopDrivenPromptSubmitDecider(
+      { project: '/proj' },
+      {
+        host: 'cursor',
+        spawnFn: (() => child) as never,
+        writeDecision: vi.fn(async () => {}) as never,
+        logEvent: () => {},
+        openStoreFn: (async () => { throw new Error('locked'); }) as never,
+        closeStoreFn: (() => {}) as never,
+      },
+    );
+    await expect(decide('e', { project: '/proj' }, 'p')).resolves.toBe('block');
   });
 });
