@@ -209,6 +209,30 @@ describe('TI-2: facade maps composer failure reasons onto the existing runtime s
   describe('states that used to be silent', () => {
     beforeEach(() => { process.env['OPENAI_API_KEY'] = `sk-${'x'.repeat(40)}`; });
 
+    it('carries the caller-declared deadline through to the composer', async () => {
+      // The ceiling is worth nothing if nothing supplies it. The composer is mocked here, so this
+      // asserts the wiring: whatever the caller declared reaches the call site unchanged.
+      const { composeStructuredComposerOutputV1 } = await import('./llm-composer.js');
+      mockCall.result = { ok: true, output: { outputId: 'o', sectionDrafts: [], composerClaims: [] } };
+      const { preparePromptEnhancement } = await import('./facade.js');
+      await preparePromptEnhancement({ ...request(NLP_HEAVY_PROMPT), deadlineAtMs: 123_456 });
+
+      const calls = vi.mocked(composeStructuredComposerOutputV1).mock.calls;
+      expect(calls.length).toBeGreaterThan(0);
+      expect(calls[calls.length - 1]![0]).toMatchObject({ deadlineAtMs: 123_456 });
+    });
+
+    it('passes no deadline when the caller declared none', async () => {
+      const { composeStructuredComposerOutputV1 } = await import('./llm-composer.js');
+      vi.mocked(composeStructuredComposerOutputV1).mockClear();
+      mockCall.result = { ok: true, output: { outputId: 'o', sectionDrafts: [], composerClaims: [] } };
+      const { preparePromptEnhancement } = await import('./facade.js');
+      await preparePromptEnhancement(request(NLP_HEAVY_PROMPT));
+
+      const calls = vi.mocked(composeStructuredComposerOutputV1).mock.calls;
+      expect(calls[calls.length - 1]![0].deadlineAtMs).toBeUndefined();
+    });
+
     it('no_eligible_sections WITH a key is named, not filed as "not requested"', async () => {
       mockCall.result = { ok: false, reason: 'no_eligible_sections' };
       const result = await prepared();

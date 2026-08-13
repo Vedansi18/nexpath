@@ -426,6 +426,27 @@ describe('coverage as a retry condition', () => {
     expect(prompts).toHaveLength(1);
   });
 
+  it('drops a stale coverage directive when the next attempt fails for a different reason', async () => {
+    // A short reply, then one that drifts language, then a good one. The directive naming the
+    // sections missing from the FIRST reply must not still be attached on the third attempt: by
+    // then it describes a reply two rounds old.
+    const short = reply([draft('sec-verify', 'fact-a')]);
+    const drifted = JSON.stringify({
+      detectedLanguageSelfReport: 'fr',
+      sectionDrafts: [draft('sec-verify', 'fact-a'), draft('sec-risk', 'fact-b')],
+      composerClaims: ['claim:fact-a'],
+    });
+    const full = reply([draft('sec-verify', 'fact-a'), draft('sec-risk', 'fact-b')]);
+    const { client: scripted, prompts } = scriptedClient([short, drifted, full]);
+
+    const result = await composeStructuredComposerOutputV1(twoSectionInput, scripted);
+
+    expect(result.ok).toBe(true);
+    expect(prompts).toHaveLength(3);
+    expect(prompts[1]).toContain('did not include a draft for every section'); // from the short reply
+    expect(prompts[2]).not.toContain('did not include a draft for every section'); // cleared
+  });
+
   it('ignores extra drafts the plan did not ask for — coverage is about what is MISSING', async () => {
     const withExtra = reply([draft('sec-verify', 'fact-a'), draft('sec-risk', 'fact-b'), draft('sec-ghost', 'fact-a')]);
     const { client: scripted, prompts } = scriptedClient([withExtra]);

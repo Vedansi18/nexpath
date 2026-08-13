@@ -368,7 +368,10 @@ export async function composeStructuredComposerOutputV1(
     const parsed = raw ? parseStructuredComposerOutput(raw, input.enhancementId) : undefined;
     if (!parsed) continue; // malformed / empty -> retry
     if (!isPromptEnhancementLanguageConsistentV1(input.originalPromptText, parsed)) {
-      // Uncovered language or English drift -> retry with a stronger directive.
+      // Uncovered language or English drift -> retry with a stronger directive. Clear any coverage
+      // directive first: it was computed from an earlier reply and naming sections this one may
+      // already carry would send the model chasing a list that is no longer true.
+      missingSectionIds = [];
       languageRetry = true;
       continue;
     }
@@ -377,6 +380,7 @@ export async function composeStructuredComposerOutputV1(
       // validator would reject that body outright and the user would get their own prompt back with
       // nothing added, so rewrite it while the composer is still running. This only ever costs a retry
       // from the existing budget — it never lets a body through that the validator would refuse.
+      missingSectionIds = []; // same reason as the language branch above
       authorityRetry = true;
       continue;
     }

@@ -226,6 +226,10 @@ async function prepare(
       enhancementId,
       originalPromptText: request.sourcePrompt.text,
       planning,
+      // Carried straight through from the caller, which is what knows which hook this is running
+      // on. Absent here means absent there, so a caller that supplies nothing keeps today's
+      // behaviour exactly.
+      deadlineAtMs: request.deadlineAtMs,
     });
     if (composerCall.ok) {
       structuredComposerOutput = composerCall.output;

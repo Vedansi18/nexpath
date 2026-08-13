@@ -1564,6 +1564,18 @@ export interface PromptEnhancementPrepareRequestV1 {
   requestId: string;
   projectRoot: string;
   hostSurface: PromptEnhancementHostSurface;
+  /**
+   * When the hook carrying this request has to be finished, as epoch milliseconds.
+   *
+   * Passed through to the composer, which declines to START a call that cannot complete before it.
+   * The value belongs to the caller because the caller is what knows which hook it is running on —
+   * the budget differs per surface, and there is deliberately no constant for it here.
+   *
+   * Absent means no ceiling, which is the behaviour without it. A caller that omits it is
+   * unaffected; a caller that supplies it gets a typed refusal between attempts instead of being
+   * killed mid-loop with no disposition, no popup, and nothing left to answer with.
+   */
+  deadlineAtMs?: number;
   sourcePrompt: {
     text: string;
     origin: 'user' | 'pe_generated_echo' | 'unknown';
