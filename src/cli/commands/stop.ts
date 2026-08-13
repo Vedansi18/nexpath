@@ -9,15 +9,13 @@ import {
   type PendingPromptEnhancement,
 } from '../../store/pending-prompt-enhancements.js';
 import { isFeedbackEligible, markFeedbackShown } from '../../store/feedback-cadence.js';
-import { recordAdvisoryFired, recordOptionSelected, recordActionSignal } from '../../store/feedback-signals.js';
+import { recordActionSignal } from '../../store/feedback-signals.js';
 import { sendFeedback } from '../../telemetry/feedback-send.js';
 import { runFeedbackPopup, type FeedbackRenderFn, type FeedbackResult } from '../../decision-session/feedback-popup.js';
 import { createFeedbackRenderFn } from '../../decision-session/feedback-tty.js';
-import { runDecisionSession } from '../../decision-session/DecisionSession.js';
 import type { SelectFn } from '../../decision-session/DecisionSession.js';
-import { createTtySelectFn } from '../../decision-session/TtySelectFn.js';
 import { getConfig } from '../../store/config.js';
-import { detectLanguage, resolveLanguage, LANG_WINDOW, LANG_DETECT_INTERVAL } from '../../classifier/LanguageDetector.js';
+import { detectLanguage, LANG_WINDOW, LANG_DETECT_INTERVAL } from '../../classifier/LanguageDetector.js';
 import { SessionStateManager } from '../../classifier/SessionStateManager.js';
 import { getRecentPrompts } from '../../store/prompts.js';
 import { getProject, setDetectedLanguage } from '../../store/projects.js';
@@ -26,8 +24,7 @@ import type { LogLevel } from '../../logger.js';
 import { writeHookStats } from '../../store/hook-stats.js';
 import { writeTelemetry } from '../../telemetry/index.js';
 import { triggerOpportunisticSync } from '../../telemetry/OpportunisticSync.js';
-import { flushIfTelemetryOn, flushLifecycle } from '../../telemetry/lifecycle-flush.js';
-import { recentPromptMetadata } from '../../telemetry/recent-prompts.js';
+import { flushLifecycle } from '../../telemetry/lifecycle-flush.js';
 import { readStdin, recordPromptEnhancementCliFeedbackV1, recordPromptEnhancementShownMemoryV1, markPromptEnhancementUsedMemoryV1, recordPromptEnhancementStopBridgeDeliveryV1 } from './auto.js';
 import {
   resolvePromptEnhancementCliHostCapabilityV1,
@@ -46,21 +43,6 @@ import { intakePromptEnhancementSequenceOnFirstSendV1 } from '../../prompt-enhan
 import { upsertPendingPromptSequence, getActivePendingPromptSequence } from '../../store/pending-sequences.js';
 import { evaluatePromptEnhancementFutureSequenceRuntimeGateV1 } from '../../prompt-enhancement/future-sequence-runtime-gate.js';
 import { PROMPT_ENHANCEMENT_CONTRACT_VERSION, type PromptEnhancementFutureSequenceRuntimeEventV1 } from '../../prompt-enhancement/contracts.js';
-import type { GeneratedOptions } from '../../decision-session/OptionGenerator.js';
-import { resolveContentSource, selectionRegister } from '../../decision-session/selection-registry.js';
-import { autogenAwareLookup, pinchSignalTypeForFlag } from '../../decision-session/content-template-source.js';
-import { runAutogenForFire } from '../../decision-session/auto-template-generator.js';
-import { loadRightGoodProfile } from '../../classifier/right-good-aggregator.js';
-import { generateFromEngine, buildEngineGrounding, composeDeterministicOptions } from '../../decision-session/engine-option-generator.js';
-import { resolveRecord } from '../../decision-session/content-template-engine.js';
-import { appendVariantServedEvent } from '../../telemetry/param-events.js';
-import { activePinFor, applyPinToLookup, applyPinToLevel, type ActivePin } from '../../decision-session/experiment-config.js';
-import { resolvePinchFields } from '../../decision-session/signal-pinch-fields.js';
-import { getWhyHelpForSignalType } from '../../decision-session/why-help-by-signal-type.js';
-import type { WhyHelpEntry } from '../../decision-session/why-help.js';
-import { getUserDepthLevel } from '../../store/user-depth-level.js';
-import type { MaturityLevel } from '../../decision-session/content-template-schema.js';
-import type { PromptRecord } from '../../classifier/types.js';
 import { resolveOpenAIKey, getKeySource } from '../../config/ApiKeyResolver.js';
 
 /**
@@ -101,7 +83,10 @@ export type StopOutcome =
   // MPS-6: a sequence's own continuation Stop was exempted from the loop guard and routed to the
   // continuation launcher, which is fail-closed in v1 (gate blocked) — nothing rendered, the row is
   // left as-is. Distinct from `loop_guard` so a gate-blocked continuation is legible in logs/tests.
-  | { outcome: 'mps_continuation_gated' };
+  | { outcome: 'mps_continuation_gated' }
+  // MPS-7: the old Decision-Session advisory popup is disabled outright — a pending advisory was found
+  // but consumed silently and never rendered. Distinct outcome so the disabled path is legible in logs.
+  | { outcome: 'advisory_disabled' };
 
 /**
  * Outcome of showing the deferred PE popup on the Stop hook (owner decision B-i).
@@ -325,9 +310,6 @@ export async function runStop(
     writeTelemetry(payload.cwd, 'language_detected', { detectedLanguage: detected ?? null }, store);
   }
 
-  // 1.7. Read decision_session_count for help-line gating in the decision session UI
-  const decisionSessionCount = getProject(store, payload.cwd)?.decisionSessionCount ?? 0;
-
   // 2. Session state (`mgr`) was loaded up front (before the loop guard) so the MPS-6 sequence check,
   //    the PE popup, and the advisory lookup are all session-scoped; it is reused here.
 
@@ -350,188 +332,15 @@ export async function runStop(
     return { outcome: 'no_pending' };
   }
 
-  logger.debug('stop_pending_hit', {
-    cwd: payload.cwd,
-    sessionId: mgr.current.sessionId,
-    advisoryId: advisory.id,
-  });
-  // 3. Mark as shown immediately — prevents duplicate UI on rapid Stop re-fires
+  // MPS-7 (Phase 7.1): the old Decision-Session advisory popup is disabled outright — it no longer
+  // appears on ANY Stop (owner ruling: removal, not precedence; no arbitration with the PE / sequence
+  // popups). A pending advisory is consumed silently — marked shown so it does not re-queue — and
+  // NOTHING renders: no popup, no shown/fired telemetry, no announcement. The now-unreachable render
+  // path (option generation + runDecisionSession + result handling) and the advisory scheduling are
+  // removed in Phase 7.2.
   markAdvisoryShown(store, advisory.id);
-
-  // 3.5. Advisory frequency gate — honour opt-out / frequency setting even for
-  //      already-queued pending advisories (e.g. user pressed Ctrl+X on a prior
-  //      advisory while a second was already pending in the DB).
-  const freq =
-    getConfig(store.db, `advisory_frequency:${payload.cwd}`) ??
-    getConfig(store.db, 'advisory_frequency') ??
-    'every_event';
-  if (freq === 'off') {
-    logger.info('stop_freq_gate', { cwd: payload.cwd, reason: 'freq_off' });
-    return { outcome: 'skipped' };
-  }
-
-  // 4. TTY resolution — Stop hook stdin is always piped; open /dev/tty directly
-  let effectiveSelectFn: SelectFn | undefined = selectFn;
-  if (!effectiveSelectFn) {
-    if (process.env['NEXPATH_SIM'] === '1') {
-      // Sim mode: skip TTY entirely — runLevel intercepts NEXPATH_SIM before calling selectFn
-      effectiveSelectFn = () => Promise.resolve('');
-      logger.debug('stop_tty_resolved', { method: 'sim' });
-    } else {
-      const ttySel = createTtySelectFn(store, payload.cwd);
-      if (!ttySel) {
-        logger.info('stop_no_tty', { cwd: payload.cwd });
-        return { outcome: 'no_tty' };
-      }
-      effectiveSelectFn = ttySel;
-      logger.debug('stop_tty_resolved', { method: 'direct_tty' });
-    }
-  }
-
-  // 5. Generate decision options — runs after Claude's response, within stop's 600s window
-  const langOverride  = getConfig(store.db, 'language_override');
-  const detectedLang  = getProject(store, payload.cwd)?.detectedLanguage ?? undefined;
-  const effectiveLang = resolveLanguage(langOverride, detectedLang);
-
-  // Dispatch: every signal is migrated, so the fired advisory's record serves it via the engine.
-  // The record signalType comes from the flag (the `absence:` convention) or, for a stage transition
-  // (no absence: key), from the destination stage — both via pinchSignalTypeForFlag, which needs no
-  // static content (the B11 cutover removed it).
-  const recordSignalType = pinchSignalTypeForFlag(advisory.flagType, advisory.stage);
-  // The engine now serves role-tailored content directly (B11 `roleOverrides` — context_loss's
-  // founder / indie_hacker / pm variants), so there is no role-precedence static guard: every
-  // migrated signal, role-tailored or not, takes the engine path (the role is passed below).
-  let generatedOptions: GeneratedOptions | null = null;
-  // A migrated signal owns its popup question + per-class why-help in the record (no matching
-  // static DecisionContent) — thread them to runDecisionSession as overrides.
-  let questionOverride: string | undefined;
-  let whyHelpOverride: WhyHelpEntry | null | undefined;
-  const register = selectionRegister(mgr.current.profile?.nature);
-  if (recordSignalType && resolveContentSource(recordSignalType) === 'content-template') {
-    // An active experiment pin makes the served variant deterministic for this
-    // installation: it can force the record source and/or the maturity level.
-    // Fail-open — a missing/malformed config means no pinning.
-    let activePin: ActivePin | null = null;
-    try { activePin = activePinFor(store, recordSignalType); } catch { activePin = null; }
-    const baseLookup = autogenAwareLookup(store, payload.cwd, recordSignalType);
-    const lookup = activePin ? applyPinToLookup(baseLookup, activePin.pin) : baseLookup;
-    const baseLevel = (getUserDepthLevel(store, payload.cwd)?.currentLevel ?? 2) as MaturityLevel;
-    const level = activePin ? applyPinToLevel(baseLevel, activePin.pin) : baseLevel;
-    const role   = mgr.current.profile?.role ?? undefined;
-    // Popup question + per-class why-help are static (no LLM). The question comes from the
-    // register-keyed pinch-fields map (the migrated question/pinchFallback layer), not the record.
-    questionOverride = resolvePinchFields(recordSignalType, register)?.question;
-    whyHelpOverride = getWhyHelpForSignalType(recordSignalType);
-    // The engine grounding/weave needs an LLM client; on ANY failure (missing key, API error)
-    // degrade below — the Stop hook must never crash on option gen.
-    try {
-      const promptHistory = mgr.current.promptHistory as PromptRecord[];
-      const facts = await buildEngineGrounding(store, payload.cwd, promptHistory, openai);
-      generatedOptions = await generateFromEngine({ lookup, level, register, role, facts, factCap: 3 }, openai);
-    } catch (err) {
-      logger.debug('stop_engine_option_gen_error', { error: String(err) });
-      generatedOptions = null;
-    }
-    let composePath: 'llm' | 'deterministic' = 'llm';
-    if (!generatedOptions) {
-      // The grounded engine failed (missing key / API error). Serve a DETERMINISTIC engine composition
-      // from the record — no LLM, register/role-aware, safeguard-carrying — so the fallback needs no
-      // static content. (Records are the whole content layer after the B11 cutover.)
-      generatedOptions = composeDeterministicOptions({ lookup, level, register, role });
-      composePath = 'deterministic';
-    }
-    // Record WHICH content variant was served (identity only — level / register /
-    // role / record source / compose path; never any option text) so downstream
-    // measurement can compare served variants against outcomes. Best-effort —
-    // never blocks the popup.
-    if (generatedOptions) {
-      try {
-        const served = resolveRecord(lookup);
-        if (served) {
-          appendVariantServedEvent(store, {
-            projectRoot:     payload.cwd,
-            sessionId:       mgr.current.sessionId,
-            promptIndex:     Math.max(0, mgr.current.promptCount - 1),
-            signalKey:       recordSignalType,
-            stage:           mgr.current.currentStage,
-            stageConfidence: mgr.current.stageConfidence,
-            variant: {
-              level, register, role, source: served.source, path: composePath,
-              ...(activePin ? { experiment: activePin.experimentId } : {}),
-            },
-          });
-        }
-      } catch { /* variant logging is non-fatal */ }
-    }
-  }
-
-  writeTelemetry(payload.cwd, 'stop_advisory_shown', {
-    flagType:         advisory.flagType,
-    stage:            advisory.stage,
-    generatedOptions: !!generatedOptions,
-  }, store);
-  recordAdvisoryFired(store, payload.cwd);
-  // On-mode: emit the advisory-fired event now (backdated). Off-mode buffers it
-  // for the feedback-consent flush. Fire-and-forget so the popup is never blocked.
-  void flushIfTelemetryOn(store).catch(() => {});
-
-  const dsResult = await runDecisionSession(
-    {
-      stage:                advisory.stage,
-      flagType:             advisory.flagType,
-      pinchLabel:           advisory.pinchLabel,
-      sessionId:            advisory.sessionId,
-      projectRoot:          payload.cwd,
-      promptCount:          advisory.promptCount,
-      decisionSessionCount,
-      generatedOptions:     generatedOptions ?? undefined,
-      questionOverride,
-      whyHelpOverride,
-      profile:              mgr.current.profile,
-      // Phase 4 — Item B: last-5 prompt metadata for decision_session_started.
-      recentPrompts:        recentPromptMetadata(mgr.current.promptHistory),
-    },
-    store,
-    effectiveSelectFn,
-  );
-
-  // Per-user auto-gen loop — after the popup, off its critical path. The current
-  // fire already served (the preset, or a previously-cached per-user record); this
-  // runs the one-time ranking and lazily generates the fired topic's per-user record
-  // so the NEXT fire of a selected topic serves it. Best-effort — never breaks the outcome.
-  if (recordSignalType && resolveContentSource(recordSignalType) === 'content-template') {
-    await runAutogenForFire({
-      store,
-      projectRoot:  payload.cwd,
-      signalType:   recordSignalType,
-      currentLevel: (getUserDepthLevel(store, payload.cwd)?.currentLevel ?? 2) as MaturityLevel,
-      rightGood:    loadRightGoodProfile(store, payload.cwd),
-      client:       openai,
-    });
-  }
-
-  if (dsResult.outcome === 'selected') {
-    // Record the selection (timestamp only — no option text or index).
-    recordOptionSelected(store, payload.cwd);
-    // On-mode: emit the option-selected event now; off-mode buffers it for the
-    // feedback-consent flush. Fire-and-forget so the block decision is not delayed.
-    void flushIfTelemetryOn(store).catch(() => {});
-    // Store injected text in session — auto reads and clears this on its next invocation
-    // to skip all pipeline processing for the advisory-injected prompt.
-    mgr.setInjectedPrompt(store, dsResult.selectedPrompt);
-    logger.info('stop_blocked', { cwd: payload.cwd, reason: dsResult.selectedPrompt });
-    return { outcome: 'blocked', reason: dsResult.selectedPrompt };
-  }
-
-  if (dsResult.outcome === 'clipboard_only') {
-    // Copy-to-clipboard is also engagement with an option (timestamp only).
-    recordOptionSelected(store, payload.cwd);
-    logger.info('stop_clipboard_only', { cwd: payload.cwd });
-    return { outcome: 'clipboard_only' };
-  }
-
-  logger.info('stop_skipped', { cwd: payload.cwd });
-  return { outcome: 'skipped' };
+  logger.debug('stop_advisory_disabled', { cwd: payload.cwd, advisoryId: advisory.id });
+  return { outcome: 'advisory_disabled' };
 }
 
 // ── CLI entry point ────────────────────────────────────────────────────────────
