@@ -3,9 +3,11 @@ import {
   prepareSequenceContinuationOfferV1,
   deliverSequenceContinuationOutcomeV1,
   packageSequenceContinuationOfferV1,
+  buildContinuationPopupFromPackageV1,
 } from './sequence-continuation-delivery.js';
 import type { PromptEnhancementSequenceRuntimeStateV1 } from './sequence-runtime.js';
 import { packagePromptEnhancementSequenceContinuationV1, type PromptEnhancementSequencePackagerInputV1 } from './sequence-packager.js';
+import { buildPromptEnhancementMpsContinuationPopupV1 } from './continuation-popup.js';
 import type { PromptEnhancementSequenceItemV1 } from './sequence-payload.js';
 import type {
   PromptEnhancementPrepareResultV1,
@@ -277,5 +279,44 @@ describe('continuation packaging step (2.1)', () => {
     // Index 0 is the already-sent first prompt — offering it again is not a continuation.
     expect(packageSequenceContinuationOfferV1(input({ currentItemIndex: 0 })))
       .toEqual({ kind: 'no_popup', refusal: 'index_is_the_first_item' });
+  });
+});
+
+describe('feed the packaged continuation into the popup builder (2.2)', () => {
+  // The fix plan's 2.2 test is "the adapter passes the packager's result/handoffMetadata/event VERBATIM
+  // into the builder — same names, no mapping layer." We assert that by comparing the adapter's output to
+  // a direct builder call fed those exact fields (plus the locked blocked_no_send cancel row); if anyone
+  // later inserts a mapping/rename, the two diverge. (A genuinely builder-valid PrepareResult only comes
+  // from the async facade — see continuation-popup.test.ts:validContinuation — which is that builder's own
+  // integration concern, not this pure adapter's.)
+  it('feeds result/handoffMetadata/event verbatim + the locked cancel row (no mapping layer)', () => {
+    const pkg = packageSequenceContinuationOfferV1(input());
+    expect(pkg.kind).toBe('package');
+    if (pkg.kind !== 'package') return;
+    const direct = buildPromptEnhancementMpsContinuationPopupV1({
+      result: pkg.packaged.result,
+      handoffMetadata: pkg.packaged.handoffMetadata,
+      event: pkg.packaged.event,
+      additionalDetails: undefined,
+      cancel: { state: 'available', disposition: 'blocked_no_send' },
+    });
+    // Identical outcome (state + reasonCodes/model) — the adapter adds nothing but the fixed cancel row,
+    // and forwards the builder's verdict as-is (it decides nothing the builder does not).
+    expect(buildContinuationPopupFromPackageV1(pkg.packaged)).toEqual(direct);
+  });
+
+  it('forwards the popup typed-details state to the builder when supplied', () => {
+    const pkg = packageSequenceContinuationOfferV1(input());
+    expect(pkg.kind).toBe('package');
+    if (pkg.kind !== 'package') return;
+    const details = { text: 'typed so far', revision: 1 };
+    const direct = buildPromptEnhancementMpsContinuationPopupV1({
+      result: pkg.packaged.result,
+      handoffMetadata: pkg.packaged.handoffMetadata,
+      event: pkg.packaged.event,
+      additionalDetails: details,
+      cancel: { state: 'available', disposition: 'blocked_no_send' },
+    });
+    expect(buildContinuationPopupFromPackageV1(pkg.packaged, details)).toEqual(direct);
   });
 });

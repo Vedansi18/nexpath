@@ -9,6 +9,11 @@ import {
   type PromptEnhancementSequencePackagedContinuationV1,
   type PromptEnhancementSequencePackagerRefusalV1,
 } from './sequence-packager.js';
+import {
+  buildPromptEnhancementMpsContinuationPopupV1,
+  type PromptEnhancementMpsContinuationBuildResultV1,
+  type PromptEnhancementMpsContinuationInputV1,
+} from './continuation-popup.js';
 
 /**
  * Pure intent delivery for the MPS continuation flow (P4). Maps the two decision moments of a
@@ -86,6 +91,29 @@ export function packageSequenceContinuationOfferV1(
   const result = packagePromptEnhancementSequenceContinuationV1(input);
   if (!result.ok) return { kind: 'no_popup', refusal: result.refusal };
   return { kind: 'package', packaged: result.packaged };
+}
+
+/**
+ * Feed a packaged continuation (2.1) into the popup builder (2.2).
+ *
+ * The packager's `result` / `handoffMetadata` / `event` are the builder's inputs under the SAME names
+ * and the SAME types — passed VERBATIM here, with no mapping/adapter layer between them. Only the
+ * popup's own inputs are supplied: `cancel` is the locked cancel-remaining-sequence row
+ * (`blocked_no_send`, MPS-2 §5b), and `additionalDetails` is the popup's typed-details field state
+ * (absent on first open). The builder validates the three fields and returns a ready popup model or a
+ * typed `no_popup` — returned as-is; this step decides nothing the builder does not.
+ */
+export function buildContinuationPopupFromPackageV1(
+  packaged: PromptEnhancementSequencePackagedContinuationV1,
+  additionalDetails?: PromptEnhancementMpsContinuationInputV1['additionalDetails'],
+): PromptEnhancementMpsContinuationBuildResultV1 {
+  return buildPromptEnhancementMpsContinuationPopupV1({
+    result: packaged.result,
+    handoffMetadata: packaged.handoffMetadata,
+    event: packaged.event,
+    additionalDetails,
+    cancel: { state: 'available', disposition: 'blocked_no_send' },
+  });
 }
 
 /** The continuation-shell outcome shape this delivery consumes (subset the launcher forwards). */
