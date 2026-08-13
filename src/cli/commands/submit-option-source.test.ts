@@ -362,3 +362,42 @@ describe('⭐ H8 Finding 2 — the pending PE row must not survive a blocked tur
     expect(markPeShownFn).toHaveBeenCalledWith({}, 9);
   });
 });
+
+/**
+ * ⚠ REQUIRED POPUP HEADER FIELDS (live root cause, 2026-08-12).
+ *
+ * The popup window's render-loop emits `pinch-label` and `question` lines
+ * UNCONDITIONALLY; an undefined value crashes `styler` (`line.length`), the
+ * terminal closes within ~200 ms, and the decider silently allows — measured
+ * live on Cursor: options composed, popup flashed, nothing ever blocked.
+ * `stop.ts` always supplies both via `runDecisionSession`; this adapter must
+ * supply them too. These pins make dropping either field a test failure, not
+ * a silent live regression.
+ */
+describe('⚠ popup header fields — render-loop crashes without them', () => {
+  it('⭐ passes a non-undefined pinchLabel and question to the selector', async () => {
+    let seenOpts: Record<string, unknown> | null = null;
+    const s = make({
+      getRow: (() => ({ id: 7, flagType: 'absence:x', stage: 'implementation', pinchLabel: 'Check it out' })) as never,
+      selectFnFactory: (() => async (o: Record<string, unknown>) => { seenOpts = o; return null; }) as never,
+    });
+    s.composeOptions('p');
+    await s.renderPopup('p', GENERATED);
+    expect(seenOpts).not.toBeNull();
+    expect(seenOpts!.pinchLabel).toBe('Check it out');       // the advisory's own label
+    expect(typeof seenOpts!.question).toBe('string');
+    expect((seenOpts!.question as string).length).toBeGreaterThan(0);
+  });
+
+  it('a label-less advisory row still renders (constant fallback, never undefined)', async () => {
+    let seenOpts: Record<string, unknown> | null = null;
+    const s = make({
+      getRow: (() => ({ id: 8, flagType: 'absence:x', stage: 'implementation', pinchLabel: undefined })) as never,
+      selectFnFactory: (() => async (o: Record<string, unknown>) => { seenOpts = o; return null; }) as never,
+    });
+    s.composeOptions('p');
+    await s.renderPopup('p', GENERATED);
+    expect(typeof seenOpts!.pinchLabel).toBe('string');      // never undefined
+    expect((seenOpts!.pinchLabel as string).length).toBeGreaterThan(0);
+  });
+});

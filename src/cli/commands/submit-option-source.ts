@@ -156,6 +156,8 @@ export function createDeterministicSubmitOptionSource(
   let resolvedLevel: MaturityLevel = 2;
   // Row id read this turn, so a blocked turn can consume it. Null ⇒ nothing read.
   let lastRowId: number | null = null;
+  // The advisory's pinch label, for the popup header (see renderPopup).
+  let lastPinchLabel: string | null = null;
   // True when the user explicitly chose "copy to clipboard" in the popup.
   let clipboardRequested = false;
 
@@ -165,6 +167,7 @@ export function createDeterministicSubmitOptionSource(
       //    turn ⇒ no popup. (Gap 5's "no pending_advisory row" case lands here.)
       const row = getRow(deps.store as never, deps.projectRoot, deps.sessionId);
       lastRowId = row ? row.id : null;
+      lastPinchLabel = row ? row.pinchLabel ?? null : null;
       if (!row) {
         log('submit_option_source: no pending_advisory row — allowing');
         return null;
@@ -235,6 +238,18 @@ export function createDeterministicSubmitOptionSource(
       if (!selectFn) { log('submit_option_source: no TTY selector — allowing'); return null; }
       const picked: unknown = await selectFn({
         message: 'Refine this prompt before sending?',
+        // ── ⚠ REQUIRED HEADER FIELDS (live root cause, 2026-08-12) ─────────
+        // The popup window's render-loop emits `pinch-label` and `question`
+        // lines UNCONDITIONALLY (`render-loop.js` header pair) — an undefined
+        // value crashes `styler` (`line.length`), the terminal closes within
+        // ~200 ms, the selection resolves null, and the decider silently
+        // allows. Measured live: the popup "flashed" and every submit passed
+        // through. `stop.ts` never hits this because `runDecisionSession`
+        // always supplies both. So they are REQUIRED here, not decoration:
+        // the advisory's own pinch label (with a constant fallback so a
+        // label-less row still renders) and the question line.
+        pinchLabel: lastPinchLabel ?? 'Nexpath',
+        question: 'Refine this prompt before sending?',
         options: choices.map((text) => ({ value: text, label: text })),
       } as never);
 
@@ -252,6 +267,10 @@ export function createDeterministicSubmitOptionSource(
       if (picked && typeof picked === 'object' && typeof pv === 'string') {
         return ((picked as { value: string }).value) || null;
       }
+      // Dismissal / unknown shape. Logged because this exact silent null once
+      // masked a crashing popup window for a full day (2026-08-12): the crash
+      // and a user pressing Esc were indistinguishable without this line.
+      log('submit_option_source: popup returned no selection — allowing');
       return null;
     } catch (err) {
       // Fail-open (A3): a popup fault releases the prompt unmodified.
