@@ -68,7 +68,7 @@ async function validContinuation() {
     terminalTransitionState: 'none', explicitUserActionState: 'present_future_only', idempotencyKey: 'b32-idem', createdAtMs: 2,
   };
   return buildPromptEnhancementMpsContinuationPopupV1({
-    result, handoffMetadata: handoff, event, progress: { done: 3, total: 27 }, additionalDetails: { text: 'Keep the same fixture.', revision: 1 },
+    result, handoffMetadata: handoff, event, progress: { done: 3, total: 27 }, itemKind: 'task', additionalDetails: { text: 'Keep the same fixture.', revision: 1 },
     cancel: { state: 'available', disposition: 'blocked_no_send' },
   });
 }
@@ -117,7 +117,7 @@ describe('stage-3-2 later MPS continuation popup', () => {
     const result = await preparePromptEnhancement(request());
     const handoff = buildPromptEnhancementHandoffMetadataV1({ handoffDecisionId: 'b32-handoff', requestId: result.requestId, projectRoot: result.projectRoot, currentBody: result.currentBody, safetySummary: result.safetySummary, handoffKind: 'first_prompt_handoff_candidate', summary: { summaryId: 'b32-summary', publicSafeText: 'Metadata only.', remainingTaskCount: 1, taskRoleLabels: ['verification'] } });
     const base: PromptEnhancementFutureSequenceRuntimeEventV1 = { requestId: result.requestId, projectScope: result.projectRoot, sequenceId: 's', sequenceItemId: 'i', currentItemRevision: 1, bodyRevision: result.currentBody.bodyRevision, contractVersion: 1, stateFreshness: 'current', stopEventState: 'stop_fired_non_proof', terminalTransitionState: 'none', idempotencyKey: 'k', createdAtMs: 1 };
-    const make = (event: PromptEnhancementFutureSequenceRuntimeEventV1) => buildPromptEnhancementMpsContinuationPopupV1({ result, handoffMetadata: handoff, event, progress: { done: 3, total: 27 }, cancel: { state: 'available', disposition: 'blocked_no_send' } });
+    const make = (event: PromptEnhancementFutureSequenceRuntimeEventV1) => buildPromptEnhancementMpsContinuationPopupV1({ result, handoffMetadata: handoff, event, progress: { done: 3, total: 27 }, itemKind: 'task', cancel: { state: 'available', disposition: 'blocked_no_send' } });
     expect(make({ ...base, stateFreshness: 'stale' }).state).toBe('no_popup');
     expect(make({ ...base, terminalTransitionState: 'completed_terminal' }).state).toBe('no_popup');
     expect(make({ ...base, stopEventState: 'not_applicable' }).state).toBe('no_popup');

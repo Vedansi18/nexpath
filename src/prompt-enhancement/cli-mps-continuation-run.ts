@@ -163,6 +163,8 @@ export async function runPromptEnhancementCliMpsContinuationPopupV1(input: {
   // MPS-3 (Part B): sequence position for the progress line, supplied by the caller (P5 launcher off
   // the packaged continuation / runtime state); the shell never recomputes it.
   progress: PromptEnhancementMpsContinuationInputV1['progress'];
+  // MPS-12: the served item's kind, supplied by the caller off the packaged continuation.
+  itemKind: PromptEnhancementMpsContinuationInputV1['itemKind'];
   interaction?: PromptEnhancementCliMpsInteractionV1 | null;
   /**
    * NF Plan B — content-free per-action sink (kind + timestamp only, never text). Fires
@@ -177,6 +179,7 @@ export async function runPromptEnhancementCliMpsContinuationPopupV1(input: {
     handoffMetadata: input.handoffMetadata,
     event: input.event,
     progress: input.progress,
+    itemKind: input.itemKind,
     additionalDetails: { text: '', revision: 0 },
     // Cancel-remaining-sequence is a no-send outcome by contract (locked 'blocked_no_send');
     // availability requires the result's no-automatic-send proof.

@@ -2,6 +2,7 @@ import type { PromptEnhancementMpsFirstPopupModelV1 } from './first-popup.js';
 import type { PromptEnhancementMpsContinuationPopupModelV1 } from './continuation-popup.js';
 import type { PromptEnhancementEditorFieldV1 } from './multiline-editor.js';
 import { isPromptEnhancementScrollMarkerLineV1 } from './cli-submit-popup.js';
+import { PROMPT_ENHANCEMENT_SEQUENCE_TASK_KINDS_V1 } from './sequence-payload.js';
 
 // ---------------------------------------------------------------------------
 // UI-6 — MPS first-popup host rendering (alignment plan §3.3).
@@ -355,6 +356,17 @@ export function renderPromptEnhancementMpsContinuationFrameV1(
   for (const bodyLine of bodyRender.lines) lines.push(bodyLine);
   if (focusIndex === 0 && !frameState.loadingSpinnerGlyph) lines.push(mpsEditKeysHintV1(c, bodyRender.hiddenBelow));
   lines.push('');
+
+  // MPS-12 (Ruling C §22.2): a TASK item (`first_task`/`task`) shows the user's original slice verbatim;
+  // a CONFIRMATION item shows NO original region — no label, box, or placeholder. Driven by the item KIND
+  // (never inferred from empty text). Plain dim presentation, reused as-is (owner: no restyle). Skipped
+  // while the loading skeleton is up.
+  if (!frameState.loadingSpinnerGlyph
+    && (PROMPT_ENHANCEMENT_SEQUENCE_TASK_KINDS_V1 as readonly string[]).includes(model.itemKind)) {
+    const original = `  Your original: ${publicText(model.body.originalPromptText)}`;
+    lines.push(c ? `${c.dim}${original}${c.reset}` : original);
+    lines.push('');
+  }
 
   // Additional details — interactive row 1. Same PE-parity helpers as the first popup: apply hint
   // always visible, editing keys as the LAST line when focused; no "Add extra requirement" label.

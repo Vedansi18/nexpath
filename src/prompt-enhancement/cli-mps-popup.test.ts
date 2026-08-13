@@ -259,6 +259,7 @@ function continuationModel(overrides: Partial<PromptEnhancementMpsContinuationPo
     heading: PROMPT_ENHANCEMENT_MPS_CONTINUATION_POPUP_HEADING_V1,
     layout: PROMPT_ENHANCEMENT_MPS_CONTINUATION_LAYOUT_V1,
     progress: { done: 3, total: 27 },
+    itemKind: 'task',
     identity: { requestId: 'req-1', sequenceId: 'seq-1', sequenceItemId: 'item-2', currentItemRevision: 2, bodyRevision: 1, detailsRevision: 1 },
     body: { text: 'Next sequence step: apply the fix and run the focused checkout test.', editable: true, originalPromptText: 'Run the checkout fix sequence.' },
     additionalDetails: { visible: true, text: 'Keep scope to the payments module.', revision: 1 },
@@ -371,6 +372,19 @@ describe('UI-7 MPS continuation-popup frame renderer (§3.4)', () => {
     const normal = renderPromptEnhancementMpsContinuationFrameV1(continuationModel());
     expect(normal).toContain('Next sequence step: apply the fix');
     expect(normal).not.toContain('preparing…');
+  });
+
+  it('MPS-12 (Ruling C): a TASK item shows "Your original: <slice>"; a CONFIRMATION item shows none', () => {
+    // TASK kinds (`first_task`/`task`) → the user's original slice rendered verbatim below the body.
+    expect(renderPromptEnhancementMpsContinuationFrameV1(continuationModel({ itemKind: 'task' })))
+      .toContain('Your original: Run the checkout fix sequence.');
+    expect(renderPromptEnhancementMpsContinuationFrameV1(continuationModel({ itemKind: 'first_task' })))
+      .toContain('Your original:');
+    // CONFIRMATION kinds (+ wrap_up) → NO original region: no label, box, or placeholder (Ruling C).
+    for (const kind of ['double_confirmation', 'cross_confirmation', 'binary_confirmation', 'wrap_up'] as const) {
+      expect(renderPromptEnhancementMpsContinuationFrameV1(continuationModel({ itemKind: kind })))
+        .not.toContain('Your original');
+    }
   });
 });
 

@@ -8,6 +8,7 @@ import type {
 } from './contracts.js';
 import type {
   PromptEnhancementSequenceItemV1,
+  PromptEnhancementSequenceItemKindV1,
   PromptEnhancementSequenceOffsetRangeV1,
 } from './sequence-payload.js';
 
@@ -144,6 +145,12 @@ export interface PromptEnhancementSequencePackagedContinuationV1 {
   handoffMetadata: PromptEnhancementHandoffMetadataV1;
   event: PromptEnhancementFutureSequenceRuntimeEventV1;
   progress: PromptEnhancementSequenceProgressV1;
+  /**
+   * MPS-12: the served item's kind. Drives the kind-dependent original-text region in the continuation UI
+   * (Ruling C, §22.2: a TASK carries the user's original slice verbatim; a CONFIRMATION carries none). Off
+   * the SAME item the body and safetyClauseRef come from — never inferred from whether the text is empty.
+   */
+  itemKind: PromptEnhancementSequenceItemKindV1;
   /**
    * Where the safety floor sits inside the body being served. Null when this item carried none.
    *
@@ -391,6 +398,8 @@ export function packagePromptEnhancementSequenceContinuationV1(
       // Off the same item the body came from, so the offsets and the text they index can never be
       // two different items'.
       safetyClauseRef: item.itemSafetyClauseRef,
+      // MPS-12: expose the served item's kind so the continuation UI honors Ruling C off the same item.
+      itemKind: item.itemKind,
     },
   };
 }
