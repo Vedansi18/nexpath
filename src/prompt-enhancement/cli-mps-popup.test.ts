@@ -268,7 +268,7 @@ function continuationModel(overrides: Partial<PromptEnhancementMpsContinuationPo
     },
     keyboard: {
       plainEnter: 'emit_one_typed_current_body_plus_details_request',
-      escape: 'leave_editor_focus_preserve_draft',
+      escape: 'cancel_remaining_sequence',
       ctrlOrCmdJ: 'insert_newline',
       ctrlOrCmdUpDown: 'move_by_line',
       leftRight: 'move_by_character',
