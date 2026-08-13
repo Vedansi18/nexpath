@@ -4,6 +4,7 @@ import {
   deliverSequenceContinuationOutcomeV1,
   packageSequenceContinuationOfferV1,
   buildContinuationPopupFromPackageV1,
+  checkContinuationSendEditV1,
 } from './sequence-continuation-delivery.js';
 import type { PromptEnhancementSequenceRuntimeStateV1 } from './sequence-runtime.js';
 import { packagePromptEnhancementSequenceContinuationV1, type PromptEnhancementSequencePackagerInputV1 } from './sequence-packager.js';
@@ -318,5 +319,60 @@ describe('feed the packaged continuation into the popup builder (2.2)', () => {
       cancel: { state: 'available', disposition: 'blocked_no_send' },
     });
     expect(buildContinuationPopupFromPackageV1(pkg.packaged, details)).toEqual(direct);
+  });
+});
+
+describe('send-time edit check (2.3)', () => {
+  // A package whose served item (item 1) carries a safety clause at offsets [4,11) of its wording
+  // "The wording of item 1." → the clause text is "wording".
+  const packageWithSafetyClause = () => {
+    const pkg = packageSequenceContinuationOfferV1(input({
+      items: [item(0), item(1, { itemSafetyClauseRef: { start: 4, end: 11 } }), item(2), item(3)],
+    }));
+    if (pkg.kind !== 'package') throw new Error('fixture did not package');
+    return pkg.packaged;
+  };
+
+  // The three copies of the handoff the package carries — all must move together (packager invariant).
+  const allThreeValidity = (p: ReturnType<typeof packageWithSafetyClause>) => [
+    p.handoffMetadata.currentBodyValidityState,
+    p.result.handoffMetadata?.currentBodyValidityState,
+    p.result.uiView.handoffAndSequenceSummary?.currentBodyValidityState,
+  ];
+
+  it('an ordinary edit that keeps the clause → valid, no failures, verdict written into all three copies', () => {
+    const packaged = packageWithSafetyClause();
+    // Sanity: the packager left the always-valid placeholder in all three copies before the check.
+    expect(allThreeValidity(packaged)).toEqual(Array(3).fill('valid_for_current_body_revision'));
+    // The user edits around the clause but keeps the word "wording".
+    const res = checkContinuationSendEditV1(packaged, 'The wording of item 1, now edited.');
+    expect(res.validityState).toBe('valid_for_current_body_revision');
+    expect(res.failures).toEqual([]);
+    // Written over (not left as an untouched placeholder), and identical across all three copies.
+    expect(allThreeValidity(res.packaged)).toEqual(Array(3).fill('valid_for_current_body_revision'));
+  });
+
+  it('an edit that removes the safety clause → invalid + blocking failure, overwritten in all three copies', () => {
+    const packaged = packageWithSafetyClause();
+    expect(allThreeValidity(packaged)).toEqual(Array(3).fill('valid_for_current_body_revision'));
+    // The sent body no longer contains "wording" — the safety clause was removed by the edit.
+    const res = checkContinuationSendEditV1(packaged, 'The stuff of item 1.');
+    expect(res.validityState).toBe('invalid_due_user_edit_or_safety_removal');
+    expect(res.failures.length).toBeGreaterThan(0);
+    // The always-valid placeholder is written OVER by the send-time verdict in ALL THREE copies — none
+    // left stale, so a consumer reading the result can never see 'valid' where the verdict is 'invalid'.
+    expect(allThreeValidity(res.packaged)).toEqual(Array(3).fill('invalid_due_user_edit_or_safety_removal'));
+    // The input package is not mutated — the reconciliation is on the returned package only.
+    expect(allThreeValidity(packaged)).toEqual(Array(3).fill('valid_for_current_body_revision'));
+  });
+
+  it('a served item with no safety clause is always valid (safetyClauseRef null, off the package)', () => {
+    const pkg = packageSequenceContinuationOfferV1(input()); // default items carry itemSafetyClauseRef: null
+    if (pkg.kind !== 'package') { expect(pkg.kind).toBe('package'); return; }
+    expect(pkg.packaged.safetyClauseRef).toBeNull(); // sourced off the package, not re-indexed from items
+    const res = checkContinuationSendEditV1(pkg.packaged, 'anything the user typed');
+    expect(res.validityState).toBe('valid_for_current_body_revision');
+    expect(res.failures).toEqual([]);
+    expect(allThreeValidity(res.packaged)).toEqual(Array(3).fill('valid_for_current_body_revision'));
   });
 });

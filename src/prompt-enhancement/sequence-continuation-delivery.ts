@@ -14,6 +14,12 @@ import {
   type PromptEnhancementMpsContinuationBuildResultV1,
   type PromptEnhancementMpsContinuationInputV1,
 } from './continuation-popup.js';
+import {
+  checkPromptEnhancementSequenceEditV1,
+  type PromptEnhancementSequenceEditValidityV1,
+  type PromptEnhancementSequenceEditCheckResultV1,
+} from './sequence-enforcement.js';
+import type { PromptEnhancementHandoffMetadataV1 } from './contracts.js';
 
 /**
  * Pure intent delivery for the MPS continuation flow (P4). Maps the two decision moments of a
@@ -114,6 +120,70 @@ export function buildContinuationPopupFromPackageV1(
     additionalDetails,
     cancel: { state: 'available', disposition: 'blocked_no_send' },
   });
+}
+
+/** The send-time edit-check outcome (2.3): the typed validity verdict, any blocking failure, and the reconciled package. */
+export interface PromptEnhancementContinuationSendEditResultV1 {
+  /** The typed verdict — `valid_for_current_body_revision` or `invalid_due_user_edit_or_safety_removal`. Never a boolean. */
+  validityState: PromptEnhancementSequenceEditValidityV1;
+  /** A blocking failure iff the served item's safety clause was removed by the edit; empty otherwise. */
+  failures: PromptEnhancementSequenceEditCheckResultV1['failures'];
+  /**
+   * The package with the send-time verdict written over the placeholder in ALL THREE handoff copies it
+   * carries — `handoffMetadata`, `result.handoffMetadata`, and `result.uiView.handoffAndSequenceSummary`
+   * — kept in step (the packager's own invariant, sequence-packager.ts:375). Nothing else changes.
+   */
+  packaged: PromptEnhancementSequencePackagedContinuationV1;
+}
+
+/**
+ * The send-time safety-edit check (MPS-14 sub-phase 2.3, §6).
+ *
+ * At send — the moment the user sends the offered continuation body — this asks the ONE question
+ * `checkPromptEnhancementSequenceEditV1` asks: did the served item's safety clause survive the edit?
+ * Its inputs come off the PACKAGE, never the raw item list: `servedBodyText` is the packaged body and
+ * `safetyClauseRef` is the packaged `safetyClauseRef` — ⛔ never `items[currentItemIndex]` (that index is
+ * 0-based with item 0 excluded, so re-indexing it resolves the range against the wrong body and guards
+ * the wrong span silently). The typed verdict is written OVER the packaging-time placeholder
+ * (`valid_for_current_body_revision`, set at sequence-packager.ts:332 / handoff-metadata.ts:185) — a
+ * typed state, never a boolean. `failures` carries the blocking failure iff the clause was removed, for
+ * the caller to refuse the send. The verdict is written over the placeholder in all three handoff copies
+ * the package carries, so the record can never disagree with itself.
+ */
+export function checkContinuationSendEditV1(
+  packaged: PromptEnhancementSequencePackagedContinuationV1,
+  sentBodyText: string,
+): PromptEnhancementContinuationSendEditResultV1 {
+  const check = checkPromptEnhancementSequenceEditV1({
+    servedBodyText: packaged.result.currentBody.text,
+    sentBodyText,
+    // Off the packaged result, bound to the served body — never re-indexed from the item list.
+    safetyClauseRef: packaged.safetyClauseRef,
+    // The packager always sets this on the event from its required input (sequence-packager.ts:358).
+    sequenceItemId: packaged.event.sequenceItemId ?? '',
+  });
+  // Write the send-time verdict OVER the always-valid packaging placeholder — never leave it. ONE
+  // handoff object, placed in all three copies the package carries (packaged.handoffMetadata,
+  // result.handoffMetadata, result.uiView.handoffAndSequenceSummary), exactly as the packager builds
+  // them (sequence-packager.ts:375) — two kept in step is how a previous verdict survives beside the
+  // current one; three is the same failure with more room.
+  const handoffMetadata: PromptEnhancementHandoffMetadataV1 = {
+    ...packaged.handoffMetadata,
+    currentBodyValidityState: check.validityState,
+  };
+  return {
+    validityState: check.validityState,
+    failures: check.failures,
+    packaged: {
+      ...packaged,
+      handoffMetadata,
+      result: {
+        ...packaged.result,
+        handoffMetadata,
+        uiView: { ...packaged.result.uiView, handoffAndSequenceSummary: handoffMetadata },
+      },
+    },
+  };
 }
 
 /** The continuation-shell outcome shape this delivery consumes (subset the launcher forwards). */
