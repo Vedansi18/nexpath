@@ -109,9 +109,51 @@ export interface PromptEnhancementSectionPlanningInput {
   guidanceFacts?: readonly PromptEnhancementGuidanceFact[];
 }
 
+/**
+ * What a guidance fact MEANS, projected for the wording composer.
+ *
+ * The composer is told which facts a section may draw on, but only ever by id — and an id says
+ * nothing. A model handed `guidance_fact:f-3` can write about the user's prompt, because it has the
+ * prompt, but it cannot write about the project or source signal that fact represents, because
+ * nothing tells it what the fact is.
+ *
+ * Every field here is a closed vocabulary. **No free text is projected**: `requiredBecause`,
+ * `signalAliasResolution` and the rest are strings that can carry project or user content, and this
+ * crosses a network boundary to a third-party model. Enums cannot leak what they do not contain.
+ */
+export interface PromptEnhancementGuidanceSemanticsV1 {
+  sectionId: string;
+  factId: string;
+  sourceType: PromptEnhancementGuidanceSourceType;
+  guidanceKind: PromptEnhancementGuidanceKind;
+  suggestedActionKind: PromptEnhancementSuggestedActionKind;
+  sourceEvidenceState: PromptEnhancementGuidanceFact['sourceEvidenceState'];
+  priority: PromptEnhancementGuidancePriority;
+  riskLevel: PromptEnhancementGuidanceFact['riskLevel'];
+}
+
+/**
+ * May this fact's semantics leave the machine?
+ *
+ * Renderability is a different question and is already answered elsewhere: a fact can be fit to
+ * render into a body the user reads locally and still be unfit to send to a third party. All three
+ * flags must agree, and anything unrecognised is treated as unsafe.
+ */
+function isFactSemanticsShareableV1(fact: PromptEnhancementGuidanceFact): boolean {
+  return fact.publicCopySafe === true
+    && fact.privacyClass === 'public_safe'
+    && fact.sanitizationState !== 'unsafe_to_render'
+    && fact.sanitizationState !== 'sensitive_ref_only';
+}
+
 export interface PromptEnhancementSectionPlanningResult {
   bodyPlan: PromptEnhancementBodyPlanV1;
   sectionPlans: readonly PromptEnhancementSectionPlanItemV1[];
+  /**
+   * Per-section fact semantics for the composer. Empty when no fact is shareable, which leaves the
+   * composer exactly where it was: ids only.
+   */
+  guidanceSemantics: readonly PromptEnhancementGuidanceSemanticsV1[];
   routeDecisionId: string;
   promptReviewOrigin: PromptEnhancementRouteResult['contractDecision']['promptReviewOrigin'];
   promptReviewProcessingPolicy: PromptEnhancementRouteResult['contractDecision']['promptReviewProcessingPolicy'];
@@ -193,6 +235,7 @@ export function planPromptEnhancementSections(
         exposesPrecomputedVariants: false,
       },
       sectionPlans: [],
+      guidanceSemantics: [],
       routeDecisionId: route.contractDecision.routeDecisionId,
       promptReviewOrigin: route.contractDecision.promptReviewOrigin,
       promptReviewProcessingPolicy: route.contractDecision.promptReviewProcessingPolicy,
@@ -241,6 +284,23 @@ export function planPromptEnhancementSections(
     routeDecisionId: route.contractDecision.routeDecisionId,
     promptReviewOrigin: route.contractDecision.promptReviewOrigin,
     promptReviewProcessingPolicy: route.contractDecision.promptReviewProcessingPolicy,
+    guidanceSemantics: sectionPlans.flatMap((plan) =>
+      facts
+        .filter((fact) =>
+          isRenderableFact(fact)
+          && sectionKindForFact(fact) === plan.sectionKind
+          && isFactSemanticsShareableV1(fact))
+        .map((fact) => ({
+          sectionId: plan.sectionId,
+          factId: fact.factId,
+          sourceType: fact.sourceType,
+          guidanceKind: fact.guidanceKind,
+          suggestedActionKind: fact.suggestedActionKind,
+          sourceEvidenceState: fact.sourceEvidenceState,
+          priority: fact.priority,
+          riskLevel: fact.riskLevel,
+        })),
+    ),
     renderedFactIds: facts.filter(isRenderableFact).map((fact) => fact.factId),
     metadataOnlyFactIds: facts.filter(isMetadataOnlyFact).map((fact) => fact.factId),
     suppressedFactIds: facts.filter(isSuppressedFact).map((fact) => fact.factId),

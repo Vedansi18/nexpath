@@ -360,3 +360,78 @@ describe('prompt-enhancement template registry and section planner', () => {
     });
   });
 });
+
+describe('guidance semantics projected for the wording composer', () => {
+  function planWith(facts: readonly PromptEnhancementGuidanceFact[]) {
+    return planPromptEnhancementSections({
+      routeResult: routePromptEnhancement(routeInput({})),
+      sourceRefs: [sourceA, contentTemplateSourceB],
+      guidanceFacts: facts,
+    });
+  }
+
+  it('projects a public-safe fact so the section knows what it cites, not just its id', () => {
+    const result = planWith([fact({ factId: 'fact-repro', privacyClass: 'public_safe' })]);
+
+    const projected = result.guidanceSemantics.filter((entry) => entry.factId === 'fact-repro');
+    expect(projected.length).toBeGreaterThan(0);
+    expect(projected[0]).toMatchObject({
+      guidanceKind: 'debug_evidence',
+      suggestedActionKind: 'capture_reproduction',
+      sourceEvidenceState: 'strong',
+      riskLevel: 'none',
+    });
+    // It must point at a section that actually exists in this plan.
+    const sectionIds = new Set(result.sectionPlans.map((plan) => plan.sectionId));
+    expect(sectionIds.has(projected[0]!.sectionId)).toBe(true);
+  });
+
+  it('the same plan without the fact projects nothing — this is what changes the wording', () => {
+    expect(planWith([]).guidanceSemantics).toEqual([]);
+  });
+
+  it('a fact with no section in the plan projects nothing', () => {
+    // A RENDERABLE fact creates its own section, so it always has one — the planner adds the
+    // section kind the fact targets. The only way a fact has no section is that it does not
+    // render at all, which is what these render policies mean.
+    for (const renderPolicy of ['metadata_only', 'why_help_only', 'suppress_with_reason', 'defer_to_normal_ds'] as const) {
+      const result = planWith([fact({ factId: 'fact-unrendered', privacyClass: 'public_safe', renderPolicy })]);
+      expect(result.guidanceSemantics.some((entry) => entry.factId === 'fact-unrendered')).toBe(false);
+    }
+  });
+
+  it('withholds a local_private fact even when publicCopySafe is true', () => {
+    const result = planWith([fact({
+      factId: 'fact-private',
+      privacyClass: 'local_private',
+      publicCopySafe: true,
+    })]);
+    expect(result.guidanceSemantics.some((entry) => entry.factId === 'fact-private')).toBe(false);
+  });
+
+  it('withholds a fact whose sanitization state marks it unsafe to render', () => {
+    for (const sanitizationState of ['unsafe_to_render', 'sensitive_ref_only'] as const) {
+      const result = planWith([fact({ factId: 'fact-unsafe', privacyClass: 'public_safe', sanitizationState })]);
+      expect(result.guidanceSemantics.some((entry) => entry.factId === 'fact-unsafe')).toBe(false);
+    }
+  });
+
+  it('projects closed vocabularies only — never the free-text fields', () => {
+    const secret = 'INTERNAL-PROJECT-DETAIL-DO-NOT-SEND';
+    const result = planWith([fact({
+      factId: 'fact-repro',
+      privacyClass: 'public_safe',
+      requiredBecause: secret,
+      signalAliasResolution: secret,
+      mergeGroupId: secret,
+    })]);
+
+    expect(JSON.stringify(result.guidanceSemantics)).not.toContain(secret);
+    for (const entry of result.guidanceSemantics) {
+      expect(Object.keys(entry).sort()).toEqual([
+        'factId', 'guidanceKind', 'priority', 'riskLevel',
+        'sectionId', 'sourceEvidenceState', 'sourceType', 'suggestedActionKind',
+      ]);
+    }
+  });
+});

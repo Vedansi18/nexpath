@@ -4,8 +4,9 @@ import type { PromptEnhancementSectionPlanningResult } from './templates/section
 
 function planning(
   sections: readonly { sectionId: string; sectionKind: string; structuredContentPartRefs: readonly string[] }[],
+  guidanceSemantics: readonly unknown[] = [],
 ): PromptEnhancementSectionPlanningResult {
-  return { sectionPlans: sections } as unknown as PromptEnhancementSectionPlanningResult;
+  return { sectionPlans: sections, guidanceSemantics } as unknown as PromptEnhancementSectionPlanningResult;
 }
 
 const RENDERABLE = planning([
@@ -543,5 +544,72 @@ describe('the caller-supplied wall-clock ceiling', () => {
     if (result.ok) return;
     expect(result.reason).toBe('deadline_exceeded');
     expect(prompts).toHaveLength(1); // the in-flight call completed; the SECOND never started
+  });
+});
+
+describe('guidance semantics reaching the model', () => {
+  const semantics = [{
+    sectionId: 'sec-verify',
+    factId: 'fact-a',
+    sourceType: 'hard_fact',
+    guidanceKind: 'source_signal_guidance',
+    suggestedActionKind: 'add_verification',
+    sourceEvidenceState: 'strong',
+    priority: 'required_survivor',
+    riskLevel: 'none',
+  }];
+
+  const good = JSON.stringify({
+    detectedLanguageSelfReport: 'en',
+    sectionDrafts: [{ sectionId: 'sec-verify', bodyText: 'Wording.', sourceFactIds: ['fact-a'] }],
+    composerClaims: ['claim:fact-a'],
+  });
+
+  it('tells the model what a cited fact MEANS, not only its id', async () => {
+    const { client: scripted, prompts } = scriptedClient([good]);
+    await composeStructuredComposerOutputV1(
+      { enhancementId: 'pe:1', originalPromptText: 'Fix the failing test.', planning: planning([
+        { sectionId: 'sec-verify', sectionKind: 'verification_or_test_plan', structuredContentPartRefs: ['fact-a'] },
+      ], semantics) },
+      scripted,
+    );
+
+    expect(prompts[0]).toContain('whatThoseFactsMean');
+    expect(prompts[0]).toContain('source_signal_guidance');
+    expect(prompts[0]).toContain('add_verification');
+    expect(prompts[0]).toContain('evidence is strong');
+  });
+
+  it('sends the same prompt as before when nothing is projected', async () => {
+    const { client: scripted, prompts } = scriptedClient([good]);
+    await composeStructuredComposerOutputV1(
+      { enhancementId: 'pe:1', originalPromptText: 'Fix the failing test.', planning: planning([
+        { sectionId: 'sec-verify', sectionKind: 'verification_or_test_plan', structuredContentPartRefs: ['fact-a'] },
+      ]) },
+      scripted,
+    );
+
+    expect(prompts[0]).not.toContain('whatThoseFactsMean');
+    expect(prompts[0]).toContain('allowedSourceFactIds'); // the ids still go, unchanged
+  });
+
+  it('attaches a fact only to the section that cites it', async () => {
+    const { client: scripted, prompts } = scriptedClient([good]);
+    await composeStructuredComposerOutputV1(
+      { enhancementId: 'pe:1', originalPromptText: 'Fix the failing test.', planning: planning([
+        { sectionId: 'sec-verify', sectionKind: 'verification_or_test_plan', structuredContentPartRefs: ['fact-a'] },
+        { sectionId: 'sec-risk', sectionKind: 'risk_safety_or_confirmation', structuredContentPartRefs: ['fact-b'] },
+      ], semantics) },
+      scripted,
+    );
+
+    // The risk section cites fact-b, which has no projection, so its own block must carry none.
+    // Bound the slice at the trailing instruction, which legitimately names the block.
+    const full = prompts[0]!;
+    const riskStart = full.indexOf('- sectionId: sec-risk');
+    const instructionStart = full.indexOf('Where a section lists');
+    const riskBlock = full.slice(riskStart, instructionStart === -1 ? undefined : instructionStart);
+    expect(riskBlock).not.toContain('whatThoseFactsMean');
+    expect(riskBlock).toContain('fact-b');
   });
 });

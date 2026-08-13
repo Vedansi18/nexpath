@@ -1,5 +1,8 @@
 import OpenAI from 'openai';
-import type { PromptEnhancementSectionPlanningResult } from './templates/section-plan.js';
+import type {
+  PromptEnhancementGuidanceSemanticsV1,
+  PromptEnhancementSectionPlanningResult,
+} from './templates/section-plan.js';
 import type { PromptEnhancementStructuredComposerOutputV1 } from './compose-enhancement.js';
 import {
   PROMPT_ENHANCEMENT_COST_MODEL_V1,
@@ -241,22 +244,57 @@ const SYSTEM_PROMPT = [
   '- composerClaims must be the union of every sourceFactId you used, each prefixed with "claim:".',
 ].join('\n');
 
+/**
+ * One fact's meaning, as a line the model can act on.
+ *
+ * The ids stay — they are what `sourceFactIds` must cite back, and the downstream validator checks
+ * that citation. What is added is what the id stands for. A section that cites a fact but is told
+ * nothing about it can only be written from the prompt, which is why the project and source-signal
+ * sections read like generic advice: the model has no way to know they are about anything else.
+ */
+function guidanceSemanticsLines(semantics: readonly PromptEnhancementGuidanceSemanticsV1[]): string {
+  if (semantics.length === 0) return '';
+  const lines = semantics
+    .map((fact) =>
+      `    - ${fact.factId}: a ${fact.sourceType} carrying ${fact.guidanceKind};`
+      + ` the reader should ${fact.suggestedActionKind};`
+      + ` evidence is ${fact.sourceEvidenceState}, priority ${fact.priority}, risk ${fact.riskLevel}`)
+    .join('\n');
+  return `\n  whatThoseFactsMean:\n${lines}`;
+}
+
 function buildUserPrompt(
   originalPromptText: string,
   sections: readonly { sectionId: string; sectionKind: string; structuredContentPartRefs: readonly string[] }[],
+  guidanceSemantics: readonly PromptEnhancementGuidanceSemanticsV1[] = [],
 ): string {
   const sectionLines = sections
     .map(
       (section) =>
-        `- sectionId: ${section.sectionId}\n  purpose: ${section.sectionKind}\n  allowedSourceFactIds: ${JSON.stringify(section.structuredContentPartRefs)}`,
+        `- sectionId: ${section.sectionId}\n  purpose: ${section.sectionKind}\n  allowedSourceFactIds: ${JSON.stringify(section.structuredContentPartRefs)}`
+        + guidanceSemanticsLines(guidanceSemantics.filter((fact) => fact.sectionId === section.sectionId)),
     )
     .join('\n');
-  return [
+  // Only explain the projection when there is one. An instruction about a block no section carries
+  // is noise on every call, and it invites the model to look for something that is not there.
+  const anyProjected = sections.some((section) =>
+    guidanceSemantics.some((fact) => fact.sectionId === section.sectionId));
+  const lines = [
     `Original request (context only — do NOT reword it):\n${originalPromptText}`,
     '',
     'Sections to word (produce one draft per section):',
     sectionLines,
-  ].join('\n');
+  ];
+  if (anyProjected) {
+    lines.push(
+      '',
+      'Where a section lists whatThoseFactsMean, write that section about those facts — they are what'
+      + ' the project and its signals say, and you cannot infer them from the request above. Say what'
+      + ' the reader should do about them. Do not name the fact ids in the prose, and do not invent'
+      + ' detail the facts do not carry.',
+    );
+  }
+  return lines.join('\n');
 }
 
 function parseStructuredComposerOutput(
@@ -336,7 +374,8 @@ export async function composeStructuredComposerOutputV1(
     return { ok: false, reason: 'no_key' };
   }
 
-  const userPrompt = buildUserPrompt(input.originalPromptText, sections) + actionWordingDirective(input.action, input.additionalDetailsText);
+  const userPrompt = buildUserPrompt(input.originalPromptText, sections, input.planning.guidanceSemantics)
+    + actionWordingDirective(input.action, input.additionalDetailsText);
   // Malformed / empty / language-inconsistent replies retry up to the locked count
   // (§33348: retry up to 3 times). A thrown error (provider unavailable / timeout) is
   // NOT retried — fast deterministic fallback rather than repeated slow waits. On a
