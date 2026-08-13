@@ -45,7 +45,7 @@ import { runPromptEnhancementCliMpsFirstPopupV1, buildPromptEnhancementMpsCancel
 import { intakePromptEnhancementSequenceOnFirstSendV1 } from '../../prompt-enhancement/sequence-intake.js';
 import { upsertPendingPromptSequence, getActivePendingPromptSequence } from '../../store/pending-sequences.js';
 import { evaluatePromptEnhancementFutureSequenceRuntimeGateV1 } from '../../prompt-enhancement/future-sequence-runtime-gate.js';
-import { PROMPT_ENHANCEMENT_CONTRACT_VERSION } from '../../prompt-enhancement/contracts.js';
+import { PROMPT_ENHANCEMENT_CONTRACT_VERSION, type PromptEnhancementFutureSequenceRuntimeEventV1 } from '../../prompt-enhancement/contracts.js';
 import type { GeneratedOptions } from '../../decision-session/OptionGenerator.js';
 import { resolveContentSource, selectionRegister } from '../../decision-session/selection-registry.js';
 import { autogenAwareLookup, pinchSignalTypeForFlag } from '../../decision-session/content-template-source.js';
@@ -164,13 +164,45 @@ export async function runStop(
       // MPS continuation launcher (moved here by MPS-6 — the continuation Stop is the stop_hook_active
       // event). FAIL-CLOSED in v1: the runtime gate always returns allowed:false and the per-item body
       // is not generated yet, so nothing renders — we look up the gate, log its outcome, and leave the
-      // row as-is. When the gate lifts (P5 / MPS-11 sub-phase 1b) the interactive continuation shell
-      // renders here instead. No advisory, feedback, or PE popup is reached on this event.
+      // row as-is. When the gate lifts (P5) the interactive continuation shell renders here instead. No
+      // advisory, feedback, or PE popup is reached on this event.
+      //
+      // MPS-11 sub-phase 1b (Phase C): the launcher now validates a REAL continuation event built from
+      // the live row + payload before it consults evidence, instead of passing nothing. The event's
+      // fields carry their HONEST v1 values — a Stop is not an explicit user action
+      // (`explicit_user_action_absent`), the future-hold commit contract is not proven on the CLI host
+      // yet (door #8 → `host_hold_commit_not_proven`), and a fired Stop is not completion proof
+      // (`stop_or_response_finished_is_non_proof`). These stay diagnostics; they do not flip `allowed`.
+      // Evidence is passed as an explicit empty read: no production source sets any of the eleven
+      // runtime-evidence flags in v1 (owner sign-offs / register rows / host-hold proof / passed
+      // fixtures do not exist as real reads yet), so the gate stays blocked by evidence ABSENCE, not by
+      // passing nothing — and it will open naturally, with no change here, once a real evidence reader
+      // supplies those flags. ⛔ No flag is asserted true; no handoff is fabricated (the row stores
+      // ids/counts/status only — a typed handoff is a create-path concern, not this seam).
+      const continuationEvent: PromptEnhancementFutureSequenceRuntimeEventV1 = {
+        contractVersion: PROMPT_ENHANCEMENT_CONTRACT_VERSION,
+        projectScope: payload.cwd,
+        requestId: activeSequence.enhancementId,
+        sequenceId: activeSequence.sequenceId,
+        // Canonical per-item identity: the store keys items by (sequenceId, currentItemIndex).
+        sequenceItemId: `${activeSequence.sequenceId}#${activeSequence.currentItemIndex}`,
+        currentItemIndex: activeSequence.currentItemIndex,
+        createdAtMs: activeSequence.createdAt,
+        idempotencyKey: `${activeSequence.sequenceId}:${activeSequence.currentItemIndex}`,
+        explicitUserActionState: 'absent',
+        continuationActionState: 'continue_current_item',
+        terminalTransitionState: 'none',
+        hostCapabilityState: 'stop_bridge_only',
+        stopEventState: 'stop_fired_non_proof',
+        stateFreshness: 'current',
+      };
       const gate = evaluatePromptEnhancementFutureSequenceRuntimeGateV1({
         schemaVersion: PROMPT_ENHANCEMENT_CONTRACT_VERSION,
         operation: 'continue_current_item',
         requestId: activeSequence.enhancementId,
         projectRoot: payload.cwd,
+        event: continuationEvent,
+        evidence: {}, // Phase-C seam: real read, no runtime-evidence flag satisfied in v1 → fail-closed.
       });
       logger.debug('stop_mps_continuation_gate', {
         cwd: payload.cwd,

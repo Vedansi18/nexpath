@@ -210,6 +210,38 @@ describe('runStop — deferred Prompt Enhancement popup (B-i)', () => {
     }
   });
 
+  // MPS-11 sub-phase 1b (Phase C): the launcher now passes a REAL continuation event (built from the
+  // live row + payload) plus an explicit empty evidence read to the runtime gate, instead of passing
+  // nothing. This must NOT change the outcome — the gate stays fail-closed by evidence absence: `allowed`
+  // is false and every evidence flag is still missing. (The event's honest v1 diagnostics — absent user
+  // action, host-hold not proven, Stop is not completion proof — are covered by the gate unit tests.)
+  it('MPS-11 1b: wiring a real event + empty evidence keeps the gate fail-closed (never flips allowed)', async () => {
+    const session = SessionStateManager.load(store, '/test/project');
+    session.setDetectedLanguage(store, undefined);
+    upsertPendingPromptSequence(store, {
+      sequenceId: 'seq-1b', enhancementId: 'enh-1b', projectRoot: '/test/project',
+      sessionId: session.current.sessionId, itemCount: 4, currentItemIndex: 2,
+      status: 'item_pending', lastActionId: 'prev',
+    }, emptyPromptEnhancementSequencePayloadV1(64));
+    const debugSpy = vi.spyOn(logger, 'debug').mockImplementation(() => {});
+    try {
+      const result = await runStop(makePayload({ stop_hook_active: true }), store, undefined, undefined, undefined, notShown());
+      expect(result).toEqual({ outcome: 'mps_continuation_gated' });
+      const call = debugSpy.mock.calls.find(([message]) => message === 'stop_mps_continuation_gate');
+      expect(call).toBeDefined();
+      const logged = call![1] as { allowed: boolean; missingGateCodeCount: number };
+      // The whole point of 1b: passing a real event + evidence:{} does not open the gate.
+      expect(logged.allowed).toBe(false);
+      // Evidence is empty, so all eleven runtime-evidence flags are still missing (fail-closed).
+      expect(logged.missingGateCodeCount).toBe(11);
+    } finally {
+      debugSpy.mockRestore();
+    }
+    // And, as always, the row is left exactly as-is — no advance/mutation on this event.
+    const after = getActivePendingPromptSequence(store, '/test/project', session.current.sessionId);
+    expect(after).toMatchObject({ currentItemIndex: 2, status: 'item_pending', lastActionId: 'prev' });
+  });
+
   // MPS-6: on a sequence-continuation Stop, ONLY the launcher runs — the pending-PE popup, the advisory,
   // and the standalone feedback popup all stay closed on that event (and nothing is consumed).
   it('sequence-continuation Stop suppresses the PE popup and the advisory (routes only to the launcher)', async () => {
