@@ -705,6 +705,14 @@ export function registerStopCommand(program: import('commander').Command): void 
           // process never exits naturally. Claude Code's 60-second hook timeout
           // would kill us and discard stdout. Force-exit after the write so the
           // block decision reaches Claude Code on a clean exit.
+          //
+          // 🔒 MPS-9: any state needed for the delivery / pointer / cancel flow MUST be persisted
+          // BEFORE this force-exit. `closeStore` → `saveStore` → `writeFileSync` is SYNCHRONOUS, so
+          // every store write made during runStop is flushed to disk on the line below, before
+          // process.exit(0). ⛔ NEVER launch sequence work as a fire-and-forget promise on this path
+          // (cf. the `triggerOpportunisticSync` anti-pattern below) — process.exit(0) would kill an
+          // un-awaited promise and silently lose the state. If sequence work must run here, `await` it
+          // before this `closeStore`.
           closeStore(store);
           process.stdout.write(
             JSON.stringify({ decision: 'block', reason: result.reason }) + '\n',
@@ -717,6 +725,10 @@ export function registerStopCommand(program: import('commander').Command): void 
             process.stderr.write('\n[nexpath] Copied to clipboard — paste and edit in Claude terminal\n');
           }
         }
+        // ⚠️ MPS-9: this fire-and-forget shape is the exact anti-pattern the blocked-path guard above
+        // warns against. It is fine HERE — best-effort telemetry on a NON-force-exit path (the `finally`
+        // below closes the store after) — but sequence delivery/pointer/cancel state must NEVER be
+        // launched this way before a force-exit.
         void triggerOpportunisticSync(store).catch(() => {});
         // All other outcomes → exit 0 (Claude stops normally)
       } finally {
