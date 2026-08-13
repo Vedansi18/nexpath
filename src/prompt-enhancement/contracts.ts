@@ -2327,8 +2327,12 @@ function isCompleteHandoffMetadata(
     && handoff['currentBodyId'] === currentBodyId
     && handoff['bodyRevision'] === bodyRevision
     && typeof handoffKind === 'string'
-    && handoff['sequenceActivationPolicy'] === 'blocked_pending_sequence_runtime_and_cost_gates'
-    && handoff['futurePromptTextPolicy'] === 'not_generated_not_stored_not_rendered'
+    // D2 un-lock: shape completeness accepts either the blocked (fail-closed) or the activated value.
+    // v1-safety (metadata-only, no runtime) is a SEPARATE, still-strict check in future-sequence-runtime-gate.
+    && (handoff['sequenceActivationPolicy'] === 'blocked_pending_sequence_runtime_and_cost_gates'
+      || handoff['sequenceActivationPolicy'] === 'activated_runtime_v1')
+    && (handoff['futurePromptTextPolicy'] === 'not_generated_not_stored_not_rendered'
+      || handoff['futurePromptTextPolicy'] === 'approved_per_item_body_v1')
     && typeof handoff['suggestedNextPromptPolicy'] === 'string'
     && Array.isArray(handoff['suggestedNextPromptRefs'])
     && handoff['suggestedNextPromptRefs'].length === 0
@@ -2528,7 +2532,7 @@ function isCompleteHandoffApplicability(value: unknown, metadataState: unknown):
     && typeof applicability['userOrderPreferenceState'] === 'string'
     && applicability['parallelExecutionPolicy'] === 'not_supported_v1'
     && typeof applicability['confidence'] === 'string'
-    && applicability['receiverCanActivateRuntime'] === false
+    && typeof applicability['receiverCanActivateRuntime'] === 'boolean'
     && Array.isArray(applicability['reasonCodes']);
 }
 
