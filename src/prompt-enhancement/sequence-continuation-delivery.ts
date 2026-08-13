@@ -3,6 +3,12 @@ import {
   type PromptEnhancementSequenceRuntimeReasonCodeV1,
   type PromptEnhancementSequenceRuntimeStateV1,
 } from './sequence-runtime.js';
+import {
+  packagePromptEnhancementSequenceContinuationV1,
+  type PromptEnhancementSequencePackagerInputV1,
+  type PromptEnhancementSequencePackagedContinuationV1,
+  type PromptEnhancementSequencePackagerRefusalV1,
+} from './sequence-packager.js';
 
 /**
  * Pure intent delivery for the MPS continuation flow (P4). Maps the two decision moments of a
@@ -51,6 +57,35 @@ export function prepareSequenceContinuationOfferV1(
     return { state: 'offer', itemIndex: advanced.state.currentItemIndex, offeredState: advanced.state, advanced: true };
   }
   return { state: 'no_offer', reasonCode: 'not_offerable_status' };
+}
+
+/**
+ * The packaging read-point (MPS-14 sub-phase 2.1): a ready package for the popup, or no popup at all.
+ *
+ * `package` — the packaged continuation is fed VERBATIM to the popup builder (2.2); its fields are the
+ * builder's inputs under the same names.
+ * `no_popup` — the packager refused (a state that should already be impossible). There is NO popup and
+ * NO fallback body: the launcher falls through to the ordinary Claude flow. ⛔ The packager never
+ * composes, skips to the next item, or serves an empty body — serving nothing is the correct outcome.
+ */
+export type PromptEnhancementSequenceContinuationPackageV1 =
+  | { kind: 'package'; packaged: PromptEnhancementSequencePackagedContinuationV1 }
+  | { kind: 'no_popup'; refusal: PromptEnhancementSequencePackagerRefusalV1 };
+
+/**
+ * Package the offered continuation item (2.1). ONE packager call per continuation Stop — the packager
+ * reads the stored wording + verdict for the offered item and re-points the handoff/event at THIS body;
+ * it composes nothing. On refusal the caller shows no popup and takes the ordinary flow. The caller
+ * supplies the input (this body's identity ids, 0-based `currentItemIndex` — index 0 is the already-sent
+ * first prompt, so a continuation is `1 … itemCount-1`); ⛔ the ids must be this body's, never the first
+ * prompt's. The package must not be cached across Stops — package once per Stop (MPS-8 re-read rule).
+ */
+export function packageSequenceContinuationOfferV1(
+  input: PromptEnhancementSequencePackagerInputV1,
+): PromptEnhancementSequenceContinuationPackageV1 {
+  const result = packagePromptEnhancementSequenceContinuationV1(input);
+  if (!result.ok) return { kind: 'no_popup', refusal: result.refusal };
+  return { kind: 'package', packaged: result.packaged };
 }
 
 /** The continuation-shell outcome shape this delivery consumes (subset the launcher forwards). */

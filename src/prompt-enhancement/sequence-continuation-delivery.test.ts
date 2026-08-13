@@ -2,8 +2,16 @@ import { describe, expect, it } from 'vitest';
 import {
   prepareSequenceContinuationOfferV1,
   deliverSequenceContinuationOutcomeV1,
+  packageSequenceContinuationOfferV1,
 } from './sequence-continuation-delivery.js';
 import type { PromptEnhancementSequenceRuntimeStateV1 } from './sequence-runtime.js';
+import { packagePromptEnhancementSequenceContinuationV1, type PromptEnhancementSequencePackagerInputV1 } from './sequence-packager.js';
+import type { PromptEnhancementSequenceItemV1 } from './sequence-payload.js';
+import type {
+  PromptEnhancementPrepareResultV1,
+  PromptEnhancementSafetySummaryV1,
+  PromptEnhancementValidationGraphV1,
+} from './contracts.js';
 
 function state(
   overrides: Partial<PromptEnhancementSequenceRuntimeStateV1> = {},
@@ -119,5 +127,155 @@ describe('continuation full walk (offer → deliver, offer → deliver, …)', (
     // Stop 4: advancing past the last item completes the sequence.
     offer = prepareSequenceContinuationOfferV1(s, 'o4');
     expect(offer.state).toBe('sequence_complete');
+  });
+});
+
+// MPS-14 sub-phase 2.1 — the packaging read-point. A valid input yields a package fed verbatim to the
+// popup builder (2.2); a refusal yields NO popup (ordinary flow), never an empty/skipped/composed body.
+// The fixture below is a known-valid packager input (mirrors the packager's own test) — the packager
+// itself is tested separately; here we only assert the adapter's package-or-no-popup mapping.
+
+/** The item's own safety verdict, deliberately different from the first body's. */
+const ITEM_SAFETY = {
+  sensitiveActionState: 'none_detected',
+  validationStatus: 'valid',
+} as unknown as PromptEnhancementSafetySummaryV1;
+
+const GRAPH = { safetyState: ITEM_SAFETY } as unknown as PromptEnhancementValidationGraphV1;
+
+const item = (
+  order: number,
+  overrides: Partial<PromptEnhancementSequenceItemV1> = {},
+): PromptEnhancementSequenceItemV1 => ({
+  itemKind: order === 0 ? 'first_task' : 'task',
+  originalSliceRef: null,
+  sourcePointRanges: [],
+  roleLabel: null,
+  dependencyOrder: order,
+  complexity: 'not_complex',
+  complexityReason: null,
+  generatedWording: order === 0 ? null : `The wording of item ${order}.`,
+  actionRiskKinds: [],
+  authorityMode: 'plan_or_review',
+  requiresConfirmationFloor: false,
+  decompositionGroupId: 'g1',
+  itemValidationGraph: order === 0 ? null : GRAPH,
+  itemSafetyClauseRef: null,
+  ...overrides,
+});
+
+const ACCEPTED = {
+  requestId: 'req-1',
+  projectRoot: '/project',
+  enhancementId: 'enh-1',
+  currentBody: {
+    currentBodyId: 'body-0', bodyRevision: 0,
+    renderedPromptBody: 'The first prompt, already sent.', text: 'The first prompt, already sent.',
+    sentPromptOrigin: 'user_authored_original_only', nexpathGeneratedPromptRef: 'ref-0',
+    originalPromptText: 'the original', generatedOriginState: 'user_original',
+    userDirtyState: 'dirty_user_edited', generatedSafeStatus: 'invalid_non_sendable',
+  },
+  disposition: 'fallback_to_original',
+  validationDecisionId: 'decision-for-the-first-body',
+  composerBoundary: {
+    composerRunId: 'run-0', sentPromptOrigin: 'user_authored_original_only',
+    nexpathGeneratedPromptRef: 'ref-0', renderedPromptBody: 'The first prompt, already sent.',
+  },
+  safetySummary: { sensitiveActionState: 'confirmation_required' },
+  handoffMetadata: {
+    handoffDecisionId: 'enh-1:handoff',
+    compactFirstPopupSequenceSummary: {
+      summaryId: 'body-0:summary', currentBodyId: 'body-0', bodyRevision: 0, publicSafeText: 'planned as 4 prompts',
+    },
+    handoffKind: 'first_prompt_handoff_candidate',
+    currentBodyId: 'body-0', bodyRevision: 0,
+    currentBodyValidityState: 'invalid_due_body_revision', riskConfirmationState: 'none_detected',
+    scope: { requestId: 'req-1', projectRoot: '/project' },
+  },
+  availableActions: [
+    { actionType: 'use_current_body', label: 'Use this prompt', currentBodyId: 'body-0', bodyRevision: 0 },
+    { actionType: 'shorter', label: 'Shorter', currentBodyId: 'body-0', bodyRevision: 0 },
+    { actionType: 'apply_details', label: 'Apply details', currentBodyId: 'body-0', bodyRevision: 0 },
+    { actionType: 'more_thorough', label: 'More thorough', currentBodyId: 'body-0', bodyRevision: 0 },
+    { actionType: 'use_original', label: 'Use original', currentBodyId: 'body-0', bodyRevision: 0 },
+    { actionType: 'close', label: 'Close', currentBodyId: 'body-0', bodyRevision: 0 },
+  ],
+  generatedOrigin: {
+    generatedOriginId: 'origin-0', generatedOriginState: 'user_original', bodyId: 'body-0', bodyRevision: 0,
+    sourceUseIds: ['body-0:use'],
+    echoRecursionGuard: {
+      sourcePromptEchoState: 'not_echo', lastInjectedPromptIsAuthority: false, bodyFingerprintRef: 'body-0:fingerprint',
+    },
+  },
+  uiView: {
+    body: {
+      text: 'The first prompt, already sent.', currentBodyId: 'body-0', bodyRevision: 0,
+      generatedOriginState: 'user_original', dirtyState: 'dirty_user_edited',
+    },
+    actions: [
+      { actionType: 'use_current_body', currentBodyId: 'body-0', bodyRevision: 0 },
+      { actionType: 'shorter', currentBodyId: 'body-0', bodyRevision: 0 },
+      { actionType: 'apply_details', currentBodyId: 'body-0', bodyRevision: 0 },
+      { actionType: 'close', currentBodyId: 'body-0', bodyRevision: 0 },
+    ],
+    actionInputContract: { currentBodyId: 'body-0', bodyRevision: 0, actionId: 'act-0' },
+    handoffAndSequenceSummary: { currentBodyId: 'body-0' },
+  },
+  routeDecision: { routeId: 'route-1' },
+  bodyPlan: { planId: 'plan-1' },
+  validationGraph: { safetyState: { fromTheFirstBody: true } },
+} as unknown as PromptEnhancementPrepareResultV1;
+
+const input = (
+  overrides: Partial<PromptEnhancementSequencePackagerInputV1> = {},
+): PromptEnhancementSequencePackagerInputV1 => ({
+  acceptedResult: ACCEPTED,
+  items: [item(0), item(1), item(2), item(3)],
+  currentItemIndex: 1,
+  itemCount: 4,
+  sequenceId: 'seq-1',
+  sequenceItemId: 'seq-1:1',
+  currentItemRevision: 0,
+  bodyRevision: 1,
+  currentBodyId: 'body-1',
+  nexpathGeneratedPromptRef: 'ref-1',
+  validationDecisionId: 'decision-for-item-1',
+  composerRunId: 'run-batch',
+  handoffDecisionId: 'handoff-for-item-1',
+  itemBodyFingerprintRef: 'body-1:fingerprint',
+  itemSourceUseIds: ['body-1:use'],
+  compactSummaryId: 'body-1:summary',
+  ...overrides,
+});
+
+describe('continuation packaging step (2.1)', () => {
+  it('a valid input yields a package carrying the five packaged fields, forwarded verbatim', () => {
+    const out = packageSequenceContinuationOfferV1(input());
+    expect(out.kind).toBe('package');
+    if (out.kind !== 'package') return;
+    // The five fields the popup builder (2.2) and the send check (2.3) consume are present.
+    expect(out.packaged).toEqual(
+      expect.objectContaining({
+        result: expect.anything(),
+        handoffMetadata: expect.anything(),
+        event: expect.anything(),
+        progress: expect.anything(),
+      }),
+    );
+    expect(out.packaged).toHaveProperty('safetyClauseRef'); // present (may be null when the item carried none)
+    // Forwarded verbatim: identical to the raw packager's own output, no mapping/mutation applied.
+    const raw = packagePromptEnhancementSequenceContinuationV1(input());
+    expect(raw.ok).toBe(true);
+    if (!raw.ok) return;
+    expect(out.packaged).toEqual(raw.packaged);
+  });
+
+  it('a refusal yields no popup and its refusal code — never an empty/skipped/composed body', () => {
+    // item_count disagreeing with the item list is a refusal (a state that should be impossible).
+    expect(packageSequenceContinuationOfferV1(input({ itemCount: 5 })))
+      .toEqual({ kind: 'no_popup', refusal: 'item_count_disagrees_with_items' });
+    // Index 0 is the already-sent first prompt — offering it again is not a continuation.
+    expect(packageSequenceContinuationOfferV1(input({ currentItemIndex: 0 })))
+      .toEqual({ kind: 'no_popup', refusal: 'index_is_the_first_item' });
   });
 });
