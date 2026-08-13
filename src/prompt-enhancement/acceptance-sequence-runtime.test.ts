@@ -76,6 +76,41 @@ const rejectingClient = (error: Error): PromptEnhancementSequencePlannerClientV1
   chat: { completions: { create: async () => { throw error; } } },
 } as unknown as PromptEnhancementSequencePlannerClientV1);
 
+type ConfirmationKind = 'double_confirmation' | 'cross_confirmation' | 'binary_confirmation';
+
+function confirmation(index: number, kind: ConfirmationKind): PromptEnhancementSequenceItemV1 {
+  return {
+    ...task(index, SLICE_TWO),
+    itemKind: kind,
+    originalSliceRef: null,
+    complexity: null,
+    complexityReason: 'why this one',
+    authorityMode: null,
+    roleLabel: null,
+    requiresConfirmationFloor: false,
+  };
+}
+
+const binaryWording = (question: string): string =>
+  `${question}\n\nReply YES or NO only, on its own line with nothing after it, and only if you are`
+  + ' clear and sure at ground level. Do not make any assumptions — confirm at ground level by'
+  + ' reading the actual source.';
+
+const passFailWording = (question: string): string =>
+  `${question}\n\nReply PASS or FAIL only, on its own line with nothing after it, and only if you`
+  + ' are clear and sure at ground level. Do not make any assumptions — confirm at ground level by'
+  + ' reading the actual source.';
+
+// Drive the body producer over a task + a confirmation, the confirmation worded as given.
+const withConfirmation = (wording: string, kind: ConfirmationKind = 'binary_confirmation') =>
+  runPromptEnhancementSequenceBodyProducerV1(
+    input([firstTask(), task(1, SLICE_ONE), confirmation(2, kind)]),
+    clientReturning(JSON.stringify({ items: [
+      { dependencyOrder: 1, wording: `${SLICE_ONE}\n\nDo the first half.` },
+      { dependencyOrder: 2, wording },
+    ] })),
+  );
+
 describe('acceptance executor (batch 1) — body-producer runtime fixtures', () => {
   it('test:acceptance-sequence-provider-failure-no-generated-content', async () => {
     const result = await runPromptEnhancementSequenceBodyProducerV1(
@@ -119,5 +154,33 @@ describe('acceptance executor (batch 1) — body-producer runtime fixtures', () 
     );
     expect(truncated.ok).toBe(false);
     if (!truncated.ok) expect(truncated.stage).toBe('batch');
+  });
+});
+
+describe('acceptance executor (batch 3) — composer confirmation-format fixtures', () => {
+  it('test:acceptance-sequence-binary-confirmation-token-set', async () => {
+    // token_set_is_a_total_function_of_the_item_kind: a binary_confirmation carries YES/NO.
+    expect((await withConfirmation(binaryWording('Does the limiter reject the 61st request?'), 'binary_confirmation')).ok)
+      .toBe(true);
+    // The wrong token set for the kind is refused, not reformatted.
+    const wrongToken = await withConfirmation(passFailWording('Does the limiter reject the 61st request?'), 'binary_confirmation');
+    expect(wrongToken.ok).toBe(false);
+    if (!wrongToken.ok) expect(wrongToken.reason).toBe('confirmation_format_wrong_for_kind');
+    // And the binary token set is wrong for a double_confirmation, which carries PASS/FAIL.
+    const wrongKind = await withConfirmation(binaryWording('Was it checked?'), 'double_confirmation');
+    expect(wrongKind.ok).toBe(false);
+    if (!wrongKind.ok) expect(wrongKind.reason).toBe('confirmation_format_wrong_for_kind');
+  });
+
+  it('test:acceptance-sequence-confirmation-three-mandatory-parts', async () => {
+    // A confirmation carrying all three mandatory parts in its kind's format is accepted.
+    expect((await withConfirmation(binaryWording('Does the limiter reject the 61st request?'))).ok).toBe(true);
+    // One that never demands the answer stand alone is refused — a mandatory part is missing.
+    const noDemand = 'Does the limiter reject the 61st request?\n\nReply YES or NO only. Give the'
+      + ' answer and nothing else, and only if you are clear and sure at ground level. Do not make any'
+      + ' assumptions — confirm at ground level by reading the actual source.';
+    const missing = await withConfirmation(noDemand);
+    expect(missing.ok).toBe(false);
+    if (!missing.ok) expect(missing.reason).toBe('confirmation_missing_answer_alone_demand');
   });
 });
