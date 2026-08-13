@@ -11,8 +11,9 @@ import { buildPromptEnhancementHandoffMetadataV1 } from './handoff-metadata.js';
 import { preparePromptEnhancement } from './facade.js';
 import { buildPromptEnhancementCostVisibilityMetadataV1 } from './cost-observability.js';
 import { getPromptStartStopSourceSnapshot } from './source-reality.js';
-import { runPromptEnhancementCliMpsContinuationPopupV1 } from './cli-mps-continuation-run.js';
+import { runPromptEnhancementCliMpsContinuationPopupV1, deliverPromptEnhancementCliMpsContinuationOutcomeV1 } from './cli-mps-continuation-run.js';
 import type { PromptEnhancementCliMpsInteractionV1 } from './cli-mps-run.js';
+import type { PromptEnhancementSequenceRuntimeStateV1 } from './sequence-runtime.js';
 
 const KEY = { enter: '\r', escape: '', up: '[A', down: '[B' } as const;
 
@@ -166,5 +167,37 @@ describe('MPS continuation-popup CLI shell (§3.4)', () => {
     const stale: PromptEnhancementFutureSequenceRuntimeEventV1 = { ...event, stateFreshness: 'stale' };
     const outcome = await runPromptEnhancementCliMpsContinuationPopupV1({ result, handoffMetadata, event: stale, interaction: scripted([]) });
     expect(outcome.state).toBe('not_shown');
+  });
+});
+
+// ── MPS-2 (6.1): the shell-outcome → delivery-mapper bridge (reaches deliverSequenceContinuationOutcomeV1) ──
+
+describe('deliverPromptEnhancementCliMpsContinuationOutcomeV1 — 6.1 wiring', () => {
+  // An OFFERED state: the item the continuation popup was shown for, still pending.
+  const offered = (overrides: Partial<PromptEnhancementSequenceRuntimeStateV1> = {}): PromptEnhancementSequenceRuntimeStateV1 => ({
+    sequenceId: 'seq-1', enhancementId: 'enh-1', projectRoot: '/tmp/p', sessionId: 's1',
+    itemCount: 3, currentItemIndex: 1, status: 'item_pending', lastActionId: 'offer-1',
+    ...overrides,
+  });
+
+  it('send → inject; interruption/declined → keep (the current mapping); cancelled → cancel', () => {
+    const s = offered();
+    expect(deliverPromptEnhancementCliMpsContinuationOutcomeV1(s, { state: 'send', bodyText: 'the edited body' }, 'a1').kind).toBe('inject');
+    expect(deliverPromptEnhancementCliMpsContinuationOutcomeV1(s, { state: 'interruption' }, 'a2').kind).toBe('keep');
+    // 6.1 locks the CURRENT decline mapping (keep, offered item stays pending) — 6.2 will switch it to cancel.
+    expect(deliverPromptEnhancementCliMpsContinuationOutcomeV1(s, { state: 'declined' }, 'a3')).toEqual({ kind: 'keep', nextState: s });
+    expect(deliverPromptEnhancementCliMpsContinuationOutcomeV1(s, { state: 'cancelled' }, 'a4').kind).toBe('cancel');
+  });
+
+  it('not_shown → keep the offered item pending (the popup never rendered; nothing delivered)', () => {
+    const s = offered();
+    expect(deliverPromptEnhancementCliMpsContinuationOutcomeV1(s, { state: 'not_shown', reasonCodes: ['no_tty'] }, 'a5'))
+      .toEqual({ kind: 'keep', nextState: s });
+  });
+
+  it('the cancel feedback the popup collected is dropped from the mapper input (a separate step)', () => {
+    const s = offered();
+    // A cancelled outcome carrying feedback still maps to a plain cancel delivery — the mapper never sees the feedback.
+    expect(deliverPromptEnhancementCliMpsContinuationOutcomeV1(s, { state: 'cancelled', feedback: { kind: 'suggested', category: 'too_long' } }, 'a6').kind).toBe('cancel');
   });
 });

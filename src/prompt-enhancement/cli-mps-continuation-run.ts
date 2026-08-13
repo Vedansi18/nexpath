@@ -30,6 +30,11 @@ import {
 } from './multiline-editor.js';
 import type { PromptEnhancementCliMpsInteractionV1, PromptEnhancementCliMpsCancelFeedbackV1 } from './cli-mps-run.js';
 import type { PromptActionSignalKind } from '../store/feedback-signals.js';
+import {
+  deliverSequenceContinuationOutcomeV1,
+  type PromptEnhancementSequenceContinuationDeliveryV1,
+} from './sequence-continuation-delivery.js';
+import type { PromptEnhancementSequenceRuntimeStateV1 } from './sequence-runtime.js';
 
 /**
  * MPS continuation-popup CLI shell (locked §3.4 layout).
@@ -62,6 +67,37 @@ export type PromptEnhancementCliMpsContinuationOutcomeV1 =
   | { state: 'declined' }
   | { state: 'cancelled'; feedback?: PromptEnhancementCliMpsCancelFeedbackV1 }
   | { state: 'not_shown'; reasonCodes: readonly string[] };
+
+/**
+ * MPS-2 (6.1): wire the continuation shell's outcome to the delivery mapper. This is what the P5
+ * launcher calls after the shell returns — it REACHES `deliverSequenceContinuationOutcomeV1`, which had
+ * no production caller (so a later mapping change, 6.2, would otherwise alter a function nobody runs).
+ *
+ * The shell's five states are converted to the four the mapper consumes (the cancel-feedback the popup
+ * collected is a separate step the launcher already forwarded, so it is dropped from the mapper input);
+ * `not_shown` — the popup never rendered — keeps the offered item pending, to be re-offered next Stop
+ * (nothing was decided, so nothing is delivered). The launcher persists the returned `nextState` and
+ * acts on the returned `kind`; no runtime logic lives inline. (Missing/invalid RESULTS — the four silent
+ * exit events — are 6.4's detection, not this mapper.)
+ */
+export function deliverPromptEnhancementCliMpsContinuationOutcomeV1(
+  offeredState: PromptEnhancementSequenceRuntimeStateV1,
+  outcome: PromptEnhancementCliMpsContinuationOutcomeV1,
+  actionId: string,
+): PromptEnhancementSequenceContinuationDeliveryV1 {
+  switch (outcome.state) {
+    case 'not_shown':
+      return { kind: 'keep', nextState: offeredState };
+    case 'send':
+      return deliverSequenceContinuationOutcomeV1(offeredState, { state: 'send', bodyText: outcome.bodyText }, actionId);
+    case 'interruption':
+      return deliverSequenceContinuationOutcomeV1(offeredState, { state: 'interruption' }, actionId);
+    case 'declined':
+      return deliverSequenceContinuationOutcomeV1(offeredState, { state: 'declined' }, actionId);
+    case 'cancelled':
+      return deliverSequenceContinuationOutcomeV1(offeredState, { state: 'cancelled' }, actionId);
+  }
+}
 
 export async function runPromptEnhancementCliMpsContinuationPopupV1(input: {
   result: PromptEnhancementPrepareResultV1;
