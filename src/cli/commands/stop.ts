@@ -266,8 +266,11 @@ export async function runStop(
         itemCount: activeSequence.itemCount,
         allowed: gate.allowed,
         // Fail-closed: allowed is always false in v1 (the gate hard-blocks runtime), so no
-        // continuation popup is opened. The first few missing-gate codes aid diagnosability.
-        reasonCodes: gate.missingGateCodes.slice(0, 4),
+        // continuation popup is opened. Emit the FULL missing-gate list + its count so a debugger can
+        // tell how many gates are missing (not just the first few) — the earlier `slice(0, 4)` under a
+        // field named `reasonCodes` silently truncated the list and read like a complete report.
+        missingGateCodeCount: gate.missingGateCodes.length,
+        missingGateCodes: gate.missingGateCodes,
       });
       // No render, no advance, no mutation — the row is left as-is for the next Stop.
     }

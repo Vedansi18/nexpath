@@ -54,6 +54,7 @@ import { generateFromEngine, composeDeterministicOptions } from '../../decision-
 import { SessionStateManager } from '../../classifier/SessionStateManager.js';
 import { generateOptionList } from '../../decision-session/OptionGenerator.js';
 import { flushIfTelemetryOn } from '../../telemetry/lifecycle-flush.js';
+import { logger } from '../../logger.js';
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -177,6 +178,33 @@ describe('runStop — deferred Prompt Enhancement popup (B-i)', () => {
     // The row is left EXACTLY as-is: no advance, no status change, no scrub (fail-closed).
     const after = getActivePendingPromptSequence(store, '/test/project', session.current.sessionId);
     expect(after).toMatchObject({ currentItemIndex: 1, status: 'item_pending', lastActionId: 'prev' });
+  });
+
+  // MPS-11 sub-phase 1a: the fail-closed launcher must log the FULL missing-gate list + its count, not a
+  // silent slice(0, 4) — so a debugger can tell how many gates are missing, not just the first four.
+  it('fail-closed continuation launcher: logs the full missing-gate count, not a truncated four', async () => {
+    const session = SessionStateManager.load(store, '/test/project');
+    session.setDetectedLanguage(store, undefined);
+    upsertPendingPromptSequence(store, {
+      sequenceId: 'seq-log', enhancementId: 'enh-log', projectRoot: '/test/project',
+      sessionId: session.current.sessionId, itemCount: 3, currentItemIndex: 1,
+      status: 'item_pending', lastActionId: 'prev',
+    }, emptyPromptEnhancementSequencePayloadV1(64));
+    const debugSpy = vi.spyOn(logger, 'debug').mockImplementation(() => {});
+    try {
+      await runStop(makePayload(), store, undefined, undefined, undefined, notShown());
+      const call = debugSpy.mock.calls.find(([message]) => message === 'stop_mps_continuation_gate');
+      expect(call).toBeDefined();
+      const logged = call![1] as { missingGateCodeCount: number; missingGateCodes: readonly string[] };
+      // Count reflects the FULL list (all evidence flags missing in v1), and equals the array length.
+      expect(logged.missingGateCodes.length).toBe(logged.missingGateCodeCount);
+      // Regression guard: the old slice(0, 4) is gone — the full list has more than four codes.
+      expect(logged.missingGateCodeCount).toBeGreaterThan(4);
+      // The truncating `reasonCodes` field must no longer exist.
+      expect(logged).not.toHaveProperty('reasonCodes');
+    } finally {
+      debugSpy.mockRestore();
+    }
   });
 
   it('leaves the pending PE PENDING on not_shown so a later Stop can retry it (Bug 2 — no silent loss)', async () => {
