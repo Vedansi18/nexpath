@@ -40,7 +40,7 @@ import { evaluatePromptEnhancementMpsIntakeDecisionV1 } from '../../prompt-enhan
 import { buildPromptEnhancementCliMpsIntakeEvidenceV1 } from '../../prompt-enhancement/cli-mps-intake-evidence.js';
 import { runPromptEnhancementCliMpsFirstPopupV1, buildPromptEnhancementMpsCancelFeedbackEventV1, promptEnhancementMpsActionSignalKindV1 } from '../../prompt-enhancement/cli-mps-run.js';
 import { intakePromptEnhancementSequenceOnFirstSendV1 } from '../../prompt-enhancement/sequence-intake.js';
-import { upsertPendingPromptSequence, getActivePendingPromptSequence } from '../../store/pending-sequences.js';
+import { upsertPendingPromptSequence, getActivePendingPromptSequence, recordPromptEnhancementSequenceOfferDeclined, type PromptEnhancementSequenceDeclinedDispositionV1 } from '../../store/pending-sequences.js';
 import { evaluatePromptEnhancementFutureSequenceRuntimeGateV1 } from '../../prompt-enhancement/future-sequence-runtime-gate.js';
 import { PROMPT_ENHANCEMENT_CONTRACT_VERSION, type PromptEnhancementFutureSequenceRuntimeEventV1 } from '../../prompt-enhancement/contracts.js';
 import { resolveOpenAIKey, getKeySource } from '../../config/ApiKeyResolver.js';
@@ -102,6 +102,55 @@ export type PromptEnhancementStopDecision =
 /** Injectable Stop-hook PE popup launcher (production wires the real host; tests mock it). */
 export type PromptEnhancementStopLaunchFn =
   (pending: PendingPromptEnhancement) => Promise<PromptEnhancementStopDecision>;
+
+/**
+ * MPS-4 (12.1): map a first-popup result to the SEQUENCE OFFER disposition to record. Only the two
+ * non-accepted, non-dead states get a stub row: `selected_original` (Use original) → `rejected`,
+ * `closed_no_send` (close/Escape) → `not_engaged`. `selected_current` is accepted (the intake writes the
+ * full row on send) and `not_shown` is no offer — both return `undefined` (no stub). A popup that died
+ * never returns a result, so its absence is the record without reaching here.
+ */
+export function promptEnhancementMpsOfferDispositionFromPopupV1(
+  popup: PromptEnhancementCliPopupResultV1,
+): PromptEnhancementSequenceDeclinedDispositionV1 | undefined {
+  if (popup.state === 'selected_original') return 'rejected';
+  if (popup.state === 'closed_no_send') return 'not_engaged';
+  return undefined;
+}
+
+/**
+ * MPS-4 (12.1): at first-popup close, record the sequence-offer disposition for a compound prompt from
+ * the state the popup already returned. Writes a STUB row for the two non-accepted, non-dead states
+ * (`selected_original` → rejected, `closed_no_send` → not_engaged) and NOTHING otherwise — a non-compound
+ * prompt (no handoff), `selected_current` (accepted → the intake's full row on send), and `not_shown` all
+ * return undefined; a popup that died throws before this is reached, so the absence IS its record.
+ *
+ * 12.2: the stub is written with `recordPromptEnhancementSequenceOfferDeclined` — NOT
+ * `upsertPendingPromptSequence` (its validator requires itemCount>=2, so a stub silently returns false).
+ * Synchronous, in-process; rides the popup host's `finally` closeStore save. `sequenceId` /
+ * `enhancementId` come off the handoff + result — the same source the intake uses. Returns the
+ * disposition written, or undefined when nothing was recorded.
+ */
+export function recordPromptEnhancementMpsSequenceOfferDispositionV1(
+  store: Store,
+  pending: PendingPromptEnhancement,
+  popup: PromptEnhancementCliPopupResultV1,
+  projectRoot: string,
+): PromptEnhancementSequenceDeclinedDispositionV1 | undefined {
+  const sequenceHandoff = pending.result.uiView.handoffAndSequenceSummary;
+  if (!sequenceHandoff) return undefined;
+  const disposition = promptEnhancementMpsOfferDispositionFromPopupV1(popup);
+  if (!disposition) return undefined;
+  const written = recordPromptEnhancementSequenceOfferDeclined(store, {
+    projectRoot,
+    sessionId:     pending.sessionId,
+    sequenceId:    sequenceHandoff.handoffDecisionId,
+    enhancementId: pending.result.enhancementId,
+    disposition,
+  });
+  logger.debug('stop_mps_offer_disposition', { cwd: projectRoot, disposition, written });
+  return disposition;
+}
 
 /**
  * Injectable feedback popup dependencies. `render` is the terminal renderer
@@ -517,6 +566,11 @@ export function registerStopCommand(program: import('commander').Command): void 
         // The popup rendered: record that its Source-A signals were shown so the
         // missing-signal memory accumulates cross-session (E3/3.2b).
         recordPromptEnhancementShownMemoryV1(store, payload.cwd, pending.request);
+        // MPS-4 (12.1): record what the user did with a compound prompt's SEQUENCE OFFER, from the
+        // state the popup already returned (details on the helper).
+        if (validatePromptEnhancementCliPopupResultV1(popup)) {
+          recordPromptEnhancementMpsSequenceOfferDispositionV1(store, pending, popup, payload.cwd);
+        }
         if (
           validatePromptEnhancementCliPopupResultV1(popup)
           && popup.state === 'selected_current'

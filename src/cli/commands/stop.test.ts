@@ -31,11 +31,12 @@ vi.mock('../../decision-session/engine-option-generator.js', () => ({
 
 import { openStore } from '../../store/db.js';
 import type { Store } from '../../store/db.js';
-import { runStop } from './stop.js';
+import { runStop, promptEnhancementMpsOfferDispositionFromPopupV1, recordPromptEnhancementMpsSequenceOfferDispositionV1 } from './stop.js';
 import type { StopPayload } from './stop.js';
 import { upsertPendingAdvisory, getPendingAdvisory } from '../../store/pending-advisories.js';
-import { upsertPendingPromptEnhancement, getPendingPromptEnhancement } from '../../store/pending-prompt-enhancements.js';
-import { upsertPendingPromptSequence, getActivePendingPromptSequence } from '../../store/pending-sequences.js';
+import { upsertPendingPromptEnhancement, getPendingPromptEnhancement, type PendingPromptEnhancement } from '../../store/pending-prompt-enhancements.js';
+import { upsertPendingPromptSequence, getActivePendingPromptSequence, getPromptEnhancementSequenceOfferDisposition } from '../../store/pending-sequences.js';
+import type { PromptEnhancementCliPopupResultV1 } from '../../prompt-enhancement/cli-submit-popup.js';
 import { emptyPromptEnhancementSequencePayloadV1 } from '../../prompt-enhancement/sequence-payload.js';
 import { buildPromptEnhancementRequestForAuto } from './auto.js';
 import { preparePromptEnhancement } from '../../prompt-enhancement/facade.js';
@@ -517,5 +518,75 @@ describe('runStop — telemetry events', () => {
     await runStop(makePayload(), store);
     const calls = vi.mocked(writeTelemetry).mock.calls;
     expect(calls.some(([, evt]) => evt === 'language_detected')).toBe(false);
+  });
+});
+
+// ── MPS-4 (12.1): sequence-offer disposition mapping ──────────────────────────
+
+describe('runStop — MPS-4 offer-disposition mapping (12.1)', () => {
+  it('maps Use-original → rejected, close/Escape → not_engaged (the two non-accepted stub states)', () => {
+    expect(promptEnhancementMpsOfferDispositionFromPopupV1({ state: 'selected_original' })).toBe('rejected');
+    expect(promptEnhancementMpsOfferDispositionFromPopupV1({ state: 'closed_no_send' })).toBe('not_engaged');
+  });
+
+  it('records NO stub for accepted (selected_current) or a not-shown popup — accepted is the intake full row', () => {
+    // selected_current is accepted (the intake writes the full row on send — no stub here).
+    expect(promptEnhancementMpsOfferDispositionFromPopupV1({ state: 'selected_current', bodyText: 'x' })).toBeUndefined();
+    // not_shown is no offer at all.
+    expect(promptEnhancementMpsOfferDispositionFromPopupV1({ state: 'not_shown', reasonCodes: [] })).toBeUndefined();
+  });
+});
+
+// ── MPS-4 (12.1): the wiring writes the stub to the store ─────────────────────
+
+describe('recordPromptEnhancementMpsSequenceOfferDispositionV1 — 12.1 wiring (writes to the store)', () => {
+  const PROJ = '/test/project';
+  let store: Store;
+  beforeEach(async () => { store = await openStore(':memory:'); });
+  afterEach(() => { store.db.close(); });
+
+  // A compound prompt whose result carries the sequence handoff (only the fields the writer reads).
+  const compound = (): PendingPromptEnhancement => ({
+    sessionId: 'sess-1',
+    result: { enhancementId: 'enh-1', uiView: { handoffAndSequenceSummary: { handoffDecisionId: 'seq-1' } } },
+  } as unknown as PendingPromptEnhancement);
+
+  const popup = (state: PromptEnhancementCliPopupResultV1['state']): PromptEnhancementCliPopupResultV1 =>
+    (state === 'selected_current' ? { state, bodyText: 'x' }
+      : state === 'not_shown' ? { state, reasonCodes: [] }
+      : { state }) as PromptEnhancementCliPopupResultV1;
+
+  const rows = () => (store.db.exec('SELECT COUNT(*) FROM pending_prompt_sequences')[0]?.values[0][0] ?? 0) as number;
+
+  it('Use original → writes a rejected stub; close/Escape → not_engaged; both readable, neither active', () => {
+    expect(recordPromptEnhancementMpsSequenceOfferDispositionV1(store, compound(), popup('selected_original'), PROJ)).toBe('rejected');
+    expect(getPromptEnhancementSequenceOfferDisposition(store, PROJ, 'seq-1')).toBe('rejected');
+    // The stub is terminal (cancelled) — never picked up as an active sequence.
+    expect(getActivePendingPromptSequence(store, PROJ, 'sess-1')).toBeNull();
+  });
+
+  it('close/Escape → writes a not_engaged stub', () => {
+    expect(recordPromptEnhancementMpsSequenceOfferDispositionV1(store, compound(), popup('closed_no_send'), PROJ)).toBe('not_engaged');
+    expect(getPromptEnhancementSequenceOfferDisposition(store, PROJ, 'seq-1')).toBe('not_engaged');
+  });
+
+  it('accepted (selected_current) and not_shown write NOTHING — accepted is the intake full row', () => {
+    expect(recordPromptEnhancementMpsSequenceOfferDispositionV1(store, compound(), popup('selected_current'), PROJ)).toBeUndefined();
+    expect(recordPromptEnhancementMpsSequenceOfferDispositionV1(store, compound(), popup('not_shown'), PROJ)).toBeUndefined();
+    expect(rows()).toBe(0);
+    expect(getPromptEnhancementSequenceOfferDisposition(store, PROJ, 'seq-1')).toBeNull();
+  });
+
+  it('a non-compound prompt (no sequence handoff) writes nothing whatever the state', () => {
+    const plain = { sessionId: 'sess-1', result: { enhancementId: 'enh-1', uiView: {} } } as unknown as PendingPromptEnhancement;
+    expect(recordPromptEnhancementMpsSequenceOfferDispositionV1(store, plain, popup('selected_original'), PROJ)).toBeUndefined();
+    expect(rows()).toBe(0);
+  });
+
+  it('offer_disposition is written once — a second matching write is idempotent, no duplicate row', () => {
+    recordPromptEnhancementMpsSequenceOfferDispositionV1(store, compound(), popup('selected_original'), PROJ);
+    recordPromptEnhancementMpsSequenceOfferDispositionV1(store, compound(), popup('selected_original'), PROJ);
+    expect(getPromptEnhancementSequenceOfferDisposition(store, PROJ, 'seq-1')).toBe('rejected');
+    expect(rows()).toBe(1);
   });
 });
