@@ -34,12 +34,11 @@ import {
 import { buildPromptEnhancementCostVisibilityMetadataV1 } from '../src/prompt-enhancement/cost-observability.js';
 import { getPromptStartStopSourceSnapshot } from '../src/prompt-enhancement/source-reality.js';
 import { isValidApiKey } from '../src/config/ApiKeyResolver.js';
-
-/** The invariant half of the fall-through sentence's long arm. */
-const FALLTHROUGH_LONG = 'for this request with concrete, source-backed specifics';
-/** Its short arm, used when a directional action asks for brevity. */
-const FALLTHROUGH_SHORT_PREFIX = 'Cover ';
-const FALLTHROUGH_SHORT_SUFFIX = ' concretely.';
+import {
+  countPromptEnhancementFallThroughSentencesV1,
+  findPromptEnhancementDuplicateGuidanceV1,
+  isPromptEnhancementBodyAssertionCheckerCurrentV1,
+} from '../src/prompt-enhancement/body-assertion-checks.js';
 
 /**
  * Both traffic shapes. Engineer-written prompts name their artefact; casual ones do not, and a
@@ -59,8 +58,8 @@ const PROMPTS: readonly { shape: 'engineer' | 'casual'; text: string }[] = [
 ];
 
 /**
- * Guard against this script going stale. It hunts for a sentence built inline in the renderer, so
- * a reworded renderer would leave it looking for text that no longer exists — and it would then
+ * Guard against this script going stale. The sentence it hunts for is built inline in the renderer,
+ * so a rewording there would leave it looking for text that no longer exists — and it would then
  * pass every run while checking nothing.
  */
 function assertCheckerIsCurrent(): void {
@@ -72,10 +71,10 @@ function assertCheckerIsCurrent(): void {
     process.stderr.write(`PE body assertion: cannot read ${rendererPath} to self-check.\n`);
     process.exit(1);
   }
-  if (!renderer.includes(FALLTHROUGH_LONG) || !renderer.includes(FALLTHROUGH_SHORT_SUFFIX)) {
+  if (!isPromptEnhancementBodyAssertionCheckerCurrentV1(renderer)) {
     process.stderr.write(
-      'PE body assertion: STALE CHECKER — the fall-through sentence this script looks for is no longer\n'
-      + 'in compose-enhancement.ts. Update the constants here before trusting a pass.\n',
+      'PE body assertion: STALE CHECKER — the fall-through sentence it looks for is no longer in\n'
+      + 'compose-enhancement.ts. Update body-assertion-checks.ts before trusting a pass.\n',
     );
     process.exit(1);
   }
@@ -140,22 +139,6 @@ function baseRequest(): PromptEnhancementPrepareRequestV1 {
   };
 }
 
-/** Everything after the verbatim-original section — the part the model is supposed to write. */
-function guidanceHalf(bodyText: string): string {
-  const lines = bodyText.split('\n');
-  const firstBlank = lines.findIndex((line, index) => index > 1 && line.trim() === '');
-  return (firstBlank === -1 ? lines.slice(1) : lines.slice(firstBlank + 1)).join('\n').trim();
-}
-
-function countFallThrough(bodyText: string): number {
-  let count = bodyText.split(FALLTHROUGH_LONG).length - 1;
-  for (const line of bodyText.split('\n')) {
-    const trimmed = line.replace(/^[-*]\s*/, '').trim();
-    if (trimmed.startsWith(FALLTHROUGH_SHORT_PREFIX) && trimmed.endsWith(FALLTHROUGH_SHORT_SUFFIX)) count++;
-  }
-  return count;
-}
-
 async function main(): Promise<void> {
   assertCheckerIsCurrent();
 
@@ -168,7 +151,7 @@ async function main(): Promise<void> {
   }
 
   const failures: string[] = [];
-  const guidanceByPrompt = new Map<string, string>();
+  const collected: { prompt: string; bodyText: string }[] = [];
 
   for (const { shape, text } of PROMPTS) {
     const base = baseRequest();
@@ -180,22 +163,18 @@ async function main(): Promise<void> {
 
     const bodyText = result.currentBody.text;
     const mode = result.callAndVisibilityMetadata.callVisibilityMode;
-    const fallThrough = countFallThrough(bodyText);
-    const guidance = guidanceHalf(bodyText);
+    const fallThrough = countPromptEnhancementFallThroughSentencesV1(bodyText);
 
     process.stdout.write(`\n${'='.repeat(78)}\n[${shape}] ${text}\n`);
     process.stdout.write(`disposition=${result.disposition} mode=${mode} model=${result.modelVersion} ${elapsedMs}ms fallThrough=${fallThrough}\n`);
     process.stdout.write(`${'-'.repeat(78)}\n${bodyText}\n`);
 
-    if (fallThrough > 0) {
-      failures.push(`fall-through sentence x${fallThrough} in: "${text}"`);
-    }
-    for (const [otherText, otherGuidance] of guidanceByPrompt) {
-      if (otherGuidance.length > 0 && otherGuidance === guidance) {
-        failures.push(`identical guidance for two prompts: "${text}" and "${otherText}"`);
-      }
-    }
-    guidanceByPrompt.set(text, guidance);
+    if (fallThrough > 0) failures.push(`fall-through sentence x${fallThrough} in: "${text}"`);
+    collected.push({ prompt: text, bodyText });
+  }
+
+  for (const { prompt, matches } of findPromptEnhancementDuplicateGuidanceV1(collected)) {
+    failures.push(`identical guidance for two prompts: "${prompt}" and "${matches}"`);
   }
 
   process.stdout.write(`\n${'='.repeat(78)}\n`);
