@@ -39,8 +39,9 @@ export interface PromptEnhancementMpsContinuationInputV1 {
 }
 
 export interface PromptEnhancementMpsContinuationIdentityV1 {
+  // MPS-10 (9.1): no `projectRoot` — an absolute path must never appear in the serialized model. The
+  // request id already binds scope (it embeds the per-project session id), so it is the only key needed.
   requestId: string;
-  projectRoot: string;
   sequenceId: string;
   sequenceItemId: string;
   currentItemRevision: number;
@@ -84,7 +85,12 @@ export interface PromptEnhancementMpsContinuationPopupModelV1 {
   };
   keyboard: {
     plainEnter: 'emit_one_typed_current_body_plus_details_request';
-    escape: 'leave_editor_focus_preserve_draft';
+    // MPS-2 (6.3): on a continuation, Escape now CANCELS the remaining sequence (terminal) — the delivery
+    // mapper turns the shell's decline outcome into `cancel_remaining_sequence`, so the declared contract
+    // value must match that runtime, not the old editor-blur claim. What the user is SHOWN about Escape
+    // (help copy, and whether a first Escape blurs the editor before cancelling) is a UI decision → Hiren's;
+    // it is deliberately not encoded here.
+    escape: 'cancel_remaining_sequence';
     ctrlOrCmdJ: 'insert_newline';
     ctrlOrCmdUpDown: 'move_by_line';
     leftRight: 'move_by_character';
@@ -206,7 +212,6 @@ export function buildPromptEnhancementMpsContinuationPopupV1(
   const safeCurrentItemRevision = currentItemRevision as number;
   const identity: PromptEnhancementMpsContinuationIdentityV1 = {
     requestId: input.result.requestId,
-    projectRoot: input.result.projectRoot,
     sequenceId: event.sequenceId,
     sequenceItemId: event.sequenceItemId,
     currentItemRevision: safeCurrentItemRevision,
@@ -246,7 +251,7 @@ export function buildPromptEnhancementMpsContinuationPopupV1(
       },
       keyboard: {
         plainEnter: 'emit_one_typed_current_body_plus_details_request',
-        escape: 'leave_editor_focus_preserve_draft',
+        escape: 'cancel_remaining_sequence',
         ctrlOrCmdJ: 'insert_newline',
         ctrlOrCmdUpDown: 'move_by_line',
         leftRight: 'move_by_character',

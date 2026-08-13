@@ -138,6 +138,25 @@ describe('stage-3-1 first MPS popup', () => {
     });
   });
 
+  // MPS-10 (9.1): the first-popup surface's serialized model must render NONE of the forbidden values —
+  // no absolute path, no sequence config key, no literal `Decision Session`, no legacy sentinel. Same
+  // substring-over-the-whole-model rule the shipping fixture runners enforce (acceptance-fixtures.ts:121).
+  it('renders no forbidden value and never leaks the project path (MPS-10 forbidden-value list)', async () => {
+    const built = await validFirstPopup();
+    if (built.state !== 'ready') throw new Error('fixture did not render');
+    const rendered = JSON.stringify(built.model);
+    const forbidden = [
+      '/home/', 'prompt_enhancement.sequence.enabled', 'Decision Session',
+      'private-provider-error-must-not-render', 'legacy-role-must-not-render',
+      'legacy-frequency-must-not-render', 'legacy-history-must-not-render',
+      'legacy-selected-prompt-must-not-render', 'legacy-host-state-must-not-render',
+      'legacy-label-must-not-render',
+    ];
+    expect(forbidden.filter((value) => rendered.includes(value))).toEqual([]);
+    // The surface never carries the absolute project path — so no /home/-class path can leak, whatever the root.
+    expect(rendered).not.toContain('/tmp/b31-project');
+  });
+
   it('emits one typed current-body-plus-details intent without merging or sending locally', async () => {
     const built = await validFirstPopup();
     if (built.state !== 'ready') throw new Error('fixture did not render');

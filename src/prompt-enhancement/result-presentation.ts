@@ -109,8 +109,9 @@ export function buildPromptEnhancementMpsResultPresentationV1(
   const typed = input.typedResult;
   const identity = input.intent.identity;
   if (
+    // requestId binds scope (it embeds the per-project session id), so it subsumes the old projectRoot
+    // check — which was dropped from the identity in MPS-10 (9.1) so no absolute path is serialized.
     typed.requestId !== identity.requestId
-    || typed.projectRoot !== identity.projectRoot
     || typed.sequenceId !== identity.sequenceId
     || typed.sequenceItemId !== identity.sequenceItemId
     || typed.currentItemRevision !== identity.currentItemRevision
@@ -119,7 +120,7 @@ export function buildPromptEnhancementMpsResultPresentationV1(
   ) {
     return { state: 'no_presentation', reasonCodes: ['mps_result_identity_mismatch'] };
   }
-  if (input.result.requestId !== identity.requestId || input.result.projectRoot !== identity.projectRoot) {
+  if (input.result.requestId !== identity.requestId) {
     return { state: 'no_presentation', reasonCodes: ['mps_result_scope_mismatch'] };
   }
   if (!Number.isSafeInteger(typed.currentItemRevision) || typed.currentItemRevision < 0) {

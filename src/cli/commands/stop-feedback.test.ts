@@ -126,10 +126,10 @@ describe('feedback popup integration', () => {
     const render = vi.fn<FeedbackRenderFn>(async () => null);
     const deps: FeedbackDeps = { render, send };
 
-    const result = await runStop(makePayload(), store, vi.fn().mockResolvedValue('opt') as SelectFn, undefined, deps);
+    const result = await runStop(makePayload(), store, undefined, undefined, deps);
 
     expect(render).not.toHaveBeenCalled();
-    expect(result.outcome).toBe('blocked'); // advisory ran normally
+    expect(result.outcome).toBe('advisory_disabled'); // advisory found but disabled (MPS-7), not rendered
   });
 
   it('skips feedback when no renderer is available even if eligible', async () => {
@@ -138,9 +138,9 @@ describe('feedback popup integration', () => {
     const send = vi.fn().mockResolvedValue(true);
     const deps: FeedbackDeps = { render: null, send };
 
-    const result = await runStop(makePayload(), store, vi.fn().mockResolvedValue('opt') as SelectFn, undefined, deps);
+    const result = await runStop(makePayload(), store, undefined, undefined, deps);
 
-    expect(result.outcome).toBe('blocked'); // fell through to advisory
+    expect(result.outcome).toBe('advisory_disabled'); // fell through to the advisory, which is disabled (MPS-7)
     expect(send).not.toHaveBeenCalled();
     // cadence NOT reset (feedback wasn't shown)
     expect(readCadence(store).lastFeedbackAt).toBeNull();

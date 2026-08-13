@@ -30,6 +30,11 @@ import {
 } from './multiline-editor.js';
 import type { PromptEnhancementCliMpsInteractionV1, PromptEnhancementCliMpsCancelFeedbackV1 } from './cli-mps-run.js';
 import type { PromptActionSignalKind } from '../store/feedback-signals.js';
+import {
+  deliverSequenceContinuationOutcomeV1,
+  type PromptEnhancementSequenceContinuationDeliveryV1,
+} from './sequence-continuation-delivery.js';
+import type { PromptEnhancementSequenceRuntimeStateV1 } from './sequence-runtime.js';
 
 /**
  * MPS continuation-popup CLI shell (locked §3.4 layout).
@@ -62,6 +67,94 @@ export type PromptEnhancementCliMpsContinuationOutcomeV1 =
   | { state: 'declined' }
   | { state: 'cancelled'; feedback?: PromptEnhancementCliMpsCancelFeedbackV1 }
   | { state: 'not_shown'; reasonCodes: readonly string[] };
+
+/**
+ * MPS-2 (6.1): wire the continuation shell's outcome to the delivery mapper. This is what the P5
+ * launcher calls after the shell returns — it REACHES `deliverSequenceContinuationOutcomeV1`, which had
+ * no production caller (so a later mapping change, 6.2, would otherwise alter a function nobody runs).
+ *
+ * The shell's five states are converted to the four the mapper consumes (the cancel-feedback the popup
+ * collected is a separate step the launcher already forwarded, so it is dropped from the mapper input);
+ * `not_shown` — the popup never rendered — keeps the offered item pending, to be re-offered next Stop
+ * (nothing was decided, so nothing is delivered). The launcher persists the returned `nextState` and
+ * acts on the returned `kind`; no runtime logic lives inline. (Missing/invalid RESULTS — the four silent
+ * exit events — are 6.4's detection, not this mapper.)
+ */
+export function deliverPromptEnhancementCliMpsContinuationOutcomeV1(
+  offeredState: PromptEnhancementSequenceRuntimeStateV1,
+  outcome: PromptEnhancementCliMpsContinuationOutcomeV1,
+  actionId: string,
+): PromptEnhancementSequenceContinuationDeliveryV1 {
+  switch (outcome.state) {
+    case 'not_shown':
+      return { kind: 'keep', nextState: offeredState };
+    case 'send':
+      return deliverSequenceContinuationOutcomeV1(offeredState, { state: 'send', bodyText: outcome.bodyText }, actionId);
+    case 'interruption':
+      return deliverSequenceContinuationOutcomeV1(offeredState, { state: 'interruption' }, actionId);
+    case 'declined':
+      return deliverSequenceContinuationOutcomeV1(offeredState, { state: 'declined' }, actionId);
+    case 'cancelled':
+      return deliverSequenceContinuationOutcomeV1(offeredState, { state: 'cancelled' }, actionId);
+  }
+}
+
+/** The continuation-shell outcome states caught in-process (a REPORTED result, not a silent exit). */
+const PROMPT_ENHANCEMENT_MPS_CONTINUATION_OUTCOME_STATES_V1: readonly PromptEnhancementCliMpsContinuationOutcomeV1['state'][] = [
+  'send',
+  'interruption',
+  'declined',
+  'cancelled',
+  'not_shown',
+];
+
+/** True only for a well-formed reported outcome; a missing (null/undefined), unrecognized, or incomplete result is not one. */
+function isPromptEnhancementCliMpsContinuationOutcomeV1(
+  result: unknown,
+): result is PromptEnhancementCliMpsContinuationOutcomeV1 {
+  if (typeof result !== 'object' || result === null) return false;
+  const state = (result as { state?: unknown }).state;
+  if (typeof state !== 'string' || !(PROMPT_ENHANCEMENT_MPS_CONTINUATION_OUTCOME_STATES_V1 as readonly string[]).includes(state)) {
+    return false;
+  }
+  // A `send` result MUST carry a string body: a recognized-but-incomplete send is an INVALID result
+  // (6.4 — invalid → cancel), not a reported outcome, so it falls to the silent-exit cancel rather than
+  // injecting an undefined body. The other states carry no delivery-critical payload, so a partial one
+  // already maps to keep/cancel harmlessly and needs no deeper check.
+  if (state === 'send' && typeof (result as { bodyText?: unknown }).bodyText !== 'string') return false;
+  return true;
+}
+
+/**
+ * MPS-2 (6.4): detect the FOUR SILENT continuation-exit events. Only Escape/Ctrl+C are caught
+ * in-process and return a typed outcome (Ctrl+C is folded into Esc → `declined`). OS close, timeout,
+ * crash, and unknown-loss return NOTHING — so the parent that AWAITS the continuation popup is handed a
+ * missing (null/undefined) or invalid (unrecognized-shape, or an incomplete `send` with no body) result
+ * instead of an outcome. At a
+ * CONTINUATION that missing/invalid result IS a cancel signal: every exit ends the active sequence
+ * (§0), so it maps to the SAME terminal cancel the Cancel/Escape paths use — routed through the mapper's
+ * `declined` case (whose comment already states "every exit event ends it, not just the Cancel button").
+ * No feedback is attached: the popup is gone, and the feedback step is never added to a silent exit
+ * (Trap §2).
+ *
+ * ⚠️ Continuation-only. At the FIRST popup nothing has activated yet, so a missing result is nothing
+ * to cancel; that surface keeps its own not-shown handling and is deliberately not routed here.
+ * A legitimately-rendered-then-`not_shown` outcome (e.g. no_tty) is a REPORTED result, NOT a silent
+ * exit: it flows through the 6.1 bridge and keeps the item pending (re-offered next Stop).
+ * ⛔ Error handling is UNCHANGED: a crash that THROWS still propagates and is logged as a crash
+ * upstream — this classifies a RETURNED value only, and never catches or reinterprets an error.
+ */
+export function deliverPromptEnhancementCliMpsContinuationResultV1(
+  offeredState: PromptEnhancementSequenceRuntimeStateV1,
+  result: unknown,
+  actionId: string,
+): PromptEnhancementSequenceContinuationDeliveryV1 {
+  if (isPromptEnhancementCliMpsContinuationOutcomeV1(result)) {
+    return deliverPromptEnhancementCliMpsContinuationOutcomeV1(offeredState, result, actionId);
+  }
+  // Silent exit (missing/invalid result) at a continuation → terminal cancel, no feedback.
+  return deliverSequenceContinuationOutcomeV1(offeredState, { state: 'declined' }, actionId);
+}
 
 export async function runPromptEnhancementCliMpsContinuationPopupV1(input: {
   result: PromptEnhancementPrepareResultV1;
