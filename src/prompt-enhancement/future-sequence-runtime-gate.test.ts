@@ -310,6 +310,47 @@ describe('Phase 11 future sequence runtime gate', () => {
     expect(result.missingGateCodes).not.toContain('current_v1_runtime_implementation_no_go');
   });
 
+  // MPS-11 sub-phase 1b: the Stop-hook continuation launcher passes a real event + empty evidence but
+  // NO handoff (the persisted sequence row stores ids/counts/status only — a typed handoff is a
+  // create-path concern, not that seam). Mirror that exact call shape and assert the gate reports the
+  // honest missing-handoff diagnostic while staying fully fail-closed.
+  it('MPS-11 1b: a real continuation event with no handoff and empty evidence stays blocked, missing-handoff reported', () => {
+    const result = evaluatePromptEnhancementFutureSequenceRuntimeGateV1({
+      schemaVersion: PROMPT_ENHANCEMENT_CONTRACT_VERSION,
+      operation: 'continue_current_item',
+      requestId: 'enh-1b',
+      projectRoot: '/repo',
+      // The launcher builds this from the live row + payload (honest v1 values keep it blocked).
+      event: {
+        contractVersion: PROMPT_ENHANCEMENT_CONTRACT_VERSION,
+        projectScope: '/repo',
+        requestId: 'enh-1b',
+        sequenceId: 'seq-1b',
+        sequenceItemId: 'seq-1b#2',
+        currentItemIndex: 2,
+        createdAtMs: 1,
+        idempotencyKey: 'seq-1b:2',
+        explicitUserActionState: 'absent',
+        continuationActionState: 'continue_current_item',
+        terminalTransitionState: 'none',
+        hostCapabilityState: 'stop_bridge_only',
+        stopEventState: 'stop_fired_non_proof',
+        stateFreshness: 'current',
+      },
+      evidence: {},
+    });
+
+    // No handoff passed → the honest diagnostic, not a fabricated inert one.
+    expect(result.reasonCodes).toContain('missing_typed_handoff_metadata');
+    expect(result.handoffRuntimeAuthorityState).toBe('missing_typed_handoff_no_runtime');
+    // Empty evidence → every runtime-evidence flag still missing; gate fully fail-closed.
+    expect(result.allowed).toBe(false);
+    expect(assertPromptEnhancementFutureSequenceRuntimeBlockedV1(result)).toBe(true);
+    expect(result.missingGateCodes).toEqual(
+      PROMPT_ENHANCEMENT_FUTURE_SEQUENCE_RUNTIME_REQUIRED_GATES_V1.filter((c) => c !== 'current_v1_runtime_implementation_no_go'),
+    );
+  });
+
   it('rejects handoff metadata that claims accepted runtime consent or queue authority', () => {
     const unsafe = metadata({
       userHandoffConsentState: 'explicitly_accepted_approved_runtime',
