@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   PROMPT_ENHANCEMENT_MPS_CLI_FOOTER_V1,
+  PROMPT_ENHANCEMENT_MPS_CLI_CONTINUATION_FOOTER_V1,
   renderPromptEnhancementMpsContinuationFrameV1,
   renderPromptEnhancementMpsFirstPopupFrameV1,
 } from './cli-mps-popup.js';
@@ -297,10 +298,11 @@ describe('UI-7 MPS continuation-popup frame renderer (§3.4)', () => {
     expect(frame).toContain('I need to do something else first');
     expect(frame).toContain('Write directly in the coding agent. This same sequence prompt returns after the response.');
     expect(frame).toContain('Cancel (remaining multi-prompt sequence)');
-    expect(frame).toContain(PROMPT_ENHANCEMENT_MPS_CLI_FOOTER_V1);
+    expect(frame).toContain(PROMPT_ENHANCEMENT_MPS_CLI_CONTINUATION_FOOTER_V1);
     const frameLines = frame.split('\n');
     expect(frameLines[0]).toBe('│ ◆ NEXPATH CLI · Multi-prompt sequence');
-    expect(frameLines[frameLines.length - 1]).toBe('│ Enter send · Esc actions');
+    // Continuation footer: Escape CANCELS the sequence (distinct from the first popup's 'Esc actions').
+    expect(frameLines[frameLines.length - 1]).toBe('│ Enter send · Esc cancels sequence');
     for (const line of frameLines) expect(line.startsWith('│')).toBe(true);
     // Body → Additional details → interruption → Cancel.
     expect(frame.indexOf('Use enhanced sequence prompt')).toBeLessThan(frame.indexOf('Additional details'));
