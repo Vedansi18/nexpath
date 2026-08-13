@@ -26,12 +26,108 @@
 import type { Command } from 'commander';
 import type { ChildProcess } from 'node:child_process';
 import { parseCursorHookPayload, type CursorHookPayload } from '../../cursor-hook/payload.js';
-import { defaultReadStdin, awaitChild } from './windsurf-hook.js';
+import { defaultReadStdin, awaitChild, isReplacementEcho } from './windsurf-hook.js';
 import { createHoldBudget, type HoldBudget } from './submit-hold-budget.js';
 import { buildDefaultPromptSubmitDecider } from './windsurf-hook.js';
 import { spawnAuto } from '../../windsurf-hook/spawn.js';
 import { isSubmitAdvisoryEnabledForHost } from './submit-flow-config.js';
 import { bringPopupToFront } from '../../windsurf-hook/foreground.js';
+import { log } from '../../logger.js';
+import { readFileSync } from 'node:fs';
+
+/**
+ * GUI env re-hydration (live root cause #3, 2026-08-12).
+ *
+ * Cursor's Hooks Service spawns hook processes with a **sanitized environment**
+ * (measured: cwd is `~/.cursor`, and `DISPLAY`/`DBUS_SESSION_BUS_ADDRESS` are
+ * absent). The decider's popup is a `gnome-terminal --wait` spawn — without a
+ * display/bus connection it exits immediately, the selection never happens, and
+ * the decider falls open to `allow` ~500 ms after printing its "select an
+ * action" cue. Measured live: hook ran perfectly, popup died silently, no block.
+ * Windsurf passes the session env through, which is why the SAME popup worked
+ * there — this gap is Cursor-only.
+ *
+ * The session env still exists one level up: the Cursor processes we descend
+ * from carry `DISPLAY` et al., and `/proc/<pid>/environ` is readable for
+ * same-user processes on Linux. So walk the parent chain (bounded) and copy
+ * ONLY the missing GUI variables. Never overwrites an existing value, silent
+ * no-op off Linux or on any read failure — strictly additive, fail-open (A3).
+ */
+export const GUI_ENV_KEYS = [
+  'DISPLAY',
+  'WAYLAND_DISPLAY',
+  'XAUTHORITY',
+  'DBUS_SESSION_BUS_ADDRESS',
+  'XDG_RUNTIME_DIR',
+] as const;
+
+export interface RehydrateGuiEnvDeps {
+  /** Target env, mutated in place. Defaults to process.env. */
+  env?: NodeJS.ProcessEnv;
+  /** Starting pid whose ancestors are probed. Defaults to process.ppid. */
+  startPid?: number;
+  /** Injected /proc reader for tests. Defaults to fs.readFileSync. */
+  readProcFile?: (path: string) => string;
+  /** Platform guard. Defaults to process.platform. */
+  platform?: NodeJS.Platform;
+  /** Max ancestors to probe — the hooks service sits a few forks up. */
+  maxHops?: number;
+}
+
+/** Parse `/proc/<pid>/environ` (NUL-separated KEY=VALUE records). */
+function parseEnviron(raw: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const rec of raw.split('\0')) {
+    const eq = rec.indexOf('=');
+    if (eq > 0) out[rec.slice(0, eq)] = rec.slice(eq + 1);
+  }
+  return out;
+}
+
+/** `/proc/<pid>/stat` field 4 is the ppid — fields 1..2 need the comm-paren skip. */
+function readPpid(pid: number, readProcFile: (p: string) => string): number | null {
+  try {
+    const stat = readProcFile(`/proc/${pid}/stat`);
+    const afterComm = stat.slice(stat.lastIndexOf(')') + 2); // "state ppid ..."
+    const ppid = Number(afterComm.split(' ')[1]);
+    return Number.isInteger(ppid) && ppid > 0 ? ppid : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Copy missing GUI env vars from the nearest ancestor that has them.
+ * Returns the keys that were filled (for the log line).
+ */
+export function rehydrateGuiEnvFromParent(deps: RehydrateGuiEnvDeps = {}): string[] {
+  const env = deps.env ?? process.env;
+  const platform = deps.platform ?? process.platform;
+  if (platform !== 'linux') return [];
+  const readProcFile = deps.readProcFile ?? ((p: string) => readFileSync(p, 'utf8'));
+  const missing = () => GUI_ENV_KEYS.filter((k) => !env[k]);
+  if (missing().length === 0) return [];
+
+  const filled: string[] = [];
+  let pid: number | null = deps.startPid ?? process.ppid;
+  const maxHops = deps.maxHops ?? 6;
+  for (let hop = 0; hop < maxHops && pid !== null && pid > 1 && missing().length > 0; hop++) {
+    let parentEnv: Record<string, string> | null = null;
+    try {
+      parentEnv = parseEnviron(readProcFile(`/proc/${pid}/environ`));
+    } catch {
+      parentEnv = null; // unreadable ancestor — keep walking
+    }
+    if (parentEnv) {
+      for (const k of missing()) {
+        const v = parentEnv[k];
+        if (v) { env[k] = v; filled.push(k); }
+      }
+    }
+    pid = readPpid(pid, readProcFile);
+  }
+  return filled;
+}
 
 /**
  * Backward-compatibility switch for the Cursor submit-time advisory (H6).
@@ -119,6 +215,27 @@ export interface CursorHookActionDeps {
    * (flag absent) so only the env var drives the gate unless a test opts in.
    */
   readFlagFile?: (path: string) => string | null;
+  /**
+   * GUI env recovery (see `rehydrateGuiEnvFromParent`). Injected for tests;
+   * the default reads `/proc` on Linux and no-ops elsewhere.
+   */
+  rehydrateGuiEnv?: (deps?: RehydrateGuiEnvDeps) => string[];
+  /**
+   * VED-PE-10 echo detector (see `isReplacementEcho` in windsurf-hook.ts).
+   * Injected for tests so they never open the real store.
+   */
+  checkReplacementEcho?: (projectRoot: string | undefined, promptText: string) => Promise<boolean>;
+  /**
+   * File logger (defaults to the shared `~/.nexpath/nexpath.log` logger the
+   * rest of the CLI uses). Added 2026-08-12 after the hooks.json `version` bug
+   * hid for four days precisely because this command logged NOTHING: with a
+   * dead registration and a silent hook, "Cursor never invoked us" and
+   * "we ran and silently allowed" were indistinguishable. Every stage now
+   * leaves a line. **PII (§4.3): prompt text and user_email are never logged —
+   * lengths and booleans only.** Logging failures are swallowed; the hook's
+   * fail-open contract outranks observability.
+   */
+  logEvent?: typeof log;
 }
 
 /**
@@ -136,8 +253,13 @@ export async function runCursorHookAction(
   const write = deps.write ?? ((t: string) => process.stdout.write(t));
   const exit = deps.exit ?? ((c: number) => process.exit(c));
   const stdinTimeoutMs = deps.stdinTimeoutMs ?? 2_000;
+  // Never let observability break fail-open: a throwing logger is swallowed.
+  const logEvent: typeof log = (level, name, data) => {
+    try { (deps.logEvent ?? log)(level, name, data); } catch { /* logging must never break the hook */ }
+  };
 
   try {
+    logEvent('info', 'cursor_hook_invoked', { event });
     if (event !== 'beforeSubmitPrompt') {
       // Unknown event: continue rather than guess at its contract.
       write(JSON.stringify(CURSOR_CONTINUE));
@@ -160,6 +282,13 @@ export async function runCursorHookAction(
     const raw = stdinRes.value ?? '';
 
     const payload = parseCursorHookPayload(raw);
+    // §4.3: lengths and booleans only — never the prompt text or user_email.
+    logEvent('info', 'cursor_hook_payload', {
+      raw_len: raw.length,
+      stdin_timed_out: stdinRes.timedOut === true,
+      prompt_len: payload?.promptText?.length ?? 0,
+      has_project_root: typeof payload?.projectRoot === 'string' && payload.projectRoot.length > 0,
+    });
 
     let decision: 'allow' | 'block' = 'allow';
     // Gated exactly like Windsurf's: with the switch off the decider is never
@@ -179,7 +308,24 @@ export async function runCursorHookAction(
     // Config-backed switch (owner ruling 2026-08-12): env var override, else the
     // shipped `~/.nexpath/submit-flow.json` flag. The env-only helper is kept for
     // its exact-equality pin; the GATE resolves through the flag-aware resolver.
-    if (isSubmitAdvisoryEnabledForHost('cursor', { env: deps.env, readFlagFile: deps.readFlagFile })) {
+    const gateEnabled = isSubmitAdvisoryEnabledForHost('cursor', { env: deps.env, readFlagFile: deps.readFlagFile });
+    logEvent('info', 'cursor_hook_gate', {
+      enabled: gateEnabled,
+      // Permanent probes for the sanitized-env trap: without DISPLAY/DBUS the
+      // popup dies instantly and the flow silently allows (measured 2026-08-12).
+      has_display: Boolean(process.env.DISPLAY || process.env.WAYLAND_DISPLAY),
+      has_dbus: Boolean(process.env.DBUS_SESSION_BUS_ADDRESS),
+    });
+    if (gateEnabled) {
+      // Cursor spawns hooks WITHOUT the GUI session env (measured) — the popup
+      // cannot open in that state. Recover the missing vars from the ancestor
+      // Cursor processes before anything downstream needs them. Additive-only;
+      // injectable for tests; silent no-op off Linux or on failure.
+      const rehydrate = deps.rehydrateGuiEnv ?? rehydrateGuiEnvFromParent;
+      try {
+        const filled = rehydrate({});
+        if (filled.length > 0) logEvent('info', 'cursor_hook_env_rehydrated', { filled });
+      } catch { /* fail-open — the decider will simply fall back to allow */ }
       // ── OPTION-A ORDERING (2026-08-12) — classify THIS prompt FIRST ────────
       // Cursor's `beforeSubmitPrompt` fires BEFORE the prompt reaches
       // `state.vscdb`, so the extension's DB-watcher has not classified it yet.
@@ -193,6 +339,24 @@ export async function runCursorHookAction(
       const spawnAutoFn = deps.spawnAutoFn ?? spawnAuto;
       const waitForChild = deps.waitForChild ?? awaitChild;
       const promptText = payload?.promptText ?? '';
+      // ── VED-PE-10: our own replacement re-entering must not re-advise ──────
+      // The extension injects + auto-submits the replacement after a block, and
+      // that submit fires THIS hook again. Without this check the hook's own
+      // `auto` consumed the `lastInjectedPrompt` guard, the extension's
+      // duplicate watcher-auto then classified the replacement fresh, and the
+      // replacement's run popped a SECOND popup and stalled ~57 s behind the
+      // hold (measured live 2026-08-13). On an echo: skip auto, popup and
+      // decision entirely — instant release. The guard field is left for the
+      // watcher's auto to consume (Layer C semantics unchanged).
+      let isEcho = false;
+      if (promptText.trim() !== '') {
+        const echoRes = await hold.run(() =>
+          (deps.checkReplacementEcho ?? isReplacementEcho)(payload?.projectRoot, promptText));
+        isEcho = !echoRes.timedOut && echoRes.value === true;
+      }
+      if (isEcho) {
+        logEvent('info', 'cursor_hook_echo_skip', { prompt_len: promptText.length });
+      } else {
       if (promptText.trim() !== '') {
         const child = spawnAutoFn(promptText, { cwd: payload?.projectRoot ?? process.cwd() });
         const waited = await hold.run(() => waitForChild(child));
@@ -201,6 +365,9 @@ export async function runCursorHookAction(
           // landed) and never leave an orphan (R2 — Cursor won't reap it).
           try { child?.kill(); } catch { /* already gone */ }
         }
+        logEvent('info', 'cursor_hook_auto', { spawned: child != null, timed_out: waited.timedOut === true });
+      } else {
+        logEvent('info', 'cursor_hook_auto', { spawned: false, reason: 'empty_prompt' });
       }
       // Raise the popup to the foreground BEFORE the blocking decision. The
       // popup spawn inside `decide` is synchronous (spawnSync); this fire-and-
@@ -212,6 +379,11 @@ export async function runCursorHookAction(
       // never a decision: it continues, so the original prompt is released (A3).
       const decided = await hold.run(() => decide(payload));
       if (!decided.timedOut && decided.value === 'block') decision = 'block';
+      logEvent('info', 'cursor_hook_decision', {
+        decision,
+        decider_timed_out: decided.timedOut === true,
+      });
+      } // end non-echo path
     }
 
     // `continue:false` is the ONLY thing that blocks Cursor — not the exit code.
@@ -223,8 +395,10 @@ export async function runCursorHookAction(
         ? { continue: false, user_message: deps.blockMessage ?? CURSOR_BLOCK_USER_MESSAGE }
         : CURSOR_CONTINUE,
     ));
-  } catch {
+    logEvent('info', 'cursor_hook_response', { continue: decision !== 'block' });
+  } catch (err) {
     // Never break the host: emit a continue and fall through to exit 0.
+    logEvent('error', 'cursor_hook_fail_open', { message: (err as Error)?.message ?? 'unknown' });
     try { write(JSON.stringify(CURSOR_CONTINUE)); } catch { /* stdout gone */ }
   }
   exit(0);

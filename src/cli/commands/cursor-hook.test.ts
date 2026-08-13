@@ -12,6 +12,7 @@ import { join } from 'node:path';
 import {
   runCursorHookAction, CURSOR_CONTINUE, CURSOR_BLOCK_USER_MESSAGE,
   CURSOR_PROMPTSUBMIT_ADVISORY_ENV, isCursorPromptSubmitAdvisoryEnabled,
+  rehydrateGuiEnvFromParent, GUI_ENV_KEYS,
 } from './cursor-hook.js';
 import { createHoldBudget } from './submit-hold-budget.js';
 
@@ -34,6 +35,12 @@ function harness(over: Record<string, unknown> = {}) {
       // Hermetic: never touch the real ~/.nexpath/submit-flow.json in tests.
       // The env override above drives the gate; flag-file tests inject their own.
       readFlagFile: () => null,
+      // Hermetic: the default logger appends to the real ~/.nexpath/nexpath.log.
+      logEvent: () => {},
+      // Hermetic: the default reads /proc and mutates the runner's process.env.
+      rehydrateGuiEnv: () => [],
+      // Hermetic: the echo-check default opens the real store.
+      checkReplacementEcho: async () => false,
       readStdin: async () => PAYLOAD,
       write: (t: string) => { writes.push(t); },
       exit: (c: number) => { exits.push(c); },
@@ -436,3 +443,216 @@ describe('foreground raise — submit popup must be brought to front', () => {
     expect(raisePopup).not.toHaveBeenCalled();
   });
 })
+
+/**
+ * FILE LOGGING (2026-08-12) — added after the hooks.json `version` bug hid for
+ * four days: the hook logged NOTHING, so a dead registration and a silent
+ * allow were indistinguishable. Every stage must leave a line, and none of
+ * those lines may carry prompt text or user_email (§4.3).
+ */
+describe('file logging — a silent hook can never hide again', () => {
+  it('⭐ logs invocation, payload meta, gate, auto, decision and response on a full run', async () => {
+    const events: string[] = [];
+    const logEvent = vi.fn((_l: string, name: string) => { events.push(name); });
+    const h = harness({ logEvent, decide: async () => 'block' as const });
+    await runCursorHookAction('beforeSubmitPrompt', h.deps as never);
+    expect(events).toEqual([
+      'cursor_hook_invoked',
+      'cursor_hook_payload',
+      'cursor_hook_gate',
+      'cursor_hook_auto',
+      'cursor_hook_decision',
+      'cursor_hook_response',
+    ]);
+  });
+
+  it('⚠ §4.3 — no log line ever carries the prompt text or user_email', async () => {
+    const calls: unknown[] = [];
+    const logEvent = vi.fn((...args: unknown[]) => { calls.push(args); });
+    const h = harness({ logEvent, decide: async () => 'block' as const });
+    await runCursorHookAction('beforeSubmitPrompt', h.deps as never);
+    const flat = JSON.stringify(calls);
+    expect(flat).not.toContain('hello');                  // the payload prompt
+    expect(flat).not.toContain('someone@example.com');    // the payload email
+    expect(flat).toContain('prompt_len');                 // meta is logged instead
+  });
+
+  it('a throwing logger never breaks fail-open (exit 0, one response)', async () => {
+    const h = harness({
+      logEvent: () => { throw new Error('disk full'); },
+      decide: async () => 'allow' as const,
+    });
+    await runCursorHookAction('beforeSubmitPrompt', h.deps as never);
+    expect(h.exits).toEqual([0]);
+    expect(JSON.parse(h.writes[0])).toEqual({ continue: true });
+  });
+
+  // NB: a throwing readStdin/decide does NOT reach the outer catch — the hold
+  // budget absorbs a rejecting segment into a clean fail-open by design (see
+  // submit-hold-budget.ts run()). The outer catch guards genuinely unmanaged
+  // failures, e.g. stdout dying mid-response.
+  it('fail-open paths log cursor_hook_fail_open (response write throws)', async () => {
+    const events: string[] = [];
+    const logEvent = vi.fn((_l: string, name: string) => { events.push(name); });
+    const writes: string[] = [];
+    let first = true;
+    const h = harness({
+      logEvent,
+      write: (t: string) => {
+        if (first) { first = false; throw new Error('EPIPE'); }
+        writes.push(t);
+      },
+      decide: async () => 'allow' as const,
+    });
+    await runCursorHookAction('beforeSubmitPrompt', h.deps as never);
+    expect(events).toContain('cursor_hook_fail_open');
+    expect(JSON.parse(writes[0])).toEqual({ continue: true }); // the recovery write
+    expect(h.exits).toEqual([0]);
+  });
+});
+
+/**
+ * GUI env re-hydration (live root cause #3, 2026-08-12): Cursor spawns hooks
+ * with a sanitized env — no DISPLAY/DBUS — so the popup terminal exits
+ * instantly and the decider silently allows. The hook recovers the missing
+ * vars from the ancestor Cursor processes via /proc. Additive-only.
+ */
+describe('rehydrateGuiEnvFromParent — recover the GUI session env Cursor strips', () => {
+  const environ = (vars: Record<string, string>) =>
+    Object.entries(vars).map(([k, v]) => `${k}=${v}`).join('\0');
+  // /proc/<pid>/stat: "pid (comm) state ppid ..."
+  const stat = (pid: number, ppid: number) => `${pid} (cursor) S ${ppid} 1 1 0`;
+
+  it('⭐ fills DISPLAY and DBUS from the immediate parent', () => {
+    const env: Record<string, string> = {};
+    const filled = rehydrateGuiEnvFromParent({
+      env, startPid: 100, platform: 'linux',
+      readProcFile: (p) => {
+        if (p === '/proc/100/environ') return environ({ DISPLAY: ':1', DBUS_SESSION_BUS_ADDRESS: 'unix:path=/run/user/1000/bus' });
+        if (p === '/proc/100/stat') return stat(100, 1);
+        throw new Error('ENOENT');
+      },
+    });
+    expect(env.DISPLAY).toBe(':1');
+    expect(env.DBUS_SESSION_BUS_ADDRESS).toBe('unix:path=/run/user/1000/bus');
+    expect(filled).toContain('DISPLAY');
+  });
+
+  it('⭐ never overwrites an existing value (additive-only)', () => {
+    const env: Record<string, string> = { DISPLAY: ':7' };
+    rehydrateGuiEnvFromParent({
+      env, startPid: 100, platform: 'linux',
+      readProcFile: (p) => {
+        if (p === '/proc/100/environ') return environ({ DISPLAY: ':1', XAUTHORITY: '/home/u/.Xauthority' });
+        if (p === '/proc/100/stat') return stat(100, 1);
+        throw new Error('ENOENT');
+      },
+    });
+    expect(env.DISPLAY).toBe(':7');          // untouched
+    expect(env.XAUTHORITY).toBe('/home/u/.Xauthority'); // still filled
+  });
+
+  it('walks UP the chain when the immediate parent lacks the vars', () => {
+    const env: Record<string, string> = {};
+    rehydrateGuiEnvFromParent({
+      env, startPid: 200, platform: 'linux',
+      readProcFile: (p) => {
+        if (p === '/proc/200/environ') return environ({ PATH: '/usr/bin' }); // sanitized service
+        if (p === '/proc/200/stat') return stat(200, 150);
+        if (p === '/proc/150/environ') return environ({ DISPLAY: ':1' });    // Cursor main
+        if (p === '/proc/150/stat') return stat(150, 1);
+        throw new Error('ENOENT');
+      },
+    });
+    expect(env.DISPLAY).toBe(':1');
+  });
+
+  it('is a silent no-op off Linux', () => {
+    const env: Record<string, string> = {};
+    const filled = rehydrateGuiEnvFromParent({
+      env, startPid: 100, platform: 'darwin',
+      readProcFile: () => { throw new Error('must not be called'); },
+    });
+    expect(filled).toEqual([]);
+    expect(env).toEqual({});
+  });
+
+  it('never throws on unreadable /proc (fail-open)', () => {
+    const env: Record<string, string> = {};
+    const filled = rehydrateGuiEnvFromParent({
+      env, startPid: 100, platform: 'linux',
+      readProcFile: () => { throw new Error('EACCES'); },
+    });
+    expect(filled).toEqual([]);
+  });
+
+  it('stops at the hop bound (no infinite ancestor walk)', () => {
+    const env: Record<string, string> = {};
+    let reads = 0;
+    rehydrateGuiEnvFromParent({
+      env, startPid: 100, platform: 'linux', maxHops: 3,
+      readProcFile: (p) => {
+        reads++;
+        if (p.endsWith('/environ')) return environ({ PATH: '/usr/bin' });
+        const pid = Number(p.split('/')[2]);
+        return stat(pid, pid + 1); // endless synthetic chain
+      },
+    });
+    expect(reads).toBeLessThanOrEqual(6); // 3 hops × (environ + stat)
+  });
+
+  it('covers every GUI key we depend on', () => {
+    expect([...GUI_ENV_KEYS]).toEqual(
+      ['DISPLAY', 'WAYLAND_DISPLAY', 'XAUTHORITY', 'DBUS_SESSION_BUS_ADDRESS', 'XDG_RUNTIME_DIR'],
+    );
+  });
+});
+
+/**
+ * VED-PE-10 echo skip (live root cause, 2026-08-13): after a block, the
+ * extension injects + auto-submits the replacement, which fires this hook
+ * AGAIN. Without recognising the echo, the hook re-classified its own
+ * replacement, popped a second popup nobody was watching, and stalled the
+ * replacement ~57 s behind the hold. An echo must release instantly, spawning
+ * NOTHING — and must leave the store guard for the watcher's auto to consume.
+ */
+describe('⭐ VED-PE-10 — the injected replacement releases instantly, no re-advise', () => {
+  it('echo: no auto spawn, no decision, immediate continue:true, logged', async () => {
+    const events: string[] = [];
+    const spawnAutoFn = vi.fn();
+    const decide = vi.fn(async () => 'block' as const);
+    const h = harness({
+      checkReplacementEcho: async () => true,
+      spawnAutoFn,
+      decide,
+      logEvent: (_l: string, name: string) => { events.push(name); },
+    });
+    await runCursorHookAction('beforeSubmitPrompt', h.deps as never);
+    expect(spawnAutoFn).not.toHaveBeenCalled();          // no re-classification
+    expect(decide).not.toHaveBeenCalled();               // no popup, no decision
+    expect(JSON.parse(h.writes[0])).toEqual({ continue: true });
+    expect(events).toContain('cursor_hook_echo_skip');
+  });
+
+  it('non-echo: the normal path is untouched (auto spawns, decider consulted)', async () => {
+    const spawnAutoFn = vi.fn(() => null);
+    const decide = vi.fn(async () => 'allow' as const);
+    const h = harness({ checkReplacementEcho: async () => false, spawnAutoFn, decide });
+    await runCursorHookAction('beforeSubmitPrompt', h.deps as never);
+    expect(spawnAutoFn).toHaveBeenCalledTimes(1);
+    expect(decide).toHaveBeenCalledTimes(1);
+  });
+
+  it('a throwing echo-check fails open into the normal path', async () => {
+    // hold.run absorbs the rejection → isEcho false → ordinary flow.
+    const decide = vi.fn(async () => 'allow' as const);
+    const h = harness({
+      checkReplacementEcho: async () => { throw new Error('store gone'); },
+      spawnAutoFn: vi.fn(() => null),
+      decide,
+    });
+    await runCursorHookAction('beforeSubmitPrompt', h.deps as never);
+    expect(decide).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(h.writes[0])).toEqual({ continue: true });
+  });
+});
