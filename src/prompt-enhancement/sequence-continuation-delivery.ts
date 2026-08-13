@@ -31,7 +31,8 @@ import type { PromptEnhancementHandoffMetadataV1 } from './contracts.js';
  *   item (from `awaiting_response`) or re-offers the SAME still-pending item; it never auto-sends.
  * - `send`          → the user explicitly sent the offered item → mark it in flight + inject it.
  * - `interruption`  → keep the SAME item pending (pointer unchanged) — it returns next Stop.
- * - `declined`      → identical persistence to interruption: the offered item stays pending.
+ * - `declined`      → Escape/decline now CANCELS the sequence (MPS-2 6.2): the SAME terminal cancel as
+ *                     the Cancel button, applied via `cancel_sequence` (see the `declined` case below).
  * - `cancel`        → sequence-scoped terminal; the row is scrubbed and PEF feedback is shown.
  * - Stop is a decision moment only — never completion proof; completion happens solely when the
  *   pointer advances past the last item with an explicit action.
