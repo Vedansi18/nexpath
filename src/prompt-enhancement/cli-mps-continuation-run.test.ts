@@ -180,12 +180,12 @@ describe('deliverPromptEnhancementCliMpsContinuationOutcomeV1 — 6.1 wiring', (
     ...overrides,
   });
 
-  it('send → inject; interruption/declined → keep (the current mapping); cancelled → cancel', () => {
+  it('send → inject; interruption → keep; declined/cancelled → cancel (MPS-2 6.2: every exit event cancels)', () => {
     const s = offered();
     expect(deliverPromptEnhancementCliMpsContinuationOutcomeV1(s, { state: 'send', bodyText: 'the edited body' }, 'a1').kind).toBe('inject');
     expect(deliverPromptEnhancementCliMpsContinuationOutcomeV1(s, { state: 'interruption' }, 'a2').kind).toBe('keep');
-    // 6.1 locks the CURRENT decline mapping (keep, offered item stays pending) — 6.2 will switch it to cancel.
-    expect(deliverPromptEnhancementCliMpsContinuationOutcomeV1(s, { state: 'declined' }, 'a3')).toEqual({ kind: 'keep', nextState: s });
+    // MPS-2 6.2: Escape/decline now CANCELS the whole sequence, exactly like the Cancel button.
+    expect(deliverPromptEnhancementCliMpsContinuationOutcomeV1(s, { state: 'declined' }, 'a3').kind).toBe('cancel');
     expect(deliverPromptEnhancementCliMpsContinuationOutcomeV1(s, { state: 'cancelled' }, 'a4').kind).toBe('cancel');
   });
 

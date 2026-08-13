@@ -74,9 +74,11 @@ describe('continuation outcome delivery', () => {
     expect(out.nextState).toMatchObject({ status: 'item_pending', currentItemIndex: 1 });
   });
 
-  it('declined → keep the offered state unchanged (returns next Stop, like interruption)', () => {
+  it('declined → terminal cancel (MPS-2 6.2: Escape ends the whole sequence, like the Cancel button)', () => {
     const out = deliverSequenceContinuationOutcomeV1(offered, { state: 'declined' }, 'act-3');
-    expect(out).toEqual({ kind: 'keep', nextState: offered });
+    expect(out.kind).toBe('cancel');
+    if (out.kind !== 'cancel') return;
+    expect(out.nextState.status).toBe('cancelled');
   });
 
   it('cancelled → terminal cancel', () => {

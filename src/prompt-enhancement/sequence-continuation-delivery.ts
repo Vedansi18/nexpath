@@ -226,9 +226,14 @@ export function deliverSequenceContinuationOutcomeV1(
       return { kind: 'keep', nextState: kept.state };
     }
     case 'declined': {
-      // Declining (Esc) leaves the offered item pending, exactly like an interruption — it returns
-      // at the next Stop. No new action is applied; the already-persisted offered state stands.
-      return { kind: 'keep', nextState: offeredState };
+      // MPS-2 (6.2): Escape/decline now CANCELS the entire active sequence (terminal, no resume) —
+      // every exit event ends it, not just the Cancel button. Apply the same `cancel_sequence` action
+      // the Cancel path uses. The feedback asymmetry (Cancel asks feedback, Escape returns immediately)
+      // lives UPSTREAM in the shell, not here; and only `status` moves — never `offer_disposition`
+      // (MPS-4 §6a). Cancel is one row's status via the transition writer, never the project-wide delete.
+      const cancelled = applyPromptEnhancementSequenceRuntimeActionV1(offeredState, { type: 'cancel_sequence', actionId });
+      if (!cancelled.ok) return { kind: 'reject', reasonCode: cancelled.reasonCode };
+      return { kind: 'cancel', nextState: cancelled.state };
     }
     case 'cancelled': {
       const cancelled = applyPromptEnhancementSequenceRuntimeActionV1(offeredState, { type: 'cancel_sequence', actionId });
