@@ -32,6 +32,18 @@
  * `<project>/.cursor/hooks.json`, `~/.cursor/hooks.json`, and enterprise
  * `/etc/cursor/hooks.json`. We only ever write the first two — the enterprise
  * path is not ours to touch.
+ *
+ * ── ⚠ R5: TOP-LEVEL `version` IS **REQUIRED** ────────────────────────────────
+ * Live root cause, 2026-08-12: Cursor's config validator (extracted from
+ * `workbench.desktop.main.js` and reproduced verbatim) REJECTS the whole file
+ * when the top-level `version` field is missing or not a positive integer —
+ * `"Config version must be a number"` → the service logs *"Failed to parse user
+ * hooks configuration"* and registers NOTHING. A syntactically valid hooks.json
+ * without `version` is therefore silently dead: no error surfaces in the UI, the
+ * hook simply never fires. This writer emitted exactly that for four days.
+ * The 2026-08-08 spike worked because its hand-written harness config carried
+ * `"version": 1`. A test pins the emitted field; preservation of a
+ * user-customised valid version is also pinned.
  */
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -45,6 +57,25 @@ import { setSubmitFlowFlag } from '../cli/commands/submit-flow-config.js';
  * user would call hung.
  */
 export const CURSOR_HOOK_TIMEOUT_SECONDS = 120;
+
+/**
+ * The REQUIRED top-level `version` of `.cursor/hooks.json` (`R5`).
+ *
+ * Cursor's validator demands a positive integer here and rejects the entire
+ * config without it — measured live 2026-08-12 ("Failed to parse user hooks
+ * configuration", zero hooks registered). `1` is the only version the current
+ * validator gives meaning to.
+ */
+export const CURSOR_HOOKS_CONFIG_VERSION = 1;
+
+/**
+ * True when an existing top-level `version` value would pass Cursor's validator
+ * (positive integer). Anything else must be replaced, or the whole file —
+ * including other tools' hooks — stays rejected.
+ */
+export function isValidCursorHooksVersion(v: unknown): v is number {
+  return typeof v === 'number' && Number.isInteger(v) && v >= 1;
+}
 
 /**
  * The events we register.
@@ -135,6 +166,10 @@ function writeJson(filePath: string, data: unknown): void {
  */
 export function writeCursorHooks(filePath: string, cliPath: string): void {
   const data = readJsonSafe(filePath);
+  // R5: without a valid top-level `version` Cursor rejects the WHOLE file and
+  // registers nothing — the hook would be silently dead. Preserve a
+  // user-customised valid value; write ours otherwise.
+  if (!isValidCursorHooksVersion(data.version)) data.version = CURSOR_HOOKS_CONFIG_VERSION;
   const hooks = (data.hooks && typeof data.hooks === 'object' ? data.hooks : {}) as Record<string, CursorHookEntry[]>;
   const cfg = buildCursorHooksConfig(cliPath) as Record<string, CursorHookEntry[]>;
   // Iterate ALL events so a stale entry from an older install is dropped even if
@@ -161,6 +196,10 @@ export function writeCursorHooks(filePath: string, cliPath: string): void {
 export function removeCursorHooks(filePath: string): boolean {
   if (!existsSync(filePath)) return false;
   const data = readJsonSafe(filePath);
+  // R5, removal half: this function rewrites the file, and other tools' hooks
+  // may remain in it — leaving them behind an invalid (version-less) config
+  // would keep THEIR hooks dead too. Same preserve-or-write rule as the writer.
+  if (!isValidCursorHooksVersion(data.version)) data.version = CURSOR_HOOKS_CONFIG_VERSION;
   const hooks = data.hooks && typeof data.hooks === 'object' ? (data.hooks as Record<string, CursorHookEntry[]>) : null;
   if (!hooks) return false;
   let removed = false;

@@ -220,3 +220,60 @@ describe('user vs project path helpers are distinct', () => {
     expect(getCursorUserHooksPath('/home/u')).not.toBe(getCursorProjectHooksPath('/proj'));
   });
 });
+
+/**
+ * ⚠ R5 (live root cause, 2026-08-12) — Cursor REQUIRES a top-level `version`
+ * (positive integer) and rejects the ENTIRE file without it: the service logs
+ * "Failed to parse user hooks configuration" and registers nothing, silently.
+ * This writer emitted exactly that for four days; the submit hook never fired.
+ * Reproduced against the validator extracted from workbench.desktop.main.js:
+ * current file → ["Config version must be a number"]; +version:1 → [].
+ */
+describe('⚠ R5 — top-level version is REQUIRED or Cursor rejects the whole file', () => {
+  it('⭐ a fresh write emits version: 1', () => {
+    const t = tmp();
+    try {
+      writeCursorHooks(t.file, CLI);
+      expect(read(t.file).version).toBe(1);
+    } finally { t.cleanup(); }
+  });
+
+  it('preserves a user-customised valid version', () => {
+    const t = tmp();
+    try {
+      mkdirSync(dirname(t.file), { recursive: true });
+      writeFileSync(t.file, JSON.stringify({ version: 2, hooks: {} }), 'utf8');
+      writeCursorHooks(t.file, CLI);
+      expect(read(t.file).version).toBe(2);
+    } finally { t.cleanup(); }
+  });
+
+  it('replaces an invalid version (Cursor would reject 0 / floats / strings)', () => {
+    const t = tmp();
+    try {
+      mkdirSync(dirname(t.file), { recursive: true });
+      writeFileSync(t.file, JSON.stringify({ version: '1', hooks: {} }), 'utf8');
+      writeCursorHooks(t.file, CLI);
+      expect(read(t.file).version).toBe(1);
+    } finally { t.cleanup(); }
+  });
+
+  it('removal also leaves a valid version behind (other tools\' hooks must not stay dead)', () => {
+    const t = tmp();
+    try {
+      mkdirSync(dirname(t.file), { recursive: true });
+      // A legacy nexpath-written file: no version, ours + a foreign hook.
+      writeFileSync(t.file, JSON.stringify({
+        hooks: { beforeSubmitPrompt: [
+          { command: 'other-tool audit' },
+          buildCursorHookEntry(CLI, 'beforeSubmitPrompt'),
+        ] },
+      }), 'utf8');
+      expect(removeCursorHooks(t.file)).toBe(true);
+      const after = read(t.file) as { version?: number; hooks: Record<string, Array<{ command: string }>> };
+      expect(after.version).toBe(1);
+      expect(after.hooks.beforeSubmitPrompt).toHaveLength(1);
+      expect(after.hooks.beforeSubmitPrompt[0].command).toBe('other-tool audit');
+    } finally { t.cleanup(); }
+  });
+});
