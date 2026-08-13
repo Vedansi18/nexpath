@@ -327,6 +327,13 @@ export function renderPromptEnhancementMpsContinuationFrameV1(
   const contentLine = (line: string): string =>
     c && isPromptEnhancementScrollMarkerLineV1(line) ? `    ${c.gray}${line}${c.reset}` : `    ${line}`;
 
+  // MPS-3 (Part B): sequence progress line near the top (owner decision: top placement). `done`/`total`
+  // come off the packaged continuation (done = currentItemIndex, total = itemCount); the copy is formatted
+  // here, never carried on the model. CONTINUATION-only surface (the first popup shows the sequence plan).
+  const progressLine = `Sequence ${model.progress.done} of ${model.progress.total}`;
+  lines.push(c ? `${c.dim}${progressLine}${c.reset}` : progressLine);
+  lines.push('');
+
   // Enhanced next sequence body — primary, interactive row 0. Same "whole prompt is included" on
   // the edit-keys hint as the first popup (owner request 2026-08-07).
   const heading = publicText(model.heading);

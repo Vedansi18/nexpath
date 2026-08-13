@@ -14,6 +14,7 @@ import { getPromptStartStopSourceSnapshot } from './source-reality.js';
 import { runPromptEnhancementCliMpsContinuationPopupV1, deliverPromptEnhancementCliMpsContinuationOutcomeV1, deliverPromptEnhancementCliMpsContinuationResultV1 } from './cli-mps-continuation-run.js';
 import type { PromptEnhancementCliMpsInteractionV1 } from './cli-mps-run.js';
 import type { PromptEnhancementSequenceRuntimeStateV1 } from './sequence-runtime.js';
+const CONT_PROGRESS = { done: 2, total: 5 } as const; // MPS-3 Part B: sequence position for the shell input
 
 const KEY = { enter: '\r', escape: '', up: '[A', down: '[B' } as const;
 
@@ -76,7 +77,7 @@ describe('MPS continuation-popup CLI shell (§3.4)', () => {
   it('Enter on the body row sends the enhanced next-item body', async () => {
     const { result, handoffMetadata, event } = await fixture();
     const io = scripted([KEY.enter]);
-    const outcome = await runPromptEnhancementCliMpsContinuationPopupV1({ result, handoffMetadata, event, interaction: io });
+    const outcome = await runPromptEnhancementCliMpsContinuationPopupV1({ result, handoffMetadata, event, progress: CONT_PROGRESS, interaction: io });
     expect(outcome.state).toBe('send');
     if (outcome.state !== 'send') return;
     expect(outcome.bodyText.trim().length).toBeGreaterThan(0);
@@ -88,13 +89,13 @@ describe('MPS continuation-popup CLI shell (§3.4)', () => {
 
   it('Esc declines (leave without a decision)', async () => {
     const { result, handoffMetadata, event } = await fixture();
-    const outcome = await runPromptEnhancementCliMpsContinuationPopupV1({ result, handoffMetadata, event, interaction: scripted([KEY.escape]) });
+    const outcome = await runPromptEnhancementCliMpsContinuationPopupV1({ result, handoffMetadata, event, progress: CONT_PROGRESS, interaction: scripted([KEY.escape]) });
     expect(outcome.state).toBe('declined');
   });
 
   it('down×2 → Enter on "something else first" returns interruption (pointer must NOT advance)', async () => {
     const { result, handoffMetadata, event } = await fixture();
-    const outcome = await runPromptEnhancementCliMpsContinuationPopupV1({ result, handoffMetadata, event, interaction: scripted([KEY.down, KEY.down, KEY.enter]) });
+    const outcome = await runPromptEnhancementCliMpsContinuationPopupV1({ result, handoffMetadata, event, progress: CONT_PROGRESS, interaction: scripted([KEY.down, KEY.down, KEY.enter]) });
     expect(outcome.state).toBe('interruption');
   });
 
@@ -102,7 +103,7 @@ describe('MPS continuation-popup CLI shell (§3.4)', () => {
     const { result, handoffMetadata, event } = await fixture();
     // After Cancel, the feedback popup opens; Enter selects the first suggested reason.
     const io = scripted([KEY.down, KEY.down, KEY.down, KEY.enter, KEY.enter]);
-    const outcome = await runPromptEnhancementCliMpsContinuationPopupV1({ result, handoffMetadata, event, interaction: io });
+    const outcome = await runPromptEnhancementCliMpsContinuationPopupV1({ result, handoffMetadata, event, progress: CONT_PROGRESS, interaction: io });
     expect(outcome.state).toBe('cancelled');
     if (outcome.state !== 'cancelled') return;
     expect(outcome.feedback).toBeDefined();
@@ -111,7 +112,7 @@ describe('MPS continuation-popup CLI shell (§3.4)', () => {
   it('Cancel → Esc in the feedback popup → cancelled WITHOUT feedback', async () => {
     const { result, handoffMetadata, event } = await fixture();
     const io = scripted([KEY.down, KEY.down, KEY.down, KEY.enter, KEY.escape]);
-    const outcome = await runPromptEnhancementCliMpsContinuationPopupV1({ result, handoffMetadata, event, interaction: io });
+    const outcome = await runPromptEnhancementCliMpsContinuationPopupV1({ result, handoffMetadata, event, progress: CONT_PROGRESS, interaction: io });
     expect(outcome).toEqual({ state: 'cancelled' });
   });
 
@@ -120,7 +121,7 @@ describe('MPS continuation-popup CLI shell (§3.4)', () => {
     // Move to details (down), type text, Enter to apply (focus returns to body), Enter to send.
     const typed = 'scope to payments'.split('');
     const io = scripted([KEY.down, ...typed, KEY.enter, KEY.enter]);
-    const outcome = await runPromptEnhancementCliMpsContinuationPopupV1({ result, handoffMetadata, event, interaction: io });
+    const outcome = await runPromptEnhancementCliMpsContinuationPopupV1({ result, handoffMetadata, event, progress: CONT_PROGRESS, interaction: io });
     expect(outcome.state).toBe('send');
     if (outcome.state !== 'send') return;
     expect(outcome.bodyText).toContain('Additional details to incorporate:');
@@ -132,7 +133,7 @@ describe('MPS continuation-popup CLI shell (§3.4)', () => {
     const sink = vi.fn();
     // down -> details row; type; Enter -> APPLY (fires the sink); Enter -> send.
     await runPromptEnhancementCliMpsContinuationPopupV1({
-      result, handoffMetadata, event,
+      result, handoffMetadata, event, progress: CONT_PROGRESS,
       interaction: scripted([KEY.down, ...'pg'.split(''), KEY.enter, KEY.enter]),
       actionSignalSink: sink,
     });
@@ -144,7 +145,7 @@ describe('MPS continuation-popup CLI shell (§3.4)', () => {
     // Blank apply (Enter on empty details) records nothing.
     const blankSink = vi.fn();
     await runPromptEnhancementCliMpsContinuationPopupV1({
-      result, handoffMetadata, event,
+      result, handoffMetadata, event, progress: CONT_PROGRESS,
       interaction: scripted([KEY.down, KEY.enter, KEY.escape]),
       actionSignalSink: blankSink,
     });
@@ -155,7 +156,7 @@ describe('MPS continuation-popup CLI shell (§3.4)', () => {
     const { result, handoffMetadata, event } = await fixture();
     // Walk all four rows so every focus state is painted, then send.
     const io = scripted([KEY.down, KEY.down, KEY.down, KEY.up, KEY.up, KEY.up, KEY.enter]);
-    await runPromptEnhancementCliMpsContinuationPopupV1({ result, handoffMetadata, event, interaction: io });
+    await runPromptEnhancementCliMpsContinuationPopupV1({ result, handoffMetadata, event, progress: CONT_PROGRESS, interaction: io });
     const rows = io.size!().rows;
     for (const frame of io.frames) {
       expect(frame.split('\n').length).toBeLessThanOrEqual(rows);
