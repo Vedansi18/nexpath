@@ -241,6 +241,14 @@ export function packagePromptEnhancementSequenceContinuationV1(
       // — the packager serving the wrong prompt while every field it was asked about looked right.
       renderedPromptBody: item.generatedWording,
       text: item.generatedWording,
+      // MPS-12 (Ruling C §22.2): a continuation shows the item's OWN original slice, not the first prompt's
+      // whole original. Re-point originalPromptText to the slice the item's offsets select — analogous to the
+      // body/text re-point above. The accepted result's original and the offsets index the same
+      // length-preserving text (redaction is length-preserving; see sequence-intake). A CONFIRMATION carries
+      // no slice (`originalSliceRef` null) → empty; the UI renders no original region for it anyway (kind-gated).
+      originalPromptText: item.originalSliceRef
+        ? input.acceptedResult.currentBody.originalPromptText.slice(item.originalSliceRef.start, item.originalSliceRef.end)
+        : '',
       // Not bookkeeping: this is the one bit that says Nexpath wrote this body. Marked as the
       // user's, a continuation re-enters the planner and plans a sequence out of our own writing.
       sentPromptOrigin: 'sequence_handoff_owned_body',
