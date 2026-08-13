@@ -357,6 +357,21 @@ describe('UI-7 MPS continuation-popup frame renderer (§3.4)', () => {
     }));
     expect(frame).toContain('Cancel (remaining multi-prompt sequence)  (unavailable)');
   });
+
+  it('MPS-1 loading wheel: body is a spinner skeleton ("<glyph> preparing…"), edit hint hidden, other rows stay', () => {
+    const frame = renderPromptEnhancementMpsContinuationFrameV1(continuationModel(), { loadingSpinnerGlyph: '⠋' });
+    // Body shows the spinner + "preparing…" instead of the real next-item body.
+    expect(frame).toContain('⠋ preparing…');
+    expect(frame).not.toContain('Next sequence step: apply the fix');
+    // The edit-keys hint is hidden while loading; the progress line and the other rows still render.
+    expect(frame).not.toContain('Ctrl+J');
+    expect(frame).toContain('Sequence 3 of 27');
+    expect(frame).toContain('Cancel (remaining multi-prompt sequence)');
+    // Not loading → the real body is back and the hint returns.
+    const normal = renderPromptEnhancementMpsContinuationFrameV1(continuationModel());
+    expect(normal).toContain('Next sequence step: apply the fix');
+    expect(normal).not.toContain('preparing…');
+  });
 });
 
 describe('UI-7 MPS continuation lifecycle proof (3 paths)', () => {

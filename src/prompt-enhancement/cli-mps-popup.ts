@@ -264,6 +264,13 @@ export interface PromptEnhancementMpsContinuationFrameStateV1 {
   caret?: { field: PromptEnhancementEditorFieldV1; visualRow: number; visualColumn: number };
   /** Mutable sink the renderer fills with the caret's 1-based screen position (see `caret`). */
   caretOut?: { row: number; col: number };
+  /**
+   * MPS-1 (loading wheel): a spinner glyph shown IN the body while the next item's wording is not yet
+   * ready — the body renders "<glyph> preparing…" and the edit hint is hidden; the other rows stay put
+   * (skeleton). The shell cycles the glyph and drops it once wording lands. Absent = normal render.
+   * (The wait itself is P5; MPS-5 8.3 found it unreachable today, so this is a defensive presentation.)
+   */
+  loadingSpinnerGlyph?: string;
 }
 
 /**
@@ -339,9 +346,14 @@ export function renderPromptEnhancementMpsContinuationFrameV1(
   const heading = publicText(model.heading);
   lines.push(radioRow(0, heading));
   recordCaret('enhanced_body');
-  const bodyRender = renderMpsBodyLinesV1(publicText(model.body.text), c);
+  // MPS-1 (loading wheel): while wording is not ready, the body is a spinner skeleton ("<glyph> preparing…")
+  // and the edit-keys hint is hidden; everything else renders as normal (owner: skeleton + spinner in body).
+  const bodyText = frameState.loadingSpinnerGlyph
+    ? `${frameState.loadingSpinnerGlyph} preparing…`
+    : publicText(model.body.text);
+  const bodyRender = renderMpsBodyLinesV1(bodyText, c);
   for (const bodyLine of bodyRender.lines) lines.push(bodyLine);
-  if (focusIndex === 0) lines.push(mpsEditKeysHintV1(c, bodyRender.hiddenBelow));
+  if (focusIndex === 0 && !frameState.loadingSpinnerGlyph) lines.push(mpsEditKeysHintV1(c, bodyRender.hiddenBelow));
   lines.push('');
 
   // Additional details — interactive row 1. Same PE-parity helpers as the first popup: apply hint
