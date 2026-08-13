@@ -44,11 +44,20 @@ describe('the switch — must stay identical to the CLI half', () => {
   });
 
   it.each(['0', 'true', 'TRUE', 'yes', '', ' 1', 'on'])('is disabled for %o', (v) => {
-    expect(isWindsurfSubmitAdvisoryEnabled({ [WINDSURF_SUBMIT_ADVISORY_ENV]: v })).toBe(false);
+    // Hermetic: flag-reader stubbed (absent) so only env semantics are pinned.
+    expect(isWindsurfSubmitAdvisoryEnabled({ [WINDSURF_SUBMIT_ADVISORY_ENV]: v }, () => false)).toBe(false);
   });
 
-  it('is disabled when unset — THE SHIPPED DEFAULT, so the old flow is untouched', () => {
-    expect(isWindsurfSubmitAdvisoryEnabled({})).toBe(false);
+  it('is disabled when unset AND the flag file is absent — the pre-flag default', () => {
+    expect(isWindsurfSubmitAdvisoryEnabled({}, () => false)).toBe(false);
+  });
+
+  it('falls through to the shipped flag file when the env var is unset', () => {
+    // The config-backed switch (owner ruling 2026-08-12): env unset ⇒ the flag
+    // decides. This is the SHIPPED state (install writes the flag ON).
+    expect(isWindsurfSubmitAdvisoryEnabled({}, () => true)).toBe(true);
+    // And '0' still overrides the flag OFF — the developer revert path.
+    expect(isWindsurfSubmitAdvisoryEnabled({ [WINDSURF_SUBMIT_ADVISORY_ENV]: '0' }, () => true)).toBe(false);
   });
 
   it('reads the REAL process.env when no argument is given (the production path)', () => {
@@ -56,9 +65,10 @@ describe('the switch — must stay identical to the CLI half', () => {
     const prev = process.env[WINDSURF_SUBMIT_ADVISORY_ENV];
     try {
       delete process.env[WINDSURF_SUBMIT_ADVISORY_ENV];
-      expect(isWindsurfSubmitAdvisoryEnabled()).toBe(false);
+      // Flag reader stubbed: this pin is about WHICH env object is read.
+      expect(isWindsurfSubmitAdvisoryEnabled(undefined, () => false)).toBe(false);
       process.env[WINDSURF_SUBMIT_ADVISORY_ENV] = '1';
-      expect(isWindsurfSubmitAdvisoryEnabled()).toBe(true);
+      expect(isWindsurfSubmitAdvisoryEnabled(undefined, () => false)).toBe(true);
     } finally {
       if (had) process.env[WINDSURF_SUBMIT_ADVISORY_ENV] = prev as string;
       else delete process.env[WINDSURF_SUBMIT_ADVISORY_ENV];

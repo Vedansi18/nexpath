@@ -159,6 +159,7 @@ describe('⭐ stdin is single-read — the buffer must reach BOTH consumers', ()
     let handleGotRaw: string | null = null;
     let seenPrompt: string | undefined;
     await windsurfHookAction('pre_user_prompt', { project: '/proj' }, {
+      checkReplacementEcho: async () => false,
       env,
       readStdin: async () => { stdinReads += 1; return PAYLOAD; },
       handle: async (_e, _o, d) => {
@@ -202,6 +203,7 @@ describe('⭐ stdin is single-read — the buffer must reach BOTH consumers', ()
     let handleCalled = false;
     let exited: number | null = null;
     await windsurfHookAction('pre_user_prompt', { project: '/proj' }, {
+      checkReplacementEcho: async () => false,
       env: { NEXPATH_WINDSURF_PROMPTSUBMIT_ADVISORY: '1' },
       readStdin: async () => 'not json{{',
       // Injected so the test stays hermetic (the default decider would open a
@@ -231,6 +233,7 @@ describe('⭐ the gated stdin read is BOUNDED — a hang must not hold the promp
     let exited: number | null = null;
     let seenPrompt: string | undefined;
     await runWindsurfHookAction('pre_user_prompt', { project: '/proj' }, {
+    checkReplacementEcho: async () => false,
       env: { NEXPATH_WINDSURF_PROMPTSUBMIT_ADVISORY: '1' },
       readStdin: () => new Promise<string>(() => {}),   // never resolves
       stdinTimeoutMs: 10,
@@ -253,6 +256,7 @@ describe('⭐ option A — the decision runs AFTER auto has classified this turn
     const order: string[] = [];
     let exited: number | null = null;
     await runWindsurfHookAction('pre_user_prompt', { project: '/proj' }, {
+    checkReplacementEcho: async () => false,
       env: { NEXPATH_WINDSURF_PROMPTSUBMIT_ADVISORY: '1' },
       readStdin: async () => JSON.stringify({ tool_info: { user_prompt: 'hi' } }),
       handle: async () => { order.push('handle'); return { action: 'auto', child: null } as never; },
@@ -283,6 +287,7 @@ describe('⭐ option A — the decision runs AFTER auto has classified this turn
     const { runWindsurfHookAction } = await import('./windsurf-hook.js');
     let decided = false;
     await runWindsurfHookAction('pre_user_prompt', { project: '/proj' }, {
+    checkReplacementEcho: async () => false,
       env: {},
       readStdin: async () => '{}',
       handle: async () => ({ action: 'ignored' } as never),

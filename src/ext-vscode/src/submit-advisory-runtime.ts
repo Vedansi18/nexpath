@@ -50,7 +50,14 @@ export const WINDSURF_SUBMIT_ADVISORY_ENV = 'NEXPATH_WINDSURF_PROMPTSUBMIT_ADVIS
  */
 export const SUBMIT_FLOW_FLAG_FILENAME = 'submit-flow.json';
 
-function readSubmitFlowFlag(host: 'cursor' | 'windsurf'): boolean {
+/**
+ * Read the shipped flag file. EXPORTED so tests can (a) pin its semantics and
+ * (b) inject a stub into the switch resolvers below — without the stub, the
+ * suite's result depends on whatever `~/.nexpath/submit-flow.json` happens to
+ * be on the developer's machine (found live 2026-08-13: the whole env-semantics
+ * describe failed on any machine where the shipped flag was ON).
+ */
+export function readSubmitFlowFlag(host: 'cursor' | 'windsurf'): boolean {
   try {
     const raw = readFileSync(join(homedir(), '.nexpath', SUBMIT_FLOW_FLAG_FILENAME), 'utf8');
     const parsed = JSON.parse(raw) as Record<string, unknown>;
@@ -60,16 +67,22 @@ function readSubmitFlowFlag(host: 'cursor' | 'windsurf'): boolean {
   }
 }
 
+/** How the resolvers consult the flag file; injectable for hermetic tests. */
+export type ReadSubmitFlowFlagFn = (host: 'cursor' | 'windsurf') => boolean;
+
 /**
  * Windsurf submit-flow ON? Env var (`'1'`/`'0'`) is the developer override and
  * wins; otherwise the shipped `~/.nexpath/submit-flow.json` flag decides;
  * otherwise OFF (old flow byte-identical). Mirrors the CLI resolver.
  */
-export function isWindsurfSubmitAdvisoryEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+export function isWindsurfSubmitAdvisoryEnabled(
+  env: NodeJS.ProcessEnv = process.env,
+  readFlag: ReadSubmitFlowFlagFn = readSubmitFlowFlag,
+): boolean {
   const v = env[WINDSURF_SUBMIT_ADVISORY_ENV];
   if (v === '1') return true;
   if (v === '0') return false;
-  return readSubmitFlowFlag('windsurf');
+  return readFlag('windsurf');
 }
 
 /** Where the hook parks a decision for a given project root. */
@@ -132,11 +145,14 @@ export const CURSOR_SUBMIT_ADVISORY_ENV = 'NEXPATH_CURSOR_PROMPTSUBMIT_ADVISORY'
  * Cursor submit-flow ON? Same resolution as Windsurf: env override (`'1'`/`'0'`)
  * wins, else the shipped `~/.nexpath/submit-flow.json` flag, else OFF.
  */
-export function isCursorSubmitAdvisoryEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+export function isCursorSubmitAdvisoryEnabled(
+  env: NodeJS.ProcessEnv = process.env,
+  readFlag: ReadSubmitFlowFlagFn = readSubmitFlowFlag,
+): boolean {
   const v = env[CURSOR_SUBMIT_ADVISORY_ENV];
   if (v === '1') return true;
   if (v === '0') return false;
-  return readSubmitFlowFlag('cursor');
+  return readFlag('cursor');
 }
 
 /**

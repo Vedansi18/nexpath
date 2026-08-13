@@ -179,17 +179,41 @@ export function buildDefaultPromptSubmitDecider(
     // The option source needs a Store. Opened per invocation and ALWAYS closed —
     // this runs inside a short-lived hook subprocess, so a leaked handle would
     // hold the SQLite lock against the `auto` child running in the same turn.
+    //
+    // ── RETRY (live root cause, 2026-08-12) ─────────────────────────────────
+    // Option-A means `auto` (and, on Cursor, the extension's concurrent
+    // pipeline) is finishing its store WRITES in the very window this open
+    // runs. A transiently locked SQLite then failed the open, the old silent
+    // catch nulled the source, and the decider allowed in ~200 ms — measured
+    // live, invisible without the log lines below. A short bounded retry
+    // (well inside the hold budget) absorbs the transient; a persistent
+    // failure still fails open exactly as before.
     let store: unknown = null;
     let source: SubmitOptionSource | null = ports.optionSource ?? null;
     if (!ports.composeOptions && !source) {
-      try {
-        store = await openStoreFn(undefined as never);
-        source = createDeterministicSubmitOptionSource({ store, projectRoot });
-      } catch {
-        // Fail-open (A3): no store ⇒ no options ⇒ the prompt is released.
-        store = null;
-        source = null;
+      for (let attempt = 0; attempt < 3 && !store; attempt++) {
+        try {
+          if (attempt > 0) await new Promise((r) => setTimeout(r, 150));
+          store = await openStoreFn(undefined as never);
+        } catch (err) {
+          store = null;
+          log('warn', 'submit_decider_store_open_failed', {
+            attempt: attempt + 1,
+            message: (err as Error)?.message ?? 'unknown',
+          });
+        }
       }
+      if (store) {
+        // The log seam was silently a no-op before — every "allowing because X"
+        // diagnostic went nowhere, which is how a 210 ms silent allow cost a
+        // day of live debugging. Wire it to the shared file logger.
+        source = createDeterministicSubmitOptionSource({
+          store,
+          projectRoot,
+          log: (m) => log('info', 'submit_option_source', { m }),
+        });
+      }
+      // Fail-open (A3): no store ⇒ no options ⇒ the prompt is released.
     }
 
     try {
@@ -270,6 +294,54 @@ function promptTextForHook(): string {
   return '';
 }
 
+/**
+ * Is this submit the hook's OWN replacement coming back around? (VED-PE-10.)
+ *
+ * Live sequence, measured 2026-08-13 on Cursor: block → replacement injected +
+ * auto-submitted by the extension → that submit fires the hook AGAIN. The
+ * hook's own `auto` then consumed the `lastInjectedPrompt` echo guard, so the
+ * EXTENSION's duplicate watcher-auto (which runs seconds later) classified the
+ * replacement as a fresh prompt, parked a new advisory, and the replacement's
+ * hook run popped a SECOND popup nobody was watching — stalling the replacement
+ * ~57 s behind the hold before failing open.
+ *
+ * So the hook must recognise the echo BEFORE spawning anything: when the
+ * incoming prompt text equals the persisted `lastInjectedPrompt` (written by
+ * `persistDecision` at block time), the whole gated path is skipped — no auto
+ * spawn, no popup, instant release. The guard field is deliberately NOT
+ * cleared here: the watcher's own `auto` still needs to hit it (`auto.ts:706`)
+ * so the synthetic prompt is not classified or counted, and Layer C already
+ * clears a stale value on the next genuine turn regardless.
+ *
+ * Fail-open: any failure (no store, no state) reports `false` and the normal
+ * path runs — worst case is today's behaviour, never a stranded prompt.
+ */
+export async function isReplacementEcho(
+  projectRoot: string | undefined,
+  promptText: string,
+  ports: {
+    openStore?: (db?: string) => Promise<unknown>;
+    closeStore?: (store: unknown) => Promise<void> | void;
+    loadState?: (store: unknown, projectRoot: string) => { current: { lastInjectedPrompt: string | null } };
+  } = {},
+): Promise<boolean> {
+  if (!projectRoot || promptText.trim() === '') return false;
+  const openStoreFn = ports.openStore ?? openStore;
+  const closeStoreFn = ports.closeStore ?? closeStore;
+  const loadState = ports.loadState
+    ?? ((s: unknown, p: string) => SessionStateManager.load(s as never, p));
+  let store: unknown = null;
+  try {
+    store = await openStoreFn(undefined as never);
+    const last = loadState(store, projectRoot).current.lastInjectedPrompt;
+    return typeof last === 'string' && last === promptText;
+  } catch {
+    return false; // fail-open — run the normal path
+  } finally {
+    if (store) { try { await closeStoreFn(store as never); } catch { /* fail-open */ } }
+  }
+}
+
 export interface WindsurfHookActionDeps {
   handle?: (event: string, opts: { project?: string }, deps?: WindsurfHookCliDeps) => Promise<RunResult>;
   readStdin?: () => Promise<string>;
@@ -283,6 +355,11 @@ export interface WindsurfHookActionDeps {
   readFlagFile?: (path: string) => string | null;
   /** H4: injectable hold budget. Defaults to the plan's 60-90s self-enforced cap. */
   holdBudget?: HoldBudget;
+  /**
+   * VED-PE-10 echo detector (see `isReplacementEcho`). Injected for tests so
+   * they never open the real store; defaults to the real implementation.
+   */
+  checkReplacementEcho?: (projectRoot: string | undefined, promptText: string) => Promise<boolean>;
   raisePopup?: () => void;
   waitForChild?: (child: ChildProcess | null | undefined) => Promise<void>;
   exit?: (code: number) => void;
@@ -454,6 +531,20 @@ export async function runWindsurfHookAction(
       // classification) now sits inside the blocking window.
       pendingPromptText = parsePayload(preReadRaw)?.tool_info?.user_prompt ?? '';
       decideAfterAuto = true;
+      // ── VED-PE-10: our own replacement re-entering must not re-advise ────
+      // Checked BEFORE `handle` spawns auto: after that, auto consumes the
+      // `lastInjectedPrompt` guard and the echo becomes unrecognisable — the
+      // exact race that double-popped and stalled the replacement ~57 s
+      // (measured live 2026-08-13). On an echo the deferred decision is simply
+      // not armed; everything else (auto, capture guard) runs as today.
+      if (pendingPromptText.trim() !== '') {
+        const echoRes = await hold.run(() =>
+          (deps.checkReplacementEcho ?? isReplacementEcho)(opts.project, pendingPromptText));
+        if (!echoRes.timedOut && echoRes.value === true) {
+          decideAfterAuto = false;
+          log('info', 'windsurf_hook_echo_skip', { prompt_len: pendingPromptText.length });
+        }
+      }
     }
 
     // ── OWNER RULING 2026-08-12: switch ON ⇒ the old advisory surface is OFF ──

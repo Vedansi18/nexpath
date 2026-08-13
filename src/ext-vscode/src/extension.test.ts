@@ -1404,7 +1404,10 @@ describe('OWNER RULING 2026-08-12 — old advisory surface suppressed under the 
   });
 
   it('⭐ Cursor + switch OFF: onAfterCapture arms exactly as before (byte-identical old flow)', async () => {
-    delete process.env[CURSOR_SWITCH];
+    // '0' is the developer revert override and beats the shipped flag file —
+    // an unset var would leave the outcome to whatever ~/.nexpath/submit-flow.json
+    // says on THIS machine (found live 2026-08-13: shipped-ON flag failed this test).
+    process.env[CURSOR_SWITCH] = '0';
     mockShowOnboarding.mockResolvedValueOnce(undefined);
     mockDetectHost.mockReturnValueOnce('cursor');
     mockEnumerateStateVscdbPaths.mockReturnValue(['/proj/state.vscdb']);

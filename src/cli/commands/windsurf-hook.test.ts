@@ -6,6 +6,7 @@ import {
   handleWindsurfHookCli,
   registerWindsurfHookCommand,
   runWindsurfHookAction,
+  isReplacementEcho,
 } from './windsurf-hook.js';
 
 describe('handleWindsurfHookCli', () => {
@@ -75,7 +76,8 @@ describe('runWindsurfHookAction — popup-raise gate', () => {
     const env: NodeJS.ProcessEnv = {};
     return {
       raisePopup, waitForChild, exit, env,
-      deps: { raisePopup, waitForChild, exit, env, ...overrides },
+      // Hermetic: the echo-check default opens the real store.
+      deps: { raisePopup, waitForChild, exit, env, checkReplacementEcho: async () => false, ...overrides },
     };
   }
 
@@ -172,5 +174,81 @@ describe('registerWindsurfHookCommand', () => {
     expect(cmd!.registeredArguments.map((a) => a.name())).toContain('event');
     // --project option present
     expect(cmd!.options.some((o) => o.long === '--project')).toBe(true);
+  });
+});
+
+/**
+ * VED-PE-10 echo skip — Windsurf half (see cursor-hook.test.ts for the live
+ * failure narrative). On an echo the deferred submit decision is never armed:
+ * auto still runs (Layer C's guard consumes the synthetic prompt), but no
+ * popup opens and the hook exits 0 exactly like the old flow.
+ */
+describe('VED-PE-10 — replacement echo never re-opens the submit popup', () => {
+  const GATE_ENV = { NEXPATH_WINDSURF_PROMPTSUBMIT_ADVISORY: '1' };
+  const PROMPT_PAYLOAD = JSON.stringify({ tool_info: { user_prompt: 'echo me' } });
+
+  it('echo: exits 0 even when the decider would block', async () => {
+    const exits: number[] = [];
+    const decide = vi.fn(async () => 'block' as const);
+    await runWindsurfHookAction('pre_user_prompt', { project: '/proj' }, {
+      env: GATE_ENV,
+      checkReplacementEcho: async () => true,
+      readStdin: async () => PROMPT_PAYLOAD,
+      decidePromptSubmit: decide,
+      handle: async () => ({ child: null } as never),
+      waitForChild: async () => {},
+      exit: (c: number) => { exits.push(c); },
+    } as never);
+    expect(decide).not.toHaveBeenCalled();   // decision never armed
+    expect(exits).toEqual([0]);              // old-flow exit, no block
+  });
+
+  it('non-echo: the deferred decision still runs', async () => {
+    const exits: number[] = [];
+    const decide = vi.fn(async () => 'allow' as const);
+    await runWindsurfHookAction('pre_user_prompt', { project: '/proj' }, {
+      env: GATE_ENV,
+      checkReplacementEcho: async () => false,
+      readStdin: async () => PROMPT_PAYLOAD,
+      decidePromptSubmit: decide,
+      handle: async () => ({ child: null } as never),
+      waitForChild: async () => {},
+      exit: (c: number) => { exits.push(c); },
+    } as never);
+    expect(decide).toHaveBeenCalledTimes(1);
+    expect(exits).toEqual([0]);
+  });
+});
+
+describe('isReplacementEcho — store-backed echo detection', () => {
+  const state = (last: string | null) => ({ current: { lastInjectedPrompt: last } });
+
+  it('true when the prompt equals lastInjectedPrompt', async () => {
+    await expect(isReplacementEcho('/proj', 'the replacement', {
+      openStore: async () => ({}),
+      closeStore: () => {},
+      loadState: () => state('the replacement'),
+    })).resolves.toBe(true);
+  });
+
+  it('false on a different prompt', async () => {
+    await expect(isReplacementEcho('/proj', 'a fresh user prompt', {
+      openStore: async () => ({}),
+      closeStore: () => {},
+      loadState: () => state('the replacement'),
+    })).resolves.toBe(false);
+  });
+
+  it('false (short-circuit, no store open) for an empty prompt or missing project', async () => {
+    const openStore = vi.fn();
+    await expect(isReplacementEcho('/proj', '   ', { openStore } as never)).resolves.toBe(false);
+    await expect(isReplacementEcho(undefined, 'text', { openStore } as never)).resolves.toBe(false);
+    expect(openStore).not.toHaveBeenCalled();
+  });
+
+  it('fails open (false) when the store cannot be opened', async () => {
+    await expect(isReplacementEcho('/proj', 'text', {
+      openStore: async () => { throw new Error('locked'); },
+    })).resolves.toBe(false);
   });
 });

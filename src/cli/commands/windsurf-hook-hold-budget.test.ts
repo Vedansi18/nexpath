@@ -40,6 +40,7 @@ function fakeBudget(totalMs = 60_000) {
 async function run(over: Record<string, unknown> = {}, project = '/proj') {
   const exits: number[] = [];
   await runWindsurfHookAction('pre_user_prompt', { project }, {
+    checkReplacementEcho: async () => false,
     env: { ...ON },
     readStdin: async () => PAYLOAD,
     handle: async () => ({ action: 'auto', child: null } as never),
