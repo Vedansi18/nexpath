@@ -11,6 +11,7 @@ import {
   assertPromptEnhancementFutureSequenceRuntimeBlockedV1,
   evaluatePromptEnhancementFutureSequenceRuntimeGateV1,
 } from './future-sequence-runtime-gate.js';
+import { promptEnhancementSequencePolicyForOutcomeV1 } from './sequence-planner-entry.js';
 
 const evaluate = (
   operation: PromptEnhancementFutureSequenceRuntimeOperationV1,
@@ -116,5 +117,23 @@ describe('acceptance executor (batch 5) — runtime-gate event / config fixtures
     expect(result.allowed).toBe(false);
     expect(result.reasonCodes).toContain('sequence_config_off_reduces_behavior_only');
     expect(result.configState).toBe('validated_off_no_runtime');
+  });
+});
+
+describe('acceptance executor (batch 7) — outcome / persistence fixtures', () => {
+  it('test:acceptance-sequence-single-item-no-continuation', () => {
+    // outcome_is_no_sequence + not_a_one_item_sequence: a single outcome (even one carrying a
+    // confirmation) generates no sequence prompt — only a genuine sequence outcome does.
+    expect(promptEnhancementSequencePolicyForOutcomeV1('single_plain')).toBe('not_generated');
+    expect(promptEnhancementSequencePolicyForOutcomeV1('single_with_confirmation')).toBe('not_generated');
+    expect(promptEnhancementSequencePolicyForOutcomeV1('sequence')).toBe('generated_not_rendered_pending_acceptance');
+  });
+
+  it('test:acceptance-sequence-privacy-telemetry-negative', () => {
+    // ids_counts_status_only + no raw content: the runtime's persistence policy carries identifiers,
+    // counts and status only, and no future prompt body is generated, stored, or rendered.
+    const result = evaluate('create_sequence_state');
+    expect(result.persistencePolicyState).toBe('ids_counts_status_only_no_raw_content');
+    expect(result.futurePromptBodyState).toBe('not_generated_not_stored_not_rendered');
   });
 });
