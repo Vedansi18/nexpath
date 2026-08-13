@@ -226,6 +226,16 @@ describe('deliverPromptEnhancementCliMpsContinuationResultV1 — 6.4 silent-exit
     }
   });
 
+  it('a recognized-but-INCOMPLETE send (no string body) is INVALID → cancel, never injects an undefined body', () => {
+    const s = offered();
+    // Recognized discriminant but the delivery-critical field is missing/malformed → fail-safe to cancel.
+    for (const malformed of [{ state: 'send' }, { state: 'send', bodyText: 42 }, { state: 'send', bodyText: null }]) {
+      expect(deliverPromptEnhancementCliMpsContinuationResultV1(s, malformed, 'a3').kind).toBe('cancel');
+    }
+    // A complete send is still delivered as inject.
+    expect(deliverPromptEnhancementCliMpsContinuationResultV1(s, { state: 'send', bodyText: 'ok' }, 'a4').kind).toBe('inject');
+  });
+
   it('a REPORTED outcome is delegated to the 6.1 bridge unchanged (send→inject, interruption→keep, decline/cancel→cancel)', () => {
     const s = offered();
     expect(deliverPromptEnhancementCliMpsContinuationResultV1(s, { state: 'send', bodyText: 'edited' }, 'b1').kind).toBe('inject');

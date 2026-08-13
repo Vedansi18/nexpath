@@ -108,21 +108,29 @@ const PROMPT_ENHANCEMENT_MPS_CONTINUATION_OUTCOME_STATES_V1: readonly PromptEnha
   'not_shown',
 ];
 
-/** True only for a well-formed reported outcome; a missing (null/undefined) or unrecognized-shape result is not one. */
+/** True only for a well-formed reported outcome; a missing (null/undefined), unrecognized, or incomplete result is not one. */
 function isPromptEnhancementCliMpsContinuationOutcomeV1(
   result: unknown,
 ): result is PromptEnhancementCliMpsContinuationOutcomeV1 {
   if (typeof result !== 'object' || result === null) return false;
   const state = (result as { state?: unknown }).state;
-  return typeof state === 'string'
-    && (PROMPT_ENHANCEMENT_MPS_CONTINUATION_OUTCOME_STATES_V1 as readonly string[]).includes(state);
+  if (typeof state !== 'string' || !(PROMPT_ENHANCEMENT_MPS_CONTINUATION_OUTCOME_STATES_V1 as readonly string[]).includes(state)) {
+    return false;
+  }
+  // A `send` result MUST carry a string body: a recognized-but-incomplete send is an INVALID result
+  // (6.4 — invalid → cancel), not a reported outcome, so it falls to the silent-exit cancel rather than
+  // injecting an undefined body. The other states carry no delivery-critical payload, so a partial one
+  // already maps to keep/cancel harmlessly and needs no deeper check.
+  if (state === 'send' && typeof (result as { bodyText?: unknown }).bodyText !== 'string') return false;
+  return true;
 }
 
 /**
  * MPS-2 (6.4): detect the FOUR SILENT continuation-exit events. Only Escape/Ctrl+C are caught
  * in-process and return a typed outcome (Ctrl+C is folded into Esc → `declined`). OS close, timeout,
  * crash, and unknown-loss return NOTHING — so the parent that AWAITS the continuation popup is handed a
- * missing (null/undefined) or invalid (unrecognized-shape) result instead of an outcome. At a
+ * missing (null/undefined) or invalid (unrecognized-shape, or an incomplete `send` with no body) result
+ * instead of an outcome. At a
  * CONTINUATION that missing/invalid result IS a cancel signal: every exit ends the active sequence
  * (§0), so it maps to the SAME terminal cancel the Cancel/Escape paths use — routed through the mapper's
  * `declined` case (whose comment already states "every exit event ends it, not just the Cancel button").
