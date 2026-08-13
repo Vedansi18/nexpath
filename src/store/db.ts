@@ -181,3 +181,23 @@ export async function reacquireStoreLock(store: Store): Promise<void> {
     store.db = fresh;
   }
 }
+
+/**
+ * Run a long, blocking operation (a user-facing popup wait, or a batch that waits on the LLM) WITHOUT
+ * holding this store's lock across it: release the lock, run `fn`, then re-acquire it AND reload the db
+ * from disk (via `reacquireStoreLock`) so writes another session made while the lock was released are
+ * not clobbered by a stale in-memory image on the next save. The re-acquire+reload runs even if `fn`
+ * throws. No-op lock handling for ':memory:' (no lock, no disk).
+ *
+ * This is the single home for the "never hold the lock across a wait" pattern (MPS-8): every wait that
+ * would otherwise hold the lock goes through here — the feedback popup and the spawned GUI popup host
+ * today, and (when wired at P5) the sequence continuation Stop wait and the background wording batch.
+ */
+export async function withReleasedStoreLockV1<T>(store: Store, fn: () => Promise<T>): Promise<T> {
+  releaseStoreLock(store);
+  try {
+    return await fn();
+  } finally {
+    await reacquireStoreLock(store);
+  }
+}

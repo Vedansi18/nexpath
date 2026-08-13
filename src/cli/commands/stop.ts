@@ -1,7 +1,7 @@
 import OpenAI from 'openai';
 import { platform } from 'node:process';
 import type { Store } from '../../store/db.js';
-import { openStore, closeStore, releaseStoreLock, reacquireStoreLock, DEFAULT_DB_PATH } from '../../store/db.js';
+import { openStore, closeStore, withReleasedStoreLockV1, DEFAULT_DB_PATH } from '../../store/db.js';
 import { getPendingAdvisory, markAdvisoryShown } from '../../store/pending-advisories.js';
 import {
   getPendingPromptEnhancement,
@@ -214,16 +214,12 @@ export async function runStop(
     const fbRender = feedbackDeps ? feedbackDeps.render : createFeedbackRenderFn();
     const fbSend   = feedbackDeps ? feedbackDeps.send   : sendFeedback;
     if (fbRender) {
-      // The popup blocks for user input; don't hold the global DB lock across it.
-      // Release before, re-acquire + reload after, so other sessions are not
-      // blocked and their concurrent writes are not clobbered. No-op for :memory:.
-      releaseStoreLock(store);
-      let result: FeedbackResult;
-      try {
-        result = await runFeedbackPopup({ render: fbRender });
-      } finally {
-        await reacquireStoreLock(store);
-      }
+      // The popup blocks for user input; don't hold the global DB lock across it (MPS-8) — release
+      // before, re-acquire + reload after, so other sessions are not blocked and their concurrent
+      // writes are not clobbered. No-op for :memory:.
+      const result: FeedbackResult = await withReleasedStoreLockV1(store, () =>
+        runFeedbackPopup({ render: fbRender }),
+      );
       if (result.outcome === 'selected') {
         // The feedback click is the consent gate: flush any buffered lifecycle
         // events (install + advisory + option-selected), then send the rating.
@@ -493,22 +489,20 @@ export function registerStopCommand(program: import('commander').Command): void 
             }),
           });
         } else {
-          // No direct TTY but a GUI session exists: spawn a terminal popup. Release the DB lock
-          // across the blocking child so the child process (its own connection) can reach the DB.
-          releaseStoreLock(store);
-          try {
-            const launch = await runPromptEnhancementCliPopupHostLaunchV1({
+          // No direct TTY but a GUI session exists: spawn a terminal popup. Release the DB lock across
+          // the blocking child (MPS-8) so the child process (its own connection) can reach the DB, then
+          // re-acquire + reload after.
+          const launch = await withReleasedStoreLockV1(store, () =>
+            runPromptEnhancementCliPopupHostLaunchV1({
               capability,
               request: pending.request,
               result: pending.result,
               cliEntryPath: process.argv[1] ?? '',
               dbPath: opts.db,
-            });
-            if (launch.state !== 'completed') return { kind: 'not_shown' };
-            popup = launch.output.result;
-          } finally {
-            await reacquireStoreLock(store);
-          }
+            }),
+          );
+          if (launch.state !== 'completed') return { kind: 'not_shown' };
+          popup = launch.output.result;
         }
         // A popup that never actually rendered (e.g. no usable console) returns not_shown. Report it
         // honestly as not_shown — so the record stays pending and the advisory path runs — instead of

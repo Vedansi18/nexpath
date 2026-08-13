@@ -3,7 +3,7 @@ import { rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { openStore, closeStore, releaseStoreLock, reacquireStoreLock } from './db.js';
+import { openStore, closeStore, releaseStoreLock, reacquireStoreLock, withReleasedStoreLockV1 } from './db.js';
 import { getConfig, setConfig } from './config.js';
 
 const paths: string[] = [];
@@ -54,5 +54,53 @@ describe('releaseStoreLock / reacquireStoreLock', () => {
     await reacquireStoreLock(s);
     expect(getConfig(s.db, 'k')).toBe('v');   // preserved, not reopened empty
     closeStore(s);
+  });
+});
+
+describe('withReleasedStoreLockV1 (MPS-8: never hold the lock across a wait)', () => {
+  it('releases across fn, returns its value, then re-acquires + reloads (another session not clobbered)', async () => {
+    const dbPath = tmpDb();
+    const a = await openStore(dbPath);
+    setConfig(a, 'k', 'a-value');
+
+    // While `fn` runs, A's lock is released → B can open the same DB and write.
+    const returned = await withReleasedStoreLockV1(a, async () => {
+      const b = await openStore(dbPath);
+      setConfig(b, 'k', 'b-value');
+      closeStore(b);   // persists + releases B's lock
+      return 'fn-result';
+    });
+
+    expect(returned).toBe('fn-result');            // fn's value is returned
+    expect(getConfig(a.db, 'k')).toBe('b-value');  // reloaded → sees B's write, not A's stale image
+
+    setConfig(a, 'k2', 'a2');
+    closeStore(a);
+    const c = await openStore(dbPath);
+    expect(getConfig(c.db, 'k')).toBe('b-value');  // B's write survived
+    expect(getConfig(c.db, 'k2')).toBe('a2');      // A's later write survived
+    closeStore(c);
+  });
+
+  it('re-acquires + reloads even when fn throws (finally runs)', async () => {
+    const dbPath = tmpDb();
+    const a = await openStore(dbPath);
+    setConfig(a, 'k', 'a-value');
+
+    await expect(withReleasedStoreLockV1(a, async () => {
+      const b = await openStore(dbPath);
+      setConfig(b, 'k', 'b-value');
+      closeStore(b);
+      throw new Error('boom');
+    })).rejects.toThrow('boom');
+
+    // Despite the throw, the lock was re-acquired and the db reloaded (B's write is visible).
+    expect(getConfig(a.db, 'k')).toBe('b-value');
+    // And A can still write + save — the lock is held again.
+    setConfig(a, 'k2', 'a2');
+    closeStore(a);
+    const c = await openStore(dbPath);
+    expect(getConfig(c.db, 'k2')).toBe('a2');
+    closeStore(c);
   });
 });
