@@ -140,6 +140,37 @@ describe('T2 carriers survive the composer validation path', () => {
     }
   });
 
+  it('stamps carried-forward sections through the real composer path', () => {
+    // The point of the code is that it is REACHABLE. Compose a body, then force the
+    // action path to fall back to it, and check the sections themselves say so.
+    const first = composePromptEnhancementBody({
+      enhancementId: 'enh-t2-carry',
+      originalPromptText: ORIGINAL_PROMPT,
+      sectionPlanningResult: planningResult(),
+    });
+    expect(first.currentBody.sections.every(
+      (section) => !section.transformReasonCodes.includes('carried_from_previous_body'),
+    )).toBe(true);
+
+    const carried = composePromptEnhancementBody({
+      enhancementId: 'enh-t2-carry',
+      originalPromptText: ORIGINAL_PROMPT,
+      sectionPlanningResult: planningResult(),
+      action: 'shorter',
+      composerRuntimeState: 'timeout',
+      previousSendableBody: first.currentBody,
+    });
+
+    expect(carried.currentBody.sections.length).toBeGreaterThan(0);
+    for (const section of carried.currentBody.sections) {
+      expect(section.transformReasonCodes).toContain('carried_from_previous_body');
+    }
+    // Appended, not substituted — the original section still reports how it was made.
+    const originalSection = carried.currentBody.sections
+      .find((section) => section.sectionKind === 'original_request_or_goal');
+    expect(originalSection?.transformReasonCodes).toContain('preserved_verbatim');
+  });
+
   it('leaves the body sendable — the carriers do not trip the validator', () => {
     const result = composePromptEnhancementBody({
       enhancementId: 'enh-t2-4',

@@ -16,6 +16,7 @@ import {
   buildPromptEnhancementPromptPointRefsV1,
   buildPromptEnhancementTransformReasonCodesV1,
   resolvePromptEnhancementOriginalTextRefV1,
+  withPromptEnhancementCarriedFromPreviousBodyV1,
 } from './original-text-refs.js';
 
 describe('T2 carriers — a ref resolves to the exact characters it names', () => {
@@ -136,6 +137,26 @@ describe('T2 carriers — an unresolvable ref is REFUSED, not dropped', () => {
     expect(refs[0]?.resolution).toBe('exact');
     expect(refs[1]?.resolution).toBe('refused');
     expect(refs[1]?.refusalReason).toBe('not_found_in_original');
+  });
+});
+
+describe('T2 carriers — a carried-forward section says so, without losing its origin', () => {
+  it('appends the carry code rather than replacing how the text was made', () => {
+    const carried = withPromptEnhancementCarriedFromPreviousBodyV1(['composed_by_model', 'quotes_original_text']);
+
+    expect(carried).toContain('carried_from_previous_body');
+    // Substituting would lose the fact that this text was model-composed, which is
+    // still true of the text and is a different fact from "it is being served again".
+    expect(carried).toContain('composed_by_model');
+    expect(carried).toContain('quotes_original_text');
+  });
+
+  it('is idempotent, so a body carried twice does not report two carries', () => {
+    const once = withPromptEnhancementCarriedFromPreviousBodyV1(['preserved_verbatim']);
+    const twice = withPromptEnhancementCarriedFromPreviousBodyV1(once);
+
+    expect(twice.filter((code) => code === 'carried_from_previous_body')).toHaveLength(1);
+    expect(twice).toEqual(once);
   });
 });
 

@@ -142,3 +142,21 @@ export function buildPromptEnhancementTransformReasonCodesV1(input: {
   codes.push(input.originalTextRef.resolution === 'exact' ? 'quotes_original_text' : 'no_original_text_quoted');
   return codes;
 }
+
+/**
+ * Stamp a section as carried forward from an earlier body.
+ *
+ * APPENDED, not substituted: the existing code says how the text was originally made and
+ * stays true of that text, while this one says the body is being served again. Both are
+ * facts about the same section, so replacing either would lose information.
+ *
+ * Idempotent, because a body can be carried forward more than once and a section that
+ * accumulated the same code twice would misreport a single carry as several.
+ */
+export function withPromptEnhancementCarriedFromPreviousBodyV1(
+  transformReasonCodes: readonly PromptEnhancementTransformReasonCodeV1[],
+): readonly PromptEnhancementTransformReasonCodeV1[] {
+  return transformReasonCodes.includes('carried_from_previous_body')
+    ? transformReasonCodes
+    : [...transformReasonCodes, 'carried_from_previous_body'];
+}

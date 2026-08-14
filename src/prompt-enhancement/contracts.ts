@@ -687,15 +687,18 @@ export interface PromptEnhancementPromptPointRefV1 {
  * What composition did to this section's text. Typed so a reader can tell a preserved
  * section from a rewritten one without re-reading the prose.
  *
- * Every value here is assigned somewhere in composition. A code nothing can produce is
- * a dead branch that reads as coverage without being coverage, so none is declared
- * "for completeness" — a previous-body carry, for instance, returns the earlier body's
- * sections untouched and never reaches this builder, so it has no code here.
+ * Every value here is assigned somewhere. A code nothing can produce is a dead branch
+ * that reads as coverage without being coverage, so none is declared "for completeness".
+ *
+ * `carried_from_previous_body` is APPENDED on the carry-forward path rather than
+ * replacing the code that says how the text was originally made — a carried section is
+ * both "model-composed" and "being served again", and substituting would lose the first.
  */
 export type PromptEnhancementTransformReasonCodeV1 =
   | 'preserved_verbatim'
   | 'composed_by_model'
   | 'rendered_deterministically'
+  | 'carried_from_previous_body'
   | 'quotes_original_text'
   | 'no_original_text_quoted';
 

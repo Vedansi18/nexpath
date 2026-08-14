@@ -27,6 +27,7 @@ import {
   buildPromptEnhancementOriginalTextRefV1,
   buildPromptEnhancementPromptPointRefsV1,
   buildPromptEnhancementTransformReasonCodesV1,
+  withPromptEnhancementCarriedFromPreviousBodyV1,
 } from './original-text-refs.js';
 import type { PromptEnhancementPrimaryIntent } from './routing-taxonomy.js';
 import {
@@ -191,12 +192,18 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
       actionType: action,
       callVisibilityMode: 'fallback_no_llm',
     });
-    const previousBody = previousBodySafety.generatedSafeStatus === input.previousSendableBody.generatedSafeStatus
-      ? input.previousSendableBody
-      : {
-          ...input.previousSendableBody,
-          generatedSafeStatus: previousBodySafety.generatedSafeStatus,
-        };
+    // T2 carriers: the body-level fields below record the carry, but the SECTIONS would
+    // otherwise still read as freshly composed. Stamp each one so a section is
+    // self-describing — appended, so how the text was originally made is not lost.
+    const carriedSections = input.previousSendableBody.sections.map((section) => ({
+      ...section,
+      transformReasonCodes: withPromptEnhancementCarriedFromPreviousBodyV1(section.transformReasonCodes),
+    }));
+    const previousBody = {
+      ...input.previousSendableBody,
+      generatedSafeStatus: previousBodySafety.generatedSafeStatus,
+      sections: carriedSections,
+    };
     return {
       currentBody: previousBody,
       composerBoundary: buildComposerBoundary(input, 'previous_sendable_body', 'fallback_no_llm', [], {
