@@ -562,8 +562,16 @@ function classifySensitiveActions(
       : generatedAuthority === 'execute_requested' || originalAuthority === 'execute_requested'
         ? 'execute_requested'
         : originalAuthority;
-    const affectedSections = sections
-      .filter((section) => section.sectionKind === 'risk_safety_or_confirmation' || section.safetyFlags.length > 0 || section.sensitivityFlags.length > 0);
+    // Every generated section, not a flag-selected subset. Whether a body carries something unsafe
+    // is a property of its TEXT — the risk pattern above matched the whole body — so which sections
+    // are affected cannot be answered by a planning flag.
+    //
+    // This used to filter on `safetyFlags.length > 0`, which looked selective and was not: three of
+    // the four flag values are ROUTE capabilities stamped onto every section, so the filter admitted
+    // everything. It only appeared to work because it never excluded anything. Reading it as a real
+    // filter would have been the mistake the moment those flags were corrected to mean what the
+    // design says they mean.
+    const affectedSections = sections;
     findings.set(riskKind, {
       riskKind,
       authorityMode,
@@ -575,8 +583,16 @@ function classifySensitiveActions(
     });
   }
 
+  // The wide-scope fallback: the body needs confirmation, but no specific risk pattern matched.
+  //
+  // The flag was a proxy for "this body needs confirmation", and it held only because every section
+  // carried it. Once the flags mean what the design says, a confirmation-needed route whose plan
+  // happens to contain none of the named sections would lose this finding entirely. So ask the
+  // question directly as well — the prompt itself is the authority on whether execution
+  // confirmation is required, and it is the same check the composer uses to place the clause.
+  const bodyNeedsConfirmation = requiresPromptEnhancementExecutionConfirmationForPrompt(currentBody.originalPromptText);
   for (const section of sections) {
-    if (!section.safetyFlags.includes('sensitive_action_confirmation')) continue;
+    if (!section.safetyFlags.includes('sensitive_action_confirmation') && !bodyNeedsConfirmation) continue;
     if (findings.size === 0) {
       findings.set('wide_scope_or_boundary_expansion', {
         riskKind: 'wide_scope_or_boundary_expansion',

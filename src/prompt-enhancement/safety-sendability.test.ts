@@ -1484,3 +1484,62 @@ describe('per-item safety helpers', () => {
     expect(promptEnhancementAuthorityModeForTextV1(text)).toBe('execute_requested');
   });
 });
+
+// ---------------------------------------------------------------------------------------------
+// Phase S1: the safety validator must not decide what it inspects by reading a planning flag.
+//
+// It used to filter sections on `safetyFlags.length > 0`. That looked selective and was not —
+// three of the four flag values are ROUTE capabilities stamped onto every section, so the filter
+// admitted everything. It only appeared to work because it never excluded anything, and it would
+// have started excluding real sections the moment those flags were corrected.
+// ---------------------------------------------------------------------------------------------
+describe('safety coverage does not depend on section safety flags', () => {
+  /** The same body, with every section stripped of the flags the validator used to filter on. */
+  function withoutSafetyFlags(body: ReturnType<typeof composedBody>) {
+    return {
+      ...body,
+      sections: body.sections.map((section) => ({ ...section, safetyFlags: [], sensitivityFlags: [] })),
+    };
+  }
+
+  const RISKY_PROMPT = 'Delete the archived customer rows in production and run the migration.';
+
+  it('inspects a body whose sections carry no safety flags at all', () => {
+    const body = composedBody({ originalPromptText: RISKY_PROMPT });
+    const flagged = validatePromptEnhancementSafety({ currentBody: body, editedBodyText: body.text });
+    const unflagged = validatePromptEnhancementSafety({
+      currentBody: withoutSafetyFlags(body),
+      editedBodyText: body.text,
+    });
+
+    // Same verdict, same risk findings — stripping the flags must change nothing.
+    expect(unflagged.validationStatus).toBe(flagged.validationStatus);
+    expect(unflagged.sensitiveActionFindings.map((finding) => finding.riskKind).sort())
+      .toEqual(flagged.sensitiveActionFindings.map((finding) => finding.riskKind).sort());
+  });
+
+  it('still attributes a risk finding to the sections when none are flagged', () => {
+    const body = composedBody({ originalPromptText: RISKY_PROMPT });
+    const unflagged = validatePromptEnhancementSafety({
+      currentBody: withoutSafetyFlags(body),
+      editedBodyText: body.text,
+    });
+
+    expect(unflagged.sensitiveActionFindings.length).toBeGreaterThan(0);
+    for (const finding of unflagged.sensitiveActionFindings) {
+      expect(finding.affectedSectionIds.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('keeps the wide-scope finding when the prompt needs confirmation but no section is flagged', () => {
+    // The fallback finding used to require a flagged section. Once flags mean what the design says,
+    // a confirmation-needed route whose plan holds none of the named sections would have lost it.
+    const body = composedBody({ originalPromptText: RISKY_PROMPT });
+    const unflagged = validatePromptEnhancementSafety({
+      currentBody: withoutSafetyFlags(body),
+      editedBodyText: body.text,
+    });
+
+    expect(unflagged.sensitiveActionFindings.length).toBeGreaterThan(0);
+  });
+});
