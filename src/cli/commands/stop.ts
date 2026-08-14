@@ -549,6 +549,10 @@ export function registerStopCommand(program: import('commander').Command): void 
                   // The pending PE row's session is the one that prepared this sequence — the
                   // continuation row binds to it (a foreign-session row is scrubbed on read).
                   sessionId: pending.sessionId,
+                  // 8c: persist the batch's worded items 2…N (validated/fail-closed inside the intake);
+                  // null on a skipped/failed batch → the empty list, exactly as before 8c.
+                  wordedItems:      batchResult && batchResult.ok ? batchResult.items : undefined,
+                  promptDirectives: pending.plannerPromptDirectives,
                 });
                 if (sequenceIntake.state === 'sequence_recorded') {
                   // The two additive continuation side fields (redacted original + handoffKind)
