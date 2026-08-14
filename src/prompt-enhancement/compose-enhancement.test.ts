@@ -1076,7 +1076,18 @@ describe('prompt-enhancement composer and deterministic fallback', () => {
       priorBodyRevision: previous.bodyRevision,
     });
 
-    expect(result.currentBody).toBe(previous);
+    // Was `toBe(previous)`. The T2 carriers stamp each carried section with
+    // `carried_from_previous_body`, so the body can no longer be the SAME object — but
+    // "keeps the previous sendable body" is about substance, and nothing in production
+    // compares these by reference. Asserted field-wise instead, which is what the
+    // sibling test below already does, and the text must still be byte-identical.
+    expect(result.currentBody.currentBodyId).toBe(previous.currentBodyId);
+    expect(result.currentBody.bodyRevision).toBe(previous.bodyRevision);
+    expect(result.currentBody.text).toBe(previous.text);
+    expect(result.currentBody.sections).toHaveLength(previous.sections.length);
+    expect(result.currentBody.sections.every(
+      (section) => section.transformReasonCodes.includes('carried_from_previous_body'),
+    )).toBe(true);
     expect(result.fallbackMode).toBe('previous_sendable_body');
     expect(result.actionInteractionState).toBe('timeout_kept_previous');
     expect(result.sendPolicy).toBe('send_current');
