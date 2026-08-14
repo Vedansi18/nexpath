@@ -77,6 +77,50 @@ function planningResult(): PromptEnhancementSectionPlanningResult {
   });
 }
 
+/**
+ * A prompt whose words are safe for a draft to echo.
+ *
+ * ORIGINAL_PROMPT contains "ask the ai" and "it says", both on the composer's disallowed
+ * phrase list, so a draft quoting it back is rejected before the carriers are ever
+ * reached. That is the validator working correctly; the model test just needs a prompt it
+ * can legitimately quote.
+ */
+const MODEL_PROMPT = 'Fix the importCsv parser and add a regression test for the failing rows.';
+
+const contentTemplateSourceB: PromptEnhancementSourceRefV1 = {
+  sourceRefId: 'source-b-content-template-debug',
+  sourceKind: 'content_template_fact',
+  sourceId: 'ABSENCE_DEBUGGING_OBSERVATION',
+  sourceAuthorization: 'source_fact_only',
+  evidenceStatus: 'present',
+  freshness: 'current',
+  confidence: 'medium',
+  privacyClass: 'raw_text_excluded',
+};
+
+/**
+ * Mirrors the source refs and facts of the composer test that is already proven to get a
+ * draft ACCEPTED. A draft is rejected unless its claimed fact ids are real guidance facts
+ * the section was planned with, so the plan has to supply them.
+ */
+function planningResultWithSourceGuidance(): PromptEnhancementSectionPlanningResult {
+  return planPromptEnhancementSections({
+    routeResult: routePromptEnhancement(routeInput({ promptText: MODEL_PROMPT })),
+    sourceRefs: [sourceA, contentTemplateSourceB],
+    guidanceFacts: [
+      fact(),
+      fact({
+        factId: 'fact-source-signal',
+        sourceType: 'absence_signal',
+        sourceIds: ['absence:debugging_observation_gap'],
+        guidanceKind: 'missing_practice',
+        suggestedActionKind: 'no_action_render_context_only',
+        targetSectionKind: 'source_signal_guidance',
+      }),
+    ],
+  });
+}
+
 describe('T2 carriers survive the composer validation path', () => {
   it('writes all three carriers onto every composed section', () => {
     const result = composePromptEnhancementBody({
@@ -169,6 +213,57 @@ describe('T2 carriers survive the composer validation path', () => {
     const originalSection = carried.currentBody.sections
       .find((section) => section.sectionKind === 'original_request_or_goal');
     expect(originalSection?.transformReasonCodes).toContain('preserved_verbatim');
+  });
+
+  it('reports composed_by_model on the path real users take', () => {
+    // Since Phase 1 opened the composer gate, a model-written body is the DEFAULT for
+    // anyone with a key. Every other test here runs the deterministic path, so without
+    // this one the code that fires on nearly every real composition is only unit-tested.
+    const plan = planningResultWithSourceGuidance();
+    const draftedSection = plan.sectionPlans
+      .find((sectionPlan) => sectionPlan.sectionKind === 'source_signal_guidance');
+    expect(draftedSection).toBeDefined();
+    const draftedSectionId = draftedSection?.sectionId;
+    // A draft is only accepted when its fact ids are the ones the section was planned
+    // with, so take them from the plan rather than inventing one the validator rejects.
+    const llmSourceFactId = draftedSection?.structuredContentPartRefs[0] ?? 'missing-source-fact';
+
+    const result = composePromptEnhancementBody({
+      enhancementId: 'enh-t2-model',
+      originalPromptText: MODEL_PROMPT,
+      sectionPlanningResult: plan,
+      composerRuntimeState: 'accepted_structured_output',
+      structuredComposerOutput: {
+        outputId: 'llm-output-t2',
+        sectionDrafts: [
+          {
+            sectionId: draftedSectionId!,
+            // Echoes the user's own words so the ref has something to resolve to.
+            bodyText: 'Start with the importCsv parser and add a regression test for the failing rows.',
+            sourceFactIds: [llmSourceFactId],
+          },
+        ],
+        composerClaims: [`claim:${llmSourceFactId}`],
+      },
+    });
+
+    const drafted = result.currentBody.sections.find((section) => section.sectionId === draftedSectionId);
+    expect(drafted).toBeDefined();
+    expect(drafted?.transformReasonCodes).toContain('composed_by_model');
+    expect(drafted?.transformReasonCodes).not.toContain('rendered_deterministically');
+
+    // The model echoed the user's words, so the ref must resolve to the original's
+    // characters — the carriers working on model prose, not just on deterministic text.
+    const ref = drafted?.originalTextRefs[0];
+    expect(ref?.resolution).toBe('exact');
+    expect(resolvePromptEnhancementOriginalTextRefV1(ref!, MODEL_PROMPT)).toBeDefined();
+    expect(drafted?.transformReasonCodes).toContain('quotes_original_text');
+
+    // The verbatim section is not a model draft and must keep saying so.
+    const originalSection = result.currentBody.sections
+      .find((section) => section.sectionKind === 'original_request_or_goal');
+    expect(originalSection?.transformReasonCodes).toContain('preserved_verbatim');
+    expect(originalSection?.transformReasonCodes).not.toContain('composed_by_model');
   });
 
   it('leaves the body sendable — the carriers do not trip the validator', () => {
