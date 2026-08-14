@@ -304,7 +304,32 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
         sectionPlan.safetyFlags.includes('sensitive_action_confirmation')
       ))?.sectionId
     : undefined;
-  const renderSectionsWithConfirmation = (confirmationSectionId: string | undefined) => sectionPlans.map((sectionPlan) =>
+  // Owner ruling 2026-08-14: when the composer RAN and a section's draft did not survive validation,
+  // that section is DISCARDED rather than filled with the deterministic line. The fixed text is not
+  // a lesser answer, it is the defect this milestone exists to remove — and it reaches the user with
+  // nothing to say it is a fallback, so a refused draft silently becomes generic advice inside the
+  // prompt they send on.
+  //
+  // Two carve-outs, both deliberate:
+  //
+  //  - A section carrying a mandatory floor keeps its text. There the fixed wording IS the
+  //    requirement, not filler: dropping the confirmation section because a draft was refused would
+  //    strip "you must ask me for go-ahead confirmation" from the prompt the user sends to their
+  //    agent, turning a validation fault into a silently missing safety clause.
+  //  - A provider failure (timeout / unavailable) is untouched. That path already renders
+  //    deterministically WITH a visible failure notice, so the user is told. This rule is for the
+  //    case that says nothing.
+  const keepsSectionWhenDraftMissing = (sectionPlan: PromptEnhancementSectionPlanItemV1): boolean =>
+    sectionPlan.sectionKind === 'original_request_or_goal'
+    || sectionPlan.isRequired
+    || sectionPlan.safetyFlags.length > 0
+    || sectionPlan.sensitivityFlags.length > 0;
+  const renderableSectionPlans = structuredComposerAttempted
+    ? sectionPlans.filter((sectionPlan) =>
+      validatedLlmDrafts.draftsBySectionId.has(sectionPlan.sectionId)
+      || keepsSectionWhenDraftMissing(sectionPlan))
+    : sectionPlans;
+  const renderSectionsWithConfirmation = (confirmationSectionId: string | undefined) => renderableSectionPlans.map((sectionPlan) =>
       renderSection({
         sectionPlan,
         originalPromptText: input.originalPromptText,
@@ -320,7 +345,7 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
   let text = action === "apply_details" && typeof input.editedBodyText === "string"
     ? applyEditedBodyWithAdditionalDetails(input.editedBodyText, input.additionalDetailsText)
     : canonicalText;
-  let sections = attachSpanRefs(sectionPlans, renderedSections, text);
+  let sections = attachSpanRefs(renderableSectionPlans, renderedSections, text);
   // Validator-parity confirmation guard (blocked-popup fix 2026-08-07): the prompt-based gate
   // above cannot see risk phrasing the GENERATED wording introduces (an LLM draft is free text),
   // but validatePromptEnhancementSafety scans the generated body and hard-blocks a body that
@@ -342,13 +367,13 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
     && !text.includes(buildPromptEnhancementCanonicalConfirmation(input.originalPromptText))
     && promptEnhancementGeneratedBodyRequiresConfirmationV1({ sections, originalPromptText: input.originalPromptText }, text)
   ) {
-    const lastGeneratedSectionId = [...sectionPlans].reverse()
+    const lastGeneratedSectionId = [...renderableSectionPlans].reverse()
       .find((sectionPlan) => sectionPlan.sectionKind !== 'original_request_or_goal')?.sectionId;
     if (lastGeneratedSectionId !== undefined) {
       renderedSections = renderSectionsWithConfirmation(lastGeneratedSectionId);
       canonicalText = renderedSections.map((section) => section.text).join('\n\n');
       text = canonicalText;
-      sections = attachSpanRefs(sectionPlans, renderedSections, text);
+      sections = attachSpanRefs(renderableSectionPlans, renderedSections, text);
     }
   }
   const generatedSafeStatus: PromptEnhancementValidationStatus = deterministicFallback === 'none' ? 'valid' : 'valid_with_fallback';

@@ -1262,3 +1262,104 @@ describe('prompt-enhancement composer and deterministic fallback', () => {
     expect(result.availableActions.find((action) => action.actionType === 'shorter')?.availability).toBe('disabled_not_applicable');
   });
 });
+
+// ---------------------------------------------------------------------------------------------
+// Owner ruling 2026-08-14: a section whose draft the composer produced but validation refused is
+// DISCARDED, not filled with the deterministic line — that fixed text is the defect this milestone
+// exists to remove, and it reaches the user with nothing to say it is a fallback. Sections carrying
+// a mandatory floor are the exception: there the fixed wording IS the requirement.
+// ---------------------------------------------------------------------------------------------
+describe('a refused draft discards its section instead of showing fixed text', () => {
+  /** One draft that will survive validation, for a section chosen by kind. */
+  function outputFor(planned: ReturnType<typeof planningResult>, sectionKind: string) {
+    const section = planned.sectionPlans.find((plan) => plan.sectionKind === sectionKind);
+    const factId = section?.structuredContentPartRefs[0] ?? 'missing-fact';
+    return {
+      section,
+      output: {
+        outputId: 'out-1',
+        sectionDrafts: [{
+          sectionId: section?.sectionId ?? 'missing',
+          bodyText: 'Model wording that survives validation for this one section.',
+          sourceFactIds: [factId],
+        }],
+        composerClaims: [`claim:${factId}`],
+      },
+    };
+  }
+
+  it('drops an ordinary section the model did not word, rather than rendering the fixed line', () => {
+    const planned = planningResult();
+    const { section, output } = outputFor(planned, 'source_signal_guidance');
+    expect(section).toBeDefined();
+
+    // Every section in this fixture carries a floor, so force ONE to be ordinary. Without this the
+    // test would pass while exercising nothing — the rule only applies to floor-free sections.
+    const victim = planned.sectionPlans.find((plan) =>
+      plan.sectionKind !== 'original_request_or_goal' && plan.sectionId !== section!.sectionId);
+    expect(victim).toBeDefined();
+    const ordinaryPlan = {
+      ...planned,
+      sectionPlans: planned.sectionPlans.map((plan) => plan.sectionId === victim!.sectionId
+        ? { ...plan, isRequired: false, safetyFlags: [], sensitivityFlags: [] }
+        : plan),
+    };
+
+    const result = composePromptEnhancementBody({
+      enhancementId: 'enh-discard-1',
+      originalPromptText: 'Fix importCsv and verify the regression.',
+      sectionPlanningResult: ordinaryPlan,
+      composerRuntimeState: 'accepted_structured_output',
+      structuredComposerOutput: output,
+    });
+
+    // The drafted section survives; the floor-free undrafted one is gone, not rendered as fixed text.
+    expect(result.currentBody.text).toContain('Model wording that survives validation');
+    expect(result.currentBody.sections.some((rendered) => rendered.sectionId === victim!.sectionId)).toBe(false);
+    // The verbatim original is never discarded.
+    expect(result.currentBody.text).toContain('My original request (verbatim):');
+  });
+
+  it('keeps a section carrying a mandatory floor, because its fixed text IS the requirement', () => {
+    const planned = planningResult();
+    const { output } = outputFor(planned, 'source_signal_guidance');
+    const floored = planned.sectionPlans.filter((plan) =>
+      plan.sectionKind !== 'original_request_or_goal'
+      && (plan.isRequired || plan.safetyFlags.length > 0 || plan.sensitivityFlags.length > 0));
+
+    const result = composePromptEnhancementBody({
+      enhancementId: 'enh-discard-2',
+      originalPromptText: 'Delete the archived customer rows and verify the migration.',
+      sectionPlanningResult: planned,
+      composerRuntimeState: 'accepted_structured_output',
+      structuredComposerOutput: output,
+    });
+
+    for (const plan of floored) {
+      expect(result.currentBody.sections.some((rendered) => rendered.sectionId === plan.sectionId)).toBe(true);
+    }
+  });
+
+  it('changes nothing when the composer never ran — the deterministic body is the supported answer', () => {
+    const planned = planningResult();
+    const deterministic = composePromptEnhancementBody({
+      enhancementId: 'enh-discard-3',
+      originalPromptText: 'Fix importCsv and verify the regression.',
+      sectionPlanningResult: planned,
+    });
+
+    expect(deterministic.currentBody.sections).toHaveLength(planned.sectionPlans.length);
+  });
+
+  it('changes nothing on a provider failure — that path already tells the user', () => {
+    const planned = planningResult();
+    const timedOut = composePromptEnhancementBody({
+      enhancementId: 'enh-discard-4',
+      originalPromptText: 'Fix importCsv and verify the regression.',
+      sectionPlanningResult: planned,
+      composerRuntimeState: 'timeout',
+    });
+
+    expect(timedOut.currentBody.sections).toHaveLength(planned.sectionPlans.length);
+  });
+});
