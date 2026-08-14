@@ -256,12 +256,16 @@ const SYSTEM_PROMPT = [
 /**
  * What each action kind means as a goal, in words worth sending.
  *
- * De-underscoring the enum is not enough. `no_action_render_context_only` becomes "no action render
- * context only", which as a goal is nonsense — and it is reachable, because that action maps to the
- * context-and-constraints section that real bodies carry. `null` means the fact states no goal, so
- * no line is sent for it: a section that exists to give context has nothing for the reader to do.
+ * De-underscoring the enum is not enough: `no_action_render_context_only` becomes "no action render
+ * context only", which as a goal is nonsense — and it is the action the live source-signal fact
+ * actually carries, so it is the one that matters most. It does not mean "say nothing"; the fact
+ * that carries it is documented as rendering "a supporting clause, not a body". That is a goal, it
+ * just is not an instruction to act, so it gets a phrase of its own rather than being dropped.
+ *
+ * Every kind maps to a goal. If a future kind genuinely has none, that is a decision to make
+ * deliberately here, not by leaving a hole for a mechanical fallback to fill.
  */
-const GOAL_BY_ACTION_KIND: Record<PromptEnhancementSuggestedActionKind, string | null> = {
+const GOAL_BY_ACTION_KIND: Record<PromptEnhancementSuggestedActionKind, string> = {
   clarify_requirement: 'pin down what is actually being asked for',
   add_acceptance_criteria: 'state what finished looks like',
   add_verification: 'say how the change will be checked',
@@ -272,7 +276,8 @@ const GOAL_BY_ACTION_KIND: Record<PromptEnhancementSuggestedActionKind, string |
   ground_in_project_fact: 'tie the work to what this project actually is',
   ask_for_source: 'find the missing source before relying on it',
   handoff_sequence: 'break the work into ordered steps',
-  no_action_render_context_only: null,
+  no_action_render_context_only:
+    'carry the context that matters here as a short supporting note, without asking the reader to act on it',
 };
 
 function guidanceSemanticsLines(semantics: readonly PromptEnhancementGuidanceSemanticsV1[]): string {
@@ -283,7 +288,7 @@ function guidanceSemanticsLines(semantics: readonly PromptEnhancementGuidanceSem
   // the projected object for callers that want them; they are not something to write ABOUT.
   const goals = semantics
     .map((fact) => GOAL_BY_ACTION_KIND[fact.suggestedActionKind])
-    .filter((goal): goal is string => goal !== null && goal !== undefined);
+    .filter((goal): goal is string => goal !== undefined); // undefined only if a kind is unmapped
   if (goals.length === 0) return '';
   const lines = [...new Set(goals)].map((goal) => `    - ${goal}`).join('\n');
   return `\n  thisSectionShould:\n${lines}`;

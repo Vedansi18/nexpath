@@ -644,12 +644,15 @@ describe('guidance goals sent to the model', () => {
   }
 
   it('never sends a de-underscored enum as if it were a goal', async () => {
-    // The reachable worst case: this action maps to the context-and-constraints section that real
-    // bodies carry, and mechanical de-underscoring made it read "get the reader to no action
-    // render context only" — nonsense, and a no-action fact stated as a goal.
+    // This is the action the LIVE source-signal fact carries, so it is the one that matters most.
+    // Mechanical de-underscoring made it read "get the reader to no action render context only" —
+    // nonsense. It also must not be dropped: the fact it comes from renders a supporting clause,
+    // which is a goal, just not an instruction to act. Dropping it made the whole projection inert
+    // on the only path that reaches the model.
     const prompt = await promptFor('no_action_render_context_only');
     expect(prompt).not.toContain('no action render context only');
-    expect(prompt).not.toContain('thisSectionShould'); // no goal to state, so no block at all
+    expect(prompt).toContain('thisSectionShould');
+    expect(prompt).toContain('short supporting note');
   });
 
   it('sends a readable goal for an action that has one', async () => {
