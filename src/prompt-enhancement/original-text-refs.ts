@@ -237,12 +237,15 @@ export function extractPromptEnhancementPromptPointsV1(
   for (const rawLine of lines) {
     const line = rawLine.trim();
 
-    // Layer 2b — fenced code blocks are quoted material, not the user speaking.
+    // Layer 2b — fenced code blocks are quoted material, not the user speaking. Their
+    // contents DO look like bullets, so this guard is load-bearing.
+    //
+    // Markdown quotes need no guard of their own: a line beginning `>` cannot match the
+    // bullet pattern below, so it is already excluded. An explicit check for it was
+    // removed after mutation testing showed nothing depended on it — a branch that never
+    // changes the outcome reads as protection without being protection.
     if (/^(```|~~~)/.test(line)) { insideFence = !insideFence; continue; }
     if (insideFence) continue;
-
-    // Layer 2c — markdown quotes are, literally, someone else's words.
-    if (line.startsWith('>')) continue;
 
     if (!/^([-*]|\d+[.)])\s+/.test(line)) continue;
     const point = line.replace(/^([-*]|\d+[.)])\s+/, '').replace(/\s+/g, ' ').trim();
