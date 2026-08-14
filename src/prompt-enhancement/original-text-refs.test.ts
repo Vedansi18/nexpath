@@ -105,6 +105,27 @@ describe('T2 carriers — an unresolvable ref is REFUSED, not dropped', () => {
     expect(resolvePromptEnhancementOriginalTextRefV1(ref, 'rotate')).toBeUndefined();
   });
 
+  it('refuses to resolve a refused ref that still carries usable offsets', () => {
+    // Builder-made refusals carry -1, so the offset guard alone would catch them. This is
+    // the shape a HAND-WRITTEN fixture or a deserialized ref can have — refused, but with
+    // offsets left on. continuation-packager-input.ts already hand-writes section fixtures,
+    // so the resolution flag has to be authoritative on its own.
+    const originalPromptText = 'restore the deleted migration file';
+    const resolved = resolvePromptEnhancementOriginalTextRefV1(
+      {
+        refId: 'sec-8:otr:1',
+        sectionId: 'sec-8',
+        startOffset: 0,
+        endOffset: 12,
+        resolution: 'refused',
+        refusalReason: 'ambiguous_multiple_matches',
+      },
+      originalPromptText,
+    );
+
+    expect(resolved).toBeUndefined();
+  });
+
   it('refuses an empty prompt-point id instead of emitting a ref to nothing', () => {
     const refs = buildPromptEnhancementPromptPointRefsV1({
       sectionId: 'sec-6',
