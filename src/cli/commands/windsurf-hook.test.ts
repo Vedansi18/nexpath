@@ -252,3 +252,79 @@ describe('isReplacementEcho — store-backed echo detection', () => {
     })).resolves.toBe(false);
   });
 });
+
+/**
+ * RC12 (live block LOOP, 2026-08-13): the DS bridge re-injects the replacement
+ * DECORATED (an @[nexpath:advisory] prefix + concatenation), so exact equality
+ * missed the echo and the hook blocked its own replacement repeatedly. The
+ * echo check now matches on normalised containment with a length floor.
+ */
+describe('⭐ RC12 — decorated replacements still register as echoes', () => {
+  const BODY = 'My original request (verbatim): make me a booking website where customers can schedule appointments and pay online. Context And Constraints: carry forward environment facts.';
+  const ports = (last: string | null) => ({
+    openStore: async () => ({}),
+    closeStore: () => {},
+    loadState: () => ({ current: { lastInjectedPrompt: last } }),
+  });
+
+  it('exact match still echoes (fast path)', async () => {
+    await expect(isReplacementEcho('/proj', BODY, ports(BODY))).resolves.toBe(true);
+  });
+
+  it('⭐ bridge-decorated resubmit (prefix + suffix) echoes via containment', async () => {
+    const decorated = `guidance.@[nexpath:advisory] ${BODY} — attached context`;
+    await expect(isReplacementEcho('/proj', decorated, ports(BODY))).resolves.toBe(true);
+  });
+
+  it('whitespace-normalised variants echo', async () => {
+    const reflowed = BODY.replace(/ /g, '  ').replace('Context', '\nContext');
+    await expect(isReplacementEcho('/proj', reflowed, ports(BODY))).resolves.toBe(true);
+  });
+
+  it('short prompts NEVER fuzzily skip (length floor)', async () => {
+    await expect(isReplacementEcho('/proj', 'fix it', ports('fix'))).resolves.toBe(false);
+    await expect(isReplacementEcho('/proj', 'a genuinely new user prompt', ports('new user'))).resolves.toBe(false);
+  });
+
+  it('a genuinely different long prompt is not an echo', async () => {
+    const other = 'Completely different request about building an inventory tracker with barcode scanning and stock reports for warehouse staff members.';
+    await expect(isReplacementEcho('/proj', other, ports(BODY))).resolves.toBe(false);
+  });
+});
+
+/**
+ * RC12 primary root cause: the registered hook command has no `--project`, so
+ * the echo check received `undefined` and bailed before reading the store —
+ * the skip NEVER fired in production. Pin that the action resolves the echo
+ * projectRoot with the same `opts.project ?? process.cwd()` chain the stop
+ * decider uses when writing `lastInjectedPrompt`.
+ */
+describe('⭐ RC12 — echo check projectRoot resolution', () => {
+  it('no --project ⇒ echo check gets process.cwd(), NOT undefined', async () => {
+    const seen: Array<string | undefined> = [];
+    const payload = JSON.stringify({ tool_info: { user_prompt: 'a genuinely long prompt body for the echo resolution pin' } });
+    await runWindsurfHookAction('pre_user_prompt', {}, {
+      readStdin: async () => payload,
+      readFlagFile: () => JSON.stringify({ windsurf: true }),
+      checkReplacementEcho: async (root, _text) => { seen.push(root); return true; }, // echo ⇒ nothing else spawns
+      handle: async () => ({ exitCode: 0 }),
+      logEvent: () => {},
+      exit: () => {},
+    });
+    expect(seen).toEqual([process.cwd()]);
+  });
+
+  it('--project wins over cwd when supplied', async () => {
+    const seen: Array<string | undefined> = [];
+    const payload = JSON.stringify({ tool_info: { user_prompt: 'a genuinely long prompt body for the echo resolution pin' } });
+    await runWindsurfHookAction('pre_user_prompt', { project: '/explicit/root' }, {
+      readStdin: async () => payload,
+      readFlagFile: () => JSON.stringify({ windsurf: true }),
+      checkReplacementEcho: async (root, _text) => { seen.push(root); return true; },
+      handle: async () => ({ exitCode: 0 }),
+      logEvent: () => {},
+      exit: () => {},
+    });
+    expect(seen).toEqual(['/explicit/root']);
+  });
+});

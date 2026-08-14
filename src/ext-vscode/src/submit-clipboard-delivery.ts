@@ -130,6 +130,14 @@ export interface SubmitKeystrokeDeps {
   run?: (cmd: string, args: string[]) => boolean;
   /** RC10 phantom-Enter guard; injectable for tests. Defaults to the real check. */
   isPopupFocused?: (deps?: { platform?: NodeJS.Platform; env?: NodeJS.ProcessEnv }) => boolean;
+  /**
+   * RC11 whitelist: when set, Enter fires ONLY if this editor's window is
+   * focused (after one focusEditor retry). Unset ⇒ pre-RC11 behaviour.
+   */
+  host?: 'windsurf' | 'cursor';
+  isEditorFocused?: typeof focusedWindowIsEditor;
+  /** One-shot editor raise used when the editor is not focused. */
+  focusEditor?: () => void;
 }
 
 
@@ -223,12 +231,58 @@ function defaultRunCapture(cmd: string, args: string[]): string | null {
   }
 }
 
+/**
+ * ⚠ RC11 (live, 2026-08-13, owner report): with the RC10 no-focus raise, a
+ * blacklist ("not one of our popups") was NOT enough — the synthetic Enter
+ * fired while Windsurf's WELCOME view had focus and pressed its "Start
+ * session" button, CLOSING the user's agent chat. A global Enter is only ever
+ * safe when the EDITOR ITSELF is the focused window — so the guard is now a
+ * WHITELIST: the active window's title must contain the target editor's name
+ * ('Windsurf'/'Cursor'), and our popup titles are still excluded (a Nexpath
+ * popup title also contains "Nexpath", never the bare editor name — but check
+ * both to be explicit). Linux/X11 where the guard is implementable; other
+ * platforms keep prior behaviour (no popup foregrounding there).
+ */
+export function focusedWindowIsEditor(host: 'windsurf' | 'cursor', deps: {
+  platform?: NodeJS.Platform;
+  env?: NodeJS.ProcessEnv;
+  hasCommand?: (cmd: string) => boolean;
+  runCapture?: (cmd: string, args: string[]) => string | null;
+} = {}): boolean {
+  const platform = deps.platform ?? process.platform;
+  const env = deps.env ?? process.env;
+  if (platform !== 'linux') return true; // no check possible; prior behaviour
+  if (!env.DISPLAY && !env.WAYLAND_DISPLAY) return false;
+  const has = deps.hasCommand ?? defaultHasCommand;
+  const runCapture = deps.runCapture ?? defaultRunCapture;
+  try {
+    if (!has('xdotool')) return true; // cannot check ⇒ prior behaviour
+    const title = runCapture('xdotool', ['getactivewindow', 'getwindowname']);
+    if (!title) return false;
+    if (NEXPATH_POPUP_TITLE_MARKERS.some((m) => title.includes(m))) return false;
+    const needle = host === 'windsurf' ? 'windsurf' : 'cursor';
+    return title.toLowerCase().includes(needle);
+  } catch {
+    return false; // cannot verify ⇒ do not press Enter blind
+  }
+}
+
 export function submitKeystroke(deps: SubmitKeystrokeDeps = {}): boolean {
   const platform = deps.platform ?? process.platform;
   const env = deps.env ?? process.env;
   // RC10: never let the submit Enter land in one of our own popups.
   if ((deps.isPopupFocused ?? focusedWindowIsNexpathPopup)({ platform, env })) {
     return false;
+  }
+  // RC11: when a target host is named, Enter fires ONLY if that editor is the
+  // focused window — a blind global Enter pressed Windsurf's "Start session"
+  // button and closed the user's chat.
+  if (deps.host) {
+    const isEditorFocused = deps.isEditorFocused ?? focusedWindowIsEditor;
+    if (!isEditorFocused(deps.host, { platform, env })) {
+      deps.focusEditor?.();
+      if (!isEditorFocused(deps.host, { platform, env })) return false;
+    }
   }
   // CORRECTED 2026-08-10 — these previously defaulted to `() => false`, which made
   // `submitKeystroke()` a guaranteed no-op in production: called with no deps (the

@@ -14,6 +14,7 @@ import {
   createSubmitClipboardDelivery,
   submitKeystroke,
   focusedWindowIsNexpathPopup,
+  focusedWindowIsEditor,
   type SubmitClipboardDeliveryDeps,
 } from './submit-clipboard-delivery.js';
 
@@ -252,5 +253,59 @@ describe('⭐ RC10 — submit Enter never fires into a Nexpath popup', () => {
   it('non-Linux platforms skip the check entirely (no popups foregrounded there)', () => {
     expect(focusedWindowIsNexpathPopup({ platform: 'darwin' })).toBe(false);
     expect(focusedWindowIsNexpathPopup({ platform: 'win32' })).toBe(false);
+  });
+});
+
+/**
+ * ⚠ RC11 (live, 2026-08-13): with the no-focus raise, a blind global Enter
+ * pressed Windsurf's WELCOME "Start session" button and CLOSED the user's
+ * chat. Whitelist: when a host is named, Enter fires only when that editor's
+ * window is focused (with one focusEditor retry).
+ */
+describe('⭐ RC11 — submit Enter fires only when the EDITOR is focused', () => {
+  const base = { platform: 'linux' as const, env: { DISPLAY: ':1' }, hasCommand: () => true, isPopupFocused: () => false };
+
+  it('editor focused ⇒ sends', () => {
+    const run = vi.fn(() => true);
+    const ok = submitKeystroke({ ...base, run, host: 'windsurf', isEditorFocused: () => true });
+    expect(ok).toBe(true);
+    expect(run).toHaveBeenCalled();
+  });
+
+  it('editor NOT focused ⇒ one focusEditor retry, then sends if focused', () => {
+    const run = vi.fn(() => true);
+    const focusEditor = vi.fn();
+    let focused = false;
+    const ok = submitKeystroke({
+      ...base, run, host: 'windsurf', focusEditor: () => { focusEditor(); focused = true; },
+      isEditorFocused: () => focused,
+    });
+    expect(focusEditor).toHaveBeenCalledTimes(1);
+    expect(ok).toBe(true);
+  });
+
+  it('editor stays unfocused ⇒ NO Enter at all (never press a blind Enter)', () => {
+    const run = vi.fn(() => true);
+    const ok = submitKeystroke({ ...base, run, host: 'cursor', focusEditor: () => {}, isEditorFocused: () => false });
+    expect(ok).toBe(false);
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it('no host named ⇒ pre-RC11 behaviour (other callers unaffected)', () => {
+    const run = vi.fn(() => true);
+    const ok = submitKeystroke({ ...base, run, hasCommand: (c: string) => c === 'xdotool' });
+    expect(ok).toBe(true);
+  });
+
+  it('focusedWindowIsEditor: editor titles pass, popups and strangers fail', () => {
+    const probe = (host: 'windsurf' | 'cursor', title: string | null) => focusedWindowIsEditor(host, {
+      platform: 'linux', env: { DISPLAY: ':1' }, hasCommand: () => true, runCapture: () => title,
+    });
+    expect(probe('windsurf', 'nexpath - Windsurf')).toBe(true);
+    expect(probe('cursor', 'nexpath - Cursor')).toBe(true);
+    expect(probe('windsurf', 'Nexpath — Action Required')).toBe(false); // our popup
+    expect(probe('windsurf', 'Mozilla Firefox')).toBe(false);
+    expect(probe('windsurf', null)).toBe(false);                        // unreadable ⇒ no blind Enter
+    expect(probe('cursor', 'nexpath - Windsurf')).toBe(false);          // wrong editor
   });
 });

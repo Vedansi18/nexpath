@@ -343,7 +343,22 @@ export async function isReplacementEcho(
   try {
     store = await openStoreFn(undefined as never);
     const last = loadState(store, projectRoot).current.lastInjectedPrompt;
-    return typeof last === 'string' && last === promptText;
+    if (typeof last !== 'string' || last.trim() === '') return false;
+    // ── RC12 (live block LOOP, 2026-08-13): exact equality was too brittle ──
+    // The DS bridge injects the replacement DECORATED (an `@[nexpath:advisory]`
+    // mention prefix + concatenation), and hosts may normalise whitespace — so
+    // the echoed submit no longer `===` the recorded text, the skip missed,
+    // and the hook BLOCKED ITS OWN REPLACEMENT repeatedly (each injection
+    // stamped "blocked by hook", nothing ever ran). Match on normalised
+    // CONTAINMENT instead: whitespace-collapsed, either side containing the
+    // other, with a minimum-length floor so short prompts can never falsely
+    // skip. Exact equality remains the fast path.
+    if (last === promptText) return true;
+    const norm = (s: string) => s.replace(/\s+/g, ' ').trim();
+    const a = norm(last);
+    const b = norm(promptText);
+    if (a.length < 40 || b.length < 40) return false; // floor: never skip short prompts fuzzily
+    return b.includes(a) || a.includes(b);
   } catch {
     return false; // fail-open — run the normal path
   } finally {
@@ -557,8 +572,17 @@ export async function runWindsurfHookAction(
       // (measured live 2026-08-13). On an echo the deferred decision is simply
       // not armed; everything else (auto, capture guard) runs as today.
       if (pendingPromptText.trim() !== '') {
+        // ── RC12 primary root cause (live block LOOP, 2026-08-13): this passed
+        // `opts.project` ALONE, but the registered hook command carries no
+        // `--project`, so it was ALWAYS undefined in production and the echo
+        // check bailed before reading the store — the skip never fired once on
+        // Windsurf. Resolve with the SAME fallback chain the stop decider uses
+        // when it WRITES `lastInjectedPrompt` (`opts.project ?? process.cwd()`;
+        // Windsurf sets cwd to the active workspace folder), so read and write
+        // land on the same projectRoot.
+        const echoProjectRoot = opts.project ?? process.cwd();
         const echoRes = await hold.run(() =>
-          (deps.checkReplacementEcho ?? isReplacementEcho)(opts.project, pendingPromptText));
+          (deps.checkReplacementEcho ?? isReplacementEcho)(echoProjectRoot, pendingPromptText));
         if (!echoRes.timedOut && echoRes.value === true) {
           decideAfterAuto = false;
           log('info', 'windsurf_hook_echo_skip', { prompt_len: pendingPromptText.length });

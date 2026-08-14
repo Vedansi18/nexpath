@@ -204,7 +204,8 @@ function buildSubmitAdvisory(
     // false and the paste still proceeds.
     focus: async () => raiseAppWindow(host),
     pasteKeystroke: () => pasteKeystroke(),
-    submitKeystroke: () => submitKeystroke(),
+    // RC11: Enter only when THIS editor is focused (one raise retry inside).
+    submitKeystroke: () => submitKeystroke({ host, focusEditor: () => void raiseAppWindow(host) }),
     log,
   });
   return createSubmitAdvisoryForHost({
@@ -685,7 +686,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         // returns false and the paste still proceeds (see the module's notes).
         focus: async () => raiseAppWindow('windsurf'),
         pasteKeystroke: () => pasteKeystroke(),
-        submitKeystroke: () => submitKeystroke(),
+        // RC11: Enter only when Windsurf itself is focused — a blind Enter
+        // pressed the Welcome view's "Start session" and closed the chat.
+        submitKeystroke: () => submitKeystroke({ host: 'windsurf', focusEditor: () => void raiseAppWindow('windsurf') }),
         log: (m) => log(m),
       });
 
@@ -697,17 +700,37 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         // expected host is windsurf by construction. H6's Cursor equivalent
         // needs its own construction site — see the note at the branch head.
         readPendingDecision: (root) => readPendingSubmitDecision(root, { expectedHost: 'windsurf' }),
-        // PRIMARY: direct command-based injection into the agent's chat — the
-        // same mechanism the old flow uses. The clipboard is reached ONLY if this
-        // fails. Previously this line called `delivery.inject` directly, which
-        // meant `chatInputInject` was never invoked on the submit path and the
-        // fallback had silently become the only path.
+        // PRIMARY: `windsurfInject` — the SAME injector the shipping old flow
+        // uses (injectViaCascadeAction → openChatPanel + addCascadeInput, the
+        // verified protobuf path). RC13 (live, 2026-08-13 18:44): this line
+        // previously called `chatInputInject`, whose windsurf candidates are
+        // dead — `windsurf.sendTextToChat` has no handler and
+        // `windsurf.sendTerminalToChat` ACCEPTS the call while inserting
+        // nothing — so delivery logged "injected directly" while the composer
+        // stayed empty (false positive), and auto-submit armed on an empty
+        // composer. The file's own header (`:277`) already said Windsurf has no
+        // extension-callable text-insert command; the submit path must use the
+        // host's own injector exactly like Cursor's branch uses `cursorInject`.
         onInject: async (text) => {
+          // Owner request 2026-08-13: Windsurf's own block card text ("Action
+          // blocked by hook") is a fixed vendor string we cannot edit — show
+          // OUR professional explanation alongside it, matching Cursor's
+          // user_message wording exactly.
+          void vscode.window.showInformationMessage(
+            'Nexpath: this prompt was held so you could refine it. Your refined version is being sent instead.',
+          );
+          // RC11.5: record FIRST — the DS bridge polls every 2s and injected a
+          // duplicate 63ms after our dispatch because the record landed after
+          // the outcome. Recording an attempt that then fails is harmless (the
+          // bridge skipping a failed delivery's text is the safe direction).
+          if (submitDeliveredStore) {
+            for (const root of roots) submitDeliveredStore.record(root, text);
+          }
           const res = await deliverSubmitReplacement(text, {
-            injectDirect: (t) => chatInputInject(t, { host }),
+            injectDirect: (t) => windsurfInject(t),
             // `verifyLanded` is DELIBERATELY NOT SUPPLIED (owner: option B).
-            // `chatInputInject` returns true as soon as the host command does not
-            // throw, so "accepted" is not "landed" — but no VS Code API exposes a
+            // `windsurfInject` returns true when the cascade-action command
+            // resolved, so "accepted" is not "landed" — but no VS Code API exposes a
             // vendor chat composer's text, so a real content check is not
             // implementable from here. Whether ANY observable signal exists is an
             // empirical question for H3's live E2E, alongside the getCommands(true)
@@ -718,12 +741,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             log: (m) => log(m),
           });
           lastDeliveryLanded = res.landed;
-          // H8 Finding 1: remember what the submit flow delivered so the DS
-          // bridge can recognise it even after the decision file is consumed
-          // (tick order between the two pollers is non-deterministic).
-          if (res.outcome !== 'failed' && submitDeliveredStore) {
-            for (const root of roots) submitDeliveredStore.record(root, text);
-          }
+          // H8 Finding 1's post-outcome record moved ABOVE the dispatch
+          // (RC11.5) — recording here again was a harmless duplicate, removed.
           return res.outcome !== 'failed';
         },
         // Auto-submit ONLY after a real injection. After a clipboard fallback the

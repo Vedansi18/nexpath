@@ -61,10 +61,17 @@ const CURSOR_CANDIDATES: ReadonlyArray<CommandCandidate> = [
 ];
 
 const WINDSURF_CANDIDATES: ReadonlyArray<CommandCandidate> = [
-  // VERIFIED command + arg shape (Windsurf 2.3.9 workbench core).
+  // Kept ONLY as a forward-compat probe: on today's builds this id has no
+  // handler (see the 2026-08-10 correction above), so the availability check
+  // skips it. If a future Windsurf registers it, it may start working.
   { id: 'windsurf.sendTextToChat', args: (t) => [t, 'nexpath:advisory'] },
-  // Best-effort fallback if a future build renames the above.
-  { id: 'windsurf.sendTerminalToChat', args: (t) => [t] },
+  // ⚠ RC13 (live, 2026-08-13): `windsurf.sendTerminalToChat` REMOVED. It is a
+  // registered command, so it passed the availability gate and RESOLVED when
+  // called with our text — while inserting NOTHING (it forwards the TERMINAL
+  // selection; the text argument is ignored). That made `chatInputInject`
+  // return a false-positive `true`: the submit delivery logged "injected
+  // directly", auto-submit armed, and the composer was empty. A candidate that
+  // can succeed without delivering the text is worse than no candidate.
 ];
 
 /** Re-export the candidate command IDs for tests that assert against the list. */
