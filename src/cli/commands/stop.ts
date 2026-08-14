@@ -379,8 +379,11 @@ export async function runStop(
               updatePendingPromptSequenceState(store, reloaded.id, delivery.nextState);
               return { outcome: 'mps_continuation_shown' };
             case 'cancel':
-              // Escape / Cancel: terminal for THIS row only (never the project-wide delete); any cancel
-              // feedback was collected upstream by the shell.
+              // Escape / Cancel: terminal for THIS row only (never the project-wide delete). ⛔ The cancel
+              // feedback the shell may collect is INTENTIONALLY NOT recorded (owner decision 2026-08-14:
+              // accept the telemetry loss — recording it would need a request-carrier the ids/counts-only
+              // continuation row deliberately does not carry, and the cancel itself is what matters). Only
+              // the terminal cancel is persisted; the mps_cancel action signal above is the kept telemetry.
               persistPromptEnhancementSequenceContinuationCancelV1(store, reloaded.id, delivery.nextState);
               return { outcome: 'mps_continuation_shown' };
             case 'reject':
