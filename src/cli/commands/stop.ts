@@ -317,15 +317,27 @@ export async function runStop(
           handoffKind:                activeSequence.handoffKind,
         });
         if (packaged.ok) {
-          const outcome = await runPromptEnhancementCliMpsContinuationPopupV1({
+          // Stage D (MPS-8, fixture store-lock-not-held-across-wait): RELEASE the store lock while the
+          // user is deciding — the popup can be open for a long time, and another session must be able to
+          // write meanwhile — then re-acquire it before writing.
+          const outcome = await withReleasedStoreLockV1(store, () => runPromptEnhancementCliMpsContinuationPopupV1({
             result:          packaged.packaged.result,
             handoffMetadata: packaged.packaged.handoffMetadata,
             event:           packaged.packaged.event,
             progress:        packaged.packaged.progress,
             itemKind:        packaged.packaged.itemKind,
             actionSignalSink: (kind, occurredAt) => recordActionSignal(store, payload.cwd, kind, occurredAt),
-          });
+          }));
           logger.info('stop_mps_continuation_shown', { cwd: payload.cwd, outcome: outcome.state });
+          // Stage D — re_acquire_reloads_before_writing: the lock is back, but the row may have moved.
+          // RELOAD before writing (a concurrent session may have advanced/cancelled it during the wait, or
+          // the sequence may have died). A click on a dead/stale offer is a SILENT no-op — no recovery UI,
+          // no explanation, and never a write of stale state that reverts the concurrent change.
+          const reloaded = getActivePendingPromptSequence(store, payload.cwd, mgr.current.sessionId);
+          if (!reloaded || reloaded.updatedAt !== activeSequence.updatedAt) {
+            logger.debug('stop_mps_continuation_stale_after_wait', { cwd: payload.cwd, died: !reloaded });
+            return { outcome: 'mps_continuation_gated' };
+          }
           // P4 (deliver + persist). Map the popup outcome onto the state machine from the OFFERED state,
           // with a DELIVER action id distinct from the offer's advance id (a duplicate id is rejected).
           // A missing/invalid result is folded to a terminal cancel inside the wrapper (§6.4).
@@ -337,8 +349,9 @@ export async function runStop(
           switch (delivery.kind) {
             case 'inject':
               // 🔒 MPS-9: persist the advanced state BEFORE the block/force-exit — closeStore flushes it
-              // synchronously below the caller's block return, so it must already be written here.
-              updatePendingPromptSequenceState(store, activeSequence.id, delivery.nextState);
+              // synchronously below the caller's block return, so it must already be written here. Write to
+              // the RELOADED row (Stage D).
+              updatePendingPromptSequenceState(store, reloaded.id, delivery.nextState);
               // Echo-guard: record the injected item body so the next UserPromptSubmit recognises it as a
               // sequence turn and does not prepare another PE for it (mirrors the first-popup inject).
               mgr.setInjectedPrompt(store, delivery.bodyText);
@@ -346,12 +359,12 @@ export async function runStop(
               return { outcome: 'blocked', reason: delivery.bodyText };
             case 'keep':
               // Interruption / not-shown: the same item stays pending and returns next Stop.
-              updatePendingPromptSequenceState(store, activeSequence.id, delivery.nextState);
+              updatePendingPromptSequenceState(store, reloaded.id, delivery.nextState);
               return { outcome: 'mps_continuation_shown' };
             case 'cancel':
               // Escape / Cancel: terminal for THIS row only (never the project-wide delete); any cancel
               // feedback was collected upstream by the shell.
-              persistPromptEnhancementSequenceContinuationCancelV1(store, activeSequence.id, delivery.nextState);
+              persistPromptEnhancementSequenceContinuationCancelV1(store, reloaded.id, delivery.nextState);
               return { outcome: 'mps_continuation_shown' };
             case 'reject':
               // Stale / duplicate / invalid transition — leave the row untouched, ordinary flow.
@@ -607,9 +620,10 @@ export function registerStopCommand(program: import('commander').Command): void 
               if (mps.state === 'send' && mps.bodyText.trim().length > 0) {
                 // 8b-2c — the user SENT: await the wording batch so its items 2…N are ready before the
                 // hook writes its block decision and exits (§4.13 Q19). Resolves to null on skip/failure
-                // and never throws, so a batch problem can never lose the send. 8c persists batchResult;
-                // for now it is awaited + logged (its output is stored once the intake path consumes it).
-                const batchResult = await sequenceBatch.awaitResult();
+                // and never throws, so a batch problem can never lose the send. Stage D (MPS-8): release
+                // the store lock across this wait (an in-flight batch is a provider call, up to 45s) so
+                // another session is not blocked; the intake below writes after re-acquire.
+                const batchResult = await withReleasedStoreLockV1(store, () => sequenceBatch.awaitResult());
                 logger.info('stop_mps_batch_awaited', {
                   cwd:        payload.cwd,
                   producedOk: Boolean(batchResult && batchResult.ok),
