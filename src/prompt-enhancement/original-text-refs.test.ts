@@ -149,6 +149,40 @@ describe('T2 carriers — an unresolvable ref is REFUSED, not dropped', () => {
   });
 });
 
+describe('T2 carriers — a pasted stack trace does not stall composition', () => {
+  it('builds a ref against a 25KB prompt well inside a frame budget', () => {
+    // Pasting a trace or a whole file is ordinary for a coding tool. An earlier
+    // implementation scanned every substring of the ORIGINAL and took 3.2 s per section
+    // at this size — tens of seconds across a body's sections and the re-render.
+    const original = Array.from({ length: 360 }, (_, index) =>
+      `    at Object.<anonymous> (/app/src/services/payment/handler${index}.ts:${index * 7 + 11}:${index % 40})`).join('\n');
+    expect(original.length).toBeGreaterThan(25_000);
+
+    const startedAt = Date.now();
+    buildPromptEnhancementOriginalTextRefV1({
+      sectionId: 'sec-perf',
+      originalPromptText: original,
+      sectionBodyText: 'Cover the reproduction and evidence with concrete, source-backed specifics.',
+    });
+
+    // Generous by design: this catches a return to super-linear scanning, not a slow CI box.
+    expect(Date.now() - startedAt).toBeLessThan(250);
+  });
+
+  it('names whole words, without ragged whitespace edges', () => {
+    const originalPromptText = 'please fix the retry logic and also fix the checkout flow';
+    const ref = buildPromptEnhancementOriginalTextRefV1({
+      sectionId: 'sec-words',
+      originalPromptText,
+      sectionBodyText: 'We will fix the retry logic carefully.',
+    });
+
+    const resolved = resolvePromptEnhancementOriginalTextRefV1(ref, originalPromptText);
+    expect(resolved).toBe('fix the retry logic');
+    expect(resolved).toBe(resolved?.trim());
+  });
+});
+
 describe('T2 carriers — prompt-point refs name the user\'s own points', () => {
   it('refs the points a section covers, and not the ones it does not', () => {
     const originalPromptText = [

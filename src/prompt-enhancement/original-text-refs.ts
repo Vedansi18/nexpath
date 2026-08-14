@@ -28,21 +28,45 @@ import type {
  */
 export const PROMPT_ENHANCEMENT_ORIGINAL_TEXT_REF_MIN_LENGTH_V1 = 12;
 
-/** Longest run of the original that also appears in the section body, if any. */
+/**
+ * Longest run of the original that also appears in the section body, if any.
+ *
+ * Candidates come from the SECTION BODY, not the original. Both directions find the same
+ * shared run, but the body is short and bounded while the original is whatever the user
+ * pasted — and a coding tool gets stack traces and whole files pasted routinely. Scanning
+ * the original's substrings measured 1.1 s per section at 15 KB and 3.2 s at 25 KB, which
+ * across a body's sections and the confirmation re-render reached tens of seconds of pure
+ * CPU on the submit path.
+ *
+ * Candidates are also word-aligned, so a ref names whole words instead of a run that
+ * starts mid-word or carries ragged whitespace edges.
+ */
 function longestSharedRun(originalText: string, sectionBodyText: string): string | undefined {
   if (originalText.length === 0 || sectionBodyText.length === 0) return undefined;
-  const haystack = sectionBodyText.toLowerCase();
-  const original = originalText.toLowerCase();
+  const originalLower = originalText.toLowerCase();
+
+  const words: { text: string; start: number; end: number }[] = [];
+  const wordPattern = /\S+/g;
+  let match = wordPattern.exec(sectionBodyText);
+  while (match !== null) {
+    words.push({ text: match[0], start: match.index, end: match.index + match[0].length });
+    match = wordPattern.exec(sectionBodyText);
+  }
 
   let best: string | undefined;
-  for (let start = 0; start < original.length; start += 1) {
-    // Only extend past the current best — a shorter run cannot win.
-    const minEnd = start + (best?.length ?? PROMPT_ENHANCEMENT_ORIGINAL_TEXT_REF_MIN_LENGTH_V1);
-    for (let end = original.length; end >= minEnd; end -= 1) {
-      const candidate = original.slice(start, end);
-      if (haystack.includes(candidate)) {
-        best = originalText.slice(start, end);
-        break;
+  for (let first = 0; first < words.length; first += 1) {
+    // Extend while the original still contains the span. `includes` is monotonic here —
+    // once a span is absent, every longer span from the same start is absent too — so the
+    // inner loop stops at the first miss instead of trying every end.
+    for (let last = first; last < words.length; last += 1) {
+      const span = sectionBodyText.slice(words[first]!.start, words[last]!.end);
+      const at = originalLower.indexOf(span.toLowerCase());
+      if (at < 0) break;
+      if (span.length >= PROMPT_ENHANCEMENT_ORIGINAL_TEXT_REF_MIN_LENGTH_V1
+        && span.length > (best?.length ?? 0)) {
+        // Return the ORIGINAL's own characters: the offsets must index the original, and
+        // its casing is what a reader resolving the ref should get back.
+        best = originalText.slice(at, at + span.length);
       }
     }
   }
