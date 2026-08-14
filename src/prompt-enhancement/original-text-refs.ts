@@ -113,18 +113,63 @@ export function resolvePromptEnhancementOriginalTextRefV1(
   return originalPromptText.slice(ref.startOffset, ref.endOffset);
 }
 
-/** Prompt-point refs for one section, from the point ids its plan already carries. */
+/**
+ * Which of the user's own enumerated points this section covers.
+ *
+ * The points are the bullet/numbered items in the original prompt, so a ref here answers
+ * "is this point of mine still covered?" — the question point-coverage exists to answer.
+ * An earlier draft populated this from `structuredContentPartRefs`, which carries
+ * `guidance_fact:` and `section_kind:` ids: real ids, but not prompt points, so the field
+ * promised one thing and delivered another.
+ *
+ * A point is REFUSED when it cannot be located verbatim in the original. That is
+ * reachable rather than theoretical: extraction collapses whitespace, so a point the user
+ * wrote with doubled spaces no longer matches the text it came from.
+ */
 export function buildPromptEnhancementPromptPointRefsV1(input: {
   sectionId: string;
-  promptPointIds: readonly string[];
+  originalPromptText: string;
+  promptPoints: readonly string[];
+  sectionBodyText: string;
 }): readonly PromptEnhancementPromptPointRefV1[] {
-  return input.promptPointIds.map((promptPointId, index) => {
-    const refId = `${input.sectionId}:ppr:${index + 1}`;
-    // An empty id names nothing; refused rather than emitted as a ref to "".
-    return promptPointId.trim().length === 0
-      ? { refId, sectionId: input.sectionId, promptPointId, resolution: 'refused' as const, refusalReason: 'not_found_in_original' as const }
-      : { refId, sectionId: input.sectionId, promptPointId, resolution: 'exact' as const };
+  const body = input.sectionBodyText.toLowerCase();
+  const refs: PromptEnhancementPromptPointRefV1[] = [];
+
+  input.promptPoints.forEach((point, index) => {
+    // A point the section does not mention is simply not covered by it — that is an
+    // ordinary fact about section scope, not a failure, so no ref is emitted.
+    if (!body.includes(point.toLowerCase())) return;
+
+    const promptPointId = `prompt_point:${index + 1}`;
+    refs.push(input.originalPromptText.includes(point)
+      ? { refId: `${input.sectionId}:ppr:${index + 1}`, sectionId: input.sectionId, promptPointId, resolution: 'exact' }
+      : {
+        refId: `${input.sectionId}:ppr:${index + 1}`,
+        sectionId: input.sectionId,
+        promptPointId,
+        resolution: 'refused',
+        refusalReason: 'not_found_in_original',
+      });
   });
+
+  return refs;
+}
+
+/**
+ * The user's enumerated points — the bullet and numbered items of the original prompt.
+ *
+ * Kept beside the refs that consume it so the two cannot drift. Mirrors the extraction
+ * the point-inventory lines already use; Q2 decides that mechanism's future, and whatever
+ * replaces it, these refs must still point at PROMPT POINTS.
+ */
+export function extractPromptEnhancementPromptPointsV1(originalPromptText: string): readonly string[] {
+  return originalPromptText
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => /^([-*]|\d+[.)])\s+/.test(line))
+    .map((line) => line.replace(/^([-*]|\d+[.)])\s+/, '').replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+    .slice(0, 12);
 }
 
 /** What composition did to this section, derived from state already known at composition. */

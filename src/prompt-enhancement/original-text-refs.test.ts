@@ -15,6 +15,7 @@ import {
   buildPromptEnhancementOriginalTextRefV1,
   buildPromptEnhancementPromptPointRefsV1,
   buildPromptEnhancementTransformReasonCodesV1,
+  extractPromptEnhancementPromptPointsV1,
   resolvePromptEnhancementOriginalTextRefV1,
   withPromptEnhancementCarriedFromPreviousBodyV1,
 } from './original-text-refs.js';
@@ -127,16 +128,55 @@ describe('T2 carriers — an unresolvable ref is REFUSED, not dropped', () => {
     expect(resolved).toBeUndefined();
   });
 
-  it('refuses an empty prompt-point id instead of emitting a ref to nothing', () => {
+  it('refuses a point that whitespace normalisation moved away from the original', () => {
+    // extractPromptPoints collapses runs of whitespace, so a point the user wrote with
+    // doubled spaces no longer appears verbatim in the text it came from. Reachable,
+    // not theoretical — which is why the refusal branch exists.
+    const originalPromptText = '- add  retry  handling to the webhook';
+    const points = extractPromptEnhancementPromptPointsV1(originalPromptText);
+    expect(points).toEqual(['add retry handling to the webhook']);
+
     const refs = buildPromptEnhancementPromptPointRefsV1({
       sectionId: 'sec-6',
-      promptPointIds: ['point-a', '   '],
+      originalPromptText,
+      promptPoints: points,
+      sectionBodyText: 'We will add retry handling to the webhook.',
     });
 
-    expect(refs).toHaveLength(2);
+    expect(refs).toHaveLength(1);
+    expect(refs[0]?.resolution).toBe('refused');
+    expect(refs[0]?.refusalReason).toBe('not_found_in_original');
+  });
+});
+
+describe('T2 carriers — prompt-point refs name the user\'s own points', () => {
+  it('refs the points a section covers, and not the ones it does not', () => {
+    const originalPromptText = [
+      'Please do the following:',
+      '- add retry handling to the webhook',
+      '- write a migration for the phone column',
+    ].join('\n');
+    const points = extractPromptEnhancementPromptPointsV1(originalPromptText);
+    expect(points).toHaveLength(2);
+
+    const refs = buildPromptEnhancementPromptPointRefsV1({
+      sectionId: 'sec-9',
+      originalPromptText,
+      promptPoints: points,
+      sectionBodyText: 'Start by add retry handling to the webhook, then verify it.',
+    });
+
+    // Covered → referenced. Not covered → no ref, because a section that does not
+    // mention a point has not failed at anything; it simply has a different scope.
+    expect(refs).toHaveLength(1);
+    expect(refs[0]?.promptPointId).toBe('prompt_point:1');
     expect(refs[0]?.resolution).toBe('exact');
-    expect(refs[1]?.resolution).toBe('refused');
-    expect(refs[1]?.refusalReason).toBe('not_found_in_original');
+  });
+
+  it('extracts nothing from a prompt with no enumerated points', () => {
+    // The common case: a one-line prompt has no points, so there is nothing to ref
+    // and the field is empty rather than filled with ids that are not points.
+    expect(extractPromptEnhancementPromptPointsV1('just fix the failing build please')).toEqual([]);
   });
 });
 

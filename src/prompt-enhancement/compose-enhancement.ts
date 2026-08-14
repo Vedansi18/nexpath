@@ -26,6 +26,7 @@ import { buildPromptEnhancementCostVisibilityMetadataV1 } from './cost-observabi
 import {
   buildPromptEnhancementOriginalTextRefV1,
   buildPromptEnhancementPromptPointRefsV1,
+  extractPromptEnhancementPromptPointsV1,
   buildPromptEnhancementTransformReasonCodesV1,
   withPromptEnhancementCarriedFromPreviousBodyV1,
 } from './original-text-refs.js';
@@ -1087,6 +1088,9 @@ function attachSpanRefs(
   originalPromptText: string,
   modelDraftedSectionIds: ReadonlySet<string>,
 ): readonly PromptEnhancementSectionV1[] {
+  // Extracted once per composition rather than per section: the points belong to the
+  // prompt, not to any one section, and recomputing invites two answers.
+  const promptPoints = extractPromptEnhancementPromptPointsV1(originalPromptText);
   return sectionPlans.map((sectionPlan) => {
     const rendered = renderedSections.find((section) => section.sectionId === sectionPlan.sectionId);
     const startOffset = rendered ? bodyText.indexOf(rendered.text) : -1;
@@ -1115,7 +1119,9 @@ function attachSpanRefs(
     });
     const promptPointRefs = buildPromptEnhancementPromptPointRefsV1({
       sectionId: sectionPlan.sectionId,
-      promptPointIds: sectionPlan.structuredContentPartRefs,
+      originalPromptText,
+      promptPoints,
+      sectionBodyText: rendered?.bodyText ?? '',
     });
     const transformReasonCodes = buildPromptEnhancementTransformReasonCodesV1({
       isOriginalSection,
