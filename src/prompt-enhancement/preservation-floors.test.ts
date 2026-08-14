@@ -16,6 +16,10 @@ import {
   checkPromptEnhancementPreservationFloorsV1,
   type PromptEnhancementPreservationFloorIdV1,
 } from './preservation-floors.js';
+import {
+  collectPromptEnhancementBodyAssertionFailuresV1,
+  collectPromptEnhancementFloorViolationsV1,
+} from './body-assertion-checks.js';
 
 function floorsFor(originalPromptText: string, generatedBodyText: string): readonly PromptEnhancementPreservationFloorIdV1[] {
   return checkPromptEnhancementPreservationFloorsV1({ originalPromptText, generatedBodyText })
@@ -201,5 +205,28 @@ describe('T4 — the floor set itself', () => {
       originalPromptText: original,
       generatedBodyText: `${original}\n\nVerify the fix with a regression test.`,
     })).toEqual([]);
+  });
+});
+
+describe('T4 — floors reported through the live assertion harness', () => {
+  it('names the floor for each violation across a run, and stays out of the Phase 2 oracle', () => {
+    const results = [
+      { prompt: 'do not change the public API shape', bodyText: 'Reshape the public API as needed.', composed: true },
+      { prompt: 'take a backup first', bodyText: 'Run the migration.', composed: true },
+    ];
+
+    const reported = collectPromptEnhancementFloorViolationsV1(results);
+    expect(reported.some((line) => line.includes('floor do_not_statements'))).toBe(true);
+    expect(reported.some((line) => line.includes('floor data_safety_boundaries'))).toBe(true);
+
+    // Phase 2's oracle is locked, so the floors must NOT have been folded into it.
+    expect(collectPromptEnhancementBodyAssertionFailuresV1(results)).toEqual([]);
+  });
+
+  it('reports nothing when the bodies preserve what the prompts supplied', () => {
+    const results = [
+      { prompt: 'do not change the public API shape', bodyText: 'Do not change the public API shape.', composed: true },
+    ];
+    expect(collectPromptEnhancementFloorViolationsV1(results)).toEqual([]);
   });
 });

@@ -41,6 +41,7 @@ import { getPromptStartStopSourceSnapshot } from '../src/prompt-enhancement/sour
 import { isValidApiKey } from '../src/config/ApiKeyResolver.js';
 import {
   collectPromptEnhancementBodyAssertionFailuresV1,
+  collectPromptEnhancementFloorViolationsV1,
   countPromptEnhancementFallThroughSentencesV1,
   isPromptEnhancementBodyAssertionCheckerCurrentV1,
 } from '../src/prompt-enhancement/body-assertion-checks.js';
@@ -177,8 +178,18 @@ async function main(): Promise<void> {
   }
 
   const failures = collectPromptEnhancementBodyAssertionFailuresV1(collected);
+  const floorViolations = collectPromptEnhancementFloorViolationsV1(collected);
 
   process.stdout.write(`\n${'='.repeat(78)}\n`);
+  // T4 floors, reported BEFORE the verdict and outside it. Phase 2's oracle is locked, so
+  // these do not decide pass or fail — they make the floors live measurement against real
+  // bodies instead of a checker nobody runs.
+  process.stdout.write(
+    floorViolations.length > 0
+      ? `T4 preservation floors: ${floorViolations.length} violation(s), each naming its floor:\n`
+        + floorViolations.map((violation) => `  ${violation}\n`).join('')
+      : 'T4 preservation floors: no violations across this run.\n',
+  );
   if (failures.length > 0) {
     process.stderr.write(`PE body assertion: FAILED — ${failures.length} finding(s):\n`);
     for (const failure of failures) process.stderr.write(`  ${failure}\n`);

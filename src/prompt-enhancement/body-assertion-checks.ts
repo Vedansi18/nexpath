@@ -8,6 +8,7 @@
  * Neither check scores quality. There is no agreed scorer for "is this good advice", and a made-up
  * threshold would be worse than none.
  */
+import { checkPromptEnhancementPreservationFloorsV1 } from './preservation-floors.js';
 
 /**
  * The invariant half of the fall-through sentence's long arm, as built in `compose-enhancement.ts`
@@ -130,4 +131,28 @@ export function collectPromptEnhancementBodyAssertionFailuresV1(
     failures.push(`identical guidance for two prompts: "${prompt}" and "${matches}"`);
   }
   return failures;
+}
+
+/**
+ * T4 preservation-floor violations across the same run.
+ *
+ * SEPARATE from the failures above on purpose. Phase 2 locked its oracle — no numeric
+ * threshold, and the echo metric stays out of it — so folding floors into that list would
+ * change what the assertion PASSES on. These are reported alongside instead: the floors
+ * become live measurement against real composed bodies without redefining Phase 2's gate.
+ */
+export function collectPromptEnhancementFloorViolationsV1(
+  results: readonly PromptEnhancementBodyAssertionResultV1[],
+): readonly string[] {
+  const reported: string[] = [];
+  for (const { prompt, bodyText } of results) {
+    for (const violation of checkPromptEnhancementPreservationFloorsV1({
+      originalPromptText: prompt,
+      generatedBodyText: bodyText,
+    })) {
+      // The floor is named first: "something was lost" is not actionable on its own.
+      reported.push(`floor ${violation.floorId}: lost "${violation.lostFromOriginal}" from: "${prompt}"`);
+    }
+  }
+  return reported;
 }
