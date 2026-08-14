@@ -417,6 +417,13 @@ function isMandatorySurvivorSection(
  *
  * The dev plan states the bound directly: "Scope must remain bounded and must not add noisy
  * rollback text to unrelated low-risk prompts."
+ *
+ * ⚠️ Only two of these entries are consulted today — `confirmation_needed` and `risk_or_rollback`,
+ * the only capabilities that have ever contributed a safety flag. The rest are here because this is
+ * the transcription of the design table and splitting it would leave the record in two places; they
+ * become live the moment another capability contributes a flag. Do not read a nine-entry map as
+ * proof that nine capabilities are scoped — `capabilityScopedSafetyFlagsV1` names the two that are,
+ * and a test pins that list so a third cannot be added silently.
  */
 const SECTIONS_BY_CAPABILITY: Partial<Record<PromptEnhancementCapabilityId, readonly string[]>> = {
   'capability.risk_or_rollback': [
@@ -439,6 +446,18 @@ const SECTIONS_BY_CAPABILITY: Partial<Record<PromptEnhancementCapabilityId, read
   ],
   'capability.decomposition_candidate': ['handoff_or_sequence_candidate'],
 };
+
+/**
+ * The capabilities whose overlay actually reaches `safetyFlags`, and are therefore scoped.
+ *
+ * Exported so a test can pin it: the map above lists every capability in the design table, but only
+ * these contribute a flag, and a reader who assumes otherwise will believe scoping covers more than
+ * it does. Adding a third capability to `safetyFlagsFor` must fail that test until this list agrees.
+ */
+export const capabilityScopedSafetyFlagsV1: readonly PromptEnhancementCapabilityId[] = [
+  'capability.confirmation_needed',
+  'capability.risk_or_rollback',
+];
 
 function capabilityAppliesToSection(
   capability: PromptEnhancementCapabilityId,

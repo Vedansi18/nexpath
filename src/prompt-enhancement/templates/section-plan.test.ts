@@ -14,6 +14,7 @@ import {
 } from './registry.js';
 import {
   normalizeGuidanceFacts,
+  capabilityScopedSafetyFlagsV1,
   planPromptEnhancementSections,
   type PromptEnhancementGuidanceFact,
 } from './section-plan.js';
@@ -426,5 +427,36 @@ describe('capability overlays are scoped to the sections their design names', ()
       .filter((s) => s.sectionKind !== 'original_request_or_goal')
       .map((s) => [...s.safetyFlags].sort().join('|')));
     expect(distinct.size).toBeGreaterThan(1);
+  });
+});
+
+describe('which capabilities actually reach safetyFlags', () => {
+  it('pins the scoped list, so a third cannot be added silently', () => {
+    // The SECTIONS_BY_CAPABILITY map transcribes the whole design table, but only the capabilities
+    // that contribute a safety flag are scoped by it. A reader seeing nine entries would conclude
+    // scoping is complete; it covers these two. If a future capability starts contributing a flag,
+    // this fails until the list agrees — which is the point.
+    expect([...capabilityScopedSafetyFlagsV1].sort()).toEqual([
+      'capability.confirmation_needed',
+      'capability.risk_or_rollback',
+    ]);
+  });
+
+  it('a capability outside that list changes no section flags', () => {
+    // capability.project_grounding appears in the map, so it looks scoped. It contributes nothing,
+    // and this proves the map entry is inert rather than quietly doing something.
+    const withGrounding = planPromptEnhancementSections({
+      routeResult: routePromptEnhancement(routeInput({ promptText: 'Ground this in the project facts and explain the module layout.' })),
+      sourceRefs: [sourceA, contentTemplateSourceB],
+      guidanceFacts: [],
+    });
+
+    for (const section of withGrounding.sectionPlans) {
+      // Only the two unconditional flags, plus whatever the two scoped capabilities added.
+      for (const flag of section.safetyFlags) {
+        expect(['source_honesty', 'no_authority_escalation', 'sensitive_action_confirmation', 'risk_or_rollback'])
+          .toContain(flag);
+      }
+    }
   });
 });
