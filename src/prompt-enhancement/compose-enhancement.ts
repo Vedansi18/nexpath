@@ -294,6 +294,20 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
   // that ruling; the failure stays fully visible via the notice + typed metadata
   // (fallbackReason / providerFailureState) while the user keeps the grounded guidance.
 
+  // Where the canonical confirmation clause goes when the PROMPT demands one.
+  //
+  // Preference order: the section whose kind is built for it, then any section the confirmation
+  // capability reached, then — the point of the third arm — ANY generated section.
+  //
+  // The third arm is not defensive padding. The first two ask which sections carry
+  // `sensitive_action_confirmation`, and that flag is now scoped to the four sections the design
+  // names. A confirmation-needed prompt whose plan happens to contain none of them would otherwise
+  // find nothing and place the clause nowhere: the prompt says "ask me before you do this" and the
+  // body never says it. Before the flags were scoped, every section carried the flag, so the second
+  // arm always matched and this hole could not open.
+  //
+  // If the prompt demands confirmation, the clause is placed. Which section hosts it is a matter of
+  // taste; whether it appears at all is not.
   const canonicalConfirmationSectionId = requiresPromptEnhancementExecutionConfirmationForPrompt(input.originalPromptText)
     ? sectionPlans.find((sectionPlan) => (
       sectionPlan.sectionKind === 'risk_safety_or_confirmation' &&
@@ -302,6 +316,9 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
       ?? sectionPlans.find((sectionPlan) => (
         sectionPlan.sectionKind !== 'original_request_or_goal' &&
         sectionPlan.safetyFlags.includes('sensitive_action_confirmation')
+      ))?.sectionId
+      ?? [...sectionPlans].reverse().find((sectionPlan) => (
+        sectionPlan.sectionKind !== 'original_request_or_goal'
       ))?.sectionId
     : undefined;
   // Owner ruling 2026-08-14: when the composer RAN and a section's draft did not survive validation,

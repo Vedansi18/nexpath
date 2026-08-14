@@ -1381,3 +1381,41 @@ describe('a refused draft discards its section instead of showing fixed text', (
     expect(timedOut.currentBody.sections).toHaveLength(planned.sectionPlans.length);
   });
 });
+
+describe('discarding every ordinary section still yields a usable result', () => {
+  // The discard rule made "no generated sections at all" reachable for the first time: if the
+  // composer ran and every draft was refused, every floor-free section goes. This asserts the body
+  // that remains is still a valid, sendable result rather than an empty or blocked popup.
+  function allDraftsRefused(originalPromptText: string) {
+    const planned = planningResult();
+    return composePromptEnhancementBody({
+      enhancementId: 'enh-all-refused',
+      originalPromptText,
+      sectionPlanningResult: planned,
+      composerRuntimeState: 'accepted_structured_output',
+      // A draft for a section id that does not exist -> every real section is left undrafted.
+      structuredComposerOutput: {
+        outputId: 'out-refused',
+        sectionDrafts: [{ sectionId: 'not-a-planned-section', bodyText: 'Rejected.', sourceFactIds: ['x'] }],
+        composerClaims: ['claim:x'],
+      },
+    });
+  }
+
+  it('keeps the verbatim original when every draft is refused', () => {
+    const result = allDraftsRefused('Fix importCsv and verify the regression.');
+    expect(result.currentBody.text).toContain('My original request (verbatim):');
+    expect(result.currentBody.text).toContain('Fix importCsv and verify the regression.');
+  });
+
+  it('reports the refusal rather than presenting the thin body as a clean composition', () => {
+    const result = allDraftsRefused('Fix importCsv and verify the regression.');
+    expect(result.currentBody.callVisibilityMode).not.toBe('llm_wording');
+  });
+
+  it('still carries the confirmation clause when the prompt demands one', () => {
+    // The carve-out's whole purpose: a validation fault must not silently drop a safety clause.
+    const result = allDraftsRefused('Delete the archived customer rows in production and run the migration.');
+    expect(result.currentBody.text).toContain('you must ask me for go-ahead confirmation');
+  });
+});
