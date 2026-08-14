@@ -8,6 +8,7 @@ import type {
 } from './contracts.js';
 import type {
   PromptEnhancementSequenceItemV1,
+  PromptEnhancementSequenceItemKindV1,
   PromptEnhancementSequenceOffsetRangeV1,
 } from './sequence-payload.js';
 
@@ -145,6 +146,12 @@ export interface PromptEnhancementSequencePackagedContinuationV1 {
   event: PromptEnhancementFutureSequenceRuntimeEventV1;
   progress: PromptEnhancementSequenceProgressV1;
   /**
+   * MPS-12: the served item's kind. Drives the kind-dependent original-text region in the continuation UI
+   * (Ruling C, §22.2: a TASK carries the user's original slice verbatim; a CONFIRMATION carries none). Off
+   * the SAME item the body and safetyClauseRef come from — never inferred from whether the text is empty.
+   */
+  itemKind: PromptEnhancementSequenceItemKindV1;
+  /**
    * Where the safety floor sits inside the body being served. Null when this item carried none.
    *
    * Emitted BESIDE the body rather than left for the caller to fetch, and the two come off the same
@@ -234,6 +241,14 @@ export function packagePromptEnhancementSequenceContinuationV1(
       // — the packager serving the wrong prompt while every field it was asked about looked right.
       renderedPromptBody: item.generatedWording,
       text: item.generatedWording,
+      // MPS-12 (Ruling C §22.2): a continuation shows the item's OWN original slice, not the first prompt's
+      // whole original. Re-point originalPromptText to the slice the item's offsets select — analogous to the
+      // body/text re-point above. The accepted result's original and the offsets index the same
+      // length-preserving text (redaction is length-preserving; see sequence-intake). A CONFIRMATION carries
+      // no slice (`originalSliceRef` null) → empty; the UI renders no original region for it anyway (kind-gated).
+      originalPromptText: item.originalSliceRef
+        ? input.acceptedResult.currentBody.originalPromptText.slice(item.originalSliceRef.start, item.originalSliceRef.end)
+        : '',
       // Not bookkeeping: this is the one bit that says Nexpath wrote this body. Marked as the
       // user's, a continuation re-enters the planner and plans a sequence out of our own writing.
       sentPromptOrigin: 'sequence_handoff_owned_body',
@@ -391,6 +406,8 @@ export function packagePromptEnhancementSequenceContinuationV1(
       // Off the same item the body came from, so the offsets and the text they index can never be
       // two different items'.
       safetyClauseRef: item.itemSafetyClauseRef,
+      // MPS-12: expose the served item's kind so the continuation UI honors Ruling C off the same item.
+      itemKind: item.itemKind,
     },
   };
 }

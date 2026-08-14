@@ -158,6 +158,23 @@ describe('sequence packager — it reads, and that is all', () => {
     expect(result.packaged.result.currentBody.renderedPromptBody).toBe('The wording of item 1.');
   });
 
+  it('MPS-12: re-points originalPromptText to the item\'s original SLICE, not the whole prompt', () => {
+    const accepted = { ...ACCEPTED, currentBody: { ...ACCEPTED.currentBody, originalPromptText: 'ABCDEFGHIJ' } };
+    const sliced = packagePromptEnhancementSequenceContinuationV1(input({
+      acceptedResult: accepted,
+      items: [item(0), item(1, { originalSliceRef: { start: 2, end: 5 } }), item(2), item(3)],
+    }));
+    expect(sliced.ok).toBe(true);
+    if (!sliced.ok) return;
+    // The item's slice (chars 2..5 of the whole), NOT the whole 'ABCDEFGHIJ'.
+    expect(sliced.packaged.result.currentBody.originalPromptText).toBe('CDE');
+    expect(sliced.packaged.itemKind).toBe('task');
+    // A missing sliceRef (default item) → empty original, never the whole prompt.
+    const empty = packagePromptEnhancementSequenceContinuationV1(input({ acceptedResult: accepted }));
+    if (!empty.ok) return;
+    expect(empty.packaged.result.currentBody.originalPromptText).toBe('');
+  });
+
   it('returns byte-identical text on a second reading, which is what the custom path needs', () => {
     // The user takes the custom-prompt path: the item stays pending and returns after their own
     // prompt and an agent response reach a later Stop. It has to come back unchanged, and it does

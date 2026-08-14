@@ -2,6 +2,7 @@ import type { PromptEnhancementMpsFirstPopupModelV1 } from './first-popup.js';
 import type { PromptEnhancementMpsContinuationPopupModelV1 } from './continuation-popup.js';
 import type { PromptEnhancementEditorFieldV1 } from './multiline-editor.js';
 import { isPromptEnhancementScrollMarkerLineV1 } from './cli-submit-popup.js';
+import { PROMPT_ENHANCEMENT_SEQUENCE_TASK_KINDS_V1 } from './sequence-payload.js';
 
 // ---------------------------------------------------------------------------
 // UI-6 — MPS first-popup host rendering (alignment plan §3.3).
@@ -20,6 +21,10 @@ import { isPromptEnhancementScrollMarkerLineV1 } from './cli-submit-popup.js';
 // ---------------------------------------------------------------------------
 
 export const PROMPT_ENHANCEMENT_MPS_CLI_FOOTER_V1 = 'Enter send · Esc actions' as const;
+// MPS-2/6.3 (owner: UI/UX presentation is Bhavnesh's lane): on the CONTINUATION surface Escape CANCELS the
+// active sequence (Hiren ruling 2026-08-10), so the footer says so — distinct from the first popup, where
+// Escape only leaves editor focus / declines the offer (nothing activated → nothing to cancel).
+export const PROMPT_ENHANCEMENT_MPS_CLI_CONTINUATION_FOOTER_V1 = 'Enter send · Esc cancels sequence' as const;
 export const PROMPT_ENHANCEMENT_MPS_CLI_SEQUENCE_PLAN_LABEL_V1 = 'Sequence plan' as const;
 export const PROMPT_ENHANCEMENT_MPS_CLI_ADDITIONAL_DETAILS_LABEL_V1 = 'Additional details' as const;
 /** Editing keys shown under a focused editable field (owner request), matching the PE popup. */
@@ -260,6 +265,13 @@ export interface PromptEnhancementMpsContinuationFrameStateV1 {
   caret?: { field: PromptEnhancementEditorFieldV1; visualRow: number; visualColumn: number };
   /** Mutable sink the renderer fills with the caret's 1-based screen position (see `caret`). */
   caretOut?: { row: number; col: number };
+  /**
+   * MPS-1 (loading wheel): a spinner glyph shown IN the body while the next item's wording is not yet
+   * ready — the body renders "<glyph> preparing…" and the edit hint is hidden; the other rows stay put
+   * (skeleton). The shell cycles the glyph and drops it once wording lands. Absent = normal render.
+   * (The wait itself is P5; MPS-5 8.3 found it unreachable today, so this is a defensive presentation.)
+   */
+  loadingSpinnerGlyph?: string;
 }
 
 /**
@@ -323,15 +335,38 @@ export function renderPromptEnhancementMpsContinuationFrameV1(
   const contentLine = (line: string): string =>
     c && isPromptEnhancementScrollMarkerLineV1(line) ? `    ${c.gray}${line}${c.reset}` : `    ${line}`;
 
+  // MPS-3 (Part B): sequence progress line near the top (owner decision: top placement). `done`/`total`
+  // come off the packaged continuation (done = currentItemIndex, total = itemCount); the copy is formatted
+  // here, never carried on the model. CONTINUATION-only surface (the first popup shows the sequence plan).
+  const progressLine = `Sequence ${model.progress.done} of ${model.progress.total}`;
+  lines.push(c ? `${c.dim}${progressLine}${c.reset}` : progressLine);
+  lines.push('');
+
   // Enhanced next sequence body — primary, interactive row 0. Same "whole prompt is included" on
   // the edit-keys hint as the first popup (owner request 2026-08-07).
   const heading = publicText(model.heading);
   lines.push(radioRow(0, heading));
   recordCaret('enhanced_body');
-  const bodyRender = renderMpsBodyLinesV1(publicText(model.body.text), c);
+  // MPS-1 (loading wheel): while wording is not ready, the body is a spinner skeleton ("<glyph> preparing…")
+  // and the edit-keys hint is hidden; everything else renders as normal (owner: skeleton + spinner in body).
+  const bodyText = frameState.loadingSpinnerGlyph
+    ? `${frameState.loadingSpinnerGlyph} preparing…`
+    : publicText(model.body.text);
+  const bodyRender = renderMpsBodyLinesV1(bodyText, c);
   for (const bodyLine of bodyRender.lines) lines.push(bodyLine);
-  if (focusIndex === 0) lines.push(mpsEditKeysHintV1(c, bodyRender.hiddenBelow));
+  if (focusIndex === 0 && !frameState.loadingSpinnerGlyph) lines.push(mpsEditKeysHintV1(c, bodyRender.hiddenBelow));
   lines.push('');
+
+  // MPS-12 (Ruling C §22.2): a TASK item (`first_task`/`task`) shows the user's original slice verbatim;
+  // a CONFIRMATION item shows NO original region — no label, box, or placeholder. Driven by the item KIND
+  // (never inferred from empty text). Plain dim presentation, reused as-is (owner: no restyle). Skipped
+  // while the loading skeleton is up.
+  if (!frameState.loadingSpinnerGlyph
+    && (PROMPT_ENHANCEMENT_SEQUENCE_TASK_KINDS_V1 as readonly string[]).includes(model.itemKind)) {
+    const original = `  Your original: ${publicText(model.body.originalPromptText)}`;
+    lines.push(c ? `${c.dim}${original}${c.reset}` : original);
+    lines.push('');
+  }
 
   // Additional details — interactive row 1. Same PE-parity helpers as the first popup: apply hint
   // always visible, editing keys as the LAST line when focused; no "Add extra requirement" label.
@@ -359,7 +394,7 @@ export function renderPromptEnhancementMpsContinuationFrameV1(
   lines.push('');
 
   // No Sequence plan / Remaining / Types on the continuation surface (§3.4).
-  lines.push(c ? `${c.dim}${PROMPT_ENHANCEMENT_MPS_CLI_FOOTER_V1}${c.reset}` : PROMPT_ENHANCEMENT_MPS_CLI_FOOTER_V1);
+  lines.push(c ? `${c.dim}${PROMPT_ENHANCEMENT_MPS_CLI_CONTINUATION_FOOTER_V1}${c.reset}` : PROMPT_ENHANCEMENT_MPS_CLI_CONTINUATION_FOOTER_V1);
 
   return applyContinuousRail(lines, c);
 }

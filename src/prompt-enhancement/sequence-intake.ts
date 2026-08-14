@@ -10,6 +10,7 @@ import {
   emptyPromptEnhancementSequencePayloadV1,
   type PromptEnhancementSequencePayloadV1,
 } from './sequence-payload.js';
+import { redactSecrets } from '../store/redact.js';
 
 /**
  * First-send sequence intake for the continuation flow: consume the typed handoff/sequence
@@ -38,6 +39,13 @@ export type PromptEnhancementSequenceIntakeResultV1 =
       // the first persist, so a return shape that carried only the state would leave the caller
       // with nothing to write into the payload columns.
       payload: PromptEnhancementSequencePayloadV1;
+      // MPS continuation content foundation (2026-08-14): two additive side fields the store
+      // persists beside the row for the continuation Stop to consume later (MPS-12 original slice
+      // + the packager's continuable-kind check). Nothing reads them yet.
+      // ⛔ `redactedOriginalPromptText` is the REDACTED, length-preserving copy — never raw text —
+      // and neither field is ever emitted in telemetry.
+      redactedOriginalPromptText: string | null;
+      handoffKind:                string | null;
     }
   | { state: 'no_sequence'; reasonCode: PromptEnhancementSequenceIntakeReasonCodeV1 };
 
@@ -96,5 +104,11 @@ export function intakePromptEnhancementSequenceOnFirstSendV1(
     payload: emptyPromptEnhancementSequencePayloadV1(
       input.result.currentBody.originalPromptText.length,
     ),
+    // Persist the REDACTED, length-preserving original (never the raw text): redaction preserves
+    // length by design, so the future offsets index it character-for-character, and it is already
+    // stored redacted in the prompts table — no new privacy exposure. The handoffKind is a single
+    // enum value (ids-only-safe). Both are local-store only and never emitted in telemetry.
+    redactedOriginalPromptText: redactSecrets(input.result.currentBody.originalPromptText),
+    handoffKind:                input.result.handoffMetadata?.handoffKind ?? null,
   };
 }

@@ -121,7 +121,13 @@ CREATE TABLE IF NOT EXISTS pending_prompt_sequences (
   status             TEXT    NOT NULL,
   last_action_id     TEXT,
   created_at         INTEGER NOT NULL,
-  updated_at         INTEGER NOT NULL
+  updated_at         INTEGER NOT NULL,
+  -- MPS continuation content foundation (sub-11, 2026-08-14): the REDACTED, length-preserving
+  -- original prompt text (so an item's original slice can render at the continuation Stop —
+  -- MPS-12) and the handoffKind (so the packager's continuable-kind check passes). Local store
+  -- only, nullable; NEVER raw text, NEVER emitted in telemetry. Nothing reads them yet.
+  redacted_original_prompt_text TEXT,
+  handoff_kind                  TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_pending_prompt_sequences_project
@@ -336,6 +342,12 @@ export function applyIncrementalMigrations(db: Database): void {
   addIfMissing('pending_prompt_sequences', 'suggested_next_prompt_policy', "TEXT NOT NULL DEFAULT 'not_generated'");
   addIfMissing('pending_prompt_sequences', 'original_length',              'INTEGER NOT NULL DEFAULT 0');
   addIfMissing('pending_prompt_sequences', 'offer_disposition',            "TEXT NOT NULL DEFAULT 'accepted'");
+
+  // sub-11 MPS continuation content foundation (2026-08-14). Nullable, default NULL — old rows
+  // read back as null. Local store only; the stored original is the redacted length-preserving
+  // copy, never raw, and neither field is ever emitted in telemetry.
+  addIfMissing('pending_prompt_sequences', 'redacted_original_prompt_text', 'TEXT');
+  addIfMissing('pending_prompt_sequences', 'handoff_kind',                  'TEXT');
 }
 
 /**
@@ -387,4 +399,10 @@ export function runMigrations(db: Database): void {
   addIfMissing('pending_prompt_sequences', 'suggested_next_prompt_policy', "TEXT NOT NULL DEFAULT 'not_generated'");
   addIfMissing('pending_prompt_sequences', 'original_length',              'INTEGER NOT NULL DEFAULT 0');
   addIfMissing('pending_prompt_sequences', 'offer_disposition',            "TEXT NOT NULL DEFAULT 'accepted'");
+
+  // sub-11 MPS continuation content foundation (2026-08-14). Nullable, default NULL — old rows
+  // read back as null. Local store only; the stored original is the redacted length-preserving
+  // copy, never raw, and neither field is ever emitted in telemetry.
+  addIfMissing('pending_prompt_sequences', 'redacted_original_prompt_text', 'TEXT');
+  addIfMissing('pending_prompt_sequences', 'handoff_kind',                  'TEXT');
 }

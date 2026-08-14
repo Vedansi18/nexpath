@@ -508,4 +508,28 @@ describe('pending-sequences store', () => {
     // The absence is the record: no modelled popup outcome was reached. It is not abandonment.
     expect(getPromptEnhancementSequenceOfferDisposition(store, PROJECT, 'never-written')).toBeNull();
   });
+
+  // MPS continuation content foundation (sub-11, 2026-08-14): two additive nullable side columns
+  // — the redacted original + the handoffKind — round-trip through the active read, and an old row
+  // (columns NULL) reads back as null. Local store only; nothing else about the row changes.
+  describe('continuation side fields — redacted original + handoffKind', () => {
+    it('round-trips both side values through the active read', () => {
+      expect(upsertPendingPromptSequence(store, createdState(), payload(), {
+        redactedOriginalPromptText: 'the original prompt text, redacted length-preserving',
+        handoffKind: 'compact_sequence_summary_candidate',
+      })).toBe(true);
+      const row = getActivePendingPromptSequence(store, PROJECT, 'sess-1');
+      expect(row?.redactedOriginalPromptText).toBe('the original prompt text, redacted length-preserving');
+      expect(row?.handoffKind).toBe('compact_sequence_summary_candidate');
+    });
+
+    it('reads both as null when the upsert omits them (old-style row)', () => {
+      // No side fields supplied — the two columns default to NULL and read back as null, never
+      // undefined and never a crash.
+      expect(upsertPendingPromptSequence(store, createdState(), payload())).toBe(true);
+      const row = getActivePendingPromptSequence(store, PROJECT, 'sess-1');
+      expect(row?.redactedOriginalPromptText).toBeNull();
+      expect(row?.handoffKind).toBeNull();
+    });
+  });
 });

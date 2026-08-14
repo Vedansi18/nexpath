@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   PROMPT_ENHANCEMENT_MPS_CLI_FOOTER_V1,
+  PROMPT_ENHANCEMENT_MPS_CLI_CONTINUATION_FOOTER_V1,
   renderPromptEnhancementMpsContinuationFrameV1,
   renderPromptEnhancementMpsFirstPopupFrameV1,
 } from './cli-mps-popup.js';
@@ -257,6 +258,8 @@ function continuationModel(overrides: Partial<PromptEnhancementMpsContinuationPo
     title: PROMPT_ENHANCEMENT_MPS_CONTINUATION_POPUP_TITLE_V1,
     heading: PROMPT_ENHANCEMENT_MPS_CONTINUATION_POPUP_HEADING_V1,
     layout: PROMPT_ENHANCEMENT_MPS_CONTINUATION_LAYOUT_V1,
+    progress: { done: 3, total: 27 },
+    itemKind: 'task',
     identity: { requestId: 'req-1', sequenceId: 'seq-1', sequenceItemId: 'item-2', currentItemRevision: 2, bodyRevision: 1, detailsRevision: 1 },
     body: { text: 'Next sequence step: apply the fix and run the focused checkout test.', editable: true, originalPromptText: 'Run the checkout fix sequence.' },
     additionalDetails: { visible: true, text: 'Keep scope to the payments module.', revision: 1 },
@@ -297,10 +300,11 @@ describe('UI-7 MPS continuation-popup frame renderer (§3.4)', () => {
     expect(frame).toContain('I need to do something else first');
     expect(frame).toContain('Write directly in the coding agent. This same sequence prompt returns after the response.');
     expect(frame).toContain('Cancel (remaining multi-prompt sequence)');
-    expect(frame).toContain(PROMPT_ENHANCEMENT_MPS_CLI_FOOTER_V1);
+    expect(frame).toContain(PROMPT_ENHANCEMENT_MPS_CLI_CONTINUATION_FOOTER_V1);
     const frameLines = frame.split('\n');
     expect(frameLines[0]).toBe('│ ◆ NEXPATH CLI · Multi-prompt sequence');
-    expect(frameLines[frameLines.length - 1]).toBe('│ Enter send · Esc actions');
+    // Continuation footer: Escape CANCELS the sequence (distinct from the first popup's 'Esc actions').
+    expect(frameLines[frameLines.length - 1]).toBe('│ Enter send · Esc cancels sequence');
     for (const line of frameLines) expect(line.startsWith('│')).toBe(true);
     // Body → Additional details → interruption → Cancel.
     expect(frame.indexOf('Use enhanced sequence prompt')).toBeLessThan(frame.indexOf('Additional details'));
@@ -353,6 +357,34 @@ describe('UI-7 MPS continuation-popup frame renderer (§3.4)', () => {
       },
     }));
     expect(frame).toContain('Cancel (remaining multi-prompt sequence)  (unavailable)');
+  });
+
+  it('MPS-1 loading wheel: body is a spinner skeleton ("<glyph> preparing…"), edit hint hidden, other rows stay', () => {
+    const frame = renderPromptEnhancementMpsContinuationFrameV1(continuationModel(), { loadingSpinnerGlyph: '⠋' });
+    // Body shows the spinner + "preparing…" instead of the real next-item body.
+    expect(frame).toContain('⠋ preparing…');
+    expect(frame).not.toContain('Next sequence step: apply the fix');
+    // The edit-keys hint is hidden while loading; the progress line and the other rows still render.
+    expect(frame).not.toContain('Ctrl+J');
+    expect(frame).toContain('Sequence 3 of 27');
+    expect(frame).toContain('Cancel (remaining multi-prompt sequence)');
+    // Not loading → the real body is back and the hint returns.
+    const normal = renderPromptEnhancementMpsContinuationFrameV1(continuationModel());
+    expect(normal).toContain('Next sequence step: apply the fix');
+    expect(normal).not.toContain('preparing…');
+  });
+
+  it('MPS-12 (Ruling C): a TASK item shows "Your original: <slice>"; a CONFIRMATION item shows none', () => {
+    // TASK kinds (`first_task`/`task`) → the user's original slice rendered verbatim below the body.
+    expect(renderPromptEnhancementMpsContinuationFrameV1(continuationModel({ itemKind: 'task' })))
+      .toContain('Your original: Run the checkout fix sequence.');
+    expect(renderPromptEnhancementMpsContinuationFrameV1(continuationModel({ itemKind: 'first_task' })))
+      .toContain('Your original:');
+    // CONFIRMATION kinds (+ wrap_up) → NO original region: no label, box, or placeholder (Ruling C).
+    for (const kind of ['double_confirmation', 'cross_confirmation', 'binary_confirmation', 'wrap_up'] as const) {
+      expect(renderPromptEnhancementMpsContinuationFrameV1(continuationModel({ itemKind: kind })))
+        .not.toContain('Your original');
+    }
   });
 });
 

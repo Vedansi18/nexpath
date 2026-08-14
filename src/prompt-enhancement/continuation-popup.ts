@@ -8,6 +8,7 @@ import {
   type PromptEnhancementWhyHelpV1,
 } from './contracts.js';
 import { validatePromptEnhancementHandoffMetadataV1 } from './handoff-metadata.js';
+import type { PromptEnhancementSequenceItemKindV1 } from './sequence-payload.js';
 
 export const PROMPT_ENHANCEMENT_MPS_CONTINUATION_POPUP_TITLE_V1 = 'Nexpath · Multi-prompt sequence' as const;
 export const PROMPT_ENHANCEMENT_MPS_CONTINUATION_POPUP_HEADING_V1 = 'Use enhanced sequence prompt' as const;
@@ -31,6 +32,13 @@ export interface PromptEnhancementMpsContinuationInputV1 {
   result: PromptEnhancementPrepareResultV1;
   handoffMetadata: PromptEnhancementHandoffMetadataV1;
   event: PromptEnhancementFutureSequenceRuntimeEventV1;
+  // MPS-3 (Part B): sequence position for the progress line. `done` = items already dealt with
+  // (= currentItemIndex, item 0 sent at intake); `total` = the whole item count. Off the packaged
+  // continuation (`sequence-packager.ts` progress); the UI derives its own copy, never recomputes.
+  progress: { done: number; total: number };
+  // MPS-12: the served item's kind (Ruling C §22.2) — read, never inferred from empty text. TASK kinds
+  // (`first_task`/`task`) render the original slice; CONFIRMATION kinds render no original region.
+  itemKind: PromptEnhancementSequenceItemKindV1;
   additionalDetails?: PromptEnhancementMpsContinuationDetailsV1;
   cancel: {
     state: 'available' | 'disabled';
@@ -55,6 +63,12 @@ export interface PromptEnhancementMpsContinuationPopupModelV1 {
   title: typeof PROMPT_ENHANCEMENT_MPS_CONTINUATION_POPUP_TITLE_V1;
   heading: typeof PROMPT_ENHANCEMENT_MPS_CONTINUATION_POPUP_HEADING_V1;
   layout: typeof PROMPT_ENHANCEMENT_MPS_CONTINUATION_LAYOUT_V1;
+  // MPS-3 (Part B): sequence position, rendered as a progress line at the top. Data only — the
+  // renderer formats the copy ("Sequence N of M"); the model never carries the formatted string.
+  progress: { done: number; total: number };
+  // MPS-12: the served item's kind (Ruling C §22.2). The renderer shows the original-text region for TASK
+  // kinds only; CONFIRMATION kinds carry no original block. Read from the stored item, never inferred.
+  itemKind: PromptEnhancementSequenceItemKindV1;
   // Deterministic header copy from the typed uiView (same source as the PE popup), present only
   // when supplied. The UI renders them like PE and never invents them.
   pinchLabel?: PromptEnhancementPinchLabelV1;
@@ -227,6 +241,8 @@ export function buildPromptEnhancementMpsContinuationPopupV1(
       title: PROMPT_ENHANCEMENT_MPS_CONTINUATION_POPUP_TITLE_V1,
       heading: PROMPT_ENHANCEMENT_MPS_CONTINUATION_POPUP_HEADING_V1,
       layout: PROMPT_ENHANCEMENT_MPS_CONTINUATION_LAYOUT_V1,
+      progress: { done: input.progress.done, total: input.progress.total },
+      itemKind: input.itemKind,
       ...(input.result.uiView.pinchLabel ? { pinchLabel: input.result.uiView.pinchLabel } : {}),
       ...(input.result.uiView.whyHelp ? { whyHelp: input.result.uiView.whyHelp } : {}),
       identity,

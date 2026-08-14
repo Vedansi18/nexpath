@@ -118,6 +118,11 @@ export function buildContinuationPopupFromPackageV1(
     result: packaged.result,
     handoffMetadata: packaged.handoffMetadata,
     event: packaged.event,
+    // MPS-3 (Part B): the packaged continuation already carries the sequence position; feed it through
+    // verbatim so the popup renders "Sequence N of M" without recomputing done/total locally.
+    progress: packaged.progress,
+    // MPS-12: the served item's kind, off the same packaged item — drives the original-text region.
+    itemKind: packaged.itemKind,
     additionalDetails,
     cancel: { state: 'available', disposition: 'blocked_no_send' },
   });
