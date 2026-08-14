@@ -312,18 +312,25 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
   //
   // Two carve-outs, both deliberate:
   //
-  //  - A section carrying a mandatory floor keeps its text. There the fixed wording IS the
-  //    requirement, not filler: dropping the confirmation section because a draft was refused would
-  //    strip "you must ask me for go-ahead confirmation" from the prompt the user sends to their
-  //    agent, turning a validation fault into a silently missing safety clause.
+  //  - The section that actually CARRIES the confirmation line keeps its text. There the fixed
+  //    wording IS the requirement, not filler: dropping it because a draft was refused would strip
+  //    "you must ask me for go-ahead confirmation" from the prompt the user sends to their agent,
+  //    turning a validation fault into a silently missing safety clause.
   //  - A provider failure (timeout / unavailable) is untouched. That path already renders
   //    deterministically WITH a visible failure notice, so the user is told. This rule is for the
   //    case that says nothing.
+  //
+  // The carve-out deliberately does NOT key on `isRequired` or `safetyFlags`, and that is the whole
+  // reason it works. `isRequired` means "this section belongs in the body" — it is true of every
+  // planned section, because they come from the template's required set — not "its fixed text is a
+  // safety requirement". `safetyFlags` is worse: three of its four values are ROUTE capabilities
+  // stamped onto every section, so every section reports the same flags and the field carries no
+  // per-section information at all. Keying on either swallows every section and the rule never
+  // fires. Only the confirmation-bearing section is genuinely load-bearing, and it is already
+  // identified above.
   const keepsSectionWhenDraftMissing = (sectionPlan: PromptEnhancementSectionPlanItemV1): boolean =>
     sectionPlan.sectionKind === 'original_request_or_goal'
-    || sectionPlan.isRequired
-    || sectionPlan.safetyFlags.length > 0
-    || sectionPlan.sensitivityFlags.length > 0;
+    || (canonicalConfirmationSectionId !== undefined && sectionPlan.sectionId === canonicalConfirmationSectionId);
   const renderableSectionPlans = structuredComposerAttempted
     ? sectionPlans.filter((sectionPlan) =>
       validatedLlmDrafts.draftsBySectionId.has(sectionPlan.sectionId)

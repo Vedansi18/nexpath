@@ -1320,24 +1320,42 @@ describe('a refused draft discards its section instead of showing fixed text', (
     expect(result.currentBody.text).toContain('My original request (verbatim):');
   });
 
-  it('keeps a section carrying a mandatory floor, because its fixed text IS the requirement', () => {
+  it('keeps the section that actually carries the confirmation line', () => {
+    // A prompt that demands execution confirmation, so a confirmation-bearing section exists.
     const planned = planningResult();
     const { output } = outputFor(planned, 'source_signal_guidance');
-    const floored = planned.sectionPlans.filter((plan) =>
-      plan.sectionKind !== 'original_request_or_goal'
-      && (plan.isRequired || plan.safetyFlags.length > 0 || plan.sensitivityFlags.length > 0));
 
     const result = composePromptEnhancementBody({
       enhancementId: 'enh-discard-2',
-      originalPromptText: 'Delete the archived customer rows and verify the migration.',
+      originalPromptText: 'Delete the archived customer rows in production and verify the migration.',
       sectionPlanningResult: planned,
       composerRuntimeState: 'accepted_structured_output',
       structuredComposerOutput: output,
     });
 
-    for (const plan of floored) {
-      expect(result.currentBody.sections.some((rendered) => rendered.sectionId === plan.sectionId)).toBe(true);
-    }
+    // Whatever else is discarded, the confirmation clause still reaches the user.
+    expect(result.currentBody.text).toContain('you must ask me for go-ahead confirmation');
+  });
+
+  it('does not keep a section merely because it is required or flagged', () => {
+    // isRequired is true of every planned section, and three of the four safetyFlags values are
+    // route capabilities stamped on every section. Keying the carve-out on either would swallow
+    // everything and the rule would never fire — this pins that it does not.
+    const planned = planningResult();
+    const { section, output } = outputFor(planned, 'source_signal_guidance');
+    const undrafted = planned.sectionPlans.filter((plan) =>
+      plan.sectionKind !== 'original_request_or_goal' && plan.sectionId !== section!.sectionId);
+    expect(undrafted.every((plan) => plan.isRequired && plan.safetyFlags.length > 0)).toBe(true);
+
+    const result = composePromptEnhancementBody({
+      enhancementId: 'enh-discard-2b',
+      originalPromptText: 'Fix importCsv and verify the regression.',
+      sectionPlanningResult: planned,
+      composerRuntimeState: 'accepted_structured_output',
+      structuredComposerOutput: output,
+    });
+
+    expect(result.currentBody.sections.length).toBeLessThan(planned.sectionPlans.length);
   });
 
   it('changes nothing when the composer never ran — the deterministic body is the supported answer', () => {
