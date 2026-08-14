@@ -583,16 +583,22 @@ function classifySensitiveActions(
     });
   }
 
-  // The wide-scope fallback: the body needs confirmation, but no specific risk pattern matched.
+  // The wide-scope fallback: no risk PATTERN matched, but the route still asked for confirmation.
   //
-  // The flag was a proxy for "this body needs confirmation", and it held only because every section
-  // carried it. Once the flags mean what the design says, a confirmation-needed route whose plan
-  // happens to contain none of the named sections would lose this finding entirely. So ask the
-  // question directly as well — the prompt itself is the authority on whether execution
-  // confirmation is required, and it is the same check the composer uses to place the clause.
-  const bodyNeedsConfirmation = requiresPromptEnhancementExecutionConfirmationForPrompt(currentBody.originalPromptText);
+  // This is the only case the loop above cannot reach. `capability.confirmation_needed` can come
+  // from ambiguity or missing acceptance facts rather than from risky wording, and then no pattern
+  // matches while a section still carries the flag. That is a real gap in coverage and this closes
+  // it.
+  //
+  // An earlier revision of this phase also OR'd in
+  // `requiresPromptEnhancementExecutionConfirmationForPrompt`, on the theory that scoping the flags
+  // could leave a confirmation-needed route with no flagged section. That condition can never fire:
+  // it is `classifyTextRiskKinds(prompt).length > 0 && ...`, and `classifyTextRiskKinds` runs the
+  // SAME `RISK_PATTERNS` the loop above runs against text that includes the prompt — so whenever it
+  // is true, `findings` is already non-empty and this branch is skipped. It was dead code implying
+  // a protection it did not provide, and it is removed rather than left to reassure a reader.
   for (const section of sections) {
-    if (!section.safetyFlags.includes('sensitive_action_confirmation') && !bodyNeedsConfirmation) continue;
+    if (!section.safetyFlags.includes('sensitive_action_confirmation')) continue;
     if (findings.size === 0) {
       findings.set('wide_scope_or_boundary_expansion', {
         riskKind: 'wide_scope_or_boundary_expansion',

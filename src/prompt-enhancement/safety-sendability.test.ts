@@ -1531,15 +1531,35 @@ describe('safety coverage does not depend on section safety flags', () => {
     }
   });
 
-  it('keeps the wide-scope finding when the prompt needs confirmation but no section is flagged', () => {
-    // The fallback finding used to require a flagged section. Once flags mean what the design says,
-    // a confirmation-needed route whose plan holds none of the named sections would have lost it.
-    const body = composedBody({ originalPromptText: RISKY_PROMPT });
-    const unflagged = validatePromptEnhancementSafety({
+  it('raises the wide-scope finding when a section is flagged and no risk pattern matched', () => {
+    // The one case the risk-pattern loop cannot reach: capability.confirmation_needed can come from
+    // ambiguity or missing acceptance facts rather than from risky wording, so no pattern matches
+    // while a section still carries the flag.
+    //
+    // It has to be a BENIGN prompt. An earlier version of this test used the risky one, where the
+    // pattern loop fires first and this branch is never entered — so it passed while exercising
+    // nothing, and removing the mechanism under test broke no test at all.
+    const BENIGN = 'Rename the helper in utils.ts and keep the tests passing.';
+    const body = composedBody({ originalPromptText: BENIGN });
+
+    const flaggedOnOneSection = {
+      ...body,
+      sections: body.sections.map((section, index) => ({
+        ...section,
+        safetyFlags: index === 1 ? ['sensitive_action_confirmation'] : [],
+        sensitivityFlags: [],
+      })),
+    };
+
+    expect(validatePromptEnhancementSafety({
       currentBody: withoutSafetyFlags(body),
       editedBodyText: body.text,
-    });
+    }).sensitiveActionFindings).toHaveLength(0);
 
-    expect(unflagged.sensitiveActionFindings.length).toBeGreaterThan(0);
+    expect(validatePromptEnhancementSafety({
+      currentBody: flaggedOnOneSection,
+      editedBodyText: body.text,
+    }).sensitiveActionFindings.map((finding) => finding.riskKind))
+      .toContain('wide_scope_or_boundary_expansion');
   });
 });
