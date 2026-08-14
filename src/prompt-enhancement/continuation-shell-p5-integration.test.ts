@@ -92,19 +92,20 @@ function state(over: Partial<PromptEnhancementSequenceRuntimeStateV1> = {}): Pro
 }
 
 /** Compose the shell exactly as stop.ts does: package (offer+package) → run (scripted) → deliver. */
-async function runShell(keys: readonly string[], st = state()) {
+async function runShell(keys: readonly string[] | null, st = state(), itemList = items()) {
   const packaged = packageContinuationAtStopV1({
-    state: st, actionId: `${st.sequenceId}:${st.currentItemIndex}`, items: items(),
+    state: st, actionId: `${st.sequenceId}:${st.currentItemIndex}`, items: itemList,
     redactedOriginalPromptText: 'x'.repeat(ORIGINAL_LEN), handoffKind: 'compact_sequence_summary_candidate',
   });
   if (!packaged.ok) return { packaged, delivery: null, frames: [] as string[] };
-  const io = scripted(keys);
+  // keys === null models NO TTY: the runner cannot render and reports not_shown.
+  const io = keys === null ? null : scripted(keys);
   const outcome = await runPromptEnhancementCliMpsContinuationPopupV1({
     result: packaged.packaged.result, handoffMetadata: packaged.packaged.handoffMetadata, event: packaged.packaged.event,
     progress: packaged.packaged.progress, itemKind: packaged.packaged.itemKind, interaction: io,
   });
   const delivery = deliverPromptEnhancementCliMpsContinuationResultV1(packaged.offeredState, outcome, `${st.sequenceId}:${st.currentItemIndex}:deliver`);
-  return { packaged, delivery, frames: io.frames };
+  return { packaged, delivery, frames: io ? io.frames : [] as string[] };
 }
 
 describe('MPS shell P5 — acceptance scenarios against the live assembled shell', () => {
@@ -139,5 +140,53 @@ describe('MPS shell P5 — acceptance scenarios against the live assembled shell
     // Persist the advanced state, as stop.ts does before the block/force-exit, and read it back.
     expect(updatePendingPromptSequenceState(store, row!.id, delivery.nextState)).toBe(true);
     expect(getActivePendingPromptSequence(store, '/tmp/p5', 's1')?.currentItemIndex).toBe(1);
+  });
+
+  it('no TTY → not_shown → keep the item pending (a headless Stop never drops the sequence)', async () => {
+    const { delivery } = await runShell(null);
+    expect(delivery?.kind).toBe('keep');
+  });
+
+  it('item_pending re-offers the SAME item unchanged, and a send then injects it (advanced:false)', async () => {
+    const { packaged, delivery } = await runShell([KEY.enter], state({ status: 'item_pending', currentItemIndex: 1 }));
+    expect(packaged.ok).toBe(true);
+    if (!packaged.ok) return;
+    expect(packaged.advanced).toBe(false); // re-offered after a prior interruption, not advanced
+    expect(delivery?.kind).toBe('inject');
+  });
+
+  it('a stale/duplicate action id is rejected — why the offer and deliver ids must differ', async () => {
+    const st = state();
+    const packaged = packageContinuationAtStopV1({
+      state: st, actionId: `${st.sequenceId}:${st.currentItemIndex}`, items: items(),
+      redactedOriginalPromptText: 'x'.repeat(ORIGINAL_LEN), handoffKind: 'compact_sequence_summary_candidate',
+    });
+    expect(packaged.ok).toBe(true);
+    if (!packaged.ok) return;
+    // Deliver with the SAME id the offer's advance already consumed → the runtime rejects the duplicate,
+    // which is exactly why stop.ts uses a distinct `:deliver` id for the send.
+    const delivery = deliverPromptEnhancementCliMpsContinuationResultV1(
+      packaged.offeredState, { state: 'send', bodyText: 'x' }, `${st.sequenceId}:${st.currentItemIndex}`,
+    );
+    expect(delivery.kind).toBe('reject');
+  });
+
+  it('a served CONFIRMATION item carries its kind and no original-text slice (MPS-12)', async () => {
+    // Items 0 (first_task) · 1 (task) · 2 (binary_confirmation). From index 1, the offer advances to
+    // serve item 2 — the confirmation, which carries a token wording and no original slice.
+    const confirmItems: readonly PromptEnhancementSequenceItemV1[] = [
+      ...items(),
+      {
+        itemKind: 'binary_confirmation', originalSliceRef: null, sourcePointRanges: [], roleLabel: 'fix',
+        dependencyOrder: 2, complexity: null, complexityReason: 'This item changes a shipped contract.',
+        generatedWording: 'YES/NO', actionRiskKinds: [], authorityMode: null, requiresConfirmationFloor: false,
+        decompositionGroupId: null, itemValidationGraph: REAL_GRAPH, itemSafetyClauseRef: null,
+      },
+    ];
+    const { packaged } = await runShell([KEY.enter], state({ itemCount: 3, currentItemIndex: 1 }), confirmItems);
+    expect(packaged.ok).toBe(true);
+    if (!packaged.ok) return;
+    expect(packaged.offeredState.currentItemIndex).toBe(2);
+    expect(packaged.packaged.itemKind).toBe('binary_confirmation');
   });
 });
