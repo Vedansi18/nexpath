@@ -46,6 +46,7 @@ import { upsertPendingPromptSequence, getActivePendingPromptSequence, recordProm
 import type { PromptEnhancementSequenceRuntimeStateV1 } from '../../prompt-enhancement/sequence-runtime.js';
 import { packageContinuationAtStopV1 } from '../../prompt-enhancement/continuation-stop-package.js';
 import { runPromptEnhancementCliMpsContinuationPopupV1, deliverPromptEnhancementCliMpsContinuationResultV1 } from '../../prompt-enhancement/cli-mps-continuation-run.js';
+import { buildFutureSequenceRuntimeGateEvidenceV1 } from '../../prompt-enhancement/future-sequence-runtime-gate-evidence.js';
 import { evaluatePromptEnhancementFutureSequenceRuntimeGateV1 } from '../../prompt-enhancement/future-sequence-runtime-gate.js';
 import { PROMPT_ENHANCEMENT_CONTRACT_VERSION, type PromptEnhancementFutureSequenceRuntimeEventV1 } from '../../prompt-enhancement/contracts.js';
 import { resolveOpenAIKey, getKeySource } from '../../config/ApiKeyResolver.js';
@@ -277,7 +278,18 @@ export async function runStop(
         requestId: activeSequence.enhancementId,
         projectRoot: payload.cwd,
         event: continuationEvent,
-        evidence: {}, // Phase-C seam: real read, no runtime-evidence flag satisfied in v1 → fail-closed.
+        // P7 (un-gate) WIRING — READY BUT UNAUTHORIZED. The real evidence reader is wired in: it supplies
+        // the ten real flags (owner approvals + built runtime source + host-hold proof + provider check),
+        // so the gate is now blocked by EXACTLY ONE missing flag — `focused_runtime_fixtures_pending`.
+        //
+        // 🔒 THE UN-GATE IS THE SINGLE LINE BELOW. It stays `false`, so the gate stays fail-closed and the
+        // continuation shell never runs in production — behaviour is byte-identical to the old `evidence:{}`
+        // (allowed:false), only the missing-code diagnostic is now precise. Flipping it to `true` is the
+        // whole un-gate, and it is authorised ONLY by the owner's recorded acceptance-oracle sign-off over
+        // the 27 sequence fixtures. ⛔ Do NOT set it true from "the tests are green" — that is the exact
+        // fabrication the fail-closed backstop exists to prevent (p5-owner-approvals register: flag 11
+        // `pending`). The moment the owner signs off, this one edit takes the whole feature live.
+        evidence: buildFutureSequenceRuntimeGateEvidenceV1({ ownerAcceptanceOracleSignoffRecorded: false }),
       });
       logger.debug('stop_mps_continuation_gate', {
         cwd: payload.cwd,
