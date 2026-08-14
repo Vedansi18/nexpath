@@ -38,6 +38,12 @@ import {
   validatePromptEnhancementSafety,
   type PromptEnhancementSafetyValidationResult,
 } from './safety-sendability.js';
+import {
+  runPromptEnhancementSequencePlannerV1,
+  type PromptEnhancementSequencePlannerClientV1,
+} from './sequence-planner.js';
+import { redactSecrets } from '../store/redact.js';
+import type { Database } from 'sql.js';
 
 /**
  * The single PE content-engine entry point.
@@ -50,6 +56,37 @@ export const preparePromptEnhancement: PromptEnhancementPrepareFacadeV1 = async 
   assertPrepareRequest(request);
   return prepare(request);
 };
+
+/**
+ * MPS P1b-i — the runtime dependencies the sequence planner (Hiren Unit P1) needs and the pure
+ * `(request) → result` facade deliberately does not carry: the store handle the config kill-switch +
+ * planner resolve from, and an optional injected LLM client (tests inject a stub; production leaves it
+ * unset so the planner constructs its own key-gated client, mirroring the composer).
+ */
+export interface PreparePromptEnhancementSequenceDepsV1 {
+  db: Database;
+  client?: PromptEnhancementSequencePlannerClientV1;
+}
+
+/**
+ * MPS P1b-i — the db-accepting facade entry that lets the full sequence planner REPLACE the
+ * display-only `describePromptEnhancementSequencePlanV1` as the source of truth for the compact
+ * sequence summary's item count + role labels (Hiren Unit P1, feeding the already-optional `summary`
+ * seam of `buildPromptEnhancementHandoffMetadataV1` — no contract change).
+ *
+ * The planner runs ONLY on the `isSequenceCandidate` branch — exactly where the describe runs today —
+ * so every non-sequence prompt (and every caller that uses the contract-typed `preparePromptEnhancement`
+ * above, which passes no deps) takes the byte-identical current path. On ANY planner failure / refusal /
+ * single-prompt outcome the summary falls back to the describe splitter, so the user always gets their
+ * enhanced prompt. The `PromptEnhancementPrepareFacadeV1` contract type is UNCHANGED.
+ */
+export async function preparePromptEnhancementWithSequenceV1(
+  request: PromptEnhancementPrepareRequestV1,
+  seqDeps: PreparePromptEnhancementSequenceDepsV1,
+): Promise<PromptEnhancementPrepareResultV1> {
+  assertPrepareRequest(request);
+  return prepare(request, undefined, undefined, seqDeps);
+}
 
 /** Apply a bounded directional/details action against the current body contract. */
 export const applyPromptEnhancementAction: PromptEnhancementActionFacadeV1 = async (request) => {
@@ -93,6 +130,7 @@ async function prepare(
   request: PromptEnhancementPrepareRequestV1,
   action?: PromptEnhancementActionRequestV1['action']['actionType'],
   actionRequest?: PromptEnhancementActionRequestV1,
+  seqDeps?: PreparePromptEnhancementSequenceDepsV1,
 ): Promise<PromptEnhancementPrepareResultV1> {
   const enhancementId = `pe:${request.requestId}`;
   const routeInput: PromptEnhancementRouteInput = {
@@ -315,10 +353,65 @@ async function prepare(
       safety = recomposedSafety;
     }
   }
+  // MPS P1b-i (Hiren Unit P1) — REPLACE the display-only punctuation splitter with the full LLM
+  // sequence planner as the source of truth for the compact summary's item count + role labels. This
+  // runs in the SAME place the describe runs (after the body is composed), for the SAME
+  // `isSequenceCandidate` prompts, and ONLY when a db + client seam is threaded in (auto.ts) — a
+  // baseline prepare, never an action. The planner reads the config kill-switch from the store itself
+  // and refuses (config off / non-user origin / no popup) or fails (no_key / provider_error / timeout /
+  // refusal) or returns a single-prompt outcome — in every one of those cases the override stays
+  // undefined and buildResult falls back to the exact describe path. So a non-sequence prompt, and any
+  // caller of the contract-typed `preparePromptEnhancement` (no deps), is byte-identical to today.
+  //
+  // Redaction: the planner is length-preserving offset-indexed, so the SAME redacted text is passed as
+  // both the provider-visible `promptContext` and the local `localOriginalText` — offsets align and no
+  // raw user text reaches the provider.
+  let plannerSummary: { remainingTaskCount: number; taskRoleLabels: readonly string[] } | undefined;
+  if (seqDeps !== undefined && action === undefined && !noPopup && isSequenceCandidateForRoute(route)) {
+    const redactedText = redactSecrets(request.sourcePrompt.text);
+    const plannerResult = await runPromptEnhancementSequencePlannerV1(
+      {
+        promptContext: redactedText,
+        localOriginalText: redactedText,
+        entry: {
+          promptOrigin: request.sourcePrompt.origin,
+          guidanceGateShow: !noPopup,
+        },
+        db: seqDeps.db,
+        projectRoot: request.projectRoot,
+        route: {
+          familyId: route.familyId,
+          primaryIntent: route.primaryIntent,
+          capabilityOverlays: route.capabilityOverlays,
+          routeConfidence: route.routeConfidence,
+        },
+      },
+      seqDeps.client,
+    );
+    if (plannerResult.ok && plannerResult.output.outcome === 'sequence' && plannerResult.output.summaryData) {
+      plannerSummary = {
+        remainingTaskCount: plannerResult.output.summaryData.remainingTaskCount,
+        taskRoleLabels: plannerResult.output.summaryData.taskRoleLabels,
+      };
+    }
+    // else → fall through to the describe fallback (single-prompt path), exactly as today.
+  }
   return buildResult(request, enhancementId, route, planning, composed, safety, noPopup, {
     deterministicFallbackApplied,
     preSubstitutionAuthorityEscalationState,
-  });
+  }, plannerSummary);
+}
+
+/**
+ * MPS (owner ruling 2026-08-06) — a result is a sequence CANDIDATE (the branch where the compact
+ * summary is built and, under P1b-i, the full planner may replace the describe) iff the route says the
+ * prompt is compound: multiple intent families in one prompt, OR a >= 3-point list of the same family.
+ * Extracted so `prepare` (planner gate) and `buildResult` (summary source) test the SAME predicate.
+ */
+function isSequenceCandidateForRoute(route: ReturnType<typeof routePromptEnhancement>): boolean {
+  const compoundPromptState = route.contractDecision.compoundPromptState;
+  return compoundPromptState === 'multi_intent_one_prompt'
+    || (compoundPromptState === 'multi_point_same_intent' && route.contractDecision.userPointCoverageRefs.length >= 3);
 }
 
 function buildResult(
@@ -337,6 +430,11 @@ function buildResult(
     deterministicFallbackApplied: boolean;
     preSubstitutionAuthorityEscalationState: PromptEnhancementValidationStatus | undefined;
   },
+  // MPS P1b-i (Hiren Unit P1) — when present, the full sequence planner produced this summary and it
+  // REPLACES the describe splitter as the source of truth for the item count + role labels. Absent on
+  // every non-sequence prompt, on any planner failure/refusal/single-outcome, and on every caller of the
+  // contract-typed `preparePromptEnhancement` (no deps) — so the describe fallback path is byte-identical.
+  plannerSummary?: { remainingTaskCount: number; taskRoleLabels: readonly string[] },
 ): PromptEnhancementPrepareResultV1 {
   const currentBody: PromptEnhancementCurrentBodyV1 = {
     ...composed.currentBody,
@@ -415,14 +513,14 @@ function buildResult(
   // (>= 3 user points — "schema, cron job, email sender, and the widget"; a plain "add X and Y"
   // stays on the PE popup). Metadata only — the builder itself locks
   // `sequenceActivationPolicy: blocked_pending_…` and `receiverCanActivateRuntime: false`.
-  const compoundPromptState = route.contractDecision.compoundPromptState;
-  const isSequenceCandidate = compoundPromptState === 'multi_intent_one_prompt'
-    || (compoundPromptState === 'multi_point_same_intent' && route.contractDecision.userPointCoverageRefs.length >= 3);
-  // Sequence-plan summary fix (2026-08-07): feed the compact summary REAL display data — the
-  // builder's default is a hardcoded 0/empty, which is what the popup showed on every live run.
-  // Count + fixed-vocabulary role labels only (display-only and-aware split; the emission gate
-  // above is untouched, so WHICH prompts open MPS is unchanged).
-  const sequencePlan = isSequenceCandidate
+  const isSequenceCandidate = isSequenceCandidateForRoute(route);
+  // Sequence-plan summary source (2026-08-07 display fix; MPS P1b-i source-of-truth swap 2026-08-14):
+  // feed the compact summary REAL display data. Under P1b-i the full sequence planner (Hiren Unit P1)
+  // supplies the count + role labels via `plannerSummary` when it ran and returned a sequence; the
+  // display-only punctuation splitter `describePromptEnhancementSequencePlanV1` STAYS as the labelled
+  // fallback for the no-deps / no-key / provider-failure / single-outcome path (byte-identical to
+  // before). The emission gate above is untouched, so WHICH prompts open MPS is unchanged.
+  const sequencePlan = isSequenceCandidate && plannerSummary === undefined
     ? describePromptEnhancementSequencePlanV1(request.sourcePrompt.text)
     : undefined;
   let handoffAndSequenceSummary = !noPopup && disposition === 'show_current_body' && isSequenceCandidate
@@ -436,8 +534,12 @@ function buildResult(
         summary: {
           summaryId: `${enhancementId}:handoff:summary`,
           publicSafeText: 'Additional task metadata is available after the current body.',
-          remainingTaskCount: Math.max(0, (sequencePlan?.pointCount ?? 1) - 1),
-          taskRoleLabels: sequencePlan?.roleLabels ?? [],
+          remainingTaskCount: plannerSummary
+            ? plannerSummary.remainingTaskCount
+            : Math.max(0, (sequencePlan?.pointCount ?? 1) - 1),
+          taskRoleLabels: plannerSummary
+            ? plannerSummary.taskRoleLabels
+            : sequencePlan?.roleLabels ?? [],
         },
       })
     : undefined;
