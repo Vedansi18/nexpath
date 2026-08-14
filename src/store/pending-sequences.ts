@@ -35,6 +35,24 @@ export interface PendingPromptSequence {
   createdAt:        number;
   updatedAt:        number;
   payload:          PromptEnhancementSequencePayloadV1;
+  // MPS continuation content foundation (sub-11, 2026-08-14). Additive side fields, independent
+  // of the runtime state and payload: the REDACTED, length-preserving original prompt text (for
+  // an item's original-slice display at the continuation Stop — MPS-12) and the handoffKind (for
+  // the packager's continuable-kind check). Null for rows written before these columns existed,
+  // and for the decline stub. Local store only; never raw text, never emitted in telemetry.
+  redactedOriginalPromptText: string | null;
+  handoffKind:                string | null;
+}
+
+/**
+ * The two additive continuation side fields threaded from intake to the upsert. They live beside
+ * the runtime state and payload, not inside them: the state carries ids/counts only and the
+ * payload's shape is frozen, so these are supplied and stored independently. Both nullable.
+ * ⛔ `redactedOriginalPromptText` MUST be the `redactSecrets` (length-preserving) copy, never raw.
+ */
+export interface PendingPromptSequenceContinuationSideFieldsV1 {
+  redactedOriginalPromptText: string | null;
+  handoffKind:                string | null;
 }
 
 const ACTIVE_STATUSES: readonly PromptEnhancementSequenceRuntimeStatusV1[] = [
@@ -69,6 +87,10 @@ export function upsertPendingPromptSequence(
   store: Store,
   state: PromptEnhancementSequenceRuntimeStateV1,
   payload: PromptEnhancementSequencePayloadV1,
+  // Optional additive continuation side fields (redacted original + handoffKind). Omitted or
+  // undefined stores NULL for both — the two columns are independent of the state/payload
+  // validation above and never affect whether the write is accepted.
+  sideFields?: PendingPromptSequenceContinuationSideFieldsV1,
 ): boolean {
   if (!validatePromptEnhancementSequenceRuntimeStateV1(state).ok) return false;
   // Validated against the state, not alone: the list length and the row's item count are one
@@ -98,8 +120,8 @@ export function upsertPendingPromptSequence(
        (project_root, session_id, sequence_id, enhancement_id, item_count, current_item_index,
         status, last_action_id, created_at, updated_at,
         items_json, prompt_directives_json, suggested_next_prompt_policy, original_length,
-        offer_disposition)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        offer_disposition, redacted_original_prompt_text, handoff_kind)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       state.projectRoot,
       state.sessionId,
@@ -116,6 +138,8 @@ export function upsertPendingPromptSequence(
       payload.suggestedNextPromptPolicy,
       payload.originalLength,
       payload.offerDisposition,
+      sideFields?.redactedOriginalPromptText ?? null,
+      sideFields?.handoffKind ?? null,
     ],
   );
   saveStore(store);
@@ -176,8 +200,8 @@ export function recordPromptEnhancementSequenceOfferDeclined(
        (project_root, session_id, sequence_id, enhancement_id, item_count, current_item_index,
         status, last_action_id, created_at, updated_at,
         items_json, prompt_directives_json, suggested_next_prompt_policy, original_length,
-        offer_disposition)
-     VALUES (?, ?, ?, ?, 0, 0, 'cancelled', NULL, ?, ?, '[]', '[]', 'not_generated', 0, ?)`,
+        offer_disposition, redacted_original_prompt_text, handoff_kind)
+     VALUES (?, ?, ?, ?, 0, 0, 'cancelled', NULL, ?, ?, '[]', '[]', 'not_generated', 0, ?, NULL, NULL)`,
     [
       params.projectRoot,
       params.sessionId,
@@ -324,7 +348,7 @@ export function getActivePendingPromptSequence(
     `SELECT id, project_root, session_id, sequence_id, enhancement_id, item_count,
             current_item_index, status, last_action_id, created_at, updated_at,
             items_json, prompt_directives_json, suggested_next_prompt_policy, original_length,
-            offer_disposition
+            offer_disposition, redacted_original_prompt_text, handoff_kind
      FROM pending_prompt_sequences
      WHERE project_root = ? AND status IN ('item_pending', 'awaiting_response')
      ORDER BY updated_at DESC
@@ -355,6 +379,9 @@ export function getActivePendingPromptSequence(
     createdAt:        raw[9] as number,
     updatedAt:        raw[10] as number,
     payload,
+    // Nullable additive side columns — an old row (written before they existed) reads back null.
+    redactedOriginalPromptText: (raw[16] as string | null) ?? null,
+    handoffKind:                (raw[17] as string | null) ?? null,
   };
   const staleSession = sessionId !== undefined && row.sessionId !== sessionId;
   // A malformed JSON column is not an empty list: reading it as one would serve a sequence

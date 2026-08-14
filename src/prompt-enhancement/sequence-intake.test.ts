@@ -11,8 +11,13 @@ import { getPromptStartStopSourceSnapshot } from './source-reality.js';
 import { intakePromptEnhancementSequenceOnFirstSendV1 } from './sequence-intake.js';
 import { openStore } from '../store/db.js';
 import { upsertPendingPromptSequence, getActivePendingPromptSequence } from '../store/pending-sequences.js';
+import { redactSecrets } from '../store/redact.js';
 
 const MULTI_INTENT = 'Fix the failing payment test and add a rate limiter to the login endpoint.';
+// A multi-intent prompt carrying a secret-shaped token, to prove the stored original is redacted.
+const RAW_SECRET = 'sk-abcdefghijklmnopqrstuvwxyz0123';
+const MULTI_INTENT_WITH_SECRET =
+  `Fix the failing payment test using key ${RAW_SECRET} and add a rate limiter to the login endpoint.`;
 const SINGLE_INTENT = 'Fix the failing payment test.';
 const PROJECT = '/tmp/seq-intake';
 
@@ -129,7 +134,10 @@ describe('sequence intake on the explicit first send (fail-closed typed no-ops)'
     expect(intake.state).toBe('sequence_recorded');
     if (intake.state !== 'sequence_recorded') return;
     const store = await openStore(':memory:');
-    expect(upsertPendingPromptSequence(store, intake.runtime, intake.payload)).toBe(true);
+    expect(upsertPendingPromptSequence(store, intake.runtime, intake.payload, {
+      redactedOriginalPromptText: intake.redactedOriginalPromptText,
+      handoffKind: intake.handoffKind,
+    })).toBe(true);
     expect(getActivePendingPromptSequence(store, PROJECT, 's1')).toMatchObject({
       sequenceId: intake.runtime.sequenceId,
       itemCount: 2,
@@ -144,5 +152,32 @@ describe('sequence intake on the explicit first send (fail-closed typed no-ops)'
         offerDisposition: 'accepted',
       },
     });
+  });
+
+  it('stores the REDACTED, length-preserving original — never the raw secret (MPS-12 foundation)', async () => {
+    const result = await preparePromptEnhancement(request(MULTI_INTENT_WITH_SECRET));
+    const original = result.currentBody.originalPromptText;
+    // Guard the fixture: the composer must preserve the raw secret in the original body, otherwise
+    // the redaction assertion below would pass vacuously.
+    expect(original).toContain(RAW_SECRET);
+    const intake = intakePromptEnhancementSequenceOnFirstSendV1({ result, projectRoot: PROJECT, sessionId: 's1' });
+    expect(intake.state).toBe('sequence_recorded');
+    if (intake.state !== 'sequence_recorded') return;
+    // Stored value is the redacted copy, not the raw secret, and length is preserved so future
+    // offsets index it character-for-character.
+    expect(intake.redactedOriginalPromptText).not.toContain(RAW_SECRET);
+    expect(intake.redactedOriginalPromptText).toBe(redactSecrets(original));
+    expect(intake.redactedOriginalPromptText).toContain('sk-[REDACTED');
+    expect(intake.redactedOriginalPromptText?.length).toBe(original.length);
+
+    // And it round-trips through the store unchanged (still redacted, never the raw secret).
+    const store = await openStore(':memory:');
+    expect(upsertPendingPromptSequence(store, intake.runtime, intake.payload, {
+      redactedOriginalPromptText: intake.redactedOriginalPromptText,
+      handoffKind: intake.handoffKind,
+    })).toBe(true);
+    const row = getActivePendingPromptSequence(store, PROJECT, 's1');
+    expect(row?.redactedOriginalPromptText).toBe(redactSecrets(original));
+    expect(row?.redactedOriginalPromptText).not.toContain(RAW_SECRET);
   });
 });

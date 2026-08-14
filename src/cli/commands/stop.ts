@@ -521,7 +521,13 @@ export function registerStopCommand(program: import('commander').Command): void 
                   sessionId: pending.sessionId,
                 });
                 if (sequenceIntake.state === 'sequence_recorded') {
-                  upsertPendingPromptSequence(store, sequenceIntake.runtime, sequenceIntake.payload);
+                  // The two additive continuation side fields (redacted original + handoffKind)
+                  // are stored beside the row for a later continuation Stop; nothing reads them
+                  // yet, and they are never emitted in telemetry.
+                  upsertPendingPromptSequence(store, sequenceIntake.runtime, sequenceIntake.payload, {
+                    redactedOriginalPromptText: sequenceIntake.redactedOriginalPromptText,
+                    handoffKind:                sequenceIntake.handoffKind,
+                  });
                 }
                 logger.debug('stop_mps_sequence_intake', {
                   cwd: payload.cwd,
