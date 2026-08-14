@@ -341,6 +341,11 @@ export async function runStop(
             actionSignalSink: (kind, occurredAt) => recordActionSignal(store, payload.cwd, kind, occurredAt),
           }));
           logger.info('stop_mps_continuation_shown', { cwd: payload.cwd, outcome: outcome.state });
+          // Telemetry parity with the first popup: the popup ran lock-released (Stage D), so its in-popup
+          // action signals were dropped on the re-acquire reload. Record the TERMINAL outcome signal HERE,
+          // in the re-acquired window, so it persists (content-free — kind + timestamp only; not_shown → none).
+          const continuationActionKind = promptEnhancementMpsActionSignalKindV1(outcome.state);
+          if (continuationActionKind) recordActionSignal(store, payload.cwd, continuationActionKind);
           // Stage D — re_acquire_reloads_before_writing: the lock is back, but the row may have moved.
           // RELOAD before writing (a concurrent session may have advanced/cancelled it during the wait, or
           // the sequence may have died). A click on a dead/stale offer is a SILENT no-op — no recovery UI,
