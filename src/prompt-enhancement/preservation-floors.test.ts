@@ -211,9 +211,20 @@ describe('T4 — the floor set itself', () => {
 
 describe('T4 — floors reported through the live assertion harness', () => {
   it('names the floor for each violation across a run, and stays out of the Phase 2 oracle', () => {
+    // Real body shape: the verbatim section, a blank line, then the generated guidance.
+    // The collector reads only the guidance half, because the verbatim half trivially
+    // contains everything the floors look for.
     const results = [
-      { prompt: 'do not change the public API shape', bodyText: 'Reshape the public API as needed.', composed: true },
-      { prompt: 'take a backup first', bodyText: 'Run the migration.', composed: true },
+      {
+        prompt: 'do not change the public API shape',
+        bodyText: 'My original request (verbatim):\ndo not change the public API shape\n\nReshape the public API as needed.',
+        composed: true,
+      },
+      {
+        prompt: 'take a backup first',
+        bodyText: 'My original request (verbatim):\ntake a backup first\n\nRun the migration.',
+        composed: true,
+      },
     ];
 
     const reported = collectPromptEnhancementFloorViolationsV1(results);
@@ -226,7 +237,11 @@ describe('T4 — floors reported through the live assertion harness', () => {
 
   it('reports nothing when the bodies preserve what the prompts supplied', () => {
     const results = [
-      { prompt: 'do not change the public API shape', bodyText: 'Do not change the public API shape.', composed: true },
+      {
+        prompt: 'do not change the public API shape',
+        bodyText: 'My original request (verbatim):\ndo not change the public API shape\n\nDo not change the public API shape while adding the field.',
+        composed: true,
+      },
     ];
     expect(collectPromptEnhancementFloorViolationsV1(results)).toEqual([]);
   });
@@ -261,5 +276,31 @@ describe('T4 — the floor check versus the shipped permission-boundary substitu
 
     expect(substituteFlagsEscalation(original, body)).toBe(true);
     expect(floorsFor(original, body)).toContain('sensitive_action_verb_mood');
+  });
+});
+
+describe('T4 — floors must be able to fire on a real composed body', () => {
+  it('does not treat an English verb as a command', () => {
+    // "make the landing page look more modern" reported a `commands` violation, because
+    // several tool names are ordinary English words. Caught by measuring against real
+    // composed bodies; reading the regex had not caught it.
+    expect(floorsFor('make the landing page look more modern', 'Improve the visual design of the landing page.'))
+      .not.toContain('commands');
+    expect(floorsFor('node the tree structure', 'Restructure the tree.')).not.toContain('commands');
+  });
+
+  it('still catches a real command', () => {
+    expect(floorsFor('run npm run build:prod first', 'Build the project first.')).toContain('commands');
+  });
+
+  it('would report nothing at all if handed a whole body instead of the guidance half', () => {
+    // The reason the collector splits: a composed body opens with the user's prompt
+    // verbatim, so every item is trivially present and no floor can fire. This pins the
+    // property that made the first wiring vacuous.
+    const prompt = 'the bug is in src/services/payment/handler.ts';
+    const wholeBody = `My original request (verbatim):\n${prompt}\n\nThe bug is in the payment module.`;
+
+    expect(floorsFor(prompt, wholeBody)).toEqual([]);
+    expect(floorsFor(prompt, 'The bug is in the payment module.')).toContain('file_paths');
   });
 });

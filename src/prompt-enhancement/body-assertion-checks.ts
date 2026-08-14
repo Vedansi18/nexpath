@@ -146,9 +146,14 @@ export function collectPromptEnhancementFloorViolationsV1(
 ): readonly string[] {
   const reported: string[] = [];
   for (const { prompt, bodyText } of results) {
+    // The GUIDANCE half, not the whole body. A composed body opens with the user's prompt
+    // verbatim, so every item the floors look for is trivially present in the full text and
+    // no floor could ever fire — measured as zero violations across every real body before
+    // this was corrected. The floors are about what the GENERATED sections did with the
+    // user's items, which is exactly the half this returns.
     for (const violation of checkPromptEnhancementPreservationFloorsV1({
       originalPromptText: prompt,
-      generatedBodyText: bodyText,
+      generatedBodyText: promptEnhancementGuidanceHalfV1(bodyText),
     })) {
       // The floor is named first: "something was lost" is not actionable on its own.
       reported.push(`floor ${violation.floorId}: lost "${violation.lostFromOriginal}" from: "${prompt}"`);

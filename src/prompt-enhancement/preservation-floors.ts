@@ -102,7 +102,11 @@ const FLOOR_MATCHERS: readonly FloorMatcher[] = [
   {
     floorId: 'commands',
     hardFailReason: 'Generated body changes, generalizes, drops, or invents command text.',
-    extract: (text) => allMatches(text, /`[^`\n]+`|(?:^|\s)(?:npm|npx|yarn|pnpm|git|docker|kubectl|make|python|node)\s+[\w:.\-/]+/gm),
+    // `make the landing page`, `node in the tree` — several tool names are ordinary English
+    // words too, and a bare match reported a command nobody wrote. Found by measuring
+    // against real composed bodies, not by reading the regex. A following article or
+    // pronoun means the sentence is prose rather than an invocation.
+    extract: (text) => allMatches(text, /`[^`\n]+`|(?:^|\s)(?:npm|npx|yarn|pnpm|git|docker|kubectl|make|python|node)\s+(?!(?:the|a|an|it|this|that|your|my|our|sure|them)\b)[\w:.\-/]+/gm),
   },
   {
     floorId: 'file_paths',
