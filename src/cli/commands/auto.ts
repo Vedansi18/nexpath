@@ -58,6 +58,7 @@ import {
 } from '../../prompt-enhancement/contracts.js';
 import { preparePromptEnhancementWithSequenceV1, explainPromptEnhancementSequenceSummaryAbsenceV1 } from '../../prompt-enhancement/facade.js';
 import type { PromptEnhancementSequencePlannerClientV1 } from '../../prompt-enhancement/sequence-planner.js';
+import type { PromptEnhancementSequenceItemV1 } from '../../prompt-enhancement/sequence-payload.js';
 import { recordPromptEnhancementFeedbackV1 } from '../../prompt-enhancement/feedback-sink.js';
 import { derivePromptEnhancementFeedbackPolicyV1 } from '../../prompt-enhancement/feedback-policy.js';
 import type { PromptEnhancementPopupEventV1 } from '../../prompt-enhancement/popup-session.js';
@@ -706,14 +707,23 @@ export async function runAuto(
   // to the describe path. `openai` is undefined on the production hook path (the planner then constructs
   // its own client, key-gated off the resolved OPENAI_API_KEY); tests inject a stub. This keeps the
   // `PromptEnhancementPrepareFacadeV1` contract type unchanged.
-  const preparePromptEnhancementForRunAuto: PromptEnhancementPrepareFacadeV1 = async (peRequest) =>
-    // MPS P1b-ii: the sequence entry now returns { result, plannerItems }; existing callers keep the
-    // contract-typed result. The plannerItems (the background batch's input) are consumed by the
-    // sequence-batch wiring (P1b-ii step 8b), not this contract-typed closure.
-    (await preparePromptEnhancementWithSequenceV1(peRequest, {
+  // MPS P1b-ii (step 8b) — the planner runs here (UserPromptSubmit) but its item list is consumed by
+  // the background wording batch at the Stop hook, a DIFFERENT process (owner decision B-i). The
+  // carrier is the pending PE row: capture the item list from the most recent prepare and store it
+  // beside the row below. This is a side-channel because the closure must stay the contract-typed
+  // `PromptEnhancementPrepareFacadeV1` for the generic `preparePromptEnhancementForAuto` boundary.
+  // Safe: each prepare→upsert is a linear await chain (no concurrent prepares), so the value read at
+  // an upsert is always the one this closure set during that upsert's own prepare. Reset every call
+  // (undefined on non-sequence), so no stale list can carry across preparations.
+  let capturedPlannerItems: readonly PromptEnhancementSequenceItemV1[] | undefined;
+  const preparePromptEnhancementForRunAuto: PromptEnhancementPrepareFacadeV1 = async (peRequest) => {
+    const prepared = await preparePromptEnhancementWithSequenceV1(peRequest, {
       db: store.db,
       client: openai as unknown as PromptEnhancementSequencePlannerClientV1 | undefined,
-    })).result;
+    });
+    capturedPlannerItems = prepared.plannerItems;
+    return prepared.result;
+  };
 
   // ── -1. Advisory-injected prompt guard ──────────────────────────────────────
   // When the stop hook injects an advisory option as a new Claude turn (block decision),
@@ -938,6 +948,9 @@ export async function runAuto(
         promptCount: mgr.current.promptCount,
         request,
         result:      preparation.result,
+        // P1b-ii: carry the planner item list (set by the closure during this prepare) so the
+        // Stop-hook batch can word items 2…N. Undefined on non-sequence prepares → NULL column.
+        plannerItems: capturedPlannerItems,
       });
       const handoffPresent = Boolean(preparation.result.uiView.handoffAndSequenceSummary);
       logger.debug('pending_prompt_enhancement_stored', {
@@ -1145,6 +1158,9 @@ export async function runAuto(
       promptCount: mgr.current.promptCount,
       request:     peIntegration.request,
       result:      preparation.result,
+      // P1b-ii: carry the planner item list (set by the closure during this prepare) so the
+      // Stop-hook batch can word items 2…N. Undefined on non-sequence prepares → NULL column.
+      plannerItems: capturedPlannerItems,
     });
     const handoffPresent = Boolean(preparation.result.uiView.handoffAndSequenceSummary);
     logger.debug('pending_prompt_enhancement_stored', {

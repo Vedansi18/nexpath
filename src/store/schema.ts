@@ -348,6 +348,13 @@ export function applyIncrementalMigrations(db: Database): void {
   // copy, never raw, and neither field is ever emitted in telemetry.
   addIfMissing('pending_prompt_sequences', 'redacted_original_prompt_text', 'TEXT');
   addIfMissing('pending_prompt_sequences', 'handoff_kind',                  'TEXT');
+
+  // sub-11 MPS content pipeline P1b-ii (2026-08-14). The UserPromptSubmit planner's full item
+  // list, carried so the Stop-hook background wording batch can read it (the planner runs in a
+  // different process than the popup+batch — owner decision B-i). Nullable, default NULL — old
+  // rows and every non-sequence prepare read back as null. Items are OFFSETS/roles into the
+  // original (no wording yet); local store only, never emitted in telemetry.
+  addIfMissing('pending_prompt_enhancements', 'planner_items_json', 'TEXT');
 }
 
 /**
@@ -405,4 +412,11 @@ export function runMigrations(db: Database): void {
   // copy, never raw, and neither field is ever emitted in telemetry.
   addIfMissing('pending_prompt_sequences', 'redacted_original_prompt_text', 'TEXT');
   addIfMissing('pending_prompt_sequences', 'handoff_kind',                  'TEXT');
+
+  // sub-11 MPS content pipeline P1b-ii (2026-08-14). The UserPromptSubmit planner's full item
+  // list, carried so the Stop-hook background wording batch can read it (the planner runs in a
+  // different process than the popup+batch — owner decision B-i). Nullable, default NULL — old
+  // rows and every non-sequence prepare read back as null. Items are OFFSETS/roles into the
+  // original (no wording yet); local store only, never emitted in telemetry.
+  addIfMissing('pending_prompt_enhancements', 'planner_items_json', 'TEXT');
 }
