@@ -91,6 +91,17 @@ function state(over: Partial<PromptEnhancementSequenceRuntimeStateV1> = {}): Pro
   return { sequenceId: 'seq-1', enhancementId: 'enh-1', projectRoot: '/tmp/p5', sessionId: 's1', itemCount: 2, currentItemIndex: 0, status: 'awaiting_response', lastActionId: null, ...over };
 }
 
+/** A confirmation item (any of the three kinds) at `order`: no slice, no authority, a token wording. */
+function confirmItem(kind: 'binary_confirmation' | 'double_confirmation' | 'cross_confirmation', order: number): PromptEnhancementSequenceItemV1 {
+  return {
+    itemKind: kind, originalSliceRef: null, sourcePointRanges: [], roleLabel: 'fix', dependencyOrder: order,
+    complexity: null, complexityReason: 'This item changes a shipped contract.',
+    generatedWording: kind === 'binary_confirmation' ? 'YES/NO' : 'Check it.', actionRiskKinds: [],
+    authorityMode: null, requiresConfirmationFloor: false, decompositionGroupId: null,
+    itemValidationGraph: REAL_GRAPH, itemSafetyClauseRef: null,
+  };
+}
+
 /** An n-item stored list: item 0 the whole original (no wording), items 1…n-1 worded tasks. */
 function itemsN(n: number): readonly PromptEnhancementSequenceItemV1[] {
   return Array.from({ length: n }, (_unused, order) => order === 0
@@ -237,4 +248,16 @@ describe('MPS shell P5 — acceptance scenarios against the live assembled shell
     expect(packaged.offeredState.currentItemIndex).toBe(1);
     expect(delivery?.kind).toBe('inject');
   });
+
+  // Every confirmation kind serves the same way — its kind travels through, and it carries NO original
+  // slice (MPS-12: a confirmation covers both classes with a token, not a cut of the user's prompt).
+  for (const kind of ['double_confirmation', 'cross_confirmation'] as const) {
+    it(`a ${kind} item serves with its kind and no original-text slice (MPS-12)`, async () => {
+      const list = [...items(), confirmItem(kind, 2)];
+      const { packaged } = await runShell([KEY.enter], state({ itemCount: 3, currentItemIndex: 1 }), list);
+      expect(packaged.ok).toBe(true);
+      if (!packaged.ok) return;
+      expect(packaged.packaged.itemKind).toBe(kind);
+    });
+  }
 });

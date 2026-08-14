@@ -11,6 +11,8 @@ import { buildPromptEnhancementCostVisibilityMetadataV1 } from './cost-observabi
 import { preparePromptEnhancement } from './facade.js';
 import { getPromptStartStopSourceSnapshot } from './source-reality.js';
 import { intakePromptEnhancementSequenceOnFirstSendV1 } from './sequence-intake.js';
+import { startSequenceWordingBatchV1 } from './sequence-body-producer-stop-input.js';
+import type { PromptEnhancementSequenceBodyProducerInputV1, PromptEnhancementSequenceBodyProducerResultV1 } from './sequence-body-producer-runtime.js';
 import { openStore } from '../store/db.js';
 import { upsertPendingPromptSequence, getActivePendingPromptSequence } from '../store/pending-sequences.js';
 import { redactSecrets } from '../store/redact.js';
@@ -248,5 +250,39 @@ describe('sequence intake on the explicit first send (fail-closed typed no-ops)'
     const row = getActivePendingPromptSequence(store, PROJECT, 's1');
     expect(row?.redactedOriginalPromptText).toBe(redactSecrets(original));
     expect(row?.redactedOriginalPromptText).not.toContain(RAW_SECRET);
+  });
+});
+
+// First-popup content flow (8b-2c batch lifecycle → 8c intake): the batch produces the wording during the
+// popup and the intake stores it on send; a provider failure produces NOTHING and the row stays empty.
+describe('first-popup content flow — batch feeds the intake, provider failure stores no partial wording', () => {
+  const fakeInput = {} as unknown as PromptEnhancementSequenceBodyProducerInputV1; // runBatch stubs ignore it
+
+  it('a produced batch → the accepted row carries the worded items', async () => {
+    const result = await preparedMultiIntent();
+    const produced: PromptEnhancementSequenceBodyProducerResultV1 = { ok: true, items: wordedItems(result.currentBody.originalPromptText.length) };
+    const batch = startSequenceWordingBatchV1({ ok: true, input: fakeInput }, () => Promise.resolve(produced));
+    const batchResult = await batch.awaitResult();
+    const intake = intakePromptEnhancementSequenceOnFirstSendV1({
+      result, projectRoot: PROJECT, sessionId: 's1',
+      wordedItems: batchResult && batchResult.ok ? batchResult.items : undefined,
+    });
+    expect(intake.state).toBe('sequence_recorded');
+    if (intake.state !== 'sequence_recorded') return;
+    expect(intake.payload.items).toHaveLength(2);
+  });
+
+  it('provider failure → NO generated content: the batch fails to null and the row carries the empty list', async () => {
+    const result = await preparedMultiIntent();
+    const batch = startSequenceWordingBatchV1({ ok: true, input: fakeInput }, () => Promise.reject(new Error('provider down')));
+    const batchResult = await batch.awaitResult(); // null — the failure never throws and never loses the send
+    expect(batchResult).toBeNull();
+    const intake = intakePromptEnhancementSequenceOnFirstSendV1({
+      result, projectRoot: PROJECT, sessionId: 's1',
+      wordedItems: batchResult && batchResult.ok ? batchResult.items : undefined,
+    });
+    expect(intake.state).toBe('sequence_recorded');
+    if (intake.state !== 'sequence_recorded') return;
+    expect(intake.payload.items).toEqual([]); // never a partial item list on a provider failure
   });
 });
