@@ -113,9 +113,15 @@ describe('T3 — the fence holds in a composed body, not just in the extractor',
     expect(result.currentBody.text).not.toContain(INVENTORY_PREFIX);
   });
 
-  it('lists no points when the prompt itself came from a previous PE send', () => {
-    // Layer 1 through composition: the bullets read like user points and the only thing
-    // saying otherwise is the typed origin.
+  it('never composes a body at all for a prompt that came from a previous PE send', () => {
+    // Written this way after the first version passed VACUOUSLY. It asserted that no
+    // points were listed, which held for a reason unrelated to the fence: routing refuses
+    // to enhance a PE-generated prompt, so no sections exist and the inventory line is
+    // never reached.
+    //
+    // Worth recording, because it means the extractor's typed-origin check is
+    // DEFENCE-IN-DEPTH behind an upstream block rather than the primary protection —
+    // mutating that check away leaves this path green, and that is not a test gap.
     const plan = planFor(PLAIN_PLANNING_PROMPT, { generatedOriginState: 'pe_generated' });
     expect(plan.promptReviewOrigin).toBe('pe_generated_initial_send');
 
@@ -125,6 +131,9 @@ describe('T3 — the fence holds in a composed body, not just in the extractor',
       sectionPlanningResult: plan,
     });
 
+    // No enhanced body at all: the prompt comes back as itself.
+    expect(result.currentBody.text).toBe(PLAIN_PLANNING_PROMPT);
+    expect(result.currentBody.text).not.toContain('Point Inventory Or Decomposition');
     expect(result.currentBody.text).not.toContain(INVENTORY_PREFIX);
   });
 });
