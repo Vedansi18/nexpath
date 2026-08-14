@@ -435,3 +435,44 @@ describe('guidance semantics projected for the wording composer', () => {
     }
   });
 });
+
+describe('guidance semantics — invariants that keep the composer honest', () => {
+  it('every projected fact is one its section is ALLOWED to cite', () => {
+    // The composer is told "this section should X" because of a fact, and the downstream validator
+    // independently requires the draft's sourceFactIds to be a subset of that section's refs. If
+    // the projection ever attached a fact the section cannot cite, the model would be steered
+    // toward a citation that is then rejected — a silent, self-inflicted draft failure.
+    const result = planPromptEnhancementSections({
+      routeResult: routePromptEnhancement(routeInput({})),
+      sourceRefs: [sourceA, contentTemplateSourceB],
+      guidanceFacts: [
+        fact({ factId: 'fact-repro', privacyClass: 'public_safe' }),
+        fact({ factId: 'fact-verify', privacyClass: 'public_safe', suggestedActionKind: 'add_verification' }),
+        fact({ factId: 'fact-private', privacyClass: 'local_private' }),
+      ],
+    });
+
+    expect(result.guidanceSemantics.length).toBeGreaterThan(0);
+    const refsBySectionId = new Map(result.sectionPlans.map((plan) => [plan.sectionId, plan.structuredContentPartRefs]));
+    for (const entry of result.guidanceSemantics) {
+      const refs = refsBySectionId.get(entry.sectionId);
+      expect(refs).toBeDefined();
+      expect(refs).toContain(`guidance_fact:${entry.factId}`);
+    }
+  });
+
+  it('withheld facts keep their id in the section refs — only the meaning is held back', () => {
+    // The gate governs what the MEANING of a fact may cross the network, not whether the section
+    // may use it locally. Dropping the id too would change which sources a section is allowed to
+    // cite, which is a different decision and not this one.
+    const result = planPromptEnhancementSections({
+      routeResult: routePromptEnhancement(routeInput({})),
+      sourceRefs: [sourceA, contentTemplateSourceB],
+      guidanceFacts: [fact({ factId: 'fact-private', privacyClass: 'local_private' })],
+    });
+
+    expect(result.guidanceSemantics).toEqual([]);
+    const allRefs = result.sectionPlans.flatMap((plan) => plan.structuredContentPartRefs);
+    expect(allRefs).toContain('guidance_fact:fact-private');
+  });
+});

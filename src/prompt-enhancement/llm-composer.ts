@@ -2,6 +2,7 @@ import OpenAI from 'openai';
 import type {
   PromptEnhancementGuidanceSemanticsV1,
   PromptEnhancementSectionPlanningResult,
+  PromptEnhancementSuggestedActionKind,
 } from './templates/section-plan.js';
 import type { PromptEnhancementStructuredComposerOutputV1 } from './compose-enhancement.js';
 import {
@@ -252,16 +253,39 @@ const SYSTEM_PROMPT = [
  * nothing about it can only be written from the prompt, which is why the project and source-signal
  * sections read like generic advice: the model has no way to know they are about anything else.
  */
+/**
+ * What each action kind means as a goal, in words worth sending.
+ *
+ * De-underscoring the enum is not enough. `no_action_render_context_only` becomes "no action render
+ * context only", which as a goal is nonsense — and it is reachable, because that action maps to the
+ * context-and-constraints section that real bodies carry. `null` means the fact states no goal, so
+ * no line is sent for it: a section that exists to give context has nothing for the reader to do.
+ */
+const GOAL_BY_ACTION_KIND: Record<PromptEnhancementSuggestedActionKind, string | null> = {
+  clarify_requirement: 'pin down what is actually being asked for',
+  add_acceptance_criteria: 'state what finished looks like',
+  add_verification: 'say how the change will be checked',
+  capture_reproduction: 'capture how to reproduce it and what was observed',
+  preserve_behavior: 'keep the behaviour outside this change intact',
+  confirm_risk: 'get confirmation before the risky step',
+  plan_rollback: 'have a way back if it goes wrong',
+  ground_in_project_fact: 'tie the work to what this project actually is',
+  ask_for_source: 'find the missing source before relying on it',
+  handoff_sequence: 'break the work into ordered steps',
+  no_action_render_context_only: null,
+};
+
 function guidanceSemanticsLines(semantics: readonly PromptEnhancementGuidanceSemanticsV1[]): string {
-  if (semantics.length === 0) return '';
   // Only what the section should COVER. The grading fields — evidence state, priority, risk — are
   // deliberately withheld from the prompt: measured live, the model recited them as prose ("the
   // evidence is strong and the priority is high, the risks are low"), which is Nexpath's internal
   // bookkeeping presented to the user as if it were advice about their code. The grades stay on
   // the projected object for callers that want them; they are not something to write ABOUT.
-  const lines = semantics
-    .map((fact) => `    - it should get the reader to ${fact.suggestedActionKind.replace(/_/g, ' ')}`)
-    .join('\n');
+  const goals = semantics
+    .map((fact) => GOAL_BY_ACTION_KIND[fact.suggestedActionKind])
+    .filter((goal): goal is string => goal !== null && goal !== undefined);
+  if (goals.length === 0) return '';
+  const lines = [...new Set(goals)].map((goal) => `    - ${goal}`).join('\n');
   return `\n  thisSectionShould:\n${lines}`;
 }
 
@@ -270,17 +294,22 @@ function buildUserPrompt(
   sections: readonly { sectionId: string; sectionKind: string; structuredContentPartRefs: readonly string[] }[],
   guidanceSemantics: readonly PromptEnhancementGuidanceSemanticsV1[] = [],
 ): string {
-  const sectionLines = sections
+  const rendered = sections.map((section) => ({
+    section,
+    goals: guidanceSemanticsLines(guidanceSemantics.filter((fact) => fact.sectionId === section.sectionId)),
+  }));
+  const sectionLines = rendered
     .map(
-      (section) =>
+      ({ section, goals }) =>
         `- sectionId: ${section.sectionId}\n  purpose: ${section.sectionKind}\n  allowedSourceFactIds: ${JSON.stringify(section.structuredContentPartRefs)}`
-        + guidanceSemanticsLines(guidanceSemantics.filter((fact) => fact.sectionId === section.sectionId)),
+        + goals,
     )
     .join('\n');
-  // Only explain the projection when there is one. An instruction about a block no section carries
-  // is noise on every call, and it invites the model to look for something that is not there.
-  const anyProjected = sections.some((section) =>
-    guidanceSemantics.some((fact) => fact.sectionId === section.sectionId));
+  // Gate the explanation on what was actually RENDERED, not on whether semantics exist. A fact
+  // whose action states no goal renders nothing, so a section can have semantics and still carry
+  // no block — and an instruction about a block that is not there is noise that invites the model
+  // to hunt for it.
+  const anyProjected = rendered.some((entry) => entry.goals.length > 0);
   const lines = [
     `Original request (context only — do NOT reword it):\n${originalPromptText}`,
     '',

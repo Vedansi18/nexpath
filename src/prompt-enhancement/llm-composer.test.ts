@@ -575,7 +575,7 @@ describe('guidance semantics reaching the model', () => {
     );
 
     expect(prompts[0]).toContain('thisSectionShould');
-    expect(prompts[0]).toContain('add verification');
+    expect(prompts[0]).toContain('say how the change will be checked');
     // Measured live: sending the grading fields made the model recite them as prose — Nexpath's
     // own bookkeeping presented to the user as advice. They stay off the wire.
     expect(prompts[0]).not.toContain('evidence is strong');
@@ -614,5 +614,47 @@ describe('guidance semantics reaching the model', () => {
     const riskBlock = full.slice(riskStart, instructionStart === -1 ? undefined : instructionStart);
     expect(riskBlock).not.toContain('thisSectionShould');
     expect(riskBlock).toContain('fact-b');
+  });
+});
+
+describe('guidance goals sent to the model', () => {
+  const good = JSON.stringify({
+    detectedLanguageSelfReport: 'en',
+    sectionDrafts: [{ sectionId: 'sec-verify', bodyText: 'Wording.', sourceFactIds: ['fact-a'] }],
+    composerClaims: ['claim:fact-a'],
+  });
+
+  function withAction(suggestedActionKind: string) {
+    return [{
+      sectionId: 'sec-verify', factId: 'fact-a', sourceType: 'hard_fact',
+      guidanceKind: 'source_signal_guidance', suggestedActionKind,
+      sourceEvidenceState: 'strong', priority: 'required_survivor', riskLevel: 'none',
+    }];
+  }
+
+  async function promptFor(suggestedActionKind: string): Promise<string> {
+    const { client: scripted, prompts } = scriptedClient([good]);
+    await composeStructuredComposerOutputV1(
+      { enhancementId: 'pe:1', originalPromptText: 'Fix it.', planning: planning([
+        { sectionId: 'sec-verify', sectionKind: 'verification_or_test_plan', structuredContentPartRefs: ['fact-a'] },
+      ], withAction(suggestedActionKind)) },
+      scripted,
+    );
+    return prompts[0]!;
+  }
+
+  it('never sends a de-underscored enum as if it were a goal', async () => {
+    // The reachable worst case: this action maps to the context-and-constraints section that real
+    // bodies carry, and mechanical de-underscoring made it read "get the reader to no action
+    // render context only" — nonsense, and a no-action fact stated as a goal.
+    const prompt = await promptFor('no_action_render_context_only');
+    expect(prompt).not.toContain('no action render context only');
+    expect(prompt).not.toContain('thisSectionShould'); // no goal to state, so no block at all
+  });
+
+  it('sends a readable goal for an action that has one', async () => {
+    const prompt = await promptFor('capture_reproduction');
+    expect(prompt).toContain('capture how to reproduce it and what was observed');
+    expect(prompt).not.toContain('capture_reproduction');
   });
 });
