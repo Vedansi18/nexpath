@@ -651,7 +651,13 @@ export type PromptEnhancementRefRefusalReason =
   | 'ambiguous_multiple_matches'
   | 'below_minimum_length'
   | 'offsets_out_of_range'
-  | 'offsets_do_not_match_quote';
+  | 'offsets_do_not_match_quote'
+  /**
+   * The shared text is Nexpath's own, echoed back through a prompt that quotes a previous
+   * enhanced body. A ref would say the section quotes the USER, which is false however
+   * exactly the characters line up.
+   */
+  | 'self_ingested_generated_text';
 
 /**
  * A ref from a composed section back to the characters of the user's own prompt.

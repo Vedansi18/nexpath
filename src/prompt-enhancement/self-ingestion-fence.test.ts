@@ -13,7 +13,10 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  buildPromptEnhancementOriginalTextRefV1,
   extractPromptEnhancementPromptPointsV1,
+  promptEnhancementInputCarriesPriorBodyV1,
+  resolvePromptEnhancementOriginalTextRefV1,
   type PromptEnhancementPromptReviewOrigin,
 } from './original-text-refs.js';
 
@@ -75,6 +78,56 @@ describe('T3 §7.3-B reproduction — a quoted prior body yields zero harvested 
 
     expect(extractPromptEnhancementPromptPointsV1(prompt, USER))
       .toEqual(['add retry handling', 'write the migration']);
+  });
+});
+
+describe('T3 — the fence reaches the carrier refs too', () => {
+  it('refuses a searched ref when the shared run is Nexpath\'s own echoed wording', () => {
+    // The same §7.3-B input, one layer over. The NEW body re-renders the same
+    // deterministic template line the pasted body contains, so the longest shared run is
+    // Nexpath's wording — and an unfenced ref reports "this section quotes the user".
+    const prompt = `here is what nexpath gave me, please continue\n\n${PRIOR_NEXPATH_BODY}`;
+    const templateLine = 'Preserve the original request, dependencies, and completion checks inside this one prompt body.';
+
+    const ref = buildPromptEnhancementOriginalTextRefV1({
+      sectionId: 'sec-generated',
+      originalPromptText: prompt,
+      sectionBodyText: templateLine,
+      inputCarriesPriorBody: promptEnhancementInputCarriesPriorBodyV1(prompt, USER),
+    });
+
+    expect(ref.resolution).toBe('refused');
+    expect(ref.refusalReason).toBe('self_ingested_generated_text');
+    // Refused, not dropped — the section still carries a ref that says what happened.
+    expect(resolvePromptEnhancementOriginalTextRefV1(ref, prompt)).toBeUndefined();
+  });
+
+  it('still states the verbatim section\'s ref, paste and all', () => {
+    // The original section genuinely IS whatever the user submitted. A stated ref is not
+    // a claim about authorship of the contents, so the fence must not refuse it.
+    const prompt = `please continue\n\n${PRIOR_NEXPATH_BODY}`;
+    const ref = buildPromptEnhancementOriginalTextRefV1({
+      sectionId: 'sec-original',
+      originalPromptText: prompt,
+      sectionBodyText: prompt,
+      quotedText: prompt,
+      inputCarriesPriorBody: promptEnhancementInputCarriesPriorBodyV1(prompt, USER),
+    });
+
+    expect(ref.resolution).toBe('exact');
+    expect(resolvePromptEnhancementOriginalTextRefV1(ref, prompt)).toBe(prompt);
+  });
+
+  it('leaves an ordinary prompt\'s searched refs alone', () => {
+    const prompt = 'please add retry handling to the payment webhook';
+    const ref = buildPromptEnhancementOriginalTextRefV1({
+      sectionId: 'sec-ordinary',
+      originalPromptText: prompt,
+      sectionBodyText: 'Cover retry handling to the payment webhook with concrete steps.',
+      inputCarriesPriorBody: promptEnhancementInputCarriesPriorBodyV1(prompt, USER),
+    });
+
+    expect(ref.resolution).toBe('exact');
   });
 });
 

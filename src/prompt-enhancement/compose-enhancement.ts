@@ -27,6 +27,7 @@ import {
   buildPromptEnhancementOriginalTextRefV1,
   buildPromptEnhancementPromptPointRefsV1,
   extractPromptEnhancementPromptPointsV1,
+  promptEnhancementInputCarriesPriorBodyV1,
   type PromptEnhancementPromptReviewOrigin,
   buildPromptEnhancementTransformReasonCodesV1,
   withPromptEnhancementCarriedFromPreviousBodyV1,
@@ -1100,6 +1101,9 @@ function attachSpanRefs(
   // Extracted once per composition rather than per section: the points belong to the
   // prompt, not to any one section, and recomputing invites two answers.
   const promptPoints = extractPromptEnhancementPromptPointsV1(originalPromptText, promptReviewOrigin);
+  // Computed once alongside the points, from the same predicate, so the point fence and
+  // the ref fence cannot disagree about whether this prompt quotes Nexpath back.
+  const inputCarriesPriorBody = promptEnhancementInputCarriesPriorBodyV1(originalPromptText, promptReviewOrigin);
   return sectionPlans.map((sectionPlan) => {
     const rendered = renderedSections.find((section) => section.sectionId === sectionPlan.sectionId);
     const startOffset = rendered ? bodyText.indexOf(rendered.text) : -1;
@@ -1125,6 +1129,7 @@ function attachSpanRefs(
       originalPromptText,
       sectionBodyText: rendered?.bodyText ?? '',
       quotedText: isOriginalSection && originalPromptText.length > 0 ? originalPromptText : undefined,
+      inputCarriesPriorBody,
     });
     const promptPointRefs = buildPromptEnhancementPromptPointRefsV1({
       sectionId: sectionPlan.sectionId,

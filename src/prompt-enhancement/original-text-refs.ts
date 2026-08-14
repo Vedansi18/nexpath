@@ -96,8 +96,19 @@ export function buildPromptEnhancementOriginalTextRefV1(input: {
   originalPromptText: string;
   sectionBodyText: string;
   quotedText?: string;
+  /**
+   * Set when the prompt quotes a previous enhanced body. A SEARCHED ref is then refused:
+   * the new body renders the same deterministic template lines the pasted one contains,
+   * so the longest shared run is Nexpath's own wording and a ref would attribute it to
+   * the user. A STATED ref (`quotedText`) is unaffected — the verbatim section genuinely
+   * is whatever the user submitted, paste and all.
+   */
+  inputCarriesPriorBody?: boolean;
 }): PromptEnhancementOriginalTextRefV1 {
   const refId = `${input.sectionId}:otr:1`;
+  if (input.quotedText === undefined && input.inputCarriesPriorBody === true) {
+    return refusedOriginalTextRef(refId, input.sectionId, 'self_ingested_generated_text');
+  }
   const quoted = input.quotedText ?? longestSharedRun(input.originalPromptText, input.sectionBodyText);
 
   if (quoted === undefined || quoted.length === 0) {
@@ -194,6 +205,20 @@ const PROMPT_ENHANCEMENT_ORIGINAL_HEADING_MARKER_V1 = 'my original request (verb
 function isPromptEnhancementSelfIngestionMarker(line: string): boolean {
   const normalized = line.trim().toLowerCase();
   return normalized.includes(PROMPT_ENHANCEMENT_ORIGINAL_HEADING_MARKER_V1);
+}
+
+/**
+ * Does this input carry a previous Nexpath body?
+ *
+ * Shared by the point fence and the ref fence, so the two cannot disagree about whether a
+ * prompt is quoting Nexpath back at itself.
+ */
+export function promptEnhancementInputCarriesPriorBodyV1(
+  originalPromptText: string,
+  promptReviewOrigin: PromptEnhancementPromptReviewOrigin,
+): boolean {
+  if (promptReviewOrigin !== 'user_authored_current_prompt') return true;
+  return originalPromptText.split(/\r?\n/).some((line) => isPromptEnhancementSelfIngestionMarker(line));
 }
 
 /**
