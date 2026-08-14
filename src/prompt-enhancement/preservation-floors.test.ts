@@ -20,6 +20,7 @@ import {
   collectPromptEnhancementBodyAssertionFailuresV1,
   collectPromptEnhancementFloorViolationsV1,
 } from './body-assertion-checks.js';
+import { promptEnhancementAuthorityModeForTextV1 } from './safety-sendability.js';
 
 function floorsFor(originalPromptText: string, generatedBodyText: string): readonly PromptEnhancementPreservationFloorIdV1[] {
   return checkPromptEnhancementPreservationFloorsV1({ originalPromptText, generatedBodyText })
@@ -228,5 +229,37 @@ describe('T4 — floors reported through the live assertion harness', () => {
       { prompt: 'do not change the public API shape', bodyText: 'Do not change the public API shape.', composed: true },
     ];
     expect(collectPromptEnhancementFloorViolationsV1(results)).toEqual([]);
+  });
+});
+
+describe('T4 — the floor check versus the shipped permission-boundary substitute', () => {
+  /**
+   * The phase plan says the substitute must not be deleted AND must not be assumed to
+   * agree with the real check. Agreement was measured rather than assumed, and they
+   * diverge — so the divergence is pinned here. If either side changes, this fails and
+   * someone re-reads the comparison instead of discovering it in production.
+   */
+  const substituteFlagsEscalation = (originalPromptText: string, generatedBodyText: string): boolean =>
+    promptEnhancementAuthorityModeForTextV1(originalPromptText) === 'plan_or_review'
+    && promptEnhancementAuthorityModeForTextV1(generatedBodyText).startsWith('execute');
+
+  it.each([
+    ['ask first before touching anything in prod', 'Apply the change in prod.'],
+    ['do not deploy without my ok', 'Deploy the service.'],
+  ])('catches an escalation the substitute misses: %s', (original, body) => {
+    // The substitute reads verb MOOD, so ask-first and do-not phrasings are not
+    // "plan_or_review" to it and the escalation goes unflagged.
+    expect(substituteFlagsEscalation(original, body)).toBe(false);
+
+    const floors = floorsFor(original, body);
+    expect(floors).toContain('permission_boundaries');
+  });
+
+  it('agrees with the substitute when the original is plan-shaped', () => {
+    const original = 'review whether we should migrate the schema';
+    const body = 'Migrate the schema now.';
+
+    expect(substituteFlagsEscalation(original, body)).toBe(true);
+    expect(floorsFor(original, body)).toContain('sensitive_action_verb_mood');
   });
 });
