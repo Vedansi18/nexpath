@@ -3416,7 +3416,7 @@ Project Grounding Facts:
             "refId": "pe:facade-nonseq-b-explain:route:section:3:verification_or_test_plan:otr:1",
             "resolution": "exact",
             "sectionId": "pe:facade-nonseq-b-explain:route:section:3:verification_or_test_plan",
-            "startOffset": 40,
+            "startOffset": 41,
           },
         ],
         "primaryIntent": "quick_improvement.local_polish_or_small_improvement",
