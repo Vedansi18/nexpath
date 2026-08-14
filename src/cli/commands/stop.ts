@@ -45,7 +45,7 @@ import { intakePromptEnhancementSequenceOnFirstSendV1 } from '../../prompt-enhan
 import { upsertPendingPromptSequence, getActivePendingPromptSequence, recordPromptEnhancementSequenceOfferDeclined, updatePendingPromptSequenceState, type PromptEnhancementSequenceDeclinedDispositionV1 } from '../../store/pending-sequences.js';
 import type { PromptEnhancementSequenceRuntimeStateV1 } from '../../prompt-enhancement/sequence-runtime.js';
 import { packageContinuationAtStopV1 } from '../../prompt-enhancement/continuation-stop-package.js';
-import { runPromptEnhancementCliMpsContinuationPopupV1 } from '../../prompt-enhancement/cli-mps-continuation-run.js';
+import { runPromptEnhancementCliMpsContinuationPopupV1, deliverPromptEnhancementCliMpsContinuationResultV1 } from '../../prompt-enhancement/cli-mps-continuation-run.js';
 import { evaluatePromptEnhancementFutureSequenceRuntimeGateV1 } from '../../prompt-enhancement/future-sequence-runtime-gate.js';
 import { PROMPT_ENHANCEMENT_CONTRACT_VERSION, type PromptEnhancementFutureSequenceRuntimeEventV1 } from '../../prompt-enhancement/contracts.js';
 import { resolveOpenAIKey, getKeySource } from '../../config/ApiKeyResolver.js';
@@ -326,7 +326,38 @@ export async function runStop(
             actionSignalSink: (kind, occurredAt) => recordActionSignal(store, payload.cwd, kind, occurredAt),
           });
           logger.info('stop_mps_continuation_shown', { cwd: payload.cwd, outcome: outcome.state });
-          return { outcome: 'mps_continuation_shown' };
+          // P4 (deliver + persist). Map the popup outcome onto the state machine from the OFFERED state,
+          // with a DELIVER action id distinct from the offer's advance id (a duplicate id is rejected).
+          // A missing/invalid result is folded to a terminal cancel inside the wrapper (§6.4).
+          const delivery = deliverPromptEnhancementCliMpsContinuationResultV1(
+            packaged.offeredState,
+            outcome,
+            `${activeSequence.sequenceId}:${activeSequence.currentItemIndex}:deliver`,
+          );
+          switch (delivery.kind) {
+            case 'inject':
+              // 🔒 MPS-9: persist the advanced state BEFORE the block/force-exit — closeStore flushes it
+              // synchronously below the caller's block return, so it must already be written here.
+              updatePendingPromptSequenceState(store, activeSequence.id, delivery.nextState);
+              // Echo-guard: record the injected item body so the next UserPromptSubmit recognises it as a
+              // sequence turn and does not prepare another PE for it (mirrors the first-popup inject).
+              mgr.setInjectedPrompt(store, delivery.bodyText);
+              logger.info('stop_mps_continuation_injected', { cwd: payload.cwd, currentItemIndex: delivery.nextState.currentItemIndex });
+              return { outcome: 'blocked', reason: delivery.bodyText };
+            case 'keep':
+              // Interruption / not-shown: the same item stays pending and returns next Stop.
+              updatePendingPromptSequenceState(store, activeSequence.id, delivery.nextState);
+              return { outcome: 'mps_continuation_shown' };
+            case 'cancel':
+              // Escape / Cancel: terminal for THIS row only (never the project-wide delete); any cancel
+              // feedback was collected upstream by the shell.
+              persistPromptEnhancementSequenceContinuationCancelV1(store, activeSequence.id, delivery.nextState);
+              return { outcome: 'mps_continuation_shown' };
+            case 'reject':
+              // Stale / duplicate / invalid transition — leave the row untouched, ordinary flow.
+              logger.debug('stop_mps_continuation_reject', { cwd: payload.cwd, reason: delivery.reasonCode });
+              return { outcome: 'mps_continuation_gated' };
+          }
         }
         // The row cannot be packaged (no worded items / redacted original / continuable handoff, or the
         // sequence has completed). Fail-closed: leave the row, fall through to the gated return.
