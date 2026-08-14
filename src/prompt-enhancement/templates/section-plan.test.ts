@@ -460,3 +460,27 @@ describe('which capabilities actually reach safetyFlags', () => {
     }
   });
 });
+
+describe('S2 done-when: no capabilities means no overlay', () => {
+  it('a route carrying no scoped capability leaves every section on the two unconditional flags ONLY', () => {
+    // The half of the S2 plan the other tests do not cover: they assert the two unconditional flags
+    // are PRESENT, which says nothing about whether an overlay leaked in. This asserts the set is
+    // exactly those two — the state that was impossible before scoping, when every section carried
+    // all four.
+    const result = planPromptEnhancementSections({
+      routeResult: routePromptEnhancement(routeInput({ promptText: 'Rename the helper in utils.ts and keep the tests passing.' })),
+      sourceRefs: [sourceA, contentTemplateSourceB],
+      guidanceFacts: [],
+    });
+
+    const scoped = ['sensitive_action_confirmation', 'risk_or_rollback'];
+    for (const section of result.sectionPlans) {
+      // risk_safety_or_confirmation earns the confirmation flag by its own kind, capability or not.
+      if (section.sectionKind === 'risk_safety_or_confirmation') continue;
+      for (const flag of scoped) {
+        expect(section.safetyFlags).not.toContain(flag);
+      }
+      expect([...section.safetyFlags].sort()).toEqual(['no_authority_escalation', 'source_honesty']);
+    }
+  });
+});

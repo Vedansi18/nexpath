@@ -1563,3 +1563,44 @@ describe('safety coverage does not depend on section safety flags', () => {
       .toContain('wide_scope_or_boundary_expansion');
   });
 });
+
+describe('S1 done-when: detection follows the body text, not section metadata', () => {
+  // ⚠️ What this proves, and what it does NOT. Risk detection reads the assembled body text, so a
+  // violation is caught wherever it sits and whatever flags the sections carry. Verified by
+  // mutation: making the validator inspect only flagged sections does NOT fail this test, because
+  // the finding never came from walking sections in the first place.
+  //
+  // The test that DOES guard the flag-dependence is "still attributes a risk finding to the
+  // sections when none are flagged" above — it catches both that mutation and the narrower one on
+  // `affectedSections`. This test documents the property; that one defends it. Kept because the
+  // property is worth stating explicitly, renamed because the original name claimed a guard it
+  // does not provide.
+  it('catches a violation planted in a section body when no section carries any flag', () => {
+    const BENIGN = 'Rename the helper in utils.ts and keep the tests passing.';
+    const body = composedBody({ originalPromptText: BENIGN });
+
+    // No flags anywhere, and the risky wording planted in a section rather than in the prompt.
+    const violationInUnflaggedSection = {
+      ...body,
+      sections: body.sections.map((section, index) => ({
+        ...section,
+        safetyFlags: [],
+        sensitivityFlags: [],
+        bodyText: index === 1
+          ? 'Drop the users table in production and force-push the rewritten history.'
+          : section.bodyText,
+        text: index === 1
+          ? `${section.title}:\n- Drop the users table in production and force-push the rewritten history.`
+          : section.text,
+      })),
+    };
+    const editedBodyText = violationInUnflaggedSection.sections.map((section) => section.text).join('\n\n');
+
+    const result = validatePromptEnhancementSafety({
+      currentBody: violationInUnflaggedSection,
+      editedBodyText,
+    });
+
+    expect(result.sensitiveActionFindings.length).toBeGreaterThan(0);
+  });
+});
