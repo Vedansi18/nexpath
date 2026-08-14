@@ -641,6 +641,64 @@ export interface PromptEnhancementSourceAttributionV1 {
   privateIdPolicy: 'metadata_only_not_body';
 }
 
+/**
+ * Why a ref could not be resolved. A ref that cannot resolve is REFUSED — kept with
+ * its reason — rather than dropped, so a body that quotes nothing is distinguishable
+ * from a body whose quotes could not be located.
+ */
+export type PromptEnhancementRefRefusalReason =
+  | 'not_found_in_original'
+  | 'ambiguous_multiple_matches'
+  | 'below_minimum_length'
+  | 'offsets_out_of_range'
+  | 'offsets_do_not_match_quote';
+
+/**
+ * A ref from a composed section back to the characters of the user's own prompt.
+ *
+ * Offsets, not copies: an offset cannot drift from the text it indexes, while a copy
+ * is a second thing that can disagree with the first. Offsets index `originalPromptText`
+ * exactly, so `originalPromptText.slice(startOffset, endOffset)` IS the quoted text.
+ *
+ * `resolution: 'refused'` carries `startOffset === -1` and a reason. Callers must not
+ * treat a refused ref as a quote.
+ */
+export interface PromptEnhancementOriginalTextRefV1 {
+  refId: string;
+  sectionId: string;
+  /** Index into `originalPromptText`; -1 when refused. */
+  startOffset: number;
+  /** Exclusive end index into `originalPromptText`; -1 when refused. */
+  endOffset: number;
+  resolution: 'exact' | 'refused';
+  refusalReason?: PromptEnhancementRefRefusalReason;
+}
+
+/** A ref from a composed section to a planned prompt point it carries. */
+export interface PromptEnhancementPromptPointRefV1 {
+  refId: string;
+  sectionId: string;
+  promptPointId: string;
+  resolution: 'exact' | 'refused';
+  refusalReason?: PromptEnhancementRefRefusalReason;
+}
+
+/**
+ * What composition did to this section's text. Typed so a reader can tell a preserved
+ * section from a rewritten one without re-reading the prose.
+ *
+ * Every value here is assigned somewhere in composition. A code nothing can produce is
+ * a dead branch that reads as coverage without being coverage, so none is declared
+ * "for completeness" — a previous-body carry, for instance, returns the earlier body's
+ * sections untouched and never reaches this builder, so it has no code here.
+ */
+export type PromptEnhancementTransformReasonCodeV1 =
+  | 'preserved_verbatim'
+  | 'composed_by_model'
+  | 'rendered_deterministically'
+  | 'quotes_original_text'
+  | 'no_original_text_quoted';
+
 export interface PromptEnhancementSectionV1 {
   sectionId: string;
   sectionKind: string;
@@ -682,6 +740,9 @@ export interface PromptEnhancementSectionV1 {
   safetyFlags: readonly string[];
   sensitivityFlags: readonly string[];
   spanRefs: readonly PromptEnhancementSpanRefV1[];
+  originalTextRefs: readonly PromptEnhancementOriginalTextRefV1[];
+  promptPointRefs: readonly PromptEnhancementPromptPointRefV1[];
+  transformReasonCodes: readonly PromptEnhancementTransformReasonCodeV1[];
   publicExplanationCategory: PromptEnhancementPublicDiagnosticCategory;
   whyHelpReasonCodes: readonly string[];
   callVisibilityMode: PromptEnhancementCallVisibilityMode;

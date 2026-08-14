@@ -1,0 +1,144 @@
+/**
+ * Typed refs from a composed section back to the user's own words.
+ *
+ * SHAPE: offsets, not copies. An offset cannot drift from the text it indexes, while a
+ * copy is a second thing that can disagree with the first. Every emitted ref satisfies
+ * `originalPromptText.slice(startOffset, endOffset) === <the quoted text>`, which is the
+ * property `resolveOriginalTextRef` checks and the tests assert.
+ *
+ * REFUSAL, NOT DROPPING: a quote that cannot be located is emitted with
+ * `resolution: 'refused'` and a reason. Silently omitting it would make "this section
+ * quotes nothing" indistinguishable from "this section's quote could not be found",
+ * and the second is a defect while the first is ordinary.
+ *
+ * WRITTEN ONCE: refs are produced during composition and never recomputed downstream,
+ * so there is no second code path that could disagree about what a section quotes.
+ */
+import type {
+  PromptEnhancementOriginalTextRefV1,
+  PromptEnhancementPromptPointRefV1,
+  PromptEnhancementRefRefusalReason,
+  PromptEnhancementTransformReasonCodeV1,
+} from './contracts.js';
+
+/**
+ * Shorter runs of shared text are noise — "the", "add a", "when the user" appear in
+ * composed prose without being quotes of anything. Below this length a candidate is
+ * refused as `below_minimum_length` rather than emitted as a quote nobody meant.
+ */
+export const PROMPT_ENHANCEMENT_ORIGINAL_TEXT_REF_MIN_LENGTH_V1 = 12;
+
+/** Longest run of the original that also appears in the section body, if any. */
+function longestSharedRun(originalText: string, sectionBodyText: string): string | undefined {
+  if (originalText.length === 0 || sectionBodyText.length === 0) return undefined;
+  const haystack = sectionBodyText.toLowerCase();
+  const original = originalText.toLowerCase();
+
+  let best: string | undefined;
+  for (let start = 0; start < original.length; start += 1) {
+    // Only extend past the current best — a shorter run cannot win.
+    const minEnd = start + (best?.length ?? PROMPT_ENHANCEMENT_ORIGINAL_TEXT_REF_MIN_LENGTH_V1);
+    for (let end = original.length; end >= minEnd; end -= 1) {
+      const candidate = original.slice(start, end);
+      if (haystack.includes(candidate)) {
+        best = originalText.slice(start, end);
+        break;
+      }
+    }
+  }
+  return best;
+}
+
+function refusedOriginalTextRef(
+  refId: string,
+  sectionId: string,
+  refusalReason: PromptEnhancementRefRefusalReason,
+): PromptEnhancementOriginalTextRefV1 {
+  return { refId, sectionId, startOffset: -1, endOffset: -1, resolution: 'refused', refusalReason };
+}
+
+/**
+ * Build the original-text ref for one section.
+ *
+ * `quotedText` is what the section is claimed to quote. When it is omitted the section's
+ * body is searched for the longest run it shares with the original.
+ */
+export function buildPromptEnhancementOriginalTextRefV1(input: {
+  sectionId: string;
+  originalPromptText: string;
+  sectionBodyText: string;
+  quotedText?: string;
+}): PromptEnhancementOriginalTextRefV1 {
+  const refId = `${input.sectionId}:otr:1`;
+  const quoted = input.quotedText ?? longestSharedRun(input.originalPromptText, input.sectionBodyText);
+
+  if (quoted === undefined || quoted.length === 0) {
+    return refusedOriginalTextRef(refId, input.sectionId, 'not_found_in_original');
+  }
+  if (quoted.length < PROMPT_ENHANCEMENT_ORIGINAL_TEXT_REF_MIN_LENGTH_V1) {
+    return refusedOriginalTextRef(refId, input.sectionId, 'below_minimum_length');
+  }
+
+  const startOffset = input.originalPromptText.indexOf(quoted);
+  if (startOffset < 0) {
+    return refusedOriginalTextRef(refId, input.sectionId, 'not_found_in_original');
+  }
+  // An ambiguous quote cannot name "the exact characters" the done-when asks for: two
+  // occurrences mean two different answers to where it points, so neither is emitted.
+  if (input.originalPromptText.indexOf(quoted, startOffset + 1) >= 0) {
+    return refusedOriginalTextRef(refId, input.sectionId, 'ambiguous_multiple_matches');
+  }
+
+  return {
+    refId,
+    sectionId: input.sectionId,
+    startOffset,
+    endOffset: startOffset + quoted.length,
+    resolution: 'exact',
+  };
+}
+
+/**
+ * Resolve a ref back to the characters it names. Returns undefined for a refused ref
+ * and for one whose offsets no longer match, so a caller cannot mistake a broken ref
+ * for a quote.
+ */
+export function resolvePromptEnhancementOriginalTextRefV1(
+  ref: PromptEnhancementOriginalTextRefV1,
+  originalPromptText: string,
+): string | undefined {
+  if (ref.resolution !== 'exact') return undefined;
+  if (ref.startOffset < 0 || ref.endOffset > originalPromptText.length) return undefined;
+  if (ref.endOffset <= ref.startOffset) return undefined;
+  return originalPromptText.slice(ref.startOffset, ref.endOffset);
+}
+
+/** Prompt-point refs for one section, from the point ids its plan already carries. */
+export function buildPromptEnhancementPromptPointRefsV1(input: {
+  sectionId: string;
+  promptPointIds: readonly string[];
+}): readonly PromptEnhancementPromptPointRefV1[] {
+  return input.promptPointIds.map((promptPointId, index) => {
+    const refId = `${input.sectionId}:ppr:${index + 1}`;
+    // An empty id names nothing; refused rather than emitted as a ref to "".
+    return promptPointId.trim().length === 0
+      ? { refId, sectionId: input.sectionId, promptPointId, resolution: 'refused' as const, refusalReason: 'not_found_in_original' as const }
+      : { refId, sectionId: input.sectionId, promptPointId, resolution: 'exact' as const };
+  });
+}
+
+/** What composition did to this section, derived from state already known at composition. */
+export function buildPromptEnhancementTransformReasonCodesV1(input: {
+  isOriginalSection: boolean;
+  wasComposedByModel: boolean;
+  originalTextRef: PromptEnhancementOriginalTextRefV1;
+}): readonly PromptEnhancementTransformReasonCodeV1[] {
+  const codes: PromptEnhancementTransformReasonCodeV1[] = [];
+
+  if (input.isOriginalSection) codes.push('preserved_verbatim');
+  else if (input.wasComposedByModel) codes.push('composed_by_model');
+  else codes.push('rendered_deterministically');
+
+  codes.push(input.originalTextRef.resolution === 'exact' ? 'quotes_original_text' : 'no_original_text_quoted');
+  return codes;
+}

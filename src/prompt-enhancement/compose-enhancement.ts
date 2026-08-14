@@ -23,6 +23,11 @@ import {
   type PromptEnhancementValidationStatus,
 } from './contracts.js';
 import { buildPromptEnhancementCostVisibilityMetadataV1 } from './cost-observability.js';
+import {
+  buildPromptEnhancementOriginalTextRefV1,
+  buildPromptEnhancementPromptPointRefsV1,
+  buildPromptEnhancementTransformReasonCodesV1,
+} from './original-text-refs.js';
 import type { PromptEnhancementPrimaryIntent } from './routing-taxonomy.js';
 import {
   buildPromptEnhancementCanonicalConfirmation,
@@ -369,7 +374,8 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
   let text = action === "apply_details" && typeof input.editedBodyText === "string"
     ? applyEditedBodyWithAdditionalDetails(input.editedBodyText, input.additionalDetailsText)
     : canonicalText;
-  let sections = attachSpanRefs(renderableSectionPlans, renderedSections, text);
+  const modelDraftedSectionIds = new Set(validatedLlmDrafts.draftsBySectionId.keys());
+  let sections = attachSpanRefs(renderableSectionPlans, renderedSections, text, input.originalPromptText, modelDraftedSectionIds);
   // Validator-parity confirmation guard (blocked-popup fix 2026-08-07): the prompt-based gate
   // above cannot see risk phrasing the GENERATED wording introduces (an LLM draft is free text),
   // but validatePromptEnhancementSafety scans the generated body and hard-blocks a body that
@@ -397,7 +403,7 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
       renderedSections = renderSectionsWithConfirmation(lastGeneratedSectionId);
       canonicalText = renderedSections.map((section) => section.text).join('\n\n');
       text = canonicalText;
-      sections = attachSpanRefs(renderableSectionPlans, renderedSections, text);
+      sections = attachSpanRefs(renderableSectionPlans, renderedSections, text, input.originalPromptText, modelDraftedSectionIds);
     }
   }
   const generatedSafeStatus: PromptEnhancementValidationStatus = deterministicFallback === 'none' ? 'valid' : 'valid_with_fallback';
@@ -1069,6 +1075,10 @@ function attachSpanRefs(
   sectionPlans: readonly PromptEnhancementSectionPlanItemV1[],
   renderedSections: readonly { sectionId: string; title: string; bodyText: string; text: string }[],
   bodyText: string,
+  // T2 carriers: the original is the anchor the refs index. Passed in rather than
+  // recovered from the body, because the body is composed prose and the original is not.
+  originalPromptText: string,
+  modelDraftedSectionIds: ReadonlySet<string>,
 ): readonly PromptEnhancementSectionV1[] {
   return sectionPlans.map((sectionPlan) => {
     const rendered = renderedSections.find((section) => section.sectionId === sectionPlan.sectionId);
@@ -1085,6 +1095,26 @@ function attachSpanRefs(
         textStoragePolicy: 'text_in_body_only',
       }]
       : [];
+
+    // T2 carriers, written ONCE here. The original section quotes itself in full, so its
+    // ref is stated rather than searched for — searching would find the same span by a
+    // fuzzier route and could disagree with it.
+    const isOriginalSection = sectionPlan.sectionKind === 'original_request_or_goal';
+    const originalTextRef = buildPromptEnhancementOriginalTextRefV1({
+      sectionId: sectionPlan.sectionId,
+      originalPromptText,
+      sectionBodyText: rendered?.bodyText ?? '',
+      quotedText: isOriginalSection && originalPromptText.length > 0 ? originalPromptText : undefined,
+    });
+    const promptPointRefs = buildPromptEnhancementPromptPointRefsV1({
+      sectionId: sectionPlan.sectionId,
+      promptPointIds: sectionPlan.structuredContentPartRefs,
+    });
+    const transformReasonCodes = buildPromptEnhancementTransformReasonCodesV1({
+      isOriginalSection,
+      wasComposedByModel: modelDraftedSectionIds.has(sectionPlan.sectionId),
+      originalTextRef,
+    });
 
     return {
       sectionId: sectionPlan.sectionId,
@@ -1126,6 +1156,9 @@ function attachSpanRefs(
       safetyFlags: sectionPlan.safetyFlags,
       sensitivityFlags: sectionPlan.sensitivityFlags,
       spanRefs,
+      originalTextRefs: [originalTextRef],
+      promptPointRefs,
+      transformReasonCodes,
       publicExplanationCategory: 'source_coverage',
       whyHelpReasonCodes: sectionPlan.structuredContentPartRefs,
       callVisibilityMode: sectionPlan.callVisibilityMode,
