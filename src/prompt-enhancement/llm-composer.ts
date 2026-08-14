@@ -254,13 +254,15 @@ const SYSTEM_PROMPT = [
  */
 function guidanceSemanticsLines(semantics: readonly PromptEnhancementGuidanceSemanticsV1[]): string {
   if (semantics.length === 0) return '';
+  // Only what the section should COVER. The grading fields — evidence state, priority, risk — are
+  // deliberately withheld from the prompt: measured live, the model recited them as prose ("the
+  // evidence is strong and the priority is high, the risks are low"), which is Nexpath's internal
+  // bookkeeping presented to the user as if it were advice about their code. The grades stay on
+  // the projected object for callers that want them; they are not something to write ABOUT.
   const lines = semantics
-    .map((fact) =>
-      `    - ${fact.factId}: a ${fact.sourceType} carrying ${fact.guidanceKind};`
-      + ` the reader should ${fact.suggestedActionKind};`
-      + ` evidence is ${fact.sourceEvidenceState}, priority ${fact.priority}, risk ${fact.riskLevel}`)
+    .map((fact) => `    - it should get the reader to ${fact.suggestedActionKind.replace(/_/g, ' ')}`)
     .join('\n');
-  return `\n  whatThoseFactsMean:\n${lines}`;
+  return `\n  thisSectionShould:\n${lines}`;
 }
 
 function buildUserPrompt(
@@ -288,10 +290,11 @@ function buildUserPrompt(
   if (anyProjected) {
     lines.push(
       '',
-      'Where a section lists whatThoseFactsMean, write that section about those facts — they are what'
-      + ' the project and its signals say, and you cannot infer them from the request above. Say what'
-      + ' the reader should do about them. Do not name the fact ids in the prose, and do not invent'
-      + ' detail the facts do not carry.',
+      'Where a section lists thisSectionShould, that is what the section is FOR — write it so the'
+      + " reader ends up doing that, about the specific thing the request names. It is a goal, not a"
+      + ' topic: never restate it, never write about signals, evidence, priorities, risk levels or'
+      + ' guidance in the abstract, and never refer to this instruction. The reader wants to know'
+      + ' what to do about their own problem.',
     );
   }
   return lines.join('\n');

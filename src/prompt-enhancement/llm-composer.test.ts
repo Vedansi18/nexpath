@@ -574,10 +574,13 @@ describe('guidance semantics reaching the model', () => {
       scripted,
     );
 
-    expect(prompts[0]).toContain('whatThoseFactsMean');
-    expect(prompts[0]).toContain('source_signal_guidance');
-    expect(prompts[0]).toContain('add_verification');
-    expect(prompts[0]).toContain('evidence is strong');
+    expect(prompts[0]).toContain('thisSectionShould');
+    expect(prompts[0]).toContain('add verification');
+    // Measured live: sending the grading fields made the model recite them as prose — Nexpath's
+    // own bookkeeping presented to the user as advice. They stay off the wire.
+    expect(prompts[0]).not.toContain('evidence is strong');
+    expect(prompts[0]).not.toContain('required_survivor');
+    expect(prompts[0]).not.toMatch(/risk (none|low|medium|high)/);
   });
 
   it('sends the same prompt as before when nothing is projected', async () => {
@@ -589,7 +592,7 @@ describe('guidance semantics reaching the model', () => {
       scripted,
     );
 
-    expect(prompts[0]).not.toContain('whatThoseFactsMean');
+    expect(prompts[0]).not.toContain('thisSectionShould');
     expect(prompts[0]).toContain('allowedSourceFactIds'); // the ids still go, unchanged
   });
 
@@ -609,7 +612,7 @@ describe('guidance semantics reaching the model', () => {
     const riskStart = full.indexOf('- sectionId: sec-risk');
     const instructionStart = full.indexOf('Where a section lists');
     const riskBlock = full.slice(riskStart, instructionStart === -1 ? undefined : instructionStart);
-    expect(riskBlock).not.toContain('whatThoseFactsMean');
+    expect(riskBlock).not.toContain('thisSectionShould');
     expect(riskBlock).toContain('fact-b');
   });
 });
