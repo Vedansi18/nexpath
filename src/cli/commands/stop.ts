@@ -44,6 +44,8 @@ import { runPromptEnhancementSequenceBodyProducerV1 } from '../../prompt-enhance
 import { intakePromptEnhancementSequenceOnFirstSendV1 } from '../../prompt-enhancement/sequence-intake.js';
 import { upsertPendingPromptSequence, getActivePendingPromptSequence, recordPromptEnhancementSequenceOfferDeclined, updatePendingPromptSequenceState, type PromptEnhancementSequenceDeclinedDispositionV1 } from '../../store/pending-sequences.js';
 import type { PromptEnhancementSequenceRuntimeStateV1 } from '../../prompt-enhancement/sequence-runtime.js';
+import { packageContinuationAtStopV1 } from '../../prompt-enhancement/continuation-stop-package.js';
+import { runPromptEnhancementCliMpsContinuationPopupV1 } from '../../prompt-enhancement/cli-mps-continuation-run.js';
 import { evaluatePromptEnhancementFutureSequenceRuntimeGateV1 } from '../../prompt-enhancement/future-sequence-runtime-gate.js';
 import { PROMPT_ENHANCEMENT_CONTRACT_VERSION, type PromptEnhancementFutureSequenceRuntimeEventV1 } from '../../prompt-enhancement/contracts.js';
 import { resolveOpenAIKey, getKeySource } from '../../config/ApiKeyResolver.js';
@@ -87,6 +89,10 @@ export type StopOutcome =
   // continuation launcher, which is fail-closed in v1 (gate blocked) — nothing rendered, the row is
   // left as-is. Distinct from `loop_guard` so a gate-blocked continuation is legible in logs/tests.
   | { outcome: 'mps_continuation_gated' }
+  // MPS shell P3: the gate ALLOWED and the interactive continuation popup was rendered for the current
+  // item (render + outcome). Distinct from `gated` so a rendered continuation is legible in logs/tests.
+  // Delivery/persist of the outcome is P4; until then the row is left unchanged (advance not persisted).
+  | { outcome: 'mps_continuation_shown' }
   // MPS-7: the old Decision-Session advisory popup is disabled outright — a pending advisory was found
   // but consumed silently and never rendered. Distinct outcome so the disabled path is legible in logs.
   | { outcome: 'advisory_disabled' };
@@ -284,6 +290,48 @@ export async function runStop(
         missingGateCodeCount: gate.missingGateCodes.length,
         missingGateCodes: gate.missingGateCodes,
       });
+      // MPS shell P3 (render + outcome). ⛔ INERT IN PRODUCTION: the gate is fail-closed in v1
+      // (evidence: {} → allowed:false), so this branch never runs until the un-gate (P7). When the gate
+      // lifts, package the offered item from the active row (P2 — advances/re-offers), then RUN the
+      // interactive continuation popup for it. The store lock is NOT released here yet — that is Stage D
+      // (P8); safe because nothing runs this branch until then. Delivery + persist of the outcome is P4;
+      // until P4 the row is left unchanged (the offer's advance is not persisted), so the same item
+      // re-offers next Stop — a build-order state, never reached in production.
+      if (gate.allowed) {
+        const runtimeState: PromptEnhancementSequenceRuntimeStateV1 = {
+          sequenceId:       activeSequence.sequenceId,
+          enhancementId:    activeSequence.enhancementId,
+          projectRoot:      activeSequence.projectRoot,
+          sessionId:        activeSequence.sessionId,
+          itemCount:        activeSequence.itemCount,
+          currentItemIndex: activeSequence.currentItemIndex,
+          status:           activeSequence.status,
+          lastActionId:     activeSequence.lastActionId,
+        };
+        const packaged = packageContinuationAtStopV1({
+          state:                      runtimeState,
+          // The per-Stop advance action id — the same deterministic idempotency key the gate event uses.
+          actionId:                   `${activeSequence.sequenceId}:${activeSequence.currentItemIndex}`,
+          items:                      activeSequence.payload.items,
+          redactedOriginalPromptText: activeSequence.redactedOriginalPromptText,
+          handoffKind:                activeSequence.handoffKind,
+        });
+        if (packaged.ok) {
+          const outcome = await runPromptEnhancementCliMpsContinuationPopupV1({
+            result:          packaged.packaged.result,
+            handoffMetadata: packaged.packaged.handoffMetadata,
+            event:           packaged.packaged.event,
+            progress:        packaged.packaged.progress,
+            itemKind:        packaged.packaged.itemKind,
+            actionSignalSink: (kind, occurredAt) => recordActionSignal(store, payload.cwd, kind, occurredAt),
+          });
+          logger.info('stop_mps_continuation_shown', { cwd: payload.cwd, outcome: outcome.state });
+          return { outcome: 'mps_continuation_shown' };
+        }
+        // The row cannot be packaged (no worded items / redacted original / continuable handoff, or the
+        // sequence has completed). Fail-closed: leave the row, fall through to the gated return.
+        logger.debug('stop_mps_continuation_package_skip', { cwd: payload.cwd, reason: packaged.reason });
+      }
       // No render, no advance, no mutation — the row is left as-is for the next Stop (fail-closed v1).
       return { outcome: 'mps_continuation_gated' };
     }
