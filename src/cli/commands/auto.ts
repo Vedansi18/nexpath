@@ -58,7 +58,7 @@ import {
 } from '../../prompt-enhancement/contracts.js';
 import { preparePromptEnhancementWithSequenceV1, explainPromptEnhancementSequenceSummaryAbsenceV1 } from '../../prompt-enhancement/facade.js';
 import type { PromptEnhancementSequencePlannerClientV1 } from '../../prompt-enhancement/sequence-planner.js';
-import type { PromptEnhancementSequenceItemV1 } from '../../prompt-enhancement/sequence-payload.js';
+import type { PromptEnhancementSequenceItemV1, PromptEnhancementSequenceOffsetRangeV1 } from '../../prompt-enhancement/sequence-payload.js';
 import { recordPromptEnhancementFeedbackV1 } from '../../prompt-enhancement/feedback-sink.js';
 import { derivePromptEnhancementFeedbackPolicyV1 } from '../../prompt-enhancement/feedback-policy.js';
 import type { PromptEnhancementPopupEventV1 } from '../../prompt-enhancement/popup-session.js';
@@ -716,12 +716,14 @@ export async function runAuto(
   // an upsert is always the one this closure set during that upsert's own prepare. Reset every call
   // (undefined on non-sequence), so no stale list can carry across preparations.
   let capturedPlannerItems: readonly PromptEnhancementSequenceItemV1[] | undefined;
+  let capturedPlannerPromptDirectives: readonly PromptEnhancementSequenceOffsetRangeV1[] | undefined;
   const preparePromptEnhancementForRunAuto: PromptEnhancementPrepareFacadeV1 = async (peRequest) => {
     const prepared = await preparePromptEnhancementWithSequenceV1(peRequest, {
       db: store.db,
       client: openai as unknown as PromptEnhancementSequencePlannerClientV1 | undefined,
     });
     capturedPlannerItems = prepared.plannerItems;
+    capturedPlannerPromptDirectives = prepared.plannerPromptDirectives;
     return prepared.result;
   };
 
@@ -948,9 +950,11 @@ export async function runAuto(
         promptCount: mgr.current.promptCount,
         request,
         result:      preparation.result,
-        // P1b-ii: carry the planner item list (set by the closure during this prepare) so the
-        // Stop-hook batch can word items 2…N. Undefined on non-sequence prepares → NULL column.
+        // P1b-ii: carry the planner item list + whole-prompt directive ranges (set by the closure
+        // during this prepare) so the Stop-hook batch can word items 2…N. Undefined on non-sequence
+        // prepares → NULL columns.
         plannerItems: capturedPlannerItems,
+        plannerPromptDirectives: capturedPlannerPromptDirectives,
       });
       const handoffPresent = Boolean(preparation.result.uiView.handoffAndSequenceSummary);
       logger.debug('pending_prompt_enhancement_stored', {
@@ -1158,9 +1162,11 @@ export async function runAuto(
       promptCount: mgr.current.promptCount,
       request:     peIntegration.request,
       result:      preparation.result,
-      // P1b-ii: carry the planner item list (set by the closure during this prepare) so the
-      // Stop-hook batch can word items 2…N. Undefined on non-sequence prepares → NULL column.
+      // P1b-ii: carry the planner item list + whole-prompt directive ranges (set by the closure
+      // during this prepare) so the Stop-hook batch can word items 2…N. Undefined on non-sequence
+      // prepares → NULL columns.
       plannerItems: capturedPlannerItems,
+      plannerPromptDirectives: capturedPlannerPromptDirectives,
     });
     const handoffPresent = Boolean(preparation.result.uiView.handoffAndSequenceSummary);
     logger.debug('pending_prompt_enhancement_stored', {

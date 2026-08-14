@@ -355,6 +355,10 @@ export function applyIncrementalMigrations(db: Database): void {
   // rows and every non-sequence prepare read back as null. Items are OFFSETS/roles into the
   // original (no wording yet); local store only, never emitted in telemetry.
   addIfMissing('pending_prompt_enhancements', 'planner_items_json', 'TEXT');
+  // The sequence's whole-prompt directive ranges (offsets into the original), carried beside the
+  // item list so the Stop-hook batch can resolve them to text for items 2…N. Same nullable/local
+  // treatment as planner_items_json — old rows and non-sequence prepares read back NULL.
+  addIfMissing('pending_prompt_enhancements', 'planner_prompt_directives_json', 'TEXT');
 }
 
 /**
@@ -419,4 +423,8 @@ export function runMigrations(db: Database): void {
   // rows and every non-sequence prepare read back as null. Items are OFFSETS/roles into the
   // original (no wording yet); local store only, never emitted in telemetry.
   addIfMissing('pending_prompt_enhancements', 'planner_items_json', 'TEXT');
+  // The sequence's whole-prompt directive ranges (offsets into the original), carried beside the
+  // item list so the Stop-hook batch can resolve them to text for items 2…N. Same nullable/local
+  // treatment as planner_items_json — old rows and non-sequence prepares read back NULL.
+  addIfMissing('pending_prompt_enhancements', 'planner_prompt_directives_json', 'TEXT');
 }

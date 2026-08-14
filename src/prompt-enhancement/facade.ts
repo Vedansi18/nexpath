@@ -42,7 +42,7 @@ import {
   runPromptEnhancementSequencePlannerV1,
   type PromptEnhancementSequencePlannerClientV1,
 } from './sequence-planner.js';
-import type { PromptEnhancementSequenceItemV1 } from './sequence-payload.js';
+import type { PromptEnhancementSequenceItemV1, PromptEnhancementSequenceOffsetRangeV1 } from './sequence-payload.js';
 import { redactSecrets } from '../store/redact.js';
 import type { Database } from 'sql.js';
 
@@ -67,6 +67,12 @@ export const preparePromptEnhancement: PromptEnhancementPrepareFacadeV1 = async 
 export interface PreparePromptEnhancementWithSequenceResultV1 {
   result: PromptEnhancementPrepareResultV1;
   plannerItems?: readonly PromptEnhancementSequenceItemV1[];
+  /**
+   * MPS P1b-ii — the sequence's whole-prompt instructions, as OFFSET ranges into the original (one
+   * copy per sequence, applied to every item). Carried alongside `plannerItems` because the background
+   * wording batch resolves them to text for items 2…N; undefined whenever `plannerItems` is.
+   */
+  plannerPromptDirectives?: readonly PromptEnhancementSequenceOffsetRangeV1[];
 }
 
 /**
@@ -382,6 +388,7 @@ async function prepare(
   // MPS P1b-ii: the planner's full item list, captured only when it ran + produced a sequence — the
   // background wording batch (P2) consumes it. Undefined on the non-sequence / fallback path.
   let plannerItems: readonly PromptEnhancementSequenceItemV1[] | undefined;
+  let plannerPromptDirectives: readonly PromptEnhancementSequenceOffsetRangeV1[] | undefined;
   if (seqDeps !== undefined && action === undefined && !noPopup && isSequenceCandidateForRoute(route)) {
     const redactedText = redactSecrets(request.sourcePrompt.text);
     const plannerResult = await runPromptEnhancementSequencePlannerV1(
@@ -409,6 +416,7 @@ async function prepare(
         taskRoleLabels: plannerResult.output.summaryData.taskRoleLabels,
       };
       plannerItems = plannerResult.output.items;
+      plannerPromptDirectives = plannerResult.output.promptDirectives;
     }
     // else → fall through to the describe fallback (single-prompt path), exactly as today.
   }
@@ -416,7 +424,7 @@ async function prepare(
     deterministicFallbackApplied,
     preSubstitutionAuthorityEscalationState,
   }, plannerSummary);
-  return { result, plannerItems };
+  return { result, plannerItems, plannerPromptDirectives };
 }
 
 /**

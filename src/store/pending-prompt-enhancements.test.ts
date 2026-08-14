@@ -9,7 +9,10 @@ import { buildPromptEnhancementRequestForAuto } from '../cli/commands/auto.js';
 import { preparePromptEnhancement } from '../prompt-enhancement/facade.js';
 import { SessionStateManager } from '../classifier/SessionStateManager.js';
 import type { PromptEnhancementPrepareRequestV1, PromptEnhancementPrepareResultV1 } from '../prompt-enhancement/contracts.js';
-import type { PromptEnhancementSequenceItemV1 } from '../prompt-enhancement/sequence-payload.js';
+import type { PromptEnhancementSequenceItemV1, PromptEnhancementSequenceOffsetRangeV1 } from '../prompt-enhancement/sequence-payload.js';
+
+/** Whole-prompt directive ranges (offsets into the original), as P1b-ii carries them beside the items. */
+const sampleDirectives: readonly PromptEnhancementSequenceOffsetRangeV1[] = [{ start: 0, end: 6 }, { start: 20, end: 28 }];
 
 /** A minimal well-formed planner item list (offsets/roles only — no wording), as P1b-ii carries it. */
 const samplePlannerItems: readonly PromptEnhancementSequenceItemV1[] = [
@@ -110,16 +113,40 @@ describe('pending_prompt_enhancements store', () => {
   });
 
   // ── MPS P1b-ii — the planner item list carrier (Stop-hook batch input) ──────────────────────
-  it('round-trips the planner item list through upsert → get (sequence prepare)', async () => {
+  it('round-trips the planner item list + directive ranges through upsert → get (sequence prepare)', async () => {
     const { request, result } = await validPayload(store, '/test/pe-planner-items');
     upsertPendingPromptEnhancement(store, {
       projectRoot: '/test/pe-planner-items', sessionId: 's', promptCount: 1, request, result,
-      plannerItems: samplePlannerItems,
+      plannerItems: samplePlannerItems, plannerPromptDirectives: sampleDirectives,
     });
     const loaded = getPendingPromptEnhancement(store, '/test/pe-planner-items');
     expect(loaded).not.toBeNull();
     expect(loaded!.plannerItems).toEqual(samplePlannerItems);
     expect(loaded!.plannerItems?.[0].itemKind).toBe('first_task');
+    expect(loaded!.plannerPromptDirectives).toEqual(sampleDirectives);
+  });
+
+  it('preserves an empty directive list ([]) as a meaningful value, distinct from undefined', async () => {
+    const { request, result } = await validPayload(store, '/test/pe-empty-directives');
+    upsertPendingPromptEnhancement(store, {
+      projectRoot: '/test/pe-empty-directives', sessionId: 's', promptCount: 1, request, result,
+      plannerItems: samplePlannerItems, plannerPromptDirectives: [],
+    });
+    const loaded = getPendingPromptEnhancement(store, '/test/pe-empty-directives');
+    expect(loaded!.plannerPromptDirectives).toEqual([]);
+  });
+
+  it('fails OPEN on corrupt planner_prompt_directives_json — the PE + items survive, directives drop', async () => {
+    const { request, result } = await validPayload(store, '/test/pe-directives-corrupt');
+    upsertPendingPromptEnhancement(store, {
+      projectRoot: '/test/pe-directives-corrupt', sessionId: 's', promptCount: 1, request, result,
+      plannerItems: samplePlannerItems, plannerPromptDirectives: sampleDirectives,
+    });
+    store.db.run("UPDATE pending_prompt_enhancements SET planner_prompt_directives_json = '{bad' WHERE project_root = '/test/pe-directives-corrupt'");
+    const loaded = getPendingPromptEnhancement(store, '/test/pe-directives-corrupt');
+    expect(loaded).not.toBeNull();
+    expect(loaded!.plannerItems).toEqual(samplePlannerItems);
+    expect(loaded!.plannerPromptDirectives).toBeUndefined();
   });
 
   it('stores NULL and reads back undefined plannerItems for a non-sequence prepare', async () => {
