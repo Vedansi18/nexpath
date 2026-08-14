@@ -15,6 +15,7 @@
  * so there is no second code path that could disagree about what a section quotes.
  */
 import type {
+  PromptEnhancementRouteDecisionV1,
   PromptEnhancementOriginalTextRefV1,
   PromptEnhancementPromptPointRefV1,
   PromptEnhancementRefRefusalReason,
@@ -27,6 +28,9 @@ import type {
  * refused as `below_minimum_length` rather than emitted as a quote nobody meant.
  */
 export const PROMPT_ENHANCEMENT_ORIGINAL_TEXT_REF_MIN_LENGTH_V1 = 12;
+
+/** Where the prompt under review came from — the typed provenance the fence reads. */
+export type PromptEnhancementPromptReviewOrigin = PromptEnhancementRouteDecisionV1['promptReviewOrigin'];
 
 /**
  * Longest run of the original that also appears in the section body, if any.
@@ -179,21 +183,73 @@ export function buildPromptEnhancementPromptPointRefsV1(input: {
   return refs;
 }
 
+/** The canonical heading Nexpath renders above the user's verbatim request. */
+const PROMPT_ENHANCEMENT_ORIGINAL_HEADING_MARKER_V1 = 'my original request (verbatim)';
+
+/**
+ * A point harvested from Nexpath's own output is worse than no point at all: it is
+ * re-emitted as *"these original points"*, a STRONGER claim than the text ever carried.
+ * So the fence fails closed — once a marker appears, nothing past it counts.
+ */
+function isPromptEnhancementSelfIngestionMarker(line: string): boolean {
+  const normalized = line.trim().toLowerCase();
+  return normalized.includes(PROMPT_ENHANCEMENT_ORIGINAL_HEADING_MARKER_V1);
+}
+
 /**
  * The user's enumerated points — the bullet and numbered items of the original prompt.
  *
- * Kept beside the refs that consume it so the two cannot drift. Mirrors the extraction
- * the point-inventory lines already use; Q2 decides that mechanism's future, and whatever
- * replaces it, these refs must still point at PROMPT POINTS.
+ * FENCED against self-ingestion, in two layers, because neither alone is enough:
+ *
+ *  1. TYPED PROVENANCE, preferred. `promptReviewOrigin` is the machinery built to stop PE
+ *     output being treated as user authority. When the prompt did not come from the user,
+ *     no line in it is a user point, whatever it looks like.
+ *
+ *  2. CONTENT FENCE, necessary. Layer 1 sees the ENVELOPE, not the contents: a user who
+ *     PASTES a previous enhanced body into their own prompt is still
+ *     `user_authored_current_prompt`, so the typed check passes and the boilerplate would
+ *     be harvested. Quoted blocks and the canonical verbatim heading are dropped here.
+ *
+ * Fails closed by design. A user who writes bullets AFTER pasting a body loses those
+ * points, which is the right trade against presenting Nexpath's own text back as theirs.
  */
-export function extractPromptEnhancementPromptPointsV1(originalPromptText: string): readonly string[] {
-  return originalPromptText
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => /^([-*]|\d+[.)])\s+/.test(line))
-    .map((line) => line.replace(/^([-*]|\d+[.)])\s+/, '').replace(/\s+/g, ' ').trim())
-    .filter(Boolean)
-    .slice(0, 12);
+export function extractPromptEnhancementPromptPointsV1(
+  originalPromptText: string,
+  promptReviewOrigin: PromptEnhancementPromptReviewOrigin,
+): readonly string[] {
+  // Layer 1 — the whole prompt is Nexpath output, or its origin is not known to be the user.
+  if (promptReviewOrigin !== 'user_authored_current_prompt') return [];
+
+  const lines = originalPromptText.split(/\r?\n/);
+
+  // Layer 2a — the canonical echo, anywhere in the input. Scanned up front rather than
+  // stopping at it, because the done-when says no input CONTAINING the echo may
+  // contribute a point. Stopping would keep whatever preceded the paste, and downstream
+  // there is no way to tell a partial harvest from a correct one — the inventory line
+  // reads "these original points" either way. Every Nexpath body carries this heading
+  // (the verbatim section is required and survives the discard rule), so its presence
+  // means a body is in here somewhere.
+  if (lines.some((line) => isPromptEnhancementSelfIngestionMarker(line))) return [];
+
+  const points: string[] = [];
+  let insideFence = false;
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+
+    // Layer 2b — fenced code blocks are quoted material, not the user speaking.
+    if (/^(```|~~~)/.test(line)) { insideFence = !insideFence; continue; }
+    if (insideFence) continue;
+
+    // Layer 2c — markdown quotes are, literally, someone else's words.
+    if (line.startsWith('>')) continue;
+
+    if (!/^([-*]|\d+[.)])\s+/.test(line)) continue;
+    const point = line.replace(/^([-*]|\d+[.)])\s+/, '').replace(/\s+/g, ' ').trim();
+    if (point) points.push(point);
+  }
+
+  return points.slice(0, 12);
 }
 
 /** What composition did to this section, derived from state already known at composition. */

@@ -16,9 +16,14 @@ import {
   buildPromptEnhancementPromptPointRefsV1,
   buildPromptEnhancementTransformReasonCodesV1,
   extractPromptEnhancementPromptPointsV1,
+  type PromptEnhancementPromptReviewOrigin,
   resolvePromptEnhancementOriginalTextRefV1,
   withPromptEnhancementCarriedFromPreviousBodyV1,
 } from './original-text-refs.js';
+
+// The extractor fails closed on an unknown origin, so these tests must state that the
+// prompt is the user's — which is the case they are about.
+const USER_ORIGIN: PromptEnhancementPromptReviewOrigin = 'user_authored_current_prompt';
 
 describe('T2 carriers — a ref resolves to the exact characters it names', () => {
   it('resolves to the expected span of the original, character for character', () => {
@@ -133,7 +138,7 @@ describe('T2 carriers — an unresolvable ref is REFUSED, not dropped', () => {
     // doubled spaces no longer appears verbatim in the text it came from. Reachable,
     // not theoretical — which is why the refusal branch exists.
     const originalPromptText = '- add  retry  handling to the webhook';
-    const points = extractPromptEnhancementPromptPointsV1(originalPromptText);
+    const points = extractPromptEnhancementPromptPointsV1(originalPromptText, USER_ORIGIN);
     expect(points).toEqual(['add retry handling to the webhook']);
 
     const refs = buildPromptEnhancementPromptPointRefsV1({
@@ -190,7 +195,7 @@ describe('T2 carriers — prompt-point refs name the user\'s own points', () => 
       '- add retry handling to the webhook',
       '- write a migration for the phone column',
     ].join('\n');
-    const points = extractPromptEnhancementPromptPointsV1(originalPromptText);
+    const points = extractPromptEnhancementPromptPointsV1(originalPromptText, USER_ORIGIN);
     expect(points).toHaveLength(2);
 
     const refs = buildPromptEnhancementPromptPointRefsV1({
@@ -210,7 +215,7 @@ describe('T2 carriers — prompt-point refs name the user\'s own points', () => 
   it('extracts nothing from a prompt with no enumerated points', () => {
     // The common case: a one-line prompt has no points, so there is nothing to ref
     // and the field is empty rather than filled with ids that are not points.
-    expect(extractPromptEnhancementPromptPointsV1('just fix the failing build please')).toEqual([]);
+    expect(extractPromptEnhancementPromptPointsV1('just fix the failing build please', USER_ORIGIN)).toEqual([]);
   });
 });
 

@@ -27,6 +27,7 @@ import {
   buildPromptEnhancementOriginalTextRefV1,
   buildPromptEnhancementPromptPointRefsV1,
   extractPromptEnhancementPromptPointsV1,
+  type PromptEnhancementPromptReviewOrigin,
   buildPromptEnhancementTransformReasonCodesV1,
   withPromptEnhancementCarriedFromPreviousBodyV1,
 } from './original-text-refs.js';
@@ -383,7 +384,7 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
     ? applyEditedBodyWithAdditionalDetails(input.editedBodyText, input.additionalDetailsText)
     : canonicalText;
   const modelDraftedSectionIds = new Set(validatedLlmDrafts.draftsBySectionId.keys());
-  let sections = attachSpanRefs(renderableSectionPlans, renderedSections, text, input.originalPromptText, modelDraftedSectionIds);
+  let sections = attachSpanRefs(renderableSectionPlans, renderedSections, text, input.originalPromptText, modelDraftedSectionIds, input.sectionPlanningResult.promptReviewOrigin);
   // Validator-parity confirmation guard (blocked-popup fix 2026-08-07): the prompt-based gate
   // above cannot see risk phrasing the GENERATED wording introduces (an LLM draft is free text),
   // but validatePromptEnhancementSafety scans the generated body and hard-blocks a body that
@@ -411,7 +412,7 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
       renderedSections = renderSectionsWithConfirmation(lastGeneratedSectionId);
       canonicalText = renderedSections.map((section) => section.text).join('\n\n');
       text = canonicalText;
-      sections = attachSpanRefs(renderableSectionPlans, renderedSections, text, input.originalPromptText, modelDraftedSectionIds);
+      sections = attachSpanRefs(renderableSectionPlans, renderedSections, text, input.originalPromptText, modelDraftedSectionIds, input.sectionPlanningResult.promptReviewOrigin);
     }
   }
   const generatedSafeStatus: PromptEnhancementValidationStatus = deterministicFallback === 'none' ? 'valid' : 'valid_with_fallback';
@@ -782,7 +783,13 @@ function renderSection(input: {
     };
   }
 
-  const lines = instructionLinesForSection(sectionPlan.sectionKind, action, input.originalPromptText, heading);
+  const lines = instructionLinesForSection(
+    sectionPlan.sectionKind,
+    action,
+    input.originalPromptText,
+    heading,
+    input.sectionPlanningResult.promptReviewOrigin,
+  );
   if (action === 'more_thorough') {
     lines.push(...moreThoroughLines(sectionPlan));
   }
@@ -814,6 +821,9 @@ function instructionLinesForSection(
   action: PromptEnhancementComposerAction,
   originalPromptText: string,
   sectionTitle: string,
+  // T3: the point inventory is the line that re-emits harvested text as "these original
+  // points", so the provenance has to reach it rather than stopping at the composer.
+  promptReviewOrigin: PromptEnhancementPromptReviewOrigin,
 ): string[] {
   const concise = action === 'shorter';
   const line = (longText: string, shortText: string) => concise ? shortText : longText;
@@ -862,8 +872,8 @@ function instructionLinesForSection(
     ],
     point_inventory_or_decomposition: [
       line(
-        pointInventoryLine(originalPromptText),
-        compactPointInventoryLine(originalPromptText),
+        pointInventoryLine(originalPromptText, promptReviewOrigin),
+        compactPointInventoryLine(originalPromptText, promptReviewOrigin),
       ),
     ],
     task_order_dependencies: [
@@ -1033,28 +1043,24 @@ function additionalDetailsWordCount(text: string | undefined): number {
   return normalized ? normalized.split(' ').length : 0;
 }
 
-function pointInventoryLine(originalPromptText: string): string {
-  const points = extractPromptPoints(originalPromptText);
+function pointInventoryLine(
+  originalPromptText: string,
+  promptReviewOrigin: PromptEnhancementPromptReviewOrigin,
+): string {
+  const points = extractPromptEnhancementPromptPointsV1(originalPromptText, promptReviewOrigin);
   if (points.length === 0) {
     return 'Preserve the original request, dependencies, and completion checks inside this one prompt body.';
   }
   return `Preserve these original points in the work plan: ${points.join(' | ')}.`;
 }
 
-function compactPointInventoryLine(originalPromptText: string): string {
-  const points = extractPromptPoints(originalPromptText);
+function compactPointInventoryLine(
+  originalPromptText: string,
+  promptReviewOrigin: PromptEnhancementPromptReviewOrigin,
+): string {
+  const points = extractPromptEnhancementPromptPointsV1(originalPromptText, promptReviewOrigin);
   if (points.length === 0) return 'Keep a compact point inventory.';
   return `Keep these points covered: ${points.join(' | ')}.`;
-}
-
-function extractPromptPoints(originalPromptText: string): readonly string[] {
-  return originalPromptText
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => /^([-*]|\d+[.)])\s+/.test(line))
-    .map((line) => normalizeWhitespace(line.replace(/^([-*]|\d+[.)])\s+/, '')))
-    .filter(Boolean)
-    .slice(0, 12);
 }
 
 function normalizeWhitespace(value: string): string {
@@ -1087,10 +1093,13 @@ function attachSpanRefs(
   // recovered from the body, because the body is composed prose and the original is not.
   originalPromptText: string,
   modelDraftedSectionIds: ReadonlySet<string>,
+  // T3: without this the carriers would ref harvested Nexpath boilerplate as the user's
+  // own points — the same self-ingestion defect, one layer down.
+  promptReviewOrigin: PromptEnhancementPromptReviewOrigin,
 ): readonly PromptEnhancementSectionV1[] {
   // Extracted once per composition rather than per section: the points belong to the
   // prompt, not to any one section, and recomputing invites two answers.
-  const promptPoints = extractPromptEnhancementPromptPointsV1(originalPromptText);
+  const promptPoints = extractPromptEnhancementPromptPointsV1(originalPromptText, promptReviewOrigin);
   return sectionPlans.map((sectionPlan) => {
     const rendered = renderedSections.find((section) => section.sectionId === sectionPlan.sectionId);
     const startOffset = rendered ? bodyText.indexOf(rendered.text) : -1;
