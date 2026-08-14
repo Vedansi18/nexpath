@@ -282,14 +282,18 @@ export async function runStop(
         // the ten real flags (owner approvals + built runtime source + host-hold proof + provider check),
         // so the gate is now blocked by EXACTLY ONE missing flag — `focused_runtime_fixtures_pending`.
         //
-        // 🔒 THE UN-GATE IS THE SINGLE LINE BELOW. It stays `false`, so the gate stays fail-closed and the
-        // continuation shell never runs in production — behaviour is byte-identical to the old `evidence:{}`
-        // (allowed:false), only the missing-code diagnostic is now precise. Flipping it to `true` is the
-        // whole un-gate, and it is authorised ONLY by the owner's recorded acceptance-oracle sign-off over
-        // the 27 sequence fixtures. ⛔ Do NOT set it true from "the tests are green" — that is the exact
-        // fabrication the fail-closed backstop exists to prevent (p5-owner-approvals register: flag 11
-        // `pending`). The moment the owner signs off, this one edit takes the whole feature live.
-        evidence: buildFutureSequenceRuntimeGateEvidenceV1({ ownerAcceptanceOracleSignoffRecorded: false }),
+        // 🔒 THE UN-GATE. Production default is FALSE — no env, no sign-off → fail-closed, and the
+        // continuation shell never runs (behaviour byte-identical to the old `evidence:{}`, allowed:false).
+        //
+        // The env `NEXPATH_MPS_TEST_UNGATE=1` is a DEV/TEST-ONLY override: it opens the gate LOCALLY for
+        // interactive E2E testing. It is NOT the real un-gate and NOT a sign-off — the committed default is
+        // false, so nothing fabricated ever ships. ⛔ The REAL un-gate is the owner replacing this whole
+        // expression with a literal `true` in a reviewed commit, which records the acceptance-oracle
+        // sign-off over the 27 fixtures. Do NOT set the literal true from "the tests are green" — that is
+        // the fabrication the fail-closed backstop exists to prevent (register: flag 11 `pending`).
+        evidence: buildFutureSequenceRuntimeGateEvidenceV1({
+          ownerAcceptanceOracleSignoffRecorded: process.env['NEXPATH_MPS_TEST_UNGATE'] === '1',
+        }),
       });
       logger.debug('stop_mps_continuation_gate', {
         cwd: payload.cwd,

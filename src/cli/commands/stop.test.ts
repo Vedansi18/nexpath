@@ -230,6 +230,38 @@ describe('runStop — deferred Prompt Enhancement popup (B-i)', () => {
     expect(after).toMatchObject({ currentItemIndex: 2, status: 'item_pending', lastActionId: 'prev' });
   });
 
+  it('DEV/TEST override NEXPATH_MPS_TEST_UNGATE=1 OPENS the gate (and the default, no env, keeps it closed)', async () => {
+    const session = SessionStateManager.load(store, '/test/project');
+    session.setDetectedLanguage(store, undefined);
+    upsertPendingPromptSequence(store, {
+      sequenceId: 'seq-ung', enhancementId: 'enh-ung', projectRoot: '/test/project',
+      sessionId: session.current.sessionId, itemCount: 3, currentItemIndex: 1,
+      status: 'item_pending', lastActionId: 'prev',
+    }, emptyPromptEnhancementSequencePayloadV1(64));
+    const debugSpy = vi.spyOn(logger, 'debug').mockImplementation(() => {});
+    const prev = process.env['NEXPATH_MPS_TEST_UNGATE'];
+    try {
+      // No env → the acceptance-oracle flag is missing (the committed production default is false).
+      delete process.env['NEXPATH_MPS_TEST_UNGATE'];
+      await runStop(makePayload({ stop_hook_active: true }), store, undefined, undefined, undefined, notShown());
+      const closed = debugSpy.mock.calls.filter(([m]) => m === 'stop_mps_continuation_gate').pop();
+      expect((closed![1] as { missingGateCodes: readonly string[] }).missingGateCodes).toContain('focused_runtime_fixtures_pending');
+
+      // Dev/test override set → the acceptance-oracle flag is SATISFIED (removed from the missing list), so
+      // the sign-off is no longer the blocker. (This no-key test env still misses the provider flag; on a
+      // real machine with OPENAI_API_KEY set, all flags are present and the gate is allowed:true.) The
+      // committed production default (no env) never ships this — it stays fail-closed.
+      debugSpy.mockClear();
+      process.env['NEXPATH_MPS_TEST_UNGATE'] = '1';
+      await runStop(makePayload({ stop_hook_active: true }), store, undefined, undefined, undefined, notShown());
+      const opened = debugSpy.mock.calls.filter(([m]) => m === 'stop_mps_continuation_gate').pop();
+      expect((opened![1] as { missingGateCodes: readonly string[] }).missingGateCodes).not.toContain('focused_runtime_fixtures_pending');
+    } finally {
+      if (prev === undefined) delete process.env['NEXPATH_MPS_TEST_UNGATE']; else process.env['NEXPATH_MPS_TEST_UNGATE'] = prev;
+      debugSpy.mockRestore();
+    }
+  });
+
   // MPS-6: on a sequence-continuation Stop, ONLY the launcher runs — the pending-PE popup, the advisory,
   // and the standalone feedback popup all stay closed on that event (and nothing is consumed).
   it('sequence-continuation Stop suppresses the PE popup and the advisory (routes only to the launcher)', async () => {
