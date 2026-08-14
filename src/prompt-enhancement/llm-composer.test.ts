@@ -4,9 +4,8 @@ import type { PromptEnhancementSectionPlanningResult } from './templates/section
 
 function planning(
   sections: readonly { sectionId: string; sectionKind: string; structuredContentPartRefs: readonly string[] }[],
-  guidanceSemantics: readonly unknown[] = [],
 ): PromptEnhancementSectionPlanningResult {
-  return { sectionPlans: sections, guidanceSemantics } as unknown as PromptEnhancementSectionPlanningResult;
+  return { sectionPlans: sections } as unknown as PromptEnhancementSectionPlanningResult;
 }
 
 const RENDERABLE = planning([
@@ -544,120 +543,5 @@ describe('the caller-supplied wall-clock ceiling', () => {
     if (result.ok) return;
     expect(result.reason).toBe('deadline_exceeded');
     expect(prompts).toHaveLength(1); // the in-flight call completed; the SECOND never started
-  });
-});
-
-describe('guidance semantics reaching the model', () => {
-  const semantics = [{
-    sectionId: 'sec-verify',
-    factId: 'fact-a',
-    sourceType: 'hard_fact',
-    guidanceKind: 'source_signal_guidance',
-    suggestedActionKind: 'add_verification',
-    sourceEvidenceState: 'strong',
-    priority: 'required_survivor',
-    riskLevel: 'none',
-  }];
-
-  const good = JSON.stringify({
-    detectedLanguageSelfReport: 'en',
-    sectionDrafts: [{ sectionId: 'sec-verify', bodyText: 'Wording.', sourceFactIds: ['fact-a'] }],
-    composerClaims: ['claim:fact-a'],
-  });
-
-  it('tells the model what a cited fact MEANS, not only its id', async () => {
-    const { client: scripted, prompts } = scriptedClient([good]);
-    await composeStructuredComposerOutputV1(
-      { enhancementId: 'pe:1', originalPromptText: 'Fix the failing test.', planning: planning([
-        { sectionId: 'sec-verify', sectionKind: 'verification_or_test_plan', structuredContentPartRefs: ['fact-a'] },
-      ], semantics) },
-      scripted,
-    );
-
-    expect(prompts[0]).toContain('thisSectionShould');
-    expect(prompts[0]).toContain('say how the change will be checked');
-    // Measured live: sending the grading fields made the model recite them as prose — Nexpath's
-    // own bookkeeping presented to the user as advice. They stay off the wire.
-    expect(prompts[0]).not.toContain('evidence is strong');
-    expect(prompts[0]).not.toContain('required_survivor');
-    expect(prompts[0]).not.toMatch(/risk (none|low|medium|high)/);
-  });
-
-  it('sends the same prompt as before when nothing is projected', async () => {
-    const { client: scripted, prompts } = scriptedClient([good]);
-    await composeStructuredComposerOutputV1(
-      { enhancementId: 'pe:1', originalPromptText: 'Fix the failing test.', planning: planning([
-        { sectionId: 'sec-verify', sectionKind: 'verification_or_test_plan', structuredContentPartRefs: ['fact-a'] },
-      ]) },
-      scripted,
-    );
-
-    expect(prompts[0]).not.toContain('thisSectionShould');
-    expect(prompts[0]).toContain('allowedSourceFactIds'); // the ids still go, unchanged
-  });
-
-  it('attaches a fact only to the section that cites it', async () => {
-    const { client: scripted, prompts } = scriptedClient([good]);
-    await composeStructuredComposerOutputV1(
-      { enhancementId: 'pe:1', originalPromptText: 'Fix the failing test.', planning: planning([
-        { sectionId: 'sec-verify', sectionKind: 'verification_or_test_plan', structuredContentPartRefs: ['fact-a'] },
-        { sectionId: 'sec-risk', sectionKind: 'risk_safety_or_confirmation', structuredContentPartRefs: ['fact-b'] },
-      ], semantics) },
-      scripted,
-    );
-
-    // The risk section cites fact-b, which has no projection, so its own block must carry none.
-    // Bound the slice at the trailing instruction, which legitimately names the block.
-    const full = prompts[0]!;
-    const riskStart = full.indexOf('- sectionId: sec-risk');
-    const instructionStart = full.indexOf('Where a section lists');
-    const riskBlock = full.slice(riskStart, instructionStart === -1 ? undefined : instructionStart);
-    expect(riskBlock).not.toContain('thisSectionShould');
-    expect(riskBlock).toContain('fact-b');
-  });
-});
-
-describe('guidance goals sent to the model', () => {
-  const good = JSON.stringify({
-    detectedLanguageSelfReport: 'en',
-    sectionDrafts: [{ sectionId: 'sec-verify', bodyText: 'Wording.', sourceFactIds: ['fact-a'] }],
-    composerClaims: ['claim:fact-a'],
-  });
-
-  function withAction(suggestedActionKind: string) {
-    return [{
-      sectionId: 'sec-verify', factId: 'fact-a', sourceType: 'hard_fact',
-      guidanceKind: 'source_signal_guidance', suggestedActionKind,
-      sourceEvidenceState: 'strong', priority: 'required_survivor', riskLevel: 'none',
-    }];
-  }
-
-  async function promptFor(suggestedActionKind: string): Promise<string> {
-    const { client: scripted, prompts } = scriptedClient([good]);
-    await composeStructuredComposerOutputV1(
-      { enhancementId: 'pe:1', originalPromptText: 'Fix it.', planning: planning([
-        { sectionId: 'sec-verify', sectionKind: 'verification_or_test_plan', structuredContentPartRefs: ['fact-a'] },
-      ], withAction(suggestedActionKind)) },
-      scripted,
-    );
-    return prompts[0]!;
-  }
-
-  it('never sends a de-underscored enum as if it were a goal', async () => {
-    // This is the action the LIVE source-signal fact carries, so it is the one that matters most.
-    // Mechanical de-underscoring made it read "get the reader to no action render context only" —
-    // nonsense. It also must not be dropped: the fact it comes from renders a supporting clause,
-    // which is a goal, just not an instruction to act. Dropping it made the whole projection inert
-    // on the only path that reaches the model.
-    const prompt = await promptFor('no_action_render_context_only');
-    expect(prompt).not.toContain('no action render context only');
-    expect(prompt).toContain('thisSectionShould');
-    expect(prompt).toContain('short supporting note');
-  });
-
-  it('sends a readable goal for an action that has one', async () => {
-    const prompt = await promptFor('capture_reproduction');
-    expect(prompt).toContain('capture how to reproduce it and what was observed');
-    expect(prompt).not.toContain('capture_reproduction');
   });
 });

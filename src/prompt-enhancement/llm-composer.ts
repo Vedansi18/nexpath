@@ -1,9 +1,5 @@
 import OpenAI from 'openai';
-import type {
-  PromptEnhancementGuidanceSemanticsV1,
-  PromptEnhancementSectionPlanningResult,
-  PromptEnhancementSuggestedActionKind,
-} from './templates/section-plan.js';
+import type { PromptEnhancementSectionPlanningResult } from './templates/section-plan.js';
 import type { PromptEnhancementStructuredComposerOutputV1 } from './compose-enhancement.js';
 import {
   PROMPT_ENHANCEMENT_COST_MODEL_V1,
@@ -245,93 +241,22 @@ const SYSTEM_PROMPT = [
   '- composerClaims must be the union of every sourceFactId you used, each prefixed with "claim:".',
 ].join('\n');
 
-/**
- * One fact's meaning, as a line the model can act on.
- *
- * The ids stay — they are what `sourceFactIds` must cite back, and the downstream validator checks
- * that citation. What is added is what the id stands for. A section that cites a fact but is told
- * nothing about it can only be written from the prompt, which is why the project and source-signal
- * sections read like generic advice: the model has no way to know they are about anything else.
- */
-/**
- * What each action kind means as a goal, in words worth sending.
- *
- * De-underscoring the enum is not enough: `no_action_render_context_only` becomes "no action render
- * context only", which as a goal is nonsense — and it is the action the live source-signal fact
- * actually carries, so it is the one that matters most. It does not mean "say nothing"; the fact
- * that carries it is documented as rendering "a supporting clause, not a body". That is a goal, it
- * just is not an instruction to act, so it gets a phrase of its own rather than being dropped.
- *
- * Every kind maps to a goal. If a future kind genuinely has none, that is a decision to make
- * deliberately here, not by leaving a hole for a mechanical fallback to fill.
- */
-const GOAL_BY_ACTION_KIND: Record<PromptEnhancementSuggestedActionKind, string> = {
-  clarify_requirement: 'pin down what is actually being asked for',
-  add_acceptance_criteria: 'state what finished looks like',
-  add_verification: 'say how the change will be checked',
-  capture_reproduction: 'capture how to reproduce it and what was observed',
-  preserve_behavior: 'keep the behaviour outside this change intact',
-  confirm_risk: 'get confirmation before the risky step',
-  plan_rollback: 'have a way back if it goes wrong',
-  ground_in_project_fact: 'tie the work to what this project actually is',
-  ask_for_source: 'find the missing source before relying on it',
-  handoff_sequence: 'break the work into ordered steps',
-  no_action_render_context_only:
-    'carry the context that matters here as a short supporting note, without asking the reader to act on it',
-};
-
-function guidanceSemanticsLines(semantics: readonly PromptEnhancementGuidanceSemanticsV1[]): string {
-  // Only what the section should COVER. The grading fields — evidence state, priority, risk — are
-  // deliberately withheld from the prompt: measured live, the model recited them as prose ("the
-  // evidence is strong and the priority is high, the risks are low"), which is Nexpath's internal
-  // bookkeeping presented to the user as if it were advice about their code. The grades stay on
-  // the projected object for callers that want them; they are not something to write ABOUT.
-  const goals = semantics
-    .map((fact) => GOAL_BY_ACTION_KIND[fact.suggestedActionKind])
-    .filter((goal): goal is string => goal !== undefined); // undefined only if a kind is unmapped
-  if (goals.length === 0) return '';
-  const lines = [...new Set(goals)].map((goal) => `    - ${goal}`).join('\n');
-  return `\n  thisSectionShould:\n${lines}`;
-}
-
 function buildUserPrompt(
   originalPromptText: string,
   sections: readonly { sectionId: string; sectionKind: string; structuredContentPartRefs: readonly string[] }[],
-  guidanceSemantics: readonly PromptEnhancementGuidanceSemanticsV1[] = [],
 ): string {
-  const rendered = sections.map((section) => ({
-    section,
-    goals: guidanceSemanticsLines(guidanceSemantics.filter((fact) => fact.sectionId === section.sectionId)),
-  }));
-  const sectionLines = rendered
+  const sectionLines = sections
     .map(
-      ({ section, goals }) =>
-        `- sectionId: ${section.sectionId}\n  purpose: ${section.sectionKind}\n  allowedSourceFactIds: ${JSON.stringify(section.structuredContentPartRefs)}`
-        + goals,
+      (section) =>
+        `- sectionId: ${section.sectionId}\n  purpose: ${section.sectionKind}\n  allowedSourceFactIds: ${JSON.stringify(section.structuredContentPartRefs)}`,
     )
     .join('\n');
-  // Gate the explanation on what was actually RENDERED, not on whether semantics exist. A fact
-  // whose action states no goal renders nothing, so a section can have semantics and still carry
-  // no block — and an instruction about a block that is not there is noise that invites the model
-  // to hunt for it.
-  const anyProjected = rendered.some((entry) => entry.goals.length > 0);
-  const lines = [
+  return [
     `Original request (context only — do NOT reword it):\n${originalPromptText}`,
     '',
     'Sections to word (produce one draft per section):',
     sectionLines,
-  ];
-  if (anyProjected) {
-    lines.push(
-      '',
-      'Where a section lists thisSectionShould, that is what the section is FOR — write it so the'
-      + " reader ends up doing that, about the specific thing the request names. It is a goal, not a"
-      + ' topic: never restate it, never write about signals, evidence, priorities, risk levels or'
-      + ' guidance in the abstract, and never refer to this instruction. The reader wants to know'
-      + ' what to do about their own problem.',
-    );
-  }
-  return lines.join('\n');
+  ].join('\n');
 }
 
 function parseStructuredComposerOutput(
@@ -411,8 +336,7 @@ export async function composeStructuredComposerOutputV1(
     return { ok: false, reason: 'no_key' };
   }
 
-  const userPrompt = buildUserPrompt(input.originalPromptText, sections, input.planning.guidanceSemantics)
-    + actionWordingDirective(input.action, input.additionalDetailsText);
+  const userPrompt = buildUserPrompt(input.originalPromptText, sections) + actionWordingDirective(input.action, input.additionalDetailsText);
   // Malformed / empty / language-inconsistent replies retry up to the locked count
   // (§33348: retry up to 3 times). A thrown error (provider unavailable / timeout) is
   // NOT retried — fast deterministic fallback rather than repeated slow waits. On a
