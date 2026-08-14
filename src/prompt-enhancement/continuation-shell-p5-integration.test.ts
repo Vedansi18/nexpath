@@ -16,7 +16,7 @@ import {
 } from './cli-mps-continuation-run.js';
 import type { PromptEnhancementCliMpsInteractionV1 } from './cli-mps-run.js';
 import type { PromptEnhancementSequenceItemV1 } from './sequence-payload.js';
-import type { PromptEnhancementSequenceRuntimeStateV1 } from './sequence-runtime.js';
+import { type PromptEnhancementSequenceRuntimeStateV1, PROMPT_ENHANCEMENT_SEQUENCE_MAX_ITEM_COUNT_V1 } from './sequence-runtime.js';
 import { openStore, type Store } from '../store/db.js';
 import {
   upsertPendingPromptSequence, getActivePendingPromptSequence, updatePendingPromptSequenceState,
@@ -89,6 +89,18 @@ function items(): readonly PromptEnhancementSequenceItemV1[] {
 
 function state(over: Partial<PromptEnhancementSequenceRuntimeStateV1> = {}): PromptEnhancementSequenceRuntimeStateV1 {
   return { sequenceId: 'seq-1', enhancementId: 'enh-1', projectRoot: '/tmp/p5', sessionId: 's1', itemCount: 2, currentItemIndex: 0, status: 'awaiting_response', lastActionId: null, ...over };
+}
+
+/** An n-item stored list: item 0 the whole original (no wording), items 1…n-1 worded tasks. */
+function itemsN(n: number): readonly PromptEnhancementSequenceItemV1[] {
+  return Array.from({ length: n }, (_unused, order) => order === 0
+    ? items()[0]
+    : {
+        itemKind: 'task' as const, originalSliceRef: { start: 10, end: 40 }, sourcePointRanges: [{ start: 10, end: 20 }],
+        roleLabel: 'fix' as const, dependencyOrder: order, complexity: 'not_complex' as const, complexityReason: null,
+        generatedWording: `Do sub-task ${order}.`, actionRiskKinds: [], authorityMode: 'plan_or_review' as const,
+        requiresConfirmationFloor: false, decompositionGroupId: 'g1', itemValidationGraph: REAL_GRAPH, itemSafetyClauseRef: null,
+      });
 }
 
 /** Compose the shell exactly as stop.ts does: package (offer+package) → run (scripted) → deliver. */
@@ -188,5 +200,41 @@ describe('MPS shell P5 — acceptance scenarios against the live assembled shell
     if (!packaged.ok) return;
     expect(packaged.offeredState.currentItemIndex).toBe(2);
     expect(packaged.packaged.itemKind).toBe('binary_confirmation');
+  });
+
+  it('mid-sequence: from item 1 the offer advances to serve item 2 of a 3-item sequence', async () => {
+    const { packaged, delivery } = await runShell([KEY.enter], state({ itemCount: 3, currentItemIndex: 1 }), itemsN(3));
+    expect(packaged.ok).toBe(true);
+    if (!packaged.ok) return;
+    expect(packaged.offeredState.currentItemIndex).toBe(2);
+    expect(delivery?.kind).toBe('inject');
+    if (delivery?.kind !== 'inject') return;
+    expect(delivery.nextState.currentItemIndex).toBe(2);
+  });
+
+  it('sequence complete: advancing off the last item yields no package (nothing to serve, no popup)', async () => {
+    const { packaged } = await runShell([KEY.enter], state({ itemCount: 3, currentItemIndex: 2 }), itemsN(3));
+    expect(packaged.ok).toBe(false);
+    if (packaged.ok) return;
+    expect(packaged.reason).toBe('sequence_complete');
+  });
+
+  it('same item returns identical: re-packaging a pending item twice yields the same served body', async () => {
+    const st = state({ status: 'item_pending', currentItemIndex: 1 });
+    const a = await runShell([KEY.enter], st);
+    const b = await runShell([KEY.enter], st);
+    expect(a.packaged.ok && b.packaged.ok).toBe(true);
+    if (!a.packaged.ok || !b.packaged.ok) return;
+    expect(b.packaged.packaged.result.currentBody.text).toBe(a.packaged.packaged.result.currentBody.text);
+    expect(b.packaged.packaged.itemKind).toBe(a.packaged.packaged.itemKind);
+  });
+
+  it('max item count: a sequence at the locked 30-item cap still packages and serves (clamped, never dropped)', async () => {
+    const max = PROMPT_ENHANCEMENT_SEQUENCE_MAX_ITEM_COUNT_V1;
+    const { packaged, delivery } = await runShell([KEY.enter], state({ itemCount: max, currentItemIndex: 0 }), itemsN(max));
+    expect(packaged.ok).toBe(true);
+    if (!packaged.ok) return;
+    expect(packaged.offeredState.currentItemIndex).toBe(1);
+    expect(delivery?.kind).toBe('inject');
   });
 });
