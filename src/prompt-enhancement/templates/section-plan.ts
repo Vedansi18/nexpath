@@ -406,16 +406,71 @@ function isMandatorySurvivorSection(
     facts.some((fact) => fact.priority === 'required_survivor');
 }
 
+/**
+ * Which sections each capability overlay applies to.
+ *
+ * Transcribed from the milestone's capability-overlay table (analysis L3325-3335, mirrored in the
+ * dev plan at L6008). Every row of that table names the sections its capability affects — the
+ * overlays were never meant to be global. Applying them to every section instead made the flags a
+ * constant: every section reported the same set, so nothing downstream could tell one from another,
+ * and `risk_or_rollback` sat on `behavior_preservation` where it means nothing.
+ *
+ * The dev plan states the bound directly: "Scope must remain bounded and must not add noisy
+ * rollback text to unrelated low-risk prompts."
+ */
+const SECTIONS_BY_CAPABILITY: Partial<Record<PromptEnhancementCapabilityId, readonly string[]>> = {
+  'capability.risk_or_rollback': [
+    'risk_safety_or_confirmation', 'verification_or_test_plan', 'behavior_preservation', 'handoff_or_sequence_candidate',
+  ],
+  'capability.confirmation_needed': [
+    'risk_safety_or_confirmation', 'verification_or_test_plan', 'behavior_preservation', 'handoff_or_sequence_candidate',
+  ],
+  'capability.verification_required': ['verification_or_test_plan', 'acceptance_or_output_expectation'],
+  'capability.reproduction_or_evidence_needed': [
+    'reproduction_or_evidence', 'verification_or_test_plan', 'uncertainty_or_clarification',
+  ],
+  'capability.behavior_preservation': ['behavior_preservation', 'context_and_constraints', 'verification_or_test_plan'],
+  'capability.project_grounding': ['project_grounding_facts'],
+  'capability.source_signal_guidance': [
+    'source_signal_guidance', 'approach_or_steps', 'verification_or_test_plan', 'risk_safety_or_confirmation',
+  ],
+  'capability.adversarial_review': [
+    'requirement_source_state', 'verification_or_test_plan', 'acceptance_or_output_expectation', 'uncertainty_or_clarification',
+  ],
+  'capability.decomposition_candidate': ['handoff_or_sequence_candidate'],
+};
+
+function capabilityAppliesToSection(
+  capability: PromptEnhancementCapabilityId,
+  sectionKind: string,
+): boolean {
+  return SECTIONS_BY_CAPABILITY[capability]?.includes(sectionKind) ?? false;
+}
+
 function safetyFlagsFor(
   sectionKind: string,
   capabilities: readonly PromptEnhancementCapabilityId[],
   facts: readonly PromptEnhancementGuidanceFact[],
 ): readonly string[] {
+  // Unconditional, and deliberately so: these are not capability overlays. Every generated section
+  // must be honest about its sources and must not escalate authority, whatever the route asked for,
+  // and the design does not scope them to a subset.
   const flags = new Set(['source_honesty', 'no_authority_escalation']);
-  if (sectionKind === 'risk_safety_or_confirmation' || capabilities.includes('capability.confirmation_needed')) {
+  if (
+    sectionKind === 'risk_safety_or_confirmation'
+    || (capabilities.includes('capability.confirmation_needed')
+      && capabilityAppliesToSection('capability.confirmation_needed', sectionKind))
+  ) {
     flags.add('sensitive_action_confirmation');
   }
-  if (capabilities.includes('capability.risk_or_rollback')) flags.add('risk_or_rollback');
+  if (
+    capabilities.includes('capability.risk_or_rollback')
+    && capabilityAppliesToSection('capability.risk_or_rollback', sectionKind)
+  ) {
+    flags.add('risk_or_rollback');
+  }
+  // Fact-supplied hooks are untouched: they arrive per fact, and facts are already matched to their
+  // own section, so these were never the blanket half.
   for (const fact of facts) {
     for (const hook of fact.safetyHooks) flags.add(hook);
   }

@@ -360,3 +360,71 @@ describe('prompt-enhancement template registry and section planner', () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------------------------
+// Phase S2: a capability overlay applies to the sections its design names, not to every section.
+//
+// Before this, three of the four safetyFlags values came from route capabilities with no section
+// filter, so every section reported the identical set and the field carried no per-section
+// information at all — risk_or_rollback sat on behavior_preservation, sensitive_action_confirmation
+// on project_grounding_facts. Mapping from analysis L3325-3335 / dev plan L6008.
+// ---------------------------------------------------------------------------------------------
+describe('capability overlays are scoped to the sections their design names', () => {
+  function plan(promptText: string) {
+    return planPromptEnhancementSections({
+      routeResult: routePromptEnhancement(routeInput({ promptText })),
+      sourceRefs: [sourceA, contentTemplateSourceB],
+      guidanceFacts: [],
+    });
+  }
+
+  /** Sections that carry a flag, by kind, ignoring the two unconditional ones. */
+  function kindsCarrying(result: ReturnType<typeof plan>, flag: string): readonly string[] {
+    return result.sectionPlans.filter((s) => s.safetyFlags.includes(flag)).map((s) => s.sectionKind);
+  }
+
+  it('every section keeps the two unconditional flags — they are not capability overlays', () => {
+    const result = plan('Rename the helper in utils.ts.');
+    for (const section of result.sectionPlans) {
+      expect(section.safetyFlags).toContain('source_honesty');
+      expect(section.safetyFlags).toContain('no_authority_escalation');
+    }
+  });
+
+  it('risk_or_rollback reaches only the sections the table names', () => {
+    // A migration/production prompt, which is what attaches capability.risk_or_rollback.
+    const result = plan('Run the production migration and delete the archived rows.');
+    const carrying = kindsCarrying(result, 'risk_or_rollback');
+    const allowed = new Set([
+      'risk_safety_or_confirmation', 'verification_or_test_plan', 'behavior_preservation', 'handoff_or_sequence_candidate',
+    ]);
+
+    for (const kind of carrying) expect(allowed.has(kind)).toBe(true);
+    // The regression this pins: it used to land on everything, including sections with no risk role.
+    const grounding = result.sectionPlans.find((s) => s.sectionKind === 'project_grounding_facts');
+    if (grounding) expect(grounding.safetyFlags).not.toContain('risk_or_rollback');
+  });
+
+  it('sensitive_action_confirmation reaches only its named sections, and always its own section kind', () => {
+    const result = plan('Run the production migration and delete the archived rows.');
+    const carrying = kindsCarrying(result, 'sensitive_action_confirmation');
+    const allowed = new Set([
+      'risk_safety_or_confirmation', 'verification_or_test_plan', 'behavior_preservation', 'handoff_or_sequence_candidate',
+    ]);
+
+    for (const kind of carrying) expect(allowed.has(kind)).toBe(true);
+    // risk_safety_or_confirmation carries it by section kind regardless of the capability, so the
+    // confirmation clause always has a home.
+    const riskSection = result.sectionPlans.find((s) => s.sectionKind === 'risk_safety_or_confirmation');
+    if (riskSection) expect(riskSection.safetyFlags).toContain('sensitive_action_confirmation');
+  });
+
+  it('the flags now differentiate — sections no longer all report the same set', () => {
+    // The property that was false before this phase and is the whole point of it.
+    const result = plan('Run the production migration and delete the archived rows.');
+    const distinct = new Set(result.sectionPlans
+      .filter((s) => s.sectionKind !== 'original_request_or_goal')
+      .map((s) => [...s.safetyFlags].sort().join('|')));
+    expect(distinct.size).toBeGreaterThan(1);
+  });
+});
