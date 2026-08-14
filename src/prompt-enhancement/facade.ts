@@ -23,7 +23,6 @@ import {
   type PromptEnhancementStructuredComposerOutputV1,
 } from './compose-enhancement.js';
 import { composeStructuredComposerOutputV1 } from './llm-composer.js';
-import { isPromptEnhancementNlpHeavyCaseV1 } from './composer-gate.js';
 import { decidePromptEnhancementRouteViaLlmV1, type PromptEnhancementLlmRouteDecisionV1 } from './llm-route-decision.js';
 import { isValidApiKey } from '../config/ApiKeyResolver.js';
 import { planPromptEnhancementSections } from './templates/section-plan.js';
@@ -248,10 +247,16 @@ async function prepare(
     guidanceFacts: sourceMix.renderedFacts,
   });
 
-  // E4: bounded LLM composer wording for a shown, NLP-heavy popup on the baseline
-  // compose (no action). Gated on a valid key so the whole test suite (no key) and
-  // any obvious/clear prompt render deterministically. Any failure -> undefined ->
+  // E4: bounded LLM composer wording for a shown popup on the baseline compose (no
+  // action). Runs for every shown popup that has a valid key, so the whole test suite
+  // (no key) renders deterministically. Any failure -> undefined ->
   // composePromptEnhancementBody validates + falls back deterministically.
+  // The route's ambiguity no longer decides this. It used to, and the effect was that
+  // roughly four popups in five rendered every guidance section from a fixed string:
+  // the section SET varied by intent while the section TEXT did not vary at all. The
+  // upstream guidance gate has already decided the popup is worth showing and never
+  // fabricates a filler one, so a second gate deciding the body is not worth writing
+  // contradicted it.
   // E8: a directional action (Shorter / More-thorough / More-project-grounded /
   // Owner decision (2026-08-06): the interactive popup actions (Shorter / More-thorough /
   // More-project-grounded / Apply-details) must stay INSTANT — deterministic recompose only,
@@ -259,14 +264,17 @@ async function prepare(
   // wording call runs ONLY on the initial prepare (action === undefined, in the background
   // before the popup shows), never inside the popup interaction. The composer's
   // action-directive seam stays available for a future non-blocking use.
-  const wantsLlmWording = action === undefined && isPromptEnhancementNlpHeavyCaseV1(route);
+  const wantsLlmWording = action === undefined;
   let structuredComposerOutput: PromptEnhancementStructuredComposerOutputV1 | undefined;
   // TI-2 (2026-08-07): the composer now reports WHY it failed, and the facade maps that onto the
   // runtime states that already exist instead of collapsing everything to `undefined` — which made
   // a real provider timeout byte-identical to "never eligible for an LLM call" in the UI, logs,
-  // and cost metadata. `no_key` / `no_eligible_sections` stay `undefined` (genuinely "not
-  // requested"); downstream, the failure states already produce `callVisibilityMode
+  // and cost metadata. Downstream, the failure states already produce `callVisibilityMode
   // 'fallback_no_llm'` + a populated `providerFailureState` via `fallbackModeForRuntime`.
+  //
+  // `no_key` is the only reason left as `undefined`. It used to share that with
+  // `no_eligible_sections`, which was right while the composer was gated off — but now that it
+  // runs for every shown popup with a key, an empty plan is a failure, not a non-request.
   let composerRuntimeState: PromptEnhancementComposerRuntimeState | undefined;
   if (
     wantsLlmWording &&
@@ -277,6 +285,10 @@ async function prepare(
       enhancementId,
       originalPromptText: request.sourcePrompt.text,
       planning,
+      // Carried straight through from the caller, which is what knows which hook this is running
+      // on. Absent here means absent there, so a caller that supplies nothing keeps today's
+      // behaviour exactly.
+      deadlineAtMs: request.deadlineAtMs,
     });
     if (composerCall.ok) {
       structuredComposerOutput = composerCall.output;
@@ -287,8 +299,22 @@ async function prepare(
       composerRuntimeState = 'provider_unavailable';
     } else if (composerCall.reason === 'invalid_output') {
       composerRuntimeState = 'invalid_output';
+    } else if (composerCall.reason === 'deadline_exceeded') {
+      // The surrounding budget ran out between attempts rather than one call exceeding its own
+      // limit. The composer keeps the two apart for logs and cost records; to the user they are
+      // the same event, so they share a runtime state rather than earning a new one.
+      composerRuntimeState = 'timeout';
+    } else if (composerCall.reason === 'no_eligible_sections') {
+      // A key was present, a popup was judged worth showing, and planning produced nothing to
+      // word. Those cannot both be right, and the result is the thinnest body there is: the
+      // user's own prompt and no guidance at all. It used to be filed as "genuinely not
+      // requested", which is true only while the composer is gated off — now that it runs for
+      // every shown popup with a key, silence here would be the worst output wearing the label of
+      // a normal one. Naming the condition is this milestone's job; why planning returned zero is
+      // a routing question and is not chased here.
+      composerRuntimeState = 'validation_failed';
     }
-    // 'no_key' / 'no_eligible_sections' -> undefined: the call was genuinely not made.
+    // 'no_key' -> undefined: the call was genuinely not made, and that is a supported state.
   }
 
   const composeInput = {

@@ -206,6 +206,17 @@ const PLANNING_VERB = /\b(?:plan|review|compare|check|prepare|assess|evaluate|dr
 const REVIEW_QUESTION_PATTERN = /\b(?:whether|safe\s+to|should\s+i|should\s+we|can\s+i|can\s+we|could\s+i|could\s+we)\b/i;
 const UNRESOLVED_PLACEHOLDER_PATTERN = /\{\{[^}]{1,80}\}\}|\[[A-Z][A-Z0-9 _-]{2,80}\]|<[^>\n]{2,80}>/;
 
+/**
+ * Owner ruling 2026-08-14 (Hiren): *"if user edits something than we will not argu against that
+ * for now."* One switch, exported so the behaviour is greppable and reversible in one place
+ * rather than being reconstructed from seven scattered conditions later.
+ *
+ * Reconsideration is recorded in the v2 deferred-issues file, which also lists what must be
+ * answered before this is flipped back â chiefly that a block today becomes `no_send`, a dead end,
+ * when the contract's own design calls for confirm-before-send instead.
+ */
+export const PROMPT_ENHANCEMENT_ARGUES_WITH_USER_EDITS_V1 = false;
+
 export function validatePromptEnhancementSafety(
   input: PromptEnhancementSafetyValidationInput,
 ): PromptEnhancementSafetyValidationResult {
@@ -216,6 +227,19 @@ export function validatePromptEnhancementSafety(
   const bodyText = input.editedBodyText ?? input.currentBody.text;
   const generatedBodyText = generatedOnlyText(bodyText, input.currentBody.originalPromptText);
   const edited = input.editedBodyText !== undefined && input.editedBodyText !== input.currentBody.text;
+  /**
+   * Owner ruling 2026-08-14: a user's edit is the user's, and Nexpath does not refuse to send a body
+   * because the user changed it — whether they removed a confirmation, removed the source-honesty
+   * floor, added an execution verb, or pasted something of their own.
+   *
+   * This suppresses CONTENT JUDGEMENTS only. `body_size:cap_exceeded` below is deliberately NOT
+   * suppressed: a body past the transport cap cannot be sent at all, which is a limit rather than an
+   * opinion about what the user wrote.
+   *
+   * Detection is unaffected — `preservation-floors.ts` still names which floor an edit removed. The
+   * generated-body path is unaffected too: everything here still runs when `edited` is false.
+   */
+  const suppressEditContentJudgements = edited && !PROMPT_ENHANCEMENT_ARGUES_WITH_USER_EDITS_V1;
   const failures: PromptEnhancementValidationFailureV1[] = [];
   const generatedSpanRefIds = generatedSpanRefs(input.currentBody);
   const generatedSourceRefIds = generatedSourceRefs(input.currentBody);
@@ -233,7 +257,7 @@ export function validatePromptEnhancementSafety(
   const confirmationEffective = confirmationPresent && !confirmationContradicted && !confirmationOverridden;
 
   for (const [pattern, reasonCode] of GENERATED_VOICE_FAILURE_PATTERNS) {
-    if (pattern.test(generatedVoicePolicyText)) {
+    if (!suppressEditContentJudgements && pattern.test(generatedVoicePolicyText)) {
       failures.push(failure({
         failureCode: `voice_policy:${reasonCode}`,
         stage: edited ? 'user_edit' : 'final_body',
@@ -246,8 +270,9 @@ export function validatePromptEnhancementSafety(
   }
 
   if (
-    generatedEscalatesAuthority(input.currentBody.originalPromptText, generatedBodyText)
-    || composerReportsEscalation(input.currentBody.originalPromptText, input.composerAuthoritySelfReport)
+    !suppressEditContentJudgements
+    && (generatedEscalatesAuthority(input.currentBody.originalPromptText, generatedBodyText)
+      || composerReportsEscalation(input.currentBody.originalPromptText, input.composerAuthoritySelfReport))
   ) {
     failures.push(failure({
       failureCode: 'authority_escalation:planning_to_execution',
@@ -259,7 +284,7 @@ export function validatePromptEnhancementSafety(
     }));
   }
 
-  if (confirmationRequired && !confirmationEffective) {
+  if (!suppressEditContentJudgements && confirmationRequired && !confirmationEffective) {
     failures.push(failure({
       failureCode: !confirmationPresent
         ? edited ? 'edit_state_invalid:confirmation_removed' : 'missing_or_weak_confirmation:canonical_confirmation_absent'
@@ -279,7 +304,7 @@ export function validatePromptEnhancementSafety(
   }
 
   for (const [pattern, reasonCode] of PRIVATE_GENERATED_VALUE_PATTERNS) {
-    if (pattern.test(generatedBodyText)) {
+    if (!suppressEditContentJudgements && pattern.test(generatedBodyText)) {
       failures.push(failure({
         failureCode: `sensitive_data_leak:${reasonCode}`,
         stage: edited ? 'user_edit' : 'privacy',
@@ -292,7 +317,7 @@ export function validatePromptEnhancementSafety(
     }
   }
 
-  if (renderedMetadataIdPresent(input.currentBody, generatedBodyText)) {
+  if (!suppressEditContentJudgements && renderedMetadataIdPresent(input.currentBody, generatedBodyText)) {
     failures.push(failure({
       failureCode: 'source_honesty:metadata_id_rendered',
       stage: edited ? 'user_edit' : 'final_body',
@@ -303,7 +328,7 @@ export function validatePromptEnhancementSafety(
     }));
   }
 
-  if (UNRESOLVED_PLACEHOLDER_PATTERN.test(generatedBodyText)) {
+  if (!suppressEditContentJudgements && UNRESOLVED_PLACEHOLDER_PATTERN.test(generatedBodyText)) {
     failures.push(failure({
       failureCode: 'body_integrity:unresolved_placeholder',
       stage: edited ? 'user_edit' : 'final_body',
@@ -325,7 +350,7 @@ export function validatePromptEnhancementSafety(
     }));
   }
 
-  if (edited && sourceHonestyFloorRemoved(input.currentBody.text, bodyText)) {
+  if (edited && !suppressEditContentJudgements && sourceHonestyFloorRemoved(input.currentBody.text, bodyText)) {
     failures.push(failure({
       failureCode: 'edit_state_invalid:source_honesty_removed',
       stage: 'user_edit',
@@ -336,7 +361,7 @@ export function validatePromptEnhancementSafety(
     }));
   }
 
-  if (edited && addsSensitiveExecution(input.currentBody.text, bodyText)) {
+  if (edited && !suppressEditContentJudgements && addsSensitiveExecution(input.currentBody.text, bodyText)) {
     failures.push(failure({
       failureCode: 'edit_state_invalid:sensitive_action_added',
       stage: 'user_edit',
@@ -562,8 +587,16 @@ function classifySensitiveActions(
       : generatedAuthority === 'execute_requested' || originalAuthority === 'execute_requested'
         ? 'execute_requested'
         : originalAuthority;
-    const affectedSections = sections
-      .filter((section) => section.sectionKind === 'risk_safety_or_confirmation' || section.safetyFlags.length > 0 || section.sensitivityFlags.length > 0);
+    // Every generated section, not a flag-selected subset. Whether a body carries something unsafe
+    // is a property of its TEXT — the risk pattern above matched the whole body — so which sections
+    // are affected cannot be answered by a planning flag.
+    //
+    // This used to filter on `safetyFlags.length > 0`, which looked selective and was not: three of
+    // the four flag values are ROUTE capabilities stamped onto every section, so the filter admitted
+    // everything. It only appeared to work because it never excluded anything. Reading it as a real
+    // filter would have been the mistake the moment those flags were corrected to mean what the
+    // design says they mean.
+    const affectedSections = sections;
     findings.set(riskKind, {
       riskKind,
       authorityMode,
@@ -575,6 +608,20 @@ function classifySensitiveActions(
     });
   }
 
+  // The wide-scope fallback: no risk PATTERN matched, but the route still asked for confirmation.
+  //
+  // This is the only case the loop above cannot reach. `capability.confirmation_needed` can come
+  // from ambiguity or missing acceptance facts rather than from risky wording, and then no pattern
+  // matches while a section still carries the flag. That is a real gap in coverage and this closes
+  // it.
+  //
+  // An earlier revision of this phase also OR'd in
+  // `requiresPromptEnhancementExecutionConfirmationForPrompt`, on the theory that scoping the flags
+  // could leave a confirmation-needed route with no flagged section. That condition can never fire:
+  // it is `classifyTextRiskKinds(prompt).length > 0 && ...`, and `classifyTextRiskKinds` runs the
+  // SAME `RISK_PATTERNS` the loop above runs against text that includes the prompt — so whenever it
+  // is true, `findings` is already non-empty and this branch is skipped. It was dead code implying
+  // a protection it did not provide, and it is removed rather than left to reassure a reader.
   for (const section of sections) {
     if (!section.safetyFlags.includes('sensitive_action_confirmation')) continue;
     if (findings.size === 0) {

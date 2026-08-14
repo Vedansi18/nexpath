@@ -4,12 +4,14 @@ import {
   type PromptEnhancementPrepareRequestV1,
   type PromptEnhancementSourceRefV1,
 } from './contracts.js';
+import { isPromptEnhancementNlpHeavyCaseV1 } from './composer-gate.js';
 import { buildPromptEnhancementCostVisibilityMetadataV1 } from './cost-observability.js';
+import { routePromptEnhancement } from './routing-taxonomy.js';
 import { getPromptStartStopSourceSnapshot } from './source-reality.js';
 
-// The composer gate is unit-tested separately; here force it true so the facade's
-// LLM wiring is exercised regardless of the fixture prompt's ambiguity.
-vi.mock('./composer-gate.js', () => ({ isPromptEnhancementNlpHeavyCaseV1: () => true }));
+// No composer-gate mock: the baseline compose no longer consults the route's
+// ambiguity, so every shown popup with a valid key reaches the composer on its own.
+// `isPromptEnhancementNlpHeavyCaseV1` keeps its own unit tests in composer-gate.test.ts.
 
 // A "smart" mock composer: it reads the planning the facade passes and returns a
 // VALID structured output (real section id + an allowed source fact id) so the
@@ -72,7 +74,7 @@ afterEach(() => {
 });
 
 describe('E4 — facade LLM composer wiring', () => {
-  it('LLM path: valid key + NLP-heavy + accepted structured output -> llm_wording + non-deterministic modelVersion', async () => {
+  it('LLM path: valid key + shown popup + accepted structured output -> llm_wording + non-deterministic modelVersion', async () => {
     process.env['OPENAI_API_KEY'] = `sk-${'x'.repeat(40)}`;
     const result = await preparePromptEnhancement(request());
     expect(result.disposition).toBe('show_current_body');
@@ -80,6 +82,64 @@ describe('E4 — facade LLM composer wiring', () => {
     expect(result.callAndVisibilityMetadata.callVisibilityMode).toBe('llm_wording');
     expect(result.modelVersion).toBe('llm-wording-v1');
     expect(result.currentBody.text).toContain('Tailored LLM wording');
+  });
+
+  it('a plainly unambiguous prompt still composes — the route no longer decides', async () => {
+    // This is the case that used to fail. An obvious, single-intent, unambiguous prompt
+    // routes "clear", which used to close the composer gate and hand the user a body whose
+    // every guidance section was a fixed string. It must now reach the composer like any
+    // other shown popup.
+    const PLAIN_TEXT = 'Add a nullable phone_number column to the users table.';
+
+    // Premise guard. The test is only the regression case while this prompt reads as NOT
+    // NLP-heavy — that is what used to shut the gate. If the routing heuristics ever change
+    // enough that this text reads ambiguous, this fails loudly and a new prompt is needed,
+    // rather than the test quietly passing while testing nothing.
+    const snapshot = getPromptStartStopSourceSnapshot();
+    const plainRoute = routePromptEnhancement({
+      promptText: PLAIN_TEXT, promptOrigin: 'user', reviewMoment: 'UserPromptSubmit_preparation',
+      sourceSnapshot: undefined, sourceFactRefs: ['src-a-1'],
+      classifierState: 'fire_recommended', degradedNoActionState: 'none',
+      generatedOriginState: 'ordinary_user_prompt', oldDecisionSessionPayloadPresent: false,
+      promptStartBoundary: snapshot.hookBoundary, deliveryBoundary: snapshot.deliveryBoundary,
+    } as never);
+    expect(isPromptEnhancementNlpHeavyCaseV1(plainRoute)).toBe(false);
+
+    process.env['OPENAI_API_KEY'] = `sk-${'x'.repeat(40)}`;
+    const plain = {
+      ...request(),
+      sourcePrompt: { ...request().sourcePrompt, text: PLAIN_TEXT },
+    } as PromptEnhancementPrepareRequestV1;
+
+    const result = await preparePromptEnhancement(plain);
+    expect(result.disposition).toBe('show_current_body');
+    expect(composeStructuredComposerOutputV1).toHaveBeenCalledTimes(1);
+    expect(result.callAndVisibilityMetadata.callVisibilityMode).toBe('llm_wording');
+    expect(result.currentBody.text).toContain('Tailored LLM wording');
+  });
+
+  it('no popup -> composer not called, even with a valid key', async () => {
+    // Opening the composer must not mean composing for a popup that is never shown.
+    // A degraded classifier routes to no-popup before any wording question arises.
+    process.env['OPENAI_API_KEY'] = `sk-${'x'.repeat(40)}`;
+    const base = request();
+    const noPopupRequest = {
+      ...base,
+      reviewMomentContext: {
+        ...base.reviewMomentContext,
+        triggerProvenance: {
+          ...base.reviewMomentContext.triggerProvenance,
+          classifierState: 'degraded_no_fire' as const,
+        },
+      },
+    } as PromptEnhancementPrepareRequestV1;
+
+    const result = await preparePromptEnhancement(noPopupRequest);
+    // Assert the popup really was suppressed, not merely that no call happened — otherwise
+    // this passes for any reason that skips the composer and stops being a no-popup test.
+    expect(result.disposition).toBe('no_popup_not_applicable');
+    expect(composeStructuredComposerOutputV1).not.toHaveBeenCalled();
+    expect(result.callAndVisibilityMetadata.callVisibilityMode).not.toBe('llm_wording');
   });
 
   it('fallback: no API key -> composer not called -> deterministic modelVersion (identical to today)', async () => {

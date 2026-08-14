@@ -23,6 +23,15 @@ import {
   type PromptEnhancementValidationStatus,
 } from './contracts.js';
 import { buildPromptEnhancementCostVisibilityMetadataV1 } from './cost-observability.js';
+import {
+  buildPromptEnhancementOriginalTextRefV1,
+  buildPromptEnhancementPromptPointRefsV1,
+  extractPromptEnhancementPromptPointsV1,
+  promptEnhancementInputCarriesPriorBodyV1,
+  type PromptEnhancementPromptReviewOrigin,
+  buildPromptEnhancementTransformReasonCodesV1,
+  withPromptEnhancementCarriedFromPreviousBodyV1,
+} from './original-text-refs.js';
 import type { PromptEnhancementPrimaryIntent } from './routing-taxonomy.js';
 import {
   buildPromptEnhancementCanonicalConfirmation,
@@ -186,12 +195,18 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
       actionType: action,
       callVisibilityMode: 'fallback_no_llm',
     });
-    const previousBody = previousBodySafety.generatedSafeStatus === input.previousSendableBody.generatedSafeStatus
-      ? input.previousSendableBody
-      : {
-          ...input.previousSendableBody,
-          generatedSafeStatus: previousBodySafety.generatedSafeStatus,
-        };
+    // T2 carriers: the body-level fields below record the carry, but the SECTIONS would
+    // otherwise still read as freshly composed. Stamp each one so a section is
+    // self-describing — appended, so how the text was originally made is not lost.
+    const carriedSections = input.previousSendableBody.sections.map((section) => ({
+      ...section,
+      transformReasonCodes: withPromptEnhancementCarriedFromPreviousBodyV1(section.transformReasonCodes),
+    }));
+    const previousBody = {
+      ...input.previousSendableBody,
+      generatedSafeStatus: previousBodySafety.generatedSafeStatus,
+      sections: carriedSections,
+    };
     return {
       currentBody: previousBody,
       composerBoundary: buildComposerBoundary(input, 'previous_sendable_body', 'fallback_no_llm', [], {
@@ -294,6 +309,20 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
   // that ruling; the failure stays fully visible via the notice + typed metadata
   // (fallbackReason / providerFailureState) while the user keeps the grounded guidance.
 
+  // Where the canonical confirmation clause goes when the PROMPT demands one.
+  //
+  // Preference order: the section whose kind is built for it, then any section the confirmation
+  // capability reached, then — the point of the third arm — ANY generated section.
+  //
+  // The third arm is not defensive padding. The first two ask which sections carry
+  // `sensitive_action_confirmation`, and that flag is now scoped to the four sections the design
+  // names. A confirmation-needed prompt whose plan happens to contain none of them would otherwise
+  // find nothing and place the clause nowhere: the prompt says "ask me before you do this" and the
+  // body never says it. Before the flags were scoped, every section carried the flag, so the second
+  // arm always matched and this hole could not open.
+  //
+  // If the prompt demands confirmation, the clause is placed. Which section hosts it is a matter of
+  // taste; whether it appears at all is not.
   const canonicalConfirmationSectionId = requiresPromptEnhancementExecutionConfirmationForPrompt(input.originalPromptText)
     ? sectionPlans.find((sectionPlan) => (
       sectionPlan.sectionKind === 'risk_safety_or_confirmation' &&
@@ -303,8 +332,43 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
         sectionPlan.sectionKind !== 'original_request_or_goal' &&
         sectionPlan.safetyFlags.includes('sensitive_action_confirmation')
       ))?.sectionId
+      ?? [...sectionPlans].reverse().find((sectionPlan) => (
+        sectionPlan.sectionKind !== 'original_request_or_goal'
+      ))?.sectionId
     : undefined;
-  const renderSectionsWithConfirmation = (confirmationSectionId: string | undefined) => sectionPlans.map((sectionPlan) =>
+  // Owner ruling 2026-08-14: when the composer RAN and a section's draft did not survive validation,
+  // that section is DISCARDED rather than filled with the deterministic line. The fixed text is not
+  // a lesser answer, it is the defect this milestone exists to remove — and it reaches the user with
+  // nothing to say it is a fallback, so a refused draft silently becomes generic advice inside the
+  // prompt they send on.
+  //
+  // Two carve-outs, both deliberate:
+  //
+  //  - The section that actually CARRIES the confirmation line keeps its text. There the fixed
+  //    wording IS the requirement, not filler: dropping it because a draft was refused would strip
+  //    "you must ask me for go-ahead confirmation" from the prompt the user sends to their agent,
+  //    turning a validation fault into a silently missing safety clause.
+  //  - A provider failure (timeout / unavailable) is untouched. That path already renders
+  //    deterministically WITH a visible failure notice, so the user is told. This rule is for the
+  //    case that says nothing.
+  //
+  // The carve-out deliberately does NOT key on `isRequired` or `safetyFlags`, and that is the whole
+  // reason it works. `isRequired` means "this section belongs in the body" — it is true of every
+  // planned section, because they come from the template's required set — not "its fixed text is a
+  // safety requirement". `safetyFlags` is worse: three of its four values are ROUTE capabilities
+  // stamped onto every section, so every section reports the same flags and the field carries no
+  // per-section information at all. Keying on either swallows every section and the rule never
+  // fires. Only the confirmation-bearing section is genuinely load-bearing, and it is already
+  // identified above.
+  const keepsSectionWhenDraftMissing = (sectionPlan: PromptEnhancementSectionPlanItemV1): boolean =>
+    sectionPlan.sectionKind === 'original_request_or_goal'
+    || (canonicalConfirmationSectionId !== undefined && sectionPlan.sectionId === canonicalConfirmationSectionId);
+  const renderableSectionPlans = structuredComposerAttempted
+    ? sectionPlans.filter((sectionPlan) =>
+      validatedLlmDrafts.draftsBySectionId.has(sectionPlan.sectionId)
+      || keepsSectionWhenDraftMissing(sectionPlan))
+    : sectionPlans;
+  const renderSectionsWithConfirmation = (confirmationSectionId: string | undefined) => renderableSectionPlans.map((sectionPlan) =>
       renderSection({
         sectionPlan,
         originalPromptText: input.originalPromptText,
@@ -320,7 +384,8 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
   let text = action === "apply_details" && typeof input.editedBodyText === "string"
     ? applyEditedBodyWithAdditionalDetails(input.editedBodyText, input.additionalDetailsText)
     : canonicalText;
-  let sections = attachSpanRefs(sectionPlans, renderedSections, text);
+  const modelDraftedSectionIds = new Set(validatedLlmDrafts.draftsBySectionId.keys());
+  let sections = attachSpanRefs(renderableSectionPlans, renderedSections, text, input.originalPromptText, modelDraftedSectionIds, input.sectionPlanningResult.promptReviewOrigin);
   // Validator-parity confirmation guard (blocked-popup fix 2026-08-07): the prompt-based gate
   // above cannot see risk phrasing the GENERATED wording introduces (an LLM draft is free text),
   // but validatePromptEnhancementSafety scans the generated body and hard-blocks a body that
@@ -342,13 +407,13 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
     && !text.includes(buildPromptEnhancementCanonicalConfirmation(input.originalPromptText))
     && promptEnhancementGeneratedBodyRequiresConfirmationV1({ sections, originalPromptText: input.originalPromptText }, text)
   ) {
-    const lastGeneratedSectionId = [...sectionPlans].reverse()
+    const lastGeneratedSectionId = [...renderableSectionPlans].reverse()
       .find((sectionPlan) => sectionPlan.sectionKind !== 'original_request_or_goal')?.sectionId;
     if (lastGeneratedSectionId !== undefined) {
       renderedSections = renderSectionsWithConfirmation(lastGeneratedSectionId);
       canonicalText = renderedSections.map((section) => section.text).join('\n\n');
       text = canonicalText;
-      sections = attachSpanRefs(sectionPlans, renderedSections, text);
+      sections = attachSpanRefs(renderableSectionPlans, renderedSections, text, input.originalPromptText, modelDraftedSectionIds, input.sectionPlanningResult.promptReviewOrigin);
     }
   }
   const generatedSafeStatus: PromptEnhancementValidationStatus = deterministicFallback === 'none' ? 'valid' : 'valid_with_fallback';
@@ -719,7 +784,13 @@ function renderSection(input: {
     };
   }
 
-  const lines = instructionLinesForSection(sectionPlan.sectionKind, action, input.originalPromptText, heading);
+  const lines = instructionLinesForSection(
+    sectionPlan.sectionKind,
+    action,
+    input.originalPromptText,
+    heading,
+    input.sectionPlanningResult.promptReviewOrigin,
+  );
   if (action === 'more_thorough') {
     lines.push(...moreThoroughLines(sectionPlan));
   }
@@ -751,6 +822,9 @@ function instructionLinesForSection(
   action: PromptEnhancementComposerAction,
   originalPromptText: string,
   sectionTitle: string,
+  // T3: the point inventory is the line that re-emits harvested text as "these original
+  // points", so the provenance has to reach it rather than stopping at the composer.
+  promptReviewOrigin: PromptEnhancementPromptReviewOrigin,
 ): string[] {
   const concise = action === 'shorter';
   const line = (longText: string, shortText: string) => concise ? shortText : longText;
@@ -799,8 +873,8 @@ function instructionLinesForSection(
     ],
     point_inventory_or_decomposition: [
       line(
-        pointInventoryLine(originalPromptText),
-        compactPointInventoryLine(originalPromptText),
+        pointInventoryLine(originalPromptText, promptReviewOrigin),
+        compactPointInventoryLine(originalPromptText, promptReviewOrigin),
       ),
     ],
     task_order_dependencies: [
@@ -970,28 +1044,24 @@ function additionalDetailsWordCount(text: string | undefined): number {
   return normalized ? normalized.split(' ').length : 0;
 }
 
-function pointInventoryLine(originalPromptText: string): string {
-  const points = extractPromptPoints(originalPromptText);
+function pointInventoryLine(
+  originalPromptText: string,
+  promptReviewOrigin: PromptEnhancementPromptReviewOrigin,
+): string {
+  const points = extractPromptEnhancementPromptPointsV1(originalPromptText, promptReviewOrigin);
   if (points.length === 0) {
     return 'Preserve the original request, dependencies, and completion checks inside this one prompt body.';
   }
   return `Preserve these original points in the work plan: ${points.join(' | ')}.`;
 }
 
-function compactPointInventoryLine(originalPromptText: string): string {
-  const points = extractPromptPoints(originalPromptText);
+function compactPointInventoryLine(
+  originalPromptText: string,
+  promptReviewOrigin: PromptEnhancementPromptReviewOrigin,
+): string {
+  const points = extractPromptEnhancementPromptPointsV1(originalPromptText, promptReviewOrigin);
   if (points.length === 0) return 'Keep a compact point inventory.';
   return `Keep these points covered: ${points.join(' | ')}.`;
-}
-
-function extractPromptPoints(originalPromptText: string): readonly string[] {
-  return originalPromptText
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => /^([-*]|\d+[.)])\s+/.test(line))
-    .map((line) => normalizeWhitespace(line.replace(/^([-*]|\d+[.)])\s+/, '')))
-    .filter(Boolean)
-    .slice(0, 12);
 }
 
 function normalizeWhitespace(value: string): string {
@@ -1020,7 +1090,20 @@ function attachSpanRefs(
   sectionPlans: readonly PromptEnhancementSectionPlanItemV1[],
   renderedSections: readonly { sectionId: string; title: string; bodyText: string; text: string }[],
   bodyText: string,
+  // T2 carriers: the original is the anchor the refs index. Passed in rather than
+  // recovered from the body, because the body is composed prose and the original is not.
+  originalPromptText: string,
+  modelDraftedSectionIds: ReadonlySet<string>,
+  // T3: without this the carriers would ref harvested Nexpath boilerplate as the user's
+  // own points — the same self-ingestion defect, one layer down.
+  promptReviewOrigin: PromptEnhancementPromptReviewOrigin,
 ): readonly PromptEnhancementSectionV1[] {
+  // Extracted once per composition rather than per section: the points belong to the
+  // prompt, not to any one section, and recomputing invites two answers.
+  const promptPoints = extractPromptEnhancementPromptPointsV1(originalPromptText, promptReviewOrigin);
+  // Computed once alongside the points, from the same predicate, so the point fence and
+  // the ref fence cannot disagree about whether this prompt quotes Nexpath back.
+  const inputCarriesPriorBody = promptEnhancementInputCarriesPriorBodyV1(originalPromptText, promptReviewOrigin);
   return sectionPlans.map((sectionPlan) => {
     const rendered = renderedSections.find((section) => section.sectionId === sectionPlan.sectionId);
     const startOffset = rendered ? bodyText.indexOf(rendered.text) : -1;
@@ -1036,6 +1119,29 @@ function attachSpanRefs(
         textStoragePolicy: 'text_in_body_only',
       }]
       : [];
+
+    // T2 carriers, written ONCE here. The original section quotes itself in full, so its
+    // ref is stated rather than searched for — searching would find the same span by a
+    // fuzzier route and could disagree with it.
+    const isOriginalSection = sectionPlan.sectionKind === 'original_request_or_goal';
+    const originalTextRef = buildPromptEnhancementOriginalTextRefV1({
+      sectionId: sectionPlan.sectionId,
+      originalPromptText,
+      sectionBodyText: rendered?.bodyText ?? '',
+      quotedText: isOriginalSection && originalPromptText.length > 0 ? originalPromptText : undefined,
+      inputCarriesPriorBody,
+    });
+    const promptPointRefs = buildPromptEnhancementPromptPointRefsV1({
+      sectionId: sectionPlan.sectionId,
+      originalPromptText,
+      promptPoints,
+      sectionBodyText: rendered?.bodyText ?? '',
+    });
+    const transformReasonCodes = buildPromptEnhancementTransformReasonCodesV1({
+      isOriginalSection,
+      wasComposedByModel: modelDraftedSectionIds.has(sectionPlan.sectionId),
+      originalTextRef,
+    });
 
     return {
       sectionId: sectionPlan.sectionId,
@@ -1077,6 +1183,9 @@ function attachSpanRefs(
       safetyFlags: sectionPlan.safetyFlags,
       sensitivityFlags: sectionPlan.sensitivityFlags,
       spanRefs,
+      originalTextRefs: [originalTextRef],
+      promptPointRefs,
+      transformReasonCodes,
       publicExplanationCategory: 'source_coverage',
       whyHelpReasonCodes: sectionPlan.structuredContentPartRefs,
       callVisibilityMode: sectionPlan.callVisibilityMode,
@@ -1372,7 +1481,18 @@ function runtimeBlockReasonFor(
   if (fallbackMode === 'deterministic_body') {
     return runtimeState === 'invalid_output' ? 'malformed_output' : 'validation_failed';
   }
-  if (fallbackMode === 'original_prompt_only' || fallbackMode === 'no_popup') return 'not_applicable';
+  if (fallbackMode === 'original_prompt_only' || fallbackMode === 'no_popup') {
+    // An empty section plan renders the user's own prompt and nothing else — the thinnest body
+    // there is. That is unremarkable when no call was requested, and it is a failure when one was:
+    // a key was present, the popup was judged worth showing, and the pipeline still produced no
+    // guidance. Reporting both as 'not_applicable' made the second indistinguishable from the
+    // first, so the state is carried through when there is one.
+    if (runtimeState === 'validation_failed') return 'validation_failed';
+    if (runtimeState === 'invalid_output') return 'malformed_output';
+    if (runtimeState === 'timeout') return 'timeout';
+    if (runtimeState === 'provider_unavailable') return 'provider_unavailable';
+    return 'not_applicable';
+  }
   return undefined;
 }
 

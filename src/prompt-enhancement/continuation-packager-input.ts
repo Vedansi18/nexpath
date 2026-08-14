@@ -172,6 +172,28 @@ function continuationDefaultCurrentBodyV1(input: {
             textStoragePolicy: 'text_in_body_only',
           },
         ],
+        // T2 carriers. This fixture's body is a placeholder the packager re-points, so it
+        // quotes no original text — recorded as a REFUSED ref with its reason rather than
+        // an empty list, which would read as "nothing to quote" instead of "not located".
+        originalTextRefs: [
+          {
+            refId: 'section-original:otr:1',
+            sectionId: 'section-original',
+            startOffset: -1,
+            endOffset: -1,
+            resolution: 'refused',
+            refusalReason: 'not_found_in_original',
+          },
+        ],
+        promptPointRefs: [
+          {
+            refId: 'section-original:ppr:1',
+            sectionId: 'section-original',
+            promptPointId: 'part-original',
+            resolution: 'exact',
+          },
+        ],
+        transformReasonCodes: ['preserved_verbatim', 'no_original_text_quoted'],
         publicExplanationCategory: 'source_coverage',
         whyHelpReasonCodes: ['part-original'],
         callVisibilityMode: 'deterministic',

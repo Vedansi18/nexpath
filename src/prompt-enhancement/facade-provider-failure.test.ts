@@ -30,7 +30,7 @@ import { renderPromptEnhancementPopupFrameV1 } from './cli-submit-popup.js';
 const mockCall = vi.hoisted(() => ({
   result: { ok: false, reason: 'no_key' } as
     | { ok: true; output: unknown }
-    | { ok: false; reason: 'no_key' | 'no_eligible_sections' | 'provider_error' | 'timeout' | 'invalid_output' },
+    | { ok: false; reason: 'no_key' | 'no_eligible_sections' | 'provider_error' | 'timeout' | 'invalid_output' | 'deadline_exceeded' },
 }));
 vi.mock('./llm-composer.js', async (importOriginal) => {
   const original = await importOriginal<typeof import('./llm-composer.js')>();
@@ -190,5 +190,79 @@ describe('TI-2: facade maps composer failure reasons onto the existing runtime s
     expect(result.disposition).toBe('show_current_body');
     const rendered = buildPromptEnhancementPopupRenderModelV1({ result, timestampMs: Date.now(), deliverySurface: result.delivery.deliveryChannel });
     expect(rendered.state === 'render_model_ready' && rendered.model.providerFailureNotice).toBeUndefined();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Key-path reliability: two states that used to be silent now carry a reason.
+  //
+  // `no_eligible_sections` was filed as "genuinely not requested" alongside
+  // `no_key`. That was true only while the composer was gated off. Now that it
+  // runs for every shown popup with a key, the same classification hides the
+  // thinnest body there is — the user's own prompt and no guidance — behind the
+  // label of a normal deterministic render.
+  //
+  // `deadline_exceeded` is new: the surrounding budget ran out BETWEEN attempts,
+  // rather than one call exceeding its own limit. Kept distinct in the composer
+  // for logs, mapped onto the existing timeout state here, because to a user the
+  // two are the same event and PE-G4 forbids a new failure state machine.
+  // ---------------------------------------------------------------------------
+  describe('states that used to be silent', () => {
+    beforeEach(() => { process.env['OPENAI_API_KEY'] = `sk-${'x'.repeat(40)}`; });
+
+    it('carries the caller-declared deadline through to the composer', async () => {
+      // The ceiling is worth nothing if nothing supplies it. The composer is mocked here, so this
+      // asserts the wiring: whatever the caller declared reaches the call site unchanged.
+      const { composeStructuredComposerOutputV1 } = await import('./llm-composer.js');
+      mockCall.result = { ok: true, output: { outputId: 'o', sectionDrafts: [], composerClaims: [] } };
+      const { preparePromptEnhancement } = await import('./facade.js');
+      await preparePromptEnhancement({ ...request(NLP_HEAVY_PROMPT), deadlineAtMs: 123_456 });
+
+      const calls = vi.mocked(composeStructuredComposerOutputV1).mock.calls;
+      expect(calls.length).toBeGreaterThan(0);
+      expect(calls[calls.length - 1]![0]).toMatchObject({ deadlineAtMs: 123_456 });
+    });
+
+    it('passes no deadline when the caller declared none', async () => {
+      const { composeStructuredComposerOutputV1 } = await import('./llm-composer.js');
+      vi.mocked(composeStructuredComposerOutputV1).mockClear();
+      mockCall.result = { ok: true, output: { outputId: 'o', sectionDrafts: [], composerClaims: [] } };
+      const { preparePromptEnhancement } = await import('./facade.js');
+      await preparePromptEnhancement(request(NLP_HEAVY_PROMPT));
+
+      const calls = vi.mocked(composeStructuredComposerOutputV1).mock.calls;
+      expect(calls[calls.length - 1]![0].deadlineAtMs).toBeUndefined();
+    });
+
+    it('no_eligible_sections WITH a key is named, not filed as "not requested"', async () => {
+      mockCall.result = { ok: false, reason: 'no_eligible_sections' };
+      const result = await prepared();
+
+      expect(validatePromptEnhancementPrepareResultV1(result)).toEqual({ ok: true, reasonCodes: [] });
+      // The point of the change: something on the result says why the body is not model-composed.
+      expect(result.callAndVisibilityMetadata.fallbackReason).not.toBe('not_applicable');
+      expect(result.callAndVisibilityMetadata.fallbackReason).toBe('validation_failed');
+    });
+
+    it('no_key stays "not requested" — the Q5 ruling, unchanged', async () => {
+      delete process.env['OPENAI_API_KEY'];
+      mockCall.result = { ok: false, reason: 'no_key' };
+      const result = await prepared();
+
+      expect(result.callAndVisibilityMetadata.callVisibilityMode).toBe('deterministic');
+      expect(result.callAndVisibilityMetadata.fallbackReason).toBe('not_applicable');
+      expect(result.callAndVisibilityMetadata.providerFailureState).toBe('none');
+    });
+
+    it('deadline_exceeded reports as a timeout to the user, distinctly in the composer', async () => {
+      mockCall.result = { ok: false, reason: 'deadline_exceeded' };
+      const result = await prepared();
+
+      expect(validatePromptEnhancementPrepareResultV1(result)).toEqual({ ok: true, reasonCodes: [] });
+      expect(result.callAndVisibilityMetadata.callVisibilityMode).toBe('fallback_no_llm');
+      expect(result.callAndVisibilityMetadata.fallbackReason).toBe('timeout');
+      expect(result.callAndVisibilityMetadata.providerFailureState).toBe('timeout');
+      // Still a usable popup — the deadline exists so the failure is answerable, not so it vanishes.
+      expect(result.disposition).toBe('show_current_body');
+    });
   });
 });

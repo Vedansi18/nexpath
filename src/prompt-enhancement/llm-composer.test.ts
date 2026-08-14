@@ -346,3 +346,202 @@ describe('composer authority self-report — framing and evidence quote', () => 
     expect(sawRequote).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------------------------
+// Key-path reliability: coverage as a retry condition, and the caller-supplied wall-clock ceiling.
+// ---------------------------------------------------------------------------------------------
+
+/** Two renderable sections, so a reply can be short without being empty. */
+const TWO_SECTIONS = planning([
+  { sectionId: 'sec-verify', sectionKind: 'verification_or_test_plan', structuredContentPartRefs: ['fact-a'] },
+  { sectionId: 'sec-risk', sectionKind: 'risk_safety_or_confirmation', structuredContentPartRefs: ['fact-b'] },
+  { sectionId: 'sec-orig', sectionKind: 'original_request_or_goal', structuredContentPartRefs: ['fact-x'] },
+]);
+
+function draft(sectionId: string, factId: string) {
+  return { sectionId, bodyText: `Wording for ${sectionId}.`, sourceFactIds: [factId] };
+}
+
+function reply(drafts: readonly { sectionId: string; bodyText: string; sourceFactIds: string[] }[]): string {
+  return JSON.stringify({ detectedLanguageSelfReport: 'en', sectionDrafts: drafts, composerClaims: ['claim:fact-a'] });
+}
+
+/** A client that answers each attempt from a queue and records every user prompt it was sent. */
+function scriptedClient(replies: readonly string[]): {
+  client: PromptEnhancementComposerClientV1;
+  prompts: string[];
+} {
+  const prompts: string[] = [];
+  let call = 0;
+  return {
+    prompts,
+    client: {
+      chat: { completions: { create: async (body) => {
+        prompts.push(body.messages.map((m) => m.content).join('\n'));
+        const content = replies[Math.min(call, replies.length - 1)] ?? null;
+        call += 1;
+        return { choices: [{ message: { content } }] };
+      } } },
+    },
+  };
+}
+
+const twoSectionInput = { enhancementId: 'pe:req-1', originalPromptText: 'Fix the failing test.', planning: TWO_SECTIONS };
+
+describe('coverage as a retry condition', () => {
+  it('retries a short draft set and names the missing sectionIds in the directive', async () => {
+    const short = reply([draft('sec-verify', 'fact-a')]);
+    const full = reply([draft('sec-verify', 'fact-a'), draft('sec-risk', 'fact-b')]);
+    const { client: scripted, prompts } = scriptedClient([short, full]);
+
+    const result = await composeStructuredComposerOutputV1(twoSectionInput, scripted);
+
+    expect(result.ok).toBe(true);
+    expect(prompts).toHaveLength(2);
+    expect(prompts[0]).not.toContain('did not include a draft for every section');
+    expect(prompts[1]).toContain('did not include a draft for every section');
+    expect(prompts[1]).toContain('sec-risk');
+    expect(prompts[1]).not.toContain('sec-verify,');
+  });
+
+  it('exits invalid_output when the set stays short — never ok with a partial body', async () => {
+    const short = reply([draft('sec-verify', 'fact-a')]);
+    const { client: scripted, prompts } = scriptedClient([short]);
+
+    const result = await composeStructuredComposerOutputV1(twoSectionInput, scripted);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe('invalid_output');
+    expect(prompts).toHaveLength(4); // the existing bound of 3 retries, not a new budget
+  });
+
+  it('returns a full draft set on the first attempt with no extra call', async () => {
+    const full = reply([draft('sec-verify', 'fact-a'), draft('sec-risk', 'fact-b')]);
+    const { client: scripted, prompts } = scriptedClient([full]);
+
+    const result = await composeStructuredComposerOutputV1(twoSectionInput, scripted);
+
+    expect(result.ok).toBe(true);
+    expect(prompts).toHaveLength(1);
+  });
+
+  it('drops a stale coverage directive when the next attempt fails for a different reason', async () => {
+    // A short reply, then one that drifts language, then a good one. The directive naming the
+    // sections missing from the FIRST reply must not still be attached on the third attempt: by
+    // then it describes a reply two rounds old.
+    const short = reply([draft('sec-verify', 'fact-a')]);
+    const drifted = JSON.stringify({
+      detectedLanguageSelfReport: 'fr',
+      sectionDrafts: [draft('sec-verify', 'fact-a'), draft('sec-risk', 'fact-b')],
+      composerClaims: ['claim:fact-a'],
+    });
+    const full = reply([draft('sec-verify', 'fact-a'), draft('sec-risk', 'fact-b')]);
+    const { client: scripted, prompts } = scriptedClient([short, drifted, full]);
+
+    const result = await composeStructuredComposerOutputV1(twoSectionInput, scripted);
+
+    expect(result.ok).toBe(true);
+    expect(prompts).toHaveLength(3);
+    expect(prompts[1]).toContain('did not include a draft for every section'); // from the short reply
+    expect(prompts[2]).not.toContain('did not include a draft for every section'); // cleared
+  });
+
+  it('ignores extra drafts the plan did not ask for — coverage is about what is MISSING', async () => {
+    const withExtra = reply([draft('sec-verify', 'fact-a'), draft('sec-risk', 'fact-b'), draft('sec-ghost', 'fact-a')]);
+    const { client: scripted, prompts } = scriptedClient([withExtra]);
+
+    const result = await composeStructuredComposerOutputV1(twoSectionInput, scripted);
+
+    expect(result.ok).toBe(true);
+    expect(prompts).toHaveLength(1);
+  });
+});
+
+describe('the caller-supplied wall-clock ceiling', () => {
+  const full = reply([draft('sec-verify', 'fact-a'), draft('sec-risk', 'fact-b')]);
+
+  it('behaves byte-identically to today when no deadline is passed', async () => {
+    const { client: scripted, prompts } = scriptedClient([full]);
+    const result = await composeStructuredComposerOutputV1(twoSectionInput, scripted);
+    expect(result.ok).toBe(true);
+    expect(prompts).toHaveLength(1);
+  });
+
+  it('starts the attempt when a whole further call still fits', async () => {
+    const { client: scripted, prompts } = scriptedClient([full]);
+    const result = await composeStructuredComposerOutputV1(
+      { ...twoSectionInput, deadlineAtMs: 100_000, nowMs: () => 10_000 },
+      scripted,
+    );
+    expect(result.ok).toBe(true);
+    expect(prompts).toHaveLength(1);
+  });
+
+  it('refuses with deadline_exceeded and makes NO provider call when a whole call does not fit', async () => {
+    const { client: scripted, prompts } = scriptedClient([full]);
+    const result = await composeStructuredComposerOutputV1(
+      { ...twoSectionInput, deadlineAtMs: 50_000, nowMs: () => 40_000 },
+      scripted,
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe('deadline_exceeded');
+    expect(prompts).toHaveLength(0);
+  });
+
+  it('treats a non-finite deadline as no ceiling rather than declining every attempt', async () => {
+    // Fails CLOSED without the guard: every comparison against NaN is false, so the composer would
+    // refuse on every popup and report a deadline exhaustion — a silent total outage that reads
+    // like a provider fault. No ceiling is the honest fallback; the request validator names the bad
+    // value separately.
+    const full = reply([draft('sec-verify', 'fact-a'), draft('sec-risk', 'fact-b')]);
+    const { client: scripted, prompts } = scriptedClient([full]);
+
+    const result = await composeStructuredComposerOutputV1(
+      { ...twoSectionInput, deadlineAtMs: Number.NaN, nowMs: () => 10_000 },
+      scripted,
+    );
+
+    expect(result.ok).toBe(true);
+    expect(prompts).toHaveLength(1);
+  });
+
+  it('still refuses on a deadline that has genuinely passed', async () => {
+    const full = reply([draft('sec-verify', 'fact-a'), draft('sec-risk', 'fact-b')]);
+    const { client: scripted, prompts } = scriptedClient([full]);
+
+    const result = await composeStructuredComposerOutputV1(
+      { ...twoSectionInput, deadlineAtMs: 1, nowMs: () => 10_000 },
+      scripted,
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe('deadline_exceeded');
+    expect(prompts).toHaveLength(0);
+  });
+
+  it('stops BETWEEN attempts, never mid-call, when the budget runs out during the loop', async () => {
+    const short = reply([draft('sec-verify', 'fact-a')]);
+    const { client: scripted, prompts } = scriptedClient([short]);
+    // Room for the first attempt only; the clock advances past the ceiling once it has run.
+    let nowValue = 10_000;
+    const result = await composeStructuredComposerOutputV1(
+      {
+        ...twoSectionInput,
+        deadlineAtMs: 60_000,
+        nowMs: () => {
+          const current = nowValue;
+          nowValue = 30_000; // after the first attempt there is no longer room for a whole call
+          return current;
+        },
+      },
+      scripted,
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe('deadline_exceeded');
+    expect(prompts).toHaveLength(1); // the in-flight call completed; the SECOND never started
+  });
+});

@@ -641,6 +641,73 @@ export interface PromptEnhancementSourceAttributionV1 {
   privateIdPolicy: 'metadata_only_not_body';
 }
 
+/**
+ * Why a ref could not be resolved. A ref that cannot resolve is REFUSED — kept with
+ * its reason — rather than dropped, so a body that quotes nothing is distinguishable
+ * from a body whose quotes could not be located.
+ */
+export type PromptEnhancementRefRefusalReason =
+  | 'not_found_in_original'
+  | 'ambiguous_multiple_matches'
+  | 'below_minimum_length'
+  | 'offsets_out_of_range'
+  | 'offsets_do_not_match_quote'
+  /**
+   * The shared text is Nexpath's own, echoed back through a prompt that quotes a previous
+   * enhanced body. A ref would say the section quotes the USER, which is false however
+   * exactly the characters line up.
+   */
+  | 'self_ingested_generated_text';
+
+/**
+ * A ref from a composed section back to the characters of the user's own prompt.
+ *
+ * Offsets, not copies: an offset cannot drift from the text it indexes, while a copy
+ * is a second thing that can disagree with the first. Offsets index `originalPromptText`
+ * exactly, so `originalPromptText.slice(startOffset, endOffset)` IS the quoted text.
+ *
+ * `resolution: 'refused'` carries `startOffset === -1` and a reason. Callers must not
+ * treat a refused ref as a quote.
+ */
+export interface PromptEnhancementOriginalTextRefV1 {
+  refId: string;
+  sectionId: string;
+  /** Index into `originalPromptText`; -1 when refused. */
+  startOffset: number;
+  /** Exclusive end index into `originalPromptText`; -1 when refused. */
+  endOffset: number;
+  resolution: 'exact' | 'refused';
+  refusalReason?: PromptEnhancementRefRefusalReason;
+}
+
+/** A ref from a composed section to a planned prompt point it carries. */
+export interface PromptEnhancementPromptPointRefV1 {
+  refId: string;
+  sectionId: string;
+  promptPointId: string;
+  resolution: 'exact' | 'refused';
+  refusalReason?: PromptEnhancementRefRefusalReason;
+}
+
+/**
+ * What composition did to this section's text. Typed so a reader can tell a preserved
+ * section from a rewritten one without re-reading the prose.
+ *
+ * Every value here is assigned somewhere. A code nothing can produce is a dead branch
+ * that reads as coverage without being coverage, so none is declared "for completeness".
+ *
+ * `carried_from_previous_body` is APPENDED on the carry-forward path rather than
+ * replacing the code that says how the text was originally made — a carried section is
+ * both "model-composed" and "being served again", and substituting would lose the first.
+ */
+export type PromptEnhancementTransformReasonCodeV1 =
+  | 'preserved_verbatim'
+  | 'composed_by_model'
+  | 'rendered_deterministically'
+  | 'carried_from_previous_body'
+  | 'quotes_original_text'
+  | 'no_original_text_quoted';
+
 export interface PromptEnhancementSectionV1 {
   sectionId: string;
   sectionKind: string;
@@ -682,6 +749,9 @@ export interface PromptEnhancementSectionV1 {
   safetyFlags: readonly string[];
   sensitivityFlags: readonly string[];
   spanRefs: readonly PromptEnhancementSpanRefV1[];
+  originalTextRefs: readonly PromptEnhancementOriginalTextRefV1[];
+  promptPointRefs: readonly PromptEnhancementPromptPointRefV1[];
+  transformReasonCodes: readonly PromptEnhancementTransformReasonCodeV1[];
   publicExplanationCategory: PromptEnhancementPublicDiagnosticCategory;
   whyHelpReasonCodes: readonly string[];
   callVisibilityMode: PromptEnhancementCallVisibilityMode;
@@ -1564,6 +1634,18 @@ export interface PromptEnhancementPrepareRequestV1 {
   requestId: string;
   projectRoot: string;
   hostSurface: PromptEnhancementHostSurface;
+  /**
+   * When the hook carrying this request has to be finished, as epoch milliseconds.
+   *
+   * Passed through to the composer, which declines to START a call that cannot complete before it.
+   * The value belongs to the caller because the caller is what knows which hook it is running on —
+   * the budget differs per surface, and there is deliberately no constant for it here.
+   *
+   * Absent means no ceiling, which is the behaviour without it. A caller that omits it is
+   * unaffected; a caller that supplies it gets a typed refusal between attempts instead of being
+   * killed mid-loop with no disposition, no popup, and nothing left to answer with.
+   */
+  deadlineAtMs?: number;
   sourcePrompt: {
     text: string;
     origin: 'user' | 'pe_generated_echo' | 'unknown';
@@ -1783,6 +1865,14 @@ export function validatePromptEnhancementPrepareRequestV1(
   if (!isCompleteSourceSignals(obj?.['sourceSignals'])) reasonCodes.push('missing_source_signals');
   if (!isCompleteCallVisibility(obj?.['callVisibilityState'])) reasonCodes.push('missing_call_visibility_state');
   if (!asRecord(obj?.['privacyAndStoragePolicy'])) reasonCodes.push('missing_privacy_storage_policy');
+  // Optional, but not unchecked. Downstream this is compared against the clock, and every
+  // comparison against a non-finite value is false — so a malformed deadline would silently
+  // decline every composer attempt rather than raising anything. The composer treats a bad value
+  // as no ceiling so that cannot happen; this is what names it.
+  const deadlineAtMs = obj?.['deadlineAtMs'];
+  if (deadlineAtMs !== undefined && (typeof deadlineAtMs !== 'number' || !Number.isFinite(deadlineAtMs))) {
+    reasonCodes.push('invalid_deadline_at_ms');
+  }
   return { ok: reasonCodes.length === 0, reasonCodes };
 }
 
