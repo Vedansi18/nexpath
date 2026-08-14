@@ -7,6 +7,7 @@ import {
   registerWindsurfHookCommand,
   runWindsurfHookAction,
   isReplacementEcho,
+  WINDSURF_BLOCK_CARD_MESSAGE,
 } from './windsurf-hook.js';
 
 describe('handleWindsurfHookCli', () => {
@@ -326,5 +327,61 @@ describe('⭐ RC12 — echo check projectRoot resolution', () => {
       exit: () => {},
     });
     expect(seen).toEqual(['/explicit/root']);
+  });
+});
+
+/**
+ * RC14: on a submit-flow block the hook writes WINDSURF_BLOCK_CARD_MESSAGE to
+ * STDERR before exit(2) — Cascade renders that text in its block card
+ * ("%d hook(s) blocked this action: %s"); empty stderr falls back to the
+ * vendor default "Action blocked by hook". Allow paths must leave stderr
+ * untouched so nothing leaks into a card that never renders.
+ */
+describe('⭐ RC14 — professional block-card text via stderr', () => {
+  const payload = JSON.stringify({ tool_info: { user_prompt: 'a fresh genuine prompt long enough to pass every guard' } });
+  const baseDeps = {
+    readStdin: async () => payload,
+    readFlagFile: () => JSON.stringify({ windsurf: true }),
+    checkReplacementEcho: async () => false,
+    handle: async () => ({ exitCode: 0 }),
+    logEvent: () => {},
+  };
+
+  it('block ⇒ stderr carries the card message, then exit 2', async () => {
+    const writes: string[] = [];
+    const spy = vi.spyOn(process.stderr, 'write').mockImplementation(((chunk: unknown) => {
+      writes.push(String(chunk)); return true;
+    }) as never);
+    const exits: number[] = [];
+    try {
+      await runWindsurfHookAction('pre_user_prompt', {}, {
+        ...baseDeps,
+        decidePromptSubmit: async () => 'block',
+        exit: (code: number) => { exits.push(code); },
+      });
+    } finally { spy.mockRestore(); }
+    expect(exits[0]).toBe(2);
+    expect(writes.join('')).toContain(WINDSURF_BLOCK_CARD_MESSAGE);
+  });
+
+  it('allow ⇒ stderr untouched', async () => {
+    const writes: string[] = [];
+    const spy = vi.spyOn(process.stderr, 'write').mockImplementation(((chunk: unknown) => {
+      writes.push(String(chunk)); return true;
+    }) as never);
+    const exits: number[] = [];
+    try {
+      await runWindsurfHookAction('pre_user_prompt', {}, {
+        ...baseDeps,
+        decidePromptSubmit: async () => 'allow',
+        exit: (code: number) => { exits.push(code); },
+      });
+    } finally { spy.mockRestore(); }
+    expect(exits[0]).toBe(0);
+    expect(writes.join('')).toBe('');
+  });
+
+  it('the message leads with the truncation-safe key phrase', () => {
+    expect(WINDSURF_BLOCK_CARD_MESSAGE.startsWith('Nexpath held this prompt')).toBe(true);
   });
 });

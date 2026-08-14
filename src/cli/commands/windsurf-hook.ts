@@ -304,6 +304,17 @@ function promptTextForHook(): string {
 }
 
 /**
+ * What Cascade's block card shows after the vendor prefix ("1 hook(s) blocked
+ * this action: …") when this hook blocks a submit — written to STDERR right
+ * before `exit(2)` (RC14; substitution + truncation behaviour verified live
+ * against the shipped language server). Wording mirrors Cursor's
+ * `user_message`; the key phrase leads so the card's word-boundary truncation
+ * (~24 chars observed) still reads professionally: "Nexpath held this prompt".
+ */
+export const WINDSURF_BLOCK_CARD_MESSAGE =
+  'Nexpath held this prompt so you could refine it. Your refined version is being sent instead.';
+
+/**
  * Is this submit the hook's OWN replacement coming back around? (VED-PE-10.)
  *
  * Live sequence, measured 2026-08-13 on Cursor: block → replacement injected +
@@ -692,6 +703,15 @@ export async function runWindsurfHookAction(
       // explicit statement of the rule: a timeout is never a decision.
       if (!decided.timedOut && decided.value === 'block') decision = 'block';
       if (decision === 'block') {
+        // ── RC14 (owner demand, verified live 2026-08-14): Cascade's block card
+        // is "%d hook(s) blocked this action: %s", where %s is THIS process's
+        // STDERR on exit 2 — the vendor default "Action blocked by hook" fills
+        // in only when stderr is empty (template + default extracted from
+        // language_server_linux_x64; stderr substitution proven with a probe
+        // hook whose stderr text rendered in the card). The card TRUNCATES at a
+        // word boundary (~24 chars observed), so the key phrase leads and the
+        // sentence degrades cleanly wherever it is cut.
+        try { process.stderr.write(WINDSURF_BLOCK_CARD_MESSAGE); } catch { /* card falls back to vendor text */ }
         exit(2);
         return;
       }
