@@ -42,6 +42,7 @@ import {
   runPromptEnhancementSequencePlannerV1,
   type PromptEnhancementSequencePlannerClientV1,
 } from './sequence-planner.js';
+import type { PromptEnhancementSequenceItemV1 } from './sequence-payload.js';
 import { redactSecrets } from '../store/redact.js';
 import type { Database } from 'sql.js';
 
@@ -54,8 +55,19 @@ import type { Database } from 'sql.js';
  */
 export const preparePromptEnhancement: PromptEnhancementPrepareFacadeV1 = async (request) => {
   assertPrepareRequest(request);
-  return prepare(request);
+  return (await prepare(request)).result;
 };
+
+/**
+ * MPS P1b-ii — the sequence entry's return: the prepare result plus, when the planner ran and produced
+ * a sequence, its full item list (structure only, no wording — item 1's slice is the whole prompt). The
+ * background wording batch (P2) consumes `plannerItems`; a non-sequence / fallback prepare leaves it
+ * undefined. The base `preparePromptEnhancement` above is UNCHANGED — it returns just the result.
+ */
+export interface PreparePromptEnhancementWithSequenceResultV1 {
+  result: PromptEnhancementPrepareResultV1;
+  plannerItems?: readonly PromptEnhancementSequenceItemV1[];
+}
 
 /**
  * MPS P1b-i — the runtime dependencies the sequence planner (Hiren Unit P1) needs and the pure
@@ -83,7 +95,7 @@ export interface PreparePromptEnhancementSequenceDepsV1 {
 export async function preparePromptEnhancementWithSequenceV1(
   request: PromptEnhancementPrepareRequestV1,
   seqDeps: PreparePromptEnhancementSequenceDepsV1,
-): Promise<PromptEnhancementPrepareResultV1> {
+): Promise<PreparePromptEnhancementWithSequenceResultV1> {
   assertPrepareRequest(request);
   return prepare(request, undefined, undefined, seqDeps);
 }
@@ -91,11 +103,11 @@ export async function preparePromptEnhancementWithSequenceV1(
 /** Apply a bounded directional/details action against the current body contract. */
 export const applyPromptEnhancementAction: PromptEnhancementActionFacadeV1 = async (request) => {
   assertPrepareRequest(request);
-  const base = await prepare(
+  const base = (await prepare(
     request,
     request.action.actionType === 'use_original' ? undefined : request.action.actionType,
     request,
-  );
+  )).result;
   if (request.action.actionType === 'use_current_body') {
     const editedBodyText = request.currentBodyBinding.editedBodyText;
     const safety = validatePromptEnhancementSafety({
@@ -131,7 +143,7 @@ async function prepare(
   action?: PromptEnhancementActionRequestV1['action']['actionType'],
   actionRequest?: PromptEnhancementActionRequestV1,
   seqDeps?: PreparePromptEnhancementSequenceDepsV1,
-): Promise<PromptEnhancementPrepareResultV1> {
+): Promise<PreparePromptEnhancementWithSequenceResultV1> {
   const enhancementId = `pe:${request.requestId}`;
   const routeInput: PromptEnhancementRouteInput = {
     routeDecisionId: `${enhancementId}:route`,
@@ -367,6 +379,9 @@ async function prepare(
   // both the provider-visible `promptContext` and the local `localOriginalText` — offsets align and no
   // raw user text reaches the provider.
   let plannerSummary: { remainingTaskCount: number; taskRoleLabels: readonly string[] } | undefined;
+  // MPS P1b-ii: the planner's full item list, captured only when it ran + produced a sequence — the
+  // background wording batch (P2) consumes it. Undefined on the non-sequence / fallback path.
+  let plannerItems: readonly PromptEnhancementSequenceItemV1[] | undefined;
   if (seqDeps !== undefined && action === undefined && !noPopup && isSequenceCandidateForRoute(route)) {
     const redactedText = redactSecrets(request.sourcePrompt.text);
     const plannerResult = await runPromptEnhancementSequencePlannerV1(
@@ -393,13 +408,15 @@ async function prepare(
         remainingTaskCount: plannerResult.output.summaryData.remainingTaskCount,
         taskRoleLabels: plannerResult.output.summaryData.taskRoleLabels,
       };
+      plannerItems = plannerResult.output.items;
     }
     // else → fall through to the describe fallback (single-prompt path), exactly as today.
   }
-  return buildResult(request, enhancementId, route, planning, composed, safety, noPopup, {
+  const result = buildResult(request, enhancementId, route, planning, composed, safety, noPopup, {
     deterministicFallbackApplied,
     preSubstitutionAuthorityEscalationState,
   }, plannerSummary);
+  return { result, plannerItems };
 }
 
 /**

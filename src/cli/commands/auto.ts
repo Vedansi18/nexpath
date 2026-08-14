@@ -706,11 +706,14 @@ export async function runAuto(
   // to the describe path. `openai` is undefined on the production hook path (the planner then constructs
   // its own client, key-gated off the resolved OPENAI_API_KEY); tests inject a stub. This keeps the
   // `PromptEnhancementPrepareFacadeV1` contract type unchanged.
-  const preparePromptEnhancementForRunAuto: PromptEnhancementPrepareFacadeV1 = (peRequest) =>
-    preparePromptEnhancementWithSequenceV1(peRequest, {
+  const preparePromptEnhancementForRunAuto: PromptEnhancementPrepareFacadeV1 = async (peRequest) =>
+    // MPS P1b-ii: the sequence entry now returns { result, plannerItems }; existing callers keep the
+    // contract-typed result. The plannerItems (the background batch's input) are consumed by the
+    // sequence-batch wiring (P1b-ii step 8b), not this contract-typed closure.
+    (await preparePromptEnhancementWithSequenceV1(peRequest, {
       db: store.db,
       client: openai as unknown as PromptEnhancementSequencePlannerClientV1 | undefined,
-    });
+    })).result;
 
   // ── -1. Advisory-injected prompt guard ──────────────────────────────────────
   // When the stop hook injects an advisory option as a new Claude turn (block decision),

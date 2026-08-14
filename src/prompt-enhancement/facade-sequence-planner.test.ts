@@ -105,10 +105,16 @@ beforeAll(async () => {
 describe('PE facade — sequence planner replaces the describe splitter (MPS P1b-i)', () => {
   it('candidate + a valid planner sequence → the compact summary count/roles come from the PLANNER', async () => {
     const req = candidateRequest();
-    const result = await preparePromptEnhancementWithSequenceV1(req, {
+    const { result, plannerItems } = await preparePromptEnhancementWithSequenceV1(req, {
       db,
       client: clientReturning(validSequenceReply(CANDIDATE_TEXT.length)),
     });
+
+    // MPS P1b-ii (8a): the sequence entry now also returns the planner's full item list — the input
+    // the background wording batch (P2) consumes. Present when the planner produced a sequence.
+    expect(plannerItems).toBeDefined();
+    expect(plannerItems?.length).toBeGreaterThanOrEqual(2);
+    expect(plannerItems?.[0].itemKind).toBe('first_task');
 
     // The candidate branch still shows the popup and emits the compact sequence summary.
     expect(result.disposition).toBe('show_current_body');
@@ -133,7 +139,7 @@ describe('PE facade — sequence planner replaces the describe splitter (MPS P1b
       points: [], groups: [], items: [], promptDirectives: [],
       summaryData: { summaryId: 's1', remainingTaskCount: 0 },
     });
-    const planned = await preparePromptEnhancementWithSequenceV1(req, { db, client: clientReturning(singleReply) });
+    const { result: planned } = await preparePromptEnhancementWithSequenceV1(req, { db, client: clientReturning(singleReply) });
     const fallback = await preparePromptEnhancement(req);
 
     // Byte-identical summary to the describe path — the planner outcome supplied nothing.
@@ -143,7 +149,7 @@ describe('PE facade — sequence planner replaces the describe splitter (MPS P1b
 
   it('candidate + planner provider failure → FALLS BACK to the describe summary', async () => {
     const req = candidateRequest();
-    const planned = await preparePromptEnhancementWithSequenceV1(req, { db, client: clientThrowing(new Error('provider down')) });
+    const { result: planned } = await preparePromptEnhancementWithSequenceV1(req, { db, client: clientThrowing(new Error('provider down')) });
     const fallback = await preparePromptEnhancement(req);
 
     expect(planned.uiView.handoffAndSequenceSummary?.compactFirstPopupSequenceSummary)
