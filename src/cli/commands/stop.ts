@@ -39,6 +39,8 @@ import { emitPromptEnhancementCostObservabilityV1 } from '../../prompt-enhanceme
 import { evaluatePromptEnhancementMpsIntakeDecisionV1 } from '../../prompt-enhancement/intake-decision.js';
 import { buildPromptEnhancementCliMpsIntakeEvidenceV1 } from '../../prompt-enhancement/cli-mps-intake-evidence.js';
 import { runPromptEnhancementCliMpsFirstPopupV1, buildPromptEnhancementMpsCancelFeedbackEventV1, promptEnhancementMpsActionSignalKindV1 } from '../../prompt-enhancement/cli-mps-run.js';
+import { assemblePromptEnhancementSequenceBodyProducerInputV1, startSequenceWordingBatchV1 } from '../../prompt-enhancement/sequence-body-producer-stop-input.js';
+import { runPromptEnhancementSequenceBodyProducerV1 } from '../../prompt-enhancement/sequence-body-producer-runtime.js';
 import { intakePromptEnhancementSequenceOnFirstSendV1 } from '../../prompt-enhancement/sequence-intake.js';
 import { upsertPendingPromptSequence, getActivePendingPromptSequence, recordPromptEnhancementSequenceOfferDeclined, updatePendingPromptSequenceState, type PromptEnhancementSequenceDeclinedDispositionV1 } from '../../store/pending-sequences.js';
 import type { PromptEnhancementSequenceRuntimeStateV1 } from '../../prompt-enhancement/sequence-runtime.js';
@@ -494,6 +496,24 @@ export function registerStopCommand(program: import('commander').Command): void 
               reasonCodes: mpsGate.reasonCodes.slice(0, 6),
             });
             if (mpsGate.renderPermission === 'mps_render_permitted') {
+              // MPS P1b-ii (8b-2c) — kick off the background wording batch for items 2…N BEFORE the
+              // popup opens, so it runs while the user reads/decides and is finished by the time they
+              // send (§4.13). It is AWAITED only on send (below); on close/Escape/Use-original it is
+              // simply never awaited — discarded — so a cancel never waits 20-30s on wording that will
+              // be thrown away (§4.13 Q19). Gated TRANSITIVELY by the planner config: plannerItems
+              // exist only when the planner ran (off by default), so in production this assembles to
+              // no_planner_items and nothing starts — no live LLM cost until MPS is activated. The
+              // handle's .catch means a provider failure can never crash the hook before its exit write.
+              const sequenceBatch = startSequenceWordingBatchV1(
+                assemblePromptEnhancementSequenceBodyProducerInputV1({
+                  result:                  pending.result,
+                  plannerItems:            pending.plannerItems,
+                  plannerPromptDirectives: pending.plannerPromptDirectives,
+                }),
+                (batchInput) => runPromptEnhancementSequenceBodyProducerV1(batchInput),
+                (err) => logger.debug('stop_mps_batch_error', { cwd: payload.cwd, error: String(err) }),
+              );
+              logger.debug('stop_mps_batch', { cwd: payload.cwd, started: sequenceBatch.started });
               const mps = await runPromptEnhancementCliMpsFirstPopupV1({
                 result: pending.result,
                 // NF Plan B — content-free capture of the in-popup APPLY action (mps_apply_details),
@@ -506,6 +526,16 @@ export function registerStopCommand(program: import('commander').Command): void 
               const mpsActionKind = promptEnhancementMpsActionSignalKindV1(mps.state);
               if (mpsActionKind) recordActionSignal(store, payload.cwd, mpsActionKind);
               if (mps.state === 'send' && mps.bodyText.trim().length > 0) {
+                // 8b-2c — the user SENT: await the wording batch so its items 2…N are ready before the
+                // hook writes its block decision and exits (§4.13 Q19). Resolves to null on skip/failure
+                // and never throws, so a batch problem can never lose the send. 8c persists batchResult;
+                // for now it is awaited + logged (its output is stored once the intake path consumes it).
+                const batchResult = await sequenceBatch.awaitResult();
+                logger.info('stop_mps_batch_awaited', {
+                  cwd:        payload.cwd,
+                  producedOk: Boolean(batchResult && batchResult.ok),
+                  itemCount:  batchResult && batchResult.ok ? batchResult.items.length : 0,
+                });
                 recordPromptEnhancementShownMemoryV1(store, payload.cwd, pending.request);
                 markPromptEnhancementUsedMemoryV1(store, payload.cwd, pending.request);
                 // Continuation bookkeeping (2026-08-08): the user EXPLICITLY sent the first

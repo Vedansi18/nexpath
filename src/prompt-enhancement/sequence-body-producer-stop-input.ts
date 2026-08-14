@@ -4,7 +4,10 @@ import type {
   PromptEnhancementSequenceItemV1,
   PromptEnhancementSequenceOffsetRangeV1,
 } from './sequence-payload.js';
-import type { PromptEnhancementSequenceBodyProducerInputV1 } from './sequence-body-producer-runtime.js';
+import type {
+  PromptEnhancementSequenceBodyProducerInputV1,
+  PromptEnhancementSequenceBodyProducerResultV1,
+} from './sequence-body-producer-runtime.js';
 
 /**
  * MPS P1b-ii (step 8b-2) — assemble the background wording batch's input at the Stop hook.
@@ -46,7 +49,10 @@ export function assemblePromptEnhancementSequenceBodyProducerInputV1(
   const { result, plannerItems, plannerPromptDirectives } = args;
 
   // The batch words items 2…N from the planner's list; a non-sequence prepare or a corrupt carrier
-  // (which read back undefined, fail-open) leaves nothing to word.
+  // (which read back undefined, fail-open) leaves nothing to word. This guard is ALSO how the batch
+  // stays inert in production: plannerItems exist only when the planner ran (sequenceEnabled === 'on',
+  // off by default), so a Stop hook where MPS is not activated never gets past here. The planner's
+  // config kill-switch gates the whole content pipeline transitively — no separate runtime gate here.
   if (!plannerItems || plannerItems.length === 0) return { ok: false, reason: 'no_planner_items' };
 
   // planGenerationId has no dedicated field; the handoff decision id is the same id the sequence row
@@ -85,4 +91,43 @@ export function assemblePromptEnhancementSequenceBodyProducerInputV1(
       sequenceItemIdFor: (order) => `${planGenerationId}:item:${order}`,
     },
   };
+}
+
+/**
+ * A started (or not-started) background wording batch, held across the first-popup await.
+ *
+ * `awaitResult` is called ONLY when the user sends — that is the one exit where the wording is about
+ * to be persisted, so §4.13 requires awaiting it before the hook writes its block decision and exits.
+ * On close / Escape / Use-original the caller simply never calls `awaitResult`: the in-flight LLM call
+ * is discarded (never awaited), which is what keeps a cancel from waiting 20-30s on wording that will
+ * be thrown away (§4.13 Q19).
+ */
+export interface SequenceWordingBatchHandleV1 {
+  /** Whether the batch was actually started (false when the pending PE had no assemblable input). */
+  readonly started: boolean;
+  /** Await the batch's result. Resolves to null on skip/failure — it NEVER rejects, so awaiting it on
+   *  send can neither throw nor block the injection past the provider's own timeout. */
+  awaitResult(): Promise<PromptEnhancementSequenceBodyProducerResultV1 | null>;
+}
+
+/**
+ * Start the background wording batch (or record that there was nothing to start) and return a handle
+ * the first-popup flow awaits on send / discards on cancel. The batch is kicked off EAGERLY here — the
+ * point is that it runs concurrently while the popup is open and is finished by the time the user sends
+ * (§4.13). The `.catch` is attached at creation so a rejection — awaited late on send, or never awaited
+ * on a discard — can never surface as an unhandledRejection and abort the hook's exit write.
+ */
+export function startSequenceWordingBatchV1(
+  assembled: AssemblePromptEnhancementSequenceBodyProducerResultV1,
+  runBatch: (input: PromptEnhancementSequenceBodyProducerInputV1) => Promise<PromptEnhancementSequenceBodyProducerResultV1>,
+  onError?: (err: unknown) => void,
+): SequenceWordingBatchHandleV1 {
+  if (!assembled.ok) {
+    return { started: false, awaitResult: () => Promise.resolve(null) };
+  }
+  const running = runBatch(assembled.input).catch((err) => {
+    onError?.(err);
+    return null;
+  });
+  return { started: true, awaitResult: () => running };
 }

@@ -1,7 +1,11 @@
-import { describe, expect, it } from 'vitest';
-import { assemblePromptEnhancementSequenceBodyProducerInputV1 } from './sequence-body-producer-stop-input.js';
+import { describe, expect, it, vi } from 'vitest';
+import {
+  assemblePromptEnhancementSequenceBodyProducerInputV1,
+  startSequenceWordingBatchV1,
+} from './sequence-body-producer-stop-input.js';
 import type { PromptEnhancementPrepareResultV1 } from './contracts.js';
 import type { PromptEnhancementSequenceItemV1 } from './sequence-payload.js';
+import type { PromptEnhancementSequenceBodyProducerResultV1 } from './sequence-body-producer-runtime.js';
 
 const ITEMS: readonly PromptEnhancementSequenceItemV1[] = [
   {
@@ -100,5 +104,50 @@ describe('assemblePromptEnhancementSequenceBodyProducerInputV1 (MPS P1b-ii 8b-2)
       result: stubResult('', 'h'), plannerItems: ITEMS,
     });
     expect(res).toEqual({ ok: false, reason: 'no_original' });
+  });
+});
+
+const OK_RESULT: PromptEnhancementSequenceBodyProducerResultV1 = { ok: true, items: ITEMS };
+
+describe('startSequenceWordingBatchV1 — the popup-lifetime batch handle (§4.13)', () => {
+  const assembled = () => assemblePromptEnhancementSequenceBodyProducerInputV1({
+    result: stubResult('Fix bug and add limiter', 'h'), plannerItems: ITEMS,
+  });
+
+  it('starts the batch EAGERLY (before any await) so it runs while the popup is open', () => {
+    const runBatch = vi.fn().mockResolvedValue(OK_RESULT);
+    const handle = startSequenceWordingBatchV1(assembled(), runBatch);
+    // The call has already happened — not deferred to awaitResult (which is only reached on send).
+    expect(runBatch).toHaveBeenCalledTimes(1);
+    expect(handle.started).toBe(true);
+  });
+
+  it('awaitResult (the send path) resolves the produced items', async () => {
+    const handle = startSequenceWordingBatchV1(assembled(), vi.fn().mockResolvedValue(OK_RESULT));
+    await expect(handle.awaitResult()).resolves.toEqual(OK_RESULT);
+  });
+
+  it('does not start and resolves null when there was nothing to assemble', async () => {
+    const runBatch = vi.fn();
+    const handle = startSequenceWordingBatchV1({ ok: false, reason: 'no_planner_items' }, runBatch);
+    expect(runBatch).not.toHaveBeenCalled();
+    expect(handle.started).toBe(false);
+    await expect(handle.awaitResult()).resolves.toBeNull();
+  });
+
+  it('a batch failure resolves to null (never throws) so a send is not lost, and calls onError', async () => {
+    const onError = vi.fn();
+    const handle = startSequenceWordingBatchV1(assembled(), () => Promise.reject(new Error('provider down')), onError);
+    await expect(handle.awaitResult()).resolves.toBeNull();
+    expect(onError).toHaveBeenCalledTimes(1);
+  });
+
+  it('a DISCARDED failing batch (awaitResult never called) does not reject unhandled', async () => {
+    // The .catch is attached at creation, so a close/Escape that never awaits cannot crash the hook.
+    startSequenceWordingBatchV1(assembled(), () => Promise.reject(new Error('provider down')));
+    // Let the microtask queue drain; an unhandled rejection here would fail the test run.
+    await Promise.resolve();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(true).toBe(true);
   });
 });
