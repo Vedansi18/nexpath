@@ -250,6 +250,23 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     process.env.NEXPATH_AGENT = host;
   }
 
+  // ── RC15 (macOS tester run, 2026-08-14): fresh-install ordering ───────────
+  // On a clean machine the extension activates BEFORE `nexpath install` writes
+  // `~/.nexpath/submit-flow.json`. The switch used to be read ONCE at
+  // activation, so the submit poller was never built: the hook (which reads the
+  // flag per invocation) blocked prompts and wrote decisions that NOBODY
+  // delivered, and the un-suppressed old advisory surface popped alongside the
+  // submit popups. Each host branch stores its idempotent armer here; setup
+  // completion and a bounded re-check retry it until it arms. Declared BEFORE
+  // the setup-command registration below so those callbacks never hit a TDZ.
+  let armSubmitFlowLate: ((reason: string) => boolean) | null = null;
+  // Activation-scoped (NOT the module-level poller var, which survives across
+  // activations in tests): true once THIS activation armed its submit flow.
+  let submitFlowArmed = false;
+  // Live view of "the submit surface owns advisories" for the watcher flags —
+  // flipped by the armer, read per event via getters at the watcher wiring.
+  const submitSurface = { active: false };
+
   // 1b. CLI auto-installer (additive). The extension drives the nexpath CLI via
   //     IPC; if the user installed only this extension (no manual CLI), nothing
   //     would work. Register the manual "Set up CLI" command, and — deferred so
@@ -260,14 +277,26 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   //     Entirely best-effort — any failure leaves prior behaviour untouched.
   context.subscriptions.push(
     vscode.commands.registerCommand(RUN_SETUP_COMMAND, () =>
-      runSetupCommand(context, log),
+      // RC15: setup writes ~/.nexpath/submit-flow.json — arm the submit flow
+      // the moment it completes instead of waiting for an editor restart.
+      runSetupCommand(context, log).then((r) => { armSubmitFlowLate?.('post-setup-command'); return r; }),
     ),
   );
   setTimeout(() => {
-    void offerSetupIfNeeded(context, log).catch((err) =>
-      log(`[nexpath] CLI setup offer failed: ${err instanceof Error ? err.message : String(err)}`),
-    );
+    void offerSetupIfNeeded(context, log)
+      .then(() => { armSubmitFlowLate?.('post-setup-offer'); })
+      .catch((err) =>
+        log(`[nexpath] CLI setup offer failed: ${err instanceof Error ? err.message : String(err)}`),
+      );
   }, 0);
+  // RC15: bounded re-check — covers `nexpath install` run manually in a
+  // terminal while the editor is open (no restart discipline required). Cheap:
+  // one flag-file read per tick; stops as soon as the flow arms or after 10 min.
+  const armRetry = setInterval(() => {
+    if (armSubmitFlowLate?.('late-flag-detected')) clearInterval(armRetry);
+  }, 20_000);
+  const armRetryCap = setTimeout(() => clearInterval(armRetry), 600_000);
+  context.subscriptions.push({ dispose: () => { clearInterval(armRetry); clearTimeout(armRetryCap); } });
 
   // 2. Construct + register the view provider with the B4 injectFn-aware
   //    onSelect. injectFn falls through to clipboard when the host has no
@@ -571,7 +600,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // when the submit switch is on — null otherwise, so the shipped DS bridge
     // below is byte-identical in behaviour with the switch off (R12). Reuses the
     // injected-record store (same non-consuming window-based echo idiom P8 uses).
-    const submitDeliveredStore = isWindsurfSubmitAdvisoryEnabled(process.env)
+    // `let` + closure-visible: RC15's late armer creates it when the flag file
+    // appears after activation (every consumer reads the binding per call).
+    let submitDeliveredStore = isWindsurfSubmitAdvisoryEnabled(process.env)
       ? createInjectedRecordStore()
       : null;
 
@@ -605,9 +636,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         // check and flows through unchanged; switch off ⇒ store is null and
         // this branch does not exist.
         if (submitDeliveredStore) {
+          // Local const so TS keeps the non-null narrowing inside the callback
+          // now that the store is a `let` (RC15 late-arm creates it lazily).
+          const sds = submitDeliveredStore;
           const isReplacement = await isSubmitFlowReplacement(prompt, {
             roots,
-            isRecentSubmitDelivery: (root, text) => submitDeliveredStore.isRecentEcho(root, text),
+            isRecentSubmitDelivery: (root, text) => sds.isRecentEcho(root, text),
             peekPendingDecision: (root) => peekPendingSubmitDecision(root, { expectedHost: 'windsurf' }),
           });
           if (isReplacement) {
@@ -678,7 +712,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // Why a second poller rather than extending the PE one: they read different
     // tables and have different staleness rules, and extending a shipping poller
     // would put new behaviour on the old path. This is additive by construction.
-    if (isWindsurfSubmitAdvisoryEnabled(process.env)) {
+    // RC15: construction wrapped in an idempotent armer so it can run at
+    // activation OR later, once setup has written the flag file. `return false`
+    // = not armed yet (retry later); `true` = armed (now or previously).
+    const armWindsurfSubmitFlow = (reason: string): boolean => {
+      if (submitFlowArmed) return true;
+      if (!isWindsurfSubmitAdvisoryEnabled(process.env)) return false;
+      submitFlowArmed = true;
+      submitSurface.active = true;
+      if (!submitDeliveredStore) submitDeliveredStore = createInjectedRecordStore();
       const delivery = createSubmitClipboardDelivery({
         // `vscode.env.clipboard` is the same API `cursorInject` already uses.
         writeClipboard: (text) => Promise.resolve(vscode.env.clipboard.writeText(text)),
@@ -712,13 +754,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         // extension-callable text-insert command; the submit path must use the
         // host's own injector exactly like Cursor's branch uses `cursorInject`.
         onInject: async (text) => {
-          // Owner request 2026-08-13: Windsurf's own block card text ("Action
-          // blocked by hook") is a fixed vendor string we cannot edit — show
-          // OUR professional explanation alongside it, matching Cursor's
-          // user_message wording exactly.
-          void vscode.window.showInformationMessage(
-            'Nexpath: this prompt was held so you could refine it. Your refined version is being sent instead.',
-          );
+          // RC14b (owner, 2026-08-14): NO notification toast here — the owner
+          // explicitly rejected it. The professional explanation lives in the
+          // block card itself: the hook writes WINDSURF_BLOCK_CARD_MESSAGE to
+          // stderr before exit(2), which Cascade renders in place of its
+          // "Action blocked by hook" default (RC14).
           // RC11.5: record FIRST — the DS bridge polls every 2s and injected a
           // duplicate 63ms after our dispatch because the record landed after
           // the outcome. Recording an attempt that then fails is harmless (the
@@ -758,8 +798,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       });
       submitPoller.start();
       context.subscriptions.push({ dispose: () => submitPoller?.stop() });
-      log('[nexpath] submit-time advisory ENABLED (NEXPATH_WINDSURF_PROMPTSUBMIT_ADVISORY=1)');
-    }
+      log(`[nexpath] submit-time advisory ENABLED (windsurf, ${reason})`);
+      return true;
+    };
+    armWindsurfSubmitFlow('activation');
+    armSubmitFlowLate = armWindsurfSubmitFlow;
   }
 
   // ── H6: Cursor submit-time advisory ────────────────────────────────────────
@@ -780,18 +823,22 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // `cursorInject` — NOT `chatInputInject`. It already performs clipboard →
     // raise → focus → paste internally, so the outer clipboard fallback fires
     // only if it returns false, rather than duplicating work it already did.
-    submitPoller = buildSubmitAdvisory(
-      'cursor',
-      isCursorSubmitAdvisoryEnabled(process.env),
-      croots,
-      log,
-      cursorInject,
-    ) ?? undefined;
-    if (submitPoller) {
+    // RC15: same idempotent-armer shape as the Windsurf branch — Cursor had the
+    // identical fresh-install ordering bug (flag file written after activation).
+    const armCursorSubmitFlow = (reason: string): boolean => {
+      if (submitFlowArmed) return true;
+      if (!isCursorSubmitAdvisoryEnabled(process.env)) return false;
+      submitFlowArmed = true;
+      submitSurface.active = true;
+      submitPoller = buildSubmitAdvisory('cursor', true, croots, log, cursorInject) ?? undefined;
+      if (!submitPoller) return false;
       submitPoller.start();
       context.subscriptions.push({ dispose: () => submitPoller?.stop() });
-      log('[nexpath] submit-time advisory ENABLED (NEXPATH_CURSOR_PROMPTSUBMIT_ADVISORY=1)');
-    }
+      log(`[nexpath] submit-time advisory ENABLED (cursor, ${reason})`);
+      return true;
+    };
+    armCursorSubmitFlow('activation');
+    armSubmitFlowLate = armCursorSubmitFlow;
   }
 
 
@@ -929,19 +976,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   peInjectedRecordStore = createInjectedRecordStore();
   // OWNER RULING 2026-08-12: is a submit-time advisory switch ON for THIS host?
   // When true, the submit-time hook owns the advisory surface and the old
-  // in-editor fallback must not arm (see onAfterCapture). Read once here so the
-  // switch-off path stays byte-identical.
-  const submitAdvisorySurfaceActive =
-    (host === 'cursor' && isCursorSubmitAdvisoryEnabled(process.env)) ||
-    (host === 'windsurf' && isWindsurfSubmitAdvisoryEnabled(process.env));
+  // in-editor fallback must not arm (see onAfterCapture).
+  // RC15: read LIVE via `submitSurface.active` (set by the armer) instead of a
+  // once-at-activation const — on a fresh machine the flag file appears after
+  // activation and the old surface must switch off the moment the flow arms.
+  // `createChatEventHandler` reads these per event, so getters keep them live.
   const handleChatEvent = createChatEventHandler({
     // OWNER RULING 2026-08-12: switch ON ⇒ old DS-advisory surface OFF, PE kept.
     // The handler skips the stop/advisory path for NON-PE turns only.
-    suppressDsAdvisory: submitAdvisorySurfaceActive,
+    get suppressDsAdvisory() { return submitSurface.active; },
     // RC6 (2026-08-13): switch ON ⇒ the hook already ran `auto` for this prompt
     // inside its hold; the watcher's duplicate auto raced it on the sql.js
     // store (last-writer-wins) and made the submit popup nondeterministic.
-    suppressWatcherAuto: submitAdvisorySurfaceActive,
+    get suppressWatcherAuto() { return submitSurface.active; },
     spawnAuto: (prompt, sid, event) =>
       spawnAuto(prompt, sid, { cwd: cwdForEvent(event) }),
     spawnStop: (sid, event) => spawnStop(sid, { cwd: cwdForEvent(event) }),
@@ -962,7 +1009,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // enforcement point is here, where the DB-watcher would otherwise arm it.
     // Switch OFF ⇒ arms exactly as before (byte-identical old behaviour).
     onAfterCapture: (event) => {
-      if (submitAdvisorySurfaceActive) return;
+      if (submitSurface.active) return;
       advisoryFallback.armIfPending(cwdForEvent(event));
     },
     composeSessionId: (event) => `${cwdForEvent(event)}|${event.rawSessionId}`,
