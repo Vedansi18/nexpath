@@ -39,9 +39,14 @@ import { emitPromptEnhancementCostObservabilityV1 } from '../../prompt-enhanceme
 import { evaluatePromptEnhancementMpsIntakeDecisionV1 } from '../../prompt-enhancement/intake-decision.js';
 import { buildPromptEnhancementCliMpsIntakeEvidenceV1 } from '../../prompt-enhancement/cli-mps-intake-evidence.js';
 import { runPromptEnhancementCliMpsFirstPopupV1, buildPromptEnhancementMpsCancelFeedbackEventV1, promptEnhancementMpsActionSignalKindV1 } from '../../prompt-enhancement/cli-mps-run.js';
+import { assemblePromptEnhancementSequenceBodyProducerInputV1, startSequenceWordingBatchV1 } from '../../prompt-enhancement/sequence-body-producer-stop-input.js';
+import { runPromptEnhancementSequenceBodyProducerV1 } from '../../prompt-enhancement/sequence-body-producer-runtime.js';
 import { intakePromptEnhancementSequenceOnFirstSendV1 } from '../../prompt-enhancement/sequence-intake.js';
 import { upsertPendingPromptSequence, getActivePendingPromptSequence, recordPromptEnhancementSequenceOfferDeclined, updatePendingPromptSequenceState, type PromptEnhancementSequenceDeclinedDispositionV1 } from '../../store/pending-sequences.js';
 import type { PromptEnhancementSequenceRuntimeStateV1 } from '../../prompt-enhancement/sequence-runtime.js';
+import { packageContinuationAtStopV1 } from '../../prompt-enhancement/continuation-stop-package.js';
+import { runPromptEnhancementCliMpsContinuationPopupV1, deliverPromptEnhancementCliMpsContinuationResultV1 } from '../../prompt-enhancement/cli-mps-continuation-run.js';
+import { buildFutureSequenceRuntimeGateEvidenceV1 } from '../../prompt-enhancement/future-sequence-runtime-gate-evidence.js';
 import { evaluatePromptEnhancementFutureSequenceRuntimeGateV1 } from '../../prompt-enhancement/future-sequence-runtime-gate.js';
 import { PROMPT_ENHANCEMENT_CONTRACT_VERSION, type PromptEnhancementFutureSequenceRuntimeEventV1 } from '../../prompt-enhancement/contracts.js';
 import { resolveOpenAIKey, getKeySource } from '../../config/ApiKeyResolver.js';
@@ -85,6 +90,10 @@ export type StopOutcome =
   // continuation launcher, which is fail-closed in v1 (gate blocked) — nothing rendered, the row is
   // left as-is. Distinct from `loop_guard` so a gate-blocked continuation is legible in logs/tests.
   | { outcome: 'mps_continuation_gated' }
+  // MPS shell P3: the gate ALLOWED and the interactive continuation popup was rendered for the current
+  // item (render + outcome). Distinct from `gated` so a rendered continuation is legible in logs/tests.
+  // Delivery/persist of the outcome is P4; until then the row is left unchanged (advance not persisted).
+  | { outcome: 'mps_continuation_shown' }
   // MPS-7: the old Decision-Session advisory popup is disabled outright — a pending advisory was found
   // but consumed silently and never rendered. Distinct outcome so the disabled path is legible in logs.
   | { outcome: 'advisory_disabled' };
@@ -269,7 +278,22 @@ export async function runStop(
         requestId: activeSequence.enhancementId,
         projectRoot: payload.cwd,
         event: continuationEvent,
-        evidence: {}, // Phase-C seam: real read, no runtime-evidence flag satisfied in v1 → fail-closed.
+        // P7 (un-gate) WIRING — READY BUT UNAUTHORIZED. The real evidence reader is wired in: it supplies
+        // the ten real flags (owner approvals + built runtime source + host-hold proof + provider check),
+        // so the gate is now blocked by EXACTLY ONE missing flag — `focused_runtime_fixtures_pending`.
+        //
+        // 🔒 THE UN-GATE. Production default is FALSE — no env, no sign-off → fail-closed, and the
+        // continuation shell never runs (behaviour byte-identical to the old `evidence:{}`, allowed:false).
+        //
+        // The env `NEXPATH_MPS_TEST_UNGATE=1` is a DEV/TEST-ONLY override: it opens the gate LOCALLY for
+        // interactive E2E testing. It is NOT the real un-gate and NOT a sign-off — the committed default is
+        // false, so nothing fabricated ever ships. ⛔ The REAL un-gate is the owner replacing this whole
+        // expression with a literal `true` in a reviewed commit, which records the acceptance-oracle
+        // sign-off over the 27 fixtures. Do NOT set the literal true from "the tests are green" — that is
+        // the fabrication the fail-closed backstop exists to prevent (register: flag 11 `pending`).
+        evidence: buildFutureSequenceRuntimeGateEvidenceV1({
+          ownerAcceptanceOracleSignoffRecorded: process.env['NEXPATH_MPS_TEST_UNGATE'] === '1',
+        }),
       });
       logger.debug('stop_mps_continuation_gate', {
         cwd: payload.cwd,
@@ -282,6 +306,100 @@ export async function runStop(
         missingGateCodeCount: gate.missingGateCodes.length,
         missingGateCodes: gate.missingGateCodes,
       });
+      // MPS shell P3 (render + outcome). ⛔ INERT IN PRODUCTION: the gate is fail-closed in v1
+      // (evidence: {} → allowed:false), so this branch never runs until the un-gate (P7). When the gate
+      // lifts, package the offered item from the active row (P2 — advances/re-offers), then RUN the
+      // interactive continuation popup for it. The store lock is NOT released here yet — that is Stage D
+      // (P8); safe because nothing runs this branch until then. Delivery + persist of the outcome is P4;
+      // until P4 the row is left unchanged (the offer's advance is not persisted), so the same item
+      // re-offers next Stop — a build-order state, never reached in production.
+      if (gate.allowed) {
+        const runtimeState: PromptEnhancementSequenceRuntimeStateV1 = {
+          sequenceId:       activeSequence.sequenceId,
+          enhancementId:    activeSequence.enhancementId,
+          projectRoot:      activeSequence.projectRoot,
+          sessionId:        activeSequence.sessionId,
+          itemCount:        activeSequence.itemCount,
+          currentItemIndex: activeSequence.currentItemIndex,
+          status:           activeSequence.status,
+          lastActionId:     activeSequence.lastActionId,
+        };
+        const packaged = packageContinuationAtStopV1({
+          state:                      runtimeState,
+          // The per-Stop advance action id — the same deterministic idempotency key the gate event uses.
+          actionId:                   `${activeSequence.sequenceId}:${activeSequence.currentItemIndex}`,
+          items:                      activeSequence.payload.items,
+          redactedOriginalPromptText: activeSequence.redactedOriginalPromptText,
+          handoffKind:                activeSequence.handoffKind,
+        });
+        if (packaged.ok) {
+          // Stage D (MPS-8, fixture store-lock-not-held-across-wait): RELEASE the store lock while the
+          // user is deciding — the popup can be open for a long time, and another session must be able to
+          // write meanwhile — then re-acquire it before writing.
+          const outcome = await withReleasedStoreLockV1(store, () => runPromptEnhancementCliMpsContinuationPopupV1({
+            result:          packaged.packaged.result,
+            handoffMetadata: packaged.packaged.handoffMetadata,
+            event:           packaged.packaged.event,
+            progress:        packaged.packaged.progress,
+            itemKind:        packaged.packaged.itemKind,
+            actionSignalSink: (kind, occurredAt) => recordActionSignal(store, payload.cwd, kind, occurredAt),
+          }));
+          logger.info('stop_mps_continuation_shown', { cwd: payload.cwd, outcome: outcome.state });
+          // Telemetry parity with the first popup: the popup ran lock-released (Stage D), so its in-popup
+          // action signals were dropped on the re-acquire reload. Record the TERMINAL outcome signal HERE,
+          // in the re-acquired window, so it persists (content-free — kind + timestamp only; not_shown → none).
+          const continuationActionKind = promptEnhancementMpsActionSignalKindV1(outcome.state);
+          if (continuationActionKind) recordActionSignal(store, payload.cwd, continuationActionKind);
+          // Stage D — re_acquire_reloads_before_writing: the lock is back, but the row may have moved.
+          // RELOAD before writing (a concurrent session may have advanced/cancelled it during the wait, or
+          // the sequence may have died). A click on a dead/stale offer is a SILENT no-op — no recovery UI,
+          // no explanation, and never a write of stale state that reverts the concurrent change.
+          const reloaded = getActivePendingPromptSequence(store, payload.cwd, mgr.current.sessionId);
+          if (!reloaded || reloaded.updatedAt !== activeSequence.updatedAt) {
+            logger.debug('stop_mps_continuation_stale_after_wait', { cwd: payload.cwd, died: !reloaded });
+            return { outcome: 'mps_continuation_gated' };
+          }
+          // P4 (deliver + persist). Map the popup outcome onto the state machine from the OFFERED state,
+          // with a DELIVER action id distinct from the offer's advance id (a duplicate id is rejected).
+          // A missing/invalid result is folded to a terminal cancel inside the wrapper (§6.4).
+          const delivery = deliverPromptEnhancementCliMpsContinuationResultV1(
+            packaged.offeredState,
+            outcome,
+            `${activeSequence.sequenceId}:${activeSequence.currentItemIndex}:deliver`,
+          );
+          switch (delivery.kind) {
+            case 'inject':
+              // 🔒 MPS-9: persist the advanced state BEFORE the block/force-exit — closeStore flushes it
+              // synchronously below the caller's block return, so it must already be written here. Write to
+              // the RELOADED row (Stage D).
+              updatePendingPromptSequenceState(store, reloaded.id, delivery.nextState);
+              // Echo-guard: record the injected item body so the next UserPromptSubmit recognises it as a
+              // sequence turn and does not prepare another PE for it (mirrors the first-popup inject).
+              mgr.setInjectedPrompt(store, delivery.bodyText);
+              logger.info('stop_mps_continuation_injected', { cwd: payload.cwd, currentItemIndex: delivery.nextState.currentItemIndex });
+              return { outcome: 'blocked', reason: delivery.bodyText };
+            case 'keep':
+              // Interruption / not-shown: the same item stays pending and returns next Stop.
+              updatePendingPromptSequenceState(store, reloaded.id, delivery.nextState);
+              return { outcome: 'mps_continuation_shown' };
+            case 'cancel':
+              // Escape / Cancel: terminal for THIS row only (never the project-wide delete). ⛔ The cancel
+              // feedback the shell may collect is INTENTIONALLY NOT recorded (owner decision 2026-08-14:
+              // accept the telemetry loss — recording it would need a request-carrier the ids/counts-only
+              // continuation row deliberately does not carry, and the cancel itself is what matters). Only
+              // the terminal cancel is persisted; the mps_cancel action signal above is the kept telemetry.
+              persistPromptEnhancementSequenceContinuationCancelV1(store, reloaded.id, delivery.nextState);
+              return { outcome: 'mps_continuation_shown' };
+            case 'reject':
+              // Stale / duplicate / invalid transition — leave the row untouched, ordinary flow.
+              logger.debug('stop_mps_continuation_reject', { cwd: payload.cwd, reason: delivery.reasonCode });
+              return { outcome: 'mps_continuation_gated' };
+          }
+        }
+        // The row cannot be packaged (no worded items / redacted original / continuable handoff, or the
+        // sequence has completed). Fail-closed: leave the row, fall through to the gated return.
+        logger.debug('stop_mps_continuation_package_skip', { cwd: payload.cwd, reason: packaged.reason });
+      }
       // No render, no advance, no mutation — the row is left as-is for the next Stop (fail-closed v1).
       return { outcome: 'mps_continuation_gated' };
     }
@@ -494,6 +612,24 @@ export function registerStopCommand(program: import('commander').Command): void 
               reasonCodes: mpsGate.reasonCodes.slice(0, 6),
             });
             if (mpsGate.renderPermission === 'mps_render_permitted') {
+              // MPS P1b-ii (8b-2c) — kick off the background wording batch for items 2…N BEFORE the
+              // popup opens, so it runs while the user reads/decides and is finished by the time they
+              // send (§4.13). It is AWAITED only on send (below); on close/Escape/Use-original it is
+              // simply never awaited — discarded — so a cancel never waits 20-30s on wording that will
+              // be thrown away (§4.13 Q19). Gated TRANSITIVELY by the planner config: plannerItems
+              // exist only when the planner ran (off by default), so in production this assembles to
+              // no_planner_items and nothing starts — no live LLM cost until MPS is activated. The
+              // handle's .catch means a provider failure can never crash the hook before its exit write.
+              const sequenceBatch = startSequenceWordingBatchV1(
+                assemblePromptEnhancementSequenceBodyProducerInputV1({
+                  result:                  pending.result,
+                  plannerItems:            pending.plannerItems,
+                  plannerPromptDirectives: pending.plannerPromptDirectives,
+                }),
+                (batchInput) => runPromptEnhancementSequenceBodyProducerV1(batchInput),
+                (err) => logger.debug('stop_mps_batch_error', { cwd: payload.cwd, error: String(err) }),
+              );
+              logger.debug('stop_mps_batch', { cwd: payload.cwd, started: sequenceBatch.started });
               const mps = await runPromptEnhancementCliMpsFirstPopupV1({
                 result: pending.result,
                 // NF Plan B — content-free capture of the in-popup APPLY action (mps_apply_details),
@@ -506,6 +642,17 @@ export function registerStopCommand(program: import('commander').Command): void 
               const mpsActionKind = promptEnhancementMpsActionSignalKindV1(mps.state);
               if (mpsActionKind) recordActionSignal(store, payload.cwd, mpsActionKind);
               if (mps.state === 'send' && mps.bodyText.trim().length > 0) {
+                // 8b-2c — the user SENT: await the wording batch so its items 2…N are ready before the
+                // hook writes its block decision and exits (§4.13 Q19). Resolves to null on skip/failure
+                // and never throws, so a batch problem can never lose the send. Stage D (MPS-8): release
+                // the store lock across this wait (an in-flight batch is a provider call, up to 45s) so
+                // another session is not blocked; the intake below writes after re-acquire.
+                const batchResult = await withReleasedStoreLockV1(store, () => sequenceBatch.awaitResult());
+                logger.info('stop_mps_batch_awaited', {
+                  cwd:        payload.cwd,
+                  producedOk: Boolean(batchResult && batchResult.ok),
+                  itemCount:  batchResult && batchResult.ok ? batchResult.items.length : 0,
+                });
                 recordPromptEnhancementShownMemoryV1(store, payload.cwd, pending.request);
                 markPromptEnhancementUsedMemoryV1(store, payload.cwd, pending.request);
                 // Continuation bookkeeping (2026-08-08): the user EXPLICITLY sent the first
@@ -519,6 +666,10 @@ export function registerStopCommand(program: import('commander').Command): void 
                   // The pending PE row's session is the one that prepared this sequence — the
                   // continuation row binds to it (a foreign-session row is scrubbed on read).
                   sessionId: pending.sessionId,
+                  // 8c: persist the batch's worded items 2…N (validated/fail-closed inside the intake);
+                  // null on a skipped/failed batch → the empty list, exactly as before 8c.
+                  wordedItems:      batchResult && batchResult.ok ? batchResult.items : undefined,
+                  promptDirectives: pending.plannerPromptDirectives,
                 });
                 if (sequenceIntake.state === 'sequence_recorded') {
                   // The two additive continuation side fields (redacted original + handoffKind)

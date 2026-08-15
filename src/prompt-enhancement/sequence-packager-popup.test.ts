@@ -64,7 +64,10 @@ function request(): PromptEnhancementPrepareRequestV1 {
 const storedItems = (): readonly PromptEnhancementSequenceItemV1[] =>
   [0, 1, 2, 3].map((order) => ({
     itemKind: order === 0 ? 'first_task' : 'task',
-    originalSliceRef: null,
+    // MPS-12 (Ruling C §22.2): task kinds carry a non-null slice into the original prompt; the
+    // packager re-points originalPromptText to it, and an empty result fails the shared prepare-result
+    // validator (missing_current_body). null is for confirmations/recap only — never a task kind.
+    originalSliceRef: { start: 0, end: 6 },
     sourcePointRanges: [],
     roleLabel: null,
     dependencyOrder: order,
@@ -136,6 +139,10 @@ async function packagedPopup(currentItemIndex: number) {
       result: packaged.packaged.result,
       handoffMetadata: packaged.packaged.handoffMetadata,
       event: packaged.packaged.event,
+      // Off the packaged continuation, exactly as buildContinuationPopupFromPackageV1 does — the UI
+      // reads its position/kind from the packager, never recomputing them.
+      progress: packaged.packaged.progress,
+      itemKind: packaged.packaged.itemKind,
       additionalDetails: { text: '', revision: 0 },
       cancel: { state: 'available', disposition: 'blocked_no_send' },
     }),
