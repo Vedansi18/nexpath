@@ -16,6 +16,7 @@ import {
   focusedWindowIsNexpathPopup,
   focusedWindowIsEditor,
   type SubmitClipboardDeliveryDeps,
+  isDarwinAccessibilityDenial,
 } from './submit-clipboard-delivery.js';
 
 function deliveryHarness(over: Partial<SubmitClipboardDeliveryDeps> = {}) {
@@ -307,5 +308,22 @@ describe('⭐ RC11 — submit Enter fires only when the EDITOR is focused', () =
     expect(probe('windsurf', 'Mozilla Firefox')).toBe(false);
     expect(probe('windsurf', null)).toBe(false);                        // unreadable ⇒ no blind Enter
     expect(probe('cursor', 'nexpath - Windsurf')).toBe(false);          // wrong editor
+  });
+});
+
+/**
+ * RC16 (macOS tester, 2026-08-15): the darwin auto-send keystroke needs the
+ * Accessibility permission; without it osascript fails and the outcome was a
+ * bare `submit_failed` with no guidance. Pin the denial matcher so the
+ * extension can route the actionable hint.
+ */
+describe('⭐ RC16 — darwin Accessibility denial detection', () => {
+  it('recognises the classic osascript assistive-access errors', () => {
+    expect(isDarwinAccessibilityDenial('osascript is not allowed assistive access. (-25211)')).toBe(true);
+    expect(isDarwinAccessibilityDenial('execution error: System Events got an error: osascript is not allowed to send keystrokes. (1002)')).toBe(true);
+  });
+  it('does not flag unrelated failures or null', () => {
+    expect(isDarwinAccessibilityDenial('osascript exited 1')).toBe(false);
+    expect(isDarwinAccessibilityDenial(null)).toBe(false);
   });
 });

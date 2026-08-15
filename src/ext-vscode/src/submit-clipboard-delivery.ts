@@ -267,6 +267,19 @@ export function focusedWindowIsEditor(host: 'windsurf' | 'cursor', deps: {
   }
 }
 
+/**
+ * RC16: the last darwin submit-keystroke failure reason (osascript stderr,
+ * trimmed). `null` until a darwin submit fails. Read by the extension to show
+ * the one-time Accessibility guidance; PII-free (osascript's own error text).
+ */
+export let lastDarwinSubmitError: string | null = null;
+
+/** True when the recorded darwin failure looks like the missing Accessibility permission. */
+export function isDarwinAccessibilityDenial(err: string | null): boolean {
+  if (!err) return false;
+  return /assistive access|not authorized|1002|-25211|accessibility/i.test(err);
+}
+
 export function submitKeystroke(deps: SubmitKeystrokeDeps = {}): boolean {
   const platform = deps.platform ?? process.platform;
   const env = deps.env ?? process.env;
@@ -296,7 +309,21 @@ export function submitKeystroke(deps: SubmitKeystrokeDeps = {}): boolean {
 
   try {
     if (platform === 'darwin') {
-      return run('osascript', ['-e', 'tell application "System Events" to key code 36']);
+      // RC16 (macOS tester, 2026-08-15): a System Events keystroke requires the
+      // HOST APP (Devin/Windsurf/Cursor — the extension host's parent) to hold
+      // the Accessibility permission. Without it osascript exits non-zero
+      // ("not allowed assistive access") and the submit silently became
+      // `submit_failed` with no guidance. The DEFAULT runner captures stderr so
+      // the log names the real reason and the caller can detect the permission
+      // case; an injected `deps.run` (tests) keeps the plain seam.
+      if (deps.run) return deps.run('osascript', ['-e', 'tell application "System Events" to key code 36']);
+      const res = spawnSync('osascript', ['-e', 'tell application "System Events" to key code 36'], {
+        stdio: ['ignore', 'ignore', 'pipe'], timeout: 3000, encoding: 'utf8',
+      });
+      if (res.status === 0) return true;
+      const err = (res.stderr ?? '').trim().slice(0, 160);
+      lastDarwinSubmitError = err || `osascript exited ${res.status}`;
+      return false;
     }
     if (platform === 'win32') {
       return run('powershell', [

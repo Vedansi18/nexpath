@@ -21,7 +21,7 @@ import { createInjectedRecordStore } from './injected-record.js';
 import { injectPeBody, injectPeBodyWithFallback, resolvePeVisibleSurfaceAckState } from './pe-delivery.js';
 import { createPePoller, type PePoller } from './pe-poller.js';
 import { createSubmitHookPoller, type SubmitHookPoller } from './submit-hook-poller.js';
-import { createSubmitClipboardDelivery, submitKeystroke } from './submit-clipboard-delivery.js';
+import { createSubmitClipboardDelivery, submitKeystroke, lastDarwinSubmitError, isDarwinAccessibilityDenial } from './submit-clipboard-delivery.js';
 import {
   isWindsurfSubmitAdvisoryEnabled,
   isCursorSubmitAdvisoryEnabled,
@@ -266,6 +266,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // Live view of "the submit surface owns advisories" for the watcher flags —
   // flipped by the armer, read per event via getters at the watcher wiring.
   const submitSurface = { active: false };
+  // RC16: one-time darwin auto-send permission hint (per activation).
+  let darwinSubmitHintShown = false;
 
   // 1b. CLI auto-installer (additive). The extension drives the nexpath CLI via
   //     IPC; if the user installed only this extension (no manual CLI), nothing
@@ -794,7 +796,23 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         onTiming: (t) => log(
           `[nexpath] submit handoff: ${t.stage} +${t.sinceDecisionMs}ms (${t.decisionId})`,
         ),
-        onOutcome: (outcome) => log(`[nexpath] submit delivery outcome: ${outcome}`),
+        onOutcome: (outcome) => {
+          log(`[nexpath] submit delivery outcome: ${outcome}`);
+          // RC16 (macOS tester, 2026-08-15): on darwin the auto-send keystroke
+          // needs the Accessibility permission for the HOST APP. Without it the
+          // refined text sits in the composer with zero guidance. One-time,
+          // actionable, and honest about the manual fallback.
+          if (outcome === 'submit_failed' && process.platform === 'darwin' && !darwinSubmitHintShown) {
+            darwinSubmitHintShown = true;
+            const why = lastDarwinSubmitError ? ` (${lastDarwinSubmitError})` : '';
+            log(`[nexpath] darwin submit keystroke failed${why}`);
+            void vscode.window.showWarningMessage(
+              isDarwinAccessibilityDenial(lastDarwinSubmitError)
+                ? 'Nexpath: your refined prompt is in the chat — press Enter to send it. To enable auto-send, grant Accessibility to this editor: System Settings → Privacy & Security → Accessibility.'
+                : 'Nexpath: your refined prompt is in the chat — press Enter to send it. Auto-send could not simulate the keystroke on this Mac (check System Settings → Privacy & Security → Accessibility).',
+            );
+          }
+        },
       });
       submitPoller.start();
       context.subscriptions.push({ dispose: () => submitPoller?.stop() });
