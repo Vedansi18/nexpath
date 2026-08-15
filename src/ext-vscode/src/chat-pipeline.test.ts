@@ -441,17 +441,21 @@ describe('createChatEventHandler', () => {
       expect(injectSelection).not.toHaveBeenCalled();
     });
 
-    it('⭐ switch ON + PE turn: PE is PRESERVED — stop runs and injectPeResult delivers', async () => {
+    it('⭐ RC18: switch ON + PE turn: NO second popup — stop never runs (H9 owns ALL popups)', async () => {
+      // Superseded ruling: 2026-08-12 said "PE preserved"; H9 (2026-08-13)
+      // moved ALL popups to submit time. The old carve-out double-popped on
+      // macOS (watcher fired while the hook popup was open — pixel-proven
+      // 2026-08-15) and the orphaned hook popup meant no decision was ever
+      // persisted. Under the switch the watcher is capture-only.
       const checkPeOrigin = vi.fn().mockResolvedValue(true);
       const injectPeResult = vi.fn().mockResolvedValue(undefined);
-      spawnStop.mockResolvedValueOnce(fakeSelection);
       const handler = createChatEventHandler({
         spawnAuto, spawnStop, injectSelection, onAfterCapture,
         checkPeOrigin, injectPeResult, suppressDsAdvisory: true, logger: { error: errorLog },
       });
       await handler(makeEvent());
-      expect(spawnStop).toHaveBeenCalled();        // PE popup still shown
-      expect(injectPeResult).toHaveBeenCalled();   // PE delivered
+      expect(spawnStop).not.toHaveBeenCalled();      // no duplicate popup
+      expect(injectPeResult).not.toHaveBeenCalled(); // no old-path delivery
       expect(injectSelection).not.toHaveBeenCalled();
     });
 
@@ -483,7 +487,7 @@ describe('createChatEventHandler', () => {
 describe('RC6 — suppressWatcherAuto skips the duplicate classification', () => {
   const evt = { prompt: 'p', rawSessionId: 's', sourcePath: '/proj/state.vscdb' } as never;
 
-  it('⭐ switch ON: spawnAuto is never called; PE turns still run stop + injectPeResult', async () => {
+  it('⭐ switch ON: spawnAuto never called; RC18: PE turns spawn NO second stop either', async () => {
     const spawnAuto = vi.fn();
     const spawnStop = vi.fn(async () => ({ selectedPrompt: 'pe body' }));
     const injectPeResult = vi.fn();
@@ -494,12 +498,12 @@ describe('RC6 — suppressWatcherAuto skips the duplicate classification', () =>
       spawnStop,
       injectSelection: vi.fn(),
       injectPeResult,
-      checkPeOrigin: async () => true,   // PE turn — must keep working
+      checkPeOrigin: async () => true,   // PE turn — the hook's stop owns it (H9)
     } as never);
     await handler(evt);
-    expect(spawnAuto).not.toHaveBeenCalled();          // the duplicate is gone
-    expect(spawnStop).toHaveBeenCalledTimes(1);        // PE path intact
-    expect(injectPeResult).toHaveBeenCalledWith('pe body', evt);
+    expect(spawnAuto).not.toHaveBeenCalled();          // the duplicate auto is gone (RC6)
+    expect(spawnStop).not.toHaveBeenCalled();          // the duplicate popup is gone (RC18)
+    expect(injectPeResult).not.toHaveBeenCalled();
   });
 
   it('switch ON + non-PE turn: nothing runs (suppressed advisory, no duplicate auto)', async () => {
