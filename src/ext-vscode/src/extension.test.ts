@@ -6,6 +6,7 @@ const {
   mockShowOnboarding,
   mockRegisterWebviewViewProvider,
   mockProviderCtor,
+  mockPeProviderCtor,
   mockDetectHost,
   mockWorkspaceStorageDir,
   mockWindsurfCodeiumDir,
@@ -17,10 +18,25 @@ const {
   mockShowInformationMessage,
   mockExistsSync,
   mockExecuteCommand,
+  mockReadPendingPromptEnhancement,
+  mockIsPeOriginTurn,
+  mockChatInputInject,
+  mockReadLatestAdvisoryMeta,
+  mockReadInjectedPrompt,
+  mockCreatePePoller,
+  mockPePollerStart,
+  mockPePollerStop,
+  mockGetCommands,
+  mockPePopupHostProbe,
+  mockReadLatestPeMeta,
+  mockCreateAdvisoryPoller,
+  mockOnDidChangeWorkspaceFolders,
+  mockArmIfPending,
 } = vi.hoisted(() => ({
   mockShowOnboarding: vi.fn(),
   mockRegisterWebviewViewProvider: vi.fn(),
   mockProviderCtor: vi.fn(),
+  mockPeProviderCtor: vi.fn(),
   mockDetectHost: vi.fn(() => 'vscode-generic'),
   mockWorkspaceStorageDir: vi.fn(() => null),
   mockWindsurfCodeiumDir: vi.fn(() => '/home/u/.codeium/windsurf'),
@@ -32,6 +48,22 @@ const {
   mockShowInformationMessage: vi.fn(),
   mockExistsSync: vi.fn(() => false),
   mockExecuteCommand: vi.fn(),
+  mockReadPendingPromptEnhancement: vi.fn(async () => null),
+  mockIsPeOriginTurn: vi.fn(async () => false),
+  mockChatInputInject: vi.fn(async () => false),
+  mockReadLatestAdvisoryMeta: vi.fn(async () => null),
+  mockReadInjectedPrompt: vi.fn(async () => null),
+  mockCreatePePoller: vi.fn(),
+  mockPePollerStart: vi.fn(),
+  mockPePollerStop: vi.fn(),
+  mockGetCommands: vi.fn(async () => [] as string[]),
+  // Default false = the headless premise: P10's poller stays live. Tests for
+  // the popup-first gate flip this to true explicitly.
+  mockPePopupHostProbe: vi.fn(() => false),
+  mockReadLatestPeMeta: vi.fn(async () => null),
+  mockCreateAdvisoryPoller: vi.fn(),
+  mockOnDidChangeWorkspaceFolders: vi.fn(() => ({ dispose: vi.fn() })),
+  mockArmIfPending: vi.fn(),
 }));
 
 vi.mock('vscode', () => ({
@@ -53,11 +85,12 @@ vi.mock('vscode', () => ({
   },
   workspace: {
     workspaceFolders: undefined,
+    onDidChangeWorkspaceFolders: mockOnDidChangeWorkspaceFolders,
   },
   env: { appName: 'Visual Studio Code' },
   commands: {
     executeCommand: mockExecuteCommand,
-    getCommands: vi.fn().mockResolvedValue([]),
+    getCommands: mockGetCommands,
     registerCommand: vi.fn(() => ({ dispose: vi.fn() })),
   },
   StatusBarAlignment: { Left: 1, Right: 2 },
@@ -75,6 +108,21 @@ vi.mock('./webview/view-provider.js', () => ({
     publishPayload(): void {}
   },
 }));
+vi.mock('./webview/pe-view-provider.js', () => ({
+  PE_VIEW_ID: 'nexpath.promptEnhancement',
+  NexpathPromptEnhancementViewProvider: class {
+    private currentPayload: unknown = null;
+    constructor(...args: unknown[]) {
+      mockPeProviderCtor(...args);
+    }
+    publishPayload(payload: unknown): void {
+      this.currentPayload = payload;
+    }
+    getCurrentPayload(): unknown {
+      return this.currentPayload;
+    }
+  },
+}));
 vi.mock('./webview/prompt-injection.js', () => ({
   handleOptionSelection: vi.fn(),
 }));
@@ -88,8 +136,22 @@ vi.mock('./host-detector.js', () => ({
   windsurfCodeiumDir: mockWindsurfCodeiumDir,
 }));
 vi.mock('./chat-input-injector.js', () => ({
-  chatInputInject: vi.fn(),
+  chatInputInject: mockChatInputInject,
   CANDIDATE_COMMANDS: { cursor: [], windsurf: [] },
+}));
+vi.mock('./pe-store-reader.js', () => ({
+  readPendingPromptEnhancement: mockReadPendingPromptEnhancement,
+  readLatestPromptEnhancementMeta: mockReadLatestPeMeta,
+}));
+vi.mock('./pe-popup-host-probe.js', () => ({
+  isPePopupHostLikelyAvailable: mockPePopupHostProbe,
+}));
+vi.mock('./pe-origin.js', () => ({
+  isPeOriginTurn: mockIsPeOriginTurn,
+}));
+vi.mock('./advisory-store-reader.js', () => ({
+  readLatestAdvisoryMeta: mockReadLatestAdvisoryMeta,
+  readInjectedPrompt: mockReadInjectedPrompt,
 }));
 vi.mock('./path-enumerator.js', () => ({
   enumerateStateVscdbPaths: mockEnumerateStateVscdbPaths,
@@ -107,20 +169,26 @@ vi.mock('./ipc.js', () => ({
 }));
 vi.mock('./advisory-fallback.js', () => ({
   createAdvisoryFallback: vi.fn(() => ({
-    armIfPending: vi.fn(),
+    armIfPending: mockArmIfPending,
     clear: vi.fn(),
     showAdvisory: vi.fn(),
   })),
 }));
 vi.mock('./advisory-poller.js', () => ({
-  createAdvisoryPoller: vi.fn(() => ({
-    start: vi.fn(),
-    stop: vi.fn(),
-    pollOnce: vi.fn(),
-  })),
+  createAdvisoryPoller: (...args: unknown[]) => {
+    mockCreateAdvisoryPoller(...args);
+    return { start: vi.fn(), stop: vi.fn(), pollOnce: vi.fn() };
+  },
+}));
+vi.mock('./pe-poller.js', () => ({
+  createPePoller: (...args: unknown[]) => {
+    mockCreatePePoller(...args);
+    return { start: mockPePollerStart, stop: mockPePollerStop, pollOnce: vi.fn() };
+  },
 }));
 
-import { activate, deactivate, getViewProvider } from './extension.js';
+import { activate, deactivate, getViewProvider, getPeViewProvider } from './extension.js';
+import * as vscodeApi from 'vscode';
 
 interface FakeContext {
   extensionUri: { __uri: true };
@@ -149,6 +217,7 @@ describe('activate', () => {
     mockShowOnboarding.mockReset();
     mockRegisterWebviewViewProvider.mockReset();
     mockProviderCtor.mockReset();
+    mockPeProviderCtor.mockReset();
     mockDetectHost.mockReset().mockReturnValue('vscode-generic');
     mockWorkspaceStorageDir.mockReset().mockReturnValue(null);
     mockWindsurfCodeiumDir.mockReset().mockReturnValue('/home/u/.codeium/windsurf');
@@ -163,6 +232,21 @@ describe('activate', () => {
     mockShowInformationMessage.mockReset();
     mockExistsSync.mockReset().mockReturnValue(false);
     mockExecuteCommand.mockReset().mockResolvedValue(undefined);
+    mockReadPendingPromptEnhancement.mockReset().mockResolvedValue(null);
+    mockPePopupHostProbe.mockReset().mockReturnValue(false);
+    mockReadLatestPeMeta.mockReset().mockResolvedValue(null);
+    mockCreateAdvisoryPoller.mockReset();
+    mockOnDidChangeWorkspaceFolders.mockReset().mockReturnValue({ dispose: vi.fn() });
+    mockArmIfPending.mockReset();
+    (vscodeApi.workspace as { workspaceFolders?: unknown }).workspaceFolders = undefined;
+    mockIsPeOriginTurn.mockReset().mockResolvedValue(false);
+    mockChatInputInject.mockReset().mockResolvedValue(false);
+    mockReadLatestAdvisoryMeta.mockReset().mockResolvedValue(null);
+    mockReadInjectedPrompt.mockReset().mockResolvedValue(null);
+    mockCreatePePoller.mockReset();
+    mockPePollerStart.mockReset();
+    mockPePollerStop.mockReset();
+    mockGetCommands.mockReset().mockResolvedValue([]);
     mockRegisterWebviewViewProvider.mockReturnValue({ dispose: vi.fn() });
     logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -189,11 +273,611 @@ describe('activate', () => {
     expect(mockShowOnboarding).toHaveBeenCalledWith(ctx);
   });
 
-  it('registers the view provider on every activation regardless of consent', async () => {
+  it('registers both the DS and PE view providers on every activation regardless of consent', async () => {
     mockShowOnboarding.mockResolvedValueOnce(undefined);
     await activate(makeCtx(false) as never); // user denied
     expect(mockProviderCtor).toHaveBeenCalledOnce();
-    expect(mockRegisterWebviewViewProvider).toHaveBeenCalledOnce();
+    expect(mockPeProviderCtor).toHaveBeenCalledOnce();
+    expect(mockRegisterWebviewViewProvider).toHaveBeenCalledTimes(2);
+    expect(mockRegisterWebviewViewProvider).toHaveBeenCalledWith('nexpath.status', expect.anything());
+    expect(mockRegisterWebviewViewProvider).toHaveBeenCalledWith('nexpath.promptEnhancement', expect.anything());
+  });
+
+  describe('PE onMessage wiring (P6)', () => {
+    function capturedOnMessage(): (raw: unknown) => void {
+      return mockPeProviderCtor.mock.calls[0]![1] as (raw: unknown) => void;
+    }
+
+    it('does nothing when no PE payload has been published yet', async () => {
+      mockShowOnboarding.mockResolvedValueOnce(undefined);
+      await activate(makeCtx() as never);
+      logSpy.mockClear();
+      capturedOnMessage()({ type: 'pe_close', actionId: 'a1' });
+      expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining('PE event'));
+    });
+
+    it('logs a safe, redacted summary when a routable message arrives with a published payload', async () => {
+      mockShowOnboarding.mockResolvedValueOnce(undefined);
+      await activate(makeCtx() as never);
+      const provider = getPeViewProvider() as unknown as { publishPayload: (p: unknown) => void };
+      provider.publishPayload({ currentBodyId: 'body-1', bodyRevision: 3 });
+      logSpy.mockClear();
+      capturedOnMessage()({ type: 'pe_close', actionId: 'a1' });
+      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('"eventType":"close_no_send"'));
+    });
+
+    it('never logs the raw edited body text — only the safe summary (raw-text leak test)', async () => {
+      mockShowOnboarding.mockResolvedValueOnce(undefined);
+      await activate(makeCtx() as never);
+      const provider = getPeViewProvider() as unknown as { publishPayload: (p: unknown) => void };
+      provider.publishPayload({ currentBodyId: 'body-1', bodyRevision: 3 });
+      logSpy.mockClear();
+      const MARKER = 'ZZQX_EXT_WIRING_LEAK_MARKER_4471';
+      capturedOnMessage()({ type: 'pe_deliver_current_body', bodyId: 'body-1', bodyRevision: 3, bodyText: MARKER });
+      const allLogs = logSpy.mock.calls.map((c) => String(c[0])).join('\n');
+      expect(allLogs).not.toContain(MARKER);
+      expect(allLogs).toContain('"hasEditedBody":true');
+    });
+
+    it('does nothing for an unroutable message', async () => {
+      mockShowOnboarding.mockResolvedValueOnce(undefined);
+      await activate(makeCtx() as never);
+      const provider = getPeViewProvider() as unknown as { publishPayload: (p: unknown) => void };
+      provider.publishPayload({ currentBodyId: 'body-1', bodyRevision: 3 });
+      logSpy.mockClear();
+      capturedOnMessage()({ type: 'bogus_type' });
+      expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining('PE event'));
+    });
+  });
+
+  describe('PE Windsurf/Devin poller (P10)', () => {
+    function capturedDeps(): {
+      readPendingPe: (root: string) => Promise<unknown>;
+      onDeliver: (text: string) => Promise<string>;
+      onPublish?: (payload: unknown) => void;
+      onOutcome?: (outcome: string) => void;
+    } {
+      return mockCreatePePoller.mock.calls[0]![0] as never;
+    }
+
+    it('starts the PE poller (and the DS poller) on Windsurf', async () => {
+      mockShowOnboarding.mockResolvedValueOnce(undefined);
+      mockDetectHost.mockReturnValueOnce('windsurf');
+      await activate(makeCtx(true) as never);
+      expect(mockCreatePePoller).toHaveBeenCalledOnce();
+      expect(mockPePollerStart).toHaveBeenCalledOnce();
+    });
+
+    it('does not create the PE poller on cursor or plain vscode (Windsurf-only bridge)', async () => {
+      mockShowOnboarding.mockResolvedValueOnce(undefined);
+      mockDetectHost.mockReturnValueOnce('cursor');
+      await activate(makeCtx(true) as never);
+      expect(mockCreatePePoller).not.toHaveBeenCalled();
+    });
+
+    it('readPendingPe is wired to the real PE-table-only reader (no popup host — P10 premise holds)', async () => {
+      mockShowOnboarding.mockResolvedValueOnce(undefined);
+      mockDetectHost.mockReturnValueOnce('windsurf');
+      mockPePopupHostProbe.mockReturnValue(false);
+      mockReadPendingPromptEnhancement.mockResolvedValueOnce({
+        id: 1, projectRoot: '/proj', sessionId: 's1', promptCount: 1,
+        status: 'pending', createdAt: 0, requestJson: '{}', resultJson: '{}',
+      });
+      await activate(makeCtx(true) as never);
+      const result = await capturedDeps().readPendingPe('/proj');
+      expect(mockReadPendingPromptEnhancement).toHaveBeenCalledWith('/proj');
+      expect(result).toEqual(expect.objectContaining({ projectRoot: '/proj' }));
+    });
+
+    it('⭐ popup host available → readPendingPe yields null and the real reader is NEVER consulted (popup-first, owner ruling 2026-08-11)', async () => {
+      mockShowOnboarding.mockResolvedValueOnce(undefined);
+      mockDetectHost.mockReturnValueOnce('windsurf');
+      mockPePopupHostProbe.mockReturnValue(true);
+      mockReadPendingPromptEnhancement.mockResolvedValue({
+        id: 1, projectRoot: '/proj', sessionId: 's1', promptCount: 1,
+        status: 'pending', createdAt: 0, requestJson: '{}', resultJson: '{}',
+      });
+      await activate(makeCtx(true) as never);
+      const result = await capturedDeps().readPendingPe('/proj');
+      expect(result).toBeNull();
+      expect(mockReadPendingPromptEnhancement).not.toHaveBeenCalled();
+    });
+
+    it('the advisory poller gets the PE-event bridge dep, wired through to the any-status meta reader', async () => {
+      mockShowOnboarding.mockResolvedValueOnce(undefined);
+      mockDetectHost.mockReturnValueOnce('windsurf');
+      await activate(makeCtx(true) as never);
+      const deps = mockCreateAdvisoryPoller.mock.calls[0]?.[0] as {
+        readPeEventMeta?: (root: string) => Promise<unknown>;
+      };
+      expect(deps.readPeEventMeta).toBeTypeOf('function');
+      await deps.readPeEventMeta!('/proj');
+      expect(mockReadLatestPeMeta).toHaveBeenCalledWith('/proj');
+    });
+
+    it('onPublish forwards a non-null payload to the PE webview (same renderer as Cursor)', async () => {
+      mockShowOnboarding.mockResolvedValueOnce(undefined);
+      mockDetectHost.mockReturnValueOnce('windsurf');
+      await activate(makeCtx(true) as never);
+      const provider = getPeViewProvider() as unknown as { getCurrentPayload: () => unknown };
+      const payload = { currentBodyId: 'body-1', bodyRevision: 3 };
+      capturedDeps().onPublish?.(payload);
+      expect(provider.getCurrentPayload()).toEqual(payload);
+    });
+
+    it('onPublish never crashes when given a null payload (malformed row)', async () => {
+      mockShowOnboarding.mockResolvedValueOnce(undefined);
+      mockDetectHost.mockReturnValueOnce('windsurf');
+      await activate(makeCtx(true) as never);
+      expect(() => capturedDeps().onPublish?.(null)).not.toThrow();
+    });
+
+    it('onDeliver: succeeds via the clipboard-free Cascade command when it is registered', async () => {
+      mockShowOnboarding.mockResolvedValueOnce(undefined);
+      mockDetectHost.mockReturnValueOnce('windsurf');
+      mockGetCommands.mockResolvedValue(['windsurf.sendChatActionMessage']);
+      mockExecuteCommand.mockResolvedValue(undefined);
+      await activate(makeCtx(true) as never);
+      const outcome = await capturedDeps().onDeliver('the enhanced body');
+      expect(outcome).toBe('inserted');
+    });
+
+    it('onDeliver: fails (D-1, no clipboard fallback) when no Cascade command is registered', async () => {
+      mockShowOnboarding.mockResolvedValueOnce(undefined);
+      mockDetectHost.mockReturnValueOnce('windsurf');
+      mockGetCommands.mockResolvedValue([]); // no candidate command available
+      await activate(makeCtx(true) as never);
+      const outcome = await capturedDeps().onDeliver('the enhanced body');
+      expect(outcome).toBe('insert_failed_no_clipboard_fallback');
+    });
+
+    it('the poller deps carry no field that could read pending_advisories/lastInjectedPrompt (structural proof)', async () => {
+      mockShowOnboarding.mockResolvedValueOnce(undefined);
+      mockDetectHost.mockReturnValueOnce('windsurf');
+      await activate(makeCtx(true) as never);
+      const keys = Object.keys(mockCreatePePoller.mock.calls[0]![0] as object).sort();
+      expect(keys).toEqual(['onDeliver', 'onOutcome', 'onPublish', 'projectRoots', 'readPendingPe']);
+    });
+
+    it('onOutcome logs the windsurf-poller-specific message for a successful insert', async () => {
+      mockShowOnboarding.mockResolvedValueOnce(undefined);
+      mockDetectHost.mockReturnValueOnce('windsurf');
+      await activate(makeCtx(true) as never);
+      logSpy.mockClear();
+      capturedDeps().onOutcome?.('inserted');
+      expect(logSpy).toHaveBeenCalledWith('[nexpath] windsurf PE poller insert outcome: inserted');
+    });
+
+    it('onOutcome logs the windsurf-poller-specific message for a failed insert (D-1, no clipboard fallback)', async () => {
+      mockShowOnboarding.mockResolvedValueOnce(undefined);
+      mockDetectHost.mockReturnValueOnce('windsurf');
+      await activate(makeCtx(true) as never);
+      logSpy.mockClear();
+      capturedDeps().onOutcome?.('insert_failed_no_clipboard_fallback');
+      expect(logSpy).toHaveBeenCalledWith(
+        '[nexpath] windsurf PE poller insert outcome: insert_failed_no_clipboard_fallback',
+      );
+    });
+  });
+
+  describe('PE action request loop (P9)', () => {
+    function capturedOnMessage(): (raw: unknown) => void {
+      return mockPeProviderCtor.mock.calls[0]![1] as (raw: unknown) => void;
+    }
+    async function activateWithPublishedPayload(): Promise<void> {
+      mockShowOnboarding.mockResolvedValueOnce(undefined);
+      await activate(makeCtx() as never);
+      const provider = getPeViewProvider() as unknown as { publishPayload: (p: unknown) => void };
+      provider.publishPayload({ currentBodyId: 'body-1', bodyRevision: 3, currentBodyText: 'the published body' });
+    }
+
+    it.each([
+      ['pe_directional_action', { actionType: 'shorter' }, 'shorter'],
+      ['pe_directional_action', { actionType: 'more_thorough' }, 'more_thorough'],
+      ['pe_directional_action', { actionType: 'more_project_grounded' }, 'more_project_grounded'],
+    ] as const)('%s (actionType=%s): builds a typed action request logged as ok:true', async (type, extra, expectedActionType) => {
+      await activateWithPublishedPayload();
+      logSpy.mockClear();
+      capturedOnMessage()({ type, bodyId: 'body-1', bodyRevision: 3, ...extra });
+      const logs = logSpy.mock.calls.map((c) => String(c[0])).join('\n');
+      expect(logs).toContain('PE action request:');
+      expect(logs).toContain(`"actionType":"${expectedActionType}"`);
+      expect(logs).toContain('"ok":true');
+    });
+
+    it('a directional action with a dirty body edit carries dirtyDraftDisposition=discarded_for_canonical_action', async () => {
+      await activateWithPublishedPayload();
+      logSpy.mockClear();
+      capturedOnMessage()({ type: 'pe_directional_action', actionType: 'shorter', bodyId: 'body-1', bodyRevision: 3, hasDirtyBodyEdit: true });
+      const logs = logSpy.mock.calls.map((c) => String(c[0])).join('\n');
+      expect(logs).toContain('"dirtyDraftDisposition":"discarded_for_canonical_action"');
+    });
+
+    it('a directional action with a clean body carries dirtyDraftDisposition=not_applicable', async () => {
+      await activateWithPublishedPayload();
+      logSpy.mockClear();
+      capturedOnMessage()({ type: 'pe_directional_action', actionType: 'shorter', bodyId: 'body-1', bodyRevision: 3 });
+      const logs = logSpy.mock.calls.map((c) => String(c[0])).join('\n');
+      expect(logs).toContain('"dirtyDraftDisposition":"not_applicable"');
+    });
+
+    it('apply_details: builds a request (ok:true) when both edited body and details text are present', async () => {
+      await activateWithPublishedPayload();
+      logSpy.mockClear();
+      capturedOnMessage()({
+        type: 'pe_submit_additional_details',
+        bodyId: 'body-1',
+        bodyRevision: 3,
+        bodyText: 'the visible edited body',
+        additionalDetailsText: 'extra requirements',
+      });
+      const logs = logSpy.mock.calls.map((c) => String(c[0])).join('\n');
+      expect(logs).toContain('"actionType":"apply_details"');
+      expect(logs).toContain('"ok":true');
+    });
+
+    it('apply_details: rejects (ok:false) when the details text is blank', async () => {
+      await activateWithPublishedPayload();
+      logSpy.mockClear();
+      capturedOnMessage()({
+        type: 'pe_submit_additional_details',
+        bodyId: 'body-1',
+        bodyRevision: 3,
+        bodyText: 'the visible edited body',
+        additionalDetailsText: '   ',
+      });
+      const logs = logSpy.mock.calls.map((c) => String(c[0])).join('\n');
+      expect(logs).toContain('"ok":false');
+      expect(logs).toContain('apply_details_requires_additional_details_text');
+    });
+
+    it('never logs the raw edited body or details text — only actionType/dirtyDraftDisposition (raw-text leak test)', async () => {
+      await activateWithPublishedPayload();
+      logSpy.mockClear();
+      const BODY_MARKER = 'ZZQX_P9_BODY_LEAK_MARKER_71a2';
+      const DETAILS_MARKER = 'ZZQX_P9_DETAILS_LEAK_MARKER_93c4';
+      capturedOnMessage()({
+        type: 'pe_submit_additional_details',
+        bodyId: 'body-1',
+        bodyRevision: 3,
+        bodyText: BODY_MARKER,
+        additionalDetailsText: DETAILS_MARKER,
+      });
+      const allLogs = logSpy.mock.calls.map((c) => String(c[0])).join('\n');
+      expect(allLogs).not.toContain(BODY_MARKER);
+      expect(allLogs).not.toContain(DETAILS_MARKER);
+      expect(allLogs).toContain('"actionType":"apply_details"');
+    });
+
+    it('does not build an action request for non-action event types (e.g. pe_close)', async () => {
+      await activateWithPublishedPayload();
+      logSpy.mockClear();
+      capturedOnMessage()({ type: 'pe_close', actionId: 'a1' });
+      expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining('PE action request'));
+    });
+  });
+
+  describe('PE send-intent gating (P7)', () => {
+    function capturedOnMessage(): (raw: unknown) => void {
+      return mockPeProviderCtor.mock.calls[0]![1] as (raw: unknown) => void;
+    }
+
+    const sendablePayload = {
+      currentBodyId: 'body-1',
+      bodyRevision: 3,
+      sendPolicy: 'send_current',
+      renderState: 'ready',
+    };
+
+    it('logs intent_ready when the current body is sendable, editable, clean, and not stale', async () => {
+      mockShowOnboarding.mockResolvedValueOnce(undefined);
+      await activate(makeCtx() as never);
+      const provider = getPeViewProvider() as unknown as { publishPayload: (p: unknown) => void };
+      provider.publishPayload(sendablePayload);
+      logSpy.mockClear();
+      capturedOnMessage()({ type: 'pe_deliver_current_body', bodyId: 'body-1', bodyRevision: 3, bodyText: 'x' });
+      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('"state":"intent_ready"'));
+    });
+
+    it('rejects with current_body_not_sendable when sendPolicy is not send_current — proves no insertion occurs', async () => {
+      mockShowOnboarding.mockResolvedValueOnce(undefined);
+      await activate(makeCtx() as never);
+      const provider = getPeViewProvider() as unknown as { publishPayload: (p: unknown) => void };
+      provider.publishPayload({ ...sendablePayload, sendPolicy: 'no_send' });
+      logSpy.mockClear();
+      capturedOnMessage()({ type: 'pe_deliver_current_body', bodyId: 'body-1', bodyRevision: 3, bodyText: 'x' });
+      const allLogs = logSpy.mock.calls.map((c) => String(c[0])).join('\n');
+      expect(allLogs).toContain('"state":"no_intent"');
+      expect(allLogs).toContain('current_body_not_sendable');
+      expect(allLogs).not.toContain('"state":"intent_ready"');
+    });
+
+    it('rejects with current_body_not_editable when renderState is not ready', async () => {
+      mockShowOnboarding.mockResolvedValueOnce(undefined);
+      await activate(makeCtx() as never);
+      const provider = getPeViewProvider() as unknown as { publishPayload: (p: unknown) => void };
+      provider.publishPayload({ ...sendablePayload, renderState: 'loading' });
+      logSpy.mockClear();
+      capturedOnMessage()({ type: 'pe_deliver_current_body', bodyId: 'body-1', bodyRevision: 3, bodyText: 'x' });
+      const allLogs = logSpy.mock.calls.map((c) => String(c[0])).join('\n');
+      expect(allLogs).toContain('current_body_not_editable');
+      expect(allLogs).not.toContain('"state":"intent_ready"');
+    });
+
+    it('rejects with dirty_additional_details_requires_apply_or_clear when the message reports dirty details', async () => {
+      mockShowOnboarding.mockResolvedValueOnce(undefined);
+      await activate(makeCtx() as never);
+      const provider = getPeViewProvider() as unknown as { publishPayload: (p: unknown) => void };
+      provider.publishPayload(sendablePayload);
+      logSpy.mockClear();
+      capturedOnMessage()({ type: 'pe_deliver_current_body', bodyId: 'body-1', bodyRevision: 3, bodyText: 'x', hasDirtyAdditionalDetails: true });
+      const allLogs = logSpy.mock.calls.map((c) => String(c[0])).join('\n');
+      expect(allLogs).toContain('dirty_additional_details_requires_apply_or_clear');
+      expect(allLogs).not.toContain('"state":"intent_ready"');
+    });
+
+    it('rejects with stale_or_mismatched_send_identity when bodyId/bodyRevision disagree with the published payload', async () => {
+      mockShowOnboarding.mockResolvedValueOnce(undefined);
+      await activate(makeCtx() as never);
+      const provider = getPeViewProvider() as unknown as { publishPayload: (p: unknown) => void };
+      provider.publishPayload(sendablePayload);
+      logSpy.mockClear();
+      capturedOnMessage()({ type: 'pe_deliver_current_body', bodyId: 'stale-body', bodyRevision: 3, bodyText: 'x' });
+      const allLogs = logSpy.mock.calls.map((c) => String(c[0])).join('\n');
+      expect(allLogs).toContain('stale_or_mismatched_send_identity');
+      expect(allLogs).not.toContain('"state":"intent_ready"');
+    });
+
+    it('does not run send-intent gating for non-deliver event types', async () => {
+      mockShowOnboarding.mockResolvedValueOnce(undefined);
+      await activate(makeCtx() as never);
+      const provider = getPeViewProvider() as unknown as { publishPayload: (p: unknown) => void };
+      provider.publishPayload({ ...sendablePayload, sendPolicy: 'no_send' }); // would reject if gated
+      logSpy.mockClear();
+      capturedOnMessage()({ type: 'pe_close', actionId: 'a1' });
+      expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining('PE send intent'));
+    });
+
+    it('re-evaluates against the latest published payload, not a stale snapshot from an earlier message', async () => {
+      mockShowOnboarding.mockResolvedValueOnce(undefined);
+      await activate(makeCtx() as never);
+      const provider = getPeViewProvider() as unknown as { publishPayload: (p: unknown) => void };
+
+      provider.publishPayload(sendablePayload);
+      logSpy.mockClear();
+      capturedOnMessage()({ type: 'pe_deliver_current_body', bodyId: 'body-1', bodyRevision: 3, bodyText: 'x' });
+      expect(logSpy.mock.calls.map((c) => String(c[0])).join('\n')).toContain('"state":"intent_ready"');
+
+      provider.publishPayload({ ...sendablePayload, sendPolicy: 'no_send' });
+      logSpy.mockClear();
+      capturedOnMessage()({ type: 'pe_deliver_current_body', bodyId: 'body-1', bodyRevision: 3, bodyText: 'x' });
+      const secondLogs = logSpy.mock.calls.map((c) => String(c[0])).join('\n');
+      expect(secondLogs).toContain('current_body_not_sendable');
+      expect(secondLogs).not.toContain('"state":"intent_ready"');
+    });
+  });
+
+  describe('PE typed delivery, ACK, and origin guard (P8)', () => {
+    interface FakeEvent {
+      rawSessionId: string;
+      sourcePath: string;
+      prompt: string;
+      capturedAt: Date;
+      extractorId: string;
+    }
+    interface ChatPipelineDeps {
+      checkPeOrigin?: (e: FakeEvent) => Promise<boolean>;
+      injectPeResult?: (text: string, e: FakeEvent) => Promise<void>;
+      isPeEcho?: (e: FakeEvent) => Promise<boolean> | boolean;
+    }
+    function makeEvent(overrides: Partial<FakeEvent> = {}): FakeEvent {
+      return {
+        rawSessionId: 'tab-pe',
+        sourcePath: '/fake/ws/a/state.vscdb',
+        prompt: 'the enhanced body',
+        capturedAt: new Date(0),
+        extractorId: 'cursor-v2024-q4',
+        ...overrides,
+      };
+    }
+    function pipelineDeps(): ChatPipelineDeps {
+      return mockCreateChatEventHandler.mock.calls[0]![0] as ChatPipelineDeps;
+    }
+    /** createChatEventHandler only builds once the watcher actually starts (consent + host + db paths). */
+    async function activateWithWatcher(): Promise<void> {
+      mockShowOnboarding.mockResolvedValueOnce(undefined);
+      mockDetectHost.mockReturnValueOnce('cursor');
+      mockWorkspaceStorageDir.mockReturnValueOnce('/fake/ws');
+      mockEnumerateStateVscdbPaths.mockReturnValueOnce(['/fake/ws/a/state.vscdb']);
+      await activate(makeCtx(true) as never);
+    }
+    const validResultJson = JSON.stringify({
+      enhancementId: 'enh-1',
+      validationDecisionId: 'vd-1',
+      uiView: {
+        body: {
+          text: 'the enhanced body',
+          currentBodyId: 'body-1',
+          bodyRevision: 3,
+          sendPolicy: 'send_current',
+          actionLoadingState: 'idle',
+          fallbackMode: 'none',
+        },
+        actions: [],
+      },
+    });
+
+    it('checkPeOrigin: returns false and never publishes/ACKs when this turn is not PE-origin', async () => {
+      mockIsPeOriginTurn.mockResolvedValueOnce(false);
+      await activateWithWatcher();
+      logSpy.mockClear();
+      const result = await pipelineDeps().checkPeOrigin!(makeEvent());
+      expect(result).toBe(false);
+      expect(mockReadPendingPromptEnhancement).not.toHaveBeenCalled();
+      expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining('PE visible-surface ACK'));
+    });
+
+    it('checkPeOrigin: publishes the parsed payload and ACKs pe_body_visible on a real PE-origin turn', async () => {
+      mockIsPeOriginTurn.mockResolvedValueOnce(true);
+      mockReadPendingPromptEnhancement.mockResolvedValueOnce({
+        id: 1, projectRoot: '/proj', sessionId: 's1', promptCount: 1,
+        status: 'pending', createdAt: 0, requestJson: '{}', resultJson: validResultJson,
+      });
+      await activateWithWatcher();
+      logSpy.mockClear();
+      const result = await pipelineDeps().checkPeOrigin!(makeEvent());
+      expect(result).toBe(true);
+      const provider = getPeViewProvider() as unknown as { getCurrentPayload: () => { currentBodyId: string } | null };
+      expect(provider.getCurrentPayload()?.currentBodyId).toBe('body-1');
+      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('PE visible-surface ACK: pe_body_visible'));
+    });
+
+    it('checkPeOrigin: ACKs not_counted_as_shown (never render_failure) when the pending row vanished before it could be read', async () => {
+      mockIsPeOriginTurn.mockResolvedValueOnce(true);
+      mockReadPendingPromptEnhancement.mockResolvedValueOnce(null);
+      await activateWithWatcher();
+      logSpy.mockClear();
+      const result = await pipelineDeps().checkPeOrigin!(makeEvent());
+      expect(result).toBe(true);
+      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('PE visible-surface ACK: not_counted_as_shown'));
+    });
+
+    it('checkPeOrigin: ACKs render_failure when the store read throws, and never propagates the throw', async () => {
+      mockIsPeOriginTurn.mockResolvedValueOnce(true);
+      mockReadPendingPromptEnhancement.mockRejectedValueOnce(new Error('sqlite busy'));
+      await activateWithWatcher();
+      logSpy.mockClear();
+      await expect(pipelineDeps().checkPeOrigin!(makeEvent())).resolves.toBe(true);
+      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('PE visible-surface ACK: render_failure'));
+    });
+
+    it('checkPeOrigin: never reads DS status="shown" — direct spy proof, not coincidental', async () => {
+      mockIsPeOriginTurn.mockResolvedValueOnce(true);
+      mockReadPendingPromptEnhancement.mockResolvedValueOnce({
+        id: 1, projectRoot: '/proj', sessionId: 's1', promptCount: 1,
+        status: 'pending', createdAt: 0, requestJson: '{}', resultJson: validResultJson,
+      });
+      await activateWithWatcher();
+      mockReadLatestAdvisoryMeta.mockClear();
+      mockReadInjectedPrompt.mockClear();
+      await pipelineDeps().checkPeOrigin!(makeEvent());
+      // readLatestAdvisoryMeta / readInjectedPrompt are DS-only reads
+      // (advisory-store-reader.js's pending_advisories.status='shown' path).
+      // Both are mocked and spied on directly here — this asserts the PE
+      // wiring never calls either, rather than relying on the coincidence
+      // that advisory-fallback.js (their only other caller) is also mocked.
+      expect(mockReadLatestAdvisoryMeta).not.toHaveBeenCalled();
+      expect(mockReadInjectedPrompt).not.toHaveBeenCalled();
+      expect(mockReadPendingPromptEnhancement).toHaveBeenCalledTimes(1);
+    });
+
+    it('checkPeOrigin: a slower-resolving OLDER turn never overwrites an already-published NEWER turn\'s payload (Late-ACK ordering gap, found + fixed on P11 cross-confirm)', async () => {
+      // chat-history-watcher.ts fires onEvent without awaiting the previous
+      // handler (fire-and-forget), so two checkPeOrigin calls for two
+      // different turns can genuinely be in flight at once. Without the
+      // createdAt guard, a slower-resolving OLDER read could publish AFTER an
+      // already-published NEWER one, silently replacing the visible body.
+      mockIsPeOriginTurn.mockResolvedValue(true);
+      let resolveOlder!: (v: unknown) => void;
+      const olderPromise = new Promise((resolve) => { resolveOlder = resolve; });
+      const newerResultJson = JSON.stringify({
+        enhancementId: 'enh-2', validationDecisionId: 'vd-2',
+        uiView: { body: { text: 'the newer body', currentBodyId: 'body-2', bodyRevision: 1, sendPolicy: 'send_current', actionLoadingState: 'idle', fallbackMode: 'none' }, actions: [] },
+      });
+      mockReadPendingPromptEnhancement
+        .mockImplementationOnce(() => olderPromise as never)
+        .mockImplementationOnce(async () => ({
+          id: 2, projectRoot: '/proj', sessionId: 's1', promptCount: 1,
+          status: 'pending', createdAt: 1000, requestJson: '{}', resultJson: newerResultJson,
+        }));
+      await activateWithWatcher();
+      const provider = getPeViewProvider() as unknown as { getCurrentPayload: () => { currentBodyId: string } | null };
+
+      const olderCall = pipelineDeps().checkPeOrigin!(makeEvent({ prompt: 'older turn prompt' }));
+      const newerCall = pipelineDeps().checkPeOrigin!(makeEvent({ prompt: 'newer turn prompt' }));
+      await newerCall;
+      expect(provider.getCurrentPayload()?.currentBodyId).toBe('body-2'); // newer turn correctly visible first
+
+      logSpy.mockClear();
+      resolveOlder({
+        id: 1, projectRoot: '/proj', sessionId: 's1', promptCount: 1,
+        status: 'pending', createdAt: 0, requestJson: '{}', resultJson: validResultJson,
+      });
+      await olderCall;
+      // Fixed: the older turn's late-resolving read is suppressed, not published.
+      expect(provider.getCurrentPayload()?.currentBodyId).toBe('body-2');
+      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('PE publish suppressed'));
+    });
+
+    it('checkPeOrigin: a row with the SAME createdAt as the last published one is still published (idempotent re-read, not treated as stale)', async () => {
+      mockIsPeOriginTurn.mockResolvedValue(true);
+      mockReadPendingPromptEnhancement.mockResolvedValue({
+        id: 1, projectRoot: '/proj', sessionId: 's1', promptCount: 1,
+        status: 'pending', createdAt: 500, requestJson: '{}', resultJson: validResultJson,
+      });
+      await activateWithWatcher();
+      const provider = getPeViewProvider() as unknown as { getCurrentPayload: () => { currentBodyId: string } | null };
+      await pipelineDeps().checkPeOrigin!(makeEvent());
+      await pipelineDeps().checkPeOrigin!(makeEvent());
+      expect(provider.getCurrentPayload()?.currentBodyId).toBe('body-1');
+    });
+
+    it('injectPeResult: on success, logs "inserted" and injects via the clipboard-free chatInputInject only', async () => {
+      mockChatInputInject.mockResolvedValueOnce(true);
+      await activateWithWatcher();
+      logSpy.mockClear();
+      await pipelineDeps().injectPeResult!('the enhanced body', makeEvent());
+      expect(mockChatInputInject).toHaveBeenCalledWith('the enhanced body', expect.objectContaining({ host: expect.anything() }));
+      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('PE insert outcome: inserted'));
+    });
+
+    it('injectPeResult: on failure (D-1), logs the typed failure — no clipboard write exists in this path to make', async () => {
+      mockChatInputInject.mockResolvedValueOnce(false);
+      await activateWithWatcher();
+      logSpy.mockClear();
+      await expect(pipelineDeps().injectPeResult!('the enhanced body', makeEvent())).resolves.toBeUndefined();
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.stringContaining('PE insert outcome: insert_failed_no_clipboard_fallback'),
+      );
+    });
+
+    it('injectPeResult: insertion succeeds but the best-effort origin-record read throws — resolves cleanly, no origin recorded', async () => {
+      mockChatInputInject.mockResolvedValueOnce(true);
+      mockReadPendingPromptEnhancement.mockRejectedValueOnce(new Error('sqlite busy'));
+      await activateWithWatcher();
+      await expect(pipelineDeps().injectPeResult!('the enhanced body', makeEvent())).resolves.toBeUndefined();
+      // The insert itself succeeded, but since the origin record failed
+      // best-effort, the next turn's isPeEcho must NOT report a typed echo —
+      // proving the failure is truly swallowed, not silently mis-recorded.
+      expect(pipelineDeps().isPeEcho!(makeEvent({ prompt: 'the enhanced body' }))).toBe(false);
+    });
+
+    it('isPeEcho: reports true for the exact text just delivered by injectPeResult (typed origin guard armed)', async () => {
+      mockChatInputInject.mockResolvedValueOnce(true);
+      mockReadPendingPromptEnhancement.mockResolvedValueOnce({
+        id: 1, projectRoot: '/proj', sessionId: 's1', promptCount: 1,
+        status: 'pending', createdAt: 0, requestJson: '{}', resultJson: validResultJson,
+      });
+      await activateWithWatcher();
+      await pipelineDeps().injectPeResult!('the enhanced body', makeEvent());
+      expect(pipelineDeps().isPeEcho!(makeEvent({ prompt: 'the enhanced body' }))).toBe(true);
+    });
+
+    it('isPeEcho: reports false for different text, even right after a real delivery', async () => {
+      mockChatInputInject.mockResolvedValueOnce(true);
+      mockReadPendingPromptEnhancement.mockResolvedValueOnce({
+        id: 1, projectRoot: '/proj', sessionId: 's1', promptCount: 1,
+        status: 'pending', createdAt: 0, requestJson: '{}', resultJson: validResultJson,
+      });
+      await activateWithWatcher();
+      await pipelineDeps().injectPeResult!('the enhanced body', makeEvent());
+      expect(pipelineDeps().isPeEcho!(makeEvent({ prompt: 'a completely different prompt' }))).toBe(false);
+    });
+
+    it('isPeEcho: reports false before anything has ever been delivered', async () => {
+      await activateWithWatcher();
+      expect(pipelineDeps().isPeEcho!(makeEvent())).toBe(false);
+    });
   });
 
   it('does NOT start the watcher when consent is undefined (first launch, user has not answered)', async () => {
@@ -288,7 +972,14 @@ describe('activate', () => {
     mockShowOnboarding.mockRejectedValueOnce(new Error('onboarding boom'));
     mockDetectHost.mockReturnValueOnce('cursor');
     await expect(activate(makeCtx(true) as never)).resolves.toBeUndefined();
+    // BUG-VEDANSI-AR9-G1 vector 4: the raw Error is no longer passed to
+    // console.error — a closed, serializable record is, so no stack or nested
+    // `cause` payload can reach the dev console or the log file.
     expect(errorSpy).toHaveBeenCalledWith(
+      '[nexpath] onboarding failed:',
+      expect.objectContaining({ name: 'Error', message: 'onboarding boom' }),
+    );
+    expect(errorSpy).not.toHaveBeenCalledWith(
       '[nexpath] onboarding failed:',
       expect.any(Error),
     );
@@ -475,6 +1166,89 @@ describe('activate', () => {
     expect(trackedHandler).toHaveBeenCalledWith(event);
   });
 
+  // ── Watcher event logging: never the prompt text ─────────────────────────
+  // BUG-VEDANSI-AR9-G1 vector 1. This line used to write the first 80 chars of
+  // the user's prompt to the Output channel, the dev console AND
+  // ~/.nexpath/nexpath.log. The routing test above proves the event reaches the
+  // handler; these prove what the event does NOT put into a log sink.
+
+  function watcherEvent(overrides: Record<string, unknown> = {}) {
+    return {
+      prompt: 'ZZQX_PROMPT_MARKER_7741 refactor the auth module',
+      rawSessionId: 'ZZQX_SESSION_MARKER_7741',
+      capturedAt: new Date(0),
+      sourcePath: '/fake/ws/a/state.vscdb',
+      extractorId: 'cursor-v2025-q2',
+      ...overrides,
+    };
+  }
+
+  /** Everything the local `log()` helper wrote during this test. */
+  function loggedLines(): string {
+    return logSpy.mock.calls.map((c) => String(c[0])).join('\n');
+  }
+
+  it('watcher event logging never emits the prompt text', async () => {
+    const opts = await activateWithWatcher();
+    const event = watcherEvent();
+    opts.onEvent(event);
+
+    const written = loggedLines();
+    expect(written).toContain('watcher event:');
+    expect(written).not.toContain('ZZQX_PROMPT_MARKER_7741');
+    expect(written).not.toContain('refactor the auth module');
+  });
+
+  it('watcher event logging never emits the raw session id', async () => {
+    const opts = await activateWithWatcher();
+    opts.onEvent(watcherEvent());
+
+    expect(loggedLines()).not.toContain('ZZQX_SESSION_MARKER_7741');
+  });
+
+  it('watcher event logging keeps the correlatable fields', async () => {
+    const opts = await activateWithWatcher();
+    const event = watcherEvent();
+    opts.onEvent(event);
+
+    const written = loggedLines();
+    // Length, not content — enough to correlate without storing the prompt.
+    expect(written).toContain(`prompt_len=${event.prompt.length}`);
+    expect(written).toContain('extractor=cursor-v2025-q2');
+    // 12 lowercase hex characters, i.e. a truncated digest and not the id.
+    expect(written).toMatch(/session=[0-9a-f]{12}\b/);
+  });
+
+  it('the session fingerprint is stable for the same id and differs across ids', async () => {
+    const readFingerprint = (): string => {
+      const m = /session=([0-9a-f]{12})\b/.exec(loggedLines());
+      if (!m) throw new Error('no session fingerprint was logged');
+      return m[1]!;
+    };
+
+    const first = await activateWithWatcher();
+    first.onEvent(watcherEvent({ rawSessionId: 'session-A' }));
+    const a1 = readFingerprint();
+
+    logSpy.mockClear();
+    first.onEvent(watcherEvent({ rawSessionId: 'session-A' }));
+    const a2 = readFingerprint();
+
+    logSpy.mockClear();
+    first.onEvent(watcherEvent({ rawSessionId: 'session-B' }));
+    const b = readFingerprint();
+
+    expect(a1).toBe(a2);      // stable → log lines stay joinable
+    expect(a1).not.toBe(b);   // distinguishing → still useful as an identifier
+  });
+
+  it('an empty prompt still logs a zero length rather than nothing', async () => {
+    const opts = await activateWithWatcher();
+    opts.onEvent(watcherEvent({ prompt: '' }));
+
+    expect(loggedLines()).toContain('prompt_len=0');
+  });
+
   it('watcher onSchemaUnknown surfaces a visible info toast with path + observed keys', async () => {
     const opts = await activateWithWatcher();
     opts.onSchemaUnknown({
@@ -490,19 +1264,24 @@ describe('activate', () => {
 
   it('watcher onError logs to console.error (does not crash the extension)', async () => {
     const opts = await activateWithWatcher();
+    // BUG-VEDANSI-AR9-G1 vector 4: a redacted record replaces the raw Error.
     const watcherErr = new Error('watch boom');
     expect(() => opts.onError(watcherErr)).not.toThrow();
-    expect(errorSpy).toHaveBeenCalledWith('[nexpath] watcher error:', watcherErr);
+    expect(errorSpy).toHaveBeenCalledWith(
+      '[nexpath] watcher error:',
+      expect.objectContaining({ name: 'Error', message: 'watch boom' }),
+    );
+    expect(errorSpy).not.toHaveBeenCalledWith('[nexpath] watcher error:', watcherErr);
   });
 
-  // ── Pipeline logger wiring (B1.4 follow-up — spawn errors in Output) ──────
+  // ── Pipeline logger wiring (spawn-error visibility follow-up) ─────────────
   // chat-pipeline.ts catches spawnAuto / spawnStop failures and forwards them
   // to its `logger.error`. extension.ts must wire a logger that writes to
   // BOTH console.error AND the Nexpath OutputChannel (via the local `log`
   // helper). Otherwise IPC errors only surface in Developer Tools Console,
-  // invisible to end users. Verified live during B1.4 (nexpath binary moved
-  // aside → spawnAuto ENOENT → silent before this fix, surfaces in Output
-  // after this fix).
+  // invisible to end users. Verified live (nexpath binary moved aside →
+  // spawnAuto ENOENT → silent before this fix, surfaces in Output after
+  // this fix).
 
   it('wires a logger into createChatEventHandler that writes spawn errors to the Output channel', async () => {
     mockShowOnboarding.mockResolvedValueOnce(undefined);
@@ -523,10 +1302,17 @@ describe('activate', () => {
       code: 'ENOENT',
     });
     handlerDeps.logger!.error('[nexpath] spawnAuto failed:', enoent);
+    // BUG-VEDANSI-AR9-G1 vector 4: redacted record, not the raw Error. The
+    // errno code is kept — it is a fixed vocabulary and carries no payload.
     expect(errorSpy).toHaveBeenCalledWith(
       '[nexpath] spawnAuto failed:',
-      enoent,
+      expect.objectContaining({
+        name: 'Error',
+        message: 'spawn nexpath ENOENT',
+        code: 'ENOENT',
+      }),
     );
+    expect(errorSpy).not.toHaveBeenCalledWith('[nexpath] spawnAuto failed:', enoent);
     expect(logSpy).toHaveBeenCalledWith(
       expect.stringContaining('spawn nexpath ENOENT'),
     );
@@ -546,6 +1332,90 @@ describe('activate', () => {
       expect.stringContaining('plain string err'),
     );
   });
+
+  // FIX-3 (2026-08-11) — a workspace folder appearing after a folder-less
+  // activation must re-enumerate the dbs (so the R4.3 filter engages and a
+  // newly-created workspace db joins the watch set) and restart the watcher.
+  describe('FIX-3 — re-enumeration when a workspace folder appears', () => {
+    it('re-enumerates and restarts the watcher when a folder becomes available', async () => {
+      mockShowOnboarding.mockResolvedValueOnce(undefined);
+      mockDetectHost.mockReturnValueOnce('cursor');
+      mockEnumerateStateVscdbPaths.mockReturnValue(['/ws/a/state.vscdb', '/ws/b/state.vscdb']);
+      await activate(makeCtx(true) as never);
+      expect(mockCreateChatHistoryWatcher).toHaveBeenCalledTimes(1);
+      expect(mockOnDidChangeWorkspaceFolders).toHaveBeenCalledTimes(1);
+      const onChange = mockOnDidChangeWorkspaceFolders.mock.calls[0][0] as () => void;
+
+      const stopsBefore = mockWatcherStop.mock.calls.length;
+      (vscodeApi.workspace as { workspaceFolders?: unknown }).workspaceFolders = [
+        { uri: { fsPath: '/proj' } },
+      ];
+      onChange();
+      expect(mockWatcherStop.mock.calls.length).toBe(stopsBefore + 1);
+      expect(mockCreateChatHistoryWatcher).toHaveBeenCalledTimes(2);
+      expect(mockWatcherStart).toHaveBeenCalledTimes(2);
+    });
+
+    it('folder change with NO folder (removal) keeps the current watcher untouched', async () => {
+      mockShowOnboarding.mockResolvedValueOnce(undefined);
+      mockDetectHost.mockReturnValueOnce('cursor');
+      mockEnumerateStateVscdbPaths.mockReturnValue(['/ws/a/state.vscdb']);
+      await activate(makeCtx(true) as never);
+      const onChange = mockOnDidChangeWorkspaceFolders.mock.calls[0][0] as () => void;
+      const stopsBefore = mockWatcherStop.mock.calls.length;
+      onChange(); // workspaceFolders is undefined
+      expect(mockWatcherStop.mock.calls.length).toBe(stopsBefore);
+      expect(mockCreateChatHistoryWatcher).toHaveBeenCalledTimes(1);
+    });
+
+    it('re-enumeration yielding zero targets leaves the running watcher in place', async () => {
+      mockShowOnboarding.mockResolvedValueOnce(undefined);
+      mockDetectHost.mockReturnValueOnce('cursor');
+      mockEnumerateStateVscdbPaths.mockReturnValueOnce(['/ws/a/state.vscdb']).mockReturnValue([]);
+      await activate(makeCtx(true) as never);
+      const onChange = mockOnDidChangeWorkspaceFolders.mock.calls[0][0] as () => void;
+      const stopsBefore = mockWatcherStop.mock.calls.length;
+      (vscodeApi.workspace as { workspaceFolders?: unknown }).workspaceFolders = [
+        { uri: { fsPath: '/proj' } },
+      ];
+      onChange();
+      expect(mockWatcherStop.mock.calls.length).toBe(stopsBefore);
+      expect(mockCreateChatHistoryWatcher).toHaveBeenCalledTimes(1);
+    });
+  });
+describe('OWNER RULING 2026-08-12 — old advisory surface suppressed under the submit switch', () => {
+  const CURSOR_SWITCH = 'NEXPATH_CURSOR_PROMPTSUBMIT_ADVISORY';
+  const onAfterCapture = () => {
+    const deps = mockCreateChatEventHandler.mock.calls[0]![0] as { onAfterCapture: (e: unknown) => void };
+    return deps.onAfterCapture;
+  };
+  const evt = { sourcePath: '/proj/state.vscdb', rawSessionId: 's' };
+
+  afterEach(() => { delete process.env[CURSOR_SWITCH]; });
+
+  it('⭐ Cursor + switch ON: onAfterCapture does NOT arm the old in-editor fallback', async () => {
+    process.env[CURSOR_SWITCH] = '1';
+    mockShowOnboarding.mockResolvedValueOnce(undefined);
+    mockDetectHost.mockReturnValueOnce('cursor');
+    mockEnumerateStateVscdbPaths.mockReturnValue(['/proj/state.vscdb']);
+    await activate(makeCtx(true) as never);
+    onAfterCapture()(evt);
+    expect(mockArmIfPending).not.toHaveBeenCalled();
+  });
+
+  it('⭐ Cursor + switch OFF: onAfterCapture arms exactly as before (byte-identical old flow)', async () => {
+    // '0' is the developer revert override and beats the shipped flag file —
+    // an unset var would leave the outcome to whatever ~/.nexpath/submit-flow.json
+    // says on THIS machine (found live 2026-08-13: shipped-ON flag failed this test).
+    process.env[CURSOR_SWITCH] = '0';
+    mockShowOnboarding.mockResolvedValueOnce(undefined);
+    mockDetectHost.mockReturnValueOnce('cursor');
+    mockEnumerateStateVscdbPaths.mockReturnValue(['/proj/state.vscdb']);
+    await activate(makeCtx(true) as never);
+    onAfterCapture()(evt);
+    expect(mockArmIfPending).toHaveBeenCalled();
+  });
+});
 });
 
 describe('deactivate', () => {
@@ -555,6 +1425,7 @@ describe('deactivate', () => {
     mockShowOnboarding.mockReset();
     mockRegisterWebviewViewProvider.mockReset();
     mockProviderCtor.mockReset();
+    mockPeProviderCtor.mockReset();
     mockDetectHost.mockReset().mockReturnValue('vscode-generic');
     mockWorkspaceStorageDir.mockReset().mockReturnValue(null);
     mockWindsurfCodeiumDir.mockReset().mockReturnValue('/home/u/.codeium/windsurf');
@@ -566,6 +1437,10 @@ describe('deactivate', () => {
     mockWatcherStart.mockReset();
     mockWatcherStop.mockReset();
     mockExistsSync.mockReset().mockReturnValue(false);
+    mockCreatePePoller.mockReset();
+    mockPePollerStart.mockReset();
+    mockPePollerStop.mockReset();
+    mockGetCommands.mockReset().mockResolvedValue([]);
     mockRegisterWebviewViewProvider.mockReturnValue({ dispose: vi.fn() });
     logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
   });
@@ -600,5 +1475,14 @@ describe('deactivate', () => {
     expect(mockWatcherStart).toHaveBeenCalledOnce();
     deactivate();
     expect(mockWatcherStop).toHaveBeenCalled();
+  });
+
+  it('stops the PE poller on deactivate (P10, Windsurf only)', async () => {
+    mockShowOnboarding.mockResolvedValueOnce(undefined);
+    mockDetectHost.mockReturnValueOnce('windsurf');
+    await activate(makeCtx(true) as never);
+    expect(mockPePollerStart).toHaveBeenCalledOnce();
+    deactivate();
+    expect(mockPePollerStop).toHaveBeenCalledOnce();
   });
 });

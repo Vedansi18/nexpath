@@ -1,5 +1,6 @@
 import type { ChatHistoryEvent } from './chat-history-types.js';
 import type { StopSelection } from './ipc.js';
+import { toSafeErrorRecord } from './diagnostics.js';
 
 /**
  * Chat pipeline orchestrator (M13 of M2 Branch 5).
@@ -23,6 +24,19 @@ import type { StopSelection } from './ipc.js';
  *      input (`injectSelection`) and the wiring clears the now-redundant
  *      fallback. No selection (dismissed / no-advisory / popup couldn't open) →
  *      the armed fallback stays as the escape hatch.
+ *
+ * **PE branch (VED-PE-10 / D-6, additive — DS behaviour above is unchanged
+ * when the three optional PE deps are omitted):**
+ *   0. Before any of the above: `isPeEcho` (if provided) checks whether this
+ *      event is a self-echo of a PE body the extension itself just injected
+ *      (F6). If so, the handler returns immediately — no `auto`/`stop` at all.
+ *   3a. Right after `auto` succeeds, `checkPeOrigin` (if provided) decides
+ *       from typed store evidence — never from Stop's returned text — whether
+ *       THIS turn parked a Prompt Enhancement rather than a DS advisory.
+ *   4a. A PE-origin result routes to `injectPeResult` instead of step 4's
+ *       `injectSelection`. Omitting `injectPeResult` falls back to step 4
+ *       unchanged, so a partial wiring degrades safely rather than dropping
+ *       the result.
  *
  * **Timing simplification for B5 smoke test:** `auto` and `stop` are
  * called back-to-back. In production we'd want `stop` to fire after the
@@ -81,10 +95,76 @@ export interface ChatPipelineDeps {
   composeSessionId?: (event: ChatHistoryEvent) => string;
   /** Optional logger override (tests). */
   logger?: { error: (msg: string, err: unknown) => void };
+  /**
+   * Optional: called right after `spawnAuto` succeeds, to decide whether THIS
+   * turn parked a pending Prompt Enhancement rather than a Decision Session
+   * advisory (VED-PE-10 / D-6 — see `pe-origin.ts`; decided from typed store
+   * evidence only, never from Stop's returned text). When it resolves `true`,
+   * a later non-null `spawnStop` result is routed to `injectPeResult` instead
+   * of `injectSelection`. Absent, or throwing, => every result is treated as
+   * DS-origin — today's exact behaviour is the fail-safe default.
+   */
+  checkPeOrigin?: (event: ChatHistoryEvent) => Promise<boolean>;
+  /**
+   * Called instead of `injectSelection` when `checkPeOrigin` reported this
+   * turn as PE-origin. If omitted, a PE-origin result still falls back to
+   * `injectSelection` — a partial wiring degrades to the pre-PE behaviour
+   * rather than silently dropping the result.
+   */
+  injectPeResult?: (resultText: string, event: ChatHistoryEvent) => Promise<void> | void;
+  /**
+   * Optional: called FIRST, before `spawnAuto`. Returns true when this
+   * event's prompt text is a recognised self-echo of a PE body the extension
+   * itself just injected (analysis F6) — the handler then returns
+   * immediately without running `auto`/`stop` at all. Absent, or throwing,
+   * => treated as "not an echo" (fail-safe; Decision Session behaviour is
+   * never affected by an echo-check failure).
+   */
+  isPeEcho?: (event: ChatHistoryEvent) => Promise<boolean> | boolean;
+  /**
+   * OWNER RULING 2026-08-12 (Cursor half of G-ARBITRATION): with the submit-time
+   * advisory switch ON, the OLD Decision-Session advisory surface must not fire —
+   * the submit-time hook owns it now. On Cursor there is no post-response hook to
+   * consume the row (unlike Windsurf's suppression leg), so the DB-watcher's
+   * `stop` is the old advisory's ONLY driver, and this is the enforcement point.
+   *
+   * **Surgical, NOT a blanket kill:** it suppresses ONLY the DS-advisory path —
+   * a turn that `checkPeOrigin` reports as a Prompt Enhancement STILL runs
+   * `spawnStop` + `injectPeResult`, so **PE keeps working** ("all popups working
+   * in the new flow"). Only a non-PE (DS-advisory) turn is skipped. Absent/false
+   * ⇒ byte-identical old behaviour (both surfaces fire as today).
+   */
+  suppressDsAdvisory?: boolean;
+  /**
+   * RC6 (live root cause, 2026-08-13): with the submit switch ON, the hook
+   * ALREADY runs `nexpath auto` for this very prompt inside its hold (option-A
+   * ordering) — the watcher's own `spawnAuto` here is a SECOND, concurrent
+   * classification of the same prompt. The store is sql.js (in-memory,
+   * whole-file write-back, lock waited max 8 s then bypassed), so two autos +
+   * PE's `stop` racing produced last-writer-wins clobbering: the decider's
+   * lookup found "no pending_advisory row" while the row demonstrably existed
+   * seconds before — measured live, timestamps matching LOCK_WAIT_MS exactly.
+   *
+   * With this flag ON the watcher SKIPS its duplicate `spawnAuto`. Everything
+   * downstream is unchanged and reads the rows the HOOK's auto wrote (same
+   * command, same store, same project): `checkPeOrigin` still classifies the
+   * turn, PE turns still run `spawnStop` + `injectPeResult`. An injected
+   * replacement then has NO auto at all (the hook echo-skips its own) — which
+   * is precisely VED-PE-10's requirement; Layer C clears the stale guard on
+   * the next genuine turn regardless.
+   *
+   * Interim implementation of the G-ARBITRATION injector-contention half,
+   * pending team-lead ratification. Absent/false ⇒ byte-identical old flow.
+   */
+  suppressWatcherAuto?: boolean;
 }
 
+// Redacts before logging: this pipeline catches spawnAuto/spawnStop failures,
+// whose errors can carry the delivered body or the user's prompt in a `cause`
+// chain or an attached property. extension.ts injects its own logger, but the
+// default must be safe on its own.
 const defaultLogger = {
-  error: (msg: string, err: unknown) => console.error(msg, err),
+  error: (msg: string, err: unknown) => console.error(msg, toSafeErrorRecord(err)),
 };
 
 /**
@@ -101,13 +181,48 @@ export function createChatEventHandler(
   const logger = deps.logger ?? defaultLogger;
 
   return async (event: ChatHistoryEvent): Promise<void> => {
-    const sessionId = composeSessionId(event);
-    try {
-      await deps.spawnAuto(event.prompt, sessionId, event);
-    } catch (err) {
-      logger.error('[nexpath] spawnAuto failed:', err);
-      return;
+    // F6 self-echo guard: skip entirely if this prompt is our own PE body
+    // reappearing. Must run before spawnAuto — a real user prompt has not
+    // been submitted, so there is nothing for auto/stop to process.
+    if (deps.isPeEcho) {
+      try {
+        if (await deps.isPeEcho(event)) return;
+      } catch (err) {
+        logger.error('[nexpath] isPeEcho check failed:', err);
+        // fall through — fail-safe, treat as not-an-echo
+      }
     }
+    const sessionId = composeSessionId(event);
+    // RC6: under the submit switch the hook already ran `auto` for this prompt
+    // inside its hold — a second concurrent auto here corrupted the sql.js
+    // store (last-writer-wins) and made the submit popup nondeterministic.
+    // Skip the duplicate; downstream reads the hook-auto's rows unchanged.
+    if (!deps.suppressWatcherAuto) {
+      try {
+        await deps.spawnAuto(event.prompt, sessionId, event);
+      } catch (err) {
+        logger.error('[nexpath] spawnAuto failed:', err);
+        return;
+      }
+    }
+    // Decide DS vs PE origin from typed store evidence while the row is still
+    // genuinely pending — see pe-origin.ts for why this must happen here and
+    // not after spawnStop returns.
+    let isPe = false;
+    if (deps.checkPeOrigin) {
+      try {
+        isPe = await deps.checkPeOrigin(event);
+      } catch (err) {
+        logger.error('[nexpath] checkPeOrigin failed:', err);
+        // fail-safe — fall back to DS routing on failure
+      }
+    }
+    // OWNER RULING 2026-08-12: switch ON ⇒ the OLD DS-advisory surface is OFF, but
+    // PE is preserved. A non-PE (DS-advisory) turn stops here — no fallback arm,
+    // no `stop`, no old popup; the submit-time hook already owned this turn's
+    // advisory. A PE turn (isPe) falls through and runs `stop` + `injectPeResult`
+    // exactly as before. Switch OFF ⇒ this is skipped entirely (old behaviour).
+    if (deps.suppressDsAdvisory && !isPe) return;
     // Arm the in-editor fallback BEFORE the popup. `stop` can block indefinitely
     // on macOS (osascript waiting on the Automation-permission dialog), so the
     // fallback must not depend on `stop` returning.
@@ -127,10 +242,18 @@ export function createChatEventHandler(
       return;
     }
     if (selection === null) return; // dismissed / no advisory / no TTY — fallback stands
+    const routeToPe = isPe && deps.injectPeResult !== undefined;
     try {
-      await deps.injectSelection(selection.selectedPrompt, event);
+      if (routeToPe) {
+        await deps.injectPeResult!(selection.selectedPrompt, event);
+      } else {
+        await deps.injectSelection(selection.selectedPrompt, event);
+      }
     } catch (err) {
-      logger.error('[nexpath] injectSelection failed:', err);
+      logger.error(
+        routeToPe ? '[nexpath] injectPeResult failed:' : '[nexpath] injectSelection failed:',
+        err,
+      );
     }
   };
 }

@@ -91,6 +91,33 @@ function buildDeps(context: vscode.ExtensionContext, log: Logger): SetupFlowDeps
     // The staged CLI "runs" only if `node <entry> --version` exits 0 — which
     // requires its deps to be installed. Used to refuse a dep-less copy.
     verifyStagedCli: (cliEntry) => cliRuns('node', [cliEntry, '--version']),
+    // 2026-08-13 (owner's clean-install test): "setup done" survives in
+    // globalState while a wipe deletes `~/.nexpath` + hooks.json — without this
+    // on-disk check the runner never re-ran and the submit hook silently never
+    // fired again. Registered = THIS editor's hooks.json carries our entry AND
+    // the submit-flow flag file exists. Hosts with nothing to register (plain
+    // VS Code) report true; an unreadable file also reports true so a transient
+    // fs error cannot loop the setup terminal on every activation.
+    verifyHookRegistration: () => {
+      try {
+        const agent = process.env.NEXPATH_AGENT;
+        if (agent !== 'cursor' && agent !== 'windsurf') return true;
+        if (!existsSync(join(home, 'submit-flow.json'))) return false;
+        if (agent === 'cursor') {
+          const p = join(homedir(), '.cursor', 'hooks.json');
+          if (!existsSync(p)) return false;
+          const t = readFileSync(p, 'utf8');
+          // `"version"` is required by Cursor's config validator (R5) — a
+          // legacy version-less file is DEAD and must be rewritten, so it
+          // counts as unregistered.
+          return t.includes('cursor-hook') && t.includes('"version"');
+        }
+        const p = join(homedir(), '.codeium', 'windsurf', 'hooks.json');
+        return existsSync(p) && readFileSync(p, 'utf8').includes('windsurf-hook');
+      } catch {
+        return true; // fail-quiet: never churn the setup terminal on fs errors
+      }
+    },
     getState: () =>
       context.globalState.get<SetupState>(SETUP_STATE_KEY) ?? { done: false, version: null },
     setState: (s) => Promise.resolve(context.globalState.update(SETUP_STATE_KEY, s)),

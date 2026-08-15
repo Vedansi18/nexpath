@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import {
   getWindsurfHooksPath,
   buildWindsurfHookCommand,
@@ -23,13 +23,29 @@ afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 const read = (): any => JSON.parse(readFileSync(file, 'utf8'));
 
+/**
+ * The CLI path as the source embeds it, computed the same way the source does.
+ *
+ * `install.ts` runs the caller's path through `resolve()` — and on Windows
+ * `resolve('/abs/cli.js')` is DRIVE-RELATIVE (`C:\abs\cli.js`), not merely a
+ * separator swap. That is correct behaviour for a real install, so the expected
+ * value has to be derived, not pinned to a POSIX literal. The bash form then
+ * forward-slashes the result; the PowerShell form keeps it native.
+ */
+const cliBash = (p: string): string => resolve(p).replace(/\\/g, '/');
+const cliPs = (p: string): string => resolve(p);
+
 describe('paths + command', () => {
   it('hooks.json lives under ~/.codeium/windsurf', () => {
-    expect(getWindsurfHooksPath('/home/u')).toBe('/home/u/.codeium/windsurf/hooks.json');
+    expect(getWindsurfHooksPath('/home/u')).toBe(
+      join('/home/u', '.codeium', 'windsurf', 'hooks.json'),
+    );
   });
   it('command embeds absolute node + cli (both quoted, forward-slashed)', () => {
     const cmd = buildWindsurfHookCommand('/abs/dist/cli/index.js', 'pre_user_prompt', '/usr/bin/node');
-    expect(cmd).toBe('"/usr/bin/node" "/abs/dist/cli/index.js" windsurf-hook pre_user_prompt');
+    expect(cmd).toBe(
+      `"/usr/bin/node" "${cliBash('/abs/dist/cli/index.js')}" windsurf-hook pre_user_prompt`,
+    );
   });
   it('forward-slashes a Windows node path (sanitized-PATH safety)', () => {
     const cmd = buildWindsurfHookCommand(
@@ -38,7 +54,7 @@ describe('paths + command', () => {
       'C:\\Program Files\\nodejs\\node.exe',
     );
     expect(cmd).toBe(
-      '"C:/Program Files/nodejs/node.exe" "/abs/cli.js" windsurf-hook post_cascade_response',
+      `"C:/Program Files/nodejs/node.exe" "${cliBash('/abs/cli.js')}" windsurf-hook post_cascade_response`,
     );
   });
   it('powershell variant uses the & call operator + native node path (Windows)', () => {
@@ -48,12 +64,18 @@ describe('paths + command', () => {
       'C:\\Program Files\\nodejs\\node.exe',
     );
     // PowerShell needs `&` to run a quoted executable path; node path stays native.
-    expect(ps).toBe('& "C:\\Program Files\\nodejs\\node.exe" "/abs/cli.js" windsurf-hook pre_user_prompt');
+    expect(ps).toBe(
+      `& "C:\\Program Files\\nodejs\\node.exe" "${cliPs('/abs/cli.js')}" windsurf-hook pre_user_prompt`,
+    );
   });
   it('hook entry carries BOTH command (bash) and powershell (Windows)', () => {
     const e = buildWindsurfHookEntry('/abs/cli.js', 'post_cascade_response', '/usr/bin/node');
-    expect(e.command).toBe('"/usr/bin/node" "/abs/cli.js" windsurf-hook post_cascade_response');
-    expect(e.powershell).toBe('& "/usr/bin/node" "/abs/cli.js" windsurf-hook post_cascade_response');
+    expect(e.command).toBe(
+      `"/usr/bin/node" "${cliBash('/abs/cli.js')}" windsurf-hook post_cascade_response`,
+    );
+    expect(e.powershell).toBe(
+      `& "/usr/bin/node" "${cliPs('/abs/cli.js')}" windsurf-hook post_cascade_response`,
+    );
   });
   it('config writes both events with both platform commands', () => {
     const cfg = buildWindsurfHooksConfig('/abs/cli.js');

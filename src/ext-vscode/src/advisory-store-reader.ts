@@ -54,8 +54,12 @@ export type ReadAdvisoryRowFn = (
  * watcher's `defaultReadItemTable` so the native module stays out of the eager
  * require graph and a concurrent CLI write can never corrupt the read. Returns
  * the first row, or null on any failure (missing file / missing table / drift).
+ *
+ * Exported so sibling readers targeting a different table in the same store
+ * (e.g. `pe-store-reader.ts`) reuse the staging + ABI-binding logic verbatim
+ * instead of duplicating it.
  */
-async function stagedGetRow(
+export async function stagedGetRow(
   dbPath: string,
   sql:    string,
   param:  string,
