@@ -137,8 +137,15 @@ describe('DRIFT PIN — the mirror matches src/cli/prompt-enhancement-host.ts', 
     expect(cliSrc).toMatch(/method: 'mac_terminal'/);
   });
 
-  it('CLI still requires a GUI session on linux (DISPLAY/WAYLAND_DISPLAY)', () => {
-    expect(cliSrc).toMatch(/!env\.DISPLAY && !env\.WAYLAND_DISPLAY/);
+  it('CLI linux capability: GUI session still consulted; direct_tty path exists (2026-08-15 reconciliation)', () => {
+    // Reconciled 2026-08-15 (combined-branch pull): the CLI no longer HARD-requires a GUI session on
+    // linux — it prefers an in-process /dev/tty render (method 'direct_tty') and keeps it as a last
+    // resort even with no DISPLAY/WAYLAND_DISPLAY. The MIRROR above deliberately keeps the GUI
+    // requirement: an extension-spawned CLI has no controlling terminal (the CLI's own comment: the
+    // hook "may have no usable in-process /dev/tty"), so on THIS surface the only linux render path
+    // is a spawned terminal window, which does need a GUI session.
+    expect(cliSrc).toMatch(/env\.DISPLAY \|\| env\.WAYLAND_DISPLAY/);
+    expect(cliSrc).toMatch(/method: 'direct_tty'/);
   });
 });
 

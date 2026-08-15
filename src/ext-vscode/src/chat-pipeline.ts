@@ -217,12 +217,23 @@ export function createChatEventHandler(
         // fail-safe — fall back to DS routing on failure
       }
     }
-    // OWNER RULING 2026-08-12: switch ON ⇒ the OLD DS-advisory surface is OFF, but
-    // PE is preserved. A non-PE (DS-advisory) turn stops here — no fallback arm,
-    // no `stop`, no old popup; the submit-time hook already owned this turn's
-    // advisory. A PE turn (isPe) falls through and runs `stop` + `injectPeResult`
-    // exactly as before. Switch OFF ⇒ this is skipped entirely (old behaviour).
-    if (deps.suppressDsAdvisory && !isPe) return;
+    // OWNER RULING 2026-08-12 (original): switch ON ⇒ old DS-advisory surface
+    // OFF, PE preserved. SUPERSEDED by H9 (2026-08-13): ALL popups — PE
+    // included — fire at submit time via the hook's own `stop`.
+    //
+    // RC18 (macOS Cursor tester, 2026-08-15, pixel-proven): the `&& !isPe`
+    // carve-out left the watcher's PE stop leg alive under the switch. On
+    // Linux the watcher event always arrived AFTER the hook's popup was
+    // answered and the PE row consumed (isPe=false ⇒ skipped) — pure timing
+    // luck. On the Mac the watcher fired WHILE the hook's popup was open:
+    // checkPeOrigin saw the still-pending row ⇒ isPe=true ⇒ a SECOND
+    // identical PE popup spawned. The user answered the watcher's copy, its
+    // selection went down the OLD delivery path (`PE visible-surface ACK`),
+    // the hook's popup was orphaned ⇒ no submit decision was ever persisted ⇒
+    // the poller had nothing to inject/auto-submit. With the switch ON the
+    // watcher is capture-only: NO stop, NO popup, NO old delivery, for any
+    // turn kind. Switch OFF ⇒ byte-identical old behaviour (PE leg intact).
+    if (deps.suppressDsAdvisory) return;
     // Arm the in-editor fallback BEFORE the popup. `stop` can block indefinitely
     // on macOS (osascript waiting on the Automation-permission dialog), so the
     // fallback must not depend on `stop` returning.

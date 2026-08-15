@@ -124,7 +124,14 @@ export function stageCli(
   };
 
   // Already staged at this exact version → reuse the copy, refresh the shim.
-  if (exists(join(stagedDir, 'package.json'))) {
+  // RC17 (macOS Cursor tester, 2026-08-15): "already staged" must be judged by
+  // the CLI ENTRY, not the manifest. A partially-created version dir (manifest
+  // present, dist/ absent — e.g. an interrupted copy) previously wedged staging
+  // FOREVER: every attempt returned already-current, the setup runner's
+  // `npm ci` succeeded, and `node dist/cli/index.js` died MODULE_NOT_FOUND
+  // with no self-heal path. Checking the entry lets the copy below repair it
+  // (cpSync overwrites in place).
+  if (exists(join(stagedDir, 'package.json')) && exists(cliEntry)) {
     writeShim();
     return { status: 'already-current', stagedDir, cliEntry, shimPath, version };
   }

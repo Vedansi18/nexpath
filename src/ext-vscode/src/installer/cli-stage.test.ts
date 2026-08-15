@@ -71,6 +71,9 @@ describe('stageCli', () => {
       [BUNDLE]: '',
       [join(BUNDLE, 'package.json')]: JSON.stringify({ version: '0.1.3' }),
       [join(staged, 'package.json')]: JSON.stringify({ version: '0.1.3' }),
+      // RC17: "already-current" now also requires the CLI entry — a manifest
+      // alone is a partial dir and must be repaired by a re-copy.
+      [join(staged, CLI_ENTRY_REL)]: '// staged entry',
     });
     const r = stageCli(BUNDLE, HOME, deps);
     expect(r.status).toBe('already-current');
@@ -102,5 +105,55 @@ describe('buildShim', () => {
     const s = buildShim('C:\\Users\\u\\.nexpath\\cli\\0.1.3\\dist\\cli\\index.js', 'win32');
     expect(s.name).toBe('nexpath.cmd');
     expect(s.body).toContain('node "C:\\Users\\u\\.nexpath\\cli\\0.1.3\\dist\\cli\\index.js" %*');
+  });
+});
+
+/**
+ * RC17 (macOS Cursor tester, 2026-08-15): a partially-created staged dir
+ * (package.json present, dist/cli/index.js ABSENT — e.g. an interrupted copy)
+ * wedged staging forever: every attempt returned 'already-current', so the
+ * setup runner's `npm ci` succeeded and `node dist/cli/index.js` died
+ * MODULE_NOT_FOUND with no self-heal. "Already staged" must be judged by the
+ * CLI entry, not the manifest.
+ */
+describe('⭐ RC17 — partial staged dir self-heals', () => {
+  const bundled = '/ext/nexpath-cli';
+  const home = '/home/u/.nexpath';
+  const baseDeps = () => {
+    const copies: Array<[string, string]> = [];
+    return {
+      copies,
+      deps: {
+        readFile: (p: string) => p.includes('package.json') ? '{"version":"0.1.3"}' : '',
+        mkdirp: () => {},
+        copyDir: (s: string, d: string) => { copies.push([s, d]); },
+        writeFile: () => {},
+        chmod: () => {},
+        platform: 'darwin' as const,
+      },
+    };
+  };
+
+  it('manifest present but entry missing ⇒ RE-COPIES (status staged, not already-current)', () => {
+    const { copies, deps } = baseDeps();
+    const res = stageCli(bundled, home, {
+      ...deps,
+      exists: (p: string) =>
+        p === bundled
+        || p.endsWith('package.json'),          // staged manifest exists…
+        // …but dist/cli/index.js does NOT
+    });
+    expect(res.status).toBe('staged');
+    expect(copies).toHaveLength(1);
+  });
+
+  it('manifest AND entry present ⇒ already-current, no copy', () => {
+    const { copies, deps } = baseDeps();
+    const res = stageCli(bundled, home, {
+      ...deps,
+      exists: () => true,
+    });
+    expect(res.status).toBe('already-current');
+    expect(copies).toHaveLength(0);
   });
 });

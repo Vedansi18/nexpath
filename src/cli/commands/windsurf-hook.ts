@@ -306,13 +306,17 @@ function promptTextForHook(): string {
 /**
  * What Cascade's block card shows after the vendor prefix ("1 hook(s) blocked
  * this action: …") when this hook blocks a submit — written to STDERR right
- * before `exit(2)` (RC14; substitution + truncation behaviour verified live
- * against the shipped language server). Wording mirrors Cursor's
- * `user_message`; the key phrase leads so the card's word-boundary truncation
- * (~24 chars observed) still reads professionally: "Nexpath held this prompt".
+ * before `exit(2)` (RC14/RC14b; every property below verified live against the
+ * shipped language server with probe hooks + pixel captures, 2026-08-14):
+ * stderr REPLACES the vendor default "Action blocked by hook"; the card is a
+ * SINGLE line clipped at the panel edge (no wrap); leading newlines are
+ * TRIMMED, so a multi-line layout is impossible. Hence a message short enough
+ * (~24 chars) to always render complete — a full sentence on its own. The
+ * refined prompt appearing + auto-submitting right below the card carries the
+ * rest of the explanation (Cursor renders the long-form `user_message`
+ * instead; that channel does not exist on Windsurf).
  */
-export const WINDSURF_BLOCK_CARD_MESSAGE =
-  'Nexpath held this prompt so you could refine it. Your refined version is being sent instead.';
+export const WINDSURF_BLOCK_CARD_MESSAGE = 'Nexpath held this prompt';
 
 /**
  * Is this submit the hook's OWN replacement coming back around? (VED-PE-10.)

@@ -248,10 +248,15 @@ describe('⭐ BACKWARD COMPAT — switch OFF must construct nothing (structural 
     expect(gate).toBeGreaterThan(-1);
   });
 
-  it('the Windsurf poller is still constructed only inside the gate', () => {
+  it('the Windsurf poller is still constructed only behind the gate', () => {
+    // RC15 reshaped the gate from a block (`if (enabled) { ... }`) into an
+    // early return inside the idempotent armer (`if (!enabled) return false;`)
+    // so setup completion can retry arming on fresh installs. Construction is
+    // unreachable when the gate returns: pin the early-return FORM plus the
+    // ordering, instead of the old indentation relationship.
+    expect(lines[gate]).toMatch(/if \(!isWindsurfSubmitAdvisoryEnabled\(process\.env\)\) return false;/);
     const at = lineOf('submitPoller = createSubmitHookPoller(');
     expect(at).toBeGreaterThan(gate);
-    expect(indentOf(at)).toBeGreaterThan(indentOf(gate));
   });
 
   it('⭐ the shared builder refuses to construct when disabled', () => {
@@ -264,11 +269,16 @@ describe('⭐ BACKWARD COMPAT — switch OFF must construct nothing (structural 
     expect(body.slice(0, 1200)).toMatch(/if \(!enabled\) return null;/);
   });
 
-  it('⭐ each host passes its OWN switch reader — never the other\'s', () => {
+  it('⭐ each host guards its armer with its OWN switch reader — never the other\'s', () => {
     // Passing the Windsurf switch on the Cursor branch would tie two platforms
-    // that must be enablable independently.
-    expect(src).toMatch(/buildSubmitAdvisory\(\s*'cursor',\s*isCursorSubmitAdvisoryEnabled/);
-    expect(src).not.toMatch(/buildSubmitAdvisory\(\s*'cursor',\s*isWindsurfSubmitAdvisoryEnabled/);
+    // that must be enablable independently. RC15 moved the read from the
+    // buildSubmitAdvisory argument into the armer's early-return gate.
+    const cursorArmer = src.slice(src.indexOf('const armCursorSubmitFlow'), src.indexOf("armCursorSubmitFlow('activation')"));
+    expect(cursorArmer).toMatch(/if \(!isCursorSubmitAdvisoryEnabled\(process\.env\)\) return false;/);
+    expect(cursorArmer).not.toContain('isWindsurfSubmitAdvisoryEnabled');
+    const windsurfArmer = src.slice(src.indexOf('const armWindsurfSubmitFlow'), src.indexOf("armWindsurfSubmitFlow('activation')"));
+    expect(windsurfArmer).toMatch(/if \(!isWindsurfSubmitAdvisoryEnabled\(process\.env\)\) return false;/);
+    expect(windsurfArmer).not.toContain('isCursorSubmitAdvisoryEnabled');
   });
 
   it('⭐ Cursor injects via cursorInject, NOT chatInputInject', () => {
@@ -431,5 +441,39 @@ describe('⭐ H8 Finding 1 — the DS-bridge guard is actually WIRED (structural
   it('the submit poller records successful deliveries for the guard', () => {
     const inj = extSrc.slice(extSrc.indexOf("onInject: async (text)"));
     expect(inj.slice(0, 2200)).toMatch(/submitDeliveredStore\.record\(root, text\)/);
+  });
+});
+
+/**
+ * RC15 (macOS tester run, 2026-08-14): on a fresh machine the extension
+ * activates BEFORE `nexpath install` writes ~/.nexpath/submit-flow.json, so an
+ * activation-time-only switch read left the submit flow permanently un-armed —
+ * the hook blocked prompts and wrote decisions NOBODY delivered, and the old
+ * advisory surface popped alongside the submit popups. Pin the late-arm wiring.
+ */
+describe('⭐ RC15 — fresh-install late arming (structural pin)', () => {
+  const src = readFileSync(join(__dirname, 'extension.ts'), 'utf8');
+
+  it('both host armers exist and register themselves as the late armer', () => {
+    expect(src).toContain("armWindsurfSubmitFlow('activation')");
+    expect(src).toContain('armSubmitFlowLate = armWindsurfSubmitFlow');
+    expect(src).toContain("armCursorSubmitFlow('activation')");
+    expect(src).toContain('armSubmitFlowLate = armCursorSubmitFlow');
+  });
+
+  it('setup completion retries arming (both the command and the auto-offer)', () => {
+    expect(src).toMatch(/runSetupCommand\(context, log\)\.then\([\s\S]{0,120}?armSubmitFlowLate\?\.\('post-setup-command'\)/);
+    expect(src).toMatch(/offerSetupIfNeeded\(context, log\)[\s\S]{0,160}?armSubmitFlowLate\?\.\('post-setup-offer'\)/);
+  });
+
+  it('a bounded re-check covers a manual `nexpath install` in a terminal', () => {
+    expect(src).toMatch(/setInterval\(\(\) => \{\s*if \(armSubmitFlowLate\?\.\('late-flag-detected'\)\) clearInterval\(armRetry\);/);
+    expect(src).toContain('setTimeout(() => clearInterval(armRetry), 600_000)');
+  });
+
+  it('the watcher suppression flags read LIVE state, not an activation-time const', () => {
+    expect(src).toMatch(/get suppressDsAdvisory\(\) \{ return submitSurface\.active; \}/);
+    expect(src).toMatch(/get suppressWatcherAuto\(\) \{ return submitSurface\.active; \}/);
+    expect(src).not.toContain('const submitAdvisorySurfaceActive');
   });
 });
