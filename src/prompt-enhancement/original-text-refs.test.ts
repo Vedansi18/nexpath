@@ -1,0 +1,284 @@
+/**
+ * T2 carriers — the three tests the phase plan names:
+ *   - a ref resolves to the expected span
+ *   - a ref that cannot resolve is REFUSED rather than silently dropped
+ *   - the refs survive the composer's own validation path
+ *
+ * Each assertion is written so that removing the behaviour it covers makes it fail.
+ * Tests that pass for the wrong reason have bitten this build repeatedly, so the
+ * refusal cases assert the REASON, not merely that something was returned.
+ */
+import { describe, expect, it } from 'vitest';
+
+import {
+  PROMPT_ENHANCEMENT_ORIGINAL_TEXT_REF_MIN_LENGTH_V1,
+  buildPromptEnhancementOriginalTextRefV1,
+  buildPromptEnhancementPromptPointRefsV1,
+  buildPromptEnhancementTransformReasonCodesV1,
+  extractPromptEnhancementPromptPointsV1,
+  type PromptEnhancementPromptReviewOrigin,
+  resolvePromptEnhancementOriginalTextRefV1,
+  withPromptEnhancementCarriedFromPreviousBodyV1,
+} from './original-text-refs.js';
+
+// The extractor fails closed on an unknown origin, so these tests must state that the
+// prompt is the user's — which is the case they are about.
+const USER_ORIGIN: PromptEnhancementPromptReviewOrigin = 'user_authored_current_prompt';
+
+describe('T2 carriers — a ref resolves to the exact characters it names', () => {
+  it('resolves to the expected span of the original, character for character', () => {
+    const originalPromptText = 'please add retry handling to the payment webhook before friday';
+    const ref = buildPromptEnhancementOriginalTextRefV1({
+      sectionId: 'sec-1',
+      originalPromptText,
+      sectionBodyText: 'Cover retry handling to the payment webhook with concrete steps.',
+    });
+
+    expect(ref.resolution).toBe('exact');
+    // The done-when: a reader can resolve any ref to the exact characters it names.
+    const resolved = resolvePromptEnhancementOriginalTextRefV1(ref, originalPromptText);
+    expect(resolved).toBe(originalPromptText.slice(ref.startOffset, ref.endOffset));
+    expect(resolved).toContain('retry handling to the payment webhook');
+  });
+
+  it('states the original section span rather than searching for it', () => {
+    const originalPromptText = 'rename the column and backfill it';
+    const ref = buildPromptEnhancementOriginalTextRefV1({
+      sectionId: 'sec-original',
+      originalPromptText,
+      sectionBodyText: originalPromptText,
+      quotedText: originalPromptText,
+    });
+
+    expect(ref.resolution).toBe('exact');
+    expect(ref.startOffset).toBe(0);
+    expect(ref.endOffset).toBe(originalPromptText.length);
+    expect(resolvePromptEnhancementOriginalTextRefV1(ref, originalPromptText)).toBe(originalPromptText);
+  });
+});
+
+describe('T2 carriers — an unresolvable ref is REFUSED, not dropped', () => {
+  it('refuses with a reason when the section quotes nothing from the original', () => {
+    const ref = buildPromptEnhancementOriginalTextRefV1({
+      sectionId: 'sec-2',
+      originalPromptText: 'add a nullable phone_number column',
+      sectionBodyText: 'Use a reliable queue system such as RabbitMQ or AWS SQS.',
+    });
+
+    // Refused, and still PRESENT — a dropped ref would make this case
+    // indistinguishable from a section that had nothing to quote.
+    expect(ref.resolution).toBe('refused');
+    expect(ref.refusalReason).toBe('not_found_in_original');
+    expect(resolvePromptEnhancementOriginalTextRefV1(ref, 'add a nullable phone_number column')).toBeUndefined();
+  });
+
+  it('refuses an ambiguous quote rather than picking the first match', () => {
+    // 'deploy the service' occurs twice, so no single span is "the exact characters".
+    const originalPromptText = 'deploy the service then verify, and if it fails deploy the service again';
+    const ref = buildPromptEnhancementOriginalTextRefV1({
+      sectionId: 'sec-3',
+      originalPromptText,
+      sectionBodyText: 'You asked to deploy the service.',
+      quotedText: 'deploy the service',
+    });
+
+    expect(ref.resolution).toBe('refused');
+    expect(ref.refusalReason).toBe('ambiguous_multiple_matches');
+  });
+
+  it('refuses a shared run too short to be a real quote', () => {
+    const shortQuote = 'x'.repeat(PROMPT_ENHANCEMENT_ORIGINAL_TEXT_REF_MIN_LENGTH_V1 - 1);
+    const ref = buildPromptEnhancementOriginalTextRefV1({
+      sectionId: 'sec-4',
+      originalPromptText: `${shortQuote} and more text besides`,
+      sectionBodyText: `something ${shortQuote} something`,
+      quotedText: shortQuote,
+    });
+
+    expect(ref.resolution).toBe('refused');
+    expect(ref.refusalReason).toBe('below_minimum_length');
+  });
+
+  it('does not resolve a ref whose offsets no longer match the original', () => {
+    const originalPromptText = 'rotate the production database credentials';
+    const ref = buildPromptEnhancementOriginalTextRefV1({
+      sectionId: 'sec-5',
+      originalPromptText,
+      sectionBodyText: 'Rotate the production database credentials carefully.',
+    });
+    expect(ref.resolution).toBe('exact');
+
+    // The original changed underneath the ref: offsets now run past its end.
+    expect(resolvePromptEnhancementOriginalTextRefV1(ref, 'rotate')).toBeUndefined();
+  });
+
+  it('refuses to resolve a refused ref that still carries usable offsets', () => {
+    // Builder-made refusals carry -1, so the offset guard alone would catch them. This is
+    // the shape a HAND-WRITTEN fixture or a deserialized ref can have — refused, but with
+    // offsets left on. continuation-packager-input.ts already hand-writes section fixtures,
+    // so the resolution flag has to be authoritative on its own.
+    const originalPromptText = 'restore the deleted migration file';
+    const resolved = resolvePromptEnhancementOriginalTextRefV1(
+      {
+        refId: 'sec-8:otr:1',
+        sectionId: 'sec-8',
+        startOffset: 0,
+        endOffset: 12,
+        resolution: 'refused',
+        refusalReason: 'ambiguous_multiple_matches',
+      },
+      originalPromptText,
+    );
+
+    expect(resolved).toBeUndefined();
+  });
+
+  it('refuses a point that whitespace normalisation moved away from the original', () => {
+    // extractPromptPoints collapses runs of whitespace, so a point the user wrote with
+    // doubled spaces no longer appears verbatim in the text it came from. Reachable,
+    // not theoretical — which is why the refusal branch exists.
+    const originalPromptText = '- add  retry  handling to the webhook';
+    const points = extractPromptEnhancementPromptPointsV1(originalPromptText, USER_ORIGIN);
+    expect(points).toEqual(['add retry handling to the webhook']);
+
+    const refs = buildPromptEnhancementPromptPointRefsV1({
+      sectionId: 'sec-6',
+      originalPromptText,
+      promptPoints: points,
+      sectionBodyText: 'We will add retry handling to the webhook.',
+    });
+
+    expect(refs).toHaveLength(1);
+    expect(refs[0]?.resolution).toBe('refused');
+    expect(refs[0]?.refusalReason).toBe('not_found_in_original');
+  });
+});
+
+describe('T2 carriers — a pasted stack trace does not stall composition', () => {
+  it('builds a ref against a 25KB prompt well inside a frame budget', () => {
+    // Pasting a trace or a whole file is ordinary for a coding tool. An earlier
+    // implementation scanned every substring of the ORIGINAL and took 3.2 s per section
+    // at this size — tens of seconds across a body's sections and the re-render.
+    const original = Array.from({ length: 360 }, (_, index) =>
+      `    at Object.<anonymous> (/app/src/services/payment/handler${index}.ts:${index * 7 + 11}:${index % 40})`).join('\n');
+    expect(original.length).toBeGreaterThan(25_000);
+
+    const startedAt = Date.now();
+    buildPromptEnhancementOriginalTextRefV1({
+      sectionId: 'sec-perf',
+      originalPromptText: original,
+      sectionBodyText: 'Cover the reproduction and evidence with concrete, source-backed specifics.',
+    });
+
+    // Generous by design: this catches a return to super-linear scanning, not a slow CI box.
+    expect(Date.now() - startedAt).toBeLessThan(250);
+  });
+
+  it('names whole words, without ragged whitespace edges', () => {
+    const originalPromptText = 'please fix the retry logic and also fix the checkout flow';
+    const ref = buildPromptEnhancementOriginalTextRefV1({
+      sectionId: 'sec-words',
+      originalPromptText,
+      sectionBodyText: 'We will fix the retry logic carefully.',
+    });
+
+    const resolved = resolvePromptEnhancementOriginalTextRefV1(ref, originalPromptText);
+    expect(resolved).toBe('fix the retry logic');
+    expect(resolved).toBe(resolved?.trim());
+  });
+});
+
+describe('T2 carriers — prompt-point refs name the user\'s own points', () => {
+  it('refs the points a section covers, and not the ones it does not', () => {
+    const originalPromptText = [
+      'Please do the following:',
+      '- add retry handling to the webhook',
+      '- write a migration for the phone column',
+    ].join('\n');
+    const points = extractPromptEnhancementPromptPointsV1(originalPromptText, USER_ORIGIN);
+    expect(points).toHaveLength(2);
+
+    const refs = buildPromptEnhancementPromptPointRefsV1({
+      sectionId: 'sec-9',
+      originalPromptText,
+      promptPoints: points,
+      sectionBodyText: 'Start by add retry handling to the webhook, then verify it.',
+    });
+
+    // Covered → referenced. Not covered → no ref, because a section that does not
+    // mention a point has not failed at anything; it simply has a different scope.
+    expect(refs).toHaveLength(1);
+    expect(refs[0]?.promptPointId).toBe('prompt_point:1');
+    expect(refs[0]?.resolution).toBe('exact');
+  });
+
+  it('extracts nothing from a prompt with no enumerated points', () => {
+    // The common case: a one-line prompt has no points, so there is nothing to ref
+    // and the field is empty rather than filled with ids that are not points.
+    expect(extractPromptEnhancementPromptPointsV1('just fix the failing build please', USER_ORIGIN)).toEqual([]);
+  });
+});
+
+describe('T2 carriers — a carried-forward section says so, without losing its origin', () => {
+  it('appends the carry code rather than replacing how the text was made', () => {
+    const carried = withPromptEnhancementCarriedFromPreviousBodyV1(['composed_by_model', 'quotes_original_text']);
+
+    expect(carried).toContain('carried_from_previous_body');
+    // Substituting would lose the fact that this text was model-composed, which is
+    // still true of the text and is a different fact from "it is being served again".
+    expect(carried).toContain('composed_by_model');
+    expect(carried).toContain('quotes_original_text');
+  });
+
+  it('is idempotent, so a body carried twice does not report two carries', () => {
+    const once = withPromptEnhancementCarriedFromPreviousBodyV1(['preserved_verbatim']);
+    const twice = withPromptEnhancementCarriedFromPreviousBodyV1(once);
+
+    expect(twice.filter((code) => code === 'carried_from_previous_body')).toHaveLength(1);
+    expect(twice).toEqual(once);
+  });
+});
+
+describe('T2 carriers — transform reason codes report what composition actually did', () => {
+  it('marks the original section preserved and reports that it quotes the original', () => {
+    const originalPromptText = 'increase the worker pool size';
+    const codes = buildPromptEnhancementTransformReasonCodesV1({
+      isOriginalSection: true,
+      wasComposedByModel: false,
+      originalTextRef: buildPromptEnhancementOriginalTextRefV1({
+        sectionId: 'sec-original',
+        originalPromptText,
+        sectionBodyText: originalPromptText,
+        quotedText: originalPromptText,
+      }),
+    });
+
+    expect(codes).toContain('preserved_verbatim');
+    expect(codes).toContain('quotes_original_text');
+    expect(codes).not.toContain('composed_by_model');
+  });
+
+  it('distinguishes a model-composed section from a deterministically rendered one', () => {
+    const refusedRef = buildPromptEnhancementOriginalTextRefV1({
+      sectionId: 'sec-7',
+      originalPromptText: 'ship it',
+      sectionBodyText: 'Nothing in common here whatsoever.',
+    });
+
+    const composed = buildPromptEnhancementTransformReasonCodesV1({
+      isOriginalSection: false,
+      wasComposedByModel: true,
+      originalTextRef: refusedRef,
+    });
+    const deterministic = buildPromptEnhancementTransformReasonCodesV1({
+      isOriginalSection: false,
+      wasComposedByModel: false,
+      originalTextRef: refusedRef,
+    });
+
+    expect(composed).toContain('composed_by_model');
+    expect(deterministic).toContain('rendered_deterministically');
+    // A section that quotes nothing says so, rather than staying silent about it.
+    expect(composed).toContain('no_original_text_quoted');
+  });
+});

@@ -2,7 +2,9 @@ import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { openStore, closeStore, DEFAULT_DB_PATH } from '../../store/db.js';
+import { SCHEMA_VERSION } from '../../store/schema.js';
 import { getPromptStats } from '../../store/prompts.js';
+import { getPromptEnhancementStoreStatus, type PromptEnhancementStoreStatus } from '../../store/prompt-enhancement.js';
 import { getAllConfig, DEFAULT_CONFIG } from '../../store/config.js';
 import { readHookStats, type ProjectHookStats } from '../../store/hook-stats.js';
 import {
@@ -38,6 +40,7 @@ export interface StatusResult {
   agents:     AgentStatus[];
   hook:       HookStatus;
   store:      StoreStatus;
+  promptEnhancement: PromptEnhancementStoreStatus;
   config:     Record<string, string>;
   hookStats:  ProjectHookStats[];
 }
@@ -132,12 +135,14 @@ export async function runStatus(input: StatusInput): Promise<StatusResult> {
   // ── Prompt store stats + config ───────────────────────────────────────────
   // Open the DB once; read both stats and config in the same session.
   let store: StoreStatus;
+  let promptEnhancement: PromptEnhancementStoreStatus;
   let config: Record<string, string>;
 
   if (input.dbPath === ':memory:' || existsSync(input.dbPath)) {
     const db = await openStore(input.dbPath);
     try {
       const stats = getPromptStats(db);
+      promptEnhancement = getPromptEnhancementStoreStatus(db);
       store = {
         exists:       true,
         dbPath:       input.dbPath,
@@ -160,6 +165,34 @@ export async function runStatus(input: StatusInput): Promise<StatusResult> {
       dbSizeBytes:  0,
       perProject:   [],
     };
+    promptEnhancement = {
+      schemaVersion: SCHEMA_VERSION,
+      enabledState: 'policy_disabled_or_no_data',
+      memoryRows: 0,
+      sourceUseRows: 0,
+      generatedOriginRows: 0,
+      feedbackRows: 0,
+      statusRows: 0,
+      globalMemoryRows: 0,
+      globalSourceUseRows: 0,
+      globalGeneratedOriginRows: 0,
+      globalFeedbackRows: 0,
+      globalStatusRows: 0,
+      estimatedBytes: 0,
+      exportedDbBytes: 0,
+      capState: 'policy_disabled_or_no_data',
+      rowCapState: 'policy_disabled_or_no_data',
+      byteThresholdState: 'policy_disabled_or_no_data',
+      lastCleanupOutcome: 'none',
+      telemetryPolicy: 'ids_enums_counts_status_timing_only',
+      rawContentStoredByDefault: false,
+      oldStoreSurfacesAreAuthority: false,
+      reasonCodes: [],
+      lastPruneAt: null,
+      lastDecayAt: null,
+      fallbackCount: 0,
+      errorCount: 0,
+    };
     config = { ...DEFAULT_CONFIG };
   }
 
@@ -168,7 +201,7 @@ export async function runStatus(input: StatusInput): Promise<StatusResult> {
     b.lastRunAt.localeCompare(a.lastRunAt),
   );
 
-  return { agents: agentStatuses, hook, store, config, hookStats };
+  return { agents: agentStatuses, hook, store, promptEnhancement, config, hookStats };
 }
 
 // ── Render ────────────────────────────────────────────────────────────────────
@@ -226,6 +259,30 @@ export function renderStatus(result: StatusResult): string {
 
   lines.push('');
 
+  lines.push('Prompt enhancement');
+  lines.push(`  Enabled state    : ${result.promptEnhancement.enabledState}`);
+  lines.push(`  Schema version   : ${result.promptEnhancement.schemaVersion}`);
+  lines.push(`  Memory rows      : ${result.promptEnhancement.memoryRows.toLocaleString()}`);
+  lines.push(`  Source-use rows  : ${result.promptEnhancement.sourceUseRows.toLocaleString()}`);
+  lines.push(`  Generated-origin : ${result.promptEnhancement.generatedOriginRows.toLocaleString()}`);
+  lines.push(`  Feedback rows    : ${result.promptEnhancement.feedbackRows.toLocaleString()}`);
+  lines.push(`  Status rows      : ${result.promptEnhancement.statusRows.toLocaleString()}`);
+  lines.push(`  Global rows      : memory ${result.promptEnhancement.globalMemoryRows.toLocaleString()}, source-use ${result.promptEnhancement.globalSourceUseRows.toLocaleString()}, generated-origin ${result.promptEnhancement.globalGeneratedOriginRows.toLocaleString()}, feedback ${result.promptEnhancement.globalFeedbackRows.toLocaleString()}, status ${result.promptEnhancement.globalStatusRows.toLocaleString()}`);
+  lines.push(`  Estimated bytes  : ${formatBytes(result.promptEnhancement.estimatedBytes)}`);
+  lines.push(`  Exported DB bytes: ${formatBytes(result.promptEnhancement.exportedDbBytes)}`);
+  lines.push(`  Cap state        : ${result.promptEnhancement.capState}`);
+  lines.push(`  Row cap state    : ${result.promptEnhancement.rowCapState}`);
+  lines.push(`  Byte state       : ${result.promptEnhancement.byteThresholdState}`);
+  lines.push(`  Last cleanup     : ${result.promptEnhancement.lastCleanupOutcome}`);
+  lines.push(`  Last prune       : ${formatOptionalTimestamp(result.promptEnhancement.lastPruneAt)}`);
+  lines.push(`  Last decay       : ${formatOptionalTimestamp(result.promptEnhancement.lastDecayAt)}`);
+  lines.push(`  Fallback/errors  : ${result.promptEnhancement.fallbackCount}/${result.promptEnhancement.errorCount}`);
+  if (result.promptEnhancement.reasonCodes.length > 0) {
+    lines.push(`  Reasons          : ${result.promptEnhancement.reasonCodes.join(', ')}`);
+  }
+
+  lines.push('');
+
   // ── Hook activity ─────────────────────────────────────────────────────────
   lines.push('Hook activity');
   if (result.hookStats.length === 0) {
@@ -251,6 +308,10 @@ export function renderStatus(result: StatusResult): string {
   }
 
   return lines.join('\n') + '\n';
+}
+
+function formatOptionalTimestamp(value: number | null): string {
+  return value === null ? 'never' : new Date(value).toISOString();
 }
 
 // ── CLI entry point ────────────────────────────────────────────────────────────

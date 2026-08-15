@@ -20,7 +20,8 @@ import { isInjectedPromptEcho } from '../../decision-session/whydesc-delivery.js
 import { selectionRegister } from '../../decision-session/selection-registry.js';
 import { resolvePinchFields } from '../../decision-session/signal-pinch-fields.js';
 import type { Stage } from '../../classifier/types.js';
-import type { FlagType, Stage2TriggerResult } from '../../core/stage2.js';
+import type { FlagType, Stage2TriggerResult } from '../../classifier/Stage2Trigger.js';
+import type { StageClassifierResult } from '../../classifier/stage-classifier.js';
 import { resolveLanguage } from '../../classifier/LanguageDetector.js';
 import { insertPrompt } from '../../store/prompts.js';
 import { getConfig } from '../../store/config.js';
@@ -34,12 +35,61 @@ import { logger, initLogger } from '../../logger.js';
 import type { LogLevel } from '../../logger.js';
 import { writeHookStats } from '../../store/hook-stats.js';
 import { upsertPendingAdvisory } from '../../store/pending-advisories.js';
+import { upsertPendingPromptEnhancement, type PendingPromptEnhancement } from '../../store/pending-prompt-enhancements.js';
+import {
+  preparePromptEnhancementStopBridgeDelivery,
+  type PromptEnhancementDeliveryRequestV1,
+  type PromptEnhancementDeliveryResultV1,
+} from '../../prompt-enhancement/delivery.js';
 import { insertSkippedSession } from '../../store/skipped-sessions.js';
 import { recordActivity } from '../../store/feedback-cadence.js';
+import { recordActionSignal } from '../../store/feedback-signals.js';
 import { writeTelemetry } from '../../telemetry/index.js';
 import { triggerOpportunisticSync } from '../../telemetry/OpportunisticSync.js';
 import { resolveFrequencyConfig, type AdvisoryFrequencyLevel } from '../../config/GlobalConfig.js';
 import { recentPromptMetadata } from '../../telemetry/recent-prompts.js';
+import {
+  PROMPT_ENHANCEMENT_CONTRACT_VERSION,
+  validatePromptEnhancementPrepareRequestV1,
+  validatePromptEnhancementPrepareResultV1,
+  type PromptEnhancementPrepareFacadeV1,
+  type PromptEnhancementPrepareRequestV1,
+  type PromptEnhancementPrepareResultV1,
+  type PromptEnhancementDisposition,
+  type PromptEnhancementSourceRefV1,
+} from '../../prompt-enhancement/contracts.js';
+import { preparePromptEnhancement, explainPromptEnhancementSequenceSummaryAbsenceV1 } from '../../prompt-enhancement/facade.js';
+import { recordPromptEnhancementFeedbackV1 } from '../../prompt-enhancement/feedback-sink.js';
+import { derivePromptEnhancementFeedbackPolicyV1 } from '../../prompt-enhancement/feedback-policy.js';
+import type { PromptEnhancementPopupEventV1 } from '../../prompt-enhancement/popup-session.js';
+import { buildPromptEnhancementCostVisibilityMetadataV1 } from '../../prompt-enhancement/cost-observability.js';
+import { emitPromptEnhancementCostObservabilityV1 } from '../../prompt-enhancement/cost-measurement.js';
+import { isPromptEnhancementSequenceShapedTextV1 } from '../../prompt-enhancement/routing-taxonomy.js';
+import { getSourceRealityAdaptersSnapshot } from '../../prompt-enhancement/source-reality.js';
+import { loadRightGoodProfile } from '../../classifier/right-good-aggregator.js';
+import { computeWorkStyleProfile } from '../../classifier/work-style-traits.js';
+import { readParamEvents } from '../../telemetry/param-events.js';
+import { getProjectEnvFacts } from '../../store/env-facts.js';
+import { getPromptEnhancementFeedbackSummary, queryRelevantPromptEnhancementMemory, recordPromptEnhancementMemoryEvidence, markPromptEnhancementMemoryUsed } from '../../store/prompt-enhancement.js';
+import { scorePromptEnhancementMemoryCandidates } from '../../prompt-enhancement/memory-scoring.js';
+import {
+  promptEnhancementStageSignalKeyV1,
+  promptEnhancementAbsenceSignalKeyV1,
+} from '../../prompt-enhancement/guidance-facts.js';
+import { resolvePromptEnhancementGuidanceOutcomeV1 } from '../../prompt-enhancement/guidance-outcome.js';
+import {
+  buildClaudeUserPromptSubmitHookOutputV1,
+  runPromptEnhancementCliSubmitPopupV1,
+  validatePromptEnhancementCliPopupResultV1,
+  type ClaudeUserPromptSubmitHookOutputV1,
+  type PromptEnhancementCliPopupResultV1,
+} from '../../prompt-enhancement/cli-submit-popup.js';
+import {
+  resolvePromptEnhancementCliHostCapabilityV1,
+  runPromptEnhancementCliPopupHostLaunchV1,
+  type PromptEnhancementCliHostCapabilityV1,
+  type PromptEnhancementCliPopupHostLaunchResultV1,
+} from '../prompt-enhancement-host.js';
 
 /**
  * nexpath auto — orchestration command (per decision-session-ux-research.md).
@@ -117,6 +167,344 @@ export interface AutoHookPayload {
 }
 
 /**
+ * Optional H1.1 integration seam. The request builder and semantic producer remain
+ * outside runAuto; this boundary only validates the approved typed packet/result and
+ * exposes a safe disposition to the application caller.
+ */
+export interface AutoPromptEnhancementIntegration {
+  request: PromptEnhancementPrepareRequestV1;
+  prepare: PromptEnhancementPrepareFacadeV1;
+  onResult?: (result: AutoPromptEnhancementPreparationResult) => void | Promise<void>;
+}
+
+export type AutoPromptEnhancementConsumerDispositionV1 = 'continue' | 'handled_no_send';
+
+export type AutoPromptEnhancementConsumerV1 = (
+  preparation: AutoPromptEnhancementPreparationResult,
+  request: PromptEnhancementPrepareRequestV1,
+) => AutoPromptEnhancementConsumerDispositionV1 | void | Promise<AutoPromptEnhancementConsumerDispositionV1 | void>;
+
+/**
+ * Build the approved H1.1 typed PE request from the values already produced by
+ * runAuto. This is an adapter only: it records existing classifier/session/source
+ * facts and does not create new routing, delivery, or semantic authority.
+ */
+/**
+ * E1 / P1-G1 + AR6-G1(query) — PE grounding-evidence refs that the guidance-fact seam (E2) consumes.
+ * Ref-ID convention (E2 parses these): `right_good:<key>` / `mistake:<key>` (RIGHT&GOOD non-neutral signals);
+ * `work_style:<trait>:<value>` (set work-style traits); `hard_fact:<key>` (source-derived project env facts);
+ * `feedback:<category>:<count>` (scoped feedback); `memory:<signalKey>` (missing-signal memory candidates —
+ * empty until E3 records evidence). `paramEventChannels` = the distinct detection channels present.
+ * Every read is DEFENSIVE — an empty or failed read yields no refs (deterministic no-data fallback). The
+ * param-event log is read ONCE and reused for work-style + channels (RIGHT&GOOD keeps its own read; its
+ * `computeRightGoodProfile` is not exported). NB: env facts map to `sourceOnlyHardFactRefs`; runtime context is
+ * already carried by the request's agent-mode/permission fields, so it is not duplicated here.
+ */
+function buildPromptEnhancementGroundingRefsV1(store: Store, projectRoot: string, signalKeys: readonly string[]): {
+  rightGoodWorkStyleEnvRuntimeRefs: readonly string[];
+  paramEventChannels: readonly string[];
+  sourceOnlyHardFactRefs: readonly string[];
+  scopedFeedbackEvidenceRefs: readonly string[];
+  missingMemoryCandidateRefs: readonly string[];
+} {
+  const rightGoodWorkStyleEnvRuntimeRefs: string[] = [];
+  try {
+    for (const [key, signal] of Object.entries(loadRightGoodProfile(store, projectRoot))) {
+      if (signal.state !== 'neutral') rightGoodWorkStyleEnvRuntimeRefs.push(`${signal.state}:${key}`);
+    }
+  } catch { /* no RIGHT&GOOD grounding available — leave empty */ }
+  const paramEventChannels: string[] = [];
+  try {
+    const events = readParamEvents(store, projectRoot);
+    for (const [trait, tv] of Object.entries(computeWorkStyleProfile(events))) {
+      if (tv.value !== null) rightGoodWorkStyleEnvRuntimeRefs.push(`work_style:${trait}:${tv.value}`);
+    }
+    for (const channel of new Set(events.map((event) => event.channel))) paramEventChannels.push(channel);
+  } catch { /* no param-event grounding available — leave empty */ }
+  const sourceOnlyHardFactRefs: string[] = [];
+  try {
+    const stored = getProjectEnvFacts(store, projectRoot);
+    if (stored) for (const factKey of Object.keys(stored.facts)) sourceOnlyHardFactRefs.push(`hard_fact:${factKey}`);
+  } catch { /* no source hard facts available — leave empty */ }
+  const scopedFeedbackEvidenceRefs: string[] = [];
+  try {
+    for (const category of getPromptEnhancementFeedbackSummary(store, projectRoot).categoryCounts) {
+      scopedFeedbackEvidenceRefs.push(`feedback:${category.feedbackCategory}:${category.count}`);
+    }
+  } catch { /* no scoped feedback available — leave empty */ }
+  const missingMemoryCandidateRefs: string[] = [];
+  try {
+    // E3/3.2c: score the queried rows so a fatigued / edited-out-twice signal does
+    // not re-surface (fix-plan §4c query-time fatigue/suppression).
+    const rows = queryRelevantPromptEnhancementMemory(store, projectRoot, signalKeys);
+    for (const candidate of scorePromptEnhancementMemoryCandidates(rows).eligible) {
+      missingMemoryCandidateRefs.push(`memory:${candidate.signalKey}`);
+    }
+  } catch { /* no missing-signal memory yet (until E3 records) — leave empty */ }
+  return {
+    rightGoodWorkStyleEnvRuntimeRefs,
+    paramEventChannels,
+    sourceOnlyHardFactRefs,
+    scopedFeedbackEvidenceRefs,
+    missingMemoryCandidateRefs,
+  };
+}
+
+export function buildPromptEnhancementRequestForAuto(input: {
+  auto: AutoInput;
+  store: Store;
+  session: SessionStateManager;
+  project: ReturnType<typeof getProject>;
+  effectiveLanguage?: string;
+  configuredRole?: string | null;
+  effectiveFlagType: FlagType;
+  firedKey: string;
+  previousStage: Stage;
+  trigger: Exclude<Stage2TriggerResult, null>;
+  stageResult: StageClassifierResult;
+  streamBOutputs: readonly string[];
+}): PromptEnhancementPrepareRequestV1 {
+  const promptIndex = input.session.current.promptCount - 1;
+  const currentStage = input.session.current.currentStage;
+  const register = selectionRegister(input.session.current.profile?.nature);
+  const source = getSourceRealityAdaptersSnapshot({
+    flagType: input.effectiveFlagType,
+    stage: currentStage,
+    projectRoot: input.auto.projectRoot,
+    register,
+    role: input.configuredRole ?? undefined,
+    level: 1,
+    store: input.store,
+  });
+  const content = source.contentTemplate;
+  const sourceId = `prompt:${promptIndex}`;
+  const originalPromptRef: PromptEnhancementSourceRefV1 = {
+    sourceRefId: `source-a:${sourceId}`,
+    sourceKind: 'source_a_user_prompt',
+    sourceId,
+    sourceAuthorization: 'source_fact_only',
+    evidenceStatus: 'present',
+    freshness: 'current',
+    confidence: 'high',
+    privacyClass: 'local_private',
+  };
+  const triggerRef: PromptEnhancementSourceRefV1 = {
+    sourceRefId: `trigger:${input.effectiveFlagType}`,
+    sourceKind: 'stage_or_absence_signal',
+    sourceId: input.effectiveFlagType,
+    sourceAuthorization: 'source_fact_only',
+    evidenceStatus: 'present',
+    freshness: 'current',
+    confidence: input.stageResult.classification.confidence >= 0.8
+      ? 'high'
+      : input.stageResult.classification.confidence >= 0.5 ? 'medium' : 'low',
+    privacyClass: 'public_safe',
+  };
+  const contentRef = content.resolvedRecordIdentity
+    ? {
+        sourceRefId: `content:${content.resolvedRecordIdentity}`,
+        sourceKind: 'content_template_fact' as const,
+        sourceId: content.resolvedRecordIdentity,
+        sourceAuthorization: content.authorization,
+        evidenceStatus: 'present' as const,
+        freshness: 'current' as const,
+        confidence: 'medium' as const,
+        privacyClass: 'public_safe' as const,
+      }
+    : undefined;
+  const sourceRefs = [originalPromptRef, triggerRef, ...(contentRef ? [contentRef] : [])];
+  const triggerKind = input.trigger.kind;
+  const absenceSignal = triggerKind === 'absence'
+    ? input.effectiveFlagType.replace(/^absence:/, '')
+    : undefined;
+  const recentRefs = recentPromptMetadata(input.session.current.promptHistory)
+    .map((prompt) => `prompt:${prompt.index}`);
+  // Read memory under the SAME canonical keys the guidance builder writes, or a
+  // repeatedly-edited-out signal would never be found and suppressed (E3/3.2c).
+  const groundingSignalKeys = [
+    ...(triggerKind === 'stage_transition' ? [promptEnhancementStageSignalKeyV1(input.previousStage, currentStage)] : []),
+    ...(absenceSignal ? [promptEnhancementAbsenceSignalKeyV1(absenceSignal)] : []),
+  ];
+  const grounding = buildPromptEnhancementGroundingRefsV1(input.store, input.auto.projectRoot, groundingSignalKeys);
+
+  return {
+    schemaVersion: PROMPT_ENHANCEMENT_CONTRACT_VERSION,
+    requestId: `pe:auto:${input.session.current.sessionId}:${promptIndex}:${input.effectiveFlagType}`,
+    projectRoot: input.auto.projectRoot,
+    hostSurface: 'cli_stop_bridge',
+    sourcePrompt: {
+      text: input.auto.promptText,
+      origin: 'user',
+      capturedAt: Date.now(),
+      promptIndex,
+      generatedOriginPolicy: 'ordinary_source_a',
+    },
+    reviewMomentContext: {
+      reviewMoment: 'UserPromptSubmit_preparation',
+      currentAgentMode: input.auto.currentAgentMode ?? 'unknown',
+      projectId: input.project?.projectRoot ?? input.auto.projectRoot,
+      sessionId: input.session.current.sessionId,
+      detectedLanguage: input.effectiveLanguage ?? 'unknown',
+      stageCandidate: currentStage,
+      promptCount: input.session.current.promptCount,
+      recentPromptMetadataRefs: recentRefs,
+      triggerProvenance: {
+        currentStage,
+        prevStage: input.previousStage,
+        triggerKind,
+        firedKey: input.firedKey,
+        effectiveFiredSource: input.effectiveFlagType,
+        selectedQualifyingAbsence: absenceSignal,
+        absenceGateReason: absenceSignal ? 'qualifying_absence_signal' : undefined,
+        classifierState: input.stageResult.degraded ? 'degraded_no_fire' : 'fire_recommended',
+        degradedNoActionState: input.stageResult.degraded ? 'degraded_no_fire' : 'none',
+        promptStartBoundary: source.promptStartStop.hookBoundary,
+        deliveryBoundary: source.promptStartStop.deliveryBoundary,
+        promptStartCanReplaceSameTurn: source.promptStartStop.runAutoCanHoldOrReplaceSubmittedPrompt,
+        promptId: sourceId,
+        sessionId: input.session.current.sessionId,
+        promptIndex,
+      },
+    },
+    sourceSignals: {
+      sourceAOriginalPromptRef: originalPromptRef,
+      sourceRefs,
+      normalizedStageAbsenceSignalRefs: absenceSignal ? [absenceSignal] : [],
+      contentTemplateRecordFactRefs: content.resolvedRecordIdentity ? [content.resolvedRecordIdentity] : [],
+      popupQuestionSourceRefs: content.resolvedRecordIdentity ? [`${content.resolvedRecordIdentity}:question`] : [],
+      whyHelpSourceRefs: content.resolvedRecordIdentity ? [`${content.resolvedRecordIdentity}:why-help`] : [],
+      profileRoleModeRefs: input.configuredRole ? [`role:${input.configuredRole}`] : [],
+      rightGoodWorkStyleEnvRuntimeRefs: grounding.rightGoodWorkStyleEnvRuntimeRefs,
+      missingMemoryCandidateRefs: grounding.missingMemoryCandidateRefs,
+      sourceLabels: [
+        { sourceRefId: originalPromptRef.sourceRefId, label: 'original_prompt', evidenceStatus: 'present' },
+        { sourceRefId: triggerRef.sourceRefId, label: 'stage_absence_signal', evidenceStatus: 'present' },
+        ...(contentRef ? [{ sourceRefId: contentRef.sourceRefId, label: 'content_template_fact' as const, evidenceStatus: 'present' as const }] : []),
+      ],
+      contentTemplate: {
+        recordSignalType: content.recordSignalType,
+        contentSource: content.contentSource,
+        resolvedRecordIdentity: content.resolvedRecordIdentity,
+        resolvedSource: content.resolvedSource,
+        sourceCascade: content.sourceCascade,
+        registerOverridePath: content.registerOverridePath,
+        safeguardRequired: content.safeguardRequired,
+        questionServing: content.questionServing,
+      },
+      promptStartStop: {
+        hookBoundary: source.promptStartStop.hookBoundary,
+        deliveryBoundary: source.promptStartStop.deliveryBoundary,
+        runAutoCanHoldOrReplaceSubmittedPrompt: source.promptStartStop.runAutoCanHoldOrReplaceSubmittedPrompt,
+        sharedSignalCount: source.promptStartStop.sharedSignalCount,
+        classifierDegradedNoFireReasons: source.promptStartStop.classifierDegradedNoFireReasons,
+      },
+      store: {
+        schemaVersion: source.store.schemaVersion,
+        missingPromptEnhancementTables: source.store.missingPromptEnhancementTables,
+        cleanupGaps: source.store.cleanupGaps,
+      },
+      historicalBootstrap: source.historicalBootstrap,
+      launchBoundary: source.launchBoundary,
+      permissionMode: input.auto.currentAgentMode ?? 'unknown',
+      transcriptPathState: input.auto.transcriptPath ? 'provided' : 'not_authority',
+      streamBOutputs: input.streamBOutputs,
+      paramEventChannels: grounding.paramEventChannels,
+      servedVariantIdentityRefs: [],
+      deliveryGateRefs: [],
+      sourceOnlyHardFactRefs: grounding.sourceOnlyHardFactRefs,
+    },
+    userPreferenceContext: {
+      levelState: 'default',
+      scopedFeedbackEvidenceRefs: grounding.scopedFeedbackEvidenceRefs,
+    },
+    configSnapshot: {
+      sequenceEnabledState: 'not_enabled_v1',
+      validatedEffectiveConfigState: 'valid',
+      arbitraryConfigRowsAreAuthority: false,
+    },
+    callVisibilityState: buildPromptEnhancementCostVisibilityMetadataV1('baseline_pe_composer', {
+      callVisibilityMode: 'deterministic',
+      plannedCallCount: 0,
+      usedCallCount: 0,
+    }),
+    privacyAndStoragePolicy: {
+      sensitivityClass: 'normal',
+      localStorageEligibility: 'ids_and_categories_only',
+      telemetryEligibility: 'allowlisted_counts_only',
+      llmSharingEligibility: 'allowed_minimal',
+      generatedBodyStoragePolicy: 'do_not_store_raw_by_default',
+    },
+  };
+}
+
+export type AutoPromptEnhancementPreparationResult =
+  | {
+      disposition: PromptEnhancementDisposition;
+      result: PromptEnhancementPrepareResultV1;
+      safeFallback: false;
+    }
+  | {
+      disposition: 'no_popup_not_applicable';
+      result?: undefined;
+      safeFallback: true;
+      reasonCode: 'invalid_request' | 'invalid_result' | 'facade_error';
+      validationReasonCodes?: readonly string[];
+    };
+
+/**
+ * Diagnosability (blocked-popup fix 2026-08-07): a blocked_no_send prepare previously logged
+ * only its disposition — the BLOCKING failure codes were unrecoverable once the pending row was
+ * overwritten. Surface the typed codes (public-safe enums, never body text) in the boundary log.
+ */
+function blockedFailureCodesForLog(
+  preparation: AutoPromptEnhancementPreparationResult,
+): readonly string[] | undefined {
+  if (preparation.disposition !== 'blocked_no_send' || !preparation.result) return undefined;
+  return preparation.result.validationGraph.failures
+    .filter((failure) => failure.blocking)
+    .map((failure) => failure.failureCode)
+    .slice(0, 6);
+}
+
+/**
+ * Validate the typed H1.1 request/result boundary without creating PE semantics.
+ * Invalid, thrown, or malformed producer output is reduced to the public-safe
+ * no-popup disposition; it never mutates the submitted prompt or legacy DS state.
+ */
+export async function preparePromptEnhancementForAuto(
+  integration: AutoPromptEnhancementIntegration,
+): Promise<AutoPromptEnhancementPreparationResult> {
+  const requestValidation = validatePromptEnhancementPrepareRequestV1(integration.request);
+  if (!requestValidation.ok) {
+    return {
+      disposition: 'no_popup_not_applicable',
+      safeFallback: true,
+      reasonCode: 'invalid_request',
+      validationReasonCodes: requestValidation.reasonCodes,
+    };
+  }
+
+  try {
+    const result = await integration.prepare(integration.request);
+    const resultValidation = validatePromptEnhancementPrepareResultV1(result);
+    if (!resultValidation.ok) {
+      return {
+        disposition: 'no_popup_not_applicable',
+        safeFallback: true,
+        reasonCode: 'invalid_result',
+        validationReasonCodes: resultValidation.reasonCodes,
+      };
+    }
+    return { disposition: result.disposition, result, safeFallback: false };
+  } catch {
+    return {
+      disposition: 'no_popup_not_applicable',
+      safeFallback: true,
+      reasonCode: 'facade_error',
+    };
+  }
+}
+/**
  * Parse the JSON payload the coding-agent hook writes to stdin.
  *
  * Captures the prompt text, the reported permission mode, and the session
@@ -145,6 +533,156 @@ export type AutoOutcome =
   | { outcome: 'no_action' }
   | { outcome: 'pending' };
 
+const PROMPT_ENHANCEMENT_CLI_DIAGNOSTIC_REASON_CODES_V1 = new Set([
+  'no_tty',
+  'renderer_failure',
+  'action_result_not_renderable',
+  'invalid_prepare_result',
+  'invalid_popup_session',
+  'popup_identity_mismatch',
+  'missing_required_popup_action',
+  'typed_no_popup_disposition',
+  'invalid_render_timestamp',
+  'delivery_surface_mismatch',
+  'host_launch_failed',
+  'invalid_host_result',
+]);
+
+const PROMPT_ENHANCEMENT_CLI_DIAGNOSTIC_REASON_LIMIT_V1 = 8;
+
+export interface PromptEnhancementCliSubmitConsumerDiagnosticV1 {
+  [key: string]: unknown;
+  state: PromptEnhancementCliPopupResultV1['state'];
+  hostAdapter: 'direct_tty' | 'linux_terminal' | 'unavailable';
+  hookOutput: 'block_no_send' | 'additional_context' | 'allow_original_or_not_shown';
+  reasonCodes: readonly string[];
+}
+
+/**
+ * Build the public-safe PE live-consumer diagnostic payload.
+ *
+ * The popup result can carry body text and its reason array crosses a runtime
+ * boundary, so neither is logged directly. Only allowlisted enum values are
+ * retained; any unknown value is collapsed to one bounded marker.
+ */
+export function buildPromptEnhancementCliSubmitConsumerDiagnosticV1(
+  popupResult: PromptEnhancementCliPopupResultV1,
+  hookOutput: ClaudeUserPromptSubmitHookOutputV1 | undefined,
+  hostAdapter: PromptEnhancementCliSubmitConsumerDiagnosticV1['hostAdapter'] = 'direct_tty',
+): PromptEnhancementCliSubmitConsumerDiagnosticV1 {
+  const reasonCodes: string[] = [];
+  if (popupResult.state === 'not_shown') {
+    for (const reasonCode of popupResult.reasonCodes) {
+      const safeReasonCode = PROMPT_ENHANCEMENT_CLI_DIAGNOSTIC_REASON_CODES_V1.has(reasonCode)
+        ? reasonCode
+        : 'unrecognized_reason_code';
+      if (!reasonCodes.includes(safeReasonCode)) reasonCodes.push(safeReasonCode);
+      if (reasonCodes.length === PROMPT_ENHANCEMENT_CLI_DIAGNOSTIC_REASON_LIMIT_V1) break;
+    }
+  }
+
+  return {
+    state: popupResult.state,
+    hostAdapter,
+    hookOutput: hookOutput
+      ? hookOutput.decision === 'block' ? 'block_no_send' : 'additional_context'
+      : 'allow_original_or_not_shown',
+    reasonCodes,
+  };
+}
+
+export interface PromptEnhancementCliHostConsumerDependenciesV1 {
+  store: Store;
+  dbPath: string;
+  cliEntryPath: string;
+  resolveCapability?: () => PromptEnhancementCliHostCapabilityV1;
+  launchHost?: (input: {
+    capability: PromptEnhancementCliHostCapabilityV1;
+    request: PromptEnhancementPrepareRequestV1;
+    result: PromptEnhancementPrepareResultV1;
+    cliEntryPath: string;
+    dbPath: string;
+  }) => Promise<PromptEnhancementCliPopupHostLaunchResultV1>;
+  showDirectPopup?: (input: {
+    request: PromptEnhancementPrepareRequestV1;
+    result: PromptEnhancementPrepareResultV1;
+    feedbackSink: (event: PromptEnhancementPopupEventV1) => ReturnType<typeof recordPromptEnhancementCliFeedbackV1>;
+    costObservabilitySink?: (result: PromptEnhancementPrepareResultV1) => void;
+  }) => Promise<PromptEnhancementCliPopupResultV1>;
+  onHookOutput?: (output: ClaudeUserPromptSubmitHookOutputV1 | undefined) => void;
+}
+
+function popupResultFromHostLaunchV1(
+  result: PromptEnhancementCliPopupHostLaunchResultV1,
+): PromptEnhancementCliPopupResultV1 {
+  if (result.state === 'completed') {
+    return validatePromptEnhancementCliPopupResultV1(result.output.result)
+      ? result.output.result
+      : { state: 'not_shown', reasonCodes: ['invalid_host_result'] };
+  }
+  return {
+    state: 'not_shown',
+    reasonCodes: [result.state === 'host_unavailable' ? 'no_tty' : 'host_launch_failed'],
+  };
+}
+
+/**
+ * Hook-only PE host selector. It preserves the existing direct-TTY popup path,
+ * uses the PE1.3 private-file launcher for a supported Linux terminal, and
+ * keeps unavailable/launch-failed hosts on normal original-prompt pass-through.
+ */
+export function createPromptEnhancementCliHostConsumerV1(
+  dependencies: PromptEnhancementCliHostConsumerDependenciesV1,
+): AutoPromptEnhancementConsumerV1 {
+  const resolveCapability = dependencies.resolveCapability ?? resolvePromptEnhancementCliHostCapabilityV1;
+  const launchHost = dependencies.launchHost ?? runPromptEnhancementCliPopupHostLaunchV1;
+  const showDirectPopup = dependencies.showDirectPopup ?? runPromptEnhancementCliSubmitPopupV1;
+
+  return async (preparation, request) => {
+    if (preparation.safeFallback || !preparation.result) return;
+
+    const capability = resolveCapability();
+    let popupResult: PromptEnhancementCliPopupResultV1;
+    let hostAdapter: PromptEnhancementCliSubmitConsumerDiagnosticV1['hostAdapter'];
+    if (capability.state === 'unavailable') {
+      hostAdapter = 'unavailable';
+      popupResult = { state: 'not_shown', reasonCodes: ['no_tty'] };
+    } else if (capability.method === 'direct_tty') {
+      hostAdapter = 'direct_tty';
+      popupResult = await showDirectPopup({
+        request,
+        result: preparation.result,
+        feedbackSink: (event) => recordPromptEnhancementCliFeedbackV1(dependencies.store, request.projectRoot, event, request),
+        // NF Plan B (B-2): content-free per-action telemetry — buffered locally, sent on the
+        // feedback-consent flush (store-backed sink; in-process direct popup).
+        actionSignalSink: (kind, occurredAt) => recordActionSignal(dependencies.store, request.projectRoot, kind, occurredAt),
+        costObservabilitySink: (result) => emitPromptEnhancementCostObservabilityV1(result, 'popup_action', logger),
+      });
+    } else {
+      hostAdapter = 'linux_terminal';
+      try {
+        popupResult = popupResultFromHostLaunchV1(await launchHost({
+          capability,
+          request,
+          result: preparation.result,
+          cliEntryPath: dependencies.cliEntryPath,
+          dbPath: dependencies.dbPath,
+        }));
+      } catch {
+        popupResult = { state: 'not_shown', reasonCodes: ['host_launch_failed'] };
+      }
+    }
+
+    const hookOutput = buildClaudeUserPromptSubmitHookOutputV1(popupResult);
+    dependencies.onHookOutput?.(hookOutput);
+    logger.debug(
+      'prompt_enhancement_cli_submit_consumer',
+      buildPromptEnhancementCliSubmitConsumerDiagnosticV1(popupResult, hookOutput, hostAdapter),
+    );
+    return popupResult.state === 'closed_no_send' ? 'handled_no_send' : 'continue';
+  };
+}
+
 // ── Core orchestration ─────────────────────────────────────────────────────────
 
 /**
@@ -159,6 +697,7 @@ export async function runAuto(
   input:   AutoInput,
   store:   Store,
   openai?: OpenAI,
+  promptEnhancement?: AutoPromptEnhancementIntegration,
 ): Promise<AutoOutcome> {
   // ── Adapters — wire platform-specific deps to core port interfaces ───────────
   const llmAdapter = new OpenAILLMAdapter(openai);
@@ -341,6 +880,75 @@ export async function runAuto(
     flagKeys:        newFlags.map((f) => f.signalKey),
   }, store);
 
+  // ── 4.6. Sequence-shaped PE fallback (team-leader approved fix, 2026-08-06) ──
+  // PE preparation historically ran ONLY inside the decision-trigger branch, so a multi-step
+  // (MPS-eligible) prompt reached the engine only when it coincidentally landed on a trigger
+  // turn — making the MPS popup effectively untestable. For SEQUENCE-SHAPED prompts only
+  // (multi-intent, or a >=3-point list), prepare + store the pending PE on every no-action
+  // exit below, exactly like the fired path (the popup still shows on the Stop hook). It
+  // creates NO advisory, marks NO decision-session fired, and ordinary prompts keep the
+  // existing trigger cadence. Frequency 'off' stays fully silent (checked before this runs).
+  let sequencePeFallbackDone = false;
+  const prepareSequenceShapedPeFallback = async (): Promise<void> => {
+    // Injected boundary-test integrations keep their own single explicit path.
+    if (sequencePeFallbackDone || promptEnhancement !== undefined) return;
+    if (!isPromptEnhancementSequenceShapedTextV1(input.promptText)) return;
+    sequencePeFallbackDone = true;
+    const request = buildPromptEnhancementRequestForAuto({
+      auto: input,
+      store,
+      session: mgr,
+      project,
+      effectiveLanguage: effectiveLang,
+      configuredRole,
+      effectiveFlagType: 'stage_transition',
+      firedKey: `sequence_shaped:${mgr.current.promptCount}`,
+      previousStage: prevStage,
+      trigger: { kind: 'stage_transition' },
+      stageResult,
+      streamBOutputs: [],
+    });
+    const preparation = await preparePromptEnhancementForAuto({ request, prepare: preparePromptEnhancement });
+    logger.debug('prompt_enhancement_prepare_boundary', {
+      disposition: preparation.disposition,
+      safeFallback: preparation.safeFallback,
+      reasonCode: 'reasonCode' in preparation ? preparation.reasonCode : undefined,
+      validationReasonCodes: 'validationReasonCodes' in preparation && preparation.validationReasonCodes
+        ? preparation.validationReasonCodes.slice(0, 10)
+        : undefined,
+      blockedFailureCodes: blockedFailureCodesForLog(preparation),
+      sequenceShapedFallback: true,
+    });
+    if (!preparation.safeFallback && preparation.result) {
+      upsertPendingPromptEnhancement(store, {
+        projectRoot: input.projectRoot,
+        sessionId:   mgr.current.sessionId,
+        promptCount: mgr.current.promptCount,
+        request,
+        result:      preparation.result,
+      });
+      const handoffPresent = Boolean(preparation.result.uiView.handoffAndSequenceSummary);
+      logger.debug('pending_prompt_enhancement_stored', {
+        projectRoot: input.projectRoot,
+        sessionId:   mgr.current.sessionId,
+        promptCount: mgr.current.promptCount,
+        disposition: preparation.disposition,
+        sequenceShapedFallback: true,
+        // Diagnosability: whether this stored row can ever open the MPS popup.
+        handoffPresent,
+      });
+      // A sequence-shaped prompt that stored WITHOUT a summary is the exact anomaly that was
+      // previously untraceable — name the reason (deterministic re-explain) in the log.
+      if (!handoffPresent) {
+        logger.warn('sequence_summary_absent', {
+          projectRoot: input.projectRoot,
+          reasonCodes: explainPromptEnhancementSequenceSummaryAbsenceV1(request, preparation.result).slice(0, 8),
+        });
+      }
+      emitPromptEnhancementCostObservabilityV1(preparation.result, 'prepare', logger);
+    }
+  };
+
   // ── 4.5. Frequency off fast-exit + minimum prompt guard ────────────────────
   if (freq === 'off') {
     writeTelemetry(input.projectRoot, 'advisory_freq_blocked', { freq }, store);
@@ -348,6 +956,7 @@ export async function runAuto(
     return { outcome: 'no_action' };
   }
   if (mgr.current.promptCount < freqConfig.minPromptsBeforeAdvisory) {
+    await prepareSequenceShapedPeFallback();
     writeTelemetry(input.projectRoot, 'advisory_min_prompts_blocked', { promptCount: mgr.current.promptCount, minRequired: freqConfig.minPromptsBeforeAdvisory }, store);
     logger.info('pipeline_outcome', { outcome: 'no_action', reason: 'min_prompts_not_reached' });
     return { outcome: 'no_action' };
@@ -363,6 +972,7 @@ export async function runAuto(
   logger.debug('should_fire', { trigger: triggerResult?.kind ?? null });
 
   if (!triggerResult) {
+    await prepareSequenceShapedPeFallback();
     writeTelemetry(input.projectRoot, 'pipeline_no_action', { reason: 'no_flag' }, store);
     logger.info('pipeline_outcome', { outcome: 'no_action', reason: 'no_flag' });
     return { outcome: 'no_action' };
@@ -376,6 +986,7 @@ export async function runAuto(
   const alreadyFired = mgr.hasFiredDecisionSession(preCheckFiredKey);
   logger.debug('dedup', { firedKey: preCheckFiredKey, alreadyFired });
   if (alreadyFired) {
+    await prepareSequenceShapedPeFallback();
     writeTelemetry(input.projectRoot, 'advisory_dedup_blocked', { firedKey: preCheckFiredKey }, store);
     logger.info('pipeline_outcome', { outcome: 'no_action', reason: 'already_fired', firedKey: preCheckFiredKey });
     return { outcome: 'no_action' };
@@ -383,11 +994,13 @@ export async function runAuto(
 
   // ── 6.5. Advisory frequency gate ────────────────────────────────────────────
   if (freq === 'major_only' && triggerResult.kind !== 'stage_transition') {
+    await prepareSequenceShapedPeFallback();
     writeTelemetry(input.projectRoot, 'advisory_freq_blocked', { freq, flagType: triggerResult.kind }, store);
     logger.info('pipeline_outcome', { outcome: 'no_action', reason: 'freq_major_only', flagType: triggerResult.kind });
     return { outcome: 'no_action' };
   }
   if (freq === 'once_per_session' && mgr.current.firedDecisionSessions.length > 0) {
+    await prepareSequenceShapedPeFallback();
     writeTelemetry(input.projectRoot, 'advisory_freq_blocked', { freq, flagType: triggerResult.kind }, store);
     logger.info('pipeline_outcome', { outcome: 'no_action', reason: 'freq_once_per_session' });
     return { outcome: 'no_action' };
@@ -396,6 +1009,7 @@ export async function runAuto(
   // ── 6.6. Post-advisory cooldown — suppress rapid back-to-back advisories ─────
   const lastAdvisory = mgr.current.lastAdvisoryPromptIndex ?? -1;
   if (lastAdvisory >= 0 && mgr.current.promptCount - lastAdvisory < freqConfig.postAdvisoryCooldown) {
+    await prepareSequenceShapedPeFallback();
     writeTelemetry(input.projectRoot, 'advisory_cooldown_blocked', {
       promptCount:       mgr.current.promptCount,
       lastAdvisoryAt:    lastAdvisory,
@@ -414,6 +1028,7 @@ export async function runAuto(
     : freqConfig.sessionAdvisoryCapDefault;
   const advisoryCount = mgr.current.advisoryCount ?? 0;
   if (advisoryCount >= advisoryCap) {
+    await prepareSequenceShapedPeFallback();
     insertSkippedSession(store, {
       projectRoot:          input.projectRoot,
       sessionId:            mgr.current.sessionId,
@@ -447,6 +1062,7 @@ export async function runAuto(
   // advisory (the stage still classifies locally, so session tracking continues).
   writeTelemetry(input.projectRoot, 'classifier_fire_evaluated', { flagType: triggerResult.kind, confirmed: stageResult.fireRecommendation }, store);
   if (!stageResult.fireRecommendation) {
+    await prepareSequenceShapedPeFallback();
     writeTelemetry(input.projectRoot, 'pipeline_no_action', { reason: 'classifier_declined' }, store);
     logger.info('pipeline_outcome', { outcome: 'no_action', reason: 'classifier_declined', confidence: stageResult.classification.confidence, degraded: stageResult.degraded });
     return { outcome: 'no_action' };
@@ -469,6 +1085,81 @@ export async function runAuto(
     effectiveFlagType = `absence:${selectedKey}`;
   }
   const firedKey = buildFiredKey(effectiveFlagType, prevStage, mgr.current.currentStage);
+  // ── 8.1. H1.1 typed PE preparation seam ────────────────────────────────────
+  // Build and consume the approved PE packet by default. An injected integration
+  // remains available for boundary tests, while the default path now exercises
+  // the executable Hiren facade without changing legacy DS or delivery authority.
+  const peIntegration = promptEnhancement ?? {
+    request: buildPromptEnhancementRequestForAuto({
+      auto: input,
+      store,
+      session: mgr,
+      project,
+      effectiveLanguage: effectiveLang,
+      configuredRole,
+      effectiveFlagType,
+      firedKey,
+      previousStage: prevStage,
+      trigger: triggerResult,
+      stageResult,
+      streamBOutputs: streamBOverrides
+        ? Object.entries(streamBOverrides)
+          .filter(([, present]) => present)
+          .map(([signal]) => `stream_b:${signal}`)
+        : [],
+    }),
+    prepare: preparePromptEnhancement,
+  };
+  const preparation = await preparePromptEnhancementForAuto(peIntegration);
+  await peIntegration.onResult?.(preparation);
+  logger.debug('prompt_enhancement_prepare_boundary', {
+    disposition: preparation.disposition,
+    safeFallback: preparation.safeFallback,
+    reasonCode: 'reasonCode' in preparation ? preparation.reasonCode : undefined,
+    // Diagnosability (2026-08-06): a bare invalid_result was undebuggable from the log — record
+    // WHICH validation checks failed so a live boundary rejection names its exact cause.
+    validationReasonCodes: 'validationReasonCodes' in preparation && preparation.validationReasonCodes
+      ? preparation.validationReasonCodes.slice(0, 10)
+      : undefined,
+    blockedFailureCodes: blockedFailureCodesForLog(preparation),
+  });
+  // Owner decision B-i (2026-08-04): the PE popup is deferred to the Stop hook. Do NOT show a
+  // popup on UserPromptSubmit — the prompt passes through raw. When a real (non-fallback) result
+  // exists, persist it so the Stop hook can show the PE popup after Claude responds.
+  if (!preparation.safeFallback && preparation.result) {
+    upsertPendingPromptEnhancement(store, {
+      projectRoot: input.projectRoot,
+      sessionId:   mgr.current.sessionId,
+      promptCount: mgr.current.promptCount,
+      request:     peIntegration.request,
+      result:      preparation.result,
+    });
+    const handoffPresent = Boolean(preparation.result.uiView.handoffAndSequenceSummary);
+    logger.debug('pending_prompt_enhancement_stored', {
+      projectRoot: input.projectRoot,
+      sessionId:   mgr.current.sessionId,
+      promptCount: mgr.current.promptCount,
+      disposition: preparation.disposition,
+      // Diagnosability: whether this stored row can ever open the MPS popup.
+      handoffPresent,
+    });
+    // A sequence-shaped prompt that stored WITHOUT a summary is the exact anomaly that was
+    // previously untraceable — name the reason (deterministic re-explain) in the log.
+    if (!handoffPresent && isPromptEnhancementSequenceShapedTextV1(input.promptText)) {
+      logger.warn('sequence_summary_absent', {
+        projectRoot: input.projectRoot,
+        reasonCodes: explainPromptEnhancementSequenceSummaryAbsenceV1(peIntegration.request, preparation.result).slice(0, 8),
+      });
+    }
+    // E9 (P12-G1/G2): measure cost off the result's REAL call-visibility (mode + planned/used
+    // counts come from the composer, not the hardcoded request placeholder), and run the PE-G4
+    // "cost never weakens behavior" check. Observability-only — this never gates the popup. The
+    // E8 popup-action calls are measured at their own surface via the popup costObservabilitySink.
+    emitPromptEnhancementCostObservabilityV1(preparation.result, 'prepare', logger);
+  }
+
+  // H1.3 keeps legacy Decision Session bookkeeping after preparation; PE preparation
+  // remains capture/classification-only and cannot gain DS authority.
   mgr.markDecisionSessionFired(store, firedKey);
 
   // ── 8.5. Read user profile (computed in processPrompt, null if < 5 prompts) ──
@@ -499,6 +1190,13 @@ export async function runAuto(
     sessionId:   mgr.current.sessionId,
     promptCount: mgr.current.promptCount,
     prevStage,
+  });
+  logger.debug('pending_advisory_stored', {
+    projectRoot: input.projectRoot,
+    sessionId: mgr.current.sessionId,
+    promptCount: mgr.current.promptCount,
+    flagType: effectiveFlagType,
+    peDisposition: preparation.disposition,
   });
   writeTelemetry(input.projectRoot, 'pipeline_advisory_pending', {
     flagType:                      effectiveFlagType,
@@ -617,6 +1315,10 @@ export function registerAutoCommand(program: import('commander').Command): void 
       }
 
       try {
+        // Owner decision B-i (2026-08-04): the PE popup is deferred to the Stop hook, so the
+        // UserPromptSubmit hook never shows a popup and never emits a hook output — the prompt
+        // always passes through raw. runAuto prepares + persists the pending PE; the Stop hook
+        // (`nexpath stop`) reads it, shows the popup, and injects the enhanced prompt as a new turn.
         const result = await runAuto(
           { promptText, projectRoot: opts.project, currentAgentMode, transcriptPath },
           store,
@@ -624,9 +1326,117 @@ export function registerAutoCommand(program: import('commander').Command): void 
 
         writeHookStats(opts.project, result.outcome);
         void triggerOpportunisticSync(store).catch(() => {});
-        // 'no_action' and 'pending' → exit silently (Stop hook handles UI)
+        // No popup on UserPromptSubmit → always normal original-prompt pass-through.
       } finally {
         closeStore(store);
       }
     });
+}
+
+/**
+ * Record that the popup's Source-A signals were shown (E3/3.2b, fix-plan §4b):
+ * neutral candidate evidence per rendered Source-A signal so the "shown" count
+ * accumulates cross-session. The signal keys come from re-running the E2 pipeline
+ * on the request (Path A). Safety-critical signals are protected so they survive
+ * fatigue. Best-effort — a memory-write failure must never block the popup.
+ */
+export function recordPromptEnhancementShownMemoryV1(
+  store: Store,
+  projectRoot: string,
+  request: PromptEnhancementPrepareRequestV1,
+  now: number = Date.now(),
+): void {
+  try {
+    for (const signal of resolvePromptEnhancementGuidanceOutcomeV1(request).renderedSourceASignals) {
+      recordPromptEnhancementMemoryEvidence(store, {
+        projectRoot,
+        signalKey: signal.signalKey,
+        evidenceKind: 'neutral',
+        currentEvidenceState: 'live_current',
+        confidenceBand: 'medium',
+        sourceStrength: 'moderate',
+        protectionState:
+          signal.riskLevel === 'high' || signal.riskLevel === 'sensitive_authority_risky'
+            ? 'high_risk_protected'
+            : undefined,
+        status: 'candidate',
+        now,
+      });
+    }
+  } catch { /* memory record is best-effort; never block the popup */ }
+}
+
+/**
+ * Mark the popup's Source-A signals as used (E3/3.2b, fix-plan §4b "markUsed on
+ * use") when the enhanced body is kept/injected. Signal keys come from re-running
+ * the E2 pipeline (Path A); the memory rows already exist from the show recording.
+ * Best-effort — a memory-write failure must never block delivery.
+ */
+export function markPromptEnhancementUsedMemoryV1(
+  store: Store,
+  projectRoot: string,
+  request: PromptEnhancementPrepareRequestV1,
+  now: number = Date.now(),
+): void {
+  try {
+    for (const signal of resolvePromptEnhancementGuidanceOutcomeV1(request).renderedSourceASignals) {
+      markPromptEnhancementMemoryUsed(store, projectRoot, signal.signalKey, now);
+    }
+  } catch { /* memory record is best-effort; never block delivery */ }
+}
+
+/**
+ * D1 (P9-G1 / resolves P9-G2): wire the live Stop injection through the typed Stop-bridge delivery
+ * contract. `preparePromptEnhancementStopBridgeDelivery` records **source-use before transport** and
+ * writes the **generated-origin** metadata (`learningEligible:false`, `raw_text_excluded`) — the
+ * audit/lineage tables (`prompt_enhancement_source_use` / `prompt_enhancement_generated_origin`) that
+ * the ad-hoc block+inject path never wrote live. The kept enhanced body is a `send_current` delivery
+ * on the `cli_stop_bridge` channel; raw text is never the transport authority. Returns the typed
+ * result for the caller to log (the actual injected carrier text is unchanged — 4d).
+ */
+export function recordPromptEnhancementStopBridgeDeliveryV1(
+  store: Store,
+  pending: PendingPromptEnhancement,
+): PromptEnhancementDeliveryResultV1 {
+  const body = pending.result.currentBody;
+  const request: PromptEnhancementDeliveryRequestV1 = {
+    deliveryAttemptId: `pe-delivery:${pending.result.enhancementId}:${pending.id}`,
+    projectRoot: pending.projectRoot,
+    enhancementId: pending.result.enhancementId,
+    currentBody: body,
+    actionId: `${body.currentBodyId}:send_current`,
+    sendPolicy: 'send_current',
+    deliveryChannel: 'cli_stop_bridge',
+  };
+  return preparePromptEnhancementStopBridgeDelivery(store, request);
+}
+
+export function recordPromptEnhancementCliFeedbackV1(
+  store: Store,
+  projectRoot: string,
+  event: PromptEnhancementPopupEventV1,
+  request?: PromptEnhancementPrepareRequestV1,
+) {
+  // With the prepare request, derive the real feedback->memory eligibility policy
+  // (E3/3.2a): the memory signal key + safety come from re-running the E2 pipeline
+  // (Path A). Without it, fall back to the inert placeholder (no memory learning).
+  const policy = request
+    ? derivePromptEnhancementFeedbackPolicyV1(event, request, projectRoot)
+    : {
+        projectRoot,
+        feedbackScopeKey: event.currentBodyId,
+        learningEligibility: 'pending_policy' as const,
+        safetyImpactState: 'unknown' as const,
+        memoryEvidence: false,
+      };
+  const acknowledgement = recordPromptEnhancementFeedbackV1({ store, event, policy });
+  return {
+    stableEventIdentity: acknowledgement.stableEventIdentity,
+    status: acknowledgement.status,
+    publicSafeText: acknowledgement.status === 'accepted'
+      ? 'Feedback saved. Your prompt is unchanged.'
+      : acknowledgement.status === 'rejected'
+        ? 'Feedback was not saved. Your prompt is unchanged.'
+        : 'Feedback is unavailable right now. Your prompt is unchanged.',
+  };
 }

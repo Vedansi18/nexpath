@@ -25,7 +25,16 @@ import { isWhyDescDeliveryEnabled } from './whydesc-delivery.js';
 import type { Store } from '../store/db.js';
 import { getConfig, setConfig } from '../store/config.js';
 import { ROLE_OPTIONS, buildRoleDescriptionLines, buildRoleMenuLines } from '../cli/shared/role-description.js';
-import { detectScreenResolution, computePopupGeometry, type PopupGeometry } from './screen-geometry.js';
+import {
+  detectScreenResolution,
+  computeDockedPopupGeometry,
+  detectLinuxDisplayServerV1,
+  wrapLinuxSpawnForWaylandX11V1,
+  buildWindowsConsolePositionScriptV1,
+  buildWindowsConsoleLauncherScriptV1,
+  type PopupGeometry,
+  type PromptEnhancementDisplayServerV1,
+} from './screen-geometry.js';
 
 // ── New-window helpers: .mjs script builders ─────────────────────────────────
 
@@ -550,16 +559,41 @@ function buildWindowsNewWindowSelectFn(store?: Store, projectRoot?: string): Sel
       // Title arg appears in taskbar and Alt+Tab for discoverability
       // Compute geometry ONCE per select call. Both the MAIN popup and any
       // sub-menu spawn (root chooser triggered by Ctrl+T) share the same
-      // closure so the sub-menu inherits the same 70% sizing without an
-      // extra detection round-trip.
+      // closure so the sub-menu inherits the same right-docked sizing without
+      // an extra detection round-trip. Right-dock (owner request 2026-08-08):
+      // ~60% width × 100% height, flush right; fail-open (null → default size).
       const screen = await detectScreenResolution();
-      const geom   = screen ? computePopupGeometry(screen) : null;
+      const geom   = screen
+        ? computeDockedPopupGeometry({ x: 0, y: 0, widthPx: screen.widthPx, heightPx: screen.heightPx })
+        : null;
 
       // Shared spawn closure. Reused below by spawnRootChooserFlow so the
-      // sub-menu spawn callback uses the same dispatch + geometry.
+      // sub-menu spawn callback uses the same dispatch + geometry. Right-dock (P5): when a docked
+      // geometry is known, write a launcher .cmd (mode con size + MoveWindow .ps1) beside the
+      // script and run THAT — same fail-open pattern as the PE host (node always runs; positioning
+      // is best-effort). The launcher/.ps1 are cleaned up after the blocking spawn returns.
       const spawnConsole: SpawnWindowFn = (title, script) => {
-        const plan = planWindowsPopupSpawn(geom, title, script);
+        let launcherPath: string | undefined;
+        let positionPath: string | undefined;
+        if (geom) {
+          positionPath = `${script}.position.ps1`;
+          launcherPath = `${script}.launch.cmd`;
+          try {
+            writeFileSync(positionPath, buildWindowsConsolePositionScriptV1(geom), 'utf8');
+            writeFileSync(launcherPath, buildWindowsConsoleLauncherScriptV1({
+              commandLine: `node "${script}"`,
+              geometry: geom,
+              positionScriptPath: positionPath,
+            }), 'utf8');
+          } catch {
+            launcherPath = undefined; // fail-open: fall back to direct node spawn
+          }
+        }
+        const plan = planWindowsPopupSpawn(geom, title, script, launcherPath);
         spawnSync(plan.cmd, plan.args, { stdio: 'ignore' });
+        for (const f of [launcherPath, positionPath]) {
+          if (f) { try { unlinkSync(f); } catch { /* best-effort */ } }
+        }
       };
 
       // Title arg appears in taskbar and Alt+Tab for discoverability
@@ -669,7 +703,21 @@ export function planWindowsPopupSpawn(
   _geom:      PopupGeometry | null,
   title:      string,
   scriptPath: string,
+  /**
+   * Right-dock (P5): when the caller has written a launcher .cmd (mode con size + MoveWindow .ps1
+   * then `node <script>`), run it instead of node directly, so the window is sized+positioned. The
+   * whole `cmd /c start /WAIT` wait model is unchanged. Omitted → today's direct `node` spawn.
+   */
+  launcherScriptPath?: string,
 ): { cmd: string; args: string[] } {
+  if (launcherScriptPath) {
+    // Windows visible-launch fix (2026-08-09): open VISIBLE, never minimized. The P6 no-jump /MIN left
+    // the window stuck in the taskbar whenever the best-effort restore did not fire (Win11 + Windows
+    // Terminal: GetConsoleWindow targets the hidden pseudo-console; or PowerShell blocked). The
+    // launcher's position .ps1 still docks the visible window best-effort — worst case a brief
+    // flash-then-dock, never an invisible popup.
+    return { cmd: 'cmd.exe', args: ['/c', 'start', '/WAIT', title, 'cmd', '/c', launcherScriptPath] };
+  }
   return {
     cmd:  'cmd.exe',
     args: ['/c', 'start', '/WAIT', title, 'node', scriptPath],
@@ -773,12 +821,19 @@ export function planLinuxPopupSpawn(
   geom:       PopupGeometry | null,
   title:      string,
   scriptPath: string,
+  /** Display server (P5). On Wayland, GTK terminals are wrapped with GDK_BACKEND=x11 so --geometry positions via XWayland. */
+  displayServer: PromptEnhancementDisplayServerV1 = 'unknown',
 ): { cmd: string; args: string[] } {
   const baseArgs = spec.args(title, scriptPath);
-  if (!geom || !spec.geometryArgs) {
-    return { cmd: spec.cmd, args: baseArgs };
-  }
-  return { cmd: spec.cmd, args: [...spec.geometryArgs(geom), ...baseArgs] };
+  const plan = (!geom || !spec.geometryArgs)
+    ? { command: spec.cmd, args: baseArgs }
+    : { command: spec.cmd, args: [...spec.geometryArgs(geom), ...baseArgs] };
+  const wrapped = wrapLinuxSpawnForWaylandX11V1(plan, {
+    displayServer,
+    terminalCommand: spec.cmd,
+    hasGeometry: Boolean(geom),
+  });
+  return { cmd: wrapped.command, args: wrapped.args };
 }
 
 /**
@@ -848,14 +903,19 @@ function buildLinuxNewWindowSelectFn(store?: Store, projectRoot?: string): Selec
 
       // Compute geometry ONCE per select call and share with the sub-menu
       // spawn callback so the Ctrl+T-triggered root chooser inherits the
-      // same 70% sizing without an extra detection round-trip.
+      // same right-docked sizing without an extra detection round-trip.
+      // Right-dock (owner request 2026-08-08): fail-open (null → default size).
       const screen = await detectScreenResolution();
-      const geom   = screen ? computePopupGeometry(screen) : null;
+      const geom   = screen
+        ? computeDockedPopupGeometry({ x: 0, y: 0, widthPx: screen.widthPx, heightPx: screen.heightPx })
+        : null;
 
       // Shared spawn closure — captures spec + geom. Used by the MAIN popup
       // below AND by the sub-menu spawn callback inside spawnRootChooserFlow.
       const spawnConsole: SpawnWindowFn = (title, script) => {
-        const plan = planLinuxPopupSpawn(terminal, geom, title, script);
+        // Right-dock (P5): pass the display server so GTK terminals get GDK_BACKEND=x11 (XWayland)
+        // on Wayland, where --geometry positioning is otherwise ignored (recent Ubuntu default).
+        const plan = planLinuxPopupSpawn(terminal, geom, title, script, detectLinuxDisplayServerV1());
         spawnSync(plan.cmd, plan.args, { stdio: 'ignore' });
       };
 
@@ -983,10 +1043,13 @@ function buildMacNewWindowSelectFn(store?: Store, projectRoot?: string): SelectF
 
       // Compute geometry ONCE per select call. Both the MAIN popup and the
       // sub-menu spawn callback (Ctrl+T → root chooser) share the same
-      // closure so the sub-menu inherits the same 70% sizing without an
-      // extra detection round-trip.
+      // closure so the sub-menu inherits the same right-docked sizing without
+      // an extra detection round-trip. Right-dock (owner request 2026-08-08):
+      // fail-open (null → default size).
       const screen = await detectScreenResolution();
-      const geom   = screen ? computePopupGeometry(screen) : null;
+      const geom   = screen
+        ? computeDockedPopupGeometry({ x: 0, y: 0, widthPx: screen.widthPx, heightPx: screen.heightPx })
+        : null;
 
       // Shared spawn closure. Reused below by spawnRootChooserFlow so the
       // sub-menu spawn callback uses the same bounds + geometry.

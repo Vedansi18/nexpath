@@ -1,0 +1,280 @@
+import { appendFileSync, chmodSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync, closeSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import type { Command } from 'commander';
+import { closeStore, openStore, DEFAULT_DB_PATH, type Store } from '../../store/db.js';
+import { recordActionSignal } from '../../store/feedback-signals.js';
+import {
+  validatePromptEnhancementPrepareRequestV1,
+  validatePromptEnhancementPrepareResultV1,
+  type PromptEnhancementPrepareRequestV1,
+  type PromptEnhancementPrepareResultV1,
+} from '../../prompt-enhancement/contracts.js';
+import {
+  runPromptEnhancementCliSubmitPopupV1,
+  type PromptEnhancementCliPopupResultV1,
+} from '../../prompt-enhancement/cli-submit-popup.js';
+import type { PromptEnhancementPopupEventV1 } from '../../prompt-enhancement/popup-session.js';
+import { emitPromptEnhancementCostObservabilityV1 } from '../../prompt-enhancement/cost-measurement.js';
+import { evaluatePromptEnhancementMpsIntakeDecisionV1 } from '../../prompt-enhancement/intake-decision.js';
+import { buildPromptEnhancementCliMpsIntakeEvidenceV1 } from '../../prompt-enhancement/cli-mps-intake-evidence.js';
+import { runPromptEnhancementCliMpsFirstPopupV1, buildPromptEnhancementMpsCancelFeedbackEventV1, promptEnhancementMpsActionSignalKindV1 } from '../../prompt-enhancement/cli-mps-run.js';
+import { recordPromptEnhancementCliFeedbackV1 } from './auto.js';
+import { logger } from '../../logger.js';
+
+const POPUP_HOST_PROTOCOL_VERSION_V1 = 1;
+
+export interface PromptEnhancementPopupHostInputV1 {
+  protocolVersion: typeof POPUP_HOST_PROTOCOL_VERSION_V1;
+  request: unknown;
+  result: unknown;
+}
+
+export interface PromptEnhancementPopupHostOutputV1 {
+  protocolVersion: typeof POPUP_HOST_PROTOCOL_VERSION_V1;
+  result: PromptEnhancementCliPopupResultV1;
+}
+
+export interface PromptEnhancementPopupHostCommandOptionsV1 {
+  inputFile: string;
+  resultFile: string;
+  readinessFile?: string;
+  db?: string;
+}
+
+export interface PromptEnhancementPopupHostDependenciesV1 {
+  readInputFile: (path: string) => string;
+  writeResultAtomically: (path: string, output: PromptEnhancementPopupHostOutputV1) => void;
+  openStore: (path: string) => Promise<Store>;
+  closeStore: (store: Store) => void;
+  runPopup: typeof runPromptEnhancementCliSubmitPopupV1;
+  runMpsPopup: typeof runPromptEnhancementCliMpsFirstPopupV1;
+  recordFeedback: typeof recordPromptEnhancementCliFeedbackV1;
+  recordActionSignal: typeof recordActionSignal;
+  markReady: (path: string) => void;
+}
+
+const SAFE_NON_DELIVERY_RESULT_V1: PromptEnhancementCliPopupResultV1 = {
+  state: 'closed_no_send',
+};
+
+function defaultDependencies(): PromptEnhancementPopupHostDependenciesV1 {
+  return {
+    readInputFile: (path) => readFileSync(path, 'utf8'),
+    writeResultAtomically: writePromptEnhancementPopupHostResultAtomicallyV1,
+    openStore,
+    closeStore,
+    runPopup: runPromptEnhancementCliSubmitPopupV1,
+    runMpsPopup: runPromptEnhancementCliMpsFirstPopupV1,
+    recordFeedback: recordPromptEnhancementCliFeedbackV1,
+    recordActionSignal,
+    markReady: writePromptEnhancementPopupHostReadyMarkerV1,
+  };
+}
+
+function asInput(value: unknown): PromptEnhancementPopupHostInputV1 | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const input = value as Record<string, unknown>;
+  if (input.protocolVersion !== POPUP_HOST_PROTOCOL_VERSION_V1) return undefined;
+  if (!('request' in input) || !('result' in input)) return undefined;
+  return {
+    protocolVersion: POPUP_HOST_PROTOCOL_VERSION_V1,
+    request: input.request,
+    result: input.result,
+  };
+}
+
+function validatedInput(value: unknown): {
+  request: PromptEnhancementPrepareRequestV1;
+  result: PromptEnhancementPrepareResultV1;
+} | undefined {
+  const input = asInput(value);
+  if (!input) return undefined;
+  if (!validatePromptEnhancementPrepareRequestV1(input.request).ok) return undefined;
+  if (!validatePromptEnhancementPrepareResultV1(input.result).ok) return undefined;
+
+  const request = input.request as PromptEnhancementPrepareRequestV1;
+  const result = input.result as PromptEnhancementPrepareResultV1;
+  if (request.requestId !== result.requestId || request.projectRoot !== result.projectRoot) return undefined;
+  return { request, result };
+}
+
+/**
+ * PE1.2 hidden child-command boundary. Invalid, missing, stale, or failed
+ * input always resolves to an explicit no-send result. It never prints prompt
+ * text/body text to stdout or stderr.
+ */
+export async function runPromptEnhancementPopupHostCommandV1(
+  options: PromptEnhancementPopupHostCommandOptionsV1,
+  overrides: Partial<PromptEnhancementPopupHostDependenciesV1> = {},
+): Promise<PromptEnhancementPopupHostOutputV1> {
+  const dependencies = { ...defaultDependencies(), ...overrides };
+  let popupResult: PromptEnhancementCliPopupResultV1 = SAFE_NON_DELIVERY_RESULT_V1;
+  let diagnosticError = 'none';
+
+  try {
+    const parsed = JSON.parse(dependencies.readInputFile(options.inputFile)) as unknown;
+    const input = validatedInput(parsed);
+    if (input) {
+      let store: Store | undefined;
+      try {
+        store = await dependencies.openStore(options.db ?? DEFAULT_DB_PATH);
+        // MPS-first (spawned-window parity fix, 2026-08-06): the direct-TTY Stop branch shows the
+        // MPS sequence popup before the PE popup — this child (the spawned-window host) must do the
+        // SAME, or environments whose Stop hook has no TTY can never see MPS. Enter returns the
+        // existing selected_current shape (the parent's inject path handles it unchanged);
+        // Esc/declined/gate-blocked falls through to the regular PE popup below. Fail-closed.
+        // The readiness marker uses 'wx' (throws on a second write), so guard it to fire ONCE
+        // whether the first rendered frame is the MPS popup or the PE popup fallthrough.
+        let readyMarked = false;
+        const markReadyOnce = (): void => {
+          if (readyMarked || !options.readinessFile) return;
+          readyMarked = true;
+          dependencies.markReady(options.readinessFile);
+        };
+        let mpsHandled = false;
+        if (input.result.uiView.handoffAndSequenceSummary) {
+          const mpsEvidence = buildPromptEnhancementCliMpsIntakeEvidenceV1(input.result);
+          const mpsGate = evaluatePromptEnhancementMpsIntakeDecisionV1({
+            surface: 'cli_stop_bridge',
+            evidence: mpsEvidence ? [...mpsEvidence] : undefined,
+          });
+          logger.debug('popup_host_mps_intake_gate', {
+            projectRoot: input.request.projectRoot,
+            renderPermission: mpsGate.renderPermission,
+            reasonCodes: mpsGate.reasonCodes.slice(0, 6),
+          });
+          if (mpsGate.renderPermission === 'mps_render_permitted') {
+            markReadyOnce();
+            const mps = await dependencies.runMpsPopup({
+              result: input.result,
+              // NF Plan B — content-free capture of the in-popup APPLY action (mps_apply_details),
+              // mirroring the PE popup. The terminal outcome is captured just below.
+              actionSignalSink: (kind, occurredAt) => dependencies.recordActionSignal(store!, input.request.projectRoot, kind, occurredAt),
+            });
+            logger.info('popup_host_mps_first_popup', { projectRoot: input.request.projectRoot, outcome: mps.state });
+            // NF Plan B (B-3): content-free per-action capture of the MPS outcome (send/cancel/decline),
+            // buffered locally, sent on the feedback-consent flush.
+            const mpsActionKind = promptEnhancementMpsActionSignalKindV1(mps.state);
+            if (mpsActionKind) dependencies.recordActionSignal(store!, input.request.projectRoot, mpsActionKind);
+            if (mps.state === 'send' && mps.bodyText.trim().length > 0) {
+              popupResult = { state: 'selected_current', bodyText: mps.bodyText };
+              mpsHandled = true;
+            } else if (mps.state === 'cancelled') {
+              // Cancel ends the flow (owner request 2026-08-06): the MPS shell already showed the
+              // PEF feedback popup — never open the PE popup after a cancel. Record any collected
+              // feedback (best-effort) and close with the safe no-send result.
+              if (mps.feedback) {
+                const feedbackEvent = buildPromptEnhancementMpsCancelFeedbackEventV1(input.result, mps.feedback, Date.now());
+                if (feedbackEvent) {
+                  try {
+                    await dependencies.recordFeedback(store!, input.request.projectRoot, feedbackEvent, input.request);
+                  } catch { /* feedback recording is best-effort — never blocks the cancel */ }
+                }
+              }
+              popupResult = { state: 'closed_no_send' };
+              mpsHandled = true;
+            }
+            // declined (Esc) / not_shown -> fall through to the regular PE popup below.
+          }
+        }
+        if (!mpsHandled) {
+          popupResult = await dependencies.runPopup({
+            request: input.request,
+            result: input.result,
+            onFirstRender: options.readinessFile ? markReadyOnce : undefined,
+            feedbackSink: (event: PromptEnhancementPopupEventV1) => dependencies.recordFeedback(
+              store!,
+              input.request.projectRoot,
+              event,
+              input.request,
+            ),
+            costObservabilitySink: (result) => emitPromptEnhancementCostObservabilityV1(result, 'popup_action', logger),
+            // NF Plan B (B-2): content-free per-action telemetry — buffered locally, sent on the
+            // feedback-consent flush. Store-backed sink (this child process owns the store).
+            actionSignalSink: (kind, occurredAt) => dependencies.recordActionSignal(store!, input.request.projectRoot, kind, occurredAt),
+            // F3 (2026-08-07): failed actions stay silent in the popup — reason codes go to the
+            // log so a spawned-window failure (the live Windows report) is diagnosable post-hoc.
+            actionDiagnosticsSink: (event) => logger.debug('pe_action_failed', {
+              projectRoot: input.request.projectRoot,
+              actionType: event.actionType,
+              state: event.state,
+              reasonCodes: event.reasonCodes.slice(0, 8),
+            }),
+          });
+        }
+      } finally {
+        if (store) dependencies.closeStore(store);
+      }
+    } else {
+      diagnosticError = 'input_invalid_or_stale';
+    }
+  } catch (error) {
+    diagnosticError = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+    popupResult = SAFE_NON_DELIVERY_RESULT_V1;
+  }
+
+  // NEXPATH_DEBUG diagnostics → a persistent file (temp dir is cleaned up, and the window may vanish),
+  // so a render-then-close can be diagnosed with a simple `cat`. No prompt/body text — only TTY state,
+  // the resolved result state, and any caught error class/message.
+  if (process.env.NEXPATH_DEBUG) {
+    try {
+      const debugDir = join(homedir(), '.nexpath');
+      mkdirSync(debugDir, { recursive: true });
+      appendFileSync(
+        join(debugDir, 'pe-popup-child-debug.log'),
+        `[${new Date().toISOString()}] stdin.isTTY=${Boolean(process.stdin.isTTY)} stdout.isTTY=${Boolean(process.stdout.isTTY)} platform=${process.platform} result=${popupResult.state} error=${diagnosticError}\n`,
+      );
+    } catch { /* diagnostics are best-effort */ }
+  }
+
+  const output: PromptEnhancementPopupHostOutputV1 = {
+    protocolVersion: POPUP_HOST_PROTOCOL_VERSION_V1,
+    result: popupResult,
+  };
+  try {
+    dependencies.writeResultAtomically(options.resultFile, output);
+  } catch {
+    // The parent launcher treats a missing result file as a safe failed launch.
+  }
+  return output;
+}
+
+export function writePromptEnhancementPopupHostResultAtomicallyV1(
+  resultFile: string,
+  output: PromptEnhancementPopupHostOutputV1,
+): void {
+  const temporaryFile = `${resultFile}.tmp-${process.pid}-${randomUUID()}`;
+  try {
+    writeFileSync(temporaryFile, JSON.stringify(output), { encoding: 'utf8', mode: 0o600 });
+    renameSync(temporaryFile, resultFile);
+    chmodSync(resultFile, 0o600);
+  } catch (error) {
+    try { unlinkSync(temporaryFile); } catch { /* best-effort cleanup */ }
+    throw error;
+  }
+}
+
+export function writePromptEnhancementPopupHostReadyMarkerV1(readinessFile: string): void {
+  const fd = openSync(readinessFile, 'wx', 0o600);
+  try {
+    writeFileSync(fd, 'ready', 'utf8');
+    chmodSync(readinessFile, 0o600);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+export function registerPromptEnhancementPopupHostCommand(program: Command): void {
+  program
+    .command('prompt-enhancement-popup-host', { hidden: true })
+    .description('Internal PE popup child-process host')
+    .requiredOption('--input-file <path>', 'Private validated PE request/result file')
+    .requiredOption('--result-file <path>', 'Private typed popup-result file')
+    .option('--readiness-file <path>', 'Private first-render readiness marker')
+    .option('--db <path>', 'Path to the SQLite database file')
+    .action(async (opts: PromptEnhancementPopupHostCommandOptionsV1) => {
+      await runPromptEnhancementPopupHostCommandV1(opts);
+    });
+}

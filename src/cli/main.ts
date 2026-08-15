@@ -27,6 +27,7 @@ import { registerWindsurfHookCommand } from './commands/windsurf-hook.js';
 import { registerOptimizeCommand } from './commands/optimize.js';
 import { registerStatusCommand } from './commands/status.js';
 import { registerFeedbackTestCommand } from './commands/feedback-test.js';
+import { registerPromptEnhancementPopupHostCommand } from './commands/prompt-enhancement-popup-host.js';
 import {
   telemetrySyncStatusAction,
   telemetrySyncEnableAction,
@@ -106,6 +107,7 @@ export function createProgram(): Command {
   // ── Dev command (hidden) ──────────────────────────────────────────────────────
 
   registerFeedbackTestCommand(program);
+  registerPromptEnhancementPopupHostCommand(program);
 
   // ── Env command (dev-environment probe transparency) ────────────────────────────
 

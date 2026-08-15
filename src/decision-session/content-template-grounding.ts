@@ -15,6 +15,7 @@
  */
 
 import OpenAI from 'openai';
+import { lengthPreservingMarker } from '../store/redact.js';
 import { logger } from '../logger.js';
 import { maskSecretsInText } from './r5-injection.js';
 import type { TwoChannelCell } from './content-template-schema.js';
@@ -136,7 +137,12 @@ const PII_PATTERNS: readonly RegExp[] = [
  */
 export function sanitizePromptDerivedValue(value: string): string {
   let out = maskSecretsInText(value);
-  for (const re of PII_PATTERNS) out = out.replace(re, '[redacted]');
+  for (const re of PII_PATTERNS) {
+    out = out.replace(re, (match) => lengthPreservingMarker('[redacted]', match.length));
+  }
+  // NOTE: this function cannot promise same-length output whatever the markers do — the collapse
+  // below rewrites runs of whitespace and trims the ends, by design, because the result is a
+  // why-desc value rather than a positional copy of the prompt.
   return out.replace(/\s+/g, ' ').trim();
 }
 

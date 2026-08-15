@@ -60,7 +60,7 @@ export interface HookAdapter extends AgentAdapter {
   /** Path to the agent's settings file that hosts hook entries. */
   settingsPath(ctx: InstallContext): string;
   /** Build the hook entries to merge into the agent's settings file. */
-  buildHooks(ctx: InstallContext): Record<string, Array<{ type: string; command: string }>>;
+  buildHooks(ctx: InstallContext): Record<string, Array<{ type: string; command: string; timeout?: number }>>;
 }
 
 /** Adapters that ship a companion VS Code-format extension (e.g. Cursor, Windsurf). */

@@ -17,6 +17,8 @@ import {
   pruneAllSignalsUpTo,
   pruneSignalAt,
   pruneSignalsOfKind,
+  recordActionSignal,
+  readAllActionSignals,
   SIGNAL_ADVISORY_FIRED,
   SIGNAL_OPTION_SELECTED,
 } from './feedback-signals.js';
@@ -25,6 +27,24 @@ let store: Store;
 
 beforeEach(async () => { store = await openStore(':memory:'); });
 afterEach(() => closeStore(store));
+
+describe('recordActionSignal / readAllActionSignals (NF Plan B)', () => {
+  it('records content-free per-action signals (kind + ts) and reads them oldest-first', () => {
+    recordActionSignal(store, '/proj', 'pe_shorter', 100);
+    recordActionSignal(store, '/proj', 'mps_send', 200);
+    expect(readAllActionSignals(store)).toEqual([
+      { kind: 'pe_shorter', occurredAt: 100 },
+      { kind: 'mps_send',   occurredAt: 200 },
+    ]);
+  });
+
+  it('readAllActionSignals ignores non-action signals (advisory_fired / option_selected)', () => {
+    recordAdvisoryFired(store, '/proj', 50);
+    recordOptionSelected(store, '/proj', 60);
+    recordActionSignal(store, '/proj', 'pe_back', 70);
+    expect(readAllActionSignals(store)).toEqual([{ kind: 'pe_back', occurredAt: 70 }]);
+  });
+});
 
 describe('getInstalledAt', () => {
   it('sets the install timestamp once when missing and returns it stably', () => {

@@ -16,6 +16,7 @@
 // `substituteCAFacingBookend`.
 
 import type { PromptRecord } from '../classifier/types.js';
+import { lengthPreservingMarker } from '../store/redact.js';
 import { getR5DFallback } from './r5-fallbacks.js';
 import { GroundingConfig } from '../config/GroundingConfig.js';
 
@@ -561,7 +562,11 @@ export function f2MaskPromptHistory(history: readonly PromptRecord[]): PromptRec
 export function maskSecretsInText(text: string): string {
   let out = text;
   for (const { re, replacement } of SECRET_PATTERNS) {
-    out = out.replace(re, replacement);
+    // Same-length markers where the marker fits, so a character position measured against the
+    // text before masking still points at the same words after it. Several markers here are
+    // longer than the shortest thing they match (an email can be six characters), and those grow
+    // — the marker is never truncated to hit a length.
+    out = out.replace(re, (match) => lengthPreservingMarker(replacement, match.length));
   }
   return out;
 }

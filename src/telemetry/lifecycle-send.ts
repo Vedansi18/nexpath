@@ -91,3 +91,17 @@ export function sendOptionSelected(
 ): Promise<boolean> {
   return sendLifecycle(store, EVENT_OPTION_SELECTED, occurredAt, { option_select_ts: occurredAt }, opts);
 }
+
+/**
+ * NF Plan B — emit ONE per-action event: the event name IS the action kind (e.g. `pe_shorter`,
+ * `mps_send`), backdated to when it occurred. Carries only the installation id + timestamp — no prompt
+ * or option text. Best-effort; never throws.
+ */
+export function sendActionEvent(
+  store:      Store,
+  kind:       string,
+  occurredAt: number,
+  opts:       SendLifecycleOptions = {},
+): Promise<boolean> {
+  return sendLifecycle(store, kind, occurredAt, { action_ts: occurredAt }, opts);
+}
