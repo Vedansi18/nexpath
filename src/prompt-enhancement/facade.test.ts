@@ -118,6 +118,25 @@ describe('PE executable facade', () => {
     expect(result.routingAndFeedbackDecision.selectedSectionPivotIds.some((id) => id.includes('source_signal_guidance'))).toBe(true);
   });
 
+  it('unknown observation entries are guarded out at the boundary before the registry decides', async () => {
+    const base = request();
+    const result = await preparePromptEnhancement(request({
+      reviewMomentContext: {
+        ...base.reviewMomentContext,
+        triggerProvenance: {
+          ...base.reviewMomentContext.triggerProvenance,
+          classifierPrimaryIntent: 'issue_debug.failing_test',
+          classifierIntentConfidence: 0.9,
+          // The junk entries must never reach the registry: an unknown
+          // capability id has no scope row and would fail the decision.
+          classifierCapabilityCandidates: ['capability.confirmation_needed', 'capability.not_a_real_one'],
+          classifierDebugEvidencePresent: ['logs', 'not_a_form'],
+        },
+      },
+    }));
+    expect(result.disposition).toBe('show_current_body');
+  });
+
   it('E2 / DR2-G1: no Source-A survivor (no trigger, no signals) returns skip_no_popup, not a filler body', async () => {
     const promptStartStop = getPromptStartStopSourceSnapshot();
     const result = await preparePromptEnhancement(

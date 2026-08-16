@@ -427,6 +427,10 @@ export function buildPromptEnhancementRequestForAuto(input: {
         // path — keyless prompts stay on the deterministic cascade).
         classifierPrimaryIntent: input.stageResult.primaryIntent,
         classifierIntentConfidence: input.stageResult.intentConfidence,
+        // The capability observation from the same call: candidates plus the
+        // debug-evidence forms present. The registry decides every attachment.
+        classifierCapabilityCandidates: input.stageResult.capabilityCandidates,
+        classifierDebugEvidencePresent: input.stageResult.debugEvidencePresent,
         promptStartBoundary: source.promptStartStop.hookBoundary,
         deliveryBoundary: source.promptStartStop.deliveryBoundary,
         promptStartCanReplaceSameTurn: source.promptStartStop.runAutoCanHoldOrReplaceSubmittedPrompt,

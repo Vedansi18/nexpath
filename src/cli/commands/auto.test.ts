@@ -2127,6 +2127,10 @@ describe('H1.1 — validated PE preparation boundary', () => {
           selectedSignalKey: '',
           reason: 'test',
           degraded: false,
+          primaryIntent: 'issue_debug.failing_test',
+          intentConfidence: 0.8,
+          capabilityCandidates: ['capability.confirmation_needed'],
+          debugEvidencePresent: ['logs', 'failing_test_details'],
         },
         streamBOutputs: [],
       });
@@ -2134,6 +2138,12 @@ describe('H1.1 — validated PE preparation boundary', () => {
       expect(validatePromptEnhancementPrepareRequestV1(request).ok).toBe(true);
       expect(request.sourceSignals.sourceAOriginalPromptRef.sourceKind).toBe('source_a_user_prompt');
       expect(request.reviewMomentContext.triggerProvenance.firedKey).toContain('stage_transition');
+      // The classifier's proposal + observation ride the provenance verbatim —
+      // proposals and observations only; the router and registry decide.
+      expect(request.reviewMomentContext.triggerProvenance.classifierPrimaryIntent).toBe('issue_debug.failing_test');
+      expect(request.reviewMomentContext.triggerProvenance.classifierIntentConfidence).toBe(0.8);
+      expect(request.reviewMomentContext.triggerProvenance.classifierCapabilityCandidates).toEqual(['capability.confirmation_needed']);
+      expect(request.reviewMomentContext.triggerProvenance.classifierDebugEvidencePresent).toEqual(['logs', 'failing_test_details']);
       expect(request.sourceSignals.promptStartStop.runAutoCanHoldOrReplaceSubmittedPrompt).toBe(false);
 
       const result = await preparePromptEnhancement(request);

@@ -13,6 +13,9 @@ import {
   findPromptEnhancementTaxonomyGaps,
   getPromptEnhancementG1AApprovalInventory,
   getPromptEnhancementRoutingSourceGateSnapshot,
+  isCapabilityCompatibleWithRoute,
+  isKnownCapabilityId,
+  isKnownDebugEvidenceForm,
   routePromptEnhancement,
   type PromptEnhancementRouteInput,
 } from './routing-taxonomy.js';
@@ -206,8 +209,13 @@ describe('prompt-enhancement routing and taxonomy', () => {
       for (const capabilityId of PROMPT_ENHANCEMENT_CAPABILITIES) {
         const compatibility = preset.capabilityCompatibility.find((entry) => entry.capabilityId === capabilityId);
         expect(compatibility).toBeDefined();
+        // Compatible = statically attached OR observation-attachable within the
+        // locked family/intent scope; rejected otherwise.
         expect(compatibility?.status).toBe(
-          preset.capabilityOverlays.includes(capabilityId) ? 'compatible' : 'rejected',
+          preset.capabilityOverlays.includes(capabilityId)
+            || isCapabilityCompatibleWithRoute(capabilityId, preset.family, preset.primaryIntent)
+            ? 'compatible'
+            : 'rejected',
         );
       }
       expect(preset.requiredSections.length).toBeGreaterThan(0);
@@ -1109,5 +1117,186 @@ describe('classifier intent preference (the keyed path)', () => {
     );
     expect(route.primaryIntent).toBe('planning.task_breakdown');
     expect(route.reasonCodes).toContain('llm_route_decision_accepted');
+  });
+});
+
+// ── Capability attachment: the classifier observes, the registry decides ──
+
+/** Keyed route through the classifier-intent path with an explicit observation. */
+function observedRoute(
+  intent: PromptEnhancementRouteInput['classifierPrimaryIntent'],
+  candidates: NonNullable<PromptEnhancementRouteInput['classifierCapabilityCandidates']>,
+  evidence: NonNullable<PromptEnhancementRouteInput['classifierDebugEvidencePresent']> = [],
+) {
+  return routePromptEnhancement(routeInput({
+    promptText: 'plain prompt with no routing keywords at all',
+    firedKey: undefined,
+    classifierPrimaryIntent: intent,
+    classifierIntentConfidence: 0.9,
+    classifierCapabilityCandidates: candidates,
+    classifierDebugEvidencePresent: evidence,
+  }));
+}
+
+describe('registry capability decision on the keyed path (one attach + one reject per capability)', () => {
+  it('decomposition_candidate: attaches from the observation on a compatible family', () => {
+    const route = observedRoute('maintenance.cleanup_dead_code', ['capability.decomposition_candidate']);
+    expect(route.capabilityOverlays).toContain('capability.decomposition_candidate');
+  });
+
+  it('decomposition_candidate: VETOED on quick_improvement (fail-closed clause)', () => {
+    const route = observedRoute('quick_improvement.local_polish_or_small_improvement', ['capability.decomposition_candidate']);
+    expect(route.capabilityOverlays).not.toContain('capability.decomposition_candidate');
+  });
+
+  it('confirmation_needed: attaches from the observation on any family', () => {
+    const route = observedRoute('issue_debug.failing_test', ['capability.confirmation_needed']);
+    expect(route.capabilityOverlays).toContain('capability.confirmation_needed');
+  });
+
+  it('confirmation_needed: never attached unobserved beyond preset statics', () => {
+    const route = observedRoute('issue_debug.failing_test', []);
+    expect(route.capabilityOverlays).not.toContain('capability.confirmation_needed');
+  });
+
+  it('adversarial_review: statically attached on every review route', () => {
+    const route = observedRoute('review.security_review', []);
+    expect(route.capabilityOverlays).toContain('capability.adversarial_review');
+  });
+
+  it('adversarial_review: VETOED outside review_verification even when observed', () => {
+    const route = observedRoute('feature.fresh_implementation', ['capability.adversarial_review']);
+    expect(route.capabilityOverlays).not.toContain('capability.adversarial_review');
+  });
+
+  it('project_grounding: attaches from the observation where not static', () => {
+    const route = observedRoute('planning.task_breakdown', ['capability.project_grounding']);
+    expect(route.capabilityOverlays).toContain('capability.project_grounding');
+  });
+
+  it('project_grounding: absent when neither static nor observed', () => {
+    const route = observedRoute('planning.task_breakdown', []);
+    expect(route.capabilityOverlays).not.toContain('capability.project_grounding');
+  });
+
+  it('verification_required: preset statics survive the registry decision', () => {
+    const route = observedRoute('quick_improvement.local_polish_or_small_improvement', []);
+    expect(route.capabilityOverlays).toContain('capability.verification_required');
+  });
+
+  it('risk_or_rollback: attaches from the observation on a compatible family', () => {
+    const route = observedRoute('issue_debug.production_incident_or_support', ['capability.risk_or_rollback']);
+    expect(route.capabilityOverlays).toContain('capability.risk_or_rollback');
+  });
+
+  it('risk_or_rollback: VETOED on quick_improvement (fail-closed clause)', () => {
+    const route = observedRoute('quick_improvement.local_polish_or_small_improvement', ['capability.risk_or_rollback']);
+    expect(route.capabilityOverlays).not.toContain('capability.risk_or_rollback');
+  });
+
+  it('reproduction_or_evidence_needed: the LACKS rule attaches it on planning.debugging_plan with thin evidence', () => {
+    const route = observedRoute('planning.debugging_plan', [], []);
+    expect(route.capabilityOverlays).toContain('capability.reproduction_or_evidence_needed');
+  });
+
+  it('reproduction_or_evidence_needed: supplied evidence clears the LACKS rule (no repro request)', () => {
+    const route = observedRoute('planning.debugging_plan', [], ['logs', 'failing_test_details']);
+    expect(route.capabilityOverlays).not.toContain('capability.reproduction_or_evidence_needed');
+  });
+
+  it('reproduction_or_evidence_needed: VETOED on a feature route even when observed', () => {
+    const route = observedRoute('feature.fresh_implementation', ['capability.reproduction_or_evidence_needed']);
+    expect(route.capabilityOverlays).not.toContain('capability.reproduction_or_evidence_needed');
+  });
+
+  it('behavior_preservation: attaches from the observation on a review route', () => {
+    const route = observedRoute('review.code_or_diff_review', ['capability.behavior_preservation']);
+    expect(route.capabilityOverlays).toContain('capability.behavior_preservation');
+  });
+
+  it('behavior_preservation: VETOED on fresh feature work even when observed', () => {
+    const route = observedRoute('feature.fresh_implementation', ['capability.behavior_preservation']);
+    expect(route.capabilityOverlays).not.toContain('capability.behavior_preservation');
+  });
+
+  it('source_signal_guidance: attaches from the observation where not static', () => {
+    const route = observedRoute('planning.spec_or_prd', ['capability.source_signal_guidance']);
+    expect(route.capabilityOverlays).toContain('capability.source_signal_guidance');
+  });
+
+  it('source_signal_guidance: absent when neither static nor observed', () => {
+    const route = observedRoute('planning.spec_or_prd', []);
+    expect(route.capabilityOverlays).not.toContain('capability.source_signal_guidance');
+  });
+
+  it('the keyword decider is not consulted on the keyed path (keyword-laden prompt adds nothing)', () => {
+    const route = routePromptEnhancement(routeInput({
+      promptText: 'plan the production migration rollback with many multiple steps',
+      firedKey: undefined,
+      classifierPrimaryIntent: 'feature.idea_discussion',
+      classifierIntentConfidence: 0.9,
+      classifierCapabilityCandidates: [],
+      classifierDebugEvidencePresent: [],
+    }));
+    expect(route.capabilityOverlays).not.toContain('capability.risk_or_rollback');
+    expect(route.capabilityOverlays).not.toContain('capability.decomposition_candidate');
+  });
+
+  it('E6 keyed path: registry decision + accepted decision capabilities pass through; keyword merge unused', () => {
+    const route = routePromptEnhancement(
+      routeInput({
+        promptText: 'plan the production migration rollback',
+        firedKey: undefined,
+        classifierCapabilityCandidates: ['capability.project_grounding'],
+        classifierDebugEvidencePresent: [],
+      }),
+      {
+        familyId: 'planning_spec',
+        primaryIntent: 'planning.task_breakdown',
+        capabilities: ['capability.confirmation_needed'],
+        ambiguityState: 'clear',
+      } as never,
+    );
+    expect(route.capabilityOverlays).toContain('capability.project_grounding');
+    expect(route.capabilityOverlays).toContain('capability.confirmation_needed');
+    expect(route.capabilityOverlays).not.toContain('capability.risk_or_rollback');
+  });
+
+  it('E6 no-key path: the keyword merge still answers, demoted not deleted', () => {
+    const route = routePromptEnhancement(
+      routeInput({
+        promptText: 'plan the production migration rollback',
+        firedKey: undefined,
+      }),
+      {
+        familyId: 'planning_spec',
+        primaryIntent: 'planning.task_breakdown',
+        capabilities: [],
+        ambiguityState: 'clear',
+      } as never,
+    );
+    expect(route.capabilityOverlays).toContain('capability.risk_or_rollback');
+  });
+
+  it('the compatibility declaration mirrors the registry authority', () => {
+    const maintenancePreset = PROMPT_ENHANCEMENT_TAXONOMY_PRESETS.find(
+      (preset) => preset.primaryIntent === 'maintenance.cleanup_dead_code',
+    );
+    expect(maintenancePreset?.capabilityCompatibility.find(
+      (entry) => entry.capabilityId === 'capability.confirmation_needed',
+    )).toMatchObject({ status: 'compatible', reasonCode: 'observation_attachable_within_locked_scope' });
+    const quickPreset = PROMPT_ENHANCEMENT_TAXONOMY_PRESETS.find(
+      (preset) => preset.primaryIntent === 'quick_improvement.local_polish_or_small_improvement',
+    );
+    expect(quickPreset?.capabilityCompatibility.find(
+      (entry) => entry.capabilityId === 'capability.adversarial_review',
+    )).toMatchObject({ status: 'rejected', reasonCode: 'not_attached_to_selected_family_intent_or_current_scope' });
+  });
+
+  it('the vocabulary guards accept only typed ids', () => {
+    expect(isKnownCapabilityId('capability.project_grounding')).toBe(true);
+    expect(isKnownCapabilityId('capability.made_up')).toBe(false);
+    expect(isKnownDebugEvidenceForm('screenshots')).toBe(true);
+    expect(isKnownDebugEvidenceForm('vibes')).toBe(false);
   });
 });

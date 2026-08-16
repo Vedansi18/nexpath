@@ -269,6 +269,15 @@ export interface PromptEnhancementTriggerProvenanceV1 {
    */
   classifierPrimaryIntent?: string;
   classifierIntentConfidence?: number;
+  /**
+   * The classifier's capability OBSERVATION from the same call: candidate
+   * capability ids, and the debug-evidence forms present in the prompt. String
+   * arrays here (the typed unions live in the routing module); the facade
+   * re-guards every entry before the registry consumes them. Observations
+   * only — the registry decides all attachment.
+   */
+  classifierCapabilityCandidates?: readonly string[];
+  classifierDebugEvidencePresent?: readonly string[];
   promptStartBoundary: PromptStartStopSourceSnapshot['hookBoundary'];
   deliveryBoundary: PromptStartStopSourceSnapshot['deliveryBoundary'];
   promptStartCanReplaceSameTurn: PromptStartStopSourceSnapshot['runAutoCanHoldOrReplaceSubmittedPrompt'];

@@ -18,6 +18,8 @@ import {
   type PromptEnhancementFamilyId,
   type PromptEnhancementPrimaryIntent,
   type PromptEnhancementCapabilityId,
+  DEBUG_EVIDENCE_FORMS,
+  type DebugEvidenceForm,
 } from './taxonomy-ids.js';
 import { STAGES } from '../classifier/types.js';
 import type {
@@ -92,6 +94,16 @@ export interface PromptEnhancementRouteInput {
    */
   classifierPrimaryIntent?: PromptEnhancementPrimaryIntent | '';
   classifierIntentConfidence?: number;
+  /**
+   * The classifier's capability OBSERVATION from the same parked call:
+   * candidates whose prompt-observable attach conditions the model reported
+   * met, and the debug-evidence forms the prompt already contains. These are
+   * observations only — the registry decides every attachment and can veto any
+   * candidate. `undefined` means no observation channel exists (no-key
+   * session); an empty array means the classifier observed and found nothing.
+   */
+  classifierCapabilityCandidates?: readonly PromptEnhancementCapabilityId[];
+  classifierDebugEvidencePresent?: readonly DebugEvidenceForm[];
   generatedOriginState?: 'ordinary_user_prompt' | 'old_ds_advisory_injected' | 'pe_generated' | 'pe_action_generated' | 'sequence_generated' | 'unknown';
   oldDecisionSessionPayloadPresent?: boolean;
 }
@@ -203,6 +215,43 @@ const BASE_APPLICABILITY_AXES = [
   'multi_prompt_suitability',
 ] as const;
 
+/**
+ * The registry's side of the capability contract: the family scope each
+ * capability may attach to, encoded from the locked attach/reject columns.
+ * Three clauses are deliberately FAIL-CLOSED where their "unless" halves name
+ * conditions this layer cannot verify deterministically: decomposition on
+ * quick_improvement (needs evidence of multiple bounded subtasks),
+ * risk_or_rollback on quick_improvement (needs a high-risk source-critical
+ * route), and deeper-review attachment outside review_verification (awaits its
+ * safety policy). Each vetoes rather than guesses.
+ */
+const CAPABILITY_COMPATIBLE_FAMILIES: Record<PromptEnhancementCapabilityId, readonly PromptEnhancementFamilyId[]> = {
+  'capability.decomposition_candidate': ['feature_delivery', 'planning_spec', 'issue_debug', 'maintenance_refactor', 'review_verification'],
+  'capability.confirmation_needed': PROMPT_ENHANCEMENT_FAMILIES,
+  'capability.adversarial_review': ['review_verification'],
+  'capability.project_grounding': PROMPT_ENHANCEMENT_FAMILIES,
+  'capability.verification_required': PROMPT_ENHANCEMENT_FAMILIES,
+  'capability.risk_or_rollback': ['feature_delivery', 'planning_spec', 'issue_debug', 'maintenance_refactor', 'review_verification'],
+  'capability.reproduction_or_evidence_needed': ['issue_debug'],
+  'capability.behavior_preservation': ['maintenance_refactor', 'review_verification'],
+  'capability.source_signal_guidance': PROMPT_ENHANCEMENT_FAMILIES,
+};
+
+/** Intent-level exceptions the locked scope columns name beyond whole families. */
+const CAPABILITY_COMPATIBLE_INTENTS: Partial<Record<PromptEnhancementCapabilityId, readonly PromptEnhancementPrimaryIntent[]>> = {
+  'capability.reproduction_or_evidence_needed': ['planning.debugging_plan'],
+  'capability.behavior_preservation': ['feature.upgrade_extension'],
+};
+
+export function isCapabilityCompatibleWithRoute(
+  capabilityId: PromptEnhancementCapabilityId,
+  family: PromptEnhancementFamilyId,
+  intent: PromptEnhancementPrimaryIntent,
+): boolean {
+  return CAPABILITY_COMPATIBLE_FAMILIES[capabilityId].includes(family)
+    || (CAPABILITY_COMPATIBLE_INTENTS[capabilityId] ?? []).includes(intent);
+}
+
 function preset(input: {
   intent: PromptEnhancementPrimaryIntent;
   family: PromptEnhancementFamilyId;
@@ -231,12 +280,19 @@ function preset(input: {
     coveredIntentTags: [input.intent],
     baseSkeletonId: input.baseSkeletonId,
     capabilityOverlays: input.capabilityOverlays,
+    // The declaration mirrors the registry's attachment authority: statically
+    // attached, attachable from a classifier observation within the locked
+    // family/intent scope, or rejected outright.
     capabilityCompatibility: PROMPT_ENHANCEMENT_CAPABILITIES.map((capabilityId) => ({
       capabilityId,
-      status: compatibleCapabilityIds.has(capabilityId) ? 'compatible' : 'rejected',
+      status: compatibleCapabilityIds.has(capabilityId) || isCapabilityCompatibleWithRoute(capabilityId, input.family, input.intent)
+        ? 'compatible'
+        : 'rejected',
       reasonCode: compatibleCapabilityIds.has(capabilityId)
         ? 'declared_by_capability_contract'
-        : 'not_attached_to_selected_family_intent_or_current_scope',
+        : isCapabilityCompatibleWithRoute(capabilityId, input.family, input.intent)
+          ? 'observation_attachable_within_locked_scope'
+          : 'not_attached_to_selected_family_intent_or_current_scope',
     })),
     requiredSections,
     optionalSections: input.optionalSections ?? ['uncertainty_or_clarification', 'source_signal_guidance'],
@@ -748,6 +804,16 @@ export function isKnownPrimaryIntent(value: string | undefined): value is Prompt
   return value !== undefined && (PROMPT_ENHANCEMENT_PRIMARY_INTENTS as readonly string[]).includes(value);
 }
 
+/** Type guard: is this string one of the nine typed capability ids? */
+export function isKnownCapabilityId(value: string): value is PromptEnhancementCapabilityId {
+  return (PROMPT_ENHANCEMENT_CAPABILITIES as readonly string[]).includes(value);
+}
+
+/** Type guard: is this string one of the eight debug-evidence forms? */
+export function isKnownDebugEvidenceForm(value: string): value is DebugEvidenceForm {
+  return (DEBUG_EVIDENCE_FORMS as readonly string[]).includes(value);
+}
+
 export function routePromptEnhancement(
   input: PromptEnhancementRouteInput,
   llmRouteDecision?: PromptEnhancementLlmRouteDecisionV1,
@@ -929,7 +995,7 @@ function buildRouteResultFromClassifierIntent(
   evidenceRefs: readonly string[],
 ): PromptEnhancementRouteResult {
   const selectedPreset = presetForIntent(intent);
-  const capabilityOverlays = mergeCapabilities([...selectedPreset.capabilityOverlays], normalized, input);
+  const capabilityOverlays = decideCapabilityOverlaysFromObservation(selectedPreset, input);
   const reasonCodes = ['classifier_intent_preferred'];
   const routeConfidence: PromptEnhancementRouteConfidence = 'partial';
   return {
@@ -957,7 +1023,13 @@ function buildRouteResultFromLlmDecision(
   evidenceRefs: readonly string[],
 ): PromptEnhancementRouteResult {
   const selectedPreset = presetForIntent(decision.primaryIntent);
-  const capabilityOverlays = mergeCapabilities([...selectedPreset.capabilityOverlays, ...decision.capabilities], normalized, input);
+  // A keyed session decides capabilities from the classifier's observation
+  // under the registry's locked scope; the accepted decision's own capability
+  // list passes through unchanged — it is E6's accepted contract. The keyword
+  // merge remains only where no observation channel exists.
+  const capabilityOverlays = input.classifierCapabilityCandidates !== undefined
+    ? [...new Set([...decideCapabilityOverlaysFromObservation(selectedPreset, input), ...decision.capabilities])]
+    : mergeCapabilities([...selectedPreset.capabilityOverlays, ...decision.capabilities], normalized, input);
   const noPopup = decision.ambiguityState === 'skip_no_useful_guidance';
   const fallbackMode: PromptEnhancementRouteFallbackMode = noPopup ? 'skip_no_popup' : 'none';
   const reasonCodes = ['llm_route_decision_accepted'];
@@ -1618,6 +1690,47 @@ function selectPrimaryIntent(normalized: string): PromptEnhancementPrimaryIntent
   return 'quick_improvement.local_polish_or_small_improvement';
 }
 
+/**
+ * The evidence floor for the LACKS rule: a debug-shaped prompt carrying fewer
+ * than this many of the eight evidence forms still lacks reproduction
+ * evidence, so the request slot attaches. Two independent forms (for example a
+ * pasted trace plus the failing test name) count as supplied.
+ */
+const DEBUG_EVIDENCE_SUPPLIED_FLOOR = 2;
+
+/**
+ * The registry's capability decision on the keyed path — the keyword decider's
+ * replacement. The classifier only OBSERVED candidates; every attachment is
+ * decided here: a candidate outside its locked family/intent scope is VETOED,
+ * and the reproduction/evidence slot additionally attaches by the registry's
+ * own rule — debug-shaped route AND the observed evidence list is short. That
+ * is a negative test about what the prompt is MISSING, which a keyword list
+ * structurally cannot evaluate: a keyword can spot a present word, not an
+ * absence.
+ */
+function decideCapabilityOverlaysFromObservation(
+  selectedPreset: PromptEnhancementTaxonomyPreset,
+  input: PromptEnhancementRouteInput,
+): readonly PromptEnhancementCapabilityId[] {
+  const capabilities = new Set(selectedPreset.capabilityOverlays);
+  for (const candidate of input.classifierCapabilityCandidates ?? []) {
+    if (isCapabilityCompatibleWithRoute(candidate, selectedPreset.family, selectedPreset.primaryIntent)) {
+      capabilities.add(candidate);
+    }
+  }
+  const debugShaped = selectedPreset.family === 'issue_debug' || selectedPreset.primaryIntent === 'planning.debugging_plan';
+  if (debugShaped && (input.classifierDebugEvidencePresent ?? []).length < DEBUG_EVIDENCE_SUPPLIED_FLOOR) {
+    capabilities.add('capability.reproduction_or_evidence_needed');
+  }
+  return [...capabilities];
+}
+
+/**
+ * The keyword capability decider — DEMOTED to the no-key path, where no
+ * classifier observation exists, exactly like the keyword cascade: not
+ * deleted, not widened. Keyed routes decide capabilities from the classifier's
+ * observation via decideCapabilityOverlaysFromObservation instead.
+ */
 function mergeCapabilities(
   baseCapabilities: readonly PromptEnhancementCapabilityId[],
   normalized: string,

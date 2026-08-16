@@ -4,9 +4,12 @@ import { classifyPrompt } from './PromptClassifier.js';
 import {
   PROMPT_ENHANCEMENT_PRIMARY_INTENTS,
   PROMPT_ENHANCEMENT_CAPABILITIES,
+  DEBUG_EVIDENCE_FORMS,
   type PromptEnhancementPrimaryIntent,
   type PromptEnhancementCapabilityId,
 } from '../prompt-enhancement/taxonomy-ids.js';
+
+export { DEBUG_EVIDENCE_FORMS } from '../prompt-enhancement/taxonomy-ids.js';
 import {
   STAGE2_MODEL,
   STAGE2_MAX_OUTPUT_TOKENS,
@@ -41,22 +44,6 @@ export const STAGE_CLASSIFIER_TIMEOUT_MS = 12_000;
 
 /** The model behind the stage classifier (shared with the former cross-confirmation call). */
 export const STAGE_CLASSIFIER_MODEL = STAGE2_MODEL;
-
-/**
- * The eight debug-evidence forms the observation reports on. This is the FULL
- * enumeration — a prompt whose only evidence is a screenshot or a metrics graph
- * must not read as evidence-less.
- */
-export const DEBUG_EVIDENCE_FORMS = [
-  'reproduction_steps',
-  'logs',
-  'failing_test_details',
-  'environment',
-  'request_response_samples',
-  'screenshots',
-  'metrics',
-  'recent_change_evidence',
-] as const;
 
 /**
  * The capability attach/reject conditions, presented in their PROMPT-OBSERVABLE

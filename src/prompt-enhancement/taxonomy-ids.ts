@@ -158,3 +158,23 @@ export const PROMPT_ENHANCEMENT_PRIMARY_INTENTS: readonly PromptEnhancementPrima
 export const PROMPT_ENHANCEMENT_INTENT_ALIASES = {
   'review.code_diff_review': 'review.code_or_diff_review',
 } as const;
+
+/**
+ * The eight debug-evidence forms the classifier's observation reports on. This
+ * is the FULL enumeration — a prompt whose only evidence is a screenshot or a
+ * metrics graph must not read as evidence-less. Lives in this leaf because both
+ * the classifier (observation vocabulary) and the routing registry (the
+ * evidence-lacking attachment rule) consume it.
+ */
+export const DEBUG_EVIDENCE_FORMS = [
+  'reproduction_steps',
+  'logs',
+  'failing_test_details',
+  'environment',
+  'request_response_samples',
+  'screenshots',
+  'metrics',
+  'recent_change_evidence',
+] as const;
+
+export type DebugEvidenceForm = (typeof DEBUG_EVIDENCE_FORMS)[number];

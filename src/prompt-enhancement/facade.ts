@@ -26,7 +26,7 @@ import { composeStructuredComposerOutputV1 } from './llm-composer.js';
 import { decidePromptEnhancementRouteViaLlmV1, type PromptEnhancementLlmRouteDecisionV1 } from './llm-route-decision.js';
 import { isValidApiKey } from '../config/ApiKeyResolver.js';
 import { planPromptEnhancementSections } from './templates/section-plan.js';
-import { routePromptEnhancement, isKnownPrimaryIntent, describePromptEnhancementSequencePlanV1, type PromptEnhancementCapabilityId, type PromptEnhancementRouteInput } from './routing-taxonomy.js';
+import { routePromptEnhancement, isKnownPrimaryIntent, isKnownCapabilityId, isKnownDebugEvidenceForm, describePromptEnhancementSequencePlanV1, type PromptEnhancementCapabilityId, type PromptEnhancementRouteInput } from './routing-taxonomy.js';
 import { buildPromptEnhancementGuidanceFactsV1 } from './guidance-facts.js';
 import { resolvePromptEnhancementSourceConflictsV1 } from './conflict-resolution.js';
 import { applyPromptEnhancementSourceMixV1 } from './source-mix.js';
@@ -186,6 +186,11 @@ async function prepare(
       ? request.reviewMomentContext.triggerProvenance.classifierPrimaryIntent
       : '',
     classifierIntentConfidence: request.reviewMomentContext.triggerProvenance.classifierIntentConfidence ?? 0,
+    // The capability observation, each entry re-guarded against its typed
+    // vocabulary; `undefined` stays undefined so the router can tell a no-key
+    // session (no observation channel) from an observed-empty one.
+    classifierCapabilityCandidates: request.reviewMomentContext.triggerProvenance.classifierCapabilityCandidates?.filter(isKnownCapabilityId),
+    classifierDebugEvidencePresent: request.reviewMomentContext.triggerProvenance.classifierDebugEvidencePresent?.filter(isKnownDebugEvidenceForm),
   };
   let route = routePromptEnhancement(routeInput);
 
