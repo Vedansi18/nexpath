@@ -645,11 +645,35 @@ async function attemptPlan(
   // is CORRECTED here rather than rejected. This is verification, not the forbidden proxy, and it is
   // strictly better than shipping a truncated first prompt (`first_task_slice_not_whole_original`) or a
   // mismatched count (`summary_remaining_count_disagrees_with_items`).
-  const normalizedItems = parsed.items.map((item) =>
-    item.itemKind === 'first_task'
-      ? { ...item, originalSliceRef: { start: 0, end: originalLength } }
-      : item,
-  );
+  //
+  // Phase 1b (§5.5a — normalize an out-of-bounds STRUCTURAL offset, not infer meaning): a model cannot
+  // count characters reliably, so it emits originalSliceRef / sourcePointRanges offsets that fall OUTSIDE
+  // the prompt (`offset_range_out_of_bounds` / `source_point_ranges_invalid`). An out-of-bounds offset is
+  // a wrong POSITION, not wrong meaning — and the item's body is worded separately by the batch, so a
+  // slice is only a rough pointer. CLAMP each offset into the valid [0, originalLength] window (dropping a
+  // source-range entry that is not even a numeric range) so a coherent plan is ACCEPTED rather than
+  // rejected. Nothing here infers meaning: it only forces a position back into the string it must index.
+  const clampOffsetRangeV1 = (range: unknown): { start: number; end: number } | null => {
+    if (originalLength <= 0 || !range || typeof range !== 'object') return null;
+    const r = range as { start?: unknown; end?: unknown };
+    if (typeof r.start !== 'number' || typeof r.end !== 'number') return null;
+    const start = Math.max(0, Math.min(Math.trunc(r.start), originalLength - 1));
+    const end = Math.max(start + 1, Math.min(Math.trunc(r.end), originalLength));
+    return { start, end };
+  };
+  const normalizedItems = parsed.items.map((item) => {
+    const originalSliceRef = item.itemKind === 'first_task'
+      ? { start: 0, end: originalLength }
+      : item.originalSliceRef && typeof item.originalSliceRef === 'object'
+        ? (clampOffsetRangeV1(item.originalSliceRef) ?? item.originalSliceRef)
+        : item.originalSliceRef;
+    const sourcePointRanges = Array.isArray(item.sourcePointRanges)
+      ? item.sourcePointRanges
+          .map((entry) => clampOffsetRangeV1(entry))
+          .filter((entry): entry is { start: number; end: number } => entry !== null)
+      : item.sourcePointRanges;
+    return { ...item, originalSliceRef, sourcePointRanges };
+  });
   const normalizedRemainingTaskCount = normalizedItems.length - 1;
 
   const bounds = checkPromptEnhancementSequencePlannerBoundsV1({

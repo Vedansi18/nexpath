@@ -726,9 +726,13 @@ describe('sequence planner — the list is checked against the rules it will be 
       .toEqual({ ok: false, reason: 'dependency_order_not_index' });
   });
 
-  it('rejects an offset that does not address the original, rather than slicing something else', async () => {
-    expect(await run(withItems(firstTask, taskItem({ originalSliceRef: { start: 0, end: ORIGINAL.length + 500 } }))))
-      .toEqual({ ok: false, reason: 'offset_range_out_of_bounds' });
+  it('clamps an offset that runs past the original, rather than slicing something else', async () => {
+    // A task slice that runs PAST the prompt is CLAMPED into the valid window (Phase 1b, §5.5a — an
+    // out-of-bounds offset is a wrong position, corrected to the bound; the body is worded fresh so a
+    // slice is only a rough pointer). The plan is accepted, not rejected.
+    const clampedTask = await run(withItems(firstTask, taskItem({ originalSliceRef: { start: 0, end: ORIGINAL.length + 500 } })));
+    expect(clampedTask.ok).toBe(true);
+    if (clampedTask.ok) expect(clampedTask.output.items[1]?.originalSliceRef).toEqual({ start: 0, end: ORIGINAL.length });
     // The first prompt is the request itself: a partial first slice is NORMALIZED to the whole
     // original (Phase 1, §5.5a — a mandated literal is corrected, never rejected).
     const firstSliceNorm = await run(withItems({ ...firstTask, originalSliceRef: { start: 0, end: 4 } }, taskItem()));
@@ -874,16 +878,17 @@ describe('sequence planner — the safety fields are derived, not asked for', ()
     });
   });
 
-  it('will not accept a plan whose offsets do not address the original', async () => {
-    // The derivation is fail-closed on such a ref — no slice, so no authority and no floor — and
-    // the list check is what makes that state unreachable rather than merely safe: a task item
-    // whose positions point outside the prompt has no verbatim text to serve, and serving it later
-    // is what the offsets exist to prevent.
-    expect(await run({
+  it('clamps a task offset that runs past the original into the valid window (Phase 1b, §5.5a)', async () => {
+    // Out-of-bounds offsets are a wrong POSITION, not a wrong plan: the model cannot count characters
+    // reliably. The ref is clamped into the valid [0, len] window (the body is worded fresh, so a slice
+    // is only a rough pointer), so the plan is accepted rather than rejected.
+    const result = await run({
       itemKind: 'task', originalSliceRef: { start: 0, end: ROTATION.length + 500 },
       sourcePointRanges: [], roleLabel: null, dependencyOrder: 1, complexity: 'not_complex',
       complexityReason: null, decompositionGroupId: 'g2',
-    })).toEqual({ ok: false, reason: 'offset_range_out_of_bounds' });
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.output.items[1]?.originalSliceRef).toEqual({ start: 0, end: ROTATION.length });
   });
 });
 
