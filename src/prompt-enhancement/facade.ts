@@ -26,7 +26,7 @@ import { composeStructuredComposerOutputV1 } from './llm-composer.js';
 import { decidePromptEnhancementRouteViaLlmV1, type PromptEnhancementLlmRouteDecisionV1 } from './llm-route-decision.js';
 import { isValidApiKey } from '../config/ApiKeyResolver.js';
 import { planPromptEnhancementSections } from './templates/section-plan.js';
-import { routePromptEnhancement, describePromptEnhancementSequencePlanV1, type PromptEnhancementCapabilityId, type PromptEnhancementRouteInput } from './routing-taxonomy.js';
+import { routePromptEnhancement, isKnownPrimaryIntent, describePromptEnhancementSequencePlanV1, type PromptEnhancementCapabilityId, type PromptEnhancementRouteInput } from './routing-taxonomy.js';
 import { buildPromptEnhancementGuidanceFactsV1 } from './guidance-facts.js';
 import { resolvePromptEnhancementSourceConflictsV1 } from './conflict-resolution.js';
 import { applyPromptEnhancementSourceMixV1 } from './source-mix.js';
@@ -180,6 +180,12 @@ async function prepare(
       ? 'pe_generated'
       : 'ordinary_user_prompt',
     oldDecisionSessionPayloadPresent: false,
+    // The classifier's intent proposal, re-guarded against the typed menu (the
+    // contract carries it as a string to avoid a type cycle).
+    classifierPrimaryIntent: isKnownPrimaryIntent(request.reviewMomentContext.triggerProvenance.classifierPrimaryIntent)
+      ? request.reviewMomentContext.triggerProvenance.classifierPrimaryIntent
+      : '',
+    classifierIntentConfidence: request.reviewMomentContext.triggerProvenance.classifierIntentConfidence ?? 0,
   };
   let route = routePromptEnhancement(routeInput);
 

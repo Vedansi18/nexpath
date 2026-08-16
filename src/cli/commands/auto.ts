@@ -423,6 +423,10 @@ export function buildPromptEnhancementRequestForAuto(input: {
         absenceGateReason: absenceSignal ? 'qualifying_absence_signal' : undefined,
         classifierState: input.stageResult.degraded ? 'degraded_no_fire' : 'fire_recommended',
         degradedNoActionState: input.stageResult.degraded ? 'degraded_no_fire' : 'none',
+        // The intent proposal from the same classifier call ('' on the degraded
+        // path — keyless prompts stay on the deterministic cascade).
+        classifierPrimaryIntent: input.stageResult.primaryIntent,
+        classifierIntentConfidence: input.stageResult.intentConfidence,
         promptStartBoundary: source.promptStartStop.hookBoundary,
         deliveryBoundary: source.promptStartStop.deliveryBoundary,
         promptStartCanReplaceSameTurn: source.promptStartStop.runAutoCanHoldOrReplaceSubmittedPrompt,

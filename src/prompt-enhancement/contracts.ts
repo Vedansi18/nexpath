@@ -261,6 +261,14 @@ export interface PromptEnhancementTriggerProvenanceV1 {
   absenceGateReason?: string;
   classifierState: 'fire_recommended' | 'no_fire' | 'degraded_no_fire' | 'not_applicable';
   degradedNoActionState: 'none' | 'degraded_no_fire' | 'no_action_not_applicable' | 'blocked_by_source_gate';
+  /**
+   * The stage classifier's intent PROPOSAL ('' when unsupported by the evidence
+   * ladder or on the degraded path). Typed as string here (the intent union lives
+   * in the routing module, which imports this file); the parser validated it
+   * against the full menu and the router re-guards before preferring it.
+   */
+  classifierPrimaryIntent?: string;
+  classifierIntentConfidence?: number;
   promptStartBoundary: PromptStartStopSourceSnapshot['hookBoundary'];
   deliveryBoundary: PromptStartStopSourceSnapshot['deliveryBoundary'];
   promptStartCanReplaceSameTurn: PromptStartStopSourceSnapshot['runAutoCanHoldOrReplaceSubmittedPrompt'];

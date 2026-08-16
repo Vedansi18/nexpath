@@ -1,4 +1,24 @@
 import type { Stage } from '../classifier/types.js';
+
+// The taxonomy ids live in a LEAF module (see taxonomy-ids.ts) so the stage
+// classifier can build its intent menu without a load-order cycle; re-exported
+// here so every existing importer keeps working unchanged.
+export * from './taxonomy-ids.js';
+import {
+  PROMPT_ENHANCEMENT_FAMILIES,
+  PROMPT_ENHANCEMENT_CAPABILITIES,
+  DEBUG_PRIMARY_INTENTS,
+  MAINTENANCE_PRIMARY_INTENTS,
+  REVIEW_PRIMARY_INTENTS,
+  FEATURE_PRIMARY_INTENTS,
+  PLANNING_PRIMARY_INTENTS,
+  QUICK_IMPROVEMENT_PRIMARY_INTENTS,
+  PROMPT_ENHANCEMENT_PRIMARY_INTENTS,
+  PROMPT_ENHANCEMENT_INTENT_ALIASES,
+  type PromptEnhancementFamilyId,
+  type PromptEnhancementPrimaryIntent,
+  type PromptEnhancementCapabilityId,
+} from './taxonomy-ids.js';
 import { STAGES } from '../classifier/types.js';
 import type {
   PromptEnhancementCallVisibilityMode,
@@ -13,66 +33,7 @@ import { PROMPT_ENHANCEMENT_CONTRACT_VERSION } from './contracts.js';
 import type { PromptEnhancementLlmRouteDecisionV1 } from './llm-route-decision.js';
 import { getContentTemplateSourceSnapshot, getPromptStartStopSourceSnapshot } from './source-reality.js';
 
-export type PromptEnhancementFamilyId =
-  | 'feature_delivery'
-  | 'planning_spec'
-  | 'issue_debug'
-  | 'maintenance_refactor'
-  | 'review_verification'
-  | 'quick_improvement';
 
-export type PromptEnhancementPrimaryIntent =
-  | 'feature.idea_discussion'
-  | 'feature.fresh_implementation'
-  | 'feature.upgrade_extension'
-  | 'planning.spec_or_prd'
-  | 'planning.architecture_or_design'
-  | 'planning.task_breakdown'
-  | 'planning.rollout_release_plan'
-  | 'planning.migration_plan'
-  | 'planning.debugging_plan'
-  | 'planning.refactor_plan'
-  | 'issue_debug.new_bug_report'
-  | 'issue_debug.regression_after_recent_change'
-  | 'issue_debug.failing_test'
-  | 'issue_debug.runtime_error_exception'
-  | 'issue_debug.ui_behavior_mismatch'
-  | 'issue_debug.integration_api_failure'
-  | 'issue_debug.performance_problem'
-  | 'issue_debug.flaky_behavior'
-  | 'issue_debug.environment_config_issue'
-  | 'issue_debug.reproduction_discovery'
-  | 'issue_debug.production_incident_or_support'
-  | 'maintenance.refactor_no_behavior_change'
-  | 'maintenance.dependency_upgrade'
-  | 'maintenance.migration_schema_change'
-  | 'maintenance.cleanup_dead_code'
-  | 'maintenance.performance_maintenance'
-  | 'maintenance.test_hardening'
-  | 'maintenance.documentation_config_upkeep'
-  | 'maintenance.compatibility_update'
-  | 'maintenance.risk_rollback_heavy'
-  | 'maintenance.incremental_module_layer_cleanup'
-  | 'review.verification_request'
-  | 'review.code_or_diff_review'
-  | 'review.requirements_fit_review'
-  | 'review.security_review'
-  | 'review.architecture_review'
-  | 'review.performance_review'
-  | 'review.api_contract_review'
-  | 'review.test_review'
-  | 'quick_improvement.local_polish_or_small_improvement';
-
-export type PromptEnhancementCapabilityId =
-  | 'capability.decomposition_candidate'
-  | 'capability.confirmation_needed'
-  | 'capability.adversarial_review'
-  | 'capability.project_grounding'
-  | 'capability.verification_required'
-  | 'capability.risk_or_rollback'
-  | 'capability.reproduction_or_evidence_needed'
-  | 'capability.behavior_preservation'
-  | 'capability.source_signal_guidance';
 
 export type PromptEnhancementRouteConfidence =
   | 'strong'
@@ -124,6 +85,13 @@ export interface PromptEnhancementRouteInput {
   runtimeEnvFactRefs?: readonly string[];
   rightGoodWorkStyleRefs?: readonly string[];
   stage2SelectionState?: 'selected' | 'qualifying_but_unselected' | 'supplementary_present' | 'absent_unselected_diagnostic' | 'counter_update_only' | 'rejected_unknown_key';
+  /**
+   * The stage classifier's intent proposal from the one parked call. When present
+   * and non-empty, routing PREFERS it over the deterministic cascade; when empty
+   * (thin evidence, degraded path, no key) the cascade answers, unchanged.
+   */
+  classifierPrimaryIntent?: PromptEnhancementPrimaryIntent | '';
+  classifierIntentConfidence?: number;
   generatedOriginState?: 'ordinary_user_prompt' | 'old_ds_advisory_injected' | 'pe_generated' | 'pe_action_generated' | 'sequence_generated' | 'unknown';
   oldDecisionSessionPayloadPresent?: boolean;
 }
@@ -199,97 +167,7 @@ export interface PromptEnhancementRouteResult {
   usesOldStaticDecisionSessionMap: false;
 }
 
-export const PROMPT_ENHANCEMENT_FAMILIES: readonly PromptEnhancementFamilyId[] = [
-  'feature_delivery',
-  'planning_spec',
-  'issue_debug',
-  'maintenance_refactor',
-  'review_verification',
-  'quick_improvement',
-] as const;
 
-export const PROMPT_ENHANCEMENT_CAPABILITIES: readonly PromptEnhancementCapabilityId[] = [
-  'capability.decomposition_candidate',
-  'capability.confirmation_needed',
-  'capability.adversarial_review',
-  'capability.project_grounding',
-  'capability.verification_required',
-  'capability.risk_or_rollback',
-  'capability.reproduction_or_evidence_needed',
-  'capability.behavior_preservation',
-  'capability.source_signal_guidance',
-] as const;
-
-export const DEBUG_PRIMARY_INTENTS: readonly Extract<PromptEnhancementPrimaryIntent, `issue_debug.${string}`>[] = [
-  'issue_debug.new_bug_report',
-  'issue_debug.regression_after_recent_change',
-  'issue_debug.failing_test',
-  'issue_debug.runtime_error_exception',
-  'issue_debug.ui_behavior_mismatch',
-  'issue_debug.integration_api_failure',
-  'issue_debug.performance_problem',
-  'issue_debug.flaky_behavior',
-  'issue_debug.environment_config_issue',
-  'issue_debug.reproduction_discovery',
-  'issue_debug.production_incident_or_support',
-] as const;
-
-export const MAINTENANCE_PRIMARY_INTENTS: readonly Extract<PromptEnhancementPrimaryIntent, `maintenance.${string}`>[] = [
-  'maintenance.refactor_no_behavior_change',
-  'maintenance.dependency_upgrade',
-  'maintenance.migration_schema_change',
-  'maintenance.cleanup_dead_code',
-  'maintenance.performance_maintenance',
-  'maintenance.test_hardening',
-  'maintenance.documentation_config_upkeep',
-  'maintenance.compatibility_update',
-  'maintenance.risk_rollback_heavy',
-  'maintenance.incremental_module_layer_cleanup',
-] as const;
-
-export const REVIEW_PRIMARY_INTENTS: readonly Extract<PromptEnhancementPrimaryIntent, `review.${string}`>[] = [
-  'review.verification_request',
-  'review.code_or_diff_review',
-  'review.requirements_fit_review',
-  'review.security_review',
-  'review.architecture_review',
-  'review.performance_review',
-  'review.api_contract_review',
-  'review.test_review',
-] as const;
-
-export const FEATURE_PRIMARY_INTENTS: readonly Extract<PromptEnhancementPrimaryIntent, `feature.${string}`>[] = [
-  'feature.idea_discussion',
-  'feature.fresh_implementation',
-  'feature.upgrade_extension',
-] as const;
-
-export const PLANNING_PRIMARY_INTENTS: readonly Extract<PromptEnhancementPrimaryIntent, `planning.${string}`>[] = [
-  'planning.spec_or_prd',
-  'planning.architecture_or_design',
-  'planning.task_breakdown',
-  'planning.rollout_release_plan',
-  'planning.migration_plan',
-  'planning.debugging_plan',
-  'planning.refactor_plan',
-] as const;
-
-export const QUICK_IMPROVEMENT_PRIMARY_INTENTS: readonly Extract<PromptEnhancementPrimaryIntent, `quick_improvement.${string}`>[] = [
-  'quick_improvement.local_polish_or_small_improvement',
-] as const;
-
-export const PROMPT_ENHANCEMENT_PRIMARY_INTENTS: readonly PromptEnhancementPrimaryIntent[] = [
-  ...FEATURE_PRIMARY_INTENTS,
-  ...PLANNING_PRIMARY_INTENTS,
-  ...DEBUG_PRIMARY_INTENTS,
-  ...MAINTENANCE_PRIMARY_INTENTS,
-  ...REVIEW_PRIMARY_INTENTS,
-  ...QUICK_IMPROVEMENT_PRIMARY_INTENTS,
-] as const;
-
-export const PROMPT_ENHANCEMENT_INTENT_ALIASES = {
-  'review.code_diff_review': 'review.code_or_diff_review',
-} as const;
 
 export const PROMPT_ENHANCEMENT_STAGE_TRANSITION_SIGNAL_IDS = [
   'IDEA_TO_PRD',
@@ -865,6 +743,11 @@ export function findPromptEnhancementTaxonomyGaps(): string[] {
   return gaps;
 }
 
+/** Type guard: is this string one of the forty typed primary intents? */
+export function isKnownPrimaryIntent(value: string | undefined): value is PromptEnhancementPrimaryIntent {
+  return value !== undefined && (PROMPT_ENHANCEMENT_PRIMARY_INTENTS as readonly string[]).includes(value);
+}
+
 export function routePromptEnhancement(
   input: PromptEnhancementRouteInput,
   llmRouteDecision?: PromptEnhancementLlmRouteDecisionV1,
@@ -890,6 +773,17 @@ export function routePromptEnhancement(
   // overridable. Everything below stays the deterministic path + fallback.
   if (llmRouteDecision) {
     return buildRouteResultFromLlmDecision(input, llmRouteDecision, normalized, evidenceRefs);
+  }
+
+  // The classifier's intent proposal routes the keyed path: it chose from the FULL
+  // forty-intent menu under the locked evidence ladder, so it reaches intents the
+  // keyword cascade never could. An explicit accepted LLM route decision (above)
+  // still wins as the stronger authority; the hard skips higher up are never
+  // overridable. An empty proposal falls through to the deterministic cascade,
+  // byte-untouched — low-confidence disposition belongs to the routing fallback
+  // layer, which consumes the threaded confidence.
+  if (input.classifierPrimaryIntent) {
+    return buildRouteResultFromClassifierIntent(input, input.classifierPrimaryIntent, normalized, evidenceRefs);
   }
 
   const hasSourceAIntent = hasExplicitRouteWords(normalized);
@@ -1027,6 +921,35 @@ function noPopupResult(input: PromptEnhancementRouteInput, reasonCode: string, e
  * `skip_no_useful_guidance` still legitimately skips (weak evidence ≠ forced popup).
  * The route stays typed + validated — no freeform route output.
  */
+/** Route from the stage classifier's intent proposal — same visible shape as every route. */
+function buildRouteResultFromClassifierIntent(
+  input: PromptEnhancementRouteInput,
+  intent: PromptEnhancementPrimaryIntent,
+  normalized: string,
+  evidenceRefs: readonly string[],
+): PromptEnhancementRouteResult {
+  const selectedPreset = presetForIntent(intent);
+  const capabilityOverlays = mergeCapabilities([...selectedPreset.capabilityOverlays], normalized, input);
+  const reasonCodes = ['classifier_intent_preferred'];
+  const routeConfidence: PromptEnhancementRouteConfidence = 'partial';
+  return {
+    contractDecision: toContractDecision(input, selectedPreset, capabilityOverlays, evidenceRefs, reasonCodes, false, routeConfidence, 'none'),
+    selectedPreset,
+    familyId: selectedPreset.family,
+    primaryIntent: selectedPreset.primaryIntent,
+    secondaryIntentTags: secondaryIntentTagsFor(normalized, selectedPreset.primaryIntent),
+    capabilityOverlays,
+    routeConfidence,
+    fallbackMode: 'none',
+    routeEvidenceRefs: evidenceRefs,
+    reasonCodes,
+    noPopup: false,
+    usesSharedSignalEvidenceOnly: true,
+    usesPeOnlyClassifier: false,
+    usesOldStaticDecisionSessionMap: false,
+  };
+}
+
 function buildRouteResultFromLlmDecision(
   input: PromptEnhancementRouteInput,
   decision: PromptEnhancementLlmRouteDecisionV1,
@@ -1319,6 +1242,12 @@ export function describePromptEnhancementSequencePlanV1(
   return { pointCount: Math.max(1, points.length), roleLabels };
 }
 
+/**
+ * DECIDED (route-preference phase): `routeCandidates` remains NON-PROMOTING
+ * diagnostics. Its original promote-a-near-miss purpose is superseded by the
+ * classifier choosing from the full intent menu; it stays as advisory metadata
+ * because it is a contract field with downstream consumers, and it never routes.
+ */
 function routeCandidatesFor(
   selectedPreset: PromptEnhancementTaxonomyPreset,
   selectedCapabilityOverlays: readonly PromptEnhancementCapabilityId[],

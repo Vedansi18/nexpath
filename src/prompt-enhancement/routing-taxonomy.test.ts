@@ -1055,3 +1055,59 @@ describe('describePromptEnhancementSequencePlanV1 (Sequence-plan summary fix 202
     expect(plan.pointCount).toBe(1);
   });
 });
+
+// ── Route preference: the classifier proposal routes; the cascade is the fallback ──
+
+describe('classifier intent preference (the keyed path)', () => {
+  it('routes a previously-unreachable intent from the proposal — the cascade never could', () => {
+    const route = routePromptEnhancement(routeInput({
+      promptText: 'can you look at this diff before I merge',
+      classifierPrimaryIntent: 'review.code_or_diff_review',
+      classifierIntentConfidence: 0.9,
+    }));
+    expect(route.primaryIntent).toBe('review.code_or_diff_review');
+    expect(route.familyId).toBe('review_verification');
+    expect(route.noPopup).toBe(false);
+    expect(route.reasonCodes).toContain('classifier_intent_preferred');
+  });
+
+  it('an empty proposal falls through to the deterministic cascade, unchanged', () => {
+    const withEmpty = routePromptEnhancement(routeInput({
+      promptText: 'the checkout page throws a null error after login, fix it',
+      classifierPrimaryIntent: '',
+      classifierIntentConfidence: 0,
+    }));
+    const without = routePromptEnhancement(routeInput({
+      promptText: 'the checkout page throws a null error after login, fix it',
+    }));
+    expect(withEmpty.primaryIntent).toBe(without.primaryIntent);
+    expect(withEmpty.reasonCodes).not.toContain('classifier_intent_preferred');
+  });
+
+  it('hard skips are never overridable by the proposal', () => {
+    const route = routePromptEnhancement(routeInput({
+      classifierState: 'degraded_no_fire',
+      classifierPrimaryIntent: 'review.code_or_diff_review',
+      classifierIntentConfidence: 0.95,
+    }));
+    expect(route.noPopup).toBe(true);
+    expect(route.reasonCodes).toContain('degraded_classifier_no_fire');
+  });
+
+  it('an explicit accepted LLM route decision still wins over the proposal', () => {
+    const route = routePromptEnhancement(
+      routeInput({
+        classifierPrimaryIntent: 'review.code_or_diff_review',
+        classifierIntentConfidence: 0.9,
+      }),
+      {
+        familyId: 'planning_spec',
+        primaryIntent: 'planning.task_breakdown',
+        capabilities: [],
+        ambiguityState: 'clear',
+      } as never,
+    );
+    expect(route.primaryIntent).toBe('planning.task_breakdown');
+    expect(route.reasonCodes).toContain('llm_route_decision_accepted');
+  });
+});

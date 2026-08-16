@@ -6,7 +6,7 @@ import {
   PROMPT_ENHANCEMENT_CAPABILITIES,
   type PromptEnhancementPrimaryIntent,
   type PromptEnhancementCapabilityId,
-} from '../prompt-enhancement/routing-taxonomy.js';
+} from '../prompt-enhancement/taxonomy-ids.js';
 import {
   STAGE2_MODEL,
   STAGE2_MAX_OUTPUT_TOKENS,
