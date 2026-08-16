@@ -667,16 +667,29 @@ describe('sequence planner — the call', () => {
   });
 
   it('surfaces the check that failed rather than a generic rejection', async () => {
-    const ungrouped = validReply({
+    // A still-hard grouping fault surfaces its own code. grouping_stage_did_nothing and
+    // point_in_no_group are recorded-not-blocked under Phase 2, so a genuinely malformed grouping
+    // (a point in two groups) is used here to show the specific code is surfaced.
+    const overlapping = validReply({
       points: [point('p1', 0), point('p2', 10)],
-      groups: [group('g1', ['p1']), group('g2', ['p2'])],
+      groups: [group('g1', ['p1', 'p2']), group('g2', ['p2'])],
     });
-    expect(await runPromptEnhancementSequencePlannerV1(call(), clientReturning(ungrouped)))
-      .toEqual({ ok: false, reason: 'grouping_stage_did_nothing' });
+    expect(await runPromptEnhancementSequencePlannerV1(call(), clientReturning(overlapping)))
+      .toEqual({ ok: false, reason: 'point_in_more_than_one_group' });
 
     const explained = validReply({ outcomeReason: 'not_big_enough' });
     expect(await runPromptEnhancementSequencePlannerV1(call(), clientReturning(explained)))
       .toEqual({ ok: false, reason: 'outcome_reason_disagrees_with_outcome' });
+  });
+
+  it('records, rather than blocks, a grouping that did nothing (Phase 2 — must still generate)', async () => {
+    // Hiren 2026-08-15: one-group-per-point (more prompts than ideal) is acceptable to ship, but the
+    // sequence MUST still generate. The soft codes no longer reject an otherwise-coherent plan.
+    const ungrouped = validReply({
+      points: [point('p1', 0), point('p2', 10)],
+      groups: [group('g1', ['p1']), group('g2', ['p2'])],
+    });
+    expect((await runPromptEnhancementSequencePlannerV1(call(), clientReturning(ungrouped))).ok).toBe(true);
   });
 });
 
@@ -716,9 +729,11 @@ describe('sequence planner — the list is checked against the rules it will be 
   it('rejects an offset that does not address the original, rather than slicing something else', async () => {
     expect(await run(withItems(firstTask, taskItem({ originalSliceRef: { start: 0, end: ORIGINAL.length + 500 } }))))
       .toEqual({ ok: false, reason: 'offset_range_out_of_bounds' });
-    // The first prompt is the request itself, not a slice of it.
-    expect(await run(withItems({ ...firstTask, originalSliceRef: { start: 0, end: 4 } }, taskItem())))
-      .toEqual({ ok: false, reason: 'first_task_slice_not_whole_original' });
+    // The first prompt is the request itself: a partial first slice is NORMALIZED to the whole
+    // original (Phase 1, §5.5a — a mandated literal is corrected, never rejected).
+    const firstSliceNorm = await run(withItems({ ...firstTask, originalSliceRef: { start: 0, end: 4 } }, taskItem()));
+    expect(firstSliceNorm.ok).toBe(true);
+    if (firstSliceNorm.ok) expect(firstSliceNorm.output.items[0]?.originalSliceRef).toEqual({ start: 0, end: ORIGINAL.length });
     // And the whole-prompt directives index the same original.
     expect(await run(validReply({ promptDirectives: [{ start: 0, end: ORIGINAL.length + 1 }] })))
       .toEqual({ ok: false, reason: 'prompt_directives_invalid' });
@@ -777,9 +792,11 @@ describe('sequence planner — the list is checked against the rules it will be 
     expect(await run(withItems(firstTask))).toEqual({ ok: false, reason: 'item_count_below_min' });
     const many = [firstTask, ...Array.from({ length: 30 }, (_, i) => taskItem({ dependencyOrder: i + 1 }))];
     expect(await run(withItems(...many))).toEqual({ ok: false, reason: 'item_count_over_max' });
-    // Rendered as the total, a summary short by one reports a prompt fewer than the plan holds.
-    expect(await run(validReply({ summaryData: { summaryId: 's1', remainingTaskCount: 2 } })))
-      .toEqual({ ok: false, reason: 'summary_remaining_count_disagrees_with_items' });
+    // A summary count that disagrees is NORMALIZED to items-after-the-first, not rejected
+    // (Phase 1, §5.5b — over-strict record-not-block; MPS-1 display only, MPS-2 reads the stored row).
+    const summaryNorm = await run(validReply({ summaryData: { summaryId: 's1', remainingTaskCount: 2 } }));
+    expect(summaryNorm.ok).toBe(true);
+    if (summaryNorm.ok) expect(summaryNorm.output.summaryData?.remainingTaskCount).toBe(summaryNorm.output.items.length - 1);
   });
 
   it('refuses a reply that words an item, rather than stripping the wording out', async () => {

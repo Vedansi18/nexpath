@@ -2,6 +2,7 @@ import OpenAI from 'openai';
 import type { Database } from 'sql.js';
 import {
   PROMPT_ENHANCEMENT_COST_MODEL_V1,
+  PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_MODEL_V1,
   PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_TIMEOUT_MS_V1,
   PROMPT_ENHANCEMENT_COST_VALIDATION_RETRY_COUNT_V1,
   PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_OUTPUT_TOKEN_CAP_V1,
@@ -330,7 +331,12 @@ function asPointList(value: unknown): readonly PromptEnhancementSequencePlannerP
   for (const entry of value) {
     if (typeof entry !== 'object' || entry === null) return null;
     const point = entry as Record<string, unknown>;
-    if (typeof point['pointId'] !== 'string'
+    // The id is a DISCARDED internal correlation key (points↔groups set-arithmetic); its string-vs-number
+    // form is a format detail, not meaning. Stronger models emit numeric ids, so coerce number→string
+    // rather than reject a coherent plan on the key's type. Not a semantic relaxation — the matching still
+    // holds because points and groups are coerced identically.
+    const pointId = coercePlannerId(point['pointId']);
+    if (pointId === null
       || typeof point['startOffset'] !== 'number'
       || typeof point['endOffset'] !== 'number'
       // Shape only: that the kind is one of the six is meaning, and is checked with the rest of it.
@@ -338,7 +344,7 @@ function asPointList(value: unknown): readonly PromptEnhancementSequencePlannerP
       return null;
     }
     points.push({
-      pointId: point['pointId'],
+      pointId,
       startOffset: point['startOffset'],
       endOffset: point['endOffset'],
       requiredKind: point['requiredKind'] as PromptEnhancementSequencePointKindV1,
@@ -354,21 +360,41 @@ function asGroupList(value: unknown): readonly PromptEnhancementSequencePlannerG
   for (const entry of value) {
     if (typeof entry !== 'object' || entry === null) return null;
     const group = entry as Record<string, unknown>;
-    if (typeof group['groupId'] !== 'string'
-      || !Array.isArray(group['pointIds'])
-      || (group['pointIds'] as unknown[]).some((id) => typeof id !== 'string')
+    // Same id coercion as the point inventory — the id is a discarded correlation key; coerce
+    // number→string so a coherent plan is not rejected on the key's form (see asPointList).
+    const groupId = coercePlannerId(group['groupId']);
+    if (!Array.isArray(group['pointIds'])) return null;
+    const pointIds: string[] = [];
+    for (const rawId of group['pointIds'] as unknown[]) {
+      const coerced = coercePlannerId(rawId);
+      if (coerced === null) return null;
+      pointIds.push(coerced);
+    }
+    if (groupId === null
       // Required rather than defaulted: a group that stays in the body is a decision, and reading
       // its absence as "becomes an item" would take that decision on the planner's behalf.
       || typeof group['canRemainOneBodySection'] !== 'boolean') {
       return null;
     }
     groups.push({
-      groupId: group['groupId'],
-      pointIds: group['pointIds'] as readonly string[],
+      groupId,
+      pointIds,
       canRemainOneBodySection: group['canRemainOneBodySection'],
     });
   }
   return groups;
+}
+
+/**
+ * Coerce a planner correlation id (point/group) to a string. The ids are internal working state,
+ * discarded after the set-arithmetic checks, so their string-vs-number form carries no meaning —
+ * only that points and groups agree, which holds under an identical coercion on both. Returns null
+ * for anything that is neither a string nor a finite number (the only forms an id can honestly take).
+ */
+function coercePlannerId(value: unknown): string | null {
+  if (typeof value === 'string' && value.length > 0) return value;
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  return null;
 }
 
 function asRange(value: unknown): PromptEnhancementSequenceOffsetRangeV1 | null | 'invalid' {
@@ -531,7 +557,7 @@ async function attemptPlan(
   try {
     const response = await openai.chat.completions.create(
       {
-        model: PROMPT_ENHANCEMENT_COST_MODEL_V1,
+        model: PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_MODEL_V1,
         // The planner's own budget: the reasons per item are what cost the tokens and they are
         // exactly what must not be dropped to fit.
         //
@@ -601,18 +627,41 @@ async function attemptPlan(
     parsed.groups,
     parsed.items.map((item) => item.decompositionGroupId),
   );
-  if (!grouping.ok) return { ok: false, reason: grouping.code };
+  // Phase 2 (Hiren 2026-08-15 — "grouping not respected is OK, but the sequence MUST generate";
+  // §5.5b record-not-block): two grouping outcomes are quality, not integrity, and must not block a
+  // coherent plan from producing items. `grouping_stage_did_nothing` (one group per point → more
+  // prompts than ideal) and `point_in_no_group` (a working-state point that landed in no group —
+  // points travel no further than this check, so nothing downstream consumes it) are RECORDED, not
+  // failed. Every other grouping code is genuine malformed output (duplicate/unknown/overlapping ids,
+  // a stray item→group reference) and still fails hard.
+  const groupingSoftCodesV1 = new Set(['grouping_stage_did_nothing', 'point_in_no_group']);
+  if (!grouping.ok && !groupingSoftCodesV1.has(grouping.code)) {
+    return { ok: false, reason: grouping.code };
+  }
+
+  // Phase 1 (§5.5a — normalize a MANDATED literal, not infer meaning): the first item IS the whole
+  // original by spec (§22.3(C)), and the summary's remaining count IS items-after-the-first. Both are
+  // dictated by the spec — "who chose the string" is us — so a model that got the boundary/count wrong
+  // is CORRECTED here rather than rejected. This is verification, not the forbidden proxy, and it is
+  // strictly better than shipping a truncated first prompt (`first_task_slice_not_whole_original`) or a
+  // mismatched count (`summary_remaining_count_disagrees_with_items`).
+  const normalizedItems = parsed.items.map((item) =>
+    item.itemKind === 'first_task'
+      ? { ...item, originalSliceRef: { start: 0, end: originalLength } }
+      : item,
+  );
+  const normalizedRemainingTaskCount = normalizedItems.length - 1;
 
   const bounds = checkPromptEnhancementSequencePlannerBoundsV1({
-    itemCount: parsed.items.length,
-    summaryRemainingTaskCount: parsed.remainingTaskCount,
+    itemCount: normalizedItems.length,
+    summaryRemainingTaskCount: normalizedRemainingTaskCount,
   });
   if (!bounds.ok) return { ok: false, reason: bounds.code };
 
   // Safety is read off the slices before the list is checked, because the list check reads those
   // fields: an item's authority has to be on it by the time the rule that an item with a slice
   // carries one is applied to it.
-  const drafts = parsed.items.map((item) => ({
+  const drafts = normalizedItems.map((item) => ({
     ...item,
     ...deriveItemSafetyFields(sliceTextFor(item.originalSliceRef, input.localOriginalText)),
   }));
@@ -646,7 +695,7 @@ async function attemptPlan(
       suggestedNextPromptPolicy: promptEnhancementSequencePolicyForOutcomeV1(parsed.outcome),
       summaryData: {
         summaryId: parsed.summaryId,
-        remainingTaskCount: parsed.remainingTaskCount,
+        remainingTaskCount: normalizedRemainingTaskCount,
         taskRoleLabels: promptEnhancementSequenceTaskRoleLabelsV1(items),
       },
     },
