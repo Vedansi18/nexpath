@@ -246,6 +246,7 @@ export function buildPromptEnhancementGuidanceFactsV1(
     if (ref.startsWith('mistake:')) {
       // A recurring mistake is a negative-capability signal: a missing practice, so
       // it belongs in Source A (fix-plan §4b), NOT the positive Source-B pattern lane.
+      const mistakeResolved = signals.groundingEvidenceByRef?.[ref];
       facts.push({
         factId: nextId('mistake'),
         sourceType: 'absence_signal',
@@ -264,6 +265,8 @@ export function buildPromptEnhancementGuidanceFactsV1(
         safetyHooks: [],
         privacyClass: 'local_private',
         sanitizationState: 'identity_only_event',
+        evidence: evidenceForGuidanceFact('local_private', 'identity_only_event', mistakeResolved),
+        sourceRuntimePath: mistakeResolved?.runtimePath,
         publicCopySafe: true,
       });
       continue;

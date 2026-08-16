@@ -322,4 +322,18 @@ describe('caller-side eager resolution (the generic key/value payload)', () => {
     expect(evidenceForGuidanceFact('local_private', 'sensitive_ref_only', resolved)).toBeUndefined();
     expect(evidenceForGuidanceFact('local_private', 'not_applicable', resolved)).toEqual(resolved);
   });
+
+  it('mistake-state refs carry their resolved value too — no branch crosses id-only', () => {
+    const facts = buildPromptEnhancementGuidanceFactsV1(
+      requestWithSignals({
+        rightGoodWorkStyleEnvRuntimeRefs: ['mistake:test_creation'],
+        groundingEvidenceByRef: {
+          'mistake:test_creation': { key: 'test_creation', value: 'mistake:claimed', runtimePath: 'local_read_model' },
+        },
+      } as never),
+    );
+    const mistakeFact = facts.find((f) => f.sourceType === 'absence_signal')!;
+    expect(mistakeFact.evidence).toEqual({ key: 'test_creation', value: 'mistake:claimed' });
+    expect(mistakeFact.sourceRuntimePath).toBe('local_read_model');
+  });
 });
