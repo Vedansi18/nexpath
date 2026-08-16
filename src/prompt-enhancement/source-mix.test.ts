@@ -362,3 +362,24 @@ describe('raw sensitive literals never ride source ids', () => {
     expect(result.showPopup).toBe(true);
   });
 });
+
+describe('the secret-class safety signal survives the id fingerprint check', () => {
+  // Guards a silent safety-killer: the id check reuses redactSecrets as its
+  // detector, and the secret_in_prompt ref TEXT contains the word "secret". If
+  // the redaction patterns are ever widened to match it, every secret-class
+  // safety popup would silently become source_invalid_fallback — this fixture
+  // is the only thing that would catch that.
+  it('a secret_in_prompt absence fact passes validity and anchors the popup', () => {
+    const secretSignal = absence('sec1', {
+      sourceIds: ['absence:secret_in_prompt@implementation'],
+      guidanceKind: 'safety_or_confirmation',
+      factRole: 'safety_confirmation_support',
+      privacyClass: 'requires_confirmation',
+      riskLevel: 'sensitive_authority_risky',
+    });
+    const result = applyPromptEnhancementSourceMixV1([secretSignal]);
+    expect(result.showPopup).toBe(true);
+    expect(result.classifiedFacts.find((c) => c.fact.factId === 'sec1')!.selectionRole).toBe('selected_required');
+    expect(result.profile).toBe('source_a_heavy_high_risk');
+  });
+});
