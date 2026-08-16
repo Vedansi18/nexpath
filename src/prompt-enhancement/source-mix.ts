@@ -167,6 +167,10 @@ export function normalizePromptEnhancementTier1FieldsV1(
   const sourceAnchorScope = fact.sourceAnchorScope ?? DEFAULT_ANCHOR_BY_SOURCE_TYPE[fact.sourceType];
   // Anchor rules: a MACHINE fact never makes a project or practice claim, and an
   // UNANCHORED env fact has its certainty suppressed — uncertainty phrasing only.
+  // Deliberately NO project_root+practice clamp here: practice wording on an env
+  // fact exists only via behaviour-corroborated tier-P promotion (the registry's
+  // policy assignment), and this seam cannot distinguish a promoted fact from a
+  // smuggled one — a clamp would undo legitimate tier-P wording. Do not add one.
   if (sourceAnchorScope === 'machine_environment' && PROJECT_KNOWLEDGE_POLICIES.has(claimVerbPolicy)) {
     claimVerbPolicy = 'must_phrase_as_possibility';
   }
