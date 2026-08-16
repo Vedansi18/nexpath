@@ -249,6 +249,27 @@ with no way to know it never happened.
 
 Back-references are not the problem. A back-reference to something no earlier item established is.
 
+Then check the SHAPE of the plan, and correct anything that is off:
+
+- Did the grouping actually group? One group per point means you decided nothing. Points that belong
+  to the same piece of work — the same file, the same feature, steps that only make sense together —
+  go in ONE group. A request of five small clauses is usually two or three prompts, not five.
+  Collapse them and re-slice.
+- Is the first item the user's WHOLE original request, start to end — not a slice of it? The first
+  prompt is what they typed, unchanged: item 0's originalSliceRef is { start: 0, end: full length }.
+  If it is anything narrower, widen it.
+- Does summaryData.remainingTaskCount equal the number of items AFTER the first? Count the list and
+  set it to that number.
+- Does every TASK item (first_task and every task) carry a complexity — "not_complex", "complex" or
+  "highly_complex" — and does every confirmation and the closing recap carry complexity: null? A task
+  missing its complexity, or a confirmation/recap that carries one, is rejected.
+- Does every TASK item name a decompositionGroupId that is one of the groups you emitted (never empty),
+  and do confirmations and the recap carry decompositionGroupId: null? An id naming no group you
+  emitted is rejected.
+- The closing recap (a "wrap_up" item) exists if and only if MORE THAN THREE non-recap items sit
+  behind it. Four or more real prompts → add exactly ONE recap, as the last item; three or fewer → do
+  not add a recap at all.
+
 Fix what you find and return the corrected plan. Do not return a plan you already know is wrong.`;
 
 /**
@@ -278,6 +299,11 @@ A single JSON object:
   originalSliceRef  — { start, end } on task kinds; null on confirmations and on the closing recap.
                       On "first_task" it is the WHOLE original — start 0, end its full length —
                       because the first prompt is the request itself, not a slice of it
+  sourcePointRanges — [{ start, end }]  the ORIGINAL-TEXT positions of the points this item covers.
+                      These are OFFSET RANGES into the original (like originalSliceRef and
+                      promptDirectives) — NOT pointId values, and NOT strings. Use [] if none.
+  pointId / groupId — string identifiers you assign (e.g. "p1", "g1"); pointIds inside a group are
+                      those same string ids
   complexityReason  — on a task, how it could be silently wrong; on a confirmation, why THAT
                       confirmation applies
   roleLabel         — one of "fix" "review" "refactor" "plan" "build", or null. Never invent one:

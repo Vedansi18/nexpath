@@ -9,6 +9,11 @@ import {
 
 export const PROMPT_ENHANCEMENT_COST_PROVIDER_V1 = 'openai';
 export const PROMPT_ENHANCEMENT_COST_MODEL_V1 = 'gpt-4o-mini';
+// The sequence PLANNER (P1) alone runs a three-stage reasoning chain (inventory → group → slice) in one
+// structured call — heavier than the single-purpose classifier calls the shared constant was chosen for
+// (§6.2c). Owner-authorised (Hiren) to use a stronger-but-not-extremely-expensive model for THIS one call
+// only; every other call stays on the shared cost model above.
+export const PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_MODEL_V1 = 'gpt-4o';
 export const PROMPT_ENHANCEMENT_COST_PRICING_SOURCE_URL_V1 = 'https://developers.openai.com/api/docs/models/gpt-4o-mini';
 export const PROMPT_ENHANCEMENT_COST_PRICING_ACCESS_DATE_V1 = '2026-07-27';
 export const PROMPT_ENHANCEMENT_COST_PROCESSING_MODE_ASSUMPTION_V1 = 'standard_text_token_api';
