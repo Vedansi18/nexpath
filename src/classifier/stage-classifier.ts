@@ -59,10 +59,15 @@ export const DEBUG_EVIDENCE_FORMS = [
 ] as const;
 
 /**
- * The capability attach/reject conditions, presented to the model AS WRITTEN —
- * never paraphrased into keyword lists (a paraphrase reintroduces the exact
- * keyword-matching defect this observation replaces). The model only OBSERVES
- * which conditions the prompt meets; the registry decides every attachment.
+ * The capability attach/reject conditions, presented in their PROMPT-OBSERVABLE
+ * halves — never paraphrased into keyword lists (a paraphrase reintroduces the
+ * exact keyword-matching defect this observation replaces). Deliberate scoping,
+ * not abridgement: clauses about SYSTEM state (registry data, runtime surfaces,
+ * internal signal stores) are not observable from the user's prompt and are
+ * evaluated registry-side at attachment, where the FULL locked conditions apply;
+ * internal vocabulary is rendered in public-safe equivalents. The model only
+ * OBSERVES which conditions the prompt meets; the registry decides every
+ * attachment.
  */
 const CAPABILITY_OBSERVATION_BLOCK = [
   'CAPABILITY OBSERVATION — for each capability below, report it in "capability_candidates" ONLY when its',
@@ -71,11 +76,11 @@ const CAPABILITY_OBSERVATION_BLOCK = [
   '- capability.decomposition_candidate — Attach when: prompt has many points, broad scope, multiple subtasks, or likely handoff value. Do not attach when: tiny low-risk quick improvement without evidence of multiple bounded subtasks.',
   '- capability.confirmation_needed — Attach when: prompt has binary/affirmative confirmation needs, ambiguity, sensitive actions, high-risk changes, or missing acceptance facts. Do not attach as a generic "be careful" note when action-specific confirmation is required.',
   '- capability.adversarial_review — Attach when: review/deeper-inspection behavior is explicitly requested or source/risk evidence calls for challenge-oriented review. Do not force adversarial behavior into every review prompt.',
-  '- capability.project_grounding — Attach when: source facts, project facts, current files/modules/layers, established patterns, or user-requested grounding should shape the prompt. Do not fabricate files/APIs/modules or dump unbounded context.',
+  '- capability.project_grounding — Attach when: source facts, project facts, current files/modules/layers, established patterns, or user-requested grounding should shape the prompt. Do not fabricate files/APIs/modules, dump unbounded context, or expose raw private source text.',
   '- capability.verification_required — Attach when: tests/manual checks/regression/build/CI/contract/performance/security verification must be present. Do not attach as generic filler unrelated to the route.',
   '- capability.risk_or_rollback — Attach when: migration, dependency, deployment, production, data, destructive, rollback-heavy, compatibility, secrets/config, or incident-like work is present.',
   '- capability.reproduction_or_evidence_needed — Attach when: a debug prompt LACKS reproduction steps, logs, failing test details, environment, request/response samples, screenshots, metrics, or recent-change evidence. Do not attach to feature/maintenance/review as a root-cause instruction without debug evidence, and do not invent evidence.',
-  '- capability.behavior_preservation — Attach when: maintenance/refactor/cleanup/compatibility work should protect current behavior unless the user explicitly asks for behavior change. Do not attach to fresh feature work as a reason to suppress requested new behavior.',
+  '- capability.behavior_preservation — Attach when: maintenance/refactor/cleanup/compatibility work should protect current behavior unless the user explicitly asks for behavior change. Do not attach to fresh feature work as a reason to suppress requested new behavior, and do not treat behavior-preserving maintenance as generic polish.',
   '- capability.source_signal_guidance — Attach when: a current stage/absence signal, advisory/source signal, or relevant guidance should become a section in the prompt body.',
 ].join('\n');
 
