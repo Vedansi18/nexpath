@@ -59,6 +59,20 @@ export type PromptEnhancementClaimVerbPolicy =
   | 'do_not_render';
 
 /**
+ * WHAT the fact's knowledge is anchored to. Anchor shapes wording: a machine fact
+ * must never be worded as project architecture, a project fact never as user
+ * behaviour, and an unknown anchor suppresses certainty.
+ */
+export type PromptEnhancementSourceAnchorScope =
+  | 'machine_environment'
+  | 'project_root'
+  | 'session_behavior'
+  | 'longitudinal_user_behavior'
+  | 'current_prompt_scope'
+  | 'content_template_scope'
+  | 'unknown_anchor';
+
+/**
  * The fact's role in the composed body. Polarity routes it: a FALSE capability is
  * safety material (`safety_confirmation_support`), never project grounding.
  */
@@ -130,7 +144,16 @@ export interface PromptEnhancementGuidanceFact {
   renderPolicy: PromptEnhancementGuidanceRenderPolicy;
   riskLevel: 'none' | 'low' | 'medium' | 'high' | 'sensitive_authority_risky';
   safetyHooks: readonly string[];
-  privacyClass: 'public_safe' | 'local_private' | 'sensitive_ref_only' | 'do_not_render';
+  privacyClass:
+    | 'public_safe'
+    | 'local_private'
+    | 'sensitive_ref_only'
+    | 'do_not_render'
+    // The locked sensitivity treatments: generalize the wording, suppress the
+    // content, or route through confirmation — content gates honour all three.
+    | 'sensitive_generalize'
+    | 'sensitive_suppress'
+    | 'requires_confirmation';
   sanitizationState: 'not_applicable' | 'redacted_prompt_store' | 'prompt_derived_sanitized' | 'identity_only_event' | 'sensitive_ref_only' | 'unsafe_to_render';
   /**
    * Tier-1 evidence fields. Optional on the raw producer layer for compatibility;
@@ -147,6 +170,10 @@ export interface PromptEnhancementGuidanceFact {
    * (`sensitive_ref_only`) or unrenderable — those never cross with content.
    */
   evidence?: { readonly key: string; readonly value: string };
+  sourceAnchorScope?: PromptEnhancementSourceAnchorScope;
+  /** Monorepo/nested-root truth — must SURVIVE source mixing when present. */
+  anchoredRoot?: string;
+  projectShape?: string;
   /** Where the resolution actually happened — stamped at the boundary. */
   sourceRuntimePath?:
     | 'local_static'

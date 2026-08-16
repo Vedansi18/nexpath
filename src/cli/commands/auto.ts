@@ -218,7 +218,7 @@ export function buildPromptEnhancementGroundingRefsV1(store: Store, projectRoot:
   missingMemoryCandidateRefs: readonly string[];
   groundingTierByRef: Readonly<Record<string, GroundingCorroborationTier>>;
   groundingPolarityByRef: Readonly<Record<string, 'present' | 'false_capability' | 'unknown'>>;
-  groundingEvidenceByRef: Readonly<Record<string, { key: string; value: string; runtimePath: 'local_store' | 'local_read_model' | 'local_probe' }>>;
+  groundingEvidenceByRef: Readonly<Record<string, { key: string; value: string; runtimePath: 'local_store' | 'local_read_model' | 'local_probe'; anchorScope: 'machine_environment' | 'project_root' | 'session_behavior' | 'longitudinal_user_behavior' | 'current_prompt_scope' | 'content_template_scope' | 'unknown_anchor' }>>;
 } {
   // Corroboration tier per crossing env / RIGHT&GOOD ref — TYPED, never smuggled
   // inside the ref strings. The promotion machinery is the SAME function the
@@ -232,7 +232,7 @@ export function buildPromptEnhancementGroundingRefsV1(store: Store, projectRoot:
   // Caller-side EAGER resolution: the content each ref points at, resolved from the
   // same store-backed reads below and carried as a generic key/value beside the ref
   // — never inside it, and never via a callback seam into the enhancement engine.
-  const groundingEvidenceByRef: Record<string, { key: string; value: string; runtimePath: 'local_store' | 'local_read_model' | 'local_probe' }> = {};
+  const groundingEvidenceByRef: Record<string, { key: string; value: string; runtimePath: 'local_store' | 'local_read_model' | 'local_probe'; anchorScope: 'machine_environment' | 'project_root' | 'session_behavior' | 'longitudinal_user_behavior' | 'current_prompt_scope' | 'content_template_scope' | 'unknown_anchor' }> = {};
   let rightGoodProfileForPromotion: RightGoodProfile = {};
   const rightGoodWorkStyleEnvRuntimeRefs: string[] = [];
   try {
@@ -245,6 +245,7 @@ export function buildPromptEnhancementGroundingRefsV1(store: Store, projectRoot:
           key,
           value: `${signal.state}${signal.behaviourVerified ? ':behaviour_verified' : ':claimed'}`,
           runtimePath: 'local_read_model',
+          anchorScope: 'longitudinal_user_behavior',
         };
       }
     }
@@ -260,6 +261,7 @@ export function buildPromptEnhancementGroundingRefsV1(store: Store, projectRoot:
           key: trait,
           value: String(tv.value),
           runtimePath: 'local_read_model',
+          anchorScope: 'longitudinal_user_behavior',
         };
       }
     }
@@ -275,10 +277,13 @@ export function buildPromptEnhancementGroundingRefsV1(store: Store, projectRoot:
         groundingTierByRef[`hard_fact:${factKey}`] = corroborationTierForEnvFact(fact);
         groundingPolarityByRef[`hard_fact:${factKey}`] =
           fact.value === false ? 'false_capability' : fact.value === null ? 'unknown' : 'present';
+        // Every current probe fact is project-anchored (has_* / project_framework);
+        // machine-environment facts get their own anchor when such probes exist.
         groundingEvidenceByRef[`hard_fact:${factKey}`] = {
           key: factKey,
           value: String(fact.value),
           runtimePath: 'local_store',
+          anchorScope: 'project_root',
         };
       }
     }

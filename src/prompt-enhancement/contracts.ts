@@ -296,6 +296,14 @@ export interface PromptEnhancementSourceInputSnapshotV1 {
     readonly key: string;
     readonly value: string;
     readonly runtimePath: 'local_store' | 'local_read_model' | 'local_probe';
+    readonly anchorScope:
+      | 'machine_environment'
+      | 'project_root'
+      | 'session_behavior'
+      | 'longitudinal_user_behavior'
+      | 'current_prompt_scope'
+      | 'content_template_scope'
+      | 'unknown_anchor';
   }>>;
   sourceLabels: readonly {
     sourceRefId: string;

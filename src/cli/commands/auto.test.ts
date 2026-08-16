@@ -382,7 +382,7 @@ describe('buildPromptEnhancementGroundingRefsV1 — corroboration tiers', () => 
     expect(out.groundingPolarityByRef['hard_fact:package_manager']).toBe('unknown');
     // The resolved VALUES cross typed beside the refs, stamped with where the
     // resolution happened.
-    expect(out.groundingEvidenceByRef['hard_fact:has_test_runner']).toEqual({ key: 'has_test_runner', value: 'true', runtimePath: 'local_store' });
+    expect(out.groundingEvidenceByRef['hard_fact:has_test_runner']).toEqual({ key: 'has_test_runner', value: 'true', runtimePath: 'local_store', anchorScope: 'project_root' });
     expect(out.groundingEvidenceByRef['hard_fact:has_backups']!.value).toBe('false');
     expect(out.groundingEvidenceByRef['hard_fact:package_manager']!.value).toBe('null');
   });

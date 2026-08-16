@@ -337,3 +337,37 @@ describe('caller-side eager resolution (the generic key/value payload)', () => {
     expect(mistakeFact.sourceRuntimePath).toBe('local_read_model');
   });
 });
+
+// ── Sensitive Source A: the signal is selectable, the literal never crosses ───
+
+describe('sensitive source separation (secret-class signals)', () => {
+  it('a secret_in_prompt ref gets the locked treatment: confirmation-routed, safety role, label-only wording, hooked', () => {
+    const fact = buildPromptEnhancementGuidanceFactsV1(
+      requestWithSignals({ normalizedStageAbsenceSignalRefs: ['absence:secret_in_prompt@implementation'] } as never),
+    )[0];
+    expect(fact.privacyClass).toBe('requires_confirmation');
+    expect(fact.factRole).toBe('safety_confirmation_support');
+    expect(fact.claimVerbPolicy).toBe('source_label_only');
+    expect(fact.riskLevel).toBe('sensitive_authority_risky');
+    expect(fact.safetyHooks).toContain('pe_ar9_sensitive_source');
+    expect(fact.guidanceKind).toBe('safety_or_confirmation');
+  });
+
+  it('confirmation-routed and suppressed classes never cross with content; crossing values are defensively redacted', () => {
+    const resolved = { key: 'k', value: 'v' };
+    expect(evidenceForGuidanceFact('requires_confirmation', 'not_applicable', resolved)).toBeUndefined();
+    expect(evidenceForGuidanceFact('sensitive_suppress', 'not_applicable', resolved)).toBeUndefined();
+    const secretValue = { key: 'k', value: 'token sk-abc123def456ghi789jkl012mno345' };
+    const crossed = evidenceForGuidanceFact('local_private', 'not_applicable', secretValue);
+    expect(crossed?.value).toContain('[REDACTED');
+    expect(crossed?.value).not.toContain('sk-abc123def456ghi789jkl012mno345');
+  });
+
+  it('an ordinary absence ref keeps the required-survivor treatment', () => {
+    const fact = buildPromptEnhancementGuidanceFactsV1(
+      requestWithSignals({ normalizedStageAbsenceSignalRefs: ['absence:test_creation@implementation'] } as never),
+    )[0];
+    expect(fact.privacyClass).toBe('public_safe');
+    expect(fact.factRole).toBe('required_source_signal_survivor');
+  });
+});

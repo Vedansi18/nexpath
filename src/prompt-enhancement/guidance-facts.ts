@@ -1,5 +1,6 @@
 import type { PromptEnhancementPrepareRequestV1 } from './contracts.js';
 import { ENV_FACT_CORROBORATOR } from '../env/env-tier-promotion.js';
+import { redactSecrets } from '../store/redact.js';
 import type {
   PromptEnhancementGuidanceFact,
   PromptEnhancementGuidancePriority,
@@ -63,8 +64,14 @@ export function evidenceForGuidanceFact(
 ): { readonly key: string; readonly value: string } | undefined {
   if (!resolved) return undefined;
   if (privacyClass === 'do_not_render' || privacyClass === 'sensitive_ref_only') return undefined;
+  // The locked sensitivity treatments: suppressed and confirmation-routed facts
+  // never cross with content (the SIGNAL crosses, the literal does not);
+  // sensitive_generalize content crosses for generalized wording downstream.
+  if (privacyClass === 'sensitive_suppress' || privacyClass === 'requires_confirmation') return undefined;
   if (sanitizationState === 'unsafe_to_render' || sanitizationState === 'sensitive_ref_only') return undefined;
-  return { key: resolved.key, value: resolved.value };
+  // Defensive redaction on every crossing value: a secret-shaped literal never
+  // crosses raw — the fingerprint crosses instead. Idempotent on clean values.
+  return { key: resolved.key, value: redactSecrets(resolved.value) };
 }
 
 export function buildPromptEnhancementGuidanceFactsV1(
@@ -127,23 +134,27 @@ export function buildPromptEnhancementGuidanceFactsV1(
   // Source A — required survivors. Stage/absence signals shown in the popup are
   // transform-rule-4/5/9 floors ("source/signal guidance in a shown popup"): must survive.
   for (const ref of signals.normalizedStageAbsenceSignalRefs) {
+    // A sensitive Source A record separates SIGNAL from LITERAL: the signal is
+    // selectable, generated guidance stays generalized safety wording, and the
+    // rendering routes through confirmation — never the raw literal.
+    const isSensitiveSource = ref.includes('secret_in_prompt');
     facts.push({
       factId: nextId('signal'),
       sourceType: 'absence_signal',
       sourceIds: [ref],
-      guidanceKind: 'missing_practice',
+      guidanceKind: isSensitiveSource ? 'safety_or_confirmation' : 'missing_practice',
       suggestedActionKind: 'no_action_render_context_only',
       targetFamily: 'family_agnostic',
       targetSectionKind: 'source_signal_guidance',
       sourceEvidenceState: 'strong',
       sourceOriginScope: 'current_prompt',
-      claimVerbPolicy: 'must_phrase_as_source_signal',
-      factRole: 'required_source_signal_survivor',
+      claimVerbPolicy: isSensitiveSource ? 'source_label_only' : 'must_phrase_as_source_signal',
+      factRole: isSensitiveSource ? 'safety_confirmation_support' : 'required_source_signal_survivor',
       priority: 'required_survivor',
       renderPolicy: 'render_as_section',
-      riskLevel: 'low',
-      safetyHooks: [],
-      privacyClass: 'public_safe',
+      riskLevel: isSensitiveSource ? 'sensitive_authority_risky' : 'low',
+      safetyHooks: isSensitiveSource ? ['pe_ar9_sensitive_source'] : [],
+      privacyClass: isSensitiveSource ? 'requires_confirmation' : 'public_safe',
       sanitizationState: 'not_applicable',
       requiredBecause: 'source_signal_guidance_shown_in_popup',
       publicCopySafe: true,
@@ -237,6 +248,7 @@ export function buildPromptEnhancementGuidanceFactsV1(
       sanitizationState: 'not_applicable',
       evidence: evidenceForGuidanceFact('local_private', 'not_applicable', resolved),
       sourceRuntimePath: resolved?.runtimePath,
+      sourceAnchorScope: resolved?.anchorScope,
       publicCopySafe: true,
     });
   }
@@ -267,6 +279,7 @@ export function buildPromptEnhancementGuidanceFactsV1(
         sanitizationState: 'identity_only_event',
         evidence: evidenceForGuidanceFact('local_private', 'identity_only_event', mistakeResolved),
         sourceRuntimePath: mistakeResolved?.runtimePath,
+        sourceAnchorScope: mistakeResolved?.anchorScope,
         publicCopySafe: true,
       });
       continue;
@@ -303,6 +316,7 @@ export function buildPromptEnhancementGuidanceFactsV1(
       sanitizationState: 'identity_only_event',
       evidence: evidenceForGuidanceFact('local_private', 'identity_only_event', profileResolved),
       sourceRuntimePath: profileResolved?.runtimePath,
+      sourceAnchorScope: profileResolved?.anchorScope,
       registerRoleSource: 'profile_register',
       publicCopySafe: true,
     });

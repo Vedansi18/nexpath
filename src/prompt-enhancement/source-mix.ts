@@ -1,10 +1,12 @@
 import type { PromptEnhancementPrepareRequestV1 } from './contracts.js';
+import { redactSecrets } from '../store/redact.js';
 import type {
   PromptEnhancementGuidanceFact,
   PromptEnhancementGuidanceSourceType,
   PromptEnhancementSourceOriginScope,
   PromptEnhancementClaimVerbPolicy,
   PromptEnhancementFactRole,
+  PromptEnhancementSourceAnchorScope,
 } from './templates/section-plan.js';
 
 /**
@@ -116,6 +118,20 @@ const DEFAULT_POLICY_BY_SOURCE_TYPE: Record<PromptEnhancementGuidanceSourceType,
   prompt_derived_fact: 'must_phrase_as_possibility',
 };
 
+const DEFAULT_ANCHOR_BY_SOURCE_TYPE: Record<PromptEnhancementGuidanceSourceType, PromptEnhancementSourceAnchorScope> = {
+  stage_transition: 'current_prompt_scope',
+  absence_signal: 'current_prompt_scope',
+  content_template_record: 'content_template_scope',
+  content_template_runtime_fact: 'content_template_scope',
+  persistent_missing_signal_memory: 'longitudinal_user_behavior',
+  // An env fact without a boundary-stamped anchor is UNANCHORED — its certainty
+  // is suppressed below, per the anchor rule.
+  hard_fact: 'unknown_anchor',
+  right_good_pattern: 'longitudinal_user_behavior',
+  work_style_fact: 'longitudinal_user_behavior',
+  prompt_derived_fact: 'current_prompt_scope',
+};
+
 function defaultFactRole(fact: PromptEnhancementGuidanceFact): PromptEnhancementFactRole {
   if (laneFor(fact) === 'source_a') {
     return fact.priority === 'required_survivor' ? 'required_source_signal_survivor' : 'supporting_missing_practice';
@@ -148,10 +164,20 @@ export function normalizePromptEnhancementTier1FieldsV1(
   // Served rows are provenance only — never practice proof, never instruction prose.
   const served = sourceOriginScope === 'served_variant_identity';
   if (served) claimVerbPolicy = 'source_label_only';
+  const sourceAnchorScope = fact.sourceAnchorScope ?? DEFAULT_ANCHOR_BY_SOURCE_TYPE[fact.sourceType];
+  // Anchor rules: a MACHINE fact never makes a project or practice claim, and an
+  // UNANCHORED env fact has its certainty suppressed — uncertainty phrasing only.
+  if (sourceAnchorScope === 'machine_environment' && PROJECT_KNOWLEDGE_POLICIES.has(claimVerbPolicy)) {
+    claimVerbPolicy = 'must_phrase_as_possibility';
+  }
+  if (fact.sourceType === 'hard_fact' && sourceAnchorScope === 'unknown_anchor' && PROJECT_KNOWLEDGE_POLICIES.has(claimVerbPolicy)) {
+    claimVerbPolicy = 'must_phrase_as_possibility';
+  }
   return {
     ...fact,
     sourceOriginScope,
     claimVerbPolicy,
+    sourceAnchorScope,
     factRole: fact.factRole ?? (served ? 'served_variant_provenance_only' : defaultFactRole(fact)),
   };
 }
@@ -170,7 +196,11 @@ function isValidFact(fact: PromptEnhancementGuidanceFact): boolean {
   return (
     fact.sourceIds.length > 0 &&
     fact.privacyClass !== 'do_not_render' &&
-    fact.sanitizationState !== 'unsafe_to_render'
+    fact.sanitizationState !== 'unsafe_to_render' &&
+    // Ids must be stable keys or redacted fingerprints, NEVER a raw sensitive
+    // literal — a secret-shaped id invalidates the fact, which rides the existing
+    // invalid-source rejection (rerun/skip with reason), the locked downgrade path.
+    fact.sourceIds.every((id) => redactSecrets(id) === id)
   );
 }
 

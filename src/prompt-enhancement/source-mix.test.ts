@@ -229,10 +229,13 @@ describe('tier-1 evidence fields at the mix seam', () => {
       'original_point_inventory',
     ] as const;
     for (const scope of scopes) {
+      // Anchored to project_root so this table tests the ORIGIN-SCOPE gates purely;
+      // the unanchored-env certainty clamp has its own fixture below.
       const probe = fact({
         factId: `s-${scope}`,
         sourceType: 'hard_fact',
         sourceOriginScope: scope,
+        sourceAnchorScope: 'project_root',
         claimVerbPolicy: 'may_state_as_project_capability',
       });
       const result = applyPromptEnhancementSourceMixV1([absence('a1'), probe]);
@@ -301,5 +304,61 @@ describe('suppression persists once facts carry content', () => {
     const result = applyPromptEnhancementSourceMixV1([absence('a1'), suppressedWithContent]);
     expect(result.renderedFacts.map((f) => f.factId)).not.toContain('sup1');
     expect(result.classifiedFacts.find((c) => c.fact.factId === 'sup1')).toBeUndefined();
+  });
+});
+
+// ── Anchor rules and the raw-literal id boundary ──────────────────────────────
+
+describe('anchor scope at the mix seam', () => {
+  it('a machine-anchored fact never makes a project or practice claim — clamped to possibility', () => {
+    const machineFact = fact({
+      factId: 'm1',
+      sourceType: 'hard_fact',
+      sourceAnchorScope: 'machine_environment',
+      claimVerbPolicy: 'may_state_as_project_capability',
+    });
+    const result = applyPromptEnhancementSourceMixV1([absence('a1'), machineFact]);
+    expect(result.classifiedFacts.find((c) => c.fact.factId === 'm1')!.fact.claimVerbPolicy)
+      .toBe('must_phrase_as_possibility');
+  });
+
+  it('an UNANCHORED env fact has its certainty suppressed — uncertainty phrasing only', () => {
+    const unanchored = fact({
+      factId: 'u1',
+      sourceType: 'hard_fact',
+      claimVerbPolicy: 'may_state_as_project_capability',
+    });
+    const result = applyPromptEnhancementSourceMixV1([absence('a1'), unanchored]);
+    const entry = result.classifiedFacts.find((c) => c.fact.factId === 'u1')!;
+    expect(entry.fact.sourceAnchorScope).toBe('unknown_anchor');
+    expect(entry.fact.claimVerbPolicy).toBe('must_phrase_as_possibility');
+  });
+
+  it('anchoredRoot / projectShape metadata SURVIVES normalization and mixing', () => {
+    const monorepoFact = fact({
+      factId: 'r1',
+      sourceType: 'hard_fact',
+      sourceAnchorScope: 'project_root',
+      anchoredRoot: 'packages/api',
+      projectShape: 'monorepo',
+    });
+    const result = applyPromptEnhancementSourceMixV1([absence('a1'), monorepoFact]);
+    const entry = result.classifiedFacts.find((c) => c.fact.factId === 'r1')!;
+    expect(entry.fact.anchoredRoot).toBe('packages/api');
+    expect(entry.fact.projectShape).toBe('monorepo');
+  });
+});
+
+describe('raw sensitive literals never ride source ids', () => {
+  it('a secret-shaped source id invalidates the fact — the invalid-source rejection path, not a render', () => {
+    const leaky = absence('leak1', { sourceIds: ['absence:secret sk-abc123def456ghi789jkl012mno345'] });
+    const result = applyPromptEnhancementSourceMixV1([leaky]);
+    expect(result.showPopup).toBe(false);
+    expect(result.profile).toBe('source_invalid_fallback');
+  });
+
+  it('a clean stable key passes the id check unchanged', () => {
+    const result = applyPromptEnhancementSourceMixV1([absence('a1')]);
+    expect(result.showPopup).toBe(true);
   });
 });
