@@ -470,7 +470,12 @@ describe('prompt-enhancement routing and taxonomy', () => {
     expect(result.contractDecision.promptReviewProcessingPolicy).toBe('eligible_for_initial_pe_route');
     expect(result.contractDecision.familyId).toBe('issue_debug');
     expect(result.contractDecision.primaryIntent).toBe('issue_debug.failing_test');
-    expect(result.contractDecision.capabilityOverlays).toEqual(result.selectedPreset.capabilityOverlays);
+    // Statics plus the dynamically attached reproduction/evidence request: a
+    // keyless route has no evidence observation, so the ask stays.
+    expect(result.contractDecision.capabilityOverlays).toEqual([
+      ...result.selectedPreset.capabilityOverlays,
+      'capability.reproduction_or_evidence_needed',
+    ]);
     expect(result.contractDecision.compoundPromptState).toBe('single_intent');
     expect(result.contractDecision.userPointCoverageRefs).toEqual(['user_point:1']);
     expect(result.contractDecision.nonPrimaryUserIntentHandling).toBe('covered_by_primary');
@@ -1298,5 +1303,55 @@ describe('registry capability decision on the keyed path (one attach + one rejec
     expect(isKnownCapabilityId('capability.made_up')).toBe(false);
     expect(isKnownDebugEvidenceForm('screenshots')).toBe(true);
     expect(isKnownDebugEvidenceForm('vibes')).toBe(false);
+  });
+});
+
+// ── De-nagging: the ask stays static, the carry goes dynamic ──
+
+describe('reproduction/evidence request — ask/carry pair for every debug intent', () => {
+  const SUPPLIED = ['reproduction_steps', 'logs', 'failing_test_details'] as const;
+
+  for (const intent of DEBUG_PRIMARY_INTENTS) {
+    it(`${intent}: asks when the observed evidence is thin`, () => {
+      const route = observedRoute(intent, [], []);
+      expect(route.capabilityOverlays).toContain('capability.reproduction_or_evidence_needed');
+    });
+
+    if (intent === 'issue_debug.reproduction_discovery') {
+      it(`${intent}: STILL asks when evidence is supplied — its whole purpose is asking`, () => {
+        const route = observedRoute(intent, [], [...SUPPLIED]);
+        expect(route.capabilityOverlays).toContain('capability.reproduction_or_evidence_needed');
+      });
+    } else {
+      it(`${intent}: carries supplied evidence without asking for it again`, () => {
+        const route = observedRoute(intent, [], [...SUPPLIED]);
+        expect(route.capabilityOverlays).not.toContain('capability.reproduction_or_evidence_needed');
+      });
+    }
+  }
+
+  it('only reproduction_discovery still attaches the request statically', () => {
+    for (const preset of PROMPT_ENHANCEMENT_TAXONOMY_PRESETS) {
+      expect(preset.capabilityOverlays.includes('capability.reproduction_or_evidence_needed')).toBe(
+        preset.primaryIntent === 'issue_debug.reproduction_discovery',
+      );
+    }
+  });
+
+  it('a keyless debug route on the cascade keeps asking — nothing is known to be supplied', () => {
+    const route = routePromptEnhancement(routeInput({}));
+    expect(route.familyId).toBe('issue_debug');
+    expect(route.capabilityOverlays).toContain('capability.reproduction_or_evidence_needed');
+  });
+
+  it('a keyed session falling through to the cascade still clears the ask on supplied evidence', () => {
+    const route = routePromptEnhancement(routeInput({
+      classifierPrimaryIntent: '',
+      classifierIntentConfidence: 0,
+      classifierCapabilityCandidates: [],
+      classifierDebugEvidencePresent: ['reproduction_steps', 'logs'],
+    }));
+    expect(route.familyId).toBe('issue_debug');
+    expect(route.capabilityOverlays).not.toContain('capability.reproduction_or_evidence_needed');
   });
 });

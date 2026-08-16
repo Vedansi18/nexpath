@@ -616,8 +616,16 @@ export const PROMPT_ENHANCEMENT_TAXONOMY_PRESETS: readonly PromptEnhancementTaxo
       family: 'issue_debug',
       baseSkeletonId: intent === 'issue_debug.reproduction_discovery' ? 'skeleton-debug-reproduction-discovery' : 'skeleton-debug-base',
       requiredSections: DEBUG_INTENT_SECTIONS[intent].requiredSections,
+      // ASK stays static, CARRY goes dynamic: reproduction_discovery's whole
+      // purpose is asking for evidence, so the reproduction/evidence request
+      // attaches unconditionally there. Every other debug intent treats
+      // evidence as content the prompt supplies, and receives the request only
+      // from the registry's evidence-lacking rule — a user who pasted the
+      // trace, steps and failing test is not asked to capture them again.
       capabilityOverlays: [
-        'capability.reproduction_or_evidence_needed',
+        ...(intent === 'issue_debug.reproduction_discovery'
+          ? (['capability.reproduction_or_evidence_needed'] as const)
+          : []),
         'capability.verification_required',
         'capability.project_grounding',
         'capability.source_signal_guidance',
@@ -937,7 +945,14 @@ export function routePromptEnhancement(
 
   const intent = selectPrimaryIntent(normalized);
   const selectedPreset = presetForIntent(intent);
-  const capabilityOverlays = mergeCapabilities(selectedPreset.capabilityOverlays, normalized, input);
+  // The ask rule also governs the cascade's debug routes: a keyless session
+  // keeps the evidence request (nothing is known to be supplied), and a keyed
+  // session whose proposal fell through still benefits from its observation.
+  const capabilityOverlays = withDebugEvidenceAskRule(
+    mergeCapabilities(selectedPreset.capabilityOverlays, normalized, input),
+    selectedPreset,
+    input,
+  );
   const confidence = confidenceFor(normalized, input, intent);
   const reasonCodes = reasonCodesFor(normalized, input, intent, capabilityOverlays);
 
@@ -1029,7 +1044,11 @@ function buildRouteResultFromLlmDecision(
   // merge remains only where no observation channel exists.
   const capabilityOverlays = input.classifierCapabilityCandidates !== undefined
     ? [...new Set([...decideCapabilityOverlaysFromObservation(selectedPreset, input), ...decision.capabilities])]
-    : mergeCapabilities([...selectedPreset.capabilityOverlays, ...decision.capabilities], normalized, input);
+    : withDebugEvidenceAskRule(
+        mergeCapabilities([...selectedPreset.capabilityOverlays, ...decision.capabilities], normalized, input),
+        selectedPreset,
+        input,
+      );
   const noPopup = decision.ambiguityState === 'skip_no_useful_guidance';
   const fallbackMode: PromptEnhancementRouteFallbackMode = noPopup ? 'skip_no_popup' : 'none';
   const reasonCodes = ['llm_route_decision_accepted'];
@@ -1718,11 +1737,29 @@ function decideCapabilityOverlaysFromObservation(
       capabilities.add(candidate);
     }
   }
+  return withDebugEvidenceAskRule(capabilities, selectedPreset, input);
+}
+
+/**
+ * The registry's evidence-lacking rule for the reproduction/evidence request:
+ * on a debug-shaped route, attach it unless the classifier OBSERVED the prompt
+ * already supplying enough evidence forms. An absent observation channel
+ * (no-key session) reads as "not known to be supplied", so those routes keep
+ * asking — only an observed-supplied prompt clears the request. This consults
+ * the evidence observation, never prompt keywords, so it lives outside the
+ * demoted keyword decider on every path.
+ */
+function withDebugEvidenceAskRule(
+  capabilities: ReadonlySet<PromptEnhancementCapabilityId> | readonly PromptEnhancementCapabilityId[],
+  selectedPreset: PromptEnhancementTaxonomyPreset,
+  input: PromptEnhancementRouteInput,
+): readonly PromptEnhancementCapabilityId[] {
+  const merged = new Set(capabilities);
   const debugShaped = selectedPreset.family === 'issue_debug' || selectedPreset.primaryIntent === 'planning.debugging_plan';
   if (debugShaped && (input.classifierDebugEvidencePresent ?? []).length < DEBUG_EVIDENCE_SUPPLIED_FLOOR) {
-    capabilities.add('capability.reproduction_or_evidence_needed');
+    merged.add('capability.reproduction_or_evidence_needed');
   }
-  return [...capabilities];
+  return [...merged];
 }
 
 /**
