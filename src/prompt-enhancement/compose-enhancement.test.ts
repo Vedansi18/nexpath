@@ -134,7 +134,9 @@ describe('prompt-enhancement composer and deterministic fallback', () => {
     const result = composePromptEnhancementBody({
       enhancementId: 'enh-phase5-artifact-metadata',
       originalPromptText: 'Fix the importCsv parser and verify the regression.',
-      sectionPlanningResult: planningResult(),
+      // A resolved route: the metadata this test pins is the resolved-path
+      // shape (the under-evidenced path adds the gate-reason why-help ref).
+      sectionPlanningResult: planningResult({ route: { promptText: 'Fix this failing test: the importCsv parser regression.' } }),
     });
 
     expect(result.currentBody.composerRunId).toBe('enh-phase5-artifact-metadata:composer:default:1');

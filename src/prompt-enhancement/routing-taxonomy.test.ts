@@ -344,7 +344,6 @@ describe('prompt-enhancement routing and taxonomy', () => {
     ['Performance review search endpoint', 'review_verification', 'review.performance_review'],
     ['API contract review for checkout response', 'review_verification', 'review.api_contract_review'],
     ['Test review checkout specs', 'review_verification', 'review.test_review'],
-    ['Polish wording in this small label', 'quick_improvement', 'quick_improvement.local_polish_or_small_improvement'],
   ] as const)('routes %s to %s / %s', (promptText, expectedFamily, expectedIntent) => {
     const result = routePromptEnhancement(routeInput({
       routeDecisionId: `route-${expectedIntent}`,
@@ -696,12 +695,6 @@ describe('prompt-enhancement routing and taxonomy', () => {
       expectedFamily: 'planning_spec',
       expectedIntent: 'planning.task_breakdown',
       evidence: { recentPromptEvidenceRefs: ['recent-task:checkout-flow-known-target'] },
-    }],
-    ['make it better', {
-      promptText: 'make it better',
-      expectedFamily: 'quick_improvement',
-      expectedIntent: 'quick_improvement.local_polish_or_small_improvement',
-      evidence: { sourceFactRefs: ['source:local-polish:button-label-known'] },
     }],
     ['plan this', {
       promptText: 'plan this',
@@ -1479,33 +1472,32 @@ describe('evidence ladder resolution on every routing path', () => {
     expect(route.ladderResolution).toEqual({ state: 'resolved', resolvedByRung: 1 });
   });
 
-  it('rung 2: project/source facts resolve without a model', () => {
-    const route = routePromptEnhancement(routeInput({ ...bare, sourceFactRefs: ['env:fact'] }));
-    expect(route.ladderResolution).toEqual({ state: 'resolved', resolvedByRung: 2 });
+  it('deterministic evidence on rungs 2-5 is walked but cannot NAME a top route without a model', () => {
+    for (const evidence of [
+      { sourceFactRefs: ['env:fact'] },
+      { triggerKind: 'absence', firedKey: 'absence:debugging_observation_gap@implementation' },
+      { contentTemplateFactRefs: ['content:record'] },
+      { recentPromptEvidenceRefs: ['prompt:3'] },
+      { memoryFeedbackRefs: ['memory:signal'] },
+    ] as const) {
+      const route = routePromptEnhancement(routeInput({ ...bare, ...evidence }));
+      expect(route.ladderResolution).toEqual({ state: 'under_evidenced', rungsWalked: [1, 2, 3, 4, 5, 6] });
+    }
   });
 
-  it('rung 3: a current stage/absence signal resolves', () => {
+  it('a keyed DECLINE is authoritative: an empty proposal leaves the route under-evidenced even when a keyword branch matches', () => {
     const route = routePromptEnhancement(routeInput({
       ...bare,
-      triggerKind: 'absence',
-      firedKey: 'absence:debugging_observation_gap@implementation',
+      promptText: 'the payment.spec.ts failing test blocks ci',
+      classifierPrimaryIntent: '',
+      classifierIntentConfidence: 0.1,
+      classifierCapabilityCandidates: [],
+      classifierDebugEvidencePresent: [],
     }));
-    expect(route.ladderResolution).toEqual({ state: 'resolved', resolvedByRung: 3 });
-  });
-
-  it('rung 3: content-template evidence also resolves this rung — the lock names it here', () => {
-    const route = routePromptEnhancement(routeInput({ ...bare, contentTemplateFactRefs: ['content:record'] }));
-    expect(route.ladderResolution).toEqual({ state: 'resolved', resolvedByRung: 3 });
-  });
-
-  it('rung 4: recent prompt history resolves', () => {
-    const route = routePromptEnhancement(routeInput({ ...bare, recentPromptEvidenceRefs: ['prompt:3'] }));
-    expect(route.ladderResolution).toEqual({ state: 'resolved', resolvedByRung: 4 });
-  });
-
-  it('rung 5: persistent memory/feedback resolves', () => {
-    const route = routePromptEnhancement(routeInput({ ...bare, memoryFeedbackRefs: ['memory:signal'] }));
-    expect(route.ladderResolution).toEqual({ state: 'resolved', resolvedByRung: 5 });
+    // The cascade shape is untouched — the family still comes from the branch —
+    // but the popup decision reads the model's decline as the ladder outcome.
+    expect(route.primaryIntent).toBe('issue_debug.failing_test');
+    expect(route.ladderResolution).toEqual({ state: 'under_evidenced', rungsWalked: [1, 2, 3, 4, 5, 6] });
   });
 
   it('rung 6 never resolves alone: profile tie-breakers leave the route under-evidenced', () => {
@@ -1518,13 +1510,37 @@ describe('evidence ladder resolution on every routing path', () => {
     expect(route.ladderResolution).toEqual({ state: 'under_evidenced', rungsWalked: [1, 2, 3, 4, 5, 6] });
   });
 
-  it('the confidently-wrong terminal fallback now CARRIES the typed state — the guess is no longer silent', () => {
+  it('the terminal no longer asserts a family: "could not tell" is not "this is small"', () => {
     const route = routePromptEnhancement(routeInput(bare));
-    // Today the ambiguous start still lands on the terminal family (the
-    // dispositions change in the fallback-direction steps) — but downstream
-    // layers can now READ that the ladder did not resolve.
-    expect(route.primaryIntent).toBe('quick_improvement.local_polish_or_small_improvement');
+    expect(route.primaryIntent).not.toBe('quick_improvement.local_polish_or_small_improvement');
+    expect(route.reasonCodes).toContain('no_family_evidence_no_catch_all');
+    expect(route.routeConfidence).toBe('missing');
+    // The structural carrier for the gate's narrow exception body.
+    expect(route.primaryIntent).toBe('planning.spec_or_prd');
     expect(route.ladderResolution.state).toBe('under_evidenced');
+  });
+
+  it('evidence existing near an unmatched prompt does not resurrect the catch-all', () => {
+    const route = routePromptEnhancement(routeInput({
+      ...bare,
+      promptText: 'make it better',
+      sourceFactRefs: ['source:local-polish:button-label-known'],
+    }));
+    expect(route.primaryIntent).not.toBe('quick_improvement.local_polish_or_small_improvement');
+    expect(route.reasonCodes).toContain('no_family_evidence_no_catch_all');
+  });
+
+  it('quick_improvement is selected ON ITS MERITS through the decider', () => {
+    const route = routePromptEnhancement(routeInput({
+      ...bare,
+      promptText: 'Polish wording in this small label',
+      classifierPrimaryIntent: 'quick_improvement.local_polish_or_small_improvement',
+      classifierIntentConfidence: 0.9,
+      classifierCapabilityCandidates: [],
+      classifierDebugEvidencePresent: [],
+    }));
+    expect(route.primaryIntent).toBe('quick_improvement.local_polish_or_small_improvement');
+    expect(route.ladderResolution).toEqual({ state: 'resolved', resolvedByRung: 1 });
   });
 
   it('a hard-skip route still carries the state', () => {

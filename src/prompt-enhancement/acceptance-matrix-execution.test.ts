@@ -59,7 +59,7 @@ describe('R1 — eval-rule-3 acceptance-matrix execution (ui-owner release-check
   });
 
   it('HARD-FAIL GATE: a second real debug/feature prompt is also grounded (not skeleton)', async () => {
-    const result = await preparePromptEnhancement(request('Fix the failing payment test and explain the verification.'));
+    const result = await preparePromptEnhancement(request('Fix the failing payment test, the test failure blocks ci, and explain the verification.'));
     expect(result.disposition).toBe('show_current_body');
     expect(result.currentBody.sections.length).toBeGreaterThan(3);
     expect(result.currentBody.text).toContain('payment test');

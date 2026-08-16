@@ -468,7 +468,15 @@ describe('S2 done-when: no capabilities means no overlay', () => {
     // exactly those two — the state that was impossible before scoping, when every section carried
     // all four.
     const result = planPromptEnhancementSections({
-      routeResult: routePromptEnhancement(routeInput({ promptText: 'Rename the helper in utils.ts and keep the tests passing.' })),
+      routeResult: routePromptEnhancement(routeInput({
+        promptText: 'Rename the helper in utils.ts and keep the tests passing.',
+        // Selected on its merits through the decider — the unmatched-keyword
+        // terminal no longer asserts this family.
+        classifierPrimaryIntent: 'quick_improvement.local_polish_or_small_improvement',
+        classifierIntentConfidence: 0.9,
+        classifierCapabilityCandidates: [],
+        classifierDebugEvidencePresent: [],
+      })),
       sourceRefs: [sourceA, contentTemplateSourceB],
       guidanceFacts: [],
     });

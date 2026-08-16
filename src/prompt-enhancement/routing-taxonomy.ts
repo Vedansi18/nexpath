@@ -846,36 +846,27 @@ function walkEvidenceLadderV1(
   normalized: string,
 ): PromptEnhancementLadderResolutionV1 {
   const rungsWalked: number[] = [1];
+  // Keyed path: the classifier IS the ladder-walker — it consumed every rung.
+  // A non-empty proposal resolves the top route on rung 1; an EMPTY proposal
+  // WITH the observation channel present is an authoritative decline ("walked
+  // the ladder, nothing resolved"), so the route is under-evidenced even when
+  // a keyword branch would match — the model saw the same prompt and more
+  // evidence, and said no. The observation channel is the keyed marker: the
+  // boundary maps an ABSENT proposal to '' too, so '' alone must not read as
+  // a decline.
   if (input.classifierPrimaryIntent) return { state: 'resolved', resolvedByRung: 1 };
-  if (selectPrimaryIntent(normalized) !== 'quick_improvement.local_polish_or_small_improvement') {
+  if (input.classifierCapabilityCandidates !== undefined) {
+    return { state: 'under_evidenced', rungsWalked: [1, 2, 3, 4, 5, 6] };
+  }
+  // No-key path: only rung 1 (a matched branch) can NAME a top route —
+  // deterministic evidence on later rungs exists but cannot be fused into a
+  // family without a model, so those rungs are walked and recorded, never
+  // resolving. "The top route remains under-evidenced after the ladder" is
+  // about the ROUTE, not about evidence existing somewhere.
+  if (selectPrimaryIntent(normalized) !== null) {
     return { state: 'resolved', resolvedByRung: 1 };
   }
-  rungsWalked.push(2);
-  if (
-    (input.sourceFactRefs?.length ?? 0) > 0 ||
-    (input.runtimeEnvFactRefs?.length ?? 0) > 0 ||
-    (input.rightGoodWorkStyleRefs?.length ?? 0) > 0
-  ) {
-    return { state: 'resolved', resolvedByRung: 2 };
-  }
-  rungsWalked.push(3);
-  // Current stage/absence/advisory signals AND related content-template
-  // evidence — the lock names both on this rung. Ladder resolution is about
-  // evidence existing, not popup permission: a content-template-only route
-  // still cannot OPEN a popup (the Source-B-only gate below owns that).
-  if (
-    typeof input.firedKey === 'string' ||
-    input.triggerKind === 'stage_transition' ||
-    input.triggerKind === 'absence' ||
-    (input.contentTemplateFactRefs?.length ?? 0) > 0
-  ) {
-    return { state: 'resolved', resolvedByRung: 3 };
-  }
-  rungsWalked.push(4);
-  if ((input.recentPromptEvidenceRefs?.length ?? 0) > 0) return { state: 'resolved', resolvedByRung: 4 };
-  rungsWalked.push(5);
-  if ((input.memoryFeedbackRefs?.length ?? 0) > 0) return { state: 'resolved', resolvedByRung: 5 };
-  rungsWalked.push(6);
+  rungsWalked.push(2, 3, 4, 5, 6);
   return { state: 'under_evidenced', rungsWalked };
 }
 
@@ -1004,6 +995,36 @@ export function routePromptEnhancement(
   }
 
   const intent = selectPrimaryIntent(normalized);
+  if (intent === null) {
+    // No branch matched — the route asserts NO family. It carries the
+    // planning/confirmation-first structural shape so the gate's narrow
+    // high-risk exception has a body to render; the gate's default for the
+    // under-evidenced state is the skip.
+    const selectedPreset = presetForIntent('planning.spec_or_prd');
+    const capabilityOverlays = withDebugEvidenceAskRule(
+      mergeCapabilities(selectedPreset.capabilityOverlays, normalized, input),
+      selectedPreset,
+      input,
+    );
+    const reasonCodes = ['no_family_evidence_no_catch_all'];
+    return {
+      contractDecision: toContractDecision(input, selectedPreset, capabilityOverlays, evidenceRefs, reasonCodes, false, 'missing', 'none'),
+      selectedPreset,
+      familyId: selectedPreset.family,
+      primaryIntent: selectedPreset.primaryIntent,
+      secondaryIntentTags: [],
+      capabilityOverlays,
+      routeConfidence: 'missing',
+      fallbackMode: 'none',
+      routeEvidenceRefs: evidenceRefs,
+      ladderResolution,
+      reasonCodes,
+      noPopup: false,
+      usesSharedSignalEvidenceOnly: true,
+      usesPeOnlyClassifier: false,
+      usesOldStaticDecisionSessionMap: false,
+    };
+  }
   const selectedPreset = presetForIntent(intent);
   // The ask rule also governs the cascade's debug routes: a keyless session
   // keeps the evidence request (nothing is known to be supplied), and a keyed
@@ -1711,7 +1732,7 @@ function hasConflictingEvidence(input: PromptEnhancementRouteInput): boolean {
   });
 }
 
-function selectPrimaryIntent(normalized: string): PromptEnhancementPrimaryIntent {
+function selectPrimaryIntent(normalized: string): PromptEnhancementPrimaryIntent | null {
   // P3-G1: a clear build/implement intent must not be captured by an incidental broad
   // verb that merely NAMES the thing being built (e.g. "implement a code review tool",
   // "add audit logging", "here's the plan: build X"). Gate the broad review/audit/plan
@@ -1777,7 +1798,12 @@ function selectPrimaryIntent(normalized: string): PromptEnhancementPrimaryIntent
   if (hasAny(normalized, ['idea', 'explore', 'options'])) return 'feature.idea_discussion';
   if (hasAny(normalized, ['implement', 'build', 'add', 'create'])) return 'feature.fresh_implementation';
 
-  return 'quick_improvement.local_polish_or_small_improvement';
+  // The old terminal asserted quick_improvement for everything unmatched —
+  // treating "could not tell" as "this is small". A cascade that matched no
+  // branch asserts NOTHING; the route carries the typed under-evidenced state
+  // instead, and the popup decision applies the locked dispositions. The
+  // keyword gates above are untouched.
+  return null;
 }
 
 /**

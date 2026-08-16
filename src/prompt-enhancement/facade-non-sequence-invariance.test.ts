@@ -80,7 +80,7 @@ function request(overrides: Partial<PromptEnhancementPrepareRequestV1> = {}): Pr
     projectRoot: '/tmp/project',
     hostSurface: 'cli_stop_bridge',
     sourcePrompt: {
-      text: 'Fix the failing payment test and explain the verification.',
+      text: 'Fix the failing test in the payment flow and explain what caused it.',
       origin: 'user',
       capturedAt: 1,
       promptIndex: 1,
@@ -175,7 +175,7 @@ const corpus: { name: string; build: () => PromptEnhancementPrepareRequestV1 }[]
       request({
         requestId: 'facade-nonseq-b-explain',
         sourcePrompt: {
-          text: 'Fix the failing payment test and explain the verification.',
+          text: 'Fix the failing test in the payment flow and explain what caused it.',
           origin: 'user',
           capturedAt: 1,
           promptIndex: 1,
@@ -211,7 +211,7 @@ const corpus: { name: string; build: () => PromptEnhancementPrepareRequestV1 }[]
       request({
         requestId: 'facade-nonseq-d-nopopup-echo',
         sourcePrompt: {
-          text: 'Fix the failing payment test and explain the verification.',
+          text: 'Fix the failing test in the payment flow and explain what caused it.',
           origin: 'pe_generated_echo',
           capturedAt: 1,
           promptIndex: 1,

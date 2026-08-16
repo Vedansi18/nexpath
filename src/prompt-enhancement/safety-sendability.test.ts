@@ -744,6 +744,12 @@ describe('prompt-enhancement safety, privacy, and sendability validation', () =>
       originalPromptText: 'ફેલિંગ ટેસ્ટ તપાસો અને પુરાવો લખો.',
       route: {
         promptText: 'ફેલિંગ ટેસ્ટ તપાસો અને પુરાવો લખો.',
+        // Non-English wording matches no cascade branch; the classifier's
+        // proposal is how such prompts route in production.
+        classifierPrimaryIntent: 'issue_debug.failing_test',
+        classifierIntentConfidence: 0.9,
+        classifierCapabilityCandidates: [],
+        classifierDebugEvidencePresent: [],
       },
     });
     const editedBodyText = `${currentBody.text}\n\nGenerated direct instruction:\n- નિષ્ફળ ટેસ્ટ તપાસો, પુરાવો નોંધો, અને ચકાસણી લખો.`;
