@@ -376,6 +376,10 @@ describe('buildPromptEnhancementGroundingRefsV1 — corroboration tiers', () => 
     }
     // The ref strings themselves are unchanged (bare keys, as before this change).
     expect(out.sourceOnlyHardFactRefs.every((r) => r.split(':').length === 2)).toBe(true);
+    // Polarity crosses typed beside the tier: present / false_capability / unknown.
+    expect(out.groundingPolarityByRef['hard_fact:has_test_runner']).toBe('present');
+    expect(out.groundingPolarityByRef['hard_fact:has_backups']).toBe('false_capability');
+    expect(out.groundingPolarityByRef['hard_fact:package_manager']).toBe('unknown');
   });
 
   it('yields no refs and an empty tier map on an empty store (deterministic no-data fallback)', () => {
