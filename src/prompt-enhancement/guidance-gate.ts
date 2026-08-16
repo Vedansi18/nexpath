@@ -5,6 +5,7 @@ import type {
 } from './contracts.js';
 import type { PromptEnhancementGuidanceFact } from './templates/section-plan.js';
 import type { PromptEnhancementSourceMixResult } from './source-mix.js';
+import type { PromptEnhancementLadderResolutionV1 } from './taxonomy-ids.js';
 
 /**
  * DR2-G1 guidance gate (E2 / phase 2.3).
@@ -66,7 +67,16 @@ function show(bodyShape: PromptEnhancementBodyShape, gateReasonCode: string): Pr
 
 export function applyPromptEnhancementGuidanceGateV1(
   mix: PromptEnhancementSourceMixResult,
+  /**
+   * The routing layer's evidence-ladder outcome, flowed into THIS gate so the
+   * under-evidenced case rides the existing skip machinery — never a second
+   * gate or a parallel skip path. The locked dispositions for it (the skip
+   * default and the narrow high-risk exception) are the fallback-direction
+   * step and are wired here by that step; absent on the routeless replay path.
+   */
+  routeLadderResolution?: PromptEnhancementLadderResolutionV1,
 ): PromptEnhancementGuidanceGateDecision {
+  void routeLadderResolution;
   // The mixer already decided to skip (DR2-G1: no Source A survivor / Source-B-only /
   // invalid). Carry the reason; never fabricate a filler popup.
   if (!mix.showPopup || mix.requiredSurvivor === null) {

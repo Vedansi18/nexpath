@@ -20,6 +20,7 @@ import {
   type PromptEnhancementCapabilityId,
   DEBUG_EVIDENCE_FORMS,
   type DebugEvidenceForm,
+  type PromptEnhancementLadderResolutionV1,
 } from './taxonomy-ids.js';
 import { STAGES } from '../classifier/types.js';
 import type {
@@ -169,6 +170,12 @@ export interface PromptEnhancementRouteResult {
   routeEvidenceRefs: readonly string[];
   reasonCodes: readonly string[];
   noPopup: boolean;
+  /**
+   * The evidence-ladder outcome for this route — present on EVERY routing
+   * path, so "the ladder did not resolve" is a typed state downstream layers
+   * can read instead of a silently guessed family.
+   */
+  ladderResolution: PromptEnhancementLadderResolutionV1;
   // P3-G3 (narrowed claim): the deterministic route consumes shared-signal evidence
   // (firedKey / stage / absence) for gating, skip, and evidence decisions and uses NO
   // PE-only classifier or old DS map. It does NOT, however, fuse those signals into
@@ -822,23 +829,65 @@ export function isKnownDebugEvidenceForm(value: string): value is DebugEvidenceF
   return (DEBUG_EVIDENCE_FORMS as readonly string[]).includes(value);
 }
 
+/**
+ * Walk the locked evidence ladder IN ORDER before declaring under-evidenced.
+ * Rung 1 — explicit current-prompt evidence: on the keyed path the
+ * classifier's proposal (its decision is ladder-ordered by construction); on
+ * the no-key path a matched cascade branch. The bare explicit-word list is
+ * deliberately NOT rung-1 evidence — "make it better" contains explicit words
+ * and is the canonical ambiguous start. Rungs 2-5 are the deterministic
+ * evidence sources that exist without a model: project/source facts, current
+ * stage/absence signals, recent prompt history, persistent memory/feedback.
+ * Rung 6 (profile tie-breakers) is walked but can never resolve alone; rung 7
+ * is locked deferred — never walked, never solicited.
+ */
+function walkEvidenceLadderV1(
+  input: PromptEnhancementRouteInput,
+  normalized: string,
+): PromptEnhancementLadderResolutionV1 {
+  const rungsWalked: number[] = [1];
+  if (input.classifierPrimaryIntent) return { state: 'resolved', resolvedByRung: 1 };
+  if (selectPrimaryIntent(normalized) !== 'quick_improvement.local_polish_or_small_improvement') {
+    return { state: 'resolved', resolvedByRung: 1 };
+  }
+  rungsWalked.push(2);
+  if (
+    (input.sourceFactRefs?.length ?? 0) > 0 ||
+    (input.runtimeEnvFactRefs?.length ?? 0) > 0 ||
+    (input.rightGoodWorkStyleRefs?.length ?? 0) > 0
+  ) {
+    return { state: 'resolved', resolvedByRung: 2 };
+  }
+  rungsWalked.push(3);
+  if (typeof input.firedKey === 'string' || input.triggerKind === 'stage_transition' || input.triggerKind === 'absence') {
+    return { state: 'resolved', resolvedByRung: 3 };
+  }
+  rungsWalked.push(4);
+  if ((input.recentPromptEvidenceRefs?.length ?? 0) > 0) return { state: 'resolved', resolvedByRung: 4 };
+  rungsWalked.push(5);
+  if ((input.memoryFeedbackRefs?.length ?? 0) > 0) return { state: 'resolved', resolvedByRung: 5 };
+  rungsWalked.push(6);
+  return { state: 'under_evidenced', rungsWalked };
+}
+
 export function routePromptEnhancement(
   input: PromptEnhancementRouteInput,
   llmRouteDecision?: PromptEnhancementLlmRouteDecisionV1,
 ): PromptEnhancementRouteResult {
   const normalized = input.promptText.toLowerCase();
   const evidenceRefs = buildRouteEvidenceRefs(input);
+  const ladderResolution = walkEvidenceLadderV1(input, normalized);
   const origin = input.generatedOriginState ?? 'ordinary_user_prompt';
 
   if (origin !== 'ordinary_user_prompt' || input.oldDecisionSessionPayloadPresent === true) {
-    return noPopupResult(input, 'old_or_generated_origin_skip', evidenceRefs);
+    return noPopupResult(input, 'old_or_generated_origin_skip', evidenceRefs, ladderResolution);
   }
 
   if (input.degradedNoActionState !== 'none' || input.classifierState === 'degraded_no_fire') {
-    return noPopupResult(input, 'degraded_classifier_no_fire', evidenceRefs);
+    return noPopupResult(input, 'degraded_classifier_no_fire', evidenceRefs, ladderResolution);
   }
   if (isFirstTriggerBlocked(input.firstTriggerGateState)) {
-    return noPopupResult(input, 'first_trigger_gate_blocked_no_popup', evidenceRefs);
+    return noPopupResult(input, 'first_trigger_gate_blocked_no_popup', evidenceRefs, ladderResolution);
   }
 
   // E6: an accepted bounded LLM route decision overrides the deterministic keyword
@@ -857,7 +906,7 @@ export function routePromptEnhancement(
   // byte-untouched — low-confidence disposition belongs to the routing fallback
   // layer, which consumes the threaded confidence.
   if (input.classifierPrimaryIntent) {
-    return buildRouteResultFromClassifierIntent(input, input.classifierPrimaryIntent, normalized, evidenceRefs);
+    return buildRouteResultFromClassifierIntent(input, input.classifierPrimaryIntent, normalized, evidenceRefs, ladderResolution);
   }
 
   const hasSourceAIntent = hasExplicitRouteWords(normalized);
@@ -891,6 +940,7 @@ export function routePromptEnhancement(
       routeConfidence: 'weak_source_critical',
       fallbackMode: 'planning_first',
       routeEvidenceRefs: evidenceRefs,
+    ladderResolution,
       reasonCodes,
       noPopup: false,
       usesSharedSignalEvidenceOnly: true,
@@ -910,7 +960,7 @@ export function routePromptEnhancement(
       (input.sourceFactRefs?.length ?? 0) > 0
     );
   if (hasSourceBOnlyEvidence) {
-    return noPopupResult(input, 'source_b_only_cannot_open_popup', evidenceRefs);
+    return noPopupResult(input, 'source_b_only_cannot_open_popup', evidenceRefs, ladderResolution);
   }
 
   if (hasConflictingEvidence(input)) {
@@ -931,6 +981,7 @@ export function routePromptEnhancement(
       routeConfidence: 'conflicting',
       fallbackMode: 'planning_first',
       routeEvidenceRefs: evidenceRefs,
+    ladderResolution,
       reasonCodes,
       noPopup: false,
       usesSharedSignalEvidenceOnly: true,
@@ -940,7 +991,7 @@ export function routePromptEnhancement(
   }
 
   if (isWeakAmbiguousPrompt(normalized, input) || isUnsupportedShortSurfacePrompt(normalized, input) || isLowInformationPrompt(normalized, input)) {
-    return noPopupResult(input, 'ambiguous_weak_evidence_skip_no_popup', evidenceRefs);
+    return noPopupResult(input, 'ambiguous_weak_evidence_skip_no_popup', evidenceRefs, ladderResolution);
   }
 
   const intent = selectPrimaryIntent(normalized);
@@ -966,6 +1017,7 @@ export function routePromptEnhancement(
     routeConfidence: confidence,
     fallbackMode: 'none',
     routeEvidenceRefs: evidenceRefs,
+    ladderResolution,
     reasonCodes,
     noPopup: false,
     usesSharedSignalEvidenceOnly: true,
@@ -974,7 +1026,7 @@ export function routePromptEnhancement(
   };
 }
 
-function noPopupResult(input: PromptEnhancementRouteInput, reasonCode: string, evidenceRefs: readonly string[]): PromptEnhancementRouteResult {
+function noPopupResult(input: PromptEnhancementRouteInput, reasonCode: string, evidenceRefs: readonly string[], ladderResolution: PromptEnhancementLadderResolutionV1): PromptEnhancementRouteResult {
   const selectedPreset = presetForIntent('quick_improvement.local_polish_or_small_improvement');
   const routeConfidence = reasonCode.includes('high_risk') ? 'weak_source_critical' : 'weak_low_risk';
   return {
@@ -987,6 +1039,7 @@ function noPopupResult(input: PromptEnhancementRouteInput, reasonCode: string, e
     routeConfidence,
     fallbackMode: 'skip_no_popup',
     routeEvidenceRefs: evidenceRefs,
+    ladderResolution,
     reasonCodes: [reasonCode],
     noPopup: true,
     usesSharedSignalEvidenceOnly: true,
@@ -1008,6 +1061,9 @@ function buildRouteResultFromClassifierIntent(
   intent: PromptEnhancementPrimaryIntent,
   normalized: string,
   evidenceRefs: readonly string[],
+  // With a non-empty proposal the walk resolved on rung 1 by construction;
+  // passed through so every path carries the same computed state.
+  ladderResolution: PromptEnhancementLadderResolutionV1,
 ): PromptEnhancementRouteResult {
   const selectedPreset = presetForIntent(intent);
   const capabilityOverlays = decideCapabilityOverlaysFromObservation(selectedPreset, input);
@@ -1023,6 +1079,7 @@ function buildRouteResultFromClassifierIntent(
     routeConfidence,
     fallbackMode: 'none',
     routeEvidenceRefs: evidenceRefs,
+    ladderResolution,
     reasonCodes,
     noPopup: false,
     usesSharedSignalEvidenceOnly: true,
@@ -1053,6 +1110,10 @@ function buildRouteResultFromLlmDecision(
   const fallbackMode: PromptEnhancementRouteFallbackMode = noPopup ? 'skip_no_popup' : 'none';
   const reasonCodes = ['llm_route_decision_accepted'];
   const routeConfidence: PromptEnhancementRouteConfidence = 'partial';
+  // An accepted route decision IS explicit rung-1 evidence resolved — the
+  // decision was made from the prompt's own natural language under its
+  // acceptance rules, so the walk's no-key reading is superseded here.
+  const ladderResolution: PromptEnhancementLadderResolutionV1 = { state: 'resolved', resolvedByRung: 1 };
   return {
     contractDecision: toContractDecision(input, selectedPreset, capabilityOverlays, evidenceRefs, reasonCodes, noPopup, routeConfidence, fallbackMode, true, decision.ambiguityState),
     selectedPreset,
@@ -1063,6 +1124,7 @@ function buildRouteResultFromLlmDecision(
     routeConfidence,
     fallbackMode,
     routeEvidenceRefs: evidenceRefs,
+    ladderResolution,
     reasonCodes,
     noPopup,
     usesSharedSignalEvidenceOnly: true,

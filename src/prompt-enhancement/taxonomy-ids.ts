@@ -178,3 +178,19 @@ export const DEBUG_EVIDENCE_FORMS = [
 ] as const;
 
 export type DebugEvidenceForm = (typeof DEBUG_EVIDENCE_FORMS)[number];
+
+/**
+ * The routing layer's evidence-ladder outcome. Every routing path used to name
+ * a concrete family even when nothing supported it; this state makes "the
+ * ladder did not resolve" REPRESENTABLE — a typed routing outcome, not a
+ * family. Rungs 1-5 can resolve (explicit prompt evidence · project/source
+ * facts · current signals · recent history · persistent memory/feedback);
+ * rung 6 (profile tie-breakers) is walked but never resolves alone; rung 7
+ * (coding-agent response context) is locked deferred and never walked. The
+ * section planner and the popup decision consume the state; the locked
+ * dispositions for the under-evidenced case belong to the routing fallback
+ * layer, not to this type.
+ */
+export type PromptEnhancementLadderResolutionV1 =
+  | { state: 'resolved'; resolvedByRung: 1 | 2 | 3 | 4 | 5 }
+  | { state: 'under_evidenced'; rungsWalked: readonly number[] };

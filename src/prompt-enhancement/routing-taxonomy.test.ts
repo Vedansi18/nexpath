@@ -1450,3 +1450,89 @@ describe('restoration: the eight review subtypes and two dead planning subtypes 
     expect(route.familyId).toBe('review_verification');
   });
 });
+
+// ── The evidence ladder: under-evidenced is a typed routing state, not a guessed family ──
+
+describe('evidence ladder resolution on every routing path', () => {
+  const bare = {
+    promptText: 'make it better please',
+    firedKey: undefined,
+    effectiveFiredSource: undefined,
+    selectedQualifyingAbsence: undefined,
+    absenceGateReason: undefined,
+    triggerKind: 'manual',
+  } as const;
+
+  it('rung 1 (keyed): a classifier proposal resolves the ladder', () => {
+    const route = routePromptEnhancement(routeInput({
+      ...bare,
+      classifierPrimaryIntent: 'review.security_review',
+      classifierIntentConfidence: 0.9,
+      classifierCapabilityCandidates: [],
+      classifierDebugEvidencePresent: [],
+    }));
+    expect(route.ladderResolution).toEqual({ state: 'resolved', resolvedByRung: 1 });
+  });
+
+  it('rung 1 (no-key): a matched cascade branch is explicit prompt evidence', () => {
+    const route = routePromptEnhancement(routeInput({ ...bare, promptText: 'the payment.spec.ts failing test blocks ci' }));
+    expect(route.ladderResolution).toEqual({ state: 'resolved', resolvedByRung: 1 });
+  });
+
+  it('rung 2: project/source facts resolve without a model', () => {
+    const route = routePromptEnhancement(routeInput({ ...bare, sourceFactRefs: ['env:fact'] }));
+    expect(route.ladderResolution).toEqual({ state: 'resolved', resolvedByRung: 2 });
+  });
+
+  it('rung 3: a current stage/absence signal resolves', () => {
+    const route = routePromptEnhancement(routeInput({
+      ...bare,
+      triggerKind: 'absence',
+      firedKey: 'absence:debugging_observation_gap@implementation',
+    }));
+    expect(route.ladderResolution).toEqual({ state: 'resolved', resolvedByRung: 3 });
+  });
+
+  it('rung 4: recent prompt history resolves', () => {
+    const route = routePromptEnhancement(routeInput({ ...bare, recentPromptEvidenceRefs: ['prompt:3'] }));
+    expect(route.ladderResolution).toEqual({ state: 'resolved', resolvedByRung: 4 });
+  });
+
+  it('rung 5: persistent memory/feedback resolves', () => {
+    const route = routePromptEnhancement(routeInput({ ...bare, memoryFeedbackRefs: ['memory:signal'] }));
+    expect(route.ladderResolution).toEqual({ state: 'resolved', resolvedByRung: 5 });
+  });
+
+  it('rung 6 never resolves alone: profile tie-breakers leave the route under-evidenced', () => {
+    const route = routePromptEnhancement(routeInput({ ...bare, profileTieBreakerRefs: ['profile:role'] }));
+    expect(route.ladderResolution.state).toBe('under_evidenced');
+  });
+
+  it('the rungs are walked IN ORDER, rung 7 never walked', () => {
+    const route = routePromptEnhancement(routeInput(bare));
+    expect(route.ladderResolution).toEqual({ state: 'under_evidenced', rungsWalked: [1, 2, 3, 4, 5, 6] });
+  });
+
+  it('the confidently-wrong terminal fallback now CARRIES the typed state — the guess is no longer silent', () => {
+    const route = routePromptEnhancement(routeInput(bare));
+    // Today the ambiguous start still lands on the terminal family (the
+    // dispositions change in the fallback-direction steps) — but downstream
+    // layers can now READ that the ladder did not resolve.
+    expect(route.primaryIntent).toBe('quick_improvement.local_polish_or_small_improvement');
+    expect(route.ladderResolution.state).toBe('under_evidenced');
+  });
+
+  it('a hard-skip route still carries the state', () => {
+    const route = routePromptEnhancement(routeInput({ ...bare, classifierState: 'degraded_no_fire' }));
+    expect(route.reasonCodes).toContain('degraded_classifier_no_fire');
+    expect(route.ladderResolution.state).toBe('under_evidenced');
+  });
+
+  it('an accepted LLM route decision is resolved rung-1 evidence', () => {
+    const route = routePromptEnhancement(
+      routeInput(bare),
+      { familyId: 'planning_spec', primaryIntent: 'planning.task_breakdown', capabilities: [], ambiguityState: 'clear' } as never,
+    );
+    expect(route.ladderResolution).toEqual({ state: 'resolved', resolvedByRung: 1 });
+  });
+});

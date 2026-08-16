@@ -242,7 +242,8 @@ async function prepare(
   const guidanceFacts = buildPromptEnhancementGuidanceFactsV1(request);
   const resolvedFacts = resolvePromptEnhancementSourceConflictsV1(guidanceFacts).facts;
   const sourceMix = applyPromptEnhancementSourceMixV1(resolvedFacts, request.userPreferenceContext.levelState);
-  const guidanceGate = applyPromptEnhancementGuidanceGateV1(sourceMix);
+  // The route's ladder outcome flows into the SAME gate — no parallel skip path.
+  const guidanceGate = applyPromptEnhancementGuidanceGateV1(sourceMix, route.ladderResolution);
   // F1 (send-block fix 2026-08-07): an ACTION never re-decides popup existence. The popup the
   // action came from already exists — its route/no-popup decision was made at PREPARE (possibly
   // via the E6 LLM route-rescue above, which is gated to prepare only). Re-running the gate here
