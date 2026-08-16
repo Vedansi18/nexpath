@@ -303,4 +303,9 @@ describe('the system prompt encodes the menu, the ladder order, and the locked c
   it('under-evidenced guidance: empty intent over a guess', () => {
     expect(STAGE_CLASSIFIER_SYSTEM_PROMPT).toContain('never guess a specific intent from thin evidence');
   });
+
+  it('rung 1 names review verbs as direct evidence — "review my diff" is decidable on rung 1 alone', () => {
+    const rungOne = STAGE_CLASSIFIER_SYSTEM_PROMPT.split('1. Explicit current-prompt words')[1]?.split('2.')[0] ?? '';
+    expect(rungOne).toContain('review verbs');
+  });
 });

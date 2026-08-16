@@ -20,6 +20,10 @@ import {
   type PromptEnhancementRouteInput,
 } from './routing-taxonomy.js';
 import { describePromptEnhancementSequencePlanV1 } from './routing-taxonomy.js';
+import {
+  PROMPT_ENHANCEMENT_ROUTABILITY_PROBES,
+  findPromptEnhancementRoutabilityGaps,
+} from './templates/registry.js';
 
 function routeInput(overrides: Partial<PromptEnhancementRouteInput>): PromptEnhancementRouteInput {
   return {
@@ -1353,5 +1357,96 @@ describe('reproduction/evidence request — ask/carry pair for every debug inten
     }));
     expect(route.familyId).toBe('issue_debug');
     expect(route.capabilityOverlays).not.toContain('capability.reproduction_or_evidence_needed');
+  });
+});
+
+// ── Restoration proof: a prompt reaches every intent individually ──
+
+describe('routability: a prompt reaches every one of the forty intents', () => {
+  it('the routability layer reports zero gaps', () => {
+    expect(findPromptEnhancementRoutabilityGaps()).toEqual([]);
+  });
+
+  it('exactly one probe per intent — forty, from the locks, no duplicates', () => {
+    expect(PROMPT_ENHANCEMENT_ROUTABILITY_PROBES.length).toBe(40);
+    const probed = new Set(PROMPT_ENHANCEMENT_ROUTABILITY_PROBES.map((probe) => probe.primaryIntent));
+    expect(probed.size).toBe(40);
+    for (const intent of PROMPT_ENHANCEMENT_PRIMARY_INTENTS) {
+      expect(probed.has(intent)).toBe(true);
+    }
+  });
+
+  it('base-family coverage: one probe per family routes to that family', () => {
+    const familyByPrefix: Record<string, string> = {
+      feature: 'feature_delivery',
+      planning: 'planning_spec',
+      issue_debug: 'issue_debug',
+      maintenance: 'maintenance_refactor',
+      review: 'review_verification',
+      quick_improvement: 'quick_improvement',
+    };
+    for (const [prefix, family] of Object.entries(familyByPrefix)) {
+      const probe = PROMPT_ENHANCEMENT_ROUTABILITY_PROBES.find((p) => p.primaryIntent.startsWith(`${prefix}.`));
+      expect(probe).toBeDefined();
+      const route = routePromptEnhancement(routeInput({
+        promptText: probe!.promptText,
+        firedKey: undefined,
+        classifierPrimaryIntent: probe!.primaryIntent,
+        classifierIntentConfidence: 0.9,
+        classifierCapabilityCandidates: [],
+        classifierDebugEvidencePresent: [],
+      }));
+      expect(route.familyId).toBe(family);
+    }
+  });
+});
+
+describe('restoration: the eight review subtypes and two dead planning subtypes are INDIVIDUALLY selectable (labelled ids 12-21 phrasings)', () => {
+  const restorationIntents = [
+    'review.security_review',
+    'review.code_or_diff_review',
+    'review.architecture_review',
+    'review.test_review',
+    'review.requirements_fit_review',
+    'review.verification_request',
+    'review.api_contract_review',
+    'review.performance_review',
+    'planning.rollout_release_plan',
+    'planning.migration_plan',
+  ] as const;
+
+  for (const intent of restorationIntents) {
+    it(`${intent}: its labelled phrasing routes to the EXACT subtype`, () => {
+      const probe = PROMPT_ENHANCEMENT_ROUTABILITY_PROBES.find((p) => p.primaryIntent === intent);
+      expect(probe).toBeDefined();
+      const route = routePromptEnhancement(routeInput({
+        promptText: probe!.promptText,
+        firedKey: undefined,
+        classifierPrimaryIntent: probe!.primaryIntent,
+        classifierIntentConfidence: 0.9,
+        classifierCapabilityCandidates: [],
+        classifierDebugEvidencePresent: [],
+      }));
+      expect(route.noPopup).toBe(false);
+      expect(route.primaryIntent).toBe(intent);
+      // A generic review absorbing a required subtype is an explicit locked
+      // FAILURE condition — the subtype must arrive as itself.
+      if (intent.startsWith('review.') && intent !== 'review.verification_request') {
+        expect(route.primaryIntent).not.toBe('review.verification_request');
+      }
+    });
+  }
+
+  it('"review my diff" reaches review.code_or_diff_review from the rung-1 proposal alone', () => {
+    const route = routePromptEnhancement(routeInput({
+      promptText: 'review my diff',
+      firedKey: undefined,
+      classifierPrimaryIntent: 'review.code_or_diff_review',
+      classifierIntentConfidence: 0.9,
+      classifierCapabilityCandidates: [],
+      classifierDebugEvidencePresent: [],
+    }));
+    expect(route.primaryIntent).toBe('review.code_or_diff_review');
+    expect(route.familyId).toBe('review_verification');
   });
 });
