@@ -99,8 +99,8 @@ describe('corroboration tier for grounding (the boundary vocabulary)', () => {
     expect(corroborationTierForRightGood(signal)).toBe('uncorroborated');
   });
 
-  it('a wrong_bad signal reads uncorroborated', () => {
-    const signal = profile({ test_creation: 'wrong_bad' })['test_creation']!;
+  it('a mistake-state signal reads uncorroborated', () => {
+    const signal = profile({ test_creation: 'mistake' })['test_creation']!;
     expect(corroborationTierForRightGood(signal)).toBe('uncorroborated');
   });
 });

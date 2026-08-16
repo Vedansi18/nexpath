@@ -206,6 +206,8 @@ export type AutoPromptEnhancementConsumerV1 = (
  * param-event log is read ONCE and reused for work-style + channels (RIGHT&GOOD keeps its own read; its
  * `computeRightGoodProfile` is not exported). NB: env facts map to `sourceOnlyHardFactRefs`; runtime context is
  * already carried by the request's agent-mode/permission fields, so it is not duplicated here.
+ * `groundingTierByRef` = typed corroboration tier per crossing env / RIGHT&GOOD ref
+ * (promoted_practice_P / capability / uncorroborated) — carried beside the refs, never inside them.
  */
 export function buildPromptEnhancementGroundingRefsV1(store: Store, projectRoot: string, signalKeys: readonly string[]): {
   rightGoodWorkStyleEnvRuntimeRefs: readonly string[];
