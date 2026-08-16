@@ -102,8 +102,8 @@ describe('importHistoricalPrompts', () => {
   // even when timestamp order contradicts file order. Recency reads (newest first)
   // must return the chronologically newest history first. The whole fixture runs
   // through the CLAUDE_CONFIG_DIR override (the harness points it at a temp dir),
-  // and also asserts the import's riders: exact imported count, retro param events
-  // visible, and zero advisories fired by the import itself.
+  // and also asserts the import's riders: exact imported count and zero advisories
+  // fired by the import itself.
   it('imports in true chronological order by row timestamps, across files', async () => {
     const projDir = setupProjDir(tmpDir);
 
