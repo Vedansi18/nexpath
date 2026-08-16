@@ -10,8 +10,10 @@ import {
   parseStageClassifierReply,
   buildStageClassifierUserMessage,
   applyReleaseGuard,
+  DEBUG_EVIDENCE_FORMS,
 } from './stage-classifier.js';
 import type { StageClassifierResult } from './stage-classifier.js';
+import { PROMPT_ENHANCEMENT_PRIMARY_INTENTS } from '../prompt-enhancement/routing-taxonomy.js';
 
 // A mock chat client that returns `content` and (optionally) captures the request.
 function mockClient(content: string, capture?: (req: { model: string; messages: { role: string; content: string }[] }) => void): OpenAI {
@@ -211,5 +213,94 @@ describe('stage-classifier — user message', () => {
     });
     expect(msg).toContain('Nature: beginner');
     expect(msg).toContain('non-technical');
+  });
+});
+
+// ── The intent proposal + observations ride the SAME parked call ──────────────
+
+describe('intent + observation reply fields (soft-parsed)', () => {
+  const baseReply = {
+    stage: 'Implementation',
+    stage_confidence: 0.9,
+    signals_present: [],
+    signals_absent: ['test_creation'],
+    fire_decision_session: true,
+    selected_signal_key: 'test_creation',
+    reason: 'test',
+  };
+
+  it('parses a valid intent proposal with confidence, evidence, and capability observations', () => {
+    const parsed = parseStageClassifierReply(JSON.stringify({
+      ...baseReply,
+      primary_intent: 'issue_debug.failing_test',
+      intent_confidence: 0.85,
+      debug_evidence_present: ['failing_test_details', 'logs'],
+      capability_candidates: ['capability.verification_required'],
+    }));
+    expect(parsed.primaryIntent).toBe('issue_debug.failing_test');
+    expect(parsed.intentConfidence).toBe(0.85);
+    expect(parsed.debugEvidencePresent).toEqual(['failing_test_details', 'logs']);
+    expect(parsed.capabilityCandidates).toEqual(['capability.verification_required']);
+  });
+
+  it('an intent outside the 40-intent menu degrades to empty — never an invented intent', () => {
+    const parsed = parseStageClassifierReply(JSON.stringify({
+      ...baseReply,
+      primary_intent: 'made_up.family_intent',
+      intent_confidence: 0.9,
+    }));
+    expect(parsed.primaryIntent).toBe('');
+  });
+
+  it('an old-shape reply without the new fields still parses the stage (soft defaults)', () => {
+    const parsed = parseStageClassifierReply(JSON.stringify(baseReply));
+    expect(parsed.stage).toBe('implementation');
+    expect(parsed.primaryIntent).toBe('');
+    expect(parsed.intentConfidence).toBe(0);
+    expect(parsed.debugEvidencePresent).toEqual([]);
+    expect(parsed.capabilityCandidates).toEqual([]);
+  });
+
+  it('unknown evidence forms and capability ids are filtered, valid ones kept', () => {
+    const parsed = parseStageClassifierReply(JSON.stringify({
+      ...baseReply,
+      debug_evidence_present: ['screenshots', 'vibes', 'metrics'],
+      capability_candidates: ['capability.risk_or_rollback', 'capability.invented'],
+    }));
+    expect(parsed.debugEvidencePresent).toEqual(['screenshots', 'metrics']);
+    expect(parsed.capabilityCandidates).toEqual(['capability.risk_or_rollback']);
+  });
+});
+
+describe('the system prompt encodes the menu, the ladder order, and the locked conditions', () => {
+  it('carries the FULL 40-intent menu', () => {
+    for (const intent of PROMPT_ENHANCEMENT_PRIMARY_INTENTS) {
+      expect(STAGE_CLASSIFIER_SYSTEM_PROMPT).toContain(`- ${intent}`);
+    }
+  });
+
+  it('encodes the ladder ORDER with the rung-6 reconciliation and the rung-7 deferral', () => {
+    expect(STAGE_CLASSIFIER_SYSTEM_PROMPT).toContain('ladder IN ORDER');
+    expect(STAGE_CLASSIFIER_SYSTEM_PROMPT).toContain('ONLY as weak tie-breakers');
+    expect(STAGE_CLASSIFIER_SYSTEM_PROMPT).toContain('Never weight mood over an explicit error');
+    expect(STAGE_CLASSIFIER_SYSTEM_PROMPT).toContain('never solicit it and never weigh it');
+  });
+
+  it('presents the capability attach conditions as written, and the full evidence enumeration', () => {
+    expect(STAGE_CLASSIFIER_SYSTEM_PROMPT).toContain('a debug prompt LACKS reproduction steps');
+    expect(STAGE_CLASSIFIER_SYSTEM_PROMPT).toContain('Do not reduce these conditions to keyword matching');
+    for (const form of DEBUG_EVIDENCE_FORMS) {
+      expect(STAGE_CLASSIFIER_SYSTEM_PROMPT).toContain(form);
+    }
+  });
+
+  it('the output schema names the four new fields', () => {
+    for (const field of ['primary_intent', 'intent_confidence', 'debug_evidence_present', 'capability_candidates']) {
+      expect(STAGE_CLASSIFIER_SYSTEM_PROMPT).toContain(`"${field}"`);
+    }
+  });
+
+  it('under-evidenced guidance: empty intent over a guess', () => {
+    expect(STAGE_CLASSIFIER_SYSTEM_PROMPT).toContain('never guess a specific intent from thin evidence');
   });
 });
