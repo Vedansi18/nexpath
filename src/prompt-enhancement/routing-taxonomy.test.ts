@@ -1493,6 +1493,11 @@ describe('evidence ladder resolution on every routing path', () => {
     expect(route.ladderResolution).toEqual({ state: 'resolved', resolvedByRung: 3 });
   });
 
+  it('rung 3: content-template evidence also resolves this rung — the lock names it here', () => {
+    const route = routePromptEnhancement(routeInput({ ...bare, contentTemplateFactRefs: ['content:record'] }));
+    expect(route.ladderResolution).toEqual({ state: 'resolved', resolvedByRung: 3 });
+  });
+
   it('rung 4: recent prompt history resolves', () => {
     const route = routePromptEnhancement(routeInput({ ...bare, recentPromptEvidenceRefs: ['prompt:3'] }));
     expect(route.ladderResolution).toEqual({ state: 'resolved', resolvedByRung: 4 });

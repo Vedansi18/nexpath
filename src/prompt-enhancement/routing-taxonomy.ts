@@ -859,7 +859,16 @@ function walkEvidenceLadderV1(
     return { state: 'resolved', resolvedByRung: 2 };
   }
   rungsWalked.push(3);
-  if (typeof input.firedKey === 'string' || input.triggerKind === 'stage_transition' || input.triggerKind === 'absence') {
+  // Current stage/absence/advisory signals AND related content-template
+  // evidence — the lock names both on this rung. Ladder resolution is about
+  // evidence existing, not popup permission: a content-template-only route
+  // still cannot OPEN a popup (the Source-B-only gate below owns that).
+  if (
+    typeof input.firedKey === 'string' ||
+    input.triggerKind === 'stage_transition' ||
+    input.triggerKind === 'absence' ||
+    (input.contentTemplateFactRefs?.length ?? 0) > 0
+  ) {
     return { state: 'resolved', resolvedByRung: 3 };
   }
   rungsWalked.push(4);
