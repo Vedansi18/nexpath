@@ -288,3 +288,18 @@ describe('unknown capability facts and grounding caps', () => {
     expect(result.classifiedFacts.find((c) => c.fact.factId === 'h1')!.selectionRole).toBe('selected_supporting');
   });
 });
+
+describe('suppression persists once facts carry content', () => {
+  it('a conflict-suppressed fact WITH resolved evidence stays suppressed — content does not resurrect it', () => {
+    const suppressedWithContent = fact({
+      factId: 'sup1',
+      sourceType: 'right_good_pattern',
+      priority: 'suppressed',
+      renderPolicy: 'suppress_with_reason',
+      evidence: { key: 'test_creation', value: 'right_good:behaviour_verified' },
+    });
+    const result = applyPromptEnhancementSourceMixV1([absence('a1'), suppressedWithContent]);
+    expect(result.renderedFacts.map((f) => f.factId)).not.toContain('sup1');
+    expect(result.classifiedFacts.find((c) => c.fact.factId === 'sup1')).toBeUndefined();
+  });
+});

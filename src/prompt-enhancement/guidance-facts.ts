@@ -51,6 +51,22 @@ export function claimVerbPolicyForCorroborationTier(
   }
 }
 
+/**
+ * The per-fact content gates, applied AT resolution: unrenderable or
+ * reference-only facts never cross with content — the gate travels with the
+ * fact, so eager delivery weakens nothing.
+ */
+export function evidenceForGuidanceFact(
+  privacyClass: PromptEnhancementGuidanceFact['privacyClass'],
+  sanitizationState: PromptEnhancementGuidanceFact['sanitizationState'],
+  resolved: { readonly key: string; readonly value: string } | undefined,
+): { readonly key: string; readonly value: string } | undefined {
+  if (!resolved) return undefined;
+  if (privacyClass === 'do_not_render' || privacyClass === 'sensitive_ref_only') return undefined;
+  if (sanitizationState === 'unsafe_to_render' || sanitizationState === 'sensitive_ref_only') return undefined;
+  return { key: resolved.key, value: resolved.value };
+}
+
 export function buildPromptEnhancementGuidanceFactsV1(
   request: PromptEnhancementPrepareRequestV1,
 ): readonly PromptEnhancementGuidanceFact[] {
@@ -196,6 +212,7 @@ export function buildPromptEnhancementGuidanceFactsV1(
     const polarity = signals.groundingPolarityByRef?.[ref] ?? 'present';
     const isFalseCapability = polarity === 'false_capability';
     const isUnknown = polarity === 'unknown';
+    const resolved = signals.groundingEvidenceByRef?.[ref];
     facts.push({
       factId: nextId('hard'),
       sourceType: 'hard_fact',
@@ -218,6 +235,8 @@ export function buildPromptEnhancementGuidanceFactsV1(
       safetyHooks: isFalseCapability ? ['pe_ar9_negative_capability'] : [],
       privacyClass: 'local_private',
       sanitizationState: 'not_applicable',
+      evidence: evidenceForGuidanceFact('local_private', 'not_applicable', resolved),
+      sourceRuntimePath: resolved?.runtimePath,
       publicCopySafe: true,
     });
   }
@@ -256,6 +275,7 @@ export function buildPromptEnhancementGuidanceFactsV1(
     // RIGHT&GOOD claim strength follows the boundary's corroboration tier: practice
     // wording only when behaviour-verified; work-style stays style metadata.
     const profileTier = signals.groundingTierByRef?.[ref] ?? 'uncorroborated';
+    const profileResolved = signals.groundingEvidenceByRef?.[ref];
     facts.push({
       factId: nextId('profile'),
       sourceType: isWorkStyle ? 'work_style_fact' : 'right_good_pattern',
@@ -278,6 +298,8 @@ export function buildPromptEnhancementGuidanceFactsV1(
       safetyHooks: [],
       privacyClass: 'local_private',
       sanitizationState: 'identity_only_event',
+      evidence: evidenceForGuidanceFact('local_private', 'identity_only_event', profileResolved),
+      sourceRuntimePath: profileResolved?.runtimePath,
       registerRoleSource: 'profile_register',
       publicCopySafe: true,
     });

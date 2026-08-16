@@ -199,7 +199,8 @@ export type AutoPromptEnhancementConsumerV1 = (
 /**
  * E1 / P1-G1 + AR6-G1(query) — PE grounding-evidence refs that the guidance-fact seam (E2) consumes.
  * Ref-ID convention (E2 parses these): `right_good:<key>` / `mistake:<key>` (RIGHT&GOOD non-neutral signals);
- * `work_style:<trait>:<value>` (set work-style traits); `hard_fact:<key>` (source-derived project env facts);
+ * `work_style:<trait>` (set work-style traits — the VALUE crosses typed in `groundingEvidenceByRef`,
+ * never inside the ref); `hard_fact:<key>` (source-derived project env facts);
  * `feedback:<category>:<count>` (scoped feedback); `memory:<signalKey>` (missing-signal memory candidates —
  * empty until E3 records evidence). `paramEventChannels` = the distinct detection channels present.
  * Every read is DEFENSIVE — an empty or failed read yields no refs (deterministic no-data fallback). The
@@ -217,6 +218,7 @@ export function buildPromptEnhancementGroundingRefsV1(store: Store, projectRoot:
   missingMemoryCandidateRefs: readonly string[];
   groundingTierByRef: Readonly<Record<string, GroundingCorroborationTier>>;
   groundingPolarityByRef: Readonly<Record<string, 'present' | 'false_capability' | 'unknown'>>;
+  groundingEvidenceByRef: Readonly<Record<string, { key: string; value: string; runtimePath: 'local_store' | 'local_read_model' | 'local_probe' }>>;
 } {
   // Corroboration tier per crossing env / RIGHT&GOOD ref — TYPED, never smuggled
   // inside the ref strings. The promotion machinery is the SAME function the
@@ -227,6 +229,10 @@ export function buildPromptEnhancementGroundingRefsV1(store: Store, projectRoot:
   // Polarity per env ref: a FALSE capability is safety material, never grounding —
   // the lane flips with polarity, so it must cross typed like the tier does.
   const groundingPolarityByRef: Record<string, 'present' | 'false_capability' | 'unknown'> = {};
+  // Caller-side EAGER resolution: the content each ref points at, resolved from the
+  // same store-backed reads below and carried as a generic key/value beside the ref
+  // — never inside it, and never via a callback seam into the enhancement engine.
+  const groundingEvidenceByRef: Record<string, { key: string; value: string; runtimePath: 'local_store' | 'local_read_model' | 'local_probe' }> = {};
   let rightGoodProfileForPromotion: RightGoodProfile = {};
   const rightGoodWorkStyleEnvRuntimeRefs: string[] = [];
   try {
@@ -235,6 +241,11 @@ export function buildPromptEnhancementGroundingRefsV1(store: Store, projectRoot:
       if (signal.state !== 'neutral') {
         rightGoodWorkStyleEnvRuntimeRefs.push(`${signal.state}:${key}`);
         groundingTierByRef[`${signal.state}:${key}`] = corroborationTierForRightGood(signal);
+        groundingEvidenceByRef[`${signal.state}:${key}`] = {
+          key,
+          value: `${signal.state}${signal.behaviourVerified ? ':behaviour_verified' : ':claimed'}`,
+          runtimePath: 'local_read_model',
+        };
       }
     }
   } catch { /* no RIGHT&GOOD grounding available — leave empty */ }
@@ -242,7 +253,15 @@ export function buildPromptEnhancementGroundingRefsV1(store: Store, projectRoot:
   try {
     const events = readParamEvents(store, projectRoot);
     for (const [trait, tv] of Object.entries(computeWorkStyleProfile(events))) {
-      if (tv.value !== null) rightGoodWorkStyleEnvRuntimeRefs.push(`work_style:${trait}:${tv.value}`);
+      if (tv.value !== null) {
+        // The trait VALUE crosses typed beside the ref — no longer smuggled inside it.
+        rightGoodWorkStyleEnvRuntimeRefs.push(`work_style:${trait}`);
+        groundingEvidenceByRef[`work_style:${trait}`] = {
+          key: trait,
+          value: String(tv.value),
+          runtimePath: 'local_read_model',
+        };
+      }
     }
     for (const channel of new Set(events.map((event) => event.channel))) paramEventChannels.push(channel);
   } catch { /* no param-event grounding available — leave empty */ }
@@ -256,6 +275,11 @@ export function buildPromptEnhancementGroundingRefsV1(store: Store, projectRoot:
         groundingTierByRef[`hard_fact:${factKey}`] = corroborationTierForEnvFact(fact);
         groundingPolarityByRef[`hard_fact:${factKey}`] =
           fact.value === false ? 'false_capability' : fact.value === null ? 'unknown' : 'present';
+        groundingEvidenceByRef[`hard_fact:${factKey}`] = {
+          key: factKey,
+          value: String(fact.value),
+          runtimePath: 'local_store',
+        };
       }
     }
   } catch { /* no source hard facts available — leave empty */ }
@@ -282,6 +306,7 @@ export function buildPromptEnhancementGroundingRefsV1(store: Store, projectRoot:
     missingMemoryCandidateRefs,
     groundingTierByRef,
     groundingPolarityByRef,
+    groundingEvidenceByRef,
   };
 }
 
@@ -449,6 +474,7 @@ export function buildPromptEnhancementRequestForAuto(input: {
       sourceOnlyHardFactRefs: grounding.sourceOnlyHardFactRefs,
       groundingTierByRef: grounding.groundingTierByRef,
       groundingPolarityByRef: grounding.groundingPolarityByRef,
+      groundingEvidenceByRef: grounding.groundingEvidenceByRef,
     },
     userPreferenceContext: {
       levelState: 'default',

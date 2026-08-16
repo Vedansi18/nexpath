@@ -286,6 +286,17 @@ export interface PromptEnhancementSourceInputSnapshotV1 {
    */
   groundingTierByRef?: Readonly<Record<string, 'promoted_practice_P' | 'capability' | 'uncorroborated'>>;
   groundingPolarityByRef?: Readonly<Record<string, 'present' | 'false_capability' | 'unknown'>>;
+  /**
+   * The caller-resolved CONTENT per crossing ref — a generic key/value pair plus
+   * where the resolution happened. Values come from the store-backed reads the
+   * boundary already performs; prompt-derived values arrive only through
+   * PE-EM-1-visible runtime extraction, never an eager boundary call.
+   */
+  groundingEvidenceByRef?: Readonly<Record<string, {
+    readonly key: string;
+    readonly value: string;
+    readonly runtimePath: 'local_store' | 'local_read_model' | 'local_probe';
+  }>>;
   sourceLabels: readonly {
     sourceRefId: string;
     label:

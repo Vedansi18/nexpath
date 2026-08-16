@@ -4,7 +4,7 @@ import type {
   PromptEnhancementSourceInputSnapshotV1,
   PromptEnhancementTriggerProvenanceV1,
 } from './contracts.js';
-import { buildPromptEnhancementGuidanceFactsV1 } from './guidance-facts.js';
+import { buildPromptEnhancementGuidanceFactsV1, evidenceForGuidanceFact } from './guidance-facts.js';
 
 // The builder reads request.sourceSignals + the review-moment trigger, so a focused
 // fixture carrying just those (cast to the full request type) keeps these tests on the
@@ -271,5 +271,55 @@ describe('negative capability paired with its live detector', () => {
     const absenceFact = facts.find((f) => f.sourceType === 'absence_signal')!;
     expect(absenceFact.sourceIds).not.toContain('hard_fact:has_test_runner');
     expect(absenceFact.safetyHooks).not.toContain('pe_ar9_negative_capability');
+  });
+});
+
+// ── Caller-resolved evidence crosses WITH the fact, gates travelling on it ────
+
+describe('caller-side eager resolution (the generic key/value payload)', () => {
+  it('env facts carry their resolved value and the runtime-path stamp', () => {
+    const fact = buildPromptEnhancementGuidanceFactsV1(
+      requestWithSignals({
+        sourceOnlyHardFactRefs: ['hard_fact:package_manager'],
+        groundingTierByRef: { 'hard_fact:package_manager': 'capability' },
+        groundingPolarityByRef: { 'hard_fact:package_manager': 'present' },
+        groundingEvidenceByRef: { 'hard_fact:package_manager': { key: 'package_manager', value: 'pnpm', runtimePath: 'local_store' } },
+      } as never),
+    )[0];
+    expect(fact.evidence).toEqual({ key: 'package_manager', value: 'pnpm' });
+    expect(fact.sourceRuntimePath).toBe('local_store');
+  });
+
+  it('RIGHT&GOOD and work-style facts carry typed values — the work-style value is no longer inside the ref', () => {
+    const facts = buildPromptEnhancementGuidanceFactsV1(
+      requestWithSignals({
+        rightGoodWorkStyleEnvRuntimeRefs: ['right_good:test_creation', 'work_style:iteration'],
+        groundingEvidenceByRef: {
+          'right_good:test_creation': { key: 'test_creation', value: 'right_good:behaviour_verified', runtimePath: 'local_read_model' },
+          'work_style:iteration': { key: 'iteration', value: 'small_steps', runtimePath: 'local_read_model' },
+        },
+      } as never),
+    );
+    const rightGood = facts.find((f) => f.sourceType === 'right_good_pattern')!;
+    const workStyle = facts.find((f) => f.sourceType === 'work_style_fact')!;
+    expect(rightGood.evidence?.value).toBe('right_good:behaviour_verified');
+    expect(workStyle.evidence).toEqual({ key: 'iteration', value: 'small_steps' });
+    expect(workStyle.sourceIds).toEqual(['work_style:iteration']);
+  });
+
+  it('facts without a resolved entry cross without evidence — never with invented content', () => {
+    const fact = buildPromptEnhancementGuidanceFactsV1(
+      requestWithSignals({ sourceOnlyHardFactRefs: ['hard_fact:has_test_runner'] } as never),
+    )[0];
+    expect(fact.evidence).toBeUndefined();
+  });
+
+  it('the content gates travel with the fact: unrenderable and reference-only classes never cross with content', () => {
+    const resolved = { key: 'k', value: 'v' };
+    expect(evidenceForGuidanceFact('do_not_render', 'not_applicable', resolved)).toBeUndefined();
+    expect(evidenceForGuidanceFact('sensitive_ref_only', 'not_applicable', resolved)).toBeUndefined();
+    expect(evidenceForGuidanceFact('local_private', 'unsafe_to_render', resolved)).toBeUndefined();
+    expect(evidenceForGuidanceFact('local_private', 'sensitive_ref_only', resolved)).toBeUndefined();
+    expect(evidenceForGuidanceFact('local_private', 'not_applicable', resolved)).toEqual(resolved);
   });
 });

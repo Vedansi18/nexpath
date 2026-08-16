@@ -140,6 +140,23 @@ export interface PromptEnhancementGuidanceFact {
   sourceOriginScope?: PromptEnhancementSourceOriginScope;
   claimVerbPolicy?: PromptEnhancementClaimVerbPolicy;
   factRole?: PromptEnhancementFactRole;
+  /**
+   * The fact's resolved CONTENT — a generic key/value pair, resolved by the CALLER
+   * at the source boundary (never by PE reaching back out) and carried WITH the
+   * fact so its gates travel with it. Absent when the fact is reference-only
+   * (`sensitive_ref_only`) or unrenderable — those never cross with content.
+   */
+  evidence?: { readonly key: string; readonly value: string };
+  /** Where the resolution actually happened — stamped at the boundary. */
+  sourceRuntimePath?:
+    | 'local_static'
+    | 'local_store'
+    | 'local_probe'
+    | 'local_read_model'
+    | 'runtime_llm_param_extract'
+    | 'runtime_llm_grounding'
+    | 'runtime_autogen'
+    | 'unknown';
   requiredBecause?: string;
   signalAliasResolution?: string;
   servedVariantRef?: string;
