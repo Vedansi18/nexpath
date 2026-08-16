@@ -758,8 +758,14 @@ export async function runAuto(
   if (!getProject(store, input.projectRoot)) {
     const name = resolveProjectName(input.projectRoot);
     upsertProject(store, { projectRoot: input.projectRoot, name });
-    await importHistoricalPrompts(store, input.projectRoot);
   }
+  // Historical backfill runs OUTSIDE the registration branch: `nexpath init` also
+  // registers the project, so a registration-gated call would never run for a user
+  // who ran init before their first prompt, and their pre-install history would be
+  // silently lost. The function self-gates on zero stored prompts (one cheap query),
+  // which is also the pinned edge: any prompt stored before this point skips the
+  // import entirely — it must stay ahead of the insertPrompt below.
+  await importHistoricalPrompts(store, input.projectRoot);
 
   // ── 0. Persist prompt text — runs before classifier so prompt is stored even if pipeline errors ──
   insertPrompt(store, { projectRoot: input.projectRoot, promptText: input.promptText, agent: ACTIVE_AGENT_ID });

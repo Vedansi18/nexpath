@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { PassThrough } from 'node:stream';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { openStore } from '../../store/db.js';
 import type { Store } from '../../store/db.js';
 
@@ -336,6 +339,62 @@ describe('buildFiredKey', () => {
     expect(new Set(keys).size).toBe(3);
 
     store.db.close();
+  });
+});
+
+// ── runAuto — historical backfill runs regardless of prior registration ───────
+
+describe('runAuto — historical prompt backfill', () => {
+  let store: Store;
+  let tmpDir: string;
+  let origEnv: string | undefined;
+  const projectRoot = '/test/init-first-project';
+
+  beforeEach(async () => {
+    store   = await openStore(':memory:');
+    tmpDir  = mkdtempSync(join(tmpdir(), 'nexpath-auto-hist-'));
+    origEnv = process.env['CLAUDE_CONFIG_DIR'];
+    process.env['CLAUDE_CONFIG_DIR'] = tmpDir;
+  });
+
+  afterEach(() => {
+    store.db.close();
+    rmSync(tmpDir, { recursive: true, force: true });
+    if (origEnv === undefined) delete process.env['CLAUDE_CONFIG_DIR'];
+    else process.env['CLAUDE_CONFIG_DIR'] = origEnv;
+  });
+
+  function writeHistoryJsonl(prompts: string[]): void {
+    const safeName = projectRoot.replace(/[^a-zA-Z0-9]/g, '-');
+    const projDir  = join(tmpDir, 'projects', safeName);
+    mkdirSync(projDir, { recursive: true });
+    const lines = prompts.map((content) => JSON.stringify({ type: 'user', message: { content } }));
+    writeFileSync(join(projDir, 'session.jsonl'), lines.join('\n') + '\n', 'utf8');
+  }
+
+  it('imports history on the first prompt even when the project was already registered (init-first)', async () => {
+    // `nexpath init` registers the project before any prompt exists. The backfill
+    // must still run on the first prompt — a registration-gated call never would.
+    upsertProject(store, { projectRoot, name: 'init-first-project' });
+    writeHistoryJsonl(['old prompt one', 'old prompt two']);
+
+    await runAuto(makeInput({ projectRoot, promptText: 'first live prompt' }), store);
+
+    const texts = getRecentPrompts(store, projectRoot, 10).map((r) => r.text);
+    expect(texts).toContain('old prompt one');
+    expect(texts).toContain('old prompt two');
+    expect(texts).toContain('first live prompt');
+  });
+
+  it('does not re-import on later prompts (self-gating guard)', async () => {
+    upsertProject(store, { projectRoot, name: 'init-first-project' });
+    writeHistoryJsonl(['old prompt one']);
+
+    await runAuto(makeInput({ projectRoot, promptText: 'first live prompt' }), store);
+    await runAuto(makeInput({ projectRoot, promptText: 'second live prompt' }), store);
+
+    const texts = getRecentPrompts(store, projectRoot, 20).map((r) => r.text);
+    expect(texts.filter((t) => t === 'old prompt one')).toHaveLength(1);
   });
 });
 

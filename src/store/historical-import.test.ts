@@ -72,6 +72,27 @@ describe('importHistoricalPrompts', () => {
     expect(rows[0].text).toBe('existing prompt');
   });
 
+  // 1b. PINNED EDGE — a prompt stored before the first import opportunity skips the
+  // entire import, permanently. There is no partial merge on later calls: the import
+  // is all-or-nothing on a zero-prompt store. (Editor-platform backfills must pin the
+  // same behaviour so the platforms stay consistent.)
+  it('pinned edge: one pre-existing prompt skips the entire import permanently — no partial merge on later calls', async () => {
+    insertPrompt(store, { projectRoot: PROJECT_ROOT, promptText: 'post-install prompt', agent: 'claude-code' });
+    const projDir = setupProjDir(tmpDir);
+    writeJsonl(projDir, 'session.jsonl', [
+      makeUserLine('history one'),
+      makeUserLine('history two'),
+      makeUserLine('history three'),
+    ]);
+
+    await importHistoricalPrompts(store, PROJECT_ROOT);
+    await importHistoricalPrompts(store, PROJECT_ROOT);
+
+    const rows = getRecentPrompts(store, PROJECT_ROOT, 10);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].text).toBe('post-install prompt');
+  });
+
   // 2. Guard — skips when projDir does not exist
   it('skips silently when project directory does not exist in Claude config', async () => {
     await importHistoricalPrompts(store, PROJECT_ROOT);
