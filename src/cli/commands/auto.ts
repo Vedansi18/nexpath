@@ -67,6 +67,13 @@ import { emitPromptEnhancementCostObservabilityV1 } from '../../prompt-enhanceme
 import { isPromptEnhancementSequenceShapedTextV1 } from '../../prompt-enhancement/routing-taxonomy.js';
 import { getSourceRealityAdaptersSnapshot } from '../../prompt-enhancement/source-reality.js';
 import { loadRightGoodProfile } from '../../classifier/right-good-aggregator.js';
+import type { RightGoodProfile } from '../../classifier/right-good-aggregator.js';
+import {
+  promoteEnvFactsToTierP,
+  corroborationTierForEnvFact,
+  corroborationTierForRightGood,
+  type GroundingCorroborationTier,
+} from '../../env/env-tier-promotion.js';
 import { computeWorkStyleProfile } from '../../classifier/work-style-traits.js';
 import { readParamEvents } from '../../telemetry/param-events.js';
 import { getProjectEnvFacts } from '../../store/env-facts.js';
@@ -200,17 +207,29 @@ export type AutoPromptEnhancementConsumerV1 = (
  * `computeRightGoodProfile` is not exported). NB: env facts map to `sourceOnlyHardFactRefs`; runtime context is
  * already carried by the request's agent-mode/permission fields, so it is not duplicated here.
  */
-function buildPromptEnhancementGroundingRefsV1(store: Store, projectRoot: string, signalKeys: readonly string[]): {
+export function buildPromptEnhancementGroundingRefsV1(store: Store, projectRoot: string, signalKeys: readonly string[]): {
   rightGoodWorkStyleEnvRuntimeRefs: readonly string[];
   paramEventChannels: readonly string[];
   sourceOnlyHardFactRefs: readonly string[];
   scopedFeedbackEvidenceRefs: readonly string[];
   missingMemoryCandidateRefs: readonly string[];
+  groundingTierByRef: Readonly<Record<string, GroundingCorroborationTier>>;
 } {
+  // Corroboration tier per crossing env / RIGHT&GOOD ref — TYPED, never smuggled
+  // inside the ref strings. The promotion machinery is the SAME function the
+  // decision-session engine consumes (`promoteEnvFactsToTierP`), fed from the
+  // store-backed facts this boundary already reads; the DS wiring is untouched.
+  // Claim wording is computed FROM this tier downstream — never assigned here.
+  const groundingTierByRef: Record<string, GroundingCorroborationTier> = {};
+  let rightGoodProfileForPromotion: RightGoodProfile = {};
   const rightGoodWorkStyleEnvRuntimeRefs: string[] = [];
   try {
-    for (const [key, signal] of Object.entries(loadRightGoodProfile(store, projectRoot))) {
-      if (signal.state !== 'neutral') rightGoodWorkStyleEnvRuntimeRefs.push(`${signal.state}:${key}`);
+    rightGoodProfileForPromotion = loadRightGoodProfile(store, projectRoot);
+    for (const [key, signal] of Object.entries(rightGoodProfileForPromotion)) {
+      if (signal.state !== 'neutral') {
+        rightGoodWorkStyleEnvRuntimeRefs.push(`${signal.state}:${key}`);
+        groundingTierByRef[`${signal.state}:${key}`] = corroborationTierForRightGood(signal);
+      }
     }
   } catch { /* no RIGHT&GOOD grounding available — leave empty */ }
   const paramEventChannels: string[] = [];
@@ -224,7 +243,13 @@ function buildPromptEnhancementGroundingRefsV1(store: Store, projectRoot: string
   const sourceOnlyHardFactRefs: string[] = [];
   try {
     const stored = getProjectEnvFacts(store, projectRoot);
-    if (stored) for (const factKey of Object.keys(stored.facts)) sourceOnlyHardFactRefs.push(`hard_fact:${factKey}`);
+    if (stored) {
+      const promoted = promoteEnvFactsToTierP(stored.facts, rightGoodProfileForPromotion);
+      for (const [factKey, fact] of Object.entries(promoted)) {
+        sourceOnlyHardFactRefs.push(`hard_fact:${factKey}`);
+        groundingTierByRef[`hard_fact:${factKey}`] = corroborationTierForEnvFact(fact);
+      }
+    }
   } catch { /* no source hard facts available — leave empty */ }
   const scopedFeedbackEvidenceRefs: string[] = [];
   try {
@@ -247,6 +272,7 @@ function buildPromptEnhancementGroundingRefsV1(store: Store, projectRoot: string
     sourceOnlyHardFactRefs,
     scopedFeedbackEvidenceRefs,
     missingMemoryCandidateRefs,
+    groundingTierByRef,
   };
 }
 

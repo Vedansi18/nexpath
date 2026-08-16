@@ -35,6 +35,7 @@ import {
   recordPromptEnhancementShownMemoryV1,
   markPromptEnhancementUsedMemoryV1,
   runAuto,
+  buildPromptEnhancementGroundingRefsV1,
   readStdin,
 } from './auto.js';
 import { getPromptEnhancementFeedbackSummary, queryRelevantPromptEnhancementMemory, recordPromptEnhancementMemoryEvidence } from '../../store/prompt-enhancement.js';
@@ -45,6 +46,7 @@ import type { AutoInput } from './auto.js';
 import { getPendingAdvisory } from '../../store/pending-advisories.js';
 import { getPendingPromptEnhancement } from '../../store/pending-prompt-enhancements.js';
 import { upsertProject, setDetectedLanguage, getProject } from '../../store/projects.js';
+import { setProjectEnvFacts } from '../../store/env-facts.js';
 import { upsertPendingAdvisory } from '../../store/pending-advisories.js';
 import { setConfig } from '../../store/config.js';
 import { readCadence, IDLE_CAP_MS } from '../../store/feedback-cadence.js';
@@ -339,6 +341,47 @@ describe('buildFiredKey', () => {
     expect(new Set(keys).size).toBe(3);
 
     store.db.close();
+  });
+});
+
+// ── grounding boundary — corroboration tier crosses TYPED with every env ref ──
+
+describe('buildPromptEnhancementGroundingRefsV1 — corroboration tiers', () => {
+  let store: Store;
+  const projectRoot = '/test/tier-project';
+
+  beforeEach(async () => {
+    store = await openStore(':memory:');
+    upsertProject(store, { projectRoot, name: 'tier-project' });
+  });
+  afterEach(() => { store.db.close(); });
+
+  it('every crossing env fact carries a typed tier: present→capability, false/null→uncorroborated', () => {
+    setProjectEnvFacts(store, projectRoot, {
+      has_test_runner: { value: true,  tier: 'C', confidence: 'high', detectedAt: 1 },
+      has_backups:     { value: false, tier: 'C', confidence: 'high', detectedAt: 1 },
+      package_manager: { value: null,  tier: 'C', confidence: 'low',  detectedAt: 1 },
+    }, 1);
+
+    const out = buildPromptEnhancementGroundingRefsV1(store, projectRoot, []);
+
+    expect(out.sourceOnlyHardFactRefs).toContain('hard_fact:has_test_runner');
+    // The tier rides a TYPED map keyed by the ref — never smuggled inside the string.
+    expect(out.groundingTierByRef['hard_fact:has_test_runner']).toBe('capability');
+    expect(out.groundingTierByRef['hard_fact:has_backups']).toBe('uncorroborated');
+    expect(out.groundingTierByRef['hard_fact:package_manager']).toBe('uncorroborated');
+    // Every crossing env ref has a tier — none crosses untiered.
+    for (const ref of out.sourceOnlyHardFactRefs) {
+      expect(out.groundingTierByRef[ref]).toBeDefined();
+    }
+    // The ref strings themselves are unchanged (bare keys, as before this change).
+    expect(out.sourceOnlyHardFactRefs.every((r) => r.split(':').length === 2)).toBe(true);
+  });
+
+  it('yields no refs and an empty tier map on an empty store (deterministic no-data fallback)', () => {
+    const out = buildPromptEnhancementGroundingRefsV1(store, projectRoot, []);
+    expect(out.sourceOnlyHardFactRefs).toHaveLength(0);
+    expect(Object.keys(out.groundingTierByRef)).toHaveLength(0);
   });
 });
 
