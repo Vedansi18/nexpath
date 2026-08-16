@@ -155,3 +155,122 @@ describe('applyPromptEnhancementSourceMixV1 (E2 / 2.2)', () => {
     expect(result.requiredSurvivor?.factId).toBe('a1');
   });
 });
+
+// ── Tier-1 normalization + the two Source-B lane boundaries ───────────────────
+
+describe('tier-1 evidence fields at the mix seam', () => {
+  it('every fact entering the mix is classified WITH origin scope, claim policy, and role (legacy facts get defaults)', () => {
+    const result = applyPromptEnhancementSourceMixV1([absence('a1'), hardFact('h1')]);
+    for (const entry of result.classifiedFacts) {
+      expect(entry.fact.sourceOriginScope).toBeDefined();
+      expect(entry.fact.claimVerbPolicy).toBeDefined();
+      expect(entry.fact.factRole).toBeDefined();
+    }
+    const survivor = result.classifiedFacts.find((c) => c.selectionRole === 'selected_required')!;
+    expect(survivor.fact.sourceOriginScope).toBe('current_prompt');
+    expect(survivor.fact.factRole).toBe('required_source_signal_survivor');
+    const grounding = result.classifiedFacts.find((c) => c.fact.sourceType === 'hard_fact')!;
+    expect(grounding.fact.sourceOriginScope).toBe('local_probe');
+    expect(grounding.fact.claimVerbPolicy).toBe('must_phrase_as_possibility');
+    expect(grounding.fact.factRole).toBe('project_grounding_support');
+  });
+
+  // The prompt-derived HARD-FAIL: a fact known only from prompt text, asked to pose
+  // as project knowledge, is clamped to possibility wording — it cannot masquerade.
+  it('a prompt-only fact phrased as project knowledge is CLAMPED to possibility wording', () => {
+    const smuggled = fact({
+      factId: 'p1',
+      sourceType: 'prompt_derived_fact',
+      sourceOriginScope: 'current_prompt',
+      claimVerbPolicy: 'may_state_as_project_capability',
+    });
+    const result = applyPromptEnhancementSourceMixV1([absence('a1'), smuggled]);
+    const entry = result.classifiedFacts.find((c) => c.fact.factId === 'p1')!;
+    expect(entry.fact.claimVerbPolicy).toBe('must_phrase_as_possibility');
+  });
+
+  it('prompt-only knowledge never satisfies a Source B cap — label-only, and the cap slot stays open', () => {
+    const promptFact = fact({ factId: 'p1', sourceType: 'prompt_derived_fact' });
+    const probed = hardFact('h1');
+    const result = applyPromptEnhancementSourceMixV1([absence('a1'), promptFact, probed]);
+    const promptEntry = result.classifiedFacts.find((c) => c.fact.factId === 'p1')!;
+    expect(promptEntry.selectionRole).toBe('selected_source_label_only');
+    expect(promptEntry.selectionReasonCode).toBe('prompt_derived_not_independent_grounding');
+    // The probed fact still takes a grounding slot — the prompt fact consumed none.
+    const probedEntry = result.classifiedFacts.find((c) => c.fact.factId === 'h1')!;
+    expect(probedEntry.selectionRole).toBe('selected_supporting');
+  });
+
+  it('a false capability (safety role) never counts as Source B grounding', () => {
+    const falseCap = hardFact('neg1', { factRole: 'safety_confirmation_support', renderPolicy: 'metadata_only' });
+    const probed = hardFact('h1');
+    const result = applyPromptEnhancementSourceMixV1([absence('a1'), falseCap, probed]);
+    const negEntry = result.classifiedFacts.find((c) => c.fact.factId === 'neg1')!;
+    expect(negEntry.selectionRole).toBe('selected_source_label_only');
+    expect(negEntry.selectionReasonCode).toBe('negative_capability_safety_not_grounding');
+    expect(result.renderedFacts.map((f) => f.factId)).not.toContain('neg1');
+    const probedEntry = result.classifiedFacts.find((c) => c.fact.factId === 'h1')!;
+    expect(probedEntry.selectionRole).toBe('selected_supporting');
+  });
+
+  // One fixture per locked origin-scope value: each is representable, survives
+  // normalization, and its gate holds where the value carries one.
+  it('all ten origin-scope values are representable, with their gates', () => {
+    const scopes = [
+      'current_prompt',
+      'recent_prompt_history',
+      'local_probe',
+      'longitudinal_param_events',
+      'served_variant_identity',
+      'transcript_corroboration',
+      'stored_memory',
+      'content_template_registry',
+      'content_template_runtime',
+      'original_point_inventory',
+    ] as const;
+    for (const scope of scopes) {
+      const probe = fact({
+        factId: `s-${scope}`,
+        sourceType: 'hard_fact',
+        sourceOriginScope: scope,
+        claimVerbPolicy: 'may_state_as_project_capability',
+      });
+      const result = applyPromptEnhancementSourceMixV1([absence('a1'), probe]);
+      const entry = result.classifiedFacts.find((c) => c.fact.factId === `s-${scope}`)!;
+      expect(entry.fact.sourceOriginScope).toBe(scope);
+      if (scope === 'current_prompt' || scope === 'recent_prompt_history') {
+        // Prompt-only gate: clamped wording, never an independent grounding slot.
+        expect(entry.fact.claimVerbPolicy).toBe('must_phrase_as_possibility');
+        expect(entry.selectionRole).toBe('selected_source_label_only');
+      } else if (scope === 'served_variant_identity') {
+        // Served rows stay provenance-only — never practice proof.
+        expect(entry.fact.claimVerbPolicy).toBe('source_label_only');
+      } else {
+        expect(entry.fact.claimVerbPolicy).toBe('may_state_as_project_capability');
+      }
+    }
+  });
+});
+
+// ── Rename reconciliation: shipped field names kept, equivalence proven ───────
+// The contract's business concepts ship under renamed TypeScript fields. Decision:
+// KEEP the shipped names (a rename would ripple through every consumer for zero
+// behaviour) and pin the semantic equivalence here instead:
+//   - `sourceEvidenceState` ≡ the contract's `evidenceState` — value sets identical.
+//   - `sourceType` carries the contract's `sourceKind` concept — the full 12-value
+//     set completion is later contract-tail work.
+//   - `privacyClass` carries the contract's `sensitivityClass` concept — the full
+//     5-value locked set lands with the sensitive-literal boundary work.
+
+describe('rename reconciliation (shipped names ≡ contract concepts)', () => {
+  it('sourceEvidenceState accepts exactly the evidenceState value set', () => {
+    const evidenceStates = [
+      'strong', 'partial', 'weak_low_risk', 'weak_source_critical',
+      'conflicting', 'missing', 'stale_or_unknown',
+    ] as const;
+    for (const state of evidenceStates) {
+      const probe = fact({ factId: `e-${state}`, sourceType: 'hard_fact', sourceEvidenceState: state });
+      expect(probe.sourceEvidenceState).toBe(state);
+    }
+  });
+});

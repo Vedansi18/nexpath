@@ -2,6 +2,9 @@ import type { PromptEnhancementPrepareRequestV1 } from './contracts.js';
 import type {
   PromptEnhancementGuidanceFact,
   PromptEnhancementGuidanceSourceType,
+  PromptEnhancementSourceOriginScope,
+  PromptEnhancementClaimVerbPolicy,
+  PromptEnhancementFactRole,
 } from './templates/section-plan.js';
 
 /**
@@ -82,6 +85,77 @@ function laneFor(fact: PromptEnhancementGuidanceFact): PromptEnhancementSourceMi
   return SOURCE_A_TYPES.has(fact.sourceType) ? 'source_a' : 'source_b';
 }
 
+// ── Tier-1 evidence-field normalization ──────────────────────────────────────
+// Every fact entering the mix carries sourceOriginScope / claimVerbPolicy /
+// factRole. Producers set them; legacy or fixture facts get deterministic
+// defaults here, and the prompt-derived clamp below enforces the lane boundary:
+// a fact known only from prompt text may never claim practice or project
+// capability uncorroborated — its policy is clamped to possibility wording.
+
+const DEFAULT_ORIGIN_BY_SOURCE_TYPE: Record<PromptEnhancementGuidanceSourceType, PromptEnhancementSourceOriginScope> = {
+  stage_transition: 'current_prompt',
+  absence_signal: 'current_prompt',
+  content_template_record: 'content_template_registry',
+  content_template_runtime_fact: 'content_template_runtime',
+  persistent_missing_signal_memory: 'stored_memory',
+  hard_fact: 'local_probe',
+  right_good_pattern: 'longitudinal_param_events',
+  work_style_fact: 'longitudinal_param_events',
+  prompt_derived_fact: 'current_prompt',
+};
+
+const DEFAULT_POLICY_BY_SOURCE_TYPE: Record<PromptEnhancementGuidanceSourceType, PromptEnhancementClaimVerbPolicy> = {
+  stage_transition: 'must_phrase_as_source_signal',
+  absence_signal: 'must_phrase_as_source_signal',
+  content_template_record: 'must_phrase_as_source_signal',
+  content_template_runtime_fact: 'must_phrase_as_source_signal',
+  persistent_missing_signal_memory: 'must_phrase_as_source_signal',
+  hard_fact: 'must_phrase_as_possibility',
+  right_good_pattern: 'must_phrase_as_possibility',
+  work_style_fact: 'source_label_only',
+  prompt_derived_fact: 'must_phrase_as_possibility',
+};
+
+function defaultFactRole(fact: PromptEnhancementGuidanceFact): PromptEnhancementFactRole {
+  if (laneFor(fact) === 'source_a') {
+    return fact.priority === 'required_survivor' ? 'required_source_signal_survivor' : 'supporting_missing_practice';
+  }
+  switch (fact.sourceType) {
+    case 'right_good_pattern': return 'positive_practice_preservation';
+    case 'work_style_fact':    return 'neutral_style_support';
+    default:                   return 'project_grounding_support';
+  }
+}
+
+/** Policies stronger than possibility wording — illegal for prompt-only knowledge. */
+const PROJECT_KNOWLEDGE_POLICIES: ReadonlySet<PromptEnhancementClaimVerbPolicy> = new Set([
+  'may_state_as_user_practice',
+  'may_state_as_project_capability',
+  'must_have_behaviour_verified_practice',
+]);
+
+export function normalizePromptEnhancementTier1FieldsV1(
+  fact: PromptEnhancementGuidanceFact,
+): PromptEnhancementGuidanceFact {
+  const sourceOriginScope = fact.sourceOriginScope ?? DEFAULT_ORIGIN_BY_SOURCE_TYPE[fact.sourceType];
+  let claimVerbPolicy = fact.claimVerbPolicy ?? DEFAULT_POLICY_BY_SOURCE_TYPE[fact.sourceType];
+  // Prompt-derived lane boundary: knowledge from prompt text alone must never be
+  // phrased as project knowledge — clamp to possibility wording, whatever was asked.
+  const promptOnly = sourceOriginScope === 'current_prompt' || sourceOriginScope === 'recent_prompt_history';
+  if (promptOnly && PROJECT_KNOWLEDGE_POLICIES.has(claimVerbPolicy)) {
+    claimVerbPolicy = 'must_phrase_as_possibility';
+  }
+  // Served rows are provenance only — never practice proof, never instruction prose.
+  const served = sourceOriginScope === 'served_variant_identity';
+  if (served) claimVerbPolicy = 'source_label_only';
+  return {
+    ...fact,
+    sourceOriginScope,
+    claimVerbPolicy,
+    factRole: fact.factRole ?? (served ? 'served_variant_provenance_only' : defaultFactRole(fact)),
+  };
+}
+
 /** High-risk / source-critical facts must never be downgraded to invisible metadata. */
 function isSourceCritical(fact: PromptEnhancementGuidanceFact): boolean {
   return (
@@ -114,9 +188,12 @@ function capsForLevel(
 }
 
 export function applyPromptEnhancementSourceMixV1(
-  facts: readonly PromptEnhancementGuidanceFact[],
+  rawFacts: readonly PromptEnhancementGuidanceFact[],
   levelState: PromptEnhancementPrepareRequestV1['userPreferenceContext']['levelState'] = 'default',
 ): PromptEnhancementSourceMixResult {
+  // Tier-1 fields are REQUIRED at this seam: normalize every entering fact so none
+  // is classified without origin scope, claim policy, and role.
+  const facts = rawFacts.map(normalizePromptEnhancementTier1FieldsV1);
   const caps = capsForLevel(levelState);
   const classified: PromptEnhancementSourceMixFact[] = [];
 
@@ -198,9 +275,30 @@ export function applyPromptEnhancementSourceMixV1(
     }
   }
 
-  // Source B grounding, only after the Source A survivor is fixed.
+  // Source B grounding, only after the Source A survivor is fixed. Two lane
+  // boundaries hold here: a FALSE capability is safety material and never counts
+  // as grounding, and prompt-only knowledge never satisfies a Source B cap —
+  // both stay visible as source labels, never as independent grounding.
   let sourceBSelected = 0;
   for (const fact of sourceB) {
+    if (fact.factRole === 'safety_confirmation_support') {
+      classified.push({
+        fact,
+        lane: 'source_b',
+        selectionRole: 'selected_source_label_only',
+        selectionReasonCode: 'negative_capability_safety_not_grounding',
+      });
+      continue;
+    }
+    if (fact.sourceOriginScope === 'current_prompt' || fact.sourceOriginScope === 'recent_prompt_history') {
+      classified.push({
+        fact,
+        lane: 'source_b',
+        selectionRole: 'selected_source_label_only',
+        selectionReasonCode: 'prompt_derived_not_independent_grounding',
+      });
+      continue;
+    }
     const underLevelCap = sourceBSelected < caps.sourceB;
     const underTotalCap = renderedCount < TOTAL_FACT_CAP;
     if (underLevelCap && underTotalCap) {

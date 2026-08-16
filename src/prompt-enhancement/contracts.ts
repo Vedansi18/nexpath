@@ -279,6 +279,13 @@ export interface PromptEnhancementSourceInputSnapshotV1 {
   profileRoleModeRefs: readonly string[];
   rightGoodWorkStyleEnvRuntimeRefs: readonly string[];
   missingMemoryCandidateRefs: readonly string[];
+  /**
+   * Typed corroboration tier / polarity per crossing env or RIGHT&GOOD ref — carried
+   * beside the ref strings, never inside them. The registry computes claim wording
+   * FROM these; absent maps read as uncorroborated/unknown (the weakest claim).
+   */
+  groundingTierByRef?: Readonly<Record<string, 'promoted_practice_P' | 'capability' | 'uncorroborated'>>;
+  groundingPolarityByRef?: Readonly<Record<string, 'present' | 'false_capability' | 'unknown'>>;
   sourceLabels: readonly {
     sourceRefId: string;
     label:

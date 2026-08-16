@@ -216,6 +216,7 @@ export function buildPromptEnhancementGroundingRefsV1(store: Store, projectRoot:
   scopedFeedbackEvidenceRefs: readonly string[];
   missingMemoryCandidateRefs: readonly string[];
   groundingTierByRef: Readonly<Record<string, GroundingCorroborationTier>>;
+  groundingPolarityByRef: Readonly<Record<string, 'present' | 'false_capability' | 'unknown'>>;
 } {
   // Corroboration tier per crossing env / RIGHT&GOOD ref — TYPED, never smuggled
   // inside the ref strings. The promotion machinery is the SAME function the
@@ -223,6 +224,9 @@ export function buildPromptEnhancementGroundingRefsV1(store: Store, projectRoot:
   // store-backed facts this boundary already reads; the DS wiring is untouched.
   // Claim wording is computed FROM this tier downstream — never assigned here.
   const groundingTierByRef: Record<string, GroundingCorroborationTier> = {};
+  // Polarity per env ref: a FALSE capability is safety material, never grounding —
+  // the lane flips with polarity, so it must cross typed like the tier does.
+  const groundingPolarityByRef: Record<string, 'present' | 'false_capability' | 'unknown'> = {};
   let rightGoodProfileForPromotion: RightGoodProfile = {};
   const rightGoodWorkStyleEnvRuntimeRefs: string[] = [];
   try {
@@ -250,6 +254,8 @@ export function buildPromptEnhancementGroundingRefsV1(store: Store, projectRoot:
       for (const [factKey, fact] of Object.entries(promoted)) {
         sourceOnlyHardFactRefs.push(`hard_fact:${factKey}`);
         groundingTierByRef[`hard_fact:${factKey}`] = corroborationTierForEnvFact(fact);
+        groundingPolarityByRef[`hard_fact:${factKey}`] =
+          fact.value === false ? 'false_capability' : fact.value === null ? 'unknown' : 'present';
       }
     }
   } catch { /* no source hard facts available — leave empty */ }
@@ -275,6 +281,7 @@ export function buildPromptEnhancementGroundingRefsV1(store: Store, projectRoot:
     scopedFeedbackEvidenceRefs,
     missingMemoryCandidateRefs,
     groundingTierByRef,
+    groundingPolarityByRef,
   };
 }
 
@@ -440,6 +447,8 @@ export function buildPromptEnhancementRequestForAuto(input: {
       servedVariantIdentityRefs: [],
       deliveryGateRefs: [],
       sourceOnlyHardFactRefs: grounding.sourceOnlyHardFactRefs,
+      groundingTierByRef: grounding.groundingTierByRef,
+      groundingPolarityByRef: grounding.groundingPolarityByRef,
     },
     userPreferenceContext: {
       levelState: 'default',

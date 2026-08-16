@@ -28,6 +28,52 @@ export type PromptEnhancementGuidanceSourceType =
   | 'work_style_fact'
   | 'prompt_derived_fact';
 
+/**
+ * WHERE the fact's knowledge came from. Origin scope controls claim strength: a fact
+ * known only from the current prompt must never pose as independent project knowledge,
+ * and its claim policy is clamped accordingly at source mixing.
+ */
+export type PromptEnhancementSourceOriginScope =
+  | 'current_prompt'
+  | 'recent_prompt_history'
+  | 'local_probe'
+  | 'longitudinal_param_events'
+  | 'served_variant_identity'
+  | 'transcript_corroboration'
+  | 'stored_memory'
+  | 'content_template_registry'
+  | 'content_template_runtime'
+  | 'original_point_inventory';
+
+/**
+ * The strongest wording the composer may use for this fact. Assigned deterministically
+ * from corroboration tier + origin scope — no generated claim may exceed it.
+ */
+export type PromptEnhancementClaimVerbPolicy =
+  | 'may_state_as_user_practice'
+  | 'may_state_as_project_capability'
+  | 'must_have_behaviour_verified_practice'
+  | 'must_phrase_as_possibility'
+  | 'must_phrase_as_source_signal'
+  | 'source_label_only'
+  | 'do_not_render';
+
+/**
+ * The fact's role in the composed body. Polarity routes it: a FALSE capability is
+ * safety material (`safety_confirmation_support`), never project grounding.
+ */
+export type PromptEnhancementFactRole =
+  | 'required_source_signal_survivor'
+  | 'supporting_missing_practice'
+  | 'project_grounding_support'
+  | 'positive_practice_preservation'
+  | 'neutral_style_support'
+  | 'safety_confirmation_support'
+  | 'served_variant_provenance_only'
+  | 'source_label_only'
+  | 'suppressed'
+  | 'deferred';
+
 export type PromptEnhancementGuidanceKind =
   | 'missing_practice'
   | 'stage_transition_discipline'
@@ -86,6 +132,14 @@ export interface PromptEnhancementGuidanceFact {
   safetyHooks: readonly string[];
   privacyClass: 'public_safe' | 'local_private' | 'sensitive_ref_only' | 'do_not_render';
   sanitizationState: 'not_applicable' | 'redacted_prompt_store' | 'prompt_derived_sanitized' | 'identity_only_event' | 'sensitive_ref_only' | 'unsafe_to_render';
+  /**
+   * Tier-1 evidence fields. Optional on the raw producer layer for compatibility;
+   * REQUIRED at source mixing — the mixer normalizes every entering fact so none is
+   * selected without them, and the registry (never a model) assigns the claim policy.
+   */
+  sourceOriginScope?: PromptEnhancementSourceOriginScope;
+  claimVerbPolicy?: PromptEnhancementClaimVerbPolicy;
+  factRole?: PromptEnhancementFactRole;
   requiredBecause?: string;
   signalAliasResolution?: string;
   servedVariantRef?: string;

@@ -2,6 +2,7 @@ import type { PromptEnhancementPrepareRequestV1 } from './contracts.js';
 import type {
   PromptEnhancementGuidanceFact,
   PromptEnhancementGuidancePriority,
+  PromptEnhancementClaimVerbPolicy,
 } from './templates/section-plan.js';
 
 /**
@@ -33,6 +34,22 @@ export function promptEnhancementAbsenceSignalKeyV1(absenceKey: string): string 
   return `absence:${absenceKey}`;
 }
 
+/**
+ * The REGISTRY's claim-wording rule, computed from the corroboration tier that
+ * crossed the boundary: practice wording only for behaviour-corroborated tier P,
+ * capability wording for present-but-uncorroborated capabilities, possibility
+ * wording otherwise. Deterministic — never model-assigned.
+ */
+export function claimVerbPolicyForCorroborationTier(
+  tier: 'promoted_practice_P' | 'capability' | 'uncorroborated',
+): PromptEnhancementClaimVerbPolicy {
+  switch (tier) {
+    case 'promoted_practice_P': return 'may_state_as_user_practice';
+    case 'capability':          return 'may_state_as_project_capability';
+    case 'uncorroborated':      return 'must_phrase_as_possibility';
+  }
+}
+
 export function buildPromptEnhancementGuidanceFactsV1(
   request: PromptEnhancementPrepareRequestV1,
 ): readonly PromptEnhancementGuidanceFact[] {
@@ -55,6 +72,9 @@ export function buildPromptEnhancementGuidanceFactsV1(
       targetFamily: 'family_agnostic',
       targetSectionKind: 'source_signal_guidance',
       sourceEvidenceState: 'strong',
+      sourceOriginScope: 'current_prompt',
+      claimVerbPolicy: 'must_phrase_as_source_signal',
+      factRole: 'supporting_missing_practice',
       priority: 'high',
       renderPolicy: 'render_as_section',
       riskLevel: 'low',
@@ -73,6 +93,9 @@ export function buildPromptEnhancementGuidanceFactsV1(
       targetFamily: 'family_agnostic',
       targetSectionKind: 'source_signal_guidance',
       sourceEvidenceState: 'strong',
+      sourceOriginScope: 'current_prompt',
+      claimVerbPolicy: 'must_phrase_as_source_signal',
+      factRole: 'required_source_signal_survivor',
       priority: 'required_survivor',
       renderPolicy: 'render_as_section',
       riskLevel: 'low',
@@ -96,6 +119,9 @@ export function buildPromptEnhancementGuidanceFactsV1(
       targetFamily: 'family_agnostic',
       targetSectionKind: 'source_signal_guidance',
       sourceEvidenceState: 'strong',
+      sourceOriginScope: 'current_prompt',
+      claimVerbPolicy: 'must_phrase_as_source_signal',
+      factRole: 'required_source_signal_survivor',
       priority: 'required_survivor',
       renderPolicy: 'render_as_section',
       riskLevel: 'low',
@@ -119,6 +145,9 @@ export function buildPromptEnhancementGuidanceFactsV1(
       targetFamily: 'family_agnostic',
       targetSectionKind: 'source_signal_guidance',
       sourceEvidenceState: 'partial',
+      sourceOriginScope: 'content_template_registry',
+      claimVerbPolicy: 'must_phrase_as_source_signal',
+      factRole: 'supporting_missing_practice',
       priority: 'normal',
       renderPolicy: 'render_as_inline_clause',
       riskLevel: 'none',
@@ -143,6 +172,9 @@ export function buildPromptEnhancementGuidanceFactsV1(
       targetFamily: 'family_agnostic',
       targetSectionKind: 'source_signal_guidance',
       sourceEvidenceState: 'partial',
+      sourceOriginScope: 'stored_memory',
+      claimVerbPolicy: 'must_phrase_as_source_signal',
+      factRole: 'supporting_missing_practice',
       priority: 'normal',
       renderPolicy: 'render_as_section',
       riskLevel: 'low',
@@ -155,7 +187,14 @@ export function buildPromptEnhancementGuidanceFactsV1(
 
   // Source B — hard facts (env-derived project grounding). Bounded grounding, not
   // a required survivor; transform-rule-2 (2.2) owns final relevance/priority mixing.
+  // Claim wording comes from the corroboration tier that crossed the boundary, and
+  // POLARITY routes the role: a FALSE capability is safety material, never grounding;
+  // an unknown probe stays stale_or_unknown — never a confident negative.
   for (const ref of signals.sourceOnlyHardFactRefs) {
+    const tier = signals.groundingTierByRef?.[ref] ?? 'uncorroborated';
+    const polarity = signals.groundingPolarityByRef?.[ref] ?? 'present';
+    const isFalseCapability = polarity === 'false_capability';
+    const isUnknown = polarity === 'unknown';
     facts.push({
       factId: nextId('hard'),
       sourceType: 'hard_fact',
@@ -164,11 +203,18 @@ export function buildPromptEnhancementGuidanceFactsV1(
       suggestedActionKind: 'ground_in_project_fact',
       targetFamily: 'family_agnostic',
       targetSectionKind: '',
-      sourceEvidenceState: 'strong',
+      sourceEvidenceState: isUnknown ? 'stale_or_unknown' : 'strong',
+      sourceOriginScope: 'local_probe',
+      claimVerbPolicy: isFalseCapability
+        ? 'source_label_only'
+        : isUnknown
+          ? 'must_phrase_as_possibility'
+          : claimVerbPolicyForCorroborationTier(tier),
+      factRole: isFalseCapability ? 'safety_confirmation_support' : 'project_grounding_support',
       priority: 'normal',
-      renderPolicy: 'render_as_section',
+      renderPolicy: isFalseCapability ? 'metadata_only' : 'render_as_section',
       riskLevel: 'none',
-      safetyHooks: [],
+      safetyHooks: isFalseCapability ? ['pe_ar9_negative_capability'] : [],
       privacyClass: 'local_private',
       sanitizationState: 'not_applicable',
       publicCopySafe: true,
@@ -189,6 +235,9 @@ export function buildPromptEnhancementGuidanceFactsV1(
         targetFamily: 'family_agnostic',
         targetSectionKind: 'source_signal_guidance',
         sourceEvidenceState: 'partial',
+        sourceOriginScope: 'longitudinal_param_events',
+        claimVerbPolicy: 'must_phrase_as_source_signal',
+        factRole: 'supporting_missing_practice',
         priority: 'normal',
         renderPolicy: 'render_as_section',
         riskLevel: 'low',
@@ -203,6 +252,9 @@ export function buildPromptEnhancementGuidanceFactsV1(
     // (transform-rule-1): they adapt register/emphasis, never override instructions/safety/
     // routing. Render as metadata, not their own section.
     const isWorkStyle = ref.startsWith('work_style:');
+    // RIGHT&GOOD claim strength follows the boundary's corroboration tier: practice
+    // wording only when behaviour-verified; work-style stays style metadata.
+    const profileTier = signals.groundingTierByRef?.[ref] ?? 'uncorroborated';
     facts.push({
       factId: nextId('profile'),
       sourceType: isWorkStyle ? 'work_style_fact' : 'right_good_pattern',
@@ -212,6 +264,13 @@ export function buildPromptEnhancementGuidanceFactsV1(
       targetFamily: 'family_agnostic',
       targetSectionKind: '',
       sourceEvidenceState: 'partial',
+      sourceOriginScope: 'longitudinal_param_events',
+      claimVerbPolicy: isWorkStyle
+        ? 'source_label_only'
+        : profileTier === 'promoted_practice_P'
+          ? 'may_state_as_user_practice'
+          : 'must_phrase_as_possibility',
+      factRole: isWorkStyle ? 'neutral_style_support' : 'positive_practice_preservation',
       priority: 'low',
       renderPolicy: 'metadata_only',
       riskLevel: 'none',

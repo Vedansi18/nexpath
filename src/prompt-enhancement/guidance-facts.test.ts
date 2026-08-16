@@ -151,3 +151,88 @@ describe('buildPromptEnhancementGuidanceFactsV1 (E2 / 2.1)', () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 });
+
+// ── Tier-1 evidence fields: claim policy from corroboration tier, role from polarity ──
+
+describe('tier-1 evidence fields (claim-policy trio + polarity trio)', () => {
+  const REF = 'hard_fact:has_test_runner';
+
+  function hardFactWith(tier?: string, polarity?: string) {
+    return buildPromptEnhancementGuidanceFactsV1(
+      requestWithSignals({
+        sourceOnlyHardFactRefs: [REF],
+        ...(tier ? { groundingTierByRef: { [REF]: tier } } : {}),
+        ...(polarity ? { groundingPolarityByRef: { [REF]: polarity } } : {}),
+      } as never),
+    )[0];
+  }
+
+  // The claim-policy TRIO: the same fact at three corroboration tiers yields three
+  // different claim policies — computed by the registry, never by a model.
+  it('promoted_practice_P tier → may_state_as_user_practice', () => {
+    const fact = hardFactWith('promoted_practice_P', 'present');
+    expect(fact.claimVerbPolicy).toBe('may_state_as_user_practice');
+    expect(fact.sourceOriginScope).toBe('local_probe');
+  });
+
+  it('capability tier → may_state_as_project_capability', () => {
+    expect(hardFactWith('capability', 'present').claimVerbPolicy).toBe('may_state_as_project_capability');
+  });
+
+  it('uncorroborated tier → must_phrase_as_possibility', () => {
+    expect(hardFactWith('uncorroborated', 'present').claimVerbPolicy).toBe('must_phrase_as_possibility');
+  });
+
+  it('absent tier map defaults to the weakest claim (possibility), never a confident one', () => {
+    expect(hardFactWith(undefined, undefined).claimVerbPolicy).toBe('must_phrase_as_possibility');
+    expect(hardFactWith(undefined, undefined).factRole).toBe('project_grounding_support');
+  });
+
+  // The polarity TRIO: TRUE grounds, FALSE is safety material, NULL stays unknown.
+  // (The typed VALUE itself crosses with the caller-side resolution payload — the
+  // value-arrives-typed rider of this trio completes there.)
+  it('polarity present → project_grounding_support (the grounding lane)', () => {
+    expect(hardFactWith('capability', 'present').factRole).toBe('project_grounding_support');
+  });
+
+  it('polarity false_capability → safety_confirmation_support, label-only, safety-hooked, never grounding prose', () => {
+    const fact = hardFactWith('uncorroborated', 'false_capability');
+    expect(fact.factRole).toBe('safety_confirmation_support');
+    expect(fact.claimVerbPolicy).toBe('source_label_only');
+    expect(fact.renderPolicy).toBe('metadata_only');
+    expect(fact.safetyHooks).toContain('pe_ar9_negative_capability');
+  });
+
+  it('polarity unknown → stale_or_unknown evidence, possibility wording — never a confident negative', () => {
+    const fact = hardFactWith('uncorroborated', 'unknown');
+    expect(fact.sourceEvidenceState).toBe('stale_or_unknown');
+    expect(fact.claimVerbPolicy).toBe('must_phrase_as_possibility');
+    expect(fact.factRole).toBe('project_grounding_support');
+  });
+
+  // RIGHT&GOOD claim strength follows the boundary tier; work-style stays style metadata.
+  it('a behaviour-corroborated RIGHT&GOOD ref may state practice; an uncorroborated one may not', () => {
+    const corroborated = buildPromptEnhancementGuidanceFactsV1(
+      requestWithSignals({
+        rightGoodWorkStyleEnvRuntimeRefs: ['right_good:test_creation'],
+        groundingTierByRef: { 'right_good:test_creation': 'promoted_practice_P' },
+      } as never),
+    )[0];
+    expect(corroborated.claimVerbPolicy).toBe('may_state_as_user_practice');
+    expect(corroborated.factRole).toBe('positive_practice_preservation');
+
+    const claimed = buildPromptEnhancementGuidanceFactsV1(
+      requestWithSignals({ rightGoodWorkStyleEnvRuntimeRefs: ['right_good:test_creation'] } as never),
+    )[0];
+    expect(claimed.claimVerbPolicy).toBe('must_phrase_as_possibility');
+  });
+
+  it('work-style refs are neutral style support, source-label-only wording', () => {
+    const fact = buildPromptEnhancementGuidanceFactsV1(
+      requestWithSignals({ rightGoodWorkStyleEnvRuntimeRefs: ['work_style:iteration:small_steps'] } as never),
+    )[0];
+    expect(fact.factRole).toBe('neutral_style_support');
+    expect(fact.claimVerbPolicy).toBe('source_label_only');
+    expect(fact.sourceOriginScope).toBe('longitudinal_param_events');
+  });
+});
