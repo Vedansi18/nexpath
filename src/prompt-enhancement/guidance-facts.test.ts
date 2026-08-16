@@ -236,3 +236,40 @@ describe('tier-1 evidence fields (claim-policy trio + polarity trio)', () => {
     expect(fact.sourceOriginScope).toBe('longitudinal_param_events');
   });
 });
+
+// ── Dual-id pairing: a live detector + a false capability route safety TOGETHER ──
+
+describe('negative capability paired with its live detector', () => {
+  it('an absence fact for a corroborating signal gains the false env ref as a second source id, plus the safety hook', () => {
+    const facts = buildPromptEnhancementGuidanceFactsV1(
+      requestWithSignals({
+        normalizedStageAbsenceSignalRefs: ['absence:test_creation@implementation'],
+        sourceOnlyHardFactRefs: ['hard_fact:has_test_runner'],
+        groundingTierByRef: { 'hard_fact:has_test_runner': 'uncorroborated' },
+        groundingPolarityByRef: { 'hard_fact:has_test_runner': 'false_capability' },
+      } as never),
+    );
+    const absenceFact = facts.find((f) => f.sourceType === 'absence_signal')!;
+    expect(absenceFact.sourceIds).toContain('absence:test_creation@implementation');
+    expect(absenceFact.sourceIds).toContain('hard_fact:has_test_runner');
+    expect(absenceFact.safetyHooks).toContain('pe_ar9_negative_capability');
+    // The false-capability fact itself stays label-only metadata — it does not
+    // become a Source A candidate on its own.
+    const falseCap = facts.find((f) => f.sourceType === 'hard_fact')!;
+    expect(falseCap.factRole).toBe('safety_confirmation_support');
+    expect(falseCap.renderPolicy).toBe('metadata_only');
+  });
+
+  it('without a live detector for its signal, the false capability pairs with nothing', () => {
+    const facts = buildPromptEnhancementGuidanceFactsV1(
+      requestWithSignals({
+        normalizedStageAbsenceSignalRefs: ['absence:acceptance_criteria@implementation'],
+        sourceOnlyHardFactRefs: ['hard_fact:has_test_runner'],
+        groundingPolarityByRef: { 'hard_fact:has_test_runner': 'false_capability' },
+      } as never),
+    );
+    const absenceFact = facts.find((f) => f.sourceType === 'absence_signal')!;
+    expect(absenceFact.sourceIds).not.toContain('hard_fact:has_test_runner');
+    expect(absenceFact.safetyHooks).not.toContain('pe_ar9_negative_capability');
+  });
+});

@@ -299,6 +299,17 @@ export function applyPromptEnhancementSourceMixV1(
       });
       continue;
     }
+    // False OR UNKNOWN capability facts must not satisfy grounding caps — an
+    // unknown probe value stays visible as a label, never as a grounding claim.
+    if (fact.sourceEvidenceState === 'stale_or_unknown') {
+      classified.push({
+        fact,
+        lane: 'source_b',
+        selectionRole: 'selected_source_label_only',
+        selectionReasonCode: 'stale_or_unknown_not_grounding',
+      });
+      continue;
+    }
     const underLevelCap = sourceBSelected < caps.sourceB;
     const underTotalCap = renderedCount < TOTAL_FACT_CAP;
     if (underLevelCap && underTotalCap) {

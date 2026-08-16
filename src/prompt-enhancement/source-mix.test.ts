@@ -274,3 +274,17 @@ describe('rename reconciliation (shipped names ≡ contract concepts)', () => {
     }
   });
 });
+
+describe('unknown capability facts and grounding caps', () => {
+  it('a stale_or_unknown fact never satisfies a grounding cap — label-only, slot stays open', () => {
+    const unknownCap = hardFact('u1', { sourceEvidenceState: 'stale_or_unknown' });
+    const probed = hardFact('h1');
+    const result = applyPromptEnhancementSourceMixV1([absence('a1'), unknownCap, probed]);
+    const unknownEntry = result.classifiedFacts.find((c) => c.fact.factId === 'u1')!;
+    expect(unknownEntry.selectionRole).toBe('selected_source_label_only');
+    expect(unknownEntry.selectionReasonCode).toBe('stale_or_unknown_not_grounding');
+    expect(result.renderedFacts.map((f) => f.factId)).not.toContain('u1');
+    // The probed fact still takes the grounding slot the unknown one did not consume.
+    expect(result.classifiedFacts.find((c) => c.fact.factId === 'h1')!.selectionRole).toBe('selected_supporting');
+  });
+});

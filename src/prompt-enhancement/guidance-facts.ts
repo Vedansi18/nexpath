@@ -1,4 +1,5 @@
 import type { PromptEnhancementPrepareRequestV1 } from './contracts.js';
+import { ENV_FACT_CORROBORATOR } from '../env/env-tier-promotion.js';
 import type {
   PromptEnhancementGuidanceFact,
   PromptEnhancementGuidancePriority,
@@ -282,7 +283,44 @@ export function buildPromptEnhancementGuidanceFactsV1(
     });
   }
 
-  return rankGuidanceFacts(dedupeGuidanceFacts(facts));
+  return rankGuidanceFacts(dedupeGuidanceFacts(pairNegativeCapabilitiesWithLiveDetectors(facts)));
+}
+
+/**
+ * A live-detector-confirmed FALSE capability becomes Source A material: when an
+ * absence fact fired for one of the env key's corroborating signals, that absence
+ * fact gains the env ref as a second source id plus the PE-AR-9 hook — the safety
+ * routing carries BOTH the detector's signal and the environment evidence. The
+ * false-capability fact itself stays label-only metadata; without a live detector
+ * it never becomes a Source A candidate on its own.
+ */
+function pairNegativeCapabilitiesWithLiveDetectors(
+  facts: readonly PromptEnhancementGuidanceFact[],
+): readonly PromptEnhancementGuidanceFact[] {
+  const falseCapabilities = facts.filter(
+    (fact) => fact.sourceType === 'hard_fact' && fact.factRole === 'safety_confirmation_support',
+  );
+  if (falseCapabilities.length === 0) return facts;
+
+  return facts.map((fact) => {
+    if (fact.sourceType !== 'absence_signal') return fact;
+    const pairedEnvRefs: string[] = [];
+    for (const falseCap of falseCapabilities) {
+      const envKey = falseCap.sourceIds[0]?.replace(/^hard_fact:/, '') ?? '';
+      const corroborators = ENV_FACT_CORROBORATOR[envKey] ?? [];
+      if (corroborators.some((signal) => fact.sourceIds.some((id) => id.includes(signal)))) {
+        pairedEnvRefs.push(...falseCap.sourceIds);
+      }
+    }
+    if (pairedEnvRefs.length === 0) return fact;
+    return {
+      ...fact,
+      sourceIds: [...fact.sourceIds, ...pairedEnvRefs],
+      safetyHooks: fact.safetyHooks.includes('pe_ar9_negative_capability')
+        ? fact.safetyHooks
+        : [...fact.safetyHooks, 'pe_ar9_negative_capability'],
+    };
+  });
 }
 
 const GUIDANCE_PRIORITY_RANK: Record<PromptEnhancementGuidancePriority, number> = {
