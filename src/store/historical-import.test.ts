@@ -6,6 +6,7 @@ import { openStore } from './db.js';
 import type { Store } from './db.js';
 import { getRecentPrompts, insertPrompt } from './prompts.js';
 import { upsertProject, getProject } from './projects.js';
+import { setConfig } from './config.js';
 import { importHistoricalPrompts } from './historical-import.js';
 import { SessionStateManager } from '../classifier/SessionStateManager.js';
 import { readParamEvents } from '../telemetry/param-events.js';
@@ -17,6 +18,10 @@ const PROJECT_ROOT = '/test/hist-project';
 
 function makeUserLine(content: string): string {
   return JSON.stringify({ type: 'user', message: { content } });
+}
+
+function makeUserLineAt(content: string, isoTimestamp: string): string {
+  return JSON.stringify({ type: 'user', message: { content }, timestamp: isoTimestamp });
 }
 
 function makeAssistantLine(content: string): string {
@@ -91,6 +96,69 @@ describe('importHistoricalPrompts', () => {
     const rows = getRecentPrompts(store, PROJECT_ROOT, 10);
     expect(rows).toHaveLength(1);
     expect(rows[0].text).toBe('post-install prompt');
+  });
+
+  // 1c. CHRONOLOGY — store order follows the rows' own timestamps, oldest first,
+  // even when timestamp order contradicts file order. Recency reads (newest first)
+  // must return the chronologically newest history first.
+  it('imports in true chronological order by row timestamps, across files', async () => {
+    const projDir = setupProjDir(tmpDir);
+
+    // Old file holds 10:00 and 13:00; new file holds 12:00 and 14:00 — a pure
+    // file-order import would interleave these wrongly.
+    writeJsonl(projDir, 'old-session.jsonl', [
+      makeUserLineAt('prompt-a', '2026-08-12T10:00:00.000Z'),
+      makeUserLineAt('prompt-c', '2026-08-12T13:00:00.000Z'),
+    ]);
+    const oneHourAgo = (Date.now() - 3_600_000) / 1000;
+    utimesSync(join(projDir, 'old-session.jsonl'), oneHourAgo, oneHourAgo);
+    writeJsonl(projDir, 'new-session.jsonl', [
+      makeUserLineAt('prompt-b', '2026-08-12T12:00:00.000Z'),
+      makeUserLineAt('prompt-d', '2026-08-12T14:00:00.000Z'),
+    ]);
+
+    await importHistoricalPrompts(store, PROJECT_ROOT);
+
+    const rows = getRecentPrompts(store, PROJECT_ROOT, 10);
+    expect(rows.map((r) => r.text)).toEqual(['prompt-d', 'prompt-c', 'prompt-b', 'prompt-a']);
+  });
+
+  // 1d. TIMESTAMPS — captured_at carries the transcript row's real time; a row
+  // without a timestamp falls back to import time, never to a fabricated value.
+  it('imported rows carry the historical row timestamps in captured_at', async () => {
+    const testStart = Date.now();
+    const projDir = setupProjDir(tmpDir);
+    writeJsonl(projDir, 'session.jsonl', [
+      makeUserLineAt('stamped prompt', '2026-08-12T15:34:31.560Z'),
+      makeUserLine('unstamped prompt'),
+    ]);
+
+    await importHistoricalPrompts(store, PROJECT_ROOT);
+
+    const rows = getRecentPrompts(store, PROJECT_ROOT, 10);
+    const stamped   = rows.find((r) => r.text === 'stamped prompt');
+    const unstamped = rows.find((r) => r.text === 'unstamped prompt');
+    expect(stamped?.capturedAt).toBe(Date.parse('2026-08-12T15:34:31.560Z'));
+    expect(unstamped?.capturedAt).toBeGreaterThanOrEqual(testStart);
+  });
+
+  // 1e. EVICTION ORDER — after a chronological import fills the cap, a live prompt
+  // evicts the GENUINELY oldest imported row, not the newest session's history.
+  it('post-import inserts evict the genuinely oldest history first', async () => {
+    setConfig(store, 'prompt_store_max_per_project', '3');
+    const projDir = setupProjDir(tmpDir);
+    writeJsonl(projDir, 'session.jsonl', [
+      makeUserLineAt('oldest', '2026-08-10T09:00:00.000Z'),
+      makeUserLineAt('middle', '2026-08-11T09:00:00.000Z'),
+      makeUserLineAt('newest', '2026-08-12T09:00:00.000Z'),
+    ]);
+
+    await importHistoricalPrompts(store, PROJECT_ROOT);
+    insertPrompt(store, { projectRoot: PROJECT_ROOT, promptText: 'live prompt', agent: 'claude-code' });
+
+    const texts = getRecentPrompts(store, PROJECT_ROOT, 10).map((r) => r.text);
+    expect(texts).toEqual(['live prompt', 'newest', 'middle']);
+    expect(texts).not.toContain('oldest');
   });
 
   // 2. Guard — skips when projDir does not exist

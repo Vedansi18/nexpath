@@ -10,6 +10,10 @@ import { detectSignalsByChannel } from '../classifier/signals.js';
 import { appendParamEvents } from '../telemetry/param-events.js';
 import type { PromptRecord, Stage } from '../classifier/types.js';
 
+// Equal to the store's per-project FIFO cap (500) BY DESIGN: collection keeps the
+// NEWEST `IMPORT_CAP` prompts and insertion is chronological (oldest first), so the
+// first live prompt evicts the genuinely oldest imported row — full capacity is used
+// and no newer history is destroyed ahead of older history.
 const IMPORT_CAP = 500;
 
 /** Session marker for param-events derived from the historical-import backfill. */
@@ -35,10 +39,14 @@ export async function importHistoricalPrompts(store: Store, projectRoot: string)
     })
     .sort((a, b) => b.mtime - a.mtime);
 
-  // Parsing — collect up to IMPORT_CAP user prompt strings
-  const collected: string[] = [];
+  // Parsing — collect up to IMPORT_CAP user prompts, newest sessions first (so the
+  // cap keeps the most recent history). Each entry carries the transcript row's own
+  // `timestamp` when present; the file's mtime is the ordering fallback for rows
+  // without one.
+  type CollectedEntry = { text: string; capturedAt?: number; fileMtime: number };
+  const collected: CollectedEntry[] = [];
 
-  outer: for (const { path } of jsonlFiles) {
+  outer: for (const { path, mtime } of jsonlFiles) {
     const raw = readFileSync(path, 'utf8');
     for (const line of raw.split('\n')) {
       if (collected.length >= IMPORT_CAP) break outer;
@@ -48,13 +56,19 @@ export async function importHistoricalPrompts(store: Store, projectRoot: string)
         const obj = JSON.parse(trimmed) as {
           type?: unknown;
           message?: { content?: unknown };
+          timestamp?: unknown;
         };
         if (
           obj.type === 'user' &&
           typeof obj.message?.content === 'string' &&
           obj.message.content.trim().length > 0
         ) {
-          collected.push(obj.message.content.trim());
+          const ts = typeof obj.timestamp === 'string' ? Date.parse(obj.timestamp) : NaN;
+          collected.push({
+            text: obj.message.content.trim(),
+            capturedAt: Number.isFinite(ts) ? ts : undefined,
+            fileMtime: mtime,
+          });
         }
       } catch { /* skip invalid JSON lines */ }
     }
@@ -62,9 +76,21 @@ export async function importHistoricalPrompts(store: Store, projectRoot: string)
 
   if (collected.length === 0) return;
 
-  // Import prompts into the store
-  for (const text of collected) {
-    insertPrompt(store, { projectRoot, promptText: text, agent: 'claude-code' });
+  // Import into the store OLDEST FIRST, with real capture times. Store rowids must
+  // ascend with true chronology: recency reads (`ORDER BY id DESC`) and the FIFO cap's
+  // eviction both follow rowid, so inserting newest-first would make "most recent"
+  // mean the oldest session and would evict the newest history first. `collected`
+  // itself stays newest-first for the language/bootstrap consumers below.
+  const chronological = [...collected].sort(
+    (a, b) => (a.capturedAt ?? a.fileMtime) - (b.capturedAt ?? b.fileMtime),
+  );
+  for (const entry of chronological) {
+    insertPrompt(store, {
+      projectRoot,
+      promptText: entry.text,
+      agent: 'claude-code',
+      capturedAt: entry.capturedAt,
+    });
   }
 
   // retro-population — record param-detection events for the imported
@@ -74,7 +100,7 @@ export async function importHistoricalPrompts(store: Store, projectRoot: string)
   // no LLM / no network. Idempotent: this whole function returns early (the
   // prompts-exist guard above) once prompts exist, so the retro runs only on the
   // first import per project. No-op for in-memory stores.
-  const retroEvents = collected.flatMap((text, i) =>
+  const retroEvents = collected.flatMap(({ text }, i) =>
     detectSignalsByChannel(text).map((d) => ({
       projectRoot,
       sessionId:       HISTORICAL_IMPORT_SESSION_ID,
@@ -89,17 +115,19 @@ export async function importHistoricalPrompts(store: Store, projectRoot: string)
   appendParamEvents(store, retroEvents);
 
   // Bootstrap: language detection on most recent LANG_WINDOW prompts
-  const langTexts = collected.slice(0, LANG_WINDOW);
+  const langTexts = collected.slice(0, LANG_WINDOW).map((entry) => entry.text);
   const detected  = detectLanguage(langTexts, undefined);
   if (detected) {
     setDetectedLanguage(store, projectRoot, detected);
   }
 
-  // Bootstrap: pre-seed session state so first advisory is not cold-started
-  const promptRecords: PromptRecord[] = collected.slice(0, MAX_HISTORY).map((text, i) => ({
+  // Bootstrap: pre-seed session state so first advisory is not cold-started.
+  // capturedAt carries the transcript row's real time when it has one — the same
+  // no-fake-stamp principle the param events above follow.
+  const promptRecords: PromptRecord[] = collected.slice(0, MAX_HISTORY).map((entry, i) => ({
     index:           i,
-    text,
-    capturedAt:      Date.now(),
+    text:            entry.text,
+    capturedAt:      entry.capturedAt ?? Date.now(),
     classifiedStage: 'idea' as Stage,
     confidence:      0.5,
   }));
