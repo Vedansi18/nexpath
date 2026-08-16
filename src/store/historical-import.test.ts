@@ -100,7 +100,10 @@ describe('importHistoricalPrompts', () => {
 
   // 1c. CHRONOLOGY — store order follows the rows' own timestamps, oldest first,
   // even when timestamp order contradicts file order. Recency reads (newest first)
-  // must return the chronologically newest history first.
+  // must return the chronologically newest history first. The whole fixture runs
+  // through the CLAUDE_CONFIG_DIR override (the harness points it at a temp dir),
+  // and also asserts the import's riders: exact imported count, retro param events
+  // visible, and zero advisories fired by the import itself.
   it('imports in true chronological order by row timestamps, across files', async () => {
     const projDir = setupProjDir(tmpDir);
 
@@ -121,6 +124,16 @@ describe('importHistoricalPrompts', () => {
 
     const rows = getRecentPrompts(store, PROJECT_ROOT, 10);
     expect(rows.map((r) => r.text)).toEqual(['prompt-d', 'prompt-c', 'prompt-b', 'prompt-a']);
+    // Rider: imported count = min(N, cap) — all four rows, nothing dropped or duplicated.
+    expect(rows).toHaveLength(4);
+    // Rider: the import fires ZERO advisories — the bootstrapped session state has
+    // no fired decision-session record.
+    const mgr = SessionStateManager.load(store, PROJECT_ROOT);
+    expect(mgr.current.firedDecisionSessions ?? []).toHaveLength(0);
+    // Rider (lives in the disk-store retro block below, NOT here): param-event
+    // retro-population is a no-op on in-memory stores, so its visibility assertion
+    // belongs to 'records historical_import param-events (stage null)…' — asserting
+    // it on this in-memory store would be vacuously true.
   });
 
   // 1d. TIMESTAMPS — captured_at carries the transcript row's real time; a row
