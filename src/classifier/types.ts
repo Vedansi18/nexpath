@@ -34,8 +34,13 @@ export interface PromptRecord {
   index: number;         // sequential index within the session
   text: string;
   capturedAt: number;    // unix ms timestamp
-  classifiedStage: Stage;
-  confidence: number;
+  /**
+   * null on records bootstrapped from the historical import — those prompts were
+   * never classified, and a fabricated stage would bias stage reads. The classifier
+   * fills real stages as live prompts arrive.
+   */
+  classifiedStage: Stage | null;
+  confidence: number | null;
 }
 
 export interface SignalCounter {

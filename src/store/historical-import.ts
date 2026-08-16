@@ -8,7 +8,7 @@ import { detectLanguage, LANG_WINDOW } from '../classifier/LanguageDetector.js';
 import { SessionStateManager, MAX_HISTORY } from '../classifier/SessionStateManager.js';
 import { detectSignalsByChannel } from '../classifier/signals.js';
 import { appendParamEvents } from '../telemetry/param-events.js';
-import type { PromptRecord, Stage } from '../classifier/types.js';
+import type { PromptRecord } from '../classifier/types.js';
 
 // Equal to the store's per-project FIFO cap (500) BY DESIGN: collection keeps the
 // NEWEST `IMPORT_CAP` prompts and insertion is chronological (oldest first), so the
@@ -18,6 +18,22 @@ const IMPORT_CAP = 500;
 
 /** Session marker for param-events derived from the historical-import backfill. */
 const HISTORICAL_IMPORT_SESSION_ID = 'historical-import';
+
+/**
+ * Non-prompt rows that Claude Code writes as `type: 'user'` string content: slash-command
+ * wrappers, caveat banners, hook feedback, and command stdout. They are a small share of
+ * rows but they would seed the longitudinal detectors with text the user never typed,
+ * so they are excluded at import. The markers are stable transcript shapes.
+ */
+function isNoiseShape(text: string): boolean {
+  return (
+    text.startsWith('<command-name>') ||
+    text.startsWith('Caveat:') ||
+    text.includes('<local-command-caveat>') ||
+    text.startsWith('<local-command-stdout>') ||
+    text.startsWith('Stop hook')
+  );
+}
 
 export async function importHistoricalPrompts(store: Store, projectRoot: string): Promise<void> {
   // Guard: skip if prompts already exist for this project
@@ -61,7 +77,8 @@ export async function importHistoricalPrompts(store: Store, projectRoot: string)
         if (
           obj.type === 'user' &&
           typeof obj.message?.content === 'string' &&
-          obj.message.content.trim().length > 0
+          obj.message.content.trim().length > 0 &&
+          !isNoiseShape(obj.message.content.trim())
         ) {
           const ts = typeof obj.timestamp === 'string' ? Date.parse(obj.timestamp) : NaN;
           collected.push({
@@ -122,14 +139,16 @@ export async function importHistoricalPrompts(store: Store, projectRoot: string)
   }
 
   // Bootstrap: pre-seed session state so first advisory is not cold-started.
-  // capturedAt carries the transcript row's real time when it has one — the same
-  // no-fake-stamp principle the param events above follow.
+  // capturedAt carries the transcript row's real time when it has one, and the
+  // stage stamp is null — the same no-fake-stamp principle the param events above
+  // follow: these prompts were never classified, and a uniform fabricated stage
+  // would bias stage reads. The classifier fills real stages as live prompts arrive.
   const promptRecords: PromptRecord[] = collected.slice(0, MAX_HISTORY).map((entry, i) => ({
     index:           i,
     text:            entry.text,
     capturedAt:      entry.capturedAt ?? Date.now(),
-    classifiedStage: 'idea' as Stage,
-    confidence:      0.5,
+    classifiedStage: null,
+    confidence:      null,
   }));
   SessionStateManager.bootstrapFromHistory(store, projectRoot, promptRecords, collected.length);
 }
