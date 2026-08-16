@@ -50,6 +50,20 @@ function isSourceCritical(fact: PromptEnhancementGuidanceFact): boolean {
   );
 }
 
+/**
+ * The locked exception test for an UNDER-EVIDENCED route: a popup may still
+ * show — confirmation-first — ONLY when high-risk or source-critical evidence
+ * is strong and useful. The test consumes the TYPED fields alone (the
+ * evidence state and the safety fact role) — never keywords or surface text:
+ * prompt length is not maturity, and short surface text never implies a
+ * target, module, or risk level.
+ */
+function isStrongAndUsefulHighRiskEvidence(fact: PromptEnhancementGuidanceFact): boolean {
+  const highRiskOrSourceCritical = isSourceCritical(fact) || fact.factRole === 'safety_confirmation_support';
+  const strongAndUseful = fact.sourceEvidenceState === 'strong' || fact.sourceEvidenceState === 'weak_source_critical';
+  return highRiskOrSourceCritical && strongAndUseful;
+}
+
 const SKIP: Omit<PromptEnhancementGuidanceGateDecision, 'gateReasonCode' | 'bodyShape'> = {
   show: false,
   disposition: 'no_popup_not_applicable',
@@ -70,13 +84,23 @@ export function applyPromptEnhancementGuidanceGateV1(
   /**
    * The routing layer's evidence-ladder outcome, flowed into THIS gate so the
    * under-evidenced case rides the existing skip machinery — never a second
-   * gate or a parallel skip path. The locked dispositions for it (the skip
-   * default and the narrow high-risk exception) are the fallback-direction
-   * step and are wired here by that step; absent on the routeless replay path.
+   * gate or a parallel skip path. Absent on the routeless replay path, which
+   * keeps its pre-existing behaviour.
    */
   routeLadderResolution?: PromptEnhancementLadderResolutionV1,
 ): PromptEnhancementGuidanceGateDecision {
-  void routeLadderResolution;
+  // The locked dispositions for an under-evidenced route: skip_no_popup is the
+  // DEFAULT — not a family, not a guess — and the single narrow exception is a
+  // confirmation-first popup on strong-and-useful high-risk/source-critical
+  // evidence, decided from typed fields only. This rides the SAME gate as
+  // every other skip; there is no parallel path.
+  if (routeLadderResolution?.state === 'under_evidenced') {
+    const survivor = mix.showPopup ? mix.requiredSurvivor : null;
+    if (survivor !== null && isStrongAndUsefulHighRiskEvidence(survivor)) {
+      return show('confirmation_first', 'show_under_evidenced_high_risk_exception');
+    }
+    return skip('skip_under_evidenced_no_popup');
+  }
   // The mixer already decided to skip (DR2-G1: no Source A survivor / Source-B-only /
   // invalid). Carry the reason; never fabricate a filler popup.
   if (!mix.showPopup || mix.requiredSurvivor === null) {

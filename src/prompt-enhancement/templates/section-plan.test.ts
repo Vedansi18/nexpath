@@ -484,3 +484,35 @@ describe('S2 done-when: no capabilities means no overlay', () => {
     }
   });
 });
+
+// ── The why-help surface carries the under-evidenced exception reason code ──
+
+describe('under-evidenced routes and the existing why-help surface', () => {
+  const bare = {
+    promptText: 'make it better please',
+    firedKey: undefined,
+    effectiveFiredSource: undefined,
+    selectedQualifyingAbsence: undefined,
+    absenceGateReason: undefined,
+    triggerKind: 'manual',
+  } as const;
+
+  it('an under-evidenced route stamps the public-safe gate reason code on every planned section (codes only, no wording)', () => {
+    const route = routePromptEnhancement(routeInput(bare));
+    expect(route.ladderResolution.state).toBe('under_evidenced');
+    const result = planPromptEnhancementSections({ routeResult: route, sourceRefs: [sourceA], guidanceFacts: [] });
+    expect(result.sectionPlans.length).toBeGreaterThan(0);
+    for (const section of result.sectionPlans) {
+      expect(section.structuredContentPartRefs).toContain('gate_reason:under_evidenced_high_risk_exception');
+    }
+  });
+
+  it('a resolved route carries no under-evidenced gate reason ref', () => {
+    const route = routePromptEnhancement(routeInput({}));
+    expect(route.ladderResolution.state).toBe('resolved');
+    const result = planPromptEnhancementSections({ routeResult: route, sourceRefs: [sourceA], guidanceFacts: [] });
+    for (const section of result.sectionPlans) {
+      expect(section.structuredContentPartRefs).not.toContain('gate_reason:under_evidenced_high_risk_exception');
+    }
+  });
+});

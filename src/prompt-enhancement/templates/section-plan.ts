@@ -393,9 +393,19 @@ function buildSectionPlan(input: {
     callVisibilityMode: callVisibilityModeFor(input.route.selectedPreset.callVisibilityMode),
     deterministicTextBasisPolicy: 'structured_parts',
     textDraftRef: `composer_pending:${input.sectionKind}`,
-    structuredContentPartRefs: matchingFacts.length > 0
-      ? matchingFacts.map((fact) => `guidance_fact:${fact.factId}`)
-      : [`section_kind:${input.sectionKind}`],
+    // The section's why-help refs (they surface as whyHelpReasonCodes on the
+    // composed section). An under-evidenced route that still shows did so ONLY
+    // through the gate's locked high-risk exception — the public-safe reason
+    // code rides this EXISTING surface so the popup can explain itself; the
+    // label wording for it is content, owned elsewhere. Codes only, no text.
+    structuredContentPartRefs: [
+      ...(matchingFacts.length > 0
+        ? matchingFacts.map((fact) => `guidance_fact:${fact.factId}`)
+        : [`section_kind:${input.sectionKind}`]),
+      ...(input.route.ladderResolution.state === 'under_evidenced'
+        ? ['gate_reason:under_evidenced_high_risk_exception']
+        : []),
+    ],
     supportedActions: ['use_current_body', 'use_original', 'shorter', 'more_thorough', 'more_project_grounded', 'apply_details'],
     contentTemplateRuntimeSeamUse: 'none',
     handoffCapabilityFlags: input.route.capabilityOverlays.includes('capability.decomposition_candidate')
