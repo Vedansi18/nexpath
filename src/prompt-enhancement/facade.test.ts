@@ -137,6 +137,35 @@ describe('PE executable facade', () => {
     expect(result.disposition).toBe('show_current_body');
   });
 
+  it('the intent proposal survives the facade hop and decides the route', async () => {
+    // The middle link of the threading chain. Its two ends are pinned elsewhere —
+    // the boundary populates provenance, and the router prefers a proposal it is
+    // handed — but nothing asserted that the facade carries one to the other. If
+    // that hop broke, every prompt would fall to the keyword cascade silently:
+    // routes still get produced, just the wrong ones, with the suite green.
+    const base = request();
+    const withProposal = await preparePromptEnhancement(request({
+      requestId: 'facade-threading-keyed',
+      reviewMomentContext: {
+        ...base.reviewMomentContext,
+        triggerProvenance: {
+          ...base.reviewMomentContext.triggerProvenance,
+          classifierPrimaryIntent: 'review.security_review',
+          classifierIntentConfidence: 0.9,
+          classifierCapabilityCandidates: [],
+          classifierDebugEvidencePresent: [],
+        },
+      },
+    }));
+    // A review subtype the cascade cannot reach from this prompt text — so seeing
+    // it here proves the proposal travelled, not that a keyword matched.
+    expect(withProposal.routeDecision.primaryIntent).toBe('review.security_review');
+    expect(withProposal.routeDecision.familyId).toBe('review_verification');
+
+    const withoutProposal = await preparePromptEnhancement(request({ requestId: 'facade-threading-keyless' }));
+    expect(withoutProposal.routeDecision.primaryIntent).not.toBe('review.security_review');
+  });
+
   it('E2 / DR2-G1: no Source-A survivor (no trigger, no signals) returns skip_no_popup, not a filler body', async () => {
     const promptStartStop = getPromptStartStopSourceSnapshot();
     const result = await preparePromptEnhancement(
