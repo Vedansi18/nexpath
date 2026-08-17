@@ -1432,3 +1432,53 @@ describe('discarding every ordinary section still yields a usable result', () =>
     expect(result.currentBody.text).toContain('you must ask me for go-ahead confirmation');
   });
 });
+
+describe('de-nagging: the reproduction section names what was supplied instead of asking again', () => {
+  const debugRoute = (evidence: readonly string[]) => ({
+    route: {
+      promptText: 'the checkout page throws a null error after login. bug.',
+      currentStage: 'implementation' as const,
+      firedKey: 'absence:debugging_observation_gap@implementation',
+      classifierPrimaryIntent: 'issue_debug.failing_test',
+      classifierIntentConfidence: 0.9,
+      classifierCapabilityCandidates: [],
+      classifierDebugEvidencePresent: evidence,
+    },
+  });
+  const reproText = (evidence: readonly string[]) => {
+    const planning = planningResult(debugRoute(evidence));
+    const body = composePromptEnhancementBody({
+      enhancementId: 'denag',
+      originalPromptText: 'the checkout page throws a null error after login. bug.',
+      sectionPlanningResult: planning,
+    }).currentBody;
+    return body.sections.find((section) => section.sectionKind === 'reproduction_or_evidence')?.bodyText ?? '';
+  };
+
+  it('carry: the line names the forms the developer ACTUALLY sent', () => {
+    expect(reproText(['reproduction_steps', 'logs', 'failing_test_details']))
+      .toContain('Reproduction steps, logs and failing test details are provided in the request above.');
+  });
+
+  it('carry: a different evidence mix names THOSE forms, never a fixed list', () => {
+    const text = reproText(['screenshots', 'metrics']);
+    expect(text).toContain('Screenshots and metrics are provided in the request above.');
+    // The bug this guards: a hardcoded sentence would claim a failing test the
+    // developer never mentioned.
+    expect(text).not.toContain('failing test');
+  });
+
+  it('carry: an id with no label override still reads as English', () => {
+    expect(reproText(['request_response_samples', 'environment']))
+      .toContain('Request/response samples and environment are provided in the request above.');
+  });
+
+  it('ask: with nothing supplied the section still asks, unchanged', () => {
+    expect(reproText([]))
+      .toContain('Capture the failing behavior, reproduction path, observed evidence, and expected behavior before changing code.');
+  });
+
+  it('carry never re-asks for what was already supplied', () => {
+    expect(reproText(['reproduction_steps', 'logs'])).not.toContain('Capture the failing behavior');
+  });
+});

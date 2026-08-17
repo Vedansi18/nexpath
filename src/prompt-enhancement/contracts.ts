@@ -426,6 +426,14 @@ export interface PromptEnhancementTemplateRegistryRefV1 {
 
 export interface PromptEnhancementRouteDecisionV1 {
   routeDecisionId: string;
+  /**
+   * The debug-evidence forms the classifier OBSERVED in the prompt, carried so
+   * the reproduction section can name what the developer actually supplied
+   * instead of asking them to supply it again. An observation only — the
+   * registry still decides every attachment. Empty on keyless sessions, where
+   * nothing is known to be supplied.
+   */
+  debugEvidenceObserved: readonly string[];
   promptReviewOrigin:
     | 'user_authored_current_prompt'
     | 'old_ds_advisory_injected'

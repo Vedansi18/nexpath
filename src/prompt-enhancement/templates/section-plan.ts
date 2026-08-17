@@ -213,6 +213,8 @@ export interface PromptEnhancementSectionPlanningResult {
   routeDecisionId: string;
   promptReviewOrigin: PromptEnhancementRouteResult['contractDecision']['promptReviewOrigin'];
   promptReviewProcessingPolicy: PromptEnhancementRouteResult['contractDecision']['promptReviewProcessingPolicy'];
+  /** Observed evidence forms, carried so the repro section can name what was supplied. */
+  debugEvidenceObserved: readonly string[];
   renderedFactIds: readonly string[];
   metadataOnlyFactIds: readonly string[];
   suppressedFactIds: readonly string[];
@@ -334,6 +336,19 @@ export const SLOT_EFFECTS_BY_CAPABILITY_V1: Partial<Record<PromptEnhancementCapa
   },
 };
 
+/**
+ * Obligations a section carries whenever it RENDERS, independent of any
+ * capability. The capability-keyed map below cannot express this: it attaches
+ * the no-invention state only when the reproduction REQUEST attaches, so a
+ * section that still renders generated text on the carry route — where the
+ * developer supplied real evidence a model could embroider into invented
+ * specifics — was left unprotected, i.e. protected precisely when there was
+ * nothing to invent from. Owner ruling 2026-08-17: protect it always.
+ */
+const SECTION_KIND_FLOOR_OBLIGATIONS_V1: Readonly<Record<string, readonly PromptEnhancementSlotObligationV1[]>> = {
+  reproduction_or_evidence: ['no_invention_state'],
+};
+
 function slotObligationsFor(
   sectionKind: string,
   capabilityOverlays: readonly PromptEnhancementCapabilityId[],
@@ -345,6 +360,11 @@ function slotObligationsFor(
       for (const obligation of effect.obligations) obligations.add(obligation);
     }
   }
+  // Floors are added LAST so a route that already carried an obligation keeps
+  // its existing order: obligations ride into the composer prompt, and the only
+  // prompt that should change here is the carry route's, which gains the
+  // protection it was missing.
+  for (const obligation of SECTION_KIND_FLOOR_OBLIGATIONS_V1[sectionKind] ?? []) obligations.add(obligation);
   return [...obligations];
 }
 
@@ -391,6 +411,7 @@ export function planPromptEnhancementSections(
       routeDecisionId: route.contractDecision.routeDecisionId,
       promptReviewOrigin: route.contractDecision.promptReviewOrigin,
       promptReviewProcessingPolicy: route.contractDecision.promptReviewProcessingPolicy,
+      debugEvidenceObserved: route.contractDecision.debugEvidenceObserved,
       renderedFactIds: [],
       metadataOnlyFactIds: facts.filter(isMetadataOnlyFact).map((fact) => fact.factId),
       suppressedFactIds: facts.filter(isSuppressedFact).map((fact) => fact.factId),
@@ -436,6 +457,7 @@ export function planPromptEnhancementSections(
     routeDecisionId: route.contractDecision.routeDecisionId,
     promptReviewOrigin: route.contractDecision.promptReviewOrigin,
     promptReviewProcessingPolicy: route.contractDecision.promptReviewProcessingPolicy,
+    debugEvidenceObserved: route.contractDecision.debugEvidenceObserved,
     renderedFactIds: facts.filter(isRenderableFact).map((fact) => fact.factId),
     metadataOnlyFactIds: facts.filter(isMetadataOnlyFact).map((fact) => fact.factId),
     suppressedFactIds: facts.filter(isSuppressedFact).map((fact) => fact.factId),

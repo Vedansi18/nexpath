@@ -790,6 +790,8 @@ function renderSection(input: {
     input.originalPromptText,
     heading,
     input.sectionPlanningResult.promptReviewOrigin,
+    sectionPlan.slotObligations,
+    input.sectionPlanningResult.debugEvidenceObserved,
   );
   if (action === 'more_thorough') {
     lines.push(...moreThoroughLines(sectionPlan));
@@ -817,6 +819,24 @@ function renderSection(input: {
   };
 }
 
+const DEBUG_EVIDENCE_LABEL_OVERRIDES_V1: Readonly<Record<string, string>> = {
+  request_response_samples: 'request/response samples',
+};
+
+/**
+ * Names the evidence forms the developer actually supplied, for the carry line.
+ * Labels are GENERIC by default (`id` with underscores as spaces) so a newly
+ * added evidence form still renders sensibly instead of silently dropping out
+ * of the sentence; only ids that read badly carry an override.
+ */
+function describeSuppliedEvidenceV1(forms: readonly string[]): string {
+  const labels = forms.map((form) => DEBUG_EVIDENCE_LABEL_OVERRIDES_V1[form] ?? form.replaceAll('_', ' '));
+  const joined = labels.length <= 1
+    ? (labels[0] ?? '')
+    : `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`;
+  return `${joined.charAt(0).toUpperCase()}${joined.slice(1)} ${labels.length === 1 ? 'is' : 'are'}`;
+}
+
 function instructionLinesForSection(
   sectionKind: string,
   action: PromptEnhancementComposerAction,
@@ -825,6 +845,14 @@ function instructionLinesForSection(
   // T3: the point inventory is the line that re-emits harvested text as "these original
   // points", so the provenance has to reach it rather than stopping at the composer.
   promptReviewOrigin: PromptEnhancementPromptReviewOrigin,
+  // De-nagging (owner ruling 2026-08-17): the reproduction section is a locked
+  // required shape, so it renders whether or not evidence was supplied. These
+  // two decide WHICH line it renders — the request obligation is present only
+  // when the registry decided to ask, and the observed forms name what the
+  // developer actually sent so the carry line cannot claim a failing test they
+  // never mentioned.
+  slotObligations: readonly string[] = [],
+  debugEvidenceObserved: readonly string[] = [],
 ): string[] {
   const concise = action === 'shorter';
   const line = (longText: string, shortText: string) => concise ? shortText : longText;
@@ -848,10 +876,15 @@ function instructionLinesForSection(
       ),
     ],
     reproduction_or_evidence: [
-      line(
-        'Capture the failing behavior, reproduction path, observed evidence, and expected behavior before changing code.',
-        'Capture repro, evidence, and expected behavior.',
-      ),
+      slotObligations.includes('reproduction_or_evidence_request') || debugEvidenceObserved.length === 0
+        ? line(
+          'Capture the failing behavior, reproduction path, observed evidence, and expected behavior before changing code.',
+          'Capture repro, evidence, and expected behavior.',
+        )
+        : line(
+          `${describeSuppliedEvidenceV1(debugEvidenceObserved)} provided in the request above.`,
+          `${describeSuppliedEvidenceV1(debugEvidenceObserved)} provided above.`,
+        ),
     ],
     behavior_preservation: [
       line(

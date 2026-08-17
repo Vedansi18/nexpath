@@ -1186,6 +1186,7 @@ function toContractDecision(
   const compoundPromptState = compoundPromptStateFor(input.promptText);
   return {
     routeDecisionId: input.routeDecisionId,
+    debugEvidenceObserved: [...(input.classifierDebugEvidencePresent ?? [])],
     promptReviewOrigin: promptReviewOriginFor(input),
     promptReviewProcessingPolicy: promptReviewProcessingPolicyFor(input),
     familyId: selectedPreset.family,

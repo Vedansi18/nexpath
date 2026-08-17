@@ -1619,6 +1619,7 @@ Source Signal Guidance:
       "capability.source_signal_guidance",
     ],
     "compoundPromptState": "single_intent",
+    "debugEvidenceObserved": [],
     "fallbackMode": "none",
     "familyId": "feature_delivery",
     "llmRoutePolicy": {
@@ -4351,6 +4352,7 @@ Source Signal Guidance:
       "capability.reproduction_or_evidence_needed",
     ],
     "compoundPromptState": "multi_point_same_intent",
+    "debugEvidenceObserved": [],
     "fallbackMode": "none",
     "familyId": "issue_debug",
     "llmRoutePolicy": {
@@ -6960,6 +6962,7 @@ Source Signal Guidance:
       "capability.source_signal_guidance",
     ],
     "compoundPromptState": "multi_point_same_intent",
+    "debugEvidenceObserved": [],
     "fallbackMode": "none",
     "familyId": "feature_delivery",
     "llmRoutePolicy": {
@@ -8307,6 +8310,7 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
     ],
     "capabilityOverlays": [],
     "compoundPromptState": "multi_point_same_intent",
+    "debugEvidenceObserved": [],
     "fallbackMode": "skip_no_popup",
     "familyId": "quick_improvement",
     "llmRoutePolicy": {
@@ -9282,6 +9286,7 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
     ],
     "capabilityOverlays": [],
     "compoundPromptState": "single_intent",
+    "debugEvidenceObserved": [],
     "fallbackMode": "skip_no_popup",
     "familyId": "quick_improvement",
     "llmRoutePolicy": {

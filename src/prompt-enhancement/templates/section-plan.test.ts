@@ -542,6 +542,26 @@ describe('slot obligations: layer 3 is no longer declared-but-inert', () => {
   const obligationsOf = (result: ReturnType<typeof planPromptEnhancementSections>, kind: string) =>
     result.sectionPlans.find((section) => section.sectionKind === kind)?.slotObligations ?? [];
 
+  it('CARRY route: the repro section keeps no-invention protection even with the request OFF', () => {
+    // The inversion this guards (owner ruling 2026-08-17): protection used to
+    // ride the capability, so a section was protected when the developer
+    // supplied NOTHING and unprotected once they supplied real evidence a model
+    // could embroider into invented specifics. The section renders generated
+    // text either way, so the protection is a floor, not a capability effect.
+    const carry = planFor('issue_debug.failing_test');
+    expect(carry.capabilityOverlays ?? []).not.toContain('capability.reproduction_or_evidence_needed');
+    expect(obligationsOf(carry, 'reproduction_or_evidence')).toContain('no_invention_state');
+    expect(obligationsOf(carry, 'reproduction_or_evidence')).not.toContain('reproduction_or_evidence_request');
+  });
+
+  it('the floor does not leak the obligation onto unrelated sections', () => {
+    const carry = planFor('issue_debug.failing_test');
+    for (const section of carry.sectionPlans) {
+      if (section.sectionKind === 'reproduction_or_evidence') continue;
+      expect(section.slotObligations).not.toContain('no_invention_state');
+    }
+  });
+
   it('reproduction_or_evidence_needed FIRST: its section carries the request obligation AND the typed no-invention state', () => {
     const result = planFor('issue_debug.reproduction_discovery');
     const obligations = obligationsOf(result, 'reproduction_or_evidence');

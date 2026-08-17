@@ -303,6 +303,7 @@ function continuationDefaultPrepareResultV1(input: {
     },
     routeDecision: {
       routeDecisionId: currentBody.routeDecisionId,
+      debugEvidenceObserved: [],
       promptReviewOrigin: 'user_authored_current_prompt',
       promptReviewProcessingPolicy: 'eligible_for_initial_pe_route',
       familyId: 'issue_debug',
