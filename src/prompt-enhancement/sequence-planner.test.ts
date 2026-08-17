@@ -733,6 +733,13 @@ describe('sequence planner — the list is checked against the rules it will be 
     const clampedTask = await run(withItems(firstTask, taskItem({ originalSliceRef: { start: 0, end: ORIGINAL.length + 500 } })));
     expect(clampedTask.ok).toBe(true);
     if (clampedTask.ok) expect(clampedTask.output.items[1]?.originalSliceRef).toEqual({ start: 0, end: ORIGINAL.length });
+    // sourcePointRanges that run past the prompt are clamped into the valid window too (Phase 1b).
+    const clampedPoints = await run(withItems(firstTask, taskItem({ sourcePointRanges: [{ start: 0, end: ORIGINAL.length + 300 }] })));
+    expect(clampedPoints.ok).toBe(true);
+    if (clampedPoints.ok) expect(clampedPoints.output.items[1]?.sourcePointRanges).toEqual([{ start: 0, end: ORIGINAL.length }]);
+    // A degenerate slice (start ≥ end) is repaired to a minimal valid range, not rejected.
+    const degenerate = await run(withItems(firstTask, taskItem({ originalSliceRef: { start: 20, end: 5 } })));
+    expect(degenerate.ok).toBe(true);
     // The first prompt is the request itself: a partial first slice is NORMALIZED to the whole
     // original (Phase 1, §5.5a — a mandated literal is corrected, never rejected).
     const firstSliceNorm = await run(withItems({ ...firstTask, originalSliceRef: { start: 0, end: 4 } }, taskItem()));
