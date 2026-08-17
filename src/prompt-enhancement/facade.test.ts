@@ -329,3 +329,52 @@ describe('PE executable facade', () => {
     expect(validatePromptEnhancementPrepareResultV1(result).ok).toBe(true);
   });
 });
+
+describe('D3 end to end: an unmatched prompt never renders a guessed family', () => {
+  // The catch-all used to answer every unclassified prompt with
+  // quick_improvement. D3 made the terminal assert NOTHING, and D2 makes the
+  // gate skip it. Those two are unit-tested separately, but the JUNCTION was
+  // not: the facade must hand the route's ladder state to the gate. Dropping
+  // that one argument leaves an unmatched prompt rendering a confidently-wrong
+  // planning body (route.noPopup is FALSE on that path — only the gate stops
+  // it), and before this test the whole PE + CLI suite stayed green while it
+  // did. MUTATION-PROVEN.
+  // A FIRED signal is essential: without one the prompt takes the older
+  // weak-ambiguous skip, where route.noPopup is already true and the gate is
+  // never the deciding party. With a fired signal the terminal path is taken —
+  // route.noPopup is FALSE and ONLY the gate's under-evidenced disposition
+  // stops the body being shown. That is the junction under test.
+  const unmatchedWithSignal = () => request({
+    sourcePrompt: {
+      text: 'the widget frobnicates the sprocket during handoff',
+      origin: 'user',
+      capturedAt: 1,
+      promptIndex: 1,
+      generatedOriginPolicy: 'ordinary_source_a',
+    },
+    reviewMomentContext: {
+      ...request().reviewMomentContext,
+      triggerProvenance: {
+        ...request().reviewMomentContext.triggerProvenance,
+        triggerKind: 'absence',
+        firedKey: 'absence:verification_gap@implementation',
+      },
+    },
+  });
+
+  it('the unmatched terminal route is not shown as a guessed family', async () => {
+    const result = await preparePromptEnhancement(unmatchedWithSignal());
+    expect(result.disposition).toBe('no_popup_not_applicable');
+    expect(result.uiView.body.sendPolicy).toBe('no_popup');
+  });
+
+  it('and the routing/feedback decision suppresses rather than serves it', async () => {
+    // THIS is the assertion that guards the junction. Sections ARE planned on
+    // this path (route.noPopup is false), so the gate is the only party that
+    // withholds them — and the disposition check above stays no_popup for a
+    // second reason, so it does NOT discriminate. Only this one fails when the
+    // facade stops handing the route's ladder state to the gate.
+    const result = await preparePromptEnhancement(unmatchedWithSignal());
+    expect(result.routingAndFeedbackDecision.state).toBe('suppress');
+  });
+});
