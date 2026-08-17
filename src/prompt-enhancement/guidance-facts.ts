@@ -74,6 +74,39 @@ export function evidenceForGuidanceFact(
   return { key: resolved.key, value: redactSecrets(resolved.value) };
 }
 
+/**
+ * One absence-signal fact, however the signal reached us — as the FIRED trigger
+ * or as a normalized signal ref. Both paths build it here because the sensitive
+ * treatment must not depend on which door the signal came through: a
+ * `secret_in_prompt`-class record separates SIGNAL from LITERAL, routes through
+ * confirmation, and carries its safety hook, and the fired trigger is the most
+ * likely way such a signal arrives (it is what opens the popup).
+ */
+function absenceSignalFactV1(factId: string, sourceId: string): PromptEnhancementGuidanceFact {
+  const isSensitiveSource = sourceId.includes('secret_in_prompt');
+  return {
+    factId,
+    sourceType: 'absence_signal',
+    sourceIds: [sourceId],
+    guidanceKind: isSensitiveSource ? 'safety_or_confirmation' : 'missing_practice',
+    suggestedActionKind: 'no_action_render_context_only',
+    targetFamily: 'family_agnostic',
+    targetSectionKind: 'source_signal_guidance',
+    sourceEvidenceState: 'strong',
+    sourceOriginScope: 'current_prompt',
+    claimVerbPolicy: isSensitiveSource ? 'source_label_only' : 'must_phrase_as_source_signal',
+    factRole: isSensitiveSource ? 'safety_confirmation_support' : 'required_source_signal_survivor',
+    priority: 'required_survivor',
+    renderPolicy: 'render_as_section',
+    riskLevel: isSensitiveSource ? 'sensitive_authority_risky' : 'low',
+    safetyHooks: isSensitiveSource ? ['pe_ar9_sensitive_source'] : [],
+    privacyClass: isSensitiveSource ? 'requires_confirmation' : 'public_safe',
+    sanitizationState: 'not_applicable',
+    requiredBecause: 'source_signal_guidance_shown_in_popup',
+    publicCopySafe: true,
+  };
+}
+
 export function buildPromptEnhancementGuidanceFactsV1(
   request: PromptEnhancementPrepareRequestV1,
 ): readonly PromptEnhancementGuidanceFact[] {
@@ -108,57 +141,16 @@ export function buildPromptEnhancementGuidanceFactsV1(
       publicCopySafe: true,
     });
   } else if (trigger.triggerKind === 'absence') {
-    facts.push({
-      factId: nextId('signal'),
-      sourceType: 'absence_signal',
-      sourceIds: [promptEnhancementAbsenceSignalKeyV1(trigger.selectedQualifyingAbsence ?? trigger.firedKey ?? trigger.currentStage)],
-      guidanceKind: 'missing_practice',
-      suggestedActionKind: 'no_action_render_context_only',
-      targetFamily: 'family_agnostic',
-      targetSectionKind: 'source_signal_guidance',
-      sourceEvidenceState: 'strong',
-      sourceOriginScope: 'current_prompt',
-      claimVerbPolicy: 'must_phrase_as_source_signal',
-      factRole: 'required_source_signal_survivor',
-      priority: 'required_survivor',
-      renderPolicy: 'render_as_section',
-      riskLevel: 'low',
-      safetyHooks: [],
-      privacyClass: 'public_safe',
-      sanitizationState: 'not_applicable',
-      requiredBecause: 'source_signal_guidance_shown_in_popup',
-      publicCopySafe: true,
-    });
+    facts.push(absenceSignalFactV1(
+      nextId('signal'),
+      promptEnhancementAbsenceSignalKeyV1(trigger.selectedQualifyingAbsence ?? trigger.firedKey ?? trigger.currentStage),
+    ));
   }
 
   // Source A — required survivors. Stage/absence signals shown in the popup are
   // transform-rule-4/5/9 floors ("source/signal guidance in a shown popup"): must survive.
   for (const ref of signals.normalizedStageAbsenceSignalRefs) {
-    // A sensitive Source A record separates SIGNAL from LITERAL: the signal is
-    // selectable, generated guidance stays generalized safety wording, and the
-    // rendering routes through confirmation — never the raw literal.
-    const isSensitiveSource = ref.includes('secret_in_prompt');
-    facts.push({
-      factId: nextId('signal'),
-      sourceType: 'absence_signal',
-      sourceIds: [ref],
-      guidanceKind: isSensitiveSource ? 'safety_or_confirmation' : 'missing_practice',
-      suggestedActionKind: 'no_action_render_context_only',
-      targetFamily: 'family_agnostic',
-      targetSectionKind: 'source_signal_guidance',
-      sourceEvidenceState: 'strong',
-      sourceOriginScope: 'current_prompt',
-      claimVerbPolicy: isSensitiveSource ? 'source_label_only' : 'must_phrase_as_source_signal',
-      factRole: isSensitiveSource ? 'safety_confirmation_support' : 'required_source_signal_survivor',
-      priority: 'required_survivor',
-      renderPolicy: 'render_as_section',
-      riskLevel: isSensitiveSource ? 'sensitive_authority_risky' : 'low',
-      safetyHooks: isSensitiveSource ? ['pe_ar9_sensitive_source'] : [],
-      privacyClass: isSensitiveSource ? 'requires_confirmation' : 'public_safe',
-      sanitizationState: 'not_applicable',
-      requiredBecause: 'source_signal_guidance_shown_in_popup',
-      publicCopySafe: true,
-    });
+    facts.push(absenceSignalFactV1(nextId('signal'), ref));
   }
 
   // Source A — content-template records are source *evidence / precedent only*

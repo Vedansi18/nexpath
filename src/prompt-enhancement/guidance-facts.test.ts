@@ -385,3 +385,57 @@ describe('sensitive source separation (secret-class signals)', () => {
     expect(fact.factRole).toBe('required_source_signal_survivor');
   });
 });
+
+// ── The sensitive signal gets its treatment however it arrives ────────────────
+
+describe('secret_in_prompt separates SIGNAL from LITERAL on every path', () => {
+  const SAFETY_HOOK = 'pe_ar9_sensitive_source';
+
+  it('as the FIRED TRIGGER — the path that actually opens the popup', () => {
+    const fact = buildPromptEnhancementGuidanceFactsV1(
+      requestWithSignals({}, {
+        triggerKind: 'absence',
+        currentStage: 'implementation',
+        selectedQualifyingAbsence: 'secret_in_prompt',
+      } as never),
+    )[0];
+    // The locked triple: routed through confirmation, safety material, label-only.
+    expect(fact.privacyClass).toBe('requires_confirmation');
+    expect(fact.factRole).toBe('safety_confirmation_support');
+    expect(fact.claimVerbPolicy).toBe('source_label_only');
+    // And it must read as source-critical downstream, not as ordinary low-risk guidance.
+    expect(fact.riskLevel).toBe('sensitive_authority_risky');
+    expect(fact.guidanceKind).toBe('safety_or_confirmation');
+    expect(fact.safetyHooks).toContain(SAFETY_HOOK);
+  });
+
+  it('as a normalized signal ref — same treatment, same fields', () => {
+    const fact = buildPromptEnhancementGuidanceFactsV1(
+      requestWithSignals({ normalizedStageAbsenceSignalRefs: ['absence:secret_in_prompt'] } as never),
+    )[0];
+    expect(fact.privacyClass).toBe('requires_confirmation');
+    expect(fact.factRole).toBe('safety_confirmation_support');
+    expect(fact.claimVerbPolicy).toBe('source_label_only');
+    expect(fact.riskLevel).toBe('sensitive_authority_risky');
+    expect(fact.safetyHooks).toContain(SAFETY_HOOK);
+  });
+
+  it('an ordinary absence signal is untouched by the sensitive path, on both routes', () => {
+    const triggered = buildPromptEnhancementGuidanceFactsV1(
+      requestWithSignals({}, {
+        triggerKind: 'absence',
+        currentStage: 'implementation',
+        selectedQualifyingAbsence: 'debugging_observation_gap',
+      } as never),
+    )[0];
+    const referenced = buildPromptEnhancementGuidanceFactsV1(
+      requestWithSignals({ normalizedStageAbsenceSignalRefs: ['absence:debugging_observation_gap'] } as never),
+    )[0];
+    for (const fact of [triggered, referenced]) {
+      expect(fact.privacyClass).toBe('public_safe');
+      expect(fact.factRole).toBe('required_source_signal_survivor');
+      expect(fact.claimVerbPolicy).toBe('must_phrase_as_source_signal');
+      expect(fact.safetyHooks).not.toContain(SAFETY_HOOK);
+    }
+  });
+});
