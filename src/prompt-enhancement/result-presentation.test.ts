@@ -41,7 +41,7 @@ async function fixture() {
   const result = await preparePromptEnhancement(request());
   const handoff = buildPromptEnhancementHandoffMetadataV1({ handoffDecisionId: `${result.enhancementId}:handoff`, requestId: result.requestId, projectRoot: result.projectRoot, currentBody: result.currentBody, safetySummary: result.safetySummary, handoffKind: 'first_prompt_handoff_candidate', summary: { summaryId: `${result.enhancementId}:summary`, publicSafeText: 'Metadata only.', remainingTaskCount: 1, taskRoleLabels: ['verification'] } });
   const event: PromptEnhancementFutureSequenceRuntimeEventV1 = { requestId: result.requestId, projectScope: result.projectRoot, sequenceId: 'sequence-1', sequenceItemId: 'item-2', currentItemRevision: 2, bodyRevision: result.currentBody.bodyRevision, contractVersion: 1, stateFreshness: 'current', stopEventState: 'stop_fired_non_proof', terminalTransitionState: 'none', idempotencyKey: 'b33-idem', createdAtMs: 2 };
-  const popup = buildPromptEnhancementMpsContinuationPopupV1({ result, handoffMetadata: handoff, event, additionalDetails: { text: 'Details', revision: 1 }, cancel: { state: 'available', disposition: 'blocked_no_send' } });
+  const popup = buildPromptEnhancementMpsContinuationPopupV1({ result, handoffMetadata: handoff, event, progress: { done: 1, total: 2 }, itemKind: 'task', additionalDetails: { text: 'Details', revision: 1 }, cancel: { state: 'available', disposition: 'blocked_no_send' } });
   if (popup.state !== 'ready') throw new Error('continuation fixture did not render');
   return { result, handoff, popup: popup.model };
 }

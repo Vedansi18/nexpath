@@ -8,7 +8,7 @@ import {
   type PromptEnhancementWhyHelpV1,
 } from './contracts.js';
 import { validatePromptEnhancementHandoffMetadataV1 } from './handoff-metadata.js';
-import type { PromptEnhancementSequenceItemKindV1 } from './sequence-payload.js';
+import { PROMPT_ENHANCEMENT_SEQUENCE_TASK_KINDS_V1, type PromptEnhancementSequenceItemKindV1 } from './sequence-payload.js';
 
 export const PROMPT_ENHANCEMENT_MPS_CONTINUATION_POPUP_TITLE_V1 = 'Nexpath · Multi-prompt sequence' as const;
 export const PROMPT_ENHANCEMENT_MPS_CONTINUATION_POPUP_HEADING_V1 = 'Use enhanced sequence prompt' as const;
@@ -160,7 +160,21 @@ export type PromptEnhancementMpsContinuationIntentResultV1 =
 export function buildPromptEnhancementMpsContinuationPopupV1(
   input: PromptEnhancementMpsContinuationInputV1,
 ): PromptEnhancementMpsContinuationBuildResultV1 {
-  const resultValidation = validatePromptEnhancementPrepareResultV1(input.result);
+  // Kind-aware validation. A CONFIRMATION item carries NO original slice, so the packager sets
+  // `originalPromptText: ''` (owner-locked, Ruling C §22.2 — see sequence-packager.ts and the
+  // `confirmation-carries-no-original-text` acceptance fixture). The shared prepare-result validator
+  // requires `originalPromptText` non-empty (isCompleteCurrentBody), but the continuation RENDERER skips
+  // the original region for confirmation kinds anyway (the TASK-kinds guard in cli-mps-popup), so the
+  // field is never displayed for them. Validating the packaged result as-is would wrongly reject a
+  // legitimate confirmation continuation as `missing_current_body`. So for a confirmation item whose
+  // original text is (correctly) empty, validate against a copy carrying a non-empty stand-in for the
+  // never-shown field. The stand-in is the item's OWN body text — it is discarded after the check; the
+  // popup is built from the real `input.result` below, which keeps the owner-locked empty value.
+  const isTaskKind = (PROMPT_ENHANCEMENT_SEQUENCE_TASK_KINDS_V1 as readonly string[]).includes(input.itemKind);
+  const validationTarget = isTaskKind || input.result.currentBody.originalPromptText.trim().length > 0
+    ? input.result
+    : { ...input.result, currentBody: { ...input.result.currentBody, originalPromptText: input.result.currentBody.text } };
+  const resultValidation = validatePromptEnhancementPrepareResultV1(validationTarget);
   if (!resultValidation.ok) {
     return { state: 'no_popup', reasonCodes: ['invalid_prepare_result', ...resultValidation.reasonCodes] };
   }

@@ -8,8 +8,12 @@ import {
 } from './sequence-runtime.js';
 import {
   emptyPromptEnhancementSequencePayloadV1,
+  validatePromptEnhancementSequencePayloadV1,
   type PromptEnhancementSequencePayloadV1,
+  type PromptEnhancementSequenceItemV1,
+  type PromptEnhancementSequenceOffsetRangeV1,
 } from './sequence-payload.js';
+import { promptEnhancementSequencePolicyForOutcomeV1 } from './sequence-planner-entry.js';
 import { redactSecrets } from '../store/redact.js';
 
 /**
@@ -53,6 +57,15 @@ export interface PromptEnhancementSequenceIntakeInputV1 {
   result:      PromptEnhancementPrepareResultV1;
   projectRoot: string;
   sessionId:   string;
+  /**
+   * MPS P1b-iii (8c): the WORDED items 2…N produced by the background batch while the popup was open,
+   * with the sequence's directive ranges. Present ⇒ the accepted row is written with its full item
+   * list (the sequence is now ready to serve when the runtime gate opens). Absent ⇒ the pre-8c
+   * empty-list behaviour. A list that does not line up with the row (count/bounds/wording) is dropped
+   * fail-closed back to the empty payload — an accepted row is never written with an invalid list.
+   */
+  wordedItems?:      readonly PromptEnhancementSequenceItemV1[];
+  promptDirectives?: readonly PromptEnhancementSequenceOffsetRangeV1[];
 }
 
 export function intakePromptEnhancementSequenceOnFirstSendV1(
@@ -90,20 +103,23 @@ export function intakePromptEnhancementSequenceOnFirstSendV1(
     itemCount:     Math.min(summary.remainingTaskCount + 1, PROMPT_ENHANCEMENT_SEQUENCE_MAX_ITEM_COUNT_V1),
   });
   if (!created.ok) return { state: 'no_sequence', reasonCode: created.reasonCode };
-  // No planner exists yet, so the item list is empty and the policy stays at its default. What
-  // is known now is the length the future offsets index into, and that the offer was accepted —
-  // a row is only created here because the user explicitly sent.
-  //
   // The bound is taken from the body's original text, which is the prompt AS RECEIVED — the string
   // slices are cut from, so the one the offsets index. The copy kept in the prompts table is
   // redacted, but redaction is length-preserving by design (see `store/redact.ts`), so the two
   // agree character for character and a stored range selects the same words in either.
+  const originalLength = input.result.currentBody.originalPromptText.length;
+
+  // P1b-iii (8c): when the background batch produced the worded items, the accepted row carries its
+  // full list — the sequence is ready to serve once the runtime gate opens. The list is validated
+  // against the runtime the intake just created (count/bounds/wording/policy); anything that does not
+  // line up is dropped fail-closed to the empty payload, so an accepted row is never invalid. When no
+  // items were produced (non-sequence, batch skipped/failed) the empty list is written, as before.
+  const payload = buildPromptEnhancementSequenceIntakePayloadV1(originalLength, created.state, input);
+
   return {
     state:   'sequence_recorded',
     runtime: created.state,
-    payload: emptyPromptEnhancementSequencePayloadV1(
-      input.result.currentBody.originalPromptText.length,
-    ),
+    payload,
     // Persist the REDACTED, length-preserving original (never the raw text): redaction preserves
     // length by design, so the future offsets index it character-for-character, and it is already
     // stored redacted in the prompts table — no new privacy exposure. The handoffKind is a single
@@ -111,4 +127,31 @@ export function intakePromptEnhancementSequenceOnFirstSendV1(
     redactedOriginalPromptText: redactSecrets(input.result.currentBody.originalPromptText),
     handoffKind:                input.result.handoffMetadata?.handoffKind ?? null,
   };
+}
+
+/**
+ * Build the intake payload for a recorded sequence. With no worded items (the pre-8c state, or a batch
+ * that was skipped/failed) it is the empty list. With worded items it is the full accepted payload —
+ * BUT only if that payload validates against the row the intake just created: the batch list must line
+ * up on count (=== itemCount), bounds (offsets in range), and wording (every stored item worded); the
+ * policy is the deterministic sequence value. A list that does not line up is dropped back to the empty
+ * payload, so an accepted row is never written invalid (the store validates on write and would reject
+ * it anyway) — the wording is simply not carried this time.
+ */
+function buildPromptEnhancementSequenceIntakePayloadV1(
+  originalLength: number,
+  runtime: PromptEnhancementSequenceRuntimeStateV1,
+  input: PromptEnhancementSequenceIntakeInputV1,
+): PromptEnhancementSequencePayloadV1 {
+  const empty = emptyPromptEnhancementSequencePayloadV1(originalLength);
+  if (!input.wordedItems || input.wordedItems.length === 0) return empty;
+  const full: PromptEnhancementSequencePayloadV1 = {
+    items:                     input.wordedItems,
+    promptDirectives:          input.promptDirectives ?? [],
+    suggestedNextPromptPolicy: promptEnhancementSequencePolicyForOutcomeV1('sequence'),
+    originalLength,
+    offerDisposition:          'accepted',
+  };
+  const context = { itemCount: runtime.itemCount, status: runtime.status };
+  return validatePromptEnhancementSequencePayloadV1(full, context).ok ? full : empty;
 }

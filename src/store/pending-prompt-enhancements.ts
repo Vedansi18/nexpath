@@ -6,6 +6,7 @@ import {
   type PromptEnhancementPrepareRequestV1,
   type PromptEnhancementPrepareResultV1,
 } from '../prompt-enhancement/contracts.js';
+import type { PromptEnhancementSequenceItemV1, PromptEnhancementSequenceOffsetRangeV1 } from '../prompt-enhancement/sequence-payload.js';
 
 /**
  * Pending Prompt Enhancement — the UserPromptSubmit `auto` hook prepares a PE and stores it
@@ -24,6 +25,19 @@ export interface PendingPromptEnhancement {
   createdAt:   number;
   request:     PromptEnhancementPrepareRequestV1;
   result:      PromptEnhancementPrepareResultV1;
+  /**
+   * MPS P1b-ii: the UserPromptSubmit planner's full item list, carried so the Stop-hook background
+   * wording batch can read it (planner and popup+batch run in different processes — owner B-i).
+   * Undefined on every non-sequence prepare and on old rows / any corrupt stored value (fail-closed
+   * → the batch simply does not run). Items are offsets/roles into the original; no wording yet.
+   */
+  plannerItems?: readonly PromptEnhancementSequenceItemV1[];
+  /**
+   * MPS P1b-ii: the sequence's whole-prompt directive ranges (offsets into the original), carried
+   * beside {@link plannerItems} so the batch can resolve them to text. Undefined whenever plannerItems
+   * is (non-sequence / old row / corrupt) — an empty sequence directive list stores as `[]`.
+   */
+  plannerPromptDirectives?: readonly PromptEnhancementSequenceOffsetRangeV1[];
 }
 
 export interface UpsertPendingPromptEnhancementInput {
@@ -32,6 +46,10 @@ export interface UpsertPendingPromptEnhancementInput {
   promptCount: number;
   request:     PromptEnhancementPrepareRequestV1;
   result:      PromptEnhancementPrepareResultV1;
+  /** MPS P1b-ii planner item list (see {@link PendingPromptEnhancement.plannerItems}). */
+  plannerItems?: readonly PromptEnhancementSequenceItemV1[];
+  /** MPS P1b-ii whole-prompt directive ranges (see {@link PendingPromptEnhancement.plannerPromptDirectives}). */
+  plannerPromptDirectives?: readonly PromptEnhancementSequenceOffsetRangeV1[];
 }
 
 /**
@@ -48,8 +66,8 @@ export function upsertPendingPromptEnhancement(
   );
   store.db.run(
     `INSERT INTO pending_prompt_enhancements
-       (project_root, session_id, prompt_count, status, created_at, request_json, result_json)
-     VALUES (?, ?, ?, 'pending', ?, ?, ?)`,
+       (project_root, session_id, prompt_count, status, created_at, request_json, result_json, planner_items_json, planner_prompt_directives_json)
+     VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?)`,
     [
       input.projectRoot,
       input.sessionId,
@@ -57,6 +75,10 @@ export function upsertPendingPromptEnhancement(
       Date.now(),
       JSON.stringify(input.request),
       JSON.stringify(input.result),
+      // Nullable: only sequence prepares carry a planner item list; non-sequence stores NULL.
+      input.plannerItems ? JSON.stringify(input.plannerItems) : null,
+      // Directive ranges travel with the item list; a sequence with no directives stores '[]'.
+      input.plannerPromptDirectives ? JSON.stringify(input.plannerPromptDirectives) : null,
     ],
   );
   saveStore(store);
@@ -74,6 +96,52 @@ function parseTyped<T>(raw: unknown, validate: (value: unknown) => { ok: boolean
 }
 
 /**
+ * Parse the carried planner item list, fail-closed. NULL (old rows / non-sequence prepares),
+ * non-JSON, or a shape that is not an array of `{ itemKind: string, … }` all read back as
+ * undefined — the batch then simply does not run. This is a lightweight structural guard only;
+ * the background wording batch performs the full semantic validation (offsets, coverage) with the
+ * original length it holds at consumption time.
+ */
+function parsePlannerItems(raw: unknown): readonly PromptEnhancementSequenceItemV1[] | undefined {
+  if (typeof raw !== 'string') return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+  if (!Array.isArray(parsed)) return undefined;
+  const wellFormed = parsed.every(
+    (item) => item !== null && typeof item === 'object'
+      && typeof (item as { itemKind?: unknown }).itemKind === 'string',
+  );
+  return wellFormed ? (parsed as readonly PromptEnhancementSequenceItemV1[]) : undefined;
+}
+
+/**
+ * Parse the carried whole-prompt directive ranges, fail-closed to undefined (same posture as
+ * {@link parsePlannerItems}): NULL, non-JSON, or a shape that is not an array of numeric
+ * `{ start, end }` reads back as undefined. An empty `[]` is a valid, meaningful value (a sequence
+ * that has no directives) and is preserved as an empty array.
+ */
+function parsePlannerPromptDirectives(raw: unknown): readonly PromptEnhancementSequenceOffsetRangeV1[] | undefined {
+  if (typeof raw !== 'string') return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+  if (!Array.isArray(parsed)) return undefined;
+  const wellFormed = parsed.every(
+    (range) => range !== null && typeof range === 'object'
+      && typeof (range as { start?: unknown }).start === 'number'
+      && typeof (range as { end?: unknown }).end === 'number',
+  );
+  return wellFormed ? (parsed as readonly PromptEnhancementSequenceOffsetRangeV1[]) : undefined;
+}
+
+/**
  * Return the most recent pending PE for a project, or null if none / corrupt. When sessionId is
  * provided only PEs from that session are returned. A row whose stored JSON fails typed
  * validation is treated as absent (fail-closed) — the Stop hook then shows no PE popup.
@@ -88,7 +156,7 @@ export function getPendingPromptEnhancement(
     ? [projectRoot, sessionId]
     : [projectRoot];
   const result = store.db.exec(
-    `SELECT id, project_root, session_id, prompt_count, status, created_at, request_json, result_json
+    `SELECT id, project_root, session_id, prompt_count, status, created_at, request_json, result_json, planner_items_json, planner_prompt_directives_json
      FROM pending_prompt_enhancements
      WHERE project_root = ?${sessionFilter} AND status = 'pending'
      ORDER BY created_at DESC
@@ -100,6 +168,10 @@ export function getPendingPromptEnhancement(
   const request = parseTyped<PromptEnhancementPrepareRequestV1>(row[6], validatePromptEnhancementPrepareRequestV1);
   const resultPayload = parseTyped<PromptEnhancementPrepareResultV1>(row[7], validatePromptEnhancementPrepareResultV1);
   if (!request || !resultPayload) return null;
+  // Additive/nullable: a corrupt or absent item list / directive list only disables the batch, never
+  // the popup — so a bad planner_* column must NOT fail-close the whole pending PE (unlike req/result).
+  const plannerItems = parsePlannerItems(row[8]);
+  const plannerPromptDirectives = parsePlannerPromptDirectives(row[9]);
   return {
     id:          row[0] as number,
     projectRoot: row[1] as string,
@@ -109,6 +181,8 @@ export function getPendingPromptEnhancement(
     createdAt:   row[5] as number,
     request,
     result:      resultPayload,
+    ...(plannerItems ? { plannerItems } : {}),
+    ...(plannerPromptDirectives ? { plannerPromptDirectives } : {}),
   };
 }
 

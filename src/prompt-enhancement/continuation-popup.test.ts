@@ -73,7 +73,47 @@ async function validContinuation() {
   });
 }
 
+// Regression (Bhavnesh, MPS-12): a CONFIRMATION-kind continuation carries an EMPTY originalPromptText by
+// owner-locked design — the packager sets '' (Ruling C §22.2 + the confirmation-carries-no-original-text
+// acceptance fixture). The builder must STILL render it: the renderer is kind-gated and shows no original
+// region for confirmation kinds, so the empty value is never displayed. Before the kind-aware validation
+// in the builder, the shared prepare-result validator rejected it as missing_current_body — and no test
+// exercised this path, which is exactly how the gap hid. This guards the fix, one assertion per kind.
+async function validConfirmationContinuation(
+  itemKind: 'double_confirmation' | 'cross_confirmation' | 'binary_confirmation' | 'wrap_up',
+) {
+  const base = await preparePromptEnhancement(request());
+  const result = { ...base, currentBody: { ...base.currentBody, originalPromptText: '' } };
+  const handoff = buildPromptEnhancementHandoffMetadataV1({
+    handoffDecisionId: `${result.enhancementId}:mps-handoff`, requestId: result.requestId, projectRoot: result.projectRoot,
+    currentBody: result.currentBody, safetySummary: result.safetySummary, handoffKind: 'first_prompt_handoff_candidate',
+    summary: { summaryId: `${result.enhancementId}:summary`, publicSafeText: 'Metadata only.', remainingTaskCount: 1, taskRoleLabels: ['verification'] },
+  });
+  const event: PromptEnhancementFutureSequenceRuntimeEventV1 = {
+    requestId: result.requestId, projectScope: result.projectRoot, sequenceId: 'sequence-1', sequenceItemId: 'item-2',
+    currentItemRevision: 2, bodyRevision: result.currentBody.bodyRevision, continuationDispositionId: 'cont-1',
+    contractVersion: PROMPT_ENHANCEMENT_CONTRACT_VERSION, stateFreshness: 'current', stopEventState: 'stop_fired_non_proof',
+    terminalTransitionState: 'none', explicitUserActionState: 'present_future_only', idempotencyKey: 'b32-idem', createdAtMs: 2,
+  };
+  return buildPromptEnhancementMpsContinuationPopupV1({
+    result, handoffMetadata: handoff, event, progress: { done: 3, total: 27 }, itemKind,
+    additionalDetails: { text: 'Keep the same fixture.', revision: 1 }, cancel: { state: 'available', disposition: 'blocked_no_send' },
+  });
+}
+
 describe('stage-3-2 later MPS continuation popup', () => {
+  it('renders every confirmation kind despite the owner-locked empty original text (kind-aware validation)', async () => {
+    for (const kind of ['double_confirmation', 'cross_confirmation', 'binary_confirmation', 'wrap_up'] as const) {
+      const built = await validConfirmationContinuation(kind);
+      expect(built.state).toBe('ready');
+      if (built.state === 'ready') {
+        expect(built.model.itemKind).toBe(kind);
+        // Empty original is carried but NEVER displayed for confirmation kinds (renderer is kind-gated).
+        expect(built.model.body.originalPromptText).toBe('');
+      }
+    }
+  });
+
   it('renders the locked continuation layout without the first-popup plan summary', async () => {
     const built = await validContinuation();
     expect(built.state).toBe('ready');
