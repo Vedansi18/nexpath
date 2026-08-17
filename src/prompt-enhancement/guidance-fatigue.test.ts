@@ -129,6 +129,27 @@ describe('F3 never-faded guard — safety and source-critical facts are NEVER fa
     expect(isPromptEnhancementFatigueEligibleV1(fact(overrides))).toBe(false);
   });
 
+  it.each([
+    ['requires_confirmation', { privacyClass: 'requires_confirmation' as const }],
+    ['sensitive_suppress', { privacyClass: 'sensitive_suppress' as const }],
+    ['sensitive_ref_only', { privacyClass: 'sensitive_ref_only' as const }],
+    ['do_not_render', { privacyClass: 'do_not_render' as const }],
+    ['unsafe_to_render sanitization', { sanitizationState: 'unsafe_to_render' as const }],
+  ])('a SENSITIVE treatment state (%s) is not fatigue-eligible either', (_label, overrides) => {
+    // These carry no risk level and no safety hook of their own, so they used to
+    // fall through the guard while STILL being fingerprinted in the key —
+    // "too sensitive to name, but fine to suppress" is incoherent, and
+    // prohibition 17 protects the confirmation lane by name.
+    expect(isPromptEnhancementFatigueEligibleV1(fact(overrides))).toBe(false);
+  });
+
+  it('prompt-scoped facts stay FADEABLE — fingerprinting is about storage, not safety', () => {
+    // The opposite error: folding prompt-scoping into the never-faded set would
+    // disable fatigue for exactly the guidance most likely to repeat.
+    expect(isPromptEnhancementFatigueEligibleV1(fact({ sourceType: 'prompt_derived_fact' }))).toBe(true);
+    expect(isPromptEnhancementFatigueEligibleV1(fact({ sourceOriginScope: 'current_prompt' }))).toBe(true);
+  });
+
   it('an ordinary missing-practice fact IS eligible', () => {
     expect(isPromptEnhancementFatigueEligibleV1(fact())).toBe(true);
   });
