@@ -185,6 +185,10 @@ describe('importHistoricalPrompts', () => {
       makeUserLine('some wrapper text <local-command-caveat> inside'),
       makeUserLine('<local-command-stdout>build ok</local-command-stdout>'),
       makeUserLine('Stop hook feedback: rerun the suite'),
+      // Background-task completion notice: injected as a user row when a
+      // backgrounded command or subagent finishes. Found surviving the filter
+      // in a re-audit of live transcripts, at ~1.5% of imported rows.
+      makeUserLine('<task-notification>\n<task-id>b3xvqc13o</task-id>\n<status>completed</status>\n</task-notification>'),
       makeUserLine('a genuine typed prompt'),
     ]);
 

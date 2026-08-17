@@ -31,7 +31,12 @@ function isNoiseShape(text: string): boolean {
     text.startsWith('Caveat:') ||
     text.includes('<local-command-caveat>') ||
     text.startsWith('<local-command-stdout>') ||
-    text.startsWith('Stop hook')
+    text.startsWith('Stop hook') ||
+    // Background-task completion notices. The agent injects these as user rows
+    // when a backgrounded command or subagent finishes; they arrived after the
+    // original marker list was measured, and a re-audit of live transcripts
+    // found them surviving the filter at ~1.5% of imported rows.
+    text.startsWith('<task-notification>')
   );
 }
 
