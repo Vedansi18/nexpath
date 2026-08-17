@@ -584,3 +584,23 @@ describe('⭐ RC19b — both setup gates verify registration (structural pin)', 
     expect(offer).toMatch(/showInformationMessage\(message, 'Set up', 'Later'\)/);
   });
 });
+
+/**
+ * RC21: Windows/Devin executes ONLY the workspace-level `.windsurf/hooks.json`.
+ * The extension must (a) tell the CLI which folder to register and (b) verify
+ * that hook — otherwise a project opened later has no hook and nothing fires.
+ */
+describe('⭐ RC21 — Windows workspace hook is passed and verified (structural pin)', () => {
+  const glue = readFileSync(join(__dirname, 'installer', 'vscode-glue.ts'), 'utf8');
+
+  it('setup terminal carries NEXPATH_WORKSPACE_DIR', () => {
+    expect(glue).toMatch(/setupEnv\.NEXPATH_WORKSPACE_DIR = ws;/);
+  });
+
+  it('verifyHookRegistration checks the workspace hook on win32', () => {
+    const fn = glue.slice(glue.indexOf('verifyHookRegistration: () =>'), glue.indexOf('getState: () =>'));
+    expect(fn).toMatch(/process\.platform === 'win32'/);
+    expect(fn).toMatch(/join\(ws, '\.windsurf', 'hooks\.json'\)/);
+    expect(fn).toMatch(/includes\('windsurf-hook'\)/);
+  });
+});

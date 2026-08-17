@@ -67,6 +67,13 @@ function buildDeps(context: vscode.ExtensionContext, log: Logger): SetupFlowDeps
           const setupEnv: Record<string, string> = { NEXPATH_EXT_SETUP: '1' };
           const agent = process.env.NEXPATH_AGENT;
           if (agent === 'cursor' || agent === 'windsurf') setupEnv.NEXPATH_ONLY_AGENT = agent;
+          // RC21: on Windows the Cascade hook that actually fires is the
+          // WORKSPACE-level `<project>/.windsurf/hooks.json`. The CLI runs with
+          // cwd = the staged CLI dir, so without this it wrote the hook next to
+          // itself and the user's project never got one. Pass the folder this
+          // window has open; the CLI falls back to its own cwd when unset.
+          const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+          if (ws) setupEnv.NEXPATH_WORKSPACE_DIR = ws;
           return vscode.window.createTerminal({ name: 'Nexpath Setup', env: setupEnv });
         },
         readSentinel: () =>
@@ -132,7 +139,19 @@ function buildDeps(context: vscode.ExtensionContext, log: Logger): SetupFlowDeps
           return t.includes('cursor-hook') && t.includes('"version"');
         }
         const p = join(homedir(), '.codeium', 'windsurf', 'hooks.json');
-        return existsSync(p) && readFileSync(p, 'utf8').includes('windsurf-hook');
+        if (!existsSync(p) || !readFileSync(p, 'utf8').includes('windsurf-hook')) return false;
+        // RC21: on Windows the user-level hook above is NOT executed by
+        // Devin/Devin Next — only the WORKSPACE hook fires. Verify the one that
+        // actually runs, per open folder, so opening a new project registers it
+        // instead of silently having no hook at all. No folder open ⇒ nothing to
+        // verify (the poller has no roots either).
+        if (process.platform === 'win32') {
+          const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+          if (!ws) return true;
+          const wsHook = join(ws, '.windsurf', 'hooks.json');
+          return existsSync(wsHook) && readFileSync(wsHook, 'utf8').includes('windsurf-hook');
+        }
+        return true;
       } catch {
         return true; // fail-quiet: never churn the setup terminal on fs errors
       }

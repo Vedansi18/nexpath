@@ -259,3 +259,20 @@ describe('windsurfAdapter registry registration', () => {
     expect(getAdapter('windsurf')).toBe(windsurfAdapter);
   });
 });
+
+/**
+ * RC21 (Windows tester, 2026-08-17): on Windows/Devin ONLY the workspace hook
+ * fires, and it was written to `ctx.cwd` — which is the STAGED CLI DIR when the
+ * extension drives setup. The tester's own output showed it landing in
+ * `…\.nexpath\cli\0.1.3\.windsurf\hooks.json`, so their project never got a
+ * hook and nothing could ever fire. The extension now passes the open folder.
+ */
+describe('⭐ RC21 — Windows workspace hook targets the user workspace', () => {
+  it('uses NEXPATH_WORKSPACE_DIR when the extension drives setup', () => {
+    const src = readFileSync(new URL('./windsurf.ts', import.meta.url), 'utf8');
+    expect(src).toMatch(/const wsRoot = process\.env\.NEXPATH_WORKSPACE_DIR\?\.trim\(\) \|\| ctx\.cwd;/);
+    expect(src).toMatch(/const wsHooksPath = join\(wsRoot, '\.windsurf', 'hooks\.json'\);/);
+    // never silently back to cwd-only
+    expect(src).not.toMatch(/join\(ctx\.cwd, '\.windsurf', 'hooks\.json'\)/);
+  });
+});

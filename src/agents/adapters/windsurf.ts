@@ -147,7 +147,18 @@ export const windsurfAdapter: VSCodeExtensionAdapter = {
     // Windows write that too, relative to the project the user runs install in. Gated
     // to win32 so platforms that already fire the user-level hook don't double-capture.
     if (process.platform === 'win32') {
-      const wsHooksPath = join(ctx.cwd, '.windsurf', 'hooks.json');
+      // ── RC21 (Windows tester, 2026-08-17) ────────────────────────────────
+      // `ctx.cwd` is the CLI process's cwd. When the EXTENSION drives setup the
+      // runner executes the staged CLI, so cwd is `~/.nexpath/cli/<version>` —
+      // and this hook landed in `…\.nexpath\cli\0.1.3\.windsurf\hooks.json`
+      // (seen verbatim in the tester's setup output). Since Windows/Devin Next
+      // honours ONLY the workspace hook, the user's project got no hook at all:
+      // nothing ever fired, no popup, no matter how correct the rest of the
+      // chain was. The extension now passes the folder it has open via
+      // NEXPATH_WORKSPACE_DIR; a manual `nexpath install` still uses the
+      // directory the user ran it in (ctx.cwd), which is what they expect.
+      const wsRoot = process.env.NEXPATH_WORKSPACE_DIR?.trim() || ctx.cwd;
+      const wsHooksPath = join(wsRoot, '.windsurf', 'hooks.json');
       writeWindsurfHooks(wsHooksPath, cliPath);
       console.log(`   ${' '.repeat(12)}   + workspace hook (Windows/Devin Next): ${wsHooksPath}`);
     }
@@ -177,9 +188,13 @@ export const windsurfAdapter: VSCodeExtensionAdapter = {
     console.log(removed
       ? `✓ ${'Windsurf'.padEnd(12)} — Cascade capture hook removed`
       : `-  ${'Windsurf'.padEnd(12)} — no Cascade capture hook found`);
-    // Mirror the install: remove the Windows workspace-level hook too (no-op elsewhere).
+    // Mirror the install: remove the Windows workspace-level hook too (no-op
+    // elsewhere). RC21: resolve the SAME root install writes to, or uninstall
+    // would leave the real workspace hook behind and keep invoking a CLI the
+    // user just removed.
     if (process.platform === 'win32') {
-      removeWindsurfHooks(join(ctx.cwd, '.windsurf', 'hooks.json'));
+      const wsRoot = process.env.NEXPATH_WORKSPACE_DIR?.trim() || ctx.cwd;
+      removeWindsurfHooks(join(wsRoot, '.windsurf', 'hooks.json'));
     }
     console.log(`   ${' '.repeat(12)}   Uninstall the Nexpath extension from the Windsurf Extensions panel`);
     console.log(`    Or via CLI:          windsurf --uninstall-extension ${MARKETPLACE_ID}`);
