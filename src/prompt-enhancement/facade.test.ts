@@ -135,6 +135,39 @@ describe('PE executable facade', () => {
       },
     }));
     expect(result.disposition).toBe('show_current_body');
+    // The guard's own subject, asserted rather than assumed: the VALID candidate
+    // reaches the registry and attaches; the junk one is gone. Checking only the
+    // disposition left the filtering itself unverified.
+    expect(result.routeDecision.capabilityOverlays).toContain('capability.confirmation_needed');
+    expect(result.routeDecision.capabilityOverlays).not.toContain('capability.not_a_real_one');
+  });
+
+  it('the capability observation survives the facade hop, so the registry decides instead of the keyword decider', async () => {
+    // C3 replaced the keyword decider with a registry decision driven by the
+    // classifier's observation, and the observation array IS the keyed-session
+    // marker. Drop it at the facade and the route silently falls back to the
+    // demoted keyword merge: no observed capability attaches, and nothing else
+    // in the suite notices.
+    const base = request();
+    const observed = await preparePromptEnhancement(request({
+      requestId: 'facade-capability-threading',
+      reviewMomentContext: {
+        ...base.reviewMomentContext,
+        triggerProvenance: {
+          ...base.reviewMomentContext.triggerProvenance,
+          classifierPrimaryIntent: 'issue_debug.failing_test',
+          classifierIntentConfidence: 0.9,
+          classifierCapabilityCandidates: ['capability.confirmation_needed'],
+          classifierDebugEvidencePresent: ['logs', 'failing_test_details'],
+        },
+      },
+    }));
+    // Attached because the registry accepted an OBSERVED candidate — this
+    // capability is not a static overlay of the debug preset.
+    expect(observed.routeDecision.capabilityOverlays).toContain('capability.confirmation_needed');
+    // The evidence observation travelled too: supplied evidence clears the
+    // reproduction request, which only the registry's lacks-rule can decide.
+    expect(observed.routeDecision.capabilityOverlays).not.toContain('capability.reproduction_or_evidence_needed');
   });
 
   it('the intent proposal survives the facade hop and decides the route', async () => {
