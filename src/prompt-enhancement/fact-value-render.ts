@@ -150,3 +150,44 @@ export function promptEnhancementGroundedValuesV1(
   }
   return values;
 }
+
+/**
+ * GR-2 step 1: the RESOLVED facts a section may cite, for the MODEL's prompt.
+ *
+ * Same gates as the body renderer, deliberately: a fact that may not be rendered
+ * may not be shown to the model either — the prompt is an outbound surface, so a
+ * withheld value must not travel there under the excuse that "the model decides".
+ * Reference-only facts are included WITHOUT their value, so the model knows a
+ * source exists and can cite it without seeing content it may not use.
+ */
+export function promptEnhancementSectionModelFactsV1(
+  sectionKind: string,
+  facts: readonly PromptEnhancementGuidanceFact[],
+): readonly {
+  readonly factId: string;
+  readonly sourceType: string;
+  readonly confidenceBand: string;
+  readonly originScope: string;
+  readonly claimVerbPolicy: string;
+  readonly evidence: string | undefined;
+}[] {
+  const out: {
+    factId: string; sourceType: string; confidenceBand: string;
+    originScope: string; claimVerbPolicy: string; evidence: string | undefined;
+  }[] = [];
+  for (const fact of facts) {
+    if (fact.targetSectionKind !== sectionKind) continue;
+    if (!isRenderableValueFactV1(fact)) continue;
+    const referenceOnly = isReferenceOnlyV1(fact);
+    const value = fact.evidence?.value.trim();
+    out.push({
+      factId: fact.factId,
+      sourceType: fact.sourceType,
+      confidenceBand: fact.confidenceBand ?? 'unknown',
+      originScope: fact.sourceOriginScope ?? 'unknown',
+      claimVerbPolicy: fact.claimVerbPolicy ?? 'must_phrase_as_possibility',
+      evidence: referenceOnly || !value ? undefined : `${fact.evidence!.key} = ${redactSecrets(value)}`,
+    });
+  }
+  return out;
+}
