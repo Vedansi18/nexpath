@@ -81,6 +81,15 @@ describe('F3 fatigueKey — the L4980 gate: what the key must NEVER be', () => {
     expect(keyFor(fact(), '   ')).toBeUndefined();
   });
 
+  it('the digest separator is unambiguous: regrouped ids do not collide', () => {
+    // With a space separator, ['alpha beta','gamma'] and ['alpha','beta gamma']
+    // both join to "alpha beta gamma" and fingerprint identically — two distinct
+    // guidances would then share one fade counter. Guards the separator choice.
+    const sensitive = (ids: readonly string[]) =>
+      keyFor(fact({ privacyClass: 'sensitive_ref_only', sourceIds: [...ids] }), 'project-alpha');
+    expect(sensitive(['alpha beta', 'gamma'])).not.toBe(sensitive(['alpha', 'beta gamma']));
+  });
+
   it('the project scope is fingerprinted, never embedded literally', () => {
     // Callers may pass a root path, which is a local filesystem literal.
     const key = keyFor(fact(), 'C:/Users/dev/secret-client-project') ?? '';
