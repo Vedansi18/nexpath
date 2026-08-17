@@ -4,7 +4,9 @@ import {
   isPromptEnhancementFatigueEligibleV1,
   stampPromptEnhancementFatigueKeysV1,
 } from './guidance-fatigue.js';
-import type { PromptEnhancementGuidanceFact } from './templates/section-plan.js';
+import { normalizeGuidanceFacts, type PromptEnhancementGuidanceFact } from './templates/section-plan.js';
+import { resolvePromptEnhancementSourceConflictsV1 } from './conflict-resolution.js';
+import { applyPromptEnhancementSourceMixV1 } from './source-mix.js';
 
 function fact(overrides: Partial<PromptEnhancementGuidanceFact> = {}): PromptEnhancementGuidanceFact {
   return {
@@ -145,5 +147,40 @@ describe('F3 never-faded guard — safety and source-critical facts are NEVER fa
   it('the stamper leaves facts untouched when no project scope exists', () => {
     const [stamped] = stampPromptEnhancementFatigueKeysV1([fact()], undefined);
     expect(stamped!.fatigueKey).toBeUndefined();
+  });
+});
+
+describe('F3 fatigueKey survives the pipeline that carries it', () => {
+  // The key has NO consumer until PE-AR-6/PE-AR-7 land, which means nothing else
+  // in the suite would notice if a layer dropped it. These hops survive today
+  // only because they SPREAD facts rather than rebuilding them field by field —
+  // a refactor to field-by-field construction would silently produce keys that
+  // die before anyone can read them. This is the only thing guarding that.
+  const keyed = (facts: readonly PromptEnhancementGuidanceFact[]): number =>
+    facts.filter((entry) => entry.fatigueKey !== undefined).length;
+
+  const stamped = (): readonly PromptEnhancementGuidanceFact[] =>
+    stampPromptEnhancementFatigueKeysV1(
+      [fact(), fact({ factId: 'pe-fact-signal-1', sourceIds: ['absence:acceptance_gap@implementation'] })],
+      'project-alpha',
+    );
+
+  it('conflict resolution preserves the key', () => {
+    const input = stamped();
+    expect(keyed(input)).toBe(2);
+    expect(keyed(resolvePromptEnhancementSourceConflictsV1(input).facts)).toBe(2);
+  });
+
+  it('the source mixer preserves the key, including on the required survivor', () => {
+    const mix = applyPromptEnhancementSourceMixV1(
+      resolvePromptEnhancementSourceConflictsV1(stamped()).facts,
+      'default',
+    );
+    expect(mix.requiredSurvivor?.fatigueKey).toBeDefined();
+    expect(keyed(mix.renderedFacts)).toBeGreaterThan(0);
+  });
+
+  it('fact normalization preserves the key', () => {
+    expect(keyed(normalizeGuidanceFacts(stamped()))).toBe(2);
   });
 });
