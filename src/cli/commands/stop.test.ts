@@ -167,6 +167,66 @@ describe('runStop — deferred Prompt Enhancement popup (B-i)', () => {
     expect(after).toMatchObject({ currentItemIndex: 1, status: 'item_pending', lastActionId: 'prev' });
   });
 
+  // Phase 5 (interruption resume) — after "I need to do something else first" the row is left
+  // `item_pending` WITHOUT blocking, so the next Stop is NOT stop_hook_active and the top launcher
+  // never runs. A second entry point on the ordinary (non-stop_hook_active) path re-offers the held
+  // item once the user's own turn resolves without blocking. In tests there is no host, so the launcher
+  // is gated → the row is left untouched (a re-offer, never an advance). These lock that routing.
+  const seedInterruptedSequence = (
+    store: Store,
+    status: 'item_pending' | 'awaiting_response',
+    sessionId: string,
+  ): void => {
+    upsertPendingPromptSequence(store, {
+      sequenceId: 'seq-i', enhancementId: 'enh-i', projectRoot: '/test/project',
+      sessionId, itemCount: 3, currentItemIndex: 1, status, lastActionId: 'prev',
+    }, emptyPromptEnhancementSequencePayloadV1(64));
+  };
+
+  it('resumes a held (item_pending) item on a non-stop_hook_active Stop with no pending PE', async () => {
+    const session = SessionStateManager.load(store, '/test/project');
+    session.setDetectedLanguage(store, undefined);
+    seedInterruptedSequence(store, 'item_pending', session.current.sessionId);
+    // Not stop_hook_active + no pending PE → before Phase 5 this returned 'no_pending'. Now it re-offers.
+    const result = await runStop(makePayload({ stop_hook_active: false }), store, undefined, undefined, undefined, notShown());
+    expect(result).toEqual({ outcome: 'mps_continuation_gated' });
+    // Re-offer, NOT advance: the row stays item_pending at the SAME index, unmutated.
+    const after = getActivePendingPromptSequence(store, '/test/project', session.current.sessionId);
+    expect(after).toMatchObject({ currentItemIndex: 1, status: 'item_pending', lastActionId: 'prev' });
+  });
+
+  it('does NOT resume an awaiting_response sequence on a non-stop_hook_active Stop (that belongs to the top launcher)', async () => {
+    const session = SessionStateManager.load(store, '/test/project');
+    session.setDetectedLanguage(store, undefined);
+    seedInterruptedSequence(store, 'awaiting_response', session.current.sessionId);
+    const result = await runStop(makePayload({ stop_hook_active: false }), store, undefined, undefined, undefined, notShown());
+    expect(result).toEqual({ outcome: 'no_pending' });
+    // Left completely untouched — mid-delivery sequences are the stop_hook_active launcher's job.
+    const after = getActivePendingPromptSequence(store, '/test/project', session.current.sessionId);
+    expect(after).toMatchObject({ currentItemIndex: 1, status: 'awaiting_response', lastActionId: 'prev' });
+  });
+
+  it('resumes the held item after the "something else" PE is closed with use-original (shown)', async () => {
+    await insertPendingPe(store); // the user's "something else" prompt, awaiting its deferred PE popup
+    const session = SessionStateManager.load(store, '/test/project');
+    seedInterruptedSequence(store, 'item_pending', session.current.sessionId);
+    // PE popup shows and is closed without sending → no block → the held item returns this Stop.
+    const result = await runStop(makePayload({ stop_hook_active: false }), store, undefined, undefined, undefined, shown());
+    expect(result).toEqual({ outcome: 'mps_continuation_gated' });
+  });
+
+  it('does NOT double-fire when the "something else" PE is SENT — it blocks, and the next stop_hook_active Stop re-offers', async () => {
+    await insertPendingPe(store);
+    const session = SessionStateManager.load(store, '/test/project');
+    seedInterruptedSequence(store, 'item_pending', session.current.sessionId);
+    // Send enhanced → inject → block. The resume must NOT also fire this Stop (the block arms the next one).
+    const result = await runStop(makePayload({ stop_hook_active: false }), store, undefined, undefined, undefined, inject('SOMETHING ELSE ENHANCED'));
+    expect(result).toEqual({ outcome: 'blocked', reason: 'SOMETHING ELSE ENHANCED' });
+    // The held item is untouched — it re-offers on the NEXT (stop_hook_active) Stop via the top launcher.
+    const after = getActivePendingPromptSequence(store, '/test/project', session.current.sessionId);
+    expect(after).toMatchObject({ currentItemIndex: 1, status: 'item_pending', lastActionId: 'prev' });
+  });
+
   // MPS-11 sub-phase 1a: the fail-closed launcher must log the FULL missing-gate list + its count, not a
   // silent slice(0, 4) — so a debugger can tell how many gates are missing, not just the first four.
   it('fail-closed continuation launcher: logs the full missing-gate count, not a truncated four', async () => {
