@@ -43,4 +43,10 @@ if (routabilityGaps.length > 0) {
   console.error('Build aborted: an intent a prompt cannot reach is a dead template, not a shipped one.');
   process.exit(1);
 }
-console.log('✓ prompt-enhancement selectability gate passed (a prompt reaches every intent - not id presence)');
+// Says what it PROVES, not what we wish it proved. Each probe is routed with its
+// intent as the classifier proposal, so this gate shows every intent is selectable
+// end-to-end at the ROUTER — no absorption into another intent, no skip — which is
+// strictly more than the id-presence check it replaced and would have caught the
+// original dead-template bug. It does NOT exercise the prompt->intent step: that is
+// the classifier's, and an LLM cannot be gated deterministically in a build.
+console.log('✓ prompt-enhancement selectability gate passed (every intent routes from its proposal - no absorb, no skip)');

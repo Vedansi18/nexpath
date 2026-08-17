@@ -1398,6 +1398,22 @@ describe('routability: a prompt reaches every one of the forty intents', () => {
     }
   });
 
+  it('probe prompts cannot silently rot to placeholders', () => {
+    // The gate feeds each probe's INTENT to the router, so the promptText never
+    // drives selection — replacing one with gibberish leaves the gate green and
+    // the whole PE suite passing (measured). The prompts are still the artifact
+    // C5 owes ("one realistic prompt per intent") and the only human-readable
+    // record of what each intent is for, so they need a floor of their own.
+    // Semantic realism cannot be gated deterministically — that is the
+    // classifier's half — but emptiness, truncation and copy-paste can.
+    const texts = PROMPT_ENHANCEMENT_ROUTABILITY_PROBES.map((probe) => probe.promptText);
+    expect(new Set(texts).size).toBe(texts.length);
+    for (const probe of PROMPT_ENHANCEMENT_ROUTABILITY_PROBES) {
+      expect(probe.promptText.trim().split(/\s+/).length, `probe for ${probe.primaryIntent} is too short to be a real prompt`)
+        .toBeGreaterThanOrEqual(4);
+    }
+  });
+
   it('base-family coverage: one probe per family routes to that family', () => {
     const familyByPrefix: Record<string, string> = {
       feature: 'feature_delivery',
