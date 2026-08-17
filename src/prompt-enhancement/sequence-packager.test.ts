@@ -306,7 +306,7 @@ describe('sequence packager — the progress the contract never carried', () => 
 
   it('counts the deliverable items only (itemCount - 1), not the whole item count', () => {
     // Item 0 was already sent at intake, so the continuation surface excludes it: total is the
-    // deliverable count (itemCount - 1 = 3 here), matching the first popup's "Remaining" figure. It
+    // deliverable count (itemCount - 1 = 3 here), matching the first popup's "Total" figure. It
     // is derived straight from itemCount, never from the summary's fixed remaining variable — the
     // overload that produced the earlier item-count defect (owner decision 2026-08-17).
     const result = packagePromptEnhancementSequenceContinuationV1(input());

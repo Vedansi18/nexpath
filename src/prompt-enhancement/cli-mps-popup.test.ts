@@ -89,7 +89,7 @@ describe('UI-6 MPS first-popup frame renderer (§3.3)', () => {
     expect(frame).toContain('Focus on the checkout module.');
     expect(frame).toContain('Cancel (remaining multi-prompt sequence)');
     expect(frame).toContain('Sequence plan');
-    expect(frame).toContain('Remaining: 3');
+    expect(frame).toContain('Total: 3');
     expect(frame).toContain('Types: implement, verify, document');
     expect(frame).toContain(PROMPT_ENHANCEMENT_MPS_CLI_FOOTER_V1);
     // Title is the first line and the footer is the last line, behind the continuous left rail
@@ -322,7 +322,7 @@ describe('UI-7 MPS continuation-popup frame renderer (§3.4)', () => {
   it('never repeats the Sequence plan, remaining count, or future-item details (§3.4)', () => {
     const frame = renderPromptEnhancementMpsContinuationFrameV1(continuationModel());
     expect(frame).not.toContain('Sequence plan');
-    expect(frame).not.toContain('Remaining:');
+    expect(frame).not.toContain('Total:');
     expect(frame).not.toContain('Types:');
   });
 
