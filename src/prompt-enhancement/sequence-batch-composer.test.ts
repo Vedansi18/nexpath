@@ -3,6 +3,7 @@ import {
   PROMPT_ENHANCEMENT_SEQUENCE_BATCH_OUTPUT_TOKEN_CAP_V1,
   PROMPT_ENHANCEMENT_SEQUENCE_BATCH_OUTPUT_TOKEN_HARD_CAP_V1,
   buildPromptEnhancementSequenceBatchItemsV1,
+  buildPromptEnhancementSequenceDeterministicComposedV1,
   promptEnhancementSequenceBatchDispositionV1,
   promptEnhancementSequenceBatchIsCurrentV1,
   promptEnhancementSequenceSliceTextV1,
@@ -107,6 +108,59 @@ const clientReturning = (...replies: readonly string[]) => {
   };
   return { client, bodies };
 };
+
+describe('sequence batch — the deterministic fallback', () => {
+  const context = {
+    baseSafetySummary: BASE_SAFETY,
+    providerRuntimeState: 'deterministic' as const,
+    optionalCallAvailabilityState: 'deterministic_only' as const,
+  };
+
+  it('words a task from its slice, a confirmation in its kind\'s format, and a recap from covered slices', () => {
+    const items = [
+      task(1, SLICE_TWO),
+      task(2, null, { itemKind: 'binary_confirmation', complexity: null, authorityMode: null, complexityReason: 'x' }),
+      task(3, null, { itemKind: 'wrap_up', complexity: null, authorityMode: null, coveredSliceTexts: [SLICE_ONE, SLICE_TWO] }),
+    ];
+    const composed = buildPromptEnhancementSequenceDeterministicComposedV1(items, context);
+    expect(composed).not.toBeNull();
+    if (!composed) return;
+    // Task: its own words, verbatim.
+    expect(composed.get(1)?.wording).toContain(SLICE_TWO);
+    // Binary confirmation: both its tokens and the answer-alone anchor, and NOT the other format.
+    const confirmation = composed.get(2)?.wording ?? '';
+    expect(confirmation).toContain('YES');
+    expect(confirmation).toContain('NO');
+    expect(confirmation).toContain('on its own line');
+    expect(confirmation).not.toContain('PASS');
+    expect(confirmation).not.toContain('FAIL');
+    // Recap: every covered slice reproduced.
+    expect(composed.get(3)?.wording).toContain(SLICE_ONE);
+    expect(composed.get(3)?.wording).toContain(SLICE_TWO);
+    // Every item leaves with a real verdict graph carrying no failures.
+    for (const order of [1, 2, 3]) {
+      expect(composed.get(order)?.validationGraph.failures).toHaveLength(0);
+    }
+  });
+
+  it('places a floor item\'s safety clause in its wording and records the ref', () => {
+    const composed = buildPromptEnhancementSequenceDeterministicComposedV1(
+      [task(1, SLICE_TWO, { requiresConfirmationFloor: true })], context,
+    );
+    expect(composed).not.toBeNull();
+    const entry = composed?.get(1);
+    expect(entry?.safetyClauseRef).not.toBeNull();
+    if (!entry?.safetyClauseRef) return;
+    // The ref points at a real, non-empty run of characters inside the wording.
+    expect(entry.wording.slice(entry.safetyClauseRef.start, entry.safetyClauseRef.end).length)
+      .toBeGreaterThan(0);
+    expect(entry.validationGraph.failures).toHaveLength(0);
+  });
+
+  it('cannot word a task that has no slice — returns null rather than a partial map', () => {
+    expect(buildPromptEnhancementSequenceDeterministicComposedV1([task(1, null)], context)).toBeNull();
+  });
+});
 
 describe('sequence batch — one call over the whole remaining list', () => {
   it('writes every item after the first, in a single call', async () => {

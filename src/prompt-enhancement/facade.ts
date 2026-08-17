@@ -433,6 +433,12 @@ async function prepare(
           capabilityOverlays: route.capabilityOverlays,
           routeConfidence: route.routeConfidence,
         },
+        // PROPER FIX — the production planner opts into the deterministic fallback: when the model
+        // cannot produce a valid plan, the loop rebuilds one from its task decomposition rather than
+        // falling through to the single-prompt path with an empty sequence. Only the sequence branch
+        // below is affected; a non-sequence outcome (or fewer than two tasks) still falls through
+        // exactly as today.
+        deterministicFallback: true,
       },
       seqDeps.client,
     );

@@ -786,18 +786,45 @@ describe('sequence planner — the list is checked against the rules it will be 
     ))).ok).toBe(true);
   });
 
-  it('rejects a closing recap that is not earned, and one that is not last', async () => {
+  it('normalizes the closing recap to the count rule (§5.5a), and still rejects one that is not last', async () => {
     const wrapUp = (order: number) => ({
       itemKind: 'wrap_up', originalSliceRef: null, sourcePointRanges: [], roleLabel: null,
       dependencyOrder: order, complexity: null, complexityReason: null, decompositionGroupId: null,
     });
-    // A recap exists if and only if there is enough behind it to recap.
-    expect(await run(withItems(firstTask, taskItem(), wrapUp(2))))
-      .toEqual({ ok: false, reason: 'wrap_up_presence_does_not_match_count' });
+    // §5.5a — the recap's PRESENCE is a spec-mandated COUNT, not the model's judgment. A recap on a
+    // SHORT list (≤3 non-recap items) is not earned, so it is NORMALIZED AWAY rather than rejected on
+    // `wrap_up_presence_does_not_match_count` — exactly as an out-of-bounds offset is clamped.
+    const dropped = await run(withItems(firstTask, taskItem(), wrapUp(2)));
+    expect(dropped.ok).toBe(true);
+    if (dropped.ok) {
+      expect(dropped.output.items.some((item) => item.itemKind === 'wrap_up')).toBe(false);
+      expect(dropped.output.items).toHaveLength(2);
+    }
+    // A recap that is not last is malformed structure (not a count miscount) — my normalize touches
+    // only the last-recap cases, so this still fails hard, unchanged.
     expect(await run(withItems(
       firstTask, wrapUp(1), taskItem({ dependencyOrder: 2 }),
       taskItem({ dependencyOrder: 3 }), taskItem({ dependencyOrder: 4 }),
     ))).toEqual({ ok: false, reason: 'wrap_up_not_last_or_duplicated' });
+  });
+
+  it('appends the one mandated closing recap when the model omitted it on a long list (§5.5a)', async () => {
+    // >3 non-recap items REQUIRE exactly one recap; a model that omitted it is CORRECTED (the recap is
+    // appended as the last item), not rejected — this is what lifted the planner success rate. Five
+    // not_complex tasks earn no confirmations, so the only thing missing is the mandated recap.
+    const res = await run(withItems(
+      firstTask,
+      taskItem({ dependencyOrder: 1 }), taskItem({ dependencyOrder: 2 }),
+      taskItem({ dependencyOrder: 3 }), taskItem({ dependencyOrder: 4 }),
+    ));
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      const items = res.output.items;
+      expect(items[items.length - 1].itemKind).toBe('wrap_up');
+      expect(items.filter((item) => item.itemKind === 'wrap_up')).toHaveLength(1);
+      // dependencyOrder of the appended recap equals its index (the store's index rule).
+      expect(items[items.length - 1].dependencyOrder).toBe(items.length - 1);
+    }
   });
 
   it('rejects a list outside the bounds, and a summary that disagrees with it', async () => {
@@ -947,6 +974,89 @@ describe('sequence planner — repair, and its bound', () => {
     expect(sent).toHaveLength(PROMPT_ENHANCEMENT_COST_VALIDATION_RETRY_COUNT_V1 + 1);
     expect(promptEnhancementSequencePlannerDispositionV1('role_label_invalid'))
       .toBe('no_sequence_single_prompt');
+  });
+
+  it('deterministic fallback (opt-in): rebuilds an unfixable plan into a valid minimal sequence', async () => {
+    // badRole fails role_label_invalid on every attempt — the model never fixes it. With the fallback
+    // ON, once the repair budget is spent the loop rebuilds a valid sequence from the plan's own tasks
+    // instead of losing it: every invented field discarded, each task not_complex.
+    const { client, sent } = clientSequence([badRole]);
+    const result = await runPromptEnhancementSequencePlannerV1(
+      { ...call(), deterministicFallback: true }, client,
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.output.items).toHaveLength(2);
+      expect(result.output.items[0]?.itemKind).toBe('first_task');
+      expect(result.output.items.every((item) => item.roleLabel === null)).toBe(true);
+      expect(result.output.items.every((item) => item.complexity === 'not_complex')).toBe(true);
+      expect(result.output.summaryData?.remainingTaskCount).toBe(1);
+    }
+    // The model still got its full repair budget BEFORE the fallback took over — the loop is unchanged.
+    expect(sent).toHaveLength(PROMPT_ENHANCEMENT_COST_VALIDATION_RETRY_COUNT_V1 + 1);
+  });
+
+  it('deterministic fallback (opt-in): appends the mandated recap when rebuilding a longer plan', async () => {
+    // Five tasks with one invented role label. Rebuilt: five not_complex tasks plus the one recap the
+    // count rule requires (more than three items behind it), as the last item.
+    const manyBadRole = validReply({
+      points: [point('p1', 0), point('p2', 10), point('p3', 20)],
+      groups: [group('g1', ['p1', 'p2', 'p3'])],
+      items: [
+        { itemKind: 'first_task', originalSliceRef: { start: 0, end: ORIGINAL.length },
+          sourcePointRanges: [], roleLabel: 'fix', dependencyOrder: 0, complexity: 'not_complex',
+          complexityReason: null, decompositionGroupId: 'g1' },
+        { itemKind: 'task', originalSliceRef: { start: 5, end: 15 }, sourcePointRanges: [],
+          roleLabel: 'INVALID ROLE THE MODEL INVENTED', dependencyOrder: 1, complexity: 'not_complex',
+          complexityReason: null, decompositionGroupId: 'g1' },
+        { itemKind: 'task', originalSliceRef: { start: 10, end: 20 }, sourcePointRanges: [],
+          roleLabel: null, dependencyOrder: 2, complexity: 'not_complex', complexityReason: null,
+          decompositionGroupId: 'g1' },
+        { itemKind: 'task', originalSliceRef: { start: 15, end: 25 }, sourcePointRanges: [],
+          roleLabel: null, dependencyOrder: 3, complexity: 'not_complex', complexityReason: null,
+          decompositionGroupId: 'g1' },
+        { itemKind: 'task', originalSliceRef: { start: 20, end: 30 }, sourcePointRanges: [],
+          roleLabel: null, dependencyOrder: 4, complexity: 'not_complex', complexityReason: null,
+          decompositionGroupId: 'g1' },
+      ],
+      summaryData: { summaryId: 's1', remainingTaskCount: 4 },
+    });
+    const { client } = clientSequence([manyBadRole]);
+    const result = await runPromptEnhancementSequencePlannerV1(
+      { ...call(), deterministicFallback: true }, client,
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.output.items).toHaveLength(6);
+      expect(result.output.items[5]?.itemKind).toBe('wrap_up');
+      expect(result.output.items.filter((item) => item.itemKind === 'wrap_up')).toHaveLength(1);
+    }
+  });
+
+  it('deterministic fallback is OFF by default — the strict reject contract is unchanged', async () => {
+    // The exact same unfixable plan, with no opt-in, still rejects. This is what keeps the fallback
+    // additive: a caller that does not ask for it sees no change.
+    const { client } = clientSequence([badRole]);
+    expect(await runPromptEnhancementSequencePlannerV1(call(), client))
+      .toEqual({ ok: false, reason: 'role_label_invalid' });
+  });
+
+  it('deterministic fallback cannot invent a sequence from fewer than two tasks', async () => {
+    // A single first_task is a single-prompt request. Even with the fallback ON there is nothing to
+    // decompose, so it returns the plan's own defect and the single-prompt path takes over — never a
+    // fabricated multi-item sequence.
+    const oneTask = validReply({
+      items: [
+        { itemKind: 'first_task', originalSliceRef: { start: 0, end: ORIGINAL.length },
+          sourcePointRanges: [], roleLabel: 'fix', dependencyOrder: 0, complexity: 'not_complex',
+          complexityReason: null, decompositionGroupId: 'g1' },
+      ],
+      summaryData: { summaryId: 's1', remainingTaskCount: 0 },
+    });
+    const { client } = clientSequence([oneTask]);
+    expect(await runPromptEnhancementSequencePlannerV1(
+      { ...call(), deterministicFallback: true }, client,
+    )).toEqual({ ok: false, reason: 'item_count_below_min' });
   });
 
   it('never repairs a provider failure — nothing came back to correct', async () => {

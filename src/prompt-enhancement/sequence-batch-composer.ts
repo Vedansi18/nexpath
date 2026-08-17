@@ -411,6 +411,76 @@ function checkBatchOutput(
   return { ok: true, composed };
 }
 
+/**
+ * PROPER FIX — the deterministic body-producer fallback.
+ *
+ * When the model batch cannot word items 2…N to spec (any reason above), rejecting it empties
+ * `items_json` and the second popup is lost. Instead, word every item WITHOUT the model, from the parts
+ * the plan already fixed: a task carries its OWN SLICE verbatim — so it reproduces its slice and cannot
+ * exceed its own authority, because it IS its authority; a confirmation carries the fixed format its
+ * kind demands (the two tokens and the answer-alone clause); the recap carries the slices it covers. The
+ * per-item verdict is the SAME graph the model path builds, from the same builder and the same safety
+ * input, so a fallback body is validated exactly as a model one and a floor keeps its located clause.
+ *
+ * Returns null — never a partial map — if any item fails that shared check, so the caller keeps the
+ * model's own failure rather than storing a half-worded sequence. A task with an empty slice is the one
+ * case it cannot word, and it says so the same way.
+ */
+export function buildPromptEnhancementSequenceDeterministicComposedV1(
+  items: readonly PromptEnhancementSequenceBatchItemV1[],
+  context: {
+    baseSafetySummary: PromptEnhancementSafetySummaryV1;
+    providerRuntimeState: PromptEnhancementCallVisibilityMode;
+    optionalCallAvailabilityState: PromptEnhancementValidationGraphV1['optionalCallAvailabilityState'];
+  },
+): ReadonlyMap<number, PromptEnhancementSequenceComposedItemV1> | null {
+  const answerAlone = PROMPT_ENHANCEMENT_SEQUENCE_CONFIRMATION_CLAUSES_V1.answerAlone.sentence;
+  // A fixed caution, not a new instruction: it demands confirmation, it does not enlarge the task, so
+  // it cannot escalate the slice's authority. Located in the wording so a floor item carries its ref.
+  const safetyClause = 'Confirm this operation is intended and safe before carrying it out.';
+  const composed = new Map<number, PromptEnhancementSequenceComposedItemV1>();
+  for (const item of items) {
+    let wording: string;
+    let safetyClauseRef: PromptEnhancementSequenceOffsetRangeV1 | null = null;
+    if (isConfirmation(item.itemKind)) {
+      const [first, second] = FORMAT_TOKENS_V1[item.itemKind] ?? ['YES', 'NO'];
+      wording = `Before this step continues, confirm it should proceed. `
+        + `Reply ${first} or ${second} only. ${answerAlone}`;
+    } else if (item.itemKind === 'wrap_up') {
+      const covered = item.coveredSliceTexts.join(' ');
+      wording = covered.trim().length > 0
+        ? `To recap, this sequence covers: ${covered}`
+        : 'To recap, this sequence is now complete.';
+    } else {
+      // A task: the user's own words for this step, verbatim — it reproduces its slice by being it.
+      wording = item.sliceText ?? '';
+      if (wording.trim().length === 0) return null;
+      if (item.requiresConfirmationFloor) {
+        wording = `${wording} ${safetyClause}`;
+        const start = wording.indexOf(safetyClause);
+        safetyClauseRef = { start, end: start + safetyClause.length };
+      }
+    }
+    const validationGraph = buildPromptEnhancementSequenceItemValidationGraphV1({
+      sliceText: item.sliceText,
+      generatedWording: wording,
+      sequenceItemId: item.sequenceItemId,
+      safetyState: composedItemSafetyInput(
+        context.baseSafetySummary,
+        item.requiresConfirmationFloor,
+        safetyClauseRef !== null,
+      ),
+      providerRuntimeState: context.providerRuntimeState,
+      optionalCallAvailabilityState: context.optionalCallAvailabilityState,
+    });
+    // The same gate the model path applies: a body that would exceed its slice's authority is not
+    // stored. The fallback is built not to, but the check is shared rather than trusted.
+    if (validationGraph.failures.length > 0) return null;
+    composed.set(item.dependencyOrder, { wording, validationGraph, safetyClauseRef });
+  }
+  return composed;
+}
+
 /** Resolve an item's slice from the local original. Resolving only — never recomputing a boundary. */
 export function promptEnhancementSequenceSliceTextV1(
   ref: PromptEnhancementSequenceOffsetRangeV1 | null,
