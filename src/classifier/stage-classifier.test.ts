@@ -106,6 +106,12 @@ describe('stage-classifier — degrade path (model unavailable)', () => {
     expect(out.classification.confidence).toBe(expected.confidence);
     expect(out.fireRecommendation).toBe(false);
     expect(out.selectedSignalKey).toBe('');
+    // A degraded reply PROPOSES NOTHING: an empty intent keeps the prompt on the
+    // deterministic cascade instead of routing it on a value no model returned.
+    expect(out.primaryIntent).toBe('');
+    expect(out.intentConfidence).toBe(0);
+    expect(out.debugEvidencePresent).toEqual([]);
+    expect(out.capabilityCandidates).toEqual([]);
   });
 
   it('degrades on an empty reply and on an unparseable reply', async () => {
@@ -150,6 +156,14 @@ describe('stage-classifier — deterministic release guard (scaffolding without 
     return {
       classification: { stage: 'release', confidence: 0.9, tier: 3, allScores: { release: 0.9 } },
       signalsPresent: [], signalsAbsent: [], fireRecommendation: true, selectedSignalKey: '', reason: 'r', degraded: false,
+      // The reply-extension fields belong here too: this helper feeds the release
+      // guard, and a guard that rebuilt its result instead of carrying the reply
+      // forward would silently drop the intent proposal — sending those prompts
+      // back to the keyword cascade with nothing to show it happened.
+      primaryIntent: 'feature.fresh_implementation',
+      intentConfidence: 0.82,
+      debugEvidencePresent: ['logs'],
+      capabilityCandidates: ['capability.verification_required'],
     };
   }
 
@@ -157,6 +171,14 @@ describe('stage-classifier — deterministic release guard (scaffolding without 
     const guarded = applyReleaseGuard(releaseResult(), 'set up the project with docker and a ci/cd pipeline');
     expect(guarded.classification.confidence).toBe(0);   // transition blocked upstream
     expect(guarded.fireRecommendation).toBe(false);      // no advisory fires
+    // The STAGE is what the guard neutralises. The intent proposal and the
+    // observations survive: a scaffolding window misread as a release says
+    // nothing about what the developer asked for, and dropping the proposal
+    // would push the prompt onto the cascade this milestone exists to demote.
+    expect(guarded.primaryIntent).toBe('feature.fresh_implementation');
+    expect(guarded.intentConfidence).toBe(0.82);
+    expect(guarded.debugEvidencePresent).toEqual(['logs']);
+    expect(guarded.capabilityCandidates).toEqual(['capability.verification_required']);
   });
 
   it('leaves a genuine release (scaffolding present but a verification token too) untouched', () => {
