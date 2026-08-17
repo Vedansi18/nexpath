@@ -167,6 +167,20 @@ export const PROMPT_ENHANCEMENT_LOCKED_SOURCE_KIND_EQUIVALENCE_V1: Readonly<
 };
 
 /**
+ * The shipped source kinds as a RUNTIME set, derived from the equivalence map
+ * above so the two halves of A5 cannot drift: whatever the map claims is shipped
+ * is exactly what the mixer will accept.
+ *
+ * 🔒 L4966's fixture line requires that an UNKNOWN source kind FAILS. TypeScript
+ * stops one at compile time, but facts cross a runtime boundary — and an
+ * unrecognised kind was being accepted and rendered as grounding, which is the
+ * "old DS row as PE source truth" shape the same lock names.
+ */
+export const PROMPT_ENHANCEMENT_KNOWN_SOURCE_TYPES_V1: ReadonlySet<string> = new Set(
+  Object.values(PROMPT_ENHANCEMENT_LOCKED_SOURCE_KIND_EQUIVALENCE_V1).filter((value) => value !== 'not_produced'),
+);
+
+/**
  * A5 tier-2 (L4965). The three locked lanes, ON THE FACT rather than recomputed
  * as a mixer local. 🔒 The gate is that they are NOT COLLAPSIBLE: before this,
  * the mixer's local knew only `source_a | source_b`, so the NEUTRAL lane — the

@@ -7,6 +7,7 @@ import {
 } from './source-mix.js';
 import {
   PROMPT_ENHANCEMENT_LOCKED_SOURCE_KIND_EQUIVALENCE_V1,
+  PROMPT_ENHANCEMENT_KNOWN_SOURCE_TYPES_V1,
   type PromptEnhancementGuidanceFact,
   type PromptEnhancementGuidanceSourceType,
 } from './templates/section-plan.js';
@@ -192,6 +193,25 @@ describe('A5 sourceKind equivalence — the per-field fixture A2 owed to this ph
       .filter((value) => value !== 'not_produced');
     expect(new Set(claimed).size).toBe(claimed.length);
     expect([...claimed].sort()).toEqual([...SHIPPED_SOURCE_TYPES].sort());
+  });
+
+  it('an UNKNOWN source kind FAILS rather than rendering as grounding (L4966 gate)', () => {
+    // Measured before the fix: an unrecognised kind arriving alongside a valid
+    // Source A fact was accepted and rendered as selected_supporting /
+    // source_b_grounding_within_cap — foreign provenance presenting as project
+    // grounding, the "old DS row as PE source truth" shape the lock names.
+    const mix = applyPromptEnhancementSourceMixV1([
+      fact({ factId: 'valid-a', priority: 'required_survivor' }),
+      fact({ factId: 'unknown-kind', sourceType: 'totally_made_up_source' as PromptEnhancementGuidanceSourceType }),
+    ], 'default');
+    expect(mix.renderedFacts.map((entry) => entry.factId)).toContain('valid-a');
+    expect(mix.renderedFacts.map((entry) => entry.factId)).not.toContain('unknown-kind');
+  });
+
+  it('the accepted kinds ARE the equivalence map — the two halves cannot drift', () => {
+    const claimed = Object.values(PROMPT_ENHANCEMENT_LOCKED_SOURCE_KIND_EQUIVALENCE_V1)
+      .filter((value) => value !== 'not_produced');
+    expect([...PROMPT_ENHANCEMENT_KNOWN_SOURCE_TYPES_V1].sort()).toEqual([...new Set(claimed)].sort());
   });
 
   it('the three unproduced locked values are exactly the recorded ones', () => {

@@ -11,7 +11,10 @@ import type {
   PromptEnhancementConfidenceBandV1,
   PromptEnhancementRecencyBandV1,
 } from './templates/section-plan.js';
-import { isPromptEnhancementSourceCriticalFactV1 } from './templates/section-plan.js';
+import {
+  isPromptEnhancementSourceCriticalFactV1,
+  PROMPT_ENHANCEMENT_KNOWN_SOURCE_TYPES_V1,
+} from './templates/section-plan.js';
 
 /**
  * transform-rule-2 split 1 — dual-lane source mixer (E2 / phase 2.2).
@@ -278,6 +281,11 @@ const isSourceCritical = isPromptEnhancementSourceCriticalFactV1;
 /** Invalid/unsafe facts (missing source ids, unrenderable) are rejected before mixing. */
 function isValidFact(fact: PromptEnhancementGuidanceFact): boolean {
   return (
+    // L4966: an UNKNOWN source kind FAILS. Without this an unrecognised fact was
+    // accepted and rendered as `source_b_grounding` — foreign provenance
+    // presenting as project grounding. It rides the existing invalid-source
+    // rejection rather than a new gate, so the locked downgrade path is unchanged.
+    PROMPT_ENHANCEMENT_KNOWN_SOURCE_TYPES_V1.has(fact.sourceType) &&
     fact.sourceIds.length > 0 &&
     fact.privacyClass !== 'do_not_render' &&
     fact.sanitizationState !== 'unsafe_to_render' &&
