@@ -243,13 +243,30 @@ const SYSTEM_PROMPT = [
 
 function buildUserPrompt(
   originalPromptText: string,
-  sections: readonly { sectionId: string; sectionKind: string; structuredContentPartRefs: readonly string[] }[],
+  sections: readonly {
+    sectionId: string;
+    sectionKind: string;
+    structuredContentPartRefs: readonly string[];
+    slotObligations?: readonly string[];
+  }[],
 ): string {
   const sectionLines = sections
-    .map(
-      (section) =>
-        `- sectionId: ${section.sectionId}\n  purpose: ${section.sectionKind}\n  allowedSourceFactIds: ${JSON.stringify(section.structuredContentPartRefs)}`,
-    )
+    .map((section) => {
+      // The typed slot obligations become part of the section's instruction —
+      // the no-invention state most of all, which used to exist only as prose
+      // nobody could check. A field the composer reads and a check enforces is
+      // a contract; a sentence in a prompt is only an instruction.
+      const obligations = section.slotObligations ?? [];
+      const obligationLine = obligations.length > 0
+        ? `\n  slotObligations: ${JSON.stringify(obligations)}`
+        : '';
+      const noInventionLine = obligations.includes('no_invention_state')
+        ? '\n  NO-INVENTION (hard): this section may not name a tool, library, service, file, API'
+          + ' or project fact that does not appear in the original request or in an allowed source'
+          + ' fact. If the evidence is missing, ASK for it — never supply an example name.'
+        : '';
+      return `- sectionId: ${section.sectionId}\n  purpose: ${section.sectionKind}\n  allowedSourceFactIds: ${JSON.stringify(section.structuredContentPartRefs)}${obligationLine}${noInventionLine}`;
+    })
     .join('\n');
   return [
     `Original request (context only — do NOT reword it):\n${originalPromptText}`,
