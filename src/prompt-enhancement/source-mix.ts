@@ -147,11 +147,16 @@ export function promptEnhancementRecencyBandForV1(
 }
 
 function laneFor(fact: PromptEnhancementGuidanceFact): PromptEnhancementSourceMixLane {
+  // READS the fact's lane — it does not re-derive one. The done-when is that no
+  // local stands in for lane semantics the lock puts ON the fact, so once the
+  // field exists it must be the authority; deriving here again would leave the
+  // field decorative. The fallback covers only un-normalized fixture facts.
+  const lane = fact.sourceLane ?? promptEnhancementSourceLaneForV1(fact);
   // The internal two-bucket split the selection logic has always used. Source
   // NEUTRAL rides the B bucket for SELECTION exactly as it did before A5 (it is
   // clamped to label-only and never consumes a grounding slot), so behaviour is
   // unchanged — but the fact now carries the honest three-value lane.
-  return promptEnhancementSourceLaneForV1(fact) === 'source_a_missing_practice' ? 'source_a' : 'source_b';
+  return lane === 'source_a_missing_practice' ? 'source_a' : 'source_b';
 }
 
 // ── Tier-1 evidence-field normalization ──────────────────────────────────────
@@ -255,7 +260,12 @@ export function normalizePromptEnhancementTier1FieldsV1(
   // fact reaches selection without them, and producers may still set them.
   return {
     ...withTier1,
-    sourceLane: fact.sourceLane ?? promptEnhancementSourceLaneForV1(withTier1),
+    // Producers may set the lane, but prompt-only knowledge can never be
+    // RELABELLED into a lane it cannot occupy — the same boundary the claim
+    // clamp above enforces for wording, applied to the lane itself.
+    sourceLane: promptEnhancementSourceLaneForV1(withTier1) === 'source_neutral_original'
+      ? 'source_neutral_original'
+      : fact.sourceLane ?? promptEnhancementSourceLaneForV1(withTier1),
     confidenceBand: fact.confidenceBand ?? promptEnhancementConfidenceBandForV1(withTier1),
     recencyBand: fact.recencyBand ?? promptEnhancementRecencyBandForV1(withTier1),
   };

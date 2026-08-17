@@ -62,6 +62,33 @@ describe('A5 sourceLane — Source A, Source B and Source NEUTRAL are not collap
     }))).toBe('source_neutral_original');
   });
 
+  it('the lane ON THE FACT is the authority — the mixer reads it, never re-derives it', () => {
+    // The done-when: no local stand-in for lane semantics the lock puts on the
+    // fact. If the mixer re-derived, an explicit lane would be ignored and the
+    // field would be decoration.
+    const relabelled = fact({
+      factId: 'explicit-lane',
+      sourceType: 'hard_fact',            // would derive as source_b_grounding
+      sourceLane: 'source_a_missing_practice',
+      priority: 'required_survivor',
+    });
+    const mix = applyPromptEnhancementSourceMixV1([relabelled], 'default');
+    expect(mix.requiredSurvivor?.factId).toBe('explicit-lane');
+    expect(mix.requiredSurvivor?.sourceLane).toBe('source_a_missing_practice');
+  });
+
+  it('but prompt-only knowledge can never be RELABELLED out of the neutral lane', () => {
+    // The lane boundary mirrors the claim clamp: a producer must not be able to
+    // promote the user's own words into missing-practice or grounding.
+    const smuggled = fact({
+      sourceType: 'prompt_derived_fact',
+      sourceLane: 'source_a_missing_practice',
+    });
+    const mix = applyPromptEnhancementSourceMixV1([smuggled], 'default');
+    const entry = mix.classifiedFacts.find((candidate) => candidate.fact.sourceType === 'prompt_derived_fact');
+    expect(entry?.fact.sourceLane).toBe('source_neutral_original');
+  });
+
   it('the lane lands ON THE FACT through the mixer, not only as a local', () => {
     const mix = applyPromptEnhancementSourceMixV1([fact(), fact({ factId: 'pe-fact-1', sourceType: 'hard_fact' })], 'default');
     for (const entry of mix.classifiedFacts) expect(entry.fact.sourceLane).toBeDefined();
