@@ -8,7 +8,7 @@ import { getRecentPrompts, insertPrompt } from './prompts.js';
 import { upsertProject, getProject } from './projects.js';
 import { setConfig } from './config.js';
 import { importHistoricalPrompts } from './historical-import.js';
-import { SessionStateManager } from '../classifier/SessionStateManager.js';
+import { SessionStateManager, MAX_HISTORY } from '../classifier/SessionStateManager.js';
 import { readParamEvents } from '../telemetry/param-events.js';
 import { getUserDepthLevel } from './user-depth-level.js';
 
@@ -470,6 +470,34 @@ describe('importHistoricalPrompts', () => {
     expect(recentTwo).toEqual(['new prompt a', 'new prompt b']);
     // Index ascends with time, as it does for live records.
     expect(mgr.current.promptHistory.map((p) => p.index)).toEqual([0, 1, 2, 3]);
+  });
+
+  // At REAL scale. The assertion above uses four prompts, where taking the
+  // newest MAX_HISTORY and taking the oldest MAX_HISTORY are the same array —
+  // so it cannot tell the two apart. Most imported projects carry far more than
+  // MAX_HISTORY prompts, and there the choice decides whether the session is
+  // seeded with the user's current work or with history from months ago.
+  it('beyond MAX_HISTORY, the session is seeded with the NEWEST window, still ascending', async () => {
+    const projDir = setupProjDir(tmpDir);
+    const total = MAX_HISTORY + 10;
+    // prompt-01 .. prompt-40, one hour apart, oldest first in the file.
+    const lines = Array.from({ length: total }, (_, i) =>
+      makeUserLineAt(
+        `prompt-${String(i + 1).padStart(2, '0')}`,
+        new Date(Date.UTC(2026, 7, 12, i, 0, 0)).toISOString(),
+      ));
+    writeJsonl(projDir, 'session.jsonl', lines);
+
+    await importHistoricalPrompts(store, PROJECT_ROOT);
+
+    const history = SessionStateManager.load(store, PROJECT_ROOT).current.promptHistory;
+    expect(history).toHaveLength(MAX_HISTORY);
+    // The newest window: prompts 11..40, not 1..30.
+    expect(history[0].text).toBe('prompt-11');
+    expect(history[history.length - 1].text).toBe('prompt-40');
+    expect(history.map((p) => p.text)).not.toContain('prompt-01');
+    // Recency still reads off the tail, as every consumer expects.
+    expect(history.slice(-3).map((p) => p.text)).toEqual(['prompt-38', 'prompt-39', 'prompt-40']);
   });
 });
 
