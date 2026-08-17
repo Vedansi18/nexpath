@@ -24,7 +24,7 @@ vi.mock('openai', () => ({
     }) } };
   },
 }));
-import { getRecentPrompts } from '../../store/prompts.js';
+import { getRecentPrompts, insertPrompt } from '../../store/prompts.js';
 import {
   buildFiredKey,
   buildPromptEnhancementCliSubmitConsumerDiagnosticV1,
@@ -447,6 +447,31 @@ describe('runAuto — historical prompt backfill', () => {
 
     const texts = getRecentPrompts(store, projectRoot, 20).map((r) => r.text);
     expect(texts.filter((t) => t === 'old prompt one')).toHaveLength(1);
+  });
+
+  it('THE PINNED EDGE: a prompt already stored before the first import opportunity skips the import entirely', () => {
+    // Not the same case as the idempotency test above, which runs AFTER a
+    // successful import. This is the user whose store already holds a prompt
+    // when the backfill first gets its chance — someone who used Nexpath before
+    // the backfill existed, or whose prompts arrived through another path. The
+    // zero-prompts guard is the whole gate, so for them the Claude history is
+    // never imported, and that is the ACCEPTED behaviour: the alternative is
+    // re-importing history behind a user who already has a live prompt stream.
+    // Pinned here so the decision cannot drift silently — swapping the guard for
+    // a persisted "already imported" flag would keep the idempotency test green
+    // while changing this outcome.
+    upsertProject(store, { projectRoot, name: 'init-first-project' });
+    insertPrompt(store, { projectRoot, promptText: 'a prompt stored before any import opportunity' });
+    writeHistoryJsonl(['old prompt one', 'old prompt two']);
+
+    return runAuto(makeInput({ projectRoot, promptText: 'first live prompt after that' }), store).then(() => {
+      const texts = getRecentPrompts(store, projectRoot, 20).map((r) => r.text);
+      expect(texts).not.toContain('old prompt one');
+      expect(texts).not.toContain('old prompt two');
+      // The live prompts themselves are unaffected.
+      expect(texts).toContain('a prompt stored before any import opportunity');
+      expect(texts).toContain('first live prompt after that');
+    });
   });
 });
 
