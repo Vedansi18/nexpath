@@ -792,6 +792,16 @@ export interface PromptEnhancementSectionV1 {
    * String-typed here (the obligation union lives in the planner layer).
    */
   slotObligations: readonly string[];
+  /**
+   * GR-1: the boundary-RESOLVED fact values this section states.
+   *
+   * The no-invention check asks whether a section names something NOBODY
+   * supplied, and its allowed texts were the prompt plus source IDS. Once
+   * GR-1 renders values, a legitimately resolved `PostgreSQL` or config path
+   * looks fabricated — real grounding rejected as invention. A value the
+   * boundary resolved WAS supplied; it just had no carrier until now.
+   */
+  groundedFactValues?: readonly string[];
   baselineSourceSignalSlot: string | 'not_applicable' | 'unknown';
   requirementSourceStatus: PromptEnhancementEvidenceStatus;
   requiredSurvivor: boolean;

@@ -23,7 +23,8 @@ import {
   type PromptEnhancementValidationStatus,
 } from './contracts.js';
 import { buildPromptEnhancementCostVisibilityMetadataV1 } from './cost-observability.js';
-import { promptEnhancementFactValueLinesV1 } from './fact-value-render.js';
+import { promptEnhancementFactValueLinesV1, promptEnhancementGroundedValuesV1 } from './fact-value-render.js';
+import type { PromptEnhancementGuidanceFact } from './templates/section-plan.js';
 import { PROMPT_ENHANCEMENT_FALLTHROUGH_SHORT_PREFIX_V1 } from './body-assertion-checks.js';
 import {
   buildPromptEnhancementOriginalTextRefV1,
@@ -387,7 +388,7 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
     ? applyEditedBodyWithAdditionalDetails(input.editedBodyText, input.additionalDetailsText)
     : canonicalText;
   const modelDraftedSectionIds = new Set(validatedLlmDrafts.draftsBySectionId.keys());
-  let sections = attachSpanRefs(renderableSectionPlans, renderedSections, text, input.originalPromptText, modelDraftedSectionIds, input.sectionPlanningResult.promptReviewOrigin);
+  let sections = attachSpanRefs(input.sectionPlanningResult.renderedFacts, renderableSectionPlans, renderedSections, text, input.originalPromptText, modelDraftedSectionIds, input.sectionPlanningResult.promptReviewOrigin);
   // Validator-parity confirmation guard (blocked-popup fix 2026-08-07): the prompt-based gate
   // above cannot see risk phrasing the GENERATED wording introduces (an LLM draft is free text),
   // but validatePromptEnhancementSafety scans the generated body and hard-blocks a body that
@@ -415,7 +416,7 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
       renderedSections = renderSectionsWithConfirmation(lastGeneratedSectionId);
       canonicalText = renderedSections.map((section) => section.text).join('\n\n');
       text = canonicalText;
-      sections = attachSpanRefs(renderableSectionPlans, renderedSections, text, input.originalPromptText, modelDraftedSectionIds, input.sectionPlanningResult.promptReviewOrigin);
+      sections = attachSpanRefs(input.sectionPlanningResult.renderedFacts, renderableSectionPlans, renderedSections, text, input.originalPromptText, modelDraftedSectionIds, input.sectionPlanningResult.promptReviewOrigin);
     }
   }
   const generatedSafeStatus: PromptEnhancementValidationStatus = deterministicFallback === 'none' ? 'valid' : 'valid_with_fallback';
@@ -1148,6 +1149,9 @@ function sentPromptOriginFor(
 }
 
 function attachSpanRefs(
+  // GR-1: the resolved facts, so each section can record the values it
+  // legitimately states for the no-invention allow-list.
+  renderedFacts: readonly PromptEnhancementGuidanceFact[],
   sectionPlans: readonly PromptEnhancementSectionPlanItemV1[],
   renderedSections: readonly { sectionId: string; title: string; bodyText: string; text: string }[],
   bodyText: string,
@@ -1217,6 +1221,7 @@ function attachSpanRefs(
       sourceKind: sectionPlan.sourceKind,
       sourceIds: sectionPlan.sourceIds,
       sourceFactIds: sectionPlan.structuredContentPartRefs,
+      groundedFactValues: promptEnhancementGroundedValuesV1(sectionPlan.sectionKind, renderedFacts),
       // The typed slot obligations travel from the plan onto the composed
       // section unchanged - the composer, checks and fixtures read them here.
       slotObligations: sectionPlan.slotObligations,

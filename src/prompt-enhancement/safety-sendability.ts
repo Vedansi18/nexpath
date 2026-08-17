@@ -316,7 +316,14 @@ export function validatePromptEnhancementSafety(
       if (!section.slotObligations.includes('no_invention_state')) continue;
       const inventions = findPromptEnhancementInventionViolationsV1({
         sectionText: section.bodyText,
-        allowedTexts: [input.currentBody.originalPromptText, ...section.sourceFactIds, ...section.sourceIds],
+        // GR-1: a value the BOUNDARY resolved was supplied — by a local probe or
+        // the store rather than by the prompt — so it is grounding, not invention.
+        allowedTexts: [
+          input.currentBody.originalPromptText,
+          ...section.sourceFactIds,
+          ...section.sourceIds,
+          ...(section.groundedFactValues ?? []),
+        ],
       });
       for (const invention of inventions) {
         failures.push(failure({

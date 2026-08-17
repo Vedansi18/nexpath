@@ -845,6 +845,7 @@ Source Signal Guidance:
         "fallbackBehavior": "none",
         "familyId": "feature_delivery",
         "feedbackSensitivity": "protected",
+        "groundedFactValues": [],
         "handoffCapabilityFlags": [
           "no_runtime_sequence_v1",
         ],
@@ -939,6 +940,7 @@ Source Signal Guidance:
         "fallbackBehavior": "none",
         "familyId": "feature_delivery",
         "feedbackSensitivity": "protected",
+        "groundedFactValues": [],
         "handoffCapabilityFlags": [
           "no_runtime_sequence_v1",
         ],
@@ -1034,6 +1036,7 @@ Source Signal Guidance:
         "fallbackBehavior": "none",
         "familyId": "feature_delivery",
         "feedbackSensitivity": "protected",
+        "groundedFactValues": [],
         "handoffCapabilityFlags": [
           "no_runtime_sequence_v1",
         ],
@@ -1129,6 +1132,7 @@ Source Signal Guidance:
         "fallbackBehavior": "none",
         "familyId": "feature_delivery",
         "feedbackSensitivity": "protected",
+        "groundedFactValues": [],
         "handoffCapabilityFlags": [
           "no_runtime_sequence_v1",
         ],
@@ -1224,6 +1228,7 @@ Source Signal Guidance:
         "fallbackBehavior": "none",
         "familyId": "feature_delivery",
         "feedbackSensitivity": "protected",
+        "groundedFactValues": [],
         "handoffCapabilityFlags": [
           "no_runtime_sequence_v1",
         ],
@@ -1321,6 +1326,7 @@ Source Signal Guidance:
         "fallbackBehavior": "none",
         "familyId": "feature_delivery",
         "feedbackSensitivity": "protected",
+        "groundedFactValues": [],
         "handoffCapabilityFlags": [
           "no_runtime_sequence_v1",
         ],
@@ -1420,6 +1426,7 @@ Source Signal Guidance:
         "fallbackBehavior": "none",
         "familyId": "feature_delivery",
         "feedbackSensitivity": "protected",
+        "groundedFactValues": [],
         "handoffCapabilityFlags": [
           "no_runtime_sequence_v1",
         ],
@@ -3475,6 +3482,7 @@ Source Signal Guidance:
         "fallbackBehavior": "none",
         "familyId": "issue_debug",
         "feedbackSensitivity": "protected",
+        "groundedFactValues": [],
         "handoffCapabilityFlags": [
           "no_runtime_sequence_v1",
         ],
@@ -3569,6 +3577,7 @@ Source Signal Guidance:
         "fallbackBehavior": "none",
         "familyId": "issue_debug",
         "feedbackSensitivity": "protected",
+        "groundedFactValues": [],
         "handoffCapabilityFlags": [
           "no_runtime_sequence_v1",
         ],
@@ -3664,6 +3673,7 @@ Source Signal Guidance:
         "fallbackBehavior": "none",
         "familyId": "issue_debug",
         "feedbackSensitivity": "protected",
+        "groundedFactValues": [],
         "handoffCapabilityFlags": [
           "no_runtime_sequence_v1",
         ],
@@ -3759,6 +3769,7 @@ Source Signal Guidance:
         "fallbackBehavior": "none",
         "familyId": "issue_debug",
         "feedbackSensitivity": "protected",
+        "groundedFactValues": [],
         "handoffCapabilityFlags": [
           "no_runtime_sequence_v1",
         ],
@@ -3857,6 +3868,7 @@ Source Signal Guidance:
         "fallbackBehavior": "none",
         "familyId": "issue_debug",
         "feedbackSensitivity": "protected",
+        "groundedFactValues": [],
         "handoffCapabilityFlags": [
           "no_runtime_sequence_v1",
         ],
@@ -3952,6 +3964,7 @@ Source Signal Guidance:
         "fallbackBehavior": "none",
         "familyId": "issue_debug",
         "feedbackSensitivity": "protected",
+        "groundedFactValues": [],
         "handoffCapabilityFlags": [
           "no_runtime_sequence_v1",
         ],
@@ -4049,6 +4062,7 @@ Source Signal Guidance:
         "fallbackBehavior": "none",
         "familyId": "issue_debug",
         "feedbackSensitivity": "protected",
+        "groundedFactValues": [],
         "handoffCapabilityFlags": [
           "no_runtime_sequence_v1",
         ],
@@ -4148,6 +4162,7 @@ Source Signal Guidance:
         "fallbackBehavior": "none",
         "familyId": "issue_debug",
         "feedbackSensitivity": "protected",
+        "groundedFactValues": [],
         "handoffCapabilityFlags": [
           "no_runtime_sequence_v1",
         ],
@@ -6188,6 +6203,7 @@ Source Signal Guidance:
         "fallbackBehavior": "none",
         "familyId": "feature_delivery",
         "feedbackSensitivity": "protected",
+        "groundedFactValues": [],
         "handoffCapabilityFlags": [
           "no_runtime_sequence_v1",
         ],
@@ -6282,6 +6298,7 @@ Source Signal Guidance:
         "fallbackBehavior": "none",
         "familyId": "feature_delivery",
         "feedbackSensitivity": "protected",
+        "groundedFactValues": [],
         "handoffCapabilityFlags": [
           "no_runtime_sequence_v1",
         ],
@@ -6377,6 +6394,7 @@ Source Signal Guidance:
         "fallbackBehavior": "none",
         "familyId": "feature_delivery",
         "feedbackSensitivity": "protected",
+        "groundedFactValues": [],
         "handoffCapabilityFlags": [
           "no_runtime_sequence_v1",
         ],
@@ -6472,6 +6490,7 @@ Source Signal Guidance:
         "fallbackBehavior": "none",
         "familyId": "feature_delivery",
         "feedbackSensitivity": "protected",
+        "groundedFactValues": [],
         "handoffCapabilityFlags": [
           "no_runtime_sequence_v1",
         ],
@@ -6567,6 +6586,7 @@ Source Signal Guidance:
         "fallbackBehavior": "none",
         "familyId": "feature_delivery",
         "feedbackSensitivity": "protected",
+        "groundedFactValues": [],
         "handoffCapabilityFlags": [
           "no_runtime_sequence_v1",
         ],
@@ -6664,6 +6684,7 @@ Source Signal Guidance:
         "fallbackBehavior": "none",
         "familyId": "feature_delivery",
         "feedbackSensitivity": "protected",
+        "groundedFactValues": [],
         "handoffCapabilityFlags": [
           "no_runtime_sequence_v1",
         ],
@@ -6763,6 +6784,7 @@ Source Signal Guidance:
         "fallbackBehavior": "none",
         "familyId": "feature_delivery",
         "feedbackSensitivity": "protected",
+        "groundedFactValues": [],
         "handoffCapabilityFlags": [
           "no_runtime_sequence_v1",
         ],

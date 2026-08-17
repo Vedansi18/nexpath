@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { promptEnhancementFactValueLinesV1 } from './fact-value-render.js';
+import { promptEnhancementFactValueLinesV1, promptEnhancementGroundedValuesV1 } from './fact-value-render.js';
 import { routePromptEnhancement, type PromptEnhancementRouteInput } from './routing-taxonomy.js';
 import { planPromptEnhancementSections, type PromptEnhancementGuidanceFact } from './templates/section-plan.js';
 import { composePromptEnhancementBody } from './compose-enhancement.js';
+import { findPromptEnhancementInventionViolationsV1 } from './preservation-floors.js';
 import type { PromptEnhancementSourceRefV1 } from './contracts.js';
 
 const STANDING_INSTRUCTION = 'Ground the request in current project facts';
@@ -189,6 +190,63 @@ describe('GR-1 — the per-fact gates hold on the deterministic path', () => {
   it('a fact targeting another section does not leak into this one', () => {
     expect(promptEnhancementFactValueLinesV1('project_grounding_facts', [
       fact({ targetSectionKind: 'verification_or_test_plan' }),
+    ])).toEqual([]);
+  });
+});
+
+describe('GR-1 x F2 — real grounding is not mistaken for invention', () => {
+  // The collision: GR-1 states values the user never typed, and F2 asks whether a
+  // section names something NOBODY supplied. Its allowed texts were the prompt
+  // plus source IDS, so a legitimately resolved PostgreSQL / RabbitMQ / config
+  // path read as fabricated — measured, all four flagged — and the body would
+  // have failed sendability on its own grounding.
+  const debugRoute = () => routePromptEnhancement({
+    routeDecisionId: 'x',
+    promptText: 'the checkout test keeps failing',
+    currentStage: 'implementation',
+    prevStage: 'task_breakdown',
+    triggerKind: 'absence',
+    firedKey: 'absence:debugging_observation_gap@implementation',
+    classifierState: 'fire_recommended',
+    degradedNoActionState: 'none',
+    generatedOriginState: 'ordinary_user_prompt',
+  });
+
+  it.each([
+    ['PostgreSQL'], ['RabbitMQ'], ['/app/src/config.ts'],
+  ])('a resolved %s value is allowed, not reported as fabricated', (value) => {
+    const planning = planPromptEnhancementSections({
+      routeResult: debugRoute(),
+      sourceRefs: [sourceA],
+      guidanceFacts: [fact({ targetSectionKind: 'reproduction_or_evidence', evidence: { key: 'dep', value } })],
+    });
+    const body = composePromptEnhancementBody({
+      enhancementId: 'x',
+      originalPromptText: 'the checkout test keeps failing',
+      sectionPlanningResult: planning,
+    }).currentBody;
+    const section = (body?.sections ?? []).find((s2) => s2.sectionKind === 'reproduction_or_evidence');
+    expect(section?.slotObligations).toContain('no_invention_state');
+    expect(section?.groundedFactValues).toContain(value);
+    const violations = findPromptEnhancementInventionViolationsV1({
+      sectionText: section?.bodyText ?? '',
+      allowedTexts: [
+        'the checkout test keeps failing',
+        ...(section?.sourceFactIds ?? []),
+        ...(section?.sourceIds ?? []),
+        ...(section?.groundedFactValues ?? []),
+      ],
+    });
+    expect(violations).toEqual([]);
+  });
+
+  it('a WITHHELD fact contributes no allowed value — the gate cannot be widened through it', () => {
+    // Otherwise the allow-list would become a way to launder a suppressed value.
+    expect(promptEnhancementGroundedValuesV1('project_grounding_facts', [
+      fact({ privacyClass: 'do_not_render', evidence: { key: 'secret', value: 'PostgreSQL' } }),
+    ])).toEqual([]);
+    expect(promptEnhancementGroundedValuesV1('project_grounding_facts', [
+      fact({ privacyClass: 'sensitive_ref_only', evidence: { key: 'token', value: 'RabbitMQ' } }),
     ])).toEqual([]);
   });
 });

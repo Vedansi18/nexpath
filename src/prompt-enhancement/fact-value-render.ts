@@ -122,3 +122,22 @@ export function promptEnhancementFactValueLinesV1(
   }
   return lines;
 }
+
+/**
+ * The resolved VALUES a section legitimately states — the allow-list companion to
+ * the lines above. Same gates: a withheld or reference-only fact contributes no
+ * value, so nothing gated can be smuggled into the invention allow-list.
+ */
+export function promptEnhancementGroundedValuesV1(
+  sectionKind: string,
+  facts: readonly PromptEnhancementGuidanceFact[],
+): readonly string[] {
+  const values: string[] = [];
+  for (const fact of facts) {
+    if (fact.targetSectionKind !== sectionKind) continue;
+    if (!isRenderableValueFactV1(fact) || isReferenceOnlyV1(fact)) continue;
+    const value = fact.evidence?.value.trim();
+    if (value) values.push(value);
+  }
+  return values;
+}
