@@ -170,6 +170,48 @@ describe('PE executable facade', () => {
     expect(observed.routeDecision.capabilityOverlays).not.toContain('capability.reproduction_or_evidence_needed');
   });
 
+  it('an ACTION recompose keeps the observation-driven route it was opened with', async () => {
+    // The popup is prepared once and persisted; an action re-runs prepare against
+    // that stored request. If the observation did not survive the round trip, the
+    // recompose would silently re-route through the demoted keyword decider and
+    // the user would see different capabilities than the popup they clicked.
+    const base = request();
+    const keyed = request({
+      requestId: 'facade-action-keeps-observation',
+      reviewMomentContext: {
+        ...base.reviewMomentContext,
+        triggerProvenance: {
+          ...base.reviewMomentContext.triggerProvenance,
+          classifierPrimaryIntent: 'issue_debug.failing_test',
+          classifierIntentConfidence: 0.9,
+          classifierCapabilityCandidates: ['capability.confirmation_needed'],
+          classifierDebugEvidencePresent: ['logs', 'failing_test_details'],
+        },
+      },
+    });
+    const prepared = await preparePromptEnhancement(keyed);
+    expect(prepared.routeDecision.capabilityOverlays).toContain('capability.confirmation_needed');
+
+    // Round-trip the request exactly as the store does: serialise, re-read.
+    const roundTripped = JSON.parse(JSON.stringify(keyed)) as typeof keyed;
+    const shorter = prepared.availableActions.find((action) => action.actionType === 'shorter');
+    expect(shorter).toBeDefined();
+    const acted = await applyPromptEnhancementAction({
+      ...roundTripped,
+      action: shorter!,
+      currentBodyBinding: {
+        currentBodyId: prepared.currentBody.currentBodyId,
+        bodyRevision: prepared.currentBody.bodyRevision,
+        validationDecisionId: prepared.validationDecisionId,
+        actionSubmittedAtMs: 2,
+        realUserInitiated: true,
+        sectionSpanEditEvents: [],
+      },
+    } as never);
+    expect(acted.routeDecision.primaryIntent).toBe('issue_debug.failing_test');
+    expect(acted.routeDecision.capabilityOverlays).toContain('capability.confirmation_needed');
+  });
+
   it('the intent proposal survives the facade hop and decides the route', async () => {
     // The middle link of the threading chain. Its two ends are pinned elsewhere —
     // the boundary populates provenance, and the router prefers a proposal it is
