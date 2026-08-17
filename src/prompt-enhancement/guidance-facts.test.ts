@@ -420,6 +420,45 @@ describe('secret_in_prompt separates SIGNAL from LITERAL on every path', () => {
     expect(fact.safetyHooks).toContain(SAFETY_HOOK);
   });
 
+  it('as a RECURRING MISTAKE ref — reachable even when a different absence fired the popup', () => {
+    // An active absence marks its key `mistake`, and this signal is an absence, so
+    // `mistake:secret_in_prompt` crosses independently of what fired the popup —
+    // with no protected sibling fact to carry the safety routing for it.
+    const fact = buildPromptEnhancementGuidanceFactsV1(
+      requestWithSignals({
+        rightGoodWorkStyleEnvRuntimeRefs: ['mistake:secret_in_prompt'],
+        groundingEvidenceByRef: {
+          'mistake:secret_in_prompt': { key: 'secret_in_prompt', value: 'mistake:claimed', runtimePath: 'local_read_model' },
+        },
+      } as never),
+    )[0];
+    expect(fact.privacyClass).toBe('requires_confirmation');
+    expect(fact.factRole).toBe('safety_confirmation_support');
+    expect(fact.claimVerbPolicy).toBe('source_label_only');
+    expect(fact.riskLevel).toBe('sensitive_authority_risky');
+    expect(fact.guidanceKind).toBe('safety_or_confirmation');
+    expect(fact.safetyHooks).toContain(SAFETY_HOOK);
+    // Confirmation-routed privacy withholds the content: the SIGNAL crosses, the
+    // resolved detail does not.
+    expect(fact.evidence).toBeUndefined();
+  });
+
+  it('an ordinary recurring mistake keeps its ordinary treatment, content and all', () => {
+    const fact = buildPromptEnhancementGuidanceFactsV1(
+      requestWithSignals({
+        rightGoodWorkStyleEnvRuntimeRefs: ['mistake:test_creation'],
+        groundingEvidenceByRef: {
+          'mistake:test_creation': { key: 'test_creation', value: 'mistake:claimed', runtimePath: 'local_read_model' },
+        },
+      } as never),
+    )[0];
+    expect(fact.privacyClass).toBe('local_private');
+    expect(fact.factRole).toBe('supporting_missing_practice');
+    expect(fact.riskLevel).toBe('low');
+    expect(fact.safetyHooks).not.toContain(SAFETY_HOOK);
+    expect(fact.evidence).toEqual({ key: 'test_creation', value: 'mistake:claimed' });
+  });
+
   it('an ordinary absence signal is untouched by the sensitive path, on both routes', () => {
     const triggered = buildPromptEnhancementGuidanceFactsV1(
       requestWithSignals({}, {

@@ -82,8 +82,19 @@ export function evidenceForGuidanceFact(
  * confirmation, and carries its safety hook, and the fired trigger is the most
  * likely way such a signal arrives (it is what opens the popup).
  */
+/**
+ * The sensitive-source test, in ONE place. A `secret_in_prompt`-class signal can
+ * reach the boundary through more than one producer — as the fired trigger, as a
+ * normalized signal ref, and as a recurring-mistake ref (an active absence marks
+ * its key `mistake`, and this signal is an absence) — and the locked treatment
+ * must not depend on which one emitted it.
+ */
+export function isSensitiveSignalRefV1(ref: string): boolean {
+  return ref.includes('secret_in_prompt');
+}
+
 function absenceSignalFactV1(factId: string, sourceId: string): PromptEnhancementGuidanceFact {
-  const isSensitiveSource = sourceId.includes('secret_in_prompt');
+  const isSensitiveSource = isSensitiveSignalRefV1(sourceId);
   return {
     factId,
     sourceType: 'absence_signal',
@@ -251,25 +262,31 @@ export function buildPromptEnhancementGuidanceFactsV1(
       // A recurring mistake is a negative-capability signal: a missing practice, so
       // it belongs in Source A (fix-plan §4b), NOT the positive Source-B pattern lane.
       const mistakeResolved = signals.groundingEvidenceByRef?.[ref];
+      // A recurring mistake CAN be the sensitive signal: an active absence marks
+      // its key `mistake`, and `secret_in_prompt` is an absence. This ref reaches
+      // PE even when a different absence fired the popup, so it carries no
+      // protected sibling — the treatment has to be applied here too.
+      const mistakeIsSensitive = isSensitiveSignalRefV1(ref);
+      const mistakePrivacy = mistakeIsSensitive ? 'requires_confirmation' as const : 'local_private' as const;
       facts.push({
         factId: nextId('mistake'),
         sourceType: 'absence_signal',
         sourceIds: [ref],
-        guidanceKind: 'missing_practice',
+        guidanceKind: mistakeIsSensitive ? 'safety_or_confirmation' : 'missing_practice',
         suggestedActionKind: 'no_action_render_context_only',
         targetFamily: 'family_agnostic',
         targetSectionKind: 'source_signal_guidance',
         sourceEvidenceState: 'partial',
         sourceOriginScope: 'longitudinal_param_events',
-        claimVerbPolicy: 'must_phrase_as_source_signal',
-        factRole: 'supporting_missing_practice',
+        claimVerbPolicy: mistakeIsSensitive ? 'source_label_only' : 'must_phrase_as_source_signal',
+        factRole: mistakeIsSensitive ? 'safety_confirmation_support' : 'supporting_missing_practice',
         priority: 'normal',
         renderPolicy: 'render_as_section',
-        riskLevel: 'low',
-        safetyHooks: [],
-        privacyClass: 'local_private',
+        riskLevel: mistakeIsSensitive ? 'sensitive_authority_risky' : 'low',
+        safetyHooks: mistakeIsSensitive ? ['pe_ar9_sensitive_source'] : [],
+        privacyClass: mistakePrivacy,
         sanitizationState: 'identity_only_event',
-        evidence: evidenceForGuidanceFact('local_private', 'identity_only_event', mistakeResolved),
+        evidence: evidenceForGuidanceFact(mistakePrivacy, 'identity_only_event', mistakeResolved),
         sourceRuntimePath: mistakeResolved?.runtimePath,
         sourceAnchorScope: mistakeResolved?.anchorScope,
         publicCopySafe: true,
