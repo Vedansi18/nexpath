@@ -1156,6 +1156,9 @@ function attachSpanRefs(
       sourceKind: sectionPlan.sourceKind,
       sourceIds: sectionPlan.sourceIds,
       sourceFactIds: sectionPlan.structuredContentPartRefs,
+      // The typed slot obligations travel from the plan onto the composed
+      // section unchanged - the composer, checks and fixtures read them here.
+      slotObligations: sectionPlan.slotObligations,
       routeCandidateRefs: [sectionPlan.templateId],
       evidenceStatus: sectionPlan.sourceEvidenceStatus,
       sourceEvidenceStatus: sectionPlan.sourceEvidenceStatus,

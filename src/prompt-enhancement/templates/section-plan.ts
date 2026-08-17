@@ -251,6 +251,103 @@ const SOURCE_KIND_BY_GUIDANCE_SOURCE: Record<PromptEnhancementGuidanceSourceType
   prompt_derived_fact: 'source_a_user_prompt',
 };
 
+/**
+ * The slot-effect vocabulary, typed from each capability's locked "adds"
+ * column. An obligation is what the attached capability requires its target
+ * section to CONTAIN or GUARANTEE — the composer, the post-compose checks and
+ * the fixtures all read the same typed value instead of prose.
+ */
+export type PromptEnhancementSlotObligationV1 =
+  | 'reproduction_or_evidence_request'
+  | 'no_invention_state'
+  | 'behavior_lock'
+  | 'baseline_current_output_proof'
+  | 'no_unrelated_change_boundary'
+  | 'before_after_verification'
+  | 'review_checklist_challenge'
+  | 'severity_residual_risk'
+  | 'project_source_fact_slots'
+  | 'known_unknown_wording'
+  | 'source_ids_evidence_state'
+  | 'confirmation_clarification'
+  | 'send_policy_metadata'
+  | 'safety_hook_linkage'
+  | 'family_specific_verification'
+  | 'risk_rollback_recovery'
+  | 'dry_run_backup_pin_deployment'
+  | 'safety_policy_hooks'
+  | 'decomposition_handoff_metadata'
+  | 'compact_first_popup_summary_support'
+  | 'ordering_dependency'
+  | 'baseline_source_signal'
+  | 'source_kind_id_evidence_metadata'
+  | 'public_safe_why_help_support';
+
+/**
+ * The slot-adds map — layer 3 of the capability design, NEW and named for one
+ * meaning only (the flag-scoping map above it stays a flag-scoping map; one
+ * map, one meaning). Each attached capability places its locked obligations on
+ * its target section kind; the shape follows the one shipped slot precedent
+ * (the baseline source-signal slot). The reproduction/evidence slot is FIRST —
+ * its no-invention state is the typed answer to the fabrication defect, and
+ * its slot is the one this design opened on.
+ */
+export const SLOT_EFFECTS_BY_CAPABILITY_V1: Partial<Record<PromptEnhancementCapabilityId, {
+  targetSectionKind: string;
+  obligations: readonly PromptEnhancementSlotObligationV1[];
+}>> = {
+  'capability.reproduction_or_evidence_needed': {
+    targetSectionKind: 'reproduction_or_evidence',
+    obligations: ['reproduction_or_evidence_request', 'no_invention_state'],
+  },
+  'capability.behavior_preservation': {
+    targetSectionKind: 'behavior_preservation',
+    obligations: ['behavior_lock', 'baseline_current_output_proof', 'no_unrelated_change_boundary', 'before_after_verification'],
+  },
+  'capability.adversarial_review': {
+    targetSectionKind: 'finding_format',
+    obligations: ['review_checklist_challenge', 'severity_residual_risk'],
+  },
+  'capability.project_grounding': {
+    targetSectionKind: 'project_grounding_facts',
+    obligations: ['project_source_fact_slots', 'known_unknown_wording', 'source_ids_evidence_state'],
+  },
+  'capability.confirmation_needed': {
+    targetSectionKind: 'risk_safety_or_confirmation',
+    obligations: ['confirmation_clarification', 'send_policy_metadata', 'safety_hook_linkage'],
+  },
+  'capability.verification_required': {
+    targetSectionKind: 'verification_or_test_plan',
+    obligations: ['family_specific_verification'],
+  },
+  'capability.risk_or_rollback': {
+    targetSectionKind: 'risk_safety_or_confirmation',
+    obligations: ['risk_rollback_recovery', 'dry_run_backup_pin_deployment', 'safety_policy_hooks'],
+  },
+  'capability.decomposition_candidate': {
+    targetSectionKind: 'point_inventory_or_decomposition',
+    obligations: ['decomposition_handoff_metadata', 'compact_first_popup_summary_support', 'ordering_dependency'],
+  },
+  'capability.source_signal_guidance': {
+    targetSectionKind: 'source_signal_guidance',
+    obligations: ['baseline_source_signal', 'source_kind_id_evidence_metadata', 'public_safe_why_help_support'],
+  },
+};
+
+function slotObligationsFor(
+  sectionKind: string,
+  capabilityOverlays: readonly PromptEnhancementCapabilityId[],
+): readonly PromptEnhancementSlotObligationV1[] {
+  const obligations = new Set<PromptEnhancementSlotObligationV1>();
+  for (const capability of capabilityOverlays) {
+    const effect = SLOT_EFFECTS_BY_CAPABILITY_V1[capability];
+    if (effect && effect.targetSectionKind === sectionKind) {
+      for (const obligation of effect.obligations) obligations.add(obligation);
+    }
+  }
+  return [...obligations];
+}
+
 const SECTION_REQUIRED_BY_CAPABILITY: Partial<Record<PromptEnhancementCapabilityId, string>> = {
   'capability.decomposition_candidate': 'point_inventory_or_decomposition',
   'capability.confirmation_needed': 'risk_safety_or_confirmation',
@@ -381,6 +478,7 @@ function buildSectionPlan(input: {
     sourceIds: sourceRefs.map((ref) => ref.sourceId),
     sourceEvidenceStatus,
     slotEvidenceStatus: slotEvidenceStatusFor(input.sectionKind, sourceEvidenceStatus, matchingFacts),
+    slotObligations: slotObligationsFor(input.sectionKind, input.route.capabilityOverlays),
     baselineSourceSignalSlot: input.route.selectedPreset.baselineSourceSignalSlot,
     requirementSourceStatus: requirementSourceStatusFor(input.route.familyId, input.sectionKind, matchingFacts),
     isRequired: input.required || isMandatorySurvivorSection(input.sectionKind, input.route.capabilityOverlays, matchingFacts),

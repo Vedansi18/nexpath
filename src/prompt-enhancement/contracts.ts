@@ -552,6 +552,14 @@ export interface PromptEnhancementSectionPlanItemV1 {
   sourceIds: readonly string[];
   sourceEvidenceStatus: PromptEnhancementEvidenceStatus;
   slotEvidenceStatus: PromptEnhancementEvidenceStatus;
+  /**
+   * The typed slot obligations the attached capabilities place on THIS
+   * section — a slot is a typed content obligation plus its metadata and
+   * state, not a heading. Populated from the capability slot-effect map at
+   * planning; empty when no attached capability targets this section kind.
+   * String-typed here (the obligation union lives in the planner layer).
+   */
+  slotObligations: readonly string[];
   baselineSourceSignalSlot: string | 'not_applicable' | 'unknown';
   requirementSourceStatus: PromptEnhancementEvidenceStatus;
   isRequired: boolean;
@@ -768,6 +776,14 @@ export interface PromptEnhancementSectionV1 {
   evidenceStatus: PromptEnhancementEvidenceStatus;
   sourceEvidenceStatus: PromptEnhancementEvidenceStatus;
   slotEvidenceStatus: PromptEnhancementEvidenceStatus;
+  /**
+   * The typed slot obligations the attached capabilities place on THIS
+   * section — a slot is a typed content obligation plus its metadata and
+   * state, not a heading. Populated from the capability slot-effect map at
+   * planning; empty when no attached capability targets this section kind.
+   * String-typed here (the obligation union lives in the planner layer).
+   */
+  slotObligations: readonly string[];
   baselineSourceSignalSlot: string | 'not_applicable' | 'unknown';
   requirementSourceStatus: PromptEnhancementEvidenceStatus;
   requiredSurvivor: boolean;

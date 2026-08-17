@@ -125,6 +125,7 @@ function continuationDefaultCurrentBodyV1(input: {
       {
         sectionId: 'section-original',
         sectionKind: 'original_request',
+        slotObligations: [],
         title: 'Original request',
         bodyText: 'Continuation body placeholder — re-pointed by the packager.',
         templateType: 'debug_repair',
@@ -411,6 +412,7 @@ function continuationDefaultPrepareResultV1(input: {
           sectionPlanId: 'section-plan-original',
           sectionId: 'section-original',
           sectionKind: 'original_request',
+          slotObligations: [],
           templateId: 'pe-template-debug-repair',
           familyId: 'debug_maintenance',
           primaryIntent: 'debug_and_verify',
