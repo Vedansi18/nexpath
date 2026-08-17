@@ -177,7 +177,11 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
     action,
     hasAcceptedAdditionalDetails(input),
   );
-  const validatedLlmDrafts = validatedStructuredComposerDrafts(input.structuredComposerOutput, sectionPlans);
+  const validatedLlmDrafts = validatedStructuredComposerDrafts(
+    input.structuredComposerOutput,
+    sectionPlans,
+    input.sectionPlanningResult.renderedFacts,
+  );
   const structuredComposerAttempted = runtimeState === 'accepted_structured_output' && input.structuredComposerOutput !== undefined;
   const structuredComposerRejected = structuredComposerAttempted && validatedLlmDrafts.draftsBySectionId.size === 0;
   const effectiveRuntimeState: PromptEnhancementComposerRuntimeState = structuredComposerRejected
@@ -571,9 +575,34 @@ function selectSectionPlansForAction(
   ));
 }
 
+/**
+ * L7567: content-template inputs are "source evidence only" and "cannot become …
+ * raw DS prose copy". GR-2 is the phase that put that text in front of the model,
+ * so this is where the lock is checked — the system prompt asks the model not to
+ * paste, and by this codebase's own standard an instruction is not a contract.
+ *
+ * ⚠️ Deliberately NARROW, because GR-1 exists to make bodies state resolved values:
+ * only content-template prose qualifies (a hard fact's value like `vitest` is a
+ * fact, not prose), and only a substantial run counts. A short evidence value is
+ * grounding and must keep passing.
+ */
+const PROMPT_ENHANCEMENT_PROSE_COPY_MIN_CHARS_V1 = 40;
+
+function contentTemplateProseFor(
+  sectionPlan: PromptEnhancementSectionPlanItemV1,
+  renderedFacts: readonly PromptEnhancementGuidanceFact[],
+): readonly string[] {
+  return renderedFacts
+    .filter((fact) => fact.targetSectionKind === sectionPlan.sectionKind)
+    .filter((fact) => fact.sourceType === 'content_template_record' || fact.sourceType === 'content_template_runtime_fact')
+    .map((fact) => normalizeWhitespace(fact.evidence?.value ?? '').toLowerCase())
+    .filter((prose) => prose.length >= PROMPT_ENHANCEMENT_PROSE_COPY_MIN_CHARS_V1);
+}
+
 function validatedStructuredComposerDrafts(
   output: PromptEnhancementStructuredComposerOutputV1 | undefined,
   sectionPlans: readonly PromptEnhancementSectionPlanItemV1[],
+  renderedFacts: readonly PromptEnhancementGuidanceFact[] = [],
 ): ValidatedStructuredComposerDrafts {
   const rejectedFor = (
     rejectionReason: PromptEnhancementComposerDraftRejectionReason,
@@ -613,6 +642,13 @@ function validatedStructuredComposerDrafts(
     if (!sectionPlan || sectionPlan.sectionKind === 'original_request_or_goal') { dropDraft('original_section'); continue; }
     const bodyText = normalizeWhitespace(draft.bodyText);
     if (!bodyText || containsDisallowedComposerWording(bodyText, sourceIds, sourceRefIds)) { dropDraft('empty_or_disallowed_wording'); continue; }
+    // Pasted content-template prose is disallowed wording of exactly the kind the
+    // check above refuses, so it rides that reason rather than widening the typed
+    // union — and it costs this draft only, leaving the section to render
+    // deterministically while every other draft keeps the model's wording.
+    const pastedProse = contentTemplateProseFor(sectionPlan, renderedFacts)
+      .some((prose) => bodyText.toLowerCase().includes(prose));
+    if (pastedProse) { dropDraft('empty_or_disallowed_wording'); continue; }
     if (draft.sourceFactIds.length === 0) { dropDraft('no_source_fact_ids'); continue; }
     if (draft.sourceFactIds.some((sourceFactId) => !sectionPlan.structuredContentPartRefs.includes(sourceFactId))) { dropDraft('source_fact_id_not_in_section'); continue; }
     drafts.set(draft.sectionId, `- ${bodyText}`);

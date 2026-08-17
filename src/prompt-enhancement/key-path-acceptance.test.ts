@@ -6,6 +6,7 @@ import {
 } from './source-mix.js';
 import { composeStructuredComposerOutputV1, type PromptEnhancementComposerClientV1 } from './llm-composer.js';
 import { composePromptEnhancementBody } from './compose-enhancement.js';
+import { PROMPT_ENHANCEMENT_MODEL_EVIDENCE_MAX_CHARS_V1 } from './fact-value-render.js';
 import { routePromptEnhancement } from './routing-taxonomy.js';
 import { planPromptEnhancementSections, type PromptEnhancementGuidanceFact } from './templates/section-plan.js';
 import type { PromptEnhancementSourceRefV1 } from './contracts.js';
@@ -501,5 +502,131 @@ describe('GR-2 — the id shown beside the evidence is the id the model may cite
     expect(result.diagnostics.map((diagnostic) => diagnostic.reasonCode))
       .not.toContain('deterministic_fallback:validation_failed:source_fact_id_not_in_section');
     expect(result.currentBody.sections.some((composed) => composed.sectionKind === 'reproduction_or_evidence')).toBe(true);
+  });
+});
+
+
+// ── Step 2's lock, CHECKED rather than requested ────────────────────────────
+
+describe('GR-2 — content-template evidence may not become raw DS prose copy (L7567)', () => {
+  const TEMPLATE_PROSE = 'Capture the exact failing input, the observed output, and the environment before you change any code.';
+
+  const templateFact = (value: string) => fact({
+    factId: 'ct-1',
+    sourceType: 'content_template_record',
+    sourceIds: ['ct:repro_guidance'],
+    guidanceKind: 'debug_evidence',
+    targetSectionKind: 'reproduction_or_evidence',
+    claimVerbPolicy: 'must_phrase_as_source_signal',
+    evidence: { key: 'reproduction_guidance', value },
+  });
+
+  const composeDraft = (facts: readonly PromptEnhancementGuidanceFact[], bodyText: string) => {
+    const planning = planPromptEnhancementSections({
+      routeResult: routePromptEnhancement({
+        routeDecisionId: 'l7567',
+        promptText: 'fix the null pointer error in checkout',
+        currentStage: 'implementation',
+        prevStage: 'task_breakdown',
+        triggerKind: 'absence',
+        firedKey: 'absence:debugging_observation_gap@implementation',
+        classifierState: 'fire_recommended',
+        degradedNoActionState: 'none',
+        generatedOriginState: 'ordinary_user_prompt',
+        classifierPrimaryIntent: 'issue_debug.runtime_error_exception',
+        classifierIntentConfidence: 0.9,
+        classifierCapabilityCandidates: [],
+        classifierDebugEvidencePresent: [],
+      }),
+      sourceRefs: [sourceA],
+      guidanceFacts: facts,
+    });
+    const section = planning.sectionPlans.find((plan) => plan.sectionKind === 'reproduction_or_evidence')!;
+    return composePromptEnhancementBody({
+      enhancementId: 'l7567',
+      originalPromptText: 'fix the null pointer error in checkout',
+      sectionPlanningResult: planning,
+      composerRuntimeState: 'accepted_structured_output',
+      structuredComposerOutput: {
+        outputId: 'o1',
+        sectionDrafts: [{ sectionId: section.sectionId, bodyText, sourceFactIds: [...section.structuredContentPartRefs] }],
+        composerClaims: section.structuredContentPartRefs.map((ref) => `claim:${ref}`),
+        detectedLanguageSelfReport: 'en',
+      },
+    });
+  };
+
+  it('a draft that PASTES the template prose is refused', () => {
+    // The system prompt asks the model not to paste. An instruction is not a
+    // contract — this is the check that makes it one.
+    const result = composeDraft([templateFact(TEMPLATE_PROSE)], TEMPLATE_PROSE);
+    expect(result.currentBody.composerMode).toBe('baseline_deterministic_render');
+    expect(result.diagnostics.map((diagnostic) => diagnostic.reasonCode))
+      .toContain('deterministic_fallback:validation_failed:empty_or_disallowed_wording');
+  });
+
+  it('the model’s OWN sentence grounded in that same evidence is kept', () => {
+    const result = composeDraft(
+      [templateFact(TEMPLATE_PROSE)],
+      'Before touching code, write down the failing input and what you saw instead, then add a failing test.',
+    );
+    expect(result.currentBody.composerMode).toBe('baseline_llm_structured_wording');
+  });
+
+  it('a LONG hard-fact value may still be stated — the lock is about template prose', () => {
+    // GR-1 renders resolved values into bodies, and some are long (a path list, a
+    // command). Only content-template PROSE is locked, so the source-type guard has
+    // to be load-bearing on its own — this fixture is what makes it so.
+    const longValue = 'tests live at src/**/*.test.ts and e2e specs at tests/e2e/checkout/';
+    const result = composeDraft(
+      [fact({ factId: 'hf-long', targetSectionKind: 'reproduction_or_evidence', evidence: { key: 'test_layout', value: longValue } })],
+      `Add the failing case under ${longValue} before changing code.`,
+    );
+    expect(result.currentBody.composerMode).toBe('baseline_llm_structured_wording');
+    expect(result.sendPolicy).toBe('send_current');
+  });
+
+  it('a SHORT template value may still appear — the length floor is load-bearing too', () => {
+    // "add a failing test first" is a phrase, not prose copy. Without the floor, any
+    // wording that happened to echo a short template value would be refused, and the
+    // model would lose the sentence it was asked to write.
+    const shortValue = 'add a failing test first';
+    const result = composeDraft(
+      [templateFact(shortValue)],
+      `Reproduce the error, then ${shortValue} so the fix has something to prove itself against.`,
+    );
+    expect(result.currentBody.composerMode).toBe('baseline_llm_structured_wording');
+    expect(result.sendPolicy).toBe('send_current');
+  });
+
+  it('GR-1’s short fact VALUES still ground bodies — the check must not swallow them', () => {
+    // `vitest` is a fact, not prose. A check that refused it would undo the phase
+    // before this one, so the narrowness is asserted, not assumed.
+    const result = composeDraft(
+      [fact({ factId: 'hf', targetSectionKind: 'reproduction_or_evidence', evidence: { key: 'test_runner', value: 'vitest' } })],
+      'Reproduce it with vitest before changing code.',
+    );
+    expect(result.currentBody.composerMode).toBe('baseline_llm_structured_wording');
+    expect(result.sendPolicy).toBe('send_current');
+  });
+});
+
+// ── §32.2 step 3's other half: BOUND, not only filtered ─────────────────────
+
+describe('GR-2 — the evidence that travels is bounded', () => {
+  it('an oversized value is truncated with a MARK, never silently', async () => {
+    // Measured before the bound: a 5,000-character value reached the model intact,
+    // on every composer call. Marked because a model told a fact is complete when
+    // it is not will ground in half a sentence and never say so.
+    const prompt = await capturedModelPrompt([fact({ evidence: { key: 'k', value: 'X'.repeat(5_000) } })]);
+    const line = prompt.split('\n').find((candidate) => candidate.includes('guidance_fact:f-runner |')) ?? '';
+    expect(line).toContain('[truncated_evidence_read_the_source]');
+    expect(line.length).toBeLessThan(PROMPT_ENHANCEMENT_MODEL_EVIDENCE_MAX_CHARS_V1 + 300);
+  });
+
+  it('ordinary evidence is untouched — this is a tail bound, not a behaviour change', async () => {
+    const prompt = await capturedModelPrompt([fact()]);
+    expect(prompt).toContain('test_runner = vitest');
+    expect(prompt).not.toContain('[truncated_evidence_read_the_source]');
   });
 });

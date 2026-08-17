@@ -29,6 +29,23 @@ import {
  * band cannot be hidden. Deterministic — no LLM.
  */
 
+/**
+ * §32.2 step 3 says "BOUND and filter it". The filter half rides the gates below;
+ * this is the bound. One oversized record would otherwise travel in full on every
+ * composer call — measured, a 5,000-character value reached the model intact.
+ *
+ * 🔒 Sized as a TAIL bound, not a behaviour change: the measured typical evidence
+ * line is ~148 characters, so this sits roughly seven times above ordinary traffic
+ * and truncates nothing in normal use. Truncation is MARKED, never silent — a model
+ * told a fact is complete when it is not would ground in a half-sentence.
+ */
+export const PROMPT_ENHANCEMENT_MODEL_EVIDENCE_MAX_CHARS_V1 = 1_000;
+
+function boundedEvidenceV1(text: string): string {
+  if (text.length <= PROMPT_ENHANCEMENT_MODEL_EVIDENCE_MAX_CHARS_V1) return text;
+  return `${text.slice(0, PROMPT_ENHANCEMENT_MODEL_EVIDENCE_MAX_CHARS_V1)} [truncated_evidence_read_the_source]`;
+}
+
 /** Per-fact gates (§35 / §43.1). A gated fact never reaches wording at all. */
 function isRenderableValueFactV1(fact: PromptEnhancementGuidanceFact): boolean {
   if (fact.privacyClass === 'do_not_render' || fact.sanitizationState === 'unsafe_to_render') return false;
@@ -209,7 +226,9 @@ export function promptEnhancementSectionModelFactsV1(
       confidenceBand: fact.confidenceBand ?? promptEnhancementConfidenceBandForV1(fact),
       originScope: fact.sourceOriginScope ?? 'unknown',
       claimVerbPolicy: fact.claimVerbPolicy ?? 'must_phrase_as_possibility',
-      evidence: referenceOnly || !value ? undefined : `${fact.evidence!.key} = ${redactSecrets(value)}`,
+      evidence: referenceOnly || !value
+        ? undefined
+        : boundedEvidenceV1(`${fact.evidence!.key} = ${redactSecrets(value)}`),
     });
   }
   return out;
