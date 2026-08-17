@@ -49,7 +49,10 @@ export type PromptEnhancementSourceMixProfile =
   | 'over_token_or_source_cap_compressed'
   | 'source_invalid_fallback';
 
-export type PromptEnhancementSourceMixLane = 'source_a' | 'source_b';
+// MODULE-PRIVATE on purpose. This is the selection GROUPING, not lane semantics —
+// the locked three-value lane lives on the fact. Exporting a two-value lane type
+// from a phase whose point is three lanes invites the collapse straight back in.
+type PromptEnhancementSourceMixLane = 'source_a' | 'source_b';
 
 export type PromptEnhancementSourceMixSelectionRole =
   | 'selected_required'
