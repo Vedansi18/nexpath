@@ -157,12 +157,15 @@ describe('buildPromptEnhancementGuidanceFactsV1 (E2 / 2.1)', () => {
 describe('tier-1 evidence fields (claim-policy trio + polarity trio)', () => {
   const REF = 'hard_fact:has_test_runner';
 
-  function hardFactWith(tier?: string, polarity?: string) {
+  function hardFactWith(tier?: string, polarity?: string, resolvedValue?: string) {
     return buildPromptEnhancementGuidanceFactsV1(
       requestWithSignals({
         sourceOnlyHardFactRefs: [REF],
         ...(tier ? { groundingTierByRef: { [REF]: tier } } : {}),
         ...(polarity ? { groundingPolarityByRef: { [REF]: polarity } } : {}),
+        ...(resolvedValue !== undefined
+          ? { groundingEvidenceByRef: { [REF]: { key: 'has_test_runner', value: resolvedValue, runtimePath: 'local_store' } } }
+          : {}),
       } as never),
     )[0];
   }
@@ -188,26 +191,37 @@ describe('tier-1 evidence fields (claim-policy trio + polarity trio)', () => {
     expect(hardFactWith(undefined, undefined).factRole).toBe('project_grounding_support');
   });
 
-  // The polarity TRIO: TRUE grounds, FALSE is safety material, NULL stays unknown.
-  // (The typed VALUE itself crosses with the caller-side resolution payload — the
-  // value-arrives-typed rider of this trio completes there.)
-  it('polarity present → project_grounding_support (the grounding lane)', () => {
-    expect(hardFactWith('capability', 'present').factRole).toBe('project_grounding_support');
+  // The polarity TRIO: TRUE grounds, FALSE is safety material, NULL stays unknown —
+  // and in EACH case the resolved VALUE crosses typed beside the fact. The value
+  // rider was written against the caller-side payload once it existed; it is
+  // asserted here per polarity because polarity must not gate content: a negative
+  // capability is safety material precisely BECAUSE its value is known, and an
+  // unknown probe must cross as a typed unknown rather than as nothing at all.
+  it('polarity present → project_grounding_support (the grounding lane), value typed', () => {
+    const fact = hardFactWith('capability', 'present', 'true');
+    expect(fact.factRole).toBe('project_grounding_support');
+    expect(fact.evidence).toEqual({ key: 'has_test_runner', value: 'true' });
   });
 
-  it('polarity false_capability → safety_confirmation_support, label-only, safety-hooked, never grounding prose', () => {
-    const fact = hardFactWith('uncorroborated', 'false_capability');
+  it('polarity false_capability → safety_confirmation_support, label-only, safety-hooked, never grounding prose, value typed', () => {
+    const fact = hardFactWith('uncorroborated', 'false_capability', 'false');
     expect(fact.factRole).toBe('safety_confirmation_support');
     expect(fact.claimVerbPolicy).toBe('source_label_only');
     expect(fact.renderPolicy).toBe('metadata_only');
     expect(fact.safetyHooks).toContain('pe_ar9_negative_capability');
+    // Safety material keeps its content: the absent capability is known, and the
+    // downstream safety wording needs to know WHICH one and what it read.
+    expect(fact.evidence).toEqual({ key: 'has_test_runner', value: 'false' });
   });
 
-  it('polarity unknown → stale_or_unknown evidence, possibility wording — never a confident negative', () => {
-    const fact = hardFactWith('uncorroborated', 'unknown');
+  it('polarity unknown → stale_or_unknown evidence, possibility wording — never a confident negative, value typed', () => {
+    const fact = hardFactWith('uncorroborated', 'unknown', 'null');
     expect(fact.sourceEvidenceState).toBe('stale_or_unknown');
     expect(fact.claimVerbPolicy).toBe('must_phrase_as_possibility');
     expect(fact.factRole).toBe('project_grounding_support');
+    // An unknown probe crosses as a TYPED unknown, not as an absent payload —
+    // "we looked and could not tell" is different from "we never looked".
+    expect(fact.evidence).toEqual({ key: 'has_test_runner', value: 'null' });
   });
 
   // RIGHT&GOOD claim strength follows the boundary tier; work-style stays style metadata.
