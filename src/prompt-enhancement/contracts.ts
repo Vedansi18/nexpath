@@ -1299,6 +1299,12 @@ export interface PromptEnhancementCompactFirstPopupSequenceSummaryV1 {
   publicSafeText: string;
   remainingTaskCount: number;
   taskRoleLabels: readonly string[];
+  /**
+   * One short display line per follow-up task, cut from the REDACTED original prompt at each item's
+   * own slice (the user's own words, not a generated body). Empty on the describe fallback / when no
+   * items are available. Body-bound and redaction-safe, so the flags below stay honest.
+   */
+  taskSummaryLines: readonly string[];
   sourceRefs: readonly string[];
   containsFuturePromptText: false;
   rawPromptTextExcluded: true;

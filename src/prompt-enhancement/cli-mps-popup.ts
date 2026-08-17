@@ -221,6 +221,12 @@ export function renderPromptEnhancementMpsFirstPopupFrameV1(
   lines.push(c ? `  ${c.dim}${planLabel}${c.reset}` : `  ${planLabel}`);
   lines.push(c ? `  ${c.dim}${remaining}${c.reset}` : `  ${remaining}`);
   lines.push(c ? `  ${c.dim}${types}${c.reset}` : `  ${types}`);
+  // Per-follow-up-task summary lines (Phase 3b) — the user's own redacted slices, numbered. Empty on
+  // the describe fallback, so nothing extra renders there.
+  model.sequencePlan.taskSummaryLines.forEach((line, index) => {
+    const numbered = `${index + 1}. ${publicText(line)}`;
+    lines.push(c ? `  ${c.dim}${numbered}${c.reset}` : `  ${numbered}`);
+  });
   lines.push('');
 
   lines.push(c ? `${c.dim}${PROMPT_ENHANCEMENT_MPS_CLI_FOOTER_V1}${c.reset}` : PROMPT_ENHANCEMENT_MPS_CLI_FOOTER_V1);

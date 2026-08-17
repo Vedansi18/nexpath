@@ -181,6 +181,9 @@ describe('PE facade — sequence planner replaces the describe splitter (MPS P1b
     expect(summary).toBeDefined();
     // Item 0's whole-prompt slice → 'fix'; item 1's "add a rate limiter" slice → 'build'. Non-empty.
     expect(summary?.taskRoleLabels).toEqual(['fix', 'build']);
+    // Phase 3b: the per-follow-up-task summary lines flow through too — only the 'task' item is lined
+    // (first_task, the whole-prompt slice, is excluded), cut from the redacted original.
+    expect(summary?.taskSummaryLines).toEqual(['add a rate limiter']);
   });
 
   it('candidate + planner returns a single-prompt outcome → FALLS BACK to the describe summary', async () => {

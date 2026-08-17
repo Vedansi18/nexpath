@@ -60,7 +60,7 @@ function model(overrides: Partial<PromptEnhancementMpsFirstPopupModelV1> = {}): 
       },
       originalPrompt: 'not_rendered',
     },
-    sequencePlan: { remainingTaskCount: 3, taskRoleLabels: ['implement', 'verify', 'document'] },
+    sequencePlan: { remainingTaskCount: 3, taskRoleLabels: ['implement', 'verify', 'document'], taskSummaryLines: [] },
     keyboard: {
       plainEnter: 'emit_one_typed_current_body_plus_details_request',
       escape: 'leave_editor_focus_preserve_draft',
@@ -149,12 +149,19 @@ describe('UI-6 MPS first-popup frame renderer (§3.3)', () => {
     expect(frame).toContain('Additional details');
   });
 
-  it('sanitises every model-supplied string, including task role labels', () => {
+  it('sanitises every model-supplied string, including task role labels and summary lines', () => {
     const frame = renderPromptEnhancementMpsFirstPopupFrameV1(model({
-      sequencePlan: { remainingTaskCount: 2, taskRoleLabels: [`impl${ESC}[31mement`, 'verify'] },
+      sequencePlan: {
+        remainingTaskCount: 2,
+        taskRoleLabels: [`impl${ESC}[31mement`, 'verify'],
+        taskSummaryLines: [`set up ${ESC}[31mthe DB`, 'add the API'],
+      },
     }), { colorize: false });
     expect(frame).not.toContain(ESC);
     expect(frame).toContain('Types: implement, verify');
+    // Phase 3b: the per-task summary lines render numbered, sanitised, below Types.
+    expect(frame).toContain('1. set up the DB');
+    expect(frame).toContain('2. add the API');
   });
 
   it('clamps an out-of-range focusIndex to the interactive rows', () => {

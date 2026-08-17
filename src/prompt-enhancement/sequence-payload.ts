@@ -313,6 +313,32 @@ export function promptEnhancementSequenceTaskRoleLabelsV1(
 }
 
 /**
+ * One short display line per FOLLOW-UP task, each cut from `originalText` at the item's own
+ * `originalSliceRef` — the user's own words, not a generated body. `originalText` is the caller's
+ * redacted, length-preserving original (facade passes `redactedText`), so a stored range selects the
+ * same words and no secret leaves. Only `task` items are lined: `first_task` is excluded (its slice is
+ * the whole prompt, already shown in the editor) and `wrap_up` carries no slice. Whitespace is
+ * flattened and each line is capped, so a long slice never breaks the popup layout.
+ */
+export function promptEnhancementSequenceTaskSummaryLinesV1(
+  items: readonly { itemKind: PromptEnhancementSequenceItemKindV1; originalSliceRef: PromptEnhancementSequenceOffsetRangeV1 | null }[],
+  originalText: string,
+  options?: { maxLineLength?: number },
+): readonly string[] {
+  const maxLineLength = options?.maxLineLength ?? 80;
+  const lines: string[] = [];
+  for (const item of items) {
+    if (item.itemKind !== 'task' || item.originalSliceRef === null) continue;
+    const ref = item.originalSliceRef;
+    if (!isPromptEnhancementSequenceOffsetRangeV1(ref, originalText.length)) continue;
+    const flat = originalText.slice(ref.start, ref.end).replace(/\s+/g, ' ').trim();
+    if (flat.length === 0) continue;
+    lines.push(flat.length > maxLineLength ? `${flat.slice(0, maxLineLength - 1).trimEnd()}…` : flat);
+  }
+  return lines;
+}
+
+/**
  * Does `text` contain `clause`, allowing for the ways the same words get written?
  *
  * Case, hyphenation and line wrapping only. "ground-level" and "ground level" are one phrase spelt
