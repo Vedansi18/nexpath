@@ -289,7 +289,7 @@ function buildUserPrompt(
       // grounded — and the claim policy is the same ceiling the deterministic
       // path obeys, so one rule set now binds both renderers.
       const factLines = promptEnhancementSectionModelFactsV1(section.sectionKind, renderedFacts)
-        .map((fact) => `\n    - ${fact.factId} | kind: ${fact.sourceType} | confidence: ${fact.confidenceBand}`
+        .map((fact) => `\n    - ${fact.factId} | kind: ${fact.guidanceKind} | confidence: ${fact.confidenceBand}`
           + ` | origin: ${fact.originScope} | claim: ${fact.claimVerbPolicy}`
           + (fact.evidence === undefined
             ? ' | evidence: WITHHELD (cite the source, never state its content)'

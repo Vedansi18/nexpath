@@ -1,4 +1,5 @@
 import { redactSecrets } from '../store/redact.js';
+import { promptEnhancementConfidenceBandForV1 } from './source-mix.js';
 import type { PromptEnhancementGuidanceFact } from './templates/section-plan.js';
 
 /**
@@ -165,14 +166,14 @@ export function promptEnhancementSectionModelFactsV1(
   facts: readonly PromptEnhancementGuidanceFact[],
 ): readonly {
   readonly factId: string;
-  readonly sourceType: string;
+  readonly guidanceKind: string;
   readonly confidenceBand: string;
   readonly originScope: string;
   readonly claimVerbPolicy: string;
   readonly evidence: string | undefined;
 }[] {
   const out: {
-    factId: string; sourceType: string; confidenceBand: string;
+    factId: string; guidanceKind: string; confidenceBand: string;
     originScope: string; claimVerbPolicy: string; evidence: string | undefined;
   }[] = [];
   for (const fact of facts) {
@@ -182,8 +183,18 @@ export function promptEnhancementSectionModelFactsV1(
     const value = fact.evidence?.value.trim();
     out.push({
       factId: fact.factId,
-      sourceType: fact.sourceType,
-      confidenceBand: fact.confidenceBand ?? 'unknown',
+      // §32.3's payload names the fact's PURPOSE here (`debug_evidence`,
+      // `project_grounding`) — which is what changes how a sentence should be
+      // worded, `safety_or_confirmation` most of all. Provenance is not lost: the
+      // origin scope below says where the knowledge came from, more precisely than
+      // the producer taxonomy did.
+      guidanceKind: fact.guidanceKind,
+      // Derived rather than 'unknown': the band is a lossless re-encoding of the
+      // evidence state (strong→high …), so a fact that reached here without passing
+      // the mixer would otherwise be reported as confidence we do not have — a claim
+      // about our own knowledge, and a false one. No production path hits this (the
+      // facade and the outcome builder both mix first); defence in depth.
+      confidenceBand: fact.confidenceBand ?? promptEnhancementConfidenceBandForV1(fact),
       originScope: fact.sourceOriginScope ?? 'unknown',
       claimVerbPolicy: fact.claimVerbPolicy ?? 'must_phrase_as_possibility',
       evidence: referenceOnly || !value ? undefined : `${fact.evidence!.key} = ${redactSecrets(value)}`,

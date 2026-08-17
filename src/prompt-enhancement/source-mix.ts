@@ -39,15 +39,26 @@ import {
  * `no_useful_source_a_skip` / `source_b_only_no_popup` profile; phase 2.3 turns that
  * into the actual `skip_no_popup` disposition. Selection is deterministic — no LLM.
  */
-export type PromptEnhancementSourceMixProfile =
-  | 'no_useful_source_a_skip'
-  | 'source_a_only'
-  | 'source_a_with_light_grounding'
-  | 'balanced_dual_source'
-  | 'source_a_heavy_high_risk'
-  | 'source_b_only_no_popup'
-  | 'over_token_or_source_cap_compressed'
-  | 'source_invalid_fallback';
+/**
+ * The eight LOCKED mix profiles (PE-AR-2 split-1, L5002-5011), declared as a VALUE
+ * so a fixture can compare the shipped set against the locked table at runtime —
+ * the type is derived from it, so the two cannot drift apart. As a type alone the
+ * union was unverifiable from a test: test files are not typechecked, so a ninth
+ * profile could be added, or one removed, with every "no more, no fewer" assertion
+ * still green. Same idiom as the risk-kind lists in `safety-sendability.ts`.
+ */
+export const PROMPT_ENHANCEMENT_LOCKED_MIX_PROFILES_V1 = [
+  'no_useful_source_a_skip',
+  'source_a_only',
+  'source_a_with_light_grounding',
+  'balanced_dual_source',
+  'source_a_heavy_high_risk',
+  'source_b_only_no_popup',
+  'over_token_or_source_cap_compressed',
+  'source_invalid_fallback',
+] as const;
+
+export type PromptEnhancementSourceMixProfile = typeof PROMPT_ENHANCEMENT_LOCKED_MIX_PROFILES_V1[number];
 
 // MODULE-PRIVATE on purpose. This is the selection GROUPING, not lane semantics —
 // the locked three-value lane lives on the fact. Exporting a two-value lane type

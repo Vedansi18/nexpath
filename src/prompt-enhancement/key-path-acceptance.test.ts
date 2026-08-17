@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   applyPromptEnhancementSourceMixV1,
+  PROMPT_ENHANCEMENT_LOCKED_MIX_PROFILES_V1,
   type PromptEnhancementSourceMixProfile,
 } from './source-mix.js';
 import { composeStructuredComposerOutputV1, type PromptEnhancementComposerClientV1 } from './llm-composer.js';
@@ -154,8 +155,35 @@ describe('GR-2 — the §32.3 acceptance example, corrected by §41.3', () => {
     ] as const) {
       const prompt = await capturedModelPrompt([fact({ sourceType, factId: `f-${sourceType}` })]);
       expect(prompt, `${sourceType} evidence did not reach the model`).toContain('test_runner = vitest');
-      expect(prompt).toContain(`kind: ${sourceType}`);
+      // The evidence must arrive FOR EACH TYPE - proven by the per-type fact id
+      // beside it, not by a `kind:` label, which names the fact's PURPOSE and is
+      // deliberately identical for all six here.
+      expect(prompt).toContain(`f-${sourceType}`);
+      expect(prompt).toContain('kind: project_grounding');
     }
+  });
+
+  it('kind names the fact PURPOSE, as §32.3’s payload does', async () => {
+    // The worked example's payload reads `kind: debug_evidence` / `kind: project_grounding`
+    // - the guidance kind. Purpose is what changes how a sentence must be worded: a
+    // `safety_or_confirmation` fact is not a grounding note, and the model cannot
+    // tell them apart from provenance alone.
+    const prompt = await capturedModelPrompt([
+      fact({ factId: 'f-debug', guidanceKind: 'debug_evidence', sourceType: 'absence_signal' }),
+      fact({ factId: 'f-safety', guidanceKind: 'safety_or_confirmation' }),
+    ]);
+    expect(prompt).toContain('kind: debug_evidence');
+    expect(prompt).toContain('kind: safety_or_confirmation');
+  });
+
+  it('a fact that never passed the mixer reports the confidence we ACTUALLY have', async () => {
+    // The band is a lossless re-encoding of the evidence state, so falling back to
+    // "unknown" would report an absence of knowledge we do not have. No production
+    // path reaches here unmixed; defence in depth for direct callers.
+    const strong = await capturedModelPrompt([fact({ confidenceBand: undefined, sourceEvidenceState: 'strong' })]);
+    expect(strong).toContain('confidence: high');
+    const weak = await capturedModelPrompt([fact({ confidenceBand: undefined, sourceEvidenceState: 'conflicting' })]);
+    expect(weak).toContain('confidence: low');
   });
 
   it('the citation contract is kept, not rebuilt (step 3)', async () => {
@@ -190,12 +218,11 @@ describe('GR-2 — the eight locked mixProfiles are each reachable in the shippe
   });
   const groundingFact = (id: string) => fact({ factId: id, sourceIds: [`env:${id}`] });
 
-  it('all eight locked values exist in the shipped union — no more, no fewer', () => {
-    expect([...LOCKED_PROFILES].sort()).toEqual([
-      'balanced_dual_source', 'no_useful_source_a_skip', 'over_token_or_source_cap_compressed',
-      'source_a_heavy_high_risk', 'source_a_only', 'source_a_with_light_grounding',
-      'source_b_only_no_popup', 'source_invalid_fallback',
-    ]);
+  it('the SHIPPED set is exactly the locked eight — no more, no fewer', () => {
+    // Compared against the shipped runtime list, not against another copy of the same
+    // literal: test files are not typechecked, so a type-only union could gain or lose
+    // a profile with this assertion still green.
+    expect([...PROMPT_ENHANCEMENT_LOCKED_MIX_PROFILES_V1].sort()).toEqual([...LOCKED_PROFILES].sort());
   });
 
   it.each([
@@ -213,6 +240,66 @@ describe('GR-2 — the eight locked mixProfiles are each reachable in the shippe
   it('over_token_or_source_cap_compressed is produced when useful facts exceed the cap', () => {
     const many = [sourceAFact(), ...Array.from({ length: 8 }, (_, i) => groundingFact(`g${i}`))];
     expect(applyPromptEnhancementSourceMixV1(many, 'default').profile).toBe('over_token_or_source_cap_compressed');
+  });
+
+  // The locked table locks THREE columns and the profile label is only one of them.
+  // A label can be right while the behaviour beside it is wrong - and the behaviour
+  // column is where the safety rules live ("do not use Source B facts to create
+  // filler", "keep one required Source A survivor").
+
+  it('no_useful_source_a_skip: no popup, and NO Source-B filler is rendered', () => {
+    const result = applyPromptEnhancementSourceMixV1([], 'default');
+    expect(result.profile).toBe('no_useful_source_a_skip');
+    expect(result.showPopup).toBe(false);
+    expect(result.renderedFacts).toEqual([]);
+  });
+
+  it('source_b_only_no_popup: the facts stay classified, but none is rendered', () => {
+    // "Keep facts available for future grounding ... do not show a project-grounded-only
+    // enhancement" - they must survive as provenance while rendering nothing.
+    const result = applyPromptEnhancementSourceMixV1([groundingFact('g1')], 'default');
+    expect(result.profile).toBe('source_b_only_no_popup');
+    expect(result.showPopup).toBe(false);
+    expect(result.classifiedFacts.length).toBeGreaterThan(0);
+    expect(result.renderedFacts).toEqual([]);
+  });
+
+  it('source_a_only / light grounding / balanced: a popup carrying the Source A survivor', () => {
+    for (const facts of [
+      [sourceAFact()],
+      [sourceAFact(), groundingFact('g1')],
+      [sourceAFact(), groundingFact('g1'), groundingFact('g2')],
+    ]) {
+      const result = applyPromptEnhancementSourceMixV1(facts, 'default');
+      expect(result.showPopup).toBe(true);
+      expect(result.requiredSurvivor?.factId).toBe('a1');
+      expect(result.renderedFacts.map((rendered) => rendered.factId)).toContain('a1');
+    }
+  });
+
+  it('over_token_or_source_cap_compressed: the required survivor is KEPT, support compressed', () => {
+    const many = [sourceAFact(), ...Array.from({ length: 8 }, (_, i) => groundingFact(`g${i}`))];
+    const result = applyPromptEnhancementSourceMixV1(many, 'default');
+    expect(result.requiredSurvivor?.factId).toBe('a1');
+    expect(result.renderedFacts.map((rendered) => rendered.factId)).toContain('a1');
+    // Compressed, not dropped: the excess stays classified with a reason.
+    expect(result.renderedFacts.length).toBeLessThan(many.length);
+    expect(result.classifiedFacts.length).toBe(many.length);
+  });
+
+  it('source_invalid_fallback: the invalid fact is rejected, not rendered', () => {
+    const result = applyPromptEnhancementSourceMixV1([sourceAFact({ sourceIds: [] })], 'default');
+    expect(result.profile).toBe('source_invalid_fallback');
+    expect(result.showPopup).toBe(false);
+    expect(result.renderedFacts.map((rendered) => rendered.factId)).not.toContain('a1');
+  });
+
+  it('source_a_heavy_high_risk: the high-risk survivor is required and rendered', () => {
+    const result = applyPromptEnhancementSourceMixV1(
+      [sourceAFact({ riskLevel: 'high', guidanceKind: 'safety_or_confirmation' })], 'default');
+    expect(result.showPopup).toBe(true);
+    expect(result.requiredSurvivor?.factId).toBe('a1');
+    expect(result.renderedFacts.map((rendered) => rendered.factId)).toContain('a1');
   });
 });
 
