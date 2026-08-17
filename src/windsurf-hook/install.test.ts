@@ -168,3 +168,39 @@ describe('removeWindsurfHooks', () => {
     expect(read().hooks.pre_write_code[0].command).toBe('node guard.js');
   });
 });
+
+/**
+ * RC23 (Windows, 2026-08-17): a WORKSPACE-level hooks.json serves exactly one
+ * project, but the command had no project argument — so the hook fell back to
+ * whatever cwd Cascade gave it and wrote its decision where no poller watches.
+ * On Windows/Devin the workspace hook is the ONLY hook that executes, so this
+ * silently disabled the entire new flow there. The command now carries the
+ * project; the global USER-level hook must NOT (it serves every project).
+ */
+describe('⭐ RC23 — workspace hook pins its project', () => {
+  it('both command shapes carry --project when a root is given', () => {
+    const cmd = buildWindsurfHookCommand('/cli/index.js', 'pre_user_prompt', '/usr/bin/node', '/ws/proj');
+    const ps = buildWindsurfHookPowershell('/cli/index.js', 'pre_user_prompt', '/usr/bin/node', '/ws/proj');
+    expect(cmd).toContain('windsurf-hook pre_user_prompt --project "/ws/proj"');
+    expect(ps).toContain('windsurf-hook pre_user_prompt --project "/ws/proj"');
+  });
+
+  it('⭐ the user-level (global) hook stays cwd-derived — no --project', () => {
+    expect(buildWindsurfHookCommand('/cli/index.js', 'pre_user_prompt', '/usr/bin/node'))
+      .not.toContain('--project');
+    expect(buildWindsurfHooksConfig('/cli/index.js').pre_user_prompt[0].command)
+      .not.toContain('--project');
+  });
+
+  it('writeWindsurfHooks threads the project into every event it writes', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'rc23-'));
+    const file = join(dir, 'hooks.json');
+    writeWindsurfHooks(file, '/cli/index.js', '/ws/proj');
+    const json = JSON.parse(readFileSync(file, 'utf8'));
+    for (const ev of ['pre_user_prompt', 'post_cascade_response']) {
+      expect(json.hooks[ev][0].command).toContain('--project');
+      expect(json.hooks[ev][0].powershell).toContain('--project');
+    }
+    rmSync(dir, { recursive: true, force: true });
+  });
+});

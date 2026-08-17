@@ -251,6 +251,89 @@ export async function peekPendingSubmitDecision(
   return record;
 }
 
+/** Where the hook mirrors the record, cwd-independently (RC22). */
+export function submitDecisionMirrorPath(): string {
+  return join(homedir(), '.nexpath', 'submit-decision.json');
+}
+
+/**
+ * Compare two filesystem roots the way the OS would.
+ *
+ * Windows made this necessary: the hook's `process.cwd()` and VS Code's
+ * `workspaceFolders[0].fsPath` routinely differ in separator style and drive
+ * letter case (`c:\Users\…` vs `C:\Users\…`) for the SAME directory. A
+ * strict string compare would reject a perfectly valid record.
+ */
+export function sameRoot(a: string, b: string): boolean {
+  const norm = (v: string) => v.replace(/[\\/]+/g, '/').replace(/\/+$/, '').toLowerCase();
+  return norm(a) === norm(b);
+}
+
+/** How stale a mirrored record may be before it is discarded (ms). */
+export const MIRROR_MAX_AGE_MS = 90_000;
+
+/**
+ * Read (and consume) the USER-LEVEL mirror — the cwd-independent handoff (RC22).
+ *
+ * ── WHY THIS EXISTS ─────────────────────────────────────────────────────────
+ * The primary record lives at `<projectRoot>/.nexpath/submit-decision.json`,
+ * where `projectRoot` is the HOOK's `process.cwd()`. Cascade's payload carries
+ * no workspace, so when that cwd is not the folder the editor has open — the
+ * normal situation for the Windows/Devin WORKSPACE hook, which is the only hook
+ * Windows executes — the block still happens but the replacement is written
+ * where no poller looks. The user's prompt is cancelled and nothing arrives.
+ * The OLD flow never had this failure mode because it handed off through the
+ * per-user store; this restores that property.
+ *
+ * ACCEPTANCE (deliberately conservative — a wrong-window injection would be
+ * worse than a missed one):
+ *   1. the record's `projectRoot` matches one of this window's roots, OR
+ *   2. the record carries no usable root AND this window has exactly ONE root
+ *      AND the record is fresh (< MIRROR_MAX_AGE_MS) — one editor, one project,
+ *      a decision seconds old, same host: there is no other window it could
+ *      belong to.
+ * Everything else is left on disk (a different window may still claim it) and
+ * simply expires.
+ */
+export async function readPendingSubmitDecisionMirror(
+  roots: readonly string[],
+  deps: SubmitDecisionReaderDeps & { now?: () => number; path?: string } = {},
+): Promise<SubmitDecisionRecordV1 | null> {
+  const path = deps.path ?? submitDecisionMirrorPath();
+  const read = deps.read ?? ((p: string) => readFile(p, 'utf8'));
+  const remove = deps.remove ?? ((p: string) => unlink(p));
+  const isAlive = deps.isProcessAlive ?? defaultIsProcessAlive;
+  const expectedHost = deps.expectedHost ?? 'windsurf';
+  const now = deps.now ?? (() => Date.now());
+
+  let text: string;
+  try {
+    text = await read(path);
+  } catch {
+    return null;
+  }
+  const record = parseSubmitDecisionJsonV1(text);
+  if (!record) return null;
+  if (record.host !== expectedHost) return null;
+
+  // Expired mirrors are swept so a dead record cannot sit around being retried.
+  if (now() - record.createdAt > MIRROR_MAX_AGE_MS) {
+    try { await remove(path); } catch { /* best-effort */ }
+    return null;
+  }
+  // Same block/injection race guard as the primary reader: never deliver while
+  // the hook that wrote it is still alive (its exit is what cancels the prompt).
+  if (isAlive(record.hookPid)) return null;
+
+  const claimable = record.projectRoot
+    ? roots.some((r) => sameRoot(r, record.projectRoot as string))
+    : roots.length === 1;
+  if (!claimable) return null;
+
+  try { await remove(path); } catch { /* one-shot; dedup also guards */ }
+  return record;
+}
+
 export async function readPendingSubmitDecision(
   projectRoot: string,
   deps: SubmitDecisionReaderDeps = {},

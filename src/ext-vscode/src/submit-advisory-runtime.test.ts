@@ -10,6 +10,8 @@ import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  readPendingSubmitDecisionMirror,
+  MIRROR_MAX_AGE_MS,
   isCursorSubmitAdvisoryEnabled,
   explainSubmitFlowGate,
   defaultIsProcessAlive,
@@ -623,5 +625,80 @@ describe('⭐ RC19c — an explicit false is a revert, not damage', () => {
   it('absent / non-true key ⇒ unregistered (repair)', () => {
     expect(fn).toMatch(/if \(flags\[agent\] !== true\) return false;/);
     expect(fn.indexOf('=== false) return true;')).toBeLessThan(fn.indexOf('!== true) return false;'));
+  });
+});
+
+/**
+ * RC22 — the cwd-independent handoff. The primary record lives under the HOOK's
+ * `process.cwd()`; Cascade's payload carries no workspace, so on Windows (where
+ * the only hook that fires is the workspace-level one) that cwd need not be the
+ * folder the editor has open — the prompt gets blocked and the replacement is
+ * written where no poller looks. The old flow never had this failure mode
+ * because it handed off through the per-user store.
+ */
+describe('⭐ RC22 — user-level mirror handoff', () => {
+  const rec = (over: Record<string, unknown> = {}) => JSON.stringify({
+    schemaVersion: 1, decisionId: 'sd-1', replacementText: 'refined',
+    createdAt: 1_000, blockIssuedAt: 900, hookPid: 4242, host: 'windsurf', ...over,
+  });
+  const base = (over: Record<string, unknown> = {}) => ({
+    read: async () => rec(over.record as Record<string, unknown> ?? {}),
+    remove: async () => { (over.removed as string[] | undefined)?.push('x'); },
+    isProcessAlive: () => false,
+    now: () => 1_500,
+    path: '/home/u/.nexpath/submit-decision.json',
+    expectedHost: 'windsurf' as const,
+  });
+
+  it('⭐ matching projectRoot is delivered (separator + drive-case insensitive)', async () => {
+    const r = await readPendingSubmitDecisionMirror(
+      ['C:\\Users\\Me\\proj'],
+      { ...base({ record: { projectRoot: 'c:/Users/Me/proj/' } }) },
+    );
+    expect(r?.replacementText).toBe('refined');
+  });
+
+  it('⭐ no projectRoot + exactly one open root + fresh ⇒ delivered', async () => {
+    const r = await readPendingSubmitDecisionMirror(['/only/root'], base());
+    expect(r?.decisionId).toBe('sd-1');
+  });
+
+  it('a DIFFERENT project is never injected into this window', async () => {
+    const r = await readPendingSubmitDecisionMirror(
+      ['/my/project'],
+      base({ record: { projectRoot: '/some/other/project' } }),
+    );
+    expect(r).toBeNull();
+  });
+
+  it('ambiguous (no root in the record, multiple open roots) ⇒ refused', async () => {
+    const r = await readPendingSubmitDecisionMirror(['/a', '/b'], base());
+    expect(r).toBeNull();
+  });
+
+  it('stale mirrors are swept, not delivered', async () => {
+    const removed: string[] = [];
+    const r = await readPendingSubmitDecisionMirror(['/only'], { ...base({ removed }), now: () => 1_000 + MIRROR_MAX_AGE_MS + 1 });
+    expect(r).toBeNull();
+    expect(removed.length).toBe(1);
+  });
+
+  it('wrong host is refused; a live hook defers (same guards as the primary)', async () => {
+    expect(await readPendingSubmitDecisionMirror(['/only'], { ...base(), expectedHost: 'cursor' })).toBeNull();
+    expect(await readPendingSubmitDecisionMirror(['/only'], { ...base(), isProcessAlive: () => true })).toBeNull();
+  });
+
+  it('absent mirror is a silent null (the common case)', async () => {
+    const r = await readPendingSubmitDecisionMirror(['/only'], {
+      ...base(), read: async () => { throw new Error('ENOENT'); },
+    });
+    expect(r).toBeNull();
+  });
+
+  it('⭐ the poller consults the mirror ONLY after the local file misses', () => {
+    const ext = readFileSync(join(__dirname, 'extension.ts'), 'utf8');
+    // both hosts: local first, `?? mirror`
+    const matches = ext.match(/await readPendingSubmitDecision\([\s\S]{0,120}?\)\)\s*\?\?\s*\(await readPendingSubmitDecisionMirror\(/g);
+    expect(matches?.length).toBe(2);
   });
 });

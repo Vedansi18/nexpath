@@ -159,7 +159,9 @@ export const windsurfAdapter: VSCodeExtensionAdapter = {
       // directory the user ran it in (ctx.cwd), which is what they expect.
       const wsRoot = process.env.NEXPATH_WORKSPACE_DIR?.trim() || ctx.cwd;
       const wsHooksPath = join(wsRoot, '.windsurf', 'hooks.json');
-      writeWindsurfHooks(wsHooksPath, cliPath);
+      // RC23: bake the project into the command — a workspace hook serves one
+      // project, so it must not depend on the cwd Cascade spawns it with.
+      writeWindsurfHooks(wsHooksPath, cliPath, wsRoot);
       console.log(`   ${' '.repeat(12)}   + workspace hook (Windows/Devin Next): ${wsHooksPath}`);
     }
 

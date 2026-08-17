@@ -26,6 +26,7 @@ import {
   isWindsurfSubmitAdvisoryEnabled,
   isCursorSubmitAdvisoryEnabled,
   explainSubmitFlowGate,
+  readPendingSubmitDecisionMirror,
   readPendingSubmitDecision,
   peekPendingSubmitDecision,
 } from './submit-advisory-runtime.js';
@@ -214,7 +215,12 @@ function buildSubmitAdvisory(
     enabled,
     projectRoots: roots,
     createPoller: (o) => createSubmitHookPoller(o as never),
-    readPendingDecision: (root, expectedHost) => readPendingSubmitDecision(root, { expectedHost }),
+    // RC22: local file first (unchanged), then the cwd-independent user-level
+    // mirror — same rule as the Windsurf branch, so Cursor gets the identical
+    // Windows-proof handoff.
+    readPendingDecision: async (root, expectedHost) =>
+      (await readPendingSubmitDecision(root, { expectedHost }))
+      ?? (await readPendingSubmitDecisionMirror(roots, { expectedHost })),
     // PRIMARY: the host's own injector, exactly as the shipping flow selects it.
     injectDirect,
     fallbackClipboard: (t) => delivery.inject(t),
@@ -757,7 +763,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         // This poller lives inside the `host === 'windsurf'` branch, so the
         // expected host is windsurf by construction. H6's Cursor equivalent
         // needs its own construction site — see the note at the branch head.
-        readPendingDecision: (root) => readPendingSubmitDecision(root, { expectedHost: 'windsurf' }),
+        // RC22: the project-local file stays PRIMARY (unchanged behaviour where
+        // it already works). The user-level mirror is consulted only when it
+        // yields nothing — that is the Windows case, where the hook's cwd is not
+        // the folder the editor has open, so the primary record is written
+        // somewhere no poller looks.
+        readPendingDecision: async (root) =>
+          (await readPendingSubmitDecision(root, { expectedHost: 'windsurf' }))
+          ?? (await readPendingSubmitDecisionMirror(roots, { expectedHost: 'windsurf' })),
         // PRIMARY: `windsurfInject` — the SAME injector the shipping old flow
         // uses (injectViaCascadeAction → openChatPanel + addCascadeInput, the
         // verified protobuf path). RC13 (live, 2026-08-13 18:44): this line

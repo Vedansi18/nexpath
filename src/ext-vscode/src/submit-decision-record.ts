@@ -42,6 +42,14 @@ export interface SubmitDecisionRecordV1 {
   hookPid: number;
   /** Which host produced it — so a Cursor record can never be delivered to Windsurf. */
   host: 'windsurf' | 'cursor';
+  /**
+   * RC22: the project the hook was running in. Present only to let the
+   * cwd-independent USER-LEVEL mirror be matched to the right editor window;
+   * the project-local file does not need it. Optional so older records (and
+   * the hermetic fixtures) stay valid — its absence only costs the mirror its
+   * strictest match, never the primary path.
+   */
+  projectRoot?: string;
 }
 
 function isNonEmptyString(v: unknown): v is string {
@@ -75,6 +83,7 @@ export function parseSubmitDecisionRecordV1(raw: unknown): SubmitDecisionRecordV
     blockIssuedAt: r.blockIssuedAt,
     hookPid: r.hookPid,
     host: r.host,
+    ...(isNonEmptyString(r.projectRoot) ? { projectRoot: r.projectRoot } : {}),
   };
 }
 

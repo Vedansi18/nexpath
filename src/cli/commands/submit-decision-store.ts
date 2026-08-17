@@ -28,6 +28,7 @@
  */
 import { mkdir, writeFile, rename } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
+import { homedir } from 'node:os';
 
 /** Must match `submit-decision-record.ts`'s constant in the extension package. */
 export const SUBMIT_DECISION_SCHEMA_V1 = 1 as const;
@@ -35,6 +36,31 @@ export const SUBMIT_DECISION_SCHEMA_V1 = 1 as const;
 /** Must match `submitDecisionPath()` in the extension package — pinned by test. */
 export function submitDecisionPath(projectRoot: string): string {
   return join(projectRoot, '.nexpath', 'submit-decision.json');
+}
+
+/**
+ * User-level MIRROR of the same record — the cwd-independent handoff (RC22).
+ *
+ * ── WHY (the cross-OS fragility this removes) ────────────────────────────────
+ * The primary handoff above is workspace-relative, so it only reaches the
+ * extension when the HOOK'S `process.cwd()` equals the folder the editor has
+ * open. Cascade's hook payload carries no workspace (`agent_action_name`,
+ * `trajectory_id`, `execution_id`, `model_name`, `tool_info` — nothing else),
+ * so cwd is our only source, and on Windows/Devin the hook that actually fires
+ * is the WORKSPACE-level one whose cwd we do not control. If they disagree the
+ * user's prompt is blocked and the replacement is written where nobody looks —
+ * a silent, total failure of the new flow.
+ *
+ * The OLD flow never had this problem because its handoff was the per-user
+ * store, not a file inside the project. This mirror restores that property:
+ * one fixed location under `~/.nexpath`, with `projectRoot` embedded so the
+ * reader can still refuse a record that belongs to a different project.
+ *
+ * The project-local file stays PRIMARY and unchanged — where it already works
+ * (Linux + macOS, both live-verified) the mirror is never consulted.
+ */
+export function submitDecisionMirrorPath(home: string = homedir()): string {
+  return join(home, '.nexpath', 'submit-decision.json');
 }
 
 export interface WriteSubmitDecisionInput {
@@ -74,6 +100,8 @@ export interface SubmitDecisionStoreDeps {
   mkdirFn?: (dir: string) => Promise<void>;
   writeFn?: (path: string, data: string) => Promise<void>;
   renameFn?: (from: string, to: string) => Promise<void>;
+  /** RC22: where the user-level mirror goes; injected for hermetic tests. */
+  mirrorPath?: () => string;
 }
 
 /**
@@ -120,9 +148,23 @@ export async function writeSubmitDecision(
     host: input.host,
     blockIssuedAt: input.blockIssuedAt,
     hookPid: input.hookPid,
+    // RC22: carried so the user-level mirror can be matched to the right editor
+    // window. Harmless in the primary file (the reader ignores unknown fields).
+    projectRoot: input.projectRoot,
   };
 
   await mkdirFn(dirname(finalPath));
   await writeFn(tmpPath, JSON.stringify(record));
   await renameFn(tmpPath, finalPath);
+
+  // RC22 mirror — BEST EFFORT, and deliberately after the primary write: the
+  // primary is the contract, and a mirror failure must never turn a successful
+  // block into a thrown "allow" (which would send the unrefined prompt).
+  try {
+    const mirrorPath = (deps.mirrorPath ?? submitDecisionMirrorPath)();
+    const mirrorTmp = `${mirrorPath}.tmp`;
+    await mkdirFn(dirname(mirrorPath));
+    await writeFn(mirrorTmp, JSON.stringify(record));
+    await renameFn(mirrorTmp, mirrorPath);
+  } catch { /* primary already landed — never fail the block over the mirror */ }
 }

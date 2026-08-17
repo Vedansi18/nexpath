@@ -55,9 +55,14 @@ describe('cross-package contract — must match the extension side exactly', () 
     const parsed = JSON.parse(h.writes[0].data);
     // The extension's parseSubmitDecisionRecordV1 rejects a record missing any of
     // these, and drops unknown extras — so the sets must agree.
+    // RC22 added `projectRoot` on BOTH sides (optional in the extension's
+    // validator, which carries it through) so the cwd-independent user-level
+    // mirror can be matched to the right editor window. The set is still
+    // closed — an unknown field here would still fail this test.
     expect(Object.keys(parsed).sort()).toEqual(
-      ['blockIssuedAt', 'createdAt', 'decisionId', 'hookPid', 'host', 'replacementText', 'schemaVersion'].sort(),
+      ['blockIssuedAt', 'createdAt', 'decisionId', 'hookPid', 'host', 'projectRoot', 'replacementText', 'schemaVersion'].sort(),
     );
+    expect(parsed.projectRoot).toBe(INPUT.projectRoot);
     expect(parsed.schemaVersion).toBe(1);
     expect(parsed.host).toBe('windsurf');
     expect(parsed.replacementText).toBe('the picked option');
@@ -133,5 +138,60 @@ describe('failure behaviour — throws so the decider can fail OPEN', () => {
       writeFn: async () => {},
       renameFn: vi.fn().mockRejectedValue(new Error('EXDEV')),
     })).rejects.toThrow('EXDEV');
+  });
+});
+
+/**
+ * RC22: the primary record is workspace-relative and therefore depends on the
+ * hook's cwd matching the editor's workspace — which Cascade's payload cannot
+ * tell us and Windows/Devin does not guarantee. The user-level mirror removes
+ * that dependency (the property the OLD flow had via the per-user store).
+ */
+describe('⭐ RC22 — user-level mirror', () => {
+  const input = {
+    projectRoot: '/proj', decisionId: 'sd-1', replacementText: 'refined',
+    createdAt: 111, host: 'windsurf' as const, blockIssuedAt: 110, hookPid: 7,
+  };
+
+  it('writes BOTH the project-local record and the mirror, each atomically', async () => {
+    const writes: Array<[string, string]> = [];
+    const renames: Array<[string, string]> = [];
+    await writeSubmitDecision(input, {
+      mkdirFn: async () => {},
+      writeFn: async (p, d) => { writes.push([p, d]); },
+      renameFn: async (a, b) => { renames.push([a, b]); },
+      mirrorPath: () => '/home/u/.nexpath/submit-decision.json',
+    });
+    expect(renames.map((r) => r[1])).toEqual([
+      submitDecisionPath('/proj'),
+      '/home/u/.nexpath/submit-decision.json',
+    ]);
+    expect(writes.every(([p]) => p.endsWith('.tmp'))).toBe(true);
+  });
+
+  it('⭐ the mirror carries projectRoot so it can be matched to the right window', async () => {
+    const bodies: string[] = [];
+    await writeSubmitDecision(input, {
+      mkdirFn: async () => {}, writeFn: async (_p, d) => { bodies.push(d); }, renameFn: async () => {},
+      mirrorPath: () => '/home/u/.nexpath/submit-decision.json',
+    });
+    for (const b of bodies) expect(JSON.parse(b).projectRoot).toBe('/proj');
+  });
+
+  it('⭐ a mirror failure NEVER fails the block (primary already landed)', async () => {
+    let n = 0;
+    await expect(writeSubmitDecision(input, {
+      mkdirFn: async () => {},
+      writeFn: async () => { n += 1; if (n > 1) throw new Error('EPERM mirror'); },
+      renameFn: async () => {},
+      mirrorPath: () => '/home/u/.nexpath/submit-decision.json',
+    })).resolves.toBeUndefined();
+  });
+
+  it('a primary failure still throws (the decider must fall back to allow)', async () => {
+    await expect(writeSubmitDecision(input, {
+      mkdirFn: async () => {}, writeFn: async () => { throw new Error('EPERM primary'); }, renameFn: async () => {},
+      mirrorPath: () => '/home/u/.nexpath/submit-decision.json',
+    })).rejects.toThrow(/EPERM primary/);
   });
 });
