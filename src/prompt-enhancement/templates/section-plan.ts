@@ -164,6 +164,14 @@ export interface PromptEnhancementGuidanceFact {
   claimVerbPolicy?: PromptEnhancementClaimVerbPolicy;
   factRole?: PromptEnhancementFactRole;
   /**
+   * F3 (L4980): the stable, project-scoped key by which REPEATED guidance is
+   * recognised across sessions — never raw prompt text, and a redacted
+   * fingerprint when the fact is sensitive (A4 / L4995). Absent when no project
+   * scope is available: a keyless fact simply cannot be matched, which is the
+   * safe direction — a GLOBAL key would fade guidance across projects.
+   */
+  fatigueKey?: string;
+  /**
    * The fact's resolved CONTENT — a generic key/value pair, resolved by the CALLER
    * at the source boundary (never by PE reaching back out) and carried WITH the
    * fact so its gates travel with it. Absent when the fact is reference-only
@@ -348,6 +356,21 @@ export const SLOT_EFFECTS_BY_CAPABILITY_V1: Partial<Record<PromptEnhancementCapa
 const SECTION_KIND_FLOOR_OBLIGATIONS_V1: Readonly<Record<string, readonly PromptEnhancementSlotObligationV1[]>> = {
   reproduction_or_evidence: ['no_invention_state'],
 };
+
+/**
+ * Is this fact source-critical? The canonical definition, exported so there is
+ * ONE of it. It previously existed as two byte-identical private copies (the
+ * guidance gate's and the source mixer's); F3 needs the same test for its
+ * never-faded guard, and a third copy is how one map ends up with two meanings.
+ * Both originals now call this.
+ */
+export function isPromptEnhancementSourceCriticalFactV1(fact: PromptEnhancementGuidanceFact): boolean {
+  return (
+    fact.riskLevel === 'high' ||
+    fact.riskLevel === 'sensitive_authority_risky' ||
+    fact.guidanceKind === 'safety_or_confirmation'
+  );
+}
 
 function slotObligationsFor(
   sectionKind: string,

@@ -478,3 +478,50 @@ describe('secret_in_prompt separates SIGNAL from LITERAL on every path', () => {
     }
   });
 });
+
+describe('F3: the fatigue key reaches facts through the real producer', () => {
+  // The unit tests cover the builder; this covers the WIRING — the producer has
+  // seven fact-construction sites and the key is stamped at its single exit, so
+  // a fact built anywhere in it must come out keyed.
+  const scoped = (
+    overrides: Partial<PromptEnhancementSourceInputSnapshotV1>,
+    trigger: PromptEnhancementTriggerProvenanceV1 = { triggerKind: 'none', currentStage: 'implementation' },
+  ): PromptEnhancementPrepareRequestV1 => {
+    const base = requestWithSignals(overrides, trigger) as unknown as {
+      reviewMomentContext: { triggerProvenance: PromptEnhancementTriggerProvenanceV1; projectId?: string };
+    };
+    base.reviewMomentContext.projectId = 'project-alpha';
+    return base as unknown as PromptEnhancementPrepareRequestV1;
+  };
+
+  it('an ordinary absence fact comes out of the producer with a project-scoped key', () => {
+    const facts = buildPromptEnhancementGuidanceFactsV1(scoped({
+      normalizedStageAbsenceSignalRefs: ['absence:verification_gap@implementation'],
+    }));
+    expect(facts.length).toBeGreaterThan(0);
+    const keyed = facts.filter((entry) => entry.fatigueKey !== undefined);
+    expect(keyed.length).toBeGreaterThan(0);
+    for (const entry of keyed) {
+      expect(entry.fatigueKey).toMatch(/^pef1:/);
+      expect(entry.fatigueKey).not.toContain('project-alpha');
+    }
+  });
+
+  it('the SENSITIVE absence fact is never keyed — safety is never faded', () => {
+    // A4 makes secret_in_prompt a sensitive, safety-routed fact; F3 must leave it
+    // unkeyable so no repeat-count can ever suppress it.
+    const facts = buildPromptEnhancementGuidanceFactsV1(scoped({
+      normalizedStageAbsenceSignalRefs: ['absence:secret_in_prompt@implementation'],
+    }));
+    const sensitive = facts.filter((entry) => entry.sourceIds.some((id) => id.includes('secret_in_prompt')));
+    expect(sensitive.length).toBeGreaterThan(0);
+    for (const entry of sensitive) expect(entry.fatigueKey).toBeUndefined();
+  });
+
+  it('without a project id the producer emits no keys at all, never a global one', () => {
+    const facts = buildPromptEnhancementGuidanceFactsV1(requestWithSignals({
+      normalizedStageAbsenceSignalRefs: ['absence:verification_gap@implementation'],
+    }));
+    for (const entry of facts) expect(entry.fatigueKey).toBeUndefined();
+  });
+});

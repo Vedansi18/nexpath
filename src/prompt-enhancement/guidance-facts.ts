@@ -28,6 +28,8 @@ import type {
  * memory query (read side) MUST agree on these, or memory never suppresses a repeat
  * signal. Kept token-safe (no '>' etc.) because they become persisted memory keys.
  */
+import { stampPromptEnhancementFatigueKeysV1 } from './guidance-fatigue.js';
+
 export function promptEnhancementStageSignalKeyV1(prevStage: string | undefined, currentStage: string): string {
   return `stage:${prevStage ?? 'unknown'}-to-${currentStage}`;
 }
@@ -331,7 +333,12 @@ export function buildPromptEnhancementGuidanceFactsV1(
     });
   }
 
-  return rankGuidanceFacts(dedupeGuidanceFacts(pairNegativeCapabilitiesWithLiveDetectors(facts)));
+  // F3: stamp the fatigue key at the producer's ONE exit, after dedupe/rank, so
+  // no construction site can ship keyless and a safety fact never gets a key.
+  return stampPromptEnhancementFatigueKeysV1(
+    rankGuidanceFacts(dedupeGuidanceFacts(pairNegativeCapabilitiesWithLiveDetectors(facts))),
+    request.reviewMomentContext.projectId,
+  );
 }
 
 /**

@@ -3,7 +3,10 @@ import type {
   PromptEnhancementFallbackMode,
   PromptEnhancementValidationStatus,
 } from './contracts.js';
-import type { PromptEnhancementGuidanceFact } from './templates/section-plan.js';
+import {
+  isPromptEnhancementSourceCriticalFactV1,
+  type PromptEnhancementGuidanceFact,
+} from './templates/section-plan.js';
 import type { PromptEnhancementSourceMixResult } from './source-mix.js';
 import type { PromptEnhancementLadderResolutionV1 } from './taxonomy-ids.js';
 
@@ -42,13 +45,8 @@ const WEAK_EVIDENCE_STATES: ReadonlySet<PromptEnhancementGuidanceFact['sourceEvi
 ]);
 
 /** High-risk / safety facts survive fatigue and weak evidence; they force a confirmation-first show. */
-function isSourceCritical(fact: PromptEnhancementGuidanceFact): boolean {
-  return (
-    fact.riskLevel === 'high' ||
-    fact.riskLevel === 'sensitive_authority_risky' ||
-    fact.guidanceKind === 'safety_or_confirmation'
-  );
-}
+// One definition, shared with the mixer/gate and F3's never-faded guard.
+const isSourceCritical = isPromptEnhancementSourceCriticalFactV1;
 
 /**
  * The locked exception test for an UNDER-EVIDENCED route: a popup may still

@@ -8,6 +8,7 @@ import type {
   PromptEnhancementFactRole,
   PromptEnhancementSourceAnchorScope,
 } from './templates/section-plan.js';
+import { isPromptEnhancementSourceCriticalFactV1 } from './templates/section-plan.js';
 
 /**
  * transform-rule-2 split 1 — dual-lane source mixer (E2 / phase 2.2).
@@ -187,13 +188,8 @@ export function normalizePromptEnhancementTier1FieldsV1(
 }
 
 /** High-risk / source-critical facts must never be downgraded to invisible metadata. */
-function isSourceCritical(fact: PromptEnhancementGuidanceFact): boolean {
-  return (
-    fact.riskLevel === 'high' ||
-    fact.riskLevel === 'sensitive_authority_risky' ||
-    fact.guidanceKind === 'safety_or_confirmation'
-  );
-}
+// One definition, shared with the mixer/gate and F3's never-faded guard.
+const isSourceCritical = isPromptEnhancementSourceCriticalFactV1;
 
 /** Invalid/unsafe facts (missing source ids, unrenderable) are rejected before mixing. */
 function isValidFact(fact: PromptEnhancementGuidanceFact): boolean {
