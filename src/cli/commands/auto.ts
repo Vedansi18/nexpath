@@ -841,7 +841,22 @@ export async function runAuto(
   // silently lost. The function self-gates on zero stored prompts (one cheap query),
   // which is also the pinned edge: any prompt stored before this point skips the
   // import entirely — it must stay ahead of the insertPrompt below.
-  await importHistoricalPrompts(store, input.projectRoot);
+  //
+  // Best-effort, like every other side task on this path: it reads session files
+  // the coding agent is actively writing and rotating, so a listed file can be gone
+  // or unreadable by the time it is opened. Sitting ahead of insertPrompt, an
+  // uncaught throw here would cost the user their live prompt AND fail the hook on
+  // their very first prompt — losing old history is bad, losing the current one is
+  // worse. Failure is logged and the pipeline continues.
+  try {
+    await importHistoricalPrompts(store, input.projectRoot);
+  } catch (err) {
+    logger.warn('historical_import_failed', {
+      project: input.projectRoot,
+      error: err instanceof Error ? err.message : String(err),
+      actionable: 'Pre-install prompt history was not imported for this project; live capture is unaffected and continues normally.',
+    });
+  }
 
   // ── 0. Persist prompt text — runs before classifier so prompt is stored even if pipeline errors ──
   insertPrompt(store, { projectRoot: input.projectRoot, promptText: input.promptText, agent: ACTIVE_AGENT_ID });
