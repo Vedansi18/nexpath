@@ -131,6 +131,67 @@ export type PromptEnhancementGuidanceRenderPolicy =
   | 'suppress_with_reason'
   | 'defer_to_normal_ds';
 
+/**
+ * A5 (L4966) — the `sourceType` ≡ `sourceKind` EQUIVALENCE that A2 deferred here.
+ *
+ * A2 kept the shipped field name `sourceType`, which L4958-4960 permits only
+ * with a per-field equivalence fixture; that fixture could not be written while
+ * the locked set was admittedly incomplete, so it was recorded as owed to this
+ * phase. This is the mapping, stated once and pinned by a fixture.
+ *
+ * Nine of the twelve locked values are the shipped values under a shipped name.
+ * THREE have no producer at all, and each is recorded with WHY rather than
+ * quietly omitted — an equivalence that hides its own gaps proves nothing:
+ *   · `current_advisory_signal` — PE consumes the current advisory as the
+ *     stage/absence signal pair above; no separate advisory fact is produced.
+ *   · `promoted_env_practice` — promotion is a corroboration TIER on an env
+ *     fact (A1's tier-promotion wire), not a distinct kind of source.
+ *   · `original_prompt_point` — the user's own points are a SECTION and a
+ *     source ref, never a guidance fact; nothing generates guidance "from" them.
+ */
+export const PROMPT_ENHANCEMENT_LOCKED_SOURCE_KIND_EQUIVALENCE_V1: Readonly<
+  Record<string, PromptEnhancementGuidanceSourceType | 'not_produced'>
+> = {
+  persistent_missing_signal_memory: 'persistent_missing_signal_memory',
+  current_absence_signal: 'absence_signal',
+  stage_transition_signal: 'stage_transition',
+  content_template_record: 'content_template_record',
+  content_template_fact: 'content_template_runtime_fact',
+  current_advisory_signal: 'not_produced',
+  env_fact: 'hard_fact',
+  promoted_env_practice: 'not_produced',
+  right_good_pattern: 'right_good_pattern',
+  work_style_trait: 'work_style_fact',
+  prompt_derived_fact: 'prompt_derived_fact',
+  original_prompt_point: 'not_produced',
+};
+
+/**
+ * A5 tier-2 (L4965). The three locked lanes, ON THE FACT rather than recomputed
+ * as a mixer local. 🔒 The gate is that they are NOT COLLAPSIBLE: before this,
+ * the mixer's local knew only `source_a | source_b`, so the NEUTRAL lane — the
+ * user's own prompt — was indistinguishable from independent project grounding.
+ */
+export type PromptEnhancementSourceLaneV1 =
+  | 'source_a_missing_practice'
+  | 'source_b_grounding'
+  | 'source_neutral_original';
+
+/** A5 tier-3 (L4976). Locked set; low/unknown must never outrank strong current Source A. */
+export type PromptEnhancementConfidenceBandV1 = 'high' | 'medium' | 'low' | 'unknown';
+
+/**
+ * A5 tier-3 (L4977). Locked set. 🔴 *"stale/historical cannot be hidden"* —
+ * without it a fact recalled from months-old memory renders identically to one
+ * observed in the current prompt.
+ */
+export type PromptEnhancementRecencyBandV1 =
+  | 'current_prompt'
+  | 'current_session'
+  | 'recent_project'
+  | 'historical'
+  | 'unknown';
+
 export interface PromptEnhancementGuidanceFact {
   factId: string;
   sourceType: PromptEnhancementGuidanceSourceType;
@@ -163,6 +224,15 @@ export interface PromptEnhancementGuidanceFact {
   sourceOriginScope?: PromptEnhancementSourceOriginScope;
   claimVerbPolicy?: PromptEnhancementClaimVerbPolicy;
   factRole?: PromptEnhancementFactRole;
+  /**
+   * A5 tier-2/3 fields. Optional on the raw producer layer for the same reason
+   * the tier-1 trio is (A2's shape), and normalized deterministically at source
+   * mixing so nothing selected is missing them. `sourceLane` in particular is
+   * the lock's replacement for the mixer-local lane variable.
+   */
+  sourceLane?: PromptEnhancementSourceLaneV1;
+  confidenceBand?: PromptEnhancementConfidenceBandV1;
+  recencyBand?: PromptEnhancementRecencyBandV1;
   /**
    * F3 (L4980): the stable, project-scoped key by which REPEATED guidance is
    * recognised across sessions — never raw prompt text, and a redacted

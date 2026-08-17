@@ -7,6 +7,9 @@ import type {
   PromptEnhancementClaimVerbPolicy,
   PromptEnhancementFactRole,
   PromptEnhancementSourceAnchorScope,
+  PromptEnhancementSourceLaneV1,
+  PromptEnhancementConfidenceBandV1,
+  PromptEnhancementRecencyBandV1,
 } from './templates/section-plan.js';
 import { isPromptEnhancementSourceCriticalFactV1 } from './templates/section-plan.js';
 
@@ -84,8 +87,71 @@ const RENDERABLE_PRIORITIES: ReadonlySet<PromptEnhancementGuidanceFact['priority
   'low',
 ]);
 
+/**
+ * A5 (L4965): the fact's own lane, from the three LOCKED values.
+ *
+ * Before A5 the only lane notion was the two-value mixer local below, which
+ * collapsed the NEUTRAL lane into grounding: a fact known only from the user's
+ * own prompt was labelled `source_b` — the same label an independently
+ * corroborated project fact carries. The wording clamp already stopped it
+ * CLAIMING project knowledge, but nothing recorded that it was a different kind
+ * of thing. This makes the distinction explicit and un-collapsible.
+ */
+export function promptEnhancementSourceLaneForV1(
+  fact: PromptEnhancementGuidanceFact,
+): PromptEnhancementSourceLaneV1 {
+  if (SOURCE_A_TYPES.has(fact.sourceType)) return 'source_a_missing_practice';
+  // The user's own prompt is neither a missing practice nor independent
+  // grounding — it is the original, and it is the third locked lane.
+  if (fact.sourceType === 'prompt_derived_fact') return 'source_neutral_original';
+  if (fact.sourceOriginScope === 'current_prompt' || fact.sourceOriginScope === 'original_point_inventory') {
+    return 'source_neutral_original';
+  }
+  return 'source_b_grounding';
+}
+
+/** A5 (L4976): the band, from the fact's own typed evidence state. */
+export function promptEnhancementConfidenceBandForV1(
+  fact: PromptEnhancementGuidanceFact,
+): PromptEnhancementConfidenceBandV1 {
+  switch (fact.sourceEvidenceState) {
+    case 'strong': return 'high';
+    case 'partial': return 'medium';
+    case 'weak_low_risk':
+    case 'weak_source_critical':
+    case 'conflicting': return 'low';
+    default: return 'unknown';
+  }
+}
+
+/**
+ * A5 (L4977): 🔴 *"stale/historical cannot be hidden"*. Derived from the fact's
+ * origin scope, which already records WHERE the knowledge came from — so a
+ * months-old memory can no longer look identical to current-prompt evidence.
+ */
+export function promptEnhancementRecencyBandForV1(
+  fact: PromptEnhancementGuidanceFact,
+): PromptEnhancementRecencyBandV1 {
+  switch (fact.sourceOriginScope ?? DEFAULT_ORIGIN_BY_SOURCE_TYPE[fact.sourceType]) {
+    case 'current_prompt':
+    case 'original_point_inventory': return 'current_prompt';
+    case 'recent_prompt_history':
+    case 'transcript_corroboration': return 'current_session';
+    case 'local_probe':
+    case 'content_template_runtime':
+    case 'content_template_registry': return 'recent_project';
+    case 'stored_memory':
+    case 'longitudinal_param_events': return 'historical';
+    default: return 'unknown';
+  }
+}
+
 function laneFor(fact: PromptEnhancementGuidanceFact): PromptEnhancementSourceMixLane {
-  return SOURCE_A_TYPES.has(fact.sourceType) ? 'source_a' : 'source_b';
+  // The internal two-bucket split the selection logic has always used. Source
+  // NEUTRAL rides the B bucket for SELECTION exactly as it did before A5 (it is
+  // clamped to label-only and never consumes a grounding slot), so behaviour is
+  // unchanged — but the fact now carries the honest three-value lane.
+  return promptEnhancementSourceLaneForV1(fact) === 'source_a_missing_practice' ? 'source_a' : 'source_b';
 }
 
 // ── Tier-1 evidence-field normalization ──────────────────────────────────────
@@ -178,12 +244,20 @@ export function normalizePromptEnhancementTier1FieldsV1(
   if (fact.sourceType === 'hard_fact' && sourceAnchorScope === 'unknown_anchor' && PROJECT_KNOWLEDGE_POLICIES.has(claimVerbPolicy)) {
     claimVerbPolicy = 'must_phrase_as_possibility';
   }
-  return {
+  const withTier1 = {
     ...fact,
     sourceOriginScope,
     claimVerbPolicy,
     sourceAnchorScope,
     factRole: fact.factRole ?? (served ? 'served_variant_provenance_only' : defaultFactRole(fact)),
+  };
+  // A5 tier-2/3: normalized here for the same reason the tier-1 trio is — no
+  // fact reaches selection without them, and producers may still set them.
+  return {
+    ...withTier1,
+    sourceLane: fact.sourceLane ?? promptEnhancementSourceLaneForV1(withTier1),
+    confidenceBand: fact.confidenceBand ?? promptEnhancementConfidenceBandForV1(withTier1),
+    recencyBand: fact.recencyBand ?? promptEnhancementRecencyBandForV1(withTier1),
   };
 }
 
