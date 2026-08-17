@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { applyPromptEnhancementSourceMixV1 } from './source-mix.js';
+import { evidenceForGuidanceFact } from './guidance-facts.js';
 import type {
   PromptEnhancementGuidanceFact,
   PromptEnhancementGuidanceSourceType,
@@ -262,10 +263,40 @@ describe('tier-1 evidence fields at the mix seam', () => {
 //   - `sourceEvidenceState` ≡ the contract's `evidenceState` — value sets identical.
 //   - `sourceType` carries the contract's `sourceKind` concept — the full 12-value
 //     set completion is later contract-tail work.
-//   - `privacyClass` carries the contract's `sensitivityClass` concept — the full
-//     5-value locked set lands with the sensitive-literal boundary work.
+//   - `privacyClass` carries the contract's `sensitivityClass` concept — all five
+//     locked values ship, plus two shipped-only refinements (`sensitive_ref_only`,
+//     `do_not_render`) whose stricter behaviour is pinned below.
 
 describe('rename reconciliation (shipped names ≡ contract concepts)', () => {
+  // privacyClass carries the contract's `sensitivityClass` concept. The locked set
+  // is FIVE values; the shipped field ships SEVEN — `sensitive_ref_only` and
+  // `do_not_render` are shipped-only refinements. Equivalence therefore has two
+  // halves, and the second is the one that matters: the extra values must never
+  // be a softer path than the locked sensitive classes they sit beside.
+  it('privacyClass accepts every locked sensitivityClass value', () => {
+    const locked = ['public_safe', 'local_private', 'sensitive_generalize', 'sensitive_suppress', 'requires_confirmation'] as const;
+    for (const cls of locked) {
+      const probe = fact({ factId: `p-${cls}`, sourceType: 'hard_fact', privacyClass: cls });
+      expect(probe.privacyClass).toBe(cls);
+    }
+  });
+
+  it('the two shipped-only privacy classes are refinements, never a loophole — content never crosses under them', () => {
+    const resolved = { key: 'api_key', value: 'plain-value' };
+    // Shipped-only values: strictly no content.
+    for (const cls of ['sensitive_ref_only', 'do_not_render'] as const) {
+      expect(evidenceForGuidanceFact(cls, 'not_applicable', resolved)).toBeUndefined();
+    }
+    // They are at least as strict as the locked classes that also withhold content.
+    for (const cls of ['sensitive_suppress', 'requires_confirmation'] as const) {
+      expect(evidenceForGuidanceFact(cls, 'not_applicable', resolved)).toBeUndefined();
+    }
+    // And strictly stricter than the locked classes that do let content through.
+    for (const cls of ['public_safe', 'local_private', 'sensitive_generalize'] as const) {
+      expect(evidenceForGuidanceFact(cls, 'not_applicable', resolved)).toBeDefined();
+    }
+  });
+
   it('sourceEvidenceState accepts exactly the evidenceState value set', () => {
     const evidenceStates = [
       'strong', 'partial', 'weak_low_risk', 'weak_source_critical',
