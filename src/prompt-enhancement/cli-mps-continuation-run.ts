@@ -109,7 +109,7 @@ const PROMPT_ENHANCEMENT_MPS_CONTINUATION_OUTCOME_STATES_V1: readonly PromptEnha
 ];
 
 /** True only for a well-formed reported outcome; a missing (null/undefined), unrecognized, or incomplete result is not one. */
-function isPromptEnhancementCliMpsContinuationOutcomeV1(
+export function isPromptEnhancementCliMpsContinuationOutcomeV1(
   result: unknown,
 ): result is PromptEnhancementCliMpsContinuationOutcomeV1 {
   if (typeof result !== 'object' || result === null) return false;

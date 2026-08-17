@@ -174,7 +174,10 @@ export function buildPromptEnhancementMpsContinuationPopupV1(
   const validationTarget = isTaskKind || input.result.currentBody.originalPromptText.trim().length > 0
     ? input.result
     : { ...input.result, currentBody: { ...input.result.currentBody, originalPromptText: input.result.currentBody.text } };
-  const resultValidation = validatePromptEnhancementPrepareResultV1(validationTarget);
+  // A continuation result is a packaged sequence-item body: its verdict graph carries the single
+  // `sequence` phase, not the fresh-prompt pipeline's fifteen. Validate it in that mode so a valid
+  // continuation is not rejected as `missing_validation_graph`; every other result check still applies.
+  const resultValidation = validatePromptEnhancementPrepareResultV1(validationTarget, { sequenceItemGraph: true });
   if (!resultValidation.ok) {
     return { state: 'no_popup', reasonCodes: ['invalid_prepare_result', ...resultValidation.reasonCodes] };
   }

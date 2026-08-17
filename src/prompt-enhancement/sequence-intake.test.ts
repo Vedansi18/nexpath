@@ -158,6 +158,11 @@ describe('sequence intake on the explicit first send (fail-closed typed no-ops)'
     const intake = intakePromptEnhancementSequenceOnFirstSendV1({ result, projectRoot: PROJECT, sessionId: 's1' });
     expect(intake.state).toBe('sequence_recorded');
     if (intake.state !== 'sequence_recorded') return;
+    // The handoffKind must ride through from the SAME handoff object the row is built from — a real,
+    // continuable kind, NEVER null. A null here is what made the continuation packager reject every row
+    // as `handoff_not_continuable`, so the second popup never rendered.
+    expect(intake.handoffKind).toBe(result.uiView.handoffAndSequenceSummary!.handoffKind);
+    expect(intake.handoffKind).not.toBeNull();
     const store = await openStore(':memory:');
     expect(upsertPendingPromptSequence(store, intake.runtime, intake.payload, {
       redactedOriginalPromptText: intake.redactedOriginalPromptText,

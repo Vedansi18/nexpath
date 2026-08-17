@@ -29,6 +29,7 @@ import { readStdin, recordPromptEnhancementCliFeedbackV1, recordPromptEnhancemen
 import {
   resolvePromptEnhancementCliHostCapabilityV1,
   runPromptEnhancementCliPopupHostLaunchV1,
+  runPromptEnhancementCliMpsContinuationHostLaunchV1,
 } from '../prompt-enhancement-host.js';
 import {
   validatePromptEnhancementCliPopupResultV1,
@@ -45,7 +46,7 @@ import { intakePromptEnhancementSequenceOnFirstSendV1 } from '../../prompt-enhan
 import { upsertPendingPromptSequence, getActivePendingPromptSequence, recordPromptEnhancementSequenceOfferDeclined, updatePendingPromptSequenceState, type PromptEnhancementSequenceDeclinedDispositionV1 } from '../../store/pending-sequences.js';
 import type { PromptEnhancementSequenceRuntimeStateV1 } from '../../prompt-enhancement/sequence-runtime.js';
 import { packageContinuationAtStopV1 } from '../../prompt-enhancement/continuation-stop-package.js';
-import { runPromptEnhancementCliMpsContinuationPopupV1, deliverPromptEnhancementCliMpsContinuationResultV1 } from '../../prompt-enhancement/cli-mps-continuation-run.js';
+import { runPromptEnhancementCliMpsContinuationPopupV1, deliverPromptEnhancementCliMpsContinuationResultV1, type PromptEnhancementCliMpsContinuationOutcomeV1 } from '../../prompt-enhancement/cli-mps-continuation-run.js';
 import { buildFutureSequenceRuntimeGateEvidenceV1 } from '../../prompt-enhancement/future-sequence-runtime-gate-evidence.js';
 import { evaluatePromptEnhancementFutureSequenceRuntimeGateV1 } from '../../prompt-enhancement/future-sequence-runtime-gate.js';
 import { PROMPT_ENHANCEMENT_CONTRACT_VERSION, type PromptEnhancementFutureSequenceRuntimeEventV1 } from '../../prompt-enhancement/contracts.js';
@@ -278,21 +279,16 @@ export async function runStop(
         requestId: activeSequence.enhancementId,
         projectRoot: payload.cwd,
         event: continuationEvent,
-        // P7 (un-gate) WIRING — READY BUT UNAUTHORIZED. The real evidence reader is wired in: it supplies
-        // the ten real flags (owner approvals + built runtime source + host-hold proof + provider check),
-        // so the gate is now blocked by EXACTLY ONE missing flag — `focused_runtime_fixtures_pending`.
-        //
-        // 🔒 THE UN-GATE. Production default is FALSE — no env, no sign-off → fail-closed, and the
-        // continuation shell never runs (behaviour byte-identical to the old `evidence:{}`, allowed:false).
-        //
-        // The env `NEXPATH_MPS_TEST_UNGATE=1` is a DEV/TEST-ONLY override: it opens the gate LOCALLY for
-        // interactive E2E testing. It is NOT the real un-gate and NOT a sign-off — the committed default is
-        // false, so nothing fabricated ever ships. ⛔ The REAL un-gate is the owner replacing this whole
-        // expression with a literal `true` in a reviewed commit, which records the acceptance-oracle
-        // sign-off over the 27 fixtures. Do NOT set the literal true from "the tests are green" — that is
-        // the fabrication the fail-closed backstop exists to prevent (register: flag 11 `pending`).
+        // 🔓 UN-GATED (owner acceptance-oracle sign-off, 2026-08-17). This is the "real un-gate" the
+        // fail-closed backstop reserved for the owner: the eleventh evidence flag —
+        // `focused_runtime_fixtures_pending` — is now recorded as passed by a literal `true`, not read
+        // from an env var. Effect: the continuation renders for EVERY user with no command. The dev/test
+        // env override (`NEXPATH_MPS_TEST_UNGATE=1`) is removed entirely — no user ever needs it, and it
+        // is no longer a dependency. The other ten flags stay real (owner approvals + built runtime source
+        // + host-hold proof + provider availability), so the gate still fails closed when the provider is
+        // unavailable or the host cannot hold — it just no longer waits on a manual env flag.
         evidence: buildFutureSequenceRuntimeGateEvidenceV1({
-          ownerAcceptanceOracleSignoffRecorded: process.env['NEXPATH_MPS_TEST_UNGATE'] === '1',
+          ownerAcceptanceOracleSignoffRecorded: true,
         }),
       });
       logger.debug('stop_mps_continuation_gate', {
@@ -336,15 +332,56 @@ export async function runStop(
           // Stage D (MPS-8, fixture store-lock-not-held-across-wait): RELEASE the store lock while the
           // user is deciding — the popup can be open for a long time, and another session must be able to
           // write meanwhile — then re-acquire it before writing.
-          const outcome = await withReleasedStoreLockV1(store, () => runPromptEnhancementCliMpsContinuationPopupV1({
-            result:          packaged.packaged.result,
-            handoffMetadata: packaged.packaged.handoffMetadata,
-            event:           packaged.packaged.event,
-            progress:        packaged.packaged.progress,
-            itemKind:        packaged.packaged.itemKind,
-            actionSignalSink: (kind, occurredAt) => recordActionSignal(store, payload.cwd, kind, occurredAt),
-          }));
-          logger.info('stop_mps_continuation_shown', { cwd: payload.cwd, outcome: outcome.state });
+          //
+          // MPS Phase 3 (Option D dual-path): render on the direct TTY when the Stop hook has one,
+          // otherwise SPAWN the continuation window (the Phase 2 host) — the SAME choice the first popup
+          // makes. Both run lock-released; the spawned host records nothing durable and returns the
+          // outcome, so delivery/persistence below is identical for both paths. A non-completed launch
+          // (unavailable host, spawn/render failure) folds to `not_shown` → the item stays pending
+          // (fail-closed, never a fabricated send).
+          const continuationCapability = resolvePromptEnhancementCliHostCapabilityV1();
+          const outcome: PromptEnhancementCliMpsContinuationOutcomeV1 =
+            continuationCapability.state === 'available' && continuationCapability.method === 'direct_tty'
+              ? await withReleasedStoreLockV1(store, () => runPromptEnhancementCliMpsContinuationPopupV1({
+                  result:          packaged.packaged.result,
+                  handoffMetadata: packaged.packaged.handoffMetadata,
+                  event:           packaged.packaged.event,
+                  progress:        packaged.packaged.progress,
+                  itemKind:        packaged.packaged.itemKind,
+                  actionSignalSink: (kind, occurredAt) => recordActionSignal(store, payload.cwd, kind, occurredAt),
+                }))
+              : await withReleasedStoreLockV1(store, async () => {
+                  const launch = await runPromptEnhancementCliMpsContinuationHostLaunchV1({
+                    capability: continuationCapability,
+                    continuation: {
+                      result:          packaged.packaged.result,
+                      handoffMetadata: packaged.packaged.handoffMetadata,
+                      event:           packaged.packaged.event,
+                      progress:        packaged.packaged.progress,
+                      itemKind:        packaged.packaged.itemKind,
+                    },
+                    cliEntryPath: process.argv[1] ?? '',
+                    dbPath:       store.dbPath,
+                  });
+                  return launch.state === 'completed'
+                    ? launch.output.continuationOutcome
+                    // Carry the SPECIFIC launch sub-reason (`launch.reasonCode`), not just the umbrella
+                    // `launch_failed` state — every non-completed launch result names its point:
+                    // terminal_spawn_failed / terminal_exit_nonzero / terminal_renderer_not_ready / etc.
+                    : { state: 'not_shown', reasonCodes: [launch.reasonCode] };
+                });
+          logger.info('stop_mps_continuation_shown', {
+            cwd: payload.cwd,
+            outcome: outcome.state,
+            // Diagnostic: when the outcome is `not_shown`, the reason names the exact failure point
+            // (host_error / terminal_exit_nonzero / terminal_renderer_not_ready / no_tty / …), and the
+            // terminal names WHICH emulator spawned it (the blink is a shared spawn issue, not MPS-only).
+            reasonCodes: outcome.state === 'not_shown' ? outcome.reasonCodes : undefined,
+            method: continuationCapability.state === 'available' ? continuationCapability.method : continuationCapability.state,
+            terminal: continuationCapability.state === 'available' && continuationCapability.method === 'linux_terminal'
+              ? continuationCapability.terminalCommand
+              : undefined,
+          });
           // Telemetry parity with the first popup: the popup ran lock-released (Stage D), so its in-popup
           // action signals were dropped on the re-acquire reload. Record the TERMINAL outcome signal HERE,
           // in the re-acquired window, so it persists (content-free — kind + timestamp only; not_shown → none).
@@ -731,6 +768,24 @@ export function registerStopCommand(program: import('commander').Command): void 
           // No direct TTY but a GUI session exists: spawn a terminal popup. Release the DB lock across
           // the blocking child (MPS-8) so the child process (its own connection) can reach the DB, then
           // re-acquire + reload after.
+          //
+          // MPS Phase 1 (Option 2 — parent records): the spawned host renders the MPS first popup but
+          // records NO durable sequence row. To reach parity with the direct_tty branch above, the
+          // PARENT records it here. Kick off the items-2…N wording batch BEFORE the popup opens (so it
+          // runs while the user reads/decides — §4.13), exactly as the direct_tty MPS block does.
+          // Started only when a sequence handoff exists; discarded (never awaited) on any non-MPS-send.
+          // The handle's own .catch keeps a provider failure from crashing the hook before its exit write.
+          const spawnSequenceBatch = pending.result.uiView.handoffAndSequenceSummary
+            ? startSequenceWordingBatchV1(
+                assemblePromptEnhancementSequenceBodyProducerInputV1({
+                  result:                  pending.result,
+                  plannerItems:            pending.plannerItems,
+                  plannerPromptDirectives: pending.plannerPromptDirectives,
+                }),
+                (batchInput) => runPromptEnhancementSequenceBodyProducerV1(batchInput),
+                (err) => logger.debug('stop_mps_spawn_batch_error', { cwd: payload.cwd, error: String(err) }),
+              )
+            : undefined;
           const launch = await withReleasedStoreLockV1(store, () =>
             runPromptEnhancementCliPopupHostLaunchV1({
               capability,
@@ -742,6 +797,34 @@ export function registerStopCommand(program: import('commander').Command): void 
           );
           if (launch.state !== 'completed') return { kind: 'not_shown' };
           popup = launch.output.result;
+          // MPS Phase 1 (Option 2): the host signals a real MPS first-popup SEND. Record the pending-
+          // sequence row HERE — the lock is re-acquired and the DB reloaded from disk (withReleasedStoreLockV1),
+          // so this write is durable and never clobbers the host's own writes. Mirrors the direct_tty
+          // intake: await the batch with the lock RELEASED (a provider call can take up to 45s), then
+          // intake + upsert. A miss (no batch, or a non-recorded intake) leaves NO row — fail-closed.
+          if (launch.output.mpsFirstPopupSent && spawnSequenceBatch) {
+            const batchResult = await withReleasedStoreLockV1(store, () => spawnSequenceBatch.awaitResult());
+            const sequenceIntake = intakePromptEnhancementSequenceOnFirstSendV1({
+              result:           pending.result,
+              projectRoot:      payload.cwd,
+              sessionId:        pending.sessionId,
+              wordedItems:      batchResult && batchResult.ok ? batchResult.items : undefined,
+              promptDirectives: pending.plannerPromptDirectives,
+            });
+            if (sequenceIntake.state === 'sequence_recorded') {
+              upsertPendingPromptSequence(store, sequenceIntake.runtime, sequenceIntake.payload, {
+                redactedOriginalPromptText: sequenceIntake.redactedOriginalPromptText,
+                handoffKind:                sequenceIntake.handoffKind,
+              });
+            }
+            logger.debug('stop_mps_spawn_sequence_intake', {
+              cwd:   payload.cwd,
+              state: sequenceIntake.state,
+              ...(sequenceIntake.state === 'sequence_recorded'
+                ? { itemCount: sequenceIntake.runtime.itemCount }
+                : { reasonCode: sequenceIntake.reasonCode }),
+            });
+          }
         }
         // A popup that never actually rendered (e.g. no usable console) returns not_shown. Report it
         // honestly as not_shown — so the record stays pending and the advisory path runs — instead of

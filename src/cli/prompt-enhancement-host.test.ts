@@ -13,6 +13,7 @@ import {
   planPromptEnhancementWindowsTerminalLaunchV1,
   resolvePromptEnhancementCliHostCapabilityV1,
   runPromptEnhancementCliPopupHostLaunchV1,
+  runPromptEnhancementCliMpsContinuationHostLaunchV1,
   type PromptEnhancementLinuxTerminalCommandV1,
 } from './prompt-enhancement-host.js';
 import type { PromptEnhancementPrepareRequestV1, PromptEnhancementPrepareResultV1 } from '../prompt-enhancement/contracts.js';
@@ -674,5 +675,115 @@ describe('PE1.3 — Linux PE popup host launcher', () => {
     expect(direct).toEqual({ state: 'not_applicable', reasonCode: 'direct_tty' });
     expect(unavailable).toEqual({ state: 'host_unavailable', reasonCode: 'no_gui_session' });
     expect(makeTempDir).not.toHaveBeenCalled();
+  });
+});
+
+describe('MPS Phase 2 (Option D) — continuation (2nd popup) window launcher', () => {
+  function continuationLaunchInput() {
+    return {
+      capability: { state: 'available', method: 'linux_terminal', terminalCommand: 'gnome-terminal' },
+      continuation: {
+        result: { currentBody: { text: 'NEXT ITEM BODY MUST STAY OUT OF ARGV' } },
+        handoffMetadata: {},
+        event: {},
+        progress: { done: 1, total: 2 },
+        itemKind: 'task',
+      },
+      cliEntryPath: '/opt/nexpath/dist/cli/index.js',
+      dbPath: '/tmp/nexpath-test.db',
+      nodePath: '/usr/bin/node',
+    } as unknown as Parameters<typeof runPromptEnhancementCliMpsContinuationHostLaunchV1>[0];
+  }
+
+  it('spawns the SAME child command, keeps the payload out of argv, parses the outcome, cleans up', async () => {
+    const observed: { plan?: unknown; inputText?: string } = {};
+    const fakeChild = child();
+    const result = await runPromptEnhancementCliMpsContinuationHostLaunchV1(continuationLaunchInput(), {
+      spawnTerminal: async (plan) => {
+        observed.plan = plan;
+        const args = [...plan.args];
+        const inputFile = args[args.indexOf('--input-file') + 1]!;
+        observed.inputText = readFileSync(inputFile, 'utf8');
+        return fakeChild;
+      },
+      readContinuationResultFile: () => ({ protocolVersion: 1, continuationOutcome: { state: 'send', bodyText: 'NEXT ITEM BODY' } }),
+      readReadyFile: () => true,
+    });
+
+    expect(result).toEqual({ state: 'completed', output: { protocolVersion: 1, continuationOutcome: { state: 'send', bodyText: 'NEXT ITEM BODY' } } });
+    // Option D: the SAME hidden child command as the first popup → identical cross-platform spawn path.
+    expect(JSON.stringify(observed.plan)).toContain('prompt-enhancement-popup-host');
+    // The continuation payload travels via the private input FILE, never argv.
+    expect(observed.inputText).toContain('"continuation"');
+    expect(JSON.stringify(observed.plan)).not.toContain('NEXT ITEM BODY MUST STAY OUT OF ARGV');
+    expect(fakeChild.kill).toHaveBeenCalledWith('SIGTERM');
+  });
+
+  it('macOS routes through the SAME mac launcher builder — the child command is inside launch.sh', async () => {
+    const observed: { plan?: string; script?: string } = {};
+    const fakeChild = child(0); // exits 0 → skips the mac close-wait
+    const result = await runPromptEnhancementCliMpsContinuationHostLaunchV1(
+      { ...continuationLaunchInput(), capability: { state: 'available', method: 'mac_terminal' } } as unknown as Parameters<typeof runPromptEnhancementCliMpsContinuationHostLaunchV1>[0],
+      {
+        spawnTerminal: async (plan) => {
+          observed.plan = JSON.stringify(plan);
+          // On macOS the command lives inside the launch.sh the mac builder wrote; read it to prove parity.
+          const applescript = String(plan.args[plan.args.length - 1] ?? '');
+          const match = applescript.match(/sh '([^']+launch\.sh)'/);
+          if (match) observed.script = readFileSync(match[1]!, 'utf8');
+          return fakeChild;
+        },
+        readContinuationResultFile: () => ({ protocolVersion: 1, continuationOutcome: { state: 'declined' } }),
+        readReadyFile: () => true,
+        sleep: async () => { /* no real wait */ },
+      },
+    );
+    expect(result.state).toBe('completed');
+    expect(observed.plan).toContain('osascript'); // routed through the mac plan builder
+    expect(observed.script).toContain('prompt-enhancement-popup-host'); // SAME child command inside launch.sh
+  });
+
+  it('Windows routes through the SAME windows launcher builder — the child command is inside launch.cmd', async () => {
+    const observed: { plan?: string; script?: string } = {};
+    const fakeChild = child();
+    const result = await runPromptEnhancementCliMpsContinuationHostLaunchV1(
+      { ...continuationLaunchInput(), capability: { state: 'available', method: 'windows_terminal' } } as unknown as Parameters<typeof runPromptEnhancementCliMpsContinuationHostLaunchV1>[0],
+      {
+        spawnTerminal: async (plan) => {
+          observed.plan = JSON.stringify(plan);
+          const cmdPath = [...plan.args].reverse().find((arg) => arg.endsWith('.cmd'));
+          if (cmdPath) observed.script = readFileSync(cmdPath, 'utf8');
+          return fakeChild;
+        },
+        readContinuationResultFile: () => ({ protocolVersion: 1, continuationOutcome: { state: 'interruption' } }),
+        readReadyFile: () => true,
+        detectPopupGeometry: async () => undefined,
+      },
+    );
+    expect(result.state).toBe('completed');
+    expect(observed.plan).toContain('cmd'); // routed through the windows plan builder (cmd /c start …)
+    expect(observed.script).toContain('prompt-enhancement-popup-host'); // SAME child command inside launch.cmd
+  });
+
+  it('a result written before the renderer is ready is a failed launch (fail-closed)', async () => {
+    const fakeChild = child();
+    const result = await runPromptEnhancementCliMpsContinuationHostLaunchV1(continuationLaunchInput(), {
+      spawnTerminal: async () => fakeChild,
+      readContinuationResultFile: () => ({ protocolVersion: 1, continuationOutcome: { state: 'send', bodyText: 'X' } }),
+      readReadyFile: () => false, // never signalled ready
+    });
+    expect(result).toEqual({ state: 'launch_failed', reasonCode: 'terminal_renderer_not_ready' });
+  });
+
+  it('returns not_applicable for direct_tty and host_unavailable for an unavailable capability', async () => {
+    const notApplicable = await runPromptEnhancementCliMpsContinuationHostLaunchV1(
+      { ...continuationLaunchInput(), capability: { state: 'available', method: 'direct_tty' } } as unknown as Parameters<typeof runPromptEnhancementCliMpsContinuationHostLaunchV1>[0],
+    );
+    expect(notApplicable).toEqual({ state: 'not_applicable', reasonCode: 'direct_tty' });
+
+    const unavailable = await runPromptEnhancementCliMpsContinuationHostLaunchV1(
+      { ...continuationLaunchInput(), capability: { state: 'unavailable', method: 'none', reasonCode: 'unsupported_platform' } } as unknown as Parameters<typeof runPromptEnhancementCliMpsContinuationHostLaunchV1>[0],
+    );
+    expect(unavailable).toEqual({ state: 'host_unavailable', reasonCode: 'unsupported_platform' });
   });
 });

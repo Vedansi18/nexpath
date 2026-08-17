@@ -186,10 +186,10 @@ describe('runStop — deferred Prompt Enhancement popup (B-i)', () => {
       const logged = call![1] as { missingGateCodeCount: number; missingGateCodes: readonly string[] };
       // The full list is logged with no silent slice — count equals the array length.
       expect(logged.missingGateCodes.length).toBe(logged.missingGateCodeCount);
-      // P7 wiring: the real evidence reader supplies the real flags, so the missing list is now short and
-      // ALWAYS carries the acceptance-oracle flag — the deliberate un-gate blocker. (This env has no
-      // OPENAI_API_KEY, so the provider flag is missing too; production resolves a key and it is not.)
-      expect(logged.missingGateCodes).toContain('focused_runtime_fixtures_pending');
+      // UN-GATED (owner sign-off): the acceptance-oracle flag is passed in code, so it is NEVER in the
+      // missing list. (This env has no OPENAI_API_KEY, so the PROVIDER flag is missing and the gate stays
+      // fail-closed HERE on a REAL flag — as designed; production resolves a key and it is not.)
+      expect(logged.missingGateCodes).not.toContain('focused_runtime_fixtures_pending');
       // The truncating `reasonCodes` field must no longer exist.
       expect(logged).not.toHaveProperty('reasonCodes');
     } finally {
@@ -197,13 +197,11 @@ describe('runStop — deferred Prompt Enhancement popup (B-i)', () => {
     }
   });
 
-  // P7 (un-gate) wiring, READY BUT UNAUTHORIZED: the launcher now passes a REAL continuation event AND
-  // the real evidence reader (buildFutureSequenceRuntimeGateEvidenceV1) with the owner acceptance-oracle
-  // sign-off left FALSE. This must NOT open the gate — `allowed` stays false. The reader supplies the ten
-  // real flags, so the gate is now blocked by exactly ONE missing flag (focused_runtime_fixtures_pending)
-  // rather than all eleven; the outcome (gated) is byte-identical. Flipping the sign-off to true — the
-  // whole un-gate — is authorised only by the owner and is deliberately not done here.
-  it('P7 wiring: the real evidence reader with no owner sign-off keeps the gate fail-closed (allowed never flips)', async () => {
+  // UN-GATED (owner sign-off 2026-08-17): the acceptance-oracle flag is passed in code, so it is NEVER the
+  // blocker. The gate still fails closed on the OTHER, REAL flags — e.g. provider availability. This env has
+  // no OPENAI_API_KEY, so the provider flag is missing and the gate stays closed HERE on that real flag,
+  // never on the un-gated sign-off. On a real machine with the key, every flag is satisfied → allowed:true.
+  it('the gate stays fail-closed on a REAL missing flag (provider), never on the un-gated sign-off flag', async () => {
     const session = SessionStateManager.load(store, '/test/project');
     session.setDetectedLanguage(store, undefined);
     upsertPendingPromptSequence(store, {
@@ -218,10 +216,10 @@ describe('runStop — deferred Prompt Enhancement popup (B-i)', () => {
       const call = debugSpy.mock.calls.find(([message]) => message === 'stop_mps_continuation_gate');
       expect(call).toBeDefined();
       const logged = call![1] as { allowed: boolean; missingGateCodes: readonly string[] };
-      // The whole point of P7-ready-but-unauthorized: the reader is wired, but the gate does not open.
+      // Still fail-closed here — but on a REAL flag (no provider key), not the un-gated sign-off.
       expect(logged.allowed).toBe(false);
-      // The owner acceptance-oracle flag is the deliberate blocker — always missing until the sign-off.
-      expect(logged.missingGateCodes).toContain('focused_runtime_fixtures_pending');
+      expect(logged.missingGateCodes).not.toContain('focused_runtime_fixtures_pending');
+      expect(logged.missingGateCodes).toContain('provider_api_availability_pending');
     } finally {
       debugSpy.mockRestore();
     }
@@ -230,7 +228,7 @@ describe('runStop — deferred Prompt Enhancement popup (B-i)', () => {
     expect(after).toMatchObject({ currentItemIndex: 2, status: 'item_pending', lastActionId: 'prev' });
   });
 
-  it('DEV/TEST override NEXPATH_MPS_TEST_UNGATE=1 OPENS the gate (and the default, no env, keeps it closed)', async () => {
+  it('the continuation gate is UN-GATED (owner sign-off) — `focused_runtime_fixtures_pending` is never the blocker, with NO env var', async () => {
     const session = SessionStateManager.load(store, '/test/project');
     session.setDetectedLanguage(store, undefined);
     upsertPendingPromptSequence(store, {
@@ -241,21 +239,16 @@ describe('runStop — deferred Prompt Enhancement popup (B-i)', () => {
     const debugSpy = vi.spyOn(logger, 'debug').mockImplementation(() => {});
     const prev = process.env['NEXPATH_MPS_TEST_UNGATE'];
     try {
-      // No env → the acceptance-oracle flag is missing (the committed production default is false).
+      // Un-gated: the acceptance-oracle flag is recorded as passed IN CODE (owner sign-off 2026-08-17), so
+      // it is NEVER the blocker — with or without any env var. The `NEXPATH_MPS_TEST_UNGATE` dependency is
+      // removed; a real user needs no command. (This no-key test env still misses the PROVIDER flag, so the
+      // gate stays fail-closed HERE; on a real machine with the key present, every flag is satisfied and the
+      // gate is allowed:true — the popup renders with no command.)
       delete process.env['NEXPATH_MPS_TEST_UNGATE'];
       await runStop(makePayload({ stop_hook_active: true }), store, undefined, undefined, undefined, notShown());
-      const closed = debugSpy.mock.calls.filter(([m]) => m === 'stop_mps_continuation_gate').pop();
-      expect((closed![1] as { missingGateCodes: readonly string[] }).missingGateCodes).toContain('focused_runtime_fixtures_pending');
-
-      // Dev/test override set → the acceptance-oracle flag is SATISFIED (removed from the missing list), so
-      // the sign-off is no longer the blocker. (This no-key test env still misses the provider flag; on a
-      // real machine with OPENAI_API_KEY set, all flags are present and the gate is allowed:true.) The
-      // committed production default (no env) never ships this — it stays fail-closed.
-      debugSpy.mockClear();
-      process.env['NEXPATH_MPS_TEST_UNGATE'] = '1';
-      await runStop(makePayload({ stop_hook_active: true }), store, undefined, undefined, undefined, notShown());
-      const opened = debugSpy.mock.calls.filter(([m]) => m === 'stop_mps_continuation_gate').pop();
-      expect((opened![1] as { missingGateCodes: readonly string[] }).missingGateCodes).not.toContain('focused_runtime_fixtures_pending');
+      const gate = debugSpy.mock.calls.filter(([m]) => m === 'stop_mps_continuation_gate').pop();
+      expect((gate![1] as { missingGateCodes: readonly string[] }).missingGateCodes)
+        .not.toContain('focused_runtime_fixtures_pending');
     } finally {
       if (prev === undefined) delete process.env['NEXPATH_MPS_TEST_UNGATE']; else process.env['NEXPATH_MPS_TEST_UNGATE'] = prev;
       debugSpy.mockRestore();
