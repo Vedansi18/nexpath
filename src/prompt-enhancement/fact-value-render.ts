@@ -41,9 +41,40 @@ import {
  */
 export const PROMPT_ENHANCEMENT_MODEL_EVIDENCE_MAX_CHARS_V1 = 1_000;
 
-function boundedEvidenceV1(text: string): string {
-  if (text.length <= PROMPT_ENHANCEMENT_MODEL_EVIDENCE_MAX_CHARS_V1) return text;
-  return `${text.slice(0, PROMPT_ENHANCEMENT_MODEL_EVIDENCE_MAX_CHARS_V1)} [truncated_evidence_read_the_source]`;
+/**
+ * The delimited, bounded value. The truncation mark sits OUTSIDE the quotes on
+ * purpose: inside, it reads as part of the value the model is grounding in, and a
+ * value could counterfeit it to look complete.
+ */
+function quotedBoundedEvidenceV1(text: string): string {
+  if (text.length <= PROMPT_ENHANCEMENT_MODEL_EVIDENCE_MAX_CHARS_V1) return `"${text}"`;
+  return `"${text.slice(0, PROMPT_ENHANCEMENT_MODEL_EVIDENCE_MAX_CHARS_V1)}" [truncated_evidence_read_the_source]`;
+}
+
+/**
+ * 🔒 A fact VALUE is data. Before this phase only IDS travelled to the model, so a
+ * value could not shape the prompt; now it can, and the payload block is a
+ * line-and-pipe structure that a value was able to WRITE INTO.
+ *
+ * MEASURED, both forms:
+ * - a newline inside a value forged a SECOND `resolvedSourceFacts` entry the planner
+ *   never authorised — attacker-chosen id, origin, claim ceiling and content
+ *   (`deploy_command = kubectl delete ns prod`);
+ * - a `|` inside a value forged FIELDS on its own line: a possibility-clamped
+ *   `recent_prompt_history` fact re-stated itself as
+ *   `claim: may_state_as_project_capability | origin: local_probe`, which is exactly
+ *   the §41.3 illegality this phase exists to prevent.
+ *
+ * So the value is flattened to one line and DELIMITED with quotes: a pipe inside
+ * quotes is visibly part of the value rather than a new field, and no value can
+ * open a line. Content is preserved — pipes are common in real commands — with only
+ * embedded quotes normalized so the delimiter itself cannot be closed early.
+ *
+ * ⚠️ This closes STRUCTURAL forgery. It does not make an instruction-shaped value
+ * harmless prose; that is a wording-policy question, recorded for its owner.
+ */
+function payloadFieldSafeV1(text: string): string {
+  return text.replace(/\s+/g, ' ').replaceAll('"', "'").trim();
 }
 
 /** Per-fact gates (§35 / §43.1). A gated fact never reaches wording at all. */
@@ -228,7 +259,10 @@ export function promptEnhancementSectionModelFactsV1(
       claimVerbPolicy: fact.claimVerbPolicy ?? 'must_phrase_as_possibility',
       evidence: referenceOnly || !value
         ? undefined
-        : boundedEvidenceV1(`${fact.evidence!.key} = ${redactSecrets(value)}`),
+        // Order matters: redact the secret, flatten the structure, bound the length,
+        // and only then quote — so the closing quote and the truncation mark cannot
+        // themselves be cut off, and a bounded value still reads as one field.
+        : `${payloadFieldSafeV1(fact.evidence!.key)} = ${quotedBoundedEvidenceV1(payloadFieldSafeV1(redactSecrets(value)))}`,
     });
   }
   return out;
