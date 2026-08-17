@@ -97,7 +97,8 @@ export async function importHistoricalPrompts(store: Store, projectRoot: string)
   // ascend with true chronology: recency reads (`ORDER BY id DESC`) and the FIFO cap's
   // eviction both follow rowid, so inserting newest-first would make "most recent"
   // mean the oldest session and would evict the newest history first. `collected`
-  // itself stays newest-first for the language/bootstrap consumers below.
+  // itself stays newest-first for the LANGUAGE window below, which wants the most
+  // recent prompts; the session bootstrap uses the chronological order instead.
   const chronological = [...collected].sort(
     (a, b) => (a.capturedAt ?? a.fileMtime) - (b.capturedAt ?? b.fileMtime),
   );
@@ -143,7 +144,15 @@ export async function importHistoricalPrompts(store: Store, projectRoot: string)
   // stage stamp is null — the same no-fake-stamp principle the param events above
   // follow: these prompts were never classified, and a uniform fabricated stage
   // would bias stage reads. The classifier fills real stages as live prompts arrive.
-  const promptRecords: PromptRecord[] = collected.slice(0, MAX_HISTORY).map((entry, i) => ({
+  // OLDEST-FIRST, like the live path. `SessionStateManager` maintains this array
+  // by `push` + `shift`, so index 0 is the oldest and the tail is the newest —
+  // and every consumer reads it that way: the mistake detectors take "recent" as
+  // `slice(-n)`, and the classifier window appends the current prompt at the end.
+  // Seeding it newest-first would hand imported projects their OLDEST prompts
+  // wherever the code asks for the newest, and would drain the newest history
+  // first as `shift` makes room — the same recency inversion the store ordering
+  // above exists to kill. Take the newest MAX_HISTORY, then keep them ascending.
+  const promptRecords: PromptRecord[] = chronological.slice(-MAX_HISTORY).map((entry, i) => ({
     index:           i,
     text:            entry.text,
     capturedAt:      entry.capturedAt ?? Date.now(),

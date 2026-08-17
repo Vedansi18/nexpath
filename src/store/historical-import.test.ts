@@ -456,12 +456,20 @@ describe('importHistoricalPrompts', () => {
     await importHistoricalPrompts(store, PROJECT_ROOT);
 
     const mgr = SessionStateManager.load(store, PROJECT_ROOT);
-    // promptHistory is built from collected.slice(0, MAX_HISTORY)
-    // collected[0] = new prompt a (from newest file), collected[2] = old prompt a
-    expect(mgr.current.promptHistory[0].text).toBe('new prompt a');
-    expect(mgr.current.promptHistory[1].text).toBe('new prompt b');
-    expect(mgr.current.promptHistory[2].text).toBe('old prompt a');
-    expect(mgr.current.promptHistory[3].text).toBe('old prompt b');
+    // OLDEST-FIRST, matching the live path: SessionStateManager maintains this
+    // array with push + shift, so index 0 is the oldest and the tail is newest.
+    // (This assertion previously pinned the reverse, which handed imported
+    // projects their oldest prompts wherever the code asks for the newest.)
+    expect(mgr.current.promptHistory.map((p) => p.text)).toEqual([
+      'old prompt a', 'old prompt b', 'new prompt a', 'new prompt b',
+    ]);
+    // The reason the order matters, pinned so it cannot regress quietly: every
+    // consumer reads recency off the TAIL — the mistake detectors take
+    // `slice(-n)`, and the classifier window appends the current prompt at the end.
+    const recentTwo = mgr.current.promptHistory.slice(-2).map((p) => p.text);
+    expect(recentTwo).toEqual(['new prompt a', 'new prompt b']);
+    // Index ascends with time, as it does for live records.
+    expect(mgr.current.promptHistory.map((p) => p.index)).toEqual([0, 1, 2, 3]);
   });
 });
 
