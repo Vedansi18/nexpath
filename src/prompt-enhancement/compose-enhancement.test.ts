@@ -1455,6 +1455,35 @@ describe('de-nagging: the reproduction section names what was supplied instead o
     return body.sections.find((section) => section.sectionKind === 'reproduction_or_evidence')?.bodyText ?? '';
   };
 
+  it('the ASK survives supplied evidence when the SLOT still obliges it', () => {
+    // The rule that decides which rows de-nag, pinned. `issue_debug.reproduction_discovery`
+    // is the intent whose whole purpose is finding a repro, and F1 puts
+    // `reproduction_or_evidence_request` on its section — so the ask stays even with
+    // evidence in hand, while intents without the obligation carry instead. Measured on
+    // the labelled set at GR-3: ids 6 and 35 carried, id 1 (this intent) kept asking.
+    const planning = planningResult({
+      route: {
+        promptText: 'help me work out how to reproduce the intermittent checkout failure',
+        currentStage: 'implementation' as const,
+        firedKey: 'absence:debugging_observation_gap@implementation',
+        classifierPrimaryIntent: 'issue_debug.reproduction_discovery',
+        classifierIntentConfidence: 0.9,
+        classifierCapabilityCandidates: [],
+        classifierDebugEvidencePresent: ['error_text', 'repro_steps'],
+      },
+    });
+    const section = planning.sectionPlans.find((plan) => plan.sectionKind === 'reproduction_or_evidence');
+    expect(section?.slotObligations).toContain('reproduction_or_evidence_request');
+    const body = composePromptEnhancementBody({
+      enhancementId: 'denag-obliged',
+      originalPromptText: 'help me work out how to reproduce the intermittent checkout failure',
+      sectionPlanningResult: planning,
+    }).currentBody;
+    const text = body.sections.find((composed) => composed.sectionKind === 'reproduction_or_evidence')?.bodyText ?? '';
+    expect(text).toContain('Capture the failing');
+    expect(text).not.toContain('provided in the request above');
+  });
+
   it('carry: the line names the forms the developer ACTUALLY sent', () => {
     expect(reproText(['reproduction_steps', 'logs', 'failing_test_details']))
       .toContain('Reproduction steps, logs and failing test details are provided in the request above.');
