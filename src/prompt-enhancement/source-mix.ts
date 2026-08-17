@@ -60,7 +60,14 @@ export type PromptEnhancementSourceMixSelectionRole =
 
 export interface PromptEnhancementSourceMixFact {
   fact: PromptEnhancementGuidanceFact;
-  lane: PromptEnhancementSourceMixLane;
+  /**
+   * ⛔ No `lane` field here. It used to carry a SECOND, two-value lane beside
+   * the fact's own three-value `sourceLane` — the very collapse A5 undoes,
+   * re-exposed on the result. The done-when is that no stand-in for lane
+   * semantics remains, so consumers read `entry.fact.sourceLane`. The two-bucket
+   * split still exists inside this module as a SELECTION grouping, derived from
+   * the fact's lane rather than defining one.
+   */
   selectionRole: PromptEnhancementSourceMixSelectionRole;
   selectionReasonCode: string;
 }
@@ -334,7 +341,6 @@ export function applyPromptEnhancementSourceMixV1(
     for (const fact of sourceB) {
       classified.push({
         fact,
-        lane: 'source_b',
         selectionRole: 'suppressed_by_payload_cap',
         selectionReasonCode: 'no_source_a_survivor_no_source_b_filler',
       });
@@ -359,7 +365,6 @@ export function applyPromptEnhancementSourceMixV1(
   const [requiredSurvivor, ...remainingSourceA] = sourceA;
   classified.push({
     fact: requiredSurvivor,
-    lane: 'source_a',
     selectionRole: 'selected_required',
     selectionReasonCode: 'required_source_signal_survivor',
   });
@@ -374,7 +379,6 @@ export function applyPromptEnhancementSourceMixV1(
     if (underLevelCap && underTotalCap) {
       classified.push({
         fact,
-        lane: 'source_a',
         selectionRole: 'selected_supporting',
         selectionReasonCode: 'supporting_source_a_within_cap',
       });
@@ -383,14 +387,12 @@ export function applyPromptEnhancementSourceMixV1(
     } else if (isSourceCritical(fact)) {
       classified.push({
         fact,
-        lane: 'source_a',
         selectionRole: 'selected_source_label_only',
         selectionReasonCode: 'source_critical_over_cap_kept_visible',
       });
     } else {
       classified.push({
         fact,
-        lane: 'source_a',
         selectionRole: 'deferred_to_handoff',
         selectionReasonCode: 'supporting_source_a_over_cap',
       });
@@ -406,7 +408,6 @@ export function applyPromptEnhancementSourceMixV1(
     if (fact.factRole === 'safety_confirmation_support') {
       classified.push({
         fact,
-        lane: 'source_b',
         selectionRole: 'selected_source_label_only',
         selectionReasonCode: 'negative_capability_safety_not_grounding',
       });
@@ -415,7 +416,6 @@ export function applyPromptEnhancementSourceMixV1(
     if (fact.sourceOriginScope === 'current_prompt' || fact.sourceOriginScope === 'recent_prompt_history') {
       classified.push({
         fact,
-        lane: 'source_b',
         selectionRole: 'selected_source_label_only',
         selectionReasonCode: 'prompt_derived_not_independent_grounding',
       });
@@ -426,7 +426,6 @@ export function applyPromptEnhancementSourceMixV1(
     if (fact.sourceEvidenceState === 'stale_or_unknown') {
       classified.push({
         fact,
-        lane: 'source_b',
         selectionRole: 'selected_source_label_only',
         selectionReasonCode: 'stale_or_unknown_not_grounding',
       });
@@ -437,7 +436,6 @@ export function applyPromptEnhancementSourceMixV1(
     if (underLevelCap && underTotalCap) {
       classified.push({
         fact,
-        lane: 'source_b',
         selectionRole: 'selected_supporting',
         selectionReasonCode: 'source_b_grounding_within_cap',
       });
@@ -446,7 +444,6 @@ export function applyPromptEnhancementSourceMixV1(
     } else {
       classified.push({
         fact,
-        lane: 'source_b',
         selectionRole: 'suppressed_by_payload_cap',
         selectionReasonCode: 'source_b_over_payload_cap',
       });

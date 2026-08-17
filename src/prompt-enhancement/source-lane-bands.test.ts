@@ -90,6 +90,22 @@ describe('A5 sourceLane — Source A, Source B and Source NEUTRAL are not collap
     expect(entry?.fact.sourceLane).toBe('source_neutral_original');
   });
 
+  it('there is ONE lane representation — no collapsed second copy on the result', () => {
+    // The mix result used to expose its own two-value `lane` beside the fact's
+    // three-value one, so a consumer reading the entry saw Source Neutral
+    // collapsed into grounding again. Consumers read the fact.
+    const mix = applyPromptEnhancementSourceMixV1([
+      fact({ factId: 'a' }),
+      fact({ factId: 'n', sourceType: 'prompt_derived_fact' }),
+    ], 'default');
+    for (const entry of mix.classifiedFacts) {
+      expect(entry).not.toHaveProperty('lane');
+      expect(entry.fact.sourceLane).toBeDefined();
+    }
+    const neutral = mix.classifiedFacts.find((entry) => entry.fact.factId === 'n');
+    expect(neutral?.fact.sourceLane).toBe('source_neutral_original');
+  });
+
   it('the lane lands ON THE FACT through the mixer, not only as a local', () => {
     const mix = applyPromptEnhancementSourceMixV1([fact(), fact({ factId: 'pe-fact-1', sourceType: 'hard_fact' })], 'default');
     for (const entry of mix.classifiedFacts) expect(entry.fact.sourceLane).toBeDefined();
