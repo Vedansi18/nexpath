@@ -497,6 +497,19 @@ const SECTION_REQUIRED_BY_CAPABILITY: Partial<Record<PromptEnhancementCapability
   'capability.source_signal_guidance': 'source_signal_guidance',
 };
 
+/**
+ * The id a section may CITE for a guidance fact. One builder, because it is used
+ * in two places that must agree exactly: the planner's `structuredContentPartRefs`
+ * (what a draft is allowed to cite) and the composer prompt's `resolvedSourceFacts`
+ * (what the model is shown beside the evidence). They disagreed once — the payload
+ * printed the bare `factId` — and a model citing the id it had been shown had its
+ * whole reply refused as `source_fact_id_not_in_section`, collapsing the key path
+ * to the deterministic body this phase exists to replace.
+ */
+export function promptEnhancementGuidanceFactRefIdV1(factId: string): string {
+  return `guidance_fact:${factId}`;
+}
+
 export function planPromptEnhancementSections(
   input: PromptEnhancementSectionPlanningInput,
 ): PromptEnhancementSectionPlanningResult {
@@ -639,7 +652,7 @@ function buildSectionPlan(input: {
     // label wording for it is content, owned elsewhere. Codes only, no text.
     structuredContentPartRefs: [
       ...(matchingFacts.length > 0
-        ? matchingFacts.map((fact) => `guidance_fact:${fact.factId}`)
+        ? matchingFacts.map((fact) => promptEnhancementGuidanceFactRefIdV1(fact.factId))
         : [`section_kind:${input.sectionKind}`]),
       ...(input.route.ladderResolution.state === 'under_evidenced'
         ? ['gate_reason:under_evidenced_high_risk_exception']

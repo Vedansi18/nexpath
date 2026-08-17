@@ -49,6 +49,16 @@ function fact(overrides: Partial<PromptEnhancementGuidanceFact> = {}): PromptEnh
   };
 }
 
+/**
+ * The `resolvedSourceFacts` ENTRY for one fact — the only place an evidence claim
+ * can honestly be read. Asserting on the whole prompt is self-satisfying: the id
+ * also appears in `allowedSourceFactIds`, and the word WITHHELD appears in the
+ * system rules, so an omitted fact would still pass a whole-prompt check.
+ */
+function evidenceEntry(prompt: string, factId: string): string | undefined {
+  return prompt.split('\n').find((line) => line.includes(`- guidance_fact:${factId} |`));
+}
+
 /** Captures the user prompt the model would receive, without any network. */
 async function capturedModelPrompt(facts: readonly PromptEnhancementGuidanceFact[]): Promise<string> {
   let captured = '';
@@ -144,7 +154,7 @@ describe('GR-2 — the §32.3 acceptance example, corrected by §41.3', () => {
       evidence: { key: 'api_token', value: 'sk-live-must-not-travel' },
     })]);
     expect(prompt).not.toContain('sk-live-must-not-travel');
-    expect(prompt).toContain('WITHHELD');
+    expect(evidenceEntry(prompt, 'f-secret')).toContain('evidence: WITHHELD');
   });
 
   it('ONE change for ALL fact types — never hard_fact alone (step 4)', async () => {
@@ -184,6 +194,27 @@ describe('GR-2 — the §32.3 acceptance example, corrected by §41.3', () => {
     expect(strong).toContain('confidence: high');
     const weak = await capturedModelPrompt([fact({ confidenceBand: undefined, sourceEvidenceState: 'conflicting' })]);
     expect(weak).toContain('confidence: low');
+  });
+
+  it.each([
+    ['privacyClass', { privacyClass: 'do_not_render' }],
+    ['sanitizationState', { sanitizationState: 'unsafe_to_render' }],
+    ['claimVerbPolicy', { claimVerbPolicy: 'do_not_render' }],
+    ['priority', { priority: 'suppressed' }],
+  ] as const)('a fact gated by %s is WITHHELD to the model, never silently omitted', async (_gate, overrides) => {
+    // The planner's citable list keys on renderPolicy ALONE, so each of these facts
+    // still reaches the model as an allowed id. Omitted, the model could cite a fact
+    // it has never seen and write a sentence that wears the citation without being
+    // sourced by it — invention with a footnote. Withholding says so plainly.
+    const prompt = await capturedModelPrompt([fact({
+      factId: 'f-gated',
+      evidence: { key: 'internal', value: 'must-not-travel-value' },
+      ...overrides,
+    })]);
+    const entry = evidenceEntry(prompt, 'f-gated');
+    expect(entry, 'the gated fact was omitted from resolvedSourceFacts entirely').toBeDefined();
+    expect(entry).toContain('evidence: WITHHELD');
+    expect(prompt).not.toContain('must-not-travel-value');
   });
 
   it('the citation contract is kept, not rebuilt (step 3)', async () => {
@@ -395,5 +426,80 @@ describe('GR-2 — the §32.3 gate: the grounded draft ships, the invented one c
     const policed = planning.sectionPlans.filter((plan) => plan.slotObligations.includes('no_invention_state'));
     expect(policed.length).toBeGreaterThan(0);
     expect(policed.length).toBeLessThan(planning.sectionPlans.length);
+  });
+});
+
+
+// ── The two surfaces must agree on ONE id ────────────────────────────────────
+
+describe('GR-2 — the id shown beside the evidence is the id the model may cite', () => {
+  // §32.3's payload reads `id: guidance_fact:fact-debug-repro`. The two surfaces are
+  // written by different code paths — the planner builds the allowed ids, GR-2's block
+  // prints the evidence — so nothing but a fixture keeps them in the same vocabulary.
+
+  const factsFor = () => [fact({ factId: 'f-runner', targetSectionKind: 'reproduction_or_evidence' })];
+
+  const planFor = () => planPromptEnhancementSections({
+    routeResult: routePromptEnhancement({
+      routeDecisionId: 'idmatch',
+      promptText: 'fix the null pointer error in checkout',
+      currentStage: 'implementation',
+      prevStage: 'task_breakdown',
+      triggerKind: 'absence',
+      firedKey: 'absence:debugging_observation_gap@implementation',
+      classifierState: 'fire_recommended',
+      degradedNoActionState: 'none',
+      generatedOriginState: 'ordinary_user_prompt',
+      classifierPrimaryIntent: 'issue_debug.runtime_error_exception',
+      classifierIntentConfidence: 0.9,
+      classifierCapabilityCandidates: [],
+      classifierDebugEvidencePresent: [],
+    }),
+    sourceRefs: [sourceA],
+    guidanceFacts: factsFor(),
+  });
+
+  /** The id GR-2's block prints beside the evidence, read out of the real prompt. */
+  const shownIdFromPrompt = (prompt: string): string => {
+    const line = prompt.split('\n').find((candidate) => candidate.includes('| kind:')) ?? '';
+    return line.replace('-', '').split('|')[0]!.trim();
+  };
+
+  it('the shown id is one of that section’s allowedSourceFactIds', async () => {
+    const prompt = await capturedModelPrompt(factsFor());
+    const shown = shownIdFromPrompt(prompt);
+    expect(shown).toBe('guidance_fact:f-runner');
+    expect(prompt).toContain(`allowedSourceFactIds: ${JSON.stringify(['guidance_fact:f-runner'])}`);
+  });
+
+  it('a draft citing the id it was SHOWN survives — the loop closes', async () => {
+    // The failure this pins is not hypothetical: with the bare id in the payload,
+    // a model doing exactly as instructed had its whole reply refused with
+    // source_fact_id_not_in_section, and the key path fell back to a one-section
+    // deterministic body — the very body this phase exists to replace.
+    const prompt = await capturedModelPrompt(factsFor());
+    const shown = shownIdFromPrompt(prompt);
+    const planning = planFor();
+    const section = planning.sectionPlans.find((plan) => plan.sectionKind === 'reproduction_or_evidence')!;
+    const result = composePromptEnhancementBody({
+      enhancementId: 'idmatch',
+      originalPromptText: 'fix the null pointer error in checkout',
+      sectionPlanningResult: planning,
+      composerRuntimeState: 'accepted_structured_output',
+      structuredComposerOutput: {
+        outputId: 'o1',
+        sectionDrafts: [{
+          sectionId: section.sectionId,
+          bodyText: 'Note the login state and the exact URL that triggers the error before changing code.',
+          sourceFactIds: [shown],
+        }],
+        composerClaims: [`claim:${shown}`],
+        detectedLanguageSelfReport: 'en',
+      },
+    });
+    expect(result.currentBody.composerMode).toBe('baseline_llm_structured_wording');
+    expect(result.diagnostics.map((diagnostic) => diagnostic.reasonCode))
+      .not.toContain('deterministic_fallback:validation_failed:source_fact_id_not_in_section');
+    expect(result.currentBody.sections.some((composed) => composed.sectionKind === 'reproduction_or_evidence')).toBe(true);
   });
 });

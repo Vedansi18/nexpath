@@ -1,6 +1,9 @@
 import { redactSecrets } from '../store/redact.js';
 import { promptEnhancementConfidenceBandForV1 } from './source-mix.js';
-import type { PromptEnhancementGuidanceFact } from './templates/section-plan.js';
+import {
+  promptEnhancementGuidanceFactRefIdV1,
+  type PromptEnhancementGuidanceFact,
+} from './templates/section-plan.js';
 
 /**
  * GR-1 (dev-plan §13.2 / §30.3 step 3) — the DETERMINISTIC FACT-RENDERING PATH,
@@ -178,11 +181,20 @@ export function promptEnhancementSectionModelFactsV1(
   }[] = [];
   for (const fact of facts) {
     if (fact.targetSectionKind !== sectionKind) continue;
-    if (!isRenderableValueFactV1(fact)) continue;
-    const referenceOnly = isReferenceOnlyV1(fact);
+    // A gated fact is WITHHELD here, never OMITTED. The planner's citable list keys
+    // on `renderPolicy` alone, so a fact gated by privacy, sanitization, claim policy
+    // or priority still reaches the model as an ALLOWED id — and with no entry beside
+    // it, the model could cite a fact it has never seen and write a sentence that
+    // wears the citation without being sourced by it. Withholding says plainly that
+    // the content exists and may not be stated; no gated value travels either way.
+    const referenceOnly = !isRenderableValueFactV1(fact) || isReferenceOnlyV1(fact);
     const value = fact.evidence?.value.trim();
     out.push({
-      factId: fact.factId,
+      // §32.3's payload reads `id: guidance_fact:fact-debug-repro` — the CITABLE
+      // id, not the bare one. Showing a different string beside the evidence than
+      // the one the citation contract accepts is an invitation to cite the wrong
+      // one, and that costs the entire reply.
+      factId: promptEnhancementGuidanceFactRefIdV1(fact.factId),
       // §32.3's payload names the fact's PURPOSE here (`debug_evidence`,
       // `project_grounding`) — which is what changes how a sentence should be
       // worded, `safety_or_confirmation` most of all. Provenance is not lost: the
