@@ -86,6 +86,21 @@ describe('F3 fatigueKey — the L4980 gate: what the key must NEVER be', () => {
     expect(key).not.toContain('Users');
   });
 
+  it.each([
+    ['a prompt-derived source type', { sourceType: 'prompt_derived_fact' as const }],
+    ['a current-prompt origin scope', { sourceOriginScope: 'current_prompt' as const }],
+  ])('FAILS on raw prompt text structurally: %s is fingerprinted, never literal', (_label, overrides) => {
+    // No producer emits these today, so this guards the prohibition rather than
+    // a live path: a future prompt-derived producer must not be able to carry
+    // prompt content into a key that is stored and compared across sessions.
+    const key = keyFor(fact({
+      ...overrides,
+      sourceIds: ['prompt:the-user-typed-this-literal-phrase'],
+    }), 'project-alpha') ?? '';
+    expect(key).not.toContain('the-user-typed-this-literal-phrase');
+    expect(key).toContain('fp_');
+  });
+
   it('a SENSITIVE fact contributes a redacted fingerprint, not its literal source id', () => {
     const sensitive = fact({
       sourceIds: ['absence:secret_in_prompt@implementation'],
