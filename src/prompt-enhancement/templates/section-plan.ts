@@ -308,6 +308,16 @@ export interface PromptEnhancementSectionPlanningResult {
   /** Observed evidence forms, carried so the repro section can name what was supplied. */
   debugEvidenceObserved: readonly string[];
   renderedFactIds: readonly string[];
+  /**
+   * GR-1: the renderable facts THEMSELVES, not only their ids.
+   *
+   * ⚠️ The Phase-4 revert lesson: widening the projection without the
+   * resolved payload collapsed to one constant line. The composer cannot
+   * STATE a fact it can only name — ids let it reference, values let it
+   * render. Group A resolved the content at the boundary; this carries it
+   * the last hop.
+   */
+  renderedFacts: readonly PromptEnhancementGuidanceFact[];
   metadataOnlyFactIds: readonly string[];
   suppressedFactIds: readonly string[];
   deferredFactIds: readonly string[];
@@ -520,6 +530,7 @@ export function planPromptEnhancementSections(
       promptReviewProcessingPolicy: route.contractDecision.promptReviewProcessingPolicy,
       debugEvidenceObserved: route.contractDecision.debugEvidenceObserved,
       renderedFactIds: [],
+      renderedFacts: [],
       metadataOnlyFactIds: facts.filter(isMetadataOnlyFact).map((fact) => fact.factId),
       suppressedFactIds: facts.filter(isSuppressedFact).map((fact) => fact.factId),
       deferredFactIds: facts.filter(isDeferredFact).map((fact) => fact.factId),
@@ -566,6 +577,7 @@ export function planPromptEnhancementSections(
     promptReviewProcessingPolicy: route.contractDecision.promptReviewProcessingPolicy,
     debugEvidenceObserved: route.contractDecision.debugEvidenceObserved,
     renderedFactIds: facts.filter(isRenderableFact).map((fact) => fact.factId),
+    renderedFacts: facts.filter(isRenderableFact),
     metadataOnlyFactIds: facts.filter(isMetadataOnlyFact).map((fact) => fact.factId),
     suppressedFactIds: facts.filter(isSuppressedFact).map((fact) => fact.factId),
     deferredFactIds: facts.filter(isDeferredFact).map((fact) => fact.factId),

@@ -23,6 +23,7 @@ import {
   type PromptEnhancementValidationStatus,
 } from './contracts.js';
 import { buildPromptEnhancementCostVisibilityMetadataV1 } from './cost-observability.js';
+import { promptEnhancementFactValueLinesV1 } from './fact-value-render.js';
 import {
   buildPromptEnhancementOriginalTextRefV1,
   buildPromptEnhancementPromptPointRefsV1,
@@ -793,6 +794,21 @@ function renderSection(input: {
     sectionPlan.slotObligations,
     input.sectionPlanningResult.debugEvidenceObserved,
   );
+  // GR-1 (§13.2): STATE the facts this section holds instead of instructing about
+  // them. Only facts group A actually RESOLVED produce a line, so a section with
+  // no value keeps its existing instruction untouched — the Phase-4 collapse
+  // happened precisely because a projection was widened without resolution.
+  const factValueLines = promptEnhancementFactValueLinesV1(
+    sectionPlan.sectionKind,
+    input.sectionPlanningResult.renderedFacts,
+  );
+  if (factValueLines.length > 0) {
+    // The done-when: the body contains the typed VALUE, not the standing
+    // instruction. Where a fact speaks for the section, it replaces the generic
+    // line rather than trailing it.
+    lines.length = 0;
+    lines.push(...factValueLines);
+  }
   if (action === 'more_thorough') {
     lines.push(...moreThoroughLines(sectionPlan));
   }
