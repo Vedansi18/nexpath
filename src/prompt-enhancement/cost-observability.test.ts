@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { STAGE2_MAX_OUTPUT_TOKENS } from '../classifier/Stage2Trigger.js';
 import {
   buildPromptEnhancementCostVisibilityMetadataV1,
   buildPromptEnhancementCostRuntimeFlowEvidenceV1,
@@ -567,5 +568,24 @@ describe('Phase 12 cost, provider, latency, and observability contracts', () => 
       'runtime_surface_missing:enhancement_popup',
       'runtime_surface_missing:stop_or_extension_delivery',
     ]));
+  });
+});
+
+describe('PE-EM-1 stage-classifier row tracks the real call budget', () => {
+  // The row records the classifier call's cost profile, and its output cap is a
+  // SECOND literal for a value that already exists as a constant. That constant
+  // is not static: it was raised to 512 in this milestone precisely because the
+  // reply gained primary_intent / intent_confidence / capability_candidates /
+  // debug_evidence_present. Adding a reply field is an ordinary move here, so
+  // without this assertion the next one leaves the cost row quietly reporting a
+  // cap the call no longer uses — wrong input to an owner-gated cost worksheet,
+  // with every suite green.
+  it('the recorded maxOutputTokens IS the cap the call actually sends', () => {
+    const row = getPromptEnhancementCurrentSourceCostBaselineInventoryV1()
+      .find((r) => r.baselineCallId === 'current_stage_classifier');
+    expect(row).toBeDefined();
+    expect(row!.maxOutputTokens).toBe(STAGE2_MAX_OUTPUT_TOKENS);
+    expect(row!.sourceLayer).toBe('src/classifier/stage-classifier.ts');
+    expect(row!.fallbackState).toBe('deterministic_or_local_fallback');
   });
 });
