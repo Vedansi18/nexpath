@@ -1284,6 +1284,20 @@ export const PROMPT_ENHANCEMENT_SEQUENCE_ROLE_FAMILY_LABELS_V1: readonly PromptE
   PROMPT_ENHANCEMENT_SEQUENCE_ROLE_FAMILIES_V1.map((family) => family.label);
 
 /**
+ * The role-family label for one piece of task text, or null when nothing matches. This is the same
+ * families-table lookup the per-point splitter below runs, factored out and exported so the
+ * deterministic sequence repair can label its rebuilt items off the SAME table — one matcher, one
+ * vocabulary, so a family added or dropped moves both surfaces together.
+ */
+export function promptEnhancementSequenceRoleLabelForTextV1(
+  text: string,
+): PromptEnhancementSequenceRoleLabelV1 | null {
+  const normalized = text.toLowerCase();
+  const family = PROMPT_ENHANCEMENT_SEQUENCE_ROLE_FAMILIES_V1.find((candidate) => hasAny(normalized, candidate.keywords));
+  return family ? family.label : null;
+}
+
+/**
  * PROVISIONAL SUBSTITUTE for semantic decomposition. It counts CLAUSES, not units of work.
  *
  * What the number should mean is how many separate pieces of work a request contains, decided by
@@ -1312,9 +1326,8 @@ export function describePromptEnhancementSequencePlanV1(
     .filter(Boolean);
   const roleLabels: string[] = [];
   for (const point of points) {
-    const normalized = point.toLowerCase();
-    const family = PROMPT_ENHANCEMENT_SEQUENCE_ROLE_FAMILIES_V1.find((candidate) => hasAny(normalized, candidate.keywords));
-    if (family && !roleLabels.includes(family.label)) roleLabels.push(family.label);
+    const label = promptEnhancementSequenceRoleLabelForTextV1(point);
+    if (label && !roleLabels.includes(label)) roleLabels.push(label);
   }
   return { pointCount: Math.max(1, points.length), roleLabels };
 }

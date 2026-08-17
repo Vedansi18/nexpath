@@ -979,7 +979,10 @@ describe('sequence planner — repair, and its bound', () => {
   it('deterministic fallback (opt-in): rebuilds an unfixable plan into a valid minimal sequence', async () => {
     // badRole fails role_label_invalid on every attempt — the model never fixes it. With the fallback
     // ON, once the repair budget is spent the loop rebuilds a valid sequence from the plan's own tasks
-    // instead of losing it: every invented field discarded, each task not_complex.
+    // instead of losing it: every invented field discarded, each task not_complex. The role label is not
+    // dropped but DERIVED from the task's own slice (Phase 3a) — the model's invented 'make checkout
+    // faster' is discarded and replaced: item 0's whole-prompt slice matches 'fix' ("fix the failing…"),
+    // item 1's slice {10,30} ("…add a") matches 'build'.
     const { client, sent } = clientSequence([badRole]);
     const result = await runPromptEnhancementSequencePlannerV1(
       { ...call(), deterministicFallback: true }, client,
@@ -988,7 +991,7 @@ describe('sequence planner — repair, and its bound', () => {
     if (result.ok) {
       expect(result.output.items).toHaveLength(2);
       expect(result.output.items[0]?.itemKind).toBe('first_task');
-      expect(result.output.items.every((item) => item.roleLabel === null)).toBe(true);
+      expect(result.output.items.map((item) => item.roleLabel)).toEqual(['fix', 'build']);
       expect(result.output.items.every((item) => item.complexity === 'not_complex')).toBe(true);
       expect(result.output.summaryData?.remainingTaskCount).toBe(1);
     }

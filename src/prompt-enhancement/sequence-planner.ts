@@ -47,6 +47,7 @@ import type {
   PromptEnhancementPrimaryIntent,
   PromptEnhancementRouteConfidence,
 } from './routing-taxonomy.js';
+import { promptEnhancementSequenceRoleLabelForTextV1 } from './routing-taxonomy.js';
 import {
   promptEnhancementAuthorityModeForTextV1,
   promptEnhancementRiskKindsForTextV1,
@@ -570,8 +571,9 @@ function sliceTextFor(
  * Rather than reject, this rebuilds a VALID minimal sequence from the one thing the model reliably
  * produces: the task DECOMPOSITION — how many tasks, and roughly where each sits in the prompt. Every
  * field the model got wrong is DISCARDED and set to a spec-valid minimal value: each task `not_complex`
- * (which earns no confirmation — the one rule that would otherwise need a verdict guessed), no role
- * labels, a unique group id per task, and the single mandated recap when the count calls for one. It is
+ * (which earns no confirmation — the one rule that would otherwise need a verdict guessed), a role label
+ * derived from the task's own slice via the shared families matcher (null when the slice matches no
+ * family), a unique group id per task, and the single mandated recap when the count calls for one. It is
  * deterministic — no model call — so it cannot fail the way the model did.
  *
  * Returns null when there are fewer than two tasks (a single-prompt request — forcing a sequence would
@@ -599,23 +601,29 @@ function buildDeterministicSequenceRepairV1(
     .filter((item) => item.itemKind === 'first_task' || item.itemKind === 'task')
     .slice(0, PROMPT_ENHANCEMENT_SEQUENCE_MAX_ITEM_COUNT_V1 - 1);
   if (taskSources.length < 2) return null;
-  const items: PlannedItemDraftV1[] = taskSources.map((source, index) => ({
-    itemKind: index === 0 ? 'first_task' : 'task',
-    originalSliceRef: index === 0
+  const items: PlannedItemDraftV1[] = taskSources.map((source, index) => {
+    const originalSliceRef = index === 0
       ? { start: 0, end: originalLength }
-      : clamp(source.originalSliceRef),
-    sourcePointRanges: [],
-    roleLabel: null,
-    dependencyOrder: index,
-    complexity: 'not_complex',
-    complexityReason: null,
-    generatedWording: null,
-    actionRiskKinds: [],
-    authorityMode: null,
-    requiresConfirmationFloor: false,
-    decompositionGroupId: `repair-group-${index}`,
-    itemValidationGraph: null,
-  }));
+      : clamp(source.originalSliceRef);
+    return {
+      itemKind: index === 0 ? 'first_task' : 'task',
+      originalSliceRef,
+      sourcePointRanges: [],
+      // Phase 3a: label the rebuilt task off its OWN slice using the shared families matcher, so the
+      // first popup's Types line is populated even on this deterministic-fallback path (null when the
+      // slice matches no family). The wrap_up recap below stays null — a non-task recap carries none.
+      roleLabel: promptEnhancementSequenceRoleLabelForTextV1(sliceTextFor(originalSliceRef, localOriginalText) ?? ''),
+      dependencyOrder: index,
+      complexity: 'not_complex',
+      complexityReason: null,
+      generatedWording: null,
+      actionRiskKinds: [],
+      authorityMode: null,
+      requiresConfirmationFloor: false,
+      decompositionGroupId: `repair-group-${index}`,
+      itemValidationGraph: null,
+    };
+  });
   // Same count rule the store enforces: a recap is earned iff more than three items sit behind it. Its
   // dependencyOrder is its index (the last slot); it carries the all-null shape a non-task recap must.
   if (items.length > 3) {
