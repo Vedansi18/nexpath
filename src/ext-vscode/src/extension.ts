@@ -25,6 +25,7 @@ import { createSubmitClipboardDelivery, submitKeystroke, lastDarwinSubmitError, 
 import {
   isWindsurfSubmitAdvisoryEnabled,
   isCursorSubmitAdvisoryEnabled,
+  explainSubmitFlowGate,
   readPendingSubmitDecision,
   peekPendingSubmitDecision,
 } from './submit-advisory-runtime.js';
@@ -268,6 +269,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const submitSurface = { active: false };
   // RC16: one-time darwin auto-send permission hint (per activation).
   let darwinSubmitHintShown = false;
+  // RC19 (Windows tester, 2026-08-17): a disarmed submit flow used to log
+  // NOTHING — the ENABLED line was simply absent, so diagnosing meant
+  // guessing. Say WHY, once per distinct reason (the RC15 re-check ticks
+  // every 20 s; only a CHANGE is worth a line).
+  let lastGateReason: string | null = null;
+  const logGateOnce = (h: 'cursor' | 'windsurf', reason: string): void => {
+    if (reason === lastGateReason) return;
+    lastGateReason = reason;
+    log(`[nexpath] submit-time advisory NOT armed (${h}): ${reason}`);
+  };
 
   // 1b. CLI auto-installer (additive). The extension drives the nexpath CLI via
   //     IPC; if the user installed only this extension (no manual CLI), nothing
@@ -719,7 +730,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // = not armed yet (retry later); `true` = armed (now or previously).
     const armWindsurfSubmitFlow = (reason: string): boolean => {
       if (submitFlowArmed) return true;
-      if (!isWindsurfSubmitAdvisoryEnabled(process.env)) return false;
+      if (!isWindsurfSubmitAdvisoryEnabled(process.env)) {
+        logGateOnce('windsurf', explainSubmitFlowGate('windsurf', process.env).reason);
+        return false;
+      }
       submitFlowArmed = true;
       submitSurface.active = true;
       if (!submitDeliveredStore) submitDeliveredStore = createInjectedRecordStore();
@@ -845,7 +859,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // identical fresh-install ordering bug (flag file written after activation).
     const armCursorSubmitFlow = (reason: string): boolean => {
       if (submitFlowArmed) return true;
-      if (!isCursorSubmitAdvisoryEnabled(process.env)) return false;
+      if (!isCursorSubmitAdvisoryEnabled(process.env)) {
+        logGateOnce('cursor', explainSubmitFlowGate('cursor', process.env).reason);
+        return false;
+      }
       submitFlowArmed = true;
       submitSurface.active = true;
       submitPoller = buildSubmitAdvisory('cursor', true, croots, log, cursorInject) ?? undefined;

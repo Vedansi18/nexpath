@@ -102,7 +102,26 @@ function buildDeps(context: vscode.ExtensionContext, log: Logger): SetupFlowDeps
       try {
         const agent = process.env.NEXPATH_AGENT;
         if (agent !== 'cursor' && agent !== 'windsurf') return true;
-        if (!existsSync(join(home, 'submit-flow.json'))) return false;
+        // ── RC19 (Windows tester, 2026-08-17) ────────────────────────────────
+        // The flag is PER HOST (`{"cursor":bool,"windsurf":bool}`) and each
+        // host's hook writer sets only its OWN key — the extension drives setup
+        // with NEXPATH_ONLY_AGENT so it registers just the editor you are in.
+        // Verifying only that the FILE EXISTS therefore reported "registered"
+        // on a machine set up for the OTHER editor (or by a pre-flag CLI):
+        // setup never re-ran, this host's key stayed absent, the submit flow
+        // never armed, and prompts sailed through with no popup at all — the
+        // exact Windows/Devin failure. Verify what the runtime actually needs:
+        // THIS host's key must be `true`. Corrupt/absent ⇒ unregistered, so the
+        // re-run rewrites it (setSubmitFlowFlag merges, never clobbers the
+        // other host).
+        const flagFile = join(home, 'submit-flow.json');
+        if (!existsSync(flagFile)) return false;
+        try {
+          const flags = JSON.parse(readFileSync(flagFile, 'utf8')) as Record<string, unknown>;
+          if (flags[agent] !== true) return false;
+        } catch {
+          return false; // unparseable ⇒ the resolver would read OFF ⇒ re-register
+        }
         if (agent === 'cursor') {
           const p = join(homedir(), '.cursor', 'hooks.json');
           if (!existsSync(p)) return false;
@@ -181,10 +200,30 @@ export async function offerSetupIfNeeded(
   const state = deps.getState();
   // "Ready" is satisfied by the global CLI when present, else by the staged copy.
   const cliReady = hasGlobalCli || verified;
+  // ── RC19 (Windows/Devin tester, 2026-08-17) ──────────────────────────────
+  // This gate USED to skip the on-disk registration check that `runSetupFlow`
+  // performs, so there were TWO different definitions of "already set up" and
+  // the shallower one won: an editor whose hooks/flag were missing reported
+  // "already set up (v0.1.3)" and returned here, never reaching the
+  // registration-aware gate. Result on the tester's machine: the submit flow
+  // could never arm and nothing ever repaired it. One authority now — the same
+  // `verifyHookRegistration` both gates use.
+  const hookRegistered = deps.verifyHookRegistration?.() ?? true;
   const upToDate =
-    state.done && state.version === staged.version && staged.status === 'already-current' && cliReady;
+    state.done && state.version === staged.version && staged.status === 'already-current'
+    && cliReady && hookRegistered;
   if (upToDate) {
     log(`[nexpath] this editor already set up (v${staged.version})`);
+    return;
+  }
+  // Registration drift on an otherwise-complete install repairs itself WITHOUT
+  // asking: the user already consented to setup once; what went missing is our
+  // own on-disk registration (e.g. this editor's `submit-flow.json` key was
+  // never written because setup last ran from the OTHER editor). Runs at most
+  // once per activation — this function is invoked once, after activation.
+  if (state.done && !hookRegistered) {
+    log('[nexpath] this editor is set up but NOT fully registered (hook entry or submit-flow key missing) — re-running setup automatically');
+    await runSetupFlow(deps, { preferExistingCli: hasGlobalCli });
     return;
   }
 

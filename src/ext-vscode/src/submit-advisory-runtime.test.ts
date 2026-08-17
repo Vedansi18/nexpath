@@ -10,6 +10,8 @@ import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  isCursorSubmitAdvisoryEnabled,
+  explainSubmitFlowGate,
   defaultIsProcessAlive,
   isWindsurfSubmitAdvisoryEnabled,
   readPendingSubmitDecision,
@@ -254,7 +256,11 @@ describe('⭐ BACKWARD COMPAT — switch OFF must construct nothing (structural 
     // so setup completion can retry arming on fresh installs. Construction is
     // unreachable when the gate returns: pin the early-return FORM plus the
     // ordering, instead of the old indentation relationship.
-    expect(lines[gate]).toMatch(/if \(!isWindsurfSubmitAdvisoryEnabled\(process\.env\)\) return false;/);
+    // RC19 turned the one-line early return into a block (it now logs WHY the
+    // flow is disarmed before returning), so match the guard + a `return false`
+    // within the next few lines rather than a single literal line.
+    expect(lines[gate]).toMatch(/if \(!isWindsurfSubmitAdvisoryEnabled\(process\.env\)\)/);
+    expect(lines.slice(gate, gate + 4).join('\n')).toMatch(/return false;/);
     const at = lineOf('submitPoller = createSubmitHookPoller(');
     expect(at).toBeGreaterThan(gate);
   });
@@ -274,11 +280,13 @@ describe('⭐ BACKWARD COMPAT — switch OFF must construct nothing (structural 
     // that must be enablable independently. RC15 moved the read from the
     // buildSubmitAdvisory argument into the armer's early-return gate.
     const cursorArmer = src.slice(src.indexOf('const armCursorSubmitFlow'), src.indexOf("armCursorSubmitFlow('activation')"));
-    expect(cursorArmer).toMatch(/if \(!isCursorSubmitAdvisoryEnabled\(process\.env\)\) return false;/);
+    expect(cursorArmer).toMatch(/if \(!isCursorSubmitAdvisoryEnabled\(process\.env\)\)[\s\S]{0,200}?return false;/);
     expect(cursorArmer).not.toContain('isWindsurfSubmitAdvisoryEnabled');
+    expect(cursorArmer).not.toMatch(/explainSubmitFlowGate\('windsurf'/);
     const windsurfArmer = src.slice(src.indexOf('const armWindsurfSubmitFlow'), src.indexOf("armWindsurfSubmitFlow('activation')"));
-    expect(windsurfArmer).toMatch(/if \(!isWindsurfSubmitAdvisoryEnabled\(process\.env\)\) return false;/);
+    expect(windsurfArmer).toMatch(/if \(!isWindsurfSubmitAdvisoryEnabled\(process\.env\)\)[\s\S]{0,200}?return false;/);
     expect(windsurfArmer).not.toContain('isCursorSubmitAdvisoryEnabled');
+    expect(windsurfArmer).not.toMatch(/explainSubmitFlowGate\('cursor'/);
   });
 
   it('⭐ Cursor injects via cursorInject, NOT chatInputInject', () => {
@@ -475,5 +483,104 @@ describe('⭐ RC15 — fresh-install late arming (structural pin)', () => {
     expect(src).toMatch(/get suppressDsAdvisory\(\) \{ return submitSurface\.active; \}/);
     expect(src).toMatch(/get suppressWatcherAuto\(\) \{ return submitSurface\.active; \}/);
     expect(src).not.toContain('const submitAdvisorySurfaceActive');
+  });
+});
+
+/**
+ * RC19 (Windows/Devin tester, 2026-08-17): the flow did not arm and the log
+ * said NOTHING — the ENABLED line was simply absent. Root cause: the flag is
+ * PER HOST and each host's installer writes only its own key, but the setup
+ * verifier only checked that the FILE EXISTS, so a machine registered for the
+ * other editor reported "already set up" forever. These pin the diagnosis
+ * surface and the contract between explain() and the resolvers.
+ */
+describe('⭐ RC19 — explainSubmitFlowGate (never fail silently)', () => {
+  const raw = (o: unknown) => () => JSON.stringify(o);
+
+  it('⭐ names the per-host gap that broke Windows: file present, host key absent', () => {
+    const g = explainSubmitFlowGate('windsurf', {}, raw({ cursor: true }));
+    expect(g.enabled).toBe(false);
+    expect(g.reason).toContain('no "windsurf" key');
+    expect(g.reason).toContain('cursor');            // says what IS registered
+    expect(g.reason).toContain('Nexpath: Set up CLI'); // says how to fix it
+  });
+
+  it('host=true ⇒ enabled with a positive reason', () => {
+    const g = explainSubmitFlowGate('windsurf', {}, raw({ windsurf: true, cursor: true }));
+    expect(g).toEqual({ enabled: true, reason: 'flag file has windsurf=true' });
+  });
+
+  it('deliberate opt-out is distinguished from "never registered"', () => {
+    expect(explainSubmitFlowGate('cursor', {}, raw({ cursor: false })).reason).toContain('cursor=false');
+  });
+
+  it('missing / corrupt file each get their own actionable reason', () => {
+    expect(explainSubmitFlowGate('cursor', {}, () => null).reason).toContain('not found or unreadable');
+    expect(explainSubmitFlowGate('cursor', {}, () => '{oops').reason).toContain('not valid JSON');
+  });
+
+  it('env overrides win and are named as overrides', () => {
+    expect(explainSubmitFlowGate('windsurf', { NEXPATH_WINDSURF_PROMPTSUBMIT_ADVISORY: '1' }, () => null))
+      .toEqual({ enabled: true, reason: 'env override NEXPATH_WINDSURF_PROMPTSUBMIT_ADVISORY=1 (forced ON)' });
+    expect(explainSubmitFlowGate('cursor', { NEXPATH_CURSOR_PROMPTSUBMIT_ADVISORY: '0' }, raw({ cursor: true })).enabled)
+      .toBe(false);
+  });
+
+  it('⭐ CONTRACT: explain() can never disagree with the shipped resolvers', () => {
+    const cases: Array<[NodeJS.ProcessEnv, unknown]> = [
+      [{}, { windsurf: true }], [{}, { cursor: true }], [{}, {}], [{}, { windsurf: false }],
+      [{ NEXPATH_WINDSURF_PROMPTSUBMIT_ADVISORY: '1' }, {}],
+      [{ NEXPATH_WINDSURF_PROMPTSUBMIT_ADVISORY: '0' }, { windsurf: true }],
+    ];
+    for (const [env, flags] of cases) {
+      const readFlag = (h: 'cursor' | 'windsurf') => (flags as Record<string, unknown>)[h] === true;
+      expect(explainSubmitFlowGate('windsurf', env, raw(flags)).enabled)
+        .toBe(isWindsurfSubmitAdvisoryEnabled(env, readFlag));
+      expect(explainSubmitFlowGate('cursor', env, raw(flags)).enabled)
+        .toBe(isCursorSubmitAdvisoryEnabled(env, readFlag));
+    }
+  });
+});
+
+describe('⭐ RC19 — the setup verifier checks the PER-HOST flag (structural pin)', () => {
+  const glue = readFileSync(join(__dirname, 'installer', 'vscode-glue.ts'), 'utf8');
+
+  it('verifyHookRegistration parses the flag and requires THIS host to be true', () => {
+    const fn = glue.slice(glue.indexOf('verifyHookRegistration: () =>'), glue.indexOf('getState: () =>'));
+    expect(fn).toMatch(/JSON\.parse\(readFileSync\(flagFile/);
+    expect(fn).toMatch(/flags\[agent\] !== true\) return false;/);
+    // existence alone must NEVER again be the whole test
+    expect(fn).not.toMatch(/if \(!existsSync\(join\(home, 'submit-flow\.json'\)\)\) return false;\s*if \(agent/);
+  });
+
+  it('the armers log a reason whenever they refuse to arm', () => {
+    const ext = readFileSync(join(__dirname, 'extension.ts'), 'utf8');
+    expect(ext).toMatch(/logGateOnce\('windsurf', explainSubmitFlowGate\('windsurf'/);
+    expect(ext).toMatch(/logGateOnce\('cursor', explainSubmitFlowGate\('cursor'/);
+    expect(ext).toContain('submit-time advisory NOT armed');
+  });
+});
+
+/**
+ * RC19b: there were TWO "already set up" gates and only the deeper one verified
+ * on-disk registration — the shallow one (offerSetupIfNeeded) short-circuited
+ * first, so a machine missing this editor's hook/flag reported "already set up"
+ * forever and never self-healed (the Windows/Devin failure). One authority now.
+ */
+describe('⭐ RC19b — both setup gates verify registration (structural pin)', () => {
+  const glue = readFileSync(join(__dirname, 'installer', 'vscode-glue.ts'), 'utf8');
+  const offer = glue.slice(glue.indexOf('const hasGlobalCli = cliRuns'), glue.indexOf('export async function runSetupCommand'));
+
+  it('the offer-level gate includes hookRegistered', () => {
+    expect(offer).toMatch(/const hookRegistered = deps\.verifyHookRegistration\?\.\(\) \?\? true;/);
+    expect(offer).toMatch(/state\.done[\s\S]{0,200}?cliReady && hookRegistered;/);
+  });
+
+  it('registration drift on a done install re-runs setup automatically (no prompt)', () => {
+    expect(offer).toMatch(/if \(state\.done && !hookRegistered\)[\s\S]{0,400}?await runSetupFlow\(/);
+  });
+
+  it('a fresh (never-done) install still goes through the normal offer prompt', () => {
+    expect(offer).toMatch(/showInformationMessage\(message, 'Set up', 'Later'\)/);
   });
 });

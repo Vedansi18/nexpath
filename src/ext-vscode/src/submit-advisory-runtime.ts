@@ -67,6 +67,66 @@ export function readSubmitFlowFlag(host: 'cursor' | 'windsurf'): boolean {
   }
 }
 
+/** Absolute path of the shipped flag file (single source for logs + readers). */
+export function submitFlowFlagPath(): string {
+  return join(homedir(), '.nexpath', SUBMIT_FLOW_FLAG_FILENAME);
+}
+
+export interface SubmitFlowGateExplanation {
+  enabled: boolean;
+  /** Human-readable, PII-free reason — safe to log verbatim. */
+  reason: string;
+}
+
+/**
+ * WHY the submit flow is (not) enabled for `host` — RC19.
+ *
+ * ── THE FAILURE THIS EXISTS FOR (Windows tester, 2026-08-17) ────────────────
+ * When the flow did not arm, the extension logged NOTHING: the ENABLED line was
+ * simply absent, so a live diagnosis meant guessing between "flag file missing",
+ * "this host's key never written", "corrupt JSON" and "env override". Silence is
+ * not an acceptable failure mode for a switch that decides the entire product
+ * surface — every disarmed activation must say why, on every OS.
+ *
+ * Resolution order MIRRORS `is{Windsurf,Cursor}SubmitAdvisoryEnabled` exactly
+ * (env '1'/'0' override → flag file → OFF); a contract test pins that the two
+ * can never disagree.
+ */
+export function explainSubmitFlowGate(
+  host: 'cursor' | 'windsurf',
+  env: NodeJS.ProcessEnv = process.env,
+  readRaw: (path: string) => string | null = (p) => {
+    try { return readFileSync(p, 'utf8'); } catch { return null; }
+  },
+): SubmitFlowGateExplanation {
+  const envName = host === 'cursor' ? CURSOR_SUBMIT_ADVISORY_ENV : WINDSURF_SUBMIT_ADVISORY_ENV;
+  const v = env[envName];
+  if (v === '1') return { enabled: true, reason: `env override ${envName}=1 (forced ON)` };
+  if (v === '0') return { enabled: false, reason: `env override ${envName}=0 (developer revert to the old flow)` };
+
+  const path = submitFlowFlagPath();
+  const raw = readRaw(path);
+  if (raw === null) {
+    return { enabled: false, reason: `flag file not found or unreadable at ${path} — run "Nexpath: Set up CLI"` };
+  }
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return { enabled: false, reason: `flag file is not valid JSON (${path}) — run "Nexpath: Set up CLI"` };
+  }
+  if (parsed[host] === true) return { enabled: true, reason: `flag file has ${host}=true` };
+  // The per-host gap that produced the Windows failure: a machine registered for
+  // the OTHER editor has the file but not this host's key.
+  const keys = Object.keys(parsed).join(', ') || '(none)';
+  return {
+    enabled: false,
+    reason: parsed[host] === false
+      ? `flag file has ${host}=false (this editor is deliberately on the old flow)`
+      : `flag file has no "${host}" key — this editor was never registered (keys present: ${keys}); run "Nexpath: Set up CLI"`,
+  };
+}
+
 /** How the resolvers consult the flag file; injectable for hermetic tests. */
 export type ReadSubmitFlowFlagFn = (host: 'cursor' | 'windsurf') => boolean;
 
