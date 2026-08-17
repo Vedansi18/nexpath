@@ -118,6 +118,23 @@ describe('A5 recencyBand — stale and historical facts cannot be hidden', () =>
     expect(promptEnhancementRecencyBandForV1(memory)).not.toBe(promptEnhancementRecencyBandForV1(current));
   });
 
+  it.each([
+    ['stale memory', 'persistent_missing_signal_memory' as const],
+    ['old RIGHT/GOOD', 'right_good_pattern' as const],
+  ])('%s never SUPPRESSES current-prompt evidence (L4977 gate), in either arrival order', (_label, staleType) => {
+    // The lock names this exact failure as the recency fixture: stale memory or
+    // old RIGHT/GOOD suppressing current prompt evidence without reason-coded
+    // conflict handling. Both orders, because survivor choice is order-dependent
+    // on ties — so a one-order fixture would prove only half of it.
+    const stale = fact({ factId: 'stale', sourceType: staleType, sourceEvidenceState: 'strong' });
+    const current = fact({ factId: 'current', sourceType: 'absence_signal', sourceEvidenceState: 'strong' });
+    for (const facts of [[stale, current], [current, stale]]) {
+      const mix = applyPromptEnhancementSourceMixV1(facts, 'default');
+      const rendered = mix.renderedFacts.map((entry) => entry.factId);
+      expect(rendered, `current-prompt evidence suppressed by ${staleType}`).toContain('current');
+    }
+  });
+
   it('the band lands on the fact through the mixer, so nothing selected is unbanded', () => {
     const mix = applyPromptEnhancementSourceMixV1([fact({ sourceType: 'persistent_missing_signal_memory' })], 'default');
     for (const entry of mix.classifiedFacts) expect(entry.fact.recencyBand).toBeDefined();
