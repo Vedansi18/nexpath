@@ -336,7 +336,8 @@ export function renderPromptEnhancementMpsContinuationFrameV1(
     c && isPromptEnhancementScrollMarkerLineV1(line) ? `    ${c.gray}${line}${c.reset}` : `    ${line}`;
 
   // MPS-3 (Part B): sequence progress line near the top (owner decision: top placement). `done`/`total`
-  // come off the packaged continuation (done = currentItemIndex, total = itemCount); the copy is formatted
+  // come off the packaged continuation (done = currentItemIndex, total = itemCount - 1 deliverable items —
+  // item 0 was sent at intake); the copy is formatted
   // here, never carried on the model. CONTINUATION-only surface (the first popup shows the sequence plan).
   const progressLine = `Sequence ${model.progress.done} of ${model.progress.total}`;
   lines.push(c ? `${c.dim}${progressLine}${c.reset}` : progressLine);

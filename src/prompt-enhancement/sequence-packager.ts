@@ -39,7 +39,12 @@ export interface PromptEnhancementSequenceProgressV1 {
    * so the count of items already dealt with IS the index.
    */
   done: number;
-  /** The whole item count — the same total the first popup showed. */
+  /**
+   * The deliverable-item count: `itemCount - 1`. Item 0 (the first prompt) was already sent at
+   * intake, so it is NOT counted on the continuation surface — this is the same "Remaining" figure
+   * the first popup shows. With `done = currentItemIndex` (1-based over the continuation items), the
+   * last item reads "N of N" (owner decision 2026-08-17).
+   */
   total: number;
 }
 
@@ -397,11 +402,15 @@ export function packagePromptEnhancementSequenceContinuationV1(
       handoffMetadata,
       event,
       progress: {
-        // Never the summary's remaining count. That figure is fixed at items.length - 1 on the
-        // first popup; giving it a second, live meaning here is the same overload that produced the
-        // item-count defect — one name, two quantities, and the wrong one rendered.
+        // Continuation surface counts the DELIVERABLE items only — item 0 (the first prompt) was
+        // already sent at intake, so it is not counted here. `done` is the current item's 1-based
+        // position among those (currentItemIndex starts at 1 for the first continuation) and `total`
+        // is their count (itemCount - 1), so the last item reads "N of N" (owner decision 2026-08-17,
+        // superseding the earlier whole-count total). `total` is derived STRAIGHT from itemCount, NOT
+        // from the summary's remainingTaskCount — the fixed first-popup meaning of that variable must
+        // not be given a second, live meaning here (the overload behind the earlier item-count defect).
         done: input.currentItemIndex,
-        total: input.itemCount,
+        total: input.itemCount - 1,
       },
       // Off the same item the body came from, so the offsets and the text they index can never be
       // two different items'.

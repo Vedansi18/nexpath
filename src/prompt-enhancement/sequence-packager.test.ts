@@ -291,25 +291,29 @@ describe('sequence packager — the index convention', () => {
 });
 
 describe('sequence packager — the progress the contract never carried', () => {
-  it('reports items behind the current one, against the whole total', () => {
-    // "done" is the index itself: 0-based, and index 0 was already sent at intake, so the count of
-    // items already dealt with IS the index.
+  it('reports the item position against the deliverable-item count', () => {
+    // "done" is currentItemIndex: 0-based, and index 0 was already sent at intake, so the count of
+    // items already dealt with IS the index — which is also its 1-based position among the
+    // deliverable (continuation) items. "total" is the deliverable count (itemCount - 1), so the
+    // last item reads "N of N" (owner decision 2026-08-17).
     for (const [index, done] of [[1, 1], [2, 2], [3, 3]] as const) {
       const result = packagePromptEnhancementSequenceContinuationV1(input({ currentItemIndex: index }));
       expect(result.ok).toBe(true);
       if (!result.ok) return;
-      expect(result.packaged.progress).toEqual({ done, total: 4 });
+      expect(result.packaged.progress).toEqual({ done, total: 3 });
     }
   });
 
-  it('uses the whole item count, not the first popup\'s remaining figure', () => {
-    // The remaining count is fixed at items.length - 1 on the first popup. Giving it a second,
-    // live meaning here is the overload that produced the item-count defect.
+  it('counts the deliverable items only (itemCount - 1), not the whole item count', () => {
+    // Item 0 was already sent at intake, so the continuation surface excludes it: total is the
+    // deliverable count (itemCount - 1 = 3 here), matching the first popup's "Remaining" figure. It
+    // is derived straight from itemCount, never from the summary's fixed remaining variable — the
+    // overload that produced the earlier item-count defect (owner decision 2026-08-17).
     const result = packagePromptEnhancementSequenceContinuationV1(input());
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.packaged.progress.total).toBe(4);
-    expect(result.packaged.progress.total).not.toBe(3);
+    expect(result.packaged.progress.total).toBe(3);
+    expect(result.packaged.progress.total).not.toBe(4);
   });
 });
 
@@ -559,7 +563,7 @@ describe('sequence packager — the handoff metadata is about THIS body too', ()
     expect(summary?.bodyRevision).toBe(1);
     expect(ACCEPTED.handoffMetadata?.compactFirstPopupSequenceSummary?.currentBodyId).toBe('body-0');
     // What that surface actually shows is the progress pair.
-    expect(result.packaged.progress).toEqual({ done: 1, total: 4 });
+    expect(result.packaged.progress).toEqual({ done: 1, total: 3 });
   });
 
   it('sets all THREE copies of the body text, which sit in two objects', () => {
