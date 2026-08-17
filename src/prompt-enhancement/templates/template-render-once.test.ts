@@ -104,11 +104,58 @@ function routeFor(intent: PromptEnhancementPrimaryIntent): PromptEnhancementRout
   };
 }
 
+
+// `bodyText` is the section's lines joined as "- <line>", so a section whose
+// content line is EMPTY still yields "- " and sails past a trim().length check —
+// the bullet marker is not text. Blanking the content-map fallthrough was proven
+// to leave every fixture here green under that weaker check. This asserts the
+// section actually says something: at least one line with real words once the
+// bullet is stripped.
+function hasRealText(bodyText: string): boolean {
+  return bodyText
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^\s*-\s*/, '').trim())
+    .some((line) => /[A-Za-z]{3}/.test(line));
+}
+
 describe('render-once: every never-rendered section kind of the ten restoration templates composes', () => {
   it('the derived class matches the knowledge table: 59 kinds through the ten templates', () => {
     const total = new Set(RESTORATION_INTENTS.flatMap((intent) => deadKindsFor(intent)));
     expect(total.size).toBe(59);
   });
+
+  // The fixtures below force each dead kind in with a KIND-TARGETING fact. E1
+  // measured that 0 of the 59 have a real fact producer, so what actually ships
+  // is the opposite configuration: sections planned from the preset, text from
+  // the content-map fallthrough, no facts at all. These ten templates are about
+  // to be user-visible for the first time, so the shipping configuration is
+  // pinned here too — across every composer action, since the majority of the
+  // 59 live in optional / moreThoroughAdds / shorterMinimum sets and first
+  // appear only when a user picks an action.
+  for (const intent of RESTORATION_INTENTS) {
+    it(`${intent}: renders with NO facts, on every action, with nothing blank`, () => {
+      const route = routePromptEnhancement(routeFor(intent));
+      const planning = planPromptEnhancementSections({
+        routeResult: route,
+        sourceRefs: [sourceA],
+        guidanceFacts: [],
+      });
+      for (const action of ['default', 'more_thorough', 'shorter', 'more_project_grounded'] as const) {
+        const compose = composePromptEnhancementBody({
+          enhancementId: `render-once-shipping-${intent}-${action}`,
+          originalPromptText: 'render the restored template once for inspection',
+          sectionPlanningResult: planning,
+          action,
+        });
+        const sections = compose.currentBody?.sections ?? [];
+        expect(sections.length, `${intent} [${action}] planned no sections`).toBeGreaterThan(0);
+        for (const section of sections) {
+          expect(hasRealText(section.bodyText), `${intent} [${action}] '${section.sectionKind}' rendered no real text`)
+            .toBe(true);
+        }
+      }
+    });
+  }
 
   for (const intent of RESTORATION_INTENTS) {
     it(`${intent}: renders once — all of its never-rendered kinds compose with non-empty text`, () => {
@@ -130,7 +177,7 @@ describe('render-once: every never-rendered section kind of the ten restoration 
       for (const kind of dead) {
         const section = sections.find((entry) => entry.sectionKind === kind);
         expect(section, `dead kind '${kind}' did not render`).toBeDefined();
-        expect(section!.bodyText.trim().length, `dead kind '${kind}' rendered empty`).toBeGreaterThan(0);
+        expect(hasRealText(section!.bodyText), `dead kind '${kind}' rendered no real text`).toBe(true);
       }
     });
   }
