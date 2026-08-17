@@ -424,6 +424,30 @@ async function launchMpsContinuationAtStopV1(
 }
 
 /**
+ * Phase 5 — resume an INTERRUPTED sequence. When the user picks "I need to do something else first",
+ * the held item is left `item_pending` (never advanced, never cancelled) and must return "at the next
+ * decision point". This runs on a non-`stop_hook_active` Stop that did NOT block, AFTER the user's own
+ * turn (e.g. the "something else" PE popup) has resolved — so the something-else runs first, then the
+ * held item comes back. ONLY `item_pending` resumes here: an `awaiting_response` sequence is mid-delivery
+ * and belongs to the `stop_hook_active` launcher, so it is left untouched. Returns the launcher outcome,
+ * or null to let the ordinary flow continue (fail-closed: no interrupted sequence → today's behaviour).
+ */
+async function maybeResumeInterruptedSequenceV1(
+  store:   Store,
+  payload: StopPayload,
+  mgr:     SessionStateManager,
+): Promise<StopOutcome | null> {
+  const active = getActivePendingPromptSequence(store, payload.cwd, mgr.current.sessionId);
+  if (!active || active.status !== 'item_pending') return null;
+  logger.debug('stop_mps_interrupted_resume', {
+    cwd: payload.cwd,
+    sequenceId: active.sequenceId,
+    currentItemIndex: active.currentItemIndex,
+  });
+  return launchMpsContinuationAtStopV1(store, payload, mgr, active);
+}
+
+/**
  * Run the Stop hook pipeline.
  *
  * @param payload   Parsed Stop hook JSON payload from Claude Code stdin
@@ -539,6 +563,10 @@ export async function runStop(
         // Displayed (incl. dismissed / use-original) → consume so a Stop re-fire cannot re-show it.
         markPromptEnhancementShown(store, pendingPe.id);
         logger.info('stop_prompt_enhancement_shown', { cwd: payload.cwd });
+        // Phase 5: the user's "something else" popup resolved WITHOUT blocking (use-original / dismiss),
+        // so their own turn is done — a sequence held from an earlier interruption resumes now.
+        const resumed = await maybeResumeInterruptedSequenceV1(store, payload, mgr);
+        if (resumed) return resumed;
         return { outcome: 'prompt_enhancement_shown' };
       }
       // not_shown → no usable PE host this turn; the record stays PENDING (not marked shown) so a
@@ -546,8 +574,13 @@ export async function runStop(
     }
   }
 
-  // (1.45. MPS continuation launcher moved to the loop-guard exemption at the top of runStop — MPS-6,
-  //  2026-08-13. The continuation Stop is the `stop_hook_active` event, so the launcher must run there.)
+  // 1.45. MPS continuation. The normal per-item launcher runs at the loop-guard exemption at the TOP of
+  //  runStop (MPS-6, 2026-08-13) because a continuation Stop is the `stop_hook_active` event. Phase 5
+  //  adds a SECOND entry point HERE: an INTERRUPTED sequence (item_pending, from "do something else
+  //  first") resumes on a non-stop_hook_active Stop that did NOT block — reached by the no-PE / not-shown
+  //  paths (the 'shown' branch above handled its own case). Fail-closed: no item_pending → ordinary flow.
+  const resumedSequence = await maybeResumeInterruptedSequenceV1(store, payload, mgr);
+  if (resumedSequence) return resumedSequence;
 
   // 1.5. Language detection — runs post-response, invisible latency
   //      Only fires when >= LANG_DETECT_INTERVAL prompts have been captured for this project.
