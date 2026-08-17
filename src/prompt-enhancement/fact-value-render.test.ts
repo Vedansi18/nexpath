@@ -250,3 +250,34 @@ describe('GR-1 x F2 — real grounding is not mistaken for invention', () => {
     ])).toEqual([]);
   });
 });
+
+describe('GR-1 — the render hop redacts, matching the producer', () => {
+  it('a credential-shaped value is MASKED, not stated verbatim', () => {
+    // No leak existed: the safety validator's secret-literal patterns would have
+    // rejected the body. But that costs the user the whole popup, where the
+    // producer's own path (evidenceForGuidanceFact -> redactSecrets) masks and
+    // continues. This is the LAST hop before body text and renders whatever fact
+    // it is handed, so it applies the same tool.
+    const token = 'ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    const line = promptEnhancementFactValueLinesV1('project_grounding_facts', [
+      fact({ evidence: { key: 'api_key', value: token } }),
+    ])[0] ?? '';
+    expect(line).not.toContain(token);
+    expect(line).toContain('REDACTED');
+  });
+
+  it('the allow-list records what is RENDERED, not the raw value', () => {
+    // Otherwise it would permit a raw secret the body never contained, and miss
+    // the masked string it actually does.
+    const token = 'ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    const values = promptEnhancementGroundedValuesV1('project_grounding_facts', [
+      fact({ evidence: { key: 'api_key', value: token } }),
+    ]);
+    expect(values.join()).not.toContain(token);
+    expect(values.join()).toContain('REDACTED');
+  });
+
+  it('an ordinary project value is untouched', () => {
+    expect(promptEnhancementGroundedValuesV1('project_grounding_facts', [fact()])).toEqual(['vitest']);
+  });
+});

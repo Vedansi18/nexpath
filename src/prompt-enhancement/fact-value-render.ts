@@ -1,3 +1,4 @@
+import { redactSecrets } from '../store/redact.js';
 import type { PromptEnhancementGuidanceFact } from './templates/section-plan.js';
 
 /**
@@ -118,7 +119,13 @@ export function promptEnhancementFactValueLinesV1(
     // ⛔ RESOLUTION, not projection: no resolved value means no line. The section
     // keeps its standing instruction rather than gaining an empty claim.
     if (!evidence || evidence.value.trim().length === 0) continue;
-    lines.push(claimSentenceV1(fact, evidence.key.replaceAll('_', ' '), evidence.value.trim()));
+    // Defence in depth, matching the producer. `evidenceForGuidanceFact` already
+    // redacts on the way in, so a production value arrives clean — but this is
+    // the LAST hop before body text, and it renders whatever fact it is handed.
+    // Without it a credential-shaped value reaches the body, the safety
+    // validator's secret-literal patterns reject the whole body, and the user
+    // loses the popup entirely rather than seeing a masked value.
+    lines.push(claimSentenceV1(fact, evidence.key.replaceAll('_', ' '), redactSecrets(evidence.value.trim())));
   }
   return lines;
 }
@@ -136,8 +143,10 @@ export function promptEnhancementGroundedValuesV1(
   for (const fact of facts) {
     if (fact.targetSectionKind !== sectionKind) continue;
     if (!isRenderableValueFactV1(fact) || isReferenceOnlyV1(fact)) continue;
+    // Must match what the renderer states, or the allow-list would permit a raw
+    // value the body never contained and miss the masked one it does.
     const value = fact.evidence?.value.trim();
-    if (value) values.push(value);
+    if (value) values.push(redactSecrets(value));
   }
   return values;
 }
