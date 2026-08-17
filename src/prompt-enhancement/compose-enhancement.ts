@@ -825,7 +825,12 @@ function renderSection(input: {
   if (action === 'more_thorough') {
     lines.push(...moreThoroughLines(sectionPlan));
   }
-  if (action === 'more_project_grounded') {
+  if (action === 'more_project_grounded' && factValueLines.length === 0) {
+    // Only when the section has NO stated grounding of its own. With a rendered
+    // fact this line either repeats the content-free instruction §13.1 names, or
+    // — worse, and measured — asserts "Known project grounding is unavailable"
+    // directly beneath a stated project fact, contradicting the body on the very
+    // action the user picked to GET more grounding.
     lines.push(projectGroundingLine(sectionPlan));
   }
   if (action === 'apply_details' && sectionPlan.sectionKind === 'context_and_constraints') {

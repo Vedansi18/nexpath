@@ -281,3 +281,51 @@ describe('GR-1 — the render hop redacts, matching the producer', () => {
     expect(promptEnhancementGroundedValuesV1('project_grounding_facts', [fact()])).toEqual(['vitest']);
   });
 });
+
+describe('GR-1 — the grounding ACTION does not contradict a stated fact', () => {
+  const groundedSection = (facts: readonly PromptEnhancementGuidanceFact[], action: 'more_project_grounded') => {
+    const planning = planPromptEnhancementSections({
+      routeResult: noKeyRoute(),
+      sourceRefs: [sourceA],
+      guidanceFacts: facts,
+    });
+    const body = composePromptEnhancementBody({
+      enhancementId: 'gr1',
+      originalPromptText: 'add tests for the checkout flow before release',
+      sectionPlanningResult: planning,
+      action,
+    }).currentBody;
+    return (body?.sections ?? []).find((s2) => s2.sectionKind === 'project_grounding_facts')?.bodyText ?? '';
+  };
+
+  it('with a stated fact, it never claims grounding is unavailable', () => {
+    // Measured before the fix: the section stated "test runner is vitest" and then
+    // "Known project grounding is unavailable for this section" — a body
+    // contradicting itself on the action the user picked to GET more grounding.
+    const text = groundedSection([fact()], 'more_project_grounded');
+    expect(text).toContain('vitest');
+    expect(text).not.toContain('grounding is unavailable');
+    expect(text).not.toContain('Use the typed project/source metadata');
+  });
+
+  it('with no stated fact, the action keeps its existing line', () => {
+    const text = groundedSection([], 'more_project_grounded');
+    expect(text).toContain('Ground the request in current project facts');
+  });
+
+  it.each([['shorter' as const], ['more_thorough' as const]])('the stated value survives %s', (action) => {
+    const planning = planPromptEnhancementSections({
+      routeResult: noKeyRoute(),
+      sourceRefs: [sourceA],
+      guidanceFacts: [fact()],
+    });
+    const body = composePromptEnhancementBody({
+      enhancementId: 'gr1',
+      originalPromptText: 'add tests for the checkout flow before release',
+      sectionPlanningResult: planning,
+      action,
+    }).currentBody;
+    const text = (body?.sections ?? []).find((s2) => s2.sectionKind === 'project_grounding_facts')?.bodyText ?? '';
+    expect(text).toContain('vitest');
+  });
+});
