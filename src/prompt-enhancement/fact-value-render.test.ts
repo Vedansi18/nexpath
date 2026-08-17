@@ -85,6 +85,26 @@ describe('GR-1 — the deterministic renderer STATES a fact value, not an instru
     expect(text).not.toContain(STANDING_INSTRUCTION);
   });
 
+  it('a section whose instruction carries a REAL requirement keeps it, and gains the fact', () => {
+    // Only the CONTENT-FREE instructions are displaced. Replacing this one
+    // stripped the verification section down to a grounding statement and lost
+    // the verification command it exists to ask for — with F1's own slot
+    // obligation going with it.
+    const planning = planPromptEnhancementSections({
+      routeResult: noKeyRoute(),
+      sourceRefs: [sourceA],
+      guidanceFacts: [fact({ targetSectionKind: 'verification_or_test_plan' })],
+    });
+    const body = composePromptEnhancementBody({
+      enhancementId: 'gr1',
+      originalPromptText: 'add tests for the checkout flow before release',
+      sectionPlanningResult: planning,
+    }).currentBody;
+    const text = (body?.sections ?? []).find((s2) => s2.sectionKind === 'verification_or_test_plan')?.bodyText ?? '';
+    expect(text).toContain('vitest');
+    expect(text).toContain('verification command');
+  });
+
   it('a fact with NO resolved value leaves the instruction alone', () => {
     // ⛔ The Phase-4 revert lesson: widening the projection WITHOUT resolution
     // collapsed to one constant line. No value means no line — never an empty

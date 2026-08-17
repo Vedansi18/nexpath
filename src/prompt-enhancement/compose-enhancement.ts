@@ -24,6 +24,7 @@ import {
 } from './contracts.js';
 import { buildPromptEnhancementCostVisibilityMetadataV1 } from './cost-observability.js';
 import { promptEnhancementFactValueLinesV1 } from './fact-value-render.js';
+import { PROMPT_ENHANCEMENT_FALLTHROUGH_SHORT_PREFIX_V1 } from './body-assertion-checks.js';
 import {
   buildPromptEnhancementOriginalTextRefV1,
   buildPromptEnhancementPromptPointRefsV1,
@@ -804,10 +805,21 @@ function renderSection(input: {
   );
   if (factValueLines.length > 0) {
     // The done-when: the body contains the typed VALUE, not the standing
-    // instruction. Where a fact speaks for the section, it replaces the generic
-    // line rather than trailing it.
-    lines.length = 0;
-    lines.push(...factValueLines);
+    // instruction. But ONLY the CONTENT-FREE instructions are displaced — the
+    // three §13.1 names ("Cover <heading>…" and the grounding lines) are the
+    // ones that tell the reader to use grounding while containing none.
+    //
+    // A section whose instruction carries a REAL requirement keeps it and gains
+    // the fact: replacing it stripped `verification_or_test_plan` down to
+    // "Known project fact: test runner is vitest", losing the verification
+    // command the section exists to ask for — and F1's own slot obligation with
+    // it. The fact leads because it is the concrete part.
+    const contentFreeInstruction =
+      lines.length === 1 &&
+      (lines[0]!.startsWith(PROMPT_ENHANCEMENT_FALLTHROUGH_SHORT_PREFIX_V1) ||
+        sectionPlan.sectionKind === 'project_grounding_facts');
+    if (contentFreeInstruction) lines.length = 0;
+    lines.unshift(...factValueLines);
   }
   if (action === 'more_thorough') {
     lines.push(...moreThoroughLines(sectionPlan));
