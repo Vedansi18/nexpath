@@ -745,9 +745,10 @@ describe('sequence planner — the list is checked against the rules it will be 
     const firstSliceNorm = await run(withItems({ ...firstTask, originalSliceRef: { start: 0, end: 4 } }, taskItem()));
     expect(firstSliceNorm.ok).toBe(true);
     if (firstSliceNorm.ok) expect(firstSliceNorm.output.items[0]?.originalSliceRef).toEqual({ start: 0, end: ORIGINAL.length });
-    // And the whole-prompt directives index the same original.
-    expect(await run(validReply({ promptDirectives: [{ start: 0, end: ORIGINAL.length + 1 }] })))
-      .toEqual({ ok: false, reason: 'prompt_directives_invalid' });
+    // Whole-prompt directives that run past the original are clamped into the valid window too (Phase 1b).
+    const clampedDirectives = await run(validReply({ promptDirectives: [{ start: 0, end: ORIGINAL.length + 1 }] }));
+    expect(clampedDirectives.ok).toBe(true);
+    if (clampedDirectives.ok) expect(clampedDirectives.output.promptDirectives).toEqual([{ start: 0, end: ORIGINAL.length }]);
   });
 
   it('rejects confirmations that are not what the verdict earns, in the order it earns them', async () => {

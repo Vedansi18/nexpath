@@ -700,7 +700,17 @@ async function attemptPlan(
   if (!structure.ok) {
     return { ok: false, reason: structure.reasonCode, itemIndex: structure.itemIndex };
   }
-  if (parsed.promptDirectives.some(
+  // Phase 1b (§5.5a): whole-prompt directives are the SAME kind of offset range as the item slices, and
+  // the model gets them out of bounds the same way. Clamp them into the valid [0, originalLength] window
+  // too — a directive that runs past the prompt must not reject the whole sequence
+  // (`prompt_directives_invalid`). Same rationale as the item slices above; the check below is kept as a
+  // defensive net and passes after clamping.
+  const normalizedPromptDirectives = Array.isArray(parsed.promptDirectives)
+    ? parsed.promptDirectives
+        .map((range) => clampOffsetRangeV1(range))
+        .filter((range): range is { start: number; end: number } => range !== null)
+    : parsed.promptDirectives;
+  if (normalizedPromptDirectives.some(
     (range) => !isPromptEnhancementSequenceOffsetRangeV1(range, originalLength),
   )) {
     return { ok: false, reason: 'prompt_directives_invalid' };
@@ -714,7 +724,7 @@ async function attemptPlan(
       outcome: parsed.outcome,
       outcomeReason: parsed.outcomeReason,
       items,
-      promptDirectives: parsed.promptDirectives,
+      promptDirectives: normalizedPromptDirectives,
       originalLength,
       suggestedNextPromptPolicy: promptEnhancementSequencePolicyForOutcomeV1(parsed.outcome),
       summaryData: {
