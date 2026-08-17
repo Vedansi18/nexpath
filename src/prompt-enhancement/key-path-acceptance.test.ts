@@ -4,6 +4,7 @@ import {
   type PromptEnhancementSourceMixProfile,
 } from './source-mix.js';
 import { composeStructuredComposerOutputV1, type PromptEnhancementComposerClientV1 } from './llm-composer.js';
+import { composePromptEnhancementBody } from './compose-enhancement.js';
 import { routePromptEnhancement } from './routing-taxonomy.js';
 import { planPromptEnhancementSections, type PromptEnhancementGuidanceFact } from './templates/section-plan.js';
 import type { PromptEnhancementSourceRefV1 } from './contracts.js';
@@ -212,5 +213,100 @@ describe('GR-2 — the eight locked mixProfiles are each reachable in the shippe
   it('over_token_or_source_cap_compressed is produced when useful facts exceed the cap', () => {
     const many = [sourceAFact(), ...Array.from({ length: 8 }, (_, i) => groundingFact(`g${i}`))];
     expect(applyPromptEnhancementSourceMixV1(many, 'default').profile).toBe('over_token_or_source_cap_compressed');
+  });
+});
+
+// ── Step 5's gate, END TO END (not just what the model was handed) ───────────
+
+describe('GR-2 — the §32.3 gate: the grounded draft ships, the invented one cannot', () => {
+  const debugRoute = () => routePromptEnhancement({
+    routeDecisionId: 'g32',
+    promptText: 'fix the null pointer error in checkout',
+    currentStage: 'implementation',
+    prevStage: 'task_breakdown',
+    triggerKind: 'absence',
+    firedKey: 'absence:debugging_observation_gap@implementation',
+    classifierState: 'fire_recommended',
+    degradedNoActionState: 'none',
+    generatedOriginState: 'ordinary_user_prompt',
+    classifierPrimaryIntent: 'issue_debug.runtime_error_exception',
+    classifierIntentConfidence: 0.9,
+    classifierCapabilityCandidates: [],
+    classifierDebugEvidencePresent: [],
+  });
+
+  // The user's REAL test path, resolved by group A and rendered by GR-1 — the fact
+  // §32.3 says the model must ground in instead of guessing infrastructure.
+  const TEST_PATH = 'tests/checkout/payment.test.ts';
+
+  const planFor = () => planPromptEnhancementSections({
+    routeResult: debugRoute(),
+    sourceRefs: [sourceA],
+    guidanceFacts: [fact({
+      targetSectionKind: 'reproduction_or_evidence',
+      evidence: { key: 'test_path', value: TEST_PATH },
+    })],
+  });
+
+  /** Drives one model draft through the real composer, exactly as the runtime would. */
+  const composeWithDraft = (bodyText: string) => {
+    const planning = planFor();
+    const section = planning.sectionPlans.find((plan) => plan.sectionKind === 'reproduction_or_evidence')!;
+    return composePromptEnhancementBody({
+      enhancementId: 'g32',
+      originalPromptText: 'fix the null pointer error in checkout',
+      sectionPlanningResult: planning,
+      composerRuntimeState: 'accepted_structured_output',
+      structuredComposerOutput: {
+        outputId: 'o1',
+        sectionDrafts: [{
+          sectionId: section.sectionId,
+          bodyText,
+          sourceFactIds: [...section.structuredContentPartRefs],
+        }],
+        // The claims union is OUTPUT-wide: empty or unallowed refuses the whole
+        // reply before any wording is judged, so a real one is required here.
+        composerClaims: section.structuredContentPartRefs.map((ref) => `claim:${ref}`),
+        detectedLanguageSelfReport: 'en',
+      },
+    });
+  };
+
+  const reproSection = (result: ReturnType<typeof composeWithDraft>) =>
+    result.currentBody.sections.find((section) => section.sectionKind === 'reproduction_or_evidence');
+
+  it('the GROUNDED half: naming the real test path SHIPS', () => {
+    // A file path is an invention item class, so this line survives ONLY because
+    // the value the boundary resolved travelled with the section. That is the
+    // whole GR-1→GR-2 chain observed at its end: resolved → handed to the model
+    // → stated back → recognised as grounding rather than invention.
+    const result = composeWithDraft(`Capture the failing run with ${TEST_PATH} before changing code.`);
+    expect(reproSection(result)?.bodyText ?? '').toContain(TEST_PATH);
+    expect(reproSection(result)?.groundedFactValues).toContain(TEST_PATH);
+    expect(result.sendPolicy).toBe('send_current');
+    expect(result.currentBody.generatedSafeStatus).toBe('valid');
+    expect(result.fallbackMode).toBe('none');
+  });
+
+  it('the INVENTED half: the RabbitMQ answer cannot be sent', () => {
+    // §32.3's failing case. GR-2 removes its CAUSE (the model now holds the real
+    // fact), and this check is the backstop on the section that carries the
+    // obligation — so the invented body is refused, not quietly shipped.
+    const result = composeWithDraft('Use a reliable queue such as RabbitMQ or AWS SQS to replay the failure.');
+    expect(result.sendPolicy).toBe('no_send');
+    expect(result.fallbackMode).toBe('validation_failed_no_send');
+    expect(result.diagnostics.map((diagnostic) => diagnostic.reasonCode))
+      .toContain('no_invention_state:fabricated_item:RabbitMQ');
+  });
+
+  it('scope, recorded honestly: only sections carrying the obligation are policed', () => {
+    // F2 said so explicitly ("does NOT fix invention everywhere"). On this route
+    // ONE of eight sections carries it, so "the invention case is gone" rests
+    // mainly on GR-2 removing the CAUSE, with the check as backstop where it
+    // rides. Pinned so the bound stays visible instead of being assumed away.
+    const planning = planFor();
+    const policed = planning.sectionPlans.filter((plan) => plan.slotObligations.includes('no_invention_state'));
+    expect(policed.length).toBeGreaterThan(0);
+    expect(policed.length).toBeLessThan(planning.sectionPlans.length);
   });
 });
