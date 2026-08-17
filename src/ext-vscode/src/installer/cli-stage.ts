@@ -206,6 +206,18 @@ export function stageCli(
     writeShim();
     return { status: 'staged', stagedDir, cliEntry, shimPath, version };
   } catch (err) {
+    // RC20b: a REFRESH that fails must not be worse than not refreshing. RC20
+    // made re-copies routine (every extension update), and a copy can fail for
+    // reasons that say nothing about the existing copy — on Windows especially,
+    // `cpSync` over a file a running hook process holds open throws EBUSY.
+    // Returning 'error' there would make `offerSetupIfNeeded` bail with
+    // "auto-setup not offered", disabling setup entirely on a machine that has
+    // a perfectly usable (if slightly older) staged CLI. Keep serving the
+    // existing copy instead; the next activation retries the refresh.
+    if (complete) {
+      writeShim();
+      return { status: 'already-current', stagedDir, cliEntry, shimPath, version };
+    }
     return { ...empty, status: 'error', version, error: (err as Error).message };
   }
 }

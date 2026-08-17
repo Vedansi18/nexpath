@@ -125,6 +125,13 @@ function buildDeps(context: vscode.ExtensionContext, log: Logger): SetupFlowDeps
         if (!existsSync(flagFile)) return false;
         try {
           const flags = JSON.parse(readFileSync(flagFile, 'utf8')) as Record<string, unknown>;
+          // RC19b (regression caught in the 2026-08-17 verification pass):
+          // an ABSENT key means "this editor was never registered" → repair it.
+          // An EXPLICIT `false` is the owner's documented config-backed REVERT
+          // to the old flow — re-running setup there would rewrite it to `true`
+          // and silently undo a deliberate decision. Treat it as registered
+          // (nothing to repair); the armer logs why it is not arming.
+          if (flags[agent] === false) return true;
           if (flags[agent] !== true) return false;
         } catch {
           return false; // unparseable ⇒ the resolver would read OFF ⇒ re-register

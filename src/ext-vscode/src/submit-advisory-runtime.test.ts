@@ -604,3 +604,24 @@ describe('⭐ RC21 — Windows workspace hook is passed and verified (structural
     expect(fn).toMatch(/includes\('windsurf-hook'\)/);
   });
 });
+
+/**
+ * RC19c (regression found in the 2026-08-17 verification pass): RC19 made the
+ * verifier demand `flags[host] === true`, which turned the owner's documented
+ * config-backed REVERT (set the host to `false`) into a self-healing loop —
+ * setup would re-run and rewrite it back to `true`. An explicit `false` must be
+ * honoured as a deliberate decision; only an ABSENT key means "never registered".
+ */
+describe('⭐ RC19c — an explicit false is a revert, not damage', () => {
+  const glue = readFileSync(join(__dirname, 'installer', 'vscode-glue.ts'), 'utf8');
+  const fn = glue.slice(glue.indexOf('verifyHookRegistration: () =>'), glue.indexOf('getState: () =>'));
+
+  it('explicit false ⇒ registered (no re-run, revert preserved)', () => {
+    expect(fn).toMatch(/if \(flags\[agent\] === false\) return true;/);
+  });
+
+  it('absent / non-true key ⇒ unregistered (repair)', () => {
+    expect(fn).toMatch(/if \(flags\[agent\] !== true\) return false;/);
+    expect(fn.indexOf('=== false) return true;')).toBeLessThan(fn.indexOf('!== true) return false;'));
+  });
+});

@@ -228,3 +228,41 @@ describe('⭐ RC20 — a stale staged CLI is re-copied (version equality ≠ ide
     expect(copies).toEqual([]);
   });
 });
+
+/**
+ * RC20b: RC20 made re-copies routine, so a FAILED refresh must degrade to the
+ * existing copy — not to 'error', which makes offerSetupIfNeeded bail with
+ * "auto-setup not offered" and disables setup entirely. (Windows: cpSync over a
+ * file a running hook holds open throws EBUSY.)
+ */
+describe('⭐ RC20b — a failed refresh keeps serving the existing staged copy', () => {
+  const boom = () => { throw new Error('EBUSY: resource busy or locked'); };
+
+  it('copy failure + complete existing copy ⇒ already-current (setup still works)', () => {
+    const res = stageCli('/ext/nexpath-cli', '/home/u/.nexpath', {
+      exists: (p) => p === '/ext/nexpath-cli' || p.endsWith('package.json') || p.endsWith(CLI_ENTRY_REL),
+      readFile: () => '{"version":"0.1.3"}',
+      writeFile: () => {},
+      copyDir: boom,
+      mkdirp: () => {},
+      chmod: () => {},
+      statFile: () => ({ size: 10, mtimeMs: 20 }),
+    });
+    expect(res.status).toBe('already-current');
+    expect(res.cliEntry).toContain('0.1.3');
+  });
+
+  it('copy failure + NO usable copy ⇒ still a real error (never pretend)', () => {
+    const res = stageCli('/ext/nexpath-cli', '/home/u/.nexpath', {
+      exists: (p) => p === '/ext/nexpath-cli' || p === join('/ext/nexpath-cli', 'package.json'),
+      readFile: () => '{"version":"0.1.3"}',
+      writeFile: () => {},
+      copyDir: boom,
+      mkdirp: () => {},
+      chmod: () => {},
+      statFile: () => ({ size: 10, mtimeMs: 20 }),
+    });
+    expect(res.status).toBe('error');
+    expect(res.error).toMatch(/EBUSY/);
+  });
+});
