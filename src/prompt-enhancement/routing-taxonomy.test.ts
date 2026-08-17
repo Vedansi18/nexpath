@@ -1335,6 +1335,35 @@ describe('reproduction/evidence request — ask/carry pair for every debug inten
     }
   });
 
+  it('the MODEL cannot re-attach the request on a carry route — the registry decides it alone', () => {
+    const route = observedRoute('issue_debug.failing_test', ['capability.reproduction_or_evidence_needed'], [...SUPPLIED]);
+    expect(route.capabilityOverlays).not.toContain('capability.reproduction_or_evidence_needed');
+  });
+
+  it('refusing that candidate does not disturb the other observed candidates', () => {
+    const route = observedRoute(
+      'issue_debug.failing_test',
+      ['capability.reproduction_or_evidence_needed', 'capability.risk_or_rollback'],
+      [...SUPPLIED],
+    );
+    expect(route.capabilityOverlays).toContain('capability.risk_or_rollback');
+    expect(route.capabilityOverlays).not.toContain('capability.reproduction_or_evidence_needed');
+  });
+
+  it('planning.debugging_plan — the twelfth debug-shaped route — asks and carries by the same rule', () => {
+    expect(observedRoute('planning.debugging_plan', [], []).capabilityOverlays)
+      .toContain('capability.reproduction_or_evidence_needed');
+    expect(observedRoute('planning.debugging_plan', [], [...SUPPLIED]).capabilityOverlays)
+      .not.toContain('capability.reproduction_or_evidence_needed');
+  });
+
+  it('the supplied floor is two independent forms — one is still thin', () => {
+    expect(observedRoute('issue_debug.failing_test', [], ['logs']).capabilityOverlays)
+      .toContain('capability.reproduction_or_evidence_needed');
+    expect(observedRoute('issue_debug.failing_test', [], ['logs', 'failing_test_details']).capabilityOverlays)
+      .not.toContain('capability.reproduction_or_evidence_needed');
+  });
+
   it('a keyless debug route on the cascade keeps asking — nothing is known to be supplied', () => {
     const route = routePromptEnhancement(routeInput({}));
     expect(route.familyId).toBe('issue_debug');

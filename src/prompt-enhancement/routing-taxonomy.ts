@@ -1815,6 +1815,22 @@ function selectPrimaryIntent(normalized: string): PromptEnhancementPrimaryIntent
 const DEBUG_EVIDENCE_SUPPLIED_FLOOR = 2;
 
 /**
+ * Capabilities the REGISTRY decides alone, never accepted as a classifier
+ * candidate. The reproduction/evidence request is decided by the LACKS rule
+ * below — a negative test about what the prompt is MISSING. That rule can only
+ * ADD, so an observed candidate naming the same capability would attach it on
+ * a prompt that already supplied its evidence, silently overriding the
+ * negative test and re-nagging exactly the user C4 exists to stop nagging. Its
+ * scope map (issue_debug + planning.debugging_plan) is the same route set the
+ * rule governs, so refusing it as a candidate costs no reachable attachment:
+ * inside that set the rule decides, and outside it the scope check vetoed it
+ * anyway. The model observes; the registry decides.
+ */
+const REGISTRY_OWNED_CAPABILITIES: ReadonlySet<PromptEnhancementCapabilityId> = new Set([
+  'capability.reproduction_or_evidence_needed',
+]);
+
+/**
  * The registry's capability decision on the keyed path — the keyword decider's
  * replacement. The classifier only OBSERVED candidates; every attachment is
  * decided here: a candidate outside its locked family/intent scope is VETOED,
@@ -1830,6 +1846,7 @@ function decideCapabilityOverlaysFromObservation(
 ): readonly PromptEnhancementCapabilityId[] {
   const capabilities = new Set(selectedPreset.capabilityOverlays);
   for (const candidate of input.classifierCapabilityCandidates ?? []) {
+    if (REGISTRY_OWNED_CAPABILITIES.has(candidate)) continue;
     if (isCapabilityCompatibleWithRoute(candidate, selectedPreset.family, selectedPreset.primaryIntent)) {
       capabilities.add(candidate);
     }
