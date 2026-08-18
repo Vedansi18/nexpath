@@ -35,6 +35,7 @@ import { runStop, promptEnhancementMpsOfferDispositionFromPopupV1, recordPromptE
 import type { StopPayload } from './stop.js';
 import { upsertPendingAdvisory, getPendingAdvisory } from '../../store/pending-advisories.js';
 import { upsertPendingPromptEnhancement, getPendingPromptEnhancement, type PendingPromptEnhancement } from '../../store/pending-prompt-enhancements.js';
+import { setConfig } from '../../store/config.js';
 import { upsertPendingPromptSequence, getActivePendingPromptSequence, getPromptEnhancementSequenceOfferDisposition, recordPromptEnhancementSequenceOfferDeclined } from '../../store/pending-sequences.js';
 import { applyPromptEnhancementSequenceRuntimeActionV1 } from '../../prompt-enhancement/sequence-runtime.js';
 import type { PromptEnhancementCliPopupResultV1 } from '../../prompt-enhancement/cli-submit-popup.js';
@@ -144,6 +145,37 @@ describe('runStop — deferred Prompt Enhancement popup (B-i)', () => {
     // No advisory seeded → falling through reaches the advisory lookup and finds nothing.
     const result = await runStop(makePayload(), store, undefined, undefined, undefined, notShown());
     expect(result).toEqual({ outcome: 'no_pending' });
+  });
+
+  // Popup cooldown (prompt_enhancement.popup_cooldown, default 15): after a PE/MPS-1 popup is shown,
+  // new ones are suppressed for N prompts. The first popup always shows.
+  it('popup cooldown: the FIRST popup always shows (no prior popup this session)', async () => {
+    await insertPendingPe(store); // lastPromptEnhancementPromptIndex defaults to -1 → not in cooldown
+    const launch = inject('ENHANCED FIRST');
+    const result = await runStop(makePayload(), store, undefined, undefined, undefined, launch);
+    expect(launch).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ outcome: 'blocked', reason: 'ENHANCED FIRST' });
+  });
+
+  it('popup cooldown: a NEW popup within the cooldown is SUPPRESSED — never launched, record consumed', async () => {
+    await insertPendingPe(store);
+    // A popup was just shown this prompt → cooldown active (default 15, promptCount unchanged).
+    SessionStateManager.load(store, '/test/project').markPromptEnhancementPopupShown(store);
+    const launch = inject('SHOULD NOT SHOW');
+    const result = await runStop(makePayload(), store, undefined, undefined, undefined, launch);
+    expect(launch).not.toHaveBeenCalled();                                       // suppressed
+    expect(getPendingPromptEnhancement(store, '/test/project')).toBeNull();      // consumed, no lingering
+    expect(result).toEqual({ outcome: 'no_pending' });
+  });
+
+  it('popup cooldown = 0 disables suppression (popup shows even right after one)', async () => {
+    setConfig(store, 'prompt_enhancement.popup_cooldown', '0');
+    await insertPendingPe(store);
+    SessionStateManager.load(store, '/test/project').markPromptEnhancementPopupShown(store);
+    const launch = inject('SHOWS ANYWAY');
+    const result = await runStop(makePayload(), store, undefined, undefined, undefined, launch);
+    expect(launch).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ outcome: 'blocked', reason: 'SHOWS ANYWAY' });
   });
 
   // MPS continuation launcher (P3, fail-closed) — an active pending-sequence row must NOT open a

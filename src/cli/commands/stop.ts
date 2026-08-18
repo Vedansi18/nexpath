@@ -458,6 +458,18 @@ async function maybeResumeInterruptedSequenceV1(
 }
 
 /**
+ * Resolve the PE / MPS-1 popup cooldown (in prompts) — how many prompts to suppress NEW popups after
+ * one is shown. Config `prompt_enhancement.popup_cooldown` (project-scoped first, then global),
+ * default 15. 0 disables the cooldown (every eligible prompt may pop). Non-numeric / negative → default.
+ */
+function resolvePromptEnhancementPopupCooldownV1(store: Store, projectRoot: string): number {
+  const raw = getConfig(store.db, `prompt_enhancement.popup_cooldown:${projectRoot}`)
+    ?? getConfig(store.db, 'prompt_enhancement.popup_cooldown');
+  const n = raw === undefined ? 15 : Number.parseInt(raw, 10);
+  return Number.isFinite(n) && n >= 0 ? n : 15;
+}
+
+/**
  * Run the Stop hook pipeline.
  *
  * @param payload   Parsed Stop hook JSON payload from Claude Code stdin
@@ -533,17 +545,35 @@ export async function runStop(
     const pendingPe = getPendingPromptEnhancement(store, payload.cwd, mgr.current.sessionId);
     if (pendingPe) {
       let decision: PromptEnhancementStopDecision;
-      try {
-        decision = await peLaunch(pendingPe);
-      } catch (err) {
-        logger.debug('stop_prompt_enhancement_error', { cwd: payload.cwd, error: String(err) });
+      // Popup cooldown: after a PE / MPS-1 popup is shown, suppress NEW ones for
+      // `prompt_enhancement.popup_cooldown` prompts (default 15). The FIRST popup always shows
+      // (lastPopupIndex < 0). During cooldown, consume the pending record (so it does not linger) and
+      // show nothing this turn. Continuation items (MPS-2) take a different Stop path and are NOT gated.
+      const popupCooldown = resolvePromptEnhancementPopupCooldownV1(store, payload.cwd);
+      const lastPopupIndex = mgr.current.lastPromptEnhancementPromptIndex ?? -1;
+      if (lastPopupIndex >= 0 && mgr.current.promptCount - lastPopupIndex < popupCooldown) {
+        markPromptEnhancementShown(store, pendingPe.id);
+        logger.debug('stop_pe_popup_cooldown', {
+          cwd:              payload.cwd,
+          promptsSinceLast: mgr.current.promptCount - lastPopupIndex,
+          cooldown:         popupCooldown,
+        });
         decision = { kind: 'not_shown' };
+      } else {
+        try {
+          decision = await peLaunch(pendingPe);
+        } catch (err) {
+          logger.debug('stop_prompt_enhancement_error', { cwd: payload.cwd, error: String(err) });
+          decision = { kind: 'not_shown' };
+        }
       }
       if (decision.kind === 'inject') {
         // Consume the record only now that it was actually displayed/injected, so a host that
         // could not display it (e.g. an unsupported platform → not_shown) leaves the record
         // pending for the next Stop instead of burning it silently.
         markPromptEnhancementShown(store, pendingPe.id);
+        // The PE / MPS-1 popup was shown this prompt → reset the popup cooldown.
+        mgr.markPromptEnhancementPopupShown(store);
         // D1 (P9-G1 / resolves P9-G2): record source-use + generated-origin BEFORE transport via
         // the typed Stop-bridge delivery contract — the audit/lineage tables the ad-hoc path never
         // wrote live. Best-effort: an audit-write failure must never lose the injection (4d).
@@ -572,6 +602,8 @@ export async function runStop(
       if (decision.kind === 'shown') {
         // Displayed (incl. dismissed / use-original) → consume so a Stop re-fire cannot re-show it.
         markPromptEnhancementShown(store, pendingPe.id);
+        // The PE / MPS-1 popup was shown this prompt → reset the popup cooldown.
+        mgr.markPromptEnhancementPopupShown(store);
         logger.info('stop_prompt_enhancement_shown', { cwd: payload.cwd });
         // Phase 5: the user's "something else" popup resolved WITHOUT blocking (use-original / dismiss),
         // so their own turn is done — a sequence held from an earlier interruption resumes now.
