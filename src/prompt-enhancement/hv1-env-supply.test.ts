@@ -30,7 +30,6 @@ function sourceFilesUnder(dir: string): string[] {
   }
   return out;
 }
-const HV1_HELPER = true;
 
 function allTsFilesUnder(dir: string): string[] {
   const out: string[] = [];
@@ -315,7 +314,7 @@ describe('HV-1 row 5 — what "partially live" means, measured per export', () =
   });
 });
 
-describe('HV-1 round 7/8 — no production file is invisible to text grep', () => {
+describe('HV-1 round 7/8/9 — no source file, test or production, is invisible to text grep', () => {
   // Round 7 found two files that `grep` classified as BINARY and skipped: they embedded a RAW NUL
   // byte as a composite-key separator instead of the `\u0000` escape. This phase's method is
   // consumer sweeps, so every shell sweep in rounds 2-6 had a silent two-file blind spot, and
