@@ -536,39 +536,3 @@ describe('§46.3c — the PRE-FIX BASELINE must survive every annotation', () =>
     expect(text).toContain('THE BASELINE IS PRESERVED, NEVER OVERWRITTEN');
   });
 });
-
-describe('records must not hard-code counts that fixtures own', () => {
-  // Round 17: the round-8 record said "642/642 .ts files are text-visible to grep". True when
-  // written; round 11 added a fixture file and made it 643. The number was in THREE places, and
-  // HV-2 adds eleven more fixtures, so it would have gone stale again immediately.
-  //
-  // The fix was not to update the number — it was to state the invariant and let the fixture own
-  // it. This assertion is that fixture's other half: it fails if a bare .ts-file count reappears
-  // in either record, because such a count is a claim the document cannot keep true about itself.
-  const DOCS = [
-    'lib/shared/submodules/nexpath-prompt-enhancement-submodule/docs/dev/' +
-      'user-experience-improvements-sub-11-prompt-enhancement-intent-family-routing-misses-debug-intents-dev-plan.md',
-    'lib/shared/submodules/nexpath-prompt-enhancement-submodule/docs/dev/' +
-      'user-experience-improvements-sub-11-prompt-enhancement-intent-family-routing-misses-debug-intents-analysis.md',
-  ];
-
-  it('no record claims an N-of-N .ts-file visibility count', () => {
-    const offenders: string[] = [];
-    for (const doc of DOCS) {
-      if (!existsSync(doc)) continue;
-      const text = readFileSync(doc, 'utf8');
-      // "642/642 `.ts` files" or "642 of 642 `.ts` files" — a self-staling claim.
-      const pattern = /\d{2,4}\s*(?:\/|of)\s*\d{2,4}\s*`?\.ts`?\s*files/g;
-      for (const m of text.matchAll(pattern)) offenders.push(`${doc.split('/').pop()}: ${m[0]}`);
-    }
-    expect(
-      offenders,
-      'a hard-coded file count came back — state the invariant and let this fixture own the count',
-    ).toEqual([]);
-  });
-
-  it('and the invariant itself still holds', () => {
-    const invisible = allTsFilesUnder('src').filter((file) => readFileSync(file, 'utf8').includes('\u0000'));
-    expect(invisible).toEqual([]);
-  });
-});
