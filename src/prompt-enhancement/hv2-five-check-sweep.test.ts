@@ -462,3 +462,58 @@ describe('HV-2 row 11 — source-mix: live, and content survives the mix into a 
     expect(rendered, 'content-free output — the garbage-in-preserved state would be back').not.toBe('');
   });
 });
+
+describe('HV-2 row 6 — A3 STEP 7 DID NOT LAND: extracted param values never enter PE', () => {
+  // §14.3 step 2 lists what checks 3-4 must verify from A3: "env values, work-style, RIGHT/GOOD
+  // with tier, PARAM EXTRACTS". The first three landed (rows 1, 9, 7). The fourth did not.
+  //
+  // A3 step 7 is explicit and marked 🔴: the engine's own `ExtractedParam` output must "cross as
+  // typed {key, value} too", and it names this as "the exact id-only hop §33.2 MEASURED as broken
+  // — the values the engine extracted never enter PE at all". They still do not.
+  //
+  // ⛔ FILED, NOT FIXED — §14.3: "a failure here is a bug against the owning group; H patches
+  // nothing." Bug record: dev-plan §17.6. Pinned in BOTH directions so the row is re-judged when
+  // group A lands the wire, rather than this line being relaxed.
+
+  it('the PE boundary has no path to the extractor at all', () => {
+    for (const file of ['src/cli/commands/auto.ts', 'src/prompt-enhancement/facade.ts']) {
+      const text = readFileSync(file, 'utf8');
+      expect(
+        text.includes('content-template-grounding'),
+        `${file} now reaches the extractor — A3 step 7 has landed; re-judge row 6 rather than relax this`,
+      ).toBe(false);
+      expect(text.includes('ExtractedParam')).toBe(false);
+    }
+  });
+
+  it('every extractor consumer is DS-side, so no value can reach the PE lane', () => {
+    // The measurement behind the bug record: the extractor's four live exports are consumed only by
+    // the decision-session engine. PE's single param reference builds `param_event:<channel>` from
+    // channel NAMES — the id-only hop, still id-only.
+    const taxonomy = readFileSync('src/prompt-enhancement/routing-taxonomy.ts', 'utf8');
+    expect(taxonomy).toContain('`param_event:${ref}`');
+    const engine = readFileSync('src/decision-session/content-template-engine.ts', 'utf8');
+    expect(engine).toContain('extractParamsFromPrompts');
+  });
+
+  it('and no fact crosses carrying a prompt-mined extracted value', async () => {
+    const { store, dir } = await openDiskStore();
+    appendParamEvents(store, Array.from({ length: 4 }, (_, i) => ({
+      projectRoot: dir, sessionId: 'x' + String(i), promptIndex: i, signalKey: 'repro_steps',
+      channel: 'transcript' as const, stage: 'implementation' as const, stageConfidence: 0.7,
+      source: 'live' as const,
+    })));
+    const { facts } = driveChain(store, dir);
+    // A3 step 7 required these to arrive with `sourceOriginScope: current_prompt` or
+    // `recent_prompt_history`. No fact carries either with a value — which is the failure, stated
+    // as a measurement rather than an inference from the missing import.
+    const promptMined = facts.filter(
+      (f) => (f.sourceOriginScope === 'current_prompt' || f.sourceOriginScope === 'recent_prompt_history')
+        && f.evidence?.value !== undefined,
+    );
+    expect(
+      promptMined.map((f) => f.factId),
+      'a prompt-mined value now crosses — A3 step 7 landed; re-judge row 6 and close §17.6',
+    ).toEqual([]);
+  });
+});
