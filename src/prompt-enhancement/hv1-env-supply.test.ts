@@ -3,6 +3,7 @@ import { openStore } from '../store/db.js';
 import { upsertProject, getProjectEnvFacts, setProjectEnvFacts } from '../store/index.js';
 import { probeProject } from '../env/env-probe.js';
 import { resolveModeBand, ACTIVE_AGENT_ID } from '../env/agent-capabilities.js';
+import { corroborationTierForEnvFact, ENV_FACT_CORROBORATOR } from '../env/env-tier-promotion.js';
 import { recordEnvTrajectory } from '../env/env-trajectory.js';
 import { buildPromptEnhancementGroundingRefsV1 } from '../cli/commands/auto.js';
 import { mkdtempSync, writeFileSync, readFileSync, readdirSync, statSync } from 'node:fs';
@@ -373,5 +374,55 @@ describe('HV-1 row 4 — trajectory-credit has FOUR exports, not one', () => {
     // The caller lives in one of the grep-invisible files, so this must be read, not grepped.
     const text = readFileSync('src/classifier/right-good-aggregator.ts', 'utf8');
     expect(text).toContain('extractMovementCredits(applyWindow(events, opts))');
+  });
+});
+
+describe('deferred-task notes §30 — the claims that document makes about source', () => {
+  // §30 is the write-up of the deferred agent-capability wire. It is read COLD by whoever builds
+  // that wire, so its statements about today's code have to be true when they read it, not just
+  // when I wrote them. Round 12 found three of them wrong or unsupported and corrected the file;
+  // these assertions are what stops the corrected versions from drifting.
+
+  it('grounding today is NOT project-only — user-scoped anchors are in use', () => {
+    // The first draft said every grounding fact answers "what is true about the user's PROJECT".
+    // Work-style traits cross anchored to the USER's longitudinal behaviour, so the subject of
+    // today's grounding is the user AND their project. The agent is still a new subject, which is
+    // what §30's category argument actually rests on.
+    const auto = readFileSync('src/cli/commands/auto.ts', 'utf8');
+    expect(auto).toContain("anchorScope: 'longitudinal_user_behavior'");
+  });
+
+  it('a `capability` tier already exists, and is defined for a true-valued env fact', () => {
+    // The first draft said the tier machinery "was built for observed/promoted evidence", which
+    // would tell a cold reader no suitable tier exists. One does — the open question is whether an
+    // agent-capability fact belongs in it, not whether the concept is missing.
+    expect(corroborationTierForEnvFact({ key: 'has_test_runner', value: true } as never)).toBe('capability');
+    expect(corroborationTierForEnvFact({ key: 'has_test_runner', value: false } as never)).toBe('uncorroborated');
+    expect(corroborationTierForEnvFact({ key: 'has_test_runner', value: true, tier: 'P' } as never))
+      .toBe('promoted_practice_P');
+  });
+
+  it('but no corroborator maps an AGENT fact — every entry is an env capability', () => {
+    // `capability` is reachable only for env facts, and promotion to practice-grade runs through
+    // this table. An agent-capability fact has no behavioural corroborator, which is the real
+    // obstacle §30 should hand to whoever builds the wire.
+    const keys = Object.keys(ENV_FACT_CORROBORATOR);
+    expect(keys.length).toBeGreaterThan(0);
+    for (const key of keys) expect(key.startsWith('has_')).toBe(true);
+    expect(keys.some((k) => k.includes('agent') || k.includes('mode'))).toBe(false);
+  });
+
+  it('the authority gate judges WORDING MODE, so it does not model an agent-self statement', () => {
+    // The first draft asserted the safety layers "were not designed against agent-self claims"
+    // without checking. They do carry authority machinery — it classifies the produced wording as
+    // plan/review vs execute vs observe, against the request's own mode. A sentence describing the
+    // agent's permission state is none of those three, which is the precise gap, and precise is
+    // what a cold reader needs.
+    const auth = readFileSync('src/prompt-enhancement/authority-consistency.ts', 'utf8');
+    expect(auth).toContain("| 'plan_or_review'");
+    expect(auth).toContain("| 'execute_requested'");
+    expect(auth).toContain("| 'observe_or_literal'");
+    expect(auth, 'an agent-self authority value appeared — §30 point 3 must be re-measured')
+      .not.toContain('agent_self');
   });
 });
