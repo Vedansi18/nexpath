@@ -305,45 +305,36 @@ describe('HV-1 row 5 — what "partially live" means, measured per export', () =
   });
 });
 
-describe('HV-1 round 7 — two production files are invisible to text grep', () => {
-  // Found while re-checking row 4's claims: `grep` reports right-good-aggregator.ts as a BINARY
-  // file. Both it and telemetry/variant-effect.ts embed a RAW NUL byte as a composite-key
-  // separator (`${sessionId}\x00${promptIndex}`) instead of the `\u0000` escape. Runtime-identical,
-  // but grep/rg skip such files by default — and THIS PHASE'S ENTIRE METHOD is consumer sweeps by
-  // grep. Every shell sweep in rounds 2-6 had a two-file blind spot.
+describe('HV-1 round 7/8 — no production file is invisible to text grep', () => {
+  // Round 7 found two files that `grep` classified as BINARY and skipped: they embedded a RAW NUL
+  // byte as a composite-key separator instead of the `\u0000` escape. This phase's method is
+  // consumer sweeps, so every shell sweep in rounds 2-6 had a silent two-file blind spot, and
+  // `right-good-aggregator` is ROW 7 of the eleven modules HV-2 must sweep.
   //
-  // Re-run NUL-safe, none of the phase's symbols appear in either file, so no phase-32 conclusion
-  // changes. It matters for HV-2: `right-good-aggregator` is ROW 7 of the eleven modules HV-2 must
-  // sweep, so a grep-based sweep there would silently under-report its own row.
-  //
-  // These fixtures read with readFileSync, which is NUL-safe — which is why the fixtures were sound
-  // while the shell reasoning was not. ⛔ Not patched: §14.3 says H patches nothing, and the escape
-  // change is another group's source.
-  function filesContainingNul(): string[] {
-    return sourceFilesUnder('src').filter((file) => readFileSync(file, 'utf8').includes('\u0000'));
-  }
-
-  it('the NUL-carrying set is exactly the two known files', () => {
+  // Round 8 fixed it on Hiren's explicit go-ahead (it is another group's source, which §14.3
+  // otherwise bars H from patching). The escape emits the identical character — verified on the
+  // BUILT output, not assumed: dist carries `\u0000`, which evaluates to charCode 0. Worth noting
+  // that the two modules' own 42 tests do NOT cover the separator (replacing it with a printable
+  // string leaves them green), so the proof had to come from the emitted string.
+  it('no production source file carries a raw NUL byte', () => {
+    const invisible = sourceFilesUnder('src').filter((file) => readFileSync(file, 'utf8').includes('\u0000'));
     expect(
-      filesContainingNul().sort(),
-      'the grep-invisible set changed — HV-2 must re-check which modules its sweep can see',
-    ).toEqual([
-      'src/classifier/right-good-aggregator.ts',
-      'src/telemetry/variant-effect.ts',
-    ]);
+      invisible,
+      'a file became grep-invisible again — every consumer sweep, including HV-2 row 7, silently under-reports',
+    ).toEqual([]);
   });
 
-  it('and none of this phase\'s symbols live in them, so the measurements stand', () => {
-    const SYMBOLS = [
-      'getEnvTrajectory', 'EnvTrajectoryState', 'runAutogenForFire', 'probeProject',
-      'setProjectEnvFacts', 'resolveModeBand', 'ACTIVE_AGENT_ID', 'AGENT_CAPABILITIES',
-      'composeDeterministicOptions', 'recordEnvTrajectory',
-    ];
-    const found = filesContainingNul().flatMap((file) => {
-      const text = readFileSync(file, 'utf8');
-      return SYMBOLS.filter((sym) => text.includes(sym)).map((sym) => `${file}:${sym}`);
-    });
-    expect(found, 'a phase-32 symbol hides in a grep-invisible file — re-measure that row').toEqual([]);
+  it('the two former offenders still separate their composite keys with the NUL escape', () => {
+    // The escape must SURVIVE, not just the raw byte be gone: dropping the separator entirely
+    // would collapse distinct keys, which is a behaviour change the 42 tests would not catch.
+    const agg = readFileSync('src/classifier/right-good-aggregator.ts', 'utf8');
+    expect(agg).toContain('`${sessionId}\\u0000${promptIndex}`');
+    const eff = readFileSync('src/telemetry/variant-effect.ts', 'utf8');
+    expect(eff).toContain('`${projectRoot}\\u0000${signalKey}`');
+  });
+
+  it('and the escape is the NUL character, so the runtime string is unchanged', () => {
+    expect('\u0000'.charCodeAt(0)).toBe(0);
   });
 });
 
