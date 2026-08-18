@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { openStore } from '../store/db.js';
 import { upsertProject, getProjectEnvFacts, setProjectEnvFacts } from '../store/index.js';
 import { probeProject } from '../env/env-probe.js';
+import { resolveModeBand, ACTIVE_AGENT_ID } from '../env/agent-capabilities.js';
 import { recordEnvTrajectory } from '../env/env-trajectory.js';
 import { buildPromptEnhancementGroundingRefsV1 } from '../cli/commands/auto.js';
 import { mkdtempSync, writeFileSync, readFileSync, readdirSync, statSync } from 'node:fs';
@@ -19,6 +20,17 @@ import { join } from 'node:path';
  * receives zero env facts, because the probe result is written to the trajectory store while PE
  * reads the env-facts store that only `nexpath env` writes.
  */
+
+function sourceFilesUnder(dir: string): string[] {
+  const out: string[] = [];
+  for (const entry of readdirSync(dir)) {
+    const full = `${dir}/${entry}`;
+    if (statSync(full).isDirectory()) out.push(...sourceFilesUnder(full));
+    else if (entry.endsWith('.ts') && !entry.endsWith('.test.ts')) out.push(full);
+  }
+  return out;
+}
+const HV1_HELPER = true;
 
 function projectWithATestRunner(): string {
   const dir = mkdtempSync(join(tmpdir(), 'hv1-'));
@@ -83,16 +95,6 @@ describe('HV-1 row 1 — check-1 is about RUNNING, not existing', () => {
   //
   // Pinned because a caller reappearing would change row 1's measured content, and the row should
   // be re-judged rather than left describing a state that moved.
-  function sourceFilesUnder(dir: string): string[] {
-    const out: string[] = [];
-    for (const entry of readdirSync(dir)) {
-      const full = `${dir}/${entry}`;
-      if (statSync(full).isDirectory()) out.push(...sourceFilesUnder(full));
-      else if (entry.endsWith('.ts') && !entry.endsWith('.test.ts')) out.push(full);
-    }
-    return out;
-  }
-
   it('runAutogenForFire has no production caller — the DS probe consumer is dead', () => {
     const callers = sourceFilesUnder('src')
       .filter((file) => !file.endsWith('auto-template-generator.ts'))
@@ -108,5 +110,87 @@ describe('HV-1 row 1 — check-1 is about RUNNING, not existing', () => {
       .filter((file) => !file.endsWith('auto-template-generator.ts'))
       .filter((file) => readFileSync(file, 'utf8').includes('auto-template-generator.js'));
     expect(importers.length).toBeGreaterThan(0);
+  });
+});
+
+describe('HV-1 row 4 — the trajectory state is WRITE-ONLY, and its listed consumer is wrong', () => {
+  // Round 3 applied round 2's caller-check to rows 4 and 5. Row 5's listed consumers are genuinely
+  // live. Row 4's are not: §46.3c lists `trajectory-credit`, which imports nothing from
+  // env-trajectory — its only export takes ParamEvent[] and its one production caller is
+  // right-good-aggregator. So the module probes the project every session, writes its state, and
+  // NOTHING reads that state.
+  //
+  // Pinned because HV-3 will judge whether this is a defect or dead weight, and it should judge the
+  // state that actually shipped rather than a table entry that was never true.
+  it('no production module reads the env-trajectory state', () => {
+    const readers = sourceFilesUnder('src')
+      // Exclude the two modules that DEFINE the state: env-trajectory writes it, and
+      // store/env-facts.ts declares the accessor and the type. A consumer is a third party
+      // that READS it — my first version counted the definition and failed on itself.
+      .filter((file) => !file.endsWith('env-trajectory.ts') && !file.endsWith('store/env-facts.ts'))
+      .filter((file) => {
+        const text = readFileSync(file, 'utf8');
+        return text.includes('getEnvTrajectory') || text.includes('EnvTrajectoryState');
+      });
+    expect(
+      readers,
+      'a reader appeared — row 4 of §17.4 must be re-measured, not this line relaxed',
+    ).toEqual([]);
+  });
+
+  it('trajectory-credit does not consume env-trajectory — the listed consumer is wrong', () => {
+    const text = readFileSync('src/classifier/trajectory-credit.ts', 'utf8');
+    expect(text).not.toContain("from './env-trajectory.js'");
+    expect(text).not.toContain('../env/env-trajectory.js');
+  });
+});
+
+describe('HV-1 row 1 — the consumer list is wrong in BOTH directions', () => {
+  // Round 2 applied the caller-check downward and found a LISTED consumer that is dead
+  // (`runAutogenForFire`). Round 4 applies it upward: is the list COMPLETE? It is not.
+  // §46.3c names three consumers for env-probe (runtime-context · cli/env · DS autogen).
+  // `engine-option-generator` is a fourth, it is live, and it is the one that matters most:
+  // it feeds `promoteEnvFactsToTierP` — row 3's tier-promotion machinery, the plan's own
+  // "🔴 standout". HV-2 writes row 3's row, and it should start from the true consumer set
+  // rather than from a list that was never complete.
+  it('engine-option-generator consumes env-probe and feeds the row-3 promotion', () => {
+    const text = readFileSync('src/decision-session/engine-option-generator.ts', 'utf8');
+    expect(text).toContain("from '../env/env-probe.js'");
+    expect(text, 'the probe no longer feeds tier promotion — re-measure rows 1 and 3').toContain(
+      'promoteEnvFactsToTierP(probeProject(',
+    );
+  });
+
+  it('and it is reachable — composeDeterministicOptions has a production caller', () => {
+    const callers = sourceFilesUnder('src')
+      .filter((file) => !file.endsWith('engine-option-generator.ts'))
+      .filter((file) => /composeDeterministicOptions\s*\(/.test(readFileSync(file, 'utf8')));
+    expect(callers, 'this consumer went dead — row 1 must be re-measured').not.toEqual([]);
+  });
+});
+
+describe('HV-1 row 5 — the two agent-self fields are ONE upstream signal', () => {
+  // My round-1 row-5 cell cited `currentAgentMode` (auto.ts:440) and `permissionMode`
+  // (auto.ts:513) as the evidence that PE already receives agent-about-itself context. Both are
+  // assigned from the same expression, and that expression is itself the hook's `permission_mode`
+  // (auto.ts:629). So PE receives one signal under two names, not two signals.
+  //
+  // The surfaced decision is unaffected — if anything the "new category" reading is stronger,
+  // because capability facts (bands, registry, versions) would be the FIRST genuinely distinct
+  // agent-self input. Pinned so the row's evidence line cannot silently become true or falser.
+  it('both PE-facing fields are fed from the same auto input', () => {
+    const text = readFileSync('src/cli/commands/auto.ts', 'utf8');
+    expect(text).toContain("currentAgentMode: input.auto.currentAgentMode ?? 'unknown'");
+    expect(text).toContain("permissionMode: input.auto.currentAgentMode ?? 'unknown'");
+  });
+
+  it('and that input is the hook permission_mode, so resolveModeBand is correctly fed', () => {
+    const text = readFileSync('src/cli/commands/auto.ts', 'utf8');
+    expect(text).toContain('typeof payload.permission_mode === \'string\' ? payload.permission_mode');
+    // The registry keys ARE Claude Code's permission_mode values, which is why the naming
+    // mismatch is not a behavioural defect: the band lookup resolves.
+    expect(resolveModeBand(ACTIVE_AGENT_ID, 'plan')).toBe('plan');
+    expect(resolveModeBand(ACTIVE_AGENT_ID, 'bypassPermissions')).toBe('execute');
+    expect(resolveModeBand(ACTIVE_AGENT_ID, 'not_a_real_mode')).toBeUndefined();
   });
 });
