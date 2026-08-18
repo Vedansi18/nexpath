@@ -159,6 +159,8 @@ export function buildPromptEnhancementGuidanceFactsV1(
       factId: nextId('stage'),
       sourceType: 'stage_transition',
       sourceIds: [promptEnhancementStageSignalKeyV1(trigger.prevStage, trigger.currentStage)],
+      // F4 done-when: the trigger signal inherits the boundary's decision; an unstamped caller keeps an active signal
+      sourceEligibilityState: triggerEligibilityV1(request) ?? 'active_signal_eligible',
       guidanceKind: 'stage_transition_discipline',
       suggestedActionKind: 'no_action_render_context_only',
       targetFamily: 'family_agnostic',
@@ -197,6 +199,8 @@ export function buildPromptEnhancementGuidanceFactsV1(
       sourceType: 'content_template_record',
       sourceIds: [ref],
       guidanceKind: 'source_signal_guidance',
+      // F4 done-when: precedent/evidence only — L4991 permits labelling only behind an eligible survivor
+      sourceEligibilityState: 'support_only_not_triggering',
       suggestedActionKind: 'no_action_render_context_only',
       targetFamily: 'family_agnostic',
       targetSectionKind: 'source_signal_guidance',
@@ -224,6 +228,8 @@ export function buildPromptEnhancementGuidanceFactsV1(
       sourceType: 'persistent_missing_signal_memory',
       sourceIds: [ref],
       guidanceKind: 'missing_practice',
+      // F4 done-when: PE-AR-6 memory: the candidate list is already gated upstream (E3)
+      sourceEligibilityState: 'memory_eligible',
       suggestedActionKind: 'no_action_render_context_only',
       targetFamily: 'family_agnostic',
       targetSectionKind: 'source_signal_guidance',
@@ -257,6 +263,8 @@ export function buildPromptEnhancementGuidanceFactsV1(
       sourceType: 'hard_fact',
       sourceIds: [ref],
       guidanceKind: 'project_grounding',
+      // F4 done-when: project grounding is Source B — support, never the reason a popup opens
+      sourceEligibilityState: 'support_only_not_triggering',
       suggestedActionKind: 'ground_in_project_fact',
       targetFamily: 'family_agnostic',
       targetSectionKind: '',
@@ -297,6 +305,9 @@ export function buildPromptEnhancementGuidanceFactsV1(
         factId: nextId('mistake'),
         sourceType: 'absence_signal',
         sourceIds: [ref],
+        // F4 done-when: a detected recurring mistake is an ACTIVE signal, not the fired
+        // trigger — eligible in its own right, which is the behaviour it already had.
+        sourceEligibilityState: 'active_signal_eligible',
         guidanceKind: mistakeIsSensitive ? 'safety_or_confirmation' : 'missing_practice',
         suggestedActionKind: 'no_action_render_context_only',
         targetFamily: 'family_agnostic',
