@@ -3,6 +3,7 @@ import { promptEnhancementConfidenceBandForV1 } from './source-mix.js';
 import {
   isPromptEnhancementRenderableRuntimePathV1,
   promptEnhancementGuidanceFactRefIdV1,
+  promptEnhancementSectionKindForFactV1,
   type PromptEnhancementGuidanceFact,
 } from './templates/section-plan.js';
 
@@ -167,7 +168,11 @@ export function promptEnhancementFactValueLinesV1(
 ): readonly string[] {
   const lines: string[] = [];
   for (const fact of facts) {
-    if (fact.targetSectionKind !== sectionKind) continue;
+    // §17.7: ask the PLANNER's resolution, never the raw field. A content-carrying fact ships
+    // `targetSectionKind` empty and is placed by its action, so reading the field raw drops it from
+    // the very section it was planned into. All THREE readers here must agree — the grounded-values
+    // allow-list included, or it would permit a value the body never contained.
+    if (promptEnhancementSectionKindForFactV1(fact) !== sectionKind) continue;
     if (!isRenderableValueFactV1(fact)) continue;
     if (isReferenceOnlyV1(fact)) {
       // States THAT the source exists; never its content.
@@ -200,7 +205,11 @@ export function promptEnhancementGroundedValuesV1(
 ): readonly string[] {
   const values: string[] = [];
   for (const fact of facts) {
-    if (fact.targetSectionKind !== sectionKind) continue;
+    // §17.7: ask the PLANNER's resolution, never the raw field. A content-carrying fact ships
+    // `targetSectionKind` empty and is placed by its action, so reading the field raw drops it from
+    // the very section it was planned into. All THREE readers here must agree — the grounded-values
+    // allow-list included, or it would permit a value the body never contained.
+    if (promptEnhancementSectionKindForFactV1(fact) !== sectionKind) continue;
     if (!isRenderableValueFactV1(fact) || isReferenceOnlyV1(fact)) continue;
     // Must match what the renderer states, or the allow-list would permit a raw
     // value the body never contained and miss the masked one it does.
@@ -235,7 +244,11 @@ export function promptEnhancementSectionModelFactsV1(
     originScope: string; claimVerbPolicy: string; evidence: string | undefined;
   }[] = [];
   for (const fact of facts) {
-    if (fact.targetSectionKind !== sectionKind) continue;
+    // §17.7: ask the PLANNER's resolution, never the raw field. A content-carrying fact ships
+    // `targetSectionKind` empty and is placed by its action, so reading the field raw drops it from
+    // the very section it was planned into. All THREE readers here must agree — the grounded-values
+    // allow-list included, or it would permit a value the body never contained.
+    if (promptEnhancementSectionKindForFactV1(fact) !== sectionKind) continue;
     // A gated fact is WITHHELD here, never OMITTED. The planner's citable list keys
     // on `renderPolicy` alone, so a fact gated by privacy, sanitization, claim policy
     // or priority still reaches the model as an ALLOWED id — and with no entry beside

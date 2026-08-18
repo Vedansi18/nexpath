@@ -805,8 +805,22 @@ export function normalizeGuidanceFacts(
   }));
 }
 
-function sectionKindForFact(fact: PromptEnhancementGuidanceFact): string {
+/**
+ * WHICH SECTION DOES THIS FACT BELONG TO — the single answer (prohibition 15: one map, one meaning).
+ *
+ * 🔴 Exported at HV-2's finding (§17.7). This resolution was correct and private, so the RENDERER
+ * answered the same question a second way — by reading `targetSectionKind` raw. Every content-
+ * carrying fact ships that field EMPTY (`guidance-facts.ts:270`) and relies on the action fallback,
+ * so a fact was planned into `project_grounding_facts` here and then dropped by the renderer asked
+ * for that same section. Measured: zero fact-value lines under all twelve production section kinds.
+ * The fix is not a second fallback in the renderer — it is this function being the only one.
+ */
+export function promptEnhancementSectionKindForFactV1(fact: PromptEnhancementGuidanceFact): string {
   return fact.targetSectionKind || SECTION_KIND_BY_ACTION[fact.suggestedActionKind];
+}
+
+function sectionKindForFact(fact: PromptEnhancementGuidanceFact): string {
+  return promptEnhancementSectionKindForFactV1(fact);
 }
 
 function sourceARef(sourceRefs: readonly PromptEnhancementSourceRefV1[]): PromptEnhancementSourceRefV1 {
