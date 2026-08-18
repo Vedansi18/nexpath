@@ -350,6 +350,32 @@ export function estimatePromptEnhancementPayloadWeightV1(
   return Math.ceil((evidenceChars + sourceIdChars) / 4);
 }
 
+/**
+ * A6 (L4981-4982 · L4964 · L4979): PROMOTE the mixer's decision onto each fact.
+ *
+ * The done-when is that nothing lives only as a mixer local — a consumer holding a fact must see
+ * why it was selected, suppressed, deferred or invalidated without re-deriving it from the result
+ * envelope. `sourceMixFactId` and `payloadWeight` ride the same pass, because this is the one place
+ * that sees every fact exactly once.
+ *
+ * ⚠️ Called before EVERY return, not just the final one. A6 first promoted only on the success
+ * path, so every skip — no Source-A survivor, Source-B-only, invalid-source fallback — returned
+ * classified facts carrying none of the tier-4 fields. That is precisely where observability is
+ * wanted: a skipped popup is the case someone needs explained.
+ */
+function promotePromptEnhancementMixDecisionV1(
+  classified: readonly PromptEnhancementSourceMixFact[],
+  mixRunId: string,
+): void {
+  for (const entry of classified) {
+    const promoted = entry.fact as { -readonly [K in keyof PromptEnhancementGuidanceFact]: PromptEnhancementGuidanceFact[K] };
+    promoted.selectionState = entry.selectionRole as PromptEnhancementSelectionStateV1;
+    promoted.selectionReasonCodes = [entry.selectionReasonCode];
+    promoted.sourceMixFactId = `${mixRunId}:${entry.fact.factId}`;
+    promoted.payloadWeight = estimatePromptEnhancementPayloadWeightV1(entry.fact);
+  }
+}
+
 export function applyPromptEnhancementSourceMixV1(
   rawFacts: readonly PromptEnhancementGuidanceFact[],
   levelState: PromptEnhancementPrepareRequestV1['userPreferenceContext']['levelState'] = 'default',
@@ -402,6 +428,9 @@ export function applyPromptEnhancementSourceMixV1(
         selectionReasonCode: 'no_source_a_survivor_no_source_b_filler',
       });
     }
+    // Same promotion on the SKIP path: a fact that never rendered still carries why.
+    promotePromptEnhancementMixDecisionV1(classified, mixRunId);
+
     // A Source A candidate rejected for invalidity, with none valid remaining, is the
     // fallback path (not a plain "no signal" skip).
     const skipProfile: PromptEnhancementSourceMixProfile = rejectedSourceA
@@ -523,21 +552,8 @@ export function applyPromptEnhancementSourceMixV1(
     }
   }
 
-  // A6 (L4981-4982): PROMOTE the mixer's decision onto the fact. The done-when is that nothing
-  // lives only as a mixer local — a consumer holding a fact must be able to see why it was
-  // selected, suppressed, deferred or invalidated without re-deriving it from this envelope.
-  //
-  // `payloadWeight` (L4979) and `sourceMixFactId` (L4964) are stamped in the same pass, because
-  // this is the one place that sees every fact exactly once: the id is stable per popup-session
-  // (the run's own decision id + the fact's own id), and the weight is the estimate the caps here
-  // already reason about. ⛔ Weight is cap/visibility metadata only — never product-cost control.
-  for (const entry of classified) {
-    const promoted = entry.fact as { -readonly [K in keyof PromptEnhancementGuidanceFact]: PromptEnhancementGuidanceFact[K] };
-    promoted.selectionState = entry.selectionRole as PromptEnhancementSelectionStateV1;
-    promoted.selectionReasonCodes = [entry.selectionReasonCode];
-    promoted.sourceMixFactId = `${mixRunId}:${entry.fact.factId}`;
-    promoted.payloadWeight = estimatePromptEnhancementPayloadWeightV1(entry.fact);
-  }
+  promotePromptEnhancementMixDecisionV1(classified, mixRunId);
+
 
   const renderedFacts = classified
     .filter((entry) => entry.selectionRole === 'selected_required' || entry.selectionRole === 'selected_supporting')

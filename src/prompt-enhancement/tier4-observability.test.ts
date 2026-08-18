@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { promptEnhancementFactValueLinesV1 } from './fact-value-render.js';
+import {
+  promptEnhancementFactValueLinesV1,
+  promptEnhancementSectionModelFactsV1,
+} from './fact-value-render.js';
 import {
   applyPromptEnhancementSourceMixV1,
   estimatePromptEnhancementPayloadWeightV1,
@@ -234,5 +237,72 @@ describe('A6 / L4970 — the gate is APPLIED, not merely typed', () => {
     // observability field into a behaviour change.
     const lines = promptEnhancementFactValueLinesV1('project_grounding_facts', [groundingFact(undefined)]);
     expect(lines).toHaveLength(1);
+  });
+});
+
+describe('A6 — the SKIP paths carry the observability too', () => {
+  // Verification round 2: the promotion ran only before the FINAL return, so every skip — no
+  // Source-A survivor, Source-B-only, invalid-source fallback — returned classified facts with none
+  // of the tier-4 fields. That is exactly backwards: a skipped popup is the case someone needs
+  // explained, and observability that only exists on the success path explains the case nobody asks
+  // about.
+  const sourceBOnly = (): PromptEnhancementGuidanceFact => fact({
+    factId: 'grounding-1',
+    sourceType: 'hard_fact',
+    guidanceKind: 'project_grounding',
+    suggestedActionKind: 'ground_in_project_fact',
+    targetSectionKind: 'project_grounding_facts',
+    sourceOriginScope: 'local_probe',
+    evidence: { key: 'test_runner', value: 'vitest' },
+  });
+
+  it('a fact on the no-survivor skip path still carries state, codes, id and weight', () => {
+    const result = applyPromptEnhancementSourceMixV1([sourceBOnly()], 'default');
+    expect(result.showPopup).toBe(false);
+    const entry = result.classifiedFacts.find((row) => row.fact.factId === 'grounding-1');
+    expect(entry, 'the fact vanished from the skip result').toBeDefined();
+    expect(entry?.fact.selectionState).toBeDefined();
+    expect(entry?.fact.selectionReasonCodes?.length).toBeGreaterThan(0);
+    expect(entry?.fact.sourceMixFactId).toBeDefined();
+    expect(typeof entry?.fact.payloadWeight).toBe('number');
+  });
+
+  it('the skip reason is the one the mixer recorded, not a placeholder', () => {
+    const result = applyPromptEnhancementSourceMixV1([sourceBOnly()], 'default');
+    const entry = result.classifiedFacts.find((row) => row.fact.factId === 'grounding-1');
+    expect(entry?.fact.selectionReasonCodes).toEqual([entry?.selectionReasonCode]);
+  });
+});
+
+describe('A6 / L4964 — "never rendered", checked at both outbound surfaces', () => {
+  // The lock says the id is local identity only. Two surfaces can leak it: the BODY the user sends,
+  // and the MODEL payload GR-2 built. Both are checked, because typing a field as internal does not
+  // keep it out of a string someone builds later.
+  const renderableFact = (): PromptEnhancementGuidanceFact => fact({
+    factId: 'render-1',
+    sourceType: 'hard_fact',
+    guidanceKind: 'project_grounding',
+    suggestedActionKind: 'ground_in_project_fact',
+    targetSectionKind: 'project_grounding_facts',
+    priority: 'normal',
+    claimVerbPolicy: 'may_state_as_project_capability',
+    sourceOriginScope: 'local_probe',
+    sourceAnchorScope: 'project_root',
+    sourceRuntimePath: 'local_probe',
+    evidence: { key: 'test_runner', value: 'vitest' },
+    sourceMixFactId: 'mix:9:render-1',
+  });
+
+  it('the body never contains the mix fact id', () => {
+    const lines = promptEnhancementFactValueLinesV1('project_grounding_facts', [renderableFact()]);
+    expect(lines.length).toBeGreaterThan(0);
+    expect(lines.join(' ')).not.toContain('mix:9:render-1');
+  });
+
+  it('the MODEL payload never contains it either — it cites the guidance ref, not the mix id', () => {
+    const payload = promptEnhancementSectionModelFactsV1('project_grounding_facts', [renderableFact()]);
+    expect(payload.length).toBeGreaterThan(0);
+    expect(JSON.stringify(payload)).not.toContain('mix:9:render-1');
+    expect(payload[0]?.factId).toBe('guidance_fact:render-1');
   });
 });
