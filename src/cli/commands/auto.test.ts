@@ -29,6 +29,7 @@ import {
   buildFiredKey,
   buildPromptEnhancementCliSubmitConsumerDiagnosticV1,
   buildPromptEnhancementRequestForAuto,
+  promptEnhancementFiredTriggerEligibilityV1,
   createPromptEnhancementCliHostConsumerV1,
   preparePromptEnhancementForAuto,
   recordPromptEnhancementCliFeedbackV1,
@@ -3657,5 +3658,60 @@ describe('F4 end-to-end — the boundary decision survives all the way onto the 
     const facts = buildPromptEnhancementGuidanceFactsV1(request);
     const trigger = facts.find((fact) => fact.sourceType === 'absence_signal');
     expect(trigger?.sourceEligibilityState).toBe('fresh_trigger_eligible');
+  });
+});
+
+describe('F4 — dismissed_or_user_skipped, the value that had no producer', () => {
+  // Round 6: phase 30 shipped recording this state as "typed and gated but nothing stamps it".
+  // That was too quick — SessionStateManager already records `dismissedAtIndex` on an absence flag
+  // when the user acts on it, and L4991 names dismissal as a state that must not anchor a popup.
+  // So the boundary can read it, and the main path now distinguishes a clean fire from a signal
+  // the user has already dismissed.
+  async function eligibilityForDismissalState(dismissed: boolean): Promise<string | undefined> {
+    const store = await openStore(':memory:');
+    const projectRoot = `C:/tmp/f4-dismiss-${dismissed ? 'yes' : 'no'}`;
+    const session = SessionStateManager.load(store, projectRoot);
+    session.addAbsenceFlag(store, {
+      signalKey: 'verification_gap',
+      stage: 'implementation',
+      detectedAtIndex: 0,
+      cooldownUntil: 0,
+      ...(dismissed ? { dismissedAtIndex: 1 } : {}),
+    } as never);
+    const request = buildPromptEnhancementRequestForAuto({
+      auto: makeInput({ projectRoot, promptText: IMPL_PROMPT, currentAgentMode: 'workspace-write' }),
+      store,
+      session,
+      project: null,
+      effectiveLanguage: 'en',
+      configuredRole: null,
+      effectiveFlagType: 'absence:verification_gap',
+      firedKey: 'absence:verification_gap@implementation',
+      previousStage: 'idea',
+      trigger: { kind: 'absence' },
+      stageResult: {
+        classification: { stage: 'implementation', confidence: 0.9, tier: 3, allScores: {} },
+        signalsPresent: [],
+        signalsAbsent: ['verification_gap'],
+        fireRecommendation: true,
+        selectedSignalKey: 'verification_gap',
+      } as never,
+      streamBOutputs: [],
+      // The REAL production rule, not a copy of it — a replicated decision passes even when
+      // production is mutated to the wrong value, which is exactly what happened here.
+      triggerEligibility: promptEnhancementFiredTriggerEligibilityV1(
+        session.current.absenceFlags,
+        'absence:verification_gap',
+      ),
+    } as never);
+    return request.sourceSignals.triggerSignalEligibilityState;
+  }
+
+  it('a signal the user already dismissed is labelled dismissed_or_user_skipped', async () => {
+    expect(await eligibilityForDismissalState(true)).toBe('dismissed_or_user_skipped');
+  });
+
+  it('an undismissed signal on the same path stays fresh_trigger_eligible', async () => {
+    expect(await eligibilityForDismissalState(false)).toBe('fresh_trigger_eligible');
   });
 });

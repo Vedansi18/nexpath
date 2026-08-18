@@ -316,6 +316,29 @@ export function buildPromptEnhancementGroundingRefsV1(store: Store, projectRoot:
   };
 }
 
+/**
+ * F4 (L4991): the eligibility a CLEANLY-FIRED trigger carries.
+ *
+ * Reaching the fire path means frequency, dedup, cooldown, cap and the classifier recommendation
+ * all passed — so the signal is `fresh_trigger_eligible` unless the user has already DISMISSED
+ * this very signal, which `SessionStateManager` records as `dismissedAtIndex` on the absence flag.
+ * L4991 names dismissal as a state that must not anchor a popup.
+ *
+ * ⚠️ Exported because a test that re-implements this decision proves nothing about production —
+ * measured at verification round 6, where fixtures replicating the logic passed happily while the
+ * production branch was mutated to the wrong value.
+ */
+export function promptEnhancementFiredTriggerEligibilityV1(
+  absenceFlags: readonly { signalKey: string; dismissedAtIndex?: number }[],
+  effectiveFlagType: string,
+): PromptEnhancementSourceEligibilityStateV1 {
+  const signalKey = effectiveFlagType.replace(/^absence:/, '');
+  const dismissed = absenceFlags.some(
+    (flag) => flag.signalKey === signalKey && flag.dismissedAtIndex !== undefined,
+  );
+  return dismissed ? 'dismissed_or_user_skipped' : 'fresh_trigger_eligible';
+}
+
 export function buildPromptEnhancementRequestForAuto(input: {
   auto: AutoInput;
   store: Store;
@@ -1255,8 +1278,12 @@ export async function runAuto(
       trigger: triggerResult,
       stageResult,
       // F4: this path is reached only after frequency, dedup, cooldown, cap and the
-      // classifier fire-recommendation have ALL passed — so the trigger is cleanly eligible.
-      triggerEligibility: 'fresh_trigger_eligible',
+      // classifier fire-recommendation have ALL passed — so the trigger is cleanly eligible,
+      // UNLESS the user already dismissed this very signal. `dismissedAtIndex` is set on the
+      // absence flag when the user acts on it, and L4991 names dismissal as a state that must
+      // not anchor a popup — so the one locked value that had no producer now has one, read
+      // from session state rather than inferred.
+      triggerEligibility: promptEnhancementFiredTriggerEligibilityV1(mgr.current.absenceFlags, effectiveFlagType),
       streamBOutputs: streamBOverrides
         ? Object.entries(streamBOverrides)
           .filter(([, present]) => present)
