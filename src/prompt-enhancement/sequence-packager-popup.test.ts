@@ -174,7 +174,7 @@ describe('sequence packager — checked by the thing that checks it', () => {
 
   it('carries the progress the contract had nowhere for', async () => {
     const { packaged } = await packagedPopup(2);
-    expect(packaged.progress).toEqual({ done: 2, total: 4 });
+    expect(packaged.progress).toEqual({ done: 2, total: 3 });
   });
 
   it('serves the same item unchanged when it comes back, at the surface the user sees', async () => {

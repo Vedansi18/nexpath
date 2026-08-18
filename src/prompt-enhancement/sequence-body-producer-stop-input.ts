@@ -89,6 +89,11 @@ export function assemblePromptEnhancementSequenceBodyProducerInputV1(
       optionalCallAvailabilityState: result.validationGraph.optionalCallAvailabilityState,
       // Match the packager's inline `${sequenceId}:item:${order}` scheme (continuation-packager-input.ts).
       sequenceItemIdFor: (order) => `${planGenerationId}:item:${order}`,
+      // PROPER FIX — the production Stop path opts into the deterministic body fallback: when the model
+      // batch cannot word the items, they are worded without it so the sequence (and its second popup)
+      // is never lost to an empty `items_json`. Only the failed-batch path is affected; a batch that
+      // succeeds is used unchanged.
+      deterministicFallback: true,
     },
   };
 }

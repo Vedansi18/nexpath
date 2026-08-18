@@ -35,6 +35,7 @@ import { runStop, promptEnhancementMpsOfferDispositionFromPopupV1, recordPromptE
 import type { StopPayload } from './stop.js';
 import { upsertPendingAdvisory, getPendingAdvisory } from '../../store/pending-advisories.js';
 import { upsertPendingPromptEnhancement, getPendingPromptEnhancement, type PendingPromptEnhancement } from '../../store/pending-prompt-enhancements.js';
+import { setConfig } from '../../store/config.js';
 import { upsertPendingPromptSequence, getActivePendingPromptSequence, getPromptEnhancementSequenceOfferDisposition, recordPromptEnhancementSequenceOfferDeclined } from '../../store/pending-sequences.js';
 import { applyPromptEnhancementSequenceRuntimeActionV1 } from '../../prompt-enhancement/sequence-runtime.js';
 import type { PromptEnhancementCliPopupResultV1 } from '../../prompt-enhancement/cli-submit-popup.js';
@@ -146,6 +147,37 @@ describe('runStop — deferred Prompt Enhancement popup (B-i)', () => {
     expect(result).toEqual({ outcome: 'no_pending' });
   });
 
+  // Popup cooldown (prompt_enhancement.popup_cooldown, default 15): after a PE/MPS-1 popup is shown,
+  // new ones are suppressed for N prompts. The first popup always shows.
+  it('popup cooldown: the FIRST popup always shows (no prior popup this session)', async () => {
+    await insertPendingPe(store); // lastPromptEnhancementPromptIndex defaults to -1 → not in cooldown
+    const launch = inject('ENHANCED FIRST');
+    const result = await runStop(makePayload(), store, undefined, undefined, undefined, launch);
+    expect(launch).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ outcome: 'blocked', reason: 'ENHANCED FIRST' });
+  });
+
+  it('popup cooldown: a NEW popup within the cooldown is SUPPRESSED — never launched, record consumed', async () => {
+    await insertPendingPe(store);
+    // A popup was just shown this prompt → cooldown active (default 15, promptCount unchanged).
+    SessionStateManager.load(store, '/test/project').markPromptEnhancementPopupShown(store);
+    const launch = inject('SHOULD NOT SHOW');
+    const result = await runStop(makePayload(), store, undefined, undefined, undefined, launch);
+    expect(launch).not.toHaveBeenCalled();                                       // suppressed
+    expect(getPendingPromptEnhancement(store, '/test/project')).toBeNull();      // consumed, no lingering
+    expect(result).toEqual({ outcome: 'no_pending' });
+  });
+
+  it('popup cooldown = 0 disables suppression (popup shows even right after one)', async () => {
+    setConfig(store, 'prompt_enhancement.popup_cooldown', '0');
+    await insertPendingPe(store);
+    SessionStateManager.load(store, '/test/project').markPromptEnhancementPopupShown(store);
+    const launch = inject('SHOWS ANYWAY');
+    const result = await runStop(makePayload(), store, undefined, undefined, undefined, launch);
+    expect(launch).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ outcome: 'blocked', reason: 'SHOWS ANYWAY' });
+  });
+
   // MPS continuation launcher (P3, fail-closed) — an active pending-sequence row must NOT open a
   // popup, advance, or mutate while the runtime gate is closed. Proves the launcher is inert.
   // MPS-6: the continuation Stop is the `stop_hook_active` event (a sequence delivers each item by
@@ -163,6 +195,66 @@ describe('runStop — deferred Prompt Enhancement popup (B-i)', () => {
     const result = await runStop(makePayload({ stop_hook_active: true }), store, undefined, undefined, undefined, notShown());
     expect(result).toEqual({ outcome: 'mps_continuation_gated' });
     // The row is left EXACTLY as-is: no advance, no status change, no scrub (fail-closed).
+    const after = getActivePendingPromptSequence(store, '/test/project', session.current.sessionId);
+    expect(after).toMatchObject({ currentItemIndex: 1, status: 'item_pending', lastActionId: 'prev' });
+  });
+
+  // Phase 5 (interruption resume) — after "I need to do something else first" the row is left
+  // `item_pending` WITHOUT blocking, so the next Stop is NOT stop_hook_active and the top launcher
+  // never runs. A second entry point on the ordinary (non-stop_hook_active) path re-offers the held
+  // item once the user's own turn resolves without blocking. In tests there is no host, so the launcher
+  // is gated → the row is left untouched (a re-offer, never an advance). These lock that routing.
+  const seedInterruptedSequence = (
+    store: Store,
+    status: 'item_pending' | 'awaiting_response',
+    sessionId: string,
+  ): void => {
+    upsertPendingPromptSequence(store, {
+      sequenceId: 'seq-i', enhancementId: 'enh-i', projectRoot: '/test/project',
+      sessionId, itemCount: 3, currentItemIndex: 1, status, lastActionId: 'prev',
+    }, emptyPromptEnhancementSequencePayloadV1(64));
+  };
+
+  it('resumes a held (item_pending) item on a non-stop_hook_active Stop with no pending PE', async () => {
+    const session = SessionStateManager.load(store, '/test/project');
+    session.setDetectedLanguage(store, undefined);
+    seedInterruptedSequence(store, 'item_pending', session.current.sessionId);
+    // Not stop_hook_active + no pending PE → before Phase 5 this returned 'no_pending'. Now it re-offers.
+    const result = await runStop(makePayload({ stop_hook_active: false }), store, undefined, undefined, undefined, notShown());
+    expect(result).toEqual({ outcome: 'mps_continuation_gated' });
+    // Re-offer, NOT advance: the row stays item_pending at the SAME index, unmutated.
+    const after = getActivePendingPromptSequence(store, '/test/project', session.current.sessionId);
+    expect(after).toMatchObject({ currentItemIndex: 1, status: 'item_pending', lastActionId: 'prev' });
+  });
+
+  it('does NOT resume an awaiting_response sequence on a non-stop_hook_active Stop (that belongs to the top launcher)', async () => {
+    const session = SessionStateManager.load(store, '/test/project');
+    session.setDetectedLanguage(store, undefined);
+    seedInterruptedSequence(store, 'awaiting_response', session.current.sessionId);
+    const result = await runStop(makePayload({ stop_hook_active: false }), store, undefined, undefined, undefined, notShown());
+    expect(result).toEqual({ outcome: 'no_pending' });
+    // Left completely untouched — mid-delivery sequences are the stop_hook_active launcher's job.
+    const after = getActivePendingPromptSequence(store, '/test/project', session.current.sessionId);
+    expect(after).toMatchObject({ currentItemIndex: 1, status: 'awaiting_response', lastActionId: 'prev' });
+  });
+
+  it('resumes the held item after the "something else" PE is closed with use-original (shown)', async () => {
+    await insertPendingPe(store); // the user's "something else" prompt, awaiting its deferred PE popup
+    const session = SessionStateManager.load(store, '/test/project');
+    seedInterruptedSequence(store, 'item_pending', session.current.sessionId);
+    // PE popup shows and is closed without sending → no block → the held item returns this Stop.
+    const result = await runStop(makePayload({ stop_hook_active: false }), store, undefined, undefined, undefined, shown());
+    expect(result).toEqual({ outcome: 'mps_continuation_gated' });
+  });
+
+  it('does NOT double-fire when the "something else" PE is SENT — it blocks, and the next stop_hook_active Stop re-offers', async () => {
+    await insertPendingPe(store);
+    const session = SessionStateManager.load(store, '/test/project');
+    seedInterruptedSequence(store, 'item_pending', session.current.sessionId);
+    // Send enhanced → inject → block. The resume must NOT also fire this Stop (the block arms the next one).
+    const result = await runStop(makePayload({ stop_hook_active: false }), store, undefined, undefined, undefined, inject('SOMETHING ELSE ENHANCED'));
+    expect(result).toEqual({ outcome: 'blocked', reason: 'SOMETHING ELSE ENHANCED' });
+    // The held item is untouched — it re-offers on the NEXT (stop_hook_active) Stop via the top launcher.
     const after = getActivePendingPromptSequence(store, '/test/project', session.current.sessionId);
     expect(after).toMatchObject({ currentItemIndex: 1, status: 'item_pending', lastActionId: 'prev' });
   });
@@ -186,10 +278,10 @@ describe('runStop — deferred Prompt Enhancement popup (B-i)', () => {
       const logged = call![1] as { missingGateCodeCount: number; missingGateCodes: readonly string[] };
       // The full list is logged with no silent slice — count equals the array length.
       expect(logged.missingGateCodes.length).toBe(logged.missingGateCodeCount);
-      // P7 wiring: the real evidence reader supplies the real flags, so the missing list is now short and
-      // ALWAYS carries the acceptance-oracle flag — the deliberate un-gate blocker. (This env has no
-      // OPENAI_API_KEY, so the provider flag is missing too; production resolves a key and it is not.)
-      expect(logged.missingGateCodes).toContain('focused_runtime_fixtures_pending');
+      // UN-GATED (owner sign-off): the acceptance-oracle flag is passed in code, so it is NEVER in the
+      // missing list. (This env has no OPENAI_API_KEY, so the PROVIDER flag is missing and the gate stays
+      // fail-closed HERE on a REAL flag — as designed; production resolves a key and it is not.)
+      expect(logged.missingGateCodes).not.toContain('focused_runtime_fixtures_pending');
       // The truncating `reasonCodes` field must no longer exist.
       expect(logged).not.toHaveProperty('reasonCodes');
     } finally {
@@ -197,13 +289,11 @@ describe('runStop — deferred Prompt Enhancement popup (B-i)', () => {
     }
   });
 
-  // P7 (un-gate) wiring, READY BUT UNAUTHORIZED: the launcher now passes a REAL continuation event AND
-  // the real evidence reader (buildFutureSequenceRuntimeGateEvidenceV1) with the owner acceptance-oracle
-  // sign-off left FALSE. This must NOT open the gate — `allowed` stays false. The reader supplies the ten
-  // real flags, so the gate is now blocked by exactly ONE missing flag (focused_runtime_fixtures_pending)
-  // rather than all eleven; the outcome (gated) is byte-identical. Flipping the sign-off to true — the
-  // whole un-gate — is authorised only by the owner and is deliberately not done here.
-  it('P7 wiring: the real evidence reader with no owner sign-off keeps the gate fail-closed (allowed never flips)', async () => {
+  // UN-GATED (owner sign-off 2026-08-17): the acceptance-oracle flag is passed in code, so it is NEVER the
+  // blocker. The gate still fails closed on the OTHER, REAL flags — e.g. provider availability. This env has
+  // no OPENAI_API_KEY, so the provider flag is missing and the gate stays closed HERE on that real flag,
+  // never on the un-gated sign-off. On a real machine with the key, every flag is satisfied → allowed:true.
+  it('the gate stays fail-closed on a REAL missing flag (provider), never on the un-gated sign-off flag', async () => {
     const session = SessionStateManager.load(store, '/test/project');
     session.setDetectedLanguage(store, undefined);
     upsertPendingPromptSequence(store, {
@@ -218,10 +308,10 @@ describe('runStop — deferred Prompt Enhancement popup (B-i)', () => {
       const call = debugSpy.mock.calls.find(([message]) => message === 'stop_mps_continuation_gate');
       expect(call).toBeDefined();
       const logged = call![1] as { allowed: boolean; missingGateCodes: readonly string[] };
-      // The whole point of P7-ready-but-unauthorized: the reader is wired, but the gate does not open.
+      // Still fail-closed here — but on a REAL flag (no provider key), not the un-gated sign-off.
       expect(logged.allowed).toBe(false);
-      // The owner acceptance-oracle flag is the deliberate blocker — always missing until the sign-off.
-      expect(logged.missingGateCodes).toContain('focused_runtime_fixtures_pending');
+      expect(logged.missingGateCodes).not.toContain('focused_runtime_fixtures_pending');
+      expect(logged.missingGateCodes).toContain('provider_api_availability_pending');
     } finally {
       debugSpy.mockRestore();
     }
@@ -230,7 +320,7 @@ describe('runStop — deferred Prompt Enhancement popup (B-i)', () => {
     expect(after).toMatchObject({ currentItemIndex: 2, status: 'item_pending', lastActionId: 'prev' });
   });
 
-  it('DEV/TEST override NEXPATH_MPS_TEST_UNGATE=1 OPENS the gate (and the default, no env, keeps it closed)', async () => {
+  it('the continuation gate is UN-GATED (owner sign-off) — `focused_runtime_fixtures_pending` is never the blocker, with NO env var', async () => {
     const session = SessionStateManager.load(store, '/test/project');
     session.setDetectedLanguage(store, undefined);
     upsertPendingPromptSequence(store, {
@@ -241,21 +331,16 @@ describe('runStop — deferred Prompt Enhancement popup (B-i)', () => {
     const debugSpy = vi.spyOn(logger, 'debug').mockImplementation(() => {});
     const prev = process.env['NEXPATH_MPS_TEST_UNGATE'];
     try {
-      // No env → the acceptance-oracle flag is missing (the committed production default is false).
+      // Un-gated: the acceptance-oracle flag is recorded as passed IN CODE (owner sign-off 2026-08-17), so
+      // it is NEVER the blocker — with or without any env var. The `NEXPATH_MPS_TEST_UNGATE` dependency is
+      // removed; a real user needs no command. (This no-key test env still misses the PROVIDER flag, so the
+      // gate stays fail-closed HERE; on a real machine with the key present, every flag is satisfied and the
+      // gate is allowed:true — the popup renders with no command.)
       delete process.env['NEXPATH_MPS_TEST_UNGATE'];
       await runStop(makePayload({ stop_hook_active: true }), store, undefined, undefined, undefined, notShown());
-      const closed = debugSpy.mock.calls.filter(([m]) => m === 'stop_mps_continuation_gate').pop();
-      expect((closed![1] as { missingGateCodes: readonly string[] }).missingGateCodes).toContain('focused_runtime_fixtures_pending');
-
-      // Dev/test override set → the acceptance-oracle flag is SATISFIED (removed from the missing list), so
-      // the sign-off is no longer the blocker. (This no-key test env still misses the provider flag; on a
-      // real machine with OPENAI_API_KEY set, all flags are present and the gate is allowed:true.) The
-      // committed production default (no env) never ships this — it stays fail-closed.
-      debugSpy.mockClear();
-      process.env['NEXPATH_MPS_TEST_UNGATE'] = '1';
-      await runStop(makePayload({ stop_hook_active: true }), store, undefined, undefined, undefined, notShown());
-      const opened = debugSpy.mock.calls.filter(([m]) => m === 'stop_mps_continuation_gate').pop();
-      expect((opened![1] as { missingGateCodes: readonly string[] }).missingGateCodes).not.toContain('focused_runtime_fixtures_pending');
+      const gate = debugSpy.mock.calls.filter(([m]) => m === 'stop_mps_continuation_gate').pop();
+      expect((gate![1] as { missingGateCodes: readonly string[] }).missingGateCodes)
+        .not.toContain('focused_runtime_fixtures_pending');
     } finally {
       if (prev === undefined) delete process.env['NEXPATH_MPS_TEST_UNGATE']; else process.env['NEXPATH_MPS_TEST_UNGATE'] = prev;
       debugSpy.mockRestore();

@@ -40,12 +40,14 @@ import {
   type PromptEnhancementSequencePayloadReasonCodeV1,
   type PromptEnhancementSequenceRoleLabelV1,
 } from './sequence-payload.js';
+import { PROMPT_ENHANCEMENT_SEQUENCE_MAX_ITEM_COUNT_V1 } from './sequence-runtime.js';
 import type {
   PromptEnhancementCapabilityId,
   PromptEnhancementFamilyId,
   PromptEnhancementPrimaryIntent,
   PromptEnhancementRouteConfidence,
 } from './routing-taxonomy.js';
+import { promptEnhancementSequenceRoleLabelForTextV1 } from './routing-taxonomy.js';
 import {
   promptEnhancementAuthorityModeForTextV1,
   promptEnhancementRiskKindsForTextV1,
@@ -170,7 +172,16 @@ export type PromptEnhancementSequencePlannerResultV1 =
  */
 type PlannerAttemptV1 =
   | { ok: true; output: PromptEnhancementSequencePlannerOutputV1 }
-  | { ok: false; reason: PromptEnhancementSequencePlannerFailureReasonV1; itemIndex?: number };
+  | {
+      ok: false;
+      reason: PromptEnhancementSequencePlannerFailureReasonV1;
+      itemIndex?: number;
+      // PROPER FIX — the deterministic rebuild of THIS plan, carried alongside its failure so the loop
+      // can fall back to it once model repair is spent, without spending another call to get it. Present
+      // only when the plan had a usable decomposition (two or more tasks) and the rebuild validated;
+      // the loop ignores it unless the caller opted into the fallback.
+      repair?: PromptEnhancementSequencePlannerOutputV1;
+    };
 
 /**
  * How many times a plan that came back wrong may be sent back for repair.
@@ -279,6 +290,15 @@ export interface PromptEnhancementSequencePlannerInputV1 {
   deadlineAtMs?: number;
   /** How the deadline is read. Present so the check is testable without waiting for real time. */
   nowMs?: () => number;
+  /**
+   * PROPER FIX — enables the deterministic sequence fallback on the FINAL attempt: a plan the model
+   * could not make valid is rebuilt from its own task decomposition rather than rejected, so
+   * `items_json` is never empty and the second popup is never lost. Off by default, which is the exact
+   * behaviour without it — the model-repair loop rejects an unfixable plan and the single-prompt path
+   * takes over. The production caller (the hook, via the facade) turns it on; direct callers that want
+   * the strict reject contract leave it off.
+   */
+  deterministicFallback?: boolean;
 }
 
 /**
@@ -543,6 +563,100 @@ function sliceTextFor(
 }
 
 /**
+ * PROPER FIX — the deterministic sequence repair.
+ *
+ * When the model's plan is structurally invalid — for ANY reason: an out-of-vocabulary role label, a
+ * complexity its confirmations do not match, a missing group id, a miscounted recap, a count out of
+ * bounds — rejecting it empties `items_json` and the second popup never appears. That is the whole bug.
+ * Rather than reject, this rebuilds a VALID minimal sequence from the one thing the model reliably
+ * produces: the task DECOMPOSITION — how many tasks, and roughly where each sits in the prompt. Every
+ * field the model got wrong is DISCARDED and set to a spec-valid minimal value: each task `not_complex`
+ * (which earns no confirmation — the one rule that would otherwise need a verdict guessed), a role label
+ * derived from the task's own slice via the shared families matcher (null when the slice matches no
+ * family), a unique group id per task, and the single mandated recap when the count calls for one. It is
+ * deterministic — no model call — so it cannot fail the way the model did.
+ *
+ * Returns null when there are fewer than two tasks (a single-prompt request — forcing a sequence would
+ * be the opposite mistake) or, defensively, when the rebuilt list still does not validate (the caller
+ * then keeps the model's original failure). Tasks are capped one below the locked maximum so the
+ * store's payload validator — which the list check does not mirror — accepts the row with its recap.
+ */
+function buildDeterministicSequenceRepairV1(
+  parsedItems: readonly PlannedItemDraftV1[],
+  originalLength: number,
+  localOriginalText: string,
+): readonly PromptEnhancementSequenceItemV1[] | null {
+  if (originalLength <= 0) return null;
+  const clamp = (
+    range: PromptEnhancementSequenceOffsetRangeV1 | null,
+  ): PromptEnhancementSequenceOffsetRangeV1 => {
+    if (!range || typeof range.start !== 'number' || typeof range.end !== 'number') {
+      return { start: 0, end: originalLength };
+    }
+    const start = Math.max(0, Math.min(Math.trunc(range.start), originalLength - 1));
+    const end = Math.max(start + 1, Math.min(Math.trunc(range.end), originalLength));
+    return { start, end };
+  };
+  const taskSources = parsedItems
+    .filter((item) => item.itemKind === 'first_task' || item.itemKind === 'task')
+    .slice(0, PROMPT_ENHANCEMENT_SEQUENCE_MAX_ITEM_COUNT_V1 - 1);
+  if (taskSources.length < 2) return null;
+  const items: PlannedItemDraftV1[] = taskSources.map((source, index) => {
+    const originalSliceRef = index === 0
+      ? { start: 0, end: originalLength }
+      : clamp(source.originalSliceRef);
+    return {
+      itemKind: index === 0 ? 'first_task' : 'task',
+      originalSliceRef,
+      sourcePointRanges: [],
+      // Phase 3a: label the rebuilt task off its OWN slice using the shared families matcher, so the
+      // first popup's Types line is populated even on this deterministic-fallback path (null when the
+      // slice matches no family). The wrap_up recap below stays null — a non-task recap carries none.
+      roleLabel: promptEnhancementSequenceRoleLabelForTextV1(sliceTextFor(originalSliceRef, localOriginalText) ?? ''),
+      dependencyOrder: index,
+      complexity: 'not_complex',
+      complexityReason: null,
+      generatedWording: null,
+      actionRiskKinds: [],
+      authorityMode: null,
+      requiresConfirmationFloor: false,
+      decompositionGroupId: `repair-group-${index}`,
+      itemValidationGraph: null,
+    };
+  });
+  // Same count rule the store enforces: a recap is earned iff more than three items sit behind it. Its
+  // dependencyOrder is its index (the last slot); it carries the all-null shape a non-task recap must.
+  if (items.length > 3) {
+    items.push({
+      itemKind: 'wrap_up',
+      originalSliceRef: null,
+      sourcePointRanges: [],
+      roleLabel: null,
+      dependencyOrder: items.length,
+      complexity: null,
+      complexityReason: null,
+      generatedWording: null,
+      actionRiskKinds: [],
+      authorityMode: null,
+      requiresConfirmationFloor: false,
+      decompositionGroupId: null,
+      itemValidationGraph: null,
+    });
+  }
+  const drafts = items.map((item) => ({
+    ...item,
+    ...deriveItemSafetyFields(sliceTextFor(item.originalSliceRef, localOriginalText)),
+  }));
+  const structure = validatePromptEnhancementSequenceItemListV1(drafts, {
+    originalLength,
+    stage: 'plan',
+  });
+  return structure.ok
+    ? (drafts as unknown as readonly PromptEnhancementSequenceItemV1[])
+    : null;
+}
+
+/**
  * One planning attempt: ask, parse, and check.
  *
  * `repairInstruction` is what a previous attempt's rejection said, sent as a further message. On the
@@ -620,6 +734,41 @@ async function attemptPlan(
     };
   }
 
+  // PROPER FIX — the deterministic fallback, prepared once from the model's task decomposition. Any
+  // structural failure below (grouping, bounds, list structure, directives) returns via `failWith`,
+  // which carries this rebuilt minimal plan alongside the failure so the loop can fall back to it once
+  // model repair is spent — when one is available (two or more tasks). Additive: a plan that PASSES
+  // every check below is built unchanged through the same `buildOutput` tail.
+  const repairItems = buildDeterministicSequenceRepairV1(
+    parsed.items,
+    originalLength,
+    input.localOriginalText,
+  );
+  const buildOutput = (
+    items: readonly PromptEnhancementSequenceItemV1[],
+    promptDirectives: readonly PromptEnhancementSequenceOffsetRangeV1[],
+  ): PromptEnhancementSequencePlannerOutputV1 => ({
+    outcome: parsed.outcome,
+    outcomeReason: parsed.outcomeReason,
+    items,
+    promptDirectives,
+    originalLength,
+    suggestedNextPromptPolicy: promptEnhancementSequencePolicyForOutcomeV1(parsed.outcome),
+    summaryData: {
+      summaryId: parsed.summaryId,
+      remainingTaskCount: items.length - 1,
+      taskRoleLabels: promptEnhancementSequenceTaskRoleLabelsV1(items),
+    },
+  });
+  // The deterministic rebuild travels WITH every structural failure below, so the loop can fall back
+  // to it once model repair is spent — no extra call to produce it, and the plan's own defect still
+  // rides along for the callers (and tests) that want the strict reject contract.
+  const repairOutput = repairItems ? buildOutput(repairItems, []) : undefined;
+  const failWith = (
+    reason: PromptEnhancementSequencePlannerFailureReasonV1,
+    itemIndex?: number,
+  ): PlannerAttemptV1 => ({ ok: false, reason, itemIndex, repair: repairOutput });
+
   // The working state is checked here and travels no further: it is not on the output, so whoever
   // consumes the plan gets items and not the inventory they were derived from.
   const grouping = checkPromptEnhancementSequencePlannerGroupingV1(
@@ -636,7 +785,7 @@ async function attemptPlan(
   // a stray item→group reference) and still fails hard.
   const groupingSoftCodesV1 = new Set(['grouping_stage_did_nothing', 'point_in_no_group']);
   if (!grouping.ok && !groupingSoftCodesV1.has(grouping.code)) {
-    return { ok: false, reason: grouping.code };
+    return failWith(grouping.code);
   }
 
   // Phase 1 (§5.5a — normalize a MANDATED literal, not infer meaning): the first item IS the whole
@@ -645,23 +794,89 @@ async function attemptPlan(
   // is CORRECTED here rather than rejected. This is verification, not the forbidden proxy, and it is
   // strictly better than shipping a truncated first prompt (`first_task_slice_not_whole_original`) or a
   // mismatched count (`summary_remaining_count_disagrees_with_items`).
-  const normalizedItems = parsed.items.map((item) =>
-    item.itemKind === 'first_task'
-      ? { ...item, originalSliceRef: { start: 0, end: originalLength } }
-      : item,
-  );
-  const normalizedRemainingTaskCount = normalizedItems.length - 1;
+  //
+  // Phase 1b (§5.5a — normalize an out-of-bounds STRUCTURAL offset, not infer meaning): a model cannot
+  // count characters reliably, so it emits originalSliceRef / sourcePointRanges offsets that fall OUTSIDE
+  // the prompt (`offset_range_out_of_bounds` / `source_point_ranges_invalid`). An out-of-bounds offset is
+  // a wrong POSITION, not wrong meaning — and the item's body is worded separately by the batch, so a
+  // slice is only a rough pointer. CLAMP each offset into the valid [0, originalLength] window (dropping a
+  // source-range entry that is not even a numeric range) so a coherent plan is ACCEPTED rather than
+  // rejected. Nothing here infers meaning: it only forces a position back into the string it must index.
+  const clampOffsetRangeV1 = (range: unknown): { start: number; end: number } | null => {
+    if (originalLength <= 0 || !range || typeof range !== 'object') return null;
+    const r = range as { start?: unknown; end?: unknown };
+    if (typeof r.start !== 'number' || typeof r.end !== 'number') return null;
+    const start = Math.max(0, Math.min(Math.trunc(r.start), originalLength - 1));
+    const end = Math.max(start + 1, Math.min(Math.trunc(r.end), originalLength));
+    return { start, end };
+  };
+  const normalizedItems = parsed.items.map((item) => {
+    const originalSliceRef = item.itemKind === 'first_task'
+      ? { start: 0, end: originalLength }
+      : item.originalSliceRef && typeof item.originalSliceRef === 'object'
+        ? (clampOffsetRangeV1(item.originalSliceRef) ?? item.originalSliceRef)
+        : item.originalSliceRef;
+    const sourcePointRanges = Array.isArray(item.sourcePointRanges)
+      ? item.sourcePointRanges
+          .map((entry) => clampOffsetRangeV1(entry))
+          .filter((entry): entry is { start: number; end: number } => entry !== null)
+      : item.sourcePointRanges;
+    return { ...item, originalSliceRef, sourcePointRanges };
+  });
+  // Phase 1c (§5.5a — normalize a MANDATED structural COUNT, not infer meaning): the closing recap's
+  // PRESENCE is dictated purely by the item count (§22 spec: a recap exists IFF more than three non-recap
+  // items sit behind it) — never by the model's judgment. A model that miscounted — omitted the mandated
+  // recap, or added one the count forbids — is CORRECTED here, exactly as an out-of-bounds offset is
+  // clamped above: append the one required recap, or drop a forbidden one. This is verification of a
+  // spec literal, not the forbidden proxy, and it is strictly better than rejecting a coherent plan on
+  // `wrap_up_presence_does_not_match_count`. Cascade-free: a recap is the LAST item, carries no
+  // confirmations and null slice/complexity/reason, so nothing before it is disturbed and no
+  // task→confirmation pair is split; its wording is null at plan (the batch words it, as with every
+  // item), and the store re-validates the whole list on write as a backstop. Only the two clean cases
+  // are touched — append-when-last-missing, drop-when-last-present — so an already-correct plan is left
+  // byte-identical, and a malformed mid-list or duplicated recap is left to fail exactly as before.
+  const nonRecapCount = normalizedItems.filter((item) => item.itemKind !== 'wrap_up').length;
+  const wrapUpCount = normalizedItems.length - nonRecapCount;
+  const lastIsWrapUp = normalizedItems.length > 0
+    && normalizedItems[normalizedItems.length - 1].itemKind === 'wrap_up';
+  const recapConformedItems: PlannedItemDraftV1[] =
+    nonRecapCount > 3 && wrapUpCount === 0
+      ? [
+          ...normalizedItems,
+          {
+            itemKind: 'wrap_up',
+            originalSliceRef: null,
+            sourcePointRanges: [],
+            roleLabel: null,
+            // Must equal the item's index (the store's `dependency_order_not_index` rule); the recap
+            // is appended last, so its index IS the pre-append length. Every prior item keeps its own
+            // 0..n-1 order untouched, so no reindex is needed.
+            dependencyOrder: normalizedItems.length,
+            complexity: null,
+            complexityReason: null,
+            generatedWording: null,
+            actionRiskKinds: [],
+            authorityMode: null,
+            requiresConfirmationFloor: false,
+            decompositionGroupId: null,
+            itemValidationGraph: null,
+          },
+        ]
+      : nonRecapCount <= 3 && wrapUpCount === 1 && lastIsWrapUp
+        ? normalizedItems.slice(0, -1)
+        : normalizedItems;
+  const normalizedRemainingTaskCount = recapConformedItems.length - 1;
 
   const bounds = checkPromptEnhancementSequencePlannerBoundsV1({
-    itemCount: normalizedItems.length,
+    itemCount: recapConformedItems.length,
     summaryRemainingTaskCount: normalizedRemainingTaskCount,
   });
-  if (!bounds.ok) return { ok: false, reason: bounds.code };
+  if (!bounds.ok) return failWith(bounds.code);
 
   // Safety is read off the slices before the list is checked, because the list check reads those
   // fields: an item's authority has to be on it by the time the rule that an item with a slice
   // carries one is applied to it.
-  const drafts = normalizedItems.map((item) => ({
+  const drafts = recapConformedItems.map((item) => ({
     ...item,
     ...deriveItemSafetyFields(sliceTextFor(item.originalSliceRef, input.localOriginalText)),
   }));
@@ -674,32 +889,29 @@ async function attemptPlan(
     stage: 'plan',
   });
   if (!structure.ok) {
-    return { ok: false, reason: structure.reasonCode, itemIndex: structure.itemIndex };
+    return failWith(structure.reasonCode, structure.itemIndex);
   }
-  if (parsed.promptDirectives.some(
+  // Phase 1b (§5.5a): whole-prompt directives are the SAME kind of offset range as the item slices, and
+  // the model gets them out of bounds the same way. Clamp them into the valid [0, originalLength] window
+  // too — a directive that runs past the prompt must not reject the whole sequence
+  // (`prompt_directives_invalid`). Same rationale as the item slices above; the check below is kept as a
+  // defensive net and passes after clamping.
+  const normalizedPromptDirectives = Array.isArray(parsed.promptDirectives)
+    ? parsed.promptDirectives
+        .map((range) => clampOffsetRangeV1(range))
+        .filter((range): range is { start: number; end: number } => range !== null)
+    : parsed.promptDirectives;
+  if (normalizedPromptDirectives.some(
     (range) => !isPromptEnhancementSequenceOffsetRangeV1(range, originalLength),
   )) {
-    return { ok: false, reason: 'prompt_directives_invalid' };
+    return failWith('prompt_directives_invalid');
   }
 
-  // The check above established every field, which is what the narrowing rests on.
+  // The check above established every field, which is what the narrowing rests on. The valid model
+  // plan is built through the SAME tail the fallback uses — `remainingTaskCount` is items-after-the-
+  // first either way, so a passing plan's output is unchanged.
   const items = drafts as unknown as readonly PromptEnhancementSequenceItemV1[];
-  return {
-    ok: true,
-    output: {
-      outcome: parsed.outcome,
-      outcomeReason: parsed.outcomeReason,
-      items,
-      promptDirectives: parsed.promptDirectives,
-      originalLength,
-      suggestedNextPromptPolicy: promptEnhancementSequencePolicyForOutcomeV1(parsed.outcome),
-      summaryData: {
-        summaryId: parsed.summaryId,
-        remainingTaskCount: normalizedRemainingTaskCount,
-        taskRoleLabels: promptEnhancementSequenceTaskRoleLabelsV1(items),
-      },
-    },
-  };
+  return { ok: true, output: buildOutput(items, normalizedPromptDirectives) };
 }
 
 /**
@@ -755,13 +967,20 @@ export async function runPromptEnhancementSequencePlannerV1(
   for (let repair = 0; ; repair += 1) {
     const attempt = await attemptPlan(openai, input, repairInstruction);
     if (attempt.ok) return attempt;
-    // Nothing came back to correct, so there is nothing a repair could say.
+    // Nothing came back to correct, so there is nothing a repair could say — and nothing to rebuild
+    // from either, so the deterministic fallback cannot help a provider failure.
     if (isProviderFailure(attempt.reason)) return { ok: false, reason: attempt.reason };
-    // Out of repairs, or out of time for another. Both end the same way and both return what was
-    // actually wrong with the plan rather than the reason for stopping — the defect is the useful
-    // half, and either way no sequence is offered and the single-prompt path is unaffected.
+    // Out of repairs, or out of time for another — the same give-up point as before, so no call this
+    // loop would not have made is made now.
     if (repair >= PROMPT_ENHANCEMENT_COST_VALIDATION_RETRY_COUNT_V1
       || !hasRoomForAnotherCall(input)) {
+      // PROPER FIX — the model could not produce a valid plan. When the caller opted in and this last
+      // plan carried a usable decomposition, emit the deterministic rebuild rather than lose the
+      // sequence to an empty `items_json`. Otherwise return the plan's own defect and leave the
+      // single-prompt path alone, exactly as before.
+      if (input.deterministicFallback === true && attempt.repair !== undefined) {
+        return { ok: true, output: attempt.repair };
+      }
       return { ok: false, reason: attempt.reason };
     }
     repairInstruction = buildPromptEnhancementSequencePlannerRepairInstructionV1(

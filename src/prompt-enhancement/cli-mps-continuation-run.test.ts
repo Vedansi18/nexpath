@@ -12,8 +12,16 @@ import { preparePromptEnhancement } from './facade.js';
 import { buildPromptEnhancementCostVisibilityMetadataV1 } from './cost-observability.js';
 import { getPromptStartStopSourceSnapshot } from './source-reality.js';
 import { runPromptEnhancementCliMpsContinuationPopupV1, deliverPromptEnhancementCliMpsContinuationOutcomeV1, deliverPromptEnhancementCliMpsContinuationResultV1 } from './cli-mps-continuation-run.js';
+import { packageContinuationAtStopV1 } from './continuation-stop-package.js';
+import {
+  buildPromptEnhancementSequenceBatchItemsV1,
+  buildPromptEnhancementSequenceDeterministicComposedV1,
+} from './sequence-batch-composer.js';
+import { producePromptEnhancementSequenceItemBodiesV1 } from './sequence-item-body-producer.js';
 import type { PromptEnhancementCliMpsInteractionV1 } from './cli-mps-run.js';
 import type { PromptEnhancementSequenceRuntimeStateV1 } from './sequence-runtime.js';
+import type { PromptEnhancementSequenceItemV1 } from './sequence-payload.js';
+import type { PromptEnhancementSafetySummaryV1 } from './contracts.js';
 const CONT_PROGRESS = { done: 2, total: 5 } as const; // MPS-3 Part B: sequence position for the shell input
 const CONT_ITEMKIND = 'task' as const; // MPS-12: served item kind for the shell input
 
@@ -257,5 +265,118 @@ describe('deliverPromptEnhancementCliMpsContinuationResultV1 — 6.4 silent-exit
     const s = offered();
     expect(() => deliverPromptEnhancementCliMpsContinuationResultV1(s, undefined, 'd1')).not.toThrow();
     expect(() => deliverPromptEnhancementCliMpsContinuationResultV1(s, { state: 'bogus' }, 'd2')).not.toThrow();
+  });
+});
+
+// ── FUNCTIONAL E2E — the FULL continuation chain, deterministic (no LLM) ──────────────────────────
+// Proves the piece that only a live run exercised before: a REAL packaged continuation (built by the
+// packager from a recorded row) feeds cleanly into the render runner, reaches a 'ready' model, renders,
+// and SENDS. If any packaged field were incompatible with the runner (the class of bug that produced
+// `handoff_not_continuable`), the runner would return `not_shown` and this fails. The only thing NOT
+// covered here is the OS terminal window spawn itself (mechanically identical to the first popup).
+describe('MPS continuation — recorded row → package → render → outcome (functional E2E)', () => {
+  const OT = 'Fix the failing payment test, then add a rate limiter to the login endpoint.';
+  const LEN = OT.length;
+  const BASE_SAFETY = {
+    validationStatus: 'valid', sendPolicy: 'send_current', sensitiveActionState: 'none',
+    sourceHonestyState: 'valid', privacyState: 'valid', authorityEscalationState: 'valid',
+    noForegroundSafer: true, noAutomaticSend: true,
+  } as const satisfies PromptEnhancementSafetySummaryV1;
+  const mk = (o: Partial<PromptEnhancementSequenceItemV1>): PromptEnhancementSequenceItemV1 => ({
+    itemKind: 'task', originalSliceRef: null, sourcePointRanges: [], roleLabel: null, dependencyOrder: 0,
+    complexity: null, complexityReason: null, generatedWording: null, actionRiskKinds: [], authorityMode: null,
+    requiresConfirmationFloor: false, decompositionGroupId: null, itemValidationGraph: null, itemSafetyClauseRef: null,
+    ...o,
+  });
+  const plannerItems: readonly PromptEnhancementSequenceItemV1[] = [
+    mk({ itemKind: 'first_task', originalSliceRef: { start: 0, end: LEN }, roleLabel: 'fix', dependencyOrder: 0, complexity: 'not_complex', authorityMode: 'plan_or_review', decompositionGroupId: 'g1' }),
+    mk({ itemKind: 'task', originalSliceRef: { start: 35, end: LEN }, roleLabel: 'fix', dependencyOrder: 1, complexity: 'not_complex', authorityMode: 'plan_or_review', decompositionGroupId: 'g2' }),
+  ];
+  const runtimeState: PromptEnhancementSequenceRuntimeStateV1 = {
+    sequenceId: 'seq-1', enhancementId: 'enh-1', projectRoot: '/tmp/p', sessionId: 's1',
+    itemCount: 2, currentItemIndex: 0, status: 'awaiting_response', lastActionId: null,
+  };
+
+  // The full continuation chain, end to end. This was the last blocker: the continuation result's graph
+  // is the ITEM-level verdict (single `sequence` phase), which the popup used to reject as
+  // `missing_validation_graph` (it required the fresh-prompt pipeline's fifteen phases). The fix
+  // validates a continuation result in `sequenceItemGraph` mode — the right question for a packaged
+  // sequence-item body — keeping every other safety check. The no-mix packager invariant is untouched.
+  it('a real packaged continuation RENDERS and SENDS — the 2nd popup appears end to end', async () => {
+    // 1. Build REAL worded items (each with a real per-item verdict graph) via the deterministic body
+    //    producer — the exact shape production stores in items_json, not a stub.
+    const batchItems = buildPromptEnhancementSequenceBatchItemsV1(plannerItems, OT, (o) => `seq-1:item:${o}`);
+    const composed = buildPromptEnhancementSequenceDeterministicComposedV1(batchItems, {
+      baseSafetySummary: BASE_SAFETY, providerRuntimeState: 'deterministic', optionalCallAvailabilityState: 'deterministic_only',
+    });
+    expect(composed).not.toBeNull();
+    const produced = producePromptEnhancementSequenceItemBodiesV1(plannerItems, composed!);
+    expect(produced.ok).toBe(true);
+    if (!produced.ok) return;
+
+    // 2. The packager turns the recorded row (items + redacted original + CONTINUABLE handoffKind) into
+    //    the exact payload the launcher hands the render host.
+    const packaged = packageContinuationAtStopV1({
+      state: runtimeState, actionId: 'act-1', items: produced.items,
+      redactedOriginalPromptText: OT, handoffKind: 'compact_sequence_summary_candidate',
+    });
+    expect(packaged.ok).toBe(true);
+    if (!packaged.ok) return;
+
+    // 3. Feed the packager's OWN output into the render runner with a scripted "Enter" (send). A model
+    //    that is not 'ready' returns 'not_shown'; asserting 'send' proves it DID render end to end.
+    const outcome = await runPromptEnhancementCliMpsContinuationPopupV1({
+      result: packaged.packaged.result,
+      handoffMetadata: packaged.packaged.handoffMetadata,
+      event: packaged.packaged.event,
+      progress: packaged.packaged.progress,
+      itemKind: packaged.packaged.itemKind,
+      interaction: scripted([KEY.enter]),
+    });
+
+    expect(outcome.state).toBe('send');
+    if (outcome.state !== 'send') return;
+    expect(outcome.bodyText.trim().length).toBeGreaterThan(0);
+  });
+
+  it('serves a CONFIRMATION item (empty slice) worded under llm_wording — renders, not `not_shown` (the real-world blink)', async () => {
+    // The exact case that failed live: item 1 is a double_confirmation (no original slice → empty
+    // originalPromptText) and it was worded by the LLM (graph.providerRuntimeState = 'llm_wording'),
+    // which differs from the continuation result's `deterministic` callVisibility. Before the fix this
+    // failed validation with `missing_current_body` + `mismatched_call_visibility_state` and the popup
+    // never rendered. Now the runner substitutes the body and the sequence-item validation skips the
+    // (category-error) callVisibility check, so it renders.
+    const confirmPlan: readonly PromptEnhancementSequenceItemV1[] = [
+      mk({ itemKind: 'first_task', originalSliceRef: { start: 0, end: LEN }, dependencyOrder: 0, complexity: 'highly_complex', complexityReason: 'the migration cannot be seen from here', authorityMode: 'plan_or_review', decompositionGroupId: 'g1' }),
+      mk({ itemKind: 'double_confirmation', originalSliceRef: null, dependencyOrder: 1, complexity: null, complexityReason: 'confirm the migration copied every row', authorityMode: null, decompositionGroupId: null }),
+      mk({ itemKind: 'binary_confirmation', originalSliceRef: null, dependencyOrder: 2, complexity: null, complexityReason: 'shall I proceed', authorityMode: null, decompositionGroupId: null }),
+    ];
+    const batchItems = buildPromptEnhancementSequenceBatchItemsV1(confirmPlan, OT, (o) => `seq-c:item:${o}`);
+    const composed = buildPromptEnhancementSequenceDeterministicComposedV1(batchItems, {
+      baseSafetySummary: BASE_SAFETY, providerRuntimeState: 'llm_wording', optionalCallAvailabilityState: 'allowed',
+    });
+    expect(composed).not.toBeNull();
+    const produced = producePromptEnhancementSequenceItemBodiesV1(confirmPlan, composed!);
+    expect(produced.ok).toBe(true);
+    if (!produced.ok) return;
+
+    // Serve item 1 (the double_confirmation): index 0 awaiting_response advances to 1.
+    const packaged = packageContinuationAtStopV1({
+      state: { ...runtimeState, itemCount: 3 }, actionId: 'act-c', items: produced.items,
+      redactedOriginalPromptText: OT, handoffKind: 'compact_sequence_summary_candidate',
+    });
+    expect(packaged.ok).toBe(true);
+    if (!packaged.ok) return;
+    expect(packaged.packaged.itemKind).toBe('double_confirmation');
+
+    const outcome = await runPromptEnhancementCliMpsContinuationPopupV1({
+      result: packaged.packaged.result,
+      handoffMetadata: packaged.packaged.handoffMetadata,
+      event: packaged.packaged.event,
+      progress: packaged.packaged.progress,
+      itemKind: packaged.packaged.itemKind,
+      interaction: scripted([KEY.enter]),
+    });
+    expect(outcome.state).toBe('send');
   });
 });

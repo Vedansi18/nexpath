@@ -4,6 +4,7 @@ import {
   buildPromptEnhancementVisualLineMapV1,
   decodePromptEnhancementEditorInputV1,
   promptEnhancementEditorIdentityMatchesV1,
+  promptEnhancementKeepFieldCursorVisibleV1,
   reducePromptEnhancementMultilineEditorV1,
   resizePromptEnhancementMultilineEditorV1,
 } from './multiline-editor.js';
@@ -157,5 +158,50 @@ describe('stage-1-2a pure multiline editor state machine', () => {
     const state = editor();
     expect(promptEnhancementEditorIdentityMatchesV1(state, identity)).toBe(true);
     expect(promptEnhancementEditorIdentityMatchesV1(state, { ...identity, bodyRevision: 2 })).toBe(false);
+  });
+
+  // Caret-drift regression (Phase 1): keepCursorVisible must clamp scrollVisualRow to the SAME
+  // window the display uses (windowPromptEnhancementFieldForDisplayV1 caps its first-shown row at
+  // maxStart). A stale scroll above maxStart made every caret site place the hardware cursor above
+  // the real text (cursor shown in one place, typed characters land in another).
+  it('clamps a stale scrollVisualRow down to the display window (never above maxStart)', () => {
+    const text = 'aaaa\nbbbb\ncccc\ndddd\neeee\nffff'; // 6 visual rows at width 4
+    const width = 4;
+    const rows = 3;
+    const visualLines = buildPromptEnhancementVisualLineMapV1(text, width).length;
+    expect(visualLines).toBe(6);
+    const maxStart = Math.max(0, visualLines - rows); // 3
+    // Cursor in the tail, with a scroll stored well past the display's clamp.
+    const stale = { text, cursor: text.length, desiredVisualColumn: 0, scrollVisualRow: 5, dirty: false, focused: true };
+    const synced = promptEnhancementKeepFieldCursorVisibleV1(stale, width, rows);
+    expect(synced.scrollVisualRow).toBeLessThanOrEqual(maxStart);
+    expect(synced.scrollVisualRow).toBe(maxStart); // pulled to the clamp, not left at 5
+  });
+
+  it('snaps a stale scroll back to 0 when a resize grows the viewport to fit the whole field', () => {
+    let state = editor({ enhancedBodyText: 'aaaa\nbbbb\ncccc\ndddd\neeee\nffff', fieldWidth: 4, viewportRows: 2 });
+    // Move within the small viewport so keepCursorVisible sets a positive scroll into the tail.
+    state = reducePromptEnhancementMultilineEditorV1(state, { type: 'move_left' }).state;
+    expect(state.buffers.enhanced_body.scrollVisualRow).toBeGreaterThan(0);
+    // Grow the viewport so all 6 rows fit (maxStart 0) — the scroll must snap back to 0.
+    const grown = resizePromptEnhancementMultilineEditorV1(state, 4, 10);
+    expect(grown.buffers.enhanced_body.scrollVisualRow).toBe(0);
+  });
+
+  it('keeps scrollVisualRow within the display window after every move and insert', () => {
+    let state = editor({ enhancedBodyText: 'aaaa\nbbbb\ncccc\ndddd\neeee\nffff', fieldWidth: 4, viewportRows: 2 });
+    const commands = [
+      { type: 'move_visual_up' }, { type: 'move_visual_up' }, { type: 'insert_text', text: 'Z' },
+      { type: 'move_visual_down' }, { type: 'insert_newline' }, { type: 'move_left' },
+      { type: 'move_visual_up' }, { type: 'insert_text', text: 'longer text here' },
+    ] as const;
+    for (const command of commands) {
+      state = reducePromptEnhancementMultilineEditorV1(state, command).state;
+      const buffer = state.buffers.enhanced_body;
+      const visualLines = buildPromptEnhancementVisualLineMapV1(buffer.text, state.fieldWidth).length;
+      const maxStart = Math.max(0, visualLines - state.viewportRows);
+      expect(buffer.scrollVisualRow).toBeGreaterThanOrEqual(0);
+      expect(buffer.scrollVisualRow).toBeLessThanOrEqual(maxStart);
+    }
   });
 });

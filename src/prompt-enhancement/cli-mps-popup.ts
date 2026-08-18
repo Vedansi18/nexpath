@@ -216,11 +216,17 @@ export function renderPromptEnhancementMpsFirstPopupFrameV1(
 
   // Sequence plan — dim gray, non-interactive, first popup only.
   const planLabel = PROMPT_ENHANCEMENT_MPS_CLI_SEQUENCE_PLAN_LABEL_V1;
-  const remaining = `Remaining: ${model.sequencePlan.remainingTaskCount}`;
+  const total = `Total: ${model.sequencePlan.remainingTaskCount}`;
   const types = `Types: ${model.sequencePlan.taskRoleLabels.map((label) => publicText(label)).join(', ')}`;
   lines.push(c ? `  ${c.dim}${planLabel}${c.reset}` : `  ${planLabel}`);
-  lines.push(c ? `  ${c.dim}${remaining}${c.reset}` : `  ${remaining}`);
+  lines.push(c ? `  ${c.dim}${total}${c.reset}` : `  ${total}`);
   lines.push(c ? `  ${c.dim}${types}${c.reset}` : `  ${types}`);
+  // Per-follow-up-task summary lines (Phase 3b) — the user's own redacted slices, numbered. Empty on
+  // the describe fallback, so nothing extra renders there.
+  model.sequencePlan.taskSummaryLines.forEach((line, index) => {
+    const numbered = `${index + 1}. ${publicText(line)}`;
+    lines.push(c ? `  ${c.dim}${numbered}${c.reset}` : `  ${numbered}`);
+  });
   lines.push('');
 
   lines.push(c ? `${c.dim}${PROMPT_ENHANCEMENT_MPS_CLI_FOOTER_V1}${c.reset}` : PROMPT_ENHANCEMENT_MPS_CLI_FOOTER_V1);
@@ -336,7 +342,8 @@ export function renderPromptEnhancementMpsContinuationFrameV1(
     c && isPromptEnhancementScrollMarkerLineV1(line) ? `    ${c.gray}${line}${c.reset}` : `    ${line}`;
 
   // MPS-3 (Part B): sequence progress line near the top (owner decision: top placement). `done`/`total`
-  // come off the packaged continuation (done = currentItemIndex, total = itemCount); the copy is formatted
+  // come off the packaged continuation (done = currentItemIndex, total = itemCount - 1 deliverable items —
+  // item 0 was sent at intake); the copy is formatted
   // here, never carried on the model. CONTINUATION-only surface (the first popup shows the sequence plan).
   const progressLine = `Sequence ${model.progress.done} of ${model.progress.total}`;
   lines.push(c ? `${c.dim}${progressLine}${c.reset}` : progressLine);
@@ -363,8 +370,18 @@ export function renderPromptEnhancementMpsContinuationFrameV1(
   // while the loading skeleton is up.
   if (!frameState.loadingSpinnerGlyph
     && (PROMPT_ENHANCEMENT_SEQUENCE_TASK_KINDS_V1 as readonly string[]).includes(model.itemKind)) {
-    const original = `  Your original: ${publicText(model.body.originalPromptText)}`;
-    lines.push(c ? `${c.dim}${original}${c.reset}` : original);
+    // Label on its own line, then the original's windowed content indented and pushed PER LINE — the
+    // runner wraps it to the field width and caps its height. Pushing each line separately guarantees
+    // the continuous left rail reaches every line: a long original previously went in as ONE multi-line
+    // string, so only its first line got the rail and the frame overflowed the terminal. Scroll markers
+    // dim like the body; other lines stay dim (read-only cue).
+    lines.push(c ? `  ${c.dim}Your original:${c.reset}` : '  Your original:');
+    for (const originalLine of publicText(model.body.originalPromptText).split('\n')) {
+      if (!c) { lines.push(`    ${originalLine}`); continue; }
+      lines.push(isPromptEnhancementScrollMarkerLineV1(originalLine)
+        ? `    ${c.gray}${originalLine}${c.reset}`
+        : `    ${c.dim}${originalLine}${c.reset}`);
+    }
     lines.push('');
   }
 
@@ -393,7 +410,7 @@ export function renderPromptEnhancementMpsContinuationFrameV1(
   lines.push(radioRow(3, cancelLabel, { suffix: cancelUnavailable, tone: 'cancel' }));
   lines.push('');
 
-  // No Sequence plan / Remaining / Types on the continuation surface (§3.4).
+  // No Sequence plan / Total / Types on the continuation surface (§3.4).
   lines.push(c ? `${c.dim}${PROMPT_ENHANCEMENT_MPS_CLI_CONTINUATION_FOOTER_V1}${c.reset}` : PROMPT_ENHANCEMENT_MPS_CLI_CONTINUATION_FOOTER_V1);
 
   return applyContinuousRail(lines, c);

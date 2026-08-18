@@ -43,6 +43,7 @@ import {
   type PromptEnhancementSequencePlannerClientV1,
 } from './sequence-planner.js';
 import type { PromptEnhancementSequenceItemV1, PromptEnhancementSequenceOffsetRangeV1 } from './sequence-payload.js';
+import { promptEnhancementSequenceTaskSummaryLinesV1 } from './sequence-payload.js';
 import { redactSecrets } from '../store/redact.js';
 import type { Database } from 'sql.js';
 
@@ -423,7 +424,7 @@ async function prepare(
   // Redaction: the planner is length-preserving offset-indexed, so the SAME redacted text is passed as
   // both the provider-visible `promptContext` and the local `localOriginalText` — offsets align and no
   // raw user text reaches the provider.
-  let plannerSummary: { remainingTaskCount: number; taskRoleLabels: readonly string[] } | undefined;
+  let plannerSummary: { remainingTaskCount: number; taskRoleLabels: readonly string[]; taskSummaryLines: readonly string[] } | undefined;
   // MPS P1b-ii: the planner's full item list, captured only when it ran + produced a sequence — the
   // background wording batch (P2) consumes it. Undefined on the non-sequence / fallback path.
   let plannerItems: readonly PromptEnhancementSequenceItemV1[] | undefined;
@@ -446,6 +447,12 @@ async function prepare(
           capabilityOverlays: route.capabilityOverlays,
           routeConfidence: route.routeConfidence,
         },
+        // PROPER FIX — the production planner opts into the deterministic fallback: when the model
+        // cannot produce a valid plan, the loop rebuilds one from its task decomposition rather than
+        // falling through to the single-prompt path with an empty sequence. Only the sequence branch
+        // below is affected; a non-sequence outcome (or fewer than two tasks) still falls through
+        // exactly as today.
+        deterministicFallback: true,
       },
       seqDeps.client,
     );
@@ -453,6 +460,9 @@ async function prepare(
       plannerSummary = {
         remainingTaskCount: plannerResult.output.summaryData.remainingTaskCount,
         taskRoleLabels: plannerResult.output.summaryData.taskRoleLabels,
+        // One display line per follow-up task, cut from the SAME redacted text the planner indexed
+        // (offsets align, length-preserving) — the user's own words, no secret, no generated body.
+        taskSummaryLines: promptEnhancementSequenceTaskSummaryLinesV1(plannerResult.output.items, redactedText),
       };
       plannerItems = plannerResult.output.items;
       plannerPromptDirectives = plannerResult.output.promptDirectives;
@@ -498,7 +508,7 @@ function buildResult(
   // REPLACES the describe splitter as the source of truth for the item count + role labels. Absent on
   // every non-sequence prompt, on any planner failure/refusal/single-outcome, and on every caller of the
   // contract-typed `preparePromptEnhancement` (no deps) — so the describe fallback path is byte-identical.
-  plannerSummary?: { remainingTaskCount: number; taskRoleLabels: readonly string[] },
+  plannerSummary?: { remainingTaskCount: number; taskRoleLabels: readonly string[]; taskSummaryLines: readonly string[] },
 ): PromptEnhancementPrepareResultV1 {
   const currentBody: PromptEnhancementCurrentBodyV1 = {
     ...composed.currentBody,
@@ -608,6 +618,10 @@ function buildResult(
           taskRoleLabels: plannerSummary
             ? plannerSummary.taskRoleLabels
             : sequencePlan?.roleLabels ?? [],
+          // Per-follow-up-task display lines come only from the planner's real items (their redacted
+          // slices). The describe fallback has no per-item slices, so it stays empty — Remaining + Types
+          // only, exactly as before.
+          taskSummaryLines: plannerSummary ? plannerSummary.taskSummaryLines : [],
         },
       })
     : undefined;

@@ -75,6 +75,41 @@ const validSequenceReply = (originalLength: number): string => JSON.stringify({
   summaryData: { summaryId: 's1', remainingTaskCount: 1 },
 });
 
+/**
+ * A `sequence` reply that PARSES but fails validation on every attempt (an out-of-vocabulary role
+ * label), so the facade's deterministic fallback rebuilds the sequence from the model's own task
+ * decomposition. Phase 3a: the rebuilt items now carry role labels DERIVED from their slices, not the
+ * discarded model value — item 0's whole-prompt slice matches 'fix' ("Fix the failing…"), item 1's
+ * {33,51} slice ("add a rate limiter") matches 'build'.
+ */
+const fallbackTriggeringReply = (originalLength: number): string => JSON.stringify({
+  outcome: 'sequence',
+  outcomeReason: null,
+  points: [
+    { pointId: 'p1', startOffset: 0, endOffset: 5, requiredKind: 'deliverable' },
+    { pointId: 'p2', startOffset: 10, endOffset: 15, requiredKind: 'deliverable' },
+    { pointId: 'p3', startOffset: 20, endOffset: 25, requiredKind: 'deliverable' },
+  ],
+  groups: [
+    { groupId: 'g1', pointIds: ['p1', 'p2'], canRemainOneBodySection: false },
+    { groupId: 'g2', pointIds: ['p3'], canRemainOneBodySection: false },
+  ],
+  items: [
+    {
+      itemKind: 'first_task', originalSliceRef: { start: 0, end: originalLength },
+      sourcePointRanges: [], roleLabel: 'fix', dependencyOrder: 0, complexity: 'not_complex',
+      complexityReason: null, decompositionGroupId: 'g1',
+    },
+    {
+      itemKind: 'task', originalSliceRef: { start: 33, end: 51 }, sourcePointRanges: [],
+      roleLabel: 'INVALID ROLE THE MODEL INVENTED', dependencyOrder: 1, complexity: 'not_complex',
+      complexityReason: null, decompositionGroupId: 'g2',
+    },
+  ],
+  promptDirectives: [],
+  summaryData: { summaryId: 's1', remainingTaskCount: 1 },
+});
+
 function candidateRequest(): PromptEnhancementPrepareRequestV1 {
   const sourceRef: PromptEnhancementSourceRefV1 = {
     sourceRefId: 'src-a-1', sourceKind: 'source_a_user_prompt', sourceId: 'prompt:1',
@@ -130,6 +165,25 @@ describe('PE facade — sequence planner replaces the describe splitter (MPS P1b
     const describeSummary = describeResult.uiView.handoffAndSequenceSummary?.compactFirstPopupSequenceSummary;
     expect(describeSummary).toBeDefined();
     expect(describeSummary?.taskRoleLabels).not.toEqual(['fix']);
+  });
+
+  it('candidate + an UNFIXABLE planner plan → deterministic fallback still emits slice-derived role labels (Phase 3a)', async () => {
+    // Phase 2 bug: the deterministic fallback hard-coded roleLabel: null, so the compact summary's
+    // taskRoleLabels came out EMPTY even though items existed — the first popup's Types line rendered
+    // blank. Phase 3a derives each rebuilt item's label from its own slice, so Types is populated on
+    // this fallback path (the production reality when the model returns an unusable plan).
+    const req = candidateRequest();
+    const { result } = await preparePromptEnhancementWithSequenceV1(req, {
+      db,
+      client: clientReturning(fallbackTriggeringReply(CANDIDATE_TEXT.length)),
+    });
+    const summary = result.uiView.handoffAndSequenceSummary?.compactFirstPopupSequenceSummary;
+    expect(summary).toBeDefined();
+    // Item 0's whole-prompt slice → 'fix'; item 1's "add a rate limiter" slice → 'build'. Non-empty.
+    expect(summary?.taskRoleLabels).toEqual(['fix', 'build']);
+    // Phase 3b: the per-follow-up-task summary lines flow through too — only the 'task' item is lined
+    // (first_task, the whole-prompt slice, is excluded), cut from the redacted original.
+    expect(summary?.taskSummaryLines).toEqual(['add a rate limiter']);
   });
 
   it('candidate + planner returns a single-prompt outcome → FALLS BACK to the describe summary', async () => {

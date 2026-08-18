@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   emptyPromptEnhancementSequencePayloadV1,
+  promptEnhancementSequenceTaskSummaryLinesV1,
   validatePromptEnhancementSequenceItemListV1,
   validatePromptEnhancementSequencePayloadV1,
   type PromptEnhancementSequenceItemKindV1,
@@ -409,5 +410,38 @@ describe('sequence payload — the two stages a list is checked at', () => {
       .toEqual({ ok: false, reasonCode: 'dependency_order_not_index', itemIndex: 1 });
     expect(atPlan(planned({ originalSliceRef: { start: 10, end: LEN + 1 } })))
       .toEqual({ ok: false, reasonCode: 'offset_range_out_of_bounds', itemIndex: 1 });
+  });
+});
+
+describe('sequence payload — per-follow-up-task summary lines', () => {
+  const text = 'Fix the bug, add a rate limiter, and ship the docs.';
+  const item = (
+    itemKind: PromptEnhancementSequenceItemKindV1,
+    originalSliceRef: { start: number; end: number } | null,
+  ) => ({ itemKind, originalSliceRef });
+
+  it('lines only the task items, cut from the text — first_task and wrap_up excluded', () => {
+    const lines = promptEnhancementSequenceTaskSummaryLinesV1([
+      item('first_task', { start: 0, end: text.length }), // whole prompt — excluded
+      item('task', { start: 13, end: 31 }),               // "add a rate limiter"
+      item('task', { start: 37, end: 49 }),               // "ship the doc"
+      item('wrap_up', null),                              // no slice — excluded
+    ], text);
+    expect(lines).toEqual(['add a rate limiter', 'ship the doc']);
+  });
+
+  it('flattens whitespace and caps a long line with an ellipsis', () => {
+    const long = `${'a'.repeat(200)}`;
+    const [line] = promptEnhancementSequenceTaskSummaryLinesV1(
+      [item('task', { start: 0, end: long.length })], long, { maxLineLength: 10 },
+    );
+    expect(line).toBe(`${'a'.repeat(9)}…`);
+    expect(line?.length).toBe(10);
+  });
+
+  it('skips an out-of-range or empty slice rather than throwing', () => {
+    expect(promptEnhancementSequenceTaskSummaryLinesV1(
+      [item('task', { start: 0, end: 999 })], 'short',
+    )).toEqual([]);
   });
 });

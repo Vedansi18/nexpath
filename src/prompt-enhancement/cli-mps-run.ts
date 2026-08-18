@@ -12,7 +12,7 @@ import {
   decodePromptEnhancementCliKeyV1,
   openPromptEnhancementInteractiveConsoleV1,
   promptEnhancementCliViewportV1,
-  windowPromptEnhancementFieldForDisplayV1,
+  windowPromptEnhancementFieldForDisplayWithStartV1,
   buildPromptEnhancementCliFeedbackStateV1,
   reducePromptEnhancementCliFeedbackV1,
   renderPromptEnhancementCliFeedbackFrameV1,
@@ -190,21 +190,25 @@ export async function runPromptEnhancementCliMpsFirstPopupV1(input: {
     const detailsBuffer = field === 'additional_details'
       ? promptEnhancementKeepFieldCursorVisibleV1(editor.buffers.additional_details, width, DETAILS_DISPLAY_ROWS)
       : editor.buffers.additional_details;
-    const detailsDisplay = detailsBuffer.text
-      ? windowPromptEnhancementFieldForDisplayV1(detailsBuffer, width, DETAILS_DISPLAY_ROWS)
-      : '';
+    const detailsWindow = detailsBuffer.text
+      ? windowPromptEnhancementFieldForDisplayWithStartV1(detailsBuffer, width, DETAILS_DISPLAY_ROWS)
+      : { text: '', start: 0 };
+    const detailsDisplay = detailsWindow.text;
     // Size the body to fill the window (two-pass measured chrome), then resize the editor to it.
     editor = resizePromptEnhancementMultilineEditorV1(editor, width, measureBodyViewport(detailsDisplay));
     const bodyBuffer = editor.buffers.enhanced_body;
-    const bodyDisplay = windowPromptEnhancementFieldForDisplayV1(bodyBuffer, width, editor.viewportRows);
-    // Caret row is window-relative, from the SAME synced buffer used for the display. If it falls
-    // outside the shown lines, leave it unset so the cursor is hidden rather than misplaced.
+    const bodyWindow = windowPromptEnhancementFieldForDisplayWithStartV1(bodyBuffer, width, editor.viewportRows);
+    const bodyDisplay = bodyWindow.text;
+    // Caret row is window-relative, derived from the SAME window the display used (its `start`),
+    // not the raw buffer scroll. If it falls outside the shown lines, leave it unset so the cursor
+    // is hidden rather than misplaced.
     let caret: { field: PromptEnhancementEditorFieldV1; visualRow: number; visualColumn: number } | undefined;
     if (field) {
       const buffer = field === 'enhanced_body' ? bodyBuffer : detailsBuffer;
       const shownLines = (field === 'enhanced_body' ? bodyDisplay : detailsDisplay).split('\n').length;
+      const start = field === 'enhanced_body' ? bodyWindow.start : detailsWindow.start;
       const pos = promptEnhancementCursorVisualPositionV1(buffer, width);
-      const visualRow = pos.row - buffer.scrollVisualRow;
+      const visualRow = pos.row - start;
       if (visualRow >= 0 && visualRow < shownLines) caret = { field, visualRow, visualColumn: pos.column };
     }
     // Display-only projection of the model: the windowed field texts render; the FULL texts stay

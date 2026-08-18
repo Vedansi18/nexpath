@@ -33,8 +33,9 @@ export interface PromptEnhancementMpsContinuationInputV1 {
   handoffMetadata: PromptEnhancementHandoffMetadataV1;
   event: PromptEnhancementFutureSequenceRuntimeEventV1;
   // MPS-3 (Part B): sequence position for the progress line. `done` = items already dealt with
-  // (= currentItemIndex, item 0 sent at intake); `total` = the whole item count. Off the packaged
-  // continuation (`sequence-packager.ts` progress); the UI derives its own copy, never recomputes.
+  // (= currentItemIndex, item 0 sent at intake); `total` = the deliverable-item count (itemCount - 1,
+  // item 0 excluded — owner decision 2026-08-17). Off the packaged continuation
+  // (`sequence-packager.ts` progress); the UI derives its own copy, never recomputes.
   progress: { done: number; total: number };
   // MPS-12: the served item's kind (Ruling C §22.2) — read, never inferred from empty text. TASK kinds
   // (`first_task`/`task`) render the original slice; CONFIRMATION kinds render no original region.
@@ -174,7 +175,10 @@ export function buildPromptEnhancementMpsContinuationPopupV1(
   const validationTarget = isTaskKind || input.result.currentBody.originalPromptText.trim().length > 0
     ? input.result
     : { ...input.result, currentBody: { ...input.result.currentBody, originalPromptText: input.result.currentBody.text } };
-  const resultValidation = validatePromptEnhancementPrepareResultV1(validationTarget);
+  // A continuation result is a packaged sequence-item body: its verdict graph carries the single
+  // `sequence` phase, not the fresh-prompt pipeline's fifteen. Validate it in that mode so a valid
+  // continuation is not rejected as `missing_validation_graph`; every other result check still applies.
+  const resultValidation = validatePromptEnhancementPrepareResultV1(validationTarget, { sequenceItemGraph: true });
   if (!resultValidation.ok) {
     return { state: 'no_popup', reasonCodes: ['invalid_prepare_result', ...resultValidation.reasonCodes] };
   }

@@ -125,7 +125,10 @@ export function intakePromptEnhancementSequenceOnFirstSendV1(
     // stored redacted in the prompts table — no new privacy exposure. The handoffKind is a single
     // enum value (ids-only-safe). Both are local-store only and never emitted in telemetry.
     redactedOriginalPromptText: redactSecrets(input.result.currentBody.originalPromptText),
-    handoffKind:                input.result.handoffMetadata?.handoffKind ?? null,
+    // Read from the SAME handoff object validated above (`result.uiView.handoffAndSequenceSummary`),
+    // not a non-existent top-level `result.handoffMetadata` — the latter always read undefined, so the
+    // row stored handoffKind=null and the continuation packager rejected it as `handoff_not_continuable`.
+    handoffKind:                handoff.handoffKind ?? null,
   };
 }
 

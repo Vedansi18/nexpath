@@ -83,6 +83,7 @@ export interface PromptEnhancementMpsFirstPopupModelV1 {
   sequencePlan: {
     remainingTaskCount: number;
     taskRoleLabels: readonly string[];
+    taskSummaryLines: readonly string[];
   };
   keyboard: {
     plainEnter: 'emit_one_typed_current_body_plus_details_request';
@@ -224,6 +225,7 @@ export function buildPromptEnhancementMpsFirstPopupV1(
       sequencePlan: {
         remainingTaskCount: summary.remainingTaskCount,
         taskRoleLabels: [...summary.taskRoleLabels],
+        taskSummaryLines: [...summary.taskSummaryLines],
       },
       keyboard: {
         plainEnter: 'emit_one_typed_current_body_plus_details_request',

@@ -13,7 +13,7 @@ import {
   decodePromptEnhancementCliKeyV1,
   openPromptEnhancementInteractiveConsoleV1,
   promptEnhancementCliViewportV1,
-  windowPromptEnhancementFieldForDisplayV1,
+  windowPromptEnhancementFieldForDisplayWithStartV1,
   buildPromptEnhancementCliFeedbackStateV1,
   reducePromptEnhancementCliFeedbackV1,
   renderPromptEnhancementCliFeedbackFrameV1,
@@ -26,6 +26,7 @@ import {
   promptEnhancementCursorVisualPositionV1,
   promptEnhancementKeepFieldCursorVisibleV1,
   type PromptEnhancementEditorFieldV1,
+  type PromptEnhancementEditorBufferV1,
   type PromptEnhancementMultilineEditorStateV1,
 } from './multiline-editor.js';
 import type { PromptEnhancementCliMpsInteractionV1, PromptEnhancementCliMpsCancelFeedbackV1 } from './cli-mps-run.js';
@@ -58,6 +59,8 @@ import type { PromptEnhancementSequenceRuntimeStateV1 } from './sequence-runtime
 
 const INTERACTIVE_ROW_COUNT = 4;
 const DETAILS_DISPLAY_ROWS = 5;
+/** Bounded height for the read-only "Your original:" reflection (same discipline as DETAILS_DISPLAY_ROWS). */
+const ORIGINAL_DISPLAY_ROWS = 5;
 /** Non-body chrome lines in a continuation frame (header, row labels, details, interruption, cancel, spacing, footer). */
 const FRAME_CHROME_LINES = 21;
 
@@ -109,7 +112,7 @@ const PROMPT_ENHANCEMENT_MPS_CONTINUATION_OUTCOME_STATES_V1: readonly PromptEnha
 ];
 
 /** True only for a well-formed reported outcome; a missing (null/undefined), unrecognized, or incomplete result is not one. */
-function isPromptEnhancementCliMpsContinuationOutcomeV1(
+export function isPromptEnhancementCliMpsContinuationOutcomeV1(
   result: unknown,
 ): result is PromptEnhancementCliMpsContinuationOutcomeV1 {
   if (typeof result !== 'object' || result === null) return false;
@@ -198,14 +201,27 @@ export async function runPromptEnhancementCliMpsContinuationPopupV1(input: {
   const bodyRows = (): number => Math.max(3, size().rows - FRAME_CHROME_LINES - DETAILS_DISPLAY_ROWS);
   // Measure the exact non-body chrome with a 1-line-body probe (same focus + details), then give
   // the body every remaining row (rows - 1 for the no-scroll cap) so the frame fills the window.
-  const measureBodyViewport = (detailsDisplay: string): number => {
+  const measureBodyViewport = (detailsDisplay: string, originalDisplay: string): number => {
     const probeModel: PromptEnhancementMpsContinuationPopupModelV1 = {
       ...model,
-      body: { ...model.body, text: 'x' },
+      body: { ...model.body, text: 'x', originalPromptText: originalDisplay },
       additionalDetails: { ...model.additionalDetails, text: detailsDisplay },
     };
     const chromeLines = renderPromptEnhancementMpsContinuationFrameV1(probeModel, { focusIndex, colorize: false }).split('\n').length - 1;
     return Math.max(3, size().rows - 1 - chromeLines);
+  };
+
+  // Bound the read-only "Your original:" reflection the SAME way as the editable body/details: wrap it
+  // to the field width and window it to a fixed cap (with the shared "↓ N more" marker). A long original
+  // was previously pushed as ONE multi-line string, so only its first line got the left rail AND the
+  // frame height was mis-measured — a long sequence prompt overflowed the terminal (rail-less spill +
+  // squeezed body). Empty original (confirmation items) stays empty.
+  const windowContinuationOriginal = (text: string, width: number): string => {
+    if (!text) return text;
+    const buffer: PromptEnhancementEditorBufferV1 = {
+      text, cursor: 0, desiredVisualColumn: 0, scrollVisualRow: 0, dirty: false, focused: false,
+    };
+    return windowPromptEnhancementFieldForDisplayWithStartV1(buffer, width, ORIGINAL_DISPLAY_ROWS).text;
   };
 
   let focusIndex = 0;
@@ -242,23 +258,27 @@ export async function runPromptEnhancementCliMpsContinuationPopupV1(input: {
     const detailsBuffer = field === 'additional_details'
       ? promptEnhancementKeepFieldCursorVisibleV1(editor.buffers.additional_details, width, DETAILS_DISPLAY_ROWS)
       : editor.buffers.additional_details;
-    const detailsDisplay = detailsBuffer.text
-      ? windowPromptEnhancementFieldForDisplayV1(detailsBuffer, width, DETAILS_DISPLAY_ROWS)
-      : '';
-    editor = resizePromptEnhancementMultilineEditorV1(editor, width, measureBodyViewport(detailsDisplay));
+    const detailsWindow = detailsBuffer.text
+      ? windowPromptEnhancementFieldForDisplayWithStartV1(detailsBuffer, width, DETAILS_DISPLAY_ROWS)
+      : { text: '', start: 0 };
+    const detailsDisplay = detailsWindow.text;
+    const originalDisplay = windowContinuationOriginal(model.body.originalPromptText, width);
+    editor = resizePromptEnhancementMultilineEditorV1(editor, width, measureBodyViewport(detailsDisplay, originalDisplay));
     const bodyBuffer = editor.buffers.enhanced_body;
-    const bodyDisplay = windowPromptEnhancementFieldForDisplayV1(bodyBuffer, width, editor.viewportRows);
+    const bodyWindow = windowPromptEnhancementFieldForDisplayWithStartV1(bodyBuffer, width, editor.viewportRows);
+    const bodyDisplay = bodyWindow.text;
     let caret: { field: PromptEnhancementEditorFieldV1; visualRow: number; visualColumn: number } | undefined;
     if (field) {
       const buffer = field === 'enhanced_body' ? bodyBuffer : detailsBuffer;
       const shownLines = (field === 'enhanced_body' ? bodyDisplay : detailsDisplay).split('\n').length;
+      const start = field === 'enhanced_body' ? bodyWindow.start : detailsWindow.start;
       const pos = promptEnhancementCursorVisualPositionV1(buffer, width);
-      const visualRow = pos.row - buffer.scrollVisualRow;
+      const visualRow = pos.row - start;
       if (visualRow >= 0 && visualRow < shownLines) caret = { field, visualRow, visualColumn: pos.column };
     }
     const displayModel: PromptEnhancementMpsContinuationPopupModelV1 = {
       ...model,
-      body: { ...model.body, text: bodyDisplay },
+      body: { ...model.body, text: bodyDisplay, originalPromptText: originalDisplay },
       additionalDetails: { ...model.additionalDetails, text: detailsDisplay },
     };
     const caretOut = { row: -1, col: -1 };

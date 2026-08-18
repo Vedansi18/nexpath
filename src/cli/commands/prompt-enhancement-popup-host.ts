@@ -20,6 +20,10 @@ import { emitPromptEnhancementCostObservabilityV1 } from '../../prompt-enhanceme
 import { evaluatePromptEnhancementMpsIntakeDecisionV1 } from '../../prompt-enhancement/intake-decision.js';
 import { buildPromptEnhancementCliMpsIntakeEvidenceV1 } from '../../prompt-enhancement/cli-mps-intake-evidence.js';
 import { runPromptEnhancementCliMpsFirstPopupV1, buildPromptEnhancementMpsCancelFeedbackEventV1, promptEnhancementMpsActionSignalKindV1 } from '../../prompt-enhancement/cli-mps-run.js';
+import {
+  runPromptEnhancementCliMpsContinuationPopupV1,
+  type PromptEnhancementCliMpsContinuationOutcomeV1,
+} from '../../prompt-enhancement/cli-mps-continuation-run.js';
 import { recordPromptEnhancementCliFeedbackV1 } from './auto.js';
 import { logger } from '../../logger.js';
 
@@ -34,6 +38,32 @@ export interface PromptEnhancementPopupHostInputV1 {
 export interface PromptEnhancementPopupHostOutputV1 {
   protocolVersion: typeof POPUP_HOST_PROTOCOL_VERSION_V1;
   result: PromptEnhancementCliPopupResultV1;
+  // MPS Phase 1 (Option 2 — parent records): true ONLY when the user SENT the MPS first popup in this
+  // spawned host. The host records no durable sequence row itself; this flag tells the parent (which
+  // owns the store lock) to run the intake + upsert. Absent/false on a PE-popup send or any non-send.
+  mpsFirstPopupSent?: boolean;
+}
+
+// ── MPS Phase 2 — continuation (2nd popup) host, Option D ─────────────────────────────────────────
+// The SAME spawned child command renders the CONTINUATION popup when its input carries a `continuation`
+// payload (dispatched by shape below), so the proven cross-platform spawn/plan-builder path is reused
+// UNCHANGED for Mac/Windows/Linux. The payload is exactly what runPromptEnhancementCliMpsContinuationPopupV1
+// consumes (the five fields off the packaged continuation); the outcome travels back to the parent, which
+// owns delivery/persistence (Phase 3).
+export interface PromptEnhancementMpsContinuationHostInputV1 {
+  protocolVersion: typeof POPUP_HOST_PROTOCOL_VERSION_V1;
+  continuation: {
+    result: unknown;
+    handoffMetadata: unknown;
+    event: unknown;
+    progress: unknown;
+    itemKind: unknown;
+  };
+}
+
+export interface PromptEnhancementMpsContinuationHostOutputV1 {
+  protocolVersion: typeof POPUP_HOST_PROTOCOL_VERSION_V1;
+  continuationOutcome: PromptEnhancementCliMpsContinuationOutcomeV1;
 }
 
 export interface PromptEnhancementPopupHostCommandOptionsV1 {
@@ -45,11 +75,17 @@ export interface PromptEnhancementPopupHostCommandOptionsV1 {
 
 export interface PromptEnhancementPopupHostDependenciesV1 {
   readInputFile: (path: string) => string;
-  writeResultAtomically: (path: string, output: PromptEnhancementPopupHostOutputV1) => void;
+  writeResultAtomically: (
+    path: string,
+    output: PromptEnhancementPopupHostOutputV1 | PromptEnhancementMpsContinuationHostOutputV1,
+  ) => void;
   openStore: (path: string) => Promise<Store>;
   closeStore: (store: Store) => void;
   runPopup: typeof runPromptEnhancementCliSubmitPopupV1;
   runMpsPopup: typeof runPromptEnhancementCliMpsFirstPopupV1;
+  // MPS Phase 2 (Option D): the continuation (2nd popup) runner, injectable for tests. Called with no
+  // `interaction` so it opens the spawned window's /dev/tty (same console the first popup uses).
+  runMpsContinuationPopup: typeof runPromptEnhancementCliMpsContinuationPopupV1;
   recordFeedback: typeof recordPromptEnhancementCliFeedbackV1;
   recordActionSignal: typeof recordActionSignal;
   markReady: (path: string) => void;
@@ -67,6 +103,7 @@ function defaultDependencies(): PromptEnhancementPopupHostDependenciesV1 {
     closeStore,
     runPopup: runPromptEnhancementCliSubmitPopupV1,
     runMpsPopup: runPromptEnhancementCliMpsFirstPopupV1,
+    runMpsContinuationPopup: runPromptEnhancementCliMpsContinuationPopupV1,
     recordFeedback: recordPromptEnhancementCliFeedbackV1,
     recordActionSignal,
     markReady: writePromptEnhancementPopupHostReadyMarkerV1,
@@ -101,6 +138,28 @@ function validatedInput(value: unknown): {
 }
 
 /**
+ * MPS Phase 2 (Option D): detect a continuation input by its `continuation` payload. A first-popup
+ * input has top-level `request`/`result` and NO `continuation` key, so it is never matched here — the
+ * first-popup dispatch is untouched. Deep validity of the five fields is the runner's fail-closed
+ * concern; this only confirms the shape well enough to route.
+ */
+function asContinuationInput(value: unknown): PromptEnhancementMpsContinuationHostInputV1 | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const v = value as Record<string, unknown>;
+  if (v.protocolVersion !== POPUP_HOST_PROTOCOL_VERSION_V1) return undefined;
+  const c = v.continuation;
+  if (!c || typeof c !== 'object' || Array.isArray(c)) return undefined;
+  const cc = c as Record<string, unknown>;
+  if (!('result' in cc && 'handoffMetadata' in cc && 'event' in cc && 'progress' in cc && 'itemKind' in cc)) {
+    return undefined;
+  }
+  return {
+    protocolVersion: POPUP_HOST_PROTOCOL_VERSION_V1,
+    continuation: cc as PromptEnhancementMpsContinuationHostInputV1['continuation'],
+  };
+}
+
+/**
  * PE1.2 hidden child-command boundary. Invalid, missing, stale, or failed
  * input always resolves to an explicit no-send result. It never prints prompt
  * text/body text to stdout or stderr.
@@ -112,6 +171,9 @@ export async function runPromptEnhancementPopupHostCommandV1(
   const dependencies = { ...defaultDependencies(), ...overrides };
   let popupResult: PromptEnhancementCliPopupResultV1 = SAFE_NON_DELIVERY_RESULT_V1;
   let diagnosticError = 'none';
+  // MPS Phase 1 (Option 2): set only when the MPS first popup was SENT; travels to the parent so it
+  // records the pending-sequence row (the host writes no durable sequence state itself).
+  let mpsFirstPopupSent = false;
 
   try {
     const parsed = JSON.parse(dependencies.readInputFile(options.inputFile)) as unknown;
@@ -160,6 +222,7 @@ export async function runPromptEnhancementPopupHostCommandV1(
             if (mpsActionKind) dependencies.recordActionSignal(store!, input.request.projectRoot, mpsActionKind);
             if (mps.state === 'send' && mps.bodyText.trim().length > 0) {
               popupResult = { state: 'selected_current', bodyText: mps.bodyText };
+              mpsFirstPopupSent = true;
               mpsHandled = true;
             } else if (mps.state === 'cancelled') {
               // Cancel ends the flow (owner request 2026-08-06): the MPS shell already showed the
@@ -232,6 +295,65 @@ export async function runPromptEnhancementPopupHostCommandV1(
   const output: PromptEnhancementPopupHostOutputV1 = {
     protocolVersion: POPUP_HOST_PROTOCOL_VERSION_V1,
     result: popupResult,
+    mpsFirstPopupSent,
+  };
+  try {
+    dependencies.writeResultAtomically(options.resultFile, output);
+  } catch {
+    // The parent launcher treats a missing result file as a safe failed launch.
+  }
+  return output;
+}
+
+/**
+ * MPS Phase 2 (Option D) — the CONTINUATION (2nd popup) child-command handler. Same spawned window and
+ * spawn/plan infra as the first popup (dispatched by input shape); here it renders the continuation
+ * popup and reports its outcome. Fail-closed: invalid/missing/stale input, or any error, resolves to a
+ * `not_shown` outcome (which the parent treats as "keep the item pending" — never a crash, never a
+ * fabricated send). It opens NO store and does no delivery/persistence — the parent owns those (Phase 3).
+ */
+export async function runPromptEnhancementMpsContinuationPopupHostCommandV1(
+  options: PromptEnhancementPopupHostCommandOptionsV1,
+  overrides: Partial<PromptEnhancementPopupHostDependenciesV1> = {},
+): Promise<PromptEnhancementMpsContinuationHostOutputV1> {
+  const dependencies = { ...defaultDependencies(), ...overrides };
+  let outcome: PromptEnhancementCliMpsContinuationOutcomeV1 = {
+    state: 'not_shown',
+    reasonCodes: ['input_invalid_or_stale'],
+  };
+  try {
+    const input = asContinuationInput(JSON.parse(dependencies.readInputFile(options.inputFile)) as unknown);
+    // Mark ready as soon as the child is up and about to REPORT an outcome — BEFORE validation — so a
+    // validation refusal (or a legitimately-rendered not_shown) surfaces to the parent as a reported
+    // outcome WITH its reason, instead of being hidden behind the launcher's `terminal_renderer_not_ready`.
+    // A crash before this point still writes no result, so the launcher detects it via the non-zero exit.
+    if (options.readinessFile) dependencies.markReady(options.readinessFile);
+    if (!input) {
+      outcome = { state: 'not_shown', reasonCodes: ['input_invalid_or_stale'] };
+    } else {
+      // Do NOT pre-validate the RAW result here: a confirmation item carries no original slice (empty by
+      // design, MPS-12), and the runner validates the result WITH the required substitution
+      // (originalPromptText ← text) that a raw pre-validation lacks — so a raw check wrongly rejects every
+      // confirmation continuation with `missing_current_body`. The runner is the single, correct validator;
+      // it returns a REPORTED not_shown with its own reason codes if the result is genuinely invalid.
+      outcome = await dependencies.runMpsContinuationPopup({
+        result: input.continuation.result,
+        handoffMetadata: input.continuation.handoffMetadata,
+        event: input.continuation.event,
+        progress: input.continuation.progress,
+        itemKind: input.continuation.itemKind,
+      } as Parameters<typeof runPromptEnhancementCliMpsContinuationPopupV1>[0]);
+    }
+  } catch (error) {
+    // Diagnostic: propagate WHAT threw through the result so the PARENT logs it persistently — the child
+    // runs in the spawned window, which is gone by the time anyone could read its stderr. The message is
+    // truncated and carries no prompt text (it is an Error message, not content).
+    const detail = (error instanceof Error ? error.message : String(error)).slice(0, 160);
+    outcome = { state: 'not_shown', reasonCodes: ['host_error', detail] };
+  }
+  const output: PromptEnhancementMpsContinuationHostOutputV1 = {
+    protocolVersion: POPUP_HOST_PROTOCOL_VERSION_V1,
+    continuationOutcome: outcome,
   };
   try {
     dependencies.writeResultAtomically(options.resultFile, output);
@@ -243,7 +365,7 @@ export async function runPromptEnhancementPopupHostCommandV1(
 
 export function writePromptEnhancementPopupHostResultAtomicallyV1(
   resultFile: string,
-  output: PromptEnhancementPopupHostOutputV1,
+  output: PromptEnhancementPopupHostOutputV1 | PromptEnhancementMpsContinuationHostOutputV1,
 ): void {
   const temporaryFile = `${resultFile}.tmp-${process.pid}-${randomUUID()}`;
   try {
@@ -275,6 +397,14 @@ export function registerPromptEnhancementPopupHostCommand(program: Command): voi
     .option('--readiness-file <path>', 'Private first-render readiness marker')
     .option('--db <path>', 'Path to the SQLite database file')
     .action(async (opts: PromptEnhancementPopupHostCommandOptionsV1) => {
-      await runPromptEnhancementPopupHostCommandV1(opts);
+      // Option D dispatch: the SAME hidden command renders the first popup OR the continuation popup,
+      // chosen by the input's shape, so the cross-platform spawn/plan infra is reused unchanged.
+      let parsed: unknown;
+      try { parsed = JSON.parse(readFileSync(opts.inputFile, 'utf8')); } catch { parsed = undefined; }
+      if (asContinuationInput(parsed)) {
+        await runPromptEnhancementMpsContinuationPopupHostCommandV1(opts);
+      } else {
+        await runPromptEnhancementPopupHostCommandV1(opts);
+      }
     });
 }

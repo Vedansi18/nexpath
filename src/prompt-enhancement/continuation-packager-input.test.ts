@@ -102,7 +102,8 @@ describe('assembleContinuationPackagerInputV1 — feeds the real packager', () =
     // redactedOriginal='ABCDEFGHIJ', slice {2,5} -> 'CDE'
     expect(result.packaged.result.currentBody.originalPromptText).toBe('CDE');
     expect(result.packaged.itemKind).toBe('task');
-    expect(result.packaged.progress).toEqual({ done: 1, total: 2 });
+    // itemCount 2 → item 0 sent at intake, one deliverable item remains: "1 of 1".
+    expect(result.packaged.progress).toEqual({ done: 1, total: 1 });
   });
 
   it('re-points the original slice off the SERVED item, not a neighbour', () => {

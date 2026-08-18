@@ -119,7 +119,13 @@ function keepCursorVisible(buffer: PromptEnhancementEditorBufferV1, width: numbe
     : position.row >= buffer.scrollVisualRow + rows
       ? position.row - rows + 1
       : buffer.scrollVisualRow;
-  return { ...buffer, desiredVisualColumn: position.column, scrollVisualRow: clampNonNegative(scroll) };
+  // Clamp the scroll to the SAME window the display uses (windowPromptEnhancementFieldForDisplayV1
+  // caps its first-shown row at maxStart, and shows from 0 when everything fits). keepCursorVisible
+  // otherwise only floored the scroll at 0 — a stale scroll above maxStart (e.g. the field now fits
+  // after a viewport grow) left buffer.scrollVisualRow > the display's start, so every caret site
+  // (visualRow = pos.row - scrollVisualRow) placed the hardware cursor ABOVE the real text.
+  const maxStart = Math.max(0, buildPromptEnhancementVisualLineMapV1(buffer.text, width).length - rows);
+  return { ...buffer, desiredVisualColumn: position.column, scrollVisualRow: Math.min(clampNonNegative(scroll), maxStart) };
 }
 
 /**
