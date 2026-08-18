@@ -214,3 +214,52 @@ describe('F4 done-when — "no popup shows on the strength of a blocked fact", a
     expect(outcome.primarySignalKey).toBe('absence:verification_gap');
   });
 });
+
+describe('F4 x prohibition 17 — eligibility gates ANCHORING, it never fades safety', () => {
+  // §12.6 puts this group under prohibition 17 ("safety never faded or pruned"), and source-mix
+  // states the same rule in its own words: high-risk / source-critical facts must never be
+  // downgraded to invisible metadata. A first pass of F4 excluded ineligible facts from the Source-A
+  // pool outright, so a source-critical fact that upstream had blocked never reached the
+  // `selected_source_label_only` carve-out — safety faded by a gate meant only to stop anchoring.
+  // L4991 is the arbiter: a blocked fact must not OPEN a popup, and support material "may
+  // label/support only AFTER another eligible Source A survivor exists".
+
+  const eligibleAnchor = (): PromptEnhancementGuidanceFact => ({
+    ...signalFact('fresh_trigger_eligible'),
+    factId: 'anchor-1',
+    sourceIds: ['absence:anchor@implementation'],
+  });
+
+  const blockedSafetyFact = (): PromptEnhancementGuidanceFact => ({
+    ...signalFact('blocked_by_dedup'),
+    factId: 'safety-1',
+    sourceIds: ['absence:secret_in_prompt@implementation'],
+    guidanceKind: 'safety_or_confirmation',
+    riskLevel: 'sensitive_authority_risky',
+    priority: 'required_survivor',
+  });
+
+  it('a BLOCKED safety fact still appears once an eligible survivor anchors the popup', () => {
+    const result = applyPromptEnhancementSourceMixV1([eligibleAnchor(), blockedSafetyFact()], 'default');
+    expect(result.showPopup).toBe(true);
+    expect(result.requiredSurvivor?.factId).toBe('anchor-1');
+    const safety = result.classifiedFacts.find((entry) => entry.fact.factId === 'safety-1');
+    expect(safety, 'the blocked safety fact vanished from the mix').toBeDefined();
+    expect(
+      ['selected_supporting', 'selected_source_label_only'],
+      'safety was downgraded to invisible metadata',
+    ).toContain(safety?.selectionRole);
+  });
+
+  it('but it still cannot ANCHOR one on its own', () => {
+    const result = applyPromptEnhancementSourceMixV1([blockedSafetyFact()], 'default');
+    expect(result.showPopup).toBe(false);
+    expect(result.requiredSurvivor).toBeNull();
+  });
+
+  it('and when nothing anchors, the refusal is still reason-coded', () => {
+    const result = applyPromptEnhancementSourceMixV1([blockedSafetyFact()], 'default');
+    const row = result.classifiedFacts.find((entry) => entry.fact.factId === 'safety-1');
+    expect(row?.selectionReasonCode).toBe('ineligible_source_a_not_triggering');
+  });
+});

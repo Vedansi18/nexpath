@@ -361,18 +361,18 @@ export function applyPromptEnhancementSourceMixV1(
   const sourceA = sourceAEligible;
   const sourceB = renderableFacts.filter((fact) => laneFor(fact) === 'source_b');
 
-  // Excluded-by-eligibility facts are CLASSIFIED, not discarded: the skip has to be explainable,
-  // and a silently vanished fact is the shape §42.2 complained about in the first place.
-  for (const fact of sourceAIneligible) {
-    classified.push({
-      fact,
-      selectionRole: 'suppressed_by_payload_cap',
-      selectionReasonCode: 'ineligible_source_a_not_triggering',
-    });
-  }
-
   // No valid Source A survivor -> DR2-G1: skip, never build filler from Source B.
   if (sourceA.length === 0) {
+    // Nothing anchors, so the ineligible facts have no supporting pool to join. Record WHY each
+    // was refused rather than letting it disappear: §42.2's complaint was that the gating was
+    // invisible, and an unexplained skip repeats that defect from the other side.
+    for (const fact of sourceAIneligible) {
+      classified.push({
+        fact,
+        selectionRole: 'suppressed_by_payload_cap',
+        selectionReasonCode: 'ineligible_source_a_not_triggering',
+      });
+    }
     for (const fact of sourceB) {
       classified.push({
         fact,
@@ -397,7 +397,23 @@ export function applyPromptEnhancementSourceMixV1(
   }
 
   // Source A is ranked required-survivor-first (phase 2.1). Anchor with exactly one.
-  const [requiredSurvivor, ...remainingSourceA] = sourceA;
+  //
+  // F4 / L4991, corrected at verification round 3: eligibility governs ANCHORING, not existence.
+  // The lock says a blocked fact must not open a popup and that support_only material "may
+  // label/support only AFTER another eligible Source A survivor exists" — so once one does, the
+  // ineligible facts join the supporting pool behind it. Excluding them outright also collided
+  // with prohibition 17: a SOURCE-CRITICAL fact that upstream had blocked would have been
+  // downgraded to invisible metadata, which this module's own rule forbids ("high-risk /
+  // source-critical facts must never be downgraded to invisible metadata") — it would never have
+  // reached the `selected_source_label_only` carve-out below.
+  const [requiredSurvivor, ...eligibleRemaining] = sourceA;
+  const remainingSourceA = [
+    ...eligibleRemaining,
+    // Order is deliberately plain: the source-critical carve-out below keeps such a fact
+    // VISIBLE as selected_source_label_only wherever it lands, so a priority sort here
+    // would be untestable decoration — a mutation removing it killed nothing.
+    ...sourceAIneligible,
+  ];
   classified.push({
     fact: requiredSurvivor,
     selectionRole: 'selected_required',
