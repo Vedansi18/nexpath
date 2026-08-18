@@ -844,9 +844,24 @@ export function windowPromptEnhancementFieldForDisplayV1(
   width: number,
   rows: number,
 ): string {
+  return windowPromptEnhancementFieldForDisplayWithStartV1(buffer, width, rows).text;
+}
+
+/**
+ * Same windowing as windowPromptEnhancementFieldForDisplayV1, but also returns the `start` —
+ * the first visual row actually shown (0 when the whole field fits; the clamped scroll otherwise).
+ * The raw-TTY caret placement uses THIS start (not the raw buffer.scrollVisualRow) so the hardware
+ * cursor's window-relative row is derived from the exact window the display rendered — display and
+ * caret can never disagree even if a buffer's scroll is momentarily past the clamp.
+ */
+export function windowPromptEnhancementFieldForDisplayWithStartV1(
+  buffer: PromptEnhancementEditorBufferV1,
+  width: number,
+  rows: number,
+): { text: string; start: number } {
   const visual = buildPromptEnhancementVisualLineMapV1(buffer.text, Math.max(1, Math.trunc(width)));
   const viewport = Math.max(1, Math.trunc(rows));
-  if (visual.length <= viewport) return visual.map((line) => line.text).join('\n');
+  if (visual.length <= viewport) return { text: visual.map((line) => line.text).join('\n'), start: 0 };
   const maxStart = visual.length - viewport;
   const start = Math.max(0, Math.min(Math.trunc(buffer.scrollVisualRow), maxStart));
   const hiddenAbove = start;
@@ -854,7 +869,7 @@ export function windowPromptEnhancementFieldForDisplayV1(
   const shown = visual.slice(start, start + viewport).map((line) => line.text);
   if (hiddenAbove > 0) shown[0] = `↑ ${hiddenAbove} more lines above`;
   if (hiddenBelow > 0) shown[shown.length - 1] = `↓ ${hiddenBelow} more lines below · the whole prompt is included`;
-  return shown.join('\n');
+  return { text: shown.join('\n'), start };
 }
 
 /**
@@ -1323,9 +1338,10 @@ function createPromptEnhancementCliPopupInteractionV1(onFirstRender?: () => void
     const detailsBuffer = focusedField === 'additional_details'
       ? promptEnhancementKeepFieldCursorVisibleV1(current.editor.buffers.additional_details, editorWidth, detailsRows)
       : current.editor.buffers.additional_details;
-    const detailsDisplay = detailsBuffer.text
-      ? windowPromptEnhancementFieldForDisplayV1(detailsBuffer, editorWidth, detailsRows)
-      : '';
+    const detailsWindow = detailsBuffer.text
+      ? windowPromptEnhancementFieldForDisplayWithStartV1(detailsBuffer, editorWidth, detailsRows)
+      : { text: '', start: 0 };
+    const detailsDisplay = detailsWindow.text;
     // Fill the window (owner request 2026-08-07 — the body was small with dead space below the
     // footer): MEASURE the exact non-body chrome by rendering a 1-line-body probe with the same
     // focus/refinement/details, then give the body every remaining row (rows-1 for the no-scroll
@@ -1345,16 +1361,18 @@ function createPromptEnhancementCliPopupInteractionV1(onFirstRender?: () => void
     // Display only the visible viewport of each editable field so the frame fits the terminal
     // and redraws in place. The full text stays in current.editor for editing/apply/send.
     const bodyBuffer = current.editor.buffers.enhanced_body;
-    const bodyDisplay = windowPromptEnhancementFieldForDisplayV1(bodyBuffer, editorWidth, measuredBodyRows);
-    // Caret row is window-relative, from the SAME synced buffer used for the display. If it
-    // still falls outside the shown lines, leave the caret unset so the cursor is hidden rather
-    // than placed on a wrong row.
+    const bodyWindow = windowPromptEnhancementFieldForDisplayWithStartV1(bodyBuffer, editorWidth, measuredBodyRows);
+    const bodyDisplay = bodyWindow.text;
+    // Caret row is window-relative, derived from the SAME window the display used (its `start`),
+    // not the raw buffer scroll. If it still falls outside the shown lines, leave the caret unset
+    // so the cursor is hidden rather than placed on a wrong row.
     let caret: PromptEnhancementCliFrameStateV1['caret'];
     if (focusedField) {
       const buffer = focusedField === 'enhanced_body' ? bodyBuffer : detailsBuffer;
       const shownLines = (focusedField === 'enhanced_body' ? bodyDisplay : detailsDisplay).split('\n').length;
+      const start = focusedField === 'enhanced_body' ? bodyWindow.start : detailsWindow.start;
       const pos = promptEnhancementCursorVisualPositionV1(buffer, editorWidth);
-      const visualRow = pos.row - buffer.scrollVisualRow;
+      const visualRow = pos.row - start;
       if (visualRow >= 0 && visualRow < shownLines) {
         caret = { field: focusedField, visualRow, visualColumn: pos.column };
       }

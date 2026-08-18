@@ -13,7 +13,7 @@ import {
   decodePromptEnhancementCliKeyV1,
   openPromptEnhancementInteractiveConsoleV1,
   promptEnhancementCliViewportV1,
-  windowPromptEnhancementFieldForDisplayV1,
+  windowPromptEnhancementFieldForDisplayWithStartV1,
   buildPromptEnhancementCliFeedbackStateV1,
   reducePromptEnhancementCliFeedbackV1,
   renderPromptEnhancementCliFeedbackFrameV1,
@@ -242,18 +242,21 @@ export async function runPromptEnhancementCliMpsContinuationPopupV1(input: {
     const detailsBuffer = field === 'additional_details'
       ? promptEnhancementKeepFieldCursorVisibleV1(editor.buffers.additional_details, width, DETAILS_DISPLAY_ROWS)
       : editor.buffers.additional_details;
-    const detailsDisplay = detailsBuffer.text
-      ? windowPromptEnhancementFieldForDisplayV1(detailsBuffer, width, DETAILS_DISPLAY_ROWS)
-      : '';
+    const detailsWindow = detailsBuffer.text
+      ? windowPromptEnhancementFieldForDisplayWithStartV1(detailsBuffer, width, DETAILS_DISPLAY_ROWS)
+      : { text: '', start: 0 };
+    const detailsDisplay = detailsWindow.text;
     editor = resizePromptEnhancementMultilineEditorV1(editor, width, measureBodyViewport(detailsDisplay));
     const bodyBuffer = editor.buffers.enhanced_body;
-    const bodyDisplay = windowPromptEnhancementFieldForDisplayV1(bodyBuffer, width, editor.viewportRows);
+    const bodyWindow = windowPromptEnhancementFieldForDisplayWithStartV1(bodyBuffer, width, editor.viewportRows);
+    const bodyDisplay = bodyWindow.text;
     let caret: { field: PromptEnhancementEditorFieldV1; visualRow: number; visualColumn: number } | undefined;
     if (field) {
       const buffer = field === 'enhanced_body' ? bodyBuffer : detailsBuffer;
       const shownLines = (field === 'enhanced_body' ? bodyDisplay : detailsDisplay).split('\n').length;
+      const start = field === 'enhanced_body' ? bodyWindow.start : detailsWindow.start;
       const pos = promptEnhancementCursorVisualPositionV1(buffer, width);
-      const visualRow = pos.row - buffer.scrollVisualRow;
+      const visualRow = pos.row - start;
       if (visualRow >= 0 && visualRow < shownLines) caret = { field, visualRow, visualColumn: pos.column };
     }
     const displayModel: PromptEnhancementMpsContinuationPopupModelV1 = {
