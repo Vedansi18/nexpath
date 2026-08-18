@@ -668,6 +668,16 @@ function defaultLaunchDependencies(): PromptEnhancementCliPopupHostLaunchDepende
  * Launch the already-built hidden popup child through a resolved Linux terminal
  * and exchange only private typed files. It does not decide hook output or
  * mutate PE semantics; PE1.3 returns transport status for the later adapter.
+ *
+ * Blink fix (Phases 1–3): before spawning, this runs the SAME two validators the child runs
+ * (validatePromptEnhancementPrepareRequestV1 + validatePromptEnhancementPrepareResultV1). An invalid
+ * payload returns `{ state: 'not_shown', reasonCode: 'payload_invalid_pre_spawn', validationReasonCodes }`
+ * WITHOUT opening a window — otherwise the spawned terminal would open and the child would exit before
+ * rendering (an open-then-close "blink"). The sibling continuation launcher below applies a narrowed,
+ * presence-only structural gate (same reasonCode) so a valid confirmation item is never over-rejected.
+ * `direct_tty` and the valid-payload spawn path are unchanged. Reason codes: `payload_invalid_pre_spawn`
+ * (this gate) vs. `terminal_spawn_failed` / `terminal_exit_nonzero` / `terminal_renderer_not_ready`
+ * (a genuine spawn/render failure AFTER a valid payload).
  */
 export async function runPromptEnhancementCliPopupHostLaunchV1(input: {
   capability: PromptEnhancementCliHostCapabilityV1;
