@@ -383,9 +383,16 @@ export function applyPromptEnhancementSourceMixV1(
   // Tier-1 fields are REQUIRED at this seam: normalize every entering fact so none
   // is classified without origin scope, claim policy, and role.
   const facts = rawFacts.map(normalizePromptEnhancementTier1FieldsV1);
-  // L4964: stable per popup-session. One id per mix run, so the same fact keeps the same
-  // identity across the run's own validation/source-use/feedback reads. ⛔ Never rendered.
-  const mixRunId = `mix:${facts.length}:${facts.map((fact) => fact.factId).join('|')}`;
+  // L4964: *"stable popup-session id … local contract, validation, source-use, and feedback
+  // identity only"*. ⛔ Never rendered.
+  //
+  // ⚠️ The identity must depend on the FACT, never on which OTHER facts happen to be in the
+  // same mix. A first version keyed it on the whole fact list, so the same fact was
+  // `mix:1:a:a` alone and `mix:2:a|b:a` once a sibling appeared — MEASURED at verification
+  // round 3. Since the fact set varies turn to turn inside one session, feedback recorded
+  // against one form would not match the same fact later, which is precisely the identity
+  // this field exists to provide.
+  const mixRunId = 'mix';
   const caps = capsForLevel(levelState);
   const classified: PromptEnhancementSourceMixFact[] = [];
 

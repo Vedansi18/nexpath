@@ -114,6 +114,32 @@ describe('A6 / L4964 — sourceMixFactId is stable per popup-session and never r
     expect(idsOf(first)).toEqual(idsOf(second));
   });
 
+  it('the id survives a CHANGING fact set — stability is per fact, not per mix', () => {
+    // The real test of "stable popup-session id". Re-running identical input proves only that the
+    // function is deterministic; the session's fact set VARIES turn to turn, and an id keyed on the
+    // whole list gave the same fact `mix:1:a:a` alone and `mix:2:a|b:a` with a sibling — measured at
+    // verification round 3. Feedback recorded against one form would not match the other, which is
+    // exactly the identity L4964 exists to provide.
+    const idFor = (facts: readonly PromptEnhancementGuidanceFact[], factId: string) =>
+      applyPromptEnhancementSourceMixV1(facts, 'default')
+        .classifiedFacts.find((entry) => entry.fact.factId === factId)?.fact.sourceMixFactId;
+
+    const alone = idFor([fact()], 'f-1');
+    const withSibling = idFor([fact(), fact({ factId: 'f-2', priority: 'normal' })], 'f-1');
+    const withDifferentSibling = idFor([fact(), fact({ factId: 'f-9', priority: 'normal' })], 'f-1');
+
+    expect(alone).toBeDefined();
+    expect(withSibling).toBe(alone);
+    expect(withDifferentSibling).toBe(alone);
+  });
+
+  it('and it survives a different LEVEL — caps change selection, not identity', () => {
+    const idAt = (level: 'default' | 'more_thorough') =>
+      applyPromptEnhancementSourceMixV1([fact()], level)
+        .classifiedFacts.find((entry) => entry.fact.factId === 'f-1')?.fact.sourceMixFactId;
+    expect(idAt('more_thorough')).toBe(idAt('default'));
+  });
+
   it('DIFFERENT facts get different ids — stability is not sameness', () => {
     const result = applyPromptEnhancementSourceMixV1(
       [fact(), fact({ factId: 'f-2', priority: 'normal' })],
