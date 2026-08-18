@@ -482,7 +482,9 @@ describe('UI-1 action-row model', () => {
     expect(rows.map((row) => row.rowKey)).toEqual([
       'editor_heading', 'additional_details', 'shorter', 'more_thorough', 'more_project_grounded', 'use_original',
     ]);
-    expect(rows.find((row) => row.rowKey === 'more_thorough')?.available).toBe(false);
+    // Owner request: directional refinements are always shown available (no "(unavailable)" marker),
+    // even when the fixture marks them uiAvailabilityState 'unavailable' — the row-builder ignores it.
+    expect(rows.find((row) => row.rowKey === 'more_thorough')?.available).toBe(true);
     // Feedback is typed-available but is never a row now.
     expect(rows.some((row) => row.rowKey === 'feedback')).toBe(false);
   });
@@ -498,12 +500,15 @@ describe('UI-1 action-row model', () => {
     expect(refinement.some((row) => row.rowKey === 'use_original')).toBe(false);
   });
 
-  it('marks unavailable rows and renders the focused row help and field body from typed state', () => {
+  it('renders directional refinements without an unavailable marker, and the focused row help and field body from typed state', () => {
     const view: PromptEnhancementCliPopupViewV1 = { model: fakeRenderModel(), editedBodyText: 'BODY-LINE', additionalDetailsText: '' };
     const frame = renderPromptEnhancementPopupFrameV1(view, { focusIndex: 2, helpExpanded: false });
     // Every row is a radio option: focused filled, others hollow.
     expect(frame).toContain('● Shorter');
-    expect(frame).toContain('○ More thorough  (unavailable)');
+    // Owner request: directional refinements never show "(unavailable)" — even though the fixture
+    // marks More thorough uiAvailabilityState 'unavailable', the row-builder ignores it for these rows.
+    expect(frame).toContain('○ More thorough');
+    expect(frame).not.toContain('(unavailable)');
     expect(frame).toContain('○ Use original prompt');
     // Directional rows show no focused-row description (owner request).
     expect(frame).not.toContain('Make it concise');

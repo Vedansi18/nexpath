@@ -642,8 +642,14 @@ export function buildPromptEnhancementCliActionRowsV1(
     rows.push({
       rowKey: entry.action.actionType,
       kind: 'directional',
+      // Owner request: the directional refinements (Shorter / More thorough / More project-grounded)
+      // never show the "(unavailable)" marker. Their `uiAvailabilityState` is always downgraded to
+      // `requires_llm_budget` (they are LLM re-wordings), which read as "(unavailable)" even in a
+      // working popup and confused users. Availability will be governed separately; here the row is
+      // always shown without the marker. Execution stays gated by the RAW action availability in the
+      // runner (a genuinely-unavailable action still no-ops silently, never a bad call).
       label: entry.action.label,
-      available: entry.uiAvailabilityState === 'available',
+      available: true,
       // No focused-row description for the directional actions (owner request):
       // the labels (Shorter / More thorough / More project-grounded) are
       // self-explanatory. Use original prompt keeps its help below.
