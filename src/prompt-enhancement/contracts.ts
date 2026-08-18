@@ -1615,6 +1615,17 @@ export interface PromptEnhancementFutureSequenceRuntimeGateResultV1 {
 }
 
 export interface PromptEnhancementCostVisibilityMetadataV1 {
+  /**
+   * A6 (prohibition 10 · L4979): the runtime seams the rendered facts came through and the
+   * relative payload weight they carried — the PE-EM-1 VISIBLE half of *"every runtime path
+   * typed + PE-EM-1 visible"*. ⛔ Typed path names and counts only, never fact content, and
+   * read by nothing in the pipeline (prohibition 9: cost never gates behaviour).
+   */
+  runtimeSeamSummary?: {
+    readonly runtimePaths: readonly string[];
+    readonly unknownRuntimePathCount: number;
+    readonly totalPayloadWeight: number;
+  };
   callId?: PromptEnhancementCostCallIdV1;
   callOwner: PromptEnhancementOwnerArea;
   callVisibilityMode: PromptEnhancementCallVisibilityMode;

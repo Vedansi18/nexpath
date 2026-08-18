@@ -30,6 +30,7 @@ import { routePromptEnhancement, isKnownPrimaryIntent, isKnownCapabilityId, isKn
 import { buildPromptEnhancementGuidanceFactsV1 } from './guidance-facts.js';
 import { resolvePromptEnhancementSourceConflictsV1 } from './conflict-resolution.js';
 import { applyPromptEnhancementSourceMixV1 } from './source-mix.js';
+import { summarisePromptEnhancementRuntimeSeamsV1 } from './cost-measurement.js';
 import { applyPromptEnhancementGuidanceGateV1 } from './guidance-gate.js';
 import { buildPromptEnhancementPinchLabelV1, buildPromptEnhancementWhyHelpV1 } from './pe-header-copy.js';
 import { buildPromptEnhancementHandoffMetadataV1, validatePromptEnhancementHandoffMetadataV1 } from './handoff-metadata.js';
@@ -549,7 +550,11 @@ function buildResult(
     (diagnostic) => diagnostic.reasonCode === 'additional_details_truncated_public_notice',
   );
   const composerCallVisibility = composed.composerBoundary.inputContract.callVisibilityState;
+  // A6: computed HERE because this is the layer that holds the mixed facts — the result
+  // carries fact IDS only, so deriving it downstream would log an empty summary forever.
+  const runtimeSeamSummary = summarisePromptEnhancementRuntimeSeamsV1(planning.renderedFacts);
   const callAndVisibilityMetadata = {
+    runtimeSeamSummary,
     ...composerCallVisibility,
     callOwner: 'content_semantics' as const,
     callTrigger: 'prepare' as const,

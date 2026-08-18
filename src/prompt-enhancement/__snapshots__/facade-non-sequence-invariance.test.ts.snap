@@ -543,6 +543,13 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
     "providerFailureState": "none",
     "regionalDataResidencyAssumption": "no_regional_or_data_residency_uplift_selected",
     "retryCount": undefined,
+    "runtimeSeamSummary": {
+      "runtimePaths": [
+        "unstamped",
+      ],
+      "totalPayloadWeight": 10,
+      "unknownRuntimePathCount": 0,
+    },
     "telemetrySafeMeasurementFields": [
       "call_id",
       "owner",
@@ -3169,6 +3176,13 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
     "providerFailureState": "none",
     "regionalDataResidencyAssumption": "no_regional_or_data_residency_uplift_selected",
     "retryCount": undefined,
+    "runtimeSeamSummary": {
+      "runtimePaths": [
+        "unstamped",
+      ],
+      "totalPayloadWeight": 10,
+      "unknownRuntimePathCount": 0,
+    },
     "telemetrySafeMeasurementFields": [
       "call_id",
       "owner",
@@ -5901,6 +5915,13 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
     "providerFailureState": "none",
     "regionalDataResidencyAssumption": "no_regional_or_data_residency_uplift_selected",
     "retryCount": undefined,
+    "runtimeSeamSummary": {
+      "runtimePaths": [
+        "unstamped",
+      ],
+      "totalPayloadWeight": 10,
+      "unknownRuntimePathCount": 0,
+    },
     "telemetrySafeMeasurementFields": [
       "call_id",
       "owner",
@@ -8049,6 +8070,11 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
     "providerFailureState": "none",
     "regionalDataResidencyAssumption": "no_regional_or_data_residency_uplift_selected",
     "retryCount": undefined,
+    "runtimeSeamSummary": {
+      "runtimePaths": [],
+      "totalPayloadWeight": 0,
+      "unknownRuntimePathCount": 0,
+    },
     "telemetrySafeMeasurementFields": [
       "call_id",
       "owner",
@@ -9025,6 +9051,11 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
     "providerFailureState": "none",
     "regionalDataResidencyAssumption": "no_regional_or_data_residency_uplift_selected",
     "retryCount": undefined,
+    "runtimeSeamSummary": {
+      "runtimePaths": [],
+      "totalPayloadWeight": 0,
+      "unknownRuntimePathCount": 0,
+    },
     "telemetrySafeMeasurementFields": [
       "call_id",
       "owner",

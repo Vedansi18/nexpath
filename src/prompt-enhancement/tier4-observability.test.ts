@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { summarisePromptEnhancementRuntimeSeamsV1 } from './cost-measurement.js';
 import {
   promptEnhancementFactValueLinesV1,
   promptEnhancementSectionModelFactsV1,
@@ -371,5 +372,58 @@ describe('L1878 — facts render in EVERY applicable section, not only absence-s
   it('and still renders into the mandatory baseline section (L7944) — restoration, not relocation', () => {
     const lines = promptEnhancementFactValueLinesV1('source_signal_guidance', [projectFactFor('source_signal_guidance')]);
     expect(lines.length).toBeGreaterThan(0);
+  });
+});
+
+describe('A6 / prohibition 10 — "every runtime path typed AND PE-EM-1 VISIBLE"', () => {
+  // Verification round 5: prohibition 10 is TWO claims and A6 delivered only the typing. The
+  // PE-EM-1 payload carried call/token/fallback facts and no runtime path or weight at all, so
+  // L4979's own stated purpose — "PE-EM-1 call/token visibility" — had no surface to appear on.
+  const weighted = (factId: string, path: string | undefined, weight: number): PromptEnhancementGuidanceFact => ({
+    ...fact({ factId, sourceType: 'hard_fact', guidanceKind: 'project_grounding' }),
+    ...(path === undefined ? {} : { sourceRuntimePath: path as never }),
+    payloadWeight: weight,
+  });
+
+  it('the summary names the seams the facts came through and totals their weight', () => {
+    const summary = summarisePromptEnhancementRuntimeSeamsV1([
+      weighted('a', 'local_probe', 5),
+      weighted('b', 'local_store', 9),
+    ]);
+    expect(summary.runtimePaths).toEqual(['local_probe', 'local_store']);
+    expect(summary.totalPayloadWeight).toBe(14);
+    expect(summary.unknownRuntimePathCount).toBe(0);
+  });
+
+  it('an UNKNOWN path is counted — the hidden seam is the number that matters', () => {
+    const summary = summarisePromptEnhancementRuntimeSeamsV1([
+      weighted('a', 'local_probe', 5),
+      weighted('c', 'unknown', 3),
+    ]);
+    expect(summary.unknownRuntimePathCount).toBe(1);
+    expect(summary.runtimePaths).toContain('unknown');
+  });
+
+  it('UNSTAMPED is reported distinctly from unknown — the round-1/3 distinction, kept', () => {
+    const summary = summarisePromptEnhancementRuntimeSeamsV1([weighted('a', undefined, 5)]);
+    expect(summary.runtimePaths).toEqual(['unstamped']);
+    expect(summary.unknownRuntimePathCount).toBe(0);
+  });
+
+  it('it reports NON-EMPTY for real facts — the check that catches an accessor reading nothing', () => {
+    // While wiring this I first derived the summary from the RESULT, which carries fact ids only,
+    // so it would have logged an empty summary forever while every type checked. A visibility
+    // field that always says "nothing" is worse than none: it reads as a clean run.
+    const summary = summarisePromptEnhancementRuntimeSeamsV1([weighted('a', 'local_probe', 7)]);
+    expect(summary.runtimePaths.length).toBeGreaterThan(0);
+    expect(summary.totalPayloadWeight).toBeGreaterThan(0);
+  });
+
+  it('carries no fact CONTENT — typed names and counts only', () => {
+    const summary = summarisePromptEnhancementRuntimeSeamsV1([
+      { ...weighted('a', 'local_probe', 5), evidence: { key: 'api_token', value: 'sk-must-not-appear' } },
+    ]);
+    expect(JSON.stringify(summary)).not.toContain('sk-must-not-appear');
+    expect(JSON.stringify(summary)).not.toContain('api_token');
   });
 });
