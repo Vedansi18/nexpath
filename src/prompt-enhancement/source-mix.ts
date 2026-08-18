@@ -13,6 +13,7 @@ import type {
 } from './templates/section-plan.js';
 import {
   isPromptEnhancementPopupEligibleFactV1,
+  type PromptEnhancementSelectionStateV1,
   isPromptEnhancementSourceCriticalFactV1,
   PROMPT_ENHANCEMENT_KNOWN_SOURCE_TYPES_V1,
 } from './templates/section-plan.js';
@@ -331,6 +332,24 @@ function capsForLevel(
   }
 }
 
+/**
+ * A6 / L4979 — the payload weight estimate.
+ *
+ * "Estimated RELATIVE token/input/source payload weight" for cap accounting and PE-EM-1 token
+ * visibility. Deliberately a coarse local estimate from what the fact actually carries (its
+ * evidence text and source ids), not a tokenizer call: the locks call it an ESTIMATE used for caps
+ * and visibility, and ⛔ it must never become product-cost control (L4979's gate, prohibition 9).
+ */
+export function estimatePromptEnhancementPayloadWeightV1(
+  fact: PromptEnhancementGuidanceFact,
+): number {
+  const evidenceChars = (fact.evidence?.key.length ?? 0) + (fact.evidence?.value.length ?? 0);
+  const sourceIdChars = fact.sourceIds.reduce((sum, id) => sum + id.length, 0);
+  // ~4 chars per token is the standard coarse approximation; the number is relative, so the
+  // constant only has to be consistent across facts.
+  return Math.ceil((evidenceChars + sourceIdChars) / 4);
+}
+
 export function applyPromptEnhancementSourceMixV1(
   rawFacts: readonly PromptEnhancementGuidanceFact[],
   levelState: PromptEnhancementPrepareRequestV1['userPreferenceContext']['levelState'] = 'default',
@@ -338,6 +357,9 @@ export function applyPromptEnhancementSourceMixV1(
   // Tier-1 fields are REQUIRED at this seam: normalize every entering fact so none
   // is classified without origin scope, claim policy, and role.
   const facts = rawFacts.map(normalizePromptEnhancementTier1FieldsV1);
+  // L4964: stable per popup-session. One id per mix run, so the same fact keeps the same
+  // identity across the run's own validation/source-use/feedback reads. ⛔ Never rendered.
+  const mixRunId = `mix:${facts.length}:${facts.map((fact) => fact.factId).join('|')}`;
   const caps = capsForLevel(levelState);
   const classified: PromptEnhancementSourceMixFact[] = [];
 
@@ -499,6 +521,22 @@ export function applyPromptEnhancementSourceMixV1(
         selectionReasonCode: 'source_b_over_payload_cap',
       });
     }
+  }
+
+  // A6 (L4981-4982): PROMOTE the mixer's decision onto the fact. The done-when is that nothing
+  // lives only as a mixer local — a consumer holding a fact must be able to see why it was
+  // selected, suppressed, deferred or invalidated without re-deriving it from this envelope.
+  //
+  // `payloadWeight` (L4979) and `sourceMixFactId` (L4964) are stamped in the same pass, because
+  // this is the one place that sees every fact exactly once: the id is stable per popup-session
+  // (the run's own decision id + the fact's own id), and the weight is the estimate the caps here
+  // already reason about. ⛔ Weight is cap/visibility metadata only — never product-cost control.
+  for (const entry of classified) {
+    const promoted = entry.fact as { -readonly [K in keyof PromptEnhancementGuidanceFact]: PromptEnhancementGuidanceFact[K] };
+    promoted.selectionState = entry.selectionRole as PromptEnhancementSelectionStateV1;
+    promoted.selectionReasonCodes = [entry.selectionReasonCode];
+    promoted.sourceMixFactId = `${mixRunId}:${entry.fact.factId}`;
+    promoted.payloadWeight = estimatePromptEnhancementPayloadWeightV1(entry.fact);
   }
 
   const renderedFacts = classified

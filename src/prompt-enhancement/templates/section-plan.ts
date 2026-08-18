@@ -100,6 +100,53 @@ export type PromptEnhancementFactRole =
  * is READ from the branch the pipeline already took at the boundary. §42.2's finding was never that
  * the gating is missing; it is that PE could not SEE it.
  */
+/**
+ * A6 / L4981 — `selectionState`, the LOCKED eight.
+ *
+ * 🔒 *"Selection state controls rendering, metadata-only, handoff, suppression, and fallback;
+ * public copy uses safe labels only."*
+ *
+ * ⚠️ The mixer's own role union shipped FIVE of these. The three it never emitted —
+ * `suppressed_by_relevance`, `suppressed_by_safety`, `invalid_source` — are part of the locked
+ * contract, so the type carries all eight and the phase records which are reachable today rather
+ * than trimming the lock to match the implementation.
+ */
+export type PromptEnhancementSelectionStateV1 =
+  | 'selected_required'
+  | 'selected_supporting'
+  | 'selected_source_label_only'
+  | 'suppressed_by_relevance'
+  | 'suppressed_by_safety'
+  | 'suppressed_by_payload_cap'
+  | 'deferred_to_handoff'
+  | 'invalid_source';
+
+/**
+ * A6 / L4970 — `sourceRuntimePath`, the LOCKED eight. A3 already stamps this value; A6 completes
+ * it as a typed field with its gate: an unknown or hidden runtime path must never DRIVE rendered
+ * guidance (it may still be recorded for diagnostics).
+ */
+export type PromptEnhancementSourceRuntimePathV1 =
+  | 'local_static'
+  | 'local_store'
+  | 'local_probe'
+  | 'local_read_model'
+  | 'runtime_llm_param_extract'
+  | 'runtime_llm_grounding'
+  | 'runtime_autogen'
+  | 'unknown';
+
+/**
+ * L4970's gate, as a predicate: which runtime paths may drive RENDERED guidance.
+ * `unknown` is the hidden-path case the lock names; everything else is a declared local or runtime
+ * seam that PE-EM-1 can account for.
+ */
+export function isPromptEnhancementRenderableRuntimePathV1(
+  path: PromptEnhancementSourceRuntimePathV1 | undefined,
+): boolean {
+  return path !== 'unknown';
+}
+
 export type PromptEnhancementSourceEligibilityStateV1 =
   | 'fresh_trigger_eligible'
   | 'active_signal_eligible'
@@ -305,6 +352,24 @@ export interface PromptEnhancementGuidanceFact {
    * never recomputed here. Optional at the producer; the mix seam treats an absent value as
    * not-independently-eligible rather than defaulting it to eligible.
    */
+  /**
+   * A6 / L4979: estimated relative token/input/source payload weight, for PE-EM-1 call/token
+   * visibility and fact caps. ⛔ Local planning/cap metadata ONLY — never user-facing, and never
+   * product-cost control (the lock's own gate, plus prohibition 9).
+   */
+  payloadWeight?: number;
+  /**
+   * A6 / L4964: stable per popup-session identity for this fact. ⛔ NEVER rendered — local
+   * contract, validation, source-use and feedback identity only.
+   */
+  sourceMixFactId?: string;
+  /**
+   * A6 / L4981-4982: the mixer's decision, PROMOTED onto the fact. The done-when is that nothing
+   * lives only as a mixer local, so a consumer reading a fact can see why it was selected,
+   * suppressed, deferred or invalidated without re-deriving it from the result envelope.
+   */
+  selectionState?: PromptEnhancementSelectionStateV1;
+  selectionReasonCodes?: readonly string[];
   sourceEligibilityState?: PromptEnhancementSourceEligibilityStateV1;
   confidenceBand?: PromptEnhancementConfidenceBandV1;
   recencyBand?: PromptEnhancementRecencyBandV1;
@@ -327,16 +392,12 @@ export interface PromptEnhancementGuidanceFact {
   /** Monorepo/nested-root truth — must SURVIVE source mixing when present. */
   anchoredRoot?: string;
   projectShape?: string;
-  /** Where the resolution actually happened — stamped at the boundary. */
-  sourceRuntimePath?:
-    | 'local_static'
-    | 'local_store'
-    | 'local_probe'
-    | 'local_read_model'
-    | 'runtime_llm_param_extract'
-    | 'runtime_llm_grounding'
-    | 'runtime_autogen'
-    | 'unknown';
+  /**
+   * Where the resolution actually happened — stamped at the boundary (A3), typed here (A6).
+   * ⚠️ Was an INLINE union duplicating the locked eight; pointing it at the named type keeps
+   * one map with one meaning (prohibition 15), so the L4970 gate and the field cannot drift.
+   */
+  sourceRuntimePath?: PromptEnhancementSourceRuntimePathV1;
   requiredBecause?: string;
   signalAliasResolution?: string;
   servedVariantRef?: string;
