@@ -623,7 +623,16 @@ export function registerStopCommand(program: import('commander').Command): void 
             bodyChars: (body.text ?? '').length,
             bodyExcerpt: (body.text ?? '').replace(/\s+/g, ' ').slice(0, 400),
           }, store);
-          return { kind: 'not_shown' };
+          // CONSUME the row, exactly as a real display does (`kind: 'shown'` below marks it).
+          //
+          // Returning `not_shown` alone leaves the record PENDING by design — that path exists so
+          // a host which could not display the popup does not burn it. Under the sim that is
+          // wrong twice over: the content HAS been displayed (to the log), and an unconsumed row
+          // is re-shown at every later Stop. MEASURED in the first s01 attempt: P5, P6 and P7 all
+          // printed the SAME 2,294-character body for the SAME original prompt, so observations
+          // did not correspond to prompts and the distinctness summary would have reported one
+          // body for many prompts — the interchangeability defect, manufactured by the harness.
+          return { kind: 'shown' };
         }
         const capability = resolvePromptEnhancementCliHostCapabilityV1();
         // Diagnosability (2026-08-06): record WHICH host branch the PE popup takes + whether the
