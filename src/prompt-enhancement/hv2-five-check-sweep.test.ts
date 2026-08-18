@@ -393,22 +393,55 @@ describe('HV-2 row 7 — right-good-aggregator: live, and its state reaches the 
 // ─────────────────────────────────────────────────────────────────────────────
 // ROW 8 — store/historical-import.ts — cross-referenced from group B (§14.3 step 4)
 // ─────────────────────────────────────────────────────────────────────────────
-describe('HV-2 row 8 — historical-import: written from group B evidence, not re-run', () => {
+describe('HV-2 row 8 — historical-import: written FROM group B\'s evidence (§14.3 step 4)', () => {
+  // Step 4 says this row is "written from group B's fixture evidence — cross-referenced, not
+  // re-run". The first version cross-referenced only that B's file EXISTS, which is not the same
+  // thing as writing the row from what B proved.
+  //
+  // What B's 27 fixtures establish: the import writes retro rows with real jsonl timestamps, null
+  // stage, the four noise shapes excluded, capped at 500. What matters for THIS table is where
+  // those rows then go — and they are not inert. `historical-import.ts:135` emits param events
+  // tagged `source: 'historical_import'`, and the aggregator folds them into the RIGHT/GOOD score
+  // at HIST_WEIGHT: score = (presence_live + HIST_WEIGHT·presence_hist) / max(opportunities, FLOOR).
+  //
+  // 🔑 So row 8 feeds row 7, which feeds row 3's tier, which decides `claimVerbPolicy`, which is
+  // the practice wording. "Indirect" is right; "inert" would not be.
+
   it('the wire group B verified is still present on the auto path', () => {
-    // §14.3 step 4: this row is cross-referenced, not re-measured. What H owes is proof that the
-    // thing B verified still exists — the import call on the live path.
     const auto = readFileSync('src/cli/commands/auto.ts', 'utf8');
-    // A CALL, not a substring — a renamed symbol still contains the old name, so `toContain`
-    // alone would pass on exactly the change it exists to catch.
+    // A CALL, not a substring — a renamed symbol still contains the old name.
     expect(
       /\bimportHistoricalPrompts\s*\(/.test(auto),
       'the group-B import wire left the auto path — row 8 is written from that wire existing',
     ).toBe(true);
   });
 
-  it("and group B's own fixtures are the evidence, so they must exist", () => {
-    const b = readFileSync('src/store/historical-import.test.ts', 'utf8');
-    expect(b.length, 'group B\'s fixture file is what row 8 is written from').toBeGreaterThan(0);
+  it('imported history enters the SAME lane row 7 aggregates, tagged as historical', () => {
+    const imp = readFileSync('src/store/historical-import.ts', 'utf8');
+    expect(imp).toContain('appendParamEvents');
+    expect(imp).toContain("source:          'historical_import'");
+    const agg = readFileSync('src/classifier/right-good-aggregator.ts', 'utf8');
+    expect(
+      agg,
+      'the historical fold-in weight vanished — imported history would count as live evidence',
+    ).toContain('HIST_WEIGHT');
+  });
+
+  it('and historical-only evidence really does move row 7\'s profile', async () => {
+    // The cross-reference, exercised rather than asserted: feed ONLY historical-import events and
+    // the aggregator still produces a profile entry for the signal. That is the indirect path
+    // arriving — row 8's contribution to rows 7 → 3 → the claim wording.
+    const { store, dir } = await openDiskStore();
+    appendParamEvents(store, Array.from({ length: 8 }, (_, i) => ({
+      projectRoot: dir, sessionId: 'hist-' + String(i), promptIndex: i, signalKey: 'test_creation',
+      channel: 'transcript' as const, stage: null, stageConfidence: null,
+      source: 'historical_import' as const,
+    })));
+    const profile = loadRightGoodProfile(store, dir);
+    expect(
+      profile.test_creation,
+      'historical-import evidence no longer reaches the aggregator — row 8 would be inert, not indirect',
+    ).toBeDefined();
   });
 });
 
