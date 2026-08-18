@@ -304,3 +304,65 @@ describe('HV-1 row 5 — what "partially live" means, measured per export', () =
     ]);
   });
 });
+
+describe('HV-1 round 7 — two production files are invisible to text grep', () => {
+  // Found while re-checking row 4's claims: `grep` reports right-good-aggregator.ts as a BINARY
+  // file. Both it and telemetry/variant-effect.ts embed a RAW NUL byte as a composite-key
+  // separator (`${sessionId}\x00${promptIndex}`) instead of the `\u0000` escape. Runtime-identical,
+  // but grep/rg skip such files by default — and THIS PHASE'S ENTIRE METHOD is consumer sweeps by
+  // grep. Every shell sweep in rounds 2-6 had a two-file blind spot.
+  //
+  // Re-run NUL-safe, none of the phase's symbols appear in either file, so no phase-32 conclusion
+  // changes. It matters for HV-2: `right-good-aggregator` is ROW 7 of the eleven modules HV-2 must
+  // sweep, so a grep-based sweep there would silently under-report its own row.
+  //
+  // These fixtures read with readFileSync, which is NUL-safe — which is why the fixtures were sound
+  // while the shell reasoning was not. ⛔ Not patched: §14.3 says H patches nothing, and the escape
+  // change is another group's source.
+  function filesContainingNul(): string[] {
+    return sourceFilesUnder('src').filter((file) => readFileSync(file, 'utf8').includes('\u0000'));
+  }
+
+  it('the NUL-carrying set is exactly the two known files', () => {
+    expect(
+      filesContainingNul().sort(),
+      'the grep-invisible set changed — HV-2 must re-check which modules its sweep can see',
+    ).toEqual([
+      'src/classifier/right-good-aggregator.ts',
+      'src/telemetry/variant-effect.ts',
+    ]);
+  });
+
+  it('and none of this phase\'s symbols live in them, so the measurements stand', () => {
+    const SYMBOLS = [
+      'getEnvTrajectory', 'EnvTrajectoryState', 'runAutogenForFire', 'probeProject',
+      'setProjectEnvFacts', 'resolveModeBand', 'ACTIVE_AGENT_ID', 'AGENT_CAPABILITIES',
+      'composeDeterministicOptions', 'recordEnvTrajectory',
+    ];
+    const found = filesContainingNul().flatMap((file) => {
+      const text = readFileSync(file, 'utf8');
+      return SYMBOLS.filter((sym) => text.includes(sym)).map((sym) => `${file}:${sym}`);
+    });
+    expect(found, 'a phase-32 symbol hides in a grep-invisible file — re-measure that row').toEqual([]);
+  });
+});
+
+describe('HV-1 row 4 — trajectory-credit has FOUR exports, not one', () => {
+  // Round 3 recorded "its only export takes ParamEvent[]" as the reason it cannot consume
+  // env-trajectory. The conclusion holds, but the stated fact does not: there are four exports.
+  // The argument that survives is the one this pins — none of them touches env-trajectory.
+  it('all four exports are present and none references env-trajectory', () => {
+    const text = readFileSync('src/classifier/trajectory-credit.ts', 'utf8');
+    for (const name of ['MOVEMENT_CREDIT', 'MOVEMENT_CREDIT_MAP', 'MovementExtraction', 'extractMovementCredits']) {
+      expect(text, `export ${name} disappeared — re-measure row 4`).toContain(name);
+    }
+    expect(text).not.toContain('EnvTrajectory');
+    expect(text).not.toContain('recordEnvTrajectory');
+  });
+
+  it('extractMovementCredits is called from right-good-aggregator, read NUL-safely', () => {
+    // The caller lives in one of the grep-invisible files, so this must be read, not grepped.
+    const text = readFileSync('src/classifier/right-good-aggregator.ts', 'utf8');
+    expect(text).toContain('extractMovementCredits(applyWindow(events, opts))');
+  });
+});
