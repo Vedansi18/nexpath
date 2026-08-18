@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { applyPromptEnhancementSourceMixV1 } from './source-mix.js';
 import { buildPromptEnhancementGuidanceFactsV1 } from './guidance-facts.js';
+import { resolvePromptEnhancementGuidanceOutcomeV1 } from './guidance-outcome.js';
 import type {
   PromptEnhancementPrepareRequestV1,
   PromptEnhancementSourceInputSnapshotV1,
@@ -176,5 +177,40 @@ describe('F4 done-when — EVERY fact entering the mix carries its eligibility',
     );
     const signal = facts.find((fact) => fact.sourceType === 'absence_signal');
     expect(signal?.sourceEligibilityState).toBe('blocked_by_post_advisory_cooldown');
+  });
+});
+
+describe('F4 done-when — "no popup shows on the strength of a blocked fact", at the SHOW layer', () => {
+  // The gate fixtures above prove the MIXER refuses an ineligible survivor. The done-when is about
+  // the popup, and `show` is decided one layer up by the guidance gate reading that mix. Asserting
+  // only the mixer would leave the sentence the plan actually wrote untested.
+  const blockedRequest = (state: string) => {
+    const request = buildRequestExercisingEveryProducer();
+    return {
+      ...request,
+      sourceSignals: { ...request.sourceSignals, triggerSignalEligibilityState: state },
+      userPreferenceContext: { levelState: 'default', scopedFeedbackEvidenceRefs: [] },
+    } as unknown as Parameters<typeof resolvePromptEnhancementGuidanceOutcomeV1>[0];
+  };
+
+  it.each([
+    'blocked_by_frequency',
+    'blocked_by_dedup',
+    'blocked_by_post_advisory_cooldown',
+    'blocked_by_session_cap',
+    'dismissed_or_user_skipped',
+    'too_weak_no_popup',
+  ])('a %s trigger does not carry a popup through the gate on its own', (state) => {
+    const outcome = resolvePromptEnhancementGuidanceOutcomeV1(blockedRequest(state));
+    // The trigger signal is blocked, so it must not be the survivor the popup rests on.
+    // The REAL key the trigger producer emits — asserting the ref string instead would pass
+    // trivially, because that value never appears as a primary signal key.
+    expect(outcome.primarySignalKey).not.toBe('absence:verification_gap');
+  });
+
+  it('the same request with an eligible trigger DOES anchor on that signal', () => {
+    const outcome = resolvePromptEnhancementGuidanceOutcomeV1(blockedRequest('fresh_trigger_eligible'));
+    expect(outcome.show).toBe(true);
+    expect(outcome.primarySignalKey).toBe('absence:verification_gap');
   });
 });
