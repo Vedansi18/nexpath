@@ -1,4 +1,7 @@
 import * as vscode from 'vscode';
+
+/** Injected by esbuild at build time (RC24). `unknown` when built outside git. */
+declare const __NEXPATH_BUILD__: string;
 import { existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { toSafeErrorRecord } from './diagnostics.js';
@@ -236,6 +239,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   logChannel = vscode.window.createOutputChannel('Nexpath');
   context.subscriptions.push(logChannel);
   log('[nexpath] extension activated');
+  // RC24: say WHICH build this is. A tester spent three rounds reporting
+  // "Windows is broken" from a bundle built off `main` on a local branch that
+  // merely carried our branch's NAME — nothing in the product could contradict
+  // the prompt string. Now the first two log lines identify the build.
+  log(`[nexpath] build: ${typeof __NEXPATH_BUILD__ === 'string' ? __NEXPATH_BUILD__ : 'unknown'}`);
 
   // Expose the extension root so the chat-history watcher can load the
   // better-sqlite3 binary matching THIS host's Electron ABI from prebuilds/<abi>/

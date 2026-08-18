@@ -1,6 +1,30 @@
 import { build, context } from 'esbuild';
+import { execSync } from 'node:child_process';
 
 const watch = process.argv.includes('--watch');
+
+/**
+ * RC24 (Windows tester, 2026-08-18): stamp the git commit into the bundle.
+ *
+ * ── THE FAILURE THIS ENDS ────────────────────────────────────────────────────
+ * A tester created a LOCAL branch with our branch's name but pointing at `main`
+ * (`git branch <name>` with no start-point), then built and installed it. The
+ * shell prompt showed the right branch name, the build succeeded, and the
+ * extension ran the OLD flow — three separate rounds of "Windows is broken"
+ * were spent on a machine that never had the code. Nothing in the product said
+ * which build was running. Now activation states it, so any report identifies
+ * its own build in one line. Falls back to 'unknown' outside a git checkout
+ * (e.g. a .vsix built from a tarball) — never fails the build.
+ */
+const buildId = (() => {
+  try {
+    const sha = execSync('git rev-parse --short HEAD', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    const branch = execSync('git rev-parse --abbrev-ref HEAD', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    return `${sha} (${branch})`;
+  } catch {
+    return 'unknown';
+  }
+})();
 
 const config = {
   entryPoints: ['src/extension.ts'],
@@ -24,6 +48,8 @@ const config = {
   sourcemap: true,
   minify: false,
   logLevel: 'info',
+  // RC24: compile-time constant read by extension.ts's activation log.
+  define: { __NEXPATH_BUILD__: JSON.stringify(buildId) },
 };
 
 if (watch) {

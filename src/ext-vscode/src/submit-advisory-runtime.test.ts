@@ -702,3 +702,24 @@ describe('⭐ RC22 — user-level mirror handoff', () => {
     expect(matches?.length).toBe(2);
   });
 });
+
+/**
+ * RC24 (Windows tester, 2026-08-18): three rounds of "Windows is broken" came
+ * from a machine that had built `main` on a local branch merely NAMED like
+ * ours — the prompt looked right, the build succeeded, the old flow ran, and
+ * nothing in the product could contradict it. Activation now states its build.
+ */
+describe('⭐ RC24 — the extension identifies its own build', () => {
+  it('activation logs a build line from a compile-time constant', () => {
+    const ext = readFileSync(join(__dirname, 'extension.ts'), 'utf8');
+    expect(ext).toMatch(/declare const __NEXPATH_BUILD__: string;/);
+    expect(ext).toMatch(/log\(`\[nexpath\] build: \$\{typeof __NEXPATH_BUILD__ === 'string' \? __NEXPATH_BUILD__ : 'unknown'\}`\)/);
+  });
+
+  it('the bundler defines it from git and never fails the build without git', () => {
+    const cfg = readFileSync(join(__dirname, '..', 'esbuild.config.mjs'), 'utf8');
+    expect(cfg).toMatch(/define: \{ __NEXPATH_BUILD__: JSON\.stringify\(buildId\) \}/);
+    expect(cfg).toMatch(/git rev-parse --short HEAD/);
+    expect(cfg).toMatch(/catch \{\s*return 'unknown';/);
+  });
+});
