@@ -144,3 +144,54 @@ describe('A6 / L4979 — payloadWeight is a relative cap/visibility estimate', (
     expect(estimatePromptEnhancementPayloadWeightV1(fact())).toBeGreaterThan(0);
   });
 });
+
+describe('A6 done-when — the contract\'s 19 fields all exist, by locked name or proven rename', () => {
+  // "the contract's 19 fields all exist on the fact with locked names-or-proven-renames".
+  // A type-level claim needs a type-level check: this object must name every field, so adding a
+  // locked field without wiring it — or renaming a shipped one — stops compiling rather than
+  // quietly reducing the count.
+  it('every locked field is reachable on the fact type', () => {
+    const probe: Required<Pick<PromptEnhancementGuidanceFact,
+      | 'sourceMixFactId'      // L4964
+      | 'sourceType'           // locked `sourceKind`, rename proven at A2
+      | 'sourceIds'
+      | 'sourceOriginScope'
+      | 'sourceAnchorScope'
+      | 'sourceRuntimePath'    // L4970
+      | 'sourceEligibilityState' // L4971
+      | 'sourceEvidenceState'  // locked `evidenceState`, rename proven at A2
+      | 'factRole'
+      | 'claimVerbPolicy'
+      | 'targetFamily'
+      | 'targetSectionKind'
+      | 'confidenceBand'
+      | 'recencyBand'
+      | 'privacyClass'         // locked `sensitivityClass`, superset pinned at A2
+      | 'payloadWeight'        // L4979
+      | 'fatigueKey'           // L4980
+      | 'selectionState'       // L4981
+      | 'selectionReasonCodes' // L4982
+    >> = {
+      sourceMixFactId: 'mix:1:f-1',
+      sourceType: 'absence_signal',
+      sourceIds: ['absence:x'],
+      sourceOriginScope: 'current_prompt',
+      sourceAnchorScope: 'project_root',
+      sourceRuntimePath: 'local_probe',
+      sourceEligibilityState: 'fresh_trigger_eligible',
+      sourceEvidenceState: 'strong',
+      factRole: 'required_source_signal_survivor',
+      claimVerbPolicy: 'must_phrase_as_source_signal',
+      targetFamily: 'family_agnostic',
+      targetSectionKind: 'verification_or_test_plan',
+      confidenceBand: 'high',
+      recencyBand: 'current_prompt',
+      privacyClass: 'public_safe',
+      payloadWeight: 12,
+      fatigueKey: 'fatigue:abc123',
+      selectionState: 'selected_required',
+      selectionReasonCodes: ['required_source_signal_survivor'],
+    };
+    expect(Object.keys(probe)).toHaveLength(19);
+  });
+});
