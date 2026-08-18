@@ -719,6 +719,37 @@ describe('PE1.3 — Linux PE popup host launcher', () => {
     expect(unavailable).toEqual({ state: 'host_unavailable', reasonCode: 'no_gui_session' });
     expect(makeTempDir).not.toHaveBeenCalled();
   });
+
+  // Blink fix (Phase 1) — the pre-spawn validity gate. An invalid payload (the shape the missing-key
+  // fallback produces) fails the SAME two contract validators the spawned child runs, so the launcher
+  // must reject it BEFORE opening a window — no spawn, no temp dir, no open-then-close flash.
+  it('does not spawn a window (no blink) when the payload fails the pre-spawn validators', async () => {
+    const makeTempDir = vi.fn();
+    const spawnTerminal = vi.fn(async () => child());
+    const result = await runPromptEnhancementCliPopupHostLaunchV1({
+      ...launchInput(),
+      request: { sourcePrompt: { text: 'x' } } as unknown as PromptEnhancementPrepareRequestV1,
+      result: { currentBody: { text: 'y' } } as unknown as PromptEnhancementPrepareResultV1,
+    }, { makeTempDir, spawnTerminal });
+
+    expect(result.state).toBe('not_shown');
+    expect(result).toMatchObject({ reasonCode: 'payload_invalid_pre_spawn' });
+    expect((result as { validationReasonCodes: readonly string[] }).validationReasonCodes.length).toBeGreaterThan(0);
+    // No window opened, and not even a temp dir allocated — the gate returns before any spawn setup.
+    expect(spawnTerminal).not.toHaveBeenCalled();
+    expect(makeTempDir).not.toHaveBeenCalled();
+  });
+
+  it('still spawns for a VALID payload (happy-path regression guard)', async () => {
+    const spawnTerminal = vi.fn(async () => child());
+    const result = await runPromptEnhancementCliPopupHostLaunchV1(launchInput(), {
+      spawnTerminal,
+      readResultFile: () => ({ protocolVersion: 1, result: { state: 'selected_original' } }),
+      readReadyFile: () => true,
+    });
+    expect(spawnTerminal).toHaveBeenCalledTimes(1);
+    expect(result.state).toBe('completed');
+  });
 });
 
 describe('MPS Phase 2 (Option D) — continuation (2nd popup) window launcher', () => {
@@ -828,5 +859,40 @@ describe('MPS Phase 2 (Option D) — continuation (2nd popup) window launcher', 
       { ...continuationLaunchInput(), capability: { state: 'unavailable', method: 'none', reasonCode: 'unsupported_platform' } } as unknown as Parameters<typeof runPromptEnhancementCliMpsContinuationHostLaunchV1>[0],
     );
     expect(unavailable).toEqual({ state: 'host_unavailable', reasonCode: 'unsupported_platform' });
+  });
+
+  // Blink fix (Phase 2) — the narrowed pre-spawn structural gate. A continuation missing a field the
+  // child dereferences must be rejected BEFORE opening a window (no spawn, no temp dir, no flash).
+  it('does not spawn a window (no blink) when the continuation payload is structurally broken', async () => {
+    const makeTempDir = vi.fn();
+    const spawnTerminal = vi.fn(async () => child());
+    const result = await runPromptEnhancementCliMpsContinuationHostLaunchV1(
+      { ...continuationLaunchInput(), continuation: { result: null, handoffMetadata: {}, event: {}, progress: null, itemKind: '' } } as unknown as Parameters<typeof runPromptEnhancementCliMpsContinuationHostLaunchV1>[0],
+      { makeTempDir, spawnTerminal },
+    );
+
+    expect(result.state).toBe('not_shown');
+    expect(result).toMatchObject({ reasonCode: 'payload_invalid_pre_spawn' });
+    expect((result as { validationReasonCodes: readonly string[] }).validationReasonCodes.length).toBeGreaterThan(0);
+    expect(spawnTerminal).not.toHaveBeenCalled();
+    expect(makeTempDir).not.toHaveBeenCalled();
+  });
+
+  // The narrowing that matters: a valid CONFIRMATION item carries an EMPTY original slice, yet all five
+  // structural fields are present — it must STILL spawn (the gate is presence-only; the runner validates
+  // content with the originalPromptText←text substitution). A raw result-validation here would wrongly
+  // reject it — this guards against that regression.
+  it('still spawns a valid CONFIRMATION item (empty original slice) — never over-rejected', async () => {
+    const spawnTerminal = vi.fn(async () => child());
+    const result = await runPromptEnhancementCliMpsContinuationHostLaunchV1(
+      { ...continuationLaunchInput(), continuation: { result: { currentBody: { text: 'Confirm the change?', originalPromptText: '' } }, handoffMetadata: {}, event: {}, progress: { done: 1, total: 2 }, itemKind: 'binary_confirmation' } } as unknown as Parameters<typeof runPromptEnhancementCliMpsContinuationHostLaunchV1>[0],
+      {
+        spawnTerminal,
+        readContinuationResultFile: () => ({ protocolVersion: 1, continuationOutcome: { state: 'send', bodyText: 'Confirm the change?' } }),
+        readReadyFile: () => true,
+      },
+    );
+    expect(spawnTerminal).toHaveBeenCalledTimes(1);
+    expect(result.state).toBe('completed');
   });
 });
