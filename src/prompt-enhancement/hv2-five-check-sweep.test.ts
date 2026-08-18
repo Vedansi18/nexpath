@@ -96,6 +96,16 @@ async function openDiskStore(): Promise<{ store: Store; dir: string }> {
   return { store, dir };
 }
 
+/**
+ * Every line the fact set renders, across every section kind it targets. §14.3 step 3 requires each
+ * module's fixture to reach "into a body"; this is that end of the chain, deterministic and with no
+ * provider call.
+ */
+function allRenderedLines(facts: readonly PromptEnhancementGuidanceFact[]): readonly string[] {
+  const kinds = [...new Set(facts.map((f) => f.targetSectionKind))];
+  return kinds.flatMap((k) => promptEnhancementFactValueLinesV1(k, facts));
+}
+
 function seedEnvFacts(store: Store, dir: string): void {
   upsertProject(store, { projectRoot: dir, name: 'x', projectType: 'app', language: 'ts', description: '', createdAt: Date.now() });
   setProjectEnvFacts(store, dir, probeProject(dir, Date.now()).facts, Date.now());
@@ -167,6 +177,11 @@ describe('HV-2 row 2 — framework-fingerprints: rides row 1, and the ride is re
     // lane of its own — so there is no separate framework channel to look for.
     expect(entry![0].startsWith('hard_fact:')).toBe(true);
     expect(entry![1].value).toBe('nextjs');
+
+    // check-4 — the ride ends in a body, not at the boundary.
+    const { facts } = driveChain(store, dir);
+    const body = allRenderedLines(facts).join('\n');
+    expect(body, 'the framework value crossed but never rendered — row 2 stops short of a body').toContain('nextjs');
   });
 });
 
@@ -187,6 +202,25 @@ describe('HV-2 row 3 — env-tier-promotion: A1 landed, the tier now crosses typ
     for (const tier of tiers) {
       expect(['promoted_practice_P', 'capability', 'uncorroborated']).toContain(tier);
     }
+  });
+
+  it('and a promoted tier changes the WORDING that reaches the body', async () => {
+    // Row 3's check-4 is not a line of its own: the tier decides `claimVerbPolicy`, which decides
+    // how the fact is allowed to speak. A tier-P fact earns practice wording — that IS the tier
+    // arriving in the body, and it is the locked L4993 behaviour ("only corroborated tier P may use
+    // practice wording"). Six verified events promote has_test_runner, so the line must say so.
+    const { store, dir } = await openDiskStore();
+    appendParamEvents(store, Array.from({ length: 6 }, (_, i) => ({
+      projectRoot: dir, sessionId: 'p' + String(i), promptIndex: i, signalKey: 'test_creation',
+      channel: 'transcript' as const, stage: 'implementation' as const, stageConfidence: 0.9,
+      source: 'live' as const,
+    })));
+    const { facts } = driveChain(store, dir);
+    const body = allRenderedLines(facts).join('\n');
+    expect(
+      body,
+      'the promoted tier stopped reaching the body as practice wording — that is L4993 unwinding',
+    ).toContain('established practice');
   });
 
   it('and the promotion rule itself is the one the DS engine uses', () => {
@@ -216,6 +250,8 @@ describe('HV-2 row 4 — env-trajectory: executes, and crosses NOTHING', () => {
       facts.some((f) => f.sourceIds.some((id) => id.includes('trajectory'))),
       'a trajectory-derived fact appeared — the gap closed; re-measure rather than relax this',
     ).toBe(false);
+    // check-4, followed to the end rather than assumed from check-2.
+    expect(allRenderedLines(facts).join('\n')).not.toContain('trajectory');
   });
 });
 
@@ -233,6 +269,10 @@ describe('HV-2 row 5 — agent-capabilities: absent from grounding, deferred by 
       facts.some((f) => f.sourceIds.some((id) => id.includes('agent_capability') || id.includes('mode_band'))),
       'capability facts started crossing — that is the deferred wire (notes §30) landing early',
     ).toBe(false);
+    // check-4 at the far end: no mode band reaches a body either.
+    const body = allRenderedLines(facts).join('\n');
+    expect(body).not.toContain('acceptEdits');
+    expect(body).not.toContain('bypassPermissions');
     // The distinction the row rests on: the mode IS present to PE as review-moment context while
     // capability FACTS are not. Asserted on the request, not on the refs — that is where mode
     // travels — so the row's "absent from grounding, present as context" claim is pinned whole.
@@ -273,6 +313,12 @@ describe('HV-2 row 6 — content-template-grounding: DS-side live, PE gets chann
     for (const channel of channels) {
       expect(channel.includes('='), 'channel "' + channel + '" now carries a value — row 6 changed').toBe(false);
     }
+    // check-4 followed to the end: a channel NAME never becomes body content.
+    const { facts } = driveChain(store, dir);
+    const body = allRenderedLines(facts).join('\n');
+    for (const channel of channels) {
+      expect(body.includes('channel ' + channel), 'a param channel reached the body').toBe(false);
+    }
   });
 });
 
@@ -295,11 +341,18 @@ describe('HV-2 row 7 — right-good-aggregator: live, and its state reaches the 
     expect(profile.test_creation).toBeDefined();
 
     // check-2: the RIGHT/GOOD lane exists at the boundary and is a typed ref list.
-    const { refs } = driveChain(store, dir);
+    const { refs, facts } = driveChain(store, dir);
     expect(refs.rightGoodWorkStyleEnvRuntimeRefs, 'the RIGHT/GOOD lane disappeared from the boundary').toBeDefined();
     for (const ref of refs.rightGoodWorkStyleEnvRuntimeRefs ?? []) {
       expect(typeof ref).toBe('string');
     }
+
+    // check-3/4 — the verified signal becomes a fact and reaches the body. It does so by
+    // corroborating the env capability, which is the whole point of the RIGHT/GOOD lane: without a
+    // behaviour-verified signal the same capability could only be stated as a capability.
+    expect(facts.some((f) => f.sourceIds.some((id) => id.startsWith('right_good:')))).toBe(true);
+    const body = allRenderedLines(facts).join('\n');
+    expect(body, 'the verified signal never reached a body').toContain('established practice');
   });
 });
 
@@ -345,6 +398,23 @@ describe('HV-2 row 9 — param-events: live, and work-style values cross TYPED n
     for (const ref of refs.rightGoodWorkStyleEnvRuntimeRefs ?? []) {
       expect(ref.split(':').length, `ref "${ref}" looks like a smuggled value payload`).toBeLessThanOrEqual(3);
     }
+
+    // check-3 ✅ / check-4 ⛔, MEASURED rather than assumed. The work-style trait DOES become a
+    // fact carrying its value — A3's correction — but that fact does not render into a body: the
+    // rendered set contains no work-style line. Recorded as the measured state, not patched here
+    // (§14.3: H patches nothing); it is evidence for HV-3 against the owning group.
+    const { facts } = driveChain(store, dir);
+    const workStyle = facts.filter((f) => f.sourceIds.some((id) => id.startsWith('work_style:')));
+    expect(workStyle.length, 'the work-style fact stopped being built at all').toBeGreaterThan(0);
+    expect(workStyle[0]!.evidence?.value, 'the work-style value stopped crossing typed').toBeTruthy();
+
+    const body = allRenderedLines(facts).join('\n');
+    for (const f of workStyle) {
+      expect(
+        body.includes(String(f.evidence?.value)),
+        'a work-style value now REACHES the body — row 9 check-4 must be re-measured, not relaxed',
+      ).toBe(false);
+    }
   });
 });
 
@@ -366,6 +436,9 @@ describe('HV-2 row 10 — guidance-facts: live, and the facts now CARRY content 
       expect(f.sourceOriginScope).toBeTruthy();
       expect(f.sourceAnchorScope).toBeTruthy();
     }
+
+    // check-4 — content that never renders is G9 in a different costume.
+    expect(allRenderedLines(facts).length, 'facts carry content that reaches no body').toBeGreaterThan(0);
   });
 });
 
