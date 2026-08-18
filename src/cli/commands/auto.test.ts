@@ -3545,3 +3545,46 @@ describe('B1.4a - live CLI PEF sink wiring', () => {
     }
   });
 });
+
+describe('F4 boundary wiring — the eligibility a branch decides must REACH the request', () => {
+  // Verification round 4 found the hole this closes: `prepareSequenceShapedPeFallback` took a
+  // `triggerEligibility` parameter and never forwarded it to the builder, so all eight labelled
+  // blocked branches produced UNSTAMPED facts while every call site read as correctly wired.
+  // The producer-side coverage fixture could not see it — it hands the producer a request that
+  // already carries the state, so it tests the producer, not the carrier.
+  it('the builder puts the given eligibility on the request snapshot', async () => {
+    const store = await openStore(':memory:');
+    const projectRoot = 'C:/tmp/f4-wiring';
+    const session = SessionStateManager.load(store, projectRoot);
+    for (const state of ['blocked_by_dedup', 'blocked_by_session_cap', 'too_weak_no_popup', 'fresh_trigger_eligible'] as const) {
+      const request = buildPromptEnhancementRequestForAuto({
+        auto: makeInput({ projectRoot, promptText: IMPL_PROMPT, currentAgentMode: 'workspace-write' }),
+        store,
+        session,
+        project: null,
+        effectiveLanguage: 'en',
+        configuredRole: null,
+        effectiveFlagType: 'stage_transition',
+        firedKey: 'stage_transition:idea→implementation',
+        previousStage: 'idea',
+        trigger: { kind: 'stage_transition' },
+        stageResult: {
+          classification: { stage: 'implementation', confidence: 0.9, tier: 3, allScores: {} },
+          signalsPresent: [],
+          signalsAbsent: [],
+          fireRecommendation: true,
+          selectedSignalKey: '',
+        } as never,
+        streamBOutputs: [],
+        triggerEligibility: state,
+      } as never);
+      expect(request.sourceSignals.triggerSignalEligibilityState, `the builder dropped ${state}`).toBe(state);
+    }
+  });
+
+  it('omitting it leaves the field ABSENT — never silently defaulted to eligible', async () => {
+    const store = await openStore(':memory:');
+    const request = makeBoundaryRequest(store, 'C:/tmp/f4-wiring-absent');
+    expect(request.sourceSignals.triggerSignalEligibilityState).toBeUndefined();
+  });
+});

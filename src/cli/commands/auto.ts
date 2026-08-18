@@ -1040,6 +1040,11 @@ export async function runAuto(
       previousStage: prevStage,
       trigger: { kind: 'stage_transition' },
       stageResult,
+      // F4: the branch that called this fallback already decided WHY the advisory was
+      // blocked. Dropping the value here would leave every blocked-path fact unlabelled
+      // while the call sites looked correctly wired — which is exactly what happened
+      // until verification round 4 traced the parameter and found it unused.
+      triggerEligibility,
       streamBOutputs: [],
     });
     const preparation = await preparePromptEnhancementForAuto({ request, prepare: preparePromptEnhancementForRunAuto });
