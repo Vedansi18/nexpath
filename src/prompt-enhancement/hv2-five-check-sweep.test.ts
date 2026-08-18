@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mkdtempSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openStore, type Store } from '../store/db.js';
@@ -563,6 +563,76 @@ describe('HV-2 row 6 — A3 STEP 7 DID NOT LAND: extracted param values never en
     expect(
       promptMined.map((f) => f.factId),
       'a prompt-mined value now crosses — A3 step 7 landed; re-judge row 6 and close §17.6',
+    ).toEqual([]);
+  });
+});
+
+describe('HV-2 check-5 for check-1 — the liveness column must guard itself', () => {
+  // §46.3b's fifth check is "does a TEST pin each of the above?", and check-1 is one of the above.
+  // §17.5's liveness column came from a one-time caller-check instrument. A one-time measurement is
+  // exactly what §46.3c's consumer cells were — and three of those were wrong by the time HV-1 read
+  // them. So the column guards itself here: if a live export loses its last production caller, or a
+  // test-only one gains its first, this fails and the row is re-measured.
+  //
+  // Files are READ, not grepped, and the declaring module is excluded — an export used only inside
+  // its own file is not a live CONSUMER relationship.
+
+  function allTs(): string[] {
+    const out: string[] = [];
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(dir)) {
+        const full = `${dir}/${entry}`;
+        if (statSync(full).isDirectory()) walk(full);
+        else if (entry.endsWith('.ts')) out.push(full);
+      }
+    };
+    walk('src');
+    return out;
+  }
+
+  function productionConsumers(exportName: string, declaredIn: string): string[] {
+    return allTs()
+      .filter((f) => !f.endsWith('.test.ts') && !f.endsWith(declaredIn))
+      .filter((f) => new RegExp(`\\b${exportName}\\b`).test(readFileSync(f, 'utf8')));
+  }
+
+  // row → the export whose liveness the row's check-1 cell rests on
+  const LIVE: readonly (readonly [number, string, string])[] = [
+    [1, 'env-probe.ts', 'probeProject'],
+    [2, 'framework-fingerprints.ts', 'resolveFramework'],
+    [3, 'env-tier-promotion.ts', 'promoteEnvFactsToTierP'],
+    [4, 'env-trajectory.ts', 'recordEnvTrajectory'],
+    [5, 'agent-capabilities.ts', 'resolveModeBand'],
+    [6, 'content-template-grounding.ts', 'extractParamsFromPrompts'],
+    [7, 'right-good-aggregator.ts', 'loadRightGoodProfile'],
+    [8, 'historical-import.ts', 'importHistoricalPrompts'],
+    [9, 'param-events.ts', 'readParamEvents'],
+    [10, 'guidance-facts.ts', 'buildPromptEnhancementGuidanceFactsV1'],
+    [11, 'source-mix.ts', 'applyPromptEnhancementSourceMixV1'],
+  ];
+
+  it('every row\'s check-1 export still has a production consumer', () => {
+    const dead = LIVE
+      .filter(([, file, name]) => productionConsumers(name, file).length === 0)
+      .map(([row, , name]) => `row ${row}: ${name}`);
+    expect(
+      dead,
+      'a module went dead — §17.5\'s check-1 column is now wrong; re-measure the row, do not relax this',
+    ).toEqual([]);
+  });
+
+  it('and the two TEST-ONLY exports this sweep found are still test-only', () => {
+    // §17.5b finding 1, filed to the classifier/telemetry areas rather than fixed. If either gains
+    // a production caller the finding is resolved and the record should say so.
+    const revived = ([
+      ['right-good-aggregator.ts', 'getRightGoodState'],
+      ['param-events.ts', 'appendVariantServedEvent'],
+    ] as const)
+      .filter(([file, name]) => productionConsumers(name, file).length > 0)
+      .map(([, name]) => name);
+    expect(
+      revived,
+      'a test-only export gained a production caller — close that finding in §17.5b rather than relaxing this',
     ).toEqual([]);
   });
 });
