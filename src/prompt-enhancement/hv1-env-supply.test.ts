@@ -247,3 +247,60 @@ describe('HV-1 row 5 — task-mode-fit consumes the TYPE, not the runtime', () =
     expect(text).toContain('recommendedModeBandForStage(stage)');
   });
 });
+
+describe('HV-1 row 1 — the recorded COUNT and the word "each", pinned exactly', () => {
+  // Row 1's cell says the boundary emits "10 refs each carrying {key,value,runtimePath,anchorScope}".
+  // The round-1 fixture only asserted `length > 0` and inspected refs[0] — it could not have caught
+  // a wrong count, nor a payload that most refs lack. Rounds 4 and 5 found two of my own recorded
+  // claims wrong by checking them literally; this checks the quantitative one the same way.
+  it('every ref carries a complete payload, and the count is the recorded one', async () => {
+    const store = await openStore(':memory:');
+    const dir = projectWithATestRunner();
+    upsertProject(store, { projectRoot: dir, name: 'x', projectType: 'app', language: 'ts', description: '', createdAt: Date.now() });
+    setProjectEnvFacts(store, dir, probeProject(dir, Date.now()).facts, Date.now());
+
+    const refs = buildPromptEnhancementGroundingRefsV1(store, dir, []);
+    const withoutPayload = refs.sourceOnlyHardFactRefs.filter((ref) => {
+      const e = refs.groundingEvidenceByRef[ref];
+      return !e || !e.key || !e.runtimePath || !e.anchorScope;
+    });
+    expect(withoutPayload, 'a ref crossed without its resolved payload — "each carrying" is false').toEqual([]);
+    expect(
+      refs.sourceOnlyHardFactRefs.length,
+      'the ref count moved off the recorded 10 — update row 1 rather than this number',
+    ).toBe(10);
+  });
+});
+
+describe('HV-1 row 5 — what "partially live" means, measured per export', () => {
+  // §14.2 step 3 says to measure the partially-live claim. Per export: ACTIVE_AGENT_ID is live in
+  // two places, resolveModeBand in one, and AGENT_CAPABILITIES is read ONLY from inside
+  // resolveModeBand — no external production consumer, and its `version` field is read nowhere.
+  // So the capability DATA the wire decision is about is reachable today through exactly one band
+  // lookup. That is the precise sense in which the module is partially live, and it is why wiring
+  // capability facts would expose something PE has no access to at all today.
+  it('AGENT_CAPABILITIES has no production consumer outside its own module', () => {
+    const consumers = sourceFilesUnder('src')
+      .filter((file) => !file.endsWith('agent-capabilities.ts'))
+      .filter((file) => readFileSync(file, 'utf8').includes('AGENT_CAPABILITIES'));
+    expect(consumers).toEqual([]);
+  });
+
+  it('the registry version field is read nowhere in production', () => {
+    const readers = sourceFilesUnder('src').filter((file) => {
+      const text = readFileSync(file, 'utf8');
+      return /AGENT_CAPABILITIES\[[^\]]*\]\??\.version|capabilities\.version/.test(text);
+    });
+    expect(readers, 'a version reader appeared — row 5 must be re-measured').toEqual([]);
+  });
+
+  it('ACTIVE_AGENT_ID is live in exactly the two measured places', () => {
+    const consumers = sourceFilesUnder('src')
+      .filter((file) => !file.endsWith('agent-capabilities.ts'))
+      .filter((file) => readFileSync(file, 'utf8').includes('ACTIVE_AGENT_ID'));
+    expect(consumers.sort()).toEqual([
+      'src/classifier/agent-mode-mismatch.ts',
+      'src/cli/commands/auto.ts',
+    ]);
+  });
+});
