@@ -97,11 +97,27 @@ async function openDiskStore(): Promise<{ store: Store; dir: string }> {
 }
 
 /**
- * Every line the fact set renders, across every section kind it targets. §14.3 step 3 requires each
- * module's fixture to reach "into a body"; this is that end of the chain, deterministic and with no
- * provider call.
+ * Every line the fact set renders WHEN ASKED THE WAY PRODUCTION ASKS.
+ *
+ * ⚠️ Round 3 correction. The first version derived the section kinds from the facts themselves,
+ * which meant it asked the renderer for `''` — the value every content-carrying fact happens to
+ * carry. No production caller ever asks that: `compose-enhancement.ts:839` passes
+ * `sectionPlan.sectionKind`, always a named kind. Asking with `''` produced lines and made check-4
+ * look satisfied for six rows; asking the way the body asks produces none.
  */
+const PRODUCTION_SECTION_KINDS = [
+  'context_and_constraints', 'approach_or_steps', 'acceptance_or_output_expectation',
+  'verification_or_test_plan', 'project_grounding_facts', 'source_signal_guidance',
+  'reproduction_or_evidence', 'risk_safety_or_confirmation', 'uncertainty_or_clarification',
+  'requirement_source_state', 'behavior_preservation', 'finding_format',
+] as const;
+
 function allRenderedLines(facts: readonly PromptEnhancementGuidanceFact[]): readonly string[] {
+  return PRODUCTION_SECTION_KINDS.flatMap((k) => promptEnhancementFactValueLinesV1(k, facts));
+}
+
+/** What the renderer emits when asked with the raw value the facts carry — the artificial path. */
+function linesUnderRawFactKinds(facts: readonly PromptEnhancementGuidanceFact[]): readonly string[] {
   const kinds = [...new Set(facts.map((f) => f.targetSectionKind))];
   return kinds.flatMap((k) => promptEnhancementFactValueLinesV1(k, facts));
 }
@@ -134,10 +150,17 @@ describe('HV-2 row 1 — env-probe: executes, crosses WITH VALUES, becomes conte
     expect(envFacts.length, 'no env-backed fact was built from the crossing refs').toBeGreaterThan(0);
     expect(envFacts.some((f) => f.evidence?.value !== undefined)).toBe(true);
 
-    // check-4: the content reaches a body
-    const kinds = [...new Set(envFacts.map((f) => f.targetSectionKind))];
-    const rendered = kinds.flatMap((k) => linesFor(k));
-    expect(rendered.join('\n'), 'the fact never rendered — defect G4 would be back').not.toBe('');
+    // check-4 — MEASURED AS A FAILURE, filed at §17.7. The fact resolves and would render, but
+    // only when the renderer is asked with the raw `''` these facts carry. Production asks with a
+    // NAMED section kind, and then nothing comes back.
+    expect(
+      linesUnderRawFactKinds(envFacts).length,
+      'the fact stopped resolving at all — that is a different and worse defect than §17.7',
+    ).toBeGreaterThan(0);
+    expect(
+      allRenderedLines(facts),
+      'env facts now render under a production section kind — §17.7 is FIXED; re-judge row 1 and close it',
+    ).toEqual([]);
   });
 });
 
@@ -178,10 +201,13 @@ describe('HV-2 row 2 — framework-fingerprints: rides row 1, and the ride is re
     expect(entry![0].startsWith('hard_fact:')).toBe(true);
     expect(entry![1].value).toBe('nextjs');
 
-    // check-4 — the ride ends in a body, not at the boundary.
+    // check-4 — the ride reaches the RESOLVED value but not a production body (§17.7).
     const { facts } = driveChain(store, dir);
-    const body = allRenderedLines(facts).join('\n');
-    expect(body, 'the framework value crossed but never rendered — row 2 stops short of a body').toContain('nextjs');
+    expect(linesUnderRawFactKinds(facts).join('\n')).toContain('nextjs');
+    expect(
+      allRenderedLines(facts).join('\n'),
+      'the framework value now reaches a production body — §17.7 is fixed; re-judge row 2',
+    ).not.toContain('nextjs');
   });
 });
 
@@ -216,11 +242,16 @@ describe('HV-2 row 3 — env-tier-promotion: A1 landed, the tier now crosses typ
       source: 'live' as const,
     })));
     const { facts } = driveChain(store, dir);
-    const body = allRenderedLines(facts).join('\n');
+    // The tier DOES reach the claim wording — that is A1 working. It is the last hop, into a
+    // production section, that drops it (§17.7).
     expect(
-      body,
-      'the promoted tier stopped reaching the body as practice wording — that is L4993 unwinding',
+      linesUnderRawFactKinds(facts).join('\n'),
+      'the promoted tier stopped producing practice wording — that is L4993 unwinding',
     ).toContain('established practice');
+    expect(
+      allRenderedLines(facts).join('\n'),
+      'practice wording now reaches a production body — §17.7 is fixed; re-judge row 3',
+    ).not.toContain('established practice');
   });
 
   it('and the promotion rule itself is the one the DS engine uses', () => {
@@ -351,8 +382,11 @@ describe('HV-2 row 7 — right-good-aggregator: live, and its state reaches the 
     // corroborating the env capability, which is the whole point of the RIGHT/GOOD lane: without a
     // behaviour-verified signal the same capability could only be stated as a capability.
     expect(facts.some((f) => f.sourceIds.some((id) => id.startsWith('right_good:')))).toBe(true);
-    const body = allRenderedLines(facts).join('\n');
-    expect(body, 'the verified signal never reached a body').toContain('established practice');
+    expect(linesUnderRawFactKinds(facts).join('\n')).toContain('established practice');
+    expect(
+      allRenderedLines(facts).join('\n'),
+      'the verified signal now reaches a production body — §17.7 is fixed; re-judge row 7',
+    ).not.toContain('established practice');
   });
 });
 
@@ -437,8 +471,13 @@ describe('HV-2 row 10 — guidance-facts: live, and the facts now CARRY content 
       expect(f.sourceAnchorScope).toBeTruthy();
     }
 
-    // check-4 — content that never renders is G9 in a different costume.
-    expect(allRenderedLines(facts).length, 'facts carry content that reaches no body').toBeGreaterThan(0);
+    // check-4 — the content resolves but reaches no production body (§17.7). G9 was "facts carry no
+    // content"; this is the next hop failing instead, which is why it survived G9's fix.
+    expect(linesUnderRawFactKinds(facts).length).toBeGreaterThan(0);
+    expect(
+      allRenderedLines(facts),
+      'facts now reach a production body — §17.7 is fixed; re-judge row 10',
+    ).toEqual([]);
   });
 });
 
@@ -455,11 +494,21 @@ describe('HV-2 row 11 — source-mix: live, and content survives the mix into a 
     const carriers = facts.filter((f) => f.evidence?.value !== undefined);
     expect(carriers.length).toBeGreaterThan(0);
 
-    const kinds = [...new Set(carriers.map((f) => f.targetSectionKind))];
-    const modelFacts = kinds.flatMap((k) => promptEnhancementSectionModelFactsV1(k, facts));
+    const rawKinds = [...new Set(carriers.map((f) => f.targetSectionKind))];
+    const modelFacts = rawKinds.flatMap((k) => promptEnhancementSectionModelFactsV1(k, facts));
     expect(modelFacts.length, 'nothing survived the mix into the section model').toBeGreaterThan(0);
-    const rendered = kinds.flatMap((k) => linesFor(k)).join('\n');
-    expect(rendered, 'content-free output — the garbage-in-preserved state would be back').not.toBe('');
+    expect(linesUnderRawFactKinds(facts).join('\n')).not.toBe('');
+    // …and the same content, asked for the way a body asks, is absent (§17.7).
+    const productionModel = PRODUCTION_SECTION_KINDS.flatMap((k) => promptEnhancementSectionModelFactsV1(k, facts));
+    // The model DOES receive entries under a production kind — but only the CONTENT-FREE ones
+    // (the stage/template facts, which carry a named section kind and no evidence). Every
+    // content-carrying fact has `targetSectionKind: ''` and matches nothing. So what arrives at a
+    // real section is exactly the G9 symptom again, one hop later: ids without values.
+    expect(productionModel.length, 'the section model went empty — a different defect from §17.7').toBeGreaterThan(0);
+    expect(
+      productionModel.filter((e) => e.evidence !== undefined).map((e) => e.factId),
+      'a content-carrying fact now reaches a production section model — §17.7 is fixed; re-judge row 11',
+    ).toEqual([]);
   });
 });
 
