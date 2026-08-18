@@ -6,7 +6,7 @@ import { resolveModeBand, ACTIVE_AGENT_ID, AGENT_CAPABILITIES } from '../env/age
 import { corroborationTierForEnvFact, ENV_FACT_CORROBORATOR } from '../env/env-tier-promotion.js';
 import { recordEnvTrajectory } from '../env/env-trajectory.js';
 import { buildPromptEnhancementGroundingRefsV1 } from '../cli/commands/auto.js';
-import { mkdtempSync, writeFileSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -459,5 +459,43 @@ describe('row 5 — what the mode registry can and cannot be said to prove', () 
     // depended on the registry being exhaustive, so it survives the correction above.
     const auto = readFileSync('src/cli/commands/auto.ts', 'utf8');
     expect(auto).toContain('typeof payload.permission_mode === \'string\' ? payload.permission_mode');
+  });
+});
+
+describe('§46.3c — the analysis table HV-2 will read must carry HV-1\'s corrections', () => {
+  // Round 15: §46.3c lives in the ANALYSIS file, is headed "consumers MEASURED", and its preamble
+  // says "grep-measured, not assumed". Three of its eleven consumer cells were wrong — and HV-2
+  // (the next phase) writes all eleven rows FROM that table. The corrections were recorded in
+  // dev-plan §17.4, i.e. not where HV-2 would look.
+  //
+  // Root cause worth keeping: "grep-measured" meant IMPORTERS, not CALLERS. A module can be
+  // imported and never run, and it can be listed as a consumer while importing nothing from its
+  // supposed source. This pins that the annotations survive in the file HV-2 reads.
+  const ANALYSIS =
+    'lib/shared/submodules/nexpath-prompt-enhancement-submodule/docs/dev/' +
+    'user-experience-improvements-sub-11-prompt-enhancement-intent-family-routing-misses-debug-intents-analysis.md';
+
+  it('the analysis file is present', () => {
+    expect(existsSync(ANALYSIS), `not found at ${ANALYSIS}`).toBe(true);
+  });
+
+  it('§46.3c carries the HV-1 correction banner and the caller-check instruction', () => {
+    const text = readFileSync(ANALYSIS, 'utf8');
+    expect(text).toContain('CORRECTED BY HV-1');
+    expect(
+      text,
+      'the caller-check instruction vanished — HV-2 would inherit the wrong consumer lists again',
+    ).toContain('caller-check every entry, do not inherit any of them');
+  });
+
+  it('each of the three wrong consumer cells is annotated', () => {
+    const text = readFileSync(ANALYSIS, 'utf8');
+    // row 1: a dead listed consumer, and a live one that was missing
+    expect(text).toContain('runAutogenForFire');
+    expect(text).toContain('engine-option-generator.ts:132');
+    // row 4: listed consumer that consumes nothing from the module
+    expect(text).toContain('NONE of its four exports touches env-trajectory');
+    // row 5: a type-only import counted as a runtime consumer
+    expect(text).toContain('TYPE-ONLY');
   });
 });
