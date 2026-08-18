@@ -499,3 +499,40 @@ describe('§46.3c — the analysis table HV-2 will read must carry HV-1\'s corre
     expect(text).toContain('TYPE-ONLY');
   });
 });
+
+describe('§46.3c — the PRE-FIX BASELINE must survive every annotation', () => {
+  // Round 16: §14.1 calls §46.3c the pre-fix state, and §14.4 step 1 has HV-3 filing each red row
+  // "with the §46.3c row as its baseline". Round 15's annotations OVERWROTE those baseline cells
+  // for rows 1, 4 and 5 — which would have left HV-3 with nothing to file against for three of the
+  // eleven modules. Round 14 had already established the right treatment on the workings file
+  // (mark superseded, never erase) and round 15 failed to carry it here.
+  //
+  // These are the exact strings the table carried before HV-1 measured anything. They are the
+  // baseline, so they are pinned as literals rather than described.
+  const ANALYSIS =
+    'lib/shared/submodules/nexpath-prompt-enhancement-submodule/docs/dev/' +
+    'user-experience-improvements-sub-11-prompt-enhancement-intent-family-routing-misses-debug-intents-analysis.md';
+
+  const BASELINE_CELLS = [
+    'run on PE path? verify',
+    'values dropped — keys only',
+    'verify which auto path',
+    'unknown — measure',
+    'partially live (mode fields)',
+    'not in grounding refs — decide if it should be',
+  ];
+
+  it('every pre-fix baseline cell for rows 1, 4 and 5 is still present verbatim', () => {
+    const text = readFileSync(ANALYSIS, 'utf8');
+    const lost = BASELINE_CELLS.filter((cell) => !text.includes(cell));
+    expect(
+      lost,
+      'a baseline cell was overwritten — HV-3 files its red rows against these, so they cannot be replaced by the answer',
+    ).toEqual([]);
+  });
+
+  it('and the mark-do-not-erase convention is stated in the table itself', () => {
+    const text = readFileSync(ANALYSIS, 'utf8');
+    expect(text).toContain('THE BASELINE IS PRESERVED, NEVER OVERWRITTEN');
+  });
+});
