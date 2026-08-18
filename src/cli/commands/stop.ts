@@ -583,6 +583,48 @@ export function registerStopCommand(program: import('commander').Command): void 
       // new turn. A GUI terminal is required — with no usable host the PE is skipped and the
       // advisory path runs instead.
       const peLaunch: PromptEnhancementStopLaunchFn = async (pending) => {
+        // ── SIM OBSERVATION (sim/observability change — temp branch only) ──────────────
+        //
+        // The sim contract's DS option-text rule (§13.6 rule 4) observes a surface that no
+        // longer exists: the DS advisory popup is disabled outright (MPS-7, above), so a sim
+        // run has no option texts to read. The surface that DOES carry the advisory content
+        // now is the PE popup, and its content is the ENHANCED PROMPT — so that is what the
+        // sim observes instead, per the owner's ruling.
+        //
+        // Why it must intercept BEFORE the capability probe: on Windows the probe always
+        // returns `available` and the launch SPAWNS A TERMINAL WINDOW. A 52-prompt scenario
+        // would open 52 blocking windows. Under NEXPATH_SIM the content is printed and the
+        // launch returns `not_shown` — the exact path already taken when no host exists, so
+        // the rest of the pipeline behaves as it does in a hostless environment.
+        if (process.env['NEXPATH_SIM'] === '1') {
+          const body = pending.result.currentBody;
+          const sections = body.sections ?? [];
+          const out = process.stdout;
+          out.write('[SIM] PE enhanced prompt — disposition:' + pending.result.disposition
+            + ' sections:' + sections.length
+            + ' composer:' + (body.composerMode ?? 'unknown')
+            + ' language:' + (body.effectiveLanguageState ?? 'unknown') + '\n');
+          for (const [index, section] of sections.entries()) {
+            out.write('  ' + (index + 1) + '. [' + section.sectionKind + '] ' + (section.title ?? '') + '\n');
+            for (const line of (section.bodyText ?? '').split('\n')) {
+              if (line.trim().length > 0) out.write('     ' + line + '\n');
+            }
+          }
+          out.write('[SIM] PE enhanced prompt (full body follows)\n');
+          out.write((body.text ?? '') + '\n');
+          out.write('[SIM] PE end of enhanced prompt\n');
+          // Telemetry mirrors the stdout block so `show_pe_detail` in sim-core.sh can report
+          // per cycle exactly as `show_advisory_detail` does for the DS path.
+          writeTelemetry(payload.cwd, 'prompt_enhancement_sim_observed', {
+            disposition: pending.result.disposition,
+            sectionCount: sections.length,
+            composerMode: body.composerMode ?? null,
+            sectionKinds: sections.map((section) => section.sectionKind),
+            bodyChars: (body.text ?? '').length,
+            bodyExcerpt: (body.text ?? '').replace(/\s+/g, ' ').slice(0, 400),
+          }, store);
+          return { kind: 'not_shown' };
+        }
         const capability = resolvePromptEnhancementCliHostCapabilityV1();
         // Diagnosability (2026-08-06): record WHICH host branch the PE popup takes + whether the
         // pending row can open MPS — the two facts a missing-MPS report needs from the log.
