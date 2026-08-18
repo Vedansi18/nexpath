@@ -1,6 +1,7 @@
 import { redactSecrets } from '../store/redact.js';
 import { promptEnhancementConfidenceBandForV1 } from './source-mix.js';
 import {
+  isPromptEnhancementRenderableRuntimePathV1,
   promptEnhancementGuidanceFactRefIdV1,
   type PromptEnhancementGuidanceFact,
 } from './templates/section-plan.js';
@@ -79,6 +80,12 @@ function payloadFieldSafeV1(text: string): string {
 
 /** Per-fact gates (§35 / §43.1). A gated fact never reaches wording at all. */
 function isRenderableValueFactV1(fact: PromptEnhancementGuidanceFact): boolean {
+  // A6 / L4970: *"unknown/hidden runtime path must never drive rendered guidance"*. This is the
+  // seam where a fact's VALUE becomes body text, so the gate belongs here rather than as a
+  // predicate nobody calls — which is exactly what A6 shipped until verification round 1.
+  // ⚠️ ABSENT is not unknown: a producer that never stamped the path has not declared a hidden
+  // one, and treating the two alike would silence every unstamped producer.
+  if (!isPromptEnhancementRenderableRuntimePathV1(fact.sourceRuntimePath)) return false;
   if (fact.privacyClass === 'do_not_render' || fact.sanitizationState === 'unsafe_to_render') return false;
   if (fact.claimVerbPolicy === 'do_not_render') return false;
   if (fact.renderPolicy === 'suppress_with_reason' || fact.renderPolicy === 'metadata_only') return false;

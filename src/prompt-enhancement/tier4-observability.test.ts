@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { promptEnhancementFactValueLinesV1 } from './fact-value-render.js';
 import {
   applyPromptEnhancementSourceMixV1,
   estimatePromptEnhancementPayloadWeightV1,
@@ -193,5 +194,45 @@ describe('A6 done-when — the contract\'s 19 fields all exist, by locked name o
       selectionReasonCodes: ['required_source_signal_survivor'],
     };
     expect(Object.keys(probe)).toHaveLength(19);
+  });
+});
+
+describe('A6 / L4970 — the gate is APPLIED, not merely typed', () => {
+  // Verification round 1: A6 shipped `isPromptEnhancementRenderableRuntimePathV1` as a predicate
+  // that NOTHING called, so the lock's requirement — "unknown/hidden runtime path must never drive
+  // rendered guidance" — was unenforced while its fixture passed. The gate now sits in
+  // `isRenderableValueFactV1`, the seam where a fact's VALUE becomes body text, and these assert
+  // the behaviour rather than the predicate.
+  const groundingFact = (path?: PromptEnhancementSourceRuntimePathV1): PromptEnhancementGuidanceFact => ({
+    ...fact({
+      factId: 'runtime-1',
+      sourceType: 'hard_fact',
+      guidanceKind: 'project_grounding',
+      suggestedActionKind: 'ground_in_project_fact',
+      targetSectionKind: 'project_grounding_facts',
+      priority: 'normal',
+      claimVerbPolicy: 'may_state_as_project_capability',
+      sourceOriginScope: 'local_probe',
+      sourceAnchorScope: 'project_root',
+      evidence: { key: 'test_runner', value: 'vitest' },
+    }),
+    ...(path === undefined ? {} : { sourceRuntimePath: path }),
+  });
+
+  it('an UNKNOWN runtime path renders NO value line', () => {
+    expect(promptEnhancementFactValueLinesV1('project_grounding_facts', [groundingFact('unknown')])).toEqual([]);
+  });
+
+  it('a DECLARED runtime path renders normally — the gate blocks the hidden case only', () => {
+    const lines = promptEnhancementFactValueLinesV1('project_grounding_facts', [groundingFact('local_probe')]);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('vitest');
+  });
+
+  it('an ABSENT path still renders — unstamped is not hidden', () => {
+    // Every producer that predates the field would fall silent otherwise, which would turn an
+    // observability field into a behaviour change.
+    const lines = promptEnhancementFactValueLinesV1('project_grounding_facts', [groundingFact(undefined)]);
+    expect(lines).toHaveLength(1);
   });
 });
