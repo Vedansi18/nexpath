@@ -32,6 +32,16 @@ function sourceFilesUnder(dir: string): string[] {
 }
 const HV1_HELPER = true;
 
+function allTsFilesUnder(dir: string): string[] {
+  const out: string[] = [];
+  for (const entry of readdirSync(dir)) {
+    const full = dir + '/' + entry;
+    if (statSync(full).isDirectory()) out.push(...allTsFilesUnder(full));
+    else if (entry.endsWith('.ts')) out.push(full);
+  }
+  return out;
+}
+
 function projectWithATestRunner(): string {
   const dir = mkdtempSync(join(tmpdir(), 'hv1-'));
   writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'x', devDependencies: { vitest: '1.0.0' } }));
@@ -316,8 +326,17 @@ describe('HV-1 round 7/8 — no production file is invisible to text grep', () =
   // BUILT output, not assumed: dist carries `\u0000`, which evaluates to charCode 0. Worth noting
   // that the two modules' own 42 tests do NOT cover the separator (replacing it with a printable
   // string leaves them green), so the proof had to come from the emitted string.
-  it('no production source file carries a raw NUL byte', () => {
-    const invisible = sourceFilesUnder('src').filter((file) => readFileSync(file, 'utf8').includes('\u0000'));
+  it('no source file carries a raw NUL byte — TESTS INCLUDED', () => {
+    // Round 9: the round-8 guard walked sourceFilesUnder(), which SKIPS .test.ts — yet the sweeps it
+    // protects routinely read test files. Round 2's entire finding was that `runAutogenForFire`
+    // appears ONLY in its own test file; had that file been grep-invisible, the module would have
+    // looked live and the dead-code finding would have been missed. The guard must cover tests too.
+    const everyTsFile = allTsFilesUnder('src');
+    expect(
+      everyTsFile.length,
+      'the widened walk found no more files than the production-only walk — it is not covering tests',
+    ).toBeGreaterThan(sourceFilesUnder('src').length);
+    const invisible = everyTsFile.filter((file) => readFileSync(file, 'utf8').includes('\u0000'));
     expect(
       invisible,
       'a file became grep-invisible again — every consumer sweep, including HV-2 row 7, silently under-reports',
