@@ -332,3 +332,44 @@ describe('A6 / L4964 — "never rendered", checked at both outbound surfaces', (
     expect(payload[0]?.factId).toBe('guidance_fact:render-1');
   });
 });
+
+describe('L1878 — facts render in EVERY applicable section, not only absence-signal guidance', () => {
+  // The lock: "the user can request stronger use of available project facts … in every applicable
+  // section, NOT ONLY absence-signal guidance". Analysis §10.4 measured facts reaching exactly one
+  // section kind — `source_signal_guidance`, which IS the absence-signal section — so the
+  // requirement had been implemented as precisely the thing it forbids. The bug record is §17.3.
+  //
+  // Pinned here because the restoration spans A1-A5, GR-1, GR-2 and A6: no single phase owns it,
+  // so without one assertion naming the lock, a later change could quietly narrow rendering back
+  // to the one mandatory section and every phase fixture would still pass.
+  const projectFactFor = (sectionKind: string): PromptEnhancementGuidanceFact => fact({
+    factId: `l1878-${sectionKind}`,
+    sourceType: 'hard_fact',
+    guidanceKind: 'project_grounding',
+    suggestedActionKind: 'ground_in_project_fact',
+    targetSectionKind: sectionKind,
+    priority: 'normal',
+    claimVerbPolicy: 'may_state_as_project_capability',
+    sourceOriginScope: 'local_probe',
+    sourceAnchorScope: 'project_root',
+    sourceRuntimePath: 'local_probe',
+    evidence: { key: 'test_runner', value: 'vitest' },
+  });
+
+  it.each([
+    'project_grounding_facts',
+    'verification_or_test_plan',
+    'reproduction_or_evidence',
+    'context_and_constraints',
+    'acceptance_or_output_expectation',
+  ])('a project fact renders into %s', (sectionKind) => {
+    const lines = promptEnhancementFactValueLinesV1(sectionKind, [projectFactFor(sectionKind)]);
+    expect(lines.length, `${sectionKind} rendered no value`).toBeGreaterThan(0);
+    expect(lines[0]).toContain('vitest');
+  });
+
+  it('and still renders into the mandatory baseline section (L7944) — restoration, not relocation', () => {
+    const lines = promptEnhancementFactValueLinesV1('source_signal_guidance', [projectFactFor('source_signal_guidance')]);
+    expect(lines.length).toBeGreaterThan(0);
+  });
+});
