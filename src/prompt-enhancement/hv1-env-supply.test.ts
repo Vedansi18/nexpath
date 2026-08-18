@@ -194,3 +194,56 @@ describe('HV-1 row 5 — the two agent-self fields are ONE upstream signal', () 
     expect(resolveModeBand(ACTIVE_AGENT_ID, 'not_a_real_mode')).toBeUndefined();
   });
 });
+
+describe('HV-1 row 4 — step 2 asked WHICH auto path, and the answer is the PE one', () => {
+  // §14.2 step 2: "measure WHICH `auto.ts` path consumes it". A line number is not a path, and
+  // auto.ts has fifteen top-level exports. The consuming path is `runAuto` — and `runAuto` is the
+  // SAME function that builds the PE request. So it is not two unrelated paths that happen to
+  // miss each other: ONE function probes the project TWICE (buildRuntimeContext for row 1,
+  // recordEnvTrajectory for row 4) and PE still receives zero env facts, because neither probe
+  // lands in the store PE reads.
+  function bodyOfRunAuto(): string {
+    const text = readFileSync('src/cli/commands/auto.ts', 'utf8');
+    const start = text.indexOf('export async function runAuto(');
+    expect(start, 'runAuto was renamed — row 4 names it as the consuming path').toBeGreaterThan(-1);
+    const next = text.indexOf('\nexport ', start + 1);
+    return text.slice(start, next === -1 ? undefined : next);
+  }
+
+  it('runAuto is the auto path that consumes env-trajectory', () => {
+    expect(bodyOfRunAuto()).toContain('recordEnvTrajectory(store, input.projectRoot,');
+  });
+
+  it('and the same path probes again for PE and builds the PE request', () => {
+    const body = bodyOfRunAuto();
+    expect(body, 'row 1 probe left runAuto — re-measure which path probes').toContain('buildRuntimeContext(');
+    expect(body, 'the PE request left runAuto — the double-probe finding must be re-measured').toContain(
+      'buildPromptEnhancementRequestForAuto({',
+    );
+  });
+});
+
+describe('HV-1 row 5 — task-mode-fit consumes the TYPE, not the runtime', () => {
+  // My row-5 cell said resolveModeBand runs "in agent-mode-mismatch / task-mode-fit". It does not
+  // run in task-mode-fit: that module imports only the ModeBand TYPE (erased at runtime) and
+  // resolves its own band from a static per-stage table. agent-capabilities has exactly ONE
+  // runtime consumer. The two meet inside agent-mode-mismatch, which calls both.
+  it('task-mode-fit never calls resolveModeBand and imports the type only', () => {
+    const text = readFileSync('src/classifier/task-mode-fit.ts', 'utf8');
+    expect(text).not.toContain('resolveModeBand');
+    expect(text).toContain("import type { ModeBand } from '../env/agent-capabilities.js'");
+  });
+
+  it('resolveModeBand has exactly one production caller', () => {
+    const callers = sourceFilesUnder('src')
+      .filter((file) => !file.endsWith('agent-capabilities.ts'))
+      .filter((file) => /resolveModeBand\s*\(/.test(readFileSync(file, 'utf8')));
+    expect(callers).toEqual(['src/classifier/agent-mode-mismatch.ts']);
+  });
+
+  it('and that caller is where the runtime band and the static band meet', () => {
+    const text = readFileSync('src/classifier/agent-mode-mismatch.ts', 'utf8');
+    expect(text).toContain('resolveModeBand(ACTIVE_AGENT_ID');
+    expect(text).toContain('recommendedModeBandForStage(stage)');
+  });
+});
