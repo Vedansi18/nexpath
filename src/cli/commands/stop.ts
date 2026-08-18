@@ -9,7 +9,7 @@ import {
   type PendingPromptEnhancement,
 } from '../../store/pending-prompt-enhancements.js';
 import { isFeedbackEligible, markFeedbackShown } from '../../store/feedback-cadence.js';
-import { recordActionSignal } from '../../store/feedback-signals.js';
+import { recordActionSignal, type PromptActionSignalKind } from '../../store/feedback-signals.js';
 import { sendFeedback } from '../../telemetry/feedback-send.js';
 import { runFeedbackPopup, type FeedbackRenderFn, type FeedbackResult } from '../../decision-session/feedback-popup.js';
 import { createFeedbackRenderFn } from '../../decision-session/feedback-tty.js';
@@ -322,6 +322,12 @@ async function launchMpsContinuationAtStopV1(
       // (unavailable host, spawn/render failure) folds to `not_shown` → the item stays pending
       // (fail-closed, never a fabricated send).
       const continuationCapability = resolvePromptEnhancementCliHostCapabilityV1();
+      // The direct-TTY popup runs lock-released, so any in-popup action signal it records (only
+      // `mps_apply_details` fires here) is dropped on the re-acquire reload — the same reason the
+      // terminal outcome is re-recorded below. BUFFER them here and re-record after re-acquire, so
+      // apply-details persists (parity with the first popup, which is not lock-released and records it
+      // directly). The spawned host records its own in-popup signals inside its child process.
+      const continuationInPopupSignals: Array<{ kind: PromptActionSignalKind; occurredAt: number }> = [];
       const outcome: PromptEnhancementCliMpsContinuationOutcomeV1 =
         continuationCapability.state === 'available' && continuationCapability.method === 'direct_tty'
           ? await withReleasedStoreLockV1(store, () => runPromptEnhancementCliMpsContinuationPopupV1({
@@ -330,7 +336,7 @@ async function launchMpsContinuationAtStopV1(
               event:           packaged.packaged.event,
               progress:        packaged.packaged.progress,
               itemKind:        packaged.packaged.itemKind,
-              actionSignalSink: (kind, occurredAt) => recordActionSignal(store, payload.cwd, kind, occurredAt),
+              actionSignalSink: (kind, occurredAt) => { continuationInPopupSignals.push({ kind, occurredAt }); },
             }))
           : await withReleasedStoreLockV1(store, async () => {
               const launch = await runPromptEnhancementCliMpsContinuationHostLaunchV1({
@@ -369,6 +375,10 @@ async function launchMpsContinuationAtStopV1(
       // in the re-acquired window, so it persists (content-free — kind + timestamp only; not_shown → none).
       const continuationActionKind = promptEnhancementMpsActionSignalKindV1(outcome.state);
       if (continuationActionKind) recordActionSignal(store, payload.cwd, continuationActionKind);
+      // Re-record the buffered in-popup signals (mps_apply_details) too — they were dropped on the
+      // reload above; recording them now, in the re-acquired window, persists them. Disjoint from the
+      // terminal kind (the sink fires only for apply-details), so no double count.
+      for (const s of continuationInPopupSignals) recordActionSignal(store, payload.cwd, s.kind, s.occurredAt);
       // Stage D — re_acquire_reloads_before_writing: the lock is back, but the row may have moved.
       // RELOAD before writing (a concurrent session may have advanced/cancelled it during the wait, or
       // the sequence may have died). A click on a dead/stale offer is a SILENT no-op — no recovery UI,
