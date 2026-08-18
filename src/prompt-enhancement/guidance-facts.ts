@@ -5,6 +5,7 @@ import type {
   PromptEnhancementGuidanceFact,
   PromptEnhancementGuidancePriority,
   PromptEnhancementClaimVerbPolicy,
+  PromptEnhancementSourceEligibilityStateV1,
 } from './templates/section-plan.js';
 
 /**
@@ -95,12 +96,33 @@ export function isSensitiveSignalRefV1(ref: string): boolean {
   return ref.includes('secret_in_prompt');
 }
 
-function absenceSignalFactV1(factId: string, sourceId: string): PromptEnhancementGuidanceFact {
+/**
+ * F4 (L4971): the eligibility a TRIGGER-derived fact inherits.
+ *
+ * The value is decided upstream and carried on the request; PE only reads it, never substitutes
+ * one. ⚠️ An absent value stays ABSENT — a first draft defaulted it to `support_only_not_triggering`,
+ * which is a BLOCKING state, so every caller that sent no decision silently lost its survivor and
+ * `guidance-outcome` began returning a null primary signal key. Caught by the full suite. Absence
+ * means "no boundary decision reached us", and the mix seam already treats that as pre-F4
+ * behaviour rather than as a block.
+ */
+function triggerEligibilityV1(
+  request: PromptEnhancementPrepareRequestV1,
+): PromptEnhancementSourceEligibilityStateV1 | undefined {
+  return request.sourceSignals.triggerSignalEligibilityState;
+}
+
+function absenceSignalFactV1(
+  factId: string,
+  sourceId: string,
+  eligibility: PromptEnhancementSourceEligibilityStateV1 | undefined,
+): PromptEnhancementGuidanceFact {
   const isSensitiveSource = isSensitiveSignalRefV1(sourceId);
   return {
     factId,
     sourceType: 'absence_signal',
     sourceIds: [sourceId],
+    ...(eligibility === undefined ? {} : { sourceEligibilityState: eligibility }),
     guidanceKind: isSensitiveSource ? 'safety_or_confirmation' : 'missing_practice',
     suggestedActionKind: 'no_action_render_context_only',
     targetFamily: 'family_agnostic',
@@ -157,13 +179,14 @@ export function buildPromptEnhancementGuidanceFactsV1(
     facts.push(absenceSignalFactV1(
       nextId('signal'),
       promptEnhancementAbsenceSignalKeyV1(trigger.selectedQualifyingAbsence ?? trigger.firedKey ?? trigger.currentStage),
+      triggerEligibilityV1(request),
     ));
   }
 
   // Source A — required survivors. Stage/absence signals shown in the popup are
   // transform-rule-4/5/9 floors ("source/signal guidance in a shown popup"): must survive.
   for (const ref of signals.normalizedStageAbsenceSignalRefs) {
-    facts.push(absenceSignalFactV1(nextId('signal'), ref));
+    facts.push(absenceSignalFactV1(nextId('signal'), ref, triggerEligibilityV1(request)));
   }
 
   // Source A — content-template records are source *evidence / precedent only*

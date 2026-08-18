@@ -1,4 +1,5 @@
 import type { Stage } from '../classifier/types.js';
+import type { PromptEnhancementSourceEligibilityStateV1 } from './templates/section-plan.js';
 import type {
   ContentTemplateSourceSnapshot,
   HistoricalBootstrapSourceSnapshot,
@@ -289,6 +290,13 @@ export interface PromptEnhancementTriggerProvenanceV1 {
 export interface PromptEnhancementSourceInputSnapshotV1 {
   sourceAOriginalPromptRef: PromptEnhancementSourceRefV1;
   sourceRefs: readonly PromptEnhancementSourceRefV1[];
+  /**
+   * F4 (L4971): the eligibility the TRIGGER signal carries, decided by the pipeline upstream
+   * and carried through — PE reads it, never recomputes it (prohibition 19). Optional so an
+   * older caller keeps working; the mix seam treats absence as NOT independently eligible,
+   * which is the fail-closed direction.
+   */
+  triggerSignalEligibilityState?: PromptEnhancementSourceEligibilityStateV1;
   normalizedStageAbsenceSignalRefs: readonly string[];
   contentTemplateRecordFactRefs: readonly string[];
   popupQuestionSourceRefs: readonly string[];

@@ -12,6 +12,7 @@ import type {
   PromptEnhancementRecencyBandV1,
 } from './templates/section-plan.js';
 import {
+  isPromptEnhancementPopupEligibleFactV1,
   isPromptEnhancementSourceCriticalFactV1,
   PROMPT_ENHANCEMENT_KNOWN_SOURCE_TYPES_V1,
 } from './templates/section-plan.js';
@@ -347,8 +348,28 @@ export function applyPromptEnhancementSourceMixV1(
   // are not selected into the shown body.
   const renderableFacts = facts.filter((fact) => isValidFact(fact) && RENDERABLE_PRIORITIES.has(fact.priority));
 
-  const sourceA = renderableFacts.filter((fact) => laneFor(fact) === 'source_a');
+  // F4 / L4971: eligibility is ROUTING AUTHORITY. A fact blocked upstream — by frequency, dedup,
+  // cooldown, session cap, dismissal, weakness or invalidity — may still travel as metadata, but it
+  // must never be the survivor a popup opens on. The gating itself is NOT re-done here (prohibition
+  // 19): the value was decided by the pipeline at the boundary and is only read.
+  const sourceAEligible = renderableFacts.filter(
+    (fact) => laneFor(fact) === 'source_a' && isPromptEnhancementPopupEligibleFactV1(fact.sourceEligibilityState),
+  );
+  const sourceAIneligible = renderableFacts.filter(
+    (fact) => laneFor(fact) === 'source_a' && !isPromptEnhancementPopupEligibleFactV1(fact.sourceEligibilityState),
+  );
+  const sourceA = sourceAEligible;
   const sourceB = renderableFacts.filter((fact) => laneFor(fact) === 'source_b');
+
+  // Excluded-by-eligibility facts are CLASSIFIED, not discarded: the skip has to be explainable,
+  // and a silently vanished fact is the shape §42.2 complained about in the first place.
+  for (const fact of sourceAIneligible) {
+    classified.push({
+      fact,
+      selectionRole: 'suppressed_by_payload_cap',
+      selectionReasonCode: 'ineligible_source_a_not_triggering',
+    });
+  }
 
   // No valid Source A survivor -> DR2-G1: skip, never build filler from Source B.
   if (sourceA.length === 0) {

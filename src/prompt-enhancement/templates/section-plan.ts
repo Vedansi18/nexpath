@@ -88,6 +88,61 @@ export type PromptEnhancementFactRole =
   | 'suppressed'
   | 'deferred';
 
+/**
+ * F4 / L4971 — `sourceEligibilityState`, the LOCKED eleven.
+ *
+ * 🔒 *"Eligibility is metadata and routing/fallback authority; only public-safe skip/fallback
+ * labels may render."* And the fixture gate it comes with: *"Eligibility fixtures fail if blocked,
+ * dismissed, skipped, capped, cooldown, weak, or invalid facts independently show a v1 popup."*
+ *
+ * ⛔ PE does NOT decide these (prohibition 19). Frequency, dedup, cooldown and session-cap are
+ * implemented upstream — `AbsenceDetector`, `SessionStateManager`, `Stage2Trigger` — and each value
+ * is READ from the branch the pipeline already took at the boundary. §42.2's finding was never that
+ * the gating is missing; it is that PE could not SEE it.
+ */
+export type PromptEnhancementSourceEligibilityStateV1 =
+  | 'fresh_trigger_eligible'
+  | 'active_signal_eligible'
+  | 'memory_eligible'
+  | 'support_only_not_triggering'
+  | 'blocked_by_frequency'
+  | 'blocked_by_dedup'
+  | 'blocked_by_post_advisory_cooldown'
+  | 'blocked_by_session_cap'
+  | 'dismissed_or_user_skipped'
+  | 'too_weak_no_popup'
+  | 'invalid_source';
+
+/**
+ * The states that BLOCK a fact from opening a popup on its own — L4971's own list, verbatim:
+ * *"blocked, dismissed, skipped, capped, cooldown, weak, or invalid"*, plus the support state whose
+ * name says it does not trigger. Such a fact may still inform wording once a popup exists; it can
+ * never be the reason one shows.
+ */
+export const PROMPT_ENHANCEMENT_NON_TRIGGERING_ELIGIBILITY_V1: ReadonlySet<PromptEnhancementSourceEligibilityStateV1> =
+  new Set([
+    'support_only_not_triggering',
+    'blocked_by_frequency',
+    'blocked_by_dedup',
+    'blocked_by_post_advisory_cooldown',
+    'blocked_by_session_cap',
+    'dismissed_or_user_skipped',
+    'too_weak_no_popup',
+    'invalid_source',
+  ]);
+
+export function isPromptEnhancementPopupEligibleFactV1(
+  state: PromptEnhancementSourceEligibilityStateV1 | undefined,
+): boolean {
+  // ⚠️ An ABSENT state is NOT a block. A first draft of F4 read it as one, and the measured effect
+  // was 43 failing fixtures: every fact no producer stamps — content-template records, hard facts,
+  // RIGHT/GOOD, work-style — lost survivor status and whole profiles collapsed to
+  // `source_b_only_no_popup`. L4971 makes the NAMED states authoritative, not the absence of one,
+  // so an unstamped fact keeps the behaviour it had before this phase and only the eight
+  // non-triggering values below actually gate.
+  return state === undefined || !PROMPT_ENHANCEMENT_NON_TRIGGERING_ELIGIBILITY_V1.has(state);
+}
+
 export type PromptEnhancementGuidanceKind =
   | 'missing_practice'
   | 'stage_transition_discipline'
@@ -245,6 +300,12 @@ export interface PromptEnhancementGuidanceFact {
    * the lock's replacement for the mixer-local lane variable.
    */
   sourceLane?: PromptEnhancementSourceLaneV1;
+  /**
+   * F4 (L4971): the upstream eligibility this fact inherits — carried THROUGH from the boundary,
+   * never recomputed here. Optional at the producer; the mix seam treats an absent value as
+   * not-independently-eligible rather than defaulting it to eligible.
+   */
+  sourceEligibilityState?: PromptEnhancementSourceEligibilityStateV1;
   confidenceBand?: PromptEnhancementConfidenceBandV1;
   recencyBand?: PromptEnhancementRecencyBandV1;
   /**

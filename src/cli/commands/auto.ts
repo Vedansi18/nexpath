@@ -83,6 +83,7 @@ import {
   promptEnhancementStageSignalKeyV1,
   promptEnhancementAbsenceSignalKeyV1,
 } from '../../prompt-enhancement/guidance-facts.js';
+import type { PromptEnhancementSourceEligibilityStateV1 } from '../../prompt-enhancement/templates/section-plan.js';
 import { resolvePromptEnhancementGuidanceOutcomeV1 } from '../../prompt-enhancement/guidance-outcome.js';
 import {
   buildClaudeUserPromptSubmitHookOutputV1,
@@ -328,6 +329,13 @@ export function buildPromptEnhancementRequestForAuto(input: {
   trigger: Exclude<Stage2TriggerResult, null>;
   stageResult: StageClassifierResult;
   streamBOutputs: readonly string[];
+  /**
+   * F4 (L4971): which eligibility the trigger signal carries INTO PE. Decided by the branch
+   * the pipeline already took — frequency, dedup, cooldown, cap, or a clean fire — and only
+   * read here (prohibition 19: PE never re-implements the gating). Omitted by boundary tests,
+   * where the fail-closed default applies.
+   */
+  triggerEligibility?: PromptEnhancementSourceEligibilityStateV1;
 }): PromptEnhancementPrepareRequestV1 {
   const promptIndex = input.session.current.promptCount - 1;
   const currentStage = input.session.current.currentStage;
@@ -442,6 +450,7 @@ export function buildPromptEnhancementRequestForAuto(input: {
     sourceSignals: {
       sourceAOriginalPromptRef: originalPromptRef,
       sourceRefs,
+      triggerSignalEligibilityState: input.triggerEligibility,
       normalizedStageAbsenceSignalRefs: absenceSignal ? [absenceSignal] : [],
       contentTemplateRecordFactRefs: content.resolvedRecordIdentity ? [content.resolvedRecordIdentity] : [],
       popupQuestionSourceRefs: content.resolvedRecordIdentity ? [`${content.resolvedRecordIdentity}:question`] : [],
@@ -1010,7 +1019,11 @@ export async function runAuto(
   // creates NO advisory, marks NO decision-session fired, and ordinary prompts keep the
   // existing trigger cadence. Frequency 'off' stays fully silent (checked before this runs).
   let sequencePeFallbackDone = false;
-  const prepareSequenceShapedPeFallback = async (): Promise<void> => {
+  // F4: every blocked branch names the eligibility it is blocking WITH, so the fact built on that
+  // path inherits the pipeline's own decision instead of arriving unlabelled.
+  const prepareSequenceShapedPeFallback = async (
+    triggerEligibility: PromptEnhancementSourceEligibilityStateV1,
+  ): Promise<void> => {
     // Injected boundary-test integrations keep their own single explicit path.
     if (sequencePeFallbackDone || promptEnhancement !== undefined) return;
     if (!isPromptEnhancementSequenceShapedTextV1(input.promptText)) return;
@@ -1082,7 +1095,8 @@ export async function runAuto(
     return { outcome: 'no_action' };
   }
   if (mgr.current.promptCount < freqConfig.minPromptsBeforeAdvisory) {
-    await prepareSequenceShapedPeFallback();
+    // F4: min-prompts guard: the signal exists but cannot trigger yet
+    await prepareSequenceShapedPeFallback('support_only_not_triggering');
     writeTelemetry(input.projectRoot, 'advisory_min_prompts_blocked', { promptCount: mgr.current.promptCount, minRequired: freqConfig.minPromptsBeforeAdvisory }, store);
     logger.info('pipeline_outcome', { outcome: 'no_action', reason: 'min_prompts_not_reached' });
     return { outcome: 'no_action' };
@@ -1098,7 +1112,8 @@ export async function runAuto(
   logger.debug('should_fire', { trigger: triggerResult?.kind ?? null });
 
   if (!triggerResult) {
-    await prepareSequenceShapedPeFallback();
+    // F4: no trigger produced this turn
+    await prepareSequenceShapedPeFallback('support_only_not_triggering');
     writeTelemetry(input.projectRoot, 'pipeline_no_action', { reason: 'no_flag' }, store);
     logger.info('pipeline_outcome', { outcome: 'no_action', reason: 'no_flag' });
     return { outcome: 'no_action' };
@@ -1112,7 +1127,8 @@ export async function runAuto(
   const alreadyFired = mgr.hasFiredDecisionSession(preCheckFiredKey);
   logger.debug('dedup', { firedKey: preCheckFiredKey, alreadyFired });
   if (alreadyFired) {
-    await prepareSequenceShapedPeFallback();
+    // F4: this key already fired in the session
+    await prepareSequenceShapedPeFallback('blocked_by_dedup');
     writeTelemetry(input.projectRoot, 'advisory_dedup_blocked', { firedKey: preCheckFiredKey }, store);
     logger.info('pipeline_outcome', { outcome: 'no_action', reason: 'already_fired', firedKey: preCheckFiredKey });
     return { outcome: 'no_action' };
@@ -1120,13 +1136,15 @@ export async function runAuto(
 
   // ── 6.5. Advisory frequency gate ────────────────────────────────────────────
   if (freq === 'major_only' && triggerResult.kind !== 'stage_transition') {
-    await prepareSequenceShapedPeFallback();
+    // F4: major_only policy declined a non-transition
+    await prepareSequenceShapedPeFallback('blocked_by_frequency');
     writeTelemetry(input.projectRoot, 'advisory_freq_blocked', { freq, flagType: triggerResult.kind }, store);
     logger.info('pipeline_outcome', { outcome: 'no_action', reason: 'freq_major_only', flagType: triggerResult.kind });
     return { outcome: 'no_action' };
   }
   if (freq === 'once_per_session' && mgr.current.firedDecisionSessions.length > 0) {
-    await prepareSequenceShapedPeFallback();
+    // F4: once_per_session policy already spent
+    await prepareSequenceShapedPeFallback('blocked_by_frequency');
     writeTelemetry(input.projectRoot, 'advisory_freq_blocked', { freq, flagType: triggerResult.kind }, store);
     logger.info('pipeline_outcome', { outcome: 'no_action', reason: 'freq_once_per_session' });
     return { outcome: 'no_action' };
@@ -1135,7 +1153,8 @@ export async function runAuto(
   // ── 6.6. Post-advisory cooldown — suppress rapid back-to-back advisories ─────
   const lastAdvisory = mgr.current.lastAdvisoryPromptIndex ?? -1;
   if (lastAdvisory >= 0 && mgr.current.promptCount - lastAdvisory < freqConfig.postAdvisoryCooldown) {
-    await prepareSequenceShapedPeFallback();
+    // F4: inside the post-advisory cooldown window
+    await prepareSequenceShapedPeFallback('blocked_by_post_advisory_cooldown');
     writeTelemetry(input.projectRoot, 'advisory_cooldown_blocked', {
       promptCount:       mgr.current.promptCount,
       lastAdvisoryAt:    lastAdvisory,
@@ -1154,7 +1173,8 @@ export async function runAuto(
     : freqConfig.sessionAdvisoryCapDefault;
   const advisoryCount = mgr.current.advisoryCount ?? 0;
   if (advisoryCount >= advisoryCap) {
-    await prepareSequenceShapedPeFallback();
+    // F4: the session advisory cap is reached
+    await prepareSequenceShapedPeFallback('blocked_by_session_cap');
     insertSkippedSession(store, {
       projectRoot:          input.projectRoot,
       sessionId:            mgr.current.sessionId,
@@ -1188,7 +1208,8 @@ export async function runAuto(
   // advisory (the stage still classifies locally, so session tracking continues).
   writeTelemetry(input.projectRoot, 'classifier_fire_evaluated', { flagType: triggerResult.kind, confirmed: stageResult.fireRecommendation }, store);
   if (!stageResult.fireRecommendation) {
-    await prepareSequenceShapedPeFallback();
+    // F4: the classifier declined to recommend firing
+    await prepareSequenceShapedPeFallback('too_weak_no_popup');
     writeTelemetry(input.projectRoot, 'pipeline_no_action', { reason: 'classifier_declined' }, store);
     logger.info('pipeline_outcome', { outcome: 'no_action', reason: 'classifier_declined', confidence: stageResult.classification.confidence, degraded: stageResult.degraded });
     return { outcome: 'no_action' };
@@ -1228,6 +1249,9 @@ export async function runAuto(
       previousStage: prevStage,
       trigger: triggerResult,
       stageResult,
+      // F4: this path is reached only after frequency, dedup, cooldown, cap and the
+      // classifier fire-recommendation have ALL passed — so the trigger is cleanly eligible.
+      triggerEligibility: 'fresh_trigger_eligible',
       streamBOutputs: streamBOverrides
         ? Object.entries(streamBOverrides)
           .filter(([, present]) => present)
