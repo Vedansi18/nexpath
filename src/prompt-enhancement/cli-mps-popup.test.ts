@@ -382,9 +382,12 @@ describe('UI-7 MPS continuation-popup frame renderer (§3.4)', () => {
   });
 
   it('MPS-12 (Ruling C): a TASK item shows "Your original: <slice>"; a CONFIRMATION item shows none', () => {
-    // TASK kinds (`first_task`/`task`) → the user's original slice rendered verbatim below the body.
-    expect(renderPromptEnhancementMpsContinuationFrameV1(continuationModel({ itemKind: 'task' })))
-      .toContain('Your original: Run the checkout fix sequence.');
+    // TASK kinds (`first_task`/`task`) → the user's original slice rendered below the body: a
+    // "Your original:" label line, then the slice indented on its own line(s) (pushed per line so the
+    // left rail reaches every line — a long original no longer spills rail-less past the frame).
+    const taskFrame = renderPromptEnhancementMpsContinuationFrameV1(continuationModel({ itemKind: 'task' }));
+    expect(taskFrame).toContain('Your original:');
+    expect(taskFrame).toContain('Run the checkout fix sequence.');
     expect(renderPromptEnhancementMpsContinuationFrameV1(continuationModel({ itemKind: 'first_task' })))
       .toContain('Your original:');
     // CONFIRMATION kinds (+ wrap_up) → NO original region: no label, box, or placeholder (Ruling C).

@@ -370,8 +370,18 @@ export function renderPromptEnhancementMpsContinuationFrameV1(
   // while the loading skeleton is up.
   if (!frameState.loadingSpinnerGlyph
     && (PROMPT_ENHANCEMENT_SEQUENCE_TASK_KINDS_V1 as readonly string[]).includes(model.itemKind)) {
-    const original = `  Your original: ${publicText(model.body.originalPromptText)}`;
-    lines.push(c ? `${c.dim}${original}${c.reset}` : original);
+    // Label on its own line, then the original's windowed content indented and pushed PER LINE — the
+    // runner wraps it to the field width and caps its height. Pushing each line separately guarantees
+    // the continuous left rail reaches every line: a long original previously went in as ONE multi-line
+    // string, so only its first line got the rail and the frame overflowed the terminal. Scroll markers
+    // dim like the body; other lines stay dim (read-only cue).
+    lines.push(c ? `  ${c.dim}Your original:${c.reset}` : '  Your original:');
+    for (const originalLine of publicText(model.body.originalPromptText).split('\n')) {
+      if (!c) { lines.push(`    ${originalLine}`); continue; }
+      lines.push(isPromptEnhancementScrollMarkerLineV1(originalLine)
+        ? `    ${c.gray}${originalLine}${c.reset}`
+        : `    ${c.dim}${originalLine}${c.reset}`);
+    }
     lines.push('');
   }
 
