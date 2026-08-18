@@ -7,6 +7,10 @@ import type {
   PromptEnhancementPrepareRequestV1,
   PromptEnhancementPrepareResultV1,
 } from '../prompt-enhancement/contracts.js';
+import {
+  validatePromptEnhancementPrepareRequestV1,
+  validatePromptEnhancementPrepareResultV1,
+} from '../prompt-enhancement/contracts.js';
 import { validatePromptEnhancementCliPopupResultV1 } from '../prompt-enhancement/cli-submit-popup.js';
 import {
   computeDockedPopupGeometry,
@@ -116,6 +120,10 @@ export type PromptEnhancementCliPopupHostLaunchResultV1 =
   | { state: 'not_applicable'; reasonCode: 'direct_tty' }
   | { state: 'host_unavailable'; reasonCode: 'unsupported_platform' | 'no_gui_session' | 'no_supported_terminal' }
   | { state: 'launch_failed'; reasonCode: 'terminal_spawn_failed' | 'terminal_exit_nonzero' | 'terminal_renderer_not_ready' }
+  // Blink fix (Phase 1): the payload failed the SAME validators the spawned child runs, so no window is
+  // opened — the launcher rejects it here instead of spawning a terminal that the child would exit from
+  // before rendering (an open-then-close "blink"). Callers treat it exactly like any non-`completed` result.
+  | { state: 'not_shown'; reasonCode: 'payload_invalid_pre_spawn'; validationReasonCodes: readonly string[] }
   | { state: 'completed'; output: PromptEnhancementPopupHostOutputV1 };
 
 interface PromptEnhancementSpawnedTerminalV1 {
@@ -673,6 +681,22 @@ export async function runPromptEnhancementCliPopupHostLaunchV1(input: {
     return { state: 'host_unavailable', reasonCode: input.capability.reasonCode };
   }
   if (input.capability.method === 'direct_tty') return { state: 'not_applicable', reasonCode: 'direct_tty' };
+
+  // Pre-spawn validity gate (blink fix, Phase 1): run the SAME two validators the spawned child runs
+  // (prompt-enhancement-popup-host.ts `validatedInput`) BEFORE opening a window. An invalid payload —
+  // e.g. the OpenAI key is missing, so the enhancement is an invalid fallback — would otherwise open a
+  // terminal window that the child immediately exits from before rendering: an open-then-close "blink".
+  // Rejecting it here yields the SAME not-shown outcome the caller already produces for any non-
+  // `completed` launch, with no wasted flashing window. The valid-payload path below is unchanged.
+  const requestCheck = validatePromptEnhancementPrepareRequestV1(input.request);
+  const resultCheck = validatePromptEnhancementPrepareResultV1(input.result);
+  if (!requestCheck.ok || !resultCheck.ok) {
+    return {
+      state: 'not_shown',
+      reasonCode: 'payload_invalid_pre_spawn',
+      validationReasonCodes: [...requestCheck.reasonCodes, ...resultCheck.reasonCodes],
+    };
+  }
 
   const dependencies = { ...defaultLaunchDependencies(), ...overrides };
   const tempDir = dependencies.makeTempDir();

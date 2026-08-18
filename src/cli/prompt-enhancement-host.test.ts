@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname } from 'node:path';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   PROMPT_ENHANCEMENT_LINUX_TERMINAL_COMMANDS_V1,
   buildPromptEnhancementMacLauncherScriptV1,
@@ -16,7 +16,10 @@ import {
   runPromptEnhancementCliMpsContinuationHostLaunchV1,
   type PromptEnhancementLinuxTerminalCommandV1,
 } from './prompt-enhancement-host.js';
-import type { PromptEnhancementPrepareRequestV1, PromptEnhancementPrepareResultV1 } from '../prompt-enhancement/contracts.js';
+import { PROMPT_ENHANCEMENT_CONTRACT_VERSION, type PromptEnhancementPrepareRequestV1, type PromptEnhancementPrepareResultV1, type PromptEnhancementSourceRefV1 } from '../prompt-enhancement/contracts.js';
+import { preparePromptEnhancement } from '../prompt-enhancement/facade.js';
+import { getPromptStartStopSourceSnapshot } from '../prompt-enhancement/source-reality.js';
+import { buildPromptEnhancementCostVisibilityMetadataV1 } from '../prompt-enhancement/cost-observability.js';
 import { computeDockedPopupGeometry } from '../decision-session/screen-geometry.js';
 
 function unavailableCommands() {
@@ -261,11 +264,48 @@ describe('PE1.1 — prompt enhancement CLI host capability resolver', () => {
   });
 });
 
+// A VALID prepared request + result, built once via the real facade (hermetic — deterministic
+// fallback when no key). The launcher runs the same two contract validators BEFORE spawning (blink
+// fix, Phase 1), so the spawn-mechanics tests must supply a payload that passes them, or they would
+// short-circuit to `payload_invalid_pre_spawn` before ever reaching the injected spawn stubs.
+function validPrepareRequest(): PromptEnhancementPrepareRequestV1 {
+  const sourceRef: PromptEnhancementSourceRefV1 = {
+    sourceRefId: 'pe1-3-source-a', sourceKind: 'source_a_user_prompt', sourceId: 'prompt:1',
+    sourceAuthorization: 'source_fact_only', evidenceStatus: 'present', freshness: 'current', confidence: 'high', privacyClass: 'local_private',
+  };
+  const promptStartStop = getPromptStartStopSourceSnapshot();
+  return {
+    schemaVersion: PROMPT_ENHANCEMENT_CONTRACT_VERSION,
+    requestId: 'pe1-3-request', projectRoot: '/tmp/pe1-3-project', hostSurface: 'cli_stop_bridge',
+    sourcePrompt: { text: 'Fix the payment test and explain verification.', origin: 'user', capturedAt: 1, promptIndex: 1, generatedOriginPolicy: 'ordinary_source_a' },
+    reviewMomentContext: {
+      reviewMoment: 'UserPromptSubmit_preparation', currentAgentMode: 'workspace-write', projectId: 'project-1', sessionId: 'session-1', detectedLanguage: 'en', stageCandidate: 'implementation', promptCount: 1, recentPromptMetadataRefs: [],
+      triggerProvenance: { currentStage: 'implementation', prevStage: 'task_breakdown', triggerKind: 'stage_transition', classifierState: 'fire_recommended', degradedNoActionState: 'none', promptStartBoundary: promptStartStop.hookBoundary, deliveryBoundary: promptStartStop.deliveryBoundary, promptStartCanReplaceSameTurn: false },
+    },
+    sourceSignals: {
+      sourceAOriginalPromptRef: sourceRef, sourceRefs: [sourceRef], normalizedStageAbsenceSignalRefs: [], contentTemplateRecordFactRefs: [], popupQuestionSourceRefs: [], whyHelpSourceRefs: [], profileRoleModeRefs: [], rightGoodWorkStyleEnvRuntimeRefs: [], missingMemoryCandidateRefs: [], sourceLabels: [{ sourceRefId: sourceRef.sourceRefId, label: 'original_prompt', evidenceStatus: 'present' }],
+      promptStartStop: { hookBoundary: promptStartStop.hookBoundary, deliveryBoundary: promptStartStop.deliveryBoundary, runAutoCanHoldOrReplaceSubmittedPrompt: false, sharedSignalCount: promptStartStop.sharedSignalCount, classifierDegradedNoFireReasons: promptStartStop.classifierDegradedNoFireReasons },
+      store: { schemaVersion: 1, missingPromptEnhancementTables: [], cleanupGaps: [] }, transcriptPathState: 'not_authority', streamBOutputs: [], paramEventChannels: [], servedVariantIdentityRefs: [], deliveryGateRefs: [], sourceOnlyHardFactRefs: [],
+    },
+    userPreferenceContext: { levelState: 'default', scopedFeedbackEvidenceRefs: [] },
+    configSnapshot: { sequenceEnabledState: 'not_enabled_v1', validatedEffectiveConfigState: 'valid', arbitraryConfigRowsAreAuthority: false },
+    callVisibilityState: buildPromptEnhancementCostVisibilityMetadataV1('baseline_pe_composer', { callVisibilityMode: 'deterministic', plannedCallCount: 0, usedCallCount: 0 }),
+    privacyAndStoragePolicy: { sensitivityClass: 'normal', localStorageEligibility: 'ids_and_categories_only', telemetryEligibility: 'allowlisted_counts_only', llmSharingEligibility: 'allowed_minimal', generatedBodyStoragePolicy: 'do_not_store_raw_by_default' },
+  };
+}
+
+let validRequest: PromptEnhancementPrepareRequestV1;
+let validResult: PromptEnhancementPrepareResultV1;
+beforeAll(async () => {
+  validRequest = validPrepareRequest();
+  validResult = await preparePromptEnhancement(validRequest);
+});
+
 function launchInput() {
   return {
     capability: { state: 'available' as const, method: 'linux_terminal' as const, terminalCommand: 'gnome-terminal' as const },
-    request: { sourcePrompt: { text: 'RAW PE REQUEST MUST STAY OUT OF ARGV' } } as PromptEnhancementPrepareRequestV1,
-    result: { currentBody: { text: 'RAW ENHANCED BODY MUST STAY OUT OF ARGV' } } as PromptEnhancementPrepareResultV1,
+    request: validRequest,
+    result: validResult,
     cliEntryPath: '/opt/nexpath/dist/cli/index.js',
     dbPath: '/tmp/nexpath-test.db',
     nodePath: '/usr/bin/node',
@@ -317,8 +357,10 @@ describe('PE1.3 — Linux PE popup host launcher', () => {
       args: ['--wait', '--title=Nexpath · Prompt enhancement', '--', '/usr/bin/node', '/opt/nexpath/dist/cli/index.js', 'prompt-enhancement-popup-host', '--input-file', '/tmp/private/input.json', '--result-file', '/tmp/private/result.json', '--readiness-file', '/tmp/private/ready', '--db', '/tmp/nexpath-test.db'],
     });
     expect(xdg.args).toEqual(['/usr/bin/node', '/opt/nexpath/dist/cli/index.js', 'prompt-enhancement-popup-host', '--input-file', '/tmp/private/input.json', '--result-file', '/tmp/private/result.json', '--readiness-file', '/tmp/private/ready', '--db', '/tmp/nexpath-test.db']);
-    expect(JSON.stringify(gnome.args)).not.toContain('RAW PE REQUEST');
-    expect(JSON.stringify(gnome.args)).not.toContain('RAW ENHANCED BODY');
+    // No prompt/body TEXT ever reaches the argv — only the executable + private file paths (the raw
+    // request/body travel via the private input file, never the command line).
+    expect(JSON.stringify(gnome.args)).not.toContain(input.request.sourcePrompt.text);
+    expect(JSON.stringify(gnome.args)).not.toContain('Fix the payment test');
   });
 
   it('inserts a ~70% popup window geometry when supplied, before the child args', () => {
@@ -513,8 +555,9 @@ describe('PE1.3 — Linux PE popup host launcher', () => {
       expect(observed.inputMode).toBe(0o600);
       expect(observed.dirMode).toBe(0o700);
     }
-    expect(observed.inputText).toContain('RAW PE REQUEST MUST STAY OUT OF ARGV');
-    expect(JSON.stringify(observed.plan)).not.toContain('RAW PE REQUEST');
+    // The raw request text travels via the private input FILE (0o600), never the argv/plan.
+    expect(observed.inputText).toContain('Fix the payment test');
+    expect(JSON.stringify(observed.plan)).not.toContain('Fix the payment test');
     expect(fakeChild.kill).toHaveBeenCalledWith('SIGTERM');
     expect(() => statSync(observed.dir!)).toThrow();
   });

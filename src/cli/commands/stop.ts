@@ -887,7 +887,21 @@ export function registerStopCommand(program: import('commander').Command): void 
               dbPath: opts.db,
             }),
           );
-          if (launch.state !== 'completed') return { kind: 'not_shown' };
+          if (launch.state !== 'completed') {
+            // Diagnosability (blink fix, Phase 1): name the exact non-completed reason so a spawned-window
+            // no-show is traceable — including `payload_invalid_pre_spawn` (the pre-spawn gate rejected an
+            // invalid payload, e.g. a missing OpenAI key, so NO window was opened / no blink).
+            logger.debug('stop_pe_launch_not_shown', {
+              cwd: payload.cwd,
+              state: launch.state,
+              reasonCode: launch.state === 'not_shown' || launch.state === 'launch_failed'
+                || launch.state === 'host_unavailable' || launch.state === 'not_applicable'
+                ? launch.reasonCode
+                : undefined,
+              validationReasonCodes: launch.state === 'not_shown' ? launch.validationReasonCodes.slice(0, 8) : undefined,
+            });
+            return { kind: 'not_shown' };
+          }
           popup = launch.output.result;
           // MPS Phase 1 (Option 2): the host signals a real MPS first-popup SEND. Record the pending-
           // sequence row HERE — the lock is re-acquired and the DB reloaded from disk (withReleasedStoreLockV1),
