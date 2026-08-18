@@ -654,6 +654,18 @@ describe('UI-1 action-row model', () => {
     expect(colored).toContain(`${ESC}[93mCtrl+J new line · Ctrl+↑/↓ move line · Enter sends this prompt`);
   });
 
+  it('shows "Enter sends this prompt" ONLY when the enhanced-body row is focused (owner 2026-08-19)', () => {
+    const view: PromptEnhancementCliPopupViewV1 = { model: fakeRenderModel(), editedBodyText: 'BODY', additionalDetailsText: '' };
+    // Body focused (index 0) → the send hint shows.
+    expect(renderPromptEnhancementPopupFrameV1(view, { focusIndex: 0, helpExpanded: false }))
+      .toContain('Enter sends this prompt');
+    // Focus on "Use original prompt" (index 2 — directional rows are hidden) → the send hint is GONE, so
+    // it never misleads ("Enter" there selects Use original, not send). The body itself still renders.
+    const elsewhere = renderPromptEnhancementPopupFrameV1(view, { focusIndex: 2, helpExpanded: false });
+    expect(elsewhere).not.toContain('Enter sends this prompt');
+    expect(elsewhere).toContain('BODY');
+  });
+
   it('applies the old-popup radio colours only when colorize is on (§8.1)', () => {
     const ESC = String.fromCharCode(27);
     const view: PromptEnhancementCliPopupViewV1 = { model: fakeRenderModel(), editedBodyText: 'BODY', additionalDetailsText: '' };
