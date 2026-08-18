@@ -3588,3 +3588,74 @@ describe('F4 boundary wiring — the eligibility a branch decides must REACH the
     expect(request.sourceSignals.triggerSignalEligibilityState).toBeUndefined();
   });
 });
+
+describe('F4 end-to-end — the boundary decision survives all the way onto the FACT', () => {
+  // Rounds 1-4 each found a seam where the value stopped: producer coverage, the show layer, the
+  // safety carve-out, and the branch→builder hand-off. This asserts the whole chain in one
+  // measurement — request built at the boundary, facts produced from it — so a future break at ANY
+  // seam fails here even if each unit still passes its own fixture.
+  it('a blocked boundary decision arrives on the produced fact', async () => {
+    const { buildPromptEnhancementGuidanceFactsV1 } = await import('../../prompt-enhancement/guidance-facts.js');
+    const store = await openStore(':memory:');
+    const projectRoot = 'C:/tmp/f4-e2e';
+    const session = SessionStateManager.load(store, projectRoot);
+    const request = buildPromptEnhancementRequestForAuto({
+      auto: makeInput({ projectRoot, promptText: IMPL_PROMPT, currentAgentMode: 'workspace-write' }),
+      store,
+      session,
+      project: null,
+      effectiveLanguage: 'en',
+      configuredRole: null,
+      effectiveFlagType: 'absence:verification_gap',
+      firedKey: 'absence:verification_gap@implementation',
+      previousStage: 'idea',
+      trigger: { kind: 'absence' },
+      stageResult: {
+        classification: { stage: 'implementation', confidence: 0.9, tier: 3, allScores: {} },
+        signalsPresent: [],
+        signalsAbsent: ['verification_gap'],
+        fireRecommendation: true,
+        selectedSignalKey: 'verification_gap',
+      } as never,
+      streamBOutputs: [],
+      triggerEligibility: 'blocked_by_session_cap',
+    } as never);
+
+    const facts = buildPromptEnhancementGuidanceFactsV1(request);
+    const trigger = facts.find((fact) => fact.sourceType === 'absence_signal');
+    expect(trigger, 'no trigger fact was produced').toBeDefined();
+    expect(trigger?.sourceEligibilityState).toBe('blocked_by_session_cap');
+  });
+
+  it('and an eligible one arrives too — the chain carries values, it does not just block', async () => {
+    const { buildPromptEnhancementGuidanceFactsV1 } = await import('../../prompt-enhancement/guidance-facts.js');
+    const store = await openStore(':memory:');
+    const projectRoot = 'C:/tmp/f4-e2e-ok';
+    const session = SessionStateManager.load(store, projectRoot);
+    const request = buildPromptEnhancementRequestForAuto({
+      auto: makeInput({ projectRoot, promptText: IMPL_PROMPT, currentAgentMode: 'workspace-write' }),
+      store,
+      session,
+      project: null,
+      effectiveLanguage: 'en',
+      configuredRole: null,
+      effectiveFlagType: 'absence:verification_gap',
+      firedKey: 'absence:verification_gap@implementation',
+      previousStage: 'idea',
+      trigger: { kind: 'absence' },
+      stageResult: {
+        classification: { stage: 'implementation', confidence: 0.9, tier: 3, allScores: {} },
+        signalsPresent: [],
+        signalsAbsent: ['verification_gap'],
+        fireRecommendation: true,
+        selectedSignalKey: 'verification_gap',
+      } as never,
+      streamBOutputs: [],
+      triggerEligibility: 'fresh_trigger_eligible',
+    } as never);
+
+    const facts = buildPromptEnhancementGuidanceFactsV1(request);
+    const trigger = facts.find((fact) => fact.sourceType === 'absence_signal');
+    expect(trigger?.sourceEligibilityState).toBe('fresh_trigger_eligible');
+  });
+});
