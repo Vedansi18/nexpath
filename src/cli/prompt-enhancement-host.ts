@@ -826,6 +826,10 @@ export type PromptEnhancementCliMpsContinuationHostLaunchResultV1 =
   | { state: 'not_applicable'; reasonCode: 'direct_tty' }
   | { state: 'host_unavailable'; reasonCode: 'unsupported_platform' | 'no_gui_session' | 'no_supported_terminal' }
   | { state: 'launch_failed'; reasonCode: 'terminal_spawn_failed' | 'terminal_exit_nonzero' | 'terminal_renderer_not_ready' }
+  // Blink fix (Phase 2): the continuation payload is structurally broken (a field the child dereferences
+  // is absent), so no window is opened. Callers treat it exactly like any non-`completed` result — the
+  // reasonCode flows into the existing continuation not-shown mapping.
+  | { state: 'not_shown'; reasonCode: 'payload_invalid_pre_spawn'; validationReasonCodes: readonly string[] }
   | { state: 'completed'; output: PromptEnhancementMpsContinuationHostOutputV1 };
 
 export interface PromptEnhancementCliMpsContinuationHostLaunchDependenciesV1 {
@@ -871,6 +875,30 @@ export async function runPromptEnhancementCliMpsContinuationHostLaunchV1(input: 
     return { state: 'host_unavailable', reasonCode: input.capability.reasonCode };
   }
   if (input.capability.method === 'direct_tty') return { state: 'not_applicable', reasonCode: 'direct_tty' };
+
+  // Pre-spawn structural gate (blink fix, Phase 2 — NARROWED): the continuation child marks itself ready
+  // BEFORE it validates, so a structurally-broken continuation still opens a window that then closes (a
+  // "blink"). Mirror the child's `asContinuationInput` structural check — the five fields it dereferences
+  // (result / handoffMetadata / event / progress / itemKind) — BEFORE spawning, so a broken payload never
+  // opens a window. Deliberately NOT the full validatePromptEnhancementPrepareResultV1 on the raw body: a
+  // CONFIRMATION item carries an empty original slice and the runner validates WITH the
+  // `originalPromptText ← text` substitution — a raw check here would wrongly reject every valid
+  // confirmation continuation. This is presence-only; the runner stays the single content validator, so a
+  // valid confirmation item (all five fields present) still spawns and renders exactly as before.
+  const c = input.continuation as Record<string, unknown> | null | undefined;
+  const missing: string[] = [];
+  if (!c || typeof c !== 'object') {
+    missing.push('missing_continuation');
+  } else {
+    if (c.result == null) missing.push('missing_result');
+    if (c.handoffMetadata == null) missing.push('missing_handoff_metadata');
+    if (c.event == null) missing.push('missing_event');
+    if (c.progress == null) missing.push('missing_progress');
+    if (typeof c.itemKind !== 'string' || c.itemKind.length === 0) missing.push('missing_item_kind');
+  }
+  if (missing.length > 0) {
+    return { state: 'not_shown', reasonCode: 'payload_invalid_pre_spawn', validationReasonCodes: missing };
+  }
 
   const dependencies = { ...defaultContinuationLaunchDependencies(), ...overrides };
   const tempDir = dependencies.makeTempDir();
