@@ -26,6 +26,7 @@ import {
   runPromptEnhancementCliSubmitPopupV1,
   validatePromptEnhancementCliPopupResultV1,
   windowPromptEnhancementFieldForDisplayV1,
+  windowPromptEnhancementFieldForDisplayWithStartV1,
   type PromptEnhancementCliPopupCommandV1,
   type PromptEnhancementCliPopupInteractionV1,
   type PromptEnhancementCliPopupViewV1,
@@ -880,5 +881,52 @@ describe('windowPromptEnhancementFieldForDisplayV1 (bounded body viewport)', () 
     const long = Array.from({ length: 200 }, (_, i) => `line ${i}`).join('\n');
     const out = windowPromptEnhancementFieldForDisplayV1(buffer(long, 50), 40, 8);
     expect(out.split('\n')).toHaveLength(8);
+  });
+});
+
+// Caret-parity regression (Phase 2): the raw-TTY caret uses the window's `start` (not the raw
+// buffer scroll), so display and caret share one source of truth. The string form and the
+// WithStart form must agree, and pos.row - start must land on the cursor's visible line.
+describe('windowPromptEnhancementFieldForDisplayWithStartV1 (caret/display parity)', () => {
+  const buffer = (text: string, scrollVisualRow = 0, cursor = 0): PromptEnhancementEditorBufferV1 => ({
+    text, cursor, desiredVisualColumn: 0, scrollVisualRow, dirty: false, focused: true,
+  });
+
+  it('returns the same text as the string form plus the first-shown row as `start`', () => {
+    const scrolled = buffer('l1\nl2\nl3\nl4\nl5\nl6', 3);
+    const withStart = windowPromptEnhancementFieldForDisplayWithStartV1(scrolled, 40, 3);
+    expect(withStart.text).toBe(windowPromptEnhancementFieldForDisplayV1(scrolled, 40, 3));
+    expect(withStart.start).toBe(3);
+    const fits = buffer('l1\nl2\nl3');
+    expect(windowPromptEnhancementFieldForDisplayWithStartV1(fits, 40, 6).start).toBe(0);
+  });
+
+  it('places the caret on the cursor line for a scrolled field (pos.row - start in range)', () => {
+    const b = buffer('l1\nl2\nl3\nl4\nl5\nl6', 3, 'l1\nl2\nl3\nl4\nl5\nl6'.length); // cursor on last row (5)
+    const win = windowPromptEnhancementFieldForDisplayWithStartV1(b, 40, 3);
+    const pos = promptEnhancementCursorVisualPositionV1(b, 40);
+    const visualRow = pos.row - win.start;
+    const shownLines = win.text.split('\n').length;
+    expect(pos.row).toBe(5);
+    expect(win.start).toBe(3);
+    expect(visualRow).toBe(2); // 3rd (last) shown line — where 'l6' renders
+    expect(visualRow).toBeGreaterThanOrEqual(0);
+    expect(visualRow).toBeLessThan(shownLines);
+  });
+
+  it('uses a row-0 basis when the field fits, even if the buffer carries a stale scroll', () => {
+    // The exact bug shape: the field fits (3 rows in a 6-row viewport) but the buffer scroll is 5.
+    // The display shows from row 0; the caret must too — the OLD `pos.row - scrollVisualRow` would
+    // have gone negative (2 - 5) and stranded the cursor.
+    const b = buffer('l1\nl2\nl3', 5, 'l1\nl2\nl3'.length); // cursor on last row (2)
+    const win = windowPromptEnhancementFieldForDisplayWithStartV1(b, 40, 6);
+    const pos = promptEnhancementCursorVisualPositionV1(b, 40);
+    const visualRow = pos.row - win.start;
+    const shownLines = win.text.split('\n').length;
+    expect(win.start).toBe(0);
+    expect(shownLines).toBe(3);
+    expect(visualRow).toBe(pos.row); // start 0 → caret row equals the real text row
+    expect(visualRow).toBeGreaterThanOrEqual(0);
+    expect(visualRow).toBeLessThan(shownLines);
   });
 });
