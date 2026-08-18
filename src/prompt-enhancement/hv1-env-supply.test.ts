@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { openStore } from '../store/db.js';
 import { upsertProject, getProjectEnvFacts, setProjectEnvFacts } from '../store/index.js';
 import { probeProject } from '../env/env-probe.js';
-import { resolveModeBand, ACTIVE_AGENT_ID } from '../env/agent-capabilities.js';
+import { resolveModeBand, ACTIVE_AGENT_ID, AGENT_CAPABILITIES } from '../env/agent-capabilities.js';
 import { corroborationTierForEnvFact, ENV_FACT_CORROBORATOR } from '../env/env-tier-promotion.js';
 import { recordEnvTrajectory } from '../env/env-trajectory.js';
 import { buildPromptEnhancementGroundingRefsV1 } from '../cli/commands/auto.js';
@@ -424,5 +424,40 @@ describe('deferred-task notes §30 — the claims that document makes about sour
     expect(auth).toContain("| 'observe_or_literal'");
     expect(auth, 'an agent-self authority value appeared — §30 point 3 must be re-measured')
       .not.toContain('agent_self');
+  });
+});
+
+describe('row 5 — what the mode registry can and cannot be said to prove', () => {
+  // Rounds 6 and 11 both recorded that the registry's keys "ARE Claude Code's permission_mode
+  // values". ⛔ That is not verifiable from this repo: the registry is the ONLY source for the list
+  // here — the test files that mention `acceptEdits`/`bypassPermissions` were written FROM it, not
+  // against any published schema. §46.3b's warning is "measure, never assume", and that claim was
+  // an assumption about an external system dressed as a measurement.
+  //
+  // What IS verifiable is pinned here, and it is the part the wire-builder actually needs.
+
+  it('the registry recognises exactly these six modes', () => {
+    expect(Object.keys(AGENT_CAPABILITIES[ACTIVE_AGENT_ID]!.modes).sort()).toEqual([
+      'acceptEdits', 'auto', 'bypassPermissions', 'default', 'dontAsk', 'plan',
+    ]);
+  });
+
+  it('an unrecognised mode resolves to undefined SILENTLY — no throw, no signal', () => {
+    // This is the consequence that matters and the reason the unverified claim was worth
+    // correcting: if the agent ever reports a mode outside the six, the band is simply absent.
+    // Nothing errors and nothing is logged, so a registry that has drifted from the agent looks
+    // exactly like a session with no mode at all.
+    expect(() => resolveModeBand(ACTIVE_AGENT_ID, 'a_mode_added_next_release')).not.toThrow();
+    expect(resolveModeBand(ACTIVE_AGENT_ID, 'a_mode_added_next_release')).toBeUndefined();
+    expect(resolveModeBand('some-other-agent', 'plan')).toBeUndefined();
+    expect(resolveModeBand(ACTIVE_AGENT_ID, undefined)).toBeUndefined();
+  });
+
+  it('and the value fed to it IS the hook permission_mode — that part IS source-verified', () => {
+    // The naming mismatch (a permission mode carried in a field called currentAgentMode) is not a
+    // behavioural defect, and this is why: the value's KIND is right. That conclusion never
+    // depended on the registry being exhaustive, so it survives the correction above.
+    const auto = readFileSync('src/cli/commands/auto.ts', 'utf8');
+    expect(auto).toContain('typeof payload.permission_mode === \'string\' ? payload.permission_mode');
   });
 });
