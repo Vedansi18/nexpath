@@ -4,7 +4,7 @@ import { upsertProject, getProjectEnvFacts, setProjectEnvFacts } from '../store/
 import { probeProject } from '../env/env-probe.js';
 import { recordEnvTrajectory } from '../env/env-trajectory.js';
 import { buildPromptEnhancementGroundingRefsV1 } from '../cli/commands/auto.js';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -71,5 +71,42 @@ describe('HV-1 rows 1+4 — the supply gap, pinned as measured', () => {
     // is missing, and this pins that the capability is otherwise whole.
     const dir = projectWithATestRunner();
     expect(Object.keys(probeProject(dir, Date.now()).facts).length).toBeGreaterThanOrEqual(10);
+  });
+});
+
+describe('HV-1 row 1 — check-1 is about RUNNING, not existing', () => {
+  // §46.3b: "the capability slots taught us 'exists' != 'runs'". §46.3c lists three consumers for
+  // env-probe, and one of them — the DS `auto-template-generator` — holds its probe inside
+  // `runAutogenForFire`, which has NO caller in source. The module IS imported by
+  // SessionStateManager, for two unrelated functions, so an import-level check would have called
+  // this consumer live. Only a CALLER check finds it.
+  //
+  // Pinned because a caller reappearing would change row 1's measured content, and the row should
+  // be re-judged rather than left describing a state that moved.
+  function sourceFilesUnder(dir: string): string[] {
+    const out: string[] = [];
+    for (const entry of readdirSync(dir)) {
+      const full = `${dir}/${entry}`;
+      if (statSync(full).isDirectory()) out.push(...sourceFilesUnder(full));
+      else if (entry.endsWith('.ts') && !entry.endsWith('.test.ts')) out.push(full);
+    }
+    return out;
+  }
+
+  it('runAutogenForFire has no production caller — the DS probe consumer is dead', () => {
+    const callers = sourceFilesUnder('src')
+      .filter((file) => !file.endsWith('auto-template-generator.ts'))
+      .filter((file) => readFileSync(file, 'utf8').includes('runAutogenForFire'));
+    expect(
+      callers,
+      'a production caller appeared — row 1 of §17.4 must be re-measured, not this line relaxed',
+    ).toEqual([]);
+  });
+
+  it('but the module IS imported elsewhere — which is why an import check would have missed it', () => {
+    const importers = sourceFilesUnder('src')
+      .filter((file) => !file.endsWith('auto-template-generator.ts'))
+      .filter((file) => readFileSync(file, 'utf8').includes('auto-template-generator.js'));
+    expect(importers.length).toBeGreaterThan(0);
   });
 });
