@@ -23,7 +23,7 @@ import {
   isEnvProbeEnabled,
   type EnvTrajectoryState,
 } from '../store/env-facts.js';
-import { appendParamEvent, readParamEvents } from '../telemetry/param-events.js';
+import { appendParamEvent, readParamEvents, type ParamEvent } from '../telemetry/param-events.js';
 
 export type EnvChangeDirection = 'acquired' | 'lost' | 'changed';
 
@@ -64,11 +64,19 @@ export function recentEnvChangesV1(
   store: Store,
   projectRoot: string,
   now: number = Date.now(),
+  /**
+   * ⚠️ The caller's ALREADY-READ event window. The PE boundary reads this file twice before it
+   * reaches here (`loadRightGoodProfile`, then the work-style profile), and PE runs on EVERY
+   * prompt — so a third full read and JSON.parse of an append-only log, for a lane that produces
+   * at most three lines, is a cost with nothing to show for it. Omitted only by standalone
+   * callers and tests, which have no window to hand over.
+   */
+  suppliedEvents?: readonly ParamEvent[],
 ): readonly RecentEnvChangeV1[] {
   if (!isEnvProbeEnabled(store.db)) return [];
-  let events;
+  let events: readonly ParamEvent[];
   try {
-    events = readParamEvents(store, projectRoot);
+    events = suppliedEvents ?? readParamEvents(store, projectRoot);
   } catch {
     return []; // the event lane is disk-backed and best-effort — no movements is a valid answer
   }

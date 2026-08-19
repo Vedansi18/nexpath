@@ -76,7 +76,7 @@ import {
   type GroundingCorroborationTier,
 } from '../../env/env-tier-promotion.js';
 import { computeWorkStyleProfile } from '../../classifier/work-style-traits.js';
-import { readParamEvents } from '../../telemetry/param-events.js';
+import { readParamEvents, type ParamEvent } from '../../telemetry/param-events.js';
 import { getProjectEnvFacts } from '../../store/env-facts.js';
 import { cachedPromptDerivedFactsV1, refreshPromptDerivedFactsIfDueV1 } from '../../prompt-enhancement/prompt-derived-facts-refresh.js';
 import { getPromptEnhancementFeedbackSummary, queryRelevantPromptEnhancementMemory, recordPromptEnhancementMemoryEvidence, markPromptEnhancementMemoryUsed } from '../../store/prompt-enhancement.js';
@@ -254,8 +254,12 @@ export function buildPromptEnhancementGroundingRefsV1(store: Store, projectRoot:
     }
   } catch { /* no RIGHT&GOOD grounding available — leave empty */ }
   const paramEventChannels: string[] = [];
+  // Hoisted so the movement lane below can reuse this window instead of re-reading the log: PE
+  // runs on every prompt, and this file is already read twice above.
+  let paramEvents: readonly ParamEvent[] = [];
   try {
     const events = readParamEvents(store, projectRoot);
+    paramEvents = events;
     for (const [trait, tv] of Object.entries(computeWorkStyleProfile(events))) {
       if (tv.value !== null) {
         // The trait VALUE crosses typed beside the ref — no longer smuggled inside it.
@@ -330,7 +334,7 @@ export function buildPromptEnhancementGroundingRefsV1(store: Store, projectRoot:
     // a probe's CURRENT value and take their claim strength from the corroboration tier. A
     // movement is a different kind of knowledge and takes a different ceiling, so it gets its own
     // ref namespace and its own producer branch rather than borrowing one that means state.
-    for (const change of recentEnvChangesV1(store, projectRoot)) {
+    for (const change of recentEnvChangesV1(store, projectRoot, Date.now(), paramEvents)) {
       const ref = `env_change:${change.key}`;
       rightGoodWorkStyleEnvRuntimeRefs.push(ref);
       groundingTierByRef[ref] = 'uncorroborated';

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openStore, type Store } from '../store/db.js';
@@ -224,5 +224,43 @@ describe('§17.11 wire — the movement crosses, becomes a fact, and reaches a b
       sourceAnchorScope: 'project_root',
     } as never);
     expect(asked.claimVerbPolicy).toBe('must_phrase_as_recent_change');
+  });
+});
+
+describe('§17.11 cost — the movement lane must not re-read the event log it was handed', () => {
+  // PE runs on EVERY prompt, and the boundary already reads the append-only param-event log TWICE
+  // before it reaches this lane (`loadRightGoodProfile`, then the work-style profile). A third full
+  // read and JSON.parse, for a lane that yields at most three lines, is a per-prompt cost with
+  // nothing to show for it.
+  //
+  // Pinned as BEHAVIOUR, not as a comment: the reader is handed a window for a project whose log
+  // does not exist on disk. If it ignores the window and re-reads, it finds nothing and returns
+  // nothing -- so this test fails the moment the saving is reverted.
+  it('uses the supplied window instead of the disk, and returns what only the window contains', async () => {
+    const { store, dir } = await diskStore();
+    const now = Date.now();
+    const windowOnly = [{
+      schemaVersion: 1, ts: now - DAY, projectRoot: dir, sessionId: 's1', promptIndex: 0,
+      signalKey: 'env_fact_changed:has_ci_pipeline:acquired', channel: 'probe',
+      stage: 'implementation', stageConfidence: 0.9, source: 'live',
+    }] as never;
+
+    // Nothing was ever appended for this project, so the disk has no such event.
+    expect(recentEnvChangesV1(store, dir, now)).toEqual([]);
+
+    expect(
+      recentEnvChangesV1(store, dir, now, windowOnly).map((c) => c.key),
+      'the supplied window was ignored -- the lane is re-reading the log a third time per prompt',
+    ).toEqual(['has_ci_pipeline']);
+  });
+
+  it('and the live boundary actually hands its window over', () => {
+    // The saving only exists if the caller takes it. Asserted at the call site because that is
+    // where it can be lost -- the function above would keep passing on its own.
+    const auto = readFileSync('src/cli/commands/auto.ts', 'utf8');
+    expect(
+      /recentEnvChangesV1\([^;]*paramEvents\)/.test(auto),
+      'the boundary stopped passing its already-read window -- the third read per prompt is back',
+    ).toBe(true);
   });
 });
