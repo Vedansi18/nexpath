@@ -151,6 +151,11 @@ function claimSentenceV1(fact: PromptEnhancementGuidanceFact, key: string, value
       return `${key} appears to be ${value}${where}${when} — confirm before relying on it.`;
     case 'must_phrase_as_source_signal':
       return `The current source signal reports ${key} as ${value}${where}${when}.`;
+    case 'must_phrase_as_recent_change':
+      // The movement phrase IS the value ("was acquired", "changed to 22"), so it reads as a
+      // verb clause rather than a state. ⚠️ No `when` here: "since the last session" already
+      // states the recency, and a second recency phrase would date the same claim twice.
+      return `The current source signal reports ${key} ${value}${where} since the last session.`;
     default:
       // Unknown or unset policy: the weakest wording, never a flat claim.
       return `${key} appears to be ${value}${where}${when} — confirm before relying on it.`;

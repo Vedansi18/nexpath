@@ -9,7 +9,7 @@ import { SessionStateManager } from '../../classifier/SessionStateManager.js';
 import { detectAbsenceFlags, ABSENCE_MIN_PROMPTS } from '../../classifier/AbsenceDetector.js';
 import { buildRuntimeContext } from '../../classifier/runtime-context.js';
 import { ACTIVE_AGENT_ID } from '../../env/agent-capabilities.js';
-import { recordEnvTrajectory } from '../../env/env-trajectory.js';
+import { recordEnvTrajectory, recentEnvChangesV1 } from '../../env/env-trajectory.js';
 import { recordTranscriptCorroboration } from '../../telemetry/transcript-corroboration.js';
 import { classifyStreamBPresence } from '../../classifier/StreamBPresenceClassifier.js';
 import type { StreamBPresenceResult } from '../../classifier/StreamBPresenceClassifier.js';
@@ -316,6 +316,30 @@ export function buildPromptEnhancementGroundingRefsV1(store: Store, projectRoot:
         value: mined.value,
         runtimePath: 'local_store',
         anchorScope: 'current_prompt_scope',
+      };
+    }
+
+    // ── §17.11 (owner-ruled: WIRE IT) — env movements cross as their own grounding claim ───────
+    //
+    // The trajectory probe was never inert: its change events already credit practice scores
+    // through `trajectory-credit` → the RIGHT&GOOD aggregator. But a score nudge is silent — the
+    // enhanced prompt could say what the project IS and never that something MOVED, which is the
+    // half a user notices ("the upgrade broke because node moved under it").
+    //
+    // ⚠️ Crossing here rather than in the `hard_fact:` loop above is deliberate: those refs carry
+    // a probe's CURRENT value and take their claim strength from the corroboration tier. A
+    // movement is a different kind of knowledge and takes a different ceiling, so it gets its own
+    // ref namespace and its own producer branch rather than borrowing one that means state.
+    for (const change of recentEnvChangesV1(store, projectRoot)) {
+      const ref = `env_change:${change.key}`;
+      rightGoodWorkStyleEnvRuntimeRefs.push(ref);
+      groundingTierByRef[ref] = 'uncorroborated';
+      groundingPolarityByRef[ref] = 'present';
+      groundingEvidenceByRef[ref] = {
+        key: change.key,
+        value: change.phrase,
+        runtimePath: 'local_store',
+        anchorScope: 'project_root',
       };
     }
   } catch { /* no source hard facts available — leave empty */ }

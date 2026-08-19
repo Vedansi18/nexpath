@@ -245,7 +245,9 @@ const SYSTEM_PROMPT = [
   // The §41.3 correction + the same claim ceiling the deterministic path obeys.
   '- Never state a fact more strongly than its claim allows: may_state_as_project_capability may',
   '  be stated as a project fact; must_phrase_as_possibility must be worded as a possibility to',
-  '  confirm; must_phrase_as_source_signal must be attributed to the current source signal.',
+  '  confirm; must_phrase_as_source_signal must be attributed to the current source signal;',
+  '  must_phrase_as_recent_change states that something CHANGED since the last session and must',
+  '  never be reworded as a standing fact about the project.',
   '- Evidence marked WITHHELD has content you may not see or state — cite the source id only.',
   '- Reply with STRICT JSON only, with the keys in EXACTLY this order:',
   '  {"detectedLanguageSelfReport":"...","requestModeSelfReport":"...","sectionDrafts":[{"sectionId":"...","bodyText":"...","sourceFactIds":["..."]}],"composerClaims":["claim:<sourceFactId>"],"authorityEvidence":"...","authorityModeSelfReport":"..."}',

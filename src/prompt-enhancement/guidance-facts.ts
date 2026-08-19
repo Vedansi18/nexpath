@@ -340,6 +340,45 @@ export function buildPromptEnhancementGuidanceFactsV1(
     //
     // ⛔ Uncorroborated by construction — mined from the user's own prompts, never behaviour-
     // verified — so the ladder caps it at possibility wording and it can never reach practice.
+    // ── §17.11 (owner-ruled: WIRE IT) — a MOVEMENT, not a state ───────────────────────────────
+    //
+    // Planned into `project_grounding_facts` with the other project facts (the owner's call: one
+    // more line in the section that exists, not a section of its own). What separates it is the
+    // claim ceiling: `must_phrase_as_recent_change` is the only rung that words a movement, and
+    // it sits below the project-knowledge rungs because a movement is one local probe pair —
+    // never behaviour-corroborated, so it can never be promoted into practice wording.
+    if (ref.startsWith('env_change:')) {
+      const changeResolved = signals.groundingEvidenceByRef?.[ref];
+      facts.push({
+        factId: nextId('envchg'),
+        sourceType: 'hard_fact',
+        sourceIds: [ref],
+        guidanceKind: 'project_grounding',
+        // Source B support: a movement is context for the reply, never the reason a popup opens.
+        sourceEligibilityState: 'support_only_not_triggering',
+        suggestedActionKind: 'ground_in_project_fact',
+        targetFamily: 'family_agnostic',
+        targetSectionKind: '',
+        sourceEvidenceState: 'partial',
+        sourceOriginScope: 'local_probe_trajectory',
+        claimVerbPolicy: 'must_phrase_as_recent_change',
+        factRole: 'project_grounding_support',
+        priority: 'low',
+        renderPolicy: 'render_as_section',
+        riskLevel: 'none',
+        safetyHooks: [],
+        privacyClass: 'local_private',
+        sanitizationState: 'not_applicable',
+        evidence: evidenceForGuidanceFact('local_private', 'not_applicable', changeResolved),
+        sourceRuntimePath: changeResolved?.runtimePath,
+        sourceAnchorScope: changeResolved?.anchorScope,
+        confidenceBand: 'low',
+        recencyBand: 'recent_project',
+        publicCopySafe: true,
+      });
+      continue;
+    }
+
     if (ref.startsWith('prompt_fact:')) {
       const minedResolved = signals.groundingEvidenceByRef?.[ref];
       facts.push({

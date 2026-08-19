@@ -488,15 +488,28 @@ describe('§46.3c — the analysis table HV-2 will read must carry HV-1\'s corre
     ).toContain('caller-check every entry, do not inherit any of them');
   });
 
-  it('each of the three wrong consumer cells is annotated', () => {
+  it('each of the consumer cells HV-1 corrected is annotated — and the one it got WRONG is annotated back', () => {
     const text = readFileSync(ANALYSIS, 'utf8');
     // row 1: a dead listed consumer, and a live one that was missing
     expect(text).toContain('runAutogenForFire');
     expect(text).toContain('engine-option-generator.ts:132');
-    // row 4: listed consumer that consumes nothing from the module
-    expect(text).toContain('NONE of its four exports touches env-trajectory');
     // row 5: a type-only import counted as a runtime consumer
     expect(text).toContain('TYPE-ONLY');
+
+    // ⛔ Row 4 was the third "correction" and it was itself WRONG. HV-1 struck `trajectory-credit`
+    // out of the consumer list on the grounds that it imports nothing from `env-trajectory` — but
+    // the coupling is a signalKey PREFIX, which no import graph can see. §46.3c was right.
+    //
+    // This assertion is inverted rather than deleted on purpose: the strikeout is the exact mistake
+    // the caller-check instruction above exists to prevent, and a deleted assertion teaches nobody.
+    expect(
+      text.includes('NONE of its four exports touches env-trajectory'),
+      'the row-4 strikeout is back — it measured the IMPORT graph, and the coupling is a string prefix',
+    ).toBe(false);
+    expect(
+      text,
+      'row 4 lost the correction of its correction — HV-2 would inherit "feeds nothing" again',
+    ).toContain('DOES consume this module');
   });
 });
 
@@ -589,28 +602,40 @@ describe('§17.10 — a GREEN pipe over an EMPTY supply (HV-3 row 1)', () => {
   });
 });
 
-describe('§17.11 — row 4 is an OPEN owner decision, so its measured basis must not drift', () => {
-  // §14.1 pairs row 4 with row 5 as "decide-then-wire". Row 5 was asked and ruled; row 4 was
-  // measured at HV-1 and never asked, and HV-3 round 3 routed it into the owner register.
+describe('§17.11 — row 4 was RULED (wire it), and the ruling rests on a corrected measurement', () => {
+  // ⛔ These two fixtures replace the pair written in round 3, which pinned "the module runs and
+  // NOTHING reads what it writes" as the basis of a pending decision. The second half was wrong,
+  // and it was wrong in a way worth keeping visible: it asked who IMPORTS `getEnvTrajectory`,
+  // while the module's other output — an `env_fact_changed` param event — was already consumed by
+  // `trajectory-credit` through a signalKey PREFIX. No import graph can see a string prefix.
   //
-  // While a decision is pending, the facts it will be decided ON are the thing worth pinning — an
-  // owner answering "remove it" or "wire it" is answering about the state below. If that state
-  // moves, the question changes and the register entry is stale before it is read.
-  it('the module still runs on the live path — the cost side of the decision', () => {
+  // So the pins below follow the DATA both ways, because that is the check that was missing.
+  it('the probe still runs on the live path — the cost side of the ruling', () => {
     const auto = readFileSync('src/cli/commands/auto.ts', 'utf8');
     expect(
       /\brecordEnvTrajectory\s*\(/.test(auto),
-      'the per-session probe is gone — §17.11 may already be resolved; re-read it before deciding',
+      'the per-session probe is gone, but §17.11 was ruled WIRE IT — the movement lane has no source now',
     ).toBe(true);
   });
 
-  it('and still nothing reads what it writes — the other side', () => {
-    const readers = sourceFilesUnder('src')
-      .filter((f) => !f.endsWith('env-trajectory.ts') && !f.endsWith('store/env-facts.ts'))
-      .filter((f) => readFileSync(f, 'utf8').includes('getEnvTrajectory'));
+  it('and its movements still reach BOTH consumers — the score credit AND the grounding line', () => {
+    // Consumer 1 (pre-existing, and the one the "write-only" measurement missed): the credit path.
+    const credit = readFileSync('src/classifier/trajectory-credit.ts', 'utf8');
     expect(
-      readers,
-      'a consumer appeared — the decision in §17.11 has been answered by code; update the record',
-    ).toEqual([]);
+      credit.includes('env_fact_changed:'),
+      'the credit path stopped matching the event key — trajectory silently stops crediting practices',
+    ).toBe(true);
+    const aggregator = readFileSync('src/classifier/right-good-aggregator.ts', 'utf8');
+    expect(
+      aggregator.includes('extractMovementCredits'),
+      'the aggregator dropped movement credit — that is a live feature, not dead weight',
+    ).toBe(true);
+
+    // Consumer 2 (the §17.11 ruling): the same events reach the grounding section as a sentence.
+    const auto = readFileSync('src/cli/commands/auto.ts', 'utf8');
+    expect(
+      auto.includes('recentEnvChangesV1'),
+      'the movement grounding lane is gone — §17.11 was ruled WIRE IT; re-open the record, do not relax this',
+    ).toBe(true);
   });
 });
