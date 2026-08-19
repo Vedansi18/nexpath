@@ -772,6 +772,48 @@ describe('PE1.3 — Linux PE popup host launcher', () => {
     expect(makeTempDir).not.toHaveBeenCalled();
   });
 
+  // Blink fix — the display-decision pre-spawn gate. A VALID payload whose render decision is `no_popup`
+  // (e.g. a `no_popup_not_applicable` disposition, the shape a missing-key sequence fallback produces)
+  // passes the contract validators but would be declined by the spawned child (`no_popup`). The launcher
+  // must reject it here — no spawn, no temp dir — instead of a wasted open-then-close flash.
+  it('does not spawn (no blink) when the render decision is no_popup — render_decision_no_popup', async () => {
+    const makeTempDir = vi.fn();
+    const spawnTerminal = vi.fn(async () => child());
+    const noPopupResult = { ...validResult, disposition: 'no_popup_not_applicable' } as PromptEnhancementPrepareResultV1;
+    const result = await runPromptEnhancementCliPopupHostLaunchV1(
+      { ...launchInput(), result: noPopupResult },
+      { makeTempDir, spawnTerminal },
+    );
+
+    expect(result).toEqual({
+      state: 'not_shown',
+      reasonCode: 'render_decision_no_popup',
+      validationReasonCodes: ['typed_no_popup_disposition'],
+    });
+    expect(spawnTerminal).not.toHaveBeenCalled();
+    expect(makeTempDir).not.toHaveBeenCalled();
+  });
+
+  // Blink fix — the request/result identity cross-check. Each side validates, but they describe DIFFERENT
+  // enhancements; the child's validatedInput would exit as input_invalid_or_stale after the window opened.
+  // Reject it here (same payload_invalid_pre_spawn bucket) — no spawn.
+  it('does not spawn (no blink) when the request/result identity mismatches — payload_invalid_pre_spawn', async () => {
+    const makeTempDir = vi.fn();
+    const spawnTerminal = vi.fn(async () => child());
+    const result = await runPromptEnhancementCliPopupHostLaunchV1(
+      { ...launchInput(), request: { ...validRequest, requestId: `${validRequest.requestId}-mismatch` } },
+      { makeTempDir, spawnTerminal },
+    );
+
+    expect(result).toEqual({
+      state: 'not_shown',
+      reasonCode: 'payload_invalid_pre_spawn',
+      validationReasonCodes: ['request_result_identity_mismatch'],
+    });
+    expect(spawnTerminal).not.toHaveBeenCalled();
+    expect(makeTempDir).not.toHaveBeenCalled();
+  });
+
   it('still spawns for a VALID payload (happy-path regression guard)', async () => {
     const spawnTerminal = vi.fn(async () => child());
     const result = await runPromptEnhancementCliPopupHostLaunchV1(launchInput(), {
@@ -900,6 +942,24 @@ describe('MPS Phase 2 (Option D) — continuation (2nd popup) window launcher', 
     expect(result.state).toBe('not_shown');
     expect(result).toMatchObject({ reasonCode: 'payload_invalid_pre_spawn' });
     expect((result as { validationReasonCodes: readonly string[] }).validationReasonCodes.length).toBeGreaterThan(0);
+    expect(spawnTerminal).not.toHaveBeenCalled();
+    expect(makeTempDir).not.toHaveBeenCalled();
+  });
+
+  // Blink fix — the display-decision gate. A continuation with all five fields PRESENT (passes the
+  // structural gate above) but NOT renderable (empty handoff/event → the child's build resolves to
+  // no_popup, not `ready`) must be rejected BEFORE opening a window. The continuation child marks ready
+  // before it renders, so this pre-spawn decision is the only defence against its visual flash.
+  it('does not spawn (no blink) when a present-but-non-renderable continuation resolves to no_popup — render_decision_no_popup', async () => {
+    const makeTempDir = vi.fn();
+    const spawnTerminal = vi.fn(async () => child());
+    const result = await runPromptEnhancementCliMpsContinuationHostLaunchV1(
+      { ...continuationLaunchInput(), continuation: { result: { currentBody: { text: 'x', originalPromptText: 'y' } }, handoffMetadata: {}, event: {}, progress: { done: 1, total: 2 }, itemKind: 'task' } } as unknown as Parameters<typeof runPromptEnhancementCliMpsContinuationHostLaunchV1>[0],
+      { makeTempDir, spawnTerminal },
+    );
+
+    expect(result.state).toBe('not_shown');
+    expect(result).toMatchObject({ reasonCode: 'render_decision_no_popup' });
     expect(spawnTerminal).not.toHaveBeenCalled();
     expect(makeTempDir).not.toHaveBeenCalled();
   });
