@@ -228,3 +228,32 @@ describe('§17.13 SAFETY — the sweep guards itself, so a NEW producer cannot s
     ).toBe(5);
   });
 });
+
+describe('§17.13 — the LAST hop: the composer may not throw the name away', () => {
+  // ⚠️ Measured in the sim (sim-s12-zara-I§UE12-VERIFY-20260819.log, P18a): with the payload fixed,
+  // the composer received the signal and still wrote "since this issue hasn't been observed in the
+  // current session" — my sentence, reworded, with the one word that mattered removed. Its own
+  // instruction told it to reword rather than paste, and the identity went with the rewording.
+  //
+  // The composer's wording cannot be asserted without a live call, so what is pinned here is the
+  // INSTRUCTION: the rules that must be in front of the model. The sim is the check that they work.
+  const composerSource = (): string => readFileSync('src/prompt-enhancement/llm-composer.ts', 'utf8');
+
+  it('the signal NAME is required to survive the rewording', () => {
+    const src = composerSource();
+    expect(
+      src.includes('the NAME must survive into your'),
+      'the composer is free to drop the signal name again — the payload fix stops at the last hop',
+    ).toBe(true);
+  });
+
+  it('and the pronouns are fixed: I is the user, you is the agent, never we', () => {
+    // The voice rule already existed ("write in the user's first-person voice") and the model still
+    // produced "we should acknowledge...". A joint voice belongs to neither party, so the rule now
+    // names the mapping and gives the counter-example rather than describing the intent.
+    const src = composerSource();
+    expect(src).toContain('"I" / "my" = the USER');
+    expect(src).toContain('"you" = the CODING AGENT');
+    expect(src.includes('NEVER "we"'), 'the joint-voice prohibition is gone').toBe(true);
+  });
+});
