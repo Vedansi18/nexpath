@@ -107,10 +107,10 @@ export interface PromptEnhancementCostObservabilitySinkV1 {
  * fields are excluded and the gate-rule-4 weakening check runs (warns only if it ever trips).
  */
 /**
- * A6 (prohibition 10 · L4970 · L4979): the RUNTIME-SEAM and PAYLOAD-WEIGHT summary PE-EM-1 needs.
+ * A6 (prohibition 10 · L4970 · L4979): the RUNTIME-SEAM and PAYLOAD-WEIGHT summary call-visibility needs.
  *
- * Prohibition 10 is two claims, not one — *"every runtime path typed **+ PE-EM-1 visible**"* — and
- * A6 delivered only the typing. L4979 likewise names its own purpose as *"PE-EM-1 call/token
+ * Prohibition 10 is two claims, not one — *"every runtime path typed **+ call-visibility visible**"* — and
+ * A6 delivered only the typing. L4979 likewise names its own purpose as *"call-visibility call/token
  * visibility"*, which cannot happen if the weight never reaches the visibility surface. This
  * aggregates both from the facts the body actually rendered.
  *
@@ -178,7 +178,7 @@ export function emitPromptEnhancementCostObservabilityV1(
       // occurred. Typed reason codes only, never body text.
       compositionFallbackReasonCodes: result.compositionFallbackReasonCodes ?? [],
       // A6 (prohibition 10 + L4979): the runtime seams the body's facts came through, and the
-      // relative payload weight they carried — the PE-EM-1 visibility half of "every runtime
+      // relative payload weight they carried — the call-visibility visibility half of "every runtime
       // path typed AND visible". `unknownRuntimePathCount` is the one that matters: a body
       // built through a path nobody declared is exactly the hidden seam the lock forbids.
       // ⛔ Typed names and counts only, and read by nothing in the pipeline (prohibition 9).

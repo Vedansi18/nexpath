@@ -208,7 +208,7 @@ const REVIEW_QUESTION_PATTERN = /\b(?:whether|safe\s+to|should\s+i|should\s+we|c
 const UNRESOLVED_PLACEHOLDER_PATTERN = /\{\{[^}]{1,80}\}\}|\[[A-Z][A-Z0-9 _-]{2,80}\]|<[^>\n]{2,80}>/;
 
 /**
- * Owner ruling 2026-08-14 (Hiren): *"if user edits something than we will not argu against that
+ * Owner ruling 2026-08-14: *"if user edits something than we will not argu against that
  * for now."* One switch, exported so the behaviour is greppable and reversible in one place
  * rather than being reconstructed from seven scattered conditions later.
  *

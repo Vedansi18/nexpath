@@ -91,7 +91,7 @@ describe('A6 / L4970 — an unknown or hidden runtime path must not DRIVE render
 
   it('every DECLARED path is allowed — the gate blocks the hidden case, not the seams', () => {
     // The lock's concern is a path nobody can account for. A declared runtime seam is exactly what
-    // PE-EM-1 visibility exists to report, so blocking those would defeat the field's purpose.
+    // call-visibility visibility exists to report, so blocking those would defeat the field's purpose.
     for (const path of ALL_PATHS.filter((candidate) => candidate !== 'unknown')) {
       expect(isPromptEnhancementRenderableRuntimePathV1(path), `${path} was refused`).toBe(true);
     }
@@ -375,10 +375,10 @@ describe('L1878 — facts render in EVERY applicable section, not only absence-s
   });
 });
 
-describe('A6 / prohibition 10 — "every runtime path typed AND PE-EM-1 VISIBLE"', () => {
+describe('A6 / prohibition 10 — "every runtime path typed AND call-visibility VISIBLE"', () => {
   // Verification round 5: prohibition 10 is TWO claims and A6 delivered only the typing. The
-  // PE-EM-1 payload carried call/token/fallback facts and no runtime path or weight at all, so
-  // L4979's own stated purpose — "PE-EM-1 call/token visibility" — had no surface to appear on.
+  // call-visibility payload carried call/token/fallback facts and no runtime path or weight at all, so
+  // L4979's own stated purpose — "call-visibility call/token visibility" — had no surface to appear on.
   const weighted = (factId: string, path: string | undefined, weight: number): PromptEnhancementGuidanceFact => ({
     ...fact({ factId, sourceType: 'hard_fact', guidanceKind: 'project_grounding' }),
     ...(path === undefined ? {} : { sourceRuntimePath: path as never }),

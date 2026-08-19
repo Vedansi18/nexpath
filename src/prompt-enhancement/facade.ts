@@ -77,7 +77,7 @@ export interface PreparePromptEnhancementWithSequenceResultV1 {
 }
 
 /**
- * MPS P1b-i — the runtime dependencies the sequence planner (Hiren Unit P1) needs and the pure
+ * MPS P1b-i — the runtime dependencies the sequence planner (owner unit P1) needs and the pure
  * `(request) → result` facade deliberately does not carry: the store handle the config kill-switch +
  * planner resolve from, and an optional injected LLM client (tests inject a stub; production leaves it
  * unset so the planner constructs its own key-gated client, mirroring the composer).
@@ -90,7 +90,7 @@ export interface PreparePromptEnhancementSequenceDepsV1 {
 /**
  * MPS P1b-i — the db-accepting facade entry that lets the full sequence planner REPLACE the
  * display-only `describePromptEnhancementSequencePlanV1` as the source of truth for the compact
- * sequence summary's item count + role labels (Hiren Unit P1, feeding the already-optional `summary`
+ * sequence summary's item count + role labels (owner unit P1, feeding the already-optional `summary`
  * seam of `buildPromptEnhancementHandoffMetadataV1` — no contract change).
  *
  * The planner runs ONLY on the `isSequenceCandidate` branch — exactly where the describe runs today —
@@ -411,7 +411,7 @@ async function prepare(
       safety = recomposedSafety;
     }
   }
-  // MPS P1b-i (Hiren Unit P1) — REPLACE the display-only punctuation splitter with the full LLM
+  // MPS P1b-i (owner unit P1) — REPLACE the display-only punctuation splitter with the full LLM
   // sequence planner as the source of truth for the compact summary's item count + role labels. This
   // runs in the SAME place the describe runs (after the body is composed), for the SAME
   // `isSequenceCandidate` prompts, and ONLY when a db + client seam is threaded in (auto.ts) — a
@@ -504,7 +504,7 @@ function buildResult(
     deterministicFallbackApplied: boolean;
     preSubstitutionAuthorityEscalationState: PromptEnhancementValidationStatus | undefined;
   },
-  // MPS P1b-i (Hiren Unit P1) — when present, the full sequence planner produced this summary and it
+  // MPS P1b-i (owner unit P1) — when present, the full sequence planner produced this summary and it
   // REPLACES the describe splitter as the source of truth for the item count + role labels. Absent on
   // every non-sequence prompt, on any planner failure/refusal/single-outcome, and on every caller of the
   // contract-typed `preparePromptEnhancement` (no deps) — so the describe fallback path is byte-identical.
@@ -593,7 +593,7 @@ function buildResult(
   // `sequenceActivationPolicy: blocked_pending_…` and `receiverCanActivateRuntime: false`.
   const isSequenceCandidate = isSequenceCandidateForRoute(route);
   // Sequence-plan summary source (2026-08-07 display fix; MPS P1b-i source-of-truth swap 2026-08-14):
-  // feed the compact summary REAL display data. Under P1b-i the full sequence planner (Hiren Unit P1)
+  // feed the compact summary REAL display data. Under P1b-i the full sequence planner (owner unit P1)
   // supplies the count + role labels via `plannerSummary` when it ran and returned a sequence; the
   // display-only punctuation splitter `describePromptEnhancementSequencePlanV1` STAYS as the labelled
   // fallback for the no-deps / no-key / provider-failure / single-outcome path (byte-identical to

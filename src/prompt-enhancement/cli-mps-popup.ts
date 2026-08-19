@@ -21,8 +21,8 @@ import { PROMPT_ENHANCEMENT_SEQUENCE_TASK_KINDS_V1 } from './sequence-payload.js
 // ---------------------------------------------------------------------------
 
 export const PROMPT_ENHANCEMENT_MPS_CLI_FOOTER_V1 = 'Enter send · Esc actions' as const;
-// MPS-2/6.3 (owner: UI/UX presentation is Bhavnesh's lane): on the CONTINUATION surface Escape CANCELS the
-// active sequence (Hiren ruling 2026-08-10), so the footer says so — distinct from the first popup, where
+// MPS-2/6.3 (owner: UI/UX presentation lane): on the CONTINUATION surface Escape CANCELS the
+// active sequence (owner ruling 2026-08-10), so the footer says so — distinct from the first popup, where
 // Escape only leaves editor focus / declines the offer (nothing activated → nothing to cancel).
 export const PROMPT_ENHANCEMENT_MPS_CLI_CONTINUATION_FOOTER_V1 = 'Enter send · Esc cancels sequence' as const;
 export const PROMPT_ENHANCEMENT_MPS_CLI_SEQUENCE_PLAN_LABEL_V1 = 'Sequence plan' as const;

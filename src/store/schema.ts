@@ -38,6 +38,9 @@ CREATE TABLE IF NOT EXISTS projects (
   decision_session_count INTEGER NOT NULL DEFAULT 0,
   env_facts              TEXT,
   env_facts_detected_at  INTEGER,
+  prompt_facts             TEXT,
+  prompt_facts_detected_at INTEGER,
+  prompt_facts_at_count    INTEGER,
   env_trajectory         TEXT,
   created_at             INTEGER NOT NULL
 );
@@ -325,6 +328,12 @@ export function applyIncrementalMigrations(db: Database): void {
   // v0.1.1 — dev-environment probe
   addIfMissing('projects', 'env_facts',             'TEXT');
   addIfMissing('projects', 'env_facts_detected_at', 'INTEGER');
+  // A3 step 7 (owner-approved adjustment): prompt-derived extracted params, CACHED. The extractor
+  // is an LLM call, and PE runs on every prompt while the DS engine that used to own it ran
+  // occasionally — so the value is mined over a window and stored, never mined per prompt.
+  addIfMissing('projects', 'prompt_facts',             'TEXT');
+  addIfMissing('projects', 'prompt_facts_detected_at', 'INTEGER');
+  addIfMissing('projects', 'prompt_facts_at_count',    'INTEGER');
   addIfMissing('projects', 'env_trajectory',        'TEXT');
 
   // sub-11 prompt enhancement store contract
@@ -393,6 +402,12 @@ export function runMigrations(db: Database): void {
   // v0.1.1 — dev-environment probe
   addIfMissing('projects', 'env_facts',             'TEXT');
   addIfMissing('projects', 'env_facts_detected_at', 'INTEGER');
+  // A3 step 7 (owner-approved adjustment): prompt-derived extracted params, CACHED. The extractor
+  // is an LLM call, and PE runs on every prompt while the DS engine that used to own it ran
+  // occasionally — so the value is mined over a window and stored, never mined per prompt.
+  addIfMissing('projects', 'prompt_facts',             'TEXT');
+  addIfMissing('projects', 'prompt_facts_detected_at', 'INTEGER');
+  addIfMissing('projects', 'prompt_facts_at_count',    'INTEGER');
   addIfMissing('projects', 'env_trajectory',        'TEXT');
 
   // sub-11 prompt enhancement store contract

@@ -208,7 +208,7 @@ describe('tier-1 evidence fields (claim-policy trio + polarity trio)', () => {
     expect(fact.factRole).toBe('safety_confirmation_support');
     expect(fact.claimVerbPolicy).toBe('source_label_only');
     expect(fact.renderPolicy).toBe('metadata_only');
-    expect(fact.safetyHooks).toContain('pe_ar9_negative_capability');
+    expect(fact.safetyHooks).toContain('safety_negative_capability');
     // Safety material keeps its content: the absent capability is known, and the
     // downstream safety wording needs to know WHICH one and what it read.
     expect(fact.evidence).toEqual({ key: 'has_test_runner', value: 'false' });
@@ -266,7 +266,7 @@ describe('negative capability paired with its live detector', () => {
     const absenceFact = facts.find((f) => f.sourceType === 'absence_signal')!;
     expect(absenceFact.sourceIds).toContain('absence:test_creation@implementation');
     expect(absenceFact.sourceIds).toContain('hard_fact:has_test_runner');
-    expect(absenceFact.safetyHooks).toContain('pe_ar9_negative_capability');
+    expect(absenceFact.safetyHooks).toContain('safety_negative_capability');
     // The false-capability fact itself stays label-only metadata — it does not
     // become a Source A candidate on its own.
     const falseCap = facts.find((f) => f.sourceType === 'hard_fact')!;
@@ -284,7 +284,7 @@ describe('negative capability paired with its live detector', () => {
     );
     const absenceFact = facts.find((f) => f.sourceType === 'absence_signal')!;
     expect(absenceFact.sourceIds).not.toContain('hard_fact:has_test_runner');
-    expect(absenceFact.safetyHooks).not.toContain('pe_ar9_negative_capability');
+    expect(absenceFact.safetyHooks).not.toContain('safety_negative_capability');
   });
 });
 
@@ -363,7 +363,7 @@ describe('sensitive source separation (secret-class signals)', () => {
     expect(fact.factRole).toBe('safety_confirmation_support');
     expect(fact.claimVerbPolicy).toBe('source_label_only');
     expect(fact.riskLevel).toBe('sensitive_authority_risky');
-    expect(fact.safetyHooks).toContain('pe_ar9_sensitive_source');
+    expect(fact.safetyHooks).toContain('safety_sensitive_source');
     expect(fact.guidanceKind).toBe('safety_or_confirmation');
   });
 
@@ -389,7 +389,7 @@ describe('sensitive source separation (secret-class signals)', () => {
 // ── The sensitive signal gets its treatment however it arrives ────────────────
 
 describe('secret_in_prompt separates SIGNAL from LITERAL on every path', () => {
-  const SAFETY_HOOK = 'pe_ar9_sensitive_source';
+  const SAFETY_HOOK = 'safety_sensitive_source';
 
   it('as the FIRED TRIGGER — the path that actually opens the popup', () => {
     const fact = buildPromptEnhancementGuidanceFactsV1(

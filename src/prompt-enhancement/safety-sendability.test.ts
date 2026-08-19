@@ -384,7 +384,7 @@ describe('prompt-enhancement safety, privacy, and sendability validation', () =>
   });
 
   it('rejects canonical-looking confirmation when the action phrase does not match the source-backed sensitive action', () => {
-    // Ruling 2026-08-14 (Hiren): a user's edit is the user's, so Nexpath no longer refuses a
+    // Owner ruling 2026-08-14: a user's edit is the user's, so Nexpath no longer refuses a
     // send because the user changed the body. Detection stays (preservation-floors.ts); the
     // refusal is gone. This pins the NEW behaviour.
     const originalPromptText = 'Deploy this release to production.';
@@ -417,7 +417,7 @@ describe('prompt-enhancement safety, privacy, and sendability validation', () =>
   });
 
   it.each([
-    // Ruling 2026-08-14 (Hiren): a user's edit is the user's, so Nexpath no longer refuses a
+    // Owner ruling 2026-08-14: a user's edit is the user's, so Nexpath no longer refuses a
     // send because the user changed the body. Detection stays (preservation-floors.ts); the
     // refusal is gone. This pins the NEW behaviour.
     ['generic confirmation', 'Still, before you do this sensitive action you must ask me for go-ahead confirmation.'],
@@ -452,7 +452,7 @@ describe('prompt-enhancement safety, privacy, and sendability validation', () =>
   });
 
   it('rejects body-visible confirmation when later generated wording bypasses the ask-before-act floor', () => {
-    // Ruling 2026-08-14 (Hiren): a user's edit is the user's, so Nexpath no longer refuses a
+    // Owner ruling 2026-08-14: a user's edit is the user's, so Nexpath no longer refuses a
     // send because the user changed the body. Detection stays (preservation-floors.ts); the
     // refusal is gone. This pins the NEW behaviour.
     const originalPromptText = 'Deploy this release to production.';
@@ -486,7 +486,7 @@ describe('prompt-enhancement safety, privacy, and sendability validation', () =>
   });
 
   it.each([
-    // Ruling 2026-08-14 (Hiren): a user's edit is the user's, so Nexpath no longer refuses a
+    // Owner ruling 2026-08-14: a user's edit is the user's, so Nexpath no longer refuses a
     // send because the user changed the body. Detection stays (preservation-floors.ts); the
     // refusal is gone. This pins the NEW behaviour.
     'Deploy without asking for go-ahead.',
@@ -524,7 +524,7 @@ describe('prompt-enhancement safety, privacy, and sendability validation', () =>
   });
 
   it('rejects later sensitive execution wording after the last valid confirmation', () => {
-    // Ruling 2026-08-14 (Hiren): a user's edit is the user's, so Nexpath no longer refuses a
+    // Owner ruling 2026-08-14: a user's edit is the user's, so Nexpath no longer refuses a
     // send because the user changed the body. Detection stays (preservation-floors.ts); the
     // refusal is gone. This pins the NEW behaviour.
     const originalPromptText = 'Deploy this release to production.';
@@ -558,7 +558,7 @@ describe('prompt-enhancement safety, privacy, and sendability validation', () =>
   });
 
   it('rejects pronoun-based execution wording after confirmation for the protected action', () => {
-    // Ruling 2026-08-14 (Hiren): a user's edit is the user's, so Nexpath no longer refuses a
+    // Owner ruling 2026-08-14: a user's edit is the user's, so Nexpath no longer refuses a
     // send because the user changed the body. Detection stays (preservation-floors.ts); the
     // refusal is gone. This pins the NEW behaviour.
     const originalPromptText = 'Deploy this release to production.';
@@ -804,7 +804,7 @@ describe('prompt-enhancement safety, privacy, and sendability validation', () =>
   });
 
   it('attaches source refs and action refs to sensitive-action validation failures', () => {
-    // Ruling 2026-08-14 (Hiren): a user's edit is the user's, so Nexpath no longer refuses a
+    // Owner ruling 2026-08-14: a user's edit is the user's, so Nexpath no longer refuses a
     // send because the user changed the body. Detection stays (preservation-floors.ts); the
     // refusal is gone. This pins the NEW behaviour.
     const originalPromptText = 'Deploy this release to production.';
@@ -832,7 +832,7 @@ describe('prompt-enhancement safety, privacy, and sendability validation', () =>
   });
 
   it('marks user edits that remove required confirmation as non-sendable', () => {
-    // Ruling 2026-08-14 (Hiren): a user's edit is the user's, so Nexpath no longer refuses a
+    // Owner ruling 2026-08-14: a user's edit is the user's, so Nexpath no longer refuses a
     // send because the user changed the body. Detection stays (preservation-floors.ts); the
     // refusal is gone. This pins the NEW behaviour.
     const originalPromptText = 'Deploy this release to production.';
@@ -965,7 +965,7 @@ describe('prompt-enhancement safety, privacy, and sendability validation', () =>
   });
 
   it('marks user edits that remove source-honesty trace as non-sendable (legacy trace-bearing bodies)', () => {
-    // Ruling 2026-08-14 (Hiren): a user's edit is the user's, so Nexpath no longer refuses a
+    // Owner ruling 2026-08-14: a user's edit is the user's, so Nexpath no longer refuses a
     // send because the user changed the body. Detection stays (preservation-floors.ts); the
     // refusal is gone. This pins the NEW behaviour.
     // Newly composed bodies carry NO trace lines (provenance is typed-metadata-only, 2026-08-06),

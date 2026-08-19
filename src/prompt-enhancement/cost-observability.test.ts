@@ -571,7 +571,7 @@ describe('Phase 12 cost, provider, latency, and observability contracts', () => 
   });
 });
 
-describe('PE-EM-1 stage-classifier row tracks the real call budget', () => {
+describe('call-visibility stage-classifier row tracks the real call budget', () => {
   // The row records the classifier call's cost profile, and its output cap is a
   // SECOND literal for a value that already exists as a constant. That constant
   // is not static: it was raised to 512 in this milestone precisely because the

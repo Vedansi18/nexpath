@@ -1,7 +1,7 @@
 /**
  * The body producer end to end: one batch call turns a planned sequence into stored item bodies.
  *
- * This is the runtime source the future-sequence gate names — the single background call Hiren's plan
+ * This is the runtime source the future-sequence gate names — the single background call the owner's plan
  * places "after item 1 is composed": it takes the planner's item structure and the first prompt's
  * finished body, asks the batch composer to write every remaining item in one reply, and merges the
  * result into the completed item list the store persists. Three existing, tested parts wired in

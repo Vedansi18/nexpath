@@ -42,7 +42,7 @@ import {
  * into the actual `skip_no_popup` disposition. Selection is deterministic — no LLM.
  */
 /**
- * The eight LOCKED mix profiles (PE-AR-2 split-1, L5002-5011), declared as a VALUE
+ * The eight LOCKED mix profiles (the source rule split-1, L5002-5011), declared as a VALUE
  * so a fixture can compare the shipped set against the locked table at runtime —
  * the type is derived from it, so the two cannot drift apart. As a type alone the
  * union was unverifiable from a test: test files are not typechecked, so a ninth
@@ -335,7 +335,7 @@ function capsForLevel(
 /**
  * A6 / L4979 — the payload weight estimate.
  *
- * "Estimated RELATIVE token/input/source payload weight" for cap accounting and PE-EM-1 token
+ * "Estimated RELATIVE token/input/source payload weight" for cap accounting and call-visibility token
  * visibility. Deliberately a coarse local estimate from what the fact actually carries (its
  * evidence text and source ids), not a tokenizer call: the locks call it an ESTIMATE used for caps
  * and visibility, and ⛔ it must never become product-cost control (L4979's gate, prohibition 9).

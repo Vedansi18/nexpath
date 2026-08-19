@@ -73,7 +73,7 @@ async function validContinuation() {
   });
 }
 
-// Regression (Bhavnesh, MPS-12): a CONFIRMATION-kind continuation carries an EMPTY originalPromptText by
+// Regression (UI lane, MPS-12): a CONFIRMATION-kind continuation carries an EMPTY originalPromptText by
 // owner-locked design — the packager sets '' (Ruling C §22.2 + the confirmation-carries-no-original-text
 // acceptance fixture). The builder must STILL render it: the renderer is kind-gated and shows no original
 // region for confirmation kinds, so the empty value is never displayed. Before the kind-aware validation

@@ -2128,11 +2128,11 @@ describe('runAuto — usage recording (feedback cadence)', () => {
     expect(readCadence(store).lastActivityAt).toBeNull();
   });
 });
-describe('H1.1 — validated PE preparation boundary', () => {
+describe('validated PE preparation boundary', () => {
   it('builds a valid source-backed request and runs the approved facade', async () => {
     const store = await openStore(':memory:');
     try {
-      const projectRoot = '/test/h1-1-builder';
+      const projectRoot = '/test/builder';
       const session = SessionStateManager.load(store, projectRoot);
       const request = buildPromptEnhancementRequestForAuto({
         auto: makeInput({ projectRoot, currentAgentMode: 'workspace-write' }),
@@ -2183,7 +2183,7 @@ describe('H1.1 — validated PE preparation boundary', () => {
   it('calls the injected facade once for one eligible shared trigger', async () => {
     const store = await openStore(':memory:');
     try {
-      const projectRoot = '/test/h1-1-eligible';
+      const projectRoot = '/test/eligible';
       primeTaskBreakdownSession(store, projectRoot);
       const request = makeBoundaryRequest(store, projectRoot);
       const facadeResult = await preparePromptEnhancement(request);
@@ -2268,7 +2268,7 @@ describe('H1.1 — validated PE preparation boundary', () => {
 
     for (const testCase of cases) {
       const store = await openStore(':memory:');
-      const projectRoot = `/test/h1-1-gate-${testCase.name}`;
+      const projectRoot = `/test/gate-${testCase.name}`;
       try {
         const request = makeBoundaryRequest(store, projectRoot, testCase.promptText ?? IMPL_PROMPT);
         const prepare = vi.fn();
@@ -2289,7 +2289,7 @@ describe('H1.1 — validated PE preparation boundary', () => {
   it('passes validated current, original-fallback, and no-popup dispositions without inventing UI authority', async () => {
     const store = await openStore(':memory:');
     try {
-      const request = makeBoundaryRequest(store, '/test/h1-1-dispositions');
+      const request = makeBoundaryRequest(store, '/test/dispositions');
       const current = await preparePromptEnhancement(request);
       const currentResult = await preparePromptEnhancementForAuto({
         request,
@@ -2298,7 +2298,7 @@ describe('H1.1 — validated PE preparation boundary', () => {
       expect(currentResult.safeFallback).toBe(false);
       expect(currentResult.disposition).toBe('show_current_body');
 
-      // The H1.1 boundary consumes the already-validated closed disposition;
+      // The boundary consumes the already-validated closed disposition;
       // action recomposition itself remains covered by the private PE suite.
       const fallback = { ...current, disposition: 'fallback_to_original' as const };
       const fallbackResult = await preparePromptEnhancementForAuto({
@@ -2324,10 +2324,10 @@ describe('H1.1 — validated PE preparation boundary', () => {
     }
   });
 
-  it('binds the validated H1.1 result to one typed H1.2 session and user event', async () => {
+  it('binds the validated result to one typed session and user event', async () => {
     const store = await openStore(':memory:');
     try {
-      const request = makeBoundaryRequest(store, '/test/h1-2-boundary');
+      const request = makeBoundaryRequest(store, '/test/boundary');
       const prepared = await preparePromptEnhancement(request);
       const boundary = buildPromptEnhancementUiBoundarySessionV1({
         result: prepared,
@@ -2336,7 +2336,7 @@ describe('H1.1 — validated PE preparation boundary', () => {
       });
 
       expect(boundary.state).toBe('session_ready');
-      if (boundary.state !== 'session_ready') throw new Error('expected typed H1.2 session');
+      if (boundary.state !== 'session_ready') throw new Error('expected typed session');
       expect(boundary.session.enhancementId).toBe(prepared.enhancementId);
       expect(boundary.session.currentBodyId).toBe(prepared.uiView.body.currentBodyId);
       expect(boundary.session.bodyRevision).toBe(prepared.uiView.body.bodyRevision);
@@ -2389,10 +2389,10 @@ describe('H1.1 — validated PE preparation boundary', () => {
     }
   });
 
-  it('maps the validated result to the locked B1.1 title, body, identity, and controls', async () => {
+  it('maps the validated result to the locked title, body, identity, and controls', async () => {
     const store = await openStore(':memory:');
     try {
-      const request = makeBoundaryRequest(store, '/test/b1-1-render-model');
+      const request = makeBoundaryRequest(store, '/test/render-model');
       const prepared = await preparePromptEnhancement(request);
       const renderModel = buildPromptEnhancementPopupRenderModelV1({
         result: prepared,
@@ -2401,7 +2401,7 @@ describe('H1.1 — validated PE preparation boundary', () => {
       });
 
       expect(renderModel.state).toBe('render_model_ready');
-      if (renderModel.state !== 'render_model_ready') throw new Error('expected B1.1 render model');
+      if (renderModel.state !== 'render_model_ready') throw new Error('expected render model');
       expect(renderModel.model.title).toBe('Nexpath · Prompt enhancement');
       expect(renderModel.model.title).not.toBe('Review enhanced prompt');
       expect(renderModel.model.editorHeading).toBe('Use enhanced prompt');
@@ -2437,7 +2437,7 @@ describe('H1.1 — validated PE preparation boundary', () => {
     }
   });
 
-  it('DEP-TEST-01-B1.1-01: renders only the approved typed popup surface', async () => {
+  it('DEP-TEST-01-01: renders only the approved typed popup surface', async () => {
     const store = await openStore(':memory:');
     try {
       const prepared = await preparePromptEnhancement(makeBoundaryRequest(store, '/test/dep-test-01-01'));
@@ -2472,7 +2472,7 @@ describe('H1.1 — validated PE preparation boundary', () => {
     }
   });
 
-  it('DEP-TEST-01-B1.1-02: keeps no_popup_not_applicable absent from the UI surface', async () => {
+  it('DEP-TEST-01-02: keeps no_popup_not_applicable absent from the UI surface', async () => {
     const store = await openStore(':memory:');
     try {
       const request = makeBoundaryRequest(store, '/test/dep-test-01-02');
@@ -2495,7 +2495,7 @@ describe('H1.1 — validated PE preparation boundary', () => {
     }
   });
 
-  it('DEP-TEST-01-B1.1-03: preserves typed locked/loading state without locally enabling edit or send', async () => {
+  it('DEP-TEST-01-03: preserves typed locked/loading state without locally enabling edit or send', async () => {
     const store = await openStore(':memory:');
     try {
       const prepared = await preparePromptEnhancement(makeBoundaryRequest(store, '/test/dep-test-01-03'));
@@ -2524,7 +2524,7 @@ describe('H1.1 — validated PE preparation boundary', () => {
     }
   });
 
-  it('DEP-TEST-01-B1.1-04: rejects stale or mismatched typed action identity before render', async () => {
+  it('DEP-TEST-01-04: rejects stale or mismatched typed action identity before render', async () => {
     const store = await openStore(':memory:');
     try {
       const prepared = await preparePromptEnhancement(makeBoundaryRequest(store, '/test/dep-test-01-04'));
@@ -2557,7 +2557,7 @@ describe('H1.1 — validated PE preparation boundary', () => {
     }
   });
 
-  it('DEP-TEST-01-B1.1-05: keeps fallback/provider state read-only and exposes no automatic delivery claim', async () => {
+  it('DEP-TEST-01-05: keeps fallback/provider state read-only and exposes no automatic delivery claim', async () => {
     const store = await openStore(':memory:');
     try {
       const prepared = await preparePromptEnhancement(makeBoundaryRequest(store, '/test/dep-test-01-05'));
@@ -2586,7 +2586,7 @@ describe('H1.1 — validated PE preparation boundary', () => {
     }
   });
 
-  it('DEP-TEST-01-B1.1-06: keeps the public boundary free of legacy labels, private diagnostics, and delivery authority', async () => {
+  it('DEP-TEST-01-06: keeps the public boundary free of legacy labels, private diagnostics, and delivery authority', async () => {
     const store = await openStore(':memory:');
     try {
       const prepared = await preparePromptEnhancement(makeBoundaryRequest(store, '/test/dep-test-01-06'));
@@ -2609,16 +2609,16 @@ describe('H1.1 — validated PE preparation boundary', () => {
     }
   });
 
-  it('B1.2: preserves a dirty same-identity draft and refreshes only clean canonical state', async () => {
+  it('preserves a dirty same-identity draft and refreshes only clean canonical state', async () => {
     const store = await openStore(':memory:');
     try {
-      const prepared = await preparePromptEnhancement(makeBoundaryRequest(store, '/test/b1-2-same-identity'));
+      const prepared = await preparePromptEnhancement(makeBoundaryRequest(store, '/test/same-identity'));
       const firstRender = buildPromptEnhancementPopupRenderModelV1({ result: prepared, timestampMs: 209 });
       expect(firstRender.state).toBe('render_model_ready');
-      if (firstRender.state !== 'render_model_ready') throw new Error('expected B1.2 render model');
+      if (firstRender.state !== 'render_model_ready') throw new Error('expected render model');
       const initial = buildPromptEnhancementLocalDraftV1(firstRender.model.session);
       expect(initial.state).toBe('draft_ready');
-      if (initial.state !== 'draft_ready') throw new Error('expected B1.2 draft');
+      if (initial.state !== 'draft_ready') throw new Error('expected draft');
 
       const dirty = updatePromptEnhancementCurrentBodyDraftV1(initial.draft, 'local unsent edit', 7);
       const withDetails = updatePromptEnhancementAdditionalDetailsDraftV1(dirty, 'keep this local detail', 10);
@@ -2635,11 +2635,11 @@ describe('H1.1 — validated PE preparation boundary', () => {
     }
   });
 
-  it('B1.2: starts a distinct draft for a new canonical revision and ignores stale input', async () => {
+  it('starts a distinct draft for a new canonical revision and ignores stale input', async () => {
     const store = await openStore(':memory:');
     try {
-      const first = await preparePromptEnhancement(makeBoundaryRequest(store, '/test/b1-2-revision-a'));
-      const second = await preparePromptEnhancement(makeBoundaryRequest(store, '/test/b1-2-revision-b'));
+      const first = await preparePromptEnhancement(makeBoundaryRequest(store, '/test/revision-a'));
+      const second = await preparePromptEnhancement(makeBoundaryRequest(store, '/test/revision-b'));
       const firstRender = buildPromptEnhancementPopupRenderModelV1({ result: first, timestampMs: 210 });
       const secondRender = buildPromptEnhancementPopupRenderModelV1({ result: second, timestampMs: 211 });
       expect(firstRender.state).toBe('render_model_ready');
@@ -2666,10 +2666,10 @@ describe('H1.1 — validated PE preparation boundary', () => {
     }
   });
 
-  it('B1.2: locks local mutation for loading/fallback typed editability states', async () => {
+  it('locks local mutation for loading/fallback typed editability states', async () => {
     const store = await openStore(':memory:');
     try {
-      const prepared = await preparePromptEnhancement(makeBoundaryRequest(store, '/test/b1-2-locked'));
+      const prepared = await preparePromptEnhancement(makeBoundaryRequest(store, '/test/locked'));
       const loading = {
         ...prepared,
         uiView: {
@@ -2691,10 +2691,10 @@ describe('H1.1 — validated PE preparation boundary', () => {
     }
   });
 
-  it('B1.2: marks dirty Additional Details for the typed no-send Apply boundary', async () => {
+  it('marks dirty Additional Details for the typed no-send Apply boundary', async () => {
     const store = await openStore(':memory:');
     try {
-      const prepared = await preparePromptEnhancement(makeBoundaryRequest(store, '/test/b1-2-details'));
+      const prepared = await preparePromptEnhancement(makeBoundaryRequest(store, '/test/details'));
       const boundary = buildPromptEnhancementUiBoundarySessionV1({
         result: prepared,
         timestampMs: 213,
@@ -2732,14 +2732,14 @@ describe('H1.1 — validated PE preparation boundary', () => {
     }
   });
 
-  it('DEP-TEST-01-B1.3-01: builds one typed action request from supplied identity and availability', async () => {
+  it('DEP-TEST-01-01: builds one typed action request from supplied identity and availability', async () => {
     const store = await openStore(':memory:');
     try {
-      const baseRequest = makeBoundaryRequest(store, '/test/b1-3-request');
+      const baseRequest = makeBoundaryRequest(store, '/test/request');
       const prepared = await preparePromptEnhancement(baseRequest);
       const boundary = buildPromptEnhancementUiBoundarySessionV1({ result: prepared, timestampMs: 215 });
       expect(boundary.state).toBe('session_ready');
-      if (boundary.state !== 'session_ready') throw new Error('expected B1.3 session');
+      if (boundary.state !== 'session_ready') throw new Error('expected session');
       const action = prepared.uiView.actions.find((entry) => entry.actionType === 'shorter');
       expect(action).toBeDefined();
       if (!action) throw new Error('expected shorter action');
@@ -2767,14 +2767,14 @@ describe('H1.1 — validated PE preparation boundary', () => {
     }
   });
 
-  it('DEP-TEST-01-B1.3-02: prevents duplicate activation and blocks unavailable or stale actions without a request', async () => {
+  it('DEP-TEST-01-02: prevents duplicate activation and blocks unavailable or stale actions without a request', async () => {
     const store = await openStore(':memory:');
     try {
-      const baseRequest = makeBoundaryRequest(store, '/test/b1-3-gates');
+      const baseRequest = makeBoundaryRequest(store, '/test/gates');
       const prepared = await preparePromptEnhancement(baseRequest);
       const boundary = buildPromptEnhancementUiBoundarySessionV1({ result: prepared, timestampMs: 217 });
       expect(boundary.state).toBe('session_ready');
-      if (boundary.state !== 'session_ready') throw new Error('expected B1.3 session');
+      if (boundary.state !== 'session_ready') throw new Error('expected session');
       const action = prepared.uiView.actions.find((entry) => entry.actionType === 'more_thorough');
       if (!action) throw new Error('expected more thorough action');
       const initial = buildPromptEnhancementActionAdapterStateV1(boundary.session);
@@ -2818,10 +2818,10 @@ describe('H1.1 — validated PE preparation boundary', () => {
     }
   });
 
-  it('DEP-TEST-01-B1.3-03: keeps dirty Additional Details on bounded Apply request and never creates delivery intent', async () => {
+  it('DEP-TEST-01-03: keeps dirty Additional Details on bounded Apply request and never creates delivery intent', async () => {
     const store = await openStore(':memory:');
     try {
-      const baseRequest = makeBoundaryRequest(store, '/test/b1-3-apply');
+      const baseRequest = makeBoundaryRequest(store, '/test/apply');
       const prepared = await preparePromptEnhancement(baseRequest);
       const boundary = buildPromptEnhancementUiBoundarySessionV1({
         result: prepared,
@@ -2869,10 +2869,10 @@ describe('H1.1 — validated PE preparation boundary', () => {
     }
   });
 
-  it('DEP-TEST-01-B1.3-04: accepts only a matching complete result and fail-closes malformed or late results', async () => {
+  it('DEP-TEST-01-04: accepts only a matching complete result and fail-closes malformed or late results', async () => {
     const store = await openStore(':memory:');
     try {
-      const baseRequest = makeBoundaryRequest(store, '/test/b1-3-results');
+      const baseRequest = makeBoundaryRequest(store, '/test/results');
       const prepared = await preparePromptEnhancement(baseRequest);
       const boundary = buildPromptEnhancementUiBoundarySessionV1({ result: prepared, timestampMs: 225 });
       expect(boundary.state).toBe('session_ready');
@@ -2906,10 +2906,10 @@ describe('H1.1 — validated PE preparation boundary', () => {
     }
   });
 
-  it('DEP-TEST-01-B1.3-05: executes Apply through the typed facade and accepts one canonical revision', async () => {
+  it('DEP-TEST-01-05: executes Apply through the typed facade and accepts one canonical revision', async () => {
     const store = await openStore(':memory:');
     try {
-      const baseRequest = makeBoundaryRequest(store, '/test/b1-3-facade-apply');
+      const baseRequest = makeBoundaryRequest(store, '/test/facade-apply');
       const prepared = await preparePromptEnhancement(baseRequest);
       const boundary = buildPromptEnhancementUiBoundarySessionV1({
         result: prepared,
@@ -2953,10 +2953,10 @@ describe('H1.1 — validated PE preparation boundary', () => {
     }
   });
 
-  it('DEP-TEST-01-B1.3-06: facade rejection keeps the previous typed session without delivery', async () => {
+  it('DEP-TEST-01-06: facade rejection keeps the previous typed session without delivery', async () => {
     const store = await openStore(':memory:');
     try {
-      const baseRequest = makeBoundaryRequest(store, '/test/b1-3-facade-failure');
+      const baseRequest = makeBoundaryRequest(store, '/test/facade-failure');
       const prepared = await preparePromptEnhancement(baseRequest);
       const boundary = buildPromptEnhancementUiBoundarySessionV1({ result: prepared, timestampMs: 229 });
       expect(boundary.state).toBe('session_ready');
@@ -2980,10 +2980,10 @@ describe('H1.1 — validated PE preparation boundary', () => {
     }
   });
 
-  it('DEP-TEST-01-B1.3-07: Apply exposes only the public-safe 5K truncation notice', async () => {
+  it('DEP-TEST-01-07: Apply exposes only the public-safe 5K truncation notice', async () => {
     const store = await openStore(':memory:');
     try {
-      const baseRequest = makeBoundaryRequest(store, '/test/b1-3-apply-cap');
+      const baseRequest = makeBoundaryRequest(store, '/test/apply-cap');
       const prepared = await preparePromptEnhancement(baseRequest);
       const boundary = buildPromptEnhancementUiBoundarySessionV1({
         result: prepared,
@@ -3017,10 +3017,10 @@ describe('H1.1 — validated PE preparation boundary', () => {
     }
   });
 
-  it('fail-closes B1.1 for typed no-popup and invalid producer input', async () => {
+  it('fail-closes for typed no-popup and invalid producer input', async () => {
     const store = await openStore(':memory:');
     try {
-      const request = makeBoundaryRequest(store, '/test/b1-1-negative');
+      const request = makeBoundaryRequest(store, '/test/negative');
       const noPopupRequest = {
         ...request,
         sourcePrompt: { ...request.sourcePrompt, origin: 'pe_generated_echo' as const, generatedOriginPolicy: 'exclude_from_ordinary_learning' as const },
@@ -3046,7 +3046,7 @@ describe('H1.1 — validated PE preparation boundary', () => {
   it('reduces thrown and validator-rejected producer output to safe no-popup', async () => {
     const store = await openStore(':memory:');
     try {
-      const request = makeBoundaryRequest(store, '/test/h1-1-failures');
+      const request = makeBoundaryRequest(store, '/test/failures');
       const thrown = await preparePromptEnhancementForAuto({
         request,
         prepare: vi.fn().mockRejectedValue(new Error('timeout')),
@@ -3067,7 +3067,7 @@ describe('H1.1 — validated PE preparation boundary', () => {
   it('never treats an old pending Decision Session advisory as PE authority', async () => {
     const store = await openStore(':memory:');
     try {
-      const projectRoot = '/test/h1-1-old-ds';
+      const projectRoot = '/test/old-ds';
       const session = primeTaskBreakdownSession(store, projectRoot);
       upsertPendingAdvisory(store, {
         projectRoot,
@@ -3149,14 +3149,14 @@ describe('H1.1 — validated PE preparation boundary', () => {
 });
 
 
-describe('H1.3 - preparation-only execution constraints', () => {
+describe('preparation-only execution constraints', () => {
   let store: Store;
 
   beforeEach(async () => { store = await openStore(':memory:'); });
   afterEach(() => { store.db.close(); });
 
   it('keeps a non-eligible prompt in the existing AutoOutcome and prompt boundary', async () => {
-    const projectRoot = '/test/h1-3-non-eligible';
+    const projectRoot = '/test/non-eligible';
     const promptText = 'ok';
     const prepare = vi.fn();
     const onResult = vi.fn();
@@ -3178,7 +3178,7 @@ describe('H1.3 - preparation-only execution constraints', () => {
   });
 
   it('keeps eligible PE preparation preparation-only with no delivery, mutation, or sequence side effects', async () => {
-    const projectRoot = '/test/h1-3-eligible';
+    const projectRoot = '/test/eligible';
     primeTaskBreakdownSession(store, projectRoot);
     const request = makeBoundaryRequest(store, projectRoot);
     const prepared = await preparePromptEnhancement(request);
@@ -3186,14 +3186,14 @@ describe('H1.3 - preparation-only execution constraints', () => {
     const onResult = vi.fn();
     const stdout = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
     const exit = vi.spyOn(process, 'exit').mockImplementation((() => {
-      throw new Error('unexpected process.exit during H1.3 preparation');
+      throw new Error('unexpected process.exit during preparation');
     }) as never);
 
     try {
       const result = await runAuto(
         makeInput({ projectRoot }),
         store,
-        makeMockOpenAI(FIRE_YES_RESPONSE, 'H1.3 test advisory'),
+        makeMockOpenAI(FIRE_YES_RESPONSE, 'test advisory'),
         { request, prepare, onResult },
       );
 
@@ -3207,7 +3207,7 @@ describe('H1.3 - preparation-only execution constraints', () => {
       expect(stdout).not.toHaveBeenCalled();
       expect(exit).not.toHaveBeenCalled();
       expect(SessionStateManager.load(store, projectRoot).current.lastInjectedPrompt ?? null).toBeNull();
-      expect(getPendingAdvisory(store, projectRoot)?.pinchLabel).toBe('H1.3 test advisory');
+      expect(getPendingAdvisory(store, projectRoot)?.pinchLabel).toBe('test advisory');
     } finally {
       stdout.mockRestore();
       exit.mockRestore();
