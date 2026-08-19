@@ -19,14 +19,17 @@ export type RegisterPartial = Partial<Record<Register, string>>;
 const CLASS_1_FALLBACKS = {
   IDEA_TO_PRD: {
     formal:   "Earlier prompts touched on what to build, but the PRD hasn't been written yet.",
+    casual:   "I've been talking through the idea without writing down what I'm actually building.",
     beginner: "I've been talking about building this without writing the plan down first.",
   },
   PRD_TO_ARCHITECTURE: {
     formal:   "Previous prompts shifted to task-level work; architecture decisions aren't recorded yet.",
+    casual:   "I've got the spec down but haven't worked out how the pieces fit together.",
     beginner: "I've been talking about specific tasks without picking the architecture first.",
   },
   ARCHITECTURE_TO_TASKS: {
     formal:   "Coding has started without an explicit task breakdown.",
+    casual:   "I've been diving into code without breaking the work into concrete tasks.",
     beginner: "I've been jumping into code without listing the specific tasks first.",
   },
   TASK_REVIEW: {
@@ -36,14 +39,17 @@ const CLASS_1_FALLBACKS = {
   },
   IMPLEMENTATION_TO_REVIEW: {
     formal:   "Earlier prompts signaled implementation completion; the review pass hasn't followed.",
+    casual:   "I've been wrapping up the build without doing a review pass on this phase.",
     beginner: "I've been finishing code without going back to review what I built.",
   },
   REVIEW_TO_RELEASE: {
     formal:   "Release-prep is underway while review sign-off hasn't been confirmed.",
+    casual:   "I'm gearing up to release without wrapping up the review sign-off.",
     beginner: "I've been getting ready to release without confirming the review is done.",
   },
   RELEASE_TO_FEEDBACK: {
     formal:   "Previous prompts moved past release, but feedback-loop signals haven't surfaced.",
+    casual:   "I've shipped it but haven't checked how it's actually landing with users.",
     beginner: "I've been working past the release without checking what users think.",
   },
 };

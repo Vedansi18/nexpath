@@ -1,4 +1,4 @@
-import OpenAI from 'openai';
+import type OpenAI from 'openai';
 import type { UserProfile, PromptRecord, Stage } from '../classifier/types.js';
 import type { FlagType } from '../classifier/Stage2Trigger.js';
 import type { DecisionContent, OptionEntry } from './options.js';
@@ -535,12 +535,18 @@ export async function generateOptionList(
 
   // ── Pass 1: vocabulary adaptation ─────────────────────────────────────────────
   let pass1Output: GeneratedOptions | null = null;
-  // Constructor is inside the try so a missing OPENAI_API_KEY surfaces as a null
-  // return (graceful fallback to static options), not a synchronous throw.
-  let openai!: OpenAI;
+  // The LLM client is dependency-injected: the CLI binds an OpenAI client
+  // (stop.ts); the browser binds an LLMPort→SDK shim (core/decision/options.ts).
+  // With no client we can't call the API, so return null → caller falls back to
+  // static options — the same observable outcome as the previous
+  // `new OpenAI()`-with-missing-key throw-then-catch path.
+  if (!client) {
+    logger.debug('option_gen_no_client');
+    return null;
+  }
+  const openai: OpenAI = client;
 
   try {
-    openai = client ?? new OpenAI();
     const prompt = buildAdaptationPrompt(content, profile, language, history);
     const messages: Array<{ role: 'user' | 'assistant'; content: string }> = [
       { role: 'user', content: prompt },

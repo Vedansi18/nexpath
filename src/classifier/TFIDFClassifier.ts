@@ -10,8 +10,12 @@ const { TfIdf } = _require('natural') as { TfIdf: new () => any };
  * Training corpus — 20 representative utterances per stage (per research spec: 20-30).
  * Each string represents what a developer might type at that stage.
  * The TF-IDF model learns the vocabulary distribution per stage.
+ *
+ * Exported as the single source of truth for the corpus: the browser-safe
+ * TF-IDF (src/core/classifier/tfidf-browser.ts) is generated from THIS exact
+ * data via `natural`, so the two classifiers can never silently diverge.
  */
-const TRAINING_DATA: Record<Stage, string[]> = {
+export const TRAINING_DATA: Record<Stage, string[]> = {
   idea: [
     'i am thinking about building a feature for sharing results',
     'what if we added a recommendation engine to the platform',

@@ -11,14 +11,17 @@ describe('r5-fallbacks — content inventory', () => {
     expect(count).toBe(136);
   });
 
-  it('total string count across all (signal_type, register) pairs is 240', () => {
+  it('total string count across all (signal_type, register) pairs is 246', () => {
+    // 240 original + 6 casual variants added 2026-07-10 completing the Class-1
+    // stage transitions (casual is the default register; the gaps rendered raw
+    // {R5_INJECT} markers in the advisory).
     let count = 0;
     for (const entry of Object.values(R5_D_FALLBACKS) as RegisterPartial[]) {
       if (entry.formal)   count++;
       if (entry.casual)   count++;
       if (entry.beginner) count++;
     }
-    expect(count).toBe(240);
+    expect(count).toBe(246);
   });
 
   it('every entry has at least one register variant populated', () => {
@@ -112,6 +115,24 @@ describe('r5-fallbacks — getR5DFallback resolver', () => {
     if (formalOnly) {
       const [key] = formalOnly;
       expect(getR5DFallback(key, 'beginner')).toBeUndefined();
+    }
+  });
+
+  it('every Class-1 stage-transition signal_type is authored for ALL registers', () => {
+    // Stage transitions are the primary trigger path and fire at ANY register —
+    // 'casual' is the default for profile-less sessions (profileToRegister(null)).
+    // A missing variant here leaks the raw {R5_INJECT: ...} template into the
+    // rendered advisory whenever F1-F7 falls back to Strategy D (seen live in the
+    // browser popup on every fresh-session fire, 2026-07-10). Absence signals stay
+    // deliberately role-targeted; this completeness bar covers Class 1 only.
+    const CLASS_1_STAGE_TRANSITIONS = [
+      'IDEA_TO_PRD', 'PRD_TO_ARCHITECTURE', 'ARCHITECTURE_TO_TASKS', 'TASK_REVIEW',
+      'IMPLEMENTATION_TO_REVIEW', 'REVIEW_TO_RELEASE', 'RELEASE_TO_FEEDBACK',
+    ];
+    for (const sig of CLASS_1_STAGE_TRANSITIONS) {
+      for (const register of ['formal', 'casual', 'beginner'] as const) {
+        expect(getR5DFallback(sig, register), `${sig} is missing the '${register}' variant`).toBeDefined();
+      }
     }
   });
 });
