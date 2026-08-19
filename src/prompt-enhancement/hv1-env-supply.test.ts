@@ -536,3 +536,55 @@ describe('§46.3c — the PRE-FIX BASELINE must survive every annotation', () =>
     expect(text).toContain('THE BASELINE IS PRESERVED, NEVER OVERWRITTEN');
   });
 });
+
+describe('§17.10 — a GREEN pipe over an EMPTY supply (HV-3 row 1)', () => {
+  // HV-2 marked row 1's checks 2/3/4 green unconditionally. They are conditional: they hold when
+  // the env-facts store is supplied, and nothing on the auto path supplies it — the only
+  // production caller of `setProjectEnvFacts` is the manual `nexpath env` command.
+  //
+  // A reader of three green checks concludes env grounding works. On a default project it produces
+  // nothing, which is exactly how this survived: the pipe is sound and the supply is absent, and
+  // the five-check protocol only asks about the pipe.
+  //
+  // This pins the DEFAULT state — no seeding, no manual command — so the row's condition cannot
+  // quietly become unconditional in either direction.
+  it('an unseeded project crosses, carries and renders NOTHING from env facts', async () => {
+    const store = await openStore(':memory:');
+    const dir = projectWithATestRunner();
+    upsertProject(store, { projectRoot: dir, name: 'x', projectType: 'app', language: 'ts', description: '', createdAt: Date.now() });
+    // ⛔ Deliberately NOT calling setProjectEnvFacts — that is the whole point.
+
+    const refs = buildPromptEnhancementGroundingRefsV1(store, dir, []);
+    expect(refs.sourceOnlyHardFactRefs, 'an unseeded project produced env refs').toEqual([]);
+    expect(Object.keys(refs.groundingEvidenceByRef ?? {}).filter((k) => k.startsWith('hard_fact:'))).toEqual([]);
+  });
+
+  it('and the auto path still has NO writer — the invariant §17.10 actually rests on', () => {
+    // ⚠️ The assertion above pins the BOUNDARY (empty store ⇒ no refs) and cannot see the auto path
+    // at all: it calls the refs builder directly. A mutation that made `runAuto` write env facts
+    // left it green — the fixture claimed to notice §17.10 closing and could not.
+    //
+    // The invariant that actually carries the record is a CALLER fact, so it is asserted as one:
+    // `setProjectEnvFacts` has exactly ONE production caller, the manual `nexpath env` command. The
+    // day the auto path gains one, §17.10 is closed and row 1 must be re-judged.
+    const callers = allTsFilesUnder('src')
+      .filter((f) => !f.endsWith('.test.ts'))
+      .filter((f) => !f.endsWith('store/env-facts.ts') && !f.endsWith('store/index.ts'))
+      .filter((f) => /setProjectEnvFacts\s*\(/.test(readFileSync(f, 'utf8')));
+    expect(
+      callers,
+      'a second writer appeared — §17.10 may be closed; re-judge row 1 rather than relaxing this',
+    ).toEqual(['src/cli/commands/env.ts']);
+  });
+
+  it('and the same project WOULD cross ten refs the moment the manual command supplies it', async () => {
+    // The contrast is the finding: one store write separates "renders nothing" from "renders ten
+    // grounded values". Nothing about the pipe needs fixing.
+    const store = await openStore(':memory:');
+    const dir = projectWithATestRunner();
+    upsertProject(store, { projectRoot: dir, name: 'x', projectType: 'app', language: 'ts', description: '', createdAt: Date.now() });
+    setProjectEnvFacts(store, dir, probeProject(dir, Date.now()).facts, Date.now());
+
+    expect(buildPromptEnhancementGroundingRefsV1(store, dir, []).sourceOnlyHardFactRefs.length).toBe(10);
+  });
+});
