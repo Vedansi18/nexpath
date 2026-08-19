@@ -243,10 +243,20 @@ export function promptEnhancementSectionModelFactsV1(
   readonly originScope: string;
   readonly claimVerbPolicy: string;
   readonly evidence: string | undefined;
+  /**
+   * TRUE when content exists and policy withholds it; FALSE when nothing resolved.
+   *
+   * ⚠️ Both reach the composer as an absent evidence string, and telling the model they are
+   * the same thing is a lie in one direction: 'WITHHELD' asserts there IS something it may
+   * not see, so a fact that simply had no value made the model write around an imagined
+   * secret. That is measurable in the sim bodies (§17.13).
+   */
+  readonly contentGated: boolean;
 }[] {
   const out: {
     factId: string; guidanceKind: string; confidenceBand: string;
     originScope: string; claimVerbPolicy: string; evidence: string | undefined;
+    contentGated: boolean;
   }[] = [];
   for (const fact of facts) {
     // §17.7: ask the PLANNER's resolution, never the raw field. A content-carrying fact ships
@@ -282,6 +292,9 @@ export function promptEnhancementSectionModelFactsV1(
       confidenceBand: fact.confidenceBand ?? promptEnhancementConfidenceBandForV1(fact),
       originScope: fact.sourceOriginScope ?? 'unknown',
       claimVerbPolicy: fact.claimVerbPolicy ?? 'must_phrase_as_possibility',
+      // Reference-only IS the gated case: sensitive treatments and `source_label_only` say the
+      // content exists and may not be stated. Anything else with no value simply has none.
+      contentGated: referenceOnly,
       evidence: referenceOnly || !value
         ? undefined
         // Order matters: redact the secret, flatten the structure, bound the length,

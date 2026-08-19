@@ -100,7 +100,11 @@ export function evidenceForGuidanceFact(
  * must not depend on which one emitted it.
  */
 export function isSensitiveSignalRefV1(ref: string): boolean {
-  return ref.includes('secret_in_prompt');
+  // ⚠️ CASE-NORMALISED at §17.13. Content-template registry ids are SHOUTED
+  // (`ABSENCE_SECRET_IN_PROMPT`), so the lowercase test missed them — and it only started
+  // mattering when that producer began stating its signal's identity. A predicate that is
+  // the single sensitive-source test must match every shape the ref actually takes.
+  return ref.toLowerCase().includes('secret_in_prompt');
 }
 
 /**
@@ -159,6 +163,57 @@ function triggerEligibilityV1(
   return request.sourceSignals.triggerSignalEligibilityState;
 }
 
+/**
+ * The IDENTITY a source-signal fact states about itself — §17.13.
+ *
+ * ⛔ The bug this closes: the slot rendered, and never named the signal that fired. Four of its five
+ * producers attached no `evidence`, and the renderer's rule is *"no resolved value means no line"* —
+ * so the deterministic sentence the claim ladder is built for could not fire, and the composer was
+ * handed an opaque fact id. The model then wrote about the CATEGORY ("missing practices in my
+ * project") because the category was all it had.
+ *
+ * 🔑 What crosses is the signal's own identity — `test_creation`, `idea → implementation` — which
+ * NEXPATH generated. No user-authored text enters this payload, which is why the redaction coverage
+ * question does not gate it (Hiren, 2026-08-19). Values are the wording he approved.
+ *
+ * 🔒 Sensitive signals are protected TWICE, and neither guard is new: a `secret_in_prompt`-class
+ * absence ships `privacyClass: 'requires_confirmation'`, which makes `evidenceForGuidanceFact`
+ * return undefined, AND `claimVerbPolicy: 'source_label_only'`, which the renderer treats as
+ * reference-only and prints without the key. The identity of a sensitive signal still never
+ * reaches a body.
+ */
+function sourceSignalEvidenceV1(
+  kind: 'absence' | 'stage' | 'memory' | 'content_template',
+  sourceId: string,
+): { readonly key: string; readonly value: string } {
+  switch (kind) {
+    case 'stage': {
+      // `stage:idea-to-implementation` — the transition IS the value, so the key names the axis.
+      const [from, to] = sourceId.replace(/^stage:/, '').split('-to-');
+      // A degenerate key (`stage:idea-to-idea`) is not a transition; an arrow pointing at
+      // itself reads as a bug to whoever sees it in a body.
+      return {
+        key: 'stage',
+        value: to === undefined || to === from ? from ?? 'unknown' : `${from} → ${to}`,
+      };
+    }
+    case 'absence':
+      return { key: sourceId.replace(/^absence:/, ''), value: 'not observed in this prompt' };
+    case 'memory':
+      // ⚠️ Just 'a repeated gap' — the ANCHOR appends 'in your recent work'. Carrying it in the
+      // value too rendered it twice: "...as a repeated gap in your recent work in your recent
+      // work." The approved sentence is unchanged; it is assembled from both halves.
+      return { key: sourceId.replace(/^memory:/, ''), value: 'a repeated gap' };
+    case 'content_template':
+      // Registry ids are shouted (`ABSENCE_TEST_CREATION`); the renderer spaces the key, so the
+      // only work here is getting it back to the signal name it was built from.
+      return {
+        key: sourceId.toLowerCase().replace(/^absence_/, ''),
+        value: 'an established guidance precedent',
+      };
+  }
+}
+
 function absenceSignalFactV1(
   factId: string,
   sourceId: string,
@@ -185,6 +240,17 @@ function absenceSignalFactV1(
     privacyClass: isSensitiveSource ? 'requires_confirmation' : 'public_safe',
     sanitizationState: 'not_applicable',
     requiredBecause: 'source_signal_guidance_shown_in_popup',
+    // A fact that carries content states where the content came from — §17.7's lesson, applied at
+    // the producer rather than left to a downstream default.
+    sourceRuntimePath: 'local_read_model',
+    sourceAnchorScope: 'current_prompt_scope',
+    // §17.13: the signal NAMES itself. A sensitive source resolves to undefined here (its privacy
+    // class blocks content at the shared gate) and falls to the reference-only line — unchanged.
+    evidence: evidenceForGuidanceFact(
+      isSensitiveSource ? 'requires_confirmation' : 'public_safe',
+      'not_applicable',
+      sourceSignalEvidenceV1('absence', sourceId),
+    ),
     publicCopySafe: true,
   };
 }
@@ -222,6 +288,13 @@ export function buildPromptEnhancementGuidanceFactsV1(
       safetyHooks: [],
       privacyClass: 'public_safe',
       sanitizationState: 'not_applicable',
+      sourceRuntimePath: 'local_read_model',
+      sourceAnchorScope: 'current_prompt_scope',
+      // §17.13: state WHICH transition, not that a transition happened.
+      evidence: evidenceForGuidanceFact('public_safe', 'not_applicable', sourceSignalEvidenceV1(
+        'stage',
+        promptEnhancementStageSignalKeyV1(trigger.prevStage, trigger.currentStage),
+      )),
       publicCopySafe: true,
     });
   } else if (trigger.triggerKind === 'absence') {
@@ -235,17 +308,28 @@ export function buildPromptEnhancementGuidanceFactsV1(
   // Source A — required survivors. Stage/absence signals shown in the popup are
   // transform-rule-4/5/9 floors ("source/signal guidance in a shown popup"): must survive.
   for (const ref of signals.normalizedStageAbsenceSignalRefs) {
-    facts.push(absenceSignalFactV1(nextId('signal'), ref, triggerEligibilityV1(request)));
+    // ⚠️ CANONICALISED at §17.13. The SAME signal arrives twice under two spellings — the fired
+    // trigger builds `absence:test_creation`, this lane carries the bare `test_creation`
+    // (`auto.ts` strips the prefix) — and `dedupeGuidanceFacts` keys on the source ids, so two
+    // facts survived for one signal. That was invisible while neither stated anything; the moment
+    // both state an identity it is the same sentence printed twice in the body.
+    const canonical = ref.includes(':') ? ref : promptEnhancementAbsenceSignalKeyV1(ref);
+    facts.push(absenceSignalFactV1(nextId('signal'), canonical, triggerEligibilityV1(request)));
   }
 
   // Source A — content-template records are source *evidence / precedent only*
   // (no direct copy of option/whyDesc); render as a supporting clause, not a body.
   for (const ref of signals.contentTemplateRecordFactRefs) {
+    // 🚨 §17.13: this producer had NO sensitive path, because before it stated an identity it had
+    // nothing to leak. Giving it one made "precedent exists for <signal>" nameable — and MEASURED,
+    // it named `secret in prompt`. Precedent for a secret-shaped signal is still a statement about
+    // that signal, so it takes the same treatment the absence lane has always had.
+    const ctplIsSensitive = isSensitiveSignalRefV1(ref);
     facts.push({
       factId: nextId('ctpl'),
       sourceType: 'content_template_record',
       sourceIds: [ref],
-      guidanceKind: 'source_signal_guidance',
+      guidanceKind: ctplIsSensitive ? 'safety_or_confirmation' : 'source_signal_guidance',
       // F4 done-when: precedent/evidence only — L4991 permits labelling only behind an eligible survivor
       sourceEligibilityState: 'support_only_not_triggering',
       suggestedActionKind: 'no_action_render_context_only',
@@ -253,16 +337,24 @@ export function buildPromptEnhancementGuidanceFactsV1(
       targetSectionKind: 'source_signal_guidance',
       sourceEvidenceState: 'partial',
       sourceOriginScope: 'content_template_registry',
-      claimVerbPolicy: 'must_phrase_as_source_signal',
+      claimVerbPolicy: ctplIsSensitive ? 'source_label_only' : 'must_phrase_as_source_signal',
       factRole: 'supporting_missing_practice',
       priority: 'normal',
       renderPolicy: 'render_as_inline_clause',
-      riskLevel: 'none',
-      safetyHooks: [],
-      privacyClass: 'local_private',
+      riskLevel: ctplIsSensitive ? 'sensitive_authority_risky' : 'none',
+      safetyHooks: ctplIsSensitive ? ['safety_sensitive_source'] : [],
+      privacyClass: ctplIsSensitive ? 'requires_confirmation' : 'local_private',
       sanitizationState: 'not_applicable',
       mergePolicy: 'merge_as_supporting_clause',
       wordingHintPolicy: 'use_template_topic_anchor',
+      sourceRuntimePath: 'local_read_model',
+      sourceAnchorScope: 'content_template_scope',
+      // §17.13: precedent EXISTS for a named signal — still evidence-only, now identifiable.
+      evidence: evidenceForGuidanceFact(
+        ctplIsSensitive ? 'requires_confirmation' : 'local_private',
+        'not_applicable',
+        sourceSignalEvidenceV1('content_template', ref),
+      ),
       publicCopySafe: true,
     });
   }
@@ -288,6 +380,11 @@ export function buildPromptEnhancementGuidanceFactsV1(
       renderPolicy: 'render_as_section',
       riskLevel: 'low',
       safetyHooks: [],
+      sourceRuntimePath: 'local_store',
+      sourceAnchorScope: 'longitudinal_user_behavior',
+      // §17.13: name the recurring gap the memory is about.
+      evidence: evidenceForGuidanceFact('local_private', 'identity_only_event',
+        sourceSignalEvidenceV1('memory', ref)),
       privacyClass: 'local_private',
       sanitizationState: 'identity_only_event',
       publicCopySafe: true,

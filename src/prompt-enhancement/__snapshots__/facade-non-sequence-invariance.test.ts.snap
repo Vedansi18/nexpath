@@ -483,9 +483,9 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
     "retryCount": undefined,
     "runtimeSeamSummary": {
       "runtimePaths": [
-        "unstamped",
+        "local_read_model",
       ],
-      "totalPayloadWeight": 10,
+      "totalPayloadWeight": 19,
       "unknownRuntimePathCount": 0,
     },
     "telemetrySafeMeasurementFields": [
@@ -674,6 +674,7 @@ Verification Or Test Plan:
 - Include the verification command, focused scenario, or regression check that should prove the change.
 
 Source Signal Guidance:
+- The current source signal reports stage as task_breakdown → implementation.
 - Use the current source signal as a task constraint and convert it into direct implementation guidance.",
     "routeDecisionId": "pe:facade-nonseq-a-plain-impl:route",
     "sentPromptOrigin": "pe_baseline_generated_body",
@@ -753,6 +754,7 @@ Verification Or Test Plan:
 - Include the verification command, focused scenario, or regression check that should prove the change.
 
 Source Signal Guidance:
+- The current source signal reports stage as task_breakdown → implementation.
 - Use the current source signal as a task constraint and convert it into direct implementation guidance.",
     "routeDecisionId": "pe:facade-nonseq-a-plain-impl:route",
     "sections": [
@@ -1247,7 +1249,8 @@ Source Signal Guidance:
           "decompositionDepth",
         ],
         "baselineSourceSignalSlot": "source_signal_guidance",
-        "bodyText": "- Use the current source signal as a task constraint and convert it into direct implementation guidance.",
+        "bodyText": "- The current source signal reports stage as task_breakdown → implementation.
+- Use the current source signal as a task constraint and convert it into direct implementation guidance.",
         "callVisibilityMode": "deterministic",
         "canExpandInMoreThorough": true,
         "canGroundInMoreProjectGrounded": true,
@@ -1260,7 +1263,9 @@ Source Signal Guidance:
         "fallbackBehavior": "none",
         "familyId": "feature_delivery",
         "feedbackSensitivity": "protected",
-        "groundedFactValues": [],
+        "groundedFactValues": [
+          "task_breakdown → implementation",
+        ],
         "handoffCapabilityFlags": [
           "no_runtime_sequence_v1",
         ],
@@ -1315,7 +1320,7 @@ Source Signal Guidance:
         "sourceTemplateType": "prompt_enhancement_template",
         "spanRefs": [
           {
-            "endOffset": 809,
+            "endOffset": 887,
             "sectionId": "pe:facade-nonseq-a-plain-impl:route:section:6:source_signal_guidance",
             "sourceRefs": [
               "src-a-1",
@@ -1373,6 +1378,7 @@ Verification Or Test Plan:
 - Include the verification command, focused scenario, or regression check that should prove the change.
 
 Source Signal Guidance:
+- The current source signal reports stage as task_breakdown → implementation.
 - Use the current source signal as a task constraint and convert it into direct implementation guidance.",
     "userDirtyState": "clean",
   },
@@ -1904,6 +1910,7 @@ Verification Or Test Plan:
 - Include the verification command, focused scenario, or regression check that should prove the change.
 
 Source Signal Guidance:
+- The current source signal reports stage as task_breakdown → implementation.
 - Use the current source signal as a task constraint and convert it into direct implementation guidance.",
     },
     "diagnostics": [
@@ -2191,7 +2198,7 @@ Source Signal Guidance:
         ],
         "spanRefs": [
           {
-            "endOffset": 809,
+            "endOffset": 887,
             "sectionId": "pe:facade-nonseq-a-plain-impl:route:section:6:source_signal_guidance",
             "sourceRefs": [
               "src-a-1",
@@ -2894,9 +2901,9 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
     "retryCount": undefined,
     "runtimeSeamSummary": {
       "runtimePaths": [
-        "unstamped",
+        "local_read_model",
       ],
-      "totalPayloadWeight": 10,
+      "totalPayloadWeight": 19,
       "unknownRuntimePathCount": 0,
     },
     "telemetrySafeMeasurementFields": [
@@ -3091,6 +3098,7 @@ Verification Or Test Plan:
 - Include the verification command, focused scenario, or regression check that should prove the change.
 
 Source Signal Guidance:
+- The current source signal reports stage as task_breakdown → implementation.
 - Use the current source signal as a task constraint and convert it into direct implementation guidance.",
     "routeDecisionId": "pe:facade-nonseq-b-explain:route",
     "sentPromptOrigin": "pe_baseline_generated_body",
@@ -3175,6 +3183,7 @@ Verification Or Test Plan:
 - Include the verification command, focused scenario, or regression check that should prove the change.
 
 Source Signal Guidance:
+- The current source signal reports stage as task_breakdown → implementation.
 - Use the current source signal as a task constraint and convert it into direct implementation guidance.",
     "routeDecisionId": "pe:facade-nonseq-b-explain:route",
     "sections": [
@@ -3768,7 +3777,8 @@ Source Signal Guidance:
           "decompositionDepth",
         ],
         "baselineSourceSignalSlot": "source_signal_guidance",
-        "bodyText": "- Use the current source signal as a task constraint and convert it into direct implementation guidance.",
+        "bodyText": "- The current source signal reports stage as task_breakdown → implementation.
+- Use the current source signal as a task constraint and convert it into direct implementation guidance.",
         "callVisibilityMode": "deterministic",
         "canExpandInMoreThorough": true,
         "canGroundInMoreProjectGrounded": true,
@@ -3781,7 +3791,9 @@ Source Signal Guidance:
         "fallbackBehavior": "none",
         "familyId": "issue_debug",
         "feedbackSensitivity": "protected",
-        "groundedFactValues": [],
+        "groundedFactValues": [
+          "task_breakdown → implementation",
+        ],
         "handoffCapabilityFlags": [
           "no_runtime_sequence_v1",
         ],
@@ -3836,7 +3848,7 @@ Source Signal Guidance:
         "sourceTemplateType": "prompt_enhancement_template",
         "spanRefs": [
           {
-            "endOffset": 1030,
+            "endOffset": 1108,
             "sectionId": "pe:facade-nonseq-b-explain:route:section:7:source_signal_guidance",
             "sourceRefs": [
               "src-a-1",
@@ -3898,6 +3910,7 @@ Verification Or Test Plan:
 - Include the verification command, focused scenario, or regression check that should prove the change.
 
 Source Signal Guidance:
+- The current source signal reports stage as task_breakdown → implementation.
 - Use the current source signal as a task constraint and convert it into direct implementation guidance.",
     "userDirtyState": "clean",
   },
@@ -4441,6 +4454,7 @@ Verification Or Test Plan:
 - Include the verification command, focused scenario, or regression check that should prove the change.
 
 Source Signal Guidance:
+- The current source signal reports stage as task_breakdown → implementation.
 - Use the current source signal as a task constraint and convert it into direct implementation guidance.",
     },
     "diagnostics": [
@@ -4769,7 +4783,7 @@ Source Signal Guidance:
         ],
         "spanRefs": [
           {
-            "endOffset": 1030,
+            "endOffset": 1108,
             "sectionId": "pe:facade-nonseq-b-explain:route:section:7:source_signal_guidance",
             "sourceRefs": [
               "src-a-1",
@@ -5411,9 +5425,9 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
     "retryCount": undefined,
     "runtimeSeamSummary": {
       "runtimePaths": [
-        "unstamped",
+        "local_read_model",
       ],
-      "totalPayloadWeight": 10,
+      "totalPayloadWeight": 19,
       "unknownRuntimePathCount": 0,
     },
     "telemetrySafeMeasurementFields": [
@@ -5602,6 +5616,7 @@ Verification Or Test Plan:
 - Include the verification command, focused scenario, or regression check that should prove the change.
 
 Source Signal Guidance:
+- The current source signal reports stage as task_breakdown → implementation.
 - Use the current source signal as a task constraint and convert it into direct implementation guidance.",
     "routeDecisionId": "pe:facade-nonseq-c-compound-shaped:route",
     "sentPromptOrigin": "pe_baseline_generated_body",
@@ -5681,6 +5696,7 @@ Verification Or Test Plan:
 - Include the verification command, focused scenario, or regression check that should prove the change.
 
 Source Signal Guidance:
+- The current source signal reports stage as task_breakdown → implementation.
 - Use the current source signal as a task constraint and convert it into direct implementation guidance.",
     "routeDecisionId": "pe:facade-nonseq-c-compound-shaped:route",
     "sections": [
@@ -6175,7 +6191,8 @@ Source Signal Guidance:
           "decompositionDepth",
         ],
         "baselineSourceSignalSlot": "source_signal_guidance",
-        "bodyText": "- Use the current source signal as a task constraint and convert it into direct implementation guidance.",
+        "bodyText": "- The current source signal reports stage as task_breakdown → implementation.
+- Use the current source signal as a task constraint and convert it into direct implementation guidance.",
         "callVisibilityMode": "deterministic",
         "canExpandInMoreThorough": true,
         "canGroundInMoreProjectGrounded": true,
@@ -6188,7 +6205,9 @@ Source Signal Guidance:
         "fallbackBehavior": "none",
         "familyId": "feature_delivery",
         "feedbackSensitivity": "protected",
-        "groundedFactValues": [],
+        "groundedFactValues": [
+          "task_breakdown → implementation",
+        ],
         "handoffCapabilityFlags": [
           "no_runtime_sequence_v1",
         ],
@@ -6243,7 +6262,7 @@ Source Signal Guidance:
         "sourceTemplateType": "prompt_enhancement_template",
         "spanRefs": [
           {
-            "endOffset": 798,
+            "endOffset": 876,
             "sectionId": "pe:facade-nonseq-c-compound-shaped:route:section:6:source_signal_guidance",
             "sourceRefs": [
               "src-a-1",
@@ -6301,6 +6320,7 @@ Verification Or Test Plan:
 - Include the verification command, focused scenario, or regression check that should prove the change.
 
 Source Signal Guidance:
+- The current source signal reports stage as task_breakdown → implementation.
 - Use the current source signal as a task constraint and convert it into direct implementation guidance.",
     "userDirtyState": "clean",
   },
@@ -6832,6 +6852,7 @@ Verification Or Test Plan:
 - Include the verification command, focused scenario, or regression check that should prove the change.
 
 Source Signal Guidance:
+- The current source signal reports stage as task_breakdown → implementation.
 - Use the current source signal as a task constraint and convert it into direct implementation guidance.",
     },
     "diagnostics": [
@@ -7119,7 +7140,7 @@ Source Signal Guidance:
         ],
         "spanRefs": [
           {
-            "endOffset": 798,
+            "endOffset": 876,
             "sectionId": "pe:facade-nonseq-c-compound-shaped:route:section:6:source_signal_guidance",
             "sourceRefs": [
               "src-a-1",

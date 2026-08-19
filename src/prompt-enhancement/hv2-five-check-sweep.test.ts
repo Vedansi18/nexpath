@@ -632,9 +632,12 @@ describe('HV-2 row 6 — A3 STEP 7 DID NOT LAND: extracted param values never en
     // A3 step 7 required these to arrive with `sourceOriginScope: current_prompt` or
     // `recent_prompt_history`. No fact carries either with a value — which is the failure, stated
     // as a measurement rather than an inference from the missing import.
+    // ⚠️ NARROWED at §17.13. This filtered on ORIGIN SCOPE as a proxy for "prompt-mined", and the
+    // proxy stopped holding the moment another producer with `current_prompt` origin gained a
+    // value: a STAGE TRANSITION is observed from the current prompt and is not a mined param. The
+    // row is about the A3 step-7 lane, so it now asks for that lane by name.
     const promptMined = facts.filter(
-      (f) => (f.sourceOriginScope === 'current_prompt' || f.sourceOriginScope === 'recent_prompt_history')
-        && f.evidence?.value !== undefined,
+      (f) => f.sourceIds.some((id) => id.startsWith('prompt_fact:')) && f.evidence?.value !== undefined,
     );
     expect(
       promptMined.map((f) => f.factId),

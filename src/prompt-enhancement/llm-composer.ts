@@ -249,6 +249,8 @@ const SYSTEM_PROMPT = [
   '  must_phrase_as_recent_change states that something CHANGED since the last session and must',
   '  never be reworded as a standing fact about the project.',
   '- Evidence marked WITHHELD has content you may not see or state — cite the source id only.',
+  '- Evidence marked NONE has no resolved content at all. Do not imply something was hidden from',
+  '  you, and do not invent what it might have been — the fact exists, its value does not.',
   '- Reply with STRICT JSON only, with the keys in EXACTLY this order:',
   '  {"detectedLanguageSelfReport":"...","requestModeSelfReport":"...","sectionDrafts":[{"sectionId":"...","bodyText":"...","sourceFactIds":["..."]}],"composerClaims":["claim:<sourceFactId>"],"authorityEvidence":"...","authorityModeSelfReport":"..."}',
   '- The key order is not cosmetic: authorityEvidence and authorityModeSelfReport come LAST, after',
@@ -294,7 +296,9 @@ function buildUserPrompt(
         .map((fact) => `\n    - ${fact.factId} | kind: ${fact.guidanceKind} | confidence: ${fact.confidenceBand}`
           + ` | origin: ${fact.originScope} | claim: ${fact.claimVerbPolicy}`
           + (fact.evidence === undefined
-            ? ' | evidence: WITHHELD (cite the source, never state its content)'
+            ? (fact.contentGated
+              ? ' | evidence: WITHHELD (cite the source, never state its content)'
+              : ' | evidence: NONE (nothing resolved — no hidden content to work around)')
             : ` | evidence: ${fact.evidence}`))
         .join('');
       const evidenceBlock = factLines.length > 0 ? `\n  resolvedSourceFacts:${factLines}` : '';
