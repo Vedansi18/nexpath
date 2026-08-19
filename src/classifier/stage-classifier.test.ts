@@ -10,8 +10,10 @@ import {
   parseStageClassifierReply,
   buildStageClassifierUserMessage,
   applyReleaseGuard,
+  DEBUG_EVIDENCE_FORMS,
 } from './stage-classifier.js';
 import type { StageClassifierResult } from './stage-classifier.js';
+import { PROMPT_ENHANCEMENT_PRIMARY_INTENTS } from '../prompt-enhancement/routing-taxonomy.js';
 
 // A mock chat client that returns `content` and (optionally) captures the request.
 function mockClient(content: string, capture?: (req: { model: string; messages: { role: string; content: string }[] }) => void): OpenAI {
@@ -104,6 +106,12 @@ describe('stage-classifier — degrade path (model unavailable)', () => {
     expect(out.classification.confidence).toBe(expected.confidence);
     expect(out.fireRecommendation).toBe(false);
     expect(out.selectedSignalKey).toBe('');
+    // A degraded reply PROPOSES NOTHING: an empty intent keeps the prompt on the
+    // deterministic cascade instead of routing it on a value no model returned.
+    expect(out.primaryIntent).toBe('');
+    expect(out.intentConfidence).toBe(0);
+    expect(out.debugEvidencePresent).toEqual([]);
+    expect(out.capabilityCandidates).toEqual([]);
   });
 
   it('degrades on an empty reply and on an unparseable reply', async () => {
@@ -148,6 +156,14 @@ describe('stage-classifier — deterministic release guard (scaffolding without 
     return {
       classification: { stage: 'release', confidence: 0.9, tier: 3, allScores: { release: 0.9 } },
       signalsPresent: [], signalsAbsent: [], fireRecommendation: true, selectedSignalKey: '', reason: 'r', degraded: false,
+      // The reply-extension fields belong here too: this helper feeds the release
+      // guard, and a guard that rebuilt its result instead of carrying the reply
+      // forward would silently drop the intent proposal — sending those prompts
+      // back to the keyword cascade with nothing to show it happened.
+      primaryIntent: 'feature.fresh_implementation',
+      intentConfidence: 0.82,
+      debugEvidencePresent: ['logs'],
+      capabilityCandidates: ['capability.verification_required'],
     };
   }
 
@@ -155,6 +171,14 @@ describe('stage-classifier — deterministic release guard (scaffolding without 
     const guarded = applyReleaseGuard(releaseResult(), 'set up the project with docker and a ci/cd pipeline');
     expect(guarded.classification.confidence).toBe(0);   // transition blocked upstream
     expect(guarded.fireRecommendation).toBe(false);      // no advisory fires
+    // The STAGE is what the guard neutralises. The intent proposal and the
+    // observations survive: a scaffolding window misread as a release says
+    // nothing about what the developer asked for, and dropping the proposal
+    // would push the prompt onto the cascade this milestone exists to demote.
+    expect(guarded.primaryIntent).toBe('feature.fresh_implementation');
+    expect(guarded.intentConfidence).toBe(0.82);
+    expect(guarded.debugEvidencePresent).toEqual(['logs']);
+    expect(guarded.capabilityCandidates).toEqual(['capability.verification_required']);
   });
 
   it('leaves a genuine release (scaffolding present but a verification token too) untouched', () => {
@@ -211,5 +235,99 @@ describe('stage-classifier — user message', () => {
     });
     expect(msg).toContain('Nature: beginner');
     expect(msg).toContain('non-technical');
+  });
+});
+
+// ── The intent proposal + observations ride the SAME parked call ──────────────
+
+describe('intent + observation reply fields (soft-parsed)', () => {
+  const baseReply = {
+    stage: 'Implementation',
+    stage_confidence: 0.9,
+    signals_present: [],
+    signals_absent: ['test_creation'],
+    fire_decision_session: true,
+    selected_signal_key: 'test_creation',
+    reason: 'test',
+  };
+
+  it('parses a valid intent proposal with confidence, evidence, and capability observations', () => {
+    const parsed = parseStageClassifierReply(JSON.stringify({
+      ...baseReply,
+      primary_intent: 'issue_debug.failing_test',
+      intent_confidence: 0.85,
+      debug_evidence_present: ['failing_test_details', 'logs'],
+      capability_candidates: ['capability.verification_required'],
+    }));
+    expect(parsed.primaryIntent).toBe('issue_debug.failing_test');
+    expect(parsed.intentConfidence).toBe(0.85);
+    expect(parsed.debugEvidencePresent).toEqual(['failing_test_details', 'logs']);
+    expect(parsed.capabilityCandidates).toEqual(['capability.verification_required']);
+  });
+
+  it('an intent outside the 40-intent menu degrades to empty — never an invented intent', () => {
+    const parsed = parseStageClassifierReply(JSON.stringify({
+      ...baseReply,
+      primary_intent: 'made_up.family_intent',
+      intent_confidence: 0.9,
+    }));
+    expect(parsed.primaryIntent).toBe('');
+  });
+
+  it('an old-shape reply without the new fields still parses the stage (soft defaults)', () => {
+    const parsed = parseStageClassifierReply(JSON.stringify(baseReply));
+    expect(parsed.stage).toBe('implementation');
+    expect(parsed.primaryIntent).toBe('');
+    expect(parsed.intentConfidence).toBe(0);
+    expect(parsed.debugEvidencePresent).toEqual([]);
+    expect(parsed.capabilityCandidates).toEqual([]);
+  });
+
+  it('unknown evidence forms and capability ids are filtered, valid ones kept', () => {
+    const parsed = parseStageClassifierReply(JSON.stringify({
+      ...baseReply,
+      debug_evidence_present: ['screenshots', 'vibes', 'metrics'],
+      capability_candidates: ['capability.risk_or_rollback', 'capability.invented'],
+    }));
+    expect(parsed.debugEvidencePresent).toEqual(['screenshots', 'metrics']);
+    expect(parsed.capabilityCandidates).toEqual(['capability.risk_or_rollback']);
+  });
+});
+
+describe('the system prompt encodes the menu, the ladder order, and the locked conditions', () => {
+  it('carries the FULL 40-intent menu', () => {
+    for (const intent of PROMPT_ENHANCEMENT_PRIMARY_INTENTS) {
+      expect(STAGE_CLASSIFIER_SYSTEM_PROMPT).toContain(`- ${intent}`);
+    }
+  });
+
+  it('encodes the ladder ORDER with the rung-6 reconciliation and the rung-7 deferral', () => {
+    expect(STAGE_CLASSIFIER_SYSTEM_PROMPT).toContain('ladder IN ORDER');
+    expect(STAGE_CLASSIFIER_SYSTEM_PROMPT).toContain('ONLY as weak tie-breakers');
+    expect(STAGE_CLASSIFIER_SYSTEM_PROMPT).toContain('Never weight mood over an explicit error');
+    expect(STAGE_CLASSIFIER_SYSTEM_PROMPT).toContain('never solicit it and never weigh it');
+  });
+
+  it('presents the capability attach conditions as written, and the full evidence enumeration', () => {
+    expect(STAGE_CLASSIFIER_SYSTEM_PROMPT).toContain('a debug prompt LACKS reproduction steps');
+    expect(STAGE_CLASSIFIER_SYSTEM_PROMPT).toContain('Do not reduce these conditions to keyword matching');
+    for (const form of DEBUG_EVIDENCE_FORMS) {
+      expect(STAGE_CLASSIFIER_SYSTEM_PROMPT).toContain(form);
+    }
+  });
+
+  it('the output schema names the four new fields', () => {
+    for (const field of ['primary_intent', 'intent_confidence', 'debug_evidence_present', 'capability_candidates']) {
+      expect(STAGE_CLASSIFIER_SYSTEM_PROMPT).toContain(`"${field}"`);
+    }
+  });
+
+  it('under-evidenced guidance: empty intent over a guess', () => {
+    expect(STAGE_CLASSIFIER_SYSTEM_PROMPT).toContain('never guess a specific intent from thin evidence');
+  });
+
+  it('rung 1 names review verbs as direct evidence — "review my diff" is decidable on rung 1 alone', () => {
+    const rungOne = STAGE_CLASSIFIER_SYSTEM_PROMPT.split('1. Explicit current-prompt words')[1]?.split('2.')[0] ?? '';
+    expect(rungOne).toContain('review verbs');
   });
 });

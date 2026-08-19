@@ -20,7 +20,10 @@ export const STAGE2_MODEL              = 'gpt-4o-mini';
 /** Prompts of recent context to include in the classifier prompt. */
 export const STAGE2_CONTEXT_WINDOW     = 10;
 /** Max output tokens for the classifier call. */
-export const STAGE2_MAX_OUTPUT_TOKENS  = 256;
+// 512 since the reply gained primary_intent / intent_confidence /
+// debug_evidence_present / capability_candidates — 256 risked truncating the
+// larger JSON into a parse failure and a silent degrade.
+export const STAGE2_MAX_OUTPUT_TOKENS  = 512;
 /** Classifier confidence below this → do not fire a decision session. */
 export const STAGE2_LLM_MIN_CONFIDENCE = 0.49;
 /** Stage-1 confidence below this → the low-confidence condition for the fire trigger. */

@@ -294,4 +294,35 @@ describe('content-template-grounding — sanitize gate (leakage)', () => {
     expect(sanitizePromptDerivedValue('at https://x.io/y')).not.toMatch(/https?:\/\//);
     expect(sanitizePromptDerivedValue('uses Vitest and a small team')).toBe('uses Vitest and a small team');
   });
+
+  // GR-4 / H2 (dev-plan §13.5 step 2, analysis §46.4). The hypothesis: this branch's
+  // length-preserving markers + whitespace collapse "could degrade extracted-value fidelity
+  // marginally" against scaffolding's plain `[redacted]`. MEASURED over a 15-value corpus at
+  // phase 28: 18/18 non-sensitive fragments preserved by BOTH shapes, 0 rows degraded — H2
+  // refuted. This fixture pins the property the verdict rests on, so a later change to the
+  // marker or the collapse cannot quietly make the verdict false.
+  it('H2: sanitizing keeps every NON-SENSITIVE fragment — the redaction shape costs no fidelity', () => {
+    const cases: readonly { value: string; keeps: readonly string[]; drops: string }[] = [
+      { value: 'pings alice@example.com on failures', keeps: ['pings', 'on failures'], drops: 'alice@example.com' },
+      { value: 'runs from /home/dev/projects/app every morning', keeps: ['runs from', 'every morning'], drops: '/home/dev' },
+      { value: 'deploys via https://ci.example.com/pipeline/42', keeps: ['deploys via'], drops: 'ci.example.com' },
+      { value: 'emails bob@corp.io from /var/log/deploy.log nightly', keeps: ['emails', 'from', 'nightly'], drops: 'bob@corp.io' },
+    ];
+    for (const { value, keeps, drops } of cases) {
+      const sanitized = sanitizePromptDerivedValue(value);
+      for (const fragment of keeps) {
+        expect(sanitized, `"${fragment}" was lost from "${value}"`).toContain(fragment);
+      }
+      expect(sanitized).not.toContain(drops);
+    }
+  });
+
+  it('H2: the whitespace collapse changes SPACING only, never the words', () => {
+    // The collapse is the other half of H2. It rewrites runs of whitespace by design (the result
+    // is a why-desc value, not a positional copy), so the check is that the WORDS are untouched.
+    const messy = 'uses  Vitest\nand   Playwright  for e2e';
+    const sanitized = sanitizePromptDerivedValue(messy);
+    expect(sanitized).toBe('uses Vitest and Playwright for e2e');
+    expect(sanitized.split(' ')).toEqual(messy.split(/\s+/).filter((word) => word.length > 0));
+  });
 });

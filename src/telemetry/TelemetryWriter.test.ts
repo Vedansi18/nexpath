@@ -210,6 +210,8 @@ describe('TelemetryWriter — writeTelemetry', () => {
 
     beforeEach(async () => {
       store = await openStore(':memory:');
+      // Telemetry is OFF by default (NF Plan A); these tests exercise the WRITE path, so enable it.
+      setConfig(store, 'telemetry.enabled', 'true');
     });
 
     afterEach(() => {
@@ -366,7 +368,7 @@ describe('TelemetryWriter — writeTelemetry', () => {
       store.db.close();
     });
 
-    it('writes happen by default when no config key is set (DEFAULT_CONFIG = true)', async () => {
+    it('writes are OFF by default when no config key is set (DEFAULT_CONFIG = false, NF Plan A)', async () => {
       const { writeTelemetry } = await import('./TelemetryWriter.js');
       const fs = await import('node:fs');
 
@@ -376,7 +378,7 @@ describe('TelemetryWriter — writeTelemetry', () => {
 
       writeTelemetry('/proj', 'prompt_received', { promptCount: 1 }, store);
 
-      expect(appendSpy).toHaveBeenCalledTimes(1);
+      expect(appendSpy).not.toHaveBeenCalled();
     });
 
     it('writes happen when telemetry.enabled is explicitly set to "true"', async () => {

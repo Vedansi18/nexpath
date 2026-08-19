@@ -1,6 +1,6 @@
 {
   "name": "nexpath",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Behaviour guidance system for vibe coders using AI coding agents",
   "type": "module",
   "bin": {
@@ -18,6 +18,9 @@
     "dev:server": "tsx src/server/index.ts",
     "typecheck": "tsc --noEmit",
     "typecheck:ext": "tsc --noEmit -p tsconfig.ext-browser.json",
+    "pe:launch-recheck": "tsx scripts/pe-public-launch-recheck.ts",
+    "pe:leak-guard": "tsx scripts/pe-leak-guard.ts",
+    "pe:body-assertion": "tsx scripts/pe-body-assertion.ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },

@@ -1,15 +1,17 @@
 import type { Database } from 'sql.js';
 import { saveStore, type Store } from './db.js';
+import { PROMPT_ENHANCEMENT_SEQUENCE_ENABLED_DEFAULT, PROMPT_ENHANCEMENT_SEQUENCE_ENABLED_KEY } from '../config/prompt-enhancement-keys.js';
 
 // Defaults applied when a key has not been explicitly set by the user
 export const DEFAULT_CONFIG: Record<string, string> = {
+  [PROMPT_ENHANCEMENT_SEQUENCE_ENABLED_KEY]: PROMPT_ENHANCEMENT_SEQUENCE_ENABLED_DEFAULT,
   prompt_capture_enabled: 'true',
   env_probe_enabled: 'true',
   whydesc_delivery_enabled: 'true',
   prompt_store_max_per_project: '500',
   prompt_store_max_db_mb: '100',
   log_level: 'info',
-  'telemetry.enabled': 'true',
+  'telemetry.enabled': 'false',
   telemetry_sync_endpoint: 'https://us.i.posthog.com/capture/',
   telemetry_sync_api_key:  'phc_mBETUUXjX2MLDCBpHmRoVMqHmRF2dUpnuByqVGw5qej9',
 };

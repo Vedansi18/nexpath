@@ -43,25 +43,43 @@ function parseFactMap(json: string | null | undefined): FactMap | null {
 
 // ── Project-scoped facts ─────────────────────────────────────────────────────
 
+/**
+ * Project rows are keyed by whatever path STRING the entry point happened to produce, and the
+ * entry points disagree: `auto` registers `--project` verbatim, while `nexpath env` persists under
+ * `resolve()`'d form — backslashes on Windows. Matching on the raw string therefore missed the row
+ * and, because these are UPDATEs, missed it SILENTLY: `env_facts` was populated for 0 of 20
+ * projects in a real store with 1,136 prompts (bug record §17.8).
+ *
+ * Every project-scoped accessor here matches on a separator-normalised comparison instead, so the
+ * lookup is insensitive to which form registered the row. ⛔ This deliberately does NOT normalise
+ * `upsertProject`/`getProject` — project IDENTITY across every other table stays exactly as it is;
+ * only these lookups become form-insensitive.
+ */
+const PROJECT_ROOT_MATCHES = "REPLACE(project_root, '\\', '/') = REPLACE(?, '\\', '/')";
+
 /** Store project facts on the projects row. No-op if the project is not registered. */
 export function setProjectEnvFacts(
   store: Store,
   projectRoot: string,
   facts: FactMap,
   detectedAt: number,
-): void {
+): boolean {
   store.db.run(
-    'UPDATE projects SET env_facts = ?, env_facts_detected_at = ? WHERE project_root = ?',
+    `UPDATE projects SET env_facts = ?, env_facts_detected_at = ? WHERE ${PROJECT_ROOT_MATCHES}`,
     [JSON.stringify(facts), detectedAt, projectRoot],
   );
+  // §17.8: an UPDATE that matches nothing is indistinguishable from a successful store unless it
+  // says so. Returning the outcome lets the caller stop reporting success it did not achieve.
+  const stored = store.db.getRowsModified() > 0;
   saveStore(store);
+  return stored;
 }
 
 /** Read project facts, or null when absent OR while consent is disabled (gated). */
 export function getProjectEnvFacts(store: Store, projectRoot: string): StoredFacts | null {
   if (!isEnvProbeEnabled(store.db)) return null;
   const res = store.db.exec(
-    'SELECT env_facts, env_facts_detected_at FROM projects WHERE project_root = ?',
+    `SELECT env_facts, env_facts_detected_at FROM projects WHERE ${PROJECT_ROOT_MATCHES}`,
     [projectRoot],
   );
   const row = res[0]?.values[0];
@@ -86,7 +104,7 @@ export interface EnvTrajectoryState {
 /** Read the trajectory state, or null when absent OR while consent is disabled (gated). */
 export function getEnvTrajectory(store: Store, projectRoot: string): EnvTrajectoryState | null {
   if (!isEnvProbeEnabled(store.db)) return null;
-  const res = store.db.exec('SELECT env_trajectory FROM projects WHERE project_root = ?', [projectRoot]);
+  const res = store.db.exec(`SELECT env_trajectory FROM projects WHERE ${PROJECT_ROOT_MATCHES}`, [projectRoot]);
   const raw = res[0]?.values[0]?.[0] as string | null | undefined;
   if (!raw) return null;
   try {
@@ -101,7 +119,7 @@ export function getEnvTrajectory(store: Store, projectRoot: string): EnvTrajecto
 /** Persist the trajectory state on the projects row. No-op if the project is not registered. */
 export function setEnvTrajectory(store: Store, projectRoot: string, state: EnvTrajectoryState): void {
   store.db.run(
-    'UPDATE projects SET env_trajectory = ? WHERE project_root = ?',
+    `UPDATE projects SET env_trajectory = ? WHERE ${PROJECT_ROOT_MATCHES}`,
     [JSON.stringify(state), projectRoot],
   );
   saveStore(store);
@@ -139,7 +157,7 @@ export function getMachineFacts(store: Store): StoredFacts | null {
 export function clearProjectEnvFacts(store: Store, projectRoot?: string): void {
   if (projectRoot) {
     store.db.run(
-      'UPDATE projects SET env_facts = NULL, env_facts_detected_at = NULL, env_trajectory = NULL WHERE project_root = ?',
+      `UPDATE projects SET env_facts = NULL, env_facts_detected_at = NULL, env_trajectory = NULL WHERE ${PROJECT_ROOT_MATCHES}`,
       [projectRoot],
     );
   } else {
@@ -153,4 +171,78 @@ export function purgeAllEnvFacts(store: Store): void {
   store.db.run('UPDATE projects SET env_facts = NULL, env_facts_detected_at = NULL, env_trajectory = NULL');
   deleteConfig(store, MACHINE_FACTS_KEY);
   saveStore(store);
+}
+
+// ── Prompt-derived extracted params (A3 step 7, cached) ──────────────────────
+
+/** One mined key/value from the user's own recent prompts. */
+export interface PromptDerivedFact {
+  readonly key: string;
+  readonly value: string;
+}
+
+/**
+ * A3 step 7 required the engine's `ExtractedParam` output to cross into PE. That extractor is an
+ * LLM call and used to run inside the decision-session engine — which fired occasionally, over a
+ * 5-prompt window, and is now disabled outright (`stop.ts` MPS-7). PE runs on EVERY prompt, so
+ * wiring the extractor straight into the boundary would have turned an occasional call into a
+ * per-prompt one.
+ *
+ * 🔒 Owner ruling: mine over a window and CACHE it, refreshing only after a threshold of new
+ * prompts. These accessors are that cache — deliberately shaped like `env_facts`, including the
+ * separator-insensitive key match (§17.8).
+ */
+export function setPromptDerivedFacts(
+  store: Store,
+  projectRoot: string,
+  facts: readonly PromptDerivedFact[],
+  detectedAt: number,
+  atPromptCount: number,
+): boolean {
+  store.db.run(
+    `UPDATE projects SET prompt_facts = ?, prompt_facts_detected_at = ?, prompt_facts_at_count = ?
+      WHERE ${PROJECT_ROOT_MATCHES}`,
+    [JSON.stringify(facts), detectedAt, atPromptCount, projectRoot],
+  );
+  const stored = store.db.getRowsModified() > 0;
+  saveStore(store);
+  return stored;
+}
+
+/** Read the cached prompt-derived facts, or null when never mined. */
+export function getPromptDerivedFacts(
+  store: Store,
+  projectRoot: string,
+): { facts: readonly PromptDerivedFact[]; detectedAt: number; atPromptCount: number } | null {
+  const res = store.db.exec(
+    `SELECT prompt_facts, prompt_facts_detected_at, prompt_facts_at_count FROM projects
+      WHERE ${PROJECT_ROOT_MATCHES}`,
+    [projectRoot],
+  );
+  const row = res[0]?.values?.[0];
+  if (!row || row[0] == null) return null;
+  try {
+    const facts = JSON.parse(String(row[0])) as PromptDerivedFact[];
+    if (!Array.isArray(facts)) return null;
+    return { facts, detectedAt: Number(row[1] ?? 0), atPromptCount: Number(row[2] ?? 0) };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Is a refresh due? True when never mined, or when the threshold of NEW prompts has accumulated
+ * since the last mine. ⛔ The only cost dial in this feature — one LLM call per threshold crossing,
+ * per project. Owner-set at 25.
+ */
+export const PROMPT_FACTS_REFRESH_EVERY_N_PROMPTS = 25;
+
+export function promptDerivedFactsRefreshDue(
+  store: Store,
+  projectRoot: string,
+  currentPromptCount: number,
+): boolean {
+  const cached = getPromptDerivedFacts(store, projectRoot);
+  if (!cached) return true;
+  return currentPromptCount - cached.atPromptCount >= PROMPT_FACTS_REFRESH_EVERY_N_PROMPTS;
 }

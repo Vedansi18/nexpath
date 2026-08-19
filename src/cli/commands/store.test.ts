@@ -12,6 +12,11 @@ import {
   insertSkippedSession,
   getSkippedSessionCount,
   pruneSkippedSessions,
+  getPromptEnhancementStoreStatus,
+  recordPromptEnhancementFeedbackEvent,
+  recordPromptEnhancementGeneratedOrigin,
+  recordPromptEnhancementMemoryEvidence,
+  recordPromptEnhancementSourceUse,
 } from '../../store/index.js';
 import { parsePeriod, storeDeleteAction, storeEnableAction, storeDisableAction, storePruneAction } from './store.js';
 
@@ -69,7 +74,7 @@ describe('storeDeleteAction — full delete', () => {
 
     const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
     await storeDeleteAction({ yes: true }, path);
-    expect(spy.mock.calls[0][0]).toBe('All stored prompts deleted.');
+    expect(spy.mock.calls[0][0]).toBe('All stored prompts and prompt-enhancement rows deleted.');
 
     // Verify DB is empty
     const store = await openStore(path);
@@ -227,7 +232,7 @@ describe('storePruneAction', () => {
 
     const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
     await storePruneAction({ olderThan: '1d' }, path);
-    expect(spy.mock.calls[0][0]).toMatch(/Pruned 1 prompt\(s\) older than 1d/);
+    expect(spy.mock.calls[0][0]).toMatch(/Pruned 1 prompt\(s\) and 0 prompt-enhancement row\(s\) older than 1d/);
 
     const store = await openStore(path);
     const res = store.db.exec('SELECT COUNT(*) FROM prompts');
@@ -316,6 +321,37 @@ describe('storeDeleteAction — project delete cleans skipped_sessions', () => {
   });
 });
 
+describe('storeDeleteAction — cleans prompt-enhancement rows', () => {
+  it('deletes PE rows for the deleted project only', async () => {
+    const { path, cleanup } = await tempDb((store) => {
+      recordMemory(store, '/proj/a', 'signal-a', Date.now());
+      recordMemory(store, '/proj/b', 'signal-b', Date.now());
+    });
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    await storeDeleteAction({ project: '/proj/a' }, path);
+
+    const store = await openStore(path);
+    expect(getPromptEnhancementStoreStatus(store, '/proj/a').memoryRows).toBe(0);
+    expect(getPromptEnhancementStoreStatus(store, '/proj/b').memoryRows).toBe(1);
+    closeStore(store);
+    cleanup();
+  });
+
+  it('removes every PE row on full delete', async () => {
+    const { path, cleanup } = await tempDb((store) => {
+      recordMemory(store, '/proj/a', 'signal-a', Date.now());
+      recordMemory(store, '/proj/b', 'signal-b', Date.now());
+    });
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    await storeDeleteAction({ yes: true }, path);
+
+    const store = await openStore(path);
+    expect(getPromptEnhancementStoreStatus(store).memoryRows).toBe(0);
+    closeStore(store);
+    cleanup();
+  });
+});
+
 describe('storeDeleteAction — full delete cleans all skipped_sessions', () => {
   it('removes every skipped_sessions row', async () => {
     const { path, cleanup } = await tempDb((store) => {
@@ -383,6 +419,89 @@ describe('storePruneAction — prunes skipped_sessions', () => {
   });
 });
 
+describe('storePruneAction — prunes prompt-enhancement rows', () => {
+  it('prunes stale low-value PE memory rows for the selected project', async () => {
+    const old = Date.now() - 2 * 24 * 60 * 60 * 1000;
+    const { path, cleanup } = await tempDb((store) => {
+      recordMemory(store, '/proj/a', 'signal-old-a', old);
+      recordMemory(store, '/proj/b', 'signal-old-b', old);
+    });
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    await storePruneAction({ olderThan: '1d', project: '/proj/a' }, path);
+    expect(spy.mock.calls[0][0]).toMatch(/1 prompt-enhancement row\(s\)/);
+
+    const store = await openStore(path);
+    expect(getPromptEnhancementStoreStatus(store, '/proj/a').memoryRows).toBe(0);
+    expect(getPromptEnhancementStoreStatus(store, '/proj/b').memoryRows).toBe(1);
+    closeStore(store);
+    cleanup();
+  });
+
+  it('prunes PE lifecycle rows through store prune for the selected project', async () => {
+    const old = Date.now() - 2 * 24 * 60 * 60 * 1000;
+    const { path, cleanup } = await tempDb((store) => {
+      recordPromptEnhancementSourceUse(store, {
+        sourceUseId: 'source-use-a',
+        projectRoot: '/proj/a',
+        enhancementId: 'enh-a',
+        bodyId: 'body-a',
+        bodyRevision: 1,
+        sourceKind: 'content_template_fact',
+        sourceId: 'ct:a',
+        useKind: 'body_section',
+        now: old,
+      });
+      recordPromptEnhancementGeneratedOrigin(store, {
+        generatedOriginId: 'origin-a',
+        projectRoot: '/proj/a',
+        enhancementId: 'enh-a',
+        bodyId: 'body-a',
+        bodyRevision: 1,
+        generatedOriginState: 'pe_generated_body',
+        deliveryChannel: 'cli_stop_bridge',
+        promptSubmitProcessingPolicy: 'pe_generated_delivery_skip_classification',
+        now: old,
+      });
+      recordPromptEnhancementFeedbackEvent(store, {
+        feedbackEventId: 'feedback-a',
+        projectRoot: '/proj/a',
+        enhancementId: 'enh-a',
+        bodyId: 'body-a',
+        bodyRevision: 1,
+        feedbackCategory: 'fallback',
+        feedbackScopeKey: 'scope-a',
+        learningEligibility: 'not_eligible',
+        safetyImpactState: 'none',
+        now: old,
+      });
+      recordPromptEnhancementSourceUse(store, {
+        sourceUseId: 'source-use-b',
+        projectRoot: '/proj/b',
+        enhancementId: 'enh-b',
+        bodyId: 'body-b',
+        bodyRevision: 1,
+        sourceKind: 'content_template_fact',
+        sourceId: 'ct:b',
+        useKind: 'body_section',
+        now: old,
+      });
+    });
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    await storePruneAction({ olderThan: '1d', project: '/proj/a' }, path);
+    expect(spy.mock.calls[0][0]).toMatch(/3 prompt-enhancement row\(s\)/);
+
+    const store = await openStore(path);
+    expect(getPromptEnhancementStoreStatus(store, '/proj/a')).toMatchObject({
+      sourceUseRows: 0,
+      generatedOriginRows: 0,
+      feedbackRows: 0,
+    });
+    expect(getPromptEnhancementStoreStatus(store, '/proj/b').sourceUseRows).toBe(1);
+    closeStore(store);
+    cleanup();
+  });
+});
+
 describe('pruneSkippedSessions (unit)', () => {
   it('deletes only items with skipped_at before the cutoff', async () => {
     const old = Date.now() - 2 * 24 * 60 * 60 * 1000;
@@ -404,3 +523,21 @@ describe('pruneSkippedSessions (unit)', () => {
     cleanup();
   });
 });
+
+function recordMemory(
+  store: Awaited<ReturnType<typeof openStore>>,
+  projectRoot: string,
+  signalKey: string,
+  now: number,
+) {
+  recordPromptEnhancementMemoryEvidence(store, {
+    projectRoot,
+    signalKey,
+    evidenceKind: 'positive',
+    currentEvidenceState: 'historical_candidate',
+    confidenceBand: 'low',
+    sourceStrength: 'weak',
+    status: 'candidate',
+    now,
+  });
+}

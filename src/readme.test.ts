@@ -38,16 +38,15 @@ describe('README — public-safe content guard', () => {
     }
   });
 
-  it('documents the user-facing frequency and role surfaces', () => {
+  it('documents the core user-facing surfaces (role + PE/MPS/PEF)', () => {
     // README is the marketing/onboarding surface; exact enum values live in
-    // `nexpath --help` and CLAUDE.md. Here we only assert that both surfaces
-    // are mentioned as configurable concepts.
-    expect(readme.toLowerCase()).toContain('frequency');
-    expect(readme.toLowerCase()).toContain('role');
-  });
-
-  it('documents Ctrl+T for inline configuration', () => {
-    expect(readme).toContain('Ctrl+T');
-    expect(readme).toContain('Cmd+T');
+    // `nexpath --help` and CLAUDE.md. Here we only assert the user-facing concepts.
+    // The advisory-frequency + Ctrl+T guidance was removed (owner 2026-08-10): the
+    // frequency picker is hidden at install and the old advisory popup / Ctrl+T is
+    // being retired, so the README now leads with role + the PE/MPS/PEF features.
+    expect(readme).toContain('role');
+    expect(readme).toContain('Prompt Enhancement'); // PE
+    expect(readme).toContain('MPS');
+    expect(readme).toContain('PEF');
   });
 });

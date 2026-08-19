@@ -24,11 +24,6 @@ import { runStop } from './stop.js';
 import type { StopPayload } from './stop.js';
 import { upsertPendingAdvisory } from '../../store/pending-advisories.js';
 import { SessionStateManager } from '../../classifier/SessionStateManager.js';
-import { SKIP_NOW } from '../../decision-session/options.js';
-import { CLIPBOARD_ONLY } from '../../decision-session/DecisionSession.js';
-import type { SelectFn } from '../../decision-session/DecisionSession.js';
-import * as TtySelectFnModule from '../../decision-session/TtySelectFn.js';
-import { setConfig } from '../../store/config.js';
 import { readSignals } from '../../store/feedback-signals.js';
 import { readCadence } from '../../store/feedback-cadence.js';
 
@@ -58,8 +53,6 @@ function insertAdvisory(store: Store) {
   });
 }
 
-const mockSelect = (value: string): SelectFn => vi.fn().mockResolvedValue(value);
-
 let store: Store;
 beforeEach(async () => { store = await openStore(':memory:'); });
 afterEach(() => { closeStore(store); vi.restoreAllMocks(); });
@@ -71,57 +64,15 @@ describe('usage is NOT recorded by the stop hook', () => {
   });
 });
 
-describe('advisory not shown → no fire recorded', () => {
-  it('does not record a fire when the advisory frequency is off', async () => {
-    setConfig(store, 'advisory_frequency', 'off');
+// MPS-7: the old Decision-Session advisory render is removed, and with it the advisory-fire /
+// option-select recording that lived there. A pending advisory is now consumed silently, so no fire or
+// selection signal is ever recorded on the Stop hook.
+describe('MPS-7: the disabled advisory records no fire or selection signal', () => {
+  it('a pending advisory is consumed (advisory_disabled) and records no fire/selection', async () => {
     insertAdvisory(store);
-    const result = await runStop(makePayload(), store, mockSelect(SKIP_NOW));
-    expect(result.outcome).toBe('skipped');
-    expect(readSignals(store, CWD).advisoryFireTs).toHaveLength(0);
-  });
-
-  it('does not record a fire when there is no TTY', async () => {
-    insertAdvisory(store);
-    vi.spyOn(TtySelectFnModule, 'createTtySelectFn').mockReturnValue(null);
     const result = await runStop(makePayload(), store);
-    expect(result.outcome).toBe('no_tty');
-    expect(readSignals(store, CWD).advisoryFireTs).toHaveLength(0);
-  });
-});
-
-describe('advisory-fire and option-select recording', () => {
-  it('records an advisory fire when the advisory is shown then skipped', async () => {
-    insertAdvisory(store);
-    await runStop(makePayload(), store, mockSelect(SKIP_NOW));
-    const signals = readSignals(store, CWD);
-    expect(signals.advisoryFireTs).toHaveLength(1);
-    expect(signals.optionSelectTs).toHaveLength(0);
-  });
-
-  it('records both a fire and a selection when a content option is chosen', async () => {
-    insertAdvisory(store);
-    const result = await runStop(makePayload(), store, mockSelect('write tests first'));
-    expect(result.outcome).toBe('blocked');
-    const signals = readSignals(store, CWD);
-    expect(signals.advisoryFireTs).toHaveLength(1);
-    expect(signals.optionSelectTs).toHaveLength(1);
-  });
-
-  it('records a fire AND a selection when the option is copied to clipboard', async () => {
-    insertAdvisory(store);
-    const result = await runStop(makePayload(), store, mockSelect(CLIPBOARD_ONLY));
-    expect(result.outcome).toBe('clipboard_only');
-    const signals = readSignals(store, CWD);
-    expect(signals.advisoryFireTs).toHaveLength(1);
-    expect(signals.optionSelectTs).toHaveLength(1);   // clipboard-copy counts as engagement
-  });
-
-  it('accumulates a fire per shown advisory across turns', async () => {
-    insertAdvisory(store);
-    await runStop(makePayload(), store, mockSelect(SKIP_NOW));
-    insertAdvisory(store);
-    await runStop(makePayload(), store, mockSelect(SKIP_NOW));
-    expect(readSignals(store, CWD).advisoryFireTs).toHaveLength(2);
+    expect(result.outcome).toBe('advisory_disabled');
+    expect(readSignals(store, CWD)).toEqual({ advisoryFireTs: [], optionSelectTs: [] });
   });
 
   it('records no signals when there is no pending advisory', async () => {

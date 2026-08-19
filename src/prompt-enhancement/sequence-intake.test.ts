@@ -1,0 +1,293 @@
+import { describe, expect, it } from 'vitest';
+import {
+  PROMPT_ENHANCEMENT_CONTRACT_VERSION,
+  type PromptEnhancementPrepareRequestV1,
+  type PromptEnhancementPrepareResultV1,
+  type PromptEnhancementSourceRefV1,
+  type PromptEnhancementValidationGraphV1,
+} from './contracts.js';
+import type { PromptEnhancementSequenceItemV1 } from './sequence-payload.js';
+import { buildPromptEnhancementCostVisibilityMetadataV1 } from './cost-observability.js';
+import { preparePromptEnhancement } from './facade.js';
+import { getPromptStartStopSourceSnapshot } from './source-reality.js';
+import { intakePromptEnhancementSequenceOnFirstSendV1 } from './sequence-intake.js';
+import { startSequenceWordingBatchV1 } from './sequence-body-producer-stop-input.js';
+import type { PromptEnhancementSequenceBodyProducerInputV1, PromptEnhancementSequenceBodyProducerResultV1 } from './sequence-body-producer-runtime.js';
+import { openStore } from '../store/db.js';
+import { upsertPendingPromptSequence, getActivePendingPromptSequence } from '../store/pending-sequences.js';
+import { redactSecrets } from '../store/redact.js';
+
+const MULTI_INTENT = 'Fix the failing payment test and add a rate limiter to the login endpoint.';
+// A multi-intent prompt carrying a secret-shaped token, to prove the stored original is redacted.
+const RAW_SECRET = 'sk-abcdefghijklmnopqrstuvwxyz0123';
+const MULTI_INTENT_WITH_SECRET =
+  `Fix the failing payment test using key ${RAW_SECRET} and add a rate limiter to the login endpoint.`;
+const SINGLE_INTENT = 'Fix the failing payment test.';
+const PROJECT = '/tmp/seq-intake';
+
+function request(text: string): PromptEnhancementPrepareRequestV1 {
+  const sourceRef: PromptEnhancementSourceRefV1 = {
+    sourceRefId: 'src-a-1', sourceKind: 'source_a_user_prompt', sourceId: 'prompt:1',
+    sourceAuthorization: 'source_fact_only', evidenceStatus: 'present', freshness: 'current', confidence: 'high', privacyClass: 'public_safe',
+  };
+  const p = getPromptStartStopSourceSnapshot();
+  return {
+    schemaVersion: PROMPT_ENHANCEMENT_CONTRACT_VERSION, requestId: 'seq-intake-1', projectRoot: PROJECT, hostSurface: 'cli_stop_bridge',
+    sourcePrompt: { text, origin: 'user', capturedAt: 1, promptIndex: 1, generatedOriginPolicy: 'ordinary_source_a' },
+    reviewMomentContext: { reviewMoment: 'UserPromptSubmit_preparation', currentAgentMode: 'workspace-write', projectId: 'p1', sessionId: 's1', detectedLanguage: 'en', stageCandidate: 'implementation', promptCount: 1, recentPromptMetadataRefs: [], triggerProvenance: { currentStage: 'implementation', prevStage: 'task_breakdown', triggerKind: 'stage_transition', classifierState: 'fire_recommended', degradedNoActionState: 'none', promptStartBoundary: p.hookBoundary, deliveryBoundary: p.deliveryBoundary, promptStartCanReplaceSameTurn: false } },
+    sourceSignals: { sourceAOriginalPromptRef: sourceRef, sourceRefs: [sourceRef], normalizedStageAbsenceSignalRefs: [], contentTemplateRecordFactRefs: [], popupQuestionSourceRefs: [], whyHelpSourceRefs: [], profileRoleModeRefs: [], rightGoodWorkStyleEnvRuntimeRefs: [], missingMemoryCandidateRefs: [], sourceLabels: [{ sourceRefId: sourceRef.sourceRefId, label: 'original_prompt', evidenceStatus: 'present' }], promptStartStop: { hookBoundary: p.hookBoundary, deliveryBoundary: p.deliveryBoundary, runAutoCanHoldOrReplaceSubmittedPrompt: false, sharedSignalCount: p.sharedSignalCount, classifierDegradedNoFireReasons: p.classifierDegradedNoFireReasons }, store: { schemaVersion: 1, missingPromptEnhancementTables: [], cleanupGaps: [] }, transcriptPathState: 'not_authority', streamBOutputs: [], paramEventChannels: [], servedVariantIdentityRefs: [], deliveryGateRefs: [], sourceOnlyHardFactRefs: [] },
+    userPreferenceContext: { levelState: 'default', scopedFeedbackEvidenceRefs: [] },
+    configSnapshot: { sequenceEnabledState: 'not_enabled_v1', validatedEffectiveConfigState: 'valid', arbitraryConfigRowsAreAuthority: false },
+    callVisibilityState: buildPromptEnhancementCostVisibilityMetadataV1('baseline_pe_composer', { callVisibilityMode: 'deterministic', plannedCallCount: 0, usedCallCount: 0 }),
+    privacyAndStoragePolicy: { sensitivityClass: 'normal', localStorageEligibility: 'ids_and_categories_only', telemetryEligibility: 'allowlisted_counts_only', llmSharingEligibility: 'allowed_minimal', generatedBodyStoragePolicy: 'do_not_store_raw_by_default' },
+  };
+}
+
+async function preparedMultiIntent(): Promise<PromptEnhancementPrepareResultV1> {
+  return preparePromptEnhancement(request(MULTI_INTENT));
+}
+
+// A valid 2-item STORED list (mirrors sequence-payload.test.ts's fixtures) matching itemCount=2:
+// item 0 is the whole original (no wording); item 1 is a worded task. `len` is the real original length.
+const GRAPH = {} as unknown as PromptEnhancementValidationGraphV1;
+function wordedItems(len: number): readonly PromptEnhancementSequenceItemV1[] {
+  return [
+    {
+      itemKind: 'first_task', originalSliceRef: { start: 0, end: len }, sourcePointRanges: [{ start: 10, end: 20 }],
+      roleLabel: 'fix', dependencyOrder: 0, complexity: 'not_complex', complexityReason: null,
+      generatedWording: null, actionRiskKinds: [], authorityMode: 'plan_or_review', requiresConfirmationFloor: false,
+      decompositionGroupId: 'g1', itemValidationGraph: null, itemSafetyClauseRef: null,
+    },
+    {
+      itemKind: 'task', originalSliceRef: { start: 10, end: 40 }, sourcePointRanges: [{ start: 10, end: 20 }],
+      roleLabel: 'fix', dependencyOrder: 1, complexity: 'not_complex', complexityReason: null,
+      generatedWording: 'Add the rate limiter to the login endpoint.', actionRiskKinds: [],
+      authorityMode: 'plan_or_review', requiresConfirmationFloor: false, decompositionGroupId: 'g1',
+      itemValidationGraph: GRAPH, itemSafetyClauseRef: null,
+    },
+  ];
+}
+
+describe('sequence intake on the explicit first send (fail-closed typed no-ops)', () => {
+  it('records the sequence for a real multi-intent result: ids/counts only, never text', async () => {
+    const result = await preparedMultiIntent();
+    const intake = intakePromptEnhancementSequenceOnFirstSendV1({ result, projectRoot: PROJECT, sessionId: 's1' });
+    expect(intake.state).toBe('sequence_recorded');
+    if (intake.state !== 'sequence_recorded') return;
+    // Live example: 2 points → first sent + 1 remaining.
+    expect(intake.runtime).toMatchObject({
+      enhancementId: result.enhancementId,
+      projectRoot: PROJECT,
+      sessionId: 's1',
+      itemCount: 2,
+      currentItemIndex: 0,
+      status: 'awaiting_response',
+    });
+    expect(intake.runtime.sequenceId).toBe(result.uiView.handoffAndSequenceSummary!.handoffDecisionId);
+    // The recorded state carries NO prompt text field at all.
+    expect(Object.values(intake.runtime).some((value) => typeof value === 'string' && value.includes('payment'))).toBe(false);
+  });
+
+  it('single-intent result → handoff_missing (typed no-op, ordinary flow)', async () => {
+    const result = await preparePromptEnhancement(request(SINGLE_INTENT));
+    expect(intakePromptEnhancementSequenceOnFirstSendV1({ result, projectRoot: PROJECT, sessionId: 's1' }))
+      .toEqual({ state: 'no_sequence', reasonCode: 'handoff_missing' });
+  });
+
+  it('foreign project → scope_mismatch (cross-project policy is reject)', async () => {
+    const result = await preparedMultiIntent();
+    expect(intakePromptEnhancementSequenceOnFirstSendV1({ result, projectRoot: '/tmp/other-project', sessionId: 's1' }))
+      .toEqual({ state: 'no_sequence', reasonCode: 'scope_mismatch' });
+  });
+
+  it('tampered handoff (safety policy flipped) → handoff_invalid (re-validated at intake)', async () => {
+    const result = await preparedMultiIntent();
+    const tampered: PromptEnhancementPrepareResultV1 = {
+      ...result,
+      uiView: {
+        ...result.uiView,
+        handoffAndSequenceSummary: {
+          ...result.uiView.handoffAndSequenceSummary!,
+          sequenceActivationPolicy: 'activated' as never,
+        },
+      },
+    };
+    expect(intakePromptEnhancementSequenceOnFirstSendV1({ result: tampered, projectRoot: PROJECT, sessionId: 's1' }))
+      .toEqual({ state: 'no_sequence', reasonCode: 'handoff_invalid' });
+  });
+
+  it('zero remaining items → no_remaining_items (nothing to continue)', async () => {
+    const result = await preparedMultiIntent();
+    const summary = result.uiView.handoffAndSequenceSummary!.compactFirstPopupSequenceSummary!;
+    const drained: PromptEnhancementPrepareResultV1 = {
+      ...result,
+      uiView: {
+        ...result.uiView,
+        handoffAndSequenceSummary: {
+          ...result.uiView.handoffAndSequenceSummary!,
+          compactFirstPopupSequenceSummary: { ...summary, remainingTaskCount: 0 },
+        },
+      },
+    };
+    expect(intakePromptEnhancementSequenceOnFirstSendV1({ result: drained, projectRoot: PROJECT, sessionId: 's1' }))
+      .toEqual({ state: 'no_sequence', reasonCode: 'no_remaining_items' });
+  });
+
+  it('caps the item count at 30 — a very long sequence still records, clamped, never dropped (owner request 2026-08-08)', async () => {
+    const result = await preparedMultiIntent();
+    const summary = result.uiView.handoffAndSequenceSummary!.compactFirstPopupSequenceSummary!;
+    const huge: PromptEnhancementPrepareResultV1 = {
+      ...result,
+      uiView: {
+        ...result.uiView,
+        handoffAndSequenceSummary: {
+          ...result.uiView.handoffAndSequenceSummary!,
+          // 199 remaining → 200 total before the cap.
+          compactFirstPopupSequenceSummary: { ...summary, remainingTaskCount: 199 },
+        },
+      },
+    };
+    const intake = intakePromptEnhancementSequenceOnFirstSendV1({ result: huge, projectRoot: PROJECT, sessionId: 's1' });
+    expect(intake.state).toBe('sequence_recorded');
+    if (intake.state !== 'sequence_recorded') return;
+    expect(intake.runtime.itemCount).toBe(30);
+  });
+
+  it('end-to-end with the store: intake → upsert → active row readable, foreign session scrubs', async () => {
+    const result = await preparedMultiIntent();
+    const intake = intakePromptEnhancementSequenceOnFirstSendV1({ result, projectRoot: PROJECT, sessionId: 's1' });
+    expect(intake.state).toBe('sequence_recorded');
+    if (intake.state !== 'sequence_recorded') return;
+    // The handoffKind must ride through from the SAME handoff object the row is built from — a real,
+    // continuable kind, NEVER null. A null here is what made the continuation packager reject every row
+    // as `handoff_not_continuable`, so the second popup never rendered.
+    expect(intake.handoffKind).toBe(result.uiView.handoffAndSequenceSummary!.handoffKind);
+    expect(intake.handoffKind).not.toBeNull();
+    const store = await openStore(':memory:');
+    expect(upsertPendingPromptSequence(store, intake.runtime, intake.payload, {
+      redactedOriginalPromptText: intake.redactedOriginalPromptText,
+      handoffKind: intake.handoffKind,
+    })).toBe(true);
+    expect(getActivePendingPromptSequence(store, PROJECT, 's1')).toMatchObject({
+      sequenceId: intake.runtime.sequenceId,
+      itemCount: 2,
+      status: 'awaiting_response',
+      // The payload round-trips: no planner yet, so an empty list at the default policy, with
+      // the length the future offsets will index into already known.
+      payload: {
+        items: [],
+        promptDirectives: [],
+        suggestedNextPromptPolicy: 'not_generated',
+        originalLength: result.currentBody.originalPromptText.length,
+        offerDisposition: 'accepted',
+      },
+    });
+  });
+
+  // ── MPS P1b-iii (8c) — persisting the batch's worded items on the accepted row ───────────────
+  it('carries the batch worded items on the accepted row (full payload, sequence policy)', async () => {
+    const result = await preparedMultiIntent();
+    const len = result.currentBody.originalPromptText.length;
+    const intake = intakePromptEnhancementSequenceOnFirstSendV1({
+      result, projectRoot: PROJECT, sessionId: 's1',
+      wordedItems: wordedItems(len), promptDirectives: [{ start: 0, end: 3 }],
+    });
+    expect(intake.state).toBe('sequence_recorded');
+    if (intake.state !== 'sequence_recorded') return;
+    expect(intake.payload.items).toHaveLength(2);
+    expect(intake.payload.items[1].generatedWording).toBe('Add the rate limiter to the login endpoint.');
+    expect(intake.payload.promptDirectives).toEqual([{ start: 0, end: 3 }]);
+    // A row that carries items must not be at the default policy — it is the deterministic sequence value.
+    expect(intake.payload.suggestedNextPromptPolicy).toBe('generated_not_rendered_pending_acceptance');
+    expect(intake.payload.offerDisposition).toBe('accepted');
+    // And it survives the store's own write-time payload validation.
+    const store = await openStore(':memory:');
+    expect(upsertPendingPromptSequence(store, intake.runtime, intake.payload, {
+      redactedOriginalPromptText: intake.redactedOriginalPromptText, handoffKind: intake.handoffKind,
+    })).toBe(true);
+    expect(getActivePendingPromptSequence(store, PROJECT, 's1')?.payload.items).toHaveLength(2);
+  });
+
+  it('with no worded items the accepted row keeps the empty list (unchanged pre-8c behaviour)', async () => {
+    const result = await preparedMultiIntent();
+    const intake = intakePromptEnhancementSequenceOnFirstSendV1({ result, projectRoot: PROJECT, sessionId: 's1' });
+    expect(intake.state).toBe('sequence_recorded');
+    if (intake.state !== 'sequence_recorded') return;
+    expect(intake.payload.items).toEqual([]);
+    expect(intake.payload.suggestedNextPromptPolicy).toBe('not_generated');
+  });
+
+  it('drops a worded list that does not line up with the row (count mismatch) fail-closed to empty', async () => {
+    const result = await preparedMultiIntent();
+    const len = result.currentBody.originalPromptText.length;
+    // itemCount is 2, but pass only item 0 → the payload validation fails → empty list, not an invalid row.
+    const intake = intakePromptEnhancementSequenceOnFirstSendV1({
+      result, projectRoot: PROJECT, sessionId: 's1', wordedItems: [wordedItems(len)[0]],
+    });
+    expect(intake.state).toBe('sequence_recorded');
+    if (intake.state !== 'sequence_recorded') return;
+    expect(intake.payload.items).toEqual([]);
+    expect(intake.payload.suggestedNextPromptPolicy).toBe('not_generated');
+  });
+
+  it('stores the REDACTED, length-preserving original — never the raw secret (MPS-12 foundation)', async () => {
+    const result = await preparePromptEnhancement(request(MULTI_INTENT_WITH_SECRET));
+    const original = result.currentBody.originalPromptText;
+    // Guard the fixture: the composer must preserve the raw secret in the original body, otherwise
+    // the redaction assertion below would pass vacuously.
+    expect(original).toContain(RAW_SECRET);
+    const intake = intakePromptEnhancementSequenceOnFirstSendV1({ result, projectRoot: PROJECT, sessionId: 's1' });
+    expect(intake.state).toBe('sequence_recorded');
+    if (intake.state !== 'sequence_recorded') return;
+    // Stored value is the redacted copy, not the raw secret, and length is preserved so future
+    // offsets index it character-for-character.
+    expect(intake.redactedOriginalPromptText).not.toContain(RAW_SECRET);
+    expect(intake.redactedOriginalPromptText).toBe(redactSecrets(original));
+    expect(intake.redactedOriginalPromptText).toContain('sk-[REDACTED');
+    expect(intake.redactedOriginalPromptText?.length).toBe(original.length);
+
+    // And it round-trips through the store unchanged (still redacted, never the raw secret).
+    const store = await openStore(':memory:');
+    expect(upsertPendingPromptSequence(store, intake.runtime, intake.payload, {
+      redactedOriginalPromptText: intake.redactedOriginalPromptText,
+      handoffKind: intake.handoffKind,
+    })).toBe(true);
+    const row = getActivePendingPromptSequence(store, PROJECT, 's1');
+    expect(row?.redactedOriginalPromptText).toBe(redactSecrets(original));
+    expect(row?.redactedOriginalPromptText).not.toContain(RAW_SECRET);
+  });
+});
+
+// First-popup content flow (8b-2c batch lifecycle → 8c intake): the batch produces the wording during the
+// popup and the intake stores it on send; a provider failure produces NOTHING and the row stays empty.
+describe('first-popup content flow — batch feeds the intake, provider failure stores no partial wording', () => {
+  const fakeInput = {} as unknown as PromptEnhancementSequenceBodyProducerInputV1; // runBatch stubs ignore it
+
+  it('a produced batch → the accepted row carries the worded items', async () => {
+    const result = await preparedMultiIntent();
+    const produced: PromptEnhancementSequenceBodyProducerResultV1 = { ok: true, items: wordedItems(result.currentBody.originalPromptText.length) };
+    const batch = startSequenceWordingBatchV1({ ok: true, input: fakeInput }, () => Promise.resolve(produced));
+    const batchResult = await batch.awaitResult();
+    const intake = intakePromptEnhancementSequenceOnFirstSendV1({
+      result, projectRoot: PROJECT, sessionId: 's1',
+      wordedItems: batchResult && batchResult.ok ? batchResult.items : undefined,
+    });
+    expect(intake.state).toBe('sequence_recorded');
+    if (intake.state !== 'sequence_recorded') return;
+    expect(intake.payload.items).toHaveLength(2);
+  });
+
+  it('provider failure → NO generated content: the batch fails to null and the row carries the empty list', async () => {
+    const result = await preparedMultiIntent();
+    const batch = startSequenceWordingBatchV1({ ok: true, input: fakeInput }, () => Promise.reject(new Error('provider down')));
+    const batchResult = await batch.awaitResult(); // null — the failure never throws and never loses the send
+    expect(batchResult).toBeNull();
+    const intake = intakePromptEnhancementSequenceOnFirstSendV1({
+      result, projectRoot: PROJECT, sessionId: 's1',
+      wordedItems: batchResult && batchResult.ok ? batchResult.items : undefined,
+    });
+    expect(intake.state).toBe('sequence_recorded');
+    if (intake.state !== 'sequence_recorded') return;
+    expect(intake.payload.items).toEqual([]); // never a partial item list on a provider failure
+  });
+});

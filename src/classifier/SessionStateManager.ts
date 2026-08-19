@@ -79,6 +79,7 @@ function newSession(projectRoot: string, now: number): SessionState {
     detectedLanguage:        undefined,
     lastInjectedPrompt:           null,
     lastAdvisoryPromptIndex:      -1,
+    lastPromptEnhancementPromptIndex: -1,
     advisoryCount:                0,
     consecutiveAcceptanceStreak:  0,
     consecutiveFrustratedPrompts: 0,
@@ -341,6 +342,16 @@ export class SessionStateManager {
   markAdvisoryFired(store: Store): void {
     this.state.lastAdvisoryPromptIndex = this.state.promptCount;
     this.state.advisoryCount = (this.state.advisoryCount ?? 0) + 1;
+    saveState(store, this.state);
+  }
+
+  /**
+   * Record that a PE / MPS-1 popup was SHOWN this prompt. Sets lastPromptEnhancementPromptIndex so the
+   * popup-cooldown gate in stop.ts suppresses new PE / MPS-1 popups for the configured number of
+   * prompts. Continuation items (MPS-2) do NOT call this — they are not new popups.
+   */
+  markPromptEnhancementPopupShown(store: Store): void {
+    this.state.lastPromptEnhancementPromptIndex = this.state.promptCount;
     saveState(store, this.state);
   }
 
