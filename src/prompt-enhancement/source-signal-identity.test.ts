@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openStore } from '../store/db.js';
@@ -170,5 +170,61 @@ describe('§17.13 SAFETY — every producer keyed by SIGNAL, not just the two th
     ).not.toContain('secret in prompt');
     // The paired half: the lane still works, so the assertion above is not passing on silence.
     expect(lines.join(String.fromCharCode(10))).toContain('a repeated gap');
+  });
+});
+
+describe('§17.13 SAFETY — the sweep guards itself, so a NEW producer cannot skip it', () => {
+  // ⚠️ Three of the four sensitive-signal defects in this record were the SAME defect at a different
+  // producer, and each was found by remembering to look again. That is not a guard.
+  //
+  // These two assertions turn the sweep into one: the first drives a sensitive signal down EVERY
+  // ref lane at once and asserts nothing names it; the second pins how many producers write into
+  // this slot, so adding a sixth fails here and tells its author to extend the first.
+
+  const SENSITIVE_IN_EVERY_LANE = {
+    normalizedStageAbsenceSignalRefs: ['absence:secret_in_prompt'],
+    contentTemplateRecordFactRefs: ['ABSENCE_SECRET_IN_PROMPT'],
+    missingMemoryCandidateRefs: ['memory:secret_in_prompt'],
+    rightGoodWorkStyleEnvRuntimeRefs: ['mistake:secret_in_prompt'],
+  };
+
+  it('a sensitive signal sent down EVERY lane at once names itself nowhere', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ssg-sweep-'));
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'x' }));
+    const store = await openStore(join(dir, 'store.db'));
+    upsertProject(store, { projectRoot: dir, name: 'x', projectType: 'app', language: 'ts', description: '', createdAt: Date.now() });
+    const base = buildPromptEnhancementRequestForAuto({
+      auto: { promptText: 'ship the billing change', projectRoot: dir, currentAgentMode: 'default' },
+      store, session: SessionStateManager.load(store, dir), project: null,
+      effectiveLanguage: 'en', configuredRole: null, effectiveFlagType: 'absence:secret_in_prompt',
+      firedKey: 'absence:secret_in_prompt', previousStage: 'idea', trigger: { kind: 'absence' },
+      stageResult: {
+        classification: { stage: 'implementation', confidence: 0.9, tier: 3, allScores: {} },
+        signalsPresent: [], signalsAbsent: [], fireRecommendation: true, selectedSignalKey: '',
+        reason: 'sweep', degraded: false, projectFactCandidates: [],
+      },
+      streamBOutputs: [],
+    } as never) as never as { sourceSignals: Record<string, unknown> };
+
+    const facts = buildPromptEnhancementGuidanceFactsV1(
+      { ...base, sourceSignals: { ...base.sourceSignals, ...SENSITIVE_IN_EVERY_LANE } } as never,
+    );
+    const rendered = promptEnhancementFactValueLinesV1('source_signal_guidance', facts).join(' | ');
+
+    expect(rendered.length, 'nothing rendered at all — this would pass on a broken slot').toBeGreaterThan(0);
+    expect(rendered, 'a lane named the sensitive signal').not.toContain('secret in prompt');
+    expect(rendered).not.toContain('secret_in_prompt');
+  });
+
+  it('and the producer COUNT is pinned, so a new one has to join the sweep', () => {
+    // Deliberately a count and not a list: the point is to stop a producer being added silently,
+    // and the failure message is the instruction.
+    const src = readFileSync('src/prompt-enhancement/guidance-facts.ts', 'utf8');
+    const producers = src.split("targetSectionKind: 'source_signal_guidance'").length - 1;
+    expect(
+      producers,
+      'a producer was added to or removed from the source-signal slot — add its ref lane to '
+      + 'SENSITIVE_IN_EVERY_LANE above and confirm it applies isSensitiveSignalRefV1',
+    ).toBe(5);
   });
 });
