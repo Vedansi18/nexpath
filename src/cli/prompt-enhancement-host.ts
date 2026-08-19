@@ -12,6 +12,7 @@ import {
   validatePromptEnhancementPrepareResultV1,
 } from '../prompt-enhancement/contracts.js';
 import { validatePromptEnhancementCliPopupResultV1 } from '../prompt-enhancement/cli-submit-popup.js';
+import { buildPromptEnhancementPopupRenderModelV1 } from '../prompt-enhancement/popup-render-model.js';
 import {
   computeDockedPopupGeometry,
   detectScreenResolution,
@@ -120,10 +121,16 @@ export type PromptEnhancementCliPopupHostLaunchResultV1 =
   | { state: 'not_applicable'; reasonCode: 'direct_tty' }
   | { state: 'host_unavailable'; reasonCode: 'unsupported_platform' | 'no_gui_session' | 'no_supported_terminal' }
   | { state: 'launch_failed'; reasonCode: 'terminal_spawn_failed' | 'terminal_exit_nonzero' | 'terminal_renderer_not_ready' }
-  // Blink fix (Phase 1): the payload failed the SAME validators the spawned child runs, so no window is
-  // opened — the launcher rejects it here instead of spawning a terminal that the child would exit from
-  // before rendering (an open-then-close "blink"). Callers treat it exactly like any non-`completed` result.
-  | { state: 'not_shown'; reasonCode: 'payload_invalid_pre_spawn'; validationReasonCodes: readonly string[] }
+  // Blink fix: the launcher rejects a payload here instead of spawning a terminal that the child would
+  // exit from before rendering (an open-then-close "blink"). Callers treat it exactly like any non-
+  // `completed` result. Two reasons:
+  //  - `payload_invalid_pre_spawn`      : failed the SAME validators the child runs (structural), or the
+  //                                       request/result identity cross-check the child also enforces.
+  //  - `render_decision_no_popup`       : structurally valid, but the SAME render decision the child makes
+  //                                       resolves to `no_popup` (e.g. a `no_popup_not_applicable`
+  //                                       disposition from a missing key) — the child would decline to
+  //                                       render, so no window is opened.
+  | { state: 'not_shown'; reasonCode: 'payload_invalid_pre_spawn' | 'render_decision_no_popup'; validationReasonCodes: readonly string[] }
   | { state: 'completed'; output: PromptEnhancementPopupHostOutputV1 };
 
 interface PromptEnhancementSpawnedTerminalV1 {
@@ -709,6 +716,39 @@ export async function runPromptEnhancementCliPopupHostLaunchV1(input: {
       state: 'not_shown',
       reasonCode: 'payload_invalid_pre_spawn',
       validationReasonCodes: [...requestCheck.reasonCodes, ...resultCheck.reasonCodes],
+    };
+  }
+
+  // Cross-field identity parity with the child's `validatedInput` (prompt-enhancement-popup-host.ts):
+  // request and result must describe the SAME enhancement. A mismatch is structurally valid on each
+  // side but makes the child exit as `input_invalid_or_stale` after the window opened — the same blink —
+  // so reject it here (same `payload_invalid_pre_spawn` bucket) before spawning.
+  if (input.request.requestId !== input.result.requestId
+      || input.request.projectRoot !== input.result.projectRoot) {
+    return {
+      state: 'not_shown',
+      reasonCode: 'payload_invalid_pre_spawn',
+      validationReasonCodes: ['request_result_identity_mismatch'],
+    };
+  }
+
+  // Display-decision pre-spawn gate (blink fix): run the SAME render decision the spawned child runs
+  // (`buildPromptEnhancementPopupRenderModelV1`, identical arguments) BEFORE opening a window. A
+  // structurally-valid but non-displayable payload — e.g. a `no_popup_not_applicable` disposition or a
+  // `no_popup` send policy from a missing key — would otherwise open a terminal the child immediately
+  // declines (`no_popup`) before rendering: the open-then-close "blink". Deciding it here yields the SAME
+  // not-shown outcome with no wasted window. It is pure parity with the child, so it never suppresses a
+  // popup the child would have shown, nor spawns one it would have declined.
+  const renderDecision = buildPromptEnhancementPopupRenderModelV1({
+    result: input.result,
+    timestampMs: Date.now(),
+    deliverySurface: input.result.delivery.deliveryChannel,
+  });
+  if (renderDecision.state === 'no_popup') {
+    return {
+      state: 'not_shown',
+      reasonCode: 'render_decision_no_popup',
+      validationReasonCodes: renderDecision.reasonCodes,
     };
   }
 
