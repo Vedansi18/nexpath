@@ -45,7 +45,7 @@ function request(overrides: Partial<PromptEnhancementPrepareRequestV1> = {}): Pr
     projectRoot: '/tmp/b13a-project',
     hostSurface: 'cli_stop_bridge',
     sourcePrompt: {
-      text: 'Fix the failing payment test and explain the verification.',
+      text: 'Fix the failing payment test, the test failure blocks ci, and explain the verification.',
       origin: 'user',
       capturedAt: 1,
       promptIndex: 1,

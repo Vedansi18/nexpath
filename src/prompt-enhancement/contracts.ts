@@ -1,4 +1,5 @@
 import type { Stage } from '../classifier/types.js';
+import type { PromptEnhancementSourceEligibilityStateV1 } from './templates/section-plan.js';
 import type {
   ContentTemplateSourceSnapshot,
   HistoricalBootstrapSourceSnapshot,
@@ -261,6 +262,23 @@ export interface PromptEnhancementTriggerProvenanceV1 {
   absenceGateReason?: string;
   classifierState: 'fire_recommended' | 'no_fire' | 'degraded_no_fire' | 'not_applicable';
   degradedNoActionState: 'none' | 'degraded_no_fire' | 'no_action_not_applicable' | 'blocked_by_source_gate';
+  /**
+   * The stage classifier's intent PROPOSAL ('' when unsupported by the evidence
+   * ladder or on the degraded path). Typed as string here (the intent union lives
+   * in the routing module, which imports this file); the parser validated it
+   * against the full menu and the router re-guards before preferring it.
+   */
+  classifierPrimaryIntent?: string;
+  classifierIntentConfidence?: number;
+  /**
+   * The classifier's capability OBSERVATION from the same call: candidate
+   * capability ids, and the debug-evidence forms present in the prompt. String
+   * arrays here (the typed unions live in the routing module); the facade
+   * re-guards every entry before the registry consumes them. Observations
+   * only — the registry decides all attachment.
+   */
+  classifierCapabilityCandidates?: readonly string[];
+  classifierDebugEvidencePresent?: readonly string[];
   promptStartBoundary: PromptStartStopSourceSnapshot['hookBoundary'];
   deliveryBoundary: PromptStartStopSourceSnapshot['deliveryBoundary'];
   promptStartCanReplaceSameTurn: PromptStartStopSourceSnapshot['runAutoCanHoldOrReplaceSubmittedPrompt'];
@@ -272,6 +290,13 @@ export interface PromptEnhancementTriggerProvenanceV1 {
 export interface PromptEnhancementSourceInputSnapshotV1 {
   sourceAOriginalPromptRef: PromptEnhancementSourceRefV1;
   sourceRefs: readonly PromptEnhancementSourceRefV1[];
+  /**
+   * F4 (L4971): the eligibility the TRIGGER signal carries, decided by the pipeline upstream
+   * and carried through — PE reads it, never recomputes it (prohibition 19). Optional so an
+   * older caller keeps working; the mix seam treats absence as NOT independently eligible,
+   * which is the fail-closed direction.
+   */
+  triggerSignalEligibilityState?: PromptEnhancementSourceEligibilityStateV1;
   normalizedStageAbsenceSignalRefs: readonly string[];
   contentTemplateRecordFactRefs: readonly string[];
   popupQuestionSourceRefs: readonly string[];
@@ -279,6 +304,32 @@ export interface PromptEnhancementSourceInputSnapshotV1 {
   profileRoleModeRefs: readonly string[];
   rightGoodWorkStyleEnvRuntimeRefs: readonly string[];
   missingMemoryCandidateRefs: readonly string[];
+  /**
+   * Typed corroboration tier / polarity per crossing env or RIGHT&GOOD ref — carried
+   * beside the ref strings, never inside them. The registry computes claim wording
+   * FROM these; absent maps read as uncorroborated/unknown (the weakest claim).
+   */
+  groundingTierByRef?: Readonly<Record<string, 'promoted_practice_P' | 'capability' | 'uncorroborated'>>;
+  groundingPolarityByRef?: Readonly<Record<string, 'present' | 'false_capability' | 'unknown'>>;
+  /**
+   * The caller-resolved CONTENT per crossing ref — a generic key/value pair plus
+   * where the resolution happened. Values come from the store-backed reads the
+   * boundary already performs; prompt-derived values arrive only through
+   * PE-EM-1-visible runtime extraction, never an eager boundary call.
+   */
+  groundingEvidenceByRef?: Readonly<Record<string, {
+    readonly key: string;
+    readonly value: string;
+    readonly runtimePath: 'local_store' | 'local_read_model' | 'local_probe';
+    readonly anchorScope:
+      | 'machine_environment'
+      | 'project_root'
+      | 'session_behavior'
+      | 'longitudinal_user_behavior'
+      | 'current_prompt_scope'
+      | 'content_template_scope'
+      | 'unknown_anchor';
+  }>>;
   sourceLabels: readonly {
     sourceRefId: string;
     label:
@@ -383,6 +434,14 @@ export interface PromptEnhancementTemplateRegistryRefV1 {
 
 export interface PromptEnhancementRouteDecisionV1 {
   routeDecisionId: string;
+  /**
+   * The debug-evidence forms the classifier OBSERVED in the prompt, carried so
+   * the reproduction section can name what the developer actually supplied
+   * instead of asking them to supply it again. An observation only — the
+   * registry still decides every attachment. Empty on keyless sessions, where
+   * nothing is known to be supplied.
+   */
+  debugEvidenceObserved: readonly string[];
   promptReviewOrigin:
     | 'user_authored_current_prompt'
     | 'old_ds_advisory_injected'
@@ -509,6 +568,14 @@ export interface PromptEnhancementSectionPlanItemV1 {
   sourceIds: readonly string[];
   sourceEvidenceStatus: PromptEnhancementEvidenceStatus;
   slotEvidenceStatus: PromptEnhancementEvidenceStatus;
+  /**
+   * The typed slot obligations the attached capabilities place on THIS
+   * section — a slot is a typed content obligation plus its metadata and
+   * state, not a heading. Populated from the capability slot-effect map at
+   * planning; empty when no attached capability targets this section kind.
+   * String-typed here (the obligation union lives in the planner layer).
+   */
+  slotObligations: readonly string[];
   baselineSourceSignalSlot: string | 'not_applicable' | 'unknown';
   requirementSourceStatus: PromptEnhancementEvidenceStatus;
   isRequired: boolean;
@@ -725,6 +792,24 @@ export interface PromptEnhancementSectionV1 {
   evidenceStatus: PromptEnhancementEvidenceStatus;
   sourceEvidenceStatus: PromptEnhancementEvidenceStatus;
   slotEvidenceStatus: PromptEnhancementEvidenceStatus;
+  /**
+   * The typed slot obligations the attached capabilities place on THIS
+   * section — a slot is a typed content obligation plus its metadata and
+   * state, not a heading. Populated from the capability slot-effect map at
+   * planning; empty when no attached capability targets this section kind.
+   * String-typed here (the obligation union lives in the planner layer).
+   */
+  slotObligations: readonly string[];
+  /**
+   * GR-1: the boundary-RESOLVED fact values this section states.
+   *
+   * The no-invention check asks whether a section names something NOBODY
+   * supplied, and its allowed texts were the prompt plus source IDS. Once
+   * GR-1 renders values, a legitimately resolved `PostgreSQL` or config path
+   * looks fabricated — real grounding rejected as invention. A value the
+   * boundary resolved WAS supplied; it just had no carrier until now.
+   */
+  groundedFactValues?: readonly string[];
   baselineSourceSignalSlot: string | 'not_applicable' | 'unknown';
   requirementSourceStatus: PromptEnhancementEvidenceStatus;
   requiredSurvivor: boolean;
@@ -1536,6 +1621,17 @@ export interface PromptEnhancementFutureSequenceRuntimeGateResultV1 {
 }
 
 export interface PromptEnhancementCostVisibilityMetadataV1 {
+  /**
+   * A6 (prohibition 10 · L4979): the runtime seams the rendered facts came through and the
+   * relative payload weight they carried — the PE-EM-1 VISIBLE half of *"every runtime path
+   * typed + PE-EM-1 visible"*. ⛔ Typed path names and counts only, never fact content, and
+   * read by nothing in the pipeline (prohibition 9: cost never gates behaviour).
+   */
+  runtimeSeamSummary?: {
+    readonly runtimePaths: readonly string[];
+    readonly unknownRuntimePathCount: number;
+    readonly totalPayloadWeight: number;
+  };
   callId?: PromptEnhancementCostCallIdV1;
   callOwner: PromptEnhancementOwnerArea;
   callVisibilityMode: PromptEnhancementCallVisibilityMode;

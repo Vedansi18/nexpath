@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { PromptEnhancementSourceRefV1 } from '../contracts.js';
+import { composePromptEnhancementBody } from '../compose-enhancement.js';
 import {
   PROMPT_ENHANCEMENT_PRIMARY_INTENTS,
   PROMPT_ENHANCEMENT_TAXONOMY_PRESETS,
@@ -468,7 +469,15 @@ describe('S2 done-when: no capabilities means no overlay', () => {
     // exactly those two — the state that was impossible before scoping, when every section carried
     // all four.
     const result = planPromptEnhancementSections({
-      routeResult: routePromptEnhancement(routeInput({ promptText: 'Rename the helper in utils.ts and keep the tests passing.' })),
+      routeResult: routePromptEnhancement(routeInput({
+        promptText: 'Rename the helper in utils.ts and keep the tests passing.',
+        // Selected on its merits through the decider — the unmatched-keyword
+        // terminal no longer asserts this family.
+        classifierPrimaryIntent: 'quick_improvement.local_polish_or_small_improvement',
+        classifierIntentConfidence: 0.9,
+        classifierCapabilityCandidates: [],
+        classifierDebugEvidencePresent: [],
+      })),
       sourceRefs: [sourceA, contentTemplateSourceB],
       guidanceFacts: [],
     });
@@ -482,5 +491,122 @@ describe('S2 done-when: no capabilities means no overlay', () => {
       }
       expect([...section.safetyFlags].sort()).toEqual(['no_authority_escalation', 'source_honesty']);
     }
+  });
+});
+
+// ── The why-help surface carries the under-evidenced exception reason code ──
+
+describe('under-evidenced routes and the existing why-help surface', () => {
+  const bare = {
+    promptText: 'make it better please',
+    firedKey: undefined,
+    effectiveFiredSource: undefined,
+    selectedQualifyingAbsence: undefined,
+    absenceGateReason: undefined,
+    triggerKind: 'manual',
+  } as const;
+
+  it('an under-evidenced route stamps the public-safe gate reason code on every planned section (codes only, no wording)', () => {
+    const route = routePromptEnhancement(routeInput(bare));
+    expect(route.ladderResolution.state).toBe('under_evidenced');
+    const result = planPromptEnhancementSections({ routeResult: route, sourceRefs: [sourceA], guidanceFacts: [] });
+    expect(result.sectionPlans.length).toBeGreaterThan(0);
+    for (const section of result.sectionPlans) {
+      expect(section.structuredContentPartRefs).toContain('gate_reason:under_evidenced_high_risk_exception');
+    }
+  });
+
+  it('a resolved route carries no under-evidenced gate reason ref', () => {
+    const route = routePromptEnhancement(routeInput({}));
+    expect(route.ladderResolution.state).toBe('resolved');
+    const result = planPromptEnhancementSections({ routeResult: route, sourceRefs: [sourceA], guidanceFacts: [] });
+    for (const section of result.sectionPlans) {
+      expect(section.structuredContentPartRefs).not.toContain('gate_reason:under_evidenced_high_risk_exception');
+    }
+  });
+});
+
+// ── The slot-effect layer: an attached capability CONTRIBUTES its locked effect ──
+
+describe('slot obligations: layer 3 is no longer declared-but-inert', () => {
+  const planFor = (intent: string, candidates: readonly string[] = []) => {
+    const route = routePromptEnhancement(routeInput({
+      promptText: 'exercise the slot-effect layer',
+      classifierPrimaryIntent: intent as never,
+      classifierIntentConfidence: 0.9,
+      classifierCapabilityCandidates: candidates as never,
+      classifierDebugEvidencePresent: ['reproduction_steps', 'logs'] as never,
+    }));
+    return planPromptEnhancementSections({ routeResult: route, sourceRefs: [sourceA], guidanceFacts: [] });
+  };
+  const obligationsOf = (result: ReturnType<typeof planPromptEnhancementSections>, kind: string) =>
+    result.sectionPlans.find((section) => section.sectionKind === kind)?.slotObligations ?? [];
+
+  it('CARRY route: the repro section keeps no-invention protection even with the request OFF', () => {
+    // The inversion this guards (owner ruling 2026-08-17): protection used to
+    // ride the capability, so a section was protected when the developer
+    // supplied NOTHING and unprotected once they supplied real evidence a model
+    // could embroider into invented specifics. The section renders generated
+    // text either way, so the protection is a floor, not a capability effect.
+    const carry = planFor('issue_debug.failing_test');
+    expect(carry.capabilityOverlays ?? []).not.toContain('capability.reproduction_or_evidence_needed');
+    expect(obligationsOf(carry, 'reproduction_or_evidence')).toContain('no_invention_state');
+    expect(obligationsOf(carry, 'reproduction_or_evidence')).not.toContain('reproduction_or_evidence_request');
+  });
+
+  it('the floor does not leak the obligation onto unrelated sections', () => {
+    const carry = planFor('issue_debug.failing_test');
+    for (const section of carry.sectionPlans) {
+      if (section.sectionKind === 'reproduction_or_evidence') continue;
+      expect(section.slotObligations).not.toContain('no_invention_state');
+    }
+  });
+
+  it('reproduction_or_evidence_needed FIRST: its section carries the request obligation AND the typed no-invention state', () => {
+    const result = planFor('issue_debug.reproduction_discovery');
+    const obligations = obligationsOf(result, 'reproduction_or_evidence');
+    expect(obligations).toContain('reproduction_or_evidence_request');
+    expect(obligations).toContain('no_invention_state');
+  });
+
+  it.each([
+    ['maintenance.refactor_no_behavior_change', 'behavior_preservation', ['behavior_lock', 'baseline_current_output_proof', 'no_unrelated_change_boundary', 'before_after_verification']],
+    ['review.security_review', 'finding_format', ['review_checklist_challenge', 'severity_residual_risk']],
+    ['issue_debug.failing_test', 'project_grounding_facts', ['project_source_fact_slots', 'known_unknown_wording', 'source_ids_evidence_state']],
+    ['planning.spec_or_prd', 'risk_safety_or_confirmation', ['confirmation_clarification', 'send_policy_metadata', 'safety_hook_linkage']],
+    ['feature.fresh_implementation', 'verification_or_test_plan', ['family_specific_verification']],
+    ['maintenance.risk_rollback_heavy', 'risk_safety_or_confirmation', ['risk_rollback_recovery', 'dry_run_backup_pin_deployment', 'safety_policy_hooks']],
+    ['planning.task_breakdown', 'point_inventory_or_decomposition', ['decomposition_handoff_metadata', 'compact_first_popup_summary_support', 'ordering_dependency']],
+    ['issue_debug.failing_test', 'source_signal_guidance', ['baseline_source_signal', 'source_kind_id_evidence_metadata', 'public_safe_why_help_support']],
+  ])('%s: the %s section carries its locked obligations', (intent, kind, expected) => {
+    const obligations = obligationsOf(planFor(intent), kind);
+    for (const obligation of expected) expect(obligations).toContain(obligation);
+  });
+
+  it('an unattached capability contributes nothing: the quick merit route carries only the verification obligation', () => {
+    const result = planFor('quick_improvement.local_polish_or_small_improvement');
+    expect(obligationsOf(result, 'verification_or_test_plan')).toEqual(['family_specific_verification']);
+    for (const section of result.sectionPlans) {
+      expect(section.slotObligations).not.toContain('no_invention_state');
+      expect(section.slotObligations).not.toContain('behavior_lock');
+    }
+  });
+
+  it('two capabilities sharing a target section UNION their obligations', () => {
+    const result = planFor('maintenance.risk_rollback_heavy', ['capability.confirmation_needed']);
+    const obligations = obligationsOf(result, 'risk_safety_or_confirmation');
+    expect(obligations).toContain('risk_rollback_recovery');
+    expect(obligations).toContain('confirmation_clarification');
+  });
+
+  it('the obligations travel onto the COMPOSED section unchanged', () => {
+    const result = planFor('issue_debug.reproduction_discovery');
+    const compose = composePromptEnhancementBody({
+      enhancementId: 'slot-effect-compose',
+      originalPromptText: 'exercise the slot-effect layer',
+      sectionPlanningResult: result,
+    });
+    const section = (compose.currentBody?.sections ?? []).find((entry) => entry.sectionKind === 'reproduction_or_evidence');
+    expect(section?.slotObligations).toContain('no_invention_state');
   });
 });

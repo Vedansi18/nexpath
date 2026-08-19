@@ -701,8 +701,12 @@ const CURRENT_SOURCE_BASELINE_ROWS: readonly PromptEnhancementCurrentSourceCostC
   currentSourceRow({
     baselineCallId: 'current_stage_classifier',
     sourceLayer: 'src/classifier/stage-classifier.ts',
-    assumedInputTokens: 3_000,
-    maxOutputTokens: 256,
+    // The reply carries the intent proposal + evidence/capability observations
+    // (parked on this SAME call — no new call exists): the system prompt grew by
+    // the intent menu, the evidence ladder, and the capability conditions
+    // (prefix-cached), and the output by four fields.
+    assumedInputTokens: 5_000,
+    maxOutputTokens: 512,
     timeoutMs: 12_000,
     fallbackState: 'deterministic_or_local_fallback',
     requirementState: 'required_current_source_row',

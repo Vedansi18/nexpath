@@ -67,6 +67,13 @@ import { emitPromptEnhancementCostObservabilityV1 } from '../../prompt-enhanceme
 import { isPromptEnhancementSequenceShapedTextV1 } from '../../prompt-enhancement/routing-taxonomy.js';
 import { getSourceRealityAdaptersSnapshot } from '../../prompt-enhancement/source-reality.js';
 import { loadRightGoodProfile } from '../../classifier/right-good-aggregator.js';
+import type { RightGoodProfile } from '../../classifier/right-good-aggregator.js';
+import {
+  promoteEnvFactsToTierP,
+  corroborationTierForEnvFact,
+  corroborationTierForRightGood,
+  type GroundingCorroborationTier,
+} from '../../env/env-tier-promotion.js';
 import { computeWorkStyleProfile } from '../../classifier/work-style-traits.js';
 import { readParamEvents } from '../../telemetry/param-events.js';
 import { getProjectEnvFacts } from '../../store/env-facts.js';
@@ -76,6 +83,7 @@ import {
   promptEnhancementStageSignalKeyV1,
   promptEnhancementAbsenceSignalKeyV1,
 } from '../../prompt-enhancement/guidance-facts.js';
+import type { PromptEnhancementSourceEligibilityStateV1 } from '../../prompt-enhancement/templates/section-plan.js';
 import { resolvePromptEnhancementGuidanceOutcomeV1 } from '../../prompt-enhancement/guidance-outcome.js';
 import {
   buildClaudeUserPromptSubmitHookOutputV1,
@@ -192,39 +200,94 @@ export type AutoPromptEnhancementConsumerV1 = (
 /**
  * E1 / P1-G1 + AR6-G1(query) — PE grounding-evidence refs that the guidance-fact seam (E2) consumes.
  * Ref-ID convention (E2 parses these): `right_good:<key>` / `mistake:<key>` (RIGHT&GOOD non-neutral signals);
- * `work_style:<trait>:<value>` (set work-style traits); `hard_fact:<key>` (source-derived project env facts);
+ * `work_style:<trait>` (set work-style traits — the VALUE crosses typed in `groundingEvidenceByRef`,
+ * never inside the ref); `hard_fact:<key>` (source-derived project env facts);
  * `feedback:<category>:<count>` (scoped feedback); `memory:<signalKey>` (missing-signal memory candidates —
  * empty until E3 records evidence). `paramEventChannels` = the distinct detection channels present.
  * Every read is DEFENSIVE — an empty or failed read yields no refs (deterministic no-data fallback). The
  * param-event log is read ONCE and reused for work-style + channels (RIGHT&GOOD keeps its own read; its
  * `computeRightGoodProfile` is not exported). NB: env facts map to `sourceOnlyHardFactRefs`; runtime context is
  * already carried by the request's agent-mode/permission fields, so it is not duplicated here.
+ * `groundingTierByRef` = typed corroboration tier per crossing env / RIGHT&GOOD ref
+ * (promoted_practice_P / capability / uncorroborated) — carried beside the refs, never inside them.
  */
-function buildPromptEnhancementGroundingRefsV1(store: Store, projectRoot: string, signalKeys: readonly string[]): {
+export function buildPromptEnhancementGroundingRefsV1(store: Store, projectRoot: string, signalKeys: readonly string[]): {
   rightGoodWorkStyleEnvRuntimeRefs: readonly string[];
   paramEventChannels: readonly string[];
   sourceOnlyHardFactRefs: readonly string[];
   scopedFeedbackEvidenceRefs: readonly string[];
   missingMemoryCandidateRefs: readonly string[];
+  groundingTierByRef: Readonly<Record<string, GroundingCorroborationTier>>;
+  groundingPolarityByRef: Readonly<Record<string, 'present' | 'false_capability' | 'unknown'>>;
+  groundingEvidenceByRef: Readonly<Record<string, { key: string; value: string; runtimePath: 'local_store' | 'local_read_model' | 'local_probe'; anchorScope: 'machine_environment' | 'project_root' | 'session_behavior' | 'longitudinal_user_behavior' | 'current_prompt_scope' | 'content_template_scope' | 'unknown_anchor' }>>;
 } {
+  // Corroboration tier per crossing env / RIGHT&GOOD ref — TYPED, never smuggled
+  // inside the ref strings. The promotion machinery is the SAME function the
+  // decision-session engine consumes (`promoteEnvFactsToTierP`), fed from the
+  // store-backed facts this boundary already reads; the DS wiring is untouched.
+  // Claim wording is computed FROM this tier downstream — never assigned here.
+  const groundingTierByRef: Record<string, GroundingCorroborationTier> = {};
+  // Polarity per env ref: a FALSE capability is safety material, never grounding —
+  // the lane flips with polarity, so it must cross typed like the tier does.
+  const groundingPolarityByRef: Record<string, 'present' | 'false_capability' | 'unknown'> = {};
+  // Caller-side EAGER resolution: the content each ref points at, resolved from the
+  // same store-backed reads below and carried as a generic key/value beside the ref
+  // — never inside it, and never via a callback seam into the enhancement engine.
+  const groundingEvidenceByRef: Record<string, { key: string; value: string; runtimePath: 'local_store' | 'local_read_model' | 'local_probe'; anchorScope: 'machine_environment' | 'project_root' | 'session_behavior' | 'longitudinal_user_behavior' | 'current_prompt_scope' | 'content_template_scope' | 'unknown_anchor' }> = {};
+  let rightGoodProfileForPromotion: RightGoodProfile = {};
   const rightGoodWorkStyleEnvRuntimeRefs: string[] = [];
   try {
-    for (const [key, signal] of Object.entries(loadRightGoodProfile(store, projectRoot))) {
-      if (signal.state !== 'neutral') rightGoodWorkStyleEnvRuntimeRefs.push(`${signal.state}:${key}`);
+    rightGoodProfileForPromotion = loadRightGoodProfile(store, projectRoot);
+    for (const [key, signal] of Object.entries(rightGoodProfileForPromotion)) {
+      if (signal.state !== 'neutral') {
+        rightGoodWorkStyleEnvRuntimeRefs.push(`${signal.state}:${key}`);
+        groundingTierByRef[`${signal.state}:${key}`] = corroborationTierForRightGood(signal);
+        groundingEvidenceByRef[`${signal.state}:${key}`] = {
+          key,
+          value: `${signal.state}${signal.behaviourVerified ? ':behaviour_verified' : ':claimed'}`,
+          runtimePath: 'local_read_model',
+          anchorScope: 'longitudinal_user_behavior',
+        };
+      }
     }
   } catch { /* no RIGHT&GOOD grounding available — leave empty */ }
   const paramEventChannels: string[] = [];
   try {
     const events = readParamEvents(store, projectRoot);
     for (const [trait, tv] of Object.entries(computeWorkStyleProfile(events))) {
-      if (tv.value !== null) rightGoodWorkStyleEnvRuntimeRefs.push(`work_style:${trait}:${tv.value}`);
+      if (tv.value !== null) {
+        // The trait VALUE crosses typed beside the ref — no longer smuggled inside it.
+        rightGoodWorkStyleEnvRuntimeRefs.push(`work_style:${trait}`);
+        groundingEvidenceByRef[`work_style:${trait}`] = {
+          key: trait,
+          value: String(tv.value),
+          runtimePath: 'local_read_model',
+          anchorScope: 'longitudinal_user_behavior',
+        };
+      }
     }
     for (const channel of new Set(events.map((event) => event.channel))) paramEventChannels.push(channel);
   } catch { /* no param-event grounding available — leave empty */ }
   const sourceOnlyHardFactRefs: string[] = [];
   try {
     const stored = getProjectEnvFacts(store, projectRoot);
-    if (stored) for (const factKey of Object.keys(stored.facts)) sourceOnlyHardFactRefs.push(`hard_fact:${factKey}`);
+    if (stored) {
+      const promoted = promoteEnvFactsToTierP(stored.facts, rightGoodProfileForPromotion);
+      for (const [factKey, fact] of Object.entries(promoted)) {
+        sourceOnlyHardFactRefs.push(`hard_fact:${factKey}`);
+        groundingTierByRef[`hard_fact:${factKey}`] = corroborationTierForEnvFact(fact);
+        groundingPolarityByRef[`hard_fact:${factKey}`] =
+          fact.value === false ? 'false_capability' : fact.value === null ? 'unknown' : 'present';
+        // Every current probe fact is project-anchored (has_* / project_framework);
+        // machine-environment facts get their own anchor when such probes exist.
+        groundingEvidenceByRef[`hard_fact:${factKey}`] = {
+          key: factKey,
+          value: String(fact.value),
+          runtimePath: 'local_store',
+          anchorScope: 'project_root',
+        };
+      }
+    }
   } catch { /* no source hard facts available — leave empty */ }
   const scopedFeedbackEvidenceRefs: string[] = [];
   try {
@@ -247,7 +310,33 @@ function buildPromptEnhancementGroundingRefsV1(store: Store, projectRoot: string
     sourceOnlyHardFactRefs,
     scopedFeedbackEvidenceRefs,
     missingMemoryCandidateRefs,
+    groundingTierByRef,
+    groundingPolarityByRef,
+    groundingEvidenceByRef,
   };
+}
+
+/**
+ * F4 (L4991): the eligibility a CLEANLY-FIRED trigger carries.
+ *
+ * Reaching the fire path means frequency, dedup, cooldown, cap and the classifier recommendation
+ * all passed — so the signal is `fresh_trigger_eligible` unless the user has already DISMISSED
+ * this very signal, which `SessionStateManager` records as `dismissedAtIndex` on the absence flag.
+ * L4991 names dismissal as a state that must not anchor a popup.
+ *
+ * ⚠️ Exported because a test that re-implements this decision proves nothing about production —
+ * measured at verification round 6, where fixtures replicating the logic passed happily while the
+ * production branch was mutated to the wrong value.
+ */
+export function promptEnhancementFiredTriggerEligibilityV1(
+  absenceFlags: readonly { signalKey: string; dismissedAtIndex?: number }[],
+  effectiveFlagType: string,
+): PromptEnhancementSourceEligibilityStateV1 {
+  const signalKey = effectiveFlagType.replace(/^absence:/, '');
+  const dismissed = absenceFlags.some(
+    (flag) => flag.signalKey === signalKey && flag.dismissedAtIndex !== undefined,
+  );
+  return dismissed ? 'dismissed_or_user_skipped' : 'fresh_trigger_eligible';
 }
 
 export function buildPromptEnhancementRequestForAuto(input: {
@@ -263,6 +352,13 @@ export function buildPromptEnhancementRequestForAuto(input: {
   trigger: Exclude<Stage2TriggerResult, null>;
   stageResult: StageClassifierResult;
   streamBOutputs: readonly string[];
+  /**
+   * F4 (L4971): which eligibility the trigger signal carries INTO PE. Decided by the branch
+   * the pipeline already took — frequency, dedup, cooldown, cap, or a clean fire — and only
+   * read here (prohibition 19: PE never re-implements the gating). Omitted by boundary tests,
+   * where the fail-closed default applies.
+   */
+  triggerEligibility?: PromptEnhancementSourceEligibilityStateV1;
 }): PromptEnhancementPrepareRequestV1 {
   const promptIndex = input.session.current.promptCount - 1;
   const currentStage = input.session.current.currentStage;
@@ -358,6 +454,14 @@ export function buildPromptEnhancementRequestForAuto(input: {
         absenceGateReason: absenceSignal ? 'qualifying_absence_signal' : undefined,
         classifierState: input.stageResult.degraded ? 'degraded_no_fire' : 'fire_recommended',
         degradedNoActionState: input.stageResult.degraded ? 'degraded_no_fire' : 'none',
+        // The intent proposal from the same classifier call ('' on the degraded
+        // path — keyless prompts stay on the deterministic cascade).
+        classifierPrimaryIntent: input.stageResult.primaryIntent,
+        classifierIntentConfidence: input.stageResult.intentConfidence,
+        // The capability observation from the same call: candidates plus the
+        // debug-evidence forms present. The registry decides every attachment.
+        classifierCapabilityCandidates: input.stageResult.capabilityCandidates,
+        classifierDebugEvidencePresent: input.stageResult.debugEvidencePresent,
         promptStartBoundary: source.promptStartStop.hookBoundary,
         deliveryBoundary: source.promptStartStop.deliveryBoundary,
         promptStartCanReplaceSameTurn: source.promptStartStop.runAutoCanHoldOrReplaceSubmittedPrompt,
@@ -369,6 +473,7 @@ export function buildPromptEnhancementRequestForAuto(input: {
     sourceSignals: {
       sourceAOriginalPromptRef: originalPromptRef,
       sourceRefs,
+      triggerSignalEligibilityState: input.triggerEligibility,
       normalizedStageAbsenceSignalRefs: absenceSignal ? [absenceSignal] : [],
       contentTemplateRecordFactRefs: content.resolvedRecordIdentity ? [content.resolvedRecordIdentity] : [],
       popupQuestionSourceRefs: content.resolvedRecordIdentity ? [`${content.resolvedRecordIdentity}:question`] : [],
@@ -412,6 +517,9 @@ export function buildPromptEnhancementRequestForAuto(input: {
       servedVariantIdentityRefs: [],
       deliveryGateRefs: [],
       sourceOnlyHardFactRefs: grounding.sourceOnlyHardFactRefs,
+      groundingTierByRef: grounding.groundingTierByRef,
+      groundingPolarityByRef: grounding.groundingPolarityByRef,
+      groundingEvidenceByRef: grounding.groundingEvidenceByRef,
     },
     userPreferenceContext: {
       levelState: 'default',
@@ -758,7 +866,28 @@ export async function runAuto(
   if (!getProject(store, input.projectRoot)) {
     const name = resolveProjectName(input.projectRoot);
     upsertProject(store, { projectRoot: input.projectRoot, name });
+  }
+  // Historical backfill runs OUTSIDE the registration branch: `nexpath init` also
+  // registers the project, so a registration-gated call would never run for a user
+  // who ran init before their first prompt, and their pre-install history would be
+  // silently lost. The function self-gates on zero stored prompts (one cheap query),
+  // which is also the pinned edge: any prompt stored before this point skips the
+  // import entirely — it must stay ahead of the insertPrompt below.
+  //
+  // Best-effort, like every other side task on this path: it reads session files
+  // the coding agent is actively writing and rotating, so a listed file can be gone
+  // or unreadable by the time it is opened. Sitting ahead of insertPrompt, an
+  // uncaught throw here would cost the user their live prompt AND fail the hook on
+  // their very first prompt — losing old history is bad, losing the current one is
+  // worse. Failure is logged and the pipeline continues.
+  try {
     await importHistoricalPrompts(store, input.projectRoot);
+  } catch (err) {
+    logger.warn('historical_import_failed', {
+      project: input.projectRoot,
+      error: err instanceof Error ? err.message : String(err),
+      actionable: 'Pre-install prompt history was not imported for this project; live capture is unaffected and continues normally.',
+    });
   }
 
   // ── 0. Persist prompt text — runs before classifier so prompt is stored even if pipeline errors ──
@@ -913,7 +1042,11 @@ export async function runAuto(
   // creates NO advisory, marks NO decision-session fired, and ordinary prompts keep the
   // existing trigger cadence. Frequency 'off' stays fully silent (checked before this runs).
   let sequencePeFallbackDone = false;
-  const prepareSequenceShapedPeFallback = async (): Promise<void> => {
+  // F4: every blocked branch names the eligibility it is blocking WITH, so the fact built on that
+  // path inherits the pipeline's own decision instead of arriving unlabelled.
+  const prepareSequenceShapedPeFallback = async (
+    triggerEligibility: PromptEnhancementSourceEligibilityStateV1,
+  ): Promise<void> => {
     // Injected boundary-test integrations keep their own single explicit path.
     if (sequencePeFallbackDone || promptEnhancement !== undefined) return;
     if (!isPromptEnhancementSequenceShapedTextV1(input.promptText)) return;
@@ -930,6 +1063,11 @@ export async function runAuto(
       previousStage: prevStage,
       trigger: { kind: 'stage_transition' },
       stageResult,
+      // F4: the branch that called this fallback already decided WHY the advisory was
+      // blocked. Dropping the value here would leave every blocked-path fact unlabelled
+      // while the call sites looked correctly wired — which is exactly what happened
+      // until verification round 4 traced the parameter and found it unused.
+      triggerEligibility,
       streamBOutputs: [],
     });
     const preparation = await preparePromptEnhancementForAuto({ request, prepare: preparePromptEnhancementForRunAuto });
@@ -997,7 +1135,8 @@ export async function runAuto(
     return { outcome: 'no_action' };
   }
   if (mgr.current.promptCount < freqConfig.minPromptsBeforeAdvisory) {
-    await prepareSequenceShapedPeFallback();
+    // F4: min-prompts guard: the signal exists but cannot trigger yet
+    await prepareSequenceShapedPeFallback('support_only_not_triggering');
     writeTelemetry(input.projectRoot, 'advisory_min_prompts_blocked', { promptCount: mgr.current.promptCount, minRequired: freqConfig.minPromptsBeforeAdvisory }, store);
     logger.info('pipeline_outcome', { outcome: 'no_action', reason: 'min_prompts_not_reached' });
     return { outcome: 'no_action' };
@@ -1013,7 +1152,8 @@ export async function runAuto(
   logger.debug('should_fire', { trigger: triggerResult?.kind ?? null });
 
   if (!triggerResult) {
-    await prepareSequenceShapedPeFallback();
+    // F4: no trigger produced this turn
+    await prepareSequenceShapedPeFallback('support_only_not_triggering');
     writeTelemetry(input.projectRoot, 'pipeline_no_action', { reason: 'no_flag' }, store);
     logger.info('pipeline_outcome', { outcome: 'no_action', reason: 'no_flag' });
     return { outcome: 'no_action' };
@@ -1027,7 +1167,8 @@ export async function runAuto(
   const alreadyFired = mgr.hasFiredDecisionSession(preCheckFiredKey);
   logger.debug('dedup', { firedKey: preCheckFiredKey, alreadyFired });
   if (alreadyFired) {
-    await prepareSequenceShapedPeFallback();
+    // F4: this key already fired in the session
+    await prepareSequenceShapedPeFallback('blocked_by_dedup');
     writeTelemetry(input.projectRoot, 'advisory_dedup_blocked', { firedKey: preCheckFiredKey }, store);
     logger.info('pipeline_outcome', { outcome: 'no_action', reason: 'already_fired', firedKey: preCheckFiredKey });
     return { outcome: 'no_action' };
@@ -1035,13 +1176,15 @@ export async function runAuto(
 
   // ── 6.5. Advisory frequency gate ────────────────────────────────────────────
   if (freq === 'major_only' && triggerResult.kind !== 'stage_transition') {
-    await prepareSequenceShapedPeFallback();
+    // F4: major_only policy declined a non-transition
+    await prepareSequenceShapedPeFallback('blocked_by_frequency');
     writeTelemetry(input.projectRoot, 'advisory_freq_blocked', { freq, flagType: triggerResult.kind }, store);
     logger.info('pipeline_outcome', { outcome: 'no_action', reason: 'freq_major_only', flagType: triggerResult.kind });
     return { outcome: 'no_action' };
   }
   if (freq === 'once_per_session' && mgr.current.firedDecisionSessions.length > 0) {
-    await prepareSequenceShapedPeFallback();
+    // F4: once_per_session policy already spent
+    await prepareSequenceShapedPeFallback('blocked_by_frequency');
     writeTelemetry(input.projectRoot, 'advisory_freq_blocked', { freq, flagType: triggerResult.kind }, store);
     logger.info('pipeline_outcome', { outcome: 'no_action', reason: 'freq_once_per_session' });
     return { outcome: 'no_action' };
@@ -1050,7 +1193,8 @@ export async function runAuto(
   // ── 6.6. Post-advisory cooldown — suppress rapid back-to-back advisories ─────
   const lastAdvisory = mgr.current.lastAdvisoryPromptIndex ?? -1;
   if (lastAdvisory >= 0 && mgr.current.promptCount - lastAdvisory < freqConfig.postAdvisoryCooldown) {
-    await prepareSequenceShapedPeFallback();
+    // F4: inside the post-advisory cooldown window
+    await prepareSequenceShapedPeFallback('blocked_by_post_advisory_cooldown');
     writeTelemetry(input.projectRoot, 'advisory_cooldown_blocked', {
       promptCount:       mgr.current.promptCount,
       lastAdvisoryAt:    lastAdvisory,
@@ -1069,7 +1213,8 @@ export async function runAuto(
     : freqConfig.sessionAdvisoryCapDefault;
   const advisoryCount = mgr.current.advisoryCount ?? 0;
   if (advisoryCount >= advisoryCap) {
-    await prepareSequenceShapedPeFallback();
+    // F4: the session advisory cap is reached
+    await prepareSequenceShapedPeFallback('blocked_by_session_cap');
     insertSkippedSession(store, {
       projectRoot:          input.projectRoot,
       sessionId:            mgr.current.sessionId,
@@ -1103,7 +1248,8 @@ export async function runAuto(
   // advisory (the stage still classifies locally, so session tracking continues).
   writeTelemetry(input.projectRoot, 'classifier_fire_evaluated', { flagType: triggerResult.kind, confirmed: stageResult.fireRecommendation }, store);
   if (!stageResult.fireRecommendation) {
-    await prepareSequenceShapedPeFallback();
+    // F4: the classifier declined to recommend firing
+    await prepareSequenceShapedPeFallback('too_weak_no_popup');
     writeTelemetry(input.projectRoot, 'pipeline_no_action', { reason: 'classifier_declined' }, store);
     logger.info('pipeline_outcome', { outcome: 'no_action', reason: 'classifier_declined', confidence: stageResult.classification.confidence, degraded: stageResult.degraded });
     return { outcome: 'no_action' };
@@ -1143,6 +1289,13 @@ export async function runAuto(
       previousStage: prevStage,
       trigger: triggerResult,
       stageResult,
+      // F4: this path is reached only after frequency, dedup, cooldown, cap and the
+      // classifier fire-recommendation have ALL passed — so the trigger is cleanly eligible,
+      // UNLESS the user already dismissed this very signal. `dismissedAtIndex` is set on the
+      // absence flag when the user acts on it, and L4991 names dismissal as a state that must
+      // not anchor a popup — so the one locked value that had no producer now has one, read
+      // from session state rather than inferred.
+      triggerEligibility: promptEnhancementFiredTriggerEligibilityV1(mgr.current.absenceFlags, effectiveFlagType),
       streamBOutputs: streamBOverrides
         ? Object.entries(streamBOverrides)
           .filter(([, present]) => present)

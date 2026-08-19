@@ -1,4 +1,27 @@
 import type { Stage } from '../classifier/types.js';
+
+// The taxonomy ids live in a LEAF module (see taxonomy-ids.ts) so the stage
+// classifier can build its intent menu without a load-order cycle; re-exported
+// here so every existing importer keeps working unchanged.
+export * from './taxonomy-ids.js';
+import {
+  PROMPT_ENHANCEMENT_FAMILIES,
+  PROMPT_ENHANCEMENT_CAPABILITIES,
+  DEBUG_PRIMARY_INTENTS,
+  MAINTENANCE_PRIMARY_INTENTS,
+  REVIEW_PRIMARY_INTENTS,
+  FEATURE_PRIMARY_INTENTS,
+  PLANNING_PRIMARY_INTENTS,
+  QUICK_IMPROVEMENT_PRIMARY_INTENTS,
+  PROMPT_ENHANCEMENT_PRIMARY_INTENTS,
+  PROMPT_ENHANCEMENT_INTENT_ALIASES,
+  type PromptEnhancementFamilyId,
+  type PromptEnhancementPrimaryIntent,
+  type PromptEnhancementCapabilityId,
+  DEBUG_EVIDENCE_FORMS,
+  type DebugEvidenceForm,
+  type PromptEnhancementLadderResolutionV1,
+} from './taxonomy-ids.js';
 import { STAGES } from '../classifier/types.js';
 import type {
   PromptEnhancementCallVisibilityMode,
@@ -13,66 +36,7 @@ import { PROMPT_ENHANCEMENT_CONTRACT_VERSION } from './contracts.js';
 import type { PromptEnhancementLlmRouteDecisionV1 } from './llm-route-decision.js';
 import { getContentTemplateSourceSnapshot, getPromptStartStopSourceSnapshot } from './source-reality.js';
 
-export type PromptEnhancementFamilyId =
-  | 'feature_delivery'
-  | 'planning_spec'
-  | 'issue_debug'
-  | 'maintenance_refactor'
-  | 'review_verification'
-  | 'quick_improvement';
 
-export type PromptEnhancementPrimaryIntent =
-  | 'feature.idea_discussion'
-  | 'feature.fresh_implementation'
-  | 'feature.upgrade_extension'
-  | 'planning.spec_or_prd'
-  | 'planning.architecture_or_design'
-  | 'planning.task_breakdown'
-  | 'planning.rollout_release_plan'
-  | 'planning.migration_plan'
-  | 'planning.debugging_plan'
-  | 'planning.refactor_plan'
-  | 'issue_debug.new_bug_report'
-  | 'issue_debug.regression_after_recent_change'
-  | 'issue_debug.failing_test'
-  | 'issue_debug.runtime_error_exception'
-  | 'issue_debug.ui_behavior_mismatch'
-  | 'issue_debug.integration_api_failure'
-  | 'issue_debug.performance_problem'
-  | 'issue_debug.flaky_behavior'
-  | 'issue_debug.environment_config_issue'
-  | 'issue_debug.reproduction_discovery'
-  | 'issue_debug.production_incident_or_support'
-  | 'maintenance.refactor_no_behavior_change'
-  | 'maintenance.dependency_upgrade'
-  | 'maintenance.migration_schema_change'
-  | 'maintenance.cleanup_dead_code'
-  | 'maintenance.performance_maintenance'
-  | 'maintenance.test_hardening'
-  | 'maintenance.documentation_config_upkeep'
-  | 'maintenance.compatibility_update'
-  | 'maintenance.risk_rollback_heavy'
-  | 'maintenance.incremental_module_layer_cleanup'
-  | 'review.verification_request'
-  | 'review.code_or_diff_review'
-  | 'review.requirements_fit_review'
-  | 'review.security_review'
-  | 'review.architecture_review'
-  | 'review.performance_review'
-  | 'review.api_contract_review'
-  | 'review.test_review'
-  | 'quick_improvement.local_polish_or_small_improvement';
-
-export type PromptEnhancementCapabilityId =
-  | 'capability.decomposition_candidate'
-  | 'capability.confirmation_needed'
-  | 'capability.adversarial_review'
-  | 'capability.project_grounding'
-  | 'capability.verification_required'
-  | 'capability.risk_or_rollback'
-  | 'capability.reproduction_or_evidence_needed'
-  | 'capability.behavior_preservation'
-  | 'capability.source_signal_guidance';
 
 export type PromptEnhancementRouteConfidence =
   | 'strong'
@@ -124,6 +88,23 @@ export interface PromptEnhancementRouteInput {
   runtimeEnvFactRefs?: readonly string[];
   rightGoodWorkStyleRefs?: readonly string[];
   stage2SelectionState?: 'selected' | 'qualifying_but_unselected' | 'supplementary_present' | 'absent_unselected_diagnostic' | 'counter_update_only' | 'rejected_unknown_key';
+  /**
+   * The stage classifier's intent proposal from the one parked call. When present
+   * and non-empty, routing PREFERS it over the deterministic cascade; when empty
+   * (thin evidence, degraded path, no key) the cascade answers, unchanged.
+   */
+  classifierPrimaryIntent?: PromptEnhancementPrimaryIntent | '';
+  classifierIntentConfidence?: number;
+  /**
+   * The classifier's capability OBSERVATION from the same parked call:
+   * candidates whose prompt-observable attach conditions the model reported
+   * met, and the debug-evidence forms the prompt already contains. These are
+   * observations only — the registry decides every attachment and can veto any
+   * candidate. `undefined` means no observation channel exists (no-key
+   * session); an empty array means the classifier observed and found nothing.
+   */
+  classifierCapabilityCandidates?: readonly PromptEnhancementCapabilityId[];
+  classifierDebugEvidencePresent?: readonly DebugEvidenceForm[];
   generatedOriginState?: 'ordinary_user_prompt' | 'old_ds_advisory_injected' | 'pe_generated' | 'pe_action_generated' | 'sequence_generated' | 'unknown';
   oldDecisionSessionPayloadPresent?: boolean;
 }
@@ -189,6 +170,12 @@ export interface PromptEnhancementRouteResult {
   routeEvidenceRefs: readonly string[];
   reasonCodes: readonly string[];
   noPopup: boolean;
+  /**
+   * The evidence-ladder outcome for this route — present on EVERY routing
+   * path, so "the ladder did not resolve" is a typed state downstream layers
+   * can read instead of a silently guessed family.
+   */
+  ladderResolution: PromptEnhancementLadderResolutionV1;
   // P3-G3 (narrowed claim): the deterministic route consumes shared-signal evidence
   // (firedKey / stage / absence) for gating, skip, and evidence decisions and uses NO
   // PE-only classifier or old DS map. It does NOT, however, fuse those signals into
@@ -199,97 +186,7 @@ export interface PromptEnhancementRouteResult {
   usesOldStaticDecisionSessionMap: false;
 }
 
-export const PROMPT_ENHANCEMENT_FAMILIES: readonly PromptEnhancementFamilyId[] = [
-  'feature_delivery',
-  'planning_spec',
-  'issue_debug',
-  'maintenance_refactor',
-  'review_verification',
-  'quick_improvement',
-] as const;
 
-export const PROMPT_ENHANCEMENT_CAPABILITIES: readonly PromptEnhancementCapabilityId[] = [
-  'capability.decomposition_candidate',
-  'capability.confirmation_needed',
-  'capability.adversarial_review',
-  'capability.project_grounding',
-  'capability.verification_required',
-  'capability.risk_or_rollback',
-  'capability.reproduction_or_evidence_needed',
-  'capability.behavior_preservation',
-  'capability.source_signal_guidance',
-] as const;
-
-export const DEBUG_PRIMARY_INTENTS: readonly Extract<PromptEnhancementPrimaryIntent, `issue_debug.${string}`>[] = [
-  'issue_debug.new_bug_report',
-  'issue_debug.regression_after_recent_change',
-  'issue_debug.failing_test',
-  'issue_debug.runtime_error_exception',
-  'issue_debug.ui_behavior_mismatch',
-  'issue_debug.integration_api_failure',
-  'issue_debug.performance_problem',
-  'issue_debug.flaky_behavior',
-  'issue_debug.environment_config_issue',
-  'issue_debug.reproduction_discovery',
-  'issue_debug.production_incident_or_support',
-] as const;
-
-export const MAINTENANCE_PRIMARY_INTENTS: readonly Extract<PromptEnhancementPrimaryIntent, `maintenance.${string}`>[] = [
-  'maintenance.refactor_no_behavior_change',
-  'maintenance.dependency_upgrade',
-  'maintenance.migration_schema_change',
-  'maintenance.cleanup_dead_code',
-  'maintenance.performance_maintenance',
-  'maintenance.test_hardening',
-  'maintenance.documentation_config_upkeep',
-  'maintenance.compatibility_update',
-  'maintenance.risk_rollback_heavy',
-  'maintenance.incremental_module_layer_cleanup',
-] as const;
-
-export const REVIEW_PRIMARY_INTENTS: readonly Extract<PromptEnhancementPrimaryIntent, `review.${string}`>[] = [
-  'review.verification_request',
-  'review.code_or_diff_review',
-  'review.requirements_fit_review',
-  'review.security_review',
-  'review.architecture_review',
-  'review.performance_review',
-  'review.api_contract_review',
-  'review.test_review',
-] as const;
-
-export const FEATURE_PRIMARY_INTENTS: readonly Extract<PromptEnhancementPrimaryIntent, `feature.${string}`>[] = [
-  'feature.idea_discussion',
-  'feature.fresh_implementation',
-  'feature.upgrade_extension',
-] as const;
-
-export const PLANNING_PRIMARY_INTENTS: readonly Extract<PromptEnhancementPrimaryIntent, `planning.${string}`>[] = [
-  'planning.spec_or_prd',
-  'planning.architecture_or_design',
-  'planning.task_breakdown',
-  'planning.rollout_release_plan',
-  'planning.migration_plan',
-  'planning.debugging_plan',
-  'planning.refactor_plan',
-] as const;
-
-export const QUICK_IMPROVEMENT_PRIMARY_INTENTS: readonly Extract<PromptEnhancementPrimaryIntent, `quick_improvement.${string}`>[] = [
-  'quick_improvement.local_polish_or_small_improvement',
-] as const;
-
-export const PROMPT_ENHANCEMENT_PRIMARY_INTENTS: readonly PromptEnhancementPrimaryIntent[] = [
-  ...FEATURE_PRIMARY_INTENTS,
-  ...PLANNING_PRIMARY_INTENTS,
-  ...DEBUG_PRIMARY_INTENTS,
-  ...MAINTENANCE_PRIMARY_INTENTS,
-  ...REVIEW_PRIMARY_INTENTS,
-  ...QUICK_IMPROVEMENT_PRIMARY_INTENTS,
-] as const;
-
-export const PROMPT_ENHANCEMENT_INTENT_ALIASES = {
-  'review.code_diff_review': 'review.code_or_diff_review',
-} as const;
 
 export const PROMPT_ENHANCEMENT_STAGE_TRANSITION_SIGNAL_IDS = [
   'IDEA_TO_PRD',
@@ -325,6 +222,43 @@ const BASE_APPLICABILITY_AXES = [
   'multi_prompt_suitability',
 ] as const;
 
+/**
+ * The registry's side of the capability contract: the family scope each
+ * capability may attach to, encoded from the locked attach/reject columns.
+ * Three clauses are deliberately FAIL-CLOSED where their "unless" halves name
+ * conditions this layer cannot verify deterministically: decomposition on
+ * quick_improvement (needs evidence of multiple bounded subtasks),
+ * risk_or_rollback on quick_improvement (needs a high-risk source-critical
+ * route), and deeper-review attachment outside review_verification (awaits its
+ * safety policy). Each vetoes rather than guesses.
+ */
+const CAPABILITY_COMPATIBLE_FAMILIES: Record<PromptEnhancementCapabilityId, readonly PromptEnhancementFamilyId[]> = {
+  'capability.decomposition_candidate': ['feature_delivery', 'planning_spec', 'issue_debug', 'maintenance_refactor', 'review_verification'],
+  'capability.confirmation_needed': PROMPT_ENHANCEMENT_FAMILIES,
+  'capability.adversarial_review': ['review_verification'],
+  'capability.project_grounding': PROMPT_ENHANCEMENT_FAMILIES,
+  'capability.verification_required': PROMPT_ENHANCEMENT_FAMILIES,
+  'capability.risk_or_rollback': ['feature_delivery', 'planning_spec', 'issue_debug', 'maintenance_refactor', 'review_verification'],
+  'capability.reproduction_or_evidence_needed': ['issue_debug'],
+  'capability.behavior_preservation': ['maintenance_refactor', 'review_verification'],
+  'capability.source_signal_guidance': PROMPT_ENHANCEMENT_FAMILIES,
+};
+
+/** Intent-level exceptions the locked scope columns name beyond whole families. */
+const CAPABILITY_COMPATIBLE_INTENTS: Partial<Record<PromptEnhancementCapabilityId, readonly PromptEnhancementPrimaryIntent[]>> = {
+  'capability.reproduction_or_evidence_needed': ['planning.debugging_plan'],
+  'capability.behavior_preservation': ['feature.upgrade_extension'],
+};
+
+export function isCapabilityCompatibleWithRoute(
+  capabilityId: PromptEnhancementCapabilityId,
+  family: PromptEnhancementFamilyId,
+  intent: PromptEnhancementPrimaryIntent,
+): boolean {
+  return CAPABILITY_COMPATIBLE_FAMILIES[capabilityId].includes(family)
+    || (CAPABILITY_COMPATIBLE_INTENTS[capabilityId] ?? []).includes(intent);
+}
+
 function preset(input: {
   intent: PromptEnhancementPrimaryIntent;
   family: PromptEnhancementFamilyId;
@@ -353,12 +287,19 @@ function preset(input: {
     coveredIntentTags: [input.intent],
     baseSkeletonId: input.baseSkeletonId,
     capabilityOverlays: input.capabilityOverlays,
+    // The declaration mirrors the registry's attachment authority: statically
+    // attached, attachable from a classifier observation within the locked
+    // family/intent scope, or rejected outright.
     capabilityCompatibility: PROMPT_ENHANCEMENT_CAPABILITIES.map((capabilityId) => ({
       capabilityId,
-      status: compatibleCapabilityIds.has(capabilityId) ? 'compatible' : 'rejected',
+      status: compatibleCapabilityIds.has(capabilityId) || isCapabilityCompatibleWithRoute(capabilityId, input.family, input.intent)
+        ? 'compatible'
+        : 'rejected',
       reasonCode: compatibleCapabilityIds.has(capabilityId)
         ? 'declared_by_capability_contract'
-        : 'not_attached_to_selected_family_intent_or_current_scope',
+        : isCapabilityCompatibleWithRoute(capabilityId, input.family, input.intent)
+          ? 'observation_attachable_within_locked_scope'
+          : 'not_attached_to_selected_family_intent_or_current_scope',
     })),
     requiredSections,
     optionalSections: input.optionalSections ?? ['uncertainty_or_clarification', 'source_signal_guidance'],
@@ -682,8 +623,16 @@ export const PROMPT_ENHANCEMENT_TAXONOMY_PRESETS: readonly PromptEnhancementTaxo
       family: 'issue_debug',
       baseSkeletonId: intent === 'issue_debug.reproduction_discovery' ? 'skeleton-debug-reproduction-discovery' : 'skeleton-debug-base',
       requiredSections: DEBUG_INTENT_SECTIONS[intent].requiredSections,
+      // ASK stays static, CARRY goes dynamic: reproduction_discovery's whole
+      // purpose is asking for evidence, so the reproduction/evidence request
+      // attaches unconditionally there. Every other debug intent treats
+      // evidence as content the prompt supplies, and receives the request only
+      // from the registry's evidence-lacking rule — a user who pasted the
+      // trace, steps and failing test is not asked to capture them again.
       capabilityOverlays: [
-        'capability.reproduction_or_evidence_needed',
+        ...(intent === 'issue_debug.reproduction_discovery'
+          ? (['capability.reproduction_or_evidence_needed'] as const)
+          : []),
         'capability.verification_required',
         'capability.project_grounding',
         'capability.source_signal_guidance',
@@ -865,23 +814,80 @@ export function findPromptEnhancementTaxonomyGaps(): string[] {
   return gaps;
 }
 
+/** Type guard: is this string one of the forty typed primary intents? */
+export function isKnownPrimaryIntent(value: string | undefined): value is PromptEnhancementPrimaryIntent {
+  return value !== undefined && (PROMPT_ENHANCEMENT_PRIMARY_INTENTS as readonly string[]).includes(value);
+}
+
+/** Type guard: is this string one of the nine typed capability ids? */
+export function isKnownCapabilityId(value: string): value is PromptEnhancementCapabilityId {
+  return (PROMPT_ENHANCEMENT_CAPABILITIES as readonly string[]).includes(value);
+}
+
+/** Type guard: is this string one of the eight debug-evidence forms? */
+export function isKnownDebugEvidenceForm(value: string): value is DebugEvidenceForm {
+  return (DEBUG_EVIDENCE_FORMS as readonly string[]).includes(value);
+}
+
+/**
+ * Walk the locked evidence ladder IN ORDER before declaring under-evidenced.
+ * Rung 1 — explicit current-prompt evidence: on the keyed path the
+ * classifier's proposal (its decision is ladder-ordered by construction); on
+ * the no-key path a matched cascade branch. The bare explicit-word list is
+ * deliberately NOT rung-1 evidence — "make it better" contains explicit words
+ * and is the canonical ambiguous start. Rungs 2-5 are the deterministic
+ * evidence sources that exist without a model: project/source facts, current
+ * stage/absence signals, recent prompt history, persistent memory/feedback.
+ * Rung 6 (profile tie-breakers) is walked but can never resolve alone; rung 7
+ * is locked deferred — never walked, never solicited.
+ */
+function walkEvidenceLadderV1(
+  input: PromptEnhancementRouteInput,
+  normalized: string,
+): PromptEnhancementLadderResolutionV1 {
+  const rungsWalked: number[] = [1];
+  // Keyed path: the classifier IS the ladder-walker — it consumed every rung.
+  // A non-empty proposal resolves the top route on rung 1; an EMPTY proposal
+  // WITH the observation channel present is an authoritative decline ("walked
+  // the ladder, nothing resolved"), so the route is under-evidenced even when
+  // a keyword branch would match — the model saw the same prompt and more
+  // evidence, and said no. The observation channel is the keyed marker: the
+  // boundary maps an ABSENT proposal to '' too, so '' alone must not read as
+  // a decline.
+  if (input.classifierPrimaryIntent) return { state: 'resolved', resolvedByRung: 1 };
+  if (input.classifierCapabilityCandidates !== undefined) {
+    return { state: 'under_evidenced', rungsWalked: [1, 2, 3, 4, 5, 6] };
+  }
+  // No-key path: only rung 1 (a matched branch) can NAME a top route —
+  // deterministic evidence on later rungs exists but cannot be fused into a
+  // family without a model, so those rungs are walked and recorded, never
+  // resolving. "The top route remains under-evidenced after the ladder" is
+  // about the ROUTE, not about evidence existing somewhere.
+  if (selectPrimaryIntent(normalized) !== null) {
+    return { state: 'resolved', resolvedByRung: 1 };
+  }
+  rungsWalked.push(2, 3, 4, 5, 6);
+  return { state: 'under_evidenced', rungsWalked };
+}
+
 export function routePromptEnhancement(
   input: PromptEnhancementRouteInput,
   llmRouteDecision?: PromptEnhancementLlmRouteDecisionV1,
 ): PromptEnhancementRouteResult {
   const normalized = input.promptText.toLowerCase();
   const evidenceRefs = buildRouteEvidenceRefs(input);
+  const ladderResolution = walkEvidenceLadderV1(input, normalized);
   const origin = input.generatedOriginState ?? 'ordinary_user_prompt';
 
   if (origin !== 'ordinary_user_prompt' || input.oldDecisionSessionPayloadPresent === true) {
-    return noPopupResult(input, 'old_or_generated_origin_skip', evidenceRefs);
+    return noPopupResult(input, 'old_or_generated_origin_skip', evidenceRefs, ladderResolution);
   }
 
   if (input.degradedNoActionState !== 'none' || input.classifierState === 'degraded_no_fire') {
-    return noPopupResult(input, 'degraded_classifier_no_fire', evidenceRefs);
+    return noPopupResult(input, 'degraded_classifier_no_fire', evidenceRefs, ladderResolution);
   }
   if (isFirstTriggerBlocked(input.firstTriggerGateState)) {
-    return noPopupResult(input, 'first_trigger_gate_blocked_no_popup', evidenceRefs);
+    return noPopupResult(input, 'first_trigger_gate_blocked_no_popup', evidenceRefs, ladderResolution);
   }
 
   // E6: an accepted bounded LLM route decision overrides the deterministic keyword
@@ -890,6 +896,17 @@ export function routePromptEnhancement(
   // overridable. Everything below stays the deterministic path + fallback.
   if (llmRouteDecision) {
     return buildRouteResultFromLlmDecision(input, llmRouteDecision, normalized, evidenceRefs);
+  }
+
+  // The classifier's intent proposal routes the keyed path: it chose from the FULL
+  // forty-intent menu under the locked evidence ladder, so it reaches intents the
+  // keyword cascade never could. An explicit accepted LLM route decision (above)
+  // still wins as the stronger authority; the hard skips higher up are never
+  // overridable. An empty proposal falls through to the deterministic cascade,
+  // byte-untouched — low-confidence disposition belongs to the routing fallback
+  // layer, which consumes the threaded confidence.
+  if (input.classifierPrimaryIntent) {
+    return buildRouteResultFromClassifierIntent(input, input.classifierPrimaryIntent, normalized, evidenceRefs, ladderResolution);
   }
 
   const hasSourceAIntent = hasExplicitRouteWords(normalized);
@@ -923,6 +940,7 @@ export function routePromptEnhancement(
       routeConfidence: 'weak_source_critical',
       fallbackMode: 'planning_first',
       routeEvidenceRefs: evidenceRefs,
+    ladderResolution,
       reasonCodes,
       noPopup: false,
       usesSharedSignalEvidenceOnly: true,
@@ -942,7 +960,7 @@ export function routePromptEnhancement(
       (input.sourceFactRefs?.length ?? 0) > 0
     );
   if (hasSourceBOnlyEvidence) {
-    return noPopupResult(input, 'source_b_only_cannot_open_popup', evidenceRefs);
+    return noPopupResult(input, 'source_b_only_cannot_open_popup', evidenceRefs, ladderResolution);
   }
 
   if (hasConflictingEvidence(input)) {
@@ -963,6 +981,7 @@ export function routePromptEnhancement(
       routeConfidence: 'conflicting',
       fallbackMode: 'planning_first',
       routeEvidenceRefs: evidenceRefs,
+    ladderResolution,
       reasonCodes,
       noPopup: false,
       usesSharedSignalEvidenceOnly: true,
@@ -972,12 +991,49 @@ export function routePromptEnhancement(
   }
 
   if (isWeakAmbiguousPrompt(normalized, input) || isUnsupportedShortSurfacePrompt(normalized, input) || isLowInformationPrompt(normalized, input)) {
-    return noPopupResult(input, 'ambiguous_weak_evidence_skip_no_popup', evidenceRefs);
+    return noPopupResult(input, 'ambiguous_weak_evidence_skip_no_popup', evidenceRefs, ladderResolution);
   }
 
   const intent = selectPrimaryIntent(normalized);
+  if (intent === null) {
+    // No branch matched — the route asserts NO family. It carries the
+    // planning/confirmation-first structural shape so the gate's narrow
+    // high-risk exception has a body to render; the gate's default for the
+    // under-evidenced state is the skip.
+    const selectedPreset = presetForIntent('planning.spec_or_prd');
+    const capabilityOverlays = withDebugEvidenceAskRule(
+      mergeCapabilities(selectedPreset.capabilityOverlays, normalized, input),
+      selectedPreset,
+      input,
+    );
+    const reasonCodes = ['no_family_evidence_no_catch_all'];
+    return {
+      contractDecision: toContractDecision(input, selectedPreset, capabilityOverlays, evidenceRefs, reasonCodes, false, 'missing', 'none'),
+      selectedPreset,
+      familyId: selectedPreset.family,
+      primaryIntent: selectedPreset.primaryIntent,
+      secondaryIntentTags: [],
+      capabilityOverlays,
+      routeConfidence: 'missing',
+      fallbackMode: 'none',
+      routeEvidenceRefs: evidenceRefs,
+      ladderResolution,
+      reasonCodes,
+      noPopup: false,
+      usesSharedSignalEvidenceOnly: true,
+      usesPeOnlyClassifier: false,
+      usesOldStaticDecisionSessionMap: false,
+    };
+  }
   const selectedPreset = presetForIntent(intent);
-  const capabilityOverlays = mergeCapabilities(selectedPreset.capabilityOverlays, normalized, input);
+  // The ask rule also governs the cascade's debug routes: a keyless session
+  // keeps the evidence request (nothing is known to be supplied), and a keyed
+  // session whose proposal fell through still benefits from its observation.
+  const capabilityOverlays = withDebugEvidenceAskRule(
+    mergeCapabilities(selectedPreset.capabilityOverlays, normalized, input),
+    selectedPreset,
+    input,
+  );
   const confidence = confidenceFor(normalized, input, intent);
   const reasonCodes = reasonCodesFor(normalized, input, intent, capabilityOverlays);
 
@@ -991,6 +1047,7 @@ export function routePromptEnhancement(
     routeConfidence: confidence,
     fallbackMode: 'none',
     routeEvidenceRefs: evidenceRefs,
+    ladderResolution,
     reasonCodes,
     noPopup: false,
     usesSharedSignalEvidenceOnly: true,
@@ -999,7 +1056,7 @@ export function routePromptEnhancement(
   };
 }
 
-function noPopupResult(input: PromptEnhancementRouteInput, reasonCode: string, evidenceRefs: readonly string[]): PromptEnhancementRouteResult {
+function noPopupResult(input: PromptEnhancementRouteInput, reasonCode: string, evidenceRefs: readonly string[], ladderResolution: PromptEnhancementLadderResolutionV1): PromptEnhancementRouteResult {
   const selectedPreset = presetForIntent('quick_improvement.local_polish_or_small_improvement');
   const routeConfidence = reasonCode.includes('high_risk') ? 'weak_source_critical' : 'weak_low_risk';
   return {
@@ -1012,6 +1069,7 @@ function noPopupResult(input: PromptEnhancementRouteInput, reasonCode: string, e
     routeConfidence,
     fallbackMode: 'skip_no_popup',
     routeEvidenceRefs: evidenceRefs,
+    ladderResolution,
     reasonCodes: [reasonCode],
     noPopup: true,
     usesSharedSignalEvidenceOnly: true,
@@ -1027,6 +1085,39 @@ function noPopupResult(input: PromptEnhancementRouteInput, reasonCode: string, e
  * `skip_no_useful_guidance` still legitimately skips (weak evidence ≠ forced popup).
  * The route stays typed + validated — no freeform route output.
  */
+/** Route from the stage classifier's intent proposal — same visible shape as every route. */
+function buildRouteResultFromClassifierIntent(
+  input: PromptEnhancementRouteInput,
+  intent: PromptEnhancementPrimaryIntent,
+  normalized: string,
+  evidenceRefs: readonly string[],
+  // With a non-empty proposal the walk resolved on rung 1 by construction;
+  // passed through so every path carries the same computed state.
+  ladderResolution: PromptEnhancementLadderResolutionV1,
+): PromptEnhancementRouteResult {
+  const selectedPreset = presetForIntent(intent);
+  const capabilityOverlays = decideCapabilityOverlaysFromObservation(selectedPreset, input);
+  const reasonCodes = ['classifier_intent_preferred'];
+  const routeConfidence: PromptEnhancementRouteConfidence = 'partial';
+  return {
+    contractDecision: toContractDecision(input, selectedPreset, capabilityOverlays, evidenceRefs, reasonCodes, false, routeConfidence, 'none'),
+    selectedPreset,
+    familyId: selectedPreset.family,
+    primaryIntent: selectedPreset.primaryIntent,
+    secondaryIntentTags: secondaryIntentTagsFor(normalized, selectedPreset.primaryIntent),
+    capabilityOverlays,
+    routeConfidence,
+    fallbackMode: 'none',
+    routeEvidenceRefs: evidenceRefs,
+    ladderResolution,
+    reasonCodes,
+    noPopup: false,
+    usesSharedSignalEvidenceOnly: true,
+    usesPeOnlyClassifier: false,
+    usesOldStaticDecisionSessionMap: false,
+  };
+}
+
 function buildRouteResultFromLlmDecision(
   input: PromptEnhancementRouteInput,
   decision: PromptEnhancementLlmRouteDecisionV1,
@@ -1034,11 +1125,25 @@ function buildRouteResultFromLlmDecision(
   evidenceRefs: readonly string[],
 ): PromptEnhancementRouteResult {
   const selectedPreset = presetForIntent(decision.primaryIntent);
-  const capabilityOverlays = mergeCapabilities([...selectedPreset.capabilityOverlays, ...decision.capabilities], normalized, input);
+  // A keyed session decides capabilities from the classifier's observation
+  // under the registry's locked scope; the accepted decision's own capability
+  // list passes through unchanged — it is E6's accepted contract. The keyword
+  // merge remains only where no observation channel exists.
+  const capabilityOverlays = input.classifierCapabilityCandidates !== undefined
+    ? [...new Set([...decideCapabilityOverlaysFromObservation(selectedPreset, input), ...decision.capabilities])]
+    : withDebugEvidenceAskRule(
+        mergeCapabilities([...selectedPreset.capabilityOverlays, ...decision.capabilities], normalized, input),
+        selectedPreset,
+        input,
+      );
   const noPopup = decision.ambiguityState === 'skip_no_useful_guidance';
   const fallbackMode: PromptEnhancementRouteFallbackMode = noPopup ? 'skip_no_popup' : 'none';
   const reasonCodes = ['llm_route_decision_accepted'];
   const routeConfidence: PromptEnhancementRouteConfidence = 'partial';
+  // An accepted route decision IS explicit rung-1 evidence resolved — the
+  // decision was made from the prompt's own natural language under its
+  // acceptance rules, so the walk's no-key reading is superseded here.
+  const ladderResolution: PromptEnhancementLadderResolutionV1 = { state: 'resolved', resolvedByRung: 1 };
   return {
     contractDecision: toContractDecision(input, selectedPreset, capabilityOverlays, evidenceRefs, reasonCodes, noPopup, routeConfidence, fallbackMode, true, decision.ambiguityState),
     selectedPreset,
@@ -1049,6 +1154,7 @@ function buildRouteResultFromLlmDecision(
     routeConfidence,
     fallbackMode,
     routeEvidenceRefs: evidenceRefs,
+    ladderResolution,
     reasonCodes,
     noPopup,
     usesSharedSignalEvidenceOnly: true,
@@ -1080,6 +1186,7 @@ function toContractDecision(
   const compoundPromptState = compoundPromptStateFor(input.promptText);
   return {
     routeDecisionId: input.routeDecisionId,
+    debugEvidenceObserved: [...(input.classifierDebugEvidencePresent ?? [])],
     promptReviewOrigin: promptReviewOriginFor(input),
     promptReviewProcessingPolicy: promptReviewProcessingPolicyFor(input),
     familyId: selectedPreset.family,
@@ -1332,6 +1439,12 @@ export function describePromptEnhancementSequencePlanV1(
   return { pointCount: Math.max(1, points.length), roleLabels };
 }
 
+/**
+ * DECIDED (route-preference phase): `routeCandidates` remains NON-PROMOTING
+ * diagnostics. Its original promote-a-near-miss purpose is superseded by the
+ * classifier choosing from the full intent menu; it stays as advisory metadata
+ * because it is a contract field with downstream consumers, and it never routes.
+ */
 function routeCandidatesFor(
   selectedPreset: PromptEnhancementTaxonomyPreset,
   selectedCapabilityOverlays: readonly PromptEnhancementCapabilityId[],
@@ -1633,7 +1746,7 @@ function hasConflictingEvidence(input: PromptEnhancementRouteInput): boolean {
   });
 }
 
-function selectPrimaryIntent(normalized: string): PromptEnhancementPrimaryIntent {
+function selectPrimaryIntent(normalized: string): PromptEnhancementPrimaryIntent | null {
   // P3-G1: a clear build/implement intent must not be captured by an incidental broad
   // verb that merely NAMES the thing being built (e.g. "implement a code review tool",
   // "add audit logging", "here's the plan: build X"). Gate the broad review/audit/plan
@@ -1699,9 +1812,90 @@ function selectPrimaryIntent(normalized: string): PromptEnhancementPrimaryIntent
   if (hasAny(normalized, ['idea', 'explore', 'options'])) return 'feature.idea_discussion';
   if (hasAny(normalized, ['implement', 'build', 'add', 'create'])) return 'feature.fresh_implementation';
 
-  return 'quick_improvement.local_polish_or_small_improvement';
+  // The old terminal asserted quick_improvement for everything unmatched —
+  // treating "could not tell" as "this is small". A cascade that matched no
+  // branch asserts NOTHING; the route carries the typed under-evidenced state
+  // instead, and the popup decision applies the locked dispositions. The
+  // keyword gates above are untouched.
+  return null;
 }
 
+/**
+ * The evidence floor for the LACKS rule: a debug-shaped prompt carrying fewer
+ * than this many of the eight evidence forms still lacks reproduction
+ * evidence, so the request slot attaches. Two independent forms (for example a
+ * pasted trace plus the failing test name) count as supplied.
+ */
+const DEBUG_EVIDENCE_SUPPLIED_FLOOR = 2;
+
+/**
+ * Capabilities the REGISTRY decides alone, never accepted as a classifier
+ * candidate. The reproduction/evidence request is decided by the LACKS rule
+ * below — a negative test about what the prompt is MISSING. That rule can only
+ * ADD, so an observed candidate naming the same capability would attach it on
+ * a prompt that already supplied its evidence, silently overriding the
+ * negative test and re-nagging exactly the user C4 exists to stop nagging. Its
+ * scope map (issue_debug + planning.debugging_plan) is the same route set the
+ * rule governs, so refusing it as a candidate costs no reachable attachment:
+ * inside that set the rule decides, and outside it the scope check vetoed it
+ * anyway. The model observes; the registry decides.
+ */
+const REGISTRY_OWNED_CAPABILITIES: ReadonlySet<PromptEnhancementCapabilityId> = new Set([
+  'capability.reproduction_or_evidence_needed',
+]);
+
+/**
+ * The registry's capability decision on the keyed path — the keyword decider's
+ * replacement. The classifier only OBSERVED candidates; every attachment is
+ * decided here: a candidate outside its locked family/intent scope is VETOED,
+ * and the reproduction/evidence slot additionally attaches by the registry's
+ * own rule — debug-shaped route AND the observed evidence list is short. That
+ * is a negative test about what the prompt is MISSING, which a keyword list
+ * structurally cannot evaluate: a keyword can spot a present word, not an
+ * absence.
+ */
+function decideCapabilityOverlaysFromObservation(
+  selectedPreset: PromptEnhancementTaxonomyPreset,
+  input: PromptEnhancementRouteInput,
+): readonly PromptEnhancementCapabilityId[] {
+  const capabilities = new Set(selectedPreset.capabilityOverlays);
+  for (const candidate of input.classifierCapabilityCandidates ?? []) {
+    if (REGISTRY_OWNED_CAPABILITIES.has(candidate)) continue;
+    if (isCapabilityCompatibleWithRoute(candidate, selectedPreset.family, selectedPreset.primaryIntent)) {
+      capabilities.add(candidate);
+    }
+  }
+  return withDebugEvidenceAskRule(capabilities, selectedPreset, input);
+}
+
+/**
+ * The registry's evidence-lacking rule for the reproduction/evidence request:
+ * on a debug-shaped route, attach it unless the classifier OBSERVED the prompt
+ * already supplying enough evidence forms. An absent observation channel
+ * (no-key session) reads as "not known to be supplied", so those routes keep
+ * asking — only an observed-supplied prompt clears the request. This consults
+ * the evidence observation, never prompt keywords, so it lives outside the
+ * demoted keyword decider on every path.
+ */
+function withDebugEvidenceAskRule(
+  capabilities: ReadonlySet<PromptEnhancementCapabilityId> | readonly PromptEnhancementCapabilityId[],
+  selectedPreset: PromptEnhancementTaxonomyPreset,
+  input: PromptEnhancementRouteInput,
+): readonly PromptEnhancementCapabilityId[] {
+  const merged = new Set(capabilities);
+  const debugShaped = selectedPreset.family === 'issue_debug' || selectedPreset.primaryIntent === 'planning.debugging_plan';
+  if (debugShaped && (input.classifierDebugEvidencePresent ?? []).length < DEBUG_EVIDENCE_SUPPLIED_FLOOR) {
+    merged.add('capability.reproduction_or_evidence_needed');
+  }
+  return [...merged];
+}
+
+/**
+ * The keyword capability decider — DEMOTED to the no-key path, where no
+ * classifier observation exists, exactly like the keyword cascade: not
+ * deleted, not widened. Keyed routes decide capabilities from the classifier's
+ * observation via decideCapabilityOverlaysFromObservation instead.
+ */
 function mergeCapabilities(
   baseCapabilities: readonly PromptEnhancementCapabilityId[],
   normalized: string,

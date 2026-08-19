@@ -8,6 +8,12 @@ export type InsertParams = {
   projectRoot: string;
   promptText: string;
   agent?: string;
+  /**
+   * Historical capture time (Unix ms). Live prompts omit it and get Date.now();
+   * the historical backfill passes the transcript row's real timestamp so recency
+   * reads and `captured_at`-based reasoning see true time, not import time.
+   */
+  capturedAt?: number;
 };
 
 export type PromptStats = {
@@ -23,12 +29,12 @@ export type PromptStats = {
 
 /** Insert a prompt, applying secret redaction and enforcing the per-project FIFO cap. */
 export function insertPrompt(store: Store, params: InsertParams): void {
-  const { projectRoot, promptText, agent } = params;
+  const { projectRoot, promptText, agent, capturedAt } = params;
   const text = redactSecrets(promptText);
 
   store.db.run(
     'INSERT INTO prompts (project_root, prompt_text, agent, captured_at) VALUES (?, ?, ?, ?)',
-    [projectRoot, text, agent ?? null, Date.now()]
+    [projectRoot, text, agent ?? null, capturedAt ?? Date.now()]
   );
 
   // Enforce per-project cap (default 500, user-configurable)

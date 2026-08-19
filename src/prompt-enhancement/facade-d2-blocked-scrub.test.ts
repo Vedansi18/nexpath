@@ -24,7 +24,7 @@ vi.mock('./safety-sendability.js', async (importOriginal) => {
 
 const { preparePromptEnhancement } = await import('./facade.js');
 
-const ORIGINAL = 'Fix the failing payment test and explain the verification.';
+const ORIGINAL = 'Fix the failing payment test, the test failure blocks ci, and explain the verification.';
 
 function request(): PromptEnhancementPrepareRequestV1 {
   const sourceRef: PromptEnhancementSourceRefV1 = {

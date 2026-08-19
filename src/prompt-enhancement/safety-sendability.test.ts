@@ -744,6 +744,12 @@ describe('prompt-enhancement safety, privacy, and sendability validation', () =>
       originalPromptText: 'ફેલિંગ ટેસ્ટ તપાસો અને પુરાવો લખો.',
       route: {
         promptText: 'ફેલિંગ ટેસ્ટ તપાસો અને પુરાવો લખો.',
+        // Non-English wording matches no cascade branch; the classifier's
+        // proposal is how such prompts route in production.
+        classifierPrimaryIntent: 'issue_debug.failing_test',
+        classifierIntentConfidence: 0.9,
+        classifierCapabilityCandidates: [],
+        classifierDebugEvidencePresent: [],
       },
     });
     const editedBodyText = `${currentBody.text}\n\nGenerated direct instruction:\n- નિષ્ફળ ટેસ્ટ તપાસો, પુરાવો નોંધો, અને ચકાસણી લખો.`;
@@ -1671,5 +1677,87 @@ describe('user-edit authority — the ruling, pinned (2026-08-14)', () => {
     const result = validatePromptEnhancementSafety({ currentBody, editedBodyText, actionType: 'use_current_body' });
 
     expect(result.failures.map((failure) => failure.failureCode)).toContain('body_size:cap_exceeded');
+  });
+});
+
+// ── The no-invention state, enforced end to end (the fabrication hard-fail) ──
+
+describe('no-invention state: a section carrying the obligation cannot name what nobody supplied', () => {
+  // The measured defect: a repro/evidence section asked to write about a queue
+  // the user never mentioned answered "use RabbitMQ or AWS SQS". Prose could
+  // not catch it; the typed state can.
+  const debugPrompt = 'the checkout job stops halfway and I cannot tell why';
+  const reproRoute = {
+    promptText: debugPrompt,
+    classifierPrimaryIntent: 'issue_debug.reproduction_discovery' as const,
+    classifierIntentConfidence: 0.9,
+    classifierCapabilityCandidates: [] as const,
+    classifierDebugEvidencePresent: [] as const,
+  };
+
+  function bodyWithReproText(sectionText: string) {
+    const body = composedBody({ originalPromptText: debugPrompt, route: reproRoute as never });
+    const sections = body.sections.map((section) =>
+      section.sectionKind === 'reproduction_or_evidence' ? { ...section, bodyText: sectionText } : section,
+    );
+    const repro = sections.find((section) => section.sectionKind === 'reproduction_or_evidence');
+    expect(repro, 'fixture needs the reproduction section').toBeDefined();
+    expect(repro!.slotObligations).toContain('no_invention_state');
+    return { ...body, sections, text: `${body.text}\n${sectionText}` };
+  }
+
+  it('HARD FAIL: the fabricated-tool answer is rejected by name', () => {
+    const result = validatePromptEnhancementSafety({
+      currentBody: bodyWithReproText('- Use RabbitMQ or AWS SQS to replay the job and capture the failure.') as never,
+    });
+    const codes = result.failures.map((failure) => failure.failureCode);
+    expect(codes.some((code) => code.startsWith('no_invention_state:fabricated_item:'))).toBe(true);
+    expect(codes.some((code) => code.includes('RabbitMQ'))).toBe(true);
+    expect(result.generatedSafeStatus).not.toBe('valid');
+  });
+
+  it('a fabricated file path in the same section also hard-fails', () => {
+    const result = validatePromptEnhancementSafety({
+      currentBody: bodyWithReproText('- Read src/queue/consumer.ts to find the stalled step.') as never,
+    });
+    expect(result.failures.map((f) => f.failureCode).some((code) => code.includes('src/queue/consumer.ts'))).toBe(true);
+  });
+
+  it('asking for the evidence — inventing nothing — passes', () => {
+    const result = validatePromptEnhancementSafety({
+      currentBody: bodyWithReproText('- State the exact steps that reach the stall, what you expected, and what happened instead.') as never,
+    });
+    expect(result.failures.map((f) => f.failureCode).some((code) => code.startsWith('no_invention_state:'))).toBe(false);
+  });
+
+  it('an item the USER supplied is not an invention', () => {
+    const body = composedBody({
+      originalPromptText: 'the checkout job stops halfway, RabbitMQ is the queue we use',
+      route: { ...reproRoute, promptText: 'the checkout job stops halfway, RabbitMQ is the queue we use' } as never,
+    });
+    const sections = body.sections.map((section) =>
+      section.sectionKind === 'reproduction_or_evidence'
+        ? { ...section, bodyText: '- Capture the RabbitMQ consumer state when the job stalls.' }
+        : section,
+    );
+    const result = validatePromptEnhancementSafety({
+      currentBody: { ...body, sections, text: `${body.text}\n- Capture the RabbitMQ consumer state when the job stalls.` } as never,
+    });
+    expect(result.failures.map((f) => f.failureCode).some((code) => code.startsWith('no_invention_state:'))).toBe(false);
+  });
+
+  it('a section WITHOUT the obligation is not policed by this check', () => {
+    const body = composedBody({ originalPromptText: debugPrompt, route: reproRoute as never });
+    const sections = body.sections.map((section) =>
+      section.sectionKind === 'verification_or_test_plan'
+        ? { ...section, bodyText: '- Verify with RabbitMQ management UI.' }
+        : section,
+    );
+    const verification = sections.find((section) => section.sectionKind === 'verification_or_test_plan');
+    expect(verification!.slotObligations).not.toContain('no_invention_state');
+    const result = validatePromptEnhancementSafety({
+      currentBody: { ...body, sections, text: `${body.text}\n- Verify with RabbitMQ management UI.` } as never,
+    });
+    expect(result.failures.map((f) => f.failureCode).some((code) => code.startsWith('no_invention_state:'))).toBe(false);
   });
 });

@@ -74,11 +74,20 @@ export async function envAction(opts: EnvCommandOptions = {}): Promise<void> {
     // Persist locally (machine facts always; project facts only for a registered
     // project — setProjectEnvFacts no-ops otherwise). Display reflects the probe.
     setMachineFacts(store, machine, now);
-    setProjectEnvFacts(store, anchoredRoot, project, now);
+    const projectStored = setProjectEnvFacts(store, anchoredRoot, project, now);
 
     console.log('Dev-environment facts (local-only; never transmitted):');
     printFacts('Machine', machine);
     printFacts(`Project — ${projectShape} @ ${anchoredRoot}`, project);
+    if (!projectStored) {
+      // §17.8: the probe ran and the store did not take it — the project is not registered
+      // under any form of this path. Saying so is the whole point: the previous silence made
+      // a no-op look identical to a successful store.
+      console.log('');
+      console.log('⚠  Project facts were NOT stored: no registered project matches this path.');
+      console.log('   They are shown above but will not reach prompt enhancement.');
+      console.log('   Send one prompt from this project first, then re-run `nexpath env`.');
+    }
     console.log(`\nDisable anytime: nexpath config set ${ENV_PROBE_ENABLED_KEY} false`);
   } finally {
     closeStore(store);

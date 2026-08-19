@@ -6,8 +6,9 @@ import { openStore } from './db.js';
 import type { Store } from './db.js';
 import { getRecentPrompts, insertPrompt } from './prompts.js';
 import { upsertProject, getProject } from './projects.js';
+import { setConfig } from './config.js';
 import { importHistoricalPrompts } from './historical-import.js';
-import { SessionStateManager } from '../classifier/SessionStateManager.js';
+import { SessionStateManager, MAX_HISTORY } from '../classifier/SessionStateManager.js';
 import { readParamEvents } from '../telemetry/param-events.js';
 import { getUserDepthLevel } from './user-depth-level.js';
 
@@ -17,6 +18,10 @@ const PROJECT_ROOT = '/test/hist-project';
 
 function makeUserLine(content: string): string {
   return JSON.stringify({ type: 'user', message: { content } });
+}
+
+function makeUserLineAt(content: string, isoTimestamp: string): string {
+  return JSON.stringify({ type: 'user', message: { content }, timestamp: isoTimestamp });
 }
 
 function makeAssistantLine(content: string): string {
@@ -70,6 +75,144 @@ describe('importHistoricalPrompts', () => {
     const rows = getRecentPrompts(store, PROJECT_ROOT, 10);
     expect(rows).toHaveLength(1);
     expect(rows[0].text).toBe('existing prompt');
+  });
+
+  // 1b. PINNED EDGE — a prompt stored before the first import opportunity skips the
+  // entire import, permanently. There is no partial merge on later calls: the import
+  // is all-or-nothing on a zero-prompt store. (Editor-platform backfills must pin the
+  // same behaviour so the platforms stay consistent.)
+  it('pinned edge: one pre-existing prompt skips the entire import permanently — no partial merge on later calls', async () => {
+    insertPrompt(store, { projectRoot: PROJECT_ROOT, promptText: 'post-install prompt', agent: 'claude-code' });
+    const projDir = setupProjDir(tmpDir);
+    writeJsonl(projDir, 'session.jsonl', [
+      makeUserLine('history one'),
+      makeUserLine('history two'),
+      makeUserLine('history three'),
+    ]);
+
+    await importHistoricalPrompts(store, PROJECT_ROOT);
+    await importHistoricalPrompts(store, PROJECT_ROOT);
+
+    const rows = getRecentPrompts(store, PROJECT_ROOT, 10);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].text).toBe('post-install prompt');
+  });
+
+  // 1c. CHRONOLOGY — store order follows the rows' own timestamps, oldest first,
+  // even when timestamp order contradicts file order. Recency reads (newest first)
+  // must return the chronologically newest history first. The whole fixture runs
+  // through the CLAUDE_CONFIG_DIR override (the harness points it at a temp dir),
+  // and also asserts the import's riders: exact imported count and zero advisories
+  // fired by the import itself.
+  it('imports in true chronological order by row timestamps, across files', async () => {
+    const projDir = setupProjDir(tmpDir);
+
+    // Old file holds 10:00 and 13:00; new file holds 12:00 and 14:00 — a pure
+    // file-order import would interleave these wrongly.
+    writeJsonl(projDir, 'old-session.jsonl', [
+      makeUserLineAt('prompt-a', '2026-08-12T10:00:00.000Z'),
+      makeUserLineAt('prompt-c', '2026-08-12T13:00:00.000Z'),
+    ]);
+    const oneHourAgo = (Date.now() - 3_600_000) / 1000;
+    utimesSync(join(projDir, 'old-session.jsonl'), oneHourAgo, oneHourAgo);
+    writeJsonl(projDir, 'new-session.jsonl', [
+      makeUserLineAt('prompt-b', '2026-08-12T12:00:00.000Z'),
+      makeUserLineAt('prompt-d', '2026-08-12T14:00:00.000Z'),
+    ]);
+
+    await importHistoricalPrompts(store, PROJECT_ROOT);
+
+    const rows = getRecentPrompts(store, PROJECT_ROOT, 10);
+    expect(rows.map((r) => r.text)).toEqual(['prompt-d', 'prompt-c', 'prompt-b', 'prompt-a']);
+    // Rider: imported count = min(N, cap) — all four rows, nothing dropped or duplicated.
+    expect(rows).toHaveLength(4);
+    // Rider: the import fires ZERO advisories — the bootstrapped session state has
+    // no fired decision-session record.
+    const mgr = SessionStateManager.load(store, PROJECT_ROOT);
+    expect(mgr.current.firedDecisionSessions ?? []).toHaveLength(0);
+    // Rider (lives in the disk-store retro block below, NOT here): param-event
+    // retro-population is a no-op on in-memory stores, so its visibility assertion
+    // belongs to 'records historical_import param-events (stage null)…' — asserting
+    // it on this in-memory store would be vacuously true.
+  });
+
+  // 1d. TIMESTAMPS — captured_at carries the transcript row's real time; a row
+  // without a timestamp falls back to import time, never to a fabricated value.
+  it('imported rows carry the historical row timestamps in captured_at', async () => {
+    const testStart = Date.now();
+    const projDir = setupProjDir(tmpDir);
+    writeJsonl(projDir, 'session.jsonl', [
+      makeUserLineAt('stamped prompt', '2026-08-12T15:34:31.560Z'),
+      makeUserLine('unstamped prompt'),
+    ]);
+
+    await importHistoricalPrompts(store, PROJECT_ROOT);
+
+    const rows = getRecentPrompts(store, PROJECT_ROOT, 10);
+    const stamped   = rows.find((r) => r.text === 'stamped prompt');
+    const unstamped = rows.find((r) => r.text === 'unstamped prompt');
+    expect(stamped?.capturedAt).toBe(Date.parse('2026-08-12T15:34:31.560Z'));
+    expect(unstamped?.capturedAt).toBeGreaterThanOrEqual(testStart);
+  });
+
+  // 1e. EVICTION ORDER — after a chronological import fills the cap, a live prompt
+  // evicts the GENUINELY oldest imported row, not the newest session's history.
+  it('post-import inserts evict the genuinely oldest history first', async () => {
+    setConfig(store, 'prompt_store_max_per_project', '3');
+    const projDir = setupProjDir(tmpDir);
+    writeJsonl(projDir, 'session.jsonl', [
+      makeUserLineAt('oldest', '2026-08-10T09:00:00.000Z'),
+      makeUserLineAt('middle', '2026-08-11T09:00:00.000Z'),
+      makeUserLineAt('newest', '2026-08-12T09:00:00.000Z'),
+    ]);
+
+    await importHistoricalPrompts(store, PROJECT_ROOT);
+    insertPrompt(store, { projectRoot: PROJECT_ROOT, promptText: 'live prompt', agent: 'claude-code' });
+
+    const texts = getRecentPrompts(store, PROJECT_ROOT, 10).map((r) => r.text);
+    expect(texts).toEqual(['live prompt', 'newest', 'middle']);
+    expect(texts).not.toContain('oldest');
+  });
+
+  // 1f. NOISE EXCLUSION — the non-prompt row shapes Claude Code writes as user rows
+  // (slash-command wrappers, caveat banners, hook feedback, command stdout) never
+  // import; genuine prompts around them do.
+  it('excludes the four noise shapes at import; genuine prompts still import', async () => {
+    const projDir = setupProjDir(tmpDir);
+    writeJsonl(projDir, 'session.jsonl', [
+      makeUserLine('<command-name>/clear</command-name>'),
+      makeUserLine('Caveat: the messages below were generated by the user while running local commands.'),
+      makeUserLine('some wrapper text <local-command-caveat> inside'),
+      makeUserLine('<local-command-stdout>build ok</local-command-stdout>'),
+      makeUserLine('Stop hook feedback: rerun the suite'),
+      // Background-task completion notice: injected as a user row when a
+      // backgrounded command or subagent finishes. Found surviving the filter
+      // in a re-audit of live transcripts, at ~1.5% of imported rows.
+      makeUserLine('<task-notification>\n<task-id>b3xvqc13o</task-id>\n<status>completed</status>\n</task-notification>'),
+      makeUserLine('a genuine typed prompt'),
+    ]);
+
+    await importHistoricalPrompts(store, PROJECT_ROOT);
+
+    const texts = getRecentPrompts(store, PROJECT_ROOT, 10).map((r) => r.text);
+    expect(texts).toEqual(['a genuine typed prompt']);
+  });
+
+  // 1g. NO FAKE STAGE STAMP — bootstrapped session records carry null stage and null
+  // confidence: these prompts were never classified, and a uniform fabricated stage
+  // would bias stage reads. The classifier fills real stages as live prompts arrive.
+  it('bootstrapped records carry null stage and null confidence — never a fabricated stamp', async () => {
+    const projDir = setupProjDir(tmpDir);
+    writeJsonl(projDir, 'session.jsonl', [makeUserLine('history a'), makeUserLine('history b')]);
+
+    await importHistoricalPrompts(store, PROJECT_ROOT);
+
+    const mgr = SessionStateManager.load(store, PROJECT_ROOT);
+    expect(mgr.current.promptHistory.length).toBeGreaterThan(0);
+    for (const record of mgr.current.promptHistory) {
+      expect(record.classifiedStage).toBeNull();
+      expect(record.confidence).toBeNull();
+    }
   });
 
   // 2. Guard — skips when projDir does not exist
@@ -317,12 +460,48 @@ describe('importHistoricalPrompts', () => {
     await importHistoricalPrompts(store, PROJECT_ROOT);
 
     const mgr = SessionStateManager.load(store, PROJECT_ROOT);
-    // promptHistory is built from collected.slice(0, MAX_HISTORY)
-    // collected[0] = new prompt a (from newest file), collected[2] = old prompt a
-    expect(mgr.current.promptHistory[0].text).toBe('new prompt a');
-    expect(mgr.current.promptHistory[1].text).toBe('new prompt b');
-    expect(mgr.current.promptHistory[2].text).toBe('old prompt a');
-    expect(mgr.current.promptHistory[3].text).toBe('old prompt b');
+    // OLDEST-FIRST, matching the live path: SessionStateManager maintains this
+    // array with push + shift, so index 0 is the oldest and the tail is newest.
+    // (This assertion previously pinned the reverse, which handed imported
+    // projects their oldest prompts wherever the code asks for the newest.)
+    expect(mgr.current.promptHistory.map((p) => p.text)).toEqual([
+      'old prompt a', 'old prompt b', 'new prompt a', 'new prompt b',
+    ]);
+    // The reason the order matters, pinned so it cannot regress quietly: every
+    // consumer reads recency off the TAIL — the mistake detectors take
+    // `slice(-n)`, and the classifier window appends the current prompt at the end.
+    const recentTwo = mgr.current.promptHistory.slice(-2).map((p) => p.text);
+    expect(recentTwo).toEqual(['new prompt a', 'new prompt b']);
+    // Index ascends with time, as it does for live records.
+    expect(mgr.current.promptHistory.map((p) => p.index)).toEqual([0, 1, 2, 3]);
+  });
+
+  // At REAL scale. The assertion above uses four prompts, where taking the
+  // newest MAX_HISTORY and taking the oldest MAX_HISTORY are the same array —
+  // so it cannot tell the two apart. Most imported projects carry far more than
+  // MAX_HISTORY prompts, and there the choice decides whether the session is
+  // seeded with the user's current work or with history from months ago.
+  it('beyond MAX_HISTORY, the session is seeded with the NEWEST window, still ascending', async () => {
+    const projDir = setupProjDir(tmpDir);
+    const total = MAX_HISTORY + 10;
+    // prompt-01 .. prompt-40, one hour apart, oldest first in the file.
+    const lines = Array.from({ length: total }, (_, i) =>
+      makeUserLineAt(
+        `prompt-${String(i + 1).padStart(2, '0')}`,
+        new Date(Date.UTC(2026, 7, 12, i, 0, 0)).toISOString(),
+      ));
+    writeJsonl(projDir, 'session.jsonl', lines);
+
+    await importHistoricalPrompts(store, PROJECT_ROOT);
+
+    const history = SessionStateManager.load(store, PROJECT_ROOT).current.promptHistory;
+    expect(history).toHaveLength(MAX_HISTORY);
+    // The newest window: prompts 11..40, not 1..30.
+    expect(history[0].text).toBe('prompt-11');
+    expect(history[history.length - 1].text).toBe('prompt-40');
+    expect(history.map((p) => p.text)).not.toContain('prompt-01');
+    // Recency still reads off the tail, as every consumer expects.
+    expect(history.slice(-3).map((p) => p.text)).toEqual(['prompt-38', 'prompt-39', 'prompt-40']);
   });
 });
 

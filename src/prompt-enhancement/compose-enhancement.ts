@@ -23,6 +23,9 @@ import {
   type PromptEnhancementValidationStatus,
 } from './contracts.js';
 import { buildPromptEnhancementCostVisibilityMetadataV1 } from './cost-observability.js';
+import { promptEnhancementFactValueLinesV1, promptEnhancementGroundedValuesV1 } from './fact-value-render.js';
+import type { PromptEnhancementGuidanceFact } from './templates/section-plan.js';
+import { PROMPT_ENHANCEMENT_FALLTHROUGH_SHORT_PREFIX_V1 } from './body-assertion-checks.js';
 import {
   buildPromptEnhancementOriginalTextRefV1,
   buildPromptEnhancementPromptPointRefsV1,
@@ -174,7 +177,11 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
     action,
     hasAcceptedAdditionalDetails(input),
   );
-  const validatedLlmDrafts = validatedStructuredComposerDrafts(input.structuredComposerOutput, sectionPlans);
+  const validatedLlmDrafts = validatedStructuredComposerDrafts(
+    input.structuredComposerOutput,
+    sectionPlans,
+    input.sectionPlanningResult.renderedFacts,
+  );
   const structuredComposerAttempted = runtimeState === 'accepted_structured_output' && input.structuredComposerOutput !== undefined;
   const structuredComposerRejected = structuredComposerAttempted && validatedLlmDrafts.draftsBySectionId.size === 0;
   const effectiveRuntimeState: PromptEnhancementComposerRuntimeState = structuredComposerRejected
@@ -385,7 +392,7 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
     ? applyEditedBodyWithAdditionalDetails(input.editedBodyText, input.additionalDetailsText)
     : canonicalText;
   const modelDraftedSectionIds = new Set(validatedLlmDrafts.draftsBySectionId.keys());
-  let sections = attachSpanRefs(renderableSectionPlans, renderedSections, text, input.originalPromptText, modelDraftedSectionIds, input.sectionPlanningResult.promptReviewOrigin);
+  let sections = attachSpanRefs(input.sectionPlanningResult.renderedFacts, renderableSectionPlans, renderedSections, text, input.originalPromptText, modelDraftedSectionIds, input.sectionPlanningResult.promptReviewOrigin);
   // Validator-parity confirmation guard (blocked-popup fix 2026-08-07): the prompt-based gate
   // above cannot see risk phrasing the GENERATED wording introduces (an LLM draft is free text),
   // but validatePromptEnhancementSafety scans the generated body and hard-blocks a body that
@@ -413,7 +420,7 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
       renderedSections = renderSectionsWithConfirmation(lastGeneratedSectionId);
       canonicalText = renderedSections.map((section) => section.text).join('\n\n');
       text = canonicalText;
-      sections = attachSpanRefs(renderableSectionPlans, renderedSections, text, input.originalPromptText, modelDraftedSectionIds, input.sectionPlanningResult.promptReviewOrigin);
+      sections = attachSpanRefs(input.sectionPlanningResult.renderedFacts, renderableSectionPlans, renderedSections, text, input.originalPromptText, modelDraftedSectionIds, input.sectionPlanningResult.promptReviewOrigin);
     }
   }
   const generatedSafeStatus: PromptEnhancementValidationStatus = deterministicFallback === 'none' ? 'valid' : 'valid_with_fallback';
@@ -568,9 +575,34 @@ function selectSectionPlansForAction(
   ));
 }
 
+/**
+ * L7567: content-template inputs are "source evidence only" and "cannot become …
+ * raw DS prose copy". GR-2 is the phase that put that text in front of the model,
+ * so this is where the lock is checked — the system prompt asks the model not to
+ * paste, and by this codebase's own standard an instruction is not a contract.
+ *
+ * ⚠️ Deliberately NARROW, because GR-1 exists to make bodies state resolved values:
+ * only content-template prose qualifies (a hard fact's value like `vitest` is a
+ * fact, not prose), and only a substantial run counts. A short evidence value is
+ * grounding and must keep passing.
+ */
+const PROMPT_ENHANCEMENT_PROSE_COPY_MIN_CHARS_V1 = 40;
+
+function contentTemplateProseFor(
+  sectionPlan: PromptEnhancementSectionPlanItemV1,
+  renderedFacts: readonly PromptEnhancementGuidanceFact[],
+): readonly string[] {
+  return renderedFacts
+    .filter((fact) => fact.targetSectionKind === sectionPlan.sectionKind)
+    .filter((fact) => fact.sourceType === 'content_template_record' || fact.sourceType === 'content_template_runtime_fact')
+    .map((fact) => normalizeWhitespace(fact.evidence?.value ?? '').toLowerCase())
+    .filter((prose) => prose.length >= PROMPT_ENHANCEMENT_PROSE_COPY_MIN_CHARS_V1);
+}
+
 function validatedStructuredComposerDrafts(
   output: PromptEnhancementStructuredComposerOutputV1 | undefined,
   sectionPlans: readonly PromptEnhancementSectionPlanItemV1[],
+  renderedFacts: readonly PromptEnhancementGuidanceFact[] = [],
 ): ValidatedStructuredComposerDrafts {
   const rejectedFor = (
     rejectionReason: PromptEnhancementComposerDraftRejectionReason,
@@ -610,6 +642,13 @@ function validatedStructuredComposerDrafts(
     if (!sectionPlan || sectionPlan.sectionKind === 'original_request_or_goal') { dropDraft('original_section'); continue; }
     const bodyText = normalizeWhitespace(draft.bodyText);
     if (!bodyText || containsDisallowedComposerWording(bodyText, sourceIds, sourceRefIds)) { dropDraft('empty_or_disallowed_wording'); continue; }
+    // Pasted content-template prose is disallowed wording of exactly the kind the
+    // check above refuses, so it rides that reason rather than widening the typed
+    // union — and it costs this draft only, leaving the section to render
+    // deterministically while every other draft keeps the model's wording.
+    const pastedProse = contentTemplateProseFor(sectionPlan, renderedFacts)
+      .some((prose) => bodyText.toLowerCase().includes(prose));
+    if (pastedProse) { dropDraft('empty_or_disallowed_wording'); continue; }
     if (draft.sourceFactIds.length === 0) { dropDraft('no_source_fact_ids'); continue; }
     if (draft.sourceFactIds.some((sourceFactId) => !sectionPlan.structuredContentPartRefs.includes(sourceFactId))) { dropDraft('source_fact_id_not_in_section'); continue; }
     drafts.set(draft.sectionId, `- ${bodyText}`);
@@ -790,11 +829,44 @@ function renderSection(input: {
     input.originalPromptText,
     heading,
     input.sectionPlanningResult.promptReviewOrigin,
+    sectionPlan.slotObligations,
+    input.sectionPlanningResult.debugEvidenceObserved,
   );
+  // GR-1 (§13.2): STATE the facts this section holds instead of instructing about
+  // them. Only facts group A actually RESOLVED produce a line, so a section with
+  // no value keeps its existing instruction untouched — the Phase-4 collapse
+  // happened precisely because a projection was widened without resolution.
+  const factValueLines = promptEnhancementFactValueLinesV1(
+    sectionPlan.sectionKind,
+    input.sectionPlanningResult.renderedFacts,
+  );
+  if (factValueLines.length > 0) {
+    // The done-when: the body contains the typed VALUE, not the standing
+    // instruction. But ONLY the CONTENT-FREE instructions are displaced — the
+    // three §13.1 names ("Cover <heading>…" and the grounding lines) are the
+    // ones that tell the reader to use grounding while containing none.
+    //
+    // A section whose instruction carries a REAL requirement keeps it and gains
+    // the fact: replacing it stripped `verification_or_test_plan` down to
+    // "Known project fact: test runner is vitest", losing the verification
+    // command the section exists to ask for — and F1's own slot obligation with
+    // it. The fact leads because it is the concrete part.
+    const contentFreeInstruction =
+      lines.length === 1 &&
+      (lines[0]!.startsWith(PROMPT_ENHANCEMENT_FALLTHROUGH_SHORT_PREFIX_V1) ||
+        sectionPlan.sectionKind === 'project_grounding_facts');
+    if (contentFreeInstruction) lines.length = 0;
+    lines.unshift(...factValueLines);
+  }
   if (action === 'more_thorough') {
     lines.push(...moreThoroughLines(sectionPlan));
   }
-  if (action === 'more_project_grounded') {
+  if (action === 'more_project_grounded' && factValueLines.length === 0) {
+    // Only when the section has NO stated grounding of its own. With a rendered
+    // fact this line either repeats the content-free instruction §13.1 names, or
+    // — worse, and measured — asserts "Known project grounding is unavailable"
+    // directly beneath a stated project fact, contradicting the body on the very
+    // action the user picked to GET more grounding.
     lines.push(projectGroundingLine(sectionPlan));
   }
   if (action === 'apply_details' && sectionPlan.sectionKind === 'context_and_constraints') {
@@ -817,6 +889,24 @@ function renderSection(input: {
   };
 }
 
+const DEBUG_EVIDENCE_LABEL_OVERRIDES_V1: Readonly<Record<string, string>> = {
+  request_response_samples: 'request/response samples',
+};
+
+/**
+ * Names the evidence forms the developer actually supplied, for the carry line.
+ * Labels are GENERIC by default (`id` with underscores as spaces) so a newly
+ * added evidence form still renders sensibly instead of silently dropping out
+ * of the sentence; only ids that read badly carry an override.
+ */
+function describeSuppliedEvidenceV1(forms: readonly string[]): string {
+  const labels = forms.map((form) => DEBUG_EVIDENCE_LABEL_OVERRIDES_V1[form] ?? form.replaceAll('_', ' '));
+  const joined = labels.length <= 1
+    ? (labels[0] ?? '')
+    : `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`;
+  return `${joined.charAt(0).toUpperCase()}${joined.slice(1)} ${labels.length === 1 ? 'is' : 'are'}`;
+}
+
 function instructionLinesForSection(
   sectionKind: string,
   action: PromptEnhancementComposerAction,
@@ -825,6 +915,14 @@ function instructionLinesForSection(
   // T3: the point inventory is the line that re-emits harvested text as "these original
   // points", so the provenance has to reach it rather than stopping at the composer.
   promptReviewOrigin: PromptEnhancementPromptReviewOrigin,
+  // De-nagging (owner ruling 2026-08-17): the reproduction section is a locked
+  // required shape, so it renders whether or not evidence was supplied. These
+  // two decide WHICH line it renders — the request obligation is present only
+  // when the registry decided to ask, and the observed forms name what the
+  // developer actually sent so the carry line cannot claim a failing test they
+  // never mentioned.
+  slotObligations: readonly string[] = [],
+  debugEvidenceObserved: readonly string[] = [],
 ): string[] {
   const concise = action === 'shorter';
   const line = (longText: string, shortText: string) => concise ? shortText : longText;
@@ -848,10 +946,15 @@ function instructionLinesForSection(
       ),
     ],
     reproduction_or_evidence: [
-      line(
-        'Capture the failing behavior, reproduction path, observed evidence, and expected behavior before changing code.',
-        'Capture repro, evidence, and expected behavior.',
-      ),
+      slotObligations.includes('reproduction_or_evidence_request') || debugEvidenceObserved.length === 0
+        ? line(
+          'Capture the failing behavior, reproduction path, observed evidence, and expected behavior before changing code.',
+          'Capture repro, evidence, and expected behavior.',
+        )
+        : line(
+          `${describeSuppliedEvidenceV1(debugEvidenceObserved)} provided in the request above.`,
+          `${describeSuppliedEvidenceV1(debugEvidenceObserved)} provided above.`,
+        ),
     ],
     behavior_preservation: [
       line(
@@ -1087,6 +1190,9 @@ function sentPromptOriginFor(
 }
 
 function attachSpanRefs(
+  // GR-1: the resolved facts, so each section can record the values it
+  // legitimately states for the no-invention allow-list.
+  renderedFacts: readonly PromptEnhancementGuidanceFact[],
   sectionPlans: readonly PromptEnhancementSectionPlanItemV1[],
   renderedSections: readonly { sectionId: string; title: string; bodyText: string; text: string }[],
   bodyText: string,
@@ -1156,6 +1262,10 @@ function attachSpanRefs(
       sourceKind: sectionPlan.sourceKind,
       sourceIds: sectionPlan.sourceIds,
       sourceFactIds: sectionPlan.structuredContentPartRefs,
+      groundedFactValues: promptEnhancementGroundedValuesV1(sectionPlan.sectionKind, renderedFacts),
+      // The typed slot obligations travel from the plan onto the composed
+      // section unchanged - the composer, checks and fixtures read them here.
+      slotObligations: sectionPlan.slotObligations,
       routeCandidateRefs: [sectionPlan.templateId],
       evidenceStatus: sectionPlan.sourceEvidenceStatus,
       sourceEvidenceStatus: sectionPlan.sourceEvidenceStatus,

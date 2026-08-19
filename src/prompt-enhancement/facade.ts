@@ -26,10 +26,11 @@ import { composeStructuredComposerOutputV1 } from './llm-composer.js';
 import { decidePromptEnhancementRouteViaLlmV1, type PromptEnhancementLlmRouteDecisionV1 } from './llm-route-decision.js';
 import { isValidApiKey } from '../config/ApiKeyResolver.js';
 import { planPromptEnhancementSections } from './templates/section-plan.js';
-import { routePromptEnhancement, describePromptEnhancementSequencePlanV1, type PromptEnhancementCapabilityId, type PromptEnhancementRouteInput } from './routing-taxonomy.js';
+import { routePromptEnhancement, isKnownPrimaryIntent, isKnownCapabilityId, isKnownDebugEvidenceForm, describePromptEnhancementSequencePlanV1, type PromptEnhancementCapabilityId, type PromptEnhancementRouteInput } from './routing-taxonomy.js';
 import { buildPromptEnhancementGuidanceFactsV1 } from './guidance-facts.js';
 import { resolvePromptEnhancementSourceConflictsV1 } from './conflict-resolution.js';
 import { applyPromptEnhancementSourceMixV1 } from './source-mix.js';
+import { summarisePromptEnhancementRuntimeSeamsV1 } from './cost-measurement.js';
 import { applyPromptEnhancementGuidanceGateV1 } from './guidance-gate.js';
 import { buildPromptEnhancementPinchLabelV1, buildPromptEnhancementWhyHelpV1 } from './pe-header-copy.js';
 import { buildPromptEnhancementHandoffMetadataV1, validatePromptEnhancementHandoffMetadataV1 } from './handoff-metadata.js';
@@ -181,6 +182,17 @@ async function prepare(
       ? 'pe_generated'
       : 'ordinary_user_prompt',
     oldDecisionSessionPayloadPresent: false,
+    // The classifier's intent proposal, re-guarded against the typed menu (the
+    // contract carries it as a string to avoid a type cycle).
+    classifierPrimaryIntent: isKnownPrimaryIntent(request.reviewMomentContext.triggerProvenance.classifierPrimaryIntent)
+      ? request.reviewMomentContext.triggerProvenance.classifierPrimaryIntent
+      : '',
+    classifierIntentConfidence: request.reviewMomentContext.triggerProvenance.classifierIntentConfidence ?? 0,
+    // The capability observation, each entry re-guarded against its typed
+    // vocabulary; `undefined` stays undefined so the router can tell a no-key
+    // session (no observation channel) from an observed-empty one.
+    classifierCapabilityCandidates: request.reviewMomentContext.triggerProvenance.classifierCapabilityCandidates?.filter(isKnownCapabilityId),
+    classifierDebugEvidencePresent: request.reviewMomentContext.triggerProvenance.classifierDebugEvidencePresent?.filter(isKnownDebugEvidenceForm),
   };
   let route = routePromptEnhancement(routeInput);
 
@@ -232,7 +244,8 @@ async function prepare(
   const guidanceFacts = buildPromptEnhancementGuidanceFactsV1(request);
   const resolvedFacts = resolvePromptEnhancementSourceConflictsV1(guidanceFacts).facts;
   const sourceMix = applyPromptEnhancementSourceMixV1(resolvedFacts, request.userPreferenceContext.levelState);
-  const guidanceGate = applyPromptEnhancementGuidanceGateV1(sourceMix);
+  // The route's ladder outcome flows into the SAME gate — no parallel skip path.
+  const guidanceGate = applyPromptEnhancementGuidanceGateV1(sourceMix, route.ladderResolution);
   // F1 (send-block fix 2026-08-07): an ACTION never re-decides popup existence. The popup the
   // action came from already exists — its route/no-popup decision was made at PREPARE (possibly
   // via the E6 LLM route-rescue above, which is gated to prepare only). Re-running the gate here
@@ -547,7 +560,11 @@ function buildResult(
     (diagnostic) => diagnostic.reasonCode === 'additional_details_truncated_public_notice',
   );
   const composerCallVisibility = composed.composerBoundary.inputContract.callVisibilityState;
+  // A6: computed HERE because this is the layer that holds the mixed facts — the result
+  // carries fact IDS only, so deriving it downstream would log an empty summary forever.
+  const runtimeSeamSummary = summarisePromptEnhancementRuntimeSeamsV1(planning.renderedFacts);
   const callAndVisibilityMetadata = {
+    runtimeSeamSummary,
     ...composerCallVisibility,
     callOwner: 'content_semantics' as const,
     callTrigger: 'prepare' as const,

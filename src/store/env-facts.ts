@@ -43,25 +43,43 @@ function parseFactMap(json: string | null | undefined): FactMap | null {
 
 // ── Project-scoped facts ─────────────────────────────────────────────────────
 
+/**
+ * Project rows are keyed by whatever path STRING the entry point happened to produce, and the
+ * entry points disagree: `auto` registers `--project` verbatim, while `nexpath env` persists under
+ * `resolve()`'d form — backslashes on Windows. Matching on the raw string therefore missed the row
+ * and, because these are UPDATEs, missed it SILENTLY: `env_facts` was populated for 0 of 20
+ * projects in a real store with 1,136 prompts (bug record §17.8).
+ *
+ * Every project-scoped accessor here matches on a separator-normalised comparison instead, so the
+ * lookup is insensitive to which form registered the row. ⛔ This deliberately does NOT normalise
+ * `upsertProject`/`getProject` — project IDENTITY across every other table stays exactly as it is;
+ * only these lookups become form-insensitive.
+ */
+const PROJECT_ROOT_MATCHES = "REPLACE(project_root, '\\', '/') = REPLACE(?, '\\', '/')";
+
 /** Store project facts on the projects row. No-op if the project is not registered. */
 export function setProjectEnvFacts(
   store: Store,
   projectRoot: string,
   facts: FactMap,
   detectedAt: number,
-): void {
+): boolean {
   store.db.run(
-    'UPDATE projects SET env_facts = ?, env_facts_detected_at = ? WHERE project_root = ?',
+    `UPDATE projects SET env_facts = ?, env_facts_detected_at = ? WHERE ${PROJECT_ROOT_MATCHES}`,
     [JSON.stringify(facts), detectedAt, projectRoot],
   );
+  // §17.8: an UPDATE that matches nothing is indistinguishable from a successful store unless it
+  // says so. Returning the outcome lets the caller stop reporting success it did not achieve.
+  const stored = store.db.getRowsModified() > 0;
   saveStore(store);
+  return stored;
 }
 
 /** Read project facts, or null when absent OR while consent is disabled (gated). */
 export function getProjectEnvFacts(store: Store, projectRoot: string): StoredFacts | null {
   if (!isEnvProbeEnabled(store.db)) return null;
   const res = store.db.exec(
-    'SELECT env_facts, env_facts_detected_at FROM projects WHERE project_root = ?',
+    `SELECT env_facts, env_facts_detected_at FROM projects WHERE ${PROJECT_ROOT_MATCHES}`,
     [projectRoot],
   );
   const row = res[0]?.values[0];
@@ -86,7 +104,7 @@ export interface EnvTrajectoryState {
 /** Read the trajectory state, or null when absent OR while consent is disabled (gated). */
 export function getEnvTrajectory(store: Store, projectRoot: string): EnvTrajectoryState | null {
   if (!isEnvProbeEnabled(store.db)) return null;
-  const res = store.db.exec('SELECT env_trajectory FROM projects WHERE project_root = ?', [projectRoot]);
+  const res = store.db.exec(`SELECT env_trajectory FROM projects WHERE ${PROJECT_ROOT_MATCHES}`, [projectRoot]);
   const raw = res[0]?.values[0]?.[0] as string | null | undefined;
   if (!raw) return null;
   try {
@@ -101,7 +119,7 @@ export function getEnvTrajectory(store: Store, projectRoot: string): EnvTrajecto
 /** Persist the trajectory state on the projects row. No-op if the project is not registered. */
 export function setEnvTrajectory(store: Store, projectRoot: string, state: EnvTrajectoryState): void {
   store.db.run(
-    'UPDATE projects SET env_trajectory = ? WHERE project_root = ?',
+    `UPDATE projects SET env_trajectory = ? WHERE ${PROJECT_ROOT_MATCHES}`,
     [JSON.stringify(state), projectRoot],
   );
   saveStore(store);
@@ -139,7 +157,7 @@ export function getMachineFacts(store: Store): StoredFacts | null {
 export function clearProjectEnvFacts(store: Store, projectRoot?: string): void {
   if (projectRoot) {
     store.db.run(
-      'UPDATE projects SET env_facts = NULL, env_facts_detected_at = NULL, env_trajectory = NULL WHERE project_root = ?',
+      `UPDATE projects SET env_facts = NULL, env_facts_detected_at = NULL, env_trajectory = NULL WHERE ${PROJECT_ROOT_MATCHES}`,
       [projectRoot],
     );
   } else {

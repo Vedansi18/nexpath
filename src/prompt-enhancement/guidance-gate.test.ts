@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { applyPromptEnhancementSourceMixV1 } from './source-mix.js';
 import { applyPromptEnhancementGuidanceGateV1 } from './guidance-gate.js';
+import { routePromptEnhancement } from './routing-taxonomy.js';
 import type {
   PromptEnhancementGuidanceFact,
   PromptEnhancementGuidanceSourceType,
@@ -92,5 +93,138 @@ describe('applyPromptEnhancementGuidanceGateV1 (E2 / 2.3 — DR2-G1)', () => {
     const decision = gateFor([bad]);
     expect(decision.show).toBe(false);
     expect(decision.gateReasonCode).toBe('skip_source_invalid_fallback');
+  });
+});
+
+// ── The locked dispositions for an under-evidenced route ──
+
+describe('under-evidenced route: skip_no_popup default + the exactly-as-narrow exception', () => {
+  const UNDER = { state: 'under_evidenced', rungsWalked: [1, 2, 3, 4, 5, 6] } as const;
+  const RESOLVED = { state: 'resolved', resolvedByRung: 1 } as const;
+  const gateUnder = (facts: PromptEnhancementGuidanceFact[]) =>
+    applyPromptEnhancementGuidanceGateV1(applyPromptEnhancementSourceMixV1(facts), UNDER);
+
+  it('no survivor at all: skip with the under-evidenced reason code', () => {
+    const decision = gateUnder([]);
+    expect(decision.show).toBe(false);
+    expect(decision.gateReasonCode).toBe('skip_under_evidenced_no_popup');
+  });
+
+  it('a NORMAL strong survivor does not rescue an under-evidenced route — the default is skip, not a guess', () => {
+    const decision = gateUnder([fact({ factId: 'a1', sourceType: 'absence_signal' })]);
+    expect(decision.show).toBe(false);
+    expect(decision.gateReasonCode).toBe('skip_under_evidenced_no_popup');
+  });
+
+  it('the exception: a source-critical survivor with STRONG evidence shows confirmation-first', () => {
+    const decision = gateUnder([
+      fact({ factId: 'r1', sourceType: 'absence_signal', riskLevel: 'high', sourceEvidenceState: 'strong' }),
+    ]);
+    expect(decision.show).toBe(true);
+    expect(decision.bodyShape).toBe('confirmation_first');
+    expect(decision.gateReasonCode).toBe('show_under_evidenced_high_risk_exception');
+  });
+
+  it('the exception: the safety_confirmation_support fact role with weak_source_critical evidence qualifies (typed fields, no keywords)', () => {
+    const decision = gateUnder([
+      fact({
+        factId: 'r2',
+        sourceType: 'absence_signal',
+        factRole: 'safety_confirmation_support',
+        sourceEvidenceState: 'weak_source_critical',
+      }),
+    ]);
+    expect(decision.show).toBe(true);
+    expect(decision.bodyShape).toBe('confirmation_first');
+    expect(decision.gateReasonCode).toBe('show_under_evidenced_high_risk_exception');
+  });
+
+  it('exactly as narrow as the lock: a source-critical survivor on weak_low_risk evidence still skips', () => {
+    const decision = gateUnder([
+      fact({ factId: 'r3', sourceType: 'absence_signal', riskLevel: 'high', sourceEvidenceState: 'weak_low_risk' }),
+    ]);
+    expect(decision.show).toBe(false);
+    expect(decision.gateReasonCode).toBe('skip_under_evidenced_no_popup');
+  });
+
+  it('a RESOLVED route keeps every pre-existing behaviour', () => {
+    const strong = applyPromptEnhancementGuidanceGateV1(
+      applyPromptEnhancementSourceMixV1([fact({ factId: 'a1', sourceType: 'absence_signal' })]),
+      RESOLVED,
+    );
+    expect(strong.show).toBe(true);
+    expect(strong.gateReasonCode).toBe('show_source_a_survivor');
+  });
+
+  it('the routeless replay path (no state passed) keeps every pre-existing behaviour', () => {
+    const decision = applyPromptEnhancementGuidanceGateV1(
+      applyPromptEnhancementSourceMixV1([fact({ factId: 'a1', sourceType: 'absence_signal' })]),
+    );
+    expect(decision.show).toBe(true);
+    expect(decision.gateReasonCode).toBe('show_source_a_survivor');
+  });
+});
+
+// ── The five ambiguous-start ladder-walk fixtures: disposition at the deciding rung ──
+
+describe('ambiguous starts walk the ladder in order; the disposition lands at the deciding rung', () => {
+  const strongAbsence = () => fact({ factId: 'amb-signal', sourceType: 'absence_signal' });
+  const routeFor = (overrides: Record<string, unknown>) =>
+    routePromptEnhancement({
+      routeDecisionId: 'ambiguous-walk',
+      promptText: 'x',
+      currentStage: 'implementation',
+      triggerKind: 'absence',
+      firedKey: 'absence:debugging_observation_gap@implementation',
+      classifierState: 'fire_recommended',
+      degradedNoActionState: 'none',
+      generatedOriginState: 'ordinary_user_prompt',
+      ...overrides,
+    } as never);
+
+  it('"make it better" with no resolving evidence: no rung decides — skip', () => {
+    const route = routeFor({ promptText: 'make it better' });
+    expect(route.ladderResolution.state).toBe('under_evidenced');
+    const gate = applyPromptEnhancementGuidanceGateV1(applyPromptEnhancementSourceMixV1([strongAbsence()]), route.ladderResolution);
+    expect(gate.show).toBe(false);
+    expect(gate.gateReasonCode).toBe('skip_under_evidenced_no_popup');
+  });
+
+  it('"fix this failing test": rung 1 decides (matched branch) — resolved, shows', () => {
+    const route = routeFor({ promptText: 'fix this failing test' });
+    expect(route.ladderResolution).toEqual({ state: 'resolved', resolvedByRung: 1 });
+    const gate = applyPromptEnhancementGuidanceGateV1(applyPromptEnhancementSourceMixV1([strongAbsence()]), route.ladderResolution);
+    expect(gate.show).toBe(true);
+  });
+
+  it('"continue": rung 1 decides (exact branch) — resolved, shows', () => {
+    const route = routeFor({ promptText: 'continue' });
+    expect(route.ladderResolution).toEqual({ state: 'resolved', resolvedByRung: 1 });
+    expect(route.primaryIntent).toBe('planning.task_breakdown');
+    const gate = applyPromptEnhancementGuidanceGateV1(applyPromptEnhancementSourceMixV1([strongAbsence()]), route.ladderResolution);
+    expect(gate.show).toBe(true);
+  });
+
+  it('"plan this": rung 1 decides — resolved, shows', () => {
+    const route = routeFor({ promptText: 'plan this' });
+    expect(route.ladderResolution).toEqual({ state: 'resolved', resolvedByRung: 1 });
+    const gate = applyPromptEnhancementGuidanceGateV1(applyPromptEnhancementSourceMixV1([strongAbsence()]), route.ladderResolution);
+    expect(gate.show).toBe(true);
+  });
+
+  it('"upgrade this" on a keyed decline with strong source-critical evidence: no rung names a route — the EXCEPTION shows confirmation-first', () => {
+    const route = routeFor({
+      promptText: 'upgrade this',
+      classifierPrimaryIntent: '',
+      classifierIntentConfidence: 0.1,
+      classifierCapabilityCandidates: [],
+      classifierDebugEvidencePresent: [],
+    });
+    expect(route.ladderResolution.state).toBe('under_evidenced');
+    const critical = fact({ factId: 'amb-risk', sourceType: 'absence_signal', riskLevel: 'high', sourceEvidenceState: 'strong' });
+    const gate = applyPromptEnhancementGuidanceGateV1(applyPromptEnhancementSourceMixV1([critical]), route.ladderResolution);
+    expect(gate.show).toBe(true);
+    expect(gate.bodyShape).toBe('confirmation_first');
+    expect(gate.gateReasonCode).toBe('show_under_evidenced_high_risk_exception');
   });
 });
