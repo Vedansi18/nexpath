@@ -10,7 +10,7 @@ import { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import {
-  writeCursorHooks, removeCursorHooks, buildCursorHookEntry, buildCursorHooksConfig,
+  writeCursorHooks, removeCursorHooks, buildCursorHookEntry, buildCursorHookCommand, buildCursorHooksConfig,
   isNexpathCursorHook, getCursorUserHooksPath, getCursorProjectHooksPath,
   CURSOR_HOOK_TIMEOUT_SECONDS, CURSOR_HOOK_EVENTS,
 } from './install.js';
@@ -275,5 +275,37 @@ describe('⚠ R5 — top-level version is REQUIRED or Cursor rejects the whole f
       expect(after.hooks.beforeSubmitPrompt).toHaveLength(1);
       expect(after.hooks.beforeSubmitPrompt[0].command).toBe('other-tool audit');
     } finally { t.cleanup(); }
+  });
+});
+
+/**
+ * RC25 (2026-08-19): the command was BARE `node`. `windsurf-hook/install.ts`
+ * documents a MEASURED live finding that hosts spawn hook commands with a
+ * sanitized PATH that may not contain `node` — a bare `node` ENOENTs silently
+ * (0 invocations, no error surfaced anywhere). That is the exact failure class
+ * RC21 root-caused for Windsurf on Windows; Cursor's writer had never been
+ * checked against it. Mirrors Windsurf's already-proven absolute-path pattern.
+ */
+describe('⭐ RC25 — the hook command carries an ABSOLUTE node path (never bare `node`)', () => {
+  it('defaults to process.execPath', () => {
+    const cmd = buildCursorHookCommand('/cli/index.js', 'beforeSubmitPrompt');
+    expect(cmd).toBe(`${JSON.stringify(process.execPath)} ${JSON.stringify('/cli/index.js')} cursor-hook beforeSubmitPrompt`);
+    expect(cmd.startsWith('node ')).toBe(false);
+  });
+
+  it('an injected node path is quoted exactly like the CLI path (spaces-safe, cross-OS)', () => {
+    const cmd = buildCursorHookCommand('/cli/index.js', 'beforeSubmitPrompt', 'C:\\Program Files\\nodejs\\node.exe');
+    expect(cmd).toContain('"C:\\\\Program Files\\\\nodejs\\\\node.exe"');
+    expect(cmd.endsWith('cursor-hook beforeSubmitPrompt')).toBe(true);
+  });
+
+  it('buildCursorHookEntry threads the same node path through', () => {
+    const e = buildCursorHookEntry('/cli/index.js', 'beforeSubmitPrompt', '/usr/local/bin/node');
+    expect(e.command).toContain('"/usr/local/bin/node"');
+  });
+
+  it('⭐ isNexpathCursorHook still identifies the entry (command-substring detection unaffected)', () => {
+    const e = buildCursorHookEntry('/cli/index.js', 'beforeSubmitPrompt');
+    expect(isNexpathCursorHook(e)).toBe(true);
   });
 });

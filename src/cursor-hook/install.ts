@@ -109,9 +109,28 @@ export function getCursorProjectHooksPath(projectRoot: string): string {
   return join(projectRoot, '.cursor', 'hooks.json');
 }
 
-/** The command string nexpath writes for a given event. */
-export function buildCursorHookCommand(cliPath: string, event: CursorHookEvent): string {
-  return `node ${JSON.stringify(cliPath)} cursor-hook ${event}`;
+/**
+ * The command string nexpath writes for a given event.
+ *
+ * ── RC25 (2026-08-19, found during a full old-flow-vs-new-flow Windows read) ──
+ * Was a BARE `node`. `windsurf-hook/install.ts` documents — from a MEASURED,
+ * live finding — that hosts spawn hook commands with a **sanitized PATH that
+ * may not contain `node`**, so a bare `node` ENOENTs silently: the hook never
+ * runs, capture is 0, and nothing in the product says why. That is the exact
+ * failure class RC21 root-caused for Windsurf on Windows. Cursor's own writer
+ * had never been checked against it and carried zero test/doc coverage either
+ * way — an unverified assumption sitting in the one hook every Cursor prompt
+ * on every OS depends on. `nodePath` defaults to `process.execPath` (the
+ * absolute binary running `nexpath install`), matching Windsurf's proven,
+ * already-shipping pattern exactly rather than inventing a second one.
+ * Injectable for tests so the emitted string is pinned deterministically.
+ */
+export function buildCursorHookCommand(
+  cliPath: string,
+  event: CursorHookEvent,
+  nodePath: string = process.execPath,
+): string {
+  return `${JSON.stringify(nodePath)} ${JSON.stringify(cliPath)} cursor-hook ${event}`;
 }
 
 /**
@@ -126,9 +145,13 @@ export function isNexpathCursorHook(entry: CursorHookEntry): boolean {
 }
 
 /** Build one entry, with the explicit seconds timeout (`R3`/`R4`). */
-export function buildCursorHookEntry(cliPath: string, event: CursorHookEvent): CursorHookEntry {
+export function buildCursorHookEntry(
+  cliPath: string,
+  event: CursorHookEvent,
+  nodePath: string = process.execPath,
+): CursorHookEntry {
   return {
-    command: buildCursorHookCommand(cliPath, event),
+    command: buildCursorHookCommand(cliPath, event, nodePath),
     // SECONDS. See CURSOR_HOOK_TIMEOUT_SECONDS.
     timeout: CURSOR_HOOK_TIMEOUT_SECONDS,
     // `failClosed` deliberately omitted — see the file header.
