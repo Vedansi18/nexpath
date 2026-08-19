@@ -802,12 +802,10 @@ export function renderPromptEnhancementPopupFrameV1(
     if (row.kind === 'editor_heading') {
       recordCaret('enhanced_body');
       for (const bodyLine of publicText(view.editedBodyText).split('\n')) lines.push(contentLine(bodyLine));
-      // Body block (owner request 2026-08-07): the edit-keys and the send hint share ONE line when
-      // focused ("Ctrl+J … · Enter sends this prompt") so the body gains a line; when not focused,
-      // just the send hint shows.
-      lines.push(hint(focused
-        ? `${PROMPT_ENHANCEMENT_CLI_EDIT_KEYS_HINT_V1} · ${PROMPT_ENHANCEMENT_CLI_BODY_HINT_V1}`
-        : PROMPT_ENHANCEMENT_CLI_BODY_HINT_V1));
+      // Body block: the "Enter sends this prompt" hint shows ONLY when this row (Use enhanced prompt) is
+      // focused — otherwise it is misleading, because Enter acts on whichever row IS focused, not on the
+      // enhanced body (owner 2026-08-19). When focused, the edit-keys and the send hint share ONE line.
+      if (focused) lines.push(hint(`${PROMPT_ENHANCEMENT_CLI_EDIT_KEYS_HINT_V1} · ${PROMPT_ENHANCEMENT_CLI_BODY_HINT_V1}`));
     } else if (row.kind === 'additional_details') {
       // UI-8: no "Apply" button — pressing Enter on this row applies the details.
       // An empty field renders blank (§8.5). Sending the body ignores unapplied details.

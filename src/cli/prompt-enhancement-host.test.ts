@@ -16,8 +16,9 @@ import {
   runPromptEnhancementCliMpsContinuationHostLaunchV1,
   type PromptEnhancementLinuxTerminalCommandV1,
 } from './prompt-enhancement-host.js';
-import { PROMPT_ENHANCEMENT_CONTRACT_VERSION, type PromptEnhancementPrepareRequestV1, type PromptEnhancementPrepareResultV1, type PromptEnhancementSourceRefV1 } from '../prompt-enhancement/contracts.js';
+import { PROMPT_ENHANCEMENT_CONTRACT_VERSION, type PromptEnhancementPrepareRequestV1, type PromptEnhancementPrepareResultV1, type PromptEnhancementSourceRefV1, type PromptEnhancementFutureSequenceRuntimeEventV1 } from '../prompt-enhancement/contracts.js';
 import { preparePromptEnhancement } from '../prompt-enhancement/facade.js';
+import { buildPromptEnhancementHandoffMetadataV1 } from '../prompt-enhancement/handoff-metadata.js';
 import { getPromptStartStopSourceSnapshot } from '../prompt-enhancement/source-reality.js';
 import { buildPromptEnhancementCostVisibilityMetadataV1 } from '../prompt-enhancement/cost-observability.js';
 import { computeDockedPopupGeometry } from '../decision-session/screen-geometry.js';
@@ -296,9 +297,48 @@ function validPrepareRequest(): PromptEnhancementPrepareRequestV1 {
 
 let validRequest: PromptEnhancementPrepareRequestV1;
 let validResult: PromptEnhancementPrepareResultV1;
+// Valid (renderable) continuation payloads for the continuation-launcher spawn tests — the launcher now
+// runs the child's render decision before spawning (blink Phase 2), so a stub that isn't renderable no
+// longer reaches the spawn stubs. Built the SAME way as the continuation-popup fixture (real result +
+// handoff + event); the confirmation variant carries the owner-locked empty original slice.
+type ContinuationPayload = Parameters<typeof runPromptEnhancementCliMpsContinuationHostLaunchV1>[0]['continuation'];
+let validTaskContinuation: ContinuationPayload;
+let validConfirmationContinuation: ContinuationPayload;
 beforeAll(async () => {
   validRequest = validPrepareRequest();
   validResult = await preparePromptEnhancement(validRequest);
+  // Origin's engine change resolves a no-key prepare to `no_popup` (correct: no key -> no enhancement ->
+  // no popup). These host tests exercise the SPAWN / render path, which needs a showable result — restore
+  // the fixture's original intent by forcing the showable disposition (the display-decision gate then
+  // permits the spawn exactly as before the engine change). Test-only; launcher/gate code is unchanged.
+  // Tests that need `no_popup` mutate this back locally.
+  if (validResult.disposition !== 'show_current_body') {
+    validResult = {
+      ...validResult,
+      disposition: 'show_current_body',
+      uiView: { ...validResult.uiView, body: { ...validResult.uiView.body, sendPolicy: 'send_current' } },
+    };
+  }
+  const mkHandoff = (r: PromptEnhancementPrepareResultV1) => buildPromptEnhancementHandoffMetadataV1({
+    handoffDecisionId: `${r.enhancementId}:mps-handoff`, requestId: r.requestId, projectRoot: r.projectRoot,
+    currentBody: r.currentBody, safetySummary: r.safetySummary, handoffKind: 'first_prompt_handoff_candidate',
+    summary: { summaryId: `${r.enhancementId}:summary`, publicSafeText: 'Metadata only.', remainingTaskCount: 1, taskRoleLabels: ['verification'] },
+  });
+  const mkEvent = (r: PromptEnhancementPrepareResultV1): PromptEnhancementFutureSequenceRuntimeEventV1 => ({
+    requestId: r.requestId, projectScope: r.projectRoot, sequenceId: 'sequence-1', sequenceItemId: 'item-2',
+    currentItemRevision: 2, bodyRevision: r.currentBody.bodyRevision, continuationDispositionId: 'cont-1',
+    contractVersion: PROMPT_ENHANCEMENT_CONTRACT_VERSION, stateFreshness: 'current', stopEventState: 'stop_fired_non_proof',
+    terminalTransitionState: 'none', explicitUserActionState: 'present_future_only', idempotencyKey: 'host-idem', createdAtMs: 2,
+  });
+  validTaskContinuation = {
+    result: validResult, handoffMetadata: mkHandoff(validResult), event: mkEvent(validResult),
+    progress: { done: 3, total: 27 }, itemKind: 'task',
+  } as ContinuationPayload;
+  const confirmationResult = { ...validResult, currentBody: { ...validResult.currentBody, originalPromptText: '' } };
+  validConfirmationContinuation = {
+    result: confirmationResult, handoffMetadata: mkHandoff(confirmationResult), event: mkEvent(confirmationResult),
+    progress: { done: 1, total: 2 }, itemKind: 'binary_confirmation',
+  } as ContinuationPayload;
 });
 
 function launchInput() {
@@ -526,6 +566,10 @@ describe('PE1.3 — Linux PE popup host launcher', () => {
       dbPath: '/Users/admin/.nexpath/prompt-store.db',
     });
     expect(script.startsWith('#!/bin/sh')).toBe(true);
+    // Clears the terminal FIRST (before node) so the login-shell greeting + echoed command don't flash
+    // above the popup in the spawned window — and the clear line precedes the node invocation.
+    expect(script).toContain("printf '\\033[2J\\033[3J\\033[H'");
+    expect(script.indexOf("printf '\\033[2J")).toBeLessThan(script.indexOf('prompt-enhancement-popup-host'));
     expect(script).toContain("'/usr/local/bin/node' '/Users/admin/Desktop/nexpath testing/nexpath/dist/cli/index.js' prompt-enhancement-popup-host");
     expect(script).toContain("--input-file '/tmp/pe/input.json'");
     expect(script).toContain("--db '/Users/admin/.nexpath/prompt-store.db'");
@@ -740,6 +784,48 @@ describe('PE1.3 — Linux PE popup host launcher', () => {
     expect(makeTempDir).not.toHaveBeenCalled();
   });
 
+  // Blink fix — the display-decision pre-spawn gate. A VALID payload whose render decision is `no_popup`
+  // (e.g. a `no_popup_not_applicable` disposition, the shape a missing-key sequence fallback produces)
+  // passes the contract validators but would be declined by the spawned child (`no_popup`). The launcher
+  // must reject it here — no spawn, no temp dir — instead of a wasted open-then-close flash.
+  it('does not spawn (no blink) when the render decision is no_popup — render_decision_no_popup', async () => {
+    const makeTempDir = vi.fn();
+    const spawnTerminal = vi.fn(async () => child());
+    const noPopupResult = { ...validResult, disposition: 'no_popup_not_applicable' } as PromptEnhancementPrepareResultV1;
+    const result = await runPromptEnhancementCliPopupHostLaunchV1(
+      { ...launchInput(), result: noPopupResult },
+      { makeTempDir, spawnTerminal },
+    );
+
+    expect(result).toEqual({
+      state: 'not_shown',
+      reasonCode: 'render_decision_no_popup',
+      validationReasonCodes: ['typed_no_popup_disposition'],
+    });
+    expect(spawnTerminal).not.toHaveBeenCalled();
+    expect(makeTempDir).not.toHaveBeenCalled();
+  });
+
+  // Blink fix — the request/result identity cross-check. Each side validates, but they describe DIFFERENT
+  // enhancements; the child's validatedInput would exit as input_invalid_or_stale after the window opened.
+  // Reject it here (same payload_invalid_pre_spawn bucket) — no spawn.
+  it('does not spawn (no blink) when the request/result identity mismatches — payload_invalid_pre_spawn', async () => {
+    const makeTempDir = vi.fn();
+    const spawnTerminal = vi.fn(async () => child());
+    const result = await runPromptEnhancementCliPopupHostLaunchV1(
+      { ...launchInput(), request: { ...validRequest, requestId: `${validRequest.requestId}-mismatch` } },
+      { makeTempDir, spawnTerminal },
+    );
+
+    expect(result).toEqual({
+      state: 'not_shown',
+      reasonCode: 'payload_invalid_pre_spawn',
+      validationReasonCodes: ['request_result_identity_mismatch'],
+    });
+    expect(spawnTerminal).not.toHaveBeenCalled();
+    expect(makeTempDir).not.toHaveBeenCalled();
+  });
+
   it('still spawns for a VALID payload (happy-path regression guard)', async () => {
     const spawnTerminal = vi.fn(async () => child());
     const result = await runPromptEnhancementCliPopupHostLaunchV1(launchInput(), {
@@ -756,17 +842,11 @@ describe('MPS Phase 2 (Option D) — continuation (2nd popup) window launcher', 
   function continuationLaunchInput() {
     return {
       capability: { state: 'available', method: 'linux_terminal', terminalCommand: 'gnome-terminal' },
-      continuation: {
-        result: { currentBody: { text: 'NEXT ITEM BODY MUST STAY OUT OF ARGV' } },
-        handoffMetadata: {},
-        event: {},
-        progress: { done: 1, total: 2 },
-        itemKind: 'task',
-      },
+      continuation: validTaskContinuation,
       cliEntryPath: '/opt/nexpath/dist/cli/index.js',
       dbPath: '/tmp/nexpath-test.db',
       nodePath: '/usr/bin/node',
-    } as unknown as Parameters<typeof runPromptEnhancementCliMpsContinuationHostLaunchV1>[0];
+    } as Parameters<typeof runPromptEnhancementCliMpsContinuationHostLaunchV1>[0];
   }
 
   it('spawns the SAME child command, keeps the payload out of argv, parses the outcome, cleans up', async () => {
@@ -878,6 +958,24 @@ describe('MPS Phase 2 (Option D) — continuation (2nd popup) window launcher', 
     expect(makeTempDir).not.toHaveBeenCalled();
   });
 
+  // Blink fix — the display-decision gate. A continuation with all five fields PRESENT (passes the
+  // structural gate above) but NOT renderable (empty handoff/event → the child's build resolves to
+  // no_popup, not `ready`) must be rejected BEFORE opening a window. The continuation child marks ready
+  // before it renders, so this pre-spawn decision is the only defence against its visual flash.
+  it('does not spawn (no blink) when a present-but-non-renderable continuation resolves to no_popup — render_decision_no_popup', async () => {
+    const makeTempDir = vi.fn();
+    const spawnTerminal = vi.fn(async () => child());
+    const result = await runPromptEnhancementCliMpsContinuationHostLaunchV1(
+      { ...continuationLaunchInput(), continuation: { result: { currentBody: { text: 'x', originalPromptText: 'y' } }, handoffMetadata: {}, event: {}, progress: { done: 1, total: 2 }, itemKind: 'task' } } as unknown as Parameters<typeof runPromptEnhancementCliMpsContinuationHostLaunchV1>[0],
+      { makeTempDir, spawnTerminal },
+    );
+
+    expect(result.state).toBe('not_shown');
+    expect(result).toMatchObject({ reasonCode: 'render_decision_no_popup' });
+    expect(spawnTerminal).not.toHaveBeenCalled();
+    expect(makeTempDir).not.toHaveBeenCalled();
+  });
+
   // The narrowing that matters: a valid CONFIRMATION item carries an EMPTY original slice, yet all five
   // structural fields are present — it must STILL spawn (the gate is presence-only; the runner validates
   // content with the originalPromptText←text substitution). A raw result-validation here would wrongly
@@ -885,10 +983,10 @@ describe('MPS Phase 2 (Option D) — continuation (2nd popup) window launcher', 
   it('still spawns a valid CONFIRMATION item (empty original slice) — never over-rejected', async () => {
     const spawnTerminal = vi.fn(async () => child());
     const result = await runPromptEnhancementCliMpsContinuationHostLaunchV1(
-      { ...continuationLaunchInput(), continuation: { result: { currentBody: { text: 'Confirm the change?', originalPromptText: '' } }, handoffMetadata: {}, event: {}, progress: { done: 1, total: 2 }, itemKind: 'binary_confirmation' } } as unknown as Parameters<typeof runPromptEnhancementCliMpsContinuationHostLaunchV1>[0],
+      { ...continuationLaunchInput(), continuation: validConfirmationContinuation } as Parameters<typeof runPromptEnhancementCliMpsContinuationHostLaunchV1>[0],
       {
         spawnTerminal,
-        readContinuationResultFile: () => ({ protocolVersion: 1, continuationOutcome: { state: 'send', bodyText: 'Confirm the change?' } }),
+        readContinuationResultFile: () => ({ protocolVersion: 1, continuationOutcome: { state: 'send', bodyText: validResult.currentBody.text } }),
         readReadyFile: () => true,
       },
     );
