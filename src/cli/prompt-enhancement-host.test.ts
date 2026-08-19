@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname } from 'node:path';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   PROMPT_ENHANCEMENT_LINUX_TERMINAL_COMMANDS_V1,
   buildPromptEnhancementMacLauncherScriptV1,
@@ -13,9 +13,13 @@ import {
   planPromptEnhancementWindowsTerminalLaunchV1,
   resolvePromptEnhancementCliHostCapabilityV1,
   runPromptEnhancementCliPopupHostLaunchV1,
+  runPromptEnhancementCliMpsContinuationHostLaunchV1,
   type PromptEnhancementLinuxTerminalCommandV1,
 } from './prompt-enhancement-host.js';
-import type { PromptEnhancementPrepareRequestV1, PromptEnhancementPrepareResultV1 } from '../prompt-enhancement/contracts.js';
+import { PROMPT_ENHANCEMENT_CONTRACT_VERSION, type PromptEnhancementPrepareRequestV1, type PromptEnhancementPrepareResultV1, type PromptEnhancementSourceRefV1 } from '../prompt-enhancement/contracts.js';
+import { preparePromptEnhancement } from '../prompt-enhancement/facade.js';
+import { getPromptStartStopSourceSnapshot } from '../prompt-enhancement/source-reality.js';
+import { buildPromptEnhancementCostVisibilityMetadataV1 } from '../prompt-enhancement/cost-observability.js';
 import { computeDockedPopupGeometry } from '../decision-session/screen-geometry.js';
 
 function unavailableCommands() {
@@ -260,11 +264,48 @@ describe('PE1.1 — prompt enhancement CLI host capability resolver', () => {
   });
 });
 
+// A VALID prepared request + result, built once via the real facade (hermetic — deterministic
+// fallback when no key). The launcher runs the same two contract validators BEFORE spawning (blink
+// fix, Phase 1), so the spawn-mechanics tests must supply a payload that passes them, or they would
+// short-circuit to `payload_invalid_pre_spawn` before ever reaching the injected spawn stubs.
+function validPrepareRequest(): PromptEnhancementPrepareRequestV1 {
+  const sourceRef: PromptEnhancementSourceRefV1 = {
+    sourceRefId: 'pe1-3-source-a', sourceKind: 'source_a_user_prompt', sourceId: 'prompt:1',
+    sourceAuthorization: 'source_fact_only', evidenceStatus: 'present', freshness: 'current', confidence: 'high', privacyClass: 'local_private',
+  };
+  const promptStartStop = getPromptStartStopSourceSnapshot();
+  return {
+    schemaVersion: PROMPT_ENHANCEMENT_CONTRACT_VERSION,
+    requestId: 'pe1-3-request', projectRoot: '/tmp/pe1-3-project', hostSurface: 'cli_stop_bridge',
+    sourcePrompt: { text: 'Fix the payment test and explain verification.', origin: 'user', capturedAt: 1, promptIndex: 1, generatedOriginPolicy: 'ordinary_source_a' },
+    reviewMomentContext: {
+      reviewMoment: 'UserPromptSubmit_preparation', currentAgentMode: 'workspace-write', projectId: 'project-1', sessionId: 'session-1', detectedLanguage: 'en', stageCandidate: 'implementation', promptCount: 1, recentPromptMetadataRefs: [],
+      triggerProvenance: { currentStage: 'implementation', prevStage: 'task_breakdown', triggerKind: 'stage_transition', classifierState: 'fire_recommended', degradedNoActionState: 'none', promptStartBoundary: promptStartStop.hookBoundary, deliveryBoundary: promptStartStop.deliveryBoundary, promptStartCanReplaceSameTurn: false },
+    },
+    sourceSignals: {
+      sourceAOriginalPromptRef: sourceRef, sourceRefs: [sourceRef], normalizedStageAbsenceSignalRefs: [], contentTemplateRecordFactRefs: [], popupQuestionSourceRefs: [], whyHelpSourceRefs: [], profileRoleModeRefs: [], rightGoodWorkStyleEnvRuntimeRefs: [], missingMemoryCandidateRefs: [], sourceLabels: [{ sourceRefId: sourceRef.sourceRefId, label: 'original_prompt', evidenceStatus: 'present' }],
+      promptStartStop: { hookBoundary: promptStartStop.hookBoundary, deliveryBoundary: promptStartStop.deliveryBoundary, runAutoCanHoldOrReplaceSubmittedPrompt: false, sharedSignalCount: promptStartStop.sharedSignalCount, classifierDegradedNoFireReasons: promptStartStop.classifierDegradedNoFireReasons },
+      store: { schemaVersion: 1, missingPromptEnhancementTables: [], cleanupGaps: [] }, transcriptPathState: 'not_authority', streamBOutputs: [], paramEventChannels: [], servedVariantIdentityRefs: [], deliveryGateRefs: [], sourceOnlyHardFactRefs: [],
+    },
+    userPreferenceContext: { levelState: 'default', scopedFeedbackEvidenceRefs: [] },
+    configSnapshot: { sequenceEnabledState: 'not_enabled_v1', validatedEffectiveConfigState: 'valid', arbitraryConfigRowsAreAuthority: false },
+    callVisibilityState: buildPromptEnhancementCostVisibilityMetadataV1('baseline_pe_composer', { callVisibilityMode: 'deterministic', plannedCallCount: 0, usedCallCount: 0 }),
+    privacyAndStoragePolicy: { sensitivityClass: 'normal', localStorageEligibility: 'ids_and_categories_only', telemetryEligibility: 'allowlisted_counts_only', llmSharingEligibility: 'allowed_minimal', generatedBodyStoragePolicy: 'do_not_store_raw_by_default' },
+  };
+}
+
+let validRequest: PromptEnhancementPrepareRequestV1;
+let validResult: PromptEnhancementPrepareResultV1;
+beforeAll(async () => {
+  validRequest = validPrepareRequest();
+  validResult = await preparePromptEnhancement(validRequest);
+});
+
 function launchInput() {
   return {
     capability: { state: 'available' as const, method: 'linux_terminal' as const, terminalCommand: 'gnome-terminal' as const },
-    request: { sourcePrompt: { text: 'RAW PE REQUEST MUST STAY OUT OF ARGV' } } as PromptEnhancementPrepareRequestV1,
-    result: { currentBody: { text: 'RAW ENHANCED BODY MUST STAY OUT OF ARGV' } } as PromptEnhancementPrepareResultV1,
+    request: validRequest,
+    result: validResult,
     cliEntryPath: '/opt/nexpath/dist/cli/index.js',
     dbPath: '/tmp/nexpath-test.db',
     nodePath: '/usr/bin/node',
@@ -316,8 +357,10 @@ describe('PE1.3 — Linux PE popup host launcher', () => {
       args: ['--wait', '--title=Nexpath · Prompt enhancement', '--', '/usr/bin/node', '/opt/nexpath/dist/cli/index.js', 'prompt-enhancement-popup-host', '--input-file', '/tmp/private/input.json', '--result-file', '/tmp/private/result.json', '--readiness-file', '/tmp/private/ready', '--db', '/tmp/nexpath-test.db'],
     });
     expect(xdg.args).toEqual(['/usr/bin/node', '/opt/nexpath/dist/cli/index.js', 'prompt-enhancement-popup-host', '--input-file', '/tmp/private/input.json', '--result-file', '/tmp/private/result.json', '--readiness-file', '/tmp/private/ready', '--db', '/tmp/nexpath-test.db']);
-    expect(JSON.stringify(gnome.args)).not.toContain('RAW PE REQUEST');
-    expect(JSON.stringify(gnome.args)).not.toContain('RAW ENHANCED BODY');
+    // No prompt/body TEXT ever reaches the argv — only the executable + private file paths (the raw
+    // request/body travel via the private input file, never the command line).
+    expect(JSON.stringify(gnome.args)).not.toContain(input.request.sourcePrompt.text);
+    expect(JSON.stringify(gnome.args)).not.toContain('Fix the payment test');
   });
 
   it('inserts a ~70% popup window geometry when supplied, before the child args', () => {
@@ -512,8 +555,9 @@ describe('PE1.3 — Linux PE popup host launcher', () => {
       expect(observed.inputMode).toBe(0o600);
       expect(observed.dirMode).toBe(0o700);
     }
-    expect(observed.inputText).toContain('RAW PE REQUEST MUST STAY OUT OF ARGV');
-    expect(JSON.stringify(observed.plan)).not.toContain('RAW PE REQUEST');
+    // The raw request text travels via the private input FILE (0o600), never the argv/plan.
+    expect(observed.inputText).toContain('Fix the payment test');
+    expect(JSON.stringify(observed.plan)).not.toContain('Fix the payment test');
     expect(fakeChild.kill).toHaveBeenCalledWith('SIGTERM');
     expect(() => statSync(observed.dir!)).toThrow();
   });
@@ -674,5 +718,181 @@ describe('PE1.3 — Linux PE popup host launcher', () => {
     expect(direct).toEqual({ state: 'not_applicable', reasonCode: 'direct_tty' });
     expect(unavailable).toEqual({ state: 'host_unavailable', reasonCode: 'no_gui_session' });
     expect(makeTempDir).not.toHaveBeenCalled();
+  });
+
+  // Blink fix (Phase 1) — the pre-spawn validity gate. An invalid payload (the shape the missing-key
+  // fallback produces) fails the SAME two contract validators the spawned child runs, so the launcher
+  // must reject it BEFORE opening a window — no spawn, no temp dir, no open-then-close flash.
+  it('does not spawn a window (no blink) when the payload fails the pre-spawn validators', async () => {
+    const makeTempDir = vi.fn();
+    const spawnTerminal = vi.fn(async () => child());
+    const result = await runPromptEnhancementCliPopupHostLaunchV1({
+      ...launchInput(),
+      request: { sourcePrompt: { text: 'x' } } as unknown as PromptEnhancementPrepareRequestV1,
+      result: { currentBody: { text: 'y' } } as unknown as PromptEnhancementPrepareResultV1,
+    }, { makeTempDir, spawnTerminal });
+
+    expect(result.state).toBe('not_shown');
+    expect(result).toMatchObject({ reasonCode: 'payload_invalid_pre_spawn' });
+    expect((result as { validationReasonCodes: readonly string[] }).validationReasonCodes.length).toBeGreaterThan(0);
+    // No window opened, and not even a temp dir allocated — the gate returns before any spawn setup.
+    expect(spawnTerminal).not.toHaveBeenCalled();
+    expect(makeTempDir).not.toHaveBeenCalled();
+  });
+
+  it('still spawns for a VALID payload (happy-path regression guard)', async () => {
+    const spawnTerminal = vi.fn(async () => child());
+    const result = await runPromptEnhancementCliPopupHostLaunchV1(launchInput(), {
+      spawnTerminal,
+      readResultFile: () => ({ protocolVersion: 1, result: { state: 'selected_original' } }),
+      readReadyFile: () => true,
+    });
+    expect(spawnTerminal).toHaveBeenCalledTimes(1);
+    expect(result.state).toBe('completed');
+  });
+});
+
+describe('MPS Phase 2 (Option D) — continuation (2nd popup) window launcher', () => {
+  function continuationLaunchInput() {
+    return {
+      capability: { state: 'available', method: 'linux_terminal', terminalCommand: 'gnome-terminal' },
+      continuation: {
+        result: { currentBody: { text: 'NEXT ITEM BODY MUST STAY OUT OF ARGV' } },
+        handoffMetadata: {},
+        event: {},
+        progress: { done: 1, total: 2 },
+        itemKind: 'task',
+      },
+      cliEntryPath: '/opt/nexpath/dist/cli/index.js',
+      dbPath: '/tmp/nexpath-test.db',
+      nodePath: '/usr/bin/node',
+    } as unknown as Parameters<typeof runPromptEnhancementCliMpsContinuationHostLaunchV1>[0];
+  }
+
+  it('spawns the SAME child command, keeps the payload out of argv, parses the outcome, cleans up', async () => {
+    const observed: { plan?: unknown; inputText?: string } = {};
+    const fakeChild = child();
+    const result = await runPromptEnhancementCliMpsContinuationHostLaunchV1(continuationLaunchInput(), {
+      spawnTerminal: async (plan) => {
+        observed.plan = plan;
+        const args = [...plan.args];
+        const inputFile = args[args.indexOf('--input-file') + 1]!;
+        observed.inputText = readFileSync(inputFile, 'utf8');
+        return fakeChild;
+      },
+      readContinuationResultFile: () => ({ protocolVersion: 1, continuationOutcome: { state: 'send', bodyText: 'NEXT ITEM BODY' } }),
+      readReadyFile: () => true,
+    });
+
+    expect(result).toEqual({ state: 'completed', output: { protocolVersion: 1, continuationOutcome: { state: 'send', bodyText: 'NEXT ITEM BODY' } } });
+    // Option D: the SAME hidden child command as the first popup → identical cross-platform spawn path.
+    expect(JSON.stringify(observed.plan)).toContain('prompt-enhancement-popup-host');
+    // The continuation payload travels via the private input FILE, never argv.
+    expect(observed.inputText).toContain('"continuation"');
+    expect(JSON.stringify(observed.plan)).not.toContain('NEXT ITEM BODY MUST STAY OUT OF ARGV');
+    expect(fakeChild.kill).toHaveBeenCalledWith('SIGTERM');
+  });
+
+  it('macOS routes through the SAME mac launcher builder — the child command is inside launch.sh', async () => {
+    const observed: { plan?: string; script?: string } = {};
+    const fakeChild = child(0); // exits 0 → skips the mac close-wait
+    const result = await runPromptEnhancementCliMpsContinuationHostLaunchV1(
+      { ...continuationLaunchInput(), capability: { state: 'available', method: 'mac_terminal' } } as unknown as Parameters<typeof runPromptEnhancementCliMpsContinuationHostLaunchV1>[0],
+      {
+        spawnTerminal: async (plan) => {
+          observed.plan = JSON.stringify(plan);
+          // On macOS the command lives inside the launch.sh the mac builder wrote; read it to prove parity.
+          const applescript = String(plan.args[plan.args.length - 1] ?? '');
+          const match = applescript.match(/sh '([^']+launch\.sh)'/);
+          if (match) observed.script = readFileSync(match[1]!, 'utf8');
+          return fakeChild;
+        },
+        readContinuationResultFile: () => ({ protocolVersion: 1, continuationOutcome: { state: 'declined' } }),
+        readReadyFile: () => true,
+        sleep: async () => { /* no real wait */ },
+      },
+    );
+    expect(result.state).toBe('completed');
+    expect(observed.plan).toContain('osascript'); // routed through the mac plan builder
+    expect(observed.script).toContain('prompt-enhancement-popup-host'); // SAME child command inside launch.sh
+  });
+
+  it('Windows routes through the SAME windows launcher builder — the child command is inside launch.cmd', async () => {
+    const observed: { plan?: string; script?: string } = {};
+    const fakeChild = child();
+    const result = await runPromptEnhancementCliMpsContinuationHostLaunchV1(
+      { ...continuationLaunchInput(), capability: { state: 'available', method: 'windows_terminal' } } as unknown as Parameters<typeof runPromptEnhancementCliMpsContinuationHostLaunchV1>[0],
+      {
+        spawnTerminal: async (plan) => {
+          observed.plan = JSON.stringify(plan);
+          const cmdPath = [...plan.args].reverse().find((arg) => arg.endsWith('.cmd'));
+          if (cmdPath) observed.script = readFileSync(cmdPath, 'utf8');
+          return fakeChild;
+        },
+        readContinuationResultFile: () => ({ protocolVersion: 1, continuationOutcome: { state: 'interruption' } }),
+        readReadyFile: () => true,
+        detectPopupGeometry: async () => undefined,
+      },
+    );
+    expect(result.state).toBe('completed');
+    expect(observed.plan).toContain('cmd'); // routed through the windows plan builder (cmd /c start …)
+    expect(observed.script).toContain('prompt-enhancement-popup-host'); // SAME child command inside launch.cmd
+  });
+
+  it('a result written before the renderer is ready is a failed launch (fail-closed)', async () => {
+    const fakeChild = child();
+    const result = await runPromptEnhancementCliMpsContinuationHostLaunchV1(continuationLaunchInput(), {
+      spawnTerminal: async () => fakeChild,
+      readContinuationResultFile: () => ({ protocolVersion: 1, continuationOutcome: { state: 'send', bodyText: 'X' } }),
+      readReadyFile: () => false, // never signalled ready
+    });
+    expect(result).toEqual({ state: 'launch_failed', reasonCode: 'terminal_renderer_not_ready' });
+  });
+
+  it('returns not_applicable for direct_tty and host_unavailable for an unavailable capability', async () => {
+    const notApplicable = await runPromptEnhancementCliMpsContinuationHostLaunchV1(
+      { ...continuationLaunchInput(), capability: { state: 'available', method: 'direct_tty' } } as unknown as Parameters<typeof runPromptEnhancementCliMpsContinuationHostLaunchV1>[0],
+    );
+    expect(notApplicable).toEqual({ state: 'not_applicable', reasonCode: 'direct_tty' });
+
+    const unavailable = await runPromptEnhancementCliMpsContinuationHostLaunchV1(
+      { ...continuationLaunchInput(), capability: { state: 'unavailable', method: 'none', reasonCode: 'unsupported_platform' } } as unknown as Parameters<typeof runPromptEnhancementCliMpsContinuationHostLaunchV1>[0],
+    );
+    expect(unavailable).toEqual({ state: 'host_unavailable', reasonCode: 'unsupported_platform' });
+  });
+
+  // Blink fix (Phase 2) — the narrowed pre-spawn structural gate. A continuation missing a field the
+  // child dereferences must be rejected BEFORE opening a window (no spawn, no temp dir, no flash).
+  it('does not spawn a window (no blink) when the continuation payload is structurally broken', async () => {
+    const makeTempDir = vi.fn();
+    const spawnTerminal = vi.fn(async () => child());
+    const result = await runPromptEnhancementCliMpsContinuationHostLaunchV1(
+      { ...continuationLaunchInput(), continuation: { result: null, handoffMetadata: {}, event: {}, progress: null, itemKind: '' } } as unknown as Parameters<typeof runPromptEnhancementCliMpsContinuationHostLaunchV1>[0],
+      { makeTempDir, spawnTerminal },
+    );
+
+    expect(result.state).toBe('not_shown');
+    expect(result).toMatchObject({ reasonCode: 'payload_invalid_pre_spawn' });
+    expect((result as { validationReasonCodes: readonly string[] }).validationReasonCodes.length).toBeGreaterThan(0);
+    expect(spawnTerminal).not.toHaveBeenCalled();
+    expect(makeTempDir).not.toHaveBeenCalled();
+  });
+
+  // The narrowing that matters: a valid CONFIRMATION item carries an EMPTY original slice, yet all five
+  // structural fields are present — it must STILL spawn (the gate is presence-only; the runner validates
+  // content with the originalPromptText←text substitution). A raw result-validation here would wrongly
+  // reject it — this guards against that regression.
+  it('still spawns a valid CONFIRMATION item (empty original slice) — never over-rejected', async () => {
+    const spawnTerminal = vi.fn(async () => child());
+    const result = await runPromptEnhancementCliMpsContinuationHostLaunchV1(
+      { ...continuationLaunchInput(), continuation: { result: { currentBody: { text: 'Confirm the change?', originalPromptText: '' } }, handoffMetadata: {}, event: {}, progress: { done: 1, total: 2 }, itemKind: 'binary_confirmation' } } as unknown as Parameters<typeof runPromptEnhancementCliMpsContinuationHostLaunchV1>[0],
+      {
+        spawnTerminal,
+        readContinuationResultFile: () => ({ protocolVersion: 1, continuationOutcome: { state: 'send', bodyText: 'Confirm the change?' } }),
+        readReadyFile: () => true,
+      },
+    );
+    expect(spawnTerminal).toHaveBeenCalledTimes(1);
+    expect(result.state).toBe('completed');
   });
 });

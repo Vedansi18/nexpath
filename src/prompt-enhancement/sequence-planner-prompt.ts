@@ -19,6 +19,13 @@ Tend towards converting a sequence back into one normal prompt. If there are com
 sequence is genuinely needed, stay with the sequence — but otherwise strive to come back to the
 single prompt.
 
+When the request is genuinely SEVERAL DISTINCT deliverables — each independently actionable, each a
+different unit of work (a separate file, endpoint, model, or feature that could be built on its own) —
+that IS a compelling reason for a sequence: keep them as separate prompts rather than collapsing
+several separate builds into one. The preference is against ARTIFICIALLY splitting ONE piece of work,
+NOT against recognising a request that is already several pieces. A request that names four or five
+independent things to build is such a request.
+
 This is a strong preference and NOT an absolute. Where the work genuinely needs a sequence, a
 sequence is the correct answer even under this preference. Do not force a single prompt.`;
 
@@ -269,6 +276,14 @@ Then check the SHAPE of the plan, and correct anything that is off:
 - The closing recap (a "wrap_up" item) exists if and only if MORE THAN THREE non-recap items sit
   behind it. Four or more real prompts → add exactly ONE recap, as the last item; three or fewer → do
   not add a recap at all.
+- Do the confirmations after each task MATCH its complexity, in order, immediately after it?
+  not_complex → NO confirmation follows. complex → exactly ONE binary_confirmation right after.
+  highly_complex → a double_confirmation OR cross_confirmation, THEN a binary_confirmation, right after.
+  Any other count or order is rejected — fix the confirmations to match the verdict, or lower the verdict.
+- Does every complex/highly_complex TASK and every CONFIRMATION carry a NON-EMPTY complexityReason (on a
+  task: how it could be silently wrong; on a confirmation: why THAT confirmation applies)? A not_complex
+  task and the closing recap carry complexityReason: null. A missing reason where one is required — or a
+  reason present where it must be null — is rejected.
 
 Fix what you find and return the corrected plan. Do not return a plan you already know is wrong.`;
 

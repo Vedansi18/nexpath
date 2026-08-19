@@ -26,6 +26,7 @@ import {
   runPromptEnhancementCliSubmitPopupV1,
   validatePromptEnhancementCliPopupResultV1,
   windowPromptEnhancementFieldForDisplayV1,
+  windowPromptEnhancementFieldForDisplayWithStartV1,
   type PromptEnhancementCliPopupCommandV1,
   type PromptEnhancementCliPopupInteractionV1,
   type PromptEnhancementCliPopupViewV1,
@@ -448,10 +449,13 @@ describe('UI-1 PE frame renderer', () => {
     expect(frame).not.toMatch(/\.done\b/);
     expect(frame).not.toMatch(/Show simpler options|Skip for now|Copy to clipboard/);
 
-    const order = ['Use enhanced prompt', 'Additional details', 'Shorter', 'More thorough', 'More project-grounded', 'Use original prompt']
+    const order = ['Use enhanced prompt', 'Additional details', 'Use original prompt']
       .map((label) => frame.indexOf(label));
     expect(order.every((index) => index >= 0)).toBe(true);
     expect([...order]).toEqual([...order].sort((a, b) => a - b));
+    // Directional refinements (Shorter / More thorough / More project-grounded) are HIDDEN from the PE
+    // popup (owner 2026-08-19) — they never render.
+    for (const gone of ['Shorter', 'More thorough', 'More project-grounded']) expect(frame).not.toContain(gone);
     expect(frame.split('Use enhanced prompt').length - 1).toBe(1);
     expect(frame).toContain(PROMPT_ENHANCEMENT_CLI_FOOTER_V1);
   });
@@ -479,9 +483,10 @@ describe('UI-1 action-row model', () => {
   it('orders rows per stage-1-2a, drops Feedback entirely (§8.3), and reflects typed availability', () => {
     const rows = buildPromptEnhancementCliActionRowsV1(fakeRenderModel());
     expect(rows.map((row) => row.rowKey)).toEqual([
-      'editor_heading', 'additional_details', 'shorter', 'more_thorough', 'more_project_grounded', 'use_original',
+      'editor_heading', 'additional_details', 'use_original',
     ]);
-    expect(rows.find((row) => row.rowKey === 'more_thorough')?.available).toBe(false);
+    // Directional refinements are HIDDEN from the PE popup (owner 2026-08-19) — no directional rows.
+    expect(rows.some((row) => row.kind === 'directional')).toBe(false);
     // Feedback is typed-available but is never a row now.
     expect(rows.some((row) => row.rowKey === 'feedback')).toBe(false);
   });
@@ -497,20 +502,18 @@ describe('UI-1 action-row model', () => {
     expect(refinement.some((row) => row.rowKey === 'use_original')).toBe(false);
   });
 
-  it('marks unavailable rows and renders the focused row help and field body from typed state', () => {
+  it('hides the directional refinement rows from the PE popup (owner 2026-08-19), keeping the other rows', () => {
     const view: PromptEnhancementCliPopupViewV1 = { model: fakeRenderModel(), editedBodyText: 'BODY-LINE', additionalDetailsText: '' };
-    const frame = renderPromptEnhancementPopupFrameV1(view, { focusIndex: 2, helpExpanded: false });
-    // Every row is a radio option: focused filled, others hollow.
-    expect(frame).toContain('● Shorter');
-    expect(frame).toContain('○ More thorough  (unavailable)');
-    expect(frame).toContain('○ Use original prompt');
-    // Directional rows show no focused-row description (owner request).
+    const frame = renderPromptEnhancementPopupFrameV1(view, { focusIndex: 0, helpExpanded: false });
+    // Shorter / More thorough / More project-grounded no longer render, and no "(unavailable)" marker.
+    for (const gone of ['Shorter', 'More thorough', 'More project-grounded']) expect(frame).not.toContain(gone);
+    expect(frame).not.toContain('(unavailable)');
     expect(frame).not.toContain('Make it concise');
     expect(frame).toContain('BODY-LINE');
-    // The editor heading and Additional details are radio rows too, and still
-    // render their editable field body beneath.
-    expect(frame).toContain('○ Use enhanced prompt');
+    // The remaining rows still render: editor heading, Additional details, Use original.
+    expect(frame).toContain('● Use enhanced prompt');
     expect(frame).toContain('○ Additional details');
+    expect(frame).toContain('○ Use original prompt');
     // Feedback never appears as a row (§8.3).
     expect(frame).not.toContain('Feedback');
   });
@@ -731,11 +734,7 @@ describe('UI-2 interaction reducer', () => {
       .toEqual([{ type: 'edit_body', text: 'BODY\n\nAdditional details to incorporate:\nnotes' }]);
     expect(applied.state.editor.buffers.additional_details.text).toBe('');
     expect(rows()[applied.state.focusIndex]!.kind).toBe('editor_heading');
-    // Enter on a directional row (focus 2 = Shorter)
-    let d = reducePromptEnhancementCliInteractionV1(state(), rows(), { kind: 'down' }).state;
-    d = reducePromptEnhancementCliInteractionV1(d, rows(), { kind: 'down' }).state;
-    expect(reducePromptEnhancementCliInteractionV1(d, rows(), { kind: 'enter' }).commands)
-      .toEqual([{ type: 'shorter' }]);
+    // (Directional rows are hidden from the PE popup — no directional Enter case to exercise here.)
   });
 
   it('applies details onto the EDITED body (dirty edits kept), and no-ops an empty details draft', () => {
@@ -768,12 +767,9 @@ describe('UI-2 interaction reducer', () => {
     expect(reducePromptEnhancementCliInteractionV1(state('   ', ''), rows(), { kind: 'enter' }).commands).toEqual([]);
   });
 
-  it('never refines or Applies on a blank body (bug B)', () => {
-    // Shorter (focus 2) with a blank body → no-op.
-    let s = reducePromptEnhancementCliInteractionV1(state('', ''), rows(), { kind: 'down' }).state;
-    s = reducePromptEnhancementCliInteractionV1(s, rows(), { kind: 'down' }).state;
-    expect(rows()[s.focusIndex]!.rowKey).toBe('shorter');
-    expect(reducePromptEnhancementCliInteractionV1(s, rows(), { kind: 'enter' }).commands).toEqual([]);
+  it('never Applies on a blank body (bug B)', () => {
+    // (Directional/refine rows are hidden from the PE popup, so the "refine on blank body" path is
+    // unreachable; the Apply-details blank guard still holds.)
     // Apply details (focus 1) with a blank body + a note → no-op.
     const d = reducePromptEnhancementCliInteractionV1(state('', 'notes'), rows(), { kind: 'down' }).state;
     expect(reducePromptEnhancementCliInteractionV1(d, rows(), { kind: 'enter' }).commands).toEqual([]);
@@ -880,5 +876,52 @@ describe('windowPromptEnhancementFieldForDisplayV1 (bounded body viewport)', () 
     const long = Array.from({ length: 200 }, (_, i) => `line ${i}`).join('\n');
     const out = windowPromptEnhancementFieldForDisplayV1(buffer(long, 50), 40, 8);
     expect(out.split('\n')).toHaveLength(8);
+  });
+});
+
+// Caret-parity regression (Phase 2): the raw-TTY caret uses the window's `start` (not the raw
+// buffer scroll), so display and caret share one source of truth. The string form and the
+// WithStart form must agree, and pos.row - start must land on the cursor's visible line.
+describe('windowPromptEnhancementFieldForDisplayWithStartV1 (caret/display parity)', () => {
+  const buffer = (text: string, scrollVisualRow = 0, cursor = 0): PromptEnhancementEditorBufferV1 => ({
+    text, cursor, desiredVisualColumn: 0, scrollVisualRow, dirty: false, focused: true,
+  });
+
+  it('returns the same text as the string form plus the first-shown row as `start`', () => {
+    const scrolled = buffer('l1\nl2\nl3\nl4\nl5\nl6', 3);
+    const withStart = windowPromptEnhancementFieldForDisplayWithStartV1(scrolled, 40, 3);
+    expect(withStart.text).toBe(windowPromptEnhancementFieldForDisplayV1(scrolled, 40, 3));
+    expect(withStart.start).toBe(3);
+    const fits = buffer('l1\nl2\nl3');
+    expect(windowPromptEnhancementFieldForDisplayWithStartV1(fits, 40, 6).start).toBe(0);
+  });
+
+  it('places the caret on the cursor line for a scrolled field (pos.row - start in range)', () => {
+    const b = buffer('l1\nl2\nl3\nl4\nl5\nl6', 3, 'l1\nl2\nl3\nl4\nl5\nl6'.length); // cursor on last row (5)
+    const win = windowPromptEnhancementFieldForDisplayWithStartV1(b, 40, 3);
+    const pos = promptEnhancementCursorVisualPositionV1(b, 40);
+    const visualRow = pos.row - win.start;
+    const shownLines = win.text.split('\n').length;
+    expect(pos.row).toBe(5);
+    expect(win.start).toBe(3);
+    expect(visualRow).toBe(2); // 3rd (last) shown line — where 'l6' renders
+    expect(visualRow).toBeGreaterThanOrEqual(0);
+    expect(visualRow).toBeLessThan(shownLines);
+  });
+
+  it('uses a row-0 basis when the field fits, even if the buffer carries a stale scroll', () => {
+    // The exact bug shape: the field fits (3 rows in a 6-row viewport) but the buffer scroll is 5.
+    // The display shows from row 0; the caret must too — the OLD `pos.row - scrollVisualRow` would
+    // have gone negative (2 - 5) and stranded the cursor.
+    const b = buffer('l1\nl2\nl3', 5, 'l1\nl2\nl3'.length); // cursor on last row (2)
+    const win = windowPromptEnhancementFieldForDisplayWithStartV1(b, 40, 6);
+    const pos = promptEnhancementCursorVisualPositionV1(b, 40);
+    const visualRow = pos.row - win.start;
+    const shownLines = win.text.split('\n').length;
+    expect(win.start).toBe(0);
+    expect(shownLines).toBe(3);
+    expect(visualRow).toBe(pos.row); // start 0 → caret row equals the real text row
+    expect(visualRow).toBeGreaterThanOrEqual(0);
+    expect(visualRow).toBeLessThan(shownLines);
   });
 });

@@ -83,7 +83,7 @@ describe('MPS CLI wiring (owner ruling 2026-08-06: CLI complete, extension pendi
     // …and the popup FRAME shows it (end-to-end).
     const ui = scripted([KEY.escape]);
     await runPromptEnhancementCliMpsFirstPopupV1({ result, interaction: ui });
-    expect(ui.frames[0]).toContain('Remaining: 1');
+    expect(ui.frames[0]).toContain('Total: 1');
     expect(ui.frames[0]).toContain('Types: fix, build');
   });
 

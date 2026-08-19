@@ -7,6 +7,10 @@ import type {
   PromptEnhancementPrepareRequestV1,
   PromptEnhancementPrepareResultV1,
 } from '../prompt-enhancement/contracts.js';
+import {
+  validatePromptEnhancementPrepareRequestV1,
+  validatePromptEnhancementPrepareResultV1,
+} from '../prompt-enhancement/contracts.js';
 import { validatePromptEnhancementCliPopupResultV1 } from '../prompt-enhancement/cli-submit-popup.js';
 import {
   computeDockedPopupGeometry,
@@ -20,7 +24,14 @@ import {
 import type {
   PromptEnhancementPopupHostInputV1,
   PromptEnhancementPopupHostOutputV1,
+  PromptEnhancementMpsContinuationHostInputV1,
+  PromptEnhancementMpsContinuationHostOutputV1,
 } from './commands/prompt-enhancement-popup-host.js';
+import {
+  isPromptEnhancementCliMpsContinuationOutcomeV1,
+  type PromptEnhancementCliMpsContinuationOutcomeV1,
+} from '../prompt-enhancement/cli-mps-continuation-run.js';
+import type { PromptEnhancementSequencePackagedContinuationV1 } from '../prompt-enhancement/sequence-packager.js';
 
 export const PROMPT_ENHANCEMENT_LINUX_TERMINAL_COMMANDS_V1 = [
   'xdg-terminal-exec',
@@ -109,6 +120,10 @@ export type PromptEnhancementCliPopupHostLaunchResultV1 =
   | { state: 'not_applicable'; reasonCode: 'direct_tty' }
   | { state: 'host_unavailable'; reasonCode: 'unsupported_platform' | 'no_gui_session' | 'no_supported_terminal' }
   | { state: 'launch_failed'; reasonCode: 'terminal_spawn_failed' | 'terminal_exit_nonzero' | 'terminal_renderer_not_ready' }
+  // Blink fix (Phase 1): the payload failed the SAME validators the spawned child runs, so no window is
+  // opened — the launcher rejects it here instead of spawning a terminal that the child would exit from
+  // before rendering (an open-then-close "blink"). Callers treat it exactly like any non-`completed` result.
+  | { state: 'not_shown'; reasonCode: 'payload_invalid_pre_spawn'; validationReasonCodes: readonly string[] }
   | { state: 'completed'; output: PromptEnhancementPopupHostOutputV1 };
 
 interface PromptEnhancementSpawnedTerminalV1 {
@@ -561,6 +576,40 @@ function readResultFile(path: string): PromptEnhancementPopupHostOutputV1 | unde
     return {
       protocolVersion: PROMPT_ENHANCEMENT_POPUP_HOST_PROTOCOL_VERSION_V1,
       result: output.result,
+      // MPS Phase 1 (Option 2): carry the parent-records flag across the IPC boundary (default false).
+      mpsFirstPopupSent: output.mpsFirstPopupSent === true,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+// MPS Phase 2 (Option D) — the continuation host's private input/output file I/O, mirroring the
+// first-popup pair above. Same atomic-write + strict-read discipline; only the payload shape differs.
+function writeContinuationInputFile(path: string, input: PromptEnhancementMpsContinuationHostInputV1): void {
+  const fd = openSync(path, 'wx', 0o600);
+  try {
+    writeFileSync(fd, JSON.stringify(input), 'utf8');
+    chmodSync(path, 0o600);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function readContinuationResultFile(path: string): PromptEnhancementMpsContinuationHostOutputV1 | undefined {
+  if (!existsSync(path)) return undefined;
+  try {
+    if (!lstatSync(path).isFile()) return undefined;
+    const parsed = JSON.parse(readFileSync(path, 'utf8')) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
+    const output = parsed as Record<string, unknown>;
+    if (output.protocolVersion !== PROMPT_ENHANCEMENT_POPUP_HOST_PROTOCOL_VERSION_V1) return undefined;
+    // Validate the reported outcome from the single canonical source; a malformed/incomplete outcome
+    // reads back as undefined, which the launcher surfaces as a failed launch (fail-closed).
+    if (!isPromptEnhancementCliMpsContinuationOutcomeV1(output.continuationOutcome)) return undefined;
+    return {
+      protocolVersion: PROMPT_ENHANCEMENT_POPUP_HOST_PROTOCOL_VERSION_V1,
+      continuationOutcome: output.continuationOutcome as PromptEnhancementCliMpsContinuationOutcomeV1,
     };
   } catch {
     return undefined;
@@ -619,6 +668,16 @@ function defaultLaunchDependencies(): PromptEnhancementCliPopupHostLaunchDepende
  * Launch the already-built hidden popup child through a resolved Linux terminal
  * and exchange only private typed files. It does not decide hook output or
  * mutate PE semantics; PE1.3 returns transport status for the later adapter.
+ *
+ * Blink fix (Phases 1–3): before spawning, this runs the SAME two validators the child runs
+ * (validatePromptEnhancementPrepareRequestV1 + validatePromptEnhancementPrepareResultV1). An invalid
+ * payload returns `{ state: 'not_shown', reasonCode: 'payload_invalid_pre_spawn', validationReasonCodes }`
+ * WITHOUT opening a window — otherwise the spawned terminal would open and the child would exit before
+ * rendering (an open-then-close "blink"). The sibling continuation launcher below applies a narrowed,
+ * presence-only structural gate (same reasonCode) so a valid confirmation item is never over-rejected.
+ * `direct_tty` and the valid-payload spawn path are unchanged. Reason codes: `payload_invalid_pre_spawn`
+ * (this gate) vs. `terminal_spawn_failed` / `terminal_exit_nonzero` / `terminal_renderer_not_ready`
+ * (a genuine spawn/render failure AFTER a valid payload).
  */
 export async function runPromptEnhancementCliPopupHostLaunchV1(input: {
   capability: PromptEnhancementCliHostCapabilityV1;
@@ -632,6 +691,22 @@ export async function runPromptEnhancementCliPopupHostLaunchV1(input: {
     return { state: 'host_unavailable', reasonCode: input.capability.reasonCode };
   }
   if (input.capability.method === 'direct_tty') return { state: 'not_applicable', reasonCode: 'direct_tty' };
+
+  // Pre-spawn validity gate (blink fix, Phase 1): run the SAME two validators the spawned child runs
+  // (prompt-enhancement-popup-host.ts `validatedInput`) BEFORE opening a window. An invalid payload —
+  // e.g. the OpenAI key is missing, so the enhancement is an invalid fallback — would otherwise open a
+  // terminal window that the child immediately exits from before rendering: an open-then-close "blink".
+  // Rejecting it here yields the SAME not-shown outcome the caller already produces for any non-
+  // `completed` launch, with no wasted flashing window. The valid-payload path below is unchanged.
+  const requestCheck = validatePromptEnhancementPrepareRequestV1(input.request);
+  const resultCheck = validatePromptEnhancementPrepareResultV1(input.result);
+  if (!requestCheck.ok || !resultCheck.ok) {
+    return {
+      state: 'not_shown',
+      reasonCode: 'payload_invalid_pre_spawn',
+      validationReasonCodes: [...requestCheck.reasonCodes, ...resultCheck.reasonCodes],
+    };
+  }
 
   const dependencies = { ...defaultLaunchDependencies(), ...overrides };
   const tempDir = dependencies.makeTempDir();
@@ -738,6 +813,189 @@ export async function runPromptEnhancementCliPopupHostLaunchV1(input: {
         // window (~8s of polls) to close the Terminal window and exit on its own; the kill in
         // `finally` then hits an already-dead process. Linux/Windows terminal windows close
         // themselves when their command exits — their flow is unchanged (no extra waiting).
+        if (input.capability.method === 'mac_terminal') {
+          for (let pollCount = 0; pollCount < 40 && !childExited; pollCount += 1) {
+            await dependencies.sleep(200);
+          }
+        }
+        return { state: 'completed', output };
+      }
+      if (terminalExitNonZero) return { state: 'launch_failed', reasonCode: 'terminal_exit_nonzero' };
+      await dependencies.sleep(PROMPT_ENHANCEMENT_POPUP_HOST_POLL_INTERVAL_MS_V1);
+    }
+  } finally {
+    if (child) {
+      try { child.kill('SIGTERM'); } catch { /* best-effort timeout/cleanup termination */ }
+    }
+    try { dependencies.cleanupTempDir(tempDir); } catch { /* cleanup must not crash the hook */ }
+  }
+}
+
+// ── MPS Phase 2 (Option D) — the CONTINUATION (2nd popup) window launcher ─────────────────────────
+export type PromptEnhancementCliMpsContinuationHostLaunchResultV1 =
+  | { state: 'not_applicable'; reasonCode: 'direct_tty' }
+  | { state: 'host_unavailable'; reasonCode: 'unsupported_platform' | 'no_gui_session' | 'no_supported_terminal' }
+  | { state: 'launch_failed'; reasonCode: 'terminal_spawn_failed' | 'terminal_exit_nonzero' | 'terminal_renderer_not_ready' }
+  // Blink fix (Phase 2): the continuation payload is structurally broken (a field the child dereferences
+  // is absent), so no window is opened. Callers treat it exactly like any non-`completed` result — the
+  // reasonCode flows into the existing continuation not-shown mapping.
+  | { state: 'not_shown'; reasonCode: 'payload_invalid_pre_spawn'; validationReasonCodes: readonly string[] }
+  | { state: 'completed'; output: PromptEnhancementMpsContinuationHostOutputV1 };
+
+export interface PromptEnhancementCliMpsContinuationHostLaunchDependenciesV1 {
+  makeTempDir: () => string;
+  writeContinuationInputFile: (path: string, input: PromptEnhancementMpsContinuationHostInputV1) => void;
+  spawnTerminal: (plan: PromptEnhancementLinuxTerminalLaunchPlanV1) => Promise<PromptEnhancementSpawnedTerminalV1>;
+  readContinuationResultFile: (path: string) => PromptEnhancementMpsContinuationHostOutputV1 | undefined;
+  readReadyFile: (path: string) => boolean;
+  sleep: (milliseconds: number) => Promise<void>;
+  cleanupTempDir: (path: string) => void;
+  detectPopupGeometry: () => Promise<PopupGeometry | undefined>;
+}
+
+function defaultContinuationLaunchDependencies(): PromptEnhancementCliMpsContinuationHostLaunchDependenciesV1 {
+  return {
+    makeTempDir,
+    writeContinuationInputFile,
+    spawnTerminal,
+    readContinuationResultFile,
+    readReadyFile,
+    sleep,
+    cleanupTempDir,
+    detectPopupGeometry: defaultLaunchDependencies().detectPopupGeometry,
+  };
+}
+
+/**
+ * Launch the CONTINUATION (2nd) popup in a spawned window. A faithful sibling of
+ * runPromptEnhancementCliPopupHostLaunchV1: it uses the SAME hidden child command and the SAME
+ * per-platform plan builders (Windows / macOS / Linux), so cross-platform spawn behaviour is IDENTICAL
+ * — the only differences are the continuation input it writes and the continuation outcome it reads
+ * back. The working first-popup launcher is left untouched (locked "preserve the Linux path" rule).
+ * Phase 3 wires this into the Stop-hook continuation launcher.
+ */
+export async function runPromptEnhancementCliMpsContinuationHostLaunchV1(input: {
+  capability: PromptEnhancementCliHostCapabilityV1;
+  continuation: Pick<PromptEnhancementSequencePackagedContinuationV1, 'result' | 'handoffMetadata' | 'event' | 'progress' | 'itemKind'>;
+  cliEntryPath: string;
+  dbPath: string;
+  nodePath?: string;
+}, overrides: Partial<PromptEnhancementCliMpsContinuationHostLaunchDependenciesV1> = {}): Promise<PromptEnhancementCliMpsContinuationHostLaunchResultV1> {
+  if (input.capability.state === 'unavailable') {
+    return { state: 'host_unavailable', reasonCode: input.capability.reasonCode };
+  }
+  if (input.capability.method === 'direct_tty') return { state: 'not_applicable', reasonCode: 'direct_tty' };
+
+  // Pre-spawn structural gate (blink fix, Phase 2 — NARROWED): the continuation child marks itself ready
+  // BEFORE it validates, so a structurally-broken continuation still opens a window that then closes (a
+  // "blink"). Mirror the child's `asContinuationInput` structural check — the five fields it dereferences
+  // (result / handoffMetadata / event / progress / itemKind) — BEFORE spawning, so a broken payload never
+  // opens a window. Deliberately NOT the full validatePromptEnhancementPrepareResultV1 on the raw body: a
+  // CONFIRMATION item carries an empty original slice and the runner validates WITH the
+  // `originalPromptText ← text` substitution — a raw check here would wrongly reject every valid
+  // confirmation continuation. This is presence-only; the runner stays the single content validator, so a
+  // valid confirmation item (all five fields present) still spawns and renders exactly as before.
+  const c = input.continuation as Record<string, unknown> | null | undefined;
+  const missing: string[] = [];
+  if (!c || typeof c !== 'object') {
+    missing.push('missing_continuation');
+  } else {
+    if (c.result == null) missing.push('missing_result');
+    if (c.handoffMetadata == null) missing.push('missing_handoff_metadata');
+    if (c.event == null) missing.push('missing_event');
+    if (c.progress == null) missing.push('missing_progress');
+    if (typeof c.itemKind !== 'string' || c.itemKind.length === 0) missing.push('missing_item_kind');
+  }
+  if (missing.length > 0) {
+    return { state: 'not_shown', reasonCode: 'payload_invalid_pre_spawn', validationReasonCodes: missing };
+  }
+
+  const dependencies = { ...defaultContinuationLaunchDependencies(), ...overrides };
+  const tempDir = dependencies.makeTempDir();
+  const inputFile = join(tempDir, 'input.json');
+  const resultFile = join(tempDir, 'result.json');
+  const readinessFile = join(tempDir, 'ready');
+  let child: PromptEnhancementSpawnedTerminalV1 | undefined;
+  let terminalExitNonZero = false;
+  let rendererReady = false;
+
+  try {
+    const childInput: PromptEnhancementMpsContinuationHostInputV1 = {
+      protocolVersion: PROMPT_ENHANCEMENT_POPUP_HOST_PROTOCOL_VERSION_V1,
+      continuation: {
+        result: input.continuation.result,
+        handoffMetadata: input.continuation.handoffMetadata,
+        event: input.continuation.event,
+        progress: input.continuation.progress,
+        itemKind: input.continuation.itemKind,
+      },
+    };
+    dependencies.writeContinuationInputFile(inputFile, childInput);
+    const geometry = await dependencies.detectPopupGeometry();
+    let plan: PromptEnhancementLinuxTerminalLaunchPlanV1;
+    if (input.capability.method === 'windows_terminal') {
+      const launcherScriptPath = join(tempDir, 'launch.cmd');
+      let positionScriptPath: string | undefined;
+      if (geometry) {
+        positionScriptPath = join(tempDir, 'position.ps1');
+        writeFileSync(positionScriptPath, buildPromptEnhancementWindowsPositionScriptV1(geometry), 'utf8');
+      }
+      const launcherScript = buildPromptEnhancementWindowsLauncherScriptV1({
+        nodeExecPath: input.nodePath ?? process.execPath,
+        cliEntryPath: input.cliEntryPath,
+        inputFile,
+        resultFile,
+        readinessFile,
+        dbPath: input.dbPath,
+        geometry,
+        positionScriptPath,
+      });
+      writeFileSync(launcherScriptPath, launcherScript, 'utf8');
+      if (process.env.NEXPATH_DEBUG) process.stderr.write(`[nexpath] mps-continuation launch.cmd (${launcherScriptPath}):\n${launcherScript}\n`);
+      plan = planPromptEnhancementWindowsTerminalLaunchV1({ launcherScriptPath });
+    } else if (input.capability.method === 'mac_terminal') {
+      const launcherScriptPath = join(tempDir, 'launch.sh');
+      writeFileSync(launcherScriptPath, buildPromptEnhancementMacLauncherScriptV1({
+        nodeExecPath: input.nodePath ?? process.execPath,
+        cliEntryPath: input.cliEntryPath,
+        inputFile,
+        resultFile,
+        readinessFile,
+        dbPath: input.dbPath,
+      }), { mode: 0o700 });
+      plan = planPromptEnhancementMacTerminalLaunchV1({ launcherScriptPath, geometry });
+    } else {
+      plan = planPromptEnhancementLinuxTerminalLaunchV1({
+        terminalCommand: input.capability.terminalCommand,
+        nodePath: input.nodePath ?? process.execPath,
+        cliEntryPath: input.cliEntryPath,
+        geometry,
+        displayServer: detectPromptEnhancementLinuxDisplayServerV1(),
+        inputFile,
+        resultFile,
+        readinessFile,
+        dbPath: input.dbPath,
+      });
+    }
+    if (process.env.NEXPATH_DEBUG) {
+      process.stderr.write(`[nexpath] MPS continuation popup spawn: ${plan.command} ${JSON.stringify(plan.args)}\n`);
+    }
+    let childExited = false;
+    try {
+      child = await dependencies.spawnTerminal(plan);
+      child.once('exit', (code, signal) => {
+        childExited = true;
+        terminalExitNonZero = code !== 0 || signal !== null;
+      });
+    } catch {
+      return { state: 'launch_failed', reasonCode: 'terminal_spawn_failed' };
+    }
+
+    for (;;) {
+      rendererReady ||= dependencies.readReadyFile(readinessFile);
+      const output = dependencies.readContinuationResultFile(resultFile);
+      if (output) {
+        if (!rendererReady) return { state: 'launch_failed', reasonCode: 'terminal_renderer_not_ready' };
         if (input.capability.method === 'mac_terminal') {
           for (let pollCount = 0; pollCount < 40 && !childExited; pollCount += 1) {
             await dependencies.sleep(200);

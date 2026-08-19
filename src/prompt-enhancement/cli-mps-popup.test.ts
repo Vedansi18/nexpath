@@ -60,7 +60,7 @@ function model(overrides: Partial<PromptEnhancementMpsFirstPopupModelV1> = {}): 
       },
       originalPrompt: 'not_rendered',
     },
-    sequencePlan: { remainingTaskCount: 3, taskRoleLabels: ['implement', 'verify', 'document'] },
+    sequencePlan: { remainingTaskCount: 3, taskRoleLabels: ['implement', 'verify', 'document'], taskSummaryLines: [] },
     keyboard: {
       plainEnter: 'emit_one_typed_current_body_plus_details_request',
       escape: 'leave_editor_focus_preserve_draft',
@@ -89,7 +89,7 @@ describe('UI-6 MPS first-popup frame renderer (§3.3)', () => {
     expect(frame).toContain('Focus on the checkout module.');
     expect(frame).toContain('Cancel (remaining multi-prompt sequence)');
     expect(frame).toContain('Sequence plan');
-    expect(frame).toContain('Remaining: 3');
+    expect(frame).toContain('Total: 3');
     expect(frame).toContain('Types: implement, verify, document');
     expect(frame).toContain(PROMPT_ENHANCEMENT_MPS_CLI_FOOTER_V1);
     // Title is the first line and the footer is the last line, behind the continuous left rail
@@ -149,12 +149,19 @@ describe('UI-6 MPS first-popup frame renderer (§3.3)', () => {
     expect(frame).toContain('Additional details');
   });
 
-  it('sanitises every model-supplied string, including task role labels', () => {
+  it('sanitises every model-supplied string, including task role labels and summary lines', () => {
     const frame = renderPromptEnhancementMpsFirstPopupFrameV1(model({
-      sequencePlan: { remainingTaskCount: 2, taskRoleLabels: [`impl${ESC}[31mement`, 'verify'] },
+      sequencePlan: {
+        remainingTaskCount: 2,
+        taskRoleLabels: [`impl${ESC}[31mement`, 'verify'],
+        taskSummaryLines: [`set up ${ESC}[31mthe DB`, 'add the API'],
+      },
     }), { colorize: false });
     expect(frame).not.toContain(ESC);
     expect(frame).toContain('Types: implement, verify');
+    // Phase 3b: the per-task summary lines render numbered, sanitised, below Types.
+    expect(frame).toContain('1. set up the DB');
+    expect(frame).toContain('2. add the API');
   });
 
   it('clamps an out-of-range focusIndex to the interactive rows', () => {
@@ -315,7 +322,7 @@ describe('UI-7 MPS continuation-popup frame renderer (§3.4)', () => {
   it('never repeats the Sequence plan, remaining count, or future-item details (§3.4)', () => {
     const frame = renderPromptEnhancementMpsContinuationFrameV1(continuationModel());
     expect(frame).not.toContain('Sequence plan');
-    expect(frame).not.toContain('Remaining:');
+    expect(frame).not.toContain('Total:');
     expect(frame).not.toContain('Types:');
   });
 
@@ -375,9 +382,12 @@ describe('UI-7 MPS continuation-popup frame renderer (§3.4)', () => {
   });
 
   it('MPS-12 (Ruling C): a TASK item shows "Your original: <slice>"; a CONFIRMATION item shows none', () => {
-    // TASK kinds (`first_task`/`task`) → the user's original slice rendered verbatim below the body.
-    expect(renderPromptEnhancementMpsContinuationFrameV1(continuationModel({ itemKind: 'task' })))
-      .toContain('Your original: Run the checkout fix sequence.');
+    // TASK kinds (`first_task`/`task`) → the user's original slice rendered below the body: a
+    // "Your original:" label line, then the slice indented on its own line(s) (pushed per line so the
+    // left rail reaches every line — a long original no longer spills rail-less past the frame).
+    const taskFrame = renderPromptEnhancementMpsContinuationFrameV1(continuationModel({ itemKind: 'task' }));
+    expect(taskFrame).toContain('Your original:');
+    expect(taskFrame).toContain('Run the checkout fix sequence.');
     expect(renderPromptEnhancementMpsContinuationFrameV1(continuationModel({ itemKind: 'first_task' })))
       .toContain('Your original:');
     // CONFIRMATION kinds (+ wrap_up) → NO original region: no label, box, or placeholder (Ruling C).

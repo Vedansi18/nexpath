@@ -81,4 +81,28 @@ describe('runPromptEnhancementSequenceBodyProducerV1', () => {
     const result = await runPromptEnhancementSequenceBodyProducerV1(input([firstTask(), task(1)]), client);
     expect(result).toEqual({ ok: false, stage: 'batch', reason: 'item_missing_wording' });
   });
+
+  it('deterministic fallback (opt-in): words items without the model when the batch fails', async () => {
+    // The model batch returns nothing usable (item_missing_wording). With the fallback ON, the item is
+    // worded WITHOUT the model — its own slice verbatim — and carries a real verdict graph, so the
+    // sequence survives instead of emptying `items_json`.
+    const client = clientReturning(JSON.stringify({ items: [] }));
+    const result = await runPromptEnhancementSequenceBodyProducerV1(
+      { ...input([firstTask(), task(1)]), deterministicFallback: true }, client,
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.items[0].generatedWording).toBeNull();          // item 0 is never worded
+    expect(result.items[1].generatedWording).toContain(SLICE_TWO); // its own words, verbatim
+    expect(result.items[1].itemValidationGraph).not.toBeNull();
+  });
+
+  it('deterministic fallback cannot word a task with an empty slice — the batch reason stands', async () => {
+    const client = clientReturning(JSON.stringify({ items: [] }));
+    const result = await runPromptEnhancementSequenceBodyProducerV1(
+      { ...input([firstTask(), task(1, { originalSliceRef: { start: 0, end: 0 } })]),
+        deterministicFallback: true }, client,
+    );
+    expect(result.ok).toBe(false);
+  });
 });

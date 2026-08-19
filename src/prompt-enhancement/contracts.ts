@@ -1384,6 +1384,12 @@ export interface PromptEnhancementCompactFirstPopupSequenceSummaryV1 {
   publicSafeText: string;
   remainingTaskCount: number;
   taskRoleLabels: readonly string[];
+  /**
+   * One short display line per follow-up task, cut from the REDACTED original prompt at each item's
+   * own slice (the user's own words, not a generated body). Empty on the describe fallback / when no
+   * items are available. Body-bound and redaction-safe, so the flags below stay honest.
+   */
+  taskSummaryLines: readonly string[];
   sourceRefs: readonly string[];
   containsFuturePromptText: false;
   rawPromptTextExcluded: true;
@@ -1998,6 +2004,11 @@ export function validatePromptEnhancementActionRequestV1(
 
 export function validatePromptEnhancementPrepareResultV1(
   value: unknown,
+  // A CONTINUATION result is a packaged sequence-item body, not a fresh-prompt result: its verdict
+  // graph carries the single `sequence` phase, not the full pipeline's fifteen. Callers that validate
+  // one pass `{ sequenceItemGraph: true }` so the graph check asks the right question. Omitted (the
+  // default) preserves the full-pipeline check exactly — every existing caller is unchanged.
+  options?: { sequenceItemGraph?: boolean },
 ): PromptEnhancementContractValidation {
   const obj = asRecord(value);
   const legacy = findLegacyDecisionSessionKeys(obj);
@@ -2029,7 +2040,10 @@ export function validatePromptEnhancementPrepareResultV1(
   if (!isCompleteRouteDecision(obj?.['routeDecision'])) reasonCodes.push('missing_route_decision');
   if (!isCompleteBodyPlan(obj?.['bodyPlan'], obj?.['disposition'] === 'no_popup_not_applicable')) reasonCodes.push('missing_body_plan');
   if (!isCompleteComposerBoundary(obj?.['composerBoundary'])) reasonCodes.push('missing_composer_boundary');
-  if (!isCompleteValidationGraph(obj?.['validationGraph'])) reasonCodes.push('missing_validation_graph');
+  if (!isCompleteValidationGraph(
+    obj?.['validationGraph'],
+    options?.sequenceItemGraph ? SEQUENCE_ITEM_VALIDATION_STAGES_V1 : FULL_PIPELINE_VALIDATION_STAGES_V1,
+  )) reasonCodes.push('missing_validation_graph');
   if (!isCompleteUiViewPayload(obj?.['uiView'])) reasonCodes.push('missing_ui_view_payload');
   if (!isCompleteCallVisibility(obj?.['callAndVisibilityMetadata'])) reasonCodes.push('missing_call_visibility_metadata');
   if (obj?.['handoffMetadata'] !== undefined && !isCompleteHandoffMetadata(obj?.['handoffMetadata'], currentBody, obj)) {
@@ -2042,7 +2056,12 @@ export function validatePromptEnhancementPrepareResultV1(
   if (isRawTransportAuthority(obj)) reasonCodes.push('raw_transport_semantic_authority');
   if (isUnsafeSafetyPolicy(obj)) reasonCodes.push('unsafe_safety_policy');
   if (isMismatchedSafetySummary(obj)) reasonCodes.push('mismatched_safety_summary');
-  if (isMismatchedCallVisibilityState(obj)) reasonCodes.push('mismatched_call_visibility_state');
+  // A CONTINUATION result's graph is the served ITEM's batch-time verdict (e.g. `llm_wording`), while its
+  // callVisibility describes the continuation presentation itself (no new provider call). These two
+  // legitimately describe DIFFERENT moments, so the fresh-prompt "graph and callVisibility must agree"
+  // check is a category error here — skip it in sequence-item mode. (For a fresh prompt, both describe the
+  // one composer call and the check still applies.)
+  if (!options?.sequenceItemGraph && isMismatchedCallVisibilityState(obj)) reasonCodes.push('mismatched_call_visibility_state');
   if (isMismatchedCurrentBodySafetyState(obj)) reasonCodes.push('mismatched_current_body_safety_state');
   return { ok: reasonCodes.length === 0, reasonCodes };
 }
@@ -2373,7 +2392,35 @@ function isCompleteComposerBoundary(value: unknown): boolean {
     && fallback['productValueDiscussionIsRuntimeLimiter'] === false;
 }
 
-function isCompleteValidationGraph(value: unknown): boolean {
+// The phase stages a FRESH-prompt (full-pipeline) result graph must carry — one per pipeline stage.
+const FULL_PIPELINE_VALIDATION_STAGES_V1 = [
+  'request',
+  'pre_plan',
+  'section_plan',
+  'composer_input',
+  'composer_output',
+  'final_body',
+  'user_edit',
+  'action',
+  'delivery',
+  'storage',
+  'source_use',
+  'privacy',
+  'handoff',
+  'sequence',
+  'launch_check',
+] as const;
+
+// The stages a SEQUENCE-ITEM (continuation) result graph carries. A continuation item's body is
+// generated and validated at the SEQUENCE stage only — it never runs the fresh-prompt pipeline — so
+// its verdict graph legitimately holds the one `sequence` phase, not all fifteen. This is a category
+// distinction, not an incomplete graph: requiring the full fifteen of it is the wrong question.
+const SEQUENCE_ITEM_VALIDATION_STAGES_V1 = ['sequence'] as const;
+
+function isCompleteValidationGraph(
+  value: unknown,
+  requiredStages: readonly string[] = FULL_PIPELINE_VALIDATION_STAGES_V1,
+): boolean {
   const graph = asRecord(value);
   if (!graph) return false;
   if (graph['graphVersion'] !== PROMPT_ENHANCEMENT_CONTRACT_VERSION) return false;
@@ -2387,23 +2434,6 @@ function isCompleteValidationGraph(value: unknown): boolean {
   const phaseStates = Array.isArray(graph['phaseStates']) ? graph['phaseStates'] : [];
   const failures = Array.isArray(graph['failures']) ? graph['failures'] : [];
   const stages = new Set(phaseStates.map((phase) => asRecord(phase)?.['stage']));
-  const requiredStages = [
-    'request',
-    'pre_plan',
-    'section_plan',
-    'composer_input',
-    'composer_output',
-    'final_body',
-    'user_edit',
-    'action',
-    'delivery',
-    'storage',
-    'source_use',
-    'privacy',
-    'handoff',
-    'sequence',
-    'launch_check',
-  ];
   if (!requiredStages.every((stage) => stages.has(stage))) return false;
   if (!phaseStates.every(isCompleteValidationPhaseState)) return false;
   if (!failures.every(isCompleteValidationFailure)) return false;

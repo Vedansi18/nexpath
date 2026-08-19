@@ -132,7 +132,7 @@ describe('stage-3-1 first MPS popup', () => {
     expect(built.model.heading).toBe('Use enhanced sequence prompt');
     expect(built.model.layout).toEqual(['enhanced_body', 'additional_details', 'cancel_remaining_sequence', 'sequence_plan']);
     expect(built.model.actions.originalPrompt).toBe('not_rendered');
-    expect(built.model.sequencePlan).toEqual({ remainingTaskCount: 1, taskRoleLabels: ['verification'] });
+    expect(built.model.sequencePlan).toEqual({ remainingTaskCount: 1, taskRoleLabels: ['verification'], taskSummaryLines: [] });
     expect(built.model.authority).toEqual({
       localSequenceRuntime: false, localQueuePointer: false, localAutoSend: false, localAdvance: false, hostTransport: false,
     });

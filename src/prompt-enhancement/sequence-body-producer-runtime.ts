@@ -15,6 +15,7 @@
  */
 import {
   buildPromptEnhancementSequenceBatchItemsV1,
+  buildPromptEnhancementSequenceDeterministicComposedV1,
   runPromptEnhancementSequenceBatchV1,
   type PromptEnhancementSequenceBatchFailureReasonV1,
 } from './sequence-batch-composer.js';
@@ -52,6 +53,14 @@ export interface PromptEnhancementSequenceBodyProducerInputV1 {
   deadlineAtMs?: number;
   /** How the deadline is read. Present so the check is testable without waiting. */
   nowMs?: () => number;
+  /**
+   * PROPER FIX — enables the deterministic body fallback: when the model batch cannot word the items to
+   * spec, they are worded WITHOUT the model (each task from its own slice, each confirmation in its
+   * fixed format, the recap from its covered slices) so `items_json` is never empty and the second
+   * popup is never lost. Off by default, which is the exact behaviour without it — a failed batch
+   * returns its reason and no bodies are produced. The production caller (the Stop hook) turns it on.
+   */
+  deterministicFallback?: boolean;
 }
 
 export type PromptEnhancementSequenceBodyProducerResultV1 =
@@ -86,9 +95,27 @@ export async function runPromptEnhancementSequenceBodyProducerV1(
     },
     client,
   );
-  if (!batch.ok) return { ok: false, stage: 'batch', reason: batch.reason };
+  // PROPER FIX — the model batch could not word the items. When the caller opted in, word them
+  // deterministically from the same batch items (each task its own slice, each confirmation its fixed
+  // format, the recap its covered slices) rather than lose the sequence to an empty `items_json`. The
+  // fallback returns null only when an item cannot be worded at all (an empty slice), in which case the
+  // batch's own reason stands and the single-prompt path takes over, exactly as before.
+  const composed = batch.ok
+    ? batch.composed
+    : input.deterministicFallback === true
+      ? buildPromptEnhancementSequenceDeterministicComposedV1(batchItems, {
+          baseSafetySummary: input.baseSafetySummary,
+          providerRuntimeState: input.providerRuntimeState,
+          optionalCallAvailabilityState: input.optionalCallAvailabilityState,
+        })
+      : null;
+  if (composed === null) {
+    // Reachable only when the batch failed (a successful batch always carries a composed map): either
+    // the caller did not opt in, or the fallback could not word an item. Return the batch's own reason.
+    return { ok: false, stage: 'batch', reason: batch.ok ? 'invalid_output' : batch.reason };
+  }
 
-  const produced = producePromptEnhancementSequenceItemBodiesV1(input.plannerItems, batch.composed);
+  const produced = producePromptEnhancementSequenceItemBodiesV1(input.plannerItems, composed);
   if (!produced.ok) return { ok: false, stage: 'assemble', reason: produced.reason };
 
   return { ok: true, items: produced.items };

@@ -726,17 +726,29 @@ describe('sequence planner — the list is checked against the rules it will be 
       .toEqual({ ok: false, reason: 'dependency_order_not_index' });
   });
 
-  it('rejects an offset that does not address the original, rather than slicing something else', async () => {
-    expect(await run(withItems(firstTask, taskItem({ originalSliceRef: { start: 0, end: ORIGINAL.length + 500 } }))))
-      .toEqual({ ok: false, reason: 'offset_range_out_of_bounds' });
+  it('clamps an offset that runs past the original, rather than slicing something else', async () => {
+    // A task slice that runs PAST the prompt is CLAMPED into the valid window (Phase 1b, §5.5a — an
+    // out-of-bounds offset is a wrong position, corrected to the bound; the body is worded fresh so a
+    // slice is only a rough pointer). The plan is accepted, not rejected.
+    const clampedTask = await run(withItems(firstTask, taskItem({ originalSliceRef: { start: 0, end: ORIGINAL.length + 500 } })));
+    expect(clampedTask.ok).toBe(true);
+    if (clampedTask.ok) expect(clampedTask.output.items[1]?.originalSliceRef).toEqual({ start: 0, end: ORIGINAL.length });
+    // sourcePointRanges that run past the prompt are clamped into the valid window too (Phase 1b).
+    const clampedPoints = await run(withItems(firstTask, taskItem({ sourcePointRanges: [{ start: 0, end: ORIGINAL.length + 300 }] })));
+    expect(clampedPoints.ok).toBe(true);
+    if (clampedPoints.ok) expect(clampedPoints.output.items[1]?.sourcePointRanges).toEqual([{ start: 0, end: ORIGINAL.length }]);
+    // A degenerate slice (start ≥ end) is repaired to a minimal valid range, not rejected.
+    const degenerate = await run(withItems(firstTask, taskItem({ originalSliceRef: { start: 20, end: 5 } })));
+    expect(degenerate.ok).toBe(true);
     // The first prompt is the request itself: a partial first slice is NORMALIZED to the whole
     // original (Phase 1, §5.5a — a mandated literal is corrected, never rejected).
     const firstSliceNorm = await run(withItems({ ...firstTask, originalSliceRef: { start: 0, end: 4 } }, taskItem()));
     expect(firstSliceNorm.ok).toBe(true);
     if (firstSliceNorm.ok) expect(firstSliceNorm.output.items[0]?.originalSliceRef).toEqual({ start: 0, end: ORIGINAL.length });
-    // And the whole-prompt directives index the same original.
-    expect(await run(validReply({ promptDirectives: [{ start: 0, end: ORIGINAL.length + 1 }] })))
-      .toEqual({ ok: false, reason: 'prompt_directives_invalid' });
+    // Whole-prompt directives that run past the original are clamped into the valid window too (Phase 1b).
+    const clampedDirectives = await run(validReply({ promptDirectives: [{ start: 0, end: ORIGINAL.length + 1 }] }));
+    expect(clampedDirectives.ok).toBe(true);
+    if (clampedDirectives.ok) expect(clampedDirectives.output.promptDirectives).toEqual([{ start: 0, end: ORIGINAL.length }]);
   });
 
   it('rejects confirmations that are not what the verdict earns, in the order it earns them', async () => {
@@ -774,18 +786,45 @@ describe('sequence planner — the list is checked against the rules it will be 
     ))).ok).toBe(true);
   });
 
-  it('rejects a closing recap that is not earned, and one that is not last', async () => {
+  it('normalizes the closing recap to the count rule (§5.5a), and still rejects one that is not last', async () => {
     const wrapUp = (order: number) => ({
       itemKind: 'wrap_up', originalSliceRef: null, sourcePointRanges: [], roleLabel: null,
       dependencyOrder: order, complexity: null, complexityReason: null, decompositionGroupId: null,
     });
-    // A recap exists if and only if there is enough behind it to recap.
-    expect(await run(withItems(firstTask, taskItem(), wrapUp(2))))
-      .toEqual({ ok: false, reason: 'wrap_up_presence_does_not_match_count' });
+    // §5.5a — the recap's PRESENCE is a spec-mandated COUNT, not the model's judgment. A recap on a
+    // SHORT list (≤3 non-recap items) is not earned, so it is NORMALIZED AWAY rather than rejected on
+    // `wrap_up_presence_does_not_match_count` — exactly as an out-of-bounds offset is clamped.
+    const dropped = await run(withItems(firstTask, taskItem(), wrapUp(2)));
+    expect(dropped.ok).toBe(true);
+    if (dropped.ok) {
+      expect(dropped.output.items.some((item) => item.itemKind === 'wrap_up')).toBe(false);
+      expect(dropped.output.items).toHaveLength(2);
+    }
+    // A recap that is not last is malformed structure (not a count miscount) — my normalize touches
+    // only the last-recap cases, so this still fails hard, unchanged.
     expect(await run(withItems(
       firstTask, wrapUp(1), taskItem({ dependencyOrder: 2 }),
       taskItem({ dependencyOrder: 3 }), taskItem({ dependencyOrder: 4 }),
     ))).toEqual({ ok: false, reason: 'wrap_up_not_last_or_duplicated' });
+  });
+
+  it('appends the one mandated closing recap when the model omitted it on a long list (§5.5a)', async () => {
+    // >3 non-recap items REQUIRE exactly one recap; a model that omitted it is CORRECTED (the recap is
+    // appended as the last item), not rejected — this is what lifted the planner success rate. Five
+    // not_complex tasks earn no confirmations, so the only thing missing is the mandated recap.
+    const res = await run(withItems(
+      firstTask,
+      taskItem({ dependencyOrder: 1 }), taskItem({ dependencyOrder: 2 }),
+      taskItem({ dependencyOrder: 3 }), taskItem({ dependencyOrder: 4 }),
+    ));
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      const items = res.output.items;
+      expect(items[items.length - 1].itemKind).toBe('wrap_up');
+      expect(items.filter((item) => item.itemKind === 'wrap_up')).toHaveLength(1);
+      // dependencyOrder of the appended recap equals its index (the store's index rule).
+      expect(items[items.length - 1].dependencyOrder).toBe(items.length - 1);
+    }
   });
 
   it('rejects a list outside the bounds, and a summary that disagrees with it', async () => {
@@ -874,16 +913,17 @@ describe('sequence planner — the safety fields are derived, not asked for', ()
     });
   });
 
-  it('will not accept a plan whose offsets do not address the original', async () => {
-    // The derivation is fail-closed on such a ref — no slice, so no authority and no floor — and
-    // the list check is what makes that state unreachable rather than merely safe: a task item
-    // whose positions point outside the prompt has no verbatim text to serve, and serving it later
-    // is what the offsets exist to prevent.
-    expect(await run({
+  it('clamps a task offset that runs past the original into the valid window (Phase 1b, §5.5a)', async () => {
+    // Out-of-bounds offsets are a wrong POSITION, not a wrong plan: the model cannot count characters
+    // reliably. The ref is clamped into the valid [0, len] window (the body is worded fresh, so a slice
+    // is only a rough pointer), so the plan is accepted rather than rejected.
+    const result = await run({
       itemKind: 'task', originalSliceRef: { start: 0, end: ROTATION.length + 500 },
       sourcePointRanges: [], roleLabel: null, dependencyOrder: 1, complexity: 'not_complex',
       complexityReason: null, decompositionGroupId: 'g2',
-    })).toEqual({ ok: false, reason: 'offset_range_out_of_bounds' });
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.output.items[1]?.originalSliceRef).toEqual({ start: 0, end: ROTATION.length });
   });
 });
 
@@ -934,6 +974,92 @@ describe('sequence planner — repair, and its bound', () => {
     expect(sent).toHaveLength(PROMPT_ENHANCEMENT_COST_VALIDATION_RETRY_COUNT_V1 + 1);
     expect(promptEnhancementSequencePlannerDispositionV1('role_label_invalid'))
       .toBe('no_sequence_single_prompt');
+  });
+
+  it('deterministic fallback (opt-in): rebuilds an unfixable plan into a valid minimal sequence', async () => {
+    // badRole fails role_label_invalid on every attempt — the model never fixes it. With the fallback
+    // ON, once the repair budget is spent the loop rebuilds a valid sequence from the plan's own tasks
+    // instead of losing it: every invented field discarded, each task not_complex. The role label is not
+    // dropped but DERIVED from the task's own slice (Phase 3a) — the model's invented 'make checkout
+    // faster' is discarded and replaced: item 0's whole-prompt slice matches 'fix' ("fix the failing…"),
+    // item 1's slice {10,30} ("…add a") matches 'build'.
+    const { client, sent } = clientSequence([badRole]);
+    const result = await runPromptEnhancementSequencePlannerV1(
+      { ...call(), deterministicFallback: true }, client,
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.output.items).toHaveLength(2);
+      expect(result.output.items[0]?.itemKind).toBe('first_task');
+      expect(result.output.items.map((item) => item.roleLabel)).toEqual(['fix', 'build']);
+      expect(result.output.items.every((item) => item.complexity === 'not_complex')).toBe(true);
+      expect(result.output.summaryData?.remainingTaskCount).toBe(1);
+    }
+    // The model still got its full repair budget BEFORE the fallback took over — the loop is unchanged.
+    expect(sent).toHaveLength(PROMPT_ENHANCEMENT_COST_VALIDATION_RETRY_COUNT_V1 + 1);
+  });
+
+  it('deterministic fallback (opt-in): appends the mandated recap when rebuilding a longer plan', async () => {
+    // Five tasks with one invented role label. Rebuilt: five not_complex tasks plus the one recap the
+    // count rule requires (more than three items behind it), as the last item.
+    const manyBadRole = validReply({
+      points: [point('p1', 0), point('p2', 10), point('p3', 20)],
+      groups: [group('g1', ['p1', 'p2', 'p3'])],
+      items: [
+        { itemKind: 'first_task', originalSliceRef: { start: 0, end: ORIGINAL.length },
+          sourcePointRanges: [], roleLabel: 'fix', dependencyOrder: 0, complexity: 'not_complex',
+          complexityReason: null, decompositionGroupId: 'g1' },
+        { itemKind: 'task', originalSliceRef: { start: 5, end: 15 }, sourcePointRanges: [],
+          roleLabel: 'INVALID ROLE THE MODEL INVENTED', dependencyOrder: 1, complexity: 'not_complex',
+          complexityReason: null, decompositionGroupId: 'g1' },
+        { itemKind: 'task', originalSliceRef: { start: 10, end: 20 }, sourcePointRanges: [],
+          roleLabel: null, dependencyOrder: 2, complexity: 'not_complex', complexityReason: null,
+          decompositionGroupId: 'g1' },
+        { itemKind: 'task', originalSliceRef: { start: 15, end: 25 }, sourcePointRanges: [],
+          roleLabel: null, dependencyOrder: 3, complexity: 'not_complex', complexityReason: null,
+          decompositionGroupId: 'g1' },
+        { itemKind: 'task', originalSliceRef: { start: 20, end: 30 }, sourcePointRanges: [],
+          roleLabel: null, dependencyOrder: 4, complexity: 'not_complex', complexityReason: null,
+          decompositionGroupId: 'g1' },
+      ],
+      summaryData: { summaryId: 's1', remainingTaskCount: 4 },
+    });
+    const { client } = clientSequence([manyBadRole]);
+    const result = await runPromptEnhancementSequencePlannerV1(
+      { ...call(), deterministicFallback: true }, client,
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.output.items).toHaveLength(6);
+      expect(result.output.items[5]?.itemKind).toBe('wrap_up');
+      expect(result.output.items.filter((item) => item.itemKind === 'wrap_up')).toHaveLength(1);
+    }
+  });
+
+  it('deterministic fallback is OFF by default — the strict reject contract is unchanged', async () => {
+    // The exact same unfixable plan, with no opt-in, still rejects. This is what keeps the fallback
+    // additive: a caller that does not ask for it sees no change.
+    const { client } = clientSequence([badRole]);
+    expect(await runPromptEnhancementSequencePlannerV1(call(), client))
+      .toEqual({ ok: false, reason: 'role_label_invalid' });
+  });
+
+  it('deterministic fallback cannot invent a sequence from fewer than two tasks', async () => {
+    // A single first_task is a single-prompt request. Even with the fallback ON there is nothing to
+    // decompose, so it returns the plan's own defect and the single-prompt path takes over — never a
+    // fabricated multi-item sequence.
+    const oneTask = validReply({
+      items: [
+        { itemKind: 'first_task', originalSliceRef: { start: 0, end: ORIGINAL.length },
+          sourcePointRanges: [], roleLabel: 'fix', dependencyOrder: 0, complexity: 'not_complex',
+          complexityReason: null, decompositionGroupId: 'g1' },
+      ],
+      summaryData: { summaryId: 's1', remainingTaskCount: 0 },
+    });
+    const { client } = clientSequence([oneTask]);
+    expect(await runPromptEnhancementSequencePlannerV1(
+      { ...call(), deterministicFallback: true }, client,
+    )).toEqual({ ok: false, reason: 'item_count_below_min' });
   });
 
   it('never repairs a provider failure — nothing came back to correct', async () => {

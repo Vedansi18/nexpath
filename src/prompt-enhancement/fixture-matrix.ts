@@ -40,10 +40,15 @@ export interface PromptEnhancementB3FixtureMatrixV1 {
 
 const ROWS: readonly PromptEnhancementB3FixtureRowV1[] = [
   {
+    // stage-3-4-01: the first popup dim-shows the Sequence plan. Per owner decision 2026-08-17 the plan
+    // now also carries per-task summary lines cut from the user's OWN redacted prompt — allowed because
+    // it is current-prompt metadata, never a future GENERATED body, a runtime queue pointer, or an
+    // auto-advance (those stay forbidden below; `future prompt text` there means the generated item
+    // bodies for items 2…N, which the first popup still never shows).
     fixtureId: 'LOCAL-stage-3-4-01', kind: 'valid_first_popup', phaseRefs: ['stage-3-1'],
-    expectedVisibleOutcome: 'first popup: editable current body, Additional Details, Cancel, then dim Sequence plan',
+    expectedVisibleOutcome: 'first popup: editable current body, Additional Details, Cancel, then dim Sequence plan with per-task summary lines from the user\'s own redacted prompt',
     expectedTypedEvents: ['send_current_body'],
-    negativeOracle: 'First popup cannot render Use original, future prompt text, queue state, or automatic send/advance.',
+    negativeOracle: 'First popup may dim-show the Sequence plan and per-task summary lines from the user\'s own redacted prompt, but cannot render Use original, a future generated prompt body, a runtime queue pointer, or automatic send/advance.',
     forbiddenUiSurfaces: ['Use original', 'future prompt text', 'queue pointer', 'automatic send', 'automatic advance'],
     oracleOwner: 'ui_app',
   },
