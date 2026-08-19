@@ -1,0 +1,695 @@
+import type { PromptEnhancementValidationGraphV1 } from './contracts.js';
+import {
+  PROMPT_ENHANCEMENT_AUTHORITY_MODES,
+  PROMPT_ENHANCEMENT_SENSITIVE_ACTION_RISK_KINDS,
+  type PromptEnhancementAuthorityMode,
+  type PromptEnhancementSensitiveActionRiskKind,
+} from './safety-sendability.js';
+import {
+  PROMPT_ENHANCEMENT_SEQUENCE_MAX_ITEM_COUNT_V1,
+  PROMPT_ENHANCEMENT_SEQUENCE_MIN_ITEM_COUNT_V1,
+  type PromptEnhancementSequenceRuntimeStatusV1,
+} from './sequence-runtime.js';
+import {
+  PROMPT_ENHANCEMENT_SEQUENCE_ROLE_LABELS_V1,
+  type PromptEnhancementSequenceRoleLabelV1,
+} from './routing-taxonomy.js';
+
+/**
+ * Durable payload for a multi-prompt sequence: the ordered item list plus the four
+ * sequence-wide fields that travel with it.
+ *
+ * The runtime state (`sequence-runtime.ts`) stays ids/counts/status and is unchanged. This
+ * is the second thing the store writer is handed — a destructive DELETE+INSERT writer either
+ * receives the payload or destroys it, so it is an explicit parameter rather than something
+ * read-modify-written behind the caller's back.
+ *
+ * Item text is never composed here and never re-derived: `originalSliceRef` is an offset pair
+ * cut from the local unredacted original, and it is authoritative rather than a cache — a
+ * boundary the planner decided is recorded, never recomputed.
+ */
+
+export const PROMPT_ENHANCEMENT_SEQUENCE_ITEM_KINDS_V1 = [
+  'first_task',
+  'task',
+  'double_confirmation',
+  'cross_confirmation',
+  'binary_confirmation',
+  'wrap_up',
+] as const;
+export type PromptEnhancementSequenceItemKindV1 =
+  typeof PROMPT_ENHANCEMENT_SEQUENCE_ITEM_KINDS_V1[number];
+
+/** Kinds that carry a slice of the user's original prompt. The other four carry none. */
+export const PROMPT_ENHANCEMENT_SEQUENCE_TASK_KINDS_V1 = ['first_task', 'task'] as const;
+
+/**
+ * The role vocabulary is NOT redeclared here. It has one definition, beside the producer that
+ * emits it, so the set a stored item is validated against is the same set the producer can
+ * produce — a second copy would let the two drift and the check would enforce a closure that is
+ * not the one being relied on.
+ */
+export {
+  PROMPT_ENHANCEMENT_SEQUENCE_ROLE_LABELS_V1,
+  type PromptEnhancementSequenceRoleLabelV1,
+} from './routing-taxonomy.js';
+
+export const PROMPT_ENHANCEMENT_SEQUENCE_COMPLEXITIES_V1 = [
+  'not_complex',
+  'complex',
+  'highly_complex',
+] as const;
+export type PromptEnhancementSequenceComplexityV1 =
+  typeof PROMPT_ENHANCEMENT_SEQUENCE_COMPLEXITIES_V1[number];
+
+/**
+ * The policy state that makes writing item wording before the user accepts a sequence legal.
+ *
+ * NOTE the name collision: `PromptEnhancementHandoffMetadataV1` carries a field of the SAME
+ * NAME whose value set is only the first three of these. Our value for an in-flight batch is
+ * not a member of that set — the two are never assigned across.
+ */
+export const PROMPT_ENHANCEMENT_SEQUENCE_NEXT_PROMPT_POLICIES_V1 = [
+  'not_applicable',
+  'not_generated',
+  'metadata_refs_only',
+  'generated_not_rendered_pending_acceptance',
+  'rendered_after_explicit_acceptance',
+] as const;
+export type PromptEnhancementSequenceNextPromptPolicyV1 =
+  typeof PROMPT_ENHANCEMENT_SEQUENCE_NEXT_PROMPT_POLICIES_V1[number];
+
+/**
+ * What the user did with the sequence offer, recorded once at first-popup close.
+ *
+ * There is deliberately no fourth value for a popup that died or returned nothing: the
+ * absence of a row is that record. A `failed` value would have to be written by the thing
+ * that failed.
+ */
+export const PROMPT_ENHANCEMENT_SEQUENCE_OFFER_DISPOSITIONS_V1 = [
+  'accepted',
+  'rejected',
+  'not_engaged',
+] as const;
+export type PromptEnhancementSequenceOfferDispositionV1 =
+  typeof PROMPT_ENHANCEMENT_SEQUENCE_OFFER_DISPOSITIONS_V1[number];
+
+/** Half-open character range into the original prompt: `0 <= start < end <= originalLength`. */
+export interface PromptEnhancementSequenceOffsetRangeV1 {
+  start: number;
+  end:   number;
+}
+
+export interface PromptEnhancementSequenceItemV1 {
+  itemKind:          PromptEnhancementSequenceItemKindV1;
+  /** Offsets into the original prompt. Non-null on task kinds only. */
+  originalSliceRef:  PromptEnhancementSequenceOffsetRangeV1 | null;
+  /** Offsets of the source-backed points this item covers — lineage, checkable after the fact. */
+  sourcePointRanges: readonly PromptEnhancementSequenceOffsetRangeV1[];
+  roleLabel:         PromptEnhancementSequenceRoleLabelV1 | null;
+  /** Equal to the item's index in the list. */
+  dependencyOrder:   number;
+  complexity:        PromptEnhancementSequenceComplexityV1 | null;
+  complexityReason:  string | null;
+  /** Written once by the batch and never rewritten. Null on `first_task`, which is never re-offered. */
+  generatedWording:  string | null;
+  /**
+   * EVERY risk family the item's own slice reads as, empty when it reads as none.
+   *
+   * A set rather than one value because an item that cannot be split can carry several: rotating a
+   * leaked credential and redeploying so the new one is live is one item by the atomic-coupling
+   * rule, and it is both a credential change and a production release. The confirmation sentence
+   * the user sees already names both, so a single-value record would disagree with what they were
+   * shown — and would do it silently, because one family on one item looks complete.
+   */
+  actionRiskKinds:   readonly PromptEnhancementSensitiveActionRiskKind[];
+  /**
+   * Carried from the slice so composition cannot escalate plan into execute. Null on the kinds
+   * that carry no slice — a confirmation has no authority of its own to exceed.
+   */
+  authorityMode:     PromptEnhancementAuthorityMode | null;
+  /** False on the kinds that carry no slice, for the same reason. */
+  requiresConfirmationFloor: boolean;
+  /** One planning-group id per item, so a payload can rebuild the real grouping. */
+  decompositionGroupId: string | null;
+  /** The per-item validation verdict, including its safety state. Reported, never fabricated. */
+  itemValidationGraph:  PromptEnhancementValidationGraphV1 | null;
+  /**
+   * Where the safety floor sits INSIDE this item's own wording. Null on every item that needed none.
+   *
+   * 🔴 The one offset field on this item that does NOT address the original prompt. Every other
+   * range here indexes the local original; this one indexes `generatedWording`, because that is the
+   * text it describes and the text the packager serves. Reading it against the original would
+   * resolve to unrelated characters that happen to be in range.
+   *
+   * It exists because the floor is written by the composer in its own words, so there is no fixed
+   * sentence to look for later. Without a recorded position, "did the user delete the safeguard
+   * before sending?" can only be answered by guessing which sentence was the safeguard — which is
+   * the inference the standing constraint bars.
+   *
+   * Offsets rather than a copy of the sentence: the sentence is already stored, inside the wording.
+   * A second copy is a second thing that can disagree with the first, and it would put composed
+   * safety text in two places at once.
+   */
+  itemSafetyClauseRef:  PromptEnhancementSequenceOffsetRangeV1 | null;
+}
+
+export interface PromptEnhancementSequencePayloadV1 {
+  items: readonly PromptEnhancementSequenceItemV1[];
+  /** Whole-prompt instructions, as offsets. One copy per sequence, applied to every item. */
+  promptDirectives: readonly PromptEnhancementSequenceOffsetRangeV1[];
+  suggestedNextPromptPolicy: PromptEnhancementSequenceNextPromptPolicyV1;
+  /** Character length of the original prompt the offsets index into. */
+  originalLength: number;
+  offerDisposition: PromptEnhancementSequenceOfferDispositionV1;
+}
+
+export type PromptEnhancementSequencePayloadReasonCodeV1 =
+  | 'payload_not_object'
+  | 'items_not_array'
+  | 'item_count_over_max'
+  | 'item_count_below_min'
+  | 'item_count_disagrees_with_row'
+  | 'stub_row_must_carry_no_items'
+  | 'declined_offer_must_be_terminal'
+  | 'original_length_zero_with_items'
+  | 'next_prompt_policy_disagrees_with_items'
+  | 'confirmations_do_not_match_complexity'
+  | 'original_length_invalid'
+  | 'prompt_directives_invalid'
+  | 'next_prompt_policy_invalid'
+  | 'offer_disposition_invalid'
+  | 'item_not_object'
+  | 'item_kind_invalid'
+  | 'first_task_not_exactly_one_at_index_0'
+  | 'wrap_up_not_last_or_duplicated'
+  | 'wrap_up_presence_does_not_match_count'
+  | 'dependency_order_not_index'
+  | 'original_slice_ref_presence_invalid'
+  | 'offset_range_out_of_bounds'
+  | 'first_task_slice_not_whole_original'
+  | 'source_point_ranges_invalid'
+  | 'role_label_invalid'
+  | 'complexity_presence_invalid'
+  | 'complexity_reason_invalid'
+  | 'generated_wording_presence_invalid'
+  | 'action_risk_kinds_invalid'
+  | 'authority_mode_invalid'
+  | 'requires_confirmation_floor_invalid'
+  | 'decomposition_group_id_invalid'
+  | 'item_validation_graph_presence_invalid'
+  | 'item_safety_clause_ref_invalid';
+
+export type PromptEnhancementSequencePayloadValidationV1 =
+  | { ok: true }
+  | { ok: false; reasonCode: PromptEnhancementSequencePayloadReasonCodeV1; itemIndex?: number };
+
+/**
+ * The row context a payload is validated against. `itemCount` is a separate column read by the
+ * state machine while the list is read by the packager, so the two are one quantity stored
+ * twice: too small and the machine completes while entries remain, too large and it offers past
+ * the end of the list. It is a required argument so the check cannot be skipped by omission.
+ */
+export interface PromptEnhancementSequencePayloadContextV1 {
+  itemCount: number;
+  /**
+   * The row's status. A row recording an offer that was not taken must be terminal — otherwise it
+   * is served as a live sequence with nothing to serve, and since the writer now spares such rows
+   * from replacement it would stay that way.
+   */
+  status: PromptEnhancementSequenceRuntimeStatusV1;
+}
+
+/** The two statuses a live sequence can hold; everything else is terminal. */
+const ACTIVE_STATUSES_V1: readonly PromptEnhancementSequenceRuntimeStatusV1[] = [
+  'item_pending',
+  'awaiting_response',
+];
+
+/**
+ * A sequence that has been recorded but not yet planned. Intake writes this on first send;
+ * the planner replaces `items` and the sequence-wide fields when it exists.
+ */
+export function emptyPromptEnhancementSequencePayloadV1(
+  originalLength: number,
+): PromptEnhancementSequencePayloadV1 {
+  return {
+    items: [],
+    promptDirectives: [],
+    suggestedNextPromptPolicy: 'not_generated',
+    originalLength: Number.isSafeInteger(originalLength) && originalLength >= 0 ? originalLength : 0,
+    offerDisposition: 'accepted',
+  };
+}
+
+function isSafeIndex(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
+/**
+ * Does a value address a real span of the original?
+ *
+ * Exported because the planner has to ask the same question of the offsets it just received, and
+ * one definition is what makes "the planner selected a boundary" and "the store accepts that
+ * boundary" the same statement. A second copy would let a plan pass a rule the row it becomes
+ * cannot pass.
+ */
+export function isPromptEnhancementSequenceOffsetRangeV1(
+  value: unknown,
+  originalLength: number,
+): value is PromptEnhancementSequenceOffsetRangeV1 {
+  if (typeof value !== 'object' || value === null) return false;
+  const range = value as Record<string, unknown>;
+  if (!isSafeIndex(range['start']) || !isSafeIndex(range['end'])) return false;
+  // Half-open and non-empty: an inverted or zero-width slice is the failure offsets introduced
+  // in place of the verbatim-match failure they removed.
+  return range['start'] < range['end'] && range['end'] <= originalLength;
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+/**
+ * Does `text` contain `token` standing on its own?
+ *
+ * Exported because two different checks over generated text need it and both got it wrong the same
+ * way: plain containment is a different question, and it fails in both directions.
+ *
+ * Too strict — "DO NOT make any assumptions" contains "NO", so a correctly formed PASS/FAIL
+ * confirmation reads as one that mixed in the other format, and is rejected for carrying the very
+ * clause it is malformed without.
+ *
+ * Too loose — "17" contains "7", so a summary sentence stating a different number of prompts than
+ * the plan holds passes a check on the right number, which is the one thing that check exists for.
+ */
+export function promptEnhancementSequenceTextHasTokenV1(text: string, token: string): boolean {
+  const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`\\b${escaped}\\b`).test(text);
+}
+
+/**
+ * The role labels a sequence reports: the distinct labels its items carry, in first-appearance order.
+ *
+ * ONE function, because the labels appear in two places and must be the same set in both. The
+ * closure used to be structural — the old producer could only pick from a fixed table, so user text
+ * could not reach it — and a model producing them removes that guarantee at the moment the producer
+ * changes. The shipped type is `readonly string[]` and never protected anything.
+ *
+ * Deriving both the summary's list and the handoff's from the items means one closed check covers
+ * both, since the summary can only contain values the items already carry. The alternative is a
+ * second generation of the same thing, which is free to disagree with the list it describes.
+ *
+ * Order is first-appearance so the same plan reports the same labels twice.
+ */
+export function promptEnhancementSequenceTaskRoleLabelsV1(
+  items: readonly { roleLabel: PromptEnhancementSequenceRoleLabelV1 | null }[],
+): readonly PromptEnhancementSequenceRoleLabelV1[] {
+  const labels: PromptEnhancementSequenceRoleLabelV1[] = [];
+  for (const item of items) {
+    if (item.roleLabel !== null && !labels.includes(item.roleLabel)) labels.push(item.roleLabel);
+  }
+  return labels;
+}
+
+/**
+ * One short display line per FOLLOW-UP task, each cut from `originalText` at the item's own
+ * `originalSliceRef` — the user's own words, not a generated body. `originalText` is the caller's
+ * redacted, length-preserving original (facade passes `redactedText`), so a stored range selects the
+ * same words and no secret leaves. Only `task` items are lined: `first_task` is excluded (its slice is
+ * the whole prompt, already shown in the editor) and `wrap_up` carries no slice. Whitespace is
+ * flattened and each line is capped, so a long slice never breaks the popup layout.
+ */
+export function promptEnhancementSequenceTaskSummaryLinesV1(
+  items: readonly { itemKind: PromptEnhancementSequenceItemKindV1; originalSliceRef: PromptEnhancementSequenceOffsetRangeV1 | null }[],
+  originalText: string,
+  options?: { maxLineLength?: number },
+): readonly string[] {
+  const maxLineLength = options?.maxLineLength ?? 80;
+  const lines: string[] = [];
+  for (const item of items) {
+    if (item.itemKind !== 'task' || item.originalSliceRef === null) continue;
+    const ref = item.originalSliceRef;
+    if (!isPromptEnhancementSequenceOffsetRangeV1(ref, originalText.length)) continue;
+    const flat = originalText.slice(ref.start, ref.end).replace(/\s+/g, ' ').trim();
+    if (flat.length === 0) continue;
+    lines.push(flat.length > maxLineLength ? `${flat.slice(0, maxLineLength - 1).trimEnd()}…` : flat);
+  }
+  return lines;
+}
+
+/**
+ * Does `text` contain `clause`, allowing for the ways the same words get written?
+ *
+ * Case, hyphenation and line wrapping only. "ground-level" and "ground level" are one phrase spelt
+ * two ways, and a clause that wrapped across a line has a newline where the sentence had a space —
+ * neither is a different clause, and rejecting a confirmation for a hyphen costs the whole sequence.
+ *
+ * Nothing beyond that. This does not accept a paraphrase, because the prompt dictates these clauses
+ * as exact sentences: the question here is whether an instruction was followed, not whether two
+ * pieces of English mean the same thing.
+ */
+export function promptEnhancementSequenceTextHasClauseV1(text: string, clause: string): boolean {
+  const flatten = (value: string): string =>
+    value.toLowerCase().replace(/[-‐-―]/g, ' ').replace(/\s+/g, ' ').trim();
+  return flatten(text).includes(flatten(clause));
+}
+
+/**
+ * Does `text` REPRODUCE `span` — the user's own wording appearing inside generated output?
+ *
+ * A single word is not reproduction. A slice is the user's wording for one piece of work and is
+ * often one word — "Fix the login bug, then deploy" gives a slice of `deploy` — and a question
+ * about that work can barely be written without naming it. A rule against carrying the user's
+ * wording that rejects a sentence for using its subject is refusing the only sentence that
+ * satisfies it.
+ *
+ * A phrase is different: two of the user's words, in the user's order, did not arrive by
+ * coincidence. That is the distinction the rule itself rests on, which is why the line is drawn
+ * between a word and a phrase rather than at some number of characters.
+ */
+export function promptEnhancementSequenceTextReproducesV1(text: string, span: string): boolean {
+  const trimmed = span.trim();
+  if (trimmed.length === 0 || !/\s/.test(trimmed)) return false;
+  return text.includes(trimmed);
+}
+
+const fail = (
+  reasonCode: PromptEnhancementSequencePayloadReasonCodeV1,
+  itemIndex?: number,
+): PromptEnhancementSequencePayloadValidationV1 =>
+  itemIndex === undefined ? { ok: false, reasonCode } : { ok: false, reasonCode, itemIndex };
+
+/**
+ * Structural validation of a stored payload, fail-closed. Every rule here is a single-row
+ * check on shape, enum membership, position, count arithmetic, or offset bounds.
+ *
+ * Deliberately NOT here: anything requiring judgement about the text (whether a reason is
+ * generic, whether wording exceeds its authority, whether a confirmation carries its
+ * mandatory parts). Those are composition-time and read-time semantic rules owned by the
+ * validation phase, and a deterministic approximation of them would be worse than none.
+ */
+export function validatePromptEnhancementSequencePayloadV1(
+  payload: unknown,
+  context: PromptEnhancementSequencePayloadContextV1,
+): PromptEnhancementSequencePayloadValidationV1 {
+  if (typeof payload !== 'object' || payload === null) return fail('payload_not_object');
+  const p = payload as Record<string, unknown>;
+
+  if (!Array.isArray(p['items'])) return fail('items_not_array');
+  const items = p['items'] as unknown[];
+  if (items.length > PROMPT_ENHANCEMENT_SEQUENCE_MAX_ITEM_COUNT_V1) return fail('item_count_over_max');
+
+  if (!isSafeIndex(p['originalLength'])) return fail('original_length_invalid');
+  const originalLength = p['originalLength'];
+
+  if (!Array.isArray(p['promptDirectives'])
+    || (p['promptDirectives'] as unknown[]).some((r) => !isPromptEnhancementSequenceOffsetRangeV1(r, originalLength))) {
+    return fail('prompt_directives_invalid');
+  }
+  if (!PROMPT_ENHANCEMENT_SEQUENCE_NEXT_PROMPT_POLICIES_V1
+    .includes(p['suggestedNextPromptPolicy'] as PromptEnhancementSequenceNextPromptPolicyV1)) {
+    return fail('next_prompt_policy_invalid');
+  }
+  if (!PROMPT_ENHANCEMENT_SEQUENCE_OFFER_DISPOSITIONS_V1
+    .includes(p['offerDisposition'] as PromptEnhancementSequenceOfferDispositionV1)) {
+    return fail('offer_disposition_invalid');
+  }
+
+  // A row whose disposition is not `accepted` is a terminal record of an offer that never
+  // activated. It is never served, so there is nothing to validate bounds against — and without
+  // this exemption the scrub would delete the record in the same breath it was written.
+  //
+  // The exemption is paired with a requirement, because on its own it would let a row be exempt
+  // from the bounds AND still be reachable by the active read: a live sequence with no items to
+  // serve. The status is what keeps such a record out of the way, so it is checked here rather
+  // than trusted to whichever writer produced the row.
+  if (p['offerDisposition'] !== 'accepted') {
+    if (ACTIVE_STATUSES_V1.includes(context.status)) return fail('declined_offer_must_be_terminal');
+    return items.length === 0 ? { ok: true } : fail('stub_row_must_carry_no_items');
+  }
+
+  // PRE-PLANNER WINDOW. Intake records the row on send and the planner fills the list; until the
+  // planner exists nothing produces items, so an accepted row is written with an empty list. This
+  // is a build-order state, not a modelled one — when the planner lands, an accepted row always
+  // carries its items and this branch stops being reachable.
+  if (items.length === 0) return { ok: true };
+
+  // From here the row claims to be a servable sequence, and every bound applies.
+  if (items.length < PROMPT_ENHANCEMENT_SEQUENCE_MIN_ITEM_COUNT_V1) return fail('item_count_below_min');
+  if (items.length !== context.itemCount) return fail('item_count_disagrees_with_row');
+  // An offset rule that compares against an unchecked bound runs and proves nothing: a bound
+  // larger than the real prompt lets out-of-range offsets pass and resolve to text that does not
+  // exist.
+  if (originalLength === 0) return fail('original_length_zero_with_items');
+  // The policy value must describe the state the row is actually in.
+  if (p['suggestedNextPromptPolicy'] === 'not_generated') {
+    return fail('next_prompt_policy_disagrees_with_items');
+  }
+
+  return validatePromptEnhancementSequenceItemListV1(items, { originalLength, stage: 'stored' });
+}
+
+/**
+ * When a list is being checked, and it is the difference between two real states rather than a
+ * strictness dial.
+ *
+ * `plan` is a list the planner has just produced: every item has its kind, its positions, its
+ * verdict and its safety fields, and NONE of them has wording, because the planner does not word.
+ * `stored` is the same list after the batch wrote that wording and the validator recorded its
+ * verdict. Every other rule is identical, and deliberately so — the checks that stop a bad plan
+ * from being built are the checks that stop a bad row from being served, and a plan that could
+ * only fail once it was stored would fail after the user had already been offered it.
+ */
+export type PromptEnhancementSequenceItemListStageV1 = 'plan' | 'stored';
+
+/**
+ * The item list's own rules, shared by both stages.
+ *
+ * It lives here, beside the shape and the closed vocabularies, so the planner cannot enforce a
+ * different closure from the one the store enforces. A second copy for plan time would be free to
+ * drift, and the drift would surface as a plan that validates and a row that does not — with the
+ * user already looking at the popup.
+ */
+export function validatePromptEnhancementSequenceItemListV1(
+  items: readonly unknown[],
+  input: { originalLength: number; stage: PromptEnhancementSequenceItemListStageV1 },
+): PromptEnhancementSequencePayloadValidationV1 {
+  const { originalLength, stage } = input;
+  let firstTaskCount = 0;
+  let wrapUpCount = 0;
+
+  for (let index = 0; index < items.length; index += 1) {
+    const raw = items[index];
+    if (typeof raw !== 'object' || raw === null) return fail('item_not_object', index);
+    const item = raw as Record<string, unknown>;
+
+    const kind = item['itemKind'] as PromptEnhancementSequenceItemKindV1;
+    if (!PROMPT_ENHANCEMENT_SEQUENCE_ITEM_KINDS_V1.includes(kind)) {
+      return fail('item_kind_invalid', index);
+    }
+    const isTaskKind = kind === 'first_task' || kind === 'task';
+    const isConfirmation = kind === 'double_confirmation'
+      || kind === 'cross_confirmation'
+      || kind === 'binary_confirmation';
+    if (kind === 'first_task') firstTaskCount += 1;
+    if (kind === 'wrap_up') {
+      wrapUpCount += 1;
+      if (index !== items.length - 1) return fail('wrap_up_not_last_or_duplicated', index);
+    }
+
+    // The offered index maps onto this list directly, so a displaced entry serves the wrong
+    // item for the rest of the sequence. Neither the runtime nor the popup can catch it.
+    if (item['dependencyOrder'] !== index) return fail('dependency_order_not_index', index);
+
+    const sliceRef = item['originalSliceRef'];
+    if (isTaskKind) {
+      if (!isPromptEnhancementSequenceOffsetRangeV1(sliceRef, originalLength)) {
+        return sliceRef === null
+          ? fail('original_slice_ref_presence_invalid', index)
+          : fail('offset_range_out_of_bounds', index);
+      }
+      // The first item is the whole original prompt, not a slice of it.
+      if (kind === 'first_task') {
+        const ref = sliceRef as PromptEnhancementSequenceOffsetRangeV1;
+        if (ref.start !== 0 || ref.end !== originalLength) {
+          return fail('first_task_slice_not_whole_original', index);
+        }
+      }
+    } else if (sliceRef !== null) {
+      return fail('original_slice_ref_presence_invalid', index);
+    }
+
+    if (!Array.isArray(item['sourcePointRanges'])
+      || (item['sourcePointRanges'] as unknown[]).some((r) => !isPromptEnhancementSequenceOffsetRangeV1(r, originalLength))) {
+      return fail('source_point_ranges_invalid', index);
+    }
+
+    const roleLabel = item['roleLabel'];
+    if (roleLabel !== null
+      && !PROMPT_ENHANCEMENT_SEQUENCE_ROLE_LABELS_V1
+        .includes(roleLabel as PromptEnhancementSequenceRoleLabelV1)) {
+      return fail('role_label_invalid', index);
+    }
+
+    const complexity = item['complexity'];
+    if (isTaskKind) {
+      if (!PROMPT_ENHANCEMENT_SEQUENCE_COMPLEXITIES_V1
+        .includes(complexity as PromptEnhancementSequenceComplexityV1)) {
+        return fail('complexity_presence_invalid', index);
+      }
+    } else if (complexity !== null) {
+      return fail('complexity_presence_invalid', index);
+    }
+
+    const reason = item['complexityReason'];
+    if (kind === 'wrap_up') {
+      if (reason !== null) return fail('complexity_reason_invalid', index);
+    } else if (isConfirmation) {
+      // Every confirmation records why THIS confirmation applies.
+      if (!isNonEmptyString(reason)) return fail('complexity_reason_invalid', index);
+    } else if (complexity === 'complex' || complexity === 'highly_complex') {
+      if (!isNonEmptyString(reason)) return fail('complexity_reason_invalid', index);
+    } else if (reason !== null && !isNonEmptyString(reason)) {
+      return fail('complexity_reason_invalid', index);
+    }
+
+    // A stored item with no wording is a body the packager cannot serve; `first_task` is the
+    // one exception because it was sent at intake and is never offered again.
+    //
+    // At plan time the rule inverts and applies to every kind: the planner emits no wording at
+    // all, so wording arriving here means the model wrote a prompt it was told not to write. That
+    // is rejected rather than quietly stripped — text with no source to check it against is
+    // exactly what the offsets exist to keep out of the user's prompts.
+    const wording = item['generatedWording'];
+    if (stage === 'plan') {
+      if (wording !== null && wording !== undefined) {
+        return fail('generated_wording_presence_invalid', index);
+      }
+    } else if (kind === 'first_task') {
+      if (wording !== null) return fail('generated_wording_presence_invalid', index);
+    } else if (!isNonEmptyString(wording)) {
+      return fail('generated_wording_presence_invalid', index);
+    }
+
+    const riskKinds = item['actionRiskKinds'];
+    if (!Array.isArray(riskKinds)
+      || riskKinds.some((kind) => !PROMPT_ENHANCEMENT_SENSITIVE_ACTION_RISK_KINDS
+        .includes(kind as PromptEnhancementSensitiveActionRiskKind))
+      || new Set(riskKinds).size !== riskKinds.length) {
+      return fail('action_risk_kinds_invalid', index);
+    }
+
+    // Authority is carried FROM the slice, so an item with a slice must have one and an item
+    // without a slice must not: a confirmation has no authority of its own to exceed.
+    const authorityMode = item['authorityMode'];
+    if (isTaskKind) {
+      if (!PROMPT_ENHANCEMENT_AUTHORITY_MODES
+        .includes(authorityMode as PromptEnhancementAuthorityMode)) {
+        return fail('authority_mode_invalid', index);
+      }
+    } else if (authorityMode !== null) {
+      return fail('authority_mode_invalid', index);
+    }
+
+    const floor = item['requiresConfirmationFloor'];
+    if (typeof floor !== 'boolean') return fail('requires_confirmation_floor_invalid', index);
+    if (!isTaskKind && floor) return fail('requires_confirmation_floor_invalid', index);
+
+    const groupId = item['decompositionGroupId'];
+    if (isTaskKind) {
+      if (!isNonEmptyString(groupId)) return fail('decomposition_group_id_invalid', index);
+    } else if (groupId !== null && !isNonEmptyString(groupId)) {
+      return fail('decomposition_group_id_invalid', index);
+    }
+
+    // Same rule and same reason as the wording: an item with a body and no verdict is a body
+    // nobody validated. And the same inversion at plan time — the verdict is produced when the
+    // wording is, so a plan carrying one is reporting on text that does not exist yet.
+    const graph = item['itemValidationGraph'];
+    if (stage === 'plan') {
+      if (graph !== null && graph !== undefined) {
+        return fail('item_validation_graph_presence_invalid', index);
+      }
+    } else if (kind === 'first_task') {
+      if (graph !== null) return fail('item_validation_graph_presence_invalid', index);
+    } else if (typeof graph !== 'object' || graph === null) {
+      return fail('item_validation_graph_presence_invalid', index);
+    }
+
+    // The floor's position, checked against the wording it indexes rather than against the original
+    // every other range here indexes. An item that was marked as needing a floor and carries no
+    // position for one is an item whose safeguard cannot be shown to have survived an edit — which
+    // is the same as not having one, arriving as a valid-looking row.
+    const clauseRef = item['itemSafetyClauseRef'];
+    const wordingText = typeof wording === 'string' ? wording : '';
+    if (stage === 'plan' || kind === 'first_task') {
+      if (clauseRef !== null && clauseRef !== undefined) {
+        return fail('item_safety_clause_ref_invalid', index);
+      }
+    } else if (floor) {
+      if (!isPromptEnhancementSequenceOffsetRangeV1(clauseRef, wordingText.length)) {
+        return fail('item_safety_clause_ref_invalid', index);
+      }
+    } else if (clauseRef !== null) {
+      return fail('item_safety_clause_ref_invalid', index);
+    }
+  }
+
+  if (firstTaskCount !== 1 || (items[0] as Record<string, unknown>)['itemKind'] !== 'first_task') {
+    return fail('first_task_not_exactly_one_at_index_0');
+  }
+  if (wrapUpCount > 1) return fail('wrap_up_not_last_or_duplicated');
+  // A recap exists if and only if there is enough behind it to recap.
+  if ((items.length - wrapUpCount > 3) !== (wrapUpCount === 1)) {
+    return fail('wrap_up_presence_does_not_match_count');
+  }
+
+  return confirmationsMatchComplexity(items as readonly Record<string, unknown>[]);
+}
+
+const CONFIRMATION_KINDS: readonly PromptEnhancementSequenceItemKindV1[] = [
+  'double_confirmation',
+  'cross_confirmation',
+  'binary_confirmation',
+];
+
+/**
+ * The confirmations following each task must be exactly what the task's complexity verdict
+ * yields, and in the locked order — where a task earns two, the double or cross precedes the
+ * binary, so the decision is not asked for before the check that informs it.
+ *
+ * This is a lookup from the verdict rather than a second judgement, which is why no separate
+ * applicability field is stored. The list is that second place, so it is checked against the
+ * verdict instead. Without this the verdict is decorative: an item could record `not_complex`
+ * and carry three confirmations, and nothing would compare them.
+ *
+ * It VALIDATES and scrubs; it never repairs. Choosing which confirmation an item should have is
+ * inferring applicability, which the runtime may not do.
+ */
+function confirmationsMatchComplexity(
+  items: readonly Record<string, unknown>[],
+): PromptEnhancementSequencePayloadValidationV1 {
+  for (let index = 0; index < items.length; index += 1) {
+    const kind = items[index]['itemKind'];
+    if (kind !== 'first_task' && kind !== 'task') continue;
+
+    const run: unknown[] = [];
+    for (let j = index + 1; j < items.length; j += 1) {
+      const next = items[j]['itemKind'] as PromptEnhancementSequenceItemKindV1;
+      if (!CONFIRMATION_KINDS.includes(next)) break;
+      run.push(next);
+    }
+
+    const complexity = items[index]['complexity'];
+    const matches = complexity === 'not_complex'
+      ? run.length === 0
+      : complexity === 'complex'
+        ? run.length === 1 && run[0] === 'binary_confirmation'
+        : run.length === 2
+          && (run[0] === 'double_confirmation' || run[0] === 'cross_confirmation')
+          && run[1] === 'binary_confirmation';
+    if (!matches) return fail('confirmations_do_not_match_complexity', index);
+  }
+  return { ok: true };
+}

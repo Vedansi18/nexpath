@@ -7,7 +7,7 @@ vi.mock('../../telemetry/lifecycle-flush.js', () => ({
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, rmSync } from 'node:fs';
+import { mkdirSync, rmSync, existsSync } from 'node:fs';
 
 vi.mock('../../config/ApiKeyResolver.js', () => ({
   storeApiKey:    vi.fn(),
@@ -46,6 +46,7 @@ describe('uninstallAction — telemetry config cleanup', () => {
       await uninstallAction({
         paths,
         execFn: () => {},
+        storeDeleteConfirmFn: async () => false,
         apiKeyConfirmFn: async () => false,
         dbPath,
       });
@@ -71,6 +72,7 @@ describe('uninstallAction — telemetry config cleanup', () => {
       await uninstallAction({
         paths,
         execFn: () => {},
+        storeDeleteConfirmFn: async () => false,
         apiKeyConfirmFn: async () => false,
         dbPath,
       });
@@ -91,6 +93,7 @@ describe('uninstallAction — telemetry config cleanup', () => {
       await uninstallAction({
         paths,
         execFn: () => {},
+        storeDeleteConfirmFn: async () => false,
         apiKeyConfirmFn: async () => false,
         dbPath,
       });
@@ -109,17 +112,19 @@ describe('uninstallAction — telemetry config cleanup', () => {
       await expect(uninstallAction({
         paths,
         execFn: () => {},
+        storeDeleteConfirmFn: async () => false,
         apiKeyConfirmFn: async () => false,
         dbPath: dir,
       })).resolves.toBeUndefined();
     } finally { cleanup(); }
   });
 
-  it('--yes mode → both flags still cleared (telemetry cleanup runs unconditionally)', async () => {
+  it('--yes mode → deletes the local store DB without prompting (NF: clean uninstall)', async () => {
     const { dir, cleanup } = tmpDirAgents();
     vi.spyOn(console, 'log').mockImplementation(() => {});
     const dbPath = join(dir, 'uninstall-yes.db');
-    const confirmFn = vi.fn<() => Promise<boolean>>();
+    const apiKeyConfirm = vi.fn<() => Promise<boolean>>();
+    const storeDeleteConfirm = vi.fn<() => Promise<boolean>>();
     try {
       // Seed prior install state.
       const seed = await openStore(dbPath);
@@ -131,18 +136,16 @@ describe('uninstallAction — telemetry config cleanup', () => {
       await uninstallAction({
         paths,
         execFn: () => {},
-        apiKeyConfirmFn: confirmFn,
+        storeDeleteConfirmFn: storeDeleteConfirm,
+        apiKeyConfirmFn: apiKeyConfirm,
         yes: true,
         dbPath,
       });
 
-      // --yes bypasses the API key prompt entirely.
-      expect(confirmFn).not.toHaveBeenCalled();
-
-      const store = await openStore(dbPath);
-      expect(getConfig(store.db, 'telemetry.enabled')).toBe('false');
-      expect(getConfig(store.db, 'telemetry_sync_enabled')).toBe('false');
-      closeStore(store);
+      // --yes bypasses BOTH prompts and deletes the local store (NF: uninstall leaves nothing behind).
+      expect(apiKeyConfirm).not.toHaveBeenCalled();
+      expect(storeDeleteConfirm).not.toHaveBeenCalled();
+      expect(existsSync(dbPath)).toBe(false);
     } finally { cleanup(); }
   });
 
@@ -162,6 +165,7 @@ describe('uninstallAction — telemetry config cleanup', () => {
       await uninstallAction({
         paths,
         execFn: () => {},
+        storeDeleteConfirmFn: async () => false,
         apiKeyConfirmFn: async () => true,  // user confirms API key removal
         dbPath,
       });

@@ -380,13 +380,12 @@ describe('TelemetrySyncScheduler — start/stop with fake timers', () => {
 });
 
 describe('createDefaultScheduler — isEnabled wired through config', () => {
-  it('falls back to telemetry.enabled when telemetry_sync_enabled is unset (default enabled)', async () => {
-    // When telemetry_sync_enabled is not explicitly set, sync is gated by
-    // telemetry.enabled, which defaults to 'true'. This keeps legacy installs
-    // (set before install.ts started writing telemetry_sync_enabled) working
-    // without a migration script.
+  it('falls back to telemetry.enabled when telemetry_sync_enabled is unset', async () => {
+    // When telemetry_sync_enabled is not explicitly set, sync is gated by telemetry.enabled.
+    // (Default is now OFF — NF Plan A — so enable telemetry.enabled explicitly to exercise the fallback.)
     const store = await openStore(':memory:');
     try {
+      setConfig(store, 'telemetry.enabled', 'true');
       const onSync = vi.fn(async () => {});
       const s     = createDefaultScheduler(store, onSync);
       await s.syncNow();

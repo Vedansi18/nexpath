@@ -10,7 +10,7 @@
 // pipeline.
 //
 // Scope: layers wired together correctly. Does NOT assert on the styler
-// body (still pass-through this phase) or D3 Space-toggle (Bhavnesh
+// body (still pass-through this phase) or D3 Space-toggle (UI-lane
 // Phase 6).
 
 import { describe, it, expect } from 'vitest';

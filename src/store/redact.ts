@@ -11,10 +11,41 @@ const PATTERNS: [RegExp, string][] = [
   [/-----BEGIN [A-Z ]{1,40}-----[\s\S]{0,8192}?-----END [A-Z ]{1,40}-----/g, '[PEM-REDACTED]'],
 ];
 
+/**
+ * Pad a marker with dots so it occupies exactly as many characters as the text it replaces.
+ *
+ * Redaction is the only step between the prompt as received and the copy that is stored, so
+ * without this the stored copy is SHORTER — every secret shrinks it — and any character position
+ * measured against the received prompt lands somewhere else in the stored one. Positions are how
+ * the sequence planner records which part of a request each item covers, so a shifted copy makes
+ * a stored range point at the wrong words, silently, and only on prompts that contained a secret.
+ *
+ * Dots rather than an invisible filler on purpose: a zero-width or non-breaking character would
+ * keep the count while hiding that anything was removed, and it survives copy-paste, terminals,
+ * editors and JSON far less predictably than ASCII does. A visibly long marker is the point — it
+ * shows how much was taken out.
+ *
+ * Every marker in THIS module is shorter than its shortest possible match, so padding always
+ * applies here. Other layers reuse this helper and some of their markers are longer than the
+ * shortest thing they match — an email can be six characters and its marker is sixteen. There the
+ * marker is returned unpadded and the text grows, because mangling the marker to hit a length
+ * would be worse than the length being wrong. Only a layer whose markers all fit can promise the
+ * property outright.
+ */
+export function lengthPreservingMarker(marker: string, matchLength: number): string {
+  if (marker.length >= matchLength) return marker;
+  const padding = '.'.repeat(matchLength - marker.length);
+  return marker.endsWith(']') ? `${marker.slice(0, -1)}${padding}]` : `${marker}${padding}`;
+}
+
+/**
+ * Replace known secret shapes with a marker of the SAME LENGTH, so the stored text lines up
+ * character-for-character with what the user typed.
+ */
 export function redactSecrets(text: string): string {
   let result = text;
-  for (const [pattern, replacement] of PATTERNS) {
-    result = result.replace(pattern, replacement);
+  for (const [pattern, marker] of PATTERNS) {
+    result = result.replace(pattern, (match) => lengthPreservingMarker(marker, match.length));
   }
   return result;
 }

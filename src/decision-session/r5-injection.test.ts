@@ -228,30 +228,57 @@ describe('r5-injection — F1 early-session guard', () => {
 
 describe('r5-injection — F2 password masking (dev-plan §10.6 F2 token list)', () => {
   it('redacts password=<value> assignments', () => {
-    expect(maskSecretsInText('password=supersecret12 thanks')).toContain('[REDACTED_SECRET]');
+    expect(maskSecretsInText('password=supersecret12 thanks')).toContain('[REDACTED_SECRET');
+  });
+
+  it('keeps the masked text the same length when the marker fits inside what it replaced', () => {
+    // These layers back the prompt-enhancement path, where character positions are recorded
+    // against text before masking. A marker padded to the match length keeps those positions
+    // pointing at the same words.
+    for (const text of [
+      'api_key: "aVeryLongSecretValue12345" rest',
+      'mail someone.long.address@example-company.com now',
+      'ssh into /home/user/.ssh/id_rsa_production_key today',
+      'ping 192.168.100.200 first',
+      // Several kinds in one string: the patterns run in sequence, so a padded marker must not be
+      // re-consumed by a later pattern. Every marker opens with a bracket, which none of the value
+      // character classes accept.
+      'api_key: "aVeryLongSecretValue12345" mail someone.long@example-company.com ping 192.168.100.200',
+    ]) {
+      expect(maskSecretsInText(text)).toHaveLength(text.length);
+    }
+  });
+
+  it('grows rather than truncating the marker when the match is shorter than it', () => {
+    // Several markers here are longer than the shortest thing their pattern matches. The marker is
+    // never cut down to hit a length — a mangled marker would be worse than a changed length.
+    const short = 'mail a@b.co now';
+    const masked = maskSecretsInText(short);
+    expect(masked.length).toBeGreaterThan(short.length);
+    expect(masked).toContain('[REDACTED_EMAIL]');
     expect(maskSecretsInText('password=supersecret12 thanks')).not.toContain('supersecret12');
   });
 
   it('redacts password: <value> assignments', () => {
-    expect(maskSecretsInText('password: hunter2lol next steps')).toContain('[REDACTED_SECRET]');
+    expect(maskSecretsInText('password: hunter2lol next steps')).toContain('[REDACTED_SECRET');
     expect(maskSecretsInText('password: hunter2lol next steps')).not.toContain('hunter2lol');
   });
 });
 
 describe('r5-injection — F2 PII / secret masking', () => {
   it('redacts api key pattern', () => {
-    expect(maskSecretsInText('api_key=sk-ABCD1234EFGH5678')).toContain('[REDACTED_SECRET]');
+    expect(maskSecretsInText('api_key=sk-ABCD1234EFGH5678')).toContain('[REDACTED_SECRET');
   });
   it('redacts email addresses', () => {
-    expect(maskSecretsInText('mail me at foo@example.com please')).toContain('[REDACTED_EMAIL]');
+    expect(maskSecretsInText('mail me at foo@example.com please')).toContain('[REDACTED_EMAIL');
   });
   it('redacts IPv4-shaped patterns', () => {
-    expect(maskSecretsInText('connect to 192.168.0.1 today')).toContain('[REDACTED_IP]');
+    expect(maskSecretsInText('connect to 192.168.0.1 today')).toContain('[REDACTED_IP');
   });
   it('redacts secret-store paths (.env / .ssh / .pem / .key)', () => {
-    expect(maskSecretsInText('cat ~/.ssh/id_rsa')).toContain('[REDACTED_SECRET_PATH]');
-    expect(maskSecretsInText('open .env now')).toContain('[REDACTED_SECRET_PATH]');
-    expect(maskSecretsInText('use cert.pem with the request')).toContain('[REDACTED_SECRET_PATH]');
+    expect(maskSecretsInText('cat ~/.ssh/id_rsa')).toContain('[REDACTED_SECRET_PATH');
+    expect(maskSecretsInText('open .env now')).toContain('[REDACTED_SECRET_PATH');
+    expect(maskSecretsInText('use cert.pem with the request')).toContain('[REDACTED_SECRET_PATH');
   });
   it('does NOT redact non-secret file paths', () => {
     expect(maskSecretsInText('edit src/api/handler.ts now')).toContain('src/api/handler.ts');
@@ -260,7 +287,7 @@ describe('r5-injection — F2 PII / secret masking', () => {
     const history = [makePrompt('email foo@bar.com', 0), makePrompt('clean', 1)];
     const out = f2MaskPromptHistory(history);
     expect(out).toHaveLength(2);
-    expect(out[0].text).toContain('[REDACTED_EMAIL]');
+    expect(out[0].text).toContain('[REDACTED_EMAIL');
     expect(out[1].text).toBe('clean');
   });
 });

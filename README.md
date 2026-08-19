@@ -1,98 +1,75 @@
-# Nexpath CLI — Build Fast. Skip Nothing. 
+  # Nexpath CLI — Build Fast. Ship with Confidence.
 
-> **A behaviour guidance layer for builders working with AI coding agents — vibe coders, indie hackers, founders, and product managers.**
+> **A local-first behaviour guidance layer that helps builders catch missing checks before AI-generated work becomes shipped risk.**
 
-Nexpath gives developers meaningful direction while they work with AI coding agents and AI code tools — helpful suggestions at the right moment that protect developer productivity, without slowing you down.
+AI coding agents make it easy to move fast. Nexpath helps reduce the chance that speed quietly becomes an unverified bug, an unsafe change, an unmaintainable codebase, or hours of manual review later.
 
----
 
-## What Is Nexpath CLI?
+## Prompt Enhancement — A Practical Twist
 
-- A behaviour guidance system and developer productivity layer for builders using AI coding agents and AI code tools.
-- Monitors your development sessions and understands where you are in your project lifecycle.
-- Surfaces **"the decision session"** — which we also call the **advisory popup** — a lightweight prompt that gives direction without forcing your hand.
-- Presents pre-filled agent prompts you select with one keypress — ready-to-send, not just tips.
-- Want to tweak one first? Copy it to your clipboard, then paste and edit before sending.
-- None fit? Skip it and revisit skipped items later in one focused session.
+Within Nexpath's broader behaviour-guidance vision, Prompt Enhancement is the first feature we're introducing as a practical twist: it saves vibe coders from writing every prompt detail by hand while preserving their original intent. When a task needs more rigour, it can suggest missing development practices, verification, or confirmation steps — encouraging users to give a mature development flow the time it needs to finish.
+
 
 ---
 
-## Architecture
+## Why Nexpath Exists
 
-```mermaid
-flowchart TB
-    Agent["AI Coding Agent<br/>Claude Code — fully supported"]
-    subgraph NS["nexpath-serve"]
-        Capture["capture_prompt handler"]
-    end
-    DB[("prompt-store.db<br/>SQLite · ~/.nexpath/")]
-    subgraph Pipeline["Advisory Pipeline — fires automatically after agent responds"]
-        S1["Stage 1: Prompt Classifier<br/>Tier 1: Keyword Match — under 1ms<br/>Tier 2: TF-IDF Scoring — under 5ms"]
-        SM["Session State Manager<br/>stage tracking · signal counters<br/>absence detection · user profile"]
-        subgraph LLM["LLM Calls — gpt-4o-mini (only if Stage 2 approves)"]
-            S2["Stage 2: Cross-Confirmation<br/>validate stage · decide if advisory fires"]
-            PL["Pinch Label<br/>2–3 word header"]
-            OPT["Option Adaptation<br/>vocabulary + feature embedding"]
-        end
-        DS["Decision Session UI<br/>question → L1 / L2 / L3<br/>selected prompt → back to agent"]
-    end
-    Agent --> NS
-    NS --> DB
-    Agent --> Pipeline
-    S1 --> SM --> S2 --> PL --> OPT --> DS
-    DS -->|"selected prompt"| Agent
-```
+- AI can introduce a bug without making the risk obvious.
+- Fast generation can leave a codebase harder to maintain after every change.
+- Security, rollback, regression, and acceptance checks are easy to miss while momentum is high.
+- Reviewing every AI-generated decision manually can cost more time than the generation saved.
+
+Nexpath reduces these risks by noticing what the current workflow is missing and bringing the relevant check into the work at the right moment. It does not replace developer judgement or promise bug-free code; it helps make that judgement faster, more structured, and harder to skip.
 
 ---
 
-## Why AI Coding Assistant for Builders
+## A Workflow, Not Another Tool
 
-- AI coding agents and coding AI tools can generate entire features from a single sentence.
-- But speed of generation often outpaces the discipline of process.
-- Developers skip reviews, forget regression checks, ship without acceptance tests — out of momentum, not laziness.
-- Nexpath appears at the right moments with the right questions, closing the gap between what AI generates and what disciplined development requires.
+1. **Build with your AI coding agent** — Work in the tools and flow you already use.
+2. **Review with Nexpath** — Let the Prompt Quality Layer surface missing verification, safety, scope, or maintenance steps while the context is still fresh.
+3. **Ship confidently** — Move forward after the important checks are visible, reviewed, and included in the task.
+
+Nexpath is one focused step inside a better shipping workflow — not a new place where development has to happen.
 
 Built during AI Hackfest 2026 by MLH.
 
 ---
 
-## The Decision Session — How It Works
+## The Prompt Quality Layer — How It Works
 
-1. **Detection** — As you work, Nexpath captures each prompt and classifies your development stage.
-2. **Trigger** — On a stage transition, a lightweight LLM call confirms before the decision session fires. The session is shown by the Stop hook **after** the agent has fully responded — never mid-response.
-3. **Presentation** — A 2–3 word creative label appears (e.g., "Before coding.", "Quick check."), followed by a question and pre-filled options across three levels.
-4. **Selection** — Pick an option to send it straight to your agent, copy it to your clipboard to edit before sending, or choose "Show simpler options" for lighter alternatives.
-
----
-
-![Nexpath CLI demo](assets/nexpath_new.gif)
+1. **Understand** — Nexpath reviews the prompt, the current development stage, and relevant workflow signals while preserving the complete original request.
+2. **Structure** — It builds one editable prompt with the sections the task needs, such as scope, constraints, acceptance expectations, verification, or missing-practice guidance.
+3. **Safeguard** — Higher-risk work can receive confirmation, safety, rollback, or evidence requirements. Complex work can also receive a sequence-aware breakdown when multiple prompts would be more effective.
+4. **Review** — You inspect and edit the result before sending it, or return to the original prompt. Nexpath provides the quality layer; you keep the final decision.
 
 ---
 
-## Nexpath CLI Features & Capabilities
+## How Nexpath Reduces Risk
 
-### The Decision Session
+### Fewer Silent Bugs and Missed Checks
 
-The core interaction:
+- Verification and test expectations can be added for debugging, maintenance, planning, review, and other tasks that need proof of completion.
+- Absence signals can surface missing regression checks, acceptance criteria, reproduction evidence, or project grounding.
+- Weak or unrelated signals are not used as filler; guidance must match the current task.
+The core interaction keeps your request and the added workflow guidance together:
 
-- Fires when Nexpath detects a stage transition in your workflow.
-- Presents structured options aligned with where you are in your project.
-- Each option is a pre-filled prompt — pick it to send straight to your AI agent, or copy it to edit first.
+### Safer High-Risk Changes
 
-The decision session cascades through three levels:
-- **Level 1** — Full-depth recommendations for thorough development practice
-- **Level 2** — Lighter alternatives when you're short on time
-- **Level 3** — Minimum viable step — one small action that still moves you forward
+- Sensitive actions can receive explicit confirmation, rollback, backup, or safety requirements before the reviewed prompt is used.
+- Double confirmation, cross-confirmation, and final confirmation are used only when the task's complexity or risk justifies them.
+- The quality layer does not silently expand authority, auto-send work, or treat an agent response as proof of completion.
 
-Select "Show simpler options →" to move down a level. Select "Skip for now" to record the item
-and revisit it later with `nexpath optimize` (available in future versions). Want to adjust a prompt before sending? Select
-**"Copy to clipboard — edit before sending"** — it lands on your clipboard to paste and tweak.
+### A More Maintainable Development Flow
 
-### Absence Detection
+- Scope, constraints, acceptance expectations, affected surfaces, and behaviour-preservation needs stay visible instead of being lost in a fast request.
+- Complex work can be decomposed into a clear current task plus a compact, ordered sequence plan.
 
-- Tracks which development signals are present or missing in your session.
-- If you've coded 15+ prompts in a confirmed stage without mentioning tests, cross-confirmation, or regression checks, it raises an absence flag.
-- Offers relevant suggestions to fill the gap.
+### Less Review Overhead, Without Losing Control
+
+- Your complete original request stays visible inside one editable, quality-reviewed prompt.
+- You can edit the result, use it, or return to the original request before the reviewed version is sent.
+
+---
 
 ### Supported AI Coding Agents & Developer Tools
 
@@ -110,7 +87,7 @@ Nexpath CLI is built for prompt capture across AI coding agents.
 
 ---
 
-## Claude Code Setup & Installation
+## Add Nexpath to Your Development Workflow — Installation
 
 ```bash
 # Clone and build from source
@@ -129,8 +106,8 @@ nexpath --version
 ```
 
 Setup notes:
-- You'll choose how often advisories appear (advisory frequency) and what kind of work you do (project role).
-- Both can be changed later — when an advisory popup appears, press Ctrl+T (Cmd+T on macOS) to change them.
+- During install you pick your project role (what kind of work you do) so Nexpath tailors its guidance to how you build.
+- Nexpath's core is Prompt Enhancement (PE), with Multi-Prompt Sequence (MPS) and Prompt Enhancement Feedback (PEF) — these work automatically as you code.
 
 ### Uninstalling
 
@@ -164,8 +141,8 @@ data and caches.
 
 ### Privacy Controls
 
-All data is stored **locally only** at `~/.nexpath/`. Only targeted LLM calls per decision
-session leave your machine.
+All data is stored **locally only** at `~/.nexpath/`. Only targeted LLM calls used to classify or
+prepare relevant guidance leave your machine.
 
 - **Automatic secret redaction** — API keys (`sk-*`, `ghp_*`, `ghu_*`), bearer tokens, and
   PEM blocks are automatically stripped from prompts before storage.
@@ -217,7 +194,7 @@ Contribution guide coming once the initial implementation is stable.
 
 - **Major League Hacking (MLH)** — For organizing AI Hackfest 2026
 - **Anthropic** — For Claude Code, our primary development environment
-- **OpenAI** — For gpt-4o-mini, used for cross-confirmation and pinch label generation
+- **OpenAI** — For models used in targeted classification and prompt-quality tasks
 - **Google** — For Gemini AI, planned as an alternative LLM provider alongside OpenAI
 
 Built with insights from the vibe coding community and developers building real projects with AI coding agents, coding AI tools, and AI developer tools.

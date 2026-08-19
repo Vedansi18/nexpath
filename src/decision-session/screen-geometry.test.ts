@@ -2,19 +2,35 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   DEFAULT_CELL_WIDTH_PX,
   DEFAULT_CELL_HEIGHT_PX,
+  DEFAULT_POPUP_DOCK_SIDE,
+  DEFAULT_POPUP_WIDTH_RATIO,
   ENV_CELL_HEIGHT,
   ENV_CELL_WIDTH,
+  ENV_POPUP_DOCK,
+  ENV_POPUP_WIDTH_RATIO,
   ENV_SCREEN_HEIGHT,
   ENV_SCREEN_WIDTH,
   FALLBACK_SCREEN_SIZE,
+  POPUP_MAX_WIDTH_PX,
+  POPUP_MIN_COLS,
   POPUP_SIZE_RATIO,
+  buildWindowsConsoleLauncherScriptV1,
+  buildWindowsConsolePositionScriptV1,
+  computeDockedPopupGeometry,
   computePopupGeometry,
+  detectLinuxDisplayServerV1,
   detectScreenResolution,
+  wrapLinuxSpawnForWaylandX11V1,
   getEnvScreenOverride,
+  getPopupDockSide,
+  getPopupWidthRatio,
   parseDimensionsPattern,
   parseMacOsascriptOutput,
+  parseMacSystemProfilerOutput,
+  parseMacVisibleFrameOutput,
   parsePowerShellOutput,
   parseWmicOutput,
+  parseWorkAreaPowerShellOutput,
   parseXdpyinfoOutput,
   parseXrandrOutput,
 } from './screen-geometry.js';
@@ -162,6 +178,48 @@ describe('screen-geometry — parseMacOsascriptOutput (macOS primary path)', () 
 
   it('returns null on empty input', () => {
     expect(parseMacOsascriptOutput('')).toBeNull();
+  });
+});
+
+describe('screen-geometry — parseMacSystemProfilerOutput (macOS no-permission fallback)', () => {
+  it('prefers the "UI Looks like" points resolution over the raw Resolution (retina)', () => {
+    const retina = [
+      'Displays:',
+      '    iMac:',
+      '      Resolution: 5120 x 2880 Retina',
+      '      UI Looks like: 2560 x 1440 @ 60.00Hz',
+      '      Main Display: Yes',
+    ].join('\n');
+    expect(parseMacSystemProfilerOutput(retina)).toEqual({ widthPx: 2560, heightPx: 1440 });
+  });
+
+  it('falls back to Resolution when there is no "UI Looks like" line (non-retina)', () => {
+    const nonRetina = [
+      'Displays:',
+      '    Display:',
+      '      Resolution: 1920 x 1080',
+    ].join('\n');
+    expect(parseMacSystemProfilerOutput(nonRetina)).toEqual({ widthPx: 1920, heightPx: 1080 });
+  });
+
+  it('returns null when no display resolution is present', () => {
+    expect(parseMacSystemProfilerOutput('Displays:\n    No info')).toBeNull();
+    expect(parseMacSystemProfilerOutput('')).toBeNull();
+  });
+});
+
+describe('screen-geometry — parseMacVisibleFrameOutput (macOS visible frame, menu-bar/Dock aware)', () => {
+  it('parses "x,y,width,height" (top-left points) into a WorkArea', () => {
+    // e.g. 2560×1440 with a 25pt menu bar + a 70pt bottom Dock → visible {0,25,2560,1345}.
+    expect(parseMacVisibleFrameOutput('0,25,2560,1345')).toEqual({ x: 0, y: 25, widthPx: 2560, heightPx: 1345 });
+  });
+  it('accepts x=0 / y=0 and tolerates whitespace', () => {
+    expect(parseMacVisibleFrameOutput('  0 , 0 , 1920 , 1055 \n')).toEqual({ x: 0, y: 0, widthPx: 1920, heightPx: 1055 });
+  });
+  it('returns null on short / malformed / non-positive size', () => {
+    expect(parseMacVisibleFrameOutput('0,25,2560')).toBeNull();
+    expect(parseMacVisibleFrameOutput('')).toBeNull();
+    expect(parseMacVisibleFrameOutput('0,25,0,1345')).toBeNull(); // zero width
   });
 });
 
@@ -477,5 +535,206 @@ describe('screen-geometry — integration: env override → computePopupGeometry
     // Centering math: xPx + widthPx/2 ≈ screen/2 (within 1 pixel rounding).
     expect(Math.abs((geom.xPx + geom.widthPx  / 2) - 1920 / 2)).toBeLessThanOrEqual(1);
     expect(Math.abs((geom.yPx + geom.heightPx / 2) - 1080 / 2)).toBeLessThanOrEqual(1);
+  });
+});
+
+// ── Right-dock geometry (P1) ─────────────────────────────────────────────────
+
+describe('screen-geometry — docked constants', () => {
+  it('DEFAULT_POPUP_WIDTH_RATIO is 0.60 (locked 60% width target)', () => {
+    expect(DEFAULT_POPUP_WIDTH_RATIO).toBe(0.60);
+  });
+  it('DEFAULT_POPUP_DOCK_SIDE is right (owner request)', () => {
+    expect(DEFAULT_POPUP_DOCK_SIDE).toBe('right');
+  });
+  it('POPUP_MIN_COLS is a sensible readability floor and MAX_WIDTH_PX an ultrawide cap', () => {
+    expect(POPUP_MIN_COLS).toBe(80);
+    expect(POPUP_MAX_WIDTH_PX).toBeGreaterThan(POPUP_MIN_COLS * DEFAULT_CELL_WIDTH_PX);
+  });
+  it('docked env-var keys are namespaced under NEXPATH_', () => {
+    expect(ENV_POPUP_WIDTH_RATIO).toMatch(/^NEXPATH_/);
+    expect(ENV_POPUP_DOCK).toMatch(/^NEXPATH_/);
+  });
+});
+
+describe('screen-geometry — getPopupWidthRatio / getPopupDockSide (env precedence)', () => {
+  const savedRatio = process.env[ENV_POPUP_WIDTH_RATIO];
+  const savedDock  = process.env[ENV_POPUP_DOCK];
+  beforeEach(() => {
+    delete process.env[ENV_POPUP_WIDTH_RATIO];
+    delete process.env[ENV_POPUP_DOCK];
+  });
+  afterEach(() => {
+    if (savedRatio === undefined) delete process.env[ENV_POPUP_WIDTH_RATIO];
+    else                          process.env[ENV_POPUP_WIDTH_RATIO] = savedRatio;
+    if (savedDock === undefined) delete process.env[ENV_POPUP_DOCK];
+    else                         process.env[ENV_POPUP_DOCK] = savedDock;
+  });
+
+  it('defaults to 0.60 / right when unset', () => {
+    expect(getPopupWidthRatio()).toBe(0.60);
+    expect(getPopupDockSide()).toBe('right');
+  });
+  it('honours a valid ratio override in (0,1]', () => {
+    process.env[ENV_POPUP_WIDTH_RATIO] = '0.5';
+    expect(getPopupWidthRatio()).toBe(0.5);
+    process.env[ENV_POPUP_WIDTH_RATIO] = '1';
+    expect(getPopupWidthRatio()).toBe(1);
+  });
+  it('ignores an out-of-range / malformed ratio and uses the default', () => {
+    for (const bad of ['0', '-0.2', '1.5', 'abc', '']) {
+      process.env[ENV_POPUP_WIDTH_RATIO] = bad;
+      expect(getPopupWidthRatio()).toBe(0.60);
+    }
+  });
+  it('honours right/left/center dock overrides (case-insensitive) and ignores garbage', () => {
+    for (const [val, expected] of [['left','left'],['CENTER','center'],['Right','right']] as const) {
+      process.env[ENV_POPUP_DOCK] = val;
+      expect(getPopupDockSide()).toBe(expected);
+    }
+    process.env[ENV_POPUP_DOCK] = 'sideways';
+    expect(getPopupDockSide()).toBe('right');
+  });
+});
+
+describe('screen-geometry — computeDockedPopupGeometry (pure math)', () => {
+  const savedRatio = process.env[ENV_POPUP_WIDTH_RATIO];
+  const savedDock  = process.env[ENV_POPUP_DOCK];
+  const savedCW = process.env[ENV_CELL_WIDTH];
+  const savedCH = process.env[ENV_CELL_HEIGHT];
+  beforeEach(() => {
+    delete process.env[ENV_POPUP_WIDTH_RATIO];
+    delete process.env[ENV_POPUP_DOCK];
+    delete process.env[ENV_CELL_WIDTH];
+    delete process.env[ENV_CELL_HEIGHT];
+  });
+  afterEach(() => {
+    for (const [k, v] of [[ENV_POPUP_WIDTH_RATIO, savedRatio], [ENV_POPUP_DOCK, savedDock], [ENV_CELL_WIDTH, savedCW], [ENV_CELL_HEIGHT, savedCH]] as const) {
+      if (v === undefined) delete process.env[k]; else process.env[k] = v;
+    }
+  });
+
+  const work = (widthPx: number, heightPx: number, x = 0, y = 0) => ({ x, y, widthPx, heightPx });
+
+  it('right-docks at 60% width × 100% height flush to the right edge (FHD)', () => {
+    const g = computeDockedPopupGeometry(work(1920, 1080));
+    expect(g.widthPx).toBe(Math.round(1920 * 0.60)); // 1152
+    expect(g.heightPx).toBe(1080);                    // 100%
+    expect(g.xPx).toBe(1920 - g.widthPx);             // flush right → 768
+    expect(g.yPx).toBe(0);
+    // right edge touches the work-area right edge exactly.
+    expect(g.xPx + g.widthPx).toBe(1920);
+  });
+
+  it('gives more rows than the centred 70% geometry (the UX win)', () => {
+    const docked  = computeDockedPopupGeometry(work(1920, 1080));
+    const centred = computePopupGeometry({ widthPx: 1920, heightPx: 1080 });
+    expect(docked.rows).toBeGreaterThan(centred.rows);
+  });
+
+  it('left dock is flush to the left edge; center is centred', () => {
+    const left = computeDockedPopupGeometry(work(1920, 1080), { dock: 'left' });
+    expect(left.xPx).toBe(0);
+    const center = computeDockedPopupGeometry(work(1920, 1080), { dock: 'center' });
+    expect(Math.abs((center.xPx + center.widthPx / 2) - 1920 / 2)).toBeLessThanOrEqual(1);
+  });
+
+  it('honours a non-zero work-area origin (taskbar offset)', () => {
+    const g = computeDockedPopupGeometry(work(1900, 1040, 20, 40));
+    expect(g.yPx).toBe(40);
+    expect(g.xPx + g.widthPx).toBe(20 + 1900); // flush to the work-area right edge, not the screen
+  });
+
+  it('caps width at POPUP_MAX_WIDTH_PX on an ultrawide screen', () => {
+    const g = computeDockedPopupGeometry(work(3840, 1080)); // 60% = 2304 > cap
+    expect(g.widthPx).toBe(POPUP_MAX_WIDTH_PX);
+    expect(g.xPx).toBe(3840 - POPUP_MAX_WIDTH_PX);
+  });
+
+  it('never narrows below POPUP_MIN_COLS cells', () => {
+    // ratio 0.1 of 1000px = 100px → below 80 cols × 10px = 800px floor.
+    const g = computeDockedPopupGeometry(work(1000, 800), { ratio: 0.1 });
+    expect(g.widthPx).toBe(POPUP_MIN_COLS * DEFAULT_CELL_WIDTH_PX); // 800
+    expect(g.cols).toBeGreaterThanOrEqual(POPUP_MIN_COLS);
+  });
+
+  it('never exceeds the work-area width even when the min-cols floor would', () => {
+    // Work area narrower than the 800px floor → width clamps to the work-area width.
+    const g = computeDockedPopupGeometry(work(600, 700));
+    expect(g.widthPx).toBe(600);
+    expect(g.xPx).toBe(0);
+  });
+
+  it('honours env ratio + dock overrides when opts are omitted', () => {
+    process.env[ENV_POPUP_WIDTH_RATIO] = '0.5';
+    process.env[ENV_POPUP_DOCK] = 'left';
+    const g = computeDockedPopupGeometry(work(2000, 1000));
+    expect(g.widthPx).toBe(1000); // 50%
+    expect(g.xPx).toBe(0);        // left
+  });
+
+  it('cols/rows stay ≥ 1 for a tiny work area', () => {
+    const g = computeDockedPopupGeometry(work(10, 10));
+    expect(g.cols).toBeGreaterThanOrEqual(1);
+    expect(g.rows).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe('screen-geometry — parseWorkAreaPowerShellOutput', () => {
+  it('parses X / Y / Width / Height four-line output', () => {
+    expect(parseWorkAreaPowerShellOutput('0\r\n0\r\n1920\r\n1040')).toEqual({ x: 0, y: 0, widthPx: 1920, heightPx: 1040 });
+  });
+  it('accepts a non-zero origin (taskbar left/top)', () => {
+    expect(parseWorkAreaPowerShellOutput('0\n40\n1920\n1040')).toEqual({ x: 0, y: 40, widthPx: 1920, heightPx: 1040 });
+  });
+  it('returns null on short / malformed input', () => {
+    expect(parseWorkAreaPowerShellOutput('1920\n1040')).toBeNull();
+    expect(parseWorkAreaPowerShellOutput('')).toBeNull();
+    expect(parseWorkAreaPowerShellOutput('0\n0\n0\n1040')).toBeNull(); // zero width
+  });
+});
+
+describe('screen-geometry — shared spawn helpers (P5)', () => {
+  it('detectLinuxDisplayServerV1: XDG authoritative, then WAYLAND_DISPLAY/DISPLAY, else unknown', () => {
+    expect(detectLinuxDisplayServerV1({ XDG_SESSION_TYPE: 'wayland', DISPLAY: ':0' })).toBe('wayland');
+    expect(detectLinuxDisplayServerV1({ XDG_SESSION_TYPE: 'x11', WAYLAND_DISPLAY: 'wayland-0' })).toBe('x11');
+    expect(detectLinuxDisplayServerV1({ WAYLAND_DISPLAY: 'wayland-0' })).toBe('wayland');
+    expect(detectLinuxDisplayServerV1({ DISPLAY: ':0' })).toBe('x11');
+    expect(detectLinuxDisplayServerV1({})).toBe('unknown');
+  });
+
+  it('wrapLinuxSpawnForWaylandX11V1: wraps GTK terminals on Wayland (with geometry), else passthrough', () => {
+    const plan = { command: 'gnome-terminal', args: ['--geometry=115x54+768+0', '--', 'node', 's'] };
+    const wrapped = wrapLinuxSpawnForWaylandX11V1(plan, { displayServer: 'wayland', terminalCommand: 'gnome-terminal', hasGeometry: true });
+    expect(wrapped).toEqual({ command: 'env', args: ['GDK_BACKEND=x11', 'gnome-terminal', '--geometry=115x54+768+0', '--', 'node', 's'] });
+    // X11 → passthrough; non-GTK → passthrough; no geometry → passthrough.
+    expect(wrapLinuxSpawnForWaylandX11V1(plan, { displayServer: 'x11', terminalCommand: 'gnome-terminal', hasGeometry: true }).command).toBe('gnome-terminal');
+    expect(wrapLinuxSpawnForWaylandX11V1({ command: 'kitty', args: [] }, { displayServer: 'wayland', terminalCommand: 'kitty', hasGeometry: true }).command).toBe('kitty');
+    expect(wrapLinuxSpawnForWaylandX11V1(plan, { displayServer: 'wayland', terminalCommand: 'gnome-terminal', hasGeometry: false }).command).toBe('gnome-terminal');
+  });
+
+  it('buildWindowsConsolePositionScriptV1: resolves the real top-level window by title and SetWindowPos docks it', () => {
+    const ps = buildWindowsConsolePositionScriptV1({ widthPx: 1152, heightPx: 1080, xPx: 768, yPx: 0, cols: 115, rows: 54 });
+    expect(ps).toContain('$ErrorActionPreference = "SilentlyContinue"'); // fail-open
+    // Windows Terminal: resolve the visible top-level window by our "Nexpath …" title (not the hidden
+    // ConPTY pseudo-console); conhost fallback keeps GetConsoleWindow.
+    expect(ps).toContain("MainWindowTitle -like 'Nexpath*'");
+    // Phase 2: pick the most-recently-started match so it resolves exactly this popup.
+    expect(ps).toContain('Sort-Object StartTime -Descending');
+    expect(ps).toContain('GetConsoleWindow');
+    // Dock position + size in one SetWindowPos call on the real window (SWP_SHOWWINDOW=0x0040).
+    expect(ps).toContain('SetWindowPos($h, [IntPtr]::Zero, 768, 0, 1152, 1080, 0x0040)');
+  });
+
+  it('buildWindowsConsoleLauncherScriptV1: mode con + powershell -File before the command; no geometry = plain', () => {
+    const geom = { widthPx: 1152, heightPx: 1080, xPx: 768, yPx: 0, cols: 115, rows: 54 };
+    const docked = buildWindowsConsoleLauncherScriptV1({ commandLine: 'node "s.mjs"', geometry: geom, positionScriptPath: 'C:/p.ps1' });
+    expect(docked).toContain('mode con: cols=115 lines=54');
+    expect(docked).toContain('powershell -NoProfile -ExecutionPolicy Bypass -File "C:/p.ps1" 2>nul');
+    expect(docked.indexOf('mode con')).toBeLessThan(docked.indexOf('node "s.mjs"'));
+    // No geometry → plain launcher (no sizing/positioning).
+    const plain = buildWindowsConsoleLauncherScriptV1({ commandLine: 'node "s.mjs"' });
+    expect(plain).not.toContain('mode con');
+    expect(plain).not.toContain('powershell');
   });
 });

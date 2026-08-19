@@ -61,14 +61,35 @@ export function buildStopHookCommand(home: string, platform = process.platform):
 }
 
 /**
+ * Claude Code hook timeout, in seconds, as written into settings.json.
+ *
+ * Raised 60 -> 90 (owner decision 2026-08-09). The UserPromptSubmit window can hold several
+ * classifier calls plus the PE composer, and rare-but-real cases were measuring close enough to
+ * 60s to risk the hook being cancelled mid-composition — which loses the enhancement silently.
+ *
+ * 90 is a deliberate value, not a ceiling found by trial: Claude Code documents 30s only as the
+ * DEFAULT for UserPromptSubmit (lowered from the 600s general default) and documents no maximum
+ * for the `timeout` field, so this is a chosen headroom rather than a limit being pushed against.
+ * The 60s cap that exists in Claude Code applies to SessionEnd's shared budget, a different event.
+ */
+export const CLAUDE_HOOK_TIMEOUT_SECONDS = 90 as const;
+
+/**
  * Build the UserPromptSubmit + Stop hook entry objects.
  *
  * The `_nexpath_hook: true` field is the reliable deduplication and removal
  * marker — it survives path changes across reinstalls, unlike scanning the
  * command string.
  *
- * No `timeout` field is set so Claude Code uses its default (600 s), which is
- * required for hooks that block for UI interaction (the decision session).
+ * UserPromptSubmit gets an explicit timeout because Claude Code reduces its default to 30s, and the
+ * PE preparation on this hook may call the LLM more than once.
+ *
+ * The Stop hook hosts the interactive PE popup (owner decision B-i). Owner decision
+ * (2026-08-04): do NOT set a large "never times out" number here. Claude Code has no
+ * infinite-timeout option, so the Stop hook is left WITHOUT an explicit timeout and
+ * inherits Claude Code's default Stop-hook budget (~600s / 10 minutes). The popup can
+ * stay open for that window; there is no way to make it truly unlimited without a
+ * magic number, which the owner declined.
  */
 export function buildHookEntry(home: string, platform = process.platform): Record<string, unknown> {
   return {
@@ -80,6 +101,7 @@ export function buildHookEntry(home: string, platform = process.platform): Recor
           {
             type:    'command',
             command: buildHookCommand(home, platform),
+            timeout: CLAUDE_HOOK_TIMEOUT_SECONDS,
           },
         ],
       },
@@ -90,6 +112,8 @@ export function buildHookEntry(home: string, platform = process.platform): Recor
         matcher:       '',
         hooks: [
           {
+            // No explicit timeout — inherits Claude Code's default Stop-hook budget so the
+            // PE popup is not cut off by an arbitrary number (owner decision, 2026-08-04).
             type:    'command',
             command: buildStopHookCommand(home, platform),
           },
@@ -100,11 +124,32 @@ export function buildHookEntry(home: string, platform = process.platform): Recor
 }
 
 /**
+ * True if a hook group is one nexpath wrote — either by our `_nexpath_hook` marker, or (fallback)
+ * by its command matching the nexpath hook shape: `node "<cliPath>" auto|stop --db "<dbPath>"`,
+ * where `cliPath` is the nexpath CLI (its bin symlink `…/nexpath` or `…/dist/cli/index.js`).
+ *
+ * The command-string fallback lets install/uninstall recognise and replace prior entries even when
+ * an external rewriter of settings.json (e.g. the host agent) strips the custom `_nexpath_hook`
+ * marker — otherwise duplicate hook groups accumulate and the hook runs N times per event (BUG-3).
+ */
+function isNexpathHookGroupV1(group: Record<string, unknown> | undefined): boolean {
+  if (group?._nexpath_hook === true) return true;
+  const groupHooks = Array.isArray(group?.hooks) ? (group!.hooks as Array<Record<string, unknown>>) : [];
+  return groupHooks.some((entry) => {
+    const command = typeof entry?.command === 'string' ? entry.command : '';
+    const isNexpathCli = /\bnexpath\b/i.test(command) || /dist[\\/]+cli[\\/]+index\.js/i.test(command);
+    const isHookVerb = /\b(?:auto|stop)\b\s+--db\b/.test(command);
+    return isNexpathCli && isHookVerb;
+  });
+}
+
+/**
  * Write the nexpath UserPromptSubmit and Stop hooks into ~/.claude/settings.json.
  *
  * Uses a read-filter-append pattern so existing hooks written by other tools are
- * preserved.  Any prior nexpath hook group (identified by `_nexpath_hook: true`)
- * is removed before appending the fresh entry, making this operation idempotent.
+ * preserved.  Any prior nexpath hook group (by the `_nexpath_hook` marker OR the nexpath command
+ * shape — see {@link isNexpathHookGroupV1}) is removed before appending the fresh entry, making
+ * this operation idempotent even if the marker was stripped by an external rewriter.
  */
 export function writeHookEntry(filePath: string, home: string, platform = process.platform): void {
   const data  = readJsonSafe(filePath);
@@ -114,14 +159,14 @@ export function writeHookEntry(filePath: string, home: string, platform = proces
   // UserPromptSubmit
   const existingUPS = (hooks.UserPromptSubmit as Array<Record<string, unknown>> | undefined) ?? [];
   hooks.UserPromptSubmit = [
-    ...existingUPS.filter((g) => !g._nexpath_hook),
+    ...existingUPS.filter((g) => !isNexpathHookGroupV1(g)),
     ...(entry.UserPromptSubmit as unknown[]),
   ];
 
   // Stop
   const existingStop = (hooks.Stop as Array<Record<string, unknown>> | undefined) ?? [];
   hooks.Stop = [
-    ...existingStop.filter((g) => !g._nexpath_hook),
+    ...existingStop.filter((g) => !isNexpathHookGroupV1(g)),
     ...(entry.Stop as unknown[]),
   ];
 
@@ -132,7 +177,8 @@ export function writeHookEntry(filePath: string, home: string, platform = proces
 /**
  * Remove the nexpath UserPromptSubmit and Stop hooks from ~/.claude/settings.json.
  *
- * Identifies nexpath-written hook groups by the `_nexpath_hook: true` field.
+ * Identifies nexpath-written hook groups by the `_nexpath_hook` marker OR the nexpath command shape
+ * (see {@link isNexpathHookGroupV1}), so marker-stripped duplicates are still removed.
  * Returns false if the file does not exist or no nexpath hooks were found.
  */
 export function removeHookEntry(filePath: string): boolean {
@@ -146,7 +192,7 @@ export function removeHookEntry(filePath: string): boolean {
   // UserPromptSubmit
   const upsGroups = hooks.UserPromptSubmit as Array<Record<string, unknown>> | undefined;
   if (upsGroups) {
-    const filtered = upsGroups.filter((g) => !g._nexpath_hook);
+    const filtered = upsGroups.filter((g) => !isNexpathHookGroupV1(g));
     if (filtered.length < upsGroups.length) {
       removed = true;
       if (filtered.length === 0) delete hooks.UserPromptSubmit;
@@ -157,7 +203,7 @@ export function removeHookEntry(filePath: string): boolean {
   // Stop
   const stopGroups = hooks.Stop as Array<Record<string, unknown>> | undefined;
   if (stopGroups) {
-    const filtered = stopGroups.filter((g) => !g._nexpath_hook);
+    const filtered = stopGroups.filter((g) => !isNexpathHookGroupV1(g));
     if (filtered.length < stopGroups.length) {
       removed = true;
       if (filtered.length === 0) delete hooks.Stop;
@@ -196,9 +242,9 @@ export const claudeCodeAdapter: HookAdapter = {
     return ctx.settingsPath ?? getClaudeSettingsPath(ctx.home);
   },
 
-  buildHooks(ctx: InstallContext): Record<string, Array<{ type: string; command: string }>> {
+  buildHooks(ctx: InstallContext): Record<string, Array<{ type: string; command: string; timeout?: number }>> {
     return {
-      UserPromptSubmit: [{ type: 'command', command: buildHookCommand(ctx.home) }],
+      UserPromptSubmit: [{ type: 'command', command: buildHookCommand(ctx.home), timeout: CLAUDE_HOOK_TIMEOUT_SECONDS }],
       Stop:             [{ type: 'command', command: buildStopHookCommand(ctx.home) }],
     };
   },

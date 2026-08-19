@@ -1,0 +1,165 @@
+import { describe, expect, it } from 'vitest';
+import {
+  PROMPT_ENHANCEMENT_CONTRACT_VERSION,
+  type PromptEnhancementFutureSequenceRuntimeEventV1,
+  type PromptEnhancementPrepareRequestV1,
+  type PromptEnhancementSourceRefV1,
+} from './contracts.js';
+import { buildPromptEnhancementHandoffMetadataV1 } from './handoff-metadata.js';
+import { preparePromptEnhancement } from './facade.js';
+import { buildPromptEnhancementCostVisibilityMetadataV1 } from './cost-observability.js';
+import { getPromptStartStopSourceSnapshot } from './source-reality.js';
+import {
+  buildPromptEnhancementMpsContinuationPopupV1,
+  createPromptEnhancementMpsContinuationCancelIntentV1,
+  createPromptEnhancementMpsContinuationSendIntentV1,
+  createPromptEnhancementMpsCustomInterruptionIntentV1,
+} from './continuation-popup.js';
+
+function request(): PromptEnhancementPrepareRequestV1 {
+  const sourceRef: PromptEnhancementSourceRefV1 = {
+    sourceRefId: 'b32-source-1', sourceKind: 'source_a_user_prompt', sourceId: 'prompt:b32',
+    sourceAuthorization: 'source_fact_only', evidenceStatus: 'present', freshness: 'current',
+    confidence: 'high', privacyClass: 'public_safe',
+  };
+  const boundaries = getPromptStartStopSourceSnapshot();
+  return {
+    schemaVersion: PROMPT_ENHANCEMENT_CONTRACT_VERSION, requestId: 'b32-request', projectRoot: '/tmp/b32-project',
+    hostSurface: 'cli_stop_bridge',
+    sourcePrompt: { text: 'Review this continuation item and explain the verification.', origin: 'user', capturedAt: 1, promptIndex: 1, generatedOriginPolicy: 'ordinary_source_a' },
+    reviewMomentContext: {
+      reviewMoment: 'UserPromptSubmit_preparation', currentAgentMode: 'workspace-write', projectId: 'b32-project',
+      sessionId: 'b32-session', detectedLanguage: 'en', stageCandidate: 'implementation', promptCount: 1,
+      recentPromptMetadataRefs: [], triggerProvenance: {
+        currentStage: 'implementation', prevStage: 'task_breakdown', triggerKind: 'stage_transition',
+        classifierState: 'fire_recommended', degradedNoActionState: 'none', promptStartBoundary: boundaries.hookBoundary,
+        deliveryBoundary: boundaries.deliveryBoundary, promptStartCanReplaceSameTurn: false,
+      },
+    },
+    sourceSignals: {
+      sourceAOriginalPromptRef: sourceRef, sourceRefs: [sourceRef], normalizedStageAbsenceSignalRefs: [],
+      contentTemplateRecordFactRefs: [], popupQuestionSourceRefs: [], whyHelpSourceRefs: [], profileRoleModeRefs: [],
+      rightGoodWorkStyleEnvRuntimeRefs: [], missingMemoryCandidateRefs: [],
+      sourceLabels: [{ sourceRefId: sourceRef.sourceRefId, label: 'original_prompt', evidenceStatus: 'present' }],
+      promptStartStop: { hookBoundary: boundaries.hookBoundary, deliveryBoundary: boundaries.deliveryBoundary,
+        runAutoCanHoldOrReplaceSubmittedPrompt: false, sharedSignalCount: boundaries.sharedSignalCount,
+        classifierDegradedNoFireReasons: boundaries.classifierDegradedNoFireReasons },
+      store: { schemaVersion: 1, missingPromptEnhancementTables: [], cleanupGaps: [] }, transcriptPathState: 'not_authority',
+      streamBOutputs: [], paramEventChannels: [], servedVariantIdentityRefs: [], deliveryGateRefs: [], sourceOnlyHardFactRefs: [],
+    },
+    userPreferenceContext: { levelState: 'default', scopedFeedbackEvidenceRefs: [] },
+    configSnapshot: { sequenceEnabledState: 'not_enabled_v1', validatedEffectiveConfigState: 'valid', arbitraryConfigRowsAreAuthority: false },
+    callVisibilityState: buildPromptEnhancementCostVisibilityMetadataV1('baseline_pe_composer', { callVisibilityMode: 'deterministic', plannedCallCount: 0, usedCallCount: 0 }),
+    privacyAndStoragePolicy: { sensitivityClass: 'normal', localStorageEligibility: 'ids_and_categories_only', telemetryEligibility: 'allowlisted_counts_only', llmSharingEligibility: 'allowed_minimal', generatedBodyStoragePolicy: 'do_not_store_raw_by_default' },
+  };
+}
+
+async function validContinuation() {
+  const result = await preparePromptEnhancement(request());
+  const handoff = buildPromptEnhancementHandoffMetadataV1({
+    handoffDecisionId: `${result.enhancementId}:mps-handoff`, requestId: result.requestId, projectRoot: result.projectRoot,
+    currentBody: result.currentBody, safetySummary: result.safetySummary, handoffKind: 'first_prompt_handoff_candidate',
+    summary: { summaryId: `${result.enhancementId}:summary`, publicSafeText: 'Metadata only.', remainingTaskCount: 1, taskRoleLabels: ['verification'] },
+  });
+  const event: PromptEnhancementFutureSequenceRuntimeEventV1 = {
+    requestId: result.requestId, projectScope: result.projectRoot, sequenceId: 'sequence-1', sequenceItemId: 'item-2',
+    currentItemRevision: 2, bodyRevision: result.currentBody.bodyRevision, continuationDispositionId: 'cont-1',
+    contractVersion: PROMPT_ENHANCEMENT_CONTRACT_VERSION, stateFreshness: 'current', stopEventState: 'stop_fired_non_proof',
+    terminalTransitionState: 'none', explicitUserActionState: 'present_future_only', idempotencyKey: 'b32-idem', createdAtMs: 2,
+  };
+  return buildPromptEnhancementMpsContinuationPopupV1({
+    result, handoffMetadata: handoff, event, progress: { done: 3, total: 27 }, itemKind: 'task', additionalDetails: { text: 'Keep the same fixture.', revision: 1 },
+    cancel: { state: 'available', disposition: 'blocked_no_send' },
+  });
+}
+
+// Regression (UI lane, MPS-12): a CONFIRMATION-kind continuation carries an EMPTY originalPromptText by
+// owner-locked design — the packager sets '' (Ruling C §22.2 + the confirmation-carries-no-original-text
+// acceptance fixture). The builder must STILL render it: the renderer is kind-gated and shows no original
+// region for confirmation kinds, so the empty value is never displayed. Before the kind-aware validation
+// in the builder, the shared prepare-result validator rejected it as missing_current_body — and no test
+// exercised this path, which is exactly how the gap hid. This guards the fix, one assertion per kind.
+async function validConfirmationContinuation(
+  itemKind: 'double_confirmation' | 'cross_confirmation' | 'binary_confirmation' | 'wrap_up',
+) {
+  const base = await preparePromptEnhancement(request());
+  const result = { ...base, currentBody: { ...base.currentBody, originalPromptText: '' } };
+  const handoff = buildPromptEnhancementHandoffMetadataV1({
+    handoffDecisionId: `${result.enhancementId}:mps-handoff`, requestId: result.requestId, projectRoot: result.projectRoot,
+    currentBody: result.currentBody, safetySummary: result.safetySummary, handoffKind: 'first_prompt_handoff_candidate',
+    summary: { summaryId: `${result.enhancementId}:summary`, publicSafeText: 'Metadata only.', remainingTaskCount: 1, taskRoleLabels: ['verification'] },
+  });
+  const event: PromptEnhancementFutureSequenceRuntimeEventV1 = {
+    requestId: result.requestId, projectScope: result.projectRoot, sequenceId: 'sequence-1', sequenceItemId: 'item-2',
+    currentItemRevision: 2, bodyRevision: result.currentBody.bodyRevision, continuationDispositionId: 'cont-1',
+    contractVersion: PROMPT_ENHANCEMENT_CONTRACT_VERSION, stateFreshness: 'current', stopEventState: 'stop_fired_non_proof',
+    terminalTransitionState: 'none', explicitUserActionState: 'present_future_only', idempotencyKey: 'b32-idem', createdAtMs: 2,
+  };
+  return buildPromptEnhancementMpsContinuationPopupV1({
+    result, handoffMetadata: handoff, event, progress: { done: 3, total: 27 }, itemKind,
+    additionalDetails: { text: 'Keep the same fixture.', revision: 1 }, cancel: { state: 'available', disposition: 'blocked_no_send' },
+  });
+}
+
+describe('stage-3-2 later MPS continuation popup', () => {
+  it('renders every confirmation kind despite the owner-locked empty original text (kind-aware validation)', async () => {
+    for (const kind of ['double_confirmation', 'cross_confirmation', 'binary_confirmation', 'wrap_up'] as const) {
+      const built = await validConfirmationContinuation(kind);
+      expect(built.state).toBe('ready');
+      if (built.state === 'ready') {
+        expect(built.model.itemKind).toBe(kind);
+        // Empty original is carried but NEVER displayed for confirmation kinds (renderer is kind-gated).
+        expect(built.model.body.originalPromptText).toBe('');
+      }
+    }
+  });
+
+  it('renders the locked continuation layout without the first-popup plan summary', async () => {
+    const built = await validContinuation();
+    expect(built.state).toBe('ready');
+    if (built.state !== 'ready') return;
+    expect(built.model.layout).toEqual(['enhanced_body', 'additional_details', 'custom_interruption', 'cancel_remaining_sequence']);
+    expect(built.model.actions.customInterruption.helper).toContain('same sequence prompt returns');
+    expect(built.model.actions.originalPrompt).toBe('not_rendered');
+    expect(built.model.authority).toEqual({ localSequenceRuntime: false, localQueuePointer: false, localAutoSend: false, localAdvance: false, stopIsCompletionProof: false, customInterruptionIsCancel: false, hostTransport: false });
+  });
+
+  // MPS-10 (9.1): the continuation surface's serialized model must render NONE of the forbidden values —
+  // no absolute path, no sequence config key, no literal `Decision Session`, no legacy sentinel. Same
+  // substring-over-the-whole-model rule the shipping fixture runners enforce (acceptance-fixtures.ts:121).
+  it('renders no forbidden value and never leaks the project path (MPS-10 forbidden-value list)', async () => {
+    const built = await validContinuation();
+    if (built.state !== 'ready') throw new Error('fixture did not render');
+    const rendered = JSON.stringify(built.model);
+    const forbidden = [
+      '/home/', 'prompt_enhancement.sequence.enabled', 'Decision Session',
+      'private-provider-error-must-not-render', 'legacy-role-must-not-render',
+      'legacy-frequency-must-not-render', 'legacy-history-must-not-render',
+      'legacy-selected-prompt-must-not-render', 'legacy-host-state-must-not-render',
+      'legacy-label-must-not-render',
+    ];
+    expect(forbidden.filter((value) => rendered.includes(value))).toEqual([]);
+    // The surface never carries the absolute project path — so no /home/-class path can leak, whatever the root.
+    expect(rendered).not.toContain('/tmp/b32-project');
+  });
+
+  it('emits one bound send intent, a separate interruption intent, and typed cancel only', async () => {
+    const built = await validContinuation();
+    if (built.state !== 'ready') throw new Error('fixture did not render');
+    const send = createPromptEnhancementMpsContinuationSendIntentV1(built.model, { editedBodyText: `${built.model.body.text}\nEdited`, additionalDetailsRevision: 2 });
+    expect(send.state).toBe('intent_ready');
+    if (send.state === 'intent_ready') expect(send.intent).toMatchObject({ type: 'send_current_body', additionalDetailsRevision: 2, identity: { sequenceId: 'sequence-1', sequenceItemId: 'item-2' } });
+    expect(createPromptEnhancementMpsCustomInterruptionIntentV1(built.model)).toMatchObject({ state: 'intent_ready', intent: { type: 'custom_interruption' } });
+    expect(createPromptEnhancementMpsContinuationCancelIntentV1(built.model)).toMatchObject({ state: 'intent_ready', intent: { type: 'cancel_remaining_sequence', disposition: 'blocked_no_send' } });
+  });
+
+  it('rejects stale, terminal, and completion-proof Stop inputs', async () => {
+    const result = await preparePromptEnhancement(request());
+    const handoff = buildPromptEnhancementHandoffMetadataV1({ handoffDecisionId: 'b32-handoff', requestId: result.requestId, projectRoot: result.projectRoot, currentBody: result.currentBody, safetySummary: result.safetySummary, handoffKind: 'first_prompt_handoff_candidate', summary: { summaryId: 'b32-summary', publicSafeText: 'Metadata only.', remainingTaskCount: 1, taskRoleLabels: ['verification'] } });
+    const base: PromptEnhancementFutureSequenceRuntimeEventV1 = { requestId: result.requestId, projectScope: result.projectRoot, sequenceId: 's', sequenceItemId: 'i', currentItemRevision: 1, bodyRevision: result.currentBody.bodyRevision, contractVersion: 1, stateFreshness: 'current', stopEventState: 'stop_fired_non_proof', terminalTransitionState: 'none', idempotencyKey: 'k', createdAtMs: 1 };
+    const make = (event: PromptEnhancementFutureSequenceRuntimeEventV1) => buildPromptEnhancementMpsContinuationPopupV1({ result, handoffMetadata: handoff, event, progress: { done: 3, total: 27 }, itemKind: 'task', cancel: { state: 'available', disposition: 'blocked_no_send' } });
+    expect(make({ ...base, stateFreshness: 'stale' }).state).toBe('no_popup');
+    expect(make({ ...base, terminalTransitionState: 'completed_terminal' }).state).toBe('no_popup');
+    expect(make({ ...base, stopEventState: 'not_applicable' }).state).toBe('no_popup');
+  });
+});

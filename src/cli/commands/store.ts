@@ -10,6 +10,9 @@ import {
   deleteAllSkippedSessions,
   deleteAllSkippedSessionsGlobal,
   pruneSkippedSessions,
+  deletePromptEnhancementProjectRows,
+  deleteAllPromptEnhancementRows,
+  prunePromptEnhancementRows,
 } from '../../store/index.js';
 
 // ── Period parser ─────────────────────────────────────────────────────────────
@@ -50,8 +53,9 @@ export async function storeDeleteAction(
     const store = await openStore(dbPath);
     deleteProjectPrompts(store, opts.project);
     deleteAllSkippedSessions(store, opts.project);
+    deletePromptEnhancementProjectRows(store, opts.project);
     closeStore(store);
-    console.log(`Deleted all prompts for project: ${opts.project}`);
+    console.log(`Deleted all prompts and prompt-enhancement rows for project: ${opts.project}`);
     return;
   }
 
@@ -67,8 +71,9 @@ export async function storeDeleteAction(
   const store = await openStore(dbPath);
   deleteAllPrompts(store);
   deleteAllSkippedSessionsGlobal(store);
+  deleteAllPromptEnhancementRows(store);
   closeStore(store);
-  console.log('All stored prompts deleted.');
+  console.log('All stored prompts and prompt-enhancement rows deleted.');
 }
 
 // ── store enable ──────────────────────────────────────────────────────────────
@@ -116,8 +121,12 @@ export async function storePruneAction(opts: PruneOpts, dbPath = DEFAULT_DB_PATH
   const store = await openStore(dbPath);
   const deleted = pruneOlderThan(store, ms, opts.project);
   pruneSkippedSessions(store, ms, opts.project);
+  const pePrune = prunePromptEnhancementRows(store, {
+    projectRoot: opts.project,
+    olderThan: Date.now() - ms,
+  });
   closeStore(store);
 
   const scope = opts.project ? `project: ${opts.project}` : 'all projects';
-  console.log(`Pruned ${deleted} prompt(s) older than ${opts.olderThan} from ${scope}.`);
+  console.log(`Pruned ${deleted} prompt(s) and ${pePrune.deletedRows} prompt-enhancement row(s) older than ${opts.olderThan} from ${scope}.`);
 }

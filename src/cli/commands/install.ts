@@ -1,5 +1,5 @@
 import { execSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { confirm, isCancel, select, password, note, intro, outro, cancel as clackCancel } from '@clack/prompts';
@@ -387,14 +387,8 @@ export type ApiKeyPromptResult =
   | { kind: 'skip' }
   | { kind: 'cancel' };
 
-export type TelemetryConsentResult =
-  | { kind: 'enable' }
-  | { kind: 'disable' }
-  | { kind: 'cancel' };
-
 export interface InstallPrompts {
-  apiKeyPrompt:     (ctx: ApiKeyPromptContext) => Promise<ApiKeyPromptResult>;
-  telemetryConsent: () => Promise<TelemetryConsentResult>;
+  apiKeyPrompt: (ctx: ApiKeyPromptContext) => Promise<ApiKeyPromptResult>;
 }
 
 export function getKeychainName(platform: NodeJS.Platform = process.platform): string {
@@ -416,7 +410,7 @@ const defaultInstallPrompts: InstallPrompts = {
         '',
         'Get a key: https://platform.openai.com/api-keys',
       ].join('\n'),
-      'Step 1 of 3 — OpenAI API Key (required)',
+      'Step 1 of 2 — OpenAI API Key (required)',
     );
 
     if (ctx.hasEnvKey) {
@@ -442,33 +436,6 @@ const defaultInstallPrompts: InstallPrompts = {
     if (input === '' && ctx.hasStoredKey) return { kind: 'keep_existing' };
     if (input === '') return { kind: 'skip' };
     return { kind: 'new_key', value: String(input) };
-  },
-  telemetryConsent: async () => {
-    note(
-      [
-        'We highly recommend you provide us logs so we can',
-        'get better information to improve nexpath as much',
-        'as possible.',
-        '',
-        "What's collected:  anonymous usage events (command",
-        '                   names, timings, error types)',
-        "What's NOT sent:   your code, prompts, API key,",
-        '                   file paths, personal information',
-        '',
-        'If you select:',
-        'Yes  → events captured locally AND auto-synced to our server',
-        'No   → no capture, no sync — full stop',
-        '',
-        'Change anytime: `nexpath config set telemetry.enabled true|false`',
-      ].join('\n'),
-      'Step 2 of 3 — Telemetry',
-    );
-    const answer = await confirm({
-      message:      'Enable telemetry?',
-      initialValue: true,
-    });
-    if (isCancel(answer)) return { kind: 'cancel' };
-    return answer === true ? { kind: 'enable' } : { kind: 'disable' };
   },
 };
 
@@ -527,7 +494,7 @@ export async function installAction(
   setInstalledAtIfMissing(store);
 
   let apiKeySource:  InstallSummary['apiKey']['source'] = 'skipped';
-  let telemetryEnabled = true;
+  let telemetryEnabled = false;
 
   try {
     // ── Step 1: API key ───────────────────────────────────────────────────────
@@ -562,30 +529,18 @@ export async function installAction(
       apiKeySource = 'skipped';
     }
 
-    // ── Step 2: Telemetry ─────────────────────────────────────────────────────
-    if (!opts.yes) {
-      const consent = await promptFn.telemetryConsent();
-      if (consent.kind === 'cancel') {
-        clackCancel('Setup aborted — no changes made');
-        closeStore(store);
-        return null;
-      }
-      telemetryEnabled = consent.kind === 'enable';
-      setConfig(store, 'telemetry.enabled',      String(telemetryEnabled));
-      setConfig(store, 'telemetry_sync_enabled', String(telemetryEnabled));
+    // ── Telemetry: OFF by default, NOT prompted at install (NF Plan A) ─────────
+    // Telemetry starts OFF and there is no install-time telemetry step. Consent to SEND is the explicit
+    // feedback-popup click, not an install toggle (the feedback send stays independent of this flag). Seed
+    // default-off on first install; preserve an existing choice on re-run (e.g. a user who enabled it
+    // later, or the VS Code two-pass setup — must not silently flip a prior choice). Same interactive and
+    // `--yes` behaviour now — no prompt either way.
+    if (!isConfigSet(store.db, 'telemetry.enabled')) {
+      setConfig(store, 'telemetry.enabled',      'false');
+      setConfig(store, 'telemetry_sync_enabled', 'false');
+      telemetryEnabled = false;
     } else {
-      // --yes (non-interactive): preserve an existing telemetry choice. A re-run
-      // — e.g. the VS Code extension's two-pass setup (`--for cli` interactive,
-      // then `--for vscode --yes`) — must NOT silently re-enable telemetry the
-      // user disabled in the first pass. Mirrors how advisory_frequency / role
-      // below only write a default when unset. On a first install (unset) it
-      // still defaults to enabled, preserving prior `--yes` behaviour.
-      if (!isConfigSet(store.db, 'telemetry.enabled')) {
-        setConfig(store, 'telemetry.enabled',      'true');
-        setConfig(store, 'telemetry_sync_enabled', 'true');
-      } else {
-        telemetryEnabled = getConfig(store.db, 'telemetry.enabled') === 'true';
-      }
+      telemetryEnabled = getConfig(store.db, 'telemetry.enabled') === 'true';
     }
   } finally {
     if (store.dbPath !== ':memory:' || telemetryEnabled !== true) {
@@ -593,7 +548,7 @@ export async function installAction(
     }
   }
 
-  // ── Step 3: Agent detection + registration ────────────────────────────────
+  // ── Step 2: Agent detection + registration ────────────────────────────────
   // When the VS Code extension drives setup it targets ONLY the IDE the user is
   // in (NEXPATH_ONLY_AGENT = cursor|windsurf). Additive: with the env unset this
   // is a no-op and the legacy multi-agent behaviour is byte-identical.
@@ -688,23 +643,28 @@ export async function installAction(
       }
     }
 
-    // ── Frequency + role prompts ───────────────────────────────────────────────
-    // Reuse the already-open `store` — opening a second store on the same dbPath
-    // would deadlock on the exclusive file lock and clobber these writes when the
-    // first store is closed afterwards.
+    // ── Advisory frequency (picker hidden) + role prompt ────────────────────────
+    // Owner ruling 2026-08-10: ONLY the advisory-frequency picker is hidden at install (support to be
+    // re-added later) — seed its default silently (Medium / every_event) when unset. Its interactive
+    // block is kept COMMENTED OUT (not removed): un-comment it (and drop the default-seed line) to
+    // restore the picker. The freqPromptFn param + defaultFreqPrompt are retained for that. The ROLE
+    // picker stays interactive (restored 2026-08-10). Both settings stay changeable via
+    // `nexpath config set advisory_frequency|role …`.
+    // (Reuse the already-open `store`; a second open on the same dbPath would deadlock the file lock.)
     const currentFreq = readInstallFreq(store.db);
-    if (opts.yes) {
-      if (!isConfigSet(store.db, 'advisory_frequency')) {
-        setAdvisoryFrequency(store, 'advisory_frequency', currentFreq);
-      }
-    } else {
-      const picked = await freqPromptFn(currentFreq);
-      if (!isCancel(picked) && typeof picked === 'string') {
-        setAdvisoryFrequency(store, 'advisory_frequency', picked);
-        console.log(`✓ advisory_frequency = ${picked}`);
-      }
+    if (!isConfigSet(store.db, 'advisory_frequency')) {
+      setAdvisoryFrequency(store, 'advisory_frequency', currentFreq);
     }
+    // HIDDEN picker (owner 2026-08-10) — un-comment to restore the interactive frequency selection:
+    // if (!opts.yes) {
+    //   const picked = await freqPromptFn(currentFreq);
+    //   if (!isCancel(picked) && typeof picked === 'string') {
+    //     setAdvisoryFrequency(store, 'advisory_frequency', picked);
+    //     console.log(`✓ advisory_frequency = ${picked}`);
+    //   }
+    // }
 
+    // Role picker stays interactive at install (owner 2026-08-10: only the frequency picker is hidden).
     const currentRole = readInstallRole(store.db);
     if (opts.yes) {
       if (!isConfigSet(store.db, 'role')) {
@@ -993,21 +953,29 @@ const defaultUninstallApiKeyConfirm: UninstallApiKeyConfirmFn = async () => {
   return !isCancel(answer) && answer === true;
 };
 
+export type UninstallStoreDeleteConfirmFn = () => Promise<boolean>;
+
+// Owner ruling 2026-08-10: deleting local data on uninstall no longer prompts the user — it is
+// automatic (default yes). The injectable seam is kept only so tests can exercise a decline.
+const defaultUninstallStoreDeleteConfirm: UninstallStoreDeleteConfirmFn = async () => true;
+
 export async function uninstallAction(
   {
     paths = resolveAgentPaths(),
     execFn,
     apiKeyConfirmFn = defaultUninstallApiKeyConfirm,
+    storeDeleteConfirmFn = defaultUninstallStoreDeleteConfirm,
     yes = false,
     projectRoot = process.cwd(),
     dbPath,
   }: {
-    paths?:           AgentPaths;
-    execFn?:          ExecFn;
-    apiKeyConfirmFn?: UninstallApiKeyConfirmFn;
-    yes?:             boolean;
-    projectRoot?:     string;
-    dbPath?:          string;
+    paths?:               AgentPaths;
+    execFn?:              ExecFn;
+    apiKeyConfirmFn?:     UninstallApiKeyConfirmFn;
+    storeDeleteConfirmFn?: UninstallStoreDeleteConfirmFn;
+    yes?:                 boolean;
+    projectRoot?:         string;
+    dbPath?:              string;
   } = {},
 ): Promise<void> {
   // Uninstall must clean up registration entries from agents that may have
@@ -1087,21 +1055,36 @@ export async function uninstallAction(
     }
   }
 
-  // ── Telemetry config cleanup ─────────────────────────────────────────────
-  try {
-    const store = await openStore(dbPath ?? DEFAULT_DB_PATH);
-    try {
-      setConfig(store, 'telemetry.enabled',      'false');
-      setConfig(store, 'telemetry_sync_enabled', 'false');
-      console.log('✓ Telemetry disabled in local config.');
-    } finally {
-      closeStore(store);
-    }
-  } catch {
-    // Best-effort — never crash uninstall over a config write failure.
-  }
-
+  // ── Local data cleanup (NF: delete on uninstall) ─────────────────────────
+  // Owner ruling 2026-08-10: the local store (prompt history, config, and the content-free
+  // feedback/action signals all live there) is deleted AUTOMATICALLY — no user prompt (default yes).
+  // A programmatic decline (test seam) keeps the retain + telemetry-off behaviour. Best-effort:
+  // a delete failure never crashes uninstall (e.g. a locked file).
+  const resolvedDbPath = dbPath ?? DEFAULT_DB_PATH;
+  const shouldDeleteData = yes || await storeDeleteConfirmFn();
   console.log('');
-  console.log('Prompt history retained at ~/.nexpath/prompt-store.db');
-  console.log('To delete it: nexpath store delete');
+  if (shouldDeleteData) {
+    try {
+      if (existsSync(resolvedDbPath)) unlinkSync(resolvedDbPath);
+      console.log('✓ Local data deleted.');
+    } catch (err) {
+      console.log(`- Could not delete local data (${(err as Error).message}); remove ${resolvedDbPath} manually.`);
+    }
+  } else {
+    // Declined (programmatic only): retain the DB, but ensure telemetry stays off in the config.
+    try {
+      const store = await openStore(resolvedDbPath);
+      try {
+        setConfig(store, 'telemetry.enabled',      'false');
+        setConfig(store, 'telemetry_sync_enabled', 'false');
+        console.log('✓ Telemetry disabled in local config.');
+      } finally {
+        closeStore(store);
+      }
+    } catch {
+      // Best-effort — never crash uninstall over a config write failure.
+    }
+    console.log('Prompt history retained at ~/.nexpath/prompt-store.db');
+    console.log('To delete it later: nexpath store delete');
+  }
 }
