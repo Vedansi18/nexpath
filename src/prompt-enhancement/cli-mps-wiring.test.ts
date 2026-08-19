@@ -147,7 +147,7 @@ describe('MPS CLI wiring (owner ruling 2026-08-06: CLI complete, extension pendi
     expect(ui.frames[0]).toContain('Multi-prompt sequence');
     expect(ui.frames[0]).toContain('Use enhanced sequence prompt');
     expect(ui.frames[0]).toContain('Additional details');
-    expect(ui.frames[0]).toContain('Cancel (remaining multi-prompt sequence)');
+    expect(ui.frames[0]).toContain('Use original prompt');
     expect(ui.frames[0]).toContain('Sequence plan');
     expect(ui.frames[0]).toContain('Enter send · Esc actions');
     // The hardware cursor is placed in the focused editable body on open (owner request): the
