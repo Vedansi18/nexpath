@@ -151,6 +151,20 @@ describe('storeNexpathToken / readNexpathToken / removeNexpathToken', () => {
     expect(await readNexpathToken({ fallbackPath })).toBeNull();
   });
 
+  it('a keychain hit that is not a valid token is ignored, falling through to the file', async () => {
+    // The keychain resolving is not, by itself, proof of a usable token — it
+    // could hold something else entirely (a stale value, a different app's
+    // reuse of the same account name). `token && isValidNexpathToken(token)`
+    // has two clauses; every other test here only exercises `token` being
+    // absent, never `token` being present but shaped wrong.
+    vi.mocked(keychain.getPassword).mockResolvedValue('not-a-nexpath-token-at-all');
+    const { mkdirSync, writeFileSync } = await import('node:fs');
+    mkdirSync(tmpDir, { recursive: true });
+    writeFileSync(fallbackPath, JSON.stringify({ nexpath_token: VALID_TOKEN }), 'utf8');
+
+    expect(await readNexpathToken({ fallbackPath })).toBe(VALID_TOKEN);
+  });
+
   it('removing clears both the keychain and the file', async () => {
     vi.mocked(keychain.setPassword).mockRejectedValue(new Error('no keychain'));
     await storeNexpathToken(VALID_TOKEN, { fallbackPath });
@@ -166,6 +180,22 @@ describe('storeNexpathToken / readNexpathToken / removeNexpathToken', () => {
   it('removing when nothing was stored does not throw', async () => {
     vi.mocked(keychain.deletePassword).mockRejectedValue(new Error('nothing to delete'));
     await expect(removeNexpathToken({ fallbackPath })).resolves.not.toThrow();
+  });
+
+  it('removing leaves a file untouched when it exists but never held a token', async () => {
+    // Distinct from "no file at all": the file is present, JSON-parseable, and
+    // simply has no `nexpath_token` key — e.g. an OpenAI-key-only file. The
+    // `if ('nexpath_token' in parsed)` branch has otherwise only been exercised
+    // by tests where the key IS present.
+    vi.mocked(keychain.deletePassword).mockRejectedValue(new Error('nothing to delete'));
+    const { mkdirSync, writeFileSync, readFileSync } = await import('node:fs');
+    mkdirSync(tmpDir, { recursive: true });
+    const original = JSON.stringify({ openai_api_key: 'sk-untouched-000000000000000000' });
+    writeFileSync(fallbackPath, original, 'utf8');
+
+    await removeNexpathToken({ fallbackPath });
+
+    expect(readFileSync(fallbackPath, 'utf8')).toBe(original);
   });
 
   it('a corrupt fallback file is not fatal to a fresh store — it is replaced, not appended to blindly', async () => {
