@@ -242,9 +242,28 @@ describe('§17.13 — the LAST hop: the composer may not throw the name away', (
   it('the signal NAME is required to survive the rewording', () => {
     const src = composerSource();
     expect(
-      src.includes('the NAME must survive into your'),
+      src.includes('That name MUST appear,'),
       'the composer is free to drop the signal name again — the payload fix stops at the last hop',
     ).toBe(true);
+  });
+
+  it('the rule names the phrasings the model actually converged to', () => {
+    // ⚠️ Strengthened after the second sim: the first version said the name "must survive", and the
+    // model complied in one body out of two. The failures are now quoted in the rule itself, because
+    // the observed failure mode is not defiance — it is generalising the name into a category
+    // ("the missing practices indicated", "what signals might be relevant here").
+    const src = composerSource();
+    expect(src).toContain('the missing practices indicated');
+    expect(src).toContain('what signals might be relevant here');
+    expect(src.includes('name EACH of their signals'), 'multi-signal merging is unguarded').toBe(true);
+  });
+
+  it('the voice rule requires BOTH halves, not just first person', () => {
+    // The first version killed "we" and the model moved to pure "I will…" narration — which takes
+    // the work back from the agent in a text that is being sent TO the agent.
+    const src = composerSource();
+    expect(src.includes('BOTH HALVES ARE REQUIRED'), 'the second-person half is unguarded').toBe(true);
+    expect(src).toContain('quietly taken the work back from the');
   });
 
   it('and the pronouns are fixed: I is the user, you is the agent, never we', () => {
