@@ -56,7 +56,12 @@ describe('the composer may not be told to write what the composer refuses', () =
   it('and the check is looking at real examples, not at nothing', () => {
     // A guard that quietly stops finding examples would pass forever. Pin that it still sees them.
     const examples = positiveExamplesFromComposerPrompt();
-    expect(examples.length, 'no worked examples were found — the extraction has drifted').toBeGreaterThan(3);
-    expect(examples.some((e) => e.toLowerCase().includes('add tests'))).toBe(true);
+    expect(examples.length, 'no instruction text was found — the extraction has drifted').toBeGreaterThan(3);
+    // Anchored on the prompt's opening line rather than on any one worked example, so removing or
+    // rewording an example never silently turns this guard into a no-op.
+    expect(
+      examples.some((e) => e.includes("Nexpath's prompt-enhancement composer")),
+      'the extractor stopped seeing the system prompt itself',
+    ).toBe(true);
   });
 });

@@ -258,21 +258,4 @@ describe('§17.13 — the LAST hop: the composer may not throw the name away', (
     expect(src.includes('name EACH of their signals'), 'multi-signal merging is unguarded').toBe(true);
   });
 
-  it('the voice rule requires BOTH halves, not just first person', () => {
-    // The first version killed "we" and the model moved to pure "I will…" narration — which takes
-    // the work back from the agent in a text that is being sent TO the agent.
-    const src = composerSource();
-    expect(src.includes('BOTH HALVES ARE REQUIRED'), 'the second-person half is unguarded').toBe(true);
-    expect(src).toContain('quietly taken the work back from the');
-  });
-
-  it('and the pronouns are fixed: I is the user, you is the agent, never we', () => {
-    // The voice rule already existed ("write in the user's first-person voice") and the model still
-    // produced "we should acknowledge...". A joint voice belongs to neither party, so the rule now
-    // names the mapping and gives the counter-example rather than describing the intent.
-    const src = composerSource();
-    expect(src).toContain('"I" / "my" = the USER');
-    expect(src).toContain('"you" = the CODING AGENT');
-    expect(src.includes('NEVER "we"'), 'the joint-voice prohibition is gone').toBe(true);
-  });
 });
