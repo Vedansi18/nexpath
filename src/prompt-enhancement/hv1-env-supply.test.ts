@@ -588,3 +588,29 @@ describe('§17.10 — a GREEN pipe over an EMPTY supply (HV-3 row 1)', () => {
     expect(buildPromptEnhancementGroundingRefsV1(store, dir, []).sourceOnlyHardFactRefs.length).toBe(10);
   });
 });
+
+describe('§17.11 — row 4 is an OPEN owner decision, so its measured basis must not drift', () => {
+  // §14.1 pairs row 4 with row 5 as "decide-then-wire". Row 5 was asked and ruled; row 4 was
+  // measured at HV-1 and never asked, and HV-3 round 3 routed it into the owner register.
+  //
+  // While a decision is pending, the facts it will be decided ON are the thing worth pinning — an
+  // owner answering "remove it" or "wire it" is answering about the state below. If that state
+  // moves, the question changes and the register entry is stale before it is read.
+  it('the module still runs on the live path — the cost side of the decision', () => {
+    const auto = readFileSync('src/cli/commands/auto.ts', 'utf8');
+    expect(
+      /\brecordEnvTrajectory\s*\(/.test(auto),
+      'the per-session probe is gone — §17.11 may already be resolved; re-read it before deciding',
+    ).toBe(true);
+  });
+
+  it('and still nothing reads what it writes — the other side', () => {
+    const readers = sourceFilesUnder('src')
+      .filter((f) => !f.endsWith('env-trajectory.ts') && !f.endsWith('store/env-facts.ts'))
+      .filter((f) => readFileSync(f, 'utf8').includes('getEnvTrajectory'));
+    expect(
+      readers,
+      'a consumer appeared — the decision in §17.11 has been answered by code; update the record',
+    ).toEqual([]);
+  });
+});
