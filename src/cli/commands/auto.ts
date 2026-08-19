@@ -807,7 +807,7 @@ export async function runAuto(
   openai?: OpenAI,
   promptEnhancement?: AutoPromptEnhancementIntegration,
 ): Promise<AutoOutcome> {
-  // MPS P1b-i (Hiren Unit P1) — thread the live store handle + the (optional, key-gated) LLM client
+  // MPS P1b-i (owner unit P1) — thread the live store handle + the (optional, key-gated) LLM client
   // into the PE facade so the full sequence planner can REPLACE the display-only describe splitter as
   // the source of truth for the compact sequence summary. The planner runs ONLY on sequence candidates
   // and only on a baseline prepare; every non-sequence prompt is byte-identical to before, and any
@@ -1263,7 +1263,7 @@ export async function runAuto(
   // ── 8.1. H1.1 typed PE preparation seam ────────────────────────────────────
   // Build and consume the approved PE packet by default. An injected integration
   // remains available for boundary tests, while the default path now exercises
-  // the executable Hiren facade without changing legacy DS or delivery authority.
+  // the executable owner-spec facade without changing legacy DS or delivery authority.
   const peIntegration = promptEnhancement ?? {
     request: buildPromptEnhancementRequestForAuto({
       auto: input,

@@ -304,7 +304,7 @@ describe('content-template-grounding — sanitize gate (leakage)', () => {
   it('H2: sanitizing keeps every NON-SENSITIVE fragment — the redaction shape costs no fidelity', () => {
     const cases: readonly { value: string; keeps: readonly string[]; drops: string }[] = [
       { value: 'pings alice@example.com on failures', keeps: ['pings', 'on failures'], drops: 'alice@example.com' },
-      { value: 'runs from /home/hiren/projects/nexpath every morning', keeps: ['runs from', 'every morning'], drops: '/home/hiren' },
+      { value: 'runs from /home/dev/projects/app every morning', keeps: ['runs from', 'every morning'], drops: '/home/dev' },
       { value: 'deploys via https://ci.example.com/pipeline/42', keeps: ['deploys via'], drops: 'ci.example.com' },
       { value: 'emails bob@corp.io from /var/log/deploy.log nightly', keeps: ['emails', 'from', 'nightly'], drops: 'bob@corp.io' },
     ];

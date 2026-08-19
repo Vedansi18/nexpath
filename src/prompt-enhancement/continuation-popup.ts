@@ -102,7 +102,7 @@ export interface PromptEnhancementMpsContinuationPopupModelV1 {
     // MPS-2 (6.3): on a continuation, Escape now CANCELS the remaining sequence (terminal) — the delivery
     // mapper turns the shell's decline outcome into `cancel_remaining_sequence`, so the declared contract
     // value must match that runtime, not the old editor-blur claim. What the user is SHOWN about Escape
-    // (help copy, and whether a first Escape blurs the editor before cancelling) is a UI decision → Hiren's;
+    // (help copy, and whether a first Escape blurs the editor before cancelling) is a UI decision → the owner's;
     // it is deliberately not encoded here.
     escape: 'cancel_remaining_sequence';
     ctrlOrCmdJ: 'insert_newline';

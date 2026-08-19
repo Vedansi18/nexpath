@@ -321,7 +321,7 @@ describe('HV-1 round 7/8/9 — no source file, test or production, is invisible 
   // consumer sweeps, so every shell sweep in rounds 2-6 had a silent two-file blind spot, and
   // `right-good-aggregator` is ROW 7 of the eleven modules HV-2 must sweep.
   //
-  // Round 8 fixed it on Hiren's explicit go-ahead (it is another group's source, which §14.3
+  // Round 8 fixed it on the owner's explicit go-ahead (it is another group's source, which §14.3
   // otherwise bars H from patching). The escape emits the identical character — verified on the
   // BUILT output, not assumed: dist carries `\u0000`, which evaluates to charCode 0. Worth noting
   // that the two modules' own 42 tests do NOT cover the separator (replacing it with a printable

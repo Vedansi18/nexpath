@@ -13,7 +13,7 @@
 //     readline keypress loop for arrow-key focus + Enter/Esc handling,
 //     re-renders via computeLayout on every state change, and resolves with
 //     the SelectableItem the user picked. The Space-key D3 toggle is wired
-//     via a small hook (registerKeyHandler) so the Bhavnesh Phase 6 task
+//     via a small hook (registerKeyHandler) so the later UI phase task
 //     adds the actual toggle body without restructuring this module.
 //
 // Vertical render order (dev-plan §11.2) — top to bottom:
@@ -26,7 +26,7 @@
 //   option-label
 //     ↳ option desc-base (truncated/expanded — D1/D2/D5)
 //   ... (repeat per option)
-//   (focused option's shortcut hint — Bhavnesh task, hook only here)
+//   (focused option's shortcut hint — UI-lane task, hook only here)
 //   [bottom OPTION_SEPARATOR padding rows — existing pattern preserved]
 //
 // LineKind separate-element invariant (dev-plan §11.11):
@@ -357,7 +357,7 @@ export function visualRows(line: string, cols: number): number {
  *
  * Phase 4 USER basic: counts characters, ignores ANSI escape sequences for
  * visual-width computation (desc-bases don't usually carry ANSI after the
- * R5 + R4 substitutions). Phase 8 Bhavnesh polish handles ANSI-aware
+ * runtime substitution passes). A later UI polish phase handles ANSI-aware
  * width measurement when the styler body grows real ANSI mappings.
  *
  * Exported for unit testability.
@@ -898,12 +898,12 @@ function moveFocus(options: readonly SelectableItem[], current: number, delta: 1
  *
  * The interactive shell is intentionally thin: arrow-up / arrow-down
  * move focus (skipping isSeparator items); Enter resolves; Escape /
- * Ctrl+C resolves with null; Space dispatches to `onSpace` (Bhavnesh
+ * Ctrl+C resolves with null; Space dispatches to `onSpace` (UI-lane
  * Phase 6 D3 binding fills in the body); every other key is ignored.
  *
  * Re-renders the full layout to `out` after every state change. The
  * Phase 4 USER basic render writes each styled line followed by `\n`;
- * Bhavnesh Phase 8 polish adds the cursor-positioning + clear-screen
+ * A later UI polish phase adds the cursor-positioning + clear-screen
  * sequences and the auto-scroll edge cases.
  */
 export async function renderLoop(opts: RenderLoopRunOptions): Promise<SelectableItem | null> {

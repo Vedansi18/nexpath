@@ -4,7 +4,7 @@
  * `hostHoldCommitContractProven` (gate evidence flag 9) attests one host capability: the CLI Stop-hook
  * can HOLD the turn open until the sequence batch commits, and persist that commit SYNCHRONOUSLY before
  * it force-exits — never fire-and-forget. This is the CLI-owner half of the transport split (Q5:
- * "CLI Stop-hook = Bhavnesh"); the VS Code extension host is a separate surface, parked with Vedansi.
+ * "CLI Stop-hook = the CLI lane"); the VS Code extension host is a separate surface, parked with the extension-host lane.
  *
  * The proof is DERIVED, not asserted: it reads the real `promptEnhancementSequenceBatchExitActionV1`
  * contract. The host holds the commit exactly when a SEND awaits the batch before exit (so the wording

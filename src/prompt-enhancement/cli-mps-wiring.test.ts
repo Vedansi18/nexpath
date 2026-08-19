@@ -126,7 +126,7 @@ describe('MPS CLI wiring (owner ruling 2026-08-06: CLI complete, extension pendi
     expect(gate.renderPermission).toBe('mps_render_permitted');
   });
 
-  it('the DEFAULT (extension/global) surface stays fail-closed on the missing host evidence (Vedansi pending)', async () => {
+  it('the DEFAULT (extension/global) surface stays fail-closed on the missing host evidence (extension host pending)', async () => {
     const result = await preparePromptEnhancement(request(MULTI_INTENT));
     const evidence = buildPromptEnhancementCliMpsIntakeEvidenceV1(result);
     const gate = evaluatePromptEnhancementMpsIntakeDecisionV1({ evidence: [...evidence!] });

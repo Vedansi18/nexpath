@@ -627,7 +627,7 @@ async function attemptPlan(
     parsed.groups,
     parsed.items.map((item) => item.decompositionGroupId),
   );
-  // Phase 2 (Hiren 2026-08-15 — "grouping not respected is OK, but the sequence MUST generate";
+  // Phase 2 (owner ruling 2026-08-15 — "grouping not respected is OK, but the sequence MUST generate";
   // §5.5b record-not-block): two grouping outcomes are quality, not integrity, and must not block a
   // coherent plan from producing items. `grouping_stage_did_nothing` (one group per point → more
   // prompts than ideal) and `point_in_no_group` (a working-state point that landed in no group —

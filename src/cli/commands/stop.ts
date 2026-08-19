@@ -476,7 +476,7 @@ export async function runStop(
         // bottom of this function — otherwise the enhanced turn would re-trigger the PE popup).
         // NB: the typed origin guard (resolvePromptEnhancementPromptSubmitOrigin) is evidence-based
         // (generatedOriginId), which the CLI text-injection cannot carry — it becomes authoritative
-        // on the EXTENSION delivery path (Vedansi handoff). The CLI echo stays text-based here.
+        // on the EXTENSION delivery path (extension-host handoff). The CLI echo stays text-based here.
         SessionStateManager.load(store, payload.cwd).setInjectedPrompt(store, decision.text);
         logger.info('stop_prompt_enhancement_injected', { cwd: payload.cwd });
         return { outcome: 'blocked', reason: decision.text };

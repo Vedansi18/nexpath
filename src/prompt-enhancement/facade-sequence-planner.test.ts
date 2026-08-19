@@ -16,7 +16,7 @@ import {
 } from '../config/PromptEnhancementConfig.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MPS P1b-i (Hiren Unit P1) — the full sequence planner REPLACES the display-only
+// MPS P1b-i (owner unit P1) — the full sequence planner REPLACES the display-only
 // `describePromptEnhancementSequencePlanV1` as the source of truth for the compact
 // sequence summary's item count + role labels, feeding the already-optional
 // `summary` seam of `buildPromptEnhancementHandoffMetadataV1` (no contract change).

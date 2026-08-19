@@ -683,7 +683,7 @@ describe('sequence planner — the call', () => {
   });
 
   it('records, rather than blocks, a grouping that did nothing (Phase 2 — must still generate)', async () => {
-    // Hiren 2026-08-15: one-group-per-point (more prompts than ideal) is acceptable to ship, but the
+    // Owner ruling 2026-08-15: one-group-per-point (more prompts than ideal) is acceptable to ship, but the
     // sequence MUST still generate. The soft codes no longer reject an otherwise-coherent plan.
     const ungrouped = validReply({
       points: [point('p1', 0), point('p2', 10)],
