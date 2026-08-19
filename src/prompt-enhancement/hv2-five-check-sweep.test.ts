@@ -267,22 +267,61 @@ describe('HV-2 row 3 — env-tier-promotion: A1 landed, the tier now crosses typ
 // ─────────────────────────────────────────────────────────────────────────────
 // ROW 4 — env/env-trajectory.ts — measured absence, pinned both ways
 // ─────────────────────────────────────────────────────────────────────────────
-describe('HV-2 row 4 — env-trajectory: executes, and crosses NOTHING', () => {
-  it('runs on the auto path yet contributes no ref, no fact, no line', async () => {
-    const store = await openStore(':memory:');
-    const dir = tempProject();
+describe('HV-2 row 4 — env-trajectory: a confirmed movement crosses, and states itself in a body', () => {
+  // -- WHY THIS FIXTURE WAS REWRITTEN (round 6) ------------------------------------------------
+  // It previously asserted the module "crosses NOTHING" and claimed to be "pinned BOTH ways --
+  // fails if the gap closes". The gap closed (§17.11 was ruled WIRE IT and shipped) and it stayed
+  // GREEN. It could not have failed, for THREE independent reasons, and each is worth naming
+  // because each is a way a fixture can look like a guard without being one:
+  //
+  //   1. it opened `:memory:` -- `paramEventsPathFor` returns null there, so the module's change
+  //      events were never written and nothing downstream could ever see them;
+  //   2. it matched refs containing 'trajectory', and the crossing ref is `env_change:<key>` --
+  //      a substring guess about a name that had not been chosen yet;
+  //   3. it called `recordEnvTrajectory` ONCE, and a first probe is initialization by design --
+  //      no first observation is ever a movement, so no event existed to cross.
+  //
+  // So the row is now exercised the way §14.3 step 3 asks: "drives its module's output through the
+  // boundary into a body and pins the whole chain" -- on a disk store, through the flap damping,
+  // to a rendered line.
+  it('drives a flap-damped acquisition through the boundary into a rendered body line', async () => {
+    const dir = tempProject(false); // starts WITHOUT a test runner
+    const store = await openStore(join(dir, 'store.db'));
     upsertProject(store, { projectRoot: dir, name: 'x', projectType: 'app', language: 'ts', description: '', createdAt: Date.now() });
+    const session = { sessionId: 's', promptIndex: 0, stage: 'implementation' as const, stageConfidence: 0.9 };
 
-    recordEnvTrajectory(store, dir, { sessionId: 's', promptIndex: 0, stage: 'implementation', stageConfidence: 0.9 });
+    // Probe 1 seeds the baseline -- initialization, never a movement.
+    recordEnvTrajectory(store, dir, session);
+    expect(driveChain(store, dir).refs.rightGoodWorkStyleEnvRuntimeRefs.filter((r) => r.startsWith('env_change:')))
+      .toEqual([]);
 
-    const { refs, facts } = driveChain(store, dir);
-    expect(refs.sourceOnlyHardFactRefs, 'the trajectory probe started supplying PE — HV-3 must re-judge row 4').toEqual([]);
+    // The project acquires a test runner.
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'x', devDependencies: { vitest: '1.0.0' } }));
+
+    // Probe 2 sees it but does not trust it yet (S4 flap damping: stable across TWO probes).
+    recordEnvTrajectory(store, dir, session);
     expect(
-      facts.some((f) => f.sourceIds.some((id) => id.includes('trajectory'))),
-      'a trajectory-derived fact appeared — the gap closed; re-measure rather than relax this',
-    ).toBe(false);
-    // check-4, followed to the end rather than assumed from check-2.
-    expect(allRenderedLines(facts).join('\n')).not.toContain('trajectory');
+      driveChain(store, dir).refs.rightGoodWorkStyleEnvRuntimeRefs.filter((r) => r.startsWith('env_change:')),
+      'an unconfirmed movement reached PE -- flap damping is what keeps a host/devcontainer flip out of the prompt',
+    ).toEqual([]);
+
+    // Probe 3 confirms it.
+    const confirmed = recordEnvTrajectory(store, dir, session);
+    expect(confirmed.map((c) => `${c.key}:${c.direction}`)).toContain('has_test_runner:acquired');
+
+    // check-2 -- it crosses, and it crosses TYPED: the movement phrase, not a bare key.
+    const { refs, facts } = driveChain(store, dir);
+    expect(refs.rightGoodWorkStyleEnvRuntimeRefs).toContain('env_change:has_test_runner');
+    expect(refs.groundingEvidenceByRef?.['env_change:has_test_runner']?.value).toBe('was acquired');
+
+    // check-3 -- it becomes a fact carrying that content.
+    const fact = facts.find((f) => f.sourceIds[0] === 'env_change:has_test_runner');
+    expect(fact?.evidence?.value, 'the movement crossed but arrived contentless -- defect G9 on a new lane').toBe('was acquired');
+
+    // check-4 -- followed to the end, into a body a user reads.
+    const body = allRenderedLines(facts).join('\n');
+    expect(body, 'the movement never reached a body').toContain('was acquired');
+    expect(body).toContain('since the last session');
   });
 });
 
