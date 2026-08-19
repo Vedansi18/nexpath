@@ -1135,7 +1135,15 @@ export async function runAuto(
       blockedFailureCodes: blockedFailureCodesForLog(preparation),
       sequenceShapedFallback: true,
     });
-    if (!preparation.safeFallback && preparation.result) {
+    // Phase 4 (defense-in-depth): do NOT persist an unshowable pending. A display decision of `no_popup`
+    // (a `no_popup_not_applicable` disposition or a `no_popup` send policy — the shape a missing-key
+    // sequence fallback produces) would be loaded at Stop, spawn a window, and be declined by the child
+    // (the "blink"). The launcher's Phase 1 gate already blocks that spawn; skipping the row here removes
+    // it at the source. Same condition the UI boundary uses (ui-boundary.ts). The skip stays traceable:
+    // `prompt_enhancement_prepare_boundary` above logs the disposition, and no `..._stored` log follows.
+    const displayDecisionIsNoPopup = preparation.result?.disposition === 'no_popup_not_applicable'
+      || preparation.result?.uiView.body.sendPolicy === 'no_popup';
+    if (!preparation.safeFallback && preparation.result && !displayDecisionIsNoPopup) {
       upsertPendingPromptEnhancement(store, {
         projectRoot: input.projectRoot,
         sessionId:   mgr.current.sessionId,
@@ -1166,6 +1174,10 @@ export async function runAuto(
           reasonCodes: explainPromptEnhancementSequenceSummaryAbsenceV1(request, preparation.result).slice(0, 8),
         });
       }
+    }
+    // Phase 4: cost observability is measured for EVERY non-fallback prepare — the display-decision skip
+    // above only affects whether the row is STORED, never this telemetry (behaviour unchanged from before).
+    if (!preparation.safeFallback && preparation.result) {
       emitPromptEnhancementCostObservabilityV1(preparation.result, 'prepare', logger);
     }
   };
@@ -1365,7 +1377,14 @@ export async function runAuto(
   // Owner decision B-i (2026-08-04): the PE popup is deferred to the Stop hook. Do NOT show a
   // popup on UserPromptSubmit — the prompt passes through raw. When a real (non-fallback) result
   // exists, persist it so the Stop hook can show the PE popup after Claude responds.
-  if (!preparation.safeFallback && preparation.result) {
+  // Phase 4 (defense-in-depth): but NOT an unshowable one — a `no_popup` display decision
+  // (`no_popup_not_applicable` disposition or `no_popup` send policy) would spawn a window at Stop that
+  // the child declines (the "blink"). Phase 1's launcher gate already blocks the spawn; skipping the row
+  // here removes it at the source. Same condition the UI boundary uses; the skip stays traceable via the
+  // `prompt_enhancement_prepare_boundary` log above (no `..._stored` log follows).
+  const displayDecisionIsNoPopup = preparation.result?.disposition === 'no_popup_not_applicable'
+    || preparation.result?.uiView.body.sendPolicy === 'no_popup';
+  if (!preparation.safeFallback && preparation.result && !displayDecisionIsNoPopup) {
     upsertPendingPromptEnhancement(store, {
       projectRoot: input.projectRoot,
       sessionId:   mgr.current.sessionId,

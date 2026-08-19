@@ -12,6 +12,8 @@ import {
   validatePromptEnhancementPrepareResultV1,
 } from '../prompt-enhancement/contracts.js';
 import { validatePromptEnhancementCliPopupResultV1 } from '../prompt-enhancement/cli-submit-popup.js';
+import { buildPromptEnhancementPopupRenderModelV1 } from '../prompt-enhancement/popup-render-model.js';
+import { buildPromptEnhancementMpsContinuationPopupV1 } from '../prompt-enhancement/continuation-popup.js';
 import {
   computeDockedPopupGeometry,
   detectScreenResolution,
@@ -120,10 +122,16 @@ export type PromptEnhancementCliPopupHostLaunchResultV1 =
   | { state: 'not_applicable'; reasonCode: 'direct_tty' }
   | { state: 'host_unavailable'; reasonCode: 'unsupported_platform' | 'no_gui_session' | 'no_supported_terminal' }
   | { state: 'launch_failed'; reasonCode: 'terminal_spawn_failed' | 'terminal_exit_nonzero' | 'terminal_renderer_not_ready' }
-  // Blink fix (Phase 1): the payload failed the SAME validators the spawned child runs, so no window is
-  // opened — the launcher rejects it here instead of spawning a terminal that the child would exit from
-  // before rendering (an open-then-close "blink"). Callers treat it exactly like any non-`completed` result.
-  | { state: 'not_shown'; reasonCode: 'payload_invalid_pre_spawn'; validationReasonCodes: readonly string[] }
+  // Blink fix: the launcher rejects a payload here instead of spawning a terminal that the child would
+  // exit from before rendering (an open-then-close "blink"). Callers treat it exactly like any non-
+  // `completed` result. Two reasons:
+  //  - `payload_invalid_pre_spawn`      : failed the SAME validators the child runs (structural), or the
+  //                                       request/result identity cross-check the child also enforces.
+  //  - `render_decision_no_popup`       : structurally valid, but the SAME render decision the child makes
+  //                                       resolves to `no_popup` (e.g. a `no_popup_not_applicable`
+  //                                       disposition from a missing key) — the child would decline to
+  //                                       render, so no window is opened.
+  | { state: 'not_shown'; reasonCode: 'payload_invalid_pre_spawn' | 'render_decision_no_popup'; validationReasonCodes: readonly string[] }
   | { state: 'completed'; output: PromptEnhancementPopupHostOutputV1 };
 
 interface PromptEnhancementSpawnedTerminalV1 {
@@ -477,7 +485,11 @@ export function buildPromptEnhancementMacLauncherScriptV1(input: {
     '--readiness-file', quote(input.readinessFile),
     '--db', quote(input.dbPath),
   ].join(' ');
-  return ['#!/bin/sh', command, ''].join('\n');
+  // Clear the terminal (the same reset the popup itself uses) as the FIRST launcher step, so the login
+  // shell's greeting ("Last login…") and the echoed launch command are wiped BEFORE node renders the
+  // popup — otherwise they flash above the popup in the spawned Terminal.app window (live iMac report
+  // 2026-08-19). Uses a printf escape rather than `clear` so it does not depend on the clear binary.
+  return ['#!/bin/sh', "printf '\\033[2J\\033[3J\\033[H'", command, ''].join('\n');
 }
 
 /**
@@ -708,6 +720,39 @@ export async function runPromptEnhancementCliPopupHostLaunchV1(input: {
     };
   }
 
+  // Cross-field identity parity with the child's `validatedInput` (prompt-enhancement-popup-host.ts):
+  // request and result must describe the SAME enhancement. A mismatch is structurally valid on each
+  // side but makes the child exit as `input_invalid_or_stale` after the window opened — the same blink —
+  // so reject it here (same `payload_invalid_pre_spawn` bucket) before spawning.
+  if (input.request.requestId !== input.result.requestId
+      || input.request.projectRoot !== input.result.projectRoot) {
+    return {
+      state: 'not_shown',
+      reasonCode: 'payload_invalid_pre_spawn',
+      validationReasonCodes: ['request_result_identity_mismatch'],
+    };
+  }
+
+  // Display-decision pre-spawn gate (blink fix): run the SAME render decision the spawned child runs
+  // (`buildPromptEnhancementPopupRenderModelV1`, identical arguments) BEFORE opening a window. A
+  // structurally-valid but non-displayable payload — e.g. a `no_popup_not_applicable` disposition or a
+  // `no_popup` send policy from a missing key — would otherwise open a terminal the child immediately
+  // declines (`no_popup`) before rendering: the open-then-close "blink". Deciding it here yields the SAME
+  // not-shown outcome with no wasted window. It is pure parity with the child, so it never suppresses a
+  // popup the child would have shown, nor spawns one it would have declined.
+  const renderDecision = buildPromptEnhancementPopupRenderModelV1({
+    result: input.result,
+    timestampMs: Date.now(),
+    deliverySurface: input.result.delivery.deliveryChannel,
+  });
+  if (renderDecision.state === 'no_popup') {
+    return {
+      state: 'not_shown',
+      reasonCode: 'render_decision_no_popup',
+      validationReasonCodes: renderDecision.reasonCodes,
+    };
+  }
+
   const dependencies = { ...defaultLaunchDependencies(), ...overrides };
   const tempDir = dependencies.makeTempDir();
   const inputFile = join(tempDir, 'input.json');
@@ -836,10 +881,14 @@ export type PromptEnhancementCliMpsContinuationHostLaunchResultV1 =
   | { state: 'not_applicable'; reasonCode: 'direct_tty' }
   | { state: 'host_unavailable'; reasonCode: 'unsupported_platform' | 'no_gui_session' | 'no_supported_terminal' }
   | { state: 'launch_failed'; reasonCode: 'terminal_spawn_failed' | 'terminal_exit_nonzero' | 'terminal_renderer_not_ready' }
-  // Blink fix (Phase 2): the continuation payload is structurally broken (a field the child dereferences
-  // is absent), so no window is opened. Callers treat it exactly like any non-`completed` result — the
-  // reasonCode flows into the existing continuation not-shown mapping.
-  | { state: 'not_shown'; reasonCode: 'payload_invalid_pre_spawn'; validationReasonCodes: readonly string[] }
+  // Blink fix: the launcher rejects a continuation here instead of spawning a window the child would open
+  // then close. Callers treat it exactly like any non-`completed` result — the reasonCode flows into the
+  // existing continuation not-shown mapping. Two reasons:
+  //  - `payload_invalid_pre_spawn`  : structurally broken (a field the child dereferences is absent).
+  //  - `render_decision_no_popup`   : structurally present, but the SAME render decision the child's runner
+  //                                   makes resolves to non-`ready` (`no_popup`) — the child would render
+  //                                   nothing, so no window is opened.
+  | { state: 'not_shown'; reasonCode: 'payload_invalid_pre_spawn' | 'render_decision_no_popup'; validationReasonCodes: readonly string[] }
   | { state: 'completed'; output: PromptEnhancementMpsContinuationHostOutputV1 };
 
 export interface PromptEnhancementCliMpsContinuationHostLaunchDependenciesV1 {
@@ -908,6 +957,32 @@ export async function runPromptEnhancementCliMpsContinuationHostLaunchV1(input: 
   }
   if (missing.length > 0) {
     return { state: 'not_shown', reasonCode: 'payload_invalid_pre_spawn', validationReasonCodes: missing };
+  }
+
+  // Display-decision pre-spawn gate (blink fix): the continuation child marks itself ready BEFORE it
+  // renders, so a non-displayable continuation does not surface as `terminal_renderer_not_ready` — but the
+  // window still visually opens then closes (a blink). Run the SAME render decision the child's runner runs
+  // (`buildPromptEnhancementMpsContinuationPopupV1` with the runner's fixed `additionalDetails` / `cancel`
+  // inputs — see cli-mps-continuation-run.ts) BEFORE spawning. That function applies the kind-aware
+  // confirmation substitution internally, so a valid CONFIRMATION item (empty original slice) is NOT
+  // wrongly rejected — this is deliberately not a raw validation. If it would not render (non-`ready`),
+  // open no window. A throw means the child (which wraps the same build) would resolve to not-shown too,
+  // so it is treated the same — never a spawned window.
+  try {
+    const continuationRender = buildPromptEnhancementMpsContinuationPopupV1({
+      result: input.continuation.result,
+      handoffMetadata: input.continuation.handoffMetadata,
+      event: input.continuation.event,
+      progress: input.continuation.progress,
+      itemKind: input.continuation.itemKind,
+      additionalDetails: { text: '', revision: 0 },
+      cancel: { state: 'available', disposition: 'blocked_no_send' },
+    });
+    if (continuationRender.state !== 'ready') {
+      return { state: 'not_shown', reasonCode: 'render_decision_no_popup', validationReasonCodes: continuationRender.reasonCodes };
+    }
+  } catch {
+    return { state: 'not_shown', reasonCode: 'render_decision_no_popup', validationReasonCodes: ['continuation_render_threw'] };
   }
 
   const dependencies = { ...defaultContinuationLaunchDependencies(), ...overrides };
