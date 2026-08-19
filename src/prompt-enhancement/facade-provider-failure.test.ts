@@ -204,7 +204,7 @@ describe('TI-2: facade maps composer failure reasons onto the existing runtime s
   // `deadline_exceeded` is new: the surrounding budget ran out BETWEEN attempts,
   // rather than one call exceeding its own limit. Kept distinct in the composer
   // for logs, mapped onto the existing timeout state here, because to a user the
-  // two are the same event and PE-G4 forbids a new failure state machine.
+  // two are the same event and the provider-failure contract forbids a new failure state machine.
   // ---------------------------------------------------------------------------
   describe('states that used to be silent', () => {
     beforeEach(() => { process.env['OPENAI_API_KEY'] = `sk-${'x'.repeat(40)}`; });

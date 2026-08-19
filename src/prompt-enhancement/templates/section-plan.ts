@@ -139,7 +139,7 @@ export type PromptEnhancementSourceRuntimePathV1 =
 /**
  * L4970's gate, as a predicate: which runtime paths may drive RENDERED guidance.
  * `unknown` is the hidden-path case the lock names; everything else is a declared local or runtime
- * seam that PE-EM-1 can account for.
+ * seam that call-visibility can account for.
  */
 export function isPromptEnhancementRenderableRuntimePathV1(
   path: PromptEnhancementSourceRuntimePathV1 | undefined,
@@ -353,7 +353,7 @@ export interface PromptEnhancementGuidanceFact {
    * not-independently-eligible rather than defaulting it to eligible.
    */
   /**
-   * A6 / L4979: estimated relative token/input/source payload weight, for PE-EM-1 call/token
+   * A6 / L4979: estimated relative token/input/source payload weight, for call-visibility call/token
    * visibility and fact caps. ⛔ Local planning/cap metadata ONLY — never user-facing, and never
    * product-cost control (the lock's own gate, plus prohibition 9).
    */

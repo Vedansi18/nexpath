@@ -134,7 +134,7 @@ function absenceSignalFactV1(
     priority: 'required_survivor',
     renderPolicy: 'render_as_section',
     riskLevel: isSensitiveSource ? 'sensitive_authority_risky' : 'low',
-    safetyHooks: isSensitiveSource ? ['pe_ar9_sensitive_source'] : [],
+    safetyHooks: isSensitiveSource ? ['safety_sensitive_source'] : [],
     privacyClass: isSensitiveSource ? 'requires_confirmation' : 'public_safe',
     sanitizationState: 'not_applicable',
     requiredBecause: 'source_signal_guidance_shown_in_popup',
@@ -228,7 +228,7 @@ export function buildPromptEnhancementGuidanceFactsV1(
       sourceType: 'persistent_missing_signal_memory',
       sourceIds: [ref],
       guidanceKind: 'missing_practice',
-      // F4 done-when: PE-AR-6 memory: the candidate list is already gated upstream (E3)
+      // F4 done-when: the source rule memory: the candidate list is already gated upstream (E3)
       sourceEligibilityState: 'memory_eligible',
       suggestedActionKind: 'no_action_render_context_only',
       targetFamily: 'family_agnostic',
@@ -279,7 +279,7 @@ export function buildPromptEnhancementGuidanceFactsV1(
       priority: 'normal',
       renderPolicy: isFalseCapability ? 'metadata_only' : 'render_as_section',
       riskLevel: 'none',
-      safetyHooks: isFalseCapability ? ['pe_ar9_negative_capability'] : [],
+      safetyHooks: isFalseCapability ? ['safety_negative_capability'] : [],
       privacyClass: 'local_private',
       sanitizationState: 'not_applicable',
       evidence: evidenceForGuidanceFact('local_private', 'not_applicable', resolved),
@@ -319,7 +319,7 @@ export function buildPromptEnhancementGuidanceFactsV1(
         priority: 'normal',
         renderPolicy: 'render_as_section',
         riskLevel: mistakeIsSensitive ? 'sensitive_authority_risky' : 'low',
-        safetyHooks: mistakeIsSensitive ? ['pe_ar9_sensitive_source'] : [],
+        safetyHooks: mistakeIsSensitive ? ['safety_sensitive_source'] : [],
         privacyClass: mistakePrivacy,
         sanitizationState: 'identity_only_event',
         evidence: evidenceForGuidanceFact(mistakePrivacy, 'identity_only_event', mistakeResolved),
@@ -378,7 +378,7 @@ export function buildPromptEnhancementGuidanceFactsV1(
 /**
  * A live-detector-confirmed FALSE capability becomes Source A material: when an
  * absence fact fired for one of the env key's corroborating signals, that absence
- * fact gains the env ref as a second source id plus the PE-AR-9 hook — the safety
+ * fact gains the env ref as a second source id plus the the sensitive-source rule hook — the safety
  * routing carries BOTH the detector's signal and the environment evidence. The
  * false-capability fact itself stays label-only metadata; without a live detector
  * it never becomes a Source A candidate on its own.
@@ -405,9 +405,9 @@ function pairNegativeCapabilitiesWithLiveDetectors(
     return {
       ...fact,
       sourceIds: [...fact.sourceIds, ...pairedEnvRefs],
-      safetyHooks: fact.safetyHooks.includes('pe_ar9_negative_capability')
+      safetyHooks: fact.safetyHooks.includes('safety_negative_capability')
         ? fact.safetyHooks
-        : [...fact.safetyHooks, 'pe_ar9_negative_capability'],
+        : [...fact.safetyHooks, 'safety_negative_capability'],
     };
   });
 }

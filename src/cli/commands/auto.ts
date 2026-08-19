@@ -175,7 +175,7 @@ export interface AutoHookPayload {
 }
 
 /**
- * Optional H1.1 integration seam. The request builder and semantic producer remain
+ * Optional integration seam. The request builder and semantic producer remain
  * outside runAuto; this boundary only validates the approved typed packet/result and
  * exposes a safe disposition to the application caller.
  */
@@ -193,7 +193,7 @@ export type AutoPromptEnhancementConsumerV1 = (
 ) => AutoPromptEnhancementConsumerDispositionV1 | void | Promise<AutoPromptEnhancementConsumerDispositionV1 | void>;
 
 /**
- * Build the approved H1.1 typed PE request from the values already produced by
+ * Build the approved typed PE request from the values already produced by
  * runAuto. This is an adapter only: it records existing classifier/session/source
  * facts and does not create new routing, delivery, or semantic authority.
  */
@@ -575,7 +575,7 @@ function blockedFailureCodesForLog(
 }
 
 /**
- * Validate the typed H1.1 request/result boundary without creating PE semantics.
+ * Validate the typed request/result boundary without creating PE semantics.
  * Invalid, thrown, or malformed producer output is reduced to the public-safe
  * no-popup disposition; it never mutates the submitted prompt or legacy DS state.
  */
@@ -1260,7 +1260,7 @@ export async function runAuto(
     effectiveFlagType = `absence:${selectedKey}`;
   }
   const firedKey = buildFiredKey(effectiveFlagType, prevStage, mgr.current.currentStage);
-  // ── 8.1. H1.1 typed PE preparation seam ────────────────────────────────────
+  // ── 8.1. typed PE preparation seam ────────────────────────────────────
   // Build and consume the approved PE packet by default. An injected integration
   // remains available for boundary tests, while the default path now exercises
   // the executable owner-spec facade without changing legacy DS or delivery authority.
@@ -1339,13 +1339,13 @@ export async function runAuto(
       });
     }
     // E9 (P12-G1/G2): measure cost off the result's REAL call-visibility (mode + planned/used
-    // counts come from the composer, not the hardcoded request placeholder), and run the PE-G4
+    // counts come from the composer, not the hardcoded request placeholder), and run the the provider-failure contract
     // "cost never weakens behavior" check. Observability-only — this never gates the popup. The
     // E8 popup-action calls are measured at their own surface via the popup costObservabilitySink.
     emitPromptEnhancementCostObservabilityV1(preparation.result, 'prepare', logger);
   }
 
-  // H1.3 keeps legacy Decision Session bookkeeping after preparation; PE preparation
+  // keeps legacy Decision Session bookkeeping after preparation; PE preparation
   // remains capture/classification-only and cannot gain DS authority.
   mgr.markDecisionSessionFired(store, firedKey);
 

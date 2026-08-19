@@ -7,7 +7,7 @@ import {
 /**
  * F3 (dev-plan §12.4 / L4980) — the per-guidance fatigue KEY.
  *
- * 🔒 L4980: *"Stable PE-AR-6/PE-AR-7 key for repeated guidance fatigue, without
+ * 🔒 L4980: *"Stable the source rule/the fatigue rule key for repeated guidance fatigue, without
  * raw prompt text. Fatigue fixtures fail on… safety/source-critical facts
  * learned away."*
  *

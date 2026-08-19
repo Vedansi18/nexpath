@@ -133,7 +133,7 @@ describe('F3 never-faded guard — safety and source-critical facts are NEVER fa
     ['sensitive authority risk', { riskLevel: 'sensitive_authority_risky' as const }],
     ['safety_or_confirmation guidance', { guidanceKind: 'safety_or_confirmation' as const }],
     ['a safety-confirmation role', { factRole: 'safety_confirmation_support' as const }],
-    ['a linked safety hook', { safetyHooks: ['pe_ar9_sensitive_source'] }],
+    ['a linked safety hook', { safetyHooks: ['safety_sensitive_source'] }],
   ])('%s is not fatigue-eligible', (_label, overrides) => {
     expect(isPromptEnhancementFatigueEligibleV1(fact(overrides))).toBe(false);
   });
@@ -181,7 +181,7 @@ describe('F3 never-faded guard — safety and source-critical facts are NEVER fa
 });
 
 describe('F3 fatigueKey survives the pipeline that carries it', () => {
-  // The key has NO consumer until PE-AR-6/PE-AR-7 land, which means nothing else
+  // The key has NO consumer until the source rule/the fatigue rule land, which means nothing else
   // in the suite would notice if a layer dropped it. These hops survive today
   // only because they SPREAD facts rather than rebuilding them field by field —
   // a refactor to field-by-field construction would silently produce keys that
