@@ -11,6 +11,12 @@ import {
 } from './cost-observability.js';
 import { isPromptEnhancementLanguageConsistentV1 } from './language-consistency.js';
 import {
+  promptEnhancementExpectedSignalNamesV1,
+  promptEnhancementDraftNamesItsSignalV1,
+  promptEnhancementSignalNameDirectiveV1,
+  PROMPT_ENHANCEMENT_SOURCE_SIGNAL_SECTION_KIND_V1,
+} from './source-signal-naming.js';
+import {
   isPromptEnhancementAuthorityConsistentV1,
   isPromptEnhancementAuthoritySelfReportV1,
 } from './authority-consistency.js';
@@ -424,6 +430,17 @@ export async function composeStructuredComposerOutputV1(
   // language mismatch the retry carries a stronger language directive (E5/5.3).
   let languageRetry = false;
   let authorityRetry = false;
+  // 🔒 The owner-sanctioned budget for the source-signal naming check: ONE extra call, spent at
+  // most once no matter how the loop turns. Tracked separately from the shared retry bound so a
+  // language or coverage retry can never consume it, and it can never consume theirs.
+  let signalNameRetry = false;
+  let signalNameRetrySpent = false;
+  const expectedSignalNames = promptEnhancementExpectedSignalNamesV1(input.planning);
+  const signalSectionIds = new Set(
+    input.planning.sectionPlans
+      .filter((plan) => plan.sectionKind === PROMPT_ENHANCEMENT_SOURCE_SIGNAL_SECTION_KIND_V1)
+      .map((plan) => plan.sectionId),
+  );
   let missingSectionIds: readonly string[] = [];
   const plannedSectionIds = sections.map((section) => section.sectionId);
   for (let attempt = 0; attempt <= PROMPT_ENHANCEMENT_COST_VALIDATION_RETRY_COUNT_V1; attempt++) {
@@ -444,6 +461,7 @@ export async function composeStructuredComposerOutputV1(
               content: userPrompt
                 + (languageRetry ? STRONGER_LANGUAGE_DIRECTIVE : '')
                 + (authorityRetry ? STRONGER_AUTHORITY_DIRECTIVE : '')
+                + (signalNameRetry ? promptEnhancementSignalNameDirectiveV1(expectedSignalNames) : '')
                 + coverageDirective(missingSectionIds),
             },
           ],
@@ -485,6 +503,37 @@ export async function composeStructuredComposerOutputV1(
     const draftedSectionIds = new Set(parsed.sectionDrafts.map((draft) => draft.sectionId));
     missingSectionIds = plannedSectionIds.filter((sectionId) => !draftedSectionIds.has(sectionId));
     if (missingSectionIds.length > 0) continue; // spends the existing bound; no new budget
+
+    // §17.13 last hop — did the source-signal section NAME its signal? Placed after coverage on
+    // purpose: a draft set that is short is not yet the draft that will ship, and judging its
+    // wording would spend the sanctioned call on text about to be rewritten anyway.
+    const signalDrafts = parsed.sectionDrafts.filter((draft) => signalSectionIds.has(draft.sectionId));
+    const unnamed = signalDrafts.filter(
+      (draft) => !promptEnhancementDraftNamesItsSignalV1(draft.bodyText, expectedSignalNames),
+    );
+    if (unnamed.length > 0 && !signalNameRetrySpent) {
+      // The ONE sanctioned extra call. Clear the other directives for the same reason the language
+      // branch does: they were computed from a reply this one replaces.
+      missingSectionIds = [];
+      signalNameRetry = true;
+      signalNameRetrySpent = true;
+      continue;
+    }
+    if (unnamed.length > 0) {
+      // ⛔ Retry spent and the name is still absent. DISCARD THE SECTION, not the popup (owner
+      // ruling): a source-signal paragraph that names no signal occupies a slot and tells the
+      // reader nothing they did not already know. Dropping the draft is all that is required —
+      // `compose-enhancement` renders only sections that HAVE one, so the section simply does not
+      // appear, and every other section ships untouched.
+      const discarded = new Set(unnamed.map((draft) => draft.sectionId));
+      return {
+        ok: true,
+        output: {
+          ...parsed,
+          sectionDrafts: parsed.sectionDrafts.filter((draft) => !discarded.has(draft.sectionId)),
+        },
+      };
+    }
     return { ok: true, output: parsed };
   }
   // Retries exhausted (malformed, persistent language mismatch, persistent authority drift, or a
