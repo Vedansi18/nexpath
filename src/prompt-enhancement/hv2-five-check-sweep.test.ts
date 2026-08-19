@@ -46,6 +46,7 @@ function tempProject(withRunner = true): string {
 /** The live chain: module output already seeded → real request builder → facts → rendered lines. */
 function driveChain(store: Store, dir: string): {
   refs: ReturnType<typeof buildPromptEnhancementRequestForAuto>['sourceSignals'];
+  request: ReturnType<typeof buildPromptEnhancementRequestForAuto>;
   facts: readonly PromptEnhancementGuidanceFact[];
   requestJson: string;
   linesFor: (sectionKind: string) => readonly string[];
@@ -76,6 +77,7 @@ function driveChain(store: Store, dir: string): {
   const facts = buildPromptEnhancementGuidanceFactsV1(request);
   return {
     refs: request.sourceSignals,
+    request,
     facts,
     requestJson: JSON.stringify(request),
     linesFor: (kind) => promptEnhancementFactValueLinesV1(kind, facts),
@@ -664,5 +666,84 @@ describe('HV-2 check-5 for check-1 — the liveness column must guard itself', (
       revived,
       'a test-only export gained a production caller — close that finding in §17.5b rather than relaxing this',
     ).toEqual([]);
+  });
+});
+
+// -----------------------------------------------------------------------------
+// §17.7 CARRIED INTO THE HV-3 VERDICT (§14.4 step 1)
+// -----------------------------------------------------------------------------
+describe('§17.7 carried - the render path asks the section-key question exactly ONE way', () => {
+  // §14.4 step 1 names TWO HV-2 records the verdict table must carry, and §17.7's own record ends
+  // "HV-3's verdict table assigns it". Owner assigned there: G (render), at its seam with A (payload).
+  //
+  // §17.7 is what every green check-4 in the verdict table rests on. Before it, a resolved value was
+  // planned into a section and then dropped by the renderer FOR THAT SAME SECTION. The behaviour is
+  // already pinned in the rows above (grounded values reach `project_grounding_facts`). What is
+  // pinned HERE is the STRUCTURE that behaviour rests on - prohibition 15, one map one meaning -
+  // because the defect was never a wrong value. It was one question answered two ways, and a
+  // behavioural pin on one section kind cannot see a second answer reappearing.
+  const RAW_READS = ['fact.targetSectionKind ' + '===', 'fact.targetSectionKind ' + '!=='];
+
+  function productionTs(): string[] {
+    const out: string[] = [];
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(dir)) {
+        const full = dir + '/' + entry;
+        if (statSync(full).isDirectory()) walk(full);
+        else if (entry.endsWith('.ts') && !entry.endsWith('.test.ts')) out.push(full);
+      }
+    };
+    walk('src');
+    return out;
+  }
+
+  it('all THREE readers in fact-value-render.ts go through the shared resolver, none reads the field raw', () => {
+    const src = readFileSync('src/prompt-enhancement/fact-value-render.ts', 'utf8');
+    const code = src.split('\n').filter((line) => {
+      const t = line.trimStart();
+      return !t.startsWith('//') && !t.startsWith('*') && !t.startsWith('/*');
+    });
+    expect(
+      code.filter((line) => RAW_READS.some((raw) => line.includes(raw))),
+      'a renderer reads the raw section key again - that IS §17.7, and the value it drops is silent',
+    ).toEqual([]);
+    // §17.7 measured THREE, not two: value lines, section model, and the grounded-values allow-list.
+    // Fixing two of three desyncs the allow-list from the body, which permits a value no body carried.
+    expect(
+      src.split('promptEnhancementSectionKindForFactV1(').length - 1,
+      'a reader stopped calling the shared resolver - one of the three is answering on its own again',
+    ).toBe(3);
+  });
+
+  it('and the one raw reader left in production is INERT - its only producer names the kind explicitly', async () => {
+    // Honest inventory rather than a claim of zero: the prose-copy lock in compose-enhancement still
+    // compares the raw field. It is inert TODAY because of a fact about its producers, not because of
+    // its own code - so the fact is asserted, not assumed.
+    const rawReaders = productionTs().filter((f) => {
+      const body = readFileSync(f, 'utf8');
+      return RAW_READS.some((raw) => body.includes(raw));
+    });
+    expect(
+      rawReaders,
+      'a new production reader compares the raw section key - §17.7 has a second site now',
+    ).toEqual(['src/prompt-enhancement/compose-enhancement.ts']);
+
+    // The lock filters two source types. Only `content_template_record` has a production producer,
+    // and it ships an explicit kind - so raw and resolved agree and nothing is skipped. The day that
+    // producer ships '' instead, the lock silently stops checking the prose it exists to check.
+    const store = await openStore(':memory:');
+    const dir = tempProject();
+    upsertProject(store, { projectRoot: dir, name: 'x', projectType: 'app', language: 'ts', description: '', createdAt: Date.now() });
+    const { request } = driveChain(store, dir);
+    const withTemplate = buildPromptEnhancementGuidanceFactsV1({
+      ...request,
+      sourceSignals: { ...request.sourceSignals, contentTemplateRecordFactRefs: ['content_template:debug_repro'] },
+    });
+    const templateFacts = withTemplate.filter((f) => f.sourceType === 'content_template_record');
+    expect(templateFacts.length, 'no content-template fact was built - the lock has nothing to guard').toBe(1);
+    expect(
+      templateFacts[0].targetSectionKind,
+      'the content-template producer stopped naming its section kind - the prose-copy lock now skips it',
+    ).toBe('source_signal_guidance');
   });
 });
