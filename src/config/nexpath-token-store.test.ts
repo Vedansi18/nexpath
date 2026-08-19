@@ -31,6 +31,7 @@ import {
   TOKEN_PREFIX,
   TOKEN_MIN_LENGTH,
 } from './NexpathTokenStore.js';
+import { API_KEY_REGEX, isValidApiKey } from './ApiKeyResolver.js';
 import * as keychain from 'cross-keychain';
 
 const VALID_TOKEN   = 'npk_' + 'a'.repeat(40);
@@ -70,6 +71,27 @@ describe('constants', () => {
 
   it('KEYCHAIN_SERVICE matches ApiKeyResolver\'s, so both plumb through the same keychain entry', () => {
     expect(KEYCHAIN_SERVICE).toBe('nexpath');
+  });
+});
+
+// ── FP-4.1's own closure condition, taken literally ─────────────────────────────
+// "a stored token ... is never matched against the OpenAI-key regex." Every
+// other test proves the token round-trips through its own path; none of them
+// prove the cross-cutting claim this closure condition actually makes — that
+// the two validators genuinely never overlap, in either direction (RISK-2).
+
+describe('the two credential formats never validate against each other (RISK-2)', () => {
+  it('a valid Nexpath token fails the OpenAI-key regex directly', () => {
+    const token = TOKEN_PREFIX + 'a'.repeat(TOKEN_MIN_LENGTH - TOKEN_PREFIX.length);
+    expect(isValidNexpathToken(token)).toBe(true);
+    expect(API_KEY_REGEX.test(token)).toBe(false);
+    expect(isValidApiKey(token)).toBe(false);
+  });
+
+  it('a valid OpenAI key fails isValidNexpathToken', () => {
+    const key = 'sk-abcdefghij1234567890ABCDEFGHIJ';
+    expect(isValidApiKey(key)).toBe(true);
+    expect(isValidNexpathToken(key)).toBe(false);
   });
 });
 
