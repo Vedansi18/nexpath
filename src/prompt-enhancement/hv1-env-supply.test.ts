@@ -5,6 +5,7 @@ import { probeProject } from '../env/env-probe.js';
 import { resolveModeBand, ACTIVE_AGENT_ID, AGENT_CAPABILITIES } from '../env/agent-capabilities.js';
 import { corroborationTierForEnvFact, ENV_FACT_CORROBORATOR } from '../env/env-tier-promotion.js';
 import { recordEnvTrajectory } from '../env/env-trajectory.js';
+import { appendParamEvent } from '../telemetry/param-events.js';
 import { buildPromptEnhancementGroundingRefsV1 } from '../cli/commands/auto.js';
 import { mkdtempSync, writeFileSync, readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -123,15 +124,17 @@ describe('HV-1 row 1 — check-1 is about RUNNING, not existing', () => {
   });
 });
 
-describe('HV-1 row 4 — the trajectory state is WRITE-ONLY, and its listed consumer is wrong', () => {
-  // Round 3 applied round 2's caller-check to rows 4 and 5. Row 5's listed consumers are genuinely
-  // live. Row 4's are not: §46.3c lists `trajectory-credit`, which imports nothing from
-  // env-trajectory — its only export takes ParamEvent[] and its one production caller is
-  // right-good-aggregator. So the module probes the project every session, writes its state, and
-  // NOTHING reads that state.
+describe('HV-1 row 4 — the trajectory STATE is write-only; the MODULE never was', () => {
+  // ⛔ CORRECTED (round 8). This block used to be titled "...and its listed consumer is wrong",
+  // asserting that §46.3c was mistaken to name `trajectory-credit`. §46.3c was RIGHT. The check
+  // below reads the IMPORT graph, and `trajectory-credit` consumes this module by matching the
+  // `env_fact_changed:` signalKey PREFIX on the param-event lane — a coupling no import check can
+  // see. Measured at round 5: a movement raises `test_creation` from 0.667 to 1.0.
   //
-  // Pinned because HV-3 will judge whether this is a defect or dead weight, and it should judge the
-  // state that actually shipped rather than a table entry that was never true.
+  // 🔑 The assertion itself is kept, because it is TRUE and it is the distinction the whole finding
+  // turned on: the module has TWO outputs, and only ONE of them is unread. The stored baseline is
+  // flap-damping bookkeeping — internal by design, and nobody outside should read it. Reading that
+  // narrow fact as "the module feeds nothing" is what nearly got a live feature deleted.
   it('no production module reads the env-trajectory state', () => {
     const readers = sourceFilesUnder('src')
       // Exclude the two modules that DEFINE the state: env-trajectory writes it, and
@@ -637,5 +640,42 @@ describe('§17.11 — row 4 was RULED (wire it), and the ruling rests on a corre
       auto.includes('recentEnvChangesV1'),
       'the movement grounding lane is gone — §17.11 was ruled WIRE IT; re-open the record, do not relax this',
     ).toBe(true);
+  });
+});
+
+describe('§17.10 — what is still missing is the VALUES, not the section (corrected round 8)', () => {
+  // §17.10 said an unseeded project has grounding that is "live, correct, and permanently empty".
+  // The §17.11 ruling made the second half false: the auto path probes every session, and since
+  // round 5 a confirmed movement crosses on its own lane and renders. The bug did not close --
+  // it NARROWED, and the difference matters to whoever picks it up. Filing "the section is
+  // always empty" against group A points at the wrong thing now.
+  //
+  // The two halves are pinned apart here so neither can be read as the other.
+  it('an unseeded project still yields NO probe VALUES, yet CAN yield a movement line', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hv1-split-'));
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'x' }));
+    const store = await openStore(join(dir, 'store.db'));
+    upsertProject(store, { projectRoot: dir, name: 'x', projectType: 'app', language: 'ts', description: '', createdAt: Date.now() });
+
+    // No `nexpath env` was ever run -- `setProjectEnvFacts` is untouched.
+    appendParamEvent(store, {
+      projectRoot: dir, sessionId: 's1', promptIndex: 0,
+      signalKey: 'env_fact_changed:has_ci_pipeline:acquired', channel: 'probe',
+      stage: 'implementation', stageConfidence: 0.9, source: 'live', ts: Date.now(),
+    });
+
+    const refs = buildPromptEnhancementGroundingRefsV1(store, dir, []);
+
+    // Half one -- STILL THE BUG. The probe's current values never reach PE without the manual command.
+    expect(
+      refs.sourceOnlyHardFactRefs,
+      'the auto path started supplying probe VALUES -- §17.10 is closed; re-judge row 1 rather than relaxing this',
+    ).toEqual([]);
+
+    // Half two -- NO LONGER TRUE of the section. A movement supplies grounding with no `nexpath env`.
+    expect(
+      refs.rightGoodWorkStyleEnvRuntimeRefs.filter((r) => r.startsWith('env_change:')),
+      'the movement lane stopped supplying an unseeded project -- §17.10 would be back to "permanently empty"',
+    ).toEqual(['env_change:has_ci_pipeline']);
   });
 });
