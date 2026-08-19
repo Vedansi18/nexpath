@@ -144,6 +144,24 @@ describe('fail-closed, and the one thing that is never gated', () => {
     expect(groundingLines).toEqual([]);
   });
 
+  it('a FALSE capability is NEVER gated — it is safety material, not grounding', async () => {
+    // 🔒 Prohibition 17: safety is never faded, and relevance is not an exception. A temp project
+    // has no backups and no CI, and those FALSE facts carry `safety_negative_capability`. The
+    // prompt below names none of it — which is exactly the prompt an applicability judgement calls
+    // irrelevant, and exactly the prompt where "this project has no backups" earns its place.
+    const { facts } = await factsFor('drop the legacy accounts table and rebuild it', []);
+    const negatives = facts.filter((f) => (f.safetyHooks ?? []).includes('safety_negative_capability'));
+
+    expect(negatives.length, 'no false capability was produced — this fixture is not exercising the carve-out').toBeGreaterThan(0);
+    for (const fact of negatives) {
+      expect(
+        fact.selectionState,
+        `${fact.sourceIds[0]} was suppressed by relevance — the gate is fading a safety fact`,
+      ).not.toBe('suppressed_by_relevance');
+      expect(fact.priority).not.toBe('suppressed');
+    }
+  });
+
   it('a suppressed fact still says WHY it was dropped', async () => {
     const { facts } = await factsFor('rename the variable userId to accountId', []);
     const dropped = facts.filter((f) => f.selectionState === 'suppressed_by_relevance');
