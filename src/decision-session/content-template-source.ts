@@ -3,8 +3,8 @@
  * resolver. Bridges a signalType to a source-cascade `RecordCandidateLookup` that the
  * content-template engine (`resolveRecord` / `composeAdvisory`) walks.
  *
- * Only the `shipped` tier is populated today (the 142 shipped preset records — the 136 canonical
- * class-1..9 signals + the 6 newer registered signals). The
+ * Only the `shipped` tier is populated today (144 shipped preset records — the
+ * executable count; the pre-build gate over the registry is the authority). The
  * `uploaded` / `autogen` / `default` tiers return undefined — per-user and
  * closest-default records are later phases (upload / auto-gen). When no shipped
  * record exists for a signalType, every tier is undefined → the engine resolves

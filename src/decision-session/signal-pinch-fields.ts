@@ -3,7 +3,7 @@
  *
  * The migrated content-template engine serves the OPTIONS/why-desc, but the popup's question
  * header and its pinch-label fallback are short register-keyed strings. This map is the single
- * source for them across all 142 signals — migrated verbatim from the retired static
+ * source for them across all 144 signals — migrated verbatim from the retired static
  * DecisionContent (formal/casual/beginner), so the static layer can be deleted (B11 sub-step iv).
  *
  * Per-register: `base` is the anchor register's phrasing; `casual`/`beginner` are stored ONLY where

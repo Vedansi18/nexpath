@@ -134,7 +134,9 @@ describe('prompt-enhancement composer and deterministic fallback', () => {
     const result = composePromptEnhancementBody({
       enhancementId: 'enh-phase5-artifact-metadata',
       originalPromptText: 'Fix the importCsv parser and verify the regression.',
-      sectionPlanningResult: planningResult(),
+      // A resolved route: the metadata this test pins is the resolved-path
+      // shape (the under-evidenced path adds the gate-reason why-help ref).
+      sectionPlanningResult: planningResult({ route: { promptText: 'Fix this failing test: the importCsv parser regression.' } }),
     });
 
     expect(result.currentBody.composerRunId).toBe('enh-phase5-artifact-metadata:composer:default:1');
@@ -1428,5 +1430,84 @@ describe('discarding every ordinary section still yields a usable result', () =>
     // The carve-out's whole purpose: a validation fault must not silently drop a safety clause.
     const result = allDraftsRefused('Delete the archived customer rows in production and run the migration.');
     expect(result.currentBody.text).toContain('you must ask me for go-ahead confirmation');
+  });
+});
+
+describe('de-nagging: the reproduction section names what was supplied instead of asking again', () => {
+  const debugRoute = (evidence: readonly string[]) => ({
+    route: {
+      promptText: 'the checkout page throws a null error after login. bug.',
+      currentStage: 'implementation' as const,
+      firedKey: 'absence:debugging_observation_gap@implementation',
+      classifierPrimaryIntent: 'issue_debug.failing_test',
+      classifierIntentConfidence: 0.9,
+      classifierCapabilityCandidates: [],
+      classifierDebugEvidencePresent: evidence,
+    },
+  });
+  const reproText = (evidence: readonly string[]) => {
+    const planning = planningResult(debugRoute(evidence));
+    const body = composePromptEnhancementBody({
+      enhancementId: 'denag',
+      originalPromptText: 'the checkout page throws a null error after login. bug.',
+      sectionPlanningResult: planning,
+    }).currentBody;
+    return body.sections.find((section) => section.sectionKind === 'reproduction_or_evidence')?.bodyText ?? '';
+  };
+
+  it('the ASK survives supplied evidence when the SLOT still obliges it', () => {
+    // The rule that decides which rows de-nag, pinned. `issue_debug.reproduction_discovery`
+    // is the intent whose whole purpose is finding a repro, and F1 puts
+    // `reproduction_or_evidence_request` on its section — so the ask stays even with
+    // evidence in hand, while intents without the obligation carry instead. Measured on
+    // the labelled set at GR-3: ids 6 and 35 carried, id 1 (this intent) kept asking.
+    const planning = planningResult({
+      route: {
+        promptText: 'help me work out how to reproduce the intermittent checkout failure',
+        currentStage: 'implementation' as const,
+        firedKey: 'absence:debugging_observation_gap@implementation',
+        classifierPrimaryIntent: 'issue_debug.reproduction_discovery',
+        classifierIntentConfidence: 0.9,
+        classifierCapabilityCandidates: [],
+        classifierDebugEvidencePresent: ['error_text', 'repro_steps'],
+      },
+    });
+    const section = planning.sectionPlans.find((plan) => plan.sectionKind === 'reproduction_or_evidence');
+    expect(section?.slotObligations).toContain('reproduction_or_evidence_request');
+    const body = composePromptEnhancementBody({
+      enhancementId: 'denag-obliged',
+      originalPromptText: 'help me work out how to reproduce the intermittent checkout failure',
+      sectionPlanningResult: planning,
+    }).currentBody;
+    const text = body.sections.find((composed) => composed.sectionKind === 'reproduction_or_evidence')?.bodyText ?? '';
+    expect(text).toContain('Capture the failing');
+    expect(text).not.toContain('provided in the request above');
+  });
+
+  it('carry: the line names the forms the developer ACTUALLY sent', () => {
+    expect(reproText(['reproduction_steps', 'logs', 'failing_test_details']))
+      .toContain('Reproduction steps, logs and failing test details are provided in the request above.');
+  });
+
+  it('carry: a different evidence mix names THOSE forms, never a fixed list', () => {
+    const text = reproText(['screenshots', 'metrics']);
+    expect(text).toContain('Screenshots and metrics are provided in the request above.');
+    // The bug this guards: a hardcoded sentence would claim a failing test the
+    // developer never mentioned.
+    expect(text).not.toContain('failing test');
+  });
+
+  it('carry: an id with no label override still reads as English', () => {
+    expect(reproText(['request_response_samples', 'environment']))
+      .toContain('Request/response samples and environment are provided in the request above.');
+  });
+
+  it('ask: with nothing supplied the section still asks, unchanged', () => {
+    expect(reproText([]))
+      .toContain('Capture the failing behavior, reproduction path, observed evidence, and expected behavior before changing code.');
+  });
+
+  it('carry never re-asks for what was already supplied', () => {
+    expect(reproText(['reproduction_steps', 'logs'])).not.toContain('Capture the failing behavior');
   });
 });

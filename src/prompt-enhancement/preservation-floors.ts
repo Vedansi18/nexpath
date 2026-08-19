@@ -214,6 +214,65 @@ function sensitiveActionVerbMoodViolation(
 }
 
 /**
+ * The NO-INVENTION check — the floors' comparison machinery pointed the other
+ * way. The floors ask "the user put this in their prompt, is it still there?";
+ * this asks "the section names this, did ANYONE supply it?". It reuses the
+ * item-floor extractors (commands, paths, module/API names, branches, issue
+ * ids, error names, test names, urls) over the SECTION text and adds two
+ * product-name shapes the floors never needed (leading-cap camel case like
+ * RabbitMQ; 3+-letter all-caps like SQS, with a stoplist of generic formatting
+ * and protocol words). An item found in the section but present in NONE of the
+ * allowed texts (the user's prompt, plus whatever fact evidence the caller
+ * supplies) is a fabrication violation.
+ */
+const INVENTION_ITEM_FLOOR_IDS: ReadonlySet<PromptEnhancementPreservationFloorIdV1> = new Set([
+  'commands', 'file_paths', 'module_api_names', 'branch_names', 'issue_ids', 'error_names', 'test_names', 'urls',
+]);
+const PRODUCT_NAME_PATTERNS: readonly RegExp[] = [
+  /\b[A-Z][a-z0-9]+[A-Z][a-zA-Z0-9]*\b/g,
+  /\b[A-Z]{3,}\b/g,
+];
+const GENERIC_UPPER_TOKENS: ReadonlySet<string> = new Set([
+  'API', 'JSON', 'CSV', 'URL', 'URLS', 'HTTP', 'HTTPS', 'SQL', 'TODO', 'NOTE', 'IMPORTANT',
+  'README', 'GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HTML', 'CSS', 'YAML', 'XML', 'IDE',
+  'CLI', 'PDF', 'UUID', 'JWT', 'CORS', 'CRUD', 'REST', 'NOT', 'AND', 'THE', 'FOR', 'ALL',
+]);
+
+export interface PromptEnhancementInventionViolationV1 {
+  item: string;
+  hardFailReason: string;
+}
+
+export function findPromptEnhancementInventionViolationsV1(input: {
+  sectionText: string;
+  allowedTexts: readonly string[];
+}): readonly PromptEnhancementInventionViolationV1[] {
+  const allowedLower = input.allowedTexts.join('\n').toLowerCase();
+  const violations: PromptEnhancementInventionViolationV1[] = [];
+  const reported = new Set<string>();
+  const report = (item: string): void => {
+    const key = item.toLowerCase();
+    if (reported.has(key) || allowedLower.includes(key)) return;
+    reported.add(key);
+    violations.push({
+      item,
+      hardFailReason: 'Section under the no-invention state names a tool, file, API or project fact that is in neither the prompt nor a source fact.',
+    });
+  };
+  for (const matcher of FLOOR_MATCHERS) {
+    if (!INVENTION_ITEM_FLOOR_IDS.has(matcher.floorId)) continue;
+    for (const item of matcher.extract(input.sectionText)) report(item);
+  }
+  for (const pattern of PRODUCT_NAME_PATTERNS) {
+    for (const item of allMatches(input.sectionText, pattern)) {
+      if (GENERIC_UPPER_TOKENS.has(item)) continue;
+      report(item);
+    }
+  }
+  return violations;
+}
+
+/**
  * Check every floor against a composed body.
  *
  * Returns one violation per lost item, each naming its floor. An empty result means every

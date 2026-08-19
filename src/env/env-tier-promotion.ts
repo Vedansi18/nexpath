@@ -11,8 +11,33 @@
  * the RIGHT&GOOD state; the transcript sets its verification — the two compose.
  */
 
-import type { FactMap } from './types.js';
-import type { RightGoodProfile } from '../classifier/right-good-aggregator.js';
+import type { EnvFact, FactMap } from './types.js';
+import type { RightGoodProfile, RightGoodSignal } from '../classifier/right-good-aggregator.js';
+
+/**
+ * Corroboration tier of a grounding fact as it crosses into prompt enhancement.
+ * This is what claim wording may later be computed FROM: practice-grade wording
+ * needs `promoted_practice_P`; a true-but-uncorroborated capability grounds
+ * capability wording only; anything else (false, null, unverified) is
+ * `uncorroborated` and can never ground a confident claim.
+ */
+export type GroundingCorroborationTier = 'promoted_practice_P' | 'capability' | 'uncorroborated';
+
+/** Tier of a (possibly promoted) env fact as grounding input. */
+export function corroborationTierForEnvFact(fact: EnvFact): GroundingCorroborationTier {
+  if (fact.tier === 'P') return 'promoted_practice_P';
+  return fact.value === true ? 'capability' : 'uncorroborated';
+}
+
+/**
+ * Tier of a RIGHT&GOOD signal as grounding input: practice-grade only when the
+ * behaviour is verified (transcript evidence), never from claimed-in-prompt state.
+ */
+export function corroborationTierForRightGood(signal: RightGoodSignal): GroundingCorroborationTier {
+  return signal.state === 'right_good' && signal.behaviourVerified
+    ? 'promoted_practice_P'
+    : 'uncorroborated';
+}
 
 /** Env capability fact → the behavioural signals whose verified RIGHT&GOOD state corroborates the practice. */
 export const ENV_FACT_CORROBORATOR: Readonly<Record<string, readonly string[]>> = {

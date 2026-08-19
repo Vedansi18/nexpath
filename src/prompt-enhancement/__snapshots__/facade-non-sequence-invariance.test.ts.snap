@@ -117,6 +117,7 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
         "sectionPlanId": "pe:facade-nonseq-a-plain-impl:route:section-plan:1:original_request_or_goal",
         "sensitivityFlags": [],
         "slotEvidenceStatus": "present",
+        "slotObligations": [],
         "sourceEvidenceStatus": "present",
         "sourceIds": [
           "prompt:1",
@@ -174,6 +175,7 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
         "sectionPlanId": "pe:facade-nonseq-a-plain-impl:route:section-plan:2:context_and_constraints",
         "sensitivityFlags": [],
         "slotEvidenceStatus": "present",
+        "slotObligations": [],
         "sourceEvidenceStatus": "present",
         "sourceIds": [
           "prompt:1",
@@ -231,6 +233,7 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
         "sectionPlanId": "pe:facade-nonseq-a-plain-impl:route:section-plan:3:approach_or_steps",
         "sensitivityFlags": [],
         "slotEvidenceStatus": "present",
+        "slotObligations": [],
         "sourceEvidenceStatus": "present",
         "sourceIds": [
           "prompt:1",
@@ -288,6 +291,7 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
         "sectionPlanId": "pe:facade-nonseq-a-plain-impl:route:section-plan:4:acceptance_or_output_expectation",
         "sensitivityFlags": [],
         "slotEvidenceStatus": "present",
+        "slotObligations": [],
         "sourceEvidenceStatus": "present",
         "sourceIds": [
           "prompt:1",
@@ -345,6 +349,9 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
         "sectionPlanId": "pe:facade-nonseq-a-plain-impl:route:section-plan:5:verification_or_test_plan",
         "sensitivityFlags": [],
         "slotEvidenceStatus": "present",
+        "slotObligations": [
+          "family_specific_verification",
+        ],
         "sourceEvidenceStatus": "present",
         "sourceIds": [
           "prompt:1",
@@ -402,6 +409,11 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
         "sectionPlanId": "pe:facade-nonseq-a-plain-impl:route:section-plan:6:project_grounding_facts",
         "sensitivityFlags": [],
         "slotEvidenceStatus": "present",
+        "slotObligations": [
+          "project_source_fact_slots",
+          "known_unknown_wording",
+          "source_ids_evidence_state",
+        ],
         "sourceEvidenceStatus": "present",
         "sourceIds": [
           "prompt:1",
@@ -459,6 +471,11 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
         "sectionPlanId": "pe:facade-nonseq-a-plain-impl:route:section-plan:7:source_signal_guidance",
         "sensitivityFlags": [],
         "slotEvidenceStatus": "present",
+        "slotObligations": [
+          "baseline_source_signal",
+          "source_kind_id_evidence_metadata",
+          "public_safe_why_help_support",
+        ],
         "sourceEvidenceStatus": "present",
         "sourceIds": [
           "prompt:1",
@@ -526,6 +543,13 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
     "providerFailureState": "none",
     "regionalDataResidencyAssumption": "no_regional_or_data_residency_uplift_selected",
     "retryCount": undefined,
+    "runtimeSeamSummary": {
+      "runtimePaths": [
+        "unstamped",
+      ],
+      "totalPayloadWeight": 10,
+      "unknownRuntimePathCount": 0,
+    },
     "telemetrySafeMeasurementFields": [
       "call_id",
       "owner",
@@ -828,6 +852,7 @@ Source Signal Guidance:
         "fallbackBehavior": "none",
         "familyId": "feature_delivery",
         "feedbackSensitivity": "protected",
+        "groundedFactValues": [],
         "handoffCapabilityFlags": [
           "no_runtime_sequence_v1",
         ],
@@ -865,6 +890,7 @@ Source Signal Guidance:
         "sectionKind": "original_request_or_goal",
         "sensitivityFlags": [],
         "slotEvidenceStatus": "present",
+        "slotObligations": [],
         "sourceEvidenceStatus": "present",
         "sourceFactIds": [
           "section_kind:original_request_or_goal",
@@ -921,6 +947,7 @@ Source Signal Guidance:
         "fallbackBehavior": "none",
         "familyId": "feature_delivery",
         "feedbackSensitivity": "protected",
+        "groundedFactValues": [],
         "handoffCapabilityFlags": [
           "no_runtime_sequence_v1",
         ],
@@ -959,6 +986,7 @@ Source Signal Guidance:
         "sectionKind": "context_and_constraints",
         "sensitivityFlags": [],
         "slotEvidenceStatus": "present",
+        "slotObligations": [],
         "sourceEvidenceStatus": "present",
         "sourceFactIds": [
           "section_kind:context_and_constraints",
@@ -1015,6 +1043,7 @@ Source Signal Guidance:
         "fallbackBehavior": "none",
         "familyId": "feature_delivery",
         "feedbackSensitivity": "protected",
+        "groundedFactValues": [],
         "handoffCapabilityFlags": [
           "no_runtime_sequence_v1",
         ],
@@ -1053,6 +1082,7 @@ Source Signal Guidance:
         "sectionKind": "approach_or_steps",
         "sensitivityFlags": [],
         "slotEvidenceStatus": "present",
+        "slotObligations": [],
         "sourceEvidenceStatus": "present",
         "sourceFactIds": [
           "section_kind:approach_or_steps",
@@ -1109,6 +1139,7 @@ Source Signal Guidance:
         "fallbackBehavior": "none",
         "familyId": "feature_delivery",
         "feedbackSensitivity": "protected",
+        "groundedFactValues": [],
         "handoffCapabilityFlags": [
           "no_runtime_sequence_v1",
         ],
@@ -1147,6 +1178,7 @@ Source Signal Guidance:
         "sectionKind": "acceptance_or_output_expectation",
         "sensitivityFlags": [],
         "slotEvidenceStatus": "present",
+        "slotObligations": [],
         "sourceEvidenceStatus": "present",
         "sourceFactIds": [
           "section_kind:acceptance_or_output_expectation",
@@ -1203,6 +1235,7 @@ Source Signal Guidance:
         "fallbackBehavior": "none",
         "familyId": "feature_delivery",
         "feedbackSensitivity": "protected",
+        "groundedFactValues": [],
         "handoffCapabilityFlags": [
           "no_runtime_sequence_v1",
         ],
@@ -1241,6 +1274,9 @@ Source Signal Guidance:
         "sectionKind": "verification_or_test_plan",
         "sensitivityFlags": [],
         "slotEvidenceStatus": "present",
+        "slotObligations": [
+          "family_specific_verification",
+        ],
         "sourceEvidenceStatus": "present",
         "sourceFactIds": [
           "section_kind:verification_or_test_plan",
@@ -1297,6 +1333,7 @@ Source Signal Guidance:
         "fallbackBehavior": "none",
         "familyId": "feature_delivery",
         "feedbackSensitivity": "protected",
+        "groundedFactValues": [],
         "handoffCapabilityFlags": [
           "no_runtime_sequence_v1",
         ],
@@ -1335,6 +1372,11 @@ Source Signal Guidance:
         "sectionKind": "project_grounding_facts",
         "sensitivityFlags": [],
         "slotEvidenceStatus": "present",
+        "slotObligations": [
+          "project_source_fact_slots",
+          "known_unknown_wording",
+          "source_ids_evidence_state",
+        ],
         "sourceEvidenceStatus": "present",
         "sourceFactIds": [
           "section_kind:project_grounding_facts",
@@ -1391,6 +1433,7 @@ Source Signal Guidance:
         "fallbackBehavior": "none",
         "familyId": "feature_delivery",
         "feedbackSensitivity": "protected",
+        "groundedFactValues": [],
         "handoffCapabilityFlags": [
           "no_runtime_sequence_v1",
         ],
@@ -1429,6 +1472,11 @@ Source Signal Guidance:
         "sectionKind": "source_signal_guidance",
         "sensitivityFlags": [],
         "slotEvidenceStatus": "present",
+        "slotObligations": [
+          "baseline_source_signal",
+          "source_kind_id_evidence_metadata",
+          "public_safe_why_help_support",
+        ],
         "sourceEvidenceStatus": "present",
         "sourceFactIds": [
           "guidance_fact:pe-fact-stage-0",
@@ -1585,6 +1633,7 @@ Source Signal Guidance:
       "capability.source_signal_guidance",
     ],
     "compoundPromptState": "single_intent",
+    "debugEvidenceObserved": [],
     "fallbackMode": "none",
     "familyId": "feature_delivery",
     "llmRoutePolicy": {
@@ -2613,22 +2662,22 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
     "exposesPrecomputedVariants": false,
     "futurePromptTextPolicy": "not_generated_not_stored_not_rendered",
     "generatedOriginPolicy": "attach_generated_origin_metadata",
-    "groundedSourceGuidancePolicy": "explicit_fallback_reason",
+    "groundedSourceGuidancePolicy": "required_when_popup_shown",
     "orderedSectionPlans": [
       {
-        "baselineSourceSignalSlot": "not_applicable",
+        "baselineSourceSignalSlot": "source_signal_guidance",
         "callVisibilityMode": "deterministic",
         "contentTemplateRuntimeSeamUse": "none",
         "deterministicTextBasisPolicy": "structured_parts",
         "fallbackMode": "none",
-        "familyId": "quick_improvement",
+        "familyId": "issue_debug",
         "handoffCapabilityFlags": [
           "no_runtime_sequence_v1",
         ],
         "isEditable": true,
         "isRequired": true,
         "order": 1,
-        "primaryIntent": "quick_improvement.local_polish_or_small_improvement",
+        "primaryIntent": "issue_debug.failing_test",
         "removalFeedbackPolicy": "typed_event_required",
         "requirementSourceStatus": "not_applicable",
         "safetyFlags": [
@@ -2640,6 +2689,7 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
         "sectionPlanId": "pe:facade-nonseq-b-explain:route:section-plan:1:original_request_or_goal",
         "sensitivityFlags": [],
         "slotEvidenceStatus": "present",
+        "slotObligations": [],
         "sourceEvidenceStatus": "present",
         "sourceIds": [
           "prompt:1",
@@ -2668,35 +2718,36 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
           "more_project_grounded",
           "apply_details",
         ],
-        "templateId": "pe-route-quick_improvement-local_polish_or_small_improvement",
+        "templateId": "pe-route-issue_debug-failing_test",
         "textDraftRef": "composer_pending:original_request_or_goal",
         "validationStatus": "valid",
       },
       {
-        "baselineSourceSignalSlot": "not_applicable",
+        "baselineSourceSignalSlot": "source_signal_guidance",
         "callVisibilityMode": "deterministic",
         "contentTemplateRuntimeSeamUse": "none",
         "deterministicTextBasisPolicy": "structured_parts",
         "fallbackMode": "none",
-        "familyId": "quick_improvement",
+        "familyId": "issue_debug",
         "handoffCapabilityFlags": [
           "no_runtime_sequence_v1",
         ],
         "isEditable": true,
         "isRequired": true,
         "order": 2,
-        "primaryIntent": "quick_improvement.local_polish_or_small_improvement",
+        "primaryIntent": "issue_debug.failing_test",
         "removalFeedbackPolicy": "typed_event_required",
         "requirementSourceStatus": "not_applicable",
         "safetyFlags": [
           "source_honesty",
           "no_authority_escalation",
         ],
-        "sectionId": "pe:facade-nonseq-b-explain:route:section:2:acceptance_or_output_expectation",
-        "sectionKind": "acceptance_or_output_expectation",
-        "sectionPlanId": "pe:facade-nonseq-b-explain:route:section-plan:2:acceptance_or_output_expectation",
+        "sectionId": "pe:facade-nonseq-b-explain:route:section:2:test_command_output",
+        "sectionKind": "test_command_output",
+        "sectionPlanId": "pe:facade-nonseq-b-explain:route:section-plan:2:test_command_output",
         "sensitivityFlags": [],
         "slotEvidenceStatus": "present",
+        "slotObligations": [],
         "sourceEvidenceStatus": "present",
         "sourceIds": [
           "prompt:1",
@@ -2715,7 +2766,7 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
           },
         ],
         "structuredContentPartRefs": [
-          "section_kind:acceptance_or_output_expectation",
+          "section_kind:test_command_output",
         ],
         "supportedActions": [
           "use_current_body",
@@ -2725,35 +2776,215 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
           "more_project_grounded",
           "apply_details",
         ],
-        "templateId": "pe-route-quick_improvement-local_polish_or_small_improvement",
-        "textDraftRef": "composer_pending:acceptance_or_output_expectation",
+        "templateId": "pe-route-issue_debug-failing_test",
+        "textDraftRef": "composer_pending:test_command_output",
         "validationStatus": "valid",
       },
       {
-        "baselineSourceSignalSlot": "not_applicable",
+        "baselineSourceSignalSlot": "source_signal_guidance",
         "callVisibilityMode": "deterministic",
         "contentTemplateRuntimeSeamUse": "none",
         "deterministicTextBasisPolicy": "structured_parts",
         "fallbackMode": "none",
-        "familyId": "quick_improvement",
+        "familyId": "issue_debug",
         "handoffCapabilityFlags": [
           "no_runtime_sequence_v1",
         ],
         "isEditable": true,
         "isRequired": true,
         "order": 3,
-        "primaryIntent": "quick_improvement.local_polish_or_small_improvement",
+        "primaryIntent": "issue_debug.failing_test",
         "removalFeedbackPolicy": "typed_event_required",
         "requirementSourceStatus": "not_applicable",
         "safetyFlags": [
           "source_honesty",
           "no_authority_escalation",
         ],
-        "sectionId": "pe:facade-nonseq-b-explain:route:section:3:verification_or_test_plan",
-        "sectionKind": "verification_or_test_plan",
-        "sectionPlanId": "pe:facade-nonseq-b-explain:route:section-plan:3:verification_or_test_plan",
+        "sectionId": "pe:facade-nonseq-b-explain:route:section:3:fixture_mock_context",
+        "sectionKind": "fixture_mock_context",
+        "sectionPlanId": "pe:facade-nonseq-b-explain:route:section-plan:3:fixture_mock_context",
         "sensitivityFlags": [],
         "slotEvidenceStatus": "present",
+        "slotObligations": [],
+        "sourceEvidenceStatus": "present",
+        "sourceIds": [
+          "prompt:1",
+        ],
+        "sourceKind": "source_a_user_prompt",
+        "sourceRefs": [
+          {
+            "confidence": "high",
+            "evidenceStatus": "present",
+            "freshness": "current",
+            "privacyClass": "public_safe",
+            "sourceAuthorization": "source_fact_only",
+            "sourceId": "prompt:1",
+            "sourceKind": "source_a_user_prompt",
+            "sourceRefId": "src-a-1",
+          },
+        ],
+        "structuredContentPartRefs": [
+          "section_kind:fixture_mock_context",
+        ],
+        "supportedActions": [
+          "use_current_body",
+          "use_original",
+          "shorter",
+          "more_thorough",
+          "more_project_grounded",
+          "apply_details",
+        ],
+        "templateId": "pe-route-issue_debug-failing_test",
+        "textDraftRef": "composer_pending:fixture_mock_context",
+        "validationStatus": "valid",
+      },
+      {
+        "baselineSourceSignalSlot": "source_signal_guidance",
+        "callVisibilityMode": "deterministic",
+        "contentTemplateRuntimeSeamUse": "none",
+        "deterministicTextBasisPolicy": "structured_parts",
+        "fallbackMode": "none",
+        "familyId": "issue_debug",
+        "handoffCapabilityFlags": [
+          "no_runtime_sequence_v1",
+        ],
+        "isEditable": true,
+        "isRequired": true,
+        "order": 4,
+        "primaryIntent": "issue_debug.failing_test",
+        "removalFeedbackPolicy": "typed_event_required",
+        "requirementSourceStatus": "not_applicable",
+        "safetyFlags": [
+          "source_honesty",
+          "no_authority_escalation",
+        ],
+        "sectionId": "pe:facade-nonseq-b-explain:route:section:4:reproduction_or_evidence",
+        "sectionKind": "reproduction_or_evidence",
+        "sectionPlanId": "pe:facade-nonseq-b-explain:route:section-plan:4:reproduction_or_evidence",
+        "sensitivityFlags": [],
+        "slotEvidenceStatus": "present",
+        "slotObligations": [
+          "reproduction_or_evidence_request",
+          "no_invention_state",
+        ],
+        "sourceEvidenceStatus": "present",
+        "sourceIds": [
+          "prompt:1",
+        ],
+        "sourceKind": "source_a_user_prompt",
+        "sourceRefs": [
+          {
+            "confidence": "high",
+            "evidenceStatus": "present",
+            "freshness": "current",
+            "privacyClass": "public_safe",
+            "sourceAuthorization": "source_fact_only",
+            "sourceId": "prompt:1",
+            "sourceKind": "source_a_user_prompt",
+            "sourceRefId": "src-a-1",
+          },
+        ],
+        "structuredContentPartRefs": [
+          "section_kind:reproduction_or_evidence",
+        ],
+        "supportedActions": [
+          "use_current_body",
+          "use_original",
+          "shorter",
+          "more_thorough",
+          "more_project_grounded",
+          "apply_details",
+        ],
+        "templateId": "pe-route-issue_debug-failing_test",
+        "textDraftRef": "composer_pending:reproduction_or_evidence",
+        "validationStatus": "valid",
+      },
+      {
+        "baselineSourceSignalSlot": "source_signal_guidance",
+        "callVisibilityMode": "deterministic",
+        "contentTemplateRuntimeSeamUse": "none",
+        "deterministicTextBasisPolicy": "structured_parts",
+        "fallbackMode": "none",
+        "familyId": "issue_debug",
+        "handoffCapabilityFlags": [
+          "no_runtime_sequence_v1",
+        ],
+        "isEditable": true,
+        "isRequired": true,
+        "order": 5,
+        "primaryIntent": "issue_debug.failing_test",
+        "removalFeedbackPolicy": "typed_event_required",
+        "requirementSourceStatus": "not_applicable",
+        "safetyFlags": [
+          "source_honesty",
+          "no_authority_escalation",
+        ],
+        "sectionId": "pe:facade-nonseq-b-explain:route:section:5:narrow_fix_boundary",
+        "sectionKind": "narrow_fix_boundary",
+        "sectionPlanId": "pe:facade-nonseq-b-explain:route:section-plan:5:narrow_fix_boundary",
+        "sensitivityFlags": [],
+        "slotEvidenceStatus": "present",
+        "slotObligations": [],
+        "sourceEvidenceStatus": "present",
+        "sourceIds": [
+          "prompt:1",
+        ],
+        "sourceKind": "source_a_user_prompt",
+        "sourceRefs": [
+          {
+            "confidence": "high",
+            "evidenceStatus": "present",
+            "freshness": "current",
+            "privacyClass": "public_safe",
+            "sourceAuthorization": "source_fact_only",
+            "sourceId": "prompt:1",
+            "sourceKind": "source_a_user_prompt",
+            "sourceRefId": "src-a-1",
+          },
+        ],
+        "structuredContentPartRefs": [
+          "section_kind:narrow_fix_boundary",
+        ],
+        "supportedActions": [
+          "use_current_body",
+          "use_original",
+          "shorter",
+          "more_thorough",
+          "more_project_grounded",
+          "apply_details",
+        ],
+        "templateId": "pe-route-issue_debug-failing_test",
+        "textDraftRef": "composer_pending:narrow_fix_boundary",
+        "validationStatus": "valid",
+      },
+      {
+        "baselineSourceSignalSlot": "source_signal_guidance",
+        "callVisibilityMode": "deterministic",
+        "contentTemplateRuntimeSeamUse": "none",
+        "deterministicTextBasisPolicy": "structured_parts",
+        "fallbackMode": "none",
+        "familyId": "issue_debug",
+        "handoffCapabilityFlags": [
+          "no_runtime_sequence_v1",
+        ],
+        "isEditable": true,
+        "isRequired": true,
+        "order": 6,
+        "primaryIntent": "issue_debug.failing_test",
+        "removalFeedbackPolicy": "typed_event_required",
+        "requirementSourceStatus": "not_applicable",
+        "safetyFlags": [
+          "source_honesty",
+          "no_authority_escalation",
+        ],
+        "sectionId": "pe:facade-nonseq-b-explain:route:section:6:verification_or_test_plan",
+        "sectionKind": "verification_or_test_plan",
+        "sectionPlanId": "pe:facade-nonseq-b-explain:route:section-plan:6:verification_or_test_plan",
+        "sensitivityFlags": [],
+        "slotEvidenceStatus": "present",
+        "slotObligations": [
+          "family_specific_verification",
+        ],
         "sourceEvidenceStatus": "present",
         "sourceIds": [
           "prompt:1",
@@ -2782,92 +3013,40 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
           "more_project_grounded",
           "apply_details",
         ],
-        "templateId": "pe-route-quick_improvement-local_polish_or_small_improvement",
+        "templateId": "pe-route-issue_debug-failing_test",
         "textDraftRef": "composer_pending:verification_or_test_plan",
         "validationStatus": "valid",
       },
       {
-        "baselineSourceSignalSlot": "not_applicable",
+        "baselineSourceSignalSlot": "source_signal_guidance",
         "callVisibilityMode": "deterministic",
         "contentTemplateRuntimeSeamUse": "none",
         "deterministicTextBasisPolicy": "structured_parts",
         "fallbackMode": "none",
-        "familyId": "quick_improvement",
+        "familyId": "issue_debug",
         "handoffCapabilityFlags": [
           "no_runtime_sequence_v1",
         ],
         "isEditable": true,
         "isRequired": true,
-        "order": 4,
-        "primaryIntent": "quick_improvement.local_polish_or_small_improvement",
+        "order": 7,
+        "primaryIntent": "issue_debug.failing_test",
         "removalFeedbackPolicy": "typed_event_required",
         "requirementSourceStatus": "not_applicable",
         "safetyFlags": [
           "source_honesty",
           "no_authority_escalation",
         ],
-        "sectionId": "pe:facade-nonseq-b-explain:route:section:4:source_signal_guidance",
-        "sectionKind": "source_signal_guidance",
-        "sectionPlanId": "pe:facade-nonseq-b-explain:route:section-plan:4:source_signal_guidance",
-        "sensitivityFlags": [],
-        "slotEvidenceStatus": "present",
-        "sourceEvidenceStatus": "present",
-        "sourceIds": [
-          "prompt:1",
-        ],
-        "sourceKind": "stage_or_absence_signal",
-        "sourceRefs": [
-          {
-            "confidence": "high",
-            "evidenceStatus": "present",
-            "freshness": "current",
-            "privacyClass": "public_safe",
-            "sourceAuthorization": "source_fact_only",
-            "sourceId": "prompt:1",
-            "sourceKind": "source_a_user_prompt",
-            "sourceRefId": "src-a-1",
-          },
-        ],
-        "structuredContentPartRefs": [
-          "guidance_fact:pe-fact-stage-0",
-        ],
-        "supportedActions": [
-          "use_current_body",
-          "use_original",
-          "shorter",
-          "more_thorough",
-          "more_project_grounded",
-          "apply_details",
-        ],
-        "templateId": "pe-route-quick_improvement-local_polish_or_small_improvement",
-        "textDraftRef": "composer_pending:source_signal_guidance",
-        "validationStatus": "valid",
-      },
-      {
-        "baselineSourceSignalSlot": "not_applicable",
-        "callVisibilityMode": "deterministic",
-        "contentTemplateRuntimeSeamUse": "none",
-        "deterministicTextBasisPolicy": "structured_parts",
-        "fallbackMode": "none",
-        "familyId": "quick_improvement",
-        "handoffCapabilityFlags": [
-          "no_runtime_sequence_v1",
-        ],
-        "isEditable": true,
-        "isRequired": true,
-        "order": 5,
-        "primaryIntent": "quick_improvement.local_polish_or_small_improvement",
-        "removalFeedbackPolicy": "typed_event_required",
-        "requirementSourceStatus": "not_applicable",
-        "safetyFlags": [
-          "source_honesty",
-          "no_authority_escalation",
-        ],
-        "sectionId": "pe:facade-nonseq-b-explain:route:section:5:project_grounding_facts",
+        "sectionId": "pe:facade-nonseq-b-explain:route:section:7:project_grounding_facts",
         "sectionKind": "project_grounding_facts",
-        "sectionPlanId": "pe:facade-nonseq-b-explain:route:section-plan:5:project_grounding_facts",
+        "sectionPlanId": "pe:facade-nonseq-b-explain:route:section-plan:7:project_grounding_facts",
         "sensitivityFlags": [],
         "slotEvidenceStatus": "present",
+        "slotObligations": [
+          "project_source_fact_slots",
+          "known_unknown_wording",
+          "source_ids_evidence_state",
+        ],
         "sourceEvidenceStatus": "present",
         "sourceIds": [
           "prompt:1",
@@ -2896,8 +3075,70 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
           "more_project_grounded",
           "apply_details",
         ],
-        "templateId": "pe-route-quick_improvement-local_polish_or_small_improvement",
+        "templateId": "pe-route-issue_debug-failing_test",
         "textDraftRef": "composer_pending:project_grounding_facts",
+        "validationStatus": "valid",
+      },
+      {
+        "baselineSourceSignalSlot": "source_signal_guidance",
+        "callVisibilityMode": "deterministic",
+        "contentTemplateRuntimeSeamUse": "none",
+        "deterministicTextBasisPolicy": "structured_parts",
+        "fallbackMode": "none",
+        "familyId": "issue_debug",
+        "handoffCapabilityFlags": [
+          "no_runtime_sequence_v1",
+        ],
+        "isEditable": true,
+        "isRequired": true,
+        "order": 8,
+        "primaryIntent": "issue_debug.failing_test",
+        "removalFeedbackPolicy": "typed_event_required",
+        "requirementSourceStatus": "not_applicable",
+        "safetyFlags": [
+          "source_honesty",
+          "no_authority_escalation",
+        ],
+        "sectionId": "pe:facade-nonseq-b-explain:route:section:8:source_signal_guidance",
+        "sectionKind": "source_signal_guidance",
+        "sectionPlanId": "pe:facade-nonseq-b-explain:route:section-plan:8:source_signal_guidance",
+        "sensitivityFlags": [],
+        "slotEvidenceStatus": "present",
+        "slotObligations": [
+          "baseline_source_signal",
+          "source_kind_id_evidence_metadata",
+          "public_safe_why_help_support",
+        ],
+        "sourceEvidenceStatus": "present",
+        "sourceIds": [
+          "prompt:1",
+        ],
+        "sourceKind": "stage_or_absence_signal",
+        "sourceRefs": [
+          {
+            "confidence": "high",
+            "evidenceStatus": "present",
+            "freshness": "current",
+            "privacyClass": "public_safe",
+            "sourceAuthorization": "source_fact_only",
+            "sourceId": "prompt:1",
+            "sourceKind": "source_a_user_prompt",
+            "sourceRefId": "src-a-1",
+          },
+        ],
+        "structuredContentPartRefs": [
+          "guidance_fact:pe-fact-stage-0",
+        ],
+        "supportedActions": [
+          "use_current_body",
+          "use_original",
+          "shorter",
+          "more_thorough",
+          "more_project_grounded",
+          "apply_details",
+        ],
+        "templateId": "pe-route-issue_debug-failing_test",
+        "textDraftRef": "composer_pending:source_signal_guidance",
         "validationStatus": "valid",
       },
     ],
@@ -2935,6 +3176,13 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
     "providerFailureState": "none",
     "regionalDataResidencyAssumption": "no_regional_or_data_residency_uplift_selected",
     "retryCount": undefined,
+    "runtimeSeamSummary": {
+      "runtimePaths": [
+        "unstamped",
+      ],
+      "totalPayloadWeight": 10,
+      "unknownRuntimePathCount": 0,
+    },
     "telemetrySafeMeasurementFields": [
       "call_id",
       "owner",
@@ -2966,17 +3214,20 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
     "composerBoundaryVersion": 1,
     "composerClaims": [
       "claim:section_kind:original_request_or_goal",
-      "claim:section_kind:acceptance_or_output_expectation",
+      "claim:section_kind:test_command_output",
+      "claim:section_kind:fixture_mock_context",
+      "claim:section_kind:reproduction_or_evidence",
+      "claim:section_kind:narrow_fix_boundary",
       "claim:section_kind:verification_or_test_plan",
-      "claim:guidance_fact:pe-fact-stage-0",
       "claim:section_kind:project_grounding_facts",
+      "claim:guidance_fact:pe-fact-stage-0",
     ],
     "composerInputPrivacyState": "approved_refs_only",
     "composerMode": "baseline_deterministic_render",
     "composerPolicy": "deterministic_only",
     "composerRunId": "pe:facade-nonseq-b-explain:composer:default:1",
     "composerVisiblePromptContext": {
-      "boundedContextRefCount": 6,
+      "boundedContextRefCount": 9,
       "contextPolicy": "structured_refs_only_no_raw_original",
       "originalPromptVisibleLocallyOnly": true,
       "rawPromptTextExcluded": true,
@@ -2984,10 +3235,13 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
     "composerVisiblePromptContextRefs": [
       "src-a-1",
       "section_kind:original_request_or_goal",
-      "section_kind:acceptance_or_output_expectation",
+      "section_kind:test_command_output",
+      "section_kind:fixture_mock_context",
+      "section_kind:reproduction_or_evidence",
+      "section_kind:narrow_fix_boundary",
       "section_kind:verification_or_test_plan",
-      "guidance_fact:pe-fact-stage-0",
       "section_kind:project_grounding_facts",
+      "guidance_fact:pe-fact-stage-0",
     ],
     "deterministicFallback": {
       "available": true,
@@ -3073,10 +3327,13 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
       "privacyApprovedFactsOnly": true,
       "sectionPlanIds": [
         "pe:facade-nonseq-b-explain:route:section-plan:1:original_request_or_goal",
-        "pe:facade-nonseq-b-explain:route:section-plan:2:acceptance_or_output_expectation",
-        "pe:facade-nonseq-b-explain:route:section-plan:3:verification_or_test_plan",
-        "pe:facade-nonseq-b-explain:route:section-plan:4:source_signal_guidance",
-        "pe:facade-nonseq-b-explain:route:section-plan:5:project_grounding_facts",
+        "pe:facade-nonseq-b-explain:route:section-plan:2:test_command_output",
+        "pe:facade-nonseq-b-explain:route:section-plan:3:fixture_mock_context",
+        "pe:facade-nonseq-b-explain:route:section-plan:4:reproduction_or_evidence",
+        "pe:facade-nonseq-b-explain:route:section-plan:5:narrow_fix_boundary",
+        "pe:facade-nonseq-b-explain:route:section-plan:6:verification_or_test_plan",
+        "pe:facade-nonseq-b-explain:route:section-plan:7:project_grounding_facts",
+        "pe:facade-nonseq-b-explain:route:section-plan:8:source_signal_guidance",
       ],
     },
     "instructionPrecedenceState": "generated_sections_qualify_original",
@@ -3103,19 +3360,28 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
     "promptReviewProcessingPolicy": "eligible_for_initial_pe_route",
     "rawComposerOutput": "not_used_deterministic",
     "renderedPromptBody": "My original request (verbatim):
-Fix the failing payment test and explain the verification.
+Fix the failing test in the payment flow and explain what caused it.
 
-Acceptance Or Output Expectation:
-- State the expected output and acceptance criteria clearly enough that the implementation can be checked.
+Test Command Output:
+- Cover Test Command Output for this request with concrete, source-backed specifics — state what is required, how to implement it, and how to verify it.
+
+Fixture Mock Context:
+- Cover Fixture Mock Context for this request with concrete, source-backed specifics — state what is required, how to implement it, and how to verify it.
+
+Reproduction Or Evidence:
+- Capture the failing behavior, reproduction path, observed evidence, and expected behavior before changing code.
+
+Narrow Fix Boundary:
+- Cover Narrow Fix Boundary for this request with concrete, source-backed specifics — state what is required, how to implement it, and how to verify it.
 
 Verification Or Test Plan:
 - Include the verification command, focused scenario, or regression check that should prove the change.
 
-Source Signal Guidance:
-- Use the current source signal as a task constraint and convert it into direct implementation guidance.
-
 Project Grounding Facts:
-- Ground the request in current project facts and source references without inventing missing implementation details.",
+- Ground the request in current project facts and source references without inventing missing implementation details.
+
+Source Signal Guidance:
+- Use the current source signal as a task constraint and convert it into direct implementation guidance.",
     "routeDecisionId": "pe:facade-nonseq-b-explain:route",
     "sentPromptOrigin": "pe_baseline_generated_body",
     "sourceAttribution": [
@@ -3130,10 +3396,13 @@ Project Grounding Facts:
     ],
     "sourceFactIds": [
       "section_kind:original_request_or_goal",
-      "section_kind:acceptance_or_output_expectation",
+      "section_kind:test_command_output",
+      "section_kind:fixture_mock_context",
+      "section_kind:reproduction_or_evidence",
+      "section_kind:narrow_fix_boundary",
       "section_kind:verification_or_test_plan",
-      "guidance_fact:pe-fact-stage-0",
       "section_kind:project_grounding_facts",
+      "guidance_fact:pe-fact-stage-0",
     ],
     "strictSchemaFailureReasonCodes": [
       "invalid_json",
@@ -3150,10 +3419,13 @@ Project Grounding Facts:
     "bodyRevision": 1,
     "composerClaims": [
       "claim:section_kind:original_request_or_goal",
-      "claim:section_kind:acceptance_or_output_expectation",
+      "claim:section_kind:test_command_output",
+      "claim:section_kind:fixture_mock_context",
+      "claim:section_kind:reproduction_or_evidence",
+      "claim:section_kind:narrow_fix_boundary",
       "claim:section_kind:verification_or_test_plan",
-      "claim:guidance_fact:pe-fact-stage-0",
       "claim:section_kind:project_grounding_facts",
+      "claim:guidance_fact:pe-fact-stage-0",
     ],
     "composerMode": "baseline_deterministic_render",
     "composerRunId": "pe:facade-nonseq-b-explain:composer:default:1",
@@ -3173,23 +3445,32 @@ Project Grounding Facts:
     "originalAsSourceStatus": "local_verbatim_source_context",
     "originalPromptPreservation": "visible_verbatim",
     "originalPromptSectionId": "pe:facade-nonseq-b-explain:route:section:1:original_request_or_goal",
-    "originalPromptText": "Fix the failing payment test and explain the verification.",
+    "originalPromptText": "Fix the failing test in the payment flow and explain what caused it.",
     "promptReviewOrigin": "user_authored_current_prompt",
     "promptReviewProcessingPolicy": "eligible_for_initial_pe_route",
     "renderedPromptBody": "My original request (verbatim):
-Fix the failing payment test and explain the verification.
+Fix the failing test in the payment flow and explain what caused it.
 
-Acceptance Or Output Expectation:
-- State the expected output and acceptance criteria clearly enough that the implementation can be checked.
+Test Command Output:
+- Cover Test Command Output for this request with concrete, source-backed specifics — state what is required, how to implement it, and how to verify it.
+
+Fixture Mock Context:
+- Cover Fixture Mock Context for this request with concrete, source-backed specifics — state what is required, how to implement it, and how to verify it.
+
+Reproduction Or Evidence:
+- Capture the failing behavior, reproduction path, observed evidence, and expected behavior before changing code.
+
+Narrow Fix Boundary:
+- Cover Narrow Fix Boundary for this request with concrete, source-backed specifics — state what is required, how to implement it, and how to verify it.
 
 Verification Or Test Plan:
 - Include the verification command, focused scenario, or regression check that should prove the change.
 
-Source Signal Guidance:
-- Use the current source signal as a task constraint and convert it into direct implementation guidance.
-
 Project Grounding Facts:
-- Ground the request in current project facts and source references without inventing missing implementation details.",
+- Ground the request in current project facts and source references without inventing missing implementation details.
+
+Source Signal Guidance:
+- Use the current source signal as a task constraint and convert it into direct implementation guidance.",
     "routeDecisionId": "pe:facade-nonseq-b-explain:route",
     "sections": [
       {
@@ -3201,8 +3482,8 @@ Project Grounding Facts:
           "groundingDepth",
           "decompositionDepth",
         ],
-        "baselineSourceSignalSlot": "not_applicable",
-        "bodyText": "Fix the failing payment test and explain the verification.",
+        "baselineSourceSignalSlot": "source_signal_guidance",
+        "bodyText": "Fix the failing test in the payment flow and explain what caused it.",
         "callVisibilityMode": "deterministic",
         "canExpandInMoreThorough": true,
         "canGroundInMoreProjectGrounded": true,
@@ -3213,8 +3494,9 @@ Project Grounding Facts:
         "depthState": "required_survivor",
         "evidenceStatus": "present",
         "fallbackBehavior": "none",
-        "familyId": "quick_improvement",
+        "familyId": "issue_debug",
         "feedbackSensitivity": "protected",
+        "groundedFactValues": [],
         "handoffCapabilityFlags": [
           "no_runtime_sequence_v1",
         ],
@@ -3225,14 +3507,14 @@ Project Grounding Facts:
         "mandatoryFloor": true,
         "originalTextRefs": [
           {
-            "endOffset": 58,
+            "endOffset": 68,
             "refId": "pe:facade-nonseq-b-explain:route:section:1:original_request_or_goal:otr:1",
             "resolution": "exact",
             "sectionId": "pe:facade-nonseq-b-explain:route:section:1:original_request_or_goal",
             "startOffset": 0,
           },
         ],
-        "primaryIntent": "quick_improvement.local_polish_or_small_improvement",
+        "primaryIntent": "issue_debug.failing_test",
         "privacyClass": "public_safe",
         "promptPointRefs": [],
         "publicCopySafe": true,
@@ -3242,7 +3524,7 @@ Project Grounding Facts:
         "requiredSurvivor": true,
         "requirementSourceStatus": "not_applicable",
         "routeCandidateRefs": [
-          "pe-route-quick_improvement-local_polish_or_small_improvement",
+          "pe-route-issue_debug-failing_test",
         ],
         "safetyFlags": [
           "source_honesty",
@@ -3252,6 +3534,7 @@ Project Grounding Facts:
         "sectionKind": "original_request_or_goal",
         "sensitivityFlags": [],
         "slotEvidenceStatus": "present",
+        "slotObligations": [],
         "sourceEvidenceStatus": "present",
         "sourceFactIds": [
           "section_kind:original_request_or_goal",
@@ -3263,7 +3546,7 @@ Project Grounding Facts:
         "sourceTemplateType": "prompt_enhancement_template",
         "spanRefs": [
           {
-            "endOffset": 90,
+            "endOffset": 100,
             "sectionId": "pe:facade-nonseq-b-explain:route:section:1:original_request_or_goal",
             "sourceRefs": [
               "src-a-1",
@@ -3294,8 +3577,8 @@ Project Grounding Facts:
           "groundingDepth",
           "decompositionDepth",
         ],
-        "baselineSourceSignalSlot": "not_applicable",
-        "bodyText": "- State the expected output and acceptance criteria clearly enough that the implementation can be checked.",
+        "baselineSourceSignalSlot": "source_signal_guidance",
+        "bodyText": "- Cover Test Command Output for this request with concrete, source-backed specifics — state what is required, how to implement it, and how to verify it.",
         "callVisibilityMode": "deterministic",
         "canExpandInMoreThorough": true,
         "canGroundInMoreProjectGrounded": true,
@@ -3306,8 +3589,9 @@ Project Grounding Facts:
         "depthState": "required_survivor",
         "evidenceStatus": "present",
         "fallbackBehavior": "none",
-        "familyId": "quick_improvement",
+        "familyId": "issue_debug",
         "feedbackSensitivity": "protected",
+        "groundedFactValues": [],
         "handoffCapabilityFlags": [
           "no_runtime_sequence_v1",
         ],
@@ -3319,14 +3603,14 @@ Project Grounding Facts:
         "originalTextRefs": [
           {
             "endOffset": -1,
-            "refId": "pe:facade-nonseq-b-explain:route:section:2:acceptance_or_output_expectation:otr:1",
+            "refId": "pe:facade-nonseq-b-explain:route:section:2:test_command_output:otr:1",
             "refusalReason": "not_found_in_original",
             "resolution": "refused",
-            "sectionId": "pe:facade-nonseq-b-explain:route:section:2:acceptance_or_output_expectation",
+            "sectionId": "pe:facade-nonseq-b-explain:route:section:2:test_command_output",
             "startOffset": -1,
           },
         ],
-        "primaryIntent": "quick_improvement.local_polish_or_small_improvement",
+        "primaryIntent": "issue_debug.failing_test",
         "privacyClass": "public_safe",
         "promptPointRefs": [],
         "publicCopySafe": true,
@@ -3336,19 +3620,20 @@ Project Grounding Facts:
         "requiredSurvivor": true,
         "requirementSourceStatus": "not_applicable",
         "routeCandidateRefs": [
-          "pe-route-quick_improvement-local_polish_or_small_improvement",
+          "pe-route-issue_debug-failing_test",
         ],
         "safetyFlags": [
           "source_honesty",
           "no_authority_escalation",
         ],
-        "sectionId": "pe:facade-nonseq-b-explain:route:section:2:acceptance_or_output_expectation",
-        "sectionKind": "acceptance_or_output_expectation",
+        "sectionId": "pe:facade-nonseq-b-explain:route:section:2:test_command_output",
+        "sectionKind": "test_command_output",
         "sensitivityFlags": [],
         "slotEvidenceStatus": "present",
+        "slotObligations": [],
         "sourceEvidenceStatus": "present",
         "sourceFactIds": [
-          "section_kind:acceptance_or_output_expectation",
+          "section_kind:test_command_output",
         ],
         "sourceIds": [
           "prompt:1",
@@ -3357,26 +3642,26 @@ Project Grounding Facts:
         "sourceTemplateType": "prompt_enhancement_template",
         "spanRefs": [
           {
-            "endOffset": 232,
-            "sectionId": "pe:facade-nonseq-b-explain:route:section:2:acceptance_or_output_expectation",
+            "endOffset": 275,
+            "sectionId": "pe:facade-nonseq-b-explain:route:section:2:test_command_output",
             "sourceRefs": [
               "src-a-1",
             ],
             "spanMappingStatus": "exact",
-            "spanRefId": "pe:facade-nonseq-b-explain:route:section:2:acceptance_or_output_expectation:span:1",
-            "startOffset": 92,
+            "spanRefId": "pe:facade-nonseq-b-explain:route:section:2:test_command_output:span:1",
+            "startOffset": 102,
             "textStoragePolicy": "text_in_body_only",
           },
         ],
         "templateType": "prompt-enhancement-template",
-        "title": "Acceptance Or Output Expectation",
+        "title": "Test Command Output",
         "transformReasonCodes": [
           "rendered_deterministically",
           "no_original_text_quoted",
         ],
         "validationStatus": "valid",
         "whyHelpReasonCodes": [
-          "section_kind:acceptance_or_output_expectation",
+          "section_kind:test_command_output",
         ],
       },
       {
@@ -3388,7 +3673,298 @@ Project Grounding Facts:
           "groundingDepth",
           "decompositionDepth",
         ],
-        "baselineSourceSignalSlot": "not_applicable",
+        "baselineSourceSignalSlot": "source_signal_guidance",
+        "bodyText": "- Cover Fixture Mock Context for this request with concrete, source-backed specifics — state what is required, how to implement it, and how to verify it.",
+        "callVisibilityMode": "deterministic",
+        "canExpandInMoreThorough": true,
+        "canGroundInMoreProjectGrounded": true,
+        "canMergeInShorter": false,
+        "confirmationPresent": false,
+        "confirmationRequired": false,
+        "contentTemplateRuntimeSeamUse": "none",
+        "depthState": "required_survivor",
+        "evidenceStatus": "present",
+        "fallbackBehavior": "none",
+        "familyId": "issue_debug",
+        "feedbackSensitivity": "protected",
+        "groundedFactValues": [],
+        "handoffCapabilityFlags": [
+          "no_runtime_sequence_v1",
+        ],
+        "handoffFlags": [
+          "no_runtime_sequence_v1",
+        ],
+        "isEditable": true,
+        "mandatoryFloor": true,
+        "originalTextRefs": [
+          {
+            "endOffset": -1,
+            "refId": "pe:facade-nonseq-b-explain:route:section:3:fixture_mock_context:otr:1",
+            "refusalReason": "not_found_in_original",
+            "resolution": "refused",
+            "sectionId": "pe:facade-nonseq-b-explain:route:section:3:fixture_mock_context",
+            "startOffset": -1,
+          },
+        ],
+        "primaryIntent": "issue_debug.failing_test",
+        "privacyClass": "public_safe",
+        "promptPointRefs": [],
+        "publicCopySafe": true,
+        "publicExplanationCategory": "source_coverage",
+        "registryNamespace": "prompt-enhancement-templates",
+        "removalFeedbackPolicy": "typed_event_required",
+        "requiredSurvivor": true,
+        "requirementSourceStatus": "not_applicable",
+        "routeCandidateRefs": [
+          "pe-route-issue_debug-failing_test",
+        ],
+        "safetyFlags": [
+          "source_honesty",
+          "no_authority_escalation",
+        ],
+        "sectionId": "pe:facade-nonseq-b-explain:route:section:3:fixture_mock_context",
+        "sectionKind": "fixture_mock_context",
+        "sensitivityFlags": [],
+        "slotEvidenceStatus": "present",
+        "slotObligations": [],
+        "sourceEvidenceStatus": "present",
+        "sourceFactIds": [
+          "section_kind:fixture_mock_context",
+        ],
+        "sourceIds": [
+          "prompt:1",
+        ],
+        "sourceKind": "source_a_user_prompt",
+        "sourceTemplateType": "prompt_enhancement_template",
+        "spanRefs": [
+          {
+            "endOffset": 452,
+            "sectionId": "pe:facade-nonseq-b-explain:route:section:3:fixture_mock_context",
+            "sourceRefs": [
+              "src-a-1",
+            ],
+            "spanMappingStatus": "exact",
+            "spanRefId": "pe:facade-nonseq-b-explain:route:section:3:fixture_mock_context:span:1",
+            "startOffset": 277,
+            "textStoragePolicy": "text_in_body_only",
+          },
+        ],
+        "templateType": "prompt-enhancement-template",
+        "title": "Fixture Mock Context",
+        "transformReasonCodes": [
+          "rendered_deterministically",
+          "no_original_text_quoted",
+        ],
+        "validationStatus": "valid",
+        "whyHelpReasonCodes": [
+          "section_kind:fixture_mock_context",
+        ],
+      },
+      {
+        "authorityBoundary": "no_authority_escalation",
+        "axisContributions": [
+          "practiceDepth",
+          "sectionDensity",
+          "riskDepth",
+          "groundingDepth",
+          "decompositionDepth",
+        ],
+        "baselineSourceSignalSlot": "source_signal_guidance",
+        "bodyText": "- Capture the failing behavior, reproduction path, observed evidence, and expected behavior before changing code.",
+        "callVisibilityMode": "deterministic",
+        "canExpandInMoreThorough": true,
+        "canGroundInMoreProjectGrounded": true,
+        "canMergeInShorter": false,
+        "confirmationPresent": false,
+        "confirmationRequired": false,
+        "contentTemplateRuntimeSeamUse": "none",
+        "depthState": "required_survivor",
+        "evidenceStatus": "present",
+        "fallbackBehavior": "none",
+        "familyId": "issue_debug",
+        "feedbackSensitivity": "protected",
+        "groundedFactValues": [],
+        "handoffCapabilityFlags": [
+          "no_runtime_sequence_v1",
+        ],
+        "handoffFlags": [
+          "no_runtime_sequence_v1",
+        ],
+        "isEditable": true,
+        "mandatoryFloor": true,
+        "originalTextRefs": [
+          {
+            "endOffset": -1,
+            "refId": "pe:facade-nonseq-b-explain:route:section:4:reproduction_or_evidence:otr:1",
+            "refusalReason": "not_found_in_original",
+            "resolution": "refused",
+            "sectionId": "pe:facade-nonseq-b-explain:route:section:4:reproduction_or_evidence",
+            "startOffset": -1,
+          },
+        ],
+        "primaryIntent": "issue_debug.failing_test",
+        "privacyClass": "public_safe",
+        "promptPointRefs": [],
+        "publicCopySafe": true,
+        "publicExplanationCategory": "source_coverage",
+        "registryNamespace": "prompt-enhancement-templates",
+        "removalFeedbackPolicy": "typed_event_required",
+        "requiredSurvivor": true,
+        "requirementSourceStatus": "not_applicable",
+        "routeCandidateRefs": [
+          "pe-route-issue_debug-failing_test",
+        ],
+        "safetyFlags": [
+          "source_honesty",
+          "no_authority_escalation",
+        ],
+        "sectionId": "pe:facade-nonseq-b-explain:route:section:4:reproduction_or_evidence",
+        "sectionKind": "reproduction_or_evidence",
+        "sensitivityFlags": [],
+        "slotEvidenceStatus": "present",
+        "slotObligations": [
+          "reproduction_or_evidence_request",
+          "no_invention_state",
+        ],
+        "sourceEvidenceStatus": "present",
+        "sourceFactIds": [
+          "section_kind:reproduction_or_evidence",
+        ],
+        "sourceIds": [
+          "prompt:1",
+        ],
+        "sourceKind": "source_a_user_prompt",
+        "sourceTemplateType": "prompt_enhancement_template",
+        "spanRefs": [
+          {
+            "endOffset": 593,
+            "sectionId": "pe:facade-nonseq-b-explain:route:section:4:reproduction_or_evidence",
+            "sourceRefs": [
+              "src-a-1",
+            ],
+            "spanMappingStatus": "exact",
+            "spanRefId": "pe:facade-nonseq-b-explain:route:section:4:reproduction_or_evidence:span:1",
+            "startOffset": 454,
+            "textStoragePolicy": "text_in_body_only",
+          },
+        ],
+        "templateType": "prompt-enhancement-template",
+        "title": "Reproduction Or Evidence",
+        "transformReasonCodes": [
+          "rendered_deterministically",
+          "no_original_text_quoted",
+        ],
+        "validationStatus": "valid",
+        "whyHelpReasonCodes": [
+          "section_kind:reproduction_or_evidence",
+        ],
+      },
+      {
+        "authorityBoundary": "no_authority_escalation",
+        "axisContributions": [
+          "practiceDepth",
+          "sectionDensity",
+          "riskDepth",
+          "groundingDepth",
+          "decompositionDepth",
+        ],
+        "baselineSourceSignalSlot": "source_signal_guidance",
+        "bodyText": "- Cover Narrow Fix Boundary for this request with concrete, source-backed specifics — state what is required, how to implement it, and how to verify it.",
+        "callVisibilityMode": "deterministic",
+        "canExpandInMoreThorough": true,
+        "canGroundInMoreProjectGrounded": true,
+        "canMergeInShorter": false,
+        "confirmationPresent": false,
+        "confirmationRequired": false,
+        "contentTemplateRuntimeSeamUse": "none",
+        "depthState": "required_survivor",
+        "evidenceStatus": "present",
+        "fallbackBehavior": "none",
+        "familyId": "issue_debug",
+        "feedbackSensitivity": "protected",
+        "groundedFactValues": [],
+        "handoffCapabilityFlags": [
+          "no_runtime_sequence_v1",
+        ],
+        "handoffFlags": [
+          "no_runtime_sequence_v1",
+        ],
+        "isEditable": true,
+        "mandatoryFloor": true,
+        "originalTextRefs": [
+          {
+            "endOffset": -1,
+            "refId": "pe:facade-nonseq-b-explain:route:section:5:narrow_fix_boundary:otr:1",
+            "refusalReason": "not_found_in_original",
+            "resolution": "refused",
+            "sectionId": "pe:facade-nonseq-b-explain:route:section:5:narrow_fix_boundary",
+            "startOffset": -1,
+          },
+        ],
+        "primaryIntent": "issue_debug.failing_test",
+        "privacyClass": "public_safe",
+        "promptPointRefs": [],
+        "publicCopySafe": true,
+        "publicExplanationCategory": "source_coverage",
+        "registryNamespace": "prompt-enhancement-templates",
+        "removalFeedbackPolicy": "typed_event_required",
+        "requiredSurvivor": true,
+        "requirementSourceStatus": "not_applicable",
+        "routeCandidateRefs": [
+          "pe-route-issue_debug-failing_test",
+        ],
+        "safetyFlags": [
+          "source_honesty",
+          "no_authority_escalation",
+        ],
+        "sectionId": "pe:facade-nonseq-b-explain:route:section:5:narrow_fix_boundary",
+        "sectionKind": "narrow_fix_boundary",
+        "sensitivityFlags": [],
+        "slotEvidenceStatus": "present",
+        "slotObligations": [],
+        "sourceEvidenceStatus": "present",
+        "sourceFactIds": [
+          "section_kind:narrow_fix_boundary",
+        ],
+        "sourceIds": [
+          "prompt:1",
+        ],
+        "sourceKind": "source_a_user_prompt",
+        "sourceTemplateType": "prompt_enhancement_template",
+        "spanRefs": [
+          {
+            "endOffset": 768,
+            "sectionId": "pe:facade-nonseq-b-explain:route:section:5:narrow_fix_boundary",
+            "sourceRefs": [
+              "src-a-1",
+            ],
+            "spanMappingStatus": "exact",
+            "spanRefId": "pe:facade-nonseq-b-explain:route:section:5:narrow_fix_boundary:span:1",
+            "startOffset": 595,
+            "textStoragePolicy": "text_in_body_only",
+          },
+        ],
+        "templateType": "prompt-enhancement-template",
+        "title": "Narrow Fix Boundary",
+        "transformReasonCodes": [
+          "rendered_deterministically",
+          "no_original_text_quoted",
+        ],
+        "validationStatus": "valid",
+        "whyHelpReasonCodes": [
+          "section_kind:narrow_fix_boundary",
+        ],
+      },
+      {
+        "authorityBoundary": "no_authority_escalation",
+        "axisContributions": [
+          "practiceDepth",
+          "sectionDensity",
+          "riskDepth",
+          "groundingDepth",
+          "decompositionDepth",
+        ],
+        "baselineSourceSignalSlot": "source_signal_guidance",
         "bodyText": "- Include the verification command, focused scenario, or regression check that should prove the change.",
         "callVisibilityMode": "deterministic",
         "canExpandInMoreThorough": true,
@@ -3400,101 +3976,9 @@ Project Grounding Facts:
         "depthState": "required_survivor",
         "evidenceStatus": "present",
         "fallbackBehavior": "none",
-        "familyId": "quick_improvement",
+        "familyId": "issue_debug",
         "feedbackSensitivity": "protected",
-        "handoffCapabilityFlags": [
-          "no_runtime_sequence_v1",
-        ],
-        "handoffFlags": [
-          "no_runtime_sequence_v1",
-        ],
-        "isEditable": true,
-        "mandatoryFloor": true,
-        "originalTextRefs": [
-          {
-            "endOffset": 57,
-            "refId": "pe:facade-nonseq-b-explain:route:section:3:verification_or_test_plan:otr:1",
-            "resolution": "exact",
-            "sectionId": "pe:facade-nonseq-b-explain:route:section:3:verification_or_test_plan",
-            "startOffset": 41,
-          },
-        ],
-        "primaryIntent": "quick_improvement.local_polish_or_small_improvement",
-        "privacyClass": "public_safe",
-        "promptPointRefs": [],
-        "publicCopySafe": true,
-        "publicExplanationCategory": "source_coverage",
-        "registryNamespace": "prompt-enhancement-templates",
-        "removalFeedbackPolicy": "typed_event_required",
-        "requiredSurvivor": true,
-        "requirementSourceStatus": "not_applicable",
-        "routeCandidateRefs": [
-          "pe-route-quick_improvement-local_polish_or_small_improvement",
-        ],
-        "safetyFlags": [
-          "source_honesty",
-          "no_authority_escalation",
-        ],
-        "sectionId": "pe:facade-nonseq-b-explain:route:section:3:verification_or_test_plan",
-        "sectionKind": "verification_or_test_plan",
-        "sensitivityFlags": [],
-        "slotEvidenceStatus": "present",
-        "sourceEvidenceStatus": "present",
-        "sourceFactIds": [
-          "section_kind:verification_or_test_plan",
-        ],
-        "sourceIds": [
-          "prompt:1",
-        ],
-        "sourceKind": "source_a_user_prompt",
-        "sourceTemplateType": "prompt_enhancement_template",
-        "spanRefs": [
-          {
-            "endOffset": 364,
-            "sectionId": "pe:facade-nonseq-b-explain:route:section:3:verification_or_test_plan",
-            "sourceRefs": [
-              "src-a-1",
-            ],
-            "spanMappingStatus": "exact",
-            "spanRefId": "pe:facade-nonseq-b-explain:route:section:3:verification_or_test_plan:span:1",
-            "startOffset": 234,
-            "textStoragePolicy": "text_in_body_only",
-          },
-        ],
-        "templateType": "prompt-enhancement-template",
-        "title": "Verification Or Test Plan",
-        "transformReasonCodes": [
-          "rendered_deterministically",
-          "quotes_original_text",
-        ],
-        "validationStatus": "valid",
-        "whyHelpReasonCodes": [
-          "section_kind:verification_or_test_plan",
-        ],
-      },
-      {
-        "authorityBoundary": "no_authority_escalation",
-        "axisContributions": [
-          "practiceDepth",
-          "sectionDensity",
-          "riskDepth",
-          "groundingDepth",
-          "decompositionDepth",
-        ],
-        "baselineSourceSignalSlot": "not_applicable",
-        "bodyText": "- Use the current source signal as a task constraint and convert it into direct implementation guidance.",
-        "callVisibilityMode": "deterministic",
-        "canExpandInMoreThorough": true,
-        "canGroundInMoreProjectGrounded": true,
-        "canMergeInShorter": false,
-        "confirmationPresent": false,
-        "confirmationRequired": false,
-        "contentTemplateRuntimeSeamUse": "none",
-        "depthState": "required_survivor",
-        "evidenceStatus": "present",
-        "fallbackBehavior": "none",
-        "familyId": "quick_improvement",
-        "feedbackSensitivity": "protected",
+        "groundedFactValues": [],
         "handoffCapabilityFlags": [
           "no_runtime_sequence_v1",
         ],
@@ -3506,14 +3990,14 @@ Project Grounding Facts:
         "originalTextRefs": [
           {
             "endOffset": -1,
-            "refId": "pe:facade-nonseq-b-explain:route:section:4:source_signal_guidance:otr:1",
+            "refId": "pe:facade-nonseq-b-explain:route:section:6:verification_or_test_plan:otr:1",
             "refusalReason": "not_found_in_original",
             "resolution": "refused",
-            "sectionId": "pe:facade-nonseq-b-explain:route:section:4:source_signal_guidance",
+            "sectionId": "pe:facade-nonseq-b-explain:route:section:6:verification_or_test_plan",
             "startOffset": -1,
           },
         ],
-        "primaryIntent": "quick_improvement.local_polish_or_small_improvement",
+        "primaryIntent": "issue_debug.failing_test",
         "privacyClass": "public_safe",
         "promptPointRefs": [],
         "publicCopySafe": true,
@@ -3523,47 +4007,50 @@ Project Grounding Facts:
         "requiredSurvivor": true,
         "requirementSourceStatus": "not_applicable",
         "routeCandidateRefs": [
-          "pe-route-quick_improvement-local_polish_or_small_improvement",
+          "pe-route-issue_debug-failing_test",
         ],
         "safetyFlags": [
           "source_honesty",
           "no_authority_escalation",
         ],
-        "sectionId": "pe:facade-nonseq-b-explain:route:section:4:source_signal_guidance",
-        "sectionKind": "source_signal_guidance",
+        "sectionId": "pe:facade-nonseq-b-explain:route:section:6:verification_or_test_plan",
+        "sectionKind": "verification_or_test_plan",
         "sensitivityFlags": [],
         "slotEvidenceStatus": "present",
+        "slotObligations": [
+          "family_specific_verification",
+        ],
         "sourceEvidenceStatus": "present",
         "sourceFactIds": [
-          "guidance_fact:pe-fact-stage-0",
+          "section_kind:verification_or_test_plan",
         ],
         "sourceIds": [
           "prompt:1",
         ],
-        "sourceKind": "stage_or_absence_signal",
+        "sourceKind": "source_a_user_prompt",
         "sourceTemplateType": "prompt_enhancement_template",
         "spanRefs": [
           {
-            "endOffset": 494,
-            "sectionId": "pe:facade-nonseq-b-explain:route:section:4:source_signal_guidance",
+            "endOffset": 900,
+            "sectionId": "pe:facade-nonseq-b-explain:route:section:6:verification_or_test_plan",
             "sourceRefs": [
               "src-a-1",
             ],
             "spanMappingStatus": "exact",
-            "spanRefId": "pe:facade-nonseq-b-explain:route:section:4:source_signal_guidance:span:1",
-            "startOffset": 366,
+            "spanRefId": "pe:facade-nonseq-b-explain:route:section:6:verification_or_test_plan:span:1",
+            "startOffset": 770,
             "textStoragePolicy": "text_in_body_only",
           },
         ],
         "templateType": "prompt-enhancement-template",
-        "title": "Source Signal Guidance",
+        "title": "Verification Or Test Plan",
         "transformReasonCodes": [
           "rendered_deterministically",
           "no_original_text_quoted",
         ],
         "validationStatus": "valid",
         "whyHelpReasonCodes": [
-          "guidance_fact:pe-fact-stage-0",
+          "section_kind:verification_or_test_plan",
         ],
       },
       {
@@ -3575,7 +4062,7 @@ Project Grounding Facts:
           "groundingDepth",
           "decompositionDepth",
         ],
-        "baselineSourceSignalSlot": "not_applicable",
+        "baselineSourceSignalSlot": "source_signal_guidance",
         "bodyText": "- Ground the request in current project facts and source references without inventing missing implementation details.",
         "callVisibilityMode": "deterministic",
         "canExpandInMoreThorough": true,
@@ -3587,8 +4074,9 @@ Project Grounding Facts:
         "depthState": "required_survivor",
         "evidenceStatus": "present",
         "fallbackBehavior": "none",
-        "familyId": "quick_improvement",
+        "familyId": "issue_debug",
         "feedbackSensitivity": "protected",
+        "groundedFactValues": [],
         "handoffCapabilityFlags": [
           "no_runtime_sequence_v1",
         ],
@@ -3600,14 +4088,14 @@ Project Grounding Facts:
         "originalTextRefs": [
           {
             "endOffset": -1,
-            "refId": "pe:facade-nonseq-b-explain:route:section:5:project_grounding_facts:otr:1",
+            "refId": "pe:facade-nonseq-b-explain:route:section:7:project_grounding_facts:otr:1",
             "refusalReason": "not_found_in_original",
             "resolution": "refused",
-            "sectionId": "pe:facade-nonseq-b-explain:route:section:5:project_grounding_facts",
+            "sectionId": "pe:facade-nonseq-b-explain:route:section:7:project_grounding_facts",
             "startOffset": -1,
           },
         ],
-        "primaryIntent": "quick_improvement.local_polish_or_small_improvement",
+        "primaryIntent": "issue_debug.failing_test",
         "privacyClass": "public_safe",
         "promptPointRefs": [],
         "publicCopySafe": true,
@@ -3617,16 +4105,21 @@ Project Grounding Facts:
         "requiredSurvivor": true,
         "requirementSourceStatus": "not_applicable",
         "routeCandidateRefs": [
-          "pe-route-quick_improvement-local_polish_or_small_improvement",
+          "pe-route-issue_debug-failing_test",
         ],
         "safetyFlags": [
           "source_honesty",
           "no_authority_escalation",
         ],
-        "sectionId": "pe:facade-nonseq-b-explain:route:section:5:project_grounding_facts",
+        "sectionId": "pe:facade-nonseq-b-explain:route:section:7:project_grounding_facts",
         "sectionKind": "project_grounding_facts",
         "sensitivityFlags": [],
         "slotEvidenceStatus": "present",
+        "slotObligations": [
+          "project_source_fact_slots",
+          "known_unknown_wording",
+          "source_ids_evidence_state",
+        ],
         "sourceEvidenceStatus": "present",
         "sourceFactIds": [
           "section_kind:project_grounding_facts",
@@ -3638,14 +4131,14 @@ Project Grounding Facts:
         "sourceTemplateType": "prompt_enhancement_template",
         "spanRefs": [
           {
-            "endOffset": 638,
-            "sectionId": "pe:facade-nonseq-b-explain:route:section:5:project_grounding_facts",
+            "endOffset": 1044,
+            "sectionId": "pe:facade-nonseq-b-explain:route:section:7:project_grounding_facts",
             "sourceRefs": [
               "src-a-1",
             ],
             "spanMappingStatus": "exact",
-            "spanRefId": "pe:facade-nonseq-b-explain:route:section:5:project_grounding_facts:span:1",
-            "startOffset": 496,
+            "spanRefId": "pe:facade-nonseq-b-explain:route:section:7:project_grounding_facts:span:1",
+            "startOffset": 902,
             "textStoragePolicy": "text_in_body_only",
           },
         ],
@@ -3658,6 +4151,106 @@ Project Grounding Facts:
         "validationStatus": "valid",
         "whyHelpReasonCodes": [
           "section_kind:project_grounding_facts",
+        ],
+      },
+      {
+        "authorityBoundary": "no_authority_escalation",
+        "axisContributions": [
+          "practiceDepth",
+          "sectionDensity",
+          "riskDepth",
+          "groundingDepth",
+          "decompositionDepth",
+        ],
+        "baselineSourceSignalSlot": "source_signal_guidance",
+        "bodyText": "- Use the current source signal as a task constraint and convert it into direct implementation guidance.",
+        "callVisibilityMode": "deterministic",
+        "canExpandInMoreThorough": true,
+        "canGroundInMoreProjectGrounded": true,
+        "canMergeInShorter": false,
+        "confirmationPresent": false,
+        "confirmationRequired": false,
+        "contentTemplateRuntimeSeamUse": "none",
+        "depthState": "required_survivor",
+        "evidenceStatus": "present",
+        "fallbackBehavior": "none",
+        "familyId": "issue_debug",
+        "feedbackSensitivity": "protected",
+        "groundedFactValues": [],
+        "handoffCapabilityFlags": [
+          "no_runtime_sequence_v1",
+        ],
+        "handoffFlags": [
+          "no_runtime_sequence_v1",
+        ],
+        "isEditable": true,
+        "mandatoryFloor": true,
+        "originalTextRefs": [
+          {
+            "endOffset": -1,
+            "refId": "pe:facade-nonseq-b-explain:route:section:8:source_signal_guidance:otr:1",
+            "refusalReason": "not_found_in_original",
+            "resolution": "refused",
+            "sectionId": "pe:facade-nonseq-b-explain:route:section:8:source_signal_guidance",
+            "startOffset": -1,
+          },
+        ],
+        "primaryIntent": "issue_debug.failing_test",
+        "privacyClass": "public_safe",
+        "promptPointRefs": [],
+        "publicCopySafe": true,
+        "publicExplanationCategory": "source_coverage",
+        "registryNamespace": "prompt-enhancement-templates",
+        "removalFeedbackPolicy": "typed_event_required",
+        "requiredSurvivor": true,
+        "requirementSourceStatus": "not_applicable",
+        "routeCandidateRefs": [
+          "pe-route-issue_debug-failing_test",
+        ],
+        "safetyFlags": [
+          "source_honesty",
+          "no_authority_escalation",
+        ],
+        "sectionId": "pe:facade-nonseq-b-explain:route:section:8:source_signal_guidance",
+        "sectionKind": "source_signal_guidance",
+        "sensitivityFlags": [],
+        "slotEvidenceStatus": "present",
+        "slotObligations": [
+          "baseline_source_signal",
+          "source_kind_id_evidence_metadata",
+          "public_safe_why_help_support",
+        ],
+        "sourceEvidenceStatus": "present",
+        "sourceFactIds": [
+          "guidance_fact:pe-fact-stage-0",
+        ],
+        "sourceIds": [
+          "prompt:1",
+        ],
+        "sourceKind": "stage_or_absence_signal",
+        "sourceTemplateType": "prompt_enhancement_template",
+        "spanRefs": [
+          {
+            "endOffset": 1174,
+            "sectionId": "pe:facade-nonseq-b-explain:route:section:8:source_signal_guidance",
+            "sourceRefs": [
+              "src-a-1",
+            ],
+            "spanMappingStatus": "exact",
+            "spanRefId": "pe:facade-nonseq-b-explain:route:section:8:source_signal_guidance:span:1",
+            "startOffset": 1046,
+            "textStoragePolicy": "text_in_body_only",
+          },
+        ],
+        "templateType": "prompt-enhancement-template",
+        "title": "Source Signal Guidance",
+        "transformReasonCodes": [
+          "rendered_deterministically",
+          "no_original_text_quoted",
+        ],
+        "validationStatus": "valid",
+        "whyHelpReasonCodes": [
+          "guidance_fact:pe-fact-stage-0",
         ],
       },
     ],
@@ -3674,25 +4267,37 @@ Project Grounding Facts:
     ],
     "sourceFactIds": [
       "section_kind:original_request_or_goal",
-      "section_kind:acceptance_or_output_expectation",
+      "section_kind:test_command_output",
+      "section_kind:fixture_mock_context",
+      "section_kind:reproduction_or_evidence",
+      "section_kind:narrow_fix_boundary",
       "section_kind:verification_or_test_plan",
-      "guidance_fact:pe-fact-stage-0",
       "section_kind:project_grounding_facts",
+      "guidance_fact:pe-fact-stage-0",
     ],
     "text": "My original request (verbatim):
-Fix the failing payment test and explain the verification.
+Fix the failing test in the payment flow and explain what caused it.
 
-Acceptance Or Output Expectation:
-- State the expected output and acceptance criteria clearly enough that the implementation can be checked.
+Test Command Output:
+- Cover Test Command Output for this request with concrete, source-backed specifics — state what is required, how to implement it, and how to verify it.
+
+Fixture Mock Context:
+- Cover Fixture Mock Context for this request with concrete, source-backed specifics — state what is required, how to implement it, and how to verify it.
+
+Reproduction Or Evidence:
+- Capture the failing behavior, reproduction path, observed evidence, and expected behavior before changing code.
+
+Narrow Fix Boundary:
+- Cover Narrow Fix Boundary for this request with concrete, source-backed specifics — state what is required, how to implement it, and how to verify it.
 
 Verification Or Test Plan:
 - Include the verification command, focused scenario, or regression check that should prove the change.
 
-Source Signal Guidance:
-- Use the current source signal as a task constraint and convert it into direct implementation guidance.
-
 Project Grounding Facts:
-- Ground the request in current project facts and source references without inventing missing implementation details.",
+- Ground the request in current project facts and source references without inventing missing implementation details.
+
+Source Signal Guidance:
+- Use the current source signal as a task constraint and convert it into direct implementation guidance.",
     "userDirtyState": "clean",
   },
   "delivery": {
@@ -3750,8 +4355,8 @@ Project Grounding Facts:
   "ownership": {
     "excludesPrivatePlanningLeakage": true,
     "fixtureIds": [
-      "route-quick-local-polish",
-      "eval-quick-local-polish",
+      "route-issue-debug-failing-test",
+      "eval-issue-debug-failing-test",
     ],
     "launchBoundaryRecheckRef": "launch_boundary_recheck_pending",
     "owners": [
@@ -3765,16 +4370,20 @@ Project Grounding Facts:
   "routeDecision": {
     "ambiguityState": "clear",
     "candidateRouteIds": [
-      "pe-route-quick_improvement-local_polish_or_small_improvement",
+      "pe-route-issue_debug-failing_test",
+      "pe-route-issue_debug-new_bug_report",
+      "pe-route-issue_debug-regression_after_recent_change",
     ],
     "capabilityOverlays": [
       "capability.verification_required",
-      "capability.source_signal_guidance",
       "capability.project_grounding",
+      "capability.source_signal_guidance",
+      "capability.reproduction_or_evidence_needed",
     ],
     "compoundPromptState": "multi_point_same_intent",
+    "debugEvidenceObserved": [],
     "fallbackMode": "none",
-    "familyId": "quick_improvement",
+    "familyId": "issue_debug",
     "llmRoutePolicy": {
       "costWorksheetRow": "not_applicable_deterministic",
       "freeformRouteOutputAllowed": false,
@@ -3782,12 +4391,12 @@ Project Grounding Facts:
       "owner": "content_semantics",
     },
     "nonPrimaryUserIntentHandling": "covered_by_secondary_tag",
-    "primaryIntent": "quick_improvement.local_polish_or_small_improvement",
+    "primaryIntent": "issue_debug.failing_test",
     "promptReviewOrigin": "user_authored_current_prompt",
     "promptReviewProcessingPolicy": "eligible_for_initial_pe_route",
     "registryLinkedFixtureIds": [
-      "route-quick-local-polish",
-      "eval-quick-local-polish",
+      "route-issue-debug-failing-test",
+      "eval-issue-debug-failing-test",
     ],
     "rejectedRouteReasonCodes": [
       "weaker_than_current_intent",
@@ -3809,8 +4418,9 @@ Project Grounding Facts:
       {
         "capabilityIds": [
           "capability.verification_required",
-          "capability.source_signal_guidance",
           "capability.project_grounding",
+          "capability.source_signal_guidance",
+          "capability.reproduction_or_evidence_needed",
         ],
         "confidence": "strong",
         "evidenceRefs": [
@@ -3821,10 +4431,50 @@ Project Grounding Facts:
           "transcript_path:not_authority",
           "stage2_selection:supplementary_present",
         ],
-        "familyId": "quick_improvement",
-        "primaryIntent": "quick_improvement.local_polish_or_small_improvement",
-        "routeId": "pe-route-quick_improvement-local_polish_or_small_improvement",
+        "familyId": "issue_debug",
+        "primaryIntent": "issue_debug.failing_test",
+        "routeId": "pe-route-issue_debug-failing_test",
         "state": "selected",
+      },
+      {
+        "capabilityIds": [
+          "capability.verification_required",
+          "capability.project_grounding",
+          "capability.source_signal_guidance",
+        ],
+        "confidence": "partial",
+        "evidenceRefs": [
+          "source_a:current_prompt",
+          "stage:task_breakdown->implementation",
+          "trigger_kind:stage_transition",
+          "source_fact:src-a-1",
+          "transcript_path:not_authority",
+          "stage2_selection:supplementary_present",
+        ],
+        "familyId": "issue_debug",
+        "primaryIntent": "issue_debug.new_bug_report",
+        "routeId": "pe-route-issue_debug-new_bug_report",
+        "state": "rejected",
+      },
+      {
+        "capabilityIds": [
+          "capability.verification_required",
+          "capability.project_grounding",
+          "capability.source_signal_guidance",
+        ],
+        "confidence": "partial",
+        "evidenceRefs": [
+          "source_a:current_prompt",
+          "stage:task_breakdown->implementation",
+          "trigger_kind:stage_transition",
+          "source_fact:src-a-1",
+          "transcript_path:not_authority",
+          "stage2_selection:supplementary_present",
+        ],
+        "familyId": "issue_debug",
+        "primaryIntent": "issue_debug.regression_after_recent_change",
+        "routeId": "pe-route-issue_debug-regression_after_recent_change",
+        "state": "rejected",
       },
     ],
     "routeConfidence": "strong",
@@ -3848,7 +4498,11 @@ Project Grounding Facts:
     "secondaryIntentTags": [],
     "sectionPlanRefs": [
       "pe:facade-nonseq-b-explain:route:section:1:original_request_or_goal",
-      "pe:facade-nonseq-b-explain:route:section:2:acceptance_or_output_expectation",
+      "pe:facade-nonseq-b-explain:route:section:2:test_command_output",
+      "pe:facade-nonseq-b-explain:route:section:3:fixture_mock_context",
+      "pe:facade-nonseq-b-explain:route:section:4:reproduction_or_evidence",
+      "pe:facade-nonseq-b-explain:route:section:5:narrow_fix_boundary",
+      "pe:facade-nonseq-b-explain:route:section:6:verification_or_test_plan",
     ],
     "selectedTemplateRef": {
       "allowedSourceBSupportKinds": [
@@ -3878,21 +4532,25 @@ Project Grounding Facts:
         "source_a_or_explicit_no_popup_reason_required",
         "source_b_support_only",
       ],
-      "baselineSourceSignalSlot": "not_applicable",
+      "baselineSourceSignalSlot": "source_signal_guidance",
       "capabilityIds": [
         "capability.verification_required",
+        "capability.project_grounding",
+        "capability.source_signal_guidance",
       ],
       "capabilityRequirements": [
         "capability.verification_required",
+        "capability.project_grounding",
+        "capability.source_signal_guidance",
       ],
       "composerPolicy": "deterministic_only",
       "confirmationRequirementPolicy": "preserve_when_required",
       "contentTemplateInputRefs": [],
       "defaultLevel": "default",
       "deterministicRendererId": "section_planner_pending",
-      "displayLabel": "quick_improvement.local_polish_or_small_improvement",
+      "displayLabel": "issue_debug.failing_test",
       "evaluationFixtureIds": [
-        "eval-quick-local-polish",
+        "eval-issue-debug-failing-test",
       ],
       "fallbackPolicy": "deterministic_body",
       "fallbackReasonCodes": [
@@ -3902,9 +4560,9 @@ Project Grounding Facts:
         "validation_failed",
         "not_applicable",
       ],
-      "familyId": "quick_improvement",
+      "familyId": "issue_debug",
       "intentTags": [
-        "quick_improvement.local_polish_or_small_improvement",
+        "issue_debug.failing_test",
       ],
       "invariantIds": [
         "no_pe_only_classifier",
@@ -3920,7 +4578,7 @@ Project Grounding Facts:
       ],
       "originalPromptPreservationPolicy": "visible_verbatim_required",
       "ownerArea": "content_semantics",
-      "primaryIntent": "quick_improvement.local_polish_or_small_improvement",
+      "primaryIntent": "issue_debug.failing_test",
       "publicSafeDiagnosticCodes": [
         "fallback_or_no_popup",
         "source_coverage",
@@ -3933,11 +4591,15 @@ Project Grounding Facts:
       "registryNamespace": "prompt-enhancement-templates",
       "requiredSectionKinds": [
         "original_request_or_goal",
-        "acceptance_or_output_expectation",
+        "test_command_output",
+        "fixture_mock_context",
+        "reproduction_or_evidence",
+        "narrow_fix_boundary",
+        "verification_or_test_plan",
       ],
       "requiredSourceACoverage": "visible_original_prompt",
       "routeFixtureIds": [
-        "route-quick-local-polish",
+        "route-issue-debug-failing-test",
       ],
       "safetyHookIds": [
         "source_honesty",
@@ -3948,8 +4610,14 @@ Project Grounding Facts:
       "sectionOrderPolicy": "fixed_required_before_optional",
       "sectionSlots": [
         "original_request_or_goal",
-        "acceptance_or_output_expectation",
+        "test_command_output",
+        "fixture_mock_context",
+        "reproduction_or_evidence",
+        "narrow_fix_boundary",
         "verification_or_test_plan",
+        "ci_environment",
+        "flaky_check",
+        "regression",
       ],
       "sensitivityPolicy": "deterministic_flags_required",
       "sourceEvidenceStatusRules": [
@@ -3960,7 +4628,7 @@ Project Grounding Facts:
         "suppressed_for_privacy",
         "suppressed_for_safety",
       ],
-      "sourceGuidanceFloorPolicy": "explicit_fallback_reason",
+      "sourceGuidanceFloorPolicy": "required_when_popup_shown",
       "sourcePriorityState": "source_a_first",
       "supportedDirectionalActions": [
         "shorter",
@@ -3975,15 +4643,15 @@ Project Grounding Facts:
         "more_project_grounded",
       ],
       "targetScopePolicy": "source_a_plus_grounded_support",
-      "templateId": "pe-route-quick_improvement-local_polish_or_small_improvement",
+      "templateId": "pe-route-issue_debug-failing_test",
       "templateType": "prompt-enhancement-template",
       "testFixtureIds": [
-        "route-quick-local-polish",
-        "eval-quick-local-polish",
+        "route-issue-debug-failing-test",
+        "eval-issue-debug-failing-test",
       ],
       "tokenTimeoutProfileRef": "cost_visible_call_policy_not_used_by_routing",
       "triggerHints": [
-        "route-quick-local-polish",
+        "route-issue-debug-failing-test",
       ],
       "validationRequirementIds": [
         "source_a_scope",
@@ -4000,7 +4668,7 @@ Project Grounding Facts:
       "transcript",
       "transcript_path:not_authority",
     ],
-    "sourceSignalPolicy": "metadata_only",
+    "sourceSignalPolicy": "render_baseline_guidance",
     "sourceSignalRole": "supplementary_stage2_present",
     "stage2SelectionState": "supplementary_present",
     "suppressionState": "not_suppressed",
@@ -4014,18 +4682,21 @@ Project Grounding Facts:
     "confidence": "high",
     "priorFeedbackEvidenceRefs": [],
     "reasonCodes": [
-      "selected_intent:quick_improvement.local_polish_or_small_improvement",
+      "selected_intent:issue_debug.failing_test",
     ],
     "resetExpiryState": "not_applicable",
-    "scopedPromptKindKey": "quick_improvement.local_polish_or_small_improvement",
-    "selectedFamilyId": "quick_improvement",
+    "scopedPromptKindKey": "issue_debug.failing_test",
+    "selectedFamilyId": "issue_debug",
     "selectedLevelState": "default",
     "selectedSectionPivotIds": [
       "pe:facade-nonseq-b-explain:route:section:1:original_request_or_goal",
-      "pe:facade-nonseq-b-explain:route:section:2:acceptance_or_output_expectation",
-      "pe:facade-nonseq-b-explain:route:section:3:verification_or_test_plan",
-      "pe:facade-nonseq-b-explain:route:section:4:source_signal_guidance",
-      "pe:facade-nonseq-b-explain:route:section:5:project_grounding_facts",
+      "pe:facade-nonseq-b-explain:route:section:2:test_command_output",
+      "pe:facade-nonseq-b-explain:route:section:3:fixture_mock_context",
+      "pe:facade-nonseq-b-explain:route:section:4:reproduction_or_evidence",
+      "pe:facade-nonseq-b-explain:route:section:5:narrow_fix_boundary",
+      "pe:facade-nonseq-b-explain:route:section:6:verification_or_test_plan",
+      "pe:facade-nonseq-b-explain:route:section:7:project_grounding_facts",
+      "pe:facade-nonseq-b-explain:route:section:8:source_signal_guidance",
     ],
     "selectedTagIds": [],
     "state": "show",
@@ -4152,19 +4823,28 @@ Project Grounding Facts:
       "originalPromptPreservation": "visible_verbatim",
       "sendPolicy": "send_current",
       "text": "My original request (verbatim):
-Fix the failing payment test and explain the verification.
+Fix the failing test in the payment flow and explain what caused it.
 
-Acceptance Or Output Expectation:
-- State the expected output and acceptance criteria clearly enough that the implementation can be checked.
+Test Command Output:
+- Cover Test Command Output for this request with concrete, source-backed specifics — state what is required, how to implement it, and how to verify it.
+
+Fixture Mock Context:
+- Cover Fixture Mock Context for this request with concrete, source-backed specifics — state what is required, how to implement it, and how to verify it.
+
+Reproduction Or Evidence:
+- Capture the failing behavior, reproduction path, observed evidence, and expected behavior before changing code.
+
+Narrow Fix Boundary:
+- Cover Narrow Fix Boundary for this request with concrete, source-backed specifics — state what is required, how to implement it, and how to verify it.
 
 Verification Or Test Plan:
 - Include the verification command, focused scenario, or regression check that should prove the change.
 
-Source Signal Guidance:
-- Use the current source signal as a task constraint and convert it into direct implementation guidance.
-
 Project Grounding Facts:
-- Ground the request in current project facts and source references without inventing missing implementation details.",
+- Ground the request in current project facts and source references without inventing missing implementation details.
+
+Source Signal Guidance:
+- Use the current source signal as a task constraint and convert it into direct implementation guidance.",
     },
     "diagnostics": [
       {
@@ -4186,7 +4866,7 @@ Project Grounding Facts:
     "hidesVisibleSectionControls": true,
     "pinchLabel": {
       "derivedFrom": "family",
-      "text": "Quick polish.",
+      "text": "Bug hunt.",
     },
     "publicTrustCues": [
       {
@@ -4220,13 +4900,13 @@ Project Grounding Facts:
     ],
     "sectionsForFeedback": [
       {
-        "baselineSourceSignalSlot": "not_applicable",
+        "baselineSourceSignalSlot": "source_signal_guidance",
         "callVisibilityMode": "deterministic",
         "fallbackMode": "none",
-        "familyId": "quick_improvement",
+        "familyId": "issue_debug",
         "label": "My original request (verbatim)",
         "preciseFeedbackAllowed": false,
-        "primaryIntent": "quick_improvement.local_polish_or_small_improvement",
+        "primaryIntent": "issue_debug.failing_test",
         "publicSafeExplanationCategory": "source_coverage",
         "requirementSourceStatus": "not_applicable",
         "safetyFlags": [
@@ -4246,7 +4926,7 @@ Project Grounding Facts:
         ],
         "spanRefs": [
           {
-            "endOffset": 90,
+            "endOffset": 100,
             "sectionId": "pe:facade-nonseq-b-explain:route:section:1:original_request_or_goal",
             "sourceRefs": [
               "src-a-1",
@@ -4261,21 +4941,21 @@ Project Grounding Facts:
         "validationStatus": "valid",
       },
       {
-        "baselineSourceSignalSlot": "not_applicable",
+        "baselineSourceSignalSlot": "source_signal_guidance",
         "callVisibilityMode": "deterministic",
         "fallbackMode": "none",
-        "familyId": "quick_improvement",
-        "label": "Acceptance Or Output Expectation",
+        "familyId": "issue_debug",
+        "label": "Test Command Output",
         "preciseFeedbackAllowed": false,
-        "primaryIntent": "quick_improvement.local_polish_or_small_improvement",
+        "primaryIntent": "issue_debug.failing_test",
         "publicSafeExplanationCategory": "source_coverage",
         "requirementSourceStatus": "not_applicable",
         "safetyFlags": [
           "source_honesty",
           "no_authority_escalation",
         ],
-        "sectionId": "pe:facade-nonseq-b-explain:route:section:2:acceptance_or_output_expectation",
-        "sectionKind": "acceptance_or_output_expectation",
+        "sectionId": "pe:facade-nonseq-b-explain:route:section:2:test_command_output",
+        "sectionKind": "test_command_output",
         "sensitivityFlags": [],
         "slotEvidenceStatus": "present",
         "sourceEvidenceStatus": "present",
@@ -4287,14 +4967,14 @@ Project Grounding Facts:
         ],
         "spanRefs": [
           {
-            "endOffset": 232,
-            "sectionId": "pe:facade-nonseq-b-explain:route:section:2:acceptance_or_output_expectation",
+            "endOffset": 275,
+            "sectionId": "pe:facade-nonseq-b-explain:route:section:2:test_command_output",
             "sourceRefs": [
               "src-a-1",
             ],
             "spanMappingStatus": "exact",
-            "spanRefId": "pe:facade-nonseq-b-explain:route:section:2:acceptance_or_output_expectation:span:1",
-            "startOffset": 92,
+            "spanRefId": "pe:facade-nonseq-b-explain:route:section:2:test_command_output:span:1",
+            "startOffset": 102,
             "textStoragePolicy": "text_in_body_only",
           },
         ],
@@ -4302,20 +4982,143 @@ Project Grounding Facts:
         "validationStatus": "valid",
       },
       {
-        "baselineSourceSignalSlot": "not_applicable",
+        "baselineSourceSignalSlot": "source_signal_guidance",
         "callVisibilityMode": "deterministic",
         "fallbackMode": "none",
-        "familyId": "quick_improvement",
-        "label": "Verification Or Test Plan",
+        "familyId": "issue_debug",
+        "label": "Fixture Mock Context",
         "preciseFeedbackAllowed": false,
-        "primaryIntent": "quick_improvement.local_polish_or_small_improvement",
+        "primaryIntent": "issue_debug.failing_test",
         "publicSafeExplanationCategory": "source_coverage",
         "requirementSourceStatus": "not_applicable",
         "safetyFlags": [
           "source_honesty",
           "no_authority_escalation",
         ],
-        "sectionId": "pe:facade-nonseq-b-explain:route:section:3:verification_or_test_plan",
+        "sectionId": "pe:facade-nonseq-b-explain:route:section:3:fixture_mock_context",
+        "sectionKind": "fixture_mock_context",
+        "sensitivityFlags": [],
+        "slotEvidenceStatus": "present",
+        "sourceEvidenceStatus": "present",
+        "sourceIds": [
+          "prompt:1",
+        ],
+        "sourceKinds": [
+          "source_a_user_prompt",
+        ],
+        "spanRefs": [
+          {
+            "endOffset": 452,
+            "sectionId": "pe:facade-nonseq-b-explain:route:section:3:fixture_mock_context",
+            "sourceRefs": [
+              "src-a-1",
+            ],
+            "spanMappingStatus": "exact",
+            "spanRefId": "pe:facade-nonseq-b-explain:route:section:3:fixture_mock_context:span:1",
+            "startOffset": 277,
+            "textStoragePolicy": "text_in_body_only",
+          },
+        ],
+        "templateType": "prompt-enhancement-template",
+        "validationStatus": "valid",
+      },
+      {
+        "baselineSourceSignalSlot": "source_signal_guidance",
+        "callVisibilityMode": "deterministic",
+        "fallbackMode": "none",
+        "familyId": "issue_debug",
+        "label": "Reproduction Or Evidence",
+        "preciseFeedbackAllowed": false,
+        "primaryIntent": "issue_debug.failing_test",
+        "publicSafeExplanationCategory": "source_coverage",
+        "requirementSourceStatus": "not_applicable",
+        "safetyFlags": [
+          "source_honesty",
+          "no_authority_escalation",
+        ],
+        "sectionId": "pe:facade-nonseq-b-explain:route:section:4:reproduction_or_evidence",
+        "sectionKind": "reproduction_or_evidence",
+        "sensitivityFlags": [],
+        "slotEvidenceStatus": "present",
+        "sourceEvidenceStatus": "present",
+        "sourceIds": [
+          "prompt:1",
+        ],
+        "sourceKinds": [
+          "source_a_user_prompt",
+        ],
+        "spanRefs": [
+          {
+            "endOffset": 593,
+            "sectionId": "pe:facade-nonseq-b-explain:route:section:4:reproduction_or_evidence",
+            "sourceRefs": [
+              "src-a-1",
+            ],
+            "spanMappingStatus": "exact",
+            "spanRefId": "pe:facade-nonseq-b-explain:route:section:4:reproduction_or_evidence:span:1",
+            "startOffset": 454,
+            "textStoragePolicy": "text_in_body_only",
+          },
+        ],
+        "templateType": "prompt-enhancement-template",
+        "validationStatus": "valid",
+      },
+      {
+        "baselineSourceSignalSlot": "source_signal_guidance",
+        "callVisibilityMode": "deterministic",
+        "fallbackMode": "none",
+        "familyId": "issue_debug",
+        "label": "Narrow Fix Boundary",
+        "preciseFeedbackAllowed": false,
+        "primaryIntent": "issue_debug.failing_test",
+        "publicSafeExplanationCategory": "source_coverage",
+        "requirementSourceStatus": "not_applicable",
+        "safetyFlags": [
+          "source_honesty",
+          "no_authority_escalation",
+        ],
+        "sectionId": "pe:facade-nonseq-b-explain:route:section:5:narrow_fix_boundary",
+        "sectionKind": "narrow_fix_boundary",
+        "sensitivityFlags": [],
+        "slotEvidenceStatus": "present",
+        "sourceEvidenceStatus": "present",
+        "sourceIds": [
+          "prompt:1",
+        ],
+        "sourceKinds": [
+          "source_a_user_prompt",
+        ],
+        "spanRefs": [
+          {
+            "endOffset": 768,
+            "sectionId": "pe:facade-nonseq-b-explain:route:section:5:narrow_fix_boundary",
+            "sourceRefs": [
+              "src-a-1",
+            ],
+            "spanMappingStatus": "exact",
+            "spanRefId": "pe:facade-nonseq-b-explain:route:section:5:narrow_fix_boundary:span:1",
+            "startOffset": 595,
+            "textStoragePolicy": "text_in_body_only",
+          },
+        ],
+        "templateType": "prompt-enhancement-template",
+        "validationStatus": "valid",
+      },
+      {
+        "baselineSourceSignalSlot": "source_signal_guidance",
+        "callVisibilityMode": "deterministic",
+        "fallbackMode": "none",
+        "familyId": "issue_debug",
+        "label": "Verification Or Test Plan",
+        "preciseFeedbackAllowed": false,
+        "primaryIntent": "issue_debug.failing_test",
+        "publicSafeExplanationCategory": "source_coverage",
+        "requirementSourceStatus": "not_applicable",
+        "safetyFlags": [
+          "source_honesty",
+          "no_authority_escalation",
+        ],
+        "sectionId": "pe:facade-nonseq-b-explain:route:section:6:verification_or_test_plan",
         "sectionKind": "verification_or_test_plan",
         "sensitivityFlags": [],
         "slotEvidenceStatus": "present",
@@ -4328,14 +5131,14 @@ Project Grounding Facts:
         ],
         "spanRefs": [
           {
-            "endOffset": 364,
-            "sectionId": "pe:facade-nonseq-b-explain:route:section:3:verification_or_test_plan",
+            "endOffset": 900,
+            "sectionId": "pe:facade-nonseq-b-explain:route:section:6:verification_or_test_plan",
             "sourceRefs": [
               "src-a-1",
             ],
             "spanMappingStatus": "exact",
-            "spanRefId": "pe:facade-nonseq-b-explain:route:section:3:verification_or_test_plan:span:1",
-            "startOffset": 234,
+            "spanRefId": "pe:facade-nonseq-b-explain:route:section:6:verification_or_test_plan:span:1",
+            "startOffset": 770,
             "textStoragePolicy": "text_in_body_only",
           },
         ],
@@ -4343,61 +5146,20 @@ Project Grounding Facts:
         "validationStatus": "valid",
       },
       {
-        "baselineSourceSignalSlot": "not_applicable",
+        "baselineSourceSignalSlot": "source_signal_guidance",
         "callVisibilityMode": "deterministic",
         "fallbackMode": "none",
-        "familyId": "quick_improvement",
-        "label": "Source Signal Guidance",
-        "preciseFeedbackAllowed": false,
-        "primaryIntent": "quick_improvement.local_polish_or_small_improvement",
-        "publicSafeExplanationCategory": "source_coverage",
-        "requirementSourceStatus": "not_applicable",
-        "safetyFlags": [
-          "source_honesty",
-          "no_authority_escalation",
-        ],
-        "sectionId": "pe:facade-nonseq-b-explain:route:section:4:source_signal_guidance",
-        "sectionKind": "source_signal_guidance",
-        "sensitivityFlags": [],
-        "slotEvidenceStatus": "present",
-        "sourceEvidenceStatus": "present",
-        "sourceIds": [
-          "prompt:1",
-        ],
-        "sourceKinds": [
-          "stage_or_absence_signal",
-        ],
-        "spanRefs": [
-          {
-            "endOffset": 494,
-            "sectionId": "pe:facade-nonseq-b-explain:route:section:4:source_signal_guidance",
-            "sourceRefs": [
-              "src-a-1",
-            ],
-            "spanMappingStatus": "exact",
-            "spanRefId": "pe:facade-nonseq-b-explain:route:section:4:source_signal_guidance:span:1",
-            "startOffset": 366,
-            "textStoragePolicy": "text_in_body_only",
-          },
-        ],
-        "templateType": "prompt-enhancement-template",
-        "validationStatus": "valid",
-      },
-      {
-        "baselineSourceSignalSlot": "not_applicable",
-        "callVisibilityMode": "deterministic",
-        "fallbackMode": "none",
-        "familyId": "quick_improvement",
+        "familyId": "issue_debug",
         "label": "Project Grounding Facts",
         "preciseFeedbackAllowed": false,
-        "primaryIntent": "quick_improvement.local_polish_or_small_improvement",
+        "primaryIntent": "issue_debug.failing_test",
         "publicSafeExplanationCategory": "source_coverage",
         "requirementSourceStatus": "not_applicable",
         "safetyFlags": [
           "source_honesty",
           "no_authority_escalation",
         ],
-        "sectionId": "pe:facade-nonseq-b-explain:route:section:5:project_grounding_facts",
+        "sectionId": "pe:facade-nonseq-b-explain:route:section:7:project_grounding_facts",
         "sectionKind": "project_grounding_facts",
         "sensitivityFlags": [],
         "slotEvidenceStatus": "present",
@@ -4410,14 +5172,55 @@ Project Grounding Facts:
         ],
         "spanRefs": [
           {
-            "endOffset": 638,
-            "sectionId": "pe:facade-nonseq-b-explain:route:section:5:project_grounding_facts",
+            "endOffset": 1044,
+            "sectionId": "pe:facade-nonseq-b-explain:route:section:7:project_grounding_facts",
             "sourceRefs": [
               "src-a-1",
             ],
             "spanMappingStatus": "exact",
-            "spanRefId": "pe:facade-nonseq-b-explain:route:section:5:project_grounding_facts:span:1",
-            "startOffset": 496,
+            "spanRefId": "pe:facade-nonseq-b-explain:route:section:7:project_grounding_facts:span:1",
+            "startOffset": 902,
+            "textStoragePolicy": "text_in_body_only",
+          },
+        ],
+        "templateType": "prompt-enhancement-template",
+        "validationStatus": "valid",
+      },
+      {
+        "baselineSourceSignalSlot": "source_signal_guidance",
+        "callVisibilityMode": "deterministic",
+        "fallbackMode": "none",
+        "familyId": "issue_debug",
+        "label": "Source Signal Guidance",
+        "preciseFeedbackAllowed": false,
+        "primaryIntent": "issue_debug.failing_test",
+        "publicSafeExplanationCategory": "source_coverage",
+        "requirementSourceStatus": "not_applicable",
+        "safetyFlags": [
+          "source_honesty",
+          "no_authority_escalation",
+        ],
+        "sectionId": "pe:facade-nonseq-b-explain:route:section:8:source_signal_guidance",
+        "sectionKind": "source_signal_guidance",
+        "sensitivityFlags": [],
+        "slotEvidenceStatus": "present",
+        "sourceEvidenceStatus": "present",
+        "sourceIds": [
+          "prompt:1",
+        ],
+        "sourceKinds": [
+          "stage_or_absence_signal",
+        ],
+        "spanRefs": [
+          {
+            "endOffset": 1174,
+            "sectionId": "pe:facade-nonseq-b-explain:route:section:8:source_signal_guidance",
+            "sourceRefs": [
+              "src-a-1",
+            ],
+            "spanMappingStatus": "exact",
+            "spanRefId": "pe:facade-nonseq-b-explain:route:section:8:source_signal_guidance:span:1",
+            "startOffset": 1046,
             "textStoragePolicy": "text_in_body_only",
           },
         ],
@@ -4686,6 +5489,7 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
         "sectionPlanId": "pe:facade-nonseq-c-compound-shaped:route:section-plan:1:original_request_or_goal",
         "sensitivityFlags": [],
         "slotEvidenceStatus": "present",
+        "slotObligations": [],
         "sourceEvidenceStatus": "present",
         "sourceIds": [
           "prompt:1",
@@ -4743,6 +5547,7 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
         "sectionPlanId": "pe:facade-nonseq-c-compound-shaped:route:section-plan:2:context_and_constraints",
         "sensitivityFlags": [],
         "slotEvidenceStatus": "present",
+        "slotObligations": [],
         "sourceEvidenceStatus": "present",
         "sourceIds": [
           "prompt:1",
@@ -4800,6 +5605,7 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
         "sectionPlanId": "pe:facade-nonseq-c-compound-shaped:route:section-plan:3:approach_or_steps",
         "sensitivityFlags": [],
         "slotEvidenceStatus": "present",
+        "slotObligations": [],
         "sourceEvidenceStatus": "present",
         "sourceIds": [
           "prompt:1",
@@ -4857,6 +5663,7 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
         "sectionPlanId": "pe:facade-nonseq-c-compound-shaped:route:section-plan:4:acceptance_or_output_expectation",
         "sensitivityFlags": [],
         "slotEvidenceStatus": "present",
+        "slotObligations": [],
         "sourceEvidenceStatus": "present",
         "sourceIds": [
           "prompt:1",
@@ -4914,6 +5721,9 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
         "sectionPlanId": "pe:facade-nonseq-c-compound-shaped:route:section-plan:5:verification_or_test_plan",
         "sensitivityFlags": [],
         "slotEvidenceStatus": "present",
+        "slotObligations": [
+          "family_specific_verification",
+        ],
         "sourceEvidenceStatus": "present",
         "sourceIds": [
           "prompt:1",
@@ -4971,6 +5781,11 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
         "sectionPlanId": "pe:facade-nonseq-c-compound-shaped:route:section-plan:6:project_grounding_facts",
         "sensitivityFlags": [],
         "slotEvidenceStatus": "present",
+        "slotObligations": [
+          "project_source_fact_slots",
+          "known_unknown_wording",
+          "source_ids_evidence_state",
+        ],
         "sourceEvidenceStatus": "present",
         "sourceIds": [
           "prompt:1",
@@ -5028,6 +5843,11 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
         "sectionPlanId": "pe:facade-nonseq-c-compound-shaped:route:section-plan:7:source_signal_guidance",
         "sensitivityFlags": [],
         "slotEvidenceStatus": "present",
+        "slotObligations": [
+          "baseline_source_signal",
+          "source_kind_id_evidence_metadata",
+          "public_safe_why_help_support",
+        ],
         "sourceEvidenceStatus": "present",
         "sourceIds": [
           "prompt:1",
@@ -5095,6 +5915,13 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
     "providerFailureState": "none",
     "regionalDataResidencyAssumption": "no_regional_or_data_residency_uplift_selected",
     "retryCount": undefined,
+    "runtimeSeamSummary": {
+      "runtimePaths": [
+        "unstamped",
+      ],
+      "totalPayloadWeight": 10,
+      "unknownRuntimePathCount": 0,
+    },
     "telemetrySafeMeasurementFields": [
       "call_id",
       "owner",
@@ -5397,6 +6224,7 @@ Source Signal Guidance:
         "fallbackBehavior": "none",
         "familyId": "feature_delivery",
         "feedbackSensitivity": "protected",
+        "groundedFactValues": [],
         "handoffCapabilityFlags": [
           "no_runtime_sequence_v1",
         ],
@@ -5434,6 +6262,7 @@ Source Signal Guidance:
         "sectionKind": "original_request_or_goal",
         "sensitivityFlags": [],
         "slotEvidenceStatus": "present",
+        "slotObligations": [],
         "sourceEvidenceStatus": "present",
         "sourceFactIds": [
           "section_kind:original_request_or_goal",
@@ -5490,6 +6319,7 @@ Source Signal Guidance:
         "fallbackBehavior": "none",
         "familyId": "feature_delivery",
         "feedbackSensitivity": "protected",
+        "groundedFactValues": [],
         "handoffCapabilityFlags": [
           "no_runtime_sequence_v1",
         ],
@@ -5528,6 +6358,7 @@ Source Signal Guidance:
         "sectionKind": "context_and_constraints",
         "sensitivityFlags": [],
         "slotEvidenceStatus": "present",
+        "slotObligations": [],
         "sourceEvidenceStatus": "present",
         "sourceFactIds": [
           "section_kind:context_and_constraints",
@@ -5584,6 +6415,7 @@ Source Signal Guidance:
         "fallbackBehavior": "none",
         "familyId": "feature_delivery",
         "feedbackSensitivity": "protected",
+        "groundedFactValues": [],
         "handoffCapabilityFlags": [
           "no_runtime_sequence_v1",
         ],
@@ -5622,6 +6454,7 @@ Source Signal Guidance:
         "sectionKind": "approach_or_steps",
         "sensitivityFlags": [],
         "slotEvidenceStatus": "present",
+        "slotObligations": [],
         "sourceEvidenceStatus": "present",
         "sourceFactIds": [
           "section_kind:approach_or_steps",
@@ -5678,6 +6511,7 @@ Source Signal Guidance:
         "fallbackBehavior": "none",
         "familyId": "feature_delivery",
         "feedbackSensitivity": "protected",
+        "groundedFactValues": [],
         "handoffCapabilityFlags": [
           "no_runtime_sequence_v1",
         ],
@@ -5716,6 +6550,7 @@ Source Signal Guidance:
         "sectionKind": "acceptance_or_output_expectation",
         "sensitivityFlags": [],
         "slotEvidenceStatus": "present",
+        "slotObligations": [],
         "sourceEvidenceStatus": "present",
         "sourceFactIds": [
           "section_kind:acceptance_or_output_expectation",
@@ -5772,6 +6607,7 @@ Source Signal Guidance:
         "fallbackBehavior": "none",
         "familyId": "feature_delivery",
         "feedbackSensitivity": "protected",
+        "groundedFactValues": [],
         "handoffCapabilityFlags": [
           "no_runtime_sequence_v1",
         ],
@@ -5810,6 +6646,9 @@ Source Signal Guidance:
         "sectionKind": "verification_or_test_plan",
         "sensitivityFlags": [],
         "slotEvidenceStatus": "present",
+        "slotObligations": [
+          "family_specific_verification",
+        ],
         "sourceEvidenceStatus": "present",
         "sourceFactIds": [
           "section_kind:verification_or_test_plan",
@@ -5866,6 +6705,7 @@ Source Signal Guidance:
         "fallbackBehavior": "none",
         "familyId": "feature_delivery",
         "feedbackSensitivity": "protected",
+        "groundedFactValues": [],
         "handoffCapabilityFlags": [
           "no_runtime_sequence_v1",
         ],
@@ -5904,6 +6744,11 @@ Source Signal Guidance:
         "sectionKind": "project_grounding_facts",
         "sensitivityFlags": [],
         "slotEvidenceStatus": "present",
+        "slotObligations": [
+          "project_source_fact_slots",
+          "known_unknown_wording",
+          "source_ids_evidence_state",
+        ],
         "sourceEvidenceStatus": "present",
         "sourceFactIds": [
           "section_kind:project_grounding_facts",
@@ -5960,6 +6805,7 @@ Source Signal Guidance:
         "fallbackBehavior": "none",
         "familyId": "feature_delivery",
         "feedbackSensitivity": "protected",
+        "groundedFactValues": [],
         "handoffCapabilityFlags": [
           "no_runtime_sequence_v1",
         ],
@@ -5998,6 +6844,11 @@ Source Signal Guidance:
         "sectionKind": "source_signal_guidance",
         "sensitivityFlags": [],
         "slotEvidenceStatus": "present",
+        "slotObligations": [
+          "baseline_source_signal",
+          "source_kind_id_evidence_metadata",
+          "public_safe_why_help_support",
+        ],
         "sourceEvidenceStatus": "present",
         "sourceFactIds": [
           "guidance_fact:pe-fact-stage-0",
@@ -6154,6 +7005,7 @@ Source Signal Guidance:
       "capability.source_signal_guidance",
     ],
     "compoundPromptState": "multi_point_same_intent",
+    "debugEvidenceObserved": [],
     "fallbackMode": "none",
     "familyId": "feature_delivery",
     "llmRoutePolicy": {
@@ -7218,6 +8070,11 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
     "providerFailureState": "none",
     "regionalDataResidencyAssumption": "no_regional_or_data_residency_uplift_selected",
     "retryCount": undefined,
+    "runtimeSeamSummary": {
+      "runtimePaths": [],
+      "totalPayloadWeight": 0,
+      "unknownRuntimePathCount": 0,
+    },
     "telemetrySafeMeasurementFields": [
       "call_id",
       "owner",
@@ -7364,7 +8221,7 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
     "promptReviewOrigin": "pe_generated_initial_send",
     "promptReviewProcessingPolicy": "metadata_only_skip_pe_route",
     "rawComposerOutput": "not_used_deterministic",
-    "renderedPromptBody": "Fix the failing payment test and explain the verification.",
+    "renderedPromptBody": "Fix the failing test in the payment flow and explain what caused it.",
     "routeDecisionId": "pe:facade-nonseq-d-nopopup-echo:route",
     "sentPromptOrigin": "user_authored_original_only",
     "sourceAttribution": [],
@@ -7404,16 +8261,16 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
     "originalAsSourceStatus": "original_only_sendable",
     "originalPromptPreservation": "fallback_original_only",
     "originalPromptSectionId": "not_applicable_original_only",
-    "originalPromptText": "Fix the failing payment test and explain the verification.",
+    "originalPromptText": "Fix the failing test in the payment flow and explain what caused it.",
     "promptReviewOrigin": "pe_generated_initial_send",
     "promptReviewProcessingPolicy": "metadata_only_skip_pe_route",
-    "renderedPromptBody": "Fix the failing payment test and explain the verification.",
+    "renderedPromptBody": "Fix the failing test in the payment flow and explain what caused it.",
     "routeDecisionId": "pe:facade-nonseq-d-nopopup-echo:route",
     "sections": [],
     "sentPromptOrigin": "user_authored_original_only",
     "sourceAttribution": [],
     "sourceFactIds": [],
-    "text": "Fix the failing payment test and explain the verification.",
+    "text": "Fix the failing test in the payment flow and explain what caused it.",
     "userDirtyState": "clean",
   },
   "delivery": {
@@ -7501,6 +8358,7 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
     ],
     "capabilityOverlays": [],
     "compoundPromptState": "multi_point_same_intent",
+    "debugEvidenceObserved": [],
     "fallbackMode": "skip_no_popup",
     "familyId": "quick_improvement",
     "llmRoutePolicy": {
@@ -7860,7 +8718,7 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
       "levelState": "default",
       "originalPromptPreservation": "fallback_original_only",
       "sendPolicy": "no_popup",
-      "text": "Fix the failing payment test and explain the verification.",
+      "text": "Fix the failing test in the payment flow and explain what caused it.",
     },
     "diagnostics": [
       {
@@ -8193,6 +9051,11 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
     "providerFailureState": "none",
     "regionalDataResidencyAssumption": "no_regional_or_data_residency_uplift_selected",
     "retryCount": undefined,
+    "runtimeSeamSummary": {
+      "runtimePaths": [],
+      "totalPayloadWeight": 0,
+      "unknownRuntimePathCount": 0,
+    },
     "telemetrySafeMeasurementFields": [
       "call_id",
       "owner",
@@ -8476,6 +9339,7 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
     ],
     "capabilityOverlays": [],
     "compoundPromptState": "single_intent",
+    "debugEvidenceObserved": [],
     "fallbackMode": "skip_no_popup",
     "familyId": "quick_improvement",
     "llmRoutePolicy": {

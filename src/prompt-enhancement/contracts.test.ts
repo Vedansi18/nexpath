@@ -266,7 +266,7 @@ const composerArtifactFields = {
   promptReviewProcessingPolicy: 'eligible_for_initial_pe_route',
   sentPromptOrigin: 'pe_baseline_generated_body',
   nexpathGeneratedPromptRef: 'body-1:generated:1',
-  renderedPromptBody: 'Original request:\nFix the failing payment test and explain the verification.\n\nPlan:\nReproduce, fix, and verify the failure.',
+  renderedPromptBody: 'Original request:\nFix the failing payment test, the test failure blocks ci, and explain the verification.\n\nPlan:\nReproduce, fix, and verify the failure.',
   originalPromptSectionId: 'section-original',
   sourceAttribution: [
     {
@@ -426,7 +426,7 @@ function validRequest(): PromptEnhancementPrepareRequestV1 {
     projectRoot: '/tmp/project',
     hostSurface: 'cli_stop_bridge',
     sourcePrompt: {
-      text: 'Fix the failing payment test and explain the verification.',
+      text: 'Fix the failing payment test, the test failure blocks ci, and explain the verification.',
       origin: 'user',
       capturedAt: 1,
       promptIndex: 4,
@@ -534,8 +534,8 @@ function validResult(): PromptEnhancementPrepareResultV1 {
       currentBodyId: 'body-1',
       bodyRevision: 1,
       ...composerArtifactFields,
-      text: 'Original request:\nFix the failing payment test and explain the verification.\n\nPlan:\nReproduce, fix, and verify the failure.',
-      originalPromptText: 'Fix the failing payment test and explain the verification.',
+      text: 'Original request:\nFix the failing payment test, the test failure blocks ci, and explain the verification.\n\nPlan:\nReproduce, fix, and verify the failure.',
+      originalPromptText: 'Fix the failing payment test, the test failure blocks ci, and explain the verification.',
       originalPromptPreservation: 'visible_verbatim',
       generatedOriginState: 'pe_generated_body',
       generatedSafeStatus: 'valid',
@@ -545,7 +545,7 @@ function validResult(): PromptEnhancementPrepareResultV1 {
           sectionId: 'section-original',
           sectionKind: 'original_request',
           title: 'Original request',
-          bodyText: 'Fix the failing payment test and explain the verification.',
+          bodyText: 'Fix the failing payment test, the test failure blocks ci, and explain the verification.',
           templateType: 'debug_repair',
           familyId: 'debug_maintenance',
           primaryIntent: 'debug_and_verify',
@@ -667,7 +667,7 @@ function validResult(): PromptEnhancementPrepareResultV1 {
         promptReviewProcessingPolicy: 'eligible_for_initial_pe_route',
         sentPromptOrigin: 'pe_baseline_generated_body',
         nexpathGeneratedPromptRef: 'body-1:generated:1',
-        renderedPromptBody: 'Original request:\nFix the failing payment test and explain the verification.\n\nPlan:\nReproduce, fix, and verify the failure.',
+        renderedPromptBody: 'Original request:\nFix the failing payment test, the test failure blocks ci, and explain the verification.\n\nPlan:\nReproduce, fix, and verify the failure.',
         originalPromptSectionId: 'section-original',
         sourceAttribution: [
           {
@@ -778,7 +778,7 @@ function validResult(): PromptEnhancementPrepareResultV1 {
       viewPayloadVersion: PROMPT_ENHANCEMENT_CONTRACT_VERSION,
       enhancementId: 'pe-enh-1',
       body: {
-        text: 'Original request:\nFix the failing payment test and explain the verification.\n\nPlan:\nReproduce, fix, and verify the failure.',
+        text: 'Original request:\nFix the failing payment test, the test failure blocks ci, and explain the verification.\n\nPlan:\nReproduce, fix, and verify the failure.',
         currentBodyId: 'body-1',
         bodyRevision: 1,
         generatedOriginState: 'pe_generated_body',
@@ -1248,7 +1248,7 @@ describe('Phase 2 contract-first core', () => {
         currentBodyId: 'body-1',
         bodyRevision: 1,
         validationDecisionId: 'validation-1',
-        editedBodyText: 'Original request:\nFix the failing payment test and explain the verification.',
+        editedBodyText: 'Original request:\nFix the failing payment test, the test failure blocks ci, and explain the verification.',
         actionSubmittedAtMs: 2,
         realUserInitiated: true,
         sectionSpanEditEvents: [
@@ -1279,7 +1279,7 @@ describe('Phase 2 contract-first core', () => {
         currentBodyId: 'body-1',
         bodyRevision: 1,
         validationDecisionId: 'validation-1',
-        editedBodyText: 'Original request:\nFix the failing payment test and explain the verification.',
+        editedBodyText: 'Original request:\nFix the failing payment test, the test failure blocks ci, and explain the verification.',
         actionSubmittedAtMs: 2,
         realUserInitiated: true,
         sectionSpanEditEvents: [],

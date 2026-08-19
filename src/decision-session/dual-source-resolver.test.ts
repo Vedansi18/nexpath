@@ -67,7 +67,7 @@ describe('§6.1 gate 1 — dual-source resolver + migration marker', () => {
     for (const rec of SHIPPED_CONTENT_TEMPLATES) {
       expect(MIGRATED_SIGNALS.has(rec.signalType), `${rec.signalType} is shipped but NOT migrated`).toBe(true);
     }
-    expect(MIGRATED_SIGNALS.size).toBe(SHIPPED_CONTENT_TEMPLATES.length); // marker == shipped == 142
+    expect(MIGRATED_SIGNALS.size).toBe(SHIPPED_CONTENT_TEMPLATES.length); // marker == shipped == 144
   });
 
   it('every migrated signalType resolves a shipped content-template record (no contentless migration)', () => {

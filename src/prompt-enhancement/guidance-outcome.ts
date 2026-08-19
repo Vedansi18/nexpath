@@ -41,7 +41,7 @@ export function resolvePromptEnhancementGuidanceOutcomeV1(
   const renderedSourceASignals = mix.classifiedFacts
     .filter(
       (entry) =>
-        entry.lane === 'source_a' &&
+        entry.fact.sourceLane === 'source_a_missing_practice' &&
         (entry.selectionRole === 'selected_required' || entry.selectionRole === 'selected_supporting'),
     )
     .map((entry) => ({

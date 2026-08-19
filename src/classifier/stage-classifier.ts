@@ -2,6 +2,15 @@ import OpenAI from 'openai';
 import type { Stage, ClassificationResult, UserProfile } from './types.js';
 import { classifyPrompt } from './PromptClassifier.js';
 import {
+  PROMPT_ENHANCEMENT_PRIMARY_INTENTS,
+  PROMPT_ENHANCEMENT_CAPABILITIES,
+  DEBUG_EVIDENCE_FORMS,
+  type PromptEnhancementPrimaryIntent,
+  type PromptEnhancementCapabilityId,
+} from '../prompt-enhancement/taxonomy-ids.js';
+
+export { DEBUG_EVIDENCE_FORMS } from '../prompt-enhancement/taxonomy-ids.js';
+import {
   STAGE2_MODEL,
   STAGE2_MAX_OUTPUT_TOKENS,
   STAGE2_LLM_MIN_CONFIDENCE,
@@ -35,6 +44,68 @@ export const STAGE_CLASSIFIER_TIMEOUT_MS = 12_000;
 
 /** The model behind the stage classifier (shared with the former cross-confirmation call). */
 export const STAGE_CLASSIFIER_MODEL = STAGE2_MODEL;
+
+/**
+ * The capability attach/reject conditions, presented in their PROMPT-OBSERVABLE
+ * halves — never paraphrased into keyword lists (a paraphrase reintroduces the
+ * exact keyword-matching defect this observation replaces). Deliberate scoping,
+ * not abridgement: clauses about SYSTEM state (registry data, runtime surfaces,
+ * internal signal stores) are not observable from the user's prompt and are
+ * evaluated registry-side at attachment, where the FULL locked conditions apply;
+ * internal vocabulary is rendered in public-safe equivalents. The model only
+ * OBSERVES which conditions the prompt meets; the registry decides every
+ * attachment.
+ */
+const CAPABILITY_OBSERVATION_BLOCK = [
+  'CAPABILITY OBSERVATION — for each capability below, report it in "capability_candidates" ONLY when its',
+  '"attach when" text describes this prompt and its "do not attach when" text does not. You observe;',
+  'the system decides. Do not reduce these conditions to keyword matching.',
+  '- capability.decomposition_candidate — Attach when: prompt has many points, broad scope, multiple subtasks, or likely handoff value. Do not attach when: tiny low-risk quick improvement without evidence of multiple bounded subtasks.',
+  '- capability.confirmation_needed — Attach when: prompt has binary/affirmative confirmation needs, ambiguity, sensitive actions, high-risk changes, or missing acceptance facts. Do not attach as a generic "be careful" note when action-specific confirmation is required.',
+  '- capability.adversarial_review — Attach when: review/deeper-inspection behavior is explicitly requested or source/risk evidence calls for challenge-oriented review. Do not force adversarial behavior into every review prompt.',
+  '- capability.project_grounding — Attach when: source facts, project facts, current files/modules/layers, established patterns, or user-requested grounding should shape the prompt. Do not fabricate files/APIs/modules, dump unbounded context, or expose raw private source text.',
+  '- capability.verification_required — Attach when: tests/manual checks/regression/build/CI/contract/performance/security verification must be present. Do not attach as generic filler unrelated to the route.',
+  '- capability.risk_or_rollback — Attach when: migration, dependency, deployment, production, data, destructive, rollback-heavy, compatibility, secrets/config, or incident-like work is present.',
+  '- capability.reproduction_or_evidence_needed — Attach when: a debug prompt LACKS reproduction steps, logs, failing test details, environment, request/response samples, screenshots, metrics, or recent-change evidence. Do not attach to feature/maintenance/review as a root-cause instruction without debug evidence, and do not invent evidence.',
+  '- capability.behavior_preservation — Attach when: maintenance/refactor/cleanup/compatibility work should protect current behavior unless the user explicitly asks for behavior change. Do not attach to fresh feature work as a reason to suppress requested new behavior, and do not treat behavior-preserving maintenance as generic polish.',
+  '- capability.source_signal_guidance — Attach when: a current stage/absence signal, advisory/source signal, or relevant guidance should become a section in the prompt body.',
+].join('\n');
+
+/**
+ * The evidence-priority ladder, in its LOCKED ORDER. Rung 7 exists but is
+ * DEFERRED — coding-agent response context is not exposed in this version, so
+ * the model must never solicit or weigh it.
+ */
+const INTENT_LADDER_BLOCK = [
+  'PRIMARY INTENT — decide which ONE intent from the menu best describes what the developer wants DONE',
+  'in the CURRENT (last) prompt. Follow this evidence-priority ladder IN ORDER — earlier rungs always',
+  'outweigh later rungs:',
+  '1. Explicit current-prompt words and artifacts: error text, failing test names, regression language,',
+  '   review verbs, planning verbs, file/module names, risk words, rollout/migration terms.',
+  '2. Currently available project/source facts and selected module/layer/file context.',
+  '3. Current stage-transition, absence-signal, and related guidance evidence.',
+  '4. Recent prompt history (the earlier prompts in the window).',
+  '5. Persistent missing-signal memory and prior scoped feedback, including edit feedback.',
+  '6. User profile/workstyle/mood signals ONLY as weak tie-breakers — they must NOT override stronger',
+  '   prompt, source, signal, risk, or feedback evidence. Never weight mood over an explicit error',
+  '   string, a file path, or a review verb.',
+  '7. (Deferred — not available.) Coding-agent response context is not exposed in this version:',
+  '   never solicit it and never weigh it.',
+  'A single word describing WHEN a bug appeared (e.g. "refactor", "migration") does not override',
+  'direct evidence of WHAT the developer wants done (a bug report, a stack trace, a failing test).',
+  'If no intent is clearly supported by the ladder, return an empty "primary_intent" with low',
+  '"intent_confidence" — never guess a specific intent from thin evidence.',
+  '',
+  'DEBUG EVIDENCE OBSERVATION — independent of intent: report in "debug_evidence_present" which of',
+  `these evidence forms the CURRENT prompt already contains: ${DEBUG_EVIDENCE_FORMS.join(', ')}.`,
+  'This is an observation of what is present, not a judgement of sufficiency.',
+].join('\n');
+
+/** The 40-intent menu, from the typed taxonomy — the model chooses from ALL of them. */
+const INTENT_MENU_BLOCK = [
+  'INTENT MENU (choose exactly one for "primary_intent", or empty string):',
+  ...PROMPT_ENHANCEMENT_PRIMARY_INTENTS.map((intent) => `- ${intent}`),
+].join('\n');
 
 /**
  * The stable system prompt — the prefix-cache lever. This is a module constant and
@@ -81,6 +152,12 @@ export const STAGE_CLASSIFIER_SYSTEM_PROMPT = [
   '("fire_decision_session": true) only when an important practice for the stage is genuinely absent, or a',
   'meaningful stage transition warrants a nudge, AND you are reasonably confident. When unsure, prefer false.',
   '',
+  INTENT_MENU_BLOCK,
+  '',
+  INTENT_LADDER_BLOCK,
+  '',
+  CAPABILITY_OBSERVATION_BLOCK,
+  '',
   'OUTPUT — return STRICT JSON only, no markdown, no prose:',
   '{',
   '  "stage": "<one of: Idea | PRD/Spec | Architecture | Task Breakdown | Implementation | Review/Testing | Release | Feedback Loop>",',
@@ -89,6 +166,10 @@ export const STAGE_CLASSIFIER_SYSTEM_PROMPT = [
   '  "signals_absent": ["<signal_key>"],',
   '  "fire_decision_session": <true|false>,',
   '  "selected_signal_key": "<one absent signal_key to raise, or empty string>",',
+  '  "primary_intent": "<one intent id from the INTENT MENU, or empty string>",',
+  '  "intent_confidence": <0.0-1.0>,',
+  '  "debug_evidence_present": ["<evidence form>"],',
+  '  "capability_candidates": ["<capability id>"],',
   '  "reason": "<one sentence>"',
   '}',
   'FEEDBACK-LOOP BOUNDARY: classify Feedback Loop ONLY when the window contains explicit evidence the product is ALREADY deployed/live for real users (e.g. "its live", "deployed", "published", users actively using it). Building features FOR clients/users (a client portal, sending invoices to clients) is NOT live evidence — without it, bug reports and fixes during building are Implementation or Review/Testing, not Feedback Loop.',
@@ -121,6 +202,18 @@ export interface ParsedStageReply {
   signalsAbsent: string[];
   fireRecommendation: boolean;
   selectedSignalKey: string;
+  /**
+   * The model's intent PROPOSAL from the 40-intent menu ('' when unsupported by
+   * the evidence ladder). A proposal only — the router prefers it, the registry
+   * decides; and these fields parse SOFTLY (invalid/absent -> ''/0/[]) so an
+   * older or partial reply still classifies the stage.
+   */
+  primaryIntent: PromptEnhancementPrimaryIntent | '';
+  intentConfidence: number;
+  /** Which debug-evidence forms the current prompt already contains (observation). */
+  debugEvidencePresent: readonly (typeof DEBUG_EVIDENCE_FORMS)[number][];
+  /** Capability candidates whose locked attach-conditions the model observed as met. */
+  capabilityCandidates: readonly PromptEnhancementCapabilityId[];
   reason: string;
 }
 
@@ -134,6 +227,11 @@ export interface StageClassifierResult {
   fireRecommendation: boolean;
   /** The absence signal key the model chose to raise (or ''). */
   selectedSignalKey: string;
+  /** Intent proposal + observations (see ParsedStageReply); empty/zero on the degraded path. */
+  primaryIntent: PromptEnhancementPrimaryIntent | '';
+  intentConfidence: number;
+  debugEvidencePresent: readonly (typeof DEBUG_EVIDENCE_FORMS)[number][];
+  capabilityCandidates: readonly PromptEnhancementCapabilityId[];
   reason: string;
   /** True when this result came from the local fallback (the model was unavailable). */
   degraded: boolean;
@@ -215,6 +313,23 @@ export function parseStageClassifierReply(raw: string, minConfidence = STAGE2_LL
   const fireRecommendation = (p.fire_decision_session as boolean) && confidence >= minConfidence;
   const selectedSignalKey = typeof p.selected_signal_key === 'string' ? p.selected_signal_key : '';
 
+  // Intent + observation fields parse SOFTLY: they are proposals/observations the
+  // router and registry consume, so an invalid or absent value degrades to
+  // ''/0/[] instead of failing the stage classification.
+  const rawIntent = typeof p.primary_intent === 'string' ? p.primary_intent : '';
+  const primaryIntent = (PROMPT_ENHANCEMENT_PRIMARY_INTENTS as readonly string[]).includes(rawIntent)
+    ? (rawIntent as PromptEnhancementPrimaryIntent)
+    : '';
+  const intentConfidence = typeof p.intent_confidence === 'number'
+    ? Math.max(0, Math.min(1, p.intent_confidence))
+    : 0;
+  const debugEvidencePresent = (Array.isArray(p.debug_evidence_present) ? p.debug_evidence_present : [])
+    .filter((x): x is (typeof DEBUG_EVIDENCE_FORMS)[number] =>
+      typeof x === 'string' && (DEBUG_EVIDENCE_FORMS as readonly string[]).includes(x));
+  const capabilityCandidates = (Array.isArray(p.capability_candidates) ? p.capability_candidates : [])
+    .filter((x): x is PromptEnhancementCapabilityId =>
+      typeof x === 'string' && (PROMPT_ENHANCEMENT_CAPABILITIES as readonly string[]).includes(x));
+
   return {
     stage,
     confidence,
@@ -222,6 +337,10 @@ export function parseStageClassifierReply(raw: string, minConfidence = STAGE2_LL
     signalsAbsent: (p.signals_absent as unknown[]).filter((x): x is string => typeof x === 'string'),
     fireRecommendation,
     selectedSignalKey,
+    primaryIntent,
+    intentConfidence,
+    debugEvidencePresent,
+    capabilityCandidates,
     reason: p.reason as string,
   };
 }
@@ -239,6 +358,10 @@ function toResult(parsed: ParsedStageReply): StageClassifierResult {
     signalsAbsent: parsed.signalsAbsent,
     fireRecommendation: parsed.fireRecommendation,
     selectedSignalKey: parsed.selectedSignalKey,
+    primaryIntent: parsed.primaryIntent,
+    intentConfidence: parsed.intentConfidence,
+    debugEvidencePresent: parsed.debugEvidencePresent,
+    capabilityCandidates: parsed.capabilityCandidates,
     reason: parsed.reason,
     degraded: false,
   };
@@ -249,6 +372,12 @@ async function degrade(promptText: string): Promise<StageClassifierResult> {
   const local = await classifyPrompt(promptText);
   return {
     classification: local,
+    // The degraded path PROPOSES nothing: the deterministic no-key routing owns
+    // these prompts, so intent/observations stay empty.
+    primaryIntent: '',
+    intentConfidence: 0,
+    debugEvidencePresent: [],
+    capabilityCandidates: [],
     signalsPresent: [],
     signalsAbsent: [],
     fireRecommendation: false,

@@ -1,4 +1,6 @@
 import OpenAI from 'openai';
+import { promptEnhancementSectionModelFactsV1 } from './fact-value-render.js';
+import type { PromptEnhancementGuidanceFact } from './templates/section-plan.js';
 import type { PromptEnhancementSectionPlanningResult } from './templates/section-plan.js';
 import type { PromptEnhancementStructuredComposerOutputV1 } from './compose-enhancement.js';
 import {
@@ -179,7 +181,11 @@ function actionWordingDirective(
     case 'more_thorough':
       return '\n\nRecomposition style — MORE THOROUGH: add depth and completeness (specific steps, edge cases, verification) without inventing scope or adding alternative variants.';
     case 'more_project_grounded':
-      return '\n\nRecomposition style — MORE PROJECT-GROUNDED: ground each section in the available project facts and source references provided; do not invent project details.';
+      // GR-2 done-when: this referenced "the project facts provided" when only IDS
+      // were provided — an instruction to ground in something the model never
+      // received. resolvedSourceFacts now exist, so it names them, and it says
+      // what to do when a section genuinely has none.
+      return '\n\nRecomposition style — MORE PROJECT-GROUNDED: ground each section in its resolvedSourceFacts evidence and the cited source references; where a section has no resolvedSourceFacts, state which project fact is missing instead of inventing one.';
     case 'apply_details':
       return `\n\nRecomposition style — APPLY DETAILS: incorporate these additional user details into the relevant sections and recompose the whole prompt to reflect them:\n${additionalDetailsText ?? ''}`;
     default:
@@ -233,6 +239,14 @@ const SYSTEM_PROMPT = [
   '- Use ONLY the provided sectionId values; never invent a section or output the original-request section.',
   '- For each section, cite in sourceFactIds only the allowed source fact ids listed for THAT section.',
   '- Do not include internal ids, section kinds, or planning labels in bodyText.',
+  // GR-2 step 2 (L7567): evidence is for the MODEL, not copy for the BODY.
+  '- resolvedSourceFacts are EVIDENCE for you, not text to paste: ground your own sentence in',
+  '  them and write it in your own words. Never copy an evidence line verbatim into bodyText.',
+  // The §41.3 correction + the same claim ceiling the deterministic path obeys.
+  '- Never state a fact more strongly than its claim allows: may_state_as_project_capability may',
+  '  be stated as a project fact; must_phrase_as_possibility must be worded as a possibility to',
+  '  confirm; must_phrase_as_source_signal must be attributed to the current source signal.',
+  '- Evidence marked WITHHELD has content you may not see or state — cite the source id only.',
   '- Reply with STRICT JSON only, with the keys in EXACTLY this order:',
   '  {"detectedLanguageSelfReport":"...","requestModeSelfReport":"...","sectionDrafts":[{"sectionId":"...","bodyText":"...","sourceFactIds":["..."]}],"composerClaims":["claim:<sourceFactId>"],"authorityEvidence":"...","authorityModeSelfReport":"..."}',
   '- The key order is not cosmetic: authorityEvidence and authorityModeSelfReport come LAST, after',
@@ -243,13 +257,47 @@ const SYSTEM_PROMPT = [
 
 function buildUserPrompt(
   originalPromptText: string,
-  sections: readonly { sectionId: string; sectionKind: string; structuredContentPartRefs: readonly string[] }[],
+  sections: readonly {
+    sectionId: string;
+    sectionKind: string;
+    structuredContentPartRefs: readonly string[];
+    slotObligations?: readonly string[];
+  }[],
+  // GR-2 step 1: group A3's RESOLVED payload arriving at its consumer. The model
+  // was handed a bare id list and told to ground in "the facts provided" — an id
+  // names a fact, it does not contain one, so there was nothing to ground in.
+  renderedFacts: readonly PromptEnhancementGuidanceFact[] = [],
 ): string {
   const sectionLines = sections
-    .map(
-      (section) =>
-        `- sectionId: ${section.sectionId}\n  purpose: ${section.sectionKind}\n  allowedSourceFactIds: ${JSON.stringify(section.structuredContentPartRefs)}`,
-    )
+    .map((section) => {
+      // The typed slot obligations become part of the section's instruction —
+      // the no-invention state most of all, which used to exist only as prose
+      // nobody could check. A field the composer reads and a check enforces is
+      // a contract; a sentence in a prompt is only an instruction.
+      const obligations = section.slotObligations ?? [];
+      const obligationLine = obligations.length > 0
+        ? `\n  slotObligations: ${JSON.stringify(obligations)}`
+        : '';
+      const noInventionLine = obligations.includes('no_invention_state')
+        ? '\n  NO-INVENTION (hard): this section may not name a tool, library, service, file, API'
+          + ' or project fact that does not appear in the original request or in an allowed source'
+          + ' fact. If the evidence is missing, ASK for it — never supply an example name.'
+        : '';
+      // GR-2 steps 1-2 + the §41.3 correction: id, kind, confidence, ORIGIN SCOPE
+      // and the claim ceiling travel with the evidence. Origin is what makes the
+      // vitest-class line legal — prompt-mined it is illegal, local_probe it is
+      // grounded — and the claim policy is the same ceiling the deterministic
+      // path obeys, so one rule set now binds both renderers.
+      const factLines = promptEnhancementSectionModelFactsV1(section.sectionKind, renderedFacts)
+        .map((fact) => `\n    - ${fact.factId} | kind: ${fact.guidanceKind} | confidence: ${fact.confidenceBand}`
+          + ` | origin: ${fact.originScope} | claim: ${fact.claimVerbPolicy}`
+          + (fact.evidence === undefined
+            ? ' | evidence: WITHHELD (cite the source, never state its content)'
+            : ` | evidence: ${fact.evidence}`))
+        .join('');
+      const evidenceBlock = factLines.length > 0 ? `\n  resolvedSourceFacts:${factLines}` : '';
+      return `- sectionId: ${section.sectionId}\n  purpose: ${section.sectionKind}\n  allowedSourceFactIds: ${JSON.stringify(section.structuredContentPartRefs)}${evidenceBlock}${obligationLine}${noInventionLine}`;
+    })
     .join('\n');
   return [
     `Original request (context only — do NOT reword it):\n${originalPromptText}`,
@@ -336,7 +384,7 @@ export async function composeStructuredComposerOutputV1(
     return { ok: false, reason: 'no_key' };
   }
 
-  const userPrompt = buildUserPrompt(input.originalPromptText, sections) + actionWordingDirective(input.action, input.additionalDetailsText);
+  const userPrompt = buildUserPrompt(input.originalPromptText, sections, input.planning.renderedFacts) + actionWordingDirective(input.action, input.additionalDetailsText);
   // Malformed / empty / language-inconsistent replies retry up to the locked count
   // (§33348: retry up to 3 times). A thrown error (provider unavailable / timeout) is
   // NOT retried — fast deterministic fallback rather than repeated slow waits. On a

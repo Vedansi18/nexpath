@@ -1,3 +1,4 @@
+import { findPromptEnhancementInventionViolationsV1 } from './preservation-floors.js';
 import {
   PROMPT_ENHANCEMENT_CONTRACT_VERSION,
   type PromptEnhancementActionType,
@@ -301,6 +302,41 @@ export function validatePromptEnhancementSafety(
       affectedSourceRefIds: generatedSourceRefIds,
       affectedActionIds,
     }));
+  }
+
+  // The no-invention state, ENFORCED. The typed obligation rides each section
+  // from the slot-effect layer; this asserts it after composition using the
+  // preservation floors' own extractors pointed the other way (does the
+  // section name something nobody supplied?), rather than a new gate. Only
+  // sections carrying the obligation are checked, and an item is a violation
+  // only when it appears in NEITHER the user's prompt NOR that section's
+  // allowed source facts.
+  if (!suppressEditContentJudgements) {
+    for (const section of input.currentBody.sections) {
+      if (!section.slotObligations.includes('no_invention_state')) continue;
+      const inventions = findPromptEnhancementInventionViolationsV1({
+        sectionText: section.bodyText,
+        // GR-1: a value the BOUNDARY resolved was supplied — by a local probe or
+        // the store rather than by the prompt — so it is grounding, not invention.
+        allowedTexts: [
+          input.currentBody.originalPromptText,
+          ...section.sourceFactIds,
+          ...section.sourceIds,
+          ...(section.groundedFactValues ?? []),
+        ],
+      });
+      for (const invention of inventions) {
+        failures.push(failure({
+          failureCode: `no_invention_state:fabricated_item:${invention.item}`,
+          stage: edited ? 'user_edit' : 'composer_output',
+          affectedSectionIds: [section.sectionId],
+          affectedBodySpanRefs: generatedSpanRefIds,
+          affectedSourceRefIds: generatedSourceRefIds,
+          affectedActionIds,
+          publicSafeReasonCategory: 'validation_failed',
+        }));
+      }
+    }
   }
 
   for (const [pattern, reasonCode] of PRIVATE_GENERATED_VALUE_PATTERNS) {
