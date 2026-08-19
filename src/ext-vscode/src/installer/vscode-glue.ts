@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { checkPrereqs, cliRuns } from './prereq.js';
 import { stageCli } from './cli-stage.js';
+import { verifyCommandCurrent } from './hook-command-verify.js';
 import { SETUP_SENTINEL_FILENAME } from './setup-runner-source.js';
 import { runSetupInTerminal } from './terminal-runner.js';
 import {
@@ -105,7 +106,24 @@ function buildDeps(context: vscode.ExtensionContext, log: Logger): SetupFlowDeps
     // the submit-flow flag file exists. Hosts with nothing to register (plain
     // VS Code) report true; an unreadable file also reports true so a transient
     // fs error cannot loop the setup terminal on every activation.
-    verifyHookRegistration: () => {
+    //
+    // ── RC26 (Windows/Cursor tester, 2026-08-19) ────────────────────────────
+    // A "watcher event" (independent DB polling) fired repeatedly on the
+    // tester's machine — real prompts were being typed and sent — but NOT ONE
+    // `submit handoff:` line ever appeared, meaning Cursor's `beforeSubmitPrompt`
+    // hook never actually ran, though the flag was armed and the file said
+    // "already set up". Root cause: this check was SHAPE-BLIND — 'cursor-hook'
+    // and '"version"' occur ANYWHERE in the file, so a hooks.json first written
+    // by an install that predates a hook-command fix (e.g. RC25's move off a
+    // bare `node`, which silently ENOENTs under a sanitized hook-spawn PATH —
+    // the exact class RC21 already proved real on Windows) is judged
+    // "registered" FOREVER: the self-heal this milestone built (RC7/RC19b) can
+    // only run when this returns false, so a stale command was invisible to it
+    // and NEVER got the fix. `verifyCommandCurrent` below closes the whole
+    // class generically — any FUTURE hook-command change now propagates to
+    // every existing install automatically, without hunting down who checks
+    // what each time.
+    verifyHookRegistration: (cliEntry) => {
       try {
         const agent = process.env.NEXPATH_AGENT;
         if (agent !== 'cursor' && agent !== 'windsurf') return true;
@@ -139,24 +157,32 @@ function buildDeps(context: vscode.ExtensionContext, log: Logger): SetupFlowDeps
         if (agent === 'cursor') {
           const p = join(homedir(), '.cursor', 'hooks.json');
           if (!existsSync(p)) return false;
-          const t = readFileSync(p, 'utf8');
+          const raw = readFileSync(p, 'utf8');
           // `"version"` is required by Cursor's config validator (R5) — a
-          // legacy version-less file is DEAD and must be rewritten, so it
-          // counts as unregistered.
-          return t.includes('cursor-hook') && t.includes('"version"');
+          // legacy version-less file is DEAD and must be rewritten.
+          if (!raw.includes('"version"')) return false;
+          // Cursor has only one command field, same shape on every OS.
+          return verifyCommandCurrent(raw, 'cursor-hook', cliEntry, 'command', '"');
         }
         const p = join(homedir(), '.codeium', 'windsurf', 'hooks.json');
-        if (!existsSync(p) || !readFileSync(p, 'utf8').includes('windsurf-hook')) return false;
+        const globalRaw = existsSync(p) ? readFileSync(p, 'utf8') : null;
+        // The GLOBAL (user-level) hook is only ever actually EXECUTED via its
+        // `command` field (bash) on macOS/Linux; on Windows it is present but
+        // inert (RC21) — checked here only for existence/shape, not currency
+        // against `powershell` semantics, since nothing on win32 runs it.
+        if (globalRaw === null || !verifyCommandCurrent(globalRaw, 'windsurf-hook', cliEntry, 'command', '"')) return false;
         // RC21: on Windows the user-level hook above is NOT executed by
-        // Devin/Devin Next — only the WORKSPACE hook fires. Verify the one that
-        // actually runs, per open folder, so opening a new project registers it
-        // instead of silently having no hook at all. No folder open ⇒ nothing to
-        // verify (the poller has no roots either).
+        // Devin/Devin Next — only the WORKSPACE hook fires, and it runs via
+        // `powershell`, not `command` (RC21/RC23's own header). Verify the
+        // field that ACTUALLY runs, per open folder, so opening a new project
+        // registers it instead of silently having no hook at all. No folder
+        // open ⇒ nothing to verify (the poller has no roots either).
         if (process.platform === 'win32') {
           const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
           if (!ws) return true;
           const wsHook = join(ws, '.windsurf', 'hooks.json');
-          return existsSync(wsHook) && readFileSync(wsHook, 'utf8').includes('windsurf-hook');
+          const wsRaw = existsSync(wsHook) ? readFileSync(wsHook, 'utf8') : null;
+          return wsRaw !== null && verifyCommandCurrent(wsRaw, 'windsurf-hook', cliEntry, 'powershell', '& "');
         }
         return true;
       } catch {
@@ -234,7 +260,12 @@ export async function offerSetupIfNeeded(
   // registration-aware gate. Result on the tester's machine: the submit flow
   // could never arm and nothing ever repaired it. One authority now — the same
   // `verifyHookRegistration` both gates use.
-  const hookRegistered = deps.verifyHookRegistration?.() ?? true;
+  // `cliEntry` is null only in a status ('no-bundle'/'error') already returned
+  // above, but the type doesn't narrow that far here; '' degrades RC26's
+  // content check to quoting-only rather than crashing (every string contains
+  // '') — never worse than before this change, and this branch is unreachable
+  // in practice.
+  const hookRegistered = deps.verifyHookRegistration?.(staged.cliEntry ?? '') ?? true;
   const upToDate =
     state.done && state.version === staged.version && staged.status === 'already-current'
     && cliReady && hookRegistered;

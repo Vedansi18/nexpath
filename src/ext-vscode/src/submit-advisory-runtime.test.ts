@@ -548,7 +548,7 @@ describe('⭐ RC19 — the setup verifier checks the PER-HOST flag (structural p
   const glue = readFileSync(join(__dirname, 'installer', 'vscode-glue.ts'), 'utf8');
 
   it('verifyHookRegistration parses the flag and requires THIS host to be true', () => {
-    const fn = glue.slice(glue.indexOf('verifyHookRegistration: () =>'), glue.indexOf('getState: () =>'));
+    const fn = glue.slice(glue.indexOf('verifyHookRegistration: (cliEntry) =>'), glue.indexOf('getState: () =>'));
     expect(fn).toMatch(/JSON\.parse\(readFileSync\(flagFile/);
     expect(fn).toMatch(/flags\[agent\] !== true\) return false;/);
     // existence alone must NEVER again be the whole test
@@ -574,7 +574,9 @@ describe('⭐ RC19b — both setup gates verify registration (structural pin)', 
   const offer = glue.slice(glue.indexOf('const hasGlobalCli = cliRuns'), glue.indexOf('export async function runSetupCommand'));
 
   it('the offer-level gate includes hookRegistered', () => {
-    expect(offer).toMatch(/const hookRegistered = deps\.verifyHookRegistration\?\.\(\) \?\? true;/);
+    // RC26: verifyHookRegistration now takes the staged CLI entry so it can
+    // verify the registered command is CURRENT, not just "something exists".
+    expect(offer).toMatch(/const hookRegistered = deps\.verifyHookRegistration\?\.\(staged\.cliEntry \?\? ''\) \?\? true;/);
     expect(offer).toMatch(/state\.done[\s\S]{0,200}?cliReady && hookRegistered;/);
   });
 
@@ -600,10 +602,12 @@ describe('⭐ RC21 — Windows workspace hook is passed and verified (structural
   });
 
   it('verifyHookRegistration checks the workspace hook on win32', () => {
-    const fn = glue.slice(glue.indexOf('verifyHookRegistration: () =>'), glue.indexOf('getState: () =>'));
+    const fn = glue.slice(glue.indexOf('verifyHookRegistration: (cliEntry) =>'), glue.indexOf('getState: () =>'));
     expect(fn).toMatch(/process\.platform === 'win32'/);
     expect(fn).toMatch(/join\(ws, '\.windsurf', 'hooks\.json'\)/);
-    expect(fn).toMatch(/includes\('windsurf-hook'\)/);
+    // RC26: content-verified, not a bare substring check — and via `powershell`
+    // (the field Devin Next actually runs, RC21/RC23), not `command` (bash).
+    expect(fn).toMatch(/verifyCommandCurrent\(wsRaw, 'windsurf-hook', cliEntry, 'powershell', '& "'\)/);
   });
 });
 
@@ -616,7 +620,7 @@ describe('⭐ RC21 — Windows workspace hook is passed and verified (structural
  */
 describe('⭐ RC19c — an explicit false is a revert, not damage', () => {
   const glue = readFileSync(join(__dirname, 'installer', 'vscode-glue.ts'), 'utf8');
-  const fn = glue.slice(glue.indexOf('verifyHookRegistration: () =>'), glue.indexOf('getState: () =>'));
+  const fn = glue.slice(glue.indexOf('verifyHookRegistration: (cliEntry) =>'), glue.indexOf('getState: () =>'));
 
   it('explicit false ⇒ registered (no re-run, revert preserved)', () => {
     expect(fn).toMatch(/if \(flags\[agent\] === false\) return true;/);

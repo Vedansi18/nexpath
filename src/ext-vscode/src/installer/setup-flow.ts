@@ -65,7 +65,10 @@ export interface SetupFlowDeps {
    * Optional so non-editor callers/tests are unaffected; absent ⇒ treated as
    * registered (the pre-fix behaviour).
    */
-  verifyHookRegistration?: () => boolean;
+  /** RC26: passed the staged CLI ENTRY so the check can verify the registered
+   *  command was built from THIS binary, not just that something plausible
+   *  exists — see the note at the vscode-glue.ts implementation. */
+  verifyHookRegistration?: (cliEntry: string) => boolean;
   getState: () => SetupState;
   setState: (s: SetupState) => Promise<void>;
   log?: (line: string) => void;
@@ -123,7 +126,7 @@ export async function runSetupFlow(
   // 2026-08-13: "done" must also mean STILL REGISTERED. globalState survives a
   // wipe of ~/.nexpath + hooks.json; without this check a wiped machine skips
   // the runner forever and the submit hook silently never fires again.
-  const hookRegistered = deps.verifyHookRegistration?.() ?? true;
+  const hookRegistered = deps.verifyHookRegistration?.(staged.cliEntry) ?? true;
   const upToDate =
     state.done &&
     state.version === staged.version &&
