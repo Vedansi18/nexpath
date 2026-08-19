@@ -307,6 +307,18 @@ let validConfirmationContinuation: ContinuationPayload;
 beforeAll(async () => {
   validRequest = validPrepareRequest();
   validResult = await preparePromptEnhancement(validRequest);
+  // Origin's engine change resolves a no-key prepare to `no_popup` (correct: no key -> no enhancement ->
+  // no popup). These host tests exercise the SPAWN / render path, which needs a showable result — restore
+  // the fixture's original intent by forcing the showable disposition (the display-decision gate then
+  // permits the spawn exactly as before the engine change). Test-only; launcher/gate code is unchanged.
+  // Tests that need `no_popup` mutate this back locally.
+  if (validResult.disposition !== 'show_current_body') {
+    validResult = {
+      ...validResult,
+      disposition: 'show_current_body',
+      uiView: { ...validResult.uiView, body: { ...validResult.uiView.body, sendPolicy: 'send_current' } },
+    };
+  }
   const mkHandoff = (r: PromptEnhancementPrepareResultV1) => buildPromptEnhancementHandoffMetadataV1({
     handoffDecisionId: `${r.enhancementId}:mps-handoff`, requestId: r.requestId, projectRoot: r.projectRoot,
     currentBody: r.currentBody, safetySummary: r.safetySummary, handoffKind: 'first_prompt_handoff_candidate',
