@@ -29,6 +29,7 @@ import {
   KEYCHAIN_SERVICE,
   KEYCHAIN_ACCOUNT,
   TOKEN_PREFIX,
+  TOKEN_MIN_LENGTH,
 } from './NexpathTokenStore.js';
 import * as keychain from 'cross-keychain';
 
@@ -57,6 +58,21 @@ afterEach(() => {
 
 // ── Validation — never the OpenAI-key shape (RISK-2) ─────────────────────────────
 
+// ── Constants — mirrors ApiKeyResolver.test.ts's own "the value is what I claim
+// it is" assertion, which existed for KEYCHAIN_SERVICE but had no equivalent
+// here for KEYCHAIN_ACCOUNT: every other test only observes it indirectly, as
+// an argument a mock was called with, never as a value in its own right. ────
+
+describe('constants', () => {
+  it('KEYCHAIN_ACCOUNT is "nexpath_token" — distinct from ApiKeyResolver\'s "openai_api_key"', () => {
+    expect(KEYCHAIN_ACCOUNT).toBe('nexpath_token');
+  });
+
+  it('KEYCHAIN_SERVICE matches ApiKeyResolver\'s, so both plumb through the same keychain entry', () => {
+    expect(KEYCHAIN_SERVICE).toBe('nexpath');
+  });
+});
+
 describe('isValidNexpathToken', () => {
   it('accepts npk_ + 40 chars', () => {
     expect(isValidNexpathToken(VALID_TOKEN)).toBe(true);
@@ -69,6 +85,18 @@ describe('isValidNexpathToken', () => {
 
   it('rejects too-short values', () => {
     expect(isValidNexpathToken('npk_short')).toBe(false);
+  });
+
+  it('the length boundary is exactly TOKEN_MIN_LENGTH, pinned rather than approximate', () => {
+    // 'npk_short' above is nowhere near the real boundary — a change to
+    // TOKEN_MIN_LENGTH from 40 down to, say, 10 would still pass it, and
+    // nothing else here checks the actual configured cutoff.
+    const oneUnder = TOKEN_PREFIX + 'a'.repeat(TOKEN_MIN_LENGTH - TOKEN_PREFIX.length - 1);
+    const exact    = TOKEN_PREFIX + 'a'.repeat(TOKEN_MIN_LENGTH - TOKEN_PREFIX.length);
+    expect(oneUnder.length).toBe(TOKEN_MIN_LENGTH - 1);
+    expect(exact.length).toBe(TOKEN_MIN_LENGTH);
+    expect(isValidNexpathToken(oneUnder)).toBe(false);
+    expect(isValidNexpathToken(exact)).toBe(true);
   });
 
   it('rejects an unprefixed value even if long enough', () => {
