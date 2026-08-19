@@ -26,6 +26,7 @@ import { resolveLanguage } from '../../classifier/LanguageDetector.js';
 import { insertPrompt } from '../../store/prompts.js';
 import { getConfig } from '../../store/config.js';
 import { getProject, upsertProject } from '../../store/projects.js';
+import { getRecentPrompts } from '../../store/prompts.js';
 import { importHistoricalPrompts } from '../../store/historical-import.js';
 import { classifyUserProfileLLM, MIN_PROFILE_PROMPTS } from '../../classifier/LLMProfileClassifier.js';
 import { isProfileStale } from '../../classifier/UserProfileClassifier.js';
@@ -77,6 +78,7 @@ import {
 import { computeWorkStyleProfile } from '../../classifier/work-style-traits.js';
 import { readParamEvents } from '../../telemetry/param-events.js';
 import { getProjectEnvFacts } from '../../store/env-facts.js';
+import { cachedPromptDerivedFactsV1, refreshPromptDerivedFactsIfDueV1 } from '../../prompt-enhancement/prompt-derived-facts-refresh.js';
 import { getPromptEnhancementFeedbackSummary, queryRelevantPromptEnhancementMemory, recordPromptEnhancementMemoryEvidence, markPromptEnhancementMemoryUsed } from '../../store/prompt-enhancement.js';
 import { scorePromptEnhancementMemoryCandidates } from '../../prompt-enhancement/memory-scoring.js';
 import {
@@ -287,6 +289,34 @@ export function buildPromptEnhancementGroundingRefsV1(store: Store, projectRoot:
           anchorScope: 'project_root',
         };
       }
+    }
+
+    // ── A3 step 7: prompt-derived extracted params cross as TYPED {key,value} ──────────────────
+    //
+    // §33.2 measured the id-only hop as broken — *"the values the engine extracted never enter PE
+    // at all"* — and step 7 requires them to cross like every other producer. They were unreachable
+    // because the only extractor lives in the decision-session engine, which is disabled outright
+    // (`stop.ts`, MPS-7) and whose call is an LLM call.
+    //
+    // 🔒 Owner-approved adjustment: the extractor is reused unchanged (step 8: *"Build no new
+    // extractor"*) but mined over a window and CACHED, refreshed only after a threshold of new
+    // prompts. ⛔ This read is FREE — a store lookup, never a provider call. PE runs on every
+    // prompt; the miner does not.
+    //
+    // `recent_prompt_history` is the honest origin: the window is the user's last few prompts, not
+    // the current one. Under L4990's lane rules that keeps the wording at possibility strength —
+    // prompt-mined evidence is uncorroborated by construction and must never reach practice claims.
+    for (const mined of cachedPromptDerivedFactsV1(store, projectRoot)) {
+      const ref = `prompt_fact:${mined.key}`;
+      rightGoodWorkStyleEnvRuntimeRefs.push(ref);
+      groundingTierByRef[ref] = 'uncorroborated';
+      groundingPolarityByRef[ref] = 'present';
+      groundingEvidenceByRef[ref] = {
+        key: mined.key,
+        value: mined.value,
+        runtimePath: 'local_store',
+        anchorScope: 'current_prompt_scope',
+      };
     }
   } catch { /* no source hard facts available — leave empty */ }
   const scopedFeedbackEvidenceRefs: string[] = [];
@@ -1042,6 +1072,29 @@ export async function runAuto(
   // creates NO advisory, marks NO decision-session fired, and ordinary prompts keep the
   // existing trigger cadence. Frequency 'off' stays fully silent (checked before this runs).
   let sequencePeFallbackDone = false;
+  // A3 step 7 — refresh the CACHED prompt-derived facts, at most once per invocation and only when
+  // the threshold of new prompts has been crossed.
+  //
+  // ⛔ Placed on the PE-preparation path, NOT on the bare auto path. The miner is an LLM call: on
+  // the auto path it would sit in front of every prompt's hook, stalling the agent on the one
+  // prompt in N where it fires. Here it runs only when PE is already preparing a popup, so the
+  // user is already waiting for a call — and the threshold keeps it to one mine per
+  // PROMPT_FACTS_REFRESH_EVERY_N_PROMPTS prompts per project either way.
+  //
+  // ⚠️ Best-effort: the helper swallows its own failures, so a miner that cannot reach the
+  // provider costs an empty grounding lane and nothing else.
+  let promptFactsRefreshDone = false;
+  const ensurePromptFactsFresh = async (): Promise<void> => {
+    if (promptFactsRefreshDone) return;
+    promptFactsRefreshDone = true;
+    await refreshPromptDerivedFactsIfDueV1({
+      store,
+      projectRoot: input.projectRoot,
+      currentPromptCount: mgr.current.promptCount,
+      // newest-first from the store; the miner reads the tail, so hand it oldest-first.
+      recentPrompts: getRecentPrompts(store, input.projectRoot, 5).map((r) => r.text).reverse(),
+    });
+  };
   // F4: every blocked branch names the eligibility it is blocking WITH, so the fact built on that
   // path inherits the pipeline's own decision instead of arriving unlabelled.
   const prepareSequenceShapedPeFallback = async (
@@ -1051,6 +1104,7 @@ export async function runAuto(
     if (sequencePeFallbackDone || promptEnhancement !== undefined) return;
     if (!isPromptEnhancementSequenceShapedTextV1(input.promptText)) return;
     sequencePeFallbackDone = true;
+    await ensurePromptFactsFresh();
     const request = buildPromptEnhancementRequestForAuto({
       auto: input,
       store,
@@ -1264,6 +1318,9 @@ export async function runAuto(
   // Build and consume the approved PE packet by default. An injected integration
   // remains available for boundary tests, while the default path now exercises
   // the executable owner-spec facade without changing legacy DS or delivery authority.
+  // A3 step 7: mine-and-cache before the request is built, so freshly mined values are in the
+  // store when the boundary reads them. One-shot and threshold-gated; see the closure above.
+  await ensurePromptFactsFresh();
   const peIntegration = promptEnhancement ?? {
     request: buildPromptEnhancementRequestForAuto({
       auto: input,

@@ -172,3 +172,77 @@ export function purgeAllEnvFacts(store: Store): void {
   deleteConfig(store, MACHINE_FACTS_KEY);
   saveStore(store);
 }
+
+// ── Prompt-derived extracted params (A3 step 7, cached) ──────────────────────
+
+/** One mined key/value from the user's own recent prompts. */
+export interface PromptDerivedFact {
+  readonly key: string;
+  readonly value: string;
+}
+
+/**
+ * A3 step 7 required the engine's `ExtractedParam` output to cross into PE. That extractor is an
+ * LLM call and used to run inside the decision-session engine — which fired occasionally, over a
+ * 5-prompt window, and is now disabled outright (`stop.ts` MPS-7). PE runs on EVERY prompt, so
+ * wiring the extractor straight into the boundary would have turned an occasional call into a
+ * per-prompt one.
+ *
+ * 🔒 Owner ruling: mine over a window and CACHE it, refreshing only after a threshold of new
+ * prompts. These accessors are that cache — deliberately shaped like `env_facts`, including the
+ * separator-insensitive key match (§17.8).
+ */
+export function setPromptDerivedFacts(
+  store: Store,
+  projectRoot: string,
+  facts: readonly PromptDerivedFact[],
+  detectedAt: number,
+  atPromptCount: number,
+): boolean {
+  store.db.run(
+    `UPDATE projects SET prompt_facts = ?, prompt_facts_detected_at = ?, prompt_facts_at_count = ?
+      WHERE ${PROJECT_ROOT_MATCHES}`,
+    [JSON.stringify(facts), detectedAt, atPromptCount, projectRoot],
+  );
+  const stored = store.db.getRowsModified() > 0;
+  saveStore(store);
+  return stored;
+}
+
+/** Read the cached prompt-derived facts, or null when never mined. */
+export function getPromptDerivedFacts(
+  store: Store,
+  projectRoot: string,
+): { facts: readonly PromptDerivedFact[]; detectedAt: number; atPromptCount: number } | null {
+  const res = store.db.exec(
+    `SELECT prompt_facts, prompt_facts_detected_at, prompt_facts_at_count FROM projects
+      WHERE ${PROJECT_ROOT_MATCHES}`,
+    [projectRoot],
+  );
+  const row = res[0]?.values?.[0];
+  if (!row || row[0] == null) return null;
+  try {
+    const facts = JSON.parse(String(row[0])) as PromptDerivedFact[];
+    if (!Array.isArray(facts)) return null;
+    return { facts, detectedAt: Number(row[1] ?? 0), atPromptCount: Number(row[2] ?? 0) };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Is a refresh due? True when never mined, or when the threshold of NEW prompts has accumulated
+ * since the last mine. ⛔ The only cost dial in this feature — one LLM call per threshold crossing,
+ * per project. Owner-set at 25.
+ */
+export const PROMPT_FACTS_REFRESH_EVERY_N_PROMPTS = 25;
+
+export function promptDerivedFactsRefreshDue(
+  store: Store,
+  projectRoot: string,
+  currentPromptCount: number,
+): boolean {
+  const cached = getPromptDerivedFacts(store, projectRoot);
+  if (!cached) return true;
+  return currentPromptCount - cached.atPromptCount >= PROMPT_FACTS_REFRESH_EVERY_N_PROMPTS;
+}
