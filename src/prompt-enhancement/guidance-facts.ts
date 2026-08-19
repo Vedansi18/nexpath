@@ -332,6 +332,48 @@ export function buildPromptEnhancementGuidanceFactsV1(
     // Positive RIGHT&GOOD and work-style signals are weak Source-B tie-breakers only
     // (transform-rule-1): they adapt register/emphasis, never override instructions/safety/
     // routing. Render as metadata, not their own section.
+    // ── A3 step 7: prompt-derived params get their OWN treatment ──────────────────────────────
+    // Without this they fall into the work-style branch below and inherit `metadata_only`, which
+    // the renderer rejects — so the value crosses, becomes a fact, and dies one hop short of the
+    // body. Step 7 specifies the opposite: cross "under A2's L4990 lane rules (never toward Source
+    // B caps uncorroborated; possibility phrasing)". Possibility phrasing is a RENDERED claim.
+    //
+    // ⛔ Uncorroborated by construction — mined from the user's own prompts, never behaviour-
+    // verified — so the ladder caps it at possibility wording and it can never reach practice.
+    if (ref.startsWith('prompt_fact:')) {
+      const minedResolved = signals.groundingEvidenceByRef?.[ref];
+      facts.push({
+        factId: nextId('mined'),
+        sourceType: 'hard_fact',
+        sourceIds: [ref],
+        guidanceKind: 'project_grounding',
+        // Source B support: prompt-mined material never opens a popup on its own.
+        sourceEligibilityState: 'support_only_not_triggering',
+        suggestedActionKind: 'ground_in_project_fact',
+        targetFamily: 'family_agnostic',
+        targetSectionKind: '',
+        sourceEvidenceState: 'partial',
+        sourceOriginScope: 'recent_prompt_history',
+        claimVerbPolicy: 'must_phrase_as_possibility',
+        factRole: 'project_grounding_support',
+        priority: 'low',
+        renderPolicy: 'render_as_section',
+        riskLevel: 'none',
+        safetyHooks: [],
+        privacyClass: 'local_private',
+        sanitizationState: 'prompt_derived_sanitized',
+        evidence: minedResolved ? { key: minedResolved.key, value: minedResolved.value } : undefined,
+        sourceRuntimePath: minedResolved?.runtimePath,
+        sourceAnchorScope: minedResolved?.anchorScope,
+        confidenceBand: 'low',
+        recencyBand: 'recent_project',
+        // Mined from the user's own prompts: local content, never safe to reproduce in
+        // public-facing copy even after sanitisation.
+        publicCopySafe: false,
+      });
+      continue;
+    }
+
     const isWorkStyle = ref.startsWith('work_style:');
     // RIGHT&GOOD claim strength follows the boundary's corroboration tier: practice
     // wording only when behaviour-verified; work-style stays style metadata.
