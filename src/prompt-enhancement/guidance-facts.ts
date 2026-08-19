@@ -362,11 +362,16 @@ export function buildPromptEnhancementGuidanceFactsV1(
   // Source A — persistent missing-signal memory (populated by E3). Shape is ready
   // now per transform-rule-1: frequency/recency/confidence/fatigue must fit the same record.
   for (const ref of signals.missingMemoryCandidateRefs) {
+    // 🚨 Same treatment as the absence and content-template lanes, and for the same reason: a
+    // memory candidate is keyed by SIGNAL, so `memory:secret_in_prompt` is as nameable as any
+    // other. Measured leaking after the §17.13 fix — the sensitive path had been applied to two
+    // producers and this one was still stating the key.
+    const memoryIsSensitive = isSensitiveSignalRefV1(ref);
     facts.push({
       factId: nextId('mem'),
       sourceType: 'persistent_missing_signal_memory',
       sourceIds: [ref],
-      guidanceKind: 'missing_practice',
+      guidanceKind: memoryIsSensitive ? 'safety_or_confirmation' : 'missing_practice',
       // F4 done-when: the source rule memory: the candidate list is already gated upstream (E3)
       sourceEligibilityState: 'memory_eligible',
       suggestedActionKind: 'no_action_render_context_only',
@@ -374,18 +379,21 @@ export function buildPromptEnhancementGuidanceFactsV1(
       targetSectionKind: 'source_signal_guidance',
       sourceEvidenceState: 'partial',
       sourceOriginScope: 'stored_memory',
-      claimVerbPolicy: 'must_phrase_as_source_signal',
-      factRole: 'supporting_missing_practice',
+      claimVerbPolicy: memoryIsSensitive ? 'source_label_only' : 'must_phrase_as_source_signal',
+      factRole: memoryIsSensitive ? 'safety_confirmation_support' : 'supporting_missing_practice',
       priority: 'normal',
       renderPolicy: 'render_as_section',
-      riskLevel: 'low',
-      safetyHooks: [],
+      riskLevel: memoryIsSensitive ? 'sensitive_authority_risky' : 'low',
+      safetyHooks: memoryIsSensitive ? ['safety_sensitive_source'] : [],
       sourceRuntimePath: 'local_store',
       sourceAnchorScope: 'longitudinal_user_behavior',
       // §17.13: name the recurring gap the memory is about.
-      evidence: evidenceForGuidanceFact('local_private', 'identity_only_event',
-        sourceSignalEvidenceV1('memory', ref)),
-      privacyClass: 'local_private',
+      evidence: evidenceForGuidanceFact(
+        memoryIsSensitive ? 'requires_confirmation' : 'local_private',
+        'identity_only_event',
+        sourceSignalEvidenceV1('memory', ref),
+      ),
+      privacyClass: memoryIsSensitive ? 'requires_confirmation' : 'local_private',
       sanitizationState: 'identity_only_event',
       publicCopySafe: true,
     });

@@ -132,3 +132,43 @@ describe('§17.13 — WITHHELD means hidden, not empty', () => {
     expect(stated.some((f) => f.evidence !== undefined)).toBe(true);
   });
 });
+
+describe('§17.13 SAFETY — every producer keyed by SIGNAL, not just the two that were checked', () => {
+  // ⛔ Written after the memory producer was MEASURED leaking, once the absence and content-template
+  // lanes were already fixed. The lesson is the shape, not the site: any producer whose ref is keyed
+  // by signal can name a sensitive one, so the sweep must cover all of them rather than the ones a
+  // fixture happened to reach. The earlier sensitive test never exercised memory, because a probe
+  // with no stored memory rows produces no memory refs.
+  async function withMemoryRefs(refs: readonly string[]): Promise<readonly string[]> {
+    const dir = mkdtempSync(join(tmpdir(), 'ssg-mem-'));
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'x' }));
+    const store = await openStore(join(dir, 'store.db'));
+    upsertProject(store, { projectRoot: dir, name: 'x', projectType: 'app', language: 'ts', description: '', createdAt: Date.now() });
+    const base = buildPromptEnhancementRequestForAuto({
+      auto: { promptText: 'ship the billing change', projectRoot: dir, currentAgentMode: 'default' },
+      store, session: SessionStateManager.load(store, dir), project: null,
+      effectiveLanguage: 'en', configuredRole: null, effectiveFlagType: 'absence:test_creation',
+      firedKey: 'absence:test_creation', previousStage: 'idea', trigger: { kind: 'absence' },
+      stageResult: {
+        classification: { stage: 'implementation', confidence: 0.9, tier: 3, allScores: {} },
+        signalsPresent: [], signalsAbsent: [], fireRecommendation: true, selectedSignalKey: '',
+        reason: 'mem', degraded: false, projectFactCandidates: [],
+      },
+      streamBOutputs: [],
+    } as never) as never as { sourceSignals: Record<string, unknown> };
+    const facts = buildPromptEnhancementGuidanceFactsV1(
+      { ...base, sourceSignals: { ...base.sourceSignals, missingMemoryCandidateRefs: refs } } as never,
+    );
+    return promptEnhancementFactValueLinesV1('source_signal_guidance', facts);
+  }
+
+  it('a sensitive MEMORY candidate is never named, while an ordinary one still is', async () => {
+    const lines = await withMemoryRefs(['memory:secret_in_prompt', 'memory:test_creation']);
+    expect(
+      lines.join(String.fromCharCode(10)),
+      'a sensitive signal reached a body through the memory lane',
+    ).not.toContain('secret in prompt');
+    // The paired half: the lane still works, so the assertion above is not passing on silence.
+    expect(lines.join(String.fromCharCode(10))).toContain('a repeated gap');
+  });
+});
