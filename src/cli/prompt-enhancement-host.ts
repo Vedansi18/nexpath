@@ -477,7 +477,11 @@ export function buildPromptEnhancementMacLauncherScriptV1(input: {
     '--readiness-file', quote(input.readinessFile),
     '--db', quote(input.dbPath),
   ].join(' ');
-  return ['#!/bin/sh', command, ''].join('\n');
+  // Clear the terminal (the same reset the popup itself uses) as the FIRST launcher step, so the login
+  // shell's greeting ("Last login…") and the echoed launch command are wiped BEFORE node renders the
+  // popup — otherwise they flash above the popup in the spawned Terminal.app window (live iMac report
+  // 2026-08-19). Uses a printf escape rather than `clear` so it does not depend on the clear binary.
+  return ['#!/bin/sh', "printf '\\033[2J\\033[3J\\033[H'", command, ''].join('\n');
 }
 
 /**

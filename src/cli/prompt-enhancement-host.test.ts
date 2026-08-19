@@ -526,6 +526,10 @@ describe('PE1.3 — Linux PE popup host launcher', () => {
       dbPath: '/Users/admin/.nexpath/prompt-store.db',
     });
     expect(script.startsWith('#!/bin/sh')).toBe(true);
+    // Clears the terminal FIRST (before node) so the login-shell greeting + echoed command don't flash
+    // above the popup in the spawned window — and the clear line precedes the node invocation.
+    expect(script).toContain("printf '\\033[2J\\033[3J\\033[H'");
+    expect(script.indexOf("printf '\\033[2J")).toBeLessThan(script.indexOf('prompt-enhancement-popup-host'));
     expect(script).toContain("'/usr/local/bin/node' '/Users/admin/Desktop/nexpath testing/nexpath/dist/cli/index.js' prompt-enhancement-popup-host");
     expect(script).toContain("--input-file '/tmp/pe/input.json'");
     expect(script).toContain("--db '/Users/admin/.nexpath/prompt-store.db'");
