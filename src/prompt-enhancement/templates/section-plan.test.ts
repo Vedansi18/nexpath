@@ -529,6 +529,21 @@ describe('under-evidenced routes and the existing why-help surface', () => {
 // ── The slot-effect layer: an attached capability CONTRIBUTES its locked effect ──
 
 describe('slot obligations: layer 3 is no longer declared-but-inert', () => {
+  // ⚠️ A grounding fact is supplied because `project_grounding_facts` now FOLLOWS ITS FACTS
+  // (Hiren's ruling on the sim finding): with none, the section is not planned and there is no
+  // section to carry obligations. That is the intended behaviour, and it is pinned in
+  // `fact-value-render.test.ts`. What THIS block guards is different — that a section which DOES
+  // exist carries its locked layer-3 obligations — so the fact is the input that lets it be asked.
+  const groundingFact = {
+    factId: 'f-ground', sourceType: 'hard_fact', sourceIds: ['hard_fact:has_test_runner'],
+    guidanceKind: 'project_grounding', suggestedActionKind: 'ground_in_project_fact',
+    targetFamily: 'family_agnostic', targetSectionKind: '', sourceEvidenceState: 'strong',
+    sourceOriginScope: 'local_probe', claimVerbPolicy: 'may_state_as_project_capability',
+    priority: 'normal', renderPolicy: 'render_as_section', riskLevel: 'none',
+    privacyClass: 'local_private', sanitizationState: 'not_applicable',
+    evidence: { key: 'has_test_runner', value: 'true' }, sourceRuntimePath: 'local_store',
+    sourceAnchorScope: 'project_root', safetyHooks: [], publicCopySafe: true,
+  };
   const planFor = (intent: string, candidates: readonly string[] = []) => {
     const route = routePromptEnhancement(routeInput({
       promptText: 'exercise the slot-effect layer',
@@ -537,7 +552,9 @@ describe('slot obligations: layer 3 is no longer declared-but-inert', () => {
       classifierCapabilityCandidates: candidates as never,
       classifierDebugEvidencePresent: ['reproduction_steps', 'logs'] as never,
     }));
-    return planPromptEnhancementSections({ routeResult: route, sourceRefs: [sourceA], guidanceFacts: [] });
+    return planPromptEnhancementSections({
+      routeResult: route, sourceRefs: [sourceA], guidanceFacts: [groundingFact] as never,
+    });
   };
   const obligationsOf = (result: ReturnType<typeof planPromptEnhancementSections>, kind: string) =>
     result.sectionPlans.find((section) => section.sectionKind === kind)?.slotObligations ?? [];

@@ -519,6 +519,9 @@ export function buildPromptEnhancementRequestForAuto(input: {
         // The capability observation from the same call: candidates plus the
         // debug-evidence forms present. The registry decides every attachment.
         classifierCapabilityCandidates: input.stageResult.capabilityCandidates,
+        // Which stored project facts THIS prompt calls for. The registry decides what to do with
+        // it; an absent channel fails closed downstream rather than sending all ten facts.
+        classifierProjectFactCandidates: input.stageResult.projectFactCandidates,
         classifierDebugEvidencePresent: input.stageResult.debugEvidencePresent,
         promptStartBoundary: source.promptStartStop.hookBoundary,
         deliveryBoundary: source.promptStartStop.deliveryBoundary,

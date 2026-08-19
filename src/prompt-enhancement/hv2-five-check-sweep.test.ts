@@ -71,6 +71,11 @@ function driveChain(store: Store, dir: string): {
       selectedSignalKey: '',
       reason: 'hv2',
       degraded: false,
+      // The applicability observation the live classifier supplies. These rows exercise the
+      // grounding CHAIN, so the prompt is one the facts genuinely serve ("add the token refresh
+      // path and check it" — implementation plus verification). The GATE has its own fixtures;
+      // supplying everything here would test neither.
+      projectFactCandidates: ['framework', 'test_runner', 'version_control', 'ci_pipeline'],
     },
     streamBOutputs: [],
   });

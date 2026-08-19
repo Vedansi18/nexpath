@@ -650,11 +650,22 @@ export function planPromptEnhancementSections(
   const template = getPromptEnhancementTemplateByIntent(route.primaryIntent);
   const sourceA = sourceARef(input.sourceRefs);
   const facts = normalizeGuidanceFacts(input.guidanceFacts ?? []);
+  // 🔒 The grounding section FOLLOWS ITS FACTS (Hiren's ruling on the sim finding). The capability
+  // used to make this section structurally required, so it appeared on every popup and stated the
+  // test runner and the lockfile to a prompt about renaming a variable. A section whose every fact
+  // was judged inapplicable has nothing to say, and saying it anyway is what made the section noise.
+  // ⚠️ Scoped to THIS section kind on purpose: the other capability-required sections carry their
+  // own floors and obligations, and generalising this would silently re-decide all of them.
+  const groundedFacts = facts.filter(isRenderableFact);
+  const hasGroundingFact = groundedFacts.some((fact) => sectionKindForFact(fact) === 'project_grounding_facts');
   const candidateSectionKinds = orderedUnique([
     'original_request_or_goal',
     ...template.requiredSections,
-    ...route.capabilityOverlays.map((capability) => SECTION_REQUIRED_BY_CAPABILITY[capability]).filter(isString),
-    ...facts.filter(isRenderableFact).map(sectionKindForFact),
+    ...route.capabilityOverlays
+      .map((capability) => SECTION_REQUIRED_BY_CAPABILITY[capability])
+      .filter(isString)
+      .filter((kind) => kind !== 'project_grounding_facts' || hasGroundingFact),
+    ...groundedFacts.map(sectionKindForFact),
   ]);
 
   if (route.noPopup) {
@@ -909,6 +920,9 @@ function isMandatorySurvivorSection(
   capabilities: readonly PromptEnhancementCapabilityId[],
   facts: readonly PromptEnhancementGuidanceFact[],
 ): boolean {
+  // Grounding is required only when it HAS a fact — the same rule as its candidacy above; a
+  // factless required section is exactly what the locked drop-criteria call stage (a).
+  if (sectionKind === 'project_grounding_facts' && !facts.some(isRenderableFact)) return false;
   return capabilities.some((capability) => SECTION_REQUIRED_BY_CAPABILITY[capability] === sectionKind) ||
     facts.some((fact) => fact.priority === 'required_survivor');
 }

@@ -1,12 +1,19 @@
 import type { PromptEnhancementPrepareRequestV1 } from './contracts.js';
 import { ENV_FACT_CORROBORATOR } from '../env/env-tier-promotion.js';
 import { redactSecrets } from '../store/redact.js';
+import {
+  projectFactCategoryForRefV1,
+  projectFactRefIsApplicableV1,
+  isPromptEnhancementProjectFactCategoryV1,
+  type PromptEnhancementProjectFactCategoryV1,
+} from './project-fact-applicability.js';
 import type {
   PromptEnhancementGuidanceFact,
   PromptEnhancementGuidancePriority,
   PromptEnhancementClaimVerbPolicy,
   PromptEnhancementSourceEligibilityStateV1,
 } from './templates/section-plan.js';
+import { isPromptEnhancementSourceCriticalFactV1 } from './templates/section-plan.js';
 
 /**
  * transform-rule-1 split 1 — guidance-fact builder (E2 / phase 2.1).
@@ -106,6 +113,46 @@ export function isSensitiveSignalRefV1(ref: string): boolean {
  * means "no boundary decision reached us", and the mix seam already treats that as pre-F4
  * behaviour rather than as a block.
  */
+/**
+ * The project-fact applicability gate (Hiren's ruling — the model judges, the registry decides).
+ *
+ * ⚠️ Applied as SUPPRESSION, not as a skipped producer. The fact is still built and still carries
+ * its evidence, and the drop is recorded on it with the locked `suppressed_by_relevance` state —
+ * because a fact that was never built cannot say WHY it is absent, and every other drop in this
+ * system is answerable. `suppressed` + `suppress_with_reason` are what the renderer and the section
+ * planner already read, so nothing downstream needs to learn a new rule.
+ *
+ * ⛔ Facts outside the project-fact vocabulary are untouched: this gate answers one question, and
+ * silently re-deciding work-style or absence signals would be a second gate wearing this one's name.
+ */
+function applyProjectFactApplicabilityV1(
+  fact: PromptEnhancementGuidanceFact,
+  observed: readonly PromptEnhancementProjectFactCategoryV1[] | undefined,
+): PromptEnhancementGuidanceFact {
+  const ref = fact.sourceIds[0];
+  if (ref === undefined) return fact;
+  if (projectFactCategoryForRefV1(ref) === undefined) return fact;
+  // 🔒 PROHIBITION 17 — safety is never faded, and relevance is not an exception. A FALSE
+  // capability ("this project has no backups") is safety material, not grounding: it carries
+  // `safety_or_confirmation` and a safety hook, and the moment it matters most is a destructive
+  // prompt that never mentioned backups — exactly the prompt an applicability judgement would call
+  // irrelevant. Uses the CANONICAL predicate the fatigue guard and the mixer use, so the three
+  // cannot drift apart.
+  if (isPromptEnhancementSourceCriticalFactV1(fact)) return fact;
+  if (fact.safetyHooks !== undefined && fact.safetyHooks.length > 0) return fact;
+  if (projectFactRefIsApplicableV1(ref, observed)) return fact;
+  return {
+    ...fact,
+    priority: 'suppressed',
+    renderPolicy: 'suppress_with_reason',
+    selectionState: 'suppressed_by_relevance',
+    selectionReasonCodes: [
+      ...(fact.selectionReasonCodes ?? []),
+      'project_fact_not_applicable_to_prompt',
+    ],
+  };
+}
+
 function triggerEligibilityV1(
   request: PromptEnhancementPrepareRequestV1,
 ): PromptEnhancementSourceEligibilityStateV1 | undefined {
@@ -448,10 +495,18 @@ export function buildPromptEnhancementGuidanceFactsV1(
     });
   }
 
+  // The applicability gate runs at the SAME single exit, and for the same reason F3 chose it: a
+  // rule applied per construction site is a rule that will one day be missed at one of them.
+  // ⚠️ Before dedupe/rank, so a suppressed fact is ranked as suppressed rather than competing for
+  // a slot it can no longer render into.
+  const observedCategories = request.reviewMomentContext.triggerProvenance
+    .classifierProjectFactCandidates?.filter(isPromptEnhancementProjectFactCategoryV1);
+  const gated = facts.map((fact) => applyProjectFactApplicabilityV1(fact, observedCategories));
+
   // F3: stamp the fatigue key at the producer's ONE exit, after dedupe/rank, so
   // no construction site can ship keyless and a safety fact never gets a key.
   return stampPromptEnhancementFatigueKeysV1(
-    rankGuidanceFacts(dedupeGuidanceFacts(pairNegativeCapabilitiesWithLiveDetectors(facts))),
+    rankGuidanceFacts(dedupeGuidanceFacts(pairNegativeCapabilitiesWithLiveDetectors(gated))),
     request.reviewMomentContext.projectId,
   );
 }

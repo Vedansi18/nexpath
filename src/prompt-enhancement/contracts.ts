@@ -278,6 +278,7 @@ export interface PromptEnhancementTriggerProvenanceV1 {
    * only — the registry decides all attachment.
    */
   classifierCapabilityCandidates?: readonly string[];
+  classifierProjectFactCandidates?: readonly string[];
   classifierDebugEvidencePresent?: readonly string[];
   promptStartBoundary: PromptStartStopSourceSnapshot['hookBoundary'];
   deliveryBoundary: PromptStartStopSourceSnapshot['deliveryBoundary'];

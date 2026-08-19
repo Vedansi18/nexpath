@@ -156,6 +156,9 @@ describe('§17.11 wire — the movement crosses, becomes a fact, and reaches a b
         selectedSignalKey: '',
         reason: 'env-change',
         degraded: false,
+        // The movement is judged under its own category (Hiren, Q4) — an observed CI-pipeline
+        // need is what lets an acquired CI pipeline be stated.
+        projectFactCandidates: ['ci_pipeline', 'test_runner'],
       },
       streamBOutputs: [],
     } as never);
