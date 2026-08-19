@@ -13,6 +13,7 @@ import {
 } from '../prompt-enhancement/contracts.js';
 import { validatePromptEnhancementCliPopupResultV1 } from '../prompt-enhancement/cli-submit-popup.js';
 import { buildPromptEnhancementPopupRenderModelV1 } from '../prompt-enhancement/popup-render-model.js';
+import { buildPromptEnhancementMpsContinuationPopupV1 } from '../prompt-enhancement/continuation-popup.js';
 import {
   computeDockedPopupGeometry,
   detectScreenResolution,
@@ -880,10 +881,14 @@ export type PromptEnhancementCliMpsContinuationHostLaunchResultV1 =
   | { state: 'not_applicable'; reasonCode: 'direct_tty' }
   | { state: 'host_unavailable'; reasonCode: 'unsupported_platform' | 'no_gui_session' | 'no_supported_terminal' }
   | { state: 'launch_failed'; reasonCode: 'terminal_spawn_failed' | 'terminal_exit_nonzero' | 'terminal_renderer_not_ready' }
-  // Blink fix (Phase 2): the continuation payload is structurally broken (a field the child dereferences
-  // is absent), so no window is opened. Callers treat it exactly like any non-`completed` result — the
-  // reasonCode flows into the existing continuation not-shown mapping.
-  | { state: 'not_shown'; reasonCode: 'payload_invalid_pre_spawn'; validationReasonCodes: readonly string[] }
+  // Blink fix: the launcher rejects a continuation here instead of spawning a window the child would open
+  // then close. Callers treat it exactly like any non-`completed` result — the reasonCode flows into the
+  // existing continuation not-shown mapping. Two reasons:
+  //  - `payload_invalid_pre_spawn`  : structurally broken (a field the child dereferences is absent).
+  //  - `render_decision_no_popup`   : structurally present, but the SAME render decision the child's runner
+  //                                   makes resolves to non-`ready` (`no_popup`) — the child would render
+  //                                   nothing, so no window is opened.
+  | { state: 'not_shown'; reasonCode: 'payload_invalid_pre_spawn' | 'render_decision_no_popup'; validationReasonCodes: readonly string[] }
   | { state: 'completed'; output: PromptEnhancementMpsContinuationHostOutputV1 };
 
 export interface PromptEnhancementCliMpsContinuationHostLaunchDependenciesV1 {
@@ -952,6 +957,32 @@ export async function runPromptEnhancementCliMpsContinuationHostLaunchV1(input: 
   }
   if (missing.length > 0) {
     return { state: 'not_shown', reasonCode: 'payload_invalid_pre_spawn', validationReasonCodes: missing };
+  }
+
+  // Display-decision pre-spawn gate (blink fix): the continuation child marks itself ready BEFORE it
+  // renders, so a non-displayable continuation does not surface as `terminal_renderer_not_ready` — but the
+  // window still visually opens then closes (a blink). Run the SAME render decision the child's runner runs
+  // (`buildPromptEnhancementMpsContinuationPopupV1` with the runner's fixed `additionalDetails` / `cancel`
+  // inputs — see cli-mps-continuation-run.ts) BEFORE spawning. That function applies the kind-aware
+  // confirmation substitution internally, so a valid CONFIRMATION item (empty original slice) is NOT
+  // wrongly rejected — this is deliberately not a raw validation. If it would not render (non-`ready`),
+  // open no window. A throw means the child (which wraps the same build) would resolve to not-shown too,
+  // so it is treated the same — never a spawned window.
+  try {
+    const continuationRender = buildPromptEnhancementMpsContinuationPopupV1({
+      result: input.continuation.result,
+      handoffMetadata: input.continuation.handoffMetadata,
+      event: input.continuation.event,
+      progress: input.continuation.progress,
+      itemKind: input.continuation.itemKind,
+      additionalDetails: { text: '', revision: 0 },
+      cancel: { state: 'available', disposition: 'blocked_no_send' },
+    });
+    if (continuationRender.state !== 'ready') {
+      return { state: 'not_shown', reasonCode: 'render_decision_no_popup', validationReasonCodes: continuationRender.reasonCodes };
+    }
+  } catch {
+    return { state: 'not_shown', reasonCode: 'render_decision_no_popup', validationReasonCodes: ['continuation_render_threw'] };
   }
 
   const dependencies = { ...defaultContinuationLaunchDependencies(), ...overrides };

@@ -16,8 +16,9 @@ import {
   runPromptEnhancementCliMpsContinuationHostLaunchV1,
   type PromptEnhancementLinuxTerminalCommandV1,
 } from './prompt-enhancement-host.js';
-import { PROMPT_ENHANCEMENT_CONTRACT_VERSION, type PromptEnhancementPrepareRequestV1, type PromptEnhancementPrepareResultV1, type PromptEnhancementSourceRefV1 } from '../prompt-enhancement/contracts.js';
+import { PROMPT_ENHANCEMENT_CONTRACT_VERSION, type PromptEnhancementPrepareRequestV1, type PromptEnhancementPrepareResultV1, type PromptEnhancementSourceRefV1, type PromptEnhancementFutureSequenceRuntimeEventV1 } from '../prompt-enhancement/contracts.js';
 import { preparePromptEnhancement } from '../prompt-enhancement/facade.js';
+import { buildPromptEnhancementHandoffMetadataV1 } from '../prompt-enhancement/handoff-metadata.js';
 import { getPromptStartStopSourceSnapshot } from '../prompt-enhancement/source-reality.js';
 import { buildPromptEnhancementCostVisibilityMetadataV1 } from '../prompt-enhancement/cost-observability.js';
 import { computeDockedPopupGeometry } from '../decision-session/screen-geometry.js';
@@ -296,9 +297,36 @@ function validPrepareRequest(): PromptEnhancementPrepareRequestV1 {
 
 let validRequest: PromptEnhancementPrepareRequestV1;
 let validResult: PromptEnhancementPrepareResultV1;
+// Valid (renderable) continuation payloads for the continuation-launcher spawn tests — the launcher now
+// runs the child's render decision before spawning (blink Phase 2), so a stub that isn't renderable no
+// longer reaches the spawn stubs. Built the SAME way as the continuation-popup fixture (real result +
+// handoff + event); the confirmation variant carries the owner-locked empty original slice.
+type ContinuationPayload = Parameters<typeof runPromptEnhancementCliMpsContinuationHostLaunchV1>[0]['continuation'];
+let validTaskContinuation: ContinuationPayload;
+let validConfirmationContinuation: ContinuationPayload;
 beforeAll(async () => {
   validRequest = validPrepareRequest();
   validResult = await preparePromptEnhancement(validRequest);
+  const mkHandoff = (r: PromptEnhancementPrepareResultV1) => buildPromptEnhancementHandoffMetadataV1({
+    handoffDecisionId: `${r.enhancementId}:mps-handoff`, requestId: r.requestId, projectRoot: r.projectRoot,
+    currentBody: r.currentBody, safetySummary: r.safetySummary, handoffKind: 'first_prompt_handoff_candidate',
+    summary: { summaryId: `${r.enhancementId}:summary`, publicSafeText: 'Metadata only.', remainingTaskCount: 1, taskRoleLabels: ['verification'] },
+  });
+  const mkEvent = (r: PromptEnhancementPrepareResultV1): PromptEnhancementFutureSequenceRuntimeEventV1 => ({
+    requestId: r.requestId, projectScope: r.projectRoot, sequenceId: 'sequence-1', sequenceItemId: 'item-2',
+    currentItemRevision: 2, bodyRevision: r.currentBody.bodyRevision, continuationDispositionId: 'cont-1',
+    contractVersion: PROMPT_ENHANCEMENT_CONTRACT_VERSION, stateFreshness: 'current', stopEventState: 'stop_fired_non_proof',
+    terminalTransitionState: 'none', explicitUserActionState: 'present_future_only', idempotencyKey: 'host-idem', createdAtMs: 2,
+  });
+  validTaskContinuation = {
+    result: validResult, handoffMetadata: mkHandoff(validResult), event: mkEvent(validResult),
+    progress: { done: 3, total: 27 }, itemKind: 'task',
+  } as ContinuationPayload;
+  const confirmationResult = { ...validResult, currentBody: { ...validResult.currentBody, originalPromptText: '' } };
+  validConfirmationContinuation = {
+    result: confirmationResult, handoffMetadata: mkHandoff(confirmationResult), event: mkEvent(confirmationResult),
+    progress: { done: 1, total: 2 }, itemKind: 'binary_confirmation',
+  } as ContinuationPayload;
 });
 
 function launchInput() {
@@ -760,17 +788,11 @@ describe('MPS Phase 2 (Option D) — continuation (2nd popup) window launcher', 
   function continuationLaunchInput() {
     return {
       capability: { state: 'available', method: 'linux_terminal', terminalCommand: 'gnome-terminal' },
-      continuation: {
-        result: { currentBody: { text: 'NEXT ITEM BODY MUST STAY OUT OF ARGV' } },
-        handoffMetadata: {},
-        event: {},
-        progress: { done: 1, total: 2 },
-        itemKind: 'task',
-      },
+      continuation: validTaskContinuation,
       cliEntryPath: '/opt/nexpath/dist/cli/index.js',
       dbPath: '/tmp/nexpath-test.db',
       nodePath: '/usr/bin/node',
-    } as unknown as Parameters<typeof runPromptEnhancementCliMpsContinuationHostLaunchV1>[0];
+    } as Parameters<typeof runPromptEnhancementCliMpsContinuationHostLaunchV1>[0];
   }
 
   it('spawns the SAME child command, keeps the payload out of argv, parses the outcome, cleans up', async () => {
@@ -889,10 +911,10 @@ describe('MPS Phase 2 (Option D) — continuation (2nd popup) window launcher', 
   it('still spawns a valid CONFIRMATION item (empty original slice) — never over-rejected', async () => {
     const spawnTerminal = vi.fn(async () => child());
     const result = await runPromptEnhancementCliMpsContinuationHostLaunchV1(
-      { ...continuationLaunchInput(), continuation: { result: { currentBody: { text: 'Confirm the change?', originalPromptText: '' } }, handoffMetadata: {}, event: {}, progress: { done: 1, total: 2 }, itemKind: 'binary_confirmation' } } as unknown as Parameters<typeof runPromptEnhancementCliMpsContinuationHostLaunchV1>[0],
+      { ...continuationLaunchInput(), continuation: validConfirmationContinuation } as Parameters<typeof runPromptEnhancementCliMpsContinuationHostLaunchV1>[0],
       {
         spawnTerminal,
-        readContinuationResultFile: () => ({ protocolVersion: 1, continuationOutcome: { state: 'send', bodyText: 'Confirm the change?' } }),
+        readContinuationResultFile: () => ({ protocolVersion: 1, continuationOutcome: { state: 'send', bodyText: validResult.currentBody.text } }),
         readReadyFile: () => true,
       },
     );
