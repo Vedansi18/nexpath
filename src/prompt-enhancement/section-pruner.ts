@@ -76,8 +76,29 @@ const OBLIGATIONS_SURVIVING_THEIR_SECTION_V1: readonly string[] = [
  */
 export const PROMPT_ENHANCEMENT_MANDATORY_SECTION_KIND_V1 = 'source_signal_guidance';
 
-/** Criterion (b)'s cap: the floor, plus at most this many extras. */
-export const PROMPT_ENHANCEMENT_PRUNE_EXTRA_CAP_V1 = 3;
+/**
+ * Criterion (b)'s cap: the floor, plus at most this many extras.
+ *
+ * 🔒 **LOWERED FROM 3 TO 2 — Hiren's ruling, 2026-08-20, superseding criterion (b)'s "2-3 extras".**
+ * His words: *"too many sections are still considered as too much noise… so prefer bringing it down
+ * to 4 on average. so the extra allowed which are 2-3 would become only 1-2."*
+ *
+ * 🔑 **Why the cap is the whole lever.** Measured on the frozen labelled set, every shown body had
+ * at least 3 extras available, so bodies land on the cap rather than under it: the average body is
+ * floor + cap, and floor measured ~3.25. That makes this constant, not the pruner's ranking, the
+ * thing that decides body length.
+ *
+ * ⚠️ **Stated when the ruling was made, and chosen anyway:** cap 2 gives ~5.25 sections on average
+ * rather than the ~4 named as the target; cap 1 would have given ~4.25. The owner took 2 with that
+ * in front of him — recorded here so the gap between the target and the constant is not mistaken
+ * later for an oversight.
+ *
+ * ⛔ An ALTERNATING cap (1, then 2, then 1…) was proposed and rejected: it makes the same prompt
+ * produce different bodies depending on when it fired, and a directional action re-enters `prepare`,
+ * so a section could appear inside a popup the user was already reading. §15.3 step 1 requires this
+ * registry to prune DETERMINISTICALLY.
+ */
+export const PROMPT_ENHANCEMENT_PRUNE_EXTRA_CAP_V1 = 2;
 
 export interface PromptEnhancementPruneResultV1 {
   /** The sections that survive, in their planned order. */

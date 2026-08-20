@@ -171,7 +171,10 @@ describe('the floor is UNTOUCHABLE (prohibition 18)', () => {
   it('and the floor does not consume the extras budget', () => {
     // The cap is "floor + N extras", not "N sections". A body with a large floor still gets its
     // full allowance of evidenced extras.
-    const extras = ['context_and_constraints', 'verification_or_test_plan', 'reproduction_or_evidence'];
+    // Exactly the cap's worth of extras, derived rather than written out — the subject here is that
+    // the FLOOR does not eat the allowance, not how big the allowance is.
+    const extras = ['context_and_constraints', 'verification_or_test_plan', 'reproduction_or_evidence']
+      .slice(0, PROMPT_ENHANCEMENT_PRUNE_EXTRA_CAP_V1);
     const result = prunePromptEnhancementSectionsV1({
       sectionPlans: [
         section({ kind: 'original_request_or_goal' }),
@@ -189,16 +192,25 @@ describe('stage (b) — the soft cap, ordered by the observation', () => {
   it('keeps the highest-ranked extras and drops the rest', () => {
     const kinds = ['context_and_constraints', 'verification_or_test_plan', 'reproduction_or_evidence',
       'behavior_preservation', 'point_inventory_or_decomposition'];
+    // Ranked most-relevant first; the cap decides how many of these survive.
+    const RANKED = ['point_inventory_or_decomposition', 'behavior_preservation', 'reproduction_or_evidence'];
     const result = prunePromptEnhancementSectionsV1({
       sectionPlans: [section({ kind: 'original_request_or_goal' }),
         ...kinds.map((kind, i) => section({ kind, factIds: [`f${i}`] }))],
       facts: kinds.map((_, i) => fact(`f${i}`)),
-      relevanceOrder: ['point_inventory_or_decomposition', 'behavior_preservation', 'reproduction_or_evidence'],
+      relevanceOrder: RANKED,
     });
     const kept = result.sectionPlans.map((s) => s.sectionKind);
     expect(kept).toHaveLength(1 + PROMPT_ENHANCEMENT_PRUNE_EXTRA_CAP_V1);
-    for (const ranked of ['point_inventory_or_decomposition', 'behavior_preservation', 'reproduction_or_evidence']) {
-      expect(kept, `${ranked} was ranked but dropped`).toContain(ranked);
+    // ⚠️ Derived from the CAP, not written out. This fixture used to list three ranked kinds and
+    // assert all three survived, which quietly encoded cap=3 into a test whose subject is "the
+    // highest-ranked survive" — so lowering the cap failed it for the wrong reason. The property is
+    // that the survivors are the TOP of the ordering, however many the cap allows.
+    for (const ranked of RANKED.slice(0, PROMPT_ENHANCEMENT_PRUNE_EXTRA_CAP_V1)) {
+      expect(kept, `${ranked} was ranked inside the cap but dropped`).toContain(ranked);
+    }
+    for (const dropped of RANKED.slice(PROMPT_ENHANCEMENT_PRUNE_EXTRA_CAP_V1)) {
+      expect(kept, `${dropped} ranked outside the cap but survived`).not.toContain(dropped);
     }
   });
 
