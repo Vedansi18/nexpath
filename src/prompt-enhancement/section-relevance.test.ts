@@ -1,12 +1,22 @@
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { openStore } from '../store/db.js';
+import { upsertProject } from '../store/index.js';
+import { SessionStateManager } from '../classifier/SessionStateManager.js';
+import { buildPromptEnhancementRequestForAuto } from '../cli/commands/auto.js';
 import {
   promptEnhancementRelevanceSectionKindsV1,
   promptEnhancementRelevanceMenuLinesV1,
   normalizePromptEnhancementRelevanceOrderV1,
 } from './section-relevance.js';
 import { PROMPT_ENHANCEMENT_PLANNABLE_SECTION_KINDS_V1 } from './templates/section-plan.js';
-import { parseStageClassifierReply, STAGE_CLASSIFIER_SYSTEM_PROMPT } from '../classifier/stage-classifier.js';
+import {
+  parseStageClassifierReply,
+  classifyStage,
+  STAGE_CLASSIFIER_SYSTEM_PROMPT,
+} from '../classifier/stage-classifier.js';
 
 /**
  * I1 (§15.2) — the relevance observation rides the C1 section.
@@ -108,5 +118,64 @@ describe('the observation rides the C1 section and decides nothing', () => {
       fire_decision_session: false, selected_signal_key: '', reason: 'x',
     }));
     expect(without.sectionRelevanceOrder, 'an old reply stopped classifying').toEqual([]);
+  });
+});
+
+describe('the observation reaches the request, which is the whole point of collecting it', () => {
+  // ⛔ Verification round 1 found this unpinned. The ordering was carried on the request and a
+  // throwaway probe confirmed it — but NO fixture asserted it, so deleting the line from the
+  // boundary would have left every test green while I2's pruner silently received nothing and fell
+  // back to evidence-only pruning. An observation that never arrives is indistinguishable from a
+  // model that returned none.
+  it('survives the WHOLE classifier path — parse, then result', async () => {
+    // ⛔ A second mutation found the hop between them unpinned: the parser test proves the reply is
+    // read, the carry test starts from a hand-built result — so the wrapper that turns one into the
+    // other could drop the field and both stayed green. This drives the public entry point end to
+    // end, which is the only assertion that covers that hop.
+    const reply = JSON.stringify({
+      stage: 'Implementation', stage_confidence: 0.9, signals_present: [], signals_absent: [],
+      fire_decision_session: false, selected_signal_key: '', reason: 'r',
+      section_relevance_order: ['project_grounding_facts', 'verification_or_test_plan'],
+    });
+    const client = {
+      chat: { completions: { create: async () => ({ choices: [{ message: { content: reply } }] }) } },
+    } as never;
+    const out = await classifyStage(
+      { promptText: 'add the retry flow', window: [{ text: 'add the retry flow' }],
+        sessionStage: 'implementation', sessionConfidence: 0.5, profile: null } as never,
+      client,
+    );
+    expect(
+      out.sectionRelevanceOrder,
+      'the ordering was parsed but never made it onto the classifier result',
+    ).toEqual(['project_grounding_facts', 'verification_or_test_plan']);
+  });
+
+  it('a classified ordering lands on the request the engine reads', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'i1-carry-'));
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'x' }));
+    const store = await openStore(join(dir, 'store.db'));
+    upsertProject(store, {
+      projectRoot: dir, name: 'x', projectType: 'app', language: 'ts', description: '', createdAt: Date.now(),
+    });
+
+    const request = buildPromptEnhancementRequestForAuto({
+      auto: { promptText: 'add the retry flow', projectRoot: dir, currentAgentMode: 'default' },
+      store, session: SessionStateManager.load(store, dir), project: null,
+      effectiveLanguage: 'en', configuredRole: null, effectiveFlagType: 'stage_transition',
+      firedKey: 'stage_transition:idea', previousStage: 'idea', trigger: { kind: 'stage_transition' },
+      stageResult: {
+        classification: { stage: 'implementation', confidence: 0.9, tier: 3, allScores: {} },
+        signalsPresent: [], signalsAbsent: [], fireRecommendation: true, selectedSignalKey: '',
+        reason: 'i1-carry', degraded: false, projectFactCandidates: [],
+        sectionRelevanceOrder: ['verification_or_test_plan', 'context_and_constraints'],
+      },
+      streamBOutputs: [],
+    } as never) as never as { reviewMomentContext: { triggerProvenance: Record<string, unknown> } };
+
+    expect(
+      request.reviewMomentContext.triggerProvenance['classifierSectionRelevanceOrder'],
+      'the ordering never reached the request — I2 would prune with no relevance signal and say nothing',
+    ).toEqual(['verification_or_test_plan', 'context_and_constraints']);
   });
 });
