@@ -113,6 +113,7 @@ function isSafetySectionV1(section: PromptEnhancementSectionPlanItemV1): boolean
  */
 function selectFloorV1(
   sectionPlans: readonly PromptEnhancementSectionPlanItemV1[],
+  carriesRequiredSurvivor: (section: PromptEnhancementSectionPlanItemV1) => boolean,
 ): ReadonlySet<string> {
   const floor = new Set<string>();
   let requiredGuidanceTaken = false;
@@ -121,6 +122,17 @@ function selectFloorV1(
       section.sectionKind === 'original_request_or_goal'
       || section.sectionKind === PROMPT_ENHANCEMENT_MANDATORY_SECTION_KIND_V1
       || isSafetySectionV1(section)
+      // 🔒 L5010, and it is a BOUND of its own rather than part of the floor's three names:
+      // *"Required Source A survivor + its metadata cannot be pruned silently — compress or move to
+      // why-help, NEVER DROP."* Required-survivor material is not an "extra" competing for the cap;
+      // it is the Source-A material the popup exists to carry.
+      //
+      // 🔴 Found in verification round 1 by MEASURING: a section carrying a `required_survivor` fact
+      // outside the mandatory kind was dropped at stage (b). Its fact was reason-coded, so the loss
+      // was not SILENT — but L5010 says never drop, not merely never drop quietly. Keeping it is the
+      // honest reading; "compress or move to why-help" is the alternative and would be a larger
+      // change that this criterion does not require in order to be satisfied.
+      || carriesRequiredSurvivor(section)
     ) {
       floor.add(section.sectionId);
       continue;
@@ -160,7 +172,11 @@ export function prunePromptEnhancementSectionsV1(input: {
       });
 
   // ── Stage (a): evidence first. A factless section drops BEFORE anything is ranked. ──────────
-  const floorIds = selectFloorV1(sectionPlans);
+  const carriesRequiredSurvivor = (section: PromptEnhancementSectionPlanItemV1): boolean =>
+    section.structuredContentPartRefs
+      .map((ref: string) => ref.replace(/^guidance_fact:/, ''))
+      .some((factId: string) => factsById.get(factId)?.priority === 'required_survivor');
+  const floorIds = selectFloorV1(sectionPlans, carriesRequiredSurvivor);
   const floor: PromptEnhancementSectionPlanItemV1[] = [];
   const evidenced: PromptEnhancementSectionPlanItemV1[] = [];
   const dropped: PromptEnhancementSectionPlanItemV1[] = [];

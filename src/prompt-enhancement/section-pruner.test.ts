@@ -23,12 +23,12 @@ import type { PromptEnhancementSectionPlanItemV1 } from './contracts.js';
  * Those three are what someone re-reading §15.1 would check, so they are what is asserted.
  */
 
-function fact(factId: string, value = 'a real value'): PromptEnhancementGuidanceFact {
+function fact(factId: string, value = 'a real value', priority = 'normal'): PromptEnhancementGuidanceFact {
   return {
     factId, sourceType: 'hard_fact', sourceIds: [`hard_fact:${factId}`],
     guidanceKind: 'project_grounding', suggestedActionKind: 'ground_in_project_fact',
     targetFamily: 'family_agnostic', targetSectionKind: '', sourceEvidenceState: 'strong',
-    priority: 'normal', renderPolicy: 'render_as_section', riskLevel: 'none',
+    priority, renderPolicy: 'render_as_section', riskLevel: 'none',
     privacyClass: 'local_private', sanitizationState: 'not_applicable', safetyHooks: [],
     ...(value === '' ? {} : { evidence: { key: factId, value } }),
   } as unknown as PromptEnhancementGuidanceFact;
@@ -337,5 +337,32 @@ describe('the MANDATORY section — owner ruling, 2026-08-20', () => {
     });
     expect(result.sectionPlans.map((s) => s.sectionKind))
       .toEqual(['original_request_or_goal', 'source_signal_guidance']);
+  });
+});
+
+describe('L5010 — required Source-A survivor material is never dropped', () => {
+  // 🔒 "Required Source A survivor + its metadata cannot be pruned silently — compress or move to
+  // why-help, NEVER DROP." (§15.1, cited by §15.3 step 5.)
+  //
+  // 🔴 Round 1 measured this dropping: a section carrying a required_survivor fact, outside the
+  // mandatory kind and ranked last, was cut by stage (b)'s cap. Its fact WAS reason-coded, so the
+  // loss was not silent — but the bound says never drop, not never drop quietly.
+  it('a section carrying a required_survivor fact survives the cap, however it is ranked', () => {
+    const extras = ['verification_or_test_plan', 'reproduction_or_evidence', 'behavior_preservation'];
+    const result = prunePromptEnhancementSectionsV1({
+      sectionPlans: [
+        section({ kind: 'original_request_or_goal' }),
+        section({ kind: 'context_and_constraints', factIds: ['a'], isRequired: true }),
+        ...extras.map((kind, i) => section({ kind, factIds: [`f${i}`] })),
+        section({ kind: 'requirement_source_state', factIds: ['survivor'] }),
+      ],
+      facts: [fact('a'), ...extras.map((_, i) => fact(`f${i}`)), fact('survivor', 'the survivor', 'required_survivor')],
+      relevanceOrder: extras,   // every extra outranks the survivor section
+    });
+    expect(
+      result.sectionPlans.map((s) => s.sectionKind),
+      'required Source-A survivor material was pruned for length',
+    ).toContain('requirement_source_state');
+    expect(result.facts.find((f) => f.factId === 'survivor')?.selectionState).toBeUndefined();
   });
 });
