@@ -448,6 +448,25 @@ const FALLBACK_REASONS: readonly PromptEnhancementRuntimeBlockReason[] = [
 
 const CALL_ROWS: readonly PromptEnhancementAcceptedCostCallInventoryRowV1[] = [
   row({
+    // ⚠️ **WHAT THIS CALL IS SENT CHANGED AT I2 (phase 36), MEASURED 2026-08-20.** The section
+    // pruner used to run BETWEEN planning and composition, so the composer only ever saw survivors.
+    // On the owner's ruling it now runs AFTER composition, because stage (a)'s question became "no
+    // fact AND no draft" and a draft cannot be consulted before the composer produces it.
+    //
+    // 🔑 The call COUNT is unchanged — still exactly one per shown popup, asserted by a fixture
+    // (prohibition 3: no new call). What changed is the size of that one call:
+    //   · INPUT — measured on a real plan for an ordinary debug prompt: 7 planned sections reach the
+    //     composer where 3 survivors used to, ≈ +800 chars ≈ +200 tokens of section descriptors;
+    //   · OUTPUT — up to 4 more section drafts, ≈ 48 words ≈ 65 tokens each, so ≈ +260 tokens.
+    // Both sit well inside the 2,000-token output cap this call runs under.
+    //
+    // ⛔ This RESTORES the load carried before the pruner landed on 2026-08-19 rather than adding a
+    // new one, and the owner accepted the trade with the cost stated. Some wording is now paid for
+    // and then dropped by the cap — that is intrinsic to judging a draft rather than predicting it.
+    //
+    // 🔒 The numbers below are LEFT AT THEIR RECORDED VALUES rather than re-set: moving a cost
+    // number is the owner's call, and the honest thing is that the measurement is written down where
+    // the row can be judged against it. Same treatment as the stage-classifier row's input note.
     callId: 'baseline_pe_composer',
     trigger: 'prepare',
     userVisibleTrigger: 'enhancement_popup_shown',

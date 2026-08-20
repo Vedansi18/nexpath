@@ -365,6 +365,11 @@ describe('E4 — facade LLM composer wiring', () => {
     // passing while testing nothing.
     expect(factlessKinds.length).toBeGreaterThan(1);
     expect(result.disposition).toBe('show_current_body');
+    // 🔒 Prohibition 3, tied to the same run that proves the composer sees the UNPRUNED plan. The
+    // `baseline_pe_composer` cost row records that I2's placement change grew what this ONE call is
+    // sent without adding a second one; both halves of that claim are asserted here together, so a
+    // change that split the work across two calls could not pass while looking like a size change.
+    expect(composeStructuredComposerOutputV1).toHaveBeenCalledTimes(1);
     expect(result.callAndVisibilityMetadata.callVisibilityMode).toBe('llm_wording');
 
     // The point: sections with zero facts, kept because the model actually wrote them. More than
