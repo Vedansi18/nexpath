@@ -164,6 +164,14 @@ describe('stage-classifier — deterministic release guard (scaffolding without 
       intentConfidence: 0.82,
       debugEvidencePresent: ['logs'],
       capabilityCandidates: ['capability.verification_required'],
+      // ⚠️ EVERY observation that rides this reply belongs here, not just C1's four. §11.2 banner
+      // (c) binds each field addition to a re-measure of the guard, and two arrived after C1 —
+      // project-fact applicability (§17.12) and the I1 relevance ordering (§15.2). Without them the
+      // helper is structurally incapable of noticing a guard that dropped them, which is the exact
+      // hole C1's own round-2 re-audit found and closed for its fields. It compiles either way,
+      // because tsc excludes test files — so the omission is invisible until someone looks.
+      projectFactCandidates: ['test_runner'],
+      sectionRelevanceOrder: ['verification_or_test_plan', 'context_and_constraints'],
     };
   }
 
@@ -179,6 +187,11 @@ describe('stage-classifier — deterministic release guard (scaffolding without 
     expect(guarded.intentConfidence).toBe(0.82);
     expect(guarded.debugEvidencePresent).toEqual(['logs']);
     expect(guarded.capabilityCandidates).toEqual(['capability.verification_required']);
+    // The two observations added after C1, asserted for the same reason as the four above: the
+    // guard neutralises the STAGE and nothing else. A relevance ordering dropped here would reach
+    // I2's pruner as "no signal", and the body would prune on evidence alone with nothing to show.
+    expect(guarded.projectFactCandidates).toEqual(['test_runner']);
+    expect(guarded.sectionRelevanceOrder).toEqual(['verification_or_test_plan', 'context_and_constraints']);
   });
 
   it('leaves a genuine release (scaffolding present but a verification token too) untouched', () => {
