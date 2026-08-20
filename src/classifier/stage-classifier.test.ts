@@ -112,6 +112,13 @@ describe('stage-classifier — degrade path (model unavailable)', () => {
     expect(out.intentConfidence).toBe(0);
     expect(out.debugEvidencePresent).toEqual([]);
     expect(out.capabilityCandidates).toEqual([]);
+    // ⚠️ The two observations added after C1 belong in the SAME claim, and for a sharper reason than
+    // symmetry: on this path no model ran at all. A degrade that returned a relevance ordering would
+    // hand I2 a "relevance" signal nothing produced, and it would do it on exactly the keyless
+    // prompts this milestone keeps on the deterministic cascade — pruning them by a ranking that was
+    // invented rather than observed.
+    expect(out.projectFactCandidates).toEqual([]);
+    expect(out.sectionRelevanceOrder).toEqual([]);
   });
 
   it('degrades on an empty reply and on an unparseable reply', async () => {
