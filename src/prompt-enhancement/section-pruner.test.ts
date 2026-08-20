@@ -271,32 +271,87 @@ describe('criterion 5 — every drop is reason-coded, never a silent loss', () =
 });
 
 describe('§47.3 worked example — the canonical scenario, as the plan wrote it', () => {
-  it('"why is my app so slow": floor + profiling and verification; rollback drops at (a), acceptance at (b)', () => {
+  /**
+   * 🔴 **Rewritten at the phase-36 verification pass, because the previous version did not
+   * reproduce the example it was named for.** MEASURED: it asserted only that the factless rollback
+   * dropped, and `acceptance` — which the plan says drops at stage (b) — SURVIVED. Its cap
+   * assertion (`kept.length - 2 <= CAP`) passed trivially at 3 <= 3, so the canonical fixture for
+   * the locked triple exercised stage (a) and nothing else, and neither half of criterion (c) was
+   * touched.
+   *
+   * ⚠️ **Why one more evidenced extra than the plan's prose lists.** The plan illustrates the
+   * example with 2 surviving extras; criterion (b) locks the cap as *"floor + 2-3 extras"* and the
+   * shipped constant is 3. With exactly 3 evidenced extras the cap cannot bite, so the plan's own
+   * stage-(b) outcome is unreachable on that input. A fourth evidenced extra makes the cap real
+   * while every other element of the example stays exactly as written. The lock is unchanged — 3 is
+   * inside "2-3".
+   */
+  it('"why is my app so slow": floor + ranked extras; rollback drops at (a), acceptance at (b), slots follow, metadata stays', () => {
     const result = prunePromptEnhancementSectionsV1({
       sectionPlans: [
         section({ kind: 'original_request_or_goal' }),
         section({ kind: 'context_and_constraints', isRequired: true }),            // the required guidance
         section({ kind: 'reproduction_or_evidence', factIds: ['profiling'] }),     // evidenced + relevant
         section({ kind: 'verification_or_test_plan', factIds: ['verify'] }),       // evidenced + relevant
-        section({ kind: 'risk_safety_or_confirmation' }),                          // rollback: FACTLESS
-        section({ kind: 'acceptance_or_output_expectation', factIds: ['accept'] }),// evidenced, low relevance
+        section({ kind: 'behavior_preservation', factIds: ['behaviour'] }),        // evidenced + relevant
+        // Rollback: FACTLESS, and it carries the visible slot + the invisible classes, so this one
+        // section proves BOTH halves of criterion (c) at once.
+        section({
+          kind: 'risk_safety_or_confirmation',
+          obligations: ['reproduction_or_evidence_request', 'no_invention_state', 'send_policy_metadata', 'safety_hook_linkage'],
+        }),
+        // Acceptance: evidenced, but ranked LAST, so the cap is what removes it — stage (b).
+        section({
+          kind: 'acceptance_or_output_expectation',
+          factIds: ['accept'],
+          obligations: ['confirmation_clarification'],
+        }),
       ],
-      facts: [fact('profiling'), fact('verify'), fact('accept')],
-      relevanceOrder: ['reproduction_or_evidence', 'verification_or_test_plan', 'acceptance_or_output_expectation'],
+      facts: [fact('profiling'), fact('verify'), fact('behaviour'), fact('accept')],
+      relevanceOrder: [
+        'reproduction_or_evidence', 'verification_or_test_plan', 'behavior_preservation',
+        'acceptance_or_output_expectation',
+      ],
     });
 
     const kept = result.sectionPlans.map((s) => s.sectionKind);
+    // The floor, exactly as the example words it: the verbatim original + one required guidance.
     expect(kept).toContain('original_request_or_goal');
     expect(kept).toContain('context_and_constraints');
+    // The evidenced, relevant extras survive.
     expect(kept).toContain('reproduction_or_evidence');
     expect(kept).toContain('verification_or_test_plan');
-    // ⚠️ The rollback section is factless AND carries no safety flag in this scenario, so it drops
+
+    // ⚠️ The rollback section is factless AND carries no safety FLAG in this scenario, so it drops
     // at stage (a). A rollback section that DID carry safety metadata would be floor and would stay
     // — which is why the plan's example says "[+ safety if risky]" rather than always.
-    expect(result.droppedSectionIds).toContain('sec-risk_safety_or_confirmation');
-    expect(kept.length - 2, 'more than the capped extras survived').toBeLessThanOrEqual(
-      PROMPT_ENHANCEMENT_PRUNE_EXTRA_CAP_V1,
-    );
+    expect(result.droppedSectionIds, 'the factless rollback survived stage (a)')
+      .toContain('sec-risk_safety_or_confirmation');
+    // 🔑 The stage-(b) half the old fixture never exercised: evidenced, but ranked last, so the cap
+    // removes it. This is the assertion whose absence let the canonical fixture pass while proving
+    // only half the criteria.
+    expect(result.droppedSectionIds, 'the lowest-ranked evidenced extra survived the cap')
+      .toContain('sec-acceptance_or_output_expectation');
+
+    // The cap counts EXTRAS, not sections: floor is the original + the one required guidance.
+    expect(kept.filter((k) => k !== 'original_request_or_goal' && k !== 'context_and_constraints'))
+      .toHaveLength(PROMPT_ENHANCEMENT_PRUNE_EXTRA_CAP_V1);
+
+    // Criterion (c), first half — "their visible slots go with them".
+    expect(
+      result.inheritedSlotObligations,
+      'a VISIBLE slot survived its section — (c) keeps the checks, not the content',
+    ).not.toContain('reproduction_or_evidence_request');
+    // Criterion (c), second half — "send-policy/no-invention metadata stays for the validators",
+    // and the criterion's own title: SAFETY METADATA NEVER DROPS.
+    expect(result.inheritedSlotObligations).toContain('no_invention_state');
+    expect(result.inheritedSlotObligations).toContain('send_policy_metadata');
+    expect(result.inheritedSlotObligations).toContain('safety_hook_linkage');
+    // Carried from the stage-(b) casualty too, not only from the stage-(a) one.
+    expect(
+      result.inheritedSlotObligations,
+      'a section dropped by the CAP took its surviving obligations with it',
+    ).toContain('confirmation_clarification');
   });
 });
 

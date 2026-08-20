@@ -1530,7 +1530,13 @@ describe('I2 criterion (c) — a pruned section\'s surviving obligations reach t
     const planned = planningResult();
     const withInherited = {
       ...planned,
-      inheritedSlotObligations: ['no_invention_state', 'send_policy_metadata'],
+      // 🔒 All four surviving classes, including the SAFETY one — the criterion's own title is
+      // "slots follow their section; SAFETY METADATA NEVER DROPS", and the phase's done-when is
+      // *"safety metadata is present on the body even when its section dropped"*. Asserting only
+      // the two non-safety classes would leave the done-when's actual subject untested.
+      inheritedSlotObligations: [
+        'no_invention_state', 'send_policy_metadata', 'safety_hook_linkage', 'confirmation_clarification',
+      ],
     } as PromptEnhancementSectionPlanningResult;
 
     const result = composePromptEnhancementBody({
@@ -1541,6 +1547,11 @@ describe('I2 criterion (c) — a pruned section\'s surviving obligations reach t
 
     expect(result.currentBody.inheritedSlotObligations).toContain('no_invention_state');
     expect(result.currentBody.inheritedSlotObligations).toContain('send_policy_metadata');
+    expect(
+      result.currentBody.inheritedSlotObligations,
+      'the done-when names SAFETY metadata specifically, and it must reach the body',
+    ).toContain('safety_hook_linkage');
+    expect(result.currentBody.inheritedSlotObligations).toContain('confirmation_clarification');
   });
 
   it('a body with nothing pruned leaves the field UNSET, not an empty array', () => {
