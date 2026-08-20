@@ -2242,6 +2242,27 @@ describe('validated PE preparation boundary', () => {
     }
   });
 
+  it('and BOTH boundary logs report the same fields — one of two is how observability rots', () => {
+    // ⛔ Found in I1 round 5, twice over: `suppressedReason` (the deterministic-popup fix) and
+    // `relevanceOrderCount` (the I1 ordering) were each added to the sequence-shaped boundary log
+    // and NOT to the main one — the common path. Both fixes were therefore observable only on the
+    // rarer route, and nothing said so.
+    //
+    // Pinned as a COUNT rather than by parsing the calls: the failure is always "added to one site",
+    // and a count catches that without pretending to understand the log's shape. Two logs of the
+    // same event reporting different fields cannot be read together.
+    const source = readFileSync('src/cli/commands/auto.ts', 'utf8');
+    const logs = source.split("logger.debug('prompt_enhancement_prepare_boundary'").length - 1;
+    for (const field of ['suppressedReason:', 'relevanceOrderCount:']) {
+      const carried = source.split(field).length - 1;
+      expect(
+        carried,
+        `${logs} prepare-boundary logs exist and ${carried} carry ${field} — the fix is invisible on `
+        + 'the paths that do not',
+      ).toBe(logs);
+    }
+  });
+
   it('and EVERY display gate carries the check — there are two, and only one is behaviourally reachable here', () => {
     // ⚠️ Honest about what this proves. The behavioural fixture below drives the main `runAuto`
     // path; the OTHER persistence site sits inside the sequence-shaped fallback closure, which

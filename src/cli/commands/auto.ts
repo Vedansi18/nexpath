@@ -1447,6 +1447,15 @@ export async function runAuto(
       ? preparation.validationReasonCodes.slice(0, 10)
       : undefined,
     blockedFailureCodes: blockedFailureCodesForLog(preparation),
+    // ⚠️ BOTH of these were on the sequence-shaped boundary log and NOT here — the MAIN path, which
+    // is the common one. So the deterministic-popup suppression and the I1 ordering count were
+    // observable only on the rarer route, which is the same one-of-two-sites shape the persistence
+    // gate had. Kept identical to the other site on purpose: two logs of the same event that report
+    // different fields cannot be read together.
+    suppressedReason: promptEnhancementBodyHasNoLlmWordingV1(preparation.result)
+      ? 'deterministic_only_no_llm_wording'
+      : undefined,
+    relevanceOrderCount: stageResult.sectionRelevanceOrder.length,
   });
   // Owner decision B-i (2026-08-04): the PE popup is deferred to the Stop hook. Do NOT show a
   // popup on UserPromptSubmit — the prompt passes through raw. When a real (non-fallback) result
