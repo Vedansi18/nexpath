@@ -460,6 +460,20 @@ export interface PromptEnhancementSectionPlanningResult {
   exposesPrecomputedVariants: false;
   usesOldDecisionSessionTemplateRecord: false;
   usesPeOnlyClassifier: false;
+  /**
+   * I2 criterion (c): obligations that OUTLIVED their pruned section, carried to the body.
+   *
+   * 🔴 Declared at the phase-36 verification pass. The facade had been attaching this (and the field
+   * below) to the planning object UNTYPED — which is precisely why nothing consumed them and the
+   * criterion never reached a body: an untyped field is invisible to every reader that goes looking
+   * through the type. Declaring them is what makes the hop checkable rather than incidental.
+   *
+   * ⚠️ Optional: the planner itself never sets these. They appear only after the pruner has run, so
+   * a planning result that was never pruned is still a valid one.
+   */
+  inheritedSlotObligations?: readonly string[];
+  /** I2: the sections the pruner dropped. Feeds the boundary log's count and phase 37's measurement. */
+  prunedSectionIds?: readonly string[];
 }
 
 const SECTION_KIND_BY_ACTION: Record<PromptEnhancementSuggestedActionKind, string> = {

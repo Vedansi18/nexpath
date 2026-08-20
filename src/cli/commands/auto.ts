@@ -1251,6 +1251,10 @@ export async function runAuto(
       // need opposite responses, and without this flag the field answers neither.
       classifierDegraded: stageResult.degraded,
       relevanceOrderCount: stageResult.sectionRelevanceOrder.length,
+      // I2 observability (prohibition 10). The pruner's one job is dropping sections, and until this
+      // was logged that job left no trace on an ordinary run — the count existed on the result and
+      // nothing read it. Also phase 37's after-number, so the measurement rides a normal log.
+      prunedSectionCount: preparation.result?.prunedSectionCount,
       sequenceShapedFallback: true,
     });
     // Phase 4 (defense-in-depth): do NOT persist an unshowable pending. A display decision of `no_popup`
@@ -1504,6 +1508,9 @@ export async function runAuto(
       : undefined,
     classifierDegraded: stageResult.degraded,
     relevanceOrderCount: stageResult.sectionRelevanceOrder.length,
+    // Kept identical to the sequence-shaped site above on purpose: two logs of the same event that
+    // report different fields cannot be read together.
+    prunedSectionCount: preparation.result?.prunedSectionCount,
   });
   // Owner decision B-i (2026-08-04): the PE popup is deferred to the Stop hook. Do NOT show a
   // popup on UserPromptSubmit — the prompt passes through raw. When a real (non-fallback) result

@@ -488,12 +488,8 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
       // planning result the pruner wrote them to; absent (nothing pruned) leaves the field unset
       // rather than an empty array, so "no pruning happened" and "pruning dropped nothing that
       // survives" stay distinguishable in the record.
-      ...(((input.sectionPlanningResult as { inheritedSlotObligations?: readonly string[] })
-        .inheritedSlotObligations ?? []).length > 0
-        ? {
-          inheritedSlotObligations: (input.sectionPlanningResult as { inheritedSlotObligations?: readonly string[] })
-            .inheritedSlotObligations,
-        }
+      ...((input.sectionPlanningResult.inheritedSlotObligations ?? []).length > 0
+        ? { inheritedSlotObligations: input.sectionPlanningResult.inheritedSlotObligations }
         : {}),
     };
   const safetyValidation = validatePromptEnhancementSafety({

@@ -1905,6 +1905,23 @@ export interface PromptEnhancementPrepareResultV1 {
   // flag rather than folded into `compositionFallbackReasonCodes`. Present only when truncation
   // occurred; additive + optional → PE/PEF behaviour and the emitted contract stay byte-identical.
   additionalDetailsTruncated?: boolean;
+  /**
+   * I2 observability — how many sections the pruner dropped from this body.
+   *
+   * 🔴 Added at the phase-36 verification pass. The pruner already produced its dropped-section
+   * list and the facade already carried it, but nothing read it: the ONE thing the pruner exists to
+   * do was unobservable from an ordinary run, which is the seam prohibition 10 forbids.
+   *
+   * 🔑 It is also what phase 37 (I3) is required to measure — *"the AFTER number: the same
+   * distribution with the pruner on"* — so the measurement rides an ordinary boundary log rather
+   * than needing a bespoke probe built for it.
+   *
+   * ⚠️ A COUNT, deliberately, not the ids. Section ids embed the route decision id and the section
+   * kind; the count answers "did the pruner do anything, and how much" without putting per-body
+   * identifiers into the log. Present only when something was actually pruned, so absent and zero
+   * stay distinguishable.
+   */
+  prunedSectionCount?: number;
 }
 
 export type PromptEnhancementPrepareFacadeV1 = (

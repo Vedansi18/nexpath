@@ -1113,6 +1113,7 @@ Source Signal Guidance:
     "sourceSnapshotVersion": 1,
   },
   "projectRoot": "/tmp/project",
+  "prunedSectionCount": 3,
   "requestId": "facade-nonseq-a-plain-impl",
   "routeDecision": {
     "ambiguityState": "clear",
@@ -3064,6 +3065,7 @@ Source Signal Guidance:
     "sourceSnapshotVersion": 1,
   },
   "projectRoot": "/tmp/project",
+  "prunedSectionCount": 4,
   "requestId": "facade-nonseq-b-explain",
   "routeDecision": {
     "ambiguityState": "clear",
@@ -4959,6 +4961,7 @@ Source Signal Guidance:
     "sourceSnapshotVersion": 1,
   },
   "projectRoot": "/tmp/project",
+  "prunedSectionCount": 3,
   "requestId": "facade-nonseq-c-compound-shaped",
   "routeDecision": {
     "ambiguityState": "clear",

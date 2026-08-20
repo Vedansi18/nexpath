@@ -744,6 +744,9 @@ function buildResult(
     ...(compositionFallbackReasonCodes.length > 0 ? { compositionFallbackReasonCodes } : {}),
     // TI-3 audit follow-up (2026-08-09) — reporting-only; emitted ONLY when the input was truncated.
     ...(additionalDetailsTruncated ? { additionalDetailsTruncated: true } : {}),
+    // I2 observability — reporting-only; emitted ONLY when the pruner actually dropped something,
+    // so absent and zero stay distinguishable. Phase 37's after-number reads this.
+    ...((planning.prunedSectionIds ?? []).length > 0 ? { prunedSectionCount: planning.prunedSectionIds!.length } : {}),
   };
 }
 

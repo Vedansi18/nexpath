@@ -427,3 +427,52 @@ describe('L5010 — required Source-A survivor material is never dropped', () =>
     expect(result.facts.find((f) => f.factId === 'survivor')?.selectionState).toBeUndefined();
   });
 });
+
+describe('I2 observability — the pruner leaves a trace on an ordinary run', () => {
+  /**
+   * 🔴 Added at the phase-36 verification pass. The pruner already produced its dropped-section list
+   * and the facade already carried it — and NOTHING read it. The one thing this module exists to do
+   * was invisible from a normal run, which is the hidden seam prohibition 10 forbids.
+   *
+   * 🔑 It is also phase 37 (I3)'s required after-number — *"the same distribution with the pruner
+   * on"* — so the measurement now rides an ordinary boundary log instead of a bespoke probe.
+   */
+  it('a body that pruned sections reports how many; a body that pruned none reports nothing', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'prune-count-'));
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'x', devDependencies: { vitest: '1.0.0' } }));
+    const store = await openStore(join(dir, 'store.db'));
+    upsertProject(store, {
+      projectRoot: dir, name: 'x', projectType: 'app', language: 'ts', description: '', createdAt: Date.now(),
+    });
+    setProjectEnvFacts(store, dir, probeProject(dir, Date.now()).facts, Date.now());
+
+    const request = buildPromptEnhancementRequestForAuto({
+      auto: { promptText: 'add retry to the payment flow and make sure it is covered', projectRoot: dir, currentAgentMode: 'default' },
+      store, session: SessionStateManager.load(store, dir), project: null,
+      effectiveLanguage: 'en', configuredRole: null, effectiveFlagType: 'stage_transition',
+      firedKey: 'stage_transition:idea', previousStage: 'idea', trigger: { kind: 'stage_transition' },
+      stageResult: {
+        classification: { stage: 'implementation', confidence: 0.9, tier: 3, allScores: {} },
+        signalsPresent: [], signalsAbsent: [], fireRecommendation: true, selectedSignalKey: '',
+        reason: 'prune-count', degraded: false,
+        projectFactCandidates: ['test_runner', 'version_control', 'framework'],
+        sectionRelevanceOrder: [],
+      },
+      streamBOutputs: [],
+    } as never);
+
+    const result = await preparePromptEnhancement(request) as never as {
+      prunedSectionCount?: number;
+      currentBody: { sections: readonly { sectionKind: string }[] };
+    };
+
+    // This fixture runs without a key, so no drafts exist and stage (a) drops the factless
+    // sections — the pruner definitely did work here.
+    expect(
+      result.prunedSectionCount,
+      'the pruner dropped sections but reported no count — the trace is missing again',
+    ).toBeGreaterThan(0);
+    // Discriminating: the count is the DROPPED sections, not the surviving ones.
+    expect(result.prunedSectionCount).not.toBe(result.currentBody.sections.length);
+  });
+});
