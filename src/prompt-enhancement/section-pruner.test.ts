@@ -688,3 +688,70 @@ describe('I3 step 4 — a body\'s floor/extras split is answerable from a run', 
     );
   });
 });
+
+describe('I3 step 3 — relevance ordering visibly follows the prompt, ASSERTED', () => {
+  /**
+   * 🔴 Added at the phase-37 verification pass. §15.4 step 3 says this must be *"asserted on the
+   * labelled set"*, and it was only MEASURED: the I3 runner prints the numbers and fails nothing, so
+   * if the registry stopped honouring the ordering tomorrow, every test would stay green and only a
+   * manual re-read of a JSON file would catch it.
+   *
+   * 🔑 The property, stated as the step states it: given a debug-serving ordering, a debug prompt's
+   * surviving extras are debug-serving rather than generic. The contrast is against NO ordering —
+   * the degraded / no-observation shape, where planned order decides — because that is the only
+   * honest baseline. (Comparing two orderings is what made the runner's first version report a
+   * false zero; both lists ranked the same section near the top.)
+   */
+  const DEBUG_SERVING = ['reproduction_or_evidence', 'verification_or_test_plan', 'behavior_preservation'];
+
+  it('a debug-serving ordering changes which extras survive, and never keeps fewer of them', () => {
+    // A body with more evidenced extras than the cap allows, so the ordering has something to do.
+    // The debug-serving kinds sit LAST in planned order — without an ordering they lose.
+    const planned = ['point_inventory_or_decomposition', 'finding_format', 'handoff_or_sequence_candidate',
+      ...DEBUG_SERVING];
+    const sectionPlans = [
+      section({ kind: 'original_request_or_goal' }),
+      section({ kind: 'context_and_constraints', isRequired: true }),
+      ...planned.map((kind, i) => section({ kind, factIds: [`f${i}`] })),
+    ];
+    const facts = planned.map((_unused, i) => fact(`f${i}`));
+    const floorKinds = ['original_request_or_goal', 'context_and_constraints'];
+    const extrasOf = (r: ReturnType<typeof prunePromptEnhancementSectionsV1>) =>
+      r.sectionPlans.map((s) => s.sectionKind).filter((k) => !floorKinds.includes(k));
+
+    const unranked = extrasOf(prunePromptEnhancementSectionsV1({ sectionPlans, facts, relevanceOrder: [] }));
+    const ranked = extrasOf(prunePromptEnhancementSectionsV1({ sectionPlans, facts, relevanceOrder: DEBUG_SERVING }));
+
+    // Premise guard: without an ordering the debug kinds are planned last and lose the cap, so the
+    // test has something to prove. If planning order ever changes this fails loudly.
+    const debugCount = (kinds: readonly string[]) => kinds.filter((k) => DEBUG_SERVING.includes(k)).length;
+    expect(debugCount(unranked), 'the premise is gone — debug kinds already win without an ordering').toBe(0);
+
+    // The step's own bar.
+    expect(ranked, 'the ordering changed nothing — the registry is not honouring it').not.toEqual(unranked);
+    expect(debugCount(ranked), 'a debug-serving ordering kept no debug-serving sections')
+      .toBeGreaterThan(debugCount(unranked));
+    // Every surviving extra is debug-serving: "debug-serving, not generic", as the step words it.
+    expect(ranked.every((k) => DEBUG_SERVING.includes(k))).toBe(true);
+  });
+
+  it('an ordering cannot promote past the FLOOR or the CAP — it only chooses among extras', () => {
+    // ⛔ Prohibition 4: the model observes, the registry decides. Ranking must not let the
+    // observation win more slots than the cap allows, nor displace floor material.
+    const planned = ['point_inventory_or_decomposition', ...DEBUG_SERVING];
+    const result = prunePromptEnhancementSectionsV1({
+      sectionPlans: [
+        section({ kind: 'original_request_or_goal' }),
+        section({ kind: 'context_and_constraints', isRequired: true }),
+        ...planned.map((kind, i) => section({ kind, factIds: [`f${i}`] })),
+      ],
+      facts: planned.map((_unused, i) => fact(`f${i}`)),
+      relevanceOrder: DEBUG_SERVING,
+    });
+    const kinds = result.sectionPlans.map((s) => s.sectionKind);
+    expect(kinds).toContain('original_request_or_goal');
+    expect(kinds).toContain('context_and_constraints');
+    expect(kinds.filter((k) => !['original_request_or_goal', 'context_and_constraints'].includes(k)))
+      .toHaveLength(PROMPT_ENHANCEMENT_PRUNE_EXTRA_CAP_V1);
+  });
+});
