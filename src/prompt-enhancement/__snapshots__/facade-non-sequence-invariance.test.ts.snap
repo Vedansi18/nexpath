@@ -520,9 +520,6 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
     "composerClaims": [
       "claim:section_kind:original_request_or_goal",
       "claim:section_kind:context_and_constraints",
-      "claim:section_kind:approach_or_steps",
-      "claim:section_kind:acceptance_or_output_expectation",
-      "claim:section_kind:verification_or_test_plan",
       "claim:guidance_fact:pe-fact-stage-0",
     ],
     "composerInputPrivacyState": "approved_refs_only",
@@ -530,7 +527,7 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
     "composerPolicy": "deterministic_only",
     "composerRunId": "pe:facade-nonseq-a-plain-impl:composer:default:1",
     "composerVisiblePromptContext": {
-      "boundedContextRefCount": 7,
+      "boundedContextRefCount": 4,
       "contextPolicy": "structured_refs_only_no_raw_original",
       "originalPromptVisibleLocallyOnly": true,
       "rawPromptTextExcluded": true,
@@ -539,9 +536,6 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
       "src-a-1",
       "section_kind:original_request_or_goal",
       "section_kind:context_and_constraints",
-      "section_kind:approach_or_steps",
-      "section_kind:acceptance_or_output_expectation",
-      "section_kind:verification_or_test_plan",
       "guidance_fact:pe-fact-stage-0",
     ],
     "deterministicFallback": {
@@ -629,9 +623,6 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
       "sectionPlanIds": [
         "pe:facade-nonseq-a-plain-impl:route:section-plan:1:original_request_or_goal",
         "pe:facade-nonseq-a-plain-impl:route:section-plan:2:context_and_constraints",
-        "pe:facade-nonseq-a-plain-impl:route:section-plan:3:approach_or_steps",
-        "pe:facade-nonseq-a-plain-impl:route:section-plan:4:acceptance_or_output_expectation",
-        "pe:facade-nonseq-a-plain-impl:route:section-plan:5:verification_or_test_plan",
         "pe:facade-nonseq-a-plain-impl:route:section-plan:6:source_signal_guidance",
       ],
     },
@@ -664,15 +655,6 @@ Add a retry with exponential backoff to the payment gateway client.
 Context And Constraints:
 - Carry forward relevant constraints, limits, environment facts, and user instructions that affect the work.
 
-Approach Or Steps:
-- Cover Approach Or Steps for this request with concrete, source-backed specifics — state what is required, how to implement it, and how to verify it.
-
-Acceptance Or Output Expectation:
-- State the expected output and acceptance criteria clearly enough that the implementation can be checked.
-
-Verification Or Test Plan:
-- Include the verification command, focused scenario, or regression check that should prove the change.
-
 Source Signal Guidance:
 - The current source signal reports stage as task_breakdown → implementation.
 - Use the current source signal as a task constraint and convert it into direct implementation guidance.",
@@ -691,9 +673,6 @@ Source Signal Guidance:
     "sourceFactIds": [
       "section_kind:original_request_or_goal",
       "section_kind:context_and_constraints",
-      "section_kind:approach_or_steps",
-      "section_kind:acceptance_or_output_expectation",
-      "section_kind:verification_or_test_plan",
       "guidance_fact:pe-fact-stage-0",
     ],
     "strictSchemaFailureReasonCodes": [
@@ -712,9 +691,6 @@ Source Signal Guidance:
     "composerClaims": [
       "claim:section_kind:original_request_or_goal",
       "claim:section_kind:context_and_constraints",
-      "claim:section_kind:approach_or_steps",
-      "claim:section_kind:acceptance_or_output_expectation",
-      "claim:section_kind:verification_or_test_plan",
       "claim:guidance_fact:pe-fact-stage-0",
     ],
     "composerMode": "baseline_deterministic_render",
@@ -743,15 +719,6 @@ Add a retry with exponential backoff to the payment gateway client.
 
 Context And Constraints:
 - Carry forward relevant constraints, limits, environment facts, and user instructions that affect the work.
-
-Approach Or Steps:
-- Cover Approach Or Steps for this request with concrete, source-backed specifics — state what is required, how to implement it, and how to verify it.
-
-Acceptance Or Output Expectation:
-- State the expected output and acceptance criteria clearly enough that the implementation can be checked.
-
-Verification Or Test Plan:
-- Include the verification command, focused scenario, or regression check that should prove the change.
 
 Source Signal Guidance:
 - The current source signal reports stage as task_breakdown → implementation.
@@ -959,296 +926,6 @@ Source Signal Guidance:
           "decompositionDepth",
         ],
         "baselineSourceSignalSlot": "source_signal_guidance",
-        "bodyText": "- Cover Approach Or Steps for this request with concrete, source-backed specifics — state what is required, how to implement it, and how to verify it.",
-        "callVisibilityMode": "deterministic",
-        "canExpandInMoreThorough": true,
-        "canGroundInMoreProjectGrounded": true,
-        "canMergeInShorter": false,
-        "confirmationPresent": false,
-        "confirmationRequired": false,
-        "contentTemplateRuntimeSeamUse": "none",
-        "depthState": "required_survivor",
-        "evidenceStatus": "present",
-        "fallbackBehavior": "none",
-        "familyId": "feature_delivery",
-        "feedbackSensitivity": "protected",
-        "groundedFactValues": [],
-        "handoffCapabilityFlags": [
-          "no_runtime_sequence_v1",
-        ],
-        "handoffFlags": [
-          "no_runtime_sequence_v1",
-        ],
-        "isEditable": true,
-        "mandatoryFloor": true,
-        "originalTextRefs": [
-          {
-            "endOffset": -1,
-            "refId": "pe:facade-nonseq-a-plain-impl:route:section:3:approach_or_steps:otr:1",
-            "refusalReason": "not_found_in_original",
-            "resolution": "refused",
-            "sectionId": "pe:facade-nonseq-a-plain-impl:route:section:3:approach_or_steps",
-            "startOffset": -1,
-          },
-        ],
-        "primaryIntent": "feature.fresh_implementation",
-        "privacyClass": "public_safe",
-        "promptPointRefs": [],
-        "publicCopySafe": true,
-        "publicExplanationCategory": "source_coverage",
-        "registryNamespace": "prompt-enhancement-templates",
-        "removalFeedbackPolicy": "typed_event_required",
-        "requiredSurvivor": true,
-        "requirementSourceStatus": "not_applicable",
-        "routeCandidateRefs": [
-          "pe-route-feature-fresh_implementation",
-        ],
-        "safetyFlags": [
-          "source_honesty",
-          "no_authority_escalation",
-        ],
-        "sectionId": "pe:facade-nonseq-a-plain-impl:route:section:3:approach_or_steps",
-        "sectionKind": "approach_or_steps",
-        "sensitivityFlags": [],
-        "slotEvidenceStatus": "present",
-        "slotObligations": [],
-        "sourceEvidenceStatus": "present",
-        "sourceFactIds": [
-          "section_kind:approach_or_steps",
-        ],
-        "sourceIds": [
-          "prompt:1",
-        ],
-        "sourceKind": "source_a_user_prompt",
-        "sourceTemplateType": "prompt_enhancement_template",
-        "spanRefs": [
-          {
-            "endOffset": 405,
-            "sectionId": "pe:facade-nonseq-a-plain-impl:route:section:3:approach_or_steps",
-            "sourceRefs": [
-              "src-a-1",
-            ],
-            "spanMappingStatus": "exact",
-            "spanRefId": "pe:facade-nonseq-a-plain-impl:route:section:3:approach_or_steps:span:1",
-            "startOffset": 236,
-            "textStoragePolicy": "text_in_body_only",
-          },
-        ],
-        "templateType": "prompt-enhancement-template",
-        "title": "Approach Or Steps",
-        "transformReasonCodes": [
-          "rendered_deterministically",
-          "no_original_text_quoted",
-        ],
-        "validationStatus": "valid",
-        "whyHelpReasonCodes": [
-          "section_kind:approach_or_steps",
-        ],
-      },
-      {
-        "authorityBoundary": "no_authority_escalation",
-        "axisContributions": [
-          "practiceDepth",
-          "sectionDensity",
-          "riskDepth",
-          "groundingDepth",
-          "decompositionDepth",
-        ],
-        "baselineSourceSignalSlot": "source_signal_guidance",
-        "bodyText": "- State the expected output and acceptance criteria clearly enough that the implementation can be checked.",
-        "callVisibilityMode": "deterministic",
-        "canExpandInMoreThorough": true,
-        "canGroundInMoreProjectGrounded": true,
-        "canMergeInShorter": false,
-        "confirmationPresent": false,
-        "confirmationRequired": false,
-        "contentTemplateRuntimeSeamUse": "none",
-        "depthState": "required_survivor",
-        "evidenceStatus": "present",
-        "fallbackBehavior": "none",
-        "familyId": "feature_delivery",
-        "feedbackSensitivity": "protected",
-        "groundedFactValues": [],
-        "handoffCapabilityFlags": [
-          "no_runtime_sequence_v1",
-        ],
-        "handoffFlags": [
-          "no_runtime_sequence_v1",
-        ],
-        "isEditable": true,
-        "mandatoryFloor": true,
-        "originalTextRefs": [
-          {
-            "endOffset": -1,
-            "refId": "pe:facade-nonseq-a-plain-impl:route:section:4:acceptance_or_output_expectation:otr:1",
-            "refusalReason": "not_found_in_original",
-            "resolution": "refused",
-            "sectionId": "pe:facade-nonseq-a-plain-impl:route:section:4:acceptance_or_output_expectation",
-            "startOffset": -1,
-          },
-        ],
-        "primaryIntent": "feature.fresh_implementation",
-        "privacyClass": "public_safe",
-        "promptPointRefs": [],
-        "publicCopySafe": true,
-        "publicExplanationCategory": "source_coverage",
-        "registryNamespace": "prompt-enhancement-templates",
-        "removalFeedbackPolicy": "typed_event_required",
-        "requiredSurvivor": true,
-        "requirementSourceStatus": "not_applicable",
-        "routeCandidateRefs": [
-          "pe-route-feature-fresh_implementation",
-        ],
-        "safetyFlags": [
-          "source_honesty",
-          "no_authority_escalation",
-        ],
-        "sectionId": "pe:facade-nonseq-a-plain-impl:route:section:4:acceptance_or_output_expectation",
-        "sectionKind": "acceptance_or_output_expectation",
-        "sensitivityFlags": [],
-        "slotEvidenceStatus": "present",
-        "slotObligations": [],
-        "sourceEvidenceStatus": "present",
-        "sourceFactIds": [
-          "section_kind:acceptance_or_output_expectation",
-        ],
-        "sourceIds": [
-          "prompt:1",
-        ],
-        "sourceKind": "source_a_user_prompt",
-        "sourceTemplateType": "prompt_enhancement_template",
-        "spanRefs": [
-          {
-            "endOffset": 547,
-            "sectionId": "pe:facade-nonseq-a-plain-impl:route:section:4:acceptance_or_output_expectation",
-            "sourceRefs": [
-              "src-a-1",
-            ],
-            "spanMappingStatus": "exact",
-            "spanRefId": "pe:facade-nonseq-a-plain-impl:route:section:4:acceptance_or_output_expectation:span:1",
-            "startOffset": 407,
-            "textStoragePolicy": "text_in_body_only",
-          },
-        ],
-        "templateType": "prompt-enhancement-template",
-        "title": "Acceptance Or Output Expectation",
-        "transformReasonCodes": [
-          "rendered_deterministically",
-          "no_original_text_quoted",
-        ],
-        "validationStatus": "valid",
-        "whyHelpReasonCodes": [
-          "section_kind:acceptance_or_output_expectation",
-        ],
-      },
-      {
-        "authorityBoundary": "no_authority_escalation",
-        "axisContributions": [
-          "practiceDepth",
-          "sectionDensity",
-          "riskDepth",
-          "groundingDepth",
-          "decompositionDepth",
-        ],
-        "baselineSourceSignalSlot": "source_signal_guidance",
-        "bodyText": "- Include the verification command, focused scenario, or regression check that should prove the change.",
-        "callVisibilityMode": "deterministic",
-        "canExpandInMoreThorough": true,
-        "canGroundInMoreProjectGrounded": true,
-        "canMergeInShorter": false,
-        "confirmationPresent": false,
-        "confirmationRequired": false,
-        "contentTemplateRuntimeSeamUse": "none",
-        "depthState": "required_survivor",
-        "evidenceStatus": "present",
-        "fallbackBehavior": "none",
-        "familyId": "feature_delivery",
-        "feedbackSensitivity": "protected",
-        "groundedFactValues": [],
-        "handoffCapabilityFlags": [
-          "no_runtime_sequence_v1",
-        ],
-        "handoffFlags": [
-          "no_runtime_sequence_v1",
-        ],
-        "isEditable": true,
-        "mandatoryFloor": true,
-        "originalTextRefs": [
-          {
-            "endOffset": -1,
-            "refId": "pe:facade-nonseq-a-plain-impl:route:section:5:verification_or_test_plan:otr:1",
-            "refusalReason": "not_found_in_original",
-            "resolution": "refused",
-            "sectionId": "pe:facade-nonseq-a-plain-impl:route:section:5:verification_or_test_plan",
-            "startOffset": -1,
-          },
-        ],
-        "primaryIntent": "feature.fresh_implementation",
-        "privacyClass": "public_safe",
-        "promptPointRefs": [],
-        "publicCopySafe": true,
-        "publicExplanationCategory": "source_coverage",
-        "registryNamespace": "prompt-enhancement-templates",
-        "removalFeedbackPolicy": "typed_event_required",
-        "requiredSurvivor": true,
-        "requirementSourceStatus": "not_applicable",
-        "routeCandidateRefs": [
-          "pe-route-feature-fresh_implementation",
-        ],
-        "safetyFlags": [
-          "source_honesty",
-          "no_authority_escalation",
-        ],
-        "sectionId": "pe:facade-nonseq-a-plain-impl:route:section:5:verification_or_test_plan",
-        "sectionKind": "verification_or_test_plan",
-        "sensitivityFlags": [],
-        "slotEvidenceStatus": "present",
-        "slotObligations": [
-          "family_specific_verification",
-        ],
-        "sourceEvidenceStatus": "present",
-        "sourceFactIds": [
-          "section_kind:verification_or_test_plan",
-        ],
-        "sourceIds": [
-          "prompt:1",
-        ],
-        "sourceKind": "source_a_user_prompt",
-        "sourceTemplateType": "prompt_enhancement_template",
-        "spanRefs": [
-          {
-            "endOffset": 679,
-            "sectionId": "pe:facade-nonseq-a-plain-impl:route:section:5:verification_or_test_plan",
-            "sourceRefs": [
-              "src-a-1",
-            ],
-            "spanMappingStatus": "exact",
-            "spanRefId": "pe:facade-nonseq-a-plain-impl:route:section:5:verification_or_test_plan:span:1",
-            "startOffset": 549,
-            "textStoragePolicy": "text_in_body_only",
-          },
-        ],
-        "templateType": "prompt-enhancement-template",
-        "title": "Verification Or Test Plan",
-        "transformReasonCodes": [
-          "rendered_deterministically",
-          "no_original_text_quoted",
-        ],
-        "validationStatus": "valid",
-        "whyHelpReasonCodes": [
-          "section_kind:verification_or_test_plan",
-        ],
-      },
-      {
-        "authorityBoundary": "no_authority_escalation",
-        "axisContributions": [
-          "practiceDepth",
-          "sectionDensity",
-          "riskDepth",
-          "groundingDepth",
-          "decompositionDepth",
-        ],
-        "baselineSourceSignalSlot": "source_signal_guidance",
         "bodyText": "- The current source signal reports stage as task_breakdown → implementation.
 - Use the current source signal as a task constraint and convert it into direct implementation guidance.",
         "callVisibilityMode": "deterministic",
@@ -1320,14 +997,14 @@ Source Signal Guidance:
         "sourceTemplateType": "prompt_enhancement_template",
         "spanRefs": [
           {
-            "endOffset": 887,
+            "endOffset": 442,
             "sectionId": "pe:facade-nonseq-a-plain-impl:route:section:6:source_signal_guidance",
             "sourceRefs": [
               "src-a-1",
             ],
             "spanMappingStatus": "exact",
             "spanRefId": "pe:facade-nonseq-a-plain-impl:route:section:6:source_signal_guidance:span:1",
-            "startOffset": 681,
+            "startOffset": 236,
             "textStoragePolicy": "text_in_body_only",
           },
         ],
@@ -1357,9 +1034,6 @@ Source Signal Guidance:
     "sourceFactIds": [
       "section_kind:original_request_or_goal",
       "section_kind:context_and_constraints",
-      "section_kind:approach_or_steps",
-      "section_kind:acceptance_or_output_expectation",
-      "section_kind:verification_or_test_plan",
       "guidance_fact:pe-fact-stage-0",
     ],
     "text": "My original request (verbatim):
@@ -1367,15 +1041,6 @@ Add a retry with exponential backoff to the payment gateway client.
 
 Context And Constraints:
 - Carry forward relevant constraints, limits, environment facts, and user instructions that affect the work.
-
-Approach Or Steps:
-- Cover Approach Or Steps for this request with concrete, source-backed specifics — state what is required, how to implement it, and how to verify it.
-
-Acceptance Or Output Expectation:
-- State the expected output and acceptance criteria clearly enough that the implementation can be checked.
-
-Verification Or Test Plan:
-- Include the verification command, focused scenario, or regression check that should prove the change.
 
 Source Signal Guidance:
 - The current source signal reports stage as task_breakdown → implementation.
@@ -1765,9 +1430,6 @@ Source Signal Guidance:
     "selectedSectionPivotIds": [
       "pe:facade-nonseq-a-plain-impl:route:section:1:original_request_or_goal",
       "pe:facade-nonseq-a-plain-impl:route:section:2:context_and_constraints",
-      "pe:facade-nonseq-a-plain-impl:route:section:3:approach_or_steps",
-      "pe:facade-nonseq-a-plain-impl:route:section:4:acceptance_or_output_expectation",
-      "pe:facade-nonseq-a-plain-impl:route:section:5:verification_or_test_plan",
       "pe:facade-nonseq-a-plain-impl:route:section:6:source_signal_guidance",
     ],
     "selectedTagIds": [],
@@ -1899,15 +1561,6 @@ Add a retry with exponential backoff to the payment gateway client.
 
 Context And Constraints:
 - Carry forward relevant constraints, limits, environment facts, and user instructions that affect the work.
-
-Approach Or Steps:
-- Cover Approach Or Steps for this request with concrete, source-backed specifics — state what is required, how to implement it, and how to verify it.
-
-Acceptance Or Output Expectation:
-- State the expected output and acceptance criteria clearly enough that the implementation can be checked.
-
-Verification Or Test Plan:
-- Include the verification command, focused scenario, or regression check that should prove the change.
 
 Source Signal Guidance:
 - The current source signal reports stage as task_breakdown → implementation.
@@ -2053,129 +1706,6 @@ Source Signal Guidance:
         "callVisibilityMode": "deterministic",
         "fallbackMode": "none",
         "familyId": "feature_delivery",
-        "label": "Approach Or Steps",
-        "preciseFeedbackAllowed": false,
-        "primaryIntent": "feature.fresh_implementation",
-        "publicSafeExplanationCategory": "source_coverage",
-        "requirementSourceStatus": "not_applicable",
-        "safetyFlags": [
-          "source_honesty",
-          "no_authority_escalation",
-        ],
-        "sectionId": "pe:facade-nonseq-a-plain-impl:route:section:3:approach_or_steps",
-        "sectionKind": "approach_or_steps",
-        "sensitivityFlags": [],
-        "slotEvidenceStatus": "present",
-        "sourceEvidenceStatus": "present",
-        "sourceIds": [
-          "prompt:1",
-        ],
-        "sourceKinds": [
-          "source_a_user_prompt",
-        ],
-        "spanRefs": [
-          {
-            "endOffset": 405,
-            "sectionId": "pe:facade-nonseq-a-plain-impl:route:section:3:approach_or_steps",
-            "sourceRefs": [
-              "src-a-1",
-            ],
-            "spanMappingStatus": "exact",
-            "spanRefId": "pe:facade-nonseq-a-plain-impl:route:section:3:approach_or_steps:span:1",
-            "startOffset": 236,
-            "textStoragePolicy": "text_in_body_only",
-          },
-        ],
-        "templateType": "prompt-enhancement-template",
-        "validationStatus": "valid",
-      },
-      {
-        "baselineSourceSignalSlot": "source_signal_guidance",
-        "callVisibilityMode": "deterministic",
-        "fallbackMode": "none",
-        "familyId": "feature_delivery",
-        "label": "Acceptance Or Output Expectation",
-        "preciseFeedbackAllowed": false,
-        "primaryIntent": "feature.fresh_implementation",
-        "publicSafeExplanationCategory": "source_coverage",
-        "requirementSourceStatus": "not_applicable",
-        "safetyFlags": [
-          "source_honesty",
-          "no_authority_escalation",
-        ],
-        "sectionId": "pe:facade-nonseq-a-plain-impl:route:section:4:acceptance_or_output_expectation",
-        "sectionKind": "acceptance_or_output_expectation",
-        "sensitivityFlags": [],
-        "slotEvidenceStatus": "present",
-        "sourceEvidenceStatus": "present",
-        "sourceIds": [
-          "prompt:1",
-        ],
-        "sourceKinds": [
-          "source_a_user_prompt",
-        ],
-        "spanRefs": [
-          {
-            "endOffset": 547,
-            "sectionId": "pe:facade-nonseq-a-plain-impl:route:section:4:acceptance_or_output_expectation",
-            "sourceRefs": [
-              "src-a-1",
-            ],
-            "spanMappingStatus": "exact",
-            "spanRefId": "pe:facade-nonseq-a-plain-impl:route:section:4:acceptance_or_output_expectation:span:1",
-            "startOffset": 407,
-            "textStoragePolicy": "text_in_body_only",
-          },
-        ],
-        "templateType": "prompt-enhancement-template",
-        "validationStatus": "valid",
-      },
-      {
-        "baselineSourceSignalSlot": "source_signal_guidance",
-        "callVisibilityMode": "deterministic",
-        "fallbackMode": "none",
-        "familyId": "feature_delivery",
-        "label": "Verification Or Test Plan",
-        "preciseFeedbackAllowed": false,
-        "primaryIntent": "feature.fresh_implementation",
-        "publicSafeExplanationCategory": "source_coverage",
-        "requirementSourceStatus": "not_applicable",
-        "safetyFlags": [
-          "source_honesty",
-          "no_authority_escalation",
-        ],
-        "sectionId": "pe:facade-nonseq-a-plain-impl:route:section:5:verification_or_test_plan",
-        "sectionKind": "verification_or_test_plan",
-        "sensitivityFlags": [],
-        "slotEvidenceStatus": "present",
-        "sourceEvidenceStatus": "present",
-        "sourceIds": [
-          "prompt:1",
-        ],
-        "sourceKinds": [
-          "source_a_user_prompt",
-        ],
-        "spanRefs": [
-          {
-            "endOffset": 679,
-            "sectionId": "pe:facade-nonseq-a-plain-impl:route:section:5:verification_or_test_plan",
-            "sourceRefs": [
-              "src-a-1",
-            ],
-            "spanMappingStatus": "exact",
-            "spanRefId": "pe:facade-nonseq-a-plain-impl:route:section:5:verification_or_test_plan:span:1",
-            "startOffset": 549,
-            "textStoragePolicy": "text_in_body_only",
-          },
-        ],
-        "templateType": "prompt-enhancement-template",
-        "validationStatus": "valid",
-      },
-      {
-        "baselineSourceSignalSlot": "source_signal_guidance",
-        "callVisibilityMode": "deterministic",
-        "fallbackMode": "none",
-        "familyId": "feature_delivery",
         "label": "Source Signal Guidance",
         "preciseFeedbackAllowed": false,
         "primaryIntent": "feature.fresh_implementation",
@@ -2198,14 +1728,14 @@ Source Signal Guidance:
         ],
         "spanRefs": [
           {
-            "endOffset": 887,
+            "endOffset": 442,
             "sectionId": "pe:facade-nonseq-a-plain-impl:route:section:6:source_signal_guidance",
             "sourceRefs": [
               "src-a-1",
             ],
             "spanMappingStatus": "exact",
             "spanRefId": "pe:facade-nonseq-a-plain-impl:route:section:6:source_signal_guidance:span:1",
-            "startOffset": 681,
+            "startOffset": 236,
             "textStoragePolicy": "text_in_body_only",
           },
         ],
@@ -2938,10 +2468,6 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
     "composerClaims": [
       "claim:section_kind:original_request_or_goal",
       "claim:section_kind:test_command_output",
-      "claim:section_kind:fixture_mock_context",
-      "claim:section_kind:reproduction_or_evidence",
-      "claim:section_kind:narrow_fix_boundary",
-      "claim:section_kind:verification_or_test_plan",
       "claim:guidance_fact:pe-fact-stage-0",
     ],
     "composerInputPrivacyState": "approved_refs_only",
@@ -2949,7 +2475,7 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
     "composerPolicy": "deterministic_only",
     "composerRunId": "pe:facade-nonseq-b-explain:composer:default:1",
     "composerVisiblePromptContext": {
-      "boundedContextRefCount": 8,
+      "boundedContextRefCount": 4,
       "contextPolicy": "structured_refs_only_no_raw_original",
       "originalPromptVisibleLocallyOnly": true,
       "rawPromptTextExcluded": true,
@@ -2958,10 +2484,6 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
       "src-a-1",
       "section_kind:original_request_or_goal",
       "section_kind:test_command_output",
-      "section_kind:fixture_mock_context",
-      "section_kind:reproduction_or_evidence",
-      "section_kind:narrow_fix_boundary",
-      "section_kind:verification_or_test_plan",
       "guidance_fact:pe-fact-stage-0",
     ],
     "deterministicFallback": {
@@ -3049,10 +2571,6 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
       "sectionPlanIds": [
         "pe:facade-nonseq-b-explain:route:section-plan:1:original_request_or_goal",
         "pe:facade-nonseq-b-explain:route:section-plan:2:test_command_output",
-        "pe:facade-nonseq-b-explain:route:section-plan:3:fixture_mock_context",
-        "pe:facade-nonseq-b-explain:route:section-plan:4:reproduction_or_evidence",
-        "pe:facade-nonseq-b-explain:route:section-plan:5:narrow_fix_boundary",
-        "pe:facade-nonseq-b-explain:route:section-plan:6:verification_or_test_plan",
         "pe:facade-nonseq-b-explain:route:section-plan:7:source_signal_guidance",
       ],
     },
@@ -3085,18 +2603,6 @@ Fix the failing test in the payment flow and explain what caused it.
 Test Command Output:
 - Cover Test Command Output for this request with concrete, source-backed specifics — state what is required, how to implement it, and how to verify it.
 
-Fixture Mock Context:
-- Cover Fixture Mock Context for this request with concrete, source-backed specifics — state what is required, how to implement it, and how to verify it.
-
-Reproduction Or Evidence:
-- Capture the failing behavior, reproduction path, observed evidence, and expected behavior before changing code.
-
-Narrow Fix Boundary:
-- Cover Narrow Fix Boundary for this request with concrete, source-backed specifics — state what is required, how to implement it, and how to verify it.
-
-Verification Or Test Plan:
-- Include the verification command, focused scenario, or regression check that should prove the change.
-
 Source Signal Guidance:
 - The current source signal reports stage as task_breakdown → implementation.
 - Use the current source signal as a task constraint and convert it into direct implementation guidance.",
@@ -3115,10 +2621,6 @@ Source Signal Guidance:
     "sourceFactIds": [
       "section_kind:original_request_or_goal",
       "section_kind:test_command_output",
-      "section_kind:fixture_mock_context",
-      "section_kind:reproduction_or_evidence",
-      "section_kind:narrow_fix_boundary",
-      "section_kind:verification_or_test_plan",
       "guidance_fact:pe-fact-stage-0",
     ],
     "strictSchemaFailureReasonCodes": [
@@ -3137,10 +2639,6 @@ Source Signal Guidance:
     "composerClaims": [
       "claim:section_kind:original_request_or_goal",
       "claim:section_kind:test_command_output",
-      "claim:section_kind:fixture_mock_context",
-      "claim:section_kind:reproduction_or_evidence",
-      "claim:section_kind:narrow_fix_boundary",
-      "claim:section_kind:verification_or_test_plan",
       "claim:guidance_fact:pe-fact-stage-0",
     ],
     "composerMode": "baseline_deterministic_render",
@@ -3169,18 +2667,6 @@ Fix the failing test in the payment flow and explain what caused it.
 
 Test Command Output:
 - Cover Test Command Output for this request with concrete, source-backed specifics — state what is required, how to implement it, and how to verify it.
-
-Fixture Mock Context:
-- Cover Fixture Mock Context for this request with concrete, source-backed specifics — state what is required, how to implement it, and how to verify it.
-
-Reproduction Or Evidence:
-- Capture the failing behavior, reproduction path, observed evidence, and expected behavior before changing code.
-
-Narrow Fix Boundary:
-- Cover Narrow Fix Boundary for this request with concrete, source-backed specifics — state what is required, how to implement it, and how to verify it.
-
-Verification Or Test Plan:
-- Include the verification command, focused scenario, or regression check that should prove the change.
 
 Source Signal Guidance:
 - The current source signal reports stage as task_breakdown → implementation.
@@ -3388,395 +2874,6 @@ Source Signal Guidance:
           "decompositionDepth",
         ],
         "baselineSourceSignalSlot": "source_signal_guidance",
-        "bodyText": "- Cover Fixture Mock Context for this request with concrete, source-backed specifics — state what is required, how to implement it, and how to verify it.",
-        "callVisibilityMode": "deterministic",
-        "canExpandInMoreThorough": true,
-        "canGroundInMoreProjectGrounded": true,
-        "canMergeInShorter": false,
-        "confirmationPresent": false,
-        "confirmationRequired": false,
-        "contentTemplateRuntimeSeamUse": "none",
-        "depthState": "required_survivor",
-        "evidenceStatus": "present",
-        "fallbackBehavior": "none",
-        "familyId": "issue_debug",
-        "feedbackSensitivity": "protected",
-        "groundedFactValues": [],
-        "handoffCapabilityFlags": [
-          "no_runtime_sequence_v1",
-        ],
-        "handoffFlags": [
-          "no_runtime_sequence_v1",
-        ],
-        "isEditable": true,
-        "mandatoryFloor": true,
-        "originalTextRefs": [
-          {
-            "endOffset": -1,
-            "refId": "pe:facade-nonseq-b-explain:route:section:3:fixture_mock_context:otr:1",
-            "refusalReason": "not_found_in_original",
-            "resolution": "refused",
-            "sectionId": "pe:facade-nonseq-b-explain:route:section:3:fixture_mock_context",
-            "startOffset": -1,
-          },
-        ],
-        "primaryIntent": "issue_debug.failing_test",
-        "privacyClass": "public_safe",
-        "promptPointRefs": [],
-        "publicCopySafe": true,
-        "publicExplanationCategory": "source_coverage",
-        "registryNamespace": "prompt-enhancement-templates",
-        "removalFeedbackPolicy": "typed_event_required",
-        "requiredSurvivor": true,
-        "requirementSourceStatus": "not_applicable",
-        "routeCandidateRefs": [
-          "pe-route-issue_debug-failing_test",
-        ],
-        "safetyFlags": [
-          "source_honesty",
-          "no_authority_escalation",
-        ],
-        "sectionId": "pe:facade-nonseq-b-explain:route:section:3:fixture_mock_context",
-        "sectionKind": "fixture_mock_context",
-        "sensitivityFlags": [],
-        "slotEvidenceStatus": "present",
-        "slotObligations": [],
-        "sourceEvidenceStatus": "present",
-        "sourceFactIds": [
-          "section_kind:fixture_mock_context",
-        ],
-        "sourceIds": [
-          "prompt:1",
-        ],
-        "sourceKind": "source_a_user_prompt",
-        "sourceTemplateType": "prompt_enhancement_template",
-        "spanRefs": [
-          {
-            "endOffset": 452,
-            "sectionId": "pe:facade-nonseq-b-explain:route:section:3:fixture_mock_context",
-            "sourceRefs": [
-              "src-a-1",
-            ],
-            "spanMappingStatus": "exact",
-            "spanRefId": "pe:facade-nonseq-b-explain:route:section:3:fixture_mock_context:span:1",
-            "startOffset": 277,
-            "textStoragePolicy": "text_in_body_only",
-          },
-        ],
-        "templateType": "prompt-enhancement-template",
-        "title": "Fixture Mock Context",
-        "transformReasonCodes": [
-          "rendered_deterministically",
-          "no_original_text_quoted",
-        ],
-        "validationStatus": "valid",
-        "whyHelpReasonCodes": [
-          "section_kind:fixture_mock_context",
-        ],
-      },
-      {
-        "authorityBoundary": "no_authority_escalation",
-        "axisContributions": [
-          "practiceDepth",
-          "sectionDensity",
-          "riskDepth",
-          "groundingDepth",
-          "decompositionDepth",
-        ],
-        "baselineSourceSignalSlot": "source_signal_guidance",
-        "bodyText": "- Capture the failing behavior, reproduction path, observed evidence, and expected behavior before changing code.",
-        "callVisibilityMode": "deterministic",
-        "canExpandInMoreThorough": true,
-        "canGroundInMoreProjectGrounded": true,
-        "canMergeInShorter": false,
-        "confirmationPresent": false,
-        "confirmationRequired": false,
-        "contentTemplateRuntimeSeamUse": "none",
-        "depthState": "required_survivor",
-        "evidenceStatus": "present",
-        "fallbackBehavior": "none",
-        "familyId": "issue_debug",
-        "feedbackSensitivity": "protected",
-        "groundedFactValues": [],
-        "handoffCapabilityFlags": [
-          "no_runtime_sequence_v1",
-        ],
-        "handoffFlags": [
-          "no_runtime_sequence_v1",
-        ],
-        "isEditable": true,
-        "mandatoryFloor": true,
-        "originalTextRefs": [
-          {
-            "endOffset": -1,
-            "refId": "pe:facade-nonseq-b-explain:route:section:4:reproduction_or_evidence:otr:1",
-            "refusalReason": "not_found_in_original",
-            "resolution": "refused",
-            "sectionId": "pe:facade-nonseq-b-explain:route:section:4:reproduction_or_evidence",
-            "startOffset": -1,
-          },
-        ],
-        "primaryIntent": "issue_debug.failing_test",
-        "privacyClass": "public_safe",
-        "promptPointRefs": [],
-        "publicCopySafe": true,
-        "publicExplanationCategory": "source_coverage",
-        "registryNamespace": "prompt-enhancement-templates",
-        "removalFeedbackPolicy": "typed_event_required",
-        "requiredSurvivor": true,
-        "requirementSourceStatus": "not_applicable",
-        "routeCandidateRefs": [
-          "pe-route-issue_debug-failing_test",
-        ],
-        "safetyFlags": [
-          "source_honesty",
-          "no_authority_escalation",
-        ],
-        "sectionId": "pe:facade-nonseq-b-explain:route:section:4:reproduction_or_evidence",
-        "sectionKind": "reproduction_or_evidence",
-        "sensitivityFlags": [],
-        "slotEvidenceStatus": "present",
-        "slotObligations": [
-          "reproduction_or_evidence_request",
-          "no_invention_state",
-        ],
-        "sourceEvidenceStatus": "present",
-        "sourceFactIds": [
-          "section_kind:reproduction_or_evidence",
-        ],
-        "sourceIds": [
-          "prompt:1",
-        ],
-        "sourceKind": "source_a_user_prompt",
-        "sourceTemplateType": "prompt_enhancement_template",
-        "spanRefs": [
-          {
-            "endOffset": 593,
-            "sectionId": "pe:facade-nonseq-b-explain:route:section:4:reproduction_or_evidence",
-            "sourceRefs": [
-              "src-a-1",
-            ],
-            "spanMappingStatus": "exact",
-            "spanRefId": "pe:facade-nonseq-b-explain:route:section:4:reproduction_or_evidence:span:1",
-            "startOffset": 454,
-            "textStoragePolicy": "text_in_body_only",
-          },
-        ],
-        "templateType": "prompt-enhancement-template",
-        "title": "Reproduction Or Evidence",
-        "transformReasonCodes": [
-          "rendered_deterministically",
-          "no_original_text_quoted",
-        ],
-        "validationStatus": "valid",
-        "whyHelpReasonCodes": [
-          "section_kind:reproduction_or_evidence",
-        ],
-      },
-      {
-        "authorityBoundary": "no_authority_escalation",
-        "axisContributions": [
-          "practiceDepth",
-          "sectionDensity",
-          "riskDepth",
-          "groundingDepth",
-          "decompositionDepth",
-        ],
-        "baselineSourceSignalSlot": "source_signal_guidance",
-        "bodyText": "- Cover Narrow Fix Boundary for this request with concrete, source-backed specifics — state what is required, how to implement it, and how to verify it.",
-        "callVisibilityMode": "deterministic",
-        "canExpandInMoreThorough": true,
-        "canGroundInMoreProjectGrounded": true,
-        "canMergeInShorter": false,
-        "confirmationPresent": false,
-        "confirmationRequired": false,
-        "contentTemplateRuntimeSeamUse": "none",
-        "depthState": "required_survivor",
-        "evidenceStatus": "present",
-        "fallbackBehavior": "none",
-        "familyId": "issue_debug",
-        "feedbackSensitivity": "protected",
-        "groundedFactValues": [],
-        "handoffCapabilityFlags": [
-          "no_runtime_sequence_v1",
-        ],
-        "handoffFlags": [
-          "no_runtime_sequence_v1",
-        ],
-        "isEditable": true,
-        "mandatoryFloor": true,
-        "originalTextRefs": [
-          {
-            "endOffset": -1,
-            "refId": "pe:facade-nonseq-b-explain:route:section:5:narrow_fix_boundary:otr:1",
-            "refusalReason": "not_found_in_original",
-            "resolution": "refused",
-            "sectionId": "pe:facade-nonseq-b-explain:route:section:5:narrow_fix_boundary",
-            "startOffset": -1,
-          },
-        ],
-        "primaryIntent": "issue_debug.failing_test",
-        "privacyClass": "public_safe",
-        "promptPointRefs": [],
-        "publicCopySafe": true,
-        "publicExplanationCategory": "source_coverage",
-        "registryNamespace": "prompt-enhancement-templates",
-        "removalFeedbackPolicy": "typed_event_required",
-        "requiredSurvivor": true,
-        "requirementSourceStatus": "not_applicable",
-        "routeCandidateRefs": [
-          "pe-route-issue_debug-failing_test",
-        ],
-        "safetyFlags": [
-          "source_honesty",
-          "no_authority_escalation",
-        ],
-        "sectionId": "pe:facade-nonseq-b-explain:route:section:5:narrow_fix_boundary",
-        "sectionKind": "narrow_fix_boundary",
-        "sensitivityFlags": [],
-        "slotEvidenceStatus": "present",
-        "slotObligations": [],
-        "sourceEvidenceStatus": "present",
-        "sourceFactIds": [
-          "section_kind:narrow_fix_boundary",
-        ],
-        "sourceIds": [
-          "prompt:1",
-        ],
-        "sourceKind": "source_a_user_prompt",
-        "sourceTemplateType": "prompt_enhancement_template",
-        "spanRefs": [
-          {
-            "endOffset": 768,
-            "sectionId": "pe:facade-nonseq-b-explain:route:section:5:narrow_fix_boundary",
-            "sourceRefs": [
-              "src-a-1",
-            ],
-            "spanMappingStatus": "exact",
-            "spanRefId": "pe:facade-nonseq-b-explain:route:section:5:narrow_fix_boundary:span:1",
-            "startOffset": 595,
-            "textStoragePolicy": "text_in_body_only",
-          },
-        ],
-        "templateType": "prompt-enhancement-template",
-        "title": "Narrow Fix Boundary",
-        "transformReasonCodes": [
-          "rendered_deterministically",
-          "no_original_text_quoted",
-        ],
-        "validationStatus": "valid",
-        "whyHelpReasonCodes": [
-          "section_kind:narrow_fix_boundary",
-        ],
-      },
-      {
-        "authorityBoundary": "no_authority_escalation",
-        "axisContributions": [
-          "practiceDepth",
-          "sectionDensity",
-          "riskDepth",
-          "groundingDepth",
-          "decompositionDepth",
-        ],
-        "baselineSourceSignalSlot": "source_signal_guidance",
-        "bodyText": "- Include the verification command, focused scenario, or regression check that should prove the change.",
-        "callVisibilityMode": "deterministic",
-        "canExpandInMoreThorough": true,
-        "canGroundInMoreProjectGrounded": true,
-        "canMergeInShorter": false,
-        "confirmationPresent": false,
-        "confirmationRequired": false,
-        "contentTemplateRuntimeSeamUse": "none",
-        "depthState": "required_survivor",
-        "evidenceStatus": "present",
-        "fallbackBehavior": "none",
-        "familyId": "issue_debug",
-        "feedbackSensitivity": "protected",
-        "groundedFactValues": [],
-        "handoffCapabilityFlags": [
-          "no_runtime_sequence_v1",
-        ],
-        "handoffFlags": [
-          "no_runtime_sequence_v1",
-        ],
-        "isEditable": true,
-        "mandatoryFloor": true,
-        "originalTextRefs": [
-          {
-            "endOffset": -1,
-            "refId": "pe:facade-nonseq-b-explain:route:section:6:verification_or_test_plan:otr:1",
-            "refusalReason": "not_found_in_original",
-            "resolution": "refused",
-            "sectionId": "pe:facade-nonseq-b-explain:route:section:6:verification_or_test_plan",
-            "startOffset": -1,
-          },
-        ],
-        "primaryIntent": "issue_debug.failing_test",
-        "privacyClass": "public_safe",
-        "promptPointRefs": [],
-        "publicCopySafe": true,
-        "publicExplanationCategory": "source_coverage",
-        "registryNamespace": "prompt-enhancement-templates",
-        "removalFeedbackPolicy": "typed_event_required",
-        "requiredSurvivor": true,
-        "requirementSourceStatus": "not_applicable",
-        "routeCandidateRefs": [
-          "pe-route-issue_debug-failing_test",
-        ],
-        "safetyFlags": [
-          "source_honesty",
-          "no_authority_escalation",
-        ],
-        "sectionId": "pe:facade-nonseq-b-explain:route:section:6:verification_or_test_plan",
-        "sectionKind": "verification_or_test_plan",
-        "sensitivityFlags": [],
-        "slotEvidenceStatus": "present",
-        "slotObligations": [
-          "family_specific_verification",
-        ],
-        "sourceEvidenceStatus": "present",
-        "sourceFactIds": [
-          "section_kind:verification_or_test_plan",
-        ],
-        "sourceIds": [
-          "prompt:1",
-        ],
-        "sourceKind": "source_a_user_prompt",
-        "sourceTemplateType": "prompt_enhancement_template",
-        "spanRefs": [
-          {
-            "endOffset": 900,
-            "sectionId": "pe:facade-nonseq-b-explain:route:section:6:verification_or_test_plan",
-            "sourceRefs": [
-              "src-a-1",
-            ],
-            "spanMappingStatus": "exact",
-            "spanRefId": "pe:facade-nonseq-b-explain:route:section:6:verification_or_test_plan:span:1",
-            "startOffset": 770,
-            "textStoragePolicy": "text_in_body_only",
-          },
-        ],
-        "templateType": "prompt-enhancement-template",
-        "title": "Verification Or Test Plan",
-        "transformReasonCodes": [
-          "rendered_deterministically",
-          "no_original_text_quoted",
-        ],
-        "validationStatus": "valid",
-        "whyHelpReasonCodes": [
-          "section_kind:verification_or_test_plan",
-        ],
-      },
-      {
-        "authorityBoundary": "no_authority_escalation",
-        "axisContributions": [
-          "practiceDepth",
-          "sectionDensity",
-          "riskDepth",
-          "groundingDepth",
-          "decompositionDepth",
-        ],
-        "baselineSourceSignalSlot": "source_signal_guidance",
         "bodyText": "- The current source signal reports stage as task_breakdown → implementation.
 - Use the current source signal as a task constraint and convert it into direct implementation guidance.",
         "callVisibilityMode": "deterministic",
@@ -3848,14 +2945,14 @@ Source Signal Guidance:
         "sourceTemplateType": "prompt_enhancement_template",
         "spanRefs": [
           {
-            "endOffset": 1108,
+            "endOffset": 483,
             "sectionId": "pe:facade-nonseq-b-explain:route:section:7:source_signal_guidance",
             "sourceRefs": [
               "src-a-1",
             ],
             "spanMappingStatus": "exact",
             "spanRefId": "pe:facade-nonseq-b-explain:route:section:7:source_signal_guidance:span:1",
-            "startOffset": 902,
+            "startOffset": 277,
             "textStoragePolicy": "text_in_body_only",
           },
         ],
@@ -3885,10 +2982,6 @@ Source Signal Guidance:
     "sourceFactIds": [
       "section_kind:original_request_or_goal",
       "section_kind:test_command_output",
-      "section_kind:fixture_mock_context",
-      "section_kind:reproduction_or_evidence",
-      "section_kind:narrow_fix_boundary",
-      "section_kind:verification_or_test_plan",
       "guidance_fact:pe-fact-stage-0",
     ],
     "text": "My original request (verbatim):
@@ -3896,18 +2989,6 @@ Fix the failing test in the payment flow and explain what caused it.
 
 Test Command Output:
 - Cover Test Command Output for this request with concrete, source-backed specifics — state what is required, how to implement it, and how to verify it.
-
-Fixture Mock Context:
-- Cover Fixture Mock Context for this request with concrete, source-backed specifics — state what is required, how to implement it, and how to verify it.
-
-Reproduction Or Evidence:
-- Capture the failing behavior, reproduction path, observed evidence, and expected behavior before changing code.
-
-Narrow Fix Boundary:
-- Cover Narrow Fix Boundary for this request with concrete, source-backed specifics — state what is required, how to implement it, and how to verify it.
-
-Verification Or Test Plan:
-- Include the verification command, focused scenario, or regression check that should prove the change.
 
 Source Signal Guidance:
 - The current source signal reports stage as task_breakdown → implementation.
@@ -4305,10 +3386,6 @@ Source Signal Guidance:
     "selectedSectionPivotIds": [
       "pe:facade-nonseq-b-explain:route:section:1:original_request_or_goal",
       "pe:facade-nonseq-b-explain:route:section:2:test_command_output",
-      "pe:facade-nonseq-b-explain:route:section:3:fixture_mock_context",
-      "pe:facade-nonseq-b-explain:route:section:4:reproduction_or_evidence",
-      "pe:facade-nonseq-b-explain:route:section:5:narrow_fix_boundary",
-      "pe:facade-nonseq-b-explain:route:section:6:verification_or_test_plan",
       "pe:facade-nonseq-b-explain:route:section:7:source_signal_guidance",
     ],
     "selectedTagIds": [],
@@ -4440,18 +3517,6 @@ Fix the failing test in the payment flow and explain what caused it.
 
 Test Command Output:
 - Cover Test Command Output for this request with concrete, source-backed specifics — state what is required, how to implement it, and how to verify it.
-
-Fixture Mock Context:
-- Cover Fixture Mock Context for this request with concrete, source-backed specifics — state what is required, how to implement it, and how to verify it.
-
-Reproduction Or Evidence:
-- Capture the failing behavior, reproduction path, observed evidence, and expected behavior before changing code.
-
-Narrow Fix Boundary:
-- Cover Narrow Fix Boundary for this request with concrete, source-backed specifics — state what is required, how to implement it, and how to verify it.
-
-Verification Or Test Plan:
-- Include the verification command, focused scenario, or regression check that should prove the change.
 
 Source Signal Guidance:
 - The current source signal reports stage as task_breakdown → implementation.
@@ -4597,170 +3662,6 @@ Source Signal Guidance:
         "callVisibilityMode": "deterministic",
         "fallbackMode": "none",
         "familyId": "issue_debug",
-        "label": "Fixture Mock Context",
-        "preciseFeedbackAllowed": false,
-        "primaryIntent": "issue_debug.failing_test",
-        "publicSafeExplanationCategory": "source_coverage",
-        "requirementSourceStatus": "not_applicable",
-        "safetyFlags": [
-          "source_honesty",
-          "no_authority_escalation",
-        ],
-        "sectionId": "pe:facade-nonseq-b-explain:route:section:3:fixture_mock_context",
-        "sectionKind": "fixture_mock_context",
-        "sensitivityFlags": [],
-        "slotEvidenceStatus": "present",
-        "sourceEvidenceStatus": "present",
-        "sourceIds": [
-          "prompt:1",
-        ],
-        "sourceKinds": [
-          "source_a_user_prompt",
-        ],
-        "spanRefs": [
-          {
-            "endOffset": 452,
-            "sectionId": "pe:facade-nonseq-b-explain:route:section:3:fixture_mock_context",
-            "sourceRefs": [
-              "src-a-1",
-            ],
-            "spanMappingStatus": "exact",
-            "spanRefId": "pe:facade-nonseq-b-explain:route:section:3:fixture_mock_context:span:1",
-            "startOffset": 277,
-            "textStoragePolicy": "text_in_body_only",
-          },
-        ],
-        "templateType": "prompt-enhancement-template",
-        "validationStatus": "valid",
-      },
-      {
-        "baselineSourceSignalSlot": "source_signal_guidance",
-        "callVisibilityMode": "deterministic",
-        "fallbackMode": "none",
-        "familyId": "issue_debug",
-        "label": "Reproduction Or Evidence",
-        "preciseFeedbackAllowed": false,
-        "primaryIntent": "issue_debug.failing_test",
-        "publicSafeExplanationCategory": "source_coverage",
-        "requirementSourceStatus": "not_applicable",
-        "safetyFlags": [
-          "source_honesty",
-          "no_authority_escalation",
-        ],
-        "sectionId": "pe:facade-nonseq-b-explain:route:section:4:reproduction_or_evidence",
-        "sectionKind": "reproduction_or_evidence",
-        "sensitivityFlags": [],
-        "slotEvidenceStatus": "present",
-        "sourceEvidenceStatus": "present",
-        "sourceIds": [
-          "prompt:1",
-        ],
-        "sourceKinds": [
-          "source_a_user_prompt",
-        ],
-        "spanRefs": [
-          {
-            "endOffset": 593,
-            "sectionId": "pe:facade-nonseq-b-explain:route:section:4:reproduction_or_evidence",
-            "sourceRefs": [
-              "src-a-1",
-            ],
-            "spanMappingStatus": "exact",
-            "spanRefId": "pe:facade-nonseq-b-explain:route:section:4:reproduction_or_evidence:span:1",
-            "startOffset": 454,
-            "textStoragePolicy": "text_in_body_only",
-          },
-        ],
-        "templateType": "prompt-enhancement-template",
-        "validationStatus": "valid",
-      },
-      {
-        "baselineSourceSignalSlot": "source_signal_guidance",
-        "callVisibilityMode": "deterministic",
-        "fallbackMode": "none",
-        "familyId": "issue_debug",
-        "label": "Narrow Fix Boundary",
-        "preciseFeedbackAllowed": false,
-        "primaryIntent": "issue_debug.failing_test",
-        "publicSafeExplanationCategory": "source_coverage",
-        "requirementSourceStatus": "not_applicable",
-        "safetyFlags": [
-          "source_honesty",
-          "no_authority_escalation",
-        ],
-        "sectionId": "pe:facade-nonseq-b-explain:route:section:5:narrow_fix_boundary",
-        "sectionKind": "narrow_fix_boundary",
-        "sensitivityFlags": [],
-        "slotEvidenceStatus": "present",
-        "sourceEvidenceStatus": "present",
-        "sourceIds": [
-          "prompt:1",
-        ],
-        "sourceKinds": [
-          "source_a_user_prompt",
-        ],
-        "spanRefs": [
-          {
-            "endOffset": 768,
-            "sectionId": "pe:facade-nonseq-b-explain:route:section:5:narrow_fix_boundary",
-            "sourceRefs": [
-              "src-a-1",
-            ],
-            "spanMappingStatus": "exact",
-            "spanRefId": "pe:facade-nonseq-b-explain:route:section:5:narrow_fix_boundary:span:1",
-            "startOffset": 595,
-            "textStoragePolicy": "text_in_body_only",
-          },
-        ],
-        "templateType": "prompt-enhancement-template",
-        "validationStatus": "valid",
-      },
-      {
-        "baselineSourceSignalSlot": "source_signal_guidance",
-        "callVisibilityMode": "deterministic",
-        "fallbackMode": "none",
-        "familyId": "issue_debug",
-        "label": "Verification Or Test Plan",
-        "preciseFeedbackAllowed": false,
-        "primaryIntent": "issue_debug.failing_test",
-        "publicSafeExplanationCategory": "source_coverage",
-        "requirementSourceStatus": "not_applicable",
-        "safetyFlags": [
-          "source_honesty",
-          "no_authority_escalation",
-        ],
-        "sectionId": "pe:facade-nonseq-b-explain:route:section:6:verification_or_test_plan",
-        "sectionKind": "verification_or_test_plan",
-        "sensitivityFlags": [],
-        "slotEvidenceStatus": "present",
-        "sourceEvidenceStatus": "present",
-        "sourceIds": [
-          "prompt:1",
-        ],
-        "sourceKinds": [
-          "source_a_user_prompt",
-        ],
-        "spanRefs": [
-          {
-            "endOffset": 900,
-            "sectionId": "pe:facade-nonseq-b-explain:route:section:6:verification_or_test_plan",
-            "sourceRefs": [
-              "src-a-1",
-            ],
-            "spanMappingStatus": "exact",
-            "spanRefId": "pe:facade-nonseq-b-explain:route:section:6:verification_or_test_plan:span:1",
-            "startOffset": 770,
-            "textStoragePolicy": "text_in_body_only",
-          },
-        ],
-        "templateType": "prompt-enhancement-template",
-        "validationStatus": "valid",
-      },
-      {
-        "baselineSourceSignalSlot": "source_signal_guidance",
-        "callVisibilityMode": "deterministic",
-        "fallbackMode": "none",
-        "familyId": "issue_debug",
         "label": "Source Signal Guidance",
         "preciseFeedbackAllowed": false,
         "primaryIntent": "issue_debug.failing_test",
@@ -4783,14 +3684,14 @@ Source Signal Guidance:
         ],
         "spanRefs": [
           {
-            "endOffset": 1108,
+            "endOffset": 483,
             "sectionId": "pe:facade-nonseq-b-explain:route:section:7:source_signal_guidance",
             "sourceRefs": [
               "src-a-1",
             ],
             "spanMappingStatus": "exact",
             "spanRefId": "pe:facade-nonseq-b-explain:route:section:7:source_signal_guidance:span:1",
-            "startOffset": 902,
+            "startOffset": 277,
             "textStoragePolicy": "text_in_body_only",
           },
         ],
@@ -5462,9 +4363,6 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
     "composerClaims": [
       "claim:section_kind:original_request_or_goal",
       "claim:section_kind:context_and_constraints",
-      "claim:section_kind:approach_or_steps",
-      "claim:section_kind:acceptance_or_output_expectation",
-      "claim:section_kind:verification_or_test_plan",
       "claim:guidance_fact:pe-fact-stage-0",
     ],
     "composerInputPrivacyState": "approved_refs_only",
@@ -5472,7 +4370,7 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
     "composerPolicy": "deterministic_only",
     "composerRunId": "pe:facade-nonseq-c-compound-shaped:composer:default:1",
     "composerVisiblePromptContext": {
-      "boundedContextRefCount": 7,
+      "boundedContextRefCount": 4,
       "contextPolicy": "structured_refs_only_no_raw_original",
       "originalPromptVisibleLocallyOnly": true,
       "rawPromptTextExcluded": true,
@@ -5481,9 +4379,6 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
       "src-a-1",
       "section_kind:original_request_or_goal",
       "section_kind:context_and_constraints",
-      "section_kind:approach_or_steps",
-      "section_kind:acceptance_or_output_expectation",
-      "section_kind:verification_or_test_plan",
       "guidance_fact:pe-fact-stage-0",
     ],
     "deterministicFallback": {
@@ -5571,9 +4466,6 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
       "sectionPlanIds": [
         "pe:facade-nonseq-c-compound-shaped:route:section-plan:1:original_request_or_goal",
         "pe:facade-nonseq-c-compound-shaped:route:section-plan:2:context_and_constraints",
-        "pe:facade-nonseq-c-compound-shaped:route:section-plan:3:approach_or_steps",
-        "pe:facade-nonseq-c-compound-shaped:route:section-plan:4:acceptance_or_output_expectation",
-        "pe:facade-nonseq-c-compound-shaped:route:section-plan:5:verification_or_test_plan",
         "pe:facade-nonseq-c-compound-shaped:route:section-plan:6:source_signal_guidance",
       ],
     },
@@ -5606,15 +4498,6 @@ Add input validation and a unit test for the login form.
 Context And Constraints:
 - Carry forward relevant constraints, limits, environment facts, and user instructions that affect the work.
 
-Approach Or Steps:
-- Cover Approach Or Steps for this request with concrete, source-backed specifics — state what is required, how to implement it, and how to verify it.
-
-Acceptance Or Output Expectation:
-- State the expected output and acceptance criteria clearly enough that the implementation can be checked.
-
-Verification Or Test Plan:
-- Include the verification command, focused scenario, or regression check that should prove the change.
-
 Source Signal Guidance:
 - The current source signal reports stage as task_breakdown → implementation.
 - Use the current source signal as a task constraint and convert it into direct implementation guidance.",
@@ -5633,9 +4516,6 @@ Source Signal Guidance:
     "sourceFactIds": [
       "section_kind:original_request_or_goal",
       "section_kind:context_and_constraints",
-      "section_kind:approach_or_steps",
-      "section_kind:acceptance_or_output_expectation",
-      "section_kind:verification_or_test_plan",
       "guidance_fact:pe-fact-stage-0",
     ],
     "strictSchemaFailureReasonCodes": [
@@ -5654,9 +4534,6 @@ Source Signal Guidance:
     "composerClaims": [
       "claim:section_kind:original_request_or_goal",
       "claim:section_kind:context_and_constraints",
-      "claim:section_kind:approach_or_steps",
-      "claim:section_kind:acceptance_or_output_expectation",
-      "claim:section_kind:verification_or_test_plan",
       "claim:guidance_fact:pe-fact-stage-0",
     ],
     "composerMode": "baseline_deterministic_render",
@@ -5685,15 +4562,6 @@ Add input validation and a unit test for the login form.
 
 Context And Constraints:
 - Carry forward relevant constraints, limits, environment facts, and user instructions that affect the work.
-
-Approach Or Steps:
-- Cover Approach Or Steps for this request with concrete, source-backed specifics — state what is required, how to implement it, and how to verify it.
-
-Acceptance Or Output Expectation:
-- State the expected output and acceptance criteria clearly enough that the implementation can be checked.
-
-Verification Or Test Plan:
-- Include the verification command, focused scenario, or regression check that should prove the change.
 
 Source Signal Guidance:
 - The current source signal reports stage as task_breakdown → implementation.
@@ -5901,296 +4769,6 @@ Source Signal Guidance:
           "decompositionDepth",
         ],
         "baselineSourceSignalSlot": "source_signal_guidance",
-        "bodyText": "- Cover Approach Or Steps for this request with concrete, source-backed specifics — state what is required, how to implement it, and how to verify it.",
-        "callVisibilityMode": "deterministic",
-        "canExpandInMoreThorough": true,
-        "canGroundInMoreProjectGrounded": true,
-        "canMergeInShorter": false,
-        "confirmationPresent": false,
-        "confirmationRequired": false,
-        "contentTemplateRuntimeSeamUse": "none",
-        "depthState": "required_survivor",
-        "evidenceStatus": "present",
-        "fallbackBehavior": "none",
-        "familyId": "feature_delivery",
-        "feedbackSensitivity": "protected",
-        "groundedFactValues": [],
-        "handoffCapabilityFlags": [
-          "no_runtime_sequence_v1",
-        ],
-        "handoffFlags": [
-          "no_runtime_sequence_v1",
-        ],
-        "isEditable": true,
-        "mandatoryFloor": true,
-        "originalTextRefs": [
-          {
-            "endOffset": -1,
-            "refId": "pe:facade-nonseq-c-compound-shaped:route:section:3:approach_or_steps:otr:1",
-            "refusalReason": "not_found_in_original",
-            "resolution": "refused",
-            "sectionId": "pe:facade-nonseq-c-compound-shaped:route:section:3:approach_or_steps",
-            "startOffset": -1,
-          },
-        ],
-        "primaryIntent": "feature.fresh_implementation",
-        "privacyClass": "public_safe",
-        "promptPointRefs": [],
-        "publicCopySafe": true,
-        "publicExplanationCategory": "source_coverage",
-        "registryNamespace": "prompt-enhancement-templates",
-        "removalFeedbackPolicy": "typed_event_required",
-        "requiredSurvivor": true,
-        "requirementSourceStatus": "not_applicable",
-        "routeCandidateRefs": [
-          "pe-route-feature-fresh_implementation",
-        ],
-        "safetyFlags": [
-          "source_honesty",
-          "no_authority_escalation",
-        ],
-        "sectionId": "pe:facade-nonseq-c-compound-shaped:route:section:3:approach_or_steps",
-        "sectionKind": "approach_or_steps",
-        "sensitivityFlags": [],
-        "slotEvidenceStatus": "present",
-        "slotObligations": [],
-        "sourceEvidenceStatus": "present",
-        "sourceFactIds": [
-          "section_kind:approach_or_steps",
-        ],
-        "sourceIds": [
-          "prompt:1",
-        ],
-        "sourceKind": "source_a_user_prompt",
-        "sourceTemplateType": "prompt_enhancement_template",
-        "spanRefs": [
-          {
-            "endOffset": 394,
-            "sectionId": "pe:facade-nonseq-c-compound-shaped:route:section:3:approach_or_steps",
-            "sourceRefs": [
-              "src-a-1",
-            ],
-            "spanMappingStatus": "exact",
-            "spanRefId": "pe:facade-nonseq-c-compound-shaped:route:section:3:approach_or_steps:span:1",
-            "startOffset": 225,
-            "textStoragePolicy": "text_in_body_only",
-          },
-        ],
-        "templateType": "prompt-enhancement-template",
-        "title": "Approach Or Steps",
-        "transformReasonCodes": [
-          "rendered_deterministically",
-          "no_original_text_quoted",
-        ],
-        "validationStatus": "valid",
-        "whyHelpReasonCodes": [
-          "section_kind:approach_or_steps",
-        ],
-      },
-      {
-        "authorityBoundary": "no_authority_escalation",
-        "axisContributions": [
-          "practiceDepth",
-          "sectionDensity",
-          "riskDepth",
-          "groundingDepth",
-          "decompositionDepth",
-        ],
-        "baselineSourceSignalSlot": "source_signal_guidance",
-        "bodyText": "- State the expected output and acceptance criteria clearly enough that the implementation can be checked.",
-        "callVisibilityMode": "deterministic",
-        "canExpandInMoreThorough": true,
-        "canGroundInMoreProjectGrounded": true,
-        "canMergeInShorter": false,
-        "confirmationPresent": false,
-        "confirmationRequired": false,
-        "contentTemplateRuntimeSeamUse": "none",
-        "depthState": "required_survivor",
-        "evidenceStatus": "present",
-        "fallbackBehavior": "none",
-        "familyId": "feature_delivery",
-        "feedbackSensitivity": "protected",
-        "groundedFactValues": [],
-        "handoffCapabilityFlags": [
-          "no_runtime_sequence_v1",
-        ],
-        "handoffFlags": [
-          "no_runtime_sequence_v1",
-        ],
-        "isEditable": true,
-        "mandatoryFloor": true,
-        "originalTextRefs": [
-          {
-            "endOffset": -1,
-            "refId": "pe:facade-nonseq-c-compound-shaped:route:section:4:acceptance_or_output_expectation:otr:1",
-            "refusalReason": "not_found_in_original",
-            "resolution": "refused",
-            "sectionId": "pe:facade-nonseq-c-compound-shaped:route:section:4:acceptance_or_output_expectation",
-            "startOffset": -1,
-          },
-        ],
-        "primaryIntent": "feature.fresh_implementation",
-        "privacyClass": "public_safe",
-        "promptPointRefs": [],
-        "publicCopySafe": true,
-        "publicExplanationCategory": "source_coverage",
-        "registryNamespace": "prompt-enhancement-templates",
-        "removalFeedbackPolicy": "typed_event_required",
-        "requiredSurvivor": true,
-        "requirementSourceStatus": "not_applicable",
-        "routeCandidateRefs": [
-          "pe-route-feature-fresh_implementation",
-        ],
-        "safetyFlags": [
-          "source_honesty",
-          "no_authority_escalation",
-        ],
-        "sectionId": "pe:facade-nonseq-c-compound-shaped:route:section:4:acceptance_or_output_expectation",
-        "sectionKind": "acceptance_or_output_expectation",
-        "sensitivityFlags": [],
-        "slotEvidenceStatus": "present",
-        "slotObligations": [],
-        "sourceEvidenceStatus": "present",
-        "sourceFactIds": [
-          "section_kind:acceptance_or_output_expectation",
-        ],
-        "sourceIds": [
-          "prompt:1",
-        ],
-        "sourceKind": "source_a_user_prompt",
-        "sourceTemplateType": "prompt_enhancement_template",
-        "spanRefs": [
-          {
-            "endOffset": 536,
-            "sectionId": "pe:facade-nonseq-c-compound-shaped:route:section:4:acceptance_or_output_expectation",
-            "sourceRefs": [
-              "src-a-1",
-            ],
-            "spanMappingStatus": "exact",
-            "spanRefId": "pe:facade-nonseq-c-compound-shaped:route:section:4:acceptance_or_output_expectation:span:1",
-            "startOffset": 396,
-            "textStoragePolicy": "text_in_body_only",
-          },
-        ],
-        "templateType": "prompt-enhancement-template",
-        "title": "Acceptance Or Output Expectation",
-        "transformReasonCodes": [
-          "rendered_deterministically",
-          "no_original_text_quoted",
-        ],
-        "validationStatus": "valid",
-        "whyHelpReasonCodes": [
-          "section_kind:acceptance_or_output_expectation",
-        ],
-      },
-      {
-        "authorityBoundary": "no_authority_escalation",
-        "axisContributions": [
-          "practiceDepth",
-          "sectionDensity",
-          "riskDepth",
-          "groundingDepth",
-          "decompositionDepth",
-        ],
-        "baselineSourceSignalSlot": "source_signal_guidance",
-        "bodyText": "- Include the verification command, focused scenario, or regression check that should prove the change.",
-        "callVisibilityMode": "deterministic",
-        "canExpandInMoreThorough": true,
-        "canGroundInMoreProjectGrounded": true,
-        "canMergeInShorter": false,
-        "confirmationPresent": false,
-        "confirmationRequired": false,
-        "contentTemplateRuntimeSeamUse": "none",
-        "depthState": "required_survivor",
-        "evidenceStatus": "present",
-        "fallbackBehavior": "none",
-        "familyId": "feature_delivery",
-        "feedbackSensitivity": "protected",
-        "groundedFactValues": [],
-        "handoffCapabilityFlags": [
-          "no_runtime_sequence_v1",
-        ],
-        "handoffFlags": [
-          "no_runtime_sequence_v1",
-        ],
-        "isEditable": true,
-        "mandatoryFloor": true,
-        "originalTextRefs": [
-          {
-            "endOffset": -1,
-            "refId": "pe:facade-nonseq-c-compound-shaped:route:section:5:verification_or_test_plan:otr:1",
-            "refusalReason": "not_found_in_original",
-            "resolution": "refused",
-            "sectionId": "pe:facade-nonseq-c-compound-shaped:route:section:5:verification_or_test_plan",
-            "startOffset": -1,
-          },
-        ],
-        "primaryIntent": "feature.fresh_implementation",
-        "privacyClass": "public_safe",
-        "promptPointRefs": [],
-        "publicCopySafe": true,
-        "publicExplanationCategory": "source_coverage",
-        "registryNamespace": "prompt-enhancement-templates",
-        "removalFeedbackPolicy": "typed_event_required",
-        "requiredSurvivor": true,
-        "requirementSourceStatus": "not_applicable",
-        "routeCandidateRefs": [
-          "pe-route-feature-fresh_implementation",
-        ],
-        "safetyFlags": [
-          "source_honesty",
-          "no_authority_escalation",
-        ],
-        "sectionId": "pe:facade-nonseq-c-compound-shaped:route:section:5:verification_or_test_plan",
-        "sectionKind": "verification_or_test_plan",
-        "sensitivityFlags": [],
-        "slotEvidenceStatus": "present",
-        "slotObligations": [
-          "family_specific_verification",
-        ],
-        "sourceEvidenceStatus": "present",
-        "sourceFactIds": [
-          "section_kind:verification_or_test_plan",
-        ],
-        "sourceIds": [
-          "prompt:1",
-        ],
-        "sourceKind": "source_a_user_prompt",
-        "sourceTemplateType": "prompt_enhancement_template",
-        "spanRefs": [
-          {
-            "endOffset": 668,
-            "sectionId": "pe:facade-nonseq-c-compound-shaped:route:section:5:verification_or_test_plan",
-            "sourceRefs": [
-              "src-a-1",
-            ],
-            "spanMappingStatus": "exact",
-            "spanRefId": "pe:facade-nonseq-c-compound-shaped:route:section:5:verification_or_test_plan:span:1",
-            "startOffset": 538,
-            "textStoragePolicy": "text_in_body_only",
-          },
-        ],
-        "templateType": "prompt-enhancement-template",
-        "title": "Verification Or Test Plan",
-        "transformReasonCodes": [
-          "rendered_deterministically",
-          "no_original_text_quoted",
-        ],
-        "validationStatus": "valid",
-        "whyHelpReasonCodes": [
-          "section_kind:verification_or_test_plan",
-        ],
-      },
-      {
-        "authorityBoundary": "no_authority_escalation",
-        "axisContributions": [
-          "practiceDepth",
-          "sectionDensity",
-          "riskDepth",
-          "groundingDepth",
-          "decompositionDepth",
-        ],
-        "baselineSourceSignalSlot": "source_signal_guidance",
         "bodyText": "- The current source signal reports stage as task_breakdown → implementation.
 - Use the current source signal as a task constraint and convert it into direct implementation guidance.",
         "callVisibilityMode": "deterministic",
@@ -6262,14 +4840,14 @@ Source Signal Guidance:
         "sourceTemplateType": "prompt_enhancement_template",
         "spanRefs": [
           {
-            "endOffset": 876,
+            "endOffset": 431,
             "sectionId": "pe:facade-nonseq-c-compound-shaped:route:section:6:source_signal_guidance",
             "sourceRefs": [
               "src-a-1",
             ],
             "spanMappingStatus": "exact",
             "spanRefId": "pe:facade-nonseq-c-compound-shaped:route:section:6:source_signal_guidance:span:1",
-            "startOffset": 670,
+            "startOffset": 225,
             "textStoragePolicy": "text_in_body_only",
           },
         ],
@@ -6299,9 +4877,6 @@ Source Signal Guidance:
     "sourceFactIds": [
       "section_kind:original_request_or_goal",
       "section_kind:context_and_constraints",
-      "section_kind:approach_or_steps",
-      "section_kind:acceptance_or_output_expectation",
-      "section_kind:verification_or_test_plan",
       "guidance_fact:pe-fact-stage-0",
     ],
     "text": "My original request (verbatim):
@@ -6309,15 +4884,6 @@ Add input validation and a unit test for the login form.
 
 Context And Constraints:
 - Carry forward relevant constraints, limits, environment facts, and user instructions that affect the work.
-
-Approach Or Steps:
-- Cover Approach Or Steps for this request with concrete, source-backed specifics — state what is required, how to implement it, and how to verify it.
-
-Acceptance Or Output Expectation:
-- State the expected output and acceptance criteria clearly enough that the implementation can be checked.
-
-Verification Or Test Plan:
-- Include the verification command, focused scenario, or regression check that should prove the change.
 
 Source Signal Guidance:
 - The current source signal reports stage as task_breakdown → implementation.
@@ -6707,9 +5273,6 @@ Source Signal Guidance:
     "selectedSectionPivotIds": [
       "pe:facade-nonseq-c-compound-shaped:route:section:1:original_request_or_goal",
       "pe:facade-nonseq-c-compound-shaped:route:section:2:context_and_constraints",
-      "pe:facade-nonseq-c-compound-shaped:route:section:3:approach_or_steps",
-      "pe:facade-nonseq-c-compound-shaped:route:section:4:acceptance_or_output_expectation",
-      "pe:facade-nonseq-c-compound-shaped:route:section:5:verification_or_test_plan",
       "pe:facade-nonseq-c-compound-shaped:route:section:6:source_signal_guidance",
     ],
     "selectedTagIds": [],
@@ -6841,15 +5404,6 @@ Add input validation and a unit test for the login form.
 
 Context And Constraints:
 - Carry forward relevant constraints, limits, environment facts, and user instructions that affect the work.
-
-Approach Or Steps:
-- Cover Approach Or Steps for this request with concrete, source-backed specifics — state what is required, how to implement it, and how to verify it.
-
-Acceptance Or Output Expectation:
-- State the expected output and acceptance criteria clearly enough that the implementation can be checked.
-
-Verification Or Test Plan:
-- Include the verification command, focused scenario, or regression check that should prove the change.
 
 Source Signal Guidance:
 - The current source signal reports stage as task_breakdown → implementation.
@@ -6995,129 +5549,6 @@ Source Signal Guidance:
         "callVisibilityMode": "deterministic",
         "fallbackMode": "none",
         "familyId": "feature_delivery",
-        "label": "Approach Or Steps",
-        "preciseFeedbackAllowed": false,
-        "primaryIntent": "feature.fresh_implementation",
-        "publicSafeExplanationCategory": "source_coverage",
-        "requirementSourceStatus": "not_applicable",
-        "safetyFlags": [
-          "source_honesty",
-          "no_authority_escalation",
-        ],
-        "sectionId": "pe:facade-nonseq-c-compound-shaped:route:section:3:approach_or_steps",
-        "sectionKind": "approach_or_steps",
-        "sensitivityFlags": [],
-        "slotEvidenceStatus": "present",
-        "sourceEvidenceStatus": "present",
-        "sourceIds": [
-          "prompt:1",
-        ],
-        "sourceKinds": [
-          "source_a_user_prompt",
-        ],
-        "spanRefs": [
-          {
-            "endOffset": 394,
-            "sectionId": "pe:facade-nonseq-c-compound-shaped:route:section:3:approach_or_steps",
-            "sourceRefs": [
-              "src-a-1",
-            ],
-            "spanMappingStatus": "exact",
-            "spanRefId": "pe:facade-nonseq-c-compound-shaped:route:section:3:approach_or_steps:span:1",
-            "startOffset": 225,
-            "textStoragePolicy": "text_in_body_only",
-          },
-        ],
-        "templateType": "prompt-enhancement-template",
-        "validationStatus": "valid",
-      },
-      {
-        "baselineSourceSignalSlot": "source_signal_guidance",
-        "callVisibilityMode": "deterministic",
-        "fallbackMode": "none",
-        "familyId": "feature_delivery",
-        "label": "Acceptance Or Output Expectation",
-        "preciseFeedbackAllowed": false,
-        "primaryIntent": "feature.fresh_implementation",
-        "publicSafeExplanationCategory": "source_coverage",
-        "requirementSourceStatus": "not_applicable",
-        "safetyFlags": [
-          "source_honesty",
-          "no_authority_escalation",
-        ],
-        "sectionId": "pe:facade-nonseq-c-compound-shaped:route:section:4:acceptance_or_output_expectation",
-        "sectionKind": "acceptance_or_output_expectation",
-        "sensitivityFlags": [],
-        "slotEvidenceStatus": "present",
-        "sourceEvidenceStatus": "present",
-        "sourceIds": [
-          "prompt:1",
-        ],
-        "sourceKinds": [
-          "source_a_user_prompt",
-        ],
-        "spanRefs": [
-          {
-            "endOffset": 536,
-            "sectionId": "pe:facade-nonseq-c-compound-shaped:route:section:4:acceptance_or_output_expectation",
-            "sourceRefs": [
-              "src-a-1",
-            ],
-            "spanMappingStatus": "exact",
-            "spanRefId": "pe:facade-nonseq-c-compound-shaped:route:section:4:acceptance_or_output_expectation:span:1",
-            "startOffset": 396,
-            "textStoragePolicy": "text_in_body_only",
-          },
-        ],
-        "templateType": "prompt-enhancement-template",
-        "validationStatus": "valid",
-      },
-      {
-        "baselineSourceSignalSlot": "source_signal_guidance",
-        "callVisibilityMode": "deterministic",
-        "fallbackMode": "none",
-        "familyId": "feature_delivery",
-        "label": "Verification Or Test Plan",
-        "preciseFeedbackAllowed": false,
-        "primaryIntent": "feature.fresh_implementation",
-        "publicSafeExplanationCategory": "source_coverage",
-        "requirementSourceStatus": "not_applicable",
-        "safetyFlags": [
-          "source_honesty",
-          "no_authority_escalation",
-        ],
-        "sectionId": "pe:facade-nonseq-c-compound-shaped:route:section:5:verification_or_test_plan",
-        "sectionKind": "verification_or_test_plan",
-        "sensitivityFlags": [],
-        "slotEvidenceStatus": "present",
-        "sourceEvidenceStatus": "present",
-        "sourceIds": [
-          "prompt:1",
-        ],
-        "sourceKinds": [
-          "source_a_user_prompt",
-        ],
-        "spanRefs": [
-          {
-            "endOffset": 668,
-            "sectionId": "pe:facade-nonseq-c-compound-shaped:route:section:5:verification_or_test_plan",
-            "sourceRefs": [
-              "src-a-1",
-            ],
-            "spanMappingStatus": "exact",
-            "spanRefId": "pe:facade-nonseq-c-compound-shaped:route:section:5:verification_or_test_plan:span:1",
-            "startOffset": 538,
-            "textStoragePolicy": "text_in_body_only",
-          },
-        ],
-        "templateType": "prompt-enhancement-template",
-        "validationStatus": "valid",
-      },
-      {
-        "baselineSourceSignalSlot": "source_signal_guidance",
-        "callVisibilityMode": "deterministic",
-        "fallbackMode": "none",
-        "familyId": "feature_delivery",
         "label": "Source Signal Guidance",
         "preciseFeedbackAllowed": false,
         "primaryIntent": "feature.fresh_implementation",
@@ -7140,14 +5571,14 @@ Source Signal Guidance:
         ],
         "spanRefs": [
           {
-            "endOffset": 876,
+            "endOffset": 431,
             "sectionId": "pe:facade-nonseq-c-compound-shaped:route:section:6:source_signal_guidance",
             "sourceRefs": [
               "src-a-1",
             ],
             "spanMappingStatus": "exact",
             "spanRefId": "pe:facade-nonseq-c-compound-shaped:route:section:6:source_signal_guidance:span:1",
-            "startOffset": 670,
+            "startOffset": 225,
             "textStoragePolicy": "text_in_body_only",
           },
         ],

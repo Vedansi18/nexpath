@@ -1003,15 +1003,30 @@ function capabilityAppliesToSection(
   return SECTIONS_BY_CAPABILITY[capability]?.includes(sectionKind) ?? false;
 }
 
+/**
+ * The safety flags EVERY generated section carries, whatever the route asked for.
+ *
+ * Unconditional, and deliberately so: these are not capability overlays. Every generated section
+ * must be honest about its sources and must not escalate authority, and the design does not scope
+ * them to a subset.
+ *
+ * ⚠️ EXPORTED because their unconditional-ness is load-bearing elsewhere: I2's pruner must decide
+ * whether a section is *safety material*, and `safetyFlags.length > 0` cannot answer that when two
+ * flags are on every section. Measured during I2: with that test, the floor swallowed 7 of 7
+ * sections on a real body and the pruner was inert. A consumer needs to know which flags MEAN
+ * something, so the list lives here rather than being re-typed by whoever asks.
+ */
+export const PROMPT_ENHANCEMENT_UNCONDITIONAL_SAFETY_FLAGS_V1: readonly string[] = [
+  'source_honesty',
+  'no_authority_escalation',
+];
+
 function safetyFlagsFor(
   sectionKind: string,
   capabilities: readonly PromptEnhancementCapabilityId[],
   facts: readonly PromptEnhancementGuidanceFact[],
 ): readonly string[] {
-  // Unconditional, and deliberately so: these are not capability overlays. Every generated section
-  // must be honest about its sources and must not escalate authority, whatever the route asked for,
-  // and the design does not scope them to a subset.
-  const flags = new Set(['source_honesty', 'no_authority_escalation']);
+  const flags = new Set(PROMPT_ENHANCEMENT_UNCONDITIONAL_SAFETY_FLAGS_V1);
   if (
     sectionKind === 'risk_safety_or_confirmation'
     || (capabilities.includes('capability.confirmation_needed')

@@ -26,6 +26,7 @@ import { composeStructuredComposerOutputV1 } from './llm-composer.js';
 import { decidePromptEnhancementRouteViaLlmV1, type PromptEnhancementLlmRouteDecisionV1 } from './llm-route-decision.js';
 import { isValidApiKey } from '../config/ApiKeyResolver.js';
 import { planPromptEnhancementSections } from './templates/section-plan.js';
+import { prunePromptEnhancementSectionsV1 } from './section-pruner.js';
 import { routePromptEnhancement, isKnownPrimaryIntent, isKnownCapabilityId, isKnownDebugEvidenceForm, describePromptEnhancementSequencePlanV1, type PromptEnhancementCapabilityId, type PromptEnhancementRouteInput } from './routing-taxonomy.js';
 import { buildPromptEnhancementGuidanceFactsV1 } from './guidance-facts.js';
 import { resolvePromptEnhancementSourceConflictsV1 } from './conflict-resolution.js';
@@ -255,11 +256,34 @@ async function prepare(
   // only stops an action from cancelling a popup that is already on screen.
   const noPopup = actionRequest !== undefined ? false : (route.noPopup || !guidanceGate.show);
 
-  const planning = planPromptEnhancementSections({
+  const plannedSections = planPromptEnhancementSections({
     routeResult: route,
     sourceRefs: request.sourceSignals.sourceRefs,
     guidanceFacts: sourceMix.renderedFacts,
   });
+
+  // ── I2: the deterministic pruner, under the LOCKED drop-criteria (§15.3) ────────────────────
+  //
+  // Placed HERE, between planning and composition, and that placement is a decision: pruning after
+  // wording would pay an LLM to write sections about to be discarded, and §15.1 bounds this to
+  // pruning inside the single editable body rather than choosing between bodies. The composer only
+  // ever sees survivors.
+  //
+  // ⛔ The registry decides. I1's ordering is an input to stage (b) and to nothing else — it cannot
+  // rescue a factless section from stage (a), and it cannot touch the floor (prohibition 18).
+  const pruned = prunePromptEnhancementSectionsV1({
+    sectionPlans: plannedSections.sectionPlans,
+    facts: plannedSections.renderedFacts ?? [],
+    relevanceOrder: request.reviewMomentContext.triggerProvenance.classifierSectionRelevanceOrder,
+  });
+  const planning = {
+    ...plannedSections,
+    sectionPlans: pruned.sectionPlans,
+    renderedFacts: pruned.facts,
+    // Criterion (c): the dropped sections' visible slots went with them; these did not.
+    inheritedSlotObligations: pruned.inheritedSlotObligations,
+    prunedSectionIds: pruned.droppedSectionIds,
+  };
 
   // E4: bounded LLM composer wording for a shown popup on the baseline compose (no
   // action). Runs for every shown popup that has a valid key, so the whole test suite
