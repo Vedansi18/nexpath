@@ -1203,6 +1203,10 @@ export async function runAuto(
       // with every test green. That is C1's own recorded failure shape. Logging the count makes
       // non-compliance readable from any ordinary run instead of needing a bespoke probe: a keyed
       // session showing 0 here on every prompt is the model ignoring the instruction.
+      // ⚠️ Logged BESIDE the count because the count alone cannot be read: 0 means either the
+      // model ignored the instruction or NO MODEL RAN (no key, provider failure, degrade). Those
+      // need opposite responses, and without this flag the field answers neither.
+      classifierDegraded: stageResult.degraded,
       relevanceOrderCount: stageResult.sectionRelevanceOrder.length,
       sequenceShapedFallback: true,
     });
@@ -1455,6 +1459,7 @@ export async function runAuto(
     suppressedReason: promptEnhancementBodyHasNoLlmWordingV1(preparation.result)
       ? 'deterministic_only_no_llm_wording'
       : undefined,
+    classifierDegraded: stageResult.degraded,
     relevanceOrderCount: stageResult.sectionRelevanceOrder.length,
   });
   // Owner decision B-i (2026-08-04): the PE popup is deferred to the Stop hook. Do NOT show a

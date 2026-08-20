@@ -2253,7 +2253,7 @@ describe('validated PE preparation boundary', () => {
     // same event reporting different fields cannot be read together.
     const source = readFileSync('src/cli/commands/auto.ts', 'utf8');
     const logs = source.split("logger.debug('prompt_enhancement_prepare_boundary'").length - 1;
-    for (const field of ['suppressedReason:', 'relevanceOrderCount:']) {
+    for (const field of ['suppressedReason:', 'relevanceOrderCount:', 'classifierDegraded:']) {
       const carried = source.split(field).length - 1;
       expect(
         carried,
