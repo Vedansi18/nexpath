@@ -286,3 +286,56 @@ describe('the pruner is WIRED — the done-when, measured on a composed body', (
     }
   });
 });
+
+describe('the MANDATORY section — owner ruling, 2026-08-20', () => {
+  // 🔒 "one section is mandatory. and that mandatory section is Source Signal Guidance… so the
+  // enhanced prompt can come with only one section as well. this is the new final rule."
+  //
+  // It is the section the whole absence/stage/mistake signal chain exists to deliver, so it is floor
+  // twice over: stage (a) cannot drop it for having no fact, and stage (b)'s cap cannot squeeze it out.
+  it('survives stage (a) with NO fact at all', () => {
+    const result = prunePromptEnhancementSectionsV1({
+      sectionPlans: [
+        section({ kind: 'original_request_or_goal' }),
+        section({ kind: 'source_signal_guidance' }),        // factless
+        section({ kind: 'context_and_constraints' }),       // factless too — this one goes
+      ],
+      facts: [],
+    });
+    expect(result.sectionPlans.map((s) => s.sectionKind)).toContain('source_signal_guidance');
+    expect(result.droppedSectionIds).toEqual(['sec-context_and_constraints']);
+  });
+
+  it('survives stage (b) even when every extra outranks it', () => {
+    const kinds = ['context_and_constraints', 'verification_or_test_plan', 'reproduction_or_evidence', 'behavior_preservation'];
+    const result = prunePromptEnhancementSectionsV1({
+      sectionPlans: [
+        section({ kind: 'original_request_or_goal' }),
+        ...kinds.map((kind, i) => section({ kind, factIds: [`f${i}`] })),
+        section({ kind: 'source_signal_guidance', factIds: ['sig'] }),
+      ],
+      facts: [...kinds.map((_, i) => fact(`f${i}`)), fact('sig')],
+      relevanceOrder: kinds,   // the mandatory section is ranked LAST, by every extra
+    });
+    expect(
+      result.sectionPlans.map((s) => s.sectionKind),
+      'the cap squeezed out the one section that must always come',
+    ).toContain('source_signal_guidance');
+  });
+
+  it('and a body of the original plus the mandatory section alone is valid', () => {
+    // The rule's own words: a body can come with only one section. Nothing here enforces a minimum
+    // count any more, because a count was never what made a body worth showing.
+    const result = prunePromptEnhancementSectionsV1({
+      sectionPlans: [
+        section({ kind: 'original_request_or_goal' }),
+        section({ kind: 'source_signal_guidance' }),
+        section({ kind: 'acceptance_or_output_expectation' }),
+        section({ kind: 'verification_or_test_plan' }),
+      ],
+      facts: [],
+    });
+    expect(result.sectionPlans.map((s) => s.sectionKind))
+      .toEqual(['original_request_or_goal', 'source_signal_guidance']);
+  });
+});

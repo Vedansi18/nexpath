@@ -37,6 +37,25 @@ const OBLIGATIONS_SURVIVING_THEIR_SECTION_V1: readonly string[] = [
   'confirmation_clarification',
 ];
 
+/**
+ * The ONE section that must always reach the reader.
+ *
+ * 🔒 **Owner ruling, 2026-08-20, which supersedes the old ">3 sections" release constraint:**
+ * *"we are up and open to show enhanced prompt even with one section. but yeah one section is
+ * mandatory. and that mandatory section is Source Signal Guidance… so yeah that one is mandatory
+ * and should always come. so the enhanced prompt can come with only one section as well. this is
+ * the new final rule."*
+ *
+ * ⛔ So it is FLOOR here: exempt from stage (a) — it survives even with no content-carrying fact —
+ * and exempt from stage (b)'s cap. It is the section the whole absence/stage/mistake signal chain
+ * exists to deliver, and a body without it has dropped the thing nexpath had to say.
+ *
+ * ⚠️ Distinct from §17.13's retry-then-discard, which removes this section when the COMPOSER twice
+ * fails to name the signal. That is a defective draft being withheld; this is the section never
+ * being pruned for length or for lacking a fact. The two do not overlap and neither weakens the other.
+ */
+export const PROMPT_ENHANCEMENT_MANDATORY_SECTION_KIND_V1 = 'source_signal_guidance';
+
 /** Criterion (b)'s cap: the floor, plus at most this many extras. */
 export const PROMPT_ENHANCEMENT_PRUNE_EXTRA_CAP_V1 = 3;
 
@@ -98,7 +117,11 @@ function selectFloorV1(
   const floor = new Set<string>();
   let requiredGuidanceTaken = false;
   for (const section of sectionPlans) {
-    if (section.sectionKind === 'original_request_or_goal' || isSafetySectionV1(section)) {
+    if (
+      section.sectionKind === 'original_request_or_goal'
+      || section.sectionKind === PROMPT_ENHANCEMENT_MANDATORY_SECTION_KIND_V1
+      || isSafetySectionV1(section)
+    ) {
       floor.add(section.sectionId);
       continue;
     }
