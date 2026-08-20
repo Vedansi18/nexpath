@@ -79,6 +79,11 @@ import { computeWorkStyleProfile } from '../../classifier/work-style-traits.js';
 import { readParamEvents, type ParamEvent } from '../../telemetry/param-events.js';
 import { getProjectEnvFacts } from '../../store/env-facts.js';
 import { cachedPromptDerivedFactsV1, refreshPromptDerivedFactsIfDueV1 } from '../../prompt-enhancement/prompt-derived-facts-refresh.js';
+import {
+  promptHistorySafeguardSentenceV1,
+  promptHistorySensitiveActionSignalsV1,
+  PROMPT_HISTORY_SIGNAL_WINDOW_V1,
+} from '../../prompt-enhancement/prompt-history-signals.js';
 import { getPromptEnhancementFeedbackSummary, queryRelevantPromptEnhancementMemory, recordPromptEnhancementMemoryEvidence, markPromptEnhancementMemoryUsed } from '../../store/prompt-enhancement.js';
 import { scorePromptEnhancementMemoryCandidates } from '../../prompt-enhancement/memory-scoring.js';
 import {
@@ -341,6 +346,37 @@ export function buildPromptEnhancementGroundingRefsV1(store: Store, projectRoot:
       groundingEvidenceByRef[ref] = {
         key: mined.key,
         value: mined.value,
+        runtimePath: 'local_store',
+        anchorScope: 'current_prompt_scope',
+      };
+    }
+
+    // ── Recent-history sensitive actions cross as their own confirmation signal ────────────────
+    //
+    // 🔒 Owner-ruled (2026-08-20). The sensitive-action detector already existed and was already
+    // tested, but every consumer of it lived in the option-generation engine, which is switched
+    // off — so a developer could say "deploy to production" three prompts running and the enhanced
+    // prompt would never ask the agent to check first.
+    //
+    // ⛔ **The CATEGORY crosses, never the matched words.** The detector returns the literal text
+    // that satisfied the trigger; the owner reversed an include-the-literal-word preference once
+    // already on leakage grounds, so the signal module drops it before this point and the ref
+    // namespace carries a category name only.
+    //
+    // ⛔ FREE: pure string matching over prompts already in hand. No provider call.
+    // Oldest-last, matching the miner's own convention so both lanes read the same stretch of
+    // history in the same order.
+    const recentPromptTexts = getRecentPrompts(store, projectRoot, PROMPT_HISTORY_SIGNAL_WINDOW_V1)
+      .map((record) => record.text)
+      .reverse();
+    for (const signal of promptHistorySensitiveActionSignalsV1(recentPromptTexts)) {
+      const ref = `history_sensitive_action:${signal.category}`;
+      rightGoodWorkStyleEnvRuntimeRefs.push(ref);
+      groundingTierByRef[ref] = 'uncorroborated';
+      groundingPolarityByRef[ref] = 'present';
+      groundingEvidenceByRef[ref] = {
+        key: signal.category,
+        value: promptHistorySafeguardSentenceV1(),
         runtimePath: 'local_store',
         anchorScope: 'current_prompt_scope',
       };

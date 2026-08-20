@@ -28,7 +28,7 @@
  * question elsewhere, so this is a reuse rather than a second detector.
  */
 
-import { detectL2TriggersInText } from '../decision-session/r5-injection.js';
+import { buildL2SafeguardSentence, detectL2TriggersInText } from '../decision-session/r5-injection.js';
 
 /**
  * One sensitive-action category observed across the recent prompts.
@@ -75,4 +75,33 @@ export function promptHistorySensitiveActionSignalsV1(
     .map(([category, promptCount]) => ({ category, promptCount }))
     // Stable: count first, then category name, so the same history always yields the same order.
     .sort((a, b) => (b.promptCount - a.promptCount) || a.category.localeCompare(b.category));
+}
+
+/**
+ * How the safeguard names the action it is asking about.
+ *
+ * 🔒 **Owner ruling (2026-08-20): the GENERIC naming, option (c).** Two alternatives were put to
+ * him and both were declined for now — the literal matched text (the leakage he had already
+ * reversed once) and a written label per category (option-text content, which is his lane and would
+ * need eight authored phrases). If the sim reads too vague, he writes those eight and this becomes
+ * the only line that changes.
+ *
+ * ⚠️ The sentence itself is NOT authored here. It is the shipped safeguard template, reused so the
+ * confirmation-seek reads identically wherever it appears — the same wording rule, one source.
+ */
+const GENERIC_SENSITIVE_ACTION_NAMING_V1 = 'sensitive action';
+
+/**
+ * The confirmation-seek line for a detected sensitive action, addressed to the coding agent.
+ *
+ * ⚠️ Built through the shipped template rather than written out, so a change to the safeguard's
+ * wording reaches this lane too. The template's own empty-input fallback is NOT used: it substitutes
+ * the string `this sensitive action` into a slot already preceded by "this", which renders "do this
+ * this sensitive action". Unreachable where it lives (the caller returns early on empty input), so
+ * this passes the naming positionally instead of relying on it.
+ */
+export function promptHistorySafeguardSentenceV1(): string {
+  return buildL2SafeguardSentence([
+    { name: 'prompt_history_sensitive_action', matchedText: GENERIC_SENSITIVE_ACTION_NAMING_V1, promptIndex: 0 },
+  ]);
 }
