@@ -9,6 +9,7 @@ AI coding agents make it easy to move fast. Nexpath helps reduce the chance that
 
 Within Nexpath's broader behaviour-guidance vision, Prompt Enhancement is the first feature we're introducing as a practical twist: it saves vibe coders from writing every prompt detail by hand while preserving their original intent. When a task needs more rigour, it can suggest missing development practices, verification, or confirmation steps — encouraging users to give a mature development flow the time it needs to finish.
 
+**Demo:** [Prompt Enhancement in action, on YouTube](https://youtu.be/pNejtPA5DPU)
 
 ---
 
