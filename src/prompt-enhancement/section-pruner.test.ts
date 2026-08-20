@@ -12,6 +12,12 @@ import {
   prunePromptEnhancementSectionsV1,
   PROMPT_ENHANCEMENT_PRUNE_EXTRA_CAP_V1,
 } from './section-pruner.js';
+import { routePromptEnhancement } from './routing-taxonomy.js';
+import { getPromptStartStopSourceSnapshot } from './source-reality.js';
+import {
+  planPromptEnhancementSections,
+  PROMPT_ENHANCEMENT_UNCONDITIONAL_SAFETY_FLAGS_V1,
+} from './templates/section-plan.js';
 import type { PromptEnhancementGuidanceFact } from './templates/section-plan.js';
 import type { PromptEnhancementSectionPlanItemV1 } from './contracts.js';
 
@@ -294,10 +300,18 @@ describe('§47.3 worked example — the canonical scenario, as the plan wrote it
         section({ kind: 'reproduction_or_evidence', factIds: ['profiling'] }),     // evidenced + relevant
         section({ kind: 'verification_or_test_plan', factIds: ['verify'] }),       // evidenced + relevant
         section({ kind: 'behavior_preservation', factIds: ['behaviour'] }),        // evidenced + relevant
-        // Rollback: FACTLESS, and it carries the visible slot + the invisible classes, so this one
-        // section proves BOTH halves of criterion (c) at once.
+        // 🔴 Rollback, carrying the flag the REAL PLANNER ALWAYS GIVES IT. `safetyFlagsFor` adds
+        // `sensitive_action_confirmation` to every section of this kind unconditionally, and that
+        // flag is not in the unconditional pair — so a production rollback section is ALWAYS safety
+        // and therefore ALWAYS floor. Measured on the planner, not inferred.
         section({
           kind: 'risk_safety_or_confirmation',
+          safety: ['source_honesty', 'no_authority_escalation', 'sensitive_action_confirmation'],
+        }),
+        // The stage-(a) casualty, on a kind that CAN be factless and non-safety in production. It
+        // carries the visible slot + the invisible classes, so one section proves both halves of (c).
+        section({
+          kind: 'handoff_or_sequence_candidate',
           obligations: ['reproduction_or_evidence_request', 'no_invention_state', 'send_policy_metadata', 'safety_hook_linkage'],
         }),
         // Acceptance: evidenced, but ranked LAST, so the cap is what removes it — stage (b).
@@ -322,20 +336,28 @@ describe('§47.3 worked example — the canonical scenario, as the plan wrote it
     expect(kept).toContain('reproduction_or_evidence');
     expect(kept).toContain('verification_or_test_plan');
 
-    // ⚠️ The rollback section is factless AND carries no safety FLAG in this scenario, so it drops
-    // at stage (a). A rollback section that DID carry safety metadata would be floor and would stay
-    // — which is why the plan's example says "[+ safety if risky]" rather than always.
-    expect(result.droppedSectionIds, 'the factless rollback survived stage (a)')
-      .toContain('sec-risk_safety_or_confirmation');
+    // 🔴 **The plan's example says the factless rollback drops at stage (a). The shipped planner
+    // cannot produce that**, and this fixture now asserts what production actually does: a
+    // `risk_safety_or_confirmation` section is unconditionally flagged
+    // `sensitive_action_confirmation`, which makes it safety, which makes it FLOOR — so it SURVIVES
+    // while factless. That is L1879 (*"safety sections cannot be pruned, ever"*) beating the
+    // example's prose, which is the correct precedence: the bound is locked, the example illustrates.
+    expect(kept, 'a safety section was pruned — L1879 is the bound the example cannot override')
+      .toContain('risk_safety_or_confirmation');
+    // The stage-(a) drop, on a kind that can genuinely be factless and non-safety.
+    expect(result.droppedSectionIds, 'the factless non-safety section survived stage (a)')
+      .toContain('sec-handoff_or_sequence_candidate');
     // 🔑 The stage-(b) half the old fixture never exercised: evidenced, but ranked last, so the cap
     // removes it. This is the assertion whose absence let the canonical fixture pass while proving
     // only half the criteria.
     expect(result.droppedSectionIds, 'the lowest-ranked evidenced extra survived the cap')
       .toContain('sec-acceptance_or_output_expectation');
 
-    // The cap counts EXTRAS, not sections: floor is the original + the one required guidance.
-    expect(kept.filter((k) => k !== 'original_request_or_goal' && k !== 'context_and_constraints'))
-      .toHaveLength(PROMPT_ENHANCEMENT_PRUNE_EXTRA_CAP_V1);
+    // The cap counts EXTRAS, not sections. Floor here is the original, the one required guidance,
+    // and the safety section — so the extras are everything else that survived.
+    expect(kept.filter((k) => (
+      k !== 'original_request_or_goal' && k !== 'context_and_constraints' && k !== 'risk_safety_or_confirmation'
+    ))).toHaveLength(PROMPT_ENHANCEMENT_PRUNE_EXTRA_CAP_V1);
 
     // Criterion (c), first half — "their visible slots go with them".
     expect(
@@ -529,5 +551,76 @@ describe('I2 observability — the pruner leaves a trace on an ordinary run', ()
     ).toBeGreaterThan(0);
     // Discriminating: the count is the DROPPED sections, not the surviving ones.
     expect(result.prunedSectionCount).not.toBe(result.currentBody.sections.length);
+  });
+});
+
+describe('the production invariant behind the floor — measured on the PLANNER, not assumed', () => {
+  /**
+   * 🔴 Added at the phase-36 verification pass, after the §47.3 fixture was found asserting a state
+   * the planner cannot produce. `safetyFlagsFor` adds `sensitive_action_confirmation` to EVERY
+   * section of kind `risk_safety_or_confirmation`, unconditionally — and that flag is not one of the
+   * two unconditional ones the pruner discounts. So such a section is always safety, always floor,
+   * and can never be pruned.
+   *
+   * 🔑 This is why the plan's worked example — *"rollback (factless) drops at stage (a)"* — is not
+   * reproducible on the shipped planner, and why L1879 (*"safety sections cannot be pruned, ever"*)
+   * is the bound that wins. Asserted against the REAL planner so the fixture above can never drift
+   * back to testing an impossible state without this failing too.
+   */
+  it('a planned risk/confirmation section always carries a MEANINGFUL safety flag', () => {
+    const snapshot = getPromptStartStopSourceSnapshot();
+    const route = routePromptEnhancement({
+      promptText: 'Fix the failing payment test, the test failure blocks ci, and explain the verification.',
+      promptOrigin: 'user', reviewMoment: 'UserPromptSubmit_preparation', sourceSnapshot: undefined,
+      sourceFactRefs: ['src-a-1'], classifierState: 'fire_recommended', degradedNoActionState: 'none',
+      generatedOriginState: 'ordinary_user_prompt', oldDecisionSessionPayloadPresent: false,
+      promptStartBoundary: snapshot.hookBoundary, deliveryBoundary: snapshot.deliveryBoundary,
+    } as never);
+
+    // A `confirm_risk` fact is what pulls the kind into a plan — the same route the recent-history
+    // safeguard lane takes.
+    const riskFact = {
+      factId: 'f-risk', sourceType: 'prompt_derived_fact', sourceIds: ['history_sensitive_action:deployment'],
+      guidanceKind: 'safety_or_confirmation', suggestedActionKind: 'confirm_risk',
+      targetFamily: 'family_agnostic', targetSectionKind: '', sourceEvidenceState: 'partial',
+      priority: 'normal', renderPolicy: 'render_as_section', riskLevel: 'none',
+      // 🔴 **NO safety hooks, and that is the whole point.** The first version of this test gave the
+      // fact `safetyHooks: ['safety_sensitive_source']` — which `safetyFlagsFor` copies onto the
+      // section — so the assertion below was satisfied by the FACT's hook and proved nothing about
+      // the KIND. A mutation probe removing the unconditional kind rule left it green. With no hook
+      // and no risk level, the only thing that can make this section safety is the kind rule itself.
+      safetyHooks: [], privacyClass: 'public_safe',
+      sanitizationState: 'not_applicable', evidence: { key: 'deployment', value: 'a safeguard line' },
+    } as unknown as PromptEnhancementGuidanceFact;
+
+    const planned = planPromptEnhancementSections({
+      routeResult: route as never,
+      sourceRefs: [{
+        sourceRefId: 'src-a-1', sourceKind: 'source_a_user_prompt', sourceId: 'prompt:1',
+        sourceAuthorization: 'source_fact_only', evidenceStatus: 'present', freshness: 'current',
+        confidence: 'high', privacyClass: 'public_safe',
+      }] as never,
+      guidanceFacts: [riskFact],
+    });
+
+    const risk = planned.sectionPlans.find((plan) => plan.sectionKind === 'risk_safety_or_confirmation');
+    // Premise guard: if planning ever stops producing the kind, this must fail loudly rather than
+    // pass while asserting nothing.
+    expect(risk, 'the confirm_risk fact no longer plans its section').toBeDefined();
+
+    const meaningful = risk!.safetyFlags.filter(
+      (flag) => !PROMPT_ENHANCEMENT_UNCONDITIONAL_SAFETY_FLAGS_V1.includes(flag),
+    );
+    expect(
+      meaningful.length,
+      'the kind is no longer unconditionally safety — the §47.3 fixture and the floor both depend on this',
+    ).toBeGreaterThan(0);
+
+    // And therefore the pruner treats it as floor: factless, ranked nowhere, and it still survives.
+    const pruned = prunePromptEnhancementSectionsV1({
+      sectionPlans: [section({ kind: 'original_request_or_goal' }), risk!],
+      facts: [],
+    });
+    expect(pruned.sectionPlans.map((s) => s.sectionKind)).toContain('risk_safety_or_confirmation');
   });
 });
