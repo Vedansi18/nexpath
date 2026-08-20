@@ -213,6 +213,29 @@ export type AutoPromptEnhancementConsumerV1 = (
  * `groundingTierByRef` = typed corroboration tier per crossing env / RIGHT&GOOD ref
  * (promoted_practice_P / capability / uncorroborated) — carried beside the refs, never inside them.
  */
+/**
+ * A popup is worth showing only if an LLM actually worded it.
+ *
+ * 🔒 Owner ruling, 2026-08-19, scope (a): *"we must not show popup if its mere deterministic based
+ * and not the LLM generated"* — INCLUDING when no API key is present. Without a key nexpath stays
+ * silent rather than showing boilerplate.
+ *
+ * ⚠️ Deliberately a DISPLAY decision, beside the blink gate, not an engine one. The engine's
+ * disposition means "what did preparation conclude"; suppressing there would relabel every keyless
+ * preparation as not-applicable — measured: 134 fixtures, because the suite runs without a key and
+ * the deterministic renderer is exactly what most of them assert. Showing is the host's call, this
+ * is the host, and the row it declines to write is the same row the blink fix declines to write.
+ *
+ * ⛔ Only `baseline_deterministic_render` counts — the mode set when no LLM wording survived into
+ * the body. `original_fallback` and `previous_body_preservation` are different outcomes with their
+ * own handling and are not re-decided here.
+ */
+function promptEnhancementBodyHasNoLlmWordingV1(
+  result: { currentBody?: { composerMode?: string } } | undefined,
+): boolean {
+  return result?.currentBody?.composerMode === 'baseline_deterministic_render';
+}
+
 export function buildPromptEnhancementGroundingRefsV1(store: Store, projectRoot: string, signalKeys: readonly string[]): {
   rightGoodWorkStyleEnvRuntimeRefs: readonly string[];
   paramEventChannels: readonly string[];
@@ -1164,6 +1187,13 @@ export async function runAuto(
         ? preparation.validationReasonCodes.slice(0, 10)
         : undefined,
       blockedFailureCodes: blockedFailureCodesForLog(preparation),
+      // Q3 (owner): the deterministic suppression gets its OWN name in the log, so "how often does
+      // a popup get withheld for having no LLM wording" is a number we can read rather than an
+      // impression. `no_popup_not_applicable` alone cannot answer it — the route suppresses under
+      // that same disposition for entirely different reasons.
+      suppressedReason: promptEnhancementBodyHasNoLlmWordingV1(preparation.result)
+        ? 'deterministic_only_no_llm_wording'
+        : undefined,
       sequenceShapedFallback: true,
     });
     // Phase 4 (defense-in-depth): do NOT persist an unshowable pending. A display decision of `no_popup`
@@ -1173,7 +1203,10 @@ export async function runAuto(
     // it at the source. Same condition the UI boundary uses (ui-boundary.ts). The skip stays traceable:
     // `prompt_enhancement_prepare_boundary` above logs the disposition, and no `..._stored` log follows.
     const displayDecisionIsNoPopup = preparation.result?.disposition === 'no_popup_not_applicable'
-      || preparation.result?.uiView.body.sendPolicy === 'no_popup';
+      || preparation.result?.uiView.body.sendPolicy === 'no_popup'
+      // Owner ruling (a): a body with no LLM wording is boilerplate, and boilerplate does not
+      // earn a popup. Same row, same gate as the blink fix above.
+      || promptEnhancementBodyHasNoLlmWordingV1(preparation.result);
     if (!preparation.safeFallback && preparation.result && !displayDecisionIsNoPopup) {
       upsertPendingPromptEnhancement(store, {
         projectRoot: input.projectRoot,
@@ -1414,7 +1447,10 @@ export async function runAuto(
   // here removes it at the source. Same condition the UI boundary uses; the skip stays traceable via the
   // `prompt_enhancement_prepare_boundary` log above (no `..._stored` log follows).
   const displayDecisionIsNoPopup = preparation.result?.disposition === 'no_popup_not_applicable'
-    || preparation.result?.uiView.body.sendPolicy === 'no_popup';
+    || preparation.result?.uiView.body.sendPolicy === 'no_popup'
+    // Owner ruling (a): a body with no LLM wording is boilerplate, and boilerplate does not
+    // earn a popup. Same row, same gate as the blink fix above.
+    || promptEnhancementBodyHasNoLlmWordingV1(preparation.result);
   if (!preparation.safeFallback && preparation.result && !displayDecisionIsNoPopup) {
     upsertPendingPromptEnhancement(store, {
       projectRoot: input.projectRoot,
