@@ -46,6 +46,7 @@ function tempProject(withRunner = true): string {
 /** The live chain: module output already seeded → real request builder → facts → rendered lines. */
 function driveChain(store: Store, dir: string): {
   refs: ReturnType<typeof buildPromptEnhancementRequestForAuto>['sourceSignals'];
+  request: ReturnType<typeof buildPromptEnhancementRequestForAuto>;
   facts: readonly PromptEnhancementGuidanceFact[];
   requestJson: string;
   linesFor: (sectionKind: string) => readonly string[];
@@ -70,12 +71,18 @@ function driveChain(store: Store, dir: string): {
       selectedSignalKey: '',
       reason: 'hv2',
       degraded: false,
+      // The applicability observation the live classifier supplies. These rows exercise the
+      // grounding CHAIN, so the prompt is one the facts genuinely serve ("add the token refresh
+      // path and check it" — implementation plus verification). The GATE has its own fixtures;
+      // supplying everything here would test neither.
+      projectFactCandidates: ['framework', 'test_runner', 'version_control', 'ci_pipeline'],
     },
     streamBOutputs: [],
   });
   const facts = buildPromptEnhancementGuidanceFactsV1(request);
   return {
     refs: request.sourceSignals,
+    request,
     facts,
     requestJson: JSON.stringify(request),
     linesFor: (kind) => promptEnhancementFactValueLinesV1(kind, facts),
@@ -265,22 +272,61 @@ describe('HV-2 row 3 — env-tier-promotion: A1 landed, the tier now crosses typ
 // ─────────────────────────────────────────────────────────────────────────────
 // ROW 4 — env/env-trajectory.ts — measured absence, pinned both ways
 // ─────────────────────────────────────────────────────────────────────────────
-describe('HV-2 row 4 — env-trajectory: executes, and crosses NOTHING', () => {
-  it('runs on the auto path yet contributes no ref, no fact, no line', async () => {
-    const store = await openStore(':memory:');
-    const dir = tempProject();
+describe('HV-2 row 4 — env-trajectory: a confirmed movement crosses, and states itself in a body', () => {
+  // -- WHY THIS FIXTURE WAS REWRITTEN (round 6) ------------------------------------------------
+  // It previously asserted the module "crosses NOTHING" and claimed to be "pinned BOTH ways --
+  // fails if the gap closes". The gap closed (§17.11 was ruled WIRE IT and shipped) and it stayed
+  // GREEN. It could not have failed, for THREE independent reasons, and each is worth naming
+  // because each is a way a fixture can look like a guard without being one:
+  //
+  //   1. it opened `:memory:` -- `paramEventsPathFor` returns null there, so the module's change
+  //      events were never written and nothing downstream could ever see them;
+  //   2. it matched refs containing 'trajectory', and the crossing ref is `env_change:<key>` --
+  //      a substring guess about a name that had not been chosen yet;
+  //   3. it called `recordEnvTrajectory` ONCE, and a first probe is initialization by design --
+  //      no first observation is ever a movement, so no event existed to cross.
+  //
+  // So the row is now exercised the way §14.3 step 3 asks: "drives its module's output through the
+  // boundary into a body and pins the whole chain" -- on a disk store, through the flap damping,
+  // to a rendered line.
+  it('drives a flap-damped acquisition through the boundary into a rendered body line', async () => {
+    const dir = tempProject(false); // starts WITHOUT a test runner
+    const store = await openStore(join(dir, 'store.db'));
     upsertProject(store, { projectRoot: dir, name: 'x', projectType: 'app', language: 'ts', description: '', createdAt: Date.now() });
+    const session = { sessionId: 's', promptIndex: 0, stage: 'implementation' as const, stageConfidence: 0.9 };
 
-    recordEnvTrajectory(store, dir, { sessionId: 's', promptIndex: 0, stage: 'implementation', stageConfidence: 0.9 });
+    // Probe 1 seeds the baseline -- initialization, never a movement.
+    recordEnvTrajectory(store, dir, session);
+    expect(driveChain(store, dir).refs.rightGoodWorkStyleEnvRuntimeRefs.filter((r) => r.startsWith('env_change:')))
+      .toEqual([]);
 
-    const { refs, facts } = driveChain(store, dir);
-    expect(refs.sourceOnlyHardFactRefs, 'the trajectory probe started supplying PE — HV-3 must re-judge row 4').toEqual([]);
+    // The project acquires a test runner.
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'x', devDependencies: { vitest: '1.0.0' } }));
+
+    // Probe 2 sees it but does not trust it yet (S4 flap damping: stable across TWO probes).
+    recordEnvTrajectory(store, dir, session);
     expect(
-      facts.some((f) => f.sourceIds.some((id) => id.includes('trajectory'))),
-      'a trajectory-derived fact appeared — the gap closed; re-measure rather than relax this',
-    ).toBe(false);
-    // check-4, followed to the end rather than assumed from check-2.
-    expect(allRenderedLines(facts).join('\n')).not.toContain('trajectory');
+      driveChain(store, dir).refs.rightGoodWorkStyleEnvRuntimeRefs.filter((r) => r.startsWith('env_change:')),
+      'an unconfirmed movement reached PE -- flap damping is what keeps a host/devcontainer flip out of the prompt',
+    ).toEqual([]);
+
+    // Probe 3 confirms it.
+    const confirmed = recordEnvTrajectory(store, dir, session);
+    expect(confirmed.map((c) => `${c.key}:${c.direction}`)).toContain('has_test_runner:acquired');
+
+    // check-2 -- it crosses, and it crosses TYPED: the movement phrase, not a bare key.
+    const { refs, facts } = driveChain(store, dir);
+    expect(refs.rightGoodWorkStyleEnvRuntimeRefs).toContain('env_change:has_test_runner');
+    expect(refs.groundingEvidenceByRef?.['env_change:has_test_runner']?.value).toBe('was acquired');
+
+    // check-3 -- it becomes a fact carrying that content.
+    const fact = facts.find((f) => f.sourceIds[0] === 'env_change:has_test_runner');
+    expect(fact?.evidence?.value, 'the movement crossed but arrived contentless -- defect G9 on a new lane').toBe('was acquired');
+
+    // check-4 -- followed to the end, into a body a user reads.
+    const body = allRenderedLines(facts).join('\n');
+    expect(body, 'the movement never reached a body').toContain('was acquired');
+    expect(body).toContain('since the last session');
   });
 });
 
@@ -586,9 +632,12 @@ describe('HV-2 row 6 — A3 STEP 7 DID NOT LAND: extracted param values never en
     // A3 step 7 required these to arrive with `sourceOriginScope: current_prompt` or
     // `recent_prompt_history`. No fact carries either with a value — which is the failure, stated
     // as a measurement rather than an inference from the missing import.
+    // ⚠️ NARROWED at §17.13. This filtered on ORIGIN SCOPE as a proxy for "prompt-mined", and the
+    // proxy stopped holding the moment another producer with `current_prompt` origin gained a
+    // value: a STAGE TRANSITION is observed from the current prompt and is not a mined param. The
+    // row is about the A3 step-7 lane, so it now asks for that lane by name.
     const promptMined = facts.filter(
-      (f) => (f.sourceOriginScope === 'current_prompt' || f.sourceOriginScope === 'recent_prompt_history')
-        && f.evidence?.value !== undefined,
+      (f) => f.sourceIds.some((id) => id.startsWith('prompt_fact:')) && f.evidence?.value !== undefined,
     );
     expect(
       promptMined.map((f) => f.factId),
@@ -664,5 +713,84 @@ describe('HV-2 check-5 for check-1 — the liveness column must guard itself', (
       revived,
       'a test-only export gained a production caller — close that finding in §17.5b rather than relaxing this',
     ).toEqual([]);
+  });
+});
+
+// -----------------------------------------------------------------------------
+// §17.7 CARRIED INTO THE HV-3 VERDICT (§14.4 step 1)
+// -----------------------------------------------------------------------------
+describe('§17.7 carried - the render path asks the section-key question exactly ONE way', () => {
+  // §14.4 step 1 names TWO HV-2 records the verdict table must carry, and §17.7's own record ends
+  // "HV-3's verdict table assigns it". Owner assigned there: G (render), at its seam with A (payload).
+  //
+  // §17.7 is what every green check-4 in the verdict table rests on. Before it, a resolved value was
+  // planned into a section and then dropped by the renderer FOR THAT SAME SECTION. The behaviour is
+  // already pinned in the rows above (grounded values reach `project_grounding_facts`). What is
+  // pinned HERE is the STRUCTURE that behaviour rests on - prohibition 15, one map one meaning -
+  // because the defect was never a wrong value. It was one question answered two ways, and a
+  // behavioural pin on one section kind cannot see a second answer reappearing.
+  const RAW_READS = ['fact.targetSectionKind ' + '===', 'fact.targetSectionKind ' + '!=='];
+
+  function productionTs(): string[] {
+    const out: string[] = [];
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(dir)) {
+        const full = dir + '/' + entry;
+        if (statSync(full).isDirectory()) walk(full);
+        else if (entry.endsWith('.ts') && !entry.endsWith('.test.ts')) out.push(full);
+      }
+    };
+    walk('src');
+    return out;
+  }
+
+  it('all THREE readers in fact-value-render.ts go through the shared resolver, none reads the field raw', () => {
+    const src = readFileSync('src/prompt-enhancement/fact-value-render.ts', 'utf8');
+    const code = src.split('\n').filter((line) => {
+      const t = line.trimStart();
+      return !t.startsWith('//') && !t.startsWith('*') && !t.startsWith('/*');
+    });
+    expect(
+      code.filter((line) => RAW_READS.some((raw) => line.includes(raw))),
+      'a renderer reads the raw section key again - that IS §17.7, and the value it drops is silent',
+    ).toEqual([]);
+    // §17.7 measured THREE, not two: value lines, section model, and the grounded-values allow-list.
+    // Fixing two of three desyncs the allow-list from the body, which permits a value no body carried.
+    expect(
+      src.split('promptEnhancementSectionKindForFactV1(').length - 1,
+      'a reader stopped calling the shared resolver - one of the three is answering on its own again',
+    ).toBe(3);
+  });
+
+  it('and the one raw reader left in production is INERT - its only producer names the kind explicitly', async () => {
+    // Honest inventory rather than a claim of zero: the prose-copy lock in compose-enhancement still
+    // compares the raw field. It is inert TODAY because of a fact about its producers, not because of
+    // its own code - so the fact is asserted, not assumed.
+    const rawReaders = productionTs().filter((f) => {
+      const body = readFileSync(f, 'utf8');
+      return RAW_READS.some((raw) => body.includes(raw));
+    });
+    expect(
+      rawReaders,
+      'a new production reader compares the raw section key - §17.7 has a second site now',
+    ).toEqual(['src/prompt-enhancement/compose-enhancement.ts']);
+
+    // The lock filters two source types. Only `content_template_record` has a production producer,
+    // and it ships an explicit kind - so raw and resolved agree and nothing is skipped. The day that
+    // producer ships '' instead, the lock silently stops checking the prose it exists to check.
+    const store = await openStore(':memory:');
+    const dir = tempProject();
+    upsertProject(store, { projectRoot: dir, name: 'x', projectType: 'app', language: 'ts', description: '', createdAt: Date.now() });
+    const { request } = driveChain(store, dir);
+    const withTemplate = buildPromptEnhancementGuidanceFactsV1({
+      ...request,
+      sourceSignals: { ...request.sourceSignals, contentTemplateRecordFactRefs: ['content_template:debug_repro'] },
+    });
+    const templateFacts = withTemplate.filter((f) => f.sourceType === 'content_template_record');
+    expect(templateFacts.length, 'no content-template fact was built - the lock has nothing to guard').toBe(1);
+    expect(
+      templateFacts[0].targetSectionKind,
+      'the content-template producer stopped naming its section kind - the prose-copy lock now skips it',
+    ).toBe('source_signal_guidance');
   });
 });

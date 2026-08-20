@@ -11,6 +11,12 @@ import {
 } from './cost-observability.js';
 import { isPromptEnhancementLanguageConsistentV1 } from './language-consistency.js';
 import {
+  promptEnhancementExpectedSignalNamesV1,
+  promptEnhancementDraftNamesItsSignalV1,
+  promptEnhancementSignalNameDirectiveV1,
+  PROMPT_ENHANCEMENT_SOURCE_SIGNAL_SECTION_KIND_V1,
+} from './source-signal-naming.js';
+import {
   isPromptEnhancementAuthorityConsistentV1,
   isPromptEnhancementAuthoritySelfReportV1,
 } from './authority-consistency.js';
@@ -198,6 +204,7 @@ const SYSTEM_PROMPT = [
   "become the user's own next prompt to their coding agent — write in the user's first-person",
   'voice as direct, methodical instructions, never as advice ABOUT the user and never mentioning',
   'Nexpath. Do not restate the original request; other sections handle that.',
+
   '',
   'Language fidelity (E5 — critical):',
   '- Write ALL generated section wording in the SAME language, slang, and code-switching as the',
@@ -245,8 +252,24 @@ const SYSTEM_PROMPT = [
   // The §41.3 correction + the same claim ceiling the deterministic path obeys.
   '- Never state a fact more strongly than its claim allows: may_state_as_project_capability may',
   '  be stated as a project fact; must_phrase_as_possibility must be worded as a possibility to',
-  '  confirm; must_phrase_as_source_signal must be attributed to the current source signal.',
+  '  confirm; must_phrase_as_source_signal must be attributed to the current source signal;',
+  '  must_phrase_as_recent_change states that something CHANGED since the last session and must',
+  '  never be reworded as a standing fact about the project.',
+  '- NAMING A SOURCE SIGNAL (hard requirement): a source-signal fact carries the NAME of the signal',
+  '  that fired — for example "session length checkpoint" or "test creation". That name MUST appear,',
+  '  in those words, in the section you write. Reword everything around it however the register',
+  '  needs; the name itself is not yours to generalise, summarise or replace.',
+  '  ⛔ These are all FAILURES, and they are what happens when the name is dropped:',
+  '     "the missing practices indicated" · "what signals might be relevant here" · "this issue" ·',
+  '     "a relevant source signal" · "the current signal".',
+  '  ✅ Correct: "I have not set up test creation for this yet — add tests for this change before',
+  '     the retry flow ships." The reader learns WHICH signal; that is the entire reason the name is',
+  '     given to you.',
+  '  ⚠️ If several source-signal facts are present, name EACH of their signals. Do not merge them',
+  '     into one category sentence — a category sentence is the failure above with more words.',
   '- Evidence marked WITHHELD has content you may not see or state — cite the source id only.',
+  '- Evidence marked NONE has no resolved content at all. Do not imply something was hidden from',
+  '  you, and do not invent what it might have been — the fact exists, its value does not.',
   '- Reply with STRICT JSON only, with the keys in EXACTLY this order:',
   '  {"detectedLanguageSelfReport":"...","requestModeSelfReport":"...","sectionDrafts":[{"sectionId":"...","bodyText":"...","sourceFactIds":["..."]}],"composerClaims":["claim:<sourceFactId>"],"authorityEvidence":"...","authorityModeSelfReport":"..."}',
   '- The key order is not cosmetic: authorityEvidence and authorityModeSelfReport come LAST, after',
@@ -292,7 +315,9 @@ function buildUserPrompt(
         .map((fact) => `\n    - ${fact.factId} | kind: ${fact.guidanceKind} | confidence: ${fact.confidenceBand}`
           + ` | origin: ${fact.originScope} | claim: ${fact.claimVerbPolicy}`
           + (fact.evidence === undefined
-            ? ' | evidence: WITHHELD (cite the source, never state its content)'
+            ? (fact.contentGated
+              ? ' | evidence: WITHHELD (cite the source, never state its content)'
+              : ' | evidence: NONE (nothing resolved — no hidden content to work around)')
             : ` | evidence: ${fact.evidence}`))
         .join('');
       const evidenceBlock = factLines.length > 0 ? `\n  resolvedSourceFacts:${factLines}` : '';
@@ -391,6 +416,17 @@ export async function composeStructuredComposerOutputV1(
   // language mismatch the retry carries a stronger language directive (E5/5.3).
   let languageRetry = false;
   let authorityRetry = false;
+  // 🔒 The owner-sanctioned budget for the source-signal naming check: ONE extra call, spent at
+  // most once no matter how the loop turns. Tracked separately from the shared retry bound so a
+  // language or coverage retry can never consume it, and it can never consume theirs.
+  let signalNameRetry = false;
+  let signalNameRetrySpent = false;
+  const expectedSignalNames = promptEnhancementExpectedSignalNamesV1(input.planning);
+  const signalSectionIds = new Set(
+    input.planning.sectionPlans
+      .filter((plan) => plan.sectionKind === PROMPT_ENHANCEMENT_SOURCE_SIGNAL_SECTION_KIND_V1)
+      .map((plan) => plan.sectionId),
+  );
   let missingSectionIds: readonly string[] = [];
   const plannedSectionIds = sections.map((section) => section.sectionId);
   for (let attempt = 0; attempt <= PROMPT_ENHANCEMENT_COST_VALIDATION_RETRY_COUNT_V1; attempt++) {
@@ -411,6 +447,7 @@ export async function composeStructuredComposerOutputV1(
               content: userPrompt
                 + (languageRetry ? STRONGER_LANGUAGE_DIRECTIVE : '')
                 + (authorityRetry ? STRONGER_AUTHORITY_DIRECTIVE : '')
+                + (signalNameRetry ? promptEnhancementSignalNameDirectiveV1(expectedSignalNames) : '')
                 + coverageDirective(missingSectionIds),
             },
           ],
@@ -452,6 +489,37 @@ export async function composeStructuredComposerOutputV1(
     const draftedSectionIds = new Set(parsed.sectionDrafts.map((draft) => draft.sectionId));
     missingSectionIds = plannedSectionIds.filter((sectionId) => !draftedSectionIds.has(sectionId));
     if (missingSectionIds.length > 0) continue; // spends the existing bound; no new budget
+
+    // §17.13 last hop — did the source-signal section NAME its signal? Placed after coverage on
+    // purpose: a draft set that is short is not yet the draft that will ship, and judging its
+    // wording would spend the sanctioned call on text about to be rewritten anyway.
+    const signalDrafts = parsed.sectionDrafts.filter((draft) => signalSectionIds.has(draft.sectionId));
+    const unnamed = signalDrafts.filter(
+      (draft) => !promptEnhancementDraftNamesItsSignalV1(draft.bodyText, expectedSignalNames),
+    );
+    if (unnamed.length > 0 && !signalNameRetrySpent) {
+      // The ONE sanctioned extra call. Clear the other directives for the same reason the language
+      // branch does: they were computed from a reply this one replaces.
+      missingSectionIds = [];
+      signalNameRetry = true;
+      signalNameRetrySpent = true;
+      continue;
+    }
+    if (unnamed.length > 0) {
+      // ⛔ Retry spent and the name is still absent. DISCARD THE SECTION, not the popup (owner
+      // ruling): a source-signal paragraph that names no signal occupies a slot and tells the
+      // reader nothing they did not already know. Dropping the draft is all that is required —
+      // `compose-enhancement` renders only sections that HAVE one, so the section simply does not
+      // appear, and every other section ships untouched.
+      const discarded = new Set(unnamed.map((draft) => draft.sectionId));
+      return {
+        ok: true,
+        output: {
+          ...parsed,
+          sectionDrafts: parsed.sectionDrafts.filter((draft) => !discarded.has(draft.sectionId)),
+        },
+      };
+    }
     return { ok: true, output: parsed };
   }
   // Retries exhausted (malformed, persistent language mismatch, persistent authority drift, or a

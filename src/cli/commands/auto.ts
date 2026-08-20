@@ -9,7 +9,7 @@ import { SessionStateManager } from '../../classifier/SessionStateManager.js';
 import { detectAbsenceFlags, ABSENCE_MIN_PROMPTS } from '../../classifier/AbsenceDetector.js';
 import { buildRuntimeContext } from '../../classifier/runtime-context.js';
 import { ACTIVE_AGENT_ID } from '../../env/agent-capabilities.js';
-import { recordEnvTrajectory } from '../../env/env-trajectory.js';
+import { recordEnvTrajectory, recentEnvChangesV1 } from '../../env/env-trajectory.js';
 import { recordTranscriptCorroboration } from '../../telemetry/transcript-corroboration.js';
 import { classifyStreamBPresence } from '../../classifier/StreamBPresenceClassifier.js';
 import type { StreamBPresenceResult } from '../../classifier/StreamBPresenceClassifier.js';
@@ -20,7 +20,7 @@ import { isInjectedPromptEcho } from '../../decision-session/whydesc-delivery.js
 import { selectionRegister } from '../../decision-session/selection-registry.js';
 import { resolvePinchFields } from '../../decision-session/signal-pinch-fields.js';
 import type { Stage } from '../../classifier/types.js';
-import type { FlagType, Stage2TriggerResult } from '../../classifier/Stage2Trigger.js';
+import type { FlagType, Stage2TriggerResult } from '../../core/stage2.js';
 import type { StageClassifierResult } from '../../classifier/stage-classifier.js';
 import { resolveLanguage } from '../../classifier/LanguageDetector.js';
 import { insertPrompt } from '../../store/prompts.js';
@@ -28,8 +28,10 @@ import { getConfig } from '../../store/config.js';
 import { getProject, upsertProject } from '../../store/projects.js';
 import { getRecentPrompts } from '../../store/prompts.js';
 import { importHistoricalPrompts } from '../../store/historical-import.js';
-import { classifyUserProfileLLM, MIN_PROFILE_PROMPTS } from '../../classifier/LLMProfileClassifier.js';
+import { classifyUserProfileLLM, MIN_PROFILE_PROMPTS } from '../../core/classifier/LLMProfileClassifier.js';
 import { isProfileStale } from '../../classifier/UserProfileClassifier.js';
+import { OpenAILLMAdapter } from '../adapters/llm.adapter.js';
+import { loggerAdapter } from '../adapters/log.adapter.js';
 import { logger, initLogger } from '../../logger.js';
 import type { LogLevel } from '../../logger.js';
 import { writeHookStats } from '../../store/hook-stats.js';
@@ -76,7 +78,7 @@ import {
   type GroundingCorroborationTier,
 } from '../../env/env-tier-promotion.js';
 import { computeWorkStyleProfile } from '../../classifier/work-style-traits.js';
-import { readParamEvents } from '../../telemetry/param-events.js';
+import { readParamEvents, type ParamEvent } from '../../telemetry/param-events.js';
 import { getProjectEnvFacts } from '../../store/env-facts.js';
 import { cachedPromptDerivedFactsV1, refreshPromptDerivedFactsIfDueV1 } from '../../prompt-enhancement/prompt-derived-facts-refresh.js';
 import { getPromptEnhancementFeedbackSummary, queryRelevantPromptEnhancementMemory, recordPromptEnhancementMemoryEvidence, markPromptEnhancementMemoryUsed } from '../../store/prompt-enhancement.js';
@@ -254,8 +256,12 @@ export function buildPromptEnhancementGroundingRefsV1(store: Store, projectRoot:
     }
   } catch { /* no RIGHT&GOOD grounding available — leave empty */ }
   const paramEventChannels: string[] = [];
+  // Hoisted so the movement lane below can reuse this window instead of re-reading the log: PE
+  // runs on every prompt, and this file is already read twice above.
+  let paramEvents: readonly ParamEvent[] = [];
   try {
     const events = readParamEvents(store, projectRoot);
+    paramEvents = events;
     for (const [trait, tv] of Object.entries(computeWorkStyleProfile(events))) {
       if (tv.value !== null) {
         // The trait VALUE crosses typed beside the ref — no longer smuggled inside it.
@@ -316,6 +322,30 @@ export function buildPromptEnhancementGroundingRefsV1(store: Store, projectRoot:
         value: mined.value,
         runtimePath: 'local_store',
         anchorScope: 'current_prompt_scope',
+      };
+    }
+
+    // ── §17.11 (owner-ruled: WIRE IT) — env movements cross as their own grounding claim ───────
+    //
+    // The trajectory probe was never inert: its change events already credit practice scores
+    // through `trajectory-credit` → the RIGHT&GOOD aggregator. But a score nudge is silent — the
+    // enhanced prompt could say what the project IS and never that something MOVED, which is the
+    // half a user notices ("the upgrade broke because node moved under it").
+    //
+    // ⚠️ Crossing here rather than in the `hard_fact:` loop above is deliberate: those refs carry
+    // a probe's CURRENT value and take their claim strength from the corroboration tier. A
+    // movement is a different kind of knowledge and takes a different ceiling, so it gets its own
+    // ref namespace and its own producer branch rather than borrowing one that means state.
+    for (const change of recentEnvChangesV1(store, projectRoot, Date.now(), paramEvents)) {
+      const ref = `env_change:${change.key}`;
+      rightGoodWorkStyleEnvRuntimeRefs.push(ref);
+      groundingTierByRef[ref] = 'uncorroborated';
+      groundingPolarityByRef[ref] = 'present';
+      groundingEvidenceByRef[ref] = {
+        key: change.key,
+        value: change.phrase,
+        runtimePath: 'local_store',
+        anchorScope: 'project_root',
       };
     }
   } catch { /* no source hard facts available — leave empty */ }
@@ -491,6 +521,9 @@ export function buildPromptEnhancementRequestForAuto(input: {
         // The capability observation from the same call: candidates plus the
         // debug-evidence forms present. The registry decides every attachment.
         classifierCapabilityCandidates: input.stageResult.capabilityCandidates,
+        // Which stored project facts THIS prompt calls for. The registry decides what to do with
+        // it; an absent channel fails closed downstream rather than sending all ten facts.
+        classifierProjectFactCandidates: input.stageResult.projectFactCandidates,
         classifierDebugEvidencePresent: input.stageResult.debugEvidencePresent,
         promptStartBoundary: source.promptStartStop.hookBoundary,
         deliveryBoundary: source.promptStartStop.deliveryBoundary,
@@ -958,17 +991,22 @@ export async function runAuto(
     getConfig(store.db, `role:${input.projectRoot}`) ??
     getConfig(store.db, 'role') ??
     null
-  ) as import('../../classifier/types.js').UserRole | null;
+  ) as import('../../core/classifier/types.js').UserRole | null;
 
   // ── 2. LLM profile classification — runs before the stage classifier so the classifier
   //       calibrates on the freshly-computed profile ──────────────────────────────
   if (isProfileStale(mgr.current.profile, mgr.current.promptCount) &&
       mgr.current.promptHistory.length >= MIN_PROFILE_PROMPTS - 1) {
     const updatedProfile = await classifyUserProfileLLM(
-      mgr.current.promptHistory as import('../../classifier/types.js').PromptRecord[],
+      mgr.current.promptHistory as import('../../core/classifier/types.js').PromptRecord[],
       mgr.current.promptCount,
       mgr.current.profile,
-      openai,
+      // Adapters — wired to core port interfaces. Constructed lazily here (not at
+      // runAuto entry): the OpenAI SDK is only instantiated when profile
+      // classification actually runs, so offline paths that never reach an LLM
+      // call don't require an API key.
+      new OpenAILLMAdapter(openai),
+      loggerAdapter,
     );
     mgr.setProfile(updatedProfile);
     logger.debug('profile_classified', { nature: updatedProfile.nature, mood: updatedProfile.mood, depth: updatedProfile.depth });
@@ -1049,7 +1087,7 @@ export async function runAuto(
 
   // ── 4. Absence detection ─────────────────────────────────────────────────────
   const newFlags = detectAbsenceFlags(
-    mgr.current as import('../../classifier/types.js').SessionState,
+    mgr.current as import('../../core/classifier/types.js').SessionState,
     mgr.current.profile,
     projectType,
     freqConfig.signalAbsenceThresholdMultiplier,
@@ -1198,7 +1236,7 @@ export async function runAuto(
 
   // ── 5. Should Stage 2 fire? ──────────────────────────────────────────────────
   const triggerResult: Stage2TriggerResult = shouldFireStage2(
-    mgr.current as import('../../classifier/types.js').SessionState,
+    mgr.current as import('../../core/classifier/types.js').SessionState,
     prevStage,
     newFlags,
     freqConfig.stage2S1LowConfidence,

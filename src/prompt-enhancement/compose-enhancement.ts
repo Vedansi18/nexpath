@@ -696,7 +696,13 @@ const DISALLOWED_INTERNAL_TOKENS: readonly string[] = ['whydesc', 'descbase', 'p
  *
  * Word boundaries keep every phrase doing its actual job while removing the collateral entirely.
  */
-const DISALLOWED_PHRASES: readonly string[] = [
+/**
+ * ⚠️ EXPORTED so the composer's own INSTRUCTIONS can be checked against it. §17.13 shipped a
+ * worked example telling the model to write "you should …" — a phrase on this very list — so
+ * every draft that obeyed was rejected, and a rejected draft takes its whole section with it.
+ * The engine ordered wording and then refused it for obeying, and the section simply vanished.
+ */
+export const PROMPT_ENHANCEMENT_DISALLOWED_COMPOSER_PHRASES_V1: readonly string[] = [
   'the developer should',
   'you seem',
   'you should',
@@ -737,7 +743,7 @@ const DISALLOWED_PHRASES: readonly string[] = [
  */
 const PHRASE_INFLECTION_SUFFIX = "(?:s|['’]s|n['’]t)?";
 
-const DISALLOWED_PHRASE_PATTERNS: readonly RegExp[] = DISALLOWED_PHRASES.map(
+const DISALLOWED_PHRASE_PATTERNS: readonly RegExp[] = PROMPT_ENHANCEMENT_DISALLOWED_COMPOSER_PHRASES_V1.map(
   (phrase) => new RegExp(`\\b${phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}${PHRASE_INFLECTION_SUFFIX}\\b`, 'i'),
 );
 

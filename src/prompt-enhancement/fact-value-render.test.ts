@@ -308,9 +308,16 @@ describe('GR-1 — the grounding ACTION does not contradict a stated fact', () =
     expect(text).not.toContain('Use the typed project/source metadata');
   });
 
-  it('with no stated fact, the action keeps its existing line', () => {
-    const text = groundedSection([], 'more_project_grounded');
-    expect(text).toContain('Ground the request in current project facts');
+  it('with no stated fact there is no section at all — not a generic instruction', () => {
+    // ⛔ CHANGED by Hiren's ruling on the sim finding. This used to assert that a FACTLESS
+    // grounding section keeps its generic line ("Ground the request in current project facts").
+    // That line is the defect he reported: a section that appears on every prompt and, having no
+    // fact to state, tells the model to ground itself in nothing. The locked drop-criteria say the
+    // same thing in stage (a) — a factless section drops before anything ranks it.
+    //
+    // The action still works; it just cannot conjure a section out of no facts. The WITH-a-fact
+    // case above is the one that carries GR-1's contract, and it is untouched.
+    expect(groundedSection([], 'more_project_grounded')).toBe('');
   });
 
   it.each([['shorter' as const], ['more_thorough' as const]])('the stated value survives %s', (action) => {

@@ -17,6 +17,14 @@ import {
 import { SessionStateManager } from '../classifier/SessionStateManager.js';
 import { buildPromptEnhancementRequestForAuto } from '../cli/commands/auto.js';
 import { probeProject } from '../env/env-probe.js';
+import { promptEnhancementFactValueLinesV1 } from './fact-value-render.js';
+import { buildPromptEnhancementGuidanceFactsV1 } from './guidance-facts.js';
+
+/** The section kinds a real body asks for; `''` is never one of them. */
+const PRODUCTION_KINDS = ['context_and_constraints','approach_or_steps','acceptance_or_output_expectation',
+  'verification_or_test_plan','project_grounding_facts','source_signal_guidance','reproduction_or_evidence',
+  'risk_safety_or_confirmation','uncertainty_or_clarification','requirement_source_state',
+  'behavior_preservation','finding_format'] as const;
 
 /**
  * A3 step 7 under the owner-approved adjustment.
@@ -163,6 +171,40 @@ describe('A3 step 7 — the values CROSS the boundary typed (the id-only hop, cl
 
     // L4990: prompt-mined evidence is uncorroborated by construction and must never claim practice.
     expect(refs.groundingTierByRef?.[ref]).toBe('uncorroborated');
+  });
+
+  it('and the mined value REACHES A BODY, not just the fact set', async () => {
+    // HV-3 measured the gap this closes: the ref crossed, the fact was built carrying its value,
+    // the claim policy was already `must_phrase_as_possibility` exactly as step 7 asks — and the
+    // value still never reached a body, because `prompt_fact:` refs had no branch of their own and
+    // inherited the work-style branch's `metadata_only`. Inherited suppression, not a decision.
+    const { store, dir } = await projectWithPrompts(1);
+    await refreshPromptDerivedFactsIfDueV1({
+      store, projectRoot: dir, currentPromptCount: 1,
+      recentPrompts: ['deploy to vercel'], extract: async () => MINED,
+    });
+    const session = SessionStateManager.load(store, dir);
+    const request = buildPromptEnhancementRequestForAuto({
+      auto: { promptText: 'add the billing page', projectRoot: dir, currentAgentMode: 'default' },
+      store, session, project: null, effectiveLanguage: 'en', configuredRole: null,
+      effectiveFlagType: 'stage_transition', firedKey: 'k', previousStage: 'idea',
+      trigger: { kind: 'stage_transition' },
+      stageResult: {
+        classification: { stage: 'implementation', confidence: 0.9, tier: 3, allScores: {} },
+        signalsPresent: [], signalsAbsent: [], fireRecommendation: true,
+        selectedSignalKey: '', reason: 't', degraded: false,
+      },
+      streamBOutputs: [],
+    });
+    const facts = buildPromptEnhancementGuidanceFactsV1(request);
+    const mined = facts.filter((f) => f.sourceIds.some((i) => i.startsWith('prompt_fact:')));
+    expect(mined.length, 'no fact was built from the mined ref').toBeGreaterThan(0);
+    expect(mined[0]!.renderPolicy, 'suppressed again — the work-style treatment came back').not.toBe('metadata_only');
+    expect(mined[0]!.claimVerbPolicy, 'prompt-mined material must stay at possibility strength')
+      .toBe('must_phrase_as_possibility');
+
+    const body = PRODUCTION_KINDS.flatMap((k) => promptEnhancementFactValueLinesV1(k, facts)).join(' | ');
+    expect(body, 'the mined value stops short of the body again').toContain('vercel');
   });
 
   it('and nothing crosses when the cache is empty — the read is free and silent', async () => {

@@ -37,6 +37,10 @@ export type PromptEnhancementSourceOriginScope =
   | 'current_prompt'
   | 'recent_prompt_history'
   | 'local_probe'
+  // The local probe compared ACROSS sessions. Distinct from `local_probe` because the
+  // knowledge is a movement, not a state: the probe says what is true now, this says what
+  // moved — and a movement carries its own claim ceiling (see the claim policy below).
+  | 'local_probe_trajectory'
   | 'longitudinal_param_events'
   | 'served_variant_identity'
   | 'transcript_corroboration'
@@ -55,6 +59,13 @@ export type PromptEnhancementClaimVerbPolicy =
   | 'must_have_behaviour_verified_practice'
   | 'must_phrase_as_possibility'
   | 'must_phrase_as_source_signal'
+  // ⚠️ The CHANGE-OVER-TIME rung. Every rung above states what IS true; this one states what
+  // MOVED, and the two cannot share wording — "known project fact: ci pipeline is true" is a
+  // different claim from "ci pipeline was acquired since the last session", and a movement
+  // stated as a state is a claim about the present that the evidence does not support.
+  // Deliberately BELOW the project-knowledge rungs: a movement is observed by one local probe
+  // pair, never behaviour-corroborated, so it may never be promoted into practice wording.
+  | 'must_phrase_as_recent_change'
   | 'source_label_only'
   | 'do_not_render';
 
@@ -639,11 +650,22 @@ export function planPromptEnhancementSections(
   const template = getPromptEnhancementTemplateByIntent(route.primaryIntent);
   const sourceA = sourceARef(input.sourceRefs);
   const facts = normalizeGuidanceFacts(input.guidanceFacts ?? []);
+  // 🔒 The grounding section FOLLOWS ITS FACTS (Hiren's ruling on the sim finding). The capability
+  // used to make this section structurally required, so it appeared on every popup and stated the
+  // test runner and the lockfile to a prompt about renaming a variable. A section whose every fact
+  // was judged inapplicable has nothing to say, and saying it anyway is what made the section noise.
+  // ⚠️ Scoped to THIS section kind on purpose: the other capability-required sections carry their
+  // own floors and obligations, and generalising this would silently re-decide all of them.
+  const groundedFacts = facts.filter(isRenderableFact);
+  const hasGroundingFact = groundedFacts.some((fact) => sectionKindForFact(fact) === 'project_grounding_facts');
   const candidateSectionKinds = orderedUnique([
     'original_request_or_goal',
     ...template.requiredSections,
-    ...route.capabilityOverlays.map((capability) => SECTION_REQUIRED_BY_CAPABILITY[capability]).filter(isString),
-    ...facts.filter(isRenderableFact).map(sectionKindForFact),
+    ...route.capabilityOverlays
+      .map((capability) => SECTION_REQUIRED_BY_CAPABILITY[capability])
+      .filter(isString)
+      .filter((kind) => kind !== 'project_grounding_facts' || hasGroundingFact),
+    ...groundedFacts.map(sectionKindForFact),
   ]);
 
   if (route.noPopup) {
@@ -898,6 +920,9 @@ function isMandatorySurvivorSection(
   capabilities: readonly PromptEnhancementCapabilityId[],
   facts: readonly PromptEnhancementGuidanceFact[],
 ): boolean {
+  // Grounding is required only when it HAS a fact — the same rule as its candidacy above; a
+  // factless required section is exactly what the locked drop-criteria call stage (a).
+  if (sectionKind === 'project_grounding_facts' && !facts.some(isRenderableFact)) return false;
   return capabilities.some((capability) => SECTION_REQUIRED_BY_CAPABILITY[capability] === sectionKind) ||
     facts.some((fact) => fact.priority === 'required_survivor');
 }

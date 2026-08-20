@@ -1911,7 +1911,11 @@ function mergeCapabilities(
   }
   if ((input.sourceFactRefs?.length ?? 0) > 0 || (input.contentTemplateFactRefs?.length ?? 0) > 0 || typeof input.firedKey === 'string') {
     capabilities.add('capability.source_signal_guidance');
-    capabilities.add('capability.project_grounding');
+    // ⛔ `capability.project_grounding` NO LONGER attaches here. `firedKey` is always a string on
+    // this path — a popup exists because something fired — so this condition was "always", and
+    // grounding was structurally guaranteed rather than decided. This is the keyless path, where
+    // no applicability observation exists at all, and the ruling is FAIL-CLOSED: no observation,
+    // no grounding section. The source-signal half is untouched (its own fix, deliberately later).
   }
   return [...capabilities];
 }

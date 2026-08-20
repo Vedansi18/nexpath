@@ -404,71 +404,9 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
           "source_honesty",
           "no_authority_escalation",
         ],
-        "sectionId": "pe:facade-nonseq-a-plain-impl:route:section:6:project_grounding_facts",
-        "sectionKind": "project_grounding_facts",
-        "sectionPlanId": "pe:facade-nonseq-a-plain-impl:route:section-plan:6:project_grounding_facts",
-        "sensitivityFlags": [],
-        "slotEvidenceStatus": "present",
-        "slotObligations": [
-          "project_source_fact_slots",
-          "known_unknown_wording",
-          "source_ids_evidence_state",
-        ],
-        "sourceEvidenceStatus": "present",
-        "sourceIds": [
-          "prompt:1",
-        ],
-        "sourceKind": "source_a_user_prompt",
-        "sourceRefs": [
-          {
-            "confidence": "high",
-            "evidenceStatus": "present",
-            "freshness": "current",
-            "privacyClass": "public_safe",
-            "sourceAuthorization": "source_fact_only",
-            "sourceId": "prompt:1",
-            "sourceKind": "source_a_user_prompt",
-            "sourceRefId": "src-a-1",
-          },
-        ],
-        "structuredContentPartRefs": [
-          "section_kind:project_grounding_facts",
-        ],
-        "supportedActions": [
-          "use_current_body",
-          "use_original",
-          "shorter",
-          "more_thorough",
-          "more_project_grounded",
-          "apply_details",
-        ],
-        "templateId": "pe-route-feature-fresh_implementation",
-        "textDraftRef": "composer_pending:project_grounding_facts",
-        "validationStatus": "valid",
-      },
-      {
-        "baselineSourceSignalSlot": "source_signal_guidance",
-        "callVisibilityMode": "deterministic",
-        "contentTemplateRuntimeSeamUse": "none",
-        "deterministicTextBasisPolicy": "structured_parts",
-        "fallbackMode": "none",
-        "familyId": "feature_delivery",
-        "handoffCapabilityFlags": [
-          "no_runtime_sequence_v1",
-        ],
-        "isEditable": true,
-        "isRequired": true,
-        "order": 7,
-        "primaryIntent": "feature.fresh_implementation",
-        "removalFeedbackPolicy": "typed_event_required",
-        "requirementSourceStatus": "not_applicable",
-        "safetyFlags": [
-          "source_honesty",
-          "no_authority_escalation",
-        ],
-        "sectionId": "pe:facade-nonseq-a-plain-impl:route:section:7:source_signal_guidance",
+        "sectionId": "pe:facade-nonseq-a-plain-impl:route:section:6:source_signal_guidance",
         "sectionKind": "source_signal_guidance",
-        "sectionPlanId": "pe:facade-nonseq-a-plain-impl:route:section-plan:7:source_signal_guidance",
+        "sectionPlanId": "pe:facade-nonseq-a-plain-impl:route:section-plan:6:source_signal_guidance",
         "sensitivityFlags": [],
         "slotEvidenceStatus": "present",
         "slotObligations": [
@@ -545,9 +483,9 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
     "retryCount": undefined,
     "runtimeSeamSummary": {
       "runtimePaths": [
-        "unstamped",
+        "local_read_model",
       ],
-      "totalPayloadWeight": 10,
+      "totalPayloadWeight": 19,
       "unknownRuntimePathCount": 0,
     },
     "telemetrySafeMeasurementFields": [
@@ -585,7 +523,6 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
       "claim:section_kind:approach_or_steps",
       "claim:section_kind:acceptance_or_output_expectation",
       "claim:section_kind:verification_or_test_plan",
-      "claim:section_kind:project_grounding_facts",
       "claim:guidance_fact:pe-fact-stage-0",
     ],
     "composerInputPrivacyState": "approved_refs_only",
@@ -593,7 +530,7 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
     "composerPolicy": "deterministic_only",
     "composerRunId": "pe:facade-nonseq-a-plain-impl:composer:default:1",
     "composerVisiblePromptContext": {
-      "boundedContextRefCount": 8,
+      "boundedContextRefCount": 7,
       "contextPolicy": "structured_refs_only_no_raw_original",
       "originalPromptVisibleLocallyOnly": true,
       "rawPromptTextExcluded": true,
@@ -605,7 +542,6 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
       "section_kind:approach_or_steps",
       "section_kind:acceptance_or_output_expectation",
       "section_kind:verification_or_test_plan",
-      "section_kind:project_grounding_facts",
       "guidance_fact:pe-fact-stage-0",
     ],
     "deterministicFallback": {
@@ -696,8 +632,7 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
         "pe:facade-nonseq-a-plain-impl:route:section-plan:3:approach_or_steps",
         "pe:facade-nonseq-a-plain-impl:route:section-plan:4:acceptance_or_output_expectation",
         "pe:facade-nonseq-a-plain-impl:route:section-plan:5:verification_or_test_plan",
-        "pe:facade-nonseq-a-plain-impl:route:section-plan:6:project_grounding_facts",
-        "pe:facade-nonseq-a-plain-impl:route:section-plan:7:source_signal_guidance",
+        "pe:facade-nonseq-a-plain-impl:route:section-plan:6:source_signal_guidance",
       ],
     },
     "instructionPrecedenceState": "generated_sections_qualify_original",
@@ -738,10 +673,8 @@ Acceptance Or Output Expectation:
 Verification Or Test Plan:
 - Include the verification command, focused scenario, or regression check that should prove the change.
 
-Project Grounding Facts:
-- Ground the request in current project facts and source references without inventing missing implementation details.
-
 Source Signal Guidance:
+- The current source signal reports stage as task_breakdown → implementation.
 - Use the current source signal as a task constraint and convert it into direct implementation guidance.",
     "routeDecisionId": "pe:facade-nonseq-a-plain-impl:route",
     "sentPromptOrigin": "pe_baseline_generated_body",
@@ -761,7 +694,6 @@ Source Signal Guidance:
       "section_kind:approach_or_steps",
       "section_kind:acceptance_or_output_expectation",
       "section_kind:verification_or_test_plan",
-      "section_kind:project_grounding_facts",
       "guidance_fact:pe-fact-stage-0",
     ],
     "strictSchemaFailureReasonCodes": [
@@ -783,7 +715,6 @@ Source Signal Guidance:
       "claim:section_kind:approach_or_steps",
       "claim:section_kind:acceptance_or_output_expectation",
       "claim:section_kind:verification_or_test_plan",
-      "claim:section_kind:project_grounding_facts",
       "claim:guidance_fact:pe-fact-stage-0",
     ],
     "composerMode": "baseline_deterministic_render",
@@ -822,10 +753,8 @@ Acceptance Or Output Expectation:
 Verification Or Test Plan:
 - Include the verification command, focused scenario, or regression check that should prove the change.
 
-Project Grounding Facts:
-- Ground the request in current project facts and source references without inventing missing implementation details.
-
 Source Signal Guidance:
+- The current source signal reports stage as task_breakdown → implementation.
 - Use the current source signal as a task constraint and convert it into direct implementation guidance.",
     "routeDecisionId": "pe:facade-nonseq-a-plain-impl:route",
     "sections": [
@@ -1320,7 +1249,8 @@ Source Signal Guidance:
           "decompositionDepth",
         ],
         "baselineSourceSignalSlot": "source_signal_guidance",
-        "bodyText": "- Ground the request in current project facts and source references without inventing missing implementation details.",
+        "bodyText": "- The current source signal reports stage as task_breakdown → implementation.
+- Use the current source signal as a task constraint and convert it into direct implementation guidance.",
         "callVisibilityMode": "deterministic",
         "canExpandInMoreThorough": true,
         "canGroundInMoreProjectGrounded": true,
@@ -1333,7 +1263,9 @@ Source Signal Guidance:
         "fallbackBehavior": "none",
         "familyId": "feature_delivery",
         "feedbackSensitivity": "protected",
-        "groundedFactValues": [],
+        "groundedFactValues": [
+          "task_breakdown → implementation",
+        ],
         "handoffCapabilityFlags": [
           "no_runtime_sequence_v1",
         ],
@@ -1345,10 +1277,10 @@ Source Signal Guidance:
         "originalTextRefs": [
           {
             "endOffset": -1,
-            "refId": "pe:facade-nonseq-a-plain-impl:route:section:6:project_grounding_facts:otr:1",
+            "refId": "pe:facade-nonseq-a-plain-impl:route:section:6:source_signal_guidance:otr:1",
             "refusalReason": "not_found_in_original",
             "resolution": "refused",
-            "sectionId": "pe:facade-nonseq-a-plain-impl:route:section:6:project_grounding_facts",
+            "sectionId": "pe:facade-nonseq-a-plain-impl:route:section:6:source_signal_guidance",
             "startOffset": -1,
           },
         ],
@@ -1368,107 +1300,7 @@ Source Signal Guidance:
           "source_honesty",
           "no_authority_escalation",
         ],
-        "sectionId": "pe:facade-nonseq-a-plain-impl:route:section:6:project_grounding_facts",
-        "sectionKind": "project_grounding_facts",
-        "sensitivityFlags": [],
-        "slotEvidenceStatus": "present",
-        "slotObligations": [
-          "project_source_fact_slots",
-          "known_unknown_wording",
-          "source_ids_evidence_state",
-        ],
-        "sourceEvidenceStatus": "present",
-        "sourceFactIds": [
-          "section_kind:project_grounding_facts",
-        ],
-        "sourceIds": [
-          "prompt:1",
-        ],
-        "sourceKind": "source_a_user_prompt",
-        "sourceTemplateType": "prompt_enhancement_template",
-        "spanRefs": [
-          {
-            "endOffset": 823,
-            "sectionId": "pe:facade-nonseq-a-plain-impl:route:section:6:project_grounding_facts",
-            "sourceRefs": [
-              "src-a-1",
-            ],
-            "spanMappingStatus": "exact",
-            "spanRefId": "pe:facade-nonseq-a-plain-impl:route:section:6:project_grounding_facts:span:1",
-            "startOffset": 681,
-            "textStoragePolicy": "text_in_body_only",
-          },
-        ],
-        "templateType": "prompt-enhancement-template",
-        "title": "Project Grounding Facts",
-        "transformReasonCodes": [
-          "rendered_deterministically",
-          "no_original_text_quoted",
-        ],
-        "validationStatus": "valid",
-        "whyHelpReasonCodes": [
-          "section_kind:project_grounding_facts",
-        ],
-      },
-      {
-        "authorityBoundary": "no_authority_escalation",
-        "axisContributions": [
-          "practiceDepth",
-          "sectionDensity",
-          "riskDepth",
-          "groundingDepth",
-          "decompositionDepth",
-        ],
-        "baselineSourceSignalSlot": "source_signal_guidance",
-        "bodyText": "- Use the current source signal as a task constraint and convert it into direct implementation guidance.",
-        "callVisibilityMode": "deterministic",
-        "canExpandInMoreThorough": true,
-        "canGroundInMoreProjectGrounded": true,
-        "canMergeInShorter": false,
-        "confirmationPresent": false,
-        "confirmationRequired": false,
-        "contentTemplateRuntimeSeamUse": "none",
-        "depthState": "required_survivor",
-        "evidenceStatus": "present",
-        "fallbackBehavior": "none",
-        "familyId": "feature_delivery",
-        "feedbackSensitivity": "protected",
-        "groundedFactValues": [],
-        "handoffCapabilityFlags": [
-          "no_runtime_sequence_v1",
-        ],
-        "handoffFlags": [
-          "no_runtime_sequence_v1",
-        ],
-        "isEditable": true,
-        "mandatoryFloor": true,
-        "originalTextRefs": [
-          {
-            "endOffset": -1,
-            "refId": "pe:facade-nonseq-a-plain-impl:route:section:7:source_signal_guidance:otr:1",
-            "refusalReason": "not_found_in_original",
-            "resolution": "refused",
-            "sectionId": "pe:facade-nonseq-a-plain-impl:route:section:7:source_signal_guidance",
-            "startOffset": -1,
-          },
-        ],
-        "primaryIntent": "feature.fresh_implementation",
-        "privacyClass": "public_safe",
-        "promptPointRefs": [],
-        "publicCopySafe": true,
-        "publicExplanationCategory": "source_coverage",
-        "registryNamespace": "prompt-enhancement-templates",
-        "removalFeedbackPolicy": "typed_event_required",
-        "requiredSurvivor": true,
-        "requirementSourceStatus": "not_applicable",
-        "routeCandidateRefs": [
-          "pe-route-feature-fresh_implementation",
-        ],
-        "safetyFlags": [
-          "source_honesty",
-          "no_authority_escalation",
-        ],
-        "sectionId": "pe:facade-nonseq-a-plain-impl:route:section:7:source_signal_guidance",
+        "sectionId": "pe:facade-nonseq-a-plain-impl:route:section:6:source_signal_guidance",
         "sectionKind": "source_signal_guidance",
         "sensitivityFlags": [],
         "slotEvidenceStatus": "present",
@@ -1488,14 +1320,14 @@ Source Signal Guidance:
         "sourceTemplateType": "prompt_enhancement_template",
         "spanRefs": [
           {
-            "endOffset": 953,
-            "sectionId": "pe:facade-nonseq-a-plain-impl:route:section:7:source_signal_guidance",
+            "endOffset": 887,
+            "sectionId": "pe:facade-nonseq-a-plain-impl:route:section:6:source_signal_guidance",
             "sourceRefs": [
               "src-a-1",
             ],
             "spanMappingStatus": "exact",
-            "spanRefId": "pe:facade-nonseq-a-plain-impl:route:section:7:source_signal_guidance:span:1",
-            "startOffset": 825,
+            "spanRefId": "pe:facade-nonseq-a-plain-impl:route:section:6:source_signal_guidance:span:1",
+            "startOffset": 681,
             "textStoragePolicy": "text_in_body_only",
           },
         ],
@@ -1528,7 +1360,6 @@ Source Signal Guidance:
       "section_kind:approach_or_steps",
       "section_kind:acceptance_or_output_expectation",
       "section_kind:verification_or_test_plan",
-      "section_kind:project_grounding_facts",
       "guidance_fact:pe-fact-stage-0",
     ],
     "text": "My original request (verbatim):
@@ -1546,10 +1377,8 @@ Acceptance Or Output Expectation:
 Verification Or Test Plan:
 - Include the verification command, focused scenario, or regression check that should prove the change.
 
-Project Grounding Facts:
-- Ground the request in current project facts and source references without inventing missing implementation details.
-
 Source Signal Guidance:
+- The current source signal reports stage as task_breakdown → implementation.
 - Use the current source signal as a task constraint and convert it into direct implementation guidance.",
     "userDirtyState": "clean",
   },
@@ -1939,8 +1768,7 @@ Source Signal Guidance:
       "pe:facade-nonseq-a-plain-impl:route:section:3:approach_or_steps",
       "pe:facade-nonseq-a-plain-impl:route:section:4:acceptance_or_output_expectation",
       "pe:facade-nonseq-a-plain-impl:route:section:5:verification_or_test_plan",
-      "pe:facade-nonseq-a-plain-impl:route:section:6:project_grounding_facts",
-      "pe:facade-nonseq-a-plain-impl:route:section:7:source_signal_guidance",
+      "pe:facade-nonseq-a-plain-impl:route:section:6:source_signal_guidance",
     ],
     "selectedTagIds": [],
     "state": "show",
@@ -2081,10 +1909,8 @@ Acceptance Or Output Expectation:
 Verification Or Test Plan:
 - Include the verification command, focused scenario, or regression check that should prove the change.
 
-Project Grounding Facts:
-- Ground the request in current project facts and source references without inventing missing implementation details.
-
 Source Signal Guidance:
+- The current source signal reports stage as task_breakdown → implementation.
 - Use the current source signal as a task constraint and convert it into direct implementation guidance.",
     },
     "diagnostics": [
@@ -2350,47 +2176,6 @@ Source Signal Guidance:
         "callVisibilityMode": "deterministic",
         "fallbackMode": "none",
         "familyId": "feature_delivery",
-        "label": "Project Grounding Facts",
-        "preciseFeedbackAllowed": false,
-        "primaryIntent": "feature.fresh_implementation",
-        "publicSafeExplanationCategory": "source_coverage",
-        "requirementSourceStatus": "not_applicable",
-        "safetyFlags": [
-          "source_honesty",
-          "no_authority_escalation",
-        ],
-        "sectionId": "pe:facade-nonseq-a-plain-impl:route:section:6:project_grounding_facts",
-        "sectionKind": "project_grounding_facts",
-        "sensitivityFlags": [],
-        "slotEvidenceStatus": "present",
-        "sourceEvidenceStatus": "present",
-        "sourceIds": [
-          "prompt:1",
-        ],
-        "sourceKinds": [
-          "source_a_user_prompt",
-        ],
-        "spanRefs": [
-          {
-            "endOffset": 823,
-            "sectionId": "pe:facade-nonseq-a-plain-impl:route:section:6:project_grounding_facts",
-            "sourceRefs": [
-              "src-a-1",
-            ],
-            "spanMappingStatus": "exact",
-            "spanRefId": "pe:facade-nonseq-a-plain-impl:route:section:6:project_grounding_facts:span:1",
-            "startOffset": 681,
-            "textStoragePolicy": "text_in_body_only",
-          },
-        ],
-        "templateType": "prompt-enhancement-template",
-        "validationStatus": "valid",
-      },
-      {
-        "baselineSourceSignalSlot": "source_signal_guidance",
-        "callVisibilityMode": "deterministic",
-        "fallbackMode": "none",
-        "familyId": "feature_delivery",
         "label": "Source Signal Guidance",
         "preciseFeedbackAllowed": false,
         "primaryIntent": "feature.fresh_implementation",
@@ -2400,7 +2185,7 @@ Source Signal Guidance:
           "source_honesty",
           "no_authority_escalation",
         ],
-        "sectionId": "pe:facade-nonseq-a-plain-impl:route:section:7:source_signal_guidance",
+        "sectionId": "pe:facade-nonseq-a-plain-impl:route:section:6:source_signal_guidance",
         "sectionKind": "source_signal_guidance",
         "sensitivityFlags": [],
         "slotEvidenceStatus": "present",
@@ -2413,14 +2198,14 @@ Source Signal Guidance:
         ],
         "spanRefs": [
           {
-            "endOffset": 953,
-            "sectionId": "pe:facade-nonseq-a-plain-impl:route:section:7:source_signal_guidance",
+            "endOffset": 887,
+            "sectionId": "pe:facade-nonseq-a-plain-impl:route:section:6:source_signal_guidance",
             "sourceRefs": [
               "src-a-1",
             ],
             "spanMappingStatus": "exact",
-            "spanRefId": "pe:facade-nonseq-a-plain-impl:route:section:7:source_signal_guidance:span:1",
-            "startOffset": 825,
+            "spanRefId": "pe:facade-nonseq-a-plain-impl:route:section:6:source_signal_guidance:span:1",
+            "startOffset": 681,
             "textStoragePolicy": "text_in_body_only",
           },
         ],
@@ -3037,71 +2822,9 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
           "source_honesty",
           "no_authority_escalation",
         ],
-        "sectionId": "pe:facade-nonseq-b-explain:route:section:7:project_grounding_facts",
-        "sectionKind": "project_grounding_facts",
-        "sectionPlanId": "pe:facade-nonseq-b-explain:route:section-plan:7:project_grounding_facts",
-        "sensitivityFlags": [],
-        "slotEvidenceStatus": "present",
-        "slotObligations": [
-          "project_source_fact_slots",
-          "known_unknown_wording",
-          "source_ids_evidence_state",
-        ],
-        "sourceEvidenceStatus": "present",
-        "sourceIds": [
-          "prompt:1",
-        ],
-        "sourceKind": "source_a_user_prompt",
-        "sourceRefs": [
-          {
-            "confidence": "high",
-            "evidenceStatus": "present",
-            "freshness": "current",
-            "privacyClass": "public_safe",
-            "sourceAuthorization": "source_fact_only",
-            "sourceId": "prompt:1",
-            "sourceKind": "source_a_user_prompt",
-            "sourceRefId": "src-a-1",
-          },
-        ],
-        "structuredContentPartRefs": [
-          "section_kind:project_grounding_facts",
-        ],
-        "supportedActions": [
-          "use_current_body",
-          "use_original",
-          "shorter",
-          "more_thorough",
-          "more_project_grounded",
-          "apply_details",
-        ],
-        "templateId": "pe-route-issue_debug-failing_test",
-        "textDraftRef": "composer_pending:project_grounding_facts",
-        "validationStatus": "valid",
-      },
-      {
-        "baselineSourceSignalSlot": "source_signal_guidance",
-        "callVisibilityMode": "deterministic",
-        "contentTemplateRuntimeSeamUse": "none",
-        "deterministicTextBasisPolicy": "structured_parts",
-        "fallbackMode": "none",
-        "familyId": "issue_debug",
-        "handoffCapabilityFlags": [
-          "no_runtime_sequence_v1",
-        ],
-        "isEditable": true,
-        "isRequired": true,
-        "order": 8,
-        "primaryIntent": "issue_debug.failing_test",
-        "removalFeedbackPolicy": "typed_event_required",
-        "requirementSourceStatus": "not_applicable",
-        "safetyFlags": [
-          "source_honesty",
-          "no_authority_escalation",
-        ],
-        "sectionId": "pe:facade-nonseq-b-explain:route:section:8:source_signal_guidance",
+        "sectionId": "pe:facade-nonseq-b-explain:route:section:7:source_signal_guidance",
         "sectionKind": "source_signal_guidance",
-        "sectionPlanId": "pe:facade-nonseq-b-explain:route:section-plan:8:source_signal_guidance",
+        "sectionPlanId": "pe:facade-nonseq-b-explain:route:section-plan:7:source_signal_guidance",
         "sensitivityFlags": [],
         "slotEvidenceStatus": "present",
         "slotObligations": [
@@ -3178,9 +2901,9 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
     "retryCount": undefined,
     "runtimeSeamSummary": {
       "runtimePaths": [
-        "unstamped",
+        "local_read_model",
       ],
-      "totalPayloadWeight": 10,
+      "totalPayloadWeight": 19,
       "unknownRuntimePathCount": 0,
     },
     "telemetrySafeMeasurementFields": [
@@ -3219,7 +2942,6 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
       "claim:section_kind:reproduction_or_evidence",
       "claim:section_kind:narrow_fix_boundary",
       "claim:section_kind:verification_or_test_plan",
-      "claim:section_kind:project_grounding_facts",
       "claim:guidance_fact:pe-fact-stage-0",
     ],
     "composerInputPrivacyState": "approved_refs_only",
@@ -3227,7 +2949,7 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
     "composerPolicy": "deterministic_only",
     "composerRunId": "pe:facade-nonseq-b-explain:composer:default:1",
     "composerVisiblePromptContext": {
-      "boundedContextRefCount": 9,
+      "boundedContextRefCount": 8,
       "contextPolicy": "structured_refs_only_no_raw_original",
       "originalPromptVisibleLocallyOnly": true,
       "rawPromptTextExcluded": true,
@@ -3240,7 +2962,6 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
       "section_kind:reproduction_or_evidence",
       "section_kind:narrow_fix_boundary",
       "section_kind:verification_or_test_plan",
-      "section_kind:project_grounding_facts",
       "guidance_fact:pe-fact-stage-0",
     ],
     "deterministicFallback": {
@@ -3332,8 +3053,7 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
         "pe:facade-nonseq-b-explain:route:section-plan:4:reproduction_or_evidence",
         "pe:facade-nonseq-b-explain:route:section-plan:5:narrow_fix_boundary",
         "pe:facade-nonseq-b-explain:route:section-plan:6:verification_or_test_plan",
-        "pe:facade-nonseq-b-explain:route:section-plan:7:project_grounding_facts",
-        "pe:facade-nonseq-b-explain:route:section-plan:8:source_signal_guidance",
+        "pe:facade-nonseq-b-explain:route:section-plan:7:source_signal_guidance",
       ],
     },
     "instructionPrecedenceState": "generated_sections_qualify_original",
@@ -3377,10 +3097,8 @@ Narrow Fix Boundary:
 Verification Or Test Plan:
 - Include the verification command, focused scenario, or regression check that should prove the change.
 
-Project Grounding Facts:
-- Ground the request in current project facts and source references without inventing missing implementation details.
-
 Source Signal Guidance:
+- The current source signal reports stage as task_breakdown → implementation.
 - Use the current source signal as a task constraint and convert it into direct implementation guidance.",
     "routeDecisionId": "pe:facade-nonseq-b-explain:route",
     "sentPromptOrigin": "pe_baseline_generated_body",
@@ -3401,7 +3119,6 @@ Source Signal Guidance:
       "section_kind:reproduction_or_evidence",
       "section_kind:narrow_fix_boundary",
       "section_kind:verification_or_test_plan",
-      "section_kind:project_grounding_facts",
       "guidance_fact:pe-fact-stage-0",
     ],
     "strictSchemaFailureReasonCodes": [
@@ -3424,7 +3141,6 @@ Source Signal Guidance:
       "claim:section_kind:reproduction_or_evidence",
       "claim:section_kind:narrow_fix_boundary",
       "claim:section_kind:verification_or_test_plan",
-      "claim:section_kind:project_grounding_facts",
       "claim:guidance_fact:pe-fact-stage-0",
     ],
     "composerMode": "baseline_deterministic_render",
@@ -3466,10 +3182,8 @@ Narrow Fix Boundary:
 Verification Or Test Plan:
 - Include the verification command, focused scenario, or regression check that should prove the change.
 
-Project Grounding Facts:
-- Ground the request in current project facts and source references without inventing missing implementation details.
-
 Source Signal Guidance:
+- The current source signal reports stage as task_breakdown → implementation.
 - Use the current source signal as a task constraint and convert it into direct implementation guidance.",
     "routeDecisionId": "pe:facade-nonseq-b-explain:route",
     "sections": [
@@ -4063,7 +3777,8 @@ Source Signal Guidance:
           "decompositionDepth",
         ],
         "baselineSourceSignalSlot": "source_signal_guidance",
-        "bodyText": "- Ground the request in current project facts and source references without inventing missing implementation details.",
+        "bodyText": "- The current source signal reports stage as task_breakdown → implementation.
+- Use the current source signal as a task constraint and convert it into direct implementation guidance.",
         "callVisibilityMode": "deterministic",
         "canExpandInMoreThorough": true,
         "canGroundInMoreProjectGrounded": true,
@@ -4076,7 +3791,9 @@ Source Signal Guidance:
         "fallbackBehavior": "none",
         "familyId": "issue_debug",
         "feedbackSensitivity": "protected",
-        "groundedFactValues": [],
+        "groundedFactValues": [
+          "task_breakdown → implementation",
+        ],
         "handoffCapabilityFlags": [
           "no_runtime_sequence_v1",
         ],
@@ -4088,10 +3805,10 @@ Source Signal Guidance:
         "originalTextRefs": [
           {
             "endOffset": -1,
-            "refId": "pe:facade-nonseq-b-explain:route:section:7:project_grounding_facts:otr:1",
+            "refId": "pe:facade-nonseq-b-explain:route:section:7:source_signal_guidance:otr:1",
             "refusalReason": "not_found_in_original",
             "resolution": "refused",
-            "sectionId": "pe:facade-nonseq-b-explain:route:section:7:project_grounding_facts",
+            "sectionId": "pe:facade-nonseq-b-explain:route:section:7:source_signal_guidance",
             "startOffset": -1,
           },
         ],
@@ -4111,107 +3828,7 @@ Source Signal Guidance:
           "source_honesty",
           "no_authority_escalation",
         ],
-        "sectionId": "pe:facade-nonseq-b-explain:route:section:7:project_grounding_facts",
-        "sectionKind": "project_grounding_facts",
-        "sensitivityFlags": [],
-        "slotEvidenceStatus": "present",
-        "slotObligations": [
-          "project_source_fact_slots",
-          "known_unknown_wording",
-          "source_ids_evidence_state",
-        ],
-        "sourceEvidenceStatus": "present",
-        "sourceFactIds": [
-          "section_kind:project_grounding_facts",
-        ],
-        "sourceIds": [
-          "prompt:1",
-        ],
-        "sourceKind": "source_a_user_prompt",
-        "sourceTemplateType": "prompt_enhancement_template",
-        "spanRefs": [
-          {
-            "endOffset": 1044,
-            "sectionId": "pe:facade-nonseq-b-explain:route:section:7:project_grounding_facts",
-            "sourceRefs": [
-              "src-a-1",
-            ],
-            "spanMappingStatus": "exact",
-            "spanRefId": "pe:facade-nonseq-b-explain:route:section:7:project_grounding_facts:span:1",
-            "startOffset": 902,
-            "textStoragePolicy": "text_in_body_only",
-          },
-        ],
-        "templateType": "prompt-enhancement-template",
-        "title": "Project Grounding Facts",
-        "transformReasonCodes": [
-          "rendered_deterministically",
-          "no_original_text_quoted",
-        ],
-        "validationStatus": "valid",
-        "whyHelpReasonCodes": [
-          "section_kind:project_grounding_facts",
-        ],
-      },
-      {
-        "authorityBoundary": "no_authority_escalation",
-        "axisContributions": [
-          "practiceDepth",
-          "sectionDensity",
-          "riskDepth",
-          "groundingDepth",
-          "decompositionDepth",
-        ],
-        "baselineSourceSignalSlot": "source_signal_guidance",
-        "bodyText": "- Use the current source signal as a task constraint and convert it into direct implementation guidance.",
-        "callVisibilityMode": "deterministic",
-        "canExpandInMoreThorough": true,
-        "canGroundInMoreProjectGrounded": true,
-        "canMergeInShorter": false,
-        "confirmationPresent": false,
-        "confirmationRequired": false,
-        "contentTemplateRuntimeSeamUse": "none",
-        "depthState": "required_survivor",
-        "evidenceStatus": "present",
-        "fallbackBehavior": "none",
-        "familyId": "issue_debug",
-        "feedbackSensitivity": "protected",
-        "groundedFactValues": [],
-        "handoffCapabilityFlags": [
-          "no_runtime_sequence_v1",
-        ],
-        "handoffFlags": [
-          "no_runtime_sequence_v1",
-        ],
-        "isEditable": true,
-        "mandatoryFloor": true,
-        "originalTextRefs": [
-          {
-            "endOffset": -1,
-            "refId": "pe:facade-nonseq-b-explain:route:section:8:source_signal_guidance:otr:1",
-            "refusalReason": "not_found_in_original",
-            "resolution": "refused",
-            "sectionId": "pe:facade-nonseq-b-explain:route:section:8:source_signal_guidance",
-            "startOffset": -1,
-          },
-        ],
-        "primaryIntent": "issue_debug.failing_test",
-        "privacyClass": "public_safe",
-        "promptPointRefs": [],
-        "publicCopySafe": true,
-        "publicExplanationCategory": "source_coverage",
-        "registryNamespace": "prompt-enhancement-templates",
-        "removalFeedbackPolicy": "typed_event_required",
-        "requiredSurvivor": true,
-        "requirementSourceStatus": "not_applicable",
-        "routeCandidateRefs": [
-          "pe-route-issue_debug-failing_test",
-        ],
-        "safetyFlags": [
-          "source_honesty",
-          "no_authority_escalation",
-        ],
-        "sectionId": "pe:facade-nonseq-b-explain:route:section:8:source_signal_guidance",
+        "sectionId": "pe:facade-nonseq-b-explain:route:section:7:source_signal_guidance",
         "sectionKind": "source_signal_guidance",
         "sensitivityFlags": [],
         "slotEvidenceStatus": "present",
@@ -4231,14 +3848,14 @@ Source Signal Guidance:
         "sourceTemplateType": "prompt_enhancement_template",
         "spanRefs": [
           {
-            "endOffset": 1174,
-            "sectionId": "pe:facade-nonseq-b-explain:route:section:8:source_signal_guidance",
+            "endOffset": 1108,
+            "sectionId": "pe:facade-nonseq-b-explain:route:section:7:source_signal_guidance",
             "sourceRefs": [
               "src-a-1",
             ],
             "spanMappingStatus": "exact",
-            "spanRefId": "pe:facade-nonseq-b-explain:route:section:8:source_signal_guidance:span:1",
-            "startOffset": 1046,
+            "spanRefId": "pe:facade-nonseq-b-explain:route:section:7:source_signal_guidance:span:1",
+            "startOffset": 902,
             "textStoragePolicy": "text_in_body_only",
           },
         ],
@@ -4272,7 +3889,6 @@ Source Signal Guidance:
       "section_kind:reproduction_or_evidence",
       "section_kind:narrow_fix_boundary",
       "section_kind:verification_or_test_plan",
-      "section_kind:project_grounding_facts",
       "guidance_fact:pe-fact-stage-0",
     ],
     "text": "My original request (verbatim):
@@ -4293,10 +3909,8 @@ Narrow Fix Boundary:
 Verification Or Test Plan:
 - Include the verification command, focused scenario, or regression check that should prove the change.
 
-Project Grounding Facts:
-- Ground the request in current project facts and source references without inventing missing implementation details.
-
 Source Signal Guidance:
+- The current source signal reports stage as task_breakdown → implementation.
 - Use the current source signal as a task constraint and convert it into direct implementation guidance.",
     "userDirtyState": "clean",
   },
@@ -4695,8 +4309,7 @@ Source Signal Guidance:
       "pe:facade-nonseq-b-explain:route:section:4:reproduction_or_evidence",
       "pe:facade-nonseq-b-explain:route:section:5:narrow_fix_boundary",
       "pe:facade-nonseq-b-explain:route:section:6:verification_or_test_plan",
-      "pe:facade-nonseq-b-explain:route:section:7:project_grounding_facts",
-      "pe:facade-nonseq-b-explain:route:section:8:source_signal_guidance",
+      "pe:facade-nonseq-b-explain:route:section:7:source_signal_guidance",
     ],
     "selectedTagIds": [],
     "state": "show",
@@ -4840,10 +4453,8 @@ Narrow Fix Boundary:
 Verification Or Test Plan:
 - Include the verification command, focused scenario, or regression check that should prove the change.
 
-Project Grounding Facts:
-- Ground the request in current project facts and source references without inventing missing implementation details.
-
 Source Signal Guidance:
+- The current source signal reports stage as task_breakdown → implementation.
 - Use the current source signal as a task constraint and convert it into direct implementation guidance.",
     },
     "diagnostics": [
@@ -5150,47 +4761,6 @@ Source Signal Guidance:
         "callVisibilityMode": "deterministic",
         "fallbackMode": "none",
         "familyId": "issue_debug",
-        "label": "Project Grounding Facts",
-        "preciseFeedbackAllowed": false,
-        "primaryIntent": "issue_debug.failing_test",
-        "publicSafeExplanationCategory": "source_coverage",
-        "requirementSourceStatus": "not_applicable",
-        "safetyFlags": [
-          "source_honesty",
-          "no_authority_escalation",
-        ],
-        "sectionId": "pe:facade-nonseq-b-explain:route:section:7:project_grounding_facts",
-        "sectionKind": "project_grounding_facts",
-        "sensitivityFlags": [],
-        "slotEvidenceStatus": "present",
-        "sourceEvidenceStatus": "present",
-        "sourceIds": [
-          "prompt:1",
-        ],
-        "sourceKinds": [
-          "source_a_user_prompt",
-        ],
-        "spanRefs": [
-          {
-            "endOffset": 1044,
-            "sectionId": "pe:facade-nonseq-b-explain:route:section:7:project_grounding_facts",
-            "sourceRefs": [
-              "src-a-1",
-            ],
-            "spanMappingStatus": "exact",
-            "spanRefId": "pe:facade-nonseq-b-explain:route:section:7:project_grounding_facts:span:1",
-            "startOffset": 902,
-            "textStoragePolicy": "text_in_body_only",
-          },
-        ],
-        "templateType": "prompt-enhancement-template",
-        "validationStatus": "valid",
-      },
-      {
-        "baselineSourceSignalSlot": "source_signal_guidance",
-        "callVisibilityMode": "deterministic",
-        "fallbackMode": "none",
-        "familyId": "issue_debug",
         "label": "Source Signal Guidance",
         "preciseFeedbackAllowed": false,
         "primaryIntent": "issue_debug.failing_test",
@@ -5200,7 +4770,7 @@ Source Signal Guidance:
           "source_honesty",
           "no_authority_escalation",
         ],
-        "sectionId": "pe:facade-nonseq-b-explain:route:section:8:source_signal_guidance",
+        "sectionId": "pe:facade-nonseq-b-explain:route:section:7:source_signal_guidance",
         "sectionKind": "source_signal_guidance",
         "sensitivityFlags": [],
         "slotEvidenceStatus": "present",
@@ -5213,14 +4783,14 @@ Source Signal Guidance:
         ],
         "spanRefs": [
           {
-            "endOffset": 1174,
-            "sectionId": "pe:facade-nonseq-b-explain:route:section:8:source_signal_guidance",
+            "endOffset": 1108,
+            "sectionId": "pe:facade-nonseq-b-explain:route:section:7:source_signal_guidance",
             "sourceRefs": [
               "src-a-1",
             ],
             "spanMappingStatus": "exact",
-            "spanRefId": "pe:facade-nonseq-b-explain:route:section:8:source_signal_guidance:span:1",
-            "startOffset": 1046,
+            "spanRefId": "pe:facade-nonseq-b-explain:route:section:7:source_signal_guidance:span:1",
+            "startOffset": 902,
             "textStoragePolicy": "text_in_body_only",
           },
         ],
@@ -5776,71 +5346,9 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
           "source_honesty",
           "no_authority_escalation",
         ],
-        "sectionId": "pe:facade-nonseq-c-compound-shaped:route:section:6:project_grounding_facts",
-        "sectionKind": "project_grounding_facts",
-        "sectionPlanId": "pe:facade-nonseq-c-compound-shaped:route:section-plan:6:project_grounding_facts",
-        "sensitivityFlags": [],
-        "slotEvidenceStatus": "present",
-        "slotObligations": [
-          "project_source_fact_slots",
-          "known_unknown_wording",
-          "source_ids_evidence_state",
-        ],
-        "sourceEvidenceStatus": "present",
-        "sourceIds": [
-          "prompt:1",
-        ],
-        "sourceKind": "source_a_user_prompt",
-        "sourceRefs": [
-          {
-            "confidence": "high",
-            "evidenceStatus": "present",
-            "freshness": "current",
-            "privacyClass": "public_safe",
-            "sourceAuthorization": "source_fact_only",
-            "sourceId": "prompt:1",
-            "sourceKind": "source_a_user_prompt",
-            "sourceRefId": "src-a-1",
-          },
-        ],
-        "structuredContentPartRefs": [
-          "section_kind:project_grounding_facts",
-        ],
-        "supportedActions": [
-          "use_current_body",
-          "use_original",
-          "shorter",
-          "more_thorough",
-          "more_project_grounded",
-          "apply_details",
-        ],
-        "templateId": "pe-route-feature-fresh_implementation",
-        "textDraftRef": "composer_pending:project_grounding_facts",
-        "validationStatus": "valid",
-      },
-      {
-        "baselineSourceSignalSlot": "source_signal_guidance",
-        "callVisibilityMode": "deterministic",
-        "contentTemplateRuntimeSeamUse": "none",
-        "deterministicTextBasisPolicy": "structured_parts",
-        "fallbackMode": "none",
-        "familyId": "feature_delivery",
-        "handoffCapabilityFlags": [
-          "no_runtime_sequence_v1",
-        ],
-        "isEditable": true,
-        "isRequired": true,
-        "order": 7,
-        "primaryIntent": "feature.fresh_implementation",
-        "removalFeedbackPolicy": "typed_event_required",
-        "requirementSourceStatus": "not_applicable",
-        "safetyFlags": [
-          "source_honesty",
-          "no_authority_escalation",
-        ],
-        "sectionId": "pe:facade-nonseq-c-compound-shaped:route:section:7:source_signal_guidance",
+        "sectionId": "pe:facade-nonseq-c-compound-shaped:route:section:6:source_signal_guidance",
         "sectionKind": "source_signal_guidance",
-        "sectionPlanId": "pe:facade-nonseq-c-compound-shaped:route:section-plan:7:source_signal_guidance",
+        "sectionPlanId": "pe:facade-nonseq-c-compound-shaped:route:section-plan:6:source_signal_guidance",
         "sensitivityFlags": [],
         "slotEvidenceStatus": "present",
         "slotObligations": [
@@ -5917,9 +5425,9 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
     "retryCount": undefined,
     "runtimeSeamSummary": {
       "runtimePaths": [
-        "unstamped",
+        "local_read_model",
       ],
-      "totalPayloadWeight": 10,
+      "totalPayloadWeight": 19,
       "unknownRuntimePathCount": 0,
     },
     "telemetrySafeMeasurementFields": [
@@ -5957,7 +5465,6 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
       "claim:section_kind:approach_or_steps",
       "claim:section_kind:acceptance_or_output_expectation",
       "claim:section_kind:verification_or_test_plan",
-      "claim:section_kind:project_grounding_facts",
       "claim:guidance_fact:pe-fact-stage-0",
     ],
     "composerInputPrivacyState": "approved_refs_only",
@@ -5965,7 +5472,7 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
     "composerPolicy": "deterministic_only",
     "composerRunId": "pe:facade-nonseq-c-compound-shaped:composer:default:1",
     "composerVisiblePromptContext": {
-      "boundedContextRefCount": 8,
+      "boundedContextRefCount": 7,
       "contextPolicy": "structured_refs_only_no_raw_original",
       "originalPromptVisibleLocallyOnly": true,
       "rawPromptTextExcluded": true,
@@ -5977,7 +5484,6 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
       "section_kind:approach_or_steps",
       "section_kind:acceptance_or_output_expectation",
       "section_kind:verification_or_test_plan",
-      "section_kind:project_grounding_facts",
       "guidance_fact:pe-fact-stage-0",
     ],
     "deterministicFallback": {
@@ -6068,8 +5574,7 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
         "pe:facade-nonseq-c-compound-shaped:route:section-plan:3:approach_or_steps",
         "pe:facade-nonseq-c-compound-shaped:route:section-plan:4:acceptance_or_output_expectation",
         "pe:facade-nonseq-c-compound-shaped:route:section-plan:5:verification_or_test_plan",
-        "pe:facade-nonseq-c-compound-shaped:route:section-plan:6:project_grounding_facts",
-        "pe:facade-nonseq-c-compound-shaped:route:section-plan:7:source_signal_guidance",
+        "pe:facade-nonseq-c-compound-shaped:route:section-plan:6:source_signal_guidance",
       ],
     },
     "instructionPrecedenceState": "generated_sections_qualify_original",
@@ -6110,10 +5615,8 @@ Acceptance Or Output Expectation:
 Verification Or Test Plan:
 - Include the verification command, focused scenario, or regression check that should prove the change.
 
-Project Grounding Facts:
-- Ground the request in current project facts and source references without inventing missing implementation details.
-
 Source Signal Guidance:
+- The current source signal reports stage as task_breakdown → implementation.
 - Use the current source signal as a task constraint and convert it into direct implementation guidance.",
     "routeDecisionId": "pe:facade-nonseq-c-compound-shaped:route",
     "sentPromptOrigin": "pe_baseline_generated_body",
@@ -6133,7 +5636,6 @@ Source Signal Guidance:
       "section_kind:approach_or_steps",
       "section_kind:acceptance_or_output_expectation",
       "section_kind:verification_or_test_plan",
-      "section_kind:project_grounding_facts",
       "guidance_fact:pe-fact-stage-0",
     ],
     "strictSchemaFailureReasonCodes": [
@@ -6155,7 +5657,6 @@ Source Signal Guidance:
       "claim:section_kind:approach_or_steps",
       "claim:section_kind:acceptance_or_output_expectation",
       "claim:section_kind:verification_or_test_plan",
-      "claim:section_kind:project_grounding_facts",
       "claim:guidance_fact:pe-fact-stage-0",
     ],
     "composerMode": "baseline_deterministic_render",
@@ -6194,10 +5695,8 @@ Acceptance Or Output Expectation:
 Verification Or Test Plan:
 - Include the verification command, focused scenario, or regression check that should prove the change.
 
-Project Grounding Facts:
-- Ground the request in current project facts and source references without inventing missing implementation details.
-
 Source Signal Guidance:
+- The current source signal reports stage as task_breakdown → implementation.
 - Use the current source signal as a task constraint and convert it into direct implementation guidance.",
     "routeDecisionId": "pe:facade-nonseq-c-compound-shaped:route",
     "sections": [
@@ -6692,7 +6191,8 @@ Source Signal Guidance:
           "decompositionDepth",
         ],
         "baselineSourceSignalSlot": "source_signal_guidance",
-        "bodyText": "- Ground the request in current project facts and source references without inventing missing implementation details.",
+        "bodyText": "- The current source signal reports stage as task_breakdown → implementation.
+- Use the current source signal as a task constraint and convert it into direct implementation guidance.",
         "callVisibilityMode": "deterministic",
         "canExpandInMoreThorough": true,
         "canGroundInMoreProjectGrounded": true,
@@ -6705,7 +6205,9 @@ Source Signal Guidance:
         "fallbackBehavior": "none",
         "familyId": "feature_delivery",
         "feedbackSensitivity": "protected",
-        "groundedFactValues": [],
+        "groundedFactValues": [
+          "task_breakdown → implementation",
+        ],
         "handoffCapabilityFlags": [
           "no_runtime_sequence_v1",
         ],
@@ -6717,10 +6219,10 @@ Source Signal Guidance:
         "originalTextRefs": [
           {
             "endOffset": -1,
-            "refId": "pe:facade-nonseq-c-compound-shaped:route:section:6:project_grounding_facts:otr:1",
+            "refId": "pe:facade-nonseq-c-compound-shaped:route:section:6:source_signal_guidance:otr:1",
             "refusalReason": "not_found_in_original",
             "resolution": "refused",
-            "sectionId": "pe:facade-nonseq-c-compound-shaped:route:section:6:project_grounding_facts",
+            "sectionId": "pe:facade-nonseq-c-compound-shaped:route:section:6:source_signal_guidance",
             "startOffset": -1,
           },
         ],
@@ -6740,107 +6242,7 @@ Source Signal Guidance:
           "source_honesty",
           "no_authority_escalation",
         ],
-        "sectionId": "pe:facade-nonseq-c-compound-shaped:route:section:6:project_grounding_facts",
-        "sectionKind": "project_grounding_facts",
-        "sensitivityFlags": [],
-        "slotEvidenceStatus": "present",
-        "slotObligations": [
-          "project_source_fact_slots",
-          "known_unknown_wording",
-          "source_ids_evidence_state",
-        ],
-        "sourceEvidenceStatus": "present",
-        "sourceFactIds": [
-          "section_kind:project_grounding_facts",
-        ],
-        "sourceIds": [
-          "prompt:1",
-        ],
-        "sourceKind": "source_a_user_prompt",
-        "sourceTemplateType": "prompt_enhancement_template",
-        "spanRefs": [
-          {
-            "endOffset": 812,
-            "sectionId": "pe:facade-nonseq-c-compound-shaped:route:section:6:project_grounding_facts",
-            "sourceRefs": [
-              "src-a-1",
-            ],
-            "spanMappingStatus": "exact",
-            "spanRefId": "pe:facade-nonseq-c-compound-shaped:route:section:6:project_grounding_facts:span:1",
-            "startOffset": 670,
-            "textStoragePolicy": "text_in_body_only",
-          },
-        ],
-        "templateType": "prompt-enhancement-template",
-        "title": "Project Grounding Facts",
-        "transformReasonCodes": [
-          "rendered_deterministically",
-          "no_original_text_quoted",
-        ],
-        "validationStatus": "valid",
-        "whyHelpReasonCodes": [
-          "section_kind:project_grounding_facts",
-        ],
-      },
-      {
-        "authorityBoundary": "no_authority_escalation",
-        "axisContributions": [
-          "practiceDepth",
-          "sectionDensity",
-          "riskDepth",
-          "groundingDepth",
-          "decompositionDepth",
-        ],
-        "baselineSourceSignalSlot": "source_signal_guidance",
-        "bodyText": "- Use the current source signal as a task constraint and convert it into direct implementation guidance.",
-        "callVisibilityMode": "deterministic",
-        "canExpandInMoreThorough": true,
-        "canGroundInMoreProjectGrounded": true,
-        "canMergeInShorter": false,
-        "confirmationPresent": false,
-        "confirmationRequired": false,
-        "contentTemplateRuntimeSeamUse": "none",
-        "depthState": "required_survivor",
-        "evidenceStatus": "present",
-        "fallbackBehavior": "none",
-        "familyId": "feature_delivery",
-        "feedbackSensitivity": "protected",
-        "groundedFactValues": [],
-        "handoffCapabilityFlags": [
-          "no_runtime_sequence_v1",
-        ],
-        "handoffFlags": [
-          "no_runtime_sequence_v1",
-        ],
-        "isEditable": true,
-        "mandatoryFloor": true,
-        "originalTextRefs": [
-          {
-            "endOffset": -1,
-            "refId": "pe:facade-nonseq-c-compound-shaped:route:section:7:source_signal_guidance:otr:1",
-            "refusalReason": "not_found_in_original",
-            "resolution": "refused",
-            "sectionId": "pe:facade-nonseq-c-compound-shaped:route:section:7:source_signal_guidance",
-            "startOffset": -1,
-          },
-        ],
-        "primaryIntent": "feature.fresh_implementation",
-        "privacyClass": "public_safe",
-        "promptPointRefs": [],
-        "publicCopySafe": true,
-        "publicExplanationCategory": "source_coverage",
-        "registryNamespace": "prompt-enhancement-templates",
-        "removalFeedbackPolicy": "typed_event_required",
-        "requiredSurvivor": true,
-        "requirementSourceStatus": "not_applicable",
-        "routeCandidateRefs": [
-          "pe-route-feature-fresh_implementation",
-        ],
-        "safetyFlags": [
-          "source_honesty",
-          "no_authority_escalation",
-        ],
-        "sectionId": "pe:facade-nonseq-c-compound-shaped:route:section:7:source_signal_guidance",
+        "sectionId": "pe:facade-nonseq-c-compound-shaped:route:section:6:source_signal_guidance",
         "sectionKind": "source_signal_guidance",
         "sensitivityFlags": [],
         "slotEvidenceStatus": "present",
@@ -6860,14 +6262,14 @@ Source Signal Guidance:
         "sourceTemplateType": "prompt_enhancement_template",
         "spanRefs": [
           {
-            "endOffset": 942,
-            "sectionId": "pe:facade-nonseq-c-compound-shaped:route:section:7:source_signal_guidance",
+            "endOffset": 876,
+            "sectionId": "pe:facade-nonseq-c-compound-shaped:route:section:6:source_signal_guidance",
             "sourceRefs": [
               "src-a-1",
             ],
             "spanMappingStatus": "exact",
-            "spanRefId": "pe:facade-nonseq-c-compound-shaped:route:section:7:source_signal_guidance:span:1",
-            "startOffset": 814,
+            "spanRefId": "pe:facade-nonseq-c-compound-shaped:route:section:6:source_signal_guidance:span:1",
+            "startOffset": 670,
             "textStoragePolicy": "text_in_body_only",
           },
         ],
@@ -6900,7 +6302,6 @@ Source Signal Guidance:
       "section_kind:approach_or_steps",
       "section_kind:acceptance_or_output_expectation",
       "section_kind:verification_or_test_plan",
-      "section_kind:project_grounding_facts",
       "guidance_fact:pe-fact-stage-0",
     ],
     "text": "My original request (verbatim):
@@ -6918,10 +6319,8 @@ Acceptance Or Output Expectation:
 Verification Or Test Plan:
 - Include the verification command, focused scenario, or regression check that should prove the change.
 
-Project Grounding Facts:
-- Ground the request in current project facts and source references without inventing missing implementation details.
-
 Source Signal Guidance:
+- The current source signal reports stage as task_breakdown → implementation.
 - Use the current source signal as a task constraint and convert it into direct implementation guidance.",
     "userDirtyState": "clean",
   },
@@ -7311,8 +6710,7 @@ Source Signal Guidance:
       "pe:facade-nonseq-c-compound-shaped:route:section:3:approach_or_steps",
       "pe:facade-nonseq-c-compound-shaped:route:section:4:acceptance_or_output_expectation",
       "pe:facade-nonseq-c-compound-shaped:route:section:5:verification_or_test_plan",
-      "pe:facade-nonseq-c-compound-shaped:route:section:6:project_grounding_facts",
-      "pe:facade-nonseq-c-compound-shaped:route:section:7:source_signal_guidance",
+      "pe:facade-nonseq-c-compound-shaped:route:section:6:source_signal_guidance",
     ],
     "selectedTagIds": [],
     "state": "show",
@@ -7453,10 +6851,8 @@ Acceptance Or Output Expectation:
 Verification Or Test Plan:
 - Include the verification command, focused scenario, or regression check that should prove the change.
 
-Project Grounding Facts:
-- Ground the request in current project facts and source references without inventing missing implementation details.
-
 Source Signal Guidance:
+- The current source signal reports stage as task_breakdown → implementation.
 - Use the current source signal as a task constraint and convert it into direct implementation guidance.",
     },
     "diagnostics": [
@@ -7722,47 +7118,6 @@ Source Signal Guidance:
         "callVisibilityMode": "deterministic",
         "fallbackMode": "none",
         "familyId": "feature_delivery",
-        "label": "Project Grounding Facts",
-        "preciseFeedbackAllowed": false,
-        "primaryIntent": "feature.fresh_implementation",
-        "publicSafeExplanationCategory": "source_coverage",
-        "requirementSourceStatus": "not_applicable",
-        "safetyFlags": [
-          "source_honesty",
-          "no_authority_escalation",
-        ],
-        "sectionId": "pe:facade-nonseq-c-compound-shaped:route:section:6:project_grounding_facts",
-        "sectionKind": "project_grounding_facts",
-        "sensitivityFlags": [],
-        "slotEvidenceStatus": "present",
-        "sourceEvidenceStatus": "present",
-        "sourceIds": [
-          "prompt:1",
-        ],
-        "sourceKinds": [
-          "source_a_user_prompt",
-        ],
-        "spanRefs": [
-          {
-            "endOffset": 812,
-            "sectionId": "pe:facade-nonseq-c-compound-shaped:route:section:6:project_grounding_facts",
-            "sourceRefs": [
-              "src-a-1",
-            ],
-            "spanMappingStatus": "exact",
-            "spanRefId": "pe:facade-nonseq-c-compound-shaped:route:section:6:project_grounding_facts:span:1",
-            "startOffset": 670,
-            "textStoragePolicy": "text_in_body_only",
-          },
-        ],
-        "templateType": "prompt-enhancement-template",
-        "validationStatus": "valid",
-      },
-      {
-        "baselineSourceSignalSlot": "source_signal_guidance",
-        "callVisibilityMode": "deterministic",
-        "fallbackMode": "none",
-        "familyId": "feature_delivery",
         "label": "Source Signal Guidance",
         "preciseFeedbackAllowed": false,
         "primaryIntent": "feature.fresh_implementation",
@@ -7772,7 +7127,7 @@ Source Signal Guidance:
           "source_honesty",
           "no_authority_escalation",
         ],
-        "sectionId": "pe:facade-nonseq-c-compound-shaped:route:section:7:source_signal_guidance",
+        "sectionId": "pe:facade-nonseq-c-compound-shaped:route:section:6:source_signal_guidance",
         "sectionKind": "source_signal_guidance",
         "sensitivityFlags": [],
         "slotEvidenceStatus": "present",
@@ -7785,14 +7140,14 @@ Source Signal Guidance:
         ],
         "spanRefs": [
           {
-            "endOffset": 942,
-            "sectionId": "pe:facade-nonseq-c-compound-shaped:route:section:7:source_signal_guidance",
+            "endOffset": 876,
+            "sectionId": "pe:facade-nonseq-c-compound-shaped:route:section:6:source_signal_guidance",
             "sourceRefs": [
               "src-a-1",
             ],
             "spanMappingStatus": "exact",
-            "spanRefId": "pe:facade-nonseq-c-compound-shaped:route:section:7:source_signal_guidance:span:1",
-            "startOffset": 814,
+            "spanRefId": "pe:facade-nonseq-c-compound-shaped:route:section:6:source_signal_guidance:span:1",
+            "startOffset": 670,
             "textStoragePolicy": "text_in_body_only",
           },
         ],

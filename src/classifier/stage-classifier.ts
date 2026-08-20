@@ -1,5 +1,10 @@
 import OpenAI from 'openai';
 import type { Stage, ClassificationResult, UserProfile } from './types.js';
+import {
+  PROJECT_FACT_CATEGORIES_V1,
+  isPromptEnhancementProjectFactCategoryV1,
+  type PromptEnhancementProjectFactCategoryV1,
+} from '../prompt-enhancement/project-fact-applicability.js';
 import { classifyPrompt } from './PromptClassifier.js';
 import {
   PROMPT_ENHANCEMENT_PRIMARY_INTENTS,
@@ -63,12 +68,33 @@ const CAPABILITY_OBSERVATION_BLOCK = [
   '- capability.decomposition_candidate — Attach when: prompt has many points, broad scope, multiple subtasks, or likely handoff value. Do not attach when: tiny low-risk quick improvement without evidence of multiple bounded subtasks.',
   '- capability.confirmation_needed — Attach when: prompt has binary/affirmative confirmation needs, ambiguity, sensitive actions, high-risk changes, or missing acceptance facts. Do not attach as a generic "be careful" note when action-specific confirmation is required.',
   '- capability.adversarial_review — Attach when: review/deeper-inspection behavior is explicitly requested or source/risk evidence calls for challenge-oriented review. Do not force adversarial behavior into every review prompt.',
-  '- capability.project_grounding — Attach when: source facts, project facts, current files/modules/layers, established patterns, or user-requested grounding should shape the prompt. Do not fabricate files/APIs/modules, dump unbounded context, or expose raw private source text.',
+  '- capability.project_grounding — Attach when: THIS prompt cannot be answered well without stating a specific project fact, file, module, layer or established pattern — i.e. you would name at least one project-fact category below. Do NOT attach because project facts merely exist or would be vaguely nice to know: that is true of every prompt and makes the signal meaningless. Do not fabricate files/APIs/modules, dump unbounded context, or expose raw private source text.',
   '- capability.verification_required — Attach when: tests/manual checks/regression/build/CI/contract/performance/security verification must be present. Do not attach as generic filler unrelated to the route.',
   '- capability.risk_or_rollback — Attach when: migration, dependency, deployment, production, data, destructive, rollback-heavy, compatibility, secrets/config, or incident-like work is present.',
   '- capability.reproduction_or_evidence_needed — Attach when: a debug prompt LACKS reproduction steps, logs, failing test details, environment, request/response samples, screenshots, metrics, or recent-change evidence. Do not attach to feature/maintenance/review as a root-cause instruction without debug evidence, and do not invent evidence.',
   '- capability.behavior_preservation — Attach when: maintenance/refactor/cleanup/compatibility work should protect current behavior unless the user explicitly asks for behavior change. Do not attach to fresh feature work as a reason to suppress requested new behavior, and do not treat behavior-preserving maintenance as generic polish.',
   '- capability.source_signal_guidance — Attach when: a current stage/absence signal, advisory/source signal, or relevant guidance should become a section in the prompt body.',
+].join('\n');
+
+/**
+ * PROJECT-FACT APPLICABILITY — which stored project facts THIS prompt actually calls for.
+ *
+ * ⛔ Ruled by Hiren: the judgement is the model's, because applicability is a question about what a
+ * prompt is FOR, and a deterministic map cannot carry that reasoning. Same contract as every other
+ * observation here — the model observes, the registry decides — and it rides this already-parked
+ * call rather than adding one.
+ *
+ * The bar is deliberately in the instruction rather than a numeric score: the categories are few
+ * and the failure mode being fixed is over-inclusion, so "omit when unsure" is the whole rule.
+ */
+const PROJECT_FACT_APPLICABILITY_BLOCK = [
+  'PROJECT-FACT APPLICABILITY — the system stores a few facts about this project. Report in',
+  '"project_fact_candidates" ONLY the categories THIS prompt genuinely calls for: the ones whose',
+  'absence would leave the answer worse, or whose value should visibly shape how the work is done.',
+  '⛔ Omit when unsure. Naming a category because it exists, or because it is generally good',
+  'practice, is the failure this observation exists to prevent — most prompts need NONE of them,',
+  'and an empty list is the correct and common answer.',
+  ...PROJECT_FACT_CATEGORIES_V1.map((c) => `- ${c.id} (${c.label}) — serves: ${c.serves}.`),
 ].join('\n');
 
 /**
@@ -158,6 +184,8 @@ export const STAGE_CLASSIFIER_SYSTEM_PROMPT = [
   '',
   CAPABILITY_OBSERVATION_BLOCK,
   '',
+  PROJECT_FACT_APPLICABILITY_BLOCK,
+  '',
   'OUTPUT — return STRICT JSON only, no markdown, no prose:',
   '{',
   '  "stage": "<one of: Idea | PRD/Spec | Architecture | Task Breakdown | Implementation | Review/Testing | Release | Feedback Loop>",',
@@ -170,6 +198,7 @@ export const STAGE_CLASSIFIER_SYSTEM_PROMPT = [
   '  "intent_confidence": <0.0-1.0>,',
   '  "debug_evidence_present": ["<evidence form>"],',
   '  "capability_candidates": ["<capability id>"],',
+  '  "project_fact_candidates": ["<project-fact category id, or omit — empty is normal>"],',
   '  "reason": "<one sentence>"',
   '}',
   'FEEDBACK-LOOP BOUNDARY: classify Feedback Loop ONLY when the window contains explicit evidence the product is ALREADY deployed/live for real users (e.g. "its live", "deployed", "published", users actively using it). Building features FOR clients/users (a client portal, sending invoices to clients) is NOT live evidence — without it, bug reports and fixes during building are Implementation or Review/Testing, not Feedback Loop.',
@@ -214,6 +243,8 @@ export interface ParsedStageReply {
   debugEvidencePresent: readonly (typeof DEBUG_EVIDENCE_FORMS)[number][];
   /** Capability candidates whose locked attach-conditions the model observed as met. */
   capabilityCandidates: readonly PromptEnhancementCapabilityId[];
+  /** Project-fact categories THIS prompt calls for. Empty is the common, correct answer. */
+  projectFactCandidates: readonly PromptEnhancementProjectFactCategoryV1[];
   reason: string;
 }
 
@@ -232,6 +263,8 @@ export interface StageClassifierResult {
   intentConfidence: number;
   debugEvidencePresent: readonly (typeof DEBUG_EVIDENCE_FORMS)[number][];
   capabilityCandidates: readonly PromptEnhancementCapabilityId[];
+  /** Project-fact categories THIS prompt calls for. Empty is the common, correct answer. */
+  projectFactCandidates: readonly PromptEnhancementProjectFactCategoryV1[];
   reason: string;
   /** True when this result came from the local fallback (the model was unavailable). */
   degraded: boolean;
@@ -329,6 +362,11 @@ export function parseStageClassifierReply(raw: string, minConfidence = STAGE2_LL
   const capabilityCandidates = (Array.isArray(p.capability_candidates) ? p.capability_candidates : [])
     .filter((x): x is PromptEnhancementCapabilityId =>
       typeof x === 'string' && (PROMPT_ENHANCEMENT_CAPABILITIES as readonly string[]).includes(x));
+  // ⚠️ Absent parses to [] like its siblings — but downstream it must NOT be confused with an
+  // observation that ran and named nothing. The distinction is carried at the boundary, where an
+  // absent CHANNEL (no key, failed call) is undefined and fails closed.
+  const projectFactCandidates = (Array.isArray(p.project_fact_candidates) ? p.project_fact_candidates : [])
+    .filter(isPromptEnhancementProjectFactCategoryV1);
 
   return {
     stage,
@@ -341,6 +379,7 @@ export function parseStageClassifierReply(raw: string, minConfidence = STAGE2_LL
     intentConfidence,
     debugEvidencePresent,
     capabilityCandidates,
+    projectFactCandidates,
     reason: p.reason as string,
   };
 }
@@ -362,6 +401,7 @@ function toResult(parsed: ParsedStageReply): StageClassifierResult {
     intentConfidence: parsed.intentConfidence,
     debugEvidencePresent: parsed.debugEvidencePresent,
     capabilityCandidates: parsed.capabilityCandidates,
+    projectFactCandidates: parsed.projectFactCandidates,
     reason: parsed.reason,
     degraded: false,
   };
@@ -378,6 +418,7 @@ async function degrade(promptText: string): Promise<StageClassifierResult> {
     intentConfidence: 0,
     debugEvidencePresent: [],
     capabilityCandidates: [],
+    projectFactCandidates: [],
     signalsPresent: [],
     signalsAbsent: [],
     fireRecommendation: false,

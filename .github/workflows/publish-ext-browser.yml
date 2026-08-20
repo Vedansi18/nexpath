@@ -1,0 +1,159 @@
+name: Publish Nexpath Browser Extension
+
+# Builds + packages the browser extension on every run; publishes to the Chrome
+# Web Store and Firefox AMO only on a tag push (ext-v*) or a manual dispatch with
+# publish=true.
+#
+# Required repository secrets for publishing:
+#   Chrome Web Store:
+#     CHROME_EXTENSION_ID     — the published item's ID
+#     CHROME_CLIENT_ID        — OAuth client id
+#     CHROME_CLIENT_SECRET    — OAuth client secret
+#     CHROME_REFRESH_TOKEN    — OAuth refresh token
+#   Firefox AMO:
+#     AMO_JWT_ISSUER          — AMO API key (issuer)
+#     AMO_JWT_SECRET          — AMO API secret
+#
+# LESSON FROM THE VS CODE WORKFLOW (do NOT regress): a step-level `env` is NOT in
+# scope for that step's own `if:`, so guarding a step on a step-defined env SILENTLY
+# skips it. All secrets here are lifted to JOB level, and the preflight step makes
+# every skip/failure LOUD — no silent no-op publishes.
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish to stores (false = build + package artefacts only)"
+        type: boolean
+        required: true
+        default: false
+  push:
+    tags:
+      - "ext-v*"
+
+jobs:
+  # ──────────────────────────────────────────────────────────────────────────
+  # Build, test, and package both store zips. Always runs.
+  # ──────────────────────────────────────────────────────────────────────────
+  package:
+    name: Build + package
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Typecheck (extension)
+        run: npm run typecheck:ext
+
+      - name: Unit + integration tests
+        run: npm test
+
+      - name: Package store zips (clean build, version from manifest)
+        run: npm run package:ext
+
+      - name: Upload store zips
+        uses: actions/upload-artifact@v4
+        with:
+          name: store-packages
+          path: dist/store-packages/*.zip
+          if-no-files-found: error
+          retention-days: 30
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Publish — only on tag push or manual publish=true.
+  # ──────────────────────────────────────────────────────────────────────────
+  publish:
+    name: Publish to stores
+    needs: [package]
+    if: ${{ github.event_name == 'push' || inputs.publish == true }}
+    runs-on: ubuntu-22.04
+    # Secrets at JOB level so per-step `if:` guards can see them (VS Code lesson).
+    env:
+      CHROME_EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
+      CHROME_CLIENT_ID: ${{ secrets.CHROME_CLIENT_ID }}
+      CHROME_CLIENT_SECRET: ${{ secrets.CHROME_CLIENT_SECRET }}
+      CHROME_REFRESH_TOKEN: ${{ secrets.CHROME_REFRESH_TOKEN }}
+      AMO_JWT_ISSUER: ${{ secrets.AMO_JWT_ISSUER }}
+      AMO_JWT_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Download store zips
+        uses: actions/download-artifact@v4
+        with:
+          name: store-packages
+          path: dist/store-packages
+
+      - name: List artefacts
+        run: ls -la dist/store-packages/
+
+      # PREFLIGHT — make configuration LOUD. Fails the job if publishing was
+      # requested but NEITHER store is configured (a fully-broken publish), and
+      # prints a clear per-store notice/warning so a skip is never silent.
+      - name: Preflight — report which stores will publish
+        run: |
+          chrome_ok=false; firefox_ok=false
+          if [ -n "$CHROME_EXTENSION_ID" ] && [ -n "$CHROME_CLIENT_ID" ] && [ -n "$CHROME_CLIENT_SECRET" ] && [ -n "$CHROME_REFRESH_TOKEN" ]; then
+            chrome_ok=true; echo "::notice::Chrome Web Store — credentials present, WILL publish."
+          else
+            echo "::warning::Chrome Web Store — credentials missing, will SKIP (set CHROME_* secrets to enable)."
+          fi
+          if [ -n "$AMO_JWT_ISSUER" ] && [ -n "$AMO_JWT_SECRET" ]; then
+            firefox_ok=true; echo "::notice::Firefox AMO — credentials present, WILL publish."
+          else
+            echo "::warning::Firefox AMO — credentials missing, will SKIP (set AMO_JWT_* secrets to enable)."
+          fi
+          if [ "$chrome_ok" = false ] && [ "$firefox_ok" = false ]; then
+            echo "::error::Publish requested but NO store is configured — set the CHROME_* and/or AMO_JWT_* secrets."
+            exit 1
+          fi
+          echo "CHROME_OK=$chrome_ok" >> "$GITHUB_ENV"
+          echo "FIREFOX_OK=$firefox_ok" >> "$GITHUB_ENV"
+
+      - name: Publish to Chrome Web Store
+        if: ${{ env.CHROME_OK == 'true' }}
+        run: |
+          set -euo pipefail
+          ZIP=$(ls dist/store-packages/nexpath-chrome-*.zip)
+          echo "Uploading $ZIP to Chrome Web Store (item $CHROME_EXTENSION_ID)…"
+          npx --yes chrome-webstore-upload-cli@3 upload \
+            --source "$ZIP" \
+            --extension-id "$CHROME_EXTENSION_ID" \
+            --client-id "$CHROME_CLIENT_ID" \
+            --client-secret "$CHROME_CLIENT_SECRET" \
+            --refresh-token "$CHROME_REFRESH_TOKEN"
+          npx --yes chrome-webstore-upload-cli@3 publish \
+            --extension-id "$CHROME_EXTENSION_ID" \
+            --client-id "$CHROME_CLIENT_ID" \
+            --client-secret "$CHROME_CLIENT_SECRET" \
+            --refresh-token "$CHROME_REFRESH_TOKEN"
+
+      - name: Publish to Firefox AMO (listed, signed by AMO)
+        if: ${{ env.FIREFOX_OK == 'true' }}
+        run: |
+          set -euo pipefail
+          ZIP=$(ls dist/store-packages/nexpath-firefox-*.zip)
+          mkdir -p amo-src && (cd amo-src && unzip -q -o "../$ZIP")
+          echo "Submitting $ZIP to Firefox AMO (listed channel)…"
+          npx --yes web-ext@latest sign \
+            --channel listed \
+            --source-dir amo-src \
+            --api-key "$AMO_JWT_ISSUER" \
+            --api-secret "$AMO_JWT_SECRET"
+
+      - name: Summary
+        run: |
+          echo "Chrome published: ${CHROME_OK:-false}"
+          echo "Firefox published: ${FIREFOX_OK:-false}"
+          echo "Store review/ingestion can take from minutes to days."

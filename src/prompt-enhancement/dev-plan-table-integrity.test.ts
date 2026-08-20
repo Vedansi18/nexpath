@@ -81,6 +81,33 @@ describe('sub-11 dev plan — every markdown table renders as a table', () => {
     expect(bad, 'escape content pipes as \\| — backticks do NOT protect them in a table').toEqual([]);
   });
 
+  it('a bug record marked FIXED is not still described as broken in the check rows', () => {
+    // Phase-34 round 1 found §17.5 row 6 reading "FAILED FIX ... values never cross" while §17.6
+    // was marked FIXED and §17.9 judged the same row GREEN — three statements about one module,
+    // two of them stale. The check tables and the bug records are written in different phases, so
+    // nothing forced them to agree.
+    //
+    // This pins the specific pairing that broke. It is deliberately narrow: a general
+    // "no record contradicts any row" rule cannot be expressed mechanically, but this one can.
+    const text = readFileSync(PLAN, 'utf8');
+    const seventeenSix = text.slice(text.indexOf('## 17.6'), text.indexOf('## 17.7'));
+    const fixed = seventeenSix.includes('BUG RECORD (FIXED');
+    if (!fixed) return; // record re-opened: the rows are free to describe it as broken again
+
+    const rows = text.slice(text.indexOf('## 17.5'), text.indexOf('## 17.6'));
+    const rowSix = rows.split(String.fromCharCode(10))
+      .map((l) => l.replace(String.fromCharCode(13), ''))
+      .find((l) => l.startsWith('| 6 |')) ?? '';
+    expect(
+      rowSix.includes('values never cross'),
+      '§17.6 is marked FIXED but §17.5 row 6 still says the values never cross',
+    ).toBe(false);
+    expect(
+      rowSix.includes('FAILED FIX'),
+      '§17.6 is marked FIXED but §17.5 row 6 still calls it a failed fix',
+    ).toBe(false);
+  });
+
   it('the execution record still carries a row per completed phase', () => {
     // Guards the failure that started this: the table silently shrank to 13 rows and nobody could
     // tell from the source. If a future edit truncates it again, this fails rather than the record

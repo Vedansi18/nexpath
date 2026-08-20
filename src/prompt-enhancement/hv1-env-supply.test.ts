@@ -5,6 +5,7 @@ import { probeProject } from '../env/env-probe.js';
 import { resolveModeBand, ACTIVE_AGENT_ID, AGENT_CAPABILITIES } from '../env/agent-capabilities.js';
 import { corroborationTierForEnvFact, ENV_FACT_CORROBORATOR } from '../env/env-tier-promotion.js';
 import { recordEnvTrajectory } from '../env/env-trajectory.js';
+import { appendParamEvent } from '../telemetry/param-events.js';
 import { buildPromptEnhancementGroundingRefsV1 } from '../cli/commands/auto.js';
 import { mkdtempSync, writeFileSync, readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -123,15 +124,17 @@ describe('HV-1 row 1 — check-1 is about RUNNING, not existing', () => {
   });
 });
 
-describe('HV-1 row 4 — the trajectory state is WRITE-ONLY, and its listed consumer is wrong', () => {
-  // Round 3 applied round 2's caller-check to rows 4 and 5. Row 5's listed consumers are genuinely
-  // live. Row 4's are not: §46.3c lists `trajectory-credit`, which imports nothing from
-  // env-trajectory — its only export takes ParamEvent[] and its one production caller is
-  // right-good-aggregator. So the module probes the project every session, writes its state, and
-  // NOTHING reads that state.
+describe('HV-1 row 4 — the trajectory STATE is write-only; the MODULE never was', () => {
+  // ⛔ CORRECTED (round 8). This block used to be titled "...and its listed consumer is wrong",
+  // asserting that §46.3c was mistaken to name `trajectory-credit`. §46.3c was RIGHT. The check
+  // below reads the IMPORT graph, and `trajectory-credit` consumes this module by matching the
+  // `env_fact_changed:` signalKey PREFIX on the param-event lane — a coupling no import check can
+  // see. Measured at round 5: a movement raises `test_creation` from 0.667 to 1.0.
   //
-  // Pinned because HV-3 will judge whether this is a defect or dead weight, and it should judge the
-  // state that actually shipped rather than a table entry that was never true.
+  // 🔑 The assertion itself is kept, because it is TRUE and it is the distinction the whole finding
+  // turned on: the module has TWO outputs, and only ONE of them is unread. The stored baseline is
+  // flap-damping bookkeeping — internal by design, and nobody outside should read it. Reading that
+  // narrow fact as "the module feeds nothing" is what nearly got a live feature deleted.
   it('no production module reads the env-trajectory state', () => {
     const readers = sourceFilesUnder('src')
       // Exclude the two modules that DEFINE the state: env-trajectory writes it, and
@@ -488,15 +491,28 @@ describe('§46.3c — the analysis table HV-2 will read must carry HV-1\'s corre
     ).toContain('caller-check every entry, do not inherit any of them');
   });
 
-  it('each of the three wrong consumer cells is annotated', () => {
+  it('each of the consumer cells HV-1 corrected is annotated — and the one it got WRONG is annotated back', () => {
     const text = readFileSync(ANALYSIS, 'utf8');
     // row 1: a dead listed consumer, and a live one that was missing
     expect(text).toContain('runAutogenForFire');
     expect(text).toContain('engine-option-generator.ts:132');
-    // row 4: listed consumer that consumes nothing from the module
-    expect(text).toContain('NONE of its four exports touches env-trajectory');
     // row 5: a type-only import counted as a runtime consumer
     expect(text).toContain('TYPE-ONLY');
+
+    // ⛔ Row 4 was the third "correction" and it was itself WRONG. HV-1 struck `trajectory-credit`
+    // out of the consumer list on the grounds that it imports nothing from `env-trajectory` — but
+    // the coupling is a signalKey PREFIX, which no import graph can see. §46.3c was right.
+    //
+    // This assertion is inverted rather than deleted on purpose: the strikeout is the exact mistake
+    // the caller-check instruction above exists to prevent, and a deleted assertion teaches nobody.
+    expect(
+      text.includes('NONE of its four exports touches env-trajectory'),
+      'the row-4 strikeout is back — it measured the IMPORT graph, and the coupling is a string prefix',
+    ).toBe(false);
+    expect(
+      text,
+      'row 4 lost the correction of its correction — HV-2 would inherit "feeds nothing" again',
+    ).toContain('DOES consume this module');
   });
 });
 
@@ -534,5 +550,132 @@ describe('§46.3c — the PRE-FIX BASELINE must survive every annotation', () =>
   it('and the mark-do-not-erase convention is stated in the table itself', () => {
     const text = readFileSync(ANALYSIS, 'utf8');
     expect(text).toContain('THE BASELINE IS PRESERVED, NEVER OVERWRITTEN');
+  });
+});
+
+describe('§17.10 — a GREEN pipe over an EMPTY supply (HV-3 row 1)', () => {
+  // HV-2 marked row 1's checks 2/3/4 green unconditionally. They are conditional: they hold when
+  // the env-facts store is supplied, and nothing on the auto path supplies it — the only
+  // production caller of `setProjectEnvFacts` is the manual `nexpath env` command.
+  //
+  // A reader of three green checks concludes env grounding works. On a default project it produces
+  // nothing, which is exactly how this survived: the pipe is sound and the supply is absent, and
+  // the five-check protocol only asks about the pipe.
+  //
+  // This pins the DEFAULT state — no seeding, no manual command — so the row's condition cannot
+  // quietly become unconditional in either direction.
+  it('an unseeded project crosses, carries and renders NOTHING from env facts', async () => {
+    const store = await openStore(':memory:');
+    const dir = projectWithATestRunner();
+    upsertProject(store, { projectRoot: dir, name: 'x', projectType: 'app', language: 'ts', description: '', createdAt: Date.now() });
+    // ⛔ Deliberately NOT calling setProjectEnvFacts — that is the whole point.
+
+    const refs = buildPromptEnhancementGroundingRefsV1(store, dir, []);
+    expect(refs.sourceOnlyHardFactRefs, 'an unseeded project produced env refs').toEqual([]);
+    expect(Object.keys(refs.groundingEvidenceByRef ?? {}).filter((k) => k.startsWith('hard_fact:'))).toEqual([]);
+  });
+
+  it('and the auto path still has NO writer — the invariant §17.10 actually rests on', () => {
+    // ⚠️ The assertion above pins the BOUNDARY (empty store ⇒ no refs) and cannot see the auto path
+    // at all: it calls the refs builder directly. A mutation that made `runAuto` write env facts
+    // left it green — the fixture claimed to notice §17.10 closing and could not.
+    //
+    // The invariant that actually carries the record is a CALLER fact, so it is asserted as one:
+    // `setProjectEnvFacts` has exactly ONE production caller, the manual `nexpath env` command. The
+    // day the auto path gains one, §17.10 is closed and row 1 must be re-judged.
+    const callers = allTsFilesUnder('src')
+      .filter((f) => !f.endsWith('.test.ts'))
+      .filter((f) => !f.endsWith('store/env-facts.ts') && !f.endsWith('store/index.ts'))
+      .filter((f) => /setProjectEnvFacts\s*\(/.test(readFileSync(f, 'utf8')));
+    expect(
+      callers,
+      'a second writer appeared — §17.10 may be closed; re-judge row 1 rather than relaxing this',
+    ).toEqual(['src/cli/commands/env.ts']);
+  });
+
+  it('and the same project WOULD cross ten refs the moment the manual command supplies it', async () => {
+    // The contrast is the finding: one store write separates "renders nothing" from "renders ten
+    // grounded values". Nothing about the pipe needs fixing.
+    const store = await openStore(':memory:');
+    const dir = projectWithATestRunner();
+    upsertProject(store, { projectRoot: dir, name: 'x', projectType: 'app', language: 'ts', description: '', createdAt: Date.now() });
+    setProjectEnvFacts(store, dir, probeProject(dir, Date.now()).facts, Date.now());
+
+    expect(buildPromptEnhancementGroundingRefsV1(store, dir, []).sourceOnlyHardFactRefs.length).toBe(10);
+  });
+});
+
+describe('§17.11 — row 4 was RULED (wire it), and the ruling rests on a corrected measurement', () => {
+  // ⛔ These two fixtures replace the pair written in round 3, which pinned "the module runs and
+  // NOTHING reads what it writes" as the basis of a pending decision. The second half was wrong,
+  // and it was wrong in a way worth keeping visible: it asked who IMPORTS `getEnvTrajectory`,
+  // while the module's other output — an `env_fact_changed` param event — was already consumed by
+  // `trajectory-credit` through a signalKey PREFIX. No import graph can see a string prefix.
+  //
+  // So the pins below follow the DATA both ways, because that is the check that was missing.
+  it('the probe still runs on the live path — the cost side of the ruling', () => {
+    const auto = readFileSync('src/cli/commands/auto.ts', 'utf8');
+    expect(
+      /\brecordEnvTrajectory\s*\(/.test(auto),
+      'the per-session probe is gone, but §17.11 was ruled WIRE IT — the movement lane has no source now',
+    ).toBe(true);
+  });
+
+  it('and its movements still reach BOTH consumers — the score credit AND the grounding line', () => {
+    // Consumer 1 (pre-existing, and the one the "write-only" measurement missed): the credit path.
+    const credit = readFileSync('src/classifier/trajectory-credit.ts', 'utf8');
+    expect(
+      credit.includes('env_fact_changed:'),
+      'the credit path stopped matching the event key — trajectory silently stops crediting practices',
+    ).toBe(true);
+    const aggregator = readFileSync('src/classifier/right-good-aggregator.ts', 'utf8');
+    expect(
+      aggregator.includes('extractMovementCredits'),
+      'the aggregator dropped movement credit — that is a live feature, not dead weight',
+    ).toBe(true);
+
+    // Consumer 2 (the §17.11 ruling): the same events reach the grounding section as a sentence.
+    const auto = readFileSync('src/cli/commands/auto.ts', 'utf8');
+    expect(
+      auto.includes('recentEnvChangesV1'),
+      'the movement grounding lane is gone — §17.11 was ruled WIRE IT; re-open the record, do not relax this',
+    ).toBe(true);
+  });
+});
+
+describe('§17.10 — what is still missing is the VALUES, not the section (corrected round 8)', () => {
+  // §17.10 said an unseeded project has grounding that is "live, correct, and permanently empty".
+  // The §17.11 ruling made the second half false: the auto path probes every session, and since
+  // round 5 a confirmed movement crosses on its own lane and renders. The bug did not close --
+  // it NARROWED, and the difference matters to whoever picks it up. Filing "the section is
+  // always empty" against group A points at the wrong thing now.
+  //
+  // The two halves are pinned apart here so neither can be read as the other.
+  it('an unseeded project still yields NO probe VALUES, yet CAN yield a movement line', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hv1-split-'));
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'x' }));
+    const store = await openStore(join(dir, 'store.db'));
+    upsertProject(store, { projectRoot: dir, name: 'x', projectType: 'app', language: 'ts', description: '', createdAt: Date.now() });
+
+    // No `nexpath env` was ever run -- `setProjectEnvFacts` is untouched.
+    appendParamEvent(store, {
+      projectRoot: dir, sessionId: 's1', promptIndex: 0,
+      signalKey: 'env_fact_changed:has_ci_pipeline:acquired', channel: 'probe',
+      stage: 'implementation', stageConfidence: 0.9, source: 'live', ts: Date.now(),
+    });
+
+    const refs = buildPromptEnhancementGroundingRefsV1(store, dir, []);
+
+    // Half one -- STILL THE BUG. The probe's current values never reach PE without the manual command.
+    expect(
+      refs.sourceOnlyHardFactRefs,
+      'the auto path started supplying probe VALUES -- §17.10 is closed; re-judge row 1 rather than relaxing this',
+    ).toEqual([]);
+
+    // Half two -- NO LONGER TRUE of the section. A movement supplies grounding with no `nexpath env`.
+    expect(
+      refs.rightGoodWorkStyleEnvRuntimeRefs.filter((r) => r.startsWith('env_change:')),
+      'the movement lane stopped supplying an unseeded project -- §17.10 would be back to "permanently empty"',
+    ).toEqual(['env_change:has_ci_pipeline']);
   });
 });
