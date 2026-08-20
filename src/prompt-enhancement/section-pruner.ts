@@ -2,14 +2,34 @@
  * I2 — the deterministic pruner, under the LOCKED drop-criteria (§15.1).
  *
  * 🔒 The criteria are Hiren's, given 2026-08-16, and are not re-derived here:
- *   **(a)** evidence first, then relevance — a FACTLESS section drops BEFORE ranking; the model's
+ *   **(a)** evidence first, then relevance — an EMPTY section drops BEFORE ranking; the model's
  *           ordering ranks the remainder; the REGISTRY drops below-bar.
  *   **(b)** soft cap — the locked floor plus at most 2–3 extras.
  *   **(c)** slots follow their section, but no-invention state, send-policy and confirmation
  *           linkage stay on the body invisibly for the checks.
  *
+ * 🔴 **What "empty" means was CORRECTED on 2026-08-20, by measuring a real body.** It used to mean
+ * "no content-carrying fact", and stage (a) ran BEFORE the composer — so a section was judged on
+ * facts it was never going to have, at a moment when the wording that would have filled it did not
+ * exist yet. Only two section kinds have fact producers at all (`project_grounding_facts` and
+ * `source_signal_guidance`); the other nine sockets in `SECTION_KIND_BY_ACTION` are wired and
+ * unplugged. So "factless" did not mean "nothing to say" — it meant "not one of the two kinds
+ * anything produces facts for".
+ *
+ * 🔑 Measured on the sim, same scenario, before and after this pruner first landed: a six-section
+ * body carrying Approach, Acceptance and Verification — all three written from the developer's own
+ * prompt, all three factless — became a three-section body. `context_and_constraints`, factless in
+ * exactly the same way, survived only because the floor's "first required guidance" happened to
+ * reach it first. Three good sections died and a fourth lived, on ordering luck.
+ *
+ * 🔒 Empty now means **no content-carrying fact AND no surviving composer draft**. A section the
+ * model actually wrote has something to say, whether or not the registry had a fact for it.
+ *
+ * ⚠️ The evidence-before-relevance ORDER is untouched, which is what the criterion locks: whatever
+ * is empty still drops before anything is ranked, and the ordering still cannot rescue it.
+ *
  * ⛔ **The registry decides; the model only ordered** (prohibition 4). I1's observation is an input
- * to stage (b) and to nothing else: it cannot promote a factless section past stage (a), and it
+ * to stage (b) and to nothing else: it cannot promote an empty section past stage (a), and it
  * cannot touch the floor at all. An empty or absent ordering is not "rank everything last" — it
  * means no relevance signal, and the cap then falls back to the planner's own order.
  *
@@ -158,6 +178,15 @@ export function prunePromptEnhancementSectionsV1(input: {
   readonly facts: readonly PromptEnhancementGuidanceFact[];
   /** I1's ordering, most-useful-first. Empty or absent = no relevance signal. */
   readonly relevanceOrder?: readonly string[];
+  /**
+   * The sections the composer actually wrote, after the renderer's own draft validation.
+   *
+   * 🔒 The second half of stage (a)'s question (owner ruling, 2026-08-20). Absent or empty is the
+   * NO-COMPOSER path — no key, a refused reply, every test that runs without a key — and there
+   * stage (a) is facts-only exactly as it always was, so a keyless body never sprouts an empty
+   * header.
+   */
+  readonly draftedSectionIds?: ReadonlySet<string>;
 }): PromptEnhancementPruneResultV1 {
   const { sectionPlans, facts } = input;
   const relevanceOrder = input.relevanceOrder ?? [];
@@ -171,7 +200,12 @@ export function prunePromptEnhancementSectionsV1(input: {
         return fact !== undefined && factHasContentV1(fact);
       });
 
-  // ── Stage (a): evidence first. A factless section drops BEFORE anything is ranked. ──────────
+  // ── Stage (a): evidence first. An EMPTY section drops BEFORE anything is ranked. ────────────
+  //
+  // 🔒 "Empty" = no content-carrying fact AND no surviving composer draft. A section the model
+  // actually wrote is not empty just because the registry had no fact producer for its kind — and
+  // for nine of the eleven kinds, no producer exists at all.
+  const drafted = input.draftedSectionIds ?? new Set<string>();
   const carriesRequiredSurvivor = (section: PromptEnhancementSectionPlanItemV1): boolean =>
     section.structuredContentPartRefs
       .map((ref: string) => ref.replace(/^guidance_fact:/, ''))
@@ -182,7 +216,7 @@ export function prunePromptEnhancementSectionsV1(input: {
   const dropped: PromptEnhancementSectionPlanItemV1[] = [];
   for (const section of sectionPlans) {
     if (floorIds.has(section.sectionId)) { floor.push(section); continue; }
-    if (contentFactIdsFor(section).length === 0) { dropped.push(section); continue; }
+    if (contentFactIdsFor(section).length === 0 && !drafted.has(section.sectionId)) { dropped.push(section); continue; }
     evidenced.push(section);
   }
 

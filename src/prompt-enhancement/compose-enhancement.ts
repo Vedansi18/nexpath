@@ -676,6 +676,79 @@ function validatedStructuredComposerDrafts(
 }
 
 /**
+ * WHICH SECTIONS THE COMPOSER ACTUALLY WROTE — the sections whose drafts survived validation.
+ *
+ * 🔴 Exported for the I2 pruner (owner ruling, 2026-08-20). The pruner's stage (a) asks whether a
+ * section has anything to say; it used to answer with FACTS ALONE, and it asked before the composer
+ * had written a word. Measured on the sim: a body that carried Approach / Acceptance / Verification
+ * — every one of them written from the developer's own prompt, every one of them factless — came
+ * out with those three gone, while `context_and_constraints`, factless in exactly the same way,
+ * survived only because the floor happened to reach it first. That is the pruner deleting good
+ * wording on a technicality.
+ *
+ * 🔑 So the question becomes "a fact OR a draft", and this is the draft half of it. It reads the
+ * SAME validation the renderer will read — one map, one meaning (prohibition 15). Predicting the
+ * answer from the raw reply would let a draft that validation later refuses (disallowed wording,
+ * unclaimed fact ids) rescue a section that then renders empty.
+ *
+ * ⚠️ No output — the no-key path, and every test that runs without one — returns an EMPTY set, so
+ * stage (a) falls back to facts alone exactly as before. A keyless body must not sprout headers no
+ * one will fill.
+ */
+export function promptEnhancementValidatedDraftSectionIdsV1(
+  output: PromptEnhancementStructuredComposerOutputV1 | undefined,
+  sectionPlans: readonly PromptEnhancementSectionPlanItemV1[],
+  renderedFacts: readonly PromptEnhancementGuidanceFact[] = [],
+): ReadonlySet<string> {
+  return new Set(validatedStructuredComposerDrafts(output, sectionPlans, renderedFacts).draftsBySectionId.keys());
+}
+
+/**
+ * RESTRICT A COMPOSER REPLY TO THE SECTIONS THAT SURVIVED PRUNING.
+ *
+ * 🔴 Required by moving the pruner AFTER the composer (owner ruling, 2026-08-20), and it is not
+ * cosmetic. `composerClaims` is an OUTPUT-WIDE union — *"the union of every sourceFactId you used"* —
+ * and validation rejects the ENTIRE reply if any claim names a fact no surviving section carries.
+ * So pruning a drafted section without pruning its claim would discard every other draft with it and
+ * fall the whole body back to deterministic text: the pruner silently costing us the LLM wording it
+ * was only supposed to shorten.
+ *
+ * 🔴 **Scoped to the PRUNED sections by id, never to "whatever is still valid".** The first version
+ * kept only drafts naming a surviving section, which also swallowed a draft aimed at a section that
+ * never existed — a real composer fault that `partial_draft_drop` exists to report, and its test
+ * caught this immediately. Removing exactly what the registry pruned leaves every other fault to
+ * the validator that is supposed to judge it.
+ *
+ * ⚠️ The empty-claims fallback re-derives the union from the SURVIVING drafts' own `sourceFactIds`
+ * rather than inventing anything — the same definition the model was given, applied to the subset
+ * that lived. Every such id is provably in a surviving section's `structuredContentPartRefs`,
+ * because that is what admitted the draft in the first place.
+ */
+export function promptEnhancementComposerOutputForSurvivingSectionsV1(
+  output: PromptEnhancementStructuredComposerOutputV1 | undefined,
+  survivingSectionPlans: readonly PromptEnhancementSectionPlanItemV1[],
+  prunedSectionPlans: readonly PromptEnhancementSectionPlanItemV1[],
+): PromptEnhancementStructuredComposerOutputV1 | undefined {
+  if (!output || prunedSectionPlans.length === 0) return output;
+  const prunedIds = new Set(prunedSectionPlans.map((section) => section.sectionId));
+  const sectionDrafts = output.sectionDrafts.filter((draft) => !prunedIds.has(draft.sectionId));
+  if (sectionDrafts.length === output.sectionDrafts.length) return output;
+  // Only claims stranded BY THE PRUNING are withdrawn: an id a surviving section still carries stays,
+  // and an id no section ever carried stays too, so the validator still refuses it.
+  const allowed = new Set(survivingSectionPlans.flatMap((section) => section.structuredContentPartRefs));
+  const stranded = new Set(
+    prunedSectionPlans.flatMap((section) => section.structuredContentPartRefs).filter((ref) => !allowed.has(ref)),
+  );
+  const claimId = (claim: string): string => (claim.startsWith('claim:') ? claim.slice('claim:'.length) : '');
+  const kept = output.composerClaims.filter((claim) => !stranded.has(claimId(claim)));
+  const composerClaims = kept.length > 0
+    ? kept
+    : [...new Set(sectionDrafts.flatMap((draft) => draft.sourceFactIds).filter((id) => allowed.has(id)))]
+      .map((id) => `claim:${id}`);
+  return { ...output, sectionDrafts, composerClaims };
+}
+
+/**
  * Internal vocabulary that must never surface in composed wording, matched as a SUBSTRING on purpose.
  *
  * These are identifier fragments, not English, so a partial match is a real hit: `pinch` must still

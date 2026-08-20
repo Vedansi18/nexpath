@@ -68,6 +68,67 @@ describe('stage (a) — evidence first, and it runs BEFORE any ranking', () => {
     expect(result.sectionPlans.map((s) => s.sectionKind)).toContain('verification_or_test_plan');
   });
 
+  it('owner ruling 2026-08-20: a factless section the COMPOSER WROTE is not empty, and survives', () => {
+    // 🔴 The correction. Nine of the eleven section kinds have no fact producer at all, so
+    // "factless" was never a statement about whether the section had anything to say — it was a
+    // statement about which two kinds the registry happens to produce facts for. A section the
+    // model actually wrote has content, and stage (a) must see it.
+    const result = prunePromptEnhancementSectionsV1({
+      sectionPlans: [
+        section({ kind: 'original_request_or_goal' }),
+        section({ kind: 'verification_or_test_plan' }),   // no facts, and none will ever exist
+      ],
+      facts: [],
+      draftedSectionIds: new Set(['sec-verification_or_test_plan']),
+    });
+    expect(result.sectionPlans.map((s) => s.sectionKind)).toContain('verification_or_test_plan');
+    expect(result.droppedSectionIds).not.toContain('sec-verification_or_test_plan');
+  });
+
+  it('the SAME section, with no draft, still drops — the draft is what changed, not the rule', () => {
+    // The discriminating half. Identical input minus the draft: stage (a) behaves exactly as it
+    // did before, so this pair proves the new clause carries the decision rather than some other
+    // part of the pipeline having gone permissive.
+    const result = prunePromptEnhancementSectionsV1({
+      sectionPlans: [
+        section({ kind: 'original_request_or_goal' }),
+        section({ kind: 'verification_or_test_plan' }),
+      ],
+      facts: [],
+    });
+    expect(result.droppedSectionIds).toContain('sec-verification_or_test_plan');
+  });
+
+  it('the NO-COMPOSER path is untouched: an empty drafted set is facts-only, as before', () => {
+    // The no-key path — no key, a refused reply, and every test in this suite that runs without
+    // one. A keyless body must never sprout a header nobody is going to fill.
+    const result = prunePromptEnhancementSectionsV1({
+      sectionPlans: [
+        section({ kind: 'original_request_or_goal' }),
+        section({ kind: 'acceptance_or_output_expectation' }),
+      ],
+      facts: [],
+      draftedSectionIds: new Set<string>(),
+    });
+    expect(result.droppedSectionIds).toContain('sec-acceptance_or_output_expectation');
+  });
+
+  it('a draft does NOT beat the cap — it survives stage (a), then competes at stage (b) like anything else', () => {
+    // The ruling widened what counts as content. It did not widen the cap, and it did not let the
+    // model's own output promote itself past the registry's limit (prohibition 4).
+    const extras = ['verification_or_test_plan', 'acceptance_or_output_expectation', 'reproduction_or_evidence', 'behavior_preservation', 'finding_format'];
+    const result = prunePromptEnhancementSectionsV1({
+      sectionPlans: [
+        section({ kind: 'original_request_or_goal' }),
+        ...extras.map((kind) => section({ kind })),
+      ],
+      facts: [],
+      draftedSectionIds: new Set(extras.map((kind) => `sec-${kind}`)),
+    });
+    const survivingExtras = result.sectionPlans.filter((s) => s.sectionKind !== 'original_request_or_goal');
+    expect(survivingExtras).toHaveLength(PROMPT_ENHANCEMENT_PRUNE_EXTRA_CAP_V1);
+  });
+
   it('a section whose only fact carries an EMPTY value is factless', () => {
     // "Factless" is judged on group A's content test — a fact with no renderable value is a fact
     // that says nothing, and a section built only from those has nothing to render either.

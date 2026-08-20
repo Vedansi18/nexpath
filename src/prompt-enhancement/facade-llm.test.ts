@@ -322,6 +322,57 @@ describe('E4 — facade LLM composer wiring', () => {
     expect(clean.additionalDetailsTruncated).toBeUndefined();
   });
 
+  it('owner ruling 2026-08-20: the composer sees the UNPRUNED plan, and a factless section it wrote reaches the body', async () => {
+    // 🔴 The end-to-end half of the I2 placement fix, and the half no unit test can reach: the
+    // pruner's stage (a) is correct in isolation either way — what broke was WHEN it ran. Measured
+    // on the sim, a six-section body lost Approach, Acceptance and Verification, all three written
+    // from the developer's own prompt, because the pruner deleted them before the composer was
+    // asked. Only a run through the facade can prove the two now happen in the right order.
+    // 🔴 **The first version of this test was not discriminating, and a mutation probe proved it.**
+    // It drafted the FIRST factless section, which on this fixture is `test_command_output` — the
+    // first required guidance section, and therefore FLOOR. Floor is exempt from stage (a) either
+    // way, so the test passed with the fix reverted. It now drafts EVERY factless section and counts
+    // how many reach the body, which is a number the old rule cannot produce: at most ONE factless
+    // section survived it (the floor's), and the fix lets the cap's worth through.
+    process.env['OPENAI_API_KEY'] = `sk-${'x'.repeat(40)}`;
+    const wordingFor = (kind: string): string => `Model wording for ${kind}, a section with no facts at all.`;
+    let factlessKinds: readonly string[] = [];
+
+    vi.mocked(composeStructuredComposerOutputV1).mockImplementationOnce(async (input: { planning: { sectionPlans: readonly { sectionId: string; sectionKind: string; structuredContentPartRefs: readonly string[] }[] } }) => {
+      // A section with NO guidance-fact refs — the planner cites `section_kind:<kind>` when it has
+      // none, which is the state nine of the eleven kinds are permanently in.
+      const factless = input.planning.sectionPlans.filter(
+        (plan) => plan.sectionKind !== 'original_request_or_goal'
+          && plan.structuredContentPartRefs.every((ref) => ref.startsWith('section_kind:')),
+      );
+      if (factless.length === 0) return { ok: false, reason: 'no_eligible_sections' };
+      factlessKinds = factless.map((plan) => plan.sectionKind);
+      return { ok: true, output: {
+        outputId: 'test-llm-factless-output',
+        sectionDrafts: factless.map((plan) => ({
+          sectionId: plan.sectionId,
+          bodyText: wordingFor(plan.sectionKind),
+          sourceFactIds: [plan.structuredContentPartRefs[0]!],
+        })),
+        composerClaims: factless.map((plan) => `claim:${plan.structuredContentPartRefs[0]!}`),
+      } };
+    });
+
+    const result = await preparePromptEnhancement(request());
+
+    // Premise guard, asserted rather than assumed: the plan handed to the composer really did carry
+    // several factless sections. If planning ever stops producing them this fails loudly instead of
+    // passing while testing nothing.
+    expect(factlessKinds.length).toBeGreaterThan(1);
+    expect(result.disposition).toBe('show_current_body');
+    expect(result.callAndVisibilityMetadata.callVisibilityMode).toBe('llm_wording');
+
+    // The point: sections with zero facts, kept because the model actually wrote them. More than
+    // one is what makes this a real assertion — a single survivor is what the OLD rule produced.
+    const survivingFactless = factlessKinds.filter((kind) => result.currentBody.text.includes(wordingFor(kind)));
+    expect(survivingFactless.length).toBeGreaterThan(1);
+  });
+
   it('safety still runs on the composed body regardless of the LLM path (validation summary present)', async () => {
     process.env['OPENAI_API_KEY'] = `sk-${'x'.repeat(40)}`;
     const result = await preparePromptEnhancement(request());

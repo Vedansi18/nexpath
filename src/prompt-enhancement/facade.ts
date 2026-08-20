@@ -18,6 +18,8 @@ import {
 } from './contracts.js';
 import {
   composePromptEnhancementBody,
+  promptEnhancementValidatedDraftSectionIdsV1,
+  promptEnhancementComposerOutputForSurvivingSectionsV1,
   type PromptEnhancementComposeResult,
   type PromptEnhancementComposerRuntimeState,
   type PromptEnhancementStructuredComposerOutputV1,
@@ -262,29 +264,6 @@ async function prepare(
     guidanceFacts: sourceMix.renderedFacts,
   });
 
-  // ── I2: the deterministic pruner, under the LOCKED drop-criteria (§15.3) ────────────────────
-  //
-  // Placed HERE, between planning and composition, and that placement is a decision: pruning after
-  // wording would pay an LLM to write sections about to be discarded, and §15.1 bounds this to
-  // pruning inside the single editable body rather than choosing between bodies. The composer only
-  // ever sees survivors.
-  //
-  // ⛔ The registry decides. I1's ordering is an input to stage (b) and to nothing else — it cannot
-  // rescue a factless section from stage (a), and it cannot touch the floor (prohibition 18).
-  const pruned = prunePromptEnhancementSectionsV1({
-    sectionPlans: plannedSections.sectionPlans,
-    facts: plannedSections.renderedFacts ?? [],
-    relevanceOrder: request.reviewMomentContext.triggerProvenance.classifierSectionRelevanceOrder,
-  });
-  const planning = {
-    ...plannedSections,
-    sectionPlans: pruned.sectionPlans,
-    renderedFacts: pruned.facts,
-    // Criterion (c): the dropped sections' visible slots went with them; these did not.
-    inheritedSlotObligations: pruned.inheritedSlotObligations,
-    prunedSectionIds: pruned.droppedSectionIds,
-  };
-
   // E4: bounded LLM composer wording for a shown popup on the baseline compose (no
   // action). Runs for every shown popup that has a valid key, so the whole test suite
   // (no key) renders deterministically. Any failure -> undefined ->
@@ -322,7 +301,9 @@ async function prepare(
     const composerCall = await composeStructuredComposerOutputV1({
       enhancementId,
       originalPromptText: request.sourcePrompt.text,
-      planning,
+      // 🔒 The FULL plan, not the pruned one — the pruner now runs after this call and needs to know
+      // which sections the model actually wrote (owner ruling, 2026-08-20).
+      planning: plannedSections,
       // Carried straight through from the caller, which is what knows which hook this is running
       // on. Absent here means absent there, so a caller that supplies nothing keeps today's
       // behaviour exactly.
@@ -354,6 +335,48 @@ async function prepare(
     }
     // 'no_key' -> undefined: the call was genuinely not made, and that is a supported state.
   }
+
+  // ── I2: the deterministic pruner, under the LOCKED drop-criteria (§15.3) ────────────────────
+  //
+  // 🔴 **Moved here — AFTER the composer — on the owner's ruling of 2026-08-20.** It used to sit
+  // between planning and composition, so that pruning never paid for wording it would throw away.
+  // Measured on the sim, that saving cost three good sections: Approach, Acceptance and Verification
+  // were deleted before the model could write them, because stage (a) judged them on FACTS and only
+  // two section kinds have fact producers at all. The composer now sees the whole plan and the
+  // pruner judges what it wrote.
+  //
+  // ⚠️ The cost of that is real and is the point: wording is produced for sections that may still be
+  // dropped by the cap. It restores exactly the composer load carried before the pruner landed.
+  //
+  // ⛔ The registry still decides. I1's ordering is an input to stage (b) and to nothing else — it
+  // cannot rescue an empty section from stage (a), and it cannot touch the floor (prohibition 18).
+  const pruned = prunePromptEnhancementSectionsV1({
+    sectionPlans: plannedSections.sectionPlans,
+    facts: plannedSections.renderedFacts ?? [],
+    relevanceOrder: request.reviewMomentContext.triggerProvenance.classifierSectionRelevanceOrder,
+    // The renderer's OWN validation, not the raw reply: a draft it will refuse must not rescue a
+    // section that then renders empty. No composer output = empty set = facts-only, as before.
+    draftedSectionIds: promptEnhancementValidatedDraftSectionIdsV1(
+      structuredComposerOutput,
+      plannedSections.sectionPlans,
+      plannedSections.renderedFacts ?? [],
+    ),
+  });
+  const planning = {
+    ...plannedSections,
+    sectionPlans: pruned.sectionPlans,
+    renderedFacts: pruned.facts,
+    // Criterion (c): the dropped sections' visible slots went with them; these did not.
+    inheritedSlotObligations: pruned.inheritedSlotObligations,
+    prunedSectionIds: pruned.droppedSectionIds,
+  };
+  // A drafted section that the cap still dropped must take its CLAIM with it — the claims union is
+  // validated output-wide, so leaving it behind would reject every surviving draft too.
+  structuredComposerOutput = promptEnhancementComposerOutputForSurvivingSectionsV1(
+    structuredComposerOutput,
+    pruned.sectionPlans,
+    plannedSections.sectionPlans.filter((section) => pruned.droppedSectionIds.includes(section.sectionId)),
+  );
 
   const composeInput = {
     enhancementId,
