@@ -1073,6 +1073,7 @@ Source Signal Guidance:
   ],
   "disposition": "show_current_body",
   "enhancementId": "pe:facade-nonseq-a-plain-impl",
+  "floorSectionCount": 3,
   "generatedOrigin": {
     "bodyId": "pe:facade-nonseq-a-plain-impl:body",
     "bodyRevision": 1,
@@ -3025,6 +3026,7 @@ Source Signal Guidance:
   ],
   "disposition": "show_current_body",
   "enhancementId": "pe:facade-nonseq-b-explain",
+  "floorSectionCount": 3,
   "generatedOrigin": {
     "bodyId": "pe:facade-nonseq-b-explain:body",
     "bodyRevision": 1,
@@ -4921,6 +4923,7 @@ Source Signal Guidance:
   ],
   "disposition": "show_current_body",
   "enhancementId": "pe:facade-nonseq-c-compound-shaped",
+  "floorSectionCount": 3,
   "generatedOrigin": {
     "bodyId": "pe:facade-nonseq-c-compound-shaped:body",
     "bodyRevision": 1,
@@ -6103,6 +6106,7 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
   ],
   "disposition": "no_popup_not_applicable",
   "enhancementId": "pe:facade-nonseq-d-nopopup-echo",
+  "floorSectionCount": 0,
   "generatedOrigin": {
     "bodyId": "pe:facade-nonseq-d-nopopup-echo:body",
     "bodyRevision": 1,
@@ -7084,6 +7088,7 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
   ],
   "disposition": "no_popup_not_applicable",
   "enhancementId": "pe:facade-nonseq-e-short",
+  "floorSectionCount": 0,
   "generatedOrigin": {
     "bodyId": "pe:facade-nonseq-e-short:body",
     "bodyRevision": 1,

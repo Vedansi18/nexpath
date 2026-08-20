@@ -88,6 +88,16 @@ export interface PromptEnhancementPruneResultV1 {
   readonly inheritedSlotObligations: readonly string[];
   /** Criterion 5: the facts whose sections went, reason-coded rather than silently gone. */
   readonly facts: readonly PromptEnhancementGuidanceFact[];
+  /**
+   * How many surviving sections were FLOOR — i.e. exempt from the cap.
+   *
+   * 🔴 Added at phase 37 (I3), because step 4 asks whether a body exceeded floor + 3 and that
+   * question was UNANSWERABLE on a live run. The pruner computed the floor and reported only what it
+   * dropped, so a measured 8-section body could not be split into floor and extras: a legitimate
+   * floor of 5 with 3 extras and a genuine cap breach of 4 floor + 4 extras look identical from
+   * outside. §15.3c's L5010 floor-growth makes that distinction real, not theoretical.
+   */
+  readonly floorSectionCount: number;
 }
 
 /** A fact carries content when it has a renderable value — group A's own test, not a kind list. */
@@ -267,5 +277,8 @@ export function prunePromptEnhancementSectionsV1(input: {
     droppedSectionIds: dropped.map((section) => section.sectionId),
     inheritedSlotObligations: [...inherited],
     facts: reasonCoded,
+    // Counted from the SURVIVORS, not from `floor` — a floor section is by definition never dropped,
+    // so the two agree, and counting the rendered set is what a reader of the log is comparing against.
+    floorSectionCount: survivors.filter((section) => floorIds.has(section.sectionId)).length,
   };
 }

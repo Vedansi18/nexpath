@@ -369,6 +369,7 @@ async function prepare(
     // Criterion (c): the dropped sections' visible slots went with them; these did not.
     inheritedSlotObligations: pruned.inheritedSlotObligations,
     prunedSectionIds: pruned.droppedSectionIds,
+    floorSectionCount: pruned.floorSectionCount,
   };
   // A drafted section that the cap still dropped must take its CLAIM with it — the claims union is
   // validated output-wide, so leaving it behind would reject every surviving draft too.
@@ -747,6 +748,10 @@ function buildResult(
     // I2 observability — reporting-only; emitted ONLY when the pruner actually dropped something,
     // so absent and zero stay distinguishable. Phase 37's after-number reads this.
     ...((planning.prunedSectionIds ?? []).length > 0 ? { prunedSectionCount: planning.prunedSectionIds!.length } : {}),
+    // Emitted WHENEVER a body exists, not only when something was pruned: phase 37 step 4 needs the
+    // floor/extras split on every body, and a body that pruned nothing is exactly the case where
+    // "was it over the cap?" is worth asking.
+    ...(planning.floorSectionCount === undefined ? {} : { floorSectionCount: planning.floorSectionCount }),
   };
 }
 

@@ -624,3 +624,55 @@ describe('the production invariant behind the floor — measured on the PLANNER,
     expect(pruned.sectionPlans.map((s) => s.sectionKind)).toContain('risk_safety_or_confirmation');
   });
 });
+
+describe('I3 step 4 — a body\'s floor/extras split is answerable from a run', () => {
+  /**
+   * 🔴 Added at phase 37. §15.4 step 4 judges whether a body exceeded floor + 3, and that question
+   * was UNANSWERABLE on a live run: the pruner reported only what it dropped, so a legitimate floor
+   * of 5 with 3 extras and a genuine breach of 4 floor + 4 extras produced the same section count.
+   * §15.3c's L5010 floor-growth makes that distinction real rather than theoretical — a sim body
+   * measured 8 sections and could not be judged either way.
+   */
+  it('the pruner reports how many survivors were floor, and the extras respect the cap', () => {
+    const extras = ['verification_or_test_plan', 'acceptance_or_output_expectation', 'reproduction_or_evidence', 'behavior_preservation'];
+    const result = prunePromptEnhancementSectionsV1({
+      sectionPlans: [
+        section({ kind: 'original_request_or_goal' }),                                  // floor
+        section({ kind: 'context_and_constraints', isRequired: true }),                 // floor
+        section({ kind: 'source_signal_guidance' }),                                    // floor (mandatory)
+        ...extras.map((kind) => section({ kind })),
+      ],
+      facts: [],
+      draftedSectionIds: new Set(extras.map((kind) => `sec-${kind}`)),
+    });
+
+    expect(result.floorSectionCount).toBe(3);
+    // The split the log now makes readable: survivors minus floor is the extras count, and it is
+    // the cap that bounds it.
+    const extrasRendered = result.sectionPlans.length - result.floorSectionCount;
+    expect(extrasRendered).toBe(PROMPT_ENHANCEMENT_PRUNE_EXTRA_CAP_V1);
+  });
+
+  it('a GROWN floor is reported as floor, not silently counted against the cap', () => {
+    // 🔑 The case that made this necessary. An L5010 required-survivor section joins the floor, so a
+    // body legitimately renders more sections without the cap being breached. Before this field a
+    // reader could not tell that apart from a cap failure.
+    const extras = ['verification_or_test_plan', 'acceptance_or_output_expectation', 'reproduction_or_evidence'];
+    const result = prunePromptEnhancementSectionsV1({
+      sectionPlans: [
+        section({ kind: 'original_request_or_goal' }),
+        section({ kind: 'context_and_constraints', isRequired: true }),
+        section({ kind: 'source_signal_guidance' }),
+        section({ kind: 'requirement_source_state', factIds: ['survivor'] }),   // L5010 → floor
+        ...extras.map((kind) => section({ kind })),
+      ],
+      facts: [fact('survivor', 'a required survivor value', 'required_survivor')],
+      draftedSectionIds: new Set(extras.map((kind) => `sec-${kind}`)),
+    });
+
+    expect(result.floorSectionCount, 'the L5010 survivor was not counted as floor').toBe(4);
+    expect(result.sectionPlans.length - result.floorSectionCount).toBeLessThanOrEqual(
+      PROMPT_ENHANCEMENT_PRUNE_EXTRA_CAP_V1,
+    );
+  });
+});

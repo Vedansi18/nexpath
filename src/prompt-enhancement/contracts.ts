@@ -1922,6 +1922,15 @@ export interface PromptEnhancementPrepareResultV1 {
    * stay distinguishable.
    */
   prunedSectionCount?: number;
+  /**
+   * I2/I3 observability — how many of this body's sections were FLOOR (exempt from the cap).
+   *
+   * 🔴 Added at phase 37 because §15.4 step 4 judges whether a body exceeded floor + 3, and without
+   * this the split is not reconstructable from a run: a legitimate floor of 5 with 3 extras and a
+   * genuine breach of 4 floor + 4 extras produce the same section count. Emitted alongside
+   * `prunedSectionCount` so the two read together.
+   */
+  floorSectionCount?: number;
 }
 
 export type PromptEnhancementPrepareFacadeV1 = (

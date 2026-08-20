@@ -474,6 +474,8 @@ export interface PromptEnhancementSectionPlanningResult {
   inheritedSlotObligations?: readonly string[];
   /** I2: the sections the pruner dropped. Feeds the boundary log's count and phase 37's measurement. */
   prunedSectionIds?: readonly string[];
+  /** I2/I3: how many surviving sections were floor — the other half of phase 37 step 4's question. */
+  floorSectionCount?: number;
 }
 
 const SECTION_KIND_BY_ACTION: Record<PromptEnhancementSuggestedActionKind, string> = {
