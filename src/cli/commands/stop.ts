@@ -460,13 +460,13 @@ async function maybeResumeInterruptedSequenceV1(
 /**
  * Resolve the PE / MPS-1 popup cooldown (in prompts) — how many prompts to suppress NEW popups after
  * one is shown. Config `prompt_enhancement.popup_cooldown` (project-scoped first, then global),
- * default 15. 0 disables the cooldown (every eligible prompt may pop). Non-numeric / negative → default.
+ * default 7. 0 disables the cooldown (every eligible prompt may pop). Non-numeric / negative → default.
  */
 function resolvePromptEnhancementPopupCooldownV1(store: Store, projectRoot: string): number {
   const raw = getConfig(store.db, `prompt_enhancement.popup_cooldown:${projectRoot}`)
     ?? getConfig(store.db, 'prompt_enhancement.popup_cooldown');
-  const n = raw === undefined ? 15 : Number.parseInt(raw, 10);
-  return Number.isFinite(n) && n >= 0 ? n : 15;
+  const n = raw === undefined ? 7 : Number.parseInt(raw, 10);
+  return Number.isFinite(n) && n >= 0 ? n : 7;
 }
 
 /**
@@ -546,7 +546,7 @@ export async function runStop(
     if (pendingPe) {
       let decision: PromptEnhancementStopDecision;
       // Popup cooldown: after a PE / MPS-1 popup is shown, suppress NEW ones for
-      // `prompt_enhancement.popup_cooldown` prompts (default 15). The FIRST popup always shows
+      // `prompt_enhancement.popup_cooldown` prompts (default 7). The FIRST popup always shows
       // (lastPopupIndex < 0). During cooldown, consume the pending record (so it does not linger) and
       // show nothing this turn. Continuation items (MPS-2) take a different Stop path and are NOT gated.
       const popupCooldown = resolvePromptEnhancementPopupCooldownV1(store, payload.cwd);

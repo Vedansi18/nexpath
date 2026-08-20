@@ -9,6 +9,7 @@ AI coding agents make it easy to move fast. Nexpath helps reduce the chance that
 
 Within Nexpath's broader behaviour-guidance vision, Prompt Enhancement is the first feature we're introducing as a practical twist: it saves vibe coders from writing every prompt detail by hand while preserving their original intent. When a task needs more rigour, it can suggest missing development practices, verification, or confirmation steps — encouraging users to give a mature development flow the time it needs to finish.
 
+**Demo:** [Prompt Enhancement in action, on YouTube](https://youtu.be/pNejtPA5DPU)
 
 ---
 
@@ -75,15 +76,14 @@ The core interaction keeps your request and the added workflow guidance together
 
 Nexpath CLI is built for prompt capture across AI coding agents.
 
-| Agent | Status in v0.1.2 |
+| Agent | Status in v0.1.4 |
 |-------|-----------------|
 | **Claude Code** | Fully supported — end-to-end tested |
-| **Cursor** | Not yet supported — end-to-end testing planned for v0.1.3 |
-| **Windsurf** | Not yet supported — end-to-end testing planned for v0.1.3 |
-| **Cline** | Not yet supported — end-to-end testing planned for v0.1.3 |
-| **Roo Code** | Not yet supported — end-to-end testing planned for v0.1.3 |
-| **KiloCode** | Not yet supported — end-to-end testing planned for v0.1.3 |
-| **OpenCode** | Not yet supported — end-to-end testing planned for v0.1.3 |
+| **Cursor** | Not yet supported — end-to-end testing planned for v0.1.5 |
+| **Windsurf** | Not yet supported — end-to-end testing planned for v0.1.5 |
+| **Replit** | Not yet supported — end-to-end testing planned for v0.1.5 |
+| **Lovable** | Not yet supported — end-to-end testing planned for v0.1.5 |
+| **Bolt.new** | Not yet supported — end-to-end testing planned for v0.1.5 |
 
 ---
 
