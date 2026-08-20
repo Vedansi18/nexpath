@@ -711,11 +711,20 @@ const CURRENT_SOURCE_BASELINE_ROWS: readonly PromptEnhancementCurrentSourceCostC
     //   · project-fact applicability (§17.12) — ten category ids, at most a short list back;
     //   · I1 section relevance (§15.2) — an ORDERING over 14 section-kind ids, so the largest
     //     honest reply now carries 14 ids plus the four original fields.
-    // Input grew by two prefix-cached blocks (~30 lines); output by one array whose worst case is
-    // those 14 ids. 512 output tokens still covers it with room — measured against the schema, not
-    // assumed: 14 snake_case ids average ~8 tokens each, so ~112 for the ordering and the rest of
-    // the JSON well inside the cap. Raise this the moment a longer field lands, because a truncated
-    // reply degrades SILENTLY to an empty intent (the C1 failure mode).
+    // Output: 512 still covers it, MEASURED rather than assumed — 14 snake_case ids average ~8
+    // tokens each, so ~112 for the ordering plus the rest of the JSON, well inside the cap. Raise it
+    // the moment a longer field lands: a truncated reply degrades SILENTLY to an empty intent (the
+    // C1 failure mode).
+    //
+    // ⚠️ INPUT — measured 2026-08-20, and the number below is NOT what the call costs:
+    //   · system prompt, assembled: 14,405 chars ≈ 3,600 tokens (the two blocks added since C1
+    //     account for roughly 650 of that, and it is prefix-cached across calls);
+    //   · user message, a FULL 10-prompt window of ordinary-length prompts: ≈ 5,600 tokens,
+    //     which is dynamic and is what actually dominates.
+    // So a busy window totals ≈ 9,200 against the 5,000 recorded here. 🔑 The gap is mostly the
+    // WINDOW, not the prompt sections, and it predates both additions — so this row is left at its
+    // recorded value rather than re-set silently: moving a cost number is the owner's call, and the
+    // honest thing is that the measurement is written down where the row can be judged against it.
     assumedInputTokens: 5_000,
     maxOutputTokens: 512,
     timeoutMs: 12_000,

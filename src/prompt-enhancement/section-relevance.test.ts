@@ -179,3 +179,20 @@ describe('the observation reaches the request, which is the whole point of colle
     ).toEqual(['verification_or_test_plan', 'context_and_constraints']);
   });
 });
+
+describe('PE-EM-1 stays honest as the prompt grows', () => {
+  // ⛔ NOT a budget and NOT a cap — it changes no spend and gates no call. It is a DRIFT ALARM on a
+  // documented number: §11.2 banner (c) and prohibition 10 make every field addition PE-EM-1-visible,
+  // and the way that obligation actually gets missed is a prompt growing block by block while the
+  // recorded figure stays where someone left it. The threshold sits well above today's measurement
+  // so ordinary edits pass; crossing it means the row needs re-reading, not that anything is wrong.
+  it('the system prompt is still the size PE-EM-1 was measured against', () => {
+    const chars = STAGE_CLASSIFIER_SYSTEM_PROMPT.length;
+    expect(
+      chars,
+      `the classifier system prompt is now ${chars} chars (~${Math.round(chars / 4)} tokens). It was `
+      + 'measured at 14,405 (~3,600) when the PE-EM-1 row was last checked — re-measure the row in '
+      + 'cost-observability.ts and update its recorded numbers before raising this bound.',
+    ).toBeLessThan(20_000);
+  });
+});
