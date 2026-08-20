@@ -631,6 +631,22 @@ const SECTION_REQUIRED_BY_CAPABILITY: Partial<Record<PromptEnhancementCapability
 };
 
 /**
+ * Every section kind the planner can produce — DERIVED from the two maps that produce them, never
+ * a hand-kept list beside them (prohibition 15: one map, one meaning).
+ *
+ * Added for I1's relevance observation, which has to offer the model a vocabulary. A kind added to
+ * either map appears there automatically; a kind removed stops being offered. `original_request_or_goal`
+ * is included explicitly because it is planned unconditionally rather than through either map.
+ */
+export const PROMPT_ENHANCEMENT_PLANNABLE_SECTION_KINDS_V1: readonly string[] = [
+  ...new Set<string>([
+    'original_request_or_goal',
+    ...Object.values(SECTION_KIND_BY_ACTION),
+    ...Object.values(SECTION_REQUIRED_BY_CAPABILITY).filter((kind): kind is string => typeof kind === 'string'),
+  ]),
+];
+
+/**
  * The id a section may CITE for a guidance fact. One builder, because it is used
  * in two places that must agree exactly: the planner's `structuredContentPartRefs`
  * (what a draft is allowed to cite) and the composer prompt's `resolvedSourceFacts`

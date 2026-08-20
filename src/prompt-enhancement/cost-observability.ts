@@ -705,6 +705,17 @@ const CURRENT_SOURCE_BASELINE_ROWS: readonly PromptEnhancementCurrentSourceCostC
     // (parked on this SAME call — no new call exists): the system prompt grew by
     // the intent menu, the evidence ladder, and the capability conditions
     // (prefix-cached), and the output by four fields.
+    //
+    // ⚠️ TWO MORE OBSERVATIONS RIDE THIS CALL SINCE (still no new call — the PE-EM-1 obligation is
+    // that every field addition is visible here, so both are recorded rather than one):
+    //   · project-fact applicability (§17.12) — ten category ids, at most a short list back;
+    //   · I1 section relevance (§15.2) — an ORDERING over 14 section-kind ids, so the largest
+    //     honest reply now carries 14 ids plus the four original fields.
+    // Input grew by two prefix-cached blocks (~30 lines); output by one array whose worst case is
+    // those 14 ids. 512 output tokens still covers it with room — measured against the schema, not
+    // assumed: 14 snake_case ids average ~8 tokens each, so ~112 for the ordering and the rest of
+    // the JSON well inside the cap. Raise this the moment a longer field lands, because a truncated
+    // reply degrades SILENTLY to an empty intent (the C1 failure mode).
     assumedInputTokens: 5_000,
     maxOutputTokens: 512,
     timeoutMs: 12_000,

@@ -5,6 +5,10 @@ import {
   isPromptEnhancementProjectFactCategoryV1,
   type PromptEnhancementProjectFactCategoryV1,
 } from '../prompt-enhancement/project-fact-applicability.js';
+import {
+  promptEnhancementRelevanceMenuLinesV1,
+  normalizePromptEnhancementRelevanceOrderV1,
+} from '../prompt-enhancement/section-relevance.js';
 import { classifyPrompt } from './PromptClassifier.js';
 import {
   PROMPT_ENHANCEMENT_PRIMARY_INTENTS,
@@ -98,6 +102,31 @@ const PROJECT_FACT_APPLICABILITY_BLOCK = [
 ].join('\n');
 
 /**
+ * I1 — the RELEVANCE OBSERVATION (§15.2, §47.2 step 1).
+ *
+ * 🔒 *"an ORDERING, not a deletion — the model deletes nothing"*. It rides THIS already-parked
+ * call (§47.1: the decider rides the same parked classifier call; prohibition 3: no new call), as
+ * the addition C1 built its section to accept.
+ *
+ * ⚠️ The model orders section KINDS, not planned sections: this call runs BEFORE routing and
+ * planning, so no plan exists yet to rank. I2 applies the ordering to whatever is actually planned.
+ *
+ * ⛔ Nothing is decided here. The registry prunes in I2 under the LOCKED drop-criteria, where
+ * evidence is tested before relevance is even consulted — a section the model ranks last still
+ * survives if the criteria say it must.
+ */
+const RELEVANCE_OBSERVATION_BLOCK = [
+  'SECTION RELEVANCE OBSERVATION — the enhanced prompt is built from sections. Order the kinds',
+  'below by how much each would SERVE THIS PROMPT, most useful first, in "section_relevance_order".',
+  '⛔ This is an ORDERING, not a selection: do NOT omit kinds because they seem unlikely, and do not',
+  'decide what gets used — that decision is not yours. Rank what you are given and stop there.',
+  '- Rank on what the developer is trying to DO in this prompt, not on which kinds sound generally',
+  '  important. A kind that would repeat what they already said is LESS useful, not more.',
+  '- If two kinds serve equally, put the one that changes the work first.',
+  ...promptEnhancementRelevanceMenuLinesV1(),
+].join('\n');
+
+/**
  * The evidence-priority ladder, in its LOCKED ORDER. Rung 7 exists but is
  * DEFERRED — coding-agent response context is not exposed in this version, so
  * the model must never solicit or weigh it.
@@ -186,6 +215,8 @@ export const STAGE_CLASSIFIER_SYSTEM_PROMPT = [
   '',
   PROJECT_FACT_APPLICABILITY_BLOCK,
   '',
+  RELEVANCE_OBSERVATION_BLOCK,
+  '',
   'OUTPUT — return STRICT JSON only, no markdown, no prose:',
   '{',
   '  "stage": "<one of: Idea | PRD/Spec | Architecture | Task Breakdown | Implementation | Review/Testing | Release | Feedback Loop>",',
@@ -199,6 +230,7 @@ export const STAGE_CLASSIFIER_SYSTEM_PROMPT = [
   '  "debug_evidence_present": ["<evidence form>"],',
   '  "capability_candidates": ["<capability id>"],',
   '  "project_fact_candidates": ["<project-fact category id, or omit — empty is normal>"],',
+  '  "section_relevance_order": ["<section kind id, most useful first — ALL of them>"],',
   '  "reason": "<one sentence>"',
   '}',
   'FEEDBACK-LOOP BOUNDARY: classify Feedback Loop ONLY when the window contains explicit evidence the product is ALREADY deployed/live for real users (e.g. "its live", "deployed", "published", users actively using it). Building features FOR clients/users (a client portal, sending invoices to clients) is NOT live evidence — without it, bug reports and fixes during building are Implementation or Review/Testing, not Feedback Loop.',
@@ -245,6 +277,8 @@ export interface ParsedStageReply {
   capabilityCandidates: readonly PromptEnhancementCapabilityId[];
   /** Project-fact categories THIS prompt calls for. Empty is the common, correct answer. */
   projectFactCandidates: readonly PromptEnhancementProjectFactCategoryV1[];
+  /** I1: section kinds ordered most-useful-first for THIS prompt. Observation only. */
+  sectionRelevanceOrder: readonly string[];
   reason: string;
 }
 
@@ -265,6 +299,8 @@ export interface StageClassifierResult {
   capabilityCandidates: readonly PromptEnhancementCapabilityId[];
   /** Project-fact categories THIS prompt calls for. Empty is the common, correct answer. */
   projectFactCandidates: readonly PromptEnhancementProjectFactCategoryV1[];
+  /** I1: section kinds ordered most-useful-first for THIS prompt. Observation only. */
+  sectionRelevanceOrder: readonly string[];
   reason: string;
   /** True when this result came from the local fallback (the model was unavailable). */
   degraded: boolean;
@@ -367,6 +403,9 @@ export function parseStageClassifierReply(raw: string, minConfidence = STAGE2_LL
   // absent CHANNEL (no key, failed call) is undefined and fails closed.
   const projectFactCandidates = (Array.isArray(p.project_fact_candidates) ? p.project_fact_candidates : [])
     .filter(isPromptEnhancementProjectFactCategoryV1);
+  // I1: unknown kinds and repeats are dropped, order preserved — a ranking with a slip in it
+  // is still a ranking, and refusing the whole reply over one would cost the observation.
+  const sectionRelevanceOrder = normalizePromptEnhancementRelevanceOrderV1(p.section_relevance_order);
 
   return {
     stage,
@@ -380,6 +419,7 @@ export function parseStageClassifierReply(raw: string, minConfidence = STAGE2_LL
     debugEvidencePresent,
     capabilityCandidates,
     projectFactCandidates,
+    sectionRelevanceOrder,
     reason: p.reason as string,
   };
 }
@@ -402,6 +442,7 @@ function toResult(parsed: ParsedStageReply): StageClassifierResult {
     debugEvidencePresent: parsed.debugEvidencePresent,
     capabilityCandidates: parsed.capabilityCandidates,
     projectFactCandidates: parsed.projectFactCandidates,
+    sectionRelevanceOrder: parsed.sectionRelevanceOrder,
     reason: parsed.reason,
     degraded: false,
   };
@@ -419,6 +460,7 @@ async function degrade(promptText: string): Promise<StageClassifierResult> {
     debugEvidencePresent: [],
     capabilityCandidates: [],
     projectFactCandidates: [],
+    sectionRelevanceOrder: [],
     signalsPresent: [],
     signalsAbsent: [],
     fireRecommendation: false,

@@ -545,6 +545,9 @@ export function buildPromptEnhancementRequestForAuto(input: {
         // Which stored project facts THIS prompt calls for. The registry decides what to do with
         // it; an absent channel fails closed downstream rather than sending all ten facts.
         classifierProjectFactCandidates: input.stageResult.projectFactCandidates,
+        // I1: the relevance ORDERING over section kinds. Carried, not acted on — I2's registry
+        // pruner is what reads it, under the locked drop-criteria.
+        classifierSectionRelevanceOrder: input.stageResult.sectionRelevanceOrder,
         classifierDebugEvidencePresent: input.stageResult.debugEvidencePresent,
         promptStartBoundary: source.promptStartStop.hookBoundary,
         deliveryBoundary: source.promptStartStop.deliveryBoundary,

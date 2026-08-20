@@ -279,6 +279,7 @@ export interface PromptEnhancementTriggerProvenanceV1 {
    */
   classifierCapabilityCandidates?: readonly string[];
   classifierProjectFactCandidates?: readonly string[];
+  classifierSectionRelevanceOrder?: readonly string[];
   classifierDebugEvidencePresent?: readonly string[];
   promptStartBoundary: PromptStartStopSourceSnapshot['hookBoundary'];
   deliveryBoundary: PromptStartStopSourceSnapshot['deliveryBoundary'];
