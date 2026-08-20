@@ -1197,6 +1197,13 @@ export async function runAuto(
       suppressedReason: promptEnhancementBodyHasNoLlmWordingV1(preparation.result)
         ? 'deterministic_only_no_llm_wording'
         : undefined,
+      // I1 observability (prohibition 10 — no hidden runtime seams). Fixtures prove the PARSER
+      // reads `section_relevance_order`; they cannot prove the MODEL emits it, and a model that
+      // never does degrades SILENTLY to an empty ordering — I2 would then prune on evidence alone
+      // with every test green. That is C1's own recorded failure shape. Logging the count makes
+      // non-compliance readable from any ordinary run instead of needing a bespoke probe: a keyed
+      // session showing 0 here on every prompt is the model ignoring the instruction.
+      relevanceOrderCount: stageResult.sectionRelevanceOrder.length,
       sequenceShapedFallback: true,
     });
     // Phase 4 (defense-in-depth): do NOT persist an unshowable pending. A display decision of `no_popup`
