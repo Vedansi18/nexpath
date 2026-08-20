@@ -484,6 +484,17 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
       generatedSafeStatus,
       userDirtyState: action === 'apply_details' && typeof input.editedBodyText === 'string' ? 'dirty_user_edited' : 'clean',
       sections,
+      // I2 criterion (c): obligations whose section was pruned still ride the BODY. Read from the
+      // planning result the pruner wrote them to; absent (nothing pruned) leaves the field unset
+      // rather than an empty array, so "no pruning happened" and "pruning dropped nothing that
+      // survives" stay distinguishable in the record.
+      ...(((input.sectionPlanningResult as { inheritedSlotObligations?: readonly string[] })
+        .inheritedSlotObligations ?? []).length > 0
+        ? {
+          inheritedSlotObligations: (input.sectionPlanningResult as { inheritedSlotObligations?: readonly string[] })
+            .inheritedSlotObligations,
+        }
+        : {}),
     };
   const safetyValidation = validatePromptEnhancementSafety({
     currentBody,

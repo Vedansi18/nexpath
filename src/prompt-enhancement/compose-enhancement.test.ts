@@ -1511,3 +1511,48 @@ describe('de-nagging: the reproduction section names what was supplied instead o
     expect(reproText(['reproduction_steps', 'logs'])).not.toContain('Capture the failing behavior');
   });
 });
+
+describe('I2 criterion (c) — a pruned section\'s surviving obligations reach the BODY', () => {
+  /**
+   * 🔴 **The gap this closes was found at the phase-36 verification pass, and it is the exact
+   * "exists ≠ runs" shape.** The pruner had computed `inheritedSlotObligations` since it was built,
+   * and `facade.ts` carried the list onto the planning object — where NOTHING read it. Its own unit
+   * test asserted only the pruner's RETURN VALUE, so it passed while the obligations never reached a
+   * body at all.
+   *
+   * 🔒 Criterion (c): *"a dropped section takes its visible slots, but no-invention state,
+   * send-policy and confirmation linkage stay on the body invisibly for the checks."* Obligations are
+   * otherwise per-section — `safety-sendability.ts` iterates `currentBody.sections` and reads each
+   * section's own `slotObligations` — so a pruned section removed its obligations from the body with
+   * it, which is what the criterion forbids.
+   */
+  it('the composed body carries obligations the pruner rescued from dropped sections', () => {
+    const planned = planningResult();
+    const withInherited = {
+      ...planned,
+      inheritedSlotObligations: ['no_invention_state', 'send_policy_metadata'],
+    } as PromptEnhancementSectionPlanningResult;
+
+    const result = composePromptEnhancementBody({
+      enhancementId: 'enh-criterion-c-body',
+      originalPromptText: 'Fix the importCsv parser and verify the regression.',
+      sectionPlanningResult: withInherited,
+    });
+
+    expect(result.currentBody.inheritedSlotObligations).toContain('no_invention_state');
+    expect(result.currentBody.inheritedSlotObligations).toContain('send_policy_metadata');
+  });
+
+  it('a body with nothing pruned leaves the field UNSET, not an empty array', () => {
+    // The discriminating half: "no pruning happened" and "pruning rescued nothing" stay
+    // distinguishable in the record, and this also proves the assertion above is not passing
+    // because the field is populated unconditionally.
+    const result = composePromptEnhancementBody({
+      enhancementId: 'enh-criterion-c-none',
+      originalPromptText: 'Fix the importCsv parser and verify the regression.',
+      sectionPlanningResult: planningResult(),
+    });
+
+    expect(result.currentBody.inheritedSlotObligations).toBeUndefined();
+  });
+});

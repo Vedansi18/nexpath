@@ -878,6 +878,22 @@ export interface PromptEnhancementCurrentBodyV1 {
   generatedSafeStatus: PromptEnhancementValidationStatus;
   userDirtyState: 'clean' | 'dirty_user_edited' | 'unknown';
   sections: readonly PromptEnhancementSectionV1[];
+  /**
+   * I2 criterion (c): the obligations that OUTLIVED their pruned section.
+   *
+   * 🔒 *"a dropped section takes its visible slots, but no-invention state, send-policy and
+   * confirmation linkage stay on the body invisibly for the checks"* (§15.1 criterion (c)), and the
+   * phase's done-when: *"safety metadata is present on the body even when its section dropped"*.
+   *
+   * 🔴 Added at the phase-36 verification pass. The pruner had computed this list since it was
+   * built, and the facade had carried it on the planning object — where NOTHING read it. Obligations
+   * are otherwise per-section (`safety-sendability.ts` iterates `currentBody.sections` and reads
+   * each section's own `slotObligations`), so a pruned section took its obligations out of the body
+   * with it, which is exactly what the criterion forbids.
+   *
+   * ⚠️ Optional so every existing caller and fixture stays valid; absent means nothing was pruned.
+   */
+  inheritedSlotObligations?: readonly string[];
 }
 
 export interface PromptEnhancementPublicTrustCueV1 {

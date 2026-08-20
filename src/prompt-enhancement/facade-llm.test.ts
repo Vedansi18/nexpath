@@ -373,6 +373,37 @@ describe('E4 — facade LLM composer wiring', () => {
     expect(survivingFactless.length).toBeGreaterThan(1);
   });
 
+  it('L1875: a directional action never loses sections the composer had filled', async () => {
+    // 🔒 §47.1 bound: *"`Shorter` obligations survive pruning — no unsafe truncation, no removal of
+    // mandatory guidance/safety"*. Written as a REGRESSION guard for the I2 placement change: the
+    // pruner now runs after the composer, and the composer does not run on the action path, so the
+    // drafted-section set is empty there. Measured: the action body does not shrink (it gains the
+    // mandatory section). Without this, a future change to stage (a) could silently strip an action
+    // body back to its floor and no other test would notice.
+    process.env['OPENAI_API_KEY'] = `sk-${'x'.repeat(40)}`;
+    const base = await preparePromptEnhancement(request());
+    const baseKinds = base.currentBody.sections.map((s) => s.sectionKind);
+    const thorough = base.availableActions.find((entry) => entry.actionType === 'more_thorough');
+    const actionRequest = {
+      ...request(),
+      action: thorough!,
+      currentBodyBinding: {
+        currentBodyId: base.currentBody.currentBodyId,
+        bodyRevision: base.currentBody.bodyRevision,
+        validationDecisionId: base.validationDecisionId,
+        editedBodyText: base.currentBody.text,
+        actionSubmittedAtMs: 2,
+        realUserInitiated: true,
+        sectionSpanEditEvents: [],
+      },
+    } as unknown as Parameters<typeof applyPromptEnhancementAction>[0];
+    const after = await applyPromptEnhancementAction(actionRequest);
+    const afterKinds = after.currentBody.sections.map((s) => s.sectionKind);
+    expect(afterKinds.length).toBeGreaterThanOrEqual(baseKinds.length);
+    // The mandatory section is present after the action, not merely a count that happened to hold.
+    expect(afterKinds).toContain('source_signal_guidance');
+  });
+
   it('safety still runs on the composed body regardless of the LLM path (validation summary present)', async () => {
     process.env['OPENAI_API_KEY'] = `sk-${'x'.repeat(40)}`;
     const result = await preparePromptEnhancement(request());

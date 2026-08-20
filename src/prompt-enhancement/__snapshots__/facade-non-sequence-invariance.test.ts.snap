@@ -2647,6 +2647,9 @@ Source Signal Guidance:
     "effectiveLanguageState": "unknown_default",
     "generatedOriginState": "pe_generated_body",
     "generatedSafeStatus": "valid",
+    "inheritedSlotObligations": [
+      "no_invention_state",
+    ],
     "instructionPrecedenceState": "generated_sections_qualify_original",
     "languageConfidence": "unknown",
     "languagePolicy": "technical_english_default",
