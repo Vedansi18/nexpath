@@ -375,14 +375,12 @@ export async function offerSetupIfNeeded(
     : 'this editor';
   const message = isUpdate
     ? `Nexpath update available (v${staged.version}). Re-run setup for ${agentLabel}?`
-    // RC28: kept to one short line. VS Code lays a notification out as
-    // [icon][message][buttons]; once the message wraps, the buttons are pushed
-    // onto their own row and the toast reflows — which is what the tester's
-    // screenshot shows (buttons above, text below) while a second notification
-    // animated in beside it. The layout itself is VS Code's renderer, not ours
-    // (this is the plain `showInformationMessage(msg, ...buttons)` API), but a
-    // message that does not wrap gives it nothing to reflow.
-    : `Set up Nexpath for ${agentLabel}?`;
+    // The SHIPPED old-flow wording, verbatim. An RC28 draft shortened this line
+    // chasing a Windows notification-layout screenshot; that layout is VS Code's
+    // own renderer (plain `showInformationMessage(msg, ...buttons)`), the change
+    // was never requested, and the owner reverted it on 2026-08-21 — this text
+    // is not to be edited again.
+    : `Set up Nexpath for ${agentLabel} now? (you can answer the prompts in the terminal).`;
   const choice = await vscode.window.showInformationMessage(message, 'Set up', 'Later');
   if (choice === 'Set up') {
     await runSetupFlowOnce(deps, { force: isUpdate, preferExistingCli: hasGlobalCli }, log);
