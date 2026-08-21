@@ -9,6 +9,18 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
+import { getActivePendingPromptSequence } from '../../store/pending-sequences.js';
+
+// RC41 test seam: spy on the sequence peek with REAL behaviour as the default,
+// so every pre-existing test in this file still drives the real function
+// through its fake store; only the RC41 tests override per call.
+vi.mock('../../store/pending-sequences.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../store/pending-sequences.js')>();
+  return {
+    ...actual,
+    getActivePendingPromptSequence: vi.fn(actual.getActivePendingPromptSequence),
+  };
+});
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
@@ -16,6 +28,7 @@ import {
   parseStopBlockOutput,
   enrichSpawnEnvFromSessionSnapshot,
   SESSION_ENV_SNAPSHOT_FILENAME,
+  runSequenceContinuationStop,
 } from './submit-stop-decider.js';
 
 /** A fake `stop` child: emits the given stdout then exits with the given code. */
@@ -300,5 +313,65 @@ describe('⭐ RC37 — stale-sequence scrub on the no-block path', () => {
 
   it('the scrub logs what it did, under its own event name', () => {
     expect(src).toMatch(/submit_stop_decider_scrubbed_stale_sequence/);
+  });
+});
+
+/**
+ * ⭐ RC41 — the MPS continuation runner: the missing "next Stop" for hook hosts.
+ * CLI chain: block(item N) → response → Stop(stop_hook_active:true) →
+ * continuation launcher → popup → block(item N+1). Windsurf's
+ * post_cascade_response and Cursor's afterAgentResponse now invoke this runner,
+ * which runs the SAME stop and hands a block to the SAME delivery pipeline.
+ */
+describe('⭐ RC41 — runSequenceContinuationStop', () => {
+  const seqStore = (active: boolean) => ({
+    openStoreFn: (async () => ({ db: {} })) as never,
+    closeStoreFn: (() => {}) as never,
+  });
+
+  it('no active sequence ⇒ {ran:false} and NOTHING is spawned (old flow byte-identical)', async () => {
+    const spawnFn = vi.fn();
+    vi.mocked(getActivePendingPromptSequence).mockReturnValueOnce(null as never);
+    const r = await runSequenceContinuationStop('/proj', 'windsurf', {
+      spawnFn: spawnFn as never, ...seqStore(false), logEvent: () => {},
+    });
+    expect(r).toEqual({ ran: false });
+    expect(spawnFn).not.toHaveBeenCalled();
+  });
+
+  it('⭐ sends the CONTINUATION payload — stop_hook_active:true (what routes runStop to the launcher)', async () => {
+    // The child must be born AT spawn time: the runner awaits the store peek
+    // first, and a pre-made fakeChild would emit exit before listeners attach.
+    vi.mocked(getActivePendingPromptSequence).mockReturnValueOnce({ id: 1 } as never);
+    let writes: string[] = [];
+    const r = await runSequenceContinuationStop('/proj', 'cursor', {
+      spawnFn: (() => { const f = fakeChild(''); writes = f.writes; return f.child; }) as never,
+      ...seqStore(true), logEvent: () => {},
+      writeDecision: (async () => {}) as never,
+    });
+    expect(r).toEqual({ ran: true, blocked: false });
+    expect(JSON.parse(writes[0]!)).toEqual({ cwd: '/proj', hook_event_name: 'Stop', stop_hook_active: true });
+  });
+
+  it('⭐ a continuation BLOCK persists the decision for the delivery pipeline (host threaded)', async () => {
+    vi.mocked(getActivePendingPromptSequence).mockReturnValueOnce({ id: 1 } as never);
+    const writeDecision = vi.fn(async () => {});
+    const r = await runSequenceContinuationStop('/proj', 'windsurf', {
+      spawnFn: (() => fakeChild('{"decision":"block","reason":"item two body — long enough for the echo floor to apply cleanly"}\n').child) as never,
+      ...seqStore(true), logEvent: () => {},
+      writeDecision: writeDecision as never, now: () => 5_000,
+    });
+    expect(r).toEqual({ ran: true, blocked: true });
+    const rec = writeDecision.mock.calls[0][0] as Record<string, unknown>;
+    expect(rec.host).toBe('windsurf');
+    expect(rec.replacementText).toContain('item two body');
+    expect(rec.blockIssuedAt).toBe(5_000);
+    expect(rec.hookPid).toBe(process.pid);
+  });
+
+  it('a failing spawn/store can never throw out of the runner (fail-open)', async () => {
+    vi.mocked(getActivePendingPromptSequence).mockImplementationOnce(() => { throw new Error('store gone'); });
+    const r = await runSequenceContinuationStop('/proj', 'cursor', { logEvent: () => {} });
+    expect(r).toEqual({ ran: false });
   });
 });

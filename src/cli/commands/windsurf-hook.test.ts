@@ -426,3 +426,57 @@ describe('⭐ RC38 — isReplacementEcho consults the registry when the slot was
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 });
+
+/**
+ * ⭐ RC41 — the MPS continuation trigger (Windsurf half).
+ * `post_cascade_response` is this host's "response finished" — the analog of
+ * the Claude Stop that drives the CLI's continuation chain. When the switch is
+ * ON and the runner reports it ran, the hook must NOT also run `handle`
+ * (that would spawn a second stop for the same event); when it did not run,
+ * the old flow must be byte-identical.
+ */
+describe('⭐ RC41 — post_cascade_response runs the sequence continuation', () => {
+  const GATE_ENV = { NEXPATH_WINDSURF_PROMPTSUBMIT_ADVISORY: '1' };
+  const base = (over: Record<string, unknown>) => ({
+    env: { ...GATE_ENV },
+    readStdin: async () => JSON.stringify({ trajectory_id: 'traj-1' }),
+    suppressOldAdvisorySurface: async () => {},
+    checkReplacementEcho: async () => false,
+    waitForChild: async () => {},
+    raisePopup: () => {},
+    ...over,
+  });
+
+  it('⭐ runner ran ⇒ handle is NOT called (no second stop) and the hook exits 0', async () => {
+    const exits: number[] = [];
+    const handle = vi.fn(async () => ({ child: null } as never));
+    const runSequenceContinuation = vi.fn(async () => ({ ran: true, blocked: true }));
+    await runWindsurfHookAction('post_cascade_response', { project: '/proj' }, base({
+      handle, runSequenceContinuation, exit: (c: number) => { exits.push(c); },
+    }) as never);
+    expect(runSequenceContinuation).toHaveBeenCalledWith('/proj', 'windsurf');
+    expect(handle).not.toHaveBeenCalled();
+    expect(exits).toEqual([0]);
+  });
+
+  it('runner {ran:false} (no sequence) ⇒ falls through to handle — old flow untouched', async () => {
+    const exits: number[] = [];
+    const handle = vi.fn(async () => ({ child: null } as never));
+    await runWindsurfHookAction('post_cascade_response', { project: '/proj' }, base({
+      handle, runSequenceContinuation: vi.fn(async () => ({ ran: false })), exit: (c: number) => { exits.push(c); },
+    }) as never);
+    expect(handle).toHaveBeenCalledTimes(1);
+  });
+
+  it('⭐ switch OFF ⇒ the runner is never consulted (regression pin for the old flow)', async () => {
+    const handle = vi.fn(async () => ({ child: null } as never));
+    const runSequenceContinuation = vi.fn(async () => ({ ran: true }));
+    await runWindsurfHookAction('post_cascade_response', { project: '/proj' }, {
+      env: {}, handle, runSequenceContinuation,
+      checkReplacementEcho: async () => false, waitForChild: async () => {},
+      raisePopup: () => {}, exit: () => {},
+    } as never);
+    expect(runSequenceContinuation).not.toHaveBeenCalled();
+    expect(handle).toHaveBeenCalledTimes(1);
+  });
+});

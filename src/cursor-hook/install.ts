@@ -80,18 +80,20 @@ export function isValidCursorHooksVersion(v: unknown): v is number {
 /**
  * The events we register.
  *
- * **Only `beforeSubmitPrompt` is listed, because only it is EVIDENCED.** The
- * analysis §4.1 measured it directly (default timeout logged verbatim, fail-open
- * at 60.002 s, orphaned process, `continue:false` blocks). No post-response
- * Cursor event name has been measured — Windsurf's `post_cascade_response` has no
- * confirmed Cursor counterpart in our evidence.
+ * `beforeSubmitPrompt` is the submit interception (measured directly: default
+ * timeout, fail-open at 60.002s, orphaned process, `continue:false` blocks).
  *
- * An invented event name would be written into a real user's config and silently
- * never fire, so the post-response event stays **unregistered until the live
- * `getCommands`/hook sweep names it**. The array is iterated everywhere, so
- * adding it later is a one-line change.
+ * RC41 (2026-08-21): `afterAgentResponse` — Cursor's "response finished" hook
+ * from its 2026-07 hook batch (`afterAgentResponse, afterAgentThought, …` per
+ * the platform research) — is the honest analog of the Claude Stop that drives
+ * the CLI's MPS continuation chain. Registered so the continuation popup can
+ * fire after each item's response, exactly like the CLI. The original caution
+ * here ("stays unregistered until a live sweep names it") is retired the same
+ * way it was written: the registration is verified against THIS machine's live
+ * Cursor at ship time (its own hooks log must list the step as loaded — an
+ * unknown step name must not appear and must not break the file's parse).
  */
-export const CURSOR_HOOK_EVENTS = ['beforeSubmitPrompt'] as const;
+export const CURSOR_HOOK_EVENTS = ['beforeSubmitPrompt', 'afterAgentResponse'] as const;
 export type CursorHookEvent = (typeof CURSOR_HOOK_EVENTS)[number];
 
 export interface CursorHookEntry {
@@ -178,6 +180,11 @@ export function buildCursorHookEntry(
 export function buildCursorHooksConfig(cliPath: string): Record<CursorHookEvent, CursorHookEntry[]> {
   return {
     beforeSubmitPrompt: [buildCursorHookEntry(cliPath, 'beforeSubmitPrompt')],
+    // RC41: the continuation trigger. Its popup waits on a HUMAN decision, so
+    // it carries a longer timeout (SECONDS — Cursor multiplies by 1000); the
+    // measured default (60s) would cut a thinking user off, and Cursor fails
+    // open + orphans on timeout (R2), so the popup would linger headless.
+    afterAgentResponse: [{ ...buildCursorHookEntry(cliPath, 'afterAgentResponse'), timeout: 600 }],
   };
 }
 

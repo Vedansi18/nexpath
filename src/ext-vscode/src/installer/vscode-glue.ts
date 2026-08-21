@@ -202,6 +202,12 @@ function buildDeps(context: vscode.ExtensionContext, log: Logger): SetupFlowDeps
           if (!raw.includes('"version"')) return false;
           // Cursor has only one command field, same shape on every OS.
           if (!verifyCommandCurrent(raw, 'cursor-hook', cliEntry, 'command', '"')) return false;
+          // RC41: the MPS continuation trigger needs the `afterAgentResponse`
+          // registration. An older install's file (beforeSubmitPrompt only)
+          // would verify forever and never gain it — require it here so
+          // existing installs self-heal ONCE onto the new event. (Duplicated
+          // literal across the G-ROOTDIR wall; pinned by test on both sides.)
+          if (!raw.includes('afterAgentResponse')) return false;
           // RC34: on Windows, ALSO require the project-level `.cursor/hooks.json`
           // (same rule the Windsurf win32 branch already applies to its workspace
           // hook). Every Windows round showed the user-level file verifying and

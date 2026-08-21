@@ -51,12 +51,23 @@ describe('failClosed stays at its default (A3)', () => {
   });
 });
 
-describe('only EVIDENCED events are registered', () => {
-  it('registers beforeSubmitPrompt and nothing invented', () => {
-    // An unmeasured event name would be written into a real user's config and
-    // silently never fire.
-    expect([...CURSOR_HOOK_EVENTS]).toEqual(['beforeSubmitPrompt']);
-    expect(Object.keys(buildCursorHooksConfig(CLI))).toEqual(['beforeSubmitPrompt']);
+describe('registered events (RC41)', () => {
+  it('registers beforeSubmitPrompt + afterAgentResponse and nothing else', () => {
+    // RC41: `afterAgentResponse` is Cursor's response-finished hook — the
+    // continuation trigger for the MPS chain (the CLI's next-Stop analog).
+    // Verified against the live Cursor at ship time (its hooks log must list
+    // the step as loaded). Anything beyond these two is still invented.
+    expect([...CURSOR_HOOK_EVENTS]).toEqual(['beforeSubmitPrompt', 'afterAgentResponse']);
+    expect(Object.keys(buildCursorHooksConfig(CLI))).toEqual(['beforeSubmitPrompt', 'afterAgentResponse']);
+  });
+
+  it('⭐ RC41 — the continuation entry carries the LONG timeout (600s, human-wait popup)', () => {
+    const cfg = buildCursorHooksConfig(CLI);
+    expect(cfg.afterAgentResponse[0].timeout).toBe(600);
+    // The submit entry keeps its measured 120s — unchanged.
+    expect(cfg.beforeSubmitPrompt[0].timeout).toBe(120);
+    // Both commands carry the event name they serve.
+    expect(cfg.afterAgentResponse[0].command).toContain('cursor-hook afterAgentResponse');
   });
 });
 

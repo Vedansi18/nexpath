@@ -31,6 +31,7 @@ import { createHoldBudget, type HoldBudget } from './submit-hold-budget.js';
 import { buildStopDrivenPromptSubmitDecider } from './submit-stop-decider.js';
 import { spawnAuto } from '../../windsurf-hook/spawn.js';
 import { isSubmitAdvisoryEnabledForHost } from './submit-flow-config.js';
+import { runSequenceContinuationStop } from './submit-stop-decider.js';
 import { bringPopupToFront } from '../../windsurf-hook/foreground.js';
 import { log } from '../../logger.js';
 import { readFileSync } from 'node:fs';
@@ -170,6 +171,8 @@ export const CURSOR_CONTINUE: CursorHookResponse = { continue: true };
 
 export interface CursorHookActionDeps {
   readStdin?: () => Promise<string>;
+  /** RC41 seam: injected in tests; defaults to the real continuation runner. */
+  runSequenceContinuation?: (projectRoot: string, host: 'windsurf' | 'cursor') => Promise<{ ran: boolean; blocked?: boolean }>;
   /** Decides whether to block. Defaults to "never" so H5 alone is inert. */
   decide?: (payload: CursorHookPayload) => Promise<'allow' | 'block'>;
   /** Overrides the block card text; defaults to CURSOR_BLOCK_USER_MESSAGE. */
@@ -260,6 +263,38 @@ export async function runCursorHookAction(
 
   try {
     logEvent('info', 'cursor_hook_invoked', { event });
+    // ── RC41: the MPS continuation trigger (Cursor half) ─────────────────────
+    // `afterAgentResponse` is Cursor's "response finished" event — the honest
+    // analog of the Claude Stop that drives the CLI's continuation chain (see
+    // runSequenceContinuationStop). With the switch ON and an active sequence,
+    // run the SAME continuation Stop (`stop_hook_active:true`) and hand its
+    // block to the proven delivery pipeline (decision file → poller → settle →
+    // inject → auto-submit → echo registry). This event must NEVER block the
+    // host: it always answers `{continue:true}`, whatever happened. No
+    // sequence / switch off ⇒ the runner reports {ran:false} — a no-op.
+    if (event === 'afterAgentResponse') {
+      try {
+        if (isSubmitAdvisoryEnabledForHost('cursor', { env: deps.env, readFlagFile: deps.readFlagFile })) {
+          const rawPost = await Promise.race([
+            readStdin(),
+            new Promise<string>((r) => {
+              const t = setTimeout(() => r(''), stdinTimeoutMs);
+              if (typeof t.unref === 'function') t.unref();
+            }),
+          ]);
+          const pl = parseCursorHookPayload(rawPost ?? '');
+          const root = pl?.projectRoot ?? process.cwd();
+          const cont = await (deps.runSequenceContinuation ?? runSequenceContinuationStop)(root, 'cursor');
+          if (cont.ran) logEvent('info', 'cursor_hook_sequence_continuation', { blocked: cont.blocked === true });
+        }
+      } catch (err) {
+        logEvent('warn', 'cursor_hook_sequence_continuation_failed', { message: (err as Error)?.message ?? 'unknown' });
+      }
+      write(JSON.stringify(CURSOR_CONTINUE));
+      exit(0);
+      return;
+    }
+
     if (event !== 'beforeSubmitPrompt') {
       // Unknown event: continue rather than guess at its contract.
       write(JSON.stringify(CURSOR_CONTINUE));

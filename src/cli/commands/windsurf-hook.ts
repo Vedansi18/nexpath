@@ -27,6 +27,7 @@ import type { Command } from 'commander';
 import type { ChildProcess } from 'node:child_process';
 import { runWindsurfHook, parsePayload, type RunResult } from '../../windsurf-hook/handler.js';
 import { decideSubmitPrompt, type DeciderOptionSet, type DeciderSelection } from './submit-prompt-decider.js';
+import { runSequenceContinuationStop } from './submit-stop-decider.js';
 import {
   createDeterministicSubmitOptionSource,
   type SubmitOptionSource,
@@ -433,6 +434,8 @@ export interface WindsurfHookActionDeps {
   decidePromptSubmit?: (event: string, opts: { project?: string }, promptText: string) => Promise<WindsurfPromptSubmitDecision>;
   /** OWNER RULING 2026-08-12: consume the session's pending advisories before `stop` runs (switch on only). */
   suppressOldAdvisorySurface?: (projectRoot: string, sessionId: string) => Promise<number>;
+  /** RC41 seam: injected in tests; defaults to the real continuation runner. */
+  runSequenceContinuation?: (projectRoot: string, host: 'windsurf' | 'cursor') => Promise<{ ran: boolean; blocked?: boolean }>;
   /**
    * Bound on the POST-leg stdin read. Separate from `stdinTimeoutMs` (the PRE
    * leg, which holds the user's prompt and must stay tight): nothing is held on
@@ -666,6 +669,27 @@ export async function runWindsurfHookAction(
         // Leaves a trace for live debugging: an empty session here means the
         // payload was missing/late — the exact silent-skip found 2026-08-12.
         log('warn', 'windsurf_hook_suppression_skipped', { reason: preReadRaw === '' ? 'stdin_timeout_or_empty' : 'no_trajectory_id' });
+      }
+    }
+
+    // ── RC41: the MPS continuation trigger (Windsurf half) ───────────────────
+    // `post_cascade_response` IS this host's "response finished" event — the
+    // honest analog of the Claude Stop that drives the CLI's continuation
+    // chain (stop.ts: next Stop with stop_hook_active:true → continuation
+    // launcher → popup → block(item body), UN-GATED since 2026-08-17). With
+    // the switch ON and an active sequence, run the SAME continuation Stop and
+    // hand its block to the proven delivery pipeline (decision file → poller →
+    // settle → inject → auto-submit → echo registry). When it ran, exit here:
+    // the normal `handle` below would spawn a SECOND stop for the same event.
+    // No sequence / switch off ⇒ {ran:false} ⇒ fall through — the old flow is
+    // byte-identical.
+    if (event === 'post_cascade_response' && isSubmitAdvisoryEnabledForHost('windsurf', { env, readFlagFile: deps.readFlagFile })) {
+      const contRoot = opts.project ?? process.cwd();
+      const cont = await (deps.runSequenceContinuation ?? runSequenceContinuationStop)(contRoot, 'windsurf');
+      if (cont.ran) {
+        log('info', 'windsurf_hook_sequence_continuation', { blocked: cont.blocked === true });
+        exit(0);
+        return;
       }
     }
 

@@ -659,3 +659,43 @@ describe('⭐ VED-PE-10 — the injected replacement releases instantly, no re-a
     expect(JSON.parse(h.writes[0])).toEqual({ continue: true });
   });
 });
+
+/**
+ * ⭐ RC41 — the MPS continuation trigger (Cursor half).
+ * `afterAgentResponse` is Cursor's "response finished" — it runs the same
+ * continuation Stop as the CLI chain, and must NEVER block the host: the
+ * answer is `{continue:true}` no matter what the runner did.
+ */
+describe('⭐ RC41 — afterAgentResponse runs the sequence continuation', () => {
+  it('⭐ switch ON ⇒ runner invoked with the payload projectRoot; always continue + exit 0', async () => {
+    const runSequenceContinuation = vi.fn(async () => ({ ran: true, blocked: true }));
+    const h = harness({ runSequenceContinuation });
+    await runCursorHookAction('afterAgentResponse', h.deps as never);
+    expect(runSequenceContinuation).toHaveBeenCalledWith('/proj', 'cursor');
+    expect(JSON.parse(h.writes[0])).toEqual(CURSOR_CONTINUE);
+    expect(h.exits).toEqual([0]);
+  });
+
+  it('switch OFF ⇒ runner never consulted, output byte-identical to the old unknown-event answer', async () => {
+    const runSequenceContinuation = vi.fn(async () => ({ ran: true }));
+    const h = harness({ env: {}, runSequenceContinuation });
+    await runCursorHookAction('afterAgentResponse', h.deps as never);
+    expect(runSequenceContinuation).not.toHaveBeenCalled();
+    expect(JSON.parse(h.writes[0])).toEqual(CURSOR_CONTINUE);
+    expect(h.exits).toEqual([0]);
+  });
+
+  it('⭐ a throwing runner still answers continue (this event must never wedge Cursor)', async () => {
+    const h = harness({ runSequenceContinuation: vi.fn(async () => { throw new Error('boom'); }) });
+    await runCursorHookAction('afterAgentResponse', h.deps as never);
+    expect(JSON.parse(h.writes[0])).toEqual(CURSOR_CONTINUE);
+    expect(h.exits).toEqual([0]);
+  });
+
+  it('an empty/late payload falls back to cwd for the project root (never skips)', async () => {
+    const runSequenceContinuation = vi.fn(async () => ({ ran: false }));
+    const h = harness({ runSequenceContinuation, readStdin: async () => '' });
+    await runCursorHookAction('afterAgentResponse', h.deps as never);
+    expect(runSequenceContinuation).toHaveBeenCalledWith(process.cwd(), 'cursor');
+  });
+});

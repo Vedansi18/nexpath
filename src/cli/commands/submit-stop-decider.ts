@@ -364,3 +364,122 @@ export function buildStopDrivenPromptSubmitDecider(
     }
   };
 }
+
+// ── RC41 (2026-08-21): the MPS CONTINUATION trigger for hook-driven hosts ────
+//
+// THE CLI CHAIN THIS MIRRORS (read end-to-end from stop.ts): the MPS-1 popup's
+// send blocks with item 1 → Claude runs it → the NEXT Stop fires with
+// `stop_hook_active:true` → runStop's top branch routes the active sequence to
+// the continuation launcher (UN-GATED for all users since 2026-08-17) → the
+// continuation popup renders → `inject` advances the row and returns
+// `{outcome:'blocked', reason:<item body>}` → the next item runs → … N popups.
+//
+// Cursor/Windsurf never fire a Stop with `stop_hook_active:true`, so the chain
+// stopped after popup 1 on our hosts. This runner IS that missing Stop: invoked
+// by Windsurf's `post_cascade_response` leg and Cursor's `afterAgentResponse`
+// hook (the hosts' own "response finished" events — the honest analog of
+// Claude's Stop), it runs the SAME `nexpath stop` with `stop_hook_active:true`
+// and hands a block to the SAME delivery pipeline every proven turn uses
+// (decision file → poller → settle → inject → auto-submit → echo registry).
+//
+// Fail-open everywhere: no active sequence ⇒ {ran:false} and the caller's flow
+// is byte-identical to before; any error ⇒ same. The popup waits on a human, so
+// the child is awaited under a long cap and killed at the cap (Cursor never
+// reaps orphans — R2).
+export const SEQUENCE_CONTINUATION_CAP_MS = 10 * 60_000;
+
+export interface SequenceContinuationResult {
+  ran: boolean;
+  blocked?: boolean;
+}
+
+export async function runSequenceContinuationStop(
+  projectRoot: string,
+  host: 'windsurf' | 'cursor',
+  ports: {
+    spawnFn?: typeof spawn;
+    binaryPath?: string;
+    writeDecision?: typeof writeSubmitDecision;
+    now?: () => number;
+    logEvent?: typeof log;
+    openStoreFn?: (db?: string) => Promise<unknown>;
+    closeStoreFn?: (store: unknown) => Promise<void> | void;
+    capMs?: number;
+  } = {},
+): Promise<SequenceContinuationResult> {
+  const logEvent: typeof log = (level, name, data) => {
+    try { (ports.logEvent ?? log)(level, name, data); } catch { /* never break the hook */ }
+  };
+  // 1. Only when an active sequence exists — read-only peek, same consume-only
+  //    convention as the RC10 sweep. `runStop` re-validates with its own
+  //    session manager, so a stale peek can only cost one harmless spawn.
+  try {
+    const s = await (ports.openStoreFn ?? openStore)(undefined as never);
+    let active = false;
+    try {
+      active = getActivePendingPromptSequence(s as never, projectRoot) !== null;
+    } finally {
+      try { await (ports.closeStoreFn ?? closeStore)(s as never); } catch { /* fail-open */ }
+    }
+    if (!active) return { ran: false };
+  } catch {
+    return { ran: false };
+  }
+
+  const spawnFn = ports.spawnFn ?? spawn;
+  const writeDecision = ports.writeDecision ?? writeSubmitDecision;
+  const now = ports.now ?? (() => Date.now());
+  let child: ChildProcess | null = null;
+  let stdout = '';
+  try {
+    const { cmd, prefix } = nexpathCmd(ports.binaryPath);
+    child = spawnFn(cmd, [...prefix, 'stop'], {
+      cwd: projectRoot,
+      stdio: ['pipe', 'pipe', 'ignore'],
+      // Same enrichment as the submit decider — the continuation popup needs
+      // the GUI session the host may have stripped from the hook env (RC35).
+      env: enrichSpawnEnvFromSessionSnapshot(process.env),
+    });
+    child.stdout?.setEncoding('utf8');
+    child.stdout?.on('data', (chunk: string) => { stdout += chunk; });
+    // The continuation Stop payload — `stop_hook_active:true` is what routes
+    // runStop to the continuation launcher (its top-of-ladder branch).
+    child.stdin?.write(JSON.stringify({ cwd: projectRoot, hook_event_name: 'Stop', stop_hook_active: true }));
+    child.stdin?.end();
+    const capMs = ports.capMs ?? SEQUENCE_CONTINUATION_CAP_MS;
+    const exitCode = await new Promise<number | null>((res) => {
+      let settled = false;
+      const finish = (code: number | null): void => { if (!settled) { settled = true; clearTimeout(t); res(code); } };
+      const t = setTimeout(() => { try { child?.kill(); } catch { /* best-effort */ } finish(null); }, capMs);
+      if (typeof t.unref === 'function') t.unref();
+      child!.on('exit', (code) => finish(code));
+      child!.on('close', (code) => finish(code));
+      child!.on('error', () => finish(null));
+    });
+    const block = exitCode === 0 ? parseStopBlockOutput(stdout) : null;
+    logEvent('info', 'sequence_continuation_stop_done', {
+      host, exit_code: exitCode, stdout_len: stdout.length, blocked: block !== null,
+    });
+    if (!block) return { ran: true, blocked: false };
+    const blockIssuedAt = now();
+    await writeDecision({
+      projectRoot,
+      decisionId: `sq-${blockIssuedAt}-${blockIssuedAt % 100000}`,
+      replacementText: block.reason,
+      createdAt: blockIssuedAt,
+      blockIssuedAt,
+      hookPid: process.pid,
+      ...(process.platform === 'win32' && process.ppid > 0 ? { hookShellPid: process.ppid } : {}),
+      host,
+    });
+    // RC38: the injected item will re-enter the submit hook — register it so
+    // the echo skip recognises it even if the single slot gets overwritten.
+    appendReplacementEcho(projectRoot, block.reason);
+    logEvent('info', 'sequence_continuation_decision_persisted', { host });
+    return { ran: true, blocked: true };
+  } catch (err) {
+    logEvent('warn', 'sequence_continuation_failed', { host, message: (err as Error)?.message ?? 'unknown' });
+    try { child?.kill(); } catch { /* best-effort */ }
+    return { ran: true, blocked: false };
+  }
+}
