@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   PROMPT_ENHANCEMENT_MPS_CLI_FOOTER_V1,
+  PROMPT_ENHANCEMENT_MPS_CLI_CONTINUATION_FOOTER_V1,
   renderPromptEnhancementMpsContinuationFrameV1,
   renderPromptEnhancementMpsFirstPopupFrameV1,
 } from './cli-mps-popup.js';
@@ -59,7 +60,7 @@ function model(overrides: Partial<PromptEnhancementMpsFirstPopupModelV1> = {}): 
       },
       originalPrompt: 'not_rendered',
     },
-    sequencePlan: { remainingTaskCount: 3, taskRoleLabels: ['implement', 'verify', 'document'] },
+    sequencePlan: { remainingTaskCount: 3, taskRoleLabels: ['implement', 'verify', 'document'], taskSummaryLines: [] },
     keyboard: {
       plainEnter: 'emit_one_typed_current_body_plus_details_request',
       escape: 'leave_editor_focus_preserve_draft',
@@ -88,7 +89,7 @@ describe('UI-6 MPS first-popup frame renderer (§3.3)', () => {
     expect(frame).toContain('Focus on the checkout module.');
     expect(frame).toContain('Cancel (remaining multi-prompt sequence)');
     expect(frame).toContain('Sequence plan');
-    expect(frame).toContain('Remaining: 3');
+    expect(frame).toContain('Total: 3');
     expect(frame).toContain('Types: implement, verify, document');
     expect(frame).toContain(PROMPT_ENHANCEMENT_MPS_CLI_FOOTER_V1);
     // Title is the first line and the footer is the last line, behind the continuous left rail
@@ -148,12 +149,19 @@ describe('UI-6 MPS first-popup frame renderer (§3.3)', () => {
     expect(frame).toContain('Additional details');
   });
 
-  it('sanitises every model-supplied string, including task role labels', () => {
+  it('sanitises every model-supplied string, including task role labels and summary lines', () => {
     const frame = renderPromptEnhancementMpsFirstPopupFrameV1(model({
-      sequencePlan: { remainingTaskCount: 2, taskRoleLabels: [`impl${ESC}[31mement`, 'verify'] },
+      sequencePlan: {
+        remainingTaskCount: 2,
+        taskRoleLabels: [`impl${ESC}[31mement`, 'verify'],
+        taskSummaryLines: [`set up ${ESC}[31mthe DB`, 'add the API'],
+      },
     }), { colorize: false });
     expect(frame).not.toContain(ESC);
     expect(frame).toContain('Types: implement, verify');
+    // Phase 3b: the per-task summary lines render numbered, sanitised, below Types.
+    expect(frame).toContain('1. set up the DB');
+    expect(frame).toContain('2. add the API');
   });
 
   it('clamps an out-of-range focusIndex to the interactive rows', () => {
@@ -186,13 +194,17 @@ describe('UI-6 MPS first-popup frame renderer (§3.3)', () => {
     expect(deRail(planLine).trimStart().startsWith('●')).toBe(false);
   });
 
-  it('renders the Cancel row yellow in colorized mode and records the caret screen position (owner request)', () => {
-    // Yellow Cancel: the caution tone is applied only to the Cancel label, never the body row.
+  it('renders the Cancel row EXTRA-light (pale) yellow in colorized mode and records the caret screen position (owner request)', () => {
+    // Pale-yellow Cancel (owner request 2026-08-08): a touch softer than the bright hint yellow —
+    // 256-colour 38;5;229. Applied only to the Cancel label, never the body row; the bright hint
+    // yellow ([93m]) and the normal yellow ([33m], provider-failure notice) are unaffected.
     const colored = renderPromptEnhancementMpsFirstPopupFrameV1(model(), { focusIndex: 0, colorize: true });
     const cancelLine = colored.split('\n').find((line) => line.includes('Cancel (remaining'));
     const bodyLine = colored.split('\n').find((line) => line.includes('Use enhanced sequence prompt'));
-    expect(cancelLine).toContain(`${ESC}[33m`);
-    expect(bodyLine).not.toContain(`${ESC}[33m`);
+    expect(cancelLine).toContain(`${ESC}[38;5;229m`);      // pale/extra-light yellow
+    expect(cancelLine).not.toContain(`${ESC}[93m`);        // not the bright hint yellow
+    expect(cancelLine).not.toContain(`${ESC}[33m`);        // not the normal (notice) yellow
+    expect(bodyLine).not.toContain(`${ESC}[38;5;229m`);
     // Caret contract (same as the PE renderer): caretOut records the 1-based screen row of the
     // body's first content line, at column 7 (2-char rail + 4-space indent + 1-based).
     const caretOut = { row: -1, col: -1 };
@@ -253,7 +265,9 @@ function continuationModel(overrides: Partial<PromptEnhancementMpsContinuationPo
     title: PROMPT_ENHANCEMENT_MPS_CONTINUATION_POPUP_TITLE_V1,
     heading: PROMPT_ENHANCEMENT_MPS_CONTINUATION_POPUP_HEADING_V1,
     layout: PROMPT_ENHANCEMENT_MPS_CONTINUATION_LAYOUT_V1,
-    identity: { requestId: 'req-1', projectRoot: '/tmp/project', sequenceId: 'seq-1', sequenceItemId: 'item-2', currentItemRevision: 2, bodyRevision: 1, detailsRevision: 1 },
+    progress: { done: 3, total: 27 },
+    itemKind: 'task',
+    identity: { requestId: 'req-1', sequenceId: 'seq-1', sequenceItemId: 'item-2', currentItemRevision: 2, bodyRevision: 1, detailsRevision: 1 },
     body: { text: 'Next sequence step: apply the fix and run the focused checkout test.', editable: true, originalPromptText: 'Run the checkout fix sequence.' },
     additionalDetails: { visible: true, text: 'Keep scope to the payments module.', revision: 1 },
     actions: {
@@ -264,7 +278,7 @@ function continuationModel(overrides: Partial<PromptEnhancementMpsContinuationPo
     },
     keyboard: {
       plainEnter: 'emit_one_typed_current_body_plus_details_request',
-      escape: 'leave_editor_focus_preserve_draft',
+      escape: 'cancel_remaining_sequence',
       ctrlOrCmdJ: 'insert_newline',
       ctrlOrCmdUpDown: 'move_by_line',
       leftRight: 'move_by_character',
@@ -293,10 +307,11 @@ describe('UI-7 MPS continuation-popup frame renderer (§3.4)', () => {
     expect(frame).toContain('I need to do something else first');
     expect(frame).toContain('Write directly in the coding agent. This same sequence prompt returns after the response.');
     expect(frame).toContain('Cancel (remaining multi-prompt sequence)');
-    expect(frame).toContain(PROMPT_ENHANCEMENT_MPS_CLI_FOOTER_V1);
+    expect(frame).toContain(PROMPT_ENHANCEMENT_MPS_CLI_CONTINUATION_FOOTER_V1);
     const frameLines = frame.split('\n');
     expect(frameLines[0]).toBe('│ ◆ NEXPATH CLI · Multi-prompt sequence');
-    expect(frameLines[frameLines.length - 1]).toBe('│ Enter send · Esc actions');
+    // Continuation footer: Escape CANCELS the sequence (distinct from the first popup's 'Esc actions').
+    expect(frameLines[frameLines.length - 1]).toBe('│ Enter send · Esc cancels sequence');
     for (const line of frameLines) expect(line.startsWith('│')).toBe(true);
     // Body → Additional details → interruption → Cancel.
     expect(frame.indexOf('Use enhanced sequence prompt')).toBeLessThan(frame.indexOf('Additional details'));
@@ -307,7 +322,7 @@ describe('UI-7 MPS continuation-popup frame renderer (§3.4)', () => {
   it('never repeats the Sequence plan, remaining count, or future-item details (§3.4)', () => {
     const frame = renderPromptEnhancementMpsContinuationFrameV1(continuationModel());
     expect(frame).not.toContain('Sequence plan');
-    expect(frame).not.toContain('Remaining:');
+    expect(frame).not.toContain('Total:');
     expect(frame).not.toContain('Types:');
   });
 
@@ -349,6 +364,37 @@ describe('UI-7 MPS continuation-popup frame renderer (§3.4)', () => {
       },
     }));
     expect(frame).toContain('Cancel (remaining multi-prompt sequence)  (unavailable)');
+  });
+
+  it('MPS-1 loading wheel: body is a spinner skeleton ("<glyph> preparing…"), edit hint hidden, other rows stay', () => {
+    const frame = renderPromptEnhancementMpsContinuationFrameV1(continuationModel(), { loadingSpinnerGlyph: '⠋' });
+    // Body shows the spinner + "preparing…" instead of the real next-item body.
+    expect(frame).toContain('⠋ preparing…');
+    expect(frame).not.toContain('Next sequence step: apply the fix');
+    // The edit-keys hint is hidden while loading; the progress line and the other rows still render.
+    expect(frame).not.toContain('Ctrl+J');
+    expect(frame).toContain('Sequence 3 of 27');
+    expect(frame).toContain('Cancel (remaining multi-prompt sequence)');
+    // Not loading → the real body is back and the hint returns.
+    const normal = renderPromptEnhancementMpsContinuationFrameV1(continuationModel());
+    expect(normal).toContain('Next sequence step: apply the fix');
+    expect(normal).not.toContain('preparing…');
+  });
+
+  it('MPS-12 (Ruling C): a TASK item shows "Your original: <slice>"; a CONFIRMATION item shows none', () => {
+    // TASK kinds (`first_task`/`task`) → the user's original slice rendered below the body: a
+    // "Your original:" label line, then the slice indented on its own line(s) (pushed per line so the
+    // left rail reaches every line — a long original no longer spills rail-less past the frame).
+    const taskFrame = renderPromptEnhancementMpsContinuationFrameV1(continuationModel({ itemKind: 'task' }));
+    expect(taskFrame).toContain('Your original:');
+    expect(taskFrame).toContain('Run the checkout fix sequence.');
+    expect(renderPromptEnhancementMpsContinuationFrameV1(continuationModel({ itemKind: 'first_task' })))
+      .toContain('Your original:');
+    // CONFIRMATION kinds (+ wrap_up) → NO original region: no label, box, or placeholder (Ruling C).
+    for (const kind of ['double_confirmation', 'cross_confirmation', 'binary_confirmation', 'wrap_up'] as const) {
+      expect(renderPromptEnhancementMpsContinuationFrameV1(continuationModel({ itemKind: kind })))
+        .not.toContain('Your original');
+    }
   });
 });
 

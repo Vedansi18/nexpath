@@ -9,6 +9,11 @@ import {
 
 export const PROMPT_ENHANCEMENT_COST_PROVIDER_V1 = 'openai';
 export const PROMPT_ENHANCEMENT_COST_MODEL_V1 = 'gpt-4o-mini';
+// The sequence PLANNER (P1) alone runs a three-stage reasoning chain (inventory → group → slice) in one
+// structured call — heavier than the single-purpose classifier calls the shared constant was chosen for
+// (§6.2c). Owner-authorised to use a stronger-but-not-extremely-expensive model for THIS one call
+// only; every other call stays on the shared cost model above.
+export const PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_MODEL_V1 = 'gpt-4o';
 export const PROMPT_ENHANCEMENT_COST_PRICING_SOURCE_URL_V1 = 'https://developers.openai.com/api/docs/models/gpt-4o-mini';
 export const PROMPT_ENHANCEMENT_COST_PRICING_ACCESS_DATE_V1 = '2026-07-27';
 export const PROMPT_ENHANCEMENT_COST_PROCESSING_MODE_ASSUMPTION_V1 = 'standard_text_token_api';
@@ -17,13 +22,87 @@ export const PROMPT_ENHANCEMENT_COST_ADD_ON_ASSUMPTION_V1 = 'no_tool_container_s
 export const PROMPT_ENHANCEMENT_COST_REGIONAL_DATA_RESIDENCY_ASSUMPTION_V1 = 'no_regional_or_data_residency_uplift_selected';
 export const PROMPT_ENHANCEMENT_COST_INPUT_TOKEN_CAP_V1 = 8_000;
 export const PROMPT_ENHANCEMENT_COST_OUTPUT_TOKEN_CAP_V1 = 2_000;
+/**
+ * The sequence planner's own output budget. Deliberately NOT the composer cap above: the planner
+ * emits a reason per item and per confirmation, and those reasons are the tokens — dropping them to
+ * fit is what turns a plan into an unexplained list. Sized against the locked 30-item maximum.
+ *
+ * A truncated plan is invalid rather than degraded, so the hard cap exists to make a long plan
+ * finish rather than to let a long one arrive half-written.
+ */
+export const PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_OUTPUT_TOKEN_CAP_V1 = 1_500;
+export const PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_OUTPUT_TOKEN_HARD_CAP_V1 = 4_000;
+
+/**
+ * The batch composer's output budget: every remaining prompt's wording in ONE reply.
+ *
+ * Not the per-item figures — those price a call per item, and the batch is one call over the whole
+ * list, so they do not transfer. Derived from the locked bounds rather than borrowed: a later item
+ * is deliberately light (its slice, a rewrite, and one section or none), which lands around 300
+ * tokens, and the maximum list is 30 items of which the batch writes 29. The hard cap covers that
+ * worst case with room for the closing recap, which carries every task's slice verbatim; the normal
+ * cap covers the ordinary sequence of a handful of items.
+ *
+ * PROVISIONAL. A truncated batch is invalid rather than degraded, so these decide when a long
+ * sequence is possible at all — and they are derived, not measured. The measurement is owed.
+ */
+/**
+ * The summary line's output budget. One sentence — a cap that would fit a paragraph is an
+ * invitation to write one, and what this line must not become is a preview of the work.
+ */
+export const PROMPT_ENHANCEMENT_SEQUENCE_SUMMARY_OUTPUT_TOKEN_CAP_V1 = 200;
+
+export const PROMPT_ENHANCEMENT_SEQUENCE_BATCH_OUTPUT_TOKEN_CAP_V1 = 4_000;
+export const PROMPT_ENHANCEMENT_SEQUENCE_BATCH_OUTPUT_TOKEN_HARD_CAP_V1 = 12_000;
 // Composer/route call budget. Raised from 10s (2026-08-07): the bounded composer asks for up to
 // PROMPT_ENHANCEMENT_COST_OUTPUT_TOKEN_CAP_V1 tokens as one JSON object covering every planned
 // section, which measures 9-14s for 6-8 sections — so a 10s cap cut the call off before it could
 // finish and the body always fell back to the deterministic render. 45s keeps headroom for a slow
 // provider while still fitting inside the host prompt-submit hook budget.
+/**
+ * The sentinel for a value this codebase has not measured yet.
+ *
+ * Named rather than left absent, because a refusal is findable and an absence is not: a reader
+ * searching for what is unpinned finds the rows carrying this, where a missing field or a zero
+ * would read as an answer.
+ */
+export const PROMPT_ENHANCEMENT_MEASUREMENT_PENDING_V1 = 'blocked_pending_source_value' as const;
+
 export const PROMPT_ENHANCEMENT_COST_TIMEOUT_MS_V1 = 45_000;
 export const PROMPT_ENHANCEMENT_COST_VALIDATION_RETRY_COUNT_V1 = 3;
+
+/**
+ * The sequence calls' own timeouts — named, so they are not the composer's by accident.
+ *
+ * 🔴 The caps beside them were given their own names for exactly this reason: the composer's figures
+ * were sized for the composer, and a borrowed timeout is the same mistake as a borrowed cap. These
+ * three inherited the global value silently until it was measured, which meant retuning the
+ * composer's number would have moved the planner's and the batch's with it, and nothing at either
+ * call site would have said so.
+ *
+ * ⚠️ They all currently hold the SAME value as the global. That is the point rather than a
+ * shortcut: the measurement says the value fits, so naming it is the whole change — and the three
+ * can now move apart without anyone having to notice they were ever joined.
+ */
+
+/** Measured 2026-08-13: 20.3 s for one attempt at a worst case of 29 separable intents. */
+export const PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_TIMEOUT_MS_V1 = 45_000;
+
+/**
+ * Measured 2026-08-13: 35.2 s for ONE batch over 29 items.
+ *
+ * ⚠️ The thin one — 78 % of this value. Left where it is deliberately: a longer per-call timeout
+ * makes the worst-case PATH longer, and the send path already measures 82.8 s against a 90 s
+ * registered hook. Trading a rare timeout for a more common hook overrun is the worse trade, and
+ * the hook is the tighter constraint.
+ */
+export const PROMPT_ENHANCEMENT_SEQUENCE_BATCH_TIMEOUT_MS_V1 = 45_000;
+
+/**
+ * ⏳ NOT measured. It takes the global's value EXPLICITLY rather than by inheritance, so the one
+ * unmeasured member of the three is visible as unmeasured instead of looking like the other two.
+ */
+export const PROMPT_ENHANCEMENT_SEQUENCE_SUMMARY_TIMEOUT_MS_V1 = 45_000;
 
 export const PROMPT_ENHANCEMENT_COST_MEASUREMENT_FIELDS_V1: readonly PromptEnhancementCostMeasurementFieldV1[] = [
   'call_id',
@@ -105,8 +184,29 @@ export interface PromptEnhancementAcceptedCostCallInventoryRowV1 {
   addOnCostAssumption: typeof PROMPT_ENHANCEMENT_COST_ADD_ON_ASSUMPTION_V1;
   regionalDataResidencyAssumption: typeof PROMPT_ENHANCEMENT_COST_REGIONAL_DATA_RESIDENCY_ASSUMPTION_V1;
   inputTokenCap: typeof PROMPT_ENHANCEMENT_COST_INPUT_TOKEN_CAP_V1;
-  outputTokenCap: typeof PROMPT_ENHANCEMENT_COST_OUTPUT_TOKEN_CAP_V1;
-  timeoutMs: typeof PROMPT_ENHANCEMENT_COST_TIMEOUT_MS_V1;
+  /**
+   * The call's own output budget, and NOT the composer's by construction.
+   *
+   * 🔴 Was typed as the composer constant, which meant a row could report only 2,000 tokens — and
+   * two calls in this inventory are sized against a different thing entirely. A batch that writes a
+   * whole sequence in one reply needs several times that, and a truncated batch is invalid rather
+   * than shorter, so a row unable to state its real cap understates the one call where the cap
+   * decides whether anything ships at all.
+   */
+  outputTokenCap: number | typeof PROMPT_ENHANCEMENT_MEASUREMENT_PENDING_V1;
+  /**
+   * The timeout this call actually runs under.
+   *
+   * 🔴 Same defect, and the sharper one. Typed as the single global constant, a row could report
+   * only 45 s — which is the composer's measured value, sized for a different call shape — so the
+   * record could not express a measured timeout for the calls this milestone exists to measure. A
+   * borrowed timeout is the same mistake as a borrowed cap, and a type that can hold nothing else
+   * makes the borrowing invisible.
+   *
+   * The sibling inventory in this file already solved it: a real number, or an explicit not-yet
+   * sentinel. This follows that shape rather than inventing a third.
+   */
+  timeoutMs: number | typeof PROMPT_ENHANCEMENT_MEASUREMENT_PENDING_V1;
   retryCount: typeof PROMPT_ENHANCEMENT_COST_VALIDATION_RETRY_COUNT_V1;
   cacheAssumption: 'no_cache_savings_no_addons';
   fallbackReasons: readonly PromptEnhancementRuntimeBlockReason[];
@@ -168,7 +268,8 @@ export interface PromptEnhancementCostMeasurementRecordV1 {
   latencyMs?: number;
   estimatedInputTokens?: number;
   estimatedOutputTokens?: number;
-  timeoutMs: typeof PROMPT_ENHANCEMENT_COST_TIMEOUT_MS_V1;
+  /** Carried from the inventory row, so a measured value reaches the record instead of the constant. */
+  timeoutMs: number | typeof PROMPT_ENHANCEMENT_MEASUREMENT_PENDING_V1;
   retryCount: typeof PROMPT_ENHANCEMENT_COST_VALIDATION_RETRY_COUNT_V1;
   status: PromptEnhancementCostMeasurementInputV1['status'];
   fallbackReason: PromptEnhancementRuntimeBlockReason;
@@ -483,7 +584,29 @@ const CALL_ROWS: readonly PromptEnhancementAcceptedCostCallInventoryRowV1[] = [
     reasonCodes: ['optional_safety_review_llm_backed_when_triggered'],
   }),
   row({
+    // The planner call, registered so its measurement has somewhere to go. The two rows below cover
+    // the wording calls and neither covers this one, so the reading with the most to say — a repair
+    // loop that spends several starts and delivers no plan — had no row to be counted in.
+    //
+    // 🔴 Classified exactly as its siblings are. The gate is shut, and a row claiming otherwise
+    // would have the source say v1-live while the runtime is still fail-closed.
+    callId: 'sequence_planning',
+    timeoutMs: PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_TIMEOUT_MS_V1,
+    outputTokenCap: PROMPT_ENHANCEMENT_SEQUENCE_PLANNER_OUTPUT_TOKEN_CAP_V1,
+    trigger: 'sequence_metadata',
+    userVisibleTrigger: 'sequence_metadata_candidate',
+    hiddenRuntimeTrigger: 'future metadata-only sequence planning candidate after sequence gates close',
+    requirementState: 'future_only_not_v1',
+    productState: 'future_runtime_gated_not_cost_gated',
+    calls: [54, 243, 972, 972],
+    separateLlmCallInV1: true,
+    skipCondition: 'future sequence runtime gated; one planning call per offered sequence',
+    reasonCodes: ['sequence_planning_cost_visible_future_runtime_gated'],
+  }),
+  row({
     callId: 'sequence_summary_wording',
+    timeoutMs: PROMPT_ENHANCEMENT_SEQUENCE_SUMMARY_TIMEOUT_MS_V1,
+    outputTokenCap: PROMPT_ENHANCEMENT_SEQUENCE_SUMMARY_OUTPUT_TOKEN_CAP_V1,
     trigger: 'sequence_metadata',
     userVisibleTrigger: 'sequence_metadata_candidate',
     hiddenRuntimeTrigger: 'future metadata-only sequence summary wording candidate after sequence gates close',
@@ -496,6 +619,8 @@ const CALL_ROWS: readonly PromptEnhancementAcceptedCostCallInventoryRowV1[] = [
   }),
   row({
     callId: 'sequence_item_wording',
+    timeoutMs: PROMPT_ENHANCEMENT_SEQUENCE_BATCH_TIMEOUT_MS_V1,
+    outputTokenCap: PROMPT_ENHANCEMENT_SEQUENCE_BATCH_OUTPUT_TOKEN_CAP_V1,
     trigger: 'sequence_metadata',
     userVisibleTrigger: 'sequence_metadata_candidate',
     hiddenRuntimeTrigger: 'future metadata-only per-item sequence wording candidate after runtime gates close',
@@ -576,8 +701,12 @@ const CURRENT_SOURCE_BASELINE_ROWS: readonly PromptEnhancementCurrentSourceCostC
   currentSourceRow({
     baselineCallId: 'current_stage_classifier',
     sourceLayer: 'src/classifier/stage-classifier.ts',
-    assumedInputTokens: 3_000,
-    maxOutputTokens: 256,
+    // The reply carries the intent proposal + evidence/capability observations
+    // (parked on this SAME call — no new call exists): the system prompt grew by
+    // the intent menu, the evidence ladder, and the capability conditions
+    // (prefix-cached), and the output by four fields.
+    assumedInputTokens: 5_000,
+    maxOutputTokens: 512,
     timeoutMs: 12_000,
     fallbackState: 'deterministic_or_local_fallback',
     requirementState: 'required_current_source_row',
@@ -720,6 +849,32 @@ export function getPromptEnhancementAcceptedCostCallRowV1(
   return rowMatch;
 }
 
+/**
+ * A measured value for the visibility metadata, or nothing at all.
+ *
+ * ⛔ Deliberately NOT a fallback to the global constant. The metadata's completeness check requires
+ * a number on any provider-using call, so an unmeasured timeout leaves that call reporting
+ * INCOMPLETE — which is the truthful outcome and the whole point of the sentinel. Substituting 45 s
+ * here would make an unmeasured call look fully specified, which is the failure the widening was
+ * done to prevent.
+ */
+function measuredOrAbsent(value: number | typeof PROMPT_ENHANCEMENT_MEASUREMENT_PENDING_V1): number | undefined {
+  return value === PROMPT_ENHANCEMENT_MEASUREMENT_PENDING_V1 ? undefined : value;
+}
+
+/**
+ * A per-call budget that has been decided: a positive number, or the explicit not-yet sentinel.
+ *
+ * ⛔ Zero, a negative, or a non-integer is not a budget — those are the states worth refusing. What
+ * is NOT refused is a value that differs from the composer's, which is the whole reason these two
+ * fields were widened: the planner and the batch are sized against the locked item count, not
+ * against the composer's section count.
+ */
+function statedCallBudget(value: number | typeof PROMPT_ENHANCEMENT_MEASUREMENT_PENDING_V1): boolean {
+  if (value === PROMPT_ENHANCEMENT_MEASUREMENT_PENDING_V1) return true;
+  return Number.isInteger(value) && value > 0;
+}
+
 export function buildPromptEnhancementCostVisibilityMetadataV1(
   callId: PromptEnhancementCostCallIdV1,
   input: {
@@ -760,15 +915,15 @@ export function buildPromptEnhancementCostVisibilityMetadataV1(
     addOnCostAssumption: inventoryRow.addOnCostAssumption,
     regionalDataResidencyAssumption: inventoryRow.regionalDataResidencyAssumption,
     inputTokenCap: inventoryRow.inputTokenCap,
-    outputTokenCap: inventoryRow.outputTokenCap,
+    outputTokenCap: measuredOrAbsent(inventoryRow.outputTokenCap),
     estimatedInputTokens: input.estimatedInputTokens ?? 0,
     estimatedOutputTokens: input.estimatedOutputTokens ?? 0,
     plannedCallCount: input.plannedCallCount,
     usedCallCount: providerUnavailable ? 0 : input.usedCallCount,
     providerAvailabilityState: providerUnavailable ? 'unavailable_by_provider_api' : 'available',
-    timeoutMs: inventoryRow.timeoutMs,
+    timeoutMs: measuredOrAbsent(inventoryRow.timeoutMs),
     retryCount: inventoryRow.retryCount,
-    latencyTargetMs: inventoryRow.timeoutMs,
+    latencyTargetMs: measuredOrAbsent(inventoryRow.timeoutMs),
     cacheAssumption: inventoryRow.cacheAssumption,
     latencyImpact: inventoryRow.latencyImpact,
     uiProviderApiLatencyStateLabel: providerUnavailable
@@ -931,8 +1086,13 @@ export function validatePromptEnhancementCostInventoryV1(
       reasonCodes.push(`regional_data_residency_assumption_missing:${inventoryRow.callId}`);
     }
     if (inventoryRow.inputTokenCap !== PROMPT_ENHANCEMENT_COST_INPUT_TOKEN_CAP_V1) reasonCodes.push(`input_cap_mismatch:${inventoryRow.callId}`);
-    if (inventoryRow.outputTokenCap !== PROMPT_ENHANCEMENT_COST_OUTPUT_TOKEN_CAP_V1) reasonCodes.push(`output_cap_mismatch:${inventoryRow.callId}`);
-    if (inventoryRow.timeoutMs !== PROMPT_ENHANCEMENT_COST_TIMEOUT_MS_V1) reasonCodes.push(`timeout_mismatch:${inventoryRow.callId}`);
+    // Stated and sane, NOT equal to the composer's. Requiring equality made the widened type
+    // unusable — a row carrying the not-yet-measured sentinel was rejected — and it compelled every
+    // row to claim the composer's 2k cap, including the batch, whose own cap is several times that
+    // and for which a truncated reply is invalid rather than shorter. A row that genuinely inherits
+    // still passes, because it holds the global's value.
+    if (!statedCallBudget(inventoryRow.outputTokenCap)) reasonCodes.push(`output_cap_missing_or_invalid:${inventoryRow.callId}`);
+    if (!statedCallBudget(inventoryRow.timeoutMs)) reasonCodes.push(`timeout_missing_or_invalid:${inventoryRow.callId}`);
     if (inventoryRow.retryCount !== PROMPT_ENHANCEMENT_COST_VALIDATION_RETRY_COUNT_V1) reasonCodes.push(`retry_mismatch:${inventoryRow.callId}`);
     if (inventoryRow.cacheAssumption !== 'no_cache_savings_no_addons') reasonCodes.push(`cache_assumption_missing:${inventoryRow.callId}`);
     if (inventoryRow.latencyImpact !== 'wait_for_full_result_under_timeout') reasonCodes.push(`latency_impact_missing:${inventoryRow.callId}`);
@@ -1049,6 +1209,22 @@ function row(input: {
   separateLlmCallInV1: boolean;
   skipCondition: string;
   reasonCodes: readonly string[];
+  /**
+   * This call's own timeout, when it has one.
+   *
+   * Absent means the row genuinely runs under the global value — which is true of most of them.
+   * The three sequence calls name theirs, so a reader of the inventory can see which figure each
+   * one is actually measured against rather than assuming they all share one.
+   */
+  timeoutMs?: number;
+  /**
+   * This call's own output budget, when it is not the composer's.
+   *
+   * 🔴 The batch's is several times the composer's, because it writes every remaining prompt in one
+   * reply — and a row claiming 2k for it understates the one call where the cap decides whether a
+   * long sequence is possible at all.
+   */
+  outputTokenCap?: number;
 }): PromptEnhancementAcceptedCostCallInventoryRowV1 {
   return {
     callId: input.callId,
@@ -1070,8 +1246,8 @@ function row(input: {
     addOnCostAssumption: PROMPT_ENHANCEMENT_COST_ADD_ON_ASSUMPTION_V1,
     regionalDataResidencyAssumption: PROMPT_ENHANCEMENT_COST_REGIONAL_DATA_RESIDENCY_ASSUMPTION_V1,
     inputTokenCap: PROMPT_ENHANCEMENT_COST_INPUT_TOKEN_CAP_V1,
-    outputTokenCap: PROMPT_ENHANCEMENT_COST_OUTPUT_TOKEN_CAP_V1,
-    timeoutMs: PROMPT_ENHANCEMENT_COST_TIMEOUT_MS_V1,
+    outputTokenCap: input.outputTokenCap ?? PROMPT_ENHANCEMENT_COST_OUTPUT_TOKEN_CAP_V1,
+    timeoutMs: input.timeoutMs ?? PROMPT_ENHANCEMENT_COST_TIMEOUT_MS_V1,
     retryCount: PROMPT_ENHANCEMENT_COST_VALIDATION_RETRY_COUNT_V1,
     cacheAssumption: 'no_cache_savings_no_addons',
     fallbackReasons: FALLBACK_REASONS,
@@ -1273,6 +1449,7 @@ const REQUIRED_CALL_IDS: readonly PromptEnhancementCostCallIdV1[] = [
   'custom_feedback_classification',
   'later_popup_feedback_decision',
   'optional_safety_review',
+  'sequence_planning',
   'sequence_summary_wording',
   'sequence_item_wording',
   'future_regenerate_flow',

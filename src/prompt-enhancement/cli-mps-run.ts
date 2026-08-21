@@ -1,5 +1,6 @@
 import * as readline from 'node:readline';
 import type { PromptEnhancementPrepareResultV1 } from './contracts.js';
+import type { PromptActionSignalKind } from '../store/feedback-signals.js';
 import {
   buildPromptEnhancementMpsFirstPopupV1,
   createPromptEnhancementMpsCurrentBodyIntentV1,
@@ -11,7 +12,7 @@ import {
   decodePromptEnhancementCliKeyV1,
   openPromptEnhancementInteractiveConsoleV1,
   promptEnhancementCliViewportV1,
-  windowPromptEnhancementFieldForDisplayV1,
+  windowPromptEnhancementFieldForDisplayWithStartV1,
   buildPromptEnhancementCliFeedbackStateV1,
   reducePromptEnhancementCliFeedbackV1,
   renderPromptEnhancementCliFeedbackFrameV1,
@@ -80,6 +81,23 @@ export type PromptEnhancementCliMpsOutcomeV1 =
   | { state: 'cancelled'; feedback?: PromptEnhancementCliMpsCancelFeedbackV1 }
   | { state: 'not_shown'; reasonCodes: readonly string[] };
 
+/**
+ * NF Plan B (B-3): map an MPS popup outcome state to its content-free per-action signal kind. Covers the
+ * first-popup states (send / declined / cancelled) and the continuation-only `interruption` (for when
+ * that runner goes live). `not_shown` (and edits) are not actions → undefined.
+ */
+export function promptEnhancementMpsActionSignalKindV1(
+  state: string,
+): PromptActionSignalKind | undefined {
+  switch (state) {
+    case 'send':         return 'mps_send';
+    case 'cancelled':    return 'mps_cancel';
+    case 'declined':     return 'mps_decline';
+    case 'interruption': return 'mps_interruption';
+    default:             return undefined;
+  }
+}
+
 const INTERACTIVE_ROW_COUNT = 3;
 const DETAILS_DISPLAY_ROWS = 5;
 /** Non-body chrome lines in a frame (header, pinch/why, row labels, details helpers, plan, footer, spacing). */
@@ -88,6 +106,13 @@ const FRAME_CHROME_LINES = 23;
 export async function runPromptEnhancementCliMpsFirstPopupV1(input: {
   result: PromptEnhancementPrepareResultV1;
   interaction?: PromptEnhancementCliMpsInteractionV1 | null;
+  /**
+   * NF Plan B — content-free per-action sink (kind + timestamp only, never text). Fired at the
+   * moment the user APPLIES additional details (`mps_apply_details`), mirroring the PE popup. The
+   * terminal outcome (send / cancel / decline) is captured separately by the caller via
+   * `promptEnhancementMpsActionSignalKindV1`. Optional — unset = no capture (unchanged behaviour).
+   */
+  actionSignalSink?: (kind: PromptActionSignalKind, occurredAt: number) => void;
 }): Promise<PromptEnhancementCliMpsOutcomeV1> {
   const handoffMetadata = input.result.uiView.handoffAndSequenceSummary;
   if (!handoffMetadata) return { state: 'not_shown', reasonCodes: ['no_handoff_sequence_summary'] };
@@ -165,21 +190,25 @@ export async function runPromptEnhancementCliMpsFirstPopupV1(input: {
     const detailsBuffer = field === 'additional_details'
       ? promptEnhancementKeepFieldCursorVisibleV1(editor.buffers.additional_details, width, DETAILS_DISPLAY_ROWS)
       : editor.buffers.additional_details;
-    const detailsDisplay = detailsBuffer.text
-      ? windowPromptEnhancementFieldForDisplayV1(detailsBuffer, width, DETAILS_DISPLAY_ROWS)
-      : '';
+    const detailsWindow = detailsBuffer.text
+      ? windowPromptEnhancementFieldForDisplayWithStartV1(detailsBuffer, width, DETAILS_DISPLAY_ROWS)
+      : { text: '', start: 0 };
+    const detailsDisplay = detailsWindow.text;
     // Size the body to fill the window (two-pass measured chrome), then resize the editor to it.
     editor = resizePromptEnhancementMultilineEditorV1(editor, width, measureBodyViewport(detailsDisplay));
     const bodyBuffer = editor.buffers.enhanced_body;
-    const bodyDisplay = windowPromptEnhancementFieldForDisplayV1(bodyBuffer, width, editor.viewportRows);
-    // Caret row is window-relative, from the SAME synced buffer used for the display. If it falls
-    // outside the shown lines, leave it unset so the cursor is hidden rather than misplaced.
+    const bodyWindow = windowPromptEnhancementFieldForDisplayWithStartV1(bodyBuffer, width, editor.viewportRows);
+    const bodyDisplay = bodyWindow.text;
+    // Caret row is window-relative, derived from the SAME window the display used (its `start`),
+    // not the raw buffer scroll. If it falls outside the shown lines, leave it unset so the cursor
+    // is hidden rather than misplaced.
     let caret: { field: PromptEnhancementEditorFieldV1; visualRow: number; visualColumn: number } | undefined;
     if (field) {
       const buffer = field === 'enhanced_body' ? bodyBuffer : detailsBuffer;
       const shownLines = (field === 'enhanced_body' ? bodyDisplay : detailsDisplay).split('\n').length;
+      const start = field === 'enhanced_body' ? bodyWindow.start : detailsWindow.start;
       const pos = promptEnhancementCursorVisualPositionV1(buffer, width);
-      const visualRow = pos.row - buffer.scrollVisualRow;
+      const visualRow = pos.row - start;
       if (visualRow >= 0 && visualRow < shownLines) caret = { field, visualRow, visualColumn: pos.column };
     }
     // Display-only projection of the model: the windowed field texts render; the FULL texts stay
@@ -245,6 +274,10 @@ export async function runPromptEnhancementCliMpsFirstPopupV1(input: {
           // row, so the next Enter sends the merged prompt. Blank details apply nothing.
           const details = editor.buffers.additional_details.text.trim();
           if (details.length === 0) continue;
+          // NF Plan B — record the apply action (content-free kind + timestamp) at the moment it is
+          // issued, mirroring the PE popup's `pe_apply_details`. Only a REAL apply fires (past the
+          // blank guard above); the merged body/details text is never carried.
+          input.actionSignalSink?.('mps_apply_details', Date.now());
           // Repeated applies extend the ONE details block (no duplicate headings — same rule as
           // the PE popup).
           const detailsHeading = 'Additional details to incorporate:';

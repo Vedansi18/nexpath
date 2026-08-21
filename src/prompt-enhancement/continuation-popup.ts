@@ -8,6 +8,7 @@ import {
   type PromptEnhancementWhyHelpV1,
 } from './contracts.js';
 import { validatePromptEnhancementHandoffMetadataV1 } from './handoff-metadata.js';
+import { PROMPT_ENHANCEMENT_SEQUENCE_TASK_KINDS_V1, type PromptEnhancementSequenceItemKindV1 } from './sequence-payload.js';
 
 export const PROMPT_ENHANCEMENT_MPS_CONTINUATION_POPUP_TITLE_V1 = 'Nexpath · Multi-prompt sequence' as const;
 export const PROMPT_ENHANCEMENT_MPS_CONTINUATION_POPUP_HEADING_V1 = 'Use enhanced sequence prompt' as const;
@@ -31,6 +32,14 @@ export interface PromptEnhancementMpsContinuationInputV1 {
   result: PromptEnhancementPrepareResultV1;
   handoffMetadata: PromptEnhancementHandoffMetadataV1;
   event: PromptEnhancementFutureSequenceRuntimeEventV1;
+  // MPS-3 (Part B): sequence position for the progress line. `done` = items already dealt with
+  // (= currentItemIndex, item 0 sent at intake); `total` = the deliverable-item count (itemCount - 1,
+  // item 0 excluded — owner decision 2026-08-17). Off the packaged continuation
+  // (`sequence-packager.ts` progress); the UI derives its own copy, never recomputes.
+  progress: { done: number; total: number };
+  // MPS-12: the served item's kind (Ruling C §22.2) — read, never inferred from empty text. TASK kinds
+  // (`first_task`/`task`) render the original slice; CONFIRMATION kinds render no original region.
+  itemKind: PromptEnhancementSequenceItemKindV1;
   additionalDetails?: PromptEnhancementMpsContinuationDetailsV1;
   cancel: {
     state: 'available' | 'disabled';
@@ -39,8 +48,9 @@ export interface PromptEnhancementMpsContinuationInputV1 {
 }
 
 export interface PromptEnhancementMpsContinuationIdentityV1 {
+  // MPS-10 (9.1): no `projectRoot` — an absolute path must never appear in the serialized model. The
+  // request id already binds scope (it embeds the per-project session id), so it is the only key needed.
   requestId: string;
-  projectRoot: string;
   sequenceId: string;
   sequenceItemId: string;
   currentItemRevision: number;
@@ -54,6 +64,12 @@ export interface PromptEnhancementMpsContinuationPopupModelV1 {
   title: typeof PROMPT_ENHANCEMENT_MPS_CONTINUATION_POPUP_TITLE_V1;
   heading: typeof PROMPT_ENHANCEMENT_MPS_CONTINUATION_POPUP_HEADING_V1;
   layout: typeof PROMPT_ENHANCEMENT_MPS_CONTINUATION_LAYOUT_V1;
+  // MPS-3 (Part B): sequence position, rendered as a progress line at the top. Data only — the
+  // renderer formats the copy ("Sequence N of M"); the model never carries the formatted string.
+  progress: { done: number; total: number };
+  // MPS-12: the served item's kind (Ruling C §22.2). The renderer shows the original-text region for TASK
+  // kinds only; CONFIRMATION kinds carry no original block. Read from the stored item, never inferred.
+  itemKind: PromptEnhancementSequenceItemKindV1;
   // Deterministic header copy from the typed uiView (same source as the PE popup), present only
   // when supplied. The UI renders them like PE and never invents them.
   pinchLabel?: PromptEnhancementPinchLabelV1;
@@ -84,7 +100,12 @@ export interface PromptEnhancementMpsContinuationPopupModelV1 {
   };
   keyboard: {
     plainEnter: 'emit_one_typed_current_body_plus_details_request';
-    escape: 'leave_editor_focus_preserve_draft';
+    // MPS-2 (6.3): on a continuation, Escape now CANCELS the remaining sequence (terminal) — the delivery
+    // mapper turns the shell's decline outcome into `cancel_remaining_sequence`, so the declared contract
+    // value must match that runtime, not the old editor-blur claim. What the user is SHOWN about Escape
+    // (help copy, and whether a first Escape blurs the editor before cancelling) is a UI decision → the owner's;
+    // it is deliberately not encoded here.
+    escape: 'cancel_remaining_sequence';
     ctrlOrCmdJ: 'insert_newline';
     ctrlOrCmdUpDown: 'move_by_line';
     leftRight: 'move_by_character';
@@ -140,7 +161,24 @@ export type PromptEnhancementMpsContinuationIntentResultV1 =
 export function buildPromptEnhancementMpsContinuationPopupV1(
   input: PromptEnhancementMpsContinuationInputV1,
 ): PromptEnhancementMpsContinuationBuildResultV1 {
-  const resultValidation = validatePromptEnhancementPrepareResultV1(input.result);
+  // Kind-aware validation. A CONFIRMATION item carries NO original slice, so the packager sets
+  // `originalPromptText: ''` (owner-locked, Ruling C §22.2 — see sequence-packager.ts and the
+  // `confirmation-carries-no-original-text` acceptance fixture). The shared prepare-result validator
+  // requires `originalPromptText` non-empty (isCompleteCurrentBody), but the continuation RENDERER skips
+  // the original region for confirmation kinds anyway (the TASK-kinds guard in cli-mps-popup), so the
+  // field is never displayed for them. Validating the packaged result as-is would wrongly reject a
+  // legitimate confirmation continuation as `missing_current_body`. So for a confirmation item whose
+  // original text is (correctly) empty, validate against a copy carrying a non-empty stand-in for the
+  // never-shown field. The stand-in is the item's OWN body text — it is discarded after the check; the
+  // popup is built from the real `input.result` below, which keeps the owner-locked empty value.
+  const isTaskKind = (PROMPT_ENHANCEMENT_SEQUENCE_TASK_KINDS_V1 as readonly string[]).includes(input.itemKind);
+  const validationTarget = isTaskKind || input.result.currentBody.originalPromptText.trim().length > 0
+    ? input.result
+    : { ...input.result, currentBody: { ...input.result.currentBody, originalPromptText: input.result.currentBody.text } };
+  // A continuation result is a packaged sequence-item body: its verdict graph carries the single
+  // `sequence` phase, not the fresh-prompt pipeline's fifteen. Validate it in that mode so a valid
+  // continuation is not rejected as `missing_validation_graph`; every other result check still applies.
+  const resultValidation = validatePromptEnhancementPrepareResultV1(validationTarget, { sequenceItemGraph: true });
   if (!resultValidation.ok) {
     return { state: 'no_popup', reasonCodes: ['invalid_prepare_result', ...resultValidation.reasonCodes] };
   }
@@ -206,7 +244,6 @@ export function buildPromptEnhancementMpsContinuationPopupV1(
   const safeCurrentItemRevision = currentItemRevision as number;
   const identity: PromptEnhancementMpsContinuationIdentityV1 = {
     requestId: input.result.requestId,
-    projectRoot: input.result.projectRoot,
     sequenceId: event.sequenceId,
     sequenceItemId: event.sequenceItemId,
     currentItemRevision: safeCurrentItemRevision,
@@ -222,6 +259,8 @@ export function buildPromptEnhancementMpsContinuationPopupV1(
       title: PROMPT_ENHANCEMENT_MPS_CONTINUATION_POPUP_TITLE_V1,
       heading: PROMPT_ENHANCEMENT_MPS_CONTINUATION_POPUP_HEADING_V1,
       layout: PROMPT_ENHANCEMENT_MPS_CONTINUATION_LAYOUT_V1,
+      progress: { done: input.progress.done, total: input.progress.total },
+      itemKind: input.itemKind,
       ...(input.result.uiView.pinchLabel ? { pinchLabel: input.result.uiView.pinchLabel } : {}),
       ...(input.result.uiView.whyHelp ? { whyHelp: input.result.uiView.whyHelp } : {}),
       identity,
@@ -246,7 +285,7 @@ export function buildPromptEnhancementMpsContinuationPopupV1(
       },
       keyboard: {
         plainEnter: 'emit_one_typed_current_body_plus_details_request',
-        escape: 'leave_editor_focus_preserve_draft',
+        escape: 'cancel_remaining_sequence',
         ctrlOrCmdJ: 'insert_newline',
         ctrlOrCmdUpDown: 'move_by_line',
         leftRight: 'move_by_character',

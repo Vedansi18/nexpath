@@ -12,6 +12,7 @@
  */
 
 import { runBuildGate, SHIPPED_CONTENT_TEMPLATES } from '../src/decision-session/content-template-tooling.js';
+import { findPromptEnhancementRoutabilityGaps } from '../src/prompt-enhancement/templates/registry.js';
 
 const res = runBuildGate(SHIPPED_CONTENT_TEMPLATES);
 
@@ -30,3 +31,22 @@ if (!res.ok) {
 }
 
 console.log(`✓ content-template build gate passed (${SHIPPED_CONTENT_TEMPLATES.length} records, all floored + schema-valid)`);
+
+// SELECTABILITY: id presence proved a record EXISTS while ten intents sat
+// unreachable by any prompt for months. This proves a realistic PROMPT actually
+// ROUTES to every intent through the production keyed path - a no-popup outcome
+// or an absorb into a different intent aborts the build.
+const routabilityGaps = findPromptEnhancementRoutabilityGaps();
+if (routabilityGaps.length > 0) {
+  console.error(`✗ prompt-enhancement selectability gate FAILED (${routabilityGaps.length} gaps)`);
+  for (const gap of routabilityGaps) console.error(`  ${gap}`);
+  console.error('Build aborted: an intent a prompt cannot reach is a dead template, not a shipped one.');
+  process.exit(1);
+}
+// Says what it PROVES, not what we wish it proved. Each probe is routed with its
+// intent as the classifier proposal, so this gate shows every intent is selectable
+// end-to-end at the ROUTER — no absorption into another intent, no skip — which is
+// strictly more than the id-presence check it replaced and would have caught the
+// original dead-template bug. It does NOT exercise the prompt->intent step: that is
+// the classifier's, and an LLM cannot be gated deterministically in a build.
+console.log('✓ prompt-enhancement selectability gate passed (every intent routes from its proposal - no absorb, no skip)');

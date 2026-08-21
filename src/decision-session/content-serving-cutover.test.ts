@@ -7,7 +7,7 @@
 //       holistic backstop for the per-class record safeguard tests.
 //   (2) context_loss role-tailored serving — founder / indie_hacker / pm each receive their
 //       own variant through the engine (record roleOverrides), distinct from the base.
-//   (3) Completeness — every shipped record is engine-served (marker == shipped == 142).
+//   (3) Completeness — every shipped record is engine-served (marker == shipped == 144).
 //
 // The single-dispatch source invariant (no static content map / resolver symbol survives)
 // lives in single-dispatch-lint.test.ts.
@@ -112,7 +112,7 @@ describe('cutover sweep — context_loss role-tailored serving through the engin
 });
 
 describe('cutover sweep — completeness (the engine is the sole content source)', () => {
-  it('every shipped record is engine-served — marker == shipped == 142', () => {
+  it('every shipped record is engine-served — marker == shipped == 144', () => {
     expect(SHIPPED_CONTENT_TEMPLATES.length).toBe(144);
     expect(MIGRATED_SIGNALS.size).toBe(SHIPPED_CONTENT_TEMPLATES.length);
     for (const rec of SHIPPED_CONTENT_TEMPLATES) {

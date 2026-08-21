@@ -23,6 +23,18 @@ import {
   type PromptEnhancementValidationStatus,
 } from './contracts.js';
 import { buildPromptEnhancementCostVisibilityMetadataV1 } from './cost-observability.js';
+import { promptEnhancementFactValueLinesV1, promptEnhancementGroundedValuesV1 } from './fact-value-render.js';
+import type { PromptEnhancementGuidanceFact } from './templates/section-plan.js';
+import { PROMPT_ENHANCEMENT_FALLTHROUGH_SHORT_PREFIX_V1 } from './body-assertion-checks.js';
+import {
+  buildPromptEnhancementOriginalTextRefV1,
+  buildPromptEnhancementPromptPointRefsV1,
+  extractPromptEnhancementPromptPointsV1,
+  promptEnhancementInputCarriesPriorBodyV1,
+  type PromptEnhancementPromptReviewOrigin,
+  buildPromptEnhancementTransformReasonCodesV1,
+  withPromptEnhancementCarriedFromPreviousBodyV1,
+} from './original-text-refs.js';
 import type { PromptEnhancementPrimaryIntent } from './routing-taxonomy.js';
 import {
   buildPromptEnhancementCanonicalConfirmation,
@@ -73,6 +85,30 @@ export interface PromptEnhancementStructuredComposerOutputV1 {
   // (BCP-47-ish, e.g. 'en' / 'hi' / 'hi-Latn' Hinglish / 'gu-Latn' Gujlish). Read by
   // the E5 language-consistency gate; optional so pre-E5 callers stay valid.
   detectedLanguageSelfReport?: string;
+  // The composer self-reports the authority mode of the wording it just produced, so drift from a
+  // plan/review request into execution instructions can be caught and rewritten while the composer is
+  // still running. Read ONLY by the authority-consistency gate to trigger a retry — it never relaxes
+  // the deterministic safety verdict. Optional so pre-existing callers stay valid.
+  authorityModeSelfReport?: 'plan_or_review' | 'execute_requested' | 'observe_or_literal';
+  // The single most action-oriented sentence the composer produced, quoted verbatim, which is the
+  // evidence its authorityModeSelfReport verdict was reached from. Asking for the quote BEFORE the
+  // verdict is what makes the verdict describe the produced text rather than the request that was
+  // made — without it the model answers from intent ("I was asked to plan, so this is planning") and
+  // reports 'plan_or_review' for wording that plainly instructs a deploy. Optional: a missing quote
+  // is not drift, exactly as a missing self-report is not drift.
+  authorityEvidence?: string;
+  // The composer's reading of the ORIGINAL REQUEST's mode, which is a different question from
+  // authorityModeSelfReport (the mode of the text it produced).
+  //
+  // An escalation is only meaningful as "a plan/review request answered with execution wording", so
+  // both layers that judge it must first decide what the request was — and both decided it with the
+  // same word list, which is the mechanism that misfires. When that list misreads the request, the
+  // composer-side gate skips itself entirely. Carrying the model's own reading lets either source
+  // establish plan/review intent, so a word-list miss no longer disables the check.
+  //
+  // Widening only: this can cause the gate to run when it otherwise would not. It can never stop the
+  // gate from running, and it never clears a deterministic verdict.
+  requestModeSelfReport?: 'plan_or_review' | 'execute_requested' | 'observe_or_literal';
 }
 
 export interface PromptEnhancementComposeResult {
@@ -96,9 +132,27 @@ export interface PromptEnhancementComposeResult {
   }[];
 }
 
+/**
+ * Why a composer reply was refused. The validator used to reject silently, so a body that lost the
+ * model's wording was indistinguishable from one that never had any — the same blindness that hid the
+ * provider-failure cause. Reporting the rule that fired makes the loss diagnosable.
+ */
+type PromptEnhancementComposerDraftRejectionReason =
+  NonNullable<PromptEnhancementComposerBoundaryV1['draftRejectionReason']>;
+
 interface ValidatedStructuredComposerDrafts {
   readonly draftsBySectionId: ReadonlyMap<string, string>;
   readonly composerClaims: readonly string[];
+  /** Set only when the WHOLE reply was refused; the body then loses every section's wording. */
+  readonly rejectionReason?: PromptEnhancementComposerDraftRejectionReason;
+  /**
+   * Set when individual drafts were dropped but the reply survived. Without this a partial drop is
+   * invisible — the body composes, `fallbackMode` stays `none`, and the diagnostic reports a clean
+   * `deterministic_body_composed` while sections have quietly gone missing. That is the same
+   * silent-loss shape the rejection reason was added to remove, so it is reported the same way.
+   */
+  readonly droppedDraftCount?: number;
+  readonly droppedDraftReason?: PromptEnhancementComposerDraftRejectionReason;
 }
 
 const ADDITIONAL_DETAILS_WORD_CAP = 5000;
@@ -123,7 +177,11 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
     action,
     hasAcceptedAdditionalDetails(input),
   );
-  const validatedLlmDrafts = validatedStructuredComposerDrafts(input.structuredComposerOutput, sectionPlans);
+  const validatedLlmDrafts = validatedStructuredComposerDrafts(
+    input.structuredComposerOutput,
+    sectionPlans,
+    input.sectionPlanningResult.renderedFacts,
+  );
   const structuredComposerAttempted = runtimeState === 'accepted_structured_output' && input.structuredComposerOutput !== undefined;
   const structuredComposerRejected = structuredComposerAttempted && validatedLlmDrafts.draftsBySectionId.size === 0;
   const effectiveRuntimeState: PromptEnhancementComposerRuntimeState = structuredComposerRejected
@@ -144,12 +202,18 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
       actionType: action,
       callVisibilityMode: 'fallback_no_llm',
     });
-    const previousBody = previousBodySafety.generatedSafeStatus === input.previousSendableBody.generatedSafeStatus
-      ? input.previousSendableBody
-      : {
-          ...input.previousSendableBody,
-          generatedSafeStatus: previousBodySafety.generatedSafeStatus,
-        };
+    // T2 carriers: the body-level fields below record the carry, but the SECTIONS would
+    // otherwise still read as freshly composed. Stamp each one so a section is
+    // self-describing — appended, so how the text was originally made is not lost.
+    const carriedSections = input.previousSendableBody.sections.map((section) => ({
+      ...section,
+      transformReasonCodes: withPromptEnhancementCarriedFromPreviousBodyV1(section.transformReasonCodes),
+    }));
+    const previousBody = {
+      ...input.previousSendableBody,
+      generatedSafeStatus: previousBodySafety.generatedSafeStatus,
+      sections: carriedSections,
+    };
     return {
       currentBody: previousBody,
       composerBoundary: buildComposerBoundary(input, 'previous_sendable_body', 'fallback_no_llm', [], {
@@ -252,6 +316,20 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
   // that ruling; the failure stays fully visible via the notice + typed metadata
   // (fallbackReason / providerFailureState) while the user keeps the grounded guidance.
 
+  // Where the canonical confirmation clause goes when the PROMPT demands one.
+  //
+  // Preference order: the section whose kind is built for it, then any section the confirmation
+  // capability reached, then — the point of the third arm — ANY generated section.
+  //
+  // The third arm is not defensive padding. The first two ask which sections carry
+  // `sensitive_action_confirmation`, and that flag is now scoped to the four sections the design
+  // names. A confirmation-needed prompt whose plan happens to contain none of them would otherwise
+  // find nothing and place the clause nowhere: the prompt says "ask me before you do this" and the
+  // body never says it. Before the flags were scoped, every section carried the flag, so the second
+  // arm always matched and this hole could not open.
+  //
+  // If the prompt demands confirmation, the clause is placed. Which section hosts it is a matter of
+  // taste; whether it appears at all is not.
   const canonicalConfirmationSectionId = requiresPromptEnhancementExecutionConfirmationForPrompt(input.originalPromptText)
     ? sectionPlans.find((sectionPlan) => (
       sectionPlan.sectionKind === 'risk_safety_or_confirmation' &&
@@ -261,8 +339,43 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
         sectionPlan.sectionKind !== 'original_request_or_goal' &&
         sectionPlan.safetyFlags.includes('sensitive_action_confirmation')
       ))?.sectionId
+      ?? [...sectionPlans].reverse().find((sectionPlan) => (
+        sectionPlan.sectionKind !== 'original_request_or_goal'
+      ))?.sectionId
     : undefined;
-  const renderSectionsWithConfirmation = (confirmationSectionId: string | undefined) => sectionPlans.map((sectionPlan) =>
+  // Owner ruling 2026-08-14: when the composer RAN and a section's draft did not survive validation,
+  // that section is DISCARDED rather than filled with the deterministic line. The fixed text is not
+  // a lesser answer, it is the defect this milestone exists to remove — and it reaches the user with
+  // nothing to say it is a fallback, so a refused draft silently becomes generic advice inside the
+  // prompt they send on.
+  //
+  // Two carve-outs, both deliberate:
+  //
+  //  - The section that actually CARRIES the confirmation line keeps its text. There the fixed
+  //    wording IS the requirement, not filler: dropping it because a draft was refused would strip
+  //    "you must ask me for go-ahead confirmation" from the prompt the user sends to their agent,
+  //    turning a validation fault into a silently missing safety clause.
+  //  - A provider failure (timeout / unavailable) is untouched. That path already renders
+  //    deterministically WITH a visible failure notice, so the user is told. This rule is for the
+  //    case that says nothing.
+  //
+  // The carve-out deliberately does NOT key on `isRequired` or `safetyFlags`, and that is the whole
+  // reason it works. `isRequired` means "this section belongs in the body" — it is true of every
+  // planned section, because they come from the template's required set — not "its fixed text is a
+  // safety requirement". `safetyFlags` is worse: three of its four values are ROUTE capabilities
+  // stamped onto every section, so every section reports the same flags and the field carries no
+  // per-section information at all. Keying on either swallows every section and the rule never
+  // fires. Only the confirmation-bearing section is genuinely load-bearing, and it is already
+  // identified above.
+  const keepsSectionWhenDraftMissing = (sectionPlan: PromptEnhancementSectionPlanItemV1): boolean =>
+    sectionPlan.sectionKind === 'original_request_or_goal'
+    || (canonicalConfirmationSectionId !== undefined && sectionPlan.sectionId === canonicalConfirmationSectionId);
+  const renderableSectionPlans = structuredComposerAttempted
+    ? sectionPlans.filter((sectionPlan) =>
+      validatedLlmDrafts.draftsBySectionId.has(sectionPlan.sectionId)
+      || keepsSectionWhenDraftMissing(sectionPlan))
+    : sectionPlans;
+  const renderSectionsWithConfirmation = (confirmationSectionId: string | undefined) => renderableSectionPlans.map((sectionPlan) =>
       renderSection({
         sectionPlan,
         originalPromptText: input.originalPromptText,
@@ -278,7 +391,8 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
   let text = action === "apply_details" && typeof input.editedBodyText === "string"
     ? applyEditedBodyWithAdditionalDetails(input.editedBodyText, input.additionalDetailsText)
     : canonicalText;
-  let sections = attachSpanRefs(sectionPlans, renderedSections, text);
+  const modelDraftedSectionIds = new Set(validatedLlmDrafts.draftsBySectionId.keys());
+  let sections = attachSpanRefs(input.sectionPlanningResult.renderedFacts, renderableSectionPlans, renderedSections, text, input.originalPromptText, modelDraftedSectionIds, input.sectionPlanningResult.promptReviewOrigin);
   // Validator-parity confirmation guard (blocked-popup fix 2026-08-07): the prompt-based gate
   // above cannot see risk phrasing the GENERATED wording introduces (an LLM draft is free text),
   // but validatePromptEnhancementSafety scans the generated body and hard-blocks a body that
@@ -289,18 +403,24 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
   // rule cannot trip either. The classifier ignores the canonical sentence itself, so this
   // converges in one pass. Edited bodies keep their own edit-stage rules (text === canonicalText
   // guard); prompts the prompt-based gate already covers are unaffected (confirmation present).
+  // Merge note (2026-08-07): the `!text.includes(...)` guard covers the one case the paragraph above
+  // does not — an LLM draft that spontaneously contains the canonical sentence itself. The classifier
+  // strips that sentence before scoring risk, so the predicate would still say "required", and
+  // re-rendering would then append a SECOND copy. Skipping the re-render when the line is already in
+  // the body keeps it appearing exactly once.
   if (
     canonicalConfirmationSectionId === undefined
     && text === canonicalText
+    && !text.includes(buildPromptEnhancementCanonicalConfirmation(input.originalPromptText))
     && promptEnhancementGeneratedBodyRequiresConfirmationV1({ sections, originalPromptText: input.originalPromptText }, text)
   ) {
-    const lastGeneratedSectionId = [...sectionPlans].reverse()
+    const lastGeneratedSectionId = [...renderableSectionPlans].reverse()
       .find((sectionPlan) => sectionPlan.sectionKind !== 'original_request_or_goal')?.sectionId;
     if (lastGeneratedSectionId !== undefined) {
       renderedSections = renderSectionsWithConfirmation(lastGeneratedSectionId);
       canonicalText = renderedSections.map((section) => section.text).join('\n\n');
       text = canonicalText;
-      sections = attachSpanRefs(sectionPlans, renderedSections, text);
+      sections = attachSpanRefs(input.sectionPlanningResult.renderedFacts, renderableSectionPlans, renderedSections, text, input.originalPromptText, modelDraftedSectionIds, input.sectionPlanningResult.promptReviewOrigin);
     }
   }
   const generatedSafeStatus: PromptEnhancementValidationStatus = deterministicFallback === 'none' ? 'valid' : 'valid_with_fallback';
@@ -313,6 +433,10 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
     effectiveRuntimeState,
     sectionPlans,
     input.additionalDetailsText,
+    validatedLlmDrafts.rejectionReason,
+    validatedLlmDrafts.droppedDraftCount
+      ? { count: validatedLlmDrafts.droppedDraftCount, reason: validatedLlmDrafts.droppedDraftReason }
+      : undefined,
   );
   const composerMode = composerModeForAction(action, usesLlmWording);
   const sourceFactIds = unique(sectionPlans.flatMap((sectionPlan) => sectionPlan.structuredContentPartRefs));
@@ -386,8 +510,9 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
       localOriginalPromptIncluded: true,
       llmCallPolicy,
       rawComposerOutput: structuredComposerRejected ? 'rejected_or_unavailable' : undefined,
+      draftRejectionReason: validatedLlmDrafts.rejectionReason,
       composerClaims,
-    }),
+    }, effectiveRuntimeState),
     availableActions: buildActionEntries(currentBodyId, bodyRevision, 'available', callVisibilityMode),
     bodySectionAgreement: 'exact',
     sourceGuidanceCoverage: hasSourceGuidanceSection(sectionPlans) ? 'covered' : 'fallback_no_generated_body',
@@ -450,39 +575,206 @@ function selectSectionPlansForAction(
   ));
 }
 
+/**
+ * L7567: content-template inputs are "source evidence only" and "cannot become …
+ * raw DS prose copy". GR-2 is the phase that put that text in front of the model,
+ * so this is where the lock is checked — the system prompt asks the model not to
+ * paste, and by this codebase's own standard an instruction is not a contract.
+ *
+ * ⚠️ Deliberately NARROW, because GR-1 exists to make bodies state resolved values:
+ * only content-template prose qualifies (a hard fact's value like `vitest` is a
+ * fact, not prose), and only a substantial run counts. A short evidence value is
+ * grounding and must keep passing.
+ */
+const PROMPT_ENHANCEMENT_PROSE_COPY_MIN_CHARS_V1 = 40;
+
+function contentTemplateProseFor(
+  sectionPlan: PromptEnhancementSectionPlanItemV1,
+  renderedFacts: readonly PromptEnhancementGuidanceFact[],
+): readonly string[] {
+  return renderedFacts
+    .filter((fact) => fact.targetSectionKind === sectionPlan.sectionKind)
+    .filter((fact) => fact.sourceType === 'content_template_record' || fact.sourceType === 'content_template_runtime_fact')
+    .map((fact) => normalizeWhitespace(fact.evidence?.value ?? '').toLowerCase())
+    .filter((prose) => prose.length >= PROMPT_ENHANCEMENT_PROSE_COPY_MIN_CHARS_V1);
+}
+
 function validatedStructuredComposerDrafts(
   output: PromptEnhancementStructuredComposerOutputV1 | undefined,
   sectionPlans: readonly PromptEnhancementSectionPlanItemV1[],
+  renderedFacts: readonly PromptEnhancementGuidanceFact[] = [],
 ): ValidatedStructuredComposerDrafts {
-  const rejected: ValidatedStructuredComposerDrafts = { draftsBySectionId: new Map(), composerClaims: [] };
-  if (!output || output.sectionDrafts.length === 0) return rejected;
+  const rejectedFor = (
+    rejectionReason: PromptEnhancementComposerDraftRejectionReason,
+  ): ValidatedStructuredComposerDrafts => ({ draftsBySectionId: new Map(), composerClaims: [], rejectionReason });
+  // No output at all is not a rejection — the composer never produced anything to refuse. But an output
+  // that arrives carrying zero drafts IS a refusal, and leaving it reasonless made it the one rejection
+  // path that could not be identified.
+  if (!output) return { draftsBySectionId: new Map(), composerClaims: [] };
+  if (output.sectionDrafts.length === 0) return rejectedFor('no_drafts_returned');
   const sectionIds = new Set(sectionPlans.map((sectionPlan) => sectionPlan.sectionId));
   const sourceIds = new Set(sectionPlans.flatMap((sectionPlan) => sectionPlan.sourceRefs.map((ref) => ref.sourceId)));
   const sourceRefIds = new Set(sectionPlans.flatMap((sectionPlan) => sectionPlan.sourceRefs.map((ref) => ref.sourceRefId)));
   const allowedSourceFactIds = new Set(sectionPlans.flatMap((sectionPlan) => sectionPlan.structuredContentPartRefs));
   const drafts = new Map<string, string>();
+
+  // Per-draft faults cost their own section, not the whole reply.
+  //
+  // Five of the six refusal rules describe ONE draft, yet each discarded every other draft with it —
+  // so a single unusable section replaced eight good ones with canned text. Dropping just the
+  // offending draft leaves that section to render deterministically while the rest keep the model's
+  // wording. This is not a new output shape: the model routinely returns fewer drafts than there are
+  // planned sections, so mixed bodies already ship and already render correctly.
+  //
+  // Safety is unchanged. Every surviving draft passed exactly the checks it passes today; nothing
+  // weaker is admitted. The only difference is that a GOOD draft is no longer punished for a
+  // DIFFERENT draft being bad.
+  let droppedDraftCount = 0;
+  let droppedDraftReason: PromptEnhancementComposerDraftRejectionReason | undefined;
+  const dropDraft = (reason: PromptEnhancementComposerDraftRejectionReason): void => {
+    droppedDraftCount += 1;
+    droppedDraftReason ??= reason;
+  };
+
   for (const draft of output.sectionDrafts) {
-    if (!sectionIds.has(draft.sectionId)) return rejected;
+    if (!sectionIds.has(draft.sectionId)) { dropDraft('unknown_section'); continue; }
     const sectionPlan = sectionPlans.find((section) => section.sectionId === draft.sectionId);
-    if (!sectionPlan || sectionPlan.sectionKind === 'original_request_or_goal') return rejected;
+    if (!sectionPlan || sectionPlan.sectionKind === 'original_request_or_goal') { dropDraft('original_section'); continue; }
     const bodyText = normalizeWhitespace(draft.bodyText);
-    if (!bodyText || containsDisallowedComposerWording(bodyText, sourceIds, sourceRefIds)) return rejected;
-    if (draft.sourceFactIds.length === 0) return rejected;
-    if (draft.sourceFactIds.some((sourceFactId) => !sectionPlan.structuredContentPartRefs.includes(sourceFactId))) return rejected;
+    if (!bodyText || containsDisallowedComposerWording(bodyText, sourceIds, sourceRefIds)) { dropDraft('empty_or_disallowed_wording'); continue; }
+    // Pasted content-template prose is disallowed wording of exactly the kind the
+    // check above refuses, so it rides that reason rather than widening the typed
+    // union — and it costs this draft only, leaving the section to render
+    // deterministically while every other draft keeps the model's wording.
+    const pastedProse = contentTemplateProseFor(sectionPlan, renderedFacts)
+      .some((prose) => bodyText.toLowerCase().includes(prose));
+    if (pastedProse) { dropDraft('empty_or_disallowed_wording'); continue; }
+    if (draft.sourceFactIds.length === 0) { dropDraft('no_source_fact_ids'); continue; }
+    if (draft.sourceFactIds.some((sourceFactId) => !sectionPlan.structuredContentPartRefs.includes(sourceFactId))) { dropDraft('source_fact_id_not_in_section'); continue; }
     drafts.set(draft.sectionId, `- ${bodyText}`);
   }
+
+  // Every draft dropped is the same outcome as an output-wide refusal, and must report as one rather
+  // than as an empty success.
+  if (drafts.size === 0) return rejectedFor(droppedDraftReason ?? 'no_drafts_returned');
+
+  // The claims union stays OUTPUT-WIDE: a broken union is a property of the whole reply and cannot be
+  // attributed to any one section, so there is no draft to drop.
   const composerClaims = output.composerClaims.map((claim) => claim.startsWith('claim:') ? claim.slice('claim:'.length) : '');
   if (
     composerClaims.length === 0 ||
     composerClaims.some((sourceFactId) => !allowedSourceFactIds.has(sourceFactId))
   ) {
-    return rejected;
+    return rejectedFor('claims_empty_or_unallowed');
   }
   return {
     draftsBySectionId: drafts,
     composerClaims: output.composerClaims,
+    droppedDraftCount: droppedDraftCount > 0 ? droppedDraftCount : undefined,
+    droppedDraftReason,
   };
 }
+
+/**
+ * Internal vocabulary that must never surface in composed wording, matched as a SUBSTRING on purpose.
+ *
+ * These are identifier fragments, not English, so a partial match is a real hit: `pinch` must still
+ * catch `pinchFallback`, `whydesc` must still catch `whyDescBase`. Word boundaries would let exactly
+ * the leaks these exist to stop straight through.
+ */
+const DISALLOWED_INTERNAL_TOKENS: readonly string[] = ['whydesc', 'descbase', 'pinch'];
+
+/**
+ * Voice-policy phrases, matched with WORD BOUNDARIES.
+ *
+ * These were substring-matched too, and that was wrong: they are ordinary English, short enough to sit
+ * inside unrelated words. Measured collateral, all of which discarded an entire composed body:
+ *
+ *   "The commit says the driver changed."     -> `it says`     (comm|it says)
+ *   "Keep this optional flag for now."        -> `this option` (this option|al)
+ *   "Count the units output by the job."      -> `its output`  (un|its output)
+ *
+ * Word boundaries keep every phrase doing its actual job while removing the collateral entirely.
+ */
+/**
+ * ⚠️ EXPORTED so the composer's own INSTRUCTIONS can be checked against it. §17.13 shipped a
+ * worked example telling the model to write "you should …" — a phrase on this very list — so
+ * every draft that obeyed was rejected, and a rejected draft takes its whole section with it.
+ * The engine ordered wording and then refused it for obeying, and the section simply vanished.
+ */
+export const PROMPT_ENHANCEMENT_DISALLOWED_COMPOSER_PHRASES_V1: readonly string[] = [
+  'the developer should',
+  'you seem',
+  'you should',
+  'you forgot',
+  'you already',
+  'you usually',
+  'you often',
+  'nexpath thinks',
+  'bad practice',
+  'you failed',
+  'show simpler options',
+  'ask the ai',
+  'have the ai',
+  'get the ai',
+  'instruct the ai',
+  'it says',
+  'it finds',
+  'its answer',
+  'its output',
+  'the prompt above',
+  'the action below',
+  'this action below',
+  'this option',
+];
+
+/**
+ * Word boundaries alone cut coverage as well as collateral, so ordinary inflection is allowed after
+ * the phrase and nothing else. Measured: a bare trailing `\b` silently stopped matching
+ *
+ *   "You shouldn't have skipped the fixture."   (`you should` + n't)
+ *   "That is bad practices in this repo."       (`bad practice` + s)
+ *   "Compare its outputs against the baseline." (`its output`  + s)
+ *
+ * — three voice-policy leaks traded for the three false positives it fixed, i.e. no net gain. The
+ * allowance is deliberately narrow: `m`, `rflow` and `al` are not inflections, so `the aim`,
+ * `the airflow` and `this optional` still pass. Both apostrophe forms are accepted because composed
+ * wording routinely carries the typographic one.
+ */
+const PHRASE_INFLECTION_SUFFIX = "(?:s|['’]s|n['’]t)?";
+
+const DISALLOWED_PHRASE_PATTERNS: readonly RegExp[] = PROMPT_ENHANCEMENT_DISALLOWED_COMPOSER_PHRASES_V1.map(
+  (phrase) => new RegExp(`\\b${phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}${PHRASE_INFLECTION_SUFFIX}\\b`, 'i'),
+);
+
+/**
+ * "the AI" as a third-person reference to the coding agent — the thing the voice policy actually
+ * forbids ("the AI should fix this", "the AI will need to run it").
+ *
+ * A bare `the ai` substring cannot express that rule. It matched `the aim`, `the air`, `the airflow`
+ * — and, worse, it matched the user's own product vocabulary. The composer is REQUIRED to mirror the
+ * user's register (the language-fidelity rule), so a prompt reading "compare our AI assistant against
+ * the AI gateway we already ship" produced sections saying "the AI gateway" and every one of them was
+ * discarded. The engine ordered the wording and then rejected it for obeying.
+ *
+ * Requiring a following verb separates the two: "the AI should" blocks, "the AI gateway" does not.
+ *
+ * The verb set is an explicit list rather than a general "looks like a verb" test, because the
+ * distinguishing word is a NOUN in the passing case ("the AI gateway", "the AI agents") and several
+ * candidate verbs are also plausible nouns — "the AI checks we run", "the AI calls we log". Listing
+ * only unambiguous ones keeps the false-positive cost down; a false positive here discards the whole
+ * composed body.
+ *
+ * ⚠️ TWO KNOWN LEAKS, both accepted and both pinned as tests:
+ *   1. a possessive reference — "the AI's answer" — no verb follows. `its answer` / `its output`
+ *      above still cover the common shape.
+ *   2. a present-tense verb outside the list — "the AI orchestrates the run". The list covers modals,
+ *      auxiliaries and the common agent verbs, which is the shape instruction-like wording takes;
+ *      exhaustive verb detection is not attainable with a word list, which is the same lesson the
+ *      authority rule taught.
+ */
+const AGENT_THIRD_PERSON_PATTERN =
+  /\bthe ai\b(?=\s+(?:should|shall|will|would|can|could|may|might|must|ought|needs?|has|have|had|is|are|was|were|does|do|did|to|runs?|executes?|performs?|generates?|produces?|handles?|decides?|chooses?|assumes?|expects?|knows?|understands?)\b)/i;
 
 function containsDisallowedComposerWording(
   text: string,
@@ -493,36 +785,9 @@ function containsDisallowedComposerWording(
   if (/\{\{[^}]+\}\}|\{r4_open\}|\{r4_close\}|\{r5_inject:/i.test(text)) return true;
   if (/\bpe-(ar|cr|dr|em|wr|g)-?\d*(?:\.\d+)*\b/i.test(text)) return true;
   if (/\b(source-review|autoresearch|analysis file|dev plan file|planning label|research label)\b/i.test(text)) return true;
-  const disallowed = [
-    'whydesc',
-    'descbase',
-    'pinch',
-    'the developer should',
-    'you seem',
-    'you should',
-    'you forgot',
-    'you already',
-    'you usually',
-    'you often',
-    'nexpath thinks',
-    'bad practice',
-    'you failed',
-    'show simpler options',
-    'ask the ai',
-    'have the ai',
-    'get the ai',
-    'instruct the ai',
-    'the ai',
-    'it says',
-    'it finds',
-    'its answer',
-    'its output',
-    'the prompt above',
-    'the action below',
-    'this action below',
-    'this option',
-  ];
-  if (disallowed.some((phrase) => normalizedText.includes(phrase))) return true;
+  if (DISALLOWED_INTERNAL_TOKENS.some((token) => normalizedText.includes(token))) return true;
+  if (DISALLOWED_PHRASE_PATTERNS.some((pattern) => pattern.test(text))) return true;
+  if (AGENT_THIRD_PERSON_PATTERN.test(text)) return true;
   return [...sourceIds, ...sourceRefIds].some((sourceId) => sourceId && normalizedText.includes(sourceId.toLowerCase()));
 }
 
@@ -564,11 +829,50 @@ function renderSection(input: {
     };
   }
 
-  const lines = instructionLinesForSection(sectionPlan.sectionKind, action, input.originalPromptText, heading);
+  const lines = instructionLinesForSection(
+    sectionPlan.sectionKind,
+    action,
+    input.originalPromptText,
+    heading,
+    input.sectionPlanningResult.promptReviewOrigin,
+    sectionPlan.slotObligations,
+    input.sectionPlanningResult.debugEvidenceObserved,
+  );
+  // GR-1 (§13.2): STATE the facts this section holds instead of instructing about
+  // them. Only facts group A actually RESOLVED produce a line, so a section with
+  // no value keeps its existing instruction untouched — the Phase-4 collapse
+  // happened precisely because a projection was widened without resolution.
+  const factValueLines = promptEnhancementFactValueLinesV1(
+    sectionPlan.sectionKind,
+    input.sectionPlanningResult.renderedFacts,
+  );
+  if (factValueLines.length > 0) {
+    // The done-when: the body contains the typed VALUE, not the standing
+    // instruction. But ONLY the CONTENT-FREE instructions are displaced — the
+    // three §13.1 names ("Cover <heading>…" and the grounding lines) are the
+    // ones that tell the reader to use grounding while containing none.
+    //
+    // A section whose instruction carries a REAL requirement keeps it and gains
+    // the fact: replacing it stripped `verification_or_test_plan` down to
+    // "Known project fact: test runner is vitest", losing the verification
+    // command the section exists to ask for — and F1's own slot obligation with
+    // it. The fact leads because it is the concrete part.
+    const contentFreeInstruction =
+      lines.length === 1 &&
+      (lines[0]!.startsWith(PROMPT_ENHANCEMENT_FALLTHROUGH_SHORT_PREFIX_V1) ||
+        sectionPlan.sectionKind === 'project_grounding_facts');
+    if (contentFreeInstruction) lines.length = 0;
+    lines.unshift(...factValueLines);
+  }
   if (action === 'more_thorough') {
     lines.push(...moreThoroughLines(sectionPlan));
   }
-  if (action === 'more_project_grounded') {
+  if (action === 'more_project_grounded' && factValueLines.length === 0) {
+    // Only when the section has NO stated grounding of its own. With a rendered
+    // fact this line either repeats the content-free instruction §13.1 names, or
+    // — worse, and measured — asserts "Known project grounding is unavailable"
+    // directly beneath a stated project fact, contradicting the body on the very
+    // action the user picked to GET more grounding.
     lines.push(projectGroundingLine(sectionPlan));
   }
   if (action === 'apply_details' && sectionPlan.sectionKind === 'context_and_constraints') {
@@ -591,11 +895,40 @@ function renderSection(input: {
   };
 }
 
+const DEBUG_EVIDENCE_LABEL_OVERRIDES_V1: Readonly<Record<string, string>> = {
+  request_response_samples: 'request/response samples',
+};
+
+/**
+ * Names the evidence forms the developer actually supplied, for the carry line.
+ * Labels are GENERIC by default (`id` with underscores as spaces) so a newly
+ * added evidence form still renders sensibly instead of silently dropping out
+ * of the sentence; only ids that read badly carry an override.
+ */
+function describeSuppliedEvidenceV1(forms: readonly string[]): string {
+  const labels = forms.map((form) => DEBUG_EVIDENCE_LABEL_OVERRIDES_V1[form] ?? form.replaceAll('_', ' '));
+  const joined = labels.length <= 1
+    ? (labels[0] ?? '')
+    : `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`;
+  return `${joined.charAt(0).toUpperCase()}${joined.slice(1)} ${labels.length === 1 ? 'is' : 'are'}`;
+}
+
 function instructionLinesForSection(
   sectionKind: string,
   action: PromptEnhancementComposerAction,
   originalPromptText: string,
   sectionTitle: string,
+  // T3: the point inventory is the line that re-emits harvested text as "these original
+  // points", so the provenance has to reach it rather than stopping at the composer.
+  promptReviewOrigin: PromptEnhancementPromptReviewOrigin,
+  // De-nagging (owner ruling 2026-08-17): the reproduction section is a locked
+  // required shape, so it renders whether or not evidence was supplied. These
+  // two decide WHICH line it renders — the request obligation is present only
+  // when the registry decided to ask, and the observed forms name what the
+  // developer actually sent so the carry line cannot claim a failing test they
+  // never mentioned.
+  slotObligations: readonly string[] = [],
+  debugEvidenceObserved: readonly string[] = [],
 ): string[] {
   const concise = action === 'shorter';
   const line = (longText: string, shortText: string) => concise ? shortText : longText;
@@ -619,10 +952,15 @@ function instructionLinesForSection(
       ),
     ],
     reproduction_or_evidence: [
-      line(
-        'Capture the failing behavior, reproduction path, observed evidence, and expected behavior before changing code.',
-        'Capture repro, evidence, and expected behavior.',
-      ),
+      slotObligations.includes('reproduction_or_evidence_request') || debugEvidenceObserved.length === 0
+        ? line(
+          'Capture the failing behavior, reproduction path, observed evidence, and expected behavior before changing code.',
+          'Capture repro, evidence, and expected behavior.',
+        )
+        : line(
+          `${describeSuppliedEvidenceV1(debugEvidenceObserved)} provided in the request above.`,
+          `${describeSuppliedEvidenceV1(debugEvidenceObserved)} provided above.`,
+        ),
     ],
     behavior_preservation: [
       line(
@@ -644,8 +982,8 @@ function instructionLinesForSection(
     ],
     point_inventory_or_decomposition: [
       line(
-        pointInventoryLine(originalPromptText),
-        compactPointInventoryLine(originalPromptText),
+        pointInventoryLine(originalPromptText, promptReviewOrigin),
+        compactPointInventoryLine(originalPromptText, promptReviewOrigin),
       ),
     ],
     task_order_dependencies: [
@@ -739,10 +1077,28 @@ function compositionDiagnostics(
   runtimeState: PromptEnhancementComposerRuntimeState,
   sectionPlans: readonly PromptEnhancementSectionPlanItemV1[],
   additionalDetailsText?: string,
+  // Which draft-validation rule refused the composer's reply, when one did. Without it a lost body
+  // reports only `validation_failed`, which names the stage but not the cause — and there are six
+  // possible causes.
+  draftRejectionReason?: PromptEnhancementComposerDraftRejectionReason,
+  // Individual drafts dropped while the reply survived. Reported for the same reason as the
+  // rejection above: without it, sections disappear from the body while the diagnostic still reads
+  // as a clean composition.
+  droppedDrafts?: { count: number; reason?: PromptEnhancementComposerDraftRejectionReason },
 ): PromptEnhancementComposeResult['diagnostics'] {
+  const fallbackReasonCode = draftRejectionReason
+    ? `deterministic_fallback:${runtimeState}:${draftRejectionReason}`
+    : `deterministic_fallback:${runtimeState}`;
   const diagnostics: PromptEnhancementComposeResult['diagnostics'][number][] = fallbackMode === 'none'
     ? [{ category: 'generated', reasonCode: 'deterministic_body_composed' }]
-    : [{ category: 'fallback_or_no_popup', reasonCode: `deterministic_fallback:${runtimeState}` }];
+    : [{ category: 'fallback_or_no_popup', reasonCode: fallbackReasonCode }];
+
+  if (droppedDrafts && droppedDrafts.count > 0) {
+    diagnostics.push({
+      category: 'fallback_or_no_popup',
+      reasonCode: `partial_draft_drop:${droppedDrafts.count}:${droppedDrafts.reason ?? 'unreported'}`,
+    });
+  }
 
   if (action === 'more_project_grounded' && !hasUsableProjectGroundingSource(sectionPlans)) {
     diagnostics.push({
@@ -797,28 +1153,24 @@ function additionalDetailsWordCount(text: string | undefined): number {
   return normalized ? normalized.split(' ').length : 0;
 }
 
-function pointInventoryLine(originalPromptText: string): string {
-  const points = extractPromptPoints(originalPromptText);
+function pointInventoryLine(
+  originalPromptText: string,
+  promptReviewOrigin: PromptEnhancementPromptReviewOrigin,
+): string {
+  const points = extractPromptEnhancementPromptPointsV1(originalPromptText, promptReviewOrigin);
   if (points.length === 0) {
     return 'Preserve the original request, dependencies, and completion checks inside this one prompt body.';
   }
   return `Preserve these original points in the work plan: ${points.join(' | ')}.`;
 }
 
-function compactPointInventoryLine(originalPromptText: string): string {
-  const points = extractPromptPoints(originalPromptText);
+function compactPointInventoryLine(
+  originalPromptText: string,
+  promptReviewOrigin: PromptEnhancementPromptReviewOrigin,
+): string {
+  const points = extractPromptEnhancementPromptPointsV1(originalPromptText, promptReviewOrigin);
   if (points.length === 0) return 'Keep a compact point inventory.';
   return `Keep these points covered: ${points.join(' | ')}.`;
-}
-
-function extractPromptPoints(originalPromptText: string): readonly string[] {
-  return originalPromptText
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => /^([-*]|\d+[.)])\s+/.test(line))
-    .map((line) => normalizeWhitespace(line.replace(/^([-*]|\d+[.)])\s+/, '')))
-    .filter(Boolean)
-    .slice(0, 12);
 }
 
 function normalizeWhitespace(value: string): string {
@@ -844,10 +1196,26 @@ function sentPromptOriginFor(
 }
 
 function attachSpanRefs(
+  // GR-1: the resolved facts, so each section can record the values it
+  // legitimately states for the no-invention allow-list.
+  renderedFacts: readonly PromptEnhancementGuidanceFact[],
   sectionPlans: readonly PromptEnhancementSectionPlanItemV1[],
   renderedSections: readonly { sectionId: string; title: string; bodyText: string; text: string }[],
   bodyText: string,
+  // T2 carriers: the original is the anchor the refs index. Passed in rather than
+  // recovered from the body, because the body is composed prose and the original is not.
+  originalPromptText: string,
+  modelDraftedSectionIds: ReadonlySet<string>,
+  // T3: without this the carriers would ref harvested Nexpath boilerplate as the user's
+  // own points — the same self-ingestion defect, one layer down.
+  promptReviewOrigin: PromptEnhancementPromptReviewOrigin,
 ): readonly PromptEnhancementSectionV1[] {
+  // Extracted once per composition rather than per section: the points belong to the
+  // prompt, not to any one section, and recomputing invites two answers.
+  const promptPoints = extractPromptEnhancementPromptPointsV1(originalPromptText, promptReviewOrigin);
+  // Computed once alongside the points, from the same predicate, so the point fence and
+  // the ref fence cannot disagree about whether this prompt quotes Nexpath back.
+  const inputCarriesPriorBody = promptEnhancementInputCarriesPriorBodyV1(originalPromptText, promptReviewOrigin);
   return sectionPlans.map((sectionPlan) => {
     const rendered = renderedSections.find((section) => section.sectionId === sectionPlan.sectionId);
     const startOffset = rendered ? bodyText.indexOf(rendered.text) : -1;
@@ -864,6 +1232,29 @@ function attachSpanRefs(
       }]
       : [];
 
+    // T2 carriers, written ONCE here. The original section quotes itself in full, so its
+    // ref is stated rather than searched for — searching would find the same span by a
+    // fuzzier route and could disagree with it.
+    const isOriginalSection = sectionPlan.sectionKind === 'original_request_or_goal';
+    const originalTextRef = buildPromptEnhancementOriginalTextRefV1({
+      sectionId: sectionPlan.sectionId,
+      originalPromptText,
+      sectionBodyText: rendered?.bodyText ?? '',
+      quotedText: isOriginalSection && originalPromptText.length > 0 ? originalPromptText : undefined,
+      inputCarriesPriorBody,
+    });
+    const promptPointRefs = buildPromptEnhancementPromptPointRefsV1({
+      sectionId: sectionPlan.sectionId,
+      originalPromptText,
+      promptPoints,
+      sectionBodyText: rendered?.bodyText ?? '',
+    });
+    const transformReasonCodes = buildPromptEnhancementTransformReasonCodesV1({
+      isOriginalSection,
+      wasComposedByModel: modelDraftedSectionIds.has(sectionPlan.sectionId),
+      originalTextRef,
+    });
+
     return {
       sectionId: sectionPlan.sectionId,
       sectionKind: sectionPlan.sectionKind,
@@ -877,6 +1268,10 @@ function attachSpanRefs(
       sourceKind: sectionPlan.sourceKind,
       sourceIds: sectionPlan.sourceIds,
       sourceFactIds: sectionPlan.structuredContentPartRefs,
+      groundedFactValues: promptEnhancementGroundedValuesV1(sectionPlan.sectionKind, renderedFacts),
+      // The typed slot obligations travel from the plan onto the composed
+      // section unchanged - the composer, checks and fixtures read them here.
+      slotObligations: sectionPlan.slotObligations,
       routeCandidateRefs: [sectionPlan.templateId],
       evidenceStatus: sectionPlan.sourceEvidenceStatus,
       sourceEvidenceStatus: sectionPlan.sourceEvidenceStatus,
@@ -904,6 +1299,9 @@ function attachSpanRefs(
       safetyFlags: sectionPlan.safetyFlags,
       sensitivityFlags: sectionPlan.sensitivityFlags,
       spanRefs,
+      originalTextRefs: [originalTextRef],
+      promptPointRefs,
+      transformReasonCodes,
       publicExplanationCategory: 'source_coverage',
       whyHelpReasonCodes: sectionPlan.structuredContentPartRefs,
       callVisibilityMode: sectionPlan.callVisibilityMode,
@@ -957,8 +1355,10 @@ function buildComposerBoundary(
     localOriginalPromptIncluded: boolean;
     llmCallPolicy?: PromptEnhancementComposerBoundaryV1['llmCallPolicy'];
     rawComposerOutput?: PromptEnhancementComposerBoundaryV1['rawComposerOutput'];
+    draftRejectionReason?: PromptEnhancementComposerBoundaryV1['draftRejectionReason'];
     composerClaims?: readonly string[];
   },
+  runtimeState?: PromptEnhancementComposerRuntimeState,
 ): PromptEnhancementComposerBoundaryV1 {
   const sourceRefs = selectedSectionPlans.flatMap((section) => section.sourceRefs);
   const originalPromptRef = selectedSectionPlans
@@ -1000,6 +1400,7 @@ function buildComposerBoundary(
     rawComposerOutput: artifactState?.rawComposerOutput ?? (llmCallPolicy === 'optional_with_cost_visibility'
       ? artifactState?.composerMode.includes('llm_structured_wording') ? 'llm_output_validated_into_artifact' : 'rejected_or_unavailable'
       : fallbackMode === 'previous_sendable_body' ? 'rejected_or_unavailable' : 'not_used_deterministic'),
+    draftRejectionReason: artifactState?.draftRejectionReason,
     validatedCanonicalPromptArtifact: 'current_body_v1',
     composerMode,
     budgetState: {
@@ -1036,14 +1437,14 @@ function buildComposerBoundary(
       'output_cap_exceeded',
       'unsafe_metadata_copy',
     ],
-    fallbackReasonCodes: [runtimeBlockReasonFor(fallbackMode) ?? 'not_applicable'],
+    fallbackReasonCodes: [runtimeBlockReasonFor(fallbackMode, runtimeState) ?? 'not_applicable'],
     inputContract: {
       originalPromptRef,
       bodyPlanId: input.sectionPlanningResult.bodyPlan.bodyPlanId,
       sectionPlanIds: selectedSectionPlans.map((section) => section.sectionPlanId),
       boundedSourceSummaryRefs: unique(sourceRefs.map((ref) => ref.sourceRefId)),
       privacyApprovedFactsOnly: true,
-      callVisibilityState: callVisibilityState(callVisibilityMode, fallbackMode, input.action ?? 'default', llmCallPolicy),
+      callVisibilityState: callVisibilityState(callVisibilityMode, fallbackMode, input.action ?? 'default', llmCallPolicy, runtimeState),
       excludesRawStoreRows: true,
       excludesOldDecisionSessionOptionText: true,
       excludesUiInferredBusinessState: true,
@@ -1133,13 +1534,14 @@ function callVisibilityState(
   fallbackMode: PromptEnhancementFallbackMode,
   action: PromptEnhancementComposerAction,
   llmCallPolicy: PromptEnhancementComposerBoundaryV1['llmCallPolicy'] = 'no_call',
+  runtimeState?: PromptEnhancementComposerRuntimeState,
 ): PromptEnhancementCostVisibilityMetadataV1 {
   const usesLlm = llmCallPolicy === 'optional_with_cost_visibility';
   const metadata = buildPromptEnhancementCostVisibilityMetadataV1(costCallIdForAction(action), {
     callVisibilityMode,
     plannedCallCount: usesLlm ? 1 : 0,
     usedCallCount: usesLlm ? 1 : 0,
-    fallbackReason: runtimeBlockReasonFor(fallbackMode) ?? 'not_applicable',
+    fallbackReason: runtimeBlockReasonFor(fallbackMode, runtimeState) ?? 'not_applicable',
     providerFailureState: providerFailureStateForFallback(fallbackMode, callVisibilityMode),
   });
   if (usesLlm || callVisibilityMode === 'provider_unavailable') return metadata;
@@ -1181,11 +1583,32 @@ function costCallIdForAction(action: PromptEnhancementComposerAction): PromptEnh
   return 'baseline_pe_composer';
 }
 
-function runtimeBlockReasonFor(fallbackMode: PromptEnhancementFallbackMode): PromptEnhancementRuntimeBlockReason | undefined {
+function runtimeBlockReasonFor(
+  fallbackMode: PromptEnhancementFallbackMode,
+  runtimeState?: PromptEnhancementComposerRuntimeState,
+): PromptEnhancementRuntimeBlockReason | undefined {
   if (fallbackMode === 'provider_api_unavailable') return 'provider_unavailable';
   if (fallbackMode === 'timeout_no_send') return 'timeout';
-  if (fallbackMode === 'deterministic_body') return 'validation_failed';
-  if (fallbackMode === 'original_prompt_only' || fallbackMode === 'no_popup') return 'not_applicable';
+  // Two very different failures both fall back to a deterministic body, and reporting them under one
+  // reason made them indistinguishable in the logs: a body whose drafts were REJECTED by
+  // `validatedStructuredComposerDrafts` looked identical to a composer that GAVE UP after exhausting
+  // its retries on malformed/inconsistent replies. `malformed_output` already exists in the contract
+  // for the second case; use it, so a reader can tell which half of the pipeline failed.
+  if (fallbackMode === 'deterministic_body') {
+    return runtimeState === 'invalid_output' ? 'malformed_output' : 'validation_failed';
+  }
+  if (fallbackMode === 'original_prompt_only' || fallbackMode === 'no_popup') {
+    // An empty section plan renders the user's own prompt and nothing else — the thinnest body
+    // there is. That is unremarkable when no call was requested, and it is a failure when one was:
+    // a key was present, the popup was judged worth showing, and the pipeline still produced no
+    // guidance. Reporting both as 'not_applicable' made the second indistinguishable from the
+    // first, so the state is carried through when there is one.
+    if (runtimeState === 'validation_failed') return 'validation_failed';
+    if (runtimeState === 'invalid_output') return 'malformed_output';
+    if (runtimeState === 'timeout') return 'timeout';
+    if (runtimeState === 'provider_unavailable') return 'provider_unavailable';
+    return 'not_applicable';
+  }
   return undefined;
 }
 

@@ -38,6 +38,7 @@ export interface PromptEnhancementHandoffMetadataInputV1 {
     publicSafeText: string;
     remainingTaskCount: number;
     taskRoleLabels: readonly string[];
+    taskSummaryLines?: readonly string[];
     sourceRefs?: readonly string[];
   };
   reasonCodes?: readonly string[];
@@ -351,6 +352,7 @@ function buildCompactSummary(
     publicSafeText: summary.publicSafeText,
     remainingTaskCount: summary.remainingTaskCount,
     taskRoleLabels: summary.taskRoleLabels,
+    taskSummaryLines: summary.taskSummaryLines ?? [],
     sourceRefs: summary.sourceRefs ?? sourceRefs,
     containsFuturePromptText: false,
     rawPromptTextExcluded: true,

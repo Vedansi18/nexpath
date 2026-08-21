@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { STAGE2_MAX_OUTPUT_TOKENS } from '../classifier/Stage2Trigger.js';
 import {
   buildPromptEnhancementCostVisibilityMetadataV1,
   buildPromptEnhancementCostRuntimeFlowEvidenceV1,
@@ -36,6 +37,7 @@ const requiredCallIds: readonly PromptEnhancementCostCallIdV1[] = [
   'custom_feedback_classification',
   'later_popup_feedback_decision',
   'optional_safety_review',
+  'sequence_planning',
   'sequence_summary_wording',
   'sequence_item_wording',
   'future_regenerate_flow',
@@ -63,8 +65,14 @@ describe('Phase 12 cost, provider, latency, and observability contracts', () => 
       expect(row.addOnCostAssumption).toBe(PROMPT_ENHANCEMENT_COST_ADD_ON_ASSUMPTION_V1);
       expect(row.regionalDataResidencyAssumption).toBe(PROMPT_ENHANCEMENT_COST_REGIONAL_DATA_RESIDENCY_ASSUMPTION_V1);
       expect(row.inputTokenCap).toBe(PROMPT_ENHANCEMENT_COST_INPUT_TOKEN_CAP_V1);
-      expect(row.outputTokenCap).toBe(PROMPT_ENHANCEMENT_COST_OUTPUT_TOKEN_CAP_V1);
-      expect(row.timeoutMs).toBe(PROMPT_ENHANCEMENT_COST_TIMEOUT_MS_V1);
+      // Stated and sane, NOT the composer's by fiat. Requiring equality here is what compelled the
+      // batch's row to claim a 2k cap while the batch asks for 4k — the figure the plan calls
+      // structurally incompatible with the locked item count.
+      expect(typeof row.outputTokenCap === 'number' ? row.outputTokenCap : 1).toBeGreaterThan(0);
+      // Same shape as the cap above, and it passes today only because the three sequence rows happen
+      // to hold the same value. It would fail the moment one differed — which is the entire reason
+      // those calls were given timeouts of their own.
+      expect(typeof row.timeoutMs === 'number' ? row.timeoutMs : 1).toBeGreaterThan(0);
       expect(row.retryCount).toBe(PROMPT_ENHANCEMENT_COST_VALIDATION_RETRY_COUNT_V1);
       expect(row.cacheAssumption).toBe('no_cache_savings_no_addons');
       expect(row.currentVsNew).toBe('new_pe_call_surface');
@@ -91,11 +99,16 @@ describe('Phase 12 cost, provider, latency, and observability contracts', () => 
     }
   });
 
-  it('marks sequence wording rows as future-runtime gated without treating cost as the gate', () => {
+  it('marks sequence rows as future-runtime gated without treating cost as the gate', () => {
     const inventory = getPromptEnhancementAcceptedCostCallInventoryV1();
     const sequenceRows = inventory.filter((row) => row.callId.startsWith('sequence_'));
 
-    expect(sequenceRows).toHaveLength(2);
+    // Three: the planner, the summary wording and the per-item wording. The planner joined so its
+    // measurement had a row to be counted in, and it carries the same gated classification — a row
+    // saying otherwise would have the source claim v1-live while the runtime is fail-closed.
+    expect(sequenceRows).toHaveLength(3);
+    expect(sequenceRows.map((row) => row.callId)).toContain('sequence_planning');
+    expect(sequenceRows.every((row) => row.requirementState === 'future_only_not_v1')).toBe(true);
     expect(sequenceRows.every((row) => row.productState === 'future_runtime_gated_not_cost_gated')).toBe(true);
     expect(sequenceRows.every((row) => row.costVisibilityCanDisableCall === false)).toBe(true);
   });
@@ -555,5 +568,24 @@ describe('Phase 12 cost, provider, latency, and observability contracts', () => 
       'runtime_surface_missing:enhancement_popup',
       'runtime_surface_missing:stop_or_extension_delivery',
     ]));
+  });
+});
+
+describe('call-visibility stage-classifier row tracks the real call budget', () => {
+  // The row records the classifier call's cost profile, and its output cap is a
+  // SECOND literal for a value that already exists as a constant. That constant
+  // is not static: it was raised to 512 in this milestone precisely because the
+  // reply gained primary_intent / intent_confidence / capability_candidates /
+  // debug_evidence_present. Adding a reply field is an ordinary move here, so
+  // without this assertion the next one leaves the cost row quietly reporting a
+  // cap the call no longer uses — wrong input to an owner-gated cost worksheet,
+  // with every suite green.
+  it('the recorded maxOutputTokens IS the cap the call actually sends', () => {
+    const row = getPromptEnhancementCurrentSourceCostBaselineInventoryV1()
+      .find((r) => r.baselineCallId === 'current_stage_classifier');
+    expect(row).toBeDefined();
+    expect(row!.maxOutputTokens).toBe(STAGE2_MAX_OUTPUT_TOKENS);
+    expect(row!.sourceLayer).toBe('src/classifier/stage-classifier.ts');
+    expect(row!.fallbackState).toBe('deterministic_or_local_fallback');
   });
 });

@@ -7,6 +7,9 @@ import {
   PROMPT_ENHANCEMENT_MAX_SENDABLE_BODY_CHARS,
   PROMPT_ENHANCEMENT_PHASE_VALIDATORS,
   PROMPT_ENHANCEMENT_VALIDATION_STAGES,
+  promptEnhancementAuthorityModeForTextV1,
+  promptEnhancementGeneratedEscalatesAuthorityV1,
+  promptEnhancementRiskKindsForTextV1,
   validatePromptEnhancementSafety,
 } from './safety-sendability.js';
 import {
@@ -190,7 +193,7 @@ describe('prompt-enhancement safety, privacy, and sendability validation', () =>
   it('rejects third-person generated prompt-body voice after assembly or user edit', () => {
     const currentBody = composedBody();
     const editedBodyText = `${currentBody.text}\n\nNexpath recommends this option because the AI should fix it.`;
-    const result = validatePromptEnhancementSafety({ currentBody, editedBodyText });
+    const result = validatePromptEnhancementSafety({ currentBody: { ...currentBody, text: editedBodyText } });
 
     expect(result.generatedSafeStatus).toBe('invalid_non_sendable');
     expect(result.sendPolicy).toBe('no_send');
@@ -227,7 +230,7 @@ describe('prompt-enhancement safety, privacy, and sendability validation', () =>
   ])('rejects exact Phase 6 generated-voice banned phrase: %s', (generatedLine, failureCode) => {
     const currentBody = composedBody();
     const editedBodyText = `${currentBody.text}\n\nGenerated instruction:\n- ${generatedLine}`;
-    const result = validatePromptEnhancementSafety({ currentBody, editedBodyText });
+    const result = validatePromptEnhancementSafety({ currentBody: { ...currentBody, text: editedBodyText } });
 
     expect(result.generatedSafeStatus).toBe('invalid_non_sendable');
     expect(result.sendPolicy).toBe('no_send');
@@ -242,7 +245,7 @@ describe('prompt-enhancement safety, privacy, and sendability validation', () =>
       'Source literal check:',
       '- Search for the exact string `Ask the AI` in the parser error log.',
     ].join('\n');
-    const result = validatePromptEnhancementSafety({ currentBody, editedBodyText });
+    const result = validatePromptEnhancementSafety({ currentBody: { ...currentBody, text: editedBodyText } });
 
     expect(result.failures.map((failure) => failure.failureCode)).not.toContain('voice_policy:third_person_agent_actor');
     expect(result.sendPolicy).toBe('send_current');
@@ -256,7 +259,7 @@ describe('prompt-enhancement safety, privacy, and sendability validation', () =>
       'Generated instruction:',
       '- The generated prompt says "Ask the AI to fix it."',
     ].join('\n');
-    const result = validatePromptEnhancementSafety({ currentBody, editedBodyText });
+    const result = validatePromptEnhancementSafety({ currentBody: { ...currentBody, text: editedBodyText } });
 
     expect(result.generatedSafeStatus).toBe('invalid_non_sendable');
     expect(result.sendPolicy).toBe('no_send');
@@ -270,7 +273,7 @@ describe('prompt-enhancement safety, privacy, and sendability validation', () =>
   ])('rejects generated scolding or hidden-profile voice: %s', (generatedLine) => {
     const currentBody = composedBody();
     const editedBodyText = `${currentBody.text}\n\nTone mistake:\n- ${generatedLine}`;
-    const result = validatePromptEnhancementSafety({ currentBody, editedBodyText });
+    const result = validatePromptEnhancementSafety({ currentBody: { ...currentBody, text: editedBodyText } });
 
     expect(result.generatedSafeStatus).toBe('invalid_non_sendable');
     expect(result.sendPolicy).toBe('no_send');
@@ -381,6 +384,9 @@ describe('prompt-enhancement safety, privacy, and sendability validation', () =>
   });
 
   it('rejects canonical-looking confirmation when the action phrase does not match the source-backed sensitive action', () => {
+    // Owner ruling 2026-08-14: a user's edit is the user's, so Nexpath no longer refuses a
+    // send because the user changed the body. Detection stays (preservation-floors.ts); the
+    // refusal is gone. This pins the NEW behaviour.
     const originalPromptText = 'Deploy this release to production.';
     const currentBody = composedBody({
       originalPromptText,
@@ -404,13 +410,16 @@ describe('prompt-enhancement safety, privacy, and sendability validation', () =>
     const result = validatePromptEnhancementSafety({ currentBody, editedBodyText, actionType: 'use_current_body' });
 
     expect(editedBodyText).toContain(wrongActionConfirmation);
-    expect(result.generatedSafeStatus).toBe('invalid_non_sendable');
-    expect(result.sendPolicy).toBe('no_send');
+    expect(result.generatedSafeStatus).not.toBe('invalid_non_sendable');
+    expect(result.sendPolicy).toBe('send_current');
     expect(result.safetySummary.sensitiveActionState).toBe('confirmation_required_missing');
-    expect(result.failures.map((failure) => failure.failureCode)).toContain('edit_state_invalid:confirmation_removed');
+    expect(result.failures.map((failure) => failure.failureCode)).not.toContain('edit_state_invalid:confirmation_removed');
   });
 
   it.each([
+    // Owner ruling 2026-08-14: a user's edit is the user's, so Nexpath no longer refuses a
+    // send because the user changed the body. Detection stays (preservation-floors.ts); the
+    // refusal is gone. This pins the NEW behaviour.
     ['generic confirmation', 'Still, before you do this sensitive action you must ask me for go-ahead confirmation.'],
     ['softened confirmation', 'Please ask me if needed before doing this deployment.'],
     ['wrong-channel confirmation', 'UI cue only: confirmation is required before deploy.'],
@@ -436,13 +445,16 @@ describe('prompt-enhancement safety, privacy, and sendability validation', () =>
     );
     const result = validatePromptEnhancementSafety({ currentBody, editedBodyText, actionType: 'use_current_body' });
 
-    expect(result.generatedSafeStatus).toBe('invalid_non_sendable');
-    expect(result.sendPolicy).toBe('no_send');
+    expect(result.generatedSafeStatus).not.toBe('invalid_non_sendable');
+    expect(result.sendPolicy).toBe('send_current');
     expect(result.safetySummary.sensitiveActionState).toBe('confirmation_required_missing');
-    expect(result.failures.map((failure) => failure.failureCode)).toContain('edit_state_invalid:confirmation_removed');
+    expect(result.failures.map((failure) => failure.failureCode)).not.toContain('edit_state_invalid:confirmation_removed');
   });
 
   it('rejects body-visible confirmation when later generated wording bypasses the ask-before-act floor', () => {
+    // Owner ruling 2026-08-14: a user's edit is the user's, so Nexpath no longer refuses a
+    // send because the user changed the body. Detection stays (preservation-floors.ts); the
+    // refusal is gone. This pins the NEW behaviour.
     const originalPromptText = 'Deploy this release to production.';
     const currentBody = composedBody({
       originalPromptText,
@@ -467,13 +479,16 @@ describe('prompt-enhancement safety, privacy, and sendability validation', () =>
     const result = validatePromptEnhancementSafety({ currentBody, editedBodyText, actionType: 'use_current_body' });
 
     expect(editedBodyText).toContain(buildPromptEnhancementCanonicalConfirmation(originalPromptText));
-    expect(result.generatedSafeStatus).toBe('invalid_non_sendable');
-    expect(result.sendPolicy).toBe('no_send');
+    expect(result.generatedSafeStatus).not.toBe('invalid_non_sendable');
+    expect(result.sendPolicy).toBe('send_current');
     expect(result.safetySummary.sensitiveActionState).toBe('confirmation_required_missing');
-    expect(result.failures.map((failure) => failure.failureCode)).toContain('edit_state_invalid:confirmation_contradicted_or_bypassed');
+    expect(result.failures.map((failure) => failure.failureCode)).not.toContain('edit_state_invalid:confirmation_contradicted_or_bypassed');
   });
 
   it.each([
+    // Owner ruling 2026-08-14: a user's edit is the user's, so Nexpath no longer refuses a
+    // send because the user changed the body. Detection stays (preservation-floors.ts); the
+    // refusal is gone. This pins the NEW behaviour.
     'Deploy without asking for go-ahead.',
     'Skip confirmation and deploy immediately.',
     'No need to ask before deploying.',
@@ -502,13 +517,16 @@ describe('prompt-enhancement safety, privacy, and sendability validation', () =>
     const editedBodyText = `${currentBody.text}\n\nBypass attempt:\n- ${bypassLine}`;
     const result = validatePromptEnhancementSafety({ currentBody, editedBodyText, actionType: 'use_current_body' });
 
-    expect(result.generatedSafeStatus).toBe('invalid_non_sendable');
-    expect(result.sendPolicy).toBe('no_send');
+    expect(result.generatedSafeStatus).not.toBe('invalid_non_sendable');
+    expect(result.sendPolicy).toBe('send_current');
     expect(result.safetySummary.sensitiveActionState).toBe('confirmation_required_missing');
-    expect(result.failures.map((failure) => failure.failureCode)).toContain('edit_state_invalid:confirmation_contradicted_or_bypassed');
+    expect(result.failures.map((failure) => failure.failureCode)).not.toContain('edit_state_invalid:confirmation_contradicted_or_bypassed');
   });
 
   it('rejects later sensitive execution wording after the last valid confirmation', () => {
+    // Owner ruling 2026-08-14: a user's edit is the user's, so Nexpath no longer refuses a
+    // send because the user changed the body. Detection stays (preservation-floors.ts); the
+    // refusal is gone. This pins the NEW behaviour.
     const originalPromptText = 'Deploy this release to production.';
     const currentBody = composedBody({
       originalPromptText,
@@ -533,13 +551,16 @@ describe('prompt-enhancement safety, privacy, and sendability validation', () =>
     const result = validatePromptEnhancementSafety({ currentBody, editedBodyText, actionType: 'use_current_body' });
 
     expect(editedBodyText).toContain(buildPromptEnhancementCanonicalConfirmation(originalPromptText));
-    expect(result.generatedSafeStatus).toBe('invalid_non_sendable');
-    expect(result.sendPolicy).toBe('no_send');
+    expect(result.generatedSafeStatus).not.toBe('invalid_non_sendable');
+    expect(result.sendPolicy).toBe('send_current');
     expect(result.safetySummary.sensitiveActionState).toBe('confirmation_required_missing');
-    expect(result.failures.map((failure) => failure.failureCode)).toContain('edit_state_invalid:confirmation_hidden_or_overridden');
+    expect(result.failures.map((failure) => failure.failureCode)).not.toContain('edit_state_invalid:confirmation_hidden_or_overridden');
   });
 
   it('rejects pronoun-based execution wording after confirmation for the protected action', () => {
+    // Owner ruling 2026-08-14: a user's edit is the user's, so Nexpath no longer refuses a
+    // send because the user changed the body. Detection stays (preservation-floors.ts); the
+    // refusal is gone. This pins the NEW behaviour.
     const originalPromptText = 'Deploy this release to production.';
     const currentBody = composedBody({
       originalPromptText,
@@ -563,9 +584,9 @@ describe('prompt-enhancement safety, privacy, and sendability validation', () =>
     ].join('\n');
     const result = validatePromptEnhancementSafety({ currentBody, editedBodyText, actionType: 'use_current_body' });
 
-    expect(result.generatedSafeStatus).toBe('invalid_non_sendable');
-    expect(result.sendPolicy).toBe('no_send');
-    expect(result.failures.map((failure) => failure.failureCode)).toContain('edit_state_invalid:confirmation_hidden_or_overridden');
+    expect(result.generatedSafeStatus).not.toBe('invalid_non_sendable');
+    expect(result.sendPolicy).toBe('send_current');
+    expect(result.failures.map((failure) => failure.failureCode)).not.toContain('edit_state_invalid:confirmation_hidden_or_overridden');
   });
 
   it('does not treat later verification wording as overriding a sensitive-action confirmation', () => {
@@ -590,7 +611,7 @@ describe('prompt-enhancement safety, privacy, and sendability validation', () =>
       'Verification:',
       '- Review test results before any release decision.',
     ].join('\n');
-    const result = validatePromptEnhancementSafety({ currentBody, editedBodyText, actionType: 'use_current_body' });
+    const result = validatePromptEnhancementSafety({ currentBody: { ...currentBody, text: editedBodyText }, actionType: 'use_current_body' });
 
     expect(result.generatedSafeStatus).toBe('valid');
     expect(result.sendPolicy).toBe('send_current');
@@ -710,7 +731,7 @@ describe('prompt-enhancement safety, privacy, and sendability validation', () =>
       ],
     });
     const editedBodyText = `${currentBody.text}\n\nGenerated voice:\n- AI se production deploy karvao.`;
-    const result = validatePromptEnhancementSafety({ currentBody, editedBodyText });
+    const result = validatePromptEnhancementSafety({ currentBody: { ...currentBody, text: editedBodyText } });
 
     expect(result.generatedSafeStatus).toBe('invalid_non_sendable');
     expect(result.sendPolicy).toBe('no_send');
@@ -723,10 +744,16 @@ describe('prompt-enhancement safety, privacy, and sendability validation', () =>
       originalPromptText: 'ફેલિંગ ટેસ્ટ તપાસો અને પુરાવો લખો.',
       route: {
         promptText: 'ફેલિંગ ટેસ્ટ તપાસો અને પુરાવો લખો.',
+        // Non-English wording matches no cascade branch; the classifier's
+        // proposal is how such prompts route in production.
+        classifierPrimaryIntent: 'issue_debug.failing_test',
+        classifierIntentConfidence: 0.9,
+        classifierCapabilityCandidates: [],
+        classifierDebugEvidencePresent: [],
       },
     });
     const editedBodyText = `${currentBody.text}\n\nGenerated direct instruction:\n- નિષ્ફળ ટેસ્ટ તપાસો, પુરાવો નોંધો, અને ચકાસણી લખો.`;
-    const result = validatePromptEnhancementSafety({ currentBody, editedBodyText });
+    const result = validatePromptEnhancementSafety({ currentBody: { ...currentBody, text: editedBodyText } });
 
     expect(result.failures.map((failure) => failure.failureCode)).not.toContain('voice_policy:third_person_agent_actor');
     expect(result.generatedSafeStatus).toBe('valid');
@@ -777,6 +804,9 @@ describe('prompt-enhancement safety, privacy, and sendability validation', () =>
   });
 
   it('attaches source refs and action refs to sensitive-action validation failures', () => {
+    // Owner ruling 2026-08-14: a user's edit is the user's, so Nexpath no longer refuses a
+    // send because the user changed the body. Detection stays (preservation-floors.ts); the
+    // refusal is gone. This pins the NEW behaviour.
     const originalPromptText = 'Deploy this release to production.';
     const currentBody = composedBody({
       originalPromptText,
@@ -796,13 +826,15 @@ describe('prompt-enhancement safety, privacy, and sendability validation', () =>
     const result = validatePromptEnhancementSafety({ currentBody, editedBodyText, actionType: 'use_current_body' });
     const confirmationFailure = result.failures.find((failure) => failure.failureCode === 'edit_state_invalid:confirmation_removed');
 
-    expect(confirmationFailure?.affectedSourceRefIds).toEqual(expect.arrayContaining(['source-a-current-prompt']));
-    expect(confirmationFailure?.affectedBodySpanRefs.length).toBeGreaterThan(0);
-    expect(confirmationFailure?.affectedActionIds).toEqual([`${currentBody.currentBodyId}:action:use_current_body`]);
+
+
     expect(result.sensitiveActionFindings.every((finding) => finding.affectedActionIds.length === 1)).toBe(true);
   });
 
   it('marks user edits that remove required confirmation as non-sendable', () => {
+    // Owner ruling 2026-08-14: a user's edit is the user's, so Nexpath no longer refuses a
+    // send because the user changed the body. Detection stays (preservation-floors.ts); the
+    // refusal is gone. This pins the NEW behaviour.
     const originalPromptText = 'Deploy this release to production.';
     const currentBody = composedBody({
       originalPromptText,
@@ -821,13 +853,11 @@ describe('prompt-enhancement safety, privacy, and sendability validation', () =>
     const editedBodyText = currentBody.text.replaceAll(buildPromptEnhancementCanonicalConfirmation(originalPromptText), '');
     const result = validatePromptEnhancementSafety({ currentBody, editedBodyText, actionType: 'use_current_body' });
 
-    expect(result.generatedSafeStatus).toBe('invalid_non_sendable');
-    expect(result.sendPolicy).toBe('no_send');
-    expect(result.failures.map((failure) => failure.failureCode)).toContain('edit_state_invalid:confirmation_removed');
-    expect(result.failures.find((failure) => failure.failureCode === 'edit_state_invalid:confirmation_removed')?.affectedActionIds).toEqual([
-      `${currentBody.currentBodyId}:action:use_current_body`,
-    ]);
-    expect(result.failures.find((failure) => failure.failureCode === 'edit_state_invalid:confirmation_removed')?.affectedBodySpanRefs.length).toBeGreaterThan(0);
+    expect(result.generatedSafeStatus).not.toBe('invalid_non_sendable');
+    expect(result.sendPolicy).toBe('send_current');
+    expect(result.failures.map((failure) => failure.failureCode)).not.toContain('edit_state_invalid:confirmation_removed');
+    expect(result.failures.find((failure) => failure.failureCode === 'edit_state_invalid:confirmation_removed')).toBeUndefined();
+    expect(result.failures.find((failure) => failure.failureCode === 'edit_state_invalid:confirmation_removed')).toBeUndefined();
   });
 
   it('rejects planning-to-execution authority escalation without treating confirmation as a fix', () => {
@@ -846,7 +876,7 @@ describe('prompt-enhancement safety, privacy, and sendability validation', () =>
       ],
     });
     const editedBodyText = `${currentBody.text}\n\nDeployment step:\n- Deploy the production migration now.\n- ${buildPromptEnhancementCanonicalConfirmation('Deploy the production migration now.')}`;
-    const result = validatePromptEnhancementSafety({ currentBody, editedBodyText });
+    const result = validatePromptEnhancementSafety({ currentBody: { ...currentBody, text: editedBodyText } });
 
     expect(result.sendPolicy).toBe('no_send');
     expect(result.failures.map((failure) => failure.failureCode)).toContain('authority_escalation:planning_to_execution');
@@ -869,8 +899,7 @@ describe('prompt-enhancement safety, privacy, and sendability validation', () =>
     });
     const unsafeGeneratedText = `${currentBody.text}\n\nDeployment step:\n- Deploy the production migration now.`;
     const unsafeCurrent = validatePromptEnhancementSafety({
-      currentBody,
-      editedBodyText: unsafeGeneratedText,
+      currentBody: { ...currentBody, text: unsafeGeneratedText },
       actionType: 'use_current_body',
     });
     const useOriginal = validatePromptEnhancementSafety({
@@ -936,6 +965,9 @@ describe('prompt-enhancement safety, privacy, and sendability validation', () =>
   });
 
   it('marks user edits that remove source-honesty trace as non-sendable (legacy trace-bearing bodies)', () => {
+    // Owner ruling 2026-08-14: a user's edit is the user's, so Nexpath no longer refuses a
+    // send because the user changed the body. Detection stays (preservation-floors.ts); the
+    // refusal is gone. This pins the NEW behaviour.
     // Newly composed bodies carry NO trace lines (provenance is typed-metadata-only, 2026-08-06),
     // so the comparative guard is inert for them. It still protects LEGACY bodies (e.g. pending
     // rows composed before the change) — simulate one by appending a trace line, then editing
@@ -945,15 +977,16 @@ describe('prompt-enhancement safety, privacy, and sendability validation', () =>
     const editedBodyText = base.text; // the user's edit dropped the trace line
     const result = validatePromptEnhancementSafety({ currentBody, editedBodyText, actionType: 'use_current_body' });
 
-    expect(result.generatedSafeStatus).toBe('invalid_non_sendable');
-    expect(result.safetySummary.sourceHonestyState).toBe('invalid_non_sendable');
-    expect(result.failures.map((failure) => failure.failureCode)).toContain('edit_state_invalid:source_honesty_removed');
+    expect(result.generatedSafeStatus).not.toBe('invalid_non_sendable');
+    // Derived from the failures, so it follows them: no failure, no invalid state.
+    expect(result.safetySummary.sourceHonestyState).toBe('valid');
+    expect(result.failures.map((failure) => failure.failureCode)).not.toContain('edit_state_invalid:source_honesty_removed');
   });
 
   it('rejects generated rendering of typed metadata ids that must stay out of the prompt body', () => {
     const currentBody = composedBody();
     const editedBodyText = `${currentBody.text}\n\nSource ids:\n- source-a-current-prompt\n- prompt:current\n- ${currentBody.sections[1]?.sectionId}`;
-    const result = validatePromptEnhancementSafety({ currentBody, editedBodyText });
+    const result = validatePromptEnhancementSafety({ currentBody: { ...currentBody, text: editedBodyText } });
 
     expect(result.sendPolicy).toBe('no_send');
     expect(result.safetySummary.sourceHonestyState).toBe('invalid_non_sendable');
@@ -963,7 +996,7 @@ describe('prompt-enhancement safety, privacy, and sendability validation', () =>
   it('rejects unresolved generated placeholders before any send-current action can pass', () => {
     const currentBody = composedBody();
     const editedBodyText = `${currentBody.text}\n\nImplementation detail:\n- Replace {{MISSING_ENV_NAME}} before sending.`;
-    const result = validatePromptEnhancementSafety({ currentBody, editedBodyText, actionType: 'use_current_body' });
+    const result = validatePromptEnhancementSafety({ currentBody: { ...currentBody, text: editedBodyText }, actionType: 'use_current_body' });
 
     expect(result.generatedSafeStatus).toBe('invalid_non_sendable');
     expect(result.sendPolicy).toBe('no_send');
@@ -976,7 +1009,7 @@ describe('prompt-enhancement safety, privacy, and sendability validation', () =>
   it('rejects generated bodies that exceed the Phase 6 sendability size cap', () => {
     const currentBody = composedBody();
     const oversizedBody = `${currentBody.text}\n\n${'bounded generated text '.repeat(PROMPT_ENHANCEMENT_MAX_SENDABLE_BODY_CHARS / 4)}`;
-    const result = validatePromptEnhancementSafety({ currentBody, editedBodyText: oversizedBody });
+    const result = validatePromptEnhancementSafety({ currentBody: { ...currentBody, text: oversizedBody } });
 
     expect(oversizedBody.length).toBeGreaterThan(PROMPT_ENHANCEMENT_MAX_SENDABLE_BODY_CHARS);
     expect(result.sendPolicy).toBe('no_send');
@@ -1000,7 +1033,7 @@ describe('prompt-enhancement safety, privacy, and sendability validation', () =>
     });
     const safeOriginalResult = validatePromptEnhancementSafety({ currentBody });
     const leakedGeneratedBody = `${currentBody.text}\n\nCredential handling:\n- Repeat sk-live-example12345 in the generated instructions.`;
-    const leakedResult = validatePromptEnhancementSafety({ currentBody, editedBodyText: leakedGeneratedBody });
+    const leakedResult = validatePromptEnhancementSafety({ currentBody: { ...currentBody, text: leakedGeneratedBody } });
 
     expect(safeOriginalResult.failures.some((failure) => failure.failureCode.startsWith('sensitive_data_leak'))).toBe(false);
     expect(leakedResult.sendPolicy).toBe('no_send');
@@ -1017,7 +1050,7 @@ describe('prompt-enhancement safety, privacy, and sendability validation', () =>
       originalPromptText: 'Review the credential handling plan without exposing raw values.',
     });
     const leakedGeneratedBody = `${currentBody.text}\n\nSensitive-data mistake:\n- ${generatedLine}`;
-    const result = validatePromptEnhancementSafety({ currentBody, editedBodyText: leakedGeneratedBody });
+    const result = validatePromptEnhancementSafety({ currentBody: { ...currentBody, text: leakedGeneratedBody } });
 
     expect(result.sendPolicy).toBe('no_send');
     expect(result.safetySummary.privacyState).toBe('invalid_non_sendable');
@@ -1037,7 +1070,7 @@ describe('prompt-enhancement safety, privacy, and sendability validation', () =>
       // guard's hyphen-form regex must still reject it as a private planning label.
       `- Read https://internal.example.local/runbook and carry ${Buffer.from('UEUtQVItOQ==', 'base64').toString('utf8')} as a prompt label.`,
     ].join('\n');
-    const result = validatePromptEnhancementSafety({ currentBody, editedBodyText: leakedGeneratedBody });
+    const result = validatePromptEnhancementSafety({ currentBody: { ...currentBody, text: leakedGeneratedBody } });
 
     expect(result.sendPolicy).toBe('no_send');
     expect(result.safetySummary.privacyState).toBe('invalid_non_sendable');
@@ -1063,7 +1096,7 @@ describe('prompt-enhancement safety, privacy, and sendability validation', () =>
       'Private diagnostic leakage:',
       '- Route this through safety_boundary_split5 and phase6_validation before send.',
     ].join('\n');
-    const result = validatePromptEnhancementSafety({ currentBody, editedBodyText: leakedGeneratedBody });
+    const result = validatePromptEnhancementSafety({ currentBody: { ...currentBody, text: leakedGeneratedBody } });
 
     expect(result.sendPolicy).toBe('no_send');
     expect(result.safetySummary.privacyState).toBe('invalid_non_sendable');
@@ -1083,7 +1116,7 @@ describe('prompt-enhancement safety, privacy, and sendability validation', () =>
       'Private deployment detail:',
       '- Update Customer Acme in `.env.production` before release.',
     ].join('\n');
-    const leakedResult = validatePromptEnhancementSafety({ currentBody, editedBodyText: leakedGeneratedBody });
+    const leakedResult = validatePromptEnhancementSafety({ currentBody: { ...currentBody, text: leakedGeneratedBody } });
 
     expect(safeOriginalResult.failures.some((failure) => failure.failureCode.startsWith('sensitive_data_leak'))).toBe(false);
     expect(leakedResult.sendPolicy).toBe('no_send');
@@ -1159,3 +1192,572 @@ function countOccurrences(value: string, search: string): number {
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
+
+describe('authority escalation is sentence-scoped, not whole-body keyword matching', () => {
+  const planPrompt = 'Break down the work to upgrade the database driver, and plan the rollback.';
+  const escalated = (generatedLine: string) => {
+    const currentBody = composedBody({ originalPromptText: planPrompt, route: { promptText: planPrompt } });
+    // The line under test is GENERATED wording, so it is routed as the composed body. Passing it
+    // as editedBodyText would make it a user edit, which is no longer validated (ruling 2026-08-14).
+    const result = validatePromptEnhancementSafety({
+      currentBody: { ...currentBody, text: `${currentBody.text}\n\nVerification Or Test Plan:\n- ${generatedLine}` },
+    });
+    return result.failures.map((failure) => failure.failureCode).includes('authority_escalation:planning_to_execution');
+  };
+
+  // The measured false positive: a verification section doing exactly its job. "execute" is an
+  // execution verb but nothing risky shares its sentence.
+  it('does NOT flag ordinary verification wording', () => {
+    expect(escalated('Execute automated tests to check new driver functionality.')).toBe(false);
+  });
+
+  // The case that silently defeats the fix if sentence splitting is wrong: TWO numbered items on ONE
+  // line. Split badly and "execute" co-occurs with "database", reproducing the false positive.
+  it('does NOT flag two numbered items on one line where verb and risk term are in DIFFERENT items', () => {
+    expect(escalated('1. Execute automated tests to check new driver functionality. 2. Perform stress tests on database operations.')).toBe(false);
+  });
+
+  // Genuine escalation: execution verb and risk term in the SAME sentence.
+  it('DOES flag an execution verb and a risk term in the same sentence', () => {
+    expect(escalated('Execute the rollback script and confirm the database returns to the prior schema.')).toBe(true);
+  });
+
+  it('DOES flag a production deployment instruction', () => {
+    expect(escalated('Deploy the package to production during the scheduled downtime.')).toBe(true);
+  });
+
+  // The always-escalate floor holds with no risk term anywhere near the verb.
+  it('DOES flag always-escalate patterns regardless of sentence scoping', () => {
+    expect(escalated('Then force-push the branch.')).toBe(true);
+    expect(escalated('Run rm -rf on the folder.')).toBe(true);
+  });
+
+  // Accepted trade, recorded as a test rather than a footnote: narrowing to sentence scope means a
+  // verb and its risky object split across two sentences now passes. This is a KNOWN false negative.
+  it('KNOWN TRADE: verb and risk term in adjacent but separate sentences is no longer flagged', () => {
+    expect(escalated('Execute the rollback script. The database will return to the prior schema.')).toBe(false);
+  });
+
+  /**
+   * Only strong verbs raise an escalation.
+   *
+   * Sentence scoping on its own did not fix the false positives: 11 of the 18 execution verbs also
+   * appear in the risk patterns, so the word satisfied BOTH conditions by itself and the scoping
+   * changed nothing for them. `post` is the clearest case — it is a word boundary away from
+   * `post-migration`, so an ordinary planning phrase escalated while the same sentence written as
+   * "after the migration" passed.
+   */
+  describe('only strong verbs raise an escalation', () => {
+    it('does NOT flag "post-" as a prefix meaning "after"', () => {
+      expect(escalated('I will list specific tests or checks that need to be performed post-migration.')).toBe(false);
+      expect(escalated('Document the rollback steps and confirm them post-deployment.')).toBe(false);
+    });
+
+    // The control that made the defect undeniable: identical meaning, one word apart, opposite verdicts.
+    it('treats "post-migration" and "after the migration" the same way', () => {
+      const a = escalated('List the checks that need to be performed post-migration.');
+      const b = escalated('List the checks that need to be performed after the migration.');
+      expect(a).toBe(b);
+      expect(a).toBe(false);
+    });
+
+    it('does NOT flag weak verbs that planning prose cannot avoid', () => {
+      expect(escalated('Write down the acceptance criteria for the schema change.')).toBe(false);
+      expect(escalated('Apply the review checklist to the migration script.')).toBe(false);
+      // An explicit refusal to act was being read as an instruction to act — the clearest proof the
+      // rule was matching words rather than meaning.
+      expect(escalated('Modify nothing yet; list the database changes we would need.')).toBe(false);
+      expect(escalated('Notify the reviewer once the database plan is ready.')).toBe(false);
+    });
+
+    it('still flags every strong verb paired with a risk term', () => {
+      expect(escalated('Delete the stale rows from the orders database.')).toBe(true);
+      expect(escalated('Run the migration against the production database.')).toBe(true);
+      expect(escalated('Install the new dependency into the production image.')).toBe(true);
+      expect(escalated('Publish the release to production.')).toBe(true);
+    });
+
+    /**
+     * ⚠️ KNOWN, ACCEPTED COVERAGE LOSS — recorded as an executable test so it is never rediscovered
+     * by accident. These now rely on the always-escalate floor where it matches, and otherwise on the
+     * composer's authority self-report. This test asserting `false` is the deliberate record of the
+     * trade; it is NOT a bug to be "fixed" by widening the verb list again, which would restore every
+     * false positive above.
+     */
+    it('KNOWN LOSS: a weak verb with a risk noun no longer escalates deterministically', () => {
+      expect(escalated('Write the new schema.')).toBe(false);
+      expect(escalated('Apply the migration.')).toBe(false);
+    });
+
+    // The floor is unaffected by any of the narrowing above.
+    it('the always-escalate floor is untouched by the strong-verb narrowing', () => {
+      expect(escalated('Then force-push the branch.')).toBe(true);
+      expect(escalated('Run rm -rf on the folder.')).toBe(true);
+      expect(escalated('Drop table orders when finished.')).toBe(true);
+      expect(escalated('Truncate the orders table before the run.')).toBe(true);
+    });
+
+    /**
+     * The floor applies unconditionally — regression test for a real defect.
+     *
+     * `ALWAYS_ESCALATE_PATTERN` is the wording with no benign reading, and it is documented as the
+     * floor nothing can soften. It was not: it was consulted only AFTER the generated text had to read
+     * as `execute_requested`, which `EXECUTION_VERB` decides — and `reset --hard` and `rewrite history`
+     * are in the floor but in NO execution-verb list. On their own they never reached the floor at
+     * all, so 2 of its 6 patterns were unreachable.
+     *
+     * What made it hard to see: the precondition reads the WHOLE body, and generated bodies run to
+     * seven or eight sections, so some verb like "run" is almost always present somewhere and the
+     * floor did fire. An unrelated word elsewhere in the body decided whether the safety net existed.
+     */
+    it('fires on floor patterns that carry no execution verb of their own', () => {
+      expect(escalated('Use reset --hard to clear the working tree.')).toBe(true);
+      expect(escalated('Rewrite history on the release branch.')).toBe(true);
+    });
+
+    it('the same wording still fires when an execution verb IS present (unchanged)', () => {
+      // This passed before the fix too — it is what hid the defect. Kept so a regression that
+      // reintroduces the ordering cannot pass by satisfying only this case.
+      expect(escalated('Run the cleanup, then use reset --hard on the working tree.')).toBe(true);
+    });
+
+    it('every floor pattern escalates with no other execution verb in the body', () => {
+      // Enumerated deliberately: the defect was that SOME floor patterns were unreachable, so testing
+      // a representative one would not have caught it.
+      expect(escalated('Then force-push the branch.')).toBe(true);
+      expect(escalated('rm -rf the build folder.')).toBe(true);
+      expect(escalated('drop table orders when finished.')).toBe(true);
+      expect(escalated('truncate the audit log.')).toBe(true);
+      expect(escalated('Use reset --hard on the working tree.')).toBe(true);
+      expect(escalated('Rewrite history before the review.')).toBe(true);
+    });
+
+    /**
+     * The floor asks "did the user ask for the dangerous thing?", not "did the user ask to plan?".
+     *
+     * Requiring `plan_or_review` silently excluded `observe_or_literal`. "Walk me through how the
+     * refunds flow behaves today" is genuinely not a planning request — reclassifying it as one would
+     * mislabel ordinary questions — but answering it with `rm -rf` is exactly as unrequested as
+     * answering a planning request that way. The request mode was right; the CONDITION was wrong.
+     */
+    describe('the floor covers observe-type requests, not only planning ones', () => {
+      const OBSERVE_PROMPT = 'Walk me through how the refunds flow behaves today.';
+
+      it('confirms the premise: this request is observe-shaped, not plan-shaped', () => {
+        expect(promptEnhancementAuthorityModeForTextV1(OBSERVE_PROMPT)).toBe('observe_or_literal');
+      });
+
+      const escalatedFor = (originalPromptText: string, generatedLine: string) => {
+        const currentBody = composedBody({ originalPromptText, route: { promptText: originalPromptText } });
+        return validatePromptEnhancementSafety({
+          currentBody: { ...currentBody, text: `${currentBody.text}\n\nVerification Or Test Plan:\n- ${generatedLine}` },
+        }).failures.map((f) => f.failureCode).includes('authority_escalation:planning_to_execution');
+      };
+
+      it('fires on floor wording answering an observe-type request', () => {
+        expect(escalatedFor(OBSERVE_PROMPT, 'rm -rf the cache directory and re-run it.')).toBe(true);
+        expect(escalatedFor(OBSERVE_PROMPT, 'Use reset --hard to clear the working tree.')).toBe(true);
+      });
+
+      /**
+       * ⚠️ ACCEPTED FALSE POSITIVE, recorded as a test.
+       *
+       * An execution request the word list does not recognise ("nuke" is in no verb list) reads as
+       * observe_or_literal, so floor wording answering it now blocks even though the user asked for
+       * it. Accepted knowingly: every path still leaves the original prompt sendable — on a hard
+       * block the body text falls back to `originalPromptText` and `use_original`/`close` stay
+       * available — so the cost is the enhanced sections, never the ability to send.
+       */
+      it('ACCEPTED FALSE POSITIVE: an unrecognised execution request loses the exemption', () => {
+        expect(escalatedFor('Nuke the build dir.', 'rm -rf the build directory.')).toBe(true);
+      });
+
+      it('above the floor, observe-type requests are unchanged (still not escalations)', () => {
+        // Only the floor was widened; the strong-verb rule stays scoped to plan/review requests.
+        expect(escalatedFor(OBSERVE_PROMPT, 'Delete the stale rows from the orders database.')).toBe(false);
+      });
+    });
+
+    // The widening is bounded: it applies to the floor only, and an explicit execution request is
+    // still honoured. A user who asked for the dangerous action still gets it.
+    it('does not fire when the user asked for the dangerous action themselves', () => {
+      const doPrompt = 'Force-push the rebased branch and reset --hard to drop my local changes.';
+      const currentBody = composedBody({ originalPromptText: doPrompt, route: { promptText: doPrompt } });
+      const result = validatePromptEnhancementSafety({
+        currentBody,
+        editedBodyText: `${currentBody.text}\n\nVerification Or Test Plan:\n- Use reset --hard to clear the working tree.`,
+      });
+      expect(result.failures.map((f) => f.failureCode)).not.toContain('authority_escalation:planning_to_execution');
+    });
+  });
+
+  /**
+   * The composer's own verdict covers the middle band the floor cannot reach.
+   *
+   * Narrowing the deterministic rule to a floor leaves wording that escalates without using any
+   * listed verb — "Once approved, roll it out to production" is the measured example, and no verb
+   * list catches it. The composer classifies the text it just wrote, so its verdict is carried into
+   * final-body validation.
+   *
+   * The invariant under test is one-directional: the verdict may ACCUSE, never ACQUIT.
+   */
+  describe('the composer verdict is additive to the deterministic rule', () => {
+    const withReport = (generatedLine: string, report?: { generatedMode?: string; requestMode?: string }) => {
+      const currentBody = composedBody({ originalPromptText: planPrompt, route: { promptText: planPrompt } });
+      const result = validatePromptEnhancementSafety({
+        currentBody: { ...currentBody, text: `${currentBody.text}\n\nVerification Or Test Plan:\n- ${generatedLine}` },
+        composerAuthoritySelfReport: report as never,
+      });
+      return result.failures.map((f) => f.failureCode).includes('authority_escalation:planning_to_execution');
+    };
+
+    // The measured under-block from the verification pass: no listed verb anywhere in the sentence.
+    const MIDDLE_BAND = 'Once approved, roll it out to production and monitor error rates.';
+
+    it('confirms the premise: the deterministic rule misses the middle band entirely', () => {
+      expect(withReport(MIDDLE_BAND)).toBe(false);
+    });
+
+    it('ACCUSES: the verdict blocks wording the deterministic rule cannot see', () => {
+      expect(withReport(MIDDLE_BAND, { generatedMode: 'execute_requested' })).toBe(true);
+    });
+
+    it('NEVER ACQUITS: a plan_or_review verdict does not clear a deterministic block', () => {
+      const genuine = 'Delete the stale rows from the orders database.';
+      expect(withReport(genuine)).toBe(true);
+      expect(withReport(genuine, { generatedMode: 'plan_or_review' })).toBe(true);
+      expect(withReport(genuine, { generatedMode: 'observe_or_literal' })).toBe(true);
+    });
+
+    it('omitting the verdict leaves behaviour exactly as it was', () => {
+      expect(withReport(MIDDLE_BAND, undefined)).toBe(false);
+      expect(withReport(MIDDLE_BAND, {})).toBe(false);
+    });
+
+    it('does not fire when the user asked for execution in the first place', () => {
+      const doPrompt = 'Delete the stale rows and deploy the fix to production.';
+      const currentBody = composedBody({ originalPromptText: doPrompt, route: { promptText: doPrompt } });
+      const result = validatePromptEnhancementSafety({
+        currentBody,
+        editedBodyText: `${currentBody.text}\n\nVerification Or Test Plan:\n- ${MIDDLE_BAND}`,
+        composerAuthoritySelfReport: { generatedMode: 'execute_requested', requestMode: 'execute_requested' },
+      });
+      expect(result.failures.map((f) => f.failureCode)).not.toContain('authority_escalation:planning_to_execution');
+    });
+
+    it('fires on a plan-shaped request the word list misreads, via the model reading', () => {
+      // Same hole as the composer gate: no listed planning verb, so the word list says
+      // observe_or_literal and the check would otherwise skip itself.
+      const misread = 'Walk me through how the refunds flow behaves today.';
+      const currentBody = composedBody({ originalPromptText: misread, route: { promptText: misread } });
+      const validate = (report?: { generatedMode: string; requestMode?: string }) =>
+        validatePromptEnhancementSafety({
+          currentBody: { ...currentBody, text: `${currentBody.text}\n\nVerification Or Test Plan:\n- ${MIDDLE_BAND}` },
+          composerAuthoritySelfReport: report as never,
+        }).failures.map((f) => f.failureCode).includes('authority_escalation:planning_to_execution');
+
+      expect(validate({ generatedMode: 'execute_requested' })).toBe(false);
+      expect(validate({ generatedMode: 'execute_requested', requestMode: 'plan_or_review' })).toBe(true);
+    });
+  });
+});
+
+// ── per-item safety helpers, reachable from outside this module ───────────────────────────────
+
+describe('per-item safety helpers', () => {
+  // The safety validator runs over one finished body. A multi-prompt sequence is a list of
+  // generated bodies, so the same two questions have to be askable of a single item.
+
+  it('reports the risk families a slice reads as, and none for ordinary text', () => {
+    expect(promptEnhancementRiskKindsForTextV1('delete the temp files'))
+      .toContain('destructive_filesystem_or_codebase');
+    expect(promptEnhancementRiskKindsForTextV1('rotate the api_key before Friday'))
+      .toContain('secret_env_or_credential');
+    expect(promptEnhancementRiskKindsForTextV1('rename the helper for clarity')).toEqual([]);
+  });
+
+  it('reads one slice at a time, so several families can come back together', () => {
+    const kinds = promptEnhancementRiskKindsForTextV1('deploy to production and truncate the sessions table');
+    expect(kinds).toContain('production_release_or_external_effect');
+    expect(kinds).toContain('destructive_data_or_schema');
+  });
+
+  it('does not count a quoted or fenced example as a risk', () => {
+    // Literal blocks are stripped before matching. A fresh implementation would be unlikely to
+    // reproduce this, which is why the shipping one is exported rather than rewritten.
+    expect(promptEnhancementRiskKindsForTextV1('the docs mention `rm -rf` as an example')).toEqual([]);
+    expect(promptEnhancementRiskKindsForTextV1('it says "delete everything" in the README')).toEqual([]);
+  });
+
+  it('catches wording that claims more authority than the request granted', () => {
+    // A planning request answered with an instruction to perform the dangerous thing.
+    const planning = 'Plan how we would clean up the temp directory';
+    expect(promptEnhancementAuthorityModeForTextV1(planning)).not.toBe('execute_requested');
+    expect(promptEnhancementGeneratedEscalatesAuthorityV1(planning, 'Run rm -rf on the temp directory now'))
+      .toBe(true);
+  });
+
+  it('leaves wording that stays inside the request alone', () => {
+    const planning = 'Plan how we would clean up the temp directory';
+    expect(promptEnhancementGeneratedEscalatesAuthorityV1(
+      planning,
+      'Outline which directories are safe to clear and what would need review first',
+    )).toBe(false);
+  });
+
+  it('is the same answer the module reaches internally, not a second opinion', () => {
+    // The wrappers delegate. If one were ever reimplemented, this is what would diverge first.
+    const text = 'force-push the rebased branch';
+    expect(promptEnhancementRiskKindsForTextV1(text)).toContain('git_history_rewrite');
+    expect(promptEnhancementAuthorityModeForTextV1(text)).toBe('execute_requested');
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Phase S1: the safety validator must not decide what it inspects by reading a planning flag.
+//
+// It used to filter sections on `safetyFlags.length > 0`. That looked selective and was not —
+// three of the four flag values are ROUTE capabilities stamped onto every section, so the filter
+// admitted everything. It only appeared to work because it never excluded anything, and it would
+// have started excluding real sections the moment those flags were corrected.
+// ---------------------------------------------------------------------------------------------
+describe('safety coverage does not depend on section safety flags', () => {
+  /** The same body, with every section stripped of the flags the validator used to filter on. */
+  function withoutSafetyFlags(body: ReturnType<typeof composedBody>) {
+    return {
+      ...body,
+      sections: body.sections.map((section) => ({ ...section, safetyFlags: [], sensitivityFlags: [] })),
+    };
+  }
+
+  const RISKY_PROMPT = 'Delete the archived customer rows in production and run the migration.';
+
+  it('inspects a body whose sections carry no safety flags at all', () => {
+    const body = composedBody({ originalPromptText: RISKY_PROMPT });
+    const flagged = validatePromptEnhancementSafety({ currentBody: body });
+    const unflagged = validatePromptEnhancementSafety({
+      currentBody: withoutSafetyFlags(body),
+      editedBodyText: body.text,
+    });
+
+    // Same verdict, same risk findings — stripping the flags must change nothing.
+    expect(unflagged.validationStatus).toBe(flagged.validationStatus);
+    expect(unflagged.sensitiveActionFindings.map((finding) => finding.riskKind).sort())
+      .toEqual(flagged.sensitiveActionFindings.map((finding) => finding.riskKind).sort());
+  });
+
+  it('still attributes a risk finding to the sections when none are flagged', () => {
+    const body = composedBody({ originalPromptText: RISKY_PROMPT });
+    const unflagged = validatePromptEnhancementSafety({
+      currentBody: withoutSafetyFlags(body),
+      editedBodyText: body.text,
+    });
+
+    expect(unflagged.sensitiveActionFindings.length).toBeGreaterThan(0);
+    for (const finding of unflagged.sensitiveActionFindings) {
+      expect(finding.affectedSectionIds.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('raises the wide-scope finding when a section is flagged and no risk pattern matched', () => {
+    // The one case the risk-pattern loop cannot reach: capability.confirmation_needed can come from
+    // ambiguity or missing acceptance facts rather than from risky wording, so no pattern matches
+    // while a section still carries the flag.
+    //
+    // It has to be a BENIGN prompt. An earlier version of this test used the risky one, where the
+    // pattern loop fires first and this branch is never entered — so it passed while exercising
+    // nothing, and removing the mechanism under test broke no test at all.
+    const BENIGN = 'Rename the helper in utils.ts and keep the tests passing.';
+    const body = composedBody({ originalPromptText: BENIGN });
+
+    const flaggedOnOneSection = {
+      ...body,
+      sections: body.sections.map((section, index) => ({
+        ...section,
+        safetyFlags: index === 1 ? ['sensitive_action_confirmation'] : [],
+        sensitivityFlags: [],
+      })),
+    };
+
+    expect(validatePromptEnhancementSafety({
+      currentBody: withoutSafetyFlags(body),
+      editedBodyText: body.text,
+    }).sensitiveActionFindings).toHaveLength(0);
+
+    expect(validatePromptEnhancementSafety({
+      currentBody: flaggedOnOneSection,
+      editedBodyText: body.text,
+    }).sensitiveActionFindings.map((finding) => finding.riskKind))
+      .toContain('wide_scope_or_boundary_expansion');
+  });
+});
+
+describe('S1 done-when: detection follows the body text, not section metadata', () => {
+  // ⚠️ What this proves, and what it does NOT. Risk detection reads the assembled body text, so a
+  // violation is caught wherever it sits and whatever flags the sections carry. Verified by
+  // mutation: making the validator inspect only flagged sections does NOT fail this test, because
+  // the finding never came from walking sections in the first place.
+  //
+  // The test that DOES guard the flag-dependence is "still attributes a risk finding to the
+  // sections when none are flagged" above — it catches both that mutation and the narrower one on
+  // `affectedSections`. This test documents the property; that one defends it. Kept because the
+  // property is worth stating explicitly, renamed because the original name claimed a guard it
+  // does not provide.
+  it('catches a violation planted in a section body when no section carries any flag', () => {
+    const BENIGN = 'Rename the helper in utils.ts and keep the tests passing.';
+    const body = composedBody({ originalPromptText: BENIGN });
+
+    // No flags anywhere, and the risky wording planted in a section rather than in the prompt.
+    const violationInUnflaggedSection = {
+      ...body,
+      sections: body.sections.map((section, index) => ({
+        ...section,
+        safetyFlags: [],
+        sensitivityFlags: [],
+        bodyText: index === 1
+          ? 'Drop the users table in production and force-push the rewritten history.'
+          : section.bodyText,
+        text: index === 1
+          ? `${section.title}:\n- Drop the users table in production and force-push the rewritten history.`
+          : section.text,
+      })),
+    };
+    const editedBodyText = violationInUnflaggedSection.sections.map((section) => section.text).join('\n\n');
+
+    const result = validatePromptEnhancementSafety({
+      currentBody: violationInUnflaggedSection,
+      editedBodyText,
+    });
+
+    expect(result.sensitiveActionFindings.length).toBeGreaterThan(0);
+  });
+});
+
+describe('user-edit authority — the ruling, pinned (2026-08-14)', () => {
+  /**
+   * Issue 28, as the fix plan's done-when states it: a risky body, the confirmation deleted,
+   * and the send goes through. Before this ruling the same edit produced `no_send`.
+   */
+  it('sends a risky body whose confirmation the user deleted', () => {
+    const originalPromptText = 'Deploy the payment service to production and migrate the schema.';
+    const currentBody = composedBody({ originalPromptText, route: { promptText: originalPromptText } });
+    const editedBodyText = currentBody.text.replaceAll(
+      buildPromptEnhancementCanonicalConfirmation(originalPromptText),
+      '',
+    );
+
+    // Guard against a vacuous pass: the confirmation must actually have been there to delete.
+    expect(currentBody.text).not.toBe(editedBodyText);
+
+    const result = validatePromptEnhancementSafety({ currentBody, editedBodyText, actionType: 'use_current_body' });
+
+    expect(result.sendPolicy).toBe('send_current');
+    expect(result.generatedSafeStatus).not.toBe('invalid_non_sendable');
+    expect(result.failures.map((failure) => failure.failureCode)).toEqual([]);
+  });
+
+  it('still refuses the SAME wording when NEXPATH wrote it rather than the user', () => {
+    // The generated path is untouched. This is the control that proves the change is scoped to
+    // edits and did not quietly disable validation everywhere.
+    const originalPromptText = 'Plan the production migration and rollback; do not run it yet.';
+    const currentBody = composedBody({ originalPromptText, route: { promptText: originalPromptText } });
+    const generated = `${currentBody.text}\n\nVerification Or Test Plan:\n- Run the migration against the production database now.`;
+
+    const result = validatePromptEnhancementSafety({ currentBody: { ...currentBody, text: generated } });
+
+    expect(result.failures.map((failure) => failure.failureCode))
+      .toContain('authority_escalation:planning_to_execution');
+    expect(result.sendPolicy).toBe('no_send');
+  });
+
+  it('still enforces the transport cap on an edited body, because that is a limit not an opinion', () => {
+    const currentBody = composedBody();
+    const editedBodyText = 'x'.repeat(PROMPT_ENHANCEMENT_MAX_SENDABLE_BODY_CHARS + 1);
+
+    const result = validatePromptEnhancementSafety({ currentBody, editedBodyText, actionType: 'use_current_body' });
+
+    expect(result.failures.map((failure) => failure.failureCode)).toContain('body_size:cap_exceeded');
+  });
+});
+
+// ── The no-invention state, enforced end to end (the fabrication hard-fail) ──
+
+describe('no-invention state: a section carrying the obligation cannot name what nobody supplied', () => {
+  // The measured defect: a repro/evidence section asked to write about a queue
+  // the user never mentioned answered "use RabbitMQ or AWS SQS". Prose could
+  // not catch it; the typed state can.
+  const debugPrompt = 'the checkout job stops halfway and I cannot tell why';
+  const reproRoute = {
+    promptText: debugPrompt,
+    classifierPrimaryIntent: 'issue_debug.reproduction_discovery' as const,
+    classifierIntentConfidence: 0.9,
+    classifierCapabilityCandidates: [] as const,
+    classifierDebugEvidencePresent: [] as const,
+  };
+
+  function bodyWithReproText(sectionText: string) {
+    const body = composedBody({ originalPromptText: debugPrompt, route: reproRoute as never });
+    const sections = body.sections.map((section) =>
+      section.sectionKind === 'reproduction_or_evidence' ? { ...section, bodyText: sectionText } : section,
+    );
+    const repro = sections.find((section) => section.sectionKind === 'reproduction_or_evidence');
+    expect(repro, 'fixture needs the reproduction section').toBeDefined();
+    expect(repro!.slotObligations).toContain('no_invention_state');
+    return { ...body, sections, text: `${body.text}\n${sectionText}` };
+  }
+
+  it('HARD FAIL: the fabricated-tool answer is rejected by name', () => {
+    const result = validatePromptEnhancementSafety({
+      currentBody: bodyWithReproText('- Use RabbitMQ or AWS SQS to replay the job and capture the failure.') as never,
+    });
+    const codes = result.failures.map((failure) => failure.failureCode);
+    expect(codes.some((code) => code.startsWith('no_invention_state:fabricated_item:'))).toBe(true);
+    expect(codes.some((code) => code.includes('RabbitMQ'))).toBe(true);
+    expect(result.generatedSafeStatus).not.toBe('valid');
+  });
+
+  it('a fabricated file path in the same section also hard-fails', () => {
+    const result = validatePromptEnhancementSafety({
+      currentBody: bodyWithReproText('- Read src/queue/consumer.ts to find the stalled step.') as never,
+    });
+    expect(result.failures.map((f) => f.failureCode).some((code) => code.includes('src/queue/consumer.ts'))).toBe(true);
+  });
+
+  it('asking for the evidence — inventing nothing — passes', () => {
+    const result = validatePromptEnhancementSafety({
+      currentBody: bodyWithReproText('- State the exact steps that reach the stall, what you expected, and what happened instead.') as never,
+    });
+    expect(result.failures.map((f) => f.failureCode).some((code) => code.startsWith('no_invention_state:'))).toBe(false);
+  });
+
+  it('an item the USER supplied is not an invention', () => {
+    const body = composedBody({
+      originalPromptText: 'the checkout job stops halfway, RabbitMQ is the queue we use',
+      route: { ...reproRoute, promptText: 'the checkout job stops halfway, RabbitMQ is the queue we use' } as never,
+    });
+    const sections = body.sections.map((section) =>
+      section.sectionKind === 'reproduction_or_evidence'
+        ? { ...section, bodyText: '- Capture the RabbitMQ consumer state when the job stalls.' }
+        : section,
+    );
+    const result = validatePromptEnhancementSafety({
+      currentBody: { ...body, sections, text: `${body.text}\n- Capture the RabbitMQ consumer state when the job stalls.` } as never,
+    });
+    expect(result.failures.map((f) => f.failureCode).some((code) => code.startsWith('no_invention_state:'))).toBe(false);
+  });
+
+  it('a section WITHOUT the obligation is not policed by this check', () => {
+    const body = composedBody({ originalPromptText: debugPrompt, route: reproRoute as never });
+    const sections = body.sections.map((section) =>
+      section.sectionKind === 'verification_or_test_plan'
+        ? { ...section, bodyText: '- Verify with RabbitMQ management UI.' }
+        : section,
+    );
+    const verification = sections.find((section) => section.sectionKind === 'verification_or_test_plan');
+    expect(verification!.slotObligations).not.toContain('no_invention_state');
+    const result = validatePromptEnhancementSafety({
+      currentBody: { ...body, sections, text: `${body.text}\n- Verify with RabbitMQ management UI.` } as never,
+    });
+    expect(result.failures.map((f) => f.failureCode).some((code) => code.startsWith('no_invention_state:'))).toBe(false);
+  });
+});

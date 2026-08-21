@@ -13,6 +13,7 @@ import {
   type PromptEnhancementPublicTrustCueV1,
   type PromptEnhancementSectionFeedbackViewV1,
   type PromptEnhancementUiViewPayloadV1,
+  type PromptEnhancementValidationStatus,
   type PromptEnhancementWhyHelpV1,
 } from './contracts.js';
 import {
@@ -22,14 +23,14 @@ import {
   type PromptEnhancementStructuredComposerOutputV1,
 } from './compose-enhancement.js';
 import { composeStructuredComposerOutputV1 } from './llm-composer.js';
-import { isPromptEnhancementNlpHeavyCaseV1 } from './composer-gate.js';
 import { decidePromptEnhancementRouteViaLlmV1, type PromptEnhancementLlmRouteDecisionV1 } from './llm-route-decision.js';
 import { isValidApiKey } from '../config/ApiKeyResolver.js';
 import { planPromptEnhancementSections } from './templates/section-plan.js';
-import { routePromptEnhancement, type PromptEnhancementCapabilityId, type PromptEnhancementRouteInput } from './routing-taxonomy.js';
+import { routePromptEnhancement, isKnownPrimaryIntent, isKnownCapabilityId, isKnownDebugEvidenceForm, describePromptEnhancementSequencePlanV1, type PromptEnhancementCapabilityId, type PromptEnhancementRouteInput } from './routing-taxonomy.js';
 import { buildPromptEnhancementGuidanceFactsV1 } from './guidance-facts.js';
 import { resolvePromptEnhancementSourceConflictsV1 } from './conflict-resolution.js';
 import { applyPromptEnhancementSourceMixV1 } from './source-mix.js';
+import { summarisePromptEnhancementRuntimeSeamsV1 } from './cost-measurement.js';
 import { applyPromptEnhancementGuidanceGateV1 } from './guidance-gate.js';
 import { buildPromptEnhancementPinchLabelV1, buildPromptEnhancementWhyHelpV1 } from './pe-header-copy.js';
 import { buildPromptEnhancementHandoffMetadataV1, validatePromptEnhancementHandoffMetadataV1 } from './handoff-metadata.js';
@@ -37,6 +38,14 @@ import {
   validatePromptEnhancementSafety,
   type PromptEnhancementSafetyValidationResult,
 } from './safety-sendability.js';
+import {
+  runPromptEnhancementSequencePlannerV1,
+  type PromptEnhancementSequencePlannerClientV1,
+} from './sequence-planner.js';
+import type { PromptEnhancementSequenceItemV1, PromptEnhancementSequenceOffsetRangeV1 } from './sequence-payload.js';
+import { promptEnhancementSequenceTaskSummaryLinesV1 } from './sequence-payload.js';
+import { redactSecrets } from '../store/redact.js';
+import type { Database } from 'sql.js';
 
 /**
  * The single PE content-engine entry point.
@@ -47,17 +56,65 @@ import {
  */
 export const preparePromptEnhancement: PromptEnhancementPrepareFacadeV1 = async (request) => {
   assertPrepareRequest(request);
-  return prepare(request);
+  return (await prepare(request)).result;
 };
+
+/**
+ * MPS P1b-ii — the sequence entry's return: the prepare result plus, when the planner ran and produced
+ * a sequence, its full item list (structure only, no wording — item 1's slice is the whole prompt). The
+ * background wording batch (P2) consumes `plannerItems`; a non-sequence / fallback prepare leaves it
+ * undefined. The base `preparePromptEnhancement` above is UNCHANGED — it returns just the result.
+ */
+export interface PreparePromptEnhancementWithSequenceResultV1 {
+  result: PromptEnhancementPrepareResultV1;
+  plannerItems?: readonly PromptEnhancementSequenceItemV1[];
+  /**
+   * MPS P1b-ii — the sequence's whole-prompt instructions, as OFFSET ranges into the original (one
+   * copy per sequence, applied to every item). Carried alongside `plannerItems` because the background
+   * wording batch resolves them to text for items 2…N; undefined whenever `plannerItems` is.
+   */
+  plannerPromptDirectives?: readonly PromptEnhancementSequenceOffsetRangeV1[];
+}
+
+/**
+ * MPS P1b-i — the runtime dependencies the sequence planner (owner unit P1) needs and the pure
+ * `(request) → result` facade deliberately does not carry: the store handle the config kill-switch +
+ * planner resolve from, and an optional injected LLM client (tests inject a stub; production leaves it
+ * unset so the planner constructs its own key-gated client, mirroring the composer).
+ */
+export interface PreparePromptEnhancementSequenceDepsV1 {
+  db: Database;
+  client?: PromptEnhancementSequencePlannerClientV1;
+}
+
+/**
+ * MPS P1b-i — the db-accepting facade entry that lets the full sequence planner REPLACE the
+ * display-only `describePromptEnhancementSequencePlanV1` as the source of truth for the compact
+ * sequence summary's item count + role labels (owner unit P1, feeding the already-optional `summary`
+ * seam of `buildPromptEnhancementHandoffMetadataV1` — no contract change).
+ *
+ * The planner runs ONLY on the `isSequenceCandidate` branch — exactly where the describe runs today —
+ * so every non-sequence prompt (and every caller that uses the contract-typed `preparePromptEnhancement`
+ * above, which passes no deps) takes the byte-identical current path. On ANY planner failure / refusal /
+ * single-prompt outcome the summary falls back to the describe splitter, so the user always gets their
+ * enhanced prompt. The `PromptEnhancementPrepareFacadeV1` contract type is UNCHANGED.
+ */
+export async function preparePromptEnhancementWithSequenceV1(
+  request: PromptEnhancementPrepareRequestV1,
+  seqDeps: PreparePromptEnhancementSequenceDepsV1,
+): Promise<PreparePromptEnhancementWithSequenceResultV1> {
+  assertPrepareRequest(request);
+  return prepare(request, undefined, undefined, seqDeps);
+}
 
 /** Apply a bounded directional/details action against the current body contract. */
 export const applyPromptEnhancementAction: PromptEnhancementActionFacadeV1 = async (request) => {
   assertPrepareRequest(request);
-  const base = await prepare(
+  const base = (await prepare(
     request,
     request.action.actionType === 'use_original' ? undefined : request.action.actionType,
     request,
-  );
+  )).result;
   if (request.action.actionType === 'use_current_body') {
     const editedBodyText = request.currentBodyBinding.editedBodyText;
     const safety = validatePromptEnhancementSafety({
@@ -92,7 +149,8 @@ async function prepare(
   request: PromptEnhancementPrepareRequestV1,
   action?: PromptEnhancementActionRequestV1['action']['actionType'],
   actionRequest?: PromptEnhancementActionRequestV1,
-): Promise<PromptEnhancementPrepareResultV1> {
+  seqDeps?: PreparePromptEnhancementSequenceDepsV1,
+): Promise<PreparePromptEnhancementWithSequenceResultV1> {
   const enhancementId = `pe:${request.requestId}`;
   const routeInput: PromptEnhancementRouteInput = {
     routeDecisionId: `${enhancementId}:route`,
@@ -124,6 +182,17 @@ async function prepare(
       ? 'pe_generated'
       : 'ordinary_user_prompt',
     oldDecisionSessionPayloadPresent: false,
+    // The classifier's intent proposal, re-guarded against the typed menu (the
+    // contract carries it as a string to avoid a type cycle).
+    classifierPrimaryIntent: isKnownPrimaryIntent(request.reviewMomentContext.triggerProvenance.classifierPrimaryIntent)
+      ? request.reviewMomentContext.triggerProvenance.classifierPrimaryIntent
+      : '',
+    classifierIntentConfidence: request.reviewMomentContext.triggerProvenance.classifierIntentConfidence ?? 0,
+    // The capability observation, each entry re-guarded against its typed
+    // vocabulary; `undefined` stays undefined so the router can tell a no-key
+    // session (no observation channel) from an observed-empty one.
+    classifierCapabilityCandidates: request.reviewMomentContext.triggerProvenance.classifierCapabilityCandidates?.filter(isKnownCapabilityId),
+    classifierDebugEvidencePresent: request.reviewMomentContext.triggerProvenance.classifierDebugEvidencePresent?.filter(isKnownDebugEvidenceForm),
   };
   let route = routePromptEnhancement(routeInput);
 
@@ -175,7 +244,8 @@ async function prepare(
   const guidanceFacts = buildPromptEnhancementGuidanceFactsV1(request);
   const resolvedFacts = resolvePromptEnhancementSourceConflictsV1(guidanceFacts).facts;
   const sourceMix = applyPromptEnhancementSourceMixV1(resolvedFacts, request.userPreferenceContext.levelState);
-  const guidanceGate = applyPromptEnhancementGuidanceGateV1(sourceMix);
+  // The route's ladder outcome flows into the SAME gate — no parallel skip path.
+  const guidanceGate = applyPromptEnhancementGuidanceGateV1(sourceMix, route.ladderResolution);
   // F1 (send-block fix 2026-08-07): an ACTION never re-decides popup existence. The popup the
   // action came from already exists — its route/no-popup decision was made at PREPARE (possibly
   // via the E6 LLM route-rescue above, which is gated to prepare only). Re-running the gate here
@@ -191,10 +261,16 @@ async function prepare(
     guidanceFacts: sourceMix.renderedFacts,
   });
 
-  // E4: bounded LLM composer wording for a shown, NLP-heavy popup on the baseline
-  // compose (no action). Gated on a valid key so the whole test suite (no key) and
-  // any obvious/clear prompt render deterministically. Any failure -> undefined ->
+  // E4: bounded LLM composer wording for a shown popup on the baseline compose (no
+  // action). Runs for every shown popup that has a valid key, so the whole test suite
+  // (no key) renders deterministically. Any failure -> undefined ->
   // composePromptEnhancementBody validates + falls back deterministically.
+  // The route's ambiguity no longer decides this. It used to, and the effect was that
+  // roughly four popups in five rendered every guidance section from a fixed string:
+  // the section SET varied by intent while the section TEXT did not vary at all. The
+  // upstream guidance gate has already decided the popup is worth showing and never
+  // fabricates a filler one, so a second gate deciding the body is not worth writing
+  // contradicted it.
   // E8: a directional action (Shorter / More-thorough / More-project-grounded /
   // Owner decision (2026-08-06): the interactive popup actions (Shorter / More-thorough /
   // More-project-grounded / Apply-details) must stay INSTANT — deterministic recompose only,
@@ -202,14 +278,17 @@ async function prepare(
   // wording call runs ONLY on the initial prepare (action === undefined, in the background
   // before the popup shows), never inside the popup interaction. The composer's
   // action-directive seam stays available for a future non-blocking use.
-  const wantsLlmWording = action === undefined && isPromptEnhancementNlpHeavyCaseV1(route);
+  const wantsLlmWording = action === undefined;
   let structuredComposerOutput: PromptEnhancementStructuredComposerOutputV1 | undefined;
   // TI-2 (2026-08-07): the composer now reports WHY it failed, and the facade maps that onto the
   // runtime states that already exist instead of collapsing everything to `undefined` — which made
   // a real provider timeout byte-identical to "never eligible for an LLM call" in the UI, logs,
-  // and cost metadata. `no_key` / `no_eligible_sections` stay `undefined` (genuinely "not
-  // requested"); downstream, the failure states already produce `callVisibilityMode
+  // and cost metadata. Downstream, the failure states already produce `callVisibilityMode
   // 'fallback_no_llm'` + a populated `providerFailureState` via `fallbackModeForRuntime`.
+  //
+  // `no_key` is the only reason left as `undefined`. It used to share that with
+  // `no_eligible_sections`, which was right while the composer was gated off — but now that it
+  // runs for every shown popup with a key, an empty plan is a failure, not a non-request.
   let composerRuntimeState: PromptEnhancementComposerRuntimeState | undefined;
   if (
     wantsLlmWording &&
@@ -220,6 +299,10 @@ async function prepare(
       enhancementId,
       originalPromptText: request.sourcePrompt.text,
       planning,
+      // Carried straight through from the caller, which is what knows which hook this is running
+      // on. Absent here means absent there, so a caller that supplies nothing keeps today's
+      // behaviour exactly.
+      deadlineAtMs: request.deadlineAtMs,
     });
     if (composerCall.ok) {
       structuredComposerOutput = composerCall.output;
@@ -230,8 +313,22 @@ async function prepare(
       composerRuntimeState = 'provider_unavailable';
     } else if (composerCall.reason === 'invalid_output') {
       composerRuntimeState = 'invalid_output';
+    } else if (composerCall.reason === 'deadline_exceeded') {
+      // The surrounding budget ran out between attempts rather than one call exceeding its own
+      // limit. The composer keeps the two apart for logs and cost records; to the user they are
+      // the same event, so they share a runtime state rather than earning a new one.
+      composerRuntimeState = 'timeout';
+    } else if (composerCall.reason === 'no_eligible_sections') {
+      // A key was present, a popup was judged worth showing, and planning produced nothing to
+      // word. Those cannot both be right, and the result is the thinnest body there is: the
+      // user's own prompt and no guidance at all. It used to be filed as "genuinely not
+      // requested", which is true only while the composer is gated off — now that it runs for
+      // every shown popup with a key, silence here would be the worst output wearing the label of
+      // a normal one. Naming the condition is this milestone's job; why planning returned zero is
+      // a routing question and is not chased here.
+      composerRuntimeState = 'validation_failed';
     }
-    // 'no_key' / 'no_eligible_sections' -> undefined: the call was genuinely not made.
+    // 'no_key' -> undefined: the call was genuinely not made, and that is a supported state.
   }
 
   const composeInput = {
@@ -263,8 +360,22 @@ async function prepare(
     // metadata already derived it correctly for every mode, including the provider-failure states
     // ('unavailable_by_provider_api'), so read it from there instead of re-deriving here.
     optionalCallAvailabilityState: candidate.composerBoundary.inputContract.callVisibilityState.optionalCallAvailabilityState,
+    // Only meaningful while the candidate still carries the composer's wording. Once the drafts are
+    // dropped below, the body is the deterministic renderer's and the composer's verdict no longer
+    // describes it — passing it on would block a body the model never wrote.
+    composerAuthoritySelfReport: candidate.callVisibilityMode === 'llm_wording'
+      ? {
+        generatedMode: structuredComposerOutput?.authorityModeSelfReport,
+        requestMode: structuredComposerOutput?.requestModeSelfReport,
+      }
+      : undefined,
   });
   let safety = validateComposed(composed);
+  // TI-3.3 (2026-08-08) — observability-only capture of the deterministic substitution below. Set
+  // ONLY if the recompose-drop actually replaces a blocked LLM body; records the verdict that body
+  // carried BEFORE `safety` is reassigned (the emitted safetySummary describes the replacement).
+  let deterministicFallbackApplied = false;
+  let preSubstitutionAuthorityEscalationState: PromptEnhancementValidationStatus | undefined;
   // Blocked-popup fix part 2 (2026-08-07) — deterministic-fallback safety net. The composer's
   // confirmation-parity guard removes the confirmation-absence block, but an accepted LLM draft
   // can still hard-block the FINAL body through the other blocking families the draft filter
@@ -294,10 +405,87 @@ async function prepare(
           { category: 'fallback_or_no_popup' as const, reasonCode: 'llm_final_body_blocked_deterministic_fallback' },
         ],
       };
+      // Capture the pre-substitution verdict BEFORE `safety` is overwritten by the replacement's.
+      deterministicFallbackApplied = true;
+      preSubstitutionAuthorityEscalationState = safety.safetySummary.authorityEscalationState;
       safety = recomposedSafety;
     }
   }
-  return buildResult(request, enhancementId, route, planning, composed, safety, noPopup);
+  // MPS P1b-i (owner unit P1) — REPLACE the display-only punctuation splitter with the full LLM
+  // sequence planner as the source of truth for the compact summary's item count + role labels. This
+  // runs in the SAME place the describe runs (after the body is composed), for the SAME
+  // `isSequenceCandidate` prompts, and ONLY when a db + client seam is threaded in (auto.ts) — a
+  // baseline prepare, never an action. The planner reads the config kill-switch from the store itself
+  // and refuses (config off / non-user origin / no popup) or fails (no_key / provider_error / timeout /
+  // refusal) or returns a single-prompt outcome — in every one of those cases the override stays
+  // undefined and buildResult falls back to the exact describe path. So a non-sequence prompt, and any
+  // caller of the contract-typed `preparePromptEnhancement` (no deps), is byte-identical to today.
+  //
+  // Redaction: the planner is length-preserving offset-indexed, so the SAME redacted text is passed as
+  // both the provider-visible `promptContext` and the local `localOriginalText` — offsets align and no
+  // raw user text reaches the provider.
+  let plannerSummary: { remainingTaskCount: number; taskRoleLabels: readonly string[]; taskSummaryLines: readonly string[] } | undefined;
+  // MPS P1b-ii: the planner's full item list, captured only when it ran + produced a sequence — the
+  // background wording batch (P2) consumes it. Undefined on the non-sequence / fallback path.
+  let plannerItems: readonly PromptEnhancementSequenceItemV1[] | undefined;
+  let plannerPromptDirectives: readonly PromptEnhancementSequenceOffsetRangeV1[] | undefined;
+  if (seqDeps !== undefined && action === undefined && !noPopup && isSequenceCandidateForRoute(route)) {
+    const redactedText = redactSecrets(request.sourcePrompt.text);
+    const plannerResult = await runPromptEnhancementSequencePlannerV1(
+      {
+        promptContext: redactedText,
+        localOriginalText: redactedText,
+        entry: {
+          promptOrigin: request.sourcePrompt.origin,
+          guidanceGateShow: !noPopup,
+        },
+        db: seqDeps.db,
+        projectRoot: request.projectRoot,
+        route: {
+          familyId: route.familyId,
+          primaryIntent: route.primaryIntent,
+          capabilityOverlays: route.capabilityOverlays,
+          routeConfidence: route.routeConfidence,
+        },
+        // PROPER FIX — the production planner opts into the deterministic fallback: when the model
+        // cannot produce a valid plan, the loop rebuilds one from its task decomposition rather than
+        // falling through to the single-prompt path with an empty sequence. Only the sequence branch
+        // below is affected; a non-sequence outcome (or fewer than two tasks) still falls through
+        // exactly as today.
+        deterministicFallback: true,
+      },
+      seqDeps.client,
+    );
+    if (plannerResult.ok && plannerResult.output.outcome === 'sequence' && plannerResult.output.summaryData) {
+      plannerSummary = {
+        remainingTaskCount: plannerResult.output.summaryData.remainingTaskCount,
+        taskRoleLabels: plannerResult.output.summaryData.taskRoleLabels,
+        // One display line per follow-up task, cut from the SAME redacted text the planner indexed
+        // (offsets align, length-preserving) — the user's own words, no secret, no generated body.
+        taskSummaryLines: promptEnhancementSequenceTaskSummaryLinesV1(plannerResult.output.items, redactedText),
+      };
+      plannerItems = plannerResult.output.items;
+      plannerPromptDirectives = plannerResult.output.promptDirectives;
+    }
+    // else → fall through to the describe fallback (single-prompt path), exactly as today.
+  }
+  const result = buildResult(request, enhancementId, route, planning, composed, safety, noPopup, {
+    deterministicFallbackApplied,
+    preSubstitutionAuthorityEscalationState,
+  }, plannerSummary);
+  return { result, plannerItems, plannerPromptDirectives };
+}
+
+/**
+ * MPS (owner ruling 2026-08-06) — a result is a sequence CANDIDATE (the branch where the compact
+ * summary is built and, under P1b-i, the full planner may replace the describe) iff the route says the
+ * prompt is compound: multiple intent families in one prompt, OR a >= 3-point list of the same family.
+ * Extracted so `prepare` (planner gate) and `buildResult` (summary source) test the SAME predicate.
+ */
+function isSequenceCandidateForRoute(route: ReturnType<typeof routePromptEnhancement>): boolean {
+  const compoundPromptState = route.contractDecision.compoundPromptState;
+  return compoundPromptState === 'multi_intent_one_prompt'
+    || (compoundPromptState === 'multi_point_same_intent' && route.contractDecision.userPointCoverageRefs.length >= 3);
 }
 
 function buildResult(
@@ -310,6 +498,17 @@ function buildResult(
   // Effective no-popup = route.noPopup OR the DR2-G1 gate skip (no useful Source-A
   // survivor / weak evidence). Both collapse to the same not-applicable disposition.
   noPopup: boolean,
+  // TI-3.3 (2026-08-08) — observability-only. Present (applied === true) only when the blocked-body
+  // deterministic substitution fired; carries the pre-substitution verdict for the log/result trace.
+  fallbackReport?: {
+    deterministicFallbackApplied: boolean;
+    preSubstitutionAuthorityEscalationState: PromptEnhancementValidationStatus | undefined;
+  },
+  // MPS P1b-i (owner unit P1) — when present, the full sequence planner produced this summary and it
+  // REPLACES the describe splitter as the source of truth for the item count + role labels. Absent on
+  // every non-sequence prompt, on any planner failure/refusal/single-outcome, and on every caller of the
+  // contract-typed `preparePromptEnhancement` (no deps) — so the describe fallback path is byte-identical.
+  plannerSummary?: { remainingTaskCount: number; taskRoleLabels: readonly string[]; taskSummaryLines: readonly string[] },
 ): PromptEnhancementPrepareResultV1 {
   const currentBody: PromptEnhancementCurrentBodyV1 = {
     ...composed.currentBody,
@@ -338,8 +537,34 @@ function buildResult(
     ? { ...composed.composerBoundary, renderedPromptBody: composed.currentBody.originalPromptText }
     : composed.composerBoundary;
   const diagnostics = diagnosticsFor(enhancementId, [...composed.diagnostics, ...safety.publicDiagnostics]);
+  // TI-3.2 (2026-08-08) — capture the compose-layer fallback reason CODES BEFORE diagnosticsFor
+  // genericizes them for the public array (which drops reasonCode). Reporting-only; typed codes only.
+  // TI-3.2 follow-up Phase 2 (2026-08-09): capture the WHOLE `fallback_or_no_popup` category, not a
+  // hand-picked subset. This is the entire class of "the body was reduced/fell back" — the draft-
+  // rejection cause, the substitution marker, partial-drop (Phase 1), and the action-preserved /
+  // no-sections codes. Any one of these, dropped from the log, means a reduction that read as a clean run.
+  // TI-3.2 follow-up Phase 3 (2026-08-09): also capture the `source_coverage` grounding code
+  // `project_grounding_source_unavailable` — a `more_project_grounded` action that finds no grounding
+  // source degrades silently (diagnosticsFor genericizes it too). It is a distinct diagnostic category,
+  // so it needs its own clause; the category holds only this one reduction code.
+  const compositionFallbackReasonCodes = composed.diagnostics
+    .filter((diagnostic) =>
+      diagnostic.category === 'fallback_or_no_popup'
+      || (diagnostic.category === 'source_coverage'
+        && diagnostic.reasonCode === 'project_grounding_source_unavailable'))
+    .map((diagnostic) => diagnostic.reasonCode);
+  // TI-3 audit follow-up (2026-08-09): the additional-details truncation is a `generated` input-cap
+  // event (not a fallback/reduction), so it is tracked as its own flag rather than mixed into the
+  // fallback reason codes above. Reporting-only.
+  const additionalDetailsTruncated = composed.diagnostics.some(
+    (diagnostic) => diagnostic.reasonCode === 'additional_details_truncated_public_notice',
+  );
   const composerCallVisibility = composed.composerBoundary.inputContract.callVisibilityState;
+  // A6: computed HERE because this is the layer that holds the mixed facts — the result
+  // carries fact IDS only, so deriving it downstream would log an empty summary forever.
+  const runtimeSeamSummary = summarisePromptEnhancementRuntimeSeamsV1(planning.renderedFacts);
   const callAndVisibilityMetadata = {
+    runtimeSeamSummary,
     ...composerCallVisibility,
     callOwner: 'content_semantics' as const,
     callTrigger: 'prepare' as const,
@@ -366,9 +591,16 @@ function buildResult(
   // (>= 3 user points — "schema, cron job, email sender, and the widget"; a plain "add X and Y"
   // stays on the PE popup). Metadata only — the builder itself locks
   // `sequenceActivationPolicy: blocked_pending_…` and `receiverCanActivateRuntime: false`.
-  const compoundPromptState = route.contractDecision.compoundPromptState;
-  const isSequenceCandidate = compoundPromptState === 'multi_intent_one_prompt'
-    || (compoundPromptState === 'multi_point_same_intent' && route.contractDecision.userPointCoverageRefs.length >= 3);
+  const isSequenceCandidate = isSequenceCandidateForRoute(route);
+  // Sequence-plan summary source (2026-08-07 display fix; MPS P1b-i source-of-truth swap 2026-08-14):
+  // feed the compact summary REAL display data. Under P1b-i the full sequence planner (owner unit P1)
+  // supplies the count + role labels via `plannerSummary` when it ran and returned a sequence; the
+  // display-only punctuation splitter `describePromptEnhancementSequencePlanV1` STAYS as the labelled
+  // fallback for the no-deps / no-key / provider-failure / single-outcome path (byte-identical to
+  // before). The emission gate above is untouched, so WHICH prompts open MPS is unchanged.
+  const sequencePlan = isSequenceCandidate && plannerSummary === undefined
+    ? describePromptEnhancementSequencePlanV1(request.sourcePrompt.text)
+    : undefined;
   let handoffAndSequenceSummary = !noPopup && disposition === 'show_current_body' && isSequenceCandidate
     ? buildPromptEnhancementHandoffMetadataV1({
         handoffDecisionId: `${enhancementId}:handoff`,
@@ -377,6 +609,20 @@ function buildResult(
         currentBody: safeCurrentBody,
         safetySummary: validationSummary,
         handoffKind: 'compact_sequence_summary_candidate',
+        summary: {
+          summaryId: `${enhancementId}:handoff:summary`,
+          publicSafeText: 'Additional task metadata is available after the current body.',
+          remainingTaskCount: plannerSummary
+            ? plannerSummary.remainingTaskCount
+            : Math.max(0, (sequencePlan?.pointCount ?? 1) - 1),
+          taskRoleLabels: plannerSummary
+            ? plannerSummary.taskRoleLabels
+            : sequencePlan?.roleLabels ?? [],
+          // Per-follow-up-task display lines come only from the planner's real items (their redacted
+          // slices). The describe fallback has no per-item slices, so it stays empty — Remaining + Types
+          // only, exactly as before.
+          taskSummaryLines: plannerSummary ? plannerSummary.taskSummaryLines : [],
+        },
       })
     : undefined;
   // Self-guard: emit the summary ONLY if it passes the same handoff validation the boundary
@@ -439,6 +685,18 @@ function buildResult(
       excludesPrivatePlanningLeakage: true,
     },
     diagnostics,
+    // TI-3.3 (2026-08-08) — reporting-only; emitted ONLY when the deterministic substitution fired.
+    ...(fallbackReport?.deterministicFallbackApplied
+      ? {
+          deterministicFallbackApplied: true,
+          preSubstitutionAuthorityEscalationState: fallbackReport.preSubstitutionAuthorityEscalationState,
+        }
+      : {}),
+    // TI-3.2 (2026-08-08) — reporting-only; emitted ONLY when a compose-layer fallback produced a
+    // reason code (a clean deterministic body composes as 'generated', so this stays absent).
+    ...(compositionFallbackReasonCodes.length > 0 ? { compositionFallbackReasonCodes } : {}),
+    // TI-3 audit follow-up (2026-08-09) — reporting-only; emitted ONLY when the input was truncated.
+    ...(additionalDetailsTruncated ? { additionalDetailsTruncated: true } : {}),
   };
 }
 

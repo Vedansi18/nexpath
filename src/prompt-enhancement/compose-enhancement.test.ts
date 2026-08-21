@@ -134,7 +134,9 @@ describe('prompt-enhancement composer and deterministic fallback', () => {
     const result = composePromptEnhancementBody({
       enhancementId: 'enh-phase5-artifact-metadata',
       originalPromptText: 'Fix the importCsv parser and verify the regression.',
-      sectionPlanningResult: planningResult(),
+      // A resolved route: the metadata this test pins is the resolved-path
+      // shape (the under-evidenced path adds the gate-reason why-help ref).
+      sectionPlanningResult: planningResult({ route: { promptText: 'Fix this failing test: the importCsv parser regression.' } }),
     });
 
     expect(result.currentBody.composerRunId).toBe('enh-phase5-artifact-metadata:composer:default:1');
@@ -433,6 +435,209 @@ describe('prompt-enhancement composer and deterministic fallback', () => {
     expect(result.currentBody.text).not.toContain('The developer should');
     expect(result.currentBody.text).not.toContain('this action below');
     expect(result.composerBoundary.rawComposerOutput).toBe('rejected_or_unavailable');
+  });
+
+  /**
+   * Voice-policy matching is phrase-accurate, not substring-accurate.
+   *
+   * Every phrase used to be matched with `.includes()`, and several are short enough to sit inside
+   * unrelated words. Because one bad draft discards the WHOLE reply, a single such match cost the user
+   * every section. Measured live: a prompt reading "compare our AI assistant integration against the
+   * AI gateway we already ship" produced 8 valid drafts and all 8 were thrown away, because the
+   * composer is required to mirror the user's own vocabulary and therefore wrote "the AI gateway".
+   */
+  describe('voice policy matches phrases, not substrings', () => {
+    const composeWith = (bodyText: string) => {
+      const planned = planningResult();
+      const section = planned.sectionPlans.find((s) => s.sectionKind === 'source_signal_guidance');
+      const factId = section?.structuredContentPartRefs[0] ?? 'missing-source-fact';
+      return composePromptEnhancementBody({
+        enhancementId: 'enh-voice-substring',
+        originalPromptText: 'Fix importCsv and verify the regression.',
+        sectionPlanningResult: planned,
+        composerRuntimeState: 'accepted_structured_output',
+        structuredComposerOutput: {
+          outputId: 'llm-output-voice-substring',
+          sectionDrafts: [{ sectionId: section?.sectionId ?? 'missing', bodyText, sourceFactIds: [factId] }],
+          composerClaims: [`claim:${factId}`],
+        },
+      });
+    };
+    const rejected = (bodyText: string) => composeWith(bodyText).composerBoundary.rawComposerOutput === 'rejected_or_unavailable';
+
+    it('no longer rejects ordinary words that merely contain a banned phrase', () => {
+      expect(rejected('The commit says the driver changed, so capture that in the notes.')).toBe(false);
+      expect(rejected('Keep this optional flag for now and record why it stays.')).toBe(false);
+      expect(rejected('Count the units output by the job and compare against the baseline.')).toBe(false);
+      expect(rejected('Check the aim of the retry helper before changing it.')).toBe(false);
+      expect(rejected('Document the airflow DAG changes alongside the fix.')).toBe(false);
+    });
+
+    it('still rejects the phrases themselves', () => {
+      expect(rejected('Note what it says in the failing log line.')).toBe(true);
+      expect(rejected('Confirm this option is still needed before shipping.')).toBe(true);
+      expect(rejected('Verify its output matches the recorded fixture.')).toBe(true);
+      expect(rejected('You should have checked the fixture first.')).toBe(true);
+    });
+
+    it('rejects third-person references to the agent, but not the user own AI vocabulary', () => {
+      // The rule exists to stop the body talking ABOUT the agent. A following verb is what makes it
+      // a reference to the actor rather than to a thing the user is building.
+      expect(rejected('The AI should run the migration before the checks.')).toBe(true);
+      expect(rejected('The AI will need the fixture in place first.')).toBe(true);
+      expect(rejected('Ask the AI to re-run the failing suite.')).toBe(true);
+
+      expect(rejected('Compare the AI gateway against the AI assistant integration we ship.')).toBe(false);
+      expect(rejected('List the AI agent features we already support in the console.')).toBe(false);
+    });
+
+    it('still rejects inflected forms of the banned phrases', () => {
+      // Regression test for a defect in the boundary fix itself: a bare trailing \b silently stopped
+      // matching these three, trading three voice-policy leaks for the three false positives it
+      // fixed. The inflection allowance is narrow enough that the collateral above stays fixed.
+      expect(rejected("You shouldn't have skipped the fixture.")).toBe(true);
+      expect(rejected('That is bad practices in this repo.')).toBe(true);
+      expect(rejected('Compare its outputs against the baseline.')).toBe(true);
+      // ...while `m`, `rflow` and `al` are still not inflections.
+      expect(rejected('Check the aim of the retry helper.')).toBe(false);
+      expect(rejected('Keep this optional flag for now.')).toBe(false);
+      expect(rejected('Review the optionality matrix before the change.')).toBe(false);
+    });
+
+    it('rejects common agent verbs, not only modals', () => {
+      expect(rejected('The AI runs the tests every night.')).toBe(true);
+      expect(rejected('The AI generates the summary for each run.')).toBe(true);
+      expect(rejected('The AI ought to stop at the first failure.')).toBe(true);
+    });
+
+    it('KNOWN LEAKS, accepted: possessive, and a verb outside the list', () => {
+      // 1. No verb follows "the AI", so the pattern cannot see it. `its answer` / `its output` still
+      //    cover the common shape.
+      expect(rejected("Record the AI's reasoning in the notes.")).toBe(false);
+      // 2. Exhaustive verb detection is not attainable with a word list — the same lesson the
+      //    authority rule taught. Recorded so it is not mistaken for a bug.
+      expect(rejected('The AI orchestrates the whole run.')).toBe(false);
+    });
+
+    it('internal identifier fragments are still matched as substrings, deliberately', () => {
+      // These are identifier fragments, not English: a partial match is a real leak. Word boundaries
+      // here would let exactly what the rule exists to stop straight through.
+      expect(rejected('Check pinchFallback rendering before the release.')).toBe(true);
+      expect(rejected('Read whyDescBase to see where the copy comes from.')).toBe(true);
+    });
+  });
+
+  /**
+   * A per-draft fault costs its own section, not the whole reply.
+   *
+   * Five of the six refusal rules describe ONE draft, yet each used to discard every other draft with
+   * it — one unusable section replaced eight good ones with canned text. Measured live: a prompt
+   * mirroring the user's own "AI gateway" vocabulary produced 8 drafts of which 3 tripped the voice
+   * rule, and all 8 were thrown away.
+   *
+   * Mixed bodies are not a new output shape — the model routinely returns fewer drafts than there are
+   * planned sections, so they already ship and already render correctly.
+   */
+  describe('draft rejection is per-section, not per-output', () => {
+    const twoSections = () => {
+      const planned = planningResult();
+      const usable = planned.sectionPlans.filter((s) => s.sectionKind !== 'original_request_or_goal'
+        && s.structuredContentPartRefs.length > 0);
+      return { planned, good: usable[0], bad: usable[1] };
+    };
+
+    const composeDrafts = (drafts: readonly { sectionId: string; bodyText: string; sourceFactIds: readonly string[] }[], claims?: readonly string[]) => {
+      const { planned } = twoSections();
+      return composePromptEnhancementBody({
+        enhancementId: 'enh-per-section',
+        originalPromptText: 'Fix importCsv and verify the regression.',
+        sectionPlanningResult: planned,
+        composerRuntimeState: 'accepted_structured_output',
+        structuredComposerOutput: {
+          outputId: 'llm-output-per-section',
+          sectionDrafts: drafts,
+          composerClaims: claims ?? drafts.flatMap((d) => d.sourceFactIds.map((id) => `claim:${id}`)),
+        },
+      });
+    };
+
+    it('keeps the good sections when ONE draft is unusable', () => {
+      const { good, bad } = twoSections();
+      const result = composeDrafts([
+        { sectionId: good.sectionId, bodyText: 'Reproduce the importCsv failure with a fixture first.', sourceFactIds: [good.structuredContentPartRefs[0]] },
+        { sectionId: bad.sectionId, bodyText: 'You should have checked this already.', sourceFactIds: [bad.structuredContentPartRefs[0]] },
+      ]);
+
+      expect(result.composerBoundary.rawComposerOutput).not.toBe('rejected_or_unavailable');
+      expect(result.currentBody.text).toContain('Reproduce the importCsv failure with a fixture first.');
+      expect(result.currentBody.text).not.toContain('You should have checked this already.');
+    });
+
+    it('reports the partial drop instead of letting a section vanish silently', () => {
+      const { good, bad } = twoSections();
+      const result = composeDrafts([
+        { sectionId: good.sectionId, bodyText: 'Reproduce the importCsv failure with a fixture first.', sourceFactIds: [good.structuredContentPartRefs[0]] },
+        { sectionId: bad.sectionId, bodyText: 'You should have checked this already.', sourceFactIds: [bad.structuredContentPartRefs[0]] },
+      ]);
+      expect(result.diagnostics.map((d) => d.reasonCode))
+        .toContain('partial_draft_drop:1:empty_or_disallowed_wording');
+    });
+
+    it('still rejects the WHOLE reply when every draft is unusable', () => {
+      const { good, bad } = twoSections();
+      const result = composeDrafts([
+        { sectionId: good.sectionId, bodyText: 'You should have checked this already.', sourceFactIds: [good.structuredContentPartRefs[0]] },
+        { sectionId: bad.sectionId, bodyText: 'The developer should fix it.', sourceFactIds: [bad.structuredContentPartRefs[0]] },
+      ]);
+      expect(result.composerBoundary.rawComposerOutput).toBe('rejected_or_unavailable');
+      expect(result.composerBoundary.draftRejectionReason).toBe('empty_or_disallowed_wording');
+    });
+
+    it('a broken claims union still rejects the whole reply — it belongs to no single section', () => {
+      const { good } = twoSections();
+      const result = composeDrafts(
+        [{ sectionId: good.sectionId, bodyText: 'Reproduce the importCsv failure with a fixture.', sourceFactIds: [good.structuredContentPartRefs[0]] }],
+        ['claim:not-an-allowed-source-fact-id'],
+      );
+      expect(result.composerBoundary.rawComposerOutput).toBe('rejected_or_unavailable');
+      expect(result.composerBoundary.draftRejectionReason).toBe('claims_empty_or_unallowed');
+    });
+
+    it('an unknown section id costs only that draft', () => {
+      const { good } = twoSections();
+      const result = composeDrafts([
+        { sectionId: good.sectionId, bodyText: 'Reproduce the importCsv failure with a fixture.', sourceFactIds: [good.structuredContentPartRefs[0]] },
+        { sectionId: 'section-that-was-never-planned', bodyText: 'Anything at all.', sourceFactIds: [good.structuredContentPartRefs[0]] },
+      ]);
+      expect(result.composerBoundary.rawComposerOutput).not.toBe('rejected_or_unavailable');
+      expect(result.currentBody.text).toContain('Reproduce the importCsv failure with a fixture.');
+      expect(result.diagnostics.map((d) => d.reasonCode)).toContain('partial_draft_drop:1:unknown_section');
+    });
+
+    it('a mis-cited source fact id costs only that draft', () => {
+      const { good, bad } = twoSections();
+      const result = composeDrafts([
+        { sectionId: good.sectionId, bodyText: 'Reproduce the importCsv failure with a fixture.', sourceFactIds: [good.structuredContentPartRefs[0]] },
+        { sectionId: bad.sectionId, bodyText: 'Check the rollback path too.', sourceFactIds: ['fact-that-belongs-to-no-section'] },
+      ], [`claim:${good.structuredContentPartRefs[0]}`]);
+      expect(result.composerBoundary.rawComposerOutput).not.toBe('rejected_or_unavailable');
+      expect(result.currentBody.text).toContain('Reproduce the importCsv failure with a fixture.');
+      expect(result.currentBody.text).not.toContain('Check the rollback path too.');
+    });
+
+    it('no drafts at all is unchanged — an output-wide refusal', () => {
+      const result = composeDrafts([], ['claim:anything']);
+      expect(result.composerBoundary.rawComposerOutput).toBe('rejected_or_unavailable');
+      expect(result.composerBoundary.draftRejectionReason).toBe('no_drafts_returned');
+    });
+
+    it('a fully clean reply reports no partial drop', () => {
+      const { good } = twoSections();
+      const result = composeDrafts([
+        { sectionId: good.sectionId, bodyText: 'Reproduce the importCsv failure with a fixture.', sourceFactIds: [good.structuredContentPartRefs[0]] },
+      ]);
+      expect(result.diagnostics.map((d) => d.reasonCode).some((c) => c.startsWith('partial_draft_drop'))).toBe(false);
+    });
   });
 
   it('rejects structured LLM wording that leaks private planning labels or user-referential scolding voice', () => {
@@ -873,11 +1078,27 @@ describe('prompt-enhancement composer and deterministic fallback', () => {
       priorBodyRevision: previous.bodyRevision,
     });
 
-    expect(result.currentBody).toBe(previous);
+    // Was `toBe(previous)`. The T2 carriers stamp each carried section with
+    // `carried_from_previous_body`, so the body can no longer be the SAME object — but
+    // "keeps the previous sendable body" is about substance, and nothing in production
+    // compares these by reference. Asserted field-wise instead, which is what the
+    // sibling test below already does, and the text must still be byte-identical.
+    expect(result.currentBody.currentBodyId).toBe(previous.currentBodyId);
+    expect(result.currentBody.bodyRevision).toBe(previous.bodyRevision);
+    expect(result.currentBody.text).toBe(previous.text);
+    expect(result.currentBody.sections).toHaveLength(previous.sections.length);
+    expect(result.currentBody.sections.every(
+      (section) => section.transformReasonCodes.includes('carried_from_previous_body'),
+    )).toBe(true);
     expect(result.fallbackMode).toBe('previous_sendable_body');
     expect(result.actionInteractionState).toBe('timeout_kept_previous');
     expect(result.sendPolicy).toBe('send_current');
     expect(result.diagnostics[0]?.reasonCode).toBe('action_failed_previous_body_preserved:timeout');
+    // TI-3.2 follow-up (Phase 2): this reason is a `fallback_or_no_popup` diagnostic, so the widened
+    // facade capture filter (category-based) now carries it to the log. (This action-failed path is
+    // compose-layer only — the facade's actions are instant-deterministic — so its capture is
+    // guaranteed by category membership rather than a facade run.)
+    expect(result.diagnostics[0]?.category).toBe('fallback_or_no_popup');
   });
 
   it('binds successful directional action recomposition to the previous current body revision', () => {
@@ -1052,5 +1273,241 @@ describe('prompt-enhancement composer and deterministic fallback', () => {
     expect(result.sourceGuidanceCoverage).toBe('not_applicable');
     expect(result.availableActions.find((action) => action.actionType === 'use_original')?.availability).toBe('available');
     expect(result.availableActions.find((action) => action.actionType === 'shorter')?.availability).toBe('disabled_not_applicable');
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Owner ruling 2026-08-14: a section whose draft the composer produced but validation refused is
+// DISCARDED, not filled with the deterministic line — that fixed text is the defect this milestone
+// exists to remove, and it reaches the user with nothing to say it is a fallback. Sections carrying
+// a mandatory floor are the exception: there the fixed wording IS the requirement.
+// ---------------------------------------------------------------------------------------------
+describe('a refused draft discards its section instead of showing fixed text', () => {
+  /** One draft that will survive validation, for a section chosen by kind. */
+  function outputFor(planned: ReturnType<typeof planningResult>, sectionKind: string) {
+    const section = planned.sectionPlans.find((plan) => plan.sectionKind === sectionKind);
+    const factId = section?.structuredContentPartRefs[0] ?? 'missing-fact';
+    return {
+      section,
+      output: {
+        outputId: 'out-1',
+        sectionDrafts: [{
+          sectionId: section?.sectionId ?? 'missing',
+          bodyText: 'Model wording that survives validation for this one section.',
+          sourceFactIds: [factId],
+        }],
+        composerClaims: [`claim:${factId}`],
+      },
+    };
+  }
+
+  it('drops an ordinary section the model did not word, rather than rendering the fixed line', () => {
+    const planned = planningResult();
+    const { section, output } = outputFor(planned, 'source_signal_guidance');
+    expect(section).toBeDefined();
+
+    // Every section in this fixture carries a floor, so force ONE to be ordinary. Without this the
+    // test would pass while exercising nothing — the rule only applies to floor-free sections.
+    const victim = planned.sectionPlans.find((plan) =>
+      plan.sectionKind !== 'original_request_or_goal' && plan.sectionId !== section!.sectionId);
+    expect(victim).toBeDefined();
+    const ordinaryPlan = {
+      ...planned,
+      sectionPlans: planned.sectionPlans.map((plan) => plan.sectionId === victim!.sectionId
+        ? { ...plan, isRequired: false, safetyFlags: [], sensitivityFlags: [] }
+        : plan),
+    };
+
+    const result = composePromptEnhancementBody({
+      enhancementId: 'enh-discard-1',
+      originalPromptText: 'Fix importCsv and verify the regression.',
+      sectionPlanningResult: ordinaryPlan,
+      composerRuntimeState: 'accepted_structured_output',
+      structuredComposerOutput: output,
+    });
+
+    // The drafted section survives; the floor-free undrafted one is gone, not rendered as fixed text.
+    expect(result.currentBody.text).toContain('Model wording that survives validation');
+    expect(result.currentBody.sections.some((rendered) => rendered.sectionId === victim!.sectionId)).toBe(false);
+    // The verbatim original is never discarded.
+    expect(result.currentBody.text).toContain('My original request (verbatim):');
+  });
+
+  it('keeps the section that actually carries the confirmation line', () => {
+    // A prompt that demands execution confirmation, so a confirmation-bearing section exists.
+    const planned = planningResult();
+    const { output } = outputFor(planned, 'source_signal_guidance');
+
+    const result = composePromptEnhancementBody({
+      enhancementId: 'enh-discard-2',
+      originalPromptText: 'Delete the archived customer rows in production and verify the migration.',
+      sectionPlanningResult: planned,
+      composerRuntimeState: 'accepted_structured_output',
+      structuredComposerOutput: output,
+    });
+
+    // Whatever else is discarded, the confirmation clause still reaches the user.
+    expect(result.currentBody.text).toContain('you must ask me for go-ahead confirmation');
+  });
+
+  it('does not keep a section merely because it is required or flagged', () => {
+    // isRequired is true of every planned section, and three of the four safetyFlags values are
+    // route capabilities stamped on every section. Keying the carve-out on either would swallow
+    // everything and the rule would never fire — this pins that it does not.
+    const planned = planningResult();
+    const { section, output } = outputFor(planned, 'source_signal_guidance');
+    const undrafted = planned.sectionPlans.filter((plan) =>
+      plan.sectionKind !== 'original_request_or_goal' && plan.sectionId !== section!.sectionId);
+    expect(undrafted.every((plan) => plan.isRequired && plan.safetyFlags.length > 0)).toBe(true);
+
+    const result = composePromptEnhancementBody({
+      enhancementId: 'enh-discard-2b',
+      originalPromptText: 'Fix importCsv and verify the regression.',
+      sectionPlanningResult: planned,
+      composerRuntimeState: 'accepted_structured_output',
+      structuredComposerOutput: output,
+    });
+
+    expect(result.currentBody.sections.length).toBeLessThan(planned.sectionPlans.length);
+  });
+
+  it('changes nothing when the composer never ran — the deterministic body is the supported answer', () => {
+    const planned = planningResult();
+    const deterministic = composePromptEnhancementBody({
+      enhancementId: 'enh-discard-3',
+      originalPromptText: 'Fix importCsv and verify the regression.',
+      sectionPlanningResult: planned,
+    });
+
+    expect(deterministic.currentBody.sections).toHaveLength(planned.sectionPlans.length);
+  });
+
+  it('changes nothing on a provider failure — that path already tells the user', () => {
+    const planned = planningResult();
+    const timedOut = composePromptEnhancementBody({
+      enhancementId: 'enh-discard-4',
+      originalPromptText: 'Fix importCsv and verify the regression.',
+      sectionPlanningResult: planned,
+      composerRuntimeState: 'timeout',
+    });
+
+    expect(timedOut.currentBody.sections).toHaveLength(planned.sectionPlans.length);
+  });
+});
+
+describe('discarding every ordinary section still yields a usable result', () => {
+  // The discard rule made "no generated sections at all" reachable for the first time: if the
+  // composer ran and every draft was refused, every floor-free section goes. This asserts the body
+  // that remains is still a valid, sendable result rather than an empty or blocked popup.
+  function allDraftsRefused(originalPromptText: string) {
+    const planned = planningResult();
+    return composePromptEnhancementBody({
+      enhancementId: 'enh-all-refused',
+      originalPromptText,
+      sectionPlanningResult: planned,
+      composerRuntimeState: 'accepted_structured_output',
+      // A draft for a section id that does not exist -> every real section is left undrafted.
+      structuredComposerOutput: {
+        outputId: 'out-refused',
+        sectionDrafts: [{ sectionId: 'not-a-planned-section', bodyText: 'Rejected.', sourceFactIds: ['x'] }],
+        composerClaims: ['claim:x'],
+      },
+    });
+  }
+
+  it('keeps the verbatim original when every draft is refused', () => {
+    const result = allDraftsRefused('Fix importCsv and verify the regression.');
+    expect(result.currentBody.text).toContain('My original request (verbatim):');
+    expect(result.currentBody.text).toContain('Fix importCsv and verify the regression.');
+  });
+
+  it('reports the refusal rather than presenting the thin body as a clean composition', () => {
+    const result = allDraftsRefused('Fix importCsv and verify the regression.');
+    expect(result.currentBody.callVisibilityMode).not.toBe('llm_wording');
+  });
+
+  it('still carries the confirmation clause when the prompt demands one', () => {
+    // The carve-out's whole purpose: a validation fault must not silently drop a safety clause.
+    const result = allDraftsRefused('Delete the archived customer rows in production and run the migration.');
+    expect(result.currentBody.text).toContain('you must ask me for go-ahead confirmation');
+  });
+});
+
+describe('de-nagging: the reproduction section names what was supplied instead of asking again', () => {
+  const debugRoute = (evidence: readonly string[]) => ({
+    route: {
+      promptText: 'the checkout page throws a null error after login. bug.',
+      currentStage: 'implementation' as const,
+      firedKey: 'absence:debugging_observation_gap@implementation',
+      classifierPrimaryIntent: 'issue_debug.failing_test',
+      classifierIntentConfidence: 0.9,
+      classifierCapabilityCandidates: [],
+      classifierDebugEvidencePresent: evidence,
+    },
+  });
+  const reproText = (evidence: readonly string[]) => {
+    const planning = planningResult(debugRoute(evidence));
+    const body = composePromptEnhancementBody({
+      enhancementId: 'denag',
+      originalPromptText: 'the checkout page throws a null error after login. bug.',
+      sectionPlanningResult: planning,
+    }).currentBody;
+    return body.sections.find((section) => section.sectionKind === 'reproduction_or_evidence')?.bodyText ?? '';
+  };
+
+  it('the ASK survives supplied evidence when the SLOT still obliges it', () => {
+    // The rule that decides which rows de-nag, pinned. `issue_debug.reproduction_discovery`
+    // is the intent whose whole purpose is finding a repro, and F1 puts
+    // `reproduction_or_evidence_request` on its section — so the ask stays even with
+    // evidence in hand, while intents without the obligation carry instead. Measured on
+    // the labelled set at GR-3: ids 6 and 35 carried, id 1 (this intent) kept asking.
+    const planning = planningResult({
+      route: {
+        promptText: 'help me work out how to reproduce the intermittent checkout failure',
+        currentStage: 'implementation' as const,
+        firedKey: 'absence:debugging_observation_gap@implementation',
+        classifierPrimaryIntent: 'issue_debug.reproduction_discovery',
+        classifierIntentConfidence: 0.9,
+        classifierCapabilityCandidates: [],
+        classifierDebugEvidencePresent: ['error_text', 'repro_steps'],
+      },
+    });
+    const section = planning.sectionPlans.find((plan) => plan.sectionKind === 'reproduction_or_evidence');
+    expect(section?.slotObligations).toContain('reproduction_or_evidence_request');
+    const body = composePromptEnhancementBody({
+      enhancementId: 'denag-obliged',
+      originalPromptText: 'help me work out how to reproduce the intermittent checkout failure',
+      sectionPlanningResult: planning,
+    }).currentBody;
+    const text = body.sections.find((composed) => composed.sectionKind === 'reproduction_or_evidence')?.bodyText ?? '';
+    expect(text).toContain('Capture the failing');
+    expect(text).not.toContain('provided in the request above');
+  });
+
+  it('carry: the line names the forms the developer ACTUALLY sent', () => {
+    expect(reproText(['reproduction_steps', 'logs', 'failing_test_details']))
+      .toContain('Reproduction steps, logs and failing test details are provided in the request above.');
+  });
+
+  it('carry: a different evidence mix names THOSE forms, never a fixed list', () => {
+    const text = reproText(['screenshots', 'metrics']);
+    expect(text).toContain('Screenshots and metrics are provided in the request above.');
+    // The bug this guards: a hardcoded sentence would claim a failing test the
+    // developer never mentioned.
+    expect(text).not.toContain('failing test');
+  });
+
+  it('carry: an id with no label override still reads as English', () => {
+    expect(reproText(['request_response_samples', 'environment']))
+      .toContain('Request/response samples and environment are provided in the request above.');
+  });
+
+  it('ask: with nothing supplied the section still asks, unchanged', () => {
+    expect(reproText([]))
+      .toContain('Capture the failing behavior, reproduction path, observed evidence, and expected behavior before changing code.');
+  });
+
+  it('carry never re-asks for what was already supplied', () => {
+    expect(reproText(['reproduction_steps', 'logs'])).not.toContain('Capture the failing behavior');
   });
 });

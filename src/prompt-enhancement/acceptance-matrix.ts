@@ -1,3 +1,5 @@
+import { promptEnhancementAcceptanceFixtureV1 } from './acceptance-fixture-shape.js';
+import { buildPromptEnhancementSequenceAcceptanceFixturesV1 } from './acceptance-sequence-fixtures.js';
 import {
   PROMPT_ENHANCEMENT_CONTRACT_VERSION,
   type PromptEnhancementOwnerArea,
@@ -619,7 +621,7 @@ function buildAcceptanceFixtures(
   currentSourceCostCallIds: readonly string[],
 ): readonly PromptEnhancementAcceptanceFixtureV1[] {
   return [
-    fixture({
+    promptEnhancementAcceptanceFixtureV1({
       fixtureId: 'acceptance-source-current-reality',
       family: 'source',
       inputPrompt: 'Use current source facts without copying old DS prompt text.',
@@ -656,7 +658,7 @@ function buildAcceptanceFixtures(
         'source_b_only_popup_forbidden',
       ],
     }),
-    fixture({
+    promptEnhancementAcceptanceFixtureV1({
       fixtureId: 'acceptance-routing-registry-links',
       family: 'routing',
       inputPrompt: 'Fix failing tests after a migration while preserving behavior.',
@@ -698,7 +700,7 @@ function buildAcceptanceFixtures(
         'raw_ds_question_or_why_desc_as_section_authority',
       ],
     }),
-    fixture({
+    promptEnhancementAcceptanceFixtureV1({
       fixtureId: 'acceptance-composer-body-actions',
       family: 'composer',
       inputPrompt: 'Improve this implementation request but keep every original point visible.',
@@ -763,7 +765,7 @@ function buildAcceptanceFixtures(
         'strict_schema_failure_without_reason_code',
       ],
     }),
-    fixture({
+    promptEnhancementAcceptanceFixtureV1({
       fixtureId: 'acceptance-safety-privacy-sendability',
       family: 'safety_privacy',
       inputPrompt: 'Delete the production database after adding rollback notes.',
@@ -806,7 +808,7 @@ function buildAcceptanceFixtures(
         'telemetry_raw_prompt_or_body',
       ],
     }),
-    fixture({
+    promptEnhancementAcceptanceFixtureV1({
       fixtureId: 'acceptance-ui-one-body-contract',
       family: 'ui_contract',
       owner: 'ui_app',
@@ -829,7 +831,7 @@ function buildAcceptanceFixtures(
       registryLinkedFixtureIds: [],
       hardFailFocus: ['ui_owned_learning', 'auto_send', 'foreground_safer', 'old_ds_option_list'],
     }),
-    fixture({
+    promptEnhancementAcceptanceFixtureV1({
       fixtureId: 'acceptance-store-memory-feedback',
       family: 'store_memory',
       inputPrompt: 'Remember only aggregate project-scoped missing-signal feedback.',
@@ -862,7 +864,7 @@ function buildAcceptanceFixtures(
         'learning_away_safety_floor',
       ],
     }),
-    fixture({
+    promptEnhancementAcceptanceFixtureV1({
       fixtureId: 'acceptance-delivery-host-boundary',
       family: 'delivery_host',
       owner: 'host_transport',
@@ -892,7 +894,7 @@ function buildAcceptanceFixtures(
       registryLinkedFixtureIds: [],
       hardFailFocus: ['auto_send', 'raw_stop_reason_authority', 'clipboard_as_consent', 'same_turn_replacement_claim'],
     }),
-    fixture({
+    promptEnhancementAcceptanceFixtureV1({
       fixtureId: 'acceptance-generated-origin-echo-guard',
       family: 'generated_origin',
       owner: 'host_transport',
@@ -911,7 +913,7 @@ function buildAcceptanceFixtures(
       registryLinkedFixtureIds: [],
       hardFailFocus: ['generated_origin_skip_without_metadata', 'prompt_history_as_authority', 'old_ds_row_as_authority'],
     }),
-    fixture({
+    promptEnhancementAcceptanceFixtureV1({
       fixtureId: 'acceptance-cost-fallback-provider',
       family: 'cost_fallback',
       inputPrompt: 'Compose enhancement when provider is unavailable or output is invalid.',
@@ -947,44 +949,11 @@ function buildAcceptanceFixtures(
         'generated_content_after_provider_failure',
       ],
     }),
+    // The multi-prompt sequence's cases, in a register of their own. Placed into the SAME nine
+    // families and validated by the same rules — a sequence fixture is a composer, store, routing
+    // or delivery fixture about a sequence, and no family was added to hold them.
+    ...buildPromptEnhancementSequenceAcceptanceFixturesV1(),
   ];
-}
-
-function fixture(input: Partial<PromptEnhancementAcceptanceFixtureV1> & Pick<
-  PromptEnhancementAcceptanceFixtureV1,
-  | 'fixtureId'
-  | 'family'
-  | 'inputPrompt'
-  | 'expectedFamily'
-  | 'expectedIntent'
-  | 'expectedCapability'
-  | 'mandatorySlotsOrSafeguards'
-  | 'sourceReasonMetadata'
-  | 'evidenceSourceKinds'
-  | 'registryLinkedFixtureIds'
-  | 'hardFailFocus'
->): PromptEnhancementAcceptanceFixtureV1 {
-  return {
-    owner: input.owner ?? 'content_semantics',
-    version: PROMPT_ENHANCEMENT_CONTRACT_VERSION,
-    sourceContextClass: input.sourceContextClass ?? 'current_source_plus_pe_fixture',
-    projectSourceScope: 'current_project_only',
-    expectedPopupState: input.expectedPopupState ?? 'popup',
-    currentEditableBodyState: input.currentEditableBodyState ?? 'current_body_required_when_popup',
-    memoryFatigueFeedbackState: input.memoryFatigueFeedbackState ?? ['neutral_or_explicit_fixture_state'],
-    actionAvailability: input.actionAvailability ?? ['use_current_body', 'use_original', 'shorter', 'more_thorough', 'more_project_grounded', 'apply_details', 'feedback', 'close'],
-    fallbackCostProviderState: input.fallbackCostProviderState ?? ['provider_available_or_public_safe_fallback', 'cost_visibility_cannot_weaken_behavior'],
-    generatedOriginState: input.generatedOriginState ?? ['ordinary_user_prompt_or_typed_pe_origin_only'],
-    privacyExpectation: input.privacyExpectation ?? ['ids_counts_status_only', 'raw_prompt_body_source_feedback_excluded'],
-    expectedObservableOutcome: input.expectedObservableOutcome ?? ['typed_contract_state_or_public_safe_reason_code'],
-    actualResult: input.actualResult ?? 'not_run_shape_only',
-    rubricObservations: input.rubricObservations ?? ['owner_oracle_required_before_readiness_claim'],
-    hardFailResult: input.hardFailResult ?? 'not_run_shape_only',
-    reproducibleEvidence: input.reproducibleEvidence ?? [`test:${input.fixtureId}`],
-    linkedOwnerDecision: input.linkedOwnerDecision ?? null,
-    oracleIds: input.oracleIds ?? [`oracle:${input.fixtureId}`],
-    ...input,
-  };
 }
 
 function validateFixtureShape(fixture: PromptEnhancementAcceptanceFixtureV1, reasonCodes: string[]): void {

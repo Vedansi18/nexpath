@@ -38,6 +38,9 @@ CREATE TABLE IF NOT EXISTS projects (
   decision_session_count INTEGER NOT NULL DEFAULT 0,
   env_facts              TEXT,
   env_facts_detected_at  INTEGER,
+  prompt_facts             TEXT,
+  prompt_facts_detected_at INTEGER,
+  prompt_facts_at_count    INTEGER,
   env_trajectory         TEXT,
   created_at             INTEGER NOT NULL
 );
@@ -99,6 +102,39 @@ CREATE TABLE IF NOT EXISTS pending_prompt_enhancements (
 
 CREATE INDEX IF NOT EXISTS idx_pending_prompt_enhancements_project
   ON pending_prompt_enhancements (project_root, status, created_at);
+
+-- Active multi-prompt sequence bookkeeping for the Stop-hook continuation flow. One active
+-- sequence per project_root. Ids, counts and status live in columns; the planned item list
+-- and the sequence-wide fields that travel with it live in the additive payload columns
+-- (items_json, prompt_directives_json, suggested_next_prompt_policy, original_length,
+-- offer_disposition). Item text is stored as OFFSETS into the original prompt plus the
+-- wording written once for each item — the original prompt itself is already stored in full
+-- in the prompts table, so this introduces no new class of data and no separate retention
+-- policy.
+-- The runtime gate stays the authority for whether the continuation surface may run at all;
+-- a row is never proof of completion.
+CREATE TABLE IF NOT EXISTS pending_prompt_sequences (
+  id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_root       TEXT    NOT NULL,
+  session_id         TEXT    NOT NULL,
+  sequence_id        TEXT    NOT NULL,
+  enhancement_id     TEXT    NOT NULL,
+  item_count         INTEGER NOT NULL,
+  current_item_index INTEGER NOT NULL,
+  status             TEXT    NOT NULL,
+  last_action_id     TEXT,
+  created_at         INTEGER NOT NULL,
+  updated_at         INTEGER NOT NULL,
+  -- MPS continuation content foundation (sub-11, 2026-08-14): the REDACTED, length-preserving
+  -- original prompt text (so an item's original slice can render at the continuation Stop —
+  -- MPS-12) and the handoffKind (so the packager's continuable-kind check passes). Local store
+  -- only, nullable; NEVER raw text, NEVER emitted in telemetry. Nothing reads them yet.
+  redacted_original_prompt_text TEXT,
+  handoff_kind                  TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_pending_prompt_sequences_project
+  ON pending_prompt_sequences (project_root, status, updated_at);
 
 CREATE TABLE IF NOT EXISTS feedback_signals (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -292,6 +328,12 @@ export function applyIncrementalMigrations(db: Database): void {
   // v0.1.1 — dev-environment probe
   addIfMissing('projects', 'env_facts',             'TEXT');
   addIfMissing('projects', 'env_facts_detected_at', 'INTEGER');
+  // A3 step 7 (owner-approved adjustment): prompt-derived extracted params, CACHED. The extractor
+  // is an LLM call, and PE runs on every prompt while the DS engine that used to own it ran
+  // occasionally — so the value is mined over a window and stored, never mined per prompt.
+  addIfMissing('projects', 'prompt_facts',             'TEXT');
+  addIfMissing('projects', 'prompt_facts_detected_at', 'INTEGER');
+  addIfMissing('projects', 'prompt_facts_at_count',    'INTEGER');
   addIfMissing('projects', 'env_trajectory',        'TEXT');
 
   // sub-11 prompt enhancement store contract
@@ -300,6 +342,32 @@ export function applyIncrementalMigrations(db: Database): void {
   addIfMissing('prompt_enhancement_generated_origin', 'action_ids_json', "TEXT NOT NULL DEFAULT '[]'");
   addIfMissing('prompt_enhancement_generated_origin', 'fallback_state', "TEXT NOT NULL DEFAULT 'unknown_not_applicable'");
   addIfMissing('prompt_enhancement_generated_origin', 'privacy_storage_policy', "TEXT NOT NULL DEFAULT 'raw_text_excluded_by_default'");
+
+  // sub-11 multi-prompt sequence payload. Column-additive so in-flight rows survive the
+  // migration; `offer_disposition` back-fills to 'accepted' because a pre-migration row
+  // exists at all, which means its sequence was sent.
+  addIfMissing('pending_prompt_sequences', 'items_json',                   "TEXT NOT NULL DEFAULT '[]'");
+  addIfMissing('pending_prompt_sequences', 'prompt_directives_json',       "TEXT NOT NULL DEFAULT '[]'");
+  addIfMissing('pending_prompt_sequences', 'suggested_next_prompt_policy', "TEXT NOT NULL DEFAULT 'not_generated'");
+  addIfMissing('pending_prompt_sequences', 'original_length',              'INTEGER NOT NULL DEFAULT 0');
+  addIfMissing('pending_prompt_sequences', 'offer_disposition',            "TEXT NOT NULL DEFAULT 'accepted'");
+
+  // sub-11 MPS continuation content foundation (2026-08-14). Nullable, default NULL — old rows
+  // read back as null. Local store only; the stored original is the redacted length-preserving
+  // copy, never raw, and neither field is ever emitted in telemetry.
+  addIfMissing('pending_prompt_sequences', 'redacted_original_prompt_text', 'TEXT');
+  addIfMissing('pending_prompt_sequences', 'handoff_kind',                  'TEXT');
+
+  // sub-11 MPS content pipeline P1b-ii (2026-08-14). The UserPromptSubmit planner's full item
+  // list, carried so the Stop-hook background wording batch can read it (the planner runs in a
+  // different process than the popup+batch — owner decision B-i). Nullable, default NULL — old
+  // rows and every non-sequence prepare read back as null. Items are OFFSETS/roles into the
+  // original (no wording yet); local store only, never emitted in telemetry.
+  addIfMissing('pending_prompt_enhancements', 'planner_items_json', 'TEXT');
+  // The sequence's whole-prompt directive ranges (offsets into the original), carried beside the
+  // item list so the Stop-hook batch can resolve them to text for items 2…N. Same nullable/local
+  // treatment as planner_items_json — old rows and non-sequence prepares read back NULL.
+  addIfMissing('pending_prompt_enhancements', 'planner_prompt_directives_json', 'TEXT');
 }
 
 /**
@@ -334,6 +402,12 @@ export function runMigrations(db: Database): void {
   // v0.1.1 — dev-environment probe
   addIfMissing('projects', 'env_facts',             'TEXT');
   addIfMissing('projects', 'env_facts_detected_at', 'INTEGER');
+  // A3 step 7 (owner-approved adjustment): prompt-derived extracted params, CACHED. The extractor
+  // is an LLM call, and PE runs on every prompt while the DS engine that used to own it ran
+  // occasionally — so the value is mined over a window and stored, never mined per prompt.
+  addIfMissing('projects', 'prompt_facts',             'TEXT');
+  addIfMissing('projects', 'prompt_facts_detected_at', 'INTEGER');
+  addIfMissing('projects', 'prompt_facts_at_count',    'INTEGER');
   addIfMissing('projects', 'env_trajectory',        'TEXT');
 
   // sub-11 prompt enhancement store contract
@@ -342,4 +416,30 @@ export function runMigrations(db: Database): void {
   addIfMissing('prompt_enhancement_generated_origin', 'action_ids_json', "TEXT NOT NULL DEFAULT '[]'");
   addIfMissing('prompt_enhancement_generated_origin', 'fallback_state', "TEXT NOT NULL DEFAULT 'unknown_not_applicable'");
   addIfMissing('prompt_enhancement_generated_origin', 'privacy_storage_policy', "TEXT NOT NULL DEFAULT 'raw_text_excluded_by_default'");
+
+  // sub-11 multi-prompt sequence payload. Column-additive so in-flight rows survive the
+  // migration; `offer_disposition` back-fills to 'accepted' because a pre-migration row
+  // exists at all, which means its sequence was sent.
+  addIfMissing('pending_prompt_sequences', 'items_json',                   "TEXT NOT NULL DEFAULT '[]'");
+  addIfMissing('pending_prompt_sequences', 'prompt_directives_json',       "TEXT NOT NULL DEFAULT '[]'");
+  addIfMissing('pending_prompt_sequences', 'suggested_next_prompt_policy', "TEXT NOT NULL DEFAULT 'not_generated'");
+  addIfMissing('pending_prompt_sequences', 'original_length',              'INTEGER NOT NULL DEFAULT 0');
+  addIfMissing('pending_prompt_sequences', 'offer_disposition',            "TEXT NOT NULL DEFAULT 'accepted'");
+
+  // sub-11 MPS continuation content foundation (2026-08-14). Nullable, default NULL — old rows
+  // read back as null. Local store only; the stored original is the redacted length-preserving
+  // copy, never raw, and neither field is ever emitted in telemetry.
+  addIfMissing('pending_prompt_sequences', 'redacted_original_prompt_text', 'TEXT');
+  addIfMissing('pending_prompt_sequences', 'handoff_kind',                  'TEXT');
+
+  // sub-11 MPS content pipeline P1b-ii (2026-08-14). The UserPromptSubmit planner's full item
+  // list, carried so the Stop-hook background wording batch can read it (the planner runs in a
+  // different process than the popup+batch — owner decision B-i). Nullable, default NULL — old
+  // rows and every non-sequence prepare read back as null. Items are OFFSETS/roles into the
+  // original (no wording yet); local store only, never emitted in telemetry.
+  addIfMissing('pending_prompt_enhancements', 'planner_items_json', 'TEXT');
+  // The sequence's whole-prompt directive ranges (offsets into the original), carried beside the
+  // item list so the Stop-hook batch can resolve them to text for items 2…N. Same nullable/local
+  // treatment as planner_items_json — old rows and non-sequence prepares read back NULL.
+  addIfMissing('pending_prompt_enhancements', 'planner_prompt_directives_json', 'TEXT');
 }

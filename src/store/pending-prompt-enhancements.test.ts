@@ -9,6 +9,24 @@ import { buildPromptEnhancementRequestForAuto } from '../cli/commands/auto.js';
 import { preparePromptEnhancement } from '../prompt-enhancement/facade.js';
 import { SessionStateManager } from '../classifier/SessionStateManager.js';
 import type { PromptEnhancementPrepareRequestV1, PromptEnhancementPrepareResultV1 } from '../prompt-enhancement/contracts.js';
+import type { PromptEnhancementSequenceItemV1, PromptEnhancementSequenceOffsetRangeV1 } from '../prompt-enhancement/sequence-payload.js';
+
+/** Whole-prompt directive ranges (offsets into the original), as P1b-ii carries them beside the items. */
+const sampleDirectives: readonly PromptEnhancementSequenceOffsetRangeV1[] = [{ start: 0, end: 6 }, { start: 20, end: 28 }];
+
+/** A minimal well-formed planner item list (offsets/roles only — no wording), as P1b-ii carries it. */
+const samplePlannerItems: readonly PromptEnhancementSequenceItemV1[] = [
+  {
+    itemKind: 'first_task', originalSliceRef: { start: 0, end: 40 }, sourcePointRanges: [],
+    roleLabel: 'fix', dependencyOrder: 0, complexity: 'not_complex', complexityReason: null,
+    decompositionGroupId: 'g1',
+  },
+  {
+    itemKind: 'task', originalSliceRef: { start: 10, end: 30 }, sourcePointRanges: [],
+    roleLabel: null, dependencyOrder: 1, complexity: 'not_complex', complexityReason: null,
+    decompositionGroupId: 'g2',
+  },
+];
 
 async function validPayload(store: Store, projectRoot: string): Promise<{
   request: PromptEnhancementPrepareRequestV1;
@@ -92,6 +110,82 @@ describe('pending_prompt_enhancements store', () => {
     upsertPendingPromptEnhancement(store, { projectRoot: '/test/pe-stop-corrupt', sessionId: 's', promptCount: 1, request, result });
     store.db.run("UPDATE pending_prompt_enhancements SET result_json = '{not valid' WHERE project_root = '/test/pe-stop-corrupt'");
     expect(getPendingPromptEnhancement(store, '/test/pe-stop-corrupt')).toBeNull();
+  });
+
+  // ── MPS P1b-ii — the planner item list carrier (Stop-hook batch input) ──────────────────────
+  it('round-trips the planner item list + directive ranges through upsert → get (sequence prepare)', async () => {
+    const { request, result } = await validPayload(store, '/test/pe-planner-items');
+    upsertPendingPromptEnhancement(store, {
+      projectRoot: '/test/pe-planner-items', sessionId: 's', promptCount: 1, request, result,
+      plannerItems: samplePlannerItems, plannerPromptDirectives: sampleDirectives,
+    });
+    const loaded = getPendingPromptEnhancement(store, '/test/pe-planner-items');
+    expect(loaded).not.toBeNull();
+    expect(loaded!.plannerItems).toEqual(samplePlannerItems);
+    expect(loaded!.plannerItems?.[0].itemKind).toBe('first_task');
+    expect(loaded!.plannerPromptDirectives).toEqual(sampleDirectives);
+  });
+
+  it('preserves an empty directive list ([]) as a meaningful value, distinct from undefined', async () => {
+    const { request, result } = await validPayload(store, '/test/pe-empty-directives');
+    upsertPendingPromptEnhancement(store, {
+      projectRoot: '/test/pe-empty-directives', sessionId: 's', promptCount: 1, request, result,
+      plannerItems: samplePlannerItems, plannerPromptDirectives: [],
+    });
+    const loaded = getPendingPromptEnhancement(store, '/test/pe-empty-directives');
+    expect(loaded!.plannerPromptDirectives).toEqual([]);
+  });
+
+  it('fails OPEN on corrupt planner_prompt_directives_json — the PE + items survive, directives drop', async () => {
+    const { request, result } = await validPayload(store, '/test/pe-directives-corrupt');
+    upsertPendingPromptEnhancement(store, {
+      projectRoot: '/test/pe-directives-corrupt', sessionId: 's', promptCount: 1, request, result,
+      plannerItems: samplePlannerItems, plannerPromptDirectives: sampleDirectives,
+    });
+    store.db.run("UPDATE pending_prompt_enhancements SET planner_prompt_directives_json = '{bad' WHERE project_root = '/test/pe-directives-corrupt'");
+    const loaded = getPendingPromptEnhancement(store, '/test/pe-directives-corrupt');
+    expect(loaded).not.toBeNull();
+    expect(loaded!.plannerItems).toEqual(samplePlannerItems);
+    expect(loaded!.plannerPromptDirectives).toBeUndefined();
+  });
+
+  it('stores NULL and reads back undefined plannerItems for a non-sequence prepare', async () => {
+    const { request, result } = await validPayload(store, '/test/pe-no-items');
+    upsertPendingPromptEnhancement(store, {
+      projectRoot: '/test/pe-no-items', sessionId: 's', promptCount: 1, request, result,
+    });
+    const loaded = getPendingPromptEnhancement(store, '/test/pe-no-items');
+    expect(loaded).not.toBeNull();
+    expect(loaded!.plannerItems).toBeUndefined();
+    // The column exists and holds NULL — the popup still opens; only the batch is disabled.
+    const raw = store.db.exec("SELECT planner_items_json FROM pending_prompt_enhancements WHERE project_root = '/test/pe-no-items'");
+    expect(raw[0]!.values[0]![0]).toBeNull();
+  });
+
+  it('fails OPEN on corrupt planner_items_json — the PE still loads, only plannerItems drops', async () => {
+    const { request, result } = await validPayload(store, '/test/pe-items-corrupt');
+    upsertPendingPromptEnhancement(store, {
+      projectRoot: '/test/pe-items-corrupt', sessionId: 's', promptCount: 1, request, result,
+      plannerItems: samplePlannerItems,
+    });
+    // Corrupt ONLY the item list — unlike a corrupt result_json (which fails the whole PE closed),
+    // a bad item list must leave the popup fully usable and merely turn the batch off.
+    store.db.run("UPDATE pending_prompt_enhancements SET planner_items_json = '{not json' WHERE project_root = '/test/pe-items-corrupt'");
+    const loaded = getPendingPromptEnhancement(store, '/test/pe-items-corrupt');
+    expect(loaded).not.toBeNull();
+    expect(loaded!.result).toEqual(result);
+    expect(loaded!.plannerItems).toBeUndefined();
+  });
+
+  it('drops a structurally wrong planner item list (array of non-items) to undefined', async () => {
+    const { request, result } = await validPayload(store, '/test/pe-items-wrong-shape');
+    upsertPendingPromptEnhancement(store, {
+      projectRoot: '/test/pe-items-wrong-shape', sessionId: 's', promptCount: 1, request, result,
+    });
+    store.db.run("UPDATE pending_prompt_enhancements SET planner_items_json = '[1,2,3]' WHERE project_root = '/test/pe-items-wrong-shape'");
+    const loaded = getPendingPromptEnhancement(store, '/test/pe-items-wrong-shape');
+    expect(loaded).not.toBeNull();
+    expect(loaded!.plannerItems).toBeUndefined();
   });
 
   it('marks a pending PE as shown so it is no longer returned', async () => {

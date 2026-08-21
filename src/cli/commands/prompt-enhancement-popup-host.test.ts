@@ -11,6 +11,7 @@ import type { PromptEnhancementPopupEventV1 } from '../../prompt-enhancement/pop
 import type { Store } from '../../store/db.js';
 import {
   runPromptEnhancementPopupHostCommandV1,
+  runPromptEnhancementMpsContinuationPopupHostCommandV1,
   type PromptEnhancementPopupHostInputV1,
 } from './prompt-enhancement-popup-host.js';
 
@@ -73,12 +74,36 @@ describe('spawned-window MPS parity (fix 2026-08-06)', () => {
 
     const output = await runPromptEnhancementPopupHostCommandV1(
       { ...paths, db: ':memory:' },
-      { openStore: async () => ({} as Store), closeStore: vi.fn(), runPopup, runMpsPopup },
+      { openStore: async () => ({} as Store), closeStore: vi.fn(), runPopup, runMpsPopup, recordActionSignal: vi.fn() },
     );
 
     expect(output.result).toEqual({ state: 'selected_current', bodyText: 'ENHANCED FIRST PROMPT' });
+    // MPS Phase 1 (Option 2): the host flags the MPS first-popup SEND so the parent records the row.
+    expect(output.mpsFirstPopupSent).toBe(true);
     expect(runMpsPopup).toHaveBeenCalledTimes(1);
     expect(runPopup).not.toHaveBeenCalled(); // MPS send resolves the popup turn; PE popup skipped
+  });
+
+  it('NF apply-details capture: the MPS actionSignalSink is wired to recordActionSignal (mps_apply_details)', async () => {
+    const paths = files();
+    writeFileSync(paths.inputFile, JSON.stringify(await sequenceInput()), 'utf8');
+    const runPopup = vi.fn(async () => ({ state: 'selected_original' as const }));
+    // The runner invokes the sink when the user applies details in-popup, then sends.
+    const runMpsPopup = vi.fn(async (arg: { actionSignalSink?: (kind: string, ts: number) => void }) => {
+      arg.actionSignalSink?.('mps_apply_details', 1234);
+      return { state: 'send' as const, bodyText: 'ENHANCED FIRST PROMPT' };
+    });
+    const recordActionSignal = vi.fn();
+
+    await runPromptEnhancementPopupHostCommandV1(
+      { ...paths, db: ':memory:' },
+      { openStore: async () => ({} as Store), closeStore: vi.fn(), runPopup, runMpsPopup, recordActionSignal },
+    );
+
+    // The apply is recorded (mps_apply_details), AND the terminal outcome (mps_send) is recorded too.
+    const kinds = recordActionSignal.mock.calls.map((c) => c[2]);
+    expect(kinds).toContain('mps_apply_details');
+    expect(kinds).toContain('mps_send');
   });
 
   it('MPS declined (Esc) falls through to the regular PE popup in the same window', async () => {
@@ -89,10 +114,12 @@ describe('spawned-window MPS parity (fix 2026-08-06)', () => {
 
     const output = await runPromptEnhancementPopupHostCommandV1(
       { ...paths, db: ':memory:' },
-      { openStore: async () => ({} as Store), closeStore: vi.fn(), runPopup, runMpsPopup },
+      { openStore: async () => ({} as Store), closeStore: vi.fn(), runPopup, runMpsPopup, recordActionSignal: vi.fn() },
     );
 
     expect(output.result).toEqual({ state: 'selected_original' });
+    // MPS Phase 1 (Option 2): Esc → PE popup is NOT an MPS send, so the parent must not record a row.
+    expect(output.mpsFirstPopupSent).toBe(false);
     expect(runMpsPopup).toHaveBeenCalledTimes(1);
     expect(runPopup).toHaveBeenCalledTimes(1);
   });
@@ -110,7 +137,7 @@ describe('spawned-window MPS parity (fix 2026-08-06)', () => {
 
     const output = await runPromptEnhancementPopupHostCommandV1(
       { ...paths, db: ':memory:' },
-      { openStore: async () => ({} as Store), closeStore: vi.fn(), runPopup, runMpsPopup, recordFeedback },
+      { openStore: async () => ({} as Store), closeStore: vi.fn(), runPopup, runMpsPopup, recordFeedback, recordActionSignal: vi.fn() },
     );
 
     expect(output.result).toEqual({ state: 'closed_no_send' });
@@ -128,7 +155,7 @@ describe('spawned-window MPS parity (fix 2026-08-06)', () => {
 
     await runPromptEnhancementPopupHostCommandV1(
       { ...paths, db: ':memory:' },
-      { openStore: async () => ({} as Store), closeStore: vi.fn(), runPopup, runMpsPopup },
+      { openStore: async () => ({} as Store), closeStore: vi.fn(), runPopup, runMpsPopup, recordActionSignal: vi.fn() },
     );
 
     expect(runMpsPopup).not.toHaveBeenCalled();
@@ -170,7 +197,7 @@ describe('PE1.2 — hidden prompt-enhancement popup child command', () => {
       { openStore: async () => store, closeStore: vi.fn(), runPopup },
     );
 
-    expect(output).toEqual({ protocolVersion: 1, result: { state: 'selected_original' } });
+    expect(output).toEqual({ protocolVersion: 1, result: { state: 'selected_original' }, mpsFirstPopupSent: false });
     expect(JSON.parse(readFileSync(paths.resultFile, 'utf8'))).toEqual(output);
     // POSIX file mode — Windows has no 0o600 equivalent, so assert it only off win32 (P5).
     if (process.platform !== 'win32') expect(statSync(paths.resultFile).mode & 0o777).toBe(0o600);
@@ -205,9 +232,9 @@ describe('PE1.2 — hidden prompt-enhancement popup child command', () => {
       { openStore, runPopup },
     );
 
-    expect(invalidOutput).toEqual({ protocolVersion: 1, result: { state: 'closed_no_send' } });
-    expect(missingOutput).toEqual({ protocolVersion: 1, result: { state: 'closed_no_send' } });
-    expect(staleOutput).toEqual({ protocolVersion: 1, result: { state: 'closed_no_send' } });
+    expect(invalidOutput).toEqual({ protocolVersion: 1, result: { state: 'closed_no_send' }, mpsFirstPopupSent: false });
+    expect(missingOutput).toEqual({ protocolVersion: 1, result: { state: 'closed_no_send' }, mpsFirstPopupSent: false });
+    expect(staleOutput).toEqual({ protocolVersion: 1, result: { state: 'closed_no_send' }, mpsFirstPopupSent: false });
     expect(JSON.parse(readFileSync(invalid.resultFile, 'utf8')).result).toEqual({ state: 'closed_no_send' });
     expect(openStore).not.toHaveBeenCalled();
     expect(runPopup).not.toHaveBeenCalled();
@@ -267,5 +294,76 @@ describe('PE1.2 — hidden prompt-enhancement popup child command', () => {
     expect(command).toBeDefined();
     expect(command!.options.map((option) => option.long)).toEqual(expect.arrayContaining(['--input-file', '--result-file', '--db']));
     expect(createProgram().helpInformation()).not.toContain('prompt-enhancement-popup-host');
+  });
+});
+
+describe('MPS Phase 2 — continuation (2nd popup) host handler (Option D)', () => {
+  const continuationInput = (result: unknown) => ({
+    protocolVersion: 1 as const,
+    continuation: {
+      result,
+      handoffMetadata: { any: 'shape' },
+      event: { any: 'shape' },
+      progress: { done: 1, total: 2 },
+      itemKind: 'task' as const,
+    },
+  });
+
+  it('renders the continuation popup for a valid input and reports its outcome to the result file', async () => {
+    const paths = files();
+    const input = await validInput(); // a real, valid prepare result
+    writeFileSync(paths.inputFile, JSON.stringify(continuationInput(input.result)), 'utf8');
+    const runMpsContinuationPopup = vi.fn(async () => ({ state: 'send' as const, bodyText: 'NEXT ITEM BODY' }));
+
+    const output = await runPromptEnhancementMpsContinuationPopupHostCommandV1(
+      { ...paths, db: ':memory:' },
+      { runMpsContinuationPopup },
+    );
+
+    expect(output).toEqual({ protocolVersion: 1, continuationOutcome: { state: 'send', bodyText: 'NEXT ITEM BODY' } });
+    expect(runMpsContinuationPopup).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(readFileSync(paths.resultFile, 'utf8'))).toEqual(output);
+  });
+
+  it('fails closed to not_shown on an invalid prepare result — the runner validates and never renders', async () => {
+    const paths = files();
+    writeFileSync(paths.inputFile, JSON.stringify(continuationInput({ not: 'a valid result' })), 'utf8');
+    // The host no longer pre-validates the RAW result: a raw pre-check wrongly rejects legitimate
+    // confirmation continuations (whose original slice is empty by design). The REAL runner validates the
+    // result — with the substitution a raw check lacks — and fails closed WITHOUT rendering on a genuinely
+    // invalid one.
+    const output = await runPromptEnhancementMpsContinuationPopupHostCommandV1({ ...paths, db: ':memory:' });
+    expect(output.continuationOutcome.state).toBe('not_shown');
+  });
+
+  it('fails closed to not_shown on unparseable input', async () => {
+    const paths = files();
+    writeFileSync(paths.inputFile, '{not json', 'utf8');
+    const runMpsContinuationPopup = vi.fn();
+    const output = await runPromptEnhancementMpsContinuationPopupHostCommandV1(
+      { ...paths, db: ':memory:' },
+      { runMpsContinuationPopup },
+    );
+    expect(output.continuationOutcome.state).toBe('not_shown');
+    expect(runMpsContinuationPopup).not.toHaveBeenCalled();
+  });
+
+  it('a continuation input is a DISTINCT shape — the first-popup command rejects it as invalid', async () => {
+    // Proof the two shapes never collide: a continuation input has no top-level request/result, so the
+    // first-popup path treats it as invalid (safe no-send) and only the continuation handler serves it.
+    const paths = files();
+    const input = await validInput();
+    writeFileSync(paths.inputFile, JSON.stringify(continuationInput(input.result)), 'utf8');
+    const runPopup = vi.fn();
+    const runMpsPopup = vi.fn();
+    const openStore = vi.fn();
+    const firstPopupOut = await runPromptEnhancementPopupHostCommandV1(
+      { ...paths, db: ':memory:' },
+      { runPopup, runMpsPopup, openStore },
+    );
+    expect(firstPopupOut.result).toEqual({ state: 'closed_no_send' });
+    expect(openStore).not.toHaveBeenCalled();
+    expect(runPopup).not.toHaveBeenCalled();
+    expect(runMpsPopup).not.toHaveBeenCalled();
   });
 });

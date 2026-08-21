@@ -42,6 +42,7 @@ import {
   type PromptEnhancementEditorFieldV1,
   type PromptEnhancementMultilineEditorStateV1,
 } from './multiline-editor.js';
+import type { PromptActionSignalKind } from '../store/feedback-signals.js';
 
 export type PromptEnhancementCliPopupCommandV1 =
   | { type: 'use_current' }
@@ -55,6 +56,21 @@ export type PromptEnhancementCliPopupCommandV1 =
   | { type: 'feedback_other'; text: string }
   | { type: 'go_back' }
   | { type: 'close' };
+
+/**
+ * NF Plan B (B-2): content-free action telemetry — maps a popup command to its per-action signal kind.
+ * `edit_body` and `feedback_*` are intentionally excluded (edit noise / a separate feedback path).
+ */
+const PE_ACTION_SIGNAL_KIND_BY_COMMAND: Partial<Record<PromptEnhancementCliPopupCommandV1['type'], PromptActionSignalKind>> = {
+  use_current:           'pe_use_current',
+  use_original:          'pe_use_original',
+  shorter:               'pe_shorter',
+  more_thorough:         'pe_more_thorough',
+  more_project_grounded: 'pe_more_project_grounded',
+  apply_details:         'pe_apply_details',
+  go_back:               'pe_back',
+  close:                 'pe_close',
+};
 
 export type PromptEnhancementCliFeedbackSinkV1 = (event: PromptEnhancementPopupEventV1) => PromptEnhancementFeedbackAcknowledgementV1 | Promise<PromptEnhancementFeedbackAcknowledgementV1>;
 
@@ -201,6 +217,13 @@ export async function runPromptEnhancementCliSubmitPopupV1(input: {
    * live failure stays diagnosable. Codes only, never body text.
    */
   actionDiagnosticsSink?: (event: { actionType: string; state: string; reasonCodes: readonly string[] }) => void;
+  /**
+   * NF Plan B (B-2): content-free per-action telemetry. Called with the action kind + timestamp the moment
+   * the user issues a captured popup action (shorter / more_thorough / more_project_grounded / apply_details
+   * / use_current / use_original / go_back / close). Never carries body/option text. Observation-only —
+   * does not affect the popup flow.
+   */
+  actionSignalSink?: (kind: PromptActionSignalKind, occurredAt: number) => void;
   onFirstRender?: () => void;
 }): Promise<PromptEnhancementCliPopupResultV1> {
   let currentResult = input.result;
@@ -239,6 +262,12 @@ export async function runPromptEnhancementCliSubmitPopupV1(input: {
     for (;;) {
       const command = await interaction.next({ model, editedBodyText, additionalDetailsText, publicNotice, refinement: inRefinement });
       publicNotice = undefined;
+
+      // NF Plan B (B-2): record the user's action (content-free kind + timestamp) at the moment it is
+      // issued — one event per mapped action, regardless of outcome. Observation-only; the send happens
+      // later on the feedback-consent flush.
+      const actionSignalKind = PE_ACTION_SIGNAL_KIND_BY_COMMAND[command.type];
+      if (actionSignalKind) input.actionSignalSink?.(actionSignalKind, Date.now());
 
       if (command.type === 'close') return { state: 'closed_no_send' };
       if (command.type === 'go_back') {
@@ -609,17 +638,28 @@ export function buildPromptEnhancementCliActionRowsV1(
     },
   ];
 
-  for (const entry of model.controls.directional) {
-    rows.push({
-      rowKey: entry.action.actionType,
-      kind: 'directional',
-      label: entry.action.label,
-      available: entry.uiAvailabilityState === 'available',
-      // No focused-row description for the directional actions (owner request):
-      // the labels (Shorter / More thorough / More project-grounded) are
-      // self-explanatory. Use original prompt keeps its help below.
-    });
-  }
+  // Directional refinements (Shorter / More thorough / More project-grounded) are HIDDEN from the PE
+  // popup UI (owner decision 2026-08-19): the row-building loop below is COMMENTED OUT (kept verbatim,
+  // NOT deleted) so the rows never render — the user never sees them and the recompose path can never
+  // be triggered. To restore, simply un-comment the loop; the action/engine code is untouched. See the
+  // submodule doc `…mps-1-directional-actions-pe-parity-plan-and-pending-2026-08-19.md`.
+  // for (const entry of model.controls.directional) {
+  //   rows.push({
+  //     rowKey: entry.action.actionType,
+  //     kind: 'directional',
+  //     // Owner request: the directional refinements (Shorter / More thorough / More project-grounded)
+  //     // never show the "(unavailable)" marker. Their `uiAvailabilityState` is always downgraded to
+  //     // `requires_llm_budget` (they are LLM re-wordings), which read as "(unavailable)" even in a
+  //     // working popup and confused users. Availability will be governed separately; here the row is
+  //     // always shown without the marker. Execution stays gated by the RAW action availability in the
+  //     // runner (a genuinely-unavailable action still no-ops silently, never a bad call).
+  //     label: entry.action.label,
+  //     available: true,
+  //     // No focused-row description for the directional actions (owner request):
+  //     // the labels (Shorter / More thorough / More project-grounded) are
+  //     // self-explanatory. Use original prompt keeps its help below.
+  //   });
+  // }
 
   // Feedback is no longer a row in the action list (§8.3): it opens on cancel
   // (Use original prompt or Esc), wired in UI-3.
@@ -663,7 +703,7 @@ const PROMPT_ENHANCEMENT_CLI_SGR_V1 = (() => {
     // 16-colour that stays readable on every terminal (owner request 2026-08-07: keep it
     // properly visible on all OSes, unlike the faint attribute).
     lightYellow: `${e}[93m`,
-    // Caution tone (normal yellow) — the provider-failure notice; matches the MPS Cancel row.
+    // Caution tone (normal yellow) — the provider-failure notice.
     yellow: `${e}[33m`,
     dim: `${e}[2m`,
     bold: `${e}[1m`,
@@ -762,12 +802,10 @@ export function renderPromptEnhancementPopupFrameV1(
     if (row.kind === 'editor_heading') {
       recordCaret('enhanced_body');
       for (const bodyLine of publicText(view.editedBodyText).split('\n')) lines.push(contentLine(bodyLine));
-      // Body block (owner request 2026-08-07): the edit-keys and the send hint share ONE line when
-      // focused ("Ctrl+J … · Enter sends this prompt") so the body gains a line; when not focused,
-      // just the send hint shows.
-      lines.push(hint(focused
-        ? `${PROMPT_ENHANCEMENT_CLI_EDIT_KEYS_HINT_V1} · ${PROMPT_ENHANCEMENT_CLI_BODY_HINT_V1}`
-        : PROMPT_ENHANCEMENT_CLI_BODY_HINT_V1));
+      // Body block: the "Enter sends this prompt" hint shows ONLY when this row (Use enhanced prompt) is
+      // focused — otherwise it is misleading, because Enter acts on whichever row IS focused, not on the
+      // enhanced body (owner 2026-08-19). When focused, the edit-keys and the send hint share ONE line.
+      if (focused) lines.push(hint(`${PROMPT_ENHANCEMENT_CLI_EDIT_KEYS_HINT_V1} · ${PROMPT_ENHANCEMENT_CLI_BODY_HINT_V1}`));
     } else if (row.kind === 'additional_details') {
       // UI-8: no "Apply" button — pressing Enter on this row applies the details.
       // An empty field renders blank (§8.5). Sending the body ignores unapplied details.
@@ -815,9 +853,24 @@ export function windowPromptEnhancementFieldForDisplayV1(
   width: number,
   rows: number,
 ): string {
+  return windowPromptEnhancementFieldForDisplayWithStartV1(buffer, width, rows).text;
+}
+
+/**
+ * Same windowing as windowPromptEnhancementFieldForDisplayV1, but also returns the `start` —
+ * the first visual row actually shown (0 when the whole field fits; the clamped scroll otherwise).
+ * The raw-TTY caret placement uses THIS start (not the raw buffer.scrollVisualRow) so the hardware
+ * cursor's window-relative row is derived from the exact window the display rendered — display and
+ * caret can never disagree even if a buffer's scroll is momentarily past the clamp.
+ */
+export function windowPromptEnhancementFieldForDisplayWithStartV1(
+  buffer: PromptEnhancementEditorBufferV1,
+  width: number,
+  rows: number,
+): { text: string; start: number } {
   const visual = buildPromptEnhancementVisualLineMapV1(buffer.text, Math.max(1, Math.trunc(width)));
   const viewport = Math.max(1, Math.trunc(rows));
-  if (visual.length <= viewport) return visual.map((line) => line.text).join('\n');
+  if (visual.length <= viewport) return { text: visual.map((line) => line.text).join('\n'), start: 0 };
   const maxStart = visual.length - viewport;
   const start = Math.max(0, Math.min(Math.trunc(buffer.scrollVisualRow), maxStart));
   const hiddenAbove = start;
@@ -825,7 +878,7 @@ export function windowPromptEnhancementFieldForDisplayV1(
   const shown = visual.slice(start, start + viewport).map((line) => line.text);
   if (hiddenAbove > 0) shown[0] = `↑ ${hiddenAbove} more lines above`;
   if (hiddenBelow > 0) shown[shown.length - 1] = `↓ ${hiddenBelow} more lines below · the whole prompt is included`;
-  return shown.join('\n');
+  return { text: shown.join('\n'), start };
 }
 
 /**
@@ -1294,9 +1347,10 @@ function createPromptEnhancementCliPopupInteractionV1(onFirstRender?: () => void
     const detailsBuffer = focusedField === 'additional_details'
       ? promptEnhancementKeepFieldCursorVisibleV1(current.editor.buffers.additional_details, editorWidth, detailsRows)
       : current.editor.buffers.additional_details;
-    const detailsDisplay = detailsBuffer.text
-      ? windowPromptEnhancementFieldForDisplayV1(detailsBuffer, editorWidth, detailsRows)
-      : '';
+    const detailsWindow = detailsBuffer.text
+      ? windowPromptEnhancementFieldForDisplayWithStartV1(detailsBuffer, editorWidth, detailsRows)
+      : { text: '', start: 0 };
+    const detailsDisplay = detailsWindow.text;
     // Fill the window (owner request 2026-08-07 — the body was small with dead space below the
     // footer): MEASURE the exact non-body chrome by rendering a 1-line-body probe with the same
     // focus/refinement/details, then give the body every remaining row (rows-1 for the no-scroll
@@ -1316,16 +1370,18 @@ function createPromptEnhancementCliPopupInteractionV1(onFirstRender?: () => void
     // Display only the visible viewport of each editable field so the frame fits the terminal
     // and redraws in place. The full text stays in current.editor for editing/apply/send.
     const bodyBuffer = current.editor.buffers.enhanced_body;
-    const bodyDisplay = windowPromptEnhancementFieldForDisplayV1(bodyBuffer, editorWidth, measuredBodyRows);
-    // Caret row is window-relative, from the SAME synced buffer used for the display. If it
-    // still falls outside the shown lines, leave the caret unset so the cursor is hidden rather
-    // than placed on a wrong row.
+    const bodyWindow = windowPromptEnhancementFieldForDisplayWithStartV1(bodyBuffer, editorWidth, measuredBodyRows);
+    const bodyDisplay = bodyWindow.text;
+    // Caret row is window-relative, derived from the SAME window the display used (its `start`),
+    // not the raw buffer scroll. If it still falls outside the shown lines, leave the caret unset
+    // so the cursor is hidden rather than placed on a wrong row.
     let caret: PromptEnhancementCliFrameStateV1['caret'];
     if (focusedField) {
       const buffer = focusedField === 'enhanced_body' ? bodyBuffer : detailsBuffer;
       const shownLines = (focusedField === 'enhanced_body' ? bodyDisplay : detailsDisplay).split('\n').length;
+      const start = focusedField === 'enhanced_body' ? bodyWindow.start : detailsWindow.start;
       const pos = promptEnhancementCursorVisualPositionV1(buffer, editorWidth);
-      const visualRow = pos.row - buffer.scrollVisualRow;
+      const visualRow = pos.row - start;
       if (visualRow >= 0 && visualRow < shownLines) {
         caret = { field: focusedField, visualRow, visualColumn: pos.column };
       }

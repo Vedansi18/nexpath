@@ -1,6 +1,19 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { isProfileStale, classifyUserProfile, NATURE_DEPTH_RECOMPUTE_INTERVAL } from './UserProfileClassifier.js';
 import type { UserProfile, PromptRecord } from './types.js';
+import type { LLMPort } from '../core/ports/llm.port.js';
+
+// Fails the test if called — the below-gate cases must never reach the LLM.
+const unusedLLM: LLMPort = { chat: vi.fn().mockRejectedValue(new Error('llm.chat should not be called below the gate')) };
+
+function makeSuccessLLM(): LLMPort {
+  return {
+    chat: vi.fn().mockResolvedValue(JSON.stringify({
+      nature: 'hardcore_pro', mood: 'focused', depth: 'high',
+      precision: 'very_high', playfulness: 'low',
+    })),
+  };
+}
 
 // ── UserProfileClassifier — isProfileStale ────────────────────────────────────
 
@@ -50,7 +63,7 @@ describe('UserProfileClassifier — classifyUserProfile', () => {
   }
 
   it('returns safe defaults when history is below MIN_PROFILE_PROMPTS - 1 gate', async () => {
-    const result = await classifyUserProfile(makeHistory(2), 2, null);
+    const result = await classifyUserProfile(makeHistory(2), 2, null, unusedLLM);
     expect(result.nature).toBe('beginner');
     expect(result.mood).toBe('casual');
     expect(result.depth).toBe('medium');
@@ -62,22 +75,23 @@ describe('UserProfileClassifier — classifyUserProfile', () => {
       precisionOrdinal: 'very_high', playfulnessOrdinal: 'low',
       mood: 'focused', depth: 'high', depthScore: 3, computedAt: 1,
     };
-    const result = await classifyUserProfile(makeHistory(2), 2, existing);
+    const result = await classifyUserProfile(makeHistory(2), 2, existing, unusedLLM);
     expect(result.nature).toBe('hardcore_pro');
     expect(result.computedAt).toBe(1);
   });
 
-  it('delegates through to LLM layer when history meets the gate — API failure falls back to defaults', async () => {
-    // history=4 clears the MIN_PROFILE_PROMPTS gate; no real OpenAI key in test env →
-    // classifyUserProfileLLM catches the API error and returns safe defaults.
-    // A thrown exception here would mean the delegate did NOT call through correctly.
-    const result = await classifyUserProfile(makeHistory(4), 4, null);
+  it('delegates through to LLM layer when history meets the gate — real LLM response is classified', async () => {
+    // history=4 clears the MIN_PROFILE_PROMPTS gate — classifyUserProfile must forward
+    // the llm param through to classifyUserProfileLLM, which then calls llm.chat().
+    const llm = makeSuccessLLM();
+    const result = await classifyUserProfile(makeHistory(4), 4, null, llm);
+    expect(llm.chat).toHaveBeenCalledOnce();
     expect(result).toMatchObject({
-      nature:             expect.any(String),
-      mood:               expect.any(String),
-      depth:              expect.any(String),
-      precisionOrdinal:   expect.any(String),
-      playfulnessOrdinal: expect.any(String),
+      nature:             'hardcore_pro',
+      mood:               'focused',
+      depth:              'high',
+      precisionOrdinal:   'very_high',
+      playfulnessOrdinal: 'low',
     });
     expect(result.computedAt).toBe(4);
   });

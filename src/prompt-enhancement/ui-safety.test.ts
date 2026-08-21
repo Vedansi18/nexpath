@@ -17,7 +17,7 @@ function request(overrides: Partial<PromptEnhancementPrepareRequestV1> = {}): Pr
   const promptStartStop = getPromptStartStopSourceSnapshot();
   return {
     schemaVersion: PROMPT_ENHANCEMENT_CONTRACT_VERSION, requestId: 'b15-test-1', projectRoot: '/tmp/project', hostSurface: 'cli_stop_bridge',
-    sourcePrompt: { text: 'Fix the failing payment test and explain the verification.', origin: 'user', capturedAt: 1, promptIndex: 1, generatedOriginPolicy: 'ordinary_source_a' },
+    sourcePrompt: { text: 'Fix the failing payment test, the test failure blocks ci, and explain the verification.', origin: 'user', capturedAt: 1, promptIndex: 1, generatedOriginPolicy: 'ordinary_source_a' },
     reviewMomentContext: {
       reviewMoment: 'UserPromptSubmit_preparation', currentAgentMode: 'workspace-write', projectId: 'project-1', sessionId: 'session-1', detectedLanguage: 'en', stageCandidate: 'implementation', promptCount: 1, recentPromptMetadataRefs: [],
       triggerProvenance: { currentStage: 'implementation', prevStage: 'task_breakdown', triggerKind: 'stage_transition', classifierState: 'fire_recommended', degradedNoActionState: 'none', promptStartBoundary: promptStartStop.hookBoundary, deliveryBoundary: promptStartStop.deliveryBoundary, promptStartCanReplaceSameTurn: false },

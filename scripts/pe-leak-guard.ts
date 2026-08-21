@@ -9,7 +9,7 @@
  *   npm run pe:leak-guard
  *
  * This is a read-only scan of the working tree — it performs NO git history rewrite, force-push,
- * branch delete, or repo-visibility change (those are Hiren-go-gated containment ops, never automated).
+ * branch delete, or repo-visibility change (those are owner-gated containment ops, never automated).
  */
 import {
   buildPromptEnhancementPublicLaunchForbiddenPatternsV1,

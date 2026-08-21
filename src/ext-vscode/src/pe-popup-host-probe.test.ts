@@ -138,7 +138,18 @@ describe('DRIFT PIN — the mirror matches src/cli/prompt-enhancement-host.ts', 
   });
 
   it('CLI still requires a GUI session on linux (DISPLAY/WAYLAND_DISPLAY)', () => {
-    expect(cliSrc).toMatch(/!env\.DISPLAY && !env\.WAYLAND_DISPLAY/);
+    // Accepts EITHER spelling of the same gate — they are De Morgan equivalents,
+    // and upstream refactored between them (2026-08-20, the merge of
+    // upstream/prompt-enhancement into this milestone branch):
+    //   ours     `if (!env.DISPLAY && !env.WAYLAND_DISPLAY) {`   → no GUI ⇒ /dev/tty
+    //   upstream `const guiSession = Boolean(env.DISPLAY || env.WAYLAND_DISPLAY)`
+    // The MIRROR's behaviour is unchanged by that refactor, so pinning the old
+    // literal text would fail on a rename that changed nothing — the exact
+    // false-positive class RC26 hit. What must still hold is that the CLI decides
+    // from BOTH vars, so a real removal of the GUI gate still trips this pin.
+    expect(cliSrc).toMatch(
+      /!env\.DISPLAY && !env\.WAYLAND_DISPLAY|Boolean\(env\.DISPLAY \|\| env\.WAYLAND_DISPLAY\)/,
+    );
   });
 });
 

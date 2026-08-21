@@ -1,3 +1,4 @@
+import { findPromptEnhancementInventionViolationsV1 } from './preservation-floors.js';
 import {
   PROMPT_ENHANCEMENT_CONTRACT_VERSION,
   type PromptEnhancementActionType,
@@ -18,23 +19,31 @@ export const PROMPT_ENHANCEMENT_CANONICAL_CONFIRMATION =
   'Still, before you do this <specific sensitive action> you must ask me for go-ahead confirmation.';
 export const PROMPT_ENHANCEMENT_MAX_SENDABLE_BODY_CHARS = 128_000;
 
+// Declared as values so membership can be checked at runtime by consumers that read a stored
+// risk kind back; the types below are derived from them so the two cannot drift apart.
+export const PROMPT_ENHANCEMENT_SENSITIVE_ACTION_RISK_KINDS = [
+  'destructive_filesystem_or_codebase',
+  'destructive_data_or_schema',
+  'dependency_or_toolchain_change',
+  'secret_env_or_credential',
+  'production_release_or_external_effect',
+  'git_history_rewrite',
+  'security_auth_permission',
+  'cost_or_resource',
+  'wide_scope_or_boundary_expansion',
+  'agent_mode_or_permission_boundary',
+] as const;
 export type PromptEnhancementSensitiveActionRiskKind =
-  | 'destructive_filesystem_or_codebase'
-  | 'destructive_data_or_schema'
-  | 'dependency_or_toolchain_change'
-  | 'secret_env_or_credential'
-  | 'production_release_or_external_effect'
-  | 'git_history_rewrite'
-  | 'security_auth_permission'
-  | 'cost_or_resource'
-  | 'wide_scope_or_boundary_expansion'
-  | 'agent_mode_or_permission_boundary';
+  typeof PROMPT_ENHANCEMENT_SENSITIVE_ACTION_RISK_KINDS[number];
 
+export const PROMPT_ENHANCEMENT_AUTHORITY_MODES = [
+  'observe_or_literal',
+  'plan_or_review',
+  'execute_requested',
+  'execute_generated_escalation',
+] as const;
 export type PromptEnhancementAuthorityMode =
-  | 'observe_or_literal'
-  | 'plan_or_review'
-  | 'execute_requested'
-  | 'execute_generated_escalation';
+  typeof PROMPT_ENHANCEMENT_AUTHORITY_MODES[number];
 
 export interface PromptEnhancementSensitiveActionFinding {
   riskKind: PromptEnhancementSensitiveActionRiskKind;
@@ -52,6 +61,23 @@ export interface PromptEnhancementSafetyValidationInput {
   actionType?: PromptEnhancementActionType;
   callVisibilityMode?: PromptEnhancementCallVisibilityMode;
   optionalCallAvailabilityState?: PromptEnhancementValidationGraphV1['optionalCallAvailabilityState'];
+  /**
+   * The composer's own verdict on the wording it produced, and its reading of the request that
+   * produced it. Supplied only when the body being validated IS that composer output.
+   *
+   * The deterministic rule above is a floor: it catches wording with no benign reading, and it was
+   * narrowed to that role because a broad verb list rejected ordinary planning prose. Between the
+   * floor and plainly-safe wording lies a middle band that words alone cannot judge — "Once approved,
+   * roll it out to production" carries no listed verb at all. This verdict covers that band.
+   *
+   * STRICTLY ADDITIVE. It can only turn a pass into a block. A verdict of `plan_or_review` never
+   * exempts a body from the deterministic rule, and omitting the field entirely leaves behaviour
+   * exactly as it was. The model is trusted to accuse, never to acquit.
+   */
+  composerAuthoritySelfReport?: {
+    generatedMode?: PromptEnhancementAuthorityMode;
+    requestMode?: PromptEnhancementAuthorityMode;
+  };
 }
 
 export interface PromptEnhancementSafetyValidationResult {
@@ -181,6 +207,17 @@ const PLANNING_VERB = /\b(?:plan|review|compare|check|prepare|assess|evaluate|dr
 const REVIEW_QUESTION_PATTERN = /\b(?:whether|safe\s+to|should\s+i|should\s+we|can\s+i|can\s+we|could\s+i|could\s+we)\b/i;
 const UNRESOLVED_PLACEHOLDER_PATTERN = /\{\{[^}]{1,80}\}\}|\[[A-Z][A-Z0-9 _-]{2,80}\]|<[^>\n]{2,80}>/;
 
+/**
+ * Owner ruling 2026-08-14: *"if user edits something than we will not argu against that
+ * for now."* One switch, exported so the behaviour is greppable and reversible in one place
+ * rather than being reconstructed from seven scattered conditions later.
+ *
+ * Reconsideration is recorded in the v2 deferred-issues file, which also lists what must be
+ * answered before this is flipped back â chiefly that a block today becomes `no_send`, a dead end,
+ * when the contract's own design calls for confirm-before-send instead.
+ */
+export const PROMPT_ENHANCEMENT_ARGUES_WITH_USER_EDITS_V1 = false;
+
 export function validatePromptEnhancementSafety(
   input: PromptEnhancementSafetyValidationInput,
 ): PromptEnhancementSafetyValidationResult {
@@ -191,6 +228,19 @@ export function validatePromptEnhancementSafety(
   const bodyText = input.editedBodyText ?? input.currentBody.text;
   const generatedBodyText = generatedOnlyText(bodyText, input.currentBody.originalPromptText);
   const edited = input.editedBodyText !== undefined && input.editedBodyText !== input.currentBody.text;
+  /**
+   * Owner ruling 2026-08-14: a user's edit is the user's, and Nexpath does not refuse to send a body
+   * because the user changed it — whether they removed a confirmation, removed the source-honesty
+   * floor, added an execution verb, or pasted something of their own.
+   *
+   * This suppresses CONTENT JUDGEMENTS only. `body_size:cap_exceeded` below is deliberately NOT
+   * suppressed: a body past the transport cap cannot be sent at all, which is a limit rather than an
+   * opinion about what the user wrote.
+   *
+   * Detection is unaffected — `preservation-floors.ts` still names which floor an edit removed. The
+   * generated-body path is unaffected too: everything here still runs when `edited` is false.
+   */
+  const suppressEditContentJudgements = edited && !PROMPT_ENHANCEMENT_ARGUES_WITH_USER_EDITS_V1;
   const failures: PromptEnhancementValidationFailureV1[] = [];
   const generatedSpanRefIds = generatedSpanRefs(input.currentBody);
   const generatedSourceRefIds = generatedSourceRefs(input.currentBody);
@@ -208,7 +258,7 @@ export function validatePromptEnhancementSafety(
   const confirmationEffective = confirmationPresent && !confirmationContradicted && !confirmationOverridden;
 
   for (const [pattern, reasonCode] of GENERATED_VOICE_FAILURE_PATTERNS) {
-    if (pattern.test(generatedVoicePolicyText)) {
+    if (!suppressEditContentJudgements && pattern.test(generatedVoicePolicyText)) {
       failures.push(failure({
         failureCode: `voice_policy:${reasonCode}`,
         stage: edited ? 'user_edit' : 'final_body',
@@ -220,7 +270,11 @@ export function validatePromptEnhancementSafety(
     }
   }
 
-  if (generatedEscalatesAuthority(input.currentBody.originalPromptText, generatedBodyText)) {
+  if (
+    !suppressEditContentJudgements
+    && (generatedEscalatesAuthority(input.currentBody.originalPromptText, generatedBodyText)
+      || composerReportsEscalation(input.currentBody.originalPromptText, input.composerAuthoritySelfReport))
+  ) {
     failures.push(failure({
       failureCode: 'authority_escalation:planning_to_execution',
       stage: edited ? 'user_edit' : 'composer_output',
@@ -231,7 +285,7 @@ export function validatePromptEnhancementSafety(
     }));
   }
 
-  if (confirmationRequired && !confirmationEffective) {
+  if (!suppressEditContentJudgements && confirmationRequired && !confirmationEffective) {
     failures.push(failure({
       failureCode: !confirmationPresent
         ? edited ? 'edit_state_invalid:confirmation_removed' : 'missing_or_weak_confirmation:canonical_confirmation_absent'
@@ -250,8 +304,43 @@ export function validatePromptEnhancementSafety(
     }));
   }
 
+  // The no-invention state, ENFORCED. The typed obligation rides each section
+  // from the slot-effect layer; this asserts it after composition using the
+  // preservation floors' own extractors pointed the other way (does the
+  // section name something nobody supplied?), rather than a new gate. Only
+  // sections carrying the obligation are checked, and an item is a violation
+  // only when it appears in NEITHER the user's prompt NOR that section's
+  // allowed source facts.
+  if (!suppressEditContentJudgements) {
+    for (const section of input.currentBody.sections) {
+      if (!section.slotObligations.includes('no_invention_state')) continue;
+      const inventions = findPromptEnhancementInventionViolationsV1({
+        sectionText: section.bodyText,
+        // GR-1: a value the BOUNDARY resolved was supplied — by a local probe or
+        // the store rather than by the prompt — so it is grounding, not invention.
+        allowedTexts: [
+          input.currentBody.originalPromptText,
+          ...section.sourceFactIds,
+          ...section.sourceIds,
+          ...(section.groundedFactValues ?? []),
+        ],
+      });
+      for (const invention of inventions) {
+        failures.push(failure({
+          failureCode: `no_invention_state:fabricated_item:${invention.item}`,
+          stage: edited ? 'user_edit' : 'composer_output',
+          affectedSectionIds: [section.sectionId],
+          affectedBodySpanRefs: generatedSpanRefIds,
+          affectedSourceRefIds: generatedSourceRefIds,
+          affectedActionIds,
+          publicSafeReasonCategory: 'validation_failed',
+        }));
+      }
+    }
+  }
+
   for (const [pattern, reasonCode] of PRIVATE_GENERATED_VALUE_PATTERNS) {
-    if (pattern.test(generatedBodyText)) {
+    if (!suppressEditContentJudgements && pattern.test(generatedBodyText)) {
       failures.push(failure({
         failureCode: `sensitive_data_leak:${reasonCode}`,
         stage: edited ? 'user_edit' : 'privacy',
@@ -264,7 +353,7 @@ export function validatePromptEnhancementSafety(
     }
   }
 
-  if (renderedMetadataIdPresent(input.currentBody, generatedBodyText)) {
+  if (!suppressEditContentJudgements && renderedMetadataIdPresent(input.currentBody, generatedBodyText)) {
     failures.push(failure({
       failureCode: 'source_honesty:metadata_id_rendered',
       stage: edited ? 'user_edit' : 'final_body',
@@ -275,7 +364,7 @@ export function validatePromptEnhancementSafety(
     }));
   }
 
-  if (UNRESOLVED_PLACEHOLDER_PATTERN.test(generatedBodyText)) {
+  if (!suppressEditContentJudgements && UNRESOLVED_PLACEHOLDER_PATTERN.test(generatedBodyText)) {
     failures.push(failure({
       failureCode: 'body_integrity:unresolved_placeholder',
       stage: edited ? 'user_edit' : 'final_body',
@@ -297,7 +386,7 @@ export function validatePromptEnhancementSafety(
     }));
   }
 
-  if (edited && sourceHonestyFloorRemoved(input.currentBody.text, bodyText)) {
+  if (edited && !suppressEditContentJudgements && sourceHonestyFloorRemoved(input.currentBody.text, bodyText)) {
     failures.push(failure({
       failureCode: 'edit_state_invalid:source_honesty_removed',
       stage: 'user_edit',
@@ -308,7 +397,7 @@ export function validatePromptEnhancementSafety(
     }));
   }
 
-  if (edited && addsSensitiveExecution(input.currentBody.text, bodyText)) {
+  if (edited && !suppressEditContentJudgements && addsSensitiveExecution(input.currentBody.text, bodyText)) {
     failures.push(failure({
       failureCode: 'edit_state_invalid:sensitive_action_added',
       stage: 'user_edit',
@@ -446,6 +535,18 @@ export function requiresPromptEnhancementExecutionConfirmationForPrompt(original
 }
 
 /**
+ * The authority mode of a piece of text, as the validator computes it.
+ *
+ * Exposed so the composer can tell — before it returns — whether the user's request was
+ * plan/review-shaped, and therefore whether the wording it just produced would be an escalation. The
+ * composer uses this to correct itself; it never relaxes a verdict, which stays entirely inside
+ * `validatePromptEnhancementSafety`.
+ */
+export function promptEnhancementAuthorityModeForTextV1(text: string): PromptEnhancementAuthorityMode {
+  return authorityModeFor(text);
+}
+
+/**
  * Validator-parity predicate for the COMPOSER (blocked-popup fix 2026-08-07). The composer's
  * prompt-based gate above cannot see sensitive-action risk phrasing that the GENERATED wording
  * introduces (LLM drafts are free text), but `validatePromptEnhancementSafety` scans the generated
@@ -461,6 +562,41 @@ export function promptEnhancementGeneratedBodyRequiresConfirmationV1(
 ): boolean {
   const generatedBodyText = generatedOnlyText(bodyText, currentBody.originalPromptText);
   return classifySensitiveActions(currentBody, generatedBodyText).some((finding) => finding.requiresConfirmation);
+}
+
+/**
+ * Does the generated wording claim more authority than the request granted?
+ *
+ * The safety validator runs this over a single prompt's finished body. A multi-prompt sequence is a
+ * list of generated bodies, one per item, and none of them passes through that path — so without a
+ * per-item check a composer can turn a plan-or-review slice into execute-requested wording and
+ * nothing in the system notices.
+ *
+ * Exported rather than reimplemented on purpose. This is the copy that was hardened after the
+ * escalation defects, including the floor being consulted first so that a dangerous instruction the
+ * user never asked for is caught even when no execution verb appears elsewhere in the body. A second
+ * implementation would start from the version those fixes were made against.
+ */
+export function promptEnhancementGeneratedEscalatesAuthorityV1(
+  originalPromptText: string,
+  generatedBodyText: string,
+): boolean {
+  return generatedEscalatesAuthority(originalPromptText, generatedBodyText);
+}
+
+/**
+ * The sensitive-action risk families a piece of text reads as, or an empty list.
+ *
+ * Sibling of `promptEnhancementAuthorityModeForTextV1`: the same question asked of a slice rather
+ * than a whole prompt, so a sequence item can carry the risk family its own words imply instead of
+ * inheriting one from the request it came from. Literal blocks are stripped before matching, which
+ * is why quoted example commands do not register as risks — a behaviour a fresh implementation
+ * would be unlikely to reproduce.
+ */
+export function promptEnhancementRiskKindsForTextV1(
+  text: string,
+): readonly PromptEnhancementSensitiveActionRiskKind[] {
+  return classifyTextRiskKinds(text);
 }
 
 export function buildPromptEnhancementCanonicalConfirmation(originalPromptText: string): string {
@@ -487,8 +623,16 @@ function classifySensitiveActions(
       : generatedAuthority === 'execute_requested' || originalAuthority === 'execute_requested'
         ? 'execute_requested'
         : originalAuthority;
-    const affectedSections = sections
-      .filter((section) => section.sectionKind === 'risk_safety_or_confirmation' || section.safetyFlags.length > 0 || section.sensitivityFlags.length > 0);
+    // Every generated section, not a flag-selected subset. Whether a body carries something unsafe
+    // is a property of its TEXT — the risk pattern above matched the whole body — so which sections
+    // are affected cannot be answered by a planning flag.
+    //
+    // This used to filter on `safetyFlags.length > 0`, which looked selective and was not: three of
+    // the four flag values are ROUTE capabilities stamped onto every section, so the filter admitted
+    // everything. It only appeared to work because it never excluded anything. Reading it as a real
+    // filter would have been the mistake the moment those flags were corrected to mean what the
+    // design says they mean.
+    const affectedSections = sections;
     findings.set(riskKind, {
       riskKind,
       authorityMode,
@@ -500,6 +644,20 @@ function classifySensitiveActions(
     });
   }
 
+  // The wide-scope fallback: no risk PATTERN matched, but the route still asked for confirmation.
+  //
+  // This is the only case the loop above cannot reach. `capability.confirmation_needed` can come
+  // from ambiguity or missing acceptance facts rather than from risky wording, and then no pattern
+  // matches while a section still carries the flag. That is a real gap in coverage and this closes
+  // it.
+  //
+  // An earlier revision of this phase also OR'd in
+  // `requiresPromptEnhancementExecutionConfirmationForPrompt`, on the theory that scoping the flags
+  // could leave a confirmation-needed route with no flagged section. That condition can never fire:
+  // it is `classifyTextRiskKinds(prompt).length > 0 && ...`, and `classifyTextRiskKinds` runs the
+  // SAME `RISK_PATTERNS` the loop above runs against text that includes the prompt — so whenever it
+  // is true, `findings` is already non-empty and this branch is skipped. It was dead code implying
+  // a protection it did not provide, and it is removed rather than left to reassure a reader.
   for (const section of sections) {
     if (!section.safetyFlags.includes('sensitive_action_confirmation')) continue;
     if (findings.size === 0) {
@@ -531,10 +689,126 @@ function authorityModeFor(text: string): PromptEnhancementAuthorityMode {
   return 'observe_or_literal';
 }
 
+/**
+ * Actions dangerous enough to count as an authority escalation on sight, whatever surrounds them.
+ * Deliberately tiny: only wording with no benign reading. This is the floor that sentence scoping
+ * below can never soften.
+ */
+const ALWAYS_ESCALATE_PATTERN = /\b(?:force[-\s]?push|rm\s+-rf|drop\s+table|truncate|reset\s+--hard|rewrite\s+history)\b/i;
+
+/**
+ * Split generated wording into the units an execution verb and a risk term must SHARE to count as an
+ * escalation.
+ *
+ * Splitting on newlines alone is not enough: a single rendered line can carry several numbered items
+ * ("1. Execute automated tests… 2. Perform stress tests on database operations"), and treating that as
+ * one unit lets `execute` pair with `database` from a different item — the exact false positive this
+ * scoping exists to remove. Sentence boundaries are therefore split too.
+ *
+ * The lookahead requires an uppercase letter or digit after the terminator, so version numbers
+ * (`v1.2`), file names (`package.json`) and `e.g.` stay intact instead of fragmenting a sentence and
+ * hiding a genuine escalation.
+ */
+function authorityScopeUnits(text: string): readonly string[] {
+  return text
+    .split(/\r?\n+/)
+    .flatMap((line) => line.split(/(?<=[.!?])\s+(?=[A-Z0-9])/))
+    .map((unit) => unit.trim())
+    .filter(Boolean);
+}
+
+/**
+ * The verbs strong enough to raise an escalation on their own, as a deliberate subset of
+ * `EXECUTION_VERB`.
+ *
+ * Sentence scoping alone did not fix the false positives, because `post`, `write`, `apply`, `modify`,
+ * `notify` and `increase` are ordinary planning vocabulary that no verification or acceptance section
+ * can avoid. Paired with any risk noun in the same sentence they escalated, so wording as plainly
+ * non-executing as "Modify nothing yet; list the database changes we would need" and "Write down the
+ * acceptance criteria for the schema change" was rejected — and `post` is worse still, since it is a
+ * word boundary away from `post-migration` and `post-deployment`.
+ *
+ * ⚠️ This is a KNOWN, ACCEPTED narrowing, not a tidy-up. Wording such as "Write the new schema" or
+ * "Apply the migration" no longer escalates by this rule; it is covered by `ALWAYS_ESCALATE_PATTERN`
+ * only where that floor matches, and otherwise by the composer's authority self-report. The loss is
+ * pinned by an explicit test so it can never be rediscovered by accident.
+ *
+ * `EXECUTION_VERB` itself is deliberately left untouched — it also drives authority-mode
+ * classification and the edited-body checks, where the broader reading is correct.
+ */
+const ESCALATION_VERB =
+  /\b(?:run|execute|deploy|delete|remove|migrate|install|force[-\s]?push|publish|rotate|truncate|drop|karo|kar\s+do|chalao|hatao|mitao)\b|(?:करो|कर\s*दो|चलाओ|हटाओ|मिटाओ|કરો|કરી\s*દો|ચલાવો|કાઢી\s*નાખો|મિટાવો)/i;
+
+/**
+ * Does the generated wording actually escalate, rather than merely contain an execution verb?
+ *
+ * Two conditions, both narrowing and neither able to make previously-safe wording escalate: the verb
+ * must be one of the strong ones above, and a risk term must appear in the SAME unit. The unit rule
+ * separates "execute the tests" from "execute the rollback"; body-level risk matching cannot, because
+ * risk patterns fire on the prompt's topic (`database`, `upgrade`) rather than on the action.
+ *
+ * The floor is NOT tested here — it is tested by the caller, before the caller's own execution-mode
+ * precondition, so that it genuinely applies unconditionally. See `generatedEscalatesAuthority`.
+ */
+function generatedRiskEscalationPresent(generatedText: string): boolean {
+  return authorityScopeUnits(generatedText).some((unit) =>
+    ESCALATION_VERB.test(unit) && RISK_PATTERNS.some(([, pattern]) => pattern.test(unit)),
+  );
+}
+
+/**
+ * Does the composer's own verdict amount to an escalation the deterministic floor would miss?
+ *
+ * Only ever returns `true` — it is OR-ed with the deterministic rule, so it can add a block and can
+ * never remove one. An escalation is "a plan/review request answered with execution wording", so the
+ * request must read as plan/review by EITHER the word list or the composer's own reading; relying on
+ * the word list alone would reproduce, one layer up, the exact misreading this check exists to cover.
+ */
+function composerReportsEscalation(
+  originalPromptText: string,
+  report: PromptEnhancementSafetyValidationInput['composerAuthoritySelfReport'],
+): boolean {
+  if (report?.generatedMode !== 'execute_requested') return false;
+  return authorityModeFor(originalPromptText) === 'plan_or_review' || report.requestMode === 'plan_or_review';
+}
+
 function generatedEscalatesAuthority(originalPromptText: string, generatedBodyText: string): boolean {
   const originalAuthority = authorityModeFor(originalPromptText);
-  const generatedAuthority = authorityModeFor(generatedBodyText.replace(buildPromptEnhancementCanonicalConfirmation(originalPromptText), ''));
-  return originalAuthority === 'plan_or_review' && generatedAuthority === 'execute_requested';
+  const generatedRiskText = generatedBodyText.replace(buildPromptEnhancementCanonicalConfirmation(originalPromptText), '');
+
+  // ── The floor ────────────────────────────────────────────────────────────────────────────────
+  // Consulted FIRST, its own match is sufficient, and it asks "did the user ask for the dangerous
+  // thing?" rather than "did the user ask to plan?".
+  //
+  // Two separate defects were fixed here, both of which let floor wording through:
+  //
+  // 1. It used to sit BELOW the execution-mode precondition further down, which is decided by
+  //    `EXECUTION_VERB` — and `reset --hard` and `rewrite history` are in the floor but in NO
+  //    execution-verb list, so standing alone they never reached the floor at all. "Use reset --hard
+  //    to clear the working tree" passed while "Run the cleanup, then use reset --hard" blocked: an
+  //    unrelated word elsewhere in the body decided whether the safety net existed.
+  //
+  // 2. It used to require the request to read as `plan_or_review`, which silently excluded
+  //    `observe_or_literal` — "Walk me through how the refunds flow behaves today" is not a planning
+  //    request, and answering it with `rm -rf` is exactly as unrequested. Widening the mode
+  //    classification instead would have mislabelled ordinary questions as planning; the request mode
+  //    is right, the CONDITION was wrong. Only an explicit execution request earns the exemption.
+  //
+  // Deliberate WIDENING of a safety rule, on the owner's ruling that a higher block rate is an
+  // accepted cost where safety is concerned. Bounded: it is the floor only — wording with no benign
+  // reading — and an explicit execution request is still honoured.
+  if (originalAuthority !== 'execute_requested' && ALWAYS_ESCALATE_PATTERN.test(generatedRiskText)) {
+    return true;
+  }
+
+  // ── Everything above the floor ───────────────────────────────────────────────────────────────
+  // Unchanged, and still scoped to plan/review requests: outside the floor, an escalation only means
+  // anything as "a plan/review request answered with execution wording".
+  if (originalAuthority !== 'plan_or_review') return false;
+  if (authorityModeFor(generatedRiskText) !== 'execute_requested') return false;
+  // Pure narrowing: both original conditions still hold above, and this can only turn a `true` into a
+  // `false`. It can never make previously-safe wording escalate.
+  return generatedRiskEscalationPresent(generatedRiskText);
 }
 
 function addsSensitiveExecution(previousBodyText: string, editedBodyText: string): boolean {

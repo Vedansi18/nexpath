@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { PromptEnhancementSourceRefV1 } from '../contracts.js';
+import { composePromptEnhancementBody } from '../compose-enhancement.js';
 import {
   PROMPT_ENHANCEMENT_PRIMARY_INTENTS,
   PROMPT_ENHANCEMENT_TAXONOMY_PRESETS,
@@ -14,6 +15,7 @@ import {
 } from './registry.js';
 import {
   normalizeGuidanceFacts,
+  capabilityScopedSafetyFlagsV1,
   planPromptEnhancementSections,
   type PromptEnhancementGuidanceFact,
 } from './section-plan.js';
@@ -358,5 +360,270 @@ describe('prompt-enhancement template registry and section planner', () => {
       status: 'rejected',
       reasonCode: 'not_attached_to_selected_family_intent_or_current_scope',
     });
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Phase S2: a capability overlay applies to the sections its design names, not to every section.
+//
+// Before this, three of the four safetyFlags values came from route capabilities with no section
+// filter, so every section reported the identical set and the field carried no per-section
+// information at all — risk_or_rollback sat on behavior_preservation, sensitive_action_confirmation
+// on project_grounding_facts. Mapping from analysis L3325-3335 / dev plan L6008.
+// ---------------------------------------------------------------------------------------------
+describe('capability overlays are scoped to the sections their design names', () => {
+  function plan(promptText: string) {
+    return planPromptEnhancementSections({
+      routeResult: routePromptEnhancement(routeInput({ promptText })),
+      sourceRefs: [sourceA, contentTemplateSourceB],
+      guidanceFacts: [],
+    });
+  }
+
+  /** Sections that carry a flag, by kind, ignoring the two unconditional ones. */
+  function kindsCarrying(result: ReturnType<typeof plan>, flag: string): readonly string[] {
+    return result.sectionPlans.filter((s) => s.safetyFlags.includes(flag)).map((s) => s.sectionKind);
+  }
+
+  it('every section keeps the two unconditional flags — they are not capability overlays', () => {
+    const result = plan('Rename the helper in utils.ts.');
+    for (const section of result.sectionPlans) {
+      expect(section.safetyFlags).toContain('source_honesty');
+      expect(section.safetyFlags).toContain('no_authority_escalation');
+    }
+  });
+
+  it('risk_or_rollback reaches only the sections the table names', () => {
+    // A migration/production prompt, which is what attaches capability.risk_or_rollback.
+    const result = plan('Run the production migration and delete the archived rows.');
+    const carrying = kindsCarrying(result, 'risk_or_rollback');
+    const allowed = new Set([
+      'risk_safety_or_confirmation', 'verification_or_test_plan', 'behavior_preservation', 'handoff_or_sequence_candidate',
+    ]);
+
+    for (const kind of carrying) expect(allowed.has(kind)).toBe(true);
+    // The regression this pins: it used to land on everything, including sections with no risk role.
+    const grounding = result.sectionPlans.find((s) => s.sectionKind === 'project_grounding_facts');
+    if (grounding) expect(grounding.safetyFlags).not.toContain('risk_or_rollback');
+  });
+
+  it('sensitive_action_confirmation reaches only its named sections, and always its own section kind', () => {
+    const result = plan('Run the production migration and delete the archived rows.');
+    const carrying = kindsCarrying(result, 'sensitive_action_confirmation');
+    const allowed = new Set([
+      'risk_safety_or_confirmation', 'verification_or_test_plan', 'behavior_preservation', 'handoff_or_sequence_candidate',
+    ]);
+
+    for (const kind of carrying) expect(allowed.has(kind)).toBe(true);
+    // risk_safety_or_confirmation carries it by section kind regardless of the capability, so the
+    // confirmation clause always has a home.
+    const riskSection = result.sectionPlans.find((s) => s.sectionKind === 'risk_safety_or_confirmation');
+    if (riskSection) expect(riskSection.safetyFlags).toContain('sensitive_action_confirmation');
+  });
+
+  it('the flags now differentiate — sections no longer all report the same set', () => {
+    // The property that was false before this phase and is the whole point of it.
+    const result = plan('Run the production migration and delete the archived rows.');
+    const distinct = new Set(result.sectionPlans
+      .filter((s) => s.sectionKind !== 'original_request_or_goal')
+      .map((s) => [...s.safetyFlags].sort().join('|')));
+    expect(distinct.size).toBeGreaterThan(1);
+  });
+});
+
+describe('which capabilities actually reach safetyFlags', () => {
+  it('pins the scoped list, so a third cannot be added silently', () => {
+    // The SECTIONS_BY_CAPABILITY map transcribes the whole design table, but only the capabilities
+    // that contribute a safety flag are scoped by it. A reader seeing nine entries would conclude
+    // scoping is complete; it covers these two. If a future capability starts contributing a flag,
+    // this fails until the list agrees — which is the point.
+    expect([...capabilityScopedSafetyFlagsV1].sort()).toEqual([
+      'capability.confirmation_needed',
+      'capability.risk_or_rollback',
+    ]);
+  });
+
+  it('a capability outside that list changes no section flags', () => {
+    // capability.project_grounding appears in the map, so it looks scoped. It contributes nothing,
+    // and this proves the map entry is inert rather than quietly doing something.
+    const withGrounding = planPromptEnhancementSections({
+      routeResult: routePromptEnhancement(routeInput({ promptText: 'Ground this in the project facts and explain the module layout.' })),
+      sourceRefs: [sourceA, contentTemplateSourceB],
+      guidanceFacts: [],
+    });
+
+    for (const section of withGrounding.sectionPlans) {
+      // Only the two unconditional flags, plus whatever the two scoped capabilities added.
+      for (const flag of section.safetyFlags) {
+        expect(['source_honesty', 'no_authority_escalation', 'sensitive_action_confirmation', 'risk_or_rollback'])
+          .toContain(flag);
+      }
+    }
+  });
+});
+
+describe('S2 done-when: no capabilities means no overlay', () => {
+  it('a route carrying no scoped capability leaves every section on the two unconditional flags ONLY', () => {
+    // The half of the S2 plan the other tests do not cover: they assert the two unconditional flags
+    // are PRESENT, which says nothing about whether an overlay leaked in. This asserts the set is
+    // exactly those two — the state that was impossible before scoping, when every section carried
+    // all four.
+    const result = planPromptEnhancementSections({
+      routeResult: routePromptEnhancement(routeInput({
+        promptText: 'Rename the helper in utils.ts and keep the tests passing.',
+        // Selected on its merits through the decider — the unmatched-keyword
+        // terminal no longer asserts this family.
+        classifierPrimaryIntent: 'quick_improvement.local_polish_or_small_improvement',
+        classifierIntentConfidence: 0.9,
+        classifierCapabilityCandidates: [],
+        classifierDebugEvidencePresent: [],
+      })),
+      sourceRefs: [sourceA, contentTemplateSourceB],
+      guidanceFacts: [],
+    });
+
+    const scoped = ['sensitive_action_confirmation', 'risk_or_rollback'];
+    for (const section of result.sectionPlans) {
+      // risk_safety_or_confirmation earns the confirmation flag by its own kind, capability or not.
+      if (section.sectionKind === 'risk_safety_or_confirmation') continue;
+      for (const flag of scoped) {
+        expect(section.safetyFlags).not.toContain(flag);
+      }
+      expect([...section.safetyFlags].sort()).toEqual(['no_authority_escalation', 'source_honesty']);
+    }
+  });
+});
+
+// ── The why-help surface carries the under-evidenced exception reason code ──
+
+describe('under-evidenced routes and the existing why-help surface', () => {
+  const bare = {
+    promptText: 'make it better please',
+    firedKey: undefined,
+    effectiveFiredSource: undefined,
+    selectedQualifyingAbsence: undefined,
+    absenceGateReason: undefined,
+    triggerKind: 'manual',
+  } as const;
+
+  it('an under-evidenced route stamps the public-safe gate reason code on every planned section (codes only, no wording)', () => {
+    const route = routePromptEnhancement(routeInput(bare));
+    expect(route.ladderResolution.state).toBe('under_evidenced');
+    const result = planPromptEnhancementSections({ routeResult: route, sourceRefs: [sourceA], guidanceFacts: [] });
+    expect(result.sectionPlans.length).toBeGreaterThan(0);
+    for (const section of result.sectionPlans) {
+      expect(section.structuredContentPartRefs).toContain('gate_reason:under_evidenced_high_risk_exception');
+    }
+  });
+
+  it('a resolved route carries no under-evidenced gate reason ref', () => {
+    const route = routePromptEnhancement(routeInput({}));
+    expect(route.ladderResolution.state).toBe('resolved');
+    const result = planPromptEnhancementSections({ routeResult: route, sourceRefs: [sourceA], guidanceFacts: [] });
+    for (const section of result.sectionPlans) {
+      expect(section.structuredContentPartRefs).not.toContain('gate_reason:under_evidenced_high_risk_exception');
+    }
+  });
+});
+
+// ── The slot-effect layer: an attached capability CONTRIBUTES its locked effect ──
+
+describe('slot obligations: layer 3 is no longer declared-but-inert', () => {
+  // ⚠️ A grounding fact is supplied because `project_grounding_facts` now FOLLOWS ITS FACTS
+  // (Hiren's ruling on the sim finding): with none, the section is not planned and there is no
+  // section to carry obligations. That is the intended behaviour, and it is pinned in
+  // `fact-value-render.test.ts`. What THIS block guards is different — that a section which DOES
+  // exist carries its locked layer-3 obligations — so the fact is the input that lets it be asked.
+  const groundingFact = {
+    factId: 'f-ground', sourceType: 'hard_fact', sourceIds: ['hard_fact:has_test_runner'],
+    guidanceKind: 'project_grounding', suggestedActionKind: 'ground_in_project_fact',
+    targetFamily: 'family_agnostic', targetSectionKind: '', sourceEvidenceState: 'strong',
+    sourceOriginScope: 'local_probe', claimVerbPolicy: 'may_state_as_project_capability',
+    priority: 'normal', renderPolicy: 'render_as_section', riskLevel: 'none',
+    privacyClass: 'local_private', sanitizationState: 'not_applicable',
+    evidence: { key: 'has_test_runner', value: 'true' }, sourceRuntimePath: 'local_store',
+    sourceAnchorScope: 'project_root', safetyHooks: [], publicCopySafe: true,
+  };
+  const planFor = (intent: string, candidates: readonly string[] = []) => {
+    const route = routePromptEnhancement(routeInput({
+      promptText: 'exercise the slot-effect layer',
+      classifierPrimaryIntent: intent as never,
+      classifierIntentConfidence: 0.9,
+      classifierCapabilityCandidates: candidates as never,
+      classifierDebugEvidencePresent: ['reproduction_steps', 'logs'] as never,
+    }));
+    return planPromptEnhancementSections({
+      routeResult: route, sourceRefs: [sourceA], guidanceFacts: [groundingFact] as never,
+    });
+  };
+  const obligationsOf = (result: ReturnType<typeof planPromptEnhancementSections>, kind: string) =>
+    result.sectionPlans.find((section) => section.sectionKind === kind)?.slotObligations ?? [];
+
+  it('CARRY route: the repro section keeps no-invention protection even with the request OFF', () => {
+    // The inversion this guards (owner ruling 2026-08-17): protection used to
+    // ride the capability, so a section was protected when the developer
+    // supplied NOTHING and unprotected once they supplied real evidence a model
+    // could embroider into invented specifics. The section renders generated
+    // text either way, so the protection is a floor, not a capability effect.
+    const carry = planFor('issue_debug.failing_test');
+    expect(carry.capabilityOverlays ?? []).not.toContain('capability.reproduction_or_evidence_needed');
+    expect(obligationsOf(carry, 'reproduction_or_evidence')).toContain('no_invention_state');
+    expect(obligationsOf(carry, 'reproduction_or_evidence')).not.toContain('reproduction_or_evidence_request');
+  });
+
+  it('the floor does not leak the obligation onto unrelated sections', () => {
+    const carry = planFor('issue_debug.failing_test');
+    for (const section of carry.sectionPlans) {
+      if (section.sectionKind === 'reproduction_or_evidence') continue;
+      expect(section.slotObligations).not.toContain('no_invention_state');
+    }
+  });
+
+  it('reproduction_or_evidence_needed FIRST: its section carries the request obligation AND the typed no-invention state', () => {
+    const result = planFor('issue_debug.reproduction_discovery');
+    const obligations = obligationsOf(result, 'reproduction_or_evidence');
+    expect(obligations).toContain('reproduction_or_evidence_request');
+    expect(obligations).toContain('no_invention_state');
+  });
+
+  it.each([
+    ['maintenance.refactor_no_behavior_change', 'behavior_preservation', ['behavior_lock', 'baseline_current_output_proof', 'no_unrelated_change_boundary', 'before_after_verification']],
+    ['review.security_review', 'finding_format', ['review_checklist_challenge', 'severity_residual_risk']],
+    ['issue_debug.failing_test', 'project_grounding_facts', ['project_source_fact_slots', 'known_unknown_wording', 'source_ids_evidence_state']],
+    ['planning.spec_or_prd', 'risk_safety_or_confirmation', ['confirmation_clarification', 'send_policy_metadata', 'safety_hook_linkage']],
+    ['feature.fresh_implementation', 'verification_or_test_plan', ['family_specific_verification']],
+    ['maintenance.risk_rollback_heavy', 'risk_safety_or_confirmation', ['risk_rollback_recovery', 'dry_run_backup_pin_deployment', 'safety_policy_hooks']],
+    ['planning.task_breakdown', 'point_inventory_or_decomposition', ['decomposition_handoff_metadata', 'compact_first_popup_summary_support', 'ordering_dependency']],
+    ['issue_debug.failing_test', 'source_signal_guidance', ['baseline_source_signal', 'source_kind_id_evidence_metadata', 'public_safe_why_help_support']],
+  ])('%s: the %s section carries its locked obligations', (intent, kind, expected) => {
+    const obligations = obligationsOf(planFor(intent), kind);
+    for (const obligation of expected) expect(obligations).toContain(obligation);
+  });
+
+  it('an unattached capability contributes nothing: the quick merit route carries only the verification obligation', () => {
+    const result = planFor('quick_improvement.local_polish_or_small_improvement');
+    expect(obligationsOf(result, 'verification_or_test_plan')).toEqual(['family_specific_verification']);
+    for (const section of result.sectionPlans) {
+      expect(section.slotObligations).not.toContain('no_invention_state');
+      expect(section.slotObligations).not.toContain('behavior_lock');
+    }
+  });
+
+  it('two capabilities sharing a target section UNION their obligations', () => {
+    const result = planFor('maintenance.risk_rollback_heavy', ['capability.confirmation_needed']);
+    const obligations = obligationsOf(result, 'risk_safety_or_confirmation');
+    expect(obligations).toContain('risk_rollback_recovery');
+    expect(obligations).toContain('confirmation_clarification');
+  });
+
+  it('the obligations travel onto the COMPOSED section unchanged', () => {
+    const result = planFor('issue_debug.reproduction_discovery');
+    const compose = composePromptEnhancementBody({
+      enhancementId: 'slot-effect-compose',
+      originalPromptText: 'exercise the slot-effect layer',
+      sectionPlanningResult: result,
+    });
+    const section = (compose.currentBody?.sections ?? []).find((entry) => entry.sectionKind === 'reproduction_or_evidence');
+    expect(section?.slotObligations).toContain('no_invention_state');
   });
 });

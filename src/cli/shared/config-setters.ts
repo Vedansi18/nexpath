@@ -42,3 +42,23 @@ export function setRole(store: Store, key: string, value: string): void {
   }
   setConfig(store, key, value);
 }
+
+export const PROMPT_ENHANCEMENT_POPUP_COOLDOWN_KEY = 'prompt_enhancement.popup_cooldown' as const;
+
+/**
+ * Validate and persist the PE / MPS-1 popup cooldown (a NON-NEGATIVE WHOLE NUMBER of prompts) at the
+ * given config key (e.g. 'prompt_enhancement.popup_cooldown' or a ':/project' scoped variant).
+ * After a popup is shown, new PE / MPS-1 popups are suppressed for this many prompts (default 7;
+ * 0 disables the cooldown). Empty string is accepted and treated as unset (→ default).
+ */
+export function setPromptEnhancementPopupCooldown(store: Store, key: string, value: string): void {
+  if (value !== '') {
+    const n = Number(value);
+    if (!Number.isInteger(n) || n < 0) {
+      throw new ConfigValidationError(
+        `Invalid ${key} "${value}". Expected a non-negative whole number of prompts (e.g. 0, 5, 15).`,
+      );
+    }
+  }
+  setConfig(store, key, value);
+}

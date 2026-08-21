@@ -13,7 +13,7 @@
 //     readline keypress loop for arrow-key focus + Enter/Esc handling,
 //     re-renders via computeLayout on every state change, and resolves with
 //     the SelectableItem the user picked. The Space-key D3 toggle is wired
-//     via a small hook (registerKeyHandler) so the Bhavnesh Phase 6 task
+//     via a small hook (registerKeyHandler) so the later UI phase task
 //     adds the actual toggle body without restructuring this module.
 //
 // Vertical render order (dev-plan §11.2) — top to bottom:
@@ -26,7 +26,7 @@
 //   option-label
 //     ↳ option desc-base (truncated/expanded — D1/D2/D5)
 //   ... (repeat per option)
-//   (focused option's shortcut hint — Bhavnesh task, hook only here)
+//   (focused option's shortcut hint — UI-lane task, hook only here)
 //   [bottom OPTION_SEPARATOR padding rows — existing pattern preserved]
 //
 // LineKind separate-element invariant (dev-plan §11.11):
@@ -238,6 +238,19 @@ export const SUB_LINE_CONTINUATION_INDENT = '  ';
 export const DEFAULT_MAX_ITEMS_FLOOR = 5;
 
 /**
+ * Minimum visual rows reserved for the option region when the sticky-header
+ * priority tiers drop Tier 2 content on a short viewport. Without this reserve,
+ * droppable header rows (question + why-help + D4 padding) can consume the
+ * viewport down to `avail === 0`, leaving the popup with a full header and ZERO
+ * selectable options — the user then sees only "Send to your agent" with nothing
+ * to pick. Reserving this band makes Tier 2 drop one step earlier so at least the
+ * focused option always fits. Kept at 3 (label + gap + first desc line) so it
+ * never over-reserves on the small-header viewports the existing budget tests
+ * lock (rows 8/10/14 headers are ~3 rows and still fit every Tier 2 emission).
+ */
+export const MIN_OPTION_BAND_ROWS = 3;
+
+/**
  * Minimum effective expanded cap. If the secondary cap drops below this
  * (terminal too short to fit a meaningful expansion plus the surrounding
  * option-list context), the layout refuses to expand and silently falls
@@ -357,7 +370,7 @@ export function visualRows(line: string, cols: number): number {
  *
  * Phase 4 USER basic: counts characters, ignores ANSI escape sequences for
  * visual-width computation (desc-bases don't usually carry ANSI after the
- * R5 + R4 substitutions). Phase 8 Bhavnesh polish handles ANSI-aware
+ * runtime substitution passes). A later UI polish phase handles ANSI-aware
  * width measurement when the styler body grows real ANSI mappings.
  *
  * Exported for unit testability.
@@ -707,7 +720,10 @@ export function computeLayout(opts: RenderLoopOptions, state: LayoutState): Rend
       fixedVisualRows += cost;
       includedHeaderIdx.push(i);
     } else if (!dropRemainingTier2) {
-      if (fixedVisualRows + cost + 2 <= opts.rows) {
+      // Reserve MIN_OPTION_BAND_ROWS for the option region so a droppable Tier 2
+      // emission is dropped one step earlier than it "just fits" — otherwise the
+      // header can fill the viewport down to avail === 0 (no visible options).
+      if (fixedVisualRows + cost + 2 + MIN_OPTION_BAND_ROWS <= opts.rows) {
         fixedVisualRows += cost;
         includedHeaderIdx.push(i);
       } else {
@@ -792,7 +808,13 @@ export function computeLayout(opts: RenderLoopOptions, state: LayoutState): Rend
   const windowedChromed: string[] = [];
   for (let i = startEmissionORIdx; i < optionStyled.length; i++) {
     const cost = visualRowsByIdx[headerEnd + i];
-    if (visualUsed + cost > avail) break;
+    // Hard floor: always keep at least the first (focused) option line. On a
+    // viewport so short that avail collapses to 0 (Tier 1 alone fills it), an
+    // empty option region leaves the user a popup they cannot act on — never let
+    // `options.length > 0` render zero options. The `windowed.length > 0` guard
+    // means this only ever changes the otherwise-empty case: whenever the first
+    // line already fits (every existing budget test), behaviour is byte-identical.
+    if (windowed.length > 0 && visualUsed + cost > avail) break;
     windowed.push(optionStyled[i]);
     windowedChromed.push(optionChromed[i]);
     visualUsed += cost;
@@ -898,12 +920,12 @@ function moveFocus(options: readonly SelectableItem[], current: number, delta: 1
  *
  * The interactive shell is intentionally thin: arrow-up / arrow-down
  * move focus (skipping isSeparator items); Enter resolves; Escape /
- * Ctrl+C resolves with null; Space dispatches to `onSpace` (Bhavnesh
+ * Ctrl+C resolves with null; Space dispatches to `onSpace` (UI-lane
  * Phase 6 D3 binding fills in the body); every other key is ignored.
  *
  * Re-renders the full layout to `out` after every state change. The
  * Phase 4 USER basic render writes each styled line followed by `\n`;
- * Bhavnesh Phase 8 polish adds the cursor-positioning + clear-screen
+ * A later UI polish phase adds the cursor-positioning + clear-screen
  * sequences and the auto-scroll edge cases.
  */
 export async function renderLoop(opts: RenderLoopRunOptions): Promise<SelectableItem | null> {

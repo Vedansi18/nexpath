@@ -13,9 +13,17 @@ import {
   findPromptEnhancementTaxonomyGaps,
   getPromptEnhancementG1AApprovalInventory,
   getPromptEnhancementRoutingSourceGateSnapshot,
+  isCapabilityCompatibleWithRoute,
+  isKnownCapabilityId,
+  isKnownDebugEvidenceForm,
   routePromptEnhancement,
   type PromptEnhancementRouteInput,
 } from './routing-taxonomy.js';
+import { describePromptEnhancementSequencePlanV1 } from './routing-taxonomy.js';
+import {
+  PROMPT_ENHANCEMENT_ROUTABILITY_PROBES,
+  findPromptEnhancementRoutabilityGaps,
+} from './templates/registry.js';
 
 function routeInput(overrides: Partial<PromptEnhancementRouteInput>): PromptEnhancementRouteInput {
   return {
@@ -205,8 +213,13 @@ describe('prompt-enhancement routing and taxonomy', () => {
       for (const capabilityId of PROMPT_ENHANCEMENT_CAPABILITIES) {
         const compatibility = preset.capabilityCompatibility.find((entry) => entry.capabilityId === capabilityId);
         expect(compatibility).toBeDefined();
+        // Compatible = statically attached OR observation-attachable within the
+        // locked family/intent scope; rejected otherwise.
         expect(compatibility?.status).toBe(
-          preset.capabilityOverlays.includes(capabilityId) ? 'compatible' : 'rejected',
+          preset.capabilityOverlays.includes(capabilityId)
+            || isCapabilityCompatibleWithRoute(capabilityId, preset.family, preset.primaryIntent)
+            ? 'compatible'
+            : 'rejected',
         );
       }
       expect(preset.requiredSections.length).toBeGreaterThan(0);
@@ -331,7 +344,6 @@ describe('prompt-enhancement routing and taxonomy', () => {
     ['Performance review search endpoint', 'review_verification', 'review.performance_review'],
     ['API contract review for checkout response', 'review_verification', 'review.api_contract_review'],
     ['Test review checkout specs', 'review_verification', 'review.test_review'],
-    ['Polish wording in this small label', 'quick_improvement', 'quick_improvement.local_polish_or_small_improvement'],
   ] as const)('routes %s to %s / %s', (promptText, expectedFamily, expectedIntent) => {
     const result = routePromptEnhancement(routeInput({
       routeDecisionId: `route-${expectedIntent}`,
@@ -461,7 +473,12 @@ describe('prompt-enhancement routing and taxonomy', () => {
     expect(result.contractDecision.promptReviewProcessingPolicy).toBe('eligible_for_initial_pe_route');
     expect(result.contractDecision.familyId).toBe('issue_debug');
     expect(result.contractDecision.primaryIntent).toBe('issue_debug.failing_test');
-    expect(result.contractDecision.capabilityOverlays).toEqual(result.selectedPreset.capabilityOverlays);
+    // Statics plus the dynamically attached reproduction/evidence request: a
+    // keyless route has no evidence observation, so the ask stays.
+    expect(result.contractDecision.capabilityOverlays).toEqual([
+      ...result.selectedPreset.capabilityOverlays,
+      'capability.reproduction_or_evidence_needed',
+    ]);
     expect(result.contractDecision.compoundPromptState).toBe('single_intent');
     expect(result.contractDecision.userPointCoverageRefs).toEqual(['user_point:1']);
     expect(result.contractDecision.nonPrimaryUserIntentHandling).toBe('covered_by_primary');
@@ -678,12 +695,6 @@ describe('prompt-enhancement routing and taxonomy', () => {
       expectedFamily: 'planning_spec',
       expectedIntent: 'planning.task_breakdown',
       evidence: { recentPromptEvidenceRefs: ['recent-task:checkout-flow-known-target'] },
-    }],
-    ['make it better', {
-      promptText: 'make it better',
-      expectedFamily: 'quick_improvement',
-      expectedIntent: 'quick_improvement.local_polish_or_small_improvement',
-      evidence: { sourceFactRefs: ['source:local-polish:button-label-known'] },
     }],
     ['plan this', {
       promptText: 'plan this',
@@ -1020,5 +1031,574 @@ describe('prompt-enhancement routing and taxonomy', () => {
     expect(result.contractDecision.routeEvidence).toContain('ds_delivery_gate:freq_once_per_session');
     expect(result.contractDecision.routeEvidence).toContain('source_only_hard_fact:hard_fact:source-only-no-popup-authority');
     expect(result.contractDecision.routeEvidence).toContain('sanitization_state:not_required');
+  });
+});
+
+describe('describePromptEnhancementSequencePlanV1 (Sequence-plan summary fix 2026-08-07 — display only)', () => {
+  it('and-aware split: the live multi-intent example counts 2 points with fix + build labels', () => {
+    const plan = describePromptEnhancementSequencePlanV1(
+      'Fix the failing payment test and add a rate limiter to the login endpoint.',
+    );
+    expect(plan.pointCount).toBe(2);
+    expect(plan.roleLabels).toEqual(['fix', 'build']);
+  });
+
+  it('a multi-point same-family list dedupes to ONE approved label', () => {
+    const plan = describePromptEnhancementSequencePlanV1(
+      'Build the whole recurring-billing flow: schema, cron job, email sender, and the dashboard widget - do it as one sequence.',
+    );
+    expect(plan.pointCount).toBeGreaterThanOrEqual(4);
+    expect(plan.roleLabels).toEqual(['build']); // deduped, fixed vocabulary only
+  });
+
+  it('a point matching no family contributes count but NO label (never raw text)', () => {
+    const plan = describePromptEnhancementSequencePlanV1('Fix the login bug, document the outcome');
+    expect(plan.pointCount).toBe(2);
+    expect(plan.roleLabels).toEqual(['fix']); // 'document the outcome' matches no family -> no label
+    for (const label of plan.roleLabels) {
+      expect(['fix', 'review', 'refactor', 'plan', 'build']).toContain(label);
+    }
+  });
+
+  it('single-task prompt: 1 point, remaining would be 0', () => {
+    const plan = describePromptEnhancementSequencePlanV1('Fix the failing payment test.');
+    expect(plan.pointCount).toBe(1);
+  });
+});
+
+// ── Route preference: the classifier proposal routes; the cascade is the fallback ──
+
+describe('classifier intent preference (the keyed path)', () => {
+  it('routes a previously-unreachable intent from the proposal — the cascade never could', () => {
+    const route = routePromptEnhancement(routeInput({
+      promptText: 'can you look at this diff before I merge',
+      classifierPrimaryIntent: 'review.code_or_diff_review',
+      classifierIntentConfidence: 0.9,
+    }));
+    expect(route.primaryIntent).toBe('review.code_or_diff_review');
+    expect(route.familyId).toBe('review_verification');
+    expect(route.noPopup).toBe(false);
+    expect(route.reasonCodes).toContain('classifier_intent_preferred');
+  });
+
+  it('an empty proposal falls through to the deterministic cascade, unchanged', () => {
+    const withEmpty = routePromptEnhancement(routeInput({
+      promptText: 'the checkout page throws a null error after login, fix it',
+      classifierPrimaryIntent: '',
+      classifierIntentConfidence: 0,
+    }));
+    const without = routePromptEnhancement(routeInput({
+      promptText: 'the checkout page throws a null error after login, fix it',
+    }));
+    expect(withEmpty.primaryIntent).toBe(without.primaryIntent);
+    expect(withEmpty.reasonCodes).not.toContain('classifier_intent_preferred');
+  });
+
+  it('hard skips are never overridable by the proposal', () => {
+    const route = routePromptEnhancement(routeInput({
+      classifierState: 'degraded_no_fire',
+      classifierPrimaryIntent: 'review.code_or_diff_review',
+      classifierIntentConfidence: 0.95,
+    }));
+    expect(route.noPopup).toBe(true);
+    expect(route.reasonCodes).toContain('degraded_classifier_no_fire');
+  });
+
+  it('an explicit accepted LLM route decision still wins over the proposal', () => {
+    const route = routePromptEnhancement(
+      routeInput({
+        classifierPrimaryIntent: 'review.code_or_diff_review',
+        classifierIntentConfidence: 0.9,
+      }),
+      {
+        familyId: 'planning_spec',
+        primaryIntent: 'planning.task_breakdown',
+        capabilities: [],
+        ambiguityState: 'clear',
+      } as never,
+    );
+    expect(route.primaryIntent).toBe('planning.task_breakdown');
+    expect(route.reasonCodes).toContain('llm_route_decision_accepted');
+  });
+});
+
+// ── Capability attachment: the classifier observes, the registry decides ──
+
+/** Keyed route through the classifier-intent path with an explicit observation. */
+function observedRoute(
+  intent: PromptEnhancementRouteInput['classifierPrimaryIntent'],
+  candidates: NonNullable<PromptEnhancementRouteInput['classifierCapabilityCandidates']>,
+  evidence: NonNullable<PromptEnhancementRouteInput['classifierDebugEvidencePresent']> = [],
+) {
+  return routePromptEnhancement(routeInput({
+    promptText: 'plain prompt with no routing keywords at all',
+    firedKey: undefined,
+    classifierPrimaryIntent: intent,
+    classifierIntentConfidence: 0.9,
+    classifierCapabilityCandidates: candidates,
+    classifierDebugEvidencePresent: evidence,
+  }));
+}
+
+describe('registry capability decision on the keyed path (one attach + one reject per capability)', () => {
+  it('decomposition_candidate: attaches from the observation on a compatible family', () => {
+    const route = observedRoute('maintenance.cleanup_dead_code', ['capability.decomposition_candidate']);
+    expect(route.capabilityOverlays).toContain('capability.decomposition_candidate');
+  });
+
+  it('decomposition_candidate: VETOED on quick_improvement (fail-closed clause)', () => {
+    const route = observedRoute('quick_improvement.local_polish_or_small_improvement', ['capability.decomposition_candidate']);
+    expect(route.capabilityOverlays).not.toContain('capability.decomposition_candidate');
+  });
+
+  it('confirmation_needed: attaches from the observation on any family', () => {
+    const route = observedRoute('issue_debug.failing_test', ['capability.confirmation_needed']);
+    expect(route.capabilityOverlays).toContain('capability.confirmation_needed');
+  });
+
+  it('confirmation_needed: never attached unobserved beyond preset statics', () => {
+    const route = observedRoute('issue_debug.failing_test', []);
+    expect(route.capabilityOverlays).not.toContain('capability.confirmation_needed');
+  });
+
+  it('adversarial_review: statically attached on every review route', () => {
+    const route = observedRoute('review.security_review', []);
+    expect(route.capabilityOverlays).toContain('capability.adversarial_review');
+  });
+
+  it('adversarial_review: VETOED outside review_verification even when observed', () => {
+    const route = observedRoute('feature.fresh_implementation', ['capability.adversarial_review']);
+    expect(route.capabilityOverlays).not.toContain('capability.adversarial_review');
+  });
+
+  it('project_grounding: attaches from the observation where not static', () => {
+    const route = observedRoute('planning.task_breakdown', ['capability.project_grounding']);
+    expect(route.capabilityOverlays).toContain('capability.project_grounding');
+  });
+
+  it('project_grounding: absent when neither static nor observed', () => {
+    const route = observedRoute('planning.task_breakdown', []);
+    expect(route.capabilityOverlays).not.toContain('capability.project_grounding');
+  });
+
+  it('verification_required: preset statics survive the registry decision', () => {
+    const route = observedRoute('quick_improvement.local_polish_or_small_improvement', []);
+    expect(route.capabilityOverlays).toContain('capability.verification_required');
+  });
+
+  it('risk_or_rollback: attaches from the observation on a compatible family', () => {
+    const route = observedRoute('issue_debug.production_incident_or_support', ['capability.risk_or_rollback']);
+    expect(route.capabilityOverlays).toContain('capability.risk_or_rollback');
+  });
+
+  it('risk_or_rollback: VETOED on quick_improvement (fail-closed clause)', () => {
+    const route = observedRoute('quick_improvement.local_polish_or_small_improvement', ['capability.risk_or_rollback']);
+    expect(route.capabilityOverlays).not.toContain('capability.risk_or_rollback');
+  });
+
+  it('reproduction_or_evidence_needed: the LACKS rule attaches it on planning.debugging_plan with thin evidence', () => {
+    const route = observedRoute('planning.debugging_plan', [], []);
+    expect(route.capabilityOverlays).toContain('capability.reproduction_or_evidence_needed');
+  });
+
+  it('reproduction_or_evidence_needed: supplied evidence clears the LACKS rule (no repro request)', () => {
+    const route = observedRoute('planning.debugging_plan', [], ['logs', 'failing_test_details']);
+    expect(route.capabilityOverlays).not.toContain('capability.reproduction_or_evidence_needed');
+  });
+
+  it('reproduction_or_evidence_needed: VETOED on a feature route even when observed', () => {
+    const route = observedRoute('feature.fresh_implementation', ['capability.reproduction_or_evidence_needed']);
+    expect(route.capabilityOverlays).not.toContain('capability.reproduction_or_evidence_needed');
+  });
+
+  it('behavior_preservation: attaches from the observation on a review route', () => {
+    const route = observedRoute('review.code_or_diff_review', ['capability.behavior_preservation']);
+    expect(route.capabilityOverlays).toContain('capability.behavior_preservation');
+  });
+
+  it('behavior_preservation: VETOED on fresh feature work even when observed', () => {
+    const route = observedRoute('feature.fresh_implementation', ['capability.behavior_preservation']);
+    expect(route.capabilityOverlays).not.toContain('capability.behavior_preservation');
+  });
+
+  it('source_signal_guidance: attaches from the observation where not static', () => {
+    const route = observedRoute('planning.spec_or_prd', ['capability.source_signal_guidance']);
+    expect(route.capabilityOverlays).toContain('capability.source_signal_guidance');
+  });
+
+  it('source_signal_guidance: absent when neither static nor observed', () => {
+    const route = observedRoute('planning.spec_or_prd', []);
+    expect(route.capabilityOverlays).not.toContain('capability.source_signal_guidance');
+  });
+
+  it('the keyword decider is not consulted on the keyed path (keyword-laden prompt adds nothing)', () => {
+    const route = routePromptEnhancement(routeInput({
+      promptText: 'plan the production migration rollback with many multiple steps',
+      firedKey: undefined,
+      classifierPrimaryIntent: 'feature.idea_discussion',
+      classifierIntentConfidence: 0.9,
+      classifierCapabilityCandidates: [],
+      classifierDebugEvidencePresent: [],
+    }));
+    expect(route.capabilityOverlays).not.toContain('capability.risk_or_rollback');
+    expect(route.capabilityOverlays).not.toContain('capability.decomposition_candidate');
+  });
+
+  it('E6 keyed path: registry decision + accepted decision capabilities pass through; keyword merge unused', () => {
+    const route = routePromptEnhancement(
+      routeInput({
+        promptText: 'plan the production migration rollback',
+        firedKey: undefined,
+        classifierCapabilityCandidates: ['capability.project_grounding'],
+        classifierDebugEvidencePresent: [],
+      }),
+      {
+        familyId: 'planning_spec',
+        primaryIntent: 'planning.task_breakdown',
+        capabilities: ['capability.confirmation_needed'],
+        ambiguityState: 'clear',
+      } as never,
+    );
+    expect(route.capabilityOverlays).toContain('capability.project_grounding');
+    expect(route.capabilityOverlays).toContain('capability.confirmation_needed');
+    expect(route.capabilityOverlays).not.toContain('capability.risk_or_rollback');
+  });
+
+  it('E6 no-key path: the keyword merge still answers, demoted not deleted', () => {
+    const route = routePromptEnhancement(
+      routeInput({
+        promptText: 'plan the production migration rollback',
+        firedKey: undefined,
+      }),
+      {
+        familyId: 'planning_spec',
+        primaryIntent: 'planning.task_breakdown',
+        capabilities: [],
+        ambiguityState: 'clear',
+      } as never,
+    );
+    expect(route.capabilityOverlays).toContain('capability.risk_or_rollback');
+  });
+
+  it('the compatibility declaration mirrors the registry authority', () => {
+    const maintenancePreset = PROMPT_ENHANCEMENT_TAXONOMY_PRESETS.find(
+      (preset) => preset.primaryIntent === 'maintenance.cleanup_dead_code',
+    );
+    expect(maintenancePreset?.capabilityCompatibility.find(
+      (entry) => entry.capabilityId === 'capability.confirmation_needed',
+    )).toMatchObject({ status: 'compatible', reasonCode: 'observation_attachable_within_locked_scope' });
+    const quickPreset = PROMPT_ENHANCEMENT_TAXONOMY_PRESETS.find(
+      (preset) => preset.primaryIntent === 'quick_improvement.local_polish_or_small_improvement',
+    );
+    expect(quickPreset?.capabilityCompatibility.find(
+      (entry) => entry.capabilityId === 'capability.adversarial_review',
+    )).toMatchObject({ status: 'rejected', reasonCode: 'not_attached_to_selected_family_intent_or_current_scope' });
+  });
+
+  it('the vocabulary guards accept only typed ids', () => {
+    expect(isKnownCapabilityId('capability.project_grounding')).toBe(true);
+    expect(isKnownCapabilityId('capability.made_up')).toBe(false);
+    expect(isKnownDebugEvidenceForm('screenshots')).toBe(true);
+    expect(isKnownDebugEvidenceForm('vibes')).toBe(false);
+  });
+});
+
+// ── De-nagging: the ask stays static, the carry goes dynamic ──
+
+describe('reproduction/evidence request — ask/carry pair for every debug intent', () => {
+  const SUPPLIED = ['reproduction_steps', 'logs', 'failing_test_details'] as const;
+
+  for (const intent of DEBUG_PRIMARY_INTENTS) {
+    it(`${intent}: asks when the observed evidence is thin`, () => {
+      const route = observedRoute(intent, [], []);
+      expect(route.capabilityOverlays).toContain('capability.reproduction_or_evidence_needed');
+    });
+
+    if (intent === 'issue_debug.reproduction_discovery') {
+      it(`${intent}: STILL asks when evidence is supplied — its whole purpose is asking`, () => {
+        const route = observedRoute(intent, [], [...SUPPLIED]);
+        expect(route.capabilityOverlays).toContain('capability.reproduction_or_evidence_needed');
+      });
+    } else {
+      it(`${intent}: carries supplied evidence without asking for it again`, () => {
+        const route = observedRoute(intent, [], [...SUPPLIED]);
+        expect(route.capabilityOverlays).not.toContain('capability.reproduction_or_evidence_needed');
+      });
+    }
+  }
+
+  it('only reproduction_discovery still attaches the request statically', () => {
+    for (const preset of PROMPT_ENHANCEMENT_TAXONOMY_PRESETS) {
+      expect(preset.capabilityOverlays.includes('capability.reproduction_or_evidence_needed')).toBe(
+        preset.primaryIntent === 'issue_debug.reproduction_discovery',
+      );
+    }
+  });
+
+  it('the MODEL cannot re-attach the request on a carry route — the registry decides it alone', () => {
+    const route = observedRoute('issue_debug.failing_test', ['capability.reproduction_or_evidence_needed'], [...SUPPLIED]);
+    expect(route.capabilityOverlays).not.toContain('capability.reproduction_or_evidence_needed');
+  });
+
+  it('refusing that candidate does not disturb the other observed candidates', () => {
+    const route = observedRoute(
+      'issue_debug.failing_test',
+      ['capability.reproduction_or_evidence_needed', 'capability.risk_or_rollback'],
+      [...SUPPLIED],
+    );
+    expect(route.capabilityOverlays).toContain('capability.risk_or_rollback');
+    expect(route.capabilityOverlays).not.toContain('capability.reproduction_or_evidence_needed');
+  });
+
+  it('planning.debugging_plan — the twelfth debug-shaped route — asks and carries by the same rule', () => {
+    expect(observedRoute('planning.debugging_plan', [], []).capabilityOverlays)
+      .toContain('capability.reproduction_or_evidence_needed');
+    expect(observedRoute('planning.debugging_plan', [], [...SUPPLIED]).capabilityOverlays)
+      .not.toContain('capability.reproduction_or_evidence_needed');
+  });
+
+  it('the supplied floor is two independent forms — one is still thin', () => {
+    expect(observedRoute('issue_debug.failing_test', [], ['logs']).capabilityOverlays)
+      .toContain('capability.reproduction_or_evidence_needed');
+    expect(observedRoute('issue_debug.failing_test', [], ['logs', 'failing_test_details']).capabilityOverlays)
+      .not.toContain('capability.reproduction_or_evidence_needed');
+  });
+
+  it('a keyless debug route on the cascade keeps asking — nothing is known to be supplied', () => {
+    const route = routePromptEnhancement(routeInput({}));
+    expect(route.familyId).toBe('issue_debug');
+    expect(route.capabilityOverlays).toContain('capability.reproduction_or_evidence_needed');
+  });
+
+  it('a keyed session falling through to the cascade still clears the ask on supplied evidence', () => {
+    const route = routePromptEnhancement(routeInput({
+      classifierPrimaryIntent: '',
+      classifierIntentConfidence: 0,
+      classifierCapabilityCandidates: [],
+      classifierDebugEvidencePresent: ['reproduction_steps', 'logs'],
+    }));
+    expect(route.familyId).toBe('issue_debug');
+    expect(route.capabilityOverlays).not.toContain('capability.reproduction_or_evidence_needed');
+  });
+});
+
+// ── Restoration proof: a prompt reaches every intent individually ──
+
+describe('routability: a prompt reaches every one of the forty intents', () => {
+  it('the routability layer reports zero gaps', () => {
+    expect(findPromptEnhancementRoutabilityGaps()).toEqual([]);
+  });
+
+  it('exactly one probe per intent — forty, from the locks, no duplicates', () => {
+    expect(PROMPT_ENHANCEMENT_ROUTABILITY_PROBES.length).toBe(40);
+    const probed = new Set(PROMPT_ENHANCEMENT_ROUTABILITY_PROBES.map((probe) => probe.primaryIntent));
+    expect(probed.size).toBe(40);
+    for (const intent of PROMPT_ENHANCEMENT_PRIMARY_INTENTS) {
+      expect(probed.has(intent)).toBe(true);
+    }
+  });
+
+  it('probe prompts cannot silently rot to placeholders', () => {
+    // The gate feeds each probe's INTENT to the router, so the promptText never
+    // drives selection — replacing one with gibberish leaves the gate green and
+    // the whole PE suite passing (measured). The prompts are still the artifact
+    // C5 owes ("one realistic prompt per intent") and the only human-readable
+    // record of what each intent is for, so they need a floor of their own.
+    // Semantic realism cannot be gated deterministically — that is the
+    // classifier's half — but emptiness, truncation and copy-paste can.
+    const texts = PROMPT_ENHANCEMENT_ROUTABILITY_PROBES.map((probe) => probe.promptText);
+    expect(new Set(texts).size).toBe(texts.length);
+    for (const probe of PROMPT_ENHANCEMENT_ROUTABILITY_PROBES) {
+      expect(probe.promptText.trim().split(/\s+/).length, `probe for ${probe.primaryIntent} is too short to be a real prompt`)
+        .toBeGreaterThanOrEqual(4);
+    }
+  });
+
+  it('base-family coverage: one probe per family routes to that family', () => {
+    const familyByPrefix: Record<string, string> = {
+      feature: 'feature_delivery',
+      planning: 'planning_spec',
+      issue_debug: 'issue_debug',
+      maintenance: 'maintenance_refactor',
+      review: 'review_verification',
+      quick_improvement: 'quick_improvement',
+    };
+    for (const [prefix, family] of Object.entries(familyByPrefix)) {
+      const probe = PROMPT_ENHANCEMENT_ROUTABILITY_PROBES.find((p) => p.primaryIntent.startsWith(`${prefix}.`));
+      expect(probe).toBeDefined();
+      const route = routePromptEnhancement(routeInput({
+        promptText: probe!.promptText,
+        firedKey: undefined,
+        classifierPrimaryIntent: probe!.primaryIntent,
+        classifierIntentConfidence: 0.9,
+        classifierCapabilityCandidates: [],
+        classifierDebugEvidencePresent: [],
+      }));
+      expect(route.familyId).toBe(family);
+    }
+  });
+});
+
+describe('restoration: the eight review subtypes and two dead planning subtypes are INDIVIDUALLY selectable (labelled ids 12-21 phrasings)', () => {
+  const restorationIntents = [
+    'review.security_review',
+    'review.code_or_diff_review',
+    'review.architecture_review',
+    'review.test_review',
+    'review.requirements_fit_review',
+    'review.verification_request',
+    'review.api_contract_review',
+    'review.performance_review',
+    'planning.rollout_release_plan',
+    'planning.migration_plan',
+  ] as const;
+
+  for (const intent of restorationIntents) {
+    it(`${intent}: its labelled phrasing routes to the EXACT subtype`, () => {
+      const probe = PROMPT_ENHANCEMENT_ROUTABILITY_PROBES.find((p) => p.primaryIntent === intent);
+      expect(probe).toBeDefined();
+      const route = routePromptEnhancement(routeInput({
+        promptText: probe!.promptText,
+        firedKey: undefined,
+        classifierPrimaryIntent: probe!.primaryIntent,
+        classifierIntentConfidence: 0.9,
+        classifierCapabilityCandidates: [],
+        classifierDebugEvidencePresent: [],
+      }));
+      expect(route.noPopup).toBe(false);
+      expect(route.primaryIntent).toBe(intent);
+      // A generic review absorbing a required subtype is an explicit locked
+      // FAILURE condition — the subtype must arrive as itself.
+      if (intent.startsWith('review.') && intent !== 'review.verification_request') {
+        expect(route.primaryIntent).not.toBe('review.verification_request');
+      }
+    });
+  }
+
+  it('"review my diff" reaches review.code_or_diff_review from the rung-1 proposal alone', () => {
+    const route = routePromptEnhancement(routeInput({
+      promptText: 'review my diff',
+      firedKey: undefined,
+      classifierPrimaryIntent: 'review.code_or_diff_review',
+      classifierIntentConfidence: 0.9,
+      classifierCapabilityCandidates: [],
+      classifierDebugEvidencePresent: [],
+    }));
+    expect(route.primaryIntent).toBe('review.code_or_diff_review');
+    expect(route.familyId).toBe('review_verification');
+  });
+});
+
+// ── The evidence ladder: under-evidenced is a typed routing state, not a guessed family ──
+
+describe('evidence ladder resolution on every routing path', () => {
+  const bare = {
+    promptText: 'make it better please',
+    firedKey: undefined,
+    effectiveFiredSource: undefined,
+    selectedQualifyingAbsence: undefined,
+    absenceGateReason: undefined,
+    triggerKind: 'manual',
+  } as const;
+
+  it('rung 1 (keyed): a classifier proposal resolves the ladder', () => {
+    const route = routePromptEnhancement(routeInput({
+      ...bare,
+      classifierPrimaryIntent: 'review.security_review',
+      classifierIntentConfidence: 0.9,
+      classifierCapabilityCandidates: [],
+      classifierDebugEvidencePresent: [],
+    }));
+    expect(route.ladderResolution).toEqual({ state: 'resolved', resolvedByRung: 1 });
+  });
+
+  it('rung 1 (no-key): a matched cascade branch is explicit prompt evidence', () => {
+    const route = routePromptEnhancement(routeInput({ ...bare, promptText: 'the payment.spec.ts failing test blocks ci' }));
+    expect(route.ladderResolution).toEqual({ state: 'resolved', resolvedByRung: 1 });
+  });
+
+  it('deterministic evidence on rungs 2-5 is walked but cannot NAME a top route without a model', () => {
+    for (const evidence of [
+      { sourceFactRefs: ['env:fact'] },
+      { triggerKind: 'absence', firedKey: 'absence:debugging_observation_gap@implementation' },
+      { contentTemplateFactRefs: ['content:record'] },
+      { recentPromptEvidenceRefs: ['prompt:3'] },
+      { memoryFeedbackRefs: ['memory:signal'] },
+    ] as const) {
+      const route = routePromptEnhancement(routeInput({ ...bare, ...evidence }));
+      expect(route.ladderResolution).toEqual({ state: 'under_evidenced', rungsWalked: [1, 2, 3, 4, 5, 6] });
+    }
+  });
+
+  it('a keyed DECLINE is authoritative: an empty proposal leaves the route under-evidenced even when a keyword branch matches', () => {
+    const route = routePromptEnhancement(routeInput({
+      ...bare,
+      promptText: 'the payment.spec.ts failing test blocks ci',
+      classifierPrimaryIntent: '',
+      classifierIntentConfidence: 0.1,
+      classifierCapabilityCandidates: [],
+      classifierDebugEvidencePresent: [],
+    }));
+    // The cascade shape is untouched — the family still comes from the branch —
+    // but the popup decision reads the model's decline as the ladder outcome.
+    expect(route.primaryIntent).toBe('issue_debug.failing_test');
+    expect(route.ladderResolution).toEqual({ state: 'under_evidenced', rungsWalked: [1, 2, 3, 4, 5, 6] });
+  });
+
+  it('rung 6 never resolves alone: profile tie-breakers leave the route under-evidenced', () => {
+    const route = routePromptEnhancement(routeInput({ ...bare, profileTieBreakerRefs: ['profile:role'] }));
+    expect(route.ladderResolution.state).toBe('under_evidenced');
+  });
+
+  it('the rungs are walked IN ORDER, rung 7 never walked', () => {
+    const route = routePromptEnhancement(routeInput(bare));
+    expect(route.ladderResolution).toEqual({ state: 'under_evidenced', rungsWalked: [1, 2, 3, 4, 5, 6] });
+  });
+
+  it('the terminal no longer asserts a family: "could not tell" is not "this is small"', () => {
+    const route = routePromptEnhancement(routeInput(bare));
+    expect(route.primaryIntent).not.toBe('quick_improvement.local_polish_or_small_improvement');
+    expect(route.reasonCodes).toContain('no_family_evidence_no_catch_all');
+    expect(route.routeConfidence).toBe('missing');
+    // The structural carrier for the gate's narrow exception body.
+    expect(route.primaryIntent).toBe('planning.spec_or_prd');
+    expect(route.ladderResolution.state).toBe('under_evidenced');
+  });
+
+  it('evidence existing near an unmatched prompt does not resurrect the catch-all', () => {
+    const route = routePromptEnhancement(routeInput({
+      ...bare,
+      promptText: 'make it better',
+      sourceFactRefs: ['source:local-polish:button-label-known'],
+    }));
+    expect(route.primaryIntent).not.toBe('quick_improvement.local_polish_or_small_improvement');
+    expect(route.reasonCodes).toContain('no_family_evidence_no_catch_all');
+  });
+
+  it('quick_improvement is selected ON ITS MERITS through the decider', () => {
+    const route = routePromptEnhancement(routeInput({
+      ...bare,
+      promptText: 'Polish wording in this small label',
+      classifierPrimaryIntent: 'quick_improvement.local_polish_or_small_improvement',
+      classifierIntentConfidence: 0.9,
+      classifierCapabilityCandidates: [],
+      classifierDebugEvidencePresent: [],
+    }));
+    expect(route.primaryIntent).toBe('quick_improvement.local_polish_or_small_improvement');
+    expect(route.ladderResolution).toEqual({ state: 'resolved', resolvedByRung: 1 });
+  });
+
+  it('a hard-skip route still carries the state', () => {
+    const route = routePromptEnhancement(routeInput({ ...bare, classifierState: 'degraded_no_fire' }));
+    expect(route.reasonCodes).toContain('degraded_classifier_no_fire');
+    expect(route.ladderResolution.state).toBe('under_evidenced');
+  });
+
+  it('an accepted LLM route decision is resolved rung-1 evidence', () => {
+    const route = routePromptEnhancement(
+      routeInput(bare),
+      { familyId: 'planning_spec', primaryIntent: 'planning.task_breakdown', capabilities: [], ambiguityState: 'clear' } as never,
+    );
+    expect(route.ladderResolution).toEqual({ state: 'resolved', resolvedByRung: 1 });
   });
 });

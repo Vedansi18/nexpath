@@ -50,7 +50,6 @@ afterEach(() => {
 function makePrompts(overrides: Partial<InstallPrompts> = {}): InstallPrompts {
   return {
     apiKeyPrompt:     async () => ({ kind: 'skip' }),
-    telemetryConsent: async () => ({ kind: 'enable' }),
     ...overrides,
   };
 }
@@ -153,16 +152,17 @@ describe('install 3-step — Step 1: API key', () => {
       expect(summary).toBeNull();
       expect(resolver.storeApiKey).not.toHaveBeenCalled();
       const store = await openStore(dbPath);
-      expect(getConfig(store.db, 'telemetry.enabled')).toBe('true');
+      // Cancel wrote nothing → getConfig returns the (now off-by-default) DEFAULT_CONFIG value.
+      expect(getConfig(store.db, 'telemetry.enabled')).toBe('false');
       closeStore(store);
     } finally { cleanup(); }
   });
 });
 
-// ── Step 2: Telemetry consent ────────────────────────────────────────────────
+// ── Telemetry: OFF by default, no install prompt (NF Plan A) ──────────────────
 
-describe('install 3-step — Step 2: Telemetry consent', () => {
-  it('enable → telemetry.enabled AND telemetry_sync_enabled both set to "true" in config', async () => {
+describe('install — telemetry OFF by default (no install prompt)', () => {
+  it('fresh install → telemetry.enabled AND telemetry_sync_enabled both "false" (no prompt shown)', async () => {
     const { dir, cleanup } = tmpDirAgents();
     vi.spyOn(console, 'log').mockImplementation(() => {});
     const dbPath = join(dir, 'telem.db');
@@ -173,27 +173,7 @@ describe('install 3-step — Step 2: Telemetry consent', () => {
         freqPromptFn: noopFreqPrompt, rolePromptFn: noopRolePrompt,
         dbPath,
         confirmFn: async () => true,
-        promptFn: makePrompts({ telemetryConsent: async () => ({ kind: 'enable' }) }),
-      });
-      const store = await openStore(dbPath);
-      expect(getConfig(store.db, 'telemetry.enabled')).toBe('true');
-      expect(getConfig(store.db, 'telemetry_sync_enabled')).toBe('true');
-      closeStore(store);
-    } finally { cleanup(); }
-  });
-
-  it('disable → telemetry.enabled AND telemetry_sync_enabled both set to "false" in config', async () => {
-    const { dir, cleanup } = tmpDirAgents();
-    vi.spyOn(console, 'log').mockImplementation(() => {});
-    const dbPath = join(dir, 'telem-off.db');
-    try {
-      const paths = resolveAgentPaths(dir, dir, dir);
-      await installAction({}, {
-        paths, isWin: false, execFn: () => {}, skipClipboardCheck: true,
-        freqPromptFn: noopFreqPrompt, rolePromptFn: noopRolePrompt,
-        dbPath,
-        confirmFn: async () => true,
-        promptFn: makePrompts({ telemetryConsent: async () => ({ kind: 'disable' }) }),
+        promptFn: makePrompts({}),
       });
       const store = await openStore(dbPath);
       expect(getConfig(store.db, 'telemetry.enabled')).toBe('false');
@@ -202,7 +182,7 @@ describe('install 3-step — Step 2: Telemetry consent', () => {
     } finally { cleanup(); }
   });
 
-  it('--yes mode → both telemetry.enabled and telemetry_sync_enabled set to "true" in DB', async () => {
+  it('--yes mode → telemetry OFF by default, both flags "false" and explicitly set', async () => {
     const { dir, cleanup } = tmpDirAgents();
     vi.spyOn(console, 'log').mockImplementation(() => {});
     const dbPath = join(dir, 'telem-yes-mode.db');
@@ -214,29 +194,28 @@ describe('install 3-step — Step 2: Telemetry consent', () => {
         dbPath,
       });
       const store = await openStore(dbPath);
-      expect(getConfig(store.db, 'telemetry.enabled')).toBe('true');
-      expect(getConfig(store.db, 'telemetry_sync_enabled')).toBe('true');
+      expect(getConfig(store.db, 'telemetry.enabled')).toBe('false');
+      expect(getConfig(store.db, 'telemetry_sync_enabled')).toBe('false');
       expect(isConfigSet(store.db, 'telemetry.enabled')).toBe(true);
       expect(isConfigSet(store.db, 'telemetry_sync_enabled')).toBe(true);
       closeStore(store);
     } finally { cleanup(); }
   });
 
-  it('--yes mode PRESERVES an existing telemetry choice (does NOT re-enable a disabled opt-out)', async () => {
-    // Guards the VS Code extension's two-pass setup (`--for cli` interactive,
-    // then `--for vscode --yes`): a prior pass where the user disabled telemetry
-    // must survive the second --yes pass. Mirrors freq/role preservation.
+  it('PRESERVES an existing telemetry choice (does NOT flip a user who ENABLED it back to the off default)', async () => {
+    // Now that the default is OFF, the meaningful guard is the reverse: a user (or the VS Code two-pass
+    // setup) who explicitly ENABLED telemetry must not be silently flipped back to off on a re-run.
     const { dir, cleanup } = tmpDirAgents();
     vi.spyOn(console, 'log').mockImplementation(() => {});
     const dbPath = join(dir, 'telem-yes-preserve.db');
     try {
-      // Simulate pass 1: user explicitly disabled telemetry.
+      // Simulate pass 1: user explicitly enabled telemetry.
       const pre = await openStore(dbPath);
-      setConfig(pre, 'telemetry.enabled',      'false');
-      setConfig(pre, 'telemetry_sync_enabled', 'false');
+      setConfig(pre, 'telemetry.enabled',      'true');
+      setConfig(pre, 'telemetry_sync_enabled', 'true');
       closeStore(pre);
 
-      // Pass 2: a non-interactive --yes install must NOT flip it back to true.
+      // Pass 2: a non-interactive --yes install must NOT flip it back to the off default.
       const paths = resolveAgentPaths(dir, dir, dir);
       const summary = await installAction({ yes: true, platform: 'vscode' }, {
         paths, isWin: false, execFn: () => {}, skipClipboardCheck: true,
@@ -245,27 +224,11 @@ describe('install 3-step — Step 2: Telemetry consent', () => {
       });
 
       const store = await openStore(dbPath);
-      expect(getConfig(store.db, 'telemetry.enabled')).toBe('false');
-      expect(getConfig(store.db, 'telemetry_sync_enabled')).toBe('false');
+      expect(getConfig(store.db, 'telemetry.enabled')).toBe('true');
+      expect(getConfig(store.db, 'telemetry_sync_enabled')).toBe('true');
       closeStore(store);
-      // Summary reflects the preserved (disabled) state, not a forced true.
-      expect(summary?.telemetry.enabled).toBe(false);
-    } finally { cleanup(); }
-  });
-
-  it('cancel → returns null and the telemetry config is NOT written', async () => {
-    const { dir, cleanup } = tmpDirAgents();
-    vi.spyOn(console, 'log').mockImplementation(() => {});
-    const dbPath = join(dir, 'telem-cancel.db');
-    try {
-      const paths = resolveAgentPaths(dir, dir, dir);
-      const summary = await installAction({}, {
-        paths, isWin: false, execFn: () => {}, skipClipboardCheck: true,
-        freqPromptFn: noopFreqPrompt, rolePromptFn: noopRolePrompt,
-        dbPath,
-        promptFn: makePrompts({ telemetryConsent: async () => ({ kind: 'cancel' }) }),
-      });
-      expect(summary).toBeNull();
+      // Summary reflects the preserved (enabled) state, not a forced off.
+      expect(summary?.telemetry.enabled).toBe(true);
     } finally { cleanup(); }
   });
 });
@@ -284,18 +247,17 @@ describe('install 3-step — Summary returned', () => {
         confirmFn: async () => true,
         promptFn: makePrompts({
           apiKeyPrompt: async () => ({ kind: 'skip' }),
-          telemetryConsent: async () => ({ kind: 'enable' }),
         }),
       });
       expect(summary).not.toBeNull();
       expect(summary!.apiKey.source).toBe('skipped');
-      expect(summary!.telemetry.enabled).toBe(true);
+      expect(summary!.telemetry.enabled).toBe(false); // off by default (NF Plan A)
       expect(Array.isArray(summary!.agents.registered)).toBe(true);
       expect(Array.isArray(summary!.agents.failed)).toBe(true);
     } finally { cleanup(); }
   });
 
-  it('--yes bypasses prompts; summary still returned with default apiKey="skipped", telemetry=true', async () => {
+  it('--yes bypasses prompts; summary still returned with default apiKey="skipped", telemetry=false', async () => {
     const { dir, cleanup } = tmpDirAgents();
     vi.spyOn(console, 'log').mockImplementation(() => {});
     try {
@@ -306,7 +268,7 @@ describe('install 3-step — Summary returned', () => {
       });
       expect(summary).not.toBeNull();
       expect(summary!.apiKey.source).toBe('skipped');
-      expect(summary!.telemetry.enabled).toBe(true);
+      expect(summary!.telemetry.enabled).toBe(false); // off by default (NF Plan A)
     } finally { cleanup(); }
   });
 });
@@ -400,7 +362,7 @@ describe('install 3-step — apiKeyPrompt context detection', () => {
         paths, isWin: false, execFn: () => {}, skipClipboardCheck: true,
         freqPromptFn: noopFreqPrompt, rolePromptFn: noopRolePrompt,
         confirmFn: async () => true,
-        promptFn: { apiKeyPrompt, telemetryConsent: async () => ({ kind: 'enable' }) },
+        promptFn: { apiKeyPrompt },
       });
       const ctx = apiKeyPrompt.mock.calls[0][0];
       expect(ctx.hasEnvKey).toBe(true);
@@ -418,7 +380,7 @@ describe('install 3-step — apiKeyPrompt context detection', () => {
         paths, isWin: false, execFn: () => {}, skipClipboardCheck: true,
         freqPromptFn: noopFreqPrompt, rolePromptFn: noopRolePrompt,
         confirmFn: async () => true,
-        promptFn: { apiKeyPrompt, telemetryConsent: async () => ({ kind: 'enable' }) },
+        promptFn: { apiKeyPrompt },
       });
       const ctx = apiKeyPrompt.mock.calls[0][0];
       expect(ctx.hasEnvKey).toBe(false);
@@ -436,7 +398,7 @@ describe('install 3-step — apiKeyPrompt context detection', () => {
         paths, isWin: false, execFn: () => {}, skipClipboardCheck: true,
         freqPromptFn: noopFreqPrompt, rolePromptFn: noopRolePrompt,
         confirmFn: async () => true,
-        promptFn: { apiKeyPrompt, telemetryConsent: async () => ({ kind: 'enable' }) },
+        promptFn: { apiKeyPrompt },
       });
       const ctx = apiKeyPrompt.mock.calls[0][0];
       expect(ctx.hasStoredKey).toBe(true);
@@ -455,7 +417,7 @@ describe('install 3-step — apiKeyPrompt context detection', () => {
         freqPromptFn: noopFreqPrompt, rolePromptFn: noopRolePrompt,
         platformForKeychain: 'win32',
         confirmFn: async () => true,
-        promptFn: { apiKeyPrompt, telemetryConsent: async () => ({ kind: 'enable' }) },
+        promptFn: { apiKeyPrompt },
       });
       const ctx = apiKeyPrompt.mock.calls[0][0];
       expect(ctx.keychainName).toBe('Credential Manager');
@@ -470,7 +432,6 @@ describe('install 3-step — cancellation aborts subsequent steps', () => {
     const { dir, cleanup } = tmpDirAgents();
     vi.spyOn(console, 'log').mockImplementation(() => {});
     const dbPath = join(dir, 'cancel-step1.db');
-    const telemetrySpy = vi.fn<InstallPrompts['telemetryConsent']>();
     try {
       const paths = resolveAgentPaths(dir, dir, dir);
       const summary = await installAction({}, {
@@ -478,12 +439,10 @@ describe('install 3-step — cancellation aborts subsequent steps', () => {
         freqPromptFn: noopFreqPrompt, rolePromptFn: noopRolePrompt,
         dbPath,
         promptFn: {
-          apiKeyPrompt:     async () => ({ kind: 'cancel' }),
-          telemetryConsent: telemetrySpy,
+          apiKeyPrompt: async () => ({ kind: 'cancel' }),
         },
       });
       expect(summary).toBeNull();
-      expect(telemetrySpy).not.toHaveBeenCalled();
       const store = await openStore(dbPath);
       expect(isConfigSet(store.db, 'telemetry.enabled')).toBe(false);
       expect(isConfigSet(store.db, 'telemetry_sync_enabled')).toBe(false);
@@ -491,31 +450,8 @@ describe('install 3-step — cancellation aborts subsequent steps', () => {
     } finally { cleanup(); }
   });
 
-  it('cancel at Step 2 → telemetry config NOT written; Step 1 storeApiKey HAS already landed (non-transactional)', async () => {
-    const { dir, cleanup } = tmpDirAgents();
-    vi.spyOn(console, 'log').mockImplementation(() => {});
-    const dbPath = join(dir, 'cancel-step2.db');
-    try {
-      const paths = resolveAgentPaths(dir, dir, dir);
-      const summary = await installAction({}, {
-        paths, isWin: false, execFn: () => {}, skipClipboardCheck: true,
-        freqPromptFn: noopFreqPrompt, rolePromptFn: noopRolePrompt,
-        dbPath,
-        promptFn: {
-          apiKeyPrompt:     async () => ({ kind: 'new_key', value: 'sk-abcdefghij1234567890abcdefghij' }),
-          telemetryConsent: async () => ({ kind: 'cancel' }),
-        },
-      });
-      expect(summary).toBeNull();
-      // Step 1 already wrote: storeApiKey was called.
-      expect(resolver.storeApiKey).toHaveBeenCalledWith('sk-abcdefghij1234567890abcdefghij');
-      // Step 2 was cancelled → neither telemetry flag should be written.
-      const store = await openStore(dbPath);
-      expect(isConfigSet(store.db, 'telemetry.enabled')).toBe(false);
-      expect(isConfigSet(store.db, 'telemetry_sync_enabled')).toBe(false);
-      closeStore(store);
-    } finally { cleanup(); }
-  });
+  // (Removed "cancel at Step 2" — there is no telemetry step to cancel anymore; telemetry is off by
+  //  default with no install prompt. Step-1 API-key cancellation is covered above.)
 });
 
 // ── getKeychainName platform variants ────────────────────────────────────────

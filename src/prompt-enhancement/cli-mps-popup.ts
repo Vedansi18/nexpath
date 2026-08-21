@@ -2,6 +2,7 @@ import type { PromptEnhancementMpsFirstPopupModelV1 } from './first-popup.js';
 import type { PromptEnhancementMpsContinuationPopupModelV1 } from './continuation-popup.js';
 import type { PromptEnhancementEditorFieldV1 } from './multiline-editor.js';
 import { isPromptEnhancementScrollMarkerLineV1 } from './cli-submit-popup.js';
+import { PROMPT_ENHANCEMENT_SEQUENCE_TASK_KINDS_V1 } from './sequence-payload.js';
 
 // ---------------------------------------------------------------------------
 // UI-6 — MPS first-popup host rendering (alignment plan §3.3).
@@ -20,6 +21,10 @@ import { isPromptEnhancementScrollMarkerLineV1 } from './cli-submit-popup.js';
 // ---------------------------------------------------------------------------
 
 export const PROMPT_ENHANCEMENT_MPS_CLI_FOOTER_V1 = 'Enter send · Esc actions' as const;
+// MPS-2/6.3 (owner: UI/UX presentation lane): on the CONTINUATION surface Escape CANCELS the
+// active sequence (owner ruling 2026-08-10), so the footer says so — distinct from the first popup, where
+// Escape only leaves editor focus / declines the offer (nothing activated → nothing to cancel).
+export const PROMPT_ENHANCEMENT_MPS_CLI_CONTINUATION_FOOTER_V1 = 'Enter send · Esc cancels sequence' as const;
 export const PROMPT_ENHANCEMENT_MPS_CLI_SEQUENCE_PLAN_LABEL_V1 = 'Sequence plan' as const;
 export const PROMPT_ENHANCEMENT_MPS_CLI_ADDITIONAL_DETAILS_LABEL_V1 = 'Additional details' as const;
 /** Editing keys shown under a focused editable field (owner request), matching the PE popup. */
@@ -71,10 +76,14 @@ const PROMPT_ENHANCEMENT_MPS_CLI_SGR_V1 = (() => {
     cyan: `${e}[36m`,
     gray: `${e}[90m`,
     green: `${e}[32m`,
+    // Normal yellow — provider-failure notice only (caution line in the header).
     yellow: `${e}[33m`,
-    // Shortcut/action hints — bright ("light") yellow, distinct + visible on every OS (owner
-    // request 2026-08-07). Distinct from the Cancel row's normal yellow ([33m]).
+    // Shortcut/action hints — bright ("light") yellow, distinct + visible on every OS (owner 2026-08-07).
     lightYellow: `${e}[93m`,
+    // Cancel row — an EXTRA-light / pale yellow (256-colour), a touch softer than the bright hint
+    // yellow (owner request 2026-08-08). 256-colour renders on all modern terminals; a terminal
+    // that ignores it simply falls back to the default fg (never broken).
+    paleYellow: `${e}[38;5;229m`,
     dim: `${e}[2m`,
     bold: `${e}[1m`,
     reset: `${e}[0m`,
@@ -124,7 +133,8 @@ export function renderPromptEnhancementMpsFirstPopupFrameV1(
   // Radio row identical to the PE popup (owner request: MPS mirrors the PE popup): a green ●
   // (focused) / gray ○ (unfocused) bullet and a bold (focused) / dim (unfocused) label. The cyan
   // left rail is applied to EVERY line as one continuous border in the post-pass below (owner
-  // request: full-height rail, not per-row segments). Cancel renders yellow (owner request).
+  // request: full-height rail, not per-row segments). Cancel renders EXTRA-light (pale) yellow — the same
+  // bright tier as the shortcut hints (owner request 2026-08-07).
   const radioRow = (rowIndex: number, label: string, options: { suffix?: string; tone?: 'default' | 'cancel' } = {}): string => {
     const focused = rowIndex === focusIndex;
     const glyph = focused ? '●' : '○';
@@ -132,7 +142,7 @@ export function renderPromptEnhancementMpsFirstPopupFrameV1(
     if (!c) return `${glyph} ${label}${suffix}`;
     const bullet = focused ? `${c.green}${glyph}${c.reset}` : `${c.gray}${glyph}${c.reset}`;
     const styled = options.tone === 'cancel'
-      ? (focused ? `${c.bold}${c.yellow}${label}${c.reset}` : `${c.yellow}${label}${c.reset}`)
+      ? (focused ? `${c.bold}${c.paleYellow}${label}${c.reset}` : `${c.paleYellow}${label}${c.reset}`)
       : (focused ? `${c.bold}${label}${c.reset}` : `${c.dim}${label}${c.reset}`);
     return `${bullet} ${styled}${suffix}`;
   };
@@ -196,8 +206,9 @@ export function renderPromptEnhancementMpsFirstPopupFrameV1(
   if (focusIndex === 1) lines.push(editKeysHint());
   lines.push('');
 
-  // Cancel — interactive row 2, last interactive action. Yellow (owner request): choosing it
-  // opens the PEF feedback popup and ends the flow, so it reads as a caution action.
+  // Cancel — interactive row 2, last interactive action. Light yellow (owner request
+  // 2026-08-07): choosing it opens the PEF feedback popup and ends the flow, so it reads as a
+  // caution action, in the same bright tier as the shortcut hints.
   const cancelLabel = publicText(model.actions.cancelRemainingSequence.label);
   const cancelUnavailable = model.actions.cancelRemainingSequence.state === 'disabled' ? '  (unavailable)' : '';
   lines.push(radioRow(2, cancelLabel, { suffix: cancelUnavailable, tone: 'cancel' }));
@@ -205,11 +216,17 @@ export function renderPromptEnhancementMpsFirstPopupFrameV1(
 
   // Sequence plan — dim gray, non-interactive, first popup only.
   const planLabel = PROMPT_ENHANCEMENT_MPS_CLI_SEQUENCE_PLAN_LABEL_V1;
-  const remaining = `Remaining: ${model.sequencePlan.remainingTaskCount}`;
+  const total = `Total: ${model.sequencePlan.remainingTaskCount}`;
   const types = `Types: ${model.sequencePlan.taskRoleLabels.map((label) => publicText(label)).join(', ')}`;
   lines.push(c ? `  ${c.dim}${planLabel}${c.reset}` : `  ${planLabel}`);
-  lines.push(c ? `  ${c.dim}${remaining}${c.reset}` : `  ${remaining}`);
+  lines.push(c ? `  ${c.dim}${total}${c.reset}` : `  ${total}`);
   lines.push(c ? `  ${c.dim}${types}${c.reset}` : `  ${types}`);
+  // Per-follow-up-task summary lines (Phase 3b) — the user's own redacted slices, numbered. Empty on
+  // the describe fallback, so nothing extra renders there.
+  model.sequencePlan.taskSummaryLines.forEach((line, index) => {
+    const numbered = `${index + 1}. ${publicText(line)}`;
+    lines.push(c ? `  ${c.dim}${numbered}${c.reset}` : `  ${numbered}`);
+  });
   lines.push('');
 
   lines.push(c ? `${c.dim}${PROMPT_ENHANCEMENT_MPS_CLI_FOOTER_V1}${c.reset}` : PROMPT_ENHANCEMENT_MPS_CLI_FOOTER_V1);
@@ -244,6 +261,23 @@ export interface PromptEnhancementMpsContinuationFrameStateV1 {
   focusIndex?: number;
   /** Apply the §3.4 ANSI tones; off (plain text) for tests and oracles. */
   colorize?: boolean;
+  /**
+   * Caret within the focused editable field (window-relative visual row/column). Same optional
+   * contract as the first-popup renderer — when supplied with `caretOut`, the renderer records the
+   * caret's 1-based SCREEN row/column so the raw-TTY shell can place the hardware cursor without
+   * re-deriving the layout. Absent by default, so every existing (non-interactive) caller is
+   * unaffected.
+   */
+  caret?: { field: PromptEnhancementEditorFieldV1; visualRow: number; visualColumn: number };
+  /** Mutable sink the renderer fills with the caret's 1-based screen position (see `caret`). */
+  caretOut?: { row: number; col: number };
+  /**
+   * MPS-1 (loading wheel): a spinner glyph shown IN the body while the next item's wording is not yet
+   * ready — the body renders "<glyph> preparing…" and the edit hint is hidden; the other rows stay put
+   * (skeleton). The shell cycles the glyph and drops it once wording lands. Absent = normal render.
+   * (The wait itself is P5; MPS-5 8.3 found it unreachable today, so this is a defensive presentation.)
+   */
+  loadingSpinnerGlyph?: string;
 }
 
 /**
@@ -263,7 +297,8 @@ export function renderPromptEnhancementMpsContinuationFrameV1(
   // Radio row identical to the PE popup (owner request: MPS mirrors the PE popup): a green ●
   // (focused) / gray ○ (unfocused) bullet and a bold (focused) / dim (unfocused) label. The cyan
   // left rail is applied to EVERY line as one continuous border in the post-pass (owner request:
-  // full-height rail). Cancel renders yellow (owner request) — same tones as the first popup.
+  // full-height rail). Cancel renders EXTRA-light (pale) yellow (owner request 2026-08-08) — same tones as
+  // the first popup.
   const radioRow = (rowIndex: number, label: string, options: { suffix?: string; tone?: 'default' | 'cancel' } = {}): string => {
     const focused = rowIndex === focusIndex;
     const glyph = focused ? '●' : '○';
@@ -271,11 +306,20 @@ export function renderPromptEnhancementMpsContinuationFrameV1(
     if (!c) return `${glyph} ${label}${suffix}`;
     const bullet = focused ? `${c.green}${glyph}${c.reset}` : `${c.gray}${glyph}${c.reset}`;
     const styled = options.tone === 'cancel'
-      ? (focused ? `${c.bold}${c.yellow}${label}${c.reset}` : `${c.yellow}${label}${c.reset}`)
+      ? (focused ? `${c.bold}${c.paleYellow}${label}${c.reset}` : `${c.paleYellow}${label}${c.reset}`)
       : (focused ? `${c.bold}${label}${c.reset}` : `${c.dim}${label}${c.reset}`);
     return `${bullet} ${styled}${suffix}`;
   };
   const lines: string[] = [];
+  // Record the caret's real screen position as the field content is built (see caretOut) — the
+  // same contract as the first-popup renderer. Content is indented 4 spaces; with the 2-char rail
+  // added in the post-pass the text lands at screen column 7.
+  const recordCaret = (field: PromptEnhancementEditorFieldV1): void => {
+    if (frameState.caret?.field === field && frameState.caretOut) {
+      frameState.caretOut.row = lines.length + 1 + Math.max(0, frameState.caret.visualRow);
+      frameState.caretOut.col = 7 + Math.max(0, frameState.caret.visualColumn);
+    }
+  };
 
   // Branded header identical to the PE popup (owner request): "◆ NEXPATH CLI ·
   // <surface>", cyan+bold, then a dim rule the same width and a blank line. Only
@@ -297,19 +341,55 @@ export function renderPromptEnhancementMpsContinuationFrameV1(
   const contentLine = (line: string): string =>
     c && isPromptEnhancementScrollMarkerLineV1(line) ? `    ${c.gray}${line}${c.reset}` : `    ${line}`;
 
+  // MPS-3 (Part B): sequence progress line near the top (owner decision: top placement). `done`/`total`
+  // come off the packaged continuation (done = currentItemIndex, total = itemCount - 1 deliverable items —
+  // item 0 was sent at intake); the copy is formatted
+  // here, never carried on the model. CONTINUATION-only surface (the first popup shows the sequence plan).
+  const progressLine = `Sequence ${model.progress.done} of ${model.progress.total}`;
+  lines.push(c ? `${c.dim}${progressLine}${c.reset}` : progressLine);
+  lines.push('');
+
   // Enhanced next sequence body — primary, interactive row 0. Same "whole prompt is included" on
   // the edit-keys hint as the first popup (owner request 2026-08-07).
   const heading = publicText(model.heading);
   lines.push(radioRow(0, heading));
-  const bodyRender = renderMpsBodyLinesV1(publicText(model.body.text), c);
+  recordCaret('enhanced_body');
+  // MPS-1 (loading wheel): while wording is not ready, the body is a spinner skeleton ("<glyph> preparing…")
+  // and the edit-keys hint is hidden; everything else renders as normal (owner: skeleton + spinner in body).
+  const bodyText = frameState.loadingSpinnerGlyph
+    ? `${frameState.loadingSpinnerGlyph} preparing…`
+    : publicText(model.body.text);
+  const bodyRender = renderMpsBodyLinesV1(bodyText, c);
   for (const bodyLine of bodyRender.lines) lines.push(bodyLine);
-  if (focusIndex === 0) lines.push(mpsEditKeysHintV1(c, bodyRender.hiddenBelow));
+  if (focusIndex === 0 && !frameState.loadingSpinnerGlyph) lines.push(mpsEditKeysHintV1(c, bodyRender.hiddenBelow));
   lines.push('');
+
+  // MPS-12 (Ruling C §22.2): a TASK item (`first_task`/`task`) shows the user's original slice verbatim;
+  // a CONFIRMATION item shows NO original region — no label, box, or placeholder. Driven by the item KIND
+  // (never inferred from empty text). Plain dim presentation, reused as-is (owner: no restyle). Skipped
+  // while the loading skeleton is up.
+  if (!frameState.loadingSpinnerGlyph
+    && (PROMPT_ENHANCEMENT_SEQUENCE_TASK_KINDS_V1 as readonly string[]).includes(model.itemKind)) {
+    // Label on its own line, then the original's windowed content indented and pushed PER LINE — the
+    // runner wraps it to the field width and caps its height. Pushing each line separately guarantees
+    // the continuous left rail reaches every line: a long original previously went in as ONE multi-line
+    // string, so only its first line got the rail and the frame overflowed the terminal. Scroll markers
+    // dim like the body; other lines stay dim (read-only cue).
+    lines.push(c ? `  ${c.dim}Your original:${c.reset}` : '  Your original:');
+    for (const originalLine of publicText(model.body.originalPromptText).split('\n')) {
+      if (!c) { lines.push(`    ${originalLine}`); continue; }
+      lines.push(isPromptEnhancementScrollMarkerLineV1(originalLine)
+        ? `    ${c.gray}${originalLine}${c.reset}`
+        : `    ${c.dim}${originalLine}${c.reset}`);
+    }
+    lines.push('');
+  }
 
   // Additional details — interactive row 1. Same PE-parity helpers as the first popup: apply hint
   // always visible, editing keys as the LAST line when focused; no "Add extra requirement" label.
   const detailsLabel = PROMPT_ENHANCEMENT_MPS_CLI_ADDITIONAL_DETAILS_LABEL_V1;
   lines.push(radioRow(1, detailsLabel));
+  recordCaret('additional_details');
   for (const detailLine of publicText(model.additionalDetails.text).split('\n')) lines.push(contentLine(detailLine));
   lines.push(c ? `      ${c.lightYellow}${PROMPT_ENHANCEMENT_MPS_CLI_DETAILS_HINT_V1}${c.reset}` : `      ${PROMPT_ENHANCEMENT_MPS_CLI_DETAILS_HINT_V1}`);
   if (focusIndex === 1) lines.push(editKeysHint());
@@ -323,14 +403,15 @@ export function renderPromptEnhancementMpsContinuationFrameV1(
   }
   lines.push('');
 
-  // Cancel — interactive row 3. Yellow (owner request) — same caution tone as the first popup.
+  // Cancel — interactive row 3. Light yellow (owner request 2026-08-07) — same caution tone as
+  // the first popup.
   const cancelLabel = publicText(model.actions.cancelRemainingSequence.label);
   const cancelUnavailable = model.actions.cancelRemainingSequence.state === 'disabled' ? '  (unavailable)' : '';
   lines.push(radioRow(3, cancelLabel, { suffix: cancelUnavailable, tone: 'cancel' }));
   lines.push('');
 
-  // No Sequence plan / Remaining / Types on the continuation surface (§3.4).
-  lines.push(c ? `${c.dim}${PROMPT_ENHANCEMENT_MPS_CLI_FOOTER_V1}${c.reset}` : PROMPT_ENHANCEMENT_MPS_CLI_FOOTER_V1);
+  // No Sequence plan / Total / Types on the continuation surface (§3.4).
+  lines.push(c ? `${c.dim}${PROMPT_ENHANCEMENT_MPS_CLI_CONTINUATION_FOOTER_V1}${c.reset}` : PROMPT_ENHANCEMENT_MPS_CLI_CONTINUATION_FOOTER_V1);
 
   return applyContinuousRail(lines, c);
 }

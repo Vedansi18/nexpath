@@ -23,9 +23,95 @@ import {
   isEnvProbeEnabled,
   type EnvTrajectoryState,
 } from '../store/env-facts.js';
-import { appendParamEvent } from '../telemetry/param-events.js';
+import { appendParamEvent, readParamEvents, type ParamEvent } from '../telemetry/param-events.js';
 
 export type EnvChangeDirection = 'acquired' | 'lost' | 'changed';
+
+/**
+ * How far back a movement is still worth STATING in the enhanced prompt. Score credit has its
+ * own (aggregation) window; this one is separate on purpose, because the two answer different
+ * questions: "should this still count?" and "is this still news?". A change from three months
+ * ago is neither news nor wrong — it is simply the project as it stands, and the probe already
+ * states that.
+ */
+export const ENV_CHANGE_GROUNDING_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
+
+/** At most this many movements reach the grounding section — a section of history is not grounding. */
+export const ENV_CHANGE_GROUNDING_MAX = 3;
+
+const CHANGE_EVENT_RE = /^env_fact_changed:(.+):(acquired|lost|changed)$/;
+
+/** A confirmed movement, recent enough to state rather than only credit. */
+export interface RecentEnvChangeV1 {
+  key: string;
+  direction: EnvChangeDirection;
+  /** The movement as a verb clause: "was acquired", "was removed", "changed to 22". */
+  phrase: string;
+  ts: number;
+}
+
+/**
+ * The movements worth stating as project grounding, newest first.
+ *
+ * ⚠️ Reads BOTH of this module's outputs, and needs both: the emitted events say WHEN a fact
+ * moved and in which direction, and the stored baseline says what the value settled on — the
+ * event carries only the key and the direction, so "changed" without the baseline could say
+ * that something moved but never to what.
+ *
+ * Consent-gated like every other read of probe-derived state.
+ */
+export function recentEnvChangesV1(
+  store: Store,
+  projectRoot: string,
+  now: number = Date.now(),
+  /**
+   * ⚠️ The caller's ALREADY-READ event window. The PE boundary reads this file twice before it
+   * reaches here (`loadRightGoodProfile`, then the work-style profile), and PE runs on EVERY
+   * prompt — so a third full read and JSON.parse of an append-only log, for a lane that produces
+   * at most three lines, is a cost with nothing to show for it. Omitted only by standalone
+   * callers and tests, which have no window to hand over.
+   */
+  suppliedEvents?: readonly ParamEvent[],
+): readonly RecentEnvChangeV1[] {
+  if (!isEnvProbeEnabled(store.db)) return [];
+  let events: readonly ParamEvent[];
+  try {
+    events = suppliedEvents ?? readParamEvents(store, projectRoot);
+  } catch {
+    return []; // the event lane is disk-backed and best-effort — no movements is a valid answer
+  }
+  const baseline = getEnvTrajectory(store, projectRoot)?.baseline ?? {};
+
+  // One movement per key: a fact that moved twice states where it landed, not its history.
+  const newest = new Map<string, { direction: EnvChangeDirection; ts: number }>();
+  for (const event of events) {
+    const match = CHANGE_EVENT_RE.exec(event.signalKey);
+    if (!match) continue;
+    if (now - event.ts > ENV_CHANGE_GROUNDING_WINDOW_MS) continue;
+    const prior = newest.get(match[1]!);
+    if (!prior || event.ts > prior.ts) {
+      newest.set(match[1]!, { direction: match[2] as EnvChangeDirection, ts: event.ts });
+    }
+  }
+
+  return [...newest.entries()]
+    .map(([key, { direction, ts }]) => ({ key, direction, ts, phrase: movementPhrase(direction, baseline[key]?.value) }))
+    .sort((a, b) => b.ts - a.ts)
+    .slice(0, ENV_CHANGE_GROUNDING_MAX);
+}
+
+/**
+ * The verb clause for a movement. A boolean fact reads as a capability arriving or going; a
+ * valued fact names what it settled on, and falls back to the bare verb when the baseline has
+ * no value to name — never to a value it might not have.
+ */
+function movementPhrase(direction: EnvChangeDirection, settledValue: FactValue | undefined): string {
+  if (direction === 'acquired') return 'was acquired';
+  if (direction === 'lost') return 'was removed';
+  return settledValue === undefined || settledValue === null || typeof settledValue === 'boolean'
+    ? 'changed'
+    : `changed to ${String(settledValue)}`;
+}
 
 export interface EnvFactChange {
   key: string;

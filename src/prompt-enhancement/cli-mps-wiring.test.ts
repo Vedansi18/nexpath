@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   PROMPT_ENHANCEMENT_CONTRACT_VERSION,
   type PromptEnhancementPrepareRequestV1,
@@ -9,7 +9,7 @@ import { preparePromptEnhancement } from './facade.js';
 import { getPromptStartStopSourceSnapshot } from './source-reality.js';
 import { evaluatePromptEnhancementMpsIntakeDecisionV1 } from './intake-decision.js';
 import { buildPromptEnhancementCliMpsIntakeEvidenceV1 } from './cli-mps-intake-evidence.js';
-import { runPromptEnhancementCliMpsFirstPopupV1, buildPromptEnhancementMpsCancelFeedbackEventV1 } from './cli-mps-run.js';
+import { runPromptEnhancementCliMpsFirstPopupV1, buildPromptEnhancementMpsCancelFeedbackEventV1, promptEnhancementMpsActionSignalKindV1 } from './cli-mps-run.js';
 import { isPromptEnhancementSequenceShapedTextV1 } from './routing-taxonomy.js';
 
 const MULTI_INTENT = 'Fix the failing payment test and add a rate limiter to the login endpoint.';
@@ -70,6 +70,23 @@ describe('MPS CLI wiring (owner ruling 2026-08-06: CLI complete, extension pendi
     expect(handoff!.applicability.receiverCanActivateRuntime).toBe(false);
   });
 
+  it('Sequence-plan summary carries REAL display data (fix 2026-08-07): remaining count + fixed-vocab role labels', async () => {
+    const result = await preparePromptEnhancement(request(MULTI_INTENT));
+    const summary = result.uiView.handoffAndSequenceSummary!.compactFirstPopupSequenceSummary!;
+    // "Fix the failing payment test AND add a rate limiter…" = 2 points -> 1 remaining after the first.
+    expect(summary.remainingTaskCount).toBe(1);
+    expect(summary.taskRoleLabels).toEqual(['fix', 'build']);
+    // Safety flags stay locked — count + fixed vocabulary only, never prompt text.
+    expect(summary.containsFuturePromptText).toBe(false);
+    expect(summary.rawPromptTextExcluded).toBe(true);
+    expect(summary.bodyBoundMetadataOnly).toBe(true);
+    // …and the popup FRAME shows it (end-to-end).
+    const ui = scripted([KEY.escape]);
+    await runPromptEnhancementCliMpsFirstPopupV1({ result, interaction: ui });
+    expect(ui.frames[0]).toContain('Total: 1');
+    expect(ui.frames[0]).toContain('Types: fix, build');
+  });
+
   it('a single-intent prompt emits NO sequence summary (no MPS popup)', async () => {
     const result = await preparePromptEnhancement(request(SINGLE_INTENT));
     expect(result.uiView.handoffAndSequenceSummary).toBeUndefined();
@@ -109,7 +126,7 @@ describe('MPS CLI wiring (owner ruling 2026-08-06: CLI complete, extension pendi
     expect(gate.renderPermission).toBe('mps_render_permitted');
   });
 
-  it('the DEFAULT (extension/global) surface stays fail-closed on the missing host evidence (Vedansi pending)', async () => {
+  it('the DEFAULT (extension/global) surface stays fail-closed on the missing host evidence (extension host pending)', async () => {
     const result = await preparePromptEnhancement(request(MULTI_INTENT));
     const evidence = buildPromptEnhancementCliMpsIntakeEvidenceV1(result);
     const gate = evaluatePromptEnhancementMpsIntakeDecisionV1({ evidence: [...evidence!] });
@@ -266,5 +283,66 @@ describe('MPS CLI wiring (owner ruling 2026-08-06: CLI complete, extension pendi
     const result = await preparePromptEnhancement(request(SINGLE_INTENT));
     const outcome = await runPromptEnhancementCliMpsFirstPopupV1({ result, interaction: scripted([]) });
     expect(outcome.state).toBe('not_shown');
+  });
+
+  it('NF Plan B (B-3): maps MPS outcome states to content-free action kinds; non-actions → undefined', () => {
+    expect(promptEnhancementMpsActionSignalKindV1('send')).toBe('mps_send');
+    expect(promptEnhancementMpsActionSignalKindV1('cancelled')).toBe('mps_cancel');
+    expect(promptEnhancementMpsActionSignalKindV1('declined')).toBe('mps_decline');
+    expect(promptEnhancementMpsActionSignalKindV1('interruption')).toBe('mps_interruption');
+    expect(promptEnhancementMpsActionSignalKindV1('not_shown')).toBeUndefined();
+  });
+
+  it('NF apply-details capture: a real Apply fires mps_apply_details once (content-free kind + timestamp, no text)', async () => {
+    const result = await preparePromptEnhancement(request(MULTI_INTENT));
+    const sink = vi.fn();
+    // down -> details row; type; Enter -> APPLY (fires the sink); Enter -> send.
+    await runPromptEnhancementCliMpsFirstPopupV1({
+      result,
+      interaction: scripted([KEY.down, 'p', 'g', KEY.enter, KEY.enter]),
+      actionSignalSink: sink,
+    });
+    expect(sink).toHaveBeenCalledTimes(1);
+    const [kind, occurredAt] = sink.mock.calls[0]!;
+    expect(kind).toBe('mps_apply_details');
+    expect(typeof occurredAt).toBe('number');
+    // Content-free: the sink carries only the kind + timestamp — never the details/body text.
+    expect(sink.mock.calls[0]).toHaveLength(2);
+  });
+
+  it('NF apply-details capture: two Applies fire twice', async () => {
+    const result = await preparePromptEnhancement(request(MULTI_INTENT));
+    const sink = vi.fn();
+    await runPromptEnhancementCliMpsFirstPopupV1({
+      result,
+      interaction: scripted([KEY.down, 'a', KEY.enter, KEY.down, 'b', KEY.enter, KEY.enter]),
+      actionSignalSink: sink,
+    });
+    expect(sink).toHaveBeenCalledTimes(2);
+    expect(sink.mock.calls.every(([k]) => k === 'mps_apply_details')).toBe(true);
+  });
+
+  it('NF apply-details capture: a BLANK Apply (Enter on empty details) fires nothing', async () => {
+    const result = await preparePromptEnhancement(request(MULTI_INTENT));
+    const sink = vi.fn();
+    // down -> details row; Enter with no text -> blank apply (no-op); Esc -> declined.
+    await runPromptEnhancementCliMpsFirstPopupV1({
+      result,
+      interaction: scripted([KEY.down, KEY.enter, KEY.escape]),
+      actionSignalSink: sink,
+    });
+    expect(sink).not.toHaveBeenCalled();
+  });
+
+  it('NF apply-details capture: a send with no Apply fires nothing via the sink (the outcome is captured by the caller)', async () => {
+    const result = await preparePromptEnhancement(request(MULTI_INTENT));
+    const sink = vi.fn();
+    const outcome = await runPromptEnhancementCliMpsFirstPopupV1({
+      result,
+      interaction: scripted([KEY.enter]),
+      actionSignalSink: sink,
+    });
+    expect(outcome.state).toBe('send');
+    expect(sink).not.toHaveBeenCalled();
   });
 });

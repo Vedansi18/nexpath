@@ -10,6 +10,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { openStore, closeStore } from '../../store/db.js';
+import { CLAUDE_HOOK_TIMEOUT_SECONDS } from '../../agents/adapters/claude-code.js';
 import { setConfig, isConfigSet, getConfig } from '../../store/config.js';
 
 import {
@@ -745,7 +746,6 @@ describe('installAction', () => {
         confirmFn: async () => false,
         promptFn: {
           apiKeyPrompt:     async () => ({ kind: 'skip' }),
-          telemetryConsent: async () => ({ kind: 'disable' }),
         },
         skipClipboardCheck: true,
       });
@@ -1181,7 +1181,6 @@ describe('installAction', () => {
         paths, isWin: false, execFn: () => {},
         promptFn: {
           apiKeyPrompt:     apiKeyPromptSpy,
-          telemetryConsent: async () => ({ kind: 'disable' }),
         },
         skipClipboardCheck: true,
       });
@@ -1215,7 +1214,6 @@ describe('installAction', () => {
         paths, isWin: false, execFn: () => {},
         promptFn: {
           apiKeyPrompt:     async () => ({ kind: 'skip' }),
-          telemetryConsent: async () => ({ kind: 'disable' }),
         },
         skipClipboardCheck: true,
       });
@@ -1230,15 +1228,83 @@ describe('installAction', () => {
 // ── uninstallAction ───────────────────────────────────────────────────────────
 
 describe('uninstallAction', () => {
-  it('always prints prompt history retention message', async () => {
+  it('retains the store DB + prints the retention message when data deletion is declined', async () => {
     const { dir, cleanup } = tmpDir();
     const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
     try {
       const paths = resolveAgentPaths(dir, dir, dir);
-      await uninstallAction({ paths, execFn: () => {}, apiKeyConfirmFn: async () => false });
+      const dbPath = join(dir, 'prompt-store.db');
+      writeFileSync(dbPath, 'x'); // simulate an existing local store
+      await uninstallAction({ paths, execFn: () => {}, apiKeyConfirmFn: async () => false, storeDeleteConfirmFn: async () => false, dbPath });
       const output = spy.mock.calls.map((c) => c[0] as string).join('\n');
       expect(output).toContain('Prompt history retained');
       expect(output).toContain('nexpath store delete');
+      expect(existsSync(dbPath)).toBe(true); // declined → retained
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('NF: deletes the local store DB on uninstall when confirmed (default yes)', async () => {
+    const { dir, cleanup } = tmpDir();
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const paths = resolveAgentPaths(dir, dir, dir);
+      const dbPath = join(dir, 'prompt-store.db');
+      writeFileSync(dbPath, 'x'); // simulate an existing local store
+      await uninstallAction({ paths, execFn: () => {}, apiKeyConfirmFn: async () => false, storeDeleteConfirmFn: async () => true, dbPath });
+      expect(existsSync(dbPath)).toBe(false); // confirmed → deleted
+      const output = spy.mock.calls.map((c) => c[0] as string).join('\n');
+      expect(output).toContain('Local data deleted');
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('NF (owner 2026-08-10): deletes the local store AUTOMATICALLY with no data-delete prompt (default yes)', async () => {
+    const { dir, cleanup } = tmpDir();
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const paths = resolveAgentPaths(dir, dir, dir);
+      const dbPath = join(dir, 'prompt-store.db');
+      writeFileSync(dbPath, 'x');
+      // No storeDeleteConfirmFn injected → the default (auto-yes, NO prompt) is used.
+      await uninstallAction({ paths, execFn: () => {}, apiKeyConfirmFn: async () => false, dbPath });
+      expect(existsSync(dbPath)).toBe(false); // deleted automatically, no confirmation
+      const output = spy.mock.calls.map((c) => c[0] as string).join('\n');
+      expect(output).toContain('✓ Local data deleted.');       // short message, no detail list
+      expect(output).not.toContain('Prompt history retained');  // never the retain path in real use
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('NF: --yes deletes the local store DB without prompting', async () => {
+    const { dir, cleanup } = tmpDir();
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const paths = resolveAgentPaths(dir, dir, dir);
+      const dbPath = join(dir, 'prompt-store.db');
+      writeFileSync(dbPath, 'x');
+      const neverCalled = vi.fn(async () => false);
+      await uninstallAction({ paths, execFn: () => {}, yes: true, apiKeyConfirmFn: async () => false, storeDeleteConfirmFn: neverCalled, dbPath });
+      expect(existsSync(dbPath)).toBe(false); // --yes → deleted
+      expect(neverCalled).not.toHaveBeenCalled(); // --yes short-circuits the prompt
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('NF: a missing store DB is a silent no-op on delete', async () => {
+    const { dir, cleanup } = tmpDir();
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const paths = resolveAgentPaths(dir, dir, dir);
+      const dbPath = join(dir, 'does-not-exist.db');
+      await uninstallAction({ paths, execFn: () => {}, apiKeyConfirmFn: async () => false, storeDeleteConfirmFn: async () => true, dbPath });
+      expect(existsSync(dbPath)).toBe(false);
+      const output = spy.mock.calls.map((c) => c[0] as string).join('\n');
+      expect(output).toContain('Local data deleted'); // no crash; reports deleted
     } finally {
       cleanup();
     }
@@ -1251,7 +1317,7 @@ describe('uninstallAction', () => {
       mkdirSync(join(dir, '.cursor'), { recursive: true });
       const paths = resolveAgentPaths(dir, dir, dir);
       writeMcpEntry(paths.cursor, buildStandardEntry(false));
-      await uninstallAction({ paths, execFn: () => {}, apiKeyConfirmFn: async () => false });
+      await uninstallAction({ paths, execFn: () => {}, apiKeyConfirmFn: async () => false, storeDeleteConfirmFn: async () => false });
       const servers = readJson(paths.cursor).mcpServers as Record<string, unknown>;
       expect(servers[MCP_SERVER_NAME]).toBeUndefined();
     } finally {
@@ -1266,7 +1332,7 @@ describe('uninstallAction', () => {
       mkdirSync(join(dir, '.config', 'opencode'), { recursive: true });
       const paths = resolveAgentPaths(dir, dir, dir);
       writeOpenCodeEntry(paths.openCodeGlobal, buildOpenCodeEntry(false));
-      await uninstallAction({ paths, execFn: () => {}, apiKeyConfirmFn: async () => false });
+      await uninstallAction({ paths, execFn: () => {}, apiKeyConfirmFn: async () => false, storeDeleteConfirmFn: async () => false });
       const mcp = readJson(paths.openCodeGlobal).mcp as Record<string, unknown>;
       expect(mcp[MCP_SERVER_NAME]).toBeUndefined();
     } finally {
@@ -1281,7 +1347,7 @@ describe('uninstallAction', () => {
       mkdirSync(join(dir, '.cursor'), { recursive: true });
       const paths = resolveAgentPaths(dir, dir, dir);
       // Don't write cursor config — so cursor has no nexpath entry
-      await uninstallAction({ paths, execFn: () => {}, apiKeyConfirmFn: async () => false });
+      await uninstallAction({ paths, execFn: () => {}, apiKeyConfirmFn: async () => false, storeDeleteConfirmFn: async () => false });
       const output = spy.mock.calls.map((c) => c[0] as string).join('\n');
       expect(output).toContain('not registered');
     } finally {
@@ -1299,6 +1365,7 @@ describe('uninstallAction', () => {
         paths,
         execFn: () => { throw new Error('claude not found'); },
         apiKeyConfirmFn: async () => false,
+        storeDeleteConfirmFn: async () => false,
       });
       const servers = readJson(paths.claudeJson).mcpServers as Record<string, unknown>;
       expect(servers[MCP_SERVER_NAME]).toBeUndefined();
@@ -1314,7 +1381,7 @@ describe('uninstallAction', () => {
       const paths = resolveAgentPaths(dir, dir, dir);
       // Pre-write the hook so uninstall has something to remove
       writeHookEntry(paths.claudeSettings, dir, 'linux');
-      await uninstallAction({ paths, execFn: () => {}, apiKeyConfirmFn: async () => false });
+      await uninstallAction({ paths, execFn: () => {}, apiKeyConfirmFn: async () => false, storeDeleteConfirmFn: async () => false });
       // File should no longer contain the nexpath hook group
       const data  = readJson(paths.claudeSettings) as Record<string, unknown>;
       const hooks = data.hooks as Record<string, unknown>;
@@ -1333,7 +1400,7 @@ describe('uninstallAction', () => {
     try {
       const paths = resolveAgentPaths(dir, dir, dir);
       // settings.json never written — hook was never registered
-      await uninstallAction({ paths, execFn: () => {}, apiKeyConfirmFn: async () => false });
+      await uninstallAction({ paths, execFn: () => {}, apiKeyConfirmFn: async () => false, storeDeleteConfirmFn: async () => false });
       const output = spy.mock.calls.map((c) => c[0] as string).join('\n');
       expect(output).toContain('hook not registered');
     } finally { cleanup(); }
@@ -1348,7 +1415,7 @@ describe('uninstallAction', () => {
       mkdirSync(join(dir, '.config', 'Cursor'), { recursive: true });
       vi.stubEnv('HOME', dir);
       const paths = resolveAgentPaths(dir, dir, dir);
-      await uninstallAction({ paths, execFn: () => {}, apiKeyConfirmFn: async () => false, dbPath: ':memory:' });
+      await uninstallAction({ paths, execFn: () => {}, apiKeyConfirmFn: async () => false, storeDeleteConfirmFn: async () => false, dbPath: ':memory:' });
       const output = spy.mock.calls.map((c) => c[0] as string).join('\n');
       expect(output).toContain('Cursor');
       expect(output).toContain('cursor --uninstall-extension');
@@ -1365,7 +1432,7 @@ describe('uninstallAction', () => {
       mkdirSync(join(dir, '.config', 'Windsurf'), { recursive: true });
       vi.stubEnv('HOME', dir);
       const paths = resolveAgentPaths(dir, dir, dir);
-      await uninstallAction({ paths, execFn: () => {}, apiKeyConfirmFn: async () => false, dbPath: ':memory:' });
+      await uninstallAction({ paths, execFn: () => {}, apiKeyConfirmFn: async () => false, storeDeleteConfirmFn: async () => false, dbPath: ':memory:' });
       const output = spy.mock.calls.map((c) => c[0] as string).join('\n');
       expect(output).toContain('Windsurf');
       expect(output).toContain('windsurf --uninstall-extension');
@@ -1387,7 +1454,7 @@ describe('uninstallAction', () => {
       mkdirSync(join(dir, '.config', 'Windsurf'), { recursive: true });
       vi.stubEnv('HOME', dir);
       const paths = resolveAgentPaths(dir, dir, dir);
-      await uninstallAction({ paths, execFn: () => {}, apiKeyConfirmFn: async () => false, dbPath: ':memory:' });
+      await uninstallAction({ paths, execFn: () => {}, apiKeyConfirmFn: async () => false, storeDeleteConfirmFn: async () => false, dbPath: ':memory:' });
       const output = spy.mock.calls.map((c) => c[0] as string).join('\n');
       expect(uninstallSpy).toHaveBeenCalledOnce();
       expect(output).toMatch(/failed:.*synthetic uninstall failure/);
@@ -1532,12 +1599,14 @@ describe('buildHookEntry', () => {
     expect(hooks[0].type).toBe('command');
   });
 
-  it('sets UserPromptSubmit to 60s and leaves the PE-hosting Stop hook without an explicit timeout', () => {
+  it('sets an explicit UserPromptSubmit timeout and leaves the PE-hosting Stop hook without one', () => {
     const entry  = buildHookEntry('/home/user', 'linux');
     const groups = entry.UserPromptSubmit as Array<Record<string, unknown>>;
     const hooks  = groups[0].hooks as Array<Record<string, unknown>>;
-    // UserPromptSubmit prepares + persists the PE (may call the LLM) → explicit 60s headroom.
-    expect(hooks[0].timeout).toBe(60);
+    // UserPromptSubmit prepares + persists the PE (may call the LLM more than once) → explicit
+    // headroom. Asserted against the constant, never a literal: a copy here would silently drift
+    // from the value actually written into settings.json.
+    expect(hooks[0].timeout).toBe(CLAUDE_HOOK_TIMEOUT_SECONDS);
     // Owner decision A (2026-08-04): the Stop hook (PE popup) has NO explicit timeout — it
     // inherits Claude Code's default Stop budget, avoiding an arbitrary "never times out" number.
     const stopGroups = entry.Stop as Array<Record<string, unknown>>;
@@ -2087,7 +2156,7 @@ describe('installAction — frequency and role prompts', () => {
     }
   });
 
-  it('interactive path passes the current frequency to the prompt and writes the selection', async () => {
+  it('hides ONLY the frequency picker (seeds Medium) — the role picker still shows (owner 2026-08-10)', async () => {
     const { dir, cleanup: cleanupDir } = tmpDir();
     markClaudeInstalled(dir);
     const { path: dbPath, cleanup: cleanupDb } = tempDbFile();
@@ -2106,7 +2175,6 @@ describe('installAction — frequency and role prompts', () => {
           confirmFn: async () => true,
           promptFn: {
             apiKeyPrompt:     async () => ({ kind: 'skip' }),
-            telemetryConsent: async () => ({ kind: 'disable' }),
           },
           freqPromptFn,
           rolePromptFn,
@@ -2115,9 +2183,11 @@ describe('installAction — frequency and role prompts', () => {
         },
       );
 
-      expect(freqPromptFn).toHaveBeenCalledWith('every_event');
+      expect(freqPromptFn).not.toHaveBeenCalled();          // frequency picker hidden
+      expect(rolePromptFn).toHaveBeenCalledWith('founder');  // role picker STILL shown (default founder)
       const store = await openStore(dbPath);
-      expect(getConfig(store.db, 'advisory_frequency')).toBe('optimum');
+      expect(getConfig(store.db, 'advisory_frequency')).toBe('every_event'); // Medium default seeded
+      expect(getConfig(store.db, 'role')).toBe('founder');                    // written by the role picker
       closeStore(store);
     } finally {
       cleanupDir();
@@ -2148,7 +2218,6 @@ describe('installAction — frequency and role prompts', () => {
           confirmFn: async () => true,
           promptFn: {
             apiKeyPrompt:     async () => ({ kind: 'skip' }),
-            telemetryConsent: async () => ({ kind: 'disable' }),
           },
           freqPromptFn,
           rolePromptFn,
@@ -2191,7 +2260,6 @@ describe('installAction — frequency and role prompts', () => {
           confirmFn: async () => true,
           promptFn: {
             apiKeyPrompt:     async () => ({ kind: 'skip' }),
-            telemetryConsent: async () => ({ kind: 'disable' }),
           },
           freqPromptFn,
           rolePromptFn,
@@ -2232,7 +2300,6 @@ describe('installAction — frequency and role prompts', () => {
           confirmFn: async () => true,
           promptFn: {
             apiKeyPrompt:     async () => ({ kind: 'skip' }),
-            telemetryConsent: async () => ({ kind: 'disable' }),
           },
           freqPromptFn,
           rolePromptFn,
@@ -2273,7 +2340,6 @@ describe('installAction — frequency and role prompts', () => {
           confirmFn: async () => true,
           promptFn: {
             apiKeyPrompt:     async () => ({ kind: 'skip' }),
-            telemetryConsent: async () => ({ kind: 'disable' }),
           },
           freqPromptFn,
           rolePromptFn,

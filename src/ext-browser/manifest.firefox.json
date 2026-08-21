@@ -1,0 +1,73 @@
+{
+  "manifest_version": 3,
+  "name": "Nexpath",
+  "version": "0.1.5",
+  "description": "AI coding assistant for Replit, Lovable, and Bolt — a behaviour-guidance layer for vibe coders.",
+  "permissions": [
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://*.replit.com/*",
+    "https://bolt.new/*",
+    "https://*.stackblitz.com/*",
+    "https://lovable.dev/*"
+  ],
+  "background": {
+    "scripts": ["service-worker.js"],
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.replit.com/*",
+        "https://bolt.new/*",
+        "https://*.stackblitz.com/*",
+        "https://lovable.dev/*"
+      ],
+      "js": ["content/main-world-injector.js", "content/inject.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://*.replit.com/*"],
+      "js": ["content/agents/replit.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://bolt.new/*", "https://*.stackblitz.com/*"],
+      "js": ["content/agents/bolt.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://lovable.dev/*"],
+      "js": ["content/agents/lovable.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["inject/main-world.js"],
+      "matches": [
+        "https://*.replit.com/*",
+        "https://bolt.new/*",
+        "https://*.stackblitz.com/*",
+        "https://lovable.dev/*"
+      ]
+    }
+  ],
+  "options_page": "options/options.html",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "{80f4c1c7-1fb2-41d9-a4a1-7c2f4981d286}",
+      "strict_min_version": "112.0",
+      "data_collection_permissions": {
+        "required": ["authenticationInfo", "websiteContent"]
+      }
+    }
+  },
+  "icons": {
+    "16":  "icons/icon16.png",
+    "48":  "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

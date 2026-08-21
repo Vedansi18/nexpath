@@ -1,4 +1,5 @@
 import type { Stage } from '../classifier/types.js';
+import type { PromptEnhancementSourceEligibilityStateV1 } from './templates/section-plan.js';
 import type {
   ContentTemplateSourceSnapshot,
   HistoricalBootstrapSourceSnapshot,
@@ -261,6 +262,24 @@ export interface PromptEnhancementTriggerProvenanceV1 {
   absenceGateReason?: string;
   classifierState: 'fire_recommended' | 'no_fire' | 'degraded_no_fire' | 'not_applicable';
   degradedNoActionState: 'none' | 'degraded_no_fire' | 'no_action_not_applicable' | 'blocked_by_source_gate';
+  /**
+   * The stage classifier's intent PROPOSAL ('' when unsupported by the evidence
+   * ladder or on the degraded path). Typed as string here (the intent union lives
+   * in the routing module, which imports this file); the parser validated it
+   * against the full menu and the router re-guards before preferring it.
+   */
+  classifierPrimaryIntent?: string;
+  classifierIntentConfidence?: number;
+  /**
+   * The classifier's capability OBSERVATION from the same call: candidate
+   * capability ids, and the debug-evidence forms present in the prompt. String
+   * arrays here (the typed unions live in the routing module); the facade
+   * re-guards every entry before the registry consumes them. Observations
+   * only — the registry decides all attachment.
+   */
+  classifierCapabilityCandidates?: readonly string[];
+  classifierProjectFactCandidates?: readonly string[];
+  classifierDebugEvidencePresent?: readonly string[];
   promptStartBoundary: PromptStartStopSourceSnapshot['hookBoundary'];
   deliveryBoundary: PromptStartStopSourceSnapshot['deliveryBoundary'];
   promptStartCanReplaceSameTurn: PromptStartStopSourceSnapshot['runAutoCanHoldOrReplaceSubmittedPrompt'];
@@ -272,6 +291,13 @@ export interface PromptEnhancementTriggerProvenanceV1 {
 export interface PromptEnhancementSourceInputSnapshotV1 {
   sourceAOriginalPromptRef: PromptEnhancementSourceRefV1;
   sourceRefs: readonly PromptEnhancementSourceRefV1[];
+  /**
+   * F4 (L4971): the eligibility the TRIGGER signal carries, decided by the pipeline upstream
+   * and carried through — PE reads it, never recomputes it (prohibition 19). Optional so an
+   * older caller keeps working; the mix seam treats absence as NOT independently eligible,
+   * which is the fail-closed direction.
+   */
+  triggerSignalEligibilityState?: PromptEnhancementSourceEligibilityStateV1;
   normalizedStageAbsenceSignalRefs: readonly string[];
   contentTemplateRecordFactRefs: readonly string[];
   popupQuestionSourceRefs: readonly string[];
@@ -279,6 +305,32 @@ export interface PromptEnhancementSourceInputSnapshotV1 {
   profileRoleModeRefs: readonly string[];
   rightGoodWorkStyleEnvRuntimeRefs: readonly string[];
   missingMemoryCandidateRefs: readonly string[];
+  /**
+   * Typed corroboration tier / polarity per crossing env or RIGHT&GOOD ref — carried
+   * beside the ref strings, never inside them. The registry computes claim wording
+   * FROM these; absent maps read as uncorroborated/unknown (the weakest claim).
+   */
+  groundingTierByRef?: Readonly<Record<string, 'promoted_practice_P' | 'capability' | 'uncorroborated'>>;
+  groundingPolarityByRef?: Readonly<Record<string, 'present' | 'false_capability' | 'unknown'>>;
+  /**
+   * The caller-resolved CONTENT per crossing ref — a generic key/value pair plus
+   * where the resolution happened. Values come from the store-backed reads the
+   * boundary already performs; prompt-derived values arrive only through
+   * call-visibility-visible runtime extraction, never an eager boundary call.
+   */
+  groundingEvidenceByRef?: Readonly<Record<string, {
+    readonly key: string;
+    readonly value: string;
+    readonly runtimePath: 'local_store' | 'local_read_model' | 'local_probe';
+    readonly anchorScope:
+      | 'machine_environment'
+      | 'project_root'
+      | 'session_behavior'
+      | 'longitudinal_user_behavior'
+      | 'current_prompt_scope'
+      | 'content_template_scope'
+      | 'unknown_anchor';
+  }>>;
   sourceLabels: readonly {
     sourceRefId: string;
     label:
@@ -383,6 +435,14 @@ export interface PromptEnhancementTemplateRegistryRefV1 {
 
 export interface PromptEnhancementRouteDecisionV1 {
   routeDecisionId: string;
+  /**
+   * The debug-evidence forms the classifier OBSERVED in the prompt, carried so
+   * the reproduction section can name what the developer actually supplied
+   * instead of asking them to supply it again. An observation only — the
+   * registry still decides every attachment. Empty on keyless sessions, where
+   * nothing is known to be supplied.
+   */
+  debugEvidenceObserved: readonly string[];
   promptReviewOrigin:
     | 'user_authored_current_prompt'
     | 'old_ds_advisory_injected'
@@ -509,6 +569,14 @@ export interface PromptEnhancementSectionPlanItemV1 {
   sourceIds: readonly string[];
   sourceEvidenceStatus: PromptEnhancementEvidenceStatus;
   slotEvidenceStatus: PromptEnhancementEvidenceStatus;
+  /**
+   * The typed slot obligations the attached capabilities place on THIS
+   * section — a slot is a typed content obligation plus its metadata and
+   * state, not a heading. Populated from the capability slot-effect map at
+   * planning; empty when no attached capability targets this section kind.
+   * String-typed here (the obligation union lives in the planner layer).
+   */
+  slotObligations: readonly string[];
   baselineSourceSignalSlot: string | 'not_applicable' | 'unknown';
   requirementSourceStatus: PromptEnhancementEvidenceStatus;
   isRequired: boolean;
@@ -553,6 +621,20 @@ export interface PromptEnhancementComposerBoundaryV1 {
   sourceAttribution: readonly PromptEnhancementSourceAttributionV1[];
   llmCallPolicy: PromptEnhancementLlmCallPolicy;
   rawComposerOutput: 'not_used_deterministic' | 'llm_output_pending_validation' | 'llm_output_validated_into_artifact' | 'rejected_or_unavailable';
+  /**
+   * When `rawComposerOutput` is `rejected_or_unavailable`, WHICH draft-validation rule refused the
+   * reply. Six rules can reject, and reporting only "validation_failed" names the stage but not the
+   * cause — the model's wording is discarded and nothing says why. Optional: absent when nothing was
+   * rejected, and absent on older payloads.
+   */
+  draftRejectionReason?:
+    | 'no_drafts_returned'
+    | 'unknown_section'
+    | 'original_section'
+    | 'empty_or_disallowed_wording'
+    | 'no_source_fact_ids'
+    | 'source_fact_id_not_in_section'
+    | 'claims_empty_or_unallowed';
   validatedCanonicalPromptArtifact: 'current_body_v1';
   composerMode: PromptEnhancementComposerMode;
   budgetState: {
@@ -627,6 +709,73 @@ export interface PromptEnhancementSourceAttributionV1 {
   privateIdPolicy: 'metadata_only_not_body';
 }
 
+/**
+ * Why a ref could not be resolved. A ref that cannot resolve is REFUSED — kept with
+ * its reason — rather than dropped, so a body that quotes nothing is distinguishable
+ * from a body whose quotes could not be located.
+ */
+export type PromptEnhancementRefRefusalReason =
+  | 'not_found_in_original'
+  | 'ambiguous_multiple_matches'
+  | 'below_minimum_length'
+  | 'offsets_out_of_range'
+  | 'offsets_do_not_match_quote'
+  /**
+   * The shared text is Nexpath's own, echoed back through a prompt that quotes a previous
+   * enhanced body. A ref would say the section quotes the USER, which is false however
+   * exactly the characters line up.
+   */
+  | 'self_ingested_generated_text';
+
+/**
+ * A ref from a composed section back to the characters of the user's own prompt.
+ *
+ * Offsets, not copies: an offset cannot drift from the text it indexes, while a copy
+ * is a second thing that can disagree with the first. Offsets index `originalPromptText`
+ * exactly, so `originalPromptText.slice(startOffset, endOffset)` IS the quoted text.
+ *
+ * `resolution: 'refused'` carries `startOffset === -1` and a reason. Callers must not
+ * treat a refused ref as a quote.
+ */
+export interface PromptEnhancementOriginalTextRefV1 {
+  refId: string;
+  sectionId: string;
+  /** Index into `originalPromptText`; -1 when refused. */
+  startOffset: number;
+  /** Exclusive end index into `originalPromptText`; -1 when refused. */
+  endOffset: number;
+  resolution: 'exact' | 'refused';
+  refusalReason?: PromptEnhancementRefRefusalReason;
+}
+
+/** A ref from a composed section to a planned prompt point it carries. */
+export interface PromptEnhancementPromptPointRefV1 {
+  refId: string;
+  sectionId: string;
+  promptPointId: string;
+  resolution: 'exact' | 'refused';
+  refusalReason?: PromptEnhancementRefRefusalReason;
+}
+
+/**
+ * What composition did to this section's text. Typed so a reader can tell a preserved
+ * section from a rewritten one without re-reading the prose.
+ *
+ * Every value here is assigned somewhere. A code nothing can produce is a dead branch
+ * that reads as coverage without being coverage, so none is declared "for completeness".
+ *
+ * `carried_from_previous_body` is APPENDED on the carry-forward path rather than
+ * replacing the code that says how the text was originally made — a carried section is
+ * both "model-composed" and "being served again", and substituting would lose the first.
+ */
+export type PromptEnhancementTransformReasonCodeV1 =
+  | 'preserved_verbatim'
+  | 'composed_by_model'
+  | 'rendered_deterministically'
+  | 'carried_from_previous_body'
+  | 'quotes_original_text'
+  | 'no_original_text_quoted';
+
 export interface PromptEnhancementSectionV1 {
   sectionId: string;
   sectionKind: string;
@@ -644,6 +793,24 @@ export interface PromptEnhancementSectionV1 {
   evidenceStatus: PromptEnhancementEvidenceStatus;
   sourceEvidenceStatus: PromptEnhancementEvidenceStatus;
   slotEvidenceStatus: PromptEnhancementEvidenceStatus;
+  /**
+   * The typed slot obligations the attached capabilities place on THIS
+   * section — a slot is a typed content obligation plus its metadata and
+   * state, not a heading. Populated from the capability slot-effect map at
+   * planning; empty when no attached capability targets this section kind.
+   * String-typed here (the obligation union lives in the planner layer).
+   */
+  slotObligations: readonly string[];
+  /**
+   * GR-1: the boundary-RESOLVED fact values this section states.
+   *
+   * The no-invention check asks whether a section names something NOBODY
+   * supplied, and its allowed texts were the prompt plus source IDS. Once
+   * GR-1 renders values, a legitimately resolved `PostgreSQL` or config path
+   * looks fabricated — real grounding rejected as invention. A value the
+   * boundary resolved WAS supplied; it just had no carrier until now.
+   */
+  groundedFactValues?: readonly string[];
   baselineSourceSignalSlot: string | 'not_applicable' | 'unknown';
   requirementSourceStatus: PromptEnhancementEvidenceStatus;
   requiredSurvivor: boolean;
@@ -668,6 +835,9 @@ export interface PromptEnhancementSectionV1 {
   safetyFlags: readonly string[];
   sensitivityFlags: readonly string[];
   spanRefs: readonly PromptEnhancementSpanRefV1[];
+  originalTextRefs: readonly PromptEnhancementOriginalTextRefV1[];
+  promptPointRefs: readonly PromptEnhancementPromptPointRefV1[];
+  transformReasonCodes: readonly PromptEnhancementTransformReasonCodeV1[];
   publicExplanationCategory: PromptEnhancementPublicDiagnosticCategory;
   whyHelpReasonCodes: readonly string[];
   callVisibilityMode: PromptEnhancementCallVisibilityMode;
@@ -1215,6 +1385,12 @@ export interface PromptEnhancementCompactFirstPopupSequenceSummaryV1 {
   publicSafeText: string;
   remainingTaskCount: number;
   taskRoleLabels: readonly string[];
+  /**
+   * One short display line per follow-up task, cut from the REDACTED original prompt at each item's
+   * own slice (the user's own words, not a generated body). Empty on the describe fallback / when no
+   * items are available. Body-bound and redaction-safe, so the flags below stay honest.
+   */
+  taskSummaryLines: readonly string[];
   sourceRefs: readonly string[];
   containsFuturePromptText: false;
   rawPromptTextExcluded: true;
@@ -1414,8 +1590,12 @@ export interface PromptEnhancementFutureSequenceRuntimeGateInputV1 {
 export interface PromptEnhancementFutureSequenceRuntimeGateResultV1 {
   schemaVersion: PromptEnhancementSchemaVersion;
   operation: PromptEnhancementFutureSequenceRuntimeOperationV1;
-  allowed: false;
-  status: 'blocked_future_sequence_runtime_v1';
+  // D3 (2026-08-08): the gate can now return `allowed: true` when ALL evidence is present. This type
+  // is MPS-only (consumed by the Stop-hook launcher + tests; the PE facade never uses it), so
+  // widening these decision fields does not touch PE/PEF. In production the gate still returns
+  // `allowed: false` because no caller supplies full evidence yet (that wiring is a later phase).
+  allowed: boolean;
+  status: 'blocked_future_sequence_runtime_v1' | 'allowed_future_sequence_runtime_v1';
   fallbackMode: 'current_or_original_fallback_no_runtime';
   sequenceIdentityState: 'not_created_v1';
   acceptedStartOrderState: 'not_created_v1';
@@ -1423,7 +1603,7 @@ export interface PromptEnhancementFutureSequenceRuntimeGateResultV1 {
   customPromptPathState: 'not_created_v1';
   cancelAbandonResumeState: 'not_created_v1';
   stopCompletionState: 'not_proof_v1';
-  runtimeAcceptanceState: 'no_go_v1';
+  runtimeAcceptanceState: 'no_go_v1' | 'go_v1';
   queueState: 'not_created_v1';
   autoSendState: 'prohibited_v1';
   pointerAdvancementState: 'prohibited_v1';
@@ -1442,6 +1622,17 @@ export interface PromptEnhancementFutureSequenceRuntimeGateResultV1 {
 }
 
 export interface PromptEnhancementCostVisibilityMetadataV1 {
+  /**
+   * A6 (prohibition 10 · L4979): the runtime seams the rendered facts came through and the
+   * relative payload weight they carried — the call-visibility VISIBLE half of *"every runtime path
+   * typed + call-visibility visible"*. ⛔ Typed path names and counts only, never fact content, and
+   * read by nothing in the pipeline (prohibition 9: cost never gates behaviour).
+   */
+  runtimeSeamSummary?: {
+    readonly runtimePaths: readonly string[];
+    readonly unknownRuntimePathCount: number;
+    readonly totalPayloadWeight: number;
+  };
   callId?: PromptEnhancementCostCallIdV1;
   callOwner: PromptEnhancementOwnerArea;
   callVisibilityMode: PromptEnhancementCallVisibilityMode;
@@ -1500,6 +1691,7 @@ export type PromptEnhancementCostCallIdV1 =
   | 'custom_feedback_classification'
   | 'later_popup_feedback_decision'
   | 'optional_safety_review'
+  | 'sequence_planning'
   | 'sequence_summary_wording'
   | 'sequence_item_wording'
   | 'future_regenerate_flow'
@@ -1545,6 +1737,18 @@ export interface PromptEnhancementPrepareRequestV1 {
   requestId: string;
   projectRoot: string;
   hostSurface: PromptEnhancementHostSurface;
+  /**
+   * When the hook carrying this request has to be finished, as epoch milliseconds.
+   *
+   * Passed through to the composer, which declines to START a call that cannot complete before it.
+   * The value belongs to the caller because the caller is what knows which hook it is running on —
+   * the budget differs per surface, and there is deliberately no constant for it here.
+   *
+   * Absent means no ceiling, which is the behaviour without it. A caller that omits it is
+   * unaffected; a caller that supplies it gets a typed refusal between attempts instead of being
+   * killed mid-loop with no disposition, no popup, and nothing left to answer with.
+   */
+  deadlineAtMs?: number;
   sourcePrompt: {
     text: string;
     origin: 'user' | 'pe_generated_echo' | 'unknown';
@@ -1656,6 +1860,34 @@ export interface PromptEnhancementPrepareResultV1 {
   delivery: PromptEnhancementDeliveryMetadataV1;
   ownership: PromptEnhancementOwnershipMetadataV1;
   diagnostics: readonly PromptEnhancementPublicDiagnosticV1[];
+  // TI-3.3 (2026-08-08) — observability-only. Set ONLY when the blocked-body deterministic
+  // substitution fired (facade recompose-drop): the emitted `safetySummary`/`currentBody` then
+  // describe the POST-substitution deterministic body, so without this a blocked-then-silently-
+  // replaced run is indistinguishable from a clean one. `preSubstitutionAuthorityEscalationState`
+  // is the safety verdict the LLM-worded body carried BEFORE it was replaced. Additive + optional
+  // → PE/PEF behaviour, disposition, and the emitted safetySummary stay byte-identical; a reader
+  // may ignore these fields entirely. They NEVER carry body text.
+  deterministicFallbackApplied?: boolean;
+  preSubstitutionAuthorityEscalationState?: PromptEnhancementValidationStatus;
+  // TI-3.2 (2026-08-08, completed through the 2026-08-09 follow-up) — observability-only. ALL
+  // compose-layer reduction reason CODES that the public `diagnostics` array genericizes away
+  // (`diagnosticsFor` drops `reasonCode`, `rawReasonValuesExcluded`): every `fallback_or_no_popup`
+  // code — the draft-rejection / deterministic-fallback cause
+  // `deterministic_fallback:<runtimeState>:<draftRejectionReason>`, the blocked-body substitution
+  // marker `llm_final_body_blocked_deterministic_fallback`, `partial_draft_drop:<count>:<reason>`,
+  // `action_failed_previous_body_preserved:<state>`, `no_popup_or_no_sections_original_only` — plus the
+  // `source_coverage` code `project_grounding_source_unavailable`. Typed reason CODES only (composer
+  // runtime state + rejection enum) — NEVER body text or raw user content, the same class as
+  // `callAndVisibilityMetadata.fallbackReason` already on this result. Present only when a compose-layer
+  // reduction occurred; additive + optional → PE/PEF behaviour and the emitted contract stay byte-identical.
+  compositionFallbackReasonCodes?: readonly string[];
+  // TI-3 audit follow-up (2026-08-09) — observability-only. True when the user's additional-details
+  // input exceeded the 5,000-word cap and was truncated before recomposition (the engine already
+  // emits a dedicated user notice for this; the `reasonCode` is genericized away from the machine-
+  // readable log). This is a `generated` input-cap event, NOT a fallback/reduction — kept as its own
+  // flag rather than folded into `compositionFallbackReasonCodes`. Present only when truncation
+  // occurred; additive + optional → PE/PEF behaviour and the emitted contract stay byte-identical.
+  additionalDetailsTruncated?: boolean;
 }
 
 export type PromptEnhancementPrepareFacadeV1 = (
@@ -1736,6 +1968,14 @@ export function validatePromptEnhancementPrepareRequestV1(
   if (!isCompleteSourceSignals(obj?.['sourceSignals'])) reasonCodes.push('missing_source_signals');
   if (!isCompleteCallVisibility(obj?.['callVisibilityState'])) reasonCodes.push('missing_call_visibility_state');
   if (!asRecord(obj?.['privacyAndStoragePolicy'])) reasonCodes.push('missing_privacy_storage_policy');
+  // Optional, but not unchecked. Downstream this is compared against the clock, and every
+  // comparison against a non-finite value is false — so a malformed deadline would silently
+  // decline every composer attempt rather than raising anything. The composer treats a bad value
+  // as no ceiling so that cannot happen; this is what names it.
+  const deadlineAtMs = obj?.['deadlineAtMs'];
+  if (deadlineAtMs !== undefined && (typeof deadlineAtMs !== 'number' || !Number.isFinite(deadlineAtMs))) {
+    reasonCodes.push('invalid_deadline_at_ms');
+  }
   return { ok: reasonCodes.length === 0, reasonCodes };
 }
 
@@ -1765,6 +2005,11 @@ export function validatePromptEnhancementActionRequestV1(
 
 export function validatePromptEnhancementPrepareResultV1(
   value: unknown,
+  // A CONTINUATION result is a packaged sequence-item body, not a fresh-prompt result: its verdict
+  // graph carries the single `sequence` phase, not the full pipeline's fifteen. Callers that validate
+  // one pass `{ sequenceItemGraph: true }` so the graph check asks the right question. Omitted (the
+  // default) preserves the full-pipeline check exactly — every existing caller is unchanged.
+  options?: { sequenceItemGraph?: boolean },
 ): PromptEnhancementContractValidation {
   const obj = asRecord(value);
   const legacy = findLegacyDecisionSessionKeys(obj);
@@ -1796,7 +2041,10 @@ export function validatePromptEnhancementPrepareResultV1(
   if (!isCompleteRouteDecision(obj?.['routeDecision'])) reasonCodes.push('missing_route_decision');
   if (!isCompleteBodyPlan(obj?.['bodyPlan'], obj?.['disposition'] === 'no_popup_not_applicable')) reasonCodes.push('missing_body_plan');
   if (!isCompleteComposerBoundary(obj?.['composerBoundary'])) reasonCodes.push('missing_composer_boundary');
-  if (!isCompleteValidationGraph(obj?.['validationGraph'])) reasonCodes.push('missing_validation_graph');
+  if (!isCompleteValidationGraph(
+    obj?.['validationGraph'],
+    options?.sequenceItemGraph ? SEQUENCE_ITEM_VALIDATION_STAGES_V1 : FULL_PIPELINE_VALIDATION_STAGES_V1,
+  )) reasonCodes.push('missing_validation_graph');
   if (!isCompleteUiViewPayload(obj?.['uiView'])) reasonCodes.push('missing_ui_view_payload');
   if (!isCompleteCallVisibility(obj?.['callAndVisibilityMetadata'])) reasonCodes.push('missing_call_visibility_metadata');
   if (obj?.['handoffMetadata'] !== undefined && !isCompleteHandoffMetadata(obj?.['handoffMetadata'], currentBody, obj)) {
@@ -1809,7 +2057,12 @@ export function validatePromptEnhancementPrepareResultV1(
   if (isRawTransportAuthority(obj)) reasonCodes.push('raw_transport_semantic_authority');
   if (isUnsafeSafetyPolicy(obj)) reasonCodes.push('unsafe_safety_policy');
   if (isMismatchedSafetySummary(obj)) reasonCodes.push('mismatched_safety_summary');
-  if (isMismatchedCallVisibilityState(obj)) reasonCodes.push('mismatched_call_visibility_state');
+  // A CONTINUATION result's graph is the served ITEM's batch-time verdict (e.g. `llm_wording`), while its
+  // callVisibility describes the continuation presentation itself (no new provider call). These two
+  // legitimately describe DIFFERENT moments, so the fresh-prompt "graph and callVisibility must agree"
+  // check is a category error here — skip it in sequence-item mode. (For a fresh prompt, both describe the
+  // one composer call and the check still applies.)
+  if (!options?.sequenceItemGraph && isMismatchedCallVisibilityState(obj)) reasonCodes.push('mismatched_call_visibility_state');
   if (isMismatchedCurrentBodySafetyState(obj)) reasonCodes.push('mismatched_current_body_safety_state');
   return { ok: reasonCodes.length === 0, reasonCodes };
 }
@@ -2140,7 +2393,35 @@ function isCompleteComposerBoundary(value: unknown): boolean {
     && fallback['productValueDiscussionIsRuntimeLimiter'] === false;
 }
 
-function isCompleteValidationGraph(value: unknown): boolean {
+// The phase stages a FRESH-prompt (full-pipeline) result graph must carry — one per pipeline stage.
+const FULL_PIPELINE_VALIDATION_STAGES_V1 = [
+  'request',
+  'pre_plan',
+  'section_plan',
+  'composer_input',
+  'composer_output',
+  'final_body',
+  'user_edit',
+  'action',
+  'delivery',
+  'storage',
+  'source_use',
+  'privacy',
+  'handoff',
+  'sequence',
+  'launch_check',
+] as const;
+
+// The stages a SEQUENCE-ITEM (continuation) result graph carries. A continuation item's body is
+// generated and validated at the SEQUENCE stage only — it never runs the fresh-prompt pipeline — so
+// its verdict graph legitimately holds the one `sequence` phase, not all fifteen. This is a category
+// distinction, not an incomplete graph: requiring the full fifteen of it is the wrong question.
+const SEQUENCE_ITEM_VALIDATION_STAGES_V1 = ['sequence'] as const;
+
+function isCompleteValidationGraph(
+  value: unknown,
+  requiredStages: readonly string[] = FULL_PIPELINE_VALIDATION_STAGES_V1,
+): boolean {
   const graph = asRecord(value);
   if (!graph) return false;
   if (graph['graphVersion'] !== PROMPT_ENHANCEMENT_CONTRACT_VERSION) return false;
@@ -2154,23 +2435,6 @@ function isCompleteValidationGraph(value: unknown): boolean {
   const phaseStates = Array.isArray(graph['phaseStates']) ? graph['phaseStates'] : [];
   const failures = Array.isArray(graph['failures']) ? graph['failures'] : [];
   const stages = new Set(phaseStates.map((phase) => asRecord(phase)?.['stage']));
-  const requiredStages = [
-    'request',
-    'pre_plan',
-    'section_plan',
-    'composer_input',
-    'composer_output',
-    'final_body',
-    'user_edit',
-    'action',
-    'delivery',
-    'storage',
-    'source_use',
-    'privacy',
-    'handoff',
-    'sequence',
-    'launch_check',
-  ];
   if (!requiredStages.every((stage) => stages.has(stage))) return false;
   if (!phaseStates.every(isCompleteValidationPhaseState)) return false;
   if (!failures.every(isCompleteValidationFailure)) return false;

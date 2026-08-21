@@ -24,39 +24,67 @@ import type { UpsertPendingAdvisoryInput } from './pending-advisories.js';
 describe('redactSecrets', () => {
   it('redacts sk- API keys', () => {
     const out = redactSecrets('key is sk-abc123def456ghi789jkl012mno');
-    expect(out).toContain('sk-[REDACTED]');
+    expect(out).toContain('sk-[REDACTED');
     expect(out).not.toContain('sk-abc123');
   });
 
   it('redacts GitHub PATs (ghp_)', () => {
     const token = 'ghp_' + 'a'.repeat(36);
     const out = redactSecrets(`token: ${token}`);
-    expect(out).toContain('ghp_[REDACTED]');
+    expect(out).toContain('ghp_[REDACTED');
     expect(out).not.toContain('ghp_aaa');
   });
 
   it('redacts GitHub user tokens (ghu_)', () => {
     const token = 'ghu_' + 'b'.repeat(36);
     const out = redactSecrets(`auth: ${token}`);
-    expect(out).toContain('ghu_[REDACTED]');
+    expect(out).toContain('ghu_[REDACTED');
   });
 
   it('redacts Bearer tokens', () => {
     const out = redactSecrets('Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload');
-    expect(out).toContain('Bearer [REDACTED]');
+    expect(out).toContain('Bearer [REDACTED');
     expect(out).not.toContain('eyJ');
   });
 
   it('redacts PEM private key blocks', () => {
     const pem = '-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA...\n-----END RSA PRIVATE KEY-----';
     const out = redactSecrets(pem);
-    expect(out).toContain('[PEM-REDACTED]');
+    expect(out).toContain('[PEM-REDACTED');
     expect(out).not.toContain('BEGIN RSA PRIVATE KEY');
   });
 
   it('leaves clean prompt text unchanged', () => {
     const text = 'Please write a function that parses JSON from a file';
     expect(redactSecrets(text)).toBe(text);
+  });
+
+  it('replaces every secret with a marker of exactly the same length', () => {
+    // The stored copy is the only durable record of what the user typed, and character positions
+    // measured against the received prompt are resolved against it later. A shorter replacement
+    // shifts every position after it — silently, and only on prompts containing a secret.
+    const cases = [
+      'key is sk-abc123def456ghi789jkl012mno and then some more text',
+      `token: ghp_${'a'.repeat(36)} trailing`,
+      `auth: ghu_${'b'.repeat(36)} trailing`,
+      'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload done',
+      ['-----BEGIN RSA PRIVATE KEY-----', 'MIIEpAIBAAKCAQEA...', '-----END RSA PRIVATE KEY-----after'].join(String.fromCharCode(10)),
+      'two secrets sk-abc123def456ghi789jkl012mno and ghp_' + 'c'.repeat(36) + ' end',
+    ];
+    for (const text of cases) {
+      expect(redactSecrets(text)).toHaveLength(text.length);
+    }
+  });
+
+  it('keeps a character range pointing at the same words after redaction', () => {
+    // This is the property the sequence planner depends on: a range recorded against the prompt as
+    // received must select the same text in the stored copy.
+    const text = 'Fix the login bug using key sk-ABCDEFGHIJKLMNOPQRSTUVWX and add rate limiting.';
+    const start = text.indexOf('add rate limiting');
+    const end = start + 'add rate limiting'.length;
+    const stored = redactSecrets(text);
+    expect(stored.slice(start, end)).toBe('add rate limiting');
+    expect(stored).not.toContain('ABCDEFGHIJKLMNOPQRSTUVWX');
   });
 });
 
@@ -187,7 +215,7 @@ describe('store — prompt CRUD', () => {
     insertPrompt(store, { projectRoot: '/proj/a', promptText: 'use sk-abc123def456ghi789jkl012mno please' });
     const res = store.db.exec('SELECT prompt_text FROM prompts');
     const stored = res[0]?.values[0]?.[0] as string;
-    expect(stored).toContain('sk-[REDACTED]');
+    expect(stored).toContain('sk-[REDACTED');
     expect(stored).not.toContain('sk-abc123');
   });
 
@@ -292,7 +320,7 @@ describe('store — getRecentPrompts', () => {
   it('returns redacted text (secret removed by insertPrompt)', () => {
     insertPrompt(store, { projectRoot: '/proj/a', promptText: 'key sk-abc123def456ghi789jkl012mno' });
     const rows = getRecentPrompts(store, '/proj/a', 1);
-    expect(rows[0].text).toContain('sk-[REDACTED]');
+    expect(rows[0].text).toContain('sk-[REDACTED');
     expect(rows[0].text).not.toContain('sk-abc123');
   });
 
@@ -439,7 +467,7 @@ describe('store — config', () => {
     expect(getConfig(store.db, 'prompt_capture_enabled')).toBe('true');
     expect(getConfig(store.db, 'prompt_store_max_per_project')).toBe('500');
     expect(getConfig(store.db, 'prompt_store_max_db_mb')).toBe('100');
-    expect(getConfig(store.db, 'telemetry.enabled')).toBe('true');
+    expect(getConfig(store.db, 'telemetry.enabled')).toBe('false'); // off by default (NF Plan A)
   });
 
   it('getConfig returns undefined for unknown non-default keys', () => {
@@ -463,7 +491,7 @@ describe('store — config', () => {
     expect(all['prompt_capture_enabled']).toBe('false');       // overridden
     expect(all['prompt_store_max_per_project']).toBe('500');   // still default
     expect(all['prompt_store_max_db_mb']).toBe('100');         // still default
-    expect(all['telemetry.enabled']).toBe('true');             // still default
+    expect(all['telemetry.enabled']).toBe('false');            // still default (off, NF Plan A)
   });
 
   it('getAllConfig includes stored custom keys', () => {

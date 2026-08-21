@@ -23,6 +23,10 @@ export type TelemetryEventName =
   | 'option_selected'
   | 'decision_session_dismissed'
   | 'decision_session_sim_dismissed'
+  // SIM OBSERVATION (temp branch only): the PE enhanced prompt the sim reads in place of the
+  // DS option texts, whose surface MPS-7 disabled. Mirrors decision_session_sim_dismissed so
+  // the sim harness can report it per cycle from telemetry.
+  | 'prompt_enhancement_sim_observed'
   // Language detection
   | 'language_detected'
   // Sync self-events
