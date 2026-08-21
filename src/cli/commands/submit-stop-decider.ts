@@ -43,6 +43,9 @@ import { log } from '../../logger.js';
 // uses them — no Layer C file is modified.
 import { openStore, closeStore } from '../../store/db.js';
 import { getPendingAdvisory, markAdvisoryShown } from '../../store/pending-advisories.js';
+// RC31: READ-ONLY diagnostic (see the no-block path below). Layer C read, same
+// consume-only convention the sweep already uses; nothing here is mutated.
+import { getActivePendingPromptSequence } from '../../store/pending-sequences.js';
 import {
   getPendingPromptEnhancement,
   markPromptEnhancementShown,
@@ -165,7 +168,41 @@ export function buildStopDrivenPromptSubmitDecider(
       if (exitCode !== 0) return 'allow'; // crash ⇒ fail-open (A3)
 
       const block = parseStopBlockOutput(stdout);
-      if (!block) return 'allow'; // skipped / shown / clipboard — ordinary turn
+      if (!block) {
+        // ── RC31 (2026-08-21): never let an MPS sequence kill the flow SILENTLY ──
+        // Upstream's MPS work added a routing rule to `stop` (Layer C, not ours):
+        // when an `item_pending` sequence exists for this project+session, `stop`
+        // returns `mps_continuation_gated` and renders NOTHING — its own test
+        // says so outright ("sequence-continuation Stop suppresses the PE popup
+        // and the advisory"), leaving both rows unconsumed. The v1 continuation
+        // gate is fail-closed in production by design, so such a sequence cannot
+        // advance on its own.
+        //
+        // For THIS flow that reads as an ordinary no-op turn: no block line, so
+        // the prompt is released and no popup ever appears — for every later
+        // submit in that session. Diagnosing that from the outside is nearly
+        // impossible, which is exactly the class RC19's `explainSubmitFlowGate`
+        // exists to prevent. Read-only, best-effort, and it changes NO decision:
+        // the return value is `allow` either way.
+        void (async () => {
+          try {
+            const s = await (ports.openStoreFn ?? openStore)(undefined as never);
+            try {
+              const seq = getActivePendingPromptSequence(s as never, projectRoot);
+              if (seq) {
+                logEvent('warn', 'submit_stop_decider_suppressed_by_sequence', {
+                  status: seq.status,
+                  current_item_index: seq.currentItemIndex,
+                  item_count: seq.itemCount,
+                });
+              }
+            } finally {
+              try { await (ports.closeStoreFn ?? closeStore)(s as never); } catch { /* fail-open */ }
+            }
+          } catch { /* diagnostics must never affect the decision */ }
+        })();
+        return 'allow'; // skipped / shown / clipboard — ordinary turn
+      }
 
       // `stop` already consumed the row, recorded lineage and set the
       // lastInjectedPrompt echo guard. Persisting the decision file is the ONLY
