@@ -47,7 +47,12 @@ import { openStore, closeStore } from '../../store/db.js';
 import { getPendingAdvisory, markAdvisoryShown } from '../../store/pending-advisories.js';
 // RC31: READ-ONLY diagnostic (see the no-block path below). Layer C read, same
 // consume-only convention the sweep already uses; nothing here is mutated.
-import { getActivePendingPromptSequence } from '../../store/pending-sequences.js';
+import {
+  getActivePendingPromptSequence,
+  deletePendingPromptSequencesForProject,
+} from '../../store/pending-sequences.js';
+import { getConfig } from '../../store/config.js';
+import { PROMPT_ENHANCEMENT_SEQUENCE_ENABLED_KEY } from '../../config/prompt-enhancement-keys.js';
 import {
   getPendingPromptEnhancement,
   markPromptEnhancementShown,
@@ -240,37 +245,55 @@ export function buildStopDrivenPromptSubmitDecider(
       const block = parseStopBlockOutput(stdout);
       if (!block) {
         // ── RC31 (2026-08-21): never let an MPS sequence kill the flow SILENTLY ──
-        // Upstream's MPS work added a routing rule to `stop` (Layer C, not ours):
-        // when an `item_pending` sequence exists for this project+session, `stop`
-        // returns `mps_continuation_gated` and renders NOTHING — its own test
-        // says so outright ("sequence-continuation Stop suppresses the PE popup
-        // and the advisory"), leaving both rows unconsumed. The v1 continuation
-        // gate is fail-closed in production by design, so such a sequence cannot
-        // advance on its own.
+        // Upstream's MPS routing: an active sequence makes `stop` return
+        // `mps_continuation_gated` and render NOTHING — its own test pins that it
+        // "suppresses the PE popup and the advisory". The v1 continuation gate is
+        // fail-closed in production, so such a sequence can never advance on its
+        // own: every later submit in the project silently loses its popup.
         //
-        // For THIS flow that reads as an ordinary no-op turn: no block line, so
-        // the prompt is released and no popup ever appears — for every later
-        // submit in that session. Diagnosing that from the outside is nearly
-        // impossible, which is exactly the class RC19's `explainSubmitFlowGate`
-        // exists to prevent. Read-only, best-effort, and it changes NO decision:
-        // the return value is `allow` either way.
-        void (async () => {
+        // MEASURED LIVE (owner's Ubuntu, 2026-08-21 10:58–11:01): a sequence
+        // accepted in WINDSURF (`awaiting_response`, item 0/3) suppressed every
+        // CURSOR submit in the same project — including a turn whose advisory was
+        // `pending` — via the shared per-project store. The RC31 warning below is
+        // what surfaced it.
+        //
+        // ── RC37: SCRUB the stale row when sequences are configured OFF ─────
+        // `prompt_enhancement.sequence.enabled !== 'on'` is the planner's own
+        // disabled semantics (`sequence_disabled_by_config`) and the launch
+        // configuration. In that state an active row is unreachable garbage —
+        // nothing can advance it and it disables the submit surface forever —
+        // so it is removed with Layer C's own exported terminal scrub
+        // (`deletePendingPromptSequencesForProject`, "terminal scrub / clean
+        // session state"). With sequences ON the row is a live MPS flow and is
+        // NOT touched — only warned about — so the PE owner's behaviour is
+        // unchanged by construction. Awaited (not fire-and-forget): the RC31
+        // draft raced the hook's exit and only logged by luck. Fail-open: any
+        // error here still returns 'allow'.
+        try {
+          const s2 = await (ports.openStoreFn ?? openStore)(undefined as never);
           try {
-            const s = await (ports.openStoreFn ?? openStore)(undefined as never);
-            try {
-              const seq = getActivePendingPromptSequence(s as never, projectRoot);
-              if (seq) {
-                logEvent('warn', 'submit_stop_decider_suppressed_by_sequence', {
-                  status: seq.status,
-                  current_item_index: seq.currentItemIndex,
-                  item_count: seq.itemCount,
+            const seq = getActivePendingPromptSequence(s2 as never, projectRoot);
+            if (seq) {
+              logEvent('warn', 'submit_stop_decider_suppressed_by_sequence', {
+                status: seq.status,
+                current_item_index: seq.currentItemIndex,
+                item_count: seq.itemCount,
+              });
+              const enabled =
+                getConfig((s2 as { db: never }).db, `${PROMPT_ENHANCEMENT_SEQUENCE_ENABLED_KEY}:${projectRoot}`)
+                ?? getConfig((s2 as { db: never }).db, PROMPT_ENHANCEMENT_SEQUENCE_ENABLED_KEY);
+              if (enabled !== 'on') {
+                const deleted = deletePendingPromptSequencesForProject(s2 as never, projectRoot);
+                logEvent('warn', 'submit_stop_decider_scrubbed_stale_sequence', {
+                  deleted,
+                  reason: 'sequences_disabled_by_config_and_row_unadvanceable',
                 });
               }
-            } finally {
-              try { await (ports.closeStoreFn ?? closeStore)(s as never); } catch { /* fail-open */ }
             }
-          } catch { /* diagnostics must never affect the decision */ }
-        })();
+          } finally {
+            try { await (ports.closeStoreFn ?? closeStore)(s2 as never); } catch { /* fail-open */ }
+          }
+        } catch { /* diagnostics/scrub must never affect the decision */ }
         return 'allow'; // skipped / shown / clipboard — ordinary turn
       }
 

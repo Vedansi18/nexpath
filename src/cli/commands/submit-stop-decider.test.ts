@@ -9,6 +9,8 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   buildStopDrivenPromptSubmitDecider,
   parseStopBlockOutput,
@@ -257,5 +259,46 @@ describe('⭐ RC35 — enrichSpawnEnvFromSessionSnapshot', () => {
 
   it('the contract filename matches the extension side', () => {
     expect(SESSION_ENV_SNAPSHOT_FILENAME).toBe('session-env.json');
+  });
+});
+
+/**
+ * ⭐ RC37 — a stale MPS sequence must not permanently disable the submit surface.
+ * Measured live: a sequence accepted in Windsurf (`awaiting_response`, 0/3)
+ * suppressed every Cursor submit in the same project via the shared store, and
+ * the fail-closed continuation gate means nothing can ever advance it.
+ * These tests inject a fake STORE via the decider's own seams — the same seams
+ * the RC10 sweep tests use — so no real sql.js store is involved.
+ */
+describe('⭐ RC37 — stale-sequence scrub on the no-block path', () => {
+  // The decider imports these as module functions; a fake store whose shape the
+  // real functions reject would throw inside the try — which the fail-open pin
+  // below covers. For behavioural pins we inject a store REAL enough for the
+  // actual store functions: an in-memory sql.js store is overkill, so instead
+  // pin the two contracts structurally + the fail-open path behaviourally.
+  const src = readFileSync(join(__dirname, 'submit-stop-decider.ts'), 'utf8');
+
+  it('⭐ the scrub exists, is AWAITED, and sits on the no-block path only', () => {
+    const noBlock = src.slice(src.indexOf('if (!block) {'), src.indexOf("return 'allow'; // skipped"));
+    expect(noBlock).toMatch(/await \(ports\.openStoreFn \?\? openStore\)/);
+    expect(noBlock).toMatch(/getActivePendingPromptSequence/);
+    expect(noBlock).toMatch(/deletePendingPromptSequencesForProject/);
+    // Awaited block — the RC31 draft was fire-and-forget and raced the hook exit.
+    expect(noBlock).not.toMatch(/void \(async/);
+  });
+
+  it("⭐ NO REGRESSION: the scrub is gated on the planner's own OFF semantics (!== 'on')", () => {
+    expect(src).toMatch(/enabled !== 'on'/);
+    // And the key is the shared constant, project-scoped first — never a bare literal.
+    expect(src).toMatch(/PROMPT_ENHANCEMENT_SEQUENCE_ENABLED_KEY\}:\$\{projectRoot\}/);
+  });
+
+  it('a throwing store can never affect the decision (fail-open, behavioural)', async () => {
+    const { decide } = harness('');   // no block line + sweep store throws
+    expect(await decide('pre_user_prompt', { project: '/proj' }, 'real prompt')).toBe('allow');
+  });
+
+  it('the scrub logs what it did, under its own event name', () => {
+    expect(src).toMatch(/submit_stop_decider_scrubbed_stale_sequence/);
   });
 });
