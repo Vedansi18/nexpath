@@ -65,7 +65,7 @@ describe('paths + command', () => {
     );
     // PowerShell needs `&` to run a quoted executable path; node path stays native.
     expect(ps).toBe(
-      `& "C:\\Program Files\\nodejs\\node.exe" "${cliPs('/abs/cli.js')}" windsurf-hook pre_user_prompt`,
+      `& "C:\\Program Files\\nodejs\\node.exe" "${cliPs('/abs/cli.js')}" windsurf-hook pre_user_prompt; exit $LASTEXITCODE`,
     );
   });
   it('hook entry carries BOTH command (bash) and powershell (Windows)', () => {
@@ -74,7 +74,7 @@ describe('paths + command', () => {
       `"/usr/bin/node" "${cliBash('/abs/cli.js')}" windsurf-hook post_cascade_response`,
     );
     expect(e.powershell).toBe(
-      `& "/usr/bin/node" "${cliPs('/abs/cli.js')}" windsurf-hook post_cascade_response`,
+      `& "/usr/bin/node" "${cliPs('/abs/cli.js')}" windsurf-hook post_cascade_response; exit $LASTEXITCODE`,
     );
   });
   it('config writes both events with both platform commands', () => {
@@ -202,5 +202,36 @@ describe('⭐ RC23 — workspace hook pins its project', () => {
       expect(json.hooks[ev][0].powershell).toContain('--project');
     }
     rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+/**
+ * ⭐ RC33 (Windows/Devin tester, 2026-08-21) — the reason the submit flow never
+ * actually BLOCKED on Windows. `powershell -Command "<pipeline>"` exits with the
+ * pipeline's status (0, or 1 on a terminating error); it does NOT propagate a
+ * native command's exit code. Node exits 2 to block; the wrapper exited 0; the
+ * host's contract is "exit code 2 blocks", so it saw "not 2" and RELEASED the
+ * prompt — popup open, original running behind it. `exit $LASTEXITCODE` forwards
+ * node's code through the wrapper.
+ */
+describe('⭐ RC33 — the powershell wrapper forwards the exit code', () => {
+  it('every powershell command ends with the exit forwarder', () => {
+    const ps = buildWindsurfHookPowershell('/abs/cli.js', 'pre_user_prompt', 'C:\\n\\node.exe');
+    expect(ps.endsWith('; exit $LASTEXITCODE')).toBe(true);
+  });
+  it('with --project the forwarder still comes LAST (after the flag)', () => {
+    const ps = buildWindsurfHookPowershell('/abs/cli.js', 'pre_user_prompt', 'C:\\n\\node.exe', 'C:\\ws');
+    expect(ps).toMatch(/--project "[^"]+"; exit \$LASTEXITCODE$/);
+  });
+  it('the bash command field is UNTOUCHED — POSIX propagates exit codes natively', () => {
+    const e = buildWindsurfHookEntry('/abs/cli.js', 'pre_user_prompt', '/usr/bin/node');
+    expect(e.command).not.toContain('LASTEXITCODE');
+    expect(e.powershell).toContain('exit $LASTEXITCODE');
+  });
+  it('the full written config carries the forwarder on every powershell entry', () => {
+    const cfg = buildWindsurfHooksConfig('/abs/cli.js');
+    for (const entries of Object.values(cfg)) {
+      for (const entry of entries) expect(entry.powershell).toContain('exit $LASTEXITCODE');
+    }
   });
 });

@@ -221,7 +221,16 @@ function buildDeps(context: vscode.ExtensionContext, log: Logger): SetupFlowDeps
           if (!ws) return true;
           const wsHook = join(ws, '.windsurf', 'hooks.json');
           const wsRaw = existsSync(wsHook) ? readFileSync(wsHook, 'utf8') : null;
-          return wsRaw !== null && verifyCommandCurrent(wsRaw, 'windsurf-hook', cliEntry, 'powershell', '& "');
+          // RC33: the powershell wrapper must FORWARD node's exit code — without
+          // `exit $LASTEXITCODE`, `powershell -Command` exits 0/1 regardless, the
+          // host never sees the blocking `2`, and the prompt is silently released
+          // (the tester's "popup open while the original keeps running"). An old
+          // entry without the forwarder still contains the CLI path, so the
+          // content check alone would call it current forever — require the
+          // forwarder too, so existing installs self-heal onto the fix.
+          return wsRaw !== null
+            && verifyCommandCurrent(wsRaw, 'windsurf-hook', cliEntry, 'powershell', '& "')
+            && wsRaw.includes('exit $LASTEXITCODE');
         }
         return true;
       } catch {

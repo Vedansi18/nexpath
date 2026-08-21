@@ -84,7 +84,17 @@ export function buildWindsurfHookPowershell(
   projectRoot?: string,
 ): string {
   const proj = projectRoot ? ` --project "${resolve(projectRoot)}"` : '';
-  return `& "${nodePath}" "${resolve(cliPath)}" windsurf-hook ${event}${proj}`;
+  // ── RC33 (Windows/Devin tester, 2026-08-21): `; exit $LASTEXITCODE` ──────
+  // THE reason the submit flow never actually blocked on Windows.
+  // `powershell -Command "<pipeline>"` exits with the PIPELINE's status (0, or
+  // 1 on a terminating error) — it does NOT propagate a native command's exit
+  // code. Node exits 2 to block; the wrapper then exits 0; the host's contract
+  // is "exit code 2 blocks", so it saw "not 2" and RELEASED the prompt — popup
+  // open, original running behind it, injection landing in a busy composer.
+  // The explicit `exit $LASTEXITCODE` forwards node's code (2, and every other
+  // code) through the wrapper. POSIX untouched: bash's `command` field already
+  // propagates exit codes natively; this string is only ever run on win32.
+  return `& "${nodePath}" "${resolve(cliPath)}" windsurf-hook ${event}${proj}; exit $LASTEXITCODE`;
 }
 
 /**
