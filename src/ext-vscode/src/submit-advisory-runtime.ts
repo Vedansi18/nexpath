@@ -274,12 +274,20 @@ export function shouldDeferForHookExit(
   now: number,
 ): boolean {
   if (isAlive(record.hookPid)) return true;
-  if (record.hookShellPid === undefined) return false;
   if (now - record.blockIssuedAt > SHELL_EXIT_GRACE_MS) return false; // never stall
-  if (isAlive(record.hookShellPid)) return true;
-  // Wrapper dead — RC39 settle: defer until one settle interval has passed
-  // since we FIRST saw it dead, then deliver and forget the key.
-  const key = `${record.blockIssuedAt}:${record.hookShellPid}`;
+  if (record.hookShellPid !== undefined && isAlive(record.hookShellPid)) return true;
+  // ── RC40 (measured LIVE on Ubuntu, 2026-08-21 12:52): the settle applies to
+  // EVERY platform, not just the win32 wrapper. The host cancels the held
+  // prompt when the hook exits, but PROCESSING that cancel takes a beat — and
+  // the poll tick can land inside it: the 12:52 turn observed the decision
+  // +45ms after the block and injected +82ms; Windsurf was still tearing the
+  // held submission down, so the replacement landed in the QUEUE ("1 message
+  // queued") instead of the idle composer — the identical symptom Windows
+  // showed chronically. One settle interval after the LAST relevant pid is
+  // first seen dead closes the race everywhere; the grace cap above still
+  // guarantees delivery can never stall.
+  const lastPid = record.hookShellPid ?? record.hookPid;
+  const key = `${record.blockIssuedAt}:${lastPid}`;
   const seen = shellDeadSeenAt.get(key);
   if (seen === undefined) {
     shellDeadSeenAt.set(key, now);

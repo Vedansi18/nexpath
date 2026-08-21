@@ -675,15 +675,20 @@ describe('⭐ RC22 — user-level mirror handoff', () => {
   });
 
   it('⭐ matching projectRoot is delivered (separator + drive-case insensitive)', async () => {
-    const r = await readPendingSubmitDecisionMirror(
-      ['C:\\Users\\Me\\proj'],
-      { ...base({ record: { projectRoot: 'c:/Users/Me/proj/' } }) },
-    );
+    // RC40: the first read after hook death starts the settle (deferred);
+    // the second read, one settle later, delivers. Same record both reads.
+    const deps = base({ record: { projectRoot: 'c:/Users/Me/proj/' } });
+    expect(await readPendingSubmitDecisionMirror(['C:\\Users\\Me\\proj'], deps)).toBeNull();
+    const later = { ...deps, now: () => 1_500 + SHELL_EXIT_SETTLE_MS };
+    const r = await readPendingSubmitDecisionMirror(['C:\\Users\\Me\\proj'], later);
     expect(r?.replacementText).toBe('refined');
   });
 
-  it('⭐ no projectRoot + exactly one open root + fresh ⇒ delivered', async () => {
-    const r = await readPendingSubmitDecisionMirror(['/only/root'], base());
+  it('⭐ no projectRoot + exactly one open root + fresh ⇒ delivered (after the RC40 settle)', async () => {
+    const deps = base();
+    expect(await readPendingSubmitDecisionMirror(['/only/root'], deps)).toBeNull(); // settle tick
+    const later = { ...deps, now: () => 1_500 + SHELL_EXIT_SETTLE_MS };
+    const r = await readPendingSubmitDecisionMirror(['/only/root'], later);
     expect(r?.decisionId).toBe('sd-1');
   });
 
@@ -815,9 +820,12 @@ describe('⭐ RC30 — defer until the SHELL that ran the hook has exited too', 
     expect(shouldDeferForHookExit(rec, alive, 2_000_100 + SHELL_EXIT_SETTLE_MS)).toBe(false);
   });
 
-  it('⭐ RC39 NO REGRESSION: a POSIX record (no hookShellPid) has NO settle — immediate delivery', () => {
+  it('⭐ RC40: a POSIX record settles ONCE on hook death, then delivers', () => {
     dead.clear(); dead.add(100);
-    expect(shouldDeferForHookExit({ hookPid: 100, blockIssuedAt: 3_000_000 }, alive, 3_000_001)).toBe(false);
+    const rec = { hookPid: 100, blockIssuedAt: 3_000_000 };
+    expect(shouldDeferForHookExit(rec, alive, 3_000_001)).toBe(true); // settle starts
+    expect(shouldDeferForHookExit(rec, alive, 3_000_001 + SHELL_EXIT_SETTLE_MS - 1)).toBe(true);
+    expect(shouldDeferForHookExit(rec, alive, 3_000_001 + SHELL_EXIT_SETTLE_MS)).toBe(false);
   });
 
   it('RC39: the grace cap still beats the settle (a wedged state cannot stall past the cap)', () => {
@@ -833,11 +841,15 @@ describe('⭐ RC30 — defer until the SHELL that ran the hook has exited too', 
       { ...base, hookShellPid: 200 }, alive, 1_000_100)).toBe(true);
   });
 
-  it('⭐ NO REGRESSION — a POSIX record (no hookShellPid) behaves exactly as before', () => {
-    dead.clear(); dead.add(100);
-    expect(shouldDeferForHookExit(base, alive, 1_000_100)).toBe(false); // delivers
+  it('a POSIX record still defers while the hook is alive, and settles after death (RC40)', () => {
     dead.clear();
-    expect(shouldDeferForHookExit(base, alive, 1_000_100)).toBe(true);  // defers
+    expect(shouldDeferForHookExit(base, alive, 1_000_100)).toBe(true);  // hook alive ⇒ defer
+    dead.add(100);
+    // RC40: hook death starts the settle — measured live on Ubuntu (12:52 turn):
+    // delivering +82ms after death landed the replacement in Windsurf's QUEUE
+    // because the host was still processing the cancel.
+    expect(shouldDeferForHookExit(base, alive, 1_000_100)).toBe(true);  // first-dead ⇒ settle
+    expect(shouldDeferForHookExit(base, alive, 1_000_100 + SHELL_EXIT_SETTLE_MS)).toBe(false);
   });
 
   it('a wedged/reused wrapper pid can NEVER stall delivery forever', () => {
