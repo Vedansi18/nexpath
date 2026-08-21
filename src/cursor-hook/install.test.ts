@@ -189,9 +189,14 @@ describe('⭐ the command string survives paths with spaces (cross-OS)', () => {
   // and the hook would fail to launch with a confusing "cannot find module".
   const SPACED = 'C:\\Program Files\\nexpath\\dist\\cli\\index.js';
 
-  it('quotes the CLI path', () => {
+  it('quotes the CLI path VERBATIM — no JSON escaping (RC29)', () => {
     const cmd = buildCursorHookEntry(SPACED, 'beforeSubmitPrompt').command;
-    expect(cmd).toContain('"C:\\\\Program Files\\\\nexpath\\\\dist\\\\cli\\\\index.js"');
+    // Pre-RC29 this asserted the DOUBLED form, i.e. it pinned the bug: on
+    // Windows `JSON.stringify` turned every separator into `\\`, so the command
+    // Cursor executed referenced a path that does not exist, and the RC26
+    // registration check could never match it (setup re-ran on every reload).
+    expect(cmd).toContain(`"${SPACED}"`);
+    expect(cmd).not.toContain('\\\\');
   });
 
   it('the event name follows the quoted path, unquoted', () => {
@@ -294,9 +299,33 @@ describe('⭐ RC25 — the hook command carries an ABSOLUTE node path (never bar
   });
 
   it('an injected node path is quoted exactly like the CLI path (spaces-safe, cross-OS)', () => {
-    const cmd = buildCursorHookCommand('/cli/index.js', 'beforeSubmitPrompt', 'C:\\Program Files\\nodejs\\node.exe');
-    expect(cmd).toContain('"C:\\\\Program Files\\\\nodejs\\\\node.exe"');
+    const NODE = 'C:\\Program Files\\nodejs\\node.exe';
+    const cmd = buildCursorHookCommand('/cli/index.js', 'beforeSubmitPrompt', NODE);
+    expect(cmd).toContain(`"${NODE}"`);
+    expect(cmd).not.toContain('\\\\');
     expect(cmd.endsWith('cursor-hook beforeSubmitPrompt')).toBe(true);
+  });
+
+  it('⭐ RC29 — a Windows command NEVER contains a doubled separator', () => {
+    // The exact defect: `JSON.stringify` is a JSON encoder, not a quoter. On
+    // POSIX it was a harmless quote-wrapper (no backslashes to escape), which is
+    // why only Windows was ever affected.
+    const cmd = buildCursorHookCommand(
+      'C:\\Users\\janvi\\.nexpath\\cli\\0.1.4\\dist\\cli\\index.js',
+      'beforeSubmitPrompt',
+      'C:\\Program Files\\nodejs\\node.exe',
+    );
+    expect(cmd).not.toContain('\\\\');
+    expect(cmd).toContain('C:\\Users\\janvi\\.nexpath\\cli\\0.1.4\\dist\\cli\\index.js');
+  });
+
+  it('RC29 — the POSIX command is byte-identical to what pre-RC29 produced', () => {
+    // Proves the fix cannot regress Linux/macOS: for a path with no backslashes
+    // and no quotes, plain quoting and JSON.stringify agree exactly.
+    const posix = '/home/u/.nexpath/cli/0.1.4/dist/cli/index.js';
+    const node = '/usr/bin/node';
+    expect(buildCursorHookCommand(posix, 'beforeSubmitPrompt', node))
+      .toBe(`${JSON.stringify(node)} ${JSON.stringify(posix)} cursor-hook beforeSubmitPrompt`);
   });
 
   it('buildCursorHookEntry threads the same node path through', () => {

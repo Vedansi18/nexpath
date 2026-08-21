@@ -71,12 +71,45 @@
  * content itself doesn't hold up — exactly the condition that must trigger a
  * repair.
  */
+/**
+ * RC29 (Windows tester, 2026-08-21): compare paths AS PATHS, not as raw text.
+ *
+ * The raw `includes(cliEntry)` check was correct on POSIX and could never match
+ * on Windows, for two independent reasons — which is why both editors re-ran
+ * setup on every single window reload there:
+ *
+ *   - **Windsurf** normalises separators when it builds its command
+ *     (`buildWindsurfHookCommand`: `.replace(/\\/g, '/')`), so the file holds
+ *     `C:/Users/.../index.js` while `cliEntry` is `C:\Users\...\index.js`.
+ *   - **Cursor** (pre-RC29) JSON-encoded the path, doubling every separator into
+ *     `C:\\Users\\...`.
+ *
+ * Both are the SAME path; only the spelling differs. Normalising kills the whole
+ * class rather than patching the two known spellings — a third one (a UNC path,
+ * a trailing separator, a differing drive-letter case) would otherwise reopen
+ * exactly this bug.
+ *
+ * `platform` is a parameter so the win32 rule is testable from CI on Linux.
+ * Case folding is applied ONLY on win32: NTFS is case-insensitive, whereas
+ * folding on Linux could mask a genuine drift between two case-distinct paths.
+ * On POSIX this function is therefore a no-op beyond collapsing repeats, so
+ * Linux/macOS behaviour is unchanged.
+ */
+export function canonicalisePathForCompare(
+  p: string,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  const unified = p.replace(/\\/g, '/').replace(/\/{2,}/g, '/');
+  return platform === 'win32' ? unified.toLowerCase() : unified;
+}
+
 export function verifyCommandCurrent(
   raw: string,
   marker: 'cursor-hook' | 'windsurf-hook',
   cliEntry: string,
   field: 'command' | 'powershell',
   quotedPrefix: '"' | '& "',
+  platform: NodeJS.Platform = process.platform,
 ): boolean {
   try {
     const data = JSON.parse(raw) as { hooks?: Record<string, Array<Record<string, unknown>>> };
@@ -86,7 +119,12 @@ export function verifyCommandCurrent(
       for (const entry of entries) {
         const v = entry[field];
         if (typeof v === 'string' && v.includes(marker)) {
-          return v.startsWith(quotedPrefix) && v.includes(cliEntry);
+          // Quoting is still checked on the RAW text (that is a property of the
+          // command's shape, not of the path); only the path comparison is
+          // canonicalised — see `canonicalisePathForCompare`.
+          if (!v.startsWith(quotedPrefix)) return false;
+          return canonicalisePathForCompare(v, platform)
+            .includes(canonicalisePathForCompare(cliEntry, platform));
         }
       }
     }

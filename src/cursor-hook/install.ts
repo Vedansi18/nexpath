@@ -130,7 +130,24 @@ export function buildCursorHookCommand(
   event: CursorHookEvent,
   nodePath: string = process.execPath,
 ): string {
-  return `${JSON.stringify(nodePath)} ${JSON.stringify(cliPath)} cursor-hook ${event}`;
+  // ── RC29 (Windows/Cursor tester, 2026-08-21) ────────────────────────────
+  // This used to be `JSON.stringify(path)`, which is NOT a quoting function —
+  // it is a JSON ENCODER, and it escapes backslashes. On POSIX a path has no
+  // backslashes, so it behaved as a harmless quote-wrapper and Linux/macOS were
+  // always correct. On Windows every separator was DOUBLED into the command
+  // text:
+  //     "C:\\Users\\janvi\\.nexpath\\cli\\0.1.4\\dist\\cli\\index.js"
+  // and because the whole file is JSON-encoded again on write, that is exactly
+  // what Cursor reads back and executes. It also made the RC26 registration
+  // check compare a doubled-separator command against a real (single-separator)
+  // path, so it could never match — which is why the tester's Cursor re-ran
+  // setup on EVERY window reload.
+  //
+  // Quote plainly instead. A `"` cannot appear in a Windows path at all, and a
+  // POSIX path containing one has no valid shell rendering here either, so it
+  // is dropped rather than silently producing a broken command.
+  const q = (s: string) => `"${s.replace(/"/g, '')}"`;
+  return `${q(nodePath)} ${q(cliPath)} cursor-hook ${event}`;
 }
 
 /**
