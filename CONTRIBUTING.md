@@ -22,8 +22,6 @@ The Nexpath community is in
 One thing sets the tone for everything below: Nexpath exists to stop unverified work from
 shipping, so we hold contributions to the same bar. **Verify before you open a PR.**
 
----
-
 ## Reporting Bugs or Issues
 
 Bug reports make Nexpath better for everyone. Before creating a new issue, please
@@ -51,8 +49,6 @@ A great bug report contains:
 redaction covers common secret formats, but that is not a guarantee for everything in a config
 dump — redact anything private before posting it publicly.
 
----
-
 ## Before Contributing
 
 All contributions must begin with a GitHub Issue, unless the change is a small bug fix, a typo
@@ -72,8 +68,6 @@ correction, a minor wording improvement, or a type-only fix that doesn't change 
 This is not bureaucracy — Nexpath's pipeline has a lot of interlocking gates, and a change that
 looks local can move behaviour three stages downstream. A short conversation up front saves you
 from rewriting work that was never going to land.
-
----
 
 ## Deciding What to Work On
 
@@ -98,8 +92,6 @@ Beyond the issue tracker, these are the areas where contribution is most useful 
    the decision-session layer (`src/decision-session/`) carry most of the product behaviour and
    most of the test suite.
 
----
-
 ## Prerequisites
 
 - **Node.js 18+** — required for all packages. Development is done on Node 20+; Node 22 is known
@@ -118,8 +110,6 @@ later:
 ```bash
 git remote add upstream https://github.com/hi0001234d/nexpath.git
 ```
-
----
 
 ## Common Checks
 
@@ -225,8 +215,6 @@ npm run build
 `src/ext-browser/` is different: its tests **do** run in the root suite, but its types do not —
 that's what `npm run typecheck:ext` is for. To build it: `npm run build:ext`.
 
----
-
 ## Writing and Submitting Code
 
 Anyone can contribute code to Nexpath, but we ask that you follow these guidelines so your
@@ -290,8 +278,6 @@ contributions can be smoothly integrated:
    - List any breaking changes
    - Add screenshots for CLI or popup UI changes
 
----
-
 ## Pull Request Expectations
 
 Contributor guidance exists to protect maintainer review time and keep reviews focused on work
@@ -352,8 +338,6 @@ reopen or create a new issue or PR if you're still working on something.
 
 Please respond to review comments rather than force-pushing silently over them.
 
----
-
 ## PR Titles
 
 Use conventional commit style PR titles, with an optional scope naming the subsystem:
@@ -366,8 +350,6 @@ Use conventional commit style PR titles, with an optional scope naming the subsy
 - `test(pe-host): cover the display-decision pre-spawn gate`
 
 Common types: `feat`, `fix`, `docs`, `test`, `refactor`, `chore`, `perf`.
-
----
 
 ## Questions
 
@@ -384,8 +366,6 @@ Common types: `feat`, `fix`, `docs`, `test`, `refactor`, `chore`, `perf`.
 You do not need to have a fix ready to start a conversation. If you tried Nexpath and could not
 tell what it does, or the install broke, or a section of the README confused you — tell us. That
 is signal we cannot get any other way, and it is a real contribution.
-
----
 
 ## Contribution Agreement
 
