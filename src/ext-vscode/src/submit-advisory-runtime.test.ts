@@ -25,6 +25,7 @@ import {
   SESSION_ENV_SNAPSHOT_FILENAME,
   shouldDeferForHookExit,
   SHELL_EXIT_GRACE_MS,
+  SHELL_EXIT_SETTLE_MS,
 } from './submit-advisory-runtime.js';
 import { parseSubmitDecisionRecordV1 } from './submit-decision-record.js';
 
@@ -801,10 +802,29 @@ describe('⭐ RC30 — defer until the SHELL that ran the hook has exited too', 
       { ...base, hookShellPid: 200 }, alive, 1_000_100)).toBe(true);
   });
 
-  it('delivers once the wrapper exits too', () => {
+  it('delivers once the wrapper exits too — after ONE settle interval (RC39)', () => {
     dead.clear(); dead.add(100); dead.add(200);
-    expect(shouldDeferForHookExit(
-      { ...base, hookShellPid: 200 }, alive, 1_000_100)).toBe(false);
+    const rec = { hookPid: 100, blockIssuedAt: 2_000_000, hookShellPid: 200 };
+    // First observation of the dead wrapper: DEFER — the host is still
+    // processing the cancel; injecting now is how replacements got QUEUED
+    // behind a live turn on Devin/Windows.
+    expect(shouldDeferForHookExit(rec, alive, 2_000_100)).toBe(true);
+    // Still inside the settle window: deferred.
+    expect(shouldDeferForHookExit(rec, alive, 2_000_100 + SHELL_EXIT_SETTLE_MS - 1)).toBe(true);
+    // Settle elapsed: deliver.
+    expect(shouldDeferForHookExit(rec, alive, 2_000_100 + SHELL_EXIT_SETTLE_MS)).toBe(false);
+  });
+
+  it('⭐ RC39 NO REGRESSION: a POSIX record (no hookShellPid) has NO settle — immediate delivery', () => {
+    dead.clear(); dead.add(100);
+    expect(shouldDeferForHookExit({ hookPid: 100, blockIssuedAt: 3_000_000 }, alive, 3_000_001)).toBe(false);
+  });
+
+  it('RC39: the grace cap still beats the settle (a wedged state cannot stall past the cap)', () => {
+    dead.clear(); dead.add(100); dead.add(200);
+    const rec = { hookPid: 100, blockIssuedAt: 4_000_000, hookShellPid: 200 };
+    const past = 4_000_000 + SHELL_EXIT_GRACE_MS + 1;
+    expect(shouldDeferForHookExit(rec, alive, past)).toBe(false);
   });
 
   it('still defers while the hook ITSELF is alive (pre-RC30 guard intact)', () => {

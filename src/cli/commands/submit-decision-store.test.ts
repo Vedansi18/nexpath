@@ -13,6 +13,11 @@ import {
   writeSubmitDecision,
   submitDecisionPath,
   SUBMIT_DECISION_SCHEMA_V1,
+  appendReplacementEcho,
+  readReplacementEchoes,
+  replacementEchoRegistryPath,
+  REPLACEMENT_ECHO_MAX_ENTRIES,
+  REPLACEMENT_ECHO_MAX_AGE_MS,
 } from './submit-decision-store.js';
 
 function harness() {
@@ -193,5 +198,72 @@ describe('⭐ RC22 — user-level mirror', () => {
       mkdirFn: async () => {}, writeFn: async () => { throw new Error('EPERM primary'); }, renameFn: async () => {},
       mirrorPath: () => '/home/u/.nexpath/submit-decision.json',
     })).rejects.toThrow(/EPERM primary/);
+  });
+});
+
+/**
+ * ⭐ RC38 — the replacement-echo registry. Devin/Windows queues a replacement
+ * injected while Cascade is busy; when it dequeues, the single lastInjectedPrompt
+ * slot has often been overwritten by a newer block, the echo misses, and a popup
+ * opens on OUR OWN replacement (nested "My original request (verbatim):" —
+ * tester-screenshot proof). Multi-entry + windowed closes the hole.
+ */
+describe('⭐ RC38 — replacement-echo registry', () => {
+  const mem = (initial?: string) => {
+    let data = initial;
+    return {
+      readFileFn: (_p: string) => { if (data === undefined) throw new Error('ENOENT'); return data; },
+      writeFileFn: (_p: string, d: string) => { data = d; },
+      get: () => data,
+    };
+  };
+
+  it('appends and reads back within the window', () => {
+    const fs1 = mem();
+    appendReplacementEcho('/proj', 'replacement one', { now: () => 1_000, ...fs1 });
+    appendReplacementEcho('/proj', 'replacement two', { now: () => 2_000, ...fs1 });
+    const got = readReplacementEchoes('/proj', { now: () => 3_000, readFileFn: fs1.readFileFn });
+    expect(got).toEqual(['replacement one', 'replacement two']);
+  });
+
+  it('⭐ expired entries fall out of reads AND are pruned on write', () => {
+    const fs1 = mem();
+    appendReplacementEcho('/proj', 'old', { now: () => 0, ...fs1 });
+    appendReplacementEcho('/proj', 'new', { now: () => REPLACEMENT_ECHO_MAX_AGE_MS + 1, ...fs1 });
+    expect(readReplacementEchoes('/proj', { now: () => REPLACEMENT_ECHO_MAX_AGE_MS + 2, readFileFn: fs1.readFileFn }))
+      .toEqual(['new']);
+  });
+
+  it('caps at the max entry count (oldest dropped)', () => {
+    const fs1 = mem();
+    for (let i = 0; i < REPLACEMENT_ECHO_MAX_ENTRIES + 3; i++) {
+      appendReplacementEcho('/proj', `r${i}`, { now: () => 1_000 + i, ...fs1 });
+    }
+    const got = readReplacementEchoes('/proj', { now: () => 2_000, readFileFn: fs1.readFileFn });
+    expect(got).toHaveLength(REPLACEMENT_ECHO_MAX_ENTRIES);
+    expect(got[0]).toBe('r3');
+  });
+
+  it('corrupt or absent registry is fail-open on BOTH sides', () => {
+    expect(readReplacementEchoes('/proj', { readFileFn: () => { throw new Error('ENOENT'); } })).toEqual([]);
+    expect(readReplacementEchoes('/proj', { readFileFn: () => '{not json' })).toEqual([]);
+    // append over corrupt starts fresh rather than throwing
+    const fs1 = mem('{broken');
+    appendReplacementEcho('/proj', 'fresh', { now: () => 1, ...fs1 });
+    expect(readReplacementEchoes('/proj', { now: () => 2, readFileFn: fs1.readFileFn })).toEqual(['fresh']);
+  });
+
+  it('empty text is never registered; write failure is swallowed', () => {
+    const fs1 = mem();
+    appendReplacementEcho('/proj', '   ', { now: () => 1, ...fs1 });
+    expect(fs1.get()).toBeUndefined();
+    expect(() => appendReplacementEcho('/proj', 'x', {
+      now: () => 1, readFileFn: () => { throw new Error('ENOENT'); }, writeFileFn: () => { throw new Error('EACCES'); },
+    })).not.toThrow();
+  });
+
+  it('the registry lives beside the decision file (same .nexpath dir contract)', () => {
+    expect(replacementEchoRegistryPath('/p')).toContain('.nexpath');
+    expect(replacementEchoRegistryPath('/p').endsWith('submit-replacement-echoes.json')).toBe(true);
   });
 });

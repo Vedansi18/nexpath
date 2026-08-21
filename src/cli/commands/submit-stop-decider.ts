@@ -39,7 +39,7 @@ import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { writeSubmitDecision } from './submit-decision-store.js';
+import { writeSubmitDecision, appendReplacementEcho } from './submit-decision-store.js';
 import { log } from '../../logger.js';
 // CONSUME-ONLY store calls (bhavnesh75-owned exports), used exactly as stop.ts
 // uses them — no Layer C file is modified.
@@ -317,6 +317,12 @@ export function buildStopDrivenPromptSubmitDecider(
         createdAt: now(),
         host: ports.host,
       });
+      // RC38: register the replacement in the multi-entry echo registry. The
+      // single Layer-C slot is overwritten by the NEXT block while a queued
+      // replacement still waits (Windows/Devin queues injections made while
+      // Cascade is busy) — the registry keeps the last few, windowed, so the
+      // dequeued replacement is recognised and skipped instead of re-popped.
+      appendReplacementEcho(projectRoot, block.reason);
       // ── H3's acceptance rule, extended to the stop-driven path (RC10 flash #2)
       // `stop` consumes only the row its popup HANDLED (PE-first: a PE turn
       // leaves the DS advisory row pending — old-flow semantics where it would

@@ -35,7 +35,8 @@ import { openStore, closeStore } from '../../store/db.js';
 import { log } from '../../logger.js';
 import { getPendingAdvisory, markAdvisoryShown } from '../../store/pending-advisories.js';
 import { isSubmitAdvisoryEnabledForHost } from './submit-flow-config.js';
-import { writeSubmitDecision } from './submit-decision-store.js';
+import { writeSubmitDecision, readReplacementEchoes,
+} from './submit-decision-store.js';
 import { buildStopDrivenPromptSubmitDecider } from './submit-stop-decider.js';
 import { createHoldBudget, type HoldBudget } from './submit-hold-budget.js';
 // CONSUME-ONLY. `SessionStateManager` is not Vedansi-owned (`hi0001234d` 15 /
@@ -364,7 +365,6 @@ export async function isReplacementEcho(
   try {
     store = await openStoreFn(undefined as never);
     const last = loadState(store, projectRoot).current.lastInjectedPrompt;
-    if (typeof last !== 'string' || last.trim() === '') return false;
     // ── RC12 (live block LOOP, 2026-08-13): exact equality was too brittle ──
     // The DS bridge injects the replacement DECORATED (an `@[nexpath:advisory]`
     // mention prefix + concatenation), and hosts may normalise whitespace — so
@@ -374,12 +374,28 @@ export async function isReplacementEcho(
     // CONTAINMENT instead: whitespace-collapsed, either side containing the
     // other, with a minimum-length floor so short prompts can never falsely
     // skip. Exact equality remains the fast path.
-    if (last === promptText) return true;
     const norm = (s: string) => s.replace(/\s+/g, ' ').trim();
-    const a = norm(last);
     const b = norm(promptText);
-    if (a.length < 40 || b.length < 40) return false; // floor: never skip short prompts fuzzily
-    return b.includes(a) || a.includes(b);
+    const matches = (recorded: string): boolean => {
+      if (recorded === promptText) return true;
+      const a = norm(recorded);
+      if (a.length < 40 || b.length < 40) return false; // floor: never skip short prompts fuzzily
+      return b.includes(a) || a.includes(b);
+    };
+    if (typeof last === 'string' && last.trim() !== '' && matches(last)) return true;
+    // ── RC38 (Windows/Devin, 2026-08-21): the slot is SINGLE-ENTRY, and Devin
+    // QUEUES a replacement injected while Cascade is busy. By the time the
+    // queued item dequeues and re-fires this hook, a newer block has often
+    // overwritten the slot — echo miss ⇒ a popup opens on OUR OWN replacement
+    // (the tester's screenshots show the nested "My original request
+    // (verbatim):" proof) ⇒ its selection re-blocks the dequeued item ⇒
+    // spiral. The registry keeps the last few replacements (windowed); same
+    // normalised-containment rule and the same ≥40-char floor, so an extra hit
+    // can only ever skip text WE injected — never a user's own prompt.
+    for (const recorded of readReplacementEchoes(projectRoot)) {
+      if (matches(recorded)) return true;
+    }
+    return false;
   } catch {
     return false; // fail-open — run the normal path
   } finally {

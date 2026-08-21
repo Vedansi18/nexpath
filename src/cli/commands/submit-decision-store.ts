@@ -27,6 +27,7 @@
  * would silently drop a real decision, so preventing the torn read matters.
  */
 import { mkdir, writeFile, rename } from 'node:fs/promises';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 
@@ -180,4 +181,88 @@ export async function writeSubmitDecision(
     await writeFn(mirrorTmp, JSON.stringify(record));
     await renameFn(mirrorTmp, mirrorPath);
   } catch { /* primary already landed — never fail the block over the mirror */ }
+}
+
+// ── RC38 (Windows/Devin tester, 2026-08-21): the replacement-echo REGISTRY ───
+//
+// THE FAILURE: Devin QUEUES a replacement injected while Cascade is busy, and
+// re-fires `pre_user_prompt` when it dequeues. The echo skip reads Layer C's
+// `lastInjectedPrompt` — a SINGLE slot — which a newer block overwrites while
+// the older replacement still sits in the queue. Echo miss ⇒ a popup opens on
+// OUR OWN replacement (the tester's screenshots show the literal proof: nested
+// "My original request (verbatim): My original request (verbatim):") ⇒ its
+// selection re-blocks the dequeued item ⇒ another queued replacement ⇒ spiral.
+// Linux never exercises this path: Cascade is idle at inject time, so the
+// immediate resubmit consumes the slot before anything can overwrite it.
+//
+// The registry keeps the LAST FEW replacements per project in a small file the
+// hook can consult IN ADDITION to the slot — multi-entry kills the overwrite
+// hole, the time window covers long queue delays. Additive and safe by
+// direction: an extra echo hit only ever SKIPS a popup on text WE injected
+// (never blocks user content — the same ≥40-char floor as the slot check
+// applies at the reader). Best-effort: a registry failure changes nothing.
+export const REPLACEMENT_ECHO_REGISTRY_FILENAME = 'submit-replacement-echoes.json';
+export const REPLACEMENT_ECHO_MAX_ENTRIES = 8;
+export const REPLACEMENT_ECHO_MAX_AGE_MS = 10 * 60_000;
+
+export function replacementEchoRegistryPath(projectRoot: string): string {
+  return join(projectRoot, '.nexpath', REPLACEMENT_ECHO_REGISTRY_FILENAME);
+}
+
+/** Append one replacement to the project's echo registry (called by the decider
+ *  right after the decision persists). Sync + swallowed: the block already
+ *  succeeded and must never be failed by bookkeeping. */
+export function appendReplacementEcho(
+  projectRoot: string,
+  text: string,
+  deps: { now?: () => number; readFileFn?: (p: string) => string; writeFileFn?: (p: string, d: string) => void } = {},
+): void {
+  try {
+    if (!text || text.trim().length === 0) return;
+    const now = deps.now ?? (() => Date.now());
+    const path = replacementEchoRegistryPath(projectRoot);
+    let entries: Array<{ text: string; at: number }> = [];
+    try {
+      const raw = (deps.readFileFn ?? ((p: string) => readFileSync(p, 'utf8')))(path);
+      const parsed = JSON.parse(raw) as unknown;
+      if (Array.isArray(parsed)) {
+        entries = parsed.filter(
+          (e): e is { text: string; at: number } =>
+            !!e && typeof (e as { text?: unknown }).text === 'string' && typeof (e as { at?: unknown }).at === 'number',
+        );
+      }
+    } catch { /* absent or corrupt ⇒ start fresh */ }
+    const t = now();
+    entries = entries.filter((e) => t - e.at <= REPLACEMENT_ECHO_MAX_AGE_MS);
+    entries.push({ text, at: t });
+    if (entries.length > REPLACEMENT_ECHO_MAX_ENTRIES) entries = entries.slice(-REPLACEMENT_ECHO_MAX_ENTRIES);
+    const write = deps.writeFileFn ?? ((p: string, d: string) => {
+      mkdirSync(dirname(p), { recursive: true });
+      writeFileSync(p, d, 'utf8');
+    });
+    write(path, JSON.stringify(entries));
+  } catch { /* best-effort — never break the block */ }
+}
+
+/** Read the live (windowed) registry entries for a project. Fail-open ⇒ []. */
+export function readReplacementEchoes(
+  projectRoot: string,
+  deps: { now?: () => number; readFileFn?: (p: string) => string } = {},
+): string[] {
+  try {
+    const now = deps.now ?? (() => Date.now());
+    const raw = (deps.readFileFn ?? ((p: string) => readFileSync(p, 'utf8')))(replacementEchoRegistryPath(projectRoot));
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    const t = now();
+    return parsed
+      .filter(
+        (e): e is { text: string; at: number } =>
+          !!e && typeof (e as { text?: unknown }).text === 'string' && typeof (e as { at?: unknown }).at === 'number',
+      )
+      .filter((e) => t - e.at <= REPLACEMENT_ECHO_MAX_AGE_MS)
+      .map((e) => e.text);
+  } catch {
+    return [];
+  }
 }

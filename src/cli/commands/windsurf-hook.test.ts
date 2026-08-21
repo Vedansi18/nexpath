@@ -385,3 +385,44 @@ describe('⭐ RC14 — professional block-card text via stderr', () => {
     expect(WINDSURF_BLOCK_CARD_MESSAGE.startsWith('Nexpath held this prompt')).toBe(true);
   });
 });
+
+/**
+ * ⭐ RC38 — the queued-replacement echo (real files, no mocks). Devin queues a
+ * replacement injected while Cascade is busy; by dequeue time a newer block has
+ * overwritten the single lastInjectedPrompt slot — the registry catches it.
+ */
+describe('⭐ RC38 — isReplacementEcho consults the registry when the slot was overwritten', () => {
+  it('a queued replacement whose slot was OVERWRITTEN is still recognised', async () => {
+    const { mkdtempSync, rmSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const { appendReplacementEcho } = await import('./submit-decision-store.js');
+    const root = mkdtempSync(join(tmpdir(), 'rc38-'));
+    try {
+      const queued = 'My original request (verbatim):\nadd stripe so clients can pay the invoice online\n\nContext And Constraints:\n- long enough to clear the forty character containment floor for the fuzzy match';
+      appendReplacementEcho(root, queued);
+      // The slot now holds a DIFFERENT, newer replacement (the overwrite).
+      const echo = await isReplacementEcho(root, queued, {
+        openStore: async () => ({}),
+        closeStore: () => {},
+        loadState: () => ({ current: { lastInjectedPrompt: 'a completely different newer replacement text that is also well over forty characters long' } }),
+      });
+      expect(echo).toBe(true);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it('⭐ NO REGRESSION: a genuine user prompt matches neither slot nor registry', async () => {
+    const { mkdtempSync, rmSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const root = mkdtempSync(join(tmpdir(), 'rc38-'));
+    try {
+      const echo = await isReplacementEcho(root, 'make me a website where users can create and manage their own online stores', {
+        openStore: async () => ({}),
+        closeStore: () => {},
+        loadState: () => ({ current: { lastInjectedPrompt: null } }),
+      });
+      expect(echo).toBe(false);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+});

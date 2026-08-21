@@ -252,6 +252,22 @@ export const SHELL_EXIT_GRACE_MS = 10_000;
  * POSIX record, and every record written before RC30 — this is exactly the
  * pre-RC30 expression, so Linux/macOS behaviour is unchanged by construction.
  */
+/**
+ * RC39: after the win32 WRAPPER dies, wait one settle interval before
+ * delivering. The wrapper's exit is when the host RECEIVES the blocking exit
+ * code — processing the cancel (tearing down the held submission, freeing the
+ * composer) takes a beat longer. Injecting inside that beat is how the
+ * replacement ended up QUEUED behind a still-live turn on Devin/Windows. One
+ * short settle lets the cancel land so the inject REPLACES instead of queueing.
+ * POSIX records carry no `hookShellPid`, so this whole mechanism is unreachable
+ * there (pinned) — Linux/macOS behaviour is unchanged by construction.
+ */
+export const SHELL_EXIT_SETTLE_MS = 1_500;
+
+/** blockIssuedAt+shellPid → when the wrapper was FIRST observed dead. Entries
+ *  are dropped once delivered/expired; keyed per decision so retries are cheap. */
+const shellDeadSeenAt = new Map<string, number>();
+
 export function shouldDeferForHookExit(
   record: { hookPid: number; hookShellPid?: number; blockIssuedAt: number },
   isAlive: (pid: number) => boolean,
@@ -260,7 +276,23 @@ export function shouldDeferForHookExit(
   if (isAlive(record.hookPid)) return true;
   if (record.hookShellPid === undefined) return false;
   if (now - record.blockIssuedAt > SHELL_EXIT_GRACE_MS) return false; // never stall
-  return isAlive(record.hookShellPid);
+  if (isAlive(record.hookShellPid)) return true;
+  // Wrapper dead — RC39 settle: defer until one settle interval has passed
+  // since we FIRST saw it dead, then deliver and forget the key.
+  const key = `${record.blockIssuedAt}:${record.hookShellPid}`;
+  const seen = shellDeadSeenAt.get(key);
+  if (seen === undefined) {
+    shellDeadSeenAt.set(key, now);
+    if (shellDeadSeenAt.size > 64) {
+      // bounded: drop the oldest entries so a long session cannot grow this
+      const oldest = [...shellDeadSeenAt.entries()].sort((x, y) => x[1] - y[1]).slice(0, 32);
+      for (const [k] of oldest) shellDeadSeenAt.delete(k);
+    }
+    return true;
+  }
+  if (now - seen < SHELL_EXIT_SETTLE_MS) return true;
+  shellDeadSeenAt.delete(key);
+  return false;
 }
 
 /**
