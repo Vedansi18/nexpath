@@ -323,3 +323,39 @@ describe('H5 — the hook is NOT written when Cursor is absent', () => {
     } finally { rmSync(home, { recursive: true, force: true }); }
   });
 });
+
+/**
+ * ⭐ RC34 (Windows/Cursor tester, 2026-08-21) — on Windows the user-level
+ * registration verified and the flow armed, yet the hook never fired once
+ * (armed + zero `submit handoff:` in every Windows round, while the identical
+ * file works on Linux). That is the shape of RC21's measured finding: Windows
+ * executes only the workspace-level hooks config. Cursor documents merging
+ * project + user configs, so the adapter now ALSO writes the project-level
+ * `.cursor/hooks.json` — on win32 only, so Linux/macOS installs stay
+ * byte-identical. Structural pins (source-shape), matching the RC21 tests.
+ */
+describe('⭐ RC34 — win32 project-level hook write (structural pins)', () => {
+  const src = readFileSync(join(__dirname, 'cursor.ts'), 'utf8');
+
+  it('install writes the project-level hook on win32 only', () => {
+    expect(src).toMatch(/if \(process\.platform === 'win32'\) \{[\s\S]{0,600}?getCursorProjectHooksPath\(wsRoot\)[\s\S]{0,200}?writeCursorHooks\(projHooksPath, cliPath\)/);
+  });
+
+  it('resolves the workspace exactly like the Windsurf adapter (NEXPATH_WORKSPACE_DIR || cwd)', () => {
+    expect(src).toMatch(/const wsRoot = process\.env\.NEXPATH_WORKSPACE_DIR\?\.trim\(\) \|\| ctx\.cwd;/);
+  });
+
+  it('uninstall removes the project-level hook with the SAME resolution (symmetry)', () => {
+    const un = src.slice(src.indexOf('async uninstall'));
+    expect(un).toMatch(/process\.platform === 'win32'/);
+    expect(un).toMatch(/removeCursorHooks\(getCursorProjectHooksPath\(wsRoot\)\)/);
+  });
+
+  it('the user-level write is untouched — it still comes FIRST, unconditionally', () => {
+    const inst = src.slice(src.indexOf('async install'), src.indexOf('async uninstall'));
+    const userAt = inst.indexOf('getCursorUserHooksPath(ctx.home)');
+    const winAt = inst.indexOf("process.platform === 'win32'");
+    expect(userAt).toBeGreaterThan(-1);
+    expect(winAt).toBeGreaterThan(userAt);
+  });
+});

@@ -201,7 +201,25 @@ function buildDeps(context: vscode.ExtensionContext, log: Logger): SetupFlowDeps
           // legacy version-less file is DEAD and must be rewritten.
           if (!raw.includes('"version"')) return false;
           // Cursor has only one command field, same shape on every OS.
-          return verifyCommandCurrent(raw, 'cursor-hook', cliEntry, 'command', '"');
+          if (!verifyCommandCurrent(raw, 'cursor-hook', cliEntry, 'command', '"')) return false;
+          // RC34: on Windows, ALSO require the project-level `.cursor/hooks.json`
+          // (same rule the Windsurf win32 branch already applies to its workspace
+          // hook). Every Windows round showed the user-level file verifying and
+          // the flow arming while the hook never fired once — the exact shape of
+          // RC21's measured finding that Windows executes only the workspace-level
+          // config. Requiring it here is what makes EXISTING installs self-heal:
+          // absent ⇒ unregistered ⇒ setup re-runs once ⇒ the adapter writes it.
+          // Linux/macOS never reach this block, so their behaviour is unchanged.
+          if (process.platform === 'win32') {
+            const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+            if (!ws) return true; // no folder open — nothing to verify against
+            const projHook = join(ws, '.cursor', 'hooks.json');
+            const projRaw = existsSync(projHook) ? readFileSync(projHook, 'utf8') : null;
+            return projRaw !== null
+              && projRaw.includes('"version"')
+              && verifyCommandCurrent(projRaw, 'cursor-hook', cliEntry, 'command', '"');
+          }
+          return true;
         }
         const p = join(homedir(), '.codeium', 'windsurf', 'hooks.json');
         const globalRaw = existsSync(p) ? readFileSync(p, 'utf8') : null;

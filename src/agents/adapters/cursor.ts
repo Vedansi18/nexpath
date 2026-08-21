@@ -4,6 +4,7 @@ import { posix as posixPath, win32 as win32Path } from 'node:path';
 import { registerAdapter } from '../registry.js';
 import {
   getCursorUserHooksPath,
+  getCursorProjectHooksPath,
   writeCursorHooks,
   removeCursorHooks,
 } from '../../cursor-hook/install.js';
@@ -170,6 +171,24 @@ export const cursorAdapter: VSCodeExtensionAdapter = {
     const hooksPath = getCursorUserHooksPath(ctx.home);
     writeCursorHooks(hooksPath, cliPath);
     console.log(`✓ ${'Cursor'.padEnd(12)} — submit hook written to ${hooksPath}`);
+    // ── RC34 (Windows/Cursor tester, 2026-08-21) ─────────────────────────────
+    // On Windows the user-level registration verifies, the flow arms, and the
+    // hook STILL never fires — armed + zero `submit handoff:` across every
+    // Windows round while the identical user-level file works on Linux. That is
+    // the precise shape of the ONE measured Windows finding this campaign has:
+    // RC21 proved Windows/Devin executes ONLY the workspace-level hooks file
+    // and ignores the user-level one. Cursor documents merging project + user
+    // configs, so ALSO writing the project-level file is correct on every OS —
+    // but it is written on win32 only, so Linux/macOS installs (verified
+    // working through the user-level file alone) keep byte-identical behaviour.
+    // Same workspace resolution as the Windsurf adapter: the extension passes
+    // the open folder via NEXPATH_WORKSPACE_DIR; a manual install uses cwd.
+    if (process.platform === 'win32') {
+      const wsRoot = process.env.NEXPATH_WORKSPACE_DIR?.trim() || ctx.cwd;
+      const projHooksPath = getCursorProjectHooksPath(wsRoot);
+      writeCursorHooks(projHooksPath, cliPath);
+      console.log(`   ${' '.repeat(12)}   + project hook (Windows): ${projHooksPath}`);
+    }
 
     if (process.env.NEXPATH_EXT_SETUP) {
       // Setup launched BY the Nexpath extension → it's already installed, so the
@@ -198,6 +217,12 @@ export const cursorAdapter: VSCodeExtensionAdapter = {
     const hooksPath = getCursorUserHooksPath(ctx.home);
     if (removeCursorHooks(hooksPath)) {
       console.log(`-  ${'Cursor'.padEnd(12)} — submit hook removed from ${hooksPath}`);
+    }
+    // RC34 symmetry: remove the win32 project-level hook too, resolved the same
+    // way it was written — leaving it would keep invoking a removed CLI.
+    if (process.platform === 'win32') {
+      const wsRoot = process.env.NEXPATH_WORKSPACE_DIR?.trim() || ctx.cwd;
+      removeCursorHooks(getCursorProjectHooksPath(wsRoot));
     }
     console.log(`-  ${'Cursor'.padEnd(12)} — uninstall the Nexpath extension from the Cursor Extensions panel`);
     console.log(`    Or via CLI:          cursor --uninstall-extension ${MARKETPLACE_ID}`);
