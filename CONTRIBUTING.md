@@ -146,7 +146,7 @@ enforces two hard gates over the shipped content-template registry and aborts th
 failure:
 
 ```
-✓ content-template build gate passed (144 records, all floored + schema-valid)
+✓ content-template build gate passed (all records floored + schema-valid)
 ✓ prompt-enhancement selectability gate passed (every intent routes from its proposal - no absorb, no skip)
 ```
 
@@ -172,11 +172,10 @@ touched `src/ext-browser/`, the second command is mandatory.
 
 ### Tests
 
-`npm test` runs `vitest run` across the whole tree: **352 test files, 9386 tests**, in roughly
-70–90 seconds.
+`npm test` runs `vitest run` across the whole tree. It takes a minute or two.
 
-**Known failures on a public clone — read this.** On a clean clone, `npm test` exits **1** with 8
-failures across 2 files:
+**Known failures on a public clone — read this.** On a clean clone, `npm test` exits **1**. Two
+test files fail:
 
 - `src/prompt-enhancement/dev-plan-table-integrity.test.ts`
 - `src/prompt-enhancement/hv1-env-supply.test.ts`
@@ -195,16 +194,11 @@ npx vitest run \
   --exclude "src/ext-vscode/**"
 ```
 
-Expected on an unmodified `main`:
+On an unmodified `main`, that run reports zero failures.
 
-```
- Test Files  350 passed (350)
-      Tests  9337 passed | 1 todo (9338)
-```
-
-**All 350 must pass.** If any file other than the two named above fails, your change broke
-something. Do not add files to the exclude list to make a run go green — that is exactly the
-kind of unverified shipping Nexpath exists to prevent.
+**Every remaining file must pass.** If any file other than the two named above fails, your
+change broke something. Do not add files to the exclude list to make a run go green — that is
+exactly the kind of unverified shipping Nexpath exists to prevent.
 
 ### Leak guard
 
@@ -212,10 +206,9 @@ kind of unverified shipping Nexpath exists to prevent.
 file contains a confidentiality leak token (internal names, internal phase codes, private
 paths). It performs no git history rewrite and no push.
 
-**Current status:** on `main` today it reports **8 pre-existing findings** (a teammate name left
-in `src/prompt-enhancement/`). This is known and tracked, and is **not caused by your change.**
-Run it before and after your change and confirm your diff **adds no new findings**. If the count
-grows, the new entries are yours.
+**Current status:** this script does not come back clean on `main`. The existing findings are
+known, tracked, and **not caused by your change.** Run it before and after your change and
+confirm your diff **adds no new findings** — if the list grows, the new entries are yours.
 
 ### Sub-package checks
 
@@ -393,9 +386,6 @@ Common types: `feat`, `fix`, `docs`, `test`, `refactor`, `chore`, `perf`.
 You do not need to have a fix ready to start a conversation. If you tried Nexpath and could not
 tell what it does, or the install broke, or a section of the README confused you — tell us. That
 is signal we cannot get any other way, and it is a real contribution.
-
-New to pull requests? [makeapullrequest.com](https://makeapullrequest.com/) and
-[firsttimersonly.com](https://www.firsttimersonly.com/) are good primers.
 
 ---
 
