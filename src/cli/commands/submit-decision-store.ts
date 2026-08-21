@@ -94,6 +94,16 @@ export interface WriteSubmitDecisionInput {
    * pid is alive rather than assuming the poll interval outruns the gap.
    */
   hookPid: number;
+  /**
+   * RC30 (Windows/Devin tester, 2026-08-21): pid of the SHELL that spawned this
+   * hook. Set **only on win32**, where Cascade executes the `powershell` field
+   * and the tree is `powershell.exe -> node.exe`: `hookPid` is node, but the
+   * host cancels the original prompt only when the WRAPPER exits. The reader
+   * defers on both, so the replacement can no longer be injected into a turn
+   * that is still live. Omitted on POSIX (no wrapper), which keeps the record —
+   * and therefore every Linux/macOS decision — byte-identical to pre-RC30.
+   */
+  hookShellPid?: number;
 }
 
 export interface SubmitDecisionStoreDeps {
@@ -148,6 +158,9 @@ export async function writeSubmitDecision(
     host: input.host,
     blockIssuedAt: input.blockIssuedAt,
     hookPid: input.hookPid,
+    // RC30: win32 only. `JSON.stringify` drops `undefined`, so on POSIX this key
+    // is simply absent and the persisted bytes are identical to pre-RC30.
+    hookShellPid: input.hookShellPid,
     // RC22: carried so the user-level mirror can be matched to the right editor
     // window. Harmless in the primary file (the reader ignores unknown fields).
     projectRoot: input.projectRoot,

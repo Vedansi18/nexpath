@@ -175,6 +175,43 @@ export interface SubmitDecisionReaderDeps {
  * the read because cleanup failed would lose a valid decision for no benefit.
  */
 /**
+ * RC30 — how long, after the hook itself has exited, we still wait for the SHELL
+ * that spawned it (win32 only; `hookShellPid` is absent everywhere else).
+ *
+ * Bounded on purpose. The wrapper exits within milliseconds of its child in
+ * practice, but a pid can be reused or a wrapper can wedge, and a decision that
+ * is never delivered is worse than one delivered slightly early: the user's
+ * prompt was already blocked, so nothing would arrive at all. Measured from
+ * `blockIssuedAt` (the record is persisted immediately after), not from
+ * `createdAt`, which can trail a long human decision.
+ */
+export const SHELL_EXIT_GRACE_MS = 10_000;
+
+/**
+ * The block/injection race guard.
+ *
+ * `hookPid` alone is correct on POSIX, where Cascade runs the `command` field
+ * directly. On Windows it runs the `powershell` field, so the tree is
+ * `powershell.exe -> node.exe`: `hookPid` is node, but the host only cancels the
+ * original prompt when the WRAPPER exits. Waiting on node alone cleared ~58 ms
+ * too early and the replacement queued behind a still-live prompt.
+ *
+ * Returns true while delivery must be deferred. With no `hookShellPid` — every
+ * POSIX record, and every record written before RC30 — this is exactly the
+ * pre-RC30 expression, so Linux/macOS behaviour is unchanged by construction.
+ */
+export function shouldDeferForHookExit(
+  record: { hookPid: number; hookShellPid?: number; blockIssuedAt: number },
+  isAlive: (pid: number) => boolean,
+  now: number,
+): boolean {
+  if (isAlive(record.hookPid)) return true;
+  if (record.hookShellPid === undefined) return false;
+  if (now - record.blockIssuedAt > SHELL_EXIT_GRACE_MS) return false; // never stall
+  return isAlive(record.hookShellPid);
+}
+
+/**
  * Is a pid still running? Cross-OS: `kill(pid, 0)` sends no signal and is
  * supported on Linux, macOS and Windows. `EPERM` means the process EXISTS but is
  * not ours, so it counts as alive; only `ESRCH` (no such process) means gone.
@@ -323,7 +360,7 @@ export async function readPendingSubmitDecisionMirror(
   }
   // Same block/injection race guard as the primary reader: never deliver while
   // the hook that wrote it is still alive (its exit is what cancels the prompt).
-  if (isAlive(record.hookPid)) return null;
+  if (shouldDeferForHookExit(record, isAlive, now())) return null;
 
   const claimable = record.projectRoot
     ? roots.some((r) => sameRoot(r, record.projectRoot as string))
@@ -373,7 +410,7 @@ export async function readPendingSubmitDecision(
   // The check sits BEFORE `remove` deliberately — this reader is one-shot, so
   // consuming and then deferring would destroy the decision permanently. A
   // deferred record stays on disk and is retried on the next poll.
-  if (isAlive(record.hookPid)) return null;
+  if (shouldDeferForHookExit(record, isAlive, Date.now())) return null;
 
   try {
     await remove(path);

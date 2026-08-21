@@ -40,6 +40,23 @@ export interface SubmitDecisionRecordV1 {
   blockIssuedAt: number;
   /** PID of the hook that issued the block; used to defer until it has exited. */
   hookPid: number;
+  /**
+   * RC30 (Windows/Devin tester, 2026-08-21): PID of the SHELL that spawned the
+   * hook, written **on win32 only**.
+   *
+   * On Windows Cascade executes the `powershell` field, so the tree is
+   * `powershell.exe → node.exe` and `hookPid` is the NODE process. Cascade acts
+   * on the WRAPPER's exit, which is strictly later — so waiting only on
+   * `hookPid` clears too early (measured: the extension injected 58 ms after the
+   * decision was persisted) and the replacement lands while the original prompt
+   * is still live, queueing behind it. That is the reported "injected but stuck
+   * in the queue until the old prompt was cancelled".
+   *
+   * OMITTED on POSIX, where the `command` field runs with no such wrapper —
+   * so the record, and every decision made from it, is byte-identical to
+   * pre-RC30 on Linux/macOS. Optional so older records stay valid.
+   */
+  hookShellPid?: number;
   /** Which host produced it — so a Cursor record can never be delivered to Windsurf. */
   host: 'windsurf' | 'cursor';
   /**
@@ -83,6 +100,9 @@ export function parseSubmitDecisionRecordV1(raw: unknown): SubmitDecisionRecordV
     blockIssuedAt: r.blockIssuedAt,
     hookPid: r.hookPid,
     host: r.host,
+    ...(typeof r.hookShellPid === 'number' && Number.isInteger(r.hookShellPid) && r.hookShellPid > 0
+      ? { hookShellPid: r.hookShellPid }
+      : {}),
     ...(isNonEmptyString(r.projectRoot) ? { projectRoot: r.projectRoot } : {}),
   };
 }

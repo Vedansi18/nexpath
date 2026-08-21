@@ -21,7 +21,10 @@ import {
   submitDecisionPath,
   WINDSURF_SUBMIT_ADVISORY_ENV,
   SUBMIT_FLOW_FLAG_FILENAME,
+  shouldDeferForHookExit,
+  SHELL_EXIT_GRACE_MS,
 } from './submit-advisory-runtime.js';
+import { parseSubmitDecisionRecordV1 } from './submit-decision-record.js';
 
 const RECORD = {
   schemaVersion: 1,
@@ -766,5 +769,71 @@ describe('⭐ RC28 — setup cannot run twice concurrently (structural pin)', ()
 
   it('only ONE terminal-creation site exists at all', () => {
     expect([...glueSrc.matchAll(/createTerminal\(\{/g)]).toHaveLength(1);
+  });
+});
+
+/**
+ * RC30 — the Windows/Devin "injected but stuck in the queue" bug.
+ *
+ * Cascade runs the `powershell` field on win32, so the tree is
+ * `powershell.exe -> node.exe`. `hookPid` is NODE, but the host cancels the
+ * original prompt only when the WRAPPER exits. Waiting on node alone cleared
+ * ~58ms too early (measured: inject_dispatched +1681ms vs decision_persisted
+ * +1623ms) and the replacement queued behind a still-live prompt.
+ */
+describe('⭐ RC30 — defer until the SHELL that ran the hook has exited too', () => {
+  const base = { hookPid: 100, blockIssuedAt: 1_000_000 };
+  const dead = new Set<number>();
+  const alive = (pid: number) => !dead.has(pid);
+
+  it('⭐ THE BUG: node dead but the powershell wrapper still alive ⇒ MUST defer', () => {
+    dead.clear(); dead.add(100);                       // node exited
+    expect(shouldDeferForHookExit(
+      { ...base, hookShellPid: 200 }, alive, 1_000_100)).toBe(true);
+  });
+
+  it('delivers once the wrapper exits too', () => {
+    dead.clear(); dead.add(100); dead.add(200);
+    expect(shouldDeferForHookExit(
+      { ...base, hookShellPid: 200 }, alive, 1_000_100)).toBe(false);
+  });
+
+  it('still defers while the hook ITSELF is alive (pre-RC30 guard intact)', () => {
+    dead.clear();                                      // both alive
+    expect(shouldDeferForHookExit(
+      { ...base, hookShellPid: 200 }, alive, 1_000_100)).toBe(true);
+  });
+
+  it('⭐ NO REGRESSION — a POSIX record (no hookShellPid) behaves exactly as before', () => {
+    dead.clear(); dead.add(100);
+    expect(shouldDeferForHookExit(base, alive, 1_000_100)).toBe(false); // delivers
+    dead.clear();
+    expect(shouldDeferForHookExit(base, alive, 1_000_100)).toBe(true);  // defers
+  });
+
+  it('a wedged/reused wrapper pid can NEVER stall delivery forever', () => {
+    dead.clear(); dead.add(100);                       // wrapper "alive" forever
+    const past = 1_000_000 + SHELL_EXIT_GRACE_MS + 1;
+    expect(shouldDeferForHookExit(
+      { ...base, hookShellPid: 200 }, alive, past)).toBe(false);
+  });
+
+  it('the grace is measured from blockIssuedAt, not createdAt', () => {
+    // createdAt can trail a long human decision; blockIssuedAt is when the
+    // record is persisted, which is what the wrapper's exit follows.
+    dead.clear(); dead.add(100);
+    expect(shouldDeferForHookExit(
+      { hookPid: 100, blockIssuedAt: 5_000_000, hookShellPid: 200 }, alive, 5_000_500)).toBe(true);
+  });
+
+  it('the record parser accepts hookShellPid and rejects a bogus one', () => {
+    const rec = (extra: Record<string, unknown>) => parseSubmitDecisionRecordV1({
+      schemaVersion: 1, decisionId: 'd', replacementText: 't',
+      createdAt: 1, blockIssuedAt: 1, hookPid: 5, host: 'windsurf', ...extra,
+    });
+    expect(rec({ hookShellPid: 42 })?.hookShellPid).toBe(42);
+    expect(rec({ hookShellPid: -1 })?.hookShellPid).toBeUndefined();
+    expect(rec({ hookShellPid: 'x' })?.hookShellPid).toBeUndefined();
+    expect(rec({})?.hookShellPid).toBeUndefined();     // POSIX record stays valid
   });
 });

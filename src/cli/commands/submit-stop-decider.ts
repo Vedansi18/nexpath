@@ -176,6 +176,12 @@ export function buildStopDrivenPromptSubmitDecider(
         projectRoot,
         blockIssuedAt,
         hookPid: process.pid,
+        // RC30: win32 only — Cascade waits on the powershell wrapper,
+        // not on this node process. Undefined elsewhere, and
+        // JSON.stringify drops it, so POSIX records are unchanged.
+        ...(process.platform === 'win32' && process.ppid > 0
+          ? { hookShellPid: process.ppid }
+          : {}),
         decisionId: `sd-${now()}-${Math.floor(now() % 100000)}`,
         replacementText: block.reason,
         createdAt: now(),
