@@ -7,9 +7,7 @@ If you are new to the project, read the [README](README.md) first — it covers 
 how to install it, and how it handles your data. This guide covers only what you need in order
 to *change* it.
 
-## TL;DR
-
-There are lots of ways to contribute:
+## Ways to Contribute
 
 - **Code Contributions:** Fix bugs, improve the pipeline, add agent support
 - **End-to-End Agent Testing:** Verify Nexpath against agents we have not certified yet
