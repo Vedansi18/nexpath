@@ -248,3 +248,50 @@ describe('⭐ verifyHookRegistration — a wiped machine must self-heal', () => 
     expect(calls.runInTerminal).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * RC32 — a working GLOBAL nexpath must not mask a STAGED copy that cannot run.
+ * The registered hook always invokes the staged entry, so only the staged copy's
+ * own dependencies make the hook work. Caught live: "setup already complete +
+ * verified" while the registered command died ERR_MODULE_NOT_FOUND.
+ */
+describe('⭐ RC32 — a registered hook needs the STAGED cli to actually run', () => {
+  const STAGED = {
+    status: 'already-current' as const, stagedDir: '/h/cli/0.1.4',
+    cliEntry: '/h/cli/0.1.4/dist/cli/index.js', shimPath: '/h/bin/nexpath', version: '0.1.4',
+  };
+  const build = (over: Partial<SetupFlowDeps> = {}) => makeDeps({
+    getState: () => ({ done: true, version: '0.1.4' }),
+    stageCli: () => STAGED,
+    verifyHookRegistration: () => true,
+    ...over,
+  });
+
+  it('⭐ THE GAP: global CLI present + staged copy broken ⇒ setup RE-RUNS (was "already-done")', async () => {
+    const { deps } = build({ verifyStagedCli: () => false });
+    expect(await runSetupFlow(deps, { preferExistingCli: true })).not.toBe('already-done');
+  });
+
+  it('says WHY, so a broken hook is never silent', async () => {
+    const lines: string[] = [];
+    const { deps } = build({ verifyStagedCli: () => false, log: (l: string) => lines.push(l) });
+    await runSetupFlow(deps, { preferExistingCli: true });
+    expect(lines.join('\n')).toMatch(/staged CLI but that copy does not run/i);
+  });
+
+  it('⭐ INERT on a healthy install — still "already-done", no setup terminal', async () => {
+    const { deps, calls } = build({ verifyStagedCli: () => true });
+    expect(await runSetupFlow(deps, { preferExistingCli: true })).toBe('already-done');
+    expect(calls.runInTerminal).not.toHaveBeenCalled();
+  });
+
+  it('inert without a global CLI too (the pre-RC32 path is unchanged)', async () => {
+    const { deps } = build({ verifyStagedCli: () => true });
+    expect(await runSetupFlow(deps, {})).toBe('already-done');
+  });
+
+  it('a broken staged cli with NO hook registered still re-runs (path unchanged)', async () => {
+    const { deps } = build({ verifyHookRegistration: () => false, verifyStagedCli: () => false });
+    expect(await runSetupFlow(deps, { preferExistingCli: true })).not.toBe('already-done');
+  });
+});

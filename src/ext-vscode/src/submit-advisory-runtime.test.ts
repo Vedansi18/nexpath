@@ -585,7 +585,14 @@ describe('⭐ RC19b — both setup gates verify registration (structural pin)', 
     // RC26: verifyHookRegistration now takes the staged CLI entry so it can
     // verify the registered command is CURRENT, not just "something exists".
     expect(offer).toMatch(/const hookRegistered = deps\.verifyHookRegistration\?\.\(staged\.cliEntry \?\? ''\) \?\? true;/);
-    expect(offer).toMatch(/state\.done[\s\S]{0,200}?cliReady && hookRegistered;/);
+    // RC32 added `stagedRunsForHook` to the SAME gate: a working global CLI
+    // satisfies `cliReady`, but the registered hook runs the STAGED entry, so a
+    // staged copy that cannot run must not read as "already set up". Both
+    // conditions must stay in this one expression — RC19's whole lesson was that
+    // a second, divergent definition of "already set up" makes the self-heal
+    // unreachable from activation.
+    expect(offer).toMatch(/state\.done[\s\S]{0,400}?cliReady && hookRegistered && stagedRunsForHook;/);
+    expect(offer).toMatch(/const stagedRunsForHook = !hookRegistered \|\| verified;/);
   });
 
   it('registration drift on a done install re-runs setup automatically (no prompt)', () => {

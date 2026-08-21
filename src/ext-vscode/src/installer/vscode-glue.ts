@@ -305,12 +305,30 @@ export async function offerSetupIfNeeded(
   // '') — never worse than before this change, and this branch is unreachable
   // in practice.
   const hookRegistered = deps.verifyHookRegistration?.(staged.cliEntry ?? '') ?? true;
+  // ── RC32 (2026-08-21) ────────────────────────────────────────────────────
+  // `cliReady` above is satisfied by a working GLOBAL nexpath (`hasGlobalCli`),
+  // but the registered hook always invokes the STAGED entry — so a global CLI
+  // cannot make the hook work. Found live: with a global present and the staged
+  // copy's `node_modules` missing, this logged "already set up" while running
+  // the registered command by hand died ERR_MODULE_NOT_FOUND.
+  //
+  // This gate MUST carry the same rule as `runSetupFlow`'s. RC19's lesson,
+  // repeating: two independent definitions of "already set up" is exactly how
+  // the self-heal became unreachable from activation last time — the fix landed
+  // in `runSetupFlow` and this gate returned before ever calling it.
+  //
+  // Inert on a healthy install (`verified` is already true there); the only
+  // machines it changes are ones whose hook is broken right now.
+  const stagedRunsForHook = !hookRegistered || verified;
   const upToDate =
     state.done && state.version === staged.version && staged.status === 'already-current'
-    && cliReady && hookRegistered;
+    && cliReady && hookRegistered && stagedRunsForHook;
   if (upToDate) {
     log(`[nexpath] this editor already set up (v${staged.version})`);
     return;
+  }
+  if (hookRegistered && !verified) {
+    log('[nexpath] the registered hook points at the staged CLI but that copy does not run (dependencies missing/incomplete) — re-running setup to repair it');
   }
   // Registration drift on an otherwise-complete install repairs itself WITHOUT
   // asking: the user already consented to setup once; what went missing is our
