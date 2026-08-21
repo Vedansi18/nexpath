@@ -28,8 +28,8 @@
  * is the fail-open outcome (`A3`): the user simply keeps whatever the hook left.
  */
 import { readFile, unlink } from 'node:fs/promises';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import {
   parseSubmitDecisionJsonV1,
@@ -37,6 +37,58 @@ import {
 } from './submit-decision-record.js';
 
 /** Must stay byte-identical to the CLI's constant — pinned by test. */
+/** `~/.nexpath/session-env.json` — read by the CLI decider before spawning
+ *  `stop`. Duplicated from the CLI (G-ROOTDIR wall); pinned by contract test. */
+export const SESSION_ENV_SNAPSHOT_FILENAME = 'session-env.json';
+
+const SESSION_ENV_SNAPSHOT_KEYS = [
+  'DISPLAY', 'WAYLAND_DISPLAY', 'XAUTHORITY', 'DBUS_SESSION_BUS_ADDRESS',
+  'XDG_RUNTIME_DIR', 'XDG_SESSION_TYPE', 'XDG_DATA_DIRS', 'XDG_CURRENT_DESKTOP',
+  'LANG', 'TERM',
+] as const;
+
+/**
+ * RC35: persist the GUI session env for the CLI's popup host.
+ *
+ * The extension host runs INSIDE the editor's desktop session, so its env is
+ * the real one. Windsurf spawns its Cascade hooks with that session STRIPPED
+ * (measured 2026-08-21: identical hook + rows popped under the desktop env and
+ * sat silent under the hook env; Cursor, which passes the session through, was
+ * fine minutes apart on the same machine). The CLI decider fills ONLY missing
+ * vars from this snapshot — it never overrides the hook env.
+ *
+ * Linux-only by construction (these vars are meaningless elsewhere), and pure
+ * best-effort: any write failure is swallowed — the decider treats a missing
+ * snapshot as "no enrichment", which is exactly today's behaviour.
+ */
+export function writeSessionEnvSnapshot(deps: {
+  env?: NodeJS.ProcessEnv;
+  platform?: NodeJS.Platform;
+  writeFile?: (path: string, data: string) => void;
+  nexpathHome?: string;
+} = {}): boolean {
+  const platform = deps.platform ?? process.platform;
+  if (platform !== 'linux') return false;
+  const env = deps.env ?? process.env;
+  const snap: Record<string, string> = {};
+  for (const k of SESSION_ENV_SNAPSHOT_KEYS) {
+    const v = env[k];
+    if (typeof v === 'string' && v.length > 0) snap[k] = v;
+  }
+  if (Object.keys(snap).length === 0) return false;
+  try {
+    const home = deps.nexpathHome ?? join(homedir(), '.nexpath');
+    const write = deps.writeFile ?? ((p2: string, d: string) => {
+      mkdirSync(dirname(p2), { recursive: true });
+      writeFileSync(p2, d, 'utf8');
+    });
+    write(join(home, SESSION_ENV_SNAPSHOT_FILENAME), JSON.stringify(snap, null, 2));
+    return true;
+  } catch {
+    return false; // best-effort — never break activation
+  }
+}
+
 export const WINDSURF_SUBMIT_ADVISORY_ENV = 'NEXPATH_WINDSURF_PROMPTSUBMIT_ADVISORY';
 
 /**

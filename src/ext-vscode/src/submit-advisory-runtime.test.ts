@@ -21,6 +21,8 @@ import {
   submitDecisionPath,
   WINDSURF_SUBMIT_ADVISORY_ENV,
   SUBMIT_FLOW_FLAG_FILENAME,
+  writeSessionEnvSnapshot,
+  SESSION_ENV_SNAPSHOT_FILENAME,
   shouldDeferForHookExit,
   SHELL_EXIT_GRACE_MS,
 } from './submit-advisory-runtime.js';
@@ -842,5 +844,59 @@ describe('⭐ RC30 — defer until the SHELL that ran the hook has exited too', 
     expect(rec({ hookShellPid: -1 })?.hookShellPid).toBeUndefined();
     expect(rec({ hookShellPid: 'x' })?.hookShellPid).toBeUndefined();
     expect(rec({})?.hookShellPid).toBeUndefined();     // POSIX record stays valid
+  });
+});
+
+/**
+ * RC35 — the extension snapshots the GUI session env for the CLI popup host
+ * (Windsurf strips it from hook spawns; measured 2026-08-21). Writer is
+ * linux-only, whitelist-only, best-effort.
+ */
+describe('⭐ RC35 — writeSessionEnvSnapshot', () => {
+  it('writes only whitelisted, defined, non-empty vars', () => {
+    const writes: Array<{ p: string; d: string }> = [];
+    const ok = writeSessionEnvSnapshot({
+      platform: 'linux', nexpathHome: '/h/.nexpath',
+      env: { DISPLAY: ':1', XAUTHORITY: '', LD_PRELOAD: '/evil.so', TERM: 'xterm', HOME: '/h' },
+      writeFile: (p, d) => writes.push({ p, d }),
+    });
+    expect(ok).toBe(true);
+    expect(writes).toHaveLength(1);
+    expect(writes[0].p.endsWith('session-env.json')).toBe(true);
+    const snap = JSON.parse(writes[0].d);
+    expect(snap.DISPLAY).toBe(':1');
+    expect(snap.TERM).toBe('xterm');
+    expect(snap.XAUTHORITY).toBeUndefined(); // empty ⇒ dropped
+    expect(snap.LD_PRELOAD).toBeUndefined(); // not whitelisted
+    expect(snap.HOME).toBeUndefined();       // not whitelisted
+  });
+
+  it('linux-only — win32/darwin write nothing', () => {
+    const writes: string[] = [];
+    expect(writeSessionEnvSnapshot({ platform: 'win32', env: { DISPLAY: ':1' }, writeFile: (p) => { writes.push(p); } })).toBe(false);
+    expect(writeSessionEnvSnapshot({ platform: 'darwin', env: { DISPLAY: ':1' }, writeFile: (p) => { writes.push(p); } })).toBe(false);
+    expect(writes).toHaveLength(0);
+  });
+
+  it('nothing to snapshot ⇒ no write (a headless session stays untouched)', () => {
+    const writes: string[] = [];
+    expect(writeSessionEnvSnapshot({ platform: 'linux', env: { PATH: '/b' }, writeFile: (p) => { writes.push(p); } })).toBe(false);
+    expect(writes).toHaveLength(0);
+  });
+
+  it('a write failure is swallowed — activation can never break on this', () => {
+    expect(writeSessionEnvSnapshot({
+      platform: 'linux', env: { DISPLAY: ':1' },
+      writeFile: () => { throw new Error('EACCES'); },
+    })).toBe(false);
+  });
+
+  it('the contract filename matches the CLI side', () => {
+    expect(SESSION_ENV_SNAPSHOT_FILENAME).toBe('session-env.json');
+  });
+
+  it('extension.ts calls it at activation (structural)', () => {
+    const src = readFileSync(join(__dirname, 'extension.ts'), 'utf8');
+    expect(src).toMatch(/writeSessionEnvSnapshot\(\);/);
   });
 });

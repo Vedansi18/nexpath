@@ -552,6 +552,18 @@ export async function runWindsurfHookAction(
     // unknown value, or anything unexpected falls through to the normal exit-0
     // path below.
     if (event === 'pre_user_prompt' && isSubmitAdvisoryEnabledForHost('windsurf', { env, readFlagFile: deps.readFlagFile })) {
+      // RC35: env-gate parity with cursor_hook_gate. Cursor has logged
+      // has_display/has_dbus since day one; Windsurf never did — which left
+      // every "popup never appeared" report on this host env-blind. The 08-21
+      // failure was exactly that: Windsurf spawns hooks with the GUI session
+      // stripped, so the popup host cannot render and stop exits silently.
+      log('info', 'windsurf_hook_gate', {
+        enabled: true,
+        has_display: Boolean(process.env.DISPLAY || process.env.WAYLAND_DISPLAY),
+        has_dbus: Boolean(process.env.DBUS_SESSION_BUS_ADDRESS),
+        has_xdg_runtime: Boolean(process.env.XDG_RUNTIME_DIR),
+        has_xauthority: Boolean(process.env.XAUTHORITY),
+      });
       // ── stdin is single-read, so it is consumed HERE and handed onward ────
       // `handleWindsurfHookCli` normally reads stdin itself. The decider needs the
       // same bytes (it must see the user's prompt text), and a pipe cannot be read

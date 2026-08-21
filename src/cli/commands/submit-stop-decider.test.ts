@@ -12,6 +12,8 @@ import { EventEmitter } from 'node:events';
 import {
   buildStopDrivenPromptSubmitDecider,
   parseStopBlockOutput,
+  enrichSpawnEnvFromSessionSnapshot,
+  SESSION_ENV_SNAPSHOT_FILENAME,
 } from './submit-stop-decider.js';
 
 /** A fake `stop` child: emits the given stdout then exits with the given code. */
@@ -197,5 +199,63 @@ describe('⭐ RC10 — a block sweeps every leftover pending row', () => {
       },
     );
     await expect(decide('e', { project: '/proj' }, 'p')).resolves.toBe('block');
+  });
+});
+
+/**
+ * ⭐ RC35 — Windsurf strips the GUI session from hook spawns, so stop's popup
+ * host cannot render and every submit ends stdout_len:0 / allow. Measured on
+ * one machine minutes apart: Cursor (full env) popped; Windsurf (sparse env)
+ * silent; the identical command popped under the desktop env with the ctty
+ * detached. The decider fills ONLY missing vars from the extension's snapshot.
+ */
+describe('⭐ RC35 — enrichSpawnEnvFromSessionSnapshot', () => {
+  const SNAP = JSON.stringify({ DISPLAY: ':1', DBUS_SESSION_BUS_ADDRESS: 'unix:path=/run/user/1000/bus', XAUTHORITY: '/run/user/1000/gdm/Xauthority' });
+
+  it('⭐ fills the vars the host stripped (the Windsurf shape)', () => {
+    const out = enrichSpawnEnvFromSessionSnapshot({ PATH: '/usr/bin', HOME: '/h' }, {
+      platform: 'linux', readSnapshot: () => SNAP,
+    });
+    expect(out.DISPLAY).toBe(':1');
+    expect(out.DBUS_SESSION_BUS_ADDRESS).toContain('/run/user/1000/bus');
+    expect(out.PATH).toBe('/usr/bin');
+  });
+
+  it('⭐ NEVER overrides a var the hook env already has (the Cursor shape = no-op)', () => {
+    const base = { DISPLAY: ':7', PATH: '/usr/bin' };
+    const out = enrichSpawnEnvFromSessionSnapshot(base, { platform: 'linux', readSnapshot: () => SNAP });
+    expect(out.DISPLAY).toBe(':7');
+  });
+
+  it('returns the SAME object when nothing was filled (identity fast-path)', () => {
+    const base = { DISPLAY: ':1', DBUS_SESSION_BUS_ADDRESS: 'x', XAUTHORITY: 'y', PATH: '/b' };
+    expect(enrichSpawnEnvFromSessionSnapshot(base, { platform: 'linux', readSnapshot: () => SNAP })).toBe(base);
+  });
+
+  it('non-linux is a strict no-op (win32/darwin popups do not use these vars)', () => {
+    const base = { PATH: 'C:\\bin' };
+    expect(enrichSpawnEnvFromSessionSnapshot(base, { platform: 'win32', readSnapshot: () => SNAP })).toBe(base);
+    expect(enrichSpawnEnvFromSessionSnapshot(base, { platform: 'darwin', readSnapshot: () => SNAP })).toBe(base);
+  });
+
+  it('missing or corrupt snapshot degrades to exactly today (fail-open)', () => {
+    const base = { PATH: '/usr/bin' };
+    expect(enrichSpawnEnvFromSessionSnapshot(base, { platform: 'linux', readSnapshot: () => { throw new Error('ENOENT'); } })).toBe(base);
+    expect(enrichSpawnEnvFromSessionSnapshot(base, { platform: 'linux', readSnapshot: () => '{bad' })).toBe(base);
+  });
+
+  it('ignores non-string / empty snapshot values and non-whitelisted keys', () => {
+    const out = enrichSpawnEnvFromSessionSnapshot({ PATH: '/b' }, {
+      platform: 'linux',
+      readSnapshot: () => JSON.stringify({ DISPLAY: '', XAUTHORITY: 42, LD_PRELOAD: '/evil.so', TERM: 'xterm' }),
+    });
+    expect(out.DISPLAY).toBeUndefined();
+    expect(out.XAUTHORITY).toBeUndefined();
+    expect((out as Record<string, unknown>).LD_PRELOAD).toBeUndefined();
+    expect(out.TERM).toBe('xterm');
+  });
+
+  it('the contract filename matches the extension side', () => {
+    expect(SESSION_ENV_SNAPSHOT_FILENAME).toBe('session-env.json');
   });
 });

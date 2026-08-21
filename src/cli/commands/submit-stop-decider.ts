@@ -36,7 +36,9 @@
  * persist failure — resolves 'allow': the original prompt is released.
  */
 import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
-import { resolve } from 'node:path';
+import { readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { writeSubmitDecision } from './submit-decision-store.js';
 import { log } from '../../logger.js';
 // CONSUME-ONLY store calls (bhavnesh75-owned exports), used exactly as stop.ts
@@ -50,6 +52,70 @@ import {
   getPendingPromptEnhancement,
   markPromptEnhancementShown,
 } from '../../store/pending-prompt-enhancements.js';
+
+/** Vars the popup host needs that GUI-service hook spawns often strip. */
+const SESSION_ENV_KEYS = [
+  'DISPLAY', 'WAYLAND_DISPLAY', 'XAUTHORITY', 'DBUS_SESSION_BUS_ADDRESS',
+  'XDG_RUNTIME_DIR', 'XDG_SESSION_TYPE', 'XDG_DATA_DIRS', 'XDG_CURRENT_DESKTOP',
+  'LANG', 'TERM',
+] as const;
+
+/** `~/.nexpath/session-env.json` — written by the extension at activation.
+ *  Duplicated in the extension (G-ROOTDIR wall); pinned by a contract test. */
+export const SESSION_ENV_SNAPSHOT_FILENAME = 'session-env.json';
+
+/**
+ * RC35 (Ubuntu/Windsurf, 2026-08-21): fill ONLY the missing GUI-session vars
+ * into the env the decider hands `stop`.
+ *
+ * ── THE MEASURED FAILURE ─────────────────────────────────────────────────────
+ * On one machine, minutes apart: Cursor's hook popped and blocked
+ * (its hook env carries the session — its own gate logs has_display/has_dbus
+ * true), while every Windsurf submit ended `submit_stop_decider_done
+ * stdout_len:0` — `stop` found rows to show and could not render ANY popup.
+ * Reproduced exactly: run the hook with a sparse env → silent allow, on BOTH
+ * the pre-sync 0.1.3 CLI and current — so not a regression, a host-env
+ * difference. Same command with the full desktop env (ctty detached) → the
+ * popup window spawns. Windsurf simply strips the GUI session from its hook
+ * spawns; the popup host then resolves unavailable and stop has nothing it can
+ * render.
+ *
+ * The extension runs INSIDE the editor GUI process, so it knows the real
+ * session env; it snapshots the whitelisted vars to `~/.nexpath/` at
+ * activation. This fills gaps from that snapshot — NEVER overriding anything
+ * the hook env already has, linux-only, fail-open on every error (missing or
+ * corrupt snapshot ⇒ exactly today's env). Cursor's env is already complete,
+ * so this is a no-op there; with the switch off this decider never runs, so
+ * the old flow is untouched by construction.
+ */
+export function enrichSpawnEnvFromSessionSnapshot(
+  base: NodeJS.ProcessEnv,
+  deps: {
+    platform?: NodeJS.Platform;
+    readSnapshot?: () => string;
+  } = {},
+): NodeJS.ProcessEnv {
+  const platform = deps.platform ?? process.platform;
+  if (platform !== 'linux') return base;
+  try {
+    const read = deps.readSnapshot
+      ?? (() => readFileSync(join(homedir(), '.nexpath', SESSION_ENV_SNAPSHOT_FILENAME), 'utf8'));
+    const snap = JSON.parse(read()) as Record<string, unknown>;
+    const out: NodeJS.ProcessEnv = { ...base };
+    let filled = false;
+    for (const k of SESSION_ENV_KEYS) {
+      const have = out[k];
+      const v = snap[k];
+      if ((have === undefined || have === '') && typeof v === 'string' && v.length > 0) {
+        out[k] = v;
+        filled = true;
+      }
+    }
+    return filled ? out : base;
+  } catch {
+    return base; // no snapshot / unreadable / corrupt — today's behaviour exactly
+  }
+}
 
 /** What `stop` prints on a selection — Layer C's Claude-Code block contract. */
 export interface StopBlockLine {
@@ -140,7 +206,11 @@ export function buildStopDrivenPromptSubmitDecider(
         // stdout is PIPED — the block line is the decision channel. stderr is
         // ignored: popup hosts write cues there ("Please select an action…").
         stdio: ['pipe', 'pipe', 'ignore'],
-        env: process.env,
+        // RC35: hand `stop` the hook env PLUS any GUI-session vars the host
+        // stripped (see enrichSpawnEnvFromSessionSnapshot) — the popup cannot
+        // render without them, and Windsurf's hook spawns arrive without a
+        // session. Set-if-absent only; Cursor and the CLI path are no-ops.
+        env: enrichSpawnEnvFromSessionSnapshot(process.env),
       };
       child = spawnFn(cmd, [...prefix, 'stop'], spawnOpts);
       ports.onChild?.(child);

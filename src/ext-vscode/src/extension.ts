@@ -29,6 +29,7 @@ import {
   isWindsurfSubmitAdvisoryEnabled,
   isCursorSubmitAdvisoryEnabled,
   explainSubmitFlowGate,
+  writeSessionEnvSnapshot,
   readPendingSubmitDecisionMirror,
   readPendingSubmitDecision,
   peekPendingSubmitDecision,
@@ -256,6 +257,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   //    first thing to check when a host shows up as vscode-generic unexpectedly.
   const host = detectHost();
   log(`[nexpath] host=${host} (appName=${JSON.stringify(vscode.env.appName)}, uriScheme=${JSON.stringify(vscode.env.uriScheme)})`);
+
+  // RC35: persist the GUI session env for the CLI popup host — Windsurf strips
+  // it from hook spawns (measured 2026-08-21); the decider fills only MISSING
+  // vars back from this snapshot. Linux-only, best-effort; failure changes nothing.
+  writeSessionEnvSnapshot();
 
   // 1a. Tell Layer C's popup which agent it's sending to, so its "Send to …"
   //     label names this surface (Cursor / Windsurf) instead of defaulting to
