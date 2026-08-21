@@ -437,11 +437,16 @@ describe('⭐ H8 Finding 1 — the DS-bridge guard is actually WIRED (structural
 
   it('onSelection consults the guard before bridging', () => {
     const sel = extSrc.slice(extSrc.indexOf('onSelection: async (prompt)'));
-    const guardAt = sel.indexOf('isSubmitFlowReplacement(');
+    // RC28: the call is now the GRACE form. The single-shot form cannot see a
+    // decision the hook has not written yet, which is exactly how a submit
+    // replacement got bridged into a still-running turn on Windows/Devin.
+    const guardAt = sel.indexOf('isSubmitFlowReplacementWithinGrace(');
     const injectAt = sel.indexOf('injectIntoChat(prompt)');
     expect(guardAt).toBeGreaterThan(-1);
     expect(injectAt).toBeGreaterThan(-1);
     expect(guardAt).toBeLessThan(injectAt);
+    // And the single-shot form must not creep back onto this path.
+    expect(sel.slice(0, injectAt)).not.toMatch(/await isSubmitFlowReplacement\(/);
   });
 
   it('the guard is null-gated so the switch-off bridge is byte-identical in behaviour', () => {
@@ -581,7 +586,9 @@ describe('⭐ RC19b — both setup gates verify registration (structural pin)', 
   });
 
   it('registration drift on a done install re-runs setup automatically (no prompt)', () => {
-    expect(offer).toMatch(/if \(state\.done && !hookRegistered\)[\s\S]{0,400}?await runSetupFlow\(/);
+    // RC28: the drift auto-repair now routes through the single-flight gate
+    // (runSetupFlowOnce) so it cannot open a second setup terminal.
+    expect(offer).toMatch(/if \(state\.done && !hookRegistered\)[\s\S]{0,400}?await runSetupFlowOnce\(/);
   });
 
   it('a fresh (never-done) install still goes through the normal offer prompt', () => {
@@ -725,5 +732,39 @@ describe('⭐ RC24 — the extension identifies its own build', () => {
     expect(cfg).toMatch(/define: \{ __NEXPATH_BUILD__: JSON\.stringify\(buildId\) \}/);
     expect(cfg).toMatch(/git rev-parse --short HEAD/);
     expect(cfg).toMatch(/catch \{\s*return 'unknown';/);
+  });
+});
+
+/**
+ * RC28 — setup is single-flight. Three call sites (drift auto-repair, the "Set
+ * up" notification, the "Nexpath: Set up CLI" command) could each open a
+ * `Nexpath Setup` terminal and race two interactive `npm ci` + install runs
+ * against the SAME staged CLI dir. The tester's screenshots show two such
+ * terminals side by side.
+ */
+describe('⭐ RC28 — setup cannot run twice concurrently (structural pin)', () => {
+  const glueSrc = readFileSync(join(__dirname, 'installer', 'vscode-glue.ts'), 'utf8');
+
+  it('a module-level in-flight slot exists and is released in finally', () => {
+    expect(glueSrc).toMatch(/let setupInFlight: Promise<SetupOutcome> \| null = null;/);
+    expect(glueSrc).toMatch(/finally \{\s*setupInFlight = null;\s*\}/);
+  });
+
+  it('EVERY call site goes through the gate — none calls runSetupFlow directly', () => {
+    // Exactly ONE direct call is permitted: the one inside the gate itself.
+    const direct = [...glueSrc.matchAll(/await runSetupFlow\(deps, opts\)/g)];
+    expect(direct).toHaveLength(1);
+    // No call site may bypass the gate with its own options object.
+    expect(glueSrc).not.toMatch(/await runSetupFlow\(deps, \{/);
+    const gated = [...glueSrc.matchAll(/runSetupFlowOnce\(deps/g)];
+    expect(gated.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('a follower JOINS the running setup instead of opening a second terminal', () => {
+    expect(glueSrc).toMatch(/if \(setupInFlight\) \{[\s\S]{0,300}?return setupInFlight;/);
+  });
+
+  it('only ONE terminal-creation site exists at all', () => {
+    expect([...glueSrc.matchAll(/createTerminal\(\{/g)]).toHaveLength(1);
   });
 });

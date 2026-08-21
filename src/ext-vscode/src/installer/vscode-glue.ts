@@ -11,8 +11,47 @@ import {
   runSetupFlow,
   buildSetupCommand,
   type SetupFlowDeps,
+  type SetupOutcome,
   type SetupState,
 } from './setup-flow.js';
+
+/**
+ * RC28 (Windows/Devin tester, 2026-08-20): setup is SINGLE-FLIGHT.
+ *
+ * Three call sites start a setup — the auto-repair on registration drift, the
+ * "Set up" notification button, and the "Nexpath: Set up CLI" command — and none
+ * of them knew about the others. Two that overlap open two `Nexpath Setup`
+ * terminals (visible in the tester's screenshots) and race TWO interactive
+ * `npm ci` + `install --for vscode` runs against the SAME staged CLI directory:
+ * one can wipe `node_modules` while the other is mid-install, and both then
+ * write the same hooks.json and flag file.
+ *
+ * A module-level promise is the right scope: `runSetupFlow` is already stateless
+ * across calls, the extension host is single-threaded, and one setup per host
+ * process is exactly the invariant we want. Followers await the SAME promise, so
+ * they observe the real outcome instead of a fabricated one, and the slot is
+ * always released in `finally` — a thrown setup can never wedge the gate shut.
+ */
+let setupInFlight: Promise<SetupOutcome> | null = null;
+
+async function runSetupFlowOnce(
+  deps: SetupFlowDeps,
+  opts: Parameters<typeof runSetupFlow>[1],
+  log: Logger,
+): Promise<SetupOutcome> {
+  if (setupInFlight) {
+    log('[nexpath] setup already running — joining it instead of opening a second setup terminal');
+    return setupInFlight;
+  }
+  setupInFlight = (async () => {
+    try {
+      return await runSetupFlow(deps, opts);
+    } finally {
+      setupInFlight = null;
+    }
+  })();
+  return setupInFlight;
+}
 
 /**
  * Thin VS Code glue for the CLI auto-installer.
@@ -280,7 +319,7 @@ export async function offerSetupIfNeeded(
   // once per activation — this function is invoked once, after activation.
   if (state.done && !hookRegistered) {
     log('[nexpath] this editor is set up but NOT fully registered (hook entry or submit-flow key missing) — re-running setup automatically');
-    await runSetupFlow(deps, { preferExistingCli: hasGlobalCli });
+    await runSetupFlowOnce(deps, { preferExistingCli: hasGlobalCli }, log);
     return;
   }
 
@@ -291,10 +330,17 @@ export async function offerSetupIfNeeded(
     : 'this editor';
   const message = isUpdate
     ? `Nexpath update available (v${staged.version}). Re-run setup for ${agentLabel}?`
-    : `Set up Nexpath for ${agentLabel} now? (you can answer the prompts in the terminal).`;
+    // RC28: kept to one short line. VS Code lays a notification out as
+    // [icon][message][buttons]; once the message wraps, the buttons are pushed
+    // onto their own row and the toast reflows — which is what the tester's
+    // screenshot shows (buttons above, text below) while a second notification
+    // animated in beside it. The layout itself is VS Code's renderer, not ours
+    // (this is the plain `showInformationMessage(msg, ...buttons)` API), but a
+    // message that does not wrap gives it nothing to reflow.
+    : `Set up Nexpath for ${agentLabel}?`;
   const choice = await vscode.window.showInformationMessage(message, 'Set up', 'Later');
   if (choice === 'Set up') {
-    await runSetupFlow(deps, { force: isUpdate, preferExistingCli: hasGlobalCli });
+    await runSetupFlowOnce(deps, { force: isUpdate, preferExistingCli: hasGlobalCli }, log);
   } else {
     log('[nexpath] user deferred per-IDE setup');
   }
@@ -308,5 +354,5 @@ export async function runSetupCommand(
   log: Logger,
 ): Promise<void> {
   const deps = buildDeps(context, log);
-  await runSetupFlow(deps, { force: true });
+  await runSetupFlowOnce(deps, { force: true }, log);
 }

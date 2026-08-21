@@ -129,6 +129,59 @@ describe('submitKeystroke — cross-OS matrix (§2.4b), pinned per platform', ()
     expect(String(run.mock.calls[0][1])).toContain('{ENTER}');
   });
 
+  // ── RC28 (Windows/Devin tester, 2026-08-20) ────────────────────────────
+  // SendKeys has no target — it types into whatever is FOREGROUND. The RC11
+  // whitelist that guarantees editor focus on Linux is a no-op off Linux
+  // (`focusedWindowIsEditor` returns true), and `raiseAppWindow` is X11-only,
+  // so nothing had ever focused the editor: the tester's log recorded
+  // `submit dispatched` on both turns while nothing was submitted.
+  it('⭐ RC28 — Windows ACTIVATES the editor window before pressing Enter', () => {
+    const run = vi.fn().mockReturnValue(true);
+    expect(submitKeystroke({ isPopupFocused: () => false, platform: 'win32', host: 'windsurf', run })).toBe(true);
+    const script = String(run.mock.calls[0][1]);
+    expect(script).toContain('AppActivate');
+    // Activation must come BEFORE the keystroke, or it targets the old window.
+    expect(script.indexOf('AppActivate')).toBeLessThan(script.indexOf('SendKeys'));
+  });
+
+  it('⭐ RC28 — the Devin rebrand is covered (the tester\'s app reports appName="Devin")', () => {
+    const run = vi.fn().mockReturnValue(true);
+    submitKeystroke({ isPopupFocused: () => false, platform: 'win32', host: 'windsurf', run });
+    const script = String(run.mock.calls[0][1]);
+    expect(script).toContain("'Devin'");
+    expect(script).toContain("'Windsurf'");
+  });
+
+  it('RC28 — the cursor host activates Cursor, not Windsurf/Devin', () => {
+    const run = vi.fn().mockReturnValue(true);
+    submitKeystroke({ isPopupFocused: () => false, platform: 'win32', host: 'cursor', run });
+    const script = String(run.mock.calls[0][1]);
+    expect(script).toContain("'Cursor'");
+    expect(script).not.toContain("'Devin'");
+  });
+
+  it('RC28 — a failed activation reports submit_failed instead of a blind Enter', () => {
+    // The script exits 1 when no title activates; defaultRun maps non-zero to
+    // false, so the caller logs `submit failed` rather than "dispatched".
+    const run = vi.fn().mockReturnValue(false);
+    expect(submitKeystroke({ isPopupFocused: () => false, platform: 'win32', host: 'windsurf', run })).toBe(false);
+    expect(String(run.mock.calls[0][1])).toContain('exit 1');
+  });
+
+  it('RC28 did NOT change the darwin or linux branches (no AppActivate there)', () => {
+    // `isEditorFocused` is stubbed so the RC11 whitelist (which would otherwise
+    // shell out to the real xdotool) cannot short-circuit before `run`.
+    const mac = vi.fn().mockReturnValue(true);
+    submitKeystroke({ isPopupFocused: () => false, platform: 'darwin', host: 'windsurf',
+      isEditorFocused: () => true, run: mac });
+    expect(String(mac.mock.calls[0][1])).not.toContain('AppActivate');
+    const lin = vi.fn().mockReturnValue(true);
+    submitKeystroke({ isPopupFocused: () => false, platform: 'linux', host: 'windsurf',
+      isEditorFocused: () => true,
+      env: { DISPLAY: ':1' }, hasCommand: (c: string) => c === 'xdotool', run: lin });
+    expect(String(lin.mock.calls[0][1])).not.toContain('AppActivate');
+  });
+
   it('Linux/X11 prefers xdotool', () => {
     const run = vi.fn().mockReturnValue(true);
     const ok = submitKeystroke({ isPopupFocused: () => false, platform: 'linux', env: { DISPLAY: ':1' }, hasCommand: (c) => c === 'xdotool', run,

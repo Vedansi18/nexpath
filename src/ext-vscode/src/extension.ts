@@ -33,7 +33,7 @@ import {
   readPendingSubmitDecision,
   peekPendingSubmitDecision,
 } from './submit-advisory-runtime.js';
-import { isSubmitFlowReplacement } from './submit-replacement-guard.js';
+import { isSubmitFlowReplacementWithinGrace } from './submit-replacement-guard.js';
 import { deliverSubmitReplacement } from './submit-delivery-strategy.js';
 import { createSubmitAdvisoryForHost } from './submit-advisory-wiring.js';
 import {
@@ -666,7 +666,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           // Local const so TS keeps the non-null narrowing inside the callback
           // now that the store is a `let` (RC15 late-arm creates it lazily).
           const sds = submitDeliveredStore;
-          const isReplacement = await isSubmitFlowReplacement(prompt, {
+          // RC28 (Windows/Devin tester, 2026-08-20): this was the single-shot
+          // `isSubmitFlowReplacement`, which can only see a decision that has
+          // ALREADY been written — and the bridge reliably beats it to disk on
+          // Windows (measured: bridge 44 ms BEFORE the decision id was minted,
+          // ~2.0 s before the block). The grace form re-asks until the decision
+          // lands, exiting early the moment it does. It only DEFERS a genuine
+          // popup selection — `stop` still reaches feedback/PE under the switch,
+          // so those must keep bridging. See the guard module's header.
+          const isReplacement = await isSubmitFlowReplacementWithinGrace(prompt, {
             roots,
             isRecentSubmitDelivery: (root, text) => sds.isRecentEcho(root, text),
             peekPendingDecision: (root) => peekPendingSubmitDecision(root, { expectedHost: 'windsurf' }),

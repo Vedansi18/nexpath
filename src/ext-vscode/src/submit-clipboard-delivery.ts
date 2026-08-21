@@ -326,9 +326,38 @@ export function submitKeystroke(deps: SubmitKeystrokeDeps = {}): boolean {
       return false;
     }
     if (platform === 'win32') {
+      // ── RC28 (Windows/Devin tester, 2026-08-20) ──────────────────────────
+      // `SendKeys` types into whatever window is FOREGROUND at that instant —
+      // it has no target. On Linux the RC11 whitelist above guarantees the
+      // editor is focused before we get here, but `focusedWindowIsEditor`
+      // returns `true` unconditionally off Linux ("no check possible"), and
+      // `focusEditor` → `raiseAppWindow` is X11-only and no-ops on Windows. So
+      // nothing had ever focused the editor: the tester's log shows
+      // `submit dispatched` on BOTH turns while nothing was actually submitted.
+      //
+      // `AppActivate` is WScript.Shell's own targeting call and the standard
+      // pairing for SendKeys. Activate FIRST, and only press Enter if it
+      // reports success — so a failed activation now reports `submit_failed`
+      // instead of firing a blind Enter into an unknown window (the RC11
+      // hazard, which on Windows was previously unguarded).
+      //
+      // Title candidates, in order. The rebrand matters: this tester's app
+      // reports `appName="Devin"`, so matching only 'Windsurf' would miss the
+      // very machine this fixes. AppActivate matches a title PREFIX or
+      // substring, so the bare product name is the right granularity.
+      const titles = deps.host === 'cursor' ? ['Cursor'] : ['Devin', 'Windsurf'];
+      const psTitles = titles.map((t) => `'${t}'`).join(',');
       return run('powershell', [
         '-NoProfile', '-Command',
-        '$w=New-Object -ComObject WScript.Shell;$w.SendKeys("{ENTER}")',
+        // Try each title; stop at the first that activates. Exit 1 (⇒ run()
+        // false ⇒ `submit_failed`) when none did, so the failure is visible in
+        // the log rather than silently reported as dispatched.
+        `$w=New-Object -ComObject WScript.Shell;` +
+        `$ok=$false;` +
+        `foreach($t in @(${psTitles})){if($w.AppActivate($t)){$ok=$true;break}};` +
+        `if(-not $ok){exit 1};` +
+        `Start-Sleep -Milliseconds 120;` +
+        `$w.SendKeys("{ENTER}")`,
       ]);
     }
     // Linux (X11, or Wayland with a compatible tool)
