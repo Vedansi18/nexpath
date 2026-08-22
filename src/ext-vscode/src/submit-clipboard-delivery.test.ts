@@ -380,3 +380,48 @@ describe('⭐ RC16 — darwin Accessibility denial detection', () => {
     expect(isDarwinAccessibilityDenial(null)).toBe(false);
   });
 });
+
+/**
+ * ⭐ RC47 — win32 submit hardening (Windows tester 2026-08-22: AppActivate
+ * failed for both 'Devin' and 'Windsurf' while the window was open, Enter never
+ * fired, the refined text stranded silently).
+ */
+describe('⭐ RC47 — win32 AppActivate candidates + retry', () => {
+  const runSpy = () => {
+    const calls: Array<{ cmd: string; args: string[] }> = [];
+    return { calls, run: (cmd: string, args: string[]) => { calls.push({ cmd, args }); return true; } };
+  };
+
+  it('⭐ the live appName leads the candidate list (rebrand coverage)', () => {
+    const { calls, run } = runSpy();
+    submitKeystroke({
+      platform: 'win32', host: 'windsurf', appName: 'Devin Next', run,
+      isPopupFocused: () => false, isEditorFocused: () => true,
+    });
+    const ps = calls[0]!.args.join(' ');
+    expect(ps.indexOf("'Devin Next'")).toBeGreaterThan(-1);
+    expect(ps.indexOf("'Devin Next'")).toBeLessThan(ps.indexOf("'Devin'"));
+    expect(ps).toContain("'Windsurf'");
+  });
+
+  it('two activation rounds with a pause (foreground-lock release window)', () => {
+    const { calls, run } = runSpy();
+    submitKeystroke({
+      platform: 'win32', host: 'cursor', appName: 'Cursor', run,
+      isPopupFocused: () => false, isEditorFocused: () => true,
+    });
+    const ps = calls[0]!.args.join(' ');
+    expect(ps).toContain('foreach($r in 1..2)');
+    expect(ps).toContain('Start-Sleep -Milliseconds 400');
+  });
+
+  it('duplicate appName==host title is deduped', () => {
+    const { calls, run } = runSpy();
+    submitKeystroke({
+      platform: 'win32', host: 'cursor', appName: 'Cursor', run,
+      isPopupFocused: () => false, isEditorFocused: () => true,
+    });
+    const ps = calls[0]!.args.join(' ');
+    expect(ps.match(/'Cursor'/g)?.length).toBe(1);
+  });
+});

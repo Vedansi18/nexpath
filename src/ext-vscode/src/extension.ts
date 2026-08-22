@@ -211,7 +211,7 @@ function buildSubmitAdvisory(
     focus: async () => raiseAppWindow(host),
     pasteKeystroke: () => pasteKeystroke(),
     // RC11: Enter only when THIS editor is focused (one raise retry inside).
-    submitKeystroke: () => submitKeystroke({ host, focusEditor: () => void raiseAppWindow(host) }),
+    submitKeystroke: () => submitKeystroke({ host, focusEditor: () => void raiseAppWindow(host), appName: vscode.env.appName, submitLog: log }),
     log,
   });
   return createSubmitAdvisoryForHost({
@@ -289,6 +289,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const submitSurface = { active: false };
   // RC16: one-time darwin auto-send permission hint (per activation).
   let darwinSubmitHintShown = false;
+  let win32SubmitHintShown = false;
   // RC19 (Windows tester, 2026-08-17): a disarmed submit flow used to log
   // NOTHING — the ENABLED line was simply absent, so diagnosing meant
   // guessing. Say WHY, once per distinct reason (the RC15 re-check ticks
@@ -774,7 +775,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         pasteKeystroke: () => pasteKeystroke(),
         // RC11: Enter only when Windsurf itself is focused — a blind Enter
         // pressed the Welcome view's "Start session" and closed the chat.
-        submitKeystroke: () => submitKeystroke({ host: 'windsurf', focusEditor: () => void raiseAppWindow('windsurf') }),
+        submitKeystroke: () => submitKeystroke({ host: 'windsurf', focusEditor: () => void raiseAppWindow('windsurf'), appName: vscode.env.appName, submitLog: log }),
         log: (m) => log(m),
       });
 
@@ -851,6 +852,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           // needs the Accessibility permission for the HOST APP. Without it the
           // refined text sits in the composer with zero guidance. One-time,
           // actionable, and honest about the manual fallback.
+          // RC47 (Windows tester, 2026-08-22): a failed win32 AppActivate left
+          // the refined text stranded in the composer with ZERO guidance — the
+          // tester watched "auto send nathi thayu". One-time, same contract as
+          // the darwin hint below: honest about the manual fallback.
+          if (outcome === 'submit_failed' && process.platform === 'win32' && !win32SubmitHintShown) {
+            win32SubmitHintShown = true;
+            void vscode.window.showWarningMessage(
+              'Nexpath: your refined prompt is in the chat input — press Enter to send it. (Auto-send could not focus the editor window this time.)',
+            );
+          }
           if (outcome === 'submit_failed' && process.platform === 'darwin' && !darwinSubmitHintShown) {
             darwinSubmitHintShown = true;
             const why = lastDarwinSubmitError ? ` (${lastDarwinSubmitError})` : '';

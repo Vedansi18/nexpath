@@ -504,3 +504,53 @@ describe('⭐ RC43 — deferred continuation ends the event (no old-flow fallthr
     expect(exits).toEqual([0]);
   });
 });
+
+/**
+ * ⭐ RC46 — the post-leg quiet window for NO-SEQUENCE turns. The RC43 window
+ * lived inside the runner, which returns {ran:false} before consulting it when
+ * no MPS row exists — so a plain PE turn's post-block echo fell through to the
+ * old-flow stop and opened a second popup (whose console stole the win32
+ * foreground at the exact moment auto-submit's Enter fired).
+ */
+describe('⭐ RC46 — post_cascade_response quiet window without a sequence', () => {
+  const GATE_ENV = { NEXPATH_WINDSURF_PROMPTSUBMIT_ADVISORY: '1' };
+  const base = (over: Record<string, unknown>) => ({
+    env: { ...GATE_ENV },
+    readStdin: async () => JSON.stringify({ trajectory_id: 'traj-1' }),
+    suppressOldAdvisorySurface: async () => {},
+    checkReplacementEcho: async () => false,
+    waitForChild: async () => {}, raisePopup: () => {},
+    runSequenceContinuation: vi.fn(async () => ({ ran: false })),
+    ...over,
+  });
+
+  it('⭐ fresh echo (inside window) ⇒ event ENDS: no handle, exit 0', async () => {
+    const exits: number[] = [];
+    const handle = vi.fn(async () => ({ child: null } as never));
+    const realAppend = await import('./submit-decision-store.js');
+    const tmp = await import('node:fs/promises');
+    const os = await import('node:os');
+    const path = await import('node:path');
+    const proj = await tmp.mkdtemp(path.join(os.tmpdir(), 'rc46-'));
+    realAppend.appendReplacementEcho(proj, 'a fresh block body long enough to be registered cleanly');
+    await runWindsurfHookAction('post_cascade_response', { project: proj }, base({
+      handle, exit: (c: number) => { exits.push(c); },
+    }) as never);
+    expect(handle).not.toHaveBeenCalled();
+    expect(exits).toEqual([0]);
+    await tmp.rm(proj, { recursive: true, force: true });
+  });
+
+  it('no echo registry (quiet long past) ⇒ falls through to handle exactly as before', async () => {
+    const handle = vi.fn(async () => ({ child: null } as never));
+    const tmp = await import('node:fs/promises');
+    const os = await import('node:os');
+    const path = await import('node:path');
+    const proj = await tmp.mkdtemp(path.join(os.tmpdir(), 'rc46b-'));
+    await runWindsurfHookAction('post_cascade_response', { project: proj }, base({
+      handle, exit: () => {},
+    }) as never);
+    expect(handle).toHaveBeenCalledTimes(1);
+    await tmp.rm(proj, { recursive: true, force: true });
+  });
+});

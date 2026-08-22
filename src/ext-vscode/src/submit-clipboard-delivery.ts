@@ -138,6 +138,15 @@ export interface SubmitKeystrokeDeps {
   isEditorFocused?: typeof focusedWindowIsEditor;
   /** One-shot editor raise used when the editor is not focused. */
   focusEditor?: () => void;
+  /**
+   * RC47 (win32): the LIVE `vscode.env.appName` — tried as the FIRST
+   * AppActivate candidate. AppActivate matches exact/prefix/suffix, NOT
+   * substring, so a rebranded title ("Devin Next", …) misses the bare product
+   * names; the app's own reported name is the one string that tracks reality.
+   */
+  appName?: string;
+  /** RC47: diagnostic sink for the win32 submit path (which titles failed, what held the foreground). */
+  submitLog?: (message: string) => void;
 }
 
 
@@ -345,20 +354,37 @@ export function submitKeystroke(deps: SubmitKeystrokeDeps = {}): boolean {
       // reports `appName="Devin"`, so matching only 'Windsurf' would miss the
       // very machine this fixes. AppActivate matches a title PREFIX or
       // substring, so the bare product name is the right granularity.
-      const titles = deps.host === 'cursor' ? ['Cursor'] : ['Devin', 'Windsurf'];
-      const psTitles = titles.map((t) => `'${t}'`).join(',');
-      return run('powershell', [
-        '-NoProfile', '-Command',
-        // Try each title; stop at the first that activates. Exit 1 (⇒ run()
-        // false ⇒ `submit_failed`) when none did, so the failure is visible in
-        // the log rather than silently reported as dispatched.
+      const hostTitles = deps.host === 'cursor' ? ['Cursor'] : ['Devin', 'Windsurf'];
+      // RC47: the live appName leads (covers "Devin Next" and any rebrand the
+      // hardcoded product names miss — the tester's AppActivate failed on both
+      // 'Devin' and 'Windsurf' while the window was open). Deduped, quoted.
+      const titles = [...new Set([deps.appName?.trim(), ...hostTitles].filter((t): t is string => !!t))];
+      const psTitles = titles.map((t) => `'${t.replace(/'/g, "''")}'`).join(',');
+      // RC47: TWO rounds with a pause — the measured failure fired while our
+      // own second popup's console briefly held the foreground (Windows'
+      // foreground lock then refuses AppActivate); a moment later it releases.
+      // On final failure, print the foreground window title so the log names
+      // what was actually in front, then exit 1 (⇒ submit_failed, visible).
+      const ps =
         `$w=New-Object -ComObject WScript.Shell;` +
         `$ok=$false;` +
+        `foreach($r in 1..2){` +
         `foreach($t in @(${psTitles})){if($w.AppActivate($t)){$ok=$true;break}};` +
-        `if(-not $ok){exit 1};` +
+        `if($ok){break};Start-Sleep -Milliseconds 400};` +
+        `if(-not $ok){` +
+        `Add-Type '[DllImport("user32.dll")]public static extern System.IntPtr GetForegroundWindow();[DllImport("user32.dll")]public static extern int GetWindowText(System.IntPtr h,System.Text.StringBuilder s,int n);' -Name U -Namespace W;` +
+        `$b=New-Object System.Text.StringBuilder 256;[void][W.U]::GetWindowText([W.U]::GetForegroundWindow(),$b,256);` +
+        `Write-Output ("FOREGROUND=" + $b.ToString());exit 1};` +
         `Start-Sleep -Milliseconds 120;` +
-        `$w.SendKeys("{ENTER}")`,
-      ]);
+        `$w.SendKeys("{ENTER}")`;
+      if (deps.run) return deps.run('powershell', ['-NoProfile', '-Command', ps]);
+      const res = spawnSync('powershell', ['-NoProfile', '-Command', ps], {
+        stdio: ['ignore', 'pipe', 'ignore'], timeout: 8000, encoding: 'utf8',
+      });
+      if (res.status === 0) return true;
+      const fg = (res.stdout ?? '').split('\n').find((l) => l.startsWith('FOREGROUND=')) ?? 'FOREGROUND=<unreadable>';
+      deps.submitLog?.(`[nexpath] submit-win32: AppActivate failed for [${titles.join(', ')}]; ${fg.trim()}`);
+      return false;
     }
     // Linux (X11, or Wayland with a compatible tool)
     if (!env.DISPLAY && !env.WAYLAND_DISPLAY) return false;

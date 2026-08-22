@@ -30,6 +30,7 @@ import {
   SESSION_ENV_SNAPSHOT_FILENAME,
   runSequenceContinuationStop,
   SEQUENCE_CONTINUATION_QUIET_MS,
+  ensureNodeDirOnPath,
 } from './submit-stop-decider.js';
 
 /** A fake `stop` child: emits the given stdout then exits with the given code. */
@@ -471,5 +472,55 @@ describe('⭐ RC43 — the post-block quiet window', () => {
       writeDecision: (async () => {}) as never,
     });
     expect(r).toEqual({ ran: true, blocked: false });
+  });
+});
+
+/**
+ * ⭐ RC45 — the popup-spawn `node` resolution guarantee. Layer C's popup hosts
+ * run a BARE `node` (win32 `cmd start … node`, linux `gnome-terminal -- node`);
+ * it resolves via the stop child's PATH, and Cursor's sanitized hook env may
+ * not carry node at all. The env handed to every NEW-FLOW stop child must be
+ * able to resolve it; machines that already can are byte-identical.
+ */
+describe('⭐ RC45 — ensureNodeDirOnPath', () => {
+  it('appends the exec dir when PATH lacks it', () => {
+    const out = ensureNodeDirOnPath({ PATH: '/usr/bin:/bin' }, { execPath: '/opt/node/bin/node', platform: 'linux' });
+    expect(out.PATH).toBe('/usr/bin:/bin:/opt/node/bin');
+  });
+
+  it('⭐ returns the env UNCHANGED when the dir is already present (no-regression pin)', () => {
+    const env = { PATH: '/opt/node/bin:/usr/bin' };
+    const out = ensureNodeDirOnPath(env, { execPath: '/opt/node/bin/node', platform: 'linux' });
+    expect(out).toBe(env);
+  });
+
+  it('win32: mutates the EXISTING case-variant key ("Path"), never adds a duplicate', () => {
+    const out = ensureNodeDirOnPath(
+      { Path: 'C:\\Windows\\System32' },
+      { execPath: 'C:\\Program Files\\nodejs\\node.exe', platform: 'win32' },
+    );
+    expect(out.Path).toBe('C:\\Windows\\System32;C:\\Program Files\\nodejs');
+    expect(Object.keys(out)).not.toContain('PATH');
+  });
+
+  it('empty/missing PATH gets exactly the exec dir', () => {
+    const out = ensureNodeDirOnPath({}, { execPath: '/opt/node/bin/node', platform: 'linux' });
+    expect(out.PATH).toBe('/opt/node/bin');
+  });
+
+  it('⭐ the continuation runner spawns stop with node-resolvable PATH', async () => {
+    vi.mocked(getActivePendingPromptSequence).mockReturnValueOnce({ id: 1, payload: { items: [{}] } } as never);
+    let seenEnv: NodeJS.ProcessEnv | undefined;
+    await runSequenceContinuationStop('/proj', 'cursor', {
+      spawnFn: ((cmd: string, args: string[], opts: { env?: NodeJS.ProcessEnv }) => {
+        seenEnv = opts.env; return fakeChild('').child;
+      }) as never,
+      openStoreFn: (async () => ({ db: {} })) as never, closeStoreFn: (() => {}) as never,
+      logEvent: () => {}, writeDecision: (async () => {}) as never,
+      latestEchoAt: (() => null) as never,
+    });
+    const nodeDir = require('node:path').dirname(process.execPath);
+    const pathKey = Object.keys(seenEnv ?? {}).find((k) => k.toUpperCase() === 'PATH') ?? 'PATH';
+    expect((seenEnv?.[pathKey] ?? '').split(process.platform === 'win32' ? ';' : ':')).toContain(nodeDir);
   });
 });
