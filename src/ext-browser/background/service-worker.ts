@@ -43,6 +43,7 @@ import {
 import { resolveFrequencyConfig, type AdvisoryFrequencyLevel } from '../../config/GlobalConfig.js';
 import type { AdvisoryPayload } from '../../core/ports/ui.port.js';
 import type { Stage, UserRole, UserProfile, PromptRecord } from '../../core/classifier/types.js';
+import { PE_ENGINE_READY } from './pe-engine.js';
 
 const idb = new IdbStorageAdapter();
 const keyStore = new ChromeStorageKeyAdapter();
@@ -51,6 +52,16 @@ const clock = new BrowserClockAdapter();
 // SW console history dies with each MV3 instance; the buffer is what the options
 // page's "Recent activity" section (the browser's `nexpath log`) reads.
 const log = new PersistentLogAdapter(new ConsoleLogAdapter('[nexpath-sw]'));
+
+// ── Build identity (amendment A10) ────────────────────────────────────────────
+// Replaced by esbuild at bundle time with "<short-hash>@<branch>:<target>"; the
+// typeof guard keeps unbundled runs (vitest) safe. Logged as one of the first
+// activation lines so a stale unpacked reload is immediately visible, ending the
+// "which code is actually running" debugging class. PE_ENGINE_READY makes the
+// prompt-enhancement engine seam (pe-engine.ts) a provable part of this bundle.
+declare const __NEXPATH_BUILD_ID__: string | undefined;
+const BUILD_ID = typeof __NEXPATH_BUILD_ID__ === 'string' ? __NEXPATH_BUILD_ID__ : 'dev-unbundled';
+log.debug('build_identity', { build: BUILD_ID, peEngine: PE_ENGINE_READY });
 
 
 // ── First-install: open options page ──────────────────────────────────────────
