@@ -221,8 +221,14 @@ function buildDeps(context: vscode.ExtensionContext, log: Logger): SetupFlowDeps
             if (!ws) return true; // no folder open — nothing to verify against
             const projHook = join(ws, '.cursor', 'hooks.json');
             const projRaw = existsSync(projHook) ? readFileSync(projHook, 'utf8') : null;
+            // RC44: the PROJECT-level file is the one Windows Cursor actually
+            // executes (RC21/RC34), so it must meet the SAME RC41 requirement
+            // as the user-level file above — without this, a pre-RC41 project
+            // file (beforeSubmitPrompt only) verifies forever, never self-heals,
+            // and the MPS continuation chain can never fire on Windows.
             return projRaw !== null
               && projRaw.includes('"version"')
+              && projRaw.includes('afterAgentResponse')
               && verifyCommandCurrent(projRaw, 'cursor-hook', cliEntry, 'command', '"');
           }
           return true;
