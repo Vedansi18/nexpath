@@ -31,9 +31,11 @@
  */
 
 import type {
+  PePanelAnyViewV1,
   PePanelCommandV1,
   PePanelControllerV1,
   PePanelEventV1,
+  PeSequenceOfferViewV1,
   PePanelViewV1,
 } from './pe-contract.js';
 
@@ -120,7 +122,7 @@ export interface PePanelOptions {
 
 export function mountNexpathPePanel(root: HTMLElement, opts: PePanelOptions): PePanelControllerV1 {
   const doc = root.ownerDocument;
-  let view: PePanelViewV1 | null = null;
+  let view: PePanelAnyViewV1 | null = null;
   let open = false;
   let busy = false;
 
@@ -154,7 +156,11 @@ export function mountNexpathPePanel(root: HTMLElement, opts: PePanelOptions): Pe
     ev.stopPropagation();
     if (ev.key === 'Escape') {
       ev.preventDefault();
-      emitCommand({ type: 'close' });
+      // CLI keyboard map: on the sequence offer Esc DECLINES (falls through to
+      // the enhancement popup); on the PE view Esc closes with nothing sent.
+      emitCommand(view && 'kind' in view && view.kind === 'sequence_offer'
+        ? { type: 'mps_decline' }
+        : { type: 'close' });
     }
   };
   doc.addEventListener('keydown', onKeydown, true);
@@ -164,11 +170,8 @@ export function mountNexpathPePanel(root: HTMLElement, opts: PePanelOptions): Pe
     return body ? body.value : (view?.bodyText ?? '');
   }
 
-  function render(v: PePanelViewV1): void {
-    view = v;
-    el.textContent = '';
-
-    // Header: locked wordmark (drag) + close.
+  /** Locked wordmark head (drag handle + ✕) — shared by both view kinds. */
+  function renderHead(onClose: () => void): void {
     const head = doc.createElement('div');
     head.className = 'npe-head';
     const wordmark = doc.createElement('div');
@@ -186,11 +189,17 @@ export function mountNexpathPePanel(root: HTMLElement, opts: PePanelOptions): Pe
     close.className = 'npe-close';
     close.textContent = '✕';
     close.title = 'Close (no send)';
-    close.addEventListener('click', () => emitCommand({ type: 'close' }));
+    close.addEventListener('click', onClose);
     head.appendChild(wordmark);
     head.appendChild(close);
     el.appendChild(head);
     el.appendChild(Object.assign(doc.createElement('hr'), { className: 'npe-hr' }));
+  }
+
+  function render(v: PePanelViewV1): void {
+    view = v;
+    el.textContent = '';
+    renderHead(() => emitCommand({ type: 'close' }));
 
     const main = doc.createElement('div');
     main.className = 'npe-main';
@@ -314,11 +323,70 @@ export function mountNexpathPePanel(root: HTMLElement, opts: PePanelOptions): Pe
     }
   }
 
+  /** MPS-1 sequence offer (locked §3.3 rendered for the browser): first prompt
+   * + plan + Send / continue-to-enhancement (Esc) / cancel ('Use original
+   * prompt', the model's own row label). No sequence runtime exists here. */
+  function renderOffer(v: PeSequenceOfferViewV1): void {
+    view = v;
+    el.textContent = '';
+    // ✕ on the offer = decline (fall through to the enhancement popup) — the
+    // offer has no silent-close outcome of its own in the CLI keyboard map.
+    renderHead(() => emitCommand({ type: 'mps_decline' }));
+
+    const main = doc.createElement('div');
+    main.className = 'npe-main';
+    el.appendChild(main);
+
+    const line = (className: string, text: string): void => {
+      const d = doc.createElement('div');
+      d.className = className;
+      d.textContent = text;
+      main.appendChild(d);
+    };
+
+    line('npe-title', v.title);
+    if (v.pinchLabel) line('npe-pinch', v.pinchLabel);
+    if (v.whyHelp) line('npe-whyhelp', v.whyHelp);
+    if (v.providerFailureNotice) line('npe-notice', v.providerFailureNotice);
+
+    line('npe-heading', v.heading);
+    const body = doc.createElement('textarea');
+    body.className = 'npe-body';
+    body.value = v.bodyText;
+    body.setAttribute('aria-label', v.heading);
+    main.appendChild(body);
+
+    if (v.remainingTaskCount > 0) {
+      line('npe-heading', `Then ${v.remainingTaskCount} more prompt${v.remainingTaskCount === 1 ? '' : 's'} in this sequence:`);
+      for (const summary of v.taskSummaryLines) line('npe-muted', summary);
+    }
+
+    const footer = doc.createElement('div');
+    footer.className = 'npe-footer';
+    const cancel = doc.createElement('button');
+    cancel.className = 'npe-btn';
+    cancel.textContent = v.cancelLabel;
+    cancel.addEventListener('click', () => emitCommand({ type: 'mps_cancel' }));
+    const send = doc.createElement('button');
+    send.className = 'npe-btn npe-btn-primary';
+    send.textContent = 'Send first prompt';
+    send.addEventListener('click', () => emitCommand({ type: 'mps_send', bodyText: currentBodyText() }));
+    footer.appendChild(cancel);
+    footer.appendChild(send);
+    el.appendChild(footer);
+
+    const hint = doc.createElement('div');
+    hint.className = 'npe-hint';
+    hint.textContent = 'Esc continues to the enhancement popup';
+    el.appendChild(hint);
+  }
+
   return {
-    show(v: PePanelViewV1): void {
+    show(v: PePanelAnyViewV1): void {
       busy = false;
       el.classList.remove('npe-busy');
-      render(v);
+      if ('kind' in v) renderOffer(v);
+      else render(v);
       open = true;
       el.classList.remove('npe-hidden');
       el.querySelector<HTMLTextAreaElement>('.npe-body')?.focus();

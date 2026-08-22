@@ -24,18 +24,25 @@ import type {
 } from '../../prompt-enhancement/contracts.js';
 import type { PendingPeRecord } from '../adapters/pe-pending-store.js';
 import {
+  PROMPT_ENHANCEMENT_CONTRACT_VERSION,
+  buildPromptEnhancementCliMpsIntakeEvidenceV1,
+  buildPromptEnhancementMpsFirstPopupV1,
   emitPromptEnhancementCostObservabilityV1,
+  evaluatePromptEnhancementMpsIntakeDecisionV1,
+  promptEnhancementMpsActionSignalKindV1,
   refreshEngineKeyEnv,
   runPromptEnhancementCliSubmitPopupV1,
   type PromptEnhancementCliPopupCommandV1,
   type PromptEnhancementCliPopupInteractionV1,
   type PromptEnhancementCliPopupResultV1,
   type PromptEnhancementCliPopupViewV1,
+  type PromptEnhancementMpsFirstPopupModelV1,
 } from './pe-engine.js';
 import {
   PE_PANEL_SCHEMA_VERSION,
   isPePanelCommandV1,
   type PePanelCommandV1,
+  type PeSequenceOfferViewV1,
   type PePanelViewV1,
 } from '../ui/pe-contract.js';
 
@@ -166,6 +173,104 @@ function translate(
   return { first: main };
 }
 
+// ── MPS-1 sequence offer (PB6) ─────────────────────────────────────────────────
+
+/**
+ * The browser host's `host_runtime` evidence (DEP-stage-3-02, owned by
+ * host_transport). The owner ruling keeps the `extension_host` intake surface
+ * fail-closed "until the host evidence lands" — this milestone is that
+ * landing: the extension NOW ships a live popup transport (view push + ack,
+ * command mailbox, inject path), and this packet references those exact
+ * modules. Any host that cannot supply it stays fail-closed by the engine's
+ * own default — the mechanism, not a bypass.
+ */
+function browserHostRuntimeEvidence(): {
+  evidenceId: string; kind: 'host_runtime'; owner: 'host_transport';
+  state: 'supplied'; contractRevision: string; sourceRefs: readonly string[];
+} {
+  return {
+    evidenceId: 'DEP-stage-3-02',
+    kind: 'host_runtime',
+    owner: 'host_transport',
+    state: 'supplied',
+    contractRevision: `v${PROMPT_ENHANCEMENT_CONTRACT_VERSION}`,
+    sourceRefs: [
+      'src/ext-browser/background/pe-popup-host.ts',
+      'src/ext-browser/content/pe-inject.ts',
+      'src/ext-browser/content/ipc.ts',
+    ],
+  };
+}
+
+/** Gate + model for the MPS offer; null = engine says no offer (fail-closed). */
+export function buildBrowserMpsOffer(
+  log: LogPort,
+  projectRoot: string,
+  result: PendingPeRecord['result'],
+): PromptEnhancementMpsFirstPopupModelV1 | null {
+  const handoffMetadata = result.uiView.handoffAndSequenceSummary;
+  if (!handoffMetadata) return null;
+  const cliEvidence = buildPromptEnhancementCliMpsIntakeEvidenceV1(result);
+  const gate = evaluatePromptEnhancementMpsIntakeDecisionV1({
+    surface: 'extension_host',
+    evidence: cliEvidence ? [...cliEvidence, browserHostRuntimeEvidence()] : undefined,
+  });
+  log.debug('pe_mps_intake_gate', {
+    projectRoot,
+    renderPermission: gate.renderPermission,
+    reasonCodes: gate.reasonCodes.slice(0, 6),
+  });
+  if (gate.renderPermission !== 'mps_render_permitted') return null;
+  const built = buildPromptEnhancementMpsFirstPopupV1({
+    result,
+    handoffMetadata,
+    cancel: { state: 'available', disposition: 'blocked_no_send' },
+  });
+  if (built.state !== 'ready') {
+    log.debug('pe_mps_model_not_ready', { projectRoot, reasonCodes: built.reasonCodes.slice(0, 6) });
+    return null;
+  }
+  return built.model;
+}
+
+/** Whitelist the MPS first-popup model down to the panel's offer view. */
+export function buildPeSequenceOfferView(
+  model: PromptEnhancementMpsFirstPopupModelV1,
+  viewSeq: number,
+): PeSequenceOfferViewV1 {
+  const out: PeSequenceOfferViewV1 = {
+    schemaVersion: PE_PANEL_SCHEMA_VERSION,
+    kind: 'sequence_offer',
+    viewSeq,
+    title: model.title,
+    heading: model.heading,
+    bodyText: model.body.text,
+    remainingTaskCount: model.sequencePlan.remainingTaskCount,
+    taskSummaryLines: model.sequencePlan.taskSummaryLines,
+    cancelLabel: model.actions.cancelRemainingSequence.label,
+  };
+  if (model.pinchLabel) out.pinchLabel = model.pinchLabel.text;
+  if (model.whyHelp) out.whyHelp = model.whyHelp.text;
+  if (model.providerFailureNotice) out.providerFailureNotice = model.providerFailureNotice;
+  return out;
+}
+
+/** Identity/counters recorded when the first sequence prompt is SENT (ids only). */
+export interface BrowserMpsSentIdentity {
+  requestId: string;
+  handoffDecisionId: string;
+  currentBodyId: string;
+  bodyRevision: number;
+  remainingTaskCount: number;
+}
+
+export interface BrowserPeStopOutcome {
+  result: PromptEnhancementCliPopupResultV1;
+  /** True ONLY when the user sent the MPS first popup (popup-host parity flag). */
+  mpsFirstPopupSent: boolean;
+  mpsIdentity?: BrowserMpsSentIdentity;
+}
+
 export interface BrowserPePopupDeps {
   log: LogPort;
   projectRoot: string;
@@ -180,17 +285,21 @@ export interface BrowserPePopupDeps {
 }
 
 /**
- * Run the engine popup loop against the content-script panel. Resolves with
- * the CLI popup result; `not_shown` means the first render never reached the
+ * Run the stop-side popups against the content-script panel — MPS-first, then
+ * the PE loop, mirroring the CLI popup host's order: an engine-permitted
+ * sequence offer renders first (send = first prompt out, sequence recorded;
+ * cancel = flow ENDS, the PE popup never opens after a cancel — owner request
+ * 2026-08-06); declined (Esc) or a blocked gate falls through to the regular
+ * enhancement popup. `not_shown` means the first render never reached the
  * panel and the pending row was left untouched (stop.ts's not_shown = keep).
  */
 export async function runBrowserPePopup(
   deps: BrowserPePopupDeps,
-): Promise<PromptEnhancementCliPopupResultV1> {
+): Promise<BrowserPeStopOutcome> {
   const { log, projectRoot, record } = deps;
   if (mailboxes.has(projectRoot)) {
     log.debug('pe_popup_already_open', { projectRoot });
-    return { state: 'not_shown', reasonCodes: ['popup_already_open'] };
+    return { result: { state: 'not_shown', reasonCodes: ['popup_already_open'] }, mpsFirstPopupSent: false };
   }
   const box: Mailbox = { expectedSeq: 0, waiter: null, queued: null };
   mailboxes.set(projectRoot, box);
@@ -200,46 +309,113 @@ export async function runBrowserPePopup(
   let renderFailed = false;
   let stashed: PromptEnhancementCliPopupCommandV1 | null = null;
 
-  const interaction: PromptEnhancementCliPopupInteractionV1 = {
-    next: async (view: PromptEnhancementCliPopupViewV1) => {
-      seq += 1;
-      box.expectedSeq = seq;
-      box.queued = null;
-      const payload = buildPePanelView(view, seq);
-      try {
-        await deps.sendToTab({ type: 'nexpath:show-pe', projectRoot, payload });
-        if (!firstRenderOk) {
-          firstRenderOk = true;
-          await deps.onFirstRendered();
-          log.debug('pe_popup_shown', { projectRoot, promptCount: record.promptCount });
-        }
-      } catch (err) {
-        // No reachable panel. Before anything rendered → not_shown (row stays
-        // pending). Mid-popup (tab closed) → close, nothing sent.
-        renderFailed = true;
-        log.debug('pe_popup_render_failed', { projectRoot, error: String(err) });
-        return { type: 'close' };
+  /** Push a view to the panel; true = rendered (ack received). Handles the
+   * shared first-render bookkeeping. */
+  const pushView = async (payload: PePanelViewV1 | PeSequenceOfferViewV1): Promise<boolean> => {
+    box.expectedSeq = payload.viewSeq;
+    box.queued = null;
+    try {
+      await deps.sendToTab({ type: 'nexpath:show-pe', projectRoot, payload });
+      if (!firstRenderOk) {
+        firstRenderOk = true;
+        await deps.onFirstRendered();
+        log.debug('pe_popup_shown', { projectRoot, promptCount: record.promptCount });
       }
-      if (stashed) {
-        const cmd = stashed;
-        stashed = null;
-        return cmd;
-      }
-      const panelCommand = box.queued !== null
-        ? Promise.resolve((() => { const q = box.queued as PePanelCommandV1; box.queued = null; return q; })())
-        : new Promise<PePanelCommandV1>((resolve) => { box.waiter = resolve; });
-      const received = await panelCommand;
-      const { first, stash } = translate(received, view);
-      if (stash) stashed = stash;
-      return first;
-    },
-    close: () => {
-      void deps.sendToTab({ type: 'nexpath:pe-close', projectRoot }).catch(() => { /* panel gone */ });
-    },
+      return true;
+    } catch (err) {
+      renderFailed = true;
+      log.debug('pe_popup_render_failed', { projectRoot, error: String(err) });
+      return false;
+    }
+  };
+
+  const awaitPanelCommand = (): Promise<PePanelCommandV1> =>
+    box.queued !== null
+      ? Promise.resolve((() => { const q = box.queued as PePanelCommandV1; box.queued = null; return q; })())
+      : new Promise<PePanelCommandV1>((resolve) => { box.waiter = resolve; });
+
+  const closePanel = (): void => {
+    void deps.sendToTab({ type: 'nexpath:pe-close', projectRoot }).catch(() => { /* panel gone */ });
   };
 
   try {
     refreshEngineKeyEnv(deps.apiKey);
+
+    // ── Stage 1: MPS-1 sequence offer (engine-gated; popup-host order) ─────────
+    const mpsModel = buildBrowserMpsOffer(log, projectRoot, record.result);
+    if (mpsModel) {
+      seq += 1;
+      const offerRendered = await pushView(buildPeSequenceOfferView(mpsModel, seq));
+      if (!offerRendered) {
+        return { result: { state: 'not_shown', reasonCodes: ['panel_unreachable'] }, mpsFirstPopupSent: false };
+      }
+      let offerOutcome: 'send' | 'declined' | 'cancelled' | null = null;
+      let sentBody = '';
+      while (offerOutcome === null) {
+        const command = await awaitPanelCommand();
+        if (command.type === 'mps_send') {
+          if (command.bodyText.trim().length === 0) continue; // empty send is a no-op, panel stays up
+          offerOutcome = 'send';
+          sentBody = command.bodyText;
+        } else if (command.type === 'mps_decline') {
+          offerOutcome = 'declined';
+        } else if (command.type === 'mps_cancel') {
+          offerOutcome = 'cancelled';
+        } else {
+          log.debug('pe_mps_command_ignored', { projectRoot, type: command.type });
+        }
+      }
+      const signalKind = promptEnhancementMpsActionSignalKindV1(
+        offerOutcome === 'send' ? 'send' : offerOutcome,
+      );
+      if (signalKind) log.debug('pe_action_signal', { kind: signalKind });
+      if (offerOutcome === 'send') {
+        return {
+          result: { state: 'selected_current', bodyText: sentBody },
+          mpsFirstPopupSent: true,
+          mpsIdentity: {
+            requestId: mpsModel.identity.requestId,
+            handoffDecisionId: mpsModel.identity.handoffDecisionId,
+            currentBodyId: mpsModel.identity.currentBodyId,
+            bodyRevision: mpsModel.identity.bodyRevision,
+            remainingTaskCount: mpsModel.sequencePlan.remainingTaskCount,
+          },
+        };
+      }
+      if (offerOutcome === 'cancelled') {
+        // Cancel ENDS the flow (owner request 2026-08-06) — the PE popup never
+        // opens after a cancel. (The CLI's PEF feedback popup is a feedback-
+        // store surface the browser doesn't have in v1 — PE-BR-11.)
+        return { result: { state: 'closed_no_send' }, mpsFirstPopupSent: false };
+      }
+      // declined (Esc) → fall through to the regular PE popup below.
+    }
+
+    // ── Stage 2: the engine's PE popup state machine ───────────────────────────
+    const interaction: PromptEnhancementCliPopupInteractionV1 = {
+      next: async (view: PromptEnhancementCliPopupViewV1) => {
+        seq += 1;
+        const rendered = await pushView(buildPePanelView(view, seq));
+        if (!rendered) return { type: 'close' };
+        if (stashed) {
+          const cmd = stashed;
+          stashed = null;
+          return cmd;
+        }
+        // Drop any MPS command arriving mid-PE-loop (stale/hostile) — only the
+        // offer stage may consume those.
+        let received = await awaitPanelCommand();
+        while (received.type === 'mps_send' || received.type === 'mps_decline' || received.type === 'mps_cancel') {
+          log.debug('pe_command_ignored_wrong_stage', { projectRoot, type: received.type });
+          received = await awaitPanelCommand();
+        }
+        const { first, stash } = translate(received, view);
+        if (stash) stashed = stash;
+        return first;
+      },
+      close: closePanel,
+    };
+
     const runPopup = deps.runPopup ?? runPromptEnhancementCliSubmitPopupV1;
     const result = await runPopup({
       request: record.request as PromptEnhancementPrepareRequestV1,
@@ -262,11 +438,11 @@ export async function runBrowserPePopup(
       actionSignalSink: (kind, occurredAt) => log.debug('pe_action_signal', { kind, occurredAt }),
     });
     if (renderFailed && !firstRenderOk) {
-      return { state: 'not_shown', reasonCodes: ['panel_unreachable'] };
+      return { result: { state: 'not_shown', reasonCodes: ['panel_unreachable'] }, mpsFirstPopupSent: false };
     }
-    return result;
+    return { result, mpsFirstPopupSent: false };
   } finally {
-    interaction.close();
+    closePanel();
     mailboxes.delete(projectRoot);
   }
 }

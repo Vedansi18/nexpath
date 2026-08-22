@@ -177,3 +177,51 @@ describe('keys and busy state', () => {
     expect(root.querySelector('.npe-root')).toBeNull();
   });
 });
+
+describe('MPS-1 sequence offer view (PB6)', () => {
+  const offer = (overrides: Partial<import('./pe-contract.js').PeSequenceOfferViewV1> = {}) => ({
+    schemaVersion: 1 as const,
+    kind: 'sequence_offer' as const,
+    viewSeq: 1,
+    title: 'Nexpath · Multi-prompt sequence',
+    heading: 'First prompt of your sequence',
+    bodyText: 'build the login page first',
+    remainingTaskCount: 2,
+    taskSummaryLines: ['add a database', 'deploy to production'],
+    cancelLabel: 'Use original prompt',
+    ...overrides,
+  });
+
+  it('renders title, first prompt, plan lines, and the Send/cancel footer', () => {
+    panel.show(offer());
+    expect(root.textContent).toContain('Nexpath · Multi-prompt sequence');
+    expect((root.querySelector('textarea.npe-body') as HTMLTextAreaElement).value).toBe('build the login page first');
+    expect(root.textContent).toContain('Then 2 more prompts in this sequence:');
+    expect(root.textContent).toContain('add a database');
+    expect(byText('button', 'Use original prompt')).toBeTruthy();
+    expect(byText('button', 'Send first prompt')).toBeTruthy();
+  });
+
+  it('Send carries the live edited text; cancel and ✕/Esc emit their MPS outcomes', () => {
+    panel.show(offer());
+    const body = root.querySelector('textarea.npe-body') as HTMLTextAreaElement;
+    body.value = 'edited first prompt';
+    byText('button', 'Send first prompt').click();
+    byText('button', 'Use original prompt').click();
+    byText('button', '✕').click();
+    body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, composed: true }));
+    expect(commands().map((c) => c.command)).toEqual([
+      { type: 'mps_send', bodyText: 'edited first prompt' },
+      { type: 'mps_cancel' },
+      { type: 'mps_decline' },
+      { type: 'mps_decline' },
+    ]);
+  });
+
+  it('a singular remaining task renders without a plural and zero renders no plan block', () => {
+    panel.show(offer({ remainingTaskCount: 1, taskSummaryLines: ['deploy'] }));
+    expect(root.textContent).toContain('Then 1 more prompt in this sequence:');
+    panel.show(offer({ viewSeq: 2, remainingTaskCount: 0, taskSummaryLines: [] }));
+    expect(root.textContent).not.toContain('more prompt');
+  });
+});

@@ -46,6 +46,7 @@ vi.mock('../adapters/pe-pending-store.js', () => ({
   markPendingPeShown: vi.fn(),
 }));
 vi.mock('../adapters/pe-config.js', () => ({ resolvePePopupCooldown: vi.fn() }));
+vi.mock('../adapters/pe-sequence-store.js', () => ({ recordPendingSequence: vi.fn() }));
 vi.mock('./pe-popup-host.js', () => ({
   runBrowserPePopup: vi.fn(),
   deliverPePanelCommand: vi.fn(),
@@ -72,6 +73,7 @@ const { prepareAndStoreBrowserPe } = await import('./pe-prepare.js');
 const { isPromptEnhancementSequenceShapedTextV1 } = await import('./pe-engine.js');
 const { getPendingPe, markPendingPeShown } = await import('../adapters/pe-pending-store.js');
 const { resolvePePopupCooldown } = await import('../adapters/pe-config.js');
+const { recordPendingSequence } = await import('../adapters/pe-sequence-store.js');
 const { runBrowserPePopup } = await import('./pe-popup-host.js');
 
 const idbLoadSessionState = vi.fn();
@@ -1440,9 +1442,10 @@ describe('service-worker.ts', () => {
 
     beforeEach(() => {
       vi.mocked(resolvePePopupCooldown).mockResolvedValue(7);
-      vi.mocked(runBrowserPePopup).mockResolvedValue({ state: 'closed_no_send' });
+      vi.mocked(runBrowserPePopup).mockResolvedValue({ result: { state: 'closed_no_send' }, mpsFirstPopupSent: false });
       vi.mocked(getPendingPe).mockResolvedValue(null);
       vi.mocked(markPendingPeShown).mockResolvedValue(undefined);
+      vi.mocked(recordPendingSequence).mockResolvedValue(undefined);
     });
 
     it('consumes a queued advisory SILENTLY (MPS-7: the advisory surface is removed by default)', async () => {
@@ -1484,13 +1487,45 @@ describe('service-worker.ts', () => {
     it('selected_current sends the accepted body to the tab for inject (echo-guarded content-side)', async () => {
       idbLoadSessionState.mockResolvedValue({ sessionId: 's1', promptCount: 9 });
       vi.mocked(getPendingPe).mockResolvedValue(peRecord as never);
-      vi.mocked(runBrowserPePopup).mockResolvedValue({ state: 'selected_current', bodyText: 'THE BODY' });
+      vi.mocked(runBrowserPePopup).mockResolvedValue({ result: { state: 'selected_current', bodyText: 'THE BODY' }, mpsFirstPopupSent: false });
       const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
       stopPe(messageListener, 7);
       await vi.waitFor(() => expect(tabsSendMessageMock).toHaveBeenCalledWith(7, {
         type: 'nexpath:pe-inject', projectRoot: P, text: 'THE BODY',
       }));
       expect(logDebugMock).toHaveBeenCalledWith('pe_injected', expect.objectContaining({ chars: 8 }));
+    });
+
+    it('MPS first-popup SENT → the sequence row is recorded (ids/counts) and the body injects (PB6)', async () => {
+      idbLoadSessionState.mockResolvedValue({ sessionId: 's1', promptCount: 9 });
+      vi.mocked(getPendingPe).mockResolvedValue(peRecord as never);
+      vi.mocked(runBrowserPePopup).mockResolvedValue({
+        result: { state: 'selected_current', bodyText: 'FIRST SEQUENCE PROMPT' },
+        mpsFirstPopupSent: true,
+        mpsIdentity: {
+          requestId: 'r1', handoffDecisionId: 'h1', currentBodyId: 'b1',
+          bodyRevision: 1, remainingTaskCount: 2,
+        },
+      });
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      stopPe(messageListener, 7);
+      await vi.waitFor(() => expect(vi.mocked(recordPendingSequence)).toHaveBeenCalledWith('https://bolt.new/~/p1', expect.objectContaining({
+        sessionId: 's1', status: 'first_sent', requestId: 'r1',
+        handoffDecisionId: 'h1', remainingTaskCount: 2,
+      })));
+      await vi.waitFor(() => expect(tabsSendMessageMock).toHaveBeenCalledWith(7, expect.objectContaining({
+        type: 'nexpath:pe-inject', text: 'FIRST SEQUENCE PROMPT',
+      })));
+      expect(logDebugMock).toHaveBeenCalledWith('pe_sequence_recorded', expect.objectContaining({ remainingTaskCount: 2 }));
+    });
+
+    it('no sequence row is recorded when the MPS popup was not sent', async () => {
+      idbLoadSessionState.mockResolvedValue({ sessionId: 's1', promptCount: 9 });
+      vi.mocked(getPendingPe).mockResolvedValue(peRecord as never);
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      stopPe(messageListener, 7);
+      await vi.waitFor(() => expect(runBrowserPePopup).toHaveBeenCalledTimes(1));
+      expect(vi.mocked(recordPendingSequence)).not.toHaveBeenCalled();
     });
 
     it('cooldown hit CONSUMES the row with a ring event and shows nothing (stop.ts:552–561)', async () => {

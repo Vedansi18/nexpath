@@ -50,6 +50,7 @@ import { PE_ENGINE_READY, isPromptEnhancementSequenceShapedTextV1 } from './pe-e
 import { prepareAndStoreBrowserPe, type BrowserPeContext } from './pe-prepare.js';
 import { getPendingPe, markPendingPeShown, upsertPendingPe } from '../adapters/pe-pending-store.js';
 import { resolvePePopupCooldown } from '../adapters/pe-config.js';
+import { recordPendingSequence } from '../adapters/pe-sequence-store.js';
 import { deliverPePanelCommand, runBrowserPePopup } from './pe-popup-host.js';
 
 const idb = new IdbStorageAdapter();
@@ -1058,7 +1059,7 @@ async function handleResponseStopPeFirst(projectRoot: string, tabId: number | un
   }
 
   const apiKey = await keyStore.getKey('openai_api_key');
-  const outcome = await runBrowserPePopup({
+  const stopOutcome = await runBrowserPePopup({
     log,
     projectRoot,
     apiKey,
@@ -1075,6 +1076,27 @@ async function handleResponseStopPeFirst(projectRoot: string, tabId: number | un
       }
     },
   });
+  const outcome = stopOutcome.result;
+
+  // MPS-1 (popup-host parity): the parent records the sequence row ONLY when
+  // the first popup was SENT — ids and counts, never text. Continuations stay
+  // deferred; nothing reads this to drive behaviour yet.
+  if (stopOutcome.mpsFirstPopupSent && stopOutcome.mpsIdentity && state) {
+    try {
+      await recordPendingSequence(projectRoot, {
+        sessionId: state.sessionId,
+        createdAt: clock.now(),
+        status: 'first_sent',
+        ...stopOutcome.mpsIdentity,
+      });
+      log.debug('pe_sequence_recorded', {
+        projectRoot,
+        remainingTaskCount: stopOutcome.mpsIdentity.remainingTaskCount,
+      });
+    } catch (err) {
+      log.warn('pe_sequence_record_failed', { projectRoot, error: String(err) });
+    }
+  }
 
   if (outcome.state === 'selected_current') {
     try {

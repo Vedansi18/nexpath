@@ -55,6 +55,34 @@ export interface PePanelViewV1 {
   trustCues: readonly string[];
 }
 
+/**
+ * MPS-1 sequence offer (PB6) — the browser rendering of the engine's first-popup
+ * model (locked §3.3, `Nexpath · Multi-prompt sequence`): the FIRST enhanced
+ * prompt of a detected sequence, the remaining-task plan, and three outcomes —
+ * send the first prompt / continue to the regular enhancement popup (Esc) /
+ * cancel the sequence (the model's own 'Use original prompt' row). No local
+ * queue, pointer, or auto-advance exists here (continuations stay engine-gated
+ * and are DEFERRED — the offer never invents sequence runtime authority).
+ */
+export interface PeSequenceOfferViewV1 {
+  schemaVersion: typeof PE_PANEL_SCHEMA_VERSION;
+  kind: 'sequence_offer';
+  viewSeq: number;
+  title: string;
+  heading: string;
+  pinchLabel?: string;
+  whyHelp?: string;
+  providerFailureNotice?: string;
+  /** The first sequence prompt — editable; send carries the live text. */
+  bodyText: string;
+  remainingTaskCount: number;
+  taskSummaryLines: readonly string[];
+  /** The cancel row's engine label ('Use original prompt'). */
+  cancelLabel: string;
+}
+
+export type PePanelAnyViewV1 = PePanelViewV1 | PeSequenceOfferViewV1;
+
 export type PePanelCommandV1 =
   | { type: 'use_current'; bodyText: string }
   | { type: 'use_original' }
@@ -63,7 +91,11 @@ export type PePanelCommandV1 =
   | { type: 'more_thorough'; bodyText: string }
   | { type: 'more_project_grounded'; bodyText: string }
   | { type: 'go_back' }
-  | { type: 'close' };
+  | { type: 'close' }
+  // MPS-1 offer outcomes (valid only while a sequence-offer view is live).
+  | { type: 'mps_send'; bodyText: string }
+  | { type: 'mps_decline' }
+  | { type: 'mps_cancel' };
 
 /** Panel → host events (same driving pattern as the advisory panel's onEvent). */
 export type PePanelEventV1 =
@@ -71,7 +103,7 @@ export type PePanelEventV1 =
   | { type: 'move'; dx: number; dy: number };
 
 export interface PePanelControllerV1 {
-  show(view: PePanelViewV1): void;
+  show(view: PePanelAnyViewV1): void;
   /** Disable inputs while a command round-trips (the next show() re-enables). */
   setBusy(busy: boolean): void;
   hide(): void;
@@ -83,13 +115,15 @@ export interface PePanelControllerV1 {
 const COMMAND_TYPES = new Set([
   'use_current', 'use_original', 'apply_details', 'shorter',
   'more_thorough', 'more_project_grounded', 'go_back', 'close',
+  'mps_send', 'mps_decline', 'mps_cancel',
 ]);
+const TEXT_FREE_COMMANDS = new Set(['use_original', 'go_back', 'close', 'mps_decline', 'mps_cancel']);
 
 export function isPePanelCommandV1(value: unknown): value is PePanelCommandV1 {
   if (typeof value !== 'object' || value === null) return false;
   const v = value as Record<string, unknown>;
   if (typeof v['type'] !== 'string' || !COMMAND_TYPES.has(v['type'])) return false;
-  if (v['type'] === 'use_original' || v['type'] === 'go_back' || v['type'] === 'close') return true;
+  if (TEXT_FREE_COMMANDS.has(v['type'])) return true;
   if (typeof v['bodyText'] !== 'string') return false;
   if (v['type'] === 'apply_details') return typeof v['detailsText'] === 'string';
   return true;

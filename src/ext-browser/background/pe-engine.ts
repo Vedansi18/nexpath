@@ -55,6 +55,17 @@ export {
   type PromptEnhancementCliPopupResultV1,
   type PromptEnhancementCliPopupViewV1,
 } from '../../prompt-enhancement/cli-submit-popup.js';
+// MPS-1 sequence offer (PB6) — the engine's OWN intake gate, evidence builder
+// and first-popup model; the browser renders the model and reports an outcome.
+// No sequence runtime authority is created browser-side (continuations stay
+// engine-gated and deferred).
+export { evaluatePromptEnhancementMpsIntakeDecisionV1 } from '../../prompt-enhancement/intake-decision.js';
+export { buildPromptEnhancementCliMpsIntakeEvidenceV1 } from '../../prompt-enhancement/cli-mps-intake-evidence.js';
+export {
+  buildPromptEnhancementMpsFirstPopupV1,
+  type PromptEnhancementMpsFirstPopupModelV1,
+} from '../../prompt-enhancement/first-popup.js';
+export { promptEnhancementMpsActionSignalKindV1 } from '../../prompt-enhancement/cli-mps-run.js';
 
 /** Bundle liveness marker — imported by the service worker's boot log so the
  * engine chain is provably part of the shipped bundle from PB1 onward. */
