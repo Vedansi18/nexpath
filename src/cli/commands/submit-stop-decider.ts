@@ -415,13 +415,25 @@ export async function runSequenceContinuationStop(
   //    session manager, so a stale peek can only cost one harmless spawn.
   try {
     const s = await (ports.openStoreFn ?? openStore)(undefined as never);
-    let active = false;
+    let row: ReturnType<typeof getActivePendingPromptSequence> = null;
     try {
-      active = getActivePendingPromptSequence(s as never, projectRoot) !== null;
+      row = getActivePendingPromptSequence(s as never, projectRoot);
     } finally {
       try { await (ports.closeStoreFn ?? closeStore)(s as never); } catch { /* fail-open */ }
     }
-    if (!active) return { ran: false };
+    if (row === null) return { ran: false };
+    // RC42 visibility: a row whose stored item list is EMPTY can never be packaged by the
+    // continuation launcher ("no worded items" refusal, debug-only upstream) — the popup will not
+    // render on ANY Stop, in the CLI or here. That row shape is produced at PREPARE time when the
+    // upstream sequence planner fails/refuses (its summary falls back to the describe splitter, so
+    // the MPS-1 popup still advertises a plan). Found live 2026-08-22 (row: item_count 4, items []).
+    // The stop still runs below — outcomes stay byte-identical to the CLI — this line only makes
+    // the silent upstream refusal diagnosable from the hook log.
+    if ((row.payload?.items?.length ?? 1) === 0) {
+      logEvent('warn', 'sequence_continuation_row_has_no_items', {
+        host, item_count: row.itemCount, status: row.status,
+      });
+    }
   } catch {
     return { ran: false };
   }

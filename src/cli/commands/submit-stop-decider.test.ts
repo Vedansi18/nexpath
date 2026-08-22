@@ -342,7 +342,7 @@ describe('⭐ RC41 — runSequenceContinuationStop', () => {
   it('⭐ sends the CONTINUATION payload — stop_hook_active:true (what routes runStop to the launcher)', async () => {
     // The child must be born AT spawn time: the runner awaits the store peek
     // first, and a pre-made fakeChild would emit exit before listeners attach.
-    vi.mocked(getActivePendingPromptSequence).mockReturnValueOnce({ id: 1 } as never);
+    vi.mocked(getActivePendingPromptSequence).mockReturnValueOnce({ id: 1, payload: { items: [{}] } } as never);
     let writes: string[] = [];
     const r = await runSequenceContinuationStop('/proj', 'cursor', {
       spawnFn: (() => { const f = fakeChild(''); writes = f.writes; return f.child; }) as never,
@@ -354,7 +354,7 @@ describe('⭐ RC41 — runSequenceContinuationStop', () => {
   });
 
   it('⭐ a continuation BLOCK persists the decision for the delivery pipeline (host threaded)', async () => {
-    vi.mocked(getActivePendingPromptSequence).mockReturnValueOnce({ id: 1 } as never);
+    vi.mocked(getActivePendingPromptSequence).mockReturnValueOnce({ id: 1, payload: { items: [{}] } } as never);
     const writeDecision = vi.fn(async () => {});
     const r = await runSequenceContinuationStop('/proj', 'windsurf', {
       spawnFn: (() => fakeChild('{"decision":"block","reason":"item two body — long enough for the echo floor to apply cleanly"}\n').child) as never,
@@ -373,5 +373,42 @@ describe('⭐ RC41 — runSequenceContinuationStop', () => {
     vi.mocked(getActivePendingPromptSequence).mockImplementationOnce(() => { throw new Error('store gone'); });
     const r = await runSequenceContinuationStop('/proj', 'cursor', { logEvent: () => {} });
     expect(r).toEqual({ ran: false });
+  });
+});
+
+/**
+ * ⭐ RC42 — the itemless-row visibility line. An active row with items:[] is the
+ * upstream planner-flake shape (found live 2026-08-22): the launcher can never
+ * package it, in the CLI or here. The runner STILL runs the stop (byte-identical
+ * outcomes) — it only names the condition in the log so a "popup came once but
+ * never chained" report is diagnosable from one grep.
+ */
+describe('⭐ RC42 — itemless active row is logged, behaviour unchanged', () => {
+  const rowWith = (items: unknown[]) =>
+    ({ id: 9, itemCount: 4, status: 'awaiting_response', payload: { items } }) as never;
+
+  it('items:[] ⇒ warn sequence_continuation_row_has_no_items AND the stop still runs', async () => {
+    vi.mocked(getActivePendingPromptSequence).mockReturnValueOnce(rowWith([]));
+    const warns: Array<[string, string]> = [];
+    const r = await runSequenceContinuationStop('/proj', 'windsurf', {
+      spawnFn: (() => fakeChild('').child) as never,
+      openStoreFn: (async () => ({ db: {} })) as never, closeStoreFn: (() => {}) as never,
+      logEvent: ((lvl: string, name: string) => { warns.push([lvl, name]); }) as never,
+      writeDecision: (async () => {}) as never,
+    });
+    expect(r).toEqual({ ran: true, blocked: false });
+    expect(warns).toContainEqual(['warn', 'sequence_continuation_row_has_no_items']);
+  });
+
+  it('a worded row logs NO such warn (healthy chain stays quiet)', async () => {
+    vi.mocked(getActivePendingPromptSequence).mockReturnValueOnce(rowWith([{ itemKind: 'first_task' }]));
+    const warns: string[] = [];
+    await runSequenceContinuationStop('/proj', 'cursor', {
+      spawnFn: (() => fakeChild('').child) as never,
+      openStoreFn: (async () => ({ db: {} })) as never, closeStoreFn: (() => {}) as never,
+      logEvent: ((_l: string, name: string) => { warns.push(name); }) as never,
+      writeDecision: (async () => {}) as never,
+    });
+    expect(warns).not.toContain('sequence_continuation_row_has_no_items');
   });
 });
