@@ -45,3 +45,9 @@ function refuseWrite(fn: string): never {
 export function appendFileSync(_path: string, _data: unknown, _options?: unknown): never { refuseWrite('appendFileSync'); }
 export function mkdirSync(_path: string, _options?: unknown): never { refuseWrite('mkdirSync'); }
 export function renameSync(_oldPath: string, _newPath: string): never { refuseWrite('renameSync'); }
+
+/** Bundled via the engine's CLI popup module (its TTY fallback opens /dev/tty);
+ * the browser always injects its own interaction, so a call here is a bug. */
+export function openSync(path: string, _flags?: unknown, _mode?: unknown): never {
+  enoent('open', path);
+}

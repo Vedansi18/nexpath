@@ -44,6 +44,17 @@ export {
   promptEnhancementStageSignalKeyV1,
 } from '../../prompt-enhancement/guidance-facts.js';
 export { buildPromptEnhancementCostVisibilityMetadataV1 } from '../../prompt-enhancement/cost-observability.js';
+// The engine's OWN popup state machine (PB4): the browser injects an
+// `interaction` that bridges views/commands to the content-script panel, so
+// every popup behaviour (F2 smooth send, refinement go-back stack, F3 silent
+// action failures, sendability validation) is the CLI's code, not a rewrite.
+export {
+  runPromptEnhancementCliSubmitPopupV1,
+  type PromptEnhancementCliPopupCommandV1,
+  type PromptEnhancementCliPopupInteractionV1,
+  type PromptEnhancementCliPopupResultV1,
+  type PromptEnhancementCliPopupViewV1,
+} from '../../prompt-enhancement/cli-submit-popup.js';
 
 /** Bundle liveness marker — imported by the service worker's boot log so the
  * engine chain is provably part of the shipped bundle from PB1 onward. */

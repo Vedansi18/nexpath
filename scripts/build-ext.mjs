@@ -108,6 +108,12 @@ const NODE_SHIMS = {
   'node:path':   path.join(SRC, 'shims', 'node-path.ts'),
   'node:os':     path.join(SRC, 'shims', 'node-os.ts'),
   'node:crypto': path.join(SRC, 'shims', 'node-crypto.ts'),
+  // Imported by the engine's CLI popup module for its default TTY interaction —
+  // statically unreachable in the browser (the SW always injects its own
+  // interaction); the shims exist so the import resolves and any actual call
+  // fails loudly.
+  'node:tty':      path.join(SRC, 'shims', 'node-tty.ts'),
+  'node:readline': path.join(SRC, 'shims', 'node-readline.ts'),
   // The real Node SDK is heavy and refuses browser-like environments; the stub
   // keeps the engine's `new OpenAI()` fallback paths working with full LLM
   // parity through the fetch adapter (see shims/openai-sdk.ts). Root import
@@ -118,7 +124,7 @@ const NODE_SHIMS = {
 const nodeShimPlugin = {
   name: 'nexpath-node-shims',
   setup(build) {
-    build.onResolve({ filter: /^(node:(fs|path|os|crypto)|openai)$/ }, (args) => ({ path: NODE_SHIMS[args.path] }));
+    build.onResolve({ filter: /^(node:(fs|path|os|crypto|tty|readline)|openai)$/ }, (args) => ({ path: NODE_SHIMS[args.path] }));
   },
 };
 

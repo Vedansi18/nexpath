@@ -34,6 +34,9 @@ import { ConsoleLogAdapter } from '../adapters/log-console.js';
 import { PersistentLogAdapter } from '../adapters/log-persistent.js';
 import { ContentScriptUIAdapter } from '../content/panel-adapter.js';
 import {
+  isPeCommandMsg,
+  isPeKeepaliveMsg,
+  isPeTerminalNoticeMsg,
   isPromptSubmitMsg,
   isResponseStopMsg,
   isAdvisoryFooterIntentMsg,
@@ -45,7 +48,9 @@ import type { AdvisoryPayload } from '../../core/ports/ui.port.js';
 import type { Stage, UserRole, UserProfile, PromptRecord } from '../../core/classifier/types.js';
 import { PE_ENGINE_READY, isPromptEnhancementSequenceShapedTextV1 } from './pe-engine.js';
 import { prepareAndStoreBrowserPe, type BrowserPeContext } from './pe-prepare.js';
-import { upsertPendingPe } from '../adapters/pe-pending-store.js';
+import { getPendingPe, markPendingPeShown, upsertPendingPe } from '../adapters/pe-pending-store.js';
+import { resolvePePopupCooldown } from '../adapters/pe-config.js';
+import { deliverPePanelCommand, runBrowserPePopup } from './pe-popup-host.js';
 
 const idb = new IdbStorageAdapter();
 const keyStore = new ChromeStorageKeyAdapter();
@@ -175,6 +180,32 @@ browser.runtime.onMessage.addListener(
       // open, observed live 2026-07-10); this message reaches whichever instance is
       // alive, so the advisory_dismissed record always lands in the ring buffer.
       log.debug('advisory_dismissed', { eventType: msg.eventType, advisoryId: msg.advisoryId });
+      sendResponse({ ok: true });
+      return true;
+    }
+
+    if (isPeCommandMsg(msg)) {
+      // One PE panel action → the live popup loop's mailbox (pe-popup-host).
+      const delivered = deliverPePanelCommand(log, msg.projectRoot, msg.viewSeq, msg.command);
+      sendResponse({ ok: delivered });
+      return true;
+    }
+
+    if (isPeTerminalNoticeMsg(msg)) {
+      // One-way PE outcome record (advisory-terminal parity): consume the pending
+      // row on whichever SW instance is alive so a teardown mid-popup can never
+      // resurrect the popup on the next stop. Idempotent — the live loop's own
+      // bookkeeping has usually consumed it already.
+      log.debug('pe_terminal_notice', { projectRoot: msg.projectRoot, outcome: msg.outcome });
+      markPendingPeShown(msg.projectRoot)
+        .then(() => sendResponse({ ok: true }))
+        .catch(() => sendResponse({ ok: false }));
+      return true;
+    }
+
+    if (isPeKeepaliveMsg(msg)) {
+      // Heartbeat while the PE panel is open — receiving any runtime message
+      // resets MV3's idle timer; the ack is all this needs to do.
       sendResponse({ ok: true });
       return true;
     }
@@ -886,14 +917,160 @@ async function runPromptSubmitPipeline(
 }
 
 /**
- * Response-stop handler — CLI-parity popup timing. Fires when the agent finishes
- * responding (the browser equivalent of Claude Code's Stop hook). Shows the advisory
- * that handlePromptSubmit queued for this project, if any — so the popup lands AFTER
- * the response, never before/during it. Mirrors cli/commands/stop.ts (runStop):
- * pull pending → clear immediately (dedup on rapid re-fires) → re-check the freq
- * gate (honour a Ctrl+X pressed since queuing) → render.
+ * D-2 advisory-surface switch. The CLI's PE branch REMOVED the decision-session
+ * advisory popup outright (MPS-7) — a queued advisory is consumed silently and
+ * the prompt-enhancement popup is the surface the user sees. That is this
+ * extension's DEFAULT. The hidden storage.local key below, set to the exact
+ * string 'enabled' (A9: exact-equality read, never truthiness), restores the
+ * legacy advisory popup byte-for-byte — the escape hatch the plan requires to
+ * stay reversible. Never surfaced in the options UI (hidden-key guard test).
+ */
+const ADVISORY_LEGACY_SURFACE_KEY = 'nexpath_advisory_legacy_surface';
+
+/**
+ * Response-stop dispatcher — CLI-parity popup timing (the browser's Stop hook).
+ * Reads the D-2 switch and routes: default = PE-first (mirrors the CLI's PE
+ * branch of stop.ts — feedback popups don't exist in the browser, PE popup
+ * next, advisory surface removed); 'enabled' = the legacy advisory flow,
+ * unchanged, with any pending PE row consumed silently so the two surfaces
+ * can never stack.
  */
 async function handleResponseStop(projectRoot: string, tabId: number | undefined): Promise<void> {
+  let legacySurface = false;
+  try {
+    legacySurface = (await keyStore.getKey(ADVISORY_LEGACY_SURFACE_KEY)) === 'enabled';
+  } catch { /* switch unreadable → CLI-parity default */ }
+  if (!legacySurface) return handleResponseStopPeFirst(projectRoot, tabId);
+  try {
+    const state = await idb.loadSessionState(projectRoot);
+    const pe = await getPendingPe(projectRoot, state?.sessionId);
+    if (pe) {
+      await markPendingPeShown(projectRoot);
+      log.debug('pe_suppressed_legacy_surface', { projectRoot });
+    }
+  } catch { /* suppression is best-effort — the legacy advisory flow must run */ }
+  return handleResponseStopLegacyAdvisory(projectRoot, tabId);
+}
+
+/**
+ * PE-first response-stop (the D-2 default) — the browser mirror of the CLI PE
+ * branch's Stop hook: wait out a still-running submit decision, consume any
+ * queued advisory SILENTLY (MPS-7 — the advisory popup no longer exists on
+ * this surface), then show the parked prompt enhancement through the engine's
+ * own popup state machine. `not_shown` leaves the row pending for the next
+ * stop (stop.ts:614–616); a cooldown hit consumes it with a ring event
+ * (stop.ts:552–561).
+ */
+async function handleResponseStopPeFirst(projectRoot: string, tabId: number | undefined): Promise<void> {
+  // The submit pipeline queues the advisory AND parks the PE before clearing
+  // its inflight marker — wait for the MARKER here (not for a row: the PE
+  // prepare runs last, so a row-based wait could read a half-finished turn).
+  const inflightRaw = await keyStore.getKey(decisionInflightKeyFor(projectRoot));
+  if (inflightRaw) {
+    let fresh = false;
+    try {
+      const inflight = JSON.parse(inflightRaw) as { at?: unknown };
+      fresh = typeof inflight.at === 'number' && clock.now() - inflight.at <= DECISION_INFLIGHT_STALE_MS;
+    } catch { /* malformed marker → treat as stale */ }
+    if (fresh) {
+      log.debug('response_stop_waiting_for_decision', { projectRoot });
+      const deadline = clock.now() + DECISION_WAIT_MAX_MS;
+      while (clock.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, DECISION_WAIT_POLL_MS));
+        if (!await keyStore.getKey(decisionInflightKeyFor(projectRoot))) break;
+      }
+    }
+  }
+
+  // MPS-7: consume the queued advisory silently — the surface is removed.
+  const advKey = pendingAdvisoryKeyFor(projectRoot);
+  if (await keyStore.getKey(advKey)) {
+    await Promise.all([
+      keyStore.setKey(advKey, ''),
+      keyStore.setKey(pendingAdvisoryOgKeyFor(projectRoot), ''),
+    ]);
+    log.debug('advisory_removed_surface', { projectRoot });
+  }
+
+  const state = await idb.loadSessionState(projectRoot);
+  const pe = await getPendingPe(projectRoot, state?.sessionId);
+  if (!pe) return;
+
+  // No usable tab → leave the row pending for the next stop (advisory parity —
+  // the 2026-07-10 lesson: never consume before a render is possible).
+  if (!tabId) {
+    log.warn('pe_stop_no_tab', {});
+    return;
+  }
+
+  // Honour frequency 'off' toggled since the prepare (CLI stop-gate parity).
+  const [projFreqRaw, globalFreqRaw] = await Promise.all([
+    keyStore.getKey(projectFreqKeyFor(projectRoot)),
+    keyStore.getKey('advisory_frequency'),
+  ]);
+  if ((projFreqRaw ?? globalFreqRaw ?? 'every_event') === 'off') {
+    await markPendingPeShown(projectRoot);
+    log.debug('pe_suppressed_freq_off', { projectRoot });
+    return;
+  }
+
+  // PE popup cooldown (default 7 prompts; stop.ts:552–561): suppressed shows
+  // CONSUME the row — a cooldown hit is a decision, not a deferral.
+  const cooldown = await resolvePePopupCooldown(projectRoot);
+  const lastShownIndex = state?.lastPromptEnhancementPromptIndex;
+  const promptCount = state?.promptCount ?? pe.promptCount;
+  if (typeof lastShownIndex === 'number' && cooldown > 0 && promptCount - lastShownIndex < cooldown) {
+    await markPendingPeShown(projectRoot);
+    log.debug('pe_popup_cooldown', { projectRoot, promptCount, lastShownIndex, cooldown });
+    return;
+  }
+
+  const apiKey = await keyStore.getKey('openai_api_key');
+  const outcome = await runBrowserPePopup({
+    log,
+    projectRoot,
+    apiKey,
+    record: pe,
+    sendToTab: (m) => browser.tabs.sendMessage(tabId, m),
+    onFirstRendered: async () => {
+      // First real render: consume the row + start the cooldown window — the
+      // same bookkeeping SessionStateManager.markPromptEnhancementPopupShown
+      // does on the manager-mediated path, applied to the loaded state here.
+      await markPendingPeShown(projectRoot);
+      if (state) {
+        state.lastPromptEnhancementPromptIndex = state.promptCount;
+        await idb.saveSessionState(state);
+      }
+    },
+  });
+
+  if (outcome.state === 'selected_current') {
+    try {
+      await browser.tabs.sendMessage(tabId, {
+        type: 'nexpath:pe-inject', projectRoot, text: outcome.bodyText,
+      });
+      log.debug('pe_injected', { projectRoot, chars: outcome.bodyText.length });
+    } catch (err) {
+      log.warn('pe_inject_failed', { projectRoot, error: String(err) });
+    }
+  } else if (outcome.state === 'selected_original') {
+    log.debug('pe_use_original', { projectRoot });
+  } else if (outcome.state === 'closed_no_send') {
+    log.debug('pe_closed_no_send', { projectRoot });
+  } else {
+    log.debug('pe_not_shown', { projectRoot, reasonCodes: outcome.reasonCodes.slice(0, 6) });
+  }
+}
+
+/**
+ * LEGACY response-stop handler (D-2 switch 'enabled') — the shipped advisory
+ * flow, byte-for-byte. Shows the advisory that handlePromptSubmit queued for
+ * this project, if any — so the popup lands AFTER the response, never
+ * before/during it. Mirrors cli/commands/stop.ts (runStop): pull pending →
+ * clear immediately (dedup on rapid re-fires) → re-check the freq gate
+ * (honour a Ctrl+X pressed since queuing) → render.
+ */
+async function handleResponseStopLegacyAdvisory(projectRoot: string, tabId: number | undefined): Promise<void> {
   const key   = pendingAdvisoryKeyFor(projectRoot);
   const ogKey = pendingAdvisoryOgKeyFor(projectRoot);
   let [raw, ogRaw, apiKey] = await Promise.all([

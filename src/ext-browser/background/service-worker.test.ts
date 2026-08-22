@@ -45,6 +45,11 @@ vi.mock('../adapters/pe-pending-store.js', () => ({
   getPendingPe: vi.fn(),
   markPendingPeShown: vi.fn(),
 }));
+vi.mock('../adapters/pe-config.js', () => ({ resolvePePopupCooldown: vi.fn() }));
+vi.mock('./pe-popup-host.js', () => ({
+  runBrowserPePopup: vi.fn(),
+  deliverPePanelCommand: vi.fn(),
+}));
 
 const { classifyPrompt } = await import('../../core/classifier/PromptClassifier.js');
 const { SessionStateManager } = await import('../../core/session-state.js');
@@ -65,6 +70,9 @@ const { PersistentLogAdapter } = await import('../adapters/log-persistent.js');
 const { ContentScriptUIAdapter } = await import('../content/panel-adapter.js');
 const { prepareAndStoreBrowserPe } = await import('./pe-prepare.js');
 const { isPromptEnhancementSequenceShapedTextV1 } = await import('./pe-engine.js');
+const { getPendingPe, markPendingPeShown } = await import('../adapters/pe-pending-store.js');
+const { resolvePePopupCooldown } = await import('../adapters/pe-config.js');
+const { runBrowserPePopup } = await import('./pe-popup-host.js');
 
 const idbLoadSessionState = vi.fn();
 const idbGetProjectDetectedLanguage = vi.fn();
@@ -73,6 +81,11 @@ const idbSaveProjectDetectedLanguage = vi.fn().mockResolvedValue(undefined);
 
 const keyStoreGetKey = vi.fn();
 const keyStoreSetKey = vi.fn().mockResolvedValue(undefined);
+// D-2 advisory-surface switch (PB4), answered at the adapter layer so individual
+// tests' keyed getKey mockImplementations never have to know about it. null =
+// the production default (PE-first, advisory surface removed); the legacy
+// response-stop describe sets 'enabled' to exercise the preserved flow.
+const advisoryLegacySwitch: { value: string | null } = { value: null };
 const clockNow = vi.fn().mockReturnValue(1000);
 
 // Shared across ConsoleLogAdapter instantiations so tests can assert on log events
@@ -100,6 +113,7 @@ const onInstalledAddListenerMock = vi.fn();
 const onMessageAddListenerMock = vi.fn();
 const tabsQueryMock = vi.fn();
 const tabsReloadMock = vi.fn().mockResolvedValue(undefined);
+const tabsSendMessageMock = vi.fn().mockResolvedValue(undefined);
 const alarmsCreateMock = vi.fn();
 const onAlarmAddListenerMock = vi.fn();
 
@@ -112,7 +126,7 @@ vi.mock('webextension-polyfill', () => ({
       onMessage:        { addListener: onMessageAddListenerMock },
       openOptionsPage:  openOptionsPageMock,
     },
-    tabs: { query: tabsQueryMock, reload: tabsReloadMock },
+    tabs: { query: tabsQueryMock, reload: tabsReloadMock, sendMessage: tabsSendMessageMock },
     alarms: { create: alarmsCreateMock, onAlarm: { addListener: onAlarmAddListenerMock } },
   },
 }));
@@ -200,8 +214,15 @@ describe('service-worker.ts', () => {
       port: {} as unknown as ReturnType<typeof makeMemoryStoragePort>['port'],
       getLatestState: getLatestStateMock,
     });
+    advisoryLegacySwitch.value = null;
     vi.mocked(ChromeStorageKeyAdapter).mockImplementation(function () {
-      return { getKey: keyStoreGetKey, setKey: keyStoreSetKey } as unknown as InstanceType<typeof ChromeStorageKeyAdapter>;
+      return {
+        getKey: (name: string) =>
+          name === 'nexpath_advisory_legacy_surface' && advisoryLegacySwitch.value !== null
+            ? Promise.resolve(advisoryLegacySwitch.value)
+            : keyStoreGetKey(name),
+        setKey: keyStoreSetKey,
+      } as unknown as InstanceType<typeof ChromeStorageKeyAdapter>;
     });
     vi.mocked(BrowserClockAdapter).mockImplementation(function () {
       return { now: clockNow } as unknown as InstanceType<typeof BrowserClockAdapter>;
@@ -1057,6 +1078,10 @@ describe('service-worker.ts', () => {
   });
 
   describe('response-stop shows the queued advisory (CLI popup-on-Stop timing)', () => {
+    // These tests pin the LEGACY advisory flow, which PB4 kept byte-identical
+    // behind the D-2 switch — so they run with the switch 'enabled'. The
+    // PE-first default is pinned in its own describe below.
+    beforeEach(() => { advisoryLegacySwitch.value = 'enabled'; });
     const P = 'https://replit.com';
     const PENDING_KEY = 'nexpath_pending_advisory::https://replit.com';
     const samplePayload = {
@@ -1370,6 +1395,168 @@ describe('service-worker.ts', () => {
       // The pending advisory must SURVIVE a tab-less stop (pre-2026-07-10 order
       // cleared it first — silently destroying the advisory forever).
       expect(keyStoreSetKey).not.toHaveBeenCalledWith(PENDING_KEY, '');
+    });
+  });
+
+  describe('PE-first response-stop (PB4 — the D-2 default, mirrors the CLI PE branch of stop.ts)', () => {
+    const P = 'https://bolt.new/~/p1';
+    const PENDING_KEY = `nexpath_pending_advisory::${P}`;
+    const OG_KEY = `nexpath_pending_advisory_og::${P}`;
+    const peRecord = {
+      sessionId: 's1', promptCount: 9, status: 'pending' as const, createdAt: 1,
+      request: { requestId: 'r1' }, result: { disposition: 'show_current_body' },
+    };
+    function stopPe(messageListener: MessageListener, tabId?: number): ReturnType<typeof vi.fn> {
+      const sendResponse = vi.fn();
+      messageListener(
+        { type: 'nexpath:response-stop', projectRoot: P, agent: 'bolt', tabId: 0 },
+        tabId === undefined ? {} : { tab: { id: tabId } },
+        sendResponse,
+      );
+      return sendResponse;
+    }
+
+    beforeEach(() => {
+      vi.mocked(resolvePePopupCooldown).mockResolvedValue(7);
+      vi.mocked(runBrowserPePopup).mockResolvedValue({ state: 'closed_no_send' });
+      vi.mocked(getPendingPe).mockResolvedValue(null);
+      vi.mocked(markPendingPeShown).mockResolvedValue(undefined);
+    });
+
+    it('consumes a queued advisory SILENTLY (MPS-7: the advisory surface is removed by default)', async () => {
+      keyStoreGetKey.mockImplementation(async (name: string) => (name === PENDING_KEY ? '{"advisoryId":"a1"}' : null));
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      stopPe(messageListener, 7);
+      await vi.waitFor(() => expect(logDebugMock).toHaveBeenCalledWith('advisory_removed_surface', { projectRoot: P }));
+      expect(keyStoreSetKey).toHaveBeenCalledWith(PENDING_KEY, '');
+      expect(keyStoreSetKey).toHaveBeenCalledWith(OG_KEY, '');
+      expect(showAdvisoryMock).not.toHaveBeenCalled();
+      expect(vi.mocked(generateOptionList)).not.toHaveBeenCalled(); // no personalisation LLM spend either
+    });
+
+    it('shows the pending PE at stop: runs the popup host with the row, session-scoped', async () => {
+      idbLoadSessionState.mockResolvedValue({ sessionId: 's1', promptCount: 9 });
+      vi.mocked(getPendingPe).mockResolvedValue(peRecord as never);
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      stopPe(messageListener, 7);
+      await vi.waitFor(() => expect(runBrowserPePopup).toHaveBeenCalledTimes(1));
+      expect(vi.mocked(getPendingPe)).toHaveBeenCalledWith(P, 's1');
+      const deps = vi.mocked(runBrowserPePopup).mock.calls[0]![0];
+      expect(deps.projectRoot).toBe(P);
+      expect(deps.record).toBe(peRecord);
+    });
+
+    it('onFirstRendered consumes the row AND starts the cooldown window in session state', async () => {
+      const state = { sessionId: 's1', promptCount: 9 } as Record<string, unknown>;
+      idbLoadSessionState.mockResolvedValue(state);
+      vi.mocked(getPendingPe).mockResolvedValue(peRecord as never);
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      stopPe(messageListener, 7);
+      await vi.waitFor(() => expect(runBrowserPePopup).toHaveBeenCalledTimes(1));
+      await vi.mocked(runBrowserPePopup).mock.calls[0]![0].onFirstRendered();
+      expect(markPendingPeShown).toHaveBeenCalledWith(P);
+      expect(state['lastPromptEnhancementPromptIndex']).toBe(9);
+      expect(idbSaveSessionState).toHaveBeenCalledWith(state);
+    });
+
+    it('selected_current sends the accepted body to the tab for inject (echo-guarded content-side)', async () => {
+      idbLoadSessionState.mockResolvedValue({ sessionId: 's1', promptCount: 9 });
+      vi.mocked(getPendingPe).mockResolvedValue(peRecord as never);
+      vi.mocked(runBrowserPePopup).mockResolvedValue({ state: 'selected_current', bodyText: 'THE BODY' });
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      stopPe(messageListener, 7);
+      await vi.waitFor(() => expect(tabsSendMessageMock).toHaveBeenCalledWith(7, {
+        type: 'nexpath:pe-inject', projectRoot: P, text: 'THE BODY',
+      }));
+      expect(logDebugMock).toHaveBeenCalledWith('pe_injected', expect.objectContaining({ chars: 8 }));
+    });
+
+    it('cooldown hit CONSUMES the row with a ring event and shows nothing (stop.ts:552–561)', async () => {
+      idbLoadSessionState.mockResolvedValue({ sessionId: 's1', promptCount: 9, lastPromptEnhancementPromptIndex: 5 });
+      vi.mocked(getPendingPe).mockResolvedValue(peRecord as never);
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      stopPe(messageListener, 7);
+      await vi.waitFor(() => expect(logDebugMock).toHaveBeenCalledWith('pe_popup_cooldown', expect.objectContaining({ cooldown: 7 })));
+      expect(markPendingPeShown).toHaveBeenCalledWith(P);
+      expect(runBrowserPePopup).not.toHaveBeenCalled();
+    });
+
+    it('outside the cooldown window the popup shows (boundary: promptCount - lastShown >= cooldown)', async () => {
+      idbLoadSessionState.mockResolvedValue({ sessionId: 's1', promptCount: 12, lastPromptEnhancementPromptIndex: 5 });
+      vi.mocked(getPendingPe).mockResolvedValue(peRecord as never);
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      stopPe(messageListener, 7);
+      await vi.waitFor(() => expect(runBrowserPePopup).toHaveBeenCalledTimes(1));
+    });
+
+    it('frequency "off" toggled since the prepare consumes the row silently', async () => {
+      keyStoreGetKey.mockImplementation(async (name: string) => (name === 'advisory_frequency' ? 'off' : null));
+      idbLoadSessionState.mockResolvedValue({ sessionId: 's1', promptCount: 9 });
+      vi.mocked(getPendingPe).mockResolvedValue(peRecord as never);
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      stopPe(messageListener, 7);
+      await vi.waitFor(() => expect(logDebugMock).toHaveBeenCalledWith('pe_suppressed_freq_off', { projectRoot: P }));
+      expect(markPendingPeShown).toHaveBeenCalledWith(P);
+      expect(runBrowserPePopup).not.toHaveBeenCalled();
+    });
+
+    it('no usable tab leaves the row PENDING (never consume before a render is possible)', async () => {
+      idbLoadSessionState.mockResolvedValue({ sessionId: 's1', promptCount: 9 });
+      vi.mocked(getPendingPe).mockResolvedValue(peRecord as never);
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      stopPe(messageListener, undefined);
+      await vi.waitFor(() => expect(logWarnMock).toHaveBeenCalledWith('pe_stop_no_tab', {}));
+      expect(markPendingPeShown).not.toHaveBeenCalled();
+      expect(runBrowserPePopup).not.toHaveBeenCalled();
+    });
+
+    it('LEGACY switch "enabled": pending PE is suppressed silently and the advisory flow runs unchanged', async () => {
+      advisoryLegacySwitch.value = 'enabled';
+      const payload = {
+        schemaVersion: 1, advisoryId: 'adv-legacy', pinchLabel: 'p', stage: 'implementation',
+        question: 'q', whyHelp: null, levels: { L1: [], L2: [], L3: [] }, options: [],
+        meta: { agent: 'bolt', frequency: 'every_event' },
+      };
+      keyStoreGetKey.mockImplementation(async (name: string) => (name === PENDING_KEY ? JSON.stringify(payload) : null));
+      idbLoadSessionState.mockResolvedValue({ sessionId: 's1', promptCount: 9 });
+      vi.mocked(getPendingPe).mockResolvedValue(peRecord as never);
+      showAdvisoryMock.mockResolvedValue({ type: 'dismiss', advisoryId: 'adv-legacy' });
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      stopPe(messageListener, 7);
+      await vi.waitFor(() => expect(showAdvisoryMock).toHaveBeenCalledOnce());
+      expect(logDebugMock).toHaveBeenCalledWith('pe_suppressed_legacy_surface', { projectRoot: P });
+      expect(markPendingPeShown).toHaveBeenCalledWith(P);
+      expect(runBrowserPePopup).not.toHaveBeenCalled();
+    });
+
+    it('the D-2 switch read is exact-equality: any other value stays PE-first (A9)', async () => {
+      advisoryLegacySwitch.value = 'true'; // truthy but NOT the exact sentinel
+      idbLoadSessionState.mockResolvedValue({ sessionId: 's1', promptCount: 9 });
+      vi.mocked(getPendingPe).mockResolvedValue(peRecord as never);
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      stopPe(messageListener, 7);
+      await vi.waitFor(() => expect(runBrowserPePopup).toHaveBeenCalledTimes(1));
+      expect(showAdvisoryMock).not.toHaveBeenCalled();
+    });
+
+    it('routes nexpath:pe-terminal-notice to the pending-store consume (SW-teardown resilience)', async () => {
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      const sendResponse = vi.fn();
+      messageListener(
+        { type: 'nexpath:pe-terminal-notice', projectRoot: P, outcome: 'use_original' },
+        {},
+        sendResponse,
+      );
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+      expect(markPendingPeShown).toHaveBeenCalledWith(P);
+      expect(logDebugMock).toHaveBeenCalledWith('pe_terminal_notice', { projectRoot: P, outcome: 'use_original' });
+    });
+
+    it('acks nexpath:pe-keepalive (the MV3 idle-timer reset needs nothing more)', async () => {
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      const sendResponse = vi.fn();
+      messageListener({ type: 'nexpath:pe-keepalive', projectRoot: P }, {}, sendResponse);
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
     });
   });
 
