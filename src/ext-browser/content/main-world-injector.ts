@@ -186,7 +186,7 @@ function setupListeners(): void {
     // is the only way to inspect the last Stage-2 verdict from the page itself.
     // Strictly whitelisted (never the API key or any other storage content).
     if ((msg as { type?: unknown } | null)?.type === 'nexpath:debug-request') {
-      void browser.storage.local.get(['nexpath_last_stage2_result', 'nexpath_recent_events']).then((res) => {
+      void browser.storage.local.get(['nexpath_last_stage2_result', 'nexpath_recent_events', 'nexpath_last_pe_prepare']).then((res) => {
         window.postMessage(
           {
             type: 'nexpath:debug-state',
@@ -195,6 +195,12 @@ function setupListeners(): void {
               : null,
             recentEvents: typeof res['nexpath_recent_events'] === 'string'
               ? res['nexpath_recent_events']
+              : null,
+            // PB5: the last PE prepare's WHITELISTED summary (disposition/
+            // sendPolicy/eligibility/counters — never request or body text;
+            // see the SW's recordPeDisposition for the exact field set).
+            lastPePrepare: typeof res['nexpath_last_pe_prepare'] === 'string'
+              ? res['nexpath_last_pe_prepare']
               : null,
           },
           window.location.origin,

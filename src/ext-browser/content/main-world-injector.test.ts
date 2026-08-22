@@ -332,12 +332,13 @@ describe('main-world-injector.ts', () => {
       dispatchWindowMessage({ type: 'nexpath:debug-request' });
       await new Promise((r) => setTimeout(r, 0));
 
-      expect(storageGetMock).toHaveBeenCalledWith(['nexpath_last_stage2_result', 'nexpath_recent_events']);
+      expect(storageGetMock).toHaveBeenCalledWith(['nexpath_last_stage2_result', 'nexpath_recent_events', 'nexpath_last_pe_prepare']);
       expect(postSpy).toHaveBeenCalledWith(
         {
           type: 'nexpath:debug-state',
           lastStage2Result: '{"fire":false,"reason":"testing already demonstrated"}',
           recentEvents: null,
+          lastPePrepare: null,
         },
         'https://replit.com',
       );
@@ -353,7 +354,22 @@ describe('main-world-injector.ts', () => {
       await new Promise((r) => setTimeout(r, 0));
 
       expect(postSpy).toHaveBeenCalledWith(
-        { type: 'nexpath:debug-state', lastStage2Result: null, recentEvents: null },
+        { type: 'nexpath:debug-state', lastStage2Result: null, recentEvents: null, lastPePrepare: null },
+        'https://replit.com',
+      );
+      postSpy.mockRestore();
+    });
+
+    it('carries the whitelisted last-PE-prepare summary when one is persisted (PB5)', async () => {
+      const summary = '{"disposition":"show_current_body","stored":true}';
+      storageGetMock.mockResolvedValueOnce({ nexpath_last_pe_prepare: summary });
+      const postSpy = vi.spyOn(window, 'postMessage');
+
+      dispatchWindowMessage({ type: 'nexpath:debug-request' });
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(postSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'nexpath:debug-state', lastPePrepare: summary }),
         'https://replit.com',
       );
       postSpy.mockRestore();

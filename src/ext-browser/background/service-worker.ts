@@ -229,6 +229,35 @@ const CROSS_PAGE_PROMPT_DEDUP_MS = 120_000;
 /** Last Stage-2 verdict (or error), persisted so it survives SW teardown. */
 const LAST_STAGE2_RESULT_KEY = 'nexpath_last_stage2_result';
 
+/**
+ * Last PE prepare's WHITELISTED summary (PB5) — the debug channel's answer to
+ * "did a prompt enhancement prepare, and what did it decide?" without reading
+ * SW console lines that die with the worker. Dispositions, policies, counters
+ * and reason labels only — NEVER the request, the prompt, or any body text.
+ */
+const LAST_PE_PREPARE_KEY = 'nexpath_last_pe_prepare';
+
+function recordPeDisposition(
+  path: 'fired_trigger' | 'sequence_fallback',
+  eligibility: string,
+  promptCount: number,
+  prep: Awaited<ReturnType<typeof prepareAndStoreBrowserPe>>,
+): Promise<void> {
+  return keyStore.setKey(LAST_PE_PREPARE_KEY, JSON.stringify({
+    at: clock.now(),
+    path,
+    eligibility,
+    promptCount,
+    disposition: prep.disposition,
+    safeFallback: prep.safeFallback,
+    reasonCode: 'reasonCode' in prep ? prep.reasonCode : null,
+    sendPolicy: prep.safeFallback || !prep.result ? null : prep.result.uiView.body.sendPolicy,
+    stored: !prep.safeFallback && prep.result !== undefined
+      && prep.result.disposition !== 'no_popup_not_applicable'
+      && prep.result.uiView.body.sendPolicy !== 'no_popup',
+  })).catch(() => { /* diagnostics are best-effort — never break the pipeline */ });
+}
+
 function lastPromptKeyFor(projectRoot: string): string {
   return `nexpath_last_prompt::${projectRoot}`;
 }
@@ -571,13 +600,14 @@ async function runPromptSubmitPipeline(
     try {
       if (!isPromptEnhancementSequenceShapedTextV1(promptText)) return;
       sequencePeFallbackDone = true;
-      await prepareAndStoreBrowserPe(log, apiKey, buildPeCtx({
+      const prep = await prepareAndStoreBrowserPe(log, apiKey, buildPeCtx({
         triggerKind: 'stage_transition',
         effectiveFlagType: 'stage_transition',
         firedKey: `sequence_shaped:${mgr.current.promptCount}`,
         classifierState: 'not_applicable',
         triggerEligibility: eligibility,
       }), upsertPendingPe);
+      await recordPeDisposition('sequence_fallback', eligibility, mgr.current.promptCount, prep);
     } catch (err) {
       log.debug('pe_prepare_failed', { path: 'sequence_fallback', error: String(err) });
     }
@@ -904,13 +934,15 @@ async function runPromptSubmitPipeline(
     const peDismissedBefore = typeof peSignalKey === 'string' && state.absenceFlags.some(
       (f) => f.signalKey === peSignalKey && f.dismissedAtIndex !== undefined,
     );
-    await prepareAndStoreBrowserPe(log, apiKey, buildPeCtx({
+    const peEligibility = peDismissedBefore ? 'dismissed_or_user_skipped' : 'fresh_trigger_eligible';
+    const prep = await prepareAndStoreBrowserPe(log, apiKey, buildPeCtx({
       triggerKind: trigger.kind,
       effectiveFlagType: flagType,
       firedKey: peFiredKey,
       classifierState: 'fire_recommended',
-      triggerEligibility: peDismissedBefore ? 'dismissed_or_user_skipped' : 'fresh_trigger_eligible',
+      triggerEligibility: peEligibility,
     }), upsertPendingPe);
+    await recordPeDisposition('fired_trigger', peEligibility, mgr.current.promptCount, prep);
   } catch (err) {
     log.debug('pe_prepare_failed', { path: 'fired_trigger', error: String(err) });
   }

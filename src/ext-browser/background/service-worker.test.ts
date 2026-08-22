@@ -187,6 +187,13 @@ describe('service-worker.ts', () => {
     tabsQueryMock.mockResolvedValue([]);
 
     vi.mocked(classifyPrompt).mockResolvedValue(baseClassification());
+    // Production-shaped default for the (mocked) PE prepare seam — the SW's
+    // recordPeDisposition reads these fields to persist the debug summary.
+    vi.mocked(prepareAndStoreBrowserPe).mockResolvedValue({
+      disposition: 'show_current_body',
+      safeFallback: false,
+      result: { disposition: 'show_current_body', uiView: { body: { sendPolicy: 'send_current' } } },
+    } as never);
     // Default: no personalisation → handleResponseStop shows the static queued payload.
     vi.mocked(generateOptionList).mockResolvedValue(null);
     vi.mocked(SessionStateManager.load).mockImplementation(function () {
@@ -946,6 +953,21 @@ describe('service-worker.ts', () => {
         keyStoreSetKey.mock.calls.findIndex(([k, v]) => typeof k === 'string' && k.startsWith('nexpath_decision_inflight::') && v === '')
       ]!;
       expect(vi.mocked(prepareAndStoreBrowserPe).mock.invocationCallOrder[0]!).toBeLessThan(markerClearOrder);
+
+      // PB5: the whitelisted disposition summary is persisted for the debug
+      // channel — decisions and counters only, never prompt or body text.
+      const summaryCall = keyStoreSetKey.mock.calls.find(([k]) => k === 'nexpath_last_pe_prepare');
+      expect(summaryCall).toBeDefined();
+      const summary = JSON.parse(summaryCall![1] as string) as Record<string, unknown>;
+      expect(summary).toMatchObject({
+        path: 'fired_trigger',
+        eligibility: 'fresh_trigger_eligible',
+        disposition: 'show_current_body',
+        sendPolicy: 'send_current',
+        stored: true,
+        promptCount: 3,
+      });
+      expect(summaryCall![1]).not.toContain('ship it');
     });
 
     it('fired absence → effective flagType/firedKey use Stage 2\'s selected signal; a dismissed flag downgrades eligibility', async () => {
