@@ -30,6 +30,21 @@ vi.mock('../adapters/clock-browser.js', () => ({ BrowserClockAdapter: vi.fn() })
 vi.mock('../adapters/log-console.js', () => ({ ConsoleLogAdapter: vi.fn() }));
 vi.mock('../adapters/log-persistent.js', () => ({ PersistentLogAdapter: vi.fn() }));
 vi.mock('../content/panel-adapter.js', () => ({ ContentScriptUIAdapter: vi.fn() }));
+// PB3: the PE seam has its own real-engine tests (pe-prepare.test.ts); here it is
+// mocked so this file tests only the SW's WIRING — when the prepare is invoked,
+// with which context, and that its failures never touch the advisory pipeline.
+// pe-engine is mocked to a switchable gate so tests drive the sequence-shape
+// branch explicitly (the real gate's behaviour is pinned in pe-prepare.test.ts).
+vi.mock('./pe-prepare.js', () => ({ prepareAndStoreBrowserPe: vi.fn() }));
+vi.mock('./pe-engine.js', () => ({
+  PE_ENGINE_READY: true,
+  isPromptEnhancementSequenceShapedTextV1: vi.fn(() => false),
+}));
+vi.mock('../adapters/pe-pending-store.js', () => ({
+  upsertPendingPe: vi.fn(),
+  getPendingPe: vi.fn(),
+  markPendingPeShown: vi.fn(),
+}));
 
 const { classifyPrompt } = await import('../../core/classifier/PromptClassifier.js');
 const { SessionStateManager } = await import('../../core/session-state.js');
@@ -48,6 +63,8 @@ const { BrowserClockAdapter } = await import('../adapters/clock-browser.js');
 const { ConsoleLogAdapter } = await import('../adapters/log-console.js');
 const { PersistentLogAdapter } = await import('../adapters/log-persistent.js');
 const { ContentScriptUIAdapter } = await import('../content/panel-adapter.js');
+const { prepareAndStoreBrowserPe } = await import('./pe-prepare.js');
+const { isPromptEnhancementSequenceShapedTextV1 } = await import('./pe-engine.js');
 
 const idbLoadSessionState = vi.fn();
 const idbGetProjectDetectedLanguage = vi.fn();
@@ -836,6 +853,206 @@ describe('service-worker.ts', () => {
       // Queued payload carries STATIC option text (raw desc-base) — personalised later, at stop.
       const payload = pendingPayload() as unknown as { levels: { L1: { title: string; body: string }[] } };
       expect(payload.levels.L1[0]).toMatchObject({ title: 'Run the full suite', body: 'b1' });
+    });
+  });
+
+  describe('prompt-enhancement prepare wiring (PB3 — mirrors auto.ts fired path + §4.6 sequence fallback)', () => {
+    const SEQ = 'first build the login page, then add a database, then deploy the whole thing';
+    function mockKeyStorePe(apiKey: string | null, freq: string | null, role: string | null): void {
+      keyStoreGetKey.mockResolvedValueOnce(apiKey).mockResolvedValueOnce(freq).mockResolvedValueOnce(role);
+    }
+    function primeFire(kind: 'stage_transition' | 'absence', selectedSignal?: string): void {
+      vi.mocked(shouldFireStage2).mockReturnValue(
+        (kind === 'stage_transition'
+          ? { kind }
+          : { kind, qualifyingFlags: [{ signalKey: selectedSignal ?? 'testing' }] }
+        ) as unknown as ReturnType<typeof shouldFireStage2>,
+      );
+      vi.mocked(runStage2).mockResolvedValue({
+        fire_decision_session: true,
+        stage: 'implementation',
+        stage_confidence: 0.95,
+        reason: 'r',
+        ...(kind === 'absence' ? { selected_signal_key: selectedSignal ?? 'testing' } : {}),
+      } as unknown as Awaited<ReturnType<typeof runStage2>>);
+      vi.mocked(resolveDecisionContent).mockReturnValue({
+        L1: [{ option: 'Run tests', descBase: 'd' }], L2: [], L3: [],
+        pinchFallback: 'Final Review',
+      } as unknown as ReturnType<typeof resolveDecisionContent>);
+      vi.mocked(generatePinchLabel).mockResolvedValue('Final Review');
+    }
+    function submitPe(messageListener: MessageListener, promptText: string): ReturnType<typeof vi.fn> {
+      const sendResponse = vi.fn();
+      messageListener(
+        { type: 'nexpath:prompt-submit', promptText, projectRoot: 'https://bolt.new/~/p1', agent: 'bolt', tabId: 7 },
+        {},
+        sendResponse,
+      );
+      return sendResponse;
+    }
+    /** The single ctx object the SW handed to the (mocked) PE prepare seam. */
+    function peCtx(): Record<string, unknown> {
+      expect(prepareAndStoreBrowserPe).toHaveBeenCalledTimes(1);
+      return vi.mocked(prepareAndStoreBrowserPe).mock.calls[0]![2] as unknown as Record<string, unknown>;
+    }
+
+    it('fired stage_transition → prepares AFTER the pending-advisory persist, with fire-path context', async () => {
+      primeFire('stage_transition');
+      mockKeyStorePe('sk-real-key', 'every_event', null);
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      const sendResponse = submitPe(messageListener, 'ship it');
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+
+      const ctx = peCtx();
+      expect(ctx).toMatchObject({
+        projectRoot: 'https://bolt.new/~/p1',
+        promptText: 'ship it',
+        triggerKind: 'stage_transition',
+        effectiveFlagType: 'stage_transition',
+        firedKey: 'stage_transition:implementation→implementation',
+        classifierState: 'fire_recommended',
+        triggerEligibility: 'fresh_trigger_eligible',
+        promptCount: 3,
+      });
+      // A1 ordering lesson: the pending-advisory write must land BEFORE any PE work.
+      const persistOrder = keyStoreSetKey.mock.invocationCallOrder[
+        keyStoreSetKey.mock.calls.findIndex(([k]) => typeof k === 'string' && k.startsWith('nexpath_pending_advisory::'))
+      ]!;
+      expect(persistOrder).toBeLessThan(vi.mocked(prepareAndStoreBrowserPe).mock.invocationCallOrder[0]!);
+      // The prepare runs inside handlePromptSubmit — before the inflight marker clears
+      // (the '' write), so response-stop's marker wait covers the PE parking too.
+      const markerClearOrder = keyStoreSetKey.mock.invocationCallOrder[
+        keyStoreSetKey.mock.calls.findIndex(([k, v]) => typeof k === 'string' && k.startsWith('nexpath_decision_inflight::') && v === '')
+      ]!;
+      expect(vi.mocked(prepareAndStoreBrowserPe).mock.invocationCallOrder[0]!).toBeLessThan(markerClearOrder);
+    });
+
+    it('fired absence → effective flagType/firedKey use Stage 2\'s selected signal; a dismissed flag downgrades eligibility', async () => {
+      primeFire('absence', 'testing');
+      // The SW's step-11 eligibility check reads mgr.current (the session's live
+      // absence-flag history), not the post-persist snapshot.
+      mgrCurrent.absenceFlags = [
+        { signalKey: 'testing', stage: 'implementation', raisedAtIndex: 1, dismissedAtIndex: 2, cooldownUntil: 0 },
+      ];
+      mockKeyStorePe('sk-real-key', 'every_event', null);
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      const sendResponse = submitPe(messageListener, 'add checkout flow');
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+
+      expect(peCtx()).toMatchObject({
+        triggerKind: 'absence',
+        effectiveFlagType: 'absence:testing',
+        firedKey: 'absence:testing@implementation',
+        triggerEligibility: 'dismissed_or_user_skipped',
+      });
+    });
+
+    it('sequence-shaped prompt at the DEDUP exit → fallback prepare labeled blocked_by_dedup, stage2 never runs', async () => {
+      vi.mocked(isPromptEnhancementSequenceShapedTextV1).mockReturnValue(true);
+      vi.mocked(shouldFireStage2).mockReturnValue({ kind: 'stage_transition' } as unknown as ReturnType<typeof shouldFireStage2>);
+      mgrHasFiredDecisionSession.mockReturnValue(true);
+      mockKeyStorePe('sk-real-key', 'every_event', null);
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      const sendResponse = submitPe(messageListener, SEQ);
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+
+      expect(runStage2).not.toHaveBeenCalled();
+      expect(vi.mocked(isPromptEnhancementSequenceShapedTextV1)).toHaveBeenCalledWith(SEQ);
+      expect(peCtx()).toMatchObject({
+        promptText: SEQ,
+        classifierState: 'not_applicable',
+        triggerEligibility: 'blocked_by_dedup',
+        firedKey: 'sequence_shaped:3',
+      });
+    });
+
+    it('sequence-shaped prompt below min-prompts → fallback labeled support_only_not_triggering', async () => {
+      vi.mocked(isPromptEnhancementSequenceShapedTextV1).mockReturnValue(true);
+      // major_only needs 5 prompts; mgrCurrent.promptCount is 3 → min-prompts exit.
+      mockKeyStorePe('sk-real-key', 'major_only', null);
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      const sendResponse = submitPe(messageListener, SEQ);
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+      expect(peCtx()).toMatchObject({ triggerEligibility: 'support_only_not_triggering' });
+    });
+
+    it('sequence-shaped prompt with NO trigger → fallback labeled support_only_not_triggering', async () => {
+      vi.mocked(isPromptEnhancementSequenceShapedTextV1).mockReturnValue(true);
+      // shouldFireStage2 default-mocked to null in beforeEach → no-trigger exit.
+      mockKeyStorePe('sk-real-key', 'every_event', null);
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      const sendResponse = submitPe(messageListener, SEQ);
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+      expect(peCtx()).toMatchObject({ triggerEligibility: 'support_only_not_triggering' });
+    });
+
+    it('sequence-shaped prompt when Stage 2 DECLINES → fallback labeled too_weak_no_popup', async () => {
+      vi.mocked(isPromptEnhancementSequenceShapedTextV1).mockReturnValue(true);
+      vi.mocked(shouldFireStage2).mockReturnValue({ kind: 'stage_transition' } as unknown as ReturnType<typeof shouldFireStage2>);
+      vi.mocked(runStage2).mockResolvedValue({
+        fire_decision_session: false, stage: 'implementation', stage_confidence: 0.4, reason: 'weak',
+      } as unknown as Awaited<ReturnType<typeof runStage2>>);
+      mockKeyStorePe('sk-real-key', 'every_event', null);
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      const sendResponse = submitPe(messageListener, SEQ);
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+      expect(peCtx()).toMatchObject({ triggerEligibility: 'too_weak_no_popup' });
+    });
+
+    it('a NON-sequence prompt at a blocked exit prepares nothing (the fallback is sequence-gated)', async () => {
+      vi.mocked(isPromptEnhancementSequenceShapedTextV1).mockReturnValue(false);
+      vi.mocked(shouldFireStage2).mockReturnValue({ kind: 'stage_transition' } as unknown as ReturnType<typeof shouldFireStage2>);
+      mgrHasFiredDecisionSession.mockReturnValue(true);
+      mockKeyStorePe('sk-real-key', 'every_event', null);
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      const sendResponse = submitPe(messageListener, 'fix the typo in the readme');
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+      expect(prepareAndStoreBrowserPe).not.toHaveBeenCalled();
+    });
+
+    it('frequency "off" stays FULLY silent — no PE prepare even for a sequence-shaped prompt (CLI parity)', async () => {
+      vi.mocked(isPromptEnhancementSequenceShapedTextV1).mockReturnValue(true);
+      mockKeyStorePe('sk-real-key', 'off', null);
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      const sendResponse = submitPe(messageListener, SEQ);
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+      expect(prepareAndStoreBrowserPe).not.toHaveBeenCalled();
+    });
+
+    it('the no-API-key stage-2 exit prepares nothing (documented decision: keyless browser = no PE surface)', async () => {
+      vi.mocked(isPromptEnhancementSequenceShapedTextV1).mockReturnValue(true);
+      vi.mocked(shouldFireStage2).mockReturnValue({ kind: 'stage_transition' } as unknown as ReturnType<typeof shouldFireStage2>);
+      mockKeyStorePe(null, 'every_event', null);
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      const sendResponse = submitPe(messageListener, SEQ);
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+      expect(logDebugMock).toHaveBeenCalledWith('stage2_skipped_no_key', expect.anything());
+      expect(prepareAndStoreBrowserPe).not.toHaveBeenCalled();
+    });
+
+    it('a PE prepare rejection is caught + logged — the advisory pipeline is untouched (fail-open)', async () => {
+      primeFire('stage_transition');
+      vi.mocked(prepareAndStoreBrowserPe).mockRejectedValue(new Error('engine exploded'));
+      mockKeyStorePe('sk-real-key', 'every_event', null);
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      const sendResponse = submitPe(messageListener, 'ship it');
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+
+      expect(logDebugMock).toHaveBeenCalledWith('advisory_pending', expect.anything());
+      expect(pendingPayload()).not.toBeNull();
+      expect(logDebugMock).toHaveBeenCalledWith('pe_prepare_failed', expect.objectContaining({ path: 'fired_trigger' }));
+    });
+
+    it('a fallback-path PE rejection is caught + logged with its own path label', async () => {
+      vi.mocked(isPromptEnhancementSequenceShapedTextV1).mockReturnValue(true);
+      vi.mocked(prepareAndStoreBrowserPe).mockRejectedValue(new Error('engine exploded'));
+      vi.mocked(shouldFireStage2).mockReturnValue({ kind: 'stage_transition' } as unknown as ReturnType<typeof shouldFireStage2>);
+      mgrHasFiredDecisionSession.mockReturnValue(true);
+      mockKeyStorePe('sk-real-key', 'every_event', null);
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      const sendResponse = submitPe(messageListener, SEQ);
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+      expect(logDebugMock).toHaveBeenCalledWith('pe_prepare_failed', expect.objectContaining({ path: 'sequence_fallback' }));
     });
   });
 

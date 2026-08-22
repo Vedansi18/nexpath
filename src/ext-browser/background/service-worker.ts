@@ -43,7 +43,9 @@ import {
 import { resolveFrequencyConfig, type AdvisoryFrequencyLevel } from '../../config/GlobalConfig.js';
 import type { AdvisoryPayload } from '../../core/ports/ui.port.js';
 import type { Stage, UserRole, UserProfile, PromptRecord } from '../../core/classifier/types.js';
-import { PE_ENGINE_READY } from './pe-engine.js';
+import { PE_ENGINE_READY, isPromptEnhancementSequenceShapedTextV1 } from './pe-engine.js';
+import { prepareAndStoreBrowserPe, type BrowserPeContext } from './pe-prepare.js';
+import { upsertPendingPe } from '../adapters/pe-pending-store.js';
 
 const idb = new IdbStorageAdapter();
 const keyStore = new ChromeStorageKeyAdapter();
@@ -501,6 +503,55 @@ async function runPromptSubmitPipeline(
   );
   log.debug('absence_flags', { new: newAbsenceFlags.length, total: mgr.current.absenceFlags.length });
 
+  // ── PE context builder + sequence-shaped fallback (mirrors auto.ts §4.6) ──────
+  // Assemble the browser PE context from what this pipeline already computed. The
+  // fallback runs ON BLOCKED EXITS for multi-intent / list-shaped prompts only, so
+  // the MPS surface is reachable without an advisory trigger — exactly the CLI's
+  // team-lead-approved behaviour. Frequency 'off' stays fully silent (the CLI
+  // exits before its fallback too), and every call is failure-shielded: PE can
+  // never break the submit pipeline (fail-open rule).
+  const buildPeCtx = (overrides: Pick<BrowserPeContext,
+    'triggerKind' | 'effectiveFlagType' | 'firedKey' | 'classifierState' | 'triggerEligibility'
+  >): BrowserPeContext => ({
+    projectRoot,
+    promptText,
+    sessionId: mgr.current.sessionId,
+    promptCount: mgr.current.promptCount,
+    currentStage: mgr.current.currentStage,
+    prevStage: prevStageBeforeUpdate,
+    triggerConfidence: classification.confidence,
+    profile: mgr.current.profile,
+    configuredRole,
+    detectedLanguage: resolveLanguage(langOverrideRaw ?? undefined, mgr.current.detectedLanguage),
+    streamBOutputs: streamBOverrides
+      ? Object.entries(streamBOverrides)
+        .filter(([, present]) => present)
+        .map(([signal]) => `stream_b:${signal}`)
+      : [],
+    recentPromptRefs: mgr.current.promptHistory.map((_, i) =>
+      `prompt:${mgr.current.promptCount - mgr.current.promptHistory.length + i}`),
+    ...overrides,
+  });
+  let sequencePeFallbackDone = false;
+  const prepareSequenceShapedPeFallback = async (
+    eligibility: BrowserPeContext['triggerEligibility'],
+  ): Promise<void> => {
+    if (sequencePeFallbackDone) return;
+    try {
+      if (!isPromptEnhancementSequenceShapedTextV1(promptText)) return;
+      sequencePeFallbackDone = true;
+      await prepareAndStoreBrowserPe(log, apiKey, buildPeCtx({
+        triggerKind: 'stage_transition',
+        effectiveFlagType: 'stage_transition',
+        firedKey: `sequence_shaped:${mgr.current.promptCount}`,
+        classifierState: 'not_applicable',
+        triggerEligibility: eligibility,
+      }), upsertPendingPe);
+    } catch (err) {
+      log.debug('pe_prepare_failed', { path: 'sequence_fallback', error: String(err) });
+    }
+  };
+
   // ── Step 5.5: Frequency off fast-exit + minimum-prompt guard — mirrors auto.ts's
   // step 4.5 exactly (same order, same gate values from freqConfig). ──────────────
   if (freq === 'off') {
@@ -512,6 +563,7 @@ async function runPromptSubmitPipeline(
       promptCount: mgr.current.promptCount,
       minRequired: freqConfig.minPromptsBeforeAdvisory,
     });
+    await prepareSequenceShapedPeFallback('support_only_not_triggering');
     return;
   }
 
@@ -523,7 +575,10 @@ async function runPromptSubmitPipeline(
     freqConfig.stage2S1LowConfidence,
   );
 
-  if (!trigger) return;
+  if (!trigger) {
+    await prepareSequenceShapedPeFallback('support_only_not_triggering');
+    return;
+  }
 
   // ── Step 6.3: Dedup — already fired this exact stage_transition/absence event
   // this session? — mirrors auto.ts's step 6 (buildFiredKey + hasFiredDecisionSession).
@@ -534,16 +589,19 @@ async function runPromptSubmitPipeline(
     : `absence:${trigger.qualifyingFlags?.[0]?.signalKey ?? 'unknown'}@${mgr.current.currentStage}`;
   if (mgr.hasFiredDecisionSession(preCheckFiredKey)) {
     log.debug('advisory_dedup_blocked', { firedKey: preCheckFiredKey });
+    await prepareSequenceShapedPeFallback('blocked_by_dedup');
     return;
   }
 
   // ── Step 6.5: Advisory frequency gate — mirrors auto.ts's step 6.5 exactly. ───
   if (freq === 'major_only' && trigger.kind !== 'stage_transition') {
     log.debug('advisory_freq_blocked', { freq, flagType: trigger.kind });
+    await prepareSequenceShapedPeFallback('blocked_by_frequency');
     return;
   }
   if (freq === 'once_per_session' && mgr.current.firedDecisionSessions.length > 0) {
     log.debug('advisory_freq_blocked', { freq, flagType: trigger.kind });
+    await prepareSequenceShapedPeFallback('blocked_by_frequency');
     return;
   }
 
@@ -555,6 +613,7 @@ async function runPromptSubmitPipeline(
       lastAdvisoryAt: lastAdvisory,
       cooldownRemaining: freqConfig.postAdvisoryCooldown - (mgr.current.promptCount - lastAdvisory),
     });
+    await prepareSequenceShapedPeFallback('blocked_by_post_advisory_cooldown');
     return;
   }
 
@@ -570,6 +629,7 @@ async function runPromptSubmitPipeline(
   const advisoryCount = mgr.current.advisoryCount ?? 0;
   if (advisoryCount >= advisoryCap) {
     log.debug('advisory_cap_blocked', { advisoryCount, advisoryCap });
+    await prepareSequenceShapedPeFallback('blocked_by_session_cap');
     return;
   }
 
@@ -673,7 +733,10 @@ async function runPromptSubmitPipeline(
     prevStage: prevStageBeforeUpdate,
   }));
 
-  if (!stage2Out.fire_decision_session) return;
+  if (!stage2Out.fire_decision_session) {
+    await prepareSequenceShapedPeFallback('too_weak_no_popup');
+    return;
+  }
 
   // ── Step 7.5: Feed Stage 2 signal assessments back into signal counters —
   // mirrors auto.ts's step 7.5 (keeps future absence detection honest about
@@ -795,6 +858,31 @@ async function runPromptSubmitPipeline(
     keyStore.setKey(pendingAdvisoryOgKeyFor(projectRoot), JSON.stringify(ogContext)),
   ]);
   log.debug('advisory_pending', { projectRoot, advisoryId: payload.advisoryId, stage: payload.stage });
+
+  // ── Step 11: Prompt-enhancement prepare — fired-trigger path ──────────────────
+  // Runs AFTER the pending-advisory persist above (the Option-A lesson: nothing
+  // may delay that write — a fast agent response races response-stop), and still
+  // inside handlePromptSubmit's inflight marker, so response-stop waits for this
+  // too. Same split as the CLI: auto.ts prepares + parks at submit, stop.ts shows
+  // at response-stop. Failure-shielded — PE can never break the submit pipeline.
+  try {
+    const peFiredKey = trigger.kind === 'stage_transition'
+      ? `stage_transition:${prevStageBeforeUpdate}→${state.currentStage}`
+      : `${flagType}@${state.currentStage}`;
+    const peSignalKey = trigger.kind === 'absence' ? stage2Out.selected_signal_key : undefined;
+    const peDismissedBefore = typeof peSignalKey === 'string' && state.absenceFlags.some(
+      (f) => f.signalKey === peSignalKey && f.dismissedAtIndex !== undefined,
+    );
+    await prepareAndStoreBrowserPe(log, apiKey, buildPeCtx({
+      triggerKind: trigger.kind,
+      effectiveFlagType: flagType,
+      firedKey: peFiredKey,
+      classifierState: 'fire_recommended',
+      triggerEligibility: peDismissedBefore ? 'dismissed_or_user_skipped' : 'fresh_trigger_eligible',
+    }), upsertPendingPe);
+  } catch (err) {
+    log.debug('pe_prepare_failed', { path: 'fired_trigger', error: String(err) });
+  }
 }
 
 /**

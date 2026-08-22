@@ -38,6 +38,12 @@ export {
 } from '../../prompt-enhancement/contracts.js';
 export { isPromptEnhancementSequenceShapedTextV1 } from '../../prompt-enhancement/routing-taxonomy.js';
 export { emitPromptEnhancementCostObservabilityV1 } from '../../prompt-enhancement/cost-measurement.js';
+export { getSourceRealityAdaptersSnapshot } from '../../prompt-enhancement/source-reality.js';
+export {
+  promptEnhancementAbsenceSignalKeyV1,
+  promptEnhancementStageSignalKeyV1,
+} from '../../prompt-enhancement/guidance-facts.js';
+export { buildPromptEnhancementCostVisibilityMetadataV1 } from '../../prompt-enhancement/cost-observability.js';
 
 /** Bundle liveness marker — imported by the service worker's boot log so the
  * engine chain is provably part of the shipped bundle from PB1 onward. */
