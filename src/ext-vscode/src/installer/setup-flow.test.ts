@@ -207,3 +207,91 @@ describe('buildSetupCommand', () => {
     expect(cmd).toBe('node "/r/runner.cjs" "/s/staged" "/s/.sentinel" "/s/staged/dist/cli/index.js"');
   });
 });
+
+/**
+ * 2026-08-13 (owner's clean-install test, live root cause): `state.done` lives
+ * in globalState and SURVIVES a wipe of `~/.nexpath` + hooks.json — the flow
+ * declared "already complete", the runner (which rewrites the hook registration
+ * and the switch flag) never re-ran, and the submit hook silently never fired
+ * again. "Already done" must also mean "still registered on disk".
+ */
+describe('⭐ verifyHookRegistration — a wiped machine must self-heal', () => {
+  const doneState = { done: true, version: '0.1.3' };
+
+  it('done + current + CLI verified BUT registration missing ⇒ the runner re-runs', async () => {
+    const { deps, calls, state } = makeDeps({
+      stageCli: () => CURRENT,
+      verifyHookRegistration: () => false,   // hooks.json / flag wiped
+    });
+    state.value = { ...doneState };
+    const outcome = await runSetupFlow(deps);
+    expect(calls.runInTerminal).toHaveBeenCalledTimes(1);  // self-heal, not skip
+    expect(outcome).toBe('done');
+  });
+
+  it('done + current + registered ⇒ still skips (no setup churn)', async () => {
+    const { deps, calls, state } = makeDeps({
+      stageCli: () => CURRENT,
+      verifyHookRegistration: () => true,
+    });
+    state.value = { ...doneState };
+    const outcome = await runSetupFlow(deps);
+    expect(outcome).toBe('already-done');
+    expect(calls.runInTerminal).not.toHaveBeenCalled();
+  });
+
+  it('dep absent ⇒ pre-fix behaviour (treated as registered)', async () => {
+    const { deps, calls, state } = makeDeps({ stageCli: () => CURRENT });
+    state.value = { ...doneState };
+    const outcome = await runSetupFlow(deps);
+    expect(outcome).toBe('already-done');
+    expect(calls.runInTerminal).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * RC32 — a working GLOBAL nexpath must not mask a STAGED copy that cannot run.
+ * The registered hook always invokes the staged entry, so only the staged copy's
+ * own dependencies make the hook work. Caught live: "setup already complete +
+ * verified" while the registered command died ERR_MODULE_NOT_FOUND.
+ */
+describe('⭐ RC32 — a registered hook needs the STAGED cli to actually run', () => {
+  const STAGED = {
+    status: 'already-current' as const, stagedDir: '/h/cli/0.1.4',
+    cliEntry: '/h/cli/0.1.4/dist/cli/index.js', shimPath: '/h/bin/nexpath', version: '0.1.4',
+  };
+  const build = (over: Partial<SetupFlowDeps> = {}) => makeDeps({
+    getState: () => ({ done: true, version: '0.1.4' }),
+    stageCli: () => STAGED,
+    verifyHookRegistration: () => true,
+    ...over,
+  });
+
+  it('⭐ THE GAP: global CLI present + staged copy broken ⇒ setup RE-RUNS (was "already-done")', async () => {
+    const { deps } = build({ verifyStagedCli: () => false });
+    expect(await runSetupFlow(deps, { preferExistingCli: true })).not.toBe('already-done');
+  });
+
+  it('says WHY, so a broken hook is never silent', async () => {
+    const lines: string[] = [];
+    const { deps } = build({ verifyStagedCli: () => false, log: (l: string) => lines.push(l) });
+    await runSetupFlow(deps, { preferExistingCli: true });
+    expect(lines.join('\n')).toMatch(/staged CLI but that copy does not run/i);
+  });
+
+  it('⭐ INERT on a healthy install — still "already-done", no setup terminal', async () => {
+    const { deps, calls } = build({ verifyStagedCli: () => true });
+    expect(await runSetupFlow(deps, { preferExistingCli: true })).toBe('already-done');
+    expect(calls.runInTerminal).not.toHaveBeenCalled();
+  });
+
+  it('inert without a global CLI too (the pre-RC32 path is unchanged)', async () => {
+    const { deps } = build({ verifyStagedCli: () => true });
+    expect(await runSetupFlow(deps, {})).toBe('already-done');
+  });
+
+  it('a broken staged cli with NO hook registered still re-runs (path unchanged)', async () => {
+    const { deps } = build({ verifyHookRegistration: () => false, verifyStagedCli: () => false });
+    expect(await runSetupFlow(deps, { preferExistingCli: true })).not.toBe('already-done');
+  });
+});

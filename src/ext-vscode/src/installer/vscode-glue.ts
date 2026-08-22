@@ -4,14 +4,54 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { checkPrereqs, cliRuns } from './prereq.js';
 import { stageCli } from './cli-stage.js';
+import { verifyCommandCurrent } from './hook-command-verify.js';
 import { SETUP_SENTINEL_FILENAME } from './setup-runner-source.js';
 import { runSetupInTerminal } from './terminal-runner.js';
 import {
   runSetupFlow,
   buildSetupCommand,
   type SetupFlowDeps,
+  type SetupOutcome,
   type SetupState,
 } from './setup-flow.js';
+
+/**
+ * RC28 (Windows/Devin tester, 2026-08-20): setup is SINGLE-FLIGHT.
+ *
+ * Three call sites start a setup — the auto-repair on registration drift, the
+ * "Set up" notification button, and the "Nexpath: Set up CLI" command — and none
+ * of them knew about the others. Two that overlap open two `Nexpath Setup`
+ * terminals (visible in the tester's screenshots) and race TWO interactive
+ * `npm ci` + `install --for vscode` runs against the SAME staged CLI directory:
+ * one can wipe `node_modules` while the other is mid-install, and both then
+ * write the same hooks.json and flag file.
+ *
+ * A module-level promise is the right scope: `runSetupFlow` is already stateless
+ * across calls, the extension host is single-threaded, and one setup per host
+ * process is exactly the invariant we want. Followers await the SAME promise, so
+ * they observe the real outcome instead of a fabricated one, and the slot is
+ * always released in `finally` — a thrown setup can never wedge the gate shut.
+ */
+let setupInFlight: Promise<SetupOutcome> | null = null;
+
+async function runSetupFlowOnce(
+  deps: SetupFlowDeps,
+  opts: Parameters<typeof runSetupFlow>[1],
+  log: Logger,
+): Promise<SetupOutcome> {
+  if (setupInFlight) {
+    log('[nexpath] setup already running — joining it instead of opening a second setup terminal');
+    return setupInFlight;
+  }
+  setupInFlight = (async () => {
+    try {
+      return await runSetupFlow(deps, opts);
+    } finally {
+      setupInFlight = null;
+    }
+  })();
+  return setupInFlight;
+}
 
 /**
  * Thin VS Code glue for the CLI auto-installer.
@@ -67,6 +107,13 @@ function buildDeps(context: vscode.ExtensionContext, log: Logger): SetupFlowDeps
           const setupEnv: Record<string, string> = { NEXPATH_EXT_SETUP: '1' };
           const agent = process.env.NEXPATH_AGENT;
           if (agent === 'cursor' || agent === 'windsurf') setupEnv.NEXPATH_ONLY_AGENT = agent;
+          // RC21: on Windows the Cascade hook that actually fires is the
+          // WORKSPACE-level `<project>/.windsurf/hooks.json`. The CLI runs with
+          // cwd = the staged CLI dir, so without this it wrote the hook next to
+          // itself and the user's project never got one. Pass the folder this
+          // window has open; the CLI falls back to its own cwd when unset.
+          const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+          if (ws) setupEnv.NEXPATH_WORKSPACE_DIR = ws;
           return vscode.window.createTerminal({ name: 'Nexpath Setup', env: setupEnv });
         },
         readSentinel: () =>
@@ -91,6 +138,135 @@ function buildDeps(context: vscode.ExtensionContext, log: Logger): SetupFlowDeps
     // The staged CLI "runs" only if `node <entry> --version` exits 0 — which
     // requires its deps to be installed. Used to refuse a dep-less copy.
     verifyStagedCli: (cliEntry) => cliRuns('node', [cliEntry, '--version']),
+    // 2026-08-13 (owner's clean-install test): "setup done" survives in
+    // globalState while a wipe deletes `~/.nexpath` + hooks.json — without this
+    // on-disk check the runner never re-ran and the submit hook silently never
+    // fired again. Registered = THIS editor's hooks.json carries our entry AND
+    // the submit-flow flag file exists. Hosts with nothing to register (plain
+    // VS Code) report true; an unreadable file also reports true so a transient
+    // fs error cannot loop the setup terminal on every activation.
+    //
+    // ── RC26 (Windows/Cursor tester, 2026-08-19) ────────────────────────────
+    // A "watcher event" (independent DB polling) fired repeatedly on the
+    // tester's machine — real prompts were being typed and sent — but NOT ONE
+    // `submit handoff:` line ever appeared, meaning Cursor's `beforeSubmitPrompt`
+    // hook never actually ran, though the flag was armed and the file said
+    // "already set up". Root cause: this check was SHAPE-BLIND — 'cursor-hook'
+    // and '"version"' occur ANYWHERE in the file, so a hooks.json first written
+    // by an install that predates a hook-command fix (e.g. RC25's move off a
+    // bare `node`, which silently ENOENTs under a sanitized hook-spawn PATH —
+    // the exact class RC21 already proved real on Windows) is judged
+    // "registered" FOREVER: the self-heal this milestone built (RC7/RC19b) can
+    // only run when this returns false, so a stale command was invisible to it
+    // and NEVER got the fix. `verifyCommandCurrent` below closes the whole
+    // class generically — any FUTURE hook-command change now propagates to
+    // every existing install automatically, without hunting down who checks
+    // what each time.
+    verifyHookRegistration: (cliEntry) => {
+      try {
+        const agent = process.env.NEXPATH_AGENT;
+        if (agent !== 'cursor' && agent !== 'windsurf') return true;
+        // ── RC19 (Windows tester, 2026-08-17) ────────────────────────────────
+        // The flag is PER HOST (`{"cursor":bool,"windsurf":bool}`) and each
+        // host's hook writer sets only its OWN key — the extension drives setup
+        // with NEXPATH_ONLY_AGENT so it registers just the editor you are in.
+        // Verifying only that the FILE EXISTS therefore reported "registered"
+        // on a machine set up for the OTHER editor (or by a pre-flag CLI):
+        // setup never re-ran, this host's key stayed absent, the submit flow
+        // never armed, and prompts sailed through with no popup at all — the
+        // exact Windows/Devin failure. Verify what the runtime actually needs:
+        // THIS host's key must be `true`. Corrupt/absent ⇒ unregistered, so the
+        // re-run rewrites it (setSubmitFlowFlag merges, never clobbers the
+        // other host).
+        const flagFile = join(home, 'submit-flow.json');
+        if (!existsSync(flagFile)) return false;
+        try {
+          const flags = JSON.parse(readFileSync(flagFile, 'utf8')) as Record<string, unknown>;
+          // RC19b (regression caught in the 2026-08-17 verification pass):
+          // an ABSENT key means "this editor was never registered" → repair it.
+          // An EXPLICIT `false` is the owner's documented config-backed REVERT
+          // to the old flow — re-running setup there would rewrite it to `true`
+          // and silently undo a deliberate decision. Treat it as registered
+          // (nothing to repair); the armer logs why it is not arming.
+          if (flags[agent] === false) return true;
+          if (flags[agent] !== true) return false;
+        } catch {
+          return false; // unparseable ⇒ the resolver would read OFF ⇒ re-register
+        }
+        if (agent === 'cursor') {
+          const p = join(homedir(), '.cursor', 'hooks.json');
+          if (!existsSync(p)) return false;
+          const raw = readFileSync(p, 'utf8');
+          // `"version"` is required by Cursor's config validator (R5) — a
+          // legacy version-less file is DEAD and must be rewritten.
+          if (!raw.includes('"version"')) return false;
+          // Cursor has only one command field, same shape on every OS.
+          if (!verifyCommandCurrent(raw, 'cursor-hook', cliEntry, 'command', '"')) return false;
+          // RC41: the MPS continuation trigger needs the `afterAgentResponse`
+          // registration. An older install's file (beforeSubmitPrompt only)
+          // would verify forever and never gain it — require it here so
+          // existing installs self-heal ONCE onto the new event. (Duplicated
+          // literal across the G-ROOTDIR wall; pinned by test on both sides.)
+          if (!raw.includes('afterAgentResponse')) return false;
+          // RC34: on Windows, ALSO require the project-level `.cursor/hooks.json`
+          // (same rule the Windsurf win32 branch already applies to its workspace
+          // hook). Every Windows round showed the user-level file verifying and
+          // the flow arming while the hook never fired once — the exact shape of
+          // RC21's measured finding that Windows executes only the workspace-level
+          // config. Requiring it here is what makes EXISTING installs self-heal:
+          // absent ⇒ unregistered ⇒ setup re-runs once ⇒ the adapter writes it.
+          // Linux/macOS never reach this block, so their behaviour is unchanged.
+          if (process.platform === 'win32') {
+            const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+            if (!ws) return true; // no folder open — nothing to verify against
+            const projHook = join(ws, '.cursor', 'hooks.json');
+            const projRaw = existsSync(projHook) ? readFileSync(projHook, 'utf8') : null;
+            // RC44: the PROJECT-level file is the one Windows Cursor actually
+            // executes (RC21/RC34), so it must meet the SAME RC41 requirement
+            // as the user-level file above — without this, a pre-RC41 project
+            // file (beforeSubmitPrompt only) verifies forever, never self-heals,
+            // and the MPS continuation chain can never fire on Windows.
+            return projRaw !== null
+              && projRaw.includes('"version"')
+              && projRaw.includes('afterAgentResponse')
+              && verifyCommandCurrent(projRaw, 'cursor-hook', cliEntry, 'command', '"');
+          }
+          return true;
+        }
+        const p = join(homedir(), '.codeium', 'windsurf', 'hooks.json');
+        const globalRaw = existsSync(p) ? readFileSync(p, 'utf8') : null;
+        // The GLOBAL (user-level) hook is only ever actually EXECUTED via its
+        // `command` field (bash) on macOS/Linux; on Windows it is present but
+        // inert (RC21) — checked here only for existence/shape, not currency
+        // against `powershell` semantics, since nothing on win32 runs it.
+        if (globalRaw === null || !verifyCommandCurrent(globalRaw, 'windsurf-hook', cliEntry, 'command', '"')) return false;
+        // RC21: on Windows the user-level hook above is NOT executed by
+        // Devin/Devin Next — only the WORKSPACE hook fires, and it runs via
+        // `powershell`, not `command` (RC21/RC23's own header). Verify the
+        // field that ACTUALLY runs, per open folder, so opening a new project
+        // registers it instead of silently having no hook at all. No folder
+        // open ⇒ nothing to verify (the poller has no roots either).
+        if (process.platform === 'win32') {
+          const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+          if (!ws) return true;
+          const wsHook = join(ws, '.windsurf', 'hooks.json');
+          const wsRaw = existsSync(wsHook) ? readFileSync(wsHook, 'utf8') : null;
+          // RC33: the powershell wrapper must FORWARD node's exit code — without
+          // `exit $LASTEXITCODE`, `powershell -Command` exits 0/1 regardless, the
+          // host never sees the blocking `2`, and the prompt is silently released
+          // (the tester's "popup open while the original keeps running"). An old
+          // entry without the forwarder still contains the CLI path, so the
+          // content check alone would call it current forever — require the
+          // forwarder too, so existing installs self-heal onto the fix.
+          return wsRaw !== null
+            && verifyCommandCurrent(wsRaw, 'windsurf-hook', cliEntry, 'powershell', '& "')
+            && wsRaw.includes('exit $LASTEXITCODE');
+        }
+        return true;
+      } catch {
+        return true; // fail-quiet: never churn the setup terminal on fs errors
+      }
+    },
     getState: () =>
       context.globalState.get<SetupState>(SETUP_STATE_KEY) ?? { done: false, version: null },
     setState: (s) => Promise.resolve(context.globalState.update(SETUP_STATE_KEY, s)),
@@ -154,10 +330,53 @@ export async function offerSetupIfNeeded(
   const state = deps.getState();
   // "Ready" is satisfied by the global CLI when present, else by the staged copy.
   const cliReady = hasGlobalCli || verified;
+  // ── RC19 (Windows/Devin tester, 2026-08-17) ──────────────────────────────
+  // This gate USED to skip the on-disk registration check that `runSetupFlow`
+  // performs, so there were TWO different definitions of "already set up" and
+  // the shallower one won: an editor whose hooks/flag were missing reported
+  // "already set up (v0.1.3)" and returned here, never reaching the
+  // registration-aware gate. Result on the tester's machine: the submit flow
+  // could never arm and nothing ever repaired it. One authority now — the same
+  // `verifyHookRegistration` both gates use.
+  // `cliEntry` is null only in a status ('no-bundle'/'error') already returned
+  // above, but the type doesn't narrow that far here; '' degrades RC26's
+  // content check to quoting-only rather than crashing (every string contains
+  // '') — never worse than before this change, and this branch is unreachable
+  // in practice.
+  const hookRegistered = deps.verifyHookRegistration?.(staged.cliEntry ?? '') ?? true;
+  // ── RC32 (2026-08-21) ────────────────────────────────────────────────────
+  // `cliReady` above is satisfied by a working GLOBAL nexpath (`hasGlobalCli`),
+  // but the registered hook always invokes the STAGED entry — so a global CLI
+  // cannot make the hook work. Found live: with a global present and the staged
+  // copy's `node_modules` missing, this logged "already set up" while running
+  // the registered command by hand died ERR_MODULE_NOT_FOUND.
+  //
+  // This gate MUST carry the same rule as `runSetupFlow`'s. RC19's lesson,
+  // repeating: two independent definitions of "already set up" is exactly how
+  // the self-heal became unreachable from activation last time — the fix landed
+  // in `runSetupFlow` and this gate returned before ever calling it.
+  //
+  // Inert on a healthy install (`verified` is already true there); the only
+  // machines it changes are ones whose hook is broken right now.
+  const stagedRunsForHook = !hookRegistered || verified;
   const upToDate =
-    state.done && state.version === staged.version && staged.status === 'already-current' && cliReady;
+    state.done && state.version === staged.version && staged.status === 'already-current'
+    && cliReady && hookRegistered && stagedRunsForHook;
   if (upToDate) {
     log(`[nexpath] this editor already set up (v${staged.version})`);
+    return;
+  }
+  if (hookRegistered && !verified) {
+    log('[nexpath] the registered hook points at the staged CLI but that copy does not run (dependencies missing/incomplete) — re-running setup to repair it');
+  }
+  // Registration drift on an otherwise-complete install repairs itself WITHOUT
+  // asking: the user already consented to setup once; what went missing is our
+  // own on-disk registration (e.g. this editor's `submit-flow.json` key was
+  // never written because setup last ran from the OTHER editor). Runs at most
+  // once per activation — this function is invoked once, after activation.
+  if (state.done && !hookRegistered) {
+    log('[nexpath] this editor is set up but NOT fully registered (hook entry or submit-flow key missing) — re-running setup automatically');
+    await runSetupFlowOnce(deps, { preferExistingCli: hasGlobalCli }, log);
     return;
   }
 
@@ -168,10 +387,15 @@ export async function offerSetupIfNeeded(
     : 'this editor';
   const message = isUpdate
     ? `Nexpath update available (v${staged.version}). Re-run setup for ${agentLabel}?`
+    // The SHIPPED old-flow wording, verbatim. An RC28 draft shortened this line
+    // chasing a Windows notification-layout screenshot; that layout is VS Code's
+    // own renderer (plain `showInformationMessage(msg, ...buttons)`), the change
+    // was never requested, and the owner reverted it on 2026-08-21 — this text
+    // is not to be edited again.
     : `Set up Nexpath for ${agentLabel} now? (you can answer the prompts in the terminal).`;
   const choice = await vscode.window.showInformationMessage(message, 'Set up', 'Later');
   if (choice === 'Set up') {
-    await runSetupFlow(deps, { force: isUpdate, preferExistingCli: hasGlobalCli });
+    await runSetupFlowOnce(deps, { force: isUpdate, preferExistingCli: hasGlobalCli }, log);
   } else {
     log('[nexpath] user deferred per-IDE setup');
   }
@@ -185,5 +409,5 @@ export async function runSetupCommand(
   log: Logger,
 ): Promise<void> {
   const deps = buildDeps(context, log);
-  await runSetupFlow(deps, { force: true });
+  await runSetupFlowOnce(deps, { force: true }, log);
 }

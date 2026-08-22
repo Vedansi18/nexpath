@@ -1,13 +1,26 @@
 /**
  * Windsurf auto-paste — put the advisory selection straight into Cascade's input.
  *
- * Why keystroke simulation instead of a command: Windsurf's Cascade input has NO
- * extension-callable insert command. `windsurf.sendTextToChat` is only a defined
- * ID (no registered handler → `executeCommand` throws); the real insert is the
- * internal `addCascadeInput` webview protobuf message, which the extension can't
- * construct. So we do what a human would: copy to clipboard, focus the Cascade
- * input, and simulate the paste shortcut. Reuses the OS-automation approach
- * already used by `popup-foreground.ts` (xdotool/wmctrl).
+ * Why keystroke simulation: this module is the FALLBACK path — copy to clipboard,
+ * focus the Cascade input, simulate the paste shortcut. It reuses the OS-automation
+ * approach already used by `popup-foreground.ts` (xdotool/wmctrl).
+ *
+ * `windsurf.sendTextToChat` is only a defined ID (no registered handler →
+ * `executeCommand` throws). **Re-confirmed 2026-08-10** against the shipped bundle:
+ * it occurs exactly once, inside a command-ID constants table
+ * (`SEND_TEXT_TO_CHAT:{id:"windsurf.sendTextToChat"}`), with no handler — while
+ * `sendChatActionMessage` occurs ×7 and `addCascadeInput` ×6. This note was right;
+ * `chat-input-injector.ts` previously claimed the opposite and has been corrected.
+ *
+ * **CORRECTED 2026-08-10 — this header used to say the `addCascadeInput` protobuf
+ * was something "the extension can't construct". That is no longer true and had
+ * been stale for some time.** `windsurf-cascade-action.ts` builds that exact
+ * message by hand and it ships as the PRIMARY Windsurf insert, called from
+ * `extension.ts:176` (advisory) and `extension.ts:491` (PE delivery). So the
+ * accurate statement is: a direct insert DOES exist and is preferred; this
+ * clipboard+keystroke path is what runs when that command is not registered on
+ * the host build — and it is also the path with no reverse-engineering exposure,
+ * which matters if the direct payload's provenance is ever ruled against.
  *
  * Fully dependency-injected; the real spawns are `spawnSync` (no shell).
  */

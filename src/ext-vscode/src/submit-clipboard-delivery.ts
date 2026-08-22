@@ -1,0 +1,372 @@
+import { spawnSync } from 'node:child_process';
+
+/**
+ * Clipboard-fallback delivery for the submit-time advisory (hook milestone H3, Q3).
+ *
+ * WHY THIS PATH FIRST (owner ruling on `G-POLICY`, 2026-08-10). Windsurf has two
+ * insert mechanisms. The direct one (`addCascadeInput`) is faster but its protobuf
+ * payload shape was derived by decompiling Windsurf's own bundle — a near-verbatim
+ * match for their AUP's reverse-engineering prohibition (`R8`), and that policy
+ * question is still unresolved. **This clipboard + keystroke path carries no such
+ * exposure**, so it is built first: if the direct payload is ever ruled against,
+ * the milestone still has a working delivery route rather than being stranded.
+ *
+ * WHY INJECT AND SUBMIT ARE SEPARATE. H1 proved empirically that **neither
+ * Windsurf nor Cursor auto-submits** after an insert — the text only populates the
+ * composer. Completing "the picked option becomes the sole prompt of that turn"
+ * therefore needs a second, distinct step with its own failure mode. Modelling
+ * them as one call would bake in a false assumption.
+ *
+ * WHY FOCUS IS AN EXPLICIT PRECONDITION. H1's other load-bearing finding: submit
+ * success is coupled to **focus state, not platform**. A synthetic Enter submitted
+ * on Windsurf after `addCascadeInput` (which focuses the panel) but not after raw
+ * typing; on Cursor it failed without a focus command and succeeded with one. So
+ * `focus` is a first-class injected step here, not an incidental detail.
+ *
+ * CROSS-OS FROM THE FIRST COMMIT (§2.4b). `submitKeystroke` branches macOS /
+ * Windows / Linux exactly as the shipped `pasteKeystroke` does
+ * (`windsurf-autopaste.ts:73-89`) — osascript / PowerShell SendKeys / xdotool with
+ * Wayland alternates. **No submit-keystroke helper existed before this**; the
+ * shipped one only sends Ctrl+V, so this is genuinely new cross-OS work, not reuse.
+ *
+ * BACKWARD COMPATIBILITY (`R12`). This is a NEW module with no consumers until H3
+ * wires it behind `NEXPATH_WINDSURF_PROMPTSUBMIT_ADVISORY`. It does not modify
+ * `windsurf-autopaste.ts`, `extension.ts`, or any other shipping file.
+ *
+ * OWNERSHIP. Everything referenced here is Vedansi-owned
+ * (`src/ext-vscode/**`). Hiren's `engine-option-generator.ts` and Bhavnesh's
+ * `TtySelectFn.ts` are consumed elsewhere in H3 but never edited.
+ */
+
+
+/** Injected OS-automation seams. Defaults are supplied by the caller (extension.ts). */
+export interface SubmitClipboardDeliveryDeps {
+  /** Write the replacement text to the system clipboard. */
+  writeClipboard: (text: string) => Promise<void>;
+  /** Raise/focus the host editor window so keystrokes land in it. */
+  focus: () => Promise<boolean>;
+  /** Simulate the paste shortcut into the focused input. */
+  pasteKeystroke: () => boolean;
+  /** Simulate the submit key (Enter) — see `buildSubmitKeystroke` for the OS matrix. */
+  submitKeystroke: () => boolean;
+  /** Optional redacted logger. **Never** pass the replacement text. */
+  log?: (message: string) => void;
+}
+
+export interface SubmitClipboardDelivery {
+  /** Place the text in the composer. Resolves `false` on any failure — never throws. */
+  inject: (text: string) => Promise<boolean>;
+  /** Send the submit key. Resolves `false` on any failure — never throws. */
+  submit: () => Promise<boolean>;
+}
+
+
+/**
+ * Build the delivery pair the submit-time poller consumes.
+ *
+ * Fail-open (`A3`) throughout: every step swallows its own error and reports
+ * `false`. A delivery problem must never propagate — the user's prompt was
+ * already blocked by the hook, so a thrown error here would strand them.
+ */
+export function createSubmitClipboardDelivery(
+  deps: SubmitClipboardDeliveryDeps,
+): SubmitClipboardDelivery {
+  const log = deps.log ?? (() => {});
+
+  return {
+    async inject(text: string): Promise<boolean> {
+      if (typeof text !== 'string' || text.length === 0) {
+        // Guard mirrors submit-decision-record's: pasting "" would clear the
+        // composer and silently lose the turn.
+        log('[nexpath] submit-clipboard: refused an empty replacement');
+        return false;
+      }
+      try {
+        await deps.writeClipboard(text);
+      } catch {
+        log('[nexpath] submit-clipboard: clipboard write failed');
+        return false;
+      }
+      // Focus is a precondition, not a nicety — H1 proved submit depends on it.
+      // A focus failure is NOT fatal on its own: the paste may still land if the
+      // composer already had focus, so we continue but record it.
+      let focused = false;
+      try {
+        focused = await deps.focus();
+      } catch {
+        focused = false;
+      }
+      if (!focused) log('[nexpath] submit-clipboard: focus not confirmed; pasting anyway');
+
+      let pasted = false;
+      try {
+        pasted = deps.pasteKeystroke();
+      } catch {
+        pasted = false;
+      }
+      log(`[nexpath] submit-clipboard: inject ${pasted ? 'dispatched' : 'failed'} (focused=${focused})`);
+      return pasted;
+    },
+
+    async submit(): Promise<boolean> {
+      try {
+        const sent = deps.submitKeystroke();
+        log(`[nexpath] submit-clipboard: submit ${sent ? 'dispatched' : 'failed'}`);
+        return sent;
+      } catch {
+        log('[nexpath] submit-clipboard: submit threw');
+        return false;
+      }
+    },
+  };
+}
+
+
+/** Platform + tool seams for the submit keystroke, mirroring `AutoPasteDeps`. */
+export interface SubmitKeystrokeDeps {
+  platform?: NodeJS.Platform;
+  env?: NodeJS.ProcessEnv;
+  hasCommand?: (cmd: string) => boolean;
+  run?: (cmd: string, args: string[]) => boolean;
+  /** RC10 phantom-Enter guard; injectable for tests. Defaults to the real check. */
+  isPopupFocused?: (deps?: { platform?: NodeJS.Platform; env?: NodeJS.ProcessEnv }) => boolean;
+  /**
+   * RC11 whitelist: when set, Enter fires ONLY if this editor's window is
+   * focused (after one focusEditor retry). Unset ⇒ pre-RC11 behaviour.
+   */
+  host?: 'windsurf' | 'cursor';
+  isEditorFocused?: typeof focusedWindowIsEditor;
+  /** One-shot editor raise used when the editor is not focused. */
+  focusEditor?: () => void;
+}
+
+
+/**
+ * Send the submit key (Enter) to the focused input, per OS.
+ *
+ * Deliberately mirrors `pasteKeystroke`'s structure and tool preferences
+ * (`windsurf-autopaste.ts:67-91`) so both keystrokes behave consistently and fail
+ * the same way. Returns `false` — never throws — when no tool is available, which
+ * the caller reports as `submit_failed` rather than treating as a crash.
+ *
+ * **Linux caveat, deliberately preserved from the shipped helper:** with no
+ * `DISPLAY`/`WAYLAND_DISPLAY` there is nothing to type into, so this returns
+ * `false` immediately rather than shelling out pointlessly.
+ */
+function defaultHasCommand(cmd: string): boolean {
+  try {
+    return spawnSync('which', [cmd], { stdio: 'ignore', timeout: 2000 }).status === 0;
+  } catch {
+    return false;
+  }
+}
+
+function defaultRun(cmd: string, args: string[]): boolean {
+  try {
+    return spawnSync(cmd, args, { stdio: 'ignore', timeout: 3000 }).status === 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Nexpath's own popup window titles. A synthetic keystroke must NEVER fire
+ * while one of these is focused — see the guard below.
+ */
+export const NEXPATH_POPUP_TITLE_MARKERS = [
+  'Nexpath — Action Required',
+  'Nexpath · Prompt enhancement',
+  'Nexpath — Feedback',
+  'NEXPATH CLI',
+] as const;
+
+/**
+ * ⚠ PHANTOM-ENTER GUARD (live root cause RC10, 2026-08-13 — captured in hex).
+ *
+ * The submit popup is deliberately raised to the foreground so the user can
+ * see it. Synthetic keystrokes go to the FOCUSED window. When a delivery's
+ * Enter fires while a popup holds focus, the Enter lands IN THE POPUP —
+ * measured live: two bare `\r` bytes hit the popup's TTY ~1.9 s after it
+ * opened (one poller tick), auto-"selecting" the first option and closing it.
+ * The user experiences a popup that flashes open and closes by itself, and a
+ * prompt that gets replaced without their choice — the worst possible UX.
+ *
+ * So: before ANY synthetic key, check the active window's title; if it is one
+ * of our own popups, DO NOT send — return false (treated as not-submitted; the
+ * user presses Enter in the editor themselves). Linux/X11 only, where the bug
+ * bites and where the popups exist; other platforms return "safe" (no check
+ * possible, no popup foregrounding there either). Fail-safe: an unreadable
+ * active title reports safe, preserving pre-guard behaviour.
+ */
+export function focusedWindowIsNexpathPopup(deps: {
+  platform?: NodeJS.Platform;
+  env?: NodeJS.ProcessEnv;
+  hasCommand?: (cmd: string) => boolean;
+  runCapture?: (cmd: string, args: string[]) => string | null;
+} = {}): boolean {
+  const platform = deps.platform ?? process.platform;
+  const env = deps.env ?? process.env;
+  if (platform !== 'linux') return false;
+  if (!env.DISPLAY && !env.WAYLAND_DISPLAY) return false;
+  const has = deps.hasCommand ?? defaultHasCommand;
+  const runCapture = deps.runCapture ?? defaultRunCapture;
+  try {
+    if (!has('xdotool')) return false;
+    const title = runCapture('xdotool', ['getactivewindow', 'getwindowname']);
+    if (!title) return false;
+    return NEXPATH_POPUP_TITLE_MARKERS.some((m) => title.includes(m));
+  } catch {
+    return false;
+  }
+}
+
+/** Capture a command's stdout (trimmed), or null on any failure. */
+function defaultRunCapture(cmd: string, args: string[]): string | null {
+  try {
+    const r = spawnSync(cmd, args, { encoding: 'utf8', timeout: 1500 });
+    if (r.status !== 0) return null;
+    return (r.stdout ?? '').trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * ⚠ RC11 (live, 2026-08-13, owner report): with the RC10 no-focus raise, a
+ * blacklist ("not one of our popups") was NOT enough — the synthetic Enter
+ * fired while Windsurf's WELCOME view had focus and pressed its "Start
+ * session" button, CLOSING the user's agent chat. A global Enter is only ever
+ * safe when the EDITOR ITSELF is the focused window — so the guard is now a
+ * WHITELIST: the active window's title must contain the target editor's name
+ * ('Windsurf'/'Cursor'), and our popup titles are still excluded (a Nexpath
+ * popup title also contains "Nexpath", never the bare editor name — but check
+ * both to be explicit). Linux/X11 where the guard is implementable; other
+ * platforms keep prior behaviour (no popup foregrounding there).
+ */
+export function focusedWindowIsEditor(host: 'windsurf' | 'cursor', deps: {
+  platform?: NodeJS.Platform;
+  env?: NodeJS.ProcessEnv;
+  hasCommand?: (cmd: string) => boolean;
+  runCapture?: (cmd: string, args: string[]) => string | null;
+} = {}): boolean {
+  const platform = deps.platform ?? process.platform;
+  const env = deps.env ?? process.env;
+  if (platform !== 'linux') return true; // no check possible; prior behaviour
+  if (!env.DISPLAY && !env.WAYLAND_DISPLAY) return false;
+  const has = deps.hasCommand ?? defaultHasCommand;
+  const runCapture = deps.runCapture ?? defaultRunCapture;
+  try {
+    if (!has('xdotool')) return true; // cannot check ⇒ prior behaviour
+    const title = runCapture('xdotool', ['getactivewindow', 'getwindowname']);
+    if (!title) return false;
+    if (NEXPATH_POPUP_TITLE_MARKERS.some((m) => title.includes(m))) return false;
+    const needle = host === 'windsurf' ? 'windsurf' : 'cursor';
+    return title.toLowerCase().includes(needle);
+  } catch {
+    return false; // cannot verify ⇒ do not press Enter blind
+  }
+}
+
+/**
+ * RC16: the last darwin submit-keystroke failure reason (osascript stderr,
+ * trimmed). `null` until a darwin submit fails. Read by the extension to show
+ * the one-time Accessibility guidance; PII-free (osascript's own error text).
+ */
+export let lastDarwinSubmitError: string | null = null;
+
+/** True when the recorded darwin failure looks like the missing Accessibility permission. */
+export function isDarwinAccessibilityDenial(err: string | null): boolean {
+  if (!err) return false;
+  return /assistive access|not authorized|1002|-25211|accessibility/i.test(err);
+}
+
+export function submitKeystroke(deps: SubmitKeystrokeDeps = {}): boolean {
+  const platform = deps.platform ?? process.platform;
+  const env = deps.env ?? process.env;
+  // RC10: never let the submit Enter land in one of our own popups.
+  if ((deps.isPopupFocused ?? focusedWindowIsNexpathPopup)({ platform, env })) {
+    return false;
+  }
+  // RC11: when a target host is named, Enter fires ONLY if that editor is the
+  // focused window — a blind global Enter pressed Windsurf's "Start session"
+  // button and closed the user's chat.
+  if (deps.host) {
+    const isEditorFocused = deps.isEditorFocused ?? focusedWindowIsEditor;
+    if (!isEditorFocused(deps.host, { platform, env })) {
+      deps.focusEditor?.();
+      if (!isEditorFocused(deps.host, { platform, env })) return false;
+    }
+  }
+  // CORRECTED 2026-08-10 — these previously defaulted to `() => false`, which made
+  // `submitKeystroke()` a guaranteed no-op in production: called with no deps (the
+  // real wiring), it could never detect a tool or run one, so the submit key would
+  // NEVER be sent while every unit test still passed. Exactly the "works in tests,
+  // silently dead in production" class this milestone already had to disprove for
+  // the env-var passthrough in H2. Defaults now spawn for real, matching the
+  // shipped `pasteKeystroke` (`windsurf-autopaste.ts:63-64,83-84`) verbatim.
+  const has = deps.hasCommand ?? defaultHasCommand;
+  const run = deps.run ?? defaultRun;
+
+  try {
+    if (platform === 'darwin') {
+      // RC16 (macOS tester, 2026-08-15): a System Events keystroke requires the
+      // HOST APP (Devin/Windsurf/Cursor — the extension host's parent) to hold
+      // the Accessibility permission. Without it osascript exits non-zero
+      // ("not allowed assistive access") and the submit silently became
+      // `submit_failed` with no guidance. The DEFAULT runner captures stderr so
+      // the log names the real reason and the caller can detect the permission
+      // case; an injected `deps.run` (tests) keeps the plain seam.
+      if (deps.run) return deps.run('osascript', ['-e', 'tell application "System Events" to key code 36']);
+      const res = spawnSync('osascript', ['-e', 'tell application "System Events" to key code 36'], {
+        stdio: ['ignore', 'ignore', 'pipe'], timeout: 3000, encoding: 'utf8',
+      });
+      if (res.status === 0) return true;
+      const err = (res.stderr ?? '').trim().slice(0, 160);
+      lastDarwinSubmitError = err || `osascript exited ${res.status}`;
+      return false;
+    }
+    if (platform === 'win32') {
+      // ── RC28 (Windows/Devin tester, 2026-08-20) ──────────────────────────
+      // `SendKeys` types into whatever window is FOREGROUND at that instant —
+      // it has no target. On Linux the RC11 whitelist above guarantees the
+      // editor is focused before we get here, but `focusedWindowIsEditor`
+      // returns `true` unconditionally off Linux ("no check possible"), and
+      // `focusEditor` → `raiseAppWindow` is X11-only and no-ops on Windows. So
+      // nothing had ever focused the editor: the tester's log shows
+      // `submit dispatched` on BOTH turns while nothing was actually submitted.
+      //
+      // `AppActivate` is WScript.Shell's own targeting call and the standard
+      // pairing for SendKeys. Activate FIRST, and only press Enter if it
+      // reports success — so a failed activation now reports `submit_failed`
+      // instead of firing a blind Enter into an unknown window (the RC11
+      // hazard, which on Windows was previously unguarded).
+      //
+      // Title candidates, in order. The rebrand matters: this tester's app
+      // reports `appName="Devin"`, so matching only 'Windsurf' would miss the
+      // very machine this fixes. AppActivate matches a title PREFIX or
+      // substring, so the bare product name is the right granularity.
+      const titles = deps.host === 'cursor' ? ['Cursor'] : ['Devin', 'Windsurf'];
+      const psTitles = titles.map((t) => `'${t}'`).join(',');
+      return run('powershell', [
+        '-NoProfile', '-Command',
+        // Try each title; stop at the first that activates. Exit 1 (⇒ run()
+        // false ⇒ `submit_failed`) when none did, so the failure is visible in
+        // the log rather than silently reported as dispatched.
+        `$w=New-Object -ComObject WScript.Shell;` +
+        `$ok=$false;` +
+        `foreach($t in @(${psTitles})){if($w.AppActivate($t)){$ok=$true;break}};` +
+        `if(-not $ok){exit 1};` +
+        `Start-Sleep -Milliseconds 120;` +
+        `$w.SendKeys("{ENTER}")`,
+      ]);
+    }
+    // Linux (X11, or Wayland with a compatible tool)
+    if (!env.DISPLAY && !env.WAYLAND_DISPLAY) return false;
+    if (has('xdotool')) return run('xdotool', ['key', '--clearmodifiers', 'Return']);
+    if (has('wtype')) return run('wtype', ['-k', 'Return']);
+    if (has('ydotool')) return run('ydotool', ['key', '28:1', '28:0']); // KEY_ENTER
+    return false;
+  } catch {
+    return false;
+  }
+}
