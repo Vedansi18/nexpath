@@ -480,3 +480,27 @@ describe('⭐ RC41 — post_cascade_response runs the sequence continuation', ()
     expect(handle).toHaveBeenCalledTimes(1);
   });
 });
+
+/**
+ * ⭐ RC43 — a DEFERRED continuation (quiet-window echo of our own block) must
+ * end the event: the old-flow `handle` reaches runStop's no-block path, which
+ * routes to the SAME continuation launcher and would reopen the premature popup.
+ */
+describe('⭐ RC43 — deferred continuation ends the event (no old-flow fallthrough)', () => {
+  it('deferred ⇒ handle NOT called, exit 0', async () => {
+    const exits: number[] = [];
+    const handle = vi.fn(async () => ({ child: null } as never));
+    await runWindsurfHookAction('post_cascade_response', { project: '/proj' }, {
+      env: { NEXPATH_WINDSURF_PROMPTSUBMIT_ADVISORY: '1' },
+      readStdin: async () => JSON.stringify({ trajectory_id: 'traj-1' }),
+      suppressOldAdvisorySurface: async () => {},
+      checkReplacementEcho: async () => false,
+      waitForChild: async () => {}, raisePopup: () => {},
+      handle,
+      runSequenceContinuation: vi.fn(async () => ({ ran: false, deferred: true })),
+      exit: (c: number) => { exits.push(c); },
+    } as never);
+    expect(handle).not.toHaveBeenCalled();
+    expect(exits).toEqual([0]);
+  });
+});

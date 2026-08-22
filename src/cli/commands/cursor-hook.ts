@@ -172,7 +172,7 @@ export const CURSOR_CONTINUE: CursorHookResponse = { continue: true };
 export interface CursorHookActionDeps {
   readStdin?: () => Promise<string>;
   /** RC41 seam: injected in tests; defaults to the real continuation runner. */
-  runSequenceContinuation?: (projectRoot: string, host: 'windsurf' | 'cursor') => Promise<{ ran: boolean; blocked?: boolean }>;
+  runSequenceContinuation?: (projectRoot: string, host: 'windsurf' | 'cursor') => Promise<{ ran: boolean; blocked?: boolean; deferred?: boolean }>;
   /** Decides whether to block. Defaults to "never" so H5 alone is inert. */
   decide?: (payload: CursorHookPayload) => Promise<'allow' | 'block'>;
   /** Overrides the block card text; defaults to CURSOR_BLOCK_USER_MESSAGE. */
@@ -285,7 +285,12 @@ export async function runCursorHookAction(
           const pl = parseCursorHookPayload(rawPost ?? '');
           const root = pl?.projectRoot ?? process.cwd();
           const cont = await (deps.runSequenceContinuation ?? runSequenceContinuationStop)(root, 'cursor');
-          if (cont.ran) logEvent('info', 'cursor_hook_sequence_continuation', { blocked: cont.blocked === true });
+          // RC43: `deferred` (quiet-window echo of our own block) needs no extra
+          // handling here — this event always answers continue and never runs a
+          // second stop; the log line just makes the deferral visible.
+          if (cont.ran || cont.deferred === true) {
+            logEvent('info', 'cursor_hook_sequence_continuation', { blocked: cont.blocked === true, deferred: cont.deferred === true });
+          }
         }
       } catch (err) {
         logEvent('warn', 'cursor_hook_sequence_continuation_failed', { message: (err as Error)?.message ?? 'unknown' });

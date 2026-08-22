@@ -39,7 +39,7 @@ import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { writeSubmitDecision, appendReplacementEcho } from './submit-decision-store.js';
+import { writeSubmitDecision, appendReplacementEcho, latestReplacementEchoAt } from './submit-decision-store.js';
 import { log } from '../../logger.js';
 // CONSUME-ONLY store calls (bhavnesh75-owned exports), used exactly as stop.ts
 // uses them — no Layer C file is modified.
@@ -391,7 +391,32 @@ export const SEQUENCE_CONTINUATION_CAP_MS = 10 * 60_000;
 export interface SequenceContinuationResult {
   ran: boolean;
   blocked?: boolean;
+  /** RC43: true when the event arrived inside the post-block quiet window and
+   *  the continuation was deliberately NOT run (see the guard below). The host
+   *  leg must END the event on deferred — never fall through to the old-flow
+   *  stop, whose no-block path can reach the same continuation launcher. */
+  deferred?: boolean;
 }
+
+/**
+ * RC43 — the post-block QUIET WINDOW (measured live 2026-08-22, owner screencast).
+ *
+ * Windsurf fires `post_cascade_response` once ~1–4 s after our OWN block — before
+ * the blocked item's delivery has even finished (settle 1.5 s + inject + submit
+ * ≈ 4 s; measured submit attempt at +3.9 s). Running the continuation on that
+ * echo-event spawned the next popup DURING delivery; the popup took focus, the
+ * RC10 phantom-Enter guard then (correctly) refused the synthetic Enter, and
+ * item 1 stranded in the composer — the next inject appended to it and two items
+ * went as ONE combined message (owner's screencast, extension log
+ * `submit-clipboard: submit failed` 04:54:57.270).
+ *
+ * The anchor is the echo REGISTRY timestamp — both block writers append there at
+ * persist time. Events younger than this window after the last block are the
+ * block's own echo, never the item's real response completion (measured real
+ * completions: +17 s, +21 s, +50 s). 12 s covers the full delivery span (≤8 s)
+ * with margin while staying under every measured real completion.
+ */
+export const SEQUENCE_CONTINUATION_QUIET_MS = 12_000;
 
 export async function runSequenceContinuationStop(
   projectRoot: string,
@@ -405,6 +430,7 @@ export async function runSequenceContinuationStop(
     openStoreFn?: (db?: string) => Promise<unknown>;
     closeStoreFn?: (store: unknown) => Promise<void> | void;
     capMs?: number;
+    latestEchoAt?: typeof latestReplacementEchoAt;
   } = {},
 ): Promise<SequenceContinuationResult> {
   const logEvent: typeof log = (level, name, data) => {
@@ -437,6 +463,20 @@ export async function runSequenceContinuationStop(
   } catch {
     return { ran: false };
   }
+
+  // RC43: quiet-window guard — see SEQUENCE_CONTINUATION_QUIET_MS above. The
+  // premature event is the block's own echo; the item's real completion always
+  // arrives later and passes. Fail-open: no registry ⇒ no deferral.
+  try {
+    const lastBlockAt = (ports.latestEchoAt ?? latestReplacementEchoAt)(projectRoot);
+    const nowMs = (ports.now ?? (() => Date.now()))();
+    if (lastBlockAt !== null && nowMs - lastBlockAt < SEQUENCE_CONTINUATION_QUIET_MS) {
+      logEvent('info', 'sequence_continuation_deferred_quiet_window', {
+        host, age_ms: nowMs - lastBlockAt,
+      });
+      return { ran: false, deferred: true };
+    }
+  } catch { /* fail-open — behave exactly as before the guard */ }
 
   const spawnFn = ports.spawnFn ?? spawn;
   const writeDecision = ports.writeDecision ?? writeSubmitDecision;

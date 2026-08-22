@@ -266,3 +266,32 @@ export function readReplacementEchoes(
     return [];
   }
 }
+
+/**
+ * RC43 — the newest block's timestamp for a project, from the echo registry
+ * (both the submit decider and the continuation runner append here at persist
+ * time, so this IS "when did we last block", surviving the decision file's
+ * consume-unlink). Null when the registry is absent/expired — fail-open.
+ */
+export function latestReplacementEchoAt(
+  projectRoot: string,
+  deps: { now?: () => number; readFileFn?: (p: string) => string } = {},
+): number | null {
+  try {
+    const now = deps.now ?? (() => Date.now());
+    const raw = (deps.readFileFn ?? ((p: string) => readFileSync(p, 'utf8')))(replacementEchoRegistryPath(projectRoot));
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return null;
+    const t = now();
+    const ats = parsed
+      .filter(
+        (e): e is { text: string; at: number } =>
+          !!e && typeof (e as { at?: unknown }).at === 'number' && typeof (e as { text?: unknown }).text === 'string',
+      )
+      .map((e) => e.at)
+      .filter((at) => t - at <= REPLACEMENT_ECHO_MAX_AGE_MS);
+    return ats.length > 0 ? Math.max(...ats) : null;
+  } catch {
+    return null;
+  }
+}

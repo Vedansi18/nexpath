@@ -435,7 +435,7 @@ export interface WindsurfHookActionDeps {
   /** OWNER RULING 2026-08-12: consume the session's pending advisories before `stop` runs (switch on only). */
   suppressOldAdvisorySurface?: (projectRoot: string, sessionId: string) => Promise<number>;
   /** RC41 seam: injected in tests; defaults to the real continuation runner. */
-  runSequenceContinuation?: (projectRoot: string, host: 'windsurf' | 'cursor') => Promise<{ ran: boolean; blocked?: boolean }>;
+  runSequenceContinuation?: (projectRoot: string, host: 'windsurf' | 'cursor') => Promise<{ ran: boolean; blocked?: boolean; deferred?: boolean }>;
   /**
    * Bound on the POST-leg stdin read. Separate from `stdinTimeoutMs` (the PRE
    * leg, which holds the user's prompt and must stay tight): nothing is held on
@@ -686,8 +686,13 @@ export async function runWindsurfHookAction(
     if (event === 'post_cascade_response' && isSubmitAdvisoryEnabledForHost('windsurf', { env, readFlagFile: deps.readFlagFile })) {
       const contRoot = opts.project ?? process.cwd();
       const cont = await (deps.runSequenceContinuation ?? runSequenceContinuationStop)(contRoot, 'windsurf');
-      if (cont.ran) {
-        log('info', 'windsurf_hook_sequence_continuation', { blocked: cont.blocked === true });
+      // RC43: a DEFERRED result (quiet-window echo of our own block) must ALSO
+      // end this event — the old-flow `handle` below reaches runStop's no-block
+      // path, which routes to the SAME continuation launcher and would reopen
+      // the premature popup this guard just suppressed. The item's real
+      // completion event arrives after the window and proceeds normally.
+      if (cont.ran || cont.deferred === true) {
+        log('info', 'windsurf_hook_sequence_continuation', { blocked: cont.blocked === true, deferred: cont.deferred === true });
         exit(0);
         return;
       }

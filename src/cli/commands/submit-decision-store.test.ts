@@ -18,6 +18,7 @@ import {
   replacementEchoRegistryPath,
   REPLACEMENT_ECHO_MAX_ENTRIES,
   REPLACEMENT_ECHO_MAX_AGE_MS,
+  latestReplacementEchoAt,
 } from './submit-decision-store.js';
 
 function harness() {
@@ -265,5 +266,31 @@ describe('⭐ RC38 — replacement-echo registry', () => {
   it('the registry lives beside the decision file (same .nexpath dir contract)', () => {
     expect(replacementEchoRegistryPath('/p')).toContain('.nexpath');
     expect(replacementEchoRegistryPath('/p').endsWith('submit-replacement-echoes.json')).toBe(true);
+  });
+});
+
+/** ⭐ RC43 — latestReplacementEchoAt: the newest block's timestamp, windowed. */
+describe('⭐ RC43 — latestReplacementEchoAt', () => {
+  it('returns the newest in-window at', () => {
+    const at = latestReplacementEchoAt('/proj', {
+      now: () => 1_000_000,
+      readFileFn: () => JSON.stringify([
+        { text: 'a', at: 900_000 }, { text: 'b', at: 950_000 },
+      ]),
+    });
+    expect(at).toBe(950_000);
+  });
+
+  it('expired entries do not count', () => {
+    const at = latestReplacementEchoAt('/proj', {
+      now: () => 10_000_000,
+      readFileFn: () => JSON.stringify([{ text: 'old', at: 10_000_000 - REPLACEMENT_ECHO_MAX_AGE_MS - 1 }]),
+    });
+    expect(at).toBeNull();
+  });
+
+  it('absent/corrupt registry ⇒ null (fail-open)', () => {
+    expect(latestReplacementEchoAt('/proj', { readFileFn: () => { throw new Error('ENOENT'); } })).toBeNull();
+    expect(latestReplacementEchoAt('/proj', { readFileFn: () => 'not json' })).toBeNull();
   });
 });

@@ -29,6 +29,7 @@ import {
   enrichSpawnEnvFromSessionSnapshot,
   SESSION_ENV_SNAPSHOT_FILENAME,
   runSequenceContinuationStop,
+  SEQUENCE_CONTINUATION_QUIET_MS,
 } from './submit-stop-decider.js';
 
 /** A fake `stop` child: emits the given stdout then exits with the given code. */
@@ -410,5 +411,65 @@ describe('⭐ RC42 — itemless active row is logged, behaviour unchanged', () =
       writeDecision: (async () => {}) as never,
     });
     expect(warns).not.toContain('sequence_continuation_row_has_no_items');
+  });
+});
+
+/**
+ * ⭐ RC43 — the quiet-window guard. Windsurf fires post_cascade_response once
+ * ~1–4 s after our OWN block (measured live: the premature popup stole focus,
+ * the RC10 guard refused the Enter, and two items went as one combined message).
+ * Inside the window the runner defers; the item's real completion (+17 s and up,
+ * measured) passes.
+ */
+describe('⭐ RC43 — the post-block quiet window', () => {
+  const activeRow = () => ({ id: 1, payload: { items: [{}] } }) as never;
+
+  it('⭐ an event inside the window ⇒ {ran:false, deferred:true} and NO stop spawns', async () => {
+    vi.mocked(getActivePendingPromptSequence).mockReturnValueOnce(activeRow());
+    const spawnFn = vi.fn();
+    const r = await runSequenceContinuationStop('/proj', 'windsurf', {
+      spawnFn: spawnFn as never,
+      openStoreFn: (async () => ({ db: {} })) as never, closeStoreFn: (() => {}) as never,
+      logEvent: () => {},
+      latestEchoAt: (() => 100_000) as never,
+      now: () => 100_000 + SEQUENCE_CONTINUATION_QUIET_MS - 1,
+    });
+    expect(r).toEqual({ ran: false, deferred: true });
+    expect(spawnFn).not.toHaveBeenCalled();
+  });
+
+  it('the real completion (window elapsed) runs the stop as before', async () => {
+    vi.mocked(getActivePendingPromptSequence).mockReturnValueOnce(activeRow());
+    const r = await runSequenceContinuationStop('/proj', 'cursor', {
+      spawnFn: (() => fakeChild('').child) as never,
+      openStoreFn: (async () => ({ db: {} })) as never, closeStoreFn: (() => {}) as never,
+      logEvent: () => {},
+      latestEchoAt: (() => 100_000) as never,
+      now: () => 100_000 + SEQUENCE_CONTINUATION_QUIET_MS,
+      writeDecision: (async () => {}) as never,
+    });
+    expect(r).toEqual({ ran: true, blocked: false });
+  });
+
+  it('no registry (null) ⇒ runs — fail-open, exactly the pre-RC43 behaviour', async () => {
+    vi.mocked(getActivePendingPromptSequence).mockReturnValueOnce(activeRow());
+    const r = await runSequenceContinuationStop('/proj', 'windsurf', {
+      spawnFn: (() => fakeChild('').child) as never,
+      openStoreFn: (async () => ({ db: {} })) as never, closeStoreFn: (() => {}) as never,
+      logEvent: () => {}, latestEchoAt: (() => null) as never,
+      writeDecision: (async () => {}) as never,
+    });
+    expect(r).toEqual({ ran: true, blocked: false });
+  });
+
+  it('a throwing reader ⇒ runs (the guard can never break the runner)', async () => {
+    vi.mocked(getActivePendingPromptSequence).mockReturnValueOnce(activeRow());
+    const r = await runSequenceContinuationStop('/proj', 'windsurf', {
+      spawnFn: (() => fakeChild('').child) as never,
+      openStoreFn: (async () => ({ db: {} })) as never, closeStoreFn: (() => {}) as never,
+      logEvent: () => {}, latestEchoAt: (() => { throw new Error('fs gone'); }) as never,
+      writeDecision: (async () => {}) as never,
+    });
+    expect(r).toEqual({ ran: true, blocked: false });
   });
 });
