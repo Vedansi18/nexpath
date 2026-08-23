@@ -619,6 +619,26 @@ describe('the notice slot', () => {
   });
 });
 
+describe('typing never re-renders the frame (D7 smoothness)', () => {
+  it('input events leave the frame element untouched — typing is native', () => {
+    // The acceptance is "no per-keystroke full re-render of the body": with 500
+    // lines in the field, rebuilding the DOM on every keystroke would stutter.
+    // Typing lives entirely in the textarea; the controller re-renders only on
+    // focus moves and activations.
+    const c = mount();
+    const frameBefore = host.querySelector('.np-frame');
+    const field = bodyField();
+
+    for (let i = 0; i < 20; i++) {
+      field.value += 'x';
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+
+    expect(host.querySelector('.np-frame')).toBe(frameBefore);
+    void c;
+  });
+});
+
 // ── lifecycle ────────────────────────────────────────────────────────────────
 
 describe('lifecycle', () => {

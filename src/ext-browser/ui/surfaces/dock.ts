@@ -63,9 +63,19 @@ export const DOCK_MAX_WIDTH_PX = 1600;
 
 /**
  * Readability floor. CLI `POPUP_MIN_COLS` (80 cells) x `DEFAULT_CELL_WIDTH_PX` (10px).
- * What should happen on a viewport narrower than this is the breakpoint model —
- * deliberately deferred to D7.4. Until then the viewport clamp below simply wins,
- * exactly as it does in the CLI.
+ *
+ * D7.4 — THE BREAKPOINT MODEL IS THE CLAMP ITSELF; there is no separate one.
+ * The single declaration `min-width: min(800px, 100%)` already resolves every
+ * band, and adding media queries on top would re-state it:
+ *   viewport >= 2667px   the 1600px ultrawide cap wins
+ *   1334px - 2666px      plain 60%
+ *   801px - 1333px       this 800px floor wins
+ *   viewport <= 800px    the dock is the full viewport width
+ * Height stays 90% throughout. No separate phone layout, decided rather than
+ * omitted: every supported agent (Replit, Bolt, Lovable) is a desktop IDE, and
+ * below the floor the frame's own C-2 behaviour — wrapping content, a scrolling
+ * band, pinned header and footer — is what carries the narrow case. The
+ * boundary maths is pinned in dock.test.ts; the live look is the harness sweep.
  */
 export const DOCK_MIN_WIDTH_PX = 800;
 

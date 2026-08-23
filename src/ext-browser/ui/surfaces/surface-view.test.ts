@@ -78,6 +78,27 @@ describe('PE surface — hints follow focus (D3.4)', () => {
   });
 });
 
+describe('every surface honours the frame regions (D7.5)', () => {
+  // The C-2 invariants live on the REGIONS (chrome.test.ts pins the CSS); this
+  // pins that each surface actually puts its content in them — a surface that
+  // rendered its rows into the fixed header would starve the scroll band and
+  // resurrect the panel's blank-options bug with the invariants still "passing".
+  it.each([
+    ['PE', PE_FIXTURE],
+    ['MPS-1', MPS_FIRST_FIXTURE],
+    ['MPS-2', MPS_CONTINUATION_FIXTURE],
+    ['PEF', PEF_FIXTURE],
+  ])('%s: header in np-fixed-top, rows in np-scroll, footer in np-footer', (_n, fixture) => {
+    const frame = renderSurface(document, fixture, { focusIndex: 0 });
+
+    expect(frame.querySelector('.np-fixed-top .np-header')).not.toBeNull();
+    expect(frame.querySelectorAll('.np-scroll .np-bullet').length).toBeGreaterThan(0);
+    expect(frame.querySelector('.np-footer .np-dim')?.textContent).toBe(fixture.footer);
+    // Rows never leak into the fixed header — that is how the band starves.
+    expect(frame.querySelectorAll('.np-fixed-top .np-bullet')).toHaveLength(0);
+  });
+});
+
 describe('what the parity test cannot see', () => {
   // Parity compares CONTENT: both sides are trimmed, because the rail is a
   // border here and the indents are padding, and it reads text, which carries no
