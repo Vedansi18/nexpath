@@ -420,7 +420,10 @@ describe('escapeHtml — every builder runs text through it', () => {
     ];
 
     for (const r of rows) {
-      expect(r.querySelector('script'), r.outerHTML).toBeNull();
+      // `script` and the LIVE payload both: a script inserted via innerHTML is
+      // inert by spec, so it only proves the markup was neutralised. An
+      // `img onerror` is the one that would actually run.
+      expect(r.querySelector('script, img, iframe, svg'), r.outerHTML).toBeNull();
       expect(r.textContent).toContain(payload);
     }
   });

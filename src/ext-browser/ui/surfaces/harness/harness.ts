@@ -44,6 +44,27 @@ function withBody(model: SurfaceModel, text: string): SurfaceModel {
   };
 }
 
+/**
+ * The payload pushed through every slot the renderer builds with innerHTML.
+ *
+ * Field text alone would prove nothing: it lands in `textarea.value`, which is
+ * inherently safe and never touches `escapeHtml`. The label, header, hints and
+ * notes are the interpolated ones, so those are what a real escaping check has
+ * to carry.
+ */
+function withPayloadEverywhere(model: SurfaceModel, payload: string): SurfaceModel {
+  return {
+    ...model,
+    label: payload,
+    pinch: payload,
+    whyHelp: payload,
+    rows: model.rows.map((r) => (r.kind === 'note'
+      ? { ...r, text: payload }
+      : { ...r, label: payload, ...(r.kind === 'field' ? { hints: { always: [payload] } } : {}) })),
+    footer: payload,
+  };
+}
+
 // ── interactive mode ─────────────────────────────────────────────────────────
 
 function mountInteractive(): void {
@@ -82,7 +103,10 @@ const CONTENT_CASES: ReadonlyArray<readonly [string, string]> = [
   ['5000-char paragraph', 'word '.repeat(1000).trim()],
   ['2000-char unbroken token', 'x'.repeat(2000)],
   ['RTL + CJK', 'שלום עולם مرحبا بالعالم\n漢字とカタカナが混ざった行です\nمزيج של שפות 中文'],
-  ['markup payload', 'a < b & "c" > d <script>alert(1)</script>'],
+  // `<img onerror>` rather than `<script>`: a script inserted via innerHTML is
+  // inert BY SPEC, so the obvious payload can never fire and testing it proves
+  // nothing. An img handler is the one that actually runs.
+  ['markup payload', 'a < b & "c" > d <img src=x onerror="window.__pwned=1">'],
 ];
 
 /** Viewport-shaped boxes. 230 and 180 are the panel bug's reproduction range. */
@@ -94,7 +118,7 @@ const SIZES: ReadonlyArray<readonly [number, number]> = [
 interface CellResult {
   surface: string; content: string; w: number; h: number;
   headerVisible: boolean; rowVisible: boolean; footerVisible: boolean;
-  noHOverflow: boolean; notGrown: boolean; noScriptRan: boolean;
+  noHOverflow: boolean; notGrown: boolean; noInjection: boolean;
 }
 
 function within(inner: DOMRect, outer: DOMRect): boolean {
@@ -113,6 +137,7 @@ function sweepCell(surface: SurfaceModel, label: string, contentName: string, w:
 
   const boxRect = box.getBoundingClientRect();
   const frameRect = frame.getBoundingClientRect();
+  const scroll = frame.querySelector('.np-scroll') as HTMLElement;
   const header = frame.querySelector('.np-header')!.getBoundingClientRect();
   const bullets = [...frame.querySelectorAll('.np-scroll .np-bullet')].map((b) => b.getBoundingClientRect());
   const footer = frame.querySelector('.np-footer .np-dim')!.getBoundingClientRect();
@@ -123,9 +148,20 @@ function sweepCell(surface: SurfaceModel, label: string, contentName: string, w:
     // The panel bug's metric: at least one option row must remain visible.
     rowVisible: bullets.some((b) => within(b, boxRect)),
     footerVisible: within(footer, boxRect),
-    noHOverflow: frame.scrollWidth <= frame.clientWidth + 1 && frameRect.width <= boxRect.width + 1,
+    // Measured on the SCROLL BAND as well as the frame: `.np-frame` is
+    // `overflow: hidden`, so a long token overflowing inside the band can be
+    // clipped out of the frame's own scrollWidth and read as clean. The band is
+    // where `overflow-wrap: anywhere` has to do its work, so the band is where
+    // a failure would actually show.
+    noHOverflow: frame.scrollWidth <= frame.clientWidth + 1
+      && scroll.scrollWidth <= scroll.clientWidth + 1
+      && frameRect.width <= boxRect.width + 1,
     notGrown: frameRect.height <= boxRect.height + 1,
-    noScriptRan: !(window as unknown as Record<string, unknown>)['__pwned'],
+    // A REAL detector: if escaping broke, the markup becomes elements. The old
+    // check read a flag nothing ever sets, against a payload that cannot fire —
+    // it would have passed with escaping fully removed.
+    noInjection: frame.querySelector('script, img, iframe, svg, object, embed') === null
+      && !(window as unknown as Record<string, unknown>)['__pwned'],
   };
 
   box.remove();
@@ -146,14 +182,24 @@ export function runSweep(): { pass: number; fail: number; failures: CellResult[]
     // The full size grid with the fixture's own content…
     for (const [w, h] of SIZES) {
       const cell = sweepCell(fixture, label, 'fixture', w, h);
-      if (cell.headerVisible && cell.rowVisible && cell.footerVisible && cell.noHOverflow && cell.notGrown && cell.noScriptRan) pass += 1;
+      if (cell.headerVisible && cell.rowVisible && cell.footerVisible && cell.noHOverflow && cell.notGrown && cell.noInjection) pass += 1;
       else failures.push(cell);
     }
+    // Every innerHTML slot carrying the live payload, once per surface.
+    {
+      const cell = sweepCell(
+        withPayloadEverywhere(fixture, 'a < b & "c" > d <img src=x onerror="window.__pwned=1">'),
+        label, 'payload in every slot', 1440, 800,
+      );
+      if (cell.headerVisible && cell.rowVisible && cell.footerVisible && cell.noHOverflow && cell.notGrown && cell.noInjection) pass += 1;
+      else failures.push(cell);
+    }
+
     // …and the content matrix at a wide, a narrow and the bug-range size.
     for (const [contentName, text] of CONTENT_CASES) {
       for (const [w, h] of [[1440, 800], [600, 300], [360, 230]] as const) {
         const cell = sweepCell(withBody(fixture, text), label, contentName, w, h);
-        if (cell.headerVisible && cell.rowVisible && cell.footerVisible && cell.noHOverflow && cell.notGrown && cell.noScriptRan) pass += 1;
+        if (cell.headerVisible && cell.rowVisible && cell.footerVisible && cell.noHOverflow && cell.notGrown && cell.noInjection) pass += 1;
         else failures.push(cell);
       }
     }
