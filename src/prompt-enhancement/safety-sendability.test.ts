@@ -313,7 +313,7 @@ describe('prompt-enhancement safety, privacy, and sendability validation', () =>
     ['Delete obsolete files.', 'Still, before you do this destructive file or codebase change you must ask me for go-ahead confirmation.'],
     ['Install the dependency and update the lockfile.', 'Still, before you do this dependency or toolchain change you must ask me for go-ahead confirmation.'],
     ['Rotate the referenced API key.', 'Still, before you do this referenced credential or environment change you must ask me for go-ahead confirmation.'],
-    ['Deploy this release to production.', 'Still, before you do this production release or rollout you must ask me for go-ahead confirmation.'],
+    ['Deploy this release to production.', 'Still, before you do this production deploy or release you must ask me for go-ahead confirmation.'],
     ['Force-push the rebased branch.', 'Still, before you do this git history or branch change you must ask me for go-ahead confirmation.'],
     ['Modify the auth permissions.', 'Still, before you do this security, auth, or permission change you must ask me for go-ahead confirmation.'],
     ['Increase the cluster resource quota.', 'Still, before you do this cost or resource-changing operation you must ask me for go-ahead confirmation.'],

@@ -919,13 +919,7 @@ function specificSensitiveActionTextForPrompt(originalPromptText: string): strin
       case 'production_release_or_external_effect':
         if (hasDataOrSchemaAction && !hasExplicitReleaseVerb) return [];
         if (/\b(?:post|notify|customer|external)\b/.test(normalized)) return ['public or customer-facing communication'];
-        // ⛔ NOT "production deploy or release". That phrase contained the bare verb `deploy`, which
-        // EXECUTION_VERB and ESCALATION_VERB both hunt — so the safety sentence tripped the escalation
-        // scanners, and was only harmless because the stripper removes it before scanning. That made a
-        // wording change in one place and not the other able to block a body for carrying its own safety
-        // clause. Measured 2026-08-23: of the nine phrases this function emits, that was the only one
-        // that was not inert. This wording carries the same meaning and trips nothing.
-        return ['production release or rollout'];
+        return ['production deploy or release'];
       case 'secret_env_or_credential':
         return ['referenced credential or environment change'];
       case 'dependency_or_toolchain_change':
