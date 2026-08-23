@@ -363,14 +363,16 @@ describe('NexpathDockController — collapse affordance (D1.3)', () => {
 
   it('sits in the top-right corner, clear of the CLI frame rail on the left edge', () => {
     // The rail is the leftmost column of every CLI frame; a control on it would
-    // break the parity this workstream exists for.
+    // break the parity this workstream exists for. Both dock buttons share
+    // `.np-dock-btn`, which is where the top-right anchoring lives.
     const dock = mountNexpathDock();
     const css = (dock.mountEl.getRootNode() as ShadowRoot).querySelector('style')!.textContent!;
-    const base = css.slice(css.indexOf('.np-dock-toggle {'), css.indexOf('.np-dock-toggle--collapsed'));
+    const shared = css.slice(css.indexOf('.np-dock-btn {'), css.indexOf('.np-dock-btn:hover'));
 
-    expect(base).toContain('top: 0');
-    expect(base).toContain('right: 0');
-    expect(base).not.toContain('left:');
+    expect(shared).toContain('top: 0');
+    expect(shared).not.toContain('left:');
+    // Neither control is ever anchored to the left edge.
+    expect(css).not.toMatch(/\.np-dock-(btn|toggle|close)[^{]*\{[^}]*left:/);
   });
 
   it('is one button in two presentations — a corner square, then the whole tab', () => {
@@ -415,6 +417,130 @@ describe('NexpathDockController — collapse affordance (D1.3)', () => {
   });
 });
 
+describe('NexpathDockController — close button (D1.4)', () => {
+  function btn(dock: { mountEl: HTMLElement }, cls: string): HTMLButtonElement {
+    const root = dock.mountEl.getRootNode() as ShadowRoot;
+    return root.querySelector(cls) as HTMLButtonElement;
+  }
+  const closeBtn = (d: { mountEl: HTMLElement }) => btn(d, '.np-dock-close');
+
+  it('is a real button carrying the glyph the contract names', () => {
+    const dock = mountNexpathDock();
+    const el = closeBtn(dock);
+
+    expect(el).toBeInstanceOf(HTMLButtonElement);
+    expect(el.type).toBe('button');
+    expect(el.textContent).toBe('✕');
+    expect(el.getAttribute('aria-label')).toBe('Close nexpath');
+  });
+
+  it('is a sibling of mountEl, so a surface cannot delete it either', () => {
+    const dock = mountNexpathDock();
+
+    dock.mountEl.replaceChildren();
+
+    expect(closeBtn(dock).isConnected).toBe(true);
+  });
+
+  it('sits outermost, with collapse to its left — window-chrome order', () => {
+    const dock = mountNexpathDock();
+    const css = (dock.mountEl.getRootNode() as ShadowRoot).querySelector('style')!.textContent!;
+
+    expect(css).toContain('.np-dock-close { right: 0;');
+    expect(css).toContain(`.np-dock-toggle { right: ${DOCK_COLLAPSED_WIDTH_PX}px; }`);
+  });
+
+  it('hides the dock and reports dismiss', () => {
+    const seen: unknown[] = [];
+    const dock = mountNexpathDock({ onEvent: (e) => seen.push(e) });
+    dock.show();
+
+    closeBtn(dock).click();
+
+    expect(dock.isVisible()).toBe(false);
+    expect(hosts()[0]!.style.display).toBe('none');
+    expect(seen).toEqual([{ type: 'dismiss' }]);
+  });
+
+  it('closes, never destroys — show() brings the same dock back', () => {
+    const dock = mountNexpathDock();
+    dock.show();
+    dock.mountEl.textContent = 'surface content';
+
+    closeBtn(dock).click();
+    dock.show();
+
+    expect(dock.isVisible()).toBe(true);
+    expect(hosts()).toHaveLength(1);
+    expect(dock.mountEl.textContent).toBe('surface content');
+    expect(getNexpathDock()).toBe(dock);
+  });
+
+  it('works with no listener at all — nothing is wired yet under C-5', () => {
+    const dock = mountNexpathDock();
+    dock.show();
+
+    expect(() => closeBtn(dock).click()).not.toThrow();
+    expect(dock.isVisible()).toBe(false);
+  });
+
+  it('hides BEFORE notifying, so a broken consumer cannot keep the dock on screen', () => {
+    // Asserted through ordering rather than by throwing: an exception inside a DOM
+    // listener never propagates out of click(), so a throw-based test would prove
+    // nothing. What matters is that the dock is already hidden by the time any
+    // consumer code runs.
+    let visibleWhenNotified: boolean | null = null;
+    let displayWhenNotified: string | null = null;
+    const dock = mountNexpathDock({
+      onEvent: () => {
+        visibleWhenNotified = dock.isVisible();
+        displayWhenNotified = hosts()[0]!.style.display;
+      },
+    });
+    dock.show();
+
+    closeBtn(dock).click();
+
+    expect(visibleWhenNotified).toBe(false);
+    expect(displayWhenNotified).toBe('none');
+  });
+
+  it('is withdrawn while collapsed — the tab does one thing', () => {
+    const dock = mountNexpathDock();
+
+    expect(closeBtn(dock).classList.contains('np-dock-close--hidden')).toBe(false);
+
+    dock.collapse();
+    expect(closeBtn(dock).classList.contains('np-dock-close--hidden')).toBe(true);
+
+    dock.expand();
+    expect(closeBtn(dock).classList.contains('np-dock-close--hidden')).toBe(false);
+  });
+
+  it('is inert once the dock is destroyed', () => {
+    const seen: unknown[] = [];
+    const dock = mountNexpathDock({ onEvent: (e) => seen.push(e) });
+    const el = closeBtn(dock);
+    dock.destroy();
+
+    el.click();
+
+    expect(seen).toEqual([]);
+  });
+
+  it('mount options are ignored on a second call — the first caller owns the listener', () => {
+    const first: unknown[] = [];
+    const second: unknown[] = [];
+    const dock = mountNexpathDock({ onEvent: (e) => first.push(e) });
+    mountNexpathDock({ onEvent: (e) => second.push(e) });
+
+    closeBtn(dock).click();
+
+    expect(first).toEqual([{ type: 'dismiss' }]);
+    expect(second).toEqual([]);
+  });
+});
+
 describe('NexpathDockController — show / hide', () => {
   it('show reveals the host and hide conceals it', () => {
     const dock = mountNexpathDock();
@@ -456,7 +582,9 @@ describe('NexpathDockController — show / hide', () => {
     expect(dock.mountEl.textContent).toBe('still here');
   });
 
-  it('never clobbers the geometry — show/hide write only `display`', () => {
+  it('never clobbers the geometry, however many times visibility flips', () => {
+    // show/hide repaint the whole cssText rather than poking `display`, so the
+    // guarantee is that every geometry declaration survives the round trip.
     const dock = mountNexpathDock();
     const style = hosts()[0]!.style;
 

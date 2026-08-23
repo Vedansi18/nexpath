@@ -1,12 +1,19 @@
 // ============================================================================
 // nexpath surface dock — host + closed shadow root + mount-once controller.
 // ----------------------------------------------------------------------------
-// Sub-phase D1.1 of the CLI-parity static UI plan. This file owns exactly three
-// things and deliberately nothing else:
+// Sub-phases D1.1 to D1.4 of the CLI-parity static UI plan. This file owns the
+// WINDOW the four surfaces will live in, and deliberately nothing inside it:
 //
-//   1. the host element that sits in the agent page's DOM,
-//   2. the CLOSED shadow root that isolates our CSS from that page,
-//   3. a controller that is mounted ONCE per content-script lifetime.
+//   D1.1  the host element in the agent page's DOM, the CLOSED shadow root that
+//         isolates our CSS from that page, and a controller mounted ONCE per
+//         content-script lifetime,
+//   D1.2  the dock's geometry — 60% x 90%, flush right, the CLI's clamp order,
+//   D1.3  the collapse affordance,
+//   D1.4  the close button.
+//
+// Everything above is browser-only window furniture. What goes INSIDE the window
+// — the CLI frame and the four surfaces — belongs to D2 onwards and never appears
+// here; the dock hands renderers `mountEl` and does not look at what they draw.
 //
 // Mirrors `content/inject.ts`'s `ensurePanelMounted()` rather than reinventing
 // it: same host-element-then-closed-shadow-then-mount-element shape, same
@@ -29,11 +36,10 @@
 //
 // Explicitly NOT in this file yet — each is a later sub-phase, and adding it
 // early would make the dock look finished when it is not:
-//   D1.4  close button.
 //   D1.5  re-attach guard + `pagehide` teardown. `destroy()` exists here because
 //         it is part of the controller; WIRING it to page lifecycle is D1.5.
 //   D2    the CLI frame's `STYLES` string. The dock already carries one for its
-//         own chrome (the collapse toggle); D2 adds a second for the frame, and
+//         own chrome (the two dock buttons); D2 adds a second for the frame, and
 //         two style nodes in one shadow root is fine. Visibility here is a raw
 //         `display` swap inside paint() — plumbing, not visual design, and D2 may
 //         replace it with a class-based transition like the panel's `.np-hidden`.
@@ -122,7 +128,11 @@ export const DOCK_Z_INDEX = 2147483647;
  * Still reachable by the page and NOT addressed here: `visibility`, `opacity`,
  * `pointer-events`, `filter`, `clip-path`. Those are visibility and interaction
  * rather than geometry — recorded for D2 and D6.
+ *
+ * The rules themselves are split in two: what both the expanded dock and the
+ * collapsed tab share (below), and what only the expanded state adds.
  */
+
 /**
  * What both states share: the fixing, the edge it docks to, the stacking, and the
  * box-model reset. Kept in one place so expanded and collapsed cannot drift apart
@@ -139,6 +149,7 @@ const DOCK_HOST_BASE_CSS = [
   'transform:none',
 ].join(';') + ';';
 
+/** Expanded geometry: the 60% x 90% docked box described above. */
 export const DOCK_HOST_GEOMETRY_CSS = DOCK_HOST_BASE_CSS + [
   `top:${(100 - DOCK_HEIGHT_RATIO * 100) / 2}%`,
   `width:${DOCK_WIDTH_RATIO * 100}%`,
@@ -192,7 +203,9 @@ export const DOCK_HOST_COLLAPSED_CSS = DOCK_HOST_BASE_CSS + [
 ].join(';') + ';';
 
 /**
- * Styles for the dock's own chrome — the collapse toggle. Separate from the CLI
+ * Styles for the dock's own chrome — the collapse toggle and the close button,
+ * which share `.np-dock-btn` and differ only in where they sit and what they
+ * do on hover. Separate from the CLI
  * frame styling D2 will add: this control is browser-only furniture the CLI has
  * no equivalent for, so per the ownership rule it follows the advisory panel's
  * idiom rather than CLI parity. Same authoring standard as `panel.js`: one string,
@@ -214,10 +227,9 @@ export const DOCK_HOST_COLLAPSED_CSS = DOCK_HOST_BASE_CSS + [
  * second element, and nothing to keep in sync.
  */
 const DOCK_CHROME_STYLES = `
-  .np-dock-toggle {
+  .np-dock-btn {
     position: absolute;
     top: 0;
-    right: 0;
     width: ${DOCK_COLLAPSED_WIDTH_PX}px;
     height: ${MIN_TARGET_SIZE_PX}px;
     display: flex;
@@ -225,7 +237,6 @@ const DOCK_CHROME_STYLES = `
     justify-content: center;
     padding: 0;
     border: none;
-    border-radius: 0 0 0 4px;
     background: #310823;
     color: #2cc7dd;
     font-family: "SF Mono", "Cascadia Code", "JetBrains Mono", Consolas, "Liberation Mono", ui-monospace, monospace;
@@ -235,14 +246,56 @@ const DOCK_CHROME_STYLES = `
     -webkit-user-select: none;
     user-select: none;
   }
+  .np-dock-btn:hover { color: #f5f5f4; }
+  .np-dock-btn:focus-visible { outline: 2px solid #2cc7dd; outline-offset: 2px; }
+
+  /* Window-chrome order: close sits outermost, collapse to its left. */
+  .np-dock-close { right: 0; border-radius: 0 0 0 4px; }
+  .np-dock-close:hover { color: #f38ba8; }
+  .np-dock-toggle { right: ${DOCK_COLLAPSED_WIDTH_PX}px; }
+
+  /* Collapsed: the tab does one thing. The toggle becomes the whole host and
+     close is withdrawn — two controls will not fit, and "expand" is the only
+     action that makes sense from a tab. */
   .np-dock-toggle--collapsed {
+    right: 0;
     height: ${DOCK_COLLAPSED_HEIGHT_PX}px;
     border-radius: 4px 0 0 4px;
     box-shadow: -2px 0 8px rgba(0,0,0,.35);
   }
-  .np-dock-toggle:hover { color: #f5f5f4; }
-  .np-dock-toggle:focus-visible { outline: 2px solid #2cc7dd; outline-offset: 2px; }
+  .np-dock-close--hidden { display: none; }
 `;
+
+// ── D1.4 — close button ─────────────────────────────────────────────────────
+// The frozen panel contract already describes this control — `DismissEvent` is
+// documented as "User clicked ✕ or pressed Escape … Panel should close"
+// (`ui-contract.ts:128-132`) — but `panel.js` never renders one and never calls
+// its own `emitDismiss()`. So the ✕ is new work, not a port.
+//
+// ✕ means CLOSE AND DO NOTHING: the dock hides and the caller is told. It is
+// deliberately not Escape, which carries a different meaning on every CLI surface
+// (PE cancels, MPS-2 cancels the whole sequence, PEF skips). Keeping them separate
+// is what lets a user dismiss the window without triggering a surface's semantics.
+// Escape itself belongs to D6.
+
+/** What the dock reports upward. One member today; D6 extends it. */
+export type NexpathDockEvent = { type: 'dismiss' };
+
+export interface MountNexpathDockOptions {
+  /**
+   * Called when the dock reports something. Mirrors the panel's
+   * `mountNexpathPanel(root, { onEvent })` shape rather than inventing a second
+   * convention. Optional: under C-5 nothing is wired yet, and a dock with no
+   * listener must still behave.
+   */
+  onEvent?: (event: NexpathDockEvent) => void;
+
+  /**
+   * Document to mount into. Defaults to the ambient `document`; parameterised
+   * only so tests can supply their own.
+   */
+  doc?: Document;
+}
 
 export interface NexpathDockController {
   /**
@@ -288,11 +341,15 @@ let current: NexpathDockController | null = null;
 /**
  * Create the dock, or return the one already mounted in this instance.
  *
- * @param doc - Document to mount into. Defaults to the ambient `document`;
- *              parameterised only so tests can supply their own.
+ * Note that on a second call the options are IGNORED — the existing dock is
+ * returned as-is. That is what mount-once means, and it is why the first caller
+ * owns the `onEvent` listener.
  */
-export function mountNexpathDock(doc: Document = document): NexpathDockController {
+export function mountNexpathDock(options: MountNexpathDockOptions = {}): NexpathDockController {
   if (current) return current;
+
+  const doc = options.doc ?? document;
+  const emit = options.onEvent;
 
   // A stale content-script instance from a prior extension reload can still be
   // alive in an already-open tab, holding a host we can never reach again (its
@@ -333,8 +390,15 @@ export function mountNexpathDock(doc: Document = document): NexpathDockControlle
   // reader — none of which a styled <div> gives for free.
   const toggle = doc.createElement('button');
   toggle.type = 'button';
-  toggle.className = 'np-dock-toggle';
+  toggle.className = 'np-dock-btn np-dock-toggle';
   shadow.appendChild(toggle);
+
+  const close = doc.createElement('button');
+  close.type = 'button';
+  close.className = 'np-dock-btn np-dock-close';
+  close.textContent = '✕';                  // ✕ — the glyph the contract names
+  close.setAttribute('aria-label', 'Close nexpath');
+  shadow.appendChild(close);
 
   let visible = false;
   let collapsed = false;
@@ -353,12 +417,23 @@ export function mountNexpathDock(doc: Document = document): NexpathDockControlle
     toggle.classList.toggle('np-dock-toggle--collapsed', collapsed);
     toggle.setAttribute('aria-expanded', String(!collapsed));
     toggle.setAttribute('aria-label', collapsed ? 'Expand nexpath' : 'Collapse nexpath');
+    close.classList.toggle('np-dock-close--hidden', collapsed);
   }
 
   toggle.addEventListener('click', () => {
     if (destroyed) return;
     collapsed = !collapsed;
     paint();
+  });
+
+  close.addEventListener('click', () => {
+    if (destroyed) return;
+    // Hide, never destroy: the contract's dismiss is "close", and a later show()
+    // must still work. Hiding first means a listener that throws cannot leave the
+    // dock on screen after the user asked for it to go.
+    visible = false;
+    paint();
+    emit?.({ type: 'dismiss' });
   });
 
   paint();
