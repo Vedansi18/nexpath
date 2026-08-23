@@ -14,15 +14,29 @@
 // is a separate host for the four new surfaces (PE / MPS-1 / MPS-2 / PEF), so
 // nothing here touches the shipped panel or its frozen contract.
 //
+// Two things D1.3 had to decide, recorded here because the code alone does not
+// say them out loud:
+//   OVERLAY, NOT PUSH (A3.7). The dock is `position:fixed` and never reflows the
+//     agent page. Pushing would mean mutating the host page's layout — an
+//     intrusion that also breaks the moment a site uses its own fixed chrome.
+//     Collapsing is what makes the overlay liveable, which is exactly why D-3
+//     paired the right dock with this affordance.
+//   COLLAPSE STATE IS IN-MEMORY (A3.4). It lives in this closure and resets on
+//     reload. Persisting it would need storage: `chrome.storage` means reaching
+//     into the adapters layer, and `sessionStorage` means writing into the agent
+//     page's own origin. Both are wiring, which C-5 rules out for now. Recorded
+//     as deferred rather than decided against.
+//
 // Explicitly NOT in this file yet — each is a later sub-phase, and adding it
 // early would make the dock look finished when it is not:
-//   D1.3  collapse affordance.
 //   D1.4  close button.
 //   D1.5  re-attach guard + `pagehide` teardown. `destroy()` exists here because
 //         it is part of the controller; WIRING it to page lifecycle is D1.5.
-//   D2    the `STYLES` string. `show()`/`hide()` below toggle raw `display` —
-//         that is plumbing, not visual design, and D2 may replace it with a
-//         class-based transition like the panel's `.np-hidden`.
+//   D2    the CLI frame's `STYLES` string. The dock already carries one for its
+//         own chrome (the collapse toggle); D2 adds a second for the frame, and
+//         two style nodes in one shadow root is fine. Visibility here is a raw
+//         `display` swap inside paint() — plumbing, not visual design, and D2 may
+//         replace it with a class-based transition like the panel's `.np-hidden`.
 //   D3/D4 surface rendering. Renderers draw into `controller.mountEl`; the dock
 //         never inspects or owns what they put there.
 // ============================================================================
@@ -109,20 +123,126 @@ export const DOCK_Z_INDEX = 2147483647;
  * `pointer-events`, `filter`, `clip-path`. Those are visibility and interaction
  * rather than geometry — recorded for D2 and D6.
  */
-export const DOCK_HOST_GEOMETRY_CSS = [
+/**
+ * What both states share: the fixing, the edge it docks to, the stacking, and the
+ * box-model reset. Kept in one place so expanded and collapsed cannot drift apart
+ * — a collapsed tab that quietly lost `margin:0` would slide off the edge exactly
+ * like the expanded box would.
+ */
+const DOCK_HOST_BASE_CSS = [
   'position:fixed',
-  `top:${(100 - DOCK_HEIGHT_RATIO * 100) / 2}%`,
   'right:0',
-  `width:${DOCK_WIDTH_RATIO * 100}%`,
-  `max-width:${DOCK_MAX_WIDTH_PX}px`,
-  `min-width:min(${DOCK_MIN_WIDTH_PX}px,100%)`,
-  `height:${DOCK_HEIGHT_RATIO * 100}%`,
   `z-index:${DOCK_Z_INDEX}`,
   'margin:0',
   'padding:0',
   'border:0',
   'transform:none',
 ].join(';') + ';';
+
+export const DOCK_HOST_GEOMETRY_CSS = DOCK_HOST_BASE_CSS + [
+  `top:${(100 - DOCK_HEIGHT_RATIO * 100) / 2}%`,
+  `width:${DOCK_WIDTH_RATIO * 100}%`,
+  `max-width:${DOCK_MAX_WIDTH_PX}px`,
+  `min-width:min(${DOCK_MIN_WIDTH_PX}px,100%)`,
+  `height:${DOCK_HEIGHT_RATIO * 100}%`,
+].join(';') + ';';
+
+// ── D1.3 — collapse affordance ──────────────────────────────────────────────
+// D-3 put the dock on the right edge, which is also where every supported agent
+// keeps its chat. Collapsing is what makes that liveable: the dock shrinks to a
+// tab, the chat is usable again, and one click brings it back.
+
+/**
+ * Width of the collapsed tab, and of the toggle handle in both states.
+ * Not an arbitrary number: the handle IS the whole target when collapsed, and
+ * WCAG 2.2 SC 2.5.8 (Target Size, Minimum, AA) puts the floor at 24x24 CSS px.
+ * Narrower than that and the only way back from a collapsed dock is a hard target.
+ */
+export const DOCK_COLLAPSED_WIDTH_PX = 24;
+
+/**
+ * Height of the collapsed tab. The toggle is only this tall while collapsed —
+ * expanded it is a {@link MIN_TARGET_SIZE_PX} square in the corner.
+ */
+export const DOCK_COLLAPSED_HEIGHT_PX = 64;
+
+/** WCAG 2.2 SC 2.5.8 minimum target size, in CSS px. */
+export const MIN_TARGET_SIZE_PX = 24;
+
+/**
+ * Collapsed geometry: the host becomes the tab.
+ *
+ * Same `top` as the expanded dock, deliberately. The toggle sits at the host's
+ * top-right in both states, so sharing the top edge means the control does not
+ * move when you click it — press collapse and the button you just hit is still
+ * under the cursor, ready to expand. Centring the tab vertically instead would
+ * make it jump to mid-screen.
+ *
+ * `min-width` is explicitly cleared: the expanded rule sets an 800px floor, and a
+ * leftover floor would keep a "collapsed" host 800px wide. The two states are
+ * applied by replacing `cssText` wholesale, so this is belt-and-braces — but the
+ * failure it prevents is silent and total, and one declaration is cheap.
+ */
+export const DOCK_HOST_COLLAPSED_CSS = DOCK_HOST_BASE_CSS + [
+  `top:${(100 - DOCK_HEIGHT_RATIO * 100) / 2}%`,
+  `width:${DOCK_COLLAPSED_WIDTH_PX}px`,
+  'max-width:none',
+  'min-width:0',
+  `height:${DOCK_COLLAPSED_HEIGHT_PX}px`,
+].join(';') + ';';
+
+/**
+ * Styles for the dock's own chrome — the collapse toggle. Separate from the CLI
+ * frame styling D2 will add: this control is browser-only furniture the CLI has
+ * no equivalent for, so per the ownership rule it follows the advisory panel's
+ * idiom rather than CLI parity. Same authoring standard as `panel.js`: one string,
+ * `np-` classes, literal hex, appended as a `<style>` inside the shadow root.
+ *
+ * WHY THE TOP-RIGHT CORNER, NOT THE LEFT EDGE. The obvious place for a drawer
+ * handle is the inner edge facing the page — but that edge is where every CLI
+ * frame puts its `│` rail, and a control sitting on the rail breaks the parity
+ * this whole workstream exists for. Three alternatives were weighed and dropped:
+ * a left gutter costs every surface 24px permanently and shifts the rail inward;
+ * overhanging outside the host puts the handle off-screen once the viewport is
+ * narrow enough that the dock spans it (`left:-24px` from x=0), which is exactly
+ * when collapsing matters most; and a header-only control still leaves the
+ * collapsed tab needing a second one. The corner is clear of the rail, is where
+ * window chrome is expected, and is where D1.4's close button will sit too.
+ *
+ * ONE BUTTON, TWO PRESENTATIONS. Expanded it is a ${MIN_TARGET_SIZE_PX}px square in the
+ * corner; collapsed the host IS the tab, so the same button simply fills it. No
+ * second element, and nothing to keep in sync.
+ */
+const DOCK_CHROME_STYLES = `
+  .np-dock-toggle {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: ${DOCK_COLLAPSED_WIDTH_PX}px;
+    height: ${MIN_TARGET_SIZE_PX}px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: none;
+    border-radius: 0 0 0 4px;
+    background: #310823;
+    color: #2cc7dd;
+    font-family: "SF Mono", "Cascadia Code", "JetBrains Mono", Consolas, "Liberation Mono", ui-monospace, monospace;
+    font-size: 12px;
+    line-height: 1;
+    cursor: pointer;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  .np-dock-toggle--collapsed {
+    height: ${DOCK_COLLAPSED_HEIGHT_PX}px;
+    border-radius: 4px 0 0 4px;
+    box-shadow: -2px 0 8px rgba(0,0,0,.35);
+  }
+  .np-dock-toggle:hover { color: #f5f5f4; }
+  .np-dock-toggle:focus-visible { outline: 2px solid #2cc7dd; outline-offset: 2px; }
+`;
 
 export interface NexpathDockController {
   /**
@@ -140,6 +260,15 @@ export interface NexpathDockController {
 
   /** True while the dock is showing. False before the first `show()`. */
   isVisible(): boolean;
+
+  /** Shrink the dock to its edge tab, freeing the agent's chat. Safe to repeat. */
+  collapse(): void;
+
+  /** Restore the dock to full size. Safe to repeat. */
+  expand(): void;
+
+  /** True while the dock is collapsed to its tab. */
+  isCollapsed(): boolean;
 
   /**
    * Remove the host from the page and end this dock's lifetime. After this,
@@ -177,10 +306,6 @@ export function mountNexpathDock(doc: Document = document): NexpathDockControlle
 
   const host = doc.createElement('div');
   host.id = NEXPATH_DOCK_HOST_ID;
-  // Geometry first, hidden second — one cssText write, so the host is never in the
-  // page with a size but no placement. `display` is then owned by show()/hide(),
-  // which write the single property and leave the rest of this block intact.
-  host.style.cssText = DOCK_HOST_GEOMETRY_CSS + 'display:none;';
   doc.body.appendChild(host);
 
   // CLOSED, matching the panel: the agent page cannot reach into our DOM through
@@ -190,38 +315,93 @@ export function mountNexpathDock(doc: Document = document): NexpathDockControlle
   // it. That is a D6 concern; noted here because the closed mode is what causes it.
   const shadow = host.attachShadow({ mode: 'closed' });
 
+  // The dock's own chrome styles. D2 will append a second <style> for the CLI
+  // frame; two style nodes in one shadow root is fine, and it keeps browser-only
+  // furniture separate from CLI-parity styling.
+  const style = doc.createElement('style');
+  style.textContent = DOCK_CHROME_STYLES;
+  shadow.appendChild(style);
+
   // Renderers get this element, never the shadow root itself — same split the
   // panel uses, so a renderer can freely clear its own subtree without touching
-  // anything the dock owns (the D2 <style> node will live beside it, not in it).
+  // anything the dock owns (the style node and the toggle are siblings, not
+  // children, so a renderer clearing mountEl cannot delete the collapse control).
   const mountEl = doc.createElement('div');
   shadow.appendChild(mountEl);
 
+  // A real <button>: focusable, Enter/Space activated, and announced by a screen
+  // reader — none of which a styled <div> gives for free.
+  const toggle = doc.createElement('button');
+  toggle.type = 'button';
+  toggle.className = 'np-dock-toggle';
+  shadow.appendChild(toggle);
+
   let visible = false;
+  let collapsed = false;
   let destroyed = false;
+
+  /**
+   * The single writer of host geometry and toggle state. Collapse and show/hide
+   * both change how the host must look, so folding them into one paint removes
+   * the whole class of bug where one silently overwrites the other's work.
+   */
+  function paint(): void {
+    host.style.cssText =
+      (collapsed ? DOCK_HOST_COLLAPSED_CSS : DOCK_HOST_GEOMETRY_CSS) +
+      `display:${visible ? 'block' : 'none'};`;
+    toggle.textContent = collapsed ? '‹' : '›';
+    toggle.classList.toggle('np-dock-toggle--collapsed', collapsed);
+    toggle.setAttribute('aria-expanded', String(!collapsed));
+    toggle.setAttribute('aria-label', collapsed ? 'Expand nexpath' : 'Collapse nexpath');
+  }
+
+  toggle.addEventListener('click', () => {
+    if (destroyed) return;
+    collapsed = !collapsed;
+    paint();
+  });
+
+  paint();
 
   const controller: NexpathDockController = {
     mountEl,
 
     show(): void {
       if (destroyed) return;
-      // An explicit inline value, never ''. The host element itself lives in the
-      // agent page's light DOM — only its shadow CONTENTS are isolated — so a page
-      // rule like `#nexpath-dock-host { display: none }` applies to it. Clearing
-      // the inline value hands the decision to that rule and show() fails
-      // silently. Inline beats a page stylesheet, so this keeps the dock ours.
-      // `block` suits the fixed, explicitly-sized box D1.2 declares above.
-      host.style.display = 'block';
+      // paint() writes an explicit `display`, never ''. The host element lives in
+      // the agent page's light DOM — only its shadow CONTENTS are isolated — so a
+      // page rule like `#nexpath-dock-host { display: none }` applies to it.
+      // Clearing the inline value would hand the decision to that rule and show()
+      // would fail silently; inline beats a page stylesheet, so this keeps the
+      // dock ours.
       visible = true;
+      paint();
     },
 
     hide(): void {
       if (destroyed) return;
-      host.style.display = 'none';
       visible = false;
+      paint();
     },
 
     isVisible(): boolean {
       return !destroyed && visible;
+    },
+
+    collapse(): void {
+      if (destroyed) return;
+      collapsed = true;
+      paint();
+    },
+
+    expand(): void {
+      if (destroyed) return;
+      collapsed = false;
+      paint();
+    },
+
+    isCollapsed(): boolean {
+      return !destroyed && collapsed;
     },
 
     destroy(): void {

@@ -10,6 +10,9 @@ import {
   DOCK_MIN_WIDTH_PX,
   DOCK_HEIGHT_RATIO,
   DOCK_Z_INDEX,
+  DOCK_COLLAPSED_WIDTH_PX,
+  DOCK_COLLAPSED_HEIGHT_PX,
+  MIN_TARGET_SIZE_PX,
 } from './dock.js';
 
 /** Hosts currently in the page, by the dock's stable id. */
@@ -230,6 +233,185 @@ describe('mountNexpathDock — mount once', () => {
     const dock = mountNexpathDock();
 
     expect(getNexpathDock()).toBe(dock);
+  });
+});
+
+describe('NexpathDockController — collapse affordance (D1.3)', () => {
+  /** The toggle lives in the closed shadow root; reach it through a known sibling. */
+  function toggle(dock: { mountEl: HTMLElement }): HTMLButtonElement {
+    const root = dock.mountEl.getRootNode() as ShadowRoot;
+    return root.querySelector('.np-dock-toggle') as HTMLButtonElement;
+  }
+
+  it('the tab meets the minimum target size — it is the only way back when collapsed', () => {
+    // A literal floor, not a value derived from the constant, so shrinking the tab
+    // has to be a deliberate decision rather than a quiet edit.
+    expect(MIN_TARGET_SIZE_PX).toBe(24);                                  // WCAG 2.2 SC 2.5.8 (AA)
+    expect(DOCK_COLLAPSED_WIDTH_PX).toBeGreaterThanOrEqual(MIN_TARGET_SIZE_PX);
+    expect(DOCK_COLLAPSED_HEIGHT_PX).toBeGreaterThanOrEqual(MIN_TARGET_SIZE_PX);
+  });
+
+  it('is a real button, so it is focusable and keyboard-activated for free', () => {
+    const dock = mountNexpathDock();
+    const el = toggle(dock);
+
+    expect(el).toBeInstanceOf(HTMLButtonElement);
+    expect(el.type).toBe('button');
+  });
+
+  it('is a sibling of mountEl, so a surface clearing its own subtree cannot delete it', () => {
+    const dock = mountNexpathDock();
+
+    dock.mountEl.innerHTML = '';
+    dock.mountEl.replaceChildren();
+
+    expect(toggle(dock)).not.toBeNull();
+    expect(toggle(dock).isConnected).toBe(true);
+    // The dock's chrome styles survive the same way.
+    const root = dock.mountEl.getRootNode() as ShadowRoot;
+    expect(root.querySelector('style')?.textContent).toContain('.np-dock-toggle');
+  });
+
+  it('starts expanded and says so', () => {
+    const dock = mountNexpathDock();
+
+    expect(dock.isCollapsed()).toBe(false);
+    expect(toggle(dock).getAttribute('aria-expanded')).toBe('true');
+    expect(toggle(dock).getAttribute('aria-label')).toBe('Collapse nexpath');
+  });
+
+  it('clicking the toggle collapses the dock to its tab, and clicking again restores it', () => {
+    const dock = mountNexpathDock();
+    dock.show();
+
+    toggle(dock).click();
+
+    expect(dock.isCollapsed()).toBe(true);
+    expect(hosts()[0]!.style.width).toBe(`${DOCK_COLLAPSED_WIDTH_PX}px`);
+    expect(hosts()[0]!.style.height).toBe(`${DOCK_COLLAPSED_HEIGHT_PX}px`);
+    expect(toggle(dock).getAttribute('aria-expanded')).toBe('false');
+    expect(toggle(dock).getAttribute('aria-label')).toBe('Expand nexpath');
+
+    toggle(dock).click();
+
+    expect(dock.isCollapsed()).toBe(false);
+    expect(hosts()[0]!.style.width).toBe(`${DOCK_WIDTH_RATIO * 100}%`);
+    expect(hosts()[0]!.style.height).toBe(`${DOCK_HEIGHT_RATIO * 100}%`);
+  });
+
+  it('the expanded 800px floor does not survive into the collapsed tab', () => {
+    // Left behind, min-width would keep a "collapsed" dock 800px wide — a silent,
+    // total failure of the affordance.
+    const dock = mountNexpathDock();
+
+    dock.collapse();
+
+    expect(hosts()[0]!.style.minWidth).toBe('0');
+    expect(hosts()[0]!.style.maxWidth).toBe('none');
+  });
+
+  it('keeps the dock pinned and reset while collapsed', () => {
+    const dock = mountNexpathDock();
+
+    dock.collapse();
+    const style = hosts()[0]!.style;
+
+    expect(style.position).toBe('fixed');
+    expect(style.right).toBe('0px');
+    expect(style.zIndex).toBe(String(DOCK_Z_INDEX));
+    expect(style.margin).toBe('0px');
+    expect(style.padding).toBe('0px');
+    expect(style.transform).toBe('none');
+  });
+
+  it('collapse() and expand() are idempotent', () => {
+    const dock = mountNexpathDock();
+
+    dock.collapse();
+    dock.collapse();
+    expect(dock.isCollapsed()).toBe(true);
+
+    dock.expand();
+    dock.expand();
+    expect(dock.isCollapsed()).toBe(false);
+  });
+
+  it('collapsing does not show a hidden dock, and showing does not expand a collapsed one', () => {
+    const dock = mountNexpathDock();
+
+    dock.collapse();
+    expect(dock.isVisible()).toBe(false);
+    expect(hosts()[0]!.style.display).toBe('none');
+
+    dock.show();
+    expect(dock.isCollapsed()).toBe(true);
+    expect(hosts()[0]!.style.display).toBe('block');
+    expect(hosts()[0]!.style.width).toBe(`${DOCK_COLLAPSED_WIDTH_PX}px`);
+  });
+
+  it('keeps the same top edge when collapsed, so the control stays under the cursor', () => {
+    // The toggle is pinned to the host's top-right in both states, so sharing the
+    // top edge is what stops it jumping when you click it.
+    const dock = mountNexpathDock();
+    const expandedTop = hosts()[0]!.style.top;
+
+    dock.collapse();
+
+    expect(hosts()[0]!.style.top).toBe(expandedTop);
+    expect(hosts()[0]!.style.top).toBe(`${(100 - DOCK_HEIGHT_RATIO * 100) / 2}%`);
+  });
+
+  it('sits in the top-right corner, clear of the CLI frame rail on the left edge', () => {
+    // The rail is the leftmost column of every CLI frame; a control on it would
+    // break the parity this workstream exists for.
+    const dock = mountNexpathDock();
+    const css = (dock.mountEl.getRootNode() as ShadowRoot).querySelector('style')!.textContent!;
+    const base = css.slice(css.indexOf('.np-dock-toggle {'), css.indexOf('.np-dock-toggle--collapsed'));
+
+    expect(base).toContain('top: 0');
+    expect(base).toContain('right: 0');
+    expect(base).not.toContain('left:');
+  });
+
+  it('is one button in two presentations — a corner square, then the whole tab', () => {
+    const dock = mountNexpathDock();
+    const root = dock.mountEl.getRootNode() as ShadowRoot;
+    const css = root.querySelector('style')!.textContent!;
+
+    // Expanded: a square that still clears the minimum target size.
+    expect(css).toContain(`width: ${DOCK_COLLAPSED_WIDTH_PX}px`);
+    expect(css).toContain(`height: ${MIN_TARGET_SIZE_PX}px`);
+    // Collapsed: the same element grows to fill the tab — no second control.
+    expect(css).toContain(`height: ${DOCK_COLLAPSED_HEIGHT_PX}px`);
+    expect(root.querySelectorAll('.np-dock-toggle')).toHaveLength(1);
+  });
+
+  it('flags its collapsed presentation with a class, so one element serves both states', () => {
+    const dock = mountNexpathDock();
+
+    expect(toggle(dock).classList.contains('np-dock-toggle--collapsed')).toBe(false);
+
+    dock.collapse();
+    expect(toggle(dock).classList.contains('np-dock-toggle--collapsed')).toBe(true);
+
+    dock.expand();
+    expect(toggle(dock).classList.contains('np-dock-toggle--collapsed')).toBe(false);
+  });
+
+  it('the toggle is inert once the dock is destroyed', () => {
+    const dock = mountNexpathDock();
+    const el = toggle(dock);
+    // Keep the host reference: after destroy it is detached, and asserting only
+    // through isCollapsed() would pass even if the click still repainted it.
+    const hostEl = hosts()[0]!;
+    const widthBefore = hostEl.style.width;
+    dock.destroy();
+
+    el.click();
+
+    expect(dock.isCollapsed()).toBe(false);
+    expect(hostEl.style.width).toBe(widthBefore);
+    expect(hosts()).toHaveLength(0);
   });
 });
 
