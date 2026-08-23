@@ -1,7 +1,16 @@
 // @vitest-environment jsdom
 
 import { describe, it, expect, afterEach } from 'vitest';
-import { mountNexpathDock, getNexpathDock, NEXPATH_DOCK_HOST_ID } from './dock.js';
+import {
+  mountNexpathDock,
+  getNexpathDock,
+  NEXPATH_DOCK_HOST_ID,
+  DOCK_WIDTH_RATIO,
+  DOCK_MAX_WIDTH_PX,
+  DOCK_MIN_WIDTH_PX,
+  DOCK_HEIGHT_RATIO,
+  DOCK_Z_INDEX,
+} from './dock.js';
 
 /** Hosts currently in the page, by the dock's stable id. */
 function hosts(): HTMLElement[] {
@@ -30,14 +39,128 @@ describe('mountNexpathDock — host element', () => {
     expect(dock.isVisible()).toBe(false);
   });
 
-  it('carries no positioning yet — geometry is D1.2, not this sub-phase', () => {
+});
+
+describe('mountNexpathDock — dock geometry (D1.2)', () => {
+  it('carries the CLI\'s own docked-popup values, not invented ones', () => {
+    // These are re-declared rather than imported (C-5 keeps this layer free of
+    // cross-layer imports), so the "keep in sync by hand" note in dock.ts needs
+    // teeth. Literals on purpose: every other geometry test derives from these
+    // constants, so without this one a wrong value would agree with itself.
+    // Source: src/decision-session/screen-geometry.ts.
+    expect(DOCK_WIDTH_RATIO).toBe(0.6);       // DEFAULT_POPUP_WIDTH_RATIO
+    expect(DOCK_MAX_WIDTH_PX).toBe(1600);     // POPUP_MAX_WIDTH_PX
+    expect(DOCK_MIN_WIDTH_PX).toBe(800);      // POPUP_MIN_COLS 80 x DEFAULT_CELL_WIDTH_PX 10
+    expect(DOCK_HEIGHT_RATIO).toBe(0.9);      // browser equivalent of 100% of the work area
+    expect(DOCK_Z_INDEX).toBe(2147483647);
+  });
+
+  it('docks flush right, fixed, above the agent UI', () => {
     mountNexpathDock();
     const style = hosts()[0]!.style;
 
-    expect(style.position).toBe('');
-    expect(style.width).toBe('');
-    expect(style.height).toBe('');
-    expect(style.zIndex).toBe('');
+    expect(style.position).toBe('fixed');
+    expect(style.right).toBe('0px');
+    expect(style.zIndex).toBe(String(DOCK_Z_INDEX));
+  });
+
+  it('sizes from the CLI constants, not hard-coded literals', () => {
+    mountNexpathDock();
+    const style = hosts()[0]!.style;
+
+    expect(style.width).toBe(`${DOCK_WIDTH_RATIO * 100}%`);
+    expect(style.maxWidth).toBe(`${DOCK_MAX_WIDTH_PX}px`);
+    expect(style.height).toBe(`${DOCK_HEIGHT_RATIO * 100}%`);
+  });
+
+  it('floors the width without letting it exceed the viewport', () => {
+    // A bare `min-width: 800px` would always win in CSS and overflow a narrow
+    // viewport; min(...) is what supplies the CLI's final viewport clamp.
+    mountNexpathDock();
+
+    expect(hosts()[0]!.style.minWidth).toBe(`min(${DOCK_MIN_WIDTH_PX}px,100%)`);
+  });
+
+  it('splits the leftover height evenly instead of dumping it at the bottom', () => {
+    mountNexpathDock();
+
+    const expectedTop = (100 - DOCK_HEIGHT_RATIO * 100) / 2;
+    expect(hosts()[0]!.style.top).toBe(`${expectedTop}%`);
+  });
+
+  it('declares the geometry INLINE, where a page stylesheet cannot outrank it', () => {
+    mountNexpathDock();
+    const host = hosts()[0]!;
+
+    // Every geometry property is on the element's own style attribute.
+    for (const prop of ['position', 'top', 'right', 'width', 'max-width', 'min-width', 'height', 'z-index']) {
+      expect(host.style.getPropertyValue(prop), prop).not.toBe('');
+    }
+  });
+
+  it('pins the box model, so a broad page rule cannot move or grow the docked box', () => {
+    // Verified exposure: inline styling protects only the properties it declares, and
+    // `div { padding; margin; border }` — the kind of rule ordinary sites ship — was
+    // observed applying to the host. `margin` alone defeats `right:0`.
+    const pageCss = document.createElement('style');
+    pageCss.textContent = 'div { padding: 20px; margin: 30px; border: 5px solid red; }';
+    document.head.appendChild(pageCss);
+
+    mountNexpathDock();
+    const computed = getComputedStyle(hosts()[0]!);
+
+    expect(computed.padding).toBe('0px');
+    expect(computed.margin).toBe('0px');
+    expect(computed.borderTopWidth).toBe('0px');
+
+    pageCss.remove();
+  });
+
+  it('pins transform, so a page cannot relocate or scale the dock', () => {
+    const pageCss = document.createElement('style');
+    pageCss.textContent = `#${NEXPATH_DOCK_HOST_ID} { transform: scale(0.2) translateX(-500px); }`;
+    document.head.appendChild(pageCss);
+
+    mountNexpathDock();
+
+    expect(getComputedStyle(hosts()[0]!).transform).toBe('none');
+
+    pageCss.remove();
+  });
+
+  it('the CSS clamp resolves exactly like the CLI computeDockedPopupGeometry order', () => {
+    // The comment in dock.ts claims these two forms agree. Pin that claim, so an
+    // edit to either the constants or the declarations cannot silently drift.
+    const cliOrder = (viewport: number): number => {
+      let w = Math.round(viewport * DOCK_WIDTH_RATIO);
+      w = Math.min(w, DOCK_MAX_WIDTH_PX);   // ultrawide cap
+      w = Math.max(w, DOCK_MIN_WIDTH_PX);   // readability floor
+      w = Math.min(w, viewport);            // never exceed the work area
+      return w;
+    };
+    // CSS used width = max(min-width, min(max-width, width)),
+    // with min-width itself being min(800px, 100%).
+    const cssOrder = (viewport: number): number => {
+      const width = Math.round(viewport * DOCK_WIDTH_RATIO);
+      const minWidth = Math.min(DOCK_MIN_WIDTH_PX, viewport);
+      return Math.max(minWidth, Math.min(DOCK_MAX_WIDTH_PX, width));
+    };
+
+    for (const viewport of [320, 600, 800, 900, 1024, 1280, 1440, 1920, 2560, 3440, 5120]) {
+      expect(cssOrder(viewport), `viewport ${viewport}px`).toBe(cliOrder(viewport));
+    }
+  });
+
+  it('the clamp actually bites at each boundary', () => {
+    const used = (viewport: number): number => {
+      const width = Math.round(viewport * DOCK_WIDTH_RATIO);
+      return Math.max(Math.min(DOCK_MIN_WIDTH_PX, viewport), Math.min(DOCK_MAX_WIDTH_PX, width));
+    };
+
+    expect(used(600)).toBe(600);                  // narrower than the floor: viewport wins
+    expect(used(1000)).toBe(DOCK_MIN_WIDTH_PX);   // 60% would be 600: floor wins
+    expect(used(2000)).toBe(1200);                // plain 60%
+    expect(used(4000)).toBe(DOCK_MAX_WIDTH_PX);   // 60% would be 2400: cap wins
   });
 });
 
@@ -149,6 +272,23 @@ describe('NexpathDockController — show / hide', () => {
     expect(hosts()).toHaveLength(1);
     expect(dock.mountEl.isConnected).toBe(true);
     expect(dock.mountEl.textContent).toBe('still here');
+  });
+
+  it('never clobbers the geometry — show/hide write only `display`', () => {
+    const dock = mountNexpathDock();
+    const style = hosts()[0]!.style;
+
+    dock.show();
+    dock.hide();
+    dock.show();
+
+    expect(style.position).toBe('fixed');
+    expect(style.right).toBe('0px');
+    expect(style.width).toBe(`${DOCK_WIDTH_RATIO * 100}%`);
+    expect(style.maxWidth).toBe(`${DOCK_MAX_WIDTH_PX}px`);
+    expect(style.minWidth).toBe(`min(${DOCK_MIN_WIDTH_PX}px,100%)`);
+    expect(style.height).toBe(`${DOCK_HEIGHT_RATIO * 100}%`);
+    expect(style.zIndex).toBe(String(DOCK_Z_INDEX));
   });
 
   it('is idempotent — repeated show / hide keep the same state', () => {
