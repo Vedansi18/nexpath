@@ -1,7 +1,7 @@
 // ============================================================================
 // nexpath surface dock — host + closed shadow root + mount-once controller.
 // ----------------------------------------------------------------------------
-// Sub-phases D1.1 to D1.4 of the CLI-parity static UI plan. This file owns the
+// Sub-phases D1.1 to D1.5 of the CLI-parity static UI plan. This file owns the
 // WINDOW the four surfaces will live in, and deliberately nothing inside it:
 //
 //   D1.1  the host element in the agent page's DOM, the CLOSED shadow root that
@@ -9,7 +9,8 @@
 //         content-script lifetime,
 //   D1.2  the dock's geometry — 60% x 90%, flush right, the CLI's clamp order,
 //   D1.3  the collapse affordance,
-//   D1.4  the close button.
+//   D1.4  the close button,
+//   D1.5  the re-attach guard and `pagehide` teardown.
 //
 // Everything above is browser-only window furniture. What goes INSIDE the window
 // — the CLI frame and the four surfaces — belongs to D2 onwards and never appears
@@ -36,8 +37,6 @@
 //
 // Explicitly NOT in this file yet — each is a later sub-phase, and adding it
 // early would make the dock look finished when it is not:
-//   D1.5  re-attach guard + `pagehide` teardown. `destroy()` exists here because
-//         it is part of the controller; WIRING it to page lifecycle is D1.5.
 //   D2    the CLI frame's `STYLES` string. The dock already carries one for its
 //         own chrome (the two dock buttons); D2 adds a second for the frame, and
 //         two style nodes in one shadow root is fine. Visibility here is a raw
@@ -420,21 +419,40 @@ export function mountNexpathDock(options: MountNexpathDockOptions = {}): Nexpath
     close.classList.toggle('np-dock-close--hidden', collapsed);
   }
 
-  toggle.addEventListener('click', () => {
-    if (destroyed) return;
+  // Named, so destroy() can take them off again — the panel's idiom
+  // (`panel.js:679-688` removes every listener it added). That detachment is also
+  // why neither handler checks `destroyed`: destroy() removes both listeners in
+  // the same synchronous block that sets the flag, so a post-destroy click cannot
+  // reach this code at all. A guard here would be unreachable.
+  function onToggleClick(): void {
     collapsed = !collapsed;
     paint();
-  });
+  }
 
-  close.addEventListener('click', () => {
-    if (destroyed) return;
+  function onCloseClick(): void {
     // Hide, never destroy: the contract's dismiss is "close", and a later show()
     // must still work. Hiding first means a listener that throws cannot leave the
     // dock on screen after the user asked for it to go.
     visible = false;
     paint();
     emit?.({ type: 'dismiss' });
-  });
+  }
+
+  /**
+   * D1.5 — a content script has no clean unload hook; `pagehide` is the closest.
+   * Tear the dock down on navigation away from the agent so nothing survives into
+   * the next page. `inject.ts:279-286` does the same for the panel.
+   */
+  function onPageHide(): void {
+    controller.destroy();
+  }
+
+  toggle.addEventListener('click', onToggleClick);
+  close.addEventListener('click', onCloseClick);
+  // `doc.defaultView`, not the ambient `window`, so a caller-supplied document is
+  // honoured here too and the listener is removable in tests.
+  const view = doc.defaultView;
+  view?.addEventListener('pagehide', onPageHide);
 
   paint();
 
@@ -443,6 +461,12 @@ export function mountNexpathDock(options: MountNexpathDockOptions = {}): Nexpath
 
     show(): void {
       if (destroyed) return;
+      // D1.5 re-attach guard. A host-page SPA re-render can wipe <body>'s children
+      // and orphan our host; a mount-once dock whose host is orphaned is dead with
+      // no way back, because mountNexpathDock() would just hand back this same
+      // controller. Checked on show() — the moment it matters — exactly as
+      // `inject.ts:272-274` does for the panel.
+      if (!host.isConnected) doc.body.appendChild(host);
       // paint() writes an explicit `display`, never ''. The host element lives in
       // the agent page's light DOM — only its shadow CONTENTS are isolated — so a
       // page rule like `#nexpath-dock-host { display: none }` applies to it.
@@ -486,6 +510,19 @@ export function mountNexpathDock(options: MountNexpathDockOptions = {}): Nexpath
       if (destroyed) return;
       destroyed = true;
       visible = false;
+      // Every listener this mount added, taken off again (panel.js:679-688).
+      // The two button listeners are load-bearing: without these lines a click on
+      // an orphaned button still runs, which is why neither handler needs its own
+      // `destroyed` guard.
+      toggle.removeEventListener('click', onToggleClick);
+      close.removeEventListener('click', onCloseClick);
+      // The `pagehide` one is hygiene, and deliberately kept even though no test
+      // can observe it: a stale handler would call destroy() on an
+      // already-destroyed controller and short-circuit, so the only cost of
+      // leaking it is that this whole closure stays reachable from the view for
+      // the life of the page. Mutation testing flags removing this line as an
+      // uncaught change — that is expected, and not a reason to delete it.
+      view?.removeEventListener('pagehide', onPageHide);
       host.remove();
       // Unconditional, and safe: `current` can only be some OTHER controller if a
       // second dock was mounted, and `mountNexpathDock` refuses to create one

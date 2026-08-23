@@ -614,6 +614,107 @@ describe('NexpathDockController — show / hide', () => {
   });
 });
 
+describe('NexpathDockController — re-attach guard and pagehide teardown (D1.5)', () => {
+  it('re-attaches a host an SPA re-render tore out of the page', () => {
+    // A mount-once dock whose host is orphaned is dead with no way back:
+    // mountNexpathDock() would just hand back the same controller.
+    const dock = mountNexpathDock();
+    dock.mountEl.textContent = 'surface content';
+    document.body.innerHTML = '';            // the SPA wipes <body>
+    expect(hosts()).toHaveLength(0);
+
+    dock.show();
+
+    expect(hosts()).toHaveLength(1);
+    expect(dock.isVisible()).toBe(true);
+    expect(dock.mountEl.textContent).toBe('surface content');
+    expect(dock.mountEl.isConnected).toBe(true);
+  });
+
+  it('leaves an attached host exactly where it is', () => {
+    // Re-appending unconditionally would MOVE the node to the end of <body> on
+    // every show — a detach/re-attach that a real browser pays for with a reflow
+    // and a lost focus. Observable here as a change in sibling order.
+    const dock = mountNexpathDock();
+    const after = document.createElement('div');
+    document.body.appendChild(after);
+
+    dock.show();
+    dock.show();
+
+    expect(hosts()).toHaveLength(1);
+    expect(hosts()[0]!.nextElementSibling).toBe(after);
+  });
+
+  it('tears the dock down on pagehide', () => {
+    const dock = mountNexpathDock();
+    dock.show();
+
+    window.dispatchEvent(new Event('pagehide'));
+
+    expect(hosts()).toHaveLength(0);
+    expect(getNexpathDock()).toBeNull();
+    expect(dock.isVisible()).toBe(false);
+  });
+
+  it('a fresh dock can be mounted after a pagehide teardown', () => {
+    const first = mountNexpathDock();
+    window.dispatchEvent(new Event('pagehide'));
+
+    const second = mountNexpathDock();
+
+    expect(second).not.toBe(first);
+    expect(hosts()).toHaveLength(1);
+  });
+
+  it('a destroyed dock never tears down the live one on pagehide', () => {
+    // destroy() also removes the pagehide listener. That removal is not
+    // behaviourally observable on its own — a stale handler would call destroy()
+    // on an already-destroyed controller and short-circuit — so what is asserted
+    // here is the property that actually matters: after a remount, pagehide
+    // affects exactly the live dock and nothing else.
+    const first = mountNexpathDock();
+    first.destroy();
+    const second = mountNexpathDock();
+    second.show();
+
+    window.dispatchEvent(new Event('pagehide'));
+
+    expect(getNexpathDock()).toBeNull();
+    expect(hosts()).toHaveLength(0);
+    expect(second.isVisible()).toBe(false);
+  });
+
+  it('mounts into a document with no view, and adds no listener there', () => {
+    // `doc.defaultView` is null for a detached document. The optional call is what
+    // keeps that from throwing during mount.
+    const detached = document.implementation.createHTMLDocument('detached');
+
+    const dock = mountNexpathDock({ doc: detached });
+
+    expect(detached.getElementById(NEXPATH_DOCK_HOST_ID)).not.toBeNull();
+    expect(() => dock.destroy()).not.toThrow();
+  });
+
+  it('pagehide after destroy is inert', () => {
+    const dock = mountNexpathDock();
+    dock.destroy();
+
+    expect(() => window.dispatchEvent(new Event('pagehide'))).not.toThrow();
+    expect(getNexpathDock()).toBeNull();
+  });
+
+  it('a destroyed dock does not re-attach itself on a stale show()', () => {
+    const dock = mountNexpathDock();
+    dock.destroy();
+
+    dock.show();
+
+    expect(hosts()).toHaveLength(0);
+    expect(dock.isVisible()).toBe(false);
+  });
+});
+
 describe('NexpathDockController — destroy', () => {
   it('removes the host from the page', () => {
     const dock = mountNexpathDock();
