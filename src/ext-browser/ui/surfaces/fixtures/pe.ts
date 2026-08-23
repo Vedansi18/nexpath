@@ -60,7 +60,7 @@ export const PE_FIXTURE: SurfaceModel = {
       hints: { always: [DETAILS_HINT], whenFocused: [EDIT_KEYS_HINT] },
       blankBefore: true,
     },
-    { kind: 'action', label: 'Use original prompt' },
+    { kind: 'action', label: 'Use original prompt', act: 'use-original' },
   ],
   footer: PE_FOOTER,
 };

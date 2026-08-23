@@ -278,6 +278,11 @@ export const CHROME_STYLES = `
   .np-scroll::-webkit-scrollbar-track { background: transparent; }
 
   .np-footer { flex: 0 0 auto; }
+
+  /* The controller's focusable wrapper (D6). It holds the element-scoped
+     keydown listener, so it must be focusable; the outline is suppressed
+     because row focus is already drawn by the bullets and the label weight. */
+  .np-surface-root { height: 100%; outline: none; }
 `;
 
 /**

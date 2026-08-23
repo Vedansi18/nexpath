@@ -71,7 +71,7 @@ export const MPS_FIRST_FIXTURE: SurfaceModel = {
       hints: { always: [DETAILS_HINT], whenFocused: [EDIT_KEYS_HINT] },
       blankBefore: true,
     },
-    { kind: 'action', label: MPS_CANCEL_LABEL, tone: 'cancel', blankBefore: true },
+    { kind: 'action', label: MPS_CANCEL_LABEL, act: 'cancel-sequence', tone: 'cancel', blankBefore: true },
     // The plan is shown, never offered — dim and unreachable, so a user can see
     // the shape of the work without being able to act on a step that is not next.
     { kind: 'note', text: 'Sequence plan', indent: 2, blankBefore: true },
@@ -113,10 +113,11 @@ export const MPS_CONTINUATION_FIXTURE: SurfaceModel = {
     {
       kind: 'action',
       label: MPS_INTERRUPTION_LABEL,
+      act: 'interruption',
       helper: MPS_INTERRUPTION_HELPER,
       blankBefore: true,
     },
-    { kind: 'action', label: MPS_CANCEL_LABEL, tone: 'cancel', blankBefore: true },
+    { kind: 'action', label: MPS_CANCEL_LABEL, act: 'cancel-sequence', tone: 'cancel', blankBefore: true },
   ],
   footer: MPS_CONTINUATION_FOOTER,
 };

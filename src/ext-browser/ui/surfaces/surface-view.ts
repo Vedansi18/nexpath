@@ -147,6 +147,12 @@ export function renderSurface(doc: Document, model: SurfaceModel, state: Surface
 
   // ── footer ───────────────────────────────────────────────────────────────
   footer.appendChild(buildBlankRow(doc));
+  // The CLI's publicNotice slot: blank, notice, blank, footer
+  // (`cli-submit-popup.ts:829-833`). Plain tone, exactly as the CLI prints it.
+  if (state.notice) {
+    footer.appendChild(buildTextRow(doc, state.notice));
+    footer.appendChild(buildBlankRow(doc));
+  }
   footer.appendChild(buildFooterRow(doc, model.footer));
 
   return frame;

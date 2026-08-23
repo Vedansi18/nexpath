@@ -58,6 +58,13 @@ export type SurfaceRow =
   | {
       kind: 'action';
       label: string;
+      /**
+       * What activating this row means (D6). Encoded in the model rather than
+       * matched on labels in the controller, so a reworded label cannot silently
+       * unhook a behaviour. Rows without one fall through to the controller's
+       * generic activate event — or to its pluggable transitions hook.
+       */
+      act?: 'use-original' | 'cancel-sequence' | 'interruption';
       /** MPS's Cancel row carries the CLI's paleYellow. */
       tone?: 'plain' | 'cancel';
       /** A line under the label, like MPS-2's interruption helper. */
@@ -114,4 +121,9 @@ export interface SurfaceModel {
 /** Which row currently has focus. Not part of the model — it changes, the model does not. */
 export interface SurfaceState {
   focusIndex: number;
+  /**
+   * A transient line above the footer — the CLI's publicNotice slot. State, not
+   * model: it describes what just happened, not what the surface is.
+   */
+  notice?: string;
 }
