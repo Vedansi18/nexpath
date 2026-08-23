@@ -185,6 +185,28 @@ export function runSweep(): { pass: number; fail: number; failures: CellResult[]
       if (cell.headerVisible && cell.rowVisible && cell.footerVisible && cell.noHOverflow && cell.notGrown && cell.noInjection) pass += 1;
       else failures.push(cell);
     }
+    // WHERE `overflow-wrap: anywhere` ACTUALLY MATTERS. A long token in the body
+    // proves nothing about it: the body is a textarea, which soft-wraps by its
+    // own rules whatever the CSS says — verified by turning the property off and
+    // watching the body-only cells still pass. The property governs the
+    // NON-textarea slots (labels, notes, hints, header), so the stress has to go
+    // there. Same mistake the escaping payload made, found the same way.
+    for (const [name, text] of [
+      ['2000-char token in every slot', 'x'.repeat(2000)],
+      ['5000-char paragraph in every slot', 'word '.repeat(1000).trim()],
+    ] as const) {
+      // 360x230 and 360x180 are the sizes that matter most here: a header made
+      // tall by long content, in a box short enough that it MUST shrink to leave
+      // the options band a row. That is the panel bug's exact geometry, and
+      // without these sizes turning the header's `flex: 0 1 auto` into
+      // `0 0 auto` — the C-2 core — passed the whole sweep.
+      for (const [w, h] of [[1440, 800], [600, 300], [360, 230], [360, 180]] as const) {
+        const cell = sweepCell(withPayloadEverywhere(fixture, text), label, name, w, h);
+        if (cell.headerVisible && cell.rowVisible && cell.footerVisible && cell.noHOverflow && cell.notGrown && cell.noInjection) pass += 1;
+        else failures.push(cell);
+      }
+    }
+
     // Every innerHTML slot carrying the live payload, once per surface.
     {
       const cell = sweepCell(
