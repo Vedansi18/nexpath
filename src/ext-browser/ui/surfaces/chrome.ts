@@ -215,6 +215,29 @@ export const CHROME_STYLES = `
   .np-desc { color: #9ba7a7; }                                     /* gray  */
   .np-focused .np-desc { color: #d0d0d0; }                         /* 38;5;252 */
 
+  /* ── editable fields ─────────────────────────────────────────────────────
+     A textarea arrives with the browser's own furniture: its own font, a white
+     ground, a border, padding and a resize grip. In a CLI frame every one of
+     those is wrong, so each is turned off and the frame's own type and colour
+     inherited — the field has to read as the plain text lines the CLI prints.
+     resize:none and overflow:hidden are not cosmetic: auto-grow owns the
+     height, and a scrollbar or a drag handle would fight it. */
+  .np-field {
+    font: inherit;
+    line-height: inherit;
+    color: inherit;
+    background: transparent;
+    border: none;
+    outline: none;
+    padding: 0;
+    margin: 0;
+    width: 100%;
+    display: block;
+    resize: none;
+    overflow: hidden;
+  }
+  .np-field:focus-visible { outline: 1px solid #2cc7dd; outline-offset: 2px; }
+
   /* Field content and hints sit at the CLI's 4-column indent. Variant B's
      description rows use three, aligning under its bullet column instead. */
   .np-indent { padding-left: 4ch; }

@@ -119,6 +119,42 @@ describe('mountNexpathDock — dock geometry (D1.2)', () => {
     pageCss.remove();
   });
 
+  it('pins visibility and interaction, so a page cannot blank or deaden the dock', () => {
+    // Same exposure as `display`, reached by other properties. Each of these was
+    // observed applying to the host from a page stylesheet, and each would leave
+    // the controller reporting a visible, live dock that the user cannot see or
+    // click.
+    const pageCss = document.createElement('style');
+    pageCss.textContent =
+      `#${NEXPATH_DOCK_HOST_ID} { visibility: hidden; opacity: 0.05; pointer-events: none; }`;
+    document.head.appendChild(pageCss);
+
+    const dock = mountNexpathDock();
+    dock.show();
+    const computed = getComputedStyle(hosts()[0]!);
+
+    expect(computed.visibility).toBe('visible');
+    expect(computed.opacity).toBe('1');
+    expect(computed.pointerEvents).toBe('auto');
+    expect(dock.isVisible()).toBe(true);
+
+    pageCss.remove();
+  });
+
+  it('pins filter and clip-path, which can hide a box just as completely', () => {
+    const pageCss = document.createElement('style');
+    pageCss.textContent = `#${NEXPATH_DOCK_HOST_ID} { filter: opacity(0); clip-path: inset(100%); }`;
+    document.head.appendChild(pageCss);
+
+    mountNexpathDock();
+    const computed = getComputedStyle(hosts()[0]!);
+
+    expect(computed.filter).toBe('none');
+    expect(computed.clipPath).toBe('none');
+
+    pageCss.remove();
+  });
+
   it('pins transform, so a page cannot relocate or scale the dock', () => {
     const pageCss = document.createElement('style');
     pageCss.textContent = `#${NEXPATH_DOCK_HOST_ID} { transform: scale(0.2) translateX(-500px); }`;

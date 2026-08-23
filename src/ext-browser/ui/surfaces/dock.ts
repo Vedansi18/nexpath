@@ -124,9 +124,14 @@ export const DOCK_Z_INDEX = 2147483647;
  * anything, so it is deliberately not declared. `transform` is here because a page
  * transform relocates or scales the whole box.
  *
- * Still reachable by the page and NOT addressed here: `visibility`, `opacity`,
- * `pointer-events`, `filter`, `clip-path`. Those are visibility and interaction
- * rather than geometry — recorded for D2 and D6.
+ * THE SAME ARGUMENT REACHES PAST GEOMETRY. `visibility`, `opacity`,
+ * `pointer-events`, `filter` and `clip-path` were left to a later phase on the
+ * grounds that they are not geometry. That was the wrong line to draw: a page
+ * rule setting `visibility: hidden` defeats show() exactly as `display: none`
+ * did, `pointer-events: none` makes the dock unclickable, and `opacity: 0` makes
+ * it invisible — all while the controller still reports itself visible. Verified
+ * against a page stylesheet: every one of them applied. They are pinned here for
+ * the same reason as the box model, and for the same cost.
  *
  * The rules themselves are split in two: what both the expanded dock and the
  * collapsed tab share (below), and what only the expanded state adds.
@@ -146,6 +151,11 @@ const DOCK_HOST_BASE_CSS = [
   'padding:0',
   'border:0',
   'transform:none',
+  'visibility:visible',
+  'opacity:1',
+  'pointer-events:auto',
+  'filter:none',
+  'clip-path:none',
 ].join(';') + ';';
 
 /** Expanded geometry: the 60% x 90% docked box described above. */
