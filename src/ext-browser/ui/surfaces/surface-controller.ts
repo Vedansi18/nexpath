@@ -393,7 +393,15 @@ export function createSurfaceController(
   function onKeyDown(e: KeyboardEvent): void {
     if (destroyed) return;
     const inField = e.target instanceof HTMLTextAreaElement;
-    const chord = e.ctrlKey || e.metaKey;   // the hint names Cmd on macOS
+    // The chord is EXACTLY Ctrl/Cmd — the hint names Cmd on macOS. Shift and Alt
+    // disqualify it: Ctrl+Shift+J is the browser's own DevTools console,
+    // Ctrl+Shift+arrows extend a selection by line, and Ctrl+Alt is AltGr on
+    // many layouts. A terminal never sees those combinations, so the CLI grammar
+    // has no claim on them — they stay native.
+    const chord = (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey;
+    // Row navigation is PLAIN arrows only: Shift+arrow inside a field is the
+    // browser's select-by-line, which stealing the key would silently break.
+    const plain = !e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey;
 
     // Ctrl/Cmd+↑/↓ — caret line movement inside a field. Physical codes, the
     // D1.3 precedent: e.key is layout- and modifier-dependent.
@@ -414,7 +422,7 @@ export function createSurfaceController(
       return;
     }
 
-    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+    if (plain && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
       const last = interactiveRows(model).length - 1;
       const next = e.key === 'ArrowUp'
         ? Math.max(0, focusIndex - 1)

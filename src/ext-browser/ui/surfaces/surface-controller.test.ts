@@ -415,6 +415,43 @@ describe('Ctrl/Cmd+↑/↓ — caret line movement, hand-built', () => {
   });
 });
 
+describe('browser-only combinations stay native — a terminal never sees them', () => {
+  it('Ctrl+Shift+J is the DevTools console, not our newline', () => {
+    mount();
+    const field = bodyField();
+    field.value = 'x';
+    field.setSelectionRange(1, 1);
+    let leaked = 0;
+    const listener = (): void => { leaked += 1; };
+    document.addEventListener('keydown', listener);
+
+    key(field, 'J', { code: 'KeyJ', ctrlKey: true, shiftKey: true });
+
+    document.removeEventListener('keydown', listener);
+    expect(field.value).toBe('x');           // no newline inserted
+    expect(leaked).toBe(1);                  // and not consumed either
+  });
+
+  it('Shift+arrow inside a field is select-by-line — row focus must not move', () => {
+    const c = mount();
+
+    key(bodyField(), 'ArrowDown', { code: 'ArrowDown', shiftKey: true });
+
+    expect(c.getFocusIndex()).toBe(0);
+  });
+
+  it('Ctrl+Shift+arrow extends a selection — neither caret-move nor row-move fires', () => {
+    const c = mount();
+    const field = bodyField();
+    field.setSelectionRange(0, 0);
+
+    key(field, 'ArrowDown', { code: 'ArrowDown', ctrlKey: true, shiftKey: true });
+
+    expect(c.getFocusIndex()).toBe(0);
+    expect(field.selectionStart).toBe(0);    // our caret-mover did not run
+  });
+});
+
 // ── the three panel fixes ────────────────────────────────────────────────────
 
 describe('the three panel fixes (A4.6)', () => {
