@@ -238,10 +238,14 @@ export const CHROME_STYLES = `
   }
   .np-field:focus-visible { outline: 1px solid #2cc7dd; outline-offset: 2px; }
 
-  /* Field content and hints sit at the CLI's 4-column indent. Variant B's
-     description rows use three, aligning under its bullet column instead. */
-  .np-indent { padding-left: 4ch; }
-  .np-indent-tight { padding-left: 3ch; }
+  /* Indent columns, named for the column they land on. The CLI uses four of
+     them and does not use one number everywhere: field content sits at 4 in PE
+     and MPS but 6 in PEF, hints at 4 in PE and 6 elsewhere, non-interactive
+     notes at 2, and variant B's descriptions at 3. */
+  .np-ind-2 { padding-left: 2ch; }
+  .np-ind-3 { padding-left: 3ch; }
+  .np-ind-4 { padding-left: 4ch; }
+  .np-ind-6 { padding-left: 6ch; }
 
   /* ── variant B ───────────────────────────────────────────────────────────
      The wordmark header carries no rail — the CLI suppresses it there so the
@@ -374,12 +378,20 @@ export function buildTextRow(doc: Document, text: string, tone: FrameTone = 'pla
 }
 
 /** `● label` when focused, `○ label` when not. */
-export function buildBulletRow(doc: Document, label: string, focused: boolean): HTMLElement {
+export function buildBulletRow(
+  doc: Document,
+  label: string,
+  focused: boolean,
+  tone?: 'plain' | 'cancel',
+): HTMLElement {
   const el = doc.createElement('div');
   el.className = focused ? 'np-row np-focused' : 'np-row';
+  // MPS's Cancel row is the one label the CLI tints — paleYellow, so destroying
+  // the rest of a sequence does not look like every other option.
+  const toneClass = tone === 'cancel' ? ' np-cancel' : '';
   el.innerHTML =
     `<div class="np-bullet">${focused ? '●' : '○'}</div>` +
-    `<div class="np-content np-label">${escapeHtml(label)}</div>`;
+    `<div class="np-content np-label${toneClass}">${escapeHtml(label)}</div>`;
   return el;
 }
 
@@ -388,14 +400,34 @@ export function buildBulletRow(doc: Document, label: string, focused: boolean): 
  * `focused` selects the brighter of the two description tiers.
  */
 export function buildIndentedRow(doc: Document, text: string, focused = false): HTMLElement {
-  const el = row(doc, 'np-content np-indent np-desc', escapeHtml(text));
+  const el = row(doc, 'np-content np-ind-4 np-desc', escapeHtml(text));
   if (focused) el.classList.add('np-focused');
   return el;
 }
 
-/** A shortcut hint, indented with the content it describes. */
-export function buildHintRow(doc: Document, text: string): HTMLElement {
-  return row(doc, 'np-content np-indent np-hint', escapeHtml(text));
+/**
+ * A shortcut hint, indented with the content it describes.
+ *
+ * The column is a parameter because the CLI does not agree with itself: PE puts
+ * hints at four, MPS and PEF at six.
+ */
+export function buildHintRow(doc: Document, text: string, indent: 4 | 6 = 4): HTMLElement {
+  return row(doc, `np-content np-ind-${indent} np-hint`, escapeHtml(text));
+}
+
+/**
+ * A line the user cannot act on — MPS-1's `Sequence plan` block, MPS-2's
+ * `Your original:` and the prompt beneath it. No bullet and no focus: the CLI
+ * prints these as indented text and never counts them among its rows.
+ */
+export function buildNoteRow(
+  doc: Document,
+  text: string,
+  indent: 2 | 4 = 2,
+  tone: 'dim' | 'plain' = 'dim',
+): HTMLElement {
+  const toneClass = tone === 'dim' ? ' np-dim' : '';
+  return row(doc, `np-content np-ind-${indent}${toneClass}`, escapeHtml(text));
 }
 
 /** The footer line — the only place a user learns Esc exists, so it never fades. */
@@ -463,7 +495,7 @@ export function buildPinchRow(doc: Document, text: string, subsequent = false): 
  * column rather than variant A's four.
  */
 export function buildTightIndentRow(doc: Document, text: string, focused = false): HTMLElement {
-  const el = row(doc, 'np-content np-indent-tight np-desc', escapeHtml(text));
+  const el = row(doc, 'np-content np-ind-3 np-desc', escapeHtml(text));
   if (focused) el.classList.add('np-focused');
   return el;
 }

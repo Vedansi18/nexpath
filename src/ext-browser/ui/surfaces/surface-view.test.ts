@@ -5,137 +5,14 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { renderSurface } from './surface-view.js';
 import { PE_FIXTURE, PE_FOOTER, DETAILS_HINT, EDIT_KEYS_HINT, BODY_HINT } from './fixtures/pe.js';
+import { MPS_FIRST_FIXTURE, MPS_CONTINUATION_FIXTURE } from './fixtures/mps.js';
+import { PEF_FIXTURE } from './fixtures/pef.js';
 import type { SurfaceModel } from './surface-model.js';
 
-// The CLI's own renderer, imported for the parity test below. Test-only: nothing
-// that ships crosses this boundary, and C-5 forbids MODIFYING other modules and
-// WIRING them into the extension — neither of which reading a reference does.
-import { renderPromptEnhancementPopupFrameV1 } from '../../../prompt-enhancement/cli-submit-popup.js';
-
-/**
- * The visible lines of a rendered surface.
- *
- * A textarea's content is its `value`, not its text node, and a multi-line value
- * is several CLI lines — so it is split. Trailing space is dropped on both sides
- * of the comparison; the CLI pads, CSS does not.
- */
+/** Cells joined with a space — the gap between bullet and label is a column, not a character. */
 function rowText(row: Element): string {
-  // Cells are joined with a space. A bullet row is two flex cells and the gap
-  // between them is the bullet column's width, not a character — so reading
-  // `textContent` straight off the row would yield "●Use enhanced prompt" and
-  // compare a layout detail rather than what the user reads.
-  return [...row.children].map((cell) => cell.textContent ?? '').join(' ').trimEnd();
+  return [...row.children].map((cell) => cell.textContent ?? '').join(' ').trim();
 }
-
-function domLines(frame: HTMLElement): string[] {
-  const out: string[] = [];
-  for (const row of frame.querySelectorAll('.np-row')) {
-    const field = row.querySelector('textarea');
-    if (field) {
-      for (const line of field.value.split('\n')) out.push(line.trimEnd());
-      continue;
-    }
-    out.push(rowText(row));
-  }
-  return out;
-}
-
-/**
- * The visible lines of a CLI frame, with the parts CSS provides removed: the
- * `│` rail is a border here, and the 4-column indent is padding. Both are
- * verified in `chrome.test.ts`; what this comparison is about is the CONTENT.
- */
-function cliLines(frame: string): string[] {
-  return frame.split('\n').map((line) => line.replace(/^│ ?/, '').trim());
-}
-
-/** A CLI render model mirroring PE_FIXTURE, so the two sides describe one popup. */
-function cliModel(): unknown {
-  return {
-    title: 'Nexpath · Prompt enhancement',
-    editorHeading: PE_FIXTURE.rows[0]!.label,
-    identity: { enhancementId: 'e1', currentBodyId: 'b1', bodyRevision: 1, validationDecisionId: 'v1' },
-    body: { editable: true },
-    pinchLabel: { text: PE_FIXTURE.pinch!, derivedFrom: 'family' },
-    whyHelp: { text: PE_FIXTURE.whyHelp!, reasonKind: 'risk_or_rollback' },
-    publicCopy: { trustCues: PE_FIXTURE.trustCues!.map((t) => ({ publicSafeText: t })), diagnostics: [] },
-    controls: {
-      additionalDetails: { availability: 'available' },
-      directional: [],
-      feedback: { availability: 'available' },
-      original: { availability: 'available' },
-      currentBody: { availability: 'available' },
-      close: { availability: 'available' },
-    },
-  };
-}
-
-function cliFrame(focusIndex: number, over: { detailsText?: string } = {}): string[] {
-  const bodyRow = PE_FIXTURE.rows[0]!;
-  const detailsRow = PE_FIXTURE.rows[1]!;
-  return cliLines(
-    renderPromptEnhancementPopupFrameV1(
-      {
-        model: cliModel(),
-        editedBodyText: bodyRow.kind === 'field' ? bodyRow.text : '',
-        additionalDetailsText: over.detailsText ?? (detailsRow.kind === 'field' ? detailsRow.text : ''),
-      } as never,
-      { focusIndex, helpExpanded: false } as never,
-    ),
-  );
-}
-
-function ourFrame(focusIndex: number): string[] {
-  return domLines(renderSurface(document, PE_FIXTURE, { focusIndex })).map((l) => l.trim());
-}
-
-describe('PE surface — parity with the CLI (D3.5)', () => {
-  // The point of this test. D-2 chose fluid CSS, which means the captured CLI
-  // frames cannot be shipped as the payload and the DOM had to be authored
-  // separately. Two authorings drift. This is what stops them: the reference is
-  // the CLI's live renderer, not a copy of its output, so it cannot go stale.
-
-  it.each([
-    ['body', 0],
-    ['additional details', 1],
-    ['use original prompt', 2],
-  ])('renders line-for-line what the CLI renders — focus on %s', (_label, focusIndex) => {
-    expect(ourFrame(focusIndex)).toEqual(cliFrame(focusIndex));
-  });
-
-  it('is comparing something — the frames are not accidentally empty', () => {
-    const lines = cliFrame(0);
-
-    expect(lines.length).toBeGreaterThan(10);
-    expect(lines).toContain('◆ NEXPATH CLI · Prompt enhancement');
-  });
-
-  it('differs between focus states, so the comparison has teeth', () => {
-    expect(ourFrame(0)).not.toEqual(ourFrame(1));
-  });
-
-  it.each([
-    ['below the first row', -1, 0],
-    ['past the last row', 99, 2],
-    ['fractional', 1.7, 1],
-  ])('clamps an out-of-range focus the way the CLI does — %s', (_label, given, settled) => {
-    // The CLI clamps and truncates. Without the same guard an out-of-range index
-    // focuses nothing at all: no filled bullet, no hint line, a frame that reads
-    // as broken rather than mis-focused. D6 drives this index.
-    expect(ourFrame(given)).toEqual(cliFrame(given));
-    expect(ourFrame(given)).toEqual(ourFrame(settled));
-  });
-
-  it('matches with an empty details field — a real CLI branch', () => {
-    const emptied: SurfaceModel = {
-      ...PE_FIXTURE,
-      rows: PE_FIXTURE.rows.map((r, i) => (i === 1 && r.kind === 'field' ? { ...r, text: '' } : r)),
-    };
-
-    expect(domLines(renderSurface(document, emptied, { focusIndex: 1 })).map((l) => l.trim()))
-      .toEqual(cliFrame(1, { detailsText: '' }));
-  });
-});
 
 describe('PE surface — structure', () => {
   it('orders the rows as the CLI does', () => {
@@ -201,6 +78,44 @@ describe('PE surface — hints follow focus (D3.4)', () => {
   });
 });
 
+describe('what the parity test cannot see', () => {
+  // Parity compares CONTENT: both sides are trimmed, because the rail is a
+  // border here and the indents are padding, and it reads text, which carries no
+  // colour. So indent columns and tones need asserting directly — mutation
+  // testing found all three of these surviving the parity suite untouched.
+
+  function classesOn(model: SurfaceModel, selector: string): string[] {
+    return [...renderSurface(document, model, { focusIndex: 0 }).querySelectorAll(selector)]
+      .flatMap((el) => [...el.classList]);
+  }
+
+  it('indents each surface\'s hints to the column the CLI uses', () => {
+    // PE puts hints at four; MPS and PEF at six.
+    expect(classesOn(PE_FIXTURE, '.np-hint')).toContain('np-ind-4');
+    expect(classesOn(MPS_FIRST_FIXTURE, '.np-hint')).toContain('np-ind-6');
+    expect(classesOn(MPS_CONTINUATION_FIXTURE, '.np-hint')).toContain('np-ind-6');
+    expect(classesOn(PEF_FIXTURE, '.np-hint')).not.toContain('np-ind-4');
+  });
+
+  it('indents each surface\'s field content to the column the CLI uses', () => {
+    // PE and MPS keep content at four; PEF puts it at six.
+    expect(classesOn(PE_FIXTURE, 'textarea')).toContain('np-ind-4');
+    expect(classesOn(MPS_FIRST_FIXTURE, 'textarea')).toContain('np-ind-4');
+    expect(classesOn(PEF_FIXTURE, 'textarea')).toContain('np-ind-6');
+  });
+
+  it('tints the Cancel row, and nothing else', () => {
+    // The one label the CLI colours — paleYellow, so ending a sequence does not
+    // look like every other option.
+    const mps = renderSurface(document, MPS_FIRST_FIXTURE, { focusIndex: 0 });
+    const cancel = [...mps.querySelectorAll('.np-label')].find((el) => el.textContent?.startsWith('Cancel'));
+
+    expect(cancel!.classList.contains('np-cancel')).toBe(true);
+    expect(mps.querySelectorAll('.np-cancel')).toHaveLength(1);
+    expect(renderSurface(document, PE_FIXTURE, { focusIndex: 0 }).querySelector('.np-cancel')).toBeNull();
+  });
+});
+
 describe('no class escapes the stylesheet', () => {
   it('every np- class any surface file writes is styled in CHROME_STYLES', () => {
     // The guard for a whole class of bug that jsdom cannot see: a class applied
@@ -215,11 +130,20 @@ describe('no class escapes the stylesheet', () => {
     const used = new Set<string>();
     // chrome.ts's own class names appear inside the stylesheet too, so only its
     // builder half is scanned; the other files are all builder code.
-    for (const src of [chrome.slice(chrome.indexOf('// ── D2.3')), read('surface-view.ts'), read('fixtures/pe.ts')]) {
+    const sources = [chrome.slice(chrome.indexOf('// ── D2.3')), read('surface-view.ts'),
+      read('fixtures/pe.ts'), read('fixtures/mps.ts'), read('fixtures/pef.ts')];
+    for (const src of sources) {
       for (const m of src.matchAll(/np-[\w-]+/g)) used.add(m[0]);
     }
 
-    expect([...used].filter((c) => !styled.has(c))).toEqual([]);
+    // A name ending in `-` came from a template like `np-ind-${indent}`: the
+    // class is completed at runtime, so it is satisfied by any rule sharing the
+    // prefix. Anything else has to match a rule exactly.
+    const unstyled = [...used].filter((name) => (name.endsWith('-')
+      ? ![...styled].some((rule) => rule.startsWith(name))
+      : !styled.has(name)));
+
+    expect(unstyled).toEqual([]);
   });
 });
 

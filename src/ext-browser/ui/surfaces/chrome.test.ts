@@ -312,14 +312,14 @@ describe('frame primitives (D2.3)', () => {
   });
 
   it('indented rows sit at the CLI\'s 4-column indent and take the focused tier', () => {
-    expect(ruleBody('.np-indent')).toContain('padding-left: 4ch');
+    expect(ruleBody('.np-ind-4')).toContain('padding-left: 4ch');
     expect(buildIndentedRow(doc, 'body').classList.contains('np-focused')).toBe(false);
     expect(buildIndentedRow(doc, 'body', true).classList.contains('np-focused')).toBe(true);
   });
 
   it('hint and footer rows carry their own tones', () => {
     expect(buildHintRow(doc, 'Ctrl+J new line').querySelector('.np-hint')).not.toBeNull();
-    expect(buildHintRow(doc, 'x').querySelector('.np-indent')).not.toBeNull();
+    expect(buildHintRow(doc, 'x').querySelector('.np-ind-4')).not.toBeNull();
     expect(buildFooterRow(doc, '↑↓ move · Esc cancel').querySelector('.np-dim')).not.toBeNull();
   });
 });
@@ -373,11 +373,11 @@ describe('chrome variant B (D2.4)', () => {
   });
 
   it('indents variant B descriptions by three columns, not variant A\'s four', () => {
-    expect(ruleBody('.np-indent-tight')).toContain('padding-left: 3ch');
-    expect(ruleBody('.np-indent')).toContain('padding-left: 4ch');
+    expect(ruleBody('.np-ind-3')).toContain('padding-left: 3ch');
+    expect(ruleBody('.np-ind-4')).toContain('padding-left: 4ch');
 
     const desc = buildTightIndentRow(doc, 'body');
-    expect(desc.querySelector('.np-indent-tight')).not.toBeNull();
+    expect(desc.querySelector('.np-ind-3')).not.toBeNull();
     expect(buildTightIndentRow(doc, 'body', true).classList.contains('np-focused')).toBe(true);
   });
 

@@ -49,6 +49,8 @@ export type SurfaceRow =
       label: string;
       /** Current text of the field. Static today; a producer fills it later. */
       text: string;
+      /** Shown in place of empty text — PEF's `(type your feedback)`. */
+      placeholder?: string;
       hints?: FieldHints;
       /** The CLI opens some blocks with a blank line; the model says which. */
       blankBefore?: boolean;
@@ -56,6 +58,23 @@ export type SurfaceRow =
   | {
       kind: 'action';
       label: string;
+      /** MPS's Cancel row carries the CLI's paleYellow. */
+      tone?: 'plain' | 'cancel';
+      /** A line under the label, like MPS-2's interruption helper. */
+      helper?: string;
+      blankBefore?: boolean;
+    }
+  | {
+      /**
+       * A line the user cannot act on: MPS-1's `Sequence plan` block, MPS-2's
+       * `Your original:` and the prompt beneath it. No bullet, no focus — the
+       * CLI prints these as plain indented text and never counts them as rows.
+       */
+      kind: 'note';
+      text: string;
+      /** Column the CLI indents it to. */
+      indent?: 2 | 4;
+      tone?: 'dim' | 'plain';
       blankBefore?: boolean;
     };
 
@@ -77,6 +96,17 @@ export interface SurfaceModel {
   whyHelp?: string;
   /** Present only on a real provider failure. Rendered in the caution tone. */
   providerFailure?: string;
+  /** MPS-2's `Sequence 1 of 4`, dim, on its own line under the header block. */
+  progress?: string;
+  /**
+   * Columns a field's content and its hints indent to.
+   *
+   * Not one number, because the CLI does not use one: PE indents both by four,
+   * MPS keeps content at four but pushes hints to six, and PEF puts both at six.
+   * Per-surface rather than per-row, because within a surface they never differ.
+   */
+  fieldIndent?: 4 | 6;
+  hintIndent?: 4 | 6;
   rows: readonly SurfaceRow[];
   footer: string;
 }
