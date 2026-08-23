@@ -142,19 +142,34 @@ describe('no class escapes the stylesheet', () => {
     // font, a white ground, a border and a resize grip inside a CLI frame.
     const read = (rel: string): string => readFileSync(resolve(process.cwd(), `src/ext-browser/ui/surfaces/${rel}`), 'utf8');
     const chrome = read('chrome.ts');
-    const styles = chrome.slice(chrome.indexOf('export const CHROME_STYLES = `'));
-    const styled = new Set([...styles.slice(0, styles.indexOf('\n`;')).matchAll(/\.(np-[\w-]+)/g)].map((m) => m[1]!));
+    // Two stylesheets style this layer: the frame's CHROME_STYLES and the
+    // dock's own DOCK_CHROME_STYLES. A class is satisfied by a rule in either.
+    const styleBlock = (src: string, marker: string): string => {
+      const from = src.indexOf(marker);
+      return src.slice(from, src.indexOf('\n`;', from));
+    };
+    const sheets = styleBlock(chrome, 'export const CHROME_STYLES = `')
+      + styleBlock(read('dock.ts'), 'const DOCK_CHROME_STYLES = `');
+    const styled = new Set([...sheets.matchAll(/\.(np-[\w-]+)/g)].map((m) => m[1]!));
 
     const used = new Set<string>();
-    // chrome.ts's own class names appear inside the stylesheet too, so only its
-    // builder half is scanned; the other files are all builder code.
-    // The fixtures are globbed, not listed: a fixture added later (D5's
-    // refinement content, say) must not silently escape this guard.
-    const fixtureDir = resolve(process.cwd(), 'src/ext-browser/ui/surfaces/fixtures');
-    const fixtures = readdirSync(fixtureDir).filter((f) => f.endsWith('.ts')).map((f) => read(`fixtures/${f}`));
-    const sources = [chrome.slice(chrome.indexOf('// ── D2.3')), read('surface-view.ts'), ...fixtures];
+    // Comment lines are dropped before scanning: prose like dock.ts's mention of
+    // "the panel's .np-hidden" names classes this layer never applies.
+    const withoutComments = (src: string): string =>
+      src.split('\n').filter((line) => !line.trimStart().startsWith('//') && !line.trimStart().startsWith('*')).join('\n');
+    // EVERY non-test module in the layer is globbed, not listed. A hard-coded
+    // list already went stale twice — first missing the fixtures, then missing
+    // refinement.ts — and a file that escapes this guard can apply a class no
+    // rule styles, which jsdom cannot see. chrome.ts contributes only its
+    // builder half, since its class names also appear inside the stylesheet.
+    const surfacesDir = resolve(process.cwd(), 'src/ext-browser/ui/surfaces');
+    const moduleFiles = [
+      ...readdirSync(surfacesDir).filter((f) => f.endsWith('.ts') && !f.endsWith('.test.ts') && f !== 'chrome.ts'),
+      ...readdirSync(resolve(surfacesDir, 'fixtures')).filter((f) => f.endsWith('.ts')).map((f) => `fixtures/${f}`),
+    ];
+    const sources = [chrome.slice(chrome.indexOf('// ── D2.3')), ...moduleFiles.map((f) => read(f))];
     for (const src of sources) {
-      for (const m of src.matchAll(/np-[\w-]+/g)) used.add(m[0]);
+      for (const m of withoutComments(src).matchAll(/np-[\w-]+/g)) used.add(m[0]);
     }
 
     // A name ending in `-` came from a template like `np-ind-${indent}`: the
