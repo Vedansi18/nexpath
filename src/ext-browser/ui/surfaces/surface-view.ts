@@ -131,7 +131,10 @@ export function renderSurface(doc: Document, model: SurfaceModel, state: Surface
     scroll.appendChild(buildBulletRow(doc, row.label, focused, row.kind === 'action' ? row.tone : undefined));
 
     if (row.kind === 'action') {
-      if (row.helper) scroll.appendChild(buildNoteRow(doc, row.helper, 4, 'plain'));
+      // Dim, not plain — the CLI's own comment reads "label, then dim helper"
+      // (`cli-mps-popup.ts:398`), and tone is exactly what the parity test
+      // cannot see, so this is asserted directly below.
+      if (row.helper) scroll.appendChild(buildNoteRow(doc, row.helper, 4, 'dim'));
       return;
     }
 

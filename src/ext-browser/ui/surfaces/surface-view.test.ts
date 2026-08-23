@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { renderSurface } from './surface-view.js';
 import { PE_FIXTURE, PE_FOOTER, DETAILS_HINT, EDIT_KEYS_HINT, BODY_HINT } from './fixtures/pe.js';
@@ -104,6 +104,24 @@ describe('what the parity test cannot see', () => {
     expect(classesOn(PEF_FIXTURE, 'textarea')).toContain('np-ind-6');
   });
 
+  it('renders the interruption helper dim, as the CLI does', () => {
+    // "label, then dim helper" — the CLI's own comment (`cli-mps-popup.ts:398`).
+    // Tone is invisible to parity; this drifted to plain and nothing failed.
+    const frame = renderSurface(document, MPS_CONTINUATION_FIXTURE, { focusIndex: 0 });
+    const helper = [...frame.querySelectorAll('.np-content')]
+      .find((el) => el.textContent?.startsWith('Write directly in the coding agent'));
+
+    expect(helper, 'the helper line must render').toBeDefined();
+    expect(helper!.classList.contains('np-dim')).toBe(true);
+  });
+
+  it('pins one placeholder colour for both browsers', () => {
+    // Chrome and Firefox default ::placeholder differently; C-3 wants one look.
+    const src = readFileSync(resolve(process.cwd(), 'src/ext-browser/ui/surfaces/chrome.ts'), 'utf8');
+
+    expect(src).toMatch(/\.np-field::placeholder \{ color: #9ba7a7; opacity: 1; \}/);
+  });
+
   it('tints the Cancel row, and nothing else', () => {
     // The one label the CLI colours — paleYellow, so ending a sequence does not
     // look like every other option.
@@ -130,8 +148,11 @@ describe('no class escapes the stylesheet', () => {
     const used = new Set<string>();
     // chrome.ts's own class names appear inside the stylesheet too, so only its
     // builder half is scanned; the other files are all builder code.
-    const sources = [chrome.slice(chrome.indexOf('// ── D2.3')), read('surface-view.ts'),
-      read('fixtures/pe.ts'), read('fixtures/mps.ts'), read('fixtures/pef.ts')];
+    // The fixtures are globbed, not listed: a fixture added later (D5's
+    // refinement content, say) must not silently escape this guard.
+    const fixtureDir = resolve(process.cwd(), 'src/ext-browser/ui/surfaces/fixtures');
+    const fixtures = readdirSync(fixtureDir).filter((f) => f.endsWith('.ts')).map((f) => read(`fixtures/${f}`));
+    const sources = [chrome.slice(chrome.indexOf('// ── D2.3')), read('surface-view.ts'), ...fixtures];
     for (const src of sources) {
       for (const m of src.matchAll(/np-[\w-]+/g)) used.add(m[0]);
     }

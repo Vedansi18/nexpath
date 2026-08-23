@@ -237,6 +237,9 @@ export const CHROME_STYLES = `
     overflow: hidden;
   }
   .np-field:focus-visible { outline: 1px solid #2cc7dd; outline-offset: 2px; }
+  /* One placeholder colour on both browsers — the defaults differ, and C-3
+     wants one look. The gray tier, matching unfocused supporting text. */
+  .np-field::placeholder { color: #9ba7a7; opacity: 1; }
 
   /* Indent columns, named for the column they land on. The CLI uses four of
      them and does not use one number everywhere: field content sits at 4 in PE
