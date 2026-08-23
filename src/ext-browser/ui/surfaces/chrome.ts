@@ -14,6 +14,16 @@
 // style nodes in one shadow root is fine, and keeping them apart means the
 // window chrome and the frame can change without touching each other.
 //
+// THREE HEX VALUES ARE REPEATED IN `dock.ts`, DELIBERATELY. `#310823`, `#2cc7dd`
+// and `#f5f5f4` appear in both files: the dock's buttons are drawn in the same
+// palette so they do not look bolted on. Hoisting them into a shared module is
+// the obvious tidy-up and is wrong here — `chrome.ts` already imports `dock.ts`
+// for the header clearance, so a palette both files imported would either add a
+// third module for three values or turn a one-way dependency into a cycle. The
+// "written once" rule this file follows applies across the five SURFACE modules,
+// which is where repetition would actually multiply; across this one deliberate
+// boundary, three literals are the cheaper price.
+//
 // AUTHORING STANDARD (C-1), copied from `ui/panel.js`: one template string, no
 // external stylesheet and no `<link>`, `np-` on every class, literal values with
 // zero CSS variables. This module owns the shared skeleton; each surface module
