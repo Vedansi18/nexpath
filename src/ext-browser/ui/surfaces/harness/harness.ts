@@ -21,7 +21,7 @@
 import { mountNexpathDock } from '../dock.js';
 import { installChromeStyles } from '../chrome.js';
 import { renderSurface } from '../surface-view.js';
-import { createSurfaceController, type SurfaceEvent } from '../surface-controller.js';
+import { createSurfaceController, DETAILS_MERGE_HEADING, type SurfaceEvent } from '../surface-controller.js';
 import type { SurfaceId, SurfaceModel } from '../surface-model.js';
 import { PE_FIXTURE } from '../fixtures/pe.js';
 import { MPS_FIRST_FIXTURE, MPS_CONTINUATION_FIXTURE } from '../fixtures/mps.js';
@@ -251,14 +251,231 @@ function renderSweepReport(): void {
   console.log('SWEEP ' + JSON.stringify({ pass, fail }));
 }
 
-// ── boot ─────────────────────────────────────────────────────────────────────
+// -- the functionality run (?e2e=1) ------------------------------------------
+//
+// The controller's behaviour has only ever been driven in jsdom, which has no
+// layout, no real focus model and a synthetic event loop. These scenarios run
+// the SAME assertions against a real engine, where focus, selection and event
+// dispatch are the browser's own. Each writes a line into the page so a headless
+// `--dump-dom` can read the verdict without a driver library.
+
+interface Scenario { name: string; run: () => string | null }
+
+function e2eScenarios(): Scenario[] {
+  const mount = (initial: SurfaceId) => {
+    const host = document.createElement('div');
+    document.getElementById('sweep-stage')!.appendChild(host);
+    const events: SurfaceEvent[] = [];
+    const controller = createSurfaceController(host, {
+      registry: FIXTURES, initial, onEvent: (e) => events.push(e),
+    });
+    return { host, controller, events };
+  };
+  const press = (el: Element, key: string, init: KeyboardEventInit = {}): void => {
+    el.dispatchEvent(new KeyboardEvent('keydown', {
+      key, code: init.code ?? key, bubbles: true, cancelable: true, ...init,
+    }));
+  };
+  const eq = (a: unknown, b: unknown, what: string): string | null =>
+    JSON.stringify(a) === JSON.stringify(b) ? null : what + ': got ' + JSON.stringify(a) + ', want ' + JSON.stringify(b);
+
+  return [
+    {
+      name: 'the body field really holds the keyboard on mount',
+      run() {
+        const { host, controller } = mount('prompt_enhancement');
+        const ok = document.activeElement === host.querySelector('textarea');
+        controller.destroy();
+        return ok ? null : 'the body textarea did not take real focus';
+      },
+    },
+    {
+      name: 'Enter sends the text the user actually typed',
+      run() {
+        const { host, controller, events } = mount('prompt_enhancement');
+        const field = host.querySelector('textarea')!;
+        field.value = 'typed in a real browser';
+        press(field, 'Enter');
+        const r = eq(events, [{ type: 'send', surface: 'prompt_enhancement', text: 'typed in a real browser' }], 'events');
+        controller.destroy();
+        return r;
+      },
+    },
+    {
+      name: 'a blank body is refused, silently (BF-1)',
+      run() {
+        const { host, controller, events } = mount('prompt_enhancement');
+        host.querySelector('textarea')!.value = '   \n  ';
+        press(host.querySelector('textarea')!, 'Enter');
+        const r = eq(events.length, 0, 'events');
+        controller.destroy();
+        return r;
+      },
+    },
+    {
+      name: 'Enter on details merges locally and returns focus to the body',
+      run() {
+        const { host, controller, events } = mount('prompt_enhancement');
+        press(controller.element, 'ArrowDown');
+        press(host.querySelectorAll('textarea')[1]!, 'Enter');
+        const body = host.querySelector('textarea')!.value;
+        const errors = [
+          body.includes(DETAILS_MERGE_HEADING) ? null : 'merge heading missing',
+          host.querySelectorAll('textarea')[1]!.value === '' ? null : 'details not cleared',
+          controller.getFocusIndex() === 0 ? null : 'focus did not return to the body',
+          events[0]?.type === 'apply-details' ? null : 'apply-details not emitted',
+        ].filter(Boolean);
+        controller.destroy();
+        return errors.length ? errors.join('; ') : null;
+      },
+    },
+    {
+      name: 'Ctrl+J inserts a newline at the real caret',
+      run() {
+        const { host, controller } = mount('prompt_enhancement');
+        const field = host.querySelector('textarea')!;
+        field.value = 'ab';
+        field.setSelectionRange(1, 1);
+        press(field, 'j', { code: 'KeyJ', ctrlKey: true });
+        const r = eq([field.value, field.selectionStart], ['a\nb', 2], 'value/caret');
+        controller.destroy();
+        return r;
+      },
+    },
+    {
+      name: 'Ctrl+Shift+J stays native - it is the DevTools chord',
+      run() {
+        const { host, controller } = mount('prompt_enhancement');
+        const field = host.querySelector('textarea')!;
+        field.value = 'x';
+        field.setSelectionRange(1, 1);
+        press(field, 'J', { code: 'KeyJ', ctrlKey: true, shiftKey: true });
+        const r = eq(field.value, 'x', 'value');
+        controller.destroy();
+        return r;
+      },
+    },
+    {
+      name: 'arrows clamp at both ends, never wrap',
+      run() {
+        const { controller } = mount('prompt_enhancement');
+        press(controller.element, 'ArrowUp');
+        const top = controller.getFocusIndex();
+        for (let i = 0; i < 6; i++) press(controller.element, 'ArrowDown');
+        const bottom = controller.getFocusIndex();
+        controller.destroy();
+        return eq([top, bottom], [0, 2], 'top/bottom focus');
+      },
+    },
+    {
+      name: 'Escape on PE cancels into the feedback surface',
+      run() {
+        const { controller, events } = mount('prompt_enhancement');
+        press(controller.element, 'Escape');
+        const r = eq([events[0]?.type, controller.getModel().id],
+          ['cancelled', 'prompt_enhancement_feedback'], 'event/surface');
+        controller.destroy();
+        return r;
+      },
+    },
+    {
+      name: 'MPS-1 Escape leaves the editor before it declines',
+      run() {
+        const { host, controller, events } = mount('mps_first');
+        const field = host.querySelector('textarea')!;
+        field.value = 'a draft';
+        press(field, 'Escape');
+        const afterFirst = events.length === 0 && document.activeElement !== field;
+        press(controller.element, 'Escape');
+        const afterSecond = events[0]?.type === 'declined';
+        const draftKept = host.querySelector('textarea')!.value === 'a draft';
+        controller.destroy();
+        return afterFirst && afterSecond && draftKept ? null
+          : 'first=' + afterFirst + ' second=' + afterSecond + ' draftKept=' + draftKept;
+      },
+    },
+    {
+      name: 'typing does not rebuild the frame (500-line smoothness)',
+      run() {
+        const { host, controller } = mount('prompt_enhancement');
+        const before = host.querySelector('.np-frame');
+        const field = host.querySelector('textarea')!;
+        field.value = Array.from({ length: 500 }, (_, i) => 'line ' + i).join('\n');
+        for (let i = 0; i < 20; i++) {
+          field.value += 'x';
+          field.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        const r = host.querySelector('.np-frame') === before ? null : 'the frame was rebuilt while typing';
+        controller.destroy();
+        return r;
+      },
+    },
+    {
+      name: 'handled keys do not reach the page (the ArrowUp hijack)',
+      run() {
+        const { controller } = mount('prompt_enhancement');
+        let leaked = 0;
+        const listener = (): void => { leaked += 1; };
+        document.addEventListener('keydown', listener);
+        press(controller.element, 'ArrowDown');
+        press(controller.element, 'Escape');
+        document.removeEventListener('keydown', listener);
+        controller.destroy();
+        return eq(leaked, 0, 'keys that escaped to the page');
+      },
+    },
+    {
+      name: 'PEF: a fixed reason submits, Other needs text',
+      run() {
+        const { host, controller, events } = mount('prompt_enhancement_feedback');
+        press(controller.element, 'Enter');
+        const fixed = events[0]?.type === 'feedback';
+        press(controller.element, 'ArrowDown');
+        press(controller.element, 'ArrowDown');
+        const field = host.querySelector('textarea')!;
+        press(field, 'Enter');
+        const refusedEmpty = events.length === 1;
+        field.value = 'my reason';
+        press(field, 'Enter');
+        const accepted = events.length === 2;
+        controller.destroy();
+        return fixed && refusedEmpty && accepted ? null
+          : 'fixed=' + fixed + ' refusedEmpty=' + refusedEmpty + ' accepted=' + accepted;
+      },
+    },
+  ];
+}
+
+function renderE2eReport(): void {
+  installChromeStyles(document.head);
+  const results = e2eScenarios().map((s) => {
+    let failure: string | null;
+    try { failure = s.run(); } catch (e) { failure = 'threw: ' + String(e); }
+    return { name: s.name, failure };
+  });
+  const failed = results.filter((r) => r.failure);
+  const banner = document.getElementById('banner')!;
+  banner.textContent = failed.length === 0
+    ? 'E2E PASS - ' + results.length + '/' + results.length + ' scenarios green'
+    : 'E2E FAIL - ' + failed.length + ' of ' + results.length + ' scenarios failed';
+  banner.className = failed.length === 0 ? 'pass' : 'fail';
+
+  const detail = document.getElementById('failures')!;
+  for (const r of results) {
+    const row = document.createElement('div');
+    row.textContent = (r.failure ? 'FAIL  ' : 'ok    ') + r.name + (r.failure ? ' -> ' + r.failure : '');
+    detail.appendChild(row);
+  }
+  console.log('E2E ' + JSON.stringify({ pass: results.length - failed.length, fail: failed.length }));
+}
+
+// -- boot --------------------------------------------------------------------
 
 // Boot only on the harness page itself. The guard is what lets a test import
 // `runSweep` without the module trying to mount into a page that is not there.
 if (document.getElementById('bar') && document.getElementById('sweep-stage')) {
-  if (new URLSearchParams(location.search).get('sweep') === '1') {
-    renderSweepReport();
-  } else {
-    mountInteractive();
-  }
+  const mode = new URLSearchParams(location.search);
+  if (mode.get('sweep') === '1') renderSweepReport();
+  else if (mode.get('e2e') === '1') renderE2eReport();
+  else mountInteractive();
 }
