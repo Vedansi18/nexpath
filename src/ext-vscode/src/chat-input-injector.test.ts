@@ -132,3 +132,27 @@ describe('CANDIDATE_COMMANDS', () => {
     expect(CANDIDATE_COMMANDS.windsurf.length).toBeGreaterThan(0);
   });
 });
+
+/**
+ * RC13 (live, 2026-08-13): `windsurf.sendTerminalToChat` is a REGISTERED
+ * command that resolves when called with our text while inserting NOTHING —
+ * a false-positive "injected directly" that armed auto-submit on an empty
+ * composer. It must never return to the candidate list; the real Windsurf
+ * insert is `injectViaCascadeAction` (see windsurf-cascade-action.ts).
+ */
+describe('⭐ RC13 — no false-positive windsurf candidates', () => {
+  it('sendTerminalToChat is not a windsurf candidate', () => {
+    expect(CANDIDATE_COMMANDS.windsurf).not.toContain('windsurf.sendTerminalToChat');
+  });
+
+  it('a host command that resolves but is absent from the list is never called', async () => {
+    const calls: string[] = [];
+    const ok = await chatInputInject('text to inject', {
+      host: 'windsurf',
+      getCommands: async () => ['windsurf.sendTerminalToChat'],
+      executeCommand: async (id) => { calls.push(id); },
+    });
+    expect(ok).toBe(false); // no usable candidate ⇒ caller falls back to the REAL injector chain
+    expect(calls).toEqual([]);
+  });
+});

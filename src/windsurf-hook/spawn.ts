@@ -27,6 +27,7 @@
  */
 import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import { resolve } from 'node:path';
+import { isWindowsBatchShim } from '../utils/batch-shim.js';
 
 export type TraceEvent = 'auto-spawned' | 'stop-spawned' | 'spawn-error';
 
@@ -49,7 +50,8 @@ export interface SpawnDeps {
  */
 function nexpathCmd(deps: SpawnDeps): { cmd: string; prefix: string[] } {
   if (deps.binaryPath) return { cmd: deps.binaryPath, prefix: [] };
-  if (process.env.NEXPATH_BIN) return { cmd: process.env.NEXPATH_BIN, prefix: [] };
+  // RC57: never spawn a .cmd/.bat shim raw (Node EINVAL) — self-reinvoke instead.
+  if (process.env.NEXPATH_BIN && !isWindowsBatchShim(process.env.NEXPATH_BIN)) return { cmd: process.env.NEXPATH_BIN, prefix: [] };
   return { cmd: process.execPath, prefix: [resolve(process.argv[1])] };
 }
 

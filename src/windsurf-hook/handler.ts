@@ -13,6 +13,7 @@
  *    "model_name":"SWE-1.6 Slow","tool_info":{"user_prompt":"what is 2 + 2."}}
  */
 import type { ChildProcess } from 'node:child_process';
+import { stripBom } from '../utils/strip-bom.js';
 import { spawnAuto, spawnStop, type SpawnDeps } from './spawn.js';
 
 export type WindsurfHookEvent = 'pre_user_prompt' | 'post_cascade_response';
@@ -35,7 +36,7 @@ export interface RunResult {
 /** Parse the hook's stdin JSON; returns null on malformed / non-object input. */
 export function parsePayload(raw: string): WindsurfHookPayload | null {
   try {
-    const v: unknown = JSON.parse(raw);
+    const v: unknown = JSON.parse(stripBom(raw)); // RC48: Windows hosts may BOM-prefix stdin
     return v && typeof v === 'object' ? (v as WindsurfHookPayload) : null;
   } catch {
     return null;

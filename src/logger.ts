@@ -63,12 +63,36 @@ function rotate(): void {
   }
 }
 
+/** Written in place of the payload when it cannot be serialized. */
+const SERIALIZATION_FAILED = '{"diagnostic":"diagnostic_serialization_failed"}';
+
+/**
+ * Serialize structured log data without ever throwing.
+ *
+ * `JSON.stringify` throws on circular references and on payloads whose getters
+ * or `toJSON` throw — an `Error` with a self-referential `cause` chain is the
+ * common case. That must not reach the caller: this module promises never to
+ * throw, and a diagnostic is not worth crashing a hook for. On failure the
+ * event line is still written with the payload replaced by a marker, so the
+ * loss is visible in the log rather than silent.
+ */
+function serializeData(data?: Record<string, unknown>): string {
+  if (!data) return '';
+  try {
+    const json = JSON.stringify(data);
+    // stringify yields undefined for values it cannot represent at all.
+    return ' ' + (json === undefined ? SERIALIZATION_FAILED : json);
+  } catch {
+    return ' ' + SERIALIZATION_FAILED;
+  }
+}
+
 export function log(level: LogLevel, event: string, data?: Record<string, unknown>): void {
   ensureInit();
   if (LEVEL_RANK[level] > LEVEL_RANK[_level]) return;
 
   const ts      = new Date().toISOString();
-  const dataStr = data ? ' ' + JSON.stringify(data) : '';
+  const dataStr = serializeData(data);
   const line    = `[${ts}] [${level.toUpperCase().padEnd(5)}] [${_command}] ${event}${dataStr}\n`;
 
   try {

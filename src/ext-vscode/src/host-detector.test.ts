@@ -116,21 +116,30 @@ describe('workspaceStorageDir', () => {
 });
 
 describe('windsurfCodeiumDir', () => {
+  // `windsurfCodeiumDir` takes no platform argument by design — production
+  // always passes the real host's home, so it uses host-native `join`. The
+  // SEGMENTS are the contract; the separator is whatever the host uses. So
+  // these normalise with `fwd` before asserting, exactly as the path
+  // assertions above already do, instead of pinning POSIX separators.
   it('joins ~/.codeium/windsurf for an explicit home', () => {
-    expect(windsurfCodeiumDir('/home/u')).toBe('/home/u/.codeium/windsurf');
+    expect(fwd(windsurfCodeiumDir('/home/u'))).toBe('/home/u/.codeium/windsurf');
   });
 
   it('matches the windsurfAdapter codeiumCascadeDir convention (cross-file invariant)', () => {
     // The CLI-side adapter at src/agents/adapters/windsurf.ts uses
     // join(home, '.codeium', 'windsurf'). Locking the same shape here so
     // a future rename on either side stays obvious.
-    expect(windsurfCodeiumDir('/Users/u')).toBe('/Users/u/.codeium/windsurf');
-    expect(windsurfCodeiumDir('C:\\Users\\u')).toBe('C:\\Users\\u/.codeium/windsurf');
+    expect(fwd(windsurfCodeiumDir('/Users/u'))).toBe('/Users/u/.codeium/windsurf');
+    // A Windows-style home: on win32 `join` yields all-backslash, on POSIX it
+    // yields a mixed form. Normalised, both are the same segment sequence —
+    // which is the invariant this test is actually about.
+    expect(fwd(windsurfCodeiumDir('C:\\Users\\u'))).toBe('C:/Users/u/.codeium/windsurf');
   });
 
   it('defaults to os.homedir() when no argument provided', () => {
     // Don't pin a literal value (runner-dependent); just assert structure.
-    const result = windsurfCodeiumDir();
-    expect(result.endsWith('/.codeium/windsurf')).toBe(true);
+    const result = fwd(windsurfCodeiumDir());
+    expect(result).not.toBeNull();
+    expect(result!.endsWith('/.codeium/windsurf')).toBe(true);
   });
 });

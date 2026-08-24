@@ -1,39 +1,63 @@
-# Nexpath Extension — Code Fast. Skip Nothing.
+# NexPath — The thing that keeps AI-generated code from becoming a mess.
 
 **Stop. Think. Prompt better.**
 
-Nexpath is an AI developer tool that works as a behaviour-guidance layer for vibe
-coders — it surfaces a quick **decision session** *between* your prompts so you stay
-aligned with specs, tests, and architecture decisions, without breaking your flow.
+Strengthen your prompts and catch skipped checks before shipping. NexPath is a quality
+engineering layer for AI-powered development: it catches your prompt **at the moment you
+submit it**, offers a sharper version with your intent preserved, and sends the version
+you choose — keeping your AI coding workflow disciplined without breaking flow.
 
 **Built for:** Cursor · Windsurf (Devin) — fully supported & end-to-end tested.
 
-![Nexpath decision session](https://raw.githubusercontent.com/hi0001234d/nexpath/main/src/ext-vscode/media/nexpath-demo.png)
+![NexPath prompt enhancement](https://raw.githubusercontent.com/hi0001234d/nexpath/main/src/ext-vscode/media/nexpath-demo.png)
 
 ---
 
-## What Is Nexpath?
+## What NexPath Does
 
-Nexpath is an **AI coding-productivity** extension for developers using AI coding
-agents like **Cursor** and **Windsurf**. Think of it as an **AI pair programmer**
-focused on *process*, not code — it watches your session and surfaces a lightweight
-advisory at key transition points in your **coding workflow**.
+While you're working with AI coding agents like **Cursor** and **Windsurf (Devin)**,
+NexPath watches your session locally and surfaces the decisions you're missing —
+incomplete specs, missing test strategy, risky shortcuts — *before* they ship.
 
-Instead of generating code, Nexpath guides it:
+Your AI pair programmer focused on **process, not code**. One suggestion. You decide.
 
-> *"You just shipped a feature. Want to confirm the feedback loop before moving on?"*
-
-One nudge. You decide. No enforcement, no interruption — just the right question at the
-right moment.
+> *Your original request stays visible. NexPath prepares an enhanced version — task
+> breakdown, acceptance criteria, verification steps, risks — from your own words.
+> Pick the enhanced version, add details, or keep your original. Only the version
+> you choose is sent.*
 
 ---
 
-## Why Nexpath?
+## Why This Matters
 
-Vibe coding with AI coding agents lets you ship features in minutes — but that speed
-often means skipped spec reviews, forgotten regression checks, and missing tests. Not
-because you're careless, but because momentum takes over. Nexpath is the
-**developer-productivity** layer that complements your AI workflow without slowing it down.
+AI coding agents are revolutionary. They're also *too fast*. Here's what happens:
+
+- You start a chat with your agent
+- Working code appears in minutes
+- You're in momentum — moving too fast to think clearly
+- Specs go incomplete
+- Tests get skipped
+- Edge cases hide silently
+- Your codebase becomes harder to maintain with every change
+
+Momentum isn't laziness. It's the default when AI agents are this good. NexPath is the
+architect in the room who asks: *"Wait — did we think this through?"*
+
+---
+
+## How It Works
+
+1. **You submit a prompt** in your agent's chat, exactly as you always do.
+2. **NexPath analyzes it** — when guidance matters, it holds the prompt and opens a
+   quick review with a strengthened version: decomposition, ordering, acceptance
+   criteria, verification and risk checks — built from your original request.
+3. **You review** — use the enhanced prompt, apply additional details, or keep your
+   original. Your wording stays visible throughout.
+4. **NexPath sends the version you choose** — injected back and submitted for you.
+   No copy-paste, no re-typing, no duplicate runs.
+5. **Ship cleaner code** — fewer skipped checks, faster reviews.
+
+Not a new tool to learn. A workflow step to adopt.
 
 ---
 
@@ -44,66 +68,84 @@ because you're careless, but because momentum takes over. Nexpath is the
 | **Cursor** | ✅ Fully supported · end-to-end tested |
 | **Windsurf / Devin** | ✅ Fully supported · end-to-end tested |
 
-> Nexpath installs in VS Code-family editors, but its guidance is built for and tested
-> on **Cursor** and **Windsurf (Devin)**.
+> NexPath installs in VS Code-family editors, but its guidance is built for and tested on
+> **Cursor** and **Windsurf (Devin)**. Claude Code users: the same guidance ships in the
+> [NexPath CLI](https://github.com/hi0001234d/nexpath).
 
 ---
 
-## Features
+## What You Get
 
-- **Between-prompt advisory** — a lightweight decision session at key transition points. Non-intrusive, never enforcing.
-- **3-level easier options** — can't take the full recommendation? Nexpath offers progressively simpler alternatives before logging the skip.
-- **Behaviour-aware** — tracks the shape of your session locally; your prompt history lives in a local store on your machine.
-- **Nothing is lost** — every item you skip is logged locally, so the context is always preserved *(full revisit interface coming in a future version)*.
-- **Adapts to your style** — calibrates its tone and depth to how you prompt.
+- ✓ **Prompt strengthening** — a sharper version of your prompt, intent preserved
+- ✓ **Spec review catching** — incomplete requirements surface before you send
+- ✓ **Test-strategy prompts** — verification and acceptance checks built into the request
+- ✓ **Risk surfacing** — architectural gaps and edge-case blindspots called out up front
+- ✓ **You stay in control** — your original is always one keypress away; the version you pick is sent for you
+- ✓ **Local-first** — your prompt history lives in a local store on your machine
+- ✓ **No subscriptions** — bring your own API key
+
+**Result:** AI agents generate better code. Reviews go faster. Fewer production bugs.
+
+### Demo: [Prompt Enhancement in action, on YouTube](https://youtu.be/pNejtPA5DPU)
 
 ---
 
 ## Getting Started
 
-1. **Install** — search **"Nexpath AI"** in your editor's Extensions panel, **or** install
+1. **Install** — search **"NexPath"** in your editor's Extensions panel, **or** install
    directly: Command Palette → `ext install nexpath.nexpath-vscode`.
-2. On first launch, Nexpath shows two prompts in the bottom-right:
+2. On first launch, NexPath shows two prompts in the bottom-right:
    - **"Allow Nexpath to read your AI chat history for prompt-level guidance?"** → click
-     **Allow**. (This lets Nexpath see your prompts so it can guide you — your data stays
-     on your machine. Without it, Nexpath will not work.)
+     **Allow**. (This lets NexPath see your prompts so it can guide you — your data stays
+     on your machine. Without it, NexPath will not work.)
    - **"Set up Nexpath for Cursor now?"** → click **Set up**.
 3. A terminal opens — answer the one-time prompts: your **OpenAI API key** and a quick
    **telemetry** choice.
-4. Restart your agent and start prompting — Nexpath surfaces sessions when they help.
+4. **Fully restart your editor** (quit and reopen — agents load their hooks at startup),
+   then start prompting — NexPath surfaces guidance when it helps.
 
 > Re-run setup anytime from the Command Palette → **"Nexpath: Set up CLI"**.
 
 ---
 
+## For Whom
+
+Built for solo developers, indie hackers, startup founders, and professional teams who
+want to ship fast without shipping broken — using AI agents like Cursor and
+Windsurf (Devin).
+
+---
 
 ## Requirements
 
 - **Cursor** or **Windsurf (Devin)** — VS Code `^1.80.0` or compatible.
 - **Node.js ≥ 20.19** on your machine (the bundled engine needs it; older Node will fail to start).
 - An **OpenAI API key** — <https://platform.openai.com/api-keys>. Without a valid key,
-  prompts are tracked but no decision session is generated.
+  prompts are tracked but no guidance is generated.
 
 ---
 
-## Privacy
+## Your Privacy
 
 - Your **API key** is stored in your OS keychain (or a `0600` file fallback) — never bundled or logged.
-- **Your prompt history is stored locally** on your machine.
-- To generate a decision session, Nexpath sends **recent prompt context to OpenAI** using
-  **your** key — that is the only place your prompt text is sent, and only when a session fires.
+- **Your prompt history is stored locally** on your machine — never sent to NexPath servers.
+- To generate guidance, NexPath sends **recent prompt context to OpenAI** using **your**
+  key — that is the only place your prompt text goes, and only when guidance fires.
 - **Telemetry is opt-in.** If you enable it, only anonymous usage events (command names,
   timings, error types) are collected — never your code, prompts, key, or file paths.
-  You choose at setup — simply enable or disable when asked.
+  You choose at setup. No vendor lock-in.
 
 ---
 
-## License
+## Legal / Attribution
 
-[Apache-2.0](https://github.com/hi0001234d/nexpath/blob/main/LICENSE)
+NexPath is an independent tool. Not affiliated with, endorsed by, or sponsored by
+Cursor, Windsurf, or Devin — those names describe which AI agents NexPath supports.
+
+License: [Apache-2.0](https://github.com/hi0001234d/nexpath/blob/main/LICENSE)
 
 ---
 
 <p align="center">
-  Built by <a href="https://parseos.io">ParseOS</a> · AI developer tools for the vibe-coding era
+  Made by <a href="https://parseos.io">ParseOS</a> · AI developer tools for the vibe-coding era
 </p>

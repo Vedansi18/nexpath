@@ -12,6 +12,7 @@
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import { setSubmitFlowFlag } from '../cli/commands/submit-flow-config.js';
 
 /** Every Cascade event nexpath has ever owned — iterated on cleanup/removal. */
 export const WINDSURF_HOOK_EVENTS = ['pre_user_prompt', 'post_cascade_response'] as const;
@@ -53,10 +54,12 @@ export function buildWindsurfHookCommand(
   cliPath: string,
   event: WindsurfHookEvent,
   nodePath: string = process.execPath,
+  projectRoot?: string,
 ): string {
   const node = nodePath.replace(/\\/g, '/');
   const abs = resolve(cliPath).replace(/\\/g, '/');
-  return `"${node}" "${abs}" windsurf-hook ${event}`;
+  const proj = projectRoot ? ` --project "${resolve(projectRoot).replace(/\\/g, '/')}"` : '';
+  return `"${node}" "${abs}" windsurf-hook ${event}${proj}`;
 }
 
 /**
@@ -78,8 +81,20 @@ export function buildWindsurfHookPowershell(
   cliPath: string,
   event: WindsurfHookEvent,
   nodePath: string = process.execPath,
+  projectRoot?: string,
 ): string {
-  return `& "${nodePath}" "${resolve(cliPath)}" windsurf-hook ${event}`;
+  const proj = projectRoot ? ` --project "${resolve(projectRoot)}"` : '';
+  // ── RC33 (Windows/Devin tester, 2026-08-21): `; exit $LASTEXITCODE` ──────
+  // THE reason the submit flow never actually blocked on Windows.
+  // `powershell -Command "<pipeline>"` exits with the PIPELINE's status (0, or
+  // 1 on a terminating error) — it does NOT propagate a native command's exit
+  // code. Node exits 2 to block; the wrapper then exits 0; the host's contract
+  // is "exit code 2 blocks", so it saw "not 2" and RELEASED the prompt — popup
+  // open, original running behind it, injection landing in a busy composer.
+  // The explicit `exit $LASTEXITCODE` forwards node's code (2, and every other
+  // code) through the wrapper. POSIX untouched: bash's `command` field already
+  // propagates exit codes natively; this string is only ever run on win32.
+  return `& "${nodePath}" "${resolve(cliPath)}" windsurf-hook ${event}${proj}; exit $LASTEXITCODE`;
 }
 
 /**
@@ -91,10 +106,11 @@ export function buildWindsurfHookEntry(
   cliPath: string,
   event: WindsurfHookEvent,
   nodePath: string = process.execPath,
+  projectRoot?: string,
 ): HookEntry {
   return {
-    command: buildWindsurfHookCommand(cliPath, event, nodePath),
-    powershell: buildWindsurfHookPowershell(cliPath, event, nodePath),
+    command: buildWindsurfHookCommand(cliPath, event, nodePath, projectRoot),
+    powershell: buildWindsurfHookPowershell(cliPath, event, nodePath, projectRoot),
   };
 }
 
@@ -105,10 +121,13 @@ export function isNexpathWindsurfHook(entry: HookEntry): boolean {
 }
 
 /** Build the hook entries nexpath writes: capture (auto) + popup (stop). */
-export function buildWindsurfHooksConfig(cliPath: string): Record<WindsurfWriteEvent, HookEntry[]> {
+export function buildWindsurfHooksConfig(
+  cliPath: string,
+  projectRoot?: string,
+): Record<WindsurfWriteEvent, HookEntry[]> {
   return {
-    pre_user_prompt:       [buildWindsurfHookEntry(cliPath, 'pre_user_prompt')],
-    post_cascade_response: [buildWindsurfHookEntry(cliPath, 'post_cascade_response')],
+    pre_user_prompt:       [buildWindsurfHookEntry(cliPath, 'pre_user_prompt', process.execPath, projectRoot)],
+    post_cascade_response: [buildWindsurfHookEntry(cliPath, 'post_cascade_response', process.execPath, projectRoot)],
   };
 }
 
@@ -134,10 +153,16 @@ function writeJson(filePath: string, data: unknown): void {
  * hooks and replacing any prior nexpath entries (idempotent). `cliPath` is the
  * path to the nexpath CLI entry (callers pass `resolve(process.argv[1])`).
  */
-export function writeWindsurfHooks(filePath: string, cliPath: string): void {
+export function writeWindsurfHooks(filePath: string, cliPath: string, projectRoot?: string): void {
   const data = readJsonSafe(filePath);
   const hooks = (data.hooks && typeof data.hooks === 'object' ? data.hooks : {}) as Record<string, HookEntry[]>;
-  const cfg = buildWindsurfHooksConfig(cliPath) as Record<string, HookEntry[]>;
+  // RC23: a WORKSPACE-level hooks.json belongs to exactly one project, so the
+  // command carries `--project <that project>` and the hook no longer depends on
+  // whatever cwd Cascade happens to give it — the failure that made the whole
+  // new flow unreachable on Windows (the decision was written under the hook's
+  // cwd, which no poller watches). The USER-level hook is global and must stay
+  // cwd-derived, so `projectRoot` is left undefined there.
+  const cfg = buildWindsurfHooksConfig(cliPath, projectRoot) as Record<string, HookEntry[]>;
   // Iterate ALL events: strip any prior nexpath entries (so a stale
   // post_cascade_response from an older install is dropped), then re-add only
   // the events we write today. Other tools' hooks are preserved; an event left
@@ -150,6 +175,10 @@ export function writeWindsurfHooks(filePath: string, cliPath: string): void {
   }
   data.hooks = hooks;
   writeJson(filePath, data);
+  // Owner ruling 2026-08-12: ship the new submit-flow ON via the config-backed
+  // flag (`~/.nexpath/submit-flow.json`), read by both the hook and the extension.
+  // Flip the flag (or set the env var to '0') to revert. Best-effort.
+  try { setSubmitFlowFlag('windsurf', true); } catch { /* best-effort */ }
 }
 
 /**

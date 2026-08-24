@@ -101,7 +101,22 @@ If the second line shows `host=vscode-generic`, the host-detector didn't recogni
 
 ### Step 4 — Run the SMOKE-TEST flow
 
-Follow the same procedure documented in `SMOKE-TEST.md` steps 4-6, then paste the verification table from that doc back as evidence.
+Follow the same procedure documented in `SMOKE-TEST.md` steps 4-6, **including Step 5b (the PE
+round-trip, P12/VED-PE-14)** — do not skip it; the old DS-only Steps 4-6 do not exercise the Prompt
+Enhancement webview, poller, or host-detection-for-PE at all. Then paste the verification table from
+that doc back as evidence, plus this doc's own table below.
+
+### Step 4b — Diagnostics public-safe spot-check (P12)
+
+While Step 5b's PE flow and Step 5's DS flow are both still on screen from this session, open the
+developer console's captured log and confirm:
+- No raw prompt text, enhanced body text, or additional-details text appears in any `[nexpath] PE
+  event:` / `[nexpath] PE action request:` / `[nexpath] PE visible-surface ACK:` log line — only ids,
+  enums, booleans, and counts (this mirrors the automated leak tests in `pe-events.test.ts` /
+  `extension.test.ts`, run here as a live sanity check on this specific OS/host combination, not a
+  replacement for them).
+- If you ran `dump-cursor-state.ts --redact` for troubleshooting, confirm the output file has no
+  unredacted prompt text either.
 
 ### Step 5 — Cleanup between matrix cells
 
@@ -131,6 +146,21 @@ After running the procedure on each cell, fill in the table and attach as B6 acc
 | Windows 11 x64 | Windsurf | ✅ / ❌ | ✅ / ❌ | ✅ / ❌ | ✅ / ❌ | |
 
 **M2 Branch 6 is complete when every cell in the matrix shows ✅ for Steps 1, 2, and 4.** Step 3 entries should list any OS-specific gotcha you encountered (even if you resolved it) so future engineers don't have to rediscover.
+
+### P12 (VED-PE-14) PE/DS/diagnostics table
+
+Per the dev plan §8 acceptance criteria — extends this same 6-cell matrix, does not replace it.
+**P12 is not done until every cell below is filled with a real observed result; do not mark a cell
+✅ without actually running Step 5b/4b above on that OS/host.**
+
+| OS / Arch | Host | Host detected as cursor/windsurf, never vscode-generic | PE flow end-to-end (Step 5b) | DS still works (regression) | Diagnostics public-safe (Step 4b) | Notes |
+|---|---|---|---|---|---|---|
+| macOS Intel | Cursor | ✅ / ❌ | ✅ / ❌ | ✅ / ❌ | ✅ / ❌ | |
+| macOS Intel | Windsurf | ✅ / ❌ | ✅ / ❌ | ✅ / ❌ | ✅ / ❌ | |
+| macOS Apple Silicon | Cursor | ✅ / ❌ | ✅ / ❌ | ✅ / ❌ | ✅ / ❌ | |
+| macOS Apple Silicon | Windsurf | ✅ / ❌ | ✅ / ❌ | ✅ / ❌ | ✅ / ❌ | |
+| Windows 11 x64 | Cursor | ✅ / ❌ | ✅ / ❌ | ✅ / ❌ | ✅ / ❌ | |
+| Windows 11 x64 | Windsurf | ✅ / ❌ | ✅ / ❌ | ✅ / ❌ | ✅ / ❌ | |
 
 ---
 
