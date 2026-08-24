@@ -289,7 +289,7 @@ describe('MPS-1 sequence offer (PB6 — popup-host order: offer first, PE after 
       },
     ]);
     const outcome = await runBrowserPePopup({
-      log, projectRoot: ROOT, apiKey: null, record: rec, sendToTab,
+      log, projectRoot: ROOT, apiKey: null, record: rec, sequenceEnabled: true, sendToTab,
       onFirstRendered: vi.fn().mockResolvedValue(undefined),
     });
     expect(outcome.mpsFirstPopupSent).toBe(true);
@@ -312,7 +312,7 @@ describe('MPS-1 sequence offer (PB6 — popup-host order: offer first, PE after 
       (view) => ({ type: 'use_original' }),
     ]);
     const outcome = await runBrowserPePopup({
-      log, projectRoot: ROOT, apiKey: null, record: sequenceRecord(), sendToTab,
+      log, projectRoot: ROOT, apiKey: null, record: sequenceRecord(), sequenceEnabled: true, sendToTab,
       onFirstRendered: vi.fn().mockResolvedValue(undefined),
     });
     expect(outcome.mpsFirstPopupSent).toBe(false);
@@ -329,7 +329,7 @@ describe('MPS-1 sequence offer (PB6 — popup-host order: offer first, PE after 
       () => ({ type: 'mps_cancel' }) as never,
     ]);
     const outcome = await runBrowserPePopup({
-      log, projectRoot: ROOT, apiKey: null, record: sequenceRecord(), sendToTab,
+      log, projectRoot: ROOT, apiKey: null, record: sequenceRecord(), sequenceEnabled: true, sendToTab,
       onFirstRendered: vi.fn().mockResolvedValue(undefined),
     });
     expect(outcome.mpsFirstPopupSent).toBe(false);
@@ -408,5 +408,42 @@ describe('PB2 storage-quota sanity — realistic pending-PE payload size', () =>
     // one row past 1 MB — the IDB fallback lever gets pulled then, not silently.
     expect(bytes).toBeGreaterThan(5_000);
     expect(bytes).toBeLessThan(1_000_000);
+  });
+});
+
+describe('sequence master switch (CLI default parity — upstream defaulted sequences OFF, 2026-08-24)', () => {
+  it('DEFAULT (switch absent): a sequence-carrying result skips the offer with a gated ring event and goes straight to the PE popup', async () => {
+    const { log, events } = makeLog();
+    const { sendToTab, views } = scriptedTab(log, [() => ({ type: 'use_original' })]);
+    const outcome = await runBrowserPePopup({
+      log, projectRoot: ROOT, apiKey: null, record: sequenceRecord(), sendToTab,
+      onFirstRendered: vi.fn().mockResolvedValue(undefined),
+    });
+    expect(outcome.mpsFirstPopupSent).toBe(false);
+    expect(outcome.result.state).toBe('selected_original');
+    expect(views).toHaveLength(1);
+    expect((views[0] as unknown as Record<string, unknown>)['kind']).toBeUndefined(); // PE view, not the offer
+    expect(events.map(([k]) => k)).toContain('pe_mps_gated_sequence_disabled');
+  });
+
+  it('exact-equality: sequenceEnabled must be true — a truthy non-true value still gates (A9)', async () => {
+    const { log } = makeLog();
+    const { sendToTab, views } = scriptedTab(log, [() => ({ type: 'close' })]);
+    await runBrowserPePopup({
+      log, projectRoot: ROOT, apiKey: null, record: sequenceRecord(),
+      sequenceEnabled: 1 as unknown as boolean, sendToTab,
+      onFirstRendered: vi.fn().mockResolvedValue(undefined),
+    });
+    expect((views[0] as unknown as Record<string, unknown>)['kind']).toBeUndefined();
+  });
+
+  it('a result with NO handoff never logs the gated event (the gate is sequence-scoped)', async () => {
+    const { log, events } = makeLog();
+    const { sendToTab } = scriptedTab(log, [() => ({ type: 'close' })]);
+    await runBrowserPePopup({
+      log, projectRoot: ROOT, apiKey: null, record, sendToTab,
+      onFirstRendered: vi.fn().mockResolvedValue(undefined),
+    });
+    expect(events.map(([k]) => k)).not.toContain('pe_mps_gated_sequence_disabled');
   });
 });

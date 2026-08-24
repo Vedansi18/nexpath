@@ -45,7 +45,7 @@ vi.mock('../adapters/pe-pending-store.js', () => ({
   getPendingPe: vi.fn(),
   markPendingPeShown: vi.fn(),
 }));
-vi.mock('../adapters/pe-config.js', () => ({ resolvePePopupCooldown: vi.fn() }));
+vi.mock('../adapters/pe-config.js', () => ({ resolvePePopupCooldown: vi.fn(), resolvePeSequenceEnabled: vi.fn() }));
 vi.mock('../adapters/pe-sequence-store.js', () => ({ recordPendingSequence: vi.fn(), getPendingSequence: vi.fn() }));
 vi.mock('./pe-popup-host.js', () => ({
   runBrowserPePopup: vi.fn(),
@@ -72,7 +72,7 @@ const { ContentScriptUIAdapter } = await import('../content/panel-adapter.js');
 const { prepareAndStoreBrowserPe } = await import('./pe-prepare.js');
 const { isPromptEnhancementSequenceShapedTextV1 } = await import('./pe-engine.js');
 const { getPendingPe, markPendingPeShown } = await import('../adapters/pe-pending-store.js');
-const { resolvePePopupCooldown } = await import('../adapters/pe-config.js');
+const { resolvePePopupCooldown, resolvePeSequenceEnabled } = await import('../adapters/pe-config.js');
 const { recordPendingSequence, getPendingSequence } = await import('../adapters/pe-sequence-store.js');
 const { runBrowserPePopup } = await import('./pe-popup-host.js');
 
@@ -1442,6 +1442,7 @@ describe('service-worker.ts', () => {
 
     beforeEach(() => {
       vi.mocked(resolvePePopupCooldown).mockResolvedValue(7);
+      vi.mocked(resolvePeSequenceEnabled).mockResolvedValue(false);
       vi.mocked(runBrowserPePopup).mockResolvedValue({ result: { state: 'closed_no_send' }, mpsFirstPopupSent: false });
       vi.mocked(getPendingPe).mockResolvedValue(null);
       vi.mocked(markPendingPeShown).mockResolvedValue(undefined);
@@ -1470,6 +1471,8 @@ describe('service-worker.ts', () => {
       const deps = vi.mocked(runBrowserPePopup).mock.calls[0]![0];
       expect(deps.projectRoot).toBe(P);
       expect(deps.record).toBe(peRecord);
+      // The resolved sequence switch travels into the popup host (CLI parity).
+      expect(deps.sequenceEnabled).toBe(false);
     });
 
     it('onFirstRendered consumes the row AND starts the cooldown window in session state', async () => {

@@ -12,6 +12,7 @@ import {
   PE_POPUP_COOLDOWN_DEFAULT,
   PE_POPUP_COOLDOWN_KEY,
   resolvePePopupCooldown,
+  resolvePeSequenceEnabled,
 } from './pe-config.js';
 
 const ROOT = 'https://lovable.dev/projects/abc';
@@ -63,9 +64,38 @@ describe('hidden-key guard — PE keys never surface on the options page', () =>
   const optionsDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'options');
   const surfaces = ['options.html', 'options.ts'].map((f) => readFileSync(join(optionsDir, f), 'utf8'));
 
-  for (const hidden of ['prompt_enhancement.popup_cooldown', 'nexpath_pending_pe', 'nexpath_advisory_legacy_surface']) {
+  for (const hidden of ['prompt_enhancement.popup_cooldown', 'nexpath_pending_pe', 'nexpath_advisory_legacy_surface', 'prompt_enhancement.sequence.enabled']) {
     it(`"${hidden}" appears nowhere in the options page`, () => {
       for (const source of surfaces) expect(source).not.toContain(hidden);
     });
   }
+});
+
+describe('resolvePeSequenceEnabled (CLI default parity: sequences OFF)', () => {
+  const seqProjectKey = `prompt_enhancement.sequence.enabled:${ROOT}`;
+
+  it('defaults to false when nothing is set (the upstream default)', async () => {
+    expect(await resolvePeSequenceEnabled(ROOT)).toBe(false);
+  });
+
+  it('exactly "on" enables; any other value stays off (A9 exact-equality)', async () => {
+    mockGet.mockResolvedValue({ 'prompt_enhancement.sequence.enabled': 'on' });
+    expect(await resolvePeSequenceEnabled(ROOT)).toBe(true);
+    for (const junk of ['ON', 'true', '1', 'yes', 'off', '']) {
+      mockGet.mockResolvedValue({ 'prompt_enhancement.sequence.enabled': junk });
+      expect(await resolvePeSequenceEnabled(ROOT), `"${junk}" must not enable`).toBe(false);
+    }
+  });
+
+  it('the project-scoped key wins over the global key', async () => {
+    mockGet.mockResolvedValue({ [seqProjectKey]: 'off', 'prompt_enhancement.sequence.enabled': 'on' });
+    expect(await resolvePeSequenceEnabled(ROOT)).toBe(false);
+    mockGet.mockResolvedValue({ [seqProjectKey]: 'on' });
+    expect(await resolvePeSequenceEnabled(ROOT)).toBe(true);
+  });
+
+  it('a storage failure fails to the default (off)', async () => {
+    mockGet.mockRejectedValue(new Error('gone'));
+    expect(await resolvePeSequenceEnabled(ROOT)).toBe(false);
+  });
 });

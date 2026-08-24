@@ -34,3 +34,26 @@ export async function resolvePePopupCooldown(projectRoot: string): Promise<numbe
   const n = typeof raw === 'number' ? Math.trunc(raw) : Number.parseInt(String(raw), 10);
   return Number.isFinite(n) && n >= 0 ? n : PE_POPUP_COOLDOWN_DEFAULT;
 }
+
+/**
+ * MPS sequence master switch — the browser mirror of the CLI's
+ * `prompt_enhancement.sequence.enabled`, whose DEFAULT upstream changed to
+ * 'off' (main, 2026-08-24: the facade gates the MPS-1 summary on it when its
+ * CLI deps are threaded). The browser calls the engine's no-deps entry — which
+ * upstream deliberately kept summary-emitting — so this hidden key restores
+ * exact default parity: no MPS-1 offer unless the key is EXACTLY 'on' (A9
+ * exact-equality read; hidden — never surfaced in the options UI).
+ */
+export const PE_SEQUENCE_ENABLED_KEY = 'prompt_enhancement.sequence.enabled';
+
+export async function resolvePeSequenceEnabled(projectRoot: string): Promise<boolean> {
+  const projectKey = `${PE_SEQUENCE_ENABLED_KEY}:${projectRoot}`;
+  try {
+    const got = await browser.storage.local.get([projectKey, PE_SEQUENCE_ENABLED_KEY]);
+    const record = got as Record<string, unknown>;
+    const raw = record[projectKey] ?? record[PE_SEQUENCE_ENABLED_KEY];
+    return raw === 'on';
+  } catch {
+    return false; // fail to the CLI's default: sequences off
+  }
+}

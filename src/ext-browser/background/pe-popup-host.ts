@@ -281,6 +281,13 @@ export interface BrowserPePopupDeps {
   sendToTab: (msg: unknown) => Promise<unknown>;
   /** First successful render: consume the row + mark the cooldown. */
   onFirstRendered: () => Promise<void>;
+  /**
+   * The resolved `prompt_enhancement.sequence.enabled` switch (CLI default
+   * parity: upstream defaulted it OFF, 2026-08-24). The MPS-1 offer renders
+   * only when this is exactly true; anything else gates the offer with a ring
+   * event and falls straight through to the PE popup.
+   */
+  sequenceEnabled?: boolean;
   /** Injectable engine runner (tests); defaults to the real state machine. */
   runPopup?: typeof runPromptEnhancementCliSubmitPopupV1;
 }
@@ -358,7 +365,15 @@ export async function runBrowserPePopup(
     refreshEngineKeyEnv(deps.apiKey);
 
     // ── Stage 1: MPS-1 sequence offer (engine-gated; popup-host order) ─────────
-    const mpsModel = buildBrowserMpsOffer(log, projectRoot, record.result);
+    // Config gate first (CLI default parity — sequences OFF unless the hidden
+    // key enables them); the engine's own intake gate runs after it.
+    const handoffPresent = (record.result as PromptEnhancementPrepareResultV1).uiView.handoffAndSequenceSummary !== undefined;
+    if (handoffPresent && deps.sequenceEnabled !== true) {
+      log.debug('pe_mps_gated_sequence_disabled', { projectRoot });
+    }
+    const mpsModel = handoffPresent && deps.sequenceEnabled === true
+      ? buildBrowserMpsOffer(log, projectRoot, record.result)
+      : null;
     if (mpsModel) {
       seq += 1;
       const offerRendered = await pushView(buildPeSequenceOfferView(mpsModel, seq));

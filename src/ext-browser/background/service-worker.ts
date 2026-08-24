@@ -49,7 +49,7 @@ import type { Stage, UserRole, UserProfile, PromptRecord } from '../../core/clas
 import { PE_ENGINE_READY, isPromptEnhancementSequenceShapedTextV1 } from './pe-engine.js';
 import { prepareAndStoreBrowserPe, type BrowserPeContext } from './pe-prepare.js';
 import { getPendingPe, markPendingPeShown, upsertPendingPe } from '../adapters/pe-pending-store.js';
-import { resolvePePopupCooldown } from '../adapters/pe-config.js';
+import { resolvePePopupCooldown, resolvePeSequenceEnabled } from '../adapters/pe-config.js';
 import { getPendingSequence, recordPendingSequence } from '../adapters/pe-sequence-store.js';
 import { deliverPePanelCommand, runBrowserPePopup } from './pe-popup-host.js';
 
@@ -1098,12 +1098,16 @@ async function handleResponseStopPeFirst(projectRoot: string, tabId: number | un
     return;
   }
 
-  const apiKey = await keyStore.getKey('openai_api_key');
+  const [apiKey, sequenceEnabled] = await Promise.all([
+    keyStore.getKey('openai_api_key'),
+    resolvePeSequenceEnabled(projectRoot),
+  ]);
   const stopOutcome = await runBrowserPePopup({
     log,
     projectRoot,
     apiKey,
     record: pe,
+    sequenceEnabled,
     sendToTab: (m) => browser.tabs.sendMessage(tabId, m),
     onFirstRendered: async () => {
       // First real render: consume the row + start the cooldown window — the
