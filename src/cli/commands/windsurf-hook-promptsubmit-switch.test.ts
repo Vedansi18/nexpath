@@ -235,11 +235,14 @@ describe('post_cascade_response — old-advisory suppression under the switch', 
     });
     await runWindsurfHookAction('post_cascade_response', { project: '/proj' }, h.deps as never);
     expect(suppress).toHaveBeenCalledWith('/proj', 'traj-suppress-1');
-    expect(order).toEqual(['suppress:traj-suppress-1', 'handle']);
+    // RC58 FLIP (2026-08-24): the sweep still runs, but the old-flow `handle`
+    // no longer does — under the switch the post leg ENDS after the sweep
+    // (its popups were undeliverable with suppressDsAdvisory armed).
+    expect(order).toEqual(['suppress:traj-suppress-1']);
     expect(h.exit).toHaveBeenCalledWith(0);
   });
 
-  it('switch ON but no trajectory in the payload: nothing consumed, handle still runs', async () => {
+  it('switch ON but no trajectory in the payload: nothing consumed; the event still ENDS (RC58)', async () => {
     const suppress = vi.fn(async () => 0);
     const h = harness({
       env: { [WINDSURF_PROMPTSUBMIT_ADVISORY_ENV]: '1' },
@@ -248,7 +251,7 @@ describe('post_cascade_response — old-advisory suppression under the switch', 
     });
     await runWindsurfHookAction('post_cascade_response', { project: '/proj' }, h.deps as never);
     expect(suppress).not.toHaveBeenCalled();
-    expect(h.handle).toHaveBeenCalled();
+    expect(h.handle).not.toHaveBeenCalled(); // RC58: post leg closed under the switch
   });
 
   it('⭐ switch OFF: no pre-read, no suppression — handle reads stdin itself (shipped shape)', async () => {
@@ -266,14 +269,14 @@ describe('post_cascade_response — old-advisory suppression under the switch', 
     expect(handleArgs[2]).toBeUndefined(); // no replay dep passed — call shape identical to shipped
   });
 
-  it('a throwing suppressor fails open: handle still runs, exit 0', async () => {
+  it('a throwing suppressor fails open: the event still ENDS cleanly, exit 0 (RC58)', async () => {
     const h = harness({
       env: { [WINDSURF_PROMPTSUBMIT_ADVISORY_ENV]: '1' },
       readStdin: async () => PAYLOAD,
       suppressOldAdvisorySurface: vi.fn(async () => { throw new Error('db locked'); }),
     });
     await runWindsurfHookAction('post_cascade_response', { project: '/proj' }, h.deps as never);
-    expect(h.handle).toHaveBeenCalled();
+    expect(h.handle).not.toHaveBeenCalled(); // RC58: post leg closed under the switch
     expect(h.exit).toHaveBeenCalledWith(0);
   });
 

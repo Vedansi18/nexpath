@@ -716,6 +716,24 @@ export async function runWindsurfHookAction(
           return;
         }
       } catch { /* fail-open: exactly the pre-RC46 fall-through */ }
+      // ── RC58 (Windows/Devin 2026-08-24 — "second popup, Enter does nothing") ──
+      // With the switch ON, the old-flow `handle` below MUST NOT run on this
+      // event at all. It spawns the old-flow stop, which can render a PE or
+      // feedback popup at POST-RESPONSE timing — but under the armed submit
+      // surface the extension suppresses the old delivery bridge
+      // (`suppressDsAdvisory` — extension.ts:1068 / chat-pipeline.ts:236), so a
+      // selection made in that popup is UNDELIVERABLE: it renders, the user
+      // picks, nothing injects. The window for it is real and intermittent —
+      // the next prompt's `auto` takes 15–30 s of LLM time, so its pending row
+      // often lands AFTER that submit's decider already looked, sits pending,
+      // and the response-finished event then surfaces it at the old timing.
+      // H9's ruling ("ALL popups — at submit time") already decided this: the
+      // row waits for the NEXT submit, where the decider shows it through the
+      // PROVEN delivery path. Switch OFF ⇒ this whole branch is unreachable
+      // and the old flow is byte-identical.
+      log('info', 'windsurf_hook_post_leg_closed', { reason: 'submit_flow_active' });
+      exit(0);
+      return;
     }
 
     // Name this surface for Layer C's popup "Send to …" label. The spawned
