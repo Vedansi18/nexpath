@@ -13,10 +13,8 @@ and how it handles your data. This guide covers what you need in order to *chang
 - **Documentation:** Improve the README, this guide, or the CLI help text
 - **Bug Reports:** Report issues you encounter
 - **Feature Requests:** Suggest new features or improvements
-- **Community Support:** Help other users in the community
-
-The Nexpath community is in
-[GitHub Discussions](https://github.com/hi0001234d/nexpath/discussions).
+- **Community Support:** Help other users in
+  [GitHub Discussions](https://github.com/hi0001234d/nexpath/discussions)
 
 ## Reporting Bugs or Issues
 
@@ -39,34 +37,29 @@ A great bug report contains:
 - **Diagnostics** — the output of `nexpath status`, and `nexpath log` if the issue is about
   advisory or popup behaviour. Re-run with `NEXPATH_DEBUG=1` for verbose stderr.
 
-`nexpath status` prints a full config dump and `nexpath log` prints recent pipeline activity,
-which may include your own prompts — read both before pasting them publicly and redact anything
-private.
+`nexpath status` dumps your full config and `nexpath log` may include your own prompts — read
+both before pasting them publicly and redact anything private.
 
 ## Before Contributing
 
 All contributions must begin with a GitHub Issue, unless the change is a small bug fix, a typo
 correction, a minor wording improvement, or a type-only fix that doesn't change functionality.
 
-**For features and larger contributions:**
+For features and larger contributions:
 
-- First check [existing issues](https://github.com/hi0001234d/nexpath/issues) and
+- Check [existing issues](https://github.com/hi0001234d/nexpath/issues) and
   [Discussions](https://github.com/hi0001234d/nexpath/discussions) for similar ideas
 - If your idea is new, open an issue describing the problem, your proposed approach, and why it
   belongs in Nexpath
 - Wait for approval from core maintainers before starting implementation
-- Once approved, feel free to begin working on a PR
 
 **PRs without approved issues may be closed.** Nexpath's pipeline has a lot of interlocking
 gates, and a change that looks local can move behaviour three stages downstream.
 
-## Deciding What to Work On
-
-Looking for a good first contribution? Check out issues labeled
+Looking for a first contribution? Start with
 [`good first issue`](https://github.com/hi0001234d/nexpath/labels/good%20first%20issue) or
-[`help wanted`](https://github.com/hi0001234d/nexpath/labels/help%20wanted).
-
-Beyond the issue tracker, these areas need help most right now:
+[`help wanted`](https://github.com/hi0001234d/nexpath/labels/help%20wanted). Beyond the tracker,
+these areas need help most:
 
 - **End-to-end agent testing** — highest value, no deep codebase knowledge needed. Only Claude
   Code is certified end-to-end today; the README's support table lists the rest. Install Nexpath
@@ -76,7 +69,7 @@ Beyond the issue tracker, these areas need help most right now:
 - **Pipeline correctness** — `src/prompt-enhancement/` and `src/decision-session/` carry most of
   the product behaviour and most of the test suite.
 
-## Prerequisites
+## Development Setup
 
 - **Node.js 18+** — development is done on Node 20+; Node 22 is known to work
 - **npm 9+** — ships with Node 18 and newer
@@ -92,15 +85,14 @@ later:
 
 ```bash
 git remote add upstream https://github.com/hi0001234d/nexpath.git
+npm install
 ```
 
 ## Common Checks
 
-**Read this section before you open a PR.**
-
-Nexpath does **not** run tests on pull requests. The two GitHub Actions workflows
-(`publish-extension.yml`, `publish-ext-browser.yml`) only fire on release tags — they are
-publish pipelines, not CI. **Your local run is the only gate that exists.**
+**Read this section before you open a PR.** Nexpath does **not** run tests on pull requests —
+the two GitHub Actions workflows only fire on release tags, so **your local run is the only gate
+that exists.**
 
 From the repo root:
 
@@ -113,8 +105,7 @@ npm test
 ### Build
 
 `npm run build` is not just `tsc`. The `prebuild` step runs `scripts/check-build-gate.ts`, which
-enforces two hard gates over the shipped content-template registry and aborts the build on
-failure:
+aborts the build on two hard gates:
 
 - **Content-template gate** — every shipped record must be schema-valid and must have a level-1
   floor. A record missing its floor fails the build.
@@ -138,15 +129,13 @@ Both must produce no output. The root `tsconfig.json` deliberately excludes `src
 
 `npm test` runs `vitest run` across the whole tree. It takes a minute or two.
 
-**Known failures on a public clone.** On a clean clone, `npm test` exits **1**. Two test files
-fail:
+On a clean public clone it exits **1**, because two test files read planning documents from a
+private submodule and fail with `ENOENT` for reasons unrelated to your change:
 
 - `src/prompt-enhancement/dev-plan-table-integrity.test.ts`
 - `src/prompt-enhancement/hv1-env-supply.test.ts`
 
-Both read planning documents from a private submodule that is **not part of the public
-repository**, so they fail with `ENOENT` for reasons unrelated to your change. **These two files
-are the only accepted failures.** To get a clean signal, exclude exactly those two:
+**These two are the only accepted failures.** To get a clean signal, exclude exactly those two:
 
 ```bash
 npx vitest run \
@@ -156,8 +145,8 @@ npx vitest run \
   --exclude "src/ext-vscode/**"
 ```
 
-On an unmodified `main`, that run reports zero failures. **Every remaining file must pass.** Do
-not add files to the exclude list to make a run go green.
+On an unmodified `main`, that run reports zero failures. Every remaining file must pass — do not
+add files to the exclude list to make a run go green.
 
 ### Leak guard
 
@@ -165,12 +154,12 @@ not add files to the exclude list to make a run go green.
 file contains a confidentiality leak token (internal names, internal phase codes, private
 paths).
 
-It does not come back clean on `main` today. The existing findings are known and tracked. Run it
-before and after your change and confirm your diff **adds no new findings**.
+It does not come back clean on `main` today; those findings are known and tracked. Run it before
+and after your change and confirm your diff **adds no new findings**.
 
 ### Sub-package checks
 
-`src/ext-vscode/` is excluded from the root typecheck, the root build, **and** the root test run
+`src/ext-vscode/` is excluded from the root typecheck, build, **and** test run
 (`vitest.config.ts`) — it's a separate npm package with a native dependency not installed at the
 root:
 
@@ -216,39 +205,25 @@ that's what `npm run typecheck:ext` is for. To build it: `npm run build:ext`.
    - The suite redirects the Nexpath home to a temp directory (`vitest.setup.ts`), so running
      tests never touches your real install. Manual CLI runs **do**.
 
-4. **Run the Checks**
+4. **Commits and PR Titles**
 
-   - Run everything in [Common Checks](#common-checks) before you push — nothing will run them
-     for you afterwards
-
-5. **Commit Guidelines**
-
-   - Write clear, descriptive commit messages
-   - Use conventional commit format (e.g. `feat:`, `fix:`, `docs:`)
+   - Use conventional commit format with an optional scope naming the subsystem:
+     `feat(agents): detect Cursor installations on Windows`,
+     `fix(pe): lower the PE/MPS-1 popup cooldown default`, `docs: clarify the known-failing tests`
+   - Common types: `feat`, `fix`, `docs`, `test`, `refactor`, `chore`, `perf`
    - Reference relevant issues using `#issue-number`
 
-6. **Before Submitting**
+5. **Before Submitting**
 
    - Rebase your branch on the latest `upstream/main`
-   - Confirm the build, both typechecks, and the test run are clean
-   - Review your changes for any debugging code or leftover logs
+   - Run everything in [Common Checks](#common-checks) — nothing will run it for you afterwards
+   - Review your changes for debugging code or leftover logs
+   - Describe in the PR what your changes do, why, how you verified them, and any breaking
+     changes. Add screenshots or a short recording for CLI or popup UI changes.
+   - Link the issue with `Fixes #123` or `Closes #123`, and open the PR against `main` on
+     [`hi0001234d/nexpath`](https://github.com/hi0001234d/nexpath)
 
-7. **Pull Request Description**
-
-   - Clearly describe what your changes do and why
-   - Include how you verified them
-   - List any breaking changes
-   - Add screenshots for CLI or popup UI changes
-
-## Pull Request Expectations
-
-- **UI Changes:** Include screenshots or a short recording (before/after)
-- **Logic Changes:** Explain how you verified it works
-
-Link the issue with `Fixes #123` or `Closes #123`, and open the PR against `main` on
-[`hi0001234d/nexpath`](https://github.com/hi0001234d/nexpath).
-
-### Testing Evidence
+## Testing Evidence
 
 Every PR marked ready for review must include testing evidence. A bare `Not tested` or `N/A` is
 not sufficient, and neither is "the tests should pass."
@@ -265,37 +240,15 @@ If you cannot complete a relevant command, include all three of the following in
 
 Draft PRs may be incomplete until they are marked ready for review.
 
-### Contribution Ownership and AI Assistance
+## AI Assistance and Ownership
 
 AI coding agents are allowed — Nexpath is built for people who use them, and this repo is
 developed with them. But contributors own the work they submit: before requesting review, make
 sure you personally understand the change, have tested it, and can explain the diff.
 
 Maintainers may close PRs that appear to be submitted without credible contributor ownership,
-including AI-assisted work the contributor cannot explain.
-
-### Tracker Use and Automation
-
-Do not submit batches of agent-generated, untested, or weakly reviewed PRs, and do not
-mass-create issues through automation. Search existing issues first, and prioritize high-impact
-work over many speculative fixes.
-
-### Issue and PR Lifecycle
-
-Inactive issues and PRs may be closed to keep the backlog manageable — feel free to reopen or
-open a new one if you're still working on something. Please respond to review comments rather
-than force-pushing silently over them.
-
-## PR Titles
-
-Use conventional commit style PR titles, with an optional scope naming the subsystem:
-
-- `feat(agents): detect Cursor installations on Windows`
-- `fix(pe): lower the PE/MPS-1 popup cooldown default`
-- `docs: clarify the known-failing test files`
-- `test(pe-host): cover the display-decision pre-spawn gate`
-
-Common types: `feat`, `fix`, `docs`, `test`, `refactor`, `chore`, `perf`.
+including AI-assisted work the contributor cannot explain. Please don't submit batches of
+agent-generated or untested PRs, or mass-create issues through automation.
 
 ## Questions
 
