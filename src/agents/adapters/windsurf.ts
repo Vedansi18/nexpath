@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join, resolve, posix as posixPath, win32 as win32Path } from 'node:path';
 import { registerAdapter } from '../registry.js';
 import {
   getWindsurfHooksPath,
@@ -45,22 +45,37 @@ const OPEN_VSX_URL = `https://open-vsx.org/extension/${MARKETPLACE_ID.replace(
 const VS_CODE_MARKETPLACE_URL = `https://marketplace.visualstudio.com/items?itemName=${MARKETPLACE_ID}`;
 
 /**
+ * Local, adapter-only platform override. Kept out of the shared
+ * `InstallContext` interface (`src/agents/types.ts`) on purpose — that file
+ * is outside this adapter's domain. A real `InstallContext` never carries
+ * these properties, so `ctx.platform`/`ctx.appdata` below simply read as
+ * `undefined` and fall back to `process.platform`/`process.env.APPDATA`.
+ */
+export type PlatformOverride = { platform?: NodeJS.Platform; appdata?: string };
+
+/**
  * OS-specific Windsurf configuration directory. Used both as the primary
  * detection heuristic and as the base for the workspace-storage path.
+ *
+ * Uses `path.posix`/`path.win32` explicitly, keyed off `platform`, rather
+ * than `node:path`'s host-native `join` — which always builds with the
+ * RUNNING machine's separator regardless of what `platform` says. That made
+ * this function silently ignore its own `platform` parameter for every
+ * platform other than whichever one the process happened to run on.
  */
 export function windsurfConfigDir(
   home: string,
   platform: NodeJS.Platform = process.platform,
   appdata?: string,
 ): string {
-  switch (platform) {
-    case 'darwin':
-      return join(home, 'Library', 'Application Support', 'Windsurf');
-    case 'win32':
-      return join(appdata ?? process.env.APPDATA ?? join(home, 'AppData', 'Roaming'), 'Windsurf');
-    default:
-      return join(home, '.config', 'Windsurf');
+  if (platform === 'win32') {
+    const base = appdata ?? process.env.APPDATA ?? win32Path.join(home, 'AppData', 'Roaming');
+    return win32Path.join(base, 'Windsurf');
   }
+  if (platform === 'darwin') {
+    return posixPath.join(home, 'Library', 'Application Support', 'Windsurf');
+  }
+  return posixPath.join(home, '.config', 'Windsurf');
 }
 
 /**
@@ -79,16 +94,20 @@ export const windsurfAdapter: VSCodeExtensionAdapter = {
   marketplace: { openVsx: MARKETPLACE_ID, vsCode: MARKETPLACE_ID },
 
   detect(ctx: InstallContext): boolean {
+    const c = ctx as InstallContext & PlatformOverride;
     return (
-      existsSync(windsurfConfigDir(ctx.home)) ||
-      existsSync(codeiumCascadeDir(ctx.home))
+      existsSync(windsurfConfigDir(c.home, c.platform, c.appdata)) ||
+      existsSync(codeiumCascadeDir(c.home))
     );
   },
 
   chatHistoryPaths(ctx: InstallContext): string[] {
+    const c = ctx as InstallContext & PlatformOverride;
+    const platform = c.platform ?? process.platform;
+    const path = platform === 'win32' ? win32Path : posixPath;
     return [
-      join(windsurfConfigDir(ctx.home), 'User', 'workspaceStorage'),
-      codeiumCascadeDir(ctx.home),
+      path.join(windsurfConfigDir(c.home, c.platform, c.appdata), 'User', 'workspaceStorage'),
+      codeiumCascadeDir(c.home),
     ];
   },
 
@@ -128,8 +147,21 @@ export const windsurfAdapter: VSCodeExtensionAdapter = {
     // Windows write that too, relative to the project the user runs install in. Gated
     // to win32 so platforms that already fire the user-level hook don't double-capture.
     if (process.platform === 'win32') {
-      const wsHooksPath = join(ctx.cwd, '.windsurf', 'hooks.json');
-      writeWindsurfHooks(wsHooksPath, cliPath);
+      // ── RC21 (Windows tester, 2026-08-17) ────────────────────────────────
+      // `ctx.cwd` is the CLI process's cwd. When the EXTENSION drives setup the
+      // runner executes the staged CLI, so cwd is `~/.nexpath/cli/<version>` —
+      // and this hook landed in `…\.nexpath\cli\0.1.3\.windsurf\hooks.json`
+      // (seen verbatim in the tester's setup output). Since Windows/Devin Next
+      // honours ONLY the workspace hook, the user's project got no hook at all:
+      // nothing ever fired, no popup, no matter how correct the rest of the
+      // chain was. The extension now passes the folder it has open via
+      // NEXPATH_WORKSPACE_DIR; a manual `nexpath install` still uses the
+      // directory the user ran it in (ctx.cwd), which is what they expect.
+      const wsRoot = process.env.NEXPATH_WORKSPACE_DIR?.trim() || ctx.cwd;
+      const wsHooksPath = join(wsRoot, '.windsurf', 'hooks.json');
+      // RC23: bake the project into the command — a workspace hook serves one
+      // project, so it must not depend on the cwd Cascade spawns it with.
+      writeWindsurfHooks(wsHooksPath, cliPath, wsRoot);
       console.log(`   ${' '.repeat(12)}   + workspace hook (Windows/Devin Next): ${wsHooksPath}`);
     }
 
@@ -158,9 +190,13 @@ export const windsurfAdapter: VSCodeExtensionAdapter = {
     console.log(removed
       ? `✓ ${'Windsurf'.padEnd(12)} — Cascade capture hook removed`
       : `-  ${'Windsurf'.padEnd(12)} — no Cascade capture hook found`);
-    // Mirror the install: remove the Windows workspace-level hook too (no-op elsewhere).
+    // Mirror the install: remove the Windows workspace-level hook too (no-op
+    // elsewhere). RC21: resolve the SAME root install writes to, or uninstall
+    // would leave the real workspace hook behind and keep invoking a CLI the
+    // user just removed.
     if (process.platform === 'win32') {
-      removeWindsurfHooks(join(ctx.cwd, '.windsurf', 'hooks.json'));
+      const wsRoot = process.env.NEXPATH_WORKSPACE_DIR?.trim() || ctx.cwd;
+      removeWindsurfHooks(join(wsRoot, '.windsurf', 'hooks.json'));
     }
     console.log(`   ${' '.repeat(12)}   Uninstall the Nexpath extension from the Windsurf Extensions panel`);
     console.log(`    Or via CLI:          windsurf --uninstall-extension ${MARKETPLACE_ID}`);

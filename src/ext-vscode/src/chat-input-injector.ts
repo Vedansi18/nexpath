@@ -10,11 +10,31 @@ import type { Host } from './host-detector.js';
  * function lists the host's real commands (`getCommands(true)`), then executes
  * the first available candidate; the first that doesn't throw wins.
  *
- * **Windsurf is VERIFIED** against Windsurf 2.3.9 (Electron 39.6): the workbench
- * core registers `windsurf.sendTextToChat`, and a core caller invokes it as
- * `executeCommand('windsurf.sendTextToChat', text, 'annotation:<id>')` — i.e.
- * `(text, sourceLabel)`. We pass `(text, 'nexpath:advisory')` to push the chosen
- * advisory straight into Cascade (no clipboard).
+ * **CORRECTED 2026-08-10 — the previous "Windsurf is VERIFIED" claim was wrong.**
+ * It stated the workbench core *registers* `windsurf.sendTextToChat`. Re-checked
+ * against the shipped bundle (`/usr/share/windsurf/resources/app/out/vs/workbench/
+ * workbench.desktop.main.js`): `windsurf.sendTextToChat` occurs **exactly once**,
+ * and only inside a command-ID constants table —
+ * `SEND_TEXT_TO_CHAT:{id:"windsurf.sendTextToChat"}` — i.e. an ID *declaration*
+ * with no handler. By contrast the mechanisms that genuinely work occur many
+ * times: `sendChatActionMessage` ×7 and `addCascadeInput` ×6.
+ *
+ * This matches `windsurf-autopaste.ts`'s long-standing note that
+ * `windsurf.sendTextToChat` is "only a defined ID (no registered handler →
+ * `executeCommand` throws)" — **that file was right and this one was stale.**
+ * The two files contradicted each other until this correction.
+ *
+ * Practical effect: `chatInputInject` guards every candidate with an
+ * `available.has(c.id)` check (below), so an unregistered id is skipped rather
+ * than throwing — the bug was the misleading comment, not the runtime path.
+ * **The real Windsurf insert used in production is `injectViaCascadeAction`**
+ * (`windsurf-cascade-action.ts` → `windsurf.sendChatActionMessage` +
+ * `addCascadeInput`), called from `extension.ts:176` and `extension.ts:491`.
+ *
+ * Honest limit of this evidence: a string scan of the bundle cannot *prove*
+ * absence of a dynamically-registered handler. It is strong evidence
+ * (1 occurrence in an id table vs 6–7 for the working commands), not a formal
+ * proof; a live `getCommands(true)` check would settle it absolutely.
  *
  * **Cursor candidates are still heuristic** — verify against a live Cursor with
  * `vscode.commands.getCommands(true)` and prune. If nothing matches, the function
@@ -41,10 +61,17 @@ const CURSOR_CANDIDATES: ReadonlyArray<CommandCandidate> = [
 ];
 
 const WINDSURF_CANDIDATES: ReadonlyArray<CommandCandidate> = [
-  // VERIFIED command + arg shape (Windsurf 2.3.9 workbench core).
+  // Kept ONLY as a forward-compat probe: on today's builds this id has no
+  // handler (see the 2026-08-10 correction above), so the availability check
+  // skips it. If a future Windsurf registers it, it may start working.
   { id: 'windsurf.sendTextToChat', args: (t) => [t, 'nexpath:advisory'] },
-  // Best-effort fallback if a future build renames the above.
-  { id: 'windsurf.sendTerminalToChat', args: (t) => [t] },
+  // ⚠ RC13 (live, 2026-08-13): `windsurf.sendTerminalToChat` REMOVED. It is a
+  // registered command, so it passed the availability gate and RESOLVED when
+  // called with our text — while inserting NOTHING (it forwards the TERMINAL
+  // selection; the text argument is ignored). That made `chatInputInject`
+  // return a false-positive `true`: the submit delivery logged "injected
+  // directly", auto-submit armed, and the composer was empty. A candidate that
+  // can succeed without delivering the text is worse than no candidate.
 ];
 
 /** Re-export the candidate command IDs for tests that assert against the list. */

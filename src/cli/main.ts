@@ -24,6 +24,7 @@ import { envAction } from './commands/env.js';
 import { registerAutoCommand } from './commands/auto.js';
 import { registerStopCommand } from './commands/stop.js';
 import { registerWindsurfHookCommand } from './commands/windsurf-hook.js';
+import { registerCursorHookCommand } from './commands/cursor-hook.js';
 import { registerOptimizeCommand } from './commands/optimize.js';
 import { registerStatusCommand } from './commands/status.js';
 import { registerFeedbackTestCommand } from './commands/feedback-test.js';
@@ -97,6 +98,7 @@ export function createProgram(): Command {
   registerAutoCommand(program);
   registerStopCommand(program);
   registerWindsurfHookCommand(program);
+  registerCursorHookCommand(program);
 
   registerOptimizeCommand(program);
 

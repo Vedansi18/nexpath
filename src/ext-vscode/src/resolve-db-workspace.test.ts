@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { mkdtempSync, symlinkSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   resolveWorkspaceFromDbPath,
   _resetResolveDbWorkspaceCache,
@@ -9,11 +10,25 @@ import {
 } from './resolve-db-workspace.js';
 
 describe('canonicalizeCwd', () => {
-  it('resolves a symlinked path to its real path (the /tmp→/private/tmp class of mac bug)', () => {
+  it('resolves a symlinked path to its real path (the /tmp→/private/tmp class of mac bug)', (ctx) => {
     const real = mkdtempSync(join(realpathSync(tmpdir()), 'nexpath-canon-real-'));
     const link = real + '-link';
     try {
-      symlinkSync(real, link, 'dir');
+      try {
+        symlinkSync(real, link, 'dir');
+      } catch (err) {
+        // Windows refuses symlink creation unless Developer Mode is on or the
+        // process is elevated (EPERM/EACCES). That is an OS policy, not a
+        // defect in canonicalizeCwd — skip so the suite reports the truth
+        // instead of a failure the code cannot fix. Everywhere symlinks can be
+        // created, this still asserts in full.
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code === 'EPERM' || code === 'EACCES') {
+          ctx.skip();
+          return;
+        }
+        throw err;
+      }
       // auto records project_root = realpath(cwd); stop must look up the same.
       expect(canonicalizeCwd(link)).toBe(realpathSync(link));
       expect(canonicalizeCwd(link)).toBe(real);
@@ -58,22 +73,50 @@ const makeFs = (entries: Record<string, string | Error>) => ({
   },
 });
 
+/**
+ * The path the source will actually look up for a given `state.vscdb`:
+ * `join(dirname(dbPath), 'workspace.json')`. Building the fake-fs key the same
+ * way keeps it matching on Windows, where `join` yields backslashes and a
+ * hard-coded POSIX key silently missed — making the negative-path tests pass
+ * for the wrong reason and the positive ones fail.
+ */
+const workspaceJsonKey = (dbPath: string): string =>
+  join(dirname(dbPath), 'workspace.json');
+
+/**
+ * A `folder` URI that Node can convert on THIS platform.
+ *
+ * `fileURLToPath` REJECTS a non-drive path on Windows — `file:///home/u` throws
+ * "File URL path must be absolute" — and the source correctly turns that throw
+ * into `null`. A POSIX-only fixture therefore stops testing the parse on
+ * Windows and starts testing the error path instead. Real Windows
+ * `workspace.json` always carries a drive letter, so adding one keeps the
+ * fixture faithful to production rather than papering over the difference.
+ *
+ * This is one of the few places a platform branch is warranted: the URI *form*
+ * must differ, so no amount of separator normalisation would do.
+ */
+const folderUri = (posixPath: string): string =>
+  process.platform === 'win32' ? `file:///C:${posixPath}` : `file://${posixPath}`;
+
+/** The fsPath the source will return for `folderUri(p)` on this platform. */
+const expectedFsPath = (posixPath: string): string =>
+  fileURLToPath(folderUri(posixPath));
+
 describe('resolveWorkspaceFromDbPath', () => {
   beforeEach(() => {
     _resetResolveDbWorkspaceCache();
   });
 
   it('returns the fs path for a normal Cursor workspace.json (folder URI)', () => {
+    const dbPath = join('/ws-storage', 'abc', 'state.vscdb');
     const fs = makeFs({
-      '/ws-storage/abc/workspace.json': JSON.stringify({
-        folder: 'file:///home/u/repos/myproj',
+      [workspaceJsonKey(dbPath)]: JSON.stringify({
+        folder: folderUri('/home/u/repos/myproj'),
       }),
     });
-    const got = resolveWorkspaceFromDbPath(
-      '/ws-storage/abc/state.vscdb',
-      { fs },
-    );
-    expect(got).toBe('/home/u/repos/myproj');
+    const got = resolveWorkspaceFromDbPath(dbPath, { fs });
+    expect(got).toBe(expectedFsPath('/home/u/repos/myproj'));
   });
 
   it('returns null when workspace.json is missing (empty-window storage entry)', () => {
@@ -124,19 +167,21 @@ describe('resolveWorkspaceFromDbPath', () => {
 
   it('caches results by directory — repeated lookups read fs only once', () => {
     let reads = 0;
+    const dbPath = join('/ws-storage', 'abc', 'state.vscdb');
+    const key = workspaceJsonKey(dbPath);
     const fs = {
       readFileSync: (p: string, _enc: 'utf8'): string => {
         reads += 1;
-        if (p === '/ws-storage/abc/workspace.json') {
-          return JSON.stringify({ folder: 'file:///home/u/a' });
+        if (p === key) {
+          return JSON.stringify({ folder: folderUri('/home/u/a') });
         }
         throw new Error('unexpected path: ' + p);
       },
     };
-    const a = resolveWorkspaceFromDbPath('/ws-storage/abc/state.vscdb', { fs });
-    const b = resolveWorkspaceFromDbPath('/ws-storage/abc/state.vscdb', { fs });
-    expect(a).toBe('/home/u/a');
-    expect(b).toBe('/home/u/a');
+    const a = resolveWorkspaceFromDbPath(dbPath, { fs });
+    const b = resolveWorkspaceFromDbPath(dbPath, { fs });
+    expect(a).toBe(expectedFsPath('/home/u/a'));
+    expect(b).toBe(expectedFsPath('/home/u/a'));
     expect(reads).toBe(1);
   });
 

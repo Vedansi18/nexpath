@@ -19,13 +19,29 @@ import { spawnSync } from 'node:child_process';
 // Must match Layer C's popup window titles (TtySelectFn / feedback-tty).
 const ADVISORY_POPUP_TITLE = 'Nexpath — Action Required';
 const FEEDBACK_POPUP_TITLE = 'Nexpath — Feedback';
+/**
+ * Must match `PROMPT_ENHANCEMENT_POPUP_WINDOW_TITLE_V1` in
+ * `src/cli/prompt-enhancement-host.ts`, which passes it as `--title` to the
+ * terminal emulator it launches. Note the separator is a middle dot (`·`), not
+ * the em dash (`—`) of the two titles above — wmctrl/xdotool match the literal
+ * text, so the wrong character silently raises nothing.
+ */
+const PROMPT_ENHANCEMENT_POPUP_TITLE = 'Nexpath · Prompt enhancement';
 
 /**
  * Titles to raise. Only one popup is open per turn (`nexpath stop` shows the
- * feedback popup OR the advisory popup, never both), so each tick tries both and
- * raises whichever window exists.
+ * feedback popup, the advisory popup, or the prompt-enhancement popup — never
+ * two), so each tick tries each and raises whichever window exists.
+ *
+ * The prompt-enhancement popup only opens a window on the spawn-terminal path;
+ * on the in-process `/dev/tty` path there is nothing to raise, and a title that
+ * matches no window is a no-op.
  */
-const POPUP_TITLES: readonly string[] = [ADVISORY_POPUP_TITLE, FEEDBACK_POPUP_TITLE];
+const POPUP_TITLES: readonly string[] = [
+  ADVISORY_POPUP_TITLE,
+  FEEDBACK_POPUP_TITLE,
+  PROMPT_ENHANCEMENT_POPUP_TITLE,
+];
 
 export interface ForegroundDeps {
   platform?: NodeJS.Platform;
@@ -48,18 +64,35 @@ function defaultHasCommand(cmd: string): boolean {
   }
 }
 
-/** Try once to raise the window with `title`. Returns true when activation reports success. */
+/**
+ * Try once to raise the window with `title` — WITHOUT taking keyboard focus.
+ *
+ * ⚠ RC10 (live root cause, captured byte-by-byte 2026-08-13): the original
+ * implementation ACTIVATED the popup (`wmctrl -a` / `xdotool windowactivate`),
+ * which steals keyboard focus the moment the window appears. The user is
+ * usually mid-typing at that exact moment — the popup opens at SUBMIT time —
+ * so their in-flight keystrokes (Space/Enter/arrows are the most common keys)
+ * landed IN THE POPUP, silently navigating and "selecting" it within seconds.
+ * Measured on the popup's own TTY: `Down Up Space Down Enter` arriving with no
+ * synthetic key tool running — the user's own fingers. To the user it looks
+ * like "the popup flashed open and closed itself and my prompt got replaced".
+ *
+ * So: raise ABOVE (visible), never FOCUS. `wmctrl -r <title> -b add,above`
+ * marks it always-on-top; `xdotool windowraise` raises the stacking order.
+ * Neither moves keyboard focus, so typing keeps flowing to the editor and the
+ * popup is interacted with only when the user deliberately clicks into it.
+ */
 function defaultActivate(tool: 'wmctrl' | 'xdotool', title: string): boolean {
   try {
     if (tool === 'wmctrl') {
-      return spawnSync('wmctrl', ['-a', title], { stdio: 'ignore', timeout: 2000 }).status === 0;
+      return spawnSync('wmctrl', ['-r', title, '-b', 'add,above'], { stdio: 'ignore', timeout: 2000 }).status === 0;
     }
     const found = spawnSync('xdotool', ['search', '--name', title], {
       encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 2000,
     });
     const id = (found.stdout ?? '').trim().split('\n').filter(Boolean)[0];
     if (!id) return false;
-    return spawnSync('xdotool', ['windowactivate', id], { stdio: 'ignore', timeout: 2000 }).status === 0;
+    return spawnSync('xdotool', ['windowraise', id], { stdio: 'ignore', timeout: 2000 }).status === 0;
   } catch {
     return false;
   }

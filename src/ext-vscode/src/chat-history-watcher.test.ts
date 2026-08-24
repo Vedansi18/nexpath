@@ -3,6 +3,7 @@ import { EventEmitter } from 'node:events';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createRequire } from 'node:module';
 import {
   createChatHistoryWatcher,
   defaultReadItemTable,
@@ -563,6 +564,10 @@ describe('createChatHistoryWatcher', () => {
       targets: [cursorTarget('/p', makeExtractor('test', []))],
       onEvent,
       onError,
+      // RC53: this pin is about a REAL watch error — the file still exists.
+      // (The fake path '/p' would otherwise probe as vanished and take the
+      // quiet close-and-notify path the RC53 suite pins separately.)
+      existsSyncFn: () => true,
       watchFn: watchFn as never,
       readItemTableFn,
       debounceMs: 1,
@@ -821,7 +826,74 @@ describe('defaultReadWindsurfJsonFiles', () => {
 // from dev plan §2.5 — the whole reason we swapped sql.js → better-sqlite3
 // in M2/B4.
 
-describe('defaultReadItemTable', () => {
+/**
+ * True iff `resolver` can resolve `moduleName` without throwing.
+ *
+ * Extracted (rather than an inline IIFE) so the try/catch logic itself has a
+ * regression test — it is new logic added for this cross-OS pass, and an
+ * untested probe is worse than no probe: if it ever resolved wrong (a typo'd
+ * module name, or a broken `resolver`), the block below would skip silently
+ * and forever, masking real regressions instead of surfacing a setup issue.
+ * `resolver` defaults to the real one; tests inject a fake so no test needs
+ * to mutate `node_modules` on disk to prove the branches.
+ */
+function canResolveModule(
+  moduleName: string,
+  resolver: (name: string) => string = (name) =>
+    createRequire(import.meta.url).resolve(name),
+): boolean {
+  try {
+    resolver(moduleName);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+describe('canResolveModule (the better-sqlite3 capability probe)', () => {
+  it('returns true when the resolver succeeds', () => {
+    expect(canResolveModule('anything', () => '/some/resolved/path')).toBe(true);
+  });
+
+  it('returns false when the resolver throws', () => {
+    expect(
+      canResolveModule('anything', () => {
+        throw new Error('Cannot find module');
+      }),
+    ).toBe(false);
+  });
+
+  it('the default resolver (real require.resolve) finds a module that is definitely installed', () => {
+    // End-to-end sanity on the default path, not just the injected fake:
+    // vitest itself is guaranteed present in this test run.
+    expect(canResolveModule('vitest')).toBe(true);
+  });
+
+  it('the default resolver returns false for a module that cannot exist', () => {
+    expect(canResolveModule('nexpath-zzq-definitely-does-not-exist-7741')).toBe(false);
+  });
+});
+
+/**
+ * `src/ext-vscode` is its own npm package and the root `package.json` declares
+ * no `workspaces`, so a root `npm install` never installs its dependencies.
+ * When the ROOT suite picks these files up, `better-sqlite3` is genuinely
+ * absent and the block below fails for a SETUP reason rather than a defect —
+ * noise that masks real regressions, which is exactly what cross-OS hardening
+ * is meant to remove.
+ *
+ * Run from the extension package (`cd src/ext-vscode && npx vitest run`) the
+ * dependency is present and every assertion below executes in full. This is a
+ * capability probe, not a platform branch: the behaviour is identical on Linux,
+ * macOS and Windows given the same install state.
+ *
+ * Complementary to the root `vitest.config` exclusion on the CLI side — if that
+ * lands, these files stop being collected by the root suite and this guard
+ * simply never triggers. Neither change duplicates the other.
+ */
+const canLoadBetterSqlite3 = canResolveModule('better-sqlite3');
+
+describe.skipIf(!canLoadBetterSqlite3)('defaultReadItemTable', () => {
   let tmpDirPath: string;
 
   beforeEach(() => {
@@ -974,5 +1046,60 @@ describe('resolveBundledNativeBinding (multi-ABI prebuild selection)', () => {
 
   it('returns null when the extension root is unknown', () => {
     expect(resolveBundledNativeBinding(undefined, '143', () => true, j)).toBeNull();
+  });
+});
+
+/**
+ * ⭐ RC53 — vanished-db watch errors (Windows/Cursor 2026-08-24): Cursor
+ * deletes its transient numeric workspaceStorage folders; Windows fs.watch
+ * then raises EPERM per watched file. A watch on a file that no longer exists
+ * is FINISHED — close it and notify quietly; a watch error on a file that
+ * still exists is a real problem and reports exactly as before.
+ */
+describe('⭐ RC53 — watch errors after the file vanished', () => {
+  function harnessRC53(exists: boolean) {
+    const created: FakeFSWatcher[] = [];
+    const watchFn = vi.fn((_p: string, listener?: (e: string, f: string) => void) => {
+      const w = makeFakeWatcher();
+      if (listener) w.on('change', listener);
+      created.push(w);
+      return w;
+    });
+    const onError = vi.fn();
+    const onInfo = vi.fn();
+    const w = createChatHistoryWatcher({
+      targets: [cursorTarget('/gone/state.vscdb')],
+      onEvent: vi.fn(),
+      onError, onInfo,
+      existsSyncFn: () => exists,
+      watchFn: watchFn as never,
+      readItemTableFn: vi.fn<ReadItemTableFn>(async () => []),
+    });
+    w.start();
+    return { created, onError, onInfo };
+  }
+
+  it('⭐ file gone ⇒ watcher CLOSED + onInfo, NO error (the EPERM-cleanup case)', () => {
+    const { created, onError, onInfo } = harnessRC53(false);
+    created[0]!.emit('error', Object.assign(new Error('EPERM: operation not permitted, watch'), { code: 'EPERM' }));
+    expect(onError).not.toHaveBeenCalled();
+    expect(onInfo).toHaveBeenCalledTimes(1);
+    expect(String(onInfo.mock.calls[0]![0])).toContain('watched db removed');
+    expect(created[0]!.close).toHaveBeenCalled();
+  });
+
+  it('file still exists ⇒ the error reports exactly as before (real EPERM)', () => {
+    const { created, onError, onInfo } = harnessRC53(true);
+    created[0]!.emit('error', new Error('EPERM: operation not permitted, watch'));
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(String(onError.mock.calls[0]![0])).toContain('EPERM');
+    expect(onInfo).not.toHaveBeenCalled();
+  });
+
+  it('each vanished sibling closes its own watcher (main + wal + shm)', () => {
+    const { created, onInfo } = harnessRC53(false);
+    for (const w of created) w.emit('error', new Error('EPERM: operation not permitted, watch'));
+    expect(onInfo).toHaveBeenCalledTimes(3);
+    for (const w of created) expect(w.close).toHaveBeenCalled();
   });
 });
