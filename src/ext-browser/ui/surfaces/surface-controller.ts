@@ -53,7 +53,7 @@
 // ============================================================================
 
 import type { SurfaceId, SurfaceModel, SurfaceRow } from './surface-model.js';
-import { renderSurface } from './surface-view.js';
+import { growFields, renderSurface } from './surface-view.js';
 
 /** What the surfaces report upward. The dock's own union stays `dismiss`-only —
  * window furniture and surface semantics are different layers. */
@@ -192,6 +192,11 @@ export function createSurfaceController(
     // Re-apply the user's edits — the freshly built textareas carry model text.
     const rendered = fields();
     fieldValues.forEach((value, i) => { if (rendered[i]) rendered[i]!.value = value; });
+
+    // Only now can a textarea be measured: the frame is in the document and the
+    // real text is in place. Growing any earlier measures either a detached
+    // element or the wrong string.
+    growFields(wrapper);
 
     // Row-focus and DOM-focus stay in step: a focused field row means its
     // textarea really has the keyboard, caret parked at the end (the CLI parks

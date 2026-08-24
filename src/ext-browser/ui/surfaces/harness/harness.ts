@@ -20,7 +20,7 @@
 
 import { mountNexpathDock } from '../dock.js';
 import { installChromeStyles } from '../chrome.js';
-import { renderSurface } from '../surface-view.js';
+import { growFields, renderSurface } from '../surface-view.js';
 import { createSurfaceController, DETAILS_MERGE_HEADING, type SurfaceEvent } from '../surface-controller.js';
 import type { SurfaceId, SurfaceModel } from '../surface-model.js';
 import { PE_FIXTURE } from '../fixtures/pe.js';
@@ -146,6 +146,9 @@ const CONTENT_CASES: ReadonlyArray<readonly [string, string]> = [
   ['markup payload', 'a < b & "c" > d <img src=x onerror="window.__pwned=1">'],
 ];
 
+/** One CLI text line. A field shorter than this is showing nothing at all. */
+const FRAME_LINE_FLOOR_PX = 14;
+
 /** Viewport-shaped boxes. 230 and 180 are the panel bug's reproduction range. */
 const SIZES: ReadonlyArray<readonly [number, number]> = [
   [2560, 1080], [1920, 1080], [1440, 800], [1024, 600],
@@ -155,7 +158,8 @@ const SIZES: ReadonlyArray<readonly [number, number]> = [
 interface CellResult {
   surface: string; content: string; w: number; h: number;
   headerVisible: boolean; rowVisible: boolean; footerVisible: boolean;
-  noHOverflow: boolean; notGrown: boolean; noInjection: boolean;
+  noHOverflow: boolean; notGrown: boolean; noInjection: boolean; fieldsShowContent: boolean;
+  detail: string;
 }
 
 function within(inner: DOMRect, outer: DOMRect): boolean {
@@ -171,6 +175,7 @@ function sweepCell(surface: SurfaceModel, label: string, contentName: string, w:
 
   const frame = renderSurface(document, surface, { focusIndex: 0 });
   box.appendChild(frame);
+  growFields(frame);
 
   const boxRect = box.getBoundingClientRect();
   const frameRect = frame.getBoundingClientRect();
@@ -199,6 +204,19 @@ function sweepCell(surface: SurfaceModel, label: string, contentName: string, w:
     // it would have passed with escaping fully removed.
     noInjection: frame.querySelector('script, img, iframe, svg, object, embed') === null
       && !(window as unknown as Record<string, unknown>)['__pwned'],
+    // THE CHECK THAT WAS MISSING. Every other metric passed while the prompt
+    // itself was invisible: a field collapsed to 0px still leaves its bullet
+    // row, header and footer exactly where they belong. A field must be at
+    // least one line tall, and tall enough for the text it holds.
+    fieldsShowContent: [...frame.querySelectorAll('textarea')].every((f) => {
+      const height = f.getBoundingClientRect().height;
+      return height >= FRAME_LINE_FLOOR_PX && f.scrollHeight <= height + 1;
+    }),
+    // The numbers, not just the verdict: a boolean tells you a field is wrong
+    // and nothing about how.
+    detail: [...frame.querySelectorAll('textarea')]
+      .map((f, i) => `f${i} h=${Math.round(f.getBoundingClientRect().height)} sh=${f.scrollHeight} w=${Math.round(f.getBoundingClientRect().width)}`)
+      .join(' | '),
   };
 
   box.remove();
@@ -219,7 +237,7 @@ export function runSweep(): { pass: number; fail: number; failures: CellResult[]
     // The full size grid with the fixture's own content…
     for (const [w, h] of SIZES) {
       const cell = sweepCell(fixture, label, 'fixture', w, h);
-      if (cell.headerVisible && cell.rowVisible && cell.footerVisible && cell.noHOverflow && cell.notGrown && cell.noInjection) pass += 1;
+      if (cell.headerVisible && cell.rowVisible && cell.footerVisible && cell.noHOverflow && cell.notGrown && cell.noInjection && cell.fieldsShowContent) pass += 1;
       else failures.push(cell);
     }
     // WHERE `overflow-wrap: anywhere` ACTUALLY MATTERS. A long token in the body
@@ -239,7 +257,7 @@ export function runSweep(): { pass: number; fail: number; failures: CellResult[]
       // `0 0 auto` — the C-2 core — passed the whole sweep.
       for (const [w, h] of [[1440, 800], [600, 300], [360, 230], [360, 180]] as const) {
         const cell = sweepCell(withPayloadEverywhere(fixture, text), label, name, w, h);
-        if (cell.headerVisible && cell.rowVisible && cell.footerVisible && cell.noHOverflow && cell.notGrown && cell.noInjection) pass += 1;
+        if (cell.headerVisible && cell.rowVisible && cell.footerVisible && cell.noHOverflow && cell.notGrown && cell.noInjection && cell.fieldsShowContent) pass += 1;
         else failures.push(cell);
       }
     }
@@ -250,7 +268,7 @@ export function runSweep(): { pass: number; fail: number; failures: CellResult[]
         withPayloadEverywhere(fixture, 'a < b & "c" > d <img src=x onerror="window.__pwned=1">'),
         label, 'payload in every slot', 1440, 800,
       );
-      if (cell.headerVisible && cell.rowVisible && cell.footerVisible && cell.noHOverflow && cell.notGrown && cell.noInjection) pass += 1;
+      if (cell.headerVisible && cell.rowVisible && cell.footerVisible && cell.noHOverflow && cell.notGrown && cell.noInjection && cell.fieldsShowContent) pass += 1;
       else failures.push(cell);
     }
 
@@ -258,7 +276,7 @@ export function runSweep(): { pass: number; fail: number; failures: CellResult[]
     for (const [contentName, text] of CONTENT_CASES) {
       for (const [w, h] of [[1440, 800], [600, 300], [360, 230]] as const) {
         const cell = sweepCell(withBodyText(fixture, text), label, contentName, w, h);
-        if (cell.headerVisible && cell.rowVisible && cell.footerVisible && cell.noHOverflow && cell.notGrown && cell.noInjection) pass += 1;
+        if (cell.headerVisible && cell.rowVisible && cell.footerVisible && cell.noHOverflow && cell.notGrown && cell.noInjection && cell.fieldsShowContent) pass += 1;
         else failures.push(cell);
       }
     }
@@ -281,7 +299,7 @@ function renderSweepReport(): void {
     const flags = Object.entries(f)
       .filter(([k, v]) => v === false && k !== 'surface' && k !== 'content')
       .map(([k]) => k).join(', ');
-    row.textContent = `${f.surface} · ${f.content} · ${f.w}×${f.h} → ${flags}`;
+    row.textContent = `${f.surface} · ${f.content} · ${f.w}×${f.h} → ${flags}   [${f.detail}]`;
     detail.appendChild(row);
   }
   // Reported two ways: the console line for a Chrome --dump-dom run, and a POST

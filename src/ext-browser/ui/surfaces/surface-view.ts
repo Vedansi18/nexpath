@@ -38,8 +38,45 @@ import type { SurfaceModel, SurfaceState } from './surface-model.js';
  * the live proof is D7's content sweep.
  */
 export function autoGrow(field: HTMLTextAreaElement): void {
+  // A DETACHED element cannot be measured: `scrollHeight` is 0 for anything not
+  // in the document. Writing that back as a height is how the field ended up
+  // 0px tall and the prompt invisible until the first keystroke — the renderer
+  // builds the frame detached, so the constructor's own call always measured
+  // nothing. Never write a height that was not actually measured.
+  if (!field.isConnected) return;
   field.style.height = 'auto';
   field.style.height = `${field.scrollHeight}px`;
+}
+
+/**
+ * Size every field under `root` to its content. Call once AFTER the frame is in
+ * the document — that is the only moment a textarea can be measured.
+ *
+ * Separate from rendering because the renderer returns a detached frame by
+ * design (it is a pure builder, and the tests depend on that). The cost is this
+ * one call at each attach site, and the sweep fails if it is ever missed.
+ */
+export function growFields(root: ParentNode): void {
+  const fields = [...root.querySelectorAll('textarea')];
+
+  // Pass one sizes each field to its content.
+  for (const field of fields) autoGrow(field);
+
+  // Pass two exists because pass one can invalidate its own measurement.
+  // Growing a field pushes the scroll band into overflow, a scrollbar appears,
+  // the field narrows, and the text rewraps TALLER than the height just set —
+  // measured at 360px wide with a 2000-character token: 825px set, 840px
+  // needed, the last line clipped.
+  //
+  // It must NOT be another autoGrow. That resets to `auto` first, which
+  // collapses the field, removes the overflow, takes the scrollbar away, widens
+  // the field and measures 825 all over again — an oscillation, not a
+  // convergence, which is why running autoGrow twice changed nothing. This pass
+  // only ever grows, from the settled width, so it terminates.
+  for (const field of fields) {
+    if (!field.isConnected) continue;
+    if (field.scrollHeight > field.clientHeight) field.style.height = `${field.scrollHeight}px`;
+  }
 }
 
 /** The editable field beneath a `field` row's label. */
@@ -54,11 +91,12 @@ function buildField(doc: Document, text: string, indent: 4 | 6, placeholder?: st
   // than pre-filled text: the CLI prints it only while there is nothing there,
   // and text the user did not write must never be sent as if they had.
   if (placeholder) field.placeholder = placeholder;
+  // One row is the floor, not the size: `growFields` raises it to the content as
+  // soon as the frame is attached. Without an inline height the field can never
+  // collapse to nothing, which is the failure this replaced.
   field.rows = 1;
-  // Auto-grow on creation and on every edit. The listener dies with the element,
-  // which is discarded whole when a surface re-renders.
+  // The listener dies with the element, which is discarded whole on re-render.
   field.addEventListener('input', () => autoGrow(field));
-  autoGrow(field);
 
   row.appendChild(field);
   return row;

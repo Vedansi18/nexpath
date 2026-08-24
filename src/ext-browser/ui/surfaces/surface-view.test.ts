@@ -3,7 +3,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { renderSurface } from './surface-view.js';
+import { autoGrow, growFields, renderSurface } from './surface-view.js';
 import { PE_FIXTURE, PE_FOOTER, DETAILS_HINT, EDIT_KEYS_HINT, BODY_HINT } from './fixtures/pe.js';
 import { MPS_FIRST_FIXTURE, MPS_CONTINUATION_FIXTURE } from './fixtures/mps.js';
 import { PEF_FIXTURE } from './fixtures/pef.js';
@@ -211,15 +211,23 @@ describe('auto-grow (D3.3)', () => {
     // scrollHeight includes the slack of an already-tall box and the height can
     // never come back down when content shrinks. The live proof is D7's sweep;
     // this stops the line being deleted before then.
+    // Comments are stripped first. Without that this reads prose: the guard's
+    // own comment explains scrollHeight, which put the word before the code
+    // reached `'auto'` and failed a check about ordering in the CODE.
     const src = readFileSync(resolve(process.cwd(), 'src/ext-browser/ui/surfaces/surface-view.ts'), 'utf8');
-    const body = src.slice(src.indexOf('export function autoGrow'), src.indexOf('/** The editable field'));
+    const whole = src.slice(src.indexOf('export function autoGrow'), src.indexOf('export function growFields'));
+    const body = whole.split('\n').filter((l) => !l.trimStart().startsWith('//')).join('\n');
 
     expect(body).toMatch(/height\s*=\s*'auto'/);
     expect(body.indexOf("'auto'")).toBeLessThan(body.indexOf('scrollHeight'));
   });
 
-  it('grows the field on input, not only when it is built', () => {
+  it('grows the field on input, once the frame is in the document', () => {
+    // Attached on purpose: a detached field is exactly what autoGrow now
+    // refuses to size, and rendering into nowhere was how the prompt came out
+    // invisible in the first place.
     const frame = renderSurface(document, PE_FIXTURE, { focusIndex: 0 });
+    document.body.appendChild(frame);
     const field = frame.querySelector('textarea')!;
     let grew = 0;
     Object.defineProperty(field, 'scrollHeight', { get: () => ++grew * 10 });
@@ -227,6 +235,62 @@ describe('auto-grow (D3.3)', () => {
     field.dispatchEvent(new Event('input'));
 
     expect(grew).toBeGreaterThan(0);
+    frame.remove();
+  });
+});
+
+describe('auto-grow measures only what it can measure', () => {
+  // The bug this pins made the prompt INVISIBLE in a real browser while every
+  // test passed: the renderer builds the frame detached, `scrollHeight` is 0 on
+  // anything not in the document, and the old code wrote that 0 back as the
+  // height. jsdom reports 0 either way, so no jsdom test could tell the two
+  // apart — these assert the contract instead.
+
+  it('refuses to size a detached field, rather than writing a measurement it never took', () => {
+    const field = document.createElement('textarea');
+    field.value = ['several', 'lines', 'of', 'text'].join('\n');
+    field.style.height = '99px';
+
+    autoGrow(field);                          // never attached
+
+    expect(field.style.height, 'a detached field must be left alone').toBe('99px');
+  });
+
+  it('sizes a field once it is in the document', () => {
+    const field = document.createElement('textarea');
+    document.body.appendChild(field);
+    Object.defineProperty(field, 'scrollHeight', { value: 120, configurable: true });
+
+    autoGrow(field);
+
+    expect(field.style.height).toBe('120px');
+    field.remove();
+  });
+
+  it('growFields reaches every field under a root', () => {
+    const root = renderSurface(document, PE_FIXTURE, { focusIndex: 0 });
+    document.body.appendChild(root);
+    for (const f of root.querySelectorAll('textarea')) {
+      Object.defineProperty(f, 'scrollHeight', { value: 77, configurable: true });
+    }
+
+    growFields(root);
+
+    expect([...root.querySelectorAll('textarea')].map((f) => f.style.height)).toEqual(['77px', '77px']);
+    root.remove();
+  });
+
+  it('the second pass only grows — resetting to auto would oscillate', () => {
+    // Growing a field can make a scrollbar appear, which narrows it and rewraps
+    // the text taller. A second `auto` reset would undo the overflow, remove the
+    // scrollbar, and measure the old height again, forever. Asserted at source:
+    // jsdom has no scrollbars to reproduce it with.
+    const src = readFileSync(resolve(process.cwd(), 'src/ext-browser/ui/surfaces/surface-view.ts'), 'utf8');
+    const body = src.slice(src.indexOf('export function growFields'));
+    const secondPass = body.slice(body.indexOf('for (const field of fields) {'));
+
+    expect(secondPass).toContain('scrollHeight > field.clientHeight');
+    expect(secondPass).not.toContain("'auto'");
   });
 });
 
