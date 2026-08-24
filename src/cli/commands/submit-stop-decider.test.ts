@@ -67,7 +67,7 @@ function harness(stdout: string, exitCode: number | null = 0) {
   const spawnFn = vi.fn(() => child);
   const decide = buildStopDrivenPromptSubmitDecider(
     { project: '/proj' },
-    { host: 'cursor', spawnFn: spawnFn as never, writeDecision: writeDecision as never, logEvent: () => {}, ...FAKE_SWEEP_STORE },
+    { host: 'cursor', mkdirFn: (() => {}) as never, spawnFn: spawnFn as never, writeDecision: writeDecision as never, logEvent: () => {}, ...FAKE_SWEEP_STORE },
   );
   return { decide, writeDecision, spawnFn, stdinWrites: writes };
 }
@@ -135,7 +135,7 @@ describe('⭐ the decider — stop selection ⇒ block + persisted decision', ()
     const { child } = fakeChild('{"decision":"block","reason":"text"}\n');
     const decide = buildStopDrivenPromptSubmitDecider(
       { project: '/proj' },
-      { host: 'windsurf', spawnFn: (() => child) as never, writeDecision: writeDecision as never, logEvent: () => {}, ...FAKE_SWEEP_STORE },
+      { host: 'windsurf', mkdirFn: (() => {}) as never, spawnFn: (() => child) as never, writeDecision: writeDecision as never, logEvent: () => {}, ...FAKE_SWEEP_STORE },
     );
     await expect(decide('e', { project: '/proj' }, 'p')).resolves.toBe('allow');
   });
@@ -143,7 +143,7 @@ describe('⭐ the decider — stop selection ⇒ block + persisted decision', ()
   it('fail-open: a throwing spawn allows', async () => {
     const decide = buildStopDrivenPromptSubmitDecider(
       { project: '/proj' },
-      { host: 'cursor', spawnFn: (() => { throw new Error('ENOENT'); }) as never, writeDecision: vi.fn() as never, logEvent: () => {} },
+      { host: 'cursor', mkdirFn: (() => {}) as never, spawnFn: (() => { throw new Error('ENOENT'); }) as never, writeDecision: vi.fn() as never, logEvent: () => {} },
     );
     await expect(decide('e', { project: '/proj' }, 'p')).resolves.toBe('allow');
   });
@@ -152,7 +152,7 @@ describe('⭐ the decider — stop selection ⇒ block + persisted decision', ()
     const spawnFn = vi.fn();
     const decide = buildStopDrivenPromptSubmitDecider(
       { project: '/proj' },
-      { host: 'cursor', spawnFn: spawnFn as never, writeDecision: vi.fn() as never, logEvent: () => {} },
+      { host: 'cursor', mkdirFn: (() => {}) as never, spawnFn: spawnFn as never, writeDecision: vi.fn() as never, logEvent: () => {} },
     );
     await expect(decide('e', { project: '/proj' }, '   ')).resolves.toBe('allow');
     expect(spawnFn).not.toHaveBeenCalled();
@@ -164,7 +164,7 @@ describe('⭐ the decider — stop selection ⇒ block + persisted decision', ()
     const decide = buildStopDrivenPromptSubmitDecider(
       { project: '/proj' },
       {
-        host: 'cursor', spawnFn: (() => child) as never, writeDecision: vi.fn() as never,
+        host: 'cursor', mkdirFn: (() => {}) as never, spawnFn: (() => child) as never, writeDecision: vi.fn() as never,
         logEvent: () => {}, onChild: (c) => { seen.push(c); },
       },
     );
@@ -187,7 +187,7 @@ describe('⭐ RC10 — a block sweeps every leftover pending row', () => {
     const decide = buildStopDrivenPromptSubmitDecider(
       { project: '/proj' },
       {
-        host: 'windsurf',
+        host: 'windsurf', mkdirFn: (() => {}) as never,
         spawnFn: (() => child) as never,
         writeDecision: vi.fn(async () => {}) as never,
         logEvent: () => {},
@@ -207,7 +207,7 @@ describe('⭐ RC10 — a block sweeps every leftover pending row', () => {
     const decide = buildStopDrivenPromptSubmitDecider(
       { project: '/proj' },
       {
-        host: 'cursor',
+        host: 'cursor', mkdirFn: (() => {}) as never,
         spawnFn: (() => child) as never,
         writeDecision: vi.fn(async () => {}) as never,
         logEvent: () => {},
@@ -522,5 +522,40 @@ describe('⭐ RC45 — ensureNodeDirOnPath', () => {
     const nodeDir = require('node:path').dirname(process.execPath);
     const pathKey = Object.keys(seenEnv ?? {}).find((k) => k.toUpperCase() === 'PATH') ?? 'PATH';
     expect((seenEnv?.[pathKey] ?? '').split(process.platform === 'win32' ? ';' : ':')).toContain(nodeDir);
+  });
+});
+
+/**
+ * ⭐ RC51 — no-folder-open (Mac/Devin 2026-08-24): root "/" makes the decision
+ * file /.nexpath/… — unwritable everywhere, guaranteed-impossible on macOS.
+ * The decider must not show a popup whose selection can never be delivered.
+ */
+describe('⭐ RC51 — unwritable project root allows without a popup', () => {
+  it('⭐ unwritable root ⇒ allow, stop NEVER spawned, warn logged', async () => {
+    const spawnFn = vi.fn();
+    const warns: string[] = [];
+    const decide = buildStopDrivenPromptSubmitDecider(
+      { project: '/' },
+      {
+        host: 'windsurf', spawnFn: spawnFn as never, writeDecision: vi.fn() as never,
+        logEvent: ((_l: string, name: string) => { warns.push(name); }) as never,
+        mkdirFn: (() => { throw Object.assign(new Error('EACCES'), { code: 'EACCES' }); }) as never,
+      },
+    );
+    await expect(decide('e', { project: '/' }, 'a real prompt')).resolves.toBe('allow');
+    expect(spawnFn).not.toHaveBeenCalled();
+    expect(warns).toContain('submit_flow_root_unwritable');
+  });
+
+  it('a writable root passes through to the normal flow (regression pin)', async () => {
+    const { child } = fakeChild('');
+    const decide = buildStopDrivenPromptSubmitDecider(
+      { project: '/proj' },
+      {
+        host: 'windsurf', spawnFn: (() => child) as never, writeDecision: vi.fn() as never,
+        logEvent: () => {}, mkdirFn: (() => {}) as never, ...FAKE_SWEEP_STORE,
+      },
+    );
+    await expect(decide('e', { project: '/proj' }, 'a real prompt')).resolves.toBe('allow');
   });
 });

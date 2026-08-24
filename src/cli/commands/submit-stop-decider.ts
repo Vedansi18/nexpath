@@ -36,7 +36,7 @@
  * persist failure — resolves 'allow': the original prompt is released.
  */
 import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve, posix as posixPath, win32 as win32Path } from 'node:path';
 import { writeSubmitDecision, appendReplacementEcho, latestReplacementEchoAt } from './submit-decision-store.js';
@@ -220,6 +220,8 @@ export interface StopDrivenDeciderPorts {
   /** RC10 sweep seams — injected for tests; default to the real store. */
   openStoreFn?: (db?: string) => Promise<unknown>;
   closeStoreFn?: (store: unknown) => Promise<void> | void;
+  /** RC51 seam: the writability probe (defaults to real mkdirSync). */
+  mkdirFn?: typeof mkdirSync;
 }
 
 /**
@@ -241,6 +243,22 @@ export function buildStopDrivenPromptSubmitDecider(
     const projectRoot = o.project ?? opts.project ?? process.cwd();
     // A blank prompt is nothing to refine — release it without any popup.
     if ((promptText ?? '').trim() === '') return 'allow';
+
+    // RC51 (Mac/Devin 2026-08-24): with NO folder open the hook's root
+    // resolves to "/" — the decision file would be /.nexpath/… (EACCES on
+    // Linux, guaranteed-impossible on macOS's sealed root volume). The old
+    // behaviour showed the FULL popup, took the user's selection, then
+    // silently failed to persist and released the original prompt — a popup
+    // whose choice can never be delivered ("popup showed, nothing happened").
+    // Probe the exact directory the persist would create; unwritable ⇒ allow
+    // immediately, loudly, with no undeliverable popup. Any writable project
+    // root passes untouched (the mkdir it performs is the persist's own).
+    try {
+      (ports.mkdirFn ?? mkdirSync)(join(projectRoot, '.nexpath'), { recursive: true });
+    } catch {
+      logEvent('warn', 'submit_flow_root_unwritable', { root: projectRoot });
+      return 'allow';
+    }
 
     let child: ChildProcess | null = null;
     let stdout = '';
