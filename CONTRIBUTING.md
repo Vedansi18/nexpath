@@ -20,7 +20,7 @@ and how it handles your data. This guide covers what you need in order to *chang
 
 Before creating a new issue, please
 [search existing ones](https://github.com/hi0001234d/nexpath/issues) to avoid duplicates. When
-you're ready, head to the [issues page](https://github.com/hi0001234d/nexpath/issues/new/choose).
+you're ready, [open a new issue](https://github.com/hi0001234d/nexpath/issues/new).
 
 > 🔐 **Important:** If you discover a security vulnerability, please use the
 > [GitHub security tool to report it privately](https://github.com/hi0001234d/nexpath/security/advisories/new)
@@ -47,8 +47,8 @@ correction, a minor wording improvement, or a type-only fix that doesn't change 
 
 For features and larger contributions:
 
-- Check [existing issues](https://github.com/hi0001234d/nexpath/issues) and
-  [Discussions](https://github.com/hi0001234d/nexpath/discussions) for similar ideas
+- Check [existing issues](https://github.com/hi0001234d/nexpath/issues) and Discussions for
+  similar ideas
 - If your idea is new, open an issue describing the problem, your proposed approach, and why it
   belongs in Nexpath
 - Wait for approval from core maintainers before starting implementation
