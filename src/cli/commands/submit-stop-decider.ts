@@ -39,6 +39,7 @@ import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
 import { readFileSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve, posix as posixPath, win32 as win32Path } from 'node:path';
+import { isWindowsBatchShim } from '../../utils/batch-shim.js';
 import { writeSubmitDecision, appendReplacementEcho, latestReplacementEchoAt } from './submit-decision-store.js';
 import { log } from '../../logger.js';
 // CONSUME-ONLY store calls (bhavnesh75-owned exports), used exactly as stop.ts
@@ -196,7 +197,11 @@ export function parseStopBlockOutput(stdout: string): StopBlockLine | null {
  */
 function nexpathCmd(binaryPath?: string): { cmd: string; prefix: string[] } {
   if (binaryPath) return { cmd: binaryPath, prefix: [] };
-  if (process.env.NEXPATH_BIN) return { cmd: process.env.NEXPATH_BIN, prefix: [] };
+  // RC57: a .cmd/.bat NEXPATH_BIN cannot be spawned raw (Node EINVAL — see
+  // utils/batch-shim.ts); the self-reinvocation below IS the CLI it wraps.
+  if (process.env.NEXPATH_BIN && !isWindowsBatchShim(process.env.NEXPATH_BIN)) {
+    return { cmd: process.env.NEXPATH_BIN, prefix: [] };
+  }
   return { cmd: process.execPath, prefix: [resolve(process.argv[1])] };
 }
 
