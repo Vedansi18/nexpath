@@ -473,3 +473,50 @@ describe('⭐ RC52 — win32 keystroke timeout', () => {
     expect(WIN32_KEYSTROKE_TIMEOUT_MS).toBeGreaterThanOrEqual(20_000);
   });
 });
+
+/**
+ * ⭐ RC59 — the Linux Devin-branding gate (staging tester 2026-08-24): the
+ * single 'windsurf' needle refused Enter on every Devin-branded Linux install
+ * (title "… - Devin"). The RC47 class, ported to the Linux gate at last:
+ * live appName leads, static brand names cover unthreaded callers.
+ */
+describe('⭐ RC59 — focusedWindowIsEditor brand needles', () => {
+  const deps = (title: string, appName?: string) => ({
+    platform: 'linux' as const, env: { DISPLAY: ':0' },
+    hasCommand: () => true, runCapture: () => title, appName,
+  });
+
+  it('⭐ the tester\'s exact failing title now passes for host windsurf', () => {
+    expect(focusedWindowIsEditor('windsurf', deps('nexpath testing - Devin'))).toBe(true);
+  });
+
+  it('Windsurf-branded titles keep passing (owner-machine regression pin)', () => {
+    expect(focusedWindowIsEditor('windsurf', deps('nexpath - Windsurf'))).toBe(true);
+  });
+
+  it('live appName leads — a future rebrand matches without a code change', () => {
+    expect(focusedWindowIsEditor('windsurf', deps('proj - Cascade IDE', 'Cascade IDE'))).toBe(true);
+  });
+
+  it('unrelated windows still refuse (the RC11 hazard stays guarded)', () => {
+    expect(focusedWindowIsEditor('windsurf', deps('bank statement - Chrome'))).toBe(false);
+  });
+
+  it('cursor host is unaffected by the windsurf needles', () => {
+    expect(focusedWindowIsEditor('cursor', deps('proj - Devin'))).toBe(false);
+    expect(focusedWindowIsEditor('cursor', deps('proj - Cursor'))).toBe(true);
+  });
+
+  it('⭐ the linux submit failure now NAMES its gate via submitLog', () => {
+    const logs: string[] = [];
+    submitKeystroke({
+      platform: 'linux', host: 'windsurf', appName: 'Devin',
+      env: { DISPLAY: ':0' },
+      isPopupFocused: () => false,
+      isEditorFocused: () => false, focusEditor: () => {},
+      submitLog: (m) => logs.push(m),
+    });
+    expect(logs.join(' ')).toContain('editor not focused after raise');
+    expect(logs.join(' ')).toContain('appName=Devin');
+  });
+});
