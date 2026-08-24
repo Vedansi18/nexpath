@@ -26,12 +26,38 @@ import type { SurfaceId, SurfaceModel } from '../surface-model.js';
 import { PE_FIXTURE } from '../fixtures/pe.js';
 import { MPS_FIRST_FIXTURE, MPS_CONTINUATION_FIXTURE } from '../fixtures/mps.js';
 import { PEF_FIXTURE } from '../fixtures/pef.js';
+import { createRefinementTransitions } from '../refinement-transitions.js';
+import {
+  PE_DIRECTIONAL_FIXTURE,
+  MPS_FIRST_DIRECTIONAL_FIXTURE,
+  PE_REFINED_TEXT,
+  MPS_REFINED_TEXT,
+} from '../fixtures/directional.js';
 
 const FIXTURES: Record<SurfaceId, SurfaceModel> = {
   prompt_enhancement: PE_FIXTURE,
   mps_first: MPS_FIRST_FIXTURE,
   mps_continuation: MPS_CONTINUATION_FIXTURE,
   prompt_enhancement_feedback: PEF_FIXTURE,
+};
+
+/**
+ * The D5 variants, as their own registry.
+ *
+ * Separate from FIXTURES on purpose: the sweep and the base scenarios measure
+ * the plain surfaces, and folding the three extra rows into them would silently
+ * change what those numbers mean. This registry is what the directional picker
+ * buttons and the refinement scenarios use.
+ */
+const DIRECTIONAL_FIXTURES: Partial<Record<SurfaceId, SurfaceModel>> = {
+  prompt_enhancement: PE_DIRECTIONAL_FIXTURE,
+  mps_first: MPS_FIRST_DIRECTIONAL_FIXTURE,
+};
+
+/** The pre-authored recompose, per surface — the static stand-in for Option B. */
+const REFINED_TEXTS = {
+  prompt_enhancement: PE_REFINED_TEXT,
+  mps_first: MPS_REFINED_TEXT,
 };
 
 /** The first field's text swapped — the harness's own tiny stand-in for the
@@ -73,14 +99,15 @@ function mountInteractive(): void {
   installChromeStyles(shadow);
 
   const log = document.getElementById('log')!;
-  const controller = createSurfaceController(dock.mountEl, {
+  const logEvent = (e: SurfaceEvent): void => {
+    const line = document.createElement('div');
+    line.textContent = JSON.stringify(e);
+    log.prepend(line);
+  };
+  let controller = createSurfaceController(dock.mountEl, {
     registry: FIXTURES,
     initial: 'prompt_enhancement',
-    onEvent(e: SurfaceEvent): void {
-      const line = document.createElement('div');
-      line.textContent = JSON.stringify(e);
-      log.prepend(line);
-    },
+    onEvent: logEvent,
   });
   dock.show();
 
@@ -88,6 +115,25 @@ function mountInteractive(): void {
     const button = document.createElement('button');
     button.textContent = id;
     button.addEventListener('click', () => controller.setSurface(id));
+    document.getElementById('picker')!.appendChild(button);
+  }
+
+  // The D5 surfaces need their own controller: the directional rows are only
+  // half of it, and the other half is the activation hook that turns one into
+  // the refinement view. Swapping models on the base controller would render
+  // the rows as dead options — the exact thing the CLI revert was about.
+  for (const id of Object.keys(DIRECTIONAL_FIXTURES) as SurfaceId[]) {
+    const button = document.createElement('button');
+    button.textContent = id + ' + directional';
+    button.addEventListener('click', () => {
+      controller.destroy();
+      controller = createSurfaceController(dock.mountEl, {
+        registry: DIRECTIONAL_FIXTURES,
+        initial: id,
+        resolveActivation: createRefinementTransitions(REFINED_TEXTS),
+        onEvent: logEvent,
+      });
+    });
     document.getElementById('picker')!.appendChild(button);
   }
 }
@@ -271,6 +317,18 @@ function e2eScenarios(): Scenario[] {
     });
     return { host, controller, events };
   };
+  const mountD5 = (initial: SurfaceId) => {
+    const host = document.createElement('div');
+    document.getElementById('sweep-stage')!.appendChild(host);
+    const events: SurfaceEvent[] = [];
+    const controller = createSurfaceController(host, {
+      registry: DIRECTIONAL_FIXTURES,
+      initial,
+      resolveActivation: createRefinementTransitions(REFINED_TEXTS),
+      onEvent: (e) => events.push(e),
+    });
+    return { host, controller, events };
+  };
   const press = (el: Element, key: string, init: KeyboardEventInit = {}): void => {
     el.dispatchEvent(new KeyboardEvent('keydown', {
       key, code: init.code ?? key, bubbles: true, cancelable: true, ...init,
@@ -441,6 +499,69 @@ function e2eScenarios(): Scenario[] {
         controller.destroy();
         return fixed && refusedEmpty && accepted ? null
           : 'fixed=' + fixed + ' refusedEmpty=' + refusedEmpty + ' accepted=' + accepted;
+      },
+    },
+    {
+      name: 'D5: Shorter opens the refinement view with the recomposed body',
+      run() {
+        const { host, controller } = mountD5('prompt_enhancement');
+        press(controller.element, 'ArrowDown');
+        press(controller.element, 'ArrowDown');   // Shorter
+        press(controller.element, 'Enter');
+        const labels = [...host.querySelectorAll('.np-label')].map((el) => el.textContent);
+        const r = eq([labels, host.querySelector('textarea')!.value],
+          [['Use enhanced prompt', '\u2190 Go back'], PE_REFINED_TEXT], 'labels/body');
+        controller.destroy();
+        return r;
+      },
+    },
+    {
+      name: 'D5: Go back restores the main view AND the edited body',
+      run() {
+        const { host, controller } = mountD5('prompt_enhancement');
+        host.querySelector('textarea')!.value = 'edited before Shorter';
+        press(controller.element, 'ArrowDown');
+        press(controller.element, 'ArrowDown');
+        press(controller.element, 'Enter');       // -> refinement
+        press(controller.element, 'ArrowDown');   // Go back
+        press(controller.element, 'Enter');
+        const labels = [...host.querySelectorAll('.np-label')].map((el) => el.textContent);
+        const errors = [
+          labels.includes('Shorter') ? null : 'did not return to the main view',
+          host.querySelector('textarea')!.value === 'edited before Shorter'
+            ? null : 'the edited body was not restored',
+        ].filter(Boolean);
+        controller.destroy();
+        return errors.length ? errors.join('; ') : null;
+      },
+    },
+    {
+      name: 'D5: a blank body refuses the directional, silently (bug B)',
+      run() {
+        const { host, controller } = mountD5('prompt_enhancement');
+        host.querySelector('textarea')!.value = '   ';
+        press(controller.element, 'ArrowDown');
+        press(controller.element, 'ArrowDown');
+        press(controller.element, 'Enter');
+        const stayed = [...host.querySelectorAll('.np-label')]
+          .map((el) => el.textContent).includes('Shorter');
+        controller.destroy();
+        return stayed ? null : 'the blank body was allowed to open a refinement';
+      },
+    },
+    {
+      name: 'D5: MPS-1 keeps its Sequence plan through the refinement',
+      run() {
+        const { host, controller } = mountD5('mps_first');
+        press(controller.element, 'ArrowDown');
+        press(controller.element, 'ArrowDown');   // Shorter
+        press(controller.element, 'Enter');
+        const errors = [
+          host.querySelector('textarea')!.value === MPS_REFINED_TEXT ? null : 'body not recomposed',
+          (host.textContent ?? '').includes('Sequence plan') ? null : 'the Sequence plan vanished',
+        ].filter(Boolean);
+        controller.destroy();
+        return errors.length ? errors.join('; ') : null;
       },
     },
   ];
