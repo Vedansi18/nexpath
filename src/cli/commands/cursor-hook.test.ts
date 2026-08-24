@@ -699,3 +699,21 @@ describe('⭐ RC41 — afterAgentResponse runs the sequence continuation', () =>
     expect(runSequenceContinuation).toHaveBeenCalledWith(process.cwd(), 'cursor');
   });
 });
+
+/** ⭐ RC50 — a duplicate registration's invocation answers continue and runs NOTHING else. */
+describe('⭐ RC50 — duplicate invocation short-circuits', () => {
+  it('duplicate ⇒ continue:true, decider never consulted', async () => {
+    const decide = vi.fn(async () => 'block' as const);
+    const h = harness({ decide, checkDuplicateInvocation: () => true });
+    await runCursorHookAction('beforeSubmitPrompt', h.deps as never);
+    expect(decide).not.toHaveBeenCalled();
+    expect(JSON.parse(h.writes[0])).toEqual(CURSOR_CONTINUE);
+    expect(h.exits).toEqual([0]);
+  });
+  it('first invocation (not duplicate) proceeds to the decider', async () => {
+    const decide = vi.fn(async () => 'allow' as const);
+    const h = harness({ decide, checkDuplicateInvocation: () => false });
+    await runCursorHookAction('beforeSubmitPrompt', h.deps as never);
+    expect(decide).toHaveBeenCalledTimes(1);
+  });
+});

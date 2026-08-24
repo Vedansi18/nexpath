@@ -25,8 +25,17 @@
  * Fully dependency-injected; the real spawns are `spawnSync` (no shell).
  */
 import { spawnSync } from 'node:child_process';
+import { buildWin32KeystrokeScript } from './submit-clipboard-delivery.js';
 
 export interface AutoPasteDeps {
+  /**
+   * RC49 (win32): editor window-title candidates (live appName first). When
+   * set, the paste uses the foreground-first targeted script instead of a
+   * blind global ^v (the RC28 class — paste landing in whatever window is
+   * foreground — was fixed for submit but never for paste). Absent ⇒ the old
+   * bare SendKeys, byte-identical for every existing caller.
+   */
+  win32Titles?: readonly string[];
   platform?: NodeJS.Platform;
   env?: NodeJS.ProcessEnv;
   /** True if `cmd` is on PATH (test seam). */
@@ -90,6 +99,10 @@ export function pasteKeystroke(deps: AutoPasteDeps = {}): boolean {
     ]);
   }
   if (platform === 'win32') {
+    if (deps.win32Titles && deps.win32Titles.length > 0) {
+      // RC49: same foreground-first targeting the submit keystroke uses.
+      return run('powershell', ['-NoProfile', '-Command', buildWin32KeystrokeScript(deps.win32Titles, '^v')]);
+    }
     return run('powershell', [
       '-NoProfile', '-Command',
       '$w=New-Object -ComObject WScript.Shell;$w.SendKeys("^v")',

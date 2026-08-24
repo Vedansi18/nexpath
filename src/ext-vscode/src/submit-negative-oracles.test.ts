@@ -36,7 +36,8 @@ describe('R12 — the new flow must NOT reach into the old, un-gated path', () =
     // `buildSubmitAdvisory`, whose own early return refuses to construct.
     const lines = code(ext).split('\n');
     const helperAt = lines.findIndex((l) => l.includes('function buildSubmitAdvisory('));
-    const helperEnd = lines.findIndex((l, i) => i > helperAt && l === '}');
+    // RC48-era fix (Bhavnesh §8.4): CRLF checkouts make lines '}\r' — trim before matching.
+    const helperEnd = lines.findIndex((l, i) => i > helperAt && l.trim() === '}');
     const sites = lines
       .map((l, i) => ({ l, i }))
       .filter((x) => x.l.includes('createSubmitHookPoller(') || x.l.includes('buildSubmitAdvisory('))

@@ -10,6 +10,7 @@
  * hardware here (`G-HARDWARE`), so the command each OS would run is pinned instead.
  */
 import { describe, it, expect, vi } from 'vitest';
+import { spawnSync } from 'node:child_process';
 import {
   createSubmitClipboardDelivery,
   submitKeystroke,
@@ -17,6 +18,7 @@ import {
   focusedWindowIsEditor,
   type SubmitClipboardDeliveryDeps,
   isDarwinAccessibilityDenial,
+  buildWin32KeystrokeScript,
 } from './submit-clipboard-delivery.js';
 
 function deliveryHarness(over: Partial<SubmitClipboardDeliveryDeps> = {}) {
@@ -234,6 +236,14 @@ describe('submitKeystroke — cross-OS matrix (§2.4b), pinned per platform', ()
     // point is not the return value but that the defaults actually execute
     // instead of short-circuiting to false.
     const calls: string[] = [];
+    // RC48-era fix (Bhavnesh §8.4): this case exercises the REAL default
+    // detector, which shells out to `which` — on a host with no keystroke tool
+    // installed (Windows/macOS checkouts, minimal CI) no tool can match and the
+    // assertion is about the HOST, not the code. Skip honestly there.
+    const anyTool = ['xdotool', 'wtype', 'ydotool'].some((t) => {
+      try { return spawnSync('which', [t], { stdio: 'ignore', timeout: 2000 }).status === 0; } catch { return false; }
+    });
+    if (!anyTool) return; // host has no tool — nothing real to probe
     const result = submitKeystroke({ isPopupFocused: () => false, platform: 'linux',
       env: { DISPLAY: ':1' },
       // hasCommand intentionally NOT injected — exercise the real default.
@@ -422,6 +432,36 @@ describe('⭐ RC47 — win32 AppActivate candidates + retry', () => {
       isPopupFocused: () => false, isEditorFocused: () => true,
     });
     const ps = calls[0]!.args.join(' ');
-    expect(ps.match(/'Cursor'/g)?.length).toBe(1);
+    // The builder embeds the candidate list twice (foreground check + activate
+    // rounds) — a deduped single candidate appears exactly 2×; a duplicated
+    // candidate would appear 4×.
+    expect(ps.match(/'Cursor'/g)?.length).toBe(2);
+  });
+});
+
+/**
+ * ⭐ RC49 — foreground-first win32 keystrokes. The Devin tester's RC47 toast
+ * proved AppActivate can fail while the editor IS foreground (Windows'
+ * foreground lock refuses background callers). When the target is already
+ * focused, no activation is needed — send directly.
+ */
+describe('⭐ RC49 — buildWin32KeystrokeScript', () => {
+  it('⭐ checks the FOREGROUND title before any AppActivate', () => {
+    const ps = buildWin32KeystrokeScript(['Devin Next', 'Devin'], '{ENTER}');
+    expect(ps.indexOf('GetForegroundWindow')).toBeLessThan(ps.indexOf('AppActivate'));
+    expect(ps).toContain('$fg.EndsWith($t)');
+  });
+  it('suffix matching, not substring — a browser tab titled "… - Chrome" cannot match', () => {
+    const ps = buildWin32KeystrokeScript(['Cursor'], '{ENTER}');
+    expect(ps).not.toContain('Contains');
+    expect(ps).toContain('EndsWith');
+  });
+  it('keeps the retry rounds and the FOREGROUND diagnostic', () => {
+    const ps = buildWin32KeystrokeScript(['Devin'], '{ENTER}');
+    expect(ps).toContain('foreach($r in 1..2)');
+    expect(ps).toContain('Write-Output ("FOREGROUND=" + $fg)');
+  });
+  it('quotes are PowerShell-escaped', () => {
+    expect(buildWin32KeystrokeScript(["O'Brien's Editor"], '^v')).toContain("'O''Brien''s Editor'");
   });
 });

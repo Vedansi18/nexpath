@@ -209,7 +209,7 @@ function buildSubmitAdvisory(
     // Reuse the shipped raiser — Linux/X11 only by design; elsewhere it returns
     // false and the paste still proceeds.
     focus: async () => raiseAppWindow(host),
-    pasteKeystroke: () => pasteKeystroke(),
+    pasteKeystroke: () => pasteKeystroke({ win32Titles: [vscode.env.appName, host === 'cursor' ? 'Cursor' : 'Devin', 'Windsurf'] }),
     // RC11: Enter only when THIS editor is focused (one raise retry inside).
     submitKeystroke: () => submitKeystroke({ host, focusEditor: () => void raiseAppWindow(host), appName: vscode.env.appName, submitLog: log }),
     log,
@@ -370,7 +370,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       focused = true;
     } catch { /* command absent on this build — paste into whatever has focus */ }
     await new Promise((r) => setTimeout(r, focused ? 400 : 250));
-    const ok = pasteKeystroke();
+    const ok = pasteKeystroke({ win32Titles: [vscode.env.appName, 'Devin', 'Windsurf'] });
     log(`[nexpath] windsurf inject (fallback) → ${ok ? `auto-pasted into Cascade (${focused ? 'openChatPanel → ' : ''}Ctrl+V)` : 'no keystroke tool; left on clipboard'}`);
     return ok;
   };
@@ -416,7 +416,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       } catch { /* try next focus command */ }
     }
     await new Promise((r) => setTimeout(r, focused ? 400 : 250));
-    const ok = pasteKeystroke();
+    const ok = pasteKeystroke({ win32Titles: [vscode.env.appName, 'Cursor'] });
     log(`[nexpath] cursor inject → ${ok ? `auto-pasted into existing chat (${focused ? focusedVia + ' → ' : ''}Ctrl+V)` : 'no keystroke tool found; left on clipboard'}`);
     return ok;
   };
@@ -772,7 +772,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         // Reuse the shipped raiser — Linux/X11 only by design; on other OSes it
         // returns false and the paste still proceeds (see the module's notes).
         focus: async () => raiseAppWindow('windsurf'),
-        pasteKeystroke: () => pasteKeystroke(),
+        pasteKeystroke: () => pasteKeystroke({ win32Titles: [vscode.env.appName, 'Devin', 'Windsurf'] }),
         // RC11: Enter only when Windsurf itself is focused — a blind Enter
         // pressed the Welcome view's "Start session" and closed the chat.
         submitKeystroke: () => submitKeystroke({ host: 'windsurf', focusEditor: () => void raiseAppWindow('windsurf'), appName: vscode.env.appName, submitLog: log }),

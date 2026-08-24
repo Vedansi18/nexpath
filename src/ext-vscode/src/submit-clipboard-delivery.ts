@@ -289,6 +289,40 @@ export function isDarwinAccessibilityDenial(err: string | null): boolean {
   return /assistive access|not authorized|1002|-25211|accessibility/i.test(err);
 }
 
+/**
+ * RC49 — the shared win32 keystroke script: FOREGROUND-FIRST, then AppActivate.
+ *
+ * The Devin tester's RC47 toast proved AppActivate can fail even while the
+ * editor is the foreground window: Windows' foreground lock refuses
+ * SetForegroundWindow from a background process tree (our PowerShell child),
+ * and AppActivate returns false REGARDLESS of the target already being
+ * focused. But when the target IS focused, no activation is needed at all —
+ * SendKeys types into the foreground. So: read the foreground title first;
+ * if it ENDS WITH one of the candidates (editor windows are titled
+ * "<file> - <folder> - Devin" — suffix matching also rejects a browser tab
+ * like "Cursor docs - Chrome", which ends with "Chrome"), send directly.
+ * Only when the editor is NOT foreground do the AppActivate rounds run —
+ * and there the lock permits it more often, because the user has interacted
+ * recently. On final failure, print the foreground title and exit 1.
+ */
+export function buildWin32KeystrokeScript(titles: readonly string[], sendKeys: string): string {
+  const psTitles = titles.map((t) => `'${t.replace(/'/g, "''")}'`).join(',');
+  return (
+    `Add-Type '[DllImport("user32.dll")]public static extern System.IntPtr GetForegroundWindow();[DllImport("user32.dll")]public static extern int GetWindowText(System.IntPtr h,System.Text.StringBuilder s,int n);' -Name U -Namespace W;` +
+    `$w=New-Object -ComObject WScript.Shell;` +
+    `$b=New-Object System.Text.StringBuilder 256;[void][W.U]::GetWindowText([W.U]::GetForegroundWindow(),$b,256);$fg=$b.ToString();` +
+    `$ok=$false;` +
+    `foreach($t in @(${psTitles})){if($fg -eq $t -or $fg.EndsWith($t)){$ok=$true;break}};` +
+    `if(-not $ok){` +
+    `foreach($r in 1..2){` +
+    `foreach($t in @(${psTitles})){if($w.AppActivate($t)){$ok=$true;break}};` +
+    `if($ok){break};Start-Sleep -Milliseconds 400};` +
+    `if($ok){Start-Sleep -Milliseconds 120}};` +
+    `if(-not $ok){Write-Output ("FOREGROUND=" + $fg);exit 1};` +
+    `$w.SendKeys("${sendKeys}")`
+  );
+}
+
 export function submitKeystroke(deps: SubmitKeystrokeDeps = {}): boolean {
   const platform = deps.platform ?? process.platform;
   const env = deps.env ?? process.env;
@@ -355,35 +389,18 @@ export function submitKeystroke(deps: SubmitKeystrokeDeps = {}): boolean {
       // very machine this fixes. AppActivate matches a title PREFIX or
       // substring, so the bare product name is the right granularity.
       const hostTitles = deps.host === 'cursor' ? ['Cursor'] : ['Devin', 'Windsurf'];
-      // RC47: the live appName leads (covers "Devin Next" and any rebrand the
-      // hardcoded product names miss — the tester's AppActivate failed on both
-      // 'Devin' and 'Windsurf' while the window was open). Deduped, quoted.
+      // RC47: the live appName leads (AppActivate + suffix matching are
+      // exact/prefix/suffix — "Devin Next" misses the bare product names).
       const titles = [...new Set([deps.appName?.trim(), ...hostTitles].filter((t): t is string => !!t))];
-      const psTitles = titles.map((t) => `'${t.replace(/'/g, "''")}'`).join(',');
-      // RC47: TWO rounds with a pause — the measured failure fired while our
-      // own second popup's console briefly held the foreground (Windows'
-      // foreground lock then refuses AppActivate); a moment later it releases.
-      // On final failure, print the foreground window title so the log names
-      // what was actually in front, then exit 1 (⇒ submit_failed, visible).
-      const ps =
-        `$w=New-Object -ComObject WScript.Shell;` +
-        `$ok=$false;` +
-        `foreach($r in 1..2){` +
-        `foreach($t in @(${psTitles})){if($w.AppActivate($t)){$ok=$true;break}};` +
-        `if($ok){break};Start-Sleep -Milliseconds 400};` +
-        `if(-not $ok){` +
-        `Add-Type '[DllImport("user32.dll")]public static extern System.IntPtr GetForegroundWindow();[DllImport("user32.dll")]public static extern int GetWindowText(System.IntPtr h,System.Text.StringBuilder s,int n);' -Name U -Namespace W;` +
-        `$b=New-Object System.Text.StringBuilder 256;[void][W.U]::GetWindowText([W.U]::GetForegroundWindow(),$b,256);` +
-        `Write-Output ("FOREGROUND=" + $b.ToString());exit 1};` +
-        `Start-Sleep -Milliseconds 120;` +
-        `$w.SendKeys("{ENTER}")`;
+      // RC49: foreground-first — see buildWin32KeystrokeScript.
+      const ps = buildWin32KeystrokeScript(titles, '{ENTER}');
       if (deps.run) return deps.run('powershell', ['-NoProfile', '-Command', ps]);
       const res = spawnSync('powershell', ['-NoProfile', '-Command', ps], {
         stdio: ['ignore', 'pipe', 'ignore'], timeout: 8000, encoding: 'utf8',
       });
       if (res.status === 0) return true;
       const fg = (res.stdout ?? '').split('\n').find((l) => l.startsWith('FOREGROUND=')) ?? 'FOREGROUND=<unreadable>';
-      deps.submitLog?.(`[nexpath] submit-win32: AppActivate failed for [${titles.join(', ')}]; ${fg.trim()}`);
+      deps.submitLog?.(`[nexpath] submit-win32: editor not foreground and AppActivate failed for [${titles.join(', ')}]; ${fg.trim()}`);
       return false;
     }
     // Linux (X11, or Wayland with a compatible tool)
