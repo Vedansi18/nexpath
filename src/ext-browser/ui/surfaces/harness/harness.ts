@@ -305,7 +305,7 @@ function renderSweepReport(): void {
   // Reported two ways: the console line for a Chrome --dump-dom run, and a POST
   // so browsers WITHOUT that flag can be measured too. Firefox has no
   // --dump-dom, and C-3 names Firefox first.
-  report('SWEEP', pass, fail);
+  report('SWEEP', pass, fail, failures.slice(0, 8).map((f) => `${f.surface} · ${f.content} · ${f.w}x${f.h} [${f.detail}]`));
 }
 
 // -- the functionality run (?e2e=1) ------------------------------------------
@@ -513,6 +513,74 @@ function e2eScenarios(): Scenario[] {
       },
     },
     {
+      name: 'the title dims when the caret leaves the editable prompt',
+      run() {
+        // Owner request 2026-08-24. Row selection and "I am typing here" must
+        // not look identical, so the label above a field is bright only while
+        // that field holds the keyboard. Measured as a real computed colour,
+        // because a class name would prove nothing about what is on screen.
+        const { host, controller } = mount('prompt_enhancement');
+        const label = host.querySelector('.np-focused .np-label') as HTMLElement | null;
+        const field = host.querySelector('textarea')!;
+        if (!label) { controller.destroy(); return 'no focused label found'; }
+
+        // `:focus` and `:focus-within` only match while the WINDOW has focus,
+        // and Firefox honours that strictly where Chrome does not. A headless
+        // window has none, so this engine cannot be asked the question at all —
+        // reported as SKIPPED rather than passed, because a green tick here
+        // would be a claim nothing measured.
+        if (!document.hasFocus()) {
+          controller.destroy();
+          return 'skip: needs a focused window — :focus-within cannot match without one';
+        }
+
+        let blurFired = false;
+        field.addEventListener('blur', () => { blurFired = true; });
+        field.focus();
+        const wasActive = document.activeElement === field;
+        const editing = getComputedStyle(label).color;
+        field.blur();
+        const idle = getComputedStyle(label).color;
+        controller.destroy();
+
+        if (editing === idle) {
+          // Say WHY, not just that they matched: whether the engine gave the
+          // field focus at all, whether a blur event arrived, and whether the
+          // document itself is focused (a headless window often is not).
+          return `identical (${editing}) — hasFocus=${document.hasFocus()}`
+            + ` activeWasField=${wasActive} blurFired=${blurFired}`
+            + ` classAfter=${label.className}`;
+        }
+        // Bright while editing, light gray once the caret leaves.
+        return editing === 'rgb(245, 245, 244)' && idle === 'rgb(168, 169, 168)'
+          ? null : `editing=${editing} idle=${idle}`;
+      },
+    },
+    {
+      name: 'the editable prompt draws no focus ring',
+      run() {
+        // The CLI has no box around its editor; a browser outline reads as a
+        // form control dropped into a terminal frame.
+        const { host, controller } = mount('prompt_enhancement');
+        const field = host.querySelector('textarea')!;
+        field.focus();
+        // Every value read BEFORE destroy: a CSSStyleDeclaration from
+        // getComputedStyle goes empty once its element leaves the document, and
+        // reading through it afterwards reports '' for everything. The first
+        // version of this scenario did exactly that and blamed the stylesheet.
+        const style = getComputedStyle(field);
+        const outlineStyle = style.outlineStyle;
+        const outlineWidth = style.outlineWidth;
+        const border = style.borderTopWidth;
+        controller.destroy();
+        // `outline: none` leaves outline-width at its initial `medium` (3px) —
+        // that is the COMPUTED value; nothing is painted while the style is
+        // none. So the style is what decides, not the width.
+        return outlineStyle === 'none' && border === '0px'
+          ? null : `outline-style=${outlineStyle} width=${outlineWidth} border=${border}`;
+      },
+    },
+    {
       name: 'D5: Shorter opens the refinement view with the recomposed body',
       run() {
         const { host, controller } = mountD5('prompt_enhancement');
@@ -585,20 +653,26 @@ function renderE2eReport(): void {
     try { failure = s.run(); } catch (e) { failure = 'threw: ' + String(e); }
     return { name: s.name, failure };
   });
-  const failed = results.filter((r) => r.failure);
+  const skipped = results.filter((r) => r.failure?.startsWith('skip: '));
+  const failed = results.filter((r) => r.failure && !r.failure.startsWith('skip: '));
   const banner = document.getElementById('banner')!;
+  const tail = skipped.length ? ` (${skipped.length} skipped)` : '';
   banner.textContent = failed.length === 0
-    ? 'E2E PASS - ' + results.length + '/' + results.length + ' scenarios green'
-    : 'E2E FAIL - ' + failed.length + ' of ' + results.length + ' scenarios failed';
+    ? `E2E PASS - ${results.length - skipped.length}/${results.length - skipped.length} scenarios green${tail}`
+    : `E2E FAIL - ${failed.length} of ${results.length} scenarios failed${tail}`;
   banner.className = failed.length === 0 ? 'pass' : 'fail';
 
   const detail = document.getElementById('failures')!;
   for (const r of results) {
     const row = document.createElement('div');
-    row.textContent = (r.failure ? 'FAIL  ' : 'ok    ') + r.name + (r.failure ? ' -> ' + r.failure : '');
+    const mark = !r.failure ? 'ok    ' : r.failure.startsWith('skip: ') ? 'SKIP  ' : 'FAIL  ';
+    row.textContent = mark + r.name + (r.failure ? ' -> ' + r.failure : '');
     detail.appendChild(row);
   }
-  report('E2E', results.length - failed.length, failed.length);
+  // Names travel with the counts: a bare number tells you Gecko disagreed and
+  // nothing about where, and Firefox has no --dump-dom to read the page with.
+  report('E2E', results.length - failed.length - skipped.length, failed.length,
+    [...failed, ...skipped].map((r) => r.name + ' -> ' + r.failure));
 }
 
 /**
@@ -607,8 +681,8 @@ function renderE2eReport(): void {
  * Fire-and-forget: a harness opened from the filesystem has no server, and that
  * must not turn into an unhandled rejection on the page.
  */
-function report(kind: string, pass: number, fail: number): void {
-  const payload = JSON.stringify({ kind, pass, fail, ua: navigator.userAgent });
+function report(kind: string, pass: number, fail: number, failures: string[] = []): void {
+  const payload = JSON.stringify({ kind, pass, fail, failures, ua: navigator.userAgent });
   console.log(kind + ' ' + payload);
   void fetch('/result', { method: 'POST', body: payload }).catch(() => undefined);
 }

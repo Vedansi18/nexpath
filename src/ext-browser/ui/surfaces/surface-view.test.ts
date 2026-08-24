@@ -328,7 +328,12 @@ describe('renderSurface — the model drives everything', () => {
   });
 
   it('opens a block with a blank row when the model asks for one', () => {
-    const rows = renderSurface(document, PE_FIXTURE, { focusIndex: 0 }).querySelector('.np-scroll')!.children;
+    // Descendants, not direct children: a field's label, editor and hints sit
+    // inside an np-field-group so CSS can test `:focus-within`, and the line
+    // sequence is the `.np-row` order regardless of that nesting — which is
+    // exactly how the parity extraction reads a frame too.
+    const rows = renderSurface(document, PE_FIXTURE, { focusIndex: 0 })
+      .querySelector('.np-scroll')!.querySelectorAll('.np-row');
     const texts = [...rows].map((r) => rowText(r).trim());
 
     // The blank sits immediately before Additional details.

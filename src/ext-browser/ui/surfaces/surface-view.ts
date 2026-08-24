@@ -166,7 +166,7 @@ export function renderSurface(doc: Document, model: SurfaceModel, state: Surface
 
     const focused = interactiveIndex === focusIndex;
     interactiveIndex += 1;
-    scroll.appendChild(buildBulletRow(doc, row.label, focused, row.kind === 'action' ? row.tone : undefined));
+    scroll.appendChild(buildBulletRow(doc, row.label, focused, row.kind === 'action' ? row.tone : undefined, row.kind === 'field'));
 
     if (row.kind === 'action') {
       // Dim, not plain — the CLI's own comment reads "label, then dim helper"
@@ -176,11 +176,24 @@ export function renderSurface(doc: Document, model: SurfaceModel, state: Surface
       return;
     }
 
-    scroll.appendChild(buildField(doc, row.text, fieldIndent, row.placeholder));
-    for (const hint of row.hints?.always ?? []) scroll.appendChild(buildHintRow(doc, hint, hintIndent));
+    // The label, the editor and its hints go in ONE group so CSS can ask
+    // whether the user is editing: `:focus-within` needs a common ancestor, and
+    // the label and the textarea are separate rows. The group has no layout box
+    // of its own — the rows sit in normal flow exactly as before.
+    //
+    // The alternative was a JS class toggled on focus/blur, which was tried and
+    // measured wrong: headless Firefox reported `blurFired=false` with the
+    // field still the active element, so the "editing" state stuck on. CSS
+    // focus state is the engine's own and needs no event to arrive.
+    const group = doc.createElement('div');
+    group.className = 'np-field-group';
+    group.appendChild(scroll.removeChild(scroll.lastElementChild!));   // the label row
+    group.appendChild(buildField(doc, row.text, fieldIndent, row.placeholder));
+    for (const hint of row.hints?.always ?? []) group.appendChild(buildHintRow(doc, hint, hintIndent));
     if (focused) {
-      for (const hint of row.hints?.whenFocused ?? []) scroll.appendChild(buildHintRow(doc, hint, hintIndent));
+      for (const hint of row.hints?.whenFocused ?? []) group.appendChild(buildHintRow(doc, hint, hintIndent));
     }
+    scroll.appendChild(group);
   });
 
   // ── footer ───────────────────────────────────────────────────────────────

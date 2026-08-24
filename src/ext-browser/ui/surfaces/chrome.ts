@@ -212,6 +212,22 @@ export const CHROME_STYLES = `
   .np-focused .np-bullet { color: #1ca46d; }                       /* green */
   .np-label { color: #a8a9a8; }                                    /* dim   */
   .np-focused .np-label { color: #f5f5f4; font-weight: 700; }      /* bold  */
+  /* A SELECTED field row that is not being edited reads light gray. Owner
+     request 2026-08-24: leaving the editable prompt should take the title above
+     it back down, so "this row is selected" and "I am typing in it" stop looking
+     identical. Neither the CLI nor panel.js has a precedent — a terminal has no
+     blur — so this is a browser-only addition.
+     Pure CSS: the renderer puts a field's label, editor and hints in one
+     np-field-group, so :focus-within has a common ancestor to test. A JS class
+     toggled on focus/blur was tried first and measured wrong — headless Firefox
+     never delivered the blur, leaving the state stuck on. :has() would remove
+     the wrapper but is Firefox 121 against a 112 floor. */
+  .np-focused.np-has-field .np-label { color: #a8a9a8; font-weight: 400; }
+  .np-focused.np-has-field .np-bullet { color: #9ba7a7; }
+  /* ...and brightens again while the caret is actually in it. Ordered after the
+     rule above and at equal specificity, so editing wins. */
+  .np-field-group:focus-within .np-label { color: #f5f5f4; font-weight: 700; }
+  .np-field-group:focus-within .np-bullet { color: #1ca46d; }
   .np-desc { color: #9ba7a7; }                                     /* gray  */
   .np-focused .np-desc { color: #d0d0d0; }                         /* 38;5;252 */
 
@@ -236,7 +252,10 @@ export const CHROME_STYLES = `
     resize: none;
     overflow: hidden;
   }
-  .np-field:focus-visible { outline: 1px solid #2cc7dd; outline-offset: 2px; }
+  /* No focus ring. The CLI draws no box around its editor, and a browser
+     outline here reads as a form control dropped into a terminal frame. Focus
+     is still shown, and more strongly than an outline would: the bullet fills
+     (o -> *) and the label goes bright while the field is being edited. */
   /* One placeholder colour on both browsers — the defaults differ, and C-3
      wants one look. The gray tier, matching unfocused supporting text. */
   .np-field::placeholder { color: #9ba7a7; opacity: 1; }
@@ -283,6 +302,9 @@ export const CHROME_STYLES = `
      keydown listener, so it must be focusable; the outline is suppressed
      because row focus is already drawn by the bullets and the label weight. */
   .np-surface-root { height: 100%; outline: none; }
+  /* No box of its own: the rows inside stay in normal flow, so grouping them
+     changes what CSS can ASK and nothing about what is drawn. */
+  .np-field-group { display: block; }
 `;
 
 /**
@@ -391,9 +413,14 @@ export function buildBulletRow(
   label: string,
   focused: boolean,
   tone?: 'plain' | 'cancel',
+  hasField = false,
 ): HTMLElement {
   const el = doc.createElement('div');
-  el.className = focused ? 'np-row np-focused' : 'np-row';
+  // `np-has-field` marks the rows whose bright state depends on whether the
+  // user is actually editing. An action row has nothing to edit, so its
+  // selected state stays bright exactly as the CLI shows it.
+  const kind = hasField ? ' np-has-field' : '';
+  el.className = (focused ? 'np-row np-focused' : 'np-row') + kind;
   // MPS's Cancel row is the one label the CLI tints — paleYellow, so destroying
   // the rest of a sequence does not look like every other option.
   const toneClass = tone === 'cancel' ? ' np-cancel' : '';
