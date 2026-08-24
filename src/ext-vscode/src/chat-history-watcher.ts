@@ -1,4 +1,4 @@
-import { watch, type FSWatcher, type WatchListener } from 'node:fs';
+import { watch, existsSync as existsSyncDefault, type FSWatcher, type WatchListener } from 'node:fs';
 import type {
   ChatHistoryEvent,
   ChatHistoryExtractor,
@@ -273,6 +273,14 @@ export interface ChatHistoryWatcherOptions {
   /** Emitted on any non-fatal error (read failure, watch error, etc.). */
   onError?: (err: Error) => void;
   /**
+   * RC53: informational (non-error) notices — e.g. a watched db vanished
+   * because its host cleaned up a transient workspace folder; the watcher
+   * closes itself and says so here instead of raising a scary error.
+   */
+  onInfo?: (message: string) => void;
+  /** RC53 seam: file-existence probe for the vanished-db check (tests inject). */
+  existsSyncFn?: (p: string) => boolean;
+  /**
    * Emitted when a Cursor target's ItemTable doesn't fingerprint to any
    * known extractor — extension layer surfaces this as a "schema unknown,
    * please update nexpath extension" toast.
@@ -403,6 +411,28 @@ export function createChatHistoryWatcher(
     opts.onError?.(new Error(`[chat-history-watcher] ${path}: ${e.message}`));
   }
 
+  /**
+   * RC53 (Windows/Cursor, 2026-08-24): Cursor creates TRANSIENT numeric
+   * workspaceStorage folders (e.g. `1787561006396/`) and deletes them again
+   * minutes later. Windows `fs.watch` then raises EPERM on EVERY watched file
+   * in the folder — main + `-wal` + `-shm`, three alarming "operation not
+   * permitted" error lines for what is a routine host cleanup, and the dead
+   * FSWatcher was never closed. A watch whose file no longer exists is
+   * correctly finished: close it and say so quietly. A watch error on a file
+   * that STILL exists is a real problem and reports exactly as before.
+   */
+  function handleWatchError(w: FSWatcher, err: unknown, path: string): void {
+    try {
+      const exists = opts.existsSyncFn ?? existsSyncDefault;
+      if (!exists(path)) {
+        try { w.close(); } catch { /* already dead */ }
+        opts.onInfo?.(`[chat-history-watcher] ${path}: watched db removed (host cleaned up its workspace folder) — watcher closed`);
+        return;
+      }
+    } catch { /* probe failed — fall through to the honest error */ }
+    reportError(err, path);
+  }
+
   async function processSqliteTarget(target: WatchTarget): Promise<void> {
     try {
       const rows = await readItemTableFn(target.path);
@@ -527,7 +557,7 @@ export function createChatHistoryWatcher(
           // Watch the primary path (the SQLite main file for cursor-sqlite,
           // or the codeium dir for windsurf-dir).
           const w = watchFn(target.path, listener);
-          w.on('error', (err: Error) => reportError(err, target.path));
+          w.on('error', (err: Error) => handleWatchError(w, err, target.path));
           fsWatchers.push(w);
 
           // ── WAL-mode liveness fix ────────────────────────────────────────
@@ -546,7 +576,7 @@ export function createChatHistoryWatcher(
               const siblingPath = target.path + suffix;
               try {
                 const sw = watchFn(siblingPath, listener);
-                sw.on('error', (err: Error) => reportError(err, siblingPath));
+                sw.on('error', (err: Error) => handleWatchError(sw, err, siblingPath));
                 fsWatchers.push(sw);
               } catch {
                 // Sibling doesn't exist yet (WAL hasn't been initialised) —

@@ -564,6 +564,10 @@ describe('createChatHistoryWatcher', () => {
       targets: [cursorTarget('/p', makeExtractor('test', []))],
       onEvent,
       onError,
+      // RC53: this pin is about a REAL watch error — the file still exists.
+      // (The fake path '/p' would otherwise probe as vanished and take the
+      // quiet close-and-notify path the RC53 suite pins separately.)
+      existsSyncFn: () => true,
       watchFn: watchFn as never,
       readItemTableFn,
       debounceMs: 1,
@@ -1042,5 +1046,60 @@ describe('resolveBundledNativeBinding (multi-ABI prebuild selection)', () => {
 
   it('returns null when the extension root is unknown', () => {
     expect(resolveBundledNativeBinding(undefined, '143', () => true, j)).toBeNull();
+  });
+});
+
+/**
+ * ⭐ RC53 — vanished-db watch errors (Windows/Cursor 2026-08-24): Cursor
+ * deletes its transient numeric workspaceStorage folders; Windows fs.watch
+ * then raises EPERM per watched file. A watch on a file that no longer exists
+ * is FINISHED — close it and notify quietly; a watch error on a file that
+ * still exists is a real problem and reports exactly as before.
+ */
+describe('⭐ RC53 — watch errors after the file vanished', () => {
+  function harnessRC53(exists: boolean) {
+    const created: FakeFSWatcher[] = [];
+    const watchFn = vi.fn((_p: string, listener?: (e: string, f: string) => void) => {
+      const w = makeFakeWatcher();
+      if (listener) w.on('change', listener);
+      created.push(w);
+      return w;
+    });
+    const onError = vi.fn();
+    const onInfo = vi.fn();
+    const w = createChatHistoryWatcher({
+      targets: [cursorTarget('/gone/state.vscdb')],
+      onEvent: vi.fn(),
+      onError, onInfo,
+      existsSyncFn: () => exists,
+      watchFn: watchFn as never,
+      readItemTableFn: vi.fn<ReadItemTableFn>(async () => []),
+    });
+    w.start();
+    return { created, onError, onInfo };
+  }
+
+  it('⭐ file gone ⇒ watcher CLOSED + onInfo, NO error (the EPERM-cleanup case)', () => {
+    const { created, onError, onInfo } = harnessRC53(false);
+    created[0]!.emit('error', Object.assign(new Error('EPERM: operation not permitted, watch'), { code: 'EPERM' }));
+    expect(onError).not.toHaveBeenCalled();
+    expect(onInfo).toHaveBeenCalledTimes(1);
+    expect(String(onInfo.mock.calls[0]![0])).toContain('watched db removed');
+    expect(created[0]!.close).toHaveBeenCalled();
+  });
+
+  it('file still exists ⇒ the error reports exactly as before (real EPERM)', () => {
+    const { created, onError, onInfo } = harnessRC53(true);
+    created[0]!.emit('error', new Error('EPERM: operation not permitted, watch'));
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(String(onError.mock.calls[0]![0])).toContain('EPERM');
+    expect(onInfo).not.toHaveBeenCalled();
+  });
+
+  it('each vanished sibling closes its own watcher (main + wal + shm)', () => {
+    const { created, onInfo } = harnessRC53(false);
+    for (const w of created) w.emit('error', new Error('EPERM: operation not permitted, watch'));
+    expect(onInfo).toHaveBeenCalledTimes(3);
+    for (const w of created) expect(w.close).toHaveBeenCalled();
   });
 });

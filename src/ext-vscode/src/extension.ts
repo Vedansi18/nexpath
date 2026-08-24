@@ -1219,6 +1219,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       log(`[nexpath] watcher error: ${record.message}`);
       console.error('[nexpath] watcher error:', record);
     },
+    // RC53: routine notices (a transient workspace db vanished and its watcher
+    // closed itself) — informational, never the "watcher error:" prefix.
+    onInfo: (message) => log(`[nexpath] ${message}`),
     onSchemaUnknown: ({ path, observedSampleKeys }) => {
       log(`[nexpath] schema unknown for ${path}; sample keys: ${observedSampleKeys.slice(0, 3).join(', ')}`);
       void vscode.window.showInformationMessage(
