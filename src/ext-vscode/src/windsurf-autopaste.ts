@@ -25,7 +25,7 @@
  * Fully dependency-injected; the real spawns are `spawnSync` (no shell).
  */
 import { spawnSync } from 'node:child_process';
-import { buildWin32KeystrokeScript } from './submit-clipboard-delivery.js';
+import { buildWin32KeystrokeScript, WIN32_KEYSTROKE_TIMEOUT_MS } from './submit-clipboard-delivery.js';
 
 export interface AutoPasteDeps {
   /**
@@ -101,7 +101,19 @@ export function pasteKeystroke(deps: AutoPasteDeps = {}): boolean {
   if (platform === 'win32') {
     if (deps.win32Titles && deps.win32Titles.length > 0) {
       // RC49: same foreground-first targeting the submit keystroke uses.
-      return run('powershell', ['-NoProfile', '-Command', buildWin32KeystrokeScript(deps.win32Titles, '^v')]);
+      // RC52: the targeted script's Add-Type can take >8 s on a COLD first run
+      // (measured on the Windows tester); defaultRun's 3 s ceiling would kill
+      // every cold paste. Injected `run` (tests) keeps the plain seam; the
+      // production path spawns with the shared 20 s ceiling.
+      const script = buildWin32KeystrokeScript(deps.win32Titles, '^v');
+      if (deps.run) return deps.run('powershell', ['-NoProfile', '-Command', script]);
+      try {
+        return spawnSync('powershell', ['-NoProfile', '-Command', script], {
+          stdio: 'ignore', timeout: WIN32_KEYSTROKE_TIMEOUT_MS,
+        }).status === 0;
+      } catch {
+        return false;
+      }
     }
     return run('powershell', [
       '-NoProfile', '-Command',

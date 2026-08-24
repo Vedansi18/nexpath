@@ -289,6 +289,9 @@ export function isDarwinAccessibilityDenial(err: string | null): boolean {
   return /assistive access|not authorized|1002|-25211|accessibility/i.test(err);
 }
 
+/** RC52: win32 keystroke-script spawn ceiling — cold Add-Type measured >8 s; warm ~0.8 s. */
+export const WIN32_KEYSTROKE_TIMEOUT_MS = 20_000;
+
 /**
  * RC49 — the shared win32 keystroke script: FOREGROUND-FIRST, then AppActivate.
  *
@@ -395,12 +398,19 @@ export function submitKeystroke(deps: SubmitKeystrokeDeps = {}): boolean {
       // RC49: foreground-first — see buildWin32KeystrokeScript.
       const ps = buildWin32KeystrokeScript(titles, '{ENTER}');
       if (deps.run) return deps.run('powershell', ['-NoProfile', '-Command', ps]);
+      // RC52 (Windows tester 2026-08-24): the FIRST submit of a session took
+      // 8025 ms — the old 8000 ms timeout killed PowerShell mid Add-Type
+      // (cold C# compile + Defender scan on first run); the second, warm call
+      // took 805 ms and delivered. 20 s covers the cold start; warm calls are
+      // sub-second so the ceiling is never felt.
       const res = spawnSync('powershell', ['-NoProfile', '-Command', ps], {
-        stdio: ['ignore', 'pipe', 'ignore'], timeout: 8000, encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'], timeout: WIN32_KEYSTROKE_TIMEOUT_MS, encoding: 'utf8',
       });
       if (res.status === 0) return true;
       const fg = (res.stdout ?? '').split('\n').find((l) => l.startsWith('FOREGROUND=')) ?? 'FOREGROUND=<unreadable>';
-      deps.submitLog?.(`[nexpath] submit-win32: editor not foreground and AppActivate failed for [${titles.join(', ')}]; ${fg.trim()}`);
+      // RC52: name HOW it failed — status null + SIGTERM is the timeout kill,
+      // distinct from the script's own exit 1 (no matching window).
+      deps.submitLog?.(`[nexpath] submit-win32: editor not foreground and AppActivate failed for [${titles.join(', ')}]; ${fg.trim()}; status=${res.status ?? 'null'} signal=${res.signal ?? 'none'}`);
       return false;
     }
     // Linux (X11, or Wayland with a compatible tool)

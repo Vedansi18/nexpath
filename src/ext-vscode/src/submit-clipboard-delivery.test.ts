@@ -19,6 +19,7 @@ import {
   type SubmitClipboardDeliveryDeps,
   isDarwinAccessibilityDenial,
   buildWin32KeystrokeScript,
+  WIN32_KEYSTROKE_TIMEOUT_MS,
 } from './submit-clipboard-delivery.js';
 
 function deliveryHarness(over: Partial<SubmitClipboardDeliveryDeps> = {}) {
@@ -463,5 +464,12 @@ describe('⭐ RC49 — buildWin32KeystrokeScript', () => {
   });
   it('quotes are PowerShell-escaped', () => {
     expect(buildWin32KeystrokeScript(["O'Brien's Editor"], '^v')).toContain("'O''Brien''s Editor'");
+  });
+});
+
+/** ⭐ RC52 — the cold-start ceiling (Windows tester 2026-08-24: first submit killed at 8 s mid Add-Type; warm run 0.8 s delivered). */
+describe('⭐ RC52 — win32 keystroke timeout', () => {
+  it('the shared ceiling covers a cold Add-Type compile (>8 s measured)', () => {
+    expect(WIN32_KEYSTROKE_TIMEOUT_MS).toBeGreaterThanOrEqual(20_000);
   });
 });
