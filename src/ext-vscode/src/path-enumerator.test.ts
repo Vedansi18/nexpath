@@ -76,14 +76,18 @@ describe('enumerateStateVscdbPaths', () => {
   });
 
   it('uses injected fs helpers when provided', () => {
+    // The source builds its lookups with host-native `join`, so the fake fs
+    // must key off the same construction. Hard-coding POSIX literals here made
+    // the fake match nothing on Windows and the enumeration come back empty.
+    const wsRoot = join('/fake', 'ws');
+    const dbPath = join(wsRoot, 'wsA', 'state.vscdb');
     const fakeFs = {
-      existsSync: (p: string) =>
-        p === '/fake/ws' || p === '/fake/ws/wsA/state.vscdb',
+      existsSync: (p: string) => p === wsRoot || p === dbPath,
       readdirSync: () => ['wsA'],
       statSync: () => ({ isDirectory: () => true }),
     };
-    const out = enumerateStateVscdbPaths('/fake/ws', { fs: fakeFs });
-    expect(out).toEqual(['/fake/ws/wsA/state.vscdb']);
+    const out = enumerateStateVscdbPaths(wsRoot, { fs: fakeFs });
+    expect(out).toEqual([dbPath]);
   });
 });
 
@@ -129,15 +133,18 @@ describe('globalStorageStateVscdbPath', () => {
   });
 
   it('uses injected fs helpers', () => {
+    // `endsWith('/globalStorage/state.vscdb')` only matched a POSIX separator,
+    // so the fake reported "missing" on Windows. Match the exact path the
+    // source builds, constructed the same way.
+    const wsStorage = join('/fake', 'User', 'workspaceStorage');
+    const expected = join('/fake', 'User', 'globalStorage', 'state.vscdb');
     const fakeFs = {
-      existsSync: (p: string) => p.endsWith('/globalStorage/state.vscdb'),
+      existsSync: (p: string) => p === expected,
       readdirSync: () => [],
       statSync: () => ({ isDirectory: () => true }),
     };
     expect(
-      globalStorageStateVscdbPath('/fake/User/workspaceStorage', {
-        fs: fakeFs,
-      }),
-    ).toBe('/fake/User/globalStorage/state.vscdb');
+      globalStorageStateVscdbPath(wsStorage, { fs: fakeFs }),
+    ).toBe(expected);
   });
 });
