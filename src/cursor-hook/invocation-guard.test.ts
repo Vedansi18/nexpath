@@ -1,38 +1,63 @@
-/** ⭐ RC50 — duplicate hook registrations must not double-run the flow. */
+/**
+ * ⭐ RC50/RC56 — duplicate hook registrations must not double-run the flow,
+ * and the claim must be ATOMIC (exclusive create): the measured 2–100 ms
+ * invocation stagger made a read-modify-write registry a coin-flip.
+ */
 import { describe, it, expect } from 'vitest';
-import { checkAndRecordCursorInvocation, CURSOR_INVOCATION_MAX_AGE_MS } from './invocation-guard.js';
+import { checkAndRecordCursorInvocation, cursorInvocationMarkerName } from './invocation-guard.js';
 
-function mem() {
-  const files = new Map<string, string>();
+function memFs() {
+  const files = new Set<string>();
+  const mtimes = new Map<string, number>();
   return {
-    readFileFn: (p: string) => { const v = files.get(p); if (v === undefined) throw new Error('ENOENT'); return v; },
-    writeFileFn: (p: string, d: string) => { files.set(p, d); },
+    files, mtimes,
+    deps: (now: number) => ({
+      now: () => now,
+      mkdirFn: () => {},
+      writeExclusiveFn: (p: string) => {
+        if (files.has(p)) throw Object.assign(new Error('EEXIST'), { code: 'EEXIST' });
+        files.add(p); mtimes.set(p, now);
+      },
+      readdirFn: () => [...files].map((p) => p.split('/').pop()!),
+      mtimeMsFn: (p: string) => mtimes.get(p) ?? [...mtimes.values()][0] ?? now,
+      removeFn: (p: string) => { for (const f of [...files]) if (f.endsWith(p.split('/').pop()!)) { files.delete(f); mtimes.delete(f); } },
+    }),
   };
 }
 
-describe('⭐ RC50 — checkAndRecordCursorInvocation', () => {
-  it('⭐ first sight records and returns false; the SAME key returns true', () => {
-    const fs = mem();
-    expect(checkAndRecordCursorInvocation('/p', 'beforeSubmitPrompt', 'gen-1', { ...fs, now: () => 1000 })).toBe(false);
-    expect(checkAndRecordCursorInvocation('/p', 'beforeSubmitPrompt', 'gen-1', { ...fs, now: () => 1500 })).toBe(true);
+describe('⭐ RC50/RC56 — atomic duplicate-invocation claim', () => {
+  it('⭐ first claim wins (false); the SAME key is a duplicate (true) — arbitration is the create itself', () => {
+    const fs = memFs();
+    expect(checkAndRecordCursorInvocation('/p', 'beforeSubmitPrompt', 'gen-1', fs.deps(1000))).toBe(false);
+    expect(checkAndRecordCursorInvocation('/p', 'beforeSubmitPrompt', 'gen-1', fs.deps(1002))).toBe(true);
   });
+
   it('a different generation is not a duplicate', () => {
-    const fs = mem();
-    checkAndRecordCursorInvocation('/p', 'beforeSubmitPrompt', 'gen-1', { ...fs, now: () => 1000 });
-    expect(checkAndRecordCursorInvocation('/p', 'beforeSubmitPrompt', 'gen-2', { ...fs, now: () => 1001 })).toBe(false);
+    const fs = memFs();
+    checkAndRecordCursorInvocation('/p', 'beforeSubmitPrompt', 'gen-1', fs.deps(1000));
+    expect(checkAndRecordCursorInvocation('/p', 'beforeSubmitPrompt', 'gen-2', fs.deps(1001))).toBe(false);
   });
-  it('expired entries no longer count', () => {
-    const fs = mem();
-    checkAndRecordCursorInvocation('/p', 'e', 'gen-1', { ...fs, now: () => 1000 });
-    expect(checkAndRecordCursorInvocation('/p', 'e', 'gen-1', { ...fs, now: () => 1000 + CURSOR_INVOCATION_MAX_AGE_MS + 1 })).toBe(false);
-  });
+
   it('⭐ no generation id ⇒ never a duplicate (fail-open)', () => {
-    expect(checkAndRecordCursorInvocation('/p', 'e', undefined, mem())).toBe(false);
+    expect(checkAndRecordCursorInvocation('/p', 'e', undefined, memFs().deps(1000))).toBe(false);
   });
-  it('fs errors ⇒ never a duplicate (fail-open)', () => {
+
+  it('non-EEXIST fs errors ⇒ fail-open (run the flow)', () => {
     expect(checkAndRecordCursorInvocation('/p', 'e', 'gen-1', {
-      readFileFn: () => { throw new Error('boom'); },
-      writeFileFn: () => { throw new Error('disk full'); },
+      mkdirFn: () => {}, writeExclusiveFn: () => { throw Object.assign(new Error('EACCES'), { code: 'EACCES' }); },
     })).toBe(false);
+  });
+
+  it('stale markers are pruned by the winner', () => {
+    const fs = memFs();
+    checkAndRecordCursorInvocation('/p', 'e', 'old', fs.deps(1000));
+    checkAndRecordCursorInvocation('/p', 'e', 'new', fs.deps(1000 + 10 * 60_000 + 1));
+    const names = [...fs.files].map((p) => p.split('/').pop()!);
+    expect(names).not.toContain(cursorInvocationMarkerName('e', 'old'));
+    expect(names).toContain(cursorInvocationMarkerName('e', 'new'));
+  });
+
+  it('marker names are fs-safe', () => {
+    expect(cursorInvocationMarkerName('beforeSubmitPrompt', 'a/b:c*d')).toBe('beforeSubmitPrompt-a_b_c_d');
   });
 });
