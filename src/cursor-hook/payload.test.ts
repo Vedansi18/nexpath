@@ -147,17 +147,55 @@ describe('⭐ RC48 — BOM-prefixed Windows payloads parse', () => {
   it('⭐ the real captured payload parses clean', () => {
     const p = parseCursorHookPayload(REAL_CAPTURED_PAYLOAD);
     expect(p.promptText).toContain('create invoices');
-    expect(p.projectRoot).toBe('/c:/Users/Admin/OneDrive/Desktop/vedansi_testing');
+    // RC55: the URI-style leading slash is stripped at parse — this is the
+    // WRITABLE form every downstream path consumer needs on Windows.
+    expect(p.projectRoot).toBe('c:/Users/Admin/OneDrive/Desktop/vedansi_testing');
   });
 
   it('⭐ BOM + compact + CRLF — the exact live failure shape — now parses identically', () => {
     const p = parseCursorHookPayload('\uFEFF' + REAL_CAPTURED_PAYLOAD + '\r\n');
     expect(p.promptText).toContain('create invoices');
-    expect(p.projectRoot).toBe('/c:/Users/Admin/OneDrive/Desktop/vedansi_testing');
+    // RC55: the URI-style leading slash is stripped at parse — this is the
+    // WRITABLE form every downstream path consumer needs on Windows.
+    expect(p.projectRoot).toBe('c:/Users/Admin/OneDrive/Desktop/vedansi_testing');
   });
 
   it('BOM on a windsurf-shaped payload parses too (shared helper, no drift)', () => {
     const p = parseAutoHookPayload('\uFEFF{"prompt":"hello there","permission_mode":"agent"}');
     expect(p.promptText).toBe('hello there');
+  });
+});
+
+/**
+ * ⭐ RC55 — Cursor's workspace_roots are URI-style: on Windows "/c:/Users/…".
+ * Node resolves that as "<current drive>\c:\…" (cannot exist) — every write
+ * off the root failed and RC51 refused it on 12/12 live submits (the round
+ * the BOM fix finally unblocked). The leading slash of a drive-letter root is
+ * stripped at the parse boundary so EVERY consumer gets a real path.
+ */
+describe('⭐ RC55 — Windows URI-style workspace roots normalize', () => {
+  const payloadWithRoot = (root: string) => JSON.stringify({
+    prompt: 'a real prompt', hook_event_name: 'beforeSubmitPrompt',
+    workspace_roots: [root], session_id: 's',
+  });
+
+  it('⭐ the exact live failing root loses its leading slash', () => {
+    const p = parseCursorHookPayload(payloadWithRoot('/c:/Users/Admin/OneDrive/Desktop/testing'));
+    expect(p.projectRoot).toBe('c:/Users/Admin/OneDrive/Desktop/testing');
+  });
+
+  it('backslash variant normalizes too', () => {
+    const p = parseCursorHookPayload(payloadWithRoot('/C:\\Users\\Admin\\proj'));
+    expect(p.projectRoot).toBe('C:\\Users\\Admin\\proj');
+  });
+
+  it('⭐ POSIX roots are untouched (Linux/mac regression pin)', () => {
+    expect(parseCursorHookPayload(payloadWithRoot('/home/user/proj')).projectRoot).toBe('/home/user/proj');
+    expect(parseCursorHookPayload(payloadWithRoot('/Users/imac/Desktop/vedansi testing/nexpath')).projectRoot)
+      .toBe('/Users/imac/Desktop/vedansi testing/nexpath');
+  });
+
+  it('a real Windows path without the URI slash is untouched', () => {
+    expect(parseCursorHookPayload(payloadWithRoot('C:\\Users\\Admin\\proj')).projectRoot).toBe('C:\\Users\\Admin\\proj');
   });
 });

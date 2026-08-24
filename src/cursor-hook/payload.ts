@@ -90,7 +90,17 @@ export function parseCursorHookPayload(raw: string): CursorHookPayload {
   }
 
   const roots = Array.isArray(extra.workspace_roots) ? extra.workspace_roots : [];
-  const firstRoot = roots.find((r): r is string => typeof r === 'string' && r.length > 0);
+  const rawRoot = roots.find((r): r is string => typeof r === 'string' && r.length > 0);
+  // RC55 (Windows/Cursor 2026-08-24, the round the BOM fix unblocked): Cursor's
+  // `workspace_roots` are URI-STYLE paths — on Windows that is "/c:/Users/…",
+  // a leading slash before the drive letter. Node's fs on Windows resolves it
+  // as "<current drive>\c:\Users\…", a directory that cannot exist — so EVERY
+  // downstream write off this root failed (RC51's probe refused it loudly on
+  // 12/12 live submits; the decision file, the echo registry, and RC50's
+  // dedupe registry would all have failed the same way). Strip exactly the
+  // one leading slash of a drive-letter path; every POSIX root and every real
+  // Windows path is untouched.
+  const firstRoot = rawRoot !== undefined && /^\/[A-Za-z]:[\\/]/.test(rawRoot) ? rawRoot.slice(1) : rawRoot;
 
   return {
     promptText: base.promptText,
