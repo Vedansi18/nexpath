@@ -293,8 +293,10 @@ function renderSweepReport(): void {
     row.textContent = `${f.surface} · ${f.content} · ${f.w}×${f.h} → ${flags}`;
     detail.appendChild(row);
   }
-  // One line for automation.
-  console.log('SWEEP ' + JSON.stringify({ pass, fail }));
+  // Reported two ways: the console line for a Chrome --dump-dom run, and a POST
+  // so browsers WITHOUT that flag can be measured too. Firefox has no
+  // --dump-dom, and C-3 names Firefox first.
+  report('SWEEP', pass, fail);
 }
 
 // -- the functionality run (?e2e=1) ------------------------------------------
@@ -587,7 +589,19 @@ function renderE2eReport(): void {
     row.textContent = (r.failure ? 'FAIL  ' : 'ok    ') + r.name + (r.failure ? ' -> ' + r.failure : '');
     detail.appendChild(row);
   }
-  console.log('E2E ' + JSON.stringify({ pass: results.length - failed.length, fail: failed.length }));
+  report('E2E', results.length - failed.length, failed.length);
+}
+
+/**
+ * Publish a verdict. The console line serves a Chrome `--dump-dom` run; the POST
+ * serves every other engine, Firefox above all, which has no such flag.
+ * Fire-and-forget: a harness opened from the filesystem has no server, and that
+ * must not turn into an unhandled rejection on the page.
+ */
+function report(kind: string, pass: number, fail: number): void {
+  const payload = JSON.stringify({ kind, pass, fail, ua: navigator.userAgent });
+  console.log(kind + ' ' + payload);
+  void fetch('/result', { method: 'POST', body: payload }).catch(() => undefined);
 }
 
 // -- boot --------------------------------------------------------------------
