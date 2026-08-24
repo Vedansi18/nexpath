@@ -50,7 +50,7 @@ import { PE_ENGINE_READY, isPromptEnhancementSequenceShapedTextV1 } from './pe-e
 import { prepareAndStoreBrowserPe, type BrowserPeContext } from './pe-prepare.js';
 import { getPendingPe, markPendingPeShown, upsertPendingPe } from '../adapters/pe-pending-store.js';
 import { resolvePePopupCooldown } from '../adapters/pe-config.js';
-import { recordPendingSequence } from '../adapters/pe-sequence-store.js';
+import { getPendingSequence, recordPendingSequence } from '../adapters/pe-sequence-store.js';
 import { deliverPePanelCommand, runBrowserPePopup } from './pe-popup-host.js';
 
 const idb = new IdbStorageAdapter();
@@ -1052,7 +1052,22 @@ async function handleResponseStopPeFirst(projectRoot: string, tabId: number | un
 
   const state = await idb.loadSessionState(projectRoot);
   const pe = await getPendingPe(projectRoot, state?.sessionId);
-  if (!pe) return;
+  if (!pe) {
+    // PB6 fail-closed row behaviour: an active sequence row with no pending PE
+    // would be the CLI's continuation moment — the browser has no continuation
+    // runtime (deferred, R-3), so it logs and does NOTHING, exactly the CLI's
+    // planner-off default. Content-free: counts only.
+    try {
+      const seq = await getPendingSequence(projectRoot);
+      if (seq) {
+        log.debug('pe_sequence_continuation_gated', {
+          projectRoot,
+          remainingTaskCount: seq.remainingTaskCount,
+        });
+      }
+    } catch { /* diagnosability only — never affects the stop path */ }
+    return;
+  }
 
   // No usable tab → leave the row pending for the next stop (advisory parity —
   // the 2026-07-10 lesson: never consume before a render is possible).

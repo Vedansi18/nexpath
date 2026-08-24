@@ -285,6 +285,34 @@ export function mountNexpathPePanel(root: HTMLElement, opts: PePanelOptions): Pe
       main.appendChild(back);
     }
 
+    // Feedback v1 (PB5): the CLI popup's two SUGGESTED categories, recorded as
+    // content-free signals — no free-text field (typed feedback rows deferred,
+    // PE-BR-11). Non-terminal: the popup stays open; the row acknowledges.
+    if (v.hasFeedback) {
+      const row = doc.createElement('div');
+      row.className = 'npe-row';
+      const label = doc.createElement('span');
+      label.className = 'npe-muted';
+      label.textContent = 'Feedback:';
+      row.appendChild(label);
+      const options: ReadonlyArray<['not_relevant_enough' | 'too_much_or_too_long', string]> = [
+        ['not_relevant_enough', 'Not relevant enough'],
+        ['too_much_or_too_long', 'Too much / too long'],
+      ];
+      for (const [category, text] of options) {
+        const b = doc.createElement('button');
+        b.className = 'npe-link';
+        b.textContent = text;
+        b.addEventListener('click', () => {
+          emitCommand({ type: 'feedback_suggested', category });
+          label.textContent = 'Feedback: thanks — noted.';
+          row.querySelectorAll('button').forEach((btn) => { btn.disabled = true; });
+        });
+        row.appendChild(b);
+      }
+      main.appendChild(row);
+    }
+
     for (const cue of v.trustCues) line('npe-muted', cue);
 
     // ── Footer ─────────────────────────────────────────────────────────────────

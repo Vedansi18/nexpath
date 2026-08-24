@@ -97,8 +97,10 @@ function handlePanelEvent(event: PePanelEventV1): void {
     return;
   }
   // One user command → one short-lived runtime message (the injector attaches
-  // the project root + forwards). Panel goes busy until the SW's next view.
-  controller?.setBusy(true);
+  // the project root + forwards). Panel goes busy until the SW's next view —
+  // EXCEPT feedback: it's non-terminal and produces no re-render (the SW only
+  // records a content-free signal), so the panel must stay interactive.
+  if (event.command.type !== 'feedback_suggested') controller?.setBusy(true);
   window.dispatchEvent(new CustomEvent('nexpath:pe-command-out', {
     detail: { viewSeq: event.viewSeq, command: event.command },
   }));

@@ -46,7 +46,7 @@ vi.mock('../adapters/pe-pending-store.js', () => ({
   markPendingPeShown: vi.fn(),
 }));
 vi.mock('../adapters/pe-config.js', () => ({ resolvePePopupCooldown: vi.fn() }));
-vi.mock('../adapters/pe-sequence-store.js', () => ({ recordPendingSequence: vi.fn() }));
+vi.mock('../adapters/pe-sequence-store.js', () => ({ recordPendingSequence: vi.fn(), getPendingSequence: vi.fn() }));
 vi.mock('./pe-popup-host.js', () => ({
   runBrowserPePopup: vi.fn(),
   deliverPePanelCommand: vi.fn(),
@@ -73,7 +73,7 @@ const { prepareAndStoreBrowserPe } = await import('./pe-prepare.js');
 const { isPromptEnhancementSequenceShapedTextV1 } = await import('./pe-engine.js');
 const { getPendingPe, markPendingPeShown } = await import('../adapters/pe-pending-store.js');
 const { resolvePePopupCooldown } = await import('../adapters/pe-config.js');
-const { recordPendingSequence } = await import('../adapters/pe-sequence-store.js');
+const { recordPendingSequence, getPendingSequence } = await import('../adapters/pe-sequence-store.js');
 const { runBrowserPePopup } = await import('./pe-popup-host.js');
 
 const idbLoadSessionState = vi.fn();
@@ -1446,6 +1446,7 @@ describe('service-worker.ts', () => {
       vi.mocked(getPendingPe).mockResolvedValue(null);
       vi.mocked(markPendingPeShown).mockResolvedValue(undefined);
       vi.mocked(recordPendingSequence).mockResolvedValue(undefined);
+      vi.mocked(getPendingSequence).mockResolvedValue(null);
     });
 
     it('consumes a queued advisory SILENTLY (MPS-7: the advisory surface is removed by default)', async () => {
@@ -1517,6 +1518,22 @@ describe('service-worker.ts', () => {
         type: 'nexpath:pe-inject', text: 'FIRST SEQUENCE PROMPT',
       })));
       expect(logDebugMock).toHaveBeenCalledWith('pe_sequence_recorded', expect.objectContaining({ remainingTaskCount: 2 }));
+    });
+
+    it('a later stop with an ACTIVE sequence row and no pending PE logs pe_sequence_continuation_gated and does nothing (PB6 fail-closed)', async () => {
+      idbLoadSessionState.mockResolvedValue({ sessionId: 's1', promptCount: 9 });
+      vi.mocked(getPendingPe).mockResolvedValue(null);
+      vi.mocked(getPendingSequence).mockResolvedValue({
+        sessionId: 's1', createdAt: 1, status: 'first_sent', requestId: 'r1',
+        handoffDecisionId: 'h1', currentBodyId: 'b1', bodyRevision: 1, remainingTaskCount: 2,
+      });
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      stopPe(messageListener, 7);
+      await vi.waitFor(() => expect(logDebugMock).toHaveBeenCalledWith('pe_sequence_continuation_gated', {
+        projectRoot: 'https://bolt.new/~/p1', remainingTaskCount: 2,
+      }));
+      expect(runBrowserPePopup).not.toHaveBeenCalled();
+      expect(showAdvisoryMock).not.toHaveBeenCalled();
     });
 
     it('no sequence row is recorded when the MPS popup was not sent', async () => {

@@ -26,6 +26,7 @@ function view(overrides: Partial<PePanelViewV1> = {}): PePanelViewV1 {
       { actionType: 'more_project_grounded', label: 'More project-grounded', availability: 'requires_llm_budget' },
     ],
     refinement: false,
+    hasFeedback: false,
     trustCues: [],
     pinchLabel: 'Final Review',
     whyHelp: 'This is a risky release step.',
@@ -223,5 +224,31 @@ describe('MPS-1 sequence offer view (PB6)', () => {
     expect(root.textContent).toContain('Then 1 more prompt in this sequence:');
     panel.show(offer({ viewSeq: 2, remainingTaskCount: 0, taskSummaryLines: [] }));
     expect(root.textContent).not.toContain('more prompt');
+  });
+});
+
+describe('feedback v1 (PB5 — suggested categories as content-free signals)', () => {
+  it('renders the two suggested categories only when the engine offers feedback', () => {
+    panel.show(view());
+    expect(root.textContent).not.toContain('Feedback:');
+    panel.show(view({ viewSeq: 2, hasFeedback: true }));
+    expect(root.textContent).toContain('Feedback:');
+    expect(byText('button', 'Not relevant enough')).toBeTruthy();
+    expect(byText('button', 'Too much / too long')).toBeTruthy();
+    // No free-text field anywhere in the row (typed feedback rows deferred).
+    expect(root.querySelectorAll('textarea')).toHaveLength(2); // body + details only
+  });
+
+  it('a category click emits the content-free command, acknowledges, and the popup STAYS interactive', () => {
+    panel.show(view({ hasFeedback: true }));
+    byText('button', 'Too much / too long').click();
+    expect(commands().at(-1)).toMatchObject({
+      command: { type: 'feedback_suggested', category: 'too_much_or_too_long' },
+    });
+    expect(root.textContent).toContain('thanks — noted');
+    expect(byText<HTMLButtonElement>('button', 'Not relevant enough').disabled).toBe(true);
+    // Non-terminal: other controls still work (panel not busy).
+    byText('button', 'Use original prompt').click();
+    expect(commands().at(-1)).toMatchObject({ command: { type: 'use_original' } });
   });
 });

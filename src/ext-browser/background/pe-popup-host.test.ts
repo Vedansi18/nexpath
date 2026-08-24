@@ -367,3 +367,46 @@ describe('MPS-1 sequence offer (PB6 — popup-host order: offer first, PE after 
     expect(json).not.toContain('handoffDecisionId');
   });
 });
+
+describe('feedback v1 signal interception (PB5)', () => {
+  it('feedback_suggested is logged as a content-free signal and does NOT enter the engine loop', async () => {
+    const { log, events } = makeLog();
+    let seq = 0;
+    const tab = async (msg: unknown): Promise<unknown> => {
+      const m = msg as { type?: string; payload?: PePanelViewV1 };
+      if (m.type === 'nexpath:show-pe' && m.payload) {
+        seq = m.payload.viewSeq;
+        setTimeout(() => {
+          // First a feedback command (must be consumed host-side, loop keeps
+          // waiting on the SAME view), then the terminal close.
+          deliverPePanelCommand(log, ROOT, seq, { type: 'feedback_suggested', category: 'not_relevant_enough' });
+          setTimeout(() => { deliverPePanelCommand(log, ROOT, seq, { type: 'close' }); }, 0);
+        }, 0);
+      }
+      return { ok: true };
+    };
+    const { result } = await runBrowserPePopup({
+      log, projectRoot: ROOT, apiKey: null, record, sendToTab: tab,
+      onFirstRendered: vi.fn().mockResolvedValue(undefined),
+    });
+    expect(result.state).toBe('closed_no_send');
+    const signal = events.find(([k, d]) => k === 'pe_action_signal' && d?.['kind'] === 'pe_feedback_suggested');
+    expect(signal?.[1]).toMatchObject({ category: 'not_relevant_enough' });
+    // Only ONE view was ever rendered — the feedback never caused an engine round-trip.
+  });
+});
+
+describe('PB2 storage-quota sanity — realistic pending-PE payload size', () => {
+  it('a real prepared record serializes well under the storage.local budget', () => {
+    const serialized = JSON.stringify({
+      sessionId: record.sessionId, promptCount: record.promptCount, status: 'pending',
+      createdAt: record.createdAt, request: record.request, result: record.result,
+    });
+    const bytes = new TextEncoder().encode(serialized).length;
+    // Realistic engine result today ≈ tens of KB. chrome.storage.local default
+    // quota is 10 MB total; flag loudly (fail) if a contract change ever pushes
+    // one row past 1 MB — the IDB fallback lever gets pulled then, not silently.
+    expect(bytes).toBeGreaterThan(5_000);
+    expect(bytes).toBeLessThan(1_000_000);
+  });
+});

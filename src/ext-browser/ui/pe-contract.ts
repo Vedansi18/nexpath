@@ -49,6 +49,13 @@ export interface PePanelViewV1 {
   directional: readonly PePanelDirectionalV1[];
   /** True on a directional refinement view — renders the Go back row. */
   refinement: boolean;
+  /**
+   * True when the engine's controls carry the feedback action. v1 renders the
+   * CLI popup's two SUGGESTED categories only, recorded as content-free
+   * signals (typed feedback rows are deferred — PE-BR-11); free-text feedback
+   * is not rendered.
+   */
+  hasFeedback: boolean;
   /** Public-safe notices (engine copy verbatim; absent = not rendered). */
   publicNotice?: string;
   providerFailureNotice?: string;
@@ -92,6 +99,8 @@ export type PePanelCommandV1 =
   | { type: 'more_project_grounded'; bodyText: string }
   | { type: 'go_back' }
   | { type: 'close' }
+  /** v1 feedback: content-free suggested category only — never free text. */
+  | { type: 'feedback_suggested'; category: 'not_relevant_enough' | 'too_much_or_too_long' }
   // MPS-1 offer outcomes (valid only while a sequence-offer view is live).
   | { type: 'mps_send'; bodyText: string }
   | { type: 'mps_decline' }
@@ -115,15 +124,20 @@ export interface PePanelControllerV1 {
 const COMMAND_TYPES = new Set([
   'use_current', 'use_original', 'apply_details', 'shorter',
   'more_thorough', 'more_project_grounded', 'go_back', 'close',
+  'feedback_suggested',
   'mps_send', 'mps_decline', 'mps_cancel',
 ]);
 const TEXT_FREE_COMMANDS = new Set(['use_original', 'go_back', 'close', 'mps_decline', 'mps_cancel']);
+const FEEDBACK_CATEGORIES = new Set(['not_relevant_enough', 'too_much_or_too_long']);
 
 export function isPePanelCommandV1(value: unknown): value is PePanelCommandV1 {
   if (typeof value !== 'object' || value === null) return false;
   const v = value as Record<string, unknown>;
   if (typeof v['type'] !== 'string' || !COMMAND_TYPES.has(v['type'])) return false;
   if (TEXT_FREE_COMMANDS.has(v['type'])) return true;
+  if (v['type'] === 'feedback_suggested') {
+    return typeof v['category'] === 'string' && FEEDBACK_CATEGORIES.has(v['category']);
+  }
   if (typeof v['bodyText'] !== 'string') return false;
   if (v['type'] === 'apply_details') return typeof v['detailsText'] === 'string';
   return true;

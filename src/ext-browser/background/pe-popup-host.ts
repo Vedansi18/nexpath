@@ -134,6 +134,7 @@ export function buildPePanelView(
     additionalDetailsText: view.additionalDetailsText,
     directional,
     refinement: view.refinement === true,
+    hasFeedback: model.controls.feedback !== undefined,
     trustCues: model.publicCopy.trustCues.map((c) => c.publicSafeText),
   };
   if (model.pinchLabel) out.pinchLabel = model.pinchLabel.text;
@@ -329,10 +330,25 @@ export async function runBrowserPePopup(
     }
   };
 
-  const awaitPanelCommand = (): Promise<PePanelCommandV1> =>
+  const takeFromMailbox = (): Promise<PePanelCommandV1> =>
     box.queued !== null
       ? Promise.resolve((() => { const q = box.queued as PePanelCommandV1; box.queued = null; return q; })())
       : new Promise<PePanelCommandV1>((resolve) => { box.waiter = resolve; });
+
+  // Feedback v1 (PB5): suggested-feedback is recorded as a CONTENT-FREE signal
+  // (kind + category enum, never text) and consumed HERE — it is non-terminal
+  // and never enters the engine loop (no feedback sink exists in the browser
+  // v1; typed feedback rows are deferred, PE-BR-11).
+  const awaitPanelCommand = async (): Promise<PePanelCommandV1> => {
+    for (;;) {
+      const command = await takeFromMailbox();
+      if (command.type === 'feedback_suggested') {
+        log.debug('pe_action_signal', { kind: 'pe_feedback_suggested', category: command.category });
+        continue;
+      }
+      return command;
+    }
+  };
 
   const closePanel = (): void => {
     void deps.sendToTab({ type: 'nexpath:pe-close', projectRoot }).catch(() => { /* panel gone */ });
