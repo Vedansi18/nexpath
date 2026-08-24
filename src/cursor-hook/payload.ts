@@ -27,6 +27,8 @@
  * that neither the parsed object nor the debug description ever contains it.
  */
 import { parseAutoHookPayload } from '../cli/commands/auto.js';
+import { stripBom, headBytesHex } from '../utils/strip-bom.js';
+import { log } from '../logger.js';
 
 export interface CursorHookPayload {
   /** Trimmed prompt text, or undefined when absent/blank. */
@@ -39,6 +41,13 @@ export interface CursorHookPayload {
   currentAgentMode?: string;
   /** Session transcript path — identical key name across both platforms. */
   transcriptPath?: string;
+  /**
+   * RC50: Cursor's per-submit generation id — the dedupe key for duplicate
+   * hook registrations (the tester's machine runs THREE registrations per
+   * submit: project + identical user + a stale claude-settings entry; without
+   * dedupe each would open its own popup once delivery works).
+   */
+  generationId?: string;
   /** From `workspace_roots[0]`. Claude's payload has no equivalent. */
   projectRoot?: string;
   /** Cursor's own session id, used only for correlation. Never a prompt. */
@@ -61,20 +70,41 @@ export function parseCursorHookPayload(raw: string): CursorHookPayload {
     composer_mode?: unknown;
     workspace_roots?: unknown;
     session_id?: unknown;
+    generation_id?: unknown;
   } = {};
   try {
-    const v: unknown = JSON.parse(raw);
+    // RC48: Windows Cursor prefixes stdin with a UTF-8 BOM — see stripBom.
+    const v: unknown = JSON.parse(stripBom(raw));
     if (v && typeof v === 'object') extra = v as typeof extra;
-  } catch {
-    // Malformed JSON: `base` is already empty, so fall through with no extras.
+  } catch (err) {
+    // RC48: a total parse failure used to be swallowed here, indistinguishable
+    // from an empty prompt — the exact reason the BOM hid for weeks. Name it.
+    try {
+      log('warn', 'cursor_hook_payload_parse_failed', {
+        message: (err as Error)?.message?.slice(0, 120) ?? 'unknown',
+        head_hex: headBytesHex(raw),
+        raw_len: raw.length,
+      });
+    } catch { /* logging must never break the hook */ }
     return {};
   }
 
   const roots = Array.isArray(extra.workspace_roots) ? extra.workspace_roots : [];
-  const firstRoot = roots.find((r): r is string => typeof r === 'string' && r.length > 0);
+  const rawRoot = roots.find((r): r is string => typeof r === 'string' && r.length > 0);
+  // RC55 (Windows/Cursor 2026-08-24, the round the BOM fix unblocked): Cursor's
+  // `workspace_roots` are URI-STYLE paths — on Windows that is "/c:/Users/…",
+  // a leading slash before the drive letter. Node's fs on Windows resolves it
+  // as "<current drive>\c:\Users\…", a directory that cannot exist — so EVERY
+  // downstream write off this root failed (RC51's probe refused it loudly on
+  // 12/12 live submits; the decision file, the echo registry, and RC50's
+  // dedupe registry would all have failed the same way). Strip exactly the
+  // one leading slash of a drive-letter path; every POSIX root and every real
+  // Windows path is untouched.
+  const firstRoot = rawRoot !== undefined && /^\/[A-Za-z]:[\\/]/.test(rawRoot) ? rawRoot.slice(1) : rawRoot;
 
   return {
     promptText: base.promptText,
+    generationId: typeof extra.generation_id === 'string' && extra.generation_id.length > 0 ? extra.generation_id : undefined,
     // composer_mode first: on a Cursor payload it is the more specific field,
     // but permission_mode is still honoured so one parser serves both shapes.
     currentAgentMode:

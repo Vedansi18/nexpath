@@ -10,6 +10,7 @@
  * hardware here (`G-HARDWARE`), so the command each OS would run is pinned instead.
  */
 import { describe, it, expect, vi } from 'vitest';
+import { spawnSync } from 'node:child_process';
 import {
   createSubmitClipboardDelivery,
   submitKeystroke,
@@ -17,6 +18,8 @@ import {
   focusedWindowIsEditor,
   type SubmitClipboardDeliveryDeps,
   isDarwinAccessibilityDenial,
+  buildWin32KeystrokeScript,
+  WIN32_KEYSTROKE_TIMEOUT_MS,
 } from './submit-clipboard-delivery.js';
 
 function deliveryHarness(over: Partial<SubmitClipboardDeliveryDeps> = {}) {
@@ -234,6 +237,14 @@ describe('submitKeystroke — cross-OS matrix (§2.4b), pinned per platform', ()
     // point is not the return value but that the defaults actually execute
     // instead of short-circuiting to false.
     const calls: string[] = [];
+    // RC48-era fix (Bhavnesh §8.4): this case exercises the REAL default
+    // detector, which shells out to `which` — on a host with no keystroke tool
+    // installed (Windows/macOS checkouts, minimal CI) no tool can match and the
+    // assertion is about the HOST, not the code. Skip honestly there.
+    const anyTool = ['xdotool', 'wtype', 'ydotool'].some((t) => {
+      try { return spawnSync('which', [t], { stdio: 'ignore', timeout: 2000 }).status === 0; } catch { return false; }
+    });
+    if (!anyTool) return; // host has no tool — nothing real to probe
     const result = submitKeystroke({ isPopupFocused: () => false, platform: 'linux',
       env: { DISPLAY: ':1' },
       // hasCommand intentionally NOT injected — exercise the real default.
@@ -378,5 +389,87 @@ describe('⭐ RC16 — darwin Accessibility denial detection', () => {
   it('does not flag unrelated failures or null', () => {
     expect(isDarwinAccessibilityDenial('osascript exited 1')).toBe(false);
     expect(isDarwinAccessibilityDenial(null)).toBe(false);
+  });
+});
+
+/**
+ * ⭐ RC47 — win32 submit hardening (Windows tester 2026-08-22: AppActivate
+ * failed for both 'Devin' and 'Windsurf' while the window was open, Enter never
+ * fired, the refined text stranded silently).
+ */
+describe('⭐ RC47 — win32 AppActivate candidates + retry', () => {
+  const runSpy = () => {
+    const calls: Array<{ cmd: string; args: string[] }> = [];
+    return { calls, run: (cmd: string, args: string[]) => { calls.push({ cmd, args }); return true; } };
+  };
+
+  it('⭐ the live appName leads the candidate list (rebrand coverage)', () => {
+    const { calls, run } = runSpy();
+    submitKeystroke({
+      platform: 'win32', host: 'windsurf', appName: 'Devin Next', run,
+      isPopupFocused: () => false, isEditorFocused: () => true,
+    });
+    const ps = calls[0]!.args.join(' ');
+    expect(ps.indexOf("'Devin Next'")).toBeGreaterThan(-1);
+    expect(ps.indexOf("'Devin Next'")).toBeLessThan(ps.indexOf("'Devin'"));
+    expect(ps).toContain("'Windsurf'");
+  });
+
+  it('two activation rounds with a pause (foreground-lock release window)', () => {
+    const { calls, run } = runSpy();
+    submitKeystroke({
+      platform: 'win32', host: 'cursor', appName: 'Cursor', run,
+      isPopupFocused: () => false, isEditorFocused: () => true,
+    });
+    const ps = calls[0]!.args.join(' ');
+    expect(ps).toContain('foreach($r in 1..2)');
+    expect(ps).toContain('Start-Sleep -Milliseconds 400');
+  });
+
+  it('duplicate appName==host title is deduped', () => {
+    const { calls, run } = runSpy();
+    submitKeystroke({
+      platform: 'win32', host: 'cursor', appName: 'Cursor', run,
+      isPopupFocused: () => false, isEditorFocused: () => true,
+    });
+    const ps = calls[0]!.args.join(' ');
+    // The builder embeds the candidate list twice (foreground check + activate
+    // rounds) — a deduped single candidate appears exactly 2×; a duplicated
+    // candidate would appear 4×.
+    expect(ps.match(/'Cursor'/g)?.length).toBe(2);
+  });
+});
+
+/**
+ * ⭐ RC49 — foreground-first win32 keystrokes. The Devin tester's RC47 toast
+ * proved AppActivate can fail while the editor IS foreground (Windows'
+ * foreground lock refuses background callers). When the target is already
+ * focused, no activation is needed — send directly.
+ */
+describe('⭐ RC49 — buildWin32KeystrokeScript', () => {
+  it('⭐ checks the FOREGROUND title before any AppActivate', () => {
+    const ps = buildWin32KeystrokeScript(['Devin Next', 'Devin'], '{ENTER}');
+    expect(ps.indexOf('GetForegroundWindow')).toBeLessThan(ps.indexOf('AppActivate'));
+    expect(ps).toContain('$fg.EndsWith($t)');
+  });
+  it('suffix matching, not substring — a browser tab titled "… - Chrome" cannot match', () => {
+    const ps = buildWin32KeystrokeScript(['Cursor'], '{ENTER}');
+    expect(ps).not.toContain('Contains');
+    expect(ps).toContain('EndsWith');
+  });
+  it('keeps the retry rounds and the FOREGROUND diagnostic', () => {
+    const ps = buildWin32KeystrokeScript(['Devin'], '{ENTER}');
+    expect(ps).toContain('foreach($r in 1..2)');
+    expect(ps).toContain('Write-Output ("FOREGROUND=" + $fg)');
+  });
+  it('quotes are PowerShell-escaped', () => {
+    expect(buildWin32KeystrokeScript(["O'Brien's Editor"], '^v')).toContain("'O''Brien''s Editor'");
+  });
+});
+
+/** ⭐ RC52 — the cold-start ceiling (Windows tester 2026-08-24: first submit killed at 8 s mid Add-Type; warm run 0.8 s delivered). */
+describe('⭐ RC52 — win32 keystroke timeout', () => {
+  it('the shared ceiling covers a cold Add-Type compile (>8 s measured)', () => {
+    expect(WIN32_KEYSTROKE_TIMEOUT_MS).toBeGreaterThanOrEqual(20_000);
   });
 });

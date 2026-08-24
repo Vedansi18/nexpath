@@ -33,6 +33,7 @@ import { isProfileStale } from '../../classifier/UserProfileClassifier.js';
 import { OpenAILLMAdapter } from '../adapters/llm.adapter.js';
 import { loggerAdapter } from '../adapters/log.adapter.js';
 import { logger, initLogger } from '../../logger.js';
+import { stripBom, headBytesHex } from '../../utils/strip-bom.js';
 import type { LogLevel } from '../../logger.js';
 import { writeHookStats } from '../../store/hook-stats.js';
 import { upsertPendingAdvisory } from '../../store/pending-advisories.js';
@@ -686,7 +687,10 @@ export async function preparePromptEnhancementForAuto(
  */
 export function parseAutoHookPayload(raw: string): AutoHookPayload {
   try {
-    const payload = JSON.parse(raw) as { prompt?: string; permission_mode?: string; transcript_path?: string };
+    // RC48 (fix authored in Bhavnesh's 2026-08-23 bug report, applied per that
+    // handoff): Windows Cursor prefixes the stdin payload with a UTF-8 BOM and
+    // JSON.parse throws on it — see src/utils/strip-bom.ts for the evidence.
+    const payload = JSON.parse(stripBom(raw)) as { prompt?: string; permission_mode?: string; transcript_path?: string };
     return {
       promptText:       payload.prompt?.trim(),
       currentAgentMode: typeof payload.permission_mode === 'string' ? payload.permission_mode : undefined,
@@ -695,7 +699,15 @@ export function parseAutoHookPayload(raw: string): AutoHookPayload {
           ? payload.transcript_path
           : undefined,
     };
-  } catch {
+  } catch (err) {
+    // RC48: a swallowed parse failure reads as "empty prompt" — log it.
+    try {
+      logger.warn('auto_hook_payload_parse_failed', {
+        message: (err as Error)?.message?.slice(0, 120) ?? 'unknown',
+        head_hex: headBytesHex(raw),
+        raw_len: raw.length,
+      });
+    } catch { /* never break the hook */ }
     return {};
   }
 }

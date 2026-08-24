@@ -92,3 +92,21 @@ describe('raiseAppWindow (generalised — used for Cursor inject)', () => {
     expect(raiseAppWindow('cursor', deps({ platform: 'darwin' as NodeJS.Platform }))).toBe(false);
   });
 });
+
+/** ⭐ RC49 — paste gets the same win32 targeting submit has (§8.2 asymmetry). */
+describe('⭐ RC49 — pasteKeystroke win32 targeting', () => {
+  it('⭐ with win32Titles: uses the foreground-first targeted script', () => {
+    const calls: string[][] = [];
+    pasteKeystroke({ platform: 'win32', win32Titles: ['Devin Next', 'Devin'], run: (_c, a) => { calls.push(a); return true; } });
+    const ps = calls[0]!.join(' ');
+    expect(ps).toContain('GetForegroundWindow');
+    expect(ps).toContain("'Devin Next'");
+    expect(ps).toContain('SendKeys("^v")');
+  });
+  it('without win32Titles: the OLD bare ^v, byte-identical (regression pin)', () => {
+    const calls: string[][] = [];
+    pasteKeystroke({ platform: 'win32', run: (_c, a) => { calls.push(a); return true; } });
+    expect(calls[0]!.join(' ')).toContain('$w=New-Object -ComObject WScript.Shell;$w.SendKeys("^v")');
+    expect(calls[0]!.join(' ')).not.toContain('GetForegroundWindow');
+  });
+});

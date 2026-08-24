@@ -209,9 +209,9 @@ function buildSubmitAdvisory(
     // Reuse the shipped raiser — Linux/X11 only by design; elsewhere it returns
     // false and the paste still proceeds.
     focus: async () => raiseAppWindow(host),
-    pasteKeystroke: () => pasteKeystroke(),
+    pasteKeystroke: () => pasteKeystroke({ win32Titles: [vscode.env.appName, host === 'cursor' ? 'Cursor' : 'Devin', 'Windsurf'] }),
     // RC11: Enter only when THIS editor is focused (one raise retry inside).
-    submitKeystroke: () => submitKeystroke({ host, focusEditor: () => void raiseAppWindow(host) }),
+    submitKeystroke: () => submitKeystroke({ host, focusEditor: () => void raiseAppWindow(host), appName: vscode.env.appName, submitLog: log }),
     log,
   });
   return createSubmitAdvisoryForHost({
@@ -289,6 +289,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const submitSurface = { active: false };
   // RC16: one-time darwin auto-send permission hint (per activation).
   let darwinSubmitHintShown = false;
+  let win32SubmitHintShown = false;
   // RC19 (Windows tester, 2026-08-17): a disarmed submit flow used to log
   // NOTHING — the ENABLED line was simply absent, so diagnosing meant
   // guessing. Say WHY, once per distinct reason (the RC15 re-check ticks
@@ -369,7 +370,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       focused = true;
     } catch { /* command absent on this build — paste into whatever has focus */ }
     await new Promise((r) => setTimeout(r, focused ? 400 : 250));
-    const ok = pasteKeystroke();
+    const ok = pasteKeystroke({ win32Titles: [vscode.env.appName, 'Devin', 'Windsurf'] });
     log(`[nexpath] windsurf inject (fallback) → ${ok ? `auto-pasted into Cascade (${focused ? 'openChatPanel → ' : ''}Ctrl+V)` : 'no keystroke tool; left on clipboard'}`);
     return ok;
   };
@@ -415,7 +416,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       } catch { /* try next focus command */ }
     }
     await new Promise((r) => setTimeout(r, focused ? 400 : 250));
-    const ok = pasteKeystroke();
+    const ok = pasteKeystroke({ win32Titles: [vscode.env.appName, 'Cursor'] });
     log(`[nexpath] cursor inject → ${ok ? `auto-pasted into existing chat (${focused ? focusedVia + ' → ' : ''}Ctrl+V)` : 'no keystroke tool found; left on clipboard'}`);
     return ok;
   };
@@ -771,10 +772,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         // Reuse the shipped raiser — Linux/X11 only by design; on other OSes it
         // returns false and the paste still proceeds (see the module's notes).
         focus: async () => raiseAppWindow('windsurf'),
-        pasteKeystroke: () => pasteKeystroke(),
+        pasteKeystroke: () => pasteKeystroke({ win32Titles: [vscode.env.appName, 'Devin', 'Windsurf'] }),
         // RC11: Enter only when Windsurf itself is focused — a blind Enter
         // pressed the Welcome view's "Start session" and closed the chat.
-        submitKeystroke: () => submitKeystroke({ host: 'windsurf', focusEditor: () => void raiseAppWindow('windsurf') }),
+        submitKeystroke: () => submitKeystroke({ host: 'windsurf', focusEditor: () => void raiseAppWindow('windsurf'), appName: vscode.env.appName, submitLog: log }),
         log: (m) => log(m),
       });
 
@@ -851,6 +852,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           // needs the Accessibility permission for the HOST APP. Without it the
           // refined text sits in the composer with zero guidance. One-time,
           // actionable, and honest about the manual fallback.
+          // RC47 (Windows tester, 2026-08-22): a failed win32 AppActivate left
+          // the refined text stranded in the composer with ZERO guidance — the
+          // tester watched "auto send nathi thayu". One-time, same contract as
+          // the darwin hint below: honest about the manual fallback.
+          if (outcome === 'submit_failed' && process.platform === 'win32' && !win32SubmitHintShown) {
+            win32SubmitHintShown = true;
+            void vscode.window.showWarningMessage(
+              'Nexpath: your refined prompt is in the chat input — press Enter to send it. (Auto-send could not focus the editor window this time.)',
+            );
+          }
           if (outcome === 'submit_failed' && process.platform === 'darwin' && !darwinSubmitHintShown) {
             darwinSubmitHintShown = true;
             const why = lastDarwinSubmitError ? ` (${lastDarwinSubmitError})` : '';
@@ -1208,6 +1219,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       log(`[nexpath] watcher error: ${record.message}`);
       console.error('[nexpath] watcher error:', record);
     },
+    // RC53: routine notices (a transient workspace db vanished and its watcher
+    // closed itself) — informational, never the "watcher error:" prefix.
+    onInfo: (message) => log(`[nexpath] ${message}`),
     onSchemaUnknown: ({ path, observedSampleKeys }) => {
       log(`[nexpath] schema unknown for ${path}; sample keys: ${observedSampleKeys.slice(0, 3).join(', ')}`);
       void vscode.window.showInformationMessage(

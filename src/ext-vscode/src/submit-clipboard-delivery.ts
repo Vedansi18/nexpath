@@ -138,6 +138,15 @@ export interface SubmitKeystrokeDeps {
   isEditorFocused?: typeof focusedWindowIsEditor;
   /** One-shot editor raise used when the editor is not focused. */
   focusEditor?: () => void;
+  /**
+   * RC47 (win32): the LIVE `vscode.env.appName` — tried as the FIRST
+   * AppActivate candidate. AppActivate matches exact/prefix/suffix, NOT
+   * substring, so a rebranded title ("Devin Next", …) misses the bare product
+   * names; the app's own reported name is the one string that tracks reality.
+   */
+  appName?: string;
+  /** RC47: diagnostic sink for the win32 submit path (which titles failed, what held the foreground). */
+  submitLog?: (message: string) => void;
 }
 
 
@@ -280,6 +289,43 @@ export function isDarwinAccessibilityDenial(err: string | null): boolean {
   return /assistive access|not authorized|1002|-25211|accessibility/i.test(err);
 }
 
+/** RC52: win32 keystroke-script spawn ceiling — cold Add-Type measured >8 s; warm ~0.8 s. */
+export const WIN32_KEYSTROKE_TIMEOUT_MS = 20_000;
+
+/**
+ * RC49 — the shared win32 keystroke script: FOREGROUND-FIRST, then AppActivate.
+ *
+ * The Devin tester's RC47 toast proved AppActivate can fail even while the
+ * editor is the foreground window: Windows' foreground lock refuses
+ * SetForegroundWindow from a background process tree (our PowerShell child),
+ * and AppActivate returns false REGARDLESS of the target already being
+ * focused. But when the target IS focused, no activation is needed at all —
+ * SendKeys types into the foreground. So: read the foreground title first;
+ * if it ENDS WITH one of the candidates (editor windows are titled
+ * "<file> - <folder> - Devin" — suffix matching also rejects a browser tab
+ * like "Cursor docs - Chrome", which ends with "Chrome"), send directly.
+ * Only when the editor is NOT foreground do the AppActivate rounds run —
+ * and there the lock permits it more often, because the user has interacted
+ * recently. On final failure, print the foreground title and exit 1.
+ */
+export function buildWin32KeystrokeScript(titles: readonly string[], sendKeys: string): string {
+  const psTitles = titles.map((t) => `'${t.replace(/'/g, "''")}'`).join(',');
+  return (
+    `Add-Type '[DllImport("user32.dll")]public static extern System.IntPtr GetForegroundWindow();[DllImport("user32.dll")]public static extern int GetWindowText(System.IntPtr h,System.Text.StringBuilder s,int n);' -Name U -Namespace W;` +
+    `$w=New-Object -ComObject WScript.Shell;` +
+    `$b=New-Object System.Text.StringBuilder 256;[void][W.U]::GetWindowText([W.U]::GetForegroundWindow(),$b,256);$fg=$b.ToString();` +
+    `$ok=$false;` +
+    `foreach($t in @(${psTitles})){if($fg -eq $t -or $fg.EndsWith($t)){$ok=$true;break}};` +
+    `if(-not $ok){` +
+    `foreach($r in 1..2){` +
+    `foreach($t in @(${psTitles})){if($w.AppActivate($t)){$ok=$true;break}};` +
+    `if($ok){break};Start-Sleep -Milliseconds 400};` +
+    `if($ok){Start-Sleep -Milliseconds 120}};` +
+    `if(-not $ok){Write-Output ("FOREGROUND=" + $fg);exit 1};` +
+    `$w.SendKeys("${sendKeys}")`
+  );
+}
+
 export function submitKeystroke(deps: SubmitKeystrokeDeps = {}): boolean {
   const platform = deps.platform ?? process.platform;
   const env = deps.env ?? process.env;
@@ -345,20 +391,27 @@ export function submitKeystroke(deps: SubmitKeystrokeDeps = {}): boolean {
       // reports `appName="Devin"`, so matching only 'Windsurf' would miss the
       // very machine this fixes. AppActivate matches a title PREFIX or
       // substring, so the bare product name is the right granularity.
-      const titles = deps.host === 'cursor' ? ['Cursor'] : ['Devin', 'Windsurf'];
-      const psTitles = titles.map((t) => `'${t}'`).join(',');
-      return run('powershell', [
-        '-NoProfile', '-Command',
-        // Try each title; stop at the first that activates. Exit 1 (⇒ run()
-        // false ⇒ `submit_failed`) when none did, so the failure is visible in
-        // the log rather than silently reported as dispatched.
-        `$w=New-Object -ComObject WScript.Shell;` +
-        `$ok=$false;` +
-        `foreach($t in @(${psTitles})){if($w.AppActivate($t)){$ok=$true;break}};` +
-        `if(-not $ok){exit 1};` +
-        `Start-Sleep -Milliseconds 120;` +
-        `$w.SendKeys("{ENTER}")`,
-      ]);
+      const hostTitles = deps.host === 'cursor' ? ['Cursor'] : ['Devin', 'Windsurf'];
+      // RC47: the live appName leads (AppActivate + suffix matching are
+      // exact/prefix/suffix — "Devin Next" misses the bare product names).
+      const titles = [...new Set([deps.appName?.trim(), ...hostTitles].filter((t): t is string => !!t))];
+      // RC49: foreground-first — see buildWin32KeystrokeScript.
+      const ps = buildWin32KeystrokeScript(titles, '{ENTER}');
+      if (deps.run) return deps.run('powershell', ['-NoProfile', '-Command', ps]);
+      // RC52 (Windows tester 2026-08-24): the FIRST submit of a session took
+      // 8025 ms — the old 8000 ms timeout killed PowerShell mid Add-Type
+      // (cold C# compile + Defender scan on first run); the second, warm call
+      // took 805 ms and delivered. 20 s covers the cold start; warm calls are
+      // sub-second so the ceiling is never felt.
+      const res = spawnSync('powershell', ['-NoProfile', '-Command', ps], {
+        stdio: ['ignore', 'pipe', 'ignore'], timeout: WIN32_KEYSTROKE_TIMEOUT_MS, encoding: 'utf8',
+      });
+      if (res.status === 0) return true;
+      const fg = (res.stdout ?? '').split('\n').find((l) => l.startsWith('FOREGROUND=')) ?? 'FOREGROUND=<unreadable>';
+      // RC52: name HOW it failed — status null + SIGTERM is the timeout kill,
+      // distinct from the script's own exit 1 (no matching window).
+      deps.submitLog?.(`[nexpath] submit-win32: editor not foreground and AppActivate failed for [${titles.join(', ')}]; ${fg.trim()}; status=${res.status ?? 'null'} signal=${res.signal ?? 'none'}`);
+      return false;
     }
     // Linux (X11, or Wayland with a compatible tool)
     if (!env.DISPLAY && !env.WAYLAND_DISPLAY) return false;

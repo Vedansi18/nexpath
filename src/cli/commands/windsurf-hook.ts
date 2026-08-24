@@ -27,7 +27,7 @@ import type { Command } from 'commander';
 import type { ChildProcess } from 'node:child_process';
 import { runWindsurfHook, parsePayload, type RunResult } from '../../windsurf-hook/handler.js';
 import { decideSubmitPrompt, type DeciderOptionSet, type DeciderSelection } from './submit-prompt-decider.js';
-import { runSequenceContinuationStop } from './submit-stop-decider.js';
+import { runSequenceContinuationStop, SEQUENCE_CONTINUATION_QUIET_MS } from './submit-stop-decider.js';
 import {
   createDeterministicSubmitOptionSource,
   type SubmitOptionSource,
@@ -36,7 +36,7 @@ import { openStore, closeStore } from '../../store/db.js';
 import { log } from '../../logger.js';
 import { getPendingAdvisory, markAdvisoryShown } from '../../store/pending-advisories.js';
 import { isSubmitAdvisoryEnabledForHost } from './submit-flow-config.js';
-import { writeSubmitDecision, readReplacementEchoes,
+import { writeSubmitDecision, readReplacementEchoes, latestReplacementEchoAt,
 } from './submit-decision-store.js';
 import { buildStopDrivenPromptSubmitDecider } from './submit-stop-decider.js';
 import { createHoldBudget, type HoldBudget } from './submit-hold-budget.js';
@@ -696,6 +696,26 @@ export async function runWindsurfHookAction(
         exit(0);
         return;
       }
+      // RC46 (Windows tester, 2026-08-22 — the "second popup killed my
+      // auto-submit" round): the RC43 quiet window lived INSIDE the runner,
+      // which returns {ran:false} BEFORE consulting it when no sequence row
+      // exists — so on a plain PE/advisory turn the 1–4 s post-block echo of
+      // post_cascade_response sailed straight through to the old-flow `handle`
+      // below, spawned a second stop, and its console stole the foreground at
+      // the exact moment the win32 AppActivate+Enter fired (submit_failed,
+      // stranded composer, merged prompts — the tester's log at 14:10:03Z).
+      // Same guard, same anchor, one level up: within the quiet window of OUR
+      // OWN last block, this event is the block's echo — end it. The item's
+      // real response completion arrives later and falls through unchanged.
+      try {
+        const lastBlockAt = latestReplacementEchoAt(contRoot);
+        const nowMs = Date.now();
+        if (lastBlockAt !== null && nowMs - lastBlockAt < SEQUENCE_CONTINUATION_QUIET_MS) {
+          log('info', 'windsurf_hook_post_leg_quiet_deferred', { age_ms: nowMs - lastBlockAt });
+          exit(0);
+          return;
+        }
+      } catch { /* fail-open: exactly the pre-RC46 fall-through */ }
     }
 
     // Name this surface for Layer C's popup "Send to …" label. The spawned
