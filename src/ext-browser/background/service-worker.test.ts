@@ -1617,6 +1617,65 @@ describe('service-worker.ts', () => {
     });
   });
 
+  describe('inflight-marker overlap (live-caught 2026-08-24: quick pipeline erased a slow sibling\'s marker)', () => {
+    it('a quick-exit pipeline does NOT clear the marker while a slow sibling still runs; the last finisher clears it', async () => {
+      // Backing store so the marker's real state is observable across both
+      // pipelines (the plain mocks don't retain writes).
+      const store = new Map<string, string>();
+      keyStoreGetKey.mockImplementation(async (k: string) => store.get(k) ?? null);
+      keyStoreSetKey.mockImplementation(async (k: string, v: string) => { store.set(k, v); });
+      store.set('openai_api_key', 'sk-real-key');
+      store.set('advisory_frequency', 'every_event');
+
+      // Pipeline A goes down the fire path and BLOCKS inside the PE prepare
+      // (the real compose takes 8-18s of LLM time — the exact window the live
+      // race hit) until we release it.
+      vi.mocked(shouldFireStage2).mockReturnValue({ kind: 'stage_transition' } as unknown as ReturnType<typeof shouldFireStage2>);
+      vi.mocked(runStage2).mockResolvedValue({
+        fire_decision_session: true, stage: 'implementation', stage_confidence: 0.9, reason: 'r',
+      } as unknown as Awaited<ReturnType<typeof runStage2>>);
+      vi.mocked(resolveDecisionContent).mockReturnValue({
+        L1: [{ option: 'o', descBase: 'd' }], L2: [], L3: [], pinchFallback: 'p',
+      } as unknown as ReturnType<typeof resolveDecisionContent>);
+      vi.mocked(generatePinchLabel).mockResolvedValue('p');
+      let releasePrepare!: () => void;
+      vi.mocked(prepareAndStoreBrowserPe).mockImplementation(() =>
+        new Promise((resolve) => {
+          releasePrepare = () => resolve({
+            disposition: 'no_popup_not_applicable', safeFallback: true, reasonCode: 'facade_error',
+          } as never);
+        }));
+
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      const P = 'https://bolt.new/~/overlap';
+      const MARKER = `nexpath_decision_inflight::${P}`;
+      const submit = (text: string): ReturnType<typeof vi.fn> => {
+        const sendResponse = vi.fn();
+        messageListener(
+          { type: 'nexpath:prompt-submit', promptText: text, projectRoot: P, agent: 'bolt', tabId: 7 },
+          {},
+          sendResponse,
+        );
+        return sendResponse;
+      };
+
+      const responseA = submit('slow prompt that fires');
+      await vi.waitFor(() => expect(vi.mocked(prepareAndStoreBrowserPe)).toHaveBeenCalledTimes(1));
+      expect(store.get(MARKER)).toBeTruthy(); // A is inside the marker
+
+      // Pipeline B: same text within the dedup window → quick exit via the
+      // cross-page dedup — the exact "fast second prompt" from the live race.
+      const responseB = submit('slow prompt that fires');
+      await vi.waitFor(() => expect(responseB).toHaveBeenCalledWith({ ok: true }));
+      // THE FIX: B's finally must NOT have cleared A's marker.
+      expect(store.get(MARKER), 'quick pipeline erased the slow sibling\'s marker').toBeTruthy();
+
+      releasePrepare();
+      await vi.waitFor(() => expect(responseA).toHaveBeenCalledWith({ ok: true }));
+      expect(store.get(MARKER)).toBe(''); // last finisher clears
+    });
+  });
+
   describe('per-project frequency override (CLI-parity Ctrl+X disable)', () => {
     it('a per-project advisory_frequency:<root>=off fast-exits even while the global setting is active', async () => {
       keyStoreGetKey.mockImplementation(async (name: string) => {

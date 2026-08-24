@@ -369,16 +369,41 @@ const DECISION_WAIT_MAX_MS = 45_000;
 /** Marker older than this is a crashed/torn-down pipeline — don't wait on it. */
 const DECISION_INFLIGHT_STALE_MS = 60_000;
 
+/**
+ * Per-root count of pipelines currently inside the inflight marker. The marker
+ * key is one value per root, so a bare set/clear pair is last-writer-wins: a
+ * QUICK pipeline (e.g. a cooldown-blocked prompt) that starts after a slow one
+ * used to clear the marker while the slow pipeline's PE compose was still
+ * running — response-stop then saw no marker, skipped its wait, and the popup
+ * missed the turn (live-caught in the adversarial fast-stop test, 2026-08-24:
+ * prompt 6 exited at t=25s and erased prompt 5's marker; prompt 5 parked its
+ * PE at t=39s, after the stop had already given up). In-memory is sufficient:
+ * all concurrent pipelines run in one SW instance, and a torn-down instance's
+ * persisted marker is already handled by the reader's staleness cutoff.
+ */
+const decisionInflightCounts = new Map<string, number>();
+
 async function handlePromptSubmit(
   promptText: string,
   projectRoot: string,
   agent: string,
 ): Promise<void> {
-  await keyStore.setKey(decisionInflightKeyFor(projectRoot), JSON.stringify({ at: clock.now() }));
+  const markerKey = decisionInflightKeyFor(projectRoot);
+  decisionInflightCounts.set(projectRoot, (decisionInflightCounts.get(projectRoot) ?? 0) + 1);
+  await keyStore.setKey(markerKey, JSON.stringify({ at: clock.now() }));
   try {
     await runPromptSubmitPipeline(promptText, projectRoot, agent);
   } finally {
-    await keyStore.setKey(decisionInflightKeyFor(projectRoot), '');
+    const remaining = Math.max(0, (decisionInflightCounts.get(projectRoot) ?? 1) - 1);
+    if (remaining === 0) {
+      decisionInflightCounts.delete(projectRoot);
+      await keyStore.setKey(markerKey, '');
+    } else {
+      decisionInflightCounts.set(projectRoot, remaining);
+      // Refresh `at` so the still-running sibling keeps a fresh (non-stale)
+      // marker for the full duration of its own work.
+      await keyStore.setKey(markerKey, JSON.stringify({ at: clock.now() }));
+    }
   }
 }
 

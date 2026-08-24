@@ -216,10 +216,19 @@ async function buildTarget(target) {
     '__NEXPATH_BUILD_ID__': JSON.stringify(`${BUILD_ID}:${target}`),
   };
 
+  // The engine chain reads `process.env.*` in module-top-level positions that
+  // evaluate BEFORE pe-engine.ts's import-time bootstrap can run — in a real
+  // MV3 worker (no `process` global) that is an instant ReferenceError and the
+  // SERVICE WORKER FAILS TO REGISTER (live-caught 2026-08-24, status code 15).
+  // Node-hosted tests can never see it (process always exists there), so the
+  // shim must be installed by the BUNDLER before any module code: a banner is
+  // the only thing guaranteed to run first.
+  const processBanner = 'globalThis.process ??= { env: {} }; globalThis.process.env ??= {};';
+
   /** @type {esbuild.BuildOptions} */
-  const contentScriptOpts = { ...commonOpts, format: 'iife', entryPoints: contentScriptEntries, outdir: outDir, define, plugins: [browserLoggerPlugin, firstPartyStubPlugin, nodeShimPlugin] };
+  const contentScriptOpts = { ...commonOpts, format: 'iife', entryPoints: contentScriptEntries, outdir: outDir, define, banner: { js: processBanner }, plugins: [browserLoggerPlugin, firstPartyStubPlugin, nodeShimPlugin] };
   /** @type {esbuild.BuildOptions} */
-  const moduleOpts = { ...commonOpts, format: 'esm', entryPoints: moduleEntries, outdir: outDir, define, plugins: [browserLoggerPlugin, firstPartyStubPlugin, nodeShimPlugin] };
+  const moduleOpts = { ...commonOpts, format: 'esm', entryPoints: moduleEntries, outdir: outDir, define, banner: { js: processBanner }, plugins: [browserLoggerPlugin, firstPartyStubPlugin, nodeShimPlugin] };
 
   if (watch) {
     const [csCtx, modCtx] = await Promise.all([
