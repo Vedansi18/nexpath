@@ -452,10 +452,17 @@ describe('⭐ RC49 — buildWin32KeystrokeScript', () => {
     expect(ps.indexOf('GetForegroundWindow')).toBeLessThan(ps.indexOf('AppActivate'));
     expect(ps).toContain('$fg.EndsWith($t)');
   });
-  it('suffix matching, not substring — a browser tab titled "… - Chrome" cannot match', () => {
-    const ps = buildWin32KeystrokeScript(['Cursor'], '{ENTER}');
-    expect(ps).not.toContain('Contains');
-    expect(ps).toContain('EndsWith');
+  it('delimiter-safe matching (RC60 flip): mid-title app names match, bare substrings do not', () => {
+    // FLIPPED 2026-08-24 (RC60): the original pin asserted suffix-ONLY ("not
+    // substring") — which refused a real Devin foreground window titled
+    // "<folder> - Devin - <session>". The browser-tab hazard is still guarded:
+    // matching requires the delimited segment " - <name> - ", a start
+    // "<name> - ", an exact match, or the original suffix — never a bare
+    // substring anywhere in the title.
+    const ps = buildWin32KeystrokeScript(['Devin'], '{ENTER}');
+    expect(ps).toContain("$fg.EndsWith($t)");
+    expect(ps).toContain("$fg.StartsWith($t + ' - ')");
+    expect(ps).toContain("$fg.Contains(' - ' + $t + ' - ')");
   });
   it('keeps the retry rounds and the FOREGROUND diagnostic', () => {
     const ps = buildWin32KeystrokeScript(['Devin'], '{ENTER}');

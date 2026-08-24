@@ -329,7 +329,15 @@ export function buildWin32KeystrokeScript(titles: readonly string[], sendKeys: s
     `$w=New-Object -ComObject WScript.Shell;` +
     `$b=New-Object System.Text.StringBuilder 256;[void][W.U]::GetWindowText([W.U]::GetForegroundWindow(),$b,256);$fg=$b.ToString();` +
     `$ok=$false;` +
-    `foreach($t in @(${psTitles})){if($fg -eq $t -or $fg.EndsWith($t)){$ok=$true;break}};` +
+    // RC60 (Windows/Devin staging tester, 2026-08-24): this Devin build titles
+    // windows "<folder> - Devin - <session title>" — the app name sits MID-title,
+    // so suffix-only matching refused a foreground window that WAS the editor
+    // (FOREGROUND=testing - Devin - set up my food delivery app…; status=1).
+    // Delimiter-safe containment (" - Devin - ") accepts every editor shape
+    // (suffix, prefix-with-delimiter, mid-title) while still rejecting the
+    // browser-tab hazard EndsWith was built for ("Cursor docs - Chrome" has no
+    // delimited " - Cursor - " segment).
+    `foreach($t in @(${psTitles})){if($fg -eq $t -or $fg.EndsWith($t) -or $fg.StartsWith($t + ' - ') -or $fg.Contains(' - ' + $t + ' - ')){$ok=$true;break}};` +
     `if(-not $ok){` +
     `foreach($r in 1..2){` +
     `foreach($t in @(${psTitles})){if($w.AppActivate($t)){$ok=$true;break}};` +
