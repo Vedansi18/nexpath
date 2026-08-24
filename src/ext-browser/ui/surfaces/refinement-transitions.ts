@@ -1,10 +1,14 @@
 // ============================================================================
 // D5 ∘ D6 — directional rows and Go back, as a controller hook.
 // ----------------------------------------------------------------------------
-// The committed controller knows nothing about refinement; it exposes
-// `resolveActivation`, and this module is what plugs into it. Kept out of the
-// committed tree so a fresh checkout without the held files still builds — the
-// controller ships hook-shaped, and this is the hook.
+// The controller knows nothing about refinement; it exposes `resolveActivation`,
+// and this module is what plugs into it.
+//
+// That shape was originally forced by C-4 — D5 had to stay uncommitted while
+// D6-D8 landed, so the controller could not name it. The hold is over, but the
+// decoupling earned its keep and stays: the controller's contract is
+// "something decides what activating a row means", and refinement is one
+// answer to that, not a branch inside it.
 //
 // The behaviour is the CLI runner's (`cli-submit-popup.ts:263-289, 435-440`):
 //

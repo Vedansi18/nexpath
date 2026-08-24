@@ -45,10 +45,11 @@
 // slot. The one deliberate exception is the CLI's own guards (blank body, empty
 // details), which the CLI refuses silently and so does this.
 //
-// D5 STAYS OUT: directional rows and Go back reach this controller only through
-// the pluggable `resolveActivation` hook. The committed controller knows
-// nothing about refinement — the held wiring supplies the hook, so a fresh
-// checkout without the held files builds and runs.
+// REFINEMENT IS A HOOK, NOT A BRANCH: directional rows and Go back reach this
+// controller only through `resolveActivation`. The shape was forced by C-4 (D5
+// had to stay uncommitted while this landed) and kept afterwards on its own
+// merit — this file has no opinion about what a row means, which is why a
+// surface can add behaviour without editing the controller.
 // ============================================================================
 
 import type { SurfaceId, SurfaceModel, SurfaceRow } from './surface-model.js';

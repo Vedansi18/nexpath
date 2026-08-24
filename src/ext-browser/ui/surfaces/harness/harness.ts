@@ -26,6 +26,7 @@ import type { SurfaceId, SurfaceModel } from '../surface-model.js';
 import { PE_FIXTURE } from '../fixtures/pe.js';
 import { MPS_FIRST_FIXTURE, MPS_CONTINUATION_FIXTURE } from '../fixtures/mps.js';
 import { PEF_FIXTURE } from '../fixtures/pef.js';
+import { withBodyText } from '../refinement.js';
 import { createRefinementTransitions } from '../refinement-transitions.js';
 import {
   PE_DIRECTIONAL_FIXTURE,
@@ -59,16 +60,6 @@ const REFINED_TEXTS = {
   prompt_enhancement: PE_REFINED_TEXT,
   mps_first: MPS_REFINED_TEXT,
 };
-
-/** The first field's text swapped — the harness's own tiny stand-in for the
- * held `withBodyText`, so the committed harness stays free of held imports. */
-function withBody(model: SurfaceModel, text: string): SurfaceModel {
-  let done = false;
-  return {
-    ...model,
-    rows: model.rows.map((r) => (!done && r.kind === 'field' ? ((done = true), { ...r, text }) : r)),
-  };
-}
 
 /**
  * The payload pushed through every slot the renderer builds with innerHTML.
@@ -266,7 +257,7 @@ export function runSweep(): { pass: number; fail: number; failures: CellResult[]
     // …and the content matrix at a wide, a narrow and the bug-range size.
     for (const [contentName, text] of CONTENT_CASES) {
       for (const [w, h] of [[1440, 800], [600, 300], [360, 230]] as const) {
-        const cell = sweepCell(withBody(fixture, text), label, contentName, w, h);
+        const cell = sweepCell(withBodyText(fixture, text), label, contentName, w, h);
         if (cell.headerVisible && cell.rowVisible && cell.footerVisible && cell.noHOverflow && cell.notGrown && cell.noInjection) pass += 1;
         else failures.push(cell);
       }
