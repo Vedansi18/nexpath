@@ -133,6 +133,30 @@ describe('the K-rows survive — the acceptance bar, as declarations a truthful 
   });
 });
 
+describe('the layer still CATCHES — silence on paraphrase did not hollow it out', () => {
+  // The K-row protection loosened the comparison deliberately; this is the other side of that
+  // trade. Four distinct shapes of "the job moved" must still be caught, or the layer is
+  // decorative — and the two same-job forms beside them must stay silent.
+  const TRANSPOSITION_PROMPT = 'i connected github with token ghp_abc123 for deploys, and set up stripe for payments';
+  const rows: readonly [string, string, string, boolean][] = [
+    ['a credential moved to authentication', 'for deploys', 'for login', true],
+    ['a credential moved to sending mail', 'for deploys', 'to send the welcome emails', true],
+    ['a payment service moved to analytics', 'for payments', 'for tracking user analytics', true],
+    ['a credential moved to schema work', 'for deploys', 'to run database migrations', true],
+    ['the same job, restated', 'for deploys', 'for deploys', false],
+    ['the same job, in the body own words', 'for deploys', 'deploying the app', false],
+  ];
+
+  it.each(rows)('%s', (_label, purposeInPrompt, purposeInBody, fires) => {
+    const findings = findPromptEnhancementNounPurposeFindingsV1({
+      nounPurposes: [{ noun: 'token', purposeInPrompt, purposeInBody }],
+      originalPromptText: TRANSPOSITION_PROMPT,
+      groundedTexts: [],
+    });
+    expect(findings.length > 0).toBe(fires);
+  });
+});
+
 describe('the invention guard — a purpose the prompt never stated is treated as null', () => {
   it('a supplied purpose with no support in the prompt falls to half B, never a manufactured mismatch', () => {
     // Without this the model can infer "for authentication", and half A would then report a
