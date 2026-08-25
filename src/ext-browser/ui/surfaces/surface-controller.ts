@@ -52,7 +52,7 @@
 // ============================================================================
 
 import type { SurfaceId, SurfaceModel, SurfaceRow } from './surface-model.js';
-import { renderSurface } from './surface-view.js';
+import { autoGrow, renderSurface } from './surface-view.js';
 
 /** What the surfaces report upward. The dock's own union stays `dismiss`-only —
  * window furniture and surface semantics are different layers. */
@@ -193,6 +193,13 @@ export function createSurfaceController(
     const rendered = fields();
     fieldValues.forEach((value, i) => { if (rendered[i]) rendered[i]!.value = value; });
 
+    // Auto-grow must run ATTACHED. buildField's own call happens while the frame
+    // is still detached, where scrollHeight is 0 — the field arrives with an
+    // inline height of 0px and the body is INVISIBLE until the first real input
+    // event (live on Replit + Lovable, 2026-08-25). Re-applied values change the
+    // needed height anyway, so the attached pass is correct for both reasons.
+    for (const field of rendered) autoGrow(field);
+
     // Row-focus and DOM-focus stay in step: a focused field row means its
     // textarea really has the keyboard, caret parked at the end (the CLI parks
     // it at the end when it rebuilds a field too).
@@ -307,6 +314,11 @@ export function createSurfaceController(
       // body or empty details cannot drive an apply (BF-1 / bug B); otherwise
       // the details land in the body under one heading, the field clears, and
       // focus returns to the body row so the next Enter sends the merged text.
+      // A LOCKED body (read-only fallback) refuses the apply the way the CLI's
+      // locked editor makes it unreachable — merging into a body the engine
+      // will not accept edits to would show text that cannot be sent.
+      const bodyRow = interactiveRows(model).find((r) => r.kind === 'field');
+      if (bodyRow && bodyRow.kind === 'field' && bodyRow.readOnly) return;
       const details = (fieldValues[ordinal] ?? '').trim();
       const body = fieldValues[0] ?? '';
       if (body.trim().length === 0 || details.length === 0) return;
@@ -480,26 +492,38 @@ export function createSurfaceController(
     }
   }
 
-  // ── Focus-steal guard (live-lesson 2026-08-25) ──────────────────────────────
-  // Agent pages grab focus moments after the dock shows (Bolt observed doing it
-  // seconds after render): every chord then goes to the PAGE — the popup's keys
-  // "stop working" and Ctrl+J becomes Chrome's Downloads. A page-script steal
-  // lands focus on document.body; a REAL user click lands on the clicked
-  // element — so re-take only when the new resting place is body, and only
-  // within a short window after our own render (steals cluster there; a user's
-  // deliberate click into the page comes later and must release the keys — the
-  // panel family's non-modal rule).
-  const FOCUS_STEAL_WINDOW_MS = 1_500;
+  // ── Focus-steal guard (live-lessons 2026-08-25, twice) ──────────────────────
+  // Agent pages grab focus moments after the dock shows: every chord then goes
+  // to the PAGE — the popup's keys "stop working" and Ctrl+J becomes Chrome's
+  // Downloads. The first guard re-took focus only when it rested on
+  // document.body — but the SAME DAY's real-prompt round showed Replit and
+  // Lovable re-focusing their own COMPOSER (a real element, not body) right at
+  // popup time, sailing past that signature: the user had to click the popup
+  // before any key worked. The honest steal signature is INTENT, not the
+  // landing spot: a steal is a focus move OUT of this surface with no recent
+  // user pointerdown outside it. A deliberate click into the page (tracked at
+  // the document level; events inside the closed shadow retarget to the host,
+  // so they never count as "outside") releases the keys — the panel family's
+  // non-modal rule survives — and after the post-render window the page wins
+  // by default, exactly as before.
+  const FOCUS_STEAL_WINDOW_MS = 3_000;
+  const USER_INTENT_MS = 1_000;
   let lastRenderAt = Date.now();
+  let lastOutsidePointerAt = 0;
+  function onDocPointerDown(e: Event): void {
+    if (destroyed) return;
+    const target = e.target as Node | null;
+    const root = wrapper.getRootNode() as Document | ShadowRoot;
+    const host = (root as ShadowRoot).host as HTMLElement | undefined;
+    const insideSurface = target !== null
+      && (wrapper.contains(target) || (host !== undefined && (target === host || host.contains(target))));
+    if (!insideSurface) lastOutsidePointerAt = Date.now();
+  }
   function onFocusOut(): void {
     if (destroyed) return;
     setTimeout(() => {
       if (destroyed) return;
       if (Date.now() - lastRenderAt > FOCUS_STEAL_WINDOW_MS) return;
-      // Steal signature: focus RESTS ON BODY. Inside a shadow root the shadow's
-      // own activeElement goes null AND the document's lands on body; mounted
-      // bare (tests, the harness) the document view is the whole story. A real
-      // element holding focus = deliberate user intent — leave it alone.
       const root = wrapper.getRootNode() as Document | ShadowRoot;
       // A HIDDEN surface must never take focus: the dock hides the host with
       // display:none the moment a send resolves, and the injector is about to
@@ -507,10 +531,11 @@ export function createSurfaceController(
       // an invisible popup mid-inject (guard for the 2026-08-25 inject path).
       const host = (root as ShadowRoot).host as HTMLElement | undefined;
       if (host && host.style.display === 'none') return;
-      const stolen = root === (doc as unknown)
-        ? doc.activeElement === doc.body
-        : (root.activeElement === null && doc.activeElement === doc.body);
-      if (!stolen) return;
+      // Focus still inside this surface (row-to-row moves) — nothing happened.
+      const active = root === (doc as unknown) ? doc.activeElement : root.activeElement;
+      if (active !== null && wrapper.contains(active)) return;
+      // The user just clicked the page — a deliberate release, respected.
+      if (Date.now() - lastOutsidePointerAt < USER_INTENT_MS) return;
       const ordinal = fieldOrdinalOf(focusIndex);
       const field = ordinal >= 0 ? fields()[ordinal] : undefined;
       (field ?? wrapper).focus({ preventScroll: true });
@@ -520,6 +545,7 @@ export function createSurfaceController(
   wrapper.addEventListener('keydown', onKeyDown);
   wrapper.addEventListener('pointerdown', onPointerDown);
   wrapper.addEventListener('focusout', onFocusOut);
+  doc.addEventListener('pointerdown', onDocPointerDown, true);
 
   show(model);
 
@@ -537,6 +563,7 @@ export function createSurfaceController(
       wrapper.removeEventListener('keydown', onKeyDown);
       wrapper.removeEventListener('pointerdown', onPointerDown);
       wrapper.removeEventListener('focusout', onFocusOut);
+      doc.removeEventListener('pointerdown', onDocPointerDown, true);
       wrapper.remove();
     },
   };

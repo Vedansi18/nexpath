@@ -43,7 +43,7 @@ export function autoGrow(field: HTMLTextAreaElement): void {
 }
 
 /** The editable field beneath a `field` row's label. */
-function buildField(doc: Document, text: string, indent: 4 | 6, placeholder?: string): HTMLElement {
+function buildField(doc: Document, text: string, indent: 4 | 6, placeholder?: string, readOnly?: boolean): HTMLElement {
   const row = doc.createElement('div');
   row.className = 'np-row';
 
@@ -54,6 +54,11 @@ function buildField(doc: Document, text: string, indent: 4 | 6, placeholder?: st
   // than pre-filled text: the CLI prints it only while there is nothing there,
   // and text the user did not write must never be sent as if they had.
   if (placeholder) field.placeholder = placeholder;
+  // The CLI's locked editor: the text shows, the caret works, typing does not.
+  // A native readonly textarea is exactly that — and it keeps the send path
+  // honest, because a browser-blocked keystroke can never produce text the
+  // engine would discard (the 2026-08-25 read-only-fallback lesson).
+  if (readOnly) field.readOnly = true;
   field.rows = 1;
   // Auto-grow on creation and on every edit. The listener dies with the element,
   // which is discarded whole when a surface re-renders.
@@ -138,7 +143,7 @@ export function renderSurface(doc: Document, model: SurfaceModel, state: Surface
       return;
     }
 
-    scroll.appendChild(buildField(doc, row.text, fieldIndent, row.placeholder));
+    scroll.appendChild(buildField(doc, row.text, fieldIndent, row.placeholder, row.readOnly));
     for (const hint of row.hints?.always ?? []) scroll.appendChild(buildHintRow(doc, hint, hintIndent));
     if (focused) {
       for (const hint of row.hints?.whenFocused ?? []) scroll.appendChild(buildHintRow(doc, hint, hintIndent));

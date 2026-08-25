@@ -732,13 +732,106 @@ describe('focus-steal guard (live 2026-08-25: agent pages grab focus after show)
       mount();
       const field = bodyField();
       field.focus();
-      vi.advanceTimersByTime(2_000); // past FOCUS_STEAL_WINDOW_MS with no render
+      vi.advanceTimersByTime(3_500); // past FOCUS_STEAL_WINDOW_MS with no render
       field.blur();
       await vi.advanceTimersByTimeAsync(50);
       expect(document.activeElement).toBe(document.body); // left alone
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  // 2026-08-25, same day, second live lesson: Replit and Lovable steal focus to
+  // their own COMPOSER (a real element, not body) right at popup time — the
+  // original body-only signature let that through and the user had to click the
+  // popup before any key worked. The signature is now intent: no recent user
+  // pointerdown outside the surface = programmatic steal.
+  it('a programmatic steal to a page element (agent composer) is re-taken', async () => {
+    mount();
+    const composer = document.createElement('input');
+    document.body.appendChild(composer);
+    const field = bodyField();
+    field.focus();
+    composer.focus(); // page script re-focusing its composer — no user gesture
+    await new Promise((r) => setTimeout(r, 10));
+    expect(document.activeElement).not.toBe(composer); // re-taken to the surface
+    expect(host.contains(document.activeElement)).toBe(true);
+    composer.remove();
+  });
+
+  it('a focus move preceded by the user\'s own click on the page is respected', async () => {
+    mount();
+    const composer = document.createElement('input');
+    document.body.appendChild(composer);
+    bodyField().focus();
+    composer.dispatchEvent(new Event('pointerdown', { bubbles: true })); // deliberate click
+    composer.focus();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(document.activeElement).toBe(composer); // released — non-modal rule
+    composer.remove();
+  });
+
+  it('a pointerdown INSIDE the surface never counts as a release gesture', async () => {
+    mount();
+    const composer = document.createElement('input');
+    document.body.appendChild(composer);
+    const field = bodyField();
+    field.focus();
+    field.dispatchEvent(new Event('pointerdown', { bubbles: true })); // user clicks the popup itself
+    composer.focus(); // then the page steals anyway
+    await new Promise((r) => setTimeout(r, 10));
+    expect(host.contains(document.activeElement)).toBe(true); // still re-taken
+    composer.remove();
+  });
+});
+
+describe('field auto-grow runs ATTACHED (live 2026-08-25: collapsed body at first paint)', () => {
+  it('the render pass re-grows every field after the frame joins the DOM', () => {
+    // buildField's own autoGrow call happens while the frame is detached, where
+    // scrollHeight is 0 — mimic exactly that with a connection-aware stub.
+    const proto = HTMLTextAreaElement.prototype;
+    Object.defineProperty(proto, 'scrollHeight', {
+      configurable: true,
+      get(this: HTMLTextAreaElement) { return this.isConnected ? 42 : 0; },
+    });
+    try {
+      mount();
+      // Without the attached pass this is '0px' and the body is invisible.
+      expect(bodyField().style.height).toBe('42px');
+    } finally {
+      delete (proto as unknown as Record<string, unknown>)['scrollHeight'];
+    }
+  });
+});
+
+describe('read-only fields (the CLI\'s locked editor — read_only_fallback bodies)', () => {
+  const LOCKED: SurfaceModel = {
+    ...PE_FIXTURE,
+    rows: PE_FIXTURE.rows.map((r) => (r.kind === 'field' ? { ...r, readOnly: true } : r)),
+  };
+
+  it('renders natively read-only textareas', () => {
+    mount('prompt_enhancement', { registry: { ...REGISTRY, prompt_enhancement: LOCKED } });
+    for (const field of host.querySelectorAll('textarea')) {
+      expect((field as HTMLTextAreaElement).readOnly).toBe(true);
+    }
+  });
+
+  it('Enter on the body still sends — read-only locks editing, never the send', () => {
+    mount('prompt_enhancement', { registry: { ...REGISTRY, prompt_enhancement: LOCKED } });
+    key(bodyField(), 'Enter');
+    expect(events.some((e) => e.type === 'send')).toBe(true);
+  });
+
+  it('refuses the details apply on a locked body (the CLI\'s unreachable merge)', () => {
+    mount('prompt_enhancement', { registry: { ...REGISTRY, prompt_enhancement: LOCKED } });
+    const details = [...host.querySelectorAll('textarea')][1] as HTMLTextAreaElement;
+    details.value = 'typed details';
+    key(details, 'ArrowDown'); // land row focus on the details row (re-renders)
+    const freshDetails = [...host.querySelectorAll('textarea')][1] as HTMLTextAreaElement;
+    key(freshDetails, 'Enter');
+    expect(events.filter((e) => e.type === 'apply-details')).toHaveLength(0);
+    expect(bodyField().value).not.toContain(DETAILS_MERGE_HEADING);
   });
 });
 

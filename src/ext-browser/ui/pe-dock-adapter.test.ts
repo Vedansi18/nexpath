@@ -308,3 +308,51 @@ describe('REAL prepare → whitelisted view → real dock DOM (plan §7: fixture
     expect(surfaceEl().textContent).not.toContain('static build');
   });
 });
+
+describe('read-only fallback bodies (live 2026-08-25: typed edits silently dropped)', () => {
+  it('bodyEditable:false renders BOTH fields natively read-only — the field never promises an edit the send path will discard', () => {
+    adapter.show(view({ bodyEditable: false }));
+    const fields = [...surfaceEl().querySelectorAll('textarea')] as HTMLTextAreaElement[];
+    expect(fields).toHaveLength(2); // body + details
+    expect(fields.every((f) => f.readOnly)).toBe(true);
+  });
+
+  it('Enter on a read-only body still sends the engine\'s own text (the CLI keeps use_current on locked bodies)', () => {
+    adapter.show(view({ bodyEditable: false }));
+    const field = bodyField();
+    field.focus();
+    pressOn(field, 'Enter');
+    expect(commands()).toEqual([{ type: 'use_current', bodyText: 'Enhanced body text' }]);
+  });
+
+  it('bodyEditable:true stays fully editable (regression)', () => {
+    adapter.show(view());
+    const fields = [...surfaceEl().querySelectorAll('textarea')] as HTMLTextAreaElement[];
+    expect(fields.some((f) => f.readOnly)).toBe(false);
+  });
+});
+
+describe('open focus + stale docks (live 2026-08-25: keys dead until a manual click)', () => {
+  it('show() makes the dock visible BEFORE the surface renders, so the first focus() really lands', () => {
+    adapter.show(view());
+    const host = document.getElementById(NEXPATH_DOCK_HOST_ID) as HTMLElement;
+    expect(host.style.display).not.toBe('none');
+    // Focus inside the shadow retargets: the document sees the HOST as active.
+    // Before the ordering fix the host was display:none during render() and
+    // focus stayed wherever the page had it (jsdom: body).
+    expect(document.activeElement).toBe(host);
+    const root = shadowRoots.at(-1)!;
+    expect(root.activeElement).toBe(bodyField()); // and the body field holds the keyboard
+  });
+
+  it('sweeps dock hosts left by an orphaned content-script generation before mounting its own', () => {
+    adapter.destroy();
+    const orphan = document.createElement('div');
+    orphan.id = NEXPATH_DOCK_HOST_ID;
+    document.body.appendChild(orphan);
+    adapter = mountNexpathPeDock({ onEvent: (e) => events.push(e) });
+    adapter.show(view());
+    expect(orphan.isConnected).toBe(false); // the stale twin is gone
+    expect(document.querySelectorAll(`#${NEXPATH_DOCK_HOST_ID}`)).toHaveLength(1);
+  });
+});

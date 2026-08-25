@@ -54,6 +54,14 @@ export type SurfaceRow =
       hints?: FieldHints;
       /** The CLI opens some blocks with a blank line; the model says which. */
       blankBefore?: boolean;
+      /**
+       * The CLI's locked editor (`editabilityState !== 'editable'` — e.g. a
+       * read-only fallback body): the field renders but typing is impossible.
+       * Live 2026-08-25: rendering a locked body as editable let the user type
+       * text the engine then correctly discarded on send — the field must
+       * never promise an edit the send path will not honour.
+       */
+      readOnly?: boolean;
     }
   | {
       kind: 'action';

@@ -56,12 +56,21 @@ type PendingTerminal = { type: 'close' } | { type: 'use_original' } | { type: 'm
 // ── producers: my views → their models ─────────────────────────────────────────
 
 export function peSurfaceModel(view: PePanelViewV1): SurfaceModel {
+  // The engine's editability verdict is SEND-PATH semantics, not styling: a
+  // read-only fallback body (`editabilityState: 'read_only_fallback'`) rejects
+  // every edit_body, and the host's translate() rightly never synthesizes one
+  // for an uneditable body. Rendering such a body editable let the user type
+  // text the send silently discarded (live on Replit + Lovable, 2026-08-25).
+  // The CLI locks its WHOLE editor in this state — body and details together —
+  // so both fields mirror that here.
+  const locked = !view.bodyEditable;
   const rows: SurfaceRow[] = [
     {
       kind: 'field',
       label: view.editorHeading,
       text: view.bodyText,
       hints: { whenFocused: [`${EDIT_KEYS_HINT} · ${BODY_HINT}`] },
+      ...(locked ? { readOnly: true } : {}),
     },
   ];
   if (view.hasAdditionalDetails) {
@@ -71,6 +80,7 @@ export function peSurfaceModel(view: PePanelViewV1): SurfaceModel {
       text: view.additionalDetailsText,
       hints: { always: [DETAILS_HINT], whenFocused: [EDIT_KEYS_HINT] },
       blankBefore: true,
+      ...(locked ? { readOnly: true } : {}),
     });
   }
   for (const d of view.directional) {
@@ -254,6 +264,14 @@ export function mountNexpathPeDock(opts: PeDockAdapterOptions): PePanelControlle
 
   const ensureDock = (): NexpathDockController => {
     if (dock) return dock;
+    // Stale-dock sweep: an extension reload leaves the previous content-script
+    // generation's MAIN-world module alive on SPA pages, and its window-event
+    // listeners still mount THEIR dock on the next show — two identical docks
+    // stack and the user types into whichever paints on top while only ours
+    // talks to a live service worker. Any host from another generation dies
+    // here, before ours mounts (its orphaned controller then toggles a
+    // detached element — harmless).
+    for (const stale of doc.querySelectorAll('#nexpath-dock-host')) stale.remove();
     dock = mountNexpathDock({
       doc,
       onEvent: () => {
@@ -293,6 +311,13 @@ export function mountNexpathPeDock(opts: PeDockAdapterOptions): PePanelControlle
       view = v;
       pendingTerminal = null;
       const d = ensureDock();
+      // The dock must be VISIBLE before the surface renders: the controller's
+      // render() focuses the active field, and focus() inside a display:none
+      // subtree is a silent no-op — the popup then opens with the keyboard
+      // still in the agent page and every arrow key dead until the user
+      // clicks it (live on Replit + Lovable, 2026-08-25). Everything below
+      // runs in the same task, so no intermediate frame ever paints.
+      d.show();
       surfaces?.destroy();
       const isOffer = 'kind' in v;
       const registry = isOffer
@@ -306,7 +331,6 @@ export function mountNexpathPeDock(opts: PeDockAdapterOptions): PePanelControlle
         resolveActivation,
       });
       setBusyOverlay(false);
-      d.show();
     },
     setBusy(b: boolean): void {
       busy = b;
