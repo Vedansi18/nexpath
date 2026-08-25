@@ -43,24 +43,15 @@ npm run typecheck:ext  # required if you touched src/ext-browser/
 npm test               # vitest, whole tree
 ```
 
-Two things that trip people up:
+Three things that trip people up:
 
 - **Build gates** — a content template that is schema-invalid, missing its level-1 floor, or
   unreachable by a realistic prompt aborts the build. Fix the record; don't bypass the gate.
 - **`src/ext-vscode/`** — a separate package, excluded from every root check. Run its own
   `npm install && npm run typecheck && npm run test && npm run build`.
-
-`npm test` also exits 1 on a public clone: two files read a private submodule and fail with
-`ENOENT`. They are the only accepted failures. Exclude exactly those two — and nothing else — to
-see whether your own change passes:
-
-```bash
-npx vitest run \
-  --exclude "src/prompt-enhancement/dev-plan-table-integrity.test.ts" \
-  --exclude "src/prompt-enhancement/hv1-env-supply.test.ts" \
-  --exclude "**/node_modules/**" \
-  --exclude "src/ext-vscode/**"
-```
+- **`npm test` exits 1 on a public clone** — `dev-plan-table-integrity.test.ts` and
+  `hv1-env-supply.test.ts` read a private submodule and fail with `ENOENT`. Those two are the only
+  accepted failures; everything else red is your change.
 
 ## Pull Requests
 
