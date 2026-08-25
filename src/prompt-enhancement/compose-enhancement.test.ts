@@ -217,7 +217,7 @@ describe('prompt-enhancement composer and deterministic fallback', () => {
 
     const generatedSection = result.currentBody.sections.find((section) => section.sectionKind === 'source_signal_guidance');
     expect(generatedSection).toMatchObject({
-      title: 'Source Signal Guidance',
+      title: 'Best practices and standards',
       sourceFactIds: ['section_kind:source_signal_guidance'],
       evidenceStatus: 'present',
       requiredSurvivor: true,
@@ -228,7 +228,7 @@ describe('prompt-enhancement composer and deterministic fallback', () => {
       confirmationRequired: false,
       confirmationPresent: false,
     });
-    expect(generatedSection?.bodyText).toContain('Use the current source signal as a task constraint');
+    expect(generatedSection?.bodyText).toContain('Treat what your recent practice shows as a working constraint');
     expect(generatedSection?.axisContributions).toEqual(expect.arrayContaining(['practiceDepth', 'sectionDensity', 'groundingDepth']));
     expect(generatedSection?.whyHelpReasonCodes).toContain('section_kind:source_signal_guidance');
   });

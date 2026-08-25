@@ -1,3 +1,4 @@
+import { promptEnhancementSectionDisplayNameV1 } from './section-display-names.js';
 import {
   PROMPT_ENHANCEMENT_CONTRACT_VERSION,
   type PromptEnhancementActionEntryV1,
@@ -1048,8 +1049,8 @@ function instructionLinesForSection(
   const map: Record<string, string[]> = {
     source_signal_guidance: [
       line(
-        'Use the current source signal as a task constraint and convert it into direct implementation guidance.',
-        'Use the source signal as a direct task constraint.',
+        'Treat what your recent practice shows as a working constraint, and turn it into direct implementation guidance.',
+        'Treat what your recent practice shows as a direct constraint on this task.',
       ),
     ],
     acceptance_or_output_expectation: [
@@ -1282,7 +1283,7 @@ function compactPointInventoryLine(
   promptReviewOrigin: PromptEnhancementPromptReviewOrigin,
 ): string {
   const points = extractPromptEnhancementPromptPointsV1(originalPromptText, promptReviewOrigin);
-  if (points.length === 0) return 'Keep a compact point inventory.';
+  if (points.length === 0) return 'Keep the list of separate points short and complete.';
   return `Keep these points covered: ${points.join(' | ')}.`;
 }
 
@@ -1735,8 +1736,9 @@ function hasSourceGuidanceSection(
 }
 
 function headingForSection(sectionKind: string): string {
-  const words = sectionKind.split('_').filter(Boolean);
-  return words.map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+  // The curated display name, never the internal id title-cased. The map keeps its own
+  // title-case fallback so an unmapped kind renders rather than crashing.
+  return promptEnhancementSectionDisplayNameV1(sectionKind);
 }
 
 function fallbackSourceA(): PromptEnhancementSourceRefV1 {

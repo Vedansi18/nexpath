@@ -660,12 +660,12 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
     "renderedPromptBody": "My original request (verbatim):
 Add a retry with exponential backoff to the payment gateway client.
 
-Context And Constraints:
+Context and constraints:
 - Carry forward relevant constraints, limits, environment facts, and user instructions that affect the work.
 
-Source Signal Guidance:
+Best practices and standards:
 - The current source signal reports stage as task_breakdown → implementation.
-- Use the current source signal as a task constraint and convert it into direct implementation guidance.",
+- Treat what your recent practice shows as a working constraint, and turn it into direct implementation guidance.",
     "routeDecisionId": "pe:facade-nonseq-a-plain-impl:route",
     "sentPromptOrigin": "pe_baseline_generated_body",
     "sourceAttribution": [
@@ -728,12 +728,12 @@ Source Signal Guidance:
     "renderedPromptBody": "My original request (verbatim):
 Add a retry with exponential backoff to the payment gateway client.
 
-Context And Constraints:
+Context and constraints:
 - Carry forward relevant constraints, limits, environment facts, and user instructions that affect the work.
 
-Source Signal Guidance:
+Best practices and standards:
 - The current source signal reports stage as task_breakdown → implementation.
-- Use the current source signal as a task constraint and convert it into direct implementation guidance.",
+- Treat what your recent practice shows as a working constraint, and turn it into direct implementation guidance.",
     "routeDecisionId": "pe:facade-nonseq-a-plain-impl:route",
     "sections": [
       {
@@ -919,7 +919,7 @@ Source Signal Guidance:
           },
         ],
         "templateType": "prompt-enhancement-template",
-        "title": "Context And Constraints",
+        "title": "Context and constraints",
         "transformReasonCodes": [
           "rendered_deterministically",
           "no_original_text_quoted",
@@ -940,7 +940,7 @@ Source Signal Guidance:
         ],
         "baselineSourceSignalSlot": "source_signal_guidance",
         "bodyText": "- The current source signal reports stage as task_breakdown → implementation.
-- Use the current source signal as a task constraint and convert it into direct implementation guidance.",
+- Treat what your recent practice shows as a working constraint, and turn it into direct implementation guidance.",
         "callVisibilityMode": "deterministic",
         "canExpandInMoreThorough": true,
         "canGroundInMoreProjectGrounded": true,
@@ -1011,7 +1011,7 @@ Source Signal Guidance:
         "sourceTemplateType": "prompt_enhancement_template",
         "spanRefs": [
           {
-            "endOffset": 442,
+            "endOffset": 457,
             "sectionId": "pe:facade-nonseq-a-plain-impl:route:section:6:source_signal_guidance",
             "sourceRefs": [
               "src-a-1",
@@ -1023,7 +1023,7 @@ Source Signal Guidance:
           },
         ],
         "templateType": "prompt-enhancement-template",
-        "title": "Source Signal Guidance",
+        "title": "Best practices and standards",
         "transformReasonCodes": [
           "rendered_deterministically",
           "no_original_text_quoted",
@@ -1053,12 +1053,12 @@ Source Signal Guidance:
     "text": "My original request (verbatim):
 Add a retry with exponential backoff to the payment gateway client.
 
-Context And Constraints:
+Context and constraints:
 - Carry forward relevant constraints, limits, environment facts, and user instructions that affect the work.
 
-Source Signal Guidance:
+Best practices and standards:
 - The current source signal reports stage as task_breakdown → implementation.
-- Use the current source signal as a task constraint and convert it into direct implementation guidance.",
+- Treat what your recent practice shows as a working constraint, and turn it into direct implementation guidance.",
     "userDirtyState": "clean",
   },
   "delivery": {
@@ -1575,12 +1575,12 @@ Source Signal Guidance:
       "text": "My original request (verbatim):
 Add a retry with exponential backoff to the payment gateway client.
 
-Context And Constraints:
+Context and constraints:
 - Carry forward relevant constraints, limits, environment facts, and user instructions that affect the work.
 
-Source Signal Guidance:
+Best practices and standards:
 - The current source signal reports stage as task_breakdown → implementation.
-- Use the current source signal as a task constraint and convert it into direct implementation guidance.",
+- Treat what your recent practice shows as a working constraint, and turn it into direct implementation guidance.",
     },
     "diagnostics": [
       {
@@ -1681,7 +1681,7 @@ Source Signal Guidance:
         "callVisibilityMode": "deterministic",
         "fallbackMode": "none",
         "familyId": "feature_delivery",
-        "label": "Context And Constraints",
+        "label": "Context and constraints",
         "preciseFeedbackAllowed": false,
         "primaryIntent": "feature.fresh_implementation",
         "publicSafeExplanationCategory": "source_coverage",
@@ -1722,7 +1722,7 @@ Source Signal Guidance:
         "callVisibilityMode": "deterministic",
         "fallbackMode": "none",
         "familyId": "feature_delivery",
-        "label": "Source Signal Guidance",
+        "label": "Best practices and standards",
         "preciseFeedbackAllowed": false,
         "primaryIntent": "feature.fresh_implementation",
         "publicSafeExplanationCategory": "source_coverage",
@@ -1744,7 +1744,7 @@ Source Signal Guidance:
         ],
         "spanRefs": [
           {
-            "endOffset": 442,
+            "endOffset": 457,
             "sectionId": "pe:facade-nonseq-a-plain-impl:route:section:6:source_signal_guidance",
             "sourceRefs": [
               "src-a-1",
@@ -2624,12 +2624,12 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
     "renderedPromptBody": "My original request (verbatim):
 Fix the failing test in the payment flow and explain what caused it.
 
-Test Command Output:
-- Cover Test Command Output for this request with concrete, source-backed specifics — state what is required, how to implement it, and how to verify it.
+Test command output:
+- Cover Test command output for this request with concrete, source-backed specifics — state what is required, how to implement it, and how to verify it.
 
-Source Signal Guidance:
+Best practices and standards:
 - The current source signal reports stage as task_breakdown → implementation.
-- Use the current source signal as a task constraint and convert it into direct implementation guidance.",
+- Treat what your recent practice shows as a working constraint, and turn it into direct implementation guidance.",
     "routeDecisionId": "pe:facade-nonseq-b-explain:route",
     "sentPromptOrigin": "pe_baseline_generated_body",
     "sourceAttribution": [
@@ -2692,12 +2692,12 @@ Source Signal Guidance:
     "renderedPromptBody": "My original request (verbatim):
 Fix the failing test in the payment flow and explain what caused it.
 
-Test Command Output:
-- Cover Test Command Output for this request with concrete, source-backed specifics — state what is required, how to implement it, and how to verify it.
+Test command output:
+- Cover Test command output for this request with concrete, source-backed specifics — state what is required, how to implement it, and how to verify it.
 
-Source Signal Guidance:
+Best practices and standards:
 - The current source signal reports stage as task_breakdown → implementation.
-- Use the current source signal as a task constraint and convert it into direct implementation guidance.",
+- Treat what your recent practice shows as a working constraint, and turn it into direct implementation guidance.",
     "routeDecisionId": "pe:facade-nonseq-b-explain:route",
     "sections": [
       {
@@ -2805,7 +2805,7 @@ Source Signal Guidance:
           "decompositionDepth",
         ],
         "baselineSourceSignalSlot": "source_signal_guidance",
-        "bodyText": "- Cover Test Command Output for this request with concrete, source-backed specifics — state what is required, how to implement it, and how to verify it.",
+        "bodyText": "- Cover Test command output for this request with concrete, source-backed specifics — state what is required, how to implement it, and how to verify it.",
         "callVisibilityMode": "deterministic",
         "canExpandInMoreThorough": true,
         "canGroundInMoreProjectGrounded": true,
@@ -2883,7 +2883,7 @@ Source Signal Guidance:
           },
         ],
         "templateType": "prompt-enhancement-template",
-        "title": "Test Command Output",
+        "title": "Test command output",
         "transformReasonCodes": [
           "rendered_deterministically",
           "no_original_text_quoted",
@@ -2904,7 +2904,7 @@ Source Signal Guidance:
         ],
         "baselineSourceSignalSlot": "source_signal_guidance",
         "bodyText": "- The current source signal reports stage as task_breakdown → implementation.
-- Use the current source signal as a task constraint and convert it into direct implementation guidance.",
+- Treat what your recent practice shows as a working constraint, and turn it into direct implementation guidance.",
         "callVisibilityMode": "deterministic",
         "canExpandInMoreThorough": true,
         "canGroundInMoreProjectGrounded": true,
@@ -2975,7 +2975,7 @@ Source Signal Guidance:
         "sourceTemplateType": "prompt_enhancement_template",
         "spanRefs": [
           {
-            "endOffset": 483,
+            "endOffset": 498,
             "sectionId": "pe:facade-nonseq-b-explain:route:section:7:source_signal_guidance",
             "sourceRefs": [
               "src-a-1",
@@ -2987,7 +2987,7 @@ Source Signal Guidance:
           },
         ],
         "templateType": "prompt-enhancement-template",
-        "title": "Source Signal Guidance",
+        "title": "Best practices and standards",
         "transformReasonCodes": [
           "rendered_deterministically",
           "no_original_text_quoted",
@@ -3017,12 +3017,12 @@ Source Signal Guidance:
     "text": "My original request (verbatim):
 Fix the failing test in the payment flow and explain what caused it.
 
-Test Command Output:
-- Cover Test Command Output for this request with concrete, source-backed specifics — state what is required, how to implement it, and how to verify it.
+Test command output:
+- Cover Test command output for this request with concrete, source-backed specifics — state what is required, how to implement it, and how to verify it.
 
-Source Signal Guidance:
+Best practices and standards:
 - The current source signal reports stage as task_breakdown → implementation.
-- Use the current source signal as a task constraint and convert it into direct implementation guidance.",
+- Treat what your recent practice shows as a working constraint, and turn it into direct implementation guidance.",
     "userDirtyState": "clean",
   },
   "delivery": {
@@ -3547,12 +3547,12 @@ Source Signal Guidance:
       "text": "My original request (verbatim):
 Fix the failing test in the payment flow and explain what caused it.
 
-Test Command Output:
-- Cover Test Command Output for this request with concrete, source-backed specifics — state what is required, how to implement it, and how to verify it.
+Test command output:
+- Cover Test command output for this request with concrete, source-backed specifics — state what is required, how to implement it, and how to verify it.
 
-Source Signal Guidance:
+Best practices and standards:
 - The current source signal reports stage as task_breakdown → implementation.
-- Use the current source signal as a task constraint and convert it into direct implementation guidance.",
+- Treat what your recent practice shows as a working constraint, and turn it into direct implementation guidance.",
     },
     "diagnostics": [
       {
@@ -3653,7 +3653,7 @@ Source Signal Guidance:
         "callVisibilityMode": "deterministic",
         "fallbackMode": "none",
         "familyId": "issue_debug",
-        "label": "Test Command Output",
+        "label": "Test command output",
         "preciseFeedbackAllowed": false,
         "primaryIntent": "issue_debug.failing_test",
         "publicSafeExplanationCategory": "source_coverage",
@@ -3694,7 +3694,7 @@ Source Signal Guidance:
         "callVisibilityMode": "deterministic",
         "fallbackMode": "none",
         "familyId": "issue_debug",
-        "label": "Source Signal Guidance",
+        "label": "Best practices and standards",
         "preciseFeedbackAllowed": false,
         "primaryIntent": "issue_debug.failing_test",
         "publicSafeExplanationCategory": "source_coverage",
@@ -3716,7 +3716,7 @@ Source Signal Guidance:
         ],
         "spanRefs": [
           {
-            "endOffset": 483,
+            "endOffset": 498,
             "sectionId": "pe:facade-nonseq-b-explain:route:section:7:source_signal_guidance",
             "sourceRefs": [
               "src-a-1",
@@ -4535,12 +4535,12 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
     "renderedPromptBody": "My original request (verbatim):
 Add input validation and a unit test for the login form.
 
-Context And Constraints:
+Context and constraints:
 - Carry forward relevant constraints, limits, environment facts, and user instructions that affect the work.
 
-Source Signal Guidance:
+Best practices and standards:
 - The current source signal reports stage as task_breakdown → implementation.
-- Use the current source signal as a task constraint and convert it into direct implementation guidance.",
+- Treat what your recent practice shows as a working constraint, and turn it into direct implementation guidance.",
     "routeDecisionId": "pe:facade-nonseq-c-compound-shaped:route",
     "sentPromptOrigin": "pe_baseline_generated_body",
     "sourceAttribution": [
@@ -4603,12 +4603,12 @@ Source Signal Guidance:
     "renderedPromptBody": "My original request (verbatim):
 Add input validation and a unit test for the login form.
 
-Context And Constraints:
+Context and constraints:
 - Carry forward relevant constraints, limits, environment facts, and user instructions that affect the work.
 
-Source Signal Guidance:
+Best practices and standards:
 - The current source signal reports stage as task_breakdown → implementation.
-- Use the current source signal as a task constraint and convert it into direct implementation guidance.",
+- Treat what your recent practice shows as a working constraint, and turn it into direct implementation guidance.",
     "routeDecisionId": "pe:facade-nonseq-c-compound-shaped:route",
     "sections": [
       {
@@ -4794,7 +4794,7 @@ Source Signal Guidance:
           },
         ],
         "templateType": "prompt-enhancement-template",
-        "title": "Context And Constraints",
+        "title": "Context and constraints",
         "transformReasonCodes": [
           "rendered_deterministically",
           "no_original_text_quoted",
@@ -4815,7 +4815,7 @@ Source Signal Guidance:
         ],
         "baselineSourceSignalSlot": "source_signal_guidance",
         "bodyText": "- The current source signal reports stage as task_breakdown → implementation.
-- Use the current source signal as a task constraint and convert it into direct implementation guidance.",
+- Treat what your recent practice shows as a working constraint, and turn it into direct implementation guidance.",
         "callVisibilityMode": "deterministic",
         "canExpandInMoreThorough": true,
         "canGroundInMoreProjectGrounded": true,
@@ -4886,7 +4886,7 @@ Source Signal Guidance:
         "sourceTemplateType": "prompt_enhancement_template",
         "spanRefs": [
           {
-            "endOffset": 431,
+            "endOffset": 446,
             "sectionId": "pe:facade-nonseq-c-compound-shaped:route:section:6:source_signal_guidance",
             "sourceRefs": [
               "src-a-1",
@@ -4898,7 +4898,7 @@ Source Signal Guidance:
           },
         ],
         "templateType": "prompt-enhancement-template",
-        "title": "Source Signal Guidance",
+        "title": "Best practices and standards",
         "transformReasonCodes": [
           "rendered_deterministically",
           "no_original_text_quoted",
@@ -4928,12 +4928,12 @@ Source Signal Guidance:
     "text": "My original request (verbatim):
 Add input validation and a unit test for the login form.
 
-Context And Constraints:
+Context and constraints:
 - Carry forward relevant constraints, limits, environment facts, and user instructions that affect the work.
 
-Source Signal Guidance:
+Best practices and standards:
 - The current source signal reports stage as task_breakdown → implementation.
-- Use the current source signal as a task constraint and convert it into direct implementation guidance.",
+- Treat what your recent practice shows as a working constraint, and turn it into direct implementation guidance.",
     "userDirtyState": "clean",
   },
   "delivery": {
@@ -5450,12 +5450,12 @@ Source Signal Guidance:
       "text": "My original request (verbatim):
 Add input validation and a unit test for the login form.
 
-Context And Constraints:
+Context and constraints:
 - Carry forward relevant constraints, limits, environment facts, and user instructions that affect the work.
 
-Source Signal Guidance:
+Best practices and standards:
 - The current source signal reports stage as task_breakdown → implementation.
-- Use the current source signal as a task constraint and convert it into direct implementation guidance.",
+- Treat what your recent practice shows as a working constraint, and turn it into direct implementation guidance.",
     },
     "diagnostics": [
       {
@@ -5556,7 +5556,7 @@ Source Signal Guidance:
         "callVisibilityMode": "deterministic",
         "fallbackMode": "none",
         "familyId": "feature_delivery",
-        "label": "Context And Constraints",
+        "label": "Context and constraints",
         "preciseFeedbackAllowed": false,
         "primaryIntent": "feature.fresh_implementation",
         "publicSafeExplanationCategory": "source_coverage",
@@ -5597,7 +5597,7 @@ Source Signal Guidance:
         "callVisibilityMode": "deterministic",
         "fallbackMode": "none",
         "familyId": "feature_delivery",
-        "label": "Source Signal Guidance",
+        "label": "Best practices and standards",
         "preciseFeedbackAllowed": false,
         "primaryIntent": "feature.fresh_implementation",
         "publicSafeExplanationCategory": "source_coverage",
@@ -5619,7 +5619,7 @@ Source Signal Guidance:
         ],
         "spanRefs": [
           {
-            "endOffset": 431,
+            "endOffset": 446,
             "sectionId": "pe:facade-nonseq-c-compound-shaped:route:section:6:source_signal_guidance",
             "sourceRefs": [
               "src-a-1",

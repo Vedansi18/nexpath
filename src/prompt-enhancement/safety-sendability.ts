@@ -1,3 +1,4 @@
+import { findPromptEnhancementInternalVocabularyLeaksV1 } from './internal-vocabulary-leak.js';
 import { findPromptEnhancementInventionViolationsV1 } from './preservation-floors.js';
 import {
   promptEnhancementSensitiveActionClearedForTextV1,
@@ -398,6 +399,38 @@ export function validatePromptEnhancementSafety(
       affectedSourceRefIds: generatedSourceRefIds,
       affectedActionIds,
     }));
+  }
+
+  // The internal-vocabulary leak: a sibling of the metadata-id check above, never a replacement
+  // for it — that one blocks rendered ids (sourceRefs, sectionIds, factIds, spanRefs); this one
+  // blocks the UNION vocabulary (obligations, section kinds, fact-line enum values), which is
+  // what every measured specimen leaked. Raw identifiers only, and an identifier the developer
+  // wrote themselves is allowed: the section's own allowed texts are the prompt and its source
+  // facts, exactly as the invention gate defines them.
+  if (!suppressEditContentJudgements) {
+    for (const section of input.currentBody.sections) {
+      if (section.sectionKind === 'original_request_or_goal') continue;
+      const leaks = findPromptEnhancementInternalVocabularyLeaksV1({
+        text: section.bodyText,
+        allowedTexts: [
+          input.currentBody.originalPromptText,
+          ...section.sourceFactIds,
+          ...section.sourceIds,
+          ...(section.groundedFactValues ?? []),
+        ],
+      });
+      for (const leak of leaks) {
+        failures.push(failure({
+          failureCode: `source_honesty:internal_vocabulary_rendered:${leak}`,
+          stage: edited ? 'user_edit' : 'final_body',
+          affectedSectionIds: [section.sectionId],
+          affectedBodySpanRefs: generatedSpanRefIds,
+          affectedSourceRefIds: generatedSourceRefIds,
+          affectedActionIds,
+          publicSafeReasonCategory: 'validation_failed',
+        }));
+      }
+    }
   }
 
   if (!suppressEditContentJudgements && UNRESOLVED_PLACEHOLDER_PATTERN.test(generatedBodyText)) {
