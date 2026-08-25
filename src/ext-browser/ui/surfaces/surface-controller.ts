@@ -45,14 +45,15 @@
 // slot. The one deliberate exception is the CLI's own guards (blank body, empty
 // details), which the CLI refuses silently and so does this.
 //
-// D5 STAYS OUT: directional rows and Go back reach this controller only through
-// the pluggable `resolveActivation` hook. The committed controller knows
-// nothing about refinement — the held wiring supplies the hook, so a fresh
-// checkout without the held files builds and runs.
+// REFINEMENT IS A HOOK, NOT A BRANCH: directional rows and Go back reach this
+// controller only through `resolveActivation`. The shape was forced by C-4 (D5
+// had to stay uncommitted while this landed) and kept afterwards on its own
+// merit — this file has no opinion about what a row means, which is why a
+// surface can add behaviour without editing the controller.
 // ============================================================================
 
 import type { SurfaceId, SurfaceModel, SurfaceRow } from './surface-model.js';
-import { autoGrow, renderSurface } from './surface-view.js';
+import { growFields, renderSurface } from './surface-view.js';
 
 /** What the surfaces report upward. The dock's own union stays `dismiss`-only —
  * window furniture and surface semantics are different layers. */
@@ -193,12 +194,10 @@ export function createSurfaceController(
     const rendered = fields();
     fieldValues.forEach((value, i) => { if (rendered[i]) rendered[i]!.value = value; });
 
-    // Auto-grow must run ATTACHED. buildField's own call happens while the frame
-    // is still detached, where scrollHeight is 0 — the field arrives with an
-    // inline height of 0px and the body is INVISIBLE until the first real input
-    // event (live on Replit + Lovable, 2026-08-25). Re-applied values change the
-    // needed height anyway, so the attached pass is correct for both reasons.
-    for (const field of rendered) autoGrow(field);
+    // Only now can a textarea be measured: the frame is in the document and the
+    // real text is in place. Growing any earlier measures either a detached
+    // element or the wrong string.
+    growFields(wrapper);
 
     // Row-focus and DOM-focus stay in step: a focused field row means its
     // textarea really has the keyboard, caret parked at the end (the CLI parks

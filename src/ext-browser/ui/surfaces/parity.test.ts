@@ -16,6 +16,7 @@ import { PE_FIXTURE, EDIT_KEYS_HINT } from './fixtures/pe.js';
 import { MPS_FIRST_FIXTURE, MPS_CONTINUATION_FIXTURE } from './fixtures/mps.js';
 import { PEF_FIXTURE } from './fixtures/pef.js';
 import type { SurfaceModel } from './surface-model.js';
+import { withoutDirectionalRows } from './refinement.js';
 
 import { renderPromptEnhancementPopupFrameV1, buildPromptEnhancementCliFeedbackStateV1, renderPromptEnhancementCliFeedbackFrameV1 } from '../../../prompt-enhancement/cli-submit-popup.js';
 import { renderPromptEnhancementMpsFirstPopupFrameV1, renderPromptEnhancementMpsContinuationFrameV1 } from '../../../prompt-enhancement/cli-mps-popup.js';
@@ -41,6 +42,11 @@ function rowText(row: Element): string {
 function domLines(frame: HTMLElement): string[] {
   const out: string[] = [];
   for (const row of frame.querySelectorAll('.np-row')) {
+    // A hidden scroll marker is not a line on screen. It is in the DOM so it
+    // can appear the moment the field windows, and `display: none` is what the
+    // reader actually sees — jsdom computes no layout, so the class is the
+    // only honest signal here.
+    if (row.classList.contains('np-marker-hidden')) continue;
     const field = row.querySelector('textarea');
     if (field) {
       const shown = field.value || field.placeholder;
@@ -62,20 +68,29 @@ function cliLines(frame: string): string[] {
 }
 
 /**
- * THE one sanctioned divergence from the CLI's frames (2026-08-25): the
- * browser advertises the Alt+Shift editor chords (the advisory panel's
- * Ctrl+T→Alt+Shift+T precedent — a strayed-focus Ctrl+J is Chrome's own
- * Downloads shortcut), while the CLI keeps its Ctrl/Cmd spelling. The
- * comparison normalizes exactly that hint string and nothing else, so any
- * OTHER hint drift still fails this suite.
+ * Our frame, made comparable to the CLI's. TWO reconciliations, both of them
+ * decisions rather than drift, and both kept in this one place so that every
+ * other line still has to match the CLI exactly.
+ *
+ * 1. THE REFINEMENT ROWS ARE STRIPPED. They are part of the surfaces — the
+ *    browser wires the recompose path, so C-4 puts them on screen — but today's
+ *    CLI renders none of them: its row loop is commented out verbatim at
+ *    `cli-submit-popup.ts:641-664` (owner, 2026-08-19: do not show dead
+ *    buttons).
+ *
+ * 2. THE EDIT-KEYS HINT IS NORMALISED. The browser advertises the Alt+Shift
+ *    chords (the advisory panel's Ctrl+T→Alt+Shift+T precedent — a strayed-focus
+ *    Ctrl+J is Chrome's own Downloads shortcut), while the CLI keeps its
+ *    Ctrl/Cmd spelling. Exactly that hint string is normalised and nothing else,
+ *    so any OTHER hint drift still fails this suite.
  */
 const CLI_EDIT_KEYS_HINT =
   typeof process !== 'undefined' && process.platform === 'darwin'
-    ? 'Cmd+J new line · Cmd+\u2191/\u2193 move line'
-    : 'Ctrl+J new line · Ctrl+\u2191/\u2193 move line';
+    ? 'Cmd+J new line · Cmd+↑/↓ move line'
+    : 'Ctrl+J new line · Ctrl+↑/↓ move line';
 
 function ours(model: SurfaceModel, focusIndex: number): string[] {
-  return domLines(renderSurface(document, model, { focusIndex }))
+  return domLines(renderSurface(document, withoutDirectionalRows(model), { focusIndex }))
     .map((l) => l.trim())
     .map((l) => l.split(EDIT_KEYS_HINT).join(CLI_EDIT_KEYS_HINT));
 }

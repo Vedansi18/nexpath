@@ -58,6 +58,23 @@ function bodyField(): HTMLTextAreaElement {
   return host.querySelector('textarea')!;
 }
 
+/**
+ * Move focus to the row with this label.
+ *
+ * By label rather than by a count of ArrowDowns: the surfaces gained their
+ * refinement rows, and every test that said "down twice reaches Use original
+ * prompt" silently started testing a different row. A label cannot drift like
+ * that, and it says what the test means.
+ */
+function focusOn(c: SurfaceController, label: string): void {
+  for (let i = 0; i < 20; i++) {
+    const focused = host.querySelector('.np-row.np-focused .np-label')?.textContent;
+    if (focused === label) return;
+    key(c.element, 'ArrowDown');
+  }
+  throw new Error(`focusOn: never reached "${label}"`);
+}
+
 // ── construction ─────────────────────────────────────────────────────────────
 
 describe('construction', () => {
@@ -85,14 +102,14 @@ describe('construction', () => {
 
 describe('navigation — the CLI clamp, never a wrap', () => {
   it('ArrowDown walks the interactive rows and clamps at the last', () => {
-    const c = mount();                       // PE: body, details, use-original
+    const c = mount();
+    const last = PE_FIXTURE.rows.filter((r) => r.kind !== 'note').length - 1;
 
     key(c.element, 'ArrowDown');
     expect(c.getFocusIndex()).toBe(1);
-    key(c.element, 'ArrowDown');
-    expect(c.getFocusIndex()).toBe(2);
-    key(c.element, 'ArrowDown');
-    expect(c.getFocusIndex()).toBe(2);       // clamped, not wrapped to 0
+    for (let i = 0; i < last + 3; i++) key(c.element, 'ArrowDown');
+
+    expect(c.getFocusIndex()).toBe(last);    // clamped, not wrapped to 0
   });
 
   it('ArrowUp clamps at the first row', () => {
@@ -105,10 +122,10 @@ describe('navigation — the CLI clamp, never a wrap', () => {
 
   it('moving focus onto a field row hands it the real keyboard', () => {
     const c = mount();
-    key(c.element, 'ArrowDown');             // details
+    focusOn(c, 'Additional details');
 
     expect(document.activeElement).toBe(host.querySelectorAll('textarea')[1]);
-    key(c.element, 'ArrowDown');             // Use original — an action row
+    focusOn(c, 'Use original prompt');       // an action row
     expect(document.activeElement).toBe(c.element);
   });
 
@@ -211,8 +228,7 @@ describe('Enter on the details — the CLI\'s local merge', () => {
 describe('cancel is where feedback opens (§8.3)', () => {
   it('Use original prompt switches to PEF and reports it', () => {
     const c = mount();
-    key(c.element, 'ArrowDown');
-    key(c.element, 'ArrowDown');             // Use original prompt
+    focusOn(c, 'Use original prompt');
 
     key(c.element, 'Enter');
 
@@ -289,8 +305,7 @@ describe('PEF', () => {
 
   it('Other requires text — empty is refused, as the CLI\'s reducer refuses it', () => {
     const c = mount('prompt_enhancement_feedback');
-    key(c.element, 'ArrowDown');
-    key(c.element, 'ArrowDown');             // Other (the field row)
+    focusOn(c, 'Other');
 
     key(bodyField(), 'Enter');
     expect(events).toEqual([]);
@@ -308,8 +323,7 @@ describe('PEF', () => {
 describe('MPS action rows', () => {
   it('Cancel emits cancel-sequence with an echo', () => {
     const c = mount('mps_first');
-    key(c.element, 'ArrowDown');
-    key(c.element, 'ArrowDown');             // Cancel
+    focusOn(c, MPS_CANCEL_LABEL);
 
     key(c.element, 'Enter');
 
@@ -319,8 +333,7 @@ describe('MPS action rows', () => {
 
   it('the interruption row emits and echoes', () => {
     const c = mount('mps_continuation');
-    key(c.element, 'ArrowDown');
-    key(c.element, 'ArrowDown');             // interruption
+    focusOn(c, 'I need to do something else first');
 
     key(c.element, 'Enter');
 
@@ -517,8 +530,7 @@ describe('clicks', () => {
 
   it('a field row focuses on click and does NOT activate — clicking to type must never send', () => {
     const c = mount();
-    key(c.element, 'ArrowDown');
-    key(c.element, 'ArrowDown');             // park focus away from the body
+    focusOn(c, 'Use original prompt');        // park focus away from the body
 
     const bodyLabel = [...host.querySelectorAll('.np-label')]
       .find((el) => el.textContent === 'Use enhanced prompt')!;

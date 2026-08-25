@@ -64,6 +64,15 @@ export const PE_FIXTURE: SurfaceModel = {
       hints: { always: [DETAILS_HINT], whenFocused: [EDIT_KEYS_HINT] },
       blankBefore: true,
     },
+    // The refinement rows are part of THIS surface, not a variant of it. The
+    // CLI keeps its own copies commented out (`cli-submit-popup.ts:641-664`,
+    // owner 2026-08-19: do not show dead buttons) because its recompose path is
+    // not wired; the browser's is, so C-4 puts them on screen. That difference
+    // is handled in one place — the parity suite strips them before comparing —
+    // rather than by keeping a second fixture that made them look optional.
+    { kind: 'action', label: 'Shorter', blankBefore: true },
+    { kind: 'action', label: 'More thorough' },
+    { kind: 'action', label: 'More project-grounded' },
     { kind: 'action', label: 'Use original prompt', act: 'use-original' },
   ],
   footer: PE_FOOTER,

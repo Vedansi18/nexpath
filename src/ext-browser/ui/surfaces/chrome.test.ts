@@ -33,6 +33,17 @@ function ruleBody(selector: string): string {
   return m[1]!;
 }
 
+/**
+ * The stylesheet with its comments removed.
+ *
+ * Every scan below has to run on this and not on the raw string. The comments
+ * NAME the things they exist to forbid — one explains why `:has()` is banned,
+ * another cites `panel.js` — so scanning the raw text reports the ban itself
+ * as a violation and a filename as a class. That false positive has now been
+ * hit three times in this layer, in three different guards.
+ */
+const CSS_ONLY = CHROME_STYLES.replace(/\/\*[\s\S]*?\*\//g, '');
+
 describe('installChromeStyles', () => {
   it('injects the frame stylesheet the panel\'s way — a <style> node, no <link>', () => {
     const root = document.createElement('div');
@@ -121,7 +132,7 @@ describe('CHROME_STYLES — C-3 compatibility floor', () => {
     const banned = [':has(', 'clamp(', ':is(', ':where(', 'dvh', 'svh', '@layer', 'aspect-ratio', 'container-type', '@container'];
 
     for (const feature of banned) {
-      expect(CHROME_STYLES, feature).not.toContain(feature);
+      expect(CSS_ONLY, feature).not.toContain(feature);
     }
   });
 
@@ -142,7 +153,7 @@ describe('CHROME_STYLES — C-3 compatibility floor', () => {
 
 describe('CHROME_STYLES — authoring standard (C-1)', () => {
   it('prefixes every class with np-', () => {
-    const classes = [...CHROME_STYLES.matchAll(/\.([A-Za-z][\w-]*)/g)].map((m) => m[1]!);
+    const classes = [...CSS_ONLY.matchAll(/\.([A-Za-z][\w-]*)/g)].map((m) => m[1]!);
 
     expect(classes.length).toBeGreaterThan(0);
     for (const name of classes) {

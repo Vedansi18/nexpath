@@ -15,6 +15,7 @@
 // ============================================================================
 
 import {
+  FRAME_LINE_HEIGHT_PX,
   buildBlankRow,
   buildBulletRow,
   buildFooterRow,
@@ -22,6 +23,7 @@ import {
   buildHeader,
   buildHintRow,
   buildNoteRow,
+  buildScrollMarkerRow,
   buildTextRow,
 } from './chrome.js';
 import type { SurfaceModel, SurfaceState } from './surface-model.js';
@@ -38,8 +40,77 @@ import type { SurfaceModel, SurfaceState } from './surface-model.js';
  * the live proof is D7's content sweep.
  */
 export function autoGrow(field: HTMLTextAreaElement): void {
+  // A DETACHED element cannot be measured: `scrollHeight` is 0 for anything not
+  // in the document. Writing that back as a height is how the field ended up
+  // 0px tall and the prompt invisible until the first keystroke — the renderer
+  // builds the frame detached, so the constructor's own call always measured
+  // nothing. Never write a height that was not actually measured.
+  if (!field.isConnected) return;
   field.style.height = 'auto';
   field.style.height = `${field.scrollHeight}px`;
+}
+
+/**
+ * Size every field under `root` to its content. Call once AFTER the frame is in
+ * the document — that is the only moment a textarea can be measured.
+ *
+ * Separate from rendering because the renderer returns a detached frame by
+ * design (it is a pure builder, and the tests depend on that). The cost is this
+ * one call at each attach site, and the sweep fails if it is ever missed.
+ */
+/** `↓ N more lines below · the whole prompt is included`, the CLI's wording. */
+const BELOW_SUFFIX = ' · the whole prompt is included';
+
+/**
+ * Update one field's scroll markers from what is actually on screen.
+ *
+ * The counts come from the live scroll position, not from the text: what is
+ * hidden depends on where the user has scrolled to, which is exactly what the
+ * CLI's own marker reports.
+ */
+export function updateFieldMarkers(field: HTMLTextAreaElement): void {
+  const group = field.closest('.np-field-group');
+  if (!group) return;
+  const markers = group.querySelectorAll('.np-marker-row');
+  const [above, below] = markers;
+  if (!above || !below) return;
+
+  const lines = (n: number): number => Math.max(0, Math.round(n / FRAME_LINE_HEIGHT_PX));
+  const hiddenAbove = lines(field.scrollTop);
+  const hiddenBelow = lines(field.scrollHeight - field.scrollTop - field.clientHeight);
+
+  const set = (el: Element, text: string, show: boolean): void => {
+    el.querySelector('.np-content')!.textContent = text;
+    el.classList.toggle('np-marker-hidden', !show);
+  };
+  set(above, `↑ ${hiddenAbove} more lines above`, hiddenAbove > 0);
+  set(below, `↓ ${hiddenBelow} more lines below${BELOW_SUFFIX}`, hiddenBelow > 0);
+}
+
+export function growFields(root: ParentNode): void {
+  const fields = [...root.querySelectorAll('textarea')];
+
+  // Pass one sizes each field to its content.
+  for (const field of fields) autoGrow(field);
+
+  // Pass two exists because pass one can invalidate its own measurement.
+  // Growing a field pushes the scroll band into overflow, a scrollbar appears,
+  // the field narrows, and the text rewraps TALLER than the height just set —
+  // measured at 360px wide with a 2000-character token: 825px set, 840px
+  // needed, the last line clipped.
+  //
+  // It must NOT be another autoGrow. That resets to `auto` first, which
+  // collapses the field, removes the overflow, takes the scrollbar away, widens
+  // the field and measures 825 all over again — an oscillation, not a
+  // convergence, which is why running autoGrow twice changed nothing. This pass
+  // only ever grows, from the settled width, so it terminates.
+  for (const field of fields) {
+    if (!field.isConnected) continue;
+    if (field.scrollHeight > field.clientHeight) field.style.height = `${field.scrollHeight}px`;
+  }
+
+  // Sizing settles the window, so the markers can only be right after it.
+  for (const field of fields) updateFieldMarkers(field);
 }
 
 /** The editable field beneath a `field` row's label. */
@@ -59,11 +130,15 @@ function buildField(doc: Document, text: string, indent: 4 | 6, placeholder?: st
   // honest, because a browser-blocked keystroke can never produce text the
   // engine would discard (the 2026-08-25 read-only-fallback lesson).
   if (readOnly) field.readOnly = true;
+  // One row is the floor, not the size: `growFields` raises it to the content as
+  // soon as the frame is attached. Without an inline height the field can never
+  // collapse to nothing, which is the failure this replaced.
   field.rows = 1;
-  // Auto-grow on creation and on every edit. The listener dies with the element,
-  // which is discarded whole when a surface re-renders.
-  field.addEventListener('input', () => autoGrow(field));
-  autoGrow(field);
+  // The listener dies with the element, which is discarded whole on re-render.
+  field.addEventListener('input', () => { autoGrow(field); updateFieldMarkers(field); });
+  // Scrolling changes what is hidden without changing the text, so the markers
+  // have to follow the scroll and not only the content.
+  field.addEventListener('scroll', () => updateFieldMarkers(field));
 
   row.appendChild(field);
   return row;
@@ -133,7 +208,7 @@ export function renderSurface(doc: Document, model: SurfaceModel, state: Surface
 
     const focused = interactiveIndex === focusIndex;
     interactiveIndex += 1;
-    scroll.appendChild(buildBulletRow(doc, row.label, focused, row.kind === 'action' ? row.tone : undefined));
+    scroll.appendChild(buildBulletRow(doc, row.label, focused, row.kind === 'action' ? row.tone : undefined, row.kind === 'field'));
 
     if (row.kind === 'action') {
       // Dim, not plain — the CLI's own comment reads "label, then dim helper"
@@ -143,11 +218,26 @@ export function renderSurface(doc: Document, model: SurfaceModel, state: Surface
       return;
     }
 
-    scroll.appendChild(buildField(doc, row.text, fieldIndent, row.placeholder, row.readOnly));
-    for (const hint of row.hints?.always ?? []) scroll.appendChild(buildHintRow(doc, hint, hintIndent));
+    // The label, the editor and its hints go in ONE group so CSS can ask
+    // whether the user is editing: `:focus-within` needs a common ancestor, and
+    // the label and the textarea are separate rows. The group has no layout box
+    // of its own — the rows sit in normal flow exactly as before.
+    //
+    // The alternative was a JS class toggled on focus/blur, which was tried and
+    // measured wrong: headless Firefox reported `blurFired=false` with the
+    // field still the active element, so the "editing" state stuck on. CSS
+    // focus state is the engine's own and needs no event to arrive.
+    const group = doc.createElement('div');
+    group.className = 'np-field-group';
+    group.appendChild(scroll.removeChild(scroll.lastElementChild!));   // the label row
+    group.appendChild(buildScrollMarkerRow(doc, fieldIndent));         // ↑ above
+    group.appendChild(buildField(doc, row.text, fieldIndent, row.placeholder, row.readOnly));
+    group.appendChild(buildScrollMarkerRow(doc, fieldIndent));         // ↓ below
+    for (const hint of row.hints?.always ?? []) group.appendChild(buildHintRow(doc, hint, hintIndent));
     if (focused) {
-      for (const hint of row.hints?.whenFocused ?? []) scroll.appendChild(buildHintRow(doc, hint, hintIndent));
+      for (const hint of row.hints?.whenFocused ?? []) group.appendChild(buildHintRow(doc, hint, hintIndent));
     }
+    scroll.appendChild(group);
   });
 
   // ── footer ───────────────────────────────────────────────────────────────
