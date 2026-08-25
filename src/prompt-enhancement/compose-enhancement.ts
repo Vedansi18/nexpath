@@ -43,6 +43,7 @@ import {
 } from './sensitive-action-clearance.js';
 import {
   buildPromptEnhancementCanonicalConfirmation,
+  resolvePromptEnhancementSensitiveActionNamingV1,
   promptEnhancementGeneratedBodyRequiresConfirmationV1,
   requiresPromptEnhancementExecutionConfirmationForPrompt,
   validatePromptEnhancementSafety,
@@ -347,6 +348,14 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
   //
   // If the prompt demands confirmation, the clause is placed. Which section hosts it is a matter of
   // taste; whether it appears at all is not.
+  //
+  // The sentence is resolved ONCE here — same naming ladder as the validator — and this exact
+  // string is what the renderer inserts, the duplication guard matches, and the parity predicate
+  // strips. One derivation per compose; the sites carry it.
+  const canonicalConfirmationSentence = buildPromptEnhancementCanonicalConfirmation(
+    input.originalPromptText,
+    resolvePromptEnhancementSensitiveActionNamingV1(input.originalPromptText, input.typedSensitiveActionVerdict),
+  );
   const canonicalConfirmationSectionId = (requiresPromptEnhancementExecutionConfirmationForPrompt(input.originalPromptText, input.sensitiveActionClearance)
     || isPromptEnhancementTypedSensitiveActionVerdictV1(input.typedSensitiveActionVerdict))
     ? sectionPlans.find((sectionPlan) => (
@@ -402,6 +411,7 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
         sectionPlanningResult: input.sectionPlanningResult,
         llmDraftsBySectionId: validatedLlmDrafts.draftsBySectionId,
         insertCanonicalConfirmation: sectionPlan.sectionId === confirmationSectionId,
+        canonicalConfirmationSentence,
       }),
   );
   let renderedSections = renderSectionsWithConfirmation(canonicalConfirmationSectionId);
@@ -429,8 +439,8 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
   if (
     canonicalConfirmationSectionId === undefined
     && text === canonicalText
-    && !text.includes(buildPromptEnhancementCanonicalConfirmation(input.originalPromptText))
-    && (promptEnhancementGeneratedBodyRequiresConfirmationV1({ sections, originalPromptText: input.originalPromptText }, text, input.sensitiveActionClearance)
+    && !text.includes(canonicalConfirmationSentence)
+    && (promptEnhancementGeneratedBodyRequiresConfirmationV1({ sections, originalPromptText: input.originalPromptText }, text, input.sensitiveActionClearance, canonicalConfirmationSentence)
       || isPromptEnhancementTypedSensitiveActionVerdictV1(input.typedSensitiveActionVerdict))
   ) {
     const lastGeneratedSectionId = [...renderableSectionPlans].reverse()
@@ -900,6 +910,8 @@ function renderSection(input: {
   sectionPlanningResult: PromptEnhancementSectionPlanningResult;
   llmDraftsBySectionId?: ReadonlyMap<string, string>;
   insertCanonicalConfirmation?: boolean;
+  /** The compose-level resolved sentence — inserted as-is so every site carries ONE string. */
+  canonicalConfirmationSentence: string;
 }): { sectionId: string; title: string; bodyText: string; text: string } {
   const { sectionPlan, action } = input;
   const heading = headingForSection(sectionPlan.sectionKind);
@@ -919,7 +931,7 @@ function renderSection(input: {
     // evidence statuses on the plan + sectionsForFeedback) — never rendered into the prompt body.
     const lines = [llmDraft];
     if (input.insertCanonicalConfirmation === true) {
-      lines.push(`- ${buildPromptEnhancementCanonicalConfirmation(input.originalPromptText)}`);
+      lines.push(`- ${input.canonicalConfirmationSentence}`);
     }
     const bodyText = lines.join('\n');
     return {
@@ -984,7 +996,7 @@ function renderSection(input: {
   // Body quality (2026-08-06): no per-section provenance sentence in the editable body — that
   // information already lives in the typed section metadata.
   if (input.insertCanonicalConfirmation === true) {
-    lines.push(buildPromptEnhancementCanonicalConfirmation(input.originalPromptText));
+    lines.push(input.canonicalConfirmationSentence);
   }
   const bodyText = lines.map((line) => `- ${line}`).join('\n');
 

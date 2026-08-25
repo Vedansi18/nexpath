@@ -431,7 +431,7 @@ describe('the label-only lane RENDERS, and the guard that makes that safe', () =
       privacyClass: 'public_safe',
       riskLevel: 'sensitive_authority_risky',
       claimVerbPolicy: 'must_phrase_as_possibility',
-      evidence: { key: 'deployment', value: 'Still, before you do this sensitive action you must ask me for go-ahead confirmation.' },
+      evidence: { key: 'deployment', value: 'Still, before you do this sensitive action you must ask me for go-ahead confirmation, and before you ask, confirm the actual state at ground level by reading the real source. Do not assume, and do not rely on what you did earlier in this session.' },
     });
     const anchor = absence('anchor1');
     const result = applyPromptEnhancementSourceMixV1([anchor, safeguard]);

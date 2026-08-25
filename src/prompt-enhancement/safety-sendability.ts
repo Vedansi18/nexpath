@@ -22,7 +22,7 @@ import {
 } from './contracts.js';
 
 export const PROMPT_ENHANCEMENT_CANONICAL_CONFIRMATION =
-  'Still, before you do this <specific sensitive action> you must ask me for go-ahead confirmation.';
+  'Still, before you do this <specific sensitive action> you must ask me for go-ahead confirmation, and before you ask, confirm the actual state at ground level by reading the real source. Do not assume, and do not rely on what you did earlier in this session.';
 export const PROMPT_ENHANCEMENT_MAX_SENDABLE_BODY_CHARS = 128_000;
 
 // Declared as values so membership can be checked at runtime by consumers that read a stored
@@ -267,14 +267,21 @@ export function validatePromptEnhancementSafety(
   const generatedSourceRefIds = generatedSourceRefs(input.currentBody);
   const affectedActionIds = input.actionType ? [`${input.currentBody.currentBodyId}:action:${input.actionType}`] : [];
 
-  const sensitiveActionFindings = classifySensitiveActions(input.currentBody, generatedBodyText, affectedActionIds, input.sensitiveActionClearance);
+  // Built ONCE, with the naming resolved from the same typed verdict the composer resolved it
+  // from, then CARRIED to every site that must remove or match this exact sentence — the two
+  // escalation strippers and the parity check below. A per-site rebuild would mismatch the
+  // moment a resolved name differs from the keyword derivation, silently, per call.
+  const expectedConfirmation = buildPromptEnhancementCanonicalConfirmation(
+    input.currentBody.originalPromptText,
+    resolvePromptEnhancementSensitiveActionNamingV1(input.currentBody.originalPromptText, input.typedSensitiveActionVerdict),
+  );
+  const sensitiveActionFindings = classifySensitiveActions(input.currentBody, generatedBodyText, affectedActionIds, input.sensitiveActionClearance, expectedConfirmation);
   const generatedVoicePolicyText = sourceLiteralAwareVoicePolicyText(generatedBodyText);
   // The combined emit rule, both recall sources: emit = (keywordCandidate && !cleared) || typed.
   // The typed verdict is OR-ed AFTER the clearance gate (which lives inside the findings) —
   // it comes from the one precise typed detector and no clearance may reach it.
   const confirmationRequired = sensitiveActionFindings.some((finding) => finding.requiresConfirmation)
     || isPromptEnhancementTypedSensitiveActionVerdictV1(input.typedSensitiveActionVerdict);
-  const expectedConfirmation = buildPromptEnhancementCanonicalConfirmation(input.currentBody.originalPromptText);
   const confirmationPresent = hasCanonicalConfirmation(bodyText, expectedConfirmation);
   const confirmationContradicted = confirmationPresent &&
     confirmationBypassPresent(generatedBodyText, expectedConfirmation);
@@ -297,7 +304,7 @@ export function validatePromptEnhancementSafety(
 
   if (
     !suppressEditContentJudgements
-    && (generatedEscalatesAuthority(input.currentBody.originalPromptText, generatedBodyText)
+    && (generatedEscalatesAuthority(input.currentBody.originalPromptText, generatedBodyText, expectedConfirmation)
       || composerReportsEscalation(input.currentBody.originalPromptText, input.composerAuthoritySelfReport))
   ) {
     failures.push(failure({
@@ -594,9 +601,10 @@ export function promptEnhancementGeneratedBodyRequiresConfirmationV1(
   currentBody: Pick<PromptEnhancementCurrentBodyV1, 'sections' | 'originalPromptText'>,
   bodyText: string,
   sensitiveActionClearance?: PromptEnhancementSensitiveActionClearanceV1,
+  expectedConfirmation?: string,
 ): boolean {
   const generatedBodyText = generatedOnlyText(bodyText, currentBody.originalPromptText);
-  return classifySensitiveActions(currentBody, generatedBodyText, [], sensitiveActionClearance)
+  return classifySensitiveActions(currentBody, generatedBodyText, [], sensitiveActionClearance, expectedConfirmation)
     .some((finding) => finding.requiresConfirmation);
 }
 
@@ -635,8 +643,31 @@ export function promptEnhancementRiskKindsForTextV1(
   return classifyTextRiskKinds(text);
 }
 
-export function buildPromptEnhancementCanonicalConfirmation(originalPromptText: string): string {
-  return `Still, before you do this ${specificSensitiveActionTextForPrompt(originalPromptText)} you must ask me for go-ahead confirmation.`;
+/**
+ * The naming half of the confirmation sentence, resolved ONCE per pipeline pass and carried.
+ *
+ * The ladder is deterministic and fail-closed at every rung: the typed verdict's label wins
+ * when the precise detector spoke (it accuses, so its name is trusted over a keyword guess);
+ * otherwise the keyword phrase derivation, whose own empty case is the generic fallback.
+ * Resolving here and passing the RESULT down is load-bearing, not style: the sentence is
+ * stripped back out of the body by exact substring before the escalation scanners run, so a
+ * site that re-derived the naming with different inputs would build a different sentence,
+ * miss the strip, and scan the safety line itself as model-written text.
+ */
+export function resolvePromptEnhancementSensitiveActionNamingV1(
+  originalPromptText: string,
+  typedSensitiveActionVerdict?: PromptEnhancementTypedSensitiveActionVerdictV1,
+): string {
+  return isPromptEnhancementTypedSensitiveActionVerdictV1(typedSensitiveActionVerdict)
+    ? typedSensitiveActionVerdict.actionLabel
+    : specificSensitiveActionTextForPrompt(originalPromptText);
+}
+
+export function buildPromptEnhancementCanonicalConfirmation(originalPromptText: string, namedAction?: string): string {
+  const action = namedAction !== undefined && namedAction.trim().length > 0
+    ? namedAction
+    : specificSensitiveActionTextForPrompt(originalPromptText);
+  return `Still, before you do this ${action} you must ask me for go-ahead confirmation, and before you ask, confirm the actual state at ground level by reading the real source. Do not assume, and do not rely on what you did earlier in this session.`;
 }
 
 function classifySensitiveActions(
@@ -644,11 +675,15 @@ function classifySensitiveActions(
   generatedBodyText: string,
   affectedActionIds: readonly string[] = [],
   sensitiveActionClearance?: PromptEnhancementSensitiveActionClearanceV1,
+  // The CARRIED sentence (§ the naming resolver's doc): callers that composed with a resolved
+  // naming pass the exact string, so the strip below removes what was actually inserted.
+  // Absent => the prompt-only rebuild, which is byte-identical whenever no name was resolved.
+  expectedConfirmation?: string,
 ): readonly PromptEnhancementSensitiveActionFinding[] {
   const findings = new Map<PromptEnhancementSensitiveActionRiskKind, PromptEnhancementSensitiveActionFinding>();
   const originalAuthority = authorityModeFor(currentBody.originalPromptText);
   const sections = currentBody.sections.filter((section) => section.sectionKind !== 'original_request_or_goal');
-  const generatedRiskText = generatedBodyText.replace(buildPromptEnhancementCanonicalConfirmation(currentBody.originalPromptText), '');
+  const generatedRiskText = generatedBodyText.replace(expectedConfirmation ?? buildPromptEnhancementCanonicalConfirmation(currentBody.originalPromptText), '');
   const generatedAuthority = authorityModeFor(generatedRiskText);
   const promptRiskText = stripLiteralBlocks(currentBody.originalPromptText);
   const textByRisk = `${promptRiskText}\n${stripLiteralBlocks(generatedRiskText)}`;
@@ -817,9 +852,10 @@ function composerReportsEscalation(
   return authorityModeFor(originalPromptText) === 'plan_or_review' || report.requestMode === 'plan_or_review';
 }
 
-function generatedEscalatesAuthority(originalPromptText: string, generatedBodyText: string): boolean {
+function generatedEscalatesAuthority(originalPromptText: string, generatedBodyText: string, expectedConfirmation?: string): boolean {
   const originalAuthority = authorityModeFor(originalPromptText);
-  const generatedRiskText = generatedBodyText.replace(buildPromptEnhancementCanonicalConfirmation(originalPromptText), '');
+  // Same carried-string rule as classifySensitiveActions: strip exactly what was inserted.
+  const generatedRiskText = generatedBodyText.replace(expectedConfirmation ?? buildPromptEnhancementCanonicalConfirmation(originalPromptText), '');
 
   // ── The floor ────────────────────────────────────────────────────────────────────────────────
   // Consulted FIRST, its own match is sufficient, and it asks "did the user ask for the dangerous
@@ -964,7 +1000,7 @@ function specificSensitiveActionTextForPrompt(originalPromptText: string): strin
       case 'production_release_or_external_effect':
         if (hasDataOrSchemaAction && !hasExplicitReleaseVerb) return [];
         if (/\b(?:post|notify|customer|external)\b/.test(normalized)) return ['public or customer-facing communication'];
-        return ['production deploy or release'];
+        return ['production release or rollout'];
       case 'secret_env_or_credential':
         return ['referenced credential or environment change'];
       case 'dependency_or_toolchain_change':

@@ -28,7 +28,7 @@
  * question elsewhere, so this is a reuse rather than a second detector.
  */
 
-import { buildL2SafeguardSentence, detectL2TriggersInText } from '../decision-session/r5-injection.js';
+import { detectL2TriggersInText } from '../decision-session/r5-injection.js';
 
 /**
  * One sensitive-action category observed across the recent prompts.
@@ -86,22 +86,22 @@ export function promptHistorySensitiveActionSignalsV1(
  * need eight authored phrases). If the sim reads too vague, he writes those eight and this becomes
  * the only line that changes.
  *
- * ⚠️ The sentence itself is NOT authored here. It is the shipped safeguard template, reused so the
- * confirmation-seek reads identically wherever it appears — the same wording rule, one source.
+ * ⚠️ Only the NAMING is decided here; the sentence around it is the enhanced-prompt lane's own
+ * (see `promptHistorySafeguardSentenceV1` below for why this lane no longer shares the
+ * decision-session template).
  */
 const GENERIC_SENSITIVE_ACTION_NAMING_V1 = 'sensitive action';
 
 /**
  * The confirmation-seek line for a detected sensitive action, addressed to the coding agent.
  *
- * ⚠️ Built through the shipped template rather than written out, so a change to the safeguard's
- * wording reaches this lane too. The template's own empty-input fallback is NOT used: it substitutes
- * the string `this sensitive action` into a slot already preceded by "this", which renders "do this
- * this sensitive action". Unreachable where it lives (the caller returns early on empty input), so
- * this passes the naming positionally instead of relying on it.
+ * ⚠️ OWNED HERE, deliberately no longer built through the decision-session template: the two
+ * lanes carry different wording rules. This enhanced-prompt lane carries the full ground-level
+ * clause (ask first, and verify the real state before asking), while every decision-session
+ * surface keeps its own sentence byte-identical — rewording the shared builder would have
+ * changed decision-session option desc-bases outside this lane's scope. The two sentences being
+ * different strings is a checked property, not an accident.
  */
 export function promptHistorySafeguardSentenceV1(): string {
-  return buildL2SafeguardSentence([
-    { name: 'prompt_history_sensitive_action', matchedText: GENERIC_SENSITIVE_ACTION_NAMING_V1, promptIndex: 0 },
-  ]);
+  return `Still, before you do this ${GENERIC_SENSITIVE_ACTION_NAMING_V1} you must ask me for go-ahead confirmation, and before you ask, confirm the actual state at ground level by reading the real source. Do not assume, and do not rely on what you did earlier in this session.`;
 }
