@@ -187,6 +187,7 @@ export function createSurfaceController(
   }
 
   function render(): void {
+    lastRenderAt = Date.now(); // re-arms the focus-steal guard's window
     wrapper.replaceChildren(renderSurface(doc, model, { focusIndex, notice }));
 
     // Re-apply the user's edits — the freshly built textareas carry model text.
@@ -399,26 +400,37 @@ export function createSurfaceController(
   function onKeyDown(e: KeyboardEvent): void {
     if (destroyed) return;
     const inField = e.target instanceof HTMLTextAreaElement;
-    // The chord is EXACTLY Ctrl/Cmd — the hint names Cmd on macOS. Shift and Alt
-    // disqualify it: Ctrl+Shift+J is the browser's own DevTools console,
-    // Ctrl+Shift+arrows extend a selection by line, and Ctrl+Alt is AltGr on
-    // many layouts. A terminal never sees those combinations, so the CLI grammar
-    // has no claim on them — they stay native.
+    // TWO chord families, live-lesson 2026-08-25:
+    //  - Ctrl/Cmd (the CLI's own) works only while focus is INSIDE this
+    //    wrapper. Agent pages steal focus moments after the dock shows, and a
+    //    stolen-focus Ctrl+J is CHROME'S OWN Downloads shortcut — the user
+    //    sees "the key does nothing AND opens a browser page". Kept for
+    //    muscle-memory when focus is here, but no longer advertised.
+    //  - Alt+Shift (ADVERTISED — the hint names it) is the extension's proven
+    //    no-conflict family, the same remap precedent as the advisory panel's
+    //    CLI Ctrl+T/Ctrl+X → Alt+Shift+T/Alt+Shift+X: Alt+Shift+J and
+    //    Alt+Shift+arrows mean nothing to Chrome, Firefox, or the OS, so a
+    //    press with strayed focus is harmless instead of a browser action.
+    //    (Ctrl+Shift stays disqualified: Ctrl+Shift+J is DevTools.)
     const chord = (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey;
+    const safeChord = e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey;
     // Row navigation is PLAIN arrows only: Shift+arrow inside a field is the
     // browser's select-by-line, which stealing the key would silently break.
     const plain = !e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey;
 
-    // Ctrl/Cmd+↑/↓ — caret line movement inside a field. Physical codes, the
-    // D1.3 precedent: e.key is layout- and modifier-dependent.
-    if (chord && (e.code === 'ArrowUp' || e.code === 'ArrowDown')) {
+    // Ctrl/Cmd+↑/↓ or Alt+Shift+↑/↓ — caret line movement inside a field.
+    // Physical codes, the D1.3 precedent: e.key is layout- and
+    // modifier-dependent (Alt+Shift+letter is a special character on macOS —
+    // e.code is what stays stable).
+    if ((chord || safeChord) && (e.code === 'ArrowUp' || e.code === 'ArrowDown')) {
       if (inField) moveCaretLine(e.target as HTMLTextAreaElement, e.code === 'ArrowUp' ? -1 : 1);
       e.preventDefault(); e.stopPropagation();
       return;
     }
 
-    // Ctrl/Cmd+J — the newline. Enter is send, so this is the only way in.
-    if (chord && e.code === 'KeyJ') {
+    // Ctrl/Cmd+J or Alt+Shift+J — the newline. Enter is send, so this is the
+    // only way in.
+    if ((chord || safeChord) && e.code === 'KeyJ') {
       if (inField) {
         const field = e.target as HTMLTextAreaElement;
         field.setRangeText('\n', field.selectionStart ?? 0, field.selectionEnd ?? 0, 'end');
@@ -474,8 +486,40 @@ export function createSurfaceController(
     }
   }
 
+  // ── Focus-steal guard (live-lesson 2026-08-25) ──────────────────────────────
+  // Agent pages grab focus moments after the dock shows (Bolt observed doing it
+  // seconds after render): every chord then goes to the PAGE — the popup's keys
+  // "stop working" and Ctrl+J becomes Chrome's Downloads. A page-script steal
+  // lands focus on document.body; a REAL user click lands on the clicked
+  // element — so re-take only when the new resting place is body, and only
+  // within a short window after our own render (steals cluster there; a user's
+  // deliberate click into the page comes later and must release the keys — the
+  // panel family's non-modal rule).
+  const FOCUS_STEAL_WINDOW_MS = 1_500;
+  let lastRenderAt = Date.now();
+  function onFocusOut(): void {
+    if (destroyed) return;
+    setTimeout(() => {
+      if (destroyed) return;
+      if (Date.now() - lastRenderAt > FOCUS_STEAL_WINDOW_MS) return;
+      // Steal signature: focus RESTS ON BODY. Inside a shadow root the shadow's
+      // own activeElement goes null AND the document's lands on body; mounted
+      // bare (tests, the harness) the document view is the whole story. A real
+      // element holding focus = deliberate user intent — leave it alone.
+      const root = wrapper.getRootNode() as Document | ShadowRoot;
+      const stolen = root === (doc as unknown)
+        ? doc.activeElement === doc.body
+        : (root.activeElement === null && doc.activeElement === doc.body);
+      if (!stolen) return;
+      const ordinal = fieldOrdinalOf(focusIndex);
+      const field = ordinal >= 0 ? fields()[ordinal] : undefined;
+      (field ?? wrapper).focus({ preventScroll: true });
+    }, 0);
+  }
+
   wrapper.addEventListener('keydown', onKeyDown);
   wrapper.addEventListener('pointerdown', onPointerDown);
+  wrapper.addEventListener('focusout', onFocusOut);
 
   show(model);
 
@@ -492,6 +536,7 @@ export function createSurfaceController(
       destroyed = true;
       wrapper.removeEventListener('keydown', onKeyDown);
       wrapper.removeEventListener('pointerdown', onPointerDown);
+      wrapper.removeEventListener('focusout', onFocusOut);
       wrapper.remove();
     },
   };

@@ -18,7 +18,7 @@ import {
   PE_REFINED_TEXT,
   MPS_REFINED_TEXT,
 } from './fixtures/directional.js';
-import { PE_FIXTURE } from './fixtures/pe.js';
+import { PE_FIXTURE, EDIT_KEYS_HINT } from './fixtures/pe.js';
 import { MPS_FIRST_FIXTURE, MPS_CANCEL_LABEL, MPS_FIRST_FOOTER } from './fixtures/mps.js';
 import type { SurfaceModel } from './surface-model.js';
 
@@ -55,8 +55,21 @@ function cliLines(frame: string): string[] {
   return frame.split('\n').map((line) => line.replace(/^│ ?/, '').trim());
 }
 
+/**
+ * The browser advertises the Alt+Shift chords where the CLI keeps Ctrl/Cmd — a
+ * strayed-focus Ctrl+J is Chrome's own Downloads shortcut. Normalised for the
+ * live-CLI comparison exactly as `parity.test.ts` normalises it, and nothing
+ * else, so any other hint drift still fails.
+ */
+const CLI_EDIT_KEYS_HINT =
+  typeof process !== 'undefined' && process.platform === 'darwin'
+    ? 'Cmd+J new line · Cmd+↑/↓ move line'
+    : 'Ctrl+J new line · Ctrl+↑/↓ move line';
+
 function ours(model: SurfaceModel, focusIndex: number): string[] {
-  return domLines(renderSurface(document, model, { focusIndex })).map((l) => l.trim());
+  return domLines(renderSurface(document, model, { focusIndex }))
+    .map((l) => l.trim())
+    .map((l) => l.split(EDIT_KEYS_HINT).join(CLI_EDIT_KEYS_HINT));
 }
 
 function labelsOf(model: SurfaceModel, focusIndex = 0): string[] {

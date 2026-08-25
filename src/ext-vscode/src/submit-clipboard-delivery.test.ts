@@ -10,6 +10,7 @@
  * hardware here (`G-HARDWARE`), so the command each OS would run is pinned instead.
  */
 import { describe, it, expect, vi } from 'vitest';
+import { spawnSync } from 'node:child_process';
 import {
   createSubmitClipboardDelivery,
   submitKeystroke,
@@ -17,6 +18,9 @@ import {
   focusedWindowIsEditor,
   type SubmitClipboardDeliveryDeps,
   isDarwinAccessibilityDenial,
+  buildWin32KeystrokeScript,
+  WIN32_KEYSTROKE_TIMEOUT_MS,
+  scheduleWindsurfQueueFlush,
 } from './submit-clipboard-delivery.js';
 
 function deliveryHarness(over: Partial<SubmitClipboardDeliveryDeps> = {}) {
@@ -234,6 +238,14 @@ describe('submitKeystroke — cross-OS matrix (§2.4b), pinned per platform', ()
     // point is not the return value but that the defaults actually execute
     // instead of short-circuiting to false.
     const calls: string[] = [];
+    // RC48-era fix (Bhavnesh §8.4): this case exercises the REAL default
+    // detector, which shells out to `which` — on a host with no keystroke tool
+    // installed (Windows/macOS checkouts, minimal CI) no tool can match and the
+    // assertion is about the HOST, not the code. Skip honestly there.
+    const anyTool = ['xdotool', 'wtype', 'ydotool'].some((t) => {
+      try { return spawnSync('which', [t], { stdio: 'ignore', timeout: 2000 }).status === 0; } catch { return false; }
+    });
+    if (!anyTool) return; // host has no tool — nothing real to probe
     const result = submitKeystroke({ isPopupFocused: () => false, platform: 'linux',
       env: { DISPLAY: ':1' },
       // hasCommand intentionally NOT injected — exercise the real default.
@@ -378,5 +390,181 @@ describe('⭐ RC16 — darwin Accessibility denial detection', () => {
   it('does not flag unrelated failures or null', () => {
     expect(isDarwinAccessibilityDenial('osascript exited 1')).toBe(false);
     expect(isDarwinAccessibilityDenial(null)).toBe(false);
+  });
+});
+
+/**
+ * ⭐ RC47 — win32 submit hardening (Windows tester 2026-08-22: AppActivate
+ * failed for both 'Devin' and 'Windsurf' while the window was open, Enter never
+ * fired, the refined text stranded silently).
+ */
+describe('⭐ RC47 — win32 AppActivate candidates + retry', () => {
+  const runSpy = () => {
+    const calls: Array<{ cmd: string; args: string[] }> = [];
+    return { calls, run: (cmd: string, args: string[]) => { calls.push({ cmd, args }); return true; } };
+  };
+
+  it('⭐ the live appName leads the candidate list (rebrand coverage)', () => {
+    const { calls, run } = runSpy();
+    submitKeystroke({
+      platform: 'win32', host: 'windsurf', appName: 'Devin Next', run,
+      isPopupFocused: () => false, isEditorFocused: () => true,
+    });
+    const ps = calls[0]!.args.join(' ');
+    expect(ps.indexOf("'Devin Next'")).toBeGreaterThan(-1);
+    expect(ps.indexOf("'Devin Next'")).toBeLessThan(ps.indexOf("'Devin'"));
+    expect(ps).toContain("'Windsurf'");
+  });
+
+  it('two activation rounds with a pause (foreground-lock release window)', () => {
+    const { calls, run } = runSpy();
+    submitKeystroke({
+      platform: 'win32', host: 'cursor', appName: 'Cursor', run,
+      isPopupFocused: () => false, isEditorFocused: () => true,
+    });
+    const ps = calls[0]!.args.join(' ');
+    expect(ps).toContain('foreach($r in 1..2)');
+    expect(ps).toContain('Start-Sleep -Milliseconds 400');
+  });
+
+  it('duplicate appName==host title is deduped', () => {
+    const { calls, run } = runSpy();
+    submitKeystroke({
+      platform: 'win32', host: 'cursor', appName: 'Cursor', run,
+      isPopupFocused: () => false, isEditorFocused: () => true,
+    });
+    const ps = calls[0]!.args.join(' ');
+    // The builder embeds the candidate list twice (foreground check + activate
+    // rounds) — a deduped single candidate appears exactly 2×; a duplicated
+    // candidate would appear 4×.
+    expect(ps.match(/'Cursor'/g)?.length).toBe(2);
+  });
+});
+
+/**
+ * ⭐ RC49 — foreground-first win32 keystrokes. The Devin tester's RC47 toast
+ * proved AppActivate can fail while the editor IS foreground (Windows'
+ * foreground lock refuses background callers). When the target is already
+ * focused, no activation is needed — send directly.
+ */
+describe('⭐ RC49 — buildWin32KeystrokeScript', () => {
+  it('⭐ checks the FOREGROUND title before any AppActivate', () => {
+    const ps = buildWin32KeystrokeScript(['Devin Next', 'Devin'], '{ENTER}');
+    expect(ps.indexOf('GetForegroundWindow')).toBeLessThan(ps.indexOf('AppActivate'));
+    expect(ps).toContain('$fg.EndsWith($t)');
+  });
+  it('delimiter-safe matching (RC60 flip): mid-title app names match, bare substrings do not', () => {
+    // FLIPPED 2026-08-24 (RC60): the original pin asserted suffix-ONLY ("not
+    // substring") — which refused a real Devin foreground window titled
+    // "<folder> - Devin - <session>". The browser-tab hazard is still guarded:
+    // matching requires the delimited segment " - <name> - ", a start
+    // "<name> - ", an exact match, or the original suffix — never a bare
+    // substring anywhere in the title.
+    const ps = buildWin32KeystrokeScript(['Devin'], '{ENTER}');
+    expect(ps).toContain("$fg.EndsWith($t)");
+    expect(ps).toContain("$fg.StartsWith($t + ' - ')");
+    expect(ps).toContain("$fg.Contains(' - ' + $t + ' - ')");
+  });
+  it('keeps the retry rounds and the FOREGROUND diagnostic', () => {
+    const ps = buildWin32KeystrokeScript(['Devin'], '{ENTER}');
+    expect(ps).toContain('foreach($r in 1..2)');
+    expect(ps).toContain('Write-Output ("FOREGROUND=" + $fg)');
+  });
+  it('quotes are PowerShell-escaped', () => {
+    expect(buildWin32KeystrokeScript(["O'Brien's Editor"], '^v')).toContain("'O''Brien''s Editor'");
+  });
+});
+
+/** ⭐ RC52 — the cold-start ceiling (Windows tester 2026-08-24: first submit killed at 8 s mid Add-Type; warm run 0.8 s delivered). */
+describe('⭐ RC52 — win32 keystroke timeout', () => {
+  it('the shared ceiling covers a cold Add-Type compile (>8 s measured)', () => {
+    expect(WIN32_KEYSTROKE_TIMEOUT_MS).toBeGreaterThanOrEqual(20_000);
+  });
+});
+
+/**
+ * ⭐ RC59 — the Linux Devin-branding gate (staging tester 2026-08-24): the
+ * single 'windsurf' needle refused Enter on every Devin-branded Linux install
+ * (title "… - Devin"). The RC47 class, ported to the Linux gate at last:
+ * live appName leads, static brand names cover unthreaded callers.
+ */
+describe('⭐ RC59 — focusedWindowIsEditor brand needles', () => {
+  const deps = (title: string, appName?: string) => ({
+    platform: 'linux' as const, env: { DISPLAY: ':0' },
+    hasCommand: () => true, runCapture: () => title, appName,
+  });
+
+  it('⭐ the tester\'s exact failing title now passes for host windsurf', () => {
+    expect(focusedWindowIsEditor('windsurf', deps('nexpath testing - Devin'))).toBe(true);
+  });
+
+  it('Windsurf-branded titles keep passing (owner-machine regression pin)', () => {
+    expect(focusedWindowIsEditor('windsurf', deps('nexpath - Windsurf'))).toBe(true);
+  });
+
+  it('live appName leads — a future rebrand matches without a code change', () => {
+    expect(focusedWindowIsEditor('windsurf', deps('proj - Cascade IDE', 'Cascade IDE'))).toBe(true);
+  });
+
+  it('unrelated windows still refuse (the RC11 hazard stays guarded)', () => {
+    expect(focusedWindowIsEditor('windsurf', deps('bank statement - Chrome'))).toBe(false);
+  });
+
+  it('cursor host is unaffected by the windsurf needles', () => {
+    expect(focusedWindowIsEditor('cursor', deps('proj - Devin'))).toBe(false);
+    expect(focusedWindowIsEditor('cursor', deps('proj - Cursor'))).toBe(true);
+  });
+
+  it('⭐ the linux submit failure now NAMES its gate via submitLog', () => {
+    const logs: string[] = [];
+    submitKeystroke({
+      platform: 'linux', host: 'windsurf', appName: 'Devin',
+      env: { DISPLAY: ':0' },
+      isPopupFocused: () => false,
+      isEditorFocused: () => false, focusEditor: () => {},
+      submitLog: (m) => logs.push(m),
+    });
+    expect(logs.join(' ')).toContain('editor not focused after raise');
+    expect(logs.join(' ')).toContain('appName=Devin');
+  });
+});
+
+/**
+ * ⭐ RC61 — the Devin queue-flush tap: a busy/reconnecting session parks a
+ * delivered submit as "1 queued message" that only a further Enter sends
+ * (the composer's own placeholder says so). One guarded tap, no-op when
+ * nothing queued.
+ */
+describe('⭐ RC61 — scheduleWindsurfQueueFlush', () => {
+  it('⭐ fires the submit fn exactly once after the delay, through the caller\'s guards', () => {
+    let fired = 0; const logs: string[] = [];
+    let scheduled: (() => void) | null = null; let delay = 0;
+    scheduleWindsurfQueueFlush(
+      () => { fired += 1; return true; },
+      (l) => logs.push(l),
+      2_500,
+      (fn, ms) => { scheduled = fn as () => void; delay = ms; return 0; },
+    );
+    expect(fired).toBe(0);          // nothing before the delay
+    expect(delay).toBe(2_500);
+    scheduled!();
+    expect(fired).toBe(1);
+    expect(logs.join(' ')).toContain('submit-queue-flush: tapped');
+  });
+
+  it('guards refusing ⇒ logged as skipped, never retried', () => {
+    const logs: string[] = [];
+    let scheduled: (() => void) | null = null;
+    scheduleWindsurfQueueFlush(() => false, (l) => logs.push(l), 1, (fn) => { scheduled = fn as () => void; return 0; });
+    scheduled!();
+    expect(logs.join(' ')).toContain('skipped (guards refused)');
+  });
+
+  it('a throwing submit fn is swallowed (the flush is best-effort)', () => {
+    const logs: string[] = [];
+    let scheduled: (() => void) | null = null;
+    scheduleWindsurfQueueFlush(() => { throw new Error('boom'); }, (l) => logs.push(l), 1, (fn) => { scheduled = fn as () => void; return 0; });
+    expect(() => scheduled!()).not.toThrow();
+    expect(logs.join(' ')).toContain('threw (ignored)');
   });
 });

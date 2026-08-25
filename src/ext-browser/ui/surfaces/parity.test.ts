@@ -12,7 +12,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { renderSurface } from './surface-view.js';
-import { PE_FIXTURE } from './fixtures/pe.js';
+import { PE_FIXTURE, EDIT_KEYS_HINT } from './fixtures/pe.js';
 import { MPS_FIRST_FIXTURE, MPS_CONTINUATION_FIXTURE } from './fixtures/mps.js';
 import { PEF_FIXTURE } from './fixtures/pef.js';
 import type { SurfaceModel } from './surface-model.js';
@@ -68,17 +68,31 @@ function cliLines(frame: string): string[] {
 }
 
 /**
- * Our frame, with the refinement rows removed before comparing.
+ * Our frame, made comparable to the CLI's. TWO reconciliations, both of them
+ * decisions rather than drift, and both kept in this one place so that every
+ * other line still has to match the CLI exactly.
  *
- * They are part of the surfaces — the browser wires the recompose path, so C-4
- * puts them on screen — but today's CLI renders none of them: its row loop is
- * commented out verbatim at `cli-submit-popup.ts:641-664` (owner, 2026-08-19:
- * do not show dead buttons). That is a decision, not drift, so it is reconciled
- * HERE, in one place, and everything else still has to match line for line.
+ * 1. THE REFINEMENT ROWS ARE STRIPPED. They are part of the surfaces — the
+ *    browser wires the recompose path, so C-4 puts them on screen — but today's
+ *    CLI renders none of them: its row loop is commented out verbatim at
+ *    `cli-submit-popup.ts:641-664` (owner, 2026-08-19: do not show dead
+ *    buttons).
+ *
+ * 2. THE EDIT-KEYS HINT IS NORMALISED. The browser advertises the Alt+Shift
+ *    chords (the advisory panel's Ctrl+T→Alt+Shift+T precedent — a strayed-focus
+ *    Ctrl+J is Chrome's own Downloads shortcut), while the CLI keeps its
+ *    Ctrl/Cmd spelling. Exactly that hint string is normalised and nothing else,
+ *    so any OTHER hint drift still fails this suite.
  */
+const CLI_EDIT_KEYS_HINT =
+  typeof process !== 'undefined' && process.platform === 'darwin'
+    ? 'Cmd+J new line · Cmd+↑/↓ move line'
+    : 'Ctrl+J new line · Ctrl+↑/↓ move line';
+
 function ours(model: SurfaceModel, focusIndex: number): string[] {
   return domLines(renderSurface(document, withoutDirectionalRows(model), { focusIndex }))
-    .map((l) => l.trim());
+    .map((l) => l.trim())
+    .map((l) => l.split(EDIT_KEYS_HINT).join(CLI_EDIT_KEYS_HINT));
 }
 
 // ── CLI models mirroring each fixture ────────────────────────────────────────

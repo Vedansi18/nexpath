@@ -138,6 +138,15 @@ export interface SubmitKeystrokeDeps {
   isEditorFocused?: typeof focusedWindowIsEditor;
   /** One-shot editor raise used when the editor is not focused. */
   focusEditor?: () => void;
+  /**
+   * RC47 (win32): the LIVE `vscode.env.appName` — tried as the FIRST
+   * AppActivate candidate. AppActivate matches exact/prefix/suffix, NOT
+   * substring, so a rebranded title ("Devin Next", …) misses the bare product
+   * names; the app's own reported name is the one string that tracks reality.
+   */
+  appName?: string;
+  /** RC47: diagnostic sink for the win32 submit path (which titles failed, what held the foreground). */
+  submitLog?: (message: string) => void;
 }
 
 
@@ -248,6 +257,9 @@ export function focusedWindowIsEditor(host: 'windsurf' | 'cursor', deps: {
   env?: NodeJS.ProcessEnv;
   hasCommand?: (cmd: string) => boolean;
   runCapture?: (cmd: string, args: string[]) => string | null;
+  /** RC59: the LIVE `vscode.env.appName`, matched first — rebrands ("Devin",
+   *  "Devin - Next", …) title their windows by the live name, not "Windsurf". */
+  appName?: string;
 } = {}): boolean {
   const platform = deps.platform ?? process.platform;
   const env = deps.env ?? process.env;
@@ -260,8 +272,19 @@ export function focusedWindowIsEditor(host: 'windsurf' | 'cursor', deps: {
     const title = runCapture('xdotool', ['getactivewindow', 'getwindowname']);
     if (!title) return false;
     if (NEXPATH_POPUP_TITLE_MARKERS.some((m) => title.includes(m))) return false;
-    const needle = host === 'windsurf' ? 'windsurf' : 'cursor';
-    return title.toLowerCase().includes(needle);
+    // RC59 (Linux/Devin staging tester, 2026-08-24): the single 'windsurf'
+    // needle refused the Enter on every Devin-BRANDED Linux install — the
+    // window title is "… - Devin", no 'windsurf' substring, so this returned
+    // false, the raise (class 'windsurf') also missed, and every submit ended
+    // `submit_failed` in ~60 ms. The exact class RC47 fixed on win32
+    // (AppActivate candidates), never ported to this Linux gate: the one
+    // untested branding cell. Live appName leads; the static brand names
+    // cover machines where it is not threaded.
+    const needles = host === 'windsurf' ? ['windsurf', 'devin'] : ['cursor'];
+    const appNeedle = deps.appName?.trim().toLowerCase();
+    if (appNeedle && !needles.includes(appNeedle)) needles.unshift(appNeedle);
+    const t = title.toLowerCase();
+    return needles.some((n) => t.includes(n));
   } catch {
     return false; // cannot verify ⇒ do not press Enter blind
   }
@@ -280,6 +303,51 @@ export function isDarwinAccessibilityDenial(err: string | null): boolean {
   return /assistive access|not authorized|1002|-25211|accessibility/i.test(err);
 }
 
+/** RC52: win32 keystroke-script spawn ceiling — cold Add-Type measured >8 s; warm ~0.8 s. */
+export const WIN32_KEYSTROKE_TIMEOUT_MS = 20_000;
+
+/**
+ * RC49 — the shared win32 keystroke script: FOREGROUND-FIRST, then AppActivate.
+ *
+ * The Devin tester's RC47 toast proved AppActivate can fail even while the
+ * editor is the foreground window: Windows' foreground lock refuses
+ * SetForegroundWindow from a background process tree (our PowerShell child),
+ * and AppActivate returns false REGARDLESS of the target already being
+ * focused. But when the target IS focused, no activation is needed at all —
+ * SendKeys types into the foreground. So: read the foreground title first;
+ * if it ENDS WITH one of the candidates (editor windows are titled
+ * "<file> - <folder> - Devin" — suffix matching also rejects a browser tab
+ * like "Cursor docs - Chrome", which ends with "Chrome"), send directly.
+ * Only when the editor is NOT foreground do the AppActivate rounds run —
+ * and there the lock permits it more often, because the user has interacted
+ * recently. On final failure, print the foreground title and exit 1.
+ */
+export function buildWin32KeystrokeScript(titles: readonly string[], sendKeys: string): string {
+  const psTitles = titles.map((t) => `'${t.replace(/'/g, "''")}'`).join(',');
+  return (
+    `Add-Type '[DllImport("user32.dll")]public static extern System.IntPtr GetForegroundWindow();[DllImport("user32.dll")]public static extern int GetWindowText(System.IntPtr h,System.Text.StringBuilder s,int n);' -Name U -Namespace W;` +
+    `$w=New-Object -ComObject WScript.Shell;` +
+    `$b=New-Object System.Text.StringBuilder 256;[void][W.U]::GetWindowText([W.U]::GetForegroundWindow(),$b,256);$fg=$b.ToString();` +
+    `$ok=$false;` +
+    // RC60 (Windows/Devin staging tester, 2026-08-24): this Devin build titles
+    // windows "<folder> - Devin - <session title>" — the app name sits MID-title,
+    // so suffix-only matching refused a foreground window that WAS the editor
+    // (FOREGROUND=testing - Devin - set up my food delivery app…; status=1).
+    // Delimiter-safe containment (" - Devin - ") accepts every editor shape
+    // (suffix, prefix-with-delimiter, mid-title) while still rejecting the
+    // browser-tab hazard EndsWith was built for ("Cursor docs - Chrome" has no
+    // delimited " - Cursor - " segment).
+    `foreach($t in @(${psTitles})){if($fg -eq $t -or $fg.EndsWith($t) -or $fg.StartsWith($t + ' - ') -or $fg.Contains(' - ' + $t + ' - ')){$ok=$true;break}};` +
+    `if(-not $ok){` +
+    `foreach($r in 1..2){` +
+    `foreach($t in @(${psTitles})){if($w.AppActivate($t)){$ok=$true;break}};` +
+    `if($ok){break};Start-Sleep -Milliseconds 400};` +
+    `if($ok){Start-Sleep -Milliseconds 120}};` +
+    `if(-not $ok){Write-Output ("FOREGROUND=" + $fg);exit 1};` +
+    `$w.SendKeys("${sendKeys}")`
+  );
+}
+
 export function submitKeystroke(deps: SubmitKeystrokeDeps = {}): boolean {
   const platform = deps.platform ?? process.platform;
   const env = deps.env ?? process.env;
@@ -292,9 +360,15 @@ export function submitKeystroke(deps: SubmitKeystrokeDeps = {}): boolean {
   // button and closed the user's chat.
   if (deps.host) {
     const isEditorFocused = deps.isEditorFocused ?? focusedWindowIsEditor;
-    if (!isEditorFocused(deps.host, { platform, env })) {
+    const focusDeps = { platform, env, appName: deps.appName };
+    if (!isEditorFocused(deps.host, focusDeps)) {
       deps.focusEditor?.();
-      if (!isEditorFocused(deps.host, { platform, env })) return false;
+      if (!isEditorFocused(deps.host, focusDeps)) {
+        // RC59: name the refusing gate — the linux submit_failed used to be
+        // indistinguishable from a missing tool (same one-line outcome).
+        deps.submitLog?.(`[nexpath] submit-linux: editor not focused after raise (host=${deps.host}, appName=${deps.appName ?? 'unset'})`);
+        return false;
+      }
     }
   }
   // CORRECTED 2026-08-10 — these previously defaulted to `() => false`, which made
@@ -345,28 +419,76 @@ export function submitKeystroke(deps: SubmitKeystrokeDeps = {}): boolean {
       // reports `appName="Devin"`, so matching only 'Windsurf' would miss the
       // very machine this fixes. AppActivate matches a title PREFIX or
       // substring, so the bare product name is the right granularity.
-      const titles = deps.host === 'cursor' ? ['Cursor'] : ['Devin', 'Windsurf'];
-      const psTitles = titles.map((t) => `'${t}'`).join(',');
-      return run('powershell', [
-        '-NoProfile', '-Command',
-        // Try each title; stop at the first that activates. Exit 1 (⇒ run()
-        // false ⇒ `submit_failed`) when none did, so the failure is visible in
-        // the log rather than silently reported as dispatched.
-        `$w=New-Object -ComObject WScript.Shell;` +
-        `$ok=$false;` +
-        `foreach($t in @(${psTitles})){if($w.AppActivate($t)){$ok=$true;break}};` +
-        `if(-not $ok){exit 1};` +
-        `Start-Sleep -Milliseconds 120;` +
-        `$w.SendKeys("{ENTER}")`,
-      ]);
+      const hostTitles = deps.host === 'cursor' ? ['Cursor'] : ['Devin', 'Windsurf'];
+      // RC47: the live appName leads (AppActivate + suffix matching are
+      // exact/prefix/suffix — "Devin Next" misses the bare product names).
+      const titles = [...new Set([deps.appName?.trim(), ...hostTitles].filter((t): t is string => !!t))];
+      // RC49: foreground-first — see buildWin32KeystrokeScript.
+      const ps = buildWin32KeystrokeScript(titles, '{ENTER}');
+      if (deps.run) return deps.run('powershell', ['-NoProfile', '-Command', ps]);
+      // RC52 (Windows tester 2026-08-24): the FIRST submit of a session took
+      // 8025 ms — the old 8000 ms timeout killed PowerShell mid Add-Type
+      // (cold C# compile + Defender scan on first run); the second, warm call
+      // took 805 ms and delivered. 20 s covers the cold start; warm calls are
+      // sub-second so the ceiling is never felt.
+      const res = spawnSync('powershell', ['-NoProfile', '-Command', ps], {
+        stdio: ['ignore', 'pipe', 'ignore'], timeout: WIN32_KEYSTROKE_TIMEOUT_MS, encoding: 'utf8',
+      });
+      if (res.status === 0) return true;
+      const fg = (res.stdout ?? '').split('\n').find((l) => l.startsWith('FOREGROUND=')) ?? 'FOREGROUND=<unreadable>';
+      // RC52: name HOW it failed — status null + SIGTERM is the timeout kill,
+      // distinct from the script's own exit 1 (no matching window).
+      deps.submitLog?.(`[nexpath] submit-win32: editor not foreground and AppActivate failed for [${titles.join(', ')}]; ${fg.trim()}; status=${res.status ?? 'null'} signal=${res.signal ?? 'none'}`);
+      return false;
     }
     // Linux (X11, or Wayland with a compatible tool)
-    if (!env.DISPLAY && !env.WAYLAND_DISPLAY) return false;
+    if (!env.DISPLAY && !env.WAYLAND_DISPLAY) {
+      deps.submitLog?.('[nexpath] submit-linux: no DISPLAY/WAYLAND_DISPLAY in env');
+      return false;
+    }
     if (has('xdotool')) return run('xdotool', ['key', '--clearmodifiers', 'Return']);
     if (has('wtype')) return run('wtype', ['-k', 'Return']);
     if (has('ydotool')) return run('ydotool', ['key', '28:1', '28:0']); // KEY_ENTER
+    // RC59: the silent false here looked identical to the focus refusal.
+    deps.submitLog?.('[nexpath] submit-linux: no keystroke tool found (xdotool/wtype/ydotool)');
     return false;
   } catch {
     return false;
   }
+}
+
+/**
+ * RC61 (Windows/Devin staging tester, 2026-08-24): when the agent session is
+ * busy or reconnecting at submit time ("Navigating.. Connecting to server"),
+ * Devin ACCEPTS the submitted replacement but parks it as "1 queued message" —
+ * and this build's queue does not auto-flush: the composer's own placeholder
+ * reads "Enter to send queued message (⏎)". The tester had to press that
+ * Enter by hand.
+ *
+ * This schedules exactly ONE follow-up Enter after a DELIVERED submit: if the
+ * message ran normally the composer is empty and the tap is a no-op (Cascade
+ * ignores Enter on an empty input); if it queued, the tap is the flush the UI
+ * asks for. The tap goes through the SAME `submitKeystroke` guards — the RC10
+ * popup-focus refusal, the RC11/RC59 editor-focus whitelist, the RC49/60
+ * win32 foreground script — and the RC43/46 quiet windows guarantee no
+ * Nexpath popup can be open this soon after a block, so the Enter cannot land
+ * anywhere but the editor's composer. Windsurf/Devin only — Cursor has no
+ * queue affordance and has never needed it.
+ */
+export const WINDSURF_QUEUE_FLUSH_DELAY_MS = 2_500;
+
+export function scheduleWindsurfQueueFlush(
+  submitFn: () => boolean,
+  log: (line: string) => void,
+  delayMs: number = WINDSURF_QUEUE_FLUSH_DELAY_MS,
+  setTimeoutFn: (fn: () => void, ms: number) => unknown = setTimeout,
+): void {
+  setTimeoutFn(() => {
+    try {
+      const ok = submitFn();
+      log(`[nexpath] submit-queue-flush: ${ok ? 'tapped' : 'skipped (guards refused)'} — no-op if nothing was queued`);
+    } catch {
+      log('[nexpath] submit-queue-flush: threw (ignored)');
+    }
+  }, delayMs);
 }

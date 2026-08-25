@@ -92,3 +92,45 @@ describe('raiseAppWindow (generalised — used for Cursor inject)', () => {
     expect(raiseAppWindow('cursor', deps({ platform: 'darwin' as NodeJS.Platform }))).toBe(false);
   });
 });
+
+/** ⭐ RC49 — paste gets the same win32 targeting submit has (§8.2 asymmetry). */
+describe('⭐ RC49 — pasteKeystroke win32 targeting', () => {
+  it('⭐ with win32Titles: uses the foreground-first targeted script', () => {
+    const calls: string[][] = [];
+    pasteKeystroke({ platform: 'win32', win32Titles: ['Devin Next', 'Devin'], run: (_c, a) => { calls.push(a); return true; } });
+    const ps = calls[0]!.join(' ');
+    expect(ps).toContain('GetForegroundWindow');
+    expect(ps).toContain("'Devin Next'");
+    expect(ps).toContain('SendKeys("^v")');
+  });
+  it('without win32Titles: the OLD bare ^v, byte-identical (regression pin)', () => {
+    const calls: string[][] = [];
+    pasteKeystroke({ platform: 'win32', run: (_c, a) => { calls.push(a); return true; } });
+    expect(calls[0]!.join(' ')).toContain('$w=New-Object -ComObject WScript.Shell;$w.SendKeys("^v")');
+    expect(calls[0]!.join(' ')).not.toContain('GetForegroundWindow');
+  });
+});
+
+/** ⭐ RC59 — raiseAppWindow candidate list: rebranded hosts carry their own WM_CLASS. */
+describe('⭐ RC59 — raiseAppWindow candidates', () => {
+  it('tries each candidate until one raises', () => {
+    const tried: string[] = [];
+    const ok = raiseAppWindow(['devin', 'windsurf'], {
+      platform: 'linux', env: { DISPLAY: ':0' },
+      hasCommand: (c) => c === 'wmctrl',
+      run: (_c, args) => { tried.push(args[2]!); return args[2] === 'windsurf'; },
+    });
+    expect(ok).toBe(true);
+    expect(tried).toEqual(['devin', 'windsurf']);
+  });
+
+  it('a single string keeps the old behaviour byte-identical', () => {
+    const tried: string[] = [];
+    raiseAppWindow('windsurf', {
+      platform: 'linux', env: { DISPLAY: ':0' },
+      hasCommand: (c) => c === 'wmctrl',
+      run: (_c, args) => { tried.push(args[2]!); return true; },
+    });
+    expect(tried).toEqual(['windsurf']);
+  });
+});

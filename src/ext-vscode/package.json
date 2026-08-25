@@ -1,15 +1,15 @@
 {
   "name": "nexpath-vscode",
   "displayName": "Nexpath",
-  "description": "AI coding assistant for Cursor and Windsurf (Devin) — a behaviour-guidance layer that surfaces decision sessions between your prompts. Fully supported and end-to-end tested on both.",
-  "version": "0.1.32",
+  "description": "Strengthen your prompts and catch skipped checks before shipping. NexPath holds your prompt at submit, offers a sharper version with your intent preserved, and sends the one you choose — on Cursor and Windsurf (Devin).",
+  "version": "0.1.33",
   "publisher": "nexpath",
   "license": "Apache-2.0",
   "private": true,
   "type": "module",
   "engines": {
     "vscode": "^1.80.0",
-    "node": ">=18"
+    "node": ">=20.19"
   },
   "categories": [
     "AI",
@@ -37,7 +37,12 @@
     "vibe-coder",
     "coding-agent",
     "ai-workflow",
-    "nexpath"
+    "nexpath",
+    "prompt-engineering",
+    "prompt-enhancement",
+    "ai-code-quality",
+    "code-review-automation",
+    "prompt-strengthening"
   ],
   "homepage": "https://github.com/hi0001234d/nexpath",
   "repository": {
@@ -108,8 +113,13 @@
             "id": "nexpath.setup",
             "title": "Set up the Nexpath CLI",
             "description": "Install Nexpath and register it for your AI coding agents (Claude Code, Cursor, Windsurf). A terminal opens where you answer a couple of prompts — your OpenAI API key and telemetry — just like the manual install.\n[Set up Nexpath](command:nexpath.runSetup)",
-            "media": { "image": "media/icon.png", "altText": "Nexpath" },
-            "completionEvents": ["onCommand:nexpath.runSetup"]
+            "media": {
+              "image": "media/icon.png",
+              "altText": "Nexpath"
+            },
+            "completionEvents": [
+              "onCommand:nexpath.runSetup"
+            ]
           }
         ]
       }
@@ -134,7 +144,16 @@
     "comment": "better-sqlite3 native binding ABIs bundled in the .vsix. `electron`/`electronAbi` is the PRIMARY (build/Release) for back-compat + the lock test. `electronVersions` is the SCALABLE set: the packager builds a binary per version into prebuilds/<NODE_MODULE_VERSION>/ and the watcher loads the one matching the host's process.versions.modules — so it works on ANY Cursor/VS Code Electron in range. Add a version here when Cursor/VS Code ships a new Electron (verify the ABI with node-abi.getAbi('<electron>','electron')).",
     "electron": "40.10.3",
     "electronAbi": 143,
-    "electronVersions": ["34.0.0", "35.0.0", "36.0.0", "37.0.0", "38.0.0", "39.0.0", "40.10.3", "41.0.0"]
+    "electronVersions": [
+      "34.0.0",
+      "35.0.0",
+      "36.0.0",
+      "37.0.0",
+      "38.0.0",
+      "39.0.0",
+      "40.10.3",
+      "41.0.0"
+    ]
   },
   "dependencies": {
     "better-sqlite3": "^12"

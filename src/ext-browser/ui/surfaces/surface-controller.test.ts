@@ -2,7 +2,7 @@
 //
 // D6 — the interaction layer, driven with real KeyboardEvents.
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach , vi } from 'vitest';
 import {
   createSurfaceController,
   mergeDetailsIntoBody,
@@ -11,6 +11,7 @@ import {
   type SurfaceController,
   type SurfaceEvent,
 } from './surface-controller.js';
+import { EDIT_KEYS_HINT } from './fixtures/pe.js';
 import { PE_FIXTURE } from './fixtures/pe.js';
 import { MPS_FIRST_FIXTURE, MPS_CONTINUATION_FIXTURE, MPS_CANCEL_LABEL } from './fixtures/mps.js';
 import { PEF_FIXTURE } from './fixtures/pef.js';
@@ -673,5 +674,82 @@ describe('lifecycle', () => {
     expect(host.querySelector('.np-surface-root')).toBeNull();
     expect(() => key(document.body, 'ArrowDown')).not.toThrow();
     expect(events).toEqual([]);
+  });
+});
+
+describe('Alt+Shift chords — the advertised no-conflict family (2026-08-25 remap)', () => {
+  // The advisory panel's Ctrl+T→Alt+Shift+T precedent applied to the editor
+  // chords: with strayed focus Ctrl+J is Chrome's Downloads, so the HINT now
+  // names Alt+Shift, which no browser or OS claims. e.code drives the match —
+  // on macOS Alt+Shift+J's e.key is a special character.
+  it('Alt+Shift+J inserts the newline at the caret', () => {
+    mount();
+    const field = bodyField();
+    field.value = 'ab';
+    field.setSelectionRange(1, 1);
+
+    key(field, 'J', { code: 'KeyJ', altKey: true, shiftKey: true });
+
+    expect(field.value).toBe('a\nb');
+    expect(field.selectionStart).toBe(2);
+  });
+
+  it('Alt+Shift+↑/↓ moves the caret by line', () => {
+    mount();
+    const field = bodyField();
+    field.value = 'one\ntwo';
+    field.setSelectionRange(6, 6); // in "two"
+
+    key(field, 'ArrowUp', { code: 'ArrowUp', altKey: true, shiftKey: true });
+    expect(field.selectionStart).toBeLessThanOrEqual(3); // now in "one"
+
+    key(field, 'ArrowDown', { code: 'ArrowDown', altKey: true, shiftKey: true });
+    expect(field.selectionStart).toBeGreaterThanOrEqual(4); // back in "two"
+  });
+
+  it('Alt WITHOUT Shift (and Ctrl+Shift) stay native — never consumed', () => {
+    mount();
+    const field = bodyField();
+    field.value = 'x';
+    field.setSelectionRange(1, 1);
+
+    key(field, 'j', { code: 'KeyJ', altKey: true });                    // AltGr class
+    key(field, 'J', { code: 'KeyJ', ctrlKey: true, shiftKey: true });   // DevTools console
+    expect(field.value).toBe('x'); // no newline from either
+  });
+
+  it('the shipped hint advertises the Alt+Shift family, not Ctrl+J', () => {
+    expect(EDIT_KEYS_HINT).toMatch(/(Alt|Option)\+Shift\+J/);
+    expect(EDIT_KEYS_HINT).not.toContain('Ctrl+J');
+  });
+});
+
+describe('focus-steal guard (live 2026-08-25: agent pages grab focus after show)', () => {
+  it('a steal that lands focus on document.body within the window is re-taken to the focused field', async () => {
+    mount();
+    const field = bodyField();
+    expect(document.activeElement === field || field.getRootNode().activeElement === field
+      || document.activeElement === document.body).toBe(true);
+    field.focus();
+    // Page-script steal signature: blur → focus rests on body.
+    field.blur();
+    expect(document.activeElement).toBe(document.body);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(document.activeElement).not.toBe(document.body); // re-taken
+  });
+
+  it('a steal AFTER the window expires is respected (the non-modal rule survives)', async () => {
+    vi.useFakeTimers();
+    try {
+      mount();
+      const field = bodyField();
+      field.focus();
+      vi.advanceTimersByTime(2_000); // past FOCUS_STEAL_WINDOW_MS with no render
+      field.blur();
+      await vi.advanceTimersByTimeAsync(50);
+      expect(document.activeElement).toBe(document.body); // left alone
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

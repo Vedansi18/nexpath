@@ -36,9 +36,10 @@
  * persist failure — resolves 'allow': the original prompt is released.
  */
 import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join, resolve, posix as posixPath, win32 as win32Path } from 'node:path';
+import { isWindowsBatchShim } from '../../utils/batch-shim.js';
 import { writeSubmitDecision, appendReplacementEcho, latestReplacementEchoAt } from './submit-decision-store.js';
 import { log } from '../../logger.js';
 // CONSUME-ONLY store calls (bhavnesh75-owned exports), used exactly as stop.ts
@@ -122,6 +123,46 @@ export function enrichSpawnEnvFromSessionSnapshot(
   }
 }
 
+/**
+ * RC45 (Windows-Cursor investigation handover, 2026-08-22): make sure the env
+ * handed to the `stop` child can resolve a bare `node`.
+ *
+ * Layer C's popup hosts spawn their windows with a BARE `node` on every OS
+ * (`TtySelectFn.ts` — win32 `cmd start … node <script>`, linux
+ * `gnome-terminal -- node <script>`, …). That resolves via the CHILD's PATH —
+ * and Cursor spawns hooks with a sanitized PATH that may not contain node at
+ * all (the exact ENOENT class RC25 fixed for the hook command itself, one
+ * layer shallower). On such a machine the popup console flashes and dies, the
+ * decider fails open, and the user reports "no popup" with a perfectly
+ * registered hook.
+ *
+ * Set-if-missing: when node's own directory is already on PATH this returns
+ * the env UNCHANGED (byte-identical spawn for every machine that works
+ * today). NEW-FLOW spawns only — the old flow's `handle` spawn env is pinned
+ * byte-identical and is deliberately not touched.
+ */
+export function ensureNodeDirOnPath(
+  env: NodeJS.ProcessEnv,
+  deps: { execPath?: string; platform?: NodeJS.Platform } = {},
+): NodeJS.ProcessEnv {
+  try {
+    const platform = deps.platform ?? process.platform;
+    // Path flavour must follow the TARGET platform, not the build host — posix
+    // dirname cannot parse a backslashed win32 exec path (and vice versa).
+    const dir = (platform === 'win32' ? win32Path : posixPath).dirname(deps.execPath ?? process.execPath);
+    if (!dir || dir === '.') return env;
+    // Windows env keys are case-insensitive; mutate the key that actually
+    // exists ("Path" usually) rather than introducing a duplicate "PATH".
+    const key = Object.keys(env).find((k) => k.toUpperCase() === 'PATH') ?? 'PATH';
+    const sep = platform === 'win32' ? ';' : ':';
+    const cur = env[key] ?? '';
+    if (cur.split(sep).some((p) => p === dir)) return env;
+    return { ...env, [key]: cur.length > 0 ? `${cur}${sep}${dir}` : dir };
+  } catch {
+    return env; // fail-open: today's env exactly
+  }
+}
+
 /** What `stop` prints on a selection — Layer C's Claude-Code block contract. */
 export interface StopBlockLine {
   decision: 'block';
@@ -156,7 +197,11 @@ export function parseStopBlockOutput(stdout: string): StopBlockLine | null {
  */
 function nexpathCmd(binaryPath?: string): { cmd: string; prefix: string[] } {
   if (binaryPath) return { cmd: binaryPath, prefix: [] };
-  if (process.env.NEXPATH_BIN) return { cmd: process.env.NEXPATH_BIN, prefix: [] };
+  // RC57: a .cmd/.bat NEXPATH_BIN cannot be spawned raw (Node EINVAL — see
+  // utils/batch-shim.ts); the self-reinvocation below IS the CLI it wraps.
+  if (process.env.NEXPATH_BIN && !isWindowsBatchShim(process.env.NEXPATH_BIN)) {
+    return { cmd: process.env.NEXPATH_BIN, prefix: [] };
+  }
   return { cmd: process.execPath, prefix: [resolve(process.argv[1])] };
 }
 
@@ -180,6 +225,8 @@ export interface StopDrivenDeciderPorts {
   /** RC10 sweep seams — injected for tests; default to the real store. */
   openStoreFn?: (db?: string) => Promise<unknown>;
   closeStoreFn?: (store: unknown) => Promise<void> | void;
+  /** RC51 seam: the writability probe (defaults to real mkdirSync). */
+  mkdirFn?: typeof mkdirSync;
 }
 
 /**
@@ -202,6 +249,22 @@ export function buildStopDrivenPromptSubmitDecider(
     // A blank prompt is nothing to refine — release it without any popup.
     if ((promptText ?? '').trim() === '') return 'allow';
 
+    // RC51 (Mac/Devin 2026-08-24): with NO folder open the hook's root
+    // resolves to "/" — the decision file would be /.nexpath/… (EACCES on
+    // Linux, guaranteed-impossible on macOS's sealed root volume). The old
+    // behaviour showed the FULL popup, took the user's selection, then
+    // silently failed to persist and released the original prompt — a popup
+    // whose choice can never be delivered ("popup showed, nothing happened").
+    // Probe the exact directory the persist would create; unwritable ⇒ allow
+    // immediately, loudly, with no undeliverable popup. Any writable project
+    // root passes untouched (the mkdir it performs is the persist's own).
+    try {
+      (ports.mkdirFn ?? mkdirSync)(join(projectRoot, '.nexpath'), { recursive: true });
+    } catch {
+      logEvent('warn', 'submit_flow_root_unwritable', { root: projectRoot });
+      return 'allow';
+    }
+
     let child: ChildProcess | null = null;
     let stdout = '';
     try {
@@ -215,7 +278,7 @@ export function buildStopDrivenPromptSubmitDecider(
         // stripped (see enrichSpawnEnvFromSessionSnapshot) — the popup cannot
         // render without them, and Windsurf's hook spawns arrive without a
         // session. Set-if-absent only; Cursor and the CLI path are no-ops.
-        env: enrichSpawnEnvFromSessionSnapshot(process.env),
+        env: ensureNodeDirOnPath(enrichSpawnEnvFromSessionSnapshot(process.env)),
       };
       child = spawnFn(cmd, [...prefix, 'stop'], spawnOpts);
       ports.onChild?.(child);
@@ -490,7 +553,7 @@ export async function runSequenceContinuationStop(
       stdio: ['pipe', 'pipe', 'ignore'],
       // Same enrichment as the submit decider — the continuation popup needs
       // the GUI session the host may have stripped from the hook env (RC35).
-      env: enrichSpawnEnvFromSessionSnapshot(process.env),
+      env: ensureNodeDirOnPath(enrichSpawnEnvFromSessionSnapshot(process.env)),
     });
     child.stdout?.setEncoding('utf8');
     child.stdout?.on('data', (chunk: string) => { stdout += chunk; });

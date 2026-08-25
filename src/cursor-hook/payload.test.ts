@@ -10,6 +10,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseCursorHookPayload, describeCursorPayloadSafely } from './payload.js';
+import { parseAutoHookPayload } from '../cli/commands/auto.js';
 
 const REAL = JSON.stringify({
   prompt: '  what is 2 + 2.  ',
@@ -115,5 +116,86 @@ describe('never throws — a hook must not break the host', () => {
 
   it('a blank prompt is undefined, not an empty string', () => {
     expect(parseCursorHookPayload(JSON.stringify({ prompt: '   ' })).promptText).toBe('');
+  });
+});
+
+/**
+ * ⭐ RC48 — the live Windows payload, BOM-prefixed (Bhavnesh's byte-exact
+ * reproduction: BOM + compact + CRLF matched the live raw_len/prompt_len/
+ * has_project_root signature on all three fields). The fixture below is the
+ * REAL captured Cursor 3.17.8 beforeSubmitPrompt INPUT from the tester's own
+ * Cursor hooks log (email swapped) — no more hand-written-only test payloads.
+ */
+describe('⭐ RC48 — BOM-prefixed Windows payloads parse', () => {
+  const REAL_CAPTURED_PAYLOAD = JSON.stringify({
+    conversation_id: '88c70b42-1616-4881-90d9-9443ff0e66f5',
+    generation_id: 'b24b1943-b9e4-4417-9fe0-c091ae51da1d',
+    model: 'cursor-grok-4.6-medium',
+    model_id: 'grok-4.6',
+    model_params: [{ id: 'effort', value: 'medium' }, { id: 'fast', value: 'false' }],
+    composer_mode: 'agent',
+    prompt: 'make me a website where i can create invoices and send them to clients and track if they paid',
+    attachments: [],
+    session_id: '88c70b42-1616-4881-90d9-9443ff0e66f5',
+    hook_event_name: 'beforeSubmitPrompt',
+    cursor_version: '3.17.8',
+    workspace_roots: ['/c:/Users/Admin/OneDrive/Desktop/vedansi_testing'],
+    user_email: 'tester@example.com',
+    transcript_path: null,
+  });
+
+  it('⭐ the real captured payload parses clean', () => {
+    const p = parseCursorHookPayload(REAL_CAPTURED_PAYLOAD);
+    expect(p.promptText).toContain('create invoices');
+    // RC55: the URI-style leading slash is stripped at parse — this is the
+    // WRITABLE form every downstream path consumer needs on Windows.
+    expect(p.projectRoot).toBe('c:/Users/Admin/OneDrive/Desktop/vedansi_testing');
+  });
+
+  it('⭐ BOM + compact + CRLF — the exact live failure shape — now parses identically', () => {
+    const p = parseCursorHookPayload('\uFEFF' + REAL_CAPTURED_PAYLOAD + '\r\n');
+    expect(p.promptText).toContain('create invoices');
+    // RC55: the URI-style leading slash is stripped at parse — this is the
+    // WRITABLE form every downstream path consumer needs on Windows.
+    expect(p.projectRoot).toBe('c:/Users/Admin/OneDrive/Desktop/vedansi_testing');
+  });
+
+  it('BOM on a windsurf-shaped payload parses too (shared helper, no drift)', () => {
+    const p = parseAutoHookPayload('\uFEFF{"prompt":"hello there","permission_mode":"agent"}');
+    expect(p.promptText).toBe('hello there');
+  });
+});
+
+/**
+ * ⭐ RC55 — Cursor's workspace_roots are URI-style: on Windows "/c:/Users/…".
+ * Node resolves that as "<current drive>\c:\…" (cannot exist) — every write
+ * off the root failed and RC51 refused it on 12/12 live submits (the round
+ * the BOM fix finally unblocked). The leading slash of a drive-letter root is
+ * stripped at the parse boundary so EVERY consumer gets a real path.
+ */
+describe('⭐ RC55 — Windows URI-style workspace roots normalize', () => {
+  const payloadWithRoot = (root: string) => JSON.stringify({
+    prompt: 'a real prompt', hook_event_name: 'beforeSubmitPrompt',
+    workspace_roots: [root], session_id: 's',
+  });
+
+  it('⭐ the exact live failing root loses its leading slash', () => {
+    const p = parseCursorHookPayload(payloadWithRoot('/c:/Users/Admin/OneDrive/Desktop/testing'));
+    expect(p.projectRoot).toBe('c:/Users/Admin/OneDrive/Desktop/testing');
+  });
+
+  it('backslash variant normalizes too', () => {
+    const p = parseCursorHookPayload(payloadWithRoot('/C:\\Users\\Admin\\proj'));
+    expect(p.projectRoot).toBe('C:\\Users\\Admin\\proj');
+  });
+
+  it('⭐ POSIX roots are untouched (Linux/mac regression pin)', () => {
+    expect(parseCursorHookPayload(payloadWithRoot('/home/user/proj')).projectRoot).toBe('/home/user/proj');
+    expect(parseCursorHookPayload(payloadWithRoot('/Users/imac/Desktop/vedansi testing/nexpath')).projectRoot)
+      .toBe('/Users/imac/Desktop/vedansi testing/nexpath');
+  });
+
+  it('a real Windows path without the URI slash is untouched', () => {
+    expect(parseCursorHookPayload(payloadWithRoot('C:\\Users\\Admin\\proj')).projectRoot).toBe('C:\\Users\\Admin\\proj');
   });
 });

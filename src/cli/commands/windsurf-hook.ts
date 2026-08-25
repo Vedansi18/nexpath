@@ -27,16 +27,17 @@ import type { Command } from 'commander';
 import type { ChildProcess } from 'node:child_process';
 import { runWindsurfHook, parsePayload, type RunResult } from '../../windsurf-hook/handler.js';
 import { decideSubmitPrompt, type DeciderOptionSet, type DeciderSelection } from './submit-prompt-decider.js';
-import { runSequenceContinuationStop } from './submit-stop-decider.js';
+import { runSequenceContinuationStop, SEQUENCE_CONTINUATION_QUIET_MS } from './submit-stop-decider.js';
 import {
   createDeterministicSubmitOptionSource,
   type SubmitOptionSource,
 } from './submit-option-source.js';
 import { openStore, closeStore } from '../../store/db.js';
 import { log } from '../../logger.js';
+import { killProcessTree } from '../../utils/kill-tree.js';
 import { getPendingAdvisory, markAdvisoryShown } from '../../store/pending-advisories.js';
 import { isSubmitAdvisoryEnabledForHost } from './submit-flow-config.js';
-import { writeSubmitDecision, readReplacementEchoes,
+import { writeSubmitDecision, readReplacementEchoes, latestReplacementEchoAt,
 } from './submit-decision-store.js';
 import { buildStopDrivenPromptSubmitDecider } from './submit-stop-decider.js';
 import { createHoldBudget, type HoldBudget } from './submit-hold-budget.js';
@@ -696,6 +697,44 @@ export async function runWindsurfHookAction(
         exit(0);
         return;
       }
+      // RC46 (Windows tester, 2026-08-22 — the "second popup killed my
+      // auto-submit" round): the RC43 quiet window lived INSIDE the runner,
+      // which returns {ran:false} BEFORE consulting it when no sequence row
+      // exists — so on a plain PE/advisory turn the 1–4 s post-block echo of
+      // post_cascade_response sailed straight through to the old-flow `handle`
+      // below, spawned a second stop, and its console stole the foreground at
+      // the exact moment the win32 AppActivate+Enter fired (submit_failed,
+      // stranded composer, merged prompts — the tester's log at 14:10:03Z).
+      // Same guard, same anchor, one level up: within the quiet window of OUR
+      // OWN last block, this event is the block's echo — end it. The item's
+      // real response completion arrives later and falls through unchanged.
+      try {
+        const lastBlockAt = latestReplacementEchoAt(contRoot);
+        const nowMs = Date.now();
+        if (lastBlockAt !== null && nowMs - lastBlockAt < SEQUENCE_CONTINUATION_QUIET_MS) {
+          log('info', 'windsurf_hook_post_leg_quiet_deferred', { age_ms: nowMs - lastBlockAt });
+          exit(0);
+          return;
+        }
+      } catch { /* fail-open: exactly the pre-RC46 fall-through */ }
+      // ── RC58 (Windows/Devin 2026-08-24 — "second popup, Enter does nothing") ──
+      // With the switch ON, the old-flow `handle` below MUST NOT run on this
+      // event at all. It spawns the old-flow stop, which can render a PE or
+      // feedback popup at POST-RESPONSE timing — but under the armed submit
+      // surface the extension suppresses the old delivery bridge
+      // (`suppressDsAdvisory` — extension.ts:1068 / chat-pipeline.ts:236), so a
+      // selection made in that popup is UNDELIVERABLE: it renders, the user
+      // picks, nothing injects. The window for it is real and intermittent —
+      // the next prompt's `auto` takes 15–30 s of LLM time, so its pending row
+      // often lands AFTER that submit's decider already looked, sits pending,
+      // and the response-finished event then surfaces it at the old timing.
+      // H9's ruling ("ALL popups — at submit time") already decided this: the
+      // row waits for the NEXT submit, where the decider shows it through the
+      // PROVEN delivery path. Switch OFF ⇒ this whole branch is unreachable
+      // and the old flow is byte-identical.
+      log('info', 'windsurf_hook_post_leg_closed', { reason: 'submit_flow_active' });
+      exit(0);
+      return;
     }
 
     // Name this surface for Layer C's popup "Send to …" label. The spawned
@@ -736,7 +775,7 @@ export async function runWindsurfHookAction(
         decideAfterAuto = false;
         // No orphan may survive the hold (plan acceptance). The child is
         // detached from our lifetime explicitly rather than left running.
-        try { result.child?.kill(); } catch { /* already gone */ }
+        killProcessTree(result.child); // RC62: take the popup terminal too
       }
     } else {
       await waitForChild(result.child);
@@ -763,7 +802,7 @@ export async function runWindsurfHookAction(
       if (decided.timedOut) {
         // Hold exhausted while stop's popup waited — reap it so no popup
         // process outlives the hook (mirrors the auto orphan-kill above).
-        try { stopChildRef.current?.kill(); } catch { /* already gone */ }
+        killProcessTree(stopChildRef.current); // RC62: take the popup terminal too
       }
       // `!decided.timedOut` is likewise redundant today (a timed-out run yields
       // no value, so `value === 'block'` is already false) and equally kept as an

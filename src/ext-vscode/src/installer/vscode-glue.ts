@@ -376,7 +376,19 @@ export async function offerSetupIfNeeded(
   // once per activation — this function is invoked once, after activation.
   if (state.done && !hookRegistered) {
     log('[nexpath] this editor is set up but NOT fully registered (hook entry or submit-flow key missing) — re-running setup automatically');
-    await runSetupFlowOnce(deps, { preferExistingCli: hasGlobalCli }, log);
+    const healed = await runSetupFlowOnce(deps, { preferExistingCli: hasGlobalCli }, log);
+    // RC54 (Windows tester 2026-08-24): the self-heal RE-WROTE the hook
+    // registration MID-SESSION — but Windows Cursor loads hooks only at
+    // startup, so this running instance has zero hooks and every submit
+    // silently gets no popup until a full restart. The tester prompted for
+    // 5 minutes against exactly that state. Say so, once, on the one
+    // platform+host where it is measured. "Reload Window" is NOT enough —
+    // the hooks service lives in the main process.
+    if (healed === 'done' && process.platform === 'win32' && process.env.NEXPATH_AGENT === 'cursor') {
+      void vscode.window.showWarningMessage(
+        'Nexpath re-registered its Cursor hooks. Fully QUIT Cursor (all windows) and reopen it — Cursor loads hooks only at startup, so popups cannot appear until then.',
+      );
+    }
     return;
   }
 

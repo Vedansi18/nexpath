@@ -25,8 +25,17 @@
  * Fully dependency-injected; the real spawns are `spawnSync` (no shell).
  */
 import { spawnSync } from 'node:child_process';
+import { buildWin32KeystrokeScript, WIN32_KEYSTROKE_TIMEOUT_MS } from './submit-clipboard-delivery.js';
 
 export interface AutoPasteDeps {
+  /**
+   * RC49 (win32): editor window-title candidates (live appName first). When
+   * set, the paste uses the foreground-first targeted script instead of a
+   * blind global ^v (the RC28 class — paste landing in whatever window is
+   * foreground — was fixed for submit but never for paste). Absent ⇒ the old
+   * bare SendKeys, byte-identical for every existing caller.
+   */
+  win32Titles?: readonly string[];
   platform?: NodeJS.Platform;
   env?: NodeJS.ProcessEnv;
   /** True if `cmd` is on PATH (test seam). */
@@ -55,15 +64,18 @@ function defaultRun(cmd: string, args: string[]): boolean {
  * (Linux/X11). No-op (returns false) elsewhere or when no tool is present.
  * `appClass` is matched against the X11 window class (e.g. 'windsurf', 'cursor').
  */
-export function raiseAppWindow(appClass: string, deps: AutoPasteDeps = {}): boolean {
+export function raiseAppWindow(appClass: string | readonly string[], deps: AutoPasteDeps = {}): boolean {
   const platform = deps.platform ?? process.platform;
   const env = deps.env ?? process.env;
   if (platform !== 'linux') return false;
   if (!env.DISPLAY && !env.WAYLAND_DISPLAY) return false;
   const has = deps.hasCommand ?? defaultHasCommand;
   const run = deps.run ?? defaultRun;
-  if (has('wmctrl')) return run('wmctrl', ['-x', '-a', appClass]);
-  if (has('xdotool')) return run('xdotool', ['search', '--class', appClass, 'windowactivate', '--sync']);
+  // RC59: rebranded hosts (Devin) carry their own WM_CLASS — try every
+  // candidate until one raises. A single string keeps the old behaviour.
+  const candidates = typeof appClass === 'string' ? [appClass] : appClass;
+  if (has('wmctrl')) return candidates.some((c) => run('wmctrl', ['-x', '-a', c]));
+  if (has('xdotool')) return candidates.some((c) => run('xdotool', ['search', '--class', c, 'windowactivate', '--sync']));
   return false;
 }
 
@@ -90,6 +102,22 @@ export function pasteKeystroke(deps: AutoPasteDeps = {}): boolean {
     ]);
   }
   if (platform === 'win32') {
+    if (deps.win32Titles && deps.win32Titles.length > 0) {
+      // RC49: same foreground-first targeting the submit keystroke uses.
+      // RC52: the targeted script's Add-Type can take >8 s on a COLD first run
+      // (measured on the Windows tester); defaultRun's 3 s ceiling would kill
+      // every cold paste. Injected `run` (tests) keeps the plain seam; the
+      // production path spawns with the shared 20 s ceiling.
+      const script = buildWin32KeystrokeScript(deps.win32Titles, '^v');
+      if (deps.run) return deps.run('powershell', ['-NoProfile', '-Command', script]);
+      try {
+        return spawnSync('powershell', ['-NoProfile', '-Command', script], {
+          stdio: 'ignore', timeout: WIN32_KEYSTROKE_TIMEOUT_MS,
+        }).status === 0;
+      } catch {
+        return false;
+      }
+    }
     return run('powershell', [
       '-NoProfile', '-Command',
       '$w=New-Object -ComObject WScript.Shell;$w.SendKeys("^v")',

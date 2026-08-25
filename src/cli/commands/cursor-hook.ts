@@ -32,8 +32,10 @@ import { buildStopDrivenPromptSubmitDecider } from './submit-stop-decider.js';
 import { spawnAuto } from '../../windsurf-hook/spawn.js';
 import { isSubmitAdvisoryEnabledForHost } from './submit-flow-config.js';
 import { runSequenceContinuationStop } from './submit-stop-decider.js';
+import { checkAndRecordCursorInvocation } from '../../cursor-hook/invocation-guard.js';
 import { bringPopupToFront } from '../../windsurf-hook/foreground.js';
 import { log } from '../../logger.js';
+import { killProcessTree } from '../../utils/kill-tree.js';
 import { readFileSync } from 'node:fs';
 
 /**
@@ -173,6 +175,8 @@ export interface CursorHookActionDeps {
   readStdin?: () => Promise<string>;
   /** RC41 seam: injected in tests; defaults to the real continuation runner. */
   runSequenceContinuation?: (projectRoot: string, host: 'windsurf' | 'cursor') => Promise<{ ran: boolean; blocked?: boolean; deferred?: boolean }>;
+  /** RC50 seam: duplicate-invocation check (true ⇒ answer continue immediately). */
+  checkDuplicateInvocation?: typeof checkAndRecordCursorInvocation;
   /** Decides whether to block. Defaults to "never" so H5 alone is inert. */
   decide?: (payload: CursorHookPayload) => Promise<'allow' | 'block'>;
   /** Overrides the block card text; defaults to CURSOR_BLOCK_USER_MESSAGE. */
@@ -330,6 +334,21 @@ export async function runCursorHookAction(
       has_project_root: typeof payload?.projectRoot === 'string' && payload.projectRoot.length > 0,
     });
 
+    // RC50: duplicate registrations (project + identical user + a stale
+    // claude-settings entry — three on the tester's machine) each invoke this
+    // command for the SAME submit. Only the FIRST runs auto + the decider;
+    // later ones answer continue immediately, so a working delivery can never
+    // open one popup per registration. Keyed on Cursor's own generation_id;
+    // absent id ⇒ no guard (fail-open).
+    if ((deps.checkDuplicateInvocation ?? checkAndRecordCursorInvocation)(
+      payload?.projectRoot ?? process.cwd(), event, payload?.generationId,
+    )) {
+      logEvent('info', 'cursor_hook_duplicate_invocation', { event });
+      write(JSON.stringify(CURSOR_CONTINUE));
+      exit(0);
+      return;
+    }
+
     let decision: 'allow' | 'block' = 'allow';
     // Gated exactly like Windsurf's: with the switch off the decider is never
     // consulted, so the path is unreachable and behaviour is unchanged.
@@ -408,7 +427,7 @@ export async function runCursorHookAction(
         if (waited.timedOut) {
           // Hold exhausted before auto finished: do NOT decide (the signal never
           // landed) and never leave an orphan (R2 — Cursor won't reap it).
-          try { child?.kill(); } catch { /* already gone */ }
+          killProcessTree(child); // RC62: take the popup terminal too
         }
         logEvent('info', 'cursor_hook_auto', { spawned: child != null, timed_out: waited.timedOut === true });
       } else {
@@ -427,7 +446,7 @@ export async function runCursorHookAction(
         // Hold exhausted while the popup waited: fail open AND reap the stop
         // child — Cursor never reaps timed-out hooks (R2), and stop's popups
         // wait on the user with no bound of their own.
-        try { stopChildRef.current?.kill(); } catch { /* already gone */ }
+        killProcessTree(stopChildRef.current); // RC62: take the popup terminal too
       }
       if (!decided.timedOut && decided.value === 'block') decision = 'block';
       logEvent('info', 'cursor_hook_decision', {

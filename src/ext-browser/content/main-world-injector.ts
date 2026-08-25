@@ -1,7 +1,8 @@
 import browser from 'webextension-polyfill';
 import { resolveAgentFromHostname, resolveProjectRootFromLocation } from './agents/agent-hosts.js';
-import { isPromptCapturedMsg, isResponseStoppedMsg, isShowAdvisoryMsg } from './ipc.js';
-import type { PromptSubmitMsg, ResponseStopMsg, AdvisoryFooterIntentMsg, PromptInjectedMsg, AdvisoryTerminalMsg } from './ipc.js';
+import { isPromptCapturedMsg, isResponseStoppedMsg, isShowAdvisoryMsg, isShowPeMsg } from './ipc.js';
+import type { PromptSubmitMsg, ResponseStopMsg, AdvisoryFooterIntentMsg, PromptInjectedMsg, AdvisoryTerminalMsg, PeCommandMsg, PeTerminalNoticeMsg, PeKeepaliveMsg } from './ipc.js';
+import { isPePanelCommandV1 } from '../ui/pe-contract.js';
 import type { PanelEvent } from '../../core/ports/ui.port.js';
 
 /**
@@ -162,7 +163,7 @@ function resumePendingCaptureFromStorage(): void {
   }
 }
 
-function sendToServiceWorker(msg: PromptSubmitMsg | ResponseStopMsg | AdvisoryFooterIntentMsg | PromptInjectedMsg | AdvisoryTerminalMsg): void {
+function sendToServiceWorker(msg: PromptSubmitMsg | ResponseStopMsg | AdvisoryFooterIntentMsg | PromptInjectedMsg | AdvisoryTerminalMsg | PeCommandMsg | PeTerminalNoticeMsg | PeKeepaliveMsg): void {
   browser.runtime.sendMessage(msg).catch((firstErr: unknown) => {
     console.warn('[nexpath] sendMessage failed, retrying once:', msg.type, String(firstErr));
     setTimeout(() => {
@@ -185,7 +186,7 @@ function setupListeners(): void {
     // is the only way to inspect the last Stage-2 verdict from the page itself.
     // Strictly whitelisted (never the API key or any other storage content).
     if ((msg as { type?: unknown } | null)?.type === 'nexpath:debug-request') {
-      void browser.storage.local.get(['nexpath_last_stage2_result', 'nexpath_recent_events']).then((res) => {
+      void browser.storage.local.get(['nexpath_last_stage2_result', 'nexpath_recent_events', 'nexpath_last_pe_prepare']).then((res) => {
         window.postMessage(
           {
             type: 'nexpath:debug-state',
@@ -194,6 +195,12 @@ function setupListeners(): void {
               : null,
             recentEvents: typeof res['nexpath_recent_events'] === 'string'
               ? res['nexpath_recent_events']
+              : null,
+            // PB5: the last PE prepare's WHITELISTED summary (disposition/
+            // sendPolicy/eligibility/counters — never request or body text;
+            // see the SW's recordPeDisposition for the exact field set).
+            lastPePrepare: typeof res['nexpath_last_pe_prepare'] === 'string'
+              ? res['nexpath_last_pe_prepare']
               : null,
           },
           window.location.origin,
@@ -282,6 +289,45 @@ function setupListeners(): void {
     sendToServiceWorker(sw);
   });
 
+  // ── PE panel channels (PB4) — same pattern as the advisory set above ─────────
+
+  // One user command from the PE panel → one short-lived runtime message. The
+  // command shape is re-validated here: a compromised page can dispatch window
+  // events, so nothing unvalidated is ever forwarded into the SW's popup loop.
+  window.addEventListener('nexpath:pe-command-out', (ev) => {
+    const detail = (ev as CustomEvent<{ viewSeq?: unknown; command?: unknown }>).detail;
+    if (typeof detail?.viewSeq !== 'number' || !isPePanelCommandV1(detail.command)) return;
+    const projectRoot = resolveProjectRoot();
+    if (projectRoot === null) return;
+    const sw: PeCommandMsg = {
+      type: 'nexpath:pe-command',
+      projectRoot,
+      viewSeq: detail.viewSeq,
+      command: detail.command,
+    };
+    sendToServiceWorker(sw);
+  });
+
+  // One-way PE terminal-outcome record — the popup loop's in-SW await dies with
+  // an MV3 teardown; this reaches whichever SW instance is alive (advisory
+  // parity: see nexpath:advisory-terminal-notice below).
+  window.addEventListener('nexpath:pe-terminal-out', (ev) => {
+    const outcome = (ev as CustomEvent<{ outcome?: unknown }>).detail?.outcome;
+    if (outcome !== 'use_current' && outcome !== 'use_original' && outcome !== 'close') return;
+    const projectRoot = resolveProjectRoot();
+    if (projectRoot === null) return;
+    const sw: PeTerminalNoticeMsg = { type: 'nexpath:pe-terminal-notice', projectRoot, outcome };
+    sendToServiceWorker(sw);
+  });
+
+  // Keepalive heartbeat while the PE panel is open (resets the SW idle timer).
+  window.addEventListener('nexpath:pe-keepalive-out', () => {
+    const projectRoot = resolveProjectRoot();
+    if (projectRoot === null) return;
+    const sw: PeKeepaliveMsg = { type: 'nexpath:pe-keepalive', projectRoot };
+    sendToServiceWorker(sw);
+  });
+
   // One-way terminal-outcome record — survives the SW teardown that kills the
   // showAdvisory round-trip's resolution (see inject.ts reportTerminal).
   window.addEventListener('nexpath:advisory-terminal-notice', (ev) => {
@@ -305,6 +351,29 @@ function setupListeners(): void {
   // to an untyped callback (confirmed via tsconfig.ext-browser.json, 2026-07-02 — see
   // that file's header comment for why this class of error went uncaught all session).
   browser.runtime.onMessage.addListener((msg: unknown): Promise<unknown> => {
+    // show-pe ack (PB4): pe-inject.ts dispatches 'nexpath:pe-view-ack' AFTER the
+    // panel is mounted and rendered. The SW's popup loop awaits this resolution
+    // as its "the panel really exists" signal (first-render bookkeeping: consume
+    // row, mark cooldown), so a page whose PE wiring is absent/stale must FAIL
+    // the send, not silently ack it — hence the reject on timeout. The listener
+    // must be registered BEFORE the re-dispatch below or a same-tick ack races.
+    if (isShowPeMsg(msg)) {
+      const ack = new Promise<unknown>((resolve, reject) => {
+        const timer = setTimeout(() => {
+          window.removeEventListener('nexpath:pe-view-ack', onAck);
+          reject(new Error('pe view ack timeout'));
+        }, 3_000);
+        const onAck = (): void => {
+          clearTimeout(timer);
+          window.removeEventListener('nexpath:pe-view-ack', onAck);
+          resolve({ rendered: true });
+        };
+        window.addEventListener('nexpath:pe-view-ack', onAck);
+      });
+      window.dispatchEvent(new CustomEvent('nexpath:sw-message', { detail: msg }));
+      return ack;
+    }
+
     // Re-dispatch to inject.ts (which handles panel mounting).
     window.dispatchEvent(new CustomEvent('nexpath:sw-message', { detail: msg }));
 
