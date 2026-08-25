@@ -38,6 +38,14 @@
 export interface PromptEnhancementSensitiveActionClearanceV1 {
   readonly verdict?: string;
   readonly reason?: string;
+  /**
+   * The model's 2–5-word noun-phrase name for a PROPOSED action. CAPTURED, not consumed:
+   * by owner ruling (2026-08-25) no naming rung reads it — the sentence's naming ladder is
+   * typed verdict → keyword phrase → generic. It rides the provenance channel so the record
+   * shows what the model would have called the action; any future consumption is a separate
+   * owner decision and must add the sanitation guard before use.
+   */
+  readonly name?: string;
 }
 
 /** A reason counts only when it says something: whitespace is not a benign reading. */

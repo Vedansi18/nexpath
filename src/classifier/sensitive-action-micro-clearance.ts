@@ -56,7 +56,8 @@ export const SENSITIVE_ACTION_MICRO_SYSTEM_PROMPT = [
   'prompt asks for the action to be done. Routine-sounding is NOT the same as not-proposed.',
   'Reply STRICT JSON only:',
   '{"sensitive_action_verdict": "proposed" | "not_proposed",',
-  ' "sensitive_action_reason": "<required with not_proposed: the benign reading of the risky word>"}',
+  ' "sensitive_action_reason": "<required with not_proposed: the benign reading of the risky word>",',
+  ' "sensitive_action_name": "<only with proposed: the proposed action as a 2-5 word noun phrase, e.g. production deployment>"}',
   'A "not_proposed" without a non-empty reason is treated as unanswered.',
   'When unsure, answer "proposed" - NEVER guess "not_proposed".',
 ].join('\n');
@@ -125,10 +126,15 @@ function parseMicroReply(raw: string): PromptEnhancementSensitiveActionClearance
   const reason = typeof p.sensitive_action_reason === 'string' && p.sensitive_action_reason.trim().length > 0
     ? p.sensitive_action_reason
     : undefined;
+  // Soft-parsed like the reason: captured for the provenance record, consumed by nothing
+  // (owner ruling 2026-08-25 — see the clearance type's field doc). Junk shapes are absent.
+  const name = typeof p.sensitive_action_name === 'string' && p.sensitive_action_name.trim().length > 0
+    ? p.sensitive_action_name.trim()
+    : undefined;
   // The reasonless-void rule is enforced again downstream by the shared gate; carrying the
   // parsed shape through keeps this parser's semantics identical to the classifier-reply
   // parser the plumbing was built against.
-  return { verdict, reason };
+  return { verdict, reason, ...(name !== undefined ? { name } : {}) };
 }
 
 /**

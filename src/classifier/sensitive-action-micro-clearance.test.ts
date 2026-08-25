@@ -103,6 +103,9 @@ describe('the parse discipline — exact literals, reasonless carried for the do
     ['valid positive', '{"sensitive_action_verdict":"proposed"}', { verdict: 'proposed', reason: undefined }],
     ['fenced json', '```json\n{"sensitive_action_verdict":"proposed"}\n```', { verdict: 'proposed', reason: undefined }],
     ['reasonless negative (void downstream, carried as parsed)', '{"sensitive_action_verdict":"not_proposed","sensitive_action_reason":"  "}', { verdict: 'not_proposed', reason: undefined }],
+    ['proposed with a name (captured, consumed by nothing)', '{"sensitive_action_verdict":"proposed","sensitive_action_name":"production deployment"}', { verdict: 'proposed', reason: undefined, name: 'production deployment' }],
+    ['junk name shapes read as absent', '{"sensitive_action_verdict":"proposed","sensitive_action_name":"   "}', { verdict: 'proposed', reason: undefined }],
+    ['a name never rescues a reasonless negative (still void downstream)', '{"sensitive_action_verdict":"not_proposed","sensitive_action_name":"styling tweak"}', { verdict: 'not_proposed', reason: undefined, name: 'styling tweak' }],
     ['malformed verdict', '{"sensitive_action_verdict":"definitely_fine","sensitive_action_reason":"x"}', undefined],
     ['not json', 'the prompt seems fine to me', undefined],
     ['empty reply', '', undefined],
@@ -158,5 +161,11 @@ describe('the shipped prompt is pinned — the acceptance-measured text is the d
     expect(SENSITIVE_ACTION_MICRO_SYSTEM_PROMPT).toContain('Routine-sounding is NOT the same as not-proposed');
     expect(SENSITIVE_ACTION_MICRO_SYSTEM_PROMPT).toContain('NEVER guess "not_proposed"');
     expect(SENSITIVE_ACTION_MICRO_SYSTEM_PROMPT).toContain('treated as unanswered');
+  });
+
+  it('asks for the action name only alongside a proposed verdict, as a bounded noun phrase', () => {
+    expect(SENSITIVE_ACTION_MICRO_SYSTEM_PROMPT).toContain('sensitive_action_name');
+    expect(SENSITIVE_ACTION_MICRO_SYSTEM_PROMPT).toContain('only with proposed');
+    expect(SENSITIVE_ACTION_MICRO_SYSTEM_PROMPT).toContain('2-5 word noun phrase');
   });
 });
