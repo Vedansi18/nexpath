@@ -513,7 +513,7 @@ function e2eScenarios(): Scenario[] {
       },
     },
     {
-      name: 'the title dims when the caret leaves the editable prompt',
+      name: 'the whole block dims when the caret leaves it — title AND body',
       run() {
         // Owner request 2026-08-24. Row selection and "I am typing here" must
         // not look identical, so the label above a field is bright only while
@@ -539,8 +539,10 @@ function e2eScenarios(): Scenario[] {
         field.focus();
         const wasActive = document.activeElement === field;
         const editing = getComputedStyle(label).color;
+        const editingBody = getComputedStyle(field).color;
         field.blur();
         const idle = getComputedStyle(label).color;
+        const idleBody = getComputedStyle(field).color;
         controller.destroy();
 
         if (editing === idle) {
@@ -551,9 +553,18 @@ function e2eScenarios(): Scenario[] {
             + ` activeWasField=${wasActive} blurFired=${blurFired}`
             + ` classAfter=${label.className}`;
         }
-        // Bright while editing, light gray once the caret leaves.
-        return editing === 'rgb(245, 245, 244)' && idle === 'rgb(168, 169, 168)'
-          ? null : `editing=${editing} idle=${idle}`;
+        // The BODY has to come down with its title. A dim heading over bright
+        // text still reads as the active block — that was the second report.
+        if (editingBody === idleBody) {
+          return `the body looked identical editing and idle: ${editingBody}`;
+        }
+        const want = (l: string, b: string): boolean =>
+          l === 'rgb(245, 245, 244)' && b === 'rgb(245, 245, 244)';
+        const dim = (l: string, b: string): boolean =>
+          l === 'rgb(168, 169, 168)' && b === 'rgb(168, 169, 168)';
+        return want(editing, editingBody) && dim(idle, idleBody)
+          ? null
+          : `editing=[${editing} / ${editingBody}] idle=[${idle} / ${idleBody}]`;
       },
     },
     {

@@ -228,6 +228,13 @@ export const CHROME_STYLES = `
      rule above and at equal specificity, so editing wins. */
   .np-field-group:focus-within .np-label { color: #f5f5f4; font-weight: 700; }
   .np-field-group:focus-within .np-bullet { color: #1ca46d; }
+  /* The BODY recedes with its title, not just the heading above it. A dim
+     heading over bright text still reads as the active block, which was the
+     complaint: moving to the next option has to take the whole block down.
+     A deliberate divergence — the CLI leaves content at full brightness — made
+     at owner request 2026-08-25. Parity compares text, not colour, so it holds. */
+  .np-field-group .np-field { color: #a8a9a8; }
+  .np-field-group:focus-within .np-field { color: #f5f5f4; }
   .np-desc { color: #9ba7a7; }                                     /* gray  */
   .np-focused .np-desc { color: #d0d0d0; }                         /* 38;5;252 */
 
