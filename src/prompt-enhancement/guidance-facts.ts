@@ -531,6 +531,57 @@ export function buildPromptEnhancementGuidanceFactsV1(
       continue;
     }
 
+    if (ref.startsWith('history_acceptance:') || ref.startsWith('history_verification:')) {
+      // The two starved sections, fed at last. What finished looks like, and how the change gets
+      // proven, were the highest-volume sections in shipped bodies and neither had ever received a
+      // fact — so both were written from plausibility, which reads as grounding without being it.
+      //
+      // What crosses here is the DEVELOPER'S OWN SENTENCE from a recent prompt, quoted. That is
+      // what makes it worth carrying: the composer cannot see their history, and a sentence they
+      // wrote themselves cannot be a plausible generality. Where they never said, the detector
+      // returns nothing and NO fact is built — an empty fact would make a section look grounded
+      // while saying less than the honest silence it replaces.
+      //
+      // ⛔ The routing map is the one authority for where these land (`add_acceptance_criteria` →
+      // what-done-looks-like, `add_verification` → how-to-verify), so no `targetSectionKind`.
+      const isAcceptance = ref.startsWith('history_acceptance:');
+      const statedResolved = signals.groundingEvidenceByRef?.[ref];
+      // No resolved value means nothing was actually stated — produce nothing rather than a shell.
+      if (!statedResolved || statedResolved.value.trim() === '') continue;
+      facts.push({
+        factId: nextId(isAcceptance ? 'history-acceptance' : 'history-verification'),
+        sourceType: 'prompt_derived_fact',
+        sourceIds: [ref],
+        // Support only, like every prompt-derived lane: material the developer mentioned enriches a
+        // popup that fired for its own reasons; it must never summon one by itself.
+        sourceEligibilityState: 'support_only_not_triggering',
+        guidanceKind: isAcceptance ? 'requirement_source_state' : 'review_verification',
+        suggestedActionKind: isAcceptance ? 'add_acceptance_criteria' : 'add_verification',
+        targetFamily: 'family_agnostic',
+        targetSectionKind: '',
+        sourceEvidenceState: 'partial',
+        sourceOriginScope: 'recent_prompt_history',
+        // They SAID it; they did not necessarily do it. Possibility strength is the honest ceiling,
+        // and it is what keeps a quoted wish from being restated as an established practice.
+        claimVerbPolicy: 'must_phrase_as_possibility',
+        factRole: isAcceptance ? 'project_grounding_support' : 'supporting_missing_practice',
+        priority: 'low',
+        renderPolicy: 'render_as_section',
+        riskLevel: 'none',
+        safetyHooks: [],
+        // The value quotes the developer's own prompt text, so it is theirs and stays local.
+        privacyClass: 'local_private',
+        sanitizationState: 'prompt_derived_sanitized',
+        evidence: { key: statedResolved.key, value: statedResolved.value },
+        sourceRuntimePath: statedResolved.runtimePath,
+        sourceAnchorScope: statedResolved.anchorScope,
+        confidenceBand: 'low',
+        recencyBand: 'recent_project',
+        publicCopySafe: false,
+      });
+      continue;
+    }
+
     if (ref.startsWith('history_sensitive_action:')) {
       // 🔒 Owner-ruled (2026-08-20). A sensitive action the developer raised in recent prompts asks
       // the agent to confirm before acting. This is the FIRST producer for

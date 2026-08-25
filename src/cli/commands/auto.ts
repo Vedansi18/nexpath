@@ -83,6 +83,11 @@ import { readParamEvents, type ParamEvent } from '../../telemetry/param-events.j
 import { getProjectEnvFacts } from '../../store/env-facts.js';
 import { cachedPromptDerivedFactsV1, refreshPromptDerivedFactsIfDueV1 } from '../../prompt-enhancement/prompt-derived-facts-refresh.js';
 import {
+  promptHistoryAcceptanceExpectationsV1,
+  promptHistoryVerificationAsksV1,
+  promptHistoryExpectationEvidenceValueV1,
+} from '../../prompt-enhancement/prompt-history-expectation-signals.js';
+import {
   promptHistorySafeguardSentenceV1,
   promptHistorySensitiveActionSignalsV1,
   PROMPT_HISTORY_SIGNAL_WINDOW_V1,
@@ -380,6 +385,38 @@ export function buildPromptEnhancementGroundingRefsV1(store: Store, projectRoot:
       groundingEvidenceByRef[ref] = {
         key: signal.category,
         value: promptHistorySafeguardSentenceV1(),
+        runtimePath: 'local_store',
+        anchorScope: 'current_prompt_scope',
+      };
+    }
+
+    // The same recent prompts, read for what the developer said DONE looks like and how the work
+    // gets PROVEN. Those two sections had never received a fact and were written from plausibility
+    // in every shipped body; what crosses here is the developer's own sentence, quoted, so the
+    // section can say something they actually wrote instead of something that merely sounds right.
+    // Nothing said means nothing produced — the detectors return empty and no ref is pushed.
+    //
+    // ⛔ FREE: the same in-hand prompts, matched as strings. No provider call.
+    for (const [index, expectation] of promptHistoryAcceptanceExpectationsV1(recentPromptTexts).entries()) {
+      const ref = `history_acceptance:${index}`;
+      rightGoodWorkStyleEnvRuntimeRefs.push(ref);
+      groundingTierByRef[ref] = 'uncorroborated';
+      groundingPolarityByRef[ref] = 'present';
+      groundingEvidenceByRef[ref] = {
+        key: 'what you said done looks like',
+        value: promptHistoryExpectationEvidenceValueV1(expectation),
+        runtimePath: 'local_store',
+        anchorScope: 'current_prompt_scope',
+      };
+    }
+    for (const [index, expectation] of promptHistoryVerificationAsksV1(recentPromptTexts).entries()) {
+      const ref = `history_verification:${index}`;
+      rightGoodWorkStyleEnvRuntimeRefs.push(ref);
+      groundingTierByRef[ref] = 'uncorroborated';
+      groundingPolarityByRef[ref] = 'present';
+      groundingEvidenceByRef[ref] = {
+        key: 'how you said it gets checked',
+        value: promptHistoryExpectationEvidenceValueV1(expectation),
         runtimePath: 'local_store',
         anchorScope: 'current_prompt_scope',
       };
