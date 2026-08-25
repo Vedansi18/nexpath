@@ -369,6 +369,7 @@ export interface PromptEnhancementCurrentSourceCostCallInventoryRowV1 {
     | 'current_profile_classifier'
     | 'current_stream_b_presence_classifier'
     | 'current_stage_classifier'
+    | 'current_sensitive_action_micro_clearance'
     | 'current_pinch_label_generator'
     | 'current_decision_session_option_generator'
     | 'current_content_template_grounding'
@@ -755,6 +756,34 @@ const CURRENT_SOURCE_BASELINE_ROWS: readonly PromptEnhancementCurrentSourceCostC
     userVisibleTrigger: 'prompt_submit',
     hiddenRuntimeTrigger: 'real prompt-submit classification pipeline after profile and Stream-B checks',
     skipCondition: 'generated-origin prompts are excluded from normal submit volume before current-source lifecycle accounting',
+    calls: ['blocked_pending_owner', 'blocked_pending_owner', 'blocked_pending_owner', 'blocked_pending_owner'],
+    costStates: [
+      'accepted_in_private_cost_visibility_packet_not_public_constant',
+      'accepted_in_private_cost_visibility_packet_not_public_constant',
+      'accepted_in_private_cost_visibility_packet_not_public_constant',
+    ],
+    worksheetStatus: 'blocked_pending_owner',
+  }),
+  currentSourceRow({
+    baselineCallId: 'current_sensitive_action_micro_clearance',
+    sourceLayer: 'src/classifier/sensitive-action-micro-clearance.ts',
+    // The sensitive-action clearance's own dedicated call — the precision half of the
+    // confirmation-line design, moved OFF the stage classifier after two failed recall
+    // measurements there (attention dilution) and a 45/45 pass in this focused form.
+    // Owner-approved 2026-08-25 with the measured figures. Deterministically gated: it
+    // fires only when the prompt matches a risk keyword (~17% of prompts in the measured
+    // corpus), runs in PARALLEL inside the stage classifier's own wait (never awaited;
+    // aborted at the join if pending), and every failure mode reads as "no clearance" —
+    // the confirmation line then emits exactly as today. ~250 input + <=120 output tokens
+    // per gated call ≈ $0.02-0.03/month at 2,000 prompts/month.
+    assumedInputTokens: 250,
+    maxOutputTokens: 120,
+    timeoutMs: 8_000,
+    fallbackState: 'null_or_no_action_fallback',
+    requirementState: 'required_current_source_row',
+    userVisibleTrigger: 'prompt_submit',
+    hiddenRuntimeTrigger: 'prompt matches a sensitive-action risk keyword (the deterministic gate)',
+    skipCondition: 'no risk-keyword match, no client/key, or the verdict has not settled by the classifier join (aborted; fail-closed)',
     calls: ['blocked_pending_owner', 'blocked_pending_owner', 'blocked_pending_owner', 'blocked_pending_owner'],
     costStates: [
       'accepted_in_private_cost_visibility_packet_not_public_constant',
@@ -1502,6 +1531,7 @@ const REQUIRED_CURRENT_SOURCE_CALL_IDS: readonly PromptEnhancementCurrentSourceC
   'current_profile_classifier',
   'current_stream_b_presence_classifier',
   'current_stage_classifier',
+  'current_sensitive_action_micro_clearance',
   'current_pinch_label_generator',
   'current_decision_session_option_generator',
   'current_content_template_grounding',

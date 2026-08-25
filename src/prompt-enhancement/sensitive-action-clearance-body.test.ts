@@ -285,10 +285,12 @@ describe('the floors stay armed — a clearance changes the confirmation line, n
 
 describe('the activation is REVERTED — pinned so it cannot silently return without a passing measurement', () => {
   it('the system prompt does NOT request the sensitive-action verdict (the clearance pathway is inert)', () => {
-    // Two live measurement runs failed the absolute recall floor (a risky imperative was
-    // wrongly cleared both times, once against its own verbatim counter-example). The
-    // block stays out; re-activation is an owner decision with a revised design that
-    // passes the gated runner - never a code edit alone.
+    // Two live measurement runs failed the absolute recall floor here (attention dilution
+    // in the multi-task prompt: a risky imperative was cleared against its own verbatim
+    // counter-example). The owner-decided design moved the observation to its own dedicated
+    // micro-call (sensitive-action-micro-clearance.ts, 45/45 on the frozen set) — so the
+    // classifier prompt NEVER carries these fields again BY DESIGN, and this pin guards
+    // that the failed hosting cannot silently return.
     expect(STAGE_CLASSIFIER_SYSTEM_PROMPT).not.toContain('SENSITIVE-ACTION OBSERVATION');
     expect(STAGE_CLASSIFIER_SYSTEM_PROMPT).not.toContain('sensitive_action_verdict');
     expect(STAGE_CLASSIFIER_SYSTEM_PROMPT).not.toContain('sensitive_action_reason');

@@ -5,6 +5,7 @@ import { resolveOpenAIKey, getKeySource } from '../../config/ApiKeyResolver.js';
 import type { Store } from '../../store/db.js';
 import { openStore, closeStore, DEFAULT_DB_PATH } from '../../store/db.js';
 import { classifyStage } from '../../classifier/stage-classifier.js';
+import { startSensitiveActionMicroClearanceV1 } from '../../classifier/sensitive-action-micro-clearance.js';
 import { SessionStateManager } from '../../classifier/SessionStateManager.js';
 import { detectAbsenceFlags, ABSENCE_MIN_PROMPTS } from '../../classifier/AbsenceDetector.js';
 import { buildRuntimeContext } from '../../classifier/runtime-context.js';
@@ -1111,6 +1112,12 @@ export async function runAuto(
 
   // ── 2.9. Stage classifier — one LLM call (after profile + Stream-B, so it calibrates on the
   //        fresh profile); folds the former cascade + cross-confirmation. Its stage feeds processPrompt. ──
+  // The sensitive-action clearance micro-call starts FIRST and is never awaited: it is
+  // deterministically gated (no risky word ⇒ inert), runs during the classifier's own wait
+  // below, and is read synchronously (then aborted if still pending) right after that await —
+  // added wall time is exactly zero and the hook process's lifetime is unchanged. Every
+  // failure mode reads as "no clearance", which keeps today's confirmation behaviour intact.
+  const microClearance = startSensitiveActionMicroClearanceV1(input.promptText, openai);
   const stageResult = await classifyStage(
     {
       promptText:        input.promptText,
@@ -1122,6 +1129,14 @@ export async function runAuto(
     openai,
     { minConfidence: freqConfig.stage2MinConfidence, contextWindow: freqConfig.stage2ContextWindow },
   );
+  microClearance.abort();
+  const settledClearance = microClearance.read();
+  if (settledClearance !== undefined) {
+    // Merged into the SAME stageResult both request-build sites pass to the one threading
+    // block, so the provenance field's producer changes with zero second wiring.
+    stageResult.sensitiveActionVerdict = settledClearance.verdict as 'proposed' | 'not_proposed';
+    stageResult.sensitiveActionReason = settledClearance.reason;
+  }
   const classification = stageResult.classification;
   logger.debug('stage_classified', { stage: classification.stage, confidence: classification.confidence, fire: stageResult.fireRecommendation, degraded: stageResult.degraded });
   writeTelemetry(input.projectRoot, 'prompt_classified', { stage: classification.stage, confidence: classification.confidence }, store);
