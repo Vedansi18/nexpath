@@ -92,6 +92,71 @@ describe('the two existing triggers are untouched — the regression guard', () 
   });
 });
 
+describe('EVERY routing exit takes the posture — decided once, not per path', () => {
+  // Routing leaves through several doors: the deterministic cascade, the classifier-intent
+  // builder, the no-family return, and the LLM route rescue. A trigger placed on one of them is
+  // a trigger the other doors never run — which is exactly how the first build of this phase came
+  // to be inert for the ordinary production case. These rows are one risky question per door.
+  it('the deterministic cascade', () => {
+    expect(routeFor(ASKS_ABOUT_RISK).fallbackMode).toBe('planning_first');
+  });
+
+  it('the classifier-intent builder — the path production usually takes', () => {
+    const route = routeFor(ASKS_ABOUT_RISK, {
+      classifierPrimaryIntent: 'issue_debug.production_incident_or_support',
+      classifierIntentConfidence: 0.9,
+    });
+    expect(route.fallbackMode).toBe('planning_first');
+    expect(route.reasonCodes).toContain('classifier_intent_preferred');
+    expect(route.reasonCodes).toContain(PROMPT_ENHANCEMENT_UNREQUESTED_ACTION_POSTURE_REASON_V1);
+  });
+
+  it('the no-family return — a risky question that matched no family still gets the stance', () => {
+    const route = routeFor('what about the api key?');
+    expect(route.reasonCodes).toContain('no_family_evidence_no_catch_all');
+    expect(route.fallbackMode).toBe('planning_first');
+    expect(route.reasonCodes).toContain(PROMPT_ENHANCEMENT_UNREQUESTED_ACTION_POSTURE_REASON_V1);
+  });
+
+  it('the LLM route rescue', () => {
+    const route = routePromptEnhancement({
+      routeDecisionId: 'posture-route',
+      promptText: 'anything on the production database?',
+      currentStage: 'implementation',
+      prevStage: 'task_breakdown',
+      triggerKind: 'absence',
+      firedKey: 'absence:verification_gap@implementation',
+      effectiveFiredSource: 'classifier_fire_recommendation',
+      selectedQualifyingAbsence: 'verification_gap',
+      absenceGateReason: 'selected_qualifying_absence',
+      classifierState: 'fire_recommended',
+      degradedNoActionState: 'none',
+      generatedOriginState: 'ordinary_user_prompt',
+    } as never, {
+      primaryIntent: 'issue_debug.production_incident_or_support',
+      capabilities: [],
+      ambiguityState: 'ambiguous_surface_prompt',
+      routeConfidence: 'partial',
+      reasonCodes: ['llm_route_rescue'],
+    } as never);
+    expect(route.fallbackMode).toBe('planning_first');
+    expect(route.reasonCodes).toContain(PROMPT_ENHANCEMENT_UNREQUESTED_ACTION_POSTURE_REASON_V1);
+  });
+
+  it('a no-popup route is never given a posture — there is nothing shown to take a stance in', () => {
+    const route = routeFor('how does deploying this to production actually work?', {
+      generatedOriginState: 'pe_generated',
+    });
+    expect(route.noPopup).toBe(true);
+    expect(route.fallbackMode).not.toBe('planning_first');
+  });
+
+  it('the contract decision carries the same mode as the route — one answer, not two', () => {
+    const route = routeFor(ASKS_ABOUT_RISK);
+    expect(route.contractDecision.fallbackMode).toBe(route.fallbackMode);
+  });
+});
+
 describe('the LIVE path — where the classifier names the intent', () => {
   // Production routing returns from the classifier-intent builder whenever the classifier supplied
   // an intent, which is the ordinary case. A trigger that only fires on the deterministic cascade

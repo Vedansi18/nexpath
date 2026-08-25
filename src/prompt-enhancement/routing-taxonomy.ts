@@ -871,7 +871,50 @@ function walkEvidenceLadderV1(
   return { state: 'under_evidenced', rungsWalked };
 }
 
+/**
+ * Apply the planning posture to a finished route, at the ONE point every route passes through.
+ *
+ * Routing has several exits — the deterministic cascade, the classifier-intent builder, the
+ * no-family return, the LLM route rescue — and a trigger placed on one of them is a trigger the
+ * other exits never run. That is not hypothetical: the first build of this phase sat on the
+ * cascade's exit alone and was inert for every prompt the classifier named an intent for, which is
+ * the ordinary case. Deciding once, here, is what makes "every risky question gets the posture"
+ * true rather than true-on-the-path-that-was-tested.
+ *
+ * Three things it must not disturb, and does not:
+ *   - a route with no popup keeps its skip (there is no posture to take when nothing is shown);
+ *   - the two evidence-quality triggers already carry `planning_first` under their OWN reason
+ *     codes, and a route that already has the posture is left exactly as it is;
+ *   - everything else keeps its reason codes, its family, and its evidence state.
+ */
+function withUnrequestedActionPostureV1(
+  result: PromptEnhancementRouteResult,
+  promptText: string,
+): PromptEnhancementRouteResult {
+  if (result.noPopup || result.fallbackMode !== 'none') return result;
+  if (!needsUnrequestedActionPosture(promptText)) return result;
+  const reasonCodes = [...result.reasonCodes, PROMPT_ENHANCEMENT_UNREQUESTED_ACTION_POSTURE_REASON_V1];
+  return {
+    ...result,
+    fallbackMode: 'planning_first',
+    reasonCodes,
+    // The contract decision carries the mode; its own reason-code surface is a different,
+    // rejected-route field and is deliberately not touched here.
+    contractDecision: {
+      ...result.contractDecision,
+      fallbackMode: 'planning_first',
+    },
+  };
+}
+
 export function routePromptEnhancement(
+  input: PromptEnhancementRouteInput,
+  llmRouteDecision?: PromptEnhancementLlmRouteDecisionV1,
+): PromptEnhancementRouteResult {
+  return withUnrequestedActionPostureV1(routeWithoutPostureV1(input, llmRouteDecision), input.promptText);
+}
+
+function routeWithoutPostureV1(
   input: PromptEnhancementRouteInput,
   llmRouteDecision?: PromptEnhancementLlmRouteDecisionV1,
 ): PromptEnhancementRouteResult {
@@ -1041,21 +1084,17 @@ export function routePromptEnhancement(
   // a debugging question about deploys is still a debugging prompt, it just must not be answered
   // with instructions to deploy. The two evidence-quality triggers return earlier and are
   // unreachable from here, so they cannot be absorbed or masked by this one.
-  const posture = needsUnrequestedActionPosture(input.promptText);
-  const reasonCodes = posture
-    ? [...reasonCodesFor(normalized, input, intent, capabilityOverlays), PROMPT_ENHANCEMENT_UNREQUESTED_ACTION_POSTURE_REASON_V1]
-    : reasonCodesFor(normalized, input, intent, capabilityOverlays);
-  const fallbackMode: PromptEnhancementRouteFallbackMode = posture ? 'planning_first' : 'none';
+  const reasonCodes = reasonCodesFor(normalized, input, intent, capabilityOverlays);
 
   return {
-    contractDecision: toContractDecision(input, selectedPreset, capabilityOverlays, evidenceRefs, reasonCodes, false, confidence, fallbackMode),
+    contractDecision: toContractDecision(input, selectedPreset, capabilityOverlays, evidenceRefs, reasonCodes, false, confidence, 'none'),
     selectedPreset,
     familyId: selectedPreset.family,
     primaryIntent: selectedPreset.primaryIntent,
     secondaryIntentTags: secondaryIntentTagsFor(normalized, selectedPreset.primaryIntent),
     capabilityOverlays,
     routeConfidence: confidence,
-    fallbackMode,
+    fallbackMode: 'none',
     routeEvidenceRefs: evidenceRefs,
     ladderResolution,
     reasonCodes,
@@ -1111,21 +1150,17 @@ function buildRouteResultFromClassifierIntent(
   // classifier names an intent, routing returns from this builder. Deciding it in one place per
   // exit rather than once at the end is what keeps the deterministic cascade and the classifier
   // path from disagreeing about the same prompt.
-  const posture = needsUnrequestedActionPosture(input.promptText);
-  const reasonCodes = posture
-    ? ['classifier_intent_preferred', PROMPT_ENHANCEMENT_UNREQUESTED_ACTION_POSTURE_REASON_V1]
-    : ['classifier_intent_preferred'];
-  const fallbackMode: PromptEnhancementRouteFallbackMode = posture ? 'planning_first' : 'none';
+  const reasonCodes = ['classifier_intent_preferred'];
   const routeConfidence: PromptEnhancementRouteConfidence = 'partial';
   return {
-    contractDecision: toContractDecision(input, selectedPreset, capabilityOverlays, evidenceRefs, reasonCodes, false, routeConfidence, fallbackMode),
+    contractDecision: toContractDecision(input, selectedPreset, capabilityOverlays, evidenceRefs, reasonCodes, false, routeConfidence, 'none'),
     selectedPreset,
     familyId: selectedPreset.family,
     primaryIntent: selectedPreset.primaryIntent,
     secondaryIntentTags: secondaryIntentTagsFor(normalized, selectedPreset.primaryIntent),
     capabilityOverlays,
     routeConfidence,
-    fallbackMode,
+    fallbackMode: 'none',
     routeEvidenceRefs: evidenceRefs,
     ladderResolution,
     reasonCodes,
