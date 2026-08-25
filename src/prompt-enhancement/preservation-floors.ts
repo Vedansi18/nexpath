@@ -17,6 +17,7 @@
  * check that cannot fail is not a check.
  */
 import { promptEnhancementAuthorityModeForTextV1 } from './safety-sendability.js';
+import { findKnownToolNamesInTextV1 } from './known-tool-names.js';
 
 export type PromptEnhancementPreservationFloorIdV1 =
   | 'commands'
@@ -269,6 +270,11 @@ export function findPromptEnhancementInventionViolationsV1(input: {
       report(item);
     }
   }
+  // Layer 0: the curated known-name list — coverage the shape patterns cannot give (measured
+  // 37% without it: a name is only caught when its casing cooperates). Same report() path, so
+  // the prompt/fact allowance and dedup above apply unchanged; deliberately NOT a
+  // capitalisation widening — unlisted capitalised words stay invisible.
+  for (const item of findKnownToolNamesInTextV1(input.sectionText)) report(item);
   return violations;
 }
 
