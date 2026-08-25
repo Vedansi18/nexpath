@@ -219,6 +219,40 @@ describe('the lane — these facts enrich a popup, they never summon one', () =>
   });
 });
 
+describe('the acceptance fact also answers where the requirement came from', () => {
+  it('the section reports its requirement source as PRESENT once the developer stated one', () => {
+    // A consequence of the guidance kind, verified rather than assumed: the planner asks each
+    // section whether its requirement source is known, and a developer who wrote "it is done when
+    // …" HAS stated one. Reporting `unknown` beside their own quoted words would be the section
+    // contradicting itself. Pinned so the coupling stays deliberate.
+    const route = routePromptEnhancement({
+      routeDecisionId: 'req-source-route',
+      promptText: 'write the spec for onboarding',
+      currentStage: 'implementation',
+      prevStage: 'task_breakdown',
+      triggerKind: 'absence',
+      firedKey: 'absence:verification_gap@implementation',
+      effectiveFiredSource: 'classifier_fire_recommendation',
+      selectedQualifyingAbsence: 'verification_gap',
+      absenceGateReason: 'selected_qualifying_absence',
+      classifierState: 'fire_recommended',
+      degradedNoActionState: 'none',
+      generatedOriginState: 'ordinary_user_prompt',
+    } as never);
+    const withFacts = planPromptEnhancementSections({ routeResult: route, sourceRefs: [sourceA], guidanceFacts: factsFor(HISTORY_THAT_STATES) });
+    const without = planPromptEnhancementSections({ routeResult: route, sourceRefs: [sourceA], guidanceFacts: [] });
+    const statusOf = (planning: typeof withFacts, kind: string) =>
+      planning.sectionPlans.find((plan) => plan.sectionKind === kind)?.requirementSourceStatus;
+    expect(statusOf(without, 'acceptance_or_output_expectation')).toBe('unknown');
+    expect(statusOf(withFacts, 'acceptance_or_output_expectation')).toBe('present');
+    // And it moves nothing else: only the section that received the stated material changes.
+    for (const plan of without.sectionPlans) {
+      if (plan.sectionKind === 'acceptance_or_output_expectation') continue;
+      expect(statusOf(withFacts, plan.sectionKind), plan.sectionKind).toBe(plan.requirementSourceStatus);
+    }
+  });
+});
+
 describe('the four other starved kinds stay starved — a choice, not an unfinished job', () => {
   it('no fact is produced for them', () => {
     const facts = factsFor(HISTORY_THAT_STATES);
