@@ -10,9 +10,10 @@
  *
  * The view is a WHITELISTED projection of the engine's render model — never the
  * full prepare result (ids, session internals, and validation graphs stay in
- * the SW). The command set mirrors `PromptEnhancementCliPopupCommandV1` minus
- * the feedback pair: the v1 browser surface has no feedback store, so the
- * feedback flow is not rendered (PE-BR-11 — deferred, not dropped).
+ * the SW). The command set mirrors `PromptEnhancementCliPopupCommandV1`,
+ * feedback included: suggested categories AND the CLI PEF's free-text Other
+ * (PE-BR-11 closed 2026-08-25 — typed feedback persists in the browser's own
+ * feedback store, capped and local, never logged to the ring as text).
  *
  * The advisory panel's frozen `ui-contract.ts` is deliberately NOT extended —
  * that file is the UI developer's contract for panel.js; this one is
@@ -46,6 +47,14 @@ export interface PePanelViewV1 {
   /** Additional-details field state (present only when the engine offers the action). */
   hasAdditionalDetails: boolean;
   additionalDetailsText: string;
+  /**
+   * Row availability, straight from the engine's controls — the CLI renders an
+   * unavailable row WITH an "(unavailable)" marker instead of hiding it
+   * (`cli-submit-popup.ts:777`, details row :636, use-original :672).
+   * Optional for wire-compat with an older SW: absent means available.
+   */
+  detailsAvailable?: boolean;
+  originalAvailable?: boolean;
   directional: readonly PePanelDirectionalV1[];
   /** True on a directional refinement view — renders the Go back row. */
   refinement: boolean;
@@ -105,8 +114,10 @@ export type PePanelCommandV1 =
    * editedBodyText tracks what the user sees.
    */
   | { type: 'edit_body'; bodyText: string }
-  /** v1 feedback: content-free suggested category only — never free text. */
+  /** Suggested feedback: the content-free category (CLI PEF rows 1-2). */
   | { type: 'feedback_suggested'; category: 'not_relevant_enough' | 'too_much_or_too_long' }
+  /** Free-text feedback — the CLI PEF's "Other" row (1..5000 chars, :1165). */
+  | { type: 'feedback_other'; text: string }
   // MPS-1 offer outcomes (valid only while a sequence-offer view is live).
   | { type: 'mps_send'; bodyText: string }
   | { type: 'mps_decline' }
@@ -130,11 +141,13 @@ export interface PePanelControllerV1 {
 const COMMAND_TYPES = new Set([
   'use_current', 'use_original', 'apply_details', 'shorter',
   'more_thorough', 'more_project_grounded', 'go_back', 'close',
-  'edit_body', 'feedback_suggested',
+  'edit_body', 'feedback_suggested', 'feedback_other',
   'mps_send', 'mps_decline', 'mps_cancel',
 ]);
 const TEXT_FREE_COMMANDS = new Set(['use_original', 'go_back', 'close', 'mps_decline', 'mps_cancel']);
 const FEEDBACK_CATEGORIES = new Set(['not_relevant_enough', 'too_much_or_too_long']);
+/** The CLI's Other-feedback bound (`cli-submit-popup.ts:136`, enforced :1165). */
+export const PE_FEEDBACK_OTHER_MAX_CHARS = 5_000;
 
 export function isPePanelCommandV1(value: unknown): value is PePanelCommandV1 {
   if (typeof value !== 'object' || value === null) return false;
@@ -143,6 +156,11 @@ export function isPePanelCommandV1(value: unknown): value is PePanelCommandV1 {
   if (TEXT_FREE_COMMANDS.has(v['type'])) return true;
   if (v['type'] === 'feedback_suggested') {
     return typeof v['category'] === 'string' && FEEDBACK_CATEGORIES.has(v['category']);
+  }
+  if (v['type'] === 'feedback_other') {
+    return typeof v['text'] === 'string'
+      && v['text'].trim().length > 0
+      && v['text'].length <= PE_FEEDBACK_OTHER_MAX_CHARS;
   }
   if (typeof v['bodyText'] !== 'string') return false;
   if (v['type'] === 'apply_details') return typeof v['detailsText'] === 'string';

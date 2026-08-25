@@ -107,10 +107,12 @@ describe('producers (my views → their models)', () => {
     expect(m.rows.some((r) => r.kind === 'action' && r.act === 'cancel-sequence' && r.label === 'Use original prompt')).toBe(true);
   });
 
-  it('the v1 PEF model has ONLY the two fixed categories — no free-text row', () => {
+  it('the PEF model is the CLI\'s three rows — two categories + the free-text Other field (:1112)', () => {
     const m = pefSurfaceModel();
-    expect(m.rows).toHaveLength(2);
-    expect(m.rows.every((r) => r.kind === 'action')).toBe(true);
+    expect(m.rows).toHaveLength(3);
+    expect(m.rows[0]).toMatchObject({ kind: 'action', label: 'Not relevant enough' });
+    expect(m.rows[1]).toMatchObject({ kind: 'action', label: 'Too much or too long' });
+    expect(m.rows[2]).toMatchObject({ kind: 'field', label: 'Other', placeholder: '(type your feedback)' });
   });
 });
 
@@ -178,23 +180,23 @@ describe('PE surface flows (real dock + controller)', () => {
 });
 
 describe('PEF-backed-by-signals (owner decision 2026-08-25)', () => {
-  it('Esc on PE opens the PEF surface; a category click records the signal THEN closes', () => {
+  it('Esc on PE closes IMMEDIATELY with no PEF — the CLI\'s shipped rule (cli-submit-popup.ts:1469-1471)', () => {
     adapter.show(view());
     pressOn(surfaceEl(), 'Escape');
+    expect(commands()).toEqual([{ type: 'close' }]);           // straight out
+    expect(surfaceEl().textContent).not.toContain('Not relevant enough'); // never PEF
+  });
+
+  it('Use-original → PEF → a category click records the signal THEN completes use_original', () => {
+    adapter.show(view());
+    rowByLabel('Use original prompt').click();
     expect(surfaceEl().textContent).toContain('Not relevant enough'); // PEF visible
     expect(commands()).toHaveLength(0); // nothing terminal yet
     rowByLabel('Too much or too long').click();
     expect(commands()).toEqual([
       { type: 'feedback_suggested', category: 'too_much_or_too_long' },
-      { type: 'close' },
+      { type: 'use_original' },
     ]);
-  });
-
-  it('Esc on PEF skips feedback and completes the remembered terminal', () => {
-    adapter.show(view());
-    pressOn(surfaceEl(), 'Escape'); // → PEF, pending close
-    pressOn(surfaceEl(), 'Escape'); // skip
-    expect(commands()).toEqual([{ type: 'close' }]);
   });
 
   it('Use-original opens PEF; skip completes with use_original', () => {
@@ -384,5 +386,103 @@ describe('apply echo keeps the CLI\'s scrolled-to-the-merge position (live 2026-
     } finally {
       follow.mockRestore();
     }
+  });
+});
+
+describe('CLI row grammar — full-read parity (2026-08-25 line-by-line audit)', () => {
+  it('an unavailable details control still RENDERS its row, marked and read-only (cli-submit-popup.ts:630-639,:777)', () => {
+    adapter.show(view({ hasAdditionalDetails: false, detailsAvailable: false }));
+    const details = [...surfaceEl().querySelectorAll('textarea')][1] as HTMLTextAreaElement;
+    expect(details).toBeTruthy();                       // never hidden
+    expect(details.readOnly).toBe(true);                // typing impossible
+    expect(surfaceEl().textContent).toContain('Additional details  (unavailable)');
+  });
+
+  it('a locked body marks the heading row "(unavailable)" — the CLI\'s lock indicator (:610,:777)', () => {
+    adapter.show(view({ bodyEditable: false }));
+    expect(surfaceEl().textContent).toContain('Use enhanced prompt  (unavailable)');
+  });
+
+  it('an unavailable Use-original row carries the marker (:672,:777)', () => {
+    adapter.show(view({ originalAvailable: false }));
+    expect(surfaceEl().textContent).toContain('Use original prompt  (unavailable)');
+  });
+
+  it('the refinement view shows ONLY the body and "← Go back" (:614-628)', () => {
+    const m = peSurfaceModel(view({ refinement: true }));
+    expect(m.rows).toHaveLength(2);
+    expect(m.rows[0]!.kind).toBe('field');
+    expect(m.rows[1]).toMatchObject({ kind: 'action', label: '← Go back', blankBefore: true });
+  });
+
+  it('the CLI blank-line rule: blank before details and Go back, NOT before Use original (:769-775)', () => {
+    const m = peSurfaceModel(view());
+    const details = m.rows.find((r) => r.kind === 'field' && r.label === 'Additional details');
+    const useOriginal = m.rows.find((r) => r.kind === 'action' && r.act === 'use-original');
+    expect(details && 'blankBefore' in details && details.blankBefore).toBe(true);
+    expect(useOriginal && (useOriginal as { blankBefore?: boolean }).blankBefore).toBeUndefined();
+  });
+});
+
+describe('PEF free-text Other — PE-BR-11 closed (CLI cli-submit-popup.ts:1112,:1164-1166)', () => {
+  function openPefViaUseOriginal(): void {
+    adapter.show(view());
+    rowByLabel('Use original prompt').click();
+  }
+  function otherField(): HTMLTextAreaElement {
+    return surfaceEl().querySelector('textarea') as HTMLTextAreaElement; // PEF's only field
+  }
+
+  it('typing into Other and Enter emits feedback_other then the remembered terminal', () => {
+    openPefViaUseOriginal();
+    otherField().focus();
+    const field = otherField(); // re-query after the focus re-render
+    field.value = '  needs project names  ';
+    pressOn(field, 'Enter');
+    expect(commands()).toEqual([
+      { type: 'feedback_other', text: 'needs project names' }, // trimmed, CLI :1164
+      { type: 'use_original' },
+    ]);
+  });
+
+  it('empty Other is the CLI silent pending — nothing emitted, PEF stays', () => {
+    openPefViaUseOriginal();
+    otherField().focus();
+    pressOn(otherField(), 'Enter');
+    expect(commands()).toHaveLength(0);
+    expect(surfaceEl().textContent).toContain('Not relevant enough'); // still PEF
+  });
+
+  it('over the 5,000-char cap is silently refused (:1165)', () => {
+    openPefViaUseOriginal();
+    otherField().focus();
+    const field = otherField();
+    field.value = 'x'.repeat(5_001);
+    pressOn(field, 'Enter');
+    expect(commands()).toHaveLength(0);
+  });
+});
+
+describe('same-body echo preserves the interaction state (CLI :1444-1453)', () => {
+  it('keeps row focus and the typed details draft across a rebuild with the same body', () => {
+    adapter.show(view());
+    ([...surfaceEl().querySelectorAll('textarea')][1] as HTMLTextAreaElement).focus();
+    const details = [...surfaceEl().querySelectorAll('textarea')][1] as HTMLTextAreaElement;
+    details.value = 'half-typed draft';
+
+    adapter.show(view({ viewSeq: 2, publicNotice: 'a notice' })); // same bodyText echo
+
+    const rebuiltDetails = [...surfaceEl().querySelectorAll('textarea')][1] as HTMLTextAreaElement;
+    expect(rebuiltDetails.value).toBe('half-typed draft');           // draft survives
+    const root = shadowRoots.at(-1)!;
+    expect(root.activeElement).toBe(rebuiltDetails);                 // focus survives
+  });
+
+  it('a CHANGED body rebuilds fresh — the CLI resets on a new bodyRevision', () => {
+    adapter.show(view());
+    ([...surfaceEl().querySelectorAll('textarea')][1] as HTMLTextAreaElement).focus();
+    adapter.show(view({ viewSeq: 2, bodyText: 'a different body' }));
+    const root = shadowRoots.at(-1)!;
+    expect(root.activeElement).toBe(bodyField()); // back to the body row
   });
 });

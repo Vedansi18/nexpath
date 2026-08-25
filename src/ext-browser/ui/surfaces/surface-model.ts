@@ -62,6 +62,15 @@ export type SurfaceRow =
        * never promise an edit the send path will not honour.
        */
       readOnly?: boolean;
+      /** The CLI's "  (unavailable)" row marker (`cli-submit-popup.ts:777`). */
+      unavailable?: boolean;
+      /**
+       * Fixed window for this field in lines — the CLI caps the PE details
+       * field at 5 rows (`cli-submit-popup.ts:1335`). Fields WITHOUT it size
+       * adaptively to the remaining band, the CLI's fill-the-window rule
+       * (:1354-1365).
+       */
+      maxLines?: number;
     }
   | {
       kind: 'action';
@@ -78,6 +87,8 @@ export type SurfaceRow =
       /** A line under the label, like MPS-2's interruption helper. */
       helper?: string;
       blankBefore?: boolean;
+      /** The CLI's "  (unavailable)" row marker (`cli-submit-popup.ts:777`). */
+      unavailable?: boolean;
     }
   | {
       /**

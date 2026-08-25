@@ -1108,6 +1108,7 @@ async function handleResponseStopPeFirst(projectRoot: string, tabId: number | un
     apiKey,
     record: pe,
     sequenceEnabled,
+    feedbackStore: keyStore, // PE-BR-11 closed: PEF events persist locally
     sendToTab: (m) => browser.tabs.sendMessage(tabId, m),
     onFirstRendered: async () => {
       // First real render: consume the row + start the cooldown window — the

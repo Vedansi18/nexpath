@@ -84,9 +84,12 @@ function handlePanelEvent(event: PePanelEventV1): void {
   if (event.type === 'move') return;
   // One user command → one short-lived runtime message (the injector attaches
   // the project root + forwards). Panel goes busy until the SW's next view —
-  // EXCEPT feedback: it's non-terminal and produces no re-render (the SW only
-  // records a content-free signal), so the panel must stay interactive.
-  if (event.command.type !== 'feedback_suggested') controller?.setBusy(true);
+  // EXCEPT feedback (both kinds): it's non-terminal and produces no re-render
+  // (the SW persists it host-side), so the panel must stay interactive for
+  // the terminal command that follows immediately behind it.
+  if (event.command.type !== 'feedback_suggested' && event.command.type !== 'feedback_other') {
+    controller?.setBusy(true);
+  }
   window.dispatchEvent(new CustomEvent('nexpath:pe-command-out', {
     detail: { viewSeq: event.viewSeq, command: event.command },
   }));

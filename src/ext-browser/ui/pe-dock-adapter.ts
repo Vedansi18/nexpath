@@ -9,13 +9,16 @@
  *   their SurfaceEvents / activation hook     ──mapping───▶  my PePanelCommandV1
  *
  * Flow decisions carried in (owner-approved 2026-08-25):
- *  - PEF-backed-by-signals: Esc / Use-original on the PE surface and Cancel on
- *    the MPS offer open the PEF feedback surface first (CLI §8.3); a category
- *    click records the content-free pe_feedback_suggested signal, then the
- *    remembered terminal command completes the flow; Esc on PEF skips straight
- *    to the terminal. v1 renders ONLY the two fixed categories — the CLI's
- *    free-text "Other" row is omitted because the browser stores no feedback
- *    text (typed feedback rows deferred, PE-BR-11).
+ *  - PEF-backed-by-signals: Use-original on the PE surface and Cancel on the
+ *    MPS offer open the PEF feedback surface first; a category click records
+ *    the content-free pe_feedback_suggested signal, then the remembered
+ *    terminal command completes the flow; Esc on PEF skips straight to the
+ *    terminal. Esc on the PE surface itself closes IMMEDIATELY with no PEF —
+ *    the CLI's shipped rule ("Feedback opens ONLY when the user chooses Use
+ *    original prompt", cli-submit-popup.ts:1469-1471; its §8.3 comment is
+ *    stale). PEF renders the CLI's full three rows — the two categories AND
+ *    the free-text "Other" (PE-BR-11 closed 2026-08-25: typed feedback
+ *    persists via the browser feedback store, host-side).
  *  - Details-apply is the CLI's LOCAL merge (their controller does it); the
  *    merged body reaches the engine as its own edit_body command, so the
  *    engine's editedBodyText tracks what the user sees.
@@ -25,13 +28,14 @@
  *    fixture era's "static build" notices; the engine's re-render is the echo.
  */
 
-import type {
-  PePanelAnyViewV1,
-  PePanelCommandV1,
-  PePanelControllerV1,
-  PePanelEventV1,
-  PeSequenceOfferViewV1,
-  PePanelViewV1,
+import {
+  PE_FEEDBACK_OTHER_MAX_CHARS,
+  type PePanelAnyViewV1,
+  type PePanelCommandV1,
+  type PePanelControllerV1,
+  type PePanelEventV1,
+  type PeSequenceOfferViewV1,
+  type PePanelViewV1,
 } from './pe-contract.js';
 import type { SurfaceModel, SurfaceRow } from './surfaces/surface-model.js';
 import { mountNexpathDock, type NexpathDockController } from './surfaces/dock.js';
@@ -56,42 +60,73 @@ type PendingTerminal = { type: 'close' } | { type: 'use_original' } | { type: 'm
 
 // ── producers: my views → their models ─────────────────────────────────────────
 
+/** The CLI's refinement-return label (`cli-submit-popup.ts:541`). */
+const CLI_GO_BACK_LABEL = '← Go back';
+
 export function peSurfaceModel(view: PePanelViewV1): SurfaceModel {
   // The engine's editability verdict is SEND-PATH semantics, not styling: a
   // read-only fallback body (`editabilityState: 'read_only_fallback'`) rejects
   // every edit_body, and the host's translate() rightly never synthesizes one
   // for an uneditable body. Rendering such a body editable let the user type
   // text the send silently discarded (live on Replit + Lovable, 2026-08-25).
-  // The CLI locks its WHOLE editor in this state — body and details together —
-  // so both fields mirror that here.
+  // The CLI locks its WHOLE editor in this state — body and details together
+  // (`cli-submit-popup.ts:969`) — and marks the heading row "(unavailable)".
   const locked = !view.bodyEditable;
+  const bodyRow: SurfaceRow = {
+    kind: 'field',
+    label: view.editorHeading,
+    text: view.bodyText,
+    hints: { whenFocused: [`${EDIT_KEYS_HINT} · ${BODY_HINT}`] },
+    ...(locked ? { readOnly: true, unavailable: true } : {}),
+  };
+
+  // Refinement view (after a directional): the CLI shows ONLY the editable body
+  // and the final "← Go back" — no details, no directionals, no Use original
+  // (`cli-submit-popup.ts:614-628`, owner request).
+  if (view.refinement) {
+    return finishPeModel(view, [
+      bodyRow,
+      { kind: 'action', label: CLI_GO_BACK_LABEL, blankBefore: true },
+    ]);
+  }
+
+  // Row availability, CLI-style: unavailable rows RENDER with the marker, never
+  // hide (`cli-submit-popup.ts:630-639` builds the details row unconditionally;
+  // :672 the use-original row; :777 the marker). Older SW views omit the
+  // availability fields — fall back to the control-presence flag they do carry.
+  const detailsAvailable = view.detailsAvailable ?? view.hasAdditionalDetails;
+  const originalAvailable = view.originalAvailable ?? true;
   const rows: SurfaceRow[] = [
+    bodyRow,
     {
-      kind: 'field',
-      label: view.editorHeading,
-      text: view.bodyText,
-      hints: { whenFocused: [`${EDIT_KEYS_HINT} · ${BODY_HINT}`] },
-      ...(locked ? { readOnly: true } : {}),
-    },
-  ];
-  if (view.hasAdditionalDetails) {
-    rows.push({
       kind: 'field',
       label: 'Additional details',
       text: view.additionalDetailsText,
       hints: { always: [DETAILS_HINT], whenFocused: [EDIT_KEYS_HINT] },
       blankBefore: true,
-      ...(locked ? { readOnly: true } : {}),
-    });
-  }
+      maxLines: 5, // the CLI windows the details field at 5 rows (:1335)
+      ...(locked || !detailsAvailable ? { readOnly: true } : {}),
+      ...(!detailsAvailable ? { unavailable: true } : {}),
+    },
+  ];
   for (const d of view.directional) {
     // Availability travels via the row label lookup in the activation hook;
-    // rows render CLI-style regardless (disabled = silent guard, never hidden).
+    // rows render CLI-style regardless (disabled = silent guard, never hidden —
+    // the CLI never shows the marker on directionals, :650-655).
     rows.push({ kind: 'action', label: d.label, blankBefore: d === view.directional[0] });
   }
-  if (view.refinement) rows.push({ kind: 'action', label: 'Go back' });
-  rows.push({ kind: 'action', label: 'Use original prompt', act: 'use-original', blankBefore: true });
+  // No blank line before Use original — the CLI's blank-line rule covers only
+  // the details block, the first directional, and Go back (:769-775).
+  rows.push({
+    kind: 'action',
+    label: 'Use original prompt',
+    act: 'use-original',
+    ...(originalAvailable ? {} : { unavailable: true }),
+  });
+  return finishPeModel(view, rows);
+}
 
+function finishPeModel(view: PePanelViewV1, rows: SurfaceRow[]): SurfaceModel {
   const model: SurfaceModel = {
     id: 'prompt_enhancement',
     label: 'Prompt enhancement',
@@ -140,7 +175,13 @@ export function mpsSurfaceModel(view: PeSequenceOfferViewV1): SurfaceModel {
   return model;
 }
 
-/** v1 PEF: the two fixed categories only (content-free signals; no free text). */
+/**
+ * PEF — the CLI's three rows exactly (`cli-submit-popup.ts:1112`): the two
+ * suggested categories plus the free-text "Other" (inline editable field,
+ * placeholder "(type your feedback)" :1202, edit-keys hint when focused
+ * :1205). PE-BR-11 closed 2026-08-25 — typed feedback persists via the
+ * browser feedback store.
+ */
 export function pefSurfaceModel(): SurfaceModel {
   return {
     id: 'prompt_enhancement_feedback',
@@ -150,6 +191,13 @@ export function pefSurfaceModel(): SurfaceModel {
     rows: [
       { kind: 'action', label: 'Not relevant enough' },
       { kind: 'action', label: 'Too much or too long' },
+      {
+        kind: 'field',
+        label: 'Other',
+        text: '',
+        placeholder: '(type your feedback)',
+        hints: { whenFocused: [EDIT_KEYS_HINT] },
+      },
     ],
     footer: PEF_FOOTER,
   };
@@ -208,6 +256,17 @@ export function mountNexpathPeDock(opts: PeDockAdapterOptions): PePanelControlle
         completePending();
         return 'refuse';
       }
+      if (row.kind === 'field') {
+        // The Other row: Enter submits non-empty bounded text; empty or over
+        // the CLI's 5,000-char cap is the CLI's silent `pending`
+        // (cli-submit-popup.ts:1164-1166). The Other text arrives as this
+        // surface's first (only) field — the hook's bodyText parameter.
+        const text = bodyText.trim();
+        if (text.length === 0 || text.length > PE_FEEDBACK_OTHER_MAX_CHARS) return 'refuse';
+        emitCommand({ type: 'feedback_other', text });
+        completePending();
+        return 'refuse';
+      }
       return 'refuse';
     }
 
@@ -232,7 +291,7 @@ export function mountNexpathPeDock(opts: PeDockAdapterOptions): PePanelControlle
       pendingTerminal = { type: 'mps_cancel' };
       return { model: pefSurfaceModel() };
     }
-    if (row.label === 'Go back') {
+    if (row.label === CLI_GO_BACK_LABEL) {
       emitCommand({ type: 'go_back' });
       return 'refuse';
     }
@@ -256,8 +315,11 @@ export function mountNexpathPeDock(opts: PeDockAdapterOptions): PePanelControlle
         emitCommand({ type: 'edit_body', bodyText: event.mergedBody });
         return;
       case 'cancelled':
-        // Esc on the PE surface: the controller has switched to PEF itself.
-        pendingTerminal = { type: 'close' };
+        // Esc on the PE surface = the CLI's immediate close: "Feedback opens
+        // ONLY when the user chooses Use original prompt … Close / Esc / crash
+        // send nothing and show no feedback" (cli-submit-popup.ts:1469-1471 —
+        // the shipped code; the §8.3 'every cancel' comment there is stale).
+        emitCommand({ type: 'close' });
         return;
       case 'declined':
         // Esc on the MPS offer with no editor focused.
@@ -320,6 +382,27 @@ export function mountNexpathPeDock(opts: PeDockAdapterOptions): PePanelControlle
       view = v;
       pendingTerminal = null;
       const d = ensureDock();
+      // The CLI PRESERVES its interaction state across re-renders unless the
+      // body itself changed (cli-submit-popup.ts:1444-1453 — same
+      // bodyRevision keeps focus, caret, scroll, and the typed details
+      // draft). This host rebuilds the controller per render, so when the
+      // incoming PE view carries the SAME body the panel already shows (a
+      // notice echo, never a content change), capture that state and restore
+      // it after the rebuild.
+      const prevFields = surfaces
+        ? ([...surfaces.element.querySelectorAll('textarea')] as HTMLTextAreaElement[])
+        : [];
+      const samePeBody = !('kind' in v)
+        && prevFields[0] !== undefined
+        && prevFields[0].value === v.bodyText;
+      const preserved = samePeBody
+        ? {
+            focusIndex: surfaces!.getFocusIndex(),
+            bodyScrollTop: prevFields[0]!.scrollTop,
+            bodyCaret: prevFields[0]!.selectionStart ?? v.bodyText.length,
+            detailsDraft: v.additionalDetailsText === '' ? prevFields[1]?.value ?? '' : '',
+          }
+        : null;
       // The dock must be VISIBLE before the surface renders: the controller's
       // render() focuses the active field, and focus() inside a display:none
       // subtree is a silent no-op — the popup then opens with the keyboard
@@ -338,8 +421,22 @@ export function mountNexpathPeDock(opts: PeDockAdapterOptions): PePanelControlle
         doc,
         onEvent: onSurfaceEvent,
         resolveActivation,
+        ...(preserved ? { initialFocusIndex: preserved.focusIndex } : {}),
       });
       setBusyOverlay(false);
+      if (preserved) {
+        const rebuilt = [...surfaces.element.querySelectorAll('textarea')] as HTMLTextAreaElement[];
+        const body = rebuilt[0];
+        if (body) {
+          body.setSelectionRange(preserved.bodyCaret, preserved.bodyCaret);
+          body.scrollTop = preserved.bodyScrollTop;
+        }
+        const details = rebuilt[1];
+        if (details && preserved.detailsDraft && details.value === '') {
+          details.value = preserved.detailsDraft;
+          details.dispatchEvent(new Event('input', { bubbles: true })); // re-grow + markers
+        }
+      }
       if (followCaretOnNextShow) {
         followCaretOnNextShow = false;
         const bodyField = surfaces.element.querySelector('textarea');

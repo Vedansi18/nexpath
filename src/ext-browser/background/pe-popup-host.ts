@@ -26,18 +26,24 @@ import type { PendingPeRecord } from '../adapters/pe-pending-store.js';
 import {
   PROMPT_ENHANCEMENT_CONTRACT_VERSION,
   buildPromptEnhancementCliMpsIntakeEvidenceV1,
+  buildPromptEnhancementFeedbackAdapterStateV1,
   buildPromptEnhancementMpsFirstPopupV1,
+  editPromptEnhancementOtherFeedbackV1,
   emitPromptEnhancementCostObservabilityV1,
   evaluatePromptEnhancementMpsIntakeDecisionV1,
+  openPromptEnhancementFeedbackV1,
   promptEnhancementMpsActionSignalKindV1,
   refreshEngineKeyEnv,
   runPromptEnhancementCliSubmitPopupV1,
+  submitPromptEnhancementOtherFeedbackV1,
+  submitPromptEnhancementSuggestedFeedbackV1,
   type PromptEnhancementCliPopupCommandV1,
   type PromptEnhancementCliPopupInteractionV1,
   type PromptEnhancementCliPopupResultV1,
   type PromptEnhancementCliPopupViewV1,
   type PromptEnhancementMpsFirstPopupModelV1,
 } from './pe-engine.js';
+import { recordPeFeedbackEvent, type PeFeedbackKeyStore } from '../adapters/pe-feedback-store.js';
 import {
   PE_PANEL_SCHEMA_VERSION,
   isPePanelCommandV1,
@@ -132,6 +138,10 @@ export function buildPePanelView(
     bodyEditable: model.body.editable,
     hasAdditionalDetails: model.controls.additionalDetails !== undefined,
     additionalDetailsText: view.additionalDetailsText,
+    // The CLI's row-availability truth (buildPromptEnhancementCliActionRowsV1
+    // :636/:672): the rows always render; unavailable ones carry the marker.
+    detailsAvailable: model.controls.additionalDetails?.availability === 'available',
+    originalAvailable: model.controls.original.availability === 'available',
     directional,
     refinement: view.refinement === true,
     hasFeedback: model.controls.feedback !== undefined,
@@ -293,6 +303,8 @@ export interface BrowserPePopupDeps {
    * event and falls straight through to the PE popup.
    */
   sequenceEnabled?: boolean;
+  /** Feedback persistence (PE-BR-11 closed): submitted events land here. */
+  feedbackStore?: PeFeedbackKeyStore;
   /** Injectable engine runner (tests); defaults to the real state machine. */
   runPopup?: typeof runPromptEnhancementCliSubmitPopupV1;
 }
@@ -347,15 +359,54 @@ export async function runBrowserPePopup(
       ? Promise.resolve((() => { const q = box.queued as PePanelCommandV1; box.queued = null; return q; })())
       : new Promise<PePanelCommandV1>((resolve) => { box.waiter = resolve; });
 
-  // Feedback v1 (PB5): suggested-feedback is recorded as a CONTENT-FREE signal
-  // (kind + category enum, never text) and consumed HERE — it is non-terminal
-  // and never enters the engine loop (no feedback sink exists in the browser
-  // v1; typed feedback rows are deferred, PE-BR-11).
+  // Feedback (PE-BR-11 closed 2026-08-25): consumed HERE — non-terminal, and
+  // kept OUT of the engine loop on purpose. Routing it through the loop would
+  // re-render an acknowledgement view whose push clears the mailbox
+  // (pushView's queued=null), destroying the terminal command the panel sends
+  // right behind the feedback — a hang until the watchdog. The CLI's own
+  // PEF-on-cancel path drains its terminal immediately after the feedback, so
+  // the acknowledgement frame is not user-visible there either. Persistence
+  // uses the ENGINE'S OWN feedback state machine (the exact builders
+  // cli-submit-popup.ts:341-368 uses) against the CURRENT loop view's
+  // session, so the stored event shape is the CLI's. Ring/log stays
+  // content-free — kind and chars only, never the text.
+  let loopView: PromptEnhancementCliPopupViewV1 | null = null;
+  const persistFeedback = async (command: PePanelCommandV1): Promise<void> => {
+    if (command.type !== 'feedback_suggested' && command.type !== 'feedback_other') return;
+    const kind = command.type === 'feedback_suggested' ? 'pe_feedback_suggested' : 'pe_feedback_other';
+    const category = command.type === 'feedback_suggested' ? command.category : 'custom_typed';
+    const chars = command.type === 'feedback_other' ? command.text.length : 0;
+    // The content-free signal ALWAYS logs (kind/category/chars — never text);
+    // persistence is additive on top of it.
+    if (!deps.feedbackStore || !loopView) {
+      log.debug('pe_action_signal', { kind, category, chars, stored: false });
+      return;
+    }
+    let state = openPromptEnhancementFeedbackV1(
+      buildPromptEnhancementFeedbackAdapterStateV1(loopView.model.session),
+    );
+    if (state.status !== 'open') {
+      log.debug('pe_action_signal', { kind, category, chars, stored: false });
+      return;
+    }
+    const submitted = command.type === 'feedback_suggested'
+      ? submitPromptEnhancementSuggestedFeedbackV1(state, command.category, Date.now())
+      : (() => {
+          state = editPromptEnhancementOtherFeedbackV1(state, command.text.trim());
+          return submitPromptEnhancementOtherFeedbackV1(state, Date.now());
+        })();
+    if (submitted.state !== 'event_ready') {
+      log.debug('pe_action_signal', { kind, category, chars, stored: false });
+      return;
+    }
+    const stored = await recordPeFeedbackEvent(deps.feedbackStore, submitted.event, Date.now());
+    log.debug('pe_action_signal', { kind, category, chars, stored });
+  };
   const awaitPanelCommand = async (): Promise<PePanelCommandV1> => {
     for (;;) {
       const command = await takeFromMailbox();
-      if (command.type === 'feedback_suggested') {
-        log.debug('pe_action_signal', { kind: 'pe_feedback_suggested', category: command.category });
+      if (command.type === 'feedback_suggested' || command.type === 'feedback_other') {
+        await persistFeedback(command);
         continue;
       }
       return command;
@@ -430,6 +481,7 @@ export async function runBrowserPePopup(
     // ── Stage 2: the engine's PE popup state machine ───────────────────────────
     const interaction: PromptEnhancementCliPopupInteractionV1 = {
       next: async (view: PromptEnhancementCliPopupViewV1) => {
+        loopView = view; // feedback persistence reads the live session from here
         seq += 1;
         const rendered = await pushView(buildPePanelView(view, seq));
         if (!rendered) return { type: 'close' };

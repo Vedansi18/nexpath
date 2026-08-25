@@ -465,3 +465,71 @@ describe('edit_body command (the dock\'s CLI-parity local details merge)', () =>
     expect(result.bodyText).toContain('keep the retry helper');
   });
 });
+
+describe('feedback persistence — PE-BR-11 closed (the CLI feedback store, browser-side)', () => {
+  function memoryStore(): { getKey(n: string): Promise<string | null>; setKey(n: string, v: string): Promise<void>; data: Map<string, string> } {
+    const data = new Map<string, string>();
+    return {
+      data,
+      getKey: async (n: string) => data.get(n) ?? null,
+      setKey: async (n: string, v: string) => { data.set(n, v); },
+    };
+  }
+
+  it('feedback_other persists the ENGINE-shaped event — content-free, exactly what the CLI stores (the typed text stays transient, feedback-adapter.ts:72)', async () => {
+    const { log, events } = makeLog();
+    const store = memoryStore();
+    let seq = 0;
+    const tab = async (msg: unknown): Promise<unknown> => {
+      const m = msg as { type?: string; payload?: PePanelViewV1 };
+      if (m.type === 'nexpath:show-pe' && m.payload) {
+        seq = m.payload.viewSeq;
+        setTimeout(() => {
+          deliverPePanelCommand(log, ROOT, seq, { type: 'feedback_other', text: 'needs my project names' });
+          setTimeout(() => { deliverPePanelCommand(log, ROOT, seq, { type: 'use_original' }); }, 0);
+        }, 0);
+      }
+      return { ok: true };
+    };
+    const { result } = await runBrowserPePopup({
+      log, projectRoot: ROOT, apiKey: null, record, sendToTab: tab,
+      feedbackStore: store,
+      onFirstRendered: vi.fn().mockResolvedValue(undefined),
+    });
+    expect(result.state).toBe('selected_original');
+    const raw = store.data.get('nexpath_pe_feedback_events');
+    expect(raw).toBeTruthy();
+    const list = JSON.parse(raw!) as Array<{ at: number; event: Record<string, unknown> }>;
+    expect(list).toHaveLength(1);
+    const eventJson = JSON.stringify(list[0]!.event);
+    expect(eventJson).toContain('"feedbackCategory":"custom_typed"');      // the CLI's event shape
+    expect(eventJson).not.toContain('needs my project names');             // the CLI never persists the text either
+    const signal = events.find(([k, d]) => k === 'pe_action_signal' && d?.['kind'] === 'pe_feedback_other');
+    expect(signal?.[1]).toMatchObject({ category: 'custom_typed', chars: 22, stored: true });
+    expect(JSON.stringify(signal?.[1])).not.toContain('needs my project names'); // ring stays content-free
+  });
+
+  it('feedback_suggested persists as a category event through the same store', async () => {
+    const { log } = makeLog();
+    const store = memoryStore();
+    let seq = 0;
+    const tab = async (msg: unknown): Promise<unknown> => {
+      const m = msg as { type?: string; payload?: PePanelViewV1 };
+      if (m.type === 'nexpath:show-pe' && m.payload) {
+        seq = m.payload.viewSeq;
+        setTimeout(() => {
+          deliverPePanelCommand(log, ROOT, seq, { type: 'feedback_suggested', category: 'too_much_or_too_long' });
+          setTimeout(() => { deliverPePanelCommand(log, ROOT, seq, { type: 'close' }); }, 0);
+        }, 0);
+      }
+      return { ok: true };
+    };
+    await runBrowserPePopup({
+      log, projectRoot: ROOT, apiKey: null, record, sendToTab: tab,
+      feedbackStore: store,
+      onFirstRendered: vi.fn().mockResolvedValue(undefined),
+    });
+    const list = JSON.parse(store.data.get('nexpath_pe_feedback_events')!) as Array<{ event: unknown }>;
+    expect(JSON.stringify(list[0]!.event)).toContain('too_much_or_too_long');
+  });
+});

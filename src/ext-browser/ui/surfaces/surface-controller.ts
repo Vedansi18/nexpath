@@ -86,6 +86,13 @@ export interface SurfaceControllerOptions {
   doc?: Document;
   onEvent?: (event: SurfaceEvent) => void;
   resolveActivation?: ResolveActivation;
+  /**
+   * Row focus to open on (clamped). The CLI PRESERVES its interaction state
+   * across re-renders unless the body itself changed (cli-submit-popup.ts
+   * :1444-1453); a host that rebuilds this controller per render passes the
+   * previous focus back in to keep that behaviour.
+   */
+  initialFocusIndex?: number;
 }
 
 export interface SurfaceController {
@@ -257,7 +264,7 @@ export function createSurfaceController(
 
   function show(next: SurfaceModel, nextFocus = 0): void {
     model = next;
-    focusIndex = nextFocus;
+    focusIndex = Math.max(0, Math.min(interactiveRows(next).length - 1, nextFocus));
     fieldValues = interactiveRows(next)
       .filter((r) => r.kind === 'field')
       .map((r) => (r.kind === 'field' ? r.text : ''));
@@ -376,9 +383,12 @@ export function createSurfaceController(
     const surface = model.id;
     switch (surface) {
       case 'prompt_enhancement':
-        // The CLI's `close` → closed_no_send, and feedback is wired to cancel.
+        // The CLI's Esc is an IMMEDIATE close — "Feedback opens ONLY when the
+        // user chooses Use original prompt … Close / Esc / crash send nothing
+        // and show no feedback" (cli-submit-popup.ts:1469-1471, the shipped
+        // rule; the §8.3 'every cancel' comment there is stale). The PEF
+        // surface opens via Use original only.
         emit?.({ type: 'cancelled', surface });
-        switchTo('prompt_enhancement_feedback');
         return;
       case 'mps_first': {
         // Leave editor focus, preserving the draft; with no editor focused,
@@ -560,12 +570,23 @@ export function createSurfaceController(
     }, 0);
   }
 
+  // The CLI repaints its frame on terminal resize and re-syncs both field
+  // windows (GAP-2, cli-submit-popup.ts:1311-1321 + the editor's resize
+  // re-clamp). The browser reflows CSS on its own, but the fields' measured
+  // inline heights and scroll markers go stale when the dock's width changes —
+  // re-grow them.
+  function onWindowResize(): void {
+    if (destroyed) return;
+    growFields(wrapper);
+  }
+
   wrapper.addEventListener('keydown', onKeyDown);
   wrapper.addEventListener('pointerdown', onPointerDown);
   wrapper.addEventListener('focusout', onFocusOut);
   doc.addEventListener('pointerdown', onDocPointerDown, true);
+  doc.defaultView?.addEventListener('resize', onWindowResize);
 
-  show(model);
+  show(model, options.initialFocusIndex ?? 0);
 
   return {
     element: wrapper,
@@ -582,6 +603,7 @@ export function createSurfaceController(
       wrapper.removeEventListener('pointerdown', onPointerDown);
       wrapper.removeEventListener('focusout', onFocusOut);
       doc.removeEventListener('pointerdown', onDocPointerDown, true);
+      doc.defaultView?.removeEventListener('resize', onWindowResize);
       wrapper.remove();
     },
   };

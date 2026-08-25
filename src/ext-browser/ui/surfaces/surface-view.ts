@@ -90,8 +90,36 @@ export function updateFieldMarkers(field: HTMLTextAreaElement): void {
 export function growFields(root: ParentNode): void {
   const fields = [...root.querySelectorAll('textarea')];
 
+  // Pass zero applies the CLI's window policy as per-field max-heights BEFORE
+  // measuring: a field with a fixed line window (the PE details field — 5
+  // rows, `cli-submit-popup.ts:1335`) caps there; every other field fills the
+  // band adaptively (:1354-1365 — the CLI measures the chrome and gives the
+  // body the rest). Fixed caps first, so the adaptive fields measure against
+  // the already-clamped siblings, the CLI's own ordering (:1344-1346).
+  const adaptive: HTMLTextAreaElement[] = [];
+  for (const field of fields) {
+    const lines = Number(field.dataset['maxLines'] ?? '');
+    if (Number.isFinite(lines) && lines > 0) {
+      field.style.maxHeight = `${lines * FRAME_LINE_HEIGHT_PX}px`;
+    } else {
+      adaptive.push(field);
+    }
+  }
+
   // Pass one sizes each field to its content.
   for (const field of fields) autoGrow(field);
+
+  // Adaptive fill: the band's free space (what the chrome does not use) goes
+  // to the unwindowed field, floored at the CLI's 4-row minimum (:1365). Only
+  // meaningful with real layout — jsdom and hidden docks skip it.
+  for (const field of adaptive) {
+    const band = field.closest('.np-scroll') as HTMLElement | null;
+    if (!band || band.clientHeight <= 0) continue;
+    const chromeHeight = band.scrollHeight - field.offsetHeight;
+    const available = Math.max(4 * FRAME_LINE_HEIGHT_PX, band.clientHeight - chromeHeight);
+    field.style.maxHeight = `${available}px`;
+    autoGrow(field); // re-measure under the new cap
+  }
 
   // Pass two exists because pass one can invalidate its own measurement.
   // Growing a field pushes the scroll band into overflow, a scrollbar appears,
@@ -188,7 +216,7 @@ export const fieldScroller = {
 };
 
 /** The editable field beneath a `field` row's label. */
-function buildField(doc: Document, text: string, indent: 4 | 6, placeholder?: string, readOnly?: boolean): HTMLElement {
+function buildField(doc: Document, text: string, indent: 4 | 6, placeholder?: string, readOnly?: boolean, maxLines?: number): HTMLElement {
   const row = doc.createElement('div');
   row.className = 'np-row';
 
@@ -204,6 +232,8 @@ function buildField(doc: Document, text: string, indent: 4 | 6, placeholder?: st
   // honest, because a browser-blocked keystroke can never produce text the
   // engine would discard (the 2026-08-25 read-only-fallback lesson).
   if (readOnly) field.readOnly = true;
+  // The window policy marker growFields reads (see its pass zero).
+  if (maxLines !== undefined && maxLines > 0) field.dataset['maxLines'] = String(maxLines);
   // One row is the floor, not the size: `growFields` raises it to the content as
   // soon as the frame is attached. Without an inline height the field can never
   // collapse to nothing, which is the failure this replaced.
@@ -282,7 +312,11 @@ export function renderSurface(doc: Document, model: SurfaceModel, state: Surface
 
     const focused = interactiveIndex === focusIndex;
     interactiveIndex += 1;
-    scroll.appendChild(buildBulletRow(doc, row.label, focused, row.kind === 'action' ? row.tone : undefined, row.kind === 'field'));
+    // The CLI appends "  (unavailable)" to a row it cannot act on instead of
+    // hiding it (`cli-submit-popup.ts:777`) — a locked heading and unavailable
+    // details/use-original rows all say so on the row itself.
+    const rowLabel = row.unavailable ? `${row.label}  (unavailable)` : row.label;
+    scroll.appendChild(buildBulletRow(doc, rowLabel, focused, row.kind === 'action' ? row.tone : undefined, row.kind === 'field'));
 
     if (row.kind === 'action') {
       // Dim, not plain — the CLI's own comment reads "label, then dim helper"
@@ -305,7 +339,7 @@ export function renderSurface(doc: Document, model: SurfaceModel, state: Surface
     group.className = 'np-field-group';
     group.appendChild(scroll.removeChild(scroll.lastElementChild!));   // the label row
     group.appendChild(buildScrollMarkerRow(doc, fieldIndent));         // ↑ above
-    group.appendChild(buildField(doc, row.text, fieldIndent, row.placeholder, row.readOnly));
+    group.appendChild(buildField(doc, row.text, fieldIndent, row.placeholder, row.readOnly, row.maxLines));
     group.appendChild(buildScrollMarkerRow(doc, fieldIndent));         // ↓ below
     for (const hint of row.hints?.always ?? []) group.appendChild(buildHintRow(doc, hint, hintIndent));
     if (focused) {

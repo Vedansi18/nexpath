@@ -401,3 +401,52 @@ describe('clampScrollToCaret — the pure window-sync math (CLI keepCursorVisibl
     expect(clampScrollToCaret(0, 15, 0, 5)).toBeGreaterThanOrEqual(0);
   });
 });
+
+describe('field window policy — the CLI sizing rules (cli-submit-popup.ts:1335,:1354-1365)', () => {
+  it('a maxLines field gets its fixed line cap in pass zero (details = 5 rows)', async () => {
+    const { growFields } = await import('./surface-view.js');
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const field = document.createElement('textarea');
+    field.dataset['maxLines'] = '5';
+    host.appendChild(field);
+    growFields(host);
+    expect(field.style.maxHeight).toBe('75px'); // 5 × 15px
+    host.remove();
+  });
+
+  it('an unwindowed field fills the band adaptively, floored at 4 rows', async () => {
+    const { growFields } = await import('./surface-view.js');
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const band = document.createElement('div');
+    band.className = 'np-scroll';
+    const field = document.createElement('textarea');
+    band.appendChild(field);
+    host.appendChild(band);
+    Object.defineProperty(band, 'clientHeight', { value: 300 });
+    Object.defineProperty(band, 'scrollHeight', { value: 400 });
+    Object.defineProperty(field, 'offsetHeight', { value: 200 });
+    growFields(host);
+    // chrome = 400-200 = 200; available = max(60, 300-200) = 100
+    expect(field.style.maxHeight).toBe('100px');
+    host.remove();
+  });
+
+  it('the adaptive floor is the CLI 4-row minimum when the chrome eats the band', async () => {
+    const { growFields } = await import('./surface-view.js');
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const band = document.createElement('div');
+    band.className = 'np-scroll';
+    const field = document.createElement('textarea');
+    band.appendChild(field);
+    host.appendChild(band);
+    Object.defineProperty(band, 'clientHeight', { value: 100 });
+    Object.defineProperty(band, 'scrollHeight', { value: 500 });
+    Object.defineProperty(field, 'offsetHeight', { value: 50 });
+    growFields(host);
+    expect(field.style.maxHeight).toBe('60px'); // max(60, 100-450) — the floor
+    host.remove();
+  });
+});

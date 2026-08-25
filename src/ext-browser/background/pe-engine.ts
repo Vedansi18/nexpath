@@ -38,6 +38,16 @@ export {
 } from '../../prompt-enhancement/contracts.js';
 export { isPromptEnhancementSequenceShapedTextV1 } from '../../prompt-enhancement/routing-taxonomy.js';
 export { emitPromptEnhancementCostObservabilityV1 } from '../../prompt-enhancement/cost-measurement.js';
+// The CLI PEF's feedback state machine — pure builders the popup host uses to
+// turn a panel feedback command into the engine's own submitted event shape
+// before persisting it (cli-submit-popup.ts:341-368 uses the same functions).
+export {
+  buildPromptEnhancementFeedbackAdapterStateV1,
+  openPromptEnhancementFeedbackV1,
+  editPromptEnhancementOtherFeedbackV1,
+  submitPromptEnhancementSuggestedFeedbackV1,
+  submitPromptEnhancementOtherFeedbackV1,
+} from '../../prompt-enhancement/feedback-adapter.js';
 export { getSourceRealityAdaptersSnapshot } from '../../prompt-enhancement/source-reality.js';
 export {
   promptEnhancementAbsenceSignalKeyV1,

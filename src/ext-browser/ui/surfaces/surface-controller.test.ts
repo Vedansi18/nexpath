@@ -237,13 +237,13 @@ describe('cancel is where feedback opens (§8.3)', () => {
     expect(host.textContent).toContain('Prompt enhancement feedback');
   });
 
-  it('Escape on PE cancels into PEF', () => {
+  it('Escape on PE cancels WITHOUT opening PEF — the CLI\'s shipped rule: feedback opens only via Use original (cli-submit-popup.ts:1469-1471)', () => {
     const c = mount();
 
     key(c.element, 'Escape');
 
     expect(events).toEqual([{ type: 'cancelled', surface: 'prompt_enhancement' }]);
-    expect(c.getModel().id).toBe('prompt_enhancement_feedback');
+    expect(c.getModel().id).toBe('prompt_enhancement'); // stays — the host closes the popup
   });
 });
 
@@ -923,5 +923,23 @@ describe('caret follow — the CLI\'s keepCursorVisible for the windowed field (
     key(c.element, 'ArrowDown');
     key(c.element, 'ArrowUp');
     expect(follow).not.toHaveBeenCalled();
+  });
+});
+
+describe('window resize re-grows the fields (the CLI repaints on terminal resize, GAP-2)', () => {
+  it('a resize event re-runs the attached grow pass', () => {
+    const proto = HTMLTextAreaElement.prototype;
+    Object.defineProperty(proto, 'scrollHeight', {
+      configurable: true,
+      get(this: HTMLTextAreaElement) { return this.isConnected ? 42 : 0; },
+    });
+    try {
+      mount();
+      bodyField().style.height = '1px';          // pretend the reflow staled it
+      window.dispatchEvent(new Event('resize'));
+      expect(bodyField().style.height).toBe('42px'); // re-grown
+    } finally {
+      delete (proto as unknown as Record<string, unknown>)['scrollHeight'];
+    }
   });
 });

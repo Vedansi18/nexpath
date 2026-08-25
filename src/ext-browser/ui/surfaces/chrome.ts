@@ -278,10 +278,11 @@ export const CHROME_STYLES = `
     width: 100%;
     display: block;
     resize: none;
-    /* Capped, and scrollable once capped. overflow:hidden would clip the text
-       with no way to reach it. The cap is in px because the lh unit is Firefox
-       120, above the 112 floor. */
-    max-height: 210px;
+    /* Scrollable once capped; overflow:hidden would clip the text with no way
+       to reach it. The cap itself is no longer a CSS constant: growFields sets
+       per-field inline max-heights the CLI's way — the details field windows
+       at 5 lines (cli-submit-popup.ts:1335) and the body fills the remaining
+       band adaptively (:1354-1365), instead of one fixed 14-line cap. */
     overflow-x: hidden;
     overflow-y: auto;
   }
