@@ -51,6 +51,21 @@ describe('half B — a purpose the body assigned with no source', () => {
     expect(findings[0]!.kind).toBe('purpose_assigned_without_source');
   });
 
+  it('a purpose the PROJECT FACTS supply is sourced — not a finding', () => {
+    // Half B asks whether a purpose has a source, and a source fact is a source. Without this
+    // allowance a correctly-grounded body would block, which is exactly what this layer must
+    // never do — the same allowed-texts discipline every other layer here applies.
+    expect(findPromptEnhancementNounPurposeFindingsV1({
+      nounPurposes: [{ noun: 'github token', purposeInPrompt: null, purposeInBody: 'for deploys' }],
+      originalPromptText: 'add login so nobody else can see my dashboard, i connected github with token ghp_abc123def456ghi789',
+      groundedTexts: ['the github token is used for deploys'],
+    })).toEqual([]);
+  });
+
+  it('the same purpose with NO source is still a finding', () => {
+    expect(judge([{ noun: 'github token', purposeInPrompt: null, purposeInBody: 'for deploys' }])).toHaveLength(1);
+  });
+
   it('the halves are disjoint — nothing is reported twice', () => {
     const findings = judge([
       { noun: 'token', purposeInPrompt: 'for deploys', purposeInBody: 'for login' },

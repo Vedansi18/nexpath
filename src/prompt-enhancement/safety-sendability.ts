@@ -446,6 +446,12 @@ export function validatePromptEnhancementSafety(
     for (const finding of findPromptEnhancementNounPurposeFindingsV1({
       nounPurposes: input.nounPurposes,
       originalPromptText: input.currentBody.originalPromptText,
+      // The same allowance inputs every other layer uses: what the body was allowed to ground in.
+      groundedTexts: input.currentBody.sections.flatMap((section) => [
+        ...section.sourceFactIds,
+        ...section.sourceIds,
+        ...(section.groundedFactValues ?? []),
+      ]),
     })) {
       failures.push(failure({
         failureCode: `noun_purpose_transposition:${finding.kind}:${finding.noun}`,

@@ -70,11 +70,15 @@ function normalizeEntry(
 ): PromptEnhancementNounPurposeV1 {
   const stated = typeof entry.purposeInPrompt === 'string' ? entry.purposeInPrompt.trim() : '';
   if (stated.length === 0) return { ...entry, purposeInPrompt: null };
-  const promptLower = originalPromptText.toLowerCase();
-  const supported = stated.toLowerCase().split(/\s+/)
-    .filter((word) => word.length > 3)
-    .some((word) => promptLower.includes(word));
-  return { ...entry, purposeInPrompt: supported ? stated : null };
+  return { ...entry, purposeInPrompt: isSupportedBy(stated, [originalPromptText]) ? stated : null };
+}
+
+/** Does any contentful word of this purpose appear in the given texts? */
+function isSupportedBy(purpose: string, texts: readonly string[]): boolean {
+  if (texts.length === 0) return false;
+  const haystack = texts.join(String.fromCharCode(10)).toLowerCase();
+  const words = purpose.toLowerCase().split(/\s+/).filter((word) => word.length > 3);
+  return words.length > 0 && words.some((word) => haystack.includes(word));
 }
 
 /** Two purposes are the same when neither says anything the other does not. */
@@ -94,6 +98,14 @@ function purposesMatch(promptPurpose: string, bodyPurpose: string): boolean {
 export function findPromptEnhancementNounPurposeFindingsV1(input: {
   readonly nounPurposes: unknown;
   readonly originalPromptText: string;
+  /**
+   * What else could have SOURCED a purpose: the resolved values of the facts the body was
+   * allowed to ground in. Half B asks whether a purpose has a source, and a project fact is a
+   * source — the same allowance discipline the invention gate applies, reused rather than
+   * re-invented. Without it a correctly-grounded body would be reported as unsourced, and this
+   * layer blocks whole popups.
+   */
+  readonly groundedTexts?: readonly string[];
 }): readonly PromptEnhancementNounPurposeFindingV1[] {
   if (!Array.isArray(input.nounPurposes)) return [];
   const findings: PromptEnhancementNounPurposeFindingV1[] = [];
@@ -101,7 +113,9 @@ export function findPromptEnhancementNounPurposeFindingsV1(input: {
     if (!isPromptEnhancementNounPurposeV1(raw)) continue;
     const entry = normalizeEntry(raw, input.originalPromptText);
     if (entry.purposeInPrompt === null) {
-      // Half B: the developer assigned no purpose and the body assigns one.
+      // Half B: the developer assigned no purpose. A purpose the allowed source facts DO supply
+      // is sourced, so it is not a finding — only an unsourced one is.
+      if (isSupportedBy(entry.purposeInBody, input.groundedTexts ?? [])) continue;
       findings.push({
         noun: entry.noun,
         kind: 'purpose_assigned_without_source',
