@@ -50,7 +50,10 @@ const ACCEPTANCE_MARKERS: readonly RegExp[] = [
  */
 const VERIFICATION_MARKERS: readonly RegExp[] = [
   /\b(?:make sure|check that|verify that|confirm that|test that)\b\s*(?<stated>[^.!?\n]{12,180})/i,
-  /\b(?:run|rerun|re-run)\b\s+(?<stated>(?:the\s+)?[\w.\-/]+\s+(?:test|tests|suite|check|checks|build)[^.!?\n]{0,120})/i,
+  // The verb rides INSIDE the quote: "run the test suite" is what the developer asked for, and
+  // dropping it left a noun fragment that read oddly under the fact's own framing. Measured inert
+  // either way against the authority and risk scanners, so the clearer form is the one used.
+  /\b(?<stated>(?:run|rerun|re-run)\s+(?:the\s+)?[\w.\-/]+\s+(?:test|tests|suite|check|checks|build)[^.!?\n]{0,120})/i,
   /\b(?:i (?:usually |always )?test(?: it)? by|to test this)\b\s*(?<stated>[^.!?\n]{12,180})/i,
 ];
 

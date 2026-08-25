@@ -286,6 +286,32 @@ describe('extraction discipline — never a fragment, never a manufactured state
   });
 });
 
+describe('the rendered fact stays inert to the safety scanners', () => {
+  // New body text on real popups, and every validator in this milestone reads body text. A quoted
+  // expectation that read as an instruction to act, or that named a risk kind, would change when
+  // the confirmation line fires — on material the developer merely described.
+  it('real developer statements render as plan-or-review, naming no risk', async () => {
+    const { promptEnhancementAuthorityModeForTextV1, promptEnhancementRiskKindsForTextV1 } = await import('./safety-sendability.js');
+    const statements = [
+      'run the test suite and fix any failures from the multi-tenant changes',
+      "queries for one company never return another company's records, including via raw SQL fall-through",
+      'book appointments online, staff should manage their calendar, and the salon owner needs a dashboard',
+      'pause bookings for a specific staff member — useful when someone is on leave',
+      'the whole invoicing section works together',
+    ];
+    for (const statement of statements) {
+      const rendered = `the check you asked for appears to be "${statement}" (seen earlier this session) — confirm before relying on it.`;
+      expect(promptEnhancementAuthorityModeForTextV1(rendered), statement).not.toBe('execute_requested');
+      expect(promptEnhancementRiskKindsForTextV1(rendered), statement).toEqual([]);
+    }
+  });
+
+  it('a verification ask keeps the developer verb inside the quote', () => {
+    const found = promptHistoryVerificationAsksV1(['run the test suite and fix any failures from the multi-tenant changes']);
+    expect(found[0]!.statedText.startsWith('run ')).toBe(true);
+  });
+});
+
 describe('the cap — new supply must not push welcome content out', () => {
   it('the pruner keeps its floor sections when the new facts arrive', async () => {
     // Supply and the cap pull against each other, and the cap was lowered deliberately. New facts
