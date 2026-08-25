@@ -2187,6 +2187,8 @@ describe('validated PE preparation boundary', () => {
           intentConfidence: 0.8,
           capabilityCandidates: ['capability.confirmation_needed'],
           debugEvidencePresent: ['logs', 'failing_test_details'],
+          sensitiveActionVerdict: 'not_proposed',
+          sensitiveActionReason: 'the risky word names a CSS effect only',
         },
         streamBOutputs: [],
       });
@@ -2200,6 +2202,12 @@ describe('validated PE preparation boundary', () => {
       expect(request.reviewMomentContext.triggerProvenance.classifierIntentConfidence).toBe(0.8);
       expect(request.reviewMomentContext.triggerProvenance.classifierCapabilityCandidates).toEqual(['capability.confirmation_needed']);
       expect(request.reviewMomentContext.triggerProvenance.classifierDebugEvidencePresent).toEqual(['logs', 'failing_test_details']);
+      // The sensitive-action clearance rides the same provenance, verdict + reason together —
+      // and only when the verdict exists (a degraded call omits the field: the fail-closed state).
+      expect(request.reviewMomentContext.triggerProvenance.classifierSensitiveActionClearance).toEqual({
+        verdict: 'not_proposed',
+        reason: 'the risky word names a CSS effect only',
+      });
       expect(request.sourceSignals.promptStartStop.runAutoCanHoldOrReplaceSubmittedPrompt).toBe(false);
 
       const result = await preparePromptEnhancement(request);

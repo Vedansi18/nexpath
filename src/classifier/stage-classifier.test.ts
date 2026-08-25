@@ -102,6 +102,10 @@ describe('stage-classifier — degrade path (model unavailable)', () => {
     const expected = await classifyPrompt(text);
     const out = await classifyStage(input(text), throwingClient());
     expect(out.degraded).toBe(true);
+    // The sensitive-action observation is OMITTED on the degraded path — absence is the
+    // fail-closed state (the confirmation line emits exactly as today).
+    expect(out.sensitiveActionVerdict).toBeUndefined();
+    expect(out.sensitiveActionReason).toBeUndefined();
     expect(out.classification.stage).toBe(expected.stage);
     expect(out.classification.confidence).toBe(expected.confidence);
     expect(out.fireRecommendation).toBe(false);
