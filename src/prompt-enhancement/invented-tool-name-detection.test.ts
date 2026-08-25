@@ -111,6 +111,54 @@ describe('the matcher discipline — case-insensitive, whole-word, never a capit
   });
 });
 
+describe('the live consumer — a list-caught name reaches the validator as a blocking failure', () => {
+  it('a lowercase curated name on a no_invention_state section blocks through validatePromptEnhancementSafety', async () => {
+    // The census suite proves the obligation is enforced, but its probe item (RabbitMQ) is
+    // shape-caught by the OLD pattern — this row proves the CURATED loop's catches ride the
+    // same live path: lowercase "redis" is invisible to every shape pattern and must still
+    // produce the blocking fabricated-item failure, in list casing.
+    const { validatePromptEnhancementSafety } = await import('./safety-sendability.js');
+    const { routePromptEnhancement } = await import('./routing-taxonomy.js');
+    const { planPromptEnhancementSections } = await import('./templates/section-plan.js');
+    const { composePromptEnhancementBody } = await import('./compose-enhancement.js');
+    const route = routePromptEnhancement({
+      routeDecisionId: 'layer0-route',
+      promptText: 'speed up my dashboard',
+      currentStage: 'implementation',
+      prevStage: 'task_breakdown',
+      triggerKind: 'absence',
+      firedKey: 'absence:verification_gap@implementation',
+      effectiveFiredSource: 'classifier_fire_recommendation',
+      selectedQualifyingAbsence: 'verification_gap',
+      absenceGateReason: 'selected_qualifying_absence',
+      classifierState: 'fire_recommended',
+      degradedNoActionState: 'none',
+      generatedOriginState: 'ordinary_user_prompt',
+    });
+    const planning = planPromptEnhancementSections({
+      routeResult: route,
+      sourceRefs: [{
+        sourceRefId: 'src-a-1', sourceKind: 'source_a_user_prompt', sourceId: 'prompt:layer0-1',
+        freshness: 'current', confidence: 'high', privacyClass: 'local_private',
+      }],
+      guidanceFacts: [],
+    });
+    const body = composePromptEnhancementBody({
+      enhancementId: 'layer0-enh',
+      originalPromptText: 'speed up my dashboard',
+      sectionPlanningResult: planning,
+    }).currentBody;
+    const targetIndex = body.sections.findIndex((section) => section.sectionKind !== 'original_request_or_goal');
+    const sections = body.sections.map((section, index) => index === targetIndex
+      ? { ...section, slotObligations: ['no_invention_state' as const], bodyText: 'wire redis into the cache layer' }
+      : section);
+    const validation = validatePromptEnhancementSafety({ currentBody: { ...body, sections } });
+    expect(validation.failures.map((failure) => failure.failureCode))
+      .toContain('no_invention_state:fabricated_item:Redis');
+    expect(validation.sendPolicy).toBe('no_send');
+  });
+});
+
 describe('the gate predicate — known name OR credential-shaped token, with its recorded cost', () => {
   it('a known tool name gates in', () => {
     expect(textNamesKnownToolOrCredentialV1('wire up Redis caching for the feed')).toBe(true);
