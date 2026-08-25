@@ -254,3 +254,17 @@ describe('dock furniture', () => {
     expect(document.getElementById(NEXPATH_DOCK_HOST_ID)).toBeNull();
   });
 });
+
+describe('chrome styles (live-caught 2026-08-25: unstyled transparent dock)', () => {
+  it('show() installs the CLI frame stylesheet into the dock shadow root exactly once', () => {
+    adapter.show(view());
+    const dockShadow = shadowRoots.find((r) => r.querySelector('.np-surface-root'))!;
+    const styleNodes = [...dockShadow.querySelectorAll('style')]
+      .filter((s) => s.textContent?.includes('.np-frame'));
+    expect(styleNodes.length).toBeGreaterThanOrEqual(1);
+    adapter.show(view({ viewSeq: 2 }));
+    const after = [...dockShadow.querySelectorAll('style')]
+      .filter((s) => s.textContent?.includes('.np-frame'));
+    expect(after.length).toBe(styleNodes.length); // once per dock lifetime, not per show
+  });
+});

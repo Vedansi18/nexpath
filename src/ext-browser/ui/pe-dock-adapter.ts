@@ -35,6 +35,7 @@ import type {
 } from './pe-contract.js';
 import type { SurfaceModel, SurfaceRow } from './surfaces/surface-model.js';
 import { mountNexpathDock, type NexpathDockController } from './surfaces/dock.js';
+import { installChromeStyles } from './surfaces/chrome.js';
 import {
   createSurfaceController,
   type SurfaceController,
@@ -261,6 +262,11 @@ export function mountNexpathPeDock(opts: PeDockAdapterOptions): PePanelControlle
         dock?.hide();
       },
     });
+    // The CLI frame's stylesheet lives in chrome.ts and must be installed into
+    // the dock's shadow root ONCE, exactly as the harness does — without it the
+    // surfaces render as unstyled transparent text over the agent page
+    // (live-caught on Bolt, 2026-08-25).
+    installChromeStyles(dock.mountEl.getRootNode() as ShadowRoot);
     return dock;
   };
 
