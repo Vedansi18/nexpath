@@ -156,6 +156,11 @@ function translate(
   command: PePanelCommandV1,
   loopView: PromptEnhancementCliPopupViewV1,
 ): { first: PromptEnhancementCliPopupCommandV1; stash?: PromptEnhancementCliPopupCommandV1 } {
+  // An explicit local edit (the dock's CLI-parity details merge): the engine's
+  // own edit_body, nothing stashed — the loop re-renders with the new text.
+  if (command.type === 'edit_body') {
+    return { first: { type: 'edit_body', text: command.bodyText } };
+  }
   const bodyText = 'bodyText' in command ? command.bodyText : undefined;
   const needsEdit = bodyText !== undefined
     && loopView.model.body.editable

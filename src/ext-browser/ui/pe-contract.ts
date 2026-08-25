@@ -99,6 +99,12 @@ export type PePanelCommandV1 =
   | { type: 'more_project_grounded'; bodyText: string }
   | { type: 'go_back' }
   | { type: 'close' }
+  /**
+   * The panel merged/edited the body LOCALLY (the CLI-parity details merge in
+   * the dock) — non-terminal; the engine records it as its own edit_body so
+   * editedBodyText tracks what the user sees.
+   */
+  | { type: 'edit_body'; bodyText: string }
   /** v1 feedback: content-free suggested category only — never free text. */
   | { type: 'feedback_suggested'; category: 'not_relevant_enough' | 'too_much_or_too_long' }
   // MPS-1 offer outcomes (valid only while a sequence-offer view is live).
@@ -124,7 +130,7 @@ export interface PePanelControllerV1 {
 const COMMAND_TYPES = new Set([
   'use_current', 'use_original', 'apply_details', 'shorter',
   'more_thorough', 'more_project_grounded', 'go_back', 'close',
-  'feedback_suggested',
+  'edit_body', 'feedback_suggested',
   'mps_send', 'mps_decline', 'mps_cancel',
 ]);
 const TEXT_FREE_COMMANDS = new Set(['use_original', 'go_back', 'close', 'mps_decline', 'mps_cancel']);

@@ -447,3 +447,21 @@ describe('sequence master switch (CLI default parity — upstream defaulted sequ
     expect(events.map(([k]) => k)).not.toContain('pe_mps_gated_sequence_disabled');
   });
 });
+
+describe('edit_body command (the dock\'s CLI-parity local details merge)', () => {
+  it('an explicit edit_body flows through the ENGINE\'s edit path and the merged text is what a later send carries', async () => {
+    const { log } = makeLog();
+    const merged = 'Enhanced base\n\nAdditional details to incorporate:\nkeep the retry helper';
+    const { sendToTab } = scriptedTab(log, [
+      () => ({ type: 'edit_body', bodyText: merged } as never),
+      () => ({ type: 'use_current', bodyText: merged }),
+    ]);
+    const { result } = await runBrowserPePopup({
+      log, projectRoot: ROOT, apiKey: null, record, sendToTab,
+      onFirstRendered: vi.fn().mockResolvedValue(undefined),
+    });
+    expect(result.state).toBe('selected_current');
+    if (result.state !== 'selected_current') return;
+    expect(result.bodyText).toContain('keep the retry helper');
+  });
+});

@@ -111,11 +111,14 @@ describe('C-3 — the Firefox 112 floor, over the whole layer', () => {
   });
 });
 
-describe('C-5 — the layer stays out of the shipped bundle', () => {
-  it('no module outside the layer imports from it', () => {
-    // This is what makes the bundle delta zero: not tree-shaking luck, but the
-    // layer never entering an entry graph at all. A single import from
-    // inject.ts would pull the whole thing in.
+describe('C-5 successor — the layer is wired through exactly ONE seam', () => {
+  it('pe-dock-adapter.ts is the only module outside the layer that imports from it', () => {
+    // C-5 originally kept the layer OUT of the shipped bundle ("nothing is
+    // wired yet"). The integration step (2026-08-25, owner-directed) is what
+    // lifted that constraint: the dock now renders the live PE/MPS/PEF flow.
+    // The guard's SPIRIT survives as single-seam discipline — every import of
+    // the layer goes through the pe-dock-adapter bridge, so the coupling stays
+    // auditable in one file and a second entry point still fails this test.
     const offenders: string[] = [];
     const walk = (dir: string, rel: string): void => {
       for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -129,6 +132,6 @@ describe('C-5 — the layer stays out of the shipped bundle', () => {
     };
     walk(resolve(process.cwd(), 'src/ext-browser'), '');
 
-    expect(offenders).toEqual([]);
+    expect(offenders).toEqual(['ui/pe-dock-adapter.ts']);
   });
 });

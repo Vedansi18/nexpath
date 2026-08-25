@@ -20,7 +20,10 @@
  */
 
 import { isPeCloseMsg, isPeInjectMsg, isShowPeMsg } from './ipc.js';
-import { mountNexpathPePanel } from '../ui/pe-panel.js';
+// The renderer is the UI developer's dock (PR #1) behind the pe-dock-adapter
+// bridge — same PePanelControllerV1 contract the retired pe-panel implemented,
+// so nothing else in this file or SW-side changed for the swap.
+import { mountNexpathPeDock } from '../ui/pe-dock-adapter.js';
 import type { PePanelControllerV1, PePanelEventV1 } from '../ui/pe-contract.js';
 import { injectPromptText } from './inject-dispatch.js';
 import { showToast } from './agents/inject-kit.js';
@@ -31,7 +34,6 @@ const TERMINAL_WATCHDOG_MS = 12_000;
 const SUPPORTED_SCHEMA_VERSION = 1;
 
 let controller: PePanelControllerV1 | null = null;
-let panelHost: HTMLDivElement | null = null;
 let keepaliveTimer: ReturnType<typeof setInterval> | null = null;
 let watchdogTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -76,26 +78,10 @@ function closePanel(): void {
   controller?.hide();
 }
 
-function moveHostBy(dx: number, dy: number): void {
-  if (!panelHost) return;
-  const r = panelHost.getBoundingClientRect();
-  panelHost.style.left = `${Math.round(r.left + dx)}px`;
-  panelHost.style.top = `${Math.round(r.top + dy)}px`;
-  panelHost.style.transform = 'none';
-}
-
-function recenterHost(): void {
-  if (!panelHost) return;
-  panelHost.style.left = '50%';
-  panelHost.style.top = '50%';
-  panelHost.style.transform = 'translate(-50%, -50%)';
-}
-
 function handlePanelEvent(event: PePanelEventV1): void {
-  if (event.type === 'move') {
-    moveHostBy(event.dx, event.dy);
-    return;
-  }
+  // 'move' is a retired pe-panel affordance — the dock owns its geometry
+  // (right-docked with collapse); the contract still carries the event type.
+  if (event.type === 'move') return;
   // One user command → one short-lived runtime message (the injector attaches
   // the project root + forwards). Panel goes busy until the SW's next view —
   // EXCEPT feedback: it's non-terminal and produces no re-render (the SW only
@@ -113,19 +99,14 @@ function handlePanelEvent(event: PePanelEventV1): void {
   }
 }
 
-/** Lazily create the closed shadow host + mount the PE panel once. */
+/**
+ * Mount the dock adapter once per content-script lifetime. The dock owns its
+ * host element, closed shadow root, geometry, and re-attach guard (D1.5) — the
+ * old panel-host plumbing that lived here moved behind the adapter.
+ */
 function ensureMounted(): PePanelControllerV1 {
   if (controller) return controller;
-  panelHost = document.createElement('div');
-  panelHost.id = 'nexpath-pe-panel-host';
-  panelHost.style.cssText =
-    'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);' +
-    'z-index:2147483647;max-height:calc(100vh - 40px);overflow-y:auto;';
-  document.body.appendChild(panelHost);
-  const shadow = panelHost.attachShadow({ mode: 'closed' });
-  const mountEl = document.createElement('div');
-  shadow.appendChild(mountEl);
-  controller = mountNexpathPePanel(mountEl, { onEvent: handlePanelEvent });
+  controller = mountNexpathPeDock({ onEvent: handlePanelEvent });
   return controller;
 }
 
@@ -140,8 +121,6 @@ export function setupPeListener(): void {
       }
       clearWatchdog(); // a fresh view answers whatever command was in flight
       const ctrl = ensureMounted();
-      if (panelHost && !panelHost.isConnected) document.body.appendChild(panelHost);
-      if (!ctrl.isOpen()) recenterHost(); // first show centers; re-renders keep the drag position
       ctrl.show(msg.payload);
       startKeepalive();
       // Ack AFTER the mount so the SW's first-render bookkeeping (consume row,
@@ -173,7 +152,5 @@ export function setupPeListener(): void {
     stopKeepalive();
     controller?.destroy();
     controller = null;
-    panelHost?.remove();
-    panelHost = null;
   });
 }

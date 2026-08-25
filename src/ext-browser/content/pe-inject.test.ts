@@ -31,7 +31,7 @@ const { injectPromptTextMock, showToastMock, controller, mountMock } = vi.hoiste
 });
 vi.mock('./inject-dispatch.js', () => ({ injectPromptText: injectPromptTextMock }));
 vi.mock('./agents/inject-kit.js', () => ({ showToast: showToastMock }));
-vi.mock('../ui/pe-panel.js', () => ({ mountNexpathPePanel: mountMock }));
+vi.mock('../ui/pe-dock-adapter.js', () => ({ mountNexpathPeDock: mountMock }));
 
 let onEvent: (event: PePanelEventV1) => void;
 const liveSpies: Array<[string, EventListener]> = [];
@@ -77,7 +77,7 @@ beforeEach(() => {
   controller.show.mockImplementation(() => { controller.openFlag = true; });
   controller.hide.mockImplementation(() => { controller.openFlag = false; });
   controller.isOpen.mockImplementation(() => controller.openFlag);
-  mountMock.mockImplementation((_el: HTMLElement, opts: { onEvent: typeof onEvent }) => {
+  mountMock.mockImplementation((opts: { onEvent: typeof onEvent }) => {
     onEvent = opts.onEvent;
     return controller;
   });
@@ -89,12 +89,9 @@ afterEach(() => {
 });
 
 describe('show-pe handling', () => {
-  it('mounts into a closed-shadow host, shows the view, and acks AFTER the mount', () => {
+  it('mounts the dock adapter once, shows the view, and acks AFTER the mount', () => {
     const ack = spyEvent('nexpath:pe-view-ack');
     showPe();
-    const host = document.getElementById('nexpath-pe-panel-host');
-    expect(host).toBeTruthy();
-    expect(host!.shadowRoot).toBeNull(); // closed shadow — invisible to the page
     expect(mountMock).toHaveBeenCalledTimes(1);
     expect(controller.show).toHaveBeenCalledWith(expect.objectContaining({ viewSeq: 1 }));
     expect(ack.calls).toHaveLength(1);
@@ -138,12 +135,9 @@ describe('command bridging', () => {
     expect(out.calls).toHaveLength(1);
   });
 
-  it('a move event drags the host and converts the centered transform to px', () => {
+  it('a move event is a no-op (the dock owns its geometry; contract still carries the type)', () => {
     showPe();
-    const host = document.getElementById('nexpath-pe-panel-host')!;
-    onEvent({ type: 'move', dx: 30, dy: -10 });
-    expect(host.style.transform).toBe('none');
-    expect(host.style.left.endsWith('px')).toBe(true);
+    expect(() => onEvent({ type: 'move', dx: 30, dy: -10 })).not.toThrow();
   });
 });
 
@@ -198,7 +192,6 @@ describe('pagehide teardown', () => {
     showPe();
     window.dispatchEvent(new Event('pagehide'));
     expect(controller.destroy).toHaveBeenCalled();
-    expect(document.getElementById('nexpath-pe-panel-host')).toBeNull();
     vi.advanceTimersByTime(60_000);
     expect(beat.calls).toHaveLength(0);
   });
