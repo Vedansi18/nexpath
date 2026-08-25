@@ -23,10 +23,6 @@ covers how to change it.
 - Output of `nexpath status` — plus `nexpath log` for advisory or popup issues
   (`NEXPATH_DEBUG=1` for verbose stderr)
 
-> 🔐 Found a security vulnerability?
-> [Report it privately](https://github.com/hi0001234d/nexpath/security/advisories/new), not in a
-> public issue.
->
 > ⚠️ `nexpath status` dumps your config and `nexpath log` may contain your prompts — redact before
 > pasting.
 
@@ -35,9 +31,6 @@ covers how to change it.
 - Open an issue first — except typos, small bug fixes, and type-only changes
 - State the problem, your approach, and why it belongs in Nexpath
 - Wait for maintainer approval. **PRs without an approved issue may be closed.**
-- New here? Start with
-  [`good first issue`](https://github.com/hi0001234d/nexpath/labels/good%20first%20issue) or
-  [`help wanted`](https://github.com/hi0001234d/nexpath/labels/help%20wanted)
 
 ## Common Checks
 
