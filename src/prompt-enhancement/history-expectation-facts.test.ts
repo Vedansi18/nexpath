@@ -55,7 +55,7 @@ function historySignals(recentPrompts: readonly string[]) {
     groundingTierByRef[ref] = 'uncorroborated';
     groundingPolarityByRef[ref] = 'present';
     groundingEvidenceByRef[ref] = {
-      key: 'what you said done looks like',
+      key: 'what you said done means',
       value: promptHistoryExpectationEvidenceValueV1(expectation),
       runtimePath: 'local_store',
       anchorScope: 'current_prompt_scope',
@@ -67,7 +67,7 @@ function historySignals(recentPrompts: readonly string[]) {
     groundingTierByRef[ref] = 'uncorroborated';
     groundingPolarityByRef[ref] = 'present';
     groundingEvidenceByRef[ref] = {
-      key: 'how you said it gets checked',
+      key: 'the check you asked for',
       value: promptHistoryExpectationEvidenceValueV1(expectation),
       runtimePath: 'local_store',
       anchorScope: 'current_prompt_scope',
@@ -137,9 +137,10 @@ describe('the detectors return the developer own words, or nothing', () => {
   });
 
   it('the rendered value quotes them and attributes it to their own history', () => {
+    // Their words, quoted, and nothing else: the renderer supplies the framing, so narration here
+    // would be narrated twice — measured as filler on a real body before this was corrected.
     const value = promptHistoryExpectationEvidenceValueV1({ statedText: STATED_ACCEPTANCE, promptsAgo: 0 });
-    expect(value).toContain('you said in your last prompt');
-    expect(value).toContain(STATED_ACCEPTANCE);
+    expect(value).toBe(`"${STATED_ACCEPTANCE}"`);
   });
 });
 

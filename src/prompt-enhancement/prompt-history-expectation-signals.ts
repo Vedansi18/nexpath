@@ -97,8 +97,15 @@ export function promptHistoryVerificationAsksV1(
   return extractStated(recentPrompts, VERIFICATION_MARKERS);
 }
 
-/** How the fact states the material: the developer's own words, attributed to their own history. */
+/**
+ * The value the fact carries: the developer's own words, quoted, and nothing else.
+ *
+ * The renderer already frames a possibility-clamped fact ("<key> appears to be <value> … — confirm
+ * before relying on it"), so any narration added here would be narrated twice. Measured on a real
+ * body before this was fixed: "what you said done looks like appears to be you said in a recent
+ * prompt: ..." — a sentence that says the same thing three ways and reads as filler, which is
+ * exactly the failure this phase must not cause.
+ */
 export function promptHistoryExpectationEvidenceValueV1(expectation: PromptHistoryExpectationV1): string {
-  const when = expectation.promptsAgo === 0 ? 'in your last prompt' : 'in a recent prompt';
-  return `you said ${when}: "${expectation.statedText}"`;
+  return `"${expectation.statedText}"`;
 }

@@ -576,7 +576,9 @@ export function buildPromptEnhancementGuidanceFactsV1(
         sourceRuntimePath: statedResolved.runtimePath,
         sourceAnchorScope: statedResolved.anchorScope,
         confidenceBand: 'low',
-        recencyBand: 'recent_project',
+        // They wrote it in this session's recent prompts. "A recent project check" would credit a
+        // probe that never ran, and a fact that misstates where it came from is worse than none.
+        recencyBand: 'current_session',
         publicCopySafe: false,
       });
       continue;

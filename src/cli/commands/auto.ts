@@ -403,7 +403,7 @@ export function buildPromptEnhancementGroundingRefsV1(store: Store, projectRoot:
       groundingTierByRef[ref] = 'uncorroborated';
       groundingPolarityByRef[ref] = 'present';
       groundingEvidenceByRef[ref] = {
-        key: 'what you said done looks like',
+        key: 'what you said done means',
         value: promptHistoryExpectationEvidenceValueV1(expectation),
         runtimePath: 'local_store',
         anchorScope: 'current_prompt_scope',
@@ -415,7 +415,7 @@ export function buildPromptEnhancementGroundingRefsV1(store: Store, projectRoot:
       groundingTierByRef[ref] = 'uncorroborated';
       groundingPolarityByRef[ref] = 'present';
       groundingEvidenceByRef[ref] = {
-        key: 'how you said it gets checked',
+        key: 'the check you asked for',
         value: promptHistoryExpectationEvidenceValueV1(expectation),
         runtimePath: 'local_store',
         anchorScope: 'current_prompt_scope',
