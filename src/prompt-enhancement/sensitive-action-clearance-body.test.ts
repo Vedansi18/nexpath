@@ -285,9 +285,10 @@ describe('the floors stay armed — a clearance changes the confirmation line, n
 
 describe('the activation is REVERTED — pinned so it cannot silently return without a passing measurement', () => {
   it('the system prompt does NOT request the sensitive-action verdict (the clearance pathway is inert)', () => {
-    // Reverted after the live acceptance measurement: the model wrongly cleared genuinely
-    // risky imperatives, and the recall floor is absolute. Re-activating requires the
-    // owner's decision plus a measurement that passes the floor - not a code edit alone.
+    // Two live measurement runs failed the absolute recall floor (a risky imperative was
+    // wrongly cleared both times, once against its own verbatim counter-example). The
+    // block stays out; re-activation is an owner decision with a revised design that
+    // passes the gated runner - never a code edit alone.
     expect(STAGE_CLASSIFIER_SYSTEM_PROMPT).not.toContain('SENSITIVE-ACTION OBSERVATION');
     expect(STAGE_CLASSIFIER_SYSTEM_PROMPT).not.toContain('sensitive_action_verdict');
     expect(STAGE_CLASSIFIER_SYSTEM_PROMPT).not.toContain('sensitive_action_reason');

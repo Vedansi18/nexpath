@@ -174,28 +174,53 @@ const INTENT_MENU_BLOCK = [
  * 'proposed'/omission whenever unsure — a wrong 'not_proposed' is the only dangerous
  * direction.
  */
-// ⛔ REVERTED 2026-08-25 after the live acceptance measurement: the model wrongly cleared
-// genuinely risky imperatives (dependency install; publish-and-notify), losing 2 of the
-// risky rows' confirmation sentences. The recall floor is absolute — one row down and the
-// activation comes back out — so this block is NOT wired into the system prompt and the
-// reply fields are never requested: the clearance pathway stays fully inert (absent ⇒ the
-// confirmation emits exactly as before). The block text is kept for the owner's revision
-// decision; re-wiring it requires a new measurement that passes the recall floor.
+/**
+ * SENSITIVE-ACTION OBSERVATION — the precision half of the confirmation-line design.
+ *
+ * The deterministic keyword layer (RISK_PATTERNS) keeps perfect recall and is unchanged;
+ * this observation answers the one question no vocabulary can: does the CURRENT prompt
+ * ASK for a risky action to be performed, or does the risky word merely play a harmless
+ * role? It is an APPROVED exception to the additive-only rule (a clearance removes the
+ * confirmation line), bound by: only an explicit negative clears, a reasonless clearance
+ * is VOID, and absence always fails closed.
+ *
+ * REVISED after live measurement run 1 (recorded in the acceptance results): the first
+ * wording let the model judge whether a category seemed dangerous in the abstract, and it
+ * wrongly cleared imperative asks it deemed routine (a dependency install; a publish-and-
+ * notify). The rule below now states explicitly that an imperative naming the action IS
+ * the proposal, using exactly those failures as counter-examples. Run 2 judges this text
+ * against the same unchanged recall floor.
+ */
+// ⛔ REVERTED AGAIN 2026-08-25 (measurement run 2): even with the imperative rule stated
+// explicitly and the run-1 failures embedded as verbatim counter-examples, the model
+// cleared "npm install the new charting package" — the exact example the block marks as
+// MUST-be-proposed. Two runs, same failure shape: this model does not hold the recall
+// floor for this observation, and the floor is absolute. The block stays unwired (the
+// clearance pathway is fully inert; absent ⇒ the confirmation emits unchanged), the
+// reverted state is pinned by test, and any further attempt is an owner decision with a
+// different design (model, corroboration, or host), judged by the same gated runner.
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 const SENSITIVE_ACTION_OBSERVATION_BLOCK = [
   'SENSITIVE-ACTION OBSERVATION — judge the CURRENT (last) prompt ONLY, never earlier prompts in the',
-  'window: does it PROPOSE actually performing a risky action (deleting/removing data, files or code;',
-  'schema, migration or database changes; installs/upgrades; secrets, tokens or credentials;',
-  'production deploys, releases or external effects; force-push or history rewrites; security, auth',
-  'or permission changes; cost/resource changes; repo-wide changes; agent-mode or permission changes),',
-  'or does it merely MENTION such a word in a harmless role?',
-  '- "truncate the events table, it is too big" PROPOSES the action: "sensitive_action_verdict": "proposed".',
-  '- "drop a shadow under the header" merely mentions a risky word: "sensitive_action_verdict": "not_proposed",',
-  '  and "sensitive_action_reason" MUST state the benign reading, e.g. "the word drop here means a CSS box-shadow;',
-  '  no data or file is being removed." A "not_proposed" without a non-empty reason is treated as unanswered.',
-  '- When unsure, answer "proposed" or omit both fields — NEVER guess "not_proposed". A wrong "not_proposed"',
-  '  removes a safety line from a genuinely risky prompt; a wrong "proposed" only keeps a line that was',
-  '  already there.',
+  'window. One question: does this prompt ASK for a risky action to be performed, or does the risky',
+  'word merely play a harmless role (a UI/styling term, a concept question, a bug description)?',
+  'Risky actions: deleting/removing data, files or code; schema, migration or database changes;',
+  'dependency installs or upgrades; secrets, tokens or credentials; production deploys, releases,',
+  'publishing, or notifying users; force-push or history rewrites; security, auth or permission',
+  'changes; cost/resource changes; repo-wide changes; agent-mode or permission changes.',
+  'THE RULE: an imperative or request that names a risky action IS a proposal — however casual, and',
+  'however routine it sounds. "npm install the new charting package", "publish the release and notify',
+  'every customer", "rotate the api key" ALL propose their actions: answer "proposed". Do NOT judge',
+  'whether the category seems dangerous in the abstract; judge ONLY whether this prompt asks for the',
+  'action to be done. Routine-sounding is NOT the same as not-proposed.',
+  '- "truncate the events table, it is too big" -> "sensitive_action_verdict": "proposed".',
+  '- "drop a shadow under the header" -> "not_proposed": the risky word is a styling term. Then',
+  '  "sensitive_action_reason" MUST state the benign reading, e.g. "the word drop here means a CSS',
+  '  box-shadow; no data or file is being removed." A "not_proposed" without a non-empty reason is',
+  '  treated as unanswered.',
+  '- When unsure, answer "proposed" or omit both fields — NEVER guess "not_proposed". A wrong',
+  '  "not_proposed" removes a safety line from a genuinely risky prompt; a wrong "proposed" only',
+  '  keeps a line that was already there.',
 ].join('\n');
 
 /**
