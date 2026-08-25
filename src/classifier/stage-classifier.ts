@@ -163,6 +163,34 @@ const INTENT_MENU_BLOCK = [
 ].join('\n');
 
 /**
+ * SENSITIVE-ACTION OBSERVATION — the precision half of the confirmation-line design.
+ *
+ * The deterministic keyword layer (RISK_PATTERNS) keeps perfect recall and is unchanged;
+ * this observation answers the one question no vocabulary can: does the CURRENT prompt
+ * PROPOSE performing a risky action, or merely MENTION a risk-flavoured word? It is an
+ * APPROVED exception to the additive-only rule (a clearance removes the confirmation
+ * line), bound by: only an explicit negative clears, a reasonless clearance is VOID, and
+ * absence always fails closed. The instruction therefore pushes the model toward
+ * 'proposed'/omission whenever unsure — a wrong 'not_proposed' is the only dangerous
+ * direction.
+ */
+const SENSITIVE_ACTION_OBSERVATION_BLOCK = [
+  'SENSITIVE-ACTION OBSERVATION — judge the CURRENT (last) prompt ONLY, never earlier prompts in the',
+  'window: does it PROPOSE actually performing a risky action (deleting/removing data, files or code;',
+  'schema, migration or database changes; installs/upgrades; secrets, tokens or credentials;',
+  'production deploys, releases or external effects; force-push or history rewrites; security, auth',
+  'or permission changes; cost/resource changes; repo-wide changes; agent-mode or permission changes),',
+  'or does it merely MENTION such a word in a harmless role?',
+  '- "truncate the events table, it is too big" PROPOSES the action: "sensitive_action_verdict": "proposed".',
+  '- "drop a shadow under the header" merely mentions a risky word: "sensitive_action_verdict": "not_proposed",',
+  '  and "sensitive_action_reason" MUST state the benign reading, e.g. "the word drop here means a CSS box-shadow;',
+  '  no data or file is being removed." A "not_proposed" without a non-empty reason is treated as unanswered.',
+  '- When unsure, answer "proposed" or omit both fields — NEVER guess "not_proposed". A wrong "not_proposed"',
+  '  removes a safety line from a genuinely risky prompt; a wrong "proposed" only keeps a line that was',
+  '  already there.',
+].join('\n');
+
+/**
  * The stable system prompt — the prefix-cache lever. This is a module constant and
  * MUST stay free of per-call values (the dynamic window/profile go in the user
  * message) so the provider can prefix-cache it across every prompt.
@@ -217,6 +245,8 @@ export const STAGE_CLASSIFIER_SYSTEM_PROMPT = [
   '',
   RELEVANCE_OBSERVATION_BLOCK,
   '',
+  SENSITIVE_ACTION_OBSERVATION_BLOCK,
+  '',
   'OUTPUT — return STRICT JSON only, no markdown, no prose:',
   '{',
   '  "stage": "<one of: Idea | PRD/Spec | Architecture | Task Breakdown | Implementation | Review/Testing | Release | Feedback Loop>",',
@@ -231,6 +261,8 @@ export const STAGE_CLASSIFIER_SYSTEM_PROMPT = [
   '  "capability_candidates": ["<capability id>"],',
   '  "project_fact_candidates": ["<project-fact category id, or omit — empty is normal>"],',
   '  "section_relevance_order": ["<section kind id, most useful first — ALL of them>"],',
+  '  "sensitive_action_verdict": "<proposed | not_proposed — or omit both fields entirely>",',
+  '  "sensitive_action_reason": "<required with not_proposed: the benign reading of the risky word>",',
   '  "reason": "<one sentence>"',
   '}',
   'FEEDBACK-LOOP BOUNDARY: classify Feedback Loop ONLY when the window contains explicit evidence the product is ALREADY deployed/live for real users (e.g. "its live", "deployed", "published", users actively using it). Building features FOR clients/users (a client portal, sending invoices to clients) is NOT live evidence — without it, bug reports and fixes during building are Implementation or Review/Testing, not Feedback Loop.',
