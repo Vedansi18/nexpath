@@ -72,16 +72,16 @@ describe('the third trigger — asking about something risky', () => {
 });
 
 describe('the two existing triggers are untouched — the regression guard', () => {
-  it('conflicting evidence still reaches the posture, under ITS own reason code', () => {
-    const route = routeFor('write the spec and also just ship it now', {
-      conflictingRequirementSourceState: 'conflicting',
+  it('conflicting evidence STILL fires the posture, carrying only its own reason code', () => {
+    // Driven for real rather than conditionally: a conflicting source fact is what this trigger
+    // reads. It must still reach planning_first, and it must stay identifiable as itself — the
+    // new cause must not appear on a route it did not cause.
+    const route = routeFor('write the spec for the new onboarding flow', {
+      sourceFactRefs: ['fact:conflicting_requirement_alpha'],
     });
-    if (route.fallbackMode === 'planning_first') {
-      // When the conflicting-evidence trigger fires it must be identifiable as itself.
-      const isConflict = route.reasonCodes.includes('conflicting_requirement_source');
-      const isPosture = route.reasonCodes.includes(PROMPT_ENHANCEMENT_UNREQUESTED_ACTION_POSTURE_REASON_V1);
-      expect(isConflict || isPosture).toBe(true);
-    }
+    expect(route.fallbackMode).toBe('planning_first');
+    expect(route.reasonCodes).toContain('conflicting_requirement_source');
+    expect(route.reasonCodes).not.toContain(PROMPT_ENHANCEMENT_UNREQUESTED_ACTION_POSTURE_REASON_V1);
   });
 
   it('the new reason code never appears on a route the new trigger did not cause', () => {
@@ -89,6 +89,42 @@ describe('the two existing triggers are untouched — the regression guard', () 
     // mistaken for one of the evidence-quality causes in any record.
     const route = routeFor(NO_RISK_AT_ALL);
     expect(route.reasonCodes).not.toContain(PROMPT_ENHANCEMENT_UNREQUESTED_ACTION_POSTURE_REASON_V1);
+  });
+});
+
+describe('the LIVE path — where the classifier names the intent', () => {
+  // Production routing returns from the classifier-intent builder whenever the classifier supplied
+  // an intent, which is the ordinary case. A trigger that only fires on the deterministic cascade
+  // would be inert for real users however well it tests in isolation.
+  const withClassifier = { classifierPrimaryIntent: 'issue_debug.production_incident_or_support', classifierIntentConfidence: 0.9 };
+
+  it('a risky question takes the posture on the classifier path too', () => {
+    const route = routeFor(ASKS_ABOUT_RISK, withClassifier);
+    expect(route.fallbackMode).toBe('planning_first');
+    expect(route.reasonCodes).toContain(PROMPT_ENHANCEMENT_UNREQUESTED_ACTION_POSTURE_REASON_V1);
+    expect(route.reasonCodes).toContain('classifier_intent_preferred');
+  });
+
+  it('an execute-shaped risky prompt does not, on either path', () => {
+    expect(routeFor(ASKS_TO_EXECUTE, withClassifier).fallbackMode).toBe('none');
+    expect(routeFor(ASKS_TO_EXECUTE).fallbackMode).toBe('none');
+  });
+
+  it('a no-risk prompt does not, on either path', () => {
+    expect(routeFor(NO_RISK_AT_ALL, withClassifier).fallbackMode).toBe('none');
+    expect(routeFor(NO_RISK_AT_ALL).fallbackMode).toBe('none');
+  });
+
+  it('the two paths agree on every prompt — one prompt, one posture decision', () => {
+    for (const prompt of [ASKS_ABOUT_RISK, ASKS_TO_EXECUTE, NO_RISK_AT_ALL, 'is it safe to drop the events table?', 'why is the production database so slow?']) {
+      const cascade = routeFor(prompt).fallbackMode === 'planning_first';
+      const classifier = routeFor(prompt, withClassifier).fallbackMode === 'planning_first';
+      expect(classifier, prompt).toBe(cascade);
+    }
+  });
+
+  it('and the evidence state stays honest on the classifier path', () => {
+    expect(routeFor(ASKS_ABOUT_RISK, withClassifier).contractDecision.ambiguityState).toBe('clear');
   });
 });
 

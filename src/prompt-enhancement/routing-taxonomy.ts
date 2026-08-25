@@ -1107,17 +1107,25 @@ function buildRouteResultFromClassifierIntent(
 ): PromptEnhancementRouteResult {
   const selectedPreset = presetForIntent(intent);
   const capabilityOverlays = decideCapabilityOverlaysFromObservation(selectedPreset, input);
-  const reasonCodes = ['classifier_intent_preferred'];
+  // The posture applies here too, and this is the path production actually takes: whenever the
+  // classifier names an intent, routing returns from this builder. Deciding it in one place per
+  // exit rather than once at the end is what keeps the deterministic cascade and the classifier
+  // path from disagreeing about the same prompt.
+  const posture = needsUnrequestedActionPosture(input.promptText);
+  const reasonCodes = posture
+    ? ['classifier_intent_preferred', PROMPT_ENHANCEMENT_UNREQUESTED_ACTION_POSTURE_REASON_V1]
+    : ['classifier_intent_preferred'];
+  const fallbackMode: PromptEnhancementRouteFallbackMode = posture ? 'planning_first' : 'none';
   const routeConfidence: PromptEnhancementRouteConfidence = 'partial';
   return {
-    contractDecision: toContractDecision(input, selectedPreset, capabilityOverlays, evidenceRefs, reasonCodes, false, routeConfidence, 'none'),
+    contractDecision: toContractDecision(input, selectedPreset, capabilityOverlays, evidenceRefs, reasonCodes, false, routeConfidence, fallbackMode),
     selectedPreset,
     familyId: selectedPreset.family,
     primaryIntent: selectedPreset.primaryIntent,
     secondaryIntentTags: secondaryIntentTagsFor(normalized, selectedPreset.primaryIntent),
     capabilityOverlays,
     routeConfidence,
-    fallbackMode: 'none',
+    fallbackMode,
     routeEvidenceRefs: evidenceRefs,
     ladderResolution,
     reasonCodes,
