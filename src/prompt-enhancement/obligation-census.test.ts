@@ -76,8 +76,8 @@ const BENIGN_PROMPT = 'center the hero text and make the font slightly larger';
 // in neither the prompt nor any allowed source text).
 const INVENTED_SECTION_TEXT = 'Confirm the flow against RabbitMQ before shipping.';
 
-function composedBody() {
-  const route = routePromptEnhancement({
+function routeFor() {
+  return routePromptEnhancement({
     routeDecisionId: 'census-route',
     promptText: BENIGN_PROMPT,
     currentStage: 'implementation',
@@ -91,6 +91,10 @@ function composedBody() {
     degradedNoActionState: 'none',
     generatedOriginState: 'ordinary_user_prompt',
   });
+}
+
+function composedBody() {
+  const route = routeFor();
   const planning = planPromptEnhancementSections({ routeResult: route, sourceRefs: [sourceA], guidanceFacts: [] });
   return composePromptEnhancementBody({
     enhancementId: 'census-enh',
@@ -124,6 +128,43 @@ function decision(body: ReturnType<typeof bodyWithObligations>) {
 describe('the universe — enumerated from the producer, pinned so drift is loud', () => {
   it('is exactly the measured 24 names', () => {
     expect(OBLIGATION_UNIVERSE).toEqual(MEASURED_24);
+  });
+});
+
+describe('the producer itself — behavioural enumeration through the real planner', () => {
+  it('planning with every capability produces exactly the measured 24 — no third obligation source exists', () => {
+    // The map pin above would miss a producer that grew a source beyond its two maps; this row
+    // cannot: it runs the REAL planner per capability and unions what actually attached.
+    const groundingFact = {
+      factId: 'census-grounding-1',
+      sourceType: 'content_template_record',
+      sourceIds: ['ABSENCE_DEBUGGING_OBSERVATION'],
+      guidanceKind: 'debug_evidence',
+      suggestedActionKind: 'capture_reproduction',
+      targetFamily: 'issue_debug',
+      targetSectionKind: 'project_grounding_facts',
+      sourceEvidenceState: 'strong',
+      priority: 'required_survivor',
+      renderPolicy: 'render_as_section',
+      riskLevel: 'none',
+      safetyHooks: ['source_honesty'],
+      privacyClass: 'local_private',
+      sanitizationState: 'prompt_derived_sanitized',
+      publicCopySafe: true,
+    } as const;
+    const produced = new Set<string>();
+    for (const capability of Object.keys(SLOT_EFFECTS_BY_CAPABILITY_V1)) {
+      const route = routeFor();
+      const planning = planPromptEnhancementSections({
+        routeResult: { ...route, capabilityOverlays: [capability] } as typeof route,
+        sourceRefs: [sourceA],
+        guidanceFacts: capability === 'capability.project_grounding' ? [groundingFact] : [],
+      });
+      for (const plan of planning.sectionPlans) {
+        for (const obligation of plan.slotObligations) produced.add(obligation);
+      }
+    }
+    expect([...produced].sort()).toEqual(MEASURED_24);
   });
 });
 
