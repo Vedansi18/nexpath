@@ -1136,6 +1136,14 @@ export async function runAuto(
     // block, so the provenance field's producer changes with zero second wiring.
     stageResult.sensitiveActionVerdict = settledClearance.verdict as 'proposed' | 'not_proposed';
     stageResult.sensitiveActionReason = settledClearance.reason;
+    // Attributability (a binding condition of the clearance exception): every clearance that
+    // can remove a safety line must be auditable from an ordinary debug run — verdict AND the
+    // model's stated benign reading. Local debug log only, same privacy class as the prompt
+    // slices logged beside it.
+    logger.debug('sensitive_action_clearance', {
+      verdict: settledClearance.verdict,
+      reason: settledClearance.reason?.slice(0, 160),
+    });
   }
   const classification = stageResult.classification;
   logger.debug('stage_classified', { stage: classification.stage, confidence: classification.confidence, fire: stageResult.fireRecommendation, degraded: stageResult.degraded });
