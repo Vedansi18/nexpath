@@ -140,6 +140,22 @@ describe('clearance independence — the typed half is NEVER clearable', () => {
   });
 });
 
+describe('fail-closed at the VALIDATOR layer — absent and malformed contribute nothing', () => {
+  it('a non-firing body validated with malformed typed shapes reads none, exactly as with no verdict', () => {
+    const composed = composeFor(SECRET_CONTEXT_PROMPT); // no keyword candidate, no sentence
+    const baseline = validatePromptEnhancementSafety({ currentBody: composed.currentBody });
+    expect(baseline.safetySummary.sensitiveActionState).toBe('none');
+    for (const bad of [{ actionLabel: '' }, { actionLabel: '   ' }, { actionLabel: 42 as unknown as string }]) {
+      const validation = validatePromptEnhancementSafety({
+        currentBody: composed.currentBody,
+        typedSensitiveActionVerdict: bad,
+      });
+      expect(validation.safetySummary.sensitiveActionState).toBe('none');
+      expect(validation.blocking).toBe(baseline.blocking);
+    }
+  });
+});
+
 describe('the validator OR direction is discriminated — a replacement cannot hide', () => {
   it('a keyword-firing body with NO typed verdict still validates as confirmation-required', () => {
     // Kills the OR -> replacement mutation at the VALIDATOR: under a replacement, a keyword
