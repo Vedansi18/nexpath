@@ -179,6 +179,62 @@ describe('the detector — raw identifiers only, and never a de-underscored phra
   });
 });
 
+describe('live blast radius — the detector blocks nothing the pipeline actually produces', () => {
+  it('every preset x prompt shape composes a body the detector passes', async () => {
+    // The corpus replay proves the detector is safe on HISTORICAL bodies; this proves it on the
+    // bodies the CURRENT renderer makes. A wording change that started emitting an identifier
+    // would destroy real popups, so the zero is pinned rather than measured once.
+    const { PROMPT_ENHANCEMENT_TAXONOMY_PRESETS } = await import('./routing-taxonomy.js');
+    const prompts = [
+      'center the hero text and make the font slightly larger',
+      'plan the rollout and split the work into separate points',
+      'the checkout job fails and I cannot tell why',
+      'review my auth module for security problems',
+      'write a spec for the new onboarding flow',
+      'upgrade every dependency and check nothing breaks',
+      'delete the old migrations folder before the demo',
+      'why is my dashboard so slow',
+    ];
+    const offenders: string[] = [];
+    let bodies = 0;
+    for (const preset of PROMPT_ENHANCEMENT_TAXONOMY_PRESETS) {
+      for (const prompt of prompts) {
+        const route = routePromptEnhancement({
+          routeDecisionId: 'blast-route',
+          promptText: prompt,
+          currentStage: 'implementation',
+          prevStage: 'task_breakdown',
+          triggerKind: 'absence',
+          firedKey: 'absence:verification_gap@implementation',
+          effectiveFiredSource: 'classifier_fire_recommendation',
+          selectedQualifyingAbsence: 'verification_gap',
+          absenceGateReason: 'selected_qualifying_absence',
+          classifierState: 'fire_recommended',
+          degradedNoActionState: 'none',
+          generatedOriginState: 'ordinary_user_prompt',
+          classifierPrimaryIntent: preset.primaryIntent,
+          classifierIntentConfidence: 0.9,
+        } as never);
+        const planning = planPromptEnhancementSections({ routeResult: route, sourceRefs: [sourceA], guidanceFacts: [] });
+        const body = composePromptEnhancementBody({
+          enhancementId: 'blast-enh',
+          originalPromptText: prompt,
+          sectionPlanningResult: planning,
+        }).currentBody;
+        const result = validatePromptEnhancementSafety({ currentBody: body });
+        bodies += 1;
+        for (const failure of result.failures) {
+          if (failure.failureCode.startsWith('source_honesty:internal_vocabulary_rendered')) {
+            offenders.push(`${preset.primaryIntent} | ${prompt} -> ${failure.failureCode}`);
+          }
+        }
+      }
+    }
+    expect(bodies).toBeGreaterThan(300);
+    expect(offenders).toEqual([]);
+  });
+});
+
 describe('the prompt-allowance discriminator — a developer may name their own code', () => {
   const echoText = '- Rename the problem_statement variable as requested.';
 
