@@ -171,13 +171,21 @@ function sweepCell(surface: SurfaceModel, label: string, contentName: string, w:
     // it would have passed with escaping fully removed.
     noInjection: frame.querySelector('script, img, iframe, svg, object, embed') === null
       && !(window as unknown as Record<string, unknown>)['__pwned'],
-    // THE CHECK THAT WAS MISSING. Every other metric passed while the prompt
-    // itself was invisible: a field collapsed to 0px still leaves its bullet
-    // row, header and footer exactly where they belong. A field must be at
-    // least one line tall, and tall enough for the text it holds.
+    // A field must show its content, or SAY that it cannot.
+    //
+    // The first version of this required the field to be tall enough for all
+    // its text, which caught the 0px-tall prompt. Then the field gained a cap —
+    // thirty blank lines used to push every row below it off the frame — and
+    // "tall enough for everything" became the wrong invariant: a capped field
+    // is correct precisely when it is SHORTER than its content. What must hold
+    // now is that nothing is hidden silently: either the whole text fits, or a
+    // scroll marker is on screen saying how much does not.
     fieldsShowContent: [...frame.querySelectorAll('textarea')].every((f) => {
       const height = f.getBoundingClientRect().height;
-      return height >= FRAME_LINE_FLOOR_PX && f.scrollHeight <= height + 1;
+      if (height < FRAME_LINE_FLOOR_PX) return false;              // collapsed
+      if (f.scrollHeight <= height + 1) return true;               // all of it shown
+      const group = f.closest('.np-field-group');
+      return !!group?.querySelector('.np-marker-row:not(.np-marker-hidden)');
     }),
     // The numbers, not just the verdict: a boolean tells you a field is wrong
     // and nothing about how.
@@ -545,6 +553,72 @@ function e2eScenarios(): Scenario[] {
         return want(editing, editingBody) && dim(idle, idleBody)
           ? null
           : `editing=[${editing} / ${editingBody}] idle=[${idle} / ${idleBody}]`;
+      },
+    },
+    {
+      name: 'a field full of newlines windows instead of pushing the frame apart',
+      run() {
+        // The reported bug: Ctrl+J thirty times grew the textarea to its
+        // content, so the hint line and every row under it left the frame. The
+        // CLI windows at about fourteen lines and prints
+        // "↑ N more lines above" for the rest.
+        const { host, controller } = mount('prompt_enhancement');
+        const field = host.querySelector('textarea')!;
+        const cap = 14 * 15;                                  // FIELD_VIEWPORT_LINES
+
+        field.value = Array.from({ length: 40 }, (_, i) => `line ${i}`).join('\n');
+        field.dispatchEvent(new Event('input', { bubbles: true }));
+        const height = field.getBoundingClientRect().height;
+
+        // …and scrolling to the bottom must report what is above.
+        field.scrollTop = field.scrollHeight;
+        field.dispatchEvent(new Event('scroll'));
+        const group = field.closest('.np-field-group')!;
+        const above = group.querySelector('.np-marker-row:not(.np-marker-hidden) .np-content');
+        const text = above?.textContent ?? '(no marker shown)';
+        controller.destroy();
+
+        if (height > cap + 2) return `the field grew to ${Math.round(height)}px; the cap is ${cap}px`;
+        return /^↑ \d+ more lines above$/.test(text)
+          ? null : `expected an "N more lines above" marker, got: ${text}`;
+      },
+    },
+    {
+      name: 'a long prompt shows its marker on FIRST render, before any input',
+      run() {
+        // The case no interaction reaches. A prompt that is already long when
+        // the surface opens windows immediately, and only the post-attach sizing
+        // pass can put the marker up — the input and scroll listeners have not
+        // fired yet and never will if the user just reads and presses Enter.
+        const box = document.createElement('div');
+        box.style.cssText = 'width:900px;height:600px;';
+        document.getElementById('sweep-stage')!.appendChild(box);
+
+        const long = { ...PE_FIXTURE, rows: PE_FIXTURE.rows.map((r) => (r.kind === 'field'
+          ? { ...r, text: Array.from({ length: 60 }, (_, i) => `line ${i}`).join('\n') }
+          : r)) };
+        const frame = renderSurface(document, long, { focusIndex: 0 });
+        box.appendChild(frame);
+        growFields(frame);
+
+        const marker = frame.querySelector('.np-marker-row:not(.np-marker-hidden) .np-content');
+        const text = marker?.textContent ?? '(none)';
+        box.remove();
+        return /more lines (above|below)/.test(text)
+          ? null : `no marker on first render, got: ${text}`;
+      },
+    },
+    {
+      name: 'a short field neither windows nor shows a marker',
+      run() {
+        const { host, controller } = mount('prompt_enhancement');
+        const field = host.querySelector('textarea')!;
+        field.value = 'one line';
+        field.dispatchEvent(new Event('input', { bubbles: true }));
+        const group = field.closest('.np-field-group')!;
+        const shown = group.querySelector('.np-marker-row:not(.np-marker-hidden)');
+        controller.destroy();
+        return shown ? 'a marker appeared for text that fits' : null;
       },
     },
     {

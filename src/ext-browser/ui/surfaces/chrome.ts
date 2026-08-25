@@ -137,6 +137,17 @@ export const FRAME_SCROLL_MIN_HEIGHT_PX = 56;
 export const FRAME_LINE_HEIGHT_PX = 15;
 
 /**
+ * How many lines of a field are shown before it windows.
+ *
+ * The CLI windows at `max(4, terminalRows - 26)` — about fourteen lines on a
+ * normal terminal — and shows `↑ N more lines above` / `↓ N more lines below`
+ * for the rest. A browser textarea has no such limit: left alone it grows to
+ * its content, and thirty blank lines from Ctrl+J push the hint line and every
+ * row below it off the frame. That is the bug this exists to stop.
+ */
+export const FIELD_VIEWPORT_LINES = 14;
+
+/**
  * The frame's layout skeleton.
  *
  * THE SHAPE, and why it is this shape. A CLI frame is a fixed header (the
@@ -267,7 +278,12 @@ export const CHROME_STYLES = `
     width: 100%;
     display: block;
     resize: none;
-    overflow: hidden;
+    /* Capped, and scrollable once capped. overflow:hidden would clip the text
+       with no way to reach it. The cap is in px because the lh unit is Firefox
+       120, above the 112 floor. */
+    max-height: 210px;
+    overflow-x: hidden;
+    overflow-y: auto;
   }
   /* No focus ring. The CLI draws no box around its editor, and a browser
      outline here reads as a form control dropped into a terminal frame. Focus
@@ -276,6 +292,14 @@ export const CHROME_STYLES = `
   /* One placeholder colour on both browsers — the defaults differ, and C-3
      wants one look. The gray tier, matching unfocused supporting text. */
   .np-field::placeholder { color: #9ba7a7; opacity: 1; }
+  /* The scroll markers. Dimmed so they read as a hint rather than as part of
+     the body — the CLI dims them for the same reason (owner, 2026-08-07). */
+  .np-scroll-marker { color: #9ba7a7; }
+  /* Structural, and declared rather than left implicit: a marker row is an
+     ordinary row until it is hidden, and the unstyled-class guard is right to
+     insist that every class the code applies has a rule to point at. */
+  .np-marker-row { }
+  .np-marker-hidden { display: none; }
 
   /* Indent columns, named for the column they land on. The CLI uses four of
      them and does not use one number everywhere: field content sits at 4 in PE
@@ -454,6 +478,25 @@ export function buildBulletRow(
 export function buildIndentedRow(doc: Document, text: string, focused = false): HTMLElement {
   const el = row(doc, 'np-content np-ind-4 np-desc', escapeHtml(text));
   if (focused) el.classList.add('np-focused');
+  return el;
+}
+
+/**
+ * A windowed field's scroll indicator.
+ *
+ * The CLI replaces the first or last VISIBLE LINE of the field with the marker.
+ * A textarea cannot have one of its lines styled or substituted without
+ * corrupting the value the user is editing, so here the marker is its own row
+ * above or below the field. Same words, same dim tone, same information — the
+ * count of lines you cannot currently see.
+ */
+export function buildScrollMarkerRow(doc: Document, indent: 4 | 6): HTMLElement {
+  const el = row(doc, `np-content np-ind-${indent} np-scroll-marker`, '');
+  // Two classes, two jobs. The ROW carries the structural ones — how to find it
+  // and whether it is shown — because hiding the content cell alone would leave
+  // the row's height and a segment of the rail behind, an empty line where the
+  // CLI prints nothing. The cell keeps the tone.
+  el.classList.add('np-marker-row', 'np-marker-hidden');
   return el;
 }
 

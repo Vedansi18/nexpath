@@ -42,6 +42,11 @@ function rowText(row: Element): string {
 function domLines(frame: HTMLElement): string[] {
   const out: string[] = [];
   for (const row of frame.querySelectorAll('.np-row')) {
+    // A hidden scroll marker is not a line on screen. It is in the DOM so it
+    // can appear the moment the field windows, and `display: none` is what the
+    // reader actually sees — jsdom computes no layout, so the class is the
+    // only honest signal here.
+    if (row.classList.contains('np-marker-hidden')) continue;
     const field = row.querySelector('textarea');
     if (field) {
       const shown = field.value || field.placeholder;

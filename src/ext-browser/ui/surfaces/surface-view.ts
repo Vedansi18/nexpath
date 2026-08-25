@@ -15,6 +15,7 @@
 // ============================================================================
 
 import {
+  FRAME_LINE_HEIGHT_PX,
   buildBlankRow,
   buildBulletRow,
   buildFooterRow,
@@ -22,6 +23,7 @@ import {
   buildHeader,
   buildHintRow,
   buildNoteRow,
+  buildScrollMarkerRow,
   buildTextRow,
 } from './chrome.js';
 import type { SurfaceModel, SurfaceState } from './surface-model.js';
@@ -56,6 +58,35 @@ export function autoGrow(field: HTMLTextAreaElement): void {
  * design (it is a pure builder, and the tests depend on that). The cost is this
  * one call at each attach site, and the sweep fails if it is ever missed.
  */
+/** `↓ N more lines below · the whole prompt is included`, the CLI's wording. */
+const BELOW_SUFFIX = ' · the whole prompt is included';
+
+/**
+ * Update one field's scroll markers from what is actually on screen.
+ *
+ * The counts come from the live scroll position, not from the text: what is
+ * hidden depends on where the user has scrolled to, which is exactly what the
+ * CLI's own marker reports.
+ */
+export function updateFieldMarkers(field: HTMLTextAreaElement): void {
+  const group = field.closest('.np-field-group');
+  if (!group) return;
+  const markers = group.querySelectorAll('.np-marker-row');
+  const [above, below] = markers;
+  if (!above || !below) return;
+
+  const lines = (n: number): number => Math.max(0, Math.round(n / FRAME_LINE_HEIGHT_PX));
+  const hiddenAbove = lines(field.scrollTop);
+  const hiddenBelow = lines(field.scrollHeight - field.scrollTop - field.clientHeight);
+
+  const set = (el: Element, text: string, show: boolean): void => {
+    el.querySelector('.np-content')!.textContent = text;
+    el.classList.toggle('np-marker-hidden', !show);
+  };
+  set(above, `↑ ${hiddenAbove} more lines above`, hiddenAbove > 0);
+  set(below, `↓ ${hiddenBelow} more lines below${BELOW_SUFFIX}`, hiddenBelow > 0);
+}
+
 export function growFields(root: ParentNode): void {
   const fields = [...root.querySelectorAll('textarea')];
 
@@ -77,6 +108,9 @@ export function growFields(root: ParentNode): void {
     if (!field.isConnected) continue;
     if (field.scrollHeight > field.clientHeight) field.style.height = `${field.scrollHeight}px`;
   }
+
+  // Sizing settles the window, so the markers can only be right after it.
+  for (const field of fields) updateFieldMarkers(field);
 }
 
 /** The editable field beneath a `field` row's label. */
@@ -96,7 +130,10 @@ function buildField(doc: Document, text: string, indent: 4 | 6, placeholder?: st
   // collapse to nothing, which is the failure this replaced.
   field.rows = 1;
   // The listener dies with the element, which is discarded whole on re-render.
-  field.addEventListener('input', () => autoGrow(field));
+  field.addEventListener('input', () => { autoGrow(field); updateFieldMarkers(field); });
+  // Scrolling changes what is hidden without changing the text, so the markers
+  // have to follow the scroll and not only the content.
+  field.addEventListener('scroll', () => updateFieldMarkers(field));
 
   row.appendChild(field);
   return row;
@@ -188,7 +225,9 @@ export function renderSurface(doc: Document, model: SurfaceModel, state: Surface
     const group = doc.createElement('div');
     group.className = 'np-field-group';
     group.appendChild(scroll.removeChild(scroll.lastElementChild!));   // the label row
+    group.appendChild(buildScrollMarkerRow(doc, fieldIndent));         // ↑ above
     group.appendChild(buildField(doc, row.text, fieldIndent, row.placeholder));
+    group.appendChild(buildScrollMarkerRow(doc, fieldIndent));         // ↓ below
     for (const hint of row.hints?.always ?? []) group.appendChild(buildHintRow(doc, hint, hintIndent));
     if (focused) {
       for (const hint of row.hints?.whenFocused ?? []) group.appendChild(buildHintRow(doc, hint, hintIndent));
