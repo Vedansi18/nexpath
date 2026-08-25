@@ -434,9 +434,12 @@ export function createSurfaceController(
     }
 
     // Ctrl/Cmd+J or Alt+Shift+J — the newline. Enter is send, so this is the
-    // only way in.
+    // only way in. setRangeText BYPASSES the readonly attribute (it blocks
+    // native typing only), so the chord must respect the lock itself — the
+    // Firefox live round (2026-08-25) put a newline into a locked fallback
+    // body this way, text the send path then rightly discarded.
     if ((chord || safeChord) && e.code === 'KeyJ') {
-      if (inField) {
+      if (inField && !(e.target as HTMLTextAreaElement).readOnly) {
         const field = e.target as HTMLTextAreaElement;
         field.setRangeText('\n', field.selectionStart ?? 0, field.selectionEnd ?? 0, 'end');
         field.dispatchEvent(new Event('input', { bubbles: true }));   // auto-grow listens here

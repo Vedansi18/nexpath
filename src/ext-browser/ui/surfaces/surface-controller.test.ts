@@ -835,6 +835,16 @@ describe('read-only fields (the CLI\'s locked editor — read_only_fallback bodi
     expect(events.some((e) => e.type === 'send')).toBe(true);
   });
 
+  it('the newline chord respects the lock — setRangeText bypasses readonly, so the handler must not (Firefox live, 2026-08-25)', () => {
+    mount('prompt_enhancement', { registry: { ...REGISTRY, prompt_enhancement: LOCKED } });
+    const field = bodyField();
+    const before = field.value;
+    field.focus();
+    key(field, 'J', { code: 'KeyJ', altKey: true, shiftKey: true });
+    key(field, 'j', { code: 'KeyJ', ctrlKey: true });
+    expect(field.value).toBe(before); // no newline entered the locked body
+  });
+
   it('refuses the details apply on a locked body (the CLI\'s unreachable merge)', () => {
     mount('prompt_enhancement', { registry: { ...REGISTRY, prompt_enhancement: LOCKED } });
     const details = [...host.querySelectorAll('textarea')][1] as HTMLTextAreaElement;
