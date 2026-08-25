@@ -119,6 +119,10 @@ function groundingFact(): PromptEnhancementGuidanceFact {
 
 /** Capture the user prompt the model would receive on a leak route, without any network. */
 async function capturedPrompt(promptText: string): Promise<string> {
+  return capturedPromptWithFact(groundingFact(), promptText);
+}
+
+async function capturedPromptWithFact(fact: PromptEnhancementGuidanceFact, promptText = 'the checkout job stops halfway and I cannot tell why'): Promise<string> {
   const route = routePromptEnhancement({
     routeDecisionId: 'wording-carrier-route',
     promptText,
@@ -136,7 +140,7 @@ async function capturedPrompt(promptText: string): Promise<string> {
     classifierIntentConfidence: 0.9,
     classifierCapabilityCandidates: ['capability.reproduction_or_evidence_needed'],
   } as never);
-  const planning = planPromptEnhancementSections({ routeResult: route, sourceRefs: [sourceA], guidanceFacts: [groundingFact()] });
+  const planning = planPromptEnhancementSections({ routeResult: route, sourceRefs: [sourceA], guidanceFacts: [fact] });
   let captured = '';
   const client: PromptEnhancementComposerClientV1 = {
     chat: {
@@ -169,6 +173,23 @@ async function capturedPrompt(promptText: string): Promise<string> {
   }, client);
   return captured;
 }
+
+describe('channel C DROP — a registry-only label leaves the line without a phrase and without its id', () => {
+  it('a fact whose origin serves only the registry prints no origin phrase and never the raw value', async () => {
+    const prompt = await capturedPromptWithFact({
+      ...groundingFact(),
+      sourceOriginScope: 'content_template_registry',
+    } as unknown as PromptEnhancementGuidanceFact);
+    const entry = prompt.split('\n').find((line) => line.trimStart().startsWith('- guidance_fact:f-runner')) ?? '';
+    expect(entry).toContain('- guidance_fact:f-runner |');
+    expect(entry).not.toContain('content_template_registry');
+    expect(entry).not.toContain('origin');
+    // The other three labels still ride as words, and the evidence value is untouched.
+    expect(entry).toContain('a fact about this specific project');
+    expect(entry).toContain('you may state this as something the project has');
+    expect(entry).toContain('evidence: test_runner = "vitest"');
+  });
+});
 
 describe('the carrier — the built composer prompt hands the model words, never identifiers', () => {
   it('a leak-route section carries directive PROSE and neither the obligation name nor the raw kind', async () => {
