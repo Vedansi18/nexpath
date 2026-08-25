@@ -179,6 +179,66 @@ describe('the detector — raw identifiers only, and never a de-underscored phra
   });
 });
 
+describe('a leaking model draft costs the DRAFT, never the popup', () => {
+  const RISKY_PROMPT = 'delete the old migrations folder before the demo';
+
+  function composeWithDraft(prompt: string, draftText: string) {
+    const route = routePromptEnhancement({
+      routeDecisionId: 'draft-route',
+      promptText: prompt,
+      currentStage: 'implementation',
+      prevStage: 'task_breakdown',
+      triggerKind: 'absence',
+      firedKey: 'absence:verification_gap@implementation',
+      effectiveFiredSource: 'classifier_fire_recommendation',
+      selectedQualifyingAbsence: 'verification_gap',
+      absenceGateReason: 'selected_qualifying_absence',
+      classifierState: 'fire_recommended',
+      degradedNoActionState: 'none',
+      generatedOriginState: 'ordinary_user_prompt',
+    });
+    const planning = planPromptEnhancementSections({ routeResult: route, sourceRefs: [sourceA], guidanceFacts: [] });
+    const host = planning.sectionPlans.find((section) => section.sectionKind !== 'original_request_or_goal')!;
+    const factId = host.structuredContentPartRefs[0] ?? 'draft-fact-missing';
+    const composed = composePromptEnhancementBody({
+      enhancementId: 'draft-enh',
+      originalPromptText: prompt,
+      sectionPlanningResult: planning,
+      composerRuntimeState: 'accepted_structured_output',
+      structuredComposerOutput: {
+        outputId: 'draft-1',
+        sectionDrafts: [{ sectionId: host.sectionId, bodyText: draftText, sourceFactIds: [factId] }],
+        composerClaims: [`claim:${factId}`],
+      },
+    });
+    return { composed, validation: validatePromptEnhancementSafety({ currentBody: composed.currentBody }) };
+  }
+
+  it('a clean draft lands and the body sends', () => {
+    const { composed, validation } = composeWithDraft(RISKY_PROMPT, 'Handle the folder cleanup as requested.');
+    expect(composed.currentBody.text).toContain('Handle the folder cleanup as requested.');
+    expect(validation.sendPolicy).not.toBe('no_send');
+  });
+
+  it('a draft echoing an identifier is DROPPED — the section renders deterministically and the popup survives', () => {
+    // Without this the model slip would reach the finished body and the validator would block
+    // the whole enhancement: the developer loses their popup for a mistake the engine made.
+    const { composed, validation } = composeWithDraft(RISKY_PROMPT, 'Provide the safety_hook_linkage before shipping.');
+    expect(composed.currentBody.text).not.toContain('safety_hook_linkage');
+    expect(validation.failures.some((failure) => failure.failureCode.startsWith('source_honesty:internal_vocabulary_rendered'))).toBe(false);
+    expect(validation.sendPolicy).not.toBe('no_send');
+  });
+
+  it('an identifier the DEVELOPER wrote is allowed through the draft gate too — one allowance rule', () => {
+    const { composed, validation } = composeWithDraft(
+      'rename my safety_hook_linkage variable and delete the old migrations folder',
+      'Rename the safety_hook_linkage variable as asked.',
+    );
+    expect(composed.currentBody.text).toContain('Rename the safety_hook_linkage variable as asked.');
+    expect(validation.sendPolicy).not.toBe('no_send');
+  });
+});
+
 describe('live blast radius — the detector blocks nothing the pipeline actually produces', () => {
   it('every preset x prompt shape composes a body the detector passes', async () => {
     // The corpus replay proves the detector is safe on HISTORICAL bodies; this proves it on the

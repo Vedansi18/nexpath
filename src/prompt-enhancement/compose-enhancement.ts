@@ -1,3 +1,4 @@
+import { findPromptEnhancementInternalVocabularyLeaksV1 } from './internal-vocabulary-leak.js';
 import { promptEnhancementSectionDisplayNameV1 } from './section-display-names.js';
 import {
   PROMPT_ENHANCEMENT_CONTRACT_VERSION,
@@ -198,6 +199,7 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
     input.structuredComposerOutput,
     sectionPlans,
     input.sectionPlanningResult.renderedFacts,
+    input.originalPromptText,
   );
   const structuredComposerAttempted = runtimeState === 'accepted_structured_output' && input.structuredComposerOutput !== undefined;
   const structuredComposerRejected = structuredComposerAttempted && validatedLlmDrafts.draftsBySectionId.size === 0;
@@ -642,6 +644,9 @@ function validatedStructuredComposerDrafts(
   output: PromptEnhancementStructuredComposerOutputV1 | undefined,
   sectionPlans: readonly PromptEnhancementSectionPlanItemV1[],
   renderedFacts: readonly PromptEnhancementGuidanceFact[] = [],
+  // The developer's own words: an identifier THEY wrote is theirs to echo, so the leak check
+  // below applies the same allowance the validator does rather than a stricter one.
+  originalPromptText = '',
 ): ValidatedStructuredComposerDrafts {
   const rejectedFor = (
     rejectionReason: PromptEnhancementComposerDraftRejectionReason,
@@ -681,6 +686,16 @@ function validatedStructuredComposerDrafts(
     if (!sectionPlan || sectionPlan.sectionKind === 'original_request_or_goal') { dropDraft('original_section'); continue; }
     const bodyText = normalizeWhitespace(draft.bodyText);
     if (!bodyText || containsDisallowedComposerWording(bodyText, sourceIds, sourceRefIds)) { dropDraft('empty_or_disallowed_wording'); continue; }
+    // A draft echoing the engine's own vocabulary is refused HERE, so the section renders
+    // deterministically and the popup survives. The validator still blocks the same identifier
+    // in a finished body — that is the backstop for text this gate never saw (a user edit, a
+    // body assembled another way); catching it at the draft keeps a model slip from costing the
+    // developer their whole enhancement.
+    const vocabularyLeaks = findPromptEnhancementInternalVocabularyLeaksV1({
+      text: bodyText,
+      allowedTexts: [originalPromptText, ...sectionPlan.structuredContentPartRefs, ...sectionPlan.sourceRefs.map((ref) => ref.sourceId)],
+    });
+    if (vocabularyLeaks.length > 0) { dropDraft('empty_or_disallowed_wording'); continue; }
     // Pasted content-template prose is disallowed wording of exactly the kind the
     // check above refuses, so it rides that reason rather than widening the typed
     // union — and it costs this draft only, leaving the section to render
