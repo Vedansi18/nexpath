@@ -81,9 +81,8 @@ npx vitest run \
 - Rebase on the latest `main`, target `main`, and link the issue with `Fixes #123`
 - **Paste real command output as testing evidence.** "Should pass" is not evidence. If a check is
   blocked, say which one, why, and what you ran instead.
-
-> AI agents are welcome — Nexpath is built with them. But you own what you submit: you must
-> understand the diff and be able to explain it.
+- **You own what you submit** — AI agents are welcome, but you must understand the diff and be able
+  to explain it
 
 ## Contribution Agreement
 
