@@ -1,21 +1,21 @@
 # Contributing to Nexpath
  
-Read the [README](https://github.com/hi0001234d/nexpath?tab=readme-ov-file) first — it covers what
+Read the [README](README.md) first — it covers what
 Nexpath does and how to install and run it. This guide covers how to contribute changes.
  
 ## Ways to Contribute
  
-- **Reports** — [Issues](https://github.com/hi0001234d/nexpath/issues) for bugs and features,
-  [Discussions](https://github.com/hi0001234d/nexpath/discussions) for everything else
+- **Reports** — [Issues](../../issues) for bugs and features,
+  [Discussions](../../discussions) for everything else
 - **Code** — bug fixes, pipeline work, new agent support
 - **Docs** — the README, this guide, or the CLI help text
-- **Reports** — [Issues](https://github.com/hi0001234d/nexpath/issues) for bugs and features,
-  [Discussions](https://github.com/hi0001234d/nexpath/discussions) for everything else
+- **Reports** — [Issues](../../issues) for bugs and features,
+  [Discussions](../../discussions) for everything else
  
 ## Reporting Bugs
  
-[Search existing issues](https://github.com/hi0001234d/nexpath/issues) first to avoid duplicates, then
-[open a new one](https://github.com/hi0001234d/nexpath/issues/new) with:
+[Search existing issues](../../issues) first to avoid duplicates, then
+[open a new one](../../issues/new) with:
  
 - OS, Node version, Nexpath version, and which AI coding agent
 - The exact prompt or command that reproduces it
