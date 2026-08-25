@@ -368,6 +368,10 @@ const DECISION_WAIT_POLL_MS = 500;
 const DECISION_WAIT_MAX_MS = 45_000;
 /** Marker older than this is a crashed/torn-down pipeline — don't wait on it. */
 const DECISION_INFLIGHT_STALE_MS = 60_000;
+/** Longest a pending PE may wait for its stop before it is stale (see the
+ * age gate in handleResponseStopPeFirst) — generous enough for the longest
+ * real agent runs, far below a cross-sitting resurrection. */
+const PE_PENDING_MAX_AGE_MS = 30 * 60 * 1000;
 
 /**
  * Per-root count of pipelines currently inside the inflight marker. The marker
@@ -1066,6 +1070,21 @@ async function handleResponseStopPeFirst(projectRoot: string, tabId: number | un
         });
       }
     } catch { /* diagnosability only — never affects the stop path */ }
+    return;
+  }
+
+  // Stale-pending age gate (browser-only defect class — live Firefox/Bolt
+  // 2026-08-25): the CLI's Stop fires seconds after each response, so a CLI
+  // pending can never sleep across sittings — but a browser row survives page
+  // closes and can resurrect at a stop HOURS later carrying a long-gone
+  // prompt's body, and that stale show then burns the cooldown window,
+  // suppressing the fresh popups the user actually asked for. A pending older
+  // than the longest legitimate agent run is consumed silently — WITHOUT the
+  // cooldown mark (only a real render starts the window, line ~1119).
+  const pendingAgeMs = clock.now() - pe.createdAt;
+  if (pendingAgeMs > PE_PENDING_MAX_AGE_MS) {
+    await markPendingPeShown(projectRoot);
+    log.debug('pe_pending_expired_stale', { projectRoot, ageMs: pendingAgeMs });
     return;
   }
 

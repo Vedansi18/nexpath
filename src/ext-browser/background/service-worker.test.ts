@@ -1548,6 +1548,21 @@ describe('service-worker.ts', () => {
       expect(vi.mocked(recordPendingSequence)).not.toHaveBeenCalled();
     });
 
+    it('a STALE pending (older than 30min) is consumed silently WITHOUT the cooldown mark — the cross-sitting resurrection fix (live Firefox/Bolt 2026-08-25)', async () => {
+      idbLoadSessionState.mockResolvedValue({ sessionId: 's1', promptCount: 9 });
+      vi.mocked(getPendingPe).mockResolvedValue({
+        ...peRecord,
+        createdAt: 1000 - 31 * 60_000, // parked 31 minutes before this stop
+      } as never);
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      stopPe(messageListener, 7);
+      await vi.waitFor(() => expect(logDebugMock).toHaveBeenCalledWith('pe_pending_expired_stale', expect.objectContaining({ projectRoot: P })));
+      expect(markPendingPeShown).toHaveBeenCalledWith(P);   // row dies
+      expect(runBrowserPePopup).not.toHaveBeenCalled();      // never shown
+      // No render happened, so the cooldown window must NOT have started.
+      expect(idbSaveSessionState).not.toHaveBeenCalled();
+    });
+
     it('cooldown hit CONSUMES the row with a ring event and shows nothing (stop.ts:552–561)', async () => {
       idbLoadSessionState.mockResolvedValue({ sessionId: 's1', promptCount: 9, lastPromptEnhancementPromptIndex: 5 });
       vi.mocked(getPendingPe).mockResolvedValue(peRecord as never);
