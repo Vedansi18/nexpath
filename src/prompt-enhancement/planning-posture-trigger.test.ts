@@ -13,7 +13,7 @@ import {
 } from './routing-taxonomy.js';
 import { planPromptEnhancementSections } from './templates/section-plan.js';
 import { composePromptEnhancementBody } from './compose-enhancement.js';
-import { requiresPromptEnhancementExecutionConfirmationForPrompt } from './safety-sendability.js';
+import { requiresPromptEnhancementExecutionConfirmationForPrompt, validatePromptEnhancementSafety } from './safety-sendability.js';
 import type { PromptEnhancementFallbackMode, PromptEnhancementSourceRefV1 } from './contracts.js';
 
 const sourceA: PromptEnhancementSourceRefV1 = {
@@ -258,6 +258,40 @@ describe('the posture reaches the WRITERS — it changes the body, not just a fi
     const route = routeFor(ASKS_ABOUT_RISK, { generatedOriginState: 'pe_generated' });
     const planning = planPromptEnhancementSections({ routeResult: route, sourceRefs: [sourceA], guidanceFacts: [] });
     expect(planning.planningPosture).toBe(false);
+  });
+});
+
+describe('a posture body still SENDS — the stance never costs the popup', () => {
+  // The stance is new body text on a real share of popups, and every validator in this milestone
+  // reads body text. A line that tripped one of them would destroy the very popups the posture
+  // was added to improve.
+  it('the stance line is inert to every scanner that reads a body', async () => {
+    const { promptEnhancementAuthorityModeForTextV1, promptEnhancementRiskKindsForTextV1 } = await import('./safety-sendability.js');
+    const { findPromptEnhancementInternalVocabularyLeaksV1 } = await import('./internal-vocabulary-leak.js');
+    const { findPromptEnhancementInventionViolationsV1 } = await import('./preservation-floors.js');
+    const stance = 'This request touches something risky the developer has not asked to have done: cover what to check and what to confirm with them first, rather than carrying it out.';
+    // Not execute-shaped: a stance line must never read as an instruction to act.
+    expect(promptEnhancementAuthorityModeForTextV1(stance)).toBe('plan_or_review');
+    // Names no risk kind: it must not change when the confirmation line fires.
+    expect(promptEnhancementRiskKindsForTextV1(stance)).toEqual([]);
+    expect(findPromptEnhancementInternalVocabularyLeaksV1({ text: stance, allowedTexts: [] })).toEqual([]);
+    expect(findPromptEnhancementInventionViolationsV1({ sectionText: stance, allowedTexts: ['center the hero text'] })).toEqual([]);
+  });
+
+  it('posture bodies validate clean across every preset', () => {
+    const prompts = [ASKS_ABOUT_RISK, 'Add user registration and login with email and password.', 'what about the api key?', 'why is the production database so slow?'];
+    for (const prompt of prompts) {
+      const route = routeFor(prompt);
+      if (route.fallbackMode !== 'planning_first') continue;
+      const planning = planPromptEnhancementSections({ routeResult: route, sourceRefs: [sourceA], guidanceFacts: [] });
+      const body = composePromptEnhancementBody({
+        enhancementId: 'posture-enh',
+        originalPromptText: prompt,
+        sectionPlanningResult: planning,
+      }).currentBody;
+      const validation = validatePromptEnhancementSafety({ currentBody: body });
+      expect(validation.sendPolicy, prompt).not.toBe('no_send');
+    }
   });
 });
 
