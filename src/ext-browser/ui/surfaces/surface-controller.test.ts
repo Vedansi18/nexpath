@@ -741,3 +741,25 @@ describe('focus-steal guard (live 2026-08-25: agent pages grab focus after show)
     }
   });
 });
+
+describe('focus-steal guard vs the injector (a HIDDEN surface must never take focus)', () => {
+  it('does not re-take focus while the shadow host is display:none', async () => {
+    // Mount inside a real shadow host, hide the host (the dock's hide()
+    // mechanism), then blur — the guard must leave focus alone so the
+    // injector can own the agent composer.
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const shadow = host.attachShadow({ mode: 'open' });
+    const mountEl = document.createElement('div');
+    shadow.appendChild(mountEl);
+    const controller = createSurfaceController(mountEl, { registry: { prompt_enhancement: PE_FIXTURE }, initial: 'prompt_enhancement' });
+    const field = shadow.querySelector('textarea') as HTMLTextAreaElement;
+    field.focus();
+    host.style.display = 'none';
+    field.blur();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(shadow.activeElement).toBeNull(); // guard did NOT yank focus back
+    controller.destroy();
+    host.remove();
+  });
+});

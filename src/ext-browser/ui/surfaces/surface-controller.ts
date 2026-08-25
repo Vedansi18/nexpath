@@ -501,6 +501,12 @@ export function createSurfaceController(
       // bare (tests, the harness) the document view is the whole story. A real
       // element holding focus = deliberate user intent — leave it alone.
       const root = wrapper.getRootNode() as Document | ShadowRoot;
+      // A HIDDEN surface must never take focus: the dock hides the host with
+      // display:none the moment a send resolves, and the injector is about to
+      // focus the agent's composer — re-taking here would yank the caret into
+      // an invisible popup mid-inject (guard for the 2026-08-25 inject path).
+      const host = (root as ShadowRoot).host as HTMLElement | undefined;
+      if (host && host.style.display === 'none') return;
       const stolen = root === (doc as unknown)
         ? doc.activeElement === doc.body
         : (root.activeElement === null && doc.activeElement === doc.body);

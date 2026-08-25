@@ -54,7 +54,13 @@ function resolveAgent(): string {
 // zero error anywhere. Retry once after a short delay (covers the transient wake-up
 // race), and always log loudly on final failure so a dropped message is never silent
 // again, even if the retry doesn't recover it.
-const SEND_RETRY_DELAY_MS = 400;
+// Escalating retry schedule (2026-08-25): the single 400ms retry was tuned for
+// the pre-PE service worker; the engine-carrying bundle is ~3MB and a COLD
+// start can take multiple seconds — live-observed on Replit: a real prompt AND
+// its response-stop both vanished into a wake gap (kit captured them, the SW
+// never received them, ring silent). The schedule must outlast a slow cold
+// start; total worst-case wait ≈ 4.5s, after which the drop is logged loudly.
+const SEND_RETRY_SCHEDULE_MS = [300, 600, 1200, 2400];
 
 // ── Rejected-capture stash ─────────────────────────────────────────────────────
 //
@@ -164,14 +170,18 @@ function resumePendingCaptureFromStorage(): void {
 }
 
 function sendToServiceWorker(msg: PromptSubmitMsg | ResponseStopMsg | AdvisoryFooterIntentMsg | PromptInjectedMsg | AdvisoryTerminalMsg | PeCommandMsg | PeTerminalNoticeMsg | PeKeepaliveMsg): void {
-  browser.runtime.sendMessage(msg).catch((firstErr: unknown) => {
-    console.warn('[nexpath] sendMessage failed, retrying once:', msg.type, String(firstErr));
-    setTimeout(() => {
-      browser.runtime.sendMessage(msg).catch((retryErr: unknown) => {
-        console.error('[nexpath] sendMessage failed on retry, message DROPPED:', msg.type, String(retryErr));
-      });
-    }, SEND_RETRY_DELAY_MS);
-  });
+  const attempt = (retryIndex: number): void => {
+    browser.runtime.sendMessage(msg).catch((err: unknown) => {
+      const delay = SEND_RETRY_SCHEDULE_MS[retryIndex];
+      if (delay === undefined) {
+        console.error('[nexpath] sendMessage failed after all retries, message DROPPED:', msg.type, String(err));
+        return;
+      }
+      console.warn(`[nexpath] sendMessage failed (attempt ${retryIndex + 1}), retrying in ${delay}ms:`, msg.type, String(err));
+      setTimeout(() => attempt(retryIndex + 1), delay);
+    });
+  };
+  attempt(0);
 }
 
 function setupListeners(): void {

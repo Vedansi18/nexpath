@@ -212,3 +212,78 @@ describe('content/agents/inject-kit.ts — injectViaSimulatedPaste', () => {
     expect(clipboardWriteTextMock).not.toHaveBeenCalled();
   });
 });
+
+describe('slow rich-editor landing (live 2026-08-25: 2.6KB PE body fell to clipboard on a busy page)', () => {
+  it('a paste the editor processes AFTER the first check still lands via the poll — no clipboard fallback', async () => {
+    const input = document.createElement('div');
+    input.className = 'tiptap ProseMirror';
+    document.body.appendChild(input);
+    Object.defineProperty(input, 'getClientRects', { value: () => [{}] });
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('navigator', { clipboard: { writeText } });
+
+    // Simulate TipTap: the paste event lands in the model ~300ms later (well
+    // past the old fixed 50ms check, inside the new 900ms poll budget).
+    input.addEventListener('paste', () => {
+      setTimeout(() => { input.textContent = 'THE ENHANCED PROMPT BODY'; }, 300);
+    });
+    const submits: string[] = [];
+    input.addEventListener('keydown', (e) => { submits.push((e as KeyboardEvent).key); });
+
+    await injectViaSimulatedPaste('.tiptap.ProseMirror', 'THE ENHANCED PROMPT BODY');
+
+    expect(input.textContent).toContain('THE ENHANCED PROMPT');
+    expect(submits).toContain('Enter');       // auto-submit fired
+    expect(writeText).not.toHaveBeenCalled(); // NO clipboard fallback
+    input.remove();
+  });
+});
+
+describe('main-world inject bridge (2026-08-25: isolated-world paste is unreadable to rich editors)', () => {
+  it('a landed bridge reply short-circuits to submit — no simulated paste, no clipboard', async () => {
+    const input = document.createElement('div');
+    input.className = 'tiptap ProseMirror';
+    document.body.appendChild(input);
+    Object.defineProperty(input, 'getClientRects', { value: () => [{}] });
+    const writeText = vi.fn();
+    vi.stubGlobal('navigator', { clipboard: { writeText } });
+    const submits: string[] = [];
+    input.addEventListener('keydown', (e) => { submits.push((e as KeyboardEvent).key); });
+    // Fake the MAIN-world bridge: acknowledge the request as landed.
+    const bridge = (ev: MessageEvent): void => {
+      const m = ev.data as { type?: string; requestId?: string };
+      if (m?.type === 'nexpath:inject-request') {
+        input.textContent = 'ENHANCED';
+        window.dispatchEvent(new MessageEvent('message', {
+          data: { type: 'nexpath:inject-result', requestId: m.requestId, landed: true },
+          source: window as unknown as MessageEventSource,
+        }));
+      }
+    };
+    window.addEventListener('message', bridge);
+
+    await injectViaSimulatedPaste('.tiptap.ProseMirror', 'ENHANCED BODY TEXT');
+
+    expect(submits).toContain('Enter');       // auto-submit after the bridge landing
+    expect(writeText).not.toHaveBeenCalled();
+    window.removeEventListener('message', bridge);
+    input.remove();
+  });
+
+  it('no bridge reply (stale page generation) times out and the existing fallback chain still lands', async () => {
+    const input = document.createElement('div');
+    input.className = 'tiptap ProseMirror';
+    document.body.appendChild(input);
+    Object.defineProperty(input, 'getClientRects', { value: () => [{}] });
+    vi.stubGlobal('navigator', { clipboard: { writeText: vi.fn() } });
+    input.addEventListener('paste', () => { input.textContent = 'FALLBACK BODY'; });
+    const submits: string[] = [];
+    input.addEventListener('keydown', (e) => { submits.push((e as KeyboardEvent).key); });
+
+    await injectViaSimulatedPaste('.tiptap.ProseMirror', 'FALLBACK BODY');
+
+    expect(input.textContent).toBe('FALLBACK BODY'); // the old chain still delivered
+    expect(submits).toContain('Enter');
+    input.remove();
+  }, 15000);
+});

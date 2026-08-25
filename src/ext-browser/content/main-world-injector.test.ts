@@ -381,27 +381,34 @@ describe('main-world-injector.ts', () => {
     // by an empty catch — completely silent, no log, no retry. Confirmed live: prompt
     // capture vanished with zero trace during a long-running page flow. Now retries once
     // after a short delay and always logs on final failure.
-    it('retries once after the SW rejects the first send, and succeeds silently if the retry works', async () => {
+    it('retries on a schedule that outlasts a slow SW cold start (2026-08-25: the ~3MB PE bundle wakes in seconds)', async () => {
       vi.useFakeTimers();
       try {
         const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
         const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
         sendMessageMock.mockClear();
-        sendMessageMock.mockRejectedValueOnce(new Error('SW not up yet')).mockResolvedValueOnce(undefined);
+        // Cold start: three failures, then the SW is finally up.
+        sendMessageMock
+          .mockRejectedValueOnce(new Error('SW not up yet'))
+          .mockRejectedValueOnce(new Error('still booting'))
+          .mockRejectedValueOnce(new Error('still booting'))
+          .mockResolvedValueOnce(undefined);
 
         setLocation('https://replit.com', 'replit.com', '/@vedansi18/Hello-World');
         dispatchWindowMessage({ type: 'nexpath:prompt-captured', promptText: 'hi', agent: 'replit' });
-        await vi.advanceTimersByTimeAsync(0); // let the first rejection's .catch() run
+        await vi.advanceTimersByTimeAsync(0);
 
         expect(warnSpy).toHaveBeenCalledWith(
-          expect.stringContaining('retrying once'),
+          expect.stringContaining('retrying in 300ms'),
           'nexpath:prompt-submit',
           expect.any(String),
         );
 
-        await vi.advanceTimersByTimeAsync(400); // fire the retry's setTimeout
-        expect(sendMessageMock).toHaveBeenCalledTimes(2);
-        expect(errorSpy).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(300); // retry 1 (fails)
+        await vi.advanceTimersByTimeAsync(600); // retry 2 (fails)
+        await vi.advanceTimersByTimeAsync(1200); // retry 3 (succeeds)
+        expect(sendMessageMock).toHaveBeenCalledTimes(4);
+        expect(errorSpy).not.toHaveBeenCalled(); // delivered — never DROPPED
 
         warnSpy.mockRestore();
         errorSpy.mockRestore();
@@ -421,8 +428,8 @@ describe('main-world-injector.ts', () => {
         setLocation('https://replit.com', 'replit.com', '/@vedansi18/Hello-World');
         dispatchWindowMessage({ type: 'nexpath:response-stopped', agent: 'replit' });
         await vi.advanceTimersByTimeAsync(0);
-        await vi.advanceTimersByTimeAsync(400);
-        await vi.advanceTimersByTimeAsync(0); // let the retry's own rejection settle
+        for (const delay of [300, 600, 1200, 2400]) await vi.advanceTimersByTimeAsync(delay);
+        await vi.advanceTimersByTimeAsync(0); // let the final rejection settle
 
         expect(errorSpy).toHaveBeenCalledWith(
           expect.stringContaining('DROPPED'),

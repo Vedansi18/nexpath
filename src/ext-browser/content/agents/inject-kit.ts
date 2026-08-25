@@ -145,29 +145,95 @@ function resolveComposer(selectors: string | string[]): HTMLElement | null {
   return firstMatch;
 }
 
+/**
+ * Wait until the text is visible in the editor, or the budget runs out. Rich
+ * editors (TipTap/ProseMirror on Bolt and Lovable) process a paste through
+ * their own async model — a fixed 50ms check missed slow frames on a busy
+ * page for a multi-KB body (live 2026-08-25: the PE popup's ~2.6KB enhanced
+ * prompt fell to the clipboard while the shorter advisory options always
+ * landed). Polling keeps fast editors fast and only slow ones wait.
+ */
+async function waitForLanding(input: HTMLElement, text: string, budgetMs: number): Promise<boolean> {
+  const deadline = Date.now() + budgetMs;
+  for (;;) {
+    if (hasLanded(input, text)) return true;
+    if (Date.now() >= deadline) return false;
+    await new Promise((resolve) => setTimeout(resolve, 75));
+  }
+}
+
+/** Diagnosability: an inject that degrades must say WHY — the clipboard toast
+ * alone made the live failure undebuggable (2026-08-25). Page console only;
+ * never carries the text. */
+function logInjectOutcome(outcome: string, detail = ''): void {
+  console.log(`[nexpath] inject-back: ${outcome}${detail ? ` — ${detail}` : ''}`);
+}
+
+/**
+ * Ask the MAIN-world script to perform the insertion inside the page's own
+ * world (see main-world.ts's inject bridge): a ClipboardEvent constructed in
+ * THIS isolated world crosses to the page with clipboardData rich editors
+ * cannot read, so TipTap/ProseMirror never accepted the content-script paste
+ * (live-diagnosed on Bolt 2026-08-25). Resolves true only on a typed 'landed'
+ * reply; a missing bridge (stale page generation) times out to false and the
+ * caller's own fallback chain takes over — this path can only improve delivery.
+ */
+function requestMainWorldInject(selector: string, text: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const requestId = `nx-inject-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const timer = setTimeout(() => {
+      window.removeEventListener('message', onReply);
+      resolve(false);
+    }, 1_500);
+    const onReply = (ev: MessageEvent): void => {
+      if (ev.source !== window) return;
+      const msg = ev.data as { type?: unknown; requestId?: unknown; landed?: unknown } | null;
+      if (!msg || msg.type !== 'nexpath:inject-result' || msg.requestId !== requestId) return;
+      clearTimeout(timer);
+      window.removeEventListener('message', onReply);
+      resolve(msg.landed === true);
+    };
+    window.addEventListener('message', onReply);
+    window.postMessage({ type: 'nexpath:inject-request', requestId, selector, text }, window.location.origin);
+  });
+}
+
 export async function injectViaSimulatedPaste(inputSelector: string | string[], text: string): Promise<void> {
   const input = resolveComposer(inputSelector);
   if (!input) {
+    logInjectOutcome('clipboard fallback', `no composer matched ${JSON.stringify(inputSelector)}`);
     await clipboardFallback(text);
     return;
+  }
+
+  // Preferred path: the page-world bridge (first-class events for rich editors).
+  const selectorList = Array.isArray(inputSelector) ? inputSelector : [inputSelector];
+  for (const selector of selectorList) {
+    if (await requestMainWorldInject(selector, text)) {
+      logInjectOutcome('landed via main-world bridge');
+      dispatchSubmit(input);
+      return;
+    }
+    if (document.querySelector(selector)) break; // selector matches; bridge tried and failed — don't retry others
   }
 
   dispatchSimulatedPaste(input, text);
-  // Give the editor a tick to process the paste before checking whether it landed.
-  await new Promise((resolve) => setTimeout(resolve, 50));
-
-  // Firefox: the synthetic paste is inert (see insertViaExecCommand). Retry the
-  // insertion through the trusted execCommand path, then re-check. No-op on Chrome,
-  // which has already landed — its path stays byte-identical.
-  if (!hasLanded(input, text)) {
-    insertViaExecCommand(input, text);
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-
-  if (!hasLanded(input, text)) {
-    await clipboardFallback(text);
+  if (await waitForLanding(input, text, 900)) {
+    logInjectOutcome('landed via simulated paste');
+    dispatchSubmit(input);
     return;
   }
-  // Landed → "Send to your agent now": auto-submit so the agent acts on it (CLI parity).
-  dispatchSubmit(input);
+
+  // Firefox: the synthetic paste is inert (see insertViaExecCommand). Retry the
+  // insertion through the trusted execCommand path, then re-check. Also the
+  // second chance for a rich editor that dropped the synthetic paste entirely.
+  insertViaExecCommand(input, text);
+  if (await waitForLanding(input, text, 900)) {
+    logInjectOutcome('landed via execCommand');
+    dispatchSubmit(input);
+    return;
+  }
+
+  logInjectOutcome('clipboard fallback', `paste did not land in <${input.tagName.toLowerCase()} class="${(input.className || '').toString().slice(0, 60)}">`);
+  await clipboardFallback(text);
 }

@@ -177,3 +177,73 @@ window.fetch = function patchedFetch(
 (globalThis as Record<string, unknown>)['__nexpath_emit_prompt__'] = emitPromptCaptured;
 (globalThis as Record<string, unknown>)['__nexpath_emit_stopped__'] = emitResponseStopped;
 (globalThis as Record<string, unknown>)['__nexpath_native_fetch__'] = _nativeFetch;
+
+// ── MAIN-world inject bridge (2026-08-25) ────────────────────────────────────
+//
+// Rich editors (TipTap/ProseMirror on Bolt and Lovable) read the paste event's
+// `clipboardData` — and a ClipboardEvent CONSTRUCTED IN THE ISOLATED WORLD
+// crosses the world boundary with clipboardData the page cannot read, so the
+// content script's simulated paste never lands there (live-diagnosed: 'paste
+// did not land in <div class="tiptap ProseMirror">'; earlier successes were
+// the execCommand fallback, which is focus-fragile). Performing the same
+// insertion HERE — the page's own world — gives the editor a first-class
+// event. The content script requests it via postMessage and receives a typed
+// landed/failed reply; on 'failed' (or no reply) it keeps its own fallback
+// chain, so this bridge can only ever improve delivery.
+//
+// Trust boundary: the request carries a CSS selector + text into the page
+// world — both already visible to the page (the text is about to be typed
+// into the page's own composer), so nothing new is exposed.
+
+interface InjectRequestMsg {
+  type: 'nexpath:inject-request';
+  requestId: string;
+  selector: string;
+  text: string;
+}
+
+function performMainWorldInject(selector: string, text: string): boolean {
+  const candidates = [...document.querySelectorAll<HTMLElement>(selector)];
+  const input = candidates.find((el) => el.getClientRects().length > 0) ?? candidates[0];
+  if (!input) return false;
+
+  input.focus();
+  const selection = window.getSelection();
+  const range = document.createRange();
+  range.selectNodeContents(input);
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+
+  const dataTransfer = new DataTransfer();
+  dataTransfer.setData('text/plain', text);
+  input.dispatchEvent(new ClipboardEvent('paste', {
+    clipboardData: dataTransfer,
+    bubbles: true,
+    cancelable: true,
+  }));
+  if ((input.textContent ?? '').includes(text.trim().slice(0, 20))) return true;
+
+  // The editor ignored the synthetic paste — the trusted-editing command path.
+  input.focus();
+  try { document.execCommand('insertText', false, text); } catch { /* checked below */ }
+  return (input.textContent ?? '').includes(text.trim().slice(0, 20));
+}
+
+// Guarded like the fetch patch above: the module must load under partial
+// window fakes (unit tests) — the bridge only registers where listeners exist.
+if (typeof window.addEventListener === 'function') {
+  window.addEventListener('message', (ev) => {
+    if (ev.source !== window) return;
+    const msg = ev.data as InjectRequestMsg | null;
+    if (!msg || msg.type !== 'nexpath:inject-request') return;
+    if (typeof msg.requestId !== 'string' || typeof msg.selector !== 'string' || typeof msg.text !== 'string') return;
+    let landed = false;
+    try {
+      landed = performMainWorldInject(msg.selector, msg.text);
+    } catch { /* landed stays false — the content script's fallback chain takes over */ }
+    window.postMessage(
+      { type: 'nexpath:inject-result', requestId: msg.requestId, landed },
+      window.location.origin,
+    );
+  });
+}

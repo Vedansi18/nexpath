@@ -268,3 +268,43 @@ describe('chrome styles (live-caught 2026-08-25: unstyled transparent dock)', ()
     expect(after.length).toBe(styleNodes.length); // once per dock lifetime, not per show
   });
 });
+
+describe('REAL prepare → whitelisted view → real dock DOM (plan §7: fixtures from real results, not hand-invented)', () => {
+  it('a real keyless engine prepare renders in the dock with its actual body and controls', async () => {
+    const { buildBrowserPeRequest, prepareBrowserPe } = await import('../background/pe-prepare.js');
+    const { buildPePanelView } = await import('../background/pe-popup-host.js');
+    const prep = await prepareBrowserPe(buildBrowserPeRequest({
+      projectRoot: 'https://bolt.new/~/real-fixture',
+      promptText: 'add a login page with email and password to the app',
+      sessionId: 's-real', promptCount: 6,
+      currentStage: 'implementation', prevStage: 'implementation',
+      triggerKind: 'absence', effectiveFlagType: 'absence:tests_before_merge',
+      firedKey: 'absence:tests_before_merge@implementation', triggerConfidence: 0.9,
+      classifierState: 'fire_recommended', profile: null, configuredRole: 'founder',
+      detectedLanguage: undefined, streamBOutputs: [],
+      triggerEligibility: 'fresh_trigger_eligible', recentPromptRefs: [],
+    }));
+    expect(prep.safeFallback).toBe(false);
+    if (prep.safeFallback) return;
+
+    // buildPePanelView needs the engine's render view — build it the way the
+    // popup host does, through the engine's own render model.
+    const { buildPromptEnhancementPopupRenderModelV1 } = await import('../../prompt-enhancement/popup-render-model.js');
+    const rm = buildPromptEnhancementPopupRenderModelV1({
+      result: prep.result, timestampMs: 1, deliverySurface: prep.result.delivery.deliveryChannel,
+    });
+    expect(rm.state).toBe('render_model_ready');
+    if (rm.state !== 'render_model_ready') return;
+    const view = buildPePanelView(
+      { model: rm.model, editedBodyText: rm.model.body.text, additionalDetailsText: '', refinement: false },
+      1,
+    );
+
+    adapter.show(view);
+    // The REAL engine body is in the dock's real DOM, with the locked controls.
+    expect(bodyField().value).toBe(rm.model.body.text);
+    expect(bodyField().value.length).toBeGreaterThan(100);
+    expect(surfaceEl().textContent).toContain('Use original prompt');
+    expect(surfaceEl().textContent).not.toContain('static build');
+  });
+});
