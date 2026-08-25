@@ -115,6 +115,42 @@ describe('the parse discipline — exact literals, reasonless carried for the do
   });
 });
 
+describe('the outcome states — gated-out, settled, unusable and failed are distinguishable', () => {
+  it('gated-out reads its own state (normal, not a failure)', () => {
+    const fake = fakeClient('{}');
+    const handle = startSensitiveActionMicroClearanceV1(CLEAN_PROMPT, fake.client);
+    expect(handle.outcome()).toBe('gated_out_no_risk_keyword');
+  });
+
+  it('a settled usable verdict reports settled', async () => {
+    const fake = fakeClient('{"sensitive_action_verdict":"proposed"}');
+    const handle = startSensitiveActionMicroClearanceV1(RISKY_PROMPT, fake.client);
+    await settle();
+    expect(handle.outcome()).toBe('settled');
+  });
+
+  it('an unusable reply reports unusable_reply — distinct from a transport failure', async () => {
+    const fake = fakeClient('not json at all');
+    const handle = startSensitiveActionMicroClearanceV1(RISKY_PROMPT, fake.client);
+    await settle();
+    expect(handle.outcome()).toBe('unusable_reply');
+  });
+
+  it('a rejected call reports pending_or_failed — the state the reliability bound counts', async () => {
+    const fake = fakeClient(() => Promise.reject(new Error('provider down')));
+    const handle = startSensitiveActionMicroClearanceV1(RISKY_PROMPT, fake.client);
+    await settle();
+    expect(handle.outcome()).toBe('pending_or_failed');
+  });
+
+  it('a still-pending call reads pending_or_failed at the join (the discard case)', () => {
+    const fake = fakeClient(() => new Promise<string>(() => {}));
+    const handle = startSensitiveActionMicroClearanceV1(RISKY_PROMPT, fake.client);
+    expect(handle.outcome()).toBe('pending_or_failed');
+    handle.abort();
+  });
+});
+
 describe('the shipped prompt is pinned — the acceptance-measured text is the deployed text', () => {
   it('carries the imperative rule, the counter-examples, and unsure => proposed', () => {
     expect(SENSITIVE_ACTION_MICRO_SYSTEM_PROMPT).toContain('names a risky action IS a proposal');

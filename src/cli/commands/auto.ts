@@ -1131,6 +1131,11 @@ export async function runAuto(
   );
   microClearance.abort();
   const settledClearance = microClearance.read();
+  // Observability for the capture/failure rate (the I1 lesson, applied here from day one):
+  // an absent clearance that cannot be told apart from "never attempted" answers nothing —
+  // gated-out is normal, pending_or_failed counts against the reliability bound the owner
+  // approved (≤ 1-in-20), and this line is what makes that bound readable from any run.
+  logger.debug('sensitive_action_clearance_outcome', { outcome: microClearance.outcome() });
   if (settledClearance !== undefined) {
     // Merged into the SAME stageResult both request-build sites pass to the one threading
     // block, so the provenance field's producer changes with zero second wiring.

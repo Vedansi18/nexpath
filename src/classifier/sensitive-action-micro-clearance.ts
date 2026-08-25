@@ -56,18 +56,31 @@ export const SENSITIVE_ACTION_MICRO_SYSTEM_PROMPT = [
   'When unsure, answer "proposed" - NEVER guess "not_proposed".',
 ].join('\n');
 
+/**
+ * The outcome states, distinguishable so the capture/failure rate is readable from any
+ * ordinary debug run (the I1 lesson: an absent value that cannot be told apart from
+ * "never attempted" answers nothing — gated-out and failed need opposite responses).
+ */
+export type SensitiveActionMicroClearanceOutcomeV1 =
+  | 'gated_out_no_risk_keyword'
+  | 'gated_out_no_client'
+  | 'settled'
+  | 'unusable_reply'
+  | 'pending_or_failed';
+
 /** The zero-wait handle: read whatever has settled; abort anything still pending. */
 export interface SensitiveActionMicroClearanceHandleV1 {
   /** Synchronous. `undefined` until (and unless) a usable verdict settled — the fail-closed value. */
   read(): PromptEnhancementSensitiveActionClearanceV1 | undefined;
   /** Tear down a still-pending request. Idempotent; a no-op once settled or gated out. */
   abort(): void;
+  /** Synchronous outcome state at the moment of the call — for the audit/observability log. */
+  outcome(): SensitiveActionMicroClearanceOutcomeV1;
 }
 
-const INERT_HANDLE: SensitiveActionMicroClearanceHandleV1 = {
-  read: () => undefined,
-  abort: () => {},
-};
+function inertHandle(outcome: SensitiveActionMicroClearanceOutcomeV1): SensitiveActionMicroClearanceHandleV1 {
+  return { read: () => undefined, abort: () => {}, outcome: () => outcome };
+}
 
 /** The deterministic gate: only a prompt with a keyword candidate can ever use a clearance. */
 export function sensitiveActionMicroClearanceApplicableV1(promptText: string): boolean {
@@ -121,18 +134,19 @@ export function startSensitiveActionMicroClearanceV1(
   promptText: string,
   client?: SensitiveActionMicroClientV1,
 ): SensitiveActionMicroClearanceHandleV1 {
-  if (!sensitiveActionMicroClearanceApplicableV1(promptText)) return INERT_HANDLE;
+  if (!sensitiveActionMicroClearanceApplicableV1(promptText)) return inertHandle('gated_out_no_risk_keyword');
 
   let resolvedClient: SensitiveActionMicroClientV1;
   try {
     // Same pattern as the stage classifier: construct on demand; no key ⇒ throws ⇒ inert.
     resolvedClient = client ?? (new OpenAI() as unknown as SensitiveActionMicroClientV1);
   } catch {
-    return INERT_HANDLE;
+    return inertHandle('gated_out_no_client');
   }
 
   const controller = new AbortController();
   let settled: PromptEnhancementSensitiveActionClearanceV1 | undefined;
+  let outcome: SensitiveActionMicroClearanceOutcomeV1 = 'pending_or_failed';
 
   resolvedClient.chat.completions
     .create(
@@ -148,14 +162,17 @@ export function startSensitiveActionMicroClearanceV1(
     )
     .then((completion) => {
       settled = parseMicroReply(completion.choices[0]?.message?.content ?? '');
+      outcome = settled !== undefined ? 'settled' : 'unusable_reply';
     })
     .catch(() => {
       // Timeout, abort, provider error — all identical: no clearance, fail closed.
       settled = undefined;
+      outcome = 'pending_or_failed';
     });
 
   return {
     read: () => settled,
+    outcome: () => outcome,
     abort: () => {
       try {
         controller.abort();
