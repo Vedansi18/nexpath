@@ -157,6 +157,56 @@ describe('the layer still CATCHES — silence on paraphrase did not hollow it ou
   });
 });
 
+describe('absent means today, measured on real bodies rather than fixtures', () => {
+  it('across every preset, an absent or empty declaration changes no outcome', async () => {
+    // Stability rule 3 is the promise that this layer is invisible until it has something to say.
+    // Fixtures can satisfy it by construction; real composed bodies are the honest test.
+    const { PROMPT_ENHANCEMENT_TAXONOMY_PRESETS } = await import('./routing-taxonomy.js');
+    const prompts = [
+      'center the hero text',
+      'i connected github with token ghp_abc123 for deploys, add a dashboard',
+      'delete the old migrations folder',
+      'review my auth module',
+      'upgrade every dependency',
+    ];
+    let compared = 0;
+    for (const preset of PROMPT_ENHANCEMENT_TAXONOMY_PRESETS) {
+      for (const prompt of prompts) {
+        const route = routePromptEnhancement({
+          routeDecisionId: 'stability-route',
+          promptText: prompt,
+          currentStage: 'implementation',
+          prevStage: 'task_breakdown',
+          triggerKind: 'absence',
+          firedKey: 'absence:verification_gap@implementation',
+          effectiveFiredSource: 'classifier_fire_recommendation',
+          selectedQualifyingAbsence: 'verification_gap',
+          absenceGateReason: 'selected_qualifying_absence',
+          classifierState: 'fire_recommended',
+          degradedNoActionState: 'none',
+          generatedOriginState: 'ordinary_user_prompt',
+          classifierPrimaryIntent: preset.primaryIntent,
+          classifierIntentConfidence: 0.9,
+        } as never);
+        const planning = planPromptEnhancementSections({ routeResult: route, sourceRefs: [sourceA], guidanceFacts: [] });
+        const body = composePromptEnhancementBody({
+          enhancementId: 'stability-enh',
+          originalPromptText: prompt,
+          sectionPlanningResult: planning,
+        }).currentBody;
+        const base = validatePromptEnhancementSafety({ currentBody: body });
+        const empty = validatePromptEnhancementSafety({ currentBody: body, nounPurposes: [] });
+        const absent = validatePromptEnhancementSafety({ currentBody: body, nounPurposes: undefined });
+        compared += 1;
+        expect(empty.sendPolicy, `${preset.primaryIntent} | ${prompt}`).toBe(base.sendPolicy);
+        expect(absent.sendPolicy, `${preset.primaryIntent} | ${prompt}`).toBe(base.sendPolicy);
+        expect(empty.failures.map((f) => f.failureCode)).toEqual(base.failures.map((f) => f.failureCode));
+      }
+    }
+    expect(compared).toBeGreaterThan(150);
+  });
+});
+
 describe('the invention guard — a purpose the prompt never stated is treated as null', () => {
   it('a supplied purpose with no support in the prompt falls to half B, never a manufactured mismatch', () => {
     // Without this the model can infer "for authentication", and half A would then report a
