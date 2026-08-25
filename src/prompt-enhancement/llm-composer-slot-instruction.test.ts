@@ -77,33 +77,30 @@ async function promptFor(intent: string, promptText: string): Promise<string> {
 }
 
 describe('composer instruction: the typed slot obligations reach the model', () => {
-  it('a repro section carrying the no-invention state gets the hard constraint in its instruction', async () => {
+  it('a repro section carrying the no-invention state gets the hard rule in its instruction — as words', async () => {
     const prompt = await promptFor('issue_debug.reproduction_discovery', 'the checkout job stops halfway and I cannot tell why');
-    expect(prompt).toContain('slotObligations');
-    expect(prompt).toContain('no_invention_state');
-    expect(prompt).toContain('NO-INVENTION (hard)');
+    // The obligation reaches the model as a directive, never as its identifier.
+    expect(prompt).toContain('Hard rule: name only tools, libraries, services, files, APIs or project facts');
+    expect(prompt).not.toContain('slotObligations');
+    expect(prompt).not.toContain('no_invention_state');
     // The locked behaviour when evidence is missing: ask, never illustrate.
-    expect(prompt).toMatch(/ASK for it/);
+    expect(prompt).toContain('ask for it — never supply an example name');
   });
 
-  it('the constraint is scoped per section — one prose line per section that carries it', async () => {
-    // The no-invention state is now UNIVERSAL over composed prose (the reach widening), so the
-    // hard line appears once per carrying section — still section-scoped, never one prompt-wide
-    // banner. The counts must match exactly: a section listing the obligation without its prose
-    // line (or the reverse) is the drift this pins against.
+  it('the rule is scoped per section — one directive line per section that carries it', async () => {
+    // The no-invention state is UNIVERSAL over composed prose, so the directive appears once per
+    // carrying section — still section-scoped, never one prompt-wide banner — and every section
+    // block that lists directives carries it.
     const prompt = await promptFor('issue_debug.reproduction_discovery', 'the checkout job stops halfway and I cannot tell why');
-    const noInventionLines = prompt.split('\n').filter((line) => line.includes('NO-INVENTION (hard)'));
-    const obligationListings = prompt.split('\n').filter((line) => line.includes('slotObligations') && line.includes('no_invention_state'));
-    expect(noInventionLines.length).toBeGreaterThan(1);
-    expect(noInventionLines).toHaveLength(obligationListings.length);
+    const hardRuleLines = prompt.split('\n').filter((line) => line.includes('Hard rule: name only'));
+    const directiveBlocks = prompt.split('\n').filter((line) => line.includes('this section must:'));
+    expect(hardRuleLines.length).toBeGreaterThan(1);
+    expect(hardRuleLines).toHaveLength(directiveBlocks.length);
   });
 
-  it('every composed-prose route now carries the constraint — the widening, pinned', async () => {
-    // Before the reach widening this route carried NO no-invention instruction and this test
-    // pinned that absence. The widening is the deliberate closure: every prose section is
-    // protected, planning routes included.
+  it('every composed-prose route carries the rule — planning routes included', async () => {
     const prompt = await promptFor('planning.spec_or_prd', 'write a spec for the new onboarding flow');
-    expect(prompt).toContain('NO-INVENTION (hard)');
-    expect(prompt).toContain('no_invention_state');
+    expect(prompt).toContain('Hard rule: name only');
+    expect(prompt).not.toContain('no_invention_state');
   });
 });
