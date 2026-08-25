@@ -63,7 +63,12 @@ describe('half B — a purpose the body assigned with no source', () => {
   });
 
   it('the same purpose with NO source is still a finding', () => {
-    expect(judge([{ noun: 'github token', purposeInPrompt: null, purposeInBody: 'for deploys' }])).toHaveLength(1);
+    // Sourced by neither the request (which never mentions deploys) nor a project fact.
+    expect(findPromptEnhancementNounPurposeFindingsV1({
+      nounPurposes: [{ noun: 'github token', purposeInPrompt: null, purposeInBody: 'for deploys' }],
+      originalPromptText: 'add login so nobody else can see my dashboard, i connected github with token ghp_abc123def456ghi789',
+      groundedTexts: [],
+    })).toHaveLength(1);
   });
 
   it('the halves are disjoint — nothing is reported twice', () => {
@@ -86,6 +91,45 @@ describe('THE SILENT CASE — a tool used for the job it was given', () => {
   it('the same purpose worded differently is still the same purpose', () => {
     expect(judge([{ noun: 'token', purposeInPrompt: 'for deploys', purposeInBody: 'to run the deploys' }])).toEqual([]);
     expect(judge([{ noun: 'github', purposeInPrompt: 'connected github', purposeInBody: 'the connected github account' }])).toEqual([]);
+  });
+});
+
+describe('the K-rows survive — the acceptance bar, as declarations a truthful model would make', () => {
+  // The layer blocks whole popups, so a body it wrongly flags costs the developer everything.
+  // These are the owner-ruled welcome rows expressed as the declaration the composer would emit
+  // for them: every one must stay silent, however differently the body words the same job.
+  const welcomeRows: readonly [string, string, { noun: string; purposeInPrompt: string | null; purposeInBody: string }][] = [
+    ['K1 — the tool he asked for, used for that',
+      'Create a React app with a home page that shows study groups as cards',
+      { noun: 'React', purposeInPrompt: 'create a React app', purposeInBody: 'building the app' }],
+    ['K2 — the browser she named, checked as she described',
+      "she said when she types a long message it cuts off, she's on chrome same as me",
+      { noun: 'chrome', purposeInPrompt: 'she is on chrome', purposeInBody: 'check the chrome settings' }],
+    ['K4 — the move she asked about, in the body own words',
+      'i hardcoded my key sk-live-abc123 in the app, should i move it to env',
+      { noun: 'key', purposeInPrompt: 'move it to env', purposeInBody: 'moving the key to an environment variable' }],
+    ['the same job, paraphrased',
+      'i connected github with token ghp_abc123 for deploys',
+      { noun: 'token', purposeInPrompt: 'for deploys', purposeInBody: 'to run the deploys' }],
+    ['a noun merely named again, not given a job',
+      'add login so nobody else can see my dashboard, i connected github with token ghp_abc123',
+      { noun: 'github', purposeInPrompt: null, purposeInBody: 'the connected github account' }],
+  ];
+
+  it.each(welcomeRows)('%s stays silent', (_label, prompt, nounPurpose) => {
+    expect(findPromptEnhancementNounPurposeFindingsV1({
+      nounPurposes: [nounPurpose],
+      originalPromptText: prompt,
+      groundedTexts: [],
+    })).toEqual([]);
+  });
+
+  it('and the transposition still fires beside them — the layer is not simply silent', () => {
+    expect(findPromptEnhancementNounPurposeFindingsV1({
+      nounPurposes: [{ noun: 'token', purposeInPrompt: 'for deploys', purposeInBody: 'for login' }],
+      originalPromptText: 'i connected github with token ghp_abc123 for deploys, add a dashboard',
+      groundedTexts: [],
+    })).toHaveLength(1);
   });
 });
 

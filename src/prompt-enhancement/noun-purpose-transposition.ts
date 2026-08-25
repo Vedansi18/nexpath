@@ -73,22 +73,57 @@ function normalizeEntry(
   return { ...entry, purposeInPrompt: isSupportedBy(stated, [originalPromptText]) ? stated : null };
 }
 
-/** Does any contentful word of this purpose appear in the given texts? */
-function isSupportedBy(purpose: string, texts: readonly string[]): boolean {
-  if (texts.length === 0) return false;
-  const haystack = texts.join(String.fromCharCode(10)).toLowerCase();
-  const words = purpose.toLowerCase().split(/\s+/).filter((word) => word.length > 3);
-  return words.length > 0 && words.some((word) => haystack.includes(word));
+/**
+ * Words that carry no purpose of their own. Excluded before comparing, because "for" appearing in
+ * both "for deploys" and "for login" would make every transposition look like a match.
+ */
+const PURPOSE_FUNCTION_WORDS: ReadonlySet<string> = new Set([
+  'the', 'and', 'for', 'with', 'this', 'that', 'from', 'into', 'onto', 'its', 'his', 'her',
+  'use', 'used', 'using', 'set', 'setting', 'make', 'making', 'get', 'getting', 'run', 'running',
+  'any', 'all', 'each', 'one', 'via', 'per', 'out', 'off', 'own', 'new', 'also', 'then', 'than',
+  'when', 'what', 'which', 'while', 'here', 'there', 'they', 'them', 'their', 'have', 'has', 'had',
+  'been', 'being', 'was', 'were', 'are', 'not', 'but', 'can', 'will', 'would', 'should', 'must',
+]);
+
+/**
+ * The contentful stems of a phrase — the first three letters of each meaningful word.
+ *
+ * Stems rather than whole words because real bodies paraphrase constantly: "move it to env" and
+ * "moving the key to an environment variable" are one instruction, and a layer that cannot see
+ * that blocks correct popups. Three letters is what makes move/moving and deploy/deploys the same
+ * root; function words are dropped first so the shared scaffolding of English cannot pass for a
+ * shared meaning.
+ */
+function stemsOf(text: string): readonly string[] {
+  return text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/)
+    .filter((word) => word.length >= 3 && !PURPOSE_FUNCTION_WORDS.has(word))
+    .map((word) => word.slice(0, 3));
 }
 
-/** Two purposes are the same when neither says anything the other does not. */
+/** Is this purpose sourced by any of these texts — the developer's own words, or a project fact? */
+function isSupportedBy(purpose: string, texts: readonly string[]): boolean {
+  if (texts.length === 0) return false;
+  const haystack = new Set(stemsOf(texts.join(String.fromCharCode(10))));
+  const stems = stemsOf(purpose);
+  return stems.length > 0 && stems.some((stem) => haystack.has(stem));
+}
+
+/**
+ * Do these two purposes describe the same job?
+ *
+ * The question this layer exists to answer is whether the ROLE MOVED — "for deploys" becoming
+ * "for login" — not whether the words differ. Any shared contentful stem means the body is still
+ * talking about the same job in its own words, and silence is the correct answer. Only a purpose
+ * with nothing in common with the stated one is a transposition. Erring toward silence is
+ * deliberate: a layer that blocks a correct body costs the developer everything, while a missed
+ * transposition costs one sentence.
+ */
 function purposesMatch(promptPurpose: string, bodyPurpose: string): boolean {
-  const key = (value: string) => value.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/)
-    .filter((word) => word.length > 3).sort().join(' ');
-  const promptKey = key(promptPurpose);
-  const bodyKey = key(bodyPurpose);
-  if (promptKey.length === 0 || bodyKey.length === 0) return true; // nothing contentful to disagree about
-  return promptKey === bodyKey || promptKey.includes(bodyKey) || bodyKey.includes(promptKey);
+  const promptStems = stemsOf(promptPurpose);
+  const bodyStems = stemsOf(bodyPurpose);
+  if (promptStems.length === 0 || bodyStems.length === 0) return true;
+  const promptSet = new Set(promptStems);
+  return bodyStems.some((stem) => promptSet.has(stem));
 }
 
 /**
@@ -115,7 +150,9 @@ export function findPromptEnhancementNounPurposeFindingsV1(input: {
     if (entry.purposeInPrompt === null) {
       // Half B: the developer assigned no purpose. A purpose the allowed source facts DO supply
       // is sourced, so it is not a finding — only an unsourced one is.
-      if (isSupportedBy(entry.purposeInBody, input.groundedTexts ?? [])) continue;
+      // A purpose is sourced when the developer's own request or an allowed project fact already
+      // says it. Only a job that comes from nowhere is an unsupported claim.
+      if (isSupportedBy(entry.purposeInBody, [input.originalPromptText, ...(input.groundedTexts ?? [])])) continue;
       findings.push({
         noun: entry.noun,
         kind: 'purpose_assigned_without_source',
