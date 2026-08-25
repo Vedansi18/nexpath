@@ -12,6 +12,13 @@ import {
 } from './sensitive-action-clearance.js';
 import { parseStageClassifierReply } from '../classifier/stage-classifier.js';
 import { routePromptEnhancement } from './routing-taxonomy.js';
+import { preparePromptEnhancement } from './facade.js';
+import {
+  PROMPT_ENHANCEMENT_CONTRACT_VERSION,
+  type PromptEnhancementPrepareRequestV1,
+} from './contracts.js';
+import { getPromptStartStopSourceSnapshot } from './source-reality.js';
+import { buildPromptEnhancementCostVisibilityMetadataV1 } from './cost-observability.js';
 import { planPromptEnhancementSections } from './templates/section-plan.js';
 import { composePromptEnhancementBody } from './compose-enhancement.js';
 import type { PromptEnhancementSourceRefV1 } from './contracts.js';
@@ -161,6 +168,109 @@ describe('the plumbing is CONNECTED end to end through compose (the wiring-exist
   it('a reasonless clearance is void ON THE WIRED PATH too — the sentence ships', () => {
     const body = composeBenignRiskyBody({ verdict: 'not_proposed' });
     expect(body).toContain(CANONICAL_MARKER);
+  });
+});
+
+describe('the REQUEST field rides — request -> facade -> compose, end to end', () => {
+  // A prompt shape the pipeline demonstrably shows a popup for (the facade suite's own
+  // evidence-bearing shape), with a benign risky-word clause appended so the keyword
+  // layer raises its candidate. Both tests assert a real popup composed (sections > 0)
+  // so neither direction can pass vacuously on a skipped popup.
+  const RIDE_PROMPT = 'Fix the failing payment test, the test failure blocks ci, and explain the verification. also drop a shadow under the submit button.';
+
+  function prepareRequest(
+    clearance?: PromptEnhancementSensitiveActionClearanceV1,
+  ): PromptEnhancementPrepareRequestV1 {
+    const promptStartStop = getPromptStartStopSourceSnapshot();
+    return {
+      schemaVersion: PROMPT_ENHANCEMENT_CONTRACT_VERSION,
+      requestId: 'clearance-ride-1',
+      projectRoot: '/tmp/project',
+      hostSurface: 'cli_stop_bridge',
+      sourcePrompt: {
+        text: RIDE_PROMPT,
+        origin: 'user',
+        capturedAt: 1,
+        promptIndex: 1,
+        generatedOriginPolicy: 'ordinary_source_a',
+      },
+      reviewMomentContext: {
+        reviewMoment: 'UserPromptSubmit_preparation',
+        currentAgentMode: 'workspace-write',
+        projectId: 'project-1',
+        sessionId: 'session-1',
+        detectedLanguage: 'en',
+        stageCandidate: 'implementation',
+        promptCount: 1,
+        recentPromptMetadataRefs: [],
+        triggerProvenance: {
+          currentStage: 'implementation',
+          prevStage: 'task_breakdown',
+          triggerKind: 'stage_transition',
+          classifierState: 'fire_recommended',
+          degradedNoActionState: 'none',
+          promptStartBoundary: promptStartStop.hookBoundary,
+          deliveryBoundary: promptStartStop.deliveryBoundary,
+          promptStartCanReplaceSameTurn: false,
+          ...(clearance !== undefined ? { classifierSensitiveActionClearance: clearance } : {}),
+        },
+      },
+      sourceSignals: {
+        sourceAOriginalPromptRef: { ...sourceA, sourceAuthorization: 'source_fact_only', evidenceStatus: 'present' },
+        sourceRefs: [{ ...sourceA, sourceAuthorization: 'source_fact_only', evidenceStatus: 'present' }],
+        normalizedStageAbsenceSignalRefs: [],
+        contentTemplateRecordFactRefs: [],
+        popupQuestionSourceRefs: [],
+        whyHelpSourceRefs: [],
+        profileRoleModeRefs: [],
+        rightGoodWorkStyleEnvRuntimeRefs: [],
+        missingMemoryCandidateRefs: [],
+        sourceLabels: [{ sourceRefId: sourceA.sourceRefId, label: 'original_prompt', evidenceStatus: 'present' }],
+        promptStartStop: {
+          hookBoundary: promptStartStop.hookBoundary,
+          deliveryBoundary: promptStartStop.deliveryBoundary,
+          runAutoCanHoldOrReplaceSubmittedPrompt: false,
+          sharedSignalCount: promptStartStop.sharedSignalCount,
+          classifierDegradedNoFireReasons: promptStartStop.classifierDegradedNoFireReasons,
+        },
+        store: { schemaVersion: 1, missingPromptEnhancementTables: [], cleanupGaps: [] },
+        transcriptPathState: 'not_authority',
+        streamBOutputs: [],
+        paramEventChannels: [],
+        servedVariantIdentityRefs: [],
+        deliveryGateRefs: [],
+        sourceOnlyHardFactRefs: [],
+      },
+      userPreferenceContext: { levelState: 'default', scopedFeedbackEvidenceRefs: [] },
+      configSnapshot: { sequenceEnabledState: 'not_enabled_v1', validatedEffectiveConfigState: 'valid', arbitraryConfigRowsAreAuthority: false },
+      callVisibilityState: buildPromptEnhancementCostVisibilityMetadataV1('baseline_pe_composer', {
+        callVisibilityMode: 'deterministic',
+        plannedCallCount: 0,
+        usedCallCount: 0,
+      }),
+      privacyAndStoragePolicy: {
+        sensitivityClass: 'normal',
+        localStorageEligibility: 'ids_and_categories_only',
+        telemetryEligibility: 'allowlisted_counts_only',
+        llmSharingEligibility: 'allowed_minimal',
+        generatedBodyStoragePolicy: 'do_not_store_raw_by_default',
+      },
+    };
+  }
+
+  it('a clearance in the trigger provenance reaches the composed body through the REAL facade path', async () => {
+    const result = await preparePromptEnhancement(prepareRequest({
+      verdict: 'not_proposed',
+      reason: "'drop' here means a CSS box-shadow; no data or file is being removed",
+    }));
+    expect(result.currentBody.sections.length).toBeGreaterThan(0);
+    expect(result.currentBody.text).not.toContain(CANONICAL_MARKER);
+  });
+
+  it('the same request WITHOUT the field emits the sentence — the fail-closed default on the real path', async () => {
+    const result = await preparePromptEnhancement(prepareRequest(undefined));
+    expect(result.currentBody.sections.length).toBeGreaterThan(0);
+    expect(result.currentBody.text).toContain(CANONICAL_MARKER);
   });
 });
 
