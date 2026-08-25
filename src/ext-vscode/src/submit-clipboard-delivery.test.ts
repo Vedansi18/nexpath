@@ -20,6 +20,7 @@ import {
   isDarwinAccessibilityDenial,
   buildWin32KeystrokeScript,
   WIN32_KEYSTROKE_TIMEOUT_MS,
+  scheduleWindsurfQueueFlush,
 } from './submit-clipboard-delivery.js';
 
 function deliveryHarness(over: Partial<SubmitClipboardDeliveryDeps> = {}) {
@@ -452,10 +453,17 @@ describe('⭐ RC49 — buildWin32KeystrokeScript', () => {
     expect(ps.indexOf('GetForegroundWindow')).toBeLessThan(ps.indexOf('AppActivate'));
     expect(ps).toContain('$fg.EndsWith($t)');
   });
-  it('suffix matching, not substring — a browser tab titled "… - Chrome" cannot match', () => {
-    const ps = buildWin32KeystrokeScript(['Cursor'], '{ENTER}');
-    expect(ps).not.toContain('Contains');
-    expect(ps).toContain('EndsWith');
+  it('delimiter-safe matching (RC60 flip): mid-title app names match, bare substrings do not', () => {
+    // FLIPPED 2026-08-24 (RC60): the original pin asserted suffix-ONLY ("not
+    // substring") — which refused a real Devin foreground window titled
+    // "<folder> - Devin - <session>". The browser-tab hazard is still guarded:
+    // matching requires the delimited segment " - <name> - ", a start
+    // "<name> - ", an exact match, or the original suffix — never a bare
+    // substring anywhere in the title.
+    const ps = buildWin32KeystrokeScript(['Devin'], '{ENTER}');
+    expect(ps).toContain("$fg.EndsWith($t)");
+    expect(ps).toContain("$fg.StartsWith($t + ' - ')");
+    expect(ps).toContain("$fg.Contains(' - ' + $t + ' - ')");
   });
   it('keeps the retry rounds and the FOREGROUND diagnostic', () => {
     const ps = buildWin32KeystrokeScript(['Devin'], '{ENTER}');
@@ -471,5 +479,92 @@ describe('⭐ RC49 — buildWin32KeystrokeScript', () => {
 describe('⭐ RC52 — win32 keystroke timeout', () => {
   it('the shared ceiling covers a cold Add-Type compile (>8 s measured)', () => {
     expect(WIN32_KEYSTROKE_TIMEOUT_MS).toBeGreaterThanOrEqual(20_000);
+  });
+});
+
+/**
+ * ⭐ RC59 — the Linux Devin-branding gate (staging tester 2026-08-24): the
+ * single 'windsurf' needle refused Enter on every Devin-branded Linux install
+ * (title "… - Devin"). The RC47 class, ported to the Linux gate at last:
+ * live appName leads, static brand names cover unthreaded callers.
+ */
+describe('⭐ RC59 — focusedWindowIsEditor brand needles', () => {
+  const deps = (title: string, appName?: string) => ({
+    platform: 'linux' as const, env: { DISPLAY: ':0' },
+    hasCommand: () => true, runCapture: () => title, appName,
+  });
+
+  it('⭐ the tester\'s exact failing title now passes for host windsurf', () => {
+    expect(focusedWindowIsEditor('windsurf', deps('nexpath testing - Devin'))).toBe(true);
+  });
+
+  it('Windsurf-branded titles keep passing (owner-machine regression pin)', () => {
+    expect(focusedWindowIsEditor('windsurf', deps('nexpath - Windsurf'))).toBe(true);
+  });
+
+  it('live appName leads — a future rebrand matches without a code change', () => {
+    expect(focusedWindowIsEditor('windsurf', deps('proj - Cascade IDE', 'Cascade IDE'))).toBe(true);
+  });
+
+  it('unrelated windows still refuse (the RC11 hazard stays guarded)', () => {
+    expect(focusedWindowIsEditor('windsurf', deps('bank statement - Chrome'))).toBe(false);
+  });
+
+  it('cursor host is unaffected by the windsurf needles', () => {
+    expect(focusedWindowIsEditor('cursor', deps('proj - Devin'))).toBe(false);
+    expect(focusedWindowIsEditor('cursor', deps('proj - Cursor'))).toBe(true);
+  });
+
+  it('⭐ the linux submit failure now NAMES its gate via submitLog', () => {
+    const logs: string[] = [];
+    submitKeystroke({
+      platform: 'linux', host: 'windsurf', appName: 'Devin',
+      env: { DISPLAY: ':0' },
+      isPopupFocused: () => false,
+      isEditorFocused: () => false, focusEditor: () => {},
+      submitLog: (m) => logs.push(m),
+    });
+    expect(logs.join(' ')).toContain('editor not focused after raise');
+    expect(logs.join(' ')).toContain('appName=Devin');
+  });
+});
+
+/**
+ * ⭐ RC61 — the Devin queue-flush tap: a busy/reconnecting session parks a
+ * delivered submit as "1 queued message" that only a further Enter sends
+ * (the composer's own placeholder says so). One guarded tap, no-op when
+ * nothing queued.
+ */
+describe('⭐ RC61 — scheduleWindsurfQueueFlush', () => {
+  it('⭐ fires the submit fn exactly once after the delay, through the caller\'s guards', () => {
+    let fired = 0; const logs: string[] = [];
+    let scheduled: (() => void) | null = null; let delay = 0;
+    scheduleWindsurfQueueFlush(
+      () => { fired += 1; return true; },
+      (l) => logs.push(l),
+      2_500,
+      (fn, ms) => { scheduled = fn as () => void; delay = ms; return 0; },
+    );
+    expect(fired).toBe(0);          // nothing before the delay
+    expect(delay).toBe(2_500);
+    scheduled!();
+    expect(fired).toBe(1);
+    expect(logs.join(' ')).toContain('submit-queue-flush: tapped');
+  });
+
+  it('guards refusing ⇒ logged as skipped, never retried', () => {
+    const logs: string[] = [];
+    let scheduled: (() => void) | null = null;
+    scheduleWindsurfQueueFlush(() => false, (l) => logs.push(l), 1, (fn) => { scheduled = fn as () => void; return 0; });
+    scheduled!();
+    expect(logs.join(' ')).toContain('skipped (guards refused)');
+  });
+
+  it('a throwing submit fn is swallowed (the flush is best-effort)', () => {
+    const logs: string[] = [];
+    let scheduled: (() => void) | null = null;
+    scheduleWindsurfQueueFlush(() => { throw new Error('boom'); }, (l) => logs.push(l), 1, (fn) => { scheduled = fn as () => void; return 0; });
+    expect(() => scheduled!()).not.toThrow();
+    expect(logs.join(' ')).toContain('threw (ignored)');
   });
 });

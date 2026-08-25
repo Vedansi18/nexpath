@@ -24,7 +24,7 @@ import { createInjectedRecordStore } from './injected-record.js';
 import { injectPeBody, injectPeBodyWithFallback, resolvePeVisibleSurfaceAckState } from './pe-delivery.js';
 import { createPePoller, type PePoller } from './pe-poller.js';
 import { createSubmitHookPoller, type SubmitHookPoller } from './submit-hook-poller.js';
-import { createSubmitClipboardDelivery, submitKeystroke, lastDarwinSubmitError, isDarwinAccessibilityDenial } from './submit-clipboard-delivery.js';
+import { createSubmitClipboardDelivery, submitKeystroke, lastDarwinSubmitError, isDarwinAccessibilityDenial, scheduleWindsurfQueueFlush } from './submit-clipboard-delivery.js';
 import {
   isWindsurfSubmitAdvisoryEnabled,
   isCursorSubmitAdvisoryEnabled,
@@ -208,10 +208,10 @@ function buildSubmitAdvisory(
     writeClipboard: (text) => Promise.resolve(vscode.env.clipboard.writeText(text)),
     // Reuse the shipped raiser — Linux/X11 only by design; elsewhere it returns
     // false and the paste still proceeds.
-    focus: async () => raiseAppWindow(host),
+    focus: async () => raiseAppWindow([vscode.env.appName.toLowerCase(), host === 'windsurf' ? 'devin' : 'cursor', host]),
     pasteKeystroke: () => pasteKeystroke({ win32Titles: [vscode.env.appName, host === 'cursor' ? 'Cursor' : 'Devin', 'Windsurf'] }),
     // RC11: Enter only when THIS editor is focused (one raise retry inside).
-    submitKeystroke: () => submitKeystroke({ host, focusEditor: () => void raiseAppWindow(host), appName: vscode.env.appName, submitLog: log }),
+    submitKeystroke: () => submitKeystroke({ host, focusEditor: () => void raiseAppWindow([vscode.env.appName.toLowerCase(), host === 'windsurf' ? 'devin' : 'cursor', host]), appName: vscode.env.appName, submitLog: log }),
     log,
   });
   return createSubmitAdvisoryForHost({
@@ -771,11 +771,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         writeClipboard: (text) => Promise.resolve(vscode.env.clipboard.writeText(text)),
         // Reuse the shipped raiser — Linux/X11 only by design; on other OSes it
         // returns false and the paste still proceeds (see the module's notes).
-        focus: async () => raiseAppWindow('windsurf'),
+        focus: async () => raiseAppWindow([vscode.env.appName.toLowerCase(), 'devin', 'windsurf']),
         pasteKeystroke: () => pasteKeystroke({ win32Titles: [vscode.env.appName, 'Devin', 'Windsurf'] }),
         // RC11: Enter only when Windsurf itself is focused — a blind Enter
         // pressed the Welcome view's "Start session" and closed the chat.
-        submitKeystroke: () => submitKeystroke({ host: 'windsurf', focusEditor: () => void raiseAppWindow('windsurf'), appName: vscode.env.appName, submitLog: log }),
+        submitKeystroke: () => submitKeystroke({ host: 'windsurf', focusEditor: () => void raiseAppWindow([vscode.env.appName.toLowerCase(), 'devin', 'windsurf']), appName: vscode.env.appName, submitLog: log }),
         log: (m) => log(m),
       });
 
@@ -848,6 +848,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         ),
         onOutcome: (outcome) => {
           log(`[nexpath] submit delivery outcome: ${outcome}`);
+          // RC61: a busy/reconnecting Devin session parks a delivered submit as
+          // "1 queued message" that only a further Enter sends — tap once.
+          if (outcome === 'delivered' && host === 'windsurf') {
+            scheduleWindsurfQueueFlush(
+              () => submitKeystroke({ host, focusEditor: () => void raiseAppWindow([vscode.env.appName.toLowerCase(), 'devin', 'windsurf']), appName: vscode.env.appName, submitLog: log }),
+              log,
+            );
+          }
           // RC16 (macOS tester, 2026-08-15): on darwin the auto-send keystroke
           // needs the Accessibility permission for the HOST APP. Without it the
           // refined text sits in the composer with zero guidance. One-time,
