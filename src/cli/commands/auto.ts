@@ -86,6 +86,7 @@ import {
   promptHistoryAcceptanceExpectationsV1,
   promptHistoryVerificationAsksV1,
   promptHistoryExpectationEvidenceValueV1,
+  PROMPT_HISTORY_EXPECTATION_WINDOW_V1,
 } from '../../prompt-enhancement/prompt-history-expectation-signals.js';
 import {
   promptHistorySafeguardSentenceV1,
@@ -390,38 +391,6 @@ export function buildPromptEnhancementGroundingRefsV1(store: Store, projectRoot:
       };
     }
 
-    // The same recent prompts, read for what the developer said DONE looks like and how the work
-    // gets PROVEN. Those two sections had never received a fact and were written from plausibility
-    // in every shipped body; what crosses here is the developer's own sentence, quoted, so the
-    // section can say something they actually wrote instead of something that merely sounds right.
-    // Nothing said means nothing produced — the detectors return empty and no ref is pushed.
-    //
-    // ⛔ FREE: the same in-hand prompts, matched as strings. No provider call.
-    for (const [index, expectation] of promptHistoryAcceptanceExpectationsV1(recentPromptTexts).entries()) {
-      const ref = `history_acceptance:${index}`;
-      rightGoodWorkStyleEnvRuntimeRefs.push(ref);
-      groundingTierByRef[ref] = 'uncorroborated';
-      groundingPolarityByRef[ref] = 'present';
-      groundingEvidenceByRef[ref] = {
-        key: 'what you said done means',
-        value: promptHistoryExpectationEvidenceValueV1(expectation),
-        runtimePath: 'local_store',
-        anchorScope: 'current_prompt_scope',
-      };
-    }
-    for (const [index, expectation] of promptHistoryVerificationAsksV1(recentPromptTexts).entries()) {
-      const ref = `history_verification:${index}`;
-      rightGoodWorkStyleEnvRuntimeRefs.push(ref);
-      groundingTierByRef[ref] = 'uncorroborated';
-      groundingPolarityByRef[ref] = 'present';
-      groundingEvidenceByRef[ref] = {
-        key: 'the check you asked for',
-        value: promptHistoryExpectationEvidenceValueV1(expectation),
-        runtimePath: 'local_store',
-        anchorScope: 'current_prompt_scope',
-      };
-    }
-
     // ── §17.11 (owner-ruled: WIRE IT) — env movements cross as their own grounding claim ───────
     //
     // The trajectory probe was never inert: its change events already credit practice scores
@@ -446,6 +415,48 @@ export function buildPromptEnhancementGroundingRefsV1(store: Store, projectRoot:
       };
     }
   } catch { /* no source hard facts available — leave empty */ }
+
+  // The same recent prompts, read for what the developer said DONE looks like and how the work
+  // gets PROVEN. Those two sections had never received a fact and were written from plausibility in
+  // every shipped body; what crosses here is the developer's own sentence, quoted, so a section can
+  // say something they actually wrote instead of something that merely sounds right. Nothing said
+  // means nothing produced — the detectors return empty and no ref is pushed.
+  //
+  // ⚠️ Its OWN try, deliberately: these loops first sat inside the env-facts block above, where an
+  // unrelated store failure would have silenced them without a trace — a project with no stored env
+  // facts would simply never have received either fact. One grounding source, one guard, which is
+  // the convention every other block in this function already follows.
+  //
+  // ⛔ FREE: the same in-hand prompts, matched as strings. No provider call.
+  try {
+    const expectationPrompts = getRecentPrompts(store, projectRoot, PROMPT_HISTORY_EXPECTATION_WINDOW_V1)
+      .map((record) => record.text)
+      .reverse();
+    for (const [index, expectation] of promptHistoryAcceptanceExpectationsV1(expectationPrompts).entries()) {
+      const ref = `history_acceptance:${index}`;
+      rightGoodWorkStyleEnvRuntimeRefs.push(ref);
+      groundingTierByRef[ref] = 'uncorroborated';
+      groundingPolarityByRef[ref] = 'present';
+      groundingEvidenceByRef[ref] = {
+        key: 'what you said done means',
+        value: promptHistoryExpectationEvidenceValueV1(expectation),
+        runtimePath: 'local_store',
+        anchorScope: 'current_prompt_scope',
+      };
+    }
+    for (const [index, expectation] of promptHistoryVerificationAsksV1(expectationPrompts).entries()) {
+      const ref = `history_verification:${index}`;
+      rightGoodWorkStyleEnvRuntimeRefs.push(ref);
+      groundingTierByRef[ref] = 'uncorroborated';
+      groundingPolarityByRef[ref] = 'present';
+      groundingEvidenceByRef[ref] = {
+        key: 'the check you asked for',
+        value: promptHistoryExpectationEvidenceValueV1(expectation),
+        runtimePath: 'local_store',
+        anchorScope: 'current_prompt_scope',
+      };
+    }
+  } catch { /* no readable prompt history — the sections keep saying what they say today */ }
   const scopedFeedbackEvidenceRefs: string[] = [];
   try {
     for (const category of getPromptEnhancementFeedbackSummary(store, projectRoot).categoryCounts) {
