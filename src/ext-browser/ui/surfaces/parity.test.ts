@@ -16,6 +16,7 @@ import { PE_FIXTURE } from './fixtures/pe.js';
 import { MPS_FIRST_FIXTURE, MPS_CONTINUATION_FIXTURE } from './fixtures/mps.js';
 import { PEF_FIXTURE } from './fixtures/pef.js';
 import type { SurfaceModel } from './surface-model.js';
+import { withoutDirectionalRows } from './refinement.js';
 
 import { renderPromptEnhancementPopupFrameV1, buildPromptEnhancementCliFeedbackStateV1, renderPromptEnhancementCliFeedbackFrameV1 } from '../../../prompt-enhancement/cli-submit-popup.js';
 import { renderPromptEnhancementMpsFirstPopupFrameV1, renderPromptEnhancementMpsContinuationFrameV1 } from '../../../prompt-enhancement/cli-mps-popup.js';
@@ -61,8 +62,18 @@ function cliLines(frame: string): string[] {
   return frame.split('\n').map((line) => line.replace(/^│ ?/, '').trim());
 }
 
+/**
+ * Our frame, with the refinement rows removed before comparing.
+ *
+ * They are part of the surfaces — the browser wires the recompose path, so C-4
+ * puts them on screen — but today's CLI renders none of them: its row loop is
+ * commented out verbatim at `cli-submit-popup.ts:641-664` (owner, 2026-08-19:
+ * do not show dead buttons). That is a decision, not drift, so it is reconciled
+ * HERE, in one place, and everything else still has to match line for line.
+ */
 function ours(model: SurfaceModel, focusIndex: number): string[] {
-  return domLines(renderSurface(document, model, { focusIndex })).map((l) => l.trim());
+  return domLines(renderSurface(document, withoutDirectionalRows(model), { focusIndex }))
+    .map((l) => l.trim());
 }
 
 // ── CLI models mirroring each fixture ────────────────────────────────────────

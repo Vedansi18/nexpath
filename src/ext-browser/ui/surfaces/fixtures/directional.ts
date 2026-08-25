@@ -1,22 +1,21 @@
 // ============================================================================
-// D5 static content — the directional variants and their refinement views.
+// D5 static content — the refinement views.
 // ----------------------------------------------------------------------------
-// Derived, not authored: the shipping variants are the base fixtures with the
-// three rows spliced in, so a change to a base fixture flows here instead of
-// having a second copy to keep in step. The base fixtures stay directional-free
-// because they anchor the live-CLI parity suite, and today's CLI renders no
-// directional rows (loop UI-off, `cli-submit-popup.ts:641-664`).
+// The refinement ROWS are not here: they are part of the surfaces themselves,
+// in `pe.ts` and `mps.ts`. Keeping them in a separate "+ directional" fixture
+// made them read as an optional variant of the surface, which they are not.
 //
-// The recomposed bodies are pre-authored (static build): the real behaviour is
-// an instant deterministic recompose with no LLM call (Option B), and each text
-// below is what a "Shorter" pass over its base body would plausibly produce —
+// What remains is the view a refinement OPENS, and the pre-authored recomposed
+// bodies it shows. Those are static stand-ins: the real behaviour is an instant
+// deterministic recompose with no LLM call (Option B, owner 2026-08-19), and
+// each text below is what a "Shorter" pass over its base body would produce —
 // same task, same guarantees, fewer words.
 // ============================================================================
 
 import type { SurfaceModel } from '../surface-model.js';
-import { withDirectionalRows, buildRefinementModel } from '../refinement.js';
+import { buildRefinementModel } from '../refinement.js';
 import { PE_FIXTURE } from './pe.js';
-import { MPS_FIRST_FIXTURE, MPS_CANCEL_LABEL } from './mps.js';
+import { MPS_FIRST_FIXTURE } from './mps.js';
 
 /** The base PE body, recomposed shorter — same guarantees, fewer words. */
 export const PE_REFINED_TEXT =
@@ -26,18 +25,10 @@ export const PE_REFINED_TEXT =
 export const MPS_REFINED_TEXT =
   'Step 1 — one failing test for the payment webhook; paste its output back.';
 
-/** PE with Shorter / More thorough / More project-grounded before `Use original prompt`. */
-export const PE_DIRECTIONAL_FIXTURE: SurfaceModel =
-  withDirectionalRows(PE_FIXTURE, 'Use original prompt');
-
-/** MPS-1 with the same three rows before the Cancel row — the blueprint's "PE parity". */
-export const MPS_FIRST_DIRECTIONAL_FIXTURE: SurfaceModel =
-  withDirectionalRows(MPS_FIRST_FIXTURE, MPS_CANCEL_LABEL);
-
-/** PE after picking Shorter: recomposed body + ← Go back. */
+/** PE after picking a refinement: recomposed body + ← Go back. */
 export const PE_REFINEMENT_FIXTURE: SurfaceModel =
   buildRefinementModel(PE_FIXTURE, PE_REFINED_TEXT);
 
-/** MPS-1 after picking Shorter: recomposed body + ← Go back, Sequence plan still visible. */
+/** MPS-1 after picking one: recomposed body + ← Go back, Sequence plan still visible. */
 export const MPS_FIRST_REFINEMENT_FIXTURE: SurfaceModel =
   buildRefinementModel(MPS_FIRST_FIXTURE, MPS_REFINED_TEXT);

@@ -28,31 +28,13 @@ import { MPS_FIRST_FIXTURE, MPS_CONTINUATION_FIXTURE } from '../fixtures/mps.js'
 import { PEF_FIXTURE } from '../fixtures/pef.js';
 import { withBodyText } from '../refinement.js';
 import { createRefinementTransitions } from '../refinement-transitions.js';
-import {
-  PE_DIRECTIONAL_FIXTURE,
-  MPS_FIRST_DIRECTIONAL_FIXTURE,
-  PE_REFINED_TEXT,
-  MPS_REFINED_TEXT,
-} from '../fixtures/directional.js';
+import { PE_REFINED_TEXT, MPS_REFINED_TEXT } from '../fixtures/directional.js';
 
 const FIXTURES: Record<SurfaceId, SurfaceModel> = {
   prompt_enhancement: PE_FIXTURE,
   mps_first: MPS_FIRST_FIXTURE,
   mps_continuation: MPS_CONTINUATION_FIXTURE,
   prompt_enhancement_feedback: PEF_FIXTURE,
-};
-
-/**
- * The D5 variants, as their own registry.
- *
- * Separate from FIXTURES on purpose: the sweep and the base scenarios measure
- * the plain surfaces, and folding the three extra rows into them would silently
- * change what those numbers mean. This registry is what the directional picker
- * buttons and the refinement scenarios use.
- */
-const DIRECTIONAL_FIXTURES: Partial<Record<SurfaceId, SurfaceModel>> = {
-  prompt_enhancement: PE_DIRECTIONAL_FIXTURE,
-  mps_first: MPS_FIRST_DIRECTIONAL_FIXTURE,
 };
 
 /** The pre-authored recompose, per surface — the static stand-in for Option B. */
@@ -95,9 +77,13 @@ function mountInteractive(): void {
     line.textContent = JSON.stringify(e);
     log.prepend(line);
   };
-  let controller = createSurfaceController(dock.mountEl, {
+  const controller = createSurfaceController(dock.mountEl, {
     registry: FIXTURES,
     initial: 'prompt_enhancement',
+    // Wired always: the refinement rows are part of the surfaces, so a
+    // controller without this hook would render them as dead options — the
+    // exact thing the CLI revert to 48aac87 was about.
+    resolveActivation: createRefinementTransitions(REFINED_TEXTS),
     onEvent: logEvent,
   });
   dock.show();
@@ -106,25 +92,6 @@ function mountInteractive(): void {
     const button = document.createElement('button');
     button.textContent = id;
     button.addEventListener('click', () => controller.setSurface(id));
-    document.getElementById('picker')!.appendChild(button);
-  }
-
-  // The D5 surfaces need their own controller: the directional rows are only
-  // half of it, and the other half is the activation hook that turns one into
-  // the refinement view. Swapping models on the base controller would render
-  // the rows as dead options — the exact thing the CLI revert was about.
-  for (const id of Object.keys(DIRECTIONAL_FIXTURES) as SurfaceId[]) {
-    const button = document.createElement('button');
-    button.textContent = id + ' + directional';
-    button.addEventListener('click', () => {
-      controller.destroy();
-      controller = createSurfaceController(dock.mountEl, {
-        registry: DIRECTIONAL_FIXTURES,
-        initial: id,
-        resolveActivation: createRefinementTransitions(REFINED_TEXTS),
-        onEvent: logEvent,
-      });
-    });
     document.getElementById('picker')!.appendChild(button);
   }
 }
@@ -328,12 +295,14 @@ function e2eScenarios(): Scenario[] {
     });
     return { host, controller, events };
   };
+  // Same surfaces as everything else — the refinement rows are part of them —
+  // with the hook that makes those rows do something.
   const mountD5 = (initial: SurfaceId) => {
     const host = document.createElement('div');
     document.getElementById('sweep-stage')!.appendChild(host);
     const events: SurfaceEvent[] = [];
     const controller = createSurfaceController(host, {
-      registry: DIRECTIONAL_FIXTURES,
+      registry: FIXTURES,
       initial,
       resolveActivation: createRefinementTransitions(REFINED_TEXTS),
       onEvent: (e) => events.push(e),
@@ -427,13 +396,17 @@ function e2eScenarios(): Scenario[] {
     {
       name: 'arrows clamp at both ends, never wrap',
       run() {
+        // The last index comes from the fixture, not a literal. It was 2 until
+        // the refinement rows joined the surface, and a hard-coded 2 turned a
+        // content change into a false failure.
+        const last = PE_FIXTURE.rows.filter((r) => r.kind !== 'note').length - 1;
         const { controller } = mount('prompt_enhancement');
         press(controller.element, 'ArrowUp');
         const top = controller.getFocusIndex();
-        for (let i = 0; i < 6; i++) press(controller.element, 'ArrowDown');
+        for (let i = 0; i < last + 4; i++) press(controller.element, 'ArrowDown');
         const bottom = controller.getFocusIndex();
         controller.destroy();
-        return eq([top, bottom], [0, 2], 'top/bottom focus');
+        return eq([top, bottom], [0, last], 'top/bottom focus');
       },
     },
     {

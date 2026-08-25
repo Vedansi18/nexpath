@@ -71,6 +71,17 @@ export const MPS_FIRST_FIXTURE: SurfaceModel = {
       hints: { always: [DETAILS_HINT], whenFocused: [EDIT_KEYS_HINT] },
       blankBefore: true,
     },
+    // The refinement rows, per the MPS-1 blueprint's "PE parity" rule.
+    //
+    // Cancel KEEPS its own blank, where PE's `Use original prompt` has none —
+    // the two surfaces genuinely differ here. MPS-1 puts a blank after its
+    // details group and PE does not, so the refinement block sits between two
+    // blanks on MPS-1 and opens one on PE. Encoded per surface rather than
+    // derived, because deriving it got MPS-1 wrong: stripping the rows for the
+    // parity comparison left Cancel without the blank the CLI prints.
+    { kind: 'action', label: 'Shorter', blankBefore: true },
+    { kind: 'action', label: 'More thorough' },
+    { kind: 'action', label: 'More project-grounded' },
     { kind: 'action', label: MPS_CANCEL_LABEL, act: 'cancel-sequence', tone: 'cancel', blankBefore: true },
     // The plan is shown, never offered — dim and unreachable, so a user can see
     // the shape of the work without being able to act on a step that is not next.

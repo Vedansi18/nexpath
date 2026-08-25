@@ -19,7 +19,17 @@ describe('PE surface — structure', () => {
     const labels = [...renderSurface(document, PE_FIXTURE, { focusIndex: 0 }).querySelectorAll('.np-label')]
       .map((el) => el.textContent);
 
-    expect(labels).toEqual(['Use enhanced prompt', 'Additional details', 'Use original prompt']);
+    // The refinement rows sit between the details field and the last option —
+    // they are part of this surface, not a variant of it. The CLI renders none
+    // of them today (its loop is UI-off), which parity.test.ts reconciles.
+    expect(labels).toEqual([
+      'Use enhanced prompt',
+      'Additional details',
+      'Shorter',
+      'More thorough',
+      'More project-grounded',
+      'Use original prompt',
+    ]);
   });
 
   it('puts the header block above the scroll band and the footer below it', () => {
@@ -48,12 +58,41 @@ describe('PE surface — structure', () => {
     expect(fields[1]!.value).toBe('Keep the existing retry helper — do not rewrite it.');
   });
 
-  it('the action row has no field', () => {
+  it('action rows have no field — only the two editable rows do', () => {
     const frame = renderSurface(document, PE_FIXTURE, { focusIndex: 2 });
     const labels = [...frame.querySelectorAll('.np-label')].map((el) => el.textContent);
 
-    expect(labels[2]).toBe('Use original prompt');
+    expect(labels.at(-1)).toBe('Use original prompt');
+    // Two textareas for six rows: the body and the details. The four action
+    // rows — three refinements and the last option — carry none.
     expect(frame.querySelectorAll('textarea')).toHaveLength(2);
+  });
+});
+
+describe('a field, its label and its hints share one group', () => {
+  // `:focus-within` is what decides whether a block reads as being edited, and
+  // it needs a common ancestor. The label and the textarea are separate rows,
+  // so the renderer wraps them — flatten the wrapper and the editing state
+  // silently stops working, with every other test still green.
+  it('wraps the label, the editor and the hints together', () => {
+    const frame = renderSurface(document, PE_FIXTURE, { focusIndex: 0 });
+    const groups = [...frame.querySelectorAll('.np-field-group')];
+
+    expect(groups).toHaveLength(2);                       // body and details
+    for (const group of groups) {
+      expect(group.querySelector('.np-label'), 'the label must be inside').not.toBeNull();
+      expect(group.querySelector('textarea'), 'the editor must be inside').not.toBeNull();
+    }
+    // The focused body's hint travels with it, not with the scroll band.
+    expect(groups[0]!.querySelector('.np-hint')).not.toBeNull();
+  });
+
+  it('leaves action rows ungrouped — they have nothing to focus within', () => {
+    const frame = renderSurface(document, PE_FIXTURE, { focusIndex: 0 });
+    const original = [...frame.querySelectorAll('.np-label')]
+      .find((el) => el.textContent === 'Use original prompt')!;
+
+    expect(original.closest('.np-field-group')).toBeNull();
   });
 });
 

@@ -11,10 +11,8 @@
 
 import { describe, it, expect } from 'vitest';
 import { renderSurface } from './surface-view.js';
-import { DIRECTIONAL_LABELS, GO_BACK_LABEL, withDirectionalRows, buildRefinementModel, withBodyText } from './refinement.js';
+import { DIRECTIONAL_LABELS, GO_BACK_LABEL, withoutDirectionalRows, buildRefinementModel, withBodyText } from './refinement.js';
 import {
-  PE_DIRECTIONAL_FIXTURE,
-  MPS_FIRST_DIRECTIONAL_FIXTURE,
   PE_REFINEMENT_FIXTURE,
   MPS_FIRST_REFINEMENT_FIXTURE,
   PE_REFINED_TEXT,
@@ -107,9 +105,9 @@ describe('PE refinement view — parity with the LIVE CLI', () => {
 // ── directional rows: structural, per the documented decisions ───────────────
 
 describe.each([
-  ['PE', PE_DIRECTIONAL_FIXTURE, 'Use original prompt', PE_FIXTURE],
-  ['MPS-1', MPS_FIRST_DIRECTIONAL_FIXTURE, MPS_CANCEL_LABEL, MPS_FIRST_FIXTURE],
-] as const)('%s directional rows', (_name, fixture, successorLabel, base) => {
+  ['PE', PE_FIXTURE, 'Use original prompt'],
+  ['MPS-1', MPS_FIRST_FIXTURE, MPS_CANCEL_LABEL],
+] as const)('%s refinement rows are part of the surface', (_name, fixture, successorLabel) => {
   it('renders the three labels, in the CLI\'s order, immediately before the successor', () => {
     const labels = labelsOf(fixture);
     const at = labels.indexOf('Shorter');
@@ -132,14 +130,23 @@ describe.each([
     }
   });
 
-  it('opens the block with one blank — before Shorter, none inside, none after', () => {
+  it('opens the block with one blank and keeps none inside it', () => {
     const lines = ours(fixture, 0);
     const shorterAt = lines.indexOf('○ Shorter');
 
-    expect(lines[shorterAt - 1]).toBe('');                       // blank opens the block
+    expect(lines[shorterAt - 1]).toBe('');                       // a blank opens the block
     expect(lines[shorterAt + 1]).toBe('○ More thorough');        // contiguous
     expect(lines[shorterAt + 2]).toBe('○ More project-grounded');
-    expect(lines[shorterAt + 3]).toBe(`○ ${successorLabel}`);    // successor follows immediately
+  });
+
+  it('is followed by its successor, with whatever blank that surface prints', () => {
+    // PE goes straight into `Use original prompt`; MPS-1 prints a blank before
+    // Cancel. The two surfaces genuinely differ, and the CLI comparison in
+    // parity.test.ts is what pins each of them.
+    const lines = ours(fixture, 0);
+    const after = lines.slice(lines.indexOf('○ More project-grounded') + 1);
+
+    expect(after.filter((l) => l !== '')[0]).toBe(`○ ${successorLabel}`);
   });
 
   it('focus reaches every directional row', () => {
@@ -152,26 +159,37 @@ describe.each([
 
       expect(focused?.textContent, `focus ${focusIndex}`).toBe(label);
     }
-    expect(interactive).toBe(base.rows.filter((r) => r.kind !== 'note').length + 3);
+    expect(interactive).toBe(withoutDirectionalRows(fixture).rows.filter((r) => r.kind !== 'note').length + 3);
   });
 
-  it('derives from the base fixture without mutating it', () => {
-    // The base fixtures anchor the live-CLI parity suite; a splice that touched
-    // them would fail parity everywhere for a reason that is not drift.
-    expect(base.rows.some((r) => r.kind !== 'note' && r.label === 'Shorter')).toBe(false);
+  it('the parity comparison can strip them back out', () => {
+    // The CLI renders none of these rows today, so the parity suite compares a
+    // stripped model. Stripping must leave the surface otherwise untouched.
+    const stripped = withoutDirectionalRows(fixture);
+
+    for (const label of DIRECTIONAL_LABELS) {
+      expect(stripped.rows.some((r) => r.kind !== 'note' && r.label === label)).toBe(false);
+    }
+    expect(stripped.rows.length).toBe(fixture.rows.length - 3);
+    expect(stripped.footer).toBe(fixture.footer);
   });
 });
 
-describe('MPS-1 directional specifics', () => {
-  it('the Cancel row keeps its tone and loses its blank — the block runs into it', () => {
-    const frame = renderSurface(document, MPS_FIRST_DIRECTIONAL_FIXTURE, { focusIndex: 0 });
+describe('MPS-1 specifics', () => {
+  it('the Cancel row keeps its tone and its own blank', () => {
+    // MPS-1 prints a blank before Cancel where PE goes straight into
+    // `Use original prompt` — the surfaces differ, and parity pins both.
+    const frame = renderSurface(document, MPS_FIRST_FIXTURE, { focusIndex: 0 });
     const cancel = [...frame.querySelectorAll('.np-label')].find((el) => el.textContent === MPS_CANCEL_LABEL)!;
 
     expect(cancel.classList.contains('np-cancel')).toBe(true);
+
+    const lines = ours(MPS_FIRST_FIXTURE, 0);
+    expect(lines[lines.indexOf(`○ ${MPS_CANCEL_LABEL}`) - 1]).toBe('');
   });
 
   it('the Sequence plan block is untouched', () => {
-    const lines = ours(MPS_FIRST_DIRECTIONAL_FIXTURE, 0);
+    const lines = ours(MPS_FIRST_FIXTURE, 0);
 
     expect(lines).toContain('Sequence plan');
     expect(lines).toContain('Total: 3');
@@ -275,9 +293,19 @@ describe('Go back restores both halves', () => {
   });
 });
 
-describe('withDirectionalRows guards', () => {
-  it('throws on a missing successor label rather than appending silently', () => {
-    expect(() => withDirectionalRows(PE_FIXTURE, 'No such row')).toThrow('no row labelled');
+describe('withoutDirectionalRows', () => {
+  it('leaves a surface that has none alone', () => {
+    const pef = { id: 'prompt_enhancement_feedback', label: 'x', footer: 'f',
+      rows: [{ kind: 'action', label: 'only' }] } as SurfaceModel;
+
+    expect(withoutDirectionalRows(pef).rows).toHaveLength(1);
+  });
+
+  it('never removes a note row', () => {
+    // MPS-1's Sequence plan lines are notes and must survive the strip.
+    const stripped = withoutDirectionalRows(MPS_FIRST_FIXTURE);
+
+    expect(stripped.rows.filter((r) => r.kind === 'note')).toHaveLength(3);
   });
 });
 
@@ -289,8 +317,8 @@ describe('directional -> refinement -> Go back, through the controller', () => {
     document.body.appendChild(host);
     const controller = createSurfaceController(host, {
       registry: {
-        prompt_enhancement: PE_DIRECTIONAL_FIXTURE,
-        mps_first: MPS_FIRST_DIRECTIONAL_FIXTURE,
+        prompt_enhancement: PE_FIXTURE,
+        mps_first: MPS_FIRST_FIXTURE,
       },
       initial: 'prompt_enhancement',
       resolveActivation: createRefinementTransitions({

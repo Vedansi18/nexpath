@@ -53,37 +53,25 @@ export const DIRECTIONAL_LABELS = ['Shorter', 'More thorough', 'More project-gro
 export const GO_BACK_LABEL = '← Go back';
 
 /**
- * Insert the three directional rows immediately before the row labelled
- * `beforeLabel` — `Use original prompt` for PE, the Cancel row for MPS-1.
+ * The same surface with its refinement rows removed.
  *
- * Blank exactly before `Shorter`: the CLI opens the directional block with one
- * blank line and puts none between the rows (`rows[index - 1]?.kind !==
- * 'directional'` gates it). The successor row loses any `blankBefore` of its
- * own, because in the CLI the row after the block follows immediately — PE's
- * `Use original prompt` never had one, and MPS-1's Cancel, which does in the
- * base fixture, follows the block directly under the blueprint's "PE parity"
- * rule.
+ * The rows live in the fixtures because they are part of the surface. This is
+ * the one place that difference is reconciled: today's CLI renders none of them
+ * — its row loop is commented out verbatim at `cli-submit-popup.ts:641-664`
+ * (owner, 2026-08-19: do not show dead buttons) — so the parity suite compares
+ * a stripped model against it.
  *
- * Throws on a missing label rather than appending: rows silently landing at the
- * bottom is exactly the kind of quiet drift this workstream exists to prevent.
+ * Stripping the ROW also removes the blank line above it, because that blank is
+ * `Shorter`'s own `blankBefore`. Filtering rendered lines instead would have to
+ * find and drop that blank separately, and get it wrong the first time.
  */
-export function withDirectionalRows(base: SurfaceModel, beforeLabel: string): SurfaceModel {
-  const at = base.rows.findIndex((r) => r.kind !== 'note' && r.label === beforeLabel);
-  if (at === -1) throw new Error(`withDirectionalRows: no row labelled "${beforeLabel}"`);
-
-  // No description line and no `(unavailable)` marker — both explicit owner
-  // decisions recorded in the commented CLI block. Plain action rows carry
-  // neither, so the decisions hold by construction.
-  const directionals: SurfaceRow[] = DIRECTIONAL_LABELS.map((label, i) => (
-    i === 0 ? { kind: 'action', label, blankBefore: true } : { kind: 'action', label }
-  ));
-
-  const successor = { ...base.rows[at]! };
-  delete successor.blankBefore;
-
-  const rows = [...base.rows];
-  rows.splice(at, 1, ...directionals, successor);
-  return { ...base, rows };
+export function withoutDirectionalRows(model: SurfaceModel): SurfaceModel {
+  return {
+    ...model,
+    rows: model.rows.filter(
+      (row) => row.kind === 'note' || !(DIRECTIONAL_LABELS as readonly string[]).includes(row.label),
+    ),
+  };
 }
 
 /**
