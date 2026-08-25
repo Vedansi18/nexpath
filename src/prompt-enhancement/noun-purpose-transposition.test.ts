@@ -325,6 +325,20 @@ describe('the prompt gate — Layer 0 decides whether the block is even asked fo
     const { captured } = await capturedComposerPrompt(NO_TOOL_PROMPT);
     expect(captured).not.toContain('nounPurposes');
   });
+
+  it('an UNLISTED noun shuts the gate, which silences BOTH halves — the cost, ruled and pinned', async () => {
+    // Owner ruling 2026-08-25: the gate stays and this cost is recorded rather than engineered
+    // around. The declaration is what half B judges, so no block means no declaration means no
+    // finding of either kind — Layer 2 covers prompts naming a known tool or a credential shape,
+    // and nothing else. Pinned so the limit stays a stated fact, never an unnoticed miss.
+    const { captured } = await capturedComposerPrompt('rotate my auth thingy tomorrow');
+    expect(captured).not.toContain('nounPurposes');
+    expect(findPromptEnhancementNounPurposeFindingsV1({
+      nounPurposes: undefined,
+      originalPromptText: 'rotate my auth thingy tomorrow',
+      groundedTexts: [],
+    })).toEqual([]);
+  });
 });
 
 describe('no retry — a declaration is never a composition failure', () => {
