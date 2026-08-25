@@ -1,74 +1,73 @@
 # Contributing to Nexpath
-
-Read the [README](https://github.com/hi0001234d/nexpath?tab=readme-ov-file) first — it covers what
-Nexpath does and how to install it. This guide covers how to change it.
-
+ 
+Read the [README](__https://github.com/hi0001234d/nexpath?tab=readme-ov-file__) first — it covers what
+Nexpath does and how to install and run it. This guide covers how to contribute changes.
+ 
 ## Ways to Contribute
-
-- **End-to-end agent testing** — run Nexpath against an agent the README lists as uncertified and
-  report what happened. No codebase knowledge needed.
+ 
+- **Reports** — [Issues](__https://github.com/hi0001234d/nexpath/issues__) for bugs and features,
+  [Discussions](__https://github.com/hi0001234d/nexpath/discussions__) for everything else
 - **Code** — bug fixes, pipeline work, new agent support
 - **Docs** — the README, this guide, or the CLI help text
-- **Reports** — [Issues](https://github.com/hi0001234d/nexpath/issues) for bugs and features,
-  [Discussions](https://github.com/hi0001234d/nexpath/discussions) for everything else
-
+- **Reports** — [Issues](__https://github.com/hi0001234d/nexpath/issues__) for bugs and features,
+  [Discussions](__https://github.com/hi0001234d/nexpath/discussions__) for everything else
+ 
 ## Reporting Bugs
-
-[Search existing issues](https://github.com/hi0001234d/nexpath/issues) first, then
-[open a new one](https://github.com/hi0001234d/nexpath/issues/new) with:
-
+ 
+[Search existing issues](__https://github.com/hi0001234d/nexpath/issues__) first to avoid duplicates, then
+[open a new one](__https://github.com/hi0001234d/nexpath/issues/new__) with:
+ 
 - OS, Node version, Nexpath version, and which AI coding agent
 - The exact prompt or command that reproduces it
 - What you expected, and the actual error text
 - Output of `nexpath status` — plus `nexpath log` for advisory or popup issues
   (`NEXPATH_DEBUG=1` for verbose stderr)
-
+ 
 > ⚠️ `nexpath status` dumps your config and `nexpath log` may contain your prompts — redact before
 > pasting.
-
+ 
 ## Before You Start
-
-- Open an issue first — except typos, small bug fixes, and type-only changes
+ 
+- Open an issue first for features and non-trivial bug fixes; typos, small bug fixes, and type-only changes can be submitted directly
 - State the problem, your approach, and why it belongs in Nexpath
-- Wait for maintainer approval. **PRs without an approved issue may be closed.**
-
+- For features and non-trivial changes, wait for maintainer approval before opening a PR. **PRs without an approved issue may be closed.**
+ 
 ## Common Checks
-
+ 
 Nexpath runs **no CI on pull requests** — your local run is the only gate.
-
+ 
 ```bash
 npm run build          # prebuild gates: content-template + selectability
 npm run typecheck      # core CLI + server
 npm run typecheck:ext  # required if you touched src/ext-browser/
 npm test               # vitest, whole tree
 ```
-
+ 
 Three things that trip people up:
-
+ 
 - **Build gates** — a content template that is schema-invalid, missing its level-1 floor, or
   unreachable by a realistic prompt aborts the build. Fix the record; don't bypass the gate.
-- **`src/ext-vscode/`** — a separate package, excluded from every root check. Run its own
+- **`src/ext-vscode/`** — a separate package, excluded from the root checks. Run its own
   `npm install && npm run typecheck && npm run test && npm run build`.
 - **`npm test` exits 1 on a public clone** — `dev-plan-table-integrity.test.ts` and
   `hv1-env-supply.test.ts` read a private submodule and fail with `ENOENT`. Those two are the only
   accepted failures; everything else red is your change.
-
+ 
 ## Pull Requests
-
-- One feature or fix per PR, split into logical commits
+ 
+- One feature or fix per PR; keep commits focused and logical
 - Conventional commit titles — `fix(pe): lower the popup cooldown default`
 - Relative imports need the `.js` extension (`NodeNext` ESM) — the most common first-build failure
 - `strict` is on: no `any`, no stray `console.log`
 - Never commit secrets, API keys, real home paths, or internal planning terminology
-- Tests live next to the code as `<module>.test.ts` — a bug fix needs one that fails before the fix
-  and passes after
-- Rebase on the latest `main`, target `main`, and link the issue with `Fixes #123`
+- Tests live next to the code as `<module>.test.ts` — add or update tests when behavior changes; a bug fix needs one that fails before the fix and passes after
+- Rebase on the latest `main`, target `main`, and link the issue with `Fixes #123` when applicable
 - **Paste real command output as testing evidence.** "Should pass" is not evidence. If a check is
   blocked, say which one, why, and what you ran instead.
 - **You own what you submit** — AI agents are welcome, but you must understand the diff and be able
   to explain it
-
+ 
 ## Contribution Agreement
-
+ 
 By submitting a pull request, you agree that your contributions are licensed under the project's
-[Apache 2.0](LICENSE) license.
+[Apache 2.0](LICENSE) license. 
