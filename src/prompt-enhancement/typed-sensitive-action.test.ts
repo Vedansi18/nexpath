@@ -140,6 +140,26 @@ describe('clearance independence — the typed half is NEVER clearable', () => {
   });
 });
 
+describe('the validator OR direction is discriminated — a replacement cannot hide', () => {
+  it('a keyword-firing body with NO typed verdict still validates as confirmation-required', () => {
+    // Kills the OR -> replacement mutation at the VALIDATOR: under a replacement, a keyword
+    // candidate no longer sets confirmationRequired and the state below reads none.
+    const row = ROWS.find((r) => r.id === 1)!;
+    const composed = composeFor(row.prompt);
+    const validation = validatePromptEnhancementSafety({ currentBody: composed.currentBody });
+    expect(validation.safetySummary.sensitiveActionState).toMatch(/^confirmation_required/);
+  });
+
+  it('the typed verdict alone also sets the required state — the second recall source at the validator', () => {
+    const composed = composeFor(SECRET_CONTEXT_PROMPT, { typed: TYPED });
+    const validation = validatePromptEnhancementSafety({
+      currentBody: composed.currentBody,
+      typedSensitiveActionVerdict: TYPED,
+    });
+    expect(validation.safetySummary.sensitiveActionState).toMatch(/^confirmation_required/);
+  });
+});
+
 describe('the still-dead fields stay dead — pinned so the deliberate choice is never read as an oversight', () => {
   it('the facade consumes neither bodyShape nor gateReasonCode from the gate decision', () => {
     const facadeSource = readFileSync(fileURLToPath(new URL('./facade.ts', import.meta.url)), 'utf8');
