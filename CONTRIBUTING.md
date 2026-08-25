@@ -62,15 +62,6 @@ npx vitest run \
   --exclude "src/ext-vscode/**"
 ```
 
-On an unmodified branch that run is green, and the summary it prints is what your PR should show:
-
-```
- Test Files  350 passed (350)
-      Tests  9337 passed | 1 todo (9338)
-```
-
-Anything red beyond those two files is your change.
-
 ## Pull Requests
 
 - One feature or fix per PR, split into logical commits
