@@ -581,3 +581,87 @@ describe('main-world-injector.ts', () => {
     });
   });
 });
+
+// Captured at REGISTRATION time (module import happens in the first describe's
+// beforeAll, after this file-level implementation is installed) — the mock call
+// LOG is cleared by earlier describes' hooks, but this variable persists.
+const capturedOnMessage: { fn?: (msg: unknown) => unknown } = {};
+onMessageAddListenerMock.mockImplementation((fn: (msg: unknown) => unknown) => { capturedOnMessage.fn = fn; });
+
+describe('PE panel channels (PB4)', () => {
+  beforeEach(() => {
+    setLocation('https://bolt.new', 'bolt.new', '/~/proj-1');
+    sendMessageMock.mockClear().mockResolvedValue(undefined);
+  });
+
+  it('forwards a valid pe-command-out with the project root and re-validated command', () => {
+    window.dispatchEvent(new CustomEvent('nexpath:pe-command-out', {
+      detail: { viewSeq: 3, command: { type: 'use_current', bodyText: 'b' } },
+    }));
+    expect(sendMessageMock).toHaveBeenCalledWith({
+      type: 'nexpath:pe-command',
+      projectRoot: 'https://bolt.new/~/proj-1',
+      viewSeq: 3,
+      command: { type: 'use_current', bodyText: 'b' },
+    });
+  });
+
+  it('drops a pe-command-out whose command fails the validator (page events are untrusted)', () => {
+    window.dispatchEvent(new CustomEvent('nexpath:pe-command-out', {
+      detail: { viewSeq: 3, command: { type: 'launch_missiles' } },
+    }));
+    window.dispatchEvent(new CustomEvent('nexpath:pe-command-out', {
+      detail: { viewSeq: '3', command: { type: 'close' } },
+    }));
+    expect(sendMessageMock).not.toHaveBeenCalled();
+  });
+
+  it('drops PE events on a page with no project context (landing-page rule)', () => {
+    setLocation('https://bolt.new', 'bolt.new', '/');
+    window.dispatchEvent(new CustomEvent('nexpath:pe-command-out', {
+      detail: { viewSeq: 1, command: { type: 'close' } },
+    }));
+    window.dispatchEvent(new CustomEvent('nexpath:pe-terminal-out', { detail: { outcome: 'close' } }));
+    window.dispatchEvent(new CustomEvent('nexpath:pe-keepalive-out'));
+    expect(sendMessageMock).not.toHaveBeenCalled();
+  });
+
+  it('forwards valid pe-terminal-out outcomes and drops junk ones', () => {
+    for (const outcome of ['use_current', 'use_original', 'close']) {
+      window.dispatchEvent(new CustomEvent('nexpath:pe-terminal-out', { detail: { outcome } }));
+    }
+    window.dispatchEvent(new CustomEvent('nexpath:pe-terminal-out', { detail: { outcome: 'select' } }));
+    expect(sendMessageMock).toHaveBeenCalledTimes(3);
+    expect(sendMessageMock).toHaveBeenLastCalledWith({
+      type: 'nexpath:pe-terminal-notice', projectRoot: 'https://bolt.new/~/proj-1', outcome: 'close',
+    });
+  });
+
+  it('forwards the keepalive heartbeat', () => {
+    window.dispatchEvent(new CustomEvent('nexpath:pe-keepalive-out'));
+    expect(sendMessageMock).toHaveBeenCalledWith({
+      type: 'nexpath:pe-keepalive', projectRoot: 'https://bolt.new/~/proj-1',
+    });
+  });
+
+  it('show-pe returns a Promise that resolves {rendered:true} on the panel ack', async () => {
+    const listener = capturedOnMessage.fn!;
+    const result = listener({ type: 'nexpath:show-pe', projectRoot: 'r', payload: { schemaVersion: 1 } });
+    expect(result).toBeInstanceOf(Promise);
+    window.dispatchEvent(new CustomEvent('nexpath:pe-view-ack'));
+    await expect(result).resolves.toEqual({ rendered: true });
+  });
+
+  it('show-pe REJECTS after 3s with no ack — a page whose PE wiring is absent must fail the send, not silently ack', async () => {
+    vi.useFakeTimers();
+    try {
+      const listener = capturedOnMessage.fn!;
+      const result = listener({ type: 'nexpath:show-pe', projectRoot: 'r', payload: { schemaVersion: 1 } }) as Promise<unknown>;
+      const settled = result.then(() => 'resolved', () => 'rejected');
+      vi.advanceTimersByTime(3_000);
+      await expect(settled).resolves.toBe('rejected');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
