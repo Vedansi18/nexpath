@@ -595,6 +595,7 @@ export function buildPromptEnhancementRequestForAuto(input: {
           ? {
               verdict: input.stageResult.sensitiveActionVerdict,
               reason: input.stageResult.sensitiveActionReason,
+              name: input.stageResult.sensitiveActionName,
             }
           : undefined,
         promptStartBoundary: source.promptStartStop.hookBoundary,
@@ -1141,6 +1142,7 @@ export async function runAuto(
     // block, so the provenance field's producer changes with zero second wiring.
     stageResult.sensitiveActionVerdict = settledClearance.verdict as 'proposed' | 'not_proposed';
     stageResult.sensitiveActionReason = settledClearance.reason;
+    stageResult.sensitiveActionName = settledClearance.name;
     // Attributability (a binding condition of the clearance exception): every clearance that
     // can remove a safety line must be auditable from an ordinary debug run — verdict AND the
     // model's stated benign reading. Local debug log only, same privacy class as the prompt
@@ -1148,6 +1150,7 @@ export async function runAuto(
     logger.debug('sensitive_action_clearance', {
       verdict: settledClearance.verdict,
       reason: settledClearance.reason?.slice(0, 160),
+      name: settledClearance.name?.slice(0, 60),
     });
   }
   const classification = stageResult.classification;

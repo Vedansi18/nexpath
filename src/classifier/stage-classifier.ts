@@ -323,6 +323,8 @@ export interface ParsedStageReply {
    */
   sensitiveActionVerdict?: 'proposed' | 'not_proposed';
   sensitiveActionReason?: string;
+  /** The model's noun-phrase name for a proposed action. Captured for the record; consumed by nothing. */
+  sensitiveActionName?: string;
   reason: string;
 }
 
@@ -356,6 +358,8 @@ export interface StageClassifierResult {
   sensitiveActionVerdict?: 'proposed' | 'not_proposed';
   /** Required for a clearance to count: what the benign reading IS. Reasonless clearances are void. */
   sensitiveActionReason?: string;
+  /** The model's noun-phrase name for a proposed action. Captured for the record; consumed by nothing. */
+  sensitiveActionName?: string;
   reason: string;
   /** True when this result came from the local fallback (the model was unavailable). */
   degraded: boolean;

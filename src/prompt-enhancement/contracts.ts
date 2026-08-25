@@ -291,7 +291,7 @@ export interface PromptEnhancementTriggerProvenanceV1 {
    * confirmation line is emitted exactly as it is today. A degraded classifier call omits
    * the field entirely.
    */
-  classifierSensitiveActionClearance?: { readonly verdict?: string; readonly reason?: string };
+  classifierSensitiveActionClearance?: { readonly verdict?: string; readonly reason?: string; readonly name?: string };
   promptStartBoundary: PromptStartStopSourceSnapshot['hookBoundary'];
   deliveryBoundary: PromptStartStopSourceSnapshot['deliveryBoundary'];
   promptStartCanReplaceSameTurn: PromptStartStopSourceSnapshot['runAutoCanHoldOrReplaceSubmittedPrompt'];

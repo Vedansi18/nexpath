@@ -2189,6 +2189,7 @@ describe('validated PE preparation boundary', () => {
           debugEvidencePresent: ['logs', 'failing_test_details'],
           sensitiveActionVerdict: 'not_proposed',
           sensitiveActionReason: 'the risky word names a CSS effect only',
+          sensitiveActionName: 'shadow styling tweak',
         },
         streamBOutputs: [],
       });
@@ -2207,6 +2208,7 @@ describe('validated PE preparation boundary', () => {
       expect(request.reviewMomentContext.triggerProvenance.classifierSensitiveActionClearance).toEqual({
         verdict: 'not_proposed',
         reason: 'the risky word names a CSS effect only',
+        name: 'shadow styling tweak',
       });
       expect(request.sourceSignals.promptStartStop.runAutoCanHoldOrReplaceSubmittedPrompt).toBe(false);
 
