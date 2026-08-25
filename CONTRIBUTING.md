@@ -51,8 +51,8 @@ Two things that trip people up:
   `npm install && npm run typecheck && npm run test && npm run build`.
 
 `npm test` also exits 1 on a public clone: two files read a private submodule and fail with
-`ENOENT`. They are the only accepted failures — exclude exactly those two to see whether your own
-change passes, and never add anything else to the list:
+`ENOENT`. They are the only accepted failures. Exclude exactly those two — and nothing else — to
+see whether your own change passes:
 
 ```bash
 npx vitest run \
@@ -61,6 +61,15 @@ npx vitest run \
   --exclude "**/node_modules/**" \
   --exclude "src/ext-vscode/**"
 ```
+
+On an unmodified branch that run is green, and the summary it prints is what your PR should show:
+
+```
+ Test Files  350 passed (350)
+      Tests  9337 passed | 1 todo (9338)
+```
+
+Anything red beyond those two files is your change.
 
 ## Pull Requests
 
