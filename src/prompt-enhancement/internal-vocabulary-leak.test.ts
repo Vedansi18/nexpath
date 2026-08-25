@@ -17,7 +17,7 @@ import {
 } from './section-display-names.js';
 import {
   findPromptEnhancementInternalVocabularyLeaksV1,
-  PROMPT_ENHANCEMENT_INTERNAL_VOCABULARY_V1,
+  promptEnhancementInternalVocabularyV1,
 } from './internal-vocabulary-leak.js';
 import { promptEnhancementAuthorityModeForTextV1, promptEnhancementRiskKindsForTextV1 } from './safety-sendability.js';
 import type { PromptEnhancementSourceRefV1 } from './contracts.js';
@@ -151,12 +151,12 @@ describe('the specimen regressions — every measured leak phrase, pinned non-re
 
 describe('the detector — raw identifiers only, and never a de-underscored phrase', () => {
   it('the derived vocabulary covers obligations, section kinds and fact-line enums', () => {
-    expect(PROMPT_ENHANCEMENT_INTERNAL_VOCABULARY_V1).toContain('safety_hook_linkage');
-    expect(PROMPT_ENHANCEMENT_INTERNAL_VOCABULARY_V1).toContain('problem_statement');
-    expect(PROMPT_ENHANCEMENT_INTERNAL_VOCABULARY_V1).toContain('must_phrase_as_possibility');
+    expect(promptEnhancementInternalVocabularyV1()).toContain('safety_hook_linkage');
+    expect(promptEnhancementInternalVocabularyV1()).toContain('problem_statement');
+    expect(promptEnhancementInternalVocabularyV1()).toContain('must_phrase_as_possibility');
     // Single words are English, never identifiers.
-    expect(PROMPT_ENHANCEMENT_INTERNAL_VOCABULARY_V1).not.toContain('alternatives');
-    expect(PROMPT_ENHANCEMENT_INTERNAL_VOCABULARY_V1).not.toContain('compatibility');
+    expect(promptEnhancementInternalVocabularyV1()).not.toContain('alternatives');
+    expect(promptEnhancementInternalVocabularyV1()).not.toContain('compatibility');
   });
 
   it('a body carrying a raw union identifier is CAUGHT, blocking', () => {

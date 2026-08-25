@@ -1,3 +1,4 @@
+import { promptEnhancementAuthorityModeForTextV1, promptEnhancementRiskKindsForTextV1 } from './safety-sendability.js';
 import type { Stage } from '../classifier/types.js';
 
 // The taxonomy ids live in a LEAF module (see taxonomy-ids.ts) so the stage
@@ -1035,17 +1036,26 @@ export function routePromptEnhancement(
     input,
   );
   const confidence = confidenceFor(normalized, input, intent);
-  const reasonCodes = reasonCodesFor(normalized, input, intent, capabilityOverlays);
+  // The third planning_first trigger. It rides the route the prompt already earned — the family,
+  // intent and preset are untouched — because the defect is the body's POSTURE, not its subject:
+  // a debugging question about deploys is still a debugging prompt, it just must not be answered
+  // with instructions to deploy. The two evidence-quality triggers return earlier and are
+  // unreachable from here, so they cannot be absorbed or masked by this one.
+  const posture = needsUnrequestedActionPosture(input.promptText);
+  const reasonCodes = posture
+    ? [...reasonCodesFor(normalized, input, intent, capabilityOverlays), PROMPT_ENHANCEMENT_UNREQUESTED_ACTION_POSTURE_REASON_V1]
+    : reasonCodesFor(normalized, input, intent, capabilityOverlays);
+  const fallbackMode: PromptEnhancementRouteFallbackMode = posture ? 'planning_first' : 'none';
 
   return {
-    contractDecision: toContractDecision(input, selectedPreset, capabilityOverlays, evidenceRefs, reasonCodes, false, confidence, 'none'),
+    contractDecision: toContractDecision(input, selectedPreset, capabilityOverlays, evidenceRefs, reasonCodes, false, confidence, fallbackMode),
     selectedPreset,
     familyId: selectedPreset.family,
     primaryIntent: selectedPreset.primaryIntent,
     secondaryIntentTags: secondaryIntentTagsFor(normalized, selectedPreset.primaryIntent),
     capabilityOverlays,
     routeConfidence: confidence,
-    fallbackMode: 'none',
+    fallbackMode,
     routeEvidenceRefs: evidenceRefs,
     ladderResolution,
     reasonCodes,
@@ -1240,6 +1250,33 @@ function nonPrimaryUserIntentHandlingFor(
   }
 }
 
+/**
+ * The reason code for the third `planning_first` trigger — named for what it observes, so the two
+ * evidence-quality triggers stay tellable apart from this one in any log or record.
+ */
+export const PROMPT_ENHANCEMENT_UNREQUESTED_ACTION_POSTURE_REASON_V1 = 'risky_topic_not_asked_to_execute';
+
+/**
+ * Should this prompt get the planning posture?
+ *
+ * The case the posture was built for and never reached: the developer ASKS ABOUT something risky
+ * rather than asking for it to be done — "how does deploying this to production actually work?" —
+ * and the body answers by instructing the agent to do it. Firing the posture makes the body propose
+ * instead of instruct, and puts the popup in its clarify state.
+ *
+ * The condition (owner ruling): not execution-requested AND names a risky topic. The first half is
+ * what keeps this disjoint from the confirmation line, which requires execution-requested — so a
+ * risky prompt gets exactly one treatment: asked-to-execute gets the confirmation, not-asked gets
+ * the posture. Neither can claim the same prompt.
+ *
+ * The risk read is the RAW keyword read, never the cleared one: routing decides by prompt SHAPE,
+ * and the clearance belongs to the confirmation line alone.
+ */
+function needsUnrequestedActionPosture(promptText: string): boolean {
+  return promptEnhancementAuthorityModeForTextV1(promptText) !== 'execute_requested'
+    && promptEnhancementRiskKindsForTextV1(promptText).length > 0;
+}
+
 function ambiguityStateFor(
   reasonCodes: readonly string[],
   noPopup: boolean,
@@ -1248,7 +1285,12 @@ function ambiguityStateFor(
   if (reasonCodes.includes('conflicting_requirement_source')) {
     return 'conflicting_evidence';
   }
-  if (reasonCodes.includes('ambiguous_surface_high_risk_source_critical_exception') || fallbackMode === 'planning_first') {
+  // The posture trigger is about the prompt's SHAPE, not its evidence: a question about a risky
+  // topic can be perfectly well evidenced. Reporting it as weak evidence would put a second lie in
+  // the record beside the one the degradation enum was kept out of.
+  const postureOnly = reasonCodes.includes(PROMPT_ENHANCEMENT_UNREQUESTED_ACTION_POSTURE_REASON_V1);
+  if (!postureOnly
+    && (reasonCodes.includes('ambiguous_surface_high_risk_source_critical_exception') || fallbackMode === 'planning_first')) {
     return 'weak_high_risk';
   }
   if (reasonCodes.includes('source_b_only_cannot_open_popup')) {
