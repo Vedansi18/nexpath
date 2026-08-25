@@ -228,13 +228,23 @@ export const CHROME_STYLES = `
      rule above and at equal specificity, so editing wins. */
   .np-field-group:focus-within .np-label { color: #f5f5f4; font-weight: 700; }
   .np-field-group:focus-within .np-bullet { color: #1ca46d; }
-  /* The BODY recedes with its title, not just the heading above it. A dim
-     heading over bright text still reads as the active block, which was the
-     complaint: moving to the next option has to take the whole block down.
-     A deliberate divergence — the CLI leaves content at full brightness — made
-     at owner request 2026-08-25. Parity compares text, not colour, so it holds. */
+  /* THREE TIERS, not two. The body recedes with its title — a dim heading over
+     bright text still reads as the active block — and inside the active block
+     the title sits one step above its own body, so the heading is legible as a
+     heading rather than as more prose at the same weight and colour:
+
+         #f5f5f4  16.18:1   title, editing (and bold)
+         #d0d0d0  11.45:1   body, editing
+         #a8a9a8   7.49:1   both, idle
+
+     All three clear AA 4.5:1 on this ground, and #d0d0d0 is the palette's
+     existing focused-supporting-text tier rather than a new colour.
+
+     A deliberate divergence — the CLI leaves content at full brightness in one
+     flat tier, because a terminal frame has no second block to recede against.
+     Owner requests 2026-08-25. Parity compares text, not colour, so it holds. */
   .np-field-group .np-field { color: #a8a9a8; }
-  .np-field-group:focus-within .np-field { color: #f5f5f4; }
+  .np-field-group:focus-within .np-field { color: #d0d0d0; }
   .np-desc { color: #9ba7a7; }                                     /* gray  */
   .np-focused .np-desc { color: #d0d0d0; }                         /* 38;5;252 */
 

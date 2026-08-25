@@ -558,8 +558,15 @@ function e2eScenarios(): Scenario[] {
         if (editingBody === idleBody) {
           return `the body looked identical editing and idle: ${editingBody}`;
         }
+        // The active block must have its own internal hierarchy too — a title
+        // and a body at the same colour and weight read as one flat run.
+        if (editing === editingBody) {
+          return `title and body are the same colour while editing: ${editing}`;
+        }
+        // Editing: the title is the brightest tier and its body one step below,
+        // so the heading reads as a heading. Idle: both fall to the dim tier.
         const want = (l: string, b: string): boolean =>
-          l === 'rgb(245, 245, 244)' && b === 'rgb(245, 245, 244)';
+          l === 'rgb(245, 245, 244)' && b === 'rgb(208, 208, 208)';
         const dim = (l: string, b: string): boolean =>
           l === 'rgb(168, 169, 168)' && b === 'rgb(168, 169, 168)';
         return want(editing, editingBody) && dim(idle, idleBody)
