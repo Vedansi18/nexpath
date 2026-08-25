@@ -228,6 +228,64 @@ describe('the four other starved kinds stay starved — a choice, not an unfinis
   });
 });
 
+describe('the synergy with the invention gate — supply widens what a section may legitimately name', () => {
+  it('a tool the developer named in their own expectation becomes allowed material', async () => {
+    // Stated once in the plan and worth proving: the gate half and the supply half were ruled to
+    // work together. A developer who said "done when the Stripe payment intent settles" has named
+    // Stripe themselves, so a section carrying that fact may say it without being an invention.
+    const { findPromptEnhancementInventionViolationsV1 } = await import('./preservation-floors.js');
+    const history = ['building a checkout page', 'it is done when the Stripe payment intent settles without a retry', 'now add the payment step'];
+    const facts = factsFor(history);
+    const route = routePromptEnhancement({
+      routeDecisionId: 'synergy-route',
+      promptText: 'now add the payment step',
+      currentStage: 'implementation',
+      prevStage: 'task_breakdown',
+      triggerKind: 'absence',
+      firedKey: 'absence:verification_gap@implementation',
+      effectiveFiredSource: 'classifier_fire_recommendation',
+      selectedQualifyingAbsence: 'verification_gap',
+      absenceGateReason: 'selected_qualifying_absence',
+      classifierState: 'fire_recommended',
+      degradedNoActionState: 'none',
+      generatedOriginState: 'ordinary_user_prompt',
+    } as never);
+    const planning = planPromptEnhancementSections({ routeResult: route, sourceRefs: [sourceA], guidanceFacts: facts });
+    const body = composePromptEnhancementBody({
+      enhancementId: 'synergy-enh',
+      originalPromptText: 'now add the payment step',
+      sectionPlanningResult: planning,
+    }).currentBody;
+    const section = body.sections.find((candidate) => candidate.groundedFactValues?.length);
+    expect(section).toBeDefined();
+    expect(section!.groundedFactValues!.join(' ')).toContain('Stripe');
+    // The gate reads those values as allowed texts, so the quote is not a fabricated name.
+    expect(findPromptEnhancementInventionViolationsV1({
+      sectionText: section!.bodyText,
+      allowedTexts: ['now add the payment step', ...(section!.groundedFactValues ?? [])],
+    }).map((violation) => violation.item)).not.toContain('Stripe');
+  });
+});
+
+describe('extraction discipline — never a fragment, never a manufactured statement', () => {
+  it('a quote is never cut mid-sentence by the length bound', () => {
+    const long = `it is done when ${'the checkout flow keeps working '.repeat(12)}end`;
+    for (const found of promptHistoryAcceptanceExpectationsV1([long])) {
+      // Either the whole clause fits, or nothing is taken — a quote that stops mid-thought reads
+      // as broken in a body, which is worse than saying nothing.
+      expect(long).toContain(found.statedText);
+      expect(found.statedText.length).toBeLessThanOrEqual(180);
+    }
+  });
+
+  it('a passing mention of done or checking is not an expectation', () => {
+    // The markers require the developer to STATE something after them; prose about the topic is
+    // not a statement, and treating it as one is how filler gets manufactured.
+    expect(promptHistoryAcceptanceExpectationsV1(['is it done?', 'done', 'the goal is'])).toEqual([]);
+    expect(promptHistoryVerificationAsksV1(['make sure', 'check that', 'i should test it'])).toEqual([]);
+  });
+});
+
 describe('the cap — new supply must not push welcome content out', () => {
   it('the pruner keeps its floor sections when the new facts arrive', async () => {
     // Supply and the cap pull against each other, and the cap was lowered deliberately. New facts
