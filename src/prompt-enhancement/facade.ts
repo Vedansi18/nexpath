@@ -425,6 +425,13 @@ async function prepare(
     // metadata already derived it correctly for every mode, including the provider-failure states
     // ('unavailable_by_provider_api'), so read it from there instead of re-deriving here.
     optionalCallAvailabilityState: candidate.composerBoundary.inputContract.callVisibilityState.optionalCallAvailabilityState,
+    // Layer 2's declaration, on the same condition as the authority self-report below: it
+    // describes the wording the model wrote, so it travels only while that wording is still the
+    // body. This is the validation the POPUP decision reads, so without it the layer would be
+    // inert on the live path however well it judges in isolation.
+    ...(candidate.callVisibilityMode === 'llm_wording'
+      ? { nounPurposes: structuredComposerOutput?.nounPurposes }
+      : {}),
     // Only meaningful while the candidate still carries the composer's wording. Once the drafts are
     // dropped below, the body is the deterministic renderer's and the composer's verdict no longer
     // describes it — passing it on would block a body the model never wrote.

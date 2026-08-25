@@ -84,6 +84,46 @@ describe('E4 — facade LLM composer wiring', () => {
     expect(result.currentBody.text).toContain('Tailored model wording');
   });
 
+  it('Layer 2 reaches the POPUP decision — a declared transposition blocks through the facade', async () => {
+    // The judge can be perfect in isolation and still be inert: the facade re-validates the
+    // composed body, and THAT result decides the popup. This proves the declaration travels.
+    process.env['OPENAI_API_KEY'] = `sk-${'x'.repeat(40)}`;
+    const mocked = vi.mocked(composeStructuredComposerOutputV1);
+    const original = mocked.getMockImplementation()!;
+    mocked.mockImplementationOnce(async (input: never) => {
+      const base = await original(input);
+      if (!base.ok) return base;
+      return { ok: true, output: {
+        ...base.output,
+        nounPurposes: [{ noun: 'payment test', purposeInPrompt: 'the failing payment test', purposeInBody: 'for tracking user analytics' }],
+      } };
+    });
+    const result = await preparePromptEnhancement(request());
+    // The model's wording is refused and the deterministic body takes its place: the layer
+    // reached the decision AND the developer keeps a popup. Both halves matter.
+    expect(result.currentBody.text).not.toContain('Tailored model wording');
+    expect(result.disposition).toBe('show_current_body');
+    expect(result.callAndVisibilityMetadata.callVisibilityMode).not.toBe('llm_wording');
+  });
+
+  it('a clean declaration changes nothing — the same request composes and sends', async () => {
+    process.env['OPENAI_API_KEY'] = `sk-${'x'.repeat(40)}`;
+    const mocked = vi.mocked(composeStructuredComposerOutputV1);
+    const original = mocked.getMockImplementation()!;
+    mocked.mockImplementationOnce(async (input: never) => {
+      const base = await original(input);
+      if (!base.ok) return base;
+      return { ok: true, output: {
+        ...base.output,
+        nounPurposes: [{ noun: 'payment test', purposeInPrompt: 'the failing payment test', purposeInBody: 'fixing the failing payment test' }],
+      } };
+    });
+    const result = await preparePromptEnhancement(request());
+    expect(result.disposition).toBe('show_current_body');
+    expect(result.currentBody.text).toContain('Tailored model wording');
+    expect(result.callAndVisibilityMetadata.callVisibilityMode).toBe('llm_wording');
+  });
+
   it('a plainly unambiguous prompt still composes — the route no longer decides', async () => {
     // This is the case that used to fail. An obvious, single-intent, unambiguous prompt
     // routes "clear", which used to close the composer gate and hand the user a body whose
