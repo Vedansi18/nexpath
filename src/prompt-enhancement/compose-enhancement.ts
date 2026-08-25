@@ -1,3 +1,4 @@
+import type { PromptEnhancementNounPurposeV1 } from './noun-purpose-transposition.js';
 import { findPromptEnhancementInternalVocabularyLeaksV1 } from './internal-vocabulary-leak.js';
 import { promptEnhancementSectionDisplayNameV1 } from './section-display-names.js';
 import {
@@ -99,6 +100,12 @@ export interface PromptEnhancementStructuredComposerOutputV1 {
     sourceFactIds: readonly string[];
   }[];
   composerClaims: readonly string[];
+  /**
+   * Layer 2's declaration: for each noun the composer used, the purpose the prompt gave it and
+   * the purpose its own text gives it. The composer STATES; a deterministic rule judges — it is
+   * never asked for a verdict on its own output. Absent means today's behaviour exactly.
+   */
+  nounPurposes?: readonly PromptEnhancementNounPurposeV1[];
   // E5: the composer self-reports the detected language of the original prompt
   // (BCP-47-ish, e.g. 'en' / 'hi' / 'hi-Latn' Hinglish / 'gu-Latn' Gujlish). Read by
   // the E5 language-consistency gate; optional so pre-E5 callers stay valid.
@@ -529,6 +536,9 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
     callVisibilityMode,
     sensitiveActionClearance: input.sensitiveActionClearance,
     typedSensitiveActionVerdict: input.typedSensitiveActionVerdict,
+    // Only meaningful while the body still carries the composer's wording: the declaration
+    // describes the text the model wrote, so it must not judge a deterministic render.
+    ...(usesLlmWording ? { nounPurposes: input.structuredComposerOutput?.nounPurposes } : {}),
   });
 
   return {

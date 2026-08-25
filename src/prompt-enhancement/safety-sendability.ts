@@ -1,3 +1,4 @@
+import { findPromptEnhancementNounPurposeFindingsV1 } from './noun-purpose-transposition.js';
 import { findPromptEnhancementInternalVocabularyLeaksV1 } from './internal-vocabulary-leak.js';
 import { findPromptEnhancementInventionViolationsV1 } from './preservation-floors.js';
 import {
@@ -96,6 +97,12 @@ export interface PromptEnhancementSafetyValidationInput {
    * exempts a body from the deterministic rule, and omitting the field entirely leaves behaviour
    * exactly as it was. The model is trusted to accuse, never to acquit.
    */
+  /**
+   * Layer 2's declaration, as the composer stated it. Judged deterministically here: the model is
+   * never asked for a verdict on its own output. Absent means today's behaviour exactly, and a
+   * malformed entry is absent — this can add a finding, never remove one.
+   */
+  nounPurposes?: unknown;
   composerAuthoritySelfReport?: {
     generatedMode?: PromptEnhancementAuthorityMode;
     requestMode?: PromptEnhancementAuthorityMode;
@@ -430,6 +437,25 @@ export function validatePromptEnhancementSafety(
           publicSafeReasonCategory: 'validation_failed',
         }));
       }
+    }
+  }
+
+  // Layer 2: the purpose-transposition judge. The composer declared what each noun was for in the
+  // developer's request and in its own text; the rule decides. Additive by construction.
+  if (!suppressEditContentJudgements) {
+    for (const finding of findPromptEnhancementNounPurposeFindingsV1({
+      nounPurposes: input.nounPurposes,
+      originalPromptText: input.currentBody.originalPromptText,
+    })) {
+      failures.push(failure({
+        failureCode: `noun_purpose_transposition:${finding.kind}:${finding.noun}`,
+        stage: edited ? 'user_edit' : 'composer_output',
+        affectedSectionIds: generatedSectionIds(input.currentBody),
+        affectedBodySpanRefs: generatedSpanRefIds,
+        affectedSourceRefIds: generatedSourceRefIds,
+        affectedActionIds,
+        publicSafeReasonCategory: 'validation_failed',
+      }));
     }
   }
 

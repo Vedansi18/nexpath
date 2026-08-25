@@ -11,6 +11,8 @@ import {
 } from './cost-observability.js';
 import { isPromptEnhancementLanguageConsistentV1 } from './language-consistency.js';
 import { promptEnhancementObligationDirectiveV1 } from './section-obligation-directives.js';
+import { isPromptEnhancementNounPurposeV1 } from './noun-purpose-transposition.js';
+import { textNamesKnownToolOrCredentialV1 } from './known-tool-names.js';
 import { promptEnhancementSectionPurposeV1 } from './section-relevance.js';
 import {
   promptEnhancementGuidanceKindWordingV1,
@@ -286,6 +288,40 @@ const SYSTEM_PROMPT = [
   '- composerClaims must be the union of every sourceFactId you used, each prefixed with "claim:".',
 ].join('\n');
 
+/**
+ * Layer 2's declaration block — appended to the user prompt ONLY when the prompt names a known
+ * tool or carries a credential-shaped token (Layer 0's predicate doing double duty; no new
+ * machinery, no new call).
+ *
+ * The wording names the conflict of interest outright, because a generic "be careful" is what
+ * this design exists to avoid: the model is describing text it wrote itself, so the honest answer
+ * is the one that costs it. It is asked only to EXTRACT — never to judge whether it did wrong.
+ *
+ * RECORDED COST: a prompt whose tool the list does not know ("my auth thingy") gets no block at
+ * all, so half A is silently void for it. Acceptable only while half B still runs ungated on
+ * everything; if B is ever gated on this predicate too, this gate must be removed instead.
+ */
+function nounPurposeDeclarationBlock(originalPromptText: string): string {
+  if (!textNamesKnownToolOrCredentialV1(originalPromptText)) return '';
+  return [
+    '',
+    '',
+    'ALSO REPORT — nounPurposes (after sectionDrafts, because it describes text you have written):',
+    'For every tool, service, credential or file the developer named in their request that your',
+    'sections mention, add one entry: {"noun":"...","purposeInPrompt":null or "...","purposeInBody":"..."}.',
+    '- purposeInPrompt is the job the DEVELOPER gave that noun, quoted from their own words.',
+    '  ⛔ If they did not say what it is for, it is null. Do NOT infer a purpose, do NOT supply a',
+    '  plausible one, and do NOT copy the purpose your own text uses. A null is a correct answer.',
+    '- purposeInBody is the job YOUR text gives it, in your own words.',
+    '⚠️ You are describing text you wrote yourself, so the accurate answer may be the one that',
+    'shows your draft moved a tool from the job it was given to a different job. Report it anyway:',
+    'a missed move is far worse than a false alarm, and you are not being asked whether it was',
+    'wrong — only what the two purposes are. Something else decides.',
+    '- And while writing: do not repurpose a tool the developer mentioned for a different job than',
+    '  the one they gave it.',
+  ].join(String.fromCharCode(10));
+}
+
 function buildUserPrompt(
   originalPromptText: string,
   sections: readonly {
@@ -404,6 +440,14 @@ function parseStructuredComposerOutput(
   const rawRequestMode = obj['requestModeSelfReport'];
   const requestModeSelfReport = isPromptEnhancementAuthoritySelfReportV1(rawRequestMode) ? rawRequestMode : undefined;
 
+  // Layer 2's declaration, parsed INDEPENDENTLY: anything unexpected leaves it absent, and an
+  // absent declaration is today's behaviour. A malformed value here can never cost a valid reply
+  // its drafts, trigger a retry, or lose a body.
+  const rawNounPurposes = obj['nounPurposes'];
+  const nounPurposes = Array.isArray(rawNounPurposes)
+    ? rawNounPurposes.filter(isPromptEnhancementNounPurposeV1)
+    : undefined;
+
   return {
     outputId: `${enhancementId}:composer-llm`,
     sectionDrafts,
@@ -412,6 +456,7 @@ function parseStructuredComposerOutput(
     authorityModeSelfReport,
     authorityEvidence,
     requestModeSelfReport,
+    ...(nounPurposes !== undefined && nounPurposes.length > 0 ? { nounPurposes } : {}),
   };
 }
 
@@ -432,7 +477,9 @@ export async function composeStructuredComposerOutputV1(
     return { ok: false, reason: 'no_key' };
   }
 
-  const userPrompt = buildUserPrompt(input.originalPromptText, sections, input.planning.renderedFacts) + actionWordingDirective(input.action, input.additionalDetailsText);
+  const userPrompt = buildUserPrompt(input.originalPromptText, sections, input.planning.renderedFacts)
+    + nounPurposeDeclarationBlock(input.originalPromptText)
+    + actionWordingDirective(input.action, input.additionalDetailsText);
   // Malformed / empty / language-inconsistent replies retry up to the locked count
   // (§33348: retry up to 3 times). A thrown error (provider unavailable / timeout) is
   // NOT retried — fast deterministic fallback rather than repeated slow waits. On a
