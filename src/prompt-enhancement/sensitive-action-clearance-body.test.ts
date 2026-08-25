@@ -283,13 +283,13 @@ describe('the floors stay armed — a clearance changes the confirmation line, n
   });
 });
 
-describe('the activation block is pinned — a later prompt edit cannot silently drop the fail-closed wording', () => {
-  it('the system prompt carries the observation block, CURRENT-prompt scoping, and unsure => proposed', () => {
-    expect(STAGE_CLASSIFIER_SYSTEM_PROMPT).toContain('SENSITIVE-ACTION OBSERVATION');
-    expect(STAGE_CLASSIFIER_SYSTEM_PROMPT).toContain('CURRENT (last) prompt ONLY');
-    expect(STAGE_CLASSIFIER_SYSTEM_PROMPT).toContain('NEVER guess "not_proposed"');
-    expect(STAGE_CLASSIFIER_SYSTEM_PROMPT).toContain('"sensitive_action_verdict": "<proposed | not_proposed');
-    expect(STAGE_CLASSIFIER_SYSTEM_PROMPT).toContain('"sensitive_action_reason": "<required with not_proposed');
-    expect(STAGE_CLASSIFIER_SYSTEM_PROMPT).toContain('without a non-empty reason is treated as unanswered');
+describe('the activation is REVERTED — pinned so it cannot silently return without a passing measurement', () => {
+  it('the system prompt does NOT request the sensitive-action verdict (the clearance pathway is inert)', () => {
+    // Reverted after the live acceptance measurement: the model wrongly cleared genuinely
+    // risky imperatives, and the recall floor is absolute. Re-activating requires the
+    // owner's decision plus a measurement that passes the floor - not a code edit alone.
+    expect(STAGE_CLASSIFIER_SYSTEM_PROMPT).not.toContain('SENSITIVE-ACTION OBSERVATION');
+    expect(STAGE_CLASSIFIER_SYSTEM_PROMPT).not.toContain('sensitive_action_verdict');
+    expect(STAGE_CLASSIFIER_SYSTEM_PROMPT).not.toContain('sensitive_action_reason');
   });
 });

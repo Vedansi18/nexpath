@@ -174,6 +174,14 @@ const INTENT_MENU_BLOCK = [
  * 'proposed'/omission whenever unsure — a wrong 'not_proposed' is the only dangerous
  * direction.
  */
+// ⛔ REVERTED 2026-08-25 after the live acceptance measurement: the model wrongly cleared
+// genuinely risky imperatives (dependency install; publish-and-notify), losing 2 of the
+// risky rows' confirmation sentences. The recall floor is absolute — one row down and the
+// activation comes back out — so this block is NOT wired into the system prompt and the
+// reply fields are never requested: the clearance pathway stays fully inert (absent ⇒ the
+// confirmation emits exactly as before). The block text is kept for the owner's revision
+// decision; re-wiring it requires a new measurement that passes the recall floor.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const SENSITIVE_ACTION_OBSERVATION_BLOCK = [
   'SENSITIVE-ACTION OBSERVATION — judge the CURRENT (last) prompt ONLY, never earlier prompts in the',
   'window: does it PROPOSE actually performing a risky action (deleting/removing data, files or code;',
@@ -245,8 +253,6 @@ export const STAGE_CLASSIFIER_SYSTEM_PROMPT = [
   '',
   RELEVANCE_OBSERVATION_BLOCK,
   '',
-  SENSITIVE_ACTION_OBSERVATION_BLOCK,
-  '',
   'OUTPUT — return STRICT JSON only, no markdown, no prose:',
   '{',
   '  "stage": "<one of: Idea | PRD/Spec | Architecture | Task Breakdown | Implementation | Review/Testing | Release | Feedback Loop>",',
@@ -261,8 +267,6 @@ export const STAGE_CLASSIFIER_SYSTEM_PROMPT = [
   '  "capability_candidates": ["<capability id>"],',
   '  "project_fact_candidates": ["<project-fact category id, or omit — empty is normal>"],',
   '  "section_relevance_order": ["<section kind id, most useful first — ALL of them>"],',
-  '  "sensitive_action_verdict": "<proposed | not_proposed — or omit both fields entirely>",',
-  '  "sensitive_action_reason": "<required with not_proposed: the benign reading of the risky word>",',
   '  "reason": "<one sentence>"',
   '}',
   'FEEDBACK-LOOP BOUNDARY: classify Feedback Loop ONLY when the window contains explicit evidence the product is ALREADY deployed/live for real users (e.g. "its live", "deployed", "published", users actively using it). Building features FOR clients/users (a client portal, sending invoices to clients) is NOT live evidence — without it, bug reports and fixes during building are Implementation or Review/Testing, not Feedback Loop.',
