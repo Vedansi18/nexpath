@@ -12,7 +12,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { renderSurface } from './surface-view.js';
-import { PE_FIXTURE } from './fixtures/pe.js';
+import { PE_FIXTURE, EDIT_KEYS_HINT } from './fixtures/pe.js';
 import { MPS_FIRST_FIXTURE, MPS_CONTINUATION_FIXTURE } from './fixtures/mps.js';
 import { PEF_FIXTURE } from './fixtures/pef.js';
 import type { SurfaceModel } from './surface-model.js';
@@ -61,8 +61,23 @@ function cliLines(frame: string): string[] {
   return frame.split('\n').map((line) => line.replace(/^│ ?/, '').trim());
 }
 
+/**
+ * THE one sanctioned divergence from the CLI's frames (2026-08-25): the
+ * browser advertises the Alt+Shift editor chords (the advisory panel's
+ * Ctrl+T→Alt+Shift+T precedent — a strayed-focus Ctrl+J is Chrome's own
+ * Downloads shortcut), while the CLI keeps its Ctrl/Cmd spelling. The
+ * comparison normalizes exactly that hint string and nothing else, so any
+ * OTHER hint drift still fails this suite.
+ */
+const CLI_EDIT_KEYS_HINT =
+  typeof process !== 'undefined' && process.platform === 'darwin'
+    ? 'Cmd+J new line · Cmd+\u2191/\u2193 move line'
+    : 'Ctrl+J new line · Ctrl+\u2191/\u2193 move line';
+
 function ours(model: SurfaceModel, focusIndex: number): string[] {
-  return domLines(renderSurface(document, model, { focusIndex })).map((l) => l.trim());
+  return domLines(renderSurface(document, model, { focusIndex }))
+    .map((l) => l.trim())
+    .map((l) => l.split(EDIT_KEYS_HINT).join(CLI_EDIT_KEYS_HINT));
 }
 
 // ── CLI models mirroring each fixture ────────────────────────────────────────

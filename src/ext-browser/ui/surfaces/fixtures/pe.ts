@@ -13,14 +13,18 @@
 import type { SurfaceModel } from '../surface-model.js';
 
 /**
- * The CLI's edit-keys hint. macOS names the Mac keys; every other platform gets
- * the Ctrl spelling (`cli-submit-popup.ts:515-517`). Read at module load, the
- * same moment the CLI reads it.
+ * The edit-keys hint — the ADVERTISED chords are the extension's Alt+Shift
+ * family, NOT the CLI's Ctrl/Cmd spelling. Deliberate divergence (2026-08-25,
+ * the advisory panel's Ctrl+T→Alt+Shift+T precedent): with focus strayed to
+ * the agent page, Ctrl+J is CHROME'S OWN Downloads shortcut, so advertising it
+ * trains users into opening a browser page. Alt+Shift+J / Alt+Shift+↑↓ mean
+ * nothing to any browser or OS; the controller still ACCEPTS Ctrl/Cmd+J
+ * in-panel for CLI muscle memory. macOS names the Option key.
  */
 export const EDIT_KEYS_HINT =
   typeof process !== 'undefined' && process.platform === 'darwin'
-    ? 'Cmd+J new line · Cmd+↑/↓ move line'
-    : 'Ctrl+J new line · Ctrl+↑/↓ move line';
+    ? 'Option+Shift+J new line · Option+Shift+↑/↓ move line'
+    : 'Alt+Shift+J new line · Alt+Shift+↑/↓ move line';
 
 /** `cli-submit-popup.ts:511`. */
 export const BODY_HINT = 'Enter sends this prompt';
