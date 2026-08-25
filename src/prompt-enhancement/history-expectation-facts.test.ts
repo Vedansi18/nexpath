@@ -228,6 +228,42 @@ describe('the four other starved kinds stay starved — a choice, not an unfinis
   });
 });
 
+describe('the supply survives the pruner — the one consumer that could discard it silently', () => {
+  it('both quoted expectations reach the body after the cap has run', async () => {
+    // The cap drops sections between planning and rendering. If it dropped the two this phase
+    // exists to feed, every producer above would be correct and the developer would still see
+    // nothing — the failure shape this milestone has hit at four different layers.
+    const { prunePromptEnhancementSectionsV1 } = await import('./section-pruner.js');
+    const facts = factsFor(HISTORY_THAT_STATES);
+    const route = routePromptEnhancement({
+      routeDecisionId: 'prune-route',
+      promptText: 'now add the payment step',
+      currentStage: 'implementation',
+      prevStage: 'task_breakdown',
+      triggerKind: 'absence',
+      firedKey: 'absence:verification_gap@implementation',
+      effectiveFiredSource: 'classifier_fire_recommendation',
+      selectedQualifyingAbsence: 'verification_gap',
+      absenceGateReason: 'selected_qualifying_absence',
+      classifierState: 'fire_recommended',
+      degradedNoActionState: 'none',
+      generatedOriginState: 'ordinary_user_prompt',
+    } as never);
+    const planned = planPromptEnhancementSections({ routeResult: route, sourceRefs: [sourceA], guidanceFacts: facts });
+    const pruned = prunePromptEnhancementSectionsV1({
+      sectionPlans: planned.sectionPlans, facts: planned.renderedFacts, relevanceOrder: [], routeResult: route,
+    } as never);
+    expect(pruned.sectionPlans.length).toBeLessThan(planned.sectionPlans.length);
+    const body = composePromptEnhancementBody({
+      enhancementId: 'prune-enh',
+      originalPromptText: 'now add the payment step',
+      sectionPlanningResult: { ...planned, sectionPlans: pruned.sectionPlans, renderedFacts: pruned.facts },
+    }).currentBody;
+    expect(body.text).toContain(STATED_ACCEPTANCE);
+    expect(body.text).toContain(STATED_VERIFICATION);
+  });
+});
+
 describe('the synergy with the invention gate — supply widens what a section may legitimately name', () => {
   it('a tool the developer named in their own expectation becomes allowed material', async () => {
     // Stated once in the plan and worth proving: the gate half and the supply half were ruled to
