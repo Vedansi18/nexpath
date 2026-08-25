@@ -440,6 +440,15 @@ export interface PromptEnhancementSectionPlanningResult {
   promptReviewProcessingPolicy: PromptEnhancementRouteResult['contractDecision']['promptReviewProcessingPolicy'];
   /** Observed evidence forms, carried so the repro section can name what was supplied. */
   debugEvidenceObserved: readonly string[];
+  /**
+   * The planning posture, carried from the route to the writers.
+   *
+   * The developer asked ABOUT something risky rather than asking for it to be done, so the body
+   * must propose and check rather than instruct. The route decides it; the composer prompt and the
+   * deterministic renderer are the two places that can act on it, and both read it from here so
+   * they cannot disagree about the same body.
+   */
+  planningPosture: boolean;
   renderedFactIds: readonly string[];
   /**
    * GR-1: the renderable facts THEMSELVES, not only their ids.
@@ -724,6 +733,7 @@ export function planPromptEnhancementSections(
       routeDecisionId: route.contractDecision.routeDecisionId,
       promptReviewOrigin: route.contractDecision.promptReviewOrigin,
       promptReviewProcessingPolicy: route.contractDecision.promptReviewProcessingPolicy,
+      planningPosture: false,
       debugEvidenceObserved: route.contractDecision.debugEvidenceObserved,
       renderedFactIds: [],
       renderedFacts: [],
@@ -771,6 +781,7 @@ export function planPromptEnhancementSections(
     routeDecisionId: route.contractDecision.routeDecisionId,
     promptReviewOrigin: route.contractDecision.promptReviewOrigin,
     promptReviewProcessingPolicy: route.contractDecision.promptReviewProcessingPolicy,
+    planningPosture: route.fallbackMode === 'planning_first',
     debugEvidenceObserved: route.contractDecision.debugEvidenceObserved,
     renderedFactIds: facts.filter(isRenderableFact).map((fact) => fact.factId),
     renderedFacts: facts.filter(isRenderableFact),

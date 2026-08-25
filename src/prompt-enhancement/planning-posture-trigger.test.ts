@@ -209,23 +209,47 @@ describe('end to end — the popup state, which is where the fix is felt', () =>
   });
 });
 
-describe('the composed body proposes rather than instructs', () => {
-  it('a posture body carries no execute-shaped instruction to do the risky thing', () => {
-    const route = routeFor(ASKS_ABOUT_RISK);
+describe('the posture reaches the WRITERS — it changes the body, not just a field', () => {
+  // The first build of this phase set a route field that nothing read: the popup state has no
+  // consumer, so the posture was invisible to the developer. These tests are the proof that it
+  // now reaches the two places a body is actually written.
+  function bodyFor(prompt: string) {
+    const route = routeFor(prompt);
     const planning = planPromptEnhancementSections({ routeResult: route, sourceRefs: [sourceA], guidanceFacts: [] });
     const body = composePromptEnhancementBody({
       enhancementId: 'posture-enh',
-      originalPromptText: ASKS_ABOUT_RISK,
+      originalPromptText: prompt,
       sectionPlanningResult: planning,
     }).currentBody;
-    const generated = body.sections
-      .filter((section) => section.sectionKind !== 'original_request_or_goal')
-      .map((section) => section.bodyText)
-      .join('\n');
-    // No imperative telling the agent to carry the risky action out.
-    expect(generated).not.toMatch(/\bdeploy (this|it|the)\b/i);
-    expect(generated).not.toMatch(/\brun the deployment\b/i);
+    return { planning, body };
+  }
+
+  it('the posture rides the planning result to the writers', () => {
+    expect(bodyFor(ASKS_ABOUT_RISK).planning.planningPosture).toBe(true);
+    expect(bodyFor(NO_RISK_AT_ALL).planning.planningPosture).toBe(false);
+  });
+
+  it('a posture body leads each generated section with check-and-confirm, not with doing', () => {
+    const { body } = bodyFor(ASKS_ABOUT_RISK);
+    const generated = body.sections.filter((section) => section.sectionKind !== 'original_request_or_goal');
     expect(generated.length).toBeGreaterThan(0);
+    for (const section of generated) {
+      expect(section.bodyText, section.sectionKind).toContain('Asked about, not asked to do');
+      expect(section.bodyText, section.sectionKind).toContain('do not carry the action out');
+    }
+  });
+
+  it('an ordinary prompt gets no such line — the discriminator', () => {
+    const { body } = bodyFor(NO_RISK_AT_ALL);
+    for (const section of body.sections) {
+      expect(section.bodyText).not.toContain('Asked about, not asked to do');
+    }
+  });
+
+  it('a no-popup route never carries the posture into planning', () => {
+    const route = routeFor(ASKS_ABOUT_RISK, { generatedOriginState: 'pe_generated' });
+    const planning = planPromptEnhancementSections({ routeResult: route, sourceRefs: [sourceA], guidanceFacts: [] });
+    expect(planning.planningPosture).toBe(false);
   });
 });
 

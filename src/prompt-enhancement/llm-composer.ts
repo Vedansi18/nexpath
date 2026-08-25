@@ -301,6 +301,25 @@ const SYSTEM_PROMPT = [
  * all, so half A is silently void for it. Acceptable only while half B still runs ungated on
  * everything; if B is ever gated on this predicate too, this gate must be removed instead.
  */
+/**
+ * The planning posture, as an instruction to the writer.
+ *
+ * Routing decided the developer asked ABOUT something risky rather than asking for it to be done.
+ * Without this the model writes what it always writes — steps that carry the action out — and the
+ * posture would be a flag nobody acted on.
+ */
+function planningPostureDirective(planningPosture: boolean): string {
+  if (!planningPosture) return '';
+  return [
+    '',
+    '',
+    'STANCE FOR THIS PROMPT — the developer asked ABOUT something risky, not FOR it to be done:',
+    '- Write what to check, what to weigh, and what to confirm with them before anything is done.',
+    '- Do NOT write steps that carry the risky action out, and do not tell the agent to perform it.',
+    '- Their question is the subject; answering it well is the goal, not doing the work behind it.',
+  ].join(String.fromCharCode(10));
+}
+
 function nounPurposeDeclarationBlock(originalPromptText: string): string {
   if (!textNamesKnownToolOrCredentialV1(originalPromptText)) return '';
   return [
@@ -478,6 +497,7 @@ export async function composeStructuredComposerOutputV1(
   }
 
   const userPrompt = buildUserPrompt(input.originalPromptText, sections, input.planning.renderedFacts)
+    + planningPostureDirective(input.planning.planningPosture === true)
     + nounPurposeDeclarationBlock(input.originalPromptText)
     + actionWordingDirective(input.action, input.additionalDetailsText);
   // Malformed / empty / language-inconsistent replies retry up to the locked count

@@ -1003,6 +1003,14 @@ function renderSection(input: {
     if (contentFreeInstruction) lines.length = 0;
     lines.unshift(...factValueLines);
   }
+  // The planning posture, stated in the body itself. Added AFTER the fact-value rule above, whose
+  // "is this instruction content-free?" test counts the section's own lines — a stance line
+  // arriving before that count would have kept a standing instruction the fact was meant to
+  // displace. The developer asked ABOUT something risky, so every section says plainly that the
+  // work is to check and confirm, not to carry it out.
+  if (input.sectionPlanningResult.planningPosture === true) {
+    lines.push('Asked about, not asked to do: cover what to check and what to confirm first, and do not carry the action out.');
+  }
   if (action === 'more_thorough') {
     lines.push(...moreThoroughLines(sectionPlan));
   }
