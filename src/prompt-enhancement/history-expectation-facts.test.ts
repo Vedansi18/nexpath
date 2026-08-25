@@ -190,12 +190,29 @@ describe('THE NEGATIVE THAT MATTERS MOST — nothing said, nothing produced', ()
   });
 });
 
-describe('the lane — these facts can never be the required survivor', () => {
-  it('neither fact opens a popup on its own', () => {
-    const facts = factsFor(HISTORY_THAT_STATES).filter((fact) =>
-      fact.suggestedActionKind === 'add_acceptance_criteria' || fact.suggestedActionKind === 'add_verification');
+describe('the lane — these facts enrich a popup, they never summon one', () => {
+  const historyFacts = () => factsFor(HISTORY_THAT_STATES).filter((fact) =>
+    fact.suggestedActionKind === 'add_acceptance_criteria' || fact.suggestedActionKind === 'add_verification');
+
+  it('the producer keeps them in the prompt-derived, support-only lane', () => {
+    // THIS is the assertion that can fail: both fields are the producer's own choice, and a
+    // promotion of either — to a triggering eligibility or out of the prompt-derived type — is
+    // caught here. (Measured: mutating either one kills this test.)
+    const facts = historyFacts();
     expect(facts.length).toBeGreaterThan(0);
-    const mix = applyPromptEnhancementSourceMixV1(facts, 'level_3');
+    for (const fact of facts) {
+      expect(fact.sourceType).toBe('prompt_derived_fact');
+      expect(fact.sourceEligibilityState).toBe('support_only_not_triggering');
+    }
+  });
+
+  it('and no popup opens on them alone', () => {
+    // Recorded honestly: this holds STRUCTURALLY — the mixer's Source-A pool cannot be entered by
+    // a fact of this shape at all, so no field this producer sets can change it (measured: source
+    // type, eligibility, priority and evidence state promoted together still yield no survivor).
+    // It is asserted because it is the property that matters, not because this test is what
+    // enforces it — the assertion above is.
+    const mix = applyPromptEnhancementSourceMixV1(historyFacts(), 'level_3');
     expect(mix.requiredSurvivor).toBeNull();
     expect(mix.showPopup).toBe(false);
   });
@@ -207,6 +224,63 @@ describe('the four other starved kinds stay starved — a choice, not an unfinis
     for (const actionKind of ['clarify_requirement', 'preserve_behavior', 'handoff_sequence', 'ask_for_source']) {
       expect(facts.some((fact) => fact.suggestedActionKind === actionKind), actionKind).toBe(false);
     }
+  });
+});
+
+describe('the cap — new supply must not push welcome content out', () => {
+  it('the pruner keeps its floor sections when the new facts arrive', async () => {
+    // Supply and the cap pull against each other, and the cap was lowered deliberately. New facts
+    // may enrich sections; they may not cost the body a section that was there to be useful.
+    const { prunePromptEnhancementSectionsV1 } = await import('./section-pruner.js');
+    const route = routePromptEnhancement({
+      routeDecisionId: 'cap-route',
+      promptText: 'now add the payment step',
+      currentStage: 'implementation',
+      prevStage: 'task_breakdown',
+      triggerKind: 'absence',
+      firedKey: 'absence:verification_gap@implementation',
+      effectiveFiredSource: 'classifier_fire_recommendation',
+      selectedQualifyingAbsence: 'verification_gap',
+      absenceGateReason: 'selected_qualifying_absence',
+      classifierState: 'fire_recommended',
+      degradedNoActionState: 'none',
+      generatedOriginState: 'ordinary_user_prompt',
+    } as never);
+    const withFacts = planPromptEnhancementSections({ routeResult: route, sourceRefs: [sourceA], guidanceFacts: factsFor(HISTORY_THAT_STATES) });
+    const without = planPromptEnhancementSections({ routeResult: route, sourceRefs: [sourceA], guidanceFacts: [] });
+    const prunedWith = prunePromptEnhancementSectionsV1({ sectionPlans: withFacts.sectionPlans, facts: withFacts.renderedFacts, relevanceOrder: [], routeResult: route } as never);
+    const prunedWithout = prunePromptEnhancementSectionsV1({ sectionPlans: without.sectionPlans, facts: without.renderedFacts, relevanceOrder: [], routeResult: route } as never);
+    // Every section the body had WITHOUT the new supply is still there WITH it.
+    const keptWithout = prunedWithout.sectionPlans.map((plan) => plan.sectionKind);
+    const keptWith = prunedWith.sectionPlans.map((plan) => plan.sectionKind);
+    for (const kind of keptWithout) expect(keptWith, kind).toContain(kind);
+    expect(prunedWith.floorSectionCount).toBe(prunedWithout.floorSectionCount);
+  });
+
+  it('the body does not grow a section count because of the new facts', () => {
+    const route = routePromptEnhancement({
+      routeDecisionId: 'cap-route-2',
+      promptText: 'now add the payment step',
+      currentStage: 'implementation',
+      prevStage: 'task_breakdown',
+      triggerKind: 'absence',
+      firedKey: 'absence:verification_gap@implementation',
+      effectiveFiredSource: 'classifier_fire_recommendation',
+      selectedQualifyingAbsence: 'verification_gap',
+      absenceGateReason: 'selected_qualifying_absence',
+      classifierState: 'fire_recommended',
+      degradedNoActionState: 'none',
+      generatedOriginState: 'ordinary_user_prompt',
+    } as never);
+    const compose = (facts: readonly PromptEnhancementGuidanceFact[]) => composePromptEnhancementBody({
+      enhancementId: 'cap-enh',
+      originalPromptText: 'now add the payment step',
+      sectionPlanningResult: planPromptEnhancementSections({ routeResult: route, sourceRefs: [sourceA], guidanceFacts: facts }),
+    }).currentBody;
+    const withFacts = compose(factsFor(HISTORY_THAT_STATES));
+    const without = compose([]);
+    // The facts speak INSIDE sections that already existed; they do not add new headings.
+    expect(withFacts.sections.length).toBe(without.sections.length);
   });
 });
 
