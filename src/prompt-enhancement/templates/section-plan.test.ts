@@ -585,6 +585,23 @@ describe('slot obligations: layer 3 is no longer declared-but-inert', () => {
     }
   });
 
+  it('the floor is universal across EVERY preset intent — no route plans an unprotected prose section', () => {
+    // The vocabulary is ~200 section kinds fed by the presets, so a per-kind pin cannot cover
+    // it; this walks every preset through the real planner and demands the floor on each
+    // planned prose section, with the user-verbatim section as the only exclusion.
+    for (const preset of PROMPT_ENHANCEMENT_TAXONOMY_PRESETS) {
+      const result = planFor(preset.primaryIntent);
+      expect(result.sectionPlans.length).toBeGreaterThan(1);
+      for (const section of result.sectionPlans) {
+        if (section.sectionKind === 'original_request_or_goal') {
+          expect(section.slotObligations).not.toContain('no_invention_state');
+        } else {
+          expect(section.slotObligations, `${preset.primaryIntent} / ${section.sectionKind}`).toContain('no_invention_state');
+        }
+      }
+    }
+  });
+
   it('reproduction_or_evidence_needed FIRST: its section carries the request obligation AND the typed no-invention state', () => {
     const result = planFor('issue_debug.reproduction_discovery');
     const obligations = obligationsOf(result, 'reproduction_or_evidence');
