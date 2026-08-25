@@ -295,6 +295,37 @@ describe('a posture body still SENDS — the stance never costs the popup', () =
   });
 });
 
+describe('the stance survives the section cap — the pruner runs between planning and rendering', () => {
+  it('a posture route whose sections are pruned still carries the stance on a surviving section', async () => {
+    // The pruner drops sections to fit the cap, and the stance lives on the FIRST GENERATED one.
+    // If pruning dropped that section, or the posture flag were lost when the facade rebuilds the
+    // planning result around the pruned sections, the stance would vanish from exactly the bodies
+    // that were judged to need it.
+    const { prunePromptEnhancementSectionsV1 } = await import('./section-pruner.js');
+    const route = routeFor(ASKS_ABOUT_RISK);
+    expect(route.fallbackMode).toBe('planning_first');
+    const planned = planPromptEnhancementSections({ routeResult: route, sourceRefs: [sourceA], guidanceFacts: [] });
+    const pruned = prunePromptEnhancementSectionsV1({
+      sectionPlans: planned.sectionPlans,
+      facts: planned.renderedFacts,
+      relevanceOrder: [],
+      routeResult: route,
+    } as never);
+    // The facade rebuilds the planning result around the pruned sections, spreading the planned
+    // one first — which is what carries the posture through.
+    const planning = { ...planned, sectionPlans: pruned.sectionPlans, renderedFacts: pruned.facts };
+    expect(pruned.sectionPlans.length).toBeLessThan(planned.sectionPlans.length);
+    expect(planning.planningPosture).toBe(true);
+    const body = composePromptEnhancementBody({
+      enhancementId: 'posture-enh',
+      originalPromptText: ASKS_ABOUT_RISK,
+      sectionPlanningResult: planning,
+    }).currentBody;
+    expect(body.text).toContain('touches something risky the developer has not asked to have done');
+    expect(body.text.split('touches something risky')).toHaveLength(2);
+  });
+});
+
 describe('disjointness — every risky prompt gets exactly ONE treatment', () => {
   const rows: readonly [string, string, boolean][] = [
     ['asked ABOUT a risky topic', ASKS_ABOUT_RISK, true],
