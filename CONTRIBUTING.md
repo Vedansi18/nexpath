@@ -1,7 +1,7 @@
 # Contributing to Nexpath
 
-Read the [README](README.md) first — it covers what Nexpath does and how to install it. This guide
-covers how to change it.
+Read the [README](https://github.com/hi0001234d/nexpath?tab=readme-ov-file) first — it covers what
+Nexpath does and how to install it. This guide covers how to change it.
 
 ## Ways to Contribute
 
