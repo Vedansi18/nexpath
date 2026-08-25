@@ -23,6 +23,9 @@ import { injectViaSimulatedPaste } from './inject-kit.js';
 
 const INPUT_SELECTOR = '.cm-content[contenteditable="true"]';
 
+// Replit's real send control — the Enter-didn't-submit fallback clicks it.
+const SUBMIT_BUTTON_SELECTOR = '[data-cy="ai-prompt-submit"]';
+
 export async function injectPromptText(text: string): Promise<void> {
-  await injectViaSimulatedPaste(INPUT_SELECTOR, text);
+  await injectViaSimulatedPaste(INPUT_SELECTOR, text, SUBMIT_BUTTON_SELECTOR);
 }

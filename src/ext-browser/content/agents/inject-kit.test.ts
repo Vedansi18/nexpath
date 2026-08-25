@@ -287,3 +287,65 @@ describe('main-world inject bridge (2026-08-25: isolated-world paste is unreadab
     input.remove();
   }, 15000);
 });
+
+describe('auto-submit button fallback (Firefox/Bolt live 2026-08-25: Enter ignored, text sat in the composer)', () => {
+  it('clicks the agent submit button when the composer still holds the text after the settle', async () => {
+    vi.useFakeTimers();
+    try {
+      const input = document.createElement('div');
+      input.className = 'tiptap ProseMirror';
+      document.body.appendChild(input);
+      Object.defineProperty(input, 'getClientRects', { value: () => [{}] });
+      input.addEventListener('paste', (ev) => {
+        const dt = (ev as ClipboardEvent).clipboardData as { getData(f: string): string } | null;
+        input.textContent = dt ? dt.getData('text/plain') : '';
+      });
+      const button = document.createElement('button');
+      button.setAttribute('aria-label', 'Send message');
+      const clicked = vi.fn();
+      button.addEventListener('click', clicked);
+      document.body.appendChild(button);
+
+      const done = injectViaSimulatedPaste('.tiptap.ProseMirror', 'submit fallback text', 'button[aria-label="Send message"]');
+      await vi.advanceTimersByTimeAsync(3000); // bridge timeout + landing polls + settle
+      await done;
+
+      expect(input.textContent).toContain('submit fallback text'); // Enter did NOT clear it (no page handler)
+      expect(clicked).toHaveBeenCalledTimes(1);                    // so the button carried the send
+      input.remove(); button.remove();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does NOT click the button when the Enter submit already cleared the composer', async () => {
+    vi.useFakeTimers();
+    try {
+      const input = document.createElement('div');
+      input.className = 'tiptap ProseMirror';
+      document.body.appendChild(input);
+      Object.defineProperty(input, 'getClientRects', { value: () => [{}] });
+      input.addEventListener('paste', (ev) => {
+        const dt = (ev as ClipboardEvent).clipboardData as { getData(f: string): string } | null;
+        input.textContent = dt ? dt.getData('text/plain') : '';
+      });
+      input.addEventListener('keydown', (ev) => {
+        if ((ev as KeyboardEvent).key === 'Enter') input.textContent = ''; // a page that submits on Enter
+      });
+      const button = document.createElement('button');
+      button.setAttribute('aria-label', 'Send message');
+      const clicked = vi.fn();
+      button.addEventListener('click', clicked);
+      document.body.appendChild(button);
+
+      const done = injectViaSimulatedPaste('.tiptap.ProseMirror', 'enter works here', 'button[aria-label="Send message"]');
+      await vi.advanceTimersByTimeAsync(3000);
+      await done;
+
+      expect(clicked).not.toHaveBeenCalled(); // no double-submit
+      input.remove(); button.remove();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

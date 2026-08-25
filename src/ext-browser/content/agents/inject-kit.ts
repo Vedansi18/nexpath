@@ -198,7 +198,42 @@ function requestMainWorldInject(selector: string, text: string): Promise<boolean
   });
 }
 
-export async function injectViaSimulatedPaste(inputSelector: string | string[], text: string): Promise<void> {
+/** How long the synthetic Enter gets to clear the composer before the button
+ * fallback fires. Agents clear their composer immediately on a real send. */
+const SUBMIT_SETTLE_MS = 800;
+
+/**
+ * Auto-submit the landed prompt. Synthetic Enter first (Chrome-proven on all
+ * three agents), then — when the composer STILL holds the text after a settle
+ * — click the agent's real submit button. Firefox/Bolt live 2026-08-25: the
+ * paste landed but the synthetic Enter never triggered Bolt's send, so the
+ * text just sat in the composer. A synthetic button .click() runs the
+ * framework's own submit handler and is not trust-gated the way editor
+ * keyboard shortcuts can be.
+ */
+async function submitInjectedPrompt(
+  input: HTMLElement,
+  text: string,
+  submitButtonSelector?: string,
+): Promise<void> {
+  dispatchSubmit(input);
+  if (!submitButtonSelector) return;
+  await new Promise((resolve) => setTimeout(resolve, SUBMIT_SETTLE_MS));
+  if (!hasLanded(input, text)) return; // composer cleared — the Enter submit worked
+  const button = document.querySelector<HTMLButtonElement>(submitButtonSelector);
+  if (button && !button.disabled) {
+    logInjectOutcome('auto-submit via button click', 'synthetic Enter did not submit');
+    button.click();
+  } else {
+    logInjectOutcome('auto-submit uncertain', `text still in composer and no clickable ${submitButtonSelector}`);
+  }
+}
+
+export async function injectViaSimulatedPaste(
+  inputSelector: string | string[],
+  text: string,
+  submitButtonSelector?: string,
+): Promise<void> {
   const input = resolveComposer(inputSelector);
   if (!input) {
     logInjectOutcome('clipboard fallback', `no composer matched ${JSON.stringify(inputSelector)}`);
@@ -211,7 +246,7 @@ export async function injectViaSimulatedPaste(inputSelector: string | string[], 
   for (const selector of selectorList) {
     if (await requestMainWorldInject(selector, text)) {
       logInjectOutcome('landed via main-world bridge');
-      dispatchSubmit(input);
+      await submitInjectedPrompt(input, text, submitButtonSelector);
       return;
     }
     if (document.querySelector(selector)) break; // selector matches; bridge tried and failed — don't retry others
@@ -220,7 +255,7 @@ export async function injectViaSimulatedPaste(inputSelector: string | string[], 
   dispatchSimulatedPaste(input, text);
   if (await waitForLanding(input, text, 900)) {
     logInjectOutcome('landed via simulated paste');
-    dispatchSubmit(input);
+    await submitInjectedPrompt(input, text, submitButtonSelector);
     return;
   }
 
@@ -230,7 +265,7 @@ export async function injectViaSimulatedPaste(inputSelector: string | string[], 
   insertViaExecCommand(input, text);
   if (await waitForLanding(input, text, 900)) {
     logInjectOutcome('landed via execCommand');
-    dispatchSubmit(input);
+    await submitInjectedPrompt(input, text, submitButtonSelector);
     return;
   }
 
