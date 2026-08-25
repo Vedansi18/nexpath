@@ -486,3 +486,23 @@ describe('same-body echo preserves the interaction state (CLI :1444-1453)', () =
     expect(root.activeElement).toBe(bodyField()); // back to the body row
   });
 });
+
+describe('unapplied details are NOT sent (the CLI\'s shipped send semantics)', () => {
+  // The plan text said "dirty details disable Use-enhanced"; the SHIPPED CLI
+  // reducer does neither disable nor merge — Enter on the body sends the body
+  // and typed-but-unapplied details are dropped, with the always-visible hint
+  // carrying the warning (cli-submit-popup.ts:1018-1029 + :512). Pin ours to
+  // the shipped behaviour, not the plan sentence.
+  it('Enter on the body sends the body only; typed-but-unapplied details are excluded', () => {
+    adapter.show(view());
+    const details = surfaceEl().querySelectorAll('textarea')[1] as HTMLTextAreaElement;
+    details.value = 'TYPED BUT NEVER APPLIED';
+    const body = bodyField();
+    body.focus();
+    pressOn(body, 'Enter');
+    const cmd = commands()[0] as { type: string; bodyText: string };
+    expect(cmd).toMatchObject({ type: 'use_current' });
+    expect(cmd.bodyText).toBe('Enhanced body text');
+    expect(cmd.bodyText).not.toContain('TYPED BUT NEVER APPLIED');
+  });
+});
