@@ -412,6 +412,8 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
       validatedLlmDrafts.draftsBySectionId.has(sectionPlan.sectionId)
       || keepsSectionWhenDraftMissing(sectionPlan))
     : sectionPlans;
+  const firstGeneratedSectionId = renderableSectionPlans
+    .find((sectionPlan) => sectionPlan.sectionKind !== 'original_request_or_goal')?.sectionId;
   const renderSectionsWithConfirmation = (confirmationSectionId: string | undefined) => renderableSectionPlans.map((sectionPlan) =>
       renderSection({
         sectionPlan,
@@ -421,6 +423,7 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
         sectionPlanningResult: input.sectionPlanningResult,
         llmDraftsBySectionId: validatedLlmDrafts.draftsBySectionId,
         insertCanonicalConfirmation: sectionPlan.sectionId === confirmationSectionId,
+        isFirstGeneratedSection: sectionPlan.sectionId === firstGeneratedSectionId,
         canonicalConfirmationSentence,
       }),
   );
@@ -936,6 +939,12 @@ function renderSection(input: {
   sectionPlanningResult: PromptEnhancementSectionPlanningResult;
   llmDraftsBySectionId?: ReadonlyMap<string, string>;
   insertCanonicalConfirmation?: boolean;
+  /**
+   * True for the first generated section only. The planning posture is a stance for the whole
+   * body, so it is stated ONCE — repeating it under every heading is the kind of line no
+   * developer needs to read five times.
+   */
+  isFirstGeneratedSection?: boolean;
   /** The compose-level resolved sentence — inserted as-is so every site carries ONE string. */
   canonicalConfirmationSentence: string;
 }): { sectionId: string; title: string; bodyText: string; text: string } {
@@ -1008,8 +1017,8 @@ function renderSection(input: {
   // arriving before that count would have kept a standing instruction the fact was meant to
   // displace. The developer asked ABOUT something risky, so every section says plainly that the
   // work is to check and confirm, not to carry it out.
-  if (input.sectionPlanningResult.planningPosture === true) {
-    lines.push('Asked about, not asked to do: cover what to check and what to confirm first, and do not carry the action out.');
+  if (input.sectionPlanningResult.planningPosture === true && input.isFirstGeneratedSection === true) {
+    lines.push('This request touches something risky the developer has not asked to have done: cover what to check and what to confirm with them first, rather than carrying it out.');
   }
   if (action === 'more_thorough') {
     lines.push(...moreThoroughLines(sectionPlan));

@@ -229,21 +229,29 @@ describe('the posture reaches the WRITERS — it changes the body, not just a fi
     expect(bodyFor(NO_RISK_AT_ALL).planning.planningPosture).toBe(false);
   });
 
-  it('a posture body leads each generated section with check-and-confirm, not with doing', () => {
+  const STANCE = 'touches something risky the developer has not asked to have done';
+
+  it('a posture body states the stance — ONCE, not under every heading', () => {
+    // Said once because it is a stance for the whole body. Repeating it per section is the kind
+    // of line no developer needs to read five times, and this milestone exists to keep bodies
+    // free of exactly that.
     const { body } = bodyFor(ASKS_ABOUT_RISK);
-    const generated = body.sections.filter((section) => section.sectionKind !== 'original_request_or_goal');
-    expect(generated.length).toBeGreaterThan(0);
-    for (const section of generated) {
-      expect(section.bodyText, section.sectionKind).toContain('Asked about, not asked to do');
-      expect(section.bodyText, section.sectionKind).toContain('do not carry the action out');
-    }
+    expect(body.text).toContain(STANCE);
+    expect(body.text).toContain('what to confirm with them first');
+    expect(body.text.split(STANCE)).toHaveLength(2);
   });
 
   it('an ordinary prompt gets no such line — the discriminator', () => {
-    const { body } = bodyFor(NO_RISK_AT_ALL);
-    for (const section of body.sections) {
-      expect(section.bodyText).not.toContain('Asked about, not asked to do');
-    }
+    expect(bodyFor(NO_RISK_AT_ALL).body.text).not.toContain(STANCE);
+  });
+
+  it('the stance never claims the developer asked nothing — it names the risk, not their intent', () => {
+    // A build request that happens to name a credential ("add login with email and password")
+    // takes the posture under the ruled condition. The line must stay true for that developer:
+    // it says the RISKY part is unasked-for, never that their request was not a request.
+    const { body } = bodyFor('Add user registration and login with email and password.');
+    expect(body.text).toContain(STANCE);
+    expect(body.text).not.toContain('not asked to do');
   });
 
   it('a no-popup route never carries the posture into planning', () => {
