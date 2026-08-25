@@ -22,6 +22,11 @@ import type { PromptEnhancementSensitiveActionClearanceV1 } from '../prompt-enha
  *   - Deterministically gated: no risky word in the prompt (the same keyword table the
  *     confirmation layer uses) ⇒ no call is started — a verdict would be unusable anyway,
  *     because a clearance only ever suppresses a keyword candidate.
+ *   - ACCEPTED TRADE, stated rather than implied: the call starts BEFORE the popup decision
+ *     exists (parallelism requires pre-start), so gated calls on risky-word prompts that end
+ *     with no popup are spent without being consumed. That waste is bounded by the gate
+ *     (~17% of prompts) and costed in the inventory row; serializing to avoid it would put
+ *     the call's full latency on the pipeline, which is the worse trade by design.
  *   - Fail-closed totality: gate-out, no key, provider error, timeout, abort-before-settle,
  *     unparseable, malformed verdict, empty reason — every one of them reads as `undefined`
  *     (no clearance), and the confirmation line then emits exactly as it does today. The
