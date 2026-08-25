@@ -53,7 +53,7 @@
 // ============================================================================
 
 import type { SurfaceId, SurfaceModel, SurfaceRow } from './surface-model.js';
-import { growFields, renderSurface } from './surface-view.js';
+import { fieldScroller, growFields, renderSurface } from './surface-view.js';
 
 /** What the surfaces report upward. The dock's own union stays `dismiss`-only —
  * window furniture and surface semantics are different layers. */
@@ -327,6 +327,12 @@ export function createSurfaceController(
       focusIndex = interactiveRows(model).findIndex((r) => r.kind === 'field');
       emit?.({ type: 'apply-details', surface, mergedBody: merged });
       render();
+      // The CLI's apply parks the cursor at the end "so the view scrolls to
+      // where the details landed" (cli-submit-popup.ts:1037) — render() parks
+      // the caret but a textarea never scrolls to it on its own, so the merge
+      // sat off-screen below the window (live on Lovable, 2026-08-25).
+      const bodyField = fields()[0];
+      if (bodyField) fieldScroller.follow(bodyField);
       return;
     }
 
@@ -428,7 +434,13 @@ export function createSurfaceController(
     // modifier-dependent (Alt+Shift+letter is a special character on macOS —
     // e.code is what stays stable).
     if ((chord || safeChord) && (e.code === 'ArrowUp' || e.code === 'ArrowDown')) {
-      if (inField) moveCaretLine(e.target as HTMLTextAreaElement, e.code === 'ArrowUp' ? -1 : 1);
+      if (inField) {
+        const field = e.target as HTMLTextAreaElement;
+        moveCaretLine(field, e.code === 'ArrowUp' ? -1 : 1);
+        // The CLI's keepCursorVisible on visual moves (multiline-editor.ts:248)
+        // — setSelectionRange never scrolls, so the window must follow here.
+        fieldScroller.follow(field);
+      }
       e.preventDefault(); e.stopPropagation();
       return;
     }
@@ -443,6 +455,10 @@ export function createSurfaceController(
         const field = e.target as HTMLTextAreaElement;
         field.setRangeText('\n', field.selectionStart ?? 0, field.selectionEnd ?? 0, 'end');
         field.dispatchEvent(new Event('input', { bubbles: true }));   // auto-grow listens here
+        // The CLI's keepCursorVisible on insert_newline (multiline-editor.ts:299)
+        // — setRangeText never scrolls, so a newline at the fold walked the
+        // caret out of the window (live on Lovable, 2026-08-25).
+        fieldScroller.follow(field);
       }
       e.preventDefault(); e.stopPropagation();
       return;

@@ -878,3 +878,50 @@ describe('focus-steal guard vs the injector (a HIDDEN surface must never take fo
     host.remove();
   });
 });
+
+describe('caret follow — the CLI\'s keepCursorVisible for the windowed field (live 2026-08-25)', () => {
+  // The CLI syncs the window after EVERY caret-affecting op (multiline-editor:
+  // insert :282, newline :299, visual moves :248) and its details apply
+  // "scrolls to where the details landed" (cli-submit-popup.ts:1037). A
+  // textarea's setSelectionRange/setRangeText never scroll — these pin that
+  // every custom caret path calls the follow seam. jsdom computes no layout,
+  // so the pixel math is pinned separately on the pure clamp.
+  let follow: ReturnType<typeof vi.spyOn>;
+  beforeEach(async () => {
+    const view = await import('./surface-view.js');
+    follow = vi.spyOn(view.fieldScroller, 'follow').mockImplementation(() => {});
+  });
+  afterEach(() => { follow.mockRestore(); });
+
+  it('Alt+Shift+↓/↑ caret moves follow', () => {
+    mount();
+    const field = bodyField();
+    field.focus();
+    key(field, 'ArrowDown', { code: 'ArrowDown', altKey: true, shiftKey: true });
+    key(field, 'ArrowUp', { code: 'ArrowUp', ctrlKey: true });
+    expect(follow).toHaveBeenCalledTimes(2);
+  });
+
+  it('the newline chord follows', () => {
+    mount();
+    const field = bodyField();
+    field.focus();
+    key(field, 'J', { code: 'KeyJ', altKey: true, shiftKey: true });
+    expect(follow).toHaveBeenCalledTimes(1);
+  });
+
+  it('the details apply follows the BODY field to the landed merge', () => {
+    const c = mount();
+    key(c.element, 'ArrowDown'); // focus details (fixture has prefilled details text)
+    key(host.querySelectorAll('textarea')[1]!, 'Enter');
+    expect(events[0]!.type).toBe('apply-details');
+    expect(follow).toHaveBeenCalledWith(bodyField());
+  });
+
+  it('a plain row-focus render does NOT follow — the CLI opens with the window at the top, cursor hidden (cli-submit-popup.ts:971-974)', () => {
+    const c = mount();
+    key(c.element, 'ArrowDown');
+    key(c.element, 'ArrowUp');
+    expect(follow).not.toHaveBeenCalled();
+  });
+});

@@ -381,3 +381,23 @@ describe('renderSurface — the model drives everything', () => {
     expect(texts[at - 1]).toBe('');
   });
 });
+
+describe('clampScrollToCaret — the pure window-sync math (CLI keepCursorVisible parity)', () => {
+  it('caret above the window scrolls up to it', async () => {
+    const { clampScrollToCaret } = await import('./surface-view.js');
+    expect(clampScrollToCaret(30, 15, 90, 210)).toBe(30);
+  });
+  it('caret below the window scrolls down just enough', async () => {
+    const { clampScrollToCaret } = await import('./surface-view.js');
+    expect(clampScrollToCaret(400, 15, 90, 210)).toBe(400 + 15 - 210);
+  });
+  it('caret inside the window leaves the scroll alone', async () => {
+    const { clampScrollToCaret } = await import('./surface-view.js');
+    expect(clampScrollToCaret(150, 15, 90, 210)).toBe(90);
+  });
+  it('never scrolls negative', async () => {
+    const { clampScrollToCaret } = await import('./surface-view.js');
+    expect(clampScrollToCaret(0, 15, 0, 5)).toBe(10 >= 0 ? Math.max(0, 0 + 15 - 5) : 0);
+    expect(clampScrollToCaret(0, 15, 0, 5)).toBeGreaterThanOrEqual(0);
+  });
+});

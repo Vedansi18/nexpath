@@ -41,6 +41,7 @@ import {
   type SurfaceController,
   type SurfaceEvent,
 } from './surfaces/surface-controller.js';
+import { fieldScroller } from './surfaces/surface-view.js';
 import { BODY_HINT, DETAILS_HINT, EDIT_KEYS_HINT, PE_FOOTER } from './surfaces/fixtures/pe.js';
 import { PEF_FOOTER } from './surfaces/fixtures/pef.js';
 import { MPS_FIRST_FOOTER } from './surfaces/fixtures/mps.js';
@@ -169,6 +170,11 @@ export function mountNexpathPeDock(opts: PeDockAdapterOptions): PePanelControlle
   let busy = false;
   let busyOverlay: HTMLDivElement | null = null;
   let pendingTerminal: PendingTerminal | null = null;
+  /** One-shot: the NEXT show() is the engine's echo of a details apply — the
+   * rebuild parks the view at the top, but the CLI's apply behaviour is "the
+   * view scrolls to where the details landed" (cli-submit-popup.ts:1037), so
+   * that one rebuild must follow the caret (parked at the body's end). */
+  let followCaretOnNextShow = false;
 
   const doc = opts.doc ?? document;
 
@@ -243,7 +249,10 @@ export function mountNexpathPeDock(opts: PeDockAdapterOptions): PePanelControlle
     switch (event.type) {
       case 'apply-details':
         // The controller already merged locally (CLI parity); tell the engine
-        // so its editedBodyText tracks what the user now sees.
+        // so its editedBodyText tracks what the user now sees. The engine's
+        // re-render echo rebuilds this surface — keep the CLI's scrolled-to-
+        // the-merge position across that rebuild.
+        followCaretOnNextShow = true;
         emitCommand({ type: 'edit_body', bodyText: event.mergedBody });
         return;
       case 'cancelled':
@@ -331,6 +340,11 @@ export function mountNexpathPeDock(opts: PeDockAdapterOptions): PePanelControlle
         resolveActivation,
       });
       setBusyOverlay(false);
+      if (followCaretOnNextShow) {
+        followCaretOnNextShow = false;
+        const bodyField = surfaces.element.querySelector('textarea');
+        if (bodyField) fieldScroller.follow(bodyField);
+      }
     },
     setBusy(b: boolean): void {
       busy = b;

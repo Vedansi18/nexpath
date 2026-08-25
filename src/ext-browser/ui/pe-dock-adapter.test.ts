@@ -356,3 +356,33 @@ describe('open focus + stale docks (live 2026-08-25: keys dead until a manual cl
     expect(document.querySelectorAll(`#${NEXPATH_DOCK_HOST_ID}`)).toHaveLength(1);
   });
 });
+
+describe('apply echo keeps the CLI\'s scrolled-to-the-merge position (live 2026-08-25)', () => {
+  it('the show() following a details apply follows the body caret once; other shows never do', async () => {
+    const { fieldScroller } = await import('./surfaces/surface-view.js');
+    const follow = vi.spyOn(fieldScroller, 'follow').mockImplementation(() => {});
+    try {
+      adapter.show(view());
+      expect(follow).not.toHaveBeenCalled(); // opening never follows (CLI opens at the top)
+
+      // Type details and apply — the controller merges locally and follows its
+      // own render; the adapter arms the one-shot for the engine's echo.
+      (surfaceEl().querySelectorAll('textarea')[1] as HTMLTextAreaElement).focus();
+      // The controller re-renders on row-focus change — re-query the LIVE node.
+      const freshDetails = surfaceEl().querySelectorAll('textarea')[1] as HTMLTextAreaElement;
+      freshDetails.value = 'echo follow details';
+      pressOn(freshDetails, 'Enter');
+      expect(commands().some((c) => c?.type === 'edit_body')).toBe(true);
+      follow.mockClear();
+
+      adapter.show(view({ viewSeq: 2, bodyText: 'echoed merged body' })); // the engine's echo
+      expect(follow).toHaveBeenCalledTimes(1); // one-shot follow on the rebuilt body
+
+      follow.mockClear();
+      adapter.show(view({ viewSeq: 3 }));      // any later render
+      expect(follow).not.toHaveBeenCalled();   // the shot is spent
+    } finally {
+      follow.mockRestore();
+    }
+  });
+});

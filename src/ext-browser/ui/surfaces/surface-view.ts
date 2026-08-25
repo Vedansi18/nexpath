@@ -113,6 +113,80 @@ export function growFields(root: ParentNode): void {
   for (const field of fields) updateFieldMarkers(field);
 }
 
+/**
+ * Scroll math for keeping the caret inside the field's window: above the
+ * window → scroll up to it; below → scroll down just enough; inside → leave
+ * the scroll alone. Pure, so the clamp is testable where jsdom cannot lay out.
+ */
+export function clampScrollToCaret(
+  caretTop: number,
+  lineHeight: number,
+  scrollTop: number,
+  clientHeight: number,
+): number {
+  if (caretTop < scrollTop) return caretTop;
+  const caretBottom = caretTop + lineHeight;
+  if (caretBottom > scrollTop + clientHeight) return Math.max(0, caretBottom - clientHeight);
+  return scrollTop;
+}
+
+/**
+ * Pixel top of the caret inside a textarea, by mirror measurement: replicate
+ * the field's text layout in a hidden block, mark the caret position, read the
+ * marker's offset. A textarea offers no caret-geometry API, and neither
+ * setSelectionRange nor setRangeText scrolls — this is the browser's missing
+ * half of the CLI's cursor math (`promptEnhancementCursorVisualPositionV1`).
+ */
+export function measureCaretTopPx(field: HTMLTextAreaElement): number {
+  const doc = field.ownerDocument;
+  const mirror = doc.createElement('div');
+  mirror.style.cssText =
+    'position:absolute;visibility:hidden;left:-9999px;top:0;white-space:pre-wrap;overflow-wrap:break-word;';
+  const view = doc.defaultView;
+  if (view) {
+    const cs = view.getComputedStyle(field);
+    mirror.style.font = cs.font;
+    mirror.style.lineHeight = cs.lineHeight;
+    mirror.style.letterSpacing = cs.letterSpacing;
+    mirror.style.padding = cs.padding;
+    mirror.style.border = cs.border;
+    mirror.style.boxSizing = cs.boxSizing;
+    mirror.style.width = `${field.clientWidth}px`;
+  }
+  mirror.textContent = field.value.slice(0, field.selectionStart ?? 0);
+  const marker = doc.createElement('span');
+  marker.textContent = '​';
+  mirror.appendChild(marker);
+  doc.body.appendChild(mirror);
+  const top = marker.offsetTop;
+  mirror.remove();
+  return top;
+}
+
+/**
+ * The browser half of the CLI's `keepCursorVisible` (`multiline-editor.ts`:
+ * insert :282, newline :299, delete :269, visual moves :248 — every
+ * caret-affecting op syncs the window so the cursor stays inside it, and the
+ * details apply "scrolls to where the details landed",
+ * `cli-submit-popup.ts:1037`). Our windowed textarea got none of that from the
+ * platform: setSelectionRange and setRangeText move the caret WITHOUT
+ * scrolling, so the caret walked below the fold and applied details landed
+ * off-screen (live on Lovable, 2026-08-25). An object seam so the controller's
+ * call sites are spyable in tests.
+ */
+export const fieldScroller = {
+  follow(field: HTMLTextAreaElement): void {
+    if (field.clientHeight <= 0) return; // no layout (jsdom, hidden) — nothing to sync
+    field.scrollTop = clampScrollToCaret(
+      measureCaretTopPx(field),
+      FRAME_LINE_HEIGHT_PX,
+      field.scrollTop,
+      field.clientHeight,
+    );
+    updateFieldMarkers(field);
+  },
+};
+
 /** The editable field beneath a `field` row's label. */
 function buildField(doc: Document, text: string, indent: 4 | 6, placeholder?: string, readOnly?: boolean): HTMLElement {
   const row = doc.createElement('div');
