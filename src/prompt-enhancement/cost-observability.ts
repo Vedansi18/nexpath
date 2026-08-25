@@ -730,10 +730,13 @@ const CURRENT_SOURCE_BASELINE_ROWS: readonly PromptEnhancementCurrentSourceCostC
     //   · project-fact applicability (§17.12) — ten category ids, at most a short list back;
     //   · I1 section relevance (§15.2) — an ORDERING over 14 section-kind ids, so the largest
     //     honest reply now carries 14 ids plus the four original fields.
-    // Output: 512 still covers it, MEASURED rather than assumed — 14 snake_case ids average ~8
-    // tokens each, so ~112 for the ordering plus the rest of the JSON, well inside the cap. Raise it
-    // the moment a longer field lands: a truncated reply degrades SILENTLY to an empty intent (the
-    // C1 failure mode).
+    // Output: raised 512 → 1024, ruled by the owner and sized against real runs rather than
+    // arithmetic — across 2,371 measured prompts, 181 (7.6%) would overrun 512 (the observed
+    // maximum names 46 signals at ~847 real tokens), and a truncated reply degrades SILENTLY
+    // to an empty intent (the C1 failure mode), paid for and then thrown away. Output bills
+    // as produced, not as capped, so the raise adds nothing to the cost figures here. The
+    // reply also carries the sensitive-action verdict + reason observation (~25 tokens),
+    // parked on this same call.
     //
     // ⚠️ INPUT — measured 2026-08-20, and the number below is NOT what the call costs:
     //   · system prompt, assembled: 14,405 chars ≈ 3,600 tokens (the two blocks added since C1
@@ -745,7 +748,7 @@ const CURRENT_SOURCE_BASELINE_ROWS: readonly PromptEnhancementCurrentSourceCostC
     // recorded value rather than re-set silently: moving a cost number is the owner's call, and the
     // honest thing is that the measurement is written down where the row can be judged against it.
     assumedInputTokens: 5_000,
-    maxOutputTokens: 512,
+    maxOutputTokens: 1_024,
     timeoutMs: 12_000,
     fallbackState: 'deterministic_or_local_fallback',
     requirementState: 'required_current_source_row',

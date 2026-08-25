@@ -281,6 +281,17 @@ export interface PromptEnhancementTriggerProvenanceV1 {
   classifierProjectFactCandidates?: readonly string[];
   classifierSectionRelevanceOrder?: readonly string[];
   classifierDebugEvidencePresent?: readonly string[];
+  /**
+   * The classifier's sensitive-action precision observation from the same call: whether
+   * the CURRENT prompt PROPOSES performing a risky action or merely MENTIONS one, plus the
+   * stated benign reading. String-typed here like its siblings (the exact-value guard lives
+   * in the clearance gate, which accepts only the literal 'not_proposed' with a non-empty
+   * reason). ⚠️ Unlike the siblings, this field's absence is not merely "no observation" —
+   * it is the FAIL-CLOSED state: absent, degraded, malformed and reasonless all mean the
+   * confirmation line is emitted exactly as it is today. A degraded classifier call omits
+   * the field entirely.
+   */
+  classifierSensitiveActionClearance?: { readonly verdict?: string; readonly reason?: string };
   promptStartBoundary: PromptStartStopSourceSnapshot['hookBoundary'];
   deliveryBoundary: PromptStartStopSourceSnapshot['deliveryBoundary'];
   promptStartCanReplaceSameTurn: PromptStartStopSourceSnapshot['runAutoCanHoldOrReplaceSubmittedPrompt'];

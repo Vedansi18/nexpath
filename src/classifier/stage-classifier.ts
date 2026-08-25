@@ -279,6 +279,13 @@ export interface ParsedStageReply {
   projectFactCandidates: readonly PromptEnhancementProjectFactCategoryV1[];
   /** I1: section kinds ordered most-useful-first for THIS prompt. Observation only. */
   sectionRelevanceOrder: readonly string[];
+  /**
+   * Sensitive-action precision observation (see StageClassifierResult for the full
+   * contract). Parses SOFTLY like its sibling observations — but degrades to ABSENT
+   * (undefined), never to a default value, because absence is the fail-closed state.
+   */
+  sensitiveActionVerdict?: 'proposed' | 'not_proposed';
+  sensitiveActionReason?: string;
   reason: string;
 }
 
@@ -301,6 +308,17 @@ export interface StageClassifierResult {
   projectFactCandidates: readonly PromptEnhancementProjectFactCategoryV1[];
   /** I1: section kinds ordered most-useful-first for THIS prompt. Observation only. */
   sectionRelevanceOrder: readonly string[];
+  /**
+   * Sensitive-action precision observation: does the CURRENT prompt PROPOSE performing a
+   * risky action, or merely MENTION a risk-flavoured word? Absent until the prompt block
+   * asks for it, and absent on the degraded path — absence always fails CLOSED downstream
+   * (the confirmation is emitted). Unlike every earlier observation, "no answer" and "the
+   * safe answer" are OPPOSITES here, so only an explicit 'not_proposed' WITH a non-empty
+   * reason can ever clear anything.
+   */
+  sensitiveActionVerdict?: 'proposed' | 'not_proposed';
+  /** Required for a clearance to count: what the benign reading IS. Reasonless clearances are void. */
+  sensitiveActionReason?: string;
   reason: string;
   /** True when this result came from the local fallback (the model was unavailable). */
   degraded: boolean;
@@ -406,6 +424,17 @@ export function parseStageClassifierReply(raw: string, minConfidence = STAGE2_LL
   // I1: unknown kinds and repeats are dropped, order preserved — a ranking with a slip in it
   // is still a ranking, and refusing the whole reply over one would cost the observation.
   const sectionRelevanceOrder = normalizePromptEnhancementRelevanceOrderV1(p.section_relevance_order);
+  // Sensitive-action verdict: soft like its siblings, but its degraded form is ABSENT
+  // (undefined) — never a default — because for this one field "no answer" and "the safe
+  // answer" are opposites, and absence is what fails closed downstream. Anything other than
+  // the two exact verdict strings parses to undefined; a reason parses only as a non-empty
+  // string (a whitespace-only reason is no reason).
+  const sensitiveActionVerdict = p.sensitive_action_verdict === 'proposed' || p.sensitive_action_verdict === 'not_proposed'
+    ? p.sensitive_action_verdict
+    : undefined;
+  const sensitiveActionReason = typeof p.sensitive_action_reason === 'string' && p.sensitive_action_reason.trim().length > 0
+    ? p.sensitive_action_reason
+    : undefined;
 
   return {
     stage,
@@ -420,6 +449,8 @@ export function parseStageClassifierReply(raw: string, minConfidence = STAGE2_LL
     capabilityCandidates,
     projectFactCandidates,
     sectionRelevanceOrder,
+    sensitiveActionVerdict,
+    sensitiveActionReason,
     reason: p.reason as string,
   };
 }
@@ -443,6 +474,8 @@ function toResult(parsed: ParsedStageReply): StageClassifierResult {
     capabilityCandidates: parsed.capabilityCandidates,
     projectFactCandidates: parsed.projectFactCandidates,
     sectionRelevanceOrder: parsed.sectionRelevanceOrder,
+    sensitiveActionVerdict: parsed.sensitiveActionVerdict,
+    sensitiveActionReason: parsed.sensitiveActionReason,
     reason: parsed.reason,
     degraded: false,
   };
@@ -461,6 +494,8 @@ async function degrade(promptText: string): Promise<StageClassifierResult> {
     capabilityCandidates: [],
     projectFactCandidates: [],
     sectionRelevanceOrder: [],
+    // The sensitive-action verdict/reason are deliberately OMITTED here: a degraded call
+    // carries no clearance, and omission is the fail-closed state (the confirmation emits).
     signalsPresent: [],
     signalsAbsent: [],
     fireRecommendation: false,

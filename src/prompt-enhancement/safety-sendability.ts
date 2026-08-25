@@ -1,5 +1,9 @@
 import { findPromptEnhancementInventionViolationsV1 } from './preservation-floors.js';
 import {
+  promptEnhancementSensitiveActionClearedForTextV1,
+  type PromptEnhancementSensitiveActionClearanceV1,
+} from './sensitive-action-clearance.js';
+import {
   PROMPT_ENHANCEMENT_CONTRACT_VERSION,
   type PromptEnhancementActionType,
   type PromptEnhancementCallVisibilityMode,
@@ -59,6 +63,14 @@ export interface PromptEnhancementSafetyValidationInput {
   currentBody: PromptEnhancementCurrentBodyV1;
   editedBodyText?: string;
   actionType?: PromptEnhancementActionType;
+  /**
+   * The classifier's sensitive-action clearance for the PROMPT this body answers (see
+   * sensitive-action-clearance.ts for the full contract). Optional and fail-closed:
+   * absent means every keyword candidate emits the confirmation exactly as today.
+   * The user-edit and use-original entry points never pass it — absence there is the
+   * same fail-closed rule, with no special case.
+   */
+  sensitiveActionClearance?: PromptEnhancementSensitiveActionClearanceV1;
   callVisibilityMode?: PromptEnhancementCallVisibilityMode;
   optionalCallAvailabilityState?: PromptEnhancementValidationGraphV1['optionalCallAvailabilityState'];
   /**
@@ -246,7 +258,7 @@ export function validatePromptEnhancementSafety(
   const generatedSourceRefIds = generatedSourceRefs(input.currentBody);
   const affectedActionIds = input.actionType ? [`${input.currentBody.currentBodyId}:action:${input.actionType}`] : [];
 
-  const sensitiveActionFindings = classifySensitiveActions(input.currentBody, generatedBodyText, affectedActionIds);
+  const sensitiveActionFindings = classifySensitiveActions(input.currentBody, generatedBodyText, affectedActionIds, input.sensitiveActionClearance);
   const generatedVoicePolicyText = sourceLiteralAwareVoicePolicyText(generatedBodyText);
   const confirmationRequired = sensitiveActionFindings.some((finding) => finding.requiresConfirmation);
   const expectedConfirmation = buildPromptEnhancementCanonicalConfirmation(input.currentBody.originalPromptText);
@@ -530,8 +542,17 @@ export function requiresPromptEnhancementConfirmation(
   return classifySensitiveActions(currentBody, '').some((finding) => finding.requiresConfirmation);
 }
 
-export function requiresPromptEnhancementExecutionConfirmationForPrompt(originalPromptText: string): boolean {
-  return classifyTextRiskKinds(originalPromptText).length > 0 && authorityModeFor(originalPromptText) === 'execute_requested';
+export function requiresPromptEnhancementExecutionConfirmationForPrompt(
+  originalPromptText: string,
+  sensitiveActionClearance?: PromptEnhancementSensitiveActionClearanceV1,
+): boolean {
+  const keywordCandidate = classifyTextRiskKinds(originalPromptText).length > 0
+    && authorityModeFor(originalPromptText) === 'execute_requested';
+  // The shared clearance gate: this function judges the PROMPT alone, which is exactly
+  // the text the classifier's verdict was computed on. Absent/invalid clearance => the
+  // candidate emits, unchanged from today.
+  return keywordCandidate
+    && !promptEnhancementSensitiveActionClearedForTextV1(originalPromptText, sensitiveActionClearance);
 }
 
 /**
@@ -559,9 +580,11 @@ export function promptEnhancementAuthorityModeForTextV1(text: string): PromptEnh
 export function promptEnhancementGeneratedBodyRequiresConfirmationV1(
   currentBody: Pick<PromptEnhancementCurrentBodyV1, 'sections' | 'originalPromptText'>,
   bodyText: string,
+  sensitiveActionClearance?: PromptEnhancementSensitiveActionClearanceV1,
 ): boolean {
   const generatedBodyText = generatedOnlyText(bodyText, currentBody.originalPromptText);
-  return classifySensitiveActions(currentBody, generatedBodyText).some((finding) => finding.requiresConfirmation);
+  return classifySensitiveActions(currentBody, generatedBodyText, [], sensitiveActionClearance)
+    .some((finding) => finding.requiresConfirmation);
 }
 
 /**
@@ -607,16 +630,24 @@ function classifySensitiveActions(
   currentBody: Pick<PromptEnhancementCurrentBodyV1, 'sections' | 'originalPromptText'>,
   generatedBodyText: string,
   affectedActionIds: readonly string[] = [],
+  sensitiveActionClearance?: PromptEnhancementSensitiveActionClearanceV1,
 ): readonly PromptEnhancementSensitiveActionFinding[] {
   const findings = new Map<PromptEnhancementSensitiveActionRiskKind, PromptEnhancementSensitiveActionFinding>();
   const originalAuthority = authorityModeFor(currentBody.originalPromptText);
   const sections = currentBody.sections.filter((section) => section.sectionKind !== 'original_request_or_goal');
   const generatedRiskText = generatedBodyText.replace(buildPromptEnhancementCanonicalConfirmation(currentBody.originalPromptText), '');
   const generatedAuthority = authorityModeFor(generatedRiskText);
-  const textByRisk = `${stripLiteralBlocks(currentBody.originalPromptText)}\n${stripLiteralBlocks(generatedRiskText)}`;
+  const promptRiskText = stripLiteralBlocks(currentBody.originalPromptText);
+  const textByRisk = `${promptRiskText}\n${stripLiteralBlocks(generatedRiskText)}`;
 
   for (const [riskKind, pattern] of RISK_PATTERNS) {
     if (!pattern.test(textByRisk)) continue;
+    // Semantic scope of the clearance: the classifier's verdict was computed on the PROMPT,
+    // so it may suppress only a candidate whose risk pattern matches the prompt text alone.
+    // A pattern matching only the generated-body portion was never seen by the classifier —
+    // its verdict says nothing about it, and that confirmation STAYS.
+    const cleared = pattern.test(promptRiskText)
+      && promptEnhancementSensitiveActionClearedForTextV1(promptRiskText, sensitiveActionClearance);
     const authorityMode: PromptEnhancementAuthorityMode = generatedAuthority === 'execute_requested' &&
       (originalAuthority === 'plan_or_review' || /\bdo\s+not\s+run\b/i.test(currentBody.originalPromptText))
       ? 'execute_generated_escalation'
@@ -636,7 +667,8 @@ function classifySensitiveActions(
     findings.set(riskKind, {
       riskKind,
       authorityMode,
-      requiresConfirmation: authorityMode === 'execute_requested' || authorityMode === 'execute_generated_escalation',
+      requiresConfirmation: (authorityMode === 'execute_requested' || authorityMode === 'execute_generated_escalation')
+        && !cleared,
       affectedSectionIds: affectedSections.map((section) => section.sectionId),
       affectedBodySpanRefs: affectedSections.flatMap((section) => section.spanRefs.map((spanRef) => spanRef.spanRefId)),
       affectedActionIds,

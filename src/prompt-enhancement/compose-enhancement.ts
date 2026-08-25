@@ -36,6 +36,7 @@ import {
   withPromptEnhancementCarriedFromPreviousBodyV1,
 } from './original-text-refs.js';
 import type { PromptEnhancementPrimaryIntent } from './routing-taxonomy.js';
+import type { PromptEnhancementSensitiveActionClearanceV1 } from './sensitive-action-clearance.js';
 import {
   buildPromptEnhancementCanonicalConfirmation,
   promptEnhancementGeneratedBodyRequiresConfirmationV1,
@@ -67,6 +68,14 @@ export interface PromptEnhancementComposeInput {
   acceptedAdditionalDetailsText?: string;
   composerRuntimeState?: PromptEnhancementComposerRuntimeState;
   structuredComposerOutput?: PromptEnhancementStructuredComposerOutputV1;
+  /**
+   * The classifier's sensitive-action clearance for this prompt. Threaded ONCE into
+   * compose, and from here it reaches all three places that consult a risk decision:
+   * insertion point 1, the validator-parity guard, and the composer's self-validate.
+   * Absent (every real call until the prompt block ships) => every decision behaves
+   * exactly as today, by the gate's fail-closed rule.
+   */
+  sensitiveActionClearance?: PromptEnhancementSensitiveActionClearanceV1;
   previousSendableBody?: PromptEnhancementCurrentBodyV1;
   priorBodyId?: string;
   priorBodyRevision?: number;
@@ -201,6 +210,7 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
       currentBody: input.previousSendableBody,
       actionType: action,
       callVisibilityMode: 'fallback_no_llm',
+      sensitiveActionClearance: input.sensitiveActionClearance,
     });
     // T2 carriers: the body-level fields below record the carry, but the SECTIONS would
     // otherwise still read as freshly composed. Stamp each one so a section is
@@ -330,7 +340,7 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
   //
   // If the prompt demands confirmation, the clause is placed. Which section hosts it is a matter of
   // taste; whether it appears at all is not.
-  const canonicalConfirmationSectionId = requiresPromptEnhancementExecutionConfirmationForPrompt(input.originalPromptText)
+  const canonicalConfirmationSectionId = requiresPromptEnhancementExecutionConfirmationForPrompt(input.originalPromptText, input.sensitiveActionClearance)
     ? sectionPlans.find((sectionPlan) => (
       sectionPlan.sectionKind === 'risk_safety_or_confirmation' &&
       sectionPlan.safetyFlags.includes('sensitive_action_confirmation')
@@ -412,7 +422,7 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
     canonicalConfirmationSectionId === undefined
     && text === canonicalText
     && !text.includes(buildPromptEnhancementCanonicalConfirmation(input.originalPromptText))
-    && promptEnhancementGeneratedBodyRequiresConfirmationV1({ sections, originalPromptText: input.originalPromptText }, text)
+    && promptEnhancementGeneratedBodyRequiresConfirmationV1({ sections, originalPromptText: input.originalPromptText }, text, input.sensitiveActionClearance)
   ) {
     const lastGeneratedSectionId = [...renderableSectionPlans].reverse()
       .find((sectionPlan) => sectionPlan.sectionKind !== 'original_request_or_goal')?.sectionId;
@@ -495,6 +505,7 @@ export function composePromptEnhancementBody(input: PromptEnhancementComposeInpu
   const safetyValidation = validatePromptEnhancementSafety({
     currentBody,
     callVisibilityMode,
+    sensitiveActionClearance: input.sensitiveActionClearance,
   });
 
   return {

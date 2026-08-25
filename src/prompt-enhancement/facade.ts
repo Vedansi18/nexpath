@@ -392,6 +392,10 @@ async function prepare(
     priorBodyId: actionRequest?.currentBodyBinding.currentBodyId,
     priorBodyRevision: actionRequest?.currentBodyBinding.bodyRevision,
     timestampMs: request.sourcePrompt.capturedAt,
+    // The sensitive-action clearance enters compose ONCE, here, and rides the same
+    // object into the action recompose below. The user-edit and use-original entry
+    // points above never receive it — absent => emit, the same fail-closed rule.
+    sensitiveActionClearance: request.reviewMomentContext.triggerProvenance.classifierSensitiveActionClearance,
   };
   let composed = composePromptEnhancementBody({
     ...composeInput,
@@ -402,6 +406,7 @@ async function prepare(
     currentBody: candidate.currentBody,
     actionType: noPopup ? 'use_original' : undefined,
     callVisibilityMode: candidate.callVisibilityMode,
+    sensitiveActionClearance: request.reviewMomentContext.triggerProvenance.classifierSensitiveActionClearance,
     // ONE source of truth (TI-2, 2026-08-07): the validation graph must carry the SAME
     // optionalCallAvailabilityState the composed boundary metadata carries — the result validator
     // enforces graph === metadata === boundary ('mismatched_call_visibility_state'). The composed

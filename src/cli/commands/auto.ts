@@ -587,6 +587,15 @@ export function buildPromptEnhancementRequestForAuto(input: {
         // pruner is what reads it, under the locked drop-criteria.
         classifierSectionRelevanceOrder: input.stageResult.sectionRelevanceOrder,
         classifierDebugEvidencePresent: input.stageResult.debugEvidencePresent,
+        // The sensitive-action clearance observation, carried ONLY when the verdict exists.
+        // A degraded call has no verdict, so this stays undefined there — and undefined is
+        // the fail-closed state (the confirmation line emits exactly as today).
+        classifierSensitiveActionClearance: input.stageResult.sensitiveActionVerdict !== undefined
+          ? {
+              verdict: input.stageResult.sensitiveActionVerdict,
+              reason: input.stageResult.sensitiveActionReason,
+            }
+          : undefined,
         promptStartBoundary: source.promptStartStop.hookBoundary,
         deliveryBoundary: source.promptStartStop.deliveryBoundary,
         promptStartCanReplaceSameTurn: source.promptStartStop.runAutoCanHoldOrReplaceSubmittedPrompt,
