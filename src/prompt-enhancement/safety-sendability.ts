@@ -1,7 +1,9 @@
 import { findPromptEnhancementInventionViolationsV1 } from './preservation-floors.js';
 import {
   promptEnhancementSensitiveActionClearedForTextV1,
+  isPromptEnhancementTypedSensitiveActionVerdictV1,
   type PromptEnhancementSensitiveActionClearanceV1,
+  type PromptEnhancementTypedSensitiveActionVerdictV1,
 } from './sensitive-action-clearance.js';
 import {
   PROMPT_ENHANCEMENT_CONTRACT_VERSION,
@@ -71,6 +73,13 @@ export interface PromptEnhancementSafetyValidationInput {
    * same fail-closed rule, with no special case.
    */
   sensitiveActionClearance?: PromptEnhancementSensitiveActionClearanceV1;
+  /**
+   * The typed secret-in-prompt verdict (see sensitive-action-clearance.ts). ACCUSES only:
+   * OR-ed into confirmationRequired after the clearance gate, so a clearance can never
+   * reach it. Absent or malformed means today's behaviour exactly. The same two entry
+   * points that never receive the clearance never receive this either.
+   */
+  typedSensitiveActionVerdict?: PromptEnhancementTypedSensitiveActionVerdictV1;
   callVisibilityMode?: PromptEnhancementCallVisibilityMode;
   optionalCallAvailabilityState?: PromptEnhancementValidationGraphV1['optionalCallAvailabilityState'];
   /**
@@ -260,7 +269,11 @@ export function validatePromptEnhancementSafety(
 
   const sensitiveActionFindings = classifySensitiveActions(input.currentBody, generatedBodyText, affectedActionIds, input.sensitiveActionClearance);
   const generatedVoicePolicyText = sourceLiteralAwareVoicePolicyText(generatedBodyText);
-  const confirmationRequired = sensitiveActionFindings.some((finding) => finding.requiresConfirmation);
+  // The combined emit rule, both recall sources: emit = (keywordCandidate && !cleared) || typed.
+  // The typed verdict is OR-ed AFTER the clearance gate (which lives inside the findings) —
+  // it comes from the one precise typed detector and no clearance may reach it.
+  const confirmationRequired = sensitiveActionFindings.some((finding) => finding.requiresConfirmation)
+    || isPromptEnhancementTypedSensitiveActionVerdictV1(input.typedSensitiveActionVerdict);
   const expectedConfirmation = buildPromptEnhancementCanonicalConfirmation(input.currentBody.originalPromptText);
   const confirmationPresent = hasCanonicalConfirmation(bodyText, expectedConfirmation);
   const confirmationContradicted = confirmationPresent &&

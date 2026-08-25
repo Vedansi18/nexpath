@@ -66,3 +66,35 @@ export function promptEnhancementSensitiveActionClearedForTextV1(
   if (clearance === undefined) return false;
   return clearance.verdict === 'not_proposed' && isNonEmptyReason(clearance.reason);
 }
+
+/**
+ * The TYPED sensitive-action verdict — the RECALL companion to the clearance above.
+ *
+ * Where the clearance may only ACQUIT a keyword candidate (the approved exception), this
+ * verdict may only ACCUSE: it is produced when a shown popup's required survivor is a
+ * secret-in-prompt-class fact (the one precise typed detector in the system), and it is
+ * OR-ed into the confirmation decision AFTER the clearance gate:
+ *
+ *   emit = (keywordCandidate && !cleared) || typedVerdict
+ *
+ * so no clearance can ever reach it, and its absence is simply today's behaviour — the
+ * additive-only default in its natural direction, no exception needed. The action label
+ * rides along for the wording seam that names the action (consumed by later work; carried
+ * from day one so it cannot be lost between phases).
+ */
+export interface PromptEnhancementTypedSensitiveActionVerdictV1 {
+  /** The typed name of the confirmed action class (e.g. 'credential exposure'). */
+  readonly actionLabel: string;
+}
+
+/**
+ * Runtime shape guard for the boundary: a malformed object (non-string or empty label)
+ * counts as ABSENT — today's behaviour exactly, per the fail-closed rule for this field.
+ */
+export function isPromptEnhancementTypedSensitiveActionVerdictV1(
+  value: PromptEnhancementTypedSensitiveActionVerdictV1 | undefined,
+): value is PromptEnhancementTypedSensitiveActionVerdictV1 {
+  return value !== undefined
+    && typeof value.actionLabel === 'string'
+    && value.actionLabel.trim().length > 0;
+}

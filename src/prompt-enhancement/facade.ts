@@ -30,7 +30,7 @@ import { isValidApiKey } from '../config/ApiKeyResolver.js';
 import { planPromptEnhancementSections } from './templates/section-plan.js';
 import { prunePromptEnhancementSectionsV1 } from './section-pruner.js';
 import { routePromptEnhancement, isKnownPrimaryIntent, isKnownCapabilityId, isKnownDebugEvidenceForm, describePromptEnhancementSequencePlanV1, type PromptEnhancementCapabilityId, type PromptEnhancementRouteInput } from './routing-taxonomy.js';
-import { buildPromptEnhancementGuidanceFactsV1 } from './guidance-facts.js';
+import { buildPromptEnhancementGuidanceFactsV1, isSensitiveSignalRefV1 } from './guidance-facts.js';
 import { resolvePromptEnhancementSourceConflictsV1 } from './conflict-resolution.js';
 import { applyPromptEnhancementSourceMixV1 } from './source-mix.js';
 import { summarisePromptEnhancementRuntimeSeamsV1 } from './cost-measurement.js';
@@ -257,6 +257,16 @@ async function prepare(
   // recompose below still runs the FULL safety validation on the recomposed body — this bypass
   // only stops an action from cancelling a popup that is already on screen.
   const noPopup = actionRequest !== undefined ? false : (route.noPopup || !guidanceGate.show);
+  // The typed secret-in-prompt verdict: derived from the gate DECISION (.show — already the
+  // only gate field this facade reads) plus the required survivor's sensitivity, via the ONE
+  // sensitive-source predicate — never widened, and never via bodyShape, which stays
+  // unconsumed. This is the precise typed detector's output finally reaching the
+  // confirmation layer; it ACCUSES only and is OR-ed after the clearance gate downstream.
+  const typedSensitiveActionVerdict = guidanceGate.show
+    && sourceMix.requiredSurvivor !== null
+    && sourceMix.requiredSurvivor.sourceIds.some((sourceId) => isSensitiveSignalRefV1(sourceId))
+    ? { actionLabel: 'credential exposure' }
+    : undefined;
 
   const plannedSections = planPromptEnhancementSections({
     routeResult: route,
@@ -396,6 +406,7 @@ async function prepare(
     // object into the action recompose below. The user-edit and use-original entry
     // points above never receive it — absent => emit, the same fail-closed rule.
     sensitiveActionClearance: request.reviewMomentContext.triggerProvenance.classifierSensitiveActionClearance,
+    typedSensitiveActionVerdict,
   };
   let composed = composePromptEnhancementBody({
     ...composeInput,
@@ -407,6 +418,7 @@ async function prepare(
     actionType: noPopup ? 'use_original' : undefined,
     callVisibilityMode: candidate.callVisibilityMode,
     sensitiveActionClearance: request.reviewMomentContext.triggerProvenance.classifierSensitiveActionClearance,
+    typedSensitiveActionVerdict,
     // ONE source of truth (TI-2, 2026-08-07): the validation graph must carry the SAME
     // optionalCallAvailabilityState the composed boundary metadata carries — the result validator
     // enforces graph === metadata === boundary ('mismatched_call_visibility_state'). The composed
