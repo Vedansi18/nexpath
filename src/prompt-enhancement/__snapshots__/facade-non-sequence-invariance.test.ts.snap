@@ -175,7 +175,9 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
         "sectionPlanId": "pe:facade-nonseq-a-plain-impl:route:section-plan:2:context_and_constraints",
         "sensitivityFlags": [],
         "slotEvidenceStatus": "present",
-        "slotObligations": [],
+        "slotObligations": [
+          "no_invention_state",
+        ],
         "sourceEvidenceStatus": "present",
         "sourceIds": [
           "prompt:1",
@@ -233,7 +235,9 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
         "sectionPlanId": "pe:facade-nonseq-a-plain-impl:route:section-plan:3:approach_or_steps",
         "sensitivityFlags": [],
         "slotEvidenceStatus": "present",
-        "slotObligations": [],
+        "slotObligations": [
+          "no_invention_state",
+        ],
         "sourceEvidenceStatus": "present",
         "sourceIds": [
           "prompt:1",
@@ -291,7 +295,9 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
         "sectionPlanId": "pe:facade-nonseq-a-plain-impl:route:section-plan:4:acceptance_or_output_expectation",
         "sensitivityFlags": [],
         "slotEvidenceStatus": "present",
-        "slotObligations": [],
+        "slotObligations": [
+          "no_invention_state",
+        ],
         "sourceEvidenceStatus": "present",
         "sourceIds": [
           "prompt:1",
@@ -351,6 +357,7 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
         "slotEvidenceStatus": "present",
         "slotObligations": [
           "family_specific_verification",
+          "no_invention_state",
         ],
         "sourceEvidenceStatus": "present",
         "sourceIds": [
@@ -413,6 +420,7 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
           "baseline_source_signal",
           "source_kind_id_evidence_metadata",
           "public_safe_why_help_support",
+          "no_invention_state",
         ],
         "sourceEvidenceStatus": "present",
         "sourceIds": [
@@ -699,6 +707,9 @@ Source Signal Guidance:
     "effectiveLanguageState": "unknown_default",
     "generatedOriginState": "pe_generated_body",
     "generatedSafeStatus": "valid",
+    "inheritedSlotObligations": [
+      "no_invention_state",
+    ],
     "instructionPrecedenceState": "generated_sections_qualify_original",
     "languageConfidence": "unknown",
     "languagePolicy": "technical_english_default",
@@ -882,7 +893,9 @@ Source Signal Guidance:
         "sectionKind": "context_and_constraints",
         "sensitivityFlags": [],
         "slotEvidenceStatus": "present",
-        "slotObligations": [],
+        "slotObligations": [
+          "no_invention_state",
+        ],
         "sourceEvidenceStatus": "present",
         "sourceFactIds": [
           "section_kind:context_and_constraints",
@@ -985,6 +998,7 @@ Source Signal Guidance:
           "baseline_source_signal",
           "source_kind_id_evidence_metadata",
           "public_safe_why_help_support",
+          "no_invention_state",
         ],
         "sourceEvidenceStatus": "present",
         "sourceFactIds": [
@@ -2064,7 +2078,9 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
         "sectionPlanId": "pe:facade-nonseq-b-explain:route:section-plan:2:test_command_output",
         "sensitivityFlags": [],
         "slotEvidenceStatus": "present",
-        "slotObligations": [],
+        "slotObligations": [
+          "no_invention_state",
+        ],
         "sourceEvidenceStatus": "present",
         "sourceIds": [
           "prompt:1",
@@ -2122,7 +2138,9 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
         "sectionPlanId": "pe:facade-nonseq-b-explain:route:section-plan:3:fixture_mock_context",
         "sensitivityFlags": [],
         "slotEvidenceStatus": "present",
-        "slotObligations": [],
+        "slotObligations": [
+          "no_invention_state",
+        ],
         "sourceEvidenceStatus": "present",
         "sourceIds": [
           "prompt:1",
@@ -2241,7 +2259,9 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
         "sectionPlanId": "pe:facade-nonseq-b-explain:route:section-plan:5:narrow_fix_boundary",
         "sensitivityFlags": [],
         "slotEvidenceStatus": "present",
-        "slotObligations": [],
+        "slotObligations": [
+          "no_invention_state",
+        ],
         "sourceEvidenceStatus": "present",
         "sourceIds": [
           "prompt:1",
@@ -2301,6 +2321,7 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
         "slotEvidenceStatus": "present",
         "slotObligations": [
           "family_specific_verification",
+          "no_invention_state",
         ],
         "sourceEvidenceStatus": "present",
         "sourceIds": [
@@ -2363,6 +2384,7 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
           "baseline_source_signal",
           "source_kind_id_evidence_metadata",
           "public_safe_why_help_support",
+          "no_invention_state",
         ],
         "sourceEvidenceStatus": "present",
         "sourceIds": [
@@ -2835,7 +2857,9 @@ Source Signal Guidance:
         "sectionKind": "test_command_output",
         "sensitivityFlags": [],
         "slotEvidenceStatus": "present",
-        "slotObligations": [],
+        "slotObligations": [
+          "no_invention_state",
+        ],
         "sourceEvidenceStatus": "present",
         "sourceFactIds": [
           "section_kind:test_command_output",
@@ -2938,6 +2962,7 @@ Source Signal Guidance:
           "baseline_source_signal",
           "source_kind_id_evidence_metadata",
           "public_safe_why_help_support",
+          "no_invention_state",
         ],
         "sourceEvidenceStatus": "present",
         "sourceFactIds": [
@@ -4025,7 +4050,9 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
         "sectionPlanId": "pe:facade-nonseq-c-compound-shaped:route:section-plan:2:context_and_constraints",
         "sensitivityFlags": [],
         "slotEvidenceStatus": "present",
-        "slotObligations": [],
+        "slotObligations": [
+          "no_invention_state",
+        ],
         "sourceEvidenceStatus": "present",
         "sourceIds": [
           "prompt:1",
@@ -4083,7 +4110,9 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
         "sectionPlanId": "pe:facade-nonseq-c-compound-shaped:route:section-plan:3:approach_or_steps",
         "sensitivityFlags": [],
         "slotEvidenceStatus": "present",
-        "slotObligations": [],
+        "slotObligations": [
+          "no_invention_state",
+        ],
         "sourceEvidenceStatus": "present",
         "sourceIds": [
           "prompt:1",
@@ -4141,7 +4170,9 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
         "sectionPlanId": "pe:facade-nonseq-c-compound-shaped:route:section-plan:4:acceptance_or_output_expectation",
         "sensitivityFlags": [],
         "slotEvidenceStatus": "present",
-        "slotObligations": [],
+        "slotObligations": [
+          "no_invention_state",
+        ],
         "sourceEvidenceStatus": "present",
         "sourceIds": [
           "prompt:1",
@@ -4201,6 +4232,7 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
         "slotEvidenceStatus": "present",
         "slotObligations": [
           "family_specific_verification",
+          "no_invention_state",
         ],
         "sourceEvidenceStatus": "present",
         "sourceIds": [
@@ -4263,6 +4295,7 @@ exports[`PE facade — non-sequence invariance (P1b-i reorder guard) > non-seque
           "baseline_source_signal",
           "source_kind_id_evidence_metadata",
           "public_safe_why_help_support",
+          "no_invention_state",
         ],
         "sourceEvidenceStatus": "present",
         "sourceIds": [
@@ -4549,6 +4582,9 @@ Source Signal Guidance:
     "effectiveLanguageState": "unknown_default",
     "generatedOriginState": "pe_generated_body",
     "generatedSafeStatus": "valid",
+    "inheritedSlotObligations": [
+      "no_invention_state",
+    ],
     "instructionPrecedenceState": "generated_sections_qualify_original",
     "languageConfidence": "unknown",
     "languagePolicy": "technical_english_default",
@@ -4732,7 +4768,9 @@ Source Signal Guidance:
         "sectionKind": "context_and_constraints",
         "sensitivityFlags": [],
         "slotEvidenceStatus": "present",
-        "slotObligations": [],
+        "slotObligations": [
+          "no_invention_state",
+        ],
         "sourceEvidenceStatus": "present",
         "sourceFactIds": [
           "section_kind:context_and_constraints",
@@ -4835,6 +4873,7 @@ Source Signal Guidance:
           "baseline_source_signal",
           "source_kind_id_evidence_metadata",
           "public_safe_why_help_support",
+          "no_invention_state",
         ],
         "sourceEvidenceStatus": "present",
         "sourceFactIds": [

@@ -347,7 +347,11 @@ export function validatePromptEnhancementSafety(
     for (const section of input.currentBody.sections) {
       if (!section.slotObligations.includes('no_invention_state')) continue;
       const inventions = findPromptEnhancementInventionViolationsV1({
-        sectionText: section.bodyText,
+        // The canonical confirmation is CODE-inserted, never model text — and its naming half
+        // ("git history or branch change") reads as a command shape to the extractors. The same
+        // carried-string rule as the escalation strippers applies: remove exactly the sentence
+        // that was inserted before scanning what the model actually wrote.
+        sectionText: section.bodyText.replace(expectedConfirmation, ''),
         // GR-1: a value the BOUNDARY resolved was supplied — by a local probe or
         // the store rather than by the prompt — so it is grounding, not invention.
         allowedTexts: [

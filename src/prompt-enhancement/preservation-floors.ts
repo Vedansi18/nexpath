@@ -262,7 +262,16 @@ export function findPromptEnhancementInventionViolationsV1(input: {
   };
   for (const matcher of FLOOR_MATCHERS) {
     if (!INVENTION_ITEM_FLOOR_IDS.has(matcher.floorId)) continue;
-    for (const item of matcher.extract(input.sectionText)) report(item);
+    for (const item of matcher.extract(input.sectionText)) {
+      // Consumer-side guard on the commands matcher (the GENERIC_UPPER_TOKENS precedent — the
+      // SHARED matcher is byte-untouched, so a command the USER wrote keeps its preservation
+      // floor). An English-verb command head followed by one plain lowercase word is prose,
+      // not an invocation: "make necessary changes", "make informed decisions" — measured as
+      // the only false-positive class across 477 real composed sections. A real target keeps
+      // a shape word ("make build-all", "node server.js") and still reports.
+      if (matcher.floorId === 'commands' && /^(?:make|python|node)\s+[a-z]+$/.test(item.trim())) continue;
+      report(item);
+    }
   }
   for (const pattern of PRODUCT_NAME_PATTERNS) {
     for (const item of allMatches(input.sectionText, pattern)) {

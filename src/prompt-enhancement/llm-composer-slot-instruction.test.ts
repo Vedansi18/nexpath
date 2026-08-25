@@ -86,15 +86,24 @@ describe('composer instruction: the typed slot obligations reach the model', () 
     expect(prompt).toMatch(/ASK for it/);
   });
 
-  it('the constraint is scoped to the section that carries it, not the whole prompt', async () => {
+  it('the constraint is scoped per section — one prose line per section that carries it', async () => {
+    // The no-invention state is now UNIVERSAL over composed prose (the reach widening), so the
+    // hard line appears once per carrying section — still section-scoped, never one prompt-wide
+    // banner. The counts must match exactly: a section listing the obligation without its prose
+    // line (or the reverse) is the drift this pins against.
     const prompt = await promptFor('issue_debug.reproduction_discovery', 'the checkout job stops halfway and I cannot tell why');
     const noInventionLines = prompt.split('\n').filter((line) => line.includes('NO-INVENTION (hard)'));
-    expect(noInventionLines).toHaveLength(1);
+    const obligationListings = prompt.split('\n').filter((line) => line.includes('slotObligations') && line.includes('no_invention_state'));
+    expect(noInventionLines.length).toBeGreaterThan(1);
+    expect(noInventionLines).toHaveLength(obligationListings.length);
   });
 
-  it('a route with no no-invention obligation carries no such instruction', async () => {
+  it('every composed-prose route now carries the constraint — the widening, pinned', async () => {
+    // Before the reach widening this route carried NO no-invention instruction and this test
+    // pinned that absence. The widening is the deliberate closure: every prose section is
+    // protected, planning routes included.
     const prompt = await promptFor('planning.spec_or_prd', 'write a spec for the new onboarding flow');
-    expect(prompt).not.toContain('NO-INVENTION (hard)');
-    expect(prompt).not.toContain('no_invention_state');
+    expect(prompt).toContain('NO-INVENTION (hard)');
+    expect(prompt).toContain('no_invention_state');
   });
 });

@@ -631,6 +631,13 @@ function slotObligationsFor(
   // prompt that should change here is the carry route's, which gains the
   // protection it was missing.
   for (const obligation of SECTION_KIND_FLOOR_OBLIGATIONS_V1[sectionKind] ?? []) obligations.add(obligation);
+  // The no-invention state is UNIVERSAL over composed prose: every planned section except the
+  // user's own verbatim text carries it, so the working gate inspects every kind — including
+  // any section kind a future preset introduces, which a per-kind list would silently miss
+  // (the vocabulary is ~200 kinds and growing with presets). `original_request_or_goal` is
+  // excluded because it IS the user's text: an invention check over the user's own words would
+  // flag the user for inventing their own prompt.
+  if (sectionKind !== 'original_request_or_goal') obligations.add('no_invention_state');
   return [...obligations];
 }
 

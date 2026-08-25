@@ -1747,10 +1747,17 @@ describe('no-invention state: a section carrying the obligation cannot name what
   });
 
   it('a section WITHOUT the obligation is not policed by this check', () => {
+    // The obligation is now UNIVERSAL over composed prose (the reach widening), so no planned
+    // section arrives without it — the fixture strips it by hand to keep the validator property
+    // pinned: the check keys on the obligation, never on the section kind.
     const body = composedBody({ originalPromptText: debugPrompt, route: reproRoute as never });
     const sections = body.sections.map((section) =>
       section.sectionKind === 'verification_or_test_plan'
-        ? { ...section, bodyText: '- Verify with RabbitMQ management UI.' }
+        ? {
+          ...section,
+          bodyText: '- Verify with RabbitMQ management UI.',
+          slotObligations: section.slotObligations.filter((obligation) => obligation !== 'no_invention_state'),
+        }
         : section,
     );
     const verification = sections.find((section) => section.sectionKind === 'verification_or_test_plan');

@@ -25,7 +25,7 @@ vi.mock('./llm-composer.js', () => ({
     const factId = section.structuredContentPartRefs[0];
     return { ok: true, output: {
       outputId: 'test-llm-output',
-      sectionDrafts: [{ sectionId: section.sectionId, bodyText: 'Tailored LLM wording for this section.', sourceFactIds: [factId] }],
+      sectionDrafts: [{ sectionId: section.sectionId, bodyText: 'Tailored model wording for this section.', sourceFactIds: [factId] }],
       composerClaims: [`claim:${factId}`],
     } };
   }),
@@ -81,7 +81,7 @@ describe('E4 — facade LLM composer wiring', () => {
     expect(composeStructuredComposerOutputV1).toHaveBeenCalledTimes(1);
     expect(result.callAndVisibilityMetadata.callVisibilityMode).toBe('llm_wording');
     expect(result.modelVersion).toBe('llm-wording-v1');
-    expect(result.currentBody.text).toContain('Tailored LLM wording');
+    expect(result.currentBody.text).toContain('Tailored model wording');
   });
 
   it('a plainly unambiguous prompt still composes — the route no longer decides', async () => {
@@ -115,7 +115,7 @@ describe('E4 — facade LLM composer wiring', () => {
     expect(result.disposition).toBe('show_current_body');
     expect(composeStructuredComposerOutputV1).toHaveBeenCalledTimes(1);
     expect(result.callAndVisibilityMetadata.callVisibilityMode).toBe('llm_wording');
-    expect(result.currentBody.text).toContain('Tailored LLM wording');
+    expect(result.currentBody.text).toContain('Tailored model wording');
   });
 
   it('no popup -> composer not called, even with a valid key', async () => {
