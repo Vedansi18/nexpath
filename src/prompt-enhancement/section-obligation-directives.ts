@@ -19,8 +19,23 @@ import type { PromptEnhancementSlotObligationV1 } from './templates/section-plan
 export const SLOT_OBLIGATION_DIRECTIVES_V1: Readonly<Record<PromptEnhancementSlotObligationV1, string>> = {
   reproduction_or_evidence_request:
     'Ask for the exact steps, logs, or samples that show the problem; if they are missing, say what is needed rather than guessing.',
+  // ⚠️ The second sentence is the WORK half, added 2026-08-26 after the Session A MID measurement.
+  //
+  // The first sentence names only THINGS — tools, libraries, files, APIs — and a line can honour it
+  // completely while still enlarging the job. Measured on Session A's eight bodies: "Gather feedback
+  // from the classmate to ensure satisfaction" on a prompt about an overlapping button, "the system
+  // logs these actions appropriately" on a question about where uploads are stored, "Document the
+  // results to showcase the deployment's success". Every one invents nothing and asks for work the
+  // developer never requested. That is Hiren's middle band — not harmful, not welcome craft, and
+  // irritating by the tenth occurrence — and it was the one number that rose (0.7 → 0.75/0.875 per
+  // body) while invented names fell tenfold.
+  //
+  // ⛔ Rollback and recovery are deliberately NOT in the list. Naming them on risky work is the
+  // risk section's own job, and a rule that silenced them would trade an irritation for a safety
+  // gap. Sequencing and verifying the developer's OWN ask stay welcome for the same reason: they
+  // are the craft the band was never meant to catch.
   no_invention_state:
-    'Hard rule: name only tools, libraries, services, files, APIs or project facts that appear in the original request or in an allowed source fact. If the evidence is missing, ask for it — never supply an example name.',
+    'Hard rule: name only tools, libraries, services, files, APIs or project facts that appear in the original request or in an allowed source fact. If the evidence is missing, ask for it — never supply an example name. Same rule for WORK: never add tasks they did not ask for — no extra approvals, sign-offs, feedback rounds, user testing, documentation or logging steps. Sequencing, verifying, and naming rollback or recovery for risky work is welcome.',
   behavior_lock:
     'State exactly what must keep working unchanged after the change.',
   baseline_current_output_proof:
