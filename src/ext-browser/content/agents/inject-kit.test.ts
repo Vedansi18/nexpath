@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { injectViaSimulatedPaste, clipboardFallback } from './inject-kit.js';
+import { injectViaSimulatedPaste, clipboardFallback, landingBudgetFor } from './inject-kit.js';
 
 // Parameterization proof for the shared inject kit: works against arbitrary,
 // NON-Replit selectors. The full behavior matrix (focus, landed-verification,
@@ -371,5 +371,29 @@ describe('empty inject text is refused outright (it used to wipe the composer an
     expect(keys).toEqual([]);                                        // no Enter
     expect(clicked).not.toHaveBeenCalled();                          // no send
     input.remove(); button.remove();
+  });
+});
+
+describe('landingBudgetFor — the clipboard-fallback regression', () => {
+  // Live 2026-08-26 (Bolt AND Replit): 2,179- and 2,465-char enhanced prompts
+  // fell to the clipboard at a flat 900ms even though the text WAS in the
+  // composer moments later. Telling a user to paste text that already arrived
+  // is the worst possible outcome.
+  it('gives a real enhanced prompt materially more time than 900ms', () => {
+    expect(landingBudgetFor('x'.repeat(2465))).toBeGreaterThan(900);
+    expect(landingBudgetFor('x'.repeat(2179))).toBeGreaterThan(900);
+  });
+
+  it('scales with the body — a longer prompt waits longer', () => {
+    expect(landingBudgetFor('x'.repeat(4000))).toBeGreaterThan(landingBudgetFor('x'.repeat(1000)));
+  });
+
+  it('keeps a floor so a one-line option stays snappy', () => {
+    expect(landingBudgetFor('add tests')).toBe(1_200);
+    expect(landingBudgetFor('')).toBe(1_200);
+  });
+
+  it('keeps a ceiling so a pathological editor cannot stall the flow', () => {
+    expect(landingBudgetFor('x'.repeat(500_000))).toBe(6_000);
   });
 });

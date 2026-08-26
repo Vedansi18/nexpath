@@ -20,6 +20,7 @@ import { createComposerSubmitGate, type ComposerDecision } from '../composer-sub
 import { setComposerSubmitInterceptor } from './capture-kit.js';
 import { resolveProjectRootFromLocation } from './agent-hosts.js';
 import { fetchGateOwnsSite } from '../../inject/submit-substitution.js';
+import { showToast } from './inject-kit.js';
 
 /**
  * Heartbeat cadence while a submit is held.
@@ -130,6 +131,19 @@ export function installSubmitGate(opts: InstallSubmitGateOptions): void {
       },
       readComposerText: () => {
         try { return composer.readComposerText(input); } catch { return ''; }
+      },
+      /**
+       * Immediate acknowledgement that Enter registered.
+       *
+       * Cancelling the submit means the site paints nothing, and the popup can
+       * be seconds away (classification + enhancement run first). To the user
+       * that reads as "Enter did nothing" — reported as exactly that. One line
+       * of feedback closes the gap; the prompt itself is still visible in the
+       * composer where they typed it.
+       */
+      onHoldStarted: () => {
+        try { showToast('Nexpath is preparing an enhancement — your prompt is held, not sent.'); }
+        catch { /* feedback only */ }
       },
       decide: async (ctx) => {
         // Keep the worker alive for as long as we hold the user's prompt.

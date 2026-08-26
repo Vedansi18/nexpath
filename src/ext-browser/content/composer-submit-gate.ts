@@ -57,6 +57,8 @@ export interface ComposerSubmitGateDeps {
   /** Read the composer's current text — used to verify a send actually happened. */
   readComposerText: () => string;
   emit?: (event: string, data?: Record<string, unknown>) => void;
+  /** Called once when a submission is taken over, before any await. */
+  onHoldStarted?: () => void;
   /**
    * Ceiling on the popup wait, or **null for none** (the shipped default).
    *
@@ -185,6 +187,7 @@ export function createComposerSubmitGate(deps: ComposerSubmitGateDeps): Composer
     const timeoutMs = deps.holdTimeoutMs ?? null;
     const startedAt = now();
     emit('submit_hold_started', { submitId, budgetMs: timeoutMs });
+    try { deps.onHoldStarted?.(); } catch { /* feedback must never break the hold */ }
 
     let outcome: { timedOut: boolean; value?: ComposerDecision };
     try {

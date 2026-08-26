@@ -95,6 +95,33 @@ describe('createComposerSubmitGate', () => {
   });
 
   describe('taking over a submission', () => {
+    it('acknowledges the hold IMMEDIATELY, before any await', () => {
+      // Cancelling means the site paints nothing and the popup is seconds away,
+      // so without this the user reads Enter as having done nothing.
+      const onHoldStarted = vi.fn();
+      const { gate } = makeGate({
+        onHoldStarted,
+        decide: vi.fn(() => new Promise<ComposerDecision>(() => {})),
+      });
+      gate.maybeIntercept(makeEvent(), PROMPT);
+      expect(onHoldStarted).toHaveBeenCalledTimes(1);
+    });
+
+    it('is not acknowledged when the gate declines to take over', () => {
+      const onHoldStarted = vi.fn();
+      const { gate } = makeGate({ onHoldStarted, isArmed: () => false });
+      gate.maybeIntercept(makeEvent(), PROMPT);
+      expect(onHoldStarted).not.toHaveBeenCalled();
+    });
+
+    it('an acknowledgement that throws cannot break the hold', async () => {
+      const { gate, deps } = makeGate({
+        onHoldStarted: () => { throw new Error('toast blew up'); },
+      });
+      gate.maybeIntercept(makeEvent(), PROMPT);
+      await vi.waitFor(() => expect(deps.reissueOriginal).toHaveBeenCalledTimes(1));
+    });
+
     it('cancels the event so the site never sees the original submit', () => {
       const { gate } = makeGate();
       const ev = makeEvent();

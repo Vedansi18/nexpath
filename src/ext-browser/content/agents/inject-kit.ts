@@ -151,12 +151,29 @@ function resolveComposer(selectors: string | string[]): HTMLElement | null {
 }
 
 /**
+ * How long to wait for an insertion to become visible, scaled to the body.
+ *
+ * A flat 900 ms was still too short: live on Bolt AND Replit (2026-08-26)
+ * 2,179- and 2,465-character enhanced prompts fell to the clipboard even though
+ * the text WAS in the composer moments later — the editor simply had not
+ * finished reconciling. Falling back then is the worst of both worlds: the user
+ * sees a "copy it yourself" toast for text that already arrived.
+ *
+ * Rich editors reconcile roughly in proportion to content, so the budget does
+ * too — with a floor that keeps one-line options snappy and a ceiling so a
+ * pathological editor cannot stall the flow.
+ */
+export function landingBudgetFor(text: string): number {
+  const perKb = Math.ceil(text.length / 500) * 1_000;
+  return Math.min(6_000, Math.max(1_200, perKb));
+}
+
+/**
  * Wait until the text is visible in the editor, or the budget runs out. Rich
  * editors (TipTap/ProseMirror on Bolt and Lovable) process a paste through
  * their own async model — a fixed 50ms check missed slow frames on a busy
- * page for a multi-KB body (live 2026-08-25: the PE popup's ~2.6KB enhanced
- * prompt fell to the clipboard while the shorter advisory options always
- * landed). Polling keeps fast editors fast and only slow ones wait.
+ * page for a multi-KB body. Polling keeps fast editors fast and only slow ones
+ * wait.
  */
 async function waitForLanding(input: HTMLElement, text: string, budgetMs: number): Promise<boolean> {
   const deadline = Date.now() + budgetMs;
@@ -266,8 +283,9 @@ export async function injectViaSimulatedPaste(
     if (document.querySelector(selector)) break; // selector matches; bridge tried and failed — don't retry others
   }
 
+  const landingBudget = landingBudgetFor(text);
   dispatchSimulatedPaste(input, text);
-  if (await waitForLanding(input, text, 900)) {
+  if (await waitForLanding(input, text, landingBudget)) {
     logInjectOutcome('landed via simulated paste');
     await submitInjectedPrompt(input, text, submitButtonSelector);
     return;
@@ -277,8 +295,18 @@ export async function injectViaSimulatedPaste(
   // insertion through the trusted execCommand path, then re-check. Also the
   // second chance for a rich editor that dropped the synthetic paste entirely.
   insertViaExecCommand(input, text);
-  if (await waitForLanding(input, text, 900)) {
+  if (await waitForLanding(input, text, landingBudget)) {
     logInjectOutcome('landed via execCommand');
+    await submitInjectedPrompt(input, text, submitButtonSelector);
+    return;
+  }
+
+  // LAST CHANCE before degrading. An earlier attempt may have been accepted
+  // after its own budget elapsed — live, that is exactly what happened, and
+  // telling the user to paste text that is already in the box is worse than
+  // saying nothing. Re-read once more before giving up.
+  if (hasLanded(input, text)) {
+    logInjectOutcome('landed late — submitting rather than degrading');
     await submitInjectedPrompt(input, text, submitButtonSelector);
     return;
   }
