@@ -100,9 +100,26 @@ export function createSubmitGate(deps: SubmitGateDeps): SubmitGate {
   };
 
   const echoes: EchoEntry[] = [];
-  // Multi-entry on purpose: two replacements can be in flight (user retries
-  // quickly), and a single-slot registry would forget the first and block it.
-  const claimed = new Set<string>();
+  /**
+   * Claimed submits, and WHAT WE DECIDED for each.
+   *
+   * Remembering the decision — not just the id — is load-bearing. A duplicate of
+   * a submit we already BLOCKED must not fall through to sending the original:
+   * that re-sends the very text the user replaced, and the agent answers it.
+   * Live-caught on Bolt 2026-08-26: `submit_hold_blocked` was immediately
+   * followed by `submit_hold_claim_duplicate`, and the duplicate sent the
+   * original. A duplicate now repeats the REPLACEMENT instead, so the site's
+   * retry still gets a response and the agent still only ever sees one text.
+   */
+  const claimed = new Map<string, { replacement: string | null }>();
+  const CLAIM_CAP = 50;
+  const rememberClaim = (id: string, replacement: string | null): void => {
+    claimed.set(id, { replacement });
+    if (claimed.size > CLAIM_CAP) {
+      const oldest = claimed.keys().next().value;
+      if (oldest !== undefined) claimed.delete(oldest);
+    }
+  };
 
   const pruneEchoes = (): void => {
     const cutoff = now() - ECHO_TTL_MS;
@@ -148,13 +165,25 @@ export function createSubmitGate(deps: SubmitGateDeps): SubmitGate {
       }
 
       // ── 2. CLAIM ─────────────────────────────────────────────────────────
-      // Set.add after a has() check is atomic here: JS is single-threaded and
+      // Map.set after a has() check is atomic here: JS is single-threaded and
       // there is no await between the two.
-      if (claimed.has(ctx.submitId)) {
-        emit('submit_hold_claim_duplicate', { submitId: ctx.submitId });
+      const prior = claimed.get(ctx.submitId);
+      if (prior !== undefined) {
+        // Already decided. If we blocked, REPEAT THE REPLACEMENT — never the
+        // original (see the registry's comment: this is a live-caught defect).
+        if (prior.replacement !== null && sendReplacement !== undefined) {
+          emit('submit_hold_claim_duplicate', { submitId: ctx.submitId, repeated: 'replacement' });
+          try {
+            return sendReplacement(prior.replacement);
+          } catch {
+            emit('submit_hold_substitution_failed', { submitId: ctx.submitId });
+            return send();
+          }
+        }
+        emit('submit_hold_claim_duplicate', { submitId: ctx.submitId, repeated: 'original' });
         return send();
       }
-      claimed.add(ctx.submitId);
+      rememberClaim(ctx.submitId, null);
 
       // ── 3. BUDGET ────────────────────────────────────────────────────────
       const budget = makeBudget(deps.budget);
@@ -196,6 +225,9 @@ export function createSubmitGate(deps: SubmitGateDeps): SubmitGate {
           return send();
         }
         this.noteEcho(decision.replacement);
+        // Record the decision BEFORE sending: a retry can arrive while the
+        // replacement request is still in flight.
+        rememberClaim(ctx.submitId, decision.replacement);
         emit('submit_hold_blocked', { submitId: ctx.submitId, heldMs: now() - startedAt });
         try {
           return sendReplacement(decision.replacement);

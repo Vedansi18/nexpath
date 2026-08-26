@@ -214,6 +214,39 @@ describe('createSubmitGate — the closure that may withhold the user request', 
       expect(send).toHaveBeenCalledTimes(2); // both callers still get their send
     });
 
+    it('LIVE-CAUGHT (Bolt, 2026-08-26): a duplicate after a BLOCK repeats the replacement, never the original', async () => {
+      const { gate, names } = makeGate(async () => ({ kind: 'block', replacement: 'the improved prompt text' }));
+      const send = vi.fn().mockReturnValue('ORIGINAL');
+      const sendReplacement = vi.fn().mockReturnValue('REPLACEMENT');
+
+      await gate.runGatedSubmit(ctx({ submitId: 'dup' }), send, sendReplacement);
+      // The site retries the same submission (observed live: submit_hold_blocked
+      // was immediately followed by submit_hold_claim_duplicate).
+      const second = await gate.runGatedSubmit(ctx({ submitId: 'dup' }), send, sendReplacement);
+
+      expect(second).toBe('REPLACEMENT');
+      expect(sendReplacement).toHaveBeenCalledTimes(2);
+      expect(sendReplacement).toHaveBeenLastCalledWith('the improved prompt text');
+      // The whole point: the text the user replaced never goes out.
+      expect(send).not.toHaveBeenCalled();
+      expect(names()).toContain('submit_hold_claim_duplicate');
+    });
+
+    it('a duplicate after an ALLOW still sends the original', async () => {
+      const { gate } = makeGate(ALLOW);
+      const send = vi.fn().mockReturnValue('ORIGINAL');
+      await gate.runGatedSubmit(ctx({ submitId: 'dup' }), send);
+      expect(await gate.runGatedSubmit(ctx({ submitId: 'dup' }), send)).toBe('ORIGINAL');
+      expect(send).toHaveBeenCalledTimes(2);
+    });
+
+    it('a duplicate after a block falls back to the original when no substitution exists', async () => {
+      const { gate } = makeGate(async () => ({ kind: 'block', replacement: 'the improved prompt text' }));
+      const send = vi.fn().mockReturnValue('ORIGINAL');
+      await gate.runGatedSubmit(ctx({ submitId: 'dup' }), send); // no sendReplacement → degrades to allow
+      expect(await gate.runGatedSubmit(ctx({ submitId: 'dup' }), send)).toBe('ORIGINAL');
+    });
+
     it('different submitIds are decided independently', async () => {
       const decide = vi.fn(ALLOW);
       const { gate } = makeGate(decide);
