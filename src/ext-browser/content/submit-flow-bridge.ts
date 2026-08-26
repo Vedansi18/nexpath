@@ -35,6 +35,9 @@ import {
   SUBMIT_DECISION_RESPONSE_TYPE,
 } from '../inject/submit-decision-channel.js';
 
+/** See install-submit-gate.ts — same rationale, same cadence. */
+const HOLD_HEARTBEAT_MS = 10_000;
+
 export interface SubmitFlowBridgeDeps {
   win?: Window;
   /** Agent/site string for this page (defaults to the live hostname mapping). */
@@ -166,6 +169,13 @@ export function setupSubmitFlowBridge(deps: SubmitFlowBridgeDeps = {}): SubmitFl
           /* the page's budget will release the hold */
         }
       };
+      // Keep the worker alive for as long as the page holds the user's prompt.
+      // Without this a long hold ends in a worker restart, the decision dies and
+      // the popup is orphaned (live-caught on Firefox 2026-08-26).
+      const beat = setInterval(() => {
+        sendToSw({ type: 'nexpath:pe-keepalive', projectRoot: projectRootOf() });
+      }, HOLD_HEARTBEAT_MS);
+      const answerAndStop = (decision: unknown): void => { clearInterval(beat); answer(decision); };
       void askSw({
         type: SUBMIT_DECISION_REQUEST_TYPE,
         site: siteOf(),
@@ -174,8 +184,8 @@ export function setupSubmitFlowBridge(deps: SubmitFlowBridgeDeps = {}): SubmitFl
         prompt: typeof req.prompt === 'string' ? req.prompt : '',
         submitId: typeof req.submitId === 'string' ? req.submitId : '',
       }).then(
-        (res) => { answer((res as { decision?: unknown } | null)?.decision ?? { kind: 'allow' }); },
-        () => { answer({ kind: 'allow' }); },
+        (res) => { answerAndStop((res as { decision?: unknown } | null)?.decision ?? { kind: 'allow' }); },
+        () => { answerAndStop({ kind: 'allow' }); },
       );
       return;
     }

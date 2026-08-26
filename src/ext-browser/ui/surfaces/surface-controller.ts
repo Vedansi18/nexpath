@@ -204,6 +204,29 @@ export function createSurfaceController(
     return rows[interactiveIndex]?.kind === 'field' ? ordinal : -1;
   }
 
+/**
+ * Scroll the panel's own list so the focused row is visible, moving as little as
+ * possible — the CLI's window only ever shifts by what it must.
+ *
+ * Uses rects rather than `offsetTop` so it does not depend on which ancestor
+ * happens to be the offset parent. In jsdom every rect is zero, so this is inert
+ * there rather than wrong.
+ */
+function scrollRowIntoView(wrapper: HTMLElement): void {
+  const row = wrapper.querySelector<HTMLElement>('.np-focused');
+  const scroller = wrapper.querySelector<HTMLElement>('.np-scroll');
+  if (!row || !scroller) return;
+  try {
+    const r = row.getBoundingClientRect();
+    const box = scroller.getBoundingClientRect();
+    if (box.height === 0) return; // not laid out yet
+    if (r.top < box.top) scroller.scrollTop -= box.top - r.top;
+    else if (r.bottom > box.bottom) scroller.scrollTop += r.bottom - box.bottom;
+  } catch {
+    /* measurement unavailable — the panel is still usable, just not auto-scrolled */
+  }
+}
+
   function bodyText(): string {
     // Field ordinal 0 is the body on every surface that has one.
     return fieldValues[0] ?? '';
@@ -233,6 +256,16 @@ export function createSurfaceController(
     } else {
       wrapper.focus({ preventScroll: true });
     }
+
+    // Bring the focused row into view.
+    //
+    // `preventScroll: true` above is deliberate — letting the browser scroll on
+    // focus moves the HOST PAGE, not the panel. But it also means nothing ever
+    // scrolls the panel's own list, so arrowing down to a row below the fold
+    // moved the selection marker somewhere the user could not see it (reported
+    // live 2026-08-26: "not auto scroll to down when focus goes to original
+    // prompt"). Scrolling the panel's own scroller is the missing half.
+    scrollRowIntoView(wrapper);
 
     // Clicking a row moves focus there; an ACTION row also activates, the way
     // the old panel's rows did. A field row must not activate on click —

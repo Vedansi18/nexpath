@@ -1,3 +1,5 @@
+// @vitest-environment jsdom
+
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const { mockGet, mockAddListener, mockSendMessage, mockSetInterceptor } = vi.hoisted(() => ({
@@ -43,8 +45,13 @@ beforeEach(() => {
   vi.clearAllMocks();
   // Nothing in storage ⇒ the switch resolves to its shipped default: ON.
   mockGet.mockResolvedValue({});
-  vi.stubGlobal('window', { location: { hostname: 'bolt.new', pathname: '/~/p1', origin: 'https://bolt.new' } });
-  vi.stubGlobal('document', { querySelector: vi.fn().mockReturnValue({ click: vi.fn() }) });
+  // Real jsdom window (the gate dispatches a CustomEvent to close the panel);
+  // only `location` needs to look like a project page.
+  Object.defineProperty(window, 'location', {
+    configurable: true,
+    value: { hostname: 'bolt.new', pathname: '/~/p1', origin: 'https://bolt.new' },
+  });
+  vi.spyOn(document, 'querySelector').mockReturnValue({ click: vi.fn() } as unknown as Element);
 });
 
 describe('installSubmitGate — exactly one gate may own a site', () => {
@@ -94,6 +101,67 @@ describe('installSubmitGate — exactly one gate may own a site', () => {
     installSubmitGate({ agent: 'bolt', submitButtonSelector: '#send', injectPromptText: vi.fn() });
     // No await: storage has not answered yet, so the page must behave as today.
     expect(lastInterceptor()(makeEvent(), 'ship this to production now', INPUT, COMPOSER)).toBe(false);
+  });
+
+  describe('surviving a long hold (live-caught on Firefox: the worker died mid-popup)', () => {
+    it('heartbeats the worker while the decision is outstanding', async () => {
+      vi.useFakeTimers();
+      try {
+        installSubmitGate({ agent: 'bolt', submitButtonSelector: '#send', injectPromptText: vi.fn() });
+        // Let the switch resolve under fake timers.
+        await vi.advanceTimersByTimeAsync(0);
+        mockSendMessage.mockReturnValue(new Promise(() => {})); // decision never answers
+
+        lastInterceptor()(makeEvent(), 'ship this to production now', INPUT, COMPOSER);
+        await vi.advanceTimersByTimeAsync(35_000);
+
+        const beats = mockSendMessage.mock.calls
+          .map((c) => c[0] as { type?: string })
+          .filter((m) => m.type === 'nexpath:pe-keepalive');
+        // 35s at a 10s cadence — comfortably inside Firefox's teardown window.
+        expect(beats.length).toBeGreaterThanOrEqual(3);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('stops heartbeating once the decision resolves', async () => {
+      vi.useFakeTimers();
+      try {
+        installSubmitGate({ agent: 'bolt', submitButtonSelector: '#send', injectPromptText: vi.fn() });
+        await vi.advanceTimersByTimeAsync(0);
+        mockSendMessage.mockResolvedValue({ decision: { kind: 'allow' } });
+
+        lastInterceptor()(makeEvent(), 'ship this to production now', INPUT, COMPOSER);
+        await vi.advanceTimersByTimeAsync(1_000);
+        const afterResolve = mockSendMessage.mock.calls.filter(
+          (c) => (c[0] as { type?: string }).type === 'nexpath:pe-keepalive').length;
+
+        await vi.advanceTimersByTimeAsync(60_000);
+        const later = mockSendMessage.mock.calls.filter(
+          (c) => (c[0] as { type?: string }).type === 'nexpath:pe-keepalive').length;
+        expect(later).toBe(afterResolve); // no beats after it settled
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('closes the panel when the original is released — never leave a dead popup on screen', async () => {
+      const dispatched: string[] = [];
+      const realDispatch = window.dispatchEvent.bind(window);
+      vi.spyOn(window, 'dispatchEvent').mockImplementation((e: Event) => {
+        const d = (e as CustomEvent<{ type?: string }>).detail;
+        if (e.type === 'nexpath:sw-message' && d?.type) dispatched.push(d.type);
+        return realDispatch(e);
+      });
+
+      installSubmitGate({ agent: 'bolt', submitButtonSelector: '#send', injectPromptText: vi.fn() });
+      await settle();
+      mockSendMessage.mockResolvedValue({ decision: { kind: 'allow' } });
+
+      lastInterceptor()(makeEvent(), 'ship this to production now', INPUT, COMPOSER);
+      await vi.waitFor(() => expect(dispatched).toContain('nexpath:pe-close'));
+    });
   });
 
   it('marks the replacement as injected BEFORE delivering it', async () => {
