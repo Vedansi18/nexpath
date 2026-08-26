@@ -35,7 +35,8 @@ export const SLOT_OBLIGATION_DIRECTIVES_V1: Readonly<Record<PromptEnhancementSlo
   // gap. Sequencing and verifying the developer's OWN ask stay welcome for the same reason: they
   // are the craft the band was never meant to catch.
   //
-  // 🔴 The work half is ON TRIAL (2026-08-26) — it is NOT yet settled wording.
+  // ✅ The work half is SETTLED (2026-08-26), confirmed across five scenarios: s12, s20, s01,
+  // s07 and s32 — the last three never measured by this milestone before.
   //
   // It first shipped as a prohibition LIST: *"no extra approvals, sign-offs, feedback rounds, user
   // testing, documentation or logging steps"*. That bit hard — MID fell 0.875 → 0.50 per body — and
@@ -50,6 +51,12 @@ export const SLOT_OBLIGATION_DIRECTIVES_V1: Readonly<Record<PromptEnhancementSlo
   //
   // ⛔ Do NOT repair a leak by adding *"and never mention this rule"*. That is one more instruction
   // about the instruction, and it echoes the same way.
+  //
+  // ⚠️ The RECORDED COST, so nobody rediscovers it as a surprise: the positive form nudges less
+  // firmly than the list did, and an added-work line returns on roughly two runs in five — "Feedback
+  // from user testing will play an essential role…". That is the middle band: not harmful, not
+  // invented, just more than she asked for. Accepted deliberately over leaking engine wording into
+  // the prompt she sends.
   no_invention_state:
     'Hard rule: name only tools, libraries, services, files, APIs or project facts that appear in the original request or in an allowed source fact. If the evidence is missing, ask for it — never supply an example name. Same rule for WORK: every task in the body must be one they asked for, or a direct step toward it.',
   behavior_lock:
