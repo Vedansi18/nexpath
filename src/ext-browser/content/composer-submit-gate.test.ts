@@ -43,6 +43,9 @@ function makeGate(over: Partial<Parameters<typeof createComposerSubmitGate>[0]> 
     makeBudget: stubBudget(),
     isArmed: () => true,
     agent: 'bolt',
+    // Keep the send-verification window short so tests stay fast; production
+    // needs seconds because these editors clear lazily.
+    verify: { timeoutMs: 300, pollMs: 50 },
     ...over,
   };
   const gate = createComposerSubmitGate(deps as Parameters<typeof createComposerSubmitGate>[0]);
@@ -222,6 +225,47 @@ describe('createComposerSubmitGate', () => {
       await vi.waitFor(() => expect(names()).toContain('submit_hold_substitution_failed'));
       expect(names()).not.toContain('submit_replacement_sent');
       await vi.waitFor(() => expect(deps.reissueOriginal).toHaveBeenCalledTimes(1));
+    });
+
+    it('LIVE-CAUGHT: when the inject leaves the REPLACEMENT in the box, the fallback says so', async () => {
+      // Bolt/Replit 2026-08-26: the inject fell back to the clipboard and the
+      // enhanced text stayed in the composer. Pressing send then sends what the
+      // USER CHOSE — reporting that as "released the original" is a lie in the
+      // ring buffer, and the ring is the only forensics we have.
+      const { gate, names, setComposer } = makeGate({
+        ...blockDeps,
+        deliverReplacement: vi.fn(async () => true),
+      });
+      setComposer('the better prompt');       // replacement stuck in the composer
+
+      gate.maybeIntercept(makeEvent(), PROMPT);
+      await vi.waitFor(() => expect(names()).toContain('submit_hold_replacement_sent_by_fallback'));
+      expect(names()).not.toContain('submit_hold_released_after_failed_substitution');
+    });
+
+    it('when the ORIGINAL is what is left in the box, it is reported as a real fallback', async () => {
+      const { gate, names, setComposer } = makeGate({
+        ...blockDeps,
+        deliverReplacement: vi.fn(async () => true),
+      });
+      setComposer(PROMPT);                    // the inject never landed at all
+
+      gate.maybeIntercept(makeEvent(), PROMPT);
+      await vi.waitFor(() => expect(names()).toContain('submit_hold_released_after_failed_substitution'));
+    });
+
+    it('a replacement that NEVER landed is not mistaken for one that was sent', async () => {
+      // "The text is not in the box" must not mean "it was sent" — if the paste
+      // never landed, the text was never there, and calling that delivered would
+      // silently drop the user's turn.
+      const { gate, names, setComposer } = makeGate({
+        ...blockDeps,
+        deliverReplacement: vi.fn(async () => true),
+      });
+      setComposer('something else entirely');
+      gate.maybeIntercept(makeEvent(), PROMPT);
+      await vi.waitFor(() => expect(names()).toContain('submit_hold_substitution_failed'));
+      expect(names()).not.toContain('submit_replacement_sent');
     });
 
     it('a replacement that fails to land falls back to the ORIGINAL — the turn is never swallowed', async () => {

@@ -332,6 +332,15 @@ export async function runBrowserPePopup(
   let seq = 0;
   let firstRenderOk = false;
   let renderFailed = false;
+  /**
+   * The engine could not compose enhanced wording, so the body is read-only.
+   *
+   * The CLI never surfaces this: a popup that refuses every keystroke and offers
+   * nothing to change is worse than no popup — a tester who met one concluded
+   * the whole feature was broken, and the owner confirmed with the CLI author
+   * that it does not appear there. Suppress it and let the prompt through.
+   */
+  let suppressedUneditable = false;
   let stashed: PromptEnhancementCliPopupCommandV1 | null = null;
 
   /** Push a view to the panel; true = rendered (ack received). Handles the
@@ -483,7 +492,14 @@ export async function runBrowserPePopup(
       next: async (view: PromptEnhancementCliPopupViewV1) => {
         loopView = view; // feedback persistence reads the live session from here
         seq += 1;
-        const rendered = await pushView(buildPePanelView(view, seq));
+        const panelView = buildPePanelView(view, seq);
+        // Checked on the FIRST render only: a body that becomes uneditable
+        // mid-session is a state the user navigated into deliberately.
+        if (!firstRenderOk && !panelView.bodyEditable) {
+          suppressedUneditable = true;
+          return { type: 'close' };
+        }
+        const rendered = await pushView(panelView);
         if (!rendered) return { type: 'close' };
         if (stashed) {
           const cmd = stashed;
@@ -525,6 +541,10 @@ export async function runBrowserPePopup(
       // NF Plan B: content-free per-action signals (kind + timestamp only).
       actionSignalSink: (kind, occurredAt) => log.debug('pe_action_signal', { kind, occurredAt }),
     });
+    if (suppressedUneditable) {
+      log.debug('pe_popup_suppressed_uneditable_body', { projectRoot });
+      return { result: { state: 'not_shown', reasonCodes: ['body_uneditable'] }, mpsFirstPopupSent: false };
+    }
     if (renderFailed && !firstRenderOk) {
       return { result: { state: 'not_shown', reasonCodes: ['panel_unreachable'] }, mpsFirstPopupSent: false };
     }

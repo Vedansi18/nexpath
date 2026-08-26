@@ -95,6 +95,48 @@ function scriptedTab(log: LogPort, commands: Array<(view: PePanelViewV1) => PePa
   return { sendToTab, views, sent };
 }
 
+describe('an uneditable body is never surfaced (CLI parity)', () => {
+  /**
+   * When the engine cannot compose enhanced wording it falls back to a
+   * deterministic body and marks it read-only. The CLI does not show a popup in
+   * that state, and a tester who met one in the browser concluded the whole
+   * feature was broken — it refuses every keystroke and offers nothing to change.
+   */
+  function readOnlyRecord(): PendingPeRecord {
+    const clone = structuredClone(record) as PendingPeRecord;
+    const body = (clone.result as unknown as {
+      uiView: { body: { fallbackMode: string } };
+    }).uiView.body;
+    body.fallbackMode = 'deterministic_body';
+    return clone;
+  }
+
+  it('does not render, and reports not_shown with a reason', async () => {
+    const { log } = makeLog();
+    const { sendToTab, views } = scriptedTab(log, []);
+    const onFirstRendered = vi.fn().mockResolvedValue(undefined);
+
+    const { result: outcome } = await runBrowserPePopup({
+      log, projectRoot: ROOT, apiKey: null, record: readOnlyRecord(), sendToTab, onFirstRendered,
+    });
+
+    expect(outcome.state).toBe('not_shown');
+    expect(outcome.state === 'not_shown' && outcome.reasonCodes).toContain('body_uneditable');
+    expect(views).toHaveLength(0);          // nothing was ever pushed to the panel
+    expect(onFirstRendered).not.toHaveBeenCalled(); // the pending row is untouched
+  });
+
+  it('an EDITABLE body still renders normally', async () => {
+    const { log } = makeLog();
+    const { sendToTab, views } = scriptedTab(log, [() => ({ type: 'close' })]);
+    await runBrowserPePopup({
+      log, projectRoot: ROOT, apiKey: null, record,
+      sendToTab, onFirstRendered: vi.fn().mockResolvedValue(undefined),
+    });
+    expect(views.length).toBeGreaterThan(0);
+  });
+});
+
 describe('runBrowserPePopup — the engine loop over the panel bridge', () => {
   it('renders the locked view shape and Use-enhanced (unedited) resolves selected_current with the engine body (F2 smooth send)', async () => {
     const { log } = makeLog();

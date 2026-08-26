@@ -57,6 +57,8 @@ export interface ComposerSubmitGateDeps {
   /** Read the composer's current text — used to verify a send actually happened. */
   readComposerText: () => string;
   emit?: (event: string, data?: Record<string, unknown>) => void;
+  /** Overrides the send-verification window (tests keep it short). */
+  verify?: { timeoutMs?: number; pollMs?: number };
   budget?: HoldBudgetDeps;
   makeBudget?: (deps?: HoldBudgetDeps) => HoldBudget;
 }
@@ -72,9 +74,18 @@ export interface ComposerSubmitGate {
   isReentrant(): boolean;
 }
 
-/** How long to wait for the composer to clear before calling a send unverified. */
-const SEND_VERIFY_TIMEOUT_MS = 3_000;
-const SEND_VERIFY_POLL_MS = 100;
+/**
+ * How long to wait for a send to be observable before calling it unverified.
+ *
+ * Widened from 3 s after live runs on Bolt and Replit (2026-08-26) where the
+ * inject fell back to the clipboard and left the replacement sitting in the
+ * composer. The failure verdict was CORRECT there — what was wrong was the
+ * label that followed it, which claimed the ORIGINAL was being released while
+ * the box actually held the replacement. Both are fixed: a longer, poll-bounded
+ * window, and a fallback that reports which text it is really sending.
+ */
+const SEND_VERIFY_TIMEOUT_MS = 8_000;
+const SEND_VERIFY_POLL_MS = 150;
 
 function submitIdFor(prompt: string): string {
   let h = 5381;
@@ -95,19 +106,39 @@ export function createComposerSubmitGate(deps: ComposerSubmitGateDeps): Composer
   // is diagnosable without drowning the ring in one line per keystroke.
   let disarmedLogged = false;
 
+  const normalize = (t: string): string => t.replace(/\s+/g, ' ').trim();
+
   /**
-   * A send is only real once the composer has emptied. A mechanism that reports
-   * success without delivering is worse than none.
+   * Has `text` left the composer?
+   *
+   * "The composer is empty" was the original test and it was WRONG in practice:
+   * these editors keep a draft, a trailing newline or a placeholder node for a
+   * moment after a programmatic send, so a real send read as a failure. What
+   * actually matters is whether the text we submitted is still sitting there —
+   * if it is gone, it went out.
+   *
+   * Bounded by poll count as well as by the clock so a stopped clock cannot turn
+   * this into an unbounded wait while the user is stuck.
    */
-  const verifySent = async (): Promise<boolean> => {
-    const deadline = now() + SEND_VERIFY_TIMEOUT_MS;
-    for (;;) {
-      let text = '';
-      try { text = deps.readComposerText(); } catch { return false; }
-      if (text.trim().length === 0) return true;
-      if (now() >= deadline) return false;
-      await new Promise((r) => setTimeout(r, SEND_VERIFY_POLL_MS));
+  const verifyGone = async (text: string): Promise<boolean> => {
+    const needle = normalize(text);
+    const timeoutMs = deps.verify?.timeoutMs ?? SEND_VERIFY_TIMEOUT_MS;
+    const pollMs = deps.verify?.pollMs ?? SEND_VERIFY_POLL_MS;
+    const maxPolls = Math.ceil(timeoutMs / pollMs);
+    // `sawIt` is what stops "the text is not there" from meaning "it was sent".
+    // If the paste never landed, the text was NEVER in the box, and reporting
+    // that as delivered would silently drop the user's turn.
+    let sawIt = needle.length === 0;
+    for (let i = 0; i <= maxPolls; i++) {
+      let current = '';
+      try { current = deps.readComposerText(); } catch { return false; }
+      const norm = normalize(current);
+      if (norm.length === 0) return true;                  // box cleared ⇒ sent
+      if (needle.length > 0 && norm.includes(needle)) sawIt = true;
+      else if (sawIt) return true;                          // was there, now gone
+      if (i < maxPolls) await new Promise((r) => setTimeout(r, pollMs));
     }
+    return false;
   };
 
   /** Submit the original we cancelled. Always the fallback, never the goal. */
@@ -115,8 +146,13 @@ export function createComposerSubmitGate(deps: ComposerSubmitGateDeps): Composer
     emit(event, { submitId, heldMs });
     reentrant = true;
     try {
+      // Capture what we are about to send BEFORE pressing send, so the check
+      // asks "did THIS text leave?" rather than "is the box empty?" — the latter
+      // reported real sends as failures on both Bolt and Replit.
+      let pending = '';
+      try { pending = deps.readComposerText(); } catch { /* unreadable */ }
       const sent = await deps.reissueOriginal();
-      if (!sent || !await verifySent()) {
+      if (!sent || !await verifyGone(pending)) {
         // Loud on purpose: this is the one branch that can lose a prompt.
         emit('submit_reissue_unverified', { submitId });
       }
@@ -152,7 +188,7 @@ export function createComposerSubmitGate(deps: ComposerSubmitGateDeps): Composer
     let delivered = false;
     try {
       delivered = await deps.deliverReplacement(decision.replacement);
-      if (delivered) delivered = await verifySent();
+      if (delivered) delivered = await verifyGone(decision.replacement);
     } catch {
       delivered = false;
     } finally {
@@ -162,10 +198,24 @@ export function createComposerSubmitGate(deps: ComposerSubmitGateDeps): Composer
       emit('submit_replacement_sent', { submitId, chars: decision.replacement.length });
       return;
     }
-    // The replacement never landed. Rather than swallow the user's turn, put the
-    // original back on the wire and say so.
+
     emit('submit_hold_substitution_failed', { submitId });
-    await releaseOriginal('submit_hold_released_after_failed_substitution', submitId, now() - startedAt);
+    // What is actually in the composer decides what pressing send will do. If the
+    // replacement landed but the send did not fire, the composer holds the text
+    // the USER CHOSE — sending that is the right outcome, and calling it
+    // "released the original" would be a lie in the ring buffer. Only when the
+    // original is still sitting there is this genuinely a fallback.
+    let pending = '';
+    try { pending = deps.readComposerText(); } catch { /* unreadable */ }
+    const replacementStillPending = normalize(decision.replacement).length > 0
+      && normalize(pending).includes(normalize(decision.replacement));
+    await releaseOriginal(
+      replacementStillPending
+        ? 'submit_hold_replacement_sent_by_fallback'
+        : 'submit_hold_released_after_failed_substitution',
+      submitId,
+      now() - startedAt,
+    );
   };
 
   return {
