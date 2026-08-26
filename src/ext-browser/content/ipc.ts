@@ -134,6 +134,19 @@ export interface PeKeepaliveMsg {
   projectRoot: string;
 }
 
+/**
+ * HB1 read-back (A7/A9): what the MAIN world actually believes about the
+ * submit-flow switch, forwarded so it lands in the ring buffer. Diagnostic only
+ * — nothing branches on it, and the SW handler is a log + ack.
+ */
+export interface SubmitFlowStateMsg {
+  type: 'nexpath:submit-flow-state';
+  site: string;
+  armed: boolean;
+  source: string;
+  seq: number;
+}
+
 export type ContentToSwMsg =
   | PromptSubmitMsg
   | ResponseStopMsg
@@ -142,7 +155,8 @@ export type ContentToSwMsg =
   | AdvisoryTerminalMsg
   | PeCommandMsg
   | PeTerminalNoticeMsg
-  | PeKeepaliveMsg;
+  | PeKeepaliveMsg
+  | SubmitFlowStateMsg;
 
 // ── Service Worker → Content ──────────────────────────────────────────────────
 
@@ -193,6 +207,7 @@ export type ExtensionMsg =
   | PeCommandMsg
   | PeTerminalNoticeMsg
   | PeKeepaliveMsg
+  | SubmitFlowStateMsg
   | ShowPeMsg
   | PeCloseMsg
   | PeInjectMsg;
@@ -257,6 +272,14 @@ export function isAdvisoryTerminalMsg(msg: unknown): msg is AdvisoryTerminalMsg 
   return m['type'] === 'nexpath:advisory-terminal' &&
     (m['eventType'] === 'select' || m['eventType'] === 'skip' || m['eventType'] === 'dismiss') &&
     typeof m['advisoryId'] === 'string';
+}
+
+export function isSubmitFlowStateMsg(msg: unknown): msg is SubmitFlowStateMsg {
+  if (typeof msg !== 'object' || msg === null) return false;
+  const m = msg as Record<string, unknown>;
+  return m['type'] === 'nexpath:submit-flow-state' &&
+    typeof m['site'] === 'string' && typeof m['armed'] === 'boolean' &&
+    typeof m['source'] === 'string' && typeof m['seq'] === 'number';
 }
 
 export function isShowPeMsg(msg: unknown): msg is ShowPeMsg {

@@ -12,6 +12,7 @@
 
 import { resolveAgentFromHostname } from '../content/agents/agent-hosts.js';
 import { hasTextLanded } from '../content/agents/landing-check.js';
+import { setupSubmitFlowPage } from './submit-flow-page.js';
 
 type PromptCapturedMsg = {
   type: 'nexpath:prompt-captured';
@@ -174,7 +175,16 @@ window.fetch = function patchedFetch(
   return _nativeFetch(input, init);
 };
 
+// ── HB1: submit-flow switch, page-world side ─────────────────────────────────
+//
+// Receives the resolved switch from the content script and reports back what it
+// believes. DELIBERATELY NOT READ BY `patchedFetch` ABOVE — HB1 is inert by
+// construction; the gated hold path is HB2. Kept AFTER the fetch patch so the
+// patch's installation cannot be delayed by anything here.
+const submitFlow = setupSubmitFlowPage();
+
 // Expose helpers so per-agent modules (loaded separately) can call them.
+(globalThis as Record<string, unknown>)['__nexpath_submit_flow__'] = submitFlow;
 (globalThis as Record<string, unknown>)['__nexpath_emit_prompt__'] = emitPromptCaptured;
 (globalThis as Record<string, unknown>)['__nexpath_emit_stopped__'] = emitResponseStopped;
 (globalThis as Record<string, unknown>)['__nexpath_native_fetch__'] = _nativeFetch;

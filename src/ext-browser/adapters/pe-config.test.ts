@@ -64,7 +64,14 @@ describe('hidden-key guard — PE keys never surface on the options page', () =>
   const optionsDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'options');
   const surfaces = ['options.html', 'options.ts'].map((f) => readFileSync(join(optionsDir, f), 'utf8'));
 
-  for (const hidden of ['prompt_enhancement.popup_cooldown', 'nexpath_pending_pe', 'nexpath_advisory_legacy_surface', 'prompt_enhancement.sequence.enabled', 'nexpath_force_advisory']) {
+  for (const hidden of [
+    'prompt_enhancement.popup_cooldown', 'nexpath_pending_pe', 'nexpath_advisory_legacy_surface',
+    'prompt_enhancement.sequence.enabled', 'nexpath_force_advisory',
+    // The submit-flow switch (team-lead ruling 2026-07-29: developer-only, never
+    // discoverable through any product surface — including renderSelfCheck()).
+    'nexpath_promptsubmit_advisory',
+    'bolt_promptsubmit_advisory', 'lovable_promptsubmit_advisory', 'replit_promptsubmit_advisory',
+  ]) {
     it(`"${hidden}" appears nowhere in the options page`, () => {
       for (const source of surfaces) expect(source).not.toContain(hidden);
     });

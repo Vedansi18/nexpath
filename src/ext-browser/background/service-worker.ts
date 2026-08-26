@@ -36,6 +36,7 @@ import { ContentScriptUIAdapter } from '../content/panel-adapter.js';
 import {
   isPeCommandMsg,
   isPeKeepaliveMsg,
+  isSubmitFlowStateMsg,
   isPeTerminalNoticeMsg,
   isPromptSubmitMsg,
   isResponseStopMsg,
@@ -181,6 +182,16 @@ browser.runtime.onMessage.addListener(
       // open, observed live 2026-07-10); this message reaches whichever instance is
       // alive, so the advisory_dismissed record always lands in the ring buffer.
       log.debug('advisory_dismissed', { eventType: msg.eventType, advisoryId: msg.advisoryId });
+      sendResponse({ ok: true });
+      return true;
+    }
+
+    if (isSubmitFlowStateMsg(msg)) {
+      // HB1 read-back (A7/A9): what the PAGE world believes about the submit-flow
+      // switch — not what storage says. Diagnostic only; nothing branches on it.
+      log.debug('submit_flow_state', {
+        site: msg.site, armed: msg.armed, source: msg.source, seq: msg.seq,
+      });
       sendResponse({ ok: true });
       return true;
     }

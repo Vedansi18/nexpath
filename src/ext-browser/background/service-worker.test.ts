@@ -2138,6 +2138,42 @@ describe('service-worker.ts', () => {
       expect(sendResponse).toHaveBeenCalledWith({ ok: true });
       expect(logDebugMock).toHaveBeenCalledWith('advisory_dismissed', { eventType: 'skip', advisoryId: 'adv-99' });
     });
+
+    it('nexpath:submit-flow-state records the PAGE world\'s own belief in the ring buffer', async () => {
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      const sendResponse = vi.fn();
+      messageListener(
+        { type: 'nexpath:submit-flow-state', site: 'bolt', armed: true, source: 'default_on', seq: 2 },
+        {}, sendResponse,
+      );
+      expect(sendResponse).toHaveBeenCalledWith({ ok: true });
+      expect(logDebugMock).toHaveBeenCalledWith('submit_flow_state', {
+        site: 'bolt', armed: true, source: 'default_on', seq: 2,
+      });
+    });
+
+    it('a malformed submit-flow-state is not routed (the guard rejects it)', async () => {
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      const sendResponse = vi.fn();
+      messageListener(
+        { type: 'nexpath:submit-flow-state', site: 'bolt', armed: 'yes', source: 'x', seq: 1 },
+        {}, sendResponse,
+      );
+      expect(logDebugMock).not.toHaveBeenCalledWith('submit_flow_state', expect.anything());
+    });
+
+    it('the read-back is diagnostic ONLY — it must not touch the advisory pipeline', async () => {
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      const sendResponse = vi.fn();
+      messageListener(
+        { type: 'nexpath:submit-flow-state', site: 'replit', armed: false, source: 'site_off', seq: 1 },
+        {}, sendResponse,
+      );
+      expect(classifyPrompt).not.toHaveBeenCalled();
+      expect(shouldFireStage2).not.toHaveBeenCalled();
+      expect(runStage2).not.toHaveBeenCalled();
+      expect(keyStoreSetKey).not.toHaveBeenCalled();
+    });
   });
 
 });

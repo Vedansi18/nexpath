@@ -14,6 +14,9 @@ describe('main-world emit helpers', () => {
       postMessage: postMessageSpy,
       fetch: vi.fn(),
       location: { origin: 'https://replit.com' },
+      // Real pages always have this; the stub needs it because main-world.ts now
+      // also installs the submit-flow listener at module scope.
+      addEventListener: vi.fn(),
     });
     vi.resetModules();
   });
@@ -70,6 +73,20 @@ describe('main-world emit helpers', () => {
 
 describe('fetch capture rules (B4 — Bolt transport, recon-confirmed)', () => {
   const postMessageSpy = vi.fn();
+
+  /**
+   * Asserts NO PROMPT WAS CAPTURED — which is what every caller of this actually
+   * means. Not "postMessage was never called": main-world.ts also posts the
+   * submit-flow readiness request at module load, which has nothing to do with
+   * capture, so a blanket never-called assertion would fail for the wrong reason.
+   */
+  function expectNoCapture(): void {
+    const captureTypes = ['nexpath:fetch-prompt', 'nexpath:prompt-captured', 'nexpath:response-stopped'];
+    const posted = postMessageSpy.mock.calls
+      .map((c) => (c[0] as { type?: unknown } | null)?.type)
+      .filter((t): t is string => typeof t === 'string');
+    expect(posted.filter((t) => captureTypes.includes(t))).toEqual([]);
+  }
   const nativeFetch = vi.fn().mockResolvedValue({ ok: true } as unknown as Response);
 
   function stubWindow(hostname: string): void {
@@ -177,7 +194,7 @@ describe('fetch capture rules (B4 — Bolt transport, recon-confirmed)', () => {
     });
     await flush();
 
-    expect(postMessageSpy).not.toHaveBeenCalled();
+    expectNoCapture();
   });
 
   it('declares a bolt rule for the /api/chat/v2 generation endpoint only', async () => {
@@ -202,7 +219,7 @@ describe('fetch capture rules (B4 — Bolt transport, recon-confirmed)', () => {
     await flush();
 
     expect(nativeFetch).toHaveBeenCalled();
-    expect(postMessageSpy).not.toHaveBeenCalled();
+    expectNoCapture();
   });
 
   it('a POST to /api/chat/v2 on bolt.new posts a nexpath:fetch-prompt message', async () => {
@@ -249,7 +266,7 @@ describe('fetch capture rules (B4 — Bolt transport, recon-confirmed)', () => {
       body: JSON.stringify({ messages: [{ role: 'user', content: 'not a chat call' }] }),
     });
     await flush();
-    expect(postMessageSpy).not.toHaveBeenCalled();
+    expectNoCapture();
 
     // Replit deliberately has no fetch rule (binary MessagePack WS — recon B3).
     vi.resetModules();
@@ -260,7 +277,7 @@ describe('fetch capture rules (B4 — Bolt transport, recon-confirmed)', () => {
       body: JSON.stringify({ messages: [{ role: 'user', content: 'should not capture' }] }),
     });
     await flush();
-    expect(postMessageSpy).not.toHaveBeenCalled();
+    expectNoCapture();
   });
 
   it('never delays or breaks the page request when the body is unparseable', async () => {
@@ -271,6 +288,6 @@ describe('fetch capture rules (B4 — Bolt transport, recon-confirmed)', () => {
     await flush();
 
     expect(nativeFetch).toHaveBeenCalled();
-    expect(postMessageSpy).not.toHaveBeenCalled();
+    expectNoCapture();
   });
 });

@@ -1,6 +1,7 @@
 import browser from 'webextension-polyfill';
 import { resolveAgentFromHostname, resolveProjectRootFromLocation } from './agents/agent-hosts.js';
 import { isPromptCapturedMsg, isResponseStoppedMsg, isShowAdvisoryMsg, isShowPeMsg } from './ipc.js';
+import { setupSubmitFlowBridge } from './submit-flow-bridge.js';
 import type { PromptSubmitMsg, ResponseStopMsg, AdvisoryFooterIntentMsg, PromptInjectedMsg, AdvisoryTerminalMsg, PeCommandMsg, PeTerminalNoticeMsg, PeKeepaliveMsg } from './ipc.js';
 import { isPePanelCommandV1 } from '../ui/pe-contract.js';
 import type { PanelEvent } from '../../core/ports/ui.port.js';
@@ -433,6 +434,19 @@ if (window.__nexpathMainWorldInjectorBootstrapped) {
   script.remove();
 
   setupListeners();
+
+  // HB1: resolve the submit-flow switch and push it into the MAIN world, which
+  // cannot read async storage at submit time (analysis §8). Started right after
+  // the script tag so the resolution races the module load rather than following
+  // it — either order is handled (the page re-requests on load, and a monotonic
+  // seq makes a late push a no-op). Nothing consumes the value until HB2.
+  // Guarded: a throw here would abort the rest of this module, and the switch is
+  // never worth losing the shipped capture wiring over.
+  try {
+    setupSubmitFlowBridge();
+  } catch (err) {
+    console.warn('[nexpath] submit-flow bridge failed to start — page stays on today\'s flow', err);
+  }
 }
 
 // Runs for EVERY instance (see its doc comment) — after the guard block above.
