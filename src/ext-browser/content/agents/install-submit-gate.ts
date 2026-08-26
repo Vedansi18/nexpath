@@ -20,7 +20,6 @@ import { createComposerSubmitGate, type ComposerDecision } from '../composer-sub
 import { setComposerSubmitInterceptor } from './capture-kit.js';
 import { resolveProjectRootFromLocation } from './agent-hosts.js';
 import { fetchGateOwnsSite } from '../../inject/submit-substitution.js';
-import { showToast } from './inject-kit.js';
 
 /**
  * Heartbeat cadence while a submit is held.
@@ -77,10 +76,38 @@ export function installSubmitGate(opts: InstallSubmitGateOptions): void {
       window.location.hostname, window.location.pathname, window.location.origin,
     ) ?? '';
 
-  const clickSend = (): boolean => {
+  /**
+   * Re-submit whatever is in the composer, by the two routes a user has.
+   *
+   * Clicking the send control alone was not enough: reported live as "choosing
+   * Use original leaves the prompt sitting in the composer, nothing sent". A
+   * site's send button can be missing, re-rendered, or refuse a programmatic
+   * click after a long hold — and this is the ONE path where failing silently
+   * costs the user their prompt, since we already cancelled their own submit.
+   *
+   * So: press the button, and if the text is still there a moment later, send
+   * the Enter the user originally pressed. Both are re-entrancy guarded by the
+   * caller, so neither can be re-intercepted.
+   */
+  const resubmitComposer = async (input: HTMLElement | null): Promise<boolean> => {
     const btn = document.querySelector<HTMLElement>(opts.submitButtonSelector);
-    if (!btn) return false;
-    btn.click();
+    if (btn) btn.click();
+
+    const target = input ?? document.querySelector<HTMLElement>(opts.submitButtonSelector);
+    if (!target) return btn !== null;
+
+    // Give the click a chance before trying the second route.
+    await new Promise((r) => setTimeout(r, 400));
+    const stillThere = (target.textContent ?? '').trim().length > 0;
+    if (!stillThere) return true;
+
+    target.focus();
+    for (const type of ['keydown', 'keypress', 'keyup'] as const) {
+      target.dispatchEvent(new KeyboardEvent(type, {
+        key: 'Enter', code: 'Enter', keyCode: 13, which: 13,
+        bubbles: true, cancelable: true,
+      }));
+    }
     return true;
   };
 
@@ -132,19 +159,6 @@ export function installSubmitGate(opts: InstallSubmitGateOptions): void {
       readComposerText: () => {
         try { return composer.readComposerText(input); } catch { return ''; }
       },
-      /**
-       * Immediate acknowledgement that Enter registered.
-       *
-       * Cancelling the submit means the site paints nothing, and the popup can
-       * be seconds away (classification + enhancement run first). To the user
-       * that reads as "Enter did nothing" — reported as exactly that. One line
-       * of feedback closes the gap; the prompt itself is still visible in the
-       * composer where they typed it.
-       */
-      onHoldStarted: () => {
-        try { showToast('Nexpath is preparing an enhancement — your prompt is held, not sent.'); }
-        catch { /* feedback only */ }
-      },
       decide: async (ctx) => {
         // Keep the worker alive for as long as we hold the user's prompt.
         const beat = setInterval(() => {
@@ -175,7 +189,7 @@ export function installSubmitGate(opts: InstallSubmitGateOptions): void {
       // and leaving it up invites a click that can no longer do anything.
       reissueOriginal: async () => {
         closePanel();
-        return clickSend();
+        return resubmitComposer(input);
       },
     });
     return gate.maybeIntercept(ev, prompt);

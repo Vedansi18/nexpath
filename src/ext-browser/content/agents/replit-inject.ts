@@ -27,12 +27,17 @@ const INPUT_SELECTOR = '.cm-content[contenteditable="true"]';
 const SUBMIT_BUTTON_SELECTOR = '[data-cy="ai-prompt-submit"]';
 
 export async function injectPromptText(text: string): Promise<void> {
-  // `preferExecCommand`: Replit turns a large PASTE into a file attachment —
-  // live 2026-08-26 the enhanced prompt arrived as two `Pasted-My-original…`
-  // chips beside the untouched original, and chips persist even if text lands
-  // later. CodeMirror 6 accepts `execCommand('insertText')` cleanly, and that
-  // path cannot trigger the conversion, so it goes first here.
+  // Replit's composer has a PASTE SIZE LIMIT. Measured live on a real project
+  // 2026-08-26: 1,500 characters landed in full; 2,200 and 4,000 landed NOTHING,
+  // silently. Real enhanced prompts are 2.1-2.5k, so every one was discarded —
+  // and with a trusted clipboard paste the same size becomes a file attachment
+  // instead (the `Pasted-…` chips the tester photographed).
+  //
+  // 800 is comfortably under the observed cliff and was the size verified live
+  // to accumulate exactly (800 → 1,600 → 2,400). `execCommand('insertText')` is
+  // NOT an alternative here: it was measured returning false and inserting
+  // nothing on this CodeMirror 6 composer, even with the document focused.
   await injectViaSimulatedPaste(INPUT_SELECTOR, text, SUBMIT_BUTTON_SELECTOR, {
-    preferExecCommand: true,
+    pasteChunkChars: 800,
   });
 }

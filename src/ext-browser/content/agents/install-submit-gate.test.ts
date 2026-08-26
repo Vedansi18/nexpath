@@ -179,4 +179,62 @@ describe('installSubmitGate — exactly one gate may own a site', () => {
     expect(marks).toHaveLength(1);
     expect(marks[0]!.text).toBe('the improved prompt');
   });
+
+  describe('re-issuing the original (live: "Use original" left the prompt stuck)', () => {
+    function composerWith(text: string): HTMLElement {
+      const el = document.createElement('div');
+      el.textContent = text;
+      document.body.appendChild(el);
+      return el;
+    }
+
+    it('presses the send control', async () => {
+      const btn = { click: vi.fn() } as unknown as HTMLElement;
+      vi.spyOn(document, 'querySelector').mockReturnValue(btn as unknown as Element);
+      installSubmitGate({ agent: 'bolt', submitButtonSelector: '#send', injectPromptText: vi.fn() });
+      await settle();
+      mockSendMessage.mockResolvedValue({ decision: { kind: 'allow' } });
+
+      lastInterceptor()(makeEvent(), 'ship it now', INPUT, COMPOSER);
+      await vi.waitFor(() => expect((btn as unknown as { click: ReturnType<typeof vi.fn> }).click).toHaveBeenCalled());
+    });
+
+    it('falls back to Enter when the composer STILL holds the text after the click', async () => {
+      // This is the reported failure: the button click did nothing and the
+      // prompt sat in the composer unsent. We already cancelled the user's own
+      // submit, so silence here costs them their prompt.
+      const composer = composerWith('ship it now');
+      const keys: string[] = [];
+      composer.addEventListener('keydown', (e) => keys.push((e as KeyboardEvent).key));
+      vi.spyOn(document, 'querySelector').mockReturnValue({ click: vi.fn() } as unknown as Element);
+
+      installSubmitGate({ agent: 'bolt', submitButtonSelector: '#send', injectPromptText: vi.fn() });
+      await settle();
+      mockSendMessage.mockResolvedValue({ decision: { kind: 'allow' } });
+
+      lastInterceptor()(makeEvent(), 'ship it now', composer, {
+        readComposerText: () => composer.textContent ?? '',
+      });
+      await vi.waitFor(() => expect(keys).toContain('Enter'), { timeout: 3000 });
+    });
+
+    it('does NOT press Enter when the click already sent it', async () => {
+      const composer = composerWith('ship it now');
+      const keys: string[] = [];
+      composer.addEventListener('keydown', (e) => keys.push((e as KeyboardEvent).key));
+      vi.spyOn(document, 'querySelector').mockReturnValue({
+        click: () => { composer.textContent = ''; },   // the site accepted it
+      } as unknown as Element);
+
+      installSubmitGate({ agent: 'bolt', submitButtonSelector: '#send', injectPromptText: vi.fn() });
+      await settle();
+      mockSendMessage.mockResolvedValue({ decision: { kind: 'allow' } });
+
+      lastInterceptor()(makeEvent(), 'ship it now', composer, {
+        readComposerText: () => composer.textContent ?? '',
+      });
+      await new Promise((r) => setTimeout(r, 900));
+      expect(keys).not.toContain('Enter');
+    });
+  });
 });

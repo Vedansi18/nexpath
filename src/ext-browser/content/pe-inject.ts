@@ -19,14 +19,25 @@
  *    rare in the first place.
  */
 
-import { isPeCloseMsg, isPeInjectMsg, isShowPeMsg } from './ipc.js';
+import { isPeCloseMsg, isPeInjectMsg, isPePreparingMsg, isShowPeMsg } from './ipc.js';
 // The renderer is the UI developer's dock (PR #1) behind the pe-dock-adapter
 // bridge — same PePanelControllerV1 contract the retired pe-panel implemented,
 // so nothing else in this file or SW-side changed for the swap.
 import { mountNexpathPeDock } from '../ui/pe-dock-adapter.js';
 import type { PePanelControllerV1, PePanelEventV1 } from '../ui/pe-contract.js';
 import { injectPromptText } from './inject-dispatch.js';
-import { showToast } from './agents/inject-kit.js';
+import { showToast, showStickyNotice, dismissStickyNotice } from './agents/inject-kit.js';
+
+/**
+ * Shown while a submit is held and the enhancement is being prepared.
+ *
+ * The worker sends `nexpath:pe-preparing` only once it has decided a popup IS
+ * coming — a pending enhancement exists and the cooldown has passed. That
+ * matters: an earlier version announced the hold on EVERY gated submit, so a
+ * prompt that never produced a popup still told the user something was being
+ * prepared, which is worse than saying nothing.
+ */
+const HOLD_NOTICE = 'Nexpath is reviewing this prompt — it has not been sent. A suggestion will appear shortly.';
 
 const KEEPALIVE_INTERVAL_MS = 20_000;
 /** How long a terminal click may wait for the SW before failing open (closed). */
@@ -141,7 +152,13 @@ export function setupPeListener(): void {
   window.addEventListener('nexpath:sw-message', (ev) => {
     const msg = (ev as CustomEvent<unknown>).detail;
 
+    if (isPePreparingMsg(msg)) {
+      showStickyNotice(HOLD_NOTICE);
+      return;
+    }
+
     if (isShowPeMsg(msg)) {
+      dismissStickyNotice();   // the popup itself replaces the notice
       if (msg.payload.schemaVersion !== SUPPORTED_SCHEMA_VERSION) {
         console.warn(`[nexpath] PE view schemaVersion mismatch: got ${String(msg.payload.schemaVersion)}, expected ${SUPPORTED_SCHEMA_VERSION}. Ignoring.`);
         return;
@@ -157,6 +174,7 @@ export function setupPeListener(): void {
     }
 
     if (isPeCloseMsg(msg)) {
+      dismissStickyNotice();   // the hold ended without a popup, or it closed
       closePanel();
       return;
     }

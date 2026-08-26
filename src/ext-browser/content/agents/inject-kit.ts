@@ -42,6 +42,43 @@ export function showToast(message: string): void {
 }
 
 /**
+ * A notice that STAYS until it is dismissed — for telling the user their prompt
+ * is held while the enhancement is prepared.
+ *
+ * Separate from `showToast` on purpose. A toast auto-dismisses after 4 s, which
+ * is wrong here twice over: the wait can be much longer than that, and the
+ * notice must disappear the moment the popup appears rather than on a timer.
+ * Only one is ever on screen; showing a second replaces the first.
+ */
+let stickyNoticeHost: HTMLElement | null = null;
+
+export function showStickyNotice(message: string): void {
+  dismissStickyNotice();
+  const host = document.createElement('div');
+  const shadow = host.attachShadow({ mode: 'closed' });
+  const style = document.createElement('style');
+  style.textContent = `
+    .notice {
+      position: fixed; bottom: 24px; left: 24px; z-index: 2147483647;
+      background: #1e1e2e; color: #cdd6f4; border: 1px solid #45475a;
+      border-radius: 8px; padding: 10px 14px; font: 13px system-ui, sans-serif;
+      max-width: 340px; box-shadow: 0 4px 16px rgba(0,0,0,.35);
+    }
+  `;
+  const notice = document.createElement('div');
+  notice.className = 'notice';
+  notice.textContent = message;
+  shadow.append(style, notice);
+  document.body.appendChild(host);
+  stickyNoticeHost = host;
+}
+
+export function dismissStickyNotice(): void {
+  try { stickyNoticeHost?.remove(); } catch { /* already gone */ }
+  stickyNoticeHost = null;
+}
+
+/**
  * Copy the text to the clipboard and toast the user to paste it manually. Used
  * internally as the paste-injection fallback, and exported for callers with no
  * agent-specific injector at all (e.g. inject.ts on a host whose inject-back
@@ -83,17 +120,50 @@ function focusAndSelectAll(input: HTMLElement): void {
   selection?.addRange(range);
 }
 
-function dispatchSimulatedPaste(input: HTMLElement, text: string): void {
-  focusAndSelectAll(input);
-
+function firePaste(input: HTMLElement, text: string): void {
   const dataTransfer = new DataTransfer();
   dataTransfer.setData('text/plain', text);
-  const pasteEvent = new ClipboardEvent('paste', {
+  input.dispatchEvent(new ClipboardEvent('paste', {
     clipboardData: dataTransfer,
     bubbles: true,
     cancelable: true,
-  });
-  input.dispatchEvent(pasteEvent);
+  }));
+}
+
+/** Put the caret at the very end of the editor, selecting nothing. */
+function collapseCaretToEnd(input: HTMLElement): void {
+  input.focus();
+  const range = document.createRange();
+  range.selectNodeContents(input);
+  range.collapse(false);
+  const selection = window.getSelection();
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+}
+
+function dispatchSimulatedPaste(input: HTMLElement, text: string, chunkChars?: number): void {
+  // MEASURED ON LIVE REPLIT (2026-08-26): its composer silently DROPS a paste
+  // above roughly 1.5-2k characters — 1,500 chars landed in full, 2,200 and
+  // 4,000 produced nothing at all, with no error and no visible change. Real
+  // enhanced prompts run ~2.1-2.5k, so every one of them was being discarded.
+  // (With a TRUSTED clipboard paste the same size becomes a file attachment
+  // instead, which is what the tester photographed: two `Pasted-…` chips.)
+  //
+  // Splitting the insertion into sub-limit pieces sidesteps it entirely, and was
+  // verified on that live composer: 800 → 1,600 → 2,400 characters accumulated
+  // exactly, with every chunk's marker present. The first piece REPLACES the
+  // composer (the user's original must go), each later one appends at the caret.
+  if (chunkChars !== undefined && chunkChars > 0 && text.length > chunkChars) {
+    focusAndSelectAll(input);
+    firePaste(input, text.slice(0, chunkChars));
+    for (let i = chunkChars; i < text.length; i += chunkChars) {
+      collapseCaretToEnd(input);
+      firePaste(input, text.slice(i, i + chunkChars));
+    }
+    return;
+  }
+  focusAndSelectAll(input);
+  firePaste(input, text);
 }
 
 /**
@@ -253,25 +323,20 @@ async function submitInjectedPrompt(
 
 export interface InjectOptions {
   /**
-   * Insert with `execCommand('insertText')` BEFORE trying any paste event.
+   * Deliver the text in pieces of at most this many characters.
    *
-   * WHY THIS EXISTS (live, Replit, 2026-08-26): a composer may convert a LARGE
-   * PASTE into a file attachment rather than text — the tester's screenshot
-   * showed two `Pasted-My-original…` chips sitting beside the untouched original
-   * prompt, so the replacement was never in the box at all and would have been
-   * SENT AS ATTACHMENTS. Worse, the chips persist: even a later successful text
-   * insert leaves them attached to the message.
+   * For a composer with a paste-size limit. Replit is one: measured live on a
+   * real project, 1,500 characters landed in full while 2,200 and 4,000 landed
+   * NOTHING — silently, no error, no visible change — and real enhanced prompts
+   * are 2.1-2.5k, so every one was discarded. A trusted clipboard paste of the
+   * same size becomes a file attachment instead (the tester's `Pasted-…` chips).
    *
-   * `execCommand('insertText')` is a plain-text insertion and cannot trigger that
-   * conversion, so on such a composer it must be tried FIRST — not as the third
-   * fallback, by which point the chips already exist.
-   *
-   * Off by default: Bolt and Lovable are TipTap/ProseMirror, where the
-   * page-world paste bridge is what made injection work at all and execCommand
-   * was measured as focus-fragile. This is opt-in per agent, so their proven
-   * path is untouched.
+   * Chunking was verified on that same live composer: 800 → 1,600 → 2,400
+   * characters accumulated exactly. Leave unset for composers with no such limit
+   * (Bolt and Lovable accept a whole 2.5k body in one paste), so their proven
+   * single-paste path is untouched.
    */
-  preferExecCommand?: boolean;
+  pasteChunkChars?: number;
 }
 
 export async function injectViaSimulatedPaste(
@@ -296,22 +361,12 @@ export async function injectViaSimulatedPaste(
     return;
   }
 
-  const landingBudgetEarly = landingBudgetFor(text);
-
-  // Plain-text insertion first, where a paste would become an attachment.
-  if (options.preferExecCommand === true) {
-    insertViaExecCommand(input, text);
-    if (await waitForLanding(input, text, landingBudgetEarly)) {
-      logInjectOutcome('landed via execCommand (paste-averse composer)');
-      await submitInjectedPrompt(input, text, submitButtonSelector);
-      return;
-    }
-    logInjectOutcome('execCommand did not land — falling through to the paste path');
-  }
-
   // Preferred path: the page-world bridge (first-class events for rich editors).
+  // SKIPPED for a size-limited composer: the bridge pastes in one piece, which is
+  // exactly what that composer drops.
   const selectorList = Array.isArray(inputSelector) ? inputSelector : [inputSelector];
-  for (const selector of selectorList) {
+  const chunked = options.pasteChunkChars !== undefined && text.length > options.pasteChunkChars;
+  for (const selector of chunked ? [] : selectorList) {
     if (await requestMainWorldInject(selector, text)) {
       logInjectOutcome('landed via main-world bridge');
       await submitInjectedPrompt(input, text, submitButtonSelector);
@@ -321,7 +376,7 @@ export async function injectViaSimulatedPaste(
   }
 
   const landingBudget = landingBudgetFor(text);
-  dispatchSimulatedPaste(input, text);
+  dispatchSimulatedPaste(input, text, options.pasteChunkChars);
   if (await waitForLanding(input, text, landingBudget)) {
     logInjectOutcome('landed via simulated paste');
     await submitInjectedPrompt(input, text, submitButtonSelector);
@@ -331,15 +386,16 @@ export async function injectViaSimulatedPaste(
   // Firefox: the synthetic paste is inert (see insertViaExecCommand). Retry the
   // insertion through the trusted execCommand path, then re-check. Also the
   // second chance for a rich editor that dropped the synthetic paste entirely.
-  // Skipped when it already ran first (paste-averse composers): re-running an
-  // insertion that just failed only doubles the wait before we degrade.
-  if (options.preferExecCommand !== true) {
-    insertViaExecCommand(input, text);
-    if (await waitForLanding(input, text, landingBudget)) {
-      logInjectOutcome('landed via execCommand');
-      await submitInjectedPrompt(input, text, submitButtonSelector);
-      return;
-    }
+  // MEASURED: `execCommand('insertText')` returns false and inserts nothing on
+  // Replit's CodeMirror 6, even with the document focused — CM6 does not
+  // implement the deprecated command. It is kept for the editors where it does
+  // work (it is the Firefox path for plain textareas), but it is not a fallback
+  // a size-limited composer can rely on.
+  insertViaExecCommand(input, text);
+  if (await waitForLanding(input, text, landingBudget)) {
+    logInjectOutcome('landed via execCommand');
+    await submitInjectedPrompt(input, text, submitButtonSelector);
+    return;
   }
 
   // LAST CHANCE before degrading. An earlier attempt may have been accepted

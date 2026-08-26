@@ -86,37 +86,53 @@ describe('replit-inject.ts — injectPromptText', () => {
     expect(focusSpy).toHaveBeenCalled();
   });
 
-  describe('paste-averse composer (live: Replit turned a large paste into attachments)', () => {
-    it('inserts with execCommand BEFORE any paste event', async () => {
-      const input = makeInput();
-      const pasteSpy = vi.fn();
-      input.addEventListener('paste', pasteSpy);
-      // execCommand is what jsdom routes through document.execCommand; stub it to
-      // "land" the text the way CodeMirror would.
-      const exec = vi.fn((_c: string, _u: boolean, value?: string) => {
-        input.textContent = value ?? '';
-        return true;
+  describe('Replit\'s paste SIZE LIMIT (measured live 2026-08-26)', () => {
+    // On a real Replit project: 1,500 characters landed in full, while 2,200 and
+    // 4,000 landed NOTHING — silently, no error. Real enhanced prompts are
+    // 2.1-2.5k, so every one was being discarded. Chunked delivery was verified
+    // on that same composer: 800 -> 1,600 -> 2,400 accumulated exactly.
+    function capturePastes(input: HTMLElement): string[] {
+      const seen: string[] = [];
+      input.addEventListener('paste', (ev) => {
+        const text = (ev as ClipboardEvent).clipboardData?.getData('text/plain') ?? '';
+        seen.push(text);
+        // Emulate the composer: first paste replaces, later ones append.
+        const sel = window.getSelection();
+        const collapsed = sel?.isCollapsed === true;
+        input.textContent = collapsed ? (input.textContent ?? '') + text : text;
       });
-      (document as unknown as { execCommand: unknown }).execCommand = exec;
+      return seen;
+    }
 
-      await injectPromptText('deploy the release with a rollback plan');
+    it('splits an oversized body into sub-limit pieces', async () => {
+      const input = makeInput();
+      const pastes = capturePastes(input);
+      const body = 'y'.repeat(2400);
 
-      expect(exec).toHaveBeenCalledWith('insertText', false, 'deploy the release with a rollback plan');
-      // The whole point: no paste event is ever dispatched, so no attachment chip
-      // can be created. Two `Pasted-My-original…` chips were what the tester saw.
-      expect(pasteSpy).not.toHaveBeenCalled();
-      expect(input.textContent).toBe('deploy the release with a rollback plan');
+      await injectPromptText(body);
+
+      expect(pastes.length).toBeGreaterThan(1);
+      for (const piece of pastes) expect(piece.length).toBeLessThanOrEqual(800);
+      expect(pastes.join('')).toBe(body);
     });
 
-    it('still falls through to the paste path when execCommand does not land', async () => {
+    it('reassembles to exactly the original text in the composer', async () => {
       const input = makeInput();
-      const pasteSpy = vi.fn();
-      input.addEventListener('paste', pasteSpy);
-      (document as unknown as { execCommand: unknown }).execCommand = vi.fn(() => false);
+      capturePastes(input);
+      const body = 'z'.repeat(2123);   // the tester's real body size
 
-      await injectPromptText('write a test');
+      await injectPromptText(body);
 
-      expect(pasteSpy).toHaveBeenCalled();
+      expect(input.textContent).toBe(body);
+    });
+
+    it('sends a small body as ONE paste — no needless splitting', async () => {
+      const input = makeInput();
+      const pastes = capturePastes(input);
+
+      await injectPromptText('deploy it now');
+
+      expect(pastes).toEqual(['deploy it now']);
     });
   });
 });

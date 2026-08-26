@@ -30,7 +30,13 @@ const { injectPromptTextMock, showToastMock, controller, mountMock } = vi.hoiste
   };
 });
 vi.mock('./inject-dispatch.js', () => ({ injectPromptText: injectPromptTextMock }));
-vi.mock('./agents/inject-kit.js', () => ({ showToast: showToastMock }));
+const showStickyNoticeMock = vi.fn();
+const dismissStickyNoticeMock = vi.fn();
+vi.mock('./agents/inject-kit.js', () => ({
+  showToast: showToastMock,
+  showStickyNotice: showStickyNoticeMock,
+  dismissStickyNotice: dismissStickyNoticeMock,
+}));
 vi.mock('../ui/pe-dock-adapter.js', () => ({ mountNexpathPeDock: mountMock }));
 
 let onEvent: (event: PePanelEventV1) => void;
@@ -194,5 +200,31 @@ describe('pagehide teardown', () => {
     expect(controller.destroy).toHaveBeenCalled();
     vi.advanceTimersByTime(60_000);
     expect(beat.calls).toHaveLength(0);
+  });
+
+  describe('the held notice (shown only when a popup is actually coming)', () => {
+    it('pe-preparing shows a notice that STAYS — the wait can be far longer than a toast', () => {
+      dispatchSwMessage({ type: 'nexpath:pe-preparing', projectRoot: 'https://bolt.new/~/p' });
+      expect(showStickyNoticeMock).toHaveBeenCalledTimes(1);
+      expect(String(showStickyNoticeMock.mock.calls[0]![0])).toMatch(/not been sent/i);
+    });
+
+    it('the popup replaces the notice', () => {
+      dispatchSwMessage({ type: 'nexpath:pe-preparing', projectRoot: 'https://bolt.new/~/p' });
+      showPe();
+      expect(dismissStickyNoticeMock).toHaveBeenCalled();
+    });
+
+    it('a close dismisses it too — a hold that ends without a popup leaves nothing behind', () => {
+      dispatchSwMessage({ type: 'nexpath:pe-preparing', projectRoot: 'https://bolt.new/~/p' });
+      dispatchSwMessage({ type: 'nexpath:pe-close', projectRoot: 'https://bolt.new/~/p' });
+      expect(dismissStickyNoticeMock).toHaveBeenCalled();
+    });
+
+    it('is NOT shown by any other message', () => {
+      showPe();
+      dispatchSwMessage({ type: 'nexpath:pe-close', projectRoot: 'https://bolt.new/~/p' });
+      expect(showStickyNoticeMock).not.toHaveBeenCalled();
+    });
   });
 });

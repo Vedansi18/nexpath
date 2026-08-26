@@ -2060,6 +2060,43 @@ describe('service-worker.ts', () => {
       });
     });
 
+    describe('the "held" notice is announced ONLY when a popup is actually coming', () => {
+      const preparing = () => tabsSendMessageMock.mock.calls.filter(
+        (c) => (c[1] as { type?: string } | undefined)?.type === 'nexpath:pe-preparing');
+
+      it('announces it once the popup is about to run', async () => {
+        const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+        decide(messageListener);
+        await vi.waitFor(() => expect(runBrowserPePopup).toHaveBeenCalled());
+        expect(preparing()).toHaveLength(1);
+      });
+
+      it('says NOTHING when there is no pending enhancement — the common case', async () => {
+        // Live-caught on Bolt: a 102 ms hold that produced no popup still told the
+        // user their prompt was held and an enhancement was being prepared.
+        vi.mocked(getPendingPe).mockResolvedValue(null);
+        const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+        const sendResponse = decide(messageListener);
+        await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ decision: { kind: 'allow' } }));
+        expect(preparing()).toEqual([]);
+      });
+
+      it('says NOTHING when the cooldown suppresses the popup', async () => {
+        idbLoadSessionState.mockResolvedValue({ sessionId: 's1', promptCount: 9, lastPromptEnhancementPromptIndex: 8 });
+        const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+        const sendResponse = decide(messageListener);
+        await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ decision: { kind: 'allow' } }));
+        expect(preparing()).toEqual([]);
+      });
+
+      it('says NOTHING when there is no tab to render into', async () => {
+        const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+        const sendResponse = decide(messageListener, null);
+        await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ decision: { kind: 'allow' } }));
+        expect(preparing()).toEqual([]);
+      });
+    });
+
     describe('THIS PATH NEVER INJECTS (injecting as well as substituting = two prompts)', () => {
       it('a block does not send nexpath:pe-inject to the tab', async () => {
         vi.mocked(runBrowserPePopup).mockResolvedValue({

@@ -688,6 +688,13 @@ async function decideHeldSubmit(
     log.debug('submit_decision_consumed_advisory', { submitId, projectRoot });
   }
 
+  // Only NOW is a popup actually coming: a pending enhancement exists, the
+  // cooldown has passed, and the rows are consumed. Telling the user their
+  // prompt is held any earlier would promise a popup that may never appear —
+  // which is exactly what happened when the notice fired on every gated submit.
+  browser.tabs.sendMessage(tabId, { type: 'nexpath:pe-preparing', projectRoot })
+    .catch(() => { /* tab gone — the notice is advisory only */ });
+
   const [apiKey, sequenceEnabled] = await Promise.all([
     keyStore.getKey('openai_api_key'),
     resolvePeSequenceEnabled(projectRoot),

@@ -200,6 +200,17 @@ export interface ShowPeMsg {
   payload: PePanelViewV1;
 }
 
+/**
+ * A popup IS coming for a held submit — show the "held" notice.
+ *
+ * Sent only after the worker has confirmed a pending enhancement exists and the
+ * cooldown has passed, so the notice never promises a popup that will not appear.
+ */
+export interface PePreparingMsg {
+  type: 'nexpath:pe-preparing';
+  projectRoot: string;
+}
+
 /** Hide the PE panel (loop ended without an inject). */
 export interface PeCloseMsg {
   type: 'nexpath:pe-close';
@@ -213,7 +224,7 @@ export interface PeInjectMsg {
   text: string;
 }
 
-export type SwToContentMsg = ShowAdvisoryMsg | ShowPeMsg | PeCloseMsg | PeInjectMsg;
+export type SwToContentMsg = ShowAdvisoryMsg | ShowPeMsg | PeCloseMsg | PeInjectMsg | PePreparingMsg;
 
 // ── Content → Service Worker (panel event) ────────────────────────────────────
 
@@ -335,6 +346,12 @@ export function isShowPeMsg(msg: unknown): msg is ShowPeMsg {
   return m['type'] === 'nexpath:show-pe' &&
     typeof m['projectRoot'] === 'string' &&
     typeof m['payload'] === 'object' && m['payload'] !== null;
+}
+
+export function isPePreparingMsg(msg: unknown): msg is PePreparingMsg {
+  if (typeof msg !== 'object' || msg === null) return false;
+  const m = msg as Record<string, unknown>;
+  return m['type'] === 'nexpath:pe-preparing' && typeof m['projectRoot'] === 'string';
 }
 
 export function isPeCloseMsg(msg: unknown): msg is PeCloseMsg {
