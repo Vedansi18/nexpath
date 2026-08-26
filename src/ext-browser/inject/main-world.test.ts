@@ -1,6 +1,28 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 /**
+ * Import main-world with the fetch gate's ownership set explicitly.
+ *
+ * `vi.resetModules()` gives every test a FRESH module registry, so the strategy
+ * table must be set on the same fresh instance main-world just imported —
+ * mutating a statically-imported copy touches a different object entirely.
+ *
+ * Bolt and Lovable ship on the COMPOSER mechanism, so the fetch patch does not
+ * gate them. The fetch-gate path is still shipped code (it is the right
+ * mechanism for a site that neither renders optimistically nor times out), so
+ * these tests opt it back on; the final describe pins the shipped default.
+ */
+async function loadMainWorld(
+  fetchGate: 'body_rewrite' | 'composer_intercept' = 'body_rewrite',
+): Promise<typeof import('./main-world.js')> {
+  const mod = await import('./main-world.js');
+  const sub = await import('./submit-substitution.js');
+  sub.SITE_SUBSTITUTION_STRATEGY['bolt'] = fetchGate;
+  sub.SITE_SUBSTITUTION_STRATEGY['lovable'] = fetchGate;
+  return mod;
+}
+
+/**
  * main-world.ts patches window.fetch and emits postMessage events.
  * We test the emit helpers in isolation using mocked globals.
  */
@@ -22,7 +44,7 @@ describe('main-world emit helpers', () => {
   });
 
   it('emitPromptCaptured posts to location.origin (not *)', async () => {
-    const { emitPromptCaptured } = await import('./main-world.js');
+    const { emitPromptCaptured } = await loadMainWorld();
     emitPromptCaptured('write some code', 'replit');
     expect(postMessageSpy).toHaveBeenCalledWith(
       { type: 'nexpath:prompt-captured', promptText: 'write some code', agent: 'replit' },
@@ -31,7 +53,7 @@ describe('main-world emit helpers', () => {
   });
 
   it('emitResponseStopped posts to location.origin (not *)', async () => {
-    const { emitResponseStopped } = await import('./main-world.js');
+    const { emitResponseStopped } = await loadMainWorld();
     emitResponseStopped('bolt');
     expect(postMessageSpy).toHaveBeenCalledWith(
       { type: 'nexpath:response-stopped', agent: 'bolt' },
@@ -40,17 +62,17 @@ describe('main-world emit helpers', () => {
   });
 
   it('exposes __nexpath_emit_prompt__ on globalThis', async () => {
-    await import('./main-world.js');
+    await loadMainWorld();
     expect(typeof (globalThis as Record<string, unknown>)['__nexpath_emit_prompt__']).toBe('function');
   });
 
   it('exposes __nexpath_emit_stopped__ on globalThis', async () => {
-    await import('./main-world.js');
+    await loadMainWorld();
     expect(typeof (globalThis as Record<string, unknown>)['__nexpath_emit_stopped__']).toBe('function');
   });
 
   it('exposes __nexpath_native_fetch__ on globalThis', async () => {
-    await import('./main-world.js');
+    await loadMainWorld();
     expect(typeof (globalThis as Record<string, unknown>)['__nexpath_native_fetch__']).toBe('function');
   });
 
@@ -63,7 +85,7 @@ describe('main-world emit helpers', () => {
     });
     vi.resetModules();
 
-    await import('./main-world.js');
+    await loadMainWorld();
     // After patching, window.fetch should be a different function (the patchedFetch wrapper)
     // but still callable — it should pass through to the native fetch
     expect(window.fetch).not.toBe(originalFetch);
@@ -138,7 +160,7 @@ describe('fetch capture rules (B4 — Bolt transport, recon-confirmed)', () => {
   describe('extractLastUserMessage', () => {
     it('extracts the newest user message content from an AI-SDK messages body', async () => {
       stubWindow('bolt.new');
-      const { extractLastUserMessage } = await import('./main-world.js');
+      const { extractLastUserMessage } = await loadMainWorld();
       const body = JSON.stringify({
         messages: [
           { role: 'user', content: 'older prompt' },
@@ -152,7 +174,7 @@ describe('fetch capture rules (B4 — Bolt transport, recon-confirmed)', () => {
 
     it('walks backwards past trailing non-user entries', async () => {
       stubWindow('bolt.new');
-      const { extractLastUserMessage } = await import('./main-world.js');
+      const { extractLastUserMessage } = await loadMainWorld();
       const body = JSON.stringify({
         messages: [
           { role: 'user', content: 'the real prompt' },
@@ -164,7 +186,7 @@ describe('fetch capture rules (B4 — Bolt transport, recon-confirmed)', () => {
 
     it('returns null for non-string content, missing messages, whitespace-only, and invalid JSON', async () => {
       stubWindow('bolt.new');
-      const { extractLastUserMessage } = await import('./main-world.js');
+      const { extractLastUserMessage } = await loadMainWorld();
       expect(extractLastUserMessage(JSON.stringify({ messages: [{ role: 'user', content: [{ type: 'text' }] }] }))).toBeNull();
       expect(extractLastUserMessage(JSON.stringify({ notMessages: true }))).toBeNull();
       expect(extractLastUserMessage(JSON.stringify({ messages: [{ role: 'user', content: '   ' }] }))).toBeNull();
@@ -174,19 +196,19 @@ describe('fetch capture rules (B4 — Bolt transport, recon-confirmed)', () => {
 
   describe('extractLovableMessage — strict body-shape guard (B5)', () => {
     it('extracts the flat message field when id starts with umsg_', async () => {
-      const { extractLovableMessage } = await import('./main-world.js');
+      const { extractLovableMessage } = await loadMainWorld();
       expect(extractLovableMessage(JSON.stringify({ id: 'umsg_01kwv', message: 'make it responsive', files: [] })))
         .toBe('make it responsive');
     });
 
     it('returns null when id is missing or not a umsg_ id (lookalike payloads)', async () => {
-      const { extractLovableMessage } = await import('./main-world.js');
+      const { extractLovableMessage } = await loadMainWorld();
       expect(extractLovableMessage(JSON.stringify({ message: 'no id at all' }))).toBeNull();
       expect(extractLovableMessage(JSON.stringify({ id: 'amsg_x', message: 'assistant-shaped' }))).toBeNull();
     });
 
     it('returns null for empty messages and non-JSON bodies', async () => {
-      const { extractLovableMessage } = await import('./main-world.js');
+      const { extractLovableMessage } = await loadMainWorld();
       expect(extractLovableMessage(JSON.stringify({ id: 'umsg_1', message: '   ' }))).toBeNull();
       expect(extractLovableMessage('not-json{{{')).toBeNull();
     });
@@ -194,7 +216,7 @@ describe('fetch capture rules (B4 — Bolt transport, recon-confirmed)', () => {
 
   it('captures Lovable POST api.lovable.dev/projects/<id>/chat via the pathEndsWith-pinned rule', async () => {
     stubWindow('lovable.dev');
-    await import('./main-world.js');
+    await loadMainWorld();
 
     void window.fetch('https://api.lovable.dev/projects/21239a50-abc/chat', {
       method: 'POST',
@@ -210,7 +232,7 @@ describe('fetch capture rules (B4 — Bolt transport, recon-confirmed)', () => {
 
   it('ignores Lovable sibling endpoints whose pathname does not END in /chat', async () => {
     stubWindow('lovable.dev');
-    await import('./main-world.js');
+    await loadMainWorld();
 
     void window.fetch('https://api.lovable.dev/projects/21239a50-abc/chat-history', {
       method: 'POST',
@@ -227,7 +249,7 @@ describe('fetch capture rules (B4 — Bolt transport, recon-confirmed)', () => {
 
   it('declares a bolt rule for the /api/chat/v2 generation endpoint only', async () => {
     stubWindow('bolt.new');
-    const { FETCH_CAPTURE_RULES } = await import('./main-world.js');
+    const { FETCH_CAPTURE_RULES } = await loadMainWorld();
     const bolt = FETCH_CAPTURE_RULES.find((r) => r.agent === 'bolt');
     expect(bolt).toBeDefined();
     expect(bolt!.urlIncludes).toBe('/api/chat/v2');
@@ -238,7 +260,7 @@ describe('fetch capture rules (B4 — Bolt transport, recon-confirmed)', () => {
     // on a load with unsaved state this replayed the last HISTORICAL prompt and fired
     // a spurious advisory with zero user action (live, 2026-07-06).
     stubWindow('bolt.new');
-    await import('./main-world.js');
+    await loadMainWorld();
 
     void window.fetch('https://bolt.new/api/chats/68519367', {
       method: 'POST',
@@ -252,7 +274,7 @@ describe('fetch capture rules (B4 — Bolt transport, recon-confirmed)', () => {
 
   it('a POST to /api/chat/v2 on bolt.new posts a nexpath:fetch-prompt message', async () => {
     stubWindow('bolt.new');
-    await import('./main-world.js');
+    await loadMainWorld();
 
     void window.fetch('https://bolt.new/api/chat/v2', {
       method: 'POST',
@@ -269,7 +291,7 @@ describe('fetch capture rules (B4 — Bolt transport, recon-confirmed)', () => {
 
   it('supports Request-object inputs by cloning the body', async () => {
     stubWindow('bolt.new');
-    await import('./main-world.js');
+    await loadMainWorld();
 
     const req = new Request('https://bolt.new/api/chat/v2', {
       method: 'POST',
@@ -286,7 +308,7 @@ describe('fetch capture rules (B4 — Bolt transport, recon-confirmed)', () => {
 
   it('ignores GETs, non-matching URLs, and hosts without a rule (replit)', async () => {
     stubWindow('bolt.new');
-    await import('./main-world.js');
+    await loadMainWorld();
 
     void window.fetch('https://bolt.new/api/chat/v2', { method: 'GET' });
     void window.fetch('https://bolt.new/api/token-stats', {
@@ -299,7 +321,7 @@ describe('fetch capture rules (B4 — Bolt transport, recon-confirmed)', () => {
     // Replit deliberately has no fetch rule (binary MessagePack WS — recon B3).
     vi.resetModules();
     stubWindow('replit.com');
-    await import('./main-world.js');
+    await loadMainWorld();
     void window.fetch('https://replit.com/api/chat', {
       method: 'POST',
       body: JSON.stringify({ messages: [{ role: 'user', content: 'should not capture' }] }),
@@ -310,7 +332,7 @@ describe('fetch capture rules (B4 — Bolt transport, recon-confirmed)', () => {
 
   it('never delays or breaks the page request when the body is unparseable', async () => {
     stubWindow('bolt.new');
-    await import('./main-world.js');
+    await loadMainWorld();
 
     void window.fetch('https://bolt.new/api/chat/v2', { method: 'POST', body: 'garbage{{{' });
     await flush();
@@ -383,7 +405,7 @@ describe('patchedFetch — both switch positions (the backward-compatibility pro
   describe('switch OFF — today\'s flow, unchanged', () => {
     it('calls the native fetch SYNCHRONOUSLY, before any await can run', async () => {
       stubWindow('bolt.new');
-      await import('./main-world.js');
+      await loadMainWorld();
 
       // Deliberately not awaited: on the ungated path the native call must have
       // already happened by the time patchedFetch returns.
@@ -393,7 +415,7 @@ describe('patchedFetch — both switch positions (the backward-compatibility pro
 
     it('passes the ORIGINAL arguments through, with the same arity', async () => {
       stubWindow('bolt.new');
-      await import('./main-world.js');
+      await loadMainWorld();
       const init = { method: 'POST', body: BODY };
 
       void window.fetch('https://bolt.new/api/chat/v2', init);
@@ -403,7 +425,7 @@ describe('patchedFetch — both switch positions (the backward-compatibility pro
 
     it('emits no gated-path ring events at all', async () => {
       stubWindow('bolt.new');
-      await import('./main-world.js');
+      await loadMainWorld();
       void window.fetch('https://bolt.new/api/chat/v2', { method: 'POST', body: BODY });
       await new Promise((r) => setTimeout(r, 0));
       expect(ringEvents()).toEqual([]);
@@ -413,7 +435,7 @@ describe('patchedFetch — both switch positions (the backward-compatibility pro
   describe('switch ON — the request is held, then released with the original', () => {
     it('does NOT call the native fetch synchronously any more', async () => {
       stubWindow('bolt.new');
-      await import('./main-world.js');
+      await loadMainWorld();
       armSwitch();
 
       void window.fetch('https://bolt.new/api/chat/v2', { method: 'POST', body: BODY });
@@ -422,7 +444,7 @@ describe('patchedFetch — both switch positions (the backward-compatibility pro
 
     it('releases exactly one native call, with the original arguments', async () => {
       stubWindow('bolt.new');
-      await import('./main-world.js');
+      await loadMainWorld();
       armSwitch();
       const init = { method: 'POST', body: BODY };
 
@@ -433,7 +455,7 @@ describe('patchedFetch — both switch positions (the backward-compatibility pro
 
     it('emits started → released_allow for the hold', async () => {
       stubWindow('bolt.new');
-      await import('./main-world.js');
+      await loadMainWorld();
       armSwitch();
 
       await window.fetch('https://bolt.new/api/chat/v2', { method: 'POST', body: BODY });
@@ -442,7 +464,7 @@ describe('patchedFetch — both switch positions (the backward-compatibility pro
 
     it('still emits the captured prompt, so the existing pipeline is unaffected', async () => {
       stubWindow('bolt.new');
-      await import('./main-world.js');
+      await loadMainWorld();
       armSwitch();
 
       await window.fetch('https://bolt.new/api/chat/v2', { method: 'POST', body: BODY });
@@ -455,7 +477,7 @@ describe('patchedFetch — both switch positions (the backward-compatibility pro
 
     it('a NON-matching URL still takes the untouched path even when armed', async () => {
       stubWindow('bolt.new');
-      await import('./main-world.js');
+      await loadMainWorld();
       armSwitch();
 
       void window.fetch('https://bolt.new/api/chats/123', { method: 'POST', body: BODY });
@@ -466,7 +488,7 @@ describe('patchedFetch — both switch positions (the backward-compatibility pro
 
     it('a GET to the same URL is never gated', async () => {
       stubWindow('bolt.new');
-      await import('./main-world.js');
+      await loadMainWorld();
       armSwitch();
 
       void window.fetch('https://bolt.new/api/chat/v2');
@@ -475,7 +497,7 @@ describe('patchedFetch — both switch positions (the backward-compatibility pro
 
     it('an unparseable body releases the original rather than losing it', async () => {
       stubWindow('bolt.new');
-      await import('./main-world.js');
+      await loadMainWorld();
       armSwitch();
 
       await window.fetch('https://bolt.new/api/chat/v2', { method: 'POST', body: 'not json' });
@@ -485,7 +507,7 @@ describe('patchedFetch — both switch positions (the backward-compatibility pro
 
     it('a repeated identical submission is claimed once but still sent both times', async () => {
       stubWindow('bolt.new');
-      await import('./main-world.js');
+      await loadMainWorld();
       armSwitch();
 
       await window.fetch('https://bolt.new/api/chat/v2', { method: 'POST', body: BODY });
@@ -548,7 +570,7 @@ describe('the milestone promise: only the modified prompt reaches the agent', ()
 
   it('BOLT: sends ONE request carrying the replacement, and never the original', async () => {
     stubWindow('bolt.new');
-    await import('./main-world.js');
+    await loadMainWorld();
     arm();
     verdict = { kind: 'block', replacement: REPLACEMENT };
 
@@ -564,7 +586,7 @@ describe('the milestone promise: only the modified prompt reaches the agent', ()
 
   it('LOVABLE: rewrites the message field, one request only', async () => {
     stubWindow('lovable.dev');
-    await import('./main-world.js');
+    await loadMainWorld();
     arm();
     verdict = { kind: 'block', replacement: REPLACEMENT };
 
@@ -579,7 +601,7 @@ describe('the milestone promise: only the modified prompt reaches the agent', ()
 
   it('emits submit_hold_blocked, not released_allow', async () => {
     stubWindow('bolt.new');
-    await import('./main-world.js');
+    await loadMainWorld();
     arm();
     verdict = { kind: 'block', replacement: REPLACEMENT };
 
@@ -594,7 +616,7 @@ describe('the milestone promise: only the modified prompt reaches the agent', ()
 
   it('the replacement\'s OWN submit is recognised as an echo and never re-gated', async () => {
     stubWindow('bolt.new');
-    await import('./main-world.js');
+    await loadMainWorld();
     arm();
     verdict = { kind: 'block', replacement: REPLACEMENT };
 
@@ -616,7 +638,7 @@ describe('the milestone promise: only the modified prompt reaches the agent', ()
 
   it('a block whose body cannot be rewritten falls back to the ORIGINAL, never nothing', async () => {
     stubWindow('bolt.new');
-    await import('./main-world.js');
+    await loadMainWorld();
     arm();
     verdict = { kind: 'block', replacement: REPLACEMENT };
 
@@ -634,5 +656,77 @@ describe('the milestone promise: only the modified prompt reaches the agent', ()
     // once, and neither loses the prompt.
     expect(events[0]).toBe('submit_hold_started');
     expect(['submit_hold_blocked', 'submit_hold_substitution_failed']).toContain(events[1]);
+  });
+});
+
+describe('the SHIPPED strategy: the fetch patch does not gate composer-intercept sites', () => {
+  // Live evidence moved Bolt and Lovable to the composer mechanism. Exactly one
+  // gate may own a site — if the fetch patch also held the request, a single
+  // submission would be decided twice.
+  const nativeFetch = vi.fn().mockResolvedValue({ ok: true } as unknown as Response);
+  const postMessageSpy = vi.fn();
+  let listeners: Array<(ev: MessageEvent) => void> = [];
+
+  function stubWindow(hostname: string): void {
+    listeners = [];
+    vi.stubGlobal('window', {
+      postMessage: postMessageSpy,
+      fetch: nativeFetch,
+      location: { origin: `https://${hostname}`, hostname },
+      addEventListener(type: string, cb: (ev: MessageEvent) => void): void {
+        if (type === 'message') listeners.push(cb);
+      },
+    });
+  }
+
+  function arm(): void {
+    const win = globalThis.window as unknown as Window;
+    for (const cb of [...listeners]) {
+      cb({ data: { type: 'nexpath:submit-flow', enabled: true, source: 'default_on', seq: 1 }, source: win } as MessageEvent);
+    }
+  }
+
+  beforeEach(() => {
+    postMessageSpy.mockClear();
+    nativeFetch.mockClear();
+    vi.resetModules();
+  });
+
+  for (const [host, body] of [
+    ['bolt.new', JSON.stringify({ messages: [{ role: 'user', content: 'ship it now' }] })],
+    ['lovable.dev', JSON.stringify({ id: 'umsg_1', message: 'ship it now' })],
+  ] as Array<[string, string]>) {
+    it(`${host}: an ARMED submit still calls the native fetch synchronously (not held)`, async () => {
+      stubWindow(host);
+      await loadMainWorld('composer_intercept');
+      arm();
+
+      const url = host === 'bolt.new'
+        ? 'https://bolt.new/api/chat/v2'
+        : 'https://api.lovable.dev/projects/abc/chat';
+      void window.fetch(url, { method: 'POST', body });
+
+      // Synchronous ⇒ never entered the hold.
+      expect(nativeFetch).toHaveBeenCalledTimes(1);
+      await new Promise((r) => setTimeout(r, 0));
+      const gated = postMessageSpy.mock.calls
+        .map((c) => c[0] as { type?: string } | null)
+        .filter((m) => m?.type === 'nexpath:submit-flow-event');
+      expect(gated).toEqual([]);
+    });
+  }
+
+  it('still captures the prompt, so the pipeline is unaffected', async () => {
+    stubWindow('bolt.new');
+    await loadMainWorld('composer_intercept');
+    arm();
+    void window.fetch('https://bolt.new/api/chat/v2', {
+      method: 'POST', body: JSON.stringify({ messages: [{ role: 'user', content: 'ship it now' }] }),
+    });
+    await new Promise((r) => setTimeout(r, 0));
+    const captures = postMessageSpy.mock.calls
+      .map((c) => c[0] as { type?: string } | null)
+      .filter((m) => m?.type === 'nexpath:fetch-prompt');
+    expect(captures).toHaveLength(1);
   });
 });

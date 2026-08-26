@@ -5,6 +5,7 @@ import {
   rewriteBodyForAgent,
   withReplacedBody,
   SITE_SUBSTITUTION_STRATEGY,
+  fetchGateOwnsSite,
 } from './submit-substitution.js';
 // main-world.ts installs its fetch patch at module scope, so it needs a window
 // before it can be imported. The extractors themselves are pure — they are
@@ -90,14 +91,26 @@ describe('rewriteBodyForAgent — the per-site seam', () => {
   const bolt = JSON.stringify({ messages: [{ role: 'user', content: 'old' }] });
   const lovable = JSON.stringify({ id: 'umsg_1', message: 'old' });
 
+  /** Run `fn` with both sites temporarily on the body-rewrite mechanism. */
+  function withBodyRewrite(fn: () => void): void {
+    const prev = { ...SITE_SUBSTITUTION_STRATEGY };
+    SITE_SUBSTITUTION_STRATEGY['bolt'] = 'body_rewrite';
+    SITE_SUBSTITUTION_STRATEGY['lovable'] = 'body_rewrite';
+    try { fn(); } finally { Object.assign(SITE_SUBSTITUTION_STRATEGY, prev); }
+  }
+
   it('routes each site to its own rewriter', () => {
-    expect(extractLastUserMessage(rewriteBodyForAgent('bolt', bolt, NEW)!)).toBe(NEW);
-    expect(extractLovableMessage(rewriteBodyForAgent('lovable', lovable, NEW)!)).toBe(NEW);
+    withBodyRewrite(() => {
+      expect(extractLastUserMessage(rewriteBodyForAgent('bolt', bolt, NEW)!)).toBe(NEW);
+      expect(extractLovableMessage(rewriteBodyForAgent('lovable', lovable, NEW)!)).toBe(NEW);
+    });
   });
 
   it('never crosses the wires — a Lovable body is not rewritten as Bolt', () => {
-    expect(rewriteBodyForAgent('bolt', lovable, NEW)).toBeNull();
-    expect(rewriteBodyForAgent('lovable', bolt, NEW)).toBeNull();
+    withBodyRewrite(() => {
+      expect(rewriteBodyForAgent('bolt', lovable, NEW)).toBeNull();
+      expect(rewriteBodyForAgent('lovable', bolt, NEW)).toBeNull();
+    });
   });
 
   it('returns null for an unknown agent (replit has no fetch transport)', () => {
@@ -106,21 +119,39 @@ describe('rewriteBodyForAgent — the per-site seam', () => {
   });
 
   it('refuses an empty replacement — a block with nothing to send loses the prompt', () => {
-    expect(rewriteBodyForAgent('bolt', bolt, '')).toBeNull();
+    withBodyRewrite(() => { expect(rewriteBodyForAgent('bolt', bolt, '')).toBeNull(); });
   });
 
-  it('only body_rewrite sites are rewritten; a site flipped to cancel_and_resubmit returns null', () => {
+  it('only body_rewrite sites are rewritten — the shipped table gates nothing here', () => {
+    // Both sites moved to composer_intercept on live evidence, so the rewriter
+    // refuses them by default. The rewriter itself stays fully tested via the
+    // explicit flip below, because it is still the correct mechanism for any
+    // future site that neither renders optimistically nor times out.
+    expect(rewriteBodyForAgent('bolt', bolt, NEW)).toBeNull();
+    expect(rewriteBodyForAgent('lovable', lovable, NEW)).toBeNull();
+  });
+
+  it('rewrites correctly for a site explicitly set to body_rewrite', () => {
     const original = SITE_SUBSTITUTION_STRATEGY['bolt'];
     try {
-      SITE_SUBSTITUTION_STRATEGY['bolt'] = 'cancel_and_resubmit';
-      expect(rewriteBodyForAgent('bolt', bolt, NEW)).toBeNull();
+      SITE_SUBSTITUTION_STRATEGY['bolt'] = 'body_rewrite';
+      expect(extractLastUserMessage(rewriteBodyForAgent('bolt', bolt, NEW)!)).toBe(NEW);
     } finally {
       SITE_SUBSTITUTION_STRATEGY['bolt'] = original!;
     }
   });
 
-  it('the shipped strategy table is body_rewrite for both fetch sites', () => {
-    expect(SITE_SUBSTITUTION_STRATEGY).toEqual({ bolt: 'body_rewrite', lovable: 'body_rewrite' });
+  it('the shipped strategy table is composer_intercept for both sites (live-evidence decision)', () => {
+    expect(SITE_SUBSTITUTION_STRATEGY).toEqual({
+      bolt: 'composer_intercept', lovable: 'composer_intercept',
+    });
+  });
+
+  it('fetchGateOwnsSite is false for every shipped site — the composer owns them', () => {
+    expect(fetchGateOwnsSite('bolt')).toBe(false);
+    expect(fetchGateOwnsSite('lovable')).toBe(false);
+    expect(fetchGateOwnsSite('replit')).toBe(false);
+    expect(fetchGateOwnsSite('unknown')).toBe(false);
   });
 });
 

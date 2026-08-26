@@ -71,13 +71,15 @@ describe('gated-path ordering pins', () => {
   });
 });
 
-describe('the Replit composer path stays observe-only in this build', () => {
+describe('the composer gate — where cancelling lives, and where it must not', () => {
+  const gate = readFileSync(join(here, '..', 'content', 'composer-submit-gate.ts'), 'utf8');
+
   it('capture-kit itself still never cancels an event', () => {
-    // Cancelling lives entirely in replit-submit-gate.ts, behind both the switch
-    // and its readiness flag. capture-kit's own listeners must stay pure
-    // observers, so that a gate that is absent or throwing changes nothing.
+    // Cancelling lives entirely in composer-submit-gate.ts, behind the switch.
+    // capture-kit's own listeners stay pure observers, so a gate that is absent,
+    // disarmed, or throwing changes nothing about today's capture.
     expect(captureKit).not.toContain('preventDefault');
-    expect(captureKit).not.toContain('stopPropagation');
+    expect(captureKit).not.toContain('stopImmediatePropagation');
   });
 
   it('the interceptor hook defaults to "not mine", so an unwired build behaves as today', () => {
@@ -85,7 +87,6 @@ describe('the Replit composer path stays observe-only in this build', () => {
   });
 
   it('a throwing interceptor can never break capture', () => {
-    // The hook is called inside a try/catch that falls back to capturing.
     const idx = captureKit.indexOf('const takenOver =');
     expect(idx).toBeGreaterThan(-1);
     const body = captureKit.slice(idx, idx + 600);
@@ -93,8 +94,16 @@ describe('the Replit composer path stays observe-only in this build', () => {
     expect(body).toContain('return false');
   });
 
-  it('the Replit gate ships NOT ready — its re-issue path is unverified live', () => {
-    const gate = readFileSync(join(here, '..', 'content', 'replit-submit-gate.ts'), 'utf8');
-    expect(gate).toContain('export const REPLIT_INTERCEPT_READY = false;');
+  it('the gate uses stopIMMEDIATEPropagation — the weaker form was live-disproven on Bolt', () => {
+    // 2026-08-26: with plain stopPropagation Bolt still submitted
+    // (`prompt-attempted` fired); with the immediate form it did not. Bolt has a
+    // document-level listener registered before ours. Downgrading this silently
+    // re-breaks every site.
+    expect(gate).toContain('ev.stopImmediatePropagation();');
+    expect(gate).not.toContain('ev.stopPropagation();');
+  });
+
+  it('the gate refuses unless the switch is armed', () => {
+    expect(gate).toContain('if (!deps.isArmed()) return false;');
   });
 });

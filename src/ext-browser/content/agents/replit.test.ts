@@ -7,7 +7,13 @@ import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vites
 // extension, so it is stubbed here exactly as the other content-script tests do.
 vi.mock('webextension-polyfill', () => ({
   default: {
-    storage: { local: { get: vi.fn().mockResolvedValue({}) }, onChanged: { addListener: vi.fn() } },
+    // The site key is 'false' so the submit gate stays DISARMED here: these tests
+    // cover CAPTURE, and an armed gate would (correctly) cancel the submit before
+    // capture runs. The gate's own behaviour is covered in composer-submit-gate.test.ts.
+    storage: {
+      local: { get: vi.fn().mockResolvedValue({ 'replit_promptsubmit_advisory': 'false' }) },
+      onChanged: { addListener: vi.fn() },
+    },
     runtime: { sendMessage: vi.fn().mockResolvedValue(undefined) },
   },
 }));

@@ -29,12 +29,32 @@
  * open (the caller sends the original), which is the safe direction.
  */
 
-export type SubstitutionStrategy = 'body_rewrite' | 'cancel_and_resubmit';
+export type SubstitutionStrategy = 'body_rewrite' | 'composer_intercept';
 
+/**
+ * Which mechanism delivers the replacement, per site.
+ *
+ * **Both sites are `composer_intercept` as of 2026-08-26, on live evidence.**
+ * The body-rewrite path below is complete, tested, and kept — it is the correct
+ * mechanism for any future site that neither renders optimistically nor imposes
+ * a client-side chat timeout. Bolt does both, which is why it moved; Lovable
+ * moved with it so all three sites share one proven mechanism rather than two,
+ * and because Lovable's own success-path render was never actually verified.
+ *
+ * A site listed as `body_rewrite` is gated in the page's fetch patch. A site
+ * listed as `composer_intercept` is gated in the capture-phase composer listener
+ * instead, and its fetch is left completely untouched — exactly one of the two
+ * may ever gate a given site, or a single submission would be decided twice.
+ */
 export const SITE_SUBSTITUTION_STRATEGY: Record<string, SubstitutionStrategy> = {
-  bolt: 'body_rewrite',
-  lovable: 'body_rewrite',
+  bolt: 'composer_intercept',
+  lovable: 'composer_intercept',
 };
+
+/** True when the page's fetch patch owns this site's gating. */
+export function fetchGateOwnsSite(agent: string): boolean {
+  return SITE_SUBSTITUTION_STRATEGY[agent] === 'body_rewrite';
+}
 
 /**
  * Replace the newest `{role:'user'}` message's content in an AI-SDK-style body.

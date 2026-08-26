@@ -15,7 +15,7 @@ import { hasTextLanded } from '../content/agents/landing-check.js';
 import { setupSubmitFlowPage, SUBMIT_FLOW_EVENT_TYPE } from './submit-flow-page.js';
 import { createSubmitGate } from './submit-gate.js';
 import { createDecisionChannel } from './submit-decision-channel.js';
-import { rewriteBodyForAgent, withReplacedBody } from './submit-substitution.js';
+import { rewriteBodyForAgent, withReplacedBody, fetchGateOwnsSite } from './submit-substitution.js';
 
 type PromptCapturedMsg = {
   type: 'nexpath:prompt-captured';
@@ -258,8 +258,14 @@ window.fetch = function patchedFetch(
   // user forever if the flow is reverted — the code below this point is exactly
   // what shipped before: fire-and-forget capture, then the native call with the
   // original arguments, never delayed or altered.
+  // Two conditions, both cheap and synchronous: the switch is armed, AND this
+  // site is one the FETCH patch owns. Sites gated at the composer instead (Bolt,
+  // Lovable — see submit-substitution.ts) must fall through to the untouched
+  // path here, or one submission would be decided twice.
   const matched = submitFlow.isArmed() ? resolveFetchRule(input, init) : null;
-  if (matched !== null) return gatedFetch(input, init, matched);
+  if (matched !== null && fetchGateOwnsSite(matched.agent)) {
+    return gatedFetch(input, init, matched);
+  }
 
   // Fire-and-forget: capture must never delay, alter, or break the page's own
   // request — the native call goes out immediately regardless of what the
