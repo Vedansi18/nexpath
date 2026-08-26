@@ -57,6 +57,24 @@ export interface ComposerSubmitGateDeps {
   /** Read the composer's current text — used to verify a send actually happened. */
   readComposerText: () => string;
   emit?: (event: string, data?: Record<string, unknown>) => void;
+  /**
+   * Ceiling on the popup wait, or **null for none** (the shipped default).
+   *
+   * OWNER RULING 2026-08-26: the popup does not time out. The CLI's own popup
+   * waits for a human indefinitely; the 60–90 s ceiling in the shipped hook
+   * exists because Cursor ORPHANS a timed-out hook process, so that hook has to
+   * bound itself or leak. **The browser has no orphan case** — the hold lives in
+   * the tab, and the tab's death ends it — so the reason for the ceiling does
+   * not apply here, while its cost is real: a 75 s limit fired on a user who was
+   * still reading a 2,000-character prompt, released the original and threw the
+   * enhancement away (live, Lovable, `submit_hold_expired heldMs:75551`).
+   *
+   * Fail-open is preserved by EVENT rather than by clock: the decision channel
+   * answers `allow` on any messaging failure, and a torn-down worker makes
+   * `sendMessage` reject — which is why the heartbeat that keeps it alive is
+   * load-bearing now that nothing else bounds this wait.
+   */
+  holdTimeoutMs?: number | null;
   /** Overrides the send-verification window (tests keep it short). */
   verify?: { timeoutMs?: number; pollMs?: number };
   budget?: HoldBudgetDeps;
@@ -164,13 +182,19 @@ export function createComposerSubmitGate(deps: ComposerSubmitGateDeps): Composer
   };
 
   const runHold = async (prompt: string, submitId: string): Promise<void> => {
-    const budget = makeBudget(deps.budget);
+    const timeoutMs = deps.holdTimeoutMs ?? null;
     const startedAt = now();
-    emit('submit_hold_started', { submitId, budgetMs: budget.remaining() });
+    emit('submit_hold_started', { submitId, budgetMs: timeoutMs });
 
     let outcome: { timedOut: boolean; value?: ComposerDecision };
     try {
-      outcome = await budget.run(() => deps.decide({ prompt, submitId }));
+      if (timeoutMs === null) {
+        // Unbounded: the popup waits for a human. See `holdTimeoutMs`.
+        outcome = { timedOut: false, value: await deps.decide({ prompt, submitId }) };
+      } else {
+        outcome = await makeBudget({ ...deps.budget, totalMs: timeoutMs })
+          .run(() => deps.decide({ prompt, submitId }));
+      }
     } catch {
       outcome = { timedOut: false, value: undefined };
     }

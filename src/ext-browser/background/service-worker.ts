@@ -268,8 +268,11 @@ browser.runtime.onMessage.addListener(
     }
 
     if (isPeKeepaliveMsg(msg)) {
-      // Heartbeat while the PE panel is open — receiving any runtime message
-      // resets MV3's idle timer; the ack is all this needs to do.
+      // Heartbeat while the panel is open OR a submit is held — receiving any
+      // runtime message resets the worker's idle timer. It also renews the
+      // response-stop quiet lease: the hold has no ceiling any more, so this
+      // beat is the only honest "still holding" signal we get.
+      refreshHoldQuietWindow(msg.projectRoot);
       sendResponse({ ok: true });
       return true;
     }
@@ -575,8 +578,21 @@ const RESPONSE_STOP_QUIET_MS = 4_000;
 const responseStopQuietUntil = new Map<string, number>();
 
 function beginHoldQuietWindow(projectRoot: string): void {
-  // Far enough ahead to cover the whole hold; refreshed as it resolves.
-  responseStopQuietUntil.set(projectRoot, clock.now() + MAX_HOLD_BUDGET_QUIET_MS);
+  responseStopQuietUntil.set(projectRoot, clock.now() + HOLD_QUIET_REFRESH_MS);
+}
+
+/**
+ * Push the quiet window forward while a hold is still open.
+ *
+ * The hold no longer has a ceiling (owner ruling: the popup waits for a human),
+ * so a fixed window would expire underneath a user who is still reading. The
+ * page heartbeats us every 10 s for exactly as long as it holds, so that
+ * heartbeat is the honest "still holding" signal — and if it stops, the window
+ * lapses on its own within one refresh.
+ */
+function refreshHoldQuietWindow(projectRoot: string): void {
+  if (!responseStopQuietUntil.has(projectRoot)) return;
+  responseStopQuietUntil.set(projectRoot, clock.now() + HOLD_QUIET_REFRESH_MS);
 }
 
 function endHoldQuietWindow(projectRoot: string): void {
@@ -590,8 +606,8 @@ function isResponseStopQuiet(projectRoot: string): boolean {
   return true;
 }
 
-/** Ceiling for the quiet window while a hold is open — the hold's own maximum. */
-const MAX_HOLD_BUDGET_QUIET_MS = 95_000;
+/** One quiet-window lease, renewed by each hold heartbeat (10 s cadence). */
+const HOLD_QUIET_REFRESH_MS = 30_000;
 
 const abandonedSubmits = new Set<string>();
 const ABANDONED_SUBMITS_CAP = 50;

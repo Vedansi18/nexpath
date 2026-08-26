@@ -46,6 +46,7 @@ function makeGate(over: Partial<Parameters<typeof createComposerSubmitGate>[0]> 
     // Keep the send-verification window short so tests stay fast; production
     // needs seconds because these editors clear lazily.
     verify: { timeoutMs: 300, pollMs: 50 },
+    // The SHIPPED default is no ceiling; the timeout tests opt in explicitly.
     ...over,
   };
   const gate = createComposerSubmitGate(deps as Parameters<typeof createComposerSubmitGate>[0]);
@@ -166,8 +167,39 @@ describe('createComposerSubmitGate', () => {
       await vi.waitFor(() => expect(names()).toContain('submit_reissue_failed'));
     });
 
+    it('reports NO ceiling in the started event — the shipped default', async () => {
+      // Pins the default directly: a 60 ms probe cannot tell a 75 s ceiling from
+      // no ceiling at all, so the emitted value is what makes this provable.
+      const { gate, events } = makeGate({
+        decide: vi.fn(() => new Promise<ComposerDecision>(() => {})),
+      });
+      gate.maybeIntercept(makeEvent(), PROMPT);
+      await flush();
+      expect(events[0]!.event).toBe('submit_hold_started');
+      expect(events[0]!.data).toMatchObject({ budgetMs: null });
+    });
+
+    it('has NO ceiling by default — the popup waits for a human', async () => {
+      // Live, Lovable: a 75 s ceiling fired on a user still reading a
+      // 2,000-character prompt, released the original and threw the enhancement
+      // away. The CLI's own popup waits indefinitely; the shipped hook's ceiling
+      // exists only because Cursor orphans timed-out hooks, which cannot happen
+      // in a tab.
+      let release: (d: ComposerDecision) => void = () => {};
+      const { gate, deps, names } = makeGate({
+        decide: vi.fn(() => new Promise<ComposerDecision>((r) => { release = r; })),
+      });
+      gate.maybeIntercept(makeEvent(), PROMPT);
+      await new Promise((r) => setTimeout(r, 60));
+      expect(deps.reissueOriginal).not.toHaveBeenCalled();
+      expect(names()).not.toContain('submit_hold_expired');
+
+      release({ kind: 'allow' });
+      await vi.waitFor(() => expect(deps.reissueOriginal).toHaveBeenCalledTimes(1));
+    });
+
     it('a timed-out hold re-issues the original', async () => {
-      const { gate, deps, names } = makeGate({ makeBudget: stubBudget({ timeout: true }) });
+      const { gate, deps, names } = makeGate({ makeBudget: stubBudget({ timeout: true }), holdTimeoutMs: 75_000 });
       gate.maybeIntercept(makeEvent(), PROMPT);
       await flush(); await flush();
       expect(deps.reissueOriginal).toHaveBeenCalledTimes(1);

@@ -45,6 +45,14 @@ export interface GatedSubmitContext {
 }
 
 export interface SubmitGateDeps {
+  /**
+   * Ceiling on the popup wait, or **null for none** (the shipped default).
+   * Owner ruling 2026-08-26 — see composer-submit-gate.ts's `holdTimeoutMs` for
+   * the full reasoning: the CLI's popup waits for a human, the shipped hook's
+   * ceiling exists only because Cursor orphans timed-out hooks, and the browser
+   * has no orphan case.
+   */
+  holdTimeoutMs?: number | null;
   /** Ask for a decision. Bounded by the budget; may throw or hang safely. */
   decide: (ctx: GatedSubmitContext) => Promise<SubmitDecision>;
   /** Ring-event sink. Must never throw (the gate guards it anyway). */
@@ -186,16 +194,18 @@ export function createSubmitGate(deps: SubmitGateDeps): SubmitGate {
       rememberClaim(ctx.submitId, null);
 
       // ── 3. BUDGET ────────────────────────────────────────────────────────
-      const budget = makeBudget(deps.budget);
+      const timeoutMs = deps.holdTimeoutMs ?? null;
       const startedAt = now();
-      emit('submit_hold_started', { submitId: ctx.submitId, budgetMs: budget.remaining() });
+      emit('submit_hold_started', { submitId: ctx.submitId, budgetMs: timeoutMs });
 
       // ── 4. DECIDE ────────────────────────────────────────────────────────
-      // `run` never rejects, but the whole block is guarded anyway: this closure
-      // owes its caller a send no matter what happens inside it.
+      // The whole block is guarded: this closure owes its caller a send no
+      // matter what happens inside it.
       let outcome: { timedOut: boolean; value?: SubmitDecision };
       try {
-        outcome = await budget.run(() => deps.decide(ctx));
+        outcome = timeoutMs === null
+          ? { timedOut: false, value: await deps.decide(ctx) }
+          : await makeBudget({ ...deps.budget, totalMs: timeoutMs }).run(() => deps.decide(ctx));
       } catch {
         emit('submit_hold_released_error', { submitId: ctx.submitId, heldMs: now() - startedAt });
         return send();

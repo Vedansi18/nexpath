@@ -29,6 +29,9 @@ function makeGate(
     emit: (event, data) => { events.push({ event, data }); },
     makeBudget: stubBudget({ timeout: opts.timeout }),
     budget: opts.now !== undefined ? { now: opts.now } : undefined,
+    // The SHIPPED default is no ceiling (the popup waits for a human). Tests that
+    // exercise the timeout path opt into one explicitly.
+    ...(opts.timeout === true ? { holdTimeoutMs: 75_000 } : {}),
   });
   const names = (): string[] => events.map((e) => e.event);
   return { gate, events, names };
@@ -283,10 +286,34 @@ describe('createSubmitGate — the closure that may withhold the user request', 
       expect(names()).toContain('submit_hold_released_empty_replacement');
     });
 
-    it('the started event reports the budget it will hold to', async () => {
+    it('the started event reports NO ceiling by default — the popup waits for a human', async () => {
       const { gate, events } = makeGate(ALLOW);
       await gate.runGatedSubmit(ctx(), () => 'x');
-      expect(events[0]!.data).toMatchObject({ budgetMs: 75_000 });
+      expect(events[0]!.data).toMatchObject({ budgetMs: null });
+    });
+
+    it('with no ceiling, a slow decision is NOT cut off', async () => {
+      // The 75 s ceiling fired on a user still reading a 2,000-character prompt
+      // (live, Lovable). Nothing may end the wait but the user or a failure.
+      let release: (d: SubmitDecision) => void = () => {};
+      const decide = vi.fn(() => new Promise<SubmitDecision>((r) => { release = r; }));
+      const { gate, names } = makeGate(decide);
+      const send = vi.fn().mockReturnValue('sent');
+
+      const inFlight = gate.runGatedSubmit(ctx(), send);
+      await new Promise((r) => setTimeout(r, 60));
+      expect(send).not.toHaveBeenCalled();      // still holding
+      expect(names()).not.toContain('submit_hold_expired');
+
+      release({ kind: 'allow' });
+      await inFlight;
+      expect(send).toHaveBeenCalledTimes(1);
+    });
+
+    it('a ceiling still works when one is configured', async () => {
+      const { gate, names } = makeGate(() => new Promise<SubmitDecision>(() => {}), { timeout: true });
+      await gate.runGatedSubmit(ctx(), () => 'x');
+      expect(names()).toContain('submit_hold_expired');
     });
   });
 });
