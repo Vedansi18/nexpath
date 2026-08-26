@@ -52,6 +52,11 @@ export function installSubmitGate(opts: InstallSubmitGateOptions): void {
     } catch { /* extension context invalidated mid-navigation */ }
   };
 
+  const projectRootOf = (): string =>
+    resolveProjectRootFromLocation(
+      window.location.hostname, window.location.pathname, window.location.origin,
+    ) ?? '';
+
   const clickSend = (): boolean => {
     const btn = document.querySelector<HTMLElement>(opts.submitButtonSelector);
     if (!btn) return false;
@@ -75,9 +80,7 @@ export function installSubmitGate(opts: InstallSubmitGateOptions): void {
         const res = await browser.runtime.sendMessage({
           type: 'nexpath:submit-decision-request',
           site: opts.agent,
-          projectRoot: resolveProjectRootFromLocation(
-            window.location.hostname, window.location.pathname, window.location.origin,
-          ) ?? '',
+          projectRoot: projectRootOf(),
           requestId: `${ctx.submitId}#${performance.now().toFixed(0)}`,
           prompt: ctx.prompt,
           submitId: ctx.submitId,
@@ -91,6 +94,13 @@ export function installSubmitGate(opts: InstallSubmitGateOptions): void {
       // The agent's inject helper performs the simulated paste AND the send
       // (it verifies the text landed first), so one call delivers the prompt.
       deliverReplacement: async (text) => {
+        // Mark it BEFORE it lands. The replacement is submitted through the
+        // site's own composer, so the capture channels see it as a brand-new
+        // prompt — without this it re-enters the pipeline, double-counts the
+        // turn and can prepare a second enhancement. Same marker the shipped
+        // response-stop inject path uses; the worker's cross-page dedup
+        // collapses the echo.
+        sendToSw({ type: 'nexpath:prompt-injected', projectRoot: projectRootOf(), text });
         await opts.injectPromptText(text);
         return true;
       },

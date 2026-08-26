@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { createCaptureKit, type CaptureKitConfig } from './capture-kit.js';
+import { createCaptureKit, setComposerSubmitInterceptor, type CaptureKitConfig } from './capture-kit.js';
 
 function flush(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
@@ -305,6 +305,86 @@ describe('content/agents/capture-kit.ts', () => {
       { type: 'nexpath:prompt-captured', promptText: 'ship it', agent: 'bolt' },
       window.location.origin,
     );
+  });
+
+  describe('the submit-time gate hook', () => {
+    function wireComposer(intercept: (ev: Event) => boolean): HTMLElement {
+      setComposerSubmitInterceptor((ev) => intercept(ev));
+      const kit = createCaptureKit(
+        makeConfig({
+          agent: 'bolt',
+          stopButtonSelector: '[data-testid="kit-gate-stop"]',
+          composer: {
+            composerSelector: '[data-testid="kit-gate-editor"]',
+            submitButtonSelector: '[data-testid="kit-gate-send"]',
+            readComposerText: (input) => (input.textContent ?? '').trim(),
+          },
+        }),
+      );
+      observers.push(kit.observeComposerSubmit(document));
+
+      const container = document.createElement('div');
+      const editor = document.createElement('div');
+      editor.setAttribute('data-testid', 'kit-gate-editor');
+      editor.textContent = 'ship it to production';
+      const send = document.createElement('button');
+      send.setAttribute('data-testid', 'kit-gate-send');
+      container.append(editor, send);
+      document.body.appendChild(container);
+      return send;
+    }
+
+    afterEach(() => { setComposerSubmitInterceptor(() => false); });
+
+    it('CAPTURES THE PROMPT EVEN WHEN THE GATE TAKES OVER — the pipeline must never be starved', () => {
+      // The gate cancels the submission, so the site never issues its request and
+      // the composer read is the ONLY channel that will see this prompt. If capture
+      // is skipped, no enhancement is ever prepared and the popup cannot appear.
+      const send = wireComposer(() => true);
+      send.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+      expect(postMessageSpy).toHaveBeenCalledWith(
+        { type: 'nexpath:prompt-captured', promptText: 'ship it to production', agent: 'bolt' },
+        window.location.origin,
+      );
+    });
+
+    it('captures BEFORE handing the event to the gate', () => {
+      const order: string[] = [];
+      const send = wireComposer(() => { order.push('gate'); return true; });
+      postMessageSpy.mockImplementation(() => { order.push('capture'); });
+      send.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      expect(order).toEqual(['capture', 'gate']);
+    });
+
+    it('captures on the ENTER path too, even when the gate takes over', () => {
+      const send = wireComposer(() => true);
+      const editor = document.querySelector<HTMLElement>('[data-testid="kit-gate-editor"]')!;
+      editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      expect(postMessageSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ promptText: 'ship it to production' }),
+        window.location.origin,
+      );
+      expect(send).toBeTruthy();
+    });
+
+    it('captures normally when the gate declines', () => {
+      const send = wireComposer(() => false);
+      send.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      expect(postMessageSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ promptText: 'ship it to production' }),
+        window.location.origin,
+      );
+    });
+
+    it('a gate that THROWS cannot stop capture', () => {
+      const send = wireComposer(() => { throw new Error('gate exploded'); });
+      expect(() => send.dispatchEvent(new MouseEvent('click', { bubbles: true }))).not.toThrow();
+      expect(postMessageSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ promptText: 'ship it to production' }),
+        window.location.origin,
+      );
+    });
   });
 
   describe('observeCaptureRejections — undelivered prompts must be re-capturable', () => {

@@ -382,8 +382,15 @@ export function createCaptureKit(config: CaptureKitConfig): CaptureKit {
     /**
      * The submit-time gate's one hook into this file. Returns true only when the
      * gate has TAKEN OVER the submission — it refuses unless the switch is armed,
-     * so with the switch off this is a no-op and the capture below runs exactly
-     * as it always has.
+     * so with the switch off this is a no-op.
+     *
+     * CAPTURE MUST RUN FIRST, ALWAYS. The gate cancels the submission, so when it
+     * takes over the site never issues its request — which means the composer read
+     * is the ONLY channel that will ever see this prompt. Skipping capture here
+     * starves the pipeline: no prompt reaches the worker, no enhancement is
+     * prepared, the decision falls through to "allow", and the popup can never
+     * appear. (Found by cross-confirming the phase against its own acceptance
+     * criteria, before it reached a live run.)
      */
     const takenOver = (ev: Event, input: HTMLElement): boolean => {
       try {
@@ -400,16 +407,16 @@ export function createCaptureKit(config: CaptureKitConfig): CaptureKit {
       const target = ev.target instanceof Element ? ev.target : null;
       const cm = target?.closest<HTMLElement>(composer.composerSelector);
       if (!cm || cm !== findChatComposer(composer)) return; // Enter in a file editor is just a newline
-      if (takenOver(ev, cm)) return;
       captureFromComposer(composer, cm);
+      takenOver(ev, cm);
     };
     const onClick = (ev: Event): void => {
       const target = ev.target instanceof Element ? ev.target : null;
       if (!target?.closest(composer.submitButtonSelector)) return;
       const cm = findChatComposer(composer);
       if (!cm) return;
-      if (takenOver(ev, cm)) return;
       captureFromComposer(composer, cm);
+      takenOver(ev, cm);
     };
     root.addEventListener('keydown', onKeyDown, true);
     root.addEventListener('click', onClick, true);
