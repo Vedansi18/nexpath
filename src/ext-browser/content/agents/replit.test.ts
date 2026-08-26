@@ -29,6 +29,21 @@ function makeWorkedForLabel(text = 'Worked for 13 seconds'): HTMLSpanElement {
   return span;
 }
 
+
+/**
+ * Arm a turn so the completion-label detector counts (capture-kit's `turnActive`
+ * gate — historical "Worked for …" rows must not fire a response-stop). Leaves
+ * the stop button PRESENT so no generating→idle transition fires on its own.
+ */
+async function armTurnViaStopButton(observers: Array<{ disconnect(): void }>): Promise<void> {
+  const btn = document.createElement('button');
+  btn.setAttribute('data-cy', 'ai-prompt-stop');
+  document.body.appendChild(btn);
+  observers.push(observeSubmitButton(document.body));
+  document.body.appendChild(document.createElement('i')); // any mutation → checkAndEmit
+  await flush();
+}
+
 describe('content/agents/replit.ts', () => {
   let postMessageSpy: ReturnType<typeof vi.spyOn>;
   let observers: Array<{ disconnect(): void }>;
@@ -820,6 +835,7 @@ describe('content/agents/replit.ts', () => {
     // seconds/minutes" completion label), confirmed by direct visual evidence across
     // every live test screenshot this session.
     it('emits nexpath:response-stopped when a "Worked for X seconds" label appears', async () => {
+      await armTurnViaStopButton(observers);
       observers.push(observeWorkedForLabel(document.body));
 
       document.body.appendChild(makeWorkedForLabel('Worked for 13 seconds'));
@@ -832,6 +848,7 @@ describe('content/agents/replit.ts', () => {
     });
 
     it('matches "Worked for X minutes" too, not just seconds', async () => {
+      await armTurnViaStopButton(observers);
       observers.push(observeWorkedForLabel(document.body));
 
       document.body.appendChild(makeWorkedForLabel('Worked for 9 minutes'));
@@ -844,6 +861,7 @@ describe('content/agents/replit.ts', () => {
     });
 
     it('detects the label nested inside a larger inserted subtree', async () => {
+      await armTurnViaStopButton(observers);
       observers.push(observeWorkedForLabel(document.body));
 
       const wrapper = document.createElement('div');

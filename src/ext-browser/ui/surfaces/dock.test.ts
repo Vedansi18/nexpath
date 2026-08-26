@@ -831,3 +831,47 @@ describe('NexpathDockController — destroy', () => {
     expect(hosts()[0]!.style.display).toBe('block');
   });
 });
+
+// The renderer's frame is `height:100%`; that resolves against the MOUNT. As a
+// bare div the mount was height:auto, so the frame ignored the dock and a long
+// prompt ran ~1100px below the viewport with no scrollbar — footer and every row
+// under the body unreachable (measured in real Chrome, 2026-08-26). jsdom does no
+// layout, so these pin the CONTRACT that was missing.
+describe('the mount carries the dock height (long-prompt overflow fix)', () => {
+  it('the mount element is classed so the stylesheet can size it', () => {
+    const dock = mountNexpathDock({ doc: document });
+    try {
+      expect(dock.mountEl.className).toBe('np-dock-mount');
+    } finally { dock.destroy(); }
+  });
+
+  it('the dock stylesheet gives that class a real height and clips it', () => {
+    const dock = mountNexpathDock({ doc: document });
+    try {
+      const root = dock.mountEl.getRootNode() as ShadowRoot;
+      const css = [...root.querySelectorAll('style')].map((s) => s.textContent ?? '').join('\n');
+      expect(css).toMatch(/\.np-dock-mount\s*\{[^}]*height:\s*100%/);
+      expect(css).toMatch(/\.np-dock-mount\s*\{[^}]*overflow:\s*hidden/);
+    } finally { dock.destroy(); }
+  });
+
+  it('the host clips its shadow content, so a collapsed dock cannot paint down the page edge', () => {
+    const dock = mountNexpathDock({ doc: document });
+    try {
+      const host = document.getElementById(NEXPATH_DOCK_HOST_ID) as HTMLElement;
+      dock.show();
+      expect(host.style.overflow).toBe('hidden');
+    } finally { dock.destroy(); }
+  });
+
+  it('collapsing hides the mount entirely (not just shrinks the host)', () => {
+    const dock = mountNexpathDock({ doc: document });
+    try {
+      dock.show();
+      expect(dock.mountEl.style.display).toBe('block');
+      const root = dock.mountEl.getRootNode() as ShadowRoot;
+      (root.querySelector('.np-dock-toggle') as HTMLButtonElement).click();
+      expect(dock.mountEl.style.display).toBe('none');
+    } finally { dock.destroy(); }
+  });
+});

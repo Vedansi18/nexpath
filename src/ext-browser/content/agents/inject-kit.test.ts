@@ -349,3 +349,27 @@ describe('auto-submit button fallback (Firefox/Bolt live 2026-08-25: Enter ignor
     }
   });
 });
+
+describe('empty inject text is refused outright (it used to wipe the composer and press Send)', () => {
+  it('leaves the composer untouched, presses nothing, clicks nothing', async () => {
+    const input = document.createElement('div');
+    input.className = 'tiptap ProseMirror';
+    input.textContent = "USER'S OWN IN-PROGRESS PROMPT";
+    document.body.appendChild(input);
+    Object.defineProperty(input, 'getClientRects', { value: () => [{}] });
+    const keys: string[] = [];
+    input.addEventListener('keydown', (e) => keys.push((e as KeyboardEvent).key));
+    const button = document.createElement('button');
+    button.setAttribute('aria-label', 'Send message');
+    const clicked = vi.fn();
+    button.addEventListener('click', clicked);
+    document.body.appendChild(button);
+
+    await injectViaSimulatedPaste('.tiptap.ProseMirror', '   ', 'button[aria-label="Send message"]');
+
+    expect(input.textContent).toBe("USER'S OWN IN-PROGRESS PROMPT"); // not wiped
+    expect(keys).toEqual([]);                                        // no Enter
+    expect(clicked).not.toHaveBeenCalled();                          // no send
+    input.remove(); button.remove();
+  });
+});

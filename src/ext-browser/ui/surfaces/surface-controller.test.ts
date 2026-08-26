@@ -943,3 +943,66 @@ describe('window resize re-grows the fields (the CLI repaints on terminal resize
     }
   });
 });
+
+describe('Enter is the plain, committed Enter only (irreversible-send guards)', () => {
+  it('Shift+Enter never sends — it is the universal newline chord in chat composers', () => {
+    mount();
+    const field = bodyField();
+    field.value = 'a real prompt';
+    key(field, 'Enter', { shiftKey: true });
+    expect(events).toEqual([]);           // nothing sent
+  });
+
+  it('an IME commit (isComposing) never sends — CJK/Indic users press Enter to accept a candidate', () => {
+    mount();
+    const field = bodyField();
+    field.value = 'ひらがな';
+    key(field, 'Enter', { isComposing: true } as KeyboardEventInit);
+    expect(events).toEqual([]);
+  });
+
+  it('the legacy keyCode 229 composition marker is also refused', () => {
+    mount();
+    const field = bodyField();
+    field.value = '한국어';
+    key(field, 'Enter', { keyCode: 229 } as KeyboardEventInit);
+    expect(events).toEqual([]);
+  });
+
+  it('plain Enter still sends (the guards are narrow)', () => {
+    mount();
+    const field = bodyField();
+    field.value = 'send me';
+    key(field, 'Enter');
+    expect(events).toEqual([{ type: 'send', surface: 'prompt_enhancement', text: 'send me' }]);
+  });
+
+  it('neither guarded Enter escapes to the host page', () => {
+    mount();
+    const field = bodyField();
+    const ev = new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, bubbles: true, cancelable: true });
+    field.dispatchEvent(ev);
+    expect(ev.defaultPrevented).toBe(true);
+  });
+});
+
+describe('the focus guard never grabs the keyboard for a hidden panel', () => {
+  it('a collapsed dock (mount display:none) is left alone', async () => {
+    const outer = document.createElement('div');
+    document.body.appendChild(outer);
+    const shadow = outer.attachShadow({ mode: 'open' });
+    const mount = document.createElement('div');
+    shadow.appendChild(mount);
+    const c = createSurfaceController(mount, { registry: REGISTRY, initial: 'prompt_enhancement' });
+    const field = shadow.querySelector('textarea') as HTMLTextAreaElement;
+    field.focus();
+
+    mount.style.display = 'none';   // the dock collapsing
+    field.blur();
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(shadow.activeElement).toBeNull();
+    c.destroy();
+    outer.remove();
+  });
+});

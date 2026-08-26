@@ -18,6 +18,8 @@
  * file — the toast/clipboard fallback below is reusable for it as-is.
  */
 
+import { hasTextLanded } from './landing-check.js';
+
 export function showToast(message: string): void {
   const host = document.createElement('div');
   const shadow = host.attachShadow({ mode: 'closed' });
@@ -115,7 +117,10 @@ function insertViaExecCommand(input: HTMLElement, text: string): void {
 }
 
 function hasLanded(input: HTMLElement, text: string): boolean {
-  return (input.textContent ?? '').trim().includes(text.trim().slice(0, 20));
+  // Whole-text containment, not a 20-char prefix — see landing-check.ts for the
+  // two false "successes" the prefix test produced (empty text, shared prefix),
+  // both of which ended in auto-submitting the wrong thing.
+  return hasTextLanded(input.textContent ?? '', text);
 }
 
 /**
@@ -234,6 +239,15 @@ export async function injectViaSimulatedPaste(
   text: string,
   submitButtonSelector?: string,
 ): Promise<void> {
+  // Blank text can never be a legitimate injection, and letting it through was
+  // actively destructive: the paste path select-alls first, so an empty insert
+  // WIPES whatever the user had in the composer, and the old landing check
+  // reported success (`''.includes('')`), so the kit went on to press Enter and
+  // click the site's send button. Refuse it at the door and say so.
+  if (text.trim().length === 0) {
+    logInjectOutcome('refused', 'empty inject text — composer left untouched');
+    return;
+  }
   const input = resolveComposer(inputSelector);
   if (!input) {
     logInjectOutcome('clipboard fallback', `no composer matched ${JSON.stringify(inputSelector)}`);

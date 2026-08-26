@@ -177,6 +177,20 @@ export function createCaptureKit(config: CaptureKitConfig): CaptureKit {
 
   let lastResponseStoppedEmittedAt = 0;
 
+  // Is a turn genuinely in flight (or just was, un-emitted)? The completion-label
+  // detector below matches TEXT that also exists throughout the historical
+  // transcript ("Version 3 at …", "Worked for 12 seconds"), and content scripts
+  // attach at document_idle — so hydration, scroll-back and virtualised
+  // re-inserts of OLD rows all looked like "the agent just finished" and fired a
+  // response-stop with no turn behind it (live: a PE popup opened on a freshly
+  // loaded project page with no prompt sent, 2026-08-25/26). The stop-BUTTON
+  // detector never had this problem because it primes `wasGenerating` from the
+  // DOM and only fires on a real generating→idle transition; the label detector
+  // had no state whatsoever. This flag gives it the same discipline: it is armed
+  // by evidence that a turn exists (our own captured prompt, or the stop button
+  // observed present) and disarmed the moment a stop is emitted.
+  let turnActive = false;
+
   // ── IPC emission ────────────────────────────────────────────────────────────────
 
   function emitPromptCaptured(promptText: string): void {
@@ -197,6 +211,8 @@ export function createCaptureKit(config: CaptureKitConfig): CaptureKit {
     const now = Date.now();
     if (now - lastResponseStoppedEmittedAt < RESPONSE_STOP_DEDUP_WINDOW_MS) return;
     lastResponseStoppedEmittedAt = now;
+    // The turn is over: a later label must not re-fire until a NEW turn arms it.
+    turnActive = false;
     emitResponseStopped();
   }
 
@@ -209,6 +225,9 @@ export function createCaptureKit(config: CaptureKitConfig): CaptureKit {
     if (!text || text === lastEmittedText) return;
     lastEmittedText = text;
     if (viaLog) console.log(viaLog);
+    // A prompt we just captured IS a turn — arm the completion-label detector
+    // even on sites/response types where the stop button is never observed.
+    turnActive = true;
     emitPromptCaptured(text);
   }
 
@@ -437,6 +456,9 @@ export function createCaptureKit(config: CaptureKitConfig): CaptureKit {
 
     const checkAndEmit = (): void => {
       const isGenerating = document.querySelector(config.stopButtonSelector) !== null;
+      // Seeing the stop button IS a turn — this is what arms the completion-label
+      // detector for response types whose prompt we never captured ourselves.
+      if (isGenerating) turnActive = true;
       if (wasGenerating && !isGenerating) {
         // Visible in the page console regardless of whether the SW message that
         // follows succeeds — closes an observability gap confirmed live 2026-07-03:
@@ -497,6 +519,7 @@ export function createCaptureKit(config: CaptureKitConfig): CaptureKit {
   // (emitResponseStoppedOnce dedups).
 
   function observeCompletionLabel(root: Element): MutationObserver {
+    let suppressedLogged = false;
     const completion = config.completionLabel;
     if (!completion) {
       throw new Error(`[nexpath] observeCompletionLabel requires completionLabel config (agent: ${config.agent})`);
@@ -513,6 +536,17 @@ export function createCaptureKit(config: CaptureKitConfig): CaptureKit {
             ? [node]
             : Array.from(node.querySelectorAll('*')).filter(isCompletionLabel);
           if (matches.length === 0) continue;
+          // Only a label belonging to a turn we have evidence for counts. Without
+          // this the transcript's OWN history fires stops (see `turnActive`).
+          // Logged once per observer so a suppressed page-load storm is visible
+          // without flooding the console.
+          if (!turnActive) {
+            if (!suppressedLogged) {
+              suppressedLogged = true;
+              console.log('[nexpath] completion label ignored — no active turn (historical/re-rendered row)');
+            }
+            continue;
+          }
           console.log(completion.log);
           emitResponseStoppedOnce();
         }

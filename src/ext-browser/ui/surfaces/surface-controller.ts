@@ -142,6 +142,22 @@ export function moveCaretLine(field: HTMLTextAreaElement, direction: -1 | 1): vo
   field.setSelectionRange(target, target);
 }
 
+/**
+ * True when this element or any ancestor — crossing the shadow boundary to the
+ * host — is inline-hidden. Layout-free on purpose (see the focus-steal guard).
+ */
+function isHiddenByAncestor(el: HTMLElement): boolean {
+  let node: HTMLElement | null = el;
+  for (let hops = 0; node && hops < 32; hops += 1) {
+    if (node.style?.display === 'none') return true;
+    const parent = node.parentElement as HTMLElement | null;
+    if (parent) { node = parent; continue; }
+    const root = node.getRootNode();
+    node = root instanceof ShadowRoot ? (root.host as HTMLElement) : null;
+  }
+  return false;
+}
+
 /** Interactive rows (the ones focus can reach), in order. Notes never count. */
 function interactiveRows(model: SurfaceModel): SurfaceRow[] {
   return model.rows.filter((r) => r.kind !== 'note');
@@ -488,6 +504,21 @@ export function createSurfaceController(
     }
 
     if (e.key === 'Enter') {
+      // Enter SENDS, so it must be the plain, committed one.
+      //  - Shift+Enter is the universal "newline" chord in every chat composer;
+      //    a user reaching for it must never fire an irreversible send (our own
+      //    newline is Alt+Shift+J, advertised in the hint).
+      //  - An IME commit (`isComposing`, or the legacy keyCode 229) is the user
+      //    accepting a candidate mid-word, not submitting — without this guard
+      //    every CJK/Indic user sends half a sentence.
+      // Both are swallowed rather than passed to the page: the panel owns Enter
+      // while it has focus, and letting them through would reach the agent's own
+      // composer underneath.
+      const composing = e.isComposing === true || e.keyCode === 229;
+      if (e.shiftKey || composing) {
+        e.preventDefault(); e.stopPropagation();
+        return;
+      }
       harvest();
       const row = interactiveRows(model)[focusIndex];
       if (row) activate(row);
@@ -557,8 +588,14 @@ export function createSurfaceController(
       // display:none the moment a send resolves, and the injector is about to
       // focus the agent's composer — re-taking here would yank the caret into
       // an invisible popup mid-inject (guard for the 2026-08-25 inject path).
-      const host = (root as ShadowRoot).host as HTMLElement | undefined;
-      if (host && host.style.display === 'none') return;
+      // A HIDDEN surface must never take focus. The dock hides the host with
+      // display:none the moment a send resolves (the injector is about to focus
+      // the agent's composer), and hides the MOUNT when collapsed — re-taking
+      // focus in either case locks the keyboard inside an invisible panel,
+      // because every key this controller handles is then preventDefault'ed
+      // away from the page. Walked by inline display rather than layout so the
+      // check is honest in jsdom too (offsetParent is always null there).
+      if (isHiddenByAncestor(wrapper)) return;
       // Focus still inside this surface (row-to-row moves) — nothing happened.
       const active = root === (doc as unknown) ? doc.activeElement : root.activeElement;
       if (active !== null && wrapper.contains(active)) return;

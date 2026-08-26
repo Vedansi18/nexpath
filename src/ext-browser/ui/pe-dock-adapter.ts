@@ -366,7 +366,23 @@ export function mountNexpathPeDock(opts: PeDockAdapterOptions): PePanelControlle
       doc,
       onEvent: () => {
         // The dock's ✕ — window furniture, not the CLI's Esc: plain close.
-        emitCommand(view && 'kind' in view ? { type: 'mps_decline' } : { type: 'close' });
+        //
+        // This MUST bypass the busy guard. `emitCommand` silently drops while
+        // busy, but the hide below is unconditional — so clicking ✕ on a busy
+        // popup made the panel vanish while the service worker was never told,
+        // leaving its popup loop waiting forever on a command that could never
+        // arrive. That wedged the project's mailbox and every later stop was
+        // refused with `popup_already_open`: NO popup ever again for that
+        // project until the worker restarted (which it does not while the user
+        // keeps chatting, or while DevTools is attached). One click, popups
+        // dead. The window's close control must always be answerable.
+        if (view) {
+          opts.onEvent({
+            type: 'command',
+            viewSeq: view.viewSeq,
+            command: 'kind' in view ? { type: 'mps_decline' } : { type: 'close' },
+          });
+        }
         dock?.hide();
       },
     });

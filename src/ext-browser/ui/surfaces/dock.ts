@@ -166,6 +166,10 @@ const DOCK_HOST_BASE_CSS = [
   'pointer-events:auto',
   'filter:none',
   'clip-path:none',
+  // The host must CLIP what the shadow draws. Without it the collapsed tab
+  // (64x24) still painted the full-height frame down the page's right edge,
+  // because nothing hid the mount (measured in real Chrome, 2026-08-26).
+  'overflow:hidden',
 ].join(';') + ';';
 
 /** Expanded geometry: the 60% x 90% docked box described above. */
@@ -246,6 +250,10 @@ export const DOCK_HOST_COLLAPSED_CSS = DOCK_HOST_BASE_CSS + [
  * second element, and nothing to keep in sync.
  */
 const DOCK_CHROME_STYLES = `
+  /* The renderer's mount: it must be exactly as tall as the dock so the frame's
+     own height:100% has something real to resolve against (see mountEl). */
+  .np-dock-mount { height: 100%; overflow: hidden; }
+
   .np-dock-btn {
     position: absolute;
     top: 0;
@@ -403,6 +411,14 @@ export function mountNexpathDock(options: MountNexpathDockOptions = {}): Nexpath
   // anything the dock owns (the style node and the toggle are siblings, not
   // children, so a renderer clearing mountEl cannot delete the collapse control).
   const mountEl = doc.createElement('div');
+  // LOAD-BEARING: the renderer's `.np-surface-root{height:100%}` and
+  // `.np-frame{height:100%}` resolve against THIS element. As a bare div it was
+  // `height:auto`, so both collapsed to content height and the frame ignored the
+  // dock entirely — measured in real Chrome: a 120-line body produced a frame
+  // ~1100px BELOW the viewport with no scrollbar, so the footer and every row
+  // under the body were unreachable, and the scroll band + adaptive field cap
+  // (which measures the band) were inert. One class fixes the whole chain.
+  mountEl.className = 'np-dock-mount';
   shadow.appendChild(mountEl);
 
   // A real <button>: focusable, Enter/Space activated, and announced by a screen
@@ -432,6 +448,10 @@ export function mountNexpathDock(options: MountNexpathDockOptions = {}): Nexpath
     host.style.cssText =
       (collapsed ? DOCK_HOST_COLLAPSED_CSS : DOCK_HOST_GEOMETRY_CSS) +
       `display:${visible ? 'block' : 'none'};`;
+    // Collapsed = the tab only. Hiding the mount (rather than relying on the
+    // host's size) keeps the surface out of the layout AND out of the focus
+    // guard's reach, which used to yank the keyboard into the invisible panel.
+    mountEl.style.display = collapsed ? 'none' : 'block';
     toggle.textContent = collapsed ? '‹' : '›';
     toggle.classList.toggle('np-dock-toggle--collapsed', collapsed);
     toggle.setAttribute('aria-expanded', String(!collapsed));

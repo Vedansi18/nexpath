@@ -26,6 +26,21 @@ function makeConfig(overrides: Partial<CaptureKitConfig> = {}): CaptureKitConfig
   };
 }
 
+/**
+ * Arm a turn the way real usage does: a prompt captured through the kit's own
+ * funnel. The completion-label detector only counts labels that belong to a turn
+ * there is evidence for (see `turnActive` in capture-kit.ts).
+ */
+async function armTurn(kit: ReturnType<typeof createCaptureKit>, selector = 'chat-msg'): Promise<void> {
+  const observer = kit.observeUserMessages(document.body);
+  const el = document.createElement('div');
+  el.setAttribute('data-testid', selector);
+  el.textContent = `armed turn ${Math.random()}`;
+  document.body.appendChild(el);
+  await flush();
+  observer.disconnect();
+}
+
 describe('content/agents/capture-kit.ts', () => {
   let postMessageSpy: ReturnType<typeof vi.spyOn>;
   let observers: Array<{ disconnect(): void }>;
@@ -232,6 +247,9 @@ describe('content/agents/capture-kit.ts', () => {
         }),
       );
       observers.push(kit.observeCompletionLabel(document.body));
+      // A label only counts for a turn we have evidence for — arm one the way a
+      // real submit does (see the turnActive gate in capture-kit.ts).
+      await armTurn(kit);
 
       const label = document.createElement('span');
       label.textContent = 'Finished in 12 seconds';
@@ -499,5 +517,99 @@ describe('content/agents/capture-kit.ts', () => {
       logSpy.mockRestore();
       delete (window as unknown as Record<string, boolean | undefined>)[flag];
     }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phantom response-stop (live 2026-08-25/26: a PE popup opened on a freshly
+// loaded Bolt project with NO prompt sent). The completion-label detector
+// matches text that also exists throughout the transcript's history, and
+// content scripts attach at document_idle — so hydration / scroll-back /
+// virtualised re-inserts of OLD rows fired a response-stop with no turn behind
+// it. These pin the `turnActive` gate.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('completion label requires an ACTIVE turn (phantom response-stop fix)', () => {
+  let spy: ReturnType<typeof vi.spyOn>;
+  const obs: Array<{ disconnect(): void }> = [];
+
+  beforeEach(async () => {
+    document.body.innerHTML = '';
+    await flush();
+    spy = vi.spyOn(window, 'postMessage').mockImplementation(() => {});
+  });
+  afterEach(() => {
+    obs.forEach((o) => o.disconnect());
+    obs.length = 0;
+    spy.mockRestore();
+  });
+
+  const labelConfig = {
+    agent: 'bolt',
+    completionLabel: {
+      pattern: /\bVersion \d+ at\b/,
+      maxTextLength: 50,
+      log: '[nexpath] response-stop detected (Version card appeared)',
+    },
+  } as Partial<CaptureKitConfig>;
+
+  function addLabel(text = 'Version 3 at 10:42'): void {
+    const el = document.createElement('span');
+    el.textContent = text;
+    document.body.appendChild(el);
+  }
+  const stops = (): unknown[] =>
+    spy.mock.calls.map((c) => c[0]).filter((m) => (m as { type?: string })?.type === 'nexpath:response-stopped');
+
+  it('a historical label on a freshly loaded page emits NOTHING', async () => {
+    const kit = createCaptureKit(makeConfig(labelConfig));
+    obs.push(kit.observeCompletionLabel(document.body));
+
+    addLabel();                      // transcript history rendering after document_idle
+    addLabel('Version 2 at 09:15');
+    await flush();
+
+    expect(stops()).toHaveLength(0);
+  });
+
+  it('a label AFTER a captured prompt emits the stop', async () => {
+    const kit = createCaptureKit(makeConfig(labelConfig));
+    obs.push(kit.observeCompletionLabel(document.body));
+    await armTurn(kit);
+
+    addLabel();
+    await flush();
+
+    expect(stops()).toHaveLength(1);
+  });
+
+  it('the stop button being present arms the label detector (turns whose prompt we never captured)', async () => {
+    const kit = createCaptureKit(makeConfig(labelConfig));
+    const btn = document.createElement('div');
+    btn.setAttribute('data-testid', 'stop-btn');
+    document.body.appendChild(btn);
+    obs.push(kit.observeStopButton(document.body));      // observes "generating"
+    obs.push(kit.observeCompletionLabel(document.body));
+    document.body.appendChild(document.createElement('i')); // any mutation → checkAndEmit
+    await flush();
+
+    addLabel();
+    await flush();
+
+    expect(stops().length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('after a stop is emitted, later labels do NOT re-fire until a new turn arms one', async () => {
+    const kit = createCaptureKit(makeConfig(labelConfig));
+    obs.push(kit.observeCompletionLabel(document.body));
+    await armTurn(kit);
+    addLabel();
+    await flush();
+    const afterFirst = stops().length;
+    expect(afterFirst).toBe(1);
+
+    addLabel('Version 9 at 11:11');   // e.g. the user scrolls back later
+    await flush();
+
+    expect(stops()).toHaveLength(afterFirst); // the turn is over — no new stop
   });
 });

@@ -62,6 +62,21 @@ function clearWatchdog(): void {
   }
 }
 
+/**
+ * Fail-open for a NON-terminal command (details apply, go back, …): if the
+ * service worker never answers, give the panel back to the user rather than
+ * leaving it frozen. Deliberately does not close the popup and sends no
+ * terminal notice — nothing was decided.
+ */
+function armRecoveryWatchdog(): void {
+  clearWatchdog();
+  watchdogTimer = setTimeout(() => {
+    console.warn('[nexpath] PE popup: no response to a non-terminal command — releasing the panel');
+    controller?.setBusy(false);
+    showToast('Nexpath: that action did not go through — the popup is usable again.');
+  }, TERMINAL_WATCHDOG_MS);
+}
+
 function armTerminalWatchdog(): void {
   clearWatchdog();
   watchdogTimer = setTimeout(() => {
@@ -99,6 +114,15 @@ function handlePanelEvent(event: PePanelEventV1): void {
     // arm the fail-open watchdog for the answer.
     window.dispatchEvent(new CustomEvent('nexpath:pe-terminal-out', { detail: { outcome: t } }));
     armTerminalWatchdog();
+  } else if (event.command.type !== 'feedback_suggested' && event.command.type !== 'feedback_other') {
+    // EVERY other command goes busy too (above), so every other command needs a
+    // way out. `edit_body` — what Enter on "Additional details" sends — had
+    // none: a dropped command or a dead worker left the panel behind its
+    // progress overlay with the keyboard dead and Escape refused, recoverable
+    // only by reloading the page. This releases the panel instead of closing
+    // it: the command was NOT terminal, so the user's prompt is still theirs to
+    // act on.
+    armRecoveryWatchdog();
   }
 }
 

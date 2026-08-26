@@ -11,6 +11,7 @@
  */
 
 import { resolveAgentFromHostname } from '../content/agents/agent-hosts.js';
+import { hasTextLanded } from '../content/agents/landing-check.js';
 
 type PromptCapturedMsg = {
   type: 'nexpath:prompt-captured';
@@ -203,6 +204,9 @@ interface InjectRequestMsg {
 }
 
 function performMainWorldInject(selector: string, text: string): boolean {
+  // Blank text is never a real injection and the paste path select-alls first,
+  // so honouring it would wipe the user's composer (see landing-check.ts).
+  if (text.trim().length === 0) return false;
   const candidates = [...document.querySelectorAll<HTMLElement>(selector)];
   const input = candidates.find((el) => el.getClientRects().length > 0) ?? candidates[0];
   if (!input) return false;
@@ -221,12 +225,21 @@ function performMainWorldInject(selector: string, text: string): boolean {
     bubbles: true,
     cancelable: true,
   }));
-  if ((input.textContent ?? '').includes(text.trim().slice(0, 20))) return true;
+  if (hasTextLanded(input.textContent ?? '', text)) return true;
 
   // The editor ignored the synthetic paste — the trusted-editing command path.
+  // Re-select before the retry: without it the insert lands at the caret and the
+  // composer ends up holding OLD TEXT + NEW TEXT, which the landing check would
+  // then pass and the caller would auto-submit (the isolated-world twin has
+  // always re-selected — `focusAndSelectAll` in inject-kit.ts).
   input.focus();
+  const retrySelection = window.getSelection();
+  const retryRange = document.createRange();
+  retryRange.selectNodeContents(input);
+  retrySelection?.removeAllRanges();
+  retrySelection?.addRange(retryRange);
   try { document.execCommand('insertText', false, text); } catch { /* checked below */ }
-  return (input.textContent ?? '').includes(text.trim().slice(0, 20));
+  return hasTextLanded(input.textContent ?? '', text);
 }
 
 // Guarded like the fetch patch above: the module must load under partial

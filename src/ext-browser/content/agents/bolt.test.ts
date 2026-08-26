@@ -72,6 +72,21 @@ function dispatchFetchPrompt(promptText: string, agent = 'bolt', origin = window
   );
 }
 
+
+/**
+ * Arm a turn so the completion-label detector counts (capture-kit's `turnActive`
+ * gate — historical "Version N at" rows must not fire a response-stop). Leaves
+ * the stop button PRESENT so no generating→idle transition fires on its own.
+ */
+async function armTurnViaStopButton(observers: Array<{ disconnect(): void }>): Promise<void> {
+  const btn = document.createElement('button');
+  btn.setAttribute('aria-label', 'Stop generation');
+  document.body.appendChild(btn);
+  observers.push(observeStopButton(document.body));
+  document.body.appendChild(document.createElement('i')); // any mutation → checkAndEmit
+  await flush();
+}
+
 describe('content/agents/bolt.ts', () => {
   let postMessageSpy: ReturnType<typeof vi.spyOn>;
   let observers: Array<{ disconnect(): void }>;
@@ -242,6 +257,7 @@ describe('content/agents/bolt.ts', () => {
     });
 
     it('emits response-stopped when a "Version N at" card appears', async () => {
+      await armTurnViaStopButton(observers);
       observers.push(observeVersionLabel(document.body));
 
       const card = document.createElement('div');
