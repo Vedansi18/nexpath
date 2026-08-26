@@ -264,7 +264,7 @@ browser.runtime.onMessage.addListener(
       // 'use_original' arrives BEFORE the feedback step, so a held prompt is
       // released the moment the user decides rather than when they finish
       // answering. Idempotent: no waiter ⇒ no-op.
-      if (msg.outcome === 'use_original') signalEarlySubmitRelease(msg.projectRoot);
+      if (msg.outcome === 'use_original') signalEarlySubmitRelease(sender.tab?.id, msg.projectRoot);
       markPendingPeShown(msg.projectRoot)
         .then(() => sendResponse({ ok: true }))
         .catch(() => sendResponse({ ok: false }));
@@ -640,15 +640,23 @@ function markSubmitAbandoned(submitId: string): void {
  * without touching the popup: feedback carries on, the command still arrives
  * behind it, and the popup loop finishes exactly as before.
  *
- * Keyed by project root — one held submit per page at a time (the gate is
- * re-entrancy guarded).
+ * Keyed by TAB and project root, not by project root alone. Two tabs open on the
+ * same project share a root (it is the project URL), so a root-only key would
+ * let a choice made in one tab release the prompt another tab is holding —
+ * sending a prompt its user never acted on. The tab is the popup's real owner.
  */
 const earlyReleaseWaiters = new Map<string, () => void>();
 
-function signalEarlySubmitRelease(projectRoot: string): void {
-  const release = earlyReleaseWaiters.get(projectRoot);
-  if (!release) return;              // nothing held, or already released
-  earlyReleaseWaiters.delete(projectRoot);
+function earlyReleaseKey(tabId: number, projectRoot: string): string {
+  return `${tabId}::${projectRoot}`;
+}
+
+function signalEarlySubmitRelease(tabId: number | undefined, projectRoot: string): void {
+  if (tabId === undefined) return;   // no tab ⇒ no hold of ours to release
+  const key = earlyReleaseKey(tabId, projectRoot);
+  const release = earlyReleaseWaiters.get(key);
+  if (!release) return;              // nothing held here, or already released
+  earlyReleaseWaiters.delete(key);
   release();
 }
 
@@ -753,14 +761,19 @@ async function decideHeldSubmit(
   // "use original" — the one terminal choice that ALLOWS and needs no body text
   // from the popup, so answering early can never change what is sent.
   const EARLY = Symbol('early-release');
+  const waiterKey = earlyReleaseKey(tabId, projectRoot);
+  let waiter: () => void;
   const earlyRelease = new Promise<typeof EARLY>((resolve) => {
-    earlyReleaseWaiters.set(projectRoot, () => resolve(EARLY));
+    waiter = () => resolve(EARLY);
+    earlyReleaseWaiters.set(waiterKey, waiter);
   });
   let raced: Awaited<typeof popup> | typeof EARLY;
   try {
     raced = await Promise.race([popup, earlyRelease]);
   } finally {
-    earlyReleaseWaiters.delete(projectRoot);
+    // Identity-checked: if this tab somehow started a second hold, its waiter
+    // now owns the slot and must not be torn out by the first one finishing.
+    if (earlyReleaseWaiters.get(waiterKey) === waiter!) earlyReleaseWaiters.delete(waiterKey);
   }
 
   if (raced === EARLY) {

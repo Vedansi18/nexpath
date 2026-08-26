@@ -1858,9 +1858,13 @@ describe('service-worker.ts', () => {
       function popupStillOpen(): void {
         vi.mocked(runBrowserPePopup).mockReturnValue(new Promise(() => {}) as never);
       }
-      function notice(messageListener: MessageListener, outcome: string, root = P) {
+      function notice(messageListener: MessageListener, outcome: string, root = P, tabId: number | null = 7) {
         const sendResponse = vi.fn();
-        messageListener({ type: 'nexpath:pe-terminal-notice', projectRoot: root, outcome }, {}, sendResponse);
+        messageListener(
+          { type: 'nexpath:pe-terminal-notice', projectRoot: root, outcome },
+          tabId === null ? {} : { tab: { id: tabId } },
+          sendResponse,
+        );
         return sendResponse;
       }
 
@@ -1905,6 +1909,48 @@ describe('service-worker.ts', () => {
         notice(messageListener, 'use_original', 'https://bolt.new/~/OTHER');
         await new Promise((r) => setTimeout(r, 50));
         expect(sendResponse).not.toHaveBeenCalled();
+      });
+
+      it('a notice from ANOTHER TAB on the same project never releases this tab\'s prompt', async () => {
+        // Two tabs open on one project share a projectRoot (it is the project
+        // URL). Releasing on the root alone would send a prompt whose own user
+        // never touched the popup.
+        popupStillOpen();
+        const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+        const sendResponse = decide(messageListener, 7);
+        await vi.waitFor(() => expect(runBrowserPePopup).toHaveBeenCalled());
+
+        notice(messageListener, 'use_original', P, 9);   // the OTHER tab
+        await new Promise((r) => setTimeout(r, 50));
+        expect(sendResponse).not.toHaveBeenCalled();
+
+        notice(messageListener, 'use_original', P, 7);   // the holding tab
+        await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ decision: { kind: 'allow' } }));
+      });
+
+      it('a notice carrying no tab releases nothing', async () => {
+        popupStillOpen();
+        const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+        const sendResponse = decide(messageListener, 7);
+        await vi.waitFor(() => expect(runBrowserPePopup).toHaveBeenCalled());
+
+        notice(messageListener, 'use_original', P, null);
+        await new Promise((r) => setTimeout(r, 50));
+        expect(sendResponse).not.toHaveBeenCalled();
+      });
+
+      it('one notice answers exactly ONE hold — never two at once', async () => {
+        popupStillOpen();
+        const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+        const first = decide(messageListener, 7, { submitId: 'sA' });
+        await vi.waitFor(() => expect(runBrowserPePopup).toHaveBeenCalledTimes(1));
+        const second = decide(messageListener, 7, { submitId: 'sB' });
+        await vi.waitFor(() => expect(runBrowserPePopup).toHaveBeenCalledTimes(2));
+
+        notice(messageListener, 'use_original');
+        await new Promise((r) => setTimeout(r, 50));
+        const answered = [first, second].filter((r) => r.mock.calls.length > 0);
+        expect(answered).toHaveLength(1);
       });
 
       it('a notice with nothing held is a no-op, and still acks', async () => {
