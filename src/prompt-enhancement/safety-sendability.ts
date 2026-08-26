@@ -233,7 +233,21 @@ const RISK_PATTERNS: readonly [PromptEnhancementSensitiveActionRiskKind, RegExp]
 
 const EXECUTION_VERB = /\b(?:run|execute|deploy|delete|remove|migrate|install|force[-\s]?push|publish|post|notify|write|modify|apply|rotate|increase|truncate|drop|karo|kar\s+do|chalao|hatao|mitao|lagao)\b|(?:करो|कर\s*दो|चलाओ|हटाओ|मिटाओ|लिखो|बदलो|કરો|કરી\s*દો|ચલાવો|કાઢી\s*નાખો|મિટાવો|લખો|બદલો)/i;
 const PLANNING_VERB = /\b(?:plan|review|compare|check|prepare|assess|evaluate|draft|discuss|list|yojana|suchi|jaanch|janch)\b|(?:योजना|समीक्षा|तुलना|जांच|जाँच|तैयार|सूची|યોજના|સમીક્ષા|તુલના|તપાસ|તૈયાર|યાદી)/i;
-const REVIEW_QUESTION_PATTERN = /\b(?:whether|safe\s+to|should\s+i|should\s+we|can\s+i|can\s+we|could\s+i|could\s+we)\b/i;
+/**
+ * The frames a developer uses to ASK ABOUT an action rather than order it.
+ *
+ * 🔴 Widened 2026-08-26, from measurement. The list covered `whether / safe to / should i|we /
+ * can i|we / could i|we`, and of seven risky questions put through it only ONE reached the planning
+ * posture. "is it a bad idea to force push over main?", "would it be risky to truncate the events
+ * table?", "what happens if i drop the sessions table?" and "do you think i should deploy this
+ * tonight?" all fell through to the execution-verb branch and were read as instructions to do the
+ * thing being asked about.
+ *
+ * ⚠️ Deliberately frames, never topics. Every entry is a way of putting a question about an action;
+ * none names an action. That is what keeps this from drifting into a keyword list for risk, which
+ * `classifyTextRiskKinds` already owns and answers correctly.
+ */
+const REVIEW_QUESTION_PATTERN = /\b(?:whether|safe\s+to|risky\s+to|dangerous\s+to|ok\s+to|okay\s+to|wise\s+to|worth\s+(?:it\s+)?to|(?:bad|good)\s+idea\s+to|should\s+i|should\s+we|i\s+should|we\s+should|can\s+i|can\s+we|could\s+i|could\s+we|what\s+happens\s+if|do\s+i\s+need\s+to|is\s+it\s+possible\s+to)\b/i;
 const UNRESOLVED_PLACEHOLDER_PATTERN = /\{\{[^}]{1,80}\}\}|\[[A-Z][A-Z0-9 _-]{2,80}\]|<[^>\n]{2,80}>/;
 
 /**
@@ -830,7 +844,17 @@ function authorityModeFor(text: string): PromptEnhancementAuthorityMode {
   if (/\b(?:do\s+not|don't|dont|without)\s+(?:run|execute|deploy|delete|remove|migrate|install|force[-\s]?push|publish|post|notify)\b/i.test(normalized)) {
     return PLANNING_VERB.test(normalized) ? 'plan_or_review' : 'observe_or_literal';
   }
-  if (PLANNING_VERB.test(normalized) && REVIEW_QUESTION_PATTERN.test(normalized) && EXECUTION_VERB.test(normalized)) {
+  // A QUESTION about an action is not an order to perform it.
+  //
+  // 🔴 This required a planning verb as well, and that third term is why the branch almost never
+  // fired: "should i delete the old migrations folder?" carries a question frame and an execution
+  // verb but no `plan|review|check|assess|…`, so it fell to the execution branch below and was read
+  // as an instruction to delete. Measured at 1 of 7 risky questions reaching the planning posture.
+  //
+  // The planning verb is now what it always should have been — sufficient on its own (the branch
+  // below still catches it), never required here. The two terms that matter are the question FRAME
+  // and the action being asked about.
+  if (REVIEW_QUESTION_PATTERN.test(normalized) && EXECUTION_VERB.test(normalized)) {
     return 'plan_or_review';
   }
   if (EXECUTION_VERB.test(normalized)) return 'execute_requested';

@@ -74,27 +74,22 @@ const UNRELATED: readonly string[] = [
 ];
 
 describe('§6f — the planning posture', () => {
-  it('🔴 MEASURED: only 1 of 7 risky QUESTIONS gets the posture', () => {
-    // The finding, pinned as a number so it cannot drift unnoticed. The posture's condition is
-    // "not execution-requested AND names a risky topic", and the authority reader answers
-    // `execute_requested` for a question the moment it contains the risky VERB — so "should i delete
-    // the old migrations folder?" is read as an instruction to delete it. Only the "how does X
-    // work?" shape survives.
-    //
-    // ⚠️ Not a safety hole: a prompt that misses the posture is execution-requested by definition,
-    // so it receives the CONFIRMATION clause instead and the agent is still told to ask first. What
-    // is lost is framing — the developer asked whether to do a thing, and the body treats the thing
-    // as pending. That is the "changes the whole purpose of the prompt" class.
-    const withPosture = RISKY_QUESTIONS.filter(postureFor);
-    expect(withPosture).toEqual(['how does deploying this to production actually work?']);
+  it('EVERY risky QUESTION takes the posture', () => {
+    // 🔴 Was 1 of 7 when first measured (2026-08-26). The posture's condition is "not
+    // execution-requested AND names a risky topic"; the risk half was right on every row, and the
+    // authority half answered `execute_requested` for a question the moment it contained the risky
+    // VERB — so "should i delete the old migrations folder?" was read as an order to delete it.
+    // Fixed in `authorityModeFor`: a question FRAME plus an action is a question, and the planning
+    // verb it also demanded is no longer required.
+    const without = RISKY_QUESTIONS.filter((prompt) => !postureFor(prompt));
+    expect(without).toEqual([]);
   });
 
-  it('the mechanism is the authority read, not the risk read', () => {
-    // Names the CAUSE, so a fix is aimed at the right layer. Every missing row is risky (the risk
-    // read is right) and every missing row is called execute_requested (the authority read is not).
-    for (const question of RISKY_QUESTIONS.filter((prompt) => !postureFor(prompt))) {
+  it('the authority read is what changed, and it now agrees with the risk read', () => {
+    // Names the layer, so a regression points at its cause rather than the symptom.
+    for (const question of RISKY_QUESTIONS) {
       expect(promptEnhancementRiskKindsForTextV1(question).length, question).toBeGreaterThan(0);
-      expect(promptEnhancementAuthorityModeForTextV1(question), question).toBe('execute_requested');
+      expect(promptEnhancementAuthorityModeForTextV1(question), question).not.toBe('execute_requested');
     }
   });
 
