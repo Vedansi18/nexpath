@@ -89,13 +89,26 @@ function pressOn(el: HTMLElement, key: string, init: KeyboardEventInit = {}): vo
 }
 
 describe('producers (my views → their models)', () => {
-  it('the PE model carries body, details, directionals, Use-original, header rows', () => {
+  it('the PE model is the CLI\'s THREE rows exactly: body, Additional details, Use original prompt', () => {
     const m = peSurfaceModel(view());
     expect(m.id).toBe('prompt_enhancement');
     expect(m.pinch).toBe('Shipping something?');
     expect(m.rows.filter((r) => r.kind === 'field')).toHaveLength(2);
+    expect(m.rows.filter((r) => r.kind === 'action')).toHaveLength(1);
     expect(m.rows.some((r) => r.kind === 'action' && r.act === 'use-original')).toBe(true);
-    expect(m.rows.some((r) => r.kind === 'action' && r.label === 'Shorter')).toBe(true);
+  });
+
+  // Owner ruling 2026-08-25 after seeing a REAL CLI popup: the CLI renders no
+  // directional rows at all — its own loop is commented out at
+  // cli-submit-popup.ts:641-662. Ours rendered them, and a row the engine
+  // silently refuses looks like broken software (tester report). Pinned so they
+  // cannot reappear.
+  it('renders NO directional rows even when the engine offers them (cli-submit-popup.ts:641-662)', () => {
+    const m = peSurfaceModel(view());
+    const labels = m.rows.map((r) => (r.kind === 'note' ? r.text : r.label));
+    expect(labels).not.toContain('Shorter');
+    expect(labels).not.toContain('More thorough');
+    expect(labels).not.toContain('More project-grounded');
   });
 
   it('the MPS model carries the first prompt, the plan notes, and the engine cancel label', () => {
@@ -152,14 +165,13 @@ describe('PE surface flows (real dock + controller)', () => {
     expect(bodyField().value).toContain('keep the retry helper'); // visible merge
   });
 
-  it('an available directional row emits its command with the live body; an unavailable one is silently refused', () => {
+  it('no directional row exists in the rendered dock — the CLI shows none', () => {
     adapter.show(view());
-    rowByLabel('Shorter').click();
-    expect(commands()).toEqual([{ type: 'shorter', bodyText: 'Enhanced body text' }]);
-    events.length = 0;
-    adapter.setBusy(false); // pe-inject would re-enable on the next view; simulate
-    rowByLabel('More thorough').click();
-    expect(commands()).toHaveLength(0);
+    const text = surfaceEl().textContent ?? '';
+    expect(text).not.toContain('Shorter');
+    expect(text).not.toContain('More thorough');
+    expect(text).not.toContain('More project-grounded');
+    expect(text).toContain('Use original prompt'); // the row that DOES exist
   });
 
   it('Go back renders on refinement views and emits go_back', () => {
@@ -504,5 +516,22 @@ describe('unapplied details are NOT sent (the CLI\'s shipped send semantics)', (
     expect(cmd).toMatchObject({ type: 'use_current' });
     expect(cmd.bodyText).toBe('Enhanced body text');
     expect(cmd.bodyText).not.toContain('TYPED BUT NEVER APPLIED');
+  });
+});
+
+describe('locked bodies explain themselves (tester read a silent read-only popup as broken)', () => {
+  it('a locked body shows an always-visible read-only line naming what Enter will do', () => {
+    adapter.show(view({ bodyEditable: false }));
+    const text = surfaceEl().textContent ?? '';
+    expect(text).toContain('Read-only');
+    expect(text).toContain('Enter sends this prompt as shown');
+  });
+
+  it('an editable body shows the normal edit-keys hint instead, and never the read-only line', () => {
+    adapter.show(view());
+    const body = bodyField();
+    body.focus();
+    const text = surfaceEl().textContent ?? '';
+    expect(text).not.toContain('Read-only');
   });
 });

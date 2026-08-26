@@ -63,6 +63,10 @@ type PendingTerminal = { type: 'close' } | { type: 'use_original' } | { type: 'm
 /** The CLI's refinement-return label (`cli-submit-popup.ts:541`). */
 const CLI_GO_BACK_LABEL = '← Go back';
 
+/** Shown under a locked (compose-failed) body — see the bodyRow comment. */
+const LOCKED_BODY_HINT =
+  'Read-only — enhanced wording unavailable · Enter sends this prompt as shown';
+
 export function peSurfaceModel(view: PePanelViewV1): SurfaceModel {
   // The engine's editability verdict is SEND-PATH semantics, not styling: a
   // read-only fallback body (`editabilityState: 'read_only_fallback'`) rejects
@@ -76,7 +80,16 @@ export function peSurfaceModel(view: PePanelViewV1): SurfaceModel {
     kind: 'field',
     label: view.editorHeading,
     text: view.bodyText,
-    hints: { whenFocused: [`${EDIT_KEYS_HINT} · ${BODY_HINT}`] },
+    hints: locked
+      // A locked body is the engine's compose-FAILURE state (the deterministic
+      // template stands in for wording it could not generate). The CLI shows no
+      // explanation for it, and a tester reading a popup that silently refuses
+      // every keystroke concluded the whole feature was broken (2026-08-25).
+      // ONE always-visible line, in the CLI's own hint tone, is the smallest
+      // honest fix: it says why typing does nothing and what Enter will do.
+      // Owner-approved divergence, deliberately additive — no behaviour changes.
+      ? { always: [LOCKED_BODY_HINT] }
+      : { whenFocused: [`${EDIT_KEYS_HINT} · ${BODY_HINT}`] },
     ...(locked ? { readOnly: true, unavailable: true } : {}),
   };
 
@@ -109,12 +122,18 @@ export function peSurfaceModel(view: PePanelViewV1): SurfaceModel {
       ...(!detailsAvailable ? { unavailable: true } : {}),
     },
   ];
-  for (const d of view.directional) {
-    // Availability travels via the row label lookup in the activation hook;
-    // rows render CLI-style regardless (disabled = silent guard, never hidden —
-    // the CLI never shows the marker on directionals, :650-655).
-    rows.push({ kind: 'action', label: d.label, blankBefore: d === view.directional[0] });
-  }
+  // DIRECTIONAL ROWS (Shorter / More thorough / More project-grounded) ARE NOT
+  // RENDERED — owner ruling 2026-08-25, matching the shipped CLI exactly. The
+  // CLI's own row loop is commented out verbatim at `cli-submit-popup.ts:641-662`
+  // ("HIDDEN from the PE popup UI, owner decision 2026-08-19"), so a real CLI
+  // popup shows only: the body, Additional details, Use original prompt.
+  // Rendering them here was worse than cosmetic: the engine can silently refuse
+  // an action whose availability is not 'available' (the CLI's F3 silent-keep
+  // discipline), so a user clicked a row that looked live and NOTHING happened —
+  // a direct contributor to the tester's "nothing works" report.
+  // The activation hook below still understands directionals, so re-enabling is
+  // one row-builder away; the engine side was never touched.
+
   // No blank line before Use original — the CLI's blank-line rule covers only
   // the details block, the first directional, and Go back (:769-775).
   rows.push({
