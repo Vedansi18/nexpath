@@ -136,6 +136,14 @@ export interface PePanelControllerV1 {
   destroy(): void;
   /** True while the panel is visible (drives the content-side keepalive). */
   isOpen(): boolean;
+  /**
+   * True while the panel is showing the feedback surface AFTER a terminal choice.
+   *
+   * Optional and additive: a host that does not implement it behaves exactly as
+   * before. It exists so a close arriving from elsewhere cannot tear down a
+   * feedback step the user is in the middle of — see pe-inject's close handler.
+   */
+  isCollectingFeedback?(): boolean;
 }
 
 const COMMAND_TYPES = new Set([

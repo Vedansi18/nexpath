@@ -261,6 +261,10 @@ browser.runtime.onMessage.addListener(
       // resurrect the popup on the next stop. Idempotent — the live loop's own
       // bookkeeping has usually consumed it already.
       log.debug('pe_terminal_notice', { projectRoot: msg.projectRoot, outcome: msg.outcome });
+      // 'use_original' arrives BEFORE the feedback step, so a held prompt is
+      // released the moment the user decides rather than when they finish
+      // answering. Idempotent: no waiter ⇒ no-op.
+      if (msg.outcome === 'use_original') signalEarlySubmitRelease(msg.projectRoot);
       markPendingPeShown(msg.projectRoot)
         .then(() => sendResponse({ ok: true }))
         .catch(() => sendResponse({ ok: false }));
@@ -622,6 +626,33 @@ function markSubmitAbandoned(submitId: string): void {
 }
 
 /**
+ * Held submits waiting to be released the moment a terminal choice is MADE.
+ *
+ * "Use original prompt" does not emit its command straight away — the panel
+ * shows a short satisfaction step first (CLI parity: feedback precedes the
+ * terminal action). On the response-stop path that costs nothing. On the submit
+ * path the user's prompt is held until the command lands, and the hold has no
+ * ceiling, so an abandoned survey held it forever — reported live as "the flow
+ * stucked".
+ *
+ * The panel therefore announces the decision as soon as it is made, over the
+ * teardown-proof `pe-terminal-notice` channel, and this releases the hold
+ * without touching the popup: feedback carries on, the command still arrives
+ * behind it, and the popup loop finishes exactly as before.
+ *
+ * Keyed by project root — one held submit per page at a time (the gate is
+ * re-entrancy guarded).
+ */
+const earlyReleaseWaiters = new Map<string, () => void>();
+
+function signalEarlySubmitRelease(projectRoot: string): void {
+  const release = earlyReleaseWaiters.get(projectRoot);
+  if (!release) return;              // nothing held, or already released
+  earlyReleaseWaiters.delete(projectRoot);
+  release();
+}
+
+/**
  * Decide a submission the page is currently HOLDING.
  *
  * Runs the SAME popup surface the response-stop path runs — the engine's own
@@ -700,7 +731,7 @@ async function decideHeldSubmit(
     resolvePeSequenceEnabled(projectRoot),
   ]);
 
-  const stopOutcome = await runBrowserPePopup({
+  const popup = runBrowserPePopup({
     log,
     projectRoot,
     apiKey,
@@ -716,7 +747,39 @@ async function decideHeldSubmit(
       }
     },
   });
-  const outcome = stopOutcome.result;
+
+  // Whichever comes first: the popup's real outcome, or word that the user has
+  // already chosen to keep their own prompt. The second only happens for
+  // "use original" — the one terminal choice that ALLOWS and needs no body text
+  // from the popup, so answering early can never change what is sent.
+  const EARLY = Symbol('early-release');
+  const earlyRelease = new Promise<typeof EARLY>((resolve) => {
+    earlyReleaseWaiters.set(projectRoot, () => resolve(EARLY));
+  });
+  let raced: Awaited<typeof popup> | typeof EARLY;
+  try {
+    raced = await Promise.race([popup, earlyRelease]);
+  } finally {
+    earlyReleaseWaiters.delete(projectRoot);
+  }
+
+  if (raced === EARLY) {
+    // The popup keeps running — it still owns the feedback step and its own
+    // teardown. Nothing here awaits it, so its rejection must not surface as an
+    // unhandled one.
+    popup.catch(() => { /* the popup logs its own failures */ });
+    // Same verdict either way — an allow — but an operator reading the log
+    // should see WHICH it was: a live hold released early, or a hold the page
+    // had already given up on.
+    if (abandonedSubmits.has(submitId)) {
+      abandonedSubmits.delete(submitId);
+      log.debug('submit_decision_discarded_abandoned', { submitId, state: 'early_release' });
+    } else {
+      log.debug('submit_decision_early_release', { submitId, projectRoot });
+    }
+    return { kind: 'allow' };
+  }
+  const outcome = raced.result;
 
   // The page may have given up while the user was reading. Its request has
   // already gone out, so a verdict now would be a second send.

@@ -144,7 +144,19 @@ function handlePanelEvent(event: PePanelEventV1): void {
  */
 function ensureMounted(): PePanelControllerV1 {
   if (controller) return controller;
-  controller = mountNexpathPeDock({ onEvent: handlePanelEvent });
+  controller = mountNexpathPeDock({
+    onEvent: handlePanelEvent,
+    // "Use original prompt" shows a satisfaction step BEFORE it emits its
+    // command. On the submit path the user's prompt is HELD until that command
+    // lands, and there is no hold ceiling — so an abandoned survey stranded the
+    // prompt for good. This announces the decision immediately, over the same
+    // teardown-proof one-way channel the terminal click uses, so the worker can
+    // release the prompt while feedback carries on. Deliberately no watchdog:
+    // nothing is pending, the panel is not busy, and the user is still typing.
+    onTerminalIntent: (outcome) => {
+      window.dispatchEvent(new CustomEvent('nexpath:pe-terminal-out', { detail: { outcome } }));
+    },
+  });
   return controller;
 }
 
@@ -175,6 +187,12 @@ export function setupPeListener(): void {
 
     if (isPeCloseMsg(msg)) {
       dismissStickyNotice();   // the hold ended without a popup, or it closed
+      // Releasing a held prompt closes the popup from the content side — and
+      // after an early release that close arrives WHILE the user is answering
+      // the feedback step. Closing then would erase the question mid-answer.
+      // The panel stays until feedback completes; its own terminal command
+      // closes it a moment later (or the terminal watchdog does).
+      if (controller?.isCollectingFeedback?.() === true) return;
       closePanel();
       return;
     }

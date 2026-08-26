@@ -21,6 +21,8 @@ const { injectPromptTextMock, showToastMock, controller, mountMock } = vi.hoiste
     hide: vi.fn(),
     destroy: vi.fn(),
     isOpen: vi.fn(),
+    collectingFlag: false,
+    isCollectingFeedback: vi.fn(),
   };
   return {
     injectPromptTextMock: vi.fn(),
@@ -40,6 +42,7 @@ vi.mock('./agents/inject-kit.js', () => ({
 vi.mock('../ui/pe-dock-adapter.js', () => ({ mountNexpathPeDock: mountMock }));
 
 let onEvent: (event: PePanelEventV1) => void;
+let onTerminalIntent: ((outcome: string) => void) | undefined;
 const liveSpies: Array<[string, EventListener]> = [];
 
 function view(seq = 1): PePanelViewV1 {
@@ -83,8 +86,14 @@ beforeEach(() => {
   controller.show.mockImplementation(() => { controller.openFlag = true; });
   controller.hide.mockImplementation(() => { controller.openFlag = false; });
   controller.isOpen.mockImplementation(() => controller.openFlag);
-  mountMock.mockImplementation((opts: { onEvent: typeof onEvent }) => {
+  controller.collectingFlag = false;
+  controller.isCollectingFeedback.mockImplementation(() => controller.collectingFlag);
+  mountMock.mockImplementation((opts: {
+    onEvent: typeof onEvent;
+    onTerminalIntent?: (o: string) => void;
+  }) => {
     onEvent = opts.onEvent;
+    onTerminalIntent = opts.onTerminalIntent;
     return controller;
   });
 });
@@ -226,5 +235,67 @@ describe('pagehide teardown', () => {
       dispatchSwMessage({ type: 'nexpath:pe-close', projectRoot: 'https://bolt.new/~/p' });
       expect(showStickyNoticeMock).not.toHaveBeenCalled();
     });
+  });
+});
+
+// ── EARLY RELEASE OF A HELD PROMPT ────────────────────────────────────────────
+// "Use original prompt" shows a satisfaction step BEFORE emitting its command,
+// and on the submit path the prompt is held until that command lands. The panel
+// announces the decision as it is made so the worker can release the prompt
+// straight away — which means a close now arrives while the user is still
+// answering, and must not tear the question off the screen.
+describe('announcing a terminal decision early', () => {
+  it('forwards the intent over the same one-way channel a terminal click uses', () => {
+    const out = spyEvent('nexpath:pe-terminal-out');
+    showPe();
+    onTerminalIntent!('use_original');
+    expect(out.calls).toEqual([{ outcome: 'use_original' }]);
+  });
+
+  it('does NOT arm the terminal watchdog — nothing is pending and the panel is live', () => {
+    showPe();
+    onTerminalIntent!('use_original');
+    vi.advanceTimersByTime(60_000);
+    expect(controller.hide).not.toHaveBeenCalled();
+    expect(showToastMock).not.toHaveBeenCalled();
+  });
+
+  it('a close arriving DURING the feedback step is ignored — the question stays up', () => {
+    showPe();
+    onTerminalIntent!('use_original');
+    controller.collectingFlag = true;               // PEF on screen
+    // The gate closes the popup as it re-issues the original prompt.
+    dispatchSwMessage({ type: 'nexpath:pe-close', projectRoot: 'https://bolt.new/~/p' });
+    expect(controller.hide).not.toHaveBeenCalled();
+  });
+
+  it('the close that follows the real terminal command DOES close it', () => {
+    showPe();
+    onTerminalIntent!('use_original');
+    controller.collectingFlag = true;
+    dispatchSwMessage({ type: 'nexpath:pe-close', projectRoot: 'https://bolt.new/~/p' });
+    controller.collectingFlag = false;             // feedback given → command emitted
+    dispatchSwMessage({ type: 'nexpath:pe-close', projectRoot: 'https://bolt.new/~/p' });
+    expect(controller.hide).toHaveBeenCalledTimes(1);
+  });
+
+  it('an ordinary close still closes — the guard is scoped to the feedback step alone', () => {
+    showPe();
+    dispatchSwMessage({ type: 'nexpath:pe-close', projectRoot: 'https://bolt.new/~/p' });
+    expect(controller.hide).toHaveBeenCalledTimes(1);
+  });
+
+  it('a panel host without the accessor is never treated as collecting feedback', () => {
+    showPe();
+    controller.isCollectingFeedback.mockReturnValue(undefined as unknown as boolean);
+    dispatchSwMessage({ type: 'nexpath:pe-close', projectRoot: 'https://bolt.new/~/p' });
+    expect(controller.hide).toHaveBeenCalledTimes(1);
+  });
+
+  it('the stuck-forever path: with no announcement the prompt has nothing to release it', () => {
+    // Guards the wiring itself — the option must reach the mount, or the whole
+    // early release is dead code.
+    showPe();
+    expect(onTerminalIntent).toBeTypeOf('function');
   });
 });

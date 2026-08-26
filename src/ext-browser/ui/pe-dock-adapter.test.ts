@@ -52,6 +52,7 @@ function offer(overrides: Partial<PeSequenceOfferViewV1> = {}): PeSequenceOfferV
  * plus querying through the mount element captured from mountNexpathDock…
  * simplest honest route: grab the shadow root at attach time. */
 let shadowRoots: ShadowRoot[];
+let intents: string[];
 const realAttachShadow = HTMLElement.prototype.attachShadow;
 
 beforeEach(() => {
@@ -63,7 +64,11 @@ beforeEach(() => {
     return root;
   };
   events = [];
-  adapter = mountNexpathPeDock({ onEvent: (e) => events.push(e) });
+  intents = [];
+  adapter = mountNexpathPeDock({
+    onEvent: (e) => events.push(e),
+    onTerminalIntent: (o) => intents.push(o),
+  });
 });
 
 afterEach(() => {
@@ -209,6 +214,73 @@ describe('PEF-backed-by-signals (owner decision 2026-08-25)', () => {
       { type: 'feedback_suggested', category: 'too_much_or_too_long' },
       { type: 'use_original' },
     ]);
+  });
+
+  // ── RELEASING A HELD PROMPT WITHOUT ENDING THE FEEDBACK STEP ───────────────
+  // On the submit path the user's prompt is held until the terminal command
+  // arrives, and the hold has no ceiling. Because "Use original" parks its
+  // command behind a satisfaction step, an abandoned survey held the prompt
+  // forever — reported live as "the flow stucked". These pin the announcement
+  // that lets the hold end early WITHOUT changing what the panel emits.
+  describe('announcing the decision before the feedback step', () => {
+    it('announces use_original the instant the row is clicked — before any command', () => {
+      adapter.show(view());
+      rowByLabel('Use original prompt').click();
+      expect(intents).toEqual(['use_original']);
+      expect(commands()).toHaveLength(0);          // command still parked (CLI order)
+      expect(adapter.isCollectingFeedback?.()).toBe(true);
+    });
+
+    it('the parked command STILL follows the feedback — the announcement replaces nothing', () => {
+      adapter.show(view());
+      rowByLabel('Use original prompt').click();
+      rowByLabel('Too much or too long').click();
+      expect(commands()).toEqual([
+        { type: 'feedback_suggested', category: 'too_much_or_too_long' },
+        { type: 'use_original' },
+      ]);
+      expect(intents).toEqual(['use_original']);   // announced once, not twice
+      expect(adapter.isCollectingFeedback?.()).toBe(false);
+    });
+
+    it('is not collecting feedback before a terminal choice, nor after skipping it', () => {
+      adapter.show(view());
+      expect(adapter.isCollectingFeedback?.()).toBe(false);
+      rowByLabel('Use original prompt').click();
+      pressOn(surfaceEl(), 'Escape');              // skip
+      expect(adapter.isCollectingFeedback?.()).toBe(false);
+    });
+
+    it('a fresh view clears the flag — a stale feedback step never guards a new popup', () => {
+      adapter.show(view());
+      rowByLabel('Use original prompt').click();
+      expect(adapter.isCollectingFeedback?.()).toBe(true);
+      adapter.show(view({ viewSeq: 2 }));
+      expect(adapter.isCollectingFeedback?.()).toBe(false);
+    });
+
+    it('NOTHING is announced for the paths that do not park a command', () => {
+      // use_current carries the body text, so it must be decided by the popup,
+      // not released early; Esc emits close directly with no feedback step.
+      adapter.show(view());
+      pressOn(surfaceEl(), 'Escape');
+      expect(intents).toEqual([]);
+      expect(commands()).toEqual([{ type: 'close' }]);
+    });
+
+    it('a host that does not supply the hook behaves exactly as before', () => {
+      const plain = mountNexpathPeDock({ onEvent: (e) => events.push(e) });
+      try {
+        plain.show(view());
+        // The last-attached shadow root is this adapter's.
+        const rows = [...(shadowRoots.at(-1)!.querySelector('.np-surface-root') as HTMLElement)
+          .querySelectorAll('.np-row')];
+        (rows.find((r) => r.textContent?.includes('Use original prompt')) as HTMLElement).click();
+        expect(events.at(-1)).toBeUndefined();   // still parked, nothing thrown
+      } finally {
+        plain.destroy();
+      }
+    });
   });
 
   it('Use-original opens PEF; skip completes with use_original', () => {

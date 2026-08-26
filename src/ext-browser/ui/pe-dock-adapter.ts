@@ -226,6 +226,17 @@ export function pefSurfaceModel(): SurfaceModel {
 
 export interface PeDockAdapterOptions {
   onEvent: (event: PePanelEventV1) => void;
+  /**
+   * The user has REACHED a terminal decision, before the feedback step runs.
+   *
+   * "Use original prompt" parks its command and shows the feedback surface
+   * first, so the command itself arrives only once feedback is given or skipped.
+   * On the submit path that means the user's prompt stays HELD for the whole of
+   * a satisfaction survey — and, with no hold ceiling, is stranded forever if
+   * the survey is simply abandoned. This fires the moment the decision is made,
+   * so the held prompt can be released immediately while feedback continues.
+   */
+  onTerminalIntent?: (outcome: 'use_original') => void;
   /** Document override for tests. */
   doc?: Document;
 }
@@ -237,6 +248,8 @@ export function mountNexpathPeDock(opts: PeDockAdapterOptions): PePanelControlle
   let busy = false;
   let busyOverlay: HTMLDivElement | null = null;
   let pendingTerminal: PendingTerminal | null = null;
+  // True only while the feedback surface is up after a terminal choice.
+  let collectingFeedback = false;
   /** One-shot: the NEXT show() is the engine's echo of a details apply — the
    * rebuild parks the view at the top, but the CLI's apply behaviour is "the
    * view scrolls to where the details landed" (cli-submit-popup.ts:1037), so
@@ -254,6 +267,7 @@ export function mountNexpathPeDock(opts: PeDockAdapterOptions): PePanelControlle
   const completePending = (): void => {
     const terminal = pendingTerminal;
     pendingTerminal = null;
+    collectingFeedback = false;
     if (terminal) emitCommand(terminal);
   };
 
@@ -304,10 +318,16 @@ export function mountNexpathPeDock(opts: PeDockAdapterOptions): PePanelControlle
     // Action rows.
     if (row.act === 'use-original') {
       pendingTerminal = { type: 'use_original' };
+      collectingFeedback = true;
+      // Announce the decision NOW. The command still follows the CLI's
+      // feedback-first ordering; this only stops a held prompt from waiting on
+      // the survey.
+      try { opts.onTerminalIntent?.('use_original'); } catch { /* notice only */ }
       return { model: pefSurfaceModel() };
     }
     if (row.act === 'cancel-sequence') {
       pendingTerminal = { type: 'mps_cancel' };
+      collectingFeedback = true;
       return { model: pefSurfaceModel() };
     }
     if (row.label === CLI_GO_BACK_LABEL) {
@@ -416,6 +436,7 @@ export function mountNexpathPeDock(opts: PeDockAdapterOptions): PePanelControlle
       busy = false;
       view = v;
       pendingTerminal = null;
+      collectingFeedback = false;
       const d = ensureDock();
       // The CLI PRESERVES its interaction state across re-renders unless the
       // body itself changed (cli-submit-popup.ts:1444-1453 — same
@@ -493,5 +514,6 @@ export function mountNexpathPeDock(opts: PeDockAdapterOptions): PePanelControlle
       view = null;
     },
     isOpen: () => dock?.isVisible() ?? false,
+    isCollectingFeedback: () => collectingFeedback,
   };
 }

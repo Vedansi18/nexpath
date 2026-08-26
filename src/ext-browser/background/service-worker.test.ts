@@ -1848,6 +1848,118 @@ describe('service-worker.ts', () => {
         (name === `nexpath_last_prompt::${P}` ? JSON.stringify({ text: 'just ship it', at: 1 }) : null));
     });
 
+    // ── RELEASING THE HOLD WHEN THE USER PICKS THEIR OWN PROMPT ───────────────
+    // "Use original" does not emit its command until the satisfaction step is
+    // answered, and the hold has no ceiling — so an abandoned survey held the
+    // prompt forever ("the flow stucked"). The panel announces the decision as
+    // it is made; that announcement ends the hold without touching the popup.
+    describe('the early release (use_original announced before its feedback step)', () => {
+      /** A popup that is still on screen collecting feedback. */
+      function popupStillOpen(): void {
+        vi.mocked(runBrowserPePopup).mockReturnValue(new Promise(() => {}) as never);
+      }
+      function notice(messageListener: MessageListener, outcome: string, root = P) {
+        const sendResponse = vi.fn();
+        messageListener({ type: 'nexpath:pe-terminal-notice', projectRoot: root, outcome }, {}, sendResponse);
+        return sendResponse;
+      }
+
+      it('releases the prompt while the popup is still up', async () => {
+        popupStillOpen();
+        const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+        const sendResponse = decide(messageListener);
+        await vi.waitFor(() => expect(runBrowserPePopup).toHaveBeenCalled());
+
+        notice(messageListener, 'use_original');
+        await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ decision: { kind: 'allow' } }));
+        expect(logDebugMock).toHaveBeenCalledWith('submit_decision_early_release', { submitId: 's1', projectRoot: P });
+      });
+
+      it('WITHOUT the announcement the prompt stays held — this is the bug it fixes', async () => {
+        popupStillOpen();
+        const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+        const sendResponse = decide(messageListener);
+        await vi.waitFor(() => expect(runBrowserPePopup).toHaveBeenCalled());
+        await new Promise((r) => setTimeout(r, 50));
+        expect(sendResponse).not.toHaveBeenCalled();
+      });
+
+      it('only use_original releases early — use_current must wait for its body text', async () => {
+        popupStillOpen();
+        const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+        const sendResponse = decide(messageListener);
+        await vi.waitFor(() => expect(runBrowserPePopup).toHaveBeenCalled());
+
+        notice(messageListener, 'use_current');
+        notice(messageListener, 'close');
+        await new Promise((r) => setTimeout(r, 50));
+        expect(sendResponse).not.toHaveBeenCalled();
+      });
+
+      it('a notice for a DIFFERENT page never releases this page\'s prompt', async () => {
+        popupStillOpen();
+        const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+        const sendResponse = decide(messageListener);
+        await vi.waitFor(() => expect(runBrowserPePopup).toHaveBeenCalled());
+
+        notice(messageListener, 'use_original', 'https://bolt.new/~/OTHER');
+        await new Promise((r) => setTimeout(r, 50));
+        expect(sendResponse).not.toHaveBeenCalled();
+      });
+
+      it('a notice with nothing held is a no-op, and still acks', async () => {
+        const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+        const sendResponse = notice(messageListener, 'use_original');
+        await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+        expect(logDebugMock).not.toHaveBeenCalledWith('submit_decision_early_release', expect.anything());
+      });
+
+      it('a second notice after the release changes nothing (the command follows behind it)', async () => {
+        popupStillOpen();
+        const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+        const sendResponse = decide(messageListener);
+        await vi.waitFor(() => expect(runBrowserPePopup).toHaveBeenCalled());
+
+        notice(messageListener, 'use_original');
+        await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledOnce());
+        notice(messageListener, 'use_original');   // the real terminal click
+        await new Promise((r) => setTimeout(r, 50));
+        expect(sendResponse).toHaveBeenCalledOnce();  // never answered twice
+      });
+
+      it('a popup that REJECTS after an early release does not become an unhandled rejection', async () => {
+        const unhandled = vi.fn();
+        process.on('unhandledRejection', unhandled);
+        try {
+          let boom: (e: Error) => void = () => {};
+          vi.mocked(runBrowserPePopup).mockReturnValue(new Promise((_, rej) => { boom = rej; }) as never);
+          const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+          const sendResponse = decide(messageListener);
+          await vi.waitFor(() => expect(runBrowserPePopup).toHaveBeenCalled());
+
+          notice(messageListener, 'use_original');
+          await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ decision: { kind: 'allow' } }));
+          boom(new Error('popup died after the release'));
+          await new Promise((r) => setTimeout(r, 50));
+          expect(unhandled).not.toHaveBeenCalled();
+        } finally {
+          process.off('unhandledRejection', unhandled);
+        }
+      });
+
+      it('the popup\'s own outcome still decides when it answers first (no behaviour change)', async () => {
+        vi.mocked(runBrowserPePopup).mockResolvedValue({
+          result: { state: 'selected_current', bodyText: 'the improved prompt' }, mpsFirstPopupSent: false,
+        } as never);
+        const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+        const sendResponse = decide(messageListener);
+        await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({
+          decision: { kind: 'block', replacement: 'the improved prompt' },
+        }));
+        expect(logDebugMock).not.toHaveBeenCalledWith('submit_decision_early_release', expect.anything());
+      });
+    });
+
     describe('the block condition — only an explicit, non-empty replacement withholds', () => {
       it('selected_current WITH body text → block, carrying that text', async () => {
         vi.mocked(runBrowserPePopup).mockResolvedValue({
