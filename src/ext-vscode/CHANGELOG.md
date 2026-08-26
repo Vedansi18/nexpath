@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.35 — 2026-08-26
+
+- Listing: the demo video is now linked at the top, next to what NexPath supports.
+
 ## 0.1.34 — 2026-08-25
 
 - Popup selections now deliver within seconds in every case on Windows — a rare condition
