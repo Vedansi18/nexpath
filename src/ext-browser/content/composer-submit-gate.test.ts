@@ -73,6 +73,14 @@ describe('createComposerSubmitGate', () => {
       });
     }
 
+    it('says WHY it is off — once per page, not once per keystroke (RC19)', () => {
+      const { gate, names } = makeGate({ isArmed: () => false });
+      gate.maybeIntercept(makeEvent(), PROMPT);
+      gate.maybeIntercept(makeEvent(), PROMPT);
+      gate.maybeIntercept(makeEvent(), PROMPT);
+      expect(names().filter((n) => n === 'submit_gate_disarmed')).toHaveLength(1);
+    });
+
     it('reads the switch per event rather than caching it', () => {
       let armed = false;
       const { gate } = makeGate({ isArmed: () => armed });

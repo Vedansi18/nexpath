@@ -104,6 +104,9 @@ describe('the composer gate — where cancelling lives, and where it must not', 
   });
 
   it('the gate refuses unless the switch is armed', () => {
-    expect(gate).toContain('if (!deps.isArmed()) return false;');
+    // The guard gained a body (it now logs WHY it is off), so pin the check and
+    // its refusal rather than a single formatting-sensitive line.
+    expect(gate).toContain('if (!deps.isArmed()) {');
+    expect(gate).toContain("return false;                       // switch off");
   });
 });

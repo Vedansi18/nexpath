@@ -495,6 +495,48 @@ async function waitForSubmitPipelineIdle(projectRoot: string, logKey: string): P
   }
 }
 
+/**
+ * How long a held submit waits for its own pipeline run to APPEAR.
+ *
+ * The capture that starts the pipeline and the decision request that waits for it
+ * are two independent messages fired microseconds apart from the same event
+ * handler, and the pipeline registers itself asynchronously. Without this grace
+ * the decider can look before the pipeline has registered, conclude "no pending
+ * enhancement", and allow — so the popup would never appear, intermittently and
+ * invisibly. Correlated by prompt text rather than by a bare timer, so a pipeline
+ * that already finished costs nothing.
+ */
+const PIPELINE_START_GRACE_MS = 3_000;
+const PIPELINE_START_POLL_MS = 100;
+
+/**
+ * Wait until the submit pipeline has SEEN `prompt` for this project, then until
+ * it has finished parking its rows.
+ */
+async function waitForPipelineOnPrompt(projectRoot: string, prompt: string): Promise<void> {
+  // Bounded by POLL COUNT, not by a clock reading: a stopped or coarse clock must
+  // not be able to turn this into an unbounded wait while a user's prompt is held.
+  const maxPolls = Math.ceil(PIPELINE_START_GRACE_MS / PIPELINE_START_POLL_MS);
+  let seen = false;
+  for (let i = 0; i <= maxPolls && !seen; i++) {
+    const raw = await keyStore.getKey(lastPromptKeyFor(projectRoot));
+    if (raw) {
+      try {
+        if ((JSON.parse(raw) as { text?: unknown }).text === prompt) { seen = true; break; }
+      } catch { /* malformed record — keep waiting */ }
+    }
+    if (i < maxPolls) await new Promise((resolve) => setTimeout(resolve, PIPELINE_START_POLL_MS));
+  }
+  if (!seen) {
+    // The pipeline never picked this prompt up (capture dropped, or the worker
+    // restarted). Nothing to wait for; the caller will find no pending row and
+    // allow, which is the safe direction.
+    log.debug('submit_decision_pipeline_never_started', { projectRoot });
+    return;
+  }
+  await waitForSubmitPipelineIdle(projectRoot, 'submit_decision_waiting_for_pipeline');
+}
+
 /** The verdict shape the page's decision channel understands. */
 type HeldSubmitDecision = { kind: 'allow' } | { kind: 'block'; replacement: string };
 
@@ -555,9 +597,9 @@ async function decideHeldSubmit(
     return { kind: 'allow' };
   }
 
-  // The prompt was emitted to the pipeline just before the hold began; give it
-  // time to classify and park its rows.
-  await waitForSubmitPipelineIdle(projectRoot, 'submit_decision_waiting_for_pipeline');
+  // The prompt was emitted to the pipeline immediately before the hold began —
+  // wait for that run to appear AND finish before reading its rows.
+  await waitForPipelineOnPrompt(projectRoot, msg.prompt);
 
   const state = await idb.loadSessionState(projectRoot);
   const pe = await getPendingPe(projectRoot, state?.sessionId);

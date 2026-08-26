@@ -91,6 +91,9 @@ export function createComposerSubmitGate(deps: ComposerSubmitGateDeps): Composer
 
   let reentrant = false;
   const inFlight = new Set<string>();
+  // RC19: never let "off" be silent. Logged once per page so a disarmed session
+  // is diagnosable without drowning the ring in one line per keystroke.
+  let disarmedLogged = false;
 
   /**
    * A send is only real once the composer has emptied. A mechanism that reports
@@ -170,7 +173,13 @@ export function createComposerSubmitGate(deps: ComposerSubmitGateDeps): Composer
 
     maybeIntercept(ev: Event, prompt: string): boolean {
       if (reentrant) return false;          // our own submit travelling back
-      if (!deps.isArmed()) return false;    // switch off ⇒ today's behaviour
+      if (!deps.isArmed()) {
+        if (!disarmedLogged) {
+          disarmedLogged = true;
+          emit('submit_gate_disarmed', { reason: 'switch_off' });
+        }
+        return false;                       // switch off ⇒ today's behaviour
+      }
       if (prompt.trim().length === 0) return false;
 
       const submitId = submitIdFor(prompt);

@@ -1841,6 +1841,11 @@ describe('service-worker.ts', () => {
       vi.mocked(markPendingPeShown).mockResolvedValue(undefined);
       idbLoadSessionState.mockResolvedValue({ sessionId: 's1', promptCount: 9 });
       vi.mocked(runBrowserPePopup).mockResolvedValue({ result: { state: 'closed_no_send' }, mpsFirstPopupSent: false });
+      // The decider waits for the pipeline to have SEEN this prompt (the
+      // capture/decision race). Default: it already has, so these tests exercise
+      // the decision itself; the race describe overrides this deliberately.
+      keyStoreGetKey.mockImplementation(async (name: string) =>
+        (name === `nexpath_last_prompt::${P}` ? JSON.stringify({ text: 'just ship it', at: 1 }) : null));
     });
 
     describe('the block condition — only an explicit, non-empty replacement withholds', () => {
@@ -1890,6 +1895,61 @@ describe('service-worker.ts', () => {
       });
     });
 
+    describe('the capture/decision race — the popup must not be lost to timing', () => {
+      // The capture that starts the pipeline and the decision request that waits
+      // for it are two independent messages fired microseconds apart. The decider
+      // must wait for ITS OWN prompt's run to appear, not just glance at a marker
+      // that may not be written yet.
+      const LAST_PROMPT_KEY = `nexpath_last_prompt::${P}`;
+
+      it('waits for the pipeline to pick up THIS prompt before reading its rows', async () => {
+        let seen = false;
+        keyStoreGetKey.mockImplementation(async (name: string) => {
+          if (name === LAST_PROMPT_KEY) return seen ? JSON.stringify({ text: 'just ship it', at: 1 }) : null;
+          return null;
+        });
+        const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+        const sendResponse = decide(messageListener);
+
+        // The pipeline has not registered yet — the decider must NOT have concluded.
+        await new Promise((r) => setTimeout(r, 150));
+        expect(runBrowserPePopup).not.toHaveBeenCalled();
+
+        seen = true; // capture lands, pipeline records the prompt
+        await vi.waitFor(() => expect(runBrowserPePopup).toHaveBeenCalledTimes(1));
+        await vi.waitFor(() => expect(sendResponse).toHaveBeenCalled());
+      });
+
+      it('proceeds immediately when the pipeline already handled this prompt', async () => {
+        keyStoreGetKey.mockImplementation(async (name: string) =>
+          (name === LAST_PROMPT_KEY ? JSON.stringify({ text: 'just ship it', at: 1 }) : null));
+        const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+        decide(messageListener);
+        await vi.waitFor(() => expect(runBrowserPePopup).toHaveBeenCalledTimes(1));
+      });
+
+      it('gives up after the grace window and ALLOWS, rather than holding forever', async () => {
+        // Capture was dropped entirely: nothing will ever record this prompt.
+        keyStoreGetKey.mockResolvedValue(null);
+        const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+        const sendResponse = decide(messageListener);
+        await vi.waitFor(
+          () => expect(sendResponse).toHaveBeenCalledWith({ decision: { kind: 'allow' } }),
+          { timeout: 8000 },
+        );
+        expect(logDebugMock).toHaveBeenCalledWith('submit_decision_pipeline_never_started', expect.anything());
+      }, 10000);
+
+      it('is not fooled by a DIFFERENT prompt already in the last-prompt slot', async () => {
+        keyStoreGetKey.mockImplementation(async (name: string) =>
+          (name === LAST_PROMPT_KEY ? JSON.stringify({ text: 'some earlier prompt', at: 1 }) : null));
+        const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+        decide(messageListener);
+        await new Promise((r) => setTimeout(r, 200));
+        expect(runBrowserPePopup).not.toHaveBeenCalled(); // still waiting for OUR prompt
+      });
+    });
+
     describe('preconditions that allow without showing anything', () => {
       it('no pending PE row → allow, popup never runs', async () => {
         vi.mocked(getPendingPe).mockResolvedValue(null);
@@ -1918,7 +1978,11 @@ describe('service-worker.ts', () => {
 
     describe('one decider per turn (the response-stop surface is suppressed)', () => {
       it('consumes the queued advisory rows so the later stop finds nothing', async () => {
-        keyStoreGetKey.mockImplementation(async (name: string) => (name === PENDING_KEY ? '{"advisoryId":"a1"}' : null));
+        keyStoreGetKey.mockImplementation(async (name: string) => {
+          if (name === PENDING_KEY) return '{"advisoryId":"a1"}';
+          if (name === `nexpath_last_prompt::${P}`) return JSON.stringify({ text: 'just ship it', at: 1 });
+          return null;
+        });
         const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
         decide(messageListener);
         await vi.waitFor(() => expect(logDebugMock).toHaveBeenCalledWith('submit_decision_consumed_advisory', expect.anything()));
