@@ -251,10 +251,34 @@ async function submitInjectedPrompt(
   }
 }
 
+export interface InjectOptions {
+  /**
+   * Insert with `execCommand('insertText')` BEFORE trying any paste event.
+   *
+   * WHY THIS EXISTS (live, Replit, 2026-08-26): a composer may convert a LARGE
+   * PASTE into a file attachment rather than text — the tester's screenshot
+   * showed two `Pasted-My-original…` chips sitting beside the untouched original
+   * prompt, so the replacement was never in the box at all and would have been
+   * SENT AS ATTACHMENTS. Worse, the chips persist: even a later successful text
+   * insert leaves them attached to the message.
+   *
+   * `execCommand('insertText')` is a plain-text insertion and cannot trigger that
+   * conversion, so on such a composer it must be tried FIRST — not as the third
+   * fallback, by which point the chips already exist.
+   *
+   * Off by default: Bolt and Lovable are TipTap/ProseMirror, where the
+   * page-world paste bridge is what made injection work at all and execCommand
+   * was measured as focus-fragile. This is opt-in per agent, so their proven
+   * path is untouched.
+   */
+  preferExecCommand?: boolean;
+}
+
 export async function injectViaSimulatedPaste(
   inputSelector: string | string[],
   text: string,
   submitButtonSelector?: string,
+  options: InjectOptions = {},
 ): Promise<void> {
   // Blank text can never be a legitimate injection, and letting it through was
   // actively destructive: the paste path select-alls first, so an empty insert
@@ -270,6 +294,19 @@ export async function injectViaSimulatedPaste(
     logInjectOutcome('clipboard fallback', `no composer matched ${JSON.stringify(inputSelector)}`);
     await clipboardFallback(text);
     return;
+  }
+
+  const landingBudgetEarly = landingBudgetFor(text);
+
+  // Plain-text insertion first, where a paste would become an attachment.
+  if (options.preferExecCommand === true) {
+    insertViaExecCommand(input, text);
+    if (await waitForLanding(input, text, landingBudgetEarly)) {
+      logInjectOutcome('landed via execCommand (paste-averse composer)');
+      await submitInjectedPrompt(input, text, submitButtonSelector);
+      return;
+    }
+    logInjectOutcome('execCommand did not land — falling through to the paste path');
   }
 
   // Preferred path: the page-world bridge (first-class events for rich editors).
@@ -294,11 +331,15 @@ export async function injectViaSimulatedPaste(
   // Firefox: the synthetic paste is inert (see insertViaExecCommand). Retry the
   // insertion through the trusted execCommand path, then re-check. Also the
   // second chance for a rich editor that dropped the synthetic paste entirely.
-  insertViaExecCommand(input, text);
-  if (await waitForLanding(input, text, landingBudget)) {
-    logInjectOutcome('landed via execCommand');
-    await submitInjectedPrompt(input, text, submitButtonSelector);
-    return;
+  // Skipped when it already ran first (paste-averse composers): re-running an
+  // insertion that just failed only doubles the wait before we degrade.
+  if (options.preferExecCommand !== true) {
+    insertViaExecCommand(input, text);
+    if (await waitForLanding(input, text, landingBudget)) {
+      logInjectOutcome('landed via execCommand');
+      await submitInjectedPrompt(input, text, submitButtonSelector);
+      return;
+    }
   }
 
   // LAST CHANCE before degrading. An earlier attempt may have been accepted

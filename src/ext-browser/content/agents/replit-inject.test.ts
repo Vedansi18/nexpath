@@ -85,4 +85,38 @@ describe('replit-inject.ts — injectPromptText', () => {
 
     expect(focusSpy).toHaveBeenCalled();
   });
+
+  describe('paste-averse composer (live: Replit turned a large paste into attachments)', () => {
+    it('inserts with execCommand BEFORE any paste event', async () => {
+      const input = makeInput();
+      const pasteSpy = vi.fn();
+      input.addEventListener('paste', pasteSpy);
+      // execCommand is what jsdom routes through document.execCommand; stub it to
+      // "land" the text the way CodeMirror would.
+      const exec = vi.fn((_c: string, _u: boolean, value?: string) => {
+        input.textContent = value ?? '';
+        return true;
+      });
+      (document as unknown as { execCommand: unknown }).execCommand = exec;
+
+      await injectPromptText('deploy the release with a rollback plan');
+
+      expect(exec).toHaveBeenCalledWith('insertText', false, 'deploy the release with a rollback plan');
+      // The whole point: no paste event is ever dispatched, so no attachment chip
+      // can be created. Two `Pasted-My-original…` chips were what the tester saw.
+      expect(pasteSpy).not.toHaveBeenCalled();
+      expect(input.textContent).toBe('deploy the release with a rollback plan');
+    });
+
+    it('still falls through to the paste path when execCommand does not land', async () => {
+      const input = makeInput();
+      const pasteSpy = vi.fn();
+      input.addEventListener('paste', pasteSpy);
+      (document as unknown as { execCommand: unknown }).execCommand = vi.fn(() => false);
+
+      await injectPromptText('write a test');
+
+      expect(pasteSpy).toHaveBeenCalled();
+    });
+  });
 });

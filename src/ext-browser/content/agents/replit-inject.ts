@@ -27,5 +27,12 @@ const INPUT_SELECTOR = '.cm-content[contenteditable="true"]';
 const SUBMIT_BUTTON_SELECTOR = '[data-cy="ai-prompt-submit"]';
 
 export async function injectPromptText(text: string): Promise<void> {
-  await injectViaSimulatedPaste(INPUT_SELECTOR, text, SUBMIT_BUTTON_SELECTOR);
+  // `preferExecCommand`: Replit turns a large PASTE into a file attachment —
+  // live 2026-08-26 the enhanced prompt arrived as two `Pasted-My-original…`
+  // chips beside the untouched original, and chips persist even if text lands
+  // later. CodeMirror 6 accepts `execCommand('insertText')` cleanly, and that
+  // path cannot trigger the conversion, so it goes first here.
+  await injectViaSimulatedPaste(INPUT_SELECTOR, text, SUBMIT_BUTTON_SELECTOR, {
+    preferExecCommand: true,
+  });
 }
