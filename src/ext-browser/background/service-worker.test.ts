@@ -807,6 +807,166 @@ describe('service-worker.ts', () => {
     });
   });
 
+  describe('hidden force-advisory test key (nexpath_force_advisory)', () => {
+    // Name-keyed rather than call-ordered: the force key is read LAST in the SW's
+    // Promise.all, and a positional mock would silently rot the moment another
+    // getKey is added ahead of it.
+    function mockKeys(map: Record<string, string | null>): void {
+      keyStoreGetKey.mockImplementation((key: string) => Promise.resolve(map[key] ?? null));
+    }
+
+    const BASE = { openai_api_key: 'sk-real-key', advisory_frequency: 'every_event' };
+
+    function submit(messageListener: (m: unknown, s: unknown, r: unknown) => void): ReturnType<typeof vi.fn> {
+      const sendResponse = vi.fn();
+      messageListener(
+        { type: 'nexpath:prompt-submit', promptText: 'fix the build', projectRoot: 'https://replit.com/@u/p', agent: 'replit', tabId: 7 },
+        {},
+        sendResponse,
+      );
+      return sendResponse;
+    }
+
+    /** The full fire path needs the payload builders the queued advisory reads. */
+    function primeFirePathContent(): void {
+      vi.mocked(resolveDecisionContent).mockReturnValue({
+        L1: [{ option: 'Run tests', descBase: 'd' }],
+        L2: [],
+        L3: [],
+        pinchFallback: 'Final Review',
+      } as unknown as ReturnType<typeof resolveDecisionContent>);
+      vi.mocked(generatePinchLabel).mockResolvedValue('Final Review');
+    }
+
+    it('is OFF when the key is absent — the min-prompts gate still blocks and nothing is forced', async () => {
+      mgrCurrent.promptCount = 1; // below every_event's minPromptsBeforeAdvisory (3)
+      mockKeys(BASE);
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+
+      const sendResponse = submit(messageListener);
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+      expect(logDebugMock).toHaveBeenCalledWith('advisory_min_prompts_blocked', expect.objectContaining({ promptCount: 1 }));
+      expect(shouldFireStage2).not.toHaveBeenCalled();
+      expect(logDebugMock).not.toHaveBeenCalledWith('advisory_gate_forced', expect.anything());
+      expect(logDebugMock).not.toHaveBeenCalledWith('advisory_force_key_active', expect.anything());
+    });
+
+    it('arms on EXACTLY "enabled" — a truthy-looking "true" does not turn it on', async () => {
+      mgrCurrent.promptCount = 1;
+      mockKeys({ ...BASE, nexpath_force_advisory: 'true' });
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+
+      const sendResponse = submit(messageListener);
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+      expect(logDebugMock).toHaveBeenCalledWith('advisory_min_prompts_blocked', expect.anything());
+      expect(shouldFireStage2).not.toHaveBeenCalled();
+    });
+
+    it('bypasses the min-prompts gate AND synthesises a trigger when there is none', async () => {
+      mgrCurrent.promptCount = 1;
+      // beforeEach leaves shouldFireStage2 returning null → the no-trigger exit.
+      vi.mocked(runStage2).mockResolvedValue({
+        fire_decision_session: false, stage: 'release', stage_confidence: 0.9, reason: 'looks fine',
+      } as unknown as Awaited<ReturnType<typeof runStage2>>);
+      primeFirePathContent();
+      mockKeys({ ...BASE, nexpath_force_advisory: 'enabled' });
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+
+      const sendResponse = submit(messageListener);
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+      expect(logDebugMock).toHaveBeenCalledWith('advisory_force_key_active', expect.anything());
+      expect(logDebugMock).toHaveBeenCalledWith('advisory_gate_forced', expect.objectContaining({ gate: 'min_prompts' }));
+      expect(logDebugMock).toHaveBeenCalledWith('advisory_gate_forced', expect.objectContaining({
+        gate: 'no_trigger', synthesised: 'stage_transition',
+      }));
+      expect(runStage2).toHaveBeenCalled();
+    });
+
+    it('overrides a stage-2 DECLINE so the advisory is queued anyway — the gate that blocked the live Replit run', async () => {
+      vi.mocked(shouldFireStage2).mockReturnValue({ kind: 'stage_transition' } as unknown as ReturnType<typeof shouldFireStage2>);
+      vi.mocked(runStage2).mockResolvedValue({
+        fire_decision_session: false,
+        stage: 'review_testing',
+        stage_confidence: 1,
+        reason: 'The developer is focused on correcting issues and ensuring tests are in place.',
+      } as unknown as Awaited<ReturnType<typeof runStage2>>);
+      primeFirePathContent();
+      mockKeys({ ...BASE, nexpath_force_advisory: 'enabled' });
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+
+      const sendResponse = submit(messageListener);
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+      expect(logDebugMock).toHaveBeenCalledWith('advisory_gate_forced', expect.objectContaining({
+        gate: 'stage2_verdict',
+        modelReason: 'The developer is focused on correcting issues and ensuring tests are in place.',
+      }));
+      // Forced or not, the advisory is QUEUED for response-stop, never shown at submit.
+      expect(logDebugMock).toHaveBeenCalledWith('advisory_pending', expect.anything());
+      expect(showAdvisoryMock).not.toHaveBeenCalled();
+    });
+
+    it('records the model\'s REAL verdict even when the switch overrides it (a forced run must not look natural)', async () => {
+      vi.mocked(shouldFireStage2).mockReturnValue({ kind: 'stage_transition' } as unknown as ReturnType<typeof shouldFireStage2>);
+      vi.mocked(runStage2).mockResolvedValue({
+        fire_decision_session: false, stage: 'review_testing', stage_confidence: 1, reason: 'no gap',
+      } as unknown as Awaited<ReturnType<typeof runStage2>>);
+      primeFirePathContent();
+      mockKeys({ ...BASE, nexpath_force_advisory: 'enabled' });
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+
+      const sendResponse = submit(messageListener);
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+      // stage2_result is logged/persisted BEFORE the override — the honest record of
+      // what the model actually said survives.
+      expect(logDebugMock).toHaveBeenCalledWith('stage2_result', expect.objectContaining({ fire: false }));
+      expect(keyStoreSetKey).toHaveBeenCalledWith('nexpath_last_stage2_result', expect.stringContaining('"fire":false'));
+    });
+
+    it('bypasses the per-event dedup so a forced run repeats instead of firing once per session', async () => {
+      vi.mocked(shouldFireStage2).mockReturnValue({ kind: 'stage_transition' } as unknown as ReturnType<typeof shouldFireStage2>);
+      mgrHasFiredDecisionSession.mockReturnValue(true);
+      vi.mocked(runStage2).mockResolvedValue({
+        fire_decision_session: true, stage: 'release', stage_confidence: 0.9, reason: 'r',
+      } as unknown as Awaited<ReturnType<typeof runStage2>>);
+      primeFirePathContent();
+      mockKeys({ ...BASE, nexpath_force_advisory: 'enabled' });
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+
+      const sendResponse = submit(messageListener);
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+      expect(logDebugMock).toHaveBeenCalledWith('advisory_gate_forced', expect.objectContaining({ gate: 'dedup' }));
+      expect(runStage2).toHaveBeenCalled();
+    });
+
+    it('bypasses the post-advisory cooldown', async () => {
+      vi.mocked(shouldFireStage2).mockReturnValue({ kind: 'stage_transition' } as unknown as ReturnType<typeof shouldFireStage2>);
+      mgrCurrent.promptCount = 4;
+      mgrCurrent.lastAdvisoryPromptIndex = 3; // 1 prompt since the last advisory
+      vi.mocked(runStage2).mockResolvedValue({
+        fire_decision_session: true, stage: 'release', stage_confidence: 0.9, reason: 'r',
+      } as unknown as Awaited<ReturnType<typeof runStage2>>);
+      primeFirePathContent();
+      mockKeys({ ...BASE, nexpath_force_advisory: 'enabled' });
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+
+      const sendResponse = submit(messageListener);
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+      expect(logDebugMock).toHaveBeenCalledWith('advisory_gate_forced', expect.objectContaining({ gate: 'post_advisory_cooldown' }));
+      expect(runStage2).toHaveBeenCalled();
+    });
+
+    it('does NOT override advisory_frequency=off — a test switch must never defeat a user kill switch', async () => {
+      mockKeys({ ...BASE, advisory_frequency: 'off', nexpath_force_advisory: 'enabled' });
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+
+      const sendResponse = submit(messageListener);
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+      expect(logDebugMock).toHaveBeenCalledWith('advisory_freq_blocked', expect.objectContaining({ freq: 'off' }));
+      expect(shouldFireStage2).not.toHaveBeenCalled();
+      expect(runStage2).not.toHaveBeenCalled();
+    });
+  });
+
   describe('CLI-parity payload enrichment (question + whyHelp + per-level option lists)', () => {
     function primeFirePath(whyHelpEntry: unknown): void {
       vi.mocked(shouldFireStage2).mockReturnValue({ kind: 'stage_transition' } as unknown as ReturnType<typeof shouldFireStage2>);

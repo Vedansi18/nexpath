@@ -231,6 +231,30 @@ const CROSS_PAGE_PROMPT_DEDUP_MS = 120_000;
 const LAST_STAGE2_RESULT_KEY = 'nexpath_last_stage2_result';
 
 /**
+ * HIDDEN DEVELOPER/TESTER KEY — forces the advisory pipeline past the gates that
+ * legitimately suppress most prompts, so a popup can be exercised ON DEMAND.
+ * Value must be exactly 'enabled'; anything else (including absent) is off, and
+ * off is the shipped behaviour for every user.
+ *
+ * WHY THIS EXISTS. Whether a popup appears is decided by (a) a minimum prompt
+ * count, (b) a trigger, (c) per-event dedup, (d) a cooldown, and finally (e) an
+ * LLM verdict that is free to say "this session is fine, say nothing" — which it
+ * does often and CORRECTLY. That is right for users and unusable for testing:
+ * verifying a panel change meant submitting prompts until the model happened to
+ * agree, and a session that never fired was indistinguishable from a broken
+ * build. Both a tester and this pass burned hours on exactly that ambiguity.
+ *
+ * DELIBERATELY NOT BYPASSED: `advisory_frequency = off` and the major_only /
+ * once_per_session modes. Those are explicit user choices, not incidental gates;
+ * a test switch must not override a kill switch. Everything it does bypass logs
+ * `advisory_gate_forced`, so a forced run can never be mistaken for a natural one.
+ *
+ * Never listed in options.html or the self-check (guard-tested) — it is set by
+ * hand from the extension console and has no UI.
+ */
+const FORCE_ADVISORY_KEY = 'nexpath_force_advisory';
+
+/**
  * Last PE prepare's WHITELISTED summary (PB5) — the debug channel's answer to
  * "did a prompt enhancement prepare, and what did it decide?" without reading
  * SW console lines that die with the worker. Dispositions, policies, counters
@@ -419,7 +443,7 @@ async function runPromptSubmitPipeline(
   const now = clock.now();
 
   // ── Step 1: Load persisted session state + config ───────────────────────────
-  const [loadedState, lang, apiKey, freqRaw, roleRaw, lastPromptRaw, projectFreqRaw, projectRoleRaw, langOverrideRaw] = await Promise.all([
+  const [loadedState, lang, apiKey, freqRaw, roleRaw, lastPromptRaw, projectFreqRaw, projectRoleRaw, langOverrideRaw, forceAdvisoryRaw] = await Promise.all([
     idb.loadSessionState(projectRoot),
     idb.getProjectDetectedLanguage(projectRoot),
     keyStore.getKey('openai_api_key'),
@@ -437,6 +461,9 @@ async function runPromptSubmitPipeline(
     keyStore.getKey(projectRoleKeyFor(projectRoot)),
     // language_override (CLI auto.ts step 3.5's getConfig('language_override')).
     keyStore.getKey('language_override'),
+    // Hidden test switch — see FORCE_ADVISORY_KEY. Kept last so no existing read
+    // shifts position; absent for every real user, and then this is a no-op.
+    keyStore.getKey(FORCE_ADVISORY_KEY),
   ]);
 
   // ── Step 1.2: Cross-page duplicate guard (see CROSS_PAGE_PROMPT_DEDUP_MS) ───
@@ -461,6 +488,9 @@ async function runPromptSubmitPipeline(
   // to the same 'every_event' default when unset.
   const freq = (projectFreqRaw ?? freqRaw ?? 'every_event') as AdvisoryFrequencyLevel;
   const freqConfig = resolveFrequencyConfig(freq);
+  // Exact-equality on purpose: a stray truthy value must not arm this.
+  const forceAdvisory = forceAdvisoryRaw === 'enabled';
+  if (forceAdvisory) log.debug('advisory_force_key_active', { key: FORCE_ADVISORY_KEY });
   // CLI parity (auto.ts:159): per-project role first, then global, then null.
   const configuredRole = (projectRoleRaw ?? roleRaw) as UserRole | null;
 
@@ -650,16 +680,23 @@ async function runPromptSubmitPipeline(
     return;
   }
   if (mgr.current.promptCount < freqConfig.minPromptsBeforeAdvisory) {
-    log.debug('advisory_min_prompts_blocked', {
+    if (!forceAdvisory) {
+      log.debug('advisory_min_prompts_blocked', {
+        promptCount: mgr.current.promptCount,
+        minRequired: freqConfig.minPromptsBeforeAdvisory,
+      });
+      await prepareSequenceShapedPeFallback('support_only_not_triggering');
+      return;
+    }
+    log.debug('advisory_gate_forced', {
+      gate: 'min_prompts',
       promptCount: mgr.current.promptCount,
       minRequired: freqConfig.minPromptsBeforeAdvisory,
     });
-    await prepareSequenceShapedPeFallback('support_only_not_triggering');
-    return;
   }
 
   // ── Step 6: Decide whether Stage 2 should run ───────────────────────────────
-  const trigger = shouldFireStage2(
+  let trigger = shouldFireStage2(
     mgr.current as import('../../core/classifier/types.js').SessionState,
     prevStage,
     newAbsenceFlags,
@@ -667,8 +704,15 @@ async function runPromptSubmitPipeline(
   );
 
   if (!trigger) {
-    await prepareSequenceShapedPeFallback('support_only_not_triggering');
-    return;
+    if (!forceAdvisory) {
+      await prepareSequenceShapedPeFallback('support_only_not_triggering');
+      return;
+    }
+    // Synthesise the simpler of the two trigger kinds: 'stage_transition' needs no
+    // qualifying flags, so the downstream flagType/selected_signal_key handling is
+    // the same path a natural stage change takes.
+    log.debug('advisory_gate_forced', { gate: 'no_trigger', synthesised: 'stage_transition' });
+    trigger = { kind: 'stage_transition' };
   }
 
   // ── Step 6.3: Dedup — already fired this exact stage_transition/absence event
@@ -679,9 +723,15 @@ async function runPromptSubmitPipeline(
     ? `stage_transition:${prevStageBeforeUpdate}→${mgr.current.currentStage}`
     : `absence:${trigger.qualifyingFlags?.[0]?.signalKey ?? 'unknown'}@${mgr.current.currentStage}`;
   if (mgr.hasFiredDecisionSession(preCheckFiredKey)) {
-    log.debug('advisory_dedup_blocked', { firedKey: preCheckFiredKey });
-    await prepareSequenceShapedPeFallback('blocked_by_dedup');
-    return;
+    if (!forceAdvisory) {
+      log.debug('advisory_dedup_blocked', { firedKey: preCheckFiredKey });
+      await prepareSequenceShapedPeFallback('blocked_by_dedup');
+      return;
+    }
+    // Without this, a forced run fires ONCE per session and every later attempt is
+    // silently deduped — the exact "it worked, now it doesn't" confusion the switch
+    // exists to remove.
+    log.debug('advisory_gate_forced', { gate: 'dedup', firedKey: preCheckFiredKey });
   }
 
   // ── Step 6.5: Advisory frequency gate — mirrors auto.ts's step 6.5 exactly. ───
@@ -699,13 +749,20 @@ async function runPromptSubmitPipeline(
   // ── Step 6.6: Post-advisory cooldown — mirrors auto.ts's step 6.6 exactly. ────
   const lastAdvisory = mgr.current.lastAdvisoryPromptIndex ?? -1;
   if (lastAdvisory >= 0 && mgr.current.promptCount - lastAdvisory < freqConfig.postAdvisoryCooldown) {
-    log.debug('advisory_cooldown_blocked', {
+    if (!forceAdvisory) {
+      log.debug('advisory_cooldown_blocked', {
+        promptCount: mgr.current.promptCount,
+        lastAdvisoryAt: lastAdvisory,
+        cooldownRemaining: freqConfig.postAdvisoryCooldown - (mgr.current.promptCount - lastAdvisory),
+      });
+      await prepareSequenceShapedPeFallback('blocked_by_post_advisory_cooldown');
+      return;
+    }
+    log.debug('advisory_gate_forced', {
+      gate: 'post_advisory_cooldown',
       promptCount: mgr.current.promptCount,
       lastAdvisoryAt: lastAdvisory,
-      cooldownRemaining: freqConfig.postAdvisoryCooldown - (mgr.current.promptCount - lastAdvisory),
     });
-    await prepareSequenceShapedPeFallback('blocked_by_post_advisory_cooldown');
-    return;
   }
 
   // ── Step 6.7: Session advisory cap — profile-aware ceiling — mirrors auto.ts's
@@ -823,6 +880,14 @@ async function runPromptSubmitPipeline(
     trigger: trigger.kind,
     prevStage: prevStageBeforeUpdate,
   }));
+
+  if (!stage2Out.fire_decision_session && forceAdvisory) {
+    // Override the VERDICT only — the stage, confidence, signal assessments and
+    // reason stay exactly as the model produced them, so the popup below is built
+    // from real pipeline output rather than a fabricated payload.
+    log.debug('advisory_gate_forced', { gate: 'stage2_verdict', modelReason: stage2Out.reason });
+    stage2Out.fire_decision_session = true;
+  }
 
   if (!stage2Out.fire_decision_session) {
     await prepareSequenceShapedPeFallback('too_weak_no_popup');

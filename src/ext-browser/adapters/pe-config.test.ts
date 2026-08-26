@@ -64,7 +64,7 @@ describe('hidden-key guard — PE keys never surface on the options page', () =>
   const optionsDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'options');
   const surfaces = ['options.html', 'options.ts'].map((f) => readFileSync(join(optionsDir, f), 'utf8'));
 
-  for (const hidden of ['prompt_enhancement.popup_cooldown', 'nexpath_pending_pe', 'nexpath_advisory_legacy_surface', 'prompt_enhancement.sequence.enabled']) {
+  for (const hidden of ['prompt_enhancement.popup_cooldown', 'nexpath_pending_pe', 'nexpath_advisory_legacy_surface', 'prompt_enhancement.sequence.enabled', 'nexpath_force_advisory']) {
     it(`"${hidden}" appears nowhere in the options page`, () => {
       for (const source of surfaces) expect(source).not.toContain(hidden);
     });
