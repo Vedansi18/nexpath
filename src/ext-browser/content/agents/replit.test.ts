@@ -1,6 +1,17 @@
 // @vitest-environment jsdom
 
 import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
+
+// replit.ts now installs the submit-time gate, which needs storage (to resolve
+// the switch) and runtime messaging. The polyfill throws on import outside a real
+// extension, so it is stubbed here exactly as the other content-script tests do.
+vi.mock('webextension-polyfill', () => ({
+  default: {
+    storage: { local: { get: vi.fn().mockResolvedValue({}) }, onChanged: { addListener: vi.fn() } },
+    runtime: { sendMessage: vi.fn().mockResolvedValue(undefined) },
+  },
+}));
+
 import { observeUserMessages, observeSubmitButton, observeWorkedForLabel, observeComposerSubmit, bootstrap, __resetResponseStopDedupForTests, __resetPromptCaptureStateForTests, __teardownAutoBootstrapForTests } from './replit.js';
 
 function flush(): Promise<void> {

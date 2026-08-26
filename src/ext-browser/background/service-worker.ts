@@ -37,6 +37,8 @@ import {
   isPeCommandMsg,
   isPeKeepaliveMsg,
   isSubmitFlowStateMsg,
+  isSubmitFlowEventMsg,
+  isSubmitDecisionRequestMsg,
   isPeTerminalNoticeMsg,
   isPromptSubmitMsg,
   isResponseStopMsg,
@@ -192,6 +194,51 @@ browser.runtime.onMessage.addListener(
       log.debug('submit_flow_state', {
         site: msg.site, armed: msg.armed, source: msg.source, seq: msg.seq,
       });
+      sendResponse({ ok: true });
+      return true;
+    }
+
+    if (isSubmitDecisionRequestMsg(msg)) {
+      // The page is HOLDING the user's request while this resolves. Two rules
+      // apply to everything under here:
+      //   1. always answer — a missing answer costs the user their prompt until
+      //      their hold budget expires;
+      //   2. answer 'allow' on any failure — only a deliberate, non-empty
+      //      replacement may withhold the original.
+      log.debug('submit_decision_requested', {
+        site: msg.site, submitId: msg.submitId, projectRoot: msg.projectRoot,
+      });
+      decideHeldSubmit(msg, sender.tab?.id)
+        .then((decision) => {
+          log.debug('submit_decision_answered', { submitId: msg.submitId, kind: decision.kind });
+          sendResponse({ decision });
+        })
+        .catch((err: unknown) => {
+          log.warn('submit_decision_failed', { submitId: msg.submitId, error: String(err) });
+          sendResponse({ decision: { kind: 'allow' } });
+        });
+      return true; // keep the channel open for the async answer
+    }
+
+    if (isSubmitFlowEventMsg(msg)) {
+      // One ring event from the page's gated submit path. The page owns the
+      // hold; this is only how its branches become readable after the fact
+      // (service-worker console lines die with the worker).
+      log.debug(msg.event, { site: msg.site, ...msg.data });
+
+      // An expired hold means the page has ALREADY sent the original. Any popup
+      // still on screen for that submit now has no consumer, so tear it down and
+      // mark the submit so a late verdict is discarded rather than acted on.
+      if (msg.event === 'submit_hold_expired') {
+        const submitId = typeof msg.data['submitId'] === 'string' ? msg.data['submitId'] : null;
+        if (submitId !== null) markSubmitAbandoned(submitId);
+        const tabId = sender.tab?.id;
+        if (tabId !== undefined) {
+          browser.tabs.sendMessage(tabId, { type: 'nexpath:pe-close', projectRoot: '' })
+            .catch(() => { /* tab gone or no panel open */ });
+        }
+      }
+
       sendResponse({ ok: true });
       return true;
     }
@@ -421,6 +468,169 @@ const PE_PENDING_MAX_AGE_MS = 30 * 60 * 1000;
  * persisted marker is already handled by the reader's staleness cutoff.
  */
 const decisionInflightCounts = new Map<string, number>();
+
+/**
+ * Wait until the submit pipeline for `projectRoot` has finished parking its rows.
+ *
+ * Extracted so the response-stop path and the held-submit decider cannot drift:
+ * both need "the pipeline queued the advisory AND parked the PE", and both must
+ * wait for the MARKER rather than for a row (the PE prepare runs last, so a
+ * row-based wait can read a half-finished turn). The response-stop path's
+ * behaviour is pinned by its own tests; this is a pure extraction.
+ */
+async function waitForSubmitPipelineIdle(projectRoot: string, logKey: string): Promise<void> {
+  const inflightRaw = await keyStore.getKey(decisionInflightKeyFor(projectRoot));
+  if (!inflightRaw) return;
+  let fresh = false;
+  try {
+    const inflight = JSON.parse(inflightRaw) as { at?: unknown };
+    fresh = typeof inflight.at === 'number' && clock.now() - inflight.at <= DECISION_INFLIGHT_STALE_MS;
+  } catch { /* malformed marker → treat as stale */ }
+  if (!fresh) return;
+  log.debug(logKey, { projectRoot });
+  const deadline = clock.now() + DECISION_WAIT_MAX_MS;
+  while (clock.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, DECISION_WAIT_POLL_MS));
+    if (!await keyStore.getKey(decisionInflightKeyFor(projectRoot))) break;
+  }
+}
+
+/** The verdict shape the page's decision channel understands. */
+type HeldSubmitDecision = { kind: 'allow' } | { kind: 'block'; replacement: string };
+
+/**
+ * Submits whose hold the PAGE has already given up on.
+ *
+ * When a hold expires, the page sends the original and stops listening — but the
+ * popup this worker opened is still on screen. Leaving it there is the one thing
+ * that could produce the double-submit this milestone must make impossible: the
+ * user would click "use this" on a surface whose outcome has no consumer, and if
+ * anything injected that text the agent would receive BOTH prompts. So an
+ * expired hold is recorded here, the popup is torn down, and any verdict that
+ * arrives afterwards is discarded.
+ */
+const abandonedSubmits = new Set<string>();
+const ABANDONED_SUBMITS_CAP = 50;
+
+function markSubmitAbandoned(submitId: string): void {
+  abandonedSubmits.add(submitId);
+  // Bounded: this is a guard set, not a log.
+  if (abandonedSubmits.size > ABANDONED_SUBMITS_CAP) {
+    const oldest = abandonedSubmits.values().next().value;
+    if (oldest !== undefined) abandonedSubmits.delete(oldest);
+  }
+}
+
+/**
+ * Decide a submission the page is currently HOLDING.
+ *
+ * Runs the SAME popup surface the response-stop path runs — the engine's own
+ * state machine, rendered in the dock — but at submit time, inside the hold.
+ *
+ * ── THE BLOCK CONDITION ──────────────────────────────────────────────────────
+ * Exactly one outcome may withhold the user's prompt: the popup produced an
+ * explicit, non-empty replacement (`selected_current` with body text). Skipped,
+ * dismissed, "use original", crashed, not shown, no pending row, cooldown,
+ * abandoned — every one of those allows. That is the shipped rule, kept; only
+ * its encoding differs (a return value here, a stdout line in the CLI).
+ *
+ * ── THIS PATH NEVER INJECTS ──────────────────────────────────────────────────
+ * The response-stop path delivers its result by injecting text into the composer
+ * and submitting it. This path MUST NOT: the replacement is delivered by
+ * rewriting the request the page is already holding. Doing both would send the
+ * prompt twice — the exact failure this milestone exists to prevent. There is
+ * deliberately no `nexpath:pe-inject` below.
+ *
+ * ── SUPPRESSION ──────────────────────────────────────────────────────────────
+ * A turn handled here consumes its pending rows, so the later response-stop
+ * finds nothing and renders nothing. One decider per turn.
+ */
+async function decideHeldSubmit(
+  msg: { site: string; projectRoot: string; prompt: string; submitId: string },
+  tabId: number | undefined,
+): Promise<HeldSubmitDecision> {
+  const { projectRoot, submitId } = msg;
+  if (!projectRoot || tabId === undefined) {
+    log.debug('submit_decision_no_target', { submitId, projectRoot, hasTab: tabId !== undefined });
+    return { kind: 'allow' };
+  }
+
+  // The prompt was emitted to the pipeline just before the hold began; give it
+  // time to classify and park its rows.
+  await waitForSubmitPipelineIdle(projectRoot, 'submit_decision_waiting_for_pipeline');
+
+  const state = await idb.loadSessionState(projectRoot);
+  const pe = await getPendingPe(projectRoot, state?.sessionId);
+  if (!pe) {
+    log.debug('submit_decision_no_pending_pe', { submitId, projectRoot });
+    return { kind: 'allow' };
+  }
+
+  // Same cooldown rule the stop path applies: a suppressed show CONSUMES the
+  // row, because a cooldown hit is a decision rather than a deferral.
+  const cooldown = await resolvePePopupCooldown(projectRoot);
+  const lastShownIndex = state?.lastPromptEnhancementPromptIndex;
+  const promptCount = state?.promptCount ?? pe.promptCount;
+  if (typeof lastShownIndex === 'number' && cooldown > 0 && promptCount - lastShownIndex < cooldown) {
+    await markPendingPeShown(projectRoot);
+    log.debug('submit_decision_cooldown', { submitId, projectRoot, promptCount, lastShownIndex, cooldown });
+    return { kind: 'allow' };
+  }
+
+  // The submit surface owns this turn — consume the queued advisory so the later
+  // response-stop has nothing to render (one decider per turn).
+  const advKey = pendingAdvisoryKeyFor(projectRoot);
+  if (await keyStore.getKey(advKey)) {
+    await Promise.all([
+      keyStore.setKey(advKey, ''),
+      keyStore.setKey(pendingAdvisoryOgKeyFor(projectRoot), ''),
+    ]);
+    log.debug('submit_decision_consumed_advisory', { submitId, projectRoot });
+  }
+
+  const [apiKey, sequenceEnabled] = await Promise.all([
+    keyStore.getKey('openai_api_key'),
+    resolvePeSequenceEnabled(projectRoot),
+  ]);
+
+  const stopOutcome = await runBrowserPePopup({
+    log,
+    projectRoot,
+    apiKey,
+    record: pe,
+    sequenceEnabled,
+    feedbackStore: keyStore,
+    sendToTab: (m) => browser.tabs.sendMessage(tabId, m),
+    onFirstRendered: async () => {
+      await markPendingPeShown(projectRoot);
+      if (state) {
+        state.lastPromptEnhancementPromptIndex = state.promptCount;
+        await idb.saveSessionState(state);
+      }
+    },
+  });
+  const outcome = stopOutcome.result;
+
+  // The page may have given up while the user was reading. Its request has
+  // already gone out, so a verdict now would be a second send.
+  if (abandonedSubmits.has(submitId)) {
+    abandonedSubmits.delete(submitId);
+    log.debug('submit_decision_discarded_abandoned', { submitId, state: outcome.state });
+    return { kind: 'allow' };
+  }
+
+  if (outcome.state === 'selected_current' && outcome.bodyText.length > 0) {
+    log.debug('submit_decision_block', { submitId, projectRoot, chars: outcome.bodyText.length });
+    return { kind: 'block', replacement: outcome.bodyText };
+  }
+
+  log.debug('submit_decision_allow', {
+    submitId,
+    state: outcome.state,
+    ...(outcome.state === 'not_shown' ? { reasonCodes: outcome.reasonCodes.slice(0, 6) } : {}),
+  });
+  return { kind: 'allow' };
+}
 
 async function handlePromptSubmit(
   promptText: string,
@@ -1103,22 +1313,7 @@ async function handleResponseStopPeFirst(projectRoot: string, tabId: number | un
   // The submit pipeline queues the advisory AND parks the PE before clearing
   // its inflight marker — wait for the MARKER here (not for a row: the PE
   // prepare runs last, so a row-based wait could read a half-finished turn).
-  const inflightRaw = await keyStore.getKey(decisionInflightKeyFor(projectRoot));
-  if (inflightRaw) {
-    let fresh = false;
-    try {
-      const inflight = JSON.parse(inflightRaw) as { at?: unknown };
-      fresh = typeof inflight.at === 'number' && clock.now() - inflight.at <= DECISION_INFLIGHT_STALE_MS;
-    } catch { /* malformed marker → treat as stale */ }
-    if (fresh) {
-      log.debug('response_stop_waiting_for_decision', { projectRoot });
-      const deadline = clock.now() + DECISION_WAIT_MAX_MS;
-      while (clock.now() < deadline) {
-        await new Promise((resolve) => setTimeout(resolve, DECISION_WAIT_POLL_MS));
-        if (!await keyStore.getKey(decisionInflightKeyFor(projectRoot))) break;
-      }
-    }
-  }
+  await waitForSubmitPipelineIdle(projectRoot, 'response_stop_waiting_for_decision');
 
   // MPS-7: consume the queued advisory silently — the surface is removed.
   const advKey = pendingAdvisoryKeyFor(projectRoot);

@@ -1,4 +1,9 @@
-import { createCaptureKit } from './capture-kit.js';
+import browser from 'webextension-polyfill';
+import { createCaptureKit, setReplitSubmitInterceptor } from './capture-kit.js';
+import { createReplitSubmitGate } from '../replit-submit-gate.js';
+import { resolveSubmitFlow, submitFlowStorageKeys } from '../../adapters/submit-flow-config.js';
+import { resolveProjectRootFromLocation } from './agent-hosts.js';
+import { injectPromptText } from './replit-inject.js';
 
 /**
  * Replit capture — B3. Thin agent config over the shared capture kit.
@@ -85,6 +90,102 @@ const kit = createCaptureKit({
     log: '[nexpath] response-stop detected ("Worked for" label appeared)',
   },
 });
+
+// ── Submit-time gate installation ────────────────────────────────────────────
+//
+// Installs the DOM gate that can cancel a composer submit, hold it, and then
+// send either a replacement or the original. It is inert on this build: the gate
+// ships with its readiness flag false (its re-issue path has not been proven on
+// a live Replit project, and an unverified re-issue can lose a prompt), and it
+// additionally refuses whenever the switch is disarmed. Installing it here
+// rather than leaving it unreferenced means the flip to live is a one-line
+// change to that flag, not new wiring — and it keeps the module in the bundle
+// where its behaviour can be inspected.
+// The switch is resolved HERE rather than read from the bridge module: each
+// content-script entry point is bundled separately, so module-level state does
+// not cross between them (this file's own note below explains the same hazard
+// for capture). Resolving locally — once at load, then on every change — is
+// self-contained and cheap. `armed` starts false, so an unresolved switch never
+// intercepts.
+let armed = false;
+function trackSubmitFlow(): void {
+  const apply = (): void => {
+    void resolveSubmitFlow('replit')
+      .then((r) => { armed = r.enabled; })
+      .catch(() => { armed = false; });
+  };
+  apply();
+  try {
+    browser.storage.onChanged.addListener((changes, area) => {
+      if (area !== 'local') return;
+      const watched = new Set(submitFlowStorageKeys());
+      if (Object.keys(changes).some((k) => watched.has(k))) apply();
+    });
+  } catch {
+    /* no storage events — the load-time resolution still applies */
+  }
+}
+trackSubmitFlow();
+
+function sendToSw(msg: unknown): void {
+  try {
+    void browser.runtime.sendMessage(msg).catch(() => { /* SW asleep */ });
+  } catch { /* context invalidated */ }
+}
+
+setReplitSubmitInterceptor((ev, prompt, input, composer) => {
+  const gate = ensureSubmitGate(input, composer);
+  return gate.maybeIntercept(ev, prompt);
+});
+
+let replitGate: ReturnType<typeof createReplitSubmitGate> | null = null;
+
+function ensureSubmitGate(
+  input: HTMLElement,
+  composer: { readComposerText: (el: HTMLElement) => string },
+): ReturnType<typeof createReplitSubmitGate> {
+  if (replitGate) return replitGate;
+  replitGate = createReplitSubmitGate({
+    isArmed: () => armed,
+    decide: async (ctx) => {
+      const res = await browser.runtime.sendMessage({
+        type: 'nexpath:submit-decision-request',
+        site: 'replit',
+        projectRoot: resolveProjectRootFromLocation(
+          window.location.hostname, window.location.pathname, window.location.origin,
+        ) ?? '',
+        requestId: `${ctx.submitId}#${Date.now()}`,
+        prompt: ctx.prompt,
+        submitId: ctx.submitId,
+      }) as { decision?: { kind?: string; replacement?: string } } | undefined;
+      const d = res?.decision;
+      if (d?.kind === 'block' && typeof d.replacement === 'string' && d.replacement.length > 0) {
+        return { kind: 'block', replacement: d.replacement };
+      }
+      return { kind: 'allow' };
+    },
+    emit: (event, data) => {
+      sendToSw({ type: 'nexpath:submit-flow-event', site: 'replit', event, data: data ?? {} });
+    },
+    readComposerText: () => composer.readComposerText(input),
+    // injectViaSimulatedPaste already performs the send (and verifies the text
+    // landed first), so delivering a replacement is one call.
+    deliverReplacement: async (text) => {
+      await injectPromptText(text);
+      return true;
+    },
+    // Re-issuing means submitting what is ALREADY in the composer — we cancelled
+    // the user's own submit, so the text is still there. Clicking Replit's real
+    // send control is the closest thing to what the user did.
+    reissueOriginal: async () => {
+      const btn = document.querySelector<HTMLElement>(SUBMIT_BUTTON_SELECTOR);
+      if (!btn) return false;
+      btn.click();
+      return true;
+    },
+  });
+  return replitGate;
+}
 
 // Re-exported under the original names so tests (and any future callers) keep a
 // stable, Replit-named surface; the implementations are the shared kit's.

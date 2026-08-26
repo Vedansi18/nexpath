@@ -147,6 +147,32 @@ export interface SubmitFlowStateMsg {
   seq: number;
 }
 
+/**
+ * One ring event from the page's gated submit path (`submit_hold_started`,
+ * `…_released_allow`, `…_echo_skip`, `…_expired`, …). Diagnostic only: the SW
+ * logs it into the durable buffer and acks. Nothing branches on it.
+ */
+export interface SubmitFlowEventMsg {
+  type: 'nexpath:submit-flow-event';
+  site: string;
+  event: string;
+  data: Record<string, unknown>;
+}
+
+/**
+ * The page is holding a submission and needs a verdict. Round-trip: the content
+ * script relays it and posts the answer straight back to the page, so the
+ * outcome never depends on this service-worker instance surviving.
+ */
+export interface SubmitDecisionRequestMsg {
+  type: 'nexpath:submit-decision-request';
+  site: string;
+  projectRoot: string;
+  requestId: string;
+  prompt: string;
+  submitId: string;
+}
+
 export type ContentToSwMsg =
   | PromptSubmitMsg
   | ResponseStopMsg
@@ -156,7 +182,9 @@ export type ContentToSwMsg =
   | PeCommandMsg
   | PeTerminalNoticeMsg
   | PeKeepaliveMsg
-  | SubmitFlowStateMsg;
+  | SubmitFlowStateMsg
+  | SubmitFlowEventMsg
+  | SubmitDecisionRequestMsg;
 
 // ── Service Worker → Content ──────────────────────────────────────────────────
 
@@ -208,6 +236,8 @@ export type ExtensionMsg =
   | PeTerminalNoticeMsg
   | PeKeepaliveMsg
   | SubmitFlowStateMsg
+  | SubmitFlowEventMsg
+  | SubmitDecisionRequestMsg
   | ShowPeMsg
   | PeCloseMsg
   | PeInjectMsg;
@@ -280,6 +310,23 @@ export function isSubmitFlowStateMsg(msg: unknown): msg is SubmitFlowStateMsg {
   return m['type'] === 'nexpath:submit-flow-state' &&
     typeof m['site'] === 'string' && typeof m['armed'] === 'boolean' &&
     typeof m['source'] === 'string' && typeof m['seq'] === 'number';
+}
+
+export function isSubmitDecisionRequestMsg(msg: unknown): msg is SubmitDecisionRequestMsg {
+  if (typeof msg !== 'object' || msg === null) return false;
+  const m = msg as Record<string, unknown>;
+  return m['type'] === 'nexpath:submit-decision-request' &&
+    typeof m['site'] === 'string' && typeof m['projectRoot'] === 'string' &&
+    typeof m['requestId'] === 'string' && typeof m['prompt'] === 'string' &&
+    typeof m['submitId'] === 'string';
+}
+
+export function isSubmitFlowEventMsg(msg: unknown): msg is SubmitFlowEventMsg {
+  if (typeof msg !== 'object' || msg === null) return false;
+  const m = msg as Record<string, unknown>;
+  return m['type'] === 'nexpath:submit-flow-event' &&
+    typeof m['site'] === 'string' && typeof m['event'] === 'string' &&
+    typeof m['data'] === 'object' && m['data'] !== null;
 }
 
 export function isShowPeMsg(msg: unknown): msg is ShowPeMsg {

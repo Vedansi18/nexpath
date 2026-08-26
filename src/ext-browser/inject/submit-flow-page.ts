@@ -33,6 +33,8 @@ export const SUBMIT_FLOW_PUSH_TYPE = 'nexpath:submit-flow';
 export const SUBMIT_FLOW_REQUEST_TYPE = 'nexpath:submit-flow-request';
 /** Page → content script: this is what I now believe (the A9 read-back). */
 export const SUBMIT_FLOW_STATE_TYPE = 'nexpath:submit-flow-state';
+/** Page → content script: one ring event from the gated submit path. */
+export const SUBMIT_FLOW_EVENT_TYPE = 'nexpath:submit-flow-event';
 
 export interface SubmitFlowPageState {
   armed: boolean;

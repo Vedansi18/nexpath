@@ -22,13 +22,18 @@
  * changes. The gated fetch path is HB2.
  */
 import browser from 'webextension-polyfill';
-import { resolveAgentFromHostname } from './agents/agent-hosts.js';
+import { resolveAgentFromHostname, resolveProjectRootFromLocation } from './agents/agent-hosts.js';
 import { resolveSubmitFlow, submitFlowStorageKeys, type SubmitFlowResolution } from '../adapters/submit-flow-config.js';
 import {
   SUBMIT_FLOW_PUSH_TYPE,
   SUBMIT_FLOW_REQUEST_TYPE,
   SUBMIT_FLOW_STATE_TYPE,
+  SUBMIT_FLOW_EVENT_TYPE,
 } from '../inject/submit-flow-page.js';
+import {
+  SUBMIT_DECISION_REQUEST_TYPE,
+  SUBMIT_DECISION_RESPONSE_TYPE,
+} from '../inject/submit-decision-channel.js';
 
 export interface SubmitFlowBridgeDeps {
   win?: Window;
@@ -39,6 +44,8 @@ export interface SubmitFlowBridgeDeps {
   onStorageChanged?: (cb: (changes: Record<string, unknown>, area: string) => void) => void;
   /** Forward the page's read-back to the SW. Failures are swallowed. */
   sendToSw?: (msg: unknown) => void;
+  /** Round-trip ask to the SW (decision requests). Rejection ⇒ the caller allows. */
+  askSw?: (msg: unknown) => Promise<unknown>;
 }
 
 export interface SubmitFlowBridgeHandle {
@@ -56,6 +63,10 @@ function defaultSendToSw(msg: unknown): void {
   }
 }
 
+function defaultAskSw(msg: unknown): Promise<unknown> {
+  return browser.runtime.sendMessage(msg);
+}
+
 function defaultOnStorageChanged(cb: (changes: Record<string, unknown>, area: string) => void): void {
   try {
     browser.storage.onChanged.addListener(cb as Parameters<typeof browser.storage.onChanged.addListener>[0]);
@@ -64,17 +75,35 @@ function defaultOnStorageChanged(cb: (changes: Record<string, unknown>, area: st
   }
 }
 
+/**
+ * The last resolution this page resolved, for content-script consumers that
+ * cannot take the page-world push (Replit's DOM gate). Null until the first
+ * resolution completes — and null must be read as DISARMED, the same fail-safe
+ * the page world applies.
+ */
+let lastResolvedForPage: SubmitFlowResolution | null = null;
+
+export function isSubmitFlowArmedForPage(): boolean {
+  return lastResolvedForPage?.enabled === true;
+}
+
 export function setupSubmitFlowBridge(deps: SubmitFlowBridgeDeps = {}): SubmitFlowBridgeHandle {
   const win = deps.win ?? window;
   const resolve = deps.resolve ?? resolveSubmitFlow;
   const sendToSw = deps.sendToSw ?? defaultSendToSw;
   const onStorageChanged = deps.onStorageChanged ?? defaultOnStorageChanged;
+  const askSw = deps.askSw ?? defaultAskSw;
   const watched = new Set(submitFlowStorageKeys());
 
   // Resolved lazily so an SPA navigation between sites re-reads the hostname
   // rather than a value frozen at content-script load.
   const siteOf = (): string =>
     deps.site ?? resolveAgentFromHostname(win.location.hostname);
+
+  // Read at message time, not at setup: SPA navigations change the path without
+  // re-injecting this script (the same rule main-world-injector.ts follows).
+  const projectRootOf = (): string =>
+    resolveProjectRootFromLocation(win.location.hostname, win.location.pathname, win.location.origin) ?? '';
 
   let seq = 0;
   let last: SubmitFlowResolution | null = null;
@@ -103,6 +132,7 @@ export function setupSubmitFlowBridge(deps: SubmitFlowBridgeDeps = {}): SubmitFl
       return;
     }
     last = resolution;
+    lastResolvedForPage = resolution;
     push(resolution);
   };
 
@@ -116,6 +146,51 @@ export function setupSubmitFlowBridge(deps: SubmitFlowBridgeDeps = {}): SubmitFl
     if (msg.type === SUBMIT_FLOW_REQUEST_TYPE) {
       if (last !== null) push(last);
       else void refresh();
+      return;
+    }
+
+    if (msg.type === SUBMIT_DECISION_REQUEST_TYPE) {
+      // Relay the page's question to the SW and post the answer straight back to
+      // the page. Every failure mode answers 'allow': a decision we cannot get
+      // must never be able to withhold the user's prompt.
+      const req = msg as { requestId?: unknown; prompt?: unknown; submitId?: unknown };
+      if (typeof req.requestId !== 'string') return;
+      const requestId = req.requestId;
+      const answer = (decision: unknown): void => {
+        try {
+          win.postMessage(
+            { type: SUBMIT_DECISION_RESPONSE_TYPE, requestId, decision },
+            win.location.origin,
+          );
+        } catch {
+          /* the page's budget will release the hold */
+        }
+      };
+      void askSw({
+        type: SUBMIT_DECISION_REQUEST_TYPE,
+        site: siteOf(),
+        projectRoot: projectRootOf(),
+        requestId,
+        prompt: typeof req.prompt === 'string' ? req.prompt : '',
+        submitId: typeof req.submitId === 'string' ? req.submitId : '',
+      }).then(
+        (res) => { answer((res as { decision?: unknown } | null)?.decision ?? { kind: 'allow' }); },
+        () => { answer({ kind: 'allow' }); },
+      );
+      return;
+    }
+
+    if (msg.type === SUBMIT_FLOW_EVENT_TYPE) {
+      // One ring event from the gated submit path. Forwarded verbatim except
+      // for the site stamp; the SW is what owns the durable buffer.
+      const ev = msg as { event?: unknown; data?: unknown };
+      if (typeof ev.event !== 'string') return;
+      sendToSw({
+        type: SUBMIT_FLOW_EVENT_TYPE,
+        site: siteOf(),
+        event: ev.event,
+        data: (typeof ev.data === 'object' && ev.data !== null ? ev.data : {}) as Record<string, unknown>,
+      });
       return;
     }
 

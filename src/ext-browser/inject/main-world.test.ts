@@ -89,12 +89,40 @@ describe('fetch capture rules (B4 — Bolt transport, recon-confirmed)', () => {
   }
   const nativeFetch = vi.fn().mockResolvedValue({ ok: true } as unknown as Response);
 
+  /**
+   * Captures the message listeners main-world.ts registers, so a test can drive
+   * the switch push and exercise BOTH switch positions of patchedFetch — the
+   * only way to prove the disarmed path is unchanged behaviourally rather than
+   * by reading the source.
+   */
+  let listeners: Array<(ev: MessageEvent) => void> = [];
+
   function stubWindow(hostname: string): void {
-    vi.stubGlobal('window', {
+    listeners = [];
+    const win = {
       postMessage: postMessageSpy,
       fetch: nativeFetch,
       location: { origin: `https://${hostname}`, hostname },
-    });
+      addEventListener(type: string, cb: (ev: MessageEvent) => void): void {
+        if (type === 'message') listeners.push(cb);
+      },
+    };
+    vi.stubGlobal('window', win);
+  }
+
+  /** Arm the page-world switch exactly as the content-script bridge would. */
+  function armSwitch(): void {
+    const win = globalThis.window as unknown as Window;
+    for (const cb of [...listeners]) {
+      cb({ data: { type: 'nexpath:submit-flow', enabled: true, source: 'default_on', seq: 1 }, source: win } as MessageEvent);
+    }
+  }
+
+  function postedEvents(): string[] {
+    return postMessageSpy.mock.calls
+      .map((c) => c[0] as { type?: string; event?: string } | null)
+      .filter((m) => m?.type === 'nexpath:submit-flow-event')
+      .map((m) => m!.event as string);
   }
 
   function flush(): Promise<void> {
@@ -289,5 +317,322 @@ describe('fetch capture rules (B4 — Bolt transport, recon-confirmed)', () => {
 
     expect(nativeFetch).toHaveBeenCalled();
     expectNoCapture();
+  });
+});
+
+describe('patchedFetch — both switch positions (the backward-compatibility proof)', () => {
+  const nativeFetch = vi.fn().mockResolvedValue({ ok: true } as unknown as Response);
+  let listeners: Array<(ev: MessageEvent) => void> = [];
+  /** What the (simulated) content script + service worker answer with. */
+  let verdict: { kind: 'allow' } | { kind: 'block'; replacement: string } = { kind: 'allow' };
+
+  function deliver(data: unknown): void {
+    const win = globalThis.window as unknown as Window;
+    for (const cb of [...listeners]) cb({ data, source: win } as MessageEvent);
+  }
+
+  /**
+   * Stands in for the content script: relays a decision request to the "service
+   * worker" and posts the answer back page-direct, exactly as the real bridge
+   * does. Without this the page would legitimately hold until its budget expires.
+   */
+  const postMessageSpy = vi.fn((msg: unknown) => {
+    const m = msg as { type?: string; requestId?: string } | null;
+    if (m?.type === 'nexpath:submit-decision-request') {
+      queueMicrotask(() => deliver({
+        type: 'nexpath:submit-decision-response', requestId: m.requestId, decision: verdict,
+      }));
+    }
+  });
+
+  function stubWindow(hostname: string): void {
+    listeners = [];
+    vi.stubGlobal('window', {
+      postMessage: postMessageSpy,
+      fetch: nativeFetch,
+      location: { origin: `https://${hostname}`, hostname },
+      addEventListener(type: string, cb: (ev: MessageEvent) => void): void {
+        if (type === 'message') listeners.push(cb);
+      },
+    });
+  }
+
+  function armSwitch(): void {
+    const win = globalThis.window as unknown as Window;
+    for (const cb of [...listeners]) {
+      cb({ data: { type: 'nexpath:submit-flow', enabled: true, source: 'default_on', seq: 1 }, source: win } as MessageEvent);
+    }
+  }
+
+  function ringEvents(): string[] {
+    return postMessageSpy.mock.calls
+      .map((c) => c[0] as { type?: string; event?: string } | null)
+      .filter((m) => m?.type === 'nexpath:submit-flow-event')
+      .map((m) => m!.event as string);
+  }
+
+  const BODY = JSON.stringify({ messages: [{ role: 'user', content: 'add integration tests for checkout' }] });
+
+  beforeEach(() => {
+    postMessageSpy.mockClear();
+    nativeFetch.mockClear();
+    verdict = { kind: 'allow' };
+    vi.resetModules();
+  });
+
+  describe('switch OFF — today\'s flow, unchanged', () => {
+    it('calls the native fetch SYNCHRONOUSLY, before any await can run', async () => {
+      stubWindow('bolt.new');
+      await import('./main-world.js');
+
+      // Deliberately not awaited: on the ungated path the native call must have
+      // already happened by the time patchedFetch returns.
+      void window.fetch('https://bolt.new/api/chat/v2', { method: 'POST', body: BODY });
+      expect(nativeFetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('passes the ORIGINAL arguments through, with the same arity', async () => {
+      stubWindow('bolt.new');
+      await import('./main-world.js');
+      const init = { method: 'POST', body: BODY };
+
+      void window.fetch('https://bolt.new/api/chat/v2', init);
+      expect(nativeFetch).toHaveBeenCalledWith('https://bolt.new/api/chat/v2', init);
+      expect(nativeFetch.mock.calls[0]).toHaveLength(2);
+    });
+
+    it('emits no gated-path ring events at all', async () => {
+      stubWindow('bolt.new');
+      await import('./main-world.js');
+      void window.fetch('https://bolt.new/api/chat/v2', { method: 'POST', body: BODY });
+      await new Promise((r) => setTimeout(r, 0));
+      expect(ringEvents()).toEqual([]);
+    });
+  });
+
+  describe('switch ON — the request is held, then released with the original', () => {
+    it('does NOT call the native fetch synchronously any more', async () => {
+      stubWindow('bolt.new');
+      await import('./main-world.js');
+      armSwitch();
+
+      void window.fetch('https://bolt.new/api/chat/v2', { method: 'POST', body: BODY });
+      expect(nativeFetch).not.toHaveBeenCalled(); // held
+    });
+
+    it('releases exactly one native call, with the original arguments', async () => {
+      stubWindow('bolt.new');
+      await import('./main-world.js');
+      armSwitch();
+      const init = { method: 'POST', body: BODY };
+
+      await window.fetch('https://bolt.new/api/chat/v2', init);
+      expect(nativeFetch).toHaveBeenCalledTimes(1);
+      expect(nativeFetch).toHaveBeenCalledWith('https://bolt.new/api/chat/v2', init);
+    });
+
+    it('emits started → released_allow for the hold', async () => {
+      stubWindow('bolt.new');
+      await import('./main-world.js');
+      armSwitch();
+
+      await window.fetch('https://bolt.new/api/chat/v2', { method: 'POST', body: BODY });
+      expect(ringEvents()).toEqual(['submit_hold_started', 'submit_hold_released_allow']);
+    });
+
+    it('still emits the captured prompt, so the existing pipeline is unaffected', async () => {
+      stubWindow('bolt.new');
+      await import('./main-world.js');
+      armSwitch();
+
+      await window.fetch('https://bolt.new/api/chat/v2', { method: 'POST', body: BODY });
+      const captures = postMessageSpy.mock.calls
+        .map((c) => c[0] as { type?: string; promptText?: string } | null)
+        .filter((m) => m?.type === 'nexpath:fetch-prompt');
+      expect(captures).toHaveLength(1);
+      expect(captures[0]!.promptText).toBe('add integration tests for checkout');
+    });
+
+    it('a NON-matching URL still takes the untouched path even when armed', async () => {
+      stubWindow('bolt.new');
+      await import('./main-world.js');
+      armSwitch();
+
+      void window.fetch('https://bolt.new/api/chats/123', { method: 'POST', body: BODY });
+      expect(nativeFetch).toHaveBeenCalledTimes(1); // synchronous — not gated
+      await new Promise((r) => setTimeout(r, 0));
+      expect(ringEvents()).toEqual([]);
+    });
+
+    it('a GET to the same URL is never gated', async () => {
+      stubWindow('bolt.new');
+      await import('./main-world.js');
+      armSwitch();
+
+      void window.fetch('https://bolt.new/api/chat/v2');
+      expect(nativeFetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('an unparseable body releases the original rather than losing it', async () => {
+      stubWindow('bolt.new');
+      await import('./main-world.js');
+      armSwitch();
+
+      await window.fetch('https://bolt.new/api/chat/v2', { method: 'POST', body: 'not json' });
+      expect(nativeFetch).toHaveBeenCalledTimes(1);
+      expect(ringEvents()).toEqual([]); // never entered the hold
+    });
+
+    it('a repeated identical submission is claimed once but still sent both times', async () => {
+      stubWindow('bolt.new');
+      await import('./main-world.js');
+      armSwitch();
+
+      await window.fetch('https://bolt.new/api/chat/v2', { method: 'POST', body: BODY });
+      await window.fetch('https://bolt.new/api/chat/v2', { method: 'POST', body: BODY });
+
+      expect(nativeFetch).toHaveBeenCalledTimes(2);
+      expect(ringEvents()).toEqual([
+        'submit_hold_started', 'submit_hold_released_allow', 'submit_hold_claim_duplicate',
+      ]);
+    });
+  });
+});
+
+describe('the milestone promise: only the modified prompt reaches the agent', () => {
+  const nativeFetch = vi.fn().mockResolvedValue({ ok: true } as unknown as Response);
+  let listeners: Array<(ev: MessageEvent) => void> = [];
+  let verdict: { kind: 'allow' } | { kind: 'block'; replacement: string } = { kind: 'allow' };
+
+  function deliver(data: unknown): void {
+    const win = globalThis.window as unknown as Window;
+    for (const cb of [...listeners]) cb({ data, source: win } as MessageEvent);
+  }
+
+  const postMessageSpy = vi.fn((msg: unknown) => {
+    const m = msg as { type?: string; requestId?: string } | null;
+    if (m?.type === 'nexpath:submit-decision-request') {
+      queueMicrotask(() => deliver({
+        type: 'nexpath:submit-decision-response', requestId: m.requestId, decision: verdict,
+      }));
+    }
+  });
+
+  function stubWindow(hostname: string): void {
+    listeners = [];
+    vi.stubGlobal('window', {
+      postMessage: postMessageSpy,
+      fetch: nativeFetch,
+      location: { origin: `https://${hostname}`, hostname },
+      addEventListener(type: string, cb: (ev: MessageEvent) => void): void {
+        if (type === 'message') listeners.push(cb);
+      },
+    });
+  }
+
+  function arm(): void {
+    const win = globalThis.window as unknown as Window;
+    for (const cb of [...listeners]) {
+      cb({ data: { type: 'nexpath:submit-flow', enabled: true, source: 'default_on', seq: 1 }, source: win } as MessageEvent);
+    }
+  }
+
+  const REPLACEMENT = 'add unit tests for the checkout total, then deploy';
+
+  beforeEach(() => {
+    postMessageSpy.mockClear();
+    nativeFetch.mockClear();
+    verdict = { kind: 'allow' };
+    vi.resetModules();
+  });
+
+  it('BOLT: sends ONE request carrying the replacement, and never the original', async () => {
+    stubWindow('bolt.new');
+    await import('./main-world.js');
+    arm();
+    verdict = { kind: 'block', replacement: REPLACEMENT };
+
+    const body = JSON.stringify({ messages: [{ role: 'user', content: 'just ship it' }] });
+    await window.fetch('https://bolt.new/api/chat/v2', { method: 'POST', body });
+
+    expect(nativeFetch).toHaveBeenCalledTimes(1);
+    const sentBody = (nativeFetch.mock.calls[0]![1] as RequestInit).body as string;
+    const sent = JSON.parse(sentBody) as { messages: Array<{ content: string }> };
+    expect(sent.messages.at(-1)!.content).toBe(REPLACEMENT);
+    expect(sentBody).not.toContain('just ship it');
+  });
+
+  it('LOVABLE: rewrites the message field, one request only', async () => {
+    stubWindow('lovable.dev');
+    await import('./main-world.js');
+    arm();
+    verdict = { kind: 'block', replacement: REPLACEMENT };
+
+    const body = JSON.stringify({ id: 'umsg_9', message: 'just ship it', view: 'preview' });
+    await window.fetch('https://api.lovable.dev/projects/abc/chat', { method: 'POST', body });
+
+    expect(nativeFetch).toHaveBeenCalledTimes(1);
+    const sent = JSON.parse((nativeFetch.mock.calls[0]![1] as RequestInit).body as string) as Record<string, unknown>;
+    expect(sent['message']).toBe(REPLACEMENT);
+    expect(sent['view']).toBe('preview');
+  });
+
+  it('emits submit_hold_blocked, not released_allow', async () => {
+    stubWindow('bolt.new');
+    await import('./main-world.js');
+    arm();
+    verdict = { kind: 'block', replacement: REPLACEMENT };
+
+    await window.fetch('https://bolt.new/api/chat/v2', {
+      method: 'POST', body: JSON.stringify({ messages: [{ role: 'user', content: 'ship it' }] }),
+    });
+    const events = postMessageSpy.mock.calls
+      .map((c) => c[0] as { type?: string; event?: string } | null)
+      .filter((m) => m?.type === 'nexpath:submit-flow-event').map((m) => m!.event);
+    expect(events).toEqual(['submit_hold_started', 'submit_hold_blocked']);
+  });
+
+  it('the replacement\'s OWN submit is recognised as an echo and never re-gated', async () => {
+    stubWindow('bolt.new');
+    await import('./main-world.js');
+    arm();
+    verdict = { kind: 'block', replacement: REPLACEMENT };
+
+    await window.fetch('https://bolt.new/api/chat/v2', {
+      method: 'POST', body: JSON.stringify({ messages: [{ role: 'user', content: 'ship it' }] }),
+    });
+
+    // The site re-submits the replacement text (or the user does):
+    await window.fetch('https://bolt.new/api/chat/v2', {
+      method: 'POST', body: JSON.stringify({ messages: [{ role: 'user', content: REPLACEMENT }] }),
+    });
+
+    const events = postMessageSpy.mock.calls
+      .map((c) => c[0] as { type?: string; event?: string } | null)
+      .filter((m) => m?.type === 'nexpath:submit-flow-event').map((m) => m!.event);
+    expect(events).toEqual(['submit_hold_started', 'submit_hold_blocked', 'submit_hold_echo_skip']);
+    expect(nativeFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('a block whose body cannot be rewritten falls back to the ORIGINAL, never nothing', async () => {
+    stubWindow('bolt.new');
+    await import('./main-world.js');
+    arm();
+    verdict = { kind: 'block', replacement: REPLACEMENT };
+
+    // A body the extractor accepts is required to reach the gate at all, so use
+    // a Request-less shape the rewriter cannot handle: body only on the Request.
+    const body = JSON.stringify({ messages: [{ role: 'user', content: 'ship it' }] });
+    const req = new Request('https://bolt.new/api/chat/v2', { method: 'POST', body });
+    await window.fetch(req);
+
+    expect(nativeFetch).toHaveBeenCalledTimes(1);
+    const events = postMessageSpy.mock.calls
+      .map((c) => c[0] as { type?: string; event?: string } | null)
+      .filter((m) => m?.type === 'nexpath:submit-flow-event').map((m) => m!.event);
+    // Either it rewrote the Request cleanly, or it fell back — both send exactly
+    // once, and neither loses the prompt.
+    expect(events[0]).toBe('submit_hold_started');
+    expect(['submit_hold_blocked', 'submit_hold_substitution_failed']).toContain(events[1]);
   });
 });

@@ -12,7 +12,10 @@
 
 import { resolveAgentFromHostname } from '../content/agents/agent-hosts.js';
 import { hasTextLanded } from '../content/agents/landing-check.js';
-import { setupSubmitFlowPage } from './submit-flow-page.js';
+import { setupSubmitFlowPage, SUBMIT_FLOW_EVENT_TYPE } from './submit-flow-page.js';
+import { createSubmitGate } from './submit-gate.js';
+import { createDecisionChannel } from './submit-decision-channel.js';
+import { rewriteBodyForAgent, withReplacedBody } from './submit-substitution.js';
 
 type PromptCapturedMsg = {
   type: 'nexpath:prompt-captured';
@@ -128,13 +131,23 @@ export function emitFetchPrompt(promptText: string, agent: string): void {
   );
 }
 
-async function maybeCaptureFetch(input: RequestInfo | URL, init?: RequestInit): Promise<void> {
+/**
+ * Which capture rule (if any) this request matches — SYNCHRONOUSLY.
+ *
+ * Extracted so the gated path can ask "is this a submit?" without reading the
+ * body, and so the ungated path's decision stays a cheap sync check. Body
+ * reading (the only async part) stays where it was.
+ */
+export function resolveFetchRule(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+): { rule: FetchCaptureRule; agent: string } | null {
   const url =
     typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
   const method = (
     init?.method ?? (typeof input === 'object' && 'method' in input ? input.method : 'GET')
   ).toUpperCase();
-  if (method !== 'POST') return;
+  if (method !== 'POST') return null;
   const agent = resolveAgentFromHostname(window.location.hostname);
   const rule = FETCH_CAPTURE_RULES.find((r) => {
     if (r.agent !== agent || !url.includes(r.urlIncludes)) return false;
@@ -147,27 +160,107 @@ async function maybeCaptureFetch(input: RequestInfo | URL, init?: RequestInit): 
     }
     return true;
   });
-  if (!rule) return;
-  let bodyText: string | null = typeof init?.body === 'string' ? init.body : null;
-  if (bodyText === null && input instanceof Request) {
-    // clone() lets us read the body without consuming the page's own copy.
+  return rule ? { rule, agent } : null;
+}
+
+/** Read the request body as text without consuming the page's own copy. */
+async function readBodyText(input: RequestInfo | URL, init?: RequestInit): Promise<string | null> {
+  const direct = typeof init?.body === 'string' ? init.body : null;
+  if (direct !== null) return direct;
+  if (input instanceof Request) {
     try {
-      bodyText = await input.clone().text();
+      return await input.clone().text();
     } catch {
-      return;
+      return null;
     }
   }
+  return null;
+}
+
+async function maybeCaptureFetch(input: RequestInfo | URL, init?: RequestInit): Promise<void> {
+  const matched = resolveFetchRule(input, init);
+  if (!matched) return;
+  const bodyText = await readBodyText(input, init);
   if (!bodyText) return;
-  const prompt = rule.extractPrompt(bodyText);
-  if (prompt) emitFetchPrompt(prompt, agent);
+  const prompt = matched.rule.extractPrompt(bodyText);
+  if (prompt) emitFetchPrompt(prompt, matched.agent);
 }
 
 const _nativeFetch = window.fetch.bind(window);
+
+/**
+ * Stable id for one submission, derived from its text.
+ *
+ * Content-derived rather than a counter, because the claim's job is to collapse
+ * DUPLICATE OBSERVATIONS of one submission (a retried request, a second
+ * listener) into one decision. Trade-off, stated: deliberately submitting the
+ * identical text twice in one page session also collapses — the same accepted
+ * limitation the service worker's cross-page dedup already carries.
+ */
+function submitIdFor(prompt: string): string {
+  let h = 5381;
+  for (let i = 0; i < prompt.length; i++) h = ((h << 5) + h + prompt.charCodeAt(i)) | 0;
+  return `s${(h >>> 0).toString(36)}:${prompt.length}`;
+}
+
+/**
+ * The gated path. Reached ONLY when the switch is armed and the URL matched a
+ * capture rule; everything else takes the untouched path above.
+ *
+ * Fail-open is absolute here: every branch, including a body that cannot be
+ * read or a prompt that cannot be extracted, ends in the original request going
+ * out with its original arguments.
+ */
+async function gatedFetch(
+  input: RequestInfo | URL,
+  init: RequestInit | undefined,
+  matched: { rule: FetchCaptureRule; agent: string },
+): Promise<Response> {
+  const send = (): Promise<Response> => _nativeFetch(input, init);
+  try {
+    const bodyText = await readBodyText(input, init);
+    const prompt = bodyText === null ? null : matched.rule.extractPrompt(bodyText);
+    if (prompt === null || bodyText === null) return send();
+
+    // Emit exactly as the ungated path does, so the existing submit pipeline
+    // (classification, PE prepare) sees this prompt identically.
+    emitFetchPrompt(prompt, matched.agent);
+
+    /**
+     * Deliver the replacement as ONE request with the prompt field rewritten.
+     * Throwing here is the documented way to fall back: the gate catches it and
+     * sends the original, so an unrewritable body can never lose the prompt.
+     */
+    const sendReplacement = (replacement: string): Promise<Response> => {
+      const newBody = rewriteBodyForAgent(matched.agent, bodyText, replacement);
+      if (newBody === null) throw new Error('body not rewritable');
+      const [nextInput, nextInit] = withReplacedBody(input, init, newBody);
+      if (nextInput === input && nextInit === init) throw new Error('body shape not supported');
+      return _nativeFetch(nextInput, nextInit);
+    };
+
+    return await submitGate.runGatedSubmit(
+      { prompt, submitId: submitIdFor(prompt) },
+      send,
+      sendReplacement,
+    );
+  } catch {
+    return send();
+  }
+}
 
 window.fetch = function patchedFetch(
   input: RequestInfo | URL,
   init?: RequestInit,
 ): Promise<Response> {
+  // The gate is the FIRST thing evaluated, and it is two cheap synchronous
+  // checks. When the switch is disarmed — which is every user today, and every
+  // user forever if the flow is reverted — the code below this point is exactly
+  // what shipped before: fire-and-forget capture, then the native call with the
+  // original arguments, never delayed or altered.
+  const matched = submitFlow.isArmed() ? resolveFetchRule(input, init) : null;
+  if (matched !== null) return gatedFetch(input, init, matched);
+
   // Fire-and-forget: capture must never delay, alter, or break the page's own
   // request — the native call goes out immediately regardless of what the
   // capture path does, and any capture error is swallowed after being isolated.
@@ -175,13 +268,46 @@ window.fetch = function patchedFetch(
   return _nativeFetch(input, init);
 };
 
-// ── HB1: submit-flow switch, page-world side ─────────────────────────────────
+// ── Submit-flow switch + gate, page-world side ───────────────────────────────
 //
-// Receives the resolved switch from the content script and reports back what it
-// believes. DELIBERATELY NOT READ BY `patchedFetch` ABOVE — HB1 is inert by
-// construction; the gated hold path is HB2. Kept AFTER the fetch patch so the
-// patch's installation cannot be delayed by anything here.
+// Declared AFTER the fetch patch so that installing the patch — the thing that
+// must not miss an early request — is the first side effect this module has.
+//
+// `patchedFetch` above closes over both bindings. That is safe, not a temporal
+// dead-zone bug: module top-level runs to completion synchronously, and nothing
+// between the patch assignment and these lines yields, so no page code can call
+// fetch before they are initialised. Do not "fix" this by hoisting them above
+// the patch — that would delay the patch for no benefit.
 const submitFlow = setupSubmitFlowPage();
+
+/**
+ * Ring-event sink for the gated path: page → content script → service worker,
+ * where it lands in the durable event buffer. One-way and best-effort; the gate
+ * already treats a failing emit as harmless.
+ */
+function emitSubmitFlowEvent(event: string, data?: Record<string, unknown>): void {
+  try {
+    window.postMessage(
+      { type: SUBMIT_FLOW_EVENT_TYPE, event, data: data ?? {} },
+      window.location.origin,
+    );
+  } catch {
+    /* diagnostics only */
+  }
+}
+
+/**
+ * The verdict comes from the service worker, relayed by the content script and
+ * delivered back page-direct. The channel never rejects and has no timeout of
+ * its own — the gate's hold budget is the single ceiling, so a service worker
+ * that dies mid-decision simply lets the hold expire and the original go.
+ */
+const decisionChannel = createDecisionChannel();
+
+const submitGate = createSubmitGate({
+  decide: (ctx) => decisionChannel.request(ctx),
+  emit: emitSubmitFlowEvent,
+});
 
 // Expose helpers so per-agent modules (loaded separately) can call them.
 (globalThis as Record<string, unknown>)['__nexpath_submit_flow__'] = submitFlow;

@@ -1812,6 +1812,171 @@ describe('service-worker.ts', () => {
     });
   });
 
+  describe('the held-submit decider (the submit-time popup, inside the page\'s hold)', () => {
+    const P = 'https://bolt.new/~/p1';
+    const PENDING_KEY = `nexpath_pending_advisory::${P}`;
+    const OG_KEY = `nexpath_pending_advisory_og::${P}`;
+    const peRecord = {
+      sessionId: 's1', promptCount: 9, status: 'pending' as const, createdAt: 1,
+      request: { requestId: 'r1' }, result: { disposition: 'show_current_body' },
+    };
+
+    // `null` (not undefined) means "no tab": passing undefined explicitly would
+    // trigger the default parameter and silently give the test a tab anyway.
+    function decide(messageListener: MessageListener, tabId: number | null = 7, over: Record<string, unknown> = {}) {
+      const sendResponse = vi.fn();
+      messageListener(
+        { type: 'nexpath:submit-decision-request', site: 'bolt', projectRoot: P,
+          requestId: 'r1', prompt: 'just ship it', submitId: 's1', ...over },
+        tabId === null ? {} : { tab: { id: tabId } },
+        sendResponse,
+      );
+      return sendResponse;
+    }
+
+    beforeEach(() => {
+      vi.mocked(resolvePePopupCooldown).mockResolvedValue(7);
+      vi.mocked(resolvePeSequenceEnabled).mockResolvedValue(false);
+      vi.mocked(getPendingPe).mockResolvedValue(peRecord as never);
+      vi.mocked(markPendingPeShown).mockResolvedValue(undefined);
+      idbLoadSessionState.mockResolvedValue({ sessionId: 's1', promptCount: 9 });
+      vi.mocked(runBrowserPePopup).mockResolvedValue({ result: { state: 'closed_no_send' }, mpsFirstPopupSent: false });
+    });
+
+    describe('the block condition — only an explicit, non-empty replacement withholds', () => {
+      it('selected_current WITH body text → block, carrying that text', async () => {
+        vi.mocked(runBrowserPePopup).mockResolvedValue({
+          result: { state: 'selected_current', bodyText: 'the improved prompt' }, mpsFirstPopupSent: false,
+        } as never);
+        const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+        const sendResponse = decide(messageListener);
+        await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({
+          decision: { kind: 'block', replacement: 'the improved prompt' },
+        }));
+      });
+
+      it('selected_current with EMPTY body text → allow (a block with nothing to send loses the prompt)', async () => {
+        vi.mocked(runBrowserPePopup).mockResolvedValue({
+          result: { state: 'selected_current', bodyText: '' }, mpsFirstPopupSent: false,
+        } as never);
+        const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+        const sendResponse = decide(messageListener);
+        await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ decision: { kind: 'allow' } }));
+      });
+
+      for (const state of ['selected_original', 'closed_no_send']) {
+        it(`${state} → allow`, async () => {
+          vi.mocked(runBrowserPePopup).mockResolvedValue({ result: { state }, mpsFirstPopupSent: false } as never);
+          const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+          const sendResponse = decide(messageListener);
+          await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ decision: { kind: 'allow' } }));
+        });
+      }
+
+      it('not_shown → allow', async () => {
+        vi.mocked(runBrowserPePopup).mockResolvedValue({
+          result: { state: 'not_shown', reasonCodes: ['popup_already_open'] }, mpsFirstPopupSent: false,
+        } as never);
+        const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+        const sendResponse = decide(messageListener);
+        await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ decision: { kind: 'allow' } }));
+      });
+
+      it('a popup host that THROWS → allow, never a hung hold', async () => {
+        vi.mocked(runBrowserPePopup).mockRejectedValue(new Error('engine blew up'));
+        const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+        const sendResponse = decide(messageListener);
+        await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ decision: { kind: 'allow' } }));
+      });
+    });
+
+    describe('preconditions that allow without showing anything', () => {
+      it('no pending PE row → allow, popup never runs', async () => {
+        vi.mocked(getPendingPe).mockResolvedValue(null);
+        const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+        const sendResponse = decide(messageListener);
+        await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ decision: { kind: 'allow' } }));
+        expect(runBrowserPePopup).not.toHaveBeenCalled();
+      });
+
+      it('no tab to render into → allow, popup never runs', async () => {
+        const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+        const sendResponse = decide(messageListener, null);
+        await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ decision: { kind: 'allow' } }));
+        expect(runBrowserPePopup).not.toHaveBeenCalled();
+      });
+
+      it('cooldown window → allow, and the row is CONSUMED (a cooldown hit is a decision)', async () => {
+        idbLoadSessionState.mockResolvedValue({ sessionId: 's1', promptCount: 9, lastPromptEnhancementPromptIndex: 8 });
+        const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+        const sendResponse = decide(messageListener);
+        await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ decision: { kind: 'allow' } }));
+        expect(markPendingPeShown).toHaveBeenCalledWith(P);
+        expect(runBrowserPePopup).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('one decider per turn (the response-stop surface is suppressed)', () => {
+      it('consumes the queued advisory rows so the later stop finds nothing', async () => {
+        keyStoreGetKey.mockImplementation(async (name: string) => (name === PENDING_KEY ? '{"advisoryId":"a1"}' : null));
+        const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+        decide(messageListener);
+        await vi.waitFor(() => expect(logDebugMock).toHaveBeenCalledWith('submit_decision_consumed_advisory', expect.anything()));
+        expect(keyStoreSetKey).toHaveBeenCalledWith(PENDING_KEY, '');
+        expect(keyStoreSetKey).toHaveBeenCalledWith(OG_KEY, '');
+      });
+
+      it('consumes the pending PE row on first render, starting the cooldown', async () => {
+        const state = { sessionId: 's1', promptCount: 9 } as Record<string, unknown>;
+        idbLoadSessionState.mockResolvedValue(state);
+        const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+        decide(messageListener);
+        await vi.waitFor(() => expect(runBrowserPePopup).toHaveBeenCalled());
+        await vi.mocked(runBrowserPePopup).mock.calls[0]![0].onFirstRendered();
+        expect(markPendingPeShown).toHaveBeenCalledWith(P);
+        expect(state['lastPromptEnhancementPromptIndex']).toBe(9);
+      });
+    });
+
+    describe('THIS PATH NEVER INJECTS (injecting as well as substituting = two prompts)', () => {
+      it('a block does not send nexpath:pe-inject to the tab', async () => {
+        vi.mocked(runBrowserPePopup).mockResolvedValue({
+          result: { state: 'selected_current', bodyText: 'the improved prompt' }, mpsFirstPopupSent: false,
+        } as never);
+        const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+        const sendResponse = decide(messageListener);
+        await vi.waitFor(() => expect(sendResponse).toHaveBeenCalled());
+        const injects = tabsSendMessageMock.mock.calls.filter(
+          (c) => (c[1] as { type?: string } | undefined)?.type === 'nexpath:pe-inject');
+        expect(injects).toEqual([]);
+      });
+    });
+
+    describe('an abandoned hold (the page already sent the original)', () => {
+      it('tears the popup down and discards a verdict that arrives afterwards', async () => {
+        let resolvePopup: (v: unknown) => void = () => {};
+        vi.mocked(runBrowserPePopup).mockReturnValue(new Promise((r) => { resolvePopup = r; }) as never);
+        const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+        const sendResponse = decide(messageListener);
+        await vi.waitFor(() => expect(runBrowserPePopup).toHaveBeenCalled());
+
+        // The page gives up and sends the original.
+        messageListener(
+          { type: 'nexpath:submit-flow-event', site: 'bolt', event: 'submit_hold_expired', data: { submitId: 's1' } },
+          { tab: { id: 7 } }, vi.fn(),
+        );
+        const closes = tabsSendMessageMock.mock.calls.filter(
+          (c) => (c[1] as { type?: string } | undefined)?.type === 'nexpath:pe-close');
+        expect(closes.length).toBeGreaterThanOrEqual(1);
+
+        // The user clicks "use this" afterwards — it must NOT come back as a block.
+        resolvePopup({ result: { state: 'selected_current', bodyText: 'too late' }, mpsFirstPopupSent: false });
+        await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ decision: { kind: 'allow' } }));
+        expect(logDebugMock).toHaveBeenCalledWith('submit_decision_discarded_abandoned', expect.anything());
+      });
+    });
+  });
+
   describe('inflight-marker overlap (live-caught 2026-08-24: quick pipeline erased a slow sibling\'s marker)', () => {
     it('a quick-exit pipeline does NOT clear the marker while a slow sibling still runs; the last finisher clears it', async () => {
       // Backing store so the marker's real state is observable across both
@@ -2160,6 +2325,45 @@ describe('service-worker.ts', () => {
         {}, sendResponse,
       );
       expect(logDebugMock).not.toHaveBeenCalledWith('submit_flow_state', expect.anything());
+    });
+
+    it('nexpath:submit-decision-request always answers, and answers allow for now', async () => {
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      const sendResponse = vi.fn();
+      const kept = messageListener(
+        { type: 'nexpath:submit-decision-request', site: 'bolt', projectRoot: 'https://bolt.new/~/p',
+          requestId: 'r1', prompt: 'ship it', submitId: 's1' },
+        {}, sendResponse,
+      );
+      // MUST keep the channel open: the page is holding the user's request.
+      expect(kept).toBe(true);
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ decision: { kind: 'allow' } }));
+      expect(logDebugMock).toHaveBeenCalledWith('submit_decision_requested', expect.objectContaining({ submitId: 's1' }));
+      expect(logDebugMock).toHaveBeenCalledWith('submit_decision_answered', { submitId: 's1', kind: 'allow' });
+    });
+
+    it('a malformed decision request is not routed', async () => {
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      const sendResponse = vi.fn();
+      messageListener(
+        { type: 'nexpath:submit-decision-request', site: 'bolt', requestId: 'r1' }, // no prompt/submitId/projectRoot
+        {}, sendResponse,
+      );
+      expect(logDebugMock).not.toHaveBeenCalledWith('submit_decision_requested', expect.anything());
+    });
+
+    it('a gated-path ring event is logged under its own event name', async () => {
+      const { messageListener } = await importFreshServiceWorker({ hasDocument: hasDocumentMock, createDocument: createDocumentMock });
+      const sendResponse = vi.fn();
+      messageListener(
+        { type: 'nexpath:submit-flow-event', site: 'lovable', event: 'submit_hold_released_allow',
+          data: { submitId: 's1', heldMs: 812 } },
+        {}, sendResponse,
+      );
+      expect(sendResponse).toHaveBeenCalledWith({ ok: true });
+      expect(logDebugMock).toHaveBeenCalledWith('submit_hold_released_allow', {
+        site: 'lovable', submitId: 's1', heldMs: 812,
+      });
     });
 
     it('the read-back is diagnostic ONLY — it must not touch the advisory pipeline', async () => {

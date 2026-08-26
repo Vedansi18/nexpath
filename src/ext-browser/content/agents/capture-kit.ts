@@ -144,6 +144,21 @@ const PENDING_EMPTY_MAX_AGE_MS = 60_000;
 const SWEEP_INTERVAL_MS = 1500;
 const POLL_INTERVAL_MS = 1500;
 
+/**
+ * Injected by the Replit submit gate at wire-up time. Default is a permanent
+ * "not mine" so this module behaves exactly as before unless something installs
+ * a real gate.
+ */
+let maybeInterceptReplitSubmit: (
+  ev: Event, prompt: string, input: HTMLElement, composer: ComposerCaptureConfig,
+) => boolean = () => false;
+
+export function setReplitSubmitInterceptor(
+  fn: (ev: Event, prompt: string, input: HTMLElement, composer: ComposerCaptureConfig) => boolean,
+): void {
+  maybeInterceptReplitSubmit = fn;
+}
+
 export function createCaptureKit(config: CaptureKitConfig): CaptureKit {
   // ── Per-instance state (was module-level in the original Replit file — a factory
   // instance per agent means two agents can never share dedup state) ──────────────
@@ -364,6 +379,21 @@ export function createCaptureKit(config: CaptureKitConfig): CaptureKit {
     if (!composer) {
       throw new Error(`[nexpath] observeComposerSubmit requires composer config (agent: ${config.agent})`);
     }
+    /**
+     * The submit-time gate's one hook into this file. It returns true only when
+     * it has taken the submission over, which today can never happen: the gate
+     * ships not-ready (see replit-submit-gate.ts) and refuses unless the switch
+     * is armed. So this is a no-op on the shipped build, and the capture below
+     * runs exactly as it always has.
+     */
+    const takenOver = (ev: Event, input: HTMLElement): boolean => {
+      try {
+        return maybeInterceptReplitSubmit(ev, composer.readComposerText(input) ?? '', input, composer);
+      } catch {
+        return false; // never let the gate break capture
+      }
+    };
+
     const onKeyDown = (ev: Event): void => {
       const ke = ev as KeyboardEvent;
       // Shift+Enter is "newline", every other Enter variant (plain/Ctrl/Cmd) submits.
@@ -371,6 +401,7 @@ export function createCaptureKit(config: CaptureKitConfig): CaptureKit {
       const target = ev.target instanceof Element ? ev.target : null;
       const cm = target?.closest<HTMLElement>(composer.composerSelector);
       if (!cm || cm !== findChatComposer(composer)) return; // Enter in a file editor is just a newline
+      if (takenOver(ev, cm)) return;
       captureFromComposer(composer, cm);
     };
     const onClick = (ev: Event): void => {
@@ -378,6 +409,7 @@ export function createCaptureKit(config: CaptureKitConfig): CaptureKit {
       if (!target?.closest(composer.submitButtonSelector)) return;
       const cm = findChatComposer(composer);
       if (!cm) return;
+      if (takenOver(ev, cm)) return;
       captureFromComposer(composer, cm);
     };
     root.addEventListener('keydown', onKeyDown, true);
